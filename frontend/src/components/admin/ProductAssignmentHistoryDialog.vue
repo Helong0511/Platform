@@ -458,9 +458,11 @@ const validateAllChanges = () => {
     currentAssignments[assignmentIndex] = updatedAssignment;
     
     // 验证当前状态（模拟后端验证：每次更新后验证所有记录）
+    // 注意：后端验证时会按开始日期排序，所以我们需要确保验证逻辑与后端一致
     const validationErrors = validateAssignmentsState(currentAssignments);
     if (validationErrors.length > 0) {
-      // 记录所有验证错误（因为后端会验证所有记录）
+      // 记录所有验证错误（因为后端会验证所有记录并报告所有错误）
+      // 后端在每次更新后都会验证所有记录，所以我们应该记录所有错误
       errors.push(...validationErrors.map(err => `更新记录ID ${assignmentId} 后: ${err}`));
     }
   }
@@ -469,8 +471,18 @@ const validateAllChanges = () => {
   const finalErrors = validateAssignmentsState(currentAssignments);
   // 添加最终状态的错误（去重）
   for (const err of finalErrors) {
-    const errorKey = err.split(':')[0]; // 使用错误的第一部分作为键
-    if (!errors.some(e => e.includes(errorKey))) {
+    // 检查是否已经记录过类似的错误
+    const isDuplicate = errors.some(e => {
+      // 提取错误中的记录ID
+      const errMatch = err.match(/记录ID\s+(\d+)/);
+      if (errMatch) {
+        const recordId = errMatch[1];
+        return e.includes(`记录ID ${recordId}`) || e.includes(`记录ID ${recordId}`);
+      }
+      return false;
+    });
+    
+    if (!isDuplicate) {
       errors.push(`最终验证: ${err}`);
     }
   }
