@@ -8,6 +8,19 @@
     class="product-assignment-history-dialog"
   >
     <div v-loading="loading" class="assignment-history-content">
+      <!-- 修改提示 -->
+      <div v-if="pendingChanges.size > 0" class="pending-changes-alert">
+        <el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+        >
+          <template #title>
+            <span>您有 {{ pendingChanges.size }} 条未保存的修改，请完成所有修改后点击"批量保存"按钮提交</span>
+          </template>
+        </el-alert>
+      </div>
+      
       <div v-if="assignments.length === 0 && !loading" class="empty-state">
         <el-empty description="暂无分配历史记录" />
       </div>
@@ -45,7 +58,12 @@
               </div>
               <div class="detail-item">
                 <span class="label">开始日期:</span>
-                <span class="value">{{ formatDate(assignment.start_date) }}</span>
+                <span class="value">
+                  {{ formatDate(assignment.start_date) }}
+                  <el-tag v-if="pendingChanges.has(assignment.id)" type="warning" size="small" style="margin-left: 8px;">
+                    已修改
+                  </el-tag>
+                </span>
               </div>
               <div class="detail-item" v-if="assignment.end_date">
                 <span class="label">结束日期:</span>
@@ -82,8 +100,8 @@
                   <div class="form-tip">留空表示当前有效</div>
                 </el-form-item>
                 <el-form-item>
-                  <el-button type="primary" @click="handleSave(assignment)" :loading="savingAssignments.has(assignment.id)">
-                    保存
+                  <el-button type="success" @click="handleTempSave(assignment)">
+                    暂存修改
                   </el-button>
                   <el-button @click="handleCancelEdit(assignment.id)">取消</el-button>
                 </el-form-item>
@@ -96,6 +114,20 @@
     
     <template #footer>
       <div class="dialog-footer">
+        <el-button 
+          v-if="pendingChanges.size > 0"
+          type="primary" 
+          @click="handleBatchSave"
+          :loading="batchSaving"
+        >
+          批量保存 ({{ pendingChanges.size }})
+        </el-button>
+        <el-button 
+          v-if="pendingChanges.size > 0"
+          @click="handleDiscardAll"
+        >
+          放弃所有修改
+        </el-button>
         <el-button type="primary" @click="handleClose">关闭</el-button>
       </div>
     </template>
@@ -103,8 +135,8 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ref, watch, computed } from 'vue';
+import { ElMessage, ElMessageBox, ElAlert } from 'element-plus';
 import { OfficeBuilding, Edit } from '@element-plus/icons-vue';
 import { getProductAssignments, updateAssignmentDates } from '../../api/product';
 
@@ -152,9 +184,11 @@ const emit = defineEmits(['update:modelValue']);
 const visible = ref(false);
 const loading = ref(false);
 const assignments = ref([]);
+const originalAssignments = ref([]); // 原始数据备份，用于验证
 const editingAssignments = ref(new Set()); // 正在编辑的分配记录ID集合
 const editForms = ref({}); // 编辑表单数据
-const savingAssignments = ref(new Set()); // 正在保存的分配记录ID集合
+const pendingChanges = ref(new Map()); // 暂存的修改 { assignmentId: { start_date, end_date, original } }
+const batchSaving = ref(false); // 批量保存中
 
 watch(() => props.modelValue, (newVal) => {
   visible.value = newVal;
@@ -190,6 +224,8 @@ const fetchAssignments = async () => {
       }
     }
     assignments.value = assignmentsData;
+    // 保存原始数据备份（深拷贝）
+    originalAssignments.value = JSON.parse(JSON.stringify(assignmentsData));
     
     // 如果没有数据，显示提示
     if (assignments.value.length === 0) {
@@ -227,11 +263,36 @@ const formatDateRange = (assignment) => {
 };
 
 const handleClose = () => {
-  visible.value = false;
+  // 如果有未保存的修改，提示用户
+  if (pendingChanges.value.size > 0) {
+    ElMessageBox.confirm(
+      `您有 ${pendingChanges.value.size} 条未保存的修改，确定要关闭吗？未保存的修改将丢失。`,
+      '确认关闭',
+      {
+        confirmButtonText: '确定关闭',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    ).then(() => {
+      // 用户确认关闭，清除所有修改
+      resetAllChanges();
+      visible.value = false;
+    }).catch(() => {
+      // 用户取消关闭
+    });
+  } else {
+    visible.value = false;
+    resetAllChanges();
+  }
+};
+
+// 重置所有修改
+const resetAllChanges = () => {
   assignments.value = [];
+  originalAssignments.value = [];
   editingAssignments.value.clear();
   editForms.value = {};
-  savingAssignments.value.clear();
+  pendingChanges.value.clear();
 };
 
 const handleEdit = (assignment) => {
@@ -249,7 +310,8 @@ const handleCancelEdit = (assignmentId) => {
   delete editForms.value[assignmentId];
 };
 
-const handleSave = async (assignment) => {
+// 暂存修改（不提交到后端）
+const handleTempSave = (assignment) => {
   const assignmentId = assignment.id;
   const formData = editForms.value[assignmentId];
   
@@ -268,65 +330,295 @@ const handleSave = async (assignment) => {
         ? formData.end_date 
         : new Date(formData.end_date).toISOString().split('T')[0])
     : null;
-  const originalStartDateStr = typeof assignment.start_date === 'string'
-    ? assignment.start_date
-    : (assignment.start_date ? new Date(assignment.start_date).toISOString().split('T')[0] : null);
-  const originalEndDateStr = assignment.end_date
-    ? (typeof assignment.end_date === 'string'
-        ? assignment.end_date
-        : new Date(assignment.end_date).toISOString().split('T')[0])
-    : null;
   
   if (endDateStr && startDateStr > endDateStr) {
     ElMessage.warning('开始日期不能大于结束日期');
     return;
   }
   
-  savingAssignments.value.add(assignmentId);
+  // 获取原始数据
+  const originalAssignment = originalAssignments.value.find(a => a.id === assignmentId);
+  if (!originalAssignment) {
+    ElMessage.error('找不到原始数据');
+    return;
+  }
+  
+  const originalStartDateStr = typeof originalAssignment.start_date === 'string'
+    ? originalAssignment.start_date
+    : (originalAssignment.start_date ? new Date(originalAssignment.start_date).toISOString().split('T')[0] : null);
+  const originalEndDateStr = originalAssignment.end_date
+    ? (typeof originalAssignment.end_date === 'string'
+        ? originalAssignment.end_date
+        : new Date(originalAssignment.end_date).toISOString().split('T')[0])
+    : null;
+  
+  // 检查是否有变化
+  const hasStartDateChange = startDateStr !== originalStartDateStr;
+  const originalEndIsNull = !originalEndDateStr;
+  const newEndIsNull = !endDateStr;
+  const hasEndDateChange = originalEndIsNull !== newEndIsNull || (endDateStr && endDateStr !== originalEndDateStr);
+  
+  if (!hasStartDateChange && !hasEndDateChange) {
+    handleCancelEdit(assignmentId);
+    ElMessage.info('没有检测到日期变化');
+    return;
+  }
+  
+  // 暂存修改
+  pendingChanges.value.set(assignmentId, {
+    start_date: startDateStr,
+    end_date: endDateStr,
+    original: originalAssignment
+  });
+  
+  // 更新显示的数据（用于预览）
+  const assignmentIndex = assignments.value.findIndex(a => a.id === assignmentId);
+  if (assignmentIndex !== -1) {
+    assignments.value[assignmentIndex] = {
+      ...assignments.value[assignmentIndex],
+      start_date: startDateStr,
+      end_date: endDateStr
+    };
+  }
+  
+  // 退出编辑模式
+  handleCancelEdit(assignmentId);
+  
+  ElMessage.success('修改已暂存，请完成所有修改后点击"批量保存"提交');
+};
+
+// 验证所有暂存的修改
+const validateAllChanges = () => {
+  const errors = [];
+  const changes = Array.from(pendingChanges.value.entries());
+  
+  if (changes.length === 0) {
+    return { valid: true, errors: [] };
+  }
+  
+  // 构建修改后的完整数据（用于验证）
+  const modifiedAssignments = assignments.value.map(assignment => {
+    const change = pendingChanges.value.get(assignment.id);
+    if (change) {
+      return {
+        ...assignment,
+        start_date: change.start_date,
+        end_date: change.end_date
+      };
+    }
+    return assignment;
+  });
+  
+  // 按开始日期排序
+  const sortedAssignments = [...modifiedAssignments].sort((a, b) => {
+    const dateA = new Date(a.start_date);
+    const dateB = new Date(b.start_date);
+    return dateA - dateB;
+  });
+  
+  // 验证1: 检查每个记录的基本逻辑
+  for (const assignment of sortedAssignments) {
+    if (assignment.end_date && assignment.start_date > assignment.end_date) {
+      errors.push(`记录ID ${assignment.id}: 开始日期（${assignment.start_date}）不能大于结束日期（${assignment.end_date}）`);
+    }
+  }
+  
+  // 验证2: 检查重叠
+  for (let i = 0; i < sortedAssignments.length; i++) {
+    for (let j = i + 1; j < sortedAssignments.length; j++) {
+      const a1 = sortedAssignments[i];
+      const a2 = sortedAssignments[j];
+      
+      const a1End = a1.end_date || '9999-12-31';
+      const a2End = a2.end_date || '9999-12-31';
+      
+      // 检查是否重叠：A.start <= B.end AND A.end >= B.start
+      if (a1.start_date <= a2End && a1End >= a2.start_date) {
+        errors.push(
+          `记录ID ${a1.id} (${a1.start_date} 至 ${a1.end_date || '当前有效'}) ` +
+          `与记录ID ${a2.id} (${a2.start_date} 至 ${a2.end_date || '当前有效'}) 重叠`
+        );
+      }
+    }
+  }
+  
+  // 验证3: 检查空窗期
+  for (let i = 0; i < sortedAssignments.length - 1; i++) {
+    const current = sortedAssignments[i];
+    const next = sortedAssignments[i + 1];
+    
+    if (current.end_date) {
+      // 计算期望的下一个开始日期（当前结束日期 + 1天）
+      const currentEnd = new Date(current.end_date);
+      currentEnd.setDate(currentEnd.getDate() + 1);
+      const expectedNextStart = currentEnd.toISOString().split('T')[0];
+      
+      if (next.start_date !== expectedNextStart) {
+        const gapDays = Math.floor((new Date(next.start_date) - new Date(current.end_date)) / (1000 * 60 * 60 * 24));
+        if (gapDays > 1) {
+          errors.push(
+            `记录ID ${current.id} (结束日期: ${current.end_date}) ` +
+            `与记录ID ${next.id} (开始日期: ${next.start_date}) ` +
+            `之间存在 ${gapDays - 1} 天的空窗期`
+          );
+        } else if (gapDays < 1) {
+          errors.push(
+            `记录ID ${current.id} (结束日期: ${current.end_date}) ` +
+            `与记录ID ${next.id} (开始日期: ${next.start_date}) 重叠`
+          );
+        }
+      }
+    }
+  }
+  
+  // 验证4: 检查是否有多个当前有效的记录
+  const activeAssignments = sortedAssignments.filter(a => !a.end_date);
+  if (activeAssignments.length > 1) {
+    const activeIds = activeAssignments.map(a => a.id).join(', ');
+    errors.push(`有 ${activeAssignments.length} 个当前有效的分配记录 (记录ID: ${activeIds})，应该只有一个`);
+  }
+  
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+};
+
+// 批量保存所有修改
+const handleBatchSave = async () => {
+  if (pendingChanges.value.size === 0) {
+    ElMessage.info('没有需要保存的修改');
+    return;
+  }
+  
+  // 先进行验证
+  const validation = validateAllChanges();
+  if (!validation.valid) {
+    ElMessageBox.alert(
+      `验证失败，发现以下问题：\n\n${validation.errors.join('\n')}\n\n请修正后重试。`,
+      '验证失败',
+      {
+        type: 'error',
+        confirmButtonText: '确定'
+      }
+    );
+    return;
+  }
+  
+  // 确认保存
+  try {
+    await ElMessageBox.confirm(
+      `确定要保存 ${pendingChanges.value.size} 条修改吗？保存后将进行完整的时间连贯性验证。`,
+      '确认保存',
+      {
+        confirmButtonText: '确定保存',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    );
+  } catch {
+    // 用户取消
+    return;
+  }
+  
+  batchSaving.value = true;
   
   try {
-    // 构建更新数据（只发送有变化的字段）
-    const updateData = {};
-    if (startDateStr !== originalStartDateStr) {
-      updateData.start_date = startDateStr;
+    // 按顺序提交所有修改
+    const changes = Array.from(pendingChanges.value.entries());
+    let successCount = 0;
+    let failCount = 0;
+    const errors = [];
+    
+    for (const [assignmentId, change] of changes) {
+      try {
+        // 构建更新数据
+        const updateData = {};
+        const original = change.original;
+        
+        const originalStartDateStr = typeof original.start_date === 'string'
+          ? original.start_date
+          : (original.start_date ? new Date(original.start_date).toISOString().split('T')[0] : null);
+        const originalEndDateStr = original.end_date
+          ? (typeof original.end_date === 'string'
+              ? original.end_date
+              : new Date(original.end_date).toISOString().split('T')[0])
+          : null;
+        
+        if (change.start_date !== originalStartDateStr) {
+          updateData.start_date = change.start_date;
+        }
+        
+        const originalEndIsNull = !originalEndDateStr;
+        const newEndIsNull = !change.end_date;
+        if (originalEndIsNull !== newEndIsNull || (change.end_date && change.end_date !== originalEndDateStr)) {
+          updateData.end_date = change.end_date || null;
+        }
+        
+        // 调用API更新
+        await updateAssignmentDates(assignmentId, updateData);
+        successCount++;
+      } catch (error) {
+        failCount++;
+        const errorMsg = error.response?.data?.detail || error.message || '更新失败';
+        errors.push(`记录ID ${assignmentId}: ${errorMsg}`);
+        console.error(`更新分配记录 ${assignmentId} 失败:`, error);
+      }
     }
-    // 对于end_date，需要明确处理：如果原值为null，新值也为null，则不更新
-    // 如果原值和新值不同（包括null的变化），则需要更新
-    const originalEndIsNull = !originalEndDateStr;
-    const newEndIsNull = !endDateStr;
     
-    if (originalEndIsNull !== newEndIsNull || (endDateStr && endDateStr !== originalEndDateStr)) {
-      // end_date有变化，需要更新（明确设置为null或新值）
-      updateData.end_date = endDateStr || null;
+    if (failCount > 0) {
+      ElMessageBox.alert(
+        `部分更新失败：\n\n${errors.join('\n')}\n\n已成功更新 ${successCount} 条，失败 ${failCount} 条。`,
+        '部分更新失败',
+        {
+          type: 'warning',
+          confirmButtonText: '确定'
+        }
+      );
+    } else {
+      ElMessage.success(`成功保存 ${successCount} 条修改，时间连贯性验证通过`);
     }
     
-    // 如果没有变化，直接退出编辑模式
-    if (Object.keys(updateData).length === 0) {
-      handleCancelEdit(assignmentId);
-      ElMessage.info('没有检测到日期变化');
-      return;
-    }
-    
-    // 调用API更新
-    await updateAssignmentDates(assignmentId, updateData);
-    
-    // 更新成功后，重新获取分配历史
+    // 重新获取分配历史
     await fetchAssignments();
     
-    ElMessage.success('日期更新成功，时间连贯性验证通过');
+    // 清除所有暂存的修改
+    pendingChanges.value.clear();
   } catch (error) {
-    // 错误已在API中处理并显示消息
-    console.error('更新分配历史日期失败:', error);
-    
-    // 如果是CSRF相关错误，提供更详细的提示
-    if (error.response?.status === 403) {
-      ElMessage.error('安全验证失败，请刷新页面后重试');
-    } else if (error.message?.includes('CSRF') || error.message?.includes('csrf')) {
-      ElMessage.error('安全验证失败，请刷新页面后重试');
-    }
-    // 其他错误已在 updateAssignmentDates 中处理
+    console.error('批量保存失败:', error);
+    ElMessage.error('批量保存失败，请稍后重试');
   } finally {
-    savingAssignments.value.delete(assignmentId);
+    batchSaving.value = false;
+  }
+};
+
+// 放弃所有修改
+const handleDiscardAll = async () => {
+  if (pendingChanges.value.size === 0) {
+    ElMessage.info('没有需要放弃的修改');
+    return;
+  }
+  
+  try {
+    await ElMessageBox.confirm(
+      `确定要放弃所有 ${pendingChanges.value.size} 条未保存的修改吗？此操作不可恢复。`,
+      '确认放弃',
+      {
+        confirmButtonText: '确定放弃',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    );
+    
+    // 恢复原始数据
+    assignments.value = JSON.parse(JSON.stringify(originalAssignments.value));
+    pendingChanges.value.clear();
+    editingAssignments.value.clear();
+    editForms.value = {};
+    
+    ElMessage.success('已放弃所有修改');
+  } catch {
+    // 用户取消
   }
 };
 </script>
@@ -425,6 +717,10 @@ const handleSave = async (assignment) => {
 
 .success-text {
   color: #67c23a;
+}
+
+.pending-changes-alert {
+  margin-bottom: var(--spacing-md);
 }
 
 .dialog-footer {
