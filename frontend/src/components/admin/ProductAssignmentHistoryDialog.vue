@@ -445,27 +445,8 @@ const validateAllChanges = () => {
   // 深拷贝原始数据，确保不会修改原始数据
   let currentAssignments = JSON.parse(JSON.stringify(originalAssignments.value));
   
-  // 调试：打印原始数据
-  console.log('[验证] 原始数据:', currentAssignments.map(a => ({
-    id: a.id,
-    start_date: a.start_date,
-    end_date: a.end_date,
-    client_id: a.client_id
-  })));
-  
   // 按ID排序，确保更新顺序一致（与后端更新顺序一致）
   const sortedChanges = changes.sort((a, b) => a[0] - b[0]);
-  
-  // 调试：打印修改内容
-  console.log('[验证] 待应用的修改:', sortedChanges.map(([id, change]) => ({
-    id,
-    start_date: change.start_date,
-    end_date: change.end_date,
-    original: {
-      start_date: change.original.start_date,
-      end_date: change.original.end_date
-    }
-  })));
   
   // 先应用所有修改，然后再验证最终状态
   // 这样可以避免在中间状态检测到错误（因为所有修改会一起生效）
@@ -485,45 +466,21 @@ const validateAllChanges = () => {
       end_date: change.end_date || null // 确保null值正确传递
     };
     
-    // 调试：打印更新前后的数据
-    console.log(`[验证] 应用修改到记录ID ${assignmentId}:`, {
-      更新前: {
-        start_date: originalAssignment.start_date,
-        end_date: originalAssignment.end_date
-      },
-      更新后: {
-        start_date: updatedAssignment.start_date,
-        end_date: updatedAssignment.end_date
-      }
-    });
-    
     // 更新当前数据（模拟数据库更新）
     currentAssignments[assignmentIndex] = updatedAssignment;
   }
   
   // 所有修改应用完成后，验证最终状态
-  console.log('[验证] 所有修改已应用，开始验证最终状态');
-  
-  // 调试：打印最终数据
-  console.log('[验证] 最终数据:', currentAssignments.map(a => ({
-    id: a.id,
-    start_date: a.start_date,
-    end_date: a.end_date,
-    client_id: a.client_id
-  })));
-  
   // 验证最终状态（所有修改应用后的状态）
   // 这是最重要的验证，因为最终状态才是实际保存到数据库的状态
   const finalErrors = validateAssignmentsState(currentAssignments);
   
   if (finalErrors.length > 0) {
-    console.log('[验证] 最终验证失败:', finalErrors);
     // 如果最终验证失败，使用最终验证的错误（因为这是实际会保存的状态）
     // 清除之前的中间状态错误，只保留最终状态的错误
     errors.length = 0; // 清空之前的错误
     errors.push(...finalErrors);
   } else {
-    console.log('[验证] 最终验证通过');
     // 如果最终验证通过，清除所有错误（包括中间状态的错误）
     // 因为最终状态是正确的，中间状态的错误是正常的（部分更新过程中的临时状态）
     errors.length = 0;
@@ -533,8 +490,6 @@ const validateAllChanges = () => {
     valid: errors.length === 0,
     errors: [...new Set(errors)] // 去重
   };
-  
-  console.log('[验证] 验证结果:', result);
   
   return result;
 };
