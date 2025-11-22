@@ -1,0 +1,110 @@
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+
+// https://vite.dev/config/
+export default defineConfig({
+  server: {
+    port: 3310,
+    host: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8960',
+        changeOrigin: true,
+        secure: false,
+        // 连接超时设置（增加到60秒，应该大于前端请求的timeout）
+        timeout: 60000,
+        // 错误处理
+        configure: (proxy, options) => {
+          proxy.on('error', (err, req, res) => {
+            console.error('代理错误:', err.message);
+            console.log('提示: 请确保后端服务已启动在 http://localhost:8960');
+          });
+          // 自定义代理日志，解码 URL 编码的路径
+          proxy.on('proxyReq', (proxyReq, req, res) => {
+            // 解码 URL 路径以便在日志中显示中文
+            try {
+              const decodedPath = decodeURIComponent(req.url);
+              // 始终记录解码后的路径（更易读）
+              if (decodedPath !== req.url) {
+                console.log(`[代理] ${req.method} ${decodedPath} -> ${options.target}${decodedPath}`);
+              }
+            } catch (e) {
+              // 如果解码失败，使用原始路径
+              console.log(`[代理] ${req.method} ${req.url} -> ${options.target}${req.url}`);
+            }
+          });
+        }
+      }
+    }
+  },
+
+  build: {
+    // 构建配置优化
+    chunkSizeWarningLimit: 1500,
+    // 使用 esbuild 压缩（比 terser 快 10-100 倍）
+    minify: 'esbuild',
+    // esbuild 压缩选项（比 terser 快很多）
+    esbuild: {
+      drop: ['console', 'debugger'],  // 移除 console 和 debugger
+    },
+    // 生产环境禁用source map（防止源码泄露，加快构建速度）
+    sourcemap: false,
+    // 代码分割优化
+    rollupOptions: {
+      output: {
+        // 手动分包，提高缓存效率
+        manualChunks: (id) => {
+          // Vue 核心库
+          if (id.includes('node_modules/vue') || id.includes('node_modules/vue-router') || id.includes('node_modules/pinia')) {
+            return 'vue-vendor';
+          }
+          // Element Plus
+          if (id.includes('node_modules/element-plus')) {
+            return 'element-plus';
+          }
+          // Axios
+          if (id.includes('node_modules/axios')) {
+            return 'axios';
+          }
+          // ECharts
+          if (id.includes('node_modules/echarts')) {
+            return 'echarts';
+          }
+          // 其他 node_modules
+          if (id.includes('node_modules')) {
+            return 'vendor';
+          }
+          // 为特定页面创建独立的 chunk，确保命名稳定
+          if (id.includes('/views/AdData.vue')) {
+            return 'ad-data';
+          }
+          if (id.includes('/views/ad-data/DailyReport.vue')) {
+            return 'daily-report';
+          }
+        },
+        // 优化 chunk 文件名
+        // 使用稳定的命名策略，确保动态导入的模块能够正确加载
+        chunkFileNames: 'assets/js/[name]-[hash].js',
+        entryFileNames: 'assets/js/[name]-[hash].js',
+        assetFileNames: 'assets/[ext]/[name]-[hash].[ext]',
+      },
+    },
+    // 禁用压缩大小报告（加快构建速度）
+    reportCompressedSize: false,
+    // 设置构建目标（现代浏览器，减少转译）
+    target: 'es2015',
+    // 启用 CSS 代码分割
+    cssCodeSplit: true,
+    // 减少构建输出信息（加快构建速度）
+    emptyOutDir: true,
+  },
+
+  plugins: [vue()],
+
+  // 优化配置
+  optimizeDeps: {
+    // 预构建依赖
+    include: ['vue', 'vue-router', 'pinia', 'element-plus', 'axios'],
+  },
+
+})
