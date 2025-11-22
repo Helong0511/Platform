@@ -700,6 +700,20 @@ const handleBatchSave = async () => {
   batchSaving.value = true;
   
   try {
+    // 在批量保存前，先获取最新的CSRF令牌（确保令牌是最新的）
+    try {
+      const axios = (await import('axios')).default;
+      await axios.get(`/api/v1/product-assignments/products/${props.productId}/assignments`, {
+        timeout: 5000,
+        validateStatus: () => true // 接受任何状态码，因为我们只是为了获取CSRF token
+      });
+      // 等待响应拦截器处理完响应头
+      await new Promise(resolve => setTimeout(resolve, 200));
+    } catch (tokenError) {
+      console.warn('批量保存前获取CSRF token时出错:', tokenError);
+      // 继续执行，因为axios拦截器可能会自动处理
+    }
+    
     const changes = Array.from(pendingChanges.value.entries());
     
     // 如果只有一条记录，使用单个更新API（更轻量）

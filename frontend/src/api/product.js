@@ -227,13 +227,58 @@ export const updateAssignmentDates = async (assignmentId, dateUpdate) => {
 // 批量更新产品分配历史的日期（管理员）
 export const batchUpdateAssignmentDates = async (updates) => {
   // updates: [{ assignment_id, start_date?, end_date? }, ...]
+  // 重试函数，用于在CSRF token失败时自动重试
+  const attemptBatchUpdate = async (retryCount = 0) => {
+    try {
+      // 如果是重试，先获取新的CSRF token
+      if (retryCount > 0) {
+        try {
+          // 发送一个GET请求来获取最新的CSRF token
+          await axios.get('/api/v1/products/', {
+            params: { page_size: 1 },
+            timeout: 5000,
+            validateStatus: () => true // 接受任何状态码
+          });
+          // 等待响应拦截器处理完响应头
+          await new Promise(resolve => setTimeout(resolve, 200));
+        } catch (tokenError) {
+          logger.warn(`[batchUpdateAssignmentDates] 获取CSRF token时出错: ${tokenError.message}`);
+        }
+      }
+      
+      // 检查CSRF token是否存在
+      const csrfToken = sessionStorage.getItem('csrf_token');
+      if (!csrfToken) {
+        throw new Error('CSRF令牌缺失，请刷新页面后重试');
+      }
+      
+      // 发送批量更新请求
+      const response = await axios.put('/api/v1/product-assignments/assignments/batch-update-dates', {
+        updates: updates
+      }, {
+        timeout: 60000 // 60秒超时，因为批量更新可能需要更长时间
+      });
+      
+      // 请求成功后，等待一小段时间，确保响应拦截器已处理完CSRF令牌更新
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      return normalizeResponse(response, { returnDataOnly: true });
+    } catch (error) {
+      // 如果是CSRF相关错误且是第一次尝试，自动重试一次
+      if (error.response?.status === 403 && retryCount === 0) {
+        const errorMsg = extractErrorMessage(error);
+        if (errorMsg.includes('CSRF') || errorMsg.includes('csrf') || errorMsg.includes('令牌')) {
+          logger.warn(`[batchUpdateAssignmentDates] CSRF token验证失败，尝试重新获取token并重试`);
+          sessionStorage.removeItem('csrf_token');
+          return attemptBatchUpdate(1);
+        }
+      }
+      throw error;
+    }
+  };
+  
   try {
-    const response = await axios.put('/api/v1/product-assignments/assignments/batch-update-dates', {
-      updates: updates
-    }, {
-      timeout: 60000 // 60秒超时，因为批量更新可能需要更长时间
-    });
-    return normalizeResponse(response, { returnDataOnly: true });
+    return await attemptBatchUpdate(0);
   } catch (error) {
     if (isErrorHandled(error)) {
       throw error;
