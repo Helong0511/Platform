@@ -1,4 +1,6 @@
 clear
+cd /data/Platform
+git pull
 cd /data/Platform/frontend
 sudo rm -rf /data/Platform/logs/*
 sudo systemctl stop Platform-backend.service
