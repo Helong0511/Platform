@@ -13,7 +13,13 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.models.models import ProductAssignment, Product, Client, User, UserRole
 from app.schemas.base import ResponseBaseSchema, ListResponseBaseSchema
-from app.schemas.product_assignment import ProductAssignmentResponse, ProductAssignmentListResponse, ProductAssignmentDateUpdate
+from app.schemas.product_assignment import (
+    ProductAssignmentResponse, 
+    ProductAssignmentListResponse, 
+    ProductAssignmentDateUpdate,
+    BatchAssignmentsDateUpdateRequest,
+    BatchAssignmentDateUpdate
+)
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.product_assignment import validate_product_assignments, cleanup_invalid_assignments
@@ -488,4 +494,164 @@ async def update_assignment_dates(
         raise_api_exception(
             ErrorCode.INTERNAL_ERROR,
             detail=f"更新日期时出错: {str(e)}"
+        )
+
+
+@router.put(
+    "/assignments/batch-update-dates",
+    response_model=ResponseBaseSchema[dict],
+    summary="批量更新产品分配历史的日期（管理员）"
+)
+async def batch_update_assignment_dates(
+    request: Request,
+    batch_update: BatchAssignmentsDateUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    批量更新产品分配历史的日期
+    
+    功能：
+    1. 一次性更新多个分配记录的开始日期和/或结束日期
+    2. 先应用所有更新（不提交），然后统一验证时间连贯性
+    3. 如果验证失败，回滚所有更改并返回错误信息
+    4. 如果验证通过，提交所有更改
+    
+    这样可以避免逐个更新时中间状态的验证错误
+    
+    仅管理员可以访问此端点
+    """
+    if not batch_update.updates or len(batch_update.updates) == 0:
+        raise_api_exception(
+            ErrorCode.VALIDATION_ERROR,
+            detail="更新列表不能为空"
+        )
+    
+    # 获取所有要更新的分配记录ID
+    assignment_ids = [update.assignment_id for update in batch_update.updates]
+    
+    # 查询所有要更新的分配记录
+    query = select(ProductAssignment).where(ProductAssignment.id.in_(assignment_ids))
+    result = await db.execute(query)
+    assignments = result.scalars().all()
+    
+    if len(assignments) != len(assignment_ids):
+        found_ids = {a.id for a in assignments}
+        missing_ids = set(assignment_ids) - found_ids
+        raise_api_exception(
+            ErrorCode.NOT_FOUND,
+            detail=f"以下分配记录ID不存在: {', '.join(map(str, missing_ids))}"
+        )
+    
+    # 创建ID到记录的映射
+    assignment_map = {a.id: a for a in assignments}
+    
+    # 保存原始值用于日志
+    original_values = {}
+    for assignment in assignments:
+        original_values[assignment.id] = {
+            'start_date': assignment.start_date,
+            'end_date': assignment.end_date
+        }
+    
+    # 应用所有更新（不提交）
+    for update_item in batch_update.updates:
+        assignment = assignment_map[update_item.assignment_id]
+        
+        # 准备更新的值
+        update_data = update_item.model_dump(exclude_unset=True, exclude={'assignment_id'})
+        new_start_date = update_data.get('start_date', assignment.start_date)
+        new_end_date = update_data.get('end_date', assignment.end_date)
+        
+        # 基本验证：如果end_date不为None，必须满足 start_date <= end_date
+        if new_end_date is not None and new_start_date > new_end_date:
+            await db.rollback()
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail=f"记录ID {assignment.id}: 日期逻辑错误：开始日期（{new_start_date}）不能大于结束日期（{new_end_date}）"
+            )
+        
+        # 更新分配记录
+        assignment.start_date = new_start_date
+        assignment.end_date = new_end_date
+    
+    # 刷新到数据库（但不提交）
+    await db.flush()
+    
+    # 获取产品ID（所有记录应该属于同一个产品）
+    product_id = assignments[0].product_id
+    for assignment in assignments:
+        if assignment.product_id != product_id:
+            await db.rollback()
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="批量更新只能更新同一产品的分配记录"
+            )
+    
+    # 验证所有更新后的分配记录连贯性
+    try:
+        # 执行验证（验证整个产品的所有记录）
+        validation_result = await validate_product_assignments(db, product_id)
+        
+        if validation_result["errors"]:
+            # 验证失败：回滚所有更改
+            await db.rollback()
+            
+            error_msg = "; ".join(validation_result["errors"])
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail=f"批量更新后验证失败：{error_msg}。请确保日期不重叠且无空窗期。"
+            )
+        
+        # 验证通过，提交所有更改
+        await db.commit()
+        
+        # 记录日志
+        update_summary = []
+        for update_item in batch_update.updates:
+            assignment_id = update_item.assignment_id
+            original = original_values[assignment_id]
+            assignment = assignment_map[assignment_id]
+            update_summary.append(
+                f"记录ID {assignment_id}: "
+                f"开始日期 {original['start_date']} -> {assignment.start_date}, "
+                f"结束日期 {original['end_date'] or 'NULL'} -> {assignment.end_date or 'NULL'}"
+            )
+        
+        logger.info(
+            f"管理员 {current_user.id} 批量更新了产品 {product_id} 的 {len(batch_update.updates)} 条分配记录：\n" +
+            "\n".join(update_summary)
+        )
+        
+        return ResponseBaseSchema.success(
+            data={
+                "updated_count": len(batch_update.updates),
+                "product_id": product_id,
+                "message": f"成功批量更新 {len(batch_update.updates)} 条记录，时间连贯性验证通过"
+            },
+            message=f"批量更新成功，共更新 {len(batch_update.updates)} 条记录"
+        )
+            
+    except Exception as e:
+        # 回滚所有更改
+        try:
+            await db.rollback()
+        except Exception as rollback_error:
+            logger.error(f"回滚事务时出错: {str(rollback_error)}", exc_info=True)
+        
+        # 如果是我们自己的API异常，直接重新抛出
+        if isinstance(e, HTTPException):
+            raise e
+        
+        # 其他异常，记录并返回错误
+        import traceback
+        error_traceback = traceback.format_exc()
+        logger.error(
+            f"批量更新分配记录日期时出错: {str(e)}\n"
+            f"错误堆栈:\n{error_traceback}",
+            exc_info=True
+        )
+        raise_api_exception(
+            ErrorCode.INTERNAL_ERROR,
+            detail=f"批量更新分配记录日期时出错: {str(e)}"
         )

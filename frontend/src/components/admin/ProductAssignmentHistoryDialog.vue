@@ -143,7 +143,7 @@
 import { ref, watch, computed } from 'vue';
 import { ElMessage, ElMessageBox, ElAlert } from 'element-plus';
 import { OfficeBuilding, Edit } from '@element-plus/icons-vue';
-import { getProductAssignments, updateAssignmentDates } from '../../api/product';
+import { getProductAssignments, updateAssignmentDates, batchUpdateAssignmentDates } from '../../api/product';
 
 // 格式化客户全名（优先显示用户全名，如果没有则显示公司名称、联系人、电话）
 const formatClientFullName = (assignment) => {
@@ -508,29 +508,21 @@ const validateAllChanges = () => {
     client_id: a.client_id
   })));
   
-  // 最后再次验证所有记录的最终状态（确保没有遗漏）
+  // 验证最终状态（所有修改应用后的状态）
+  // 这是最重要的验证，因为最终状态才是实际保存到数据库的状态
   const finalErrors = validateAssignmentsState(currentAssignments);
+  
   if (finalErrors.length > 0) {
     console.log('[验证] 最终验证失败:', finalErrors);
-    // 添加最终状态的错误（去重）
-    for (const err of finalErrors) {
-      // 检查是否已经记录过类似的错误
-      const isDuplicate = errors.some(e => {
-        // 提取错误中的记录ID
-        const errMatch = err.match(/记录ID\s+(\d+)/);
-        if (errMatch) {
-          const recordId = errMatch[1];
-          return e.includes(`记录ID ${recordId}`);
-        }
-        return false;
-      });
-      
-      if (!isDuplicate) {
-        errors.push(`最终验证: ${err}`);
-      }
-    }
+    // 如果最终验证失败，使用最终验证的错误（因为这是实际会保存的状态）
+    // 清除之前的中间状态错误，只保留最终状态的错误
+    errors.length = 0; // 清空之前的错误
+    errors.push(...finalErrors);
   } else {
     console.log('[验证] 最终验证通过');
+    // 如果最终验证通过，清除所有错误（包括中间状态的错误）
+    // 因为最终状态是正确的，中间状态的错误是正常的（部分更新过程中的临时状态）
+    errors.length = 0;
   }
   
   const result = {
@@ -704,32 +696,49 @@ const handleBatchSave = async () => {
   batchSaving.value = true;
   
   try {
-    // 在批量保存前，先获取最新的CSRF令牌
-    try {
-      const axios = (await import('axios')).default;
-      await axios.get(`/api/v1/product-assignments/products/${props.productId}/assignments`, {
-        timeout: 5000,
-        validateStatus: () => true // 接受任何状态码，因为我们只是为了获取CSRF token
-      });
-      // 等待响应拦截器处理完响应头
-      await new Promise(resolve => setTimeout(resolve, 200));
-    } catch (tokenError) {
-      console.warn('批量保存前获取CSRF token时出错:', tokenError);
-      // 继续执行，因为axios拦截器可能会自动处理
-    }
-    
-    // 按顺序提交所有修改（确保顺序执行，避免并发导致的CSRF令牌冲突）
     const changes = Array.from(pendingChanges.value.entries());
-    let successCount = 0;
-    let failCount = 0;
-    const errors = [];
     
-    for (let i = 0; i < changes.length; i++) {
-      const [assignmentId, change] = changes[i];
-      try {
-        // 构建更新数据
-        const updateData = {};
+    // 如果只有一条记录，使用单个更新API（更轻量）
+    if (changes.length === 1) {
+      const [assignmentId, change] = changes[0];
+      const original = change.original;
+      
+      // 构建更新数据（只包含有变化的字段）
+      const updateData = {};
+      
+      const originalStartDateStr = typeof original.start_date === 'string'
+        ? original.start_date
+        : (original.start_date ? new Date(original.start_date).toISOString().split('T')[0] : null);
+      const originalEndDateStr = original.end_date
+        ? (typeof original.end_date === 'string'
+            ? original.end_date
+            : new Date(original.end_date).toISOString().split('T')[0])
+        : null;
+      
+      if (change.start_date !== originalStartDateStr) {
+        updateData.start_date = change.start_date;
+      }
+      
+      const originalEndIsNull = !originalEndDateStr;
+      const newEndIsNull = !change.end_date;
+      if (originalEndIsNull !== newEndIsNull || (change.end_date && change.end_date !== originalEndDateStr)) {
+        updateData.end_date = change.end_date || null;
+      }
+      
+      // 调用单个更新API
+      await updateAssignmentDates(assignmentId, updateData);
+      ElMessage.success('修改已保存，时间连贯性验证通过');
+    } else {
+      // 多条记录，使用批量更新API（避免中间状态验证错误）
+      const updates = [];
+      
+      for (const [assignmentId, change] of changes) {
         const original = change.original;
+        
+        // 构建更新数据（只包含有变化的字段）
+        const updateData = {
+          assignment_id: assignmentId
+        };
         
         const originalStartDateStr = typeof original.start_date === 'string'
           ? original.start_date
@@ -750,61 +759,37 @@ const handleBatchSave = async () => {
           updateData.end_date = change.end_date || null;
         }
         
-        // 调用API更新（顺序执行，确保每个请求完成后再执行下一个）
-        await updateAssignmentDates(assignmentId, updateData);
-        successCount++;
-        
-        // 在每个请求之间添加短暂延迟，避免CSRF令牌冲突
-        // 同时确保响应拦截器有时间更新CSRF令牌
-        if (i < changes.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-      } catch (error) {
-        failCount++;
-        const errorMsg = error.response?.data?.detail || error.message || '更新失败';
-        errors.push(`记录ID ${assignmentId}: ${errorMsg}`);
-        console.error(`更新分配记录 ${assignmentId} 失败:`, error);
-        
-        // 如果是CSRF相关错误，尝试获取新的令牌后继续
-        if (error.response?.status === 403) {
-          const errorDetail = error.response?.data?.detail || errorMsg;
-          if (errorDetail.includes('CSRF') || errorDetail.includes('csrf') || errorDetail.includes('令牌')) {
-            try {
-              const axios = (await import('axios')).default;
-              await axios.get(`/api/v1/product-assignments/products/${props.productId}/assignments`, {
-                timeout: 5000,
-                validateStatus: () => true
-              });
-              await new Promise(resolve => setTimeout(resolve, 200));
-            } catch (tokenError) {
-              console.warn('获取新CSRF token失败:', tokenError);
-            }
-          }
-        }
+        updates.push(updateData);
       }
-    }
-    
-    if (failCount > 0) {
-      ElMessageBox.alert(
-        `部分更新失败：\n\n${errors.join('\n')}\n\n已成功更新 ${successCount} 条，失败 ${failCount} 条。`,
-        '部分更新失败',
-        {
-          type: 'warning',
-          confirmButtonText: '确定'
-        }
-      );
-    } else {
-      ElMessage.success(`成功保存 ${successCount} 条修改，时间连贯性验证通过`);
+      
+      // 调用批量更新API（一次性更新所有记录，后端会统一验证）
+      const result = await batchUpdateAssignmentDates(updates);
+      ElMessage.success(result.message || `成功保存 ${updates.length} 条修改`);
     }
     
     // 重新获取分配历史
-    await fetchAssignments();
+    await loadAssignments();
     
     // 清除所有暂存的修改
     pendingChanges.value.clear();
   } catch (error) {
-    console.error('批量保存失败:', error);
-    ElMessage.error('批量保存失败，请稍后重试');
+    console.error('保存时出错:', error);
+    const errorMsg = error.response?.data?.detail || error.message || '保存失败';
+    
+    // 显示详细的错误信息
+    if (errorMsg.includes('验证失败') || errorMsg.includes('重叠') || errorMsg.includes('空窗期')) {
+      ElMessageBox.alert(
+        errorMsg,
+        '更新失败',
+        {
+          type: 'error',
+          confirmButtonText: '确定',
+          dangerouslyUseHTMLString: false
+        }
+      );
+    } else {
+      ElMessage.error(errorMsg);
+    }
   } finally {
     batchSaving.value = false;
   }

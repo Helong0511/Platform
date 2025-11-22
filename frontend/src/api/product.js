@@ -177,8 +177,10 @@ export const updateAssignmentDates = async (assignmentId, dateUpdate) => {
         throw new Error('CSRF令牌缺失，请刷新页面后重试');
       }
       
-      // 发送PUT请求
-      const response = await axios.put(`/api/v1/product-assignments/assignments/${assignmentId}/dates`, dateUpdate);
+      // 发送PUT请求（设置较长的超时时间，因为验证可能需要时间）
+      const response = await axios.put(`/api/v1/product-assignments/assignments/${assignmentId}/dates`, dateUpdate, {
+        timeout: 30000 // 30秒超时，因为后端验证可能需要时间
+      });
       
       // 请求成功后，等待一小段时间，确保响应拦截器已处理完CSRF令牌更新
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -217,6 +219,36 @@ export const updateAssignmentDates = async (assignmentId, dateUpdate) => {
         // 清除旧的token
         sessionStorage.removeItem('csrf_token');
       }
+    }
+    throw error;
+  }
+};
+
+// 批量更新产品分配历史的日期（管理员）
+export const batchUpdateAssignmentDates = async (updates) => {
+  // updates: [{ assignment_id, start_date?, end_date? }, ...]
+  try {
+    const response = await axios.put('/api/v1/product-assignments/assignments/batch-update-dates', {
+      updates: updates
+    }, {
+      timeout: 60000 // 60秒超时，因为批量更新可能需要更长时间
+    });
+    return normalizeResponse(response, { returnDataOnly: true });
+  } catch (error) {
+    if (isErrorHandled(error)) {
+      throw error;
+    }
+    
+    const errorMsg = extractErrorMessage(error);
+    
+    // 如果是CSRF相关错误，提供更友好的提示
+    if (error.response?.status === 403) {
+      if (errorMsg.includes('CSRF') || errorMsg.includes('csrf') || errorMsg.includes('令牌')) {
+        ElMessage.error('安全验证失败，请刷新页面后重试');
+        sessionStorage.removeItem('csrf_token');
+      }
+    } else {
+      ElMessage.error(errorMsg || '批量更新失败，请稍后重试');
     }
     throw error;
   }
