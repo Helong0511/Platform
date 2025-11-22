@@ -276,11 +276,46 @@ const formatCurrency = (row, column, value) => {
 
 // 防抖定时器
 let fetchAdDataTimer = null;
+// 当前正在进行的请求Promise（用于请求去重）
+let currentRequestPromise = null;
+// 当前请求的参数（用于判断是否为重复请求）
+let currentRequestParams = null;
 
 // 获取广告数据
 const fetchAdData = async () => {
   // 如果正在加载，直接返回，防止重复请求
   if (loading.value) {
+    return;
+  }
+  
+  // 构建当前请求参数
+  const params = {
+    page: pagination.value.current,
+    page_size: pagination.value.size
+  };
+  if (isAdmin.value && searchForm.value.clientId) {
+    params.client_id = searchForm.value.clientId;
+  }
+  if (searchForm.value.productId) {
+    params.product_id = searchForm.value.productId;
+  }
+  if (searchForm.value.countryCode) {
+    params.country_code = searchForm.value.countryCode;
+  }
+  if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
+    params.start_date = searchForm.value.dateRange[0];
+    params.end_date = searchForm.value.dateRange[1];
+  }
+  
+  // 检查是否为重复请求（相同的参数且正在请求中）
+  const paramsKey = JSON.stringify(params);
+  if (currentRequestPromise && currentRequestParams === paramsKey) {
+    // 相同的请求正在进行，等待现有请求完成
+    try {
+      await currentRequestPromise;
+    } catch (error) {
+      // 忽略错误，让现有请求处理
+    }
     return;
   }
   
@@ -291,47 +326,25 @@ const fetchAdData = async () => {
   
   // 设置防抖：300ms内只执行最后一次
   fetchAdDataTimer = setTimeout(async () => {
-    try {
-      loading.value = true;
-      
-      // 检查token是否有效
-      const token = sessionStorage.getItem('token');
-      if (!token) {
-        ElMessage.warning('登录已过期，请重新登录');
-        router.push('/login').catch(() => {
-          window.location.href = '/login';
-        });
-        return;
-      }
-      
-      const params = {
-        page: pagination.value.current,
-        page_size: pagination.value.size
-        // 排序参数由后端默认处理（按日期降序）
-      };
+    // 标记当前请求参数
+    currentRequestParams = paramsKey;
+    
+    // 创建请求Promise
+    const requestPromise = (async () => {
+      try {
+        loading.value = true;
+        
+        // 检查token是否有效
+        const token = sessionStorage.getItem('token');
+        if (!token) {
+          ElMessage.warning('登录已过期，请重新登录');
+          router.push('/login').catch(() => {
+            window.location.href = '/login';
+          });
+          return;
+        }
 
-      // 如果是管理员且选择了客户，添加客户ID筛选
-      if (isAdmin.value && searchForm.value.clientId) {
-        params.client_id = searchForm.value.clientId;
-      }
-
-      // 添加产品ID筛选（如果选择了产品）
-      if (searchForm.value.productId) {
-        params.product_id = searchForm.value.productId;
-      }
-
-      // 添加国家代码筛选（如果选择了国家）
-      if (searchForm.value.countryCode) {
-        params.country_code = searchForm.value.countryCode;
-      }
-
-      // 添加日期范围筛选
-      if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
-        params.start_date = searchForm.value.dateRange[0];
-        params.end_date = searchForm.value.dateRange[1];
-      }
-
-      const response = await getAdDataList(params);
+        const response = await getAdDataList(params);
       
       // 检查响应结构
       if (response.code !== 200) {
@@ -349,29 +362,41 @@ const fetchAdData = async () => {
       const totalValue = typeof listResponse.total === 'number' ? listResponse.total : parseInt(listResponse.total || 0, 10);
       pagination.value.total = totalValue;
       
-      // 验证数据完整性
-      if (adDataList.value.length > 0) {
-        const requiredFields = ['date', 'product_name', 'request_count', 'match_count'];
-        const missingFields = requiredFields.filter(field => !(field in adDataList.value[0]));
-        if (missingFields.length > 0) {
-          ElMessage.warning(`数据格式不完整，缺少字段: ${missingFields.join(', ')}`);
+        // 验证数据完整性
+        if (adDataList.value.length > 0) {
+          const requiredFields = ['date', 'product_name', 'request_count', 'match_count'];
+          const missingFields = requiredFields.filter(field => !(field in adDataList.value[0]));
+          if (missingFields.length > 0) {
+            ElMessage.warning(`数据格式不完整，缺少字段: ${missingFields.join(', ')}`);
+          }
+        }
+      } catch (error) {
+        // 401错误已在拦截器中处理，直接返回
+        if (error.response?.status === 401) {
+          loading.value = false;
+          return;
+        }
+        
+        // 检查错误是否已被处理（如拦截器或API函数已显示）
+        if (!isErrorHandled(error)) {
+          const errorMsg = extractErrorMessage(error);
+          ElMessage.error(errorMsg);
+        }
+      } finally {
+        loading.value = false;
+        // 清除当前请求标记
+        if (currentRequestParams === paramsKey) {
+          currentRequestPromise = null;
+          currentRequestParams = null;
         }
       }
-    } catch (error) {
-      // 401错误已在拦截器中处理，直接返回
-      if (error.response?.status === 401) {
-        loading.value = false;
-        return;
-      }
-      
-      // 检查错误是否已被处理（如拦截器或API函数已显示）
-      if (!isErrorHandled(error)) {
-        const errorMsg = extractErrorMessage(error);
-        ElMessage.error(errorMsg);
-      }
-    } finally {
-      loading.value = false;
-    }
+    })();
+    
+    // 保存当前请求Promise
+    currentRequestPromise = requestPromise;
+    
+    // 等待请求完成
+    await requestPromise;
   }, 300);
 };
 
@@ -1178,6 +1203,9 @@ onUnmounted(() => {
     clearTimeout(fetchAdDataTimer);
     fetchAdDataTimer = null;
   }
+  // 清理请求标记
+  currentRequestPromise = null;
+  currentRequestParams = null;
 });
 
 // 监听路由变化，当从其他页面导航到 AdData 时自动刷新数据

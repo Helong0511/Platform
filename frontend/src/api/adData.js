@@ -5,7 +5,15 @@ import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isE
 // 获取广告数据列表
 export const getAdDataList = async (params) => {
   try {
-    const response = await axios.get('/api/v1/ad-data/', { params });
+    // 检测是否为移动设备，移动端使用更长的超时时间
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    // 广告数据查询可能涉及大量数据，使用更长的超时时间
+    const timeout = isMobile ? 60000 : 45000; // 移动端60秒，桌面端45秒
+    
+    const response = await axios.get('/api/v1/ad-data/', { 
+      params,
+      timeout: timeout
+    });
     return normalizePaginatedResponse(response);
   } catch (error) {
     if (isErrorHandled(error)) {
@@ -20,7 +28,15 @@ export const getAdDataList = async (params) => {
 // 获取每日汇总数据
 export const getDailySummary = async (params) => {
   try {
-    const response = await axios.get('/api/v1/ad-data/daily-summary', { params });
+    // 检测是否为移动设备，移动端使用更长的超时时间
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    // 每日汇总查询涉及聚合计算，使用更长的超时时间
+    const timeout = isMobile ? 60000 : 45000; // 移动端60秒，桌面端45秒
+    
+    const response = await axios.get('/api/v1/ad-data/daily-summary', { 
+      params,
+      timeout: timeout
+    });
     return normalizePaginatedResponse(response);
   } catch (error) {
     if (isErrorHandled(error)) {

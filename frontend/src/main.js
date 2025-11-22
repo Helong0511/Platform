@@ -62,16 +62,23 @@ axios.interceptors.request.use(
         config.timeout = isMobile ? 60000 : 30000; // 移动端60秒，桌面端30秒
       } else {
         // 普通请求：移动端使用更长的超时时间
-        // 对于数据列表请求，使用较短的超时时间，避免长时间等待
+        // 对于广告数据查询请求，使用更长的超时时间（因为涉及复杂查询和大量数据）
+        const isAdDataRequest = config.url && (
+          config.url.includes('/ad-data/') && 
+          !config.url.includes('/export') // 导出请求使用默认超时
+        );
         const isDataListRequest = config.url && (
-          config.url.includes('/ad-data/') || 
           config.url.includes('/dashboard/') ||
           config.url.includes('/clients-with-data') ||
           config.url.includes('/products-with-data')
         );
-        if (isDataListRequest) {
-          // 优化：数据列表请求使用更短的超时时间，提高响应速度
-          config.timeout = isMobile ? 15000 : 8000; // 数据列表请求：移动端15秒，桌面端8秒
+        if (isAdDataRequest) {
+          // 广告数据查询：使用更长的超时时间（移动端60秒，桌面端45秒）
+          // 这些查询可能涉及复杂的JOIN和聚合操作
+          config.timeout = isMobile ? 60000 : 45000;
+        } else if (isDataListRequest) {
+          // 其他数据列表请求：使用中等超时时间
+          config.timeout = isMobile ? 30000 : 20000; // 移动端30秒，桌面端20秒
         } else {
           config.timeout = isMobile ? 30000 : 15000; // 其他请求：移动端30秒，桌面端15秒
         }

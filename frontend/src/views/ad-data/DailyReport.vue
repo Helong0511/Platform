@@ -155,11 +155,43 @@ const formatCurrency = (row, column, value) => {
 
 // 防抖定时器
 let fetchDailyDataTimer = null;
+// 当前正在进行的请求Promise（用于请求去重）
+let currentRequestPromise = null;
+// 当前请求的参数（用于判断是否为重复请求）
+let currentRequestParams = null;
 
 // 获取每日汇总数据
 const fetchDailyData = async () => {
   // 如果正在加载，直接返回，防止重复请求
   if (loading.value) {
+    return;
+  }
+  
+  // 构建当前请求参数
+  const params = {
+    page: pagination.value.current,
+    page_size: pagination.value.size
+  };
+  if (isAdmin.value && searchForm.value.clientId) {
+    params.client_id = searchForm.value.clientId;
+  }
+  if (searchForm.value.productId) {
+    params.product_id = searchForm.value.productId;
+  }
+  if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
+    params.start_date = searchForm.value.dateRange[0];
+    params.end_date = searchForm.value.dateRange[1];
+  }
+  
+  // 检查是否为重复请求（相同的参数且正在请求中）
+  const paramsKey = JSON.stringify(params);
+  if (currentRequestPromise && currentRequestParams === paramsKey) {
+    // 相同的请求正在进行，等待现有请求完成
+    try {
+      await currentRequestPromise;
+    } catch (error) {
+      // 忽略错误，让现有请求处理
+    }
     return;
   }
   
@@ -170,37 +202,24 @@ const fetchDailyData = async () => {
   
   // 设置防抖：300ms内只执行最后一次
   fetchDailyDataTimer = setTimeout(async () => {
-    try {
-      loading.value = true;
-      
-      const token = sessionStorage.getItem('token');
-      if (!token) {
-        ElMessage.warning('登录已过期，请重新登录');
-        router.push('/login').catch(() => {
-          window.location.href = '/login';
-        });
-        return;
-      }
-      
-      const params = {
-        page: pagination.value.current,
-        page_size: pagination.value.size
-      };
+    // 标记当前请求参数
+    currentRequestParams = paramsKey;
+    
+    // 创建请求Promise
+    const requestPromise = (async () => {
+      try {
+        loading.value = true;
+        
+        const token = sessionStorage.getItem('token');
+        if (!token) {
+          ElMessage.warning('登录已过期，请重新登录');
+          router.push('/login').catch(() => {
+            window.location.href = '/login';
+          });
+          return;
+        }
 
-      if (isAdmin.value && searchForm.value.clientId) {
-        params.client_id = searchForm.value.clientId;
-      }
-
-      if (searchForm.value.productId) {
-        params.product_id = searchForm.value.productId;
-      }
-
-      if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
-        params.start_date = searchForm.value.dateRange[0];
-        params.end_date = searchForm.value.dateRange[1];
-      }
-
-      const response = await getDailySummary(params);
+        const response = await getDailySummary(params);
       
       if (response.code !== 200) {
         const errorMsg = response.detail || response.message || '获取数据失败';
@@ -213,21 +232,33 @@ const fetchDailyData = async () => {
       const listResponse = response.data || {};
       dailyDataList.value = listResponse.data || [];
       // 确保total是数字类型，避免字符串类型导致的计算错误
-      const totalValue = typeof listResponse.total === 'number' ? listResponse.total : parseInt(listResponse.total || 0, 10);
-      pagination.value.total = totalValue;
-    } catch (error) {
-      if (error.response?.status === 401) {
+        const totalValue = typeof listResponse.total === 'number' ? listResponse.total : parseInt(listResponse.total || 0, 10);
+        pagination.value.total = totalValue;
+      } catch (error) {
+        if (error.response?.status === 401) {
+          loading.value = false;
+          return;
+        }
+        
+        if (!isErrorHandled(error)) {
+          const errorMsg = extractErrorMessage(error);
+          ElMessage.error(errorMsg);
+        }
+      } finally {
         loading.value = false;
-        return;
+        // 清除当前请求标记
+        if (currentRequestParams === paramsKey) {
+          currentRequestPromise = null;
+          currentRequestParams = null;
+        }
       }
-      
-      if (!isErrorHandled(error)) {
-        const errorMsg = extractErrorMessage(error);
-        ElMessage.error(errorMsg);
-      }
-    } finally {
-      loading.value = false;
-    }
+    })();
+    
+    // 保存当前请求Promise
+    currentRequestPromise = requestPromise;
+    
+    // 等待请求完成
+    await requestPromise;
   }, 300);
 };
 
@@ -437,6 +468,9 @@ onUnmounted(() => {
     clearTimeout(fetchDailyDataTimer);
     fetchDailyDataTimer = null;
   }
+  // 清理请求标记
+  currentRequestPromise = null;
+  currentRequestParams = null;
 });
 </script>
 

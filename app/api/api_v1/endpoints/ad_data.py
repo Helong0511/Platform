@@ -909,24 +909,21 @@ async def get_daily_summary(
     
     # ====== 计算总数 ======
     try:
-        # 构建计数查询（使用相同的过滤条件，但不分组）
-        # 使用 select_from 明确指定左表，避免 join 歧义
-        count_query = select(func.count(func.distinct(
-            func.concat(
-                func.date(AdData.date),
-                text("'-'"),
-                Product.id
-            )
-        ))).select_from(AdData)
-        count_query = count_query.join(Product, AdData.product_id == Product.id)
-        count_query = count_query.where(Product.is_active == True)
+        # 优化：使用子查询优化计数，避免复杂的DISTINCT CONCAT操作
+        # 先获取满足条件的所有(date, product_id)组合，然后计数
+        subquery = select(
+            func.date(AdData.date).label("date"),
+            Product.id.label("product_id")
+        ).select_from(AdData)
+        subquery = subquery.join(Product, AdData.product_id == Product.id)
+        subquery = subquery.where(Product.is_active == True)
         
         if use_assignment_table:
             end_date_with_default = func.coalesce(
                 func.date_add(ProductAssignment.end_date, text("INTERVAL 1 DAY")),
                 literal_column("'2099-12-31'")
             )
-            count_query = count_query.join(
+            subquery = subquery.join(
                 ProductAssignment,
                 and_(
                     ProductAssignment.product_id == Product.id,
@@ -934,30 +931,30 @@ async def get_daily_summary(
                     AdData.date < end_date_with_default
                 )
             )
-            count_query = count_query.join(Client, ProductAssignment.client_id == Client.id)
+            subquery = subquery.join(Client, ProductAssignment.client_id == Client.id)
         else:
-            count_query = count_query.join(Client, Product.client_id == Client.id)
+            subquery = subquery.join(Client, Product.client_id == Client.id)
         
         # 应用相同的过滤条件
         if current_user.role != UserRole.ADMIN:
-            count_query = count_query.where(Client.user_id == current_user.id)
+            subquery = subquery.where(Client.user_id == current_user.id)
         else:
             if client_id:
-                count_query = count_query.where(Client.id == client_id)
+                subquery = subquery.where(Client.id == client_id)
         
         if product_id and product_id.strip():
             try:
                 product_id_int = int(product_id)
-                count_query = count_query.where(AdData.product_id == product_id_int)
+                subquery = subquery.where(AdData.product_id == product_id_int)
             except ValueError:
                 pass
         
         if start_date:
             start_datetime = datetime.combine(start_date, datetime.min.time())
-            count_query = count_query.where(AdData.date >= start_datetime)
+            subquery = subquery.where(AdData.date >= start_datetime)
         if end_date:
             end_datetime = datetime.combine(end_date, datetime.max.time())
-            count_query = count_query.where(AdData.date <= end_datetime)
+            subquery = subquery.where(AdData.date <= end_datetime)
         elif not start_date and not end_date:
             today = date.today()
             month_start = date(today.year, today.month, 1)
@@ -965,9 +962,17 @@ async def get_daily_summary(
             month_end = date(today.year, today.month, last_day)
             month_start_datetime = datetime.combine(month_start, datetime.min.time())
             month_end_datetime = datetime.combine(month_end, datetime.max.time())
-            count_query = count_query.where(AdData.date >= month_start_datetime)
-            count_query = count_query.where(AdData.date <= month_end_datetime)
+            subquery = subquery.where(AdData.date >= month_start_datetime)
+            subquery = subquery.where(AdData.date <= month_end_datetime)
         
+        # 分组去重
+        subquery = subquery.group_by(
+            func.date(AdData.date),
+            Product.id
+        )
+        
+        # 外层查询计数
+        count_query = select(func.count()).select_from(subquery.alias("distinct_groups"))
         count_result = await db.execute(count_query)
         total = count_result.scalar() or 0
     except Exception as e:

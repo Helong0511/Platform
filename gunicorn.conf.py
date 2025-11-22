@@ -6,6 +6,13 @@ Gunicorn 配置文件
 """
 import multiprocessing
 import os
+import logging
+
+# 获取日志记录器（用于配置加载时的日志输出）
+logger = logging.getLogger(__name__)
+
+# 导入配置（用于判断是否为生产环境）
+from app.core.config import settings
 
 # ====== 服务器配置 ======
 # 绑定地址和端口
@@ -75,10 +82,17 @@ pidfile = os.path.join(os.path.dirname(__file__), "logs", "gunicorn.pid")
 # 预加载可以减少启动时间，但会增加内存占用
 # 多进程环境：预加载可以共享代码，但每个 worker 仍需要独立初始化
 # 可以通过环境变量 PRELOAD_APP 控制
-if os.getenv("PRELOAD_APP", "false").lower() == "true":
+# 
+# 注意：对于 4GB 内存服务器，建议关闭 preload 以节省内存
+# 如果服务器内存充足（>= 8GB），可以启用 preload 提升性能
+preload_env = os.getenv("PRELOAD_APP", "false").lower()
+if preload_env in ["true", "1", "yes"]:
     preload_app = True
+    logger.info("已启用应用预加载（preload_app=True），将增加内存使用")
 else:
     preload_app = False  # 默认关闭以节省内存（4GB服务器）
+    if not settings.is_production:
+        logger.debug("应用预加载已关闭（preload_app=False），如需启用请设置环境变量 PRELOAD_APP=true")
 
 # Worker 临时文件目录
 # Ubuntu 22.04.5 优化：使用内存文件系统（如果可用）可以提高性能
