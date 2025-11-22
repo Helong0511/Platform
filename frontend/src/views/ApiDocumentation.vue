@@ -1,0 +1,1040 @@
+<template>
+  <div class="api-documentation-container">
+    <el-card class="documentation-card">
+      <template #header>
+        <div class="card-header">
+          <h1>客户API对接文档</h1>
+          <el-tag type="info" size="large">API版本: v1</el-tag>
+        </div>
+      </template>
+
+      <!-- 概述 -->
+      <section class="doc-section">
+        <h2>概述</h2>
+        <p>客户API提供客户通过API密钥访问的接口，包括查询产品信息和广告数据。所有接口都需要进行签名验证，确保请求的安全性。</p>
+        <div class="info-box">
+          <p><strong>基础URL</strong>: <code>https://client.btfrx.online/api/v1</code></p>
+          <p><strong>请求格式</strong>: JSON (Content-Type: application/json)</p>
+          <p><strong>响应格式</strong>: JSON</p>
+        </div>
+      </section>
+
+      <!-- 认证方式 -->
+      <section class="doc-section">
+        <h2>认证方式</h2>
+        <h3>签名算法</h3>
+        <p>所有API请求都需要进行MD5签名验证，签名算法如下：</p>
+        <ol>
+          <li><strong>准备参数</strong>：将请求参数放入参数字典
+            <ul>
+              <li><code>/client_products</code> 接口：<code>client_id</code>、<code>req_time</code></li>
+              <li><code>/client_data</code> 接口：<code>client_id</code>、<code>req_time</code>、<code>data_type</code>（必填），以及可选参数 <code>start_date</code>、<code>end_date</code>（如果提供）</li>
+            </ul>
+          </li>
+          <li><strong>参数排序</strong>：按字母顺序对参数键进行排序</li>
+          <li><strong>拼接字符串</strong>：将参数拼接为 <code>key=value&key=value</code> 格式</li>
+          <li><strong>追加密钥</strong>：在末尾追加 <code>&key={SECRET_KEY}</code></li>
+          <li><strong>MD5加密</strong>：对整个字符串进行MD5加密并转为小写</li>
+        </ol>
+        <div class="info-box">
+          <p><strong>注意</strong>：</p>
+          <ul>
+            <li><code>/client_data</code> 接口的 <code>data_type</code> 参数是必填的，必须包含在签名计算中</li>
+            <li>只有非空参数才参与签名计算。如果未提供可选参数（如 <code>start_date</code>、<code>end_date</code>），则不包含在签名中</li>
+          </ul>
+        </div>
+
+        <el-collapse class="code-example">
+          <el-collapse-item title="Python签名示例（查询产品）" name="python-products">
+            <pre><code>import hashlib
+import time
+
+# 参数（查询产品接口）
+client_id = 1000
+req_time = int(time.time())  # 当前时间戳（10位秒级）
+SECRET_KEY = '3716607b-04cb-4f71-91c0-2dae7a87fa63'
+
+# 1. 准备参数
+params = {
+    'client_id': str(client_id),
+    'req_time': str(req_time)
+}
+
+# 2. 按字母顺序排序
+sorted_keys = sorted(params.keys())
+
+# 3. 拼接字符串
+temp_str = '&'.join([f"{key}={params[key]}" for key in sorted_keys])
+# 结果: client_id=1000&req_time=1745656222
+
+# 4. 追加密钥
+temp_str = temp_str + f'&key={SECRET_KEY}'
+# 结果: client_id=1000&req_time=1745656222&key=3716607b-04cb-4f71-91c0-2dae7a87fa63
+
+# 5. MD5加密并转为小写
+sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()</code></pre>
+          </el-collapse-item>
+          <el-collapse-item title="Python签名示例（查询广告数据）" name="python-ad-data">
+            <pre><code>import hashlib
+import time
+
+# 参数（查询广告数据接口）
+client_id = 1000
+req_time = int(time.time())  # 当前时间戳（10位秒级）
+data_type = 'all'  # 必填参数：'all' 或 'day'
+start_date = '2024-01-01'  # 可选参数
+end_date = '2024-01-31'  # 可选参数
+SECRET_KEY = '3716607b-04cb-4f71-91c0-2dae7a87fa63'
+
+# 1. 准备参数（data_type 是必填的）
+params = {
+    'client_id': str(client_id),
+    'data_type': str(data_type),  # 必填参数
+    'req_time': str(req_time)
+}
+
+# 添加可选参数（如果提供）
+if start_date:
+    params['start_date'] = str(start_date)
+if end_date:
+    params['end_date'] = str(end_date)
+
+# 2. 按字母顺序排序
+sorted_keys = sorted(params.keys())
+
+# 3. 拼接字符串
+temp_str = '&'.join([f"{key}={params[key]}" for key in sorted_keys])
+# 结果: client_id=1000&data_type=all&req_time=1745656222&start_date=2024-01-01
+
+# 4. 追加密钥
+temp_str = temp_str + f'&key={SECRET_KEY}'
+# 结果: client_id=1000&data_type=all&req_time=1745656222&start_date=2024-01-01&key=3716607b-04cb-4f71-91c0-2dae7a87fa63
+
+# 5. MD5加密并转为小写
+sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()</code></pre>
+          </el-collapse-item>
+          <el-collapse-item title="Java签名示例（查询产品）" name="java-products">
+            <pre><code>import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.*;
+
+public String generateSignature(int clientId, long reqTime, String secretKey) {
+    // 准备参数（查询产品接口）
+    Map&lt;String, String&gt; params = new LinkedHashMap&lt;&gt;();
+    params.put("client_id", String.valueOf(clientId));
+    params.put("req_time", String.valueOf(reqTime));
+    
+    // 排序并拼接
+    List&lt;String&gt; sortedKeys = new ArrayList&lt;&gt;(params.keySet());
+    Collections.sort(sortedKeys);
+    
+    StringBuilder sb = new StringBuilder();
+    for (String key : sortedKeys) {
+        if (sb.length() &gt; 0) {
+            sb.append("&");
+        }
+        sb.append(key).append("=").append(params.get(key));
+    }
+    
+    // 追加密钥
+    sb.append("&key=").append(secretKey);
+    
+    // MD5加密
+    MessageDigest md = MessageDigest.getInstance("MD5");
+    byte[] digest = md.digest(sb.toString().getBytes("UTF-8"));
+    
+    // 转为小写十六进制字符串
+    StringBuilder hexString = new StringBuilder();
+    for (byte b : digest) {
+        String hex = Integer.toHexString(0xff & b);
+        if (hex.length() == 1) {
+            hexString.append('0');
+        }
+        hexString.append(hex);
+    }
+    
+    return hexString.toString().toLowerCase();
+}</code></pre>
+          </el-collapse-item>
+          <el-collapse-item title="Java签名示例（查询广告数据）" name="java-ad-data">
+            <pre><code>import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.*;
+
+public String generateSignature(int clientId, long reqTime, String secretKey, 
+                                 String dataType, String startDate, String endDate) {
+    try {
+        // 准备参数（查询广告数据接口，data_type 是必填的）
+        Map&lt;String, String&gt; params = new LinkedHashMap&lt;&gt;();
+        params.put("client_id", String.valueOf(clientId));
+        params.put("data_type", dataType);  // 必填参数
+        params.put("req_time", String.valueOf(reqTime));
+        
+        // 添加可选参数（如果提供）
+        if (startDate != null && !startDate.isEmpty()) {
+            params.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isEmpty()) {
+            params.put("end_date", endDate);
+        }
+        
+        // 排序并拼接
+        List&lt;String&gt; sortedKeys = new ArrayList&lt;&gt;(params.keySet());
+        Collections.sort(sortedKeys);
+        
+        StringBuilder sb = new StringBuilder();
+        for (String key : sortedKeys) {
+            if (sb.length() &gt; 0) {
+                sb.append("&");
+            }
+            sb.append(key).append("=").append(params.get(key));
+        }
+        
+        // 追加密钥
+        sb.append("&key=").append(secretKey);
+        
+        // MD5加密
+        MessageDigest md = MessageDigest.getInstance("MD5");
+        byte[] digest = md.digest(sb.toString().getBytes("UTF-8"));
+        
+        // 转为小写十六进制字符串
+        StringBuilder hexString = new StringBuilder();
+        for (byte b : digest) {
+            String hex = Integer.toHexString(0xff & b);
+            if (hex.length() == 1) {
+                hexString.append('0');
+            }
+            hexString.append(hex);
+        }
+        
+        return hexString.toString().toLowerCase();
+    } catch (Exception e) {
+        throw new RuntimeException("生成签名失败", e);
+    }
+}</code></pre>
+          </el-collapse-item>
+        </el-collapse>
+
+        <div class="warning-box">
+          <el-alert
+            title="请求验证规则"
+            type="warning"
+            :closable="false"
+            show-icon
+          >
+            <ul>
+              <li><strong>客户ID验证</strong>：验证 <code>client_id</code> 是否存在且已激活</li>
+              <li><strong>时间戳验证</strong>：请求时间戳与服务器时间差异不能超过5秒（正负5秒）</li>
+              <li><strong>签名验证</strong>：验证MD5签名是否正确</li>
+            </ul>
+            <p><strong>注意</strong>：<code>SECRET_KEY</code> 不通过请求传递，而是从数据库查询客户的 <code>key</code> 字段进行验证。</p>
+          </el-alert>
+        </div>
+      </section>
+
+      <!-- API接口列表 -->
+      <section class="doc-section">
+        <h2>API接口列表</h2>
+
+        <!-- 查询产品信息 -->
+        <el-card class="api-card" shadow="hover">
+          <template #header>
+            <div class="api-header">
+              <el-tag type="success" size="large">POST</el-tag>
+              <span class="api-path">/client_products</span>
+              <span class="api-title">查询产品信息</span>
+            </div>
+          </template>
+
+          <p>获取客户的所有激活产品列表。</p>
+
+          <h4>请求参数</h4>
+          <el-table :data="productRequestParams" border style="width: 100%">
+            <el-table-column prop="name" label="参数名" width="150" />
+            <el-table-column prop="type" label="类型" width="100" />
+            <el-table-column prop="required" label="必填" width="80" />
+            <el-table-column prop="description" label="说明" />
+          </el-table>
+
+          <h4>请求示例</h4>
+          <el-collapse>
+            <el-collapse-item title="查看请求示例" name="product-request">
+              <pre><code>{
+  "client_id": 1000,
+  "req_time": 1745656222,
+  "sign": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
+}</code></pre>
+            </el-collapse-item>
+          </el-collapse>
+
+          <h4>响应示例</h4>
+          <el-collapse>
+            <el-collapse-item title="查看响应示例" name="product-response">
+              <pre><code>{
+  "code": 200,
+  "message": "成功获取 3 个产品",
+  "data": [
+    {
+      "id": 1,
+      "name": "产品A"
+    },
+    {
+      "id": 2,
+      "name": "产品B"
+    },
+    {
+      "id": 3,
+      "name": "产品C"
+    }
+  ]
+}</code></pre>
+            </el-collapse-item>
+          </el-collapse>
+
+          <div class="note-box">
+            <p><strong>注意事项</strong>：</p>
+            <ul>
+              <li>如果客户没有产品，<code>data</code> 字段返回空数组 <code>[]</code>，而不是 <code>null</code></li>
+              <li>产品按ID升序排列</li>
+              <li>只返回已激活的产品</li>
+            </ul>
+          </div>
+        </el-card>
+
+        <!-- 查询广告数据 -->
+        <el-card class="api-card" shadow="hover" style="margin-top: 20px;">
+          <template #header>
+            <div class="api-header">
+              <el-tag type="success" size="large">POST</el-tag>
+              <span class="api-path">/client_data</span>
+              <span class="api-title">查询广告数据</span>
+            </div>
+          </template>
+
+          <p>获取客户的广告数据。支持两种数据模式：详细数据（按国家分组）和每日汇总（按产品+日期汇总）。</p>
+
+          <h4>请求参数</h4>
+          <el-table :data="adDataRequestParams" border style="width: 100%">
+            <el-table-column prop="name" label="参数名" width="150" />
+            <el-table-column prop="type" label="类型" width="100" />
+            <el-table-column prop="required" label="必填" width="80" />
+            <el-table-column prop="description" label="说明" />
+          </el-table>
+
+          <h4>请求示例</h4>
+          <el-collapse>
+            <el-collapse-item title="查看请求示例（详细数据）" name="ad-data-request-all">
+              <pre><code>{
+  "client_id": 1000,
+  "req_time": 1745656222,
+  "sign": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6",
+  "data_type": "all",
+  "start_date": "2024-01-01",
+  "end_date": "2024-01-31"
+}</code></pre>
+            </el-collapse-item>
+            <el-collapse-item title="查看请求示例（每日汇总）" name="ad-data-request-day">
+              <pre><code>{
+  "client_id": 1000,
+  "req_time": 1745656222,
+  "sign": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6",
+  "data_type": "day",
+  "start_date": "2024-01-01",
+  "end_date": "2024-01-31"
+}</code></pre>
+            </el-collapse-item>
+          </el-collapse>
+
+          <h4>响应示例</h4>
+          <el-collapse>
+            <el-collapse-item title="查看响应示例" name="ad-data-response">
+              <pre><code>{
+  "code": 200,
+  "message": "成功获取 30 条广告数据",
+  "data": [
+    {
+      "date": "2024-01-15",
+      "product_name": "产品A",
+      "request_count": 10000,
+      "match_count": 8000,
+      "coverage_rate": 80.0,
+      "display_count": 7500,
+      "display_rate": 93.75,
+      "click_count": 500,
+      "click_rate": 6.67,
+      "ecpm": 5.25,
+      "revenue": 393.75
+    }
+  ]
+}</code></pre>
+            </el-collapse-item>
+          </el-collapse>
+
+          <h4>响应字段说明</h4>
+          <el-table :data="adDataResponseFields" border style="width: 100%">
+            <el-table-column prop="field" label="字段名" width="180" />
+            <el-table-column prop="type" label="类型" width="100" />
+            <el-table-column prop="description" label="说明" />
+          </el-table>
+
+          <div class="note-box">
+            <p><strong>数据说明</strong>：</p>
+            <ul>
+              <li><strong>覆盖率</strong> = 匹配数 / 请求数 × 100</li>
+              <li><strong>展示率</strong> = 展示数 / 匹配数 × 100</li>
+              <li><strong>点击率</strong> = 点击数 / 展示数 × 100</li>
+              <li><strong>eCPM</strong>: 每千次展示的有效成本</li>
+              <li><strong>收益</strong>: 实际收益</li>
+            </ul>
+            <p><strong>数据模式说明</strong>：</p>
+            <ul>
+              <li><strong>data_type='all'</strong>：详细数据模式，按国家分组，返回每条详细记录</li>
+              <li><strong>data_type='day'</strong>：每日汇总模式，按产品+日期汇总，国家统一显示"全部区域"</li>
+            </ul>
+            <p><strong>注意事项</strong>：</p>
+            <ul>
+              <li>如果不提供 <code>start_date</code> 和 <code>end_date</code>，默认返回当前月的数据（从当月1日到最后一天）</li>
+              <li>如果只提供 <code>start_date</code> 或 <code>end_date</code>，另一个使用当前月的对应日期</li>
+              <li>数据按日期升序排列</li>
+              <li>如果查询范围内没有数据，<code>data</code> 字段返回空数组 <code>[]</code>，而不是 <code>null</code></li>
+              <li>所有数值类型明确（int/float），不会返回字符串</li>
+              <li>浮点数保留2位小数</li>
+              <li>每日汇总模式下，<code>country_name_zh</code> 字段统一返回"全部区域"</li>
+            </ul>
+          </div>
+        </el-card>
+      </section>
+
+      <!-- 错误码说明 -->
+      <section class="doc-section">
+        <h2>错误码说明</h2>
+        
+        <el-alert
+          title="重要提示"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 20px;"
+        >
+          所有错误响应都返回HTTP状态码200，通过响应体中的 <code>code</code> 字段区分错误类型。
+        </el-alert>
+
+        <el-table :data="errorCodes" border style="width: 100%">
+          <el-table-column prop="code" label="错误码" width="100" />
+          <el-table-column prop="message" label="说明" />
+          <el-table-column prop="solution" label="解决方案" />
+        </el-table>
+      </section>
+
+      <!-- 完整示例代码 -->
+      <section class="doc-section">
+        <h2>完整示例代码</h2>
+        
+        <el-tabs v-model="activeTab" type="border-card">
+          <el-tab-pane label="Python示例" name="python">
+            <pre><code>
+import hashlib
+import time
+import requests
+import json
+
+# 配置信息
+BASE_URL = 'https://client.btfrx.online/api/v1'
+CLIENT_ID = 1000
+SECRET_KEY = '3716607b-04cb-4f71-91c0-2dae7a87fa63'
+
+def generate_signature(client_id, req_time, secret_key, data_type=None, start_date=None, end_date=None):
+    """生成签名
+    
+    Args:
+        client_id: 客户ID
+        req_time: 请求时间戳
+        secret_key: 密钥
+        data_type: 数据类型（对于 /client_data 接口是必填的，'all' 或 'day'）
+        start_date: 起始日期（可选）
+        end_date: 终止日期（可选）
+    """
+    params = {
+        'client_id': str(client_id),
+        'req_time': str(req_time)
+    }
+    
+    # 添加参数（对于 /client_data 接口，data_type 是必填的）
+    if data_type:
+        params['data_type'] = str(data_type)
+    if start_date:
+        params['start_date'] = str(start_date)
+    if end_date:
+        params['end_date'] = str(end_date)
+    
+    sorted_keys = sorted(params.keys())
+    temp_str = '&'.join([f"{key}={params[key]}" for key in sorted_keys])
+    temp_str = temp_str + f'&key={secret_key}'
+    
+    sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
+    return sign
+
+def get_products():
+    """获取产品列表"""
+    req_time = int(time.time())
+    sign = generate_signature(CLIENT_ID, req_time, SECRET_KEY)
+    
+    params = {
+        'client_id': CLIENT_ID,
+        'req_time': req_time,
+        'sign': sign
+    }
+    
+    headers = {'Content-Type': 'application/json'}
+    response = requests.post(
+        f'{BASE_URL}/client_products',
+        headers=headers,
+        json=params,
+        timeout=10
+    )
+    
+    return response.json()
+
+def get_ad_data(data_type, start_date=None, end_date=None):
+    """获取广告数据
+    Args:
+        data_type: 必填，数据类型，'all' 表示详细数据（按国家），'day' 表示每日汇总（按产品+日期）
+        start_date: 可选，起始日期（格式：YYYY-MM-DD），不提供则使用当前月第一天
+        end_date: 可选，终止日期（格式：YYYY-MM-DD），不提供则使用当前月最后一天
+    """
+    req_time = int(time.time())
+    sign = generate_signature(CLIENT_ID, req_time, SECRET_KEY, data_type, start_date, end_date)
+    
+    params = {
+        'client_id': CLIENT_ID,
+        'req_time': req_time,
+        'data_type': data_type,  # 必填参数
+        'sign': sign
+    }
+    
+    # 添加可选参数
+    if start_date:
+        params['start_date'] = start_date
+    if end_date:
+        params['end_date'] = end_date
+    
+    headers = {'Content-Type': 'application/json'}
+    response = requests.post(
+        f'{BASE_URL}/client_data',
+        headers=headers,
+        json=params,
+        timeout=10
+    )
+    
+    return response.json()
+
+# 使用示例
+if __name__ == '__main__':
+    # 获取产品列表
+    products_result = get_products()
+    print("产品列表:", json.dumps(products_result, indent=2, ensure_ascii=False))
+    
+    # 获取详细广告数据（按国家分组）
+    ad_data_result = get_ad_data(data_type='all', start_date='2024-01-01', end_date='2024-01-31')
+    print("详细广告数据:", json.dumps(ad_data_result, indent=2, ensure_ascii=False))
+    
+    # 获取每日汇总数据（按产品+日期汇总）
+    daily_summary_result = get_ad_data(data_type='day', start_date='2024-01-01', end_date='2024-01-31')
+    print("每日汇总数据:", json.dumps(daily_summary_result, indent=2, ensure_ascii=False))</code></pre>
+          </el-tab-pane>
+          <el-tab-pane label="Java示例" name="java">
+            <pre><code>
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.*;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.URI;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+public class ClientAPI {
+    private static final String BASE_URL = "https://client.btfrx.online/api/v1";
+    private static final int CLIENT_ID = 1000;
+    private static final String SECRET_KEY = "3716607b-04cb-4f71-91c0-2dae7a87fa63";
+    
+    // 查询产品接口的签名生成（不需要 data_type 参数）
+    private static String generateSignature(int clientId, long reqTime, String secretKey) {
+        return generateSignature(clientId, reqTime, secretKey, null, null, null);
+    }
+    
+    // 查询广告数据接口的签名生成（data_type 是必填的）
+    private static String generateSignature(int clientId, long reqTime, String secretKey, 
+                                             String dataType, String startDate, String endDate) {
+        try {
+            // 准备参数
+            Map&lt;String, String&gt; params = new LinkedHashMap&lt;&gt;();
+            params.put("client_id", String.valueOf(clientId));
+            params.put("req_time", String.valueOf(reqTime));
+            
+            // 对于 /client_data 接口，data_type 是必填的
+            if (dataType != null && !dataType.isEmpty()) {
+                params.put("data_type", dataType);
+            }
+            
+            // 添加可选参数（如果提供）
+            if (startDate != null && !startDate.isEmpty()) {
+                params.put("start_date", startDate);
+            }
+            if (endDate != null && !endDate.isEmpty()) {
+                params.put("end_date", endDate);
+            }
+            
+            // 排序并拼接
+            List&lt;String&gt; sortedKeys = new ArrayList&lt;&gt;(params.keySet());
+            Collections.sort(sortedKeys);
+            
+            StringBuilder sb = new StringBuilder();
+            for (String key : sortedKeys) {
+                if (sb.length() &gt; 0) {
+                    sb.append("&");
+                }
+                sb.append(key).append("=").append(params.get(key));
+            }
+            
+            // 追加密钥
+            sb.append("&key=").append(secretKey);
+            
+            // MD5加密
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(sb.toString().getBytes("UTF-8"));
+            
+            // 转为小写十六进制字符串
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : digest) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) {
+                    hexString.append('0');
+                }
+                hexString.append(hex);
+            }
+            
+            return hexString.toString().toLowerCase();
+        } catch (Exception e) {
+            throw new RuntimeException("生成签名失败", e);
+        }
+    }
+    
+    public static String getProducts() throws Exception {
+        long reqTime = Instant.now().getEpochSecond();
+        String sign = generateSignature(CLIENT_ID, reqTime, SECRET_KEY);
+        
+        Map&lt;String, Object&gt; params = new HashMap&lt;&gt;();
+        params.put("client_id", CLIENT_ID);
+        params.put("req_time", reqTime);
+        params.put("sign", sign);
+        
+        ObjectMapper mapper = new ObjectMapper();
+        String jsonBody = mapper.writeValueAsString(params);
+        
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(BASE_URL + "/client_products"))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+            .build();
+        
+        HttpResponse&lt;String&gt; response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        return response.body();
+    }
+    
+    /**
+     * 获取广告数据
+     * @param dataType 必填，数据类型，'all' 表示详细数据（按国家），'day' 表示每日汇总（按产品+日期）
+     * @param startDate 可选，起始日期（格式：YYYY-MM-DD），不提供则使用当前月第一天
+     * @param endDate 可选，终止日期（格式：YYYY-MM-DD），不提供则使用当前月最后一天
+     */
+    public static String getAdData(String dataType, String startDate, String endDate) throws Exception {
+        long reqTime = Instant.now().getEpochSecond();
+        String sign = generateSignature(CLIENT_ID, reqTime, SECRET_KEY, dataType, startDate, endDate);
+        
+        Map&lt;String, Object&gt; params = new HashMap&lt;&gt;();
+        params.put("client_id", CLIENT_ID);
+        params.put("req_time", reqTime);
+        params.put("data_type", dataType);  // 必填参数
+        params.put("sign", sign);
+        
+        // 添加可选参数
+        if (startDate != null && !startDate.isEmpty()) {
+            params.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isEmpty()) {
+            params.put("end_date", endDate);
+        }
+        
+        ObjectMapper mapper = new ObjectMapper();
+        String jsonBody = mapper.writeValueAsString(params);
+        
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(BASE_URL + "/client_data"))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+            .build();
+        
+        HttpResponse&lt;String&gt; response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        return response.body();
+    }
+}</code></pre>
+          </el-tab-pane>
+        </el-tabs>
+      </section>
+
+      <!-- 注意事项 -->
+      <section class="doc-section">
+        <h2>注意事项</h2>
+        <el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+        >
+          <ul>
+            <li><strong>时间同步</strong>：确保客户端系统时间准确，请求时间戳与服务器时间差异不能超过5秒</li>
+            <li><strong>签名大小写</strong>：签名必须使用小写MD5值</li>
+            <li><strong>数据类型</strong>：响应中的数值类型明确（int/float），不会返回字符串</li>
+            <li><strong>空值处理</strong>：如果查询结果为空，<code>data</code> 字段返回空数组 <code>[]</code>，而不是 <code>null</code></li>
+            <li><strong>时区</strong>：所有时间戳使用UTC时区</li>
+            <li><strong>请求频率</strong>：建议控制请求频率，避免过于频繁的请求</li>
+          </ul>
+        </el-alert>
+      </section>
+    </el-card>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue';
+import { ElCard, ElTag, ElCollapse, ElCollapseItem, ElTable, ElTableColumn, ElAlert, ElTabs, ElTabPane } from 'element-plus';
+
+const activeTab = ref('python');
+
+// 产品接口请求参数
+const productRequestParams = [
+  { name: 'client_id', type: 'int', required: '是', description: '客户ID' },
+  { name: 'req_time', type: 'int', required: '是', description: '请求时间戳（10位秒级，Unix时间戳）' },
+  { name: 'sign', type: 'string', required: '是', description: 'MD5签名（小写）' }
+];
+
+// 广告数据接口请求参数
+const adDataRequestParams = [
+  { name: 'client_id', type: 'int', required: '是', description: '客户ID' },
+  { name: 'req_time', type: 'int', required: '是', description: '请求时间戳（10位秒级，Unix时间戳）' },
+  { name: 'data_type', type: 'string', required: '是', description: '数据类型：\'all\' 表示详细数据（按国家），\'day\' 表示每日汇总（按产品+日期）' },
+  { name: 'start_date', type: 'string', required: '否', description: '起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天' },
+  { name: 'end_date', type: 'string', required: '否', description: '终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天' },
+  { name: 'sign', type: 'string', required: '是', description: 'MD5签名（小写），包含所有非空参数' }
+];
+
+// 广告数据响应字段
+const adDataResponseFields = [
+  { field: 'date', type: 'string', description: '数据日期（ISO格式：YYYY-MM-DD）' },
+  { field: 'product_name', type: 'string', description: '产品名称（确保不为null）' },
+  { field: 'country_name_zh', type: 'string', description: '国家中文名称（详细模式显示具体国家，汇总模式显示"全部区域"）' },
+  { field: 'request_count', type: 'int', description: '请求数（整数）' },
+  { field: 'match_count', type: 'int', description: '匹配数（整数）' },
+  { field: 'coverage_rate', type: 'float', description: '覆盖率（%，浮点数，保留2位小数）' },
+  { field: 'display_count', type: 'int', description: '展示数（整数）' },
+  { field: 'display_rate', type: 'float', description: '展示率（%，浮点数，保留2位小数）' },
+  { field: 'click_count', type: 'int', description: '点击数（整数）' },
+  { field: 'click_rate', type: 'float', description: '点击率（%，浮点数，保留2位小数）' },
+  { field: 'ecpm', type: 'float', description: 'eCPM（浮点数，保留2位小数）' },
+  { field: 'revenue', type: 'float', description: '收益（浮点数，保留2位小数）' }
+];
+
+// 错误码列表
+const errorCodes = [
+  { code: 200, message: '成功', solution: '-' },
+  { code: 2201, message: '客户不存在或未激活', solution: '检查 client_id 是否正确，确认客户已激活' },
+  { code: 2205, message: '参数验证不通过', solution: '检查以下项：1. 请求时间戳是否在允许范围内（正负5秒） 2. 签名是否正确 3. 参数格式是否正确' },
+  { code: 2501, message: '操作失败', solution: '查看 detail 字段获取详细错误信息' }
+];
+</script>
+
+<style scoped>
+.api-documentation-container {
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.documentation-card {
+  min-height: calc(100vh - 200px);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-header h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.doc-section {
+  margin-bottom: 40px;
+}
+
+.doc-section h2 {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e4e7ed;
+}
+
+.doc-section h3 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-top: 24px;
+  margin-bottom: 12px;
+}
+
+.doc-section h4 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-top: 20px;
+  margin-bottom: 12px;
+}
+
+.info-box {
+  background-color: var(--primary-light);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-lg);
+  margin: var(--spacing-lg) 0;
+}
+
+.info-box p {
+  margin: var(--spacing-sm) 0;
+  color: var(--text-primary);
+}
+
+.info-box code {
+  background-color: var(--bg-secondary);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  font-family: 'Courier New', monospace;
+  color: var(--primary-color);
+}
+
+.warning-box {
+  margin: 20px 0;
+}
+
+.warning-box ul {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.code-example {
+  margin: 16px 0;
+}
+
+.code-example pre {
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 16px;
+  overflow-x: auto;
+  margin: 0;
+}
+
+.code-example code {
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.api-card {
+  margin-bottom: 20px;
+}
+
+.api-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.api-path {
+  font-family: 'Courier New', monospace;
+  font-weight: var(--font-weight-semibold);
+  color: var(--primary-color);
+}
+
+.api-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.note-box {
+  background-color: var(--warning-light);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-lg);
+  margin-top: var(--spacing-lg);
+}
+
+.note-box ul {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.note-box p {
+  margin: 8px 0;
+  font-weight: 600;
+}
+
+pre {
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 16px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+pre code {
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+code {
+  background-color: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+}
+
+ol, ul {
+  margin: 12px 0;
+  padding-left: 24px;
+}
+
+li {
+  margin: 8px 0;
+}
+
+/* 响应式设计 - 统一使用标准断点 */
+/* 平板端优化 (768px - 1024px) */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .api-documentation-container {
+    padding: var(--spacing-lg);
+  }
+  
+  .documentation-card :deep(.el-card__body) {
+    padding: var(--spacing-lg);
+  }
+}
+
+/* 移动端优化 (< 768px) */
+@media (max-width: 767px) {
+  .api-documentation-container {
+    padding: var(--spacing-md);
+  }
+
+  .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-md);
+  }
+
+  .api-header {
+    flex-wrap: wrap;
+  }
+  
+  .documentation-card :deep(.el-card__body) {
+    padding: var(--spacing-md);
+  }
+  
+  .doc-section {
+    margin-bottom: var(--spacing-lg);
+  }
+  
+  .doc-section h2 {
+    font-size: var(--font-size-xl);
+  }
+  
+  .doc-section h3 {
+    font-size: var(--font-size-lg);
+  }
+  
+  .info-box,
+  .note-box {
+    padding: var(--spacing-md);
+    margin: var(--spacing-md) 0;
+  }
+  
+  pre {
+    padding: var(--spacing-md);
+    font-size: var(--font-size-sm);
+  }
+  
+  /* 移动端表格优化 */
+  .el-table {
+    font-size: var(--font-size-sm);
+    min-width: 500px; /* 确保表格有最小宽度，可以横向滚动 */
+  }
+  
+  .el-table :deep(.el-table__cell) {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    word-break: break-word;
+  }
+  
+  .el-table :deep(.el-table__header th),
+  .el-table :deep(.el-table__body td) {
+    font-size: var(--font-size-xs);
+    padding: var(--spacing-xs);
+  }
+  
+  /* 表格容器优化 */
+  .api-card :deep(.el-card__body) {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .el-table :deep(.el-table__header-wrapper) {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .el-table :deep(.el-table__body-wrapper) {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* 小屏手机优化 (< 480px) */
+@media (max-width: 480px) {
+  .api-documentation-container {
+    padding: var(--spacing-sm);
+  }
+  
+  .documentation-card :deep(.el-card__body) {
+    padding: var(--spacing-sm);
+  }
+  
+  .doc-section h2 {
+    font-size: var(--font-size-lg);
+  }
+  
+  .doc-section h3 {
+    font-size: var(--font-size-base);
+  }
+  
+  pre {
+    padding: var(--spacing-sm);
+    font-size: var(--font-size-xs);
+  }
+}
+</style>
+
