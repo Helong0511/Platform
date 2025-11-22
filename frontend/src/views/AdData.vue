@@ -526,13 +526,18 @@ const fetchFilterCountries = async (clientId = null, productId = null) => {
     const data = result.data || [];
     
     // 转换为下拉选择格式
-    // 过滤掉code为空或null的项，避免重复的"全部区域"选项
+    // 过滤掉code为空、null或'ZZ'的项，避免重复的"全部区域"选项
+    // 'ZZ'是后端返回的"全部区域"代码，前端使用空字符串''表示"全部区域"
     const countryOptions = data
-      .filter(item => item && item.code != null && item.code !== '')
+      .filter(item => item && item.code != null && item.code !== '' && item.code !== 'ZZ')
       .map(item => ({
         code: item.code,
         name_zh: item.name_zh || item.code
       }))
+      // 去重：根据code去重，避免重复的国家选项
+      .filter((item, index, self) => 
+        index === self.findIndex(t => t.code === item.code)
+      )
       .sort((a, b) => {
         // 按国家名称排序
         return a.name_zh.localeCompare(b.name_zh, 'zh-CN');
