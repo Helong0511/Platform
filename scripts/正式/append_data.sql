@@ -5,6 +5,23 @@ INSERT INTO `users` VALUES
 (1, 'admin', '$2b$12$BOHTtubZePvpDN.Sls7EbO3ANHMwjouG104GVdfdKcyPxM6wR/gYy', '管理员', 'admin@btfrx.online', 'admin', 1, 0, NULL, '2025-11-14 17:32:33.000000', '2025-11-14 17:32:33.000000'),
 (2, 'data', '$2b$12$BOHTtubZePvpDN.Sls7EbO3ANHMwjouG104GVdfdKcyPxM6wR/gYy', '数据挂靠', 'data@btfrx.online', 'admin', 0, 0, NULL, '2025-11-14 17:32:33.000000', '2025-11-14 17:32:33.000000');
 
+
+
+INSERT INTO `users` VALUES (3, 'yipaijihe', '$2b$12$F3EWj6vrp2ZzmaMPbV4ZwexOOCGBDKEbKU6bsCDEWlN3/lapQFtnu', 'yipaijihe', 'yipaijihe@btfrx.online', 'client', 1, 0, NULL, '2025-10-22 04:00:11.000000', '2025-10-22 04:00:11.000000');
+INSERT INTO `users` VALUES (4, 'ecovital', '$2b$12$uwZQuAY37wLO3vxmLC9kLuGgKEWmwMT5YeMGXBNwTtXFrc3slHnua', 'ev', 'ev@btfrx.online', 'client', 1, 0, NULL, '2025-10-24 03:25:14.000000', '2025-11-13 06:34:04.334620');
+INSERT INTO `users` VALUES (5, 'mengting1', '$2b$12$zmK8cr0h1RWv67b5foPAvuP7Gn4ruuq97CSdVR.l8ObngXGSqwo1C', 'mengting1', 'mengting1@btfrx.online', 'client', 1, 0, NULL, '2025-10-29 09:51:13.000000', '2025-10-29 09:51:13.000000');
+INSERT INTO `users` VALUES (6, 'hehemobi', '$2b$12$B1A4hdGELolxcUECzdzMMOl8suqprIKUVMeUiOL7W93khv7d1Z6Sq', 'hehemobi', 'hehemobi@btfrx.online', 'client', 1, 0, NULL, '2025-10-30 03:13:09.000000', '2025-10-30 03:13:09.000000');
+INSERT INTO `users` VALUES (7, 'mengting2', '$2b$12$lpE.1kXqXinEmwTAOoefBusXZzIP1fmAGt5jFLatGtUhnaB.eA/te', 'mengting2', 'mengting2@btfrx.online', 'client', 1, 0, NULL, '2025-11-06 02:11:56.000000', '2025-11-06 02:11:56.000000');
+INSERT INTO `users` VALUES (8, 'leadwin', '$2b$12$YeuwoLi5rJWLdLcvnY1iG.kt5vjl2.yGHOs2WwDNekZ12NOGLdi7K', 'leadwin', 'leadwin@btfrx.online', 'client', 1, 0, NULL, '2025-11-07 03:03:56.000000', '2025-11-19 08:15:03.165646');
+INSERT INTO `users` VALUES (9, 'mengting3', '$2b$12$ZomV536j03hKrG7JWGq...iVY9mB5I7ffn8zrwV7u/RG5nYiwXfjm', 'mengting3', 'mengting3@btfrx.online', 'client', 1, 0, NULL, '2025-11-07 03:20:12.000000', '2025-11-07 03:20:12.000000');
+INSERT INTO `users` VALUES (10, 'mengting4', '$2b$12$w7.kiIgUgC.yBcCqXzLGVeWnKGeEk9k8JGhuAoWUDm/Y5UxefOv8u', 'mengting4', 'mengting4@btfrx.online', 'client', 1, 0, NULL, '2025-11-07 09:33:09.000000', '2025-11-07 09:33:09.000000');
+INSERT INTO `users` VALUES (11, 'fulong', '$2b$12$HZqrcI/SMAsygsBACO7o4OTHkHvhiu1qekVAxvm51FWk5NEhV4JOS', 'fulong', 'moobai@outlook.com', 'client', 1, 0, NULL, '2025-11-13 02:03:47.787808', '2025-11-13 02:03:47.787813');
+INSERT INTO `users` VALUES (12, 'mengting5', '$2b$12$Nt9FHDt806cQxKtYe4N7pOrUEi.1uF6zC9idGIWOHY4foiak7Ecqa', 'mengting5', 'mengting5@btfrx.online', 'client', 1, 0, NULL, '2025-11-14 07:37:11.300670', '2025-11-14 07:37:22.839605');
+INSERT INTO `users` VALUES (13, 'zhuzhouyiya', '$2b$12$lcj4bGqw4o/4S709JjEbrusqkyoXfvTFmGxB06A2rxx9b/cVT8AQC', 'zhuzhouyiya', '1914442009@qq.com', 'client', 1, 0, NULL, '2025-11-19 09:48:27.784731', '2025-11-19 09:48:27.784736');
+INSERT INTO `users` VALUES (14, 'winner', '$2b$12$lanvDaMNEdMoz9GLAAO2y.O5LI8Gj31YRMGY6fqO9zVj1T38NsuNq', 'winner', 'winner@btfrx.online', 'client', 1, 0, NULL, '2025-11-20 04:09:27.851443', '2025-11-20 04:09:27.851448');
+
+
+
 INSERT INTO `clients` (`id`, `user_id`, `company_name`, `key`, `is_active`, `api_enabled`, `password_change_enabled`) VALUES 
 (1, 2, '默认客户（导入数据）', '8bc85bd7-c69b-4dc8-8728-f1b7be669ec5', 1, 0, 0),
 (1000, 3, 'yipaijihe Company', 'a8117b66-acda-4c18-9ef4-f4b796c9debf', 1, 0, 0),

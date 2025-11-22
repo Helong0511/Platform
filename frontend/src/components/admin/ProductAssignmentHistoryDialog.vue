@@ -768,7 +768,7 @@ const handleBatchSave = async () => {
     }
     
     // 重新获取分配历史
-    await loadAssignments();
+    await fetchAssignments();
     
     // 清除所有暂存的修改
     pendingChanges.value.clear();
