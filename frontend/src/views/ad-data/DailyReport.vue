@@ -197,7 +197,9 @@ const fetchDailyData = async () => {
     
     const listResponse = response.data || {};
     dailyDataList.value = listResponse.data || [];
-    pagination.value.total = listResponse.total || 0;
+    // 确保total是数字类型，避免字符串类型导致的计算错误
+    const totalValue = typeof listResponse.total === 'number' ? listResponse.total : parseInt(listResponse.total || 0, 10);
+    pagination.value.total = totalValue;
   } catch (error) {
     if (error.response?.status === 401) {
       loading.value = false;

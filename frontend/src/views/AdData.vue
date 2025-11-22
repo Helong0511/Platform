@@ -330,7 +330,9 @@ const fetchAdData = async () => {
     // 提取数据
     const listResponse = response.data || {};
     adDataList.value = listResponse.data || [];
-    pagination.value.total = listResponse.total || 0;
+    // 确保total是数字类型，避免字符串类型导致的计算错误
+    const totalValue = typeof listResponse.total === 'number' ? listResponse.total : parseInt(listResponse.total || 0, 10);
+    pagination.value.total = totalValue;
     
     // 验证数据完整性
     if (adDataList.value.length > 0) {
