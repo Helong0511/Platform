@@ -158,7 +158,9 @@ export const updateAssignmentDates = async (assignmentId, dateUpdate) => {
       if (retryCount > 0) {
         try {
           // 发送一个GET请求来获取最新的CSRF token
-          await axios.get(`/api/v1/product-assignments/products/${assignmentId}/assignments`, {
+          // 注意：使用productId可能不存在，使用一个通用的端点
+          await axios.get('/api/v1/products/', {
+            params: { page_size: 1 },
             timeout: 5000,
             validateStatus: () => true // 接受任何状态码
           });
@@ -177,6 +179,10 @@ export const updateAssignmentDates = async (assignmentId, dateUpdate) => {
       
       // 发送PUT请求
       const response = await axios.put(`/api/v1/product-assignments/assignments/${assignmentId}/dates`, dateUpdate);
+      
+      // 请求成功后，等待一小段时间，确保响应拦截器已处理完CSRF令牌更新
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       return normalizeResponse(response, { returnDataOnly: true });
     } catch (error) {
       // 如果是CSRF相关错误（403），且还没有重试过，尝试重试一次
@@ -204,17 +210,13 @@ export const updateAssignmentDates = async (assignmentId, dateUpdate) => {
     
     const errorMsg = extractErrorMessage(error);
     
-    // 如果是CSRF相关错误，提供更友好的提示
+    // 如果是CSRF相关错误，提供更友好的提示（但不显示错误消息，由调用方处理）
     if (error.response?.status === 403) {
       if (errorMsg.includes('CSRF') || errorMsg.includes('csrf') || errorMsg.includes('令牌')) {
-        ElMessage.error('安全验证失败，请刷新页面后重试');
+        // 不在这里显示错误消息，由批量保存函数统一处理
         // 清除旧的token
         sessionStorage.removeItem('csrf_token');
-      } else {
-        ElMessage.error(errorMsg || '安全验证失败，请刷新页面后重试');
       }
-    } else {
-      ElMessage.error(errorMsg || '服务器错误，请稍后重试');
     }
     throw error;
   }

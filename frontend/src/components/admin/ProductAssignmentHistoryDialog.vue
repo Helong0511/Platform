@@ -524,13 +524,28 @@ const handleBatchSave = async () => {
   batchSaving.value = true;
   
   try {
-    // 按顺序提交所有修改
+    // 在批量保存前，先获取最新的CSRF令牌
+    try {
+      const axios = (await import('axios')).default;
+      await axios.get(`/api/v1/product-assignments/products/${props.productId}/assignments`, {
+        timeout: 5000,
+        validateStatus: () => true // 接受任何状态码，因为我们只是为了获取CSRF token
+      });
+      // 等待响应拦截器处理完响应头
+      await new Promise(resolve => setTimeout(resolve, 200));
+    } catch (tokenError) {
+      console.warn('批量保存前获取CSRF token时出错:', tokenError);
+      // 继续执行，因为axios拦截器可能会自动处理
+    }
+    
+    // 按顺序提交所有修改（确保顺序执行，避免并发导致的CSRF令牌冲突）
     const changes = Array.from(pendingChanges.value.entries());
     let successCount = 0;
     let failCount = 0;
     const errors = [];
     
-    for (const [assignmentId, change] of changes) {
+    for (let i = 0; i < changes.length; i++) {
+      const [assignmentId, change] = changes[i];
       try {
         // 构建更新数据
         const updateData = {};
@@ -555,14 +570,37 @@ const handleBatchSave = async () => {
           updateData.end_date = change.end_date || null;
         }
         
-        // 调用API更新
+        // 调用API更新（顺序执行，确保每个请求完成后再执行下一个）
         await updateAssignmentDates(assignmentId, updateData);
         successCount++;
+        
+        // 在每个请求之间添加短暂延迟，避免CSRF令牌冲突
+        // 同时确保响应拦截器有时间更新CSRF令牌
+        if (i < changes.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
       } catch (error) {
         failCount++;
         const errorMsg = error.response?.data?.detail || error.message || '更新失败';
         errors.push(`记录ID ${assignmentId}: ${errorMsg}`);
         console.error(`更新分配记录 ${assignmentId} 失败:`, error);
+        
+        // 如果是CSRF相关错误，尝试获取新的令牌后继续
+        if (error.response?.status === 403) {
+          const errorDetail = error.response?.data?.detail || errorMsg;
+          if (errorDetail.includes('CSRF') || errorDetail.includes('csrf') || errorDetail.includes('令牌')) {
+            try {
+              const axios = (await import('axios')).default;
+              await axios.get(`/api/v1/product-assignments/products/${props.productId}/assignments`, {
+                timeout: 5000,
+                validateStatus: () => true
+              });
+              await new Promise(resolve => setTimeout(resolve, 200));
+            } catch (tokenError) {
+              console.warn('获取新CSRF token失败:', tokenError);
+            }
+          }
+        }
       }
     }
     
