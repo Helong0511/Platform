@@ -387,7 +387,7 @@ const handleTempSave = (assignment) => {
   ElMessage.success('修改已暂存，请完成所有修改后点击"批量保存"提交');
 };
 
-// 验证所有暂存的修改（与后端验证逻辑保持一致）
+// 验证所有暂存的修改（模拟后端逐个更新的验证过程）
 const validateAllChanges = () => {
   const errors = [];
   const changes = Array.from(pendingChanges.value.entries());
@@ -396,18 +396,174 @@ const validateAllChanges = () => {
     return { valid: true, errors: [] };
   }
   
-  // 构建修改后的完整数据（用于验证）
-  const modifiedAssignments = assignments.value.map(assignment => {
-    const change = pendingChanges.value.get(assignment.id);
-    if (change) {
-      return {
-        ...assignment,
-        start_date: change.start_date,
-        end_date: change.end_date
-      };
+  // 模拟逐个更新的验证过程
+  // 每次更新一个记录后，重新验证所有记录（与后端逻辑一致）
+  let currentAssignments = [...assignments.value];
+  
+  // 按ID排序，确保更新顺序一致
+  const sortedChanges = changes.sort((a, b) => a[0] - b[0]);
+  
+  for (const [assignmentId, change] of sortedChanges) {
+    // 找到要更新的记录
+    const assignmentIndex = currentAssignments.findIndex(a => a.id === assignmentId);
+    if (assignmentIndex === -1) {
+      errors.push(`记录ID ${assignmentId} 不存在`);
+      continue;
     }
-    return assignment;
+    
+    // 应用修改
+    const updatedAssignment = {
+      ...currentAssignments[assignmentIndex],
+      start_date: change.start_date,
+      end_date: change.end_date
+    };
+    
+    // 更新当前数据（模拟数据库更新）
+    currentAssignments[assignmentIndex] = updatedAssignment;
+    
+    // 验证当前状态（模拟后端验证：每次更新后验证所有记录）
+    const validationErrors = validateAssignmentsState(currentAssignments);
+    if (validationErrors.length > 0) {
+      // 记录所有验证错误（因为后端会验证所有记录）
+      errors.push(...validationErrors.map(err => `更新记录ID ${assignmentId} 后: ${err}`));
+    }
+  }
+  
+  // 最后再次验证所有记录的最终状态（确保没有遗漏）
+  const finalErrors = validateAssignmentsState(currentAssignments);
+  // 只添加新的错误（避免重复）
+  for (const err of finalErrors) {
+    if (!errors.some(e => e.includes(err.split(':')[0]))) {
+      errors.push(err);
+    }
+  }
+  
+  return {
+    valid: errors.length === 0,
+    errors: [...new Set(errors)] // 去重
+  };
+};
+
+// 验证分配记录状态的辅助函数（与后端逻辑完全一致）
+const validateAssignmentsState = (assignmentsList) => {
+  const errors = [];
+  
+  if (!assignmentsList || assignmentsList.length === 0) {
+    return errors;
+  }
+  
+  // 按开始日期排序
+  const sortedAssignments = [...assignmentsList].sort((a, b) => {
+    const dateA = new Date(a.start_date);
+    const dateB = new Date(b.start_date);
+    return dateA - dateB;
   });
+  
+  // 验证1: 检查每个记录的基本逻辑
+  for (const assignment of sortedAssignments) {
+    if (assignment.end_date && assignment.start_date > assignment.end_date) {
+      errors.push(`记录ID ${assignment.id}: 开始日期（${assignment.start_date}）不能大于结束日期（${assignment.end_date}）`);
+    }
+  }
+  
+  // 验证2: 检查重叠（与后端逻辑一致）
+  for (let i = 0; i < sortedAssignments.length; i++) {
+    for (let j = i + 1; j < sortedAssignments.length; j++) {
+      const a1 = sortedAssignments[i];
+      const a2 = sortedAssignments[j];
+      
+      const a1Start = new Date(a1.start_date);
+      const a1End = a1.end_date ? new Date(a1.end_date) : new Date('9999-12-31');
+      const a2Start = new Date(a2.start_date);
+      const a2End = a2.end_date ? new Date(a2.end_date) : new Date('9999-12-31');
+      
+      // 检查是否重叠：A.start <= B.end AND A.end >= B.start
+      if (a1Start <= a2End && a1End >= a2Start) {
+        errors.push(
+          `日期重叠：记录ID ${a1.id} (客户ID: ${a1.client_id}, ${a1.start_date} 至 ${a1.end_date || '当前有效'}) ` +
+          `与记录ID ${a2.id} (客户ID: ${a2.client_id}, ${a2.start_date} 至 ${a2.end_date || '当前有效'}) 重叠`
+        );
+      }
+    }
+  }
+  
+  // 验证3: 检查空窗期和不连贯（与后端逻辑一致）
+  for (let i = 0; i < sortedAssignments.length - 1; i++) {
+    const current = sortedAssignments[i];
+    const next = sortedAssignments[i + 1];
+    
+    const currentEnd = current.end_date ? new Date(current.end_date) : null;
+    
+    if (currentEnd) {
+      // 如果当前记录有结束日期，下一个记录的开始日期应该是当前结束日期 + 1天
+      const expectedNextStart = new Date(currentEnd);
+      expectedNextStart.setDate(expectedNextStart.getDate() + 1);
+      const nextStart = new Date(next.start_date);
+      
+      if (nextStart.getTime() !== expectedNextStart.getTime()) {
+        if (nextStart < expectedNextStart) {
+          errors.push(
+            `日期重叠：记录ID ${current.id} (结束日期: ${current.end_date}) ` +
+            `与记录ID ${next.id} (开始日期: ${next.start_date}) 重叠`
+          );
+        } else {
+          const gapDays = Math.floor((nextStart - expectedNextStart) / (1000 * 60 * 60 * 24));
+          errors.push(
+            `空窗期：记录ID ${current.id} (结束日期: ${current.end_date}) ` +
+            `与记录ID ${next.id} (开始日期: ${next.start_date}) ` +
+            `之间存在 ${gapDays} 天的空窗期`
+          );
+        }
+      }
+    } else {
+      // 当前记录是当前有效的（end_date为NULL）
+      if (!next.end_date) {
+        errors.push(
+          `逻辑错误：记录ID ${current.id} 和记录ID ${next.id} 都是当前有效的（end_date为NULL），应该只有一个当前有效的记录`
+        );
+      } else if (next.end_date) {
+        const nextStart = new Date(next.start_date);
+        const nextEnd = new Date(next.end_date);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        if (nextStart <= today && nextEnd >= today) {
+          errors.push(
+            `日期重叠：记录ID ${current.id} 是当前有效的（end_date为NULL），` +
+            `与记录ID ${next.id} (${next.start_date} 至 ${next.end_date}) 重叠`
+          );
+        }
+      }
+    }
+  }
+  
+  // 验证4: 检查是否有多个当前有效的记录
+  const activeAssignments = sortedAssignments.filter(a => !a.end_date);
+  if (activeAssignments.length > 1) {
+    const activeIds = activeAssignments.map(a => a.id).join(', ');
+    errors.push(
+      `逻辑错误：产品有 ${activeAssignments.length} 个当前有效的分配记录 (记录ID: ${activeIds})，应该只有一个`
+    );
+  }
+  
+  // 验证5: 检查日期顺序
+  for (let i = 0; i < sortedAssignments.length - 1; i++) {
+    const current = sortedAssignments[i];
+    const next = sortedAssignments[i + 1];
+    
+    const currentStart = new Date(current.start_date);
+    const nextStart = new Date(next.start_date);
+    
+    if (currentStart > nextStart) {
+      errors.push(
+        `日期顺序错误：记录ID ${current.id} (开始日期: ${current.start_date}) ` +
+        `应该早于记录ID ${next.id} (开始日期: ${next.start_date})`
+      );
+    }
+  }
+  
+  return errors;
+};
   
   // 按开始日期排序（与后端逻辑一致）
   const sortedAssignments = [...modifiedAssignments].sort((a, b) => {
