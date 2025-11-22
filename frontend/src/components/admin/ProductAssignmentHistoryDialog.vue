@@ -398,9 +398,12 @@ const validateAllChanges = () => {
   
   // 模拟逐个更新的验证过程
   // 每次更新一个记录后，重新验证所有记录（与后端逻辑一致）
-  let currentAssignments = [...assignments.value];
+  // 使用原始数据作为基础，而不是已修改的显示数据
+  let currentAssignments = originalAssignments.value.length > 0 
+    ? JSON.parse(JSON.stringify(originalAssignments.value)) // 深拷贝原始数据
+    : JSON.parse(JSON.stringify(assignments.value)); // 如果没有原始数据，使用当前数据
   
-  // 按ID排序，确保更新顺序一致
+  // 按ID排序，确保更新顺序一致（与后端更新顺序一致）
   const sortedChanges = changes.sort((a, b) => a[0] - b[0]);
   
   for (const [assignmentId, change] of sortedChanges) {
@@ -411,11 +414,11 @@ const validateAllChanges = () => {
       continue;
     }
     
-    // 应用修改
+    // 应用修改（模拟后端更新）
     const updatedAssignment = {
       ...currentAssignments[assignmentIndex],
       start_date: change.start_date,
-      end_date: change.end_date
+      end_date: change.end_date || null // 确保null值正确传递
     };
     
     // 更新当前数据（模拟数据库更新）
@@ -431,10 +434,11 @@ const validateAllChanges = () => {
   
   // 最后再次验证所有记录的最终状态（确保没有遗漏）
   const finalErrors = validateAssignmentsState(currentAssignments);
-  // 只添加新的错误（避免重复）
+  // 添加最终状态的错误（去重）
   for (const err of finalErrors) {
-    if (!errors.some(e => e.includes(err.split(':')[0]))) {
-      errors.push(err);
+    const errorKey = err.split(':')[0]; // 使用错误的第一部分作为键
+    if (!errors.some(e => e.includes(errorKey))) {
+      errors.push(`最终验证: ${err}`);
     }
   }
   
