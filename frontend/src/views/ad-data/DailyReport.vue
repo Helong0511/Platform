@@ -46,8 +46,8 @@
           </el-select>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="fetchDailyData">查询</el-button>
-          <el-button @click="resetFilter">重置</el-button>
+          <el-button type="primary" @click="fetchDailyData" :loading="loading" :disabled="loading">查询</el-button>
+          <el-button @click="resetFilter" :disabled="loading">重置</el-button>
         </el-form-item>
       </el-form>
       <div class="filter-hint">
@@ -98,7 +98,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../../store';
 import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElIcon, ElMessage } from 'element-plus';
 import { Download, InfoFilled } from '@element-plus/icons-vue';
@@ -153,66 +153,82 @@ const formatCurrency = (row, column, value) => {
   return `$${numValue.toFixed(2)}`;
 };
 
+// 防抖定时器
+let fetchDailyDataTimer = null;
+
 // 获取每日汇总数据
 const fetchDailyData = async () => {
-  try {
-    loading.value = true;
-    
-    const token = sessionStorage.getItem('token');
-    if (!token) {
-      ElMessage.warning('登录已过期，请重新登录');
-      router.push('/login').catch(() => {
-        window.location.href = '/login';
-      });
-      return;
-    }
-    
-    const params = {
-      page: pagination.value.current,
-      page_size: pagination.value.size
-    };
-
-    if (isAdmin.value && searchForm.value.clientId) {
-      params.client_id = searchForm.value.clientId;
-    }
-
-    if (searchForm.value.productId) {
-      params.product_id = searchForm.value.productId;
-    }
-
-    if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
-      params.start_date = searchForm.value.dateRange[0];
-      params.end_date = searchForm.value.dateRange[1];
-    }
-
-    const response = await getDailySummary(params);
-    
-    if (response.code !== 200) {
-      const errorMsg = response.detail || response.message || '获取数据失败';
-      ElMessage.error(errorMsg);
-      dailyDataList.value = [];
-      pagination.value.total = 0;
-      return;
-    }
-    
-    const listResponse = response.data || {};
-    dailyDataList.value = listResponse.data || [];
-    // 确保total是数字类型，避免字符串类型导致的计算错误
-    const totalValue = typeof listResponse.total === 'number' ? listResponse.total : parseInt(listResponse.total || 0, 10);
-    pagination.value.total = totalValue;
-  } catch (error) {
-    if (error.response?.status === 401) {
-      loading.value = false;
-      return;
-    }
-    
-    if (!isErrorHandled(error)) {
-      const errorMsg = extractErrorMessage(error);
-      ElMessage.error(errorMsg);
-    }
-  } finally {
-    loading.value = false;
+  // 如果正在加载，直接返回，防止重复请求
+  if (loading.value) {
+    return;
   }
+  
+  // 清除之前的防抖定时器
+  if (fetchDailyDataTimer) {
+    clearTimeout(fetchDailyDataTimer);
+  }
+  
+  // 设置防抖：300ms内只执行最后一次
+  fetchDailyDataTimer = setTimeout(async () => {
+    try {
+      loading.value = true;
+      
+      const token = sessionStorage.getItem('token');
+      if (!token) {
+        ElMessage.warning('登录已过期，请重新登录');
+        router.push('/login').catch(() => {
+          window.location.href = '/login';
+        });
+        return;
+      }
+      
+      const params = {
+        page: pagination.value.current,
+        page_size: pagination.value.size
+      };
+
+      if (isAdmin.value && searchForm.value.clientId) {
+        params.client_id = searchForm.value.clientId;
+      }
+
+      if (searchForm.value.productId) {
+        params.product_id = searchForm.value.productId;
+      }
+
+      if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
+        params.start_date = searchForm.value.dateRange[0];
+        params.end_date = searchForm.value.dateRange[1];
+      }
+
+      const response = await getDailySummary(params);
+      
+      if (response.code !== 200) {
+        const errorMsg = response.detail || response.message || '获取数据失败';
+        ElMessage.error(errorMsg);
+        dailyDataList.value = [];
+        pagination.value.total = 0;
+        return;
+      }
+      
+      const listResponse = response.data || {};
+      dailyDataList.value = listResponse.data || [];
+      // 确保total是数字类型，避免字符串类型导致的计算错误
+      const totalValue = typeof listResponse.total === 'number' ? listResponse.total : parseInt(listResponse.total || 0, 10);
+      pagination.value.total = totalValue;
+    } catch (error) {
+      if (error.response?.status === 401) {
+        loading.value = false;
+        return;
+      }
+      
+      if (!isErrorHandled(error)) {
+        const errorMsg = extractErrorMessage(error);
+        ElMessage.error(errorMsg);
+      }
+    } finally {
+      loading.value = false;
+    }
+  }, 300);
 };
 
 // 获取有数据的客户列表
@@ -413,6 +429,14 @@ onMounted(async () => {
     await nextTick();
     isInitializing = false;
   }, 0);
+});
+
+// 组件卸载时清理定时器
+onUnmounted(() => {
+  if (fetchDailyDataTimer) {
+    clearTimeout(fetchDailyDataTimer);
+    fetchDailyDataTimer = null;
+  }
 });
 </script>
 

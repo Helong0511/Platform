@@ -11,9 +11,7 @@ DROP DATABASE IF EXISTS `platform`;
 -- ============================================
 -- 创建数据库
 -- ============================================
-CREATE DATABASE IF NOT EXISTS `platform` 
-    DEFAULT CHARACTER SET utf8mb4 
-    DEFAULT COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS `platform` DEFAULT CHARACTER SET utf8mb4 DEFAULT COLLATE utf8mb4_unicode_ci;
 
 USE `platform`;
 
@@ -297,5 +295,4 @@ CREATE TABLE IF NOT EXISTS `countries`  (
   INDEX `idx_continent`(`continent` ASC) USING BTREE,
   INDEX `idx_subregion`(`subregion` ASC) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 250 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC COMMENT = 'ISO 3166-1国家代码表';
-
 SET FOREIGN_KEY_CHECKS = 1;

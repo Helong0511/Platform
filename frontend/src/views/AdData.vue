@@ -73,8 +73,8 @@
           </el-select>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="fetchAdData">查询</el-button>
-          <el-button @click="resetFilter">重置</el-button>
+          <el-button type="primary" @click="fetchAdData" :loading="loading" :disabled="loading">查询</el-button>
+          <el-button @click="resetFilter" :disabled="loading">重置</el-button>
         </el-form-item>
       </el-form>
       <div class="filter-hint">
@@ -274,89 +274,105 @@ const formatCurrency = (row, column, value) => {
   return `$${numValue.toFixed(2)}`;
 };
 
+// 防抖定时器
+let fetchAdDataTimer = null;
+
 // 获取广告数据
 const fetchAdData = async () => {
-  try {
-    loading.value = true;
-    
-    // 检查token是否有效
-    const token = sessionStorage.getItem('token');
-    if (!token) {
-      ElMessage.warning('登录已过期，请重新登录');
-      router.push('/login').catch(() => {
-        window.location.href = '/login';
-      });
-      return;
-    }
-    
-    const params = {
-      page: pagination.value.current,
-      page_size: pagination.value.size
-      // 排序参数由后端默认处理（按日期降序）
-    };
-
-    // 如果是管理员且选择了客户，添加客户ID筛选
-    if (isAdmin.value && searchForm.value.clientId) {
-      params.client_id = searchForm.value.clientId;
-    }
-
-    // 添加产品ID筛选（如果选择了产品）
-    if (searchForm.value.productId) {
-      params.product_id = searchForm.value.productId;
-    }
-
-    // 添加国家代码筛选（如果选择了国家）
-    if (searchForm.value.countryCode) {
-      params.country_code = searchForm.value.countryCode;
-    }
-
-    // 添加日期范围筛选
-    if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
-      params.start_date = searchForm.value.dateRange[0];
-      params.end_date = searchForm.value.dateRange[1];
-    }
-
-    const response = await getAdDataList(params);
-    
-    // 检查响应结构
-    if (response.code !== 200) {
-      const errorMsg = response.detail || response.message || '获取数据失败';
-      ElMessage.error(errorMsg);
-      adDataList.value = [];
-      pagination.value.total = 0;
-      return;
-    }
-    
-    // 提取数据
-    const listResponse = response.data || {};
-    adDataList.value = listResponse.data || [];
-    // 确保total是数字类型，避免字符串类型导致的计算错误
-    const totalValue = typeof listResponse.total === 'number' ? listResponse.total : parseInt(listResponse.total || 0, 10);
-    pagination.value.total = totalValue;
-    
-    // 验证数据完整性
-    if (adDataList.value.length > 0) {
-      const requiredFields = ['date', 'product_name', 'request_count', 'match_count'];
-      const missingFields = requiredFields.filter(field => !(field in adDataList.value[0]));
-      if (missingFields.length > 0) {
-        ElMessage.warning(`数据格式不完整，缺少字段: ${missingFields.join(', ')}`);
-      }
-    }
-  } catch (error) {
-    // 401错误已在拦截器中处理，直接返回
-    if (error.response?.status === 401) {
-      loading.value = false;
-      return;
-    }
-    
-    // 检查错误是否已被处理（如拦截器或API函数已显示）
-    if (!isErrorHandled(error)) {
-      const errorMsg = extractErrorMessage(error);
-      ElMessage.error(errorMsg);
-    }
-  } finally {
-    loading.value = false;
+  // 如果正在加载，直接返回，防止重复请求
+  if (loading.value) {
+    return;
   }
+  
+  // 清除之前的防抖定时器
+  if (fetchAdDataTimer) {
+    clearTimeout(fetchAdDataTimer);
+  }
+  
+  // 设置防抖：300ms内只执行最后一次
+  fetchAdDataTimer = setTimeout(async () => {
+    try {
+      loading.value = true;
+      
+      // 检查token是否有效
+      const token = sessionStorage.getItem('token');
+      if (!token) {
+        ElMessage.warning('登录已过期，请重新登录');
+        router.push('/login').catch(() => {
+          window.location.href = '/login';
+        });
+        return;
+      }
+      
+      const params = {
+        page: pagination.value.current,
+        page_size: pagination.value.size
+        // 排序参数由后端默认处理（按日期降序）
+      };
+
+      // 如果是管理员且选择了客户，添加客户ID筛选
+      if (isAdmin.value && searchForm.value.clientId) {
+        params.client_id = searchForm.value.clientId;
+      }
+
+      // 添加产品ID筛选（如果选择了产品）
+      if (searchForm.value.productId) {
+        params.product_id = searchForm.value.productId;
+      }
+
+      // 添加国家代码筛选（如果选择了国家）
+      if (searchForm.value.countryCode) {
+        params.country_code = searchForm.value.countryCode;
+      }
+
+      // 添加日期范围筛选
+      if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
+        params.start_date = searchForm.value.dateRange[0];
+        params.end_date = searchForm.value.dateRange[1];
+      }
+
+      const response = await getAdDataList(params);
+      
+      // 检查响应结构
+      if (response.code !== 200) {
+        const errorMsg = response.detail || response.message || '获取数据失败';
+        ElMessage.error(errorMsg);
+        adDataList.value = [];
+        pagination.value.total = 0;
+        return;
+      }
+      
+      // 提取数据
+      const listResponse = response.data || {};
+      adDataList.value = listResponse.data || [];
+      // 确保total是数字类型，避免字符串类型导致的计算错误
+      const totalValue = typeof listResponse.total === 'number' ? listResponse.total : parseInt(listResponse.total || 0, 10);
+      pagination.value.total = totalValue;
+      
+      // 验证数据完整性
+      if (adDataList.value.length > 0) {
+        const requiredFields = ['date', 'product_name', 'request_count', 'match_count'];
+        const missingFields = requiredFields.filter(field => !(field in adDataList.value[0]));
+        if (missingFields.length > 0) {
+          ElMessage.warning(`数据格式不完整，缺少字段: ${missingFields.join(', ')}`);
+        }
+      }
+    } catch (error) {
+      // 401错误已在拦截器中处理，直接返回
+      if (error.response?.status === 401) {
+        loading.value = false;
+        return;
+      }
+      
+      // 检查错误是否已被处理（如拦截器或API函数已显示）
+      if (!isErrorHandled(error)) {
+        const errorMsg = extractErrorMessage(error);
+        ElMessage.error(errorMsg);
+      }
+    } finally {
+      loading.value = false;
+    }
+  }, 300);
 };
 
 // 获取有数据的客户列表（用于筛选）
@@ -1157,6 +1173,10 @@ onUnmounted(() => {
   if (mountedTimeoutId) {
     clearTimeout(mountedTimeoutId);
     mountedTimeoutId = null;
+  }
+  if (fetchAdDataTimer) {
+    clearTimeout(fetchAdDataTimer);
+    fetchAdDataTimer = null;
   }
 });
 
