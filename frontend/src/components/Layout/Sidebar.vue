@@ -1,0 +1,220 @@
+<template>
+  <el-menu
+    :default-active="activeMenu"
+    class="sidebar-menu"
+    :background-color="bgDark"
+    :text-color="textWhite"
+    :active-text-color="primaryColor"
+    router
+    @select="handleMenuSelect"
+  >
+    <el-menu-item index="/app/dashboard">
+      <template #icon><PieChart /></template>
+      <span>数据仪表</span>
+    </el-menu-item>
+
+    <el-sub-menu index="/app/ad-data">
+      <template #title>
+        <el-icon><Document /></el-icon>
+        <span>广告数据</span>
+      </template>
+      <el-menu-item index="/app/ad-data/daily-report">
+        <span>每日报表</span>
+      </el-menu-item>
+      <el-menu-item index="/app/ad-data/detail-report">
+        <span>详细报表</span>
+      </el-menu-item>
+    </el-sub-menu>
+
+    <el-menu-item v-if="isAdmin" index="/app/admin/import-training">
+      <template #icon><Upload /></template>
+      <span>训练导入</span>
+    </el-menu-item>
+
+    <el-menu-item v-if="isAdmin" index="/app/admin/users">
+      <template #icon><UserFilled /></template>
+      <span>用户管理</span>
+    </el-menu-item>
+
+    <el-menu-item v-if="isAdmin" index="/app/admin/scheduled-tasks">
+      <template #icon><Timer /></template>
+      <span>定时任务</span>
+    </el-menu-item>
+
+    <el-menu-item v-if="isAdmin" index="/app/admin/audit-logs">
+      <template #icon><Document /></template>
+      <span>操作日志</span>
+    </el-menu-item>
+    
+    <el-menu-item v-if="!isAdmin" index="/app/client/user-management">
+      <template #icon><UserFilled /></template>
+      <span>用户管理</span>
+    </el-menu-item>
+
+    <el-menu-item v-if="!isAdmin && apiEnabled" index="/app/api-documentation">
+      <template #icon><Link /></template>
+      <span>API对接文档</span>
+    </el-menu-item>
+
+  </el-menu>
+</template>
+
+<script setup>
+import { computed, onMounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
+import { useAuthStore } from '../../store';
+import { ElMenu, ElMenuItem, ElSubMenu, ElIcon } from 'element-plus';
+import { PieChart, Document, UserFilled, Upload, Timer, Link } from '@element-plus/icons-vue';
+
+const authStore = useAuthStore();
+const route = useRoute();
+const isAdmin = computed(() => authStore.isAdmin);
+
+// 获取 CSS 变量值
+const getCSSVariable = (variableName) => {
+  if (typeof window !== 'undefined') {
+    return getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
+  }
+  return '';
+};
+
+const bgDark = ref('#2c3e50');
+const textWhite = ref('#ffffff');
+const primaryColor = ref('#409eff');
+
+onMounted(() => {
+  bgDark.value = getCSSVariable('--bg-dark') || '#2c3e50';
+  textWhite.value = getCSSVariable('--text-white') || '#ffffff';
+  primaryColor.value = getCSSVariable('--primary-color') || '#409eff';
+});
+// 检查客户API是否启用（从userInfo中获取api_enabled字段）
+const apiEnabled = computed(() => {
+  if (isAdmin.value) return false;  // 管理员不显示API菜单
+  return authStore.userInfo?.api_enabled === true;  // 客户用户且API已启用
+});
+
+// 获取当前激活的菜单项
+const activeMenu = computed(() => {
+  const path = route.path;
+  // 如果是广告数据相关路由，返回对应的菜单项
+  if (path.startsWith('/app/ad-data')) {
+    return path;
+  }
+  return path;
+});
+
+// 处理菜单选择事件
+// 注意：当 el-menu 设置了 router 属性时，它会自动处理路由导航
+// 我们只需要处理菜单点击事件（用于移动端关闭抽屉）
+const emit = defineEmits(['menu-click']);
+
+const handleMenuSelect = (index) => {
+  // router 属性会自动处理导航，这里只需要触发菜单点击事件
+  // 用于移动端/平板端关闭抽屉
+  emit('menu-click');
+};
+</script>
+
+<style scoped>
+.sidebar-menu {
+  height: 100%;
+  width: 100%;
+  padding-top: var(--spacing-xl);
+  border-right: none;
+}
+
+.sidebar-menu :deep(.el-menu-item) {
+  padding: 0 var(--spacing-xl) !important;
+  min-height: var(--touch-target-size);
+  height: auto;
+  line-height: var(--line-height-base);
+  margin: var(--spacing-xs) var(--spacing-md);
+  border-radius: var(--radius-md);
+  transition: var(--transition-base);
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-menu :deep(.el-menu-item:hover) {
+  background-color: var(--bg-dark-hover);
+}
+
+.sidebar-menu :deep(.el-menu-item.is-active) {
+  background-color: rgba(64, 158, 255, 0.2);
+  color: var(--primary-color);
+  font-weight: var(--font-weight-semibold);
+}
+
+.sidebar-menu :deep(.el-menu-item .el-icon) {
+  margin-right: var(--spacing-md);
+  font-size: var(--font-size-lg);
+}
+
+.sidebar-menu :deep(.el-menu-item span) {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+}
+
+.sidebar-menu :deep(.el-sub-menu) {
+  margin: var(--spacing-xs) var(--spacing-md);
+}
+
+.sidebar-menu :deep(.el-sub-menu__title) {
+  padding: 0 var(--spacing-xl) !important;
+  min-height: var(--touch-target-size);
+  height: auto;
+  line-height: var(--line-height-base);
+  border-radius: var(--radius-md);
+  transition: var(--transition-base);
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-menu :deep(.el-sub-menu__title:hover) {
+  background-color: var(--bg-dark-hover);
+}
+
+.sidebar-menu :deep(.el-sub-menu.is-opened .el-sub-menu__title) {
+  background-color: rgba(64, 158, 255, 0.1);
+}
+
+.sidebar-menu :deep(.el-sub-menu .el-menu-item) {
+  padding-left: var(--spacing-xl) !important;
+}
+
+/* 移动端优化 */
+@media (max-width: 767px) {
+  .sidebar-menu {
+    padding-top: var(--spacing-lg);
+  }
+  
+  .sidebar-menu :deep(.el-menu-item) {
+    min-height: var(--touch-target-size);
+    height: auto;
+    line-height: var(--line-height-base);
+    margin: var(--spacing-xs) var(--spacing-sm);
+    padding: 0 var(--spacing-lg) !important;
+  }
+  
+  .sidebar-menu :deep(.el-menu-item .el-icon) {
+    margin-right: var(--spacing-sm);
+    font-size: var(--font-size-base);
+  }
+  
+  .sidebar-menu :deep(.el-menu-item span) {
+    font-size: var(--font-size-sm);
+  }
+}
+
+/* 触摸设备优化 */
+@media (hover: none) and (pointer: coarse) {
+  .sidebar-menu :deep(.el-menu-item) {
+    min-height: var(--touch-target-size);
+  }
+  
+  .sidebar-menu :deep(.el-menu-item:active) {
+    opacity: 0.8;
+    background-color: var(--bg-dark-hover);
+  }
+}
+</style>

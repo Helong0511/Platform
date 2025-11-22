@@ -1,0 +1,249 @@
+"""
+统一错误码和错误信息定义
+确保前后端错误处理的一致性
+"""
+from enum import IntEnum
+from typing import Optional, Dict, Any
+
+
+class ErrorCode(IntEnum):
+    """API 错误码枚举"""
+    # ====== 通用错误 (1000-1999) ======
+    SUCCESS = 200  # 成功
+    BAD_REQUEST = 400  # 请求参数错误
+    UNAUTHORIZED = 401  # 未授权
+    FORBIDDEN = 403  # 禁止访问
+    NOT_FOUND = 404  # 资源不存在
+    METHOD_NOT_ALLOWED = 405  # 方法不允许
+    CONFLICT = 409  # 资源冲突
+    VALIDATION_ERROR = 422  # 验证错误
+    TOO_MANY_REQUESTS = 429  # 请求过于频繁
+    INTERNAL_ERROR = 500  # 服务器内部错误
+    SERVICE_UNAVAILABLE = 503  # 服务不可用
+
+    # ====== 业务错误 (2000-2999) ======
+    # 认证相关 (2000-2099)
+    INVALID_CREDENTIALS = 2001  # 用户名或密码错误
+    TOKEN_EXPIRED = 2002  # Token 已过期
+    TOKEN_INVALID = 2003  # Token 无效
+    USER_DISABLED = 2004  # 用户已被禁用
+
+    # 用户相关 (2100-2199)
+    USER_NOT_FOUND = 2101  # 用户不存在
+    USER_ALREADY_EXISTS = 2102  # 用户已存在
+    USERNAME_TAKEN = 2103  # 用户名已被使用
+    EMAIL_TAKEN = 2104  # 邮箱已被使用
+
+    # 客户相关 (2200-2299)
+    CLIENT_NOT_FOUND = 2201  # 客户不存在
+    CLIENT_ALREADY_EXISTS = 2202  # 客户已存在
+    CLIENT_NO_PERMISSION = 2203  # 没有权限访问客户
+    CLIENT_HAS_PRODUCTS = 2204  # 客户有关联产品，无法删除
+    CLIENT_API_VALIDATION_FAILED = 2205  # 客户API参数验证失败
+
+    # 产品相关 (2250-2299)
+    PRODUCT_NOT_FOUND = 2251  # 产品不存在
+    PRODUCT_ALREADY_EXISTS = 2252  # 产品已存在
+    PRODUCT_NO_PERMISSION = 2253  # 没有权限访问产品
+    PRODUCT_HAS_DATA = 2254  # 产品有关联数据，无法删除
+    PRODUCT_DEDUCT_RATIO_INVALID = 2255  # 减扣比例无效
+    PRODUCT_CLIENT_REQUIRED = 2256  # 创建产品必须指定客户ID
+
+    # 广告数据相关 (2260-2279)
+    AD_DATA_NOT_FOUND = 2261  # 广告数据不存在
+    AD_DATA_NO_PERMISSION = 2262  # 没有权限访问广告数据
+    AD_DATA_UPDATE_FORBIDDEN = 2263  # 仅管理员可更新广告数据
+    AD_DATA_DELETE_FORBIDDEN = 2264  # 没有权限删除广告数据
+    AD_DATA_PRODUCT_NOT_FOUND = 2265  # 关联的产品不存在
+    AD_DATA_EMPTY_SELECTION = 2266  # 未选择要删除的数据
+
+    # 定时任务相关 (2300-2399)
+    TASK_NOT_FOUND = 2301  # 任务不存在
+    TASK_ALREADY_EXISTS = 2302  # 任务已存在
+    TASK_NAME_INVALID = 2303  # 任务名称无效
+    TASK_IS_RUNNING = 2304  # 任务正在运行中
+    TASK_CRON_INVALID = 2305  # Cron 表达式无效
+    TASK_FUNCTION_NOT_FOUND = 2306  # 任务函数不存在
+
+    # 数据导入相关 (2400-2499)
+    IMPORT_FILE_INVALID = 2401  # 导入文件格式无效
+    IMPORT_COLUMN_MAPPING_INCOMPLETE = 2402  # 列映射不完整
+    IMPORT_DATA_VALIDATION_FAILED = 2403  # 数据验证失败
+    IMPORT_DUPLICATE_DATA = 2404  # 重复数据
+
+    # 其他业务错误 (2500-2999)
+    OPERATION_FAILED = 2501  # 操作失败
+    RESOURCE_LOCKED = 2502  # 资源被锁定
+    CANNOT_DELETE_SELF = 2503  # 不能删除自己的账户
+    CANNOT_MODIFY_SELF_ROLE = 2504  # 不能修改自己的角色
+    USER_HAS_CLIENTS = 2505  # 用户有关联客户，无法删除
+    NO_ADMIN_USERS = 2506  # 系统中没有管理员用户
+
+
+class ErrorMessage:
+    """错误信息常量"""
+    # 通用错误信息
+    SUCCESS = "操作成功"
+    BAD_REQUEST = "请求参数错误"
+    UNAUTHORIZED = "未授权，请先登录"
+    FORBIDDEN = "禁止访问，权限不足"
+    NOT_FOUND = "资源不存在"
+    METHOD_NOT_ALLOWED = "请求方法不允许"
+    CONFLICT = "资源冲突"
+    VALIDATION_ERROR = "数据验证失败"
+    TOO_MANY_REQUESTS = "请求过于频繁，请稍后再试"
+    INTERNAL_ERROR = "服务器内部错误"
+    SERVICE_UNAVAILABLE = "服务暂时不可用"
+
+    # 业务错误信息
+    INVALID_CREDENTIALS = "用户名或密码错误"
+    TOKEN_EXPIRED = "登录已过期，请重新登录"
+    TOKEN_INVALID = "登录凭证无效，请重新登录"
+    USER_DISABLED = "用户已被禁用"
+    USER_NOT_FOUND = "用户不存在"
+    USER_ALREADY_EXISTS = "用户已存在"
+    USERNAME_TAKEN = "用户名已被使用"
+    EMAIL_TAKEN = "邮箱已被使用"
+    CLIENT_NOT_FOUND = "客户不存在"
+    CLIENT_ALREADY_EXISTS = "客户已存在"
+    CLIENT_NO_PERMISSION = "没有权限访问此客户"
+    CLIENT_HAS_PRODUCTS = "客户有关联产品，无法删除"
+    CLIENT_API_VALIDATION_FAILED = "参数验证不通过"
+
+    PRODUCT_NOT_FOUND = "产品不存在"
+    PRODUCT_ALREADY_EXISTS = "产品已存在"
+    PRODUCT_NO_PERMISSION = "没有权限访问此产品"
+    PRODUCT_HAS_DATA = "产品有关联广告数据，无法删除"
+    PRODUCT_DEDUCT_RATIO_INVALID = "减扣比例必须在0到1之间"
+    PRODUCT_CLIENT_REQUIRED = "创建产品必须指定客户ID"
+
+    AD_DATA_NOT_FOUND = "广告数据不存在"
+    AD_DATA_NO_PERMISSION = "没有权限访问此广告数据"
+    AD_DATA_UPDATE_FORBIDDEN = "仅管理员可更新广告数据"
+    AD_DATA_DELETE_FORBIDDEN = "没有权限删除此广告数据"
+    AD_DATA_PRODUCT_NOT_FOUND = "关联的产品不存在"
+    AD_DATA_EMPTY_SELECTION = "请选择要删除的数据"
+
+    TASK_NOT_FOUND = "定时任务不存在"
+    TASK_ALREADY_EXISTS = "定时任务已存在"
+    TASK_NAME_INVALID = "任务名称无效"
+    TASK_IS_RUNNING = "任务正在运行中，请稍后再试"
+    TASK_CRON_INVALID = "Cron 表达式格式错误"
+    TASK_FUNCTION_NOT_FOUND = "任务函数不存在"
+    IMPORT_FILE_INVALID = "导入文件格式无效"
+    IMPORT_COLUMN_MAPPING_INCOMPLETE = "列映射不完整"
+    IMPORT_DATA_VALIDATION_FAILED = "数据验证失败"
+    IMPORT_DUPLICATE_DATA = "存在重复数据"
+    OPERATION_FAILED = "操作失败"
+    RESOURCE_LOCKED = "资源被锁定"
+    CANNOT_DELETE_SELF = "不能删除自己的账户"
+    CANNOT_MODIFY_SELF_ROLE = "不能将自己的角色修改为非管理员"
+    USER_HAS_CLIENTS = "用户有关联客户数据，无法删除"
+    NO_ADMIN_USERS = "系统中没有管理员用户"
+
+
+def get_error_message(error_code: int, custom_message: Optional[str] = None) -> str:
+    """
+    获取错误信息
+    
+    Args:
+        error_code: 错误码
+        custom_message: 自定义错误信息（如果提供，优先使用）
+    
+    Returns:
+        错误信息字符串
+    """
+    if custom_message:
+        return custom_message
+
+    # 根据错误码返回对应的错误信息
+    error_code_map = {
+        ErrorCode.SUCCESS: ErrorMessage.SUCCESS,
+        ErrorCode.BAD_REQUEST: ErrorMessage.BAD_REQUEST,
+        ErrorCode.UNAUTHORIZED: ErrorMessage.UNAUTHORIZED,
+        ErrorCode.FORBIDDEN: ErrorMessage.FORBIDDEN,
+        ErrorCode.NOT_FOUND: ErrorMessage.NOT_FOUND,
+        ErrorCode.METHOD_NOT_ALLOWED: ErrorMessage.METHOD_NOT_ALLOWED,
+        ErrorCode.CONFLICT: ErrorMessage.CONFLICT,
+        ErrorCode.VALIDATION_ERROR: ErrorMessage.VALIDATION_ERROR,
+        ErrorCode.TOO_MANY_REQUESTS: ErrorMessage.TOO_MANY_REQUESTS,
+        ErrorCode.INTERNAL_ERROR: ErrorMessage.INTERNAL_ERROR,
+        ErrorCode.SERVICE_UNAVAILABLE: ErrorMessage.SERVICE_UNAVAILABLE,
+        ErrorCode.INVALID_CREDENTIALS: ErrorMessage.INVALID_CREDENTIALS,
+        ErrorCode.TOKEN_EXPIRED: ErrorMessage.TOKEN_EXPIRED,
+        ErrorCode.TOKEN_INVALID: ErrorMessage.TOKEN_INVALID,
+        ErrorCode.USER_DISABLED: ErrorMessage.USER_DISABLED,
+        ErrorCode.USER_NOT_FOUND: ErrorMessage.USER_NOT_FOUND,
+        ErrorCode.USER_ALREADY_EXISTS: ErrorMessage.USER_ALREADY_EXISTS,
+        ErrorCode.USERNAME_TAKEN: ErrorMessage.USERNAME_TAKEN,
+        ErrorCode.EMAIL_TAKEN: ErrorMessage.EMAIL_TAKEN,
+        ErrorCode.CLIENT_NOT_FOUND: ErrorMessage.CLIENT_NOT_FOUND,
+        ErrorCode.CLIENT_ALREADY_EXISTS: ErrorMessage.CLIENT_ALREADY_EXISTS,
+        ErrorCode.CLIENT_NO_PERMISSION: ErrorMessage.CLIENT_NO_PERMISSION,
+        ErrorCode.CLIENT_HAS_PRODUCTS: ErrorMessage.CLIENT_HAS_PRODUCTS,
+        ErrorCode.CLIENT_API_VALIDATION_FAILED: ErrorMessage.CLIENT_API_VALIDATION_FAILED,
+        ErrorCode.PRODUCT_NOT_FOUND: ErrorMessage.PRODUCT_NOT_FOUND,
+        ErrorCode.PRODUCT_ALREADY_EXISTS: ErrorMessage.PRODUCT_ALREADY_EXISTS,
+        ErrorCode.PRODUCT_NO_PERMISSION: ErrorMessage.PRODUCT_NO_PERMISSION,
+        ErrorCode.PRODUCT_HAS_DATA: ErrorMessage.PRODUCT_HAS_DATA,
+        ErrorCode.PRODUCT_DEDUCT_RATIO_INVALID: ErrorMessage.PRODUCT_DEDUCT_RATIO_INVALID,
+        ErrorCode.PRODUCT_CLIENT_REQUIRED: ErrorMessage.PRODUCT_CLIENT_REQUIRED,
+        ErrorCode.AD_DATA_NOT_FOUND: ErrorMessage.AD_DATA_NOT_FOUND,
+        ErrorCode.AD_DATA_NO_PERMISSION: ErrorMessage.AD_DATA_NO_PERMISSION,
+        ErrorCode.AD_DATA_UPDATE_FORBIDDEN: ErrorMessage.AD_DATA_UPDATE_FORBIDDEN,
+        ErrorCode.AD_DATA_DELETE_FORBIDDEN: ErrorMessage.AD_DATA_DELETE_FORBIDDEN,
+        ErrorCode.AD_DATA_PRODUCT_NOT_FOUND: ErrorMessage.AD_DATA_PRODUCT_NOT_FOUND,
+        ErrorCode.AD_DATA_EMPTY_SELECTION: ErrorMessage.AD_DATA_EMPTY_SELECTION,
+        ErrorCode.TASK_NOT_FOUND: ErrorMessage.TASK_NOT_FOUND,
+        ErrorCode.TASK_ALREADY_EXISTS: ErrorMessage.TASK_ALREADY_EXISTS,
+        ErrorCode.TASK_NAME_INVALID: ErrorMessage.TASK_NAME_INVALID,
+        ErrorCode.TASK_IS_RUNNING: ErrorMessage.TASK_IS_RUNNING,
+        ErrorCode.TASK_CRON_INVALID: ErrorMessage.TASK_CRON_INVALID,
+        ErrorCode.TASK_FUNCTION_NOT_FOUND: ErrorMessage.TASK_FUNCTION_NOT_FOUND,
+        ErrorCode.IMPORT_FILE_INVALID: ErrorMessage.IMPORT_FILE_INVALID,
+        ErrorCode.IMPORT_COLUMN_MAPPING_INCOMPLETE: ErrorMessage.IMPORT_COLUMN_MAPPING_INCOMPLETE,
+        ErrorCode.IMPORT_DATA_VALIDATION_FAILED: ErrorMessage.IMPORT_DATA_VALIDATION_FAILED,
+        ErrorCode.IMPORT_DUPLICATE_DATA: ErrorMessage.IMPORT_DUPLICATE_DATA,
+        ErrorCode.OPERATION_FAILED: ErrorMessage.OPERATION_FAILED,
+        ErrorCode.RESOURCE_LOCKED: ErrorMessage.RESOURCE_LOCKED,
+        ErrorCode.CANNOT_DELETE_SELF: ErrorMessage.CANNOT_DELETE_SELF,
+        ErrorCode.CANNOT_MODIFY_SELF_ROLE: ErrorMessage.CANNOT_MODIFY_SELF_ROLE,
+        ErrorCode.USER_HAS_CLIENTS: ErrorMessage.USER_HAS_CLIENTS,
+        ErrorCode.NO_ADMIN_USERS: ErrorMessage.NO_ADMIN_USERS,
+    }
+
+    return error_code_map.get(error_code, ErrorMessage.INTERNAL_ERROR)
+
+
+def create_error_response(
+        error_code: int,
+        message: Optional[str] = None,
+        detail: Optional[str] = None,
+        data: Optional[Any] = None
+) -> Dict[str, Any]:
+    """
+    创建标准错误响应
+    
+    Args:
+        error_code: 错误码
+        message: 错误信息（如果为 None，会根据 error_code 自动获取）
+        detail: 详细错误信息（可选）
+        data: 附加数据（可选）
+    
+    Returns:
+        标准错误响应字典
+    """
+    error_message = get_error_message(error_code, message)
+
+    response = {
+        "code": error_code,
+        "message": error_message,
+    }
+
+    if detail:
+        response["detail"] = detail
+
+    if data is not None:
+        response["data"] = data
+
+    return response

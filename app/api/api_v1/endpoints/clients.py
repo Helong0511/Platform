@@ -1,0 +1,559 @@
+"""
+客户管理API端点
+提供客户信息的CRUD操作，包括：
+- 获取客户列表（支持分页和过滤）
+- 获取客户详情
+- 创建新客户（支持创建新用户或关联已有用户）
+- 更新客户信息
+- 删除客户（检查关联数据）
+"""
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, Path
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy import func, update
+# Python 3.10+ 使用内置类型注解
+import logging
+from pydantic import BaseModel
+
+from app.core.database import get_db
+from app.core.security import get_current_user, require_admin, require_admin_or_self
+from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
+from app.models.models import User, Client, UserRole, Product
+from app.schemas.client import ClientCreate, ClientUpdate, ClientResponse
+from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
+from app.core.exceptions import raise_api_exception
+from app.core.errors import ErrorCode
+import uuid
+
+# 创建路由实例
+router = APIRouter()
+# 获取日志记录器
+logger = logging.getLogger(__name__)
+
+
+# 快速更新客户开关的请求模型
+class ClientSwitchUpdate(BaseModel):
+    """快速更新客户开关的请求模型"""
+    api_enabled: bool | None = None
+    password_change_enabled: bool | None = None
+
+
+@router.get("/", response_model=PaginatedResponseBaseSchema[list[ClientResponse]], summary="获取客户列表")
+async def get_clients(
+        request: Request,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin),
+        page: int = Query(1, ge=1, description="页码"),
+        page_size: int = Query(10, ge=1, le=100, description="每页条数"),
+        company_name: str | None = Query(None, description="公司名称过滤"),
+        is_active: bool | None = Query(None, description="是否激活过滤")
+):
+    """
+    获取客户列表，支持分页和过滤
+    - 仅管理员可访问
+    - 支持按公司名称和激活状态过滤
+    - 返回分页结果
+    """
+    # 构建查询 - 使用selectinload预加载用户信息，避免N+1查询
+    from sqlalchemy.orm import selectinload
+    
+    query = select(Client).options(selectinload(Client.user))
+    count_query = select(func.count(Client.id))
+
+    # 应用过滤条件
+    if company_name:
+        # 使用全文搜索（优先）或LIKE查询
+        from app.core.fulltext_search import search_with_fulltext
+        query = await search_with_fulltext(
+            db=db,
+            model_class=Client,
+            search_fields=["company_name", "contact_person"],
+            search_term=company_name,
+            base_query=query,
+            use_fulltext=True
+        )
+        count_query = await search_with_fulltext(
+            db=db,
+            model_class=Client,
+            search_fields=["company_name", "contact_person"],
+            search_term=company_name,
+            base_query=count_query,
+            use_fulltext=True
+        )
+
+    if is_active is not None:
+        query = query.where(Client.is_active == is_active)
+        count_query = count_query.where(Client.is_active == is_active)
+
+    # 获取总数
+    total_result = await db.execute(count_query)
+    total = total_result.scalar()
+
+    # 应用分页和排序
+    query = query.order_by(Client.id.desc())
+    query = query.offset((page - 1) * page_size).limit(page_size)
+
+    # 执行查询
+    result = await db.execute(query)
+    clients = result.scalars().unique().all()
+
+    # 转换为响应格式（用户信息已通过selectinload预加载）
+    client_responses = [ClientResponse.model_validate(client) for client in clients]
+
+    return PaginatedResponseBaseSchema.success(
+        data=client_responses,
+        total=total,
+        page=page,
+        page_size=page_size
+    )
+
+
+@router.get("/{client_id}", response_model=ResponseBaseSchema[ClientResponse], summary="获取客户详情")
+async def get_client(
+        client_id: int = Path(..., ge=1, description="客户ID"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin_or_self)
+):
+    """
+    获取客户详细信息
+    - 管理员可以查看所有客户
+    - 客户用户只能查看自己的客户信息
+    - 返回客户完整信息，包括关联的用户信息
+    """
+    # 构建查询 - 使用JOIN避免N+1查询问题
+    from sqlalchemy.orm import selectinload
+    
+    query = select(Client).options(selectinload(Client.user)).where(Client.id == client_id)
+
+    # 如果是客户用户，只能查看自己的客户信息
+    if current_user.role == UserRole.CLIENT:
+        query = query.where(Client.user_id == current_user.id)
+
+    result = await db.execute(query)
+    client = result.scalars().first()
+
+    if not client:
+        raise_api_exception(
+            ErrorCode.CLIENT_NOT_FOUND,
+            detail=f"客户ID {client_id} 不存在或您没有权限访问"
+        )
+
+    # 用户信息已通过selectinload预加载，直接访问
+    user = client.user
+
+    # 构建响应数据
+    client_data = {
+        'id': client.id,
+        'key': client.key,
+        'company_name': client.company_name,
+        'contact_person': client.contact_person,
+        'phone': client.phone,
+        'address': client.address,
+        'allowed_ips': client.allowed_ips,
+        'is_active': client.is_active,
+        'api_enabled': client.api_enabled,
+        'password_change_enabled': client.password_change_enabled,
+        'created_at': client.created_at,
+        'updated_at': client.updated_at,
+        'user_id': client.user_id,
+        'user_name': user.username if user else None
+    }
+
+    return ResponseBaseSchema.success(data=client_data)
+
+
+@router.post("/", response_model=ResponseBaseSchema[ClientResponse], summary="创建客户")
+async def create_client(
+        request: Request,
+        client_in: ClientCreate,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    """
+    创建新客户
+    - 仅管理员可访问
+    - 如果提供user_id，则关联到已存在的用户账号（clients.user_id 对应 users.id）
+    - 如果不提供user_id但提供用户信息（username, password, email），则先创建用户再创建客户
+    - 创建客户基本信息
+    - 验证用户存在性和唯一性
+    """
+    try:
+        user = None
+        user_created = False
+
+        # ====== 用户处理逻辑 ======
+        # 情况1：提供了user_id，关联已有用户（当前已废弃，仅保留代码兼容性）
+        if client_in.user_id:
+            result = await db.execute(select(User).where(User.id == client_in.user_id))
+            user = result.scalars().first()
+
+            if not user:
+                raise_api_exception(
+                    ErrorCode.USER_NOT_FOUND,
+                    detail=f"指定的用户ID {client_in.user_id} 不存在，请确认用户是否存在"
+                )
+        # 情况2：未提供user_id，但提供了用户信息，创建新用户（当前默认模式）
+        elif client_in.username and client_in.password and client_in.email:
+            # 优化：一次性检查用户名和邮箱是否存在，减少查询次数
+            result = await db.execute(
+                select(User).where(
+                    (User.username == client_in.username) | (User.email == client_in.email)
+                )
+            )
+            existing_users = result.scalars().all()
+            
+            # 检查用户名是否已存在
+            username_exists = any(user.username == client_in.username for user in existing_users)
+            if username_exists:
+                raise_api_exception(
+                    ErrorCode.USERNAME_TAKEN,
+                    detail=f"用户名 '{client_in.username}' 已被使用，请使用其他用户名"
+                )
+
+            # 检查邮箱是否已存在
+            email_exists = any(user.email == client_in.email for user in existing_users)
+            if email_exists:
+                raise_api_exception(
+                    ErrorCode.EMAIL_TAKEN,
+                    detail=f"邮箱 '{client_in.email}' 已被使用，请使用其他邮箱地址"
+                )
+
+            # 创建新用户
+            from app.models.models import User
+            user = User(
+                username=client_in.username,
+                email=client_in.email,
+                full_name=client_in.full_name,
+                role=UserRole.CLIENT,
+                is_active=True
+            )
+            user.hashed_password = user.get_password_hash(client_in.password)
+            db.add(user)
+            await db.flush()  # 获取用户ID
+            user_created = True
+            logger.info(f"创建新用户: {user.username} (ID: {user.id})")
+        else:
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="创建客户时必须提供用户信息（username, password, email）或user_id"
+            )
+
+        # ====== 创建客户 ======
+        # 生成唯一的UUID作为客户密钥
+        client_key = str(uuid.uuid4())
+
+        # 创建客户对象
+        client = Client(
+            user_id=user.id,
+            key=client_key,
+            company_name=client_in.company_name,
+            contact_person=client_in.contact_person,
+            phone=client_in.phone,
+            address=client_in.address,
+            allowed_ips=client_in.allowed_ips,
+            is_active=client_in.is_active if client_in.is_active is not None else True,
+            api_enabled=client_in.api_enabled if client_in.api_enabled is not None else False,
+            password_change_enabled=client_in.password_change_enabled if client_in.password_change_enabled is not None else False
+        )
+
+        db.add(client)
+        await db.commit()
+        await db.refresh(client)
+
+        logger.info(f"创建客户: {client.company_name} (ID: {client.id}), 关联用户: {user.username} (ID: {user.id})")
+
+        # 记录创建日志
+        await log_create(
+            db=db,
+            user=current_user,
+            resource_type="CLIENT",
+            resource_id=client.id,
+            resource_name=client.company_name,
+            request=request,
+            details={
+                "user_id": user.id,
+                "user_created": user_created,
+                "company_name": client.company_name
+            }
+        )
+
+        return ResponseBaseSchema.success(data=ClientResponse.model_validate(client))
+
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"创建客户失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"创建客户失败：{str(e)}。请检查数据格式或联系管理员"
+        )
+
+
+@router.put("/{client_id}", response_model=ResponseBaseSchema[ClientResponse], summary="更新客户")
+async def update_client(
+        request: Request,
+        client_id: int = Path(..., ge=1, description="客户ID"),
+        *,
+        client_in: ClientUpdate,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    """
+    更新客户信息
+    - 仅管理员可访问
+    - 可更新客户联系信息和状态
+    - 支持关联用户变更
+    """
+    # 获取客户
+    result = await db.execute(select(Client).where(Client.id == client_id))
+    client = result.scalars().first()
+
+    if not client:
+        raise_api_exception(
+            ErrorCode.CLIENT_NOT_FOUND,
+            detail=f"客户ID {client_id} 不存在"
+        )
+
+    # 如果变更了关联用户
+    if client_in.user_id and client_in.user_id != client.user_id:
+        # 检查新用户是否存在
+        result = await db.execute(select(User).where(User.id == client_in.user_id))
+        new_user = result.scalars().first()
+        if not new_user:
+            raise_api_exception(
+                ErrorCode.USER_NOT_FOUND,
+                detail=f"指定的用户ID {client_in.user_id} 不存在，请确认用户是否存在"
+            )
+
+        # 检查新用户是否已有客户关联
+        result = await db.execute(select(Client).where(Client.user_id == client_in.user_id))
+        existing_client = result.scalars().first()
+        if existing_client and existing_client.id != client_id:
+            raise_api_exception(
+                ErrorCode.CLIENT_ALREADY_EXISTS,
+                detail=f"用户ID {client_in.user_id} 已关联客户：{existing_client.company_name}。每个用户只能关联一个客户，请选择其他用户"
+            )
+
+    # 更新客户信息
+    update_data = client_in.model_dump(exclude_unset=True)
+
+    # 如果更新了key字段，需要验证
+    if 'key' in update_data and update_data['key']:
+        new_key = update_data['key'].strip()
+        # 验证UUID格式（简单验证，36个字符，包含连字符）
+        import re
+        uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        if not re.match(uuid_pattern, new_key, re.IGNORECASE):
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="UUID格式不正确，请使用有效的UUID格式（例如：xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx）"
+            )
+
+        # 检查key是否已被其他客户使用
+        if new_key != client.key:
+            result = await db.execute(select(Client).where(Client.key == new_key))
+            existing_client = result.scalars().first()
+            if existing_client:
+                raise_api_exception(
+                    ErrorCode.VALIDATION_ERROR,
+                    detail=f"UUID '{new_key}' 已被其他客户使用，请使用其他UUID"
+                )
+
+    # 检查 is_active 是否改变（用于记录激活/禁用日志）
+    old_is_active = client.is_active
+    is_active_changed = False
+
+    for key, value in update_data.items():
+        if key == "is_active" and value != old_is_active:
+            is_active_changed = True
+        setattr(client, key, value)
+
+    # 保存到数据库
+    try:
+        await db.commit()
+        await db.refresh(client)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"更新客户失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"更新客户失败：{str(e)}。请检查数据格式或联系管理员"
+        )
+
+    logger.info(f"Client {client.company_name} updated by {current_user.username}")
+
+    # 如果 is_active 改变，记录激活/禁用日志
+    if is_active_changed:
+        if client.is_active:
+            await log_activate(
+                db=db,
+                user=current_user,
+                resource_type="CLIENT",
+                resource_id=client_id,
+                resource_name=client.company_name,
+                request=request
+            )
+        else:
+            await log_deactivate(
+                db=db,
+                user=current_user,
+                resource_type="CLIENT",
+                resource_id=client_id,
+                resource_name=client.company_name,
+                request=request
+            )
+
+    # 记录更新操作（排除 is_active，因为已经单独记录）
+    update_data = client_in.model_dump(exclude_unset=True)
+    # 如果只更新了 is_active，不记录 UPDATE 日志（避免重复）
+    if len(update_data) > 1 or "is_active" not in update_data:
+        await log_update(
+            db=db,
+            user=current_user,
+            resource_type="CLIENT",
+            resource_id=client_id,
+            resource_name=client.company_name,
+            request=request,
+            details=update_data
+        )
+
+    return ResponseBaseSchema.success(data=ClientResponse.model_validate(client))
+
+
+@router.patch("/{client_id}/switches", response_model=ResponseBaseSchema[ClientResponse], summary="快速更新客户开关")
+async def update_client_switches(
+        request: Request,
+        client_id: int = Path(..., ge=1, description="客户ID"),
+        *,
+        switch_data: ClientSwitchUpdate,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    """
+    快速更新客户的API开关和密码修改开关
+    - 仅管理员可访问
+    - 可以单独更新api_enabled或password_change_enabled，或同时更新两者
+    """
+    # 获取客户
+    result = await db.execute(select(Client).where(Client.id == client_id))
+    client = result.scalars().first()
+
+    if not client:
+        raise_api_exception(
+            ErrorCode.CLIENT_NOT_FOUND,
+            detail=f"客户ID {client_id} 不存在"
+        )
+
+    # 更新开关状态
+    update_details = {}
+    update_values = {}
+    
+    if switch_data.api_enabled is not None:
+        old_value = client.api_enabled
+        # 确保是布尔值
+        new_value = bool(switch_data.api_enabled)
+        update_values['api_enabled'] = new_value
+        update_details['api_enabled'] = {'old': old_value, 'new': new_value}
+
+    if switch_data.password_change_enabled is not None:
+        old_value = client.password_change_enabled
+        # 确保是布尔值
+        new_value = bool(switch_data.password_change_enabled)
+        update_values['password_change_enabled'] = new_value
+        update_details['password_change_enabled'] = {'old': old_value, 'new': new_value}
+
+    # 保存到数据库
+    try:
+        # 使用 SQLAlchemy 的 update 语句直接更新数据库，确保数据被保存
+        if update_values:
+            # 使用 update 语句直接更新数据库
+            stmt = update(Client).where(Client.id == client_id).values(**update_values)
+            await db.execute(stmt)
+        
+        # 提交事务
+        await db.commit()
+        
+        # 重新查询以获取最新数据
+        result = await db.execute(select(Client).where(Client.id == client_id))
+        client = result.scalars().first()
+        if client:
+            await db.refresh(client)
+        else:
+            logger.error(f"更新后无法找到客户 {client_id}")
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"更新客户开关失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"更新客户开关失败：{str(e)}。请检查数据格式或联系管理员"
+        )
+
+    logger.info(f"Client {client.company_name} switches updated by {current_user.username}: {update_details}")
+
+    # 记录更新操作
+    await log_update(
+        db=db,
+        user=current_user,
+        resource_type="CLIENT",
+        resource_id=client_id,
+        resource_name=client.company_name,
+        request=request,
+        details=update_details
+    )
+
+    # 确保返回的数据包含最新的开关状态
+    client_data = ClientResponse.model_validate(client)
+    return ResponseBaseSchema.success(data=client_data)
+
+
+@router.delete("/{client_id}", response_model=ResponseBaseSchema[dict], summary="删除客户")
+async def delete_client(
+        client_id: int = Path(..., ge=1, description="客户ID"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin),
+        request: Request = None
+):
+    """
+    删除客户
+    - 仅管理员可访问
+    - 检查是否有关联产品，如果有则不允许删除
+    - 删除客户时不会删除关联的用户账号
+    """
+    # 获取客户
+    result = await db.execute(select(Client).where(Client.id == client_id))
+    client = result.scalars().first()
+
+    if not client:
+        raise_api_exception(
+            ErrorCode.CLIENT_NOT_FOUND,
+            detail=f"客户ID {client_id} 不存在"
+        )
+
+    # 检查是否有关联产品 - 优化：只查询数量，不查询所有产品
+    product_count_result = await db.execute(
+        select(func.count(Product.id)).where(Product.client_id == client_id)
+    )
+    product_count = product_count_result.scalar() or 0
+
+    if product_count > 0:
+        raise_api_exception(
+            ErrorCode.CLIENT_HAS_PRODUCTS,
+            detail=f"客户 '{client.company_name}' 有关联产品（{product_count}个），无法删除。请先删除或转移所有关联产品"
+        )
+
+    # 记录删除日志
+    await log_delete(
+        db=db,
+        user=current_user,
+        resource_type="CLIENT",
+        resource_id=client_id,
+        resource_name=client.company_name,
+        request=request
+    )
+
+    # 删除客户
+    await db.delete(client)
+    await db.commit()
+
+    logger.info(f"Client {client.company_name} deleted by {current_user.username}")
+
+    return ResponseBaseSchema.success(data={"message": "客户已成功删除"})

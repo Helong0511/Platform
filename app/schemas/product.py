@@ -1,0 +1,49 @@
+from pydantic import BaseModel, Field
+from datetime import datetime, date
+
+
+class ProductBase(BaseModel):
+    name: str | None = None
+    ecpm_deduct_ratio: float | None = Field(None, ge=0, le=1)
+    revenue_deduct_ratio: float | None = Field(None, ge=0, le=1)
+    is_active: bool | None = True
+    client_id: int | None = None
+    transfer_date: date | None = Field(
+        None, 
+        description="产品转移日期（新客户开始拥有该产品的日期，可选，仅在更改client_id时生效）。如果不指定，默认使用当前日期。用于补录历史转移记录。"
+    )
+    old_client_end_date: date | None = Field(
+        None,
+        description="上一个客户拥有该产品的结束日期（可选，仅在更改client_id时生效）。如果不指定，自动计算为transfer_date的前一天。"
+    )
+
+
+class ProductCreate(ProductBase):
+    name: str
+    ecpm_deduct_ratio: float = Field(..., ge=0, le=1)
+    revenue_deduct_ratio: float = Field(..., ge=0, le=1)
+    client_id: int
+
+
+class ProductUpdate(ProductBase):
+    pass
+
+
+class ProductInDBBase(ProductBase):
+    id: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class ProductResponse(ProductInDBBase):
+    pass
+
+
+class ProductListResponse(BaseModel):
+    data: list[ProductResponse]
+    total: int
+    page: int
+    page_size: int
