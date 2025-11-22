@@ -244,9 +244,10 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         # 获取或生成会话标识
         # 如果能够获取用户ID，使用 user_id:IP:hash(User-Agent)
         # 否则回退到 IP:hash(User-Agent)（向后兼容）
-        # 使用hashlib.md5生成稳定的hash值，避免Python hash()在不同进程中的随机化问题
+        # 使用hashlib.sha256生成稳定的hash值，避免Python hash()在不同进程中的随机化问题
+        # 注意：必须与GET请求中的hash算法保持一致，否则会导致session_id不匹配
         user_agent = request.headers.get("User-Agent", "")[:100]  # 限制长度
-        user_agent_hash = hashlib.md5(user_agent.encode('utf-8')).hexdigest()[:16]  # 使用MD5前16位
+        user_agent_hash = hashlib.sha256(user_agent.encode('utf-8')).hexdigest()[:16]  # 使用SHA256前16位
         if user_id:
             session_id = f"{user_id}:{client_ip}:{user_agent_hash}"
         else:
