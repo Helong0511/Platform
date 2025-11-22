@@ -60,14 +60,19 @@
                 <span class="label">开始日期:</span>
                 <span class="value">
                   {{ formatDate(assignment.start_date) }}
-                  <el-tag v-if="pendingChanges.has(assignment.id)" type="warning" size="small" style="margin-left: 8px;">
+                  <el-tag v-if="isFieldModified(assignment.id, 'start_date')" type="warning" size="small" style="margin-left: 8px;">
                     已修改
                   </el-tag>
                 </span>
               </div>
               <div class="detail-item" v-if="assignment.end_date">
                 <span class="label">结束日期:</span>
-                <span class="value">{{ formatDate(assignment.end_date) }}</span>
+                <span class="value">
+                  {{ formatDate(assignment.end_date) }}
+                  <el-tag v-if="isFieldModified(assignment.id, 'end_date')" type="warning" size="small" style="margin-left: 8px;">
+                    已修改
+                  </el-tag>
+                </span>
               </div>
               <div class="detail-item" v-else>
                 <span class="label">状态:</span>
@@ -260,6 +265,34 @@ const formatDateRange = (assignment) => {
   } else {
     return `${formatDate(assignment.start_date)} - 至今`;
   }
+};
+
+// 检查指定字段是否被修改
+const isFieldModified = (assignmentId, fieldName) => {
+  if (!pendingChanges.value.has(assignmentId)) {
+    return false;
+  }
+  
+  const change = pendingChanges.value.get(assignmentId);
+  const original = change.original;
+  
+  if (fieldName === 'start_date') {
+    const originalStartDateStr = typeof original.start_date === 'string'
+      ? original.start_date
+      : (original.start_date ? new Date(original.start_date).toISOString().split('T')[0] : null);
+    return change.start_date !== originalStartDateStr;
+  } else if (fieldName === 'end_date') {
+    const originalEndDateStr = original.end_date
+      ? (typeof original.end_date === 'string'
+          ? original.end_date
+          : new Date(original.end_date).toISOString().split('T')[0])
+      : null;
+    const originalEndIsNull = !originalEndDateStr;
+    const newEndIsNull = !change.end_date;
+    return originalEndIsNull !== newEndIsNull || (change.end_date && change.end_date !== originalEndDateStr);
+  }
+  
+  return false;
 };
 
 const handleClose = () => {
