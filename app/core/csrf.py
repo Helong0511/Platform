@@ -336,10 +336,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         status.HTTP_403_FORBIDDEN
                     )
                 except RuntimeError as e:
-                    # 如果连接已断开，直接返回，不抛出异常
+                    # 如果连接已断开，直接重新抛出流异常，不调用 call_next
                     if "Connection disconnected" in str(e):
                         logger.debug("客户端已断开连接，跳过CSRF验证")
-                        return await call_next(request)
+                        # 不调用 call_next，因为连接已断开，直接抛出流异常
+                        from anyio import EndOfStream
+                        raise EndOfStream("客户端已断开连接")
                     raise
             
             # 验证CSRF令牌（优先从Redis获取）
@@ -424,10 +426,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         status.HTTP_403_FORBIDDEN
                     )
                 except RuntimeError as e:
-                    # 如果连接已断开，直接返回，不抛出异常
+                    # 如果连接已断开，直接重新抛出流异常，不调用 call_next
                     if "Connection disconnected" in str(e):
                         logger.debug("客户端已断开连接，跳过CSRF验证")
-                        return await call_next(request)
+                        # 不调用 call_next，因为连接已断开，直接抛出流异常
+                        from anyio import EndOfStream
+                        raise EndOfStream("客户端已断开连接")
                     raise
                 except HTTPException as http_exc:
                     # 在异常响应中添加新的CSRF token（通过响应头）
@@ -480,9 +484,24 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             # 如果连接已断开，不抛出异常，避免EndOfStream错误
             try:
                 if hasattr(request, '_is_disconnected') and request._is_disconnected:
-                    # 客户端已断开连接，不抛出异常，直接返回
+                    # 客户端已断开连接，不抛出异常，直接重新抛出流异常
                     logger.debug("客户端已断开连接，跳过CSRF异常处理")
-                    return await call_next(request)
+                    from anyio import EndOfStream
+                    raise EndOfStream("客户端已断开连接")
+            except EndOfStream:
+                raise
+            except Exception:
+                pass
+            
+            # 检查 scope 中是否有连接断开标记
+            try:
+                if hasattr(request, 'scope') and isinstance(request.scope, dict):
+                    if request.scope.get('_disconnected', False):
+                        logger.debug("从 scope 检测到连接已断开，跳过CSRF异常处理")
+                        from anyio import EndOfStream
+                        raise EndOfStream("客户端已断开连接")
+            except EndOfStream:
+                raise
             except Exception:
                 pass
             
@@ -493,7 +512,9 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             # 捕获 safe_raise_csrf_exception 抛出的连接断开异常
             if "Connection disconnected" in str(runtime_exc):
                 logger.debug("客户端已断开连接，跳过CSRF异常处理")
-                return await call_next(request)
+                # 不调用 call_next，因为连接已断开，直接抛出流异常
+                from anyio import EndOfStream
+                raise EndOfStream("客户端已断开连接")
             # 其他 RuntimeError 重新抛出
             raise
         except (ConnectionError, OSError, RuntimeError) as e:
