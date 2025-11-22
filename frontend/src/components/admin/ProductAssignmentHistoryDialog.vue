@@ -431,13 +431,37 @@ const validateAllChanges = () => {
   
   // 模拟逐个更新的验证过程
   // 每次更新一个记录后，重新验证所有记录（与后端逻辑一致）
-  // 使用原始数据作为基础，而不是已修改的显示数据
-  let currentAssignments = originalAssignments.value.length > 0 
-    ? JSON.parse(JSON.stringify(originalAssignments.value)) // 深拷贝原始数据
-    : JSON.parse(JSON.stringify(assignments.value)); // 如果没有原始数据，使用当前数据
+  // 重要：必须使用原始数据（originalAssignments）作为基础，然后应用所有修改
+  // 因为 assignments.value 可能已经被修改过，不能作为验证的基础
+  if (originalAssignments.value.length === 0) {
+    // 如果没有原始数据，说明数据可能还没有加载，无法验证
+    return { valid: false, errors: ['无法验证：缺少原始数据'] };
+  }
+  
+  // 深拷贝原始数据，确保不会修改原始数据
+  let currentAssignments = JSON.parse(JSON.stringify(originalAssignments.value));
+  
+  // 调试：打印原始数据
+  console.log('[验证] 原始数据:', currentAssignments.map(a => ({
+    id: a.id,
+    start_date: a.start_date,
+    end_date: a.end_date,
+    client_id: a.client_id
+  })));
   
   // 按ID排序，确保更新顺序一致（与后端更新顺序一致）
   const sortedChanges = changes.sort((a, b) => a[0] - b[0]);
+  
+  // 调试：打印修改内容
+  console.log('[验证] 待应用的修改:', sortedChanges.map(([id, change]) => ({
+    id,
+    start_date: change.start_date,
+    end_date: change.end_date,
+    original: {
+      start_date: change.original.start_date,
+      end_date: change.original.end_date
+    }
+  })));
   
   for (const [assignmentId, change] of sortedChanges) {
     // 找到要更新的记录
@@ -448,11 +472,24 @@ const validateAllChanges = () => {
     }
     
     // 应用修改（模拟后端更新）
+    const originalAssignment = currentAssignments[assignmentIndex];
     const updatedAssignment = {
-      ...currentAssignments[assignmentIndex],
+      ...originalAssignment,
       start_date: change.start_date,
       end_date: change.end_date || null // 确保null值正确传递
     };
+    
+    // 调试：打印更新前后的数据
+    console.log(`[验证] 更新记录ID ${assignmentId}:`, {
+      更新前: {
+        start_date: originalAssignment.start_date,
+        end_date: originalAssignment.end_date
+      },
+      更新后: {
+        start_date: updatedAssignment.start_date,
+        end_date: updatedAssignment.end_date
+      }
+    });
     
     // 更新当前数据（模拟数据库更新）
     currentAssignments[assignmentIndex] = updatedAssignment;
@@ -461,36 +498,58 @@ const validateAllChanges = () => {
     // 注意：后端验证时会按开始日期排序，所以我们需要确保验证逻辑与后端一致
     const validationErrors = validateAssignmentsState(currentAssignments);
     if (validationErrors.length > 0) {
+      // 调试：打印验证错误
+      console.log(`[验证] 更新记录ID ${assignmentId} 后验证失败:`, validationErrors);
+      
       // 记录所有验证错误（因为后端会验证所有记录并报告所有错误）
       // 后端在每次更新后都会验证所有记录，所以我们应该记录所有错误
       errors.push(...validationErrors.map(err => `更新记录ID ${assignmentId} 后: ${err}`));
+    } else {
+      console.log(`[验证] 更新记录ID ${assignmentId} 后验证通过`);
     }
   }
+  
+  // 调试：打印最终数据
+  console.log('[验证] 最终数据:', currentAssignments.map(a => ({
+    id: a.id,
+    start_date: a.start_date,
+    end_date: a.end_date,
+    client_id: a.client_id
+  })));
   
   // 最后再次验证所有记录的最终状态（确保没有遗漏）
   const finalErrors = validateAssignmentsState(currentAssignments);
-  // 添加最终状态的错误（去重）
-  for (const err of finalErrors) {
-    // 检查是否已经记录过类似的错误
-    const isDuplicate = errors.some(e => {
-      // 提取错误中的记录ID
-      const errMatch = err.match(/记录ID\s+(\d+)/);
-      if (errMatch) {
-        const recordId = errMatch[1];
-        return e.includes(`记录ID ${recordId}`) || e.includes(`记录ID ${recordId}`);
+  if (finalErrors.length > 0) {
+    console.log('[验证] 最终验证失败:', finalErrors);
+    // 添加最终状态的错误（去重）
+    for (const err of finalErrors) {
+      // 检查是否已经记录过类似的错误
+      const isDuplicate = errors.some(e => {
+        // 提取错误中的记录ID
+        const errMatch = err.match(/记录ID\s+(\d+)/);
+        if (errMatch) {
+          const recordId = errMatch[1];
+          return e.includes(`记录ID ${recordId}`);
+        }
+        return false;
+      });
+      
+      if (!isDuplicate) {
+        errors.push(`最终验证: ${err}`);
       }
-      return false;
-    });
-    
-    if (!isDuplicate) {
-      errors.push(`最终验证: ${err}`);
     }
+  } else {
+    console.log('[验证] 最终验证通过');
   }
   
-  return {
+  const result = {
     valid: errors.length === 0,
     errors: [...new Set(errors)] // 去重
   };
+  
+  console.log('[验证] 验证结果:', result);
+  
+  return result;
 };
 
 // 验证分配记录状态的辅助函数（与后端逻辑完全一致）
