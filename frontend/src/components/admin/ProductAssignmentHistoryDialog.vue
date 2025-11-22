@@ -463,6 +463,8 @@ const validateAllChanges = () => {
     }
   })));
   
+  // 先应用所有修改，然后再验证最终状态
+  // 这样可以避免在中间状态检测到错误（因为所有修改会一起生效）
   for (const [assignmentId, change] of sortedChanges) {
     // 找到要更新的记录
     const assignmentIndex = currentAssignments.findIndex(a => a.id === assignmentId);
@@ -480,7 +482,7 @@ const validateAllChanges = () => {
     };
     
     // 调试：打印更新前后的数据
-    console.log(`[验证] 更新记录ID ${assignmentId}:`, {
+    console.log(`[验证] 应用修改到记录ID ${assignmentId}:`, {
       更新前: {
         start_date: originalAssignment.start_date,
         end_date: originalAssignment.end_date
@@ -493,21 +495,10 @@ const validateAllChanges = () => {
     
     // 更新当前数据（模拟数据库更新）
     currentAssignments[assignmentIndex] = updatedAssignment;
-    
-    // 验证当前状态（模拟后端验证：每次更新后验证所有记录）
-    // 注意：后端验证时会按开始日期排序，所以我们需要确保验证逻辑与后端一致
-    const validationErrors = validateAssignmentsState(currentAssignments);
-    if (validationErrors.length > 0) {
-      // 调试：打印验证错误
-      console.log(`[验证] 更新记录ID ${assignmentId} 后验证失败:`, validationErrors);
-      
-      // 记录所有验证错误（因为后端会验证所有记录并报告所有错误）
-      // 后端在每次更新后都会验证所有记录，所以我们应该记录所有错误
-      errors.push(...validationErrors.map(err => `更新记录ID ${assignmentId} 后: ${err}`));
-    } else {
-      console.log(`[验证] 更新记录ID ${assignmentId} 后验证通过`);
-    }
   }
+  
+  // 所有修改应用完成后，验证最终状态
+  console.log('[验证] 所有修改已应用，开始验证最终状态');
   
   // 调试：打印最终数据
   console.log('[验证] 最终数据:', currentAssignments.map(a => ({
