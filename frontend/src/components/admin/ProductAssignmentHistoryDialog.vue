@@ -198,7 +198,11 @@ const batchSaving = ref(false); // 批量保存中
 watch(() => props.modelValue, (newVal) => {
   visible.value = newVal;
   if (newVal && props.productId) {
-    fetchAssignments();
+    // 使用 void 确保 Promise 被正确处理，避免未捕获的 Promise 错误
+    void fetchAssignments().catch(error => {
+      // 错误已在 fetchAssignments 内部处理，这里只是确保 Promise 被捕获
+      console.debug('加载分配历史时出错:', error);
+    });
   }
 });
 
