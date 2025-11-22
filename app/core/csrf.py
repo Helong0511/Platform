@@ -329,11 +329,18 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 
                 # 使用安全的异常抛出机制
                 from app.core.csrf_utils import safe_raise_csrf_exception
-                safe_raise_csrf_exception(
-                    request,
-                    "CSRF令牌缺失，请刷新页面后重试",
-                    status.HTTP_403_FORBIDDEN
-                )
+                try:
+                    safe_raise_csrf_exception(
+                        request,
+                        "CSRF令牌缺失，请刷新页面后重试",
+                        status.HTTP_403_FORBIDDEN
+                    )
+                except RuntimeError as e:
+                    # 如果连接已断开，直接返回，不抛出异常
+                    if "Connection disconnected" in str(e):
+                        logger.debug("客户端已断开连接，跳过CSRF验证")
+                        return await call_next(request)
+                    raise
             
             # 验证CSRF令牌（优先从Redis获取）
             stored_token = None
@@ -416,6 +423,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         "CSRF令牌无效或已过期，请刷新页面后重试",
                         status.HTTP_403_FORBIDDEN
                     )
+                except RuntimeError as e:
+                    # 如果连接已断开，直接返回，不抛出异常
+                    if "Connection disconnected" in str(e):
+                        logger.debug("客户端已断开连接，跳过CSRF验证")
+                        return await call_next(request)
+                    raise
                 except HTTPException as http_exc:
                     # 在异常响应中添加新的CSRF token（通过响应头）
                     # 注意：这里不能直接修改响应，需要通过异常处理器处理
@@ -447,11 +460,18 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 
                 # 使用安全的异常抛出机制
                 from app.core.csrf_utils import safe_raise_csrf_exception
-                safe_raise_csrf_exception(
-                    request,
-                    "CSRF令牌验证失败，请刷新页面后重试",
-                    status.HTTP_403_FORBIDDEN
-                )
+                try:
+                    safe_raise_csrf_exception(
+                        request,
+                        "CSRF令牌验证失败，请刷新页面后重试",
+                        status.HTTP_403_FORBIDDEN
+                    )
+                except RuntimeError as e:
+                    # 如果连接已断开，直接返回，不抛出异常
+                    if "Connection disconnected" in str(e):
+                        logger.debug("客户端已断开连接，跳过CSRF验证")
+                        return await call_next(request)
+                    raise
             
             # 验证通过，继续处理请求
             response = await call_next(request)
@@ -469,6 +489,13 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             # 重新抛出HTTPException，让异常处理器处理
             # 注意：如果连接已断开，异常处理器会在尝试发送响应时捕获EndOfStream异常
             raise http_exc
+        except RuntimeError as runtime_exc:
+            # 捕获 safe_raise_csrf_exception 抛出的连接断开异常
+            if "Connection disconnected" in str(runtime_exc):
+                logger.debug("客户端已断开连接，跳过CSRF异常处理")
+                return await call_next(request)
+            # 其他 RuntimeError 重新抛出
+            raise
         except (ConnectionError, OSError, RuntimeError) as e:
             # 处理连接中断或流关闭的情况
             # 这些异常通常表示客户端提前关闭了连接

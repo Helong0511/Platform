@@ -1,0 +1,62 @@
+[Unit]
+Description=Platform Backend API Service
+After=network.target mysql.service redis.service
+Requires=mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/data/Platform
+Environment="PATH=/data/Platform/venv/bin"
+Environment="PRODUCTION_ENV=production"
+EnvironmentFile=/data/Platform/.env
+
+# 确保日志目录存在（注意：目录权限需要在部署时手动设置）
+ExecStartPre=/bin/mkdir -p /data/Platform/logs
+
+# 启动命令
+# 使用 Gunicorn 配置文件
+# ExecStart=/data/Platform/venv/bin/gunicorn \
+#     --config /data/Platform/gunicorn.conf.py \
+#     app.main:app
+
+# 或者直接使用命令行参数（二选一）
+ExecStart=/data/Platform/venv/bin/gunicorn \
+    --workers 3 \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --bind 127.0.0.1:8960 \
+    --access-logfile /data/Platform/logs/access.log \
+    --error-logfile /data/Platform/logs/error.log \
+    --log-level warning \
+    --timeout 120 \
+    --keep-alive 5 \
+    --preload \
+    app.main:app
+
+# 重启策略
+Restart=always
+RestartSec=10
+
+# 资源限制
+LimitNOFILE=65535
+LimitNPROC=4096
+
+# 安全配置
+NoNewPrivileges=true
+PrivateTmp=true
+# ProtectSystem 可选值: full, strict, off
+# full: 只读保护 /usr, /boot, /etc（推荐）
+# strict: 严格保护所有系统目录（最安全，但可能影响某些应用）
+ProtectSystem=full
+ProtectHome=true
+# 允许写入的路径（日志目录和应用目录）
+ReadWritePaths=/data/Platform/logs /data/Platform
+
+# 日志配置
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=platform-backend
+
+[Install]
+WantedBy=multi-user.target

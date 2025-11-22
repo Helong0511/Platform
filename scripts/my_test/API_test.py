@@ -1,0 +1,147 @@
+import hashlib
+import time
+import requests
+import json
+
+domain = 'king-sms.com'
+# domain = 'btfrx.online'
+
+product_url = f'https://client.{domain}/api/v1/client_products'
+data_url = f'https://client.{domain}/api/v1/client_data'
+
+if domain == 'king-sms.com':
+    APP_ID = 1000
+    SECRET_KEY = '9a8b42b0-e55b-4b52-9f6b-f71de43be5ac'
+else:
+    APP_ID = 1000
+    SECRET_KEY = 'a8117b66-acda-4c18-9ef4-f4b796c9debf'
+
+Headers = {'Content-Type': 'application/json'}
+
+product_params = {
+    'client_id': str(APP_ID),
+    'req_time': str(int(time.time()))
+}
+
+sorted_keys = sorted(product_params.keys())
+temp_str = '&'.join([f"{key}={product_params[key]}" for key in sorted_keys])
+temp_str += f'&key={SECRET_KEY}'
+sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest()
+product_params['sign'] = sign.lower()
+
+ad_data_params = {
+    'client_id': str(APP_ID),
+    'req_time': str(int(time.time())),
+    'data_type': 'day'  # all:表示全部国家的详细数据；day:表示产品按天统计的数据
+
+}
+
+sorted_keys = sorted(ad_data_params.keys())
+temp_str = '&'.join([f"{key}={ad_data_params[key]}" for key in sorted_keys])
+temp_str += f'&key={SECRET_KEY}'
+sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest()
+ad_data_params['sign'] = sign.lower()
+
+try:
+    # 发送POST请求
+    response = requests.post(
+        url=product_url,
+        headers=Headers,
+        json=product_params,  # 使用JSON格式发送
+        timeout=10
+    )
+
+    status_code = response.status_code
+
+    print(f'响应状态码: {status_code}')
+    print(f'响应头 Content-Type: {response.headers.get("Content-Type", "N/A")}')
+
+    try:
+        response_data = response.json()
+        print(response_data)
+        print(f'响应内容: {json.dumps(response_data, indent=2, ensure_ascii=False)}')
+
+        if status_code == 200:
+            if response_data.get("code") == 200 or response_data.get("success"):
+                data = response_data.get("data", [])
+                print(f'产品数量: {len(data)}')
+                if data:
+                    print('\n产品列表:')
+                    for i, product in enumerate(data, 1):
+                        print(f'  {i}. ID: {product.get("id")}, 名称: {product.get("name")}')
+                else:
+                    print('  暂无产品数据')
+
+
+        else:
+            error_msg = response_data.get("detail") or response_data.get("message", "未知错误")
+            print(f'错误信息: {error_msg}')
+
+    except json.JSONDecodeError:
+        print(f'原始响应: {response.text[:500]}')
+
+
+except requests.exceptions.RequestException as e:
+    print(f'\n❌ 请求失败: {str(e)}')
+
+try:
+    # 发送POST请求
+    response = requests.post(
+        url=data_url,
+        headers=Headers,
+        json=ad_data_params,  # 使用JSON格式发送
+        timeout=10
+    )
+
+    status_code = response.status_code
+    print(f'响应状态码: {status_code}')
+    print(f'响应头 Content-Type: {response.headers.get("Content-Type", "N/A")}')
+
+    try:
+        response_data = response.json()
+        # 如果数据太多，只显示前几条
+        if isinstance(response_data.get("data"), list) and len(response_data.get("data", [])) > 5:
+            preview_data = response_data.copy()
+            preview_data["data"] = preview_data["data"][:3]
+            preview_data["_preview"] = True
+            preview_data["_total_count"] = len(response_data["data"])
+            print(f'响应内容（预览前3条）: {json.dumps(preview_data, indent=2, ensure_ascii=False)}')
+            print(f'\n... 共 {len(response_data["data"])} 条数据，仅显示前3条')
+        else:
+            print(f'响应内容: {json.dumps(response_data, indent=2, ensure_ascii=False)}')
+
+        if status_code == 200:
+            if response_data.get("code") == 200 or response_data.get("success"):
+                data = response_data.get("data", [])
+                print(f'\n✅ 查询成功！')
+                print(f'广告数据条数: {len(data)}')
+                if data:
+                    for item in data:
+                        print(f'\n日期: {item.get("date")}')
+                        print(f'产品: {item.get("product_name")}')
+                        print(f'请求数: {item.get("request_count")}')
+                        print(f'匹配数: {item.get("match_count")}')
+                        print(f'覆盖率: {item.get("coverage_rate")}%')
+                        print(f'展示数: {item.get("display_count")}')
+                        print(f'展示率: {item.get("display_rate")}%')
+                        print(f'点击数: {item.get("click_count")}')
+                        print(f'点击率: {item.get("click_rate")}%')
+                        print(f'eCPM: {item.get("ecpm")}')
+                        print(f'收益: {item.get("revenue")}')
+                else:
+                    print('  暂无广告数据')
+            else:
+                print(f'\n❌ 查询失败: {response_data.get("message", "未知错误")}')
+
+        else:
+            print(f'\n❌ 请求失败，状态码: {status_code}')
+            error_msg = response_data.get("detail") or response_data.get("message", "未知错误")
+            print(f'错误信息: {error_msg}')
+
+    except json.JSONDecodeError:
+        print(f'\n❌ 响应不是有效的JSON格式')
+        print(f'原始响应: {response.text[:500]}')
+
+
+except requests.exceptions.RequestException as e:
+    print(f'\n❌ 请求失败: {str(e)}')
