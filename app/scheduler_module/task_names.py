@@ -16,6 +16,9 @@ ARCHIVE_DATA_TASK_NAME = "数据归档任务"
 # 清理过期会话和黑名单任务
 CLEANUP_SESSIONS_TASK_NAME = "清理过期会话和黑名单"
 
+# 清理旧日志任务
+CLEANUP_LOGS_TASK_NAME = "清理旧日志"
+
 # TQT API获取数据任务
 TQT_API_TASK_NAME = "TQT API获取数据"
 
@@ -30,6 +33,7 @@ TASK_NAME_MAP = {
     "skymobi_task": SKYMOBI_API_TASK_NAME,
     "archive_old_data": ARCHIVE_DATA_TASK_NAME,
     "cleanup_expired_sessions": CLEANUP_SESSIONS_TASK_NAME,
+    "cleanup_old_logs": CLEANUP_LOGS_TASK_NAME,
 }
 
 # ==================== 所有任务名称列表 ====================
@@ -38,6 +42,7 @@ TASK_NAME_MAP = {
 ALL_TASK_NAMES = [
     ARCHIVE_DATA_TASK_NAME,
     CLEANUP_SESSIONS_TASK_NAME,
+    CLEANUP_LOGS_TASK_NAME,
     TQT_API_TASK_NAME,
     SKYMOBI_API_TASK_NAME,
 ]

@@ -18,11 +18,13 @@
 
 所有API请求都需要进行MD5签名验证，签名算法如下：
 
-1. **准备参数**：将 `client_id` 和 `req_time` 放入参数字典
+1. **准备参数**：将所有非空参数（`client_id`、`req_time`、`data_type`、`start_date`、`end_date` 等）放入参数字典
 2. **参数排序**：按字母顺序对参数键进行排序
 3. **拼接字符串**：将参数拼接为 `key=value&key=value` 格式
 4. **追加密钥**：在末尾追加 `&key={SECRET_KEY}`
 5. **MD5加密**：对整个字符串进行MD5加密并转为小写
+
+**注意**：签名计算时只包含非空参数。例如，如果未提供 `start_date` 和 `end_date`，则签名只包含 `client_id`、`req_time` 和 `data_type`。
 
 ### 签名示例
 
@@ -136,7 +138,7 @@ sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
 
 ### 2. 查询广告数据
 
-获取客户当前月的广告数据。
+获取客户的广告数据，支持详细数据（按国家）和每日汇总两种模式。
 
 **接口地址**: `/client_data`
 
@@ -148,7 +150,10 @@ sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
 |--------|------|------|------|
 | client_id | int | 是 | 客户ID |
 | req_time | int | 是 | 请求时间戳（10位秒级，Unix时间戳） |
-| sign | string | 是 | MD5签名（小写） |
+| data_type | string | 是 | 数据类型：'all' 表示详细数据（按国家），'day' 表示每日汇总（按产品+日期） |
+| start_date | string | 否 | 起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天 |
+| end_date | string | 否 | 终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天 |
+| sign | string | 是 | MD5签名（小写），包含所有非空参数 |
 
 **请求示例**:
 
@@ -156,11 +161,18 @@ sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
 {
   "client_id": 1000,
   "req_time": 1745656222,
+  "data_type": "all",
+  "start_date": "2024-01-01",
+  "end_date": "2024-01-31",
   "sign": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
 }
 ```
 
+**注意**：签名计算时，只包含非空参数。例如，如果未提供 `start_date` 和 `end_date`，则签名只包含 `client_id`、`req_time` 和 `data_type`。
+
 **响应格式**:
+
+**详细数据模式（data_type='all'）示例**:
 
 ```json
 {
@@ -170,6 +182,8 @@ sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
     {
       "date": "2024-01-15",
       "product_name": "产品A",
+      "country_code": "US",
+      "country_name_zh": "美国",
       "request_count": 10000,
       "match_count": 8000,
       "coverage_rate": 80.0,
@@ -181,8 +195,10 @@ sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
       "revenue": 393.75
     },
     {
-      "date": "2024-01-16",
+      "date": "2024-01-15",
       "product_name": "产品A",
+      "country_code": "CN",
+      "country_name_zh": "中国",
       "request_count": 12000,
       "match_count": 9600,
       "coverage_rate": 80.0,
@@ -197,6 +213,47 @@ sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
 }
 ```
 
+**每日汇总模式（data_type='day'）示例**:
+
+```json
+{
+  "code": 200,
+  "message": "成功获取 15 条广告数据",
+  "data": [
+    {
+      "date": "2024-01-15",
+      "product_name": "产品A",
+      "country_code": "ZZ",
+      "country_name_zh": "全部区域",
+      "request_count": 50000,
+      "match_count": 40000,
+      "coverage_rate": 80.0,
+      "display_count": 37500,
+      "display_rate": 93.75,
+      "click_count": 2500,
+      "click_rate": 6.67,
+      "ecpm": 5.25,
+      "revenue": 1968.75
+    },
+    {
+      "date": "2024-01-16",
+      "product_name": "产品A",
+      "country_code": "ZZ",
+      "country_name_zh": "全部区域",
+      "request_count": 60000,
+      "match_count": 48000,
+      "coverage_rate": 80.0,
+      "display_count": 45000,
+      "display_rate": 93.75,
+      "click_count": 3000,
+      "click_rate": 6.67,
+      "ecpm": 5.30,
+      "revenue": 2385.0
+    }
+  ]
+}
+```
+
 **响应字段说明**:
 
 | 字段名 | 类型 | 说明 |
@@ -206,6 +263,8 @@ sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
 | data | array | 广告数据列表 |
 | data[].date | string | 数据日期（ISO格式：YYYY-MM-DD） |
 | data[].product_name | string | 产品名称（确保不为null） |
+| data[].country_code | string | 国家二字代码（ISO 3166-1 alpha-2），详细模式返回实际国家代码（如"US"、"CN"），汇总模式返回"ZZ"表示全部区域 |
+| data[].country_name_zh | string | 国家中文名称，详细模式返回实际国家名称（如"美国"、"中国"），汇总模式返回"全部区域" |
 | data[].request_count | int | 请求数（整数） |
 | data[].match_count | int | 匹配数（整数） |
 | data[].coverage_rate | float | 覆盖率（%，浮点数，保留2位小数） |
@@ -216,6 +275,14 @@ sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
 | data[].ecpm | float | eCPM（减扣后的，浮点数，保留2位小数） |
 | data[].revenue | float | 收益（减扣后的，浮点数，保留2位小数） |
 
+**国家代码说明**:
+
+- **详细模式（data_type='all'）**：返回实际的国家二字代码（如 "US"、"CN"、"GB" 等），如果无法识别国家则返回 "AA"（未知区域），如果为空则返回空字符串
+- **汇总模式（data_type='day'）**：统一返回 "ZZ"（全部区域），表示该数据是多个国家的汇总
+- **特殊代码**：
+  - `"ZZ"`: 全部区域（汇总数据）
+  - `"AA"`: 未知区域（无法识别的国家）
+
 **数据说明**:
 
 - **覆盖率** = 匹配数 / 请求数 × 100
@@ -224,12 +291,26 @@ sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
 - **eCPM**: 每千次展示的有效成本（减扣后）
 - **收益**: 实际收益（减扣后）
 
+**数据类型说明**:
+
+- **data_type='all'（详细数据）**：
+  - 按国家分组，每个国家每天一条记录
+  - 返回实际的国家代码和国家名称
+  - 适用于需要按国家分析数据的场景
+  
+- **data_type='day'（每日汇总）**：
+  - 按产品+日期汇总，每天每个产品一条记录
+  - 国家代码统一为 "ZZ"（全部区域）
+  - 适用于只需要查看产品整体数据的场景
+
 **注意事项**:
 - 默认返回当前月的数据（从当月1日到最后一天）
+- 可通过 `start_date` 和 `end_date` 参数指定日期范围
 - 数据按日期升序排列
-- 如果当月没有数据，`data` 字段返回空数组 `[]`，而不是 `null`
+- 如果查询结果为空，`data` 字段返回空数组 `[]`，而不是 `null`
 - 所有数值类型明确（int/float），不会返回字符串
 - 浮点数保留2位小数
+- 数据查询遵循产品历史分配表，只返回分配给该客户的产品数据
 
 ---
 
@@ -318,16 +399,45 @@ def get_products():
     
     return response.json()
 
-def get_ad_data():
+def generate_signature_with_params(client_id, req_time, secret_key, data_type=None, start_date=None, end_date=None):
+    """生成签名（包含可选参数）"""
+    params = {
+        'client_id': str(client_id),
+        'req_time': str(req_time)
+    }
+    
+    # 添加可选参数（如果提供了的话）
+    if data_type:
+        params['data_type'] = str(data_type)
+    if start_date:
+        params['start_date'] = str(start_date)
+    if end_date:
+        params['end_date'] = str(end_date)
+    
+    sorted_keys = sorted(params.keys())
+    temp_str = '&'.join([f"{key}={params[key]}" for key in sorted_keys])
+    temp_str = temp_str + f'&key={secret_key}'
+    
+    sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
+    return sign
+
+def get_ad_data(data_type='all', start_date=None, end_date=None):
     """获取广告数据"""
     req_time = int(time.time())
-    sign = generate_signature(CLIENT_ID, req_time, SECRET_KEY)
+    sign = generate_signature_with_params(CLIENT_ID, req_time, SECRET_KEY, data_type, start_date, end_date)
     
     params = {
         'client_id': CLIENT_ID,
         'req_time': req_time,
+        'data_type': data_type,
         'sign': sign
     }
+    
+    # 添加可选参数
+    if start_date:
+        params['start_date'] = start_date
+    if end_date:
+        params['end_date'] = end_date
     
     headers = {'Content-Type': 'application/json'}
     response = requests.post(
@@ -345,9 +455,13 @@ if __name__ == '__main__':
     products_result = get_products()
     print("产品列表:", json.dumps(products_result, indent=2, ensure_ascii=False))
     
-    # 获取广告数据
-    ad_data_result = get_ad_data()
-    print("广告数据:", json.dumps(ad_data_result, indent=2, ensure_ascii=False))
+    # 获取详细广告数据（按国家）
+    ad_data_result = get_ad_data(data_type='all', start_date='2024-01-01', end_date='2024-01-31')
+    print("详细广告数据:", json.dumps(ad_data_result, indent=2, ensure_ascii=False))
+    
+    # 获取每日汇总数据
+    summary_result = get_ad_data(data_type='day', start_date='2024-01-01', end_date='2024-01-31')
+    print("每日汇总数据:", json.dumps(summary_result, indent=2, ensure_ascii=False))
 ```
 
 ### Java示例
@@ -432,14 +546,77 @@ public class ClientAPI {
         return response.body();
     }
     
-    public static String getAdData() throws Exception {
+    private static String generateSignatureWithParams(int clientId, long reqTime, String secretKey, 
+                                                       String dataType, String startDate, String endDate) {
+        try {
+            // 准备参数
+            Map<String, String> params = new LinkedHashMap<>();
+            params.put("client_id", String.valueOf(clientId));
+            params.put("req_time", String.valueOf(reqTime));
+            
+            // 添加可选参数（如果提供了的话）
+            if (dataType != null && !dataType.isEmpty()) {
+                params.put("data_type", dataType);
+            }
+            if (startDate != null && !startDate.isEmpty()) {
+                params.put("start_date", startDate);
+            }
+            if (endDate != null && !endDate.isEmpty()) {
+                params.put("end_date", endDate);
+            }
+            
+            // 排序并拼接
+            List<String> sortedKeys = new ArrayList<>(params.keySet());
+            Collections.sort(sortedKeys);
+            
+            StringBuilder sb = new StringBuilder();
+            for (String key : sortedKeys) {
+                if (sb.length() > 0) {
+                    sb.append("&");
+                }
+                sb.append(key).append("=").append(params.get(key));
+            }
+            
+            // 追加密钥
+            sb.append("&key=").append(secretKey);
+            
+            // MD5加密
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(sb.toString().getBytes("UTF-8"));
+            
+            // 转为小写十六进制字符串
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : digest) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) {
+                    hexString.append('0');
+                }
+                hexString.append(hex);
+            }
+            
+            return hexString.toString().toLowerCase();
+        } catch (Exception e) {
+            throw new RuntimeException("生成签名失败", e);
+        }
+    }
+    
+    public static String getAdData(String dataType, String startDate, String endDate) throws Exception {
         long reqTime = Instant.now().getEpochSecond();
-        String sign = generateSignature(CLIENT_ID, reqTime, SECRET_KEY);
+        String sign = generateSignatureWithParams(CLIENT_ID, reqTime, SECRET_KEY, dataType, startDate, endDate);
         
         Map<String, Object> params = new HashMap<>();
         params.put("client_id", CLIENT_ID);
         params.put("req_time", reqTime);
+        params.put("data_type", dataType);
         params.put("sign", sign);
+        
+        // 添加可选参数
+        if (startDate != null && !startDate.isEmpty()) {
+            params.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isEmpty()) {
+            params.put("end_date", endDate);
+        }
         
         ObjectMapper mapper = new ObjectMapper();
         String jsonBody = mapper.writeValueAsString(params);
@@ -475,5 +652,13 @@ public class ClientAPI {
 如有问题，请联系技术支持团队。
 
 **API版本**: v1  
-**最后更新**: 2024-01-15
+**最后更新**: 2024-01-20
+
+## 更新日志
+
+### 2024-01-20
+- 新增 `country_code` 字段：在广告数据响应中返回国家二字代码（ISO 3166-1 alpha-2）
+- 新增 `data_type` 参数：支持详细数据（按国家）和每日汇总两种查询模式
+- 新增 `start_date` 和 `end_date` 参数：支持指定日期范围查询
+- 优化签名算法说明：明确只包含非空参数参与签名计算
 

@@ -347,7 +347,7 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
 
           <h4>响应示例</h4>
           <el-collapse>
-            <el-collapse-item title="查看响应示例" name="ad-data-response">
+            <el-collapse-item title="查看响应示例（详细数据模式）" name="ad-data-response-all">
               <pre><code>{
   "code": 200,
   "message": "成功获取 30 条广告数据",
@@ -355,6 +355,8 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
     {
       "date": "2024-01-15",
       "product_name": "产品A",
+      "country_code": "US",
+      "country_name_zh": "美国",
       "request_count": 10000,
       "match_count": 8000,
       "coverage_rate": 80.0,
@@ -364,6 +366,59 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
       "click_rate": 6.67,
       "ecpm": 5.25,
       "revenue": 393.75
+    },
+    {
+      "date": "2024-01-15",
+      "product_name": "产品A",
+      "country_code": "CN",
+      "country_name_zh": "中国",
+      "request_count": 12000,
+      "match_count": 9600,
+      "coverage_rate": 80.0,
+      "display_count": 9000,
+      "display_rate": 93.75,
+      "click_count": 600,
+      "click_rate": 6.67,
+      "ecpm": 5.30,
+      "revenue": 477.0
+    }
+  ]
+}</code></pre>
+            </el-collapse-item>
+            <el-collapse-item title="查看响应示例（每日汇总模式）" name="ad-data-response-day">
+              <pre><code>{
+  "code": 200,
+  "message": "成功获取 15 条广告数据",
+  "data": [
+    {
+      "date": "2024-01-15",
+      "product_name": "产品A",
+      "country_code": "ZZ",
+      "country_name_zh": "全部区域",
+      "request_count": 50000,
+      "match_count": 40000,
+      "coverage_rate": 80.0,
+      "display_count": 37500,
+      "display_rate": 93.75,
+      "click_count": 2500,
+      "click_rate": 6.67,
+      "ecpm": 5.25,
+      "revenue": 1968.75
+    },
+    {
+      "date": "2024-01-16",
+      "product_name": "产品A",
+      "country_code": "ZZ",
+      "country_name_zh": "全部区域",
+      "request_count": 60000,
+      "match_count": 48000,
+      "coverage_rate": 80.0,
+      "display_count": 45000,
+      "display_rate": 93.75,
+      "click_count": 3000,
+      "click_rate": 6.67,
+      "ecpm": 5.30,
+      "revenue": 2385.0
     }
   ]
 }</code></pre>
@@ -388,8 +443,19 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
             </ul>
             <p><strong>数据模式说明</strong>：</p>
             <ul>
-              <li><strong>data_type='all'</strong>：详细数据模式，按国家分组，返回每条详细记录</li>
-              <li><strong>data_type='day'</strong>：每日汇总模式，按产品+日期汇总，国家统一显示"全部区域"</li>
+              <li><strong>data_type='all'（详细数据）</strong>：按国家分组，每个国家每天一条记录，返回实际的国家代码和国家名称</li>
+              <li><strong>data_type='day'（每日汇总）</strong>：按产品+日期汇总，每天每个产品一条记录，国家代码统一为"ZZ"（全部区域）</li>
+            </ul>
+            <p><strong>国家代码说明</strong>：</p>
+            <ul>
+              <li><strong>详细模式（data_type='all'）</strong>：返回实际的国家二字代码（如 "US"、"CN"、"GB" 等），如果无法识别国家则返回 "AA"（未知区域），如果为空则返回空字符串</li>
+              <li><strong>汇总模式（data_type='day'）</strong>：统一返回 "ZZ"（全部区域），表示该数据是多个国家的汇总</li>
+              <li><strong>特殊代码</strong>：
+                <ul>
+                  <li><code>"ZZ"</code>: 全部区域（汇总数据）</li>
+                  <li><code>"AA"</code>: 未知区域（无法识别的国家）</li>
+                </ul>
+              </li>
             </ul>
             <p><strong>注意事项</strong>：</p>
             <ul>
@@ -399,7 +465,7 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
               <li>如果查询范围内没有数据，<code>data</code> 字段返回空数组 <code>[]</code>，而不是 <code>null</code></li>
               <li>所有数值类型明确（int/float），不会返回字符串</li>
               <li>浮点数保留2位小数</li>
-              <li>每日汇总模式下，<code>country_name_zh</code> 字段统一返回"全部区域"</li>
+              <li>数据查询遵循产品历史分配表，只返回分配给该客户的产品数据</li>
             </ul>
           </div>
         </el-card>
@@ -734,7 +800,8 @@ const adDataRequestParams = [
 const adDataResponseFields = [
   { field: 'date', type: 'string', description: '数据日期（ISO格式：YYYY-MM-DD）' },
   { field: 'product_name', type: 'string', description: '产品名称（确保不为null）' },
-  { field: 'country_name_zh', type: 'string', description: '国家中文名称（详细模式显示具体国家，汇总模式显示"全部区域"）' },
+  { field: 'country_code', type: 'string', description: '国家二字代码（ISO 3166-1 alpha-2），详细模式返回实际国家代码（如"US"、"CN"），汇总模式返回"ZZ"表示全部区域' },
+  { field: 'country_name_zh', type: 'string', description: '国家中文名称，详细模式返回实际国家名称（如"美国"、"中国"），汇总模式返回"全部区域"' },
   { field: 'request_count', type: 'int', description: '请求数（整数）' },
   { field: 'match_count', type: 'int', description: '匹配数（整数）' },
   { field: 'coverage_rate', type: 'float', description: '覆盖率（%，浮点数，保留2位小数）' },

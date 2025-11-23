@@ -82,6 +82,7 @@ class AdDataItemResponse(BaseModel):
     """
     date: str = Field(..., description="数据日期（ISO格式：YYYY-MM-DD）")
     product_name: str = Field(..., description="产品名称")
+    country_code: str = Field(..., description="国家二字代码（ISO 3166-1 alpha-2）")
     country_name_zh: str = Field(default="", description="国家中文名称")
     request_count: int = Field(..., description="请求数（整数）")
     match_count: int = Field(..., description="匹配数（整数）")
@@ -487,6 +488,7 @@ async def get_client_data(
                 data_list.append(AdDataItemResponse(
                     date=date_str,
                     product_name=row.product_name or "",
+                    country_code="ZZ",  # 每日汇总模式使用"ZZ"表示全部区域
                     country_name_zh="全部区域",  # 每日汇总模式统一显示"全部区域"
                     request_count=total_request_count,
                     match_count=total_match_count,
@@ -572,7 +574,9 @@ async def get_client_data(
                     2
                 )
 
-                # 处理国家名称
+                # 处理国家代码和国家名称
+                country_code_str = ad_data.country_code or ""
+                
                 if country_name_zh:
                     final_country_name = country_name_zh
                 elif ad_data.country_code == "AA":
@@ -586,6 +590,7 @@ async def get_client_data(
                 data_list.append(AdDataItemResponse(
                     date=date_str,
                     product_name=product_name or "",
+                    country_code=country_code_str,  # 返回二字国家代码
                     country_name_zh=final_country_name,
                     request_count=int(ad_data.request_count),
                     match_count=int(ad_data.match_count),

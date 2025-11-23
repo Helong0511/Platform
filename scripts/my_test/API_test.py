@@ -10,8 +10,8 @@ product_url = f'https://client.{domain}/api/v1/client_products'
 data_url = f'https://client.{domain}/api/v1/client_data'
 
 if domain == 'king-sms.com':
-    APP_ID = 1000
-    SECRET_KEY = '9a8b42b0-e55b-4b52-9f6b-f71de43be5ac'
+    APP_ID = 1010
+    SECRET_KEY = 'a481444f-3a12-471a-8c89-2d2576b7fa14'
 else:
     APP_ID = 1000
     SECRET_KEY = 'a8117b66-acda-4c18-9ef4-f4b796c9debf'
@@ -32,7 +32,7 @@ product_params['sign'] = sign.lower()
 ad_data_params = {
     'client_id': str(APP_ID),
     'req_time': str(int(time.time())),
-    'data_type': 'day'  # all:表示全部国家的详细数据；day:表示产品按天统计的数据
+    'data_type': 'all'  # all:表示全部国家的详细数据；day:表示产品按天统计的数据
 
 }
 
@@ -99,26 +99,19 @@ try:
 
     try:
         response_data = response.json()
-        # 如果数据太多，只显示前几条
-        if isinstance(response_data.get("data"), list) and len(response_data.get("data", [])) > 5:
-            preview_data = response_data.copy()
-            preview_data["data"] = preview_data["data"][:3]
-            preview_data["_preview"] = True
-            preview_data["_total_count"] = len(response_data["data"])
-            print(f'响应内容（预览前3条）: {json.dumps(preview_data, indent=2, ensure_ascii=False)}')
-            print(f'\n... 共 {len(response_data["data"])} 条数据，仅显示前3条')
-        else:
-            print(f'响应内容: {json.dumps(response_data, indent=2, ensure_ascii=False)}')
 
         if status_code == 200:
             if response_data.get("code") == 200 or response_data.get("success"):
                 data = response_data.get("data", [])
                 print(f'\n✅ 查询成功！')
                 print(f'广告数据条数: {len(data)}')
+                print(data)
                 if data:
                     for item in data:
                         print(f'\n日期: {item.get("date")}')
                         print(f'产品: {item.get("product_name")}')
+                        print(f'国家代码: {item.get("product_name")}')
+                        print(f'国家名称: {item.get("country_name_zh")}')
                         print(f'请求数: {item.get("request_count")}')
                         print(f'匹配数: {item.get("match_count")}')
                         print(f'覆盖率: {item.get("coverage_rate")}%')

@@ -179,6 +179,7 @@ def auto_register_tasks() -> None:
         SKYMOBI_API_TASK_NAME,
         ARCHIVE_DATA_TASK_NAME,
         CLEANUP_SESSIONS_TASK_NAME,
+        CLEANUP_LOGS_TASK_NAME,
     )
     
     # 注册数据归档任务
@@ -188,6 +189,20 @@ def auto_register_tasks() -> None:
     # 注册清理过期会话和黑名单记录任务（使用 cleanup_expired_sessions，功能更完整）
     from app.scheduler_module.tasks.cleanup_expired_sessions import cleanup_expired_sessions
     register_task_function(CLEANUP_SESSIONS_TASK_NAME, cleanup_expired_sessions)
+
+    # 注册清理旧日志任务
+    from app.scheduler_module.tasks.cleanup_old_logs import cleanup_old_audit_logs
+    from app.core.config import settings
+    
+    # 创建包装函数，使用配置中的参数
+    async def cleanup_old_logs_wrapper():
+        """清理旧日志任务的包装函数，使用配置中的参数"""
+        return await cleanup_old_audit_logs(
+            days=settings.AUDIT_LOG_RETENTION_DAYS,
+            archive=settings.AUDIT_LOG_ARCHIVE
+        )
+    
+    register_task_function(CLEANUP_LOGS_TASK_NAME, cleanup_old_logs_wrapper)
 
     # 注册 TQT API获取数据 任务
     from app.scheduler_module.tasks.tqt_task import tqt_api_task

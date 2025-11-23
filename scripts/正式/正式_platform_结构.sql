@@ -26,8 +26,14 @@ CREATE TABLE IF NOT EXISTS `ad_data` (
   `product_id` INT NOT NULL COMMENT '产品ID',
   `request_count` INT NOT NULL DEFAULT 0 COMMENT '请求数',
   `match_count` INT NOT NULL DEFAULT 0 COMMENT '匹配数',
+  `coverage_rate` FLOAT NULL DEFAULT 0.00 COMMENT '覆盖率',
+
   `display_count` INT NOT NULL DEFAULT 0 COMMENT '展示数',
+  `display_rate` FLOAT NULL DEFAULT 0.00 COMMENT '展示率',
+
   `click_count` INT NOT NULL DEFAULT 0 COMMENT '点击数',
+  `click_rate` FLOAT NULL DEFAULT 0.00 COMMENT '点击率',
+
   `ecpm_before_deduct` FLOAT NOT NULL DEFAULT 0 COMMENT 'eCPM未减扣',
   `ecpm_after_deduct` FLOAT NOT NULL DEFAULT 0 COMMENT 'eCPM已减扣',
   `revenue_before_deduct` FLOAT NOT NULL DEFAULT 0 COMMENT '收益未减扣',

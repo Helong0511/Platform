@@ -327,6 +327,19 @@ class Settings(BaseSettings):
     LOG_MAX_BYTES: int = int(os.getenv("LOG_MAX_BYTES", "10485760"))
     # 日志文件备份数量
     LOG_BACKUP_COUNT: int = int(os.getenv("LOG_BACKUP_COUNT", "5"))
+    
+    # ====== 审计日志配置 ======
+    # 审计日志保留天数（超过此天数的日志将被清理）
+    # 默认 90 天（3个月），可根据需要调整
+    # 建议值：
+    #   - 30-60 天：适合高频操作场景，节省存储空间
+    #   - 90-180 天：推荐值，平衡存储和查询需求
+    #   - 180+ 天：适合需要长期审计的场景
+    AUDIT_LOG_RETENTION_DAYS: int = int(os.getenv("AUDIT_LOG_RETENTION_DAYS", "90"))
+    # 是否归档旧日志（True：归档到归档表，False：直接删除）
+    # 默认 False（直接删除），因为日志数据通常不需要长期保留
+    # 如果需要保留历史日志，可以设置为 True 并创建归档表
+    AUDIT_LOG_ARCHIVE: bool = os.getenv("AUDIT_LOG_ARCHIVE", "false").lower() in ["true", "1", "yes"]
 
     # ====== 时区配置 ======
     # 应用时区（用于调度器、前端显示等）
