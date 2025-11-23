@@ -32,8 +32,9 @@ product_params['sign'] = sign.lower()
 ad_data_params = {
     'client_id': str(APP_ID),
     'req_time': str(int(time.time())),
-    'data_type': 'all'  # all:表示全部国家的详细数据；day:表示产品按天统计的数据
-
+    'data_type': 'all',  # all:表示全部国家的详细数据；day:表示产品按天统计的数据
+    'start_date': '2025-11-20',
+    'end_date': '2025-11-21'
 }
 
 sorted_keys = sorted(ad_data_params.keys())
@@ -99,18 +100,17 @@ try:
 
     try:
         response_data = response.json()
-
+        print(response_data)
         if status_code == 200:
             if response_data.get("code") == 200 or response_data.get("success"):
                 data = response_data.get("data", [])
                 print(f'\n✅ 查询成功！')
                 print(f'广告数据条数: {len(data)}')
-                print(data)
                 if data:
                     for item in data:
                         print(f'\n日期: {item.get("date")}')
                         print(f'产品: {item.get("product_name")}')
-                        print(f'国家代码: {item.get("product_name")}')
+                        print(f'国家代码: {item.get("country_code")}')
                         print(f'国家名称: {item.get("country_name_zh")}')
                         print(f'请求数: {item.get("request_count")}')
                         print(f'匹配数: {item.get("match_count")}')

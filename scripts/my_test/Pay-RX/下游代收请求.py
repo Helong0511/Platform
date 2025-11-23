@@ -16,8 +16,6 @@ from need import (
 )
 
 
-
-
 def get_file_md5_str(file: str) -> str:
     """
     计算文件的 MD5 哈希值
@@ -69,7 +67,6 @@ def get_file_md5_str(file: str) -> str:
         return f"错误: 计算MD5时发生未知错误: {e}"
 
 
-
 def verify_sign(
         data: Dict[str, Any],
         secure_key: str,
@@ -110,6 +107,7 @@ def verify_sign(
 
     # 比较签名是否一致（严格区分大小写）
     return generated_sign == original_sign
+
 
 def generate_sign(
         data: Dict[str, Any],
