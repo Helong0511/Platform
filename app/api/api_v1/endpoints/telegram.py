@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.errors import ErrorCode, raise_api_exception
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
 from app.core.security import get_current_user
 from app.models.models import User, UserRole
 
