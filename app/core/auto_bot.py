@@ -189,6 +189,9 @@ def _acquire_bot_lock():
     if _bot_lock_acquired:
         return True
     
+    # os 模块已在文件顶部导入，直接使用
+    current_pid = os.getpid()
+    
     try:
         # 创建锁文件路径（在项目根目录的 logs 目录下）
         lock_file_path = Path(__file__).parent.parent.parent / "logs" / "telegram_bot.lock"
@@ -202,11 +205,10 @@ def _acquire_bot_lock():
         _bot_lock_acquired = True
         
         # 写入当前进程信息
-        import os
-        _bot_lock_file.write(f"PID: {os.getpid()}\n")
+        _bot_lock_file.write(f"PID: {current_pid}\n")
         _bot_lock_file.flush()
         
-        logger.info(f"[PID:{os.getpid()}] 成功获取 Telegram Bot 启动锁")
+        logger.info(f"[PID:{current_pid}] 成功获取 Telegram Bot 启动锁")
         return True
     except (IOError, OSError) as e:
         # 无法获取锁（其他进程已持有）
@@ -217,10 +219,10 @@ def _acquire_bot_lock():
                 pass
             _bot_lock_file = None
         
-        logger.info(f"[PID:{os.getpid()}] 无法获取 Telegram Bot 启动锁（其他进程可能已启动）: {e}")
+        logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（其他进程可能已启动）: {e}")
         return False
     except Exception as e:
-        logger.warning(f"获取 Telegram Bot 启动锁时发生错误: {e}")
+        logger.warning(f"[PID:{current_pid}] 获取 Telegram Bot 启动锁时发生错误: {e}")
         if _bot_lock_file:
             try:
                 _bot_lock_file.close()
@@ -235,12 +237,13 @@ def _release_bot_lock():
     global _bot_lock_file, _bot_lock_acquired
     
     if _bot_lock_file and _bot_lock_acquired:
+        current_pid = os.getpid()
         try:
             fcntl.flock(_bot_lock_file.fileno(), fcntl.LOCK_UN)
             _bot_lock_file.close()
-            logger.info(f"[PID:{os.getpid()}] 已释放 Telegram Bot 启动锁")
+            logger.info(f"[PID:{current_pid}] 已释放 Telegram Bot 启动锁")
         except Exception as e:
-            logger.warning(f"释放 Telegram Bot 启动锁时发生错误: {e}")
+            logger.warning(f"[PID:{current_pid}] 释放 Telegram Bot 启动锁时发生错误: {e}")
         finally:
             _bot_lock_file = None
             _bot_lock_acquired = False
