@@ -28,7 +28,7 @@ config = {
 conn = mysql.connector.connect(**config)
 cur = conn.cursor()
 
-username = 'admin'
+username = 'zhuzhouyiya'
 
 password = 'admin123'
 

@@ -480,6 +480,26 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             
             # 验证通过，继续处理请求
             response = await call_next(request)
+            
+            # 在响应头中添加CSRF令牌（确保前端可以更新令牌）
+            # 使用存储的令牌（如果存在），否则使用请求中的令牌
+            token_to_return = stored_token or csrf_token
+            if token_to_return:
+                try:
+                    response.headers["X-CSRF-Token"] = token_to_return
+                    logger.debug(f"已添加CSRF令牌到响应头: {request.method} {path}")
+                except (ConnectionError, OSError, RuntimeError) as e:
+                    # 如果连接已关闭，无法修改响应头，记录日志但不抛出异常
+                    error_type_name = type(e).__name__
+                    error_module = type(e).__module__
+                    if ("EndOfStream" in error_type_name or "WouldBlock" in error_type_name or 
+                        "anyio" in error_module):
+                        logger.debug(f"响应流已关闭，无法添加CSRF令牌: {request.method} {path}, IP: {client_ip}")
+                    else:
+                        logger.warning(f"无法添加CSRF令牌到响应头: {request.method} {path}, IP: {client_ip}, 错误: {e}")
+                except Exception as e:
+                    # 其他异常，记录日志但不影响响应
+                    logger.warning(f"添加CSRF令牌到响应头时出错: {request.method} {path}, IP: {client_ip}, 错误: {e}")
         except HTTPException as http_exc:
             # 检查连接是否仍然有效
             # 如果连接已断开，不抛出异常，避免EndOfStream错误

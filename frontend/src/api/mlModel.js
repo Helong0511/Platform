@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { normalizeResponse, extractErrorMessage, isErrorHandled } from '../utils/api';
+import { normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
 import { ElMessage } from 'element-plus';
 import { getWarningMessage } from '../utils/messages';
 
@@ -10,13 +10,24 @@ import { getWarningMessage } from '../utils/messages';
  */
 export const validateExcelData = async (file) => {
   try {
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
+    
     const formData = new FormData();
     formData.append('file', file);
     
+    // 获取CSRF令牌（如果存在）
+    const csrfToken = sessionStorage.getItem('csrf_token');
+    
+    // 构建headers，确保包含CSRF令牌
+    // 注意：不要手动设置 Content-Type，让 axios 自动处理 multipart/form-data 的 boundary
+    const headers = {};
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
+    
     const response = await axios.post('/api/v1/ml-model/validate', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      }
+      headers: Object.keys(headers).length > 0 ? headers : undefined
     });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
@@ -70,13 +81,24 @@ export const getTimezone = async () => {
  */
 export const parseExcelColumns = async (file) => {
   try {
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
+    
     const formData = new FormData();
     formData.append('file', file);
     
+    // 获取CSRF令牌（如果存在）
+    const csrfToken = sessionStorage.getItem('csrf_token');
+    
+    // 构建headers，确保包含CSRF令牌
+    // 注意：不要手动设置 Content-Type，让 axios 自动处理 multipart/form-data 的 boundary
+    const headers = {};
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
+    
     const response = await axios.post('/api/v1/ml-model/parse-excel', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      }
+      headers: Object.keys(headers).length > 0 ? headers : undefined
     });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
@@ -103,11 +125,25 @@ export const saveMapping = async (mapping) => {
       throw new Error('未登录');
     }
     
+    // 确保CSRF令牌存在（如果不存在，会通过GET请求获取）
+    await ensureCsrfToken();
+    
+    // 获取CSRF令牌（如果存在）
+    const csrfToken = sessionStorage.getItem('csrf_token');
+    
+    // 构建headers，确保包含CSRF令牌
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    };
+    
+    // 如果CSRF令牌存在，添加到headers中
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
+    
     const response = await axios.post('/api/v1/ml-model/save-mapping', mapping, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      }
+      headers
     });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
@@ -129,13 +165,24 @@ export const saveMapping = async (mapping) => {
  */
 export const previewExcelData = async (file, rows = 10) => {
   try {
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
+    
     const formData = new FormData();
     formData.append('file', file);
     
+    // 获取CSRF令牌（如果存在）
+    const csrfToken = sessionStorage.getItem('csrf_token');
+    
+    // 构建headers，确保包含CSRF令牌
+    // 注意：不要手动设置 Content-Type，让 axios 自动处理 multipart/form-data 的 boundary
+    const headers = {};
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
+    
     const response = await axios.post(`/api/v1/ml-model/preview?rows=${rows}`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      }
+      headers: Object.keys(headers).length > 0 ? headers : undefined
     });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
@@ -155,13 +202,24 @@ export const previewExcelData = async (file, rows = 10) => {
  */
 export const importTrainingData = async (file) => {
   try {
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
+    
     const formData = new FormData();
     formData.append('file', file);
     
+    // 获取CSRF令牌（如果存在）
+    const csrfToken = sessionStorage.getItem('csrf_token');
+    
+    // 构建headers，确保包含CSRF令牌
+    // 注意：不要手动设置 Content-Type，让 axios 自动处理 multipart/form-data 的 boundary
+    const headers = {};
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
+    
     const response = await axios.post('/api/v1/ml-model/import', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      }
+      headers: Object.keys(headers).length > 0 ? headers : undefined
     });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {

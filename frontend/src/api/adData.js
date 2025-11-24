@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { ElMessage } from 'element-plus';
-import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled } from '../utils/api';
+import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
 
 // 获取广告数据列表
 export const getAdDataList = async (params) => {
@@ -171,10 +171,21 @@ export const exportAdData = async (params) => {
 // 导入广告数据
 export const importAdData = async (formData) => {
   try {
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
+    
+    // 获取CSRF令牌（如果存在）
+    const csrfToken = sessionStorage.getItem('csrf_token');
+    
+    // 构建headers，确保包含CSRF令牌
+    // 注意：不要手动设置 Content-Type，让 axios 自动处理 multipart/form-data 的 boundary
+    const headers = {};
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
+    
     const response = await axios.post('/api/v1/excel/import/ad-data', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      },
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
       timeout: 60000  // 导入可能需要较长时间，设置60秒超时
     });
     
@@ -194,12 +205,27 @@ export const importAdData = async (formData) => {
 // 更新广告数据
 export const updateAdData = async (adData) => {
   try {
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
+    
     // 准备请求数据，排除id字段（id在URL中）
     const { id, ...updateData } = adData;
+    
+    // 获取CSRF令牌（如果存在）
+    const csrfToken = sessionStorage.getItem('csrf_token');
+    
+    // 构建headers，确保包含CSRF令牌
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+    
+    // 如果CSRF令牌存在，添加到headers中
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
+    
     const response = await axios.post(`/api/v1/ad-data/${id}`, updateData, {
-      headers: {
-        'Content-Type': 'application/json'
-      }
+      headers
     });
     // 返回标准化的响应
     return normalizeResponse(response);
@@ -222,11 +248,25 @@ export const deleteAdData = async (dataId) => {
 // 批量删除广告数据
 export const batchDeleteAdData = async (dataIds) => {
   try {
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
+    
+    // 获取CSRF令牌（如果存在）
+    const csrfToken = sessionStorage.getItem('csrf_token');
+    
+    // 构建headers，确保包含CSRF令牌
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+    
+    // 如果CSRF令牌存在，添加到headers中
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
+    
     const response = await axios.delete('/api/v1/ad-data/batch', {
       data: dataIds,
-      headers: {
-        'Content-Type': 'application/json'
-      }
+      headers
     });
     return normalizeResponse(response);
   } catch (error) {

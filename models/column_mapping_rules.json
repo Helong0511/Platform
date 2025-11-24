@@ -1,6 +1,6 @@
 {
-  "created_at": "2025-11-10T05:55:45.650664+00:00",
-  "created_by": "helong",
+  "created_at": "2025-11-24T07:30:12.404352+00:00",
+  "created_by": "admin",
   "mapping": {
     "Date": "date",
     "Site": "product_name",
@@ -58,7 +58,15 @@
     "AdImp": "display_count",
     "ImpRate": "display_rate",
     "AdClick": "click_count",
-    "Est.Revenue": "revenue_before_deduct"
+    "Est.Revenue": "revenue_before_deduct",
+    "Ad unit": "product_name",
+    "ad requests": "request_count",
+    "responses served": "match_count",
+    "impressions": "display_count",
+    "fill rate": "display_rate",
+    "clicks": "click_count",
+    "eCPM ($)": "ecpm_before_deduct",
+    "revenue ($)": "revenue_before_deduct"
   },
   "required_fields": [
     "date",
@@ -73,11 +81,11 @@
     "ecpm_before_deduct",
     "revenue_before_deduct"
   ],
-  "mapping_count": 57,
+  "mapping_count": 65,
   "version": "1.0",
   "update_info": {
     "new_mappings": 0,
     "updated_mappings": 0,
-    "total_mappings": 57
+    "total_mappings": 65
   }
 }

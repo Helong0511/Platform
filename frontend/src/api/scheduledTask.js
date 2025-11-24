@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled } from '../utils/api';
+import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
 import { ElMessage } from 'element-plus';
 import { getSuccessMessage } from '../utils/messages';
 import { logger } from '../utils/logger';
@@ -61,6 +61,9 @@ export const getScheduledTask = async (taskName) => {
  */
 export const createScheduledTask = async (data) => {
   try {
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
+    
     const response = await axios.post('/api/v1/scheduled-tasks/', data);
     ElMessage.success(getSuccessMessage('TASK_CREATE_SUCCESS'));
     return normalizeResponse(response, { returnDataOnly: true });
@@ -87,27 +90,8 @@ export const createScheduledTask = async (data) => {
  */
 export const updateScheduledTask = async (taskName, data) => {
   try {
-    // 在发送PATCH请求前，先发送一个GET请求来获取最新的CSRF token
-    // 这样可以确保token是最新的，避免token过期或不匹配的问题
-    try {
-      await axios.get('/api/v1/scheduled-tasks/', {
-        timeout: 5000,
-        validateStatus: () => true // 接受任何状态码，因为我们只是为了获取CSRF token
-      });
-      // 等待一小段时间，确保响应拦截器已经处理完响应头
-      await new Promise(resolve => setTimeout(resolve, 150));
-    } catch (tokenError) {
-      // 即使获取token失败，也继续尝试，因为axios拦截器可能会自动处理
-      logger.warn(`[updateScheduledTask] 获取CSRF token时出错，但继续尝试: ${tokenError.message}`);
-    }
-    
-    // 检查CSRF token是否存在
-    const csrfToken = sessionStorage.getItem('csrf_token');
-    if (!csrfToken) {
-      logger.error(`[updateScheduledTask] CSRF令牌缺失，无法更新任务 ${taskName}`);
-      ElMessage.error('CSRF令牌缺失，请刷新页面后重试');
-      throw new Error('CSRF令牌缺失，请刷新页面后重试');
-    }
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
     
     // 对任务名称进行 URL 编码，确保中文路径正确传输
     const encodedTaskName = encodeURIComponent(taskName);
@@ -147,6 +131,9 @@ export const updateScheduledTask = async (taskName, data) => {
  */
 export const triggerScheduledTask = async (taskName) => {
   try {
+    // 确保CSRF令牌存在（虽然定时任务接口可能跳过CSRF检查，但为了统一性还是确保令牌存在）
+    await ensureCsrfToken();
+    
     // 对任务名称进行 URL 编码，确保中文路径正确传输
     const encodedTaskName = encodeURIComponent(taskName);
     const response = await axios.post(`/api/v1/scheduled-tasks/${encodedTaskName}/trigger`);
@@ -169,6 +156,9 @@ export const triggerScheduledTask = async (taskName) => {
  */
 export const releaseTaskLock = async (taskName) => {
   try {
+    // 确保CSRF令牌存在（虽然定时任务接口可能跳过CSRF检查，但为了统一性还是确保令牌存在）
+    await ensureCsrfToken();
+    
     // 对任务名称进行 URL 编码，确保中文路径正确传输
     const encodedTaskName = encodeURIComponent(taskName);
     const response = await axios.post(`/api/v1/scheduled-tasks/${encodedTaskName}/release-lock`);

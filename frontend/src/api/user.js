@@ -150,6 +150,9 @@ export const createUser = async (userData) => {
  */
 export const updateUser = async (id, userData) => {
   try {
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
+    
     const response = await axios.put(`/api/v1/users/${id}`, userData);
     return normalizeResponse(response);
   } catch (error) {
@@ -169,6 +172,9 @@ export const updateUser = async (id, userData) => {
  */
 export const deleteUser = async (id) => {
   try {
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
+    
     await axios.delete(`/api/v1/users/${id}`);
     return true;
   } catch (error) {
@@ -262,6 +268,9 @@ export const getUserStats = async () => {
  */
 export const changePassword = async (passwordData) => {
   try {
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
+    
     const response = await axios.put('/api/v1/users/me/password', passwordData);
     return normalizeResponse(response);
   } catch (error) {

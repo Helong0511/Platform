@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { ElMessage } from 'element-plus';
-import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled } from '../utils/api';
+import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
 import { getSuccessMessage, getWarningMessage } from '../utils/messages';
 
 // 全局缓存和请求去重机制
@@ -109,6 +109,9 @@ export const getClientDetail = async (id, options = {}) => {
 // 创建客户
 export const createClient = async (clientData) => {
   try {
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
+    
     const response = await axios.post('/api/v1/clients/', clientData);
     // 不在这里显示成功消息，由调用方处理
     return normalizeResponse(response, { returnDataOnly: true });
@@ -134,6 +137,9 @@ export const clearClientDetailCache = (id = null) => {
 // 更新客户
 export const updateClient = async (id, clientData) => {
   try {
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
+    
     const response = await axios.put(`/api/v1/clients/${id}`, clientData);
     // 清除该客户的缓存，因为信息已更新
     clearClientDetailCache(id);
@@ -152,6 +158,9 @@ export const updateClient = async (id, clientData) => {
 // 快速更新客户开关
 export const updateClientSwitches = async (id, switchData) => {
   try {
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
+    
     const response = await axios.patch(`/api/v1/clients/${id}/switches`, switchData);
     const result = normalizeResponse(response, { returnDataOnly: true });
     // 清除该客户的缓存，因为开关状态已更新
@@ -170,6 +179,9 @@ export const updateClientSwitches = async (id, switchData) => {
 // 删除客户
 export const deleteClient = async (id) => {
   try {
+    // 确保CSRF令牌存在
+    await ensureCsrfToken();
+    
     await axios.delete(`/api/v1/clients/${id}`);
     // 不在这里显示成功消息，由调用方处理
     return true;

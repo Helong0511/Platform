@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled } from '../utils/api';
+import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
 import { ElMessage } from 'element-plus';
 
 // 获取产品列表
@@ -44,11 +44,7 @@ import { logger } from '../utils/logger';
 export const createProduct = async (productData) => {
   try {
     // 确保CSRF令牌存在
-    const csrfToken = sessionStorage.getItem('csrf_token');
-    if (!csrfToken) {
-      logger.error('[createProduct] CSRF令牌缺失，无法创建产品');
-      throw new Error('CSRF令牌缺失，请刷新页面后重试');
-    }
+    await ensureCsrfToken();
     
     const response = await axios.post('/api/v1/products/', productData);
     return normalizeResponse(response, { returnDataOnly: true });
@@ -61,11 +57,7 @@ export const createProduct = async (productData) => {
 export const updateProduct = async (id, productData) => {
   try {
     // 确保CSRF令牌存在
-    const csrfToken = sessionStorage.getItem('csrf_token');
-    if (!csrfToken) {
-      logger.error(`[updateProduct] CSRF令牌缺失，无法更新产品 ${id}`);
-      throw new Error('CSRF令牌缺失，请刷新页面后重试');
-    }
+    await ensureCsrfToken();
     
     const response = await axios.put(`/api/v1/products/${id}`, productData);
     return normalizeResponse(response, { returnDataOnly: true });
@@ -78,11 +70,7 @@ export const updateProduct = async (id, productData) => {
 export const deleteProduct = async (id) => {
   try {
     // 确保CSRF令牌存在
-    const csrfToken = sessionStorage.getItem('csrf_token');
-    if (!csrfToken) {
-      logger.error(`[deleteProduct] CSRF令牌缺失，无法删除产品 ${id}`);
-      throw new Error('CSRF令牌缺失，请刷新页面后重试');
-    }
+    await ensureCsrfToken();
     
     const response = await axios.delete(`/api/v1/products/${id}`);
     return normalizeResponse(response, { returnDataOnly: true });
