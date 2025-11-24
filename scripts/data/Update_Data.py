@@ -110,7 +110,7 @@ for exp in need_exp:
                     wr = wr + "'" + str(item[b]) + "'"
                 elif isinstance(item[b], datetime.date):
                     wr = wr + "'" + str(item[b]) + "'"
-                else:
+                else:123456
                     print(type(item[b]))
 
                 if b == len(item) - 1:
@@ -135,6 +135,8 @@ for exp in need_exp:
         hand.write("UPDATE `ad_data` SET `coverage_rate` = CASE WHEN `request_count` > 0 THEN ROUND(`match_count` / `request_count` * 100, 2) ELSE 0 END;\n")
         hand.write("UPDATE `ad_data` SET `display_rate` = CASE WHEN `match_count` > 0 THEN ROUND(`display_count` / `match_count` * 100, 2) ELSE 0 END;\n")
         hand.write("UPDATE `ad_data` SET `click_rate` = CASE WHEN `display_count` > 0 THEN ROUND(`click_count` / `display_count` * 100, 2) ELSE 0 END;\n")
+
+    print('表', table_name.replace('`',''), '生成完毕！')
 
 
 wr = """\nINSERT INTO `scheduled_tasks` (`task_name`, `cron_expression`, `description`, `function_path`, `is_active`) VALUES 
