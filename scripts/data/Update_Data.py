@@ -110,7 +110,7 @@ for exp in need_exp:
                     wr = wr + "'" + str(item[b]) + "'"
                 elif isinstance(item[b], datetime.date):
                     wr = wr + "'" + str(item[b]) + "'"
-                else:123456
+                else:
                     print(type(item[b]))
 
                 if b == len(item) - 1:
