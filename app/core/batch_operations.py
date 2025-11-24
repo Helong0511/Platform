@@ -4,7 +4,7 @@
 """
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.mysql import insert
-from sqlalchemy import func
+from sqlalchemy import func, Float
 from typing import List, Dict, Any
 import logging
 
@@ -58,11 +58,28 @@ async def batch_upsert_ad_data(
             # 如果 (date, product_id) 已存在，则更新；否则插入
             stmt = insert(AdData).values(batch)
             
+            from sqlalchemy import case
             stmt = stmt.on_duplicate_key_update(
                 request_count=stmt.inserted.request_count,
                 match_count=stmt.inserted.match_count,
                 display_count=stmt.inserted.display_count,
                 click_count=stmt.inserted.click_count,
+                # 更新比率字段（如果数据中包含，否则使用计算值）
+                coverage_rate=case(
+                    (stmt.inserted.coverage_rate.isnot(None), stmt.inserted.coverage_rate),
+                    (stmt.inserted.request_count > 0, func.cast(stmt.inserted.match_count, Float) * 100.0 / func.cast(stmt.inserted.request_count, Float)),
+                    else_=0.0
+                ),
+                display_rate=case(
+                    (stmt.inserted.display_rate.isnot(None), stmt.inserted.display_rate),
+                    (stmt.inserted.match_count > 0, func.cast(stmt.inserted.display_count, Float) * 100.0 / func.cast(stmt.inserted.match_count, Float)),
+                    else_=0.0
+                ),
+                click_rate=case(
+                    (stmt.inserted.click_rate.isnot(None), stmt.inserted.click_rate),
+                    (stmt.inserted.display_count > 0, func.cast(stmt.inserted.click_count, Float) * 100.0 / func.cast(stmt.inserted.display_count, Float)),
+                    else_=0.0
+                ),
                 ecpm_before_deduct=stmt.inserted.ecpm_before_deduct,
                 ecpm_after_deduct=stmt.inserted.ecpm_after_deduct,
                 revenue_before_deduct=stmt.inserted.revenue_before_deduct,

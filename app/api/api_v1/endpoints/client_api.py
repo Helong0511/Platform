@@ -557,18 +557,18 @@ async def get_client_data(
                 date_obj = ad_data.date.date() if hasattr(ad_data.date, 'date') else ad_data.date
                 date_str = date_obj.isoformat()
 
-                # 计算比率（保留2位小数）
-                coverage_rate = round(
+                # 使用数据库字段中的比率（如果为空则计算）
+                coverage_rate = ad_data.coverage_rate if ad_data.coverage_rate is not None else round(
                     (ad_data.match_count / ad_data.request_count * 100)
                     if ad_data.request_count > 0 else 0.0,
                     2
                 )
-                display_rate = round(
+                display_rate = ad_data.display_rate if ad_data.display_rate is not None else round(
                     (ad_data.display_count / ad_data.match_count * 100)
                     if ad_data.match_count > 0 else 0.0,
                     2
                 )
-                click_rate = round(
+                click_rate = ad_data.click_rate if ad_data.click_rate is not None else round(
                     (ad_data.click_count / ad_data.display_count * 100)
                     if ad_data.display_count > 0 else 0.0,
                     2

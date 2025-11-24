@@ -80,17 +80,27 @@ async def get_dashboard_stats(period: str = "week", db: AsyncSession = Depends(g
         query = select(
             func.cast(func.sum(AdData.request_count), Float).label('total_requests'),
             func.sum(AdData.match_count).label('total_matches'),
-            case((func.sum(AdData.request_count) == 0, 0),
-                 else_=func.cast(func.sum(AdData.match_count), Float) * 100.0 / func.cast(
-                     func.sum(AdData.request_count), Float)).label('avg_coverage'),
+            # 使用数据库字段，如果为空则计算（使用 COALESCE 确保向后兼容）
+            func.coalesce(
+                func.avg(AdData.coverage_rate),
+                case((func.sum(AdData.request_count) == 0, 0),
+                     else_=func.cast(func.sum(AdData.match_count), Float) * 100.0 / func.cast(
+                         func.sum(AdData.request_count), Float))
+            ).label('avg_coverage'),
             func.sum(AdData.display_count).label('total_impressions'),
-            case((func.sum(AdData.match_count) == 0, 0),
-                 else_=func.cast(func.sum(AdData.display_count), Float) * 100.0 / func.cast(
-                     func.sum(AdData.match_count), Float)).label('avg_display_rate'),
+            func.coalesce(
+                func.avg(AdData.display_rate),
+                case((func.sum(AdData.match_count) == 0, 0),
+                     else_=func.cast(func.sum(AdData.display_count), Float) * 100.0 / func.cast(
+                         func.sum(AdData.match_count), Float))
+            ).label('avg_display_rate'),
             func.sum(AdData.click_count).label('total_clicks'),
-            case((func.sum(AdData.display_count) == 0, 0),
-                 else_=func.cast(func.sum(AdData.click_count), Float) * 100.0 / func.cast(
-                     func.sum(AdData.display_count), Float)).label('avg_ctr'),
+            func.coalesce(
+                func.avg(AdData.click_rate),
+                case((func.sum(AdData.display_count) == 0, 0),
+                     else_=func.cast(func.sum(AdData.click_count), Float) * 100.0 / func.cast(
+                         func.sum(AdData.display_count), Float))
+            ).label('avg_ctr'),
             func.avg(AdData.ecpm_after_deduct).label('avg_ecpm_deducted'),
             func.cast(func.sum(AdData.revenue_after_deduct), Float).label('total_revenue_deducted'),
             func.avg(AdData.ecpm_before_deduct).label('avg_ecpm_undeducted'),
@@ -174,17 +184,27 @@ async def get_dashboard_stats(period: str = "week", db: AsyncSession = Depends(g
         query_prev = select(
             func.cast(func.sum(AdData.request_count), Float).label('total_requests'),
             func.sum(AdData.match_count).label('total_matches'),
-            case((func.sum(AdData.request_count) == 0, 0),
-                 else_=func.cast(func.sum(AdData.match_count), Float) * 100.0 / func.cast(
-                     func.sum(AdData.request_count), Float)).label('avg_coverage'),
+            # 使用数据库字段，如果为空则计算（使用 COALESCE 确保向后兼容）
+            func.coalesce(
+                func.avg(AdData.coverage_rate),
+                case((func.sum(AdData.request_count) == 0, 0),
+                     else_=func.cast(func.sum(AdData.match_count), Float) * 100.0 / func.cast(
+                         func.sum(AdData.request_count), Float))
+            ).label('avg_coverage'),
             func.sum(AdData.display_count).label('total_impressions'),
-            case((func.sum(AdData.match_count) == 0, 0),
-                 else_=func.cast(func.sum(AdData.display_count), Float) * 100.0 / func.cast(
-                     func.sum(AdData.match_count), Float)).label('avg_display_rate'),
+            func.coalesce(
+                func.avg(AdData.display_rate),
+                case((func.sum(AdData.match_count) == 0, 0),
+                     else_=func.cast(func.sum(AdData.display_count), Float) * 100.0 / func.cast(
+                         func.sum(AdData.match_count), Float))
+            ).label('avg_display_rate'),
             func.sum(AdData.click_count).label('total_clicks'),
-            case((func.sum(AdData.display_count) == 0, 0),
-                 else_=func.cast(func.sum(AdData.click_count), Float) * 100.0 / func.cast(
-                     func.sum(AdData.display_count), Float)).label('avg_ctr'),
+            func.coalesce(
+                func.avg(AdData.click_rate),
+                case((func.sum(AdData.display_count) == 0, 0),
+                     else_=func.cast(func.sum(AdData.click_count), Float) * 100.0 / func.cast(
+                         func.sum(AdData.display_count), Float))
+            ).label('avg_ctr'),
             func.avg(AdData.ecpm_after_deduct).label('avg_ecpm_deducted'),
             func.cast(func.sum(AdData.revenue_after_deduct), Float).label('total_revenue_deducted'),
             func.avg(AdData.ecpm_before_deduct).label('avg_ecpm_undeducted'),
@@ -376,11 +396,15 @@ async def get_recent_ad_data(
             func.sum(AdData.display_count).label('impressions'),
             func.sum(AdData.click_count).label('clicks'),
             func.sum(AdData.revenue_after_deduct).label('revenue'),
-            func.avg(
-                case(
-                    (func.sum(AdData.display_count) == 0, 0),
-                    else_=func.cast(func.sum(AdData.click_count), Float) * 100.0 / func.cast(
-                        func.sum(AdData.display_count), Float)
+            # 使用数据库字段，如果为空则计算（使用 COALESCE 确保向后兼容）
+            func.coalesce(
+                func.avg(AdData.click_rate),
+                func.avg(
+                    case(
+                        (func.sum(AdData.display_count) == 0, 0),
+                        else_=func.cast(func.sum(AdData.click_count), Float) * 100.0 / func.cast(
+                            func.sum(AdData.display_count), Float)
+                    )
                 )
             ).label('avg_ctr')
         ).join(Product, AdData.product_id == Product.id)

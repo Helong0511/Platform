@@ -862,6 +862,21 @@ async def process_row_data(
             existing_data.ecpm_after_deduct = ecpm_after
             existing_data.revenue_before_deduct = revenue_before
             existing_data.revenue_after_deduct = revenue_after
+            # 如果Excel中提供了比率字段，使用Excel的值；否则使用计算值
+            if coverage_rate_val is not None and pd.notna(coverage_rate_val) and str(coverage_rate_val).strip() != "":
+                existing_data.coverage_rate = float(coverage_rate_val)
+            else:
+                existing_data.coverage_rate = coverage_rate
+            if display_rate_val is not None and pd.notna(display_rate_val) and str(display_rate_val).strip() != "":
+                existing_data.display_rate = float(display_rate_val)
+            else:
+                existing_data.display_rate = display_rate
+            if click_rate_val is not None and pd.notna(click_rate_val) and str(click_rate_val).strip() != "":
+                existing_data.click_rate = float(click_rate_val)
+            else:
+                existing_data.click_rate = click_rate
+            # 如果基础数据有变化，重新计算比率字段（确保一致性）
+            existing_data.calculate_rates()
             result["updated_rows"] += 1
             logger.debug(f"✅ 已更新记录: 日期={data_date}, 产品={product_name}")
         else:
@@ -912,6 +927,21 @@ async def process_row_data(
                 revenue_before_deduct=revenue_before,
                 revenue_after_deduct=revenue_after
             )
+            # 如果Excel中提供了比率字段，使用Excel的值；否则使用计算值
+            if coverage_rate_val is not None and pd.notna(coverage_rate_val) and str(coverage_rate_val).strip() != "":
+                ad_data.coverage_rate = float(coverage_rate_val)
+            else:
+                ad_data.coverage_rate = coverage_rate
+            if display_rate_val is not None and pd.notna(display_rate_val) and str(display_rate_val).strip() != "":
+                ad_data.display_rate = float(display_rate_val)
+            else:
+                ad_data.display_rate = display_rate
+            if click_rate_val is not None and pd.notna(click_rate_val) and str(click_rate_val).strip() != "":
+                ad_data.click_rate = float(click_rate_val)
+            else:
+                ad_data.click_rate = click_rate
+            # 调用计算方法确保比率字段正确（如果基础数据有变化，会重新计算）
+            ad_data.calculate_rates()
             db.add(ad_data)
             result["new_rows"] += 1
             logger.debug(f"✅ 已创建新记录: 日期={data_date}, 产品={product_name}")

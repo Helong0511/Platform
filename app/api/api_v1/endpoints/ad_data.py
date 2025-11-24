@@ -16,7 +16,7 @@ from typing import Any
 
 # 第三方库导入
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, status
-from sqlalchemy import delete, func, text, literal_column
+from sqlalchemy import delete, func, text, literal_column, case, Float
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -223,16 +223,21 @@ async def get_ad_data(
         "display_count": AdData.display_count,
         "click_count": AdData.click_count,
         "ecpm_after_deduct": AdData.ecpm_after_deduct,
-        "revenue_after_deduct": AdData.revenue_after_deduct
+        "ecpm_before_deduct": AdData.ecpm_before_deduct,
+        "revenue_after_deduct": AdData.revenue_after_deduct,
+        "revenue_before_deduct": AdData.revenue_before_deduct,
+        "coverage_rate": AdData.coverage_rate,  # 覆盖率（数据库字段）
+        "display_rate": AdData.display_rate,   # 展示率（数据库字段）
+        "click_rate": AdData.click_rate        # 点击率（数据库字段）
     }
-
+    
     # 默认排序字段
     if sort_by not in valid_sort_fields:
         sort_by = "date"
-
+    
     # 获取排序字段
     sort_column = valid_sort_fields[sort_by]
-
+    
     # 设置排序方向
     if sort_order.lower() == "desc":
         query = query.order_by(sort_column.desc())
@@ -356,10 +361,19 @@ async def get_ad_data(
         except Exception as e:
             logger.error(f"解构数据失败: {str(e)}, row={row}")
             continue
-        # 计算各种比率
-        coverage_rate = ad_data.coverage_rate
-        display_rate = ad_data.display_rate
-        click_rate = ad_data.click_rate
+        # 使用数据库字段中的比率（如果为空则计算）
+        coverage_rate = ad_data.coverage_rate if ad_data.coverage_rate is not None else round(
+            (ad_data.match_count / ad_data.request_count * 100) if ad_data.request_count > 0 else 0.0,
+            2
+        )
+        display_rate = ad_data.display_rate if ad_data.display_rate is not None else round(
+            (ad_data.display_count / ad_data.match_count * 100) if ad_data.match_count > 0 else 0.0,
+            2
+        )
+        click_rate = ad_data.click_rate if ad_data.click_rate is not None else round(
+            (ad_data.click_count / ad_data.display_count * 100) if ad_data.display_count > 0 else 0.0,
+            2
+        )
 
         # 根据用户角色决定返回哪些字段
         # 将 DateTime 转换为 date
@@ -885,7 +899,9 @@ async def get_daily_summary(
     )
     
     # 验证排序字段
-    # 注意：eCPM 排序使用收益/展示数计算，但由于SQL限制，这里使用收益排序作为近似
+    # 注意：覆盖率、展示率、点击率、eCPM等计算字段无法在SQL中直接排序
+    # 这些字段需要在获取数据后在前端或内存中排序
+    # 对于可以在SQL中排序的字段，使用SQL排序；对于计算字段，标记为需要内存排序
     valid_sort_fields = {
         "date": func.date(AdData.date),
         "product": Product.name,
@@ -894,99 +910,133 @@ async def get_daily_summary(
         "match_count": func.sum(AdData.match_count),
         "display_count": func.sum(AdData.display_count),
         "click_count": func.sum(AdData.click_count),
+        "coverage_rate": func.avg(AdData.coverage_rate),  # 使用平均值作为排序依据
+        "display_rate": func.avg(AdData.display_rate),
+        "click_rate": func.avg(AdData.click_rate),
         "ecpm_after_deduct": func.sum(AdData.revenue_after_deduct),  # 使用收益排序作为eCPM的近似排序
-        "revenue_after_deduct": func.sum(AdData.revenue_after_deduct)
+        "revenue_after_deduct": func.sum(AdData.revenue_after_deduct),
+        "revenue_before_deduct": func.sum(AdData.revenue_before_deduct)
     }
     
-    if sort_by not in valid_sort_fields:
-        sort_by = "date"
+    # 需要内存排序的字段（计算字段，无法在SQL中直接排序）
+    memory_sort_fields = {
+        "ecpm_before_deduct"  # 扣减前eCPM = 扣减前收益 / 展示数 * 1000（每日汇总时需要计算）
+    }
     
-    sort_column = valid_sort_fields[sort_by]
-    if sort_order.lower() == "desc":
-        query = query.order_by(sort_column.desc())
-    else:
-        query = query.order_by(sort_column.asc())
+    # 判断是否需要内存排序
+    need_memory_sort = sort_by in memory_sort_fields
+    
+    # 如果排序字段在SQL可排序列表中，使用SQL排序
+    if sort_by in valid_sort_fields:
+        sort_column = valid_sort_fields[sort_by]
+        if sort_order.lower() == "desc":
+            query = query.order_by(sort_column.desc())
+        else:
+            query = query.order_by(sort_column.asc())
+    elif not need_memory_sort:
+        # 无效的排序字段，使用默认排序
+        sort_by = "date"
+        sort_column = valid_sort_fields[sort_by]
+        if sort_order.lower() == "desc":
+            query = query.order_by(sort_column.desc())
+        else:
+            query = query.order_by(sort_column.asc())
+    # 如果是需要内存排序的字段，先不排序，后面在内存中排序
     
     # ====== 计算总数 ======
-    try:
-        # 优化：使用子查询优化计数，避免复杂的DISTINCT CONCAT操作
-        # 先获取满足条件的所有(date, product_id)组合，然后计数
-        subquery = select(
-            func.date(AdData.date).label("date"),
-            Product.id.label("product_id")
-        ).select_from(AdData)
-        subquery = subquery.join(Product, AdData.product_id == Product.id)
-        subquery = subquery.where(Product.is_active == True)
-        
-        if use_assignment_table:
-            end_date_with_default = func.coalesce(
-                func.date_add(ProductAssignment.end_date, text("INTERVAL 1 DAY")),
-                literal_column("'2099-12-31'")
-            )
-            subquery = subquery.join(
-                ProductAssignment,
-                and_(
-                    ProductAssignment.product_id == Product.id,
-                    AdData.date >= ProductAssignment.start_date,
-                    AdData.date < end_date_with_default
+    # 如果需要在内存中排序，总数会在排序后计算
+    # 否则使用SQL计算总数
+    if not need_memory_sort:
+        try:
+            # 优化：使用子查询优化计数，避免复杂的DISTINCT CONCAT操作
+            # 先获取满足条件的所有(date, product_id)组合，然后计数
+            subquery = select(
+                func.date(AdData.date).label("date"),
+                Product.id.label("product_id")
+            ).select_from(AdData)
+            subquery = subquery.join(Product, AdData.product_id == Product.id)
+            subquery = subquery.where(Product.is_active == True)
+            
+            if use_assignment_table:
+                end_date_with_default = func.coalesce(
+                    func.date_add(ProductAssignment.end_date, text("INTERVAL 1 DAY")),
+                    literal_column("'2099-12-31'")
                 )
+                subquery = subquery.join(
+                    ProductAssignment,
+                    and_(
+                        ProductAssignment.product_id == Product.id,
+                        AdData.date >= ProductAssignment.start_date,
+                        AdData.date < end_date_with_default
+                    )
+                )
+                subquery = subquery.join(Client, ProductAssignment.client_id == Client.id)
+            else:
+                subquery = subquery.join(Client, Product.client_id == Client.id)
+            
+            # 应用相同的过滤条件
+            if current_user.role != UserRole.ADMIN:
+                subquery = subquery.where(Client.user_id == current_user.id)
+            else:
+                if client_id:
+                    subquery = subquery.where(Client.id == client_id)
+            
+            if product_id and product_id.strip():
+                try:
+                    product_id_int = int(product_id)
+                    subquery = subquery.where(AdData.product_id == product_id_int)
+                except ValueError:
+                    pass
+            
+            if start_date:
+                start_datetime = datetime.combine(start_date, datetime.min.time())
+                subquery = subquery.where(AdData.date >= start_datetime)
+            if end_date:
+                end_datetime = datetime.combine(end_date, datetime.max.time())
+                subquery = subquery.where(AdData.date <= end_datetime)
+            elif not start_date and not end_date:
+                today = date.today()
+                month_start = date(today.year, today.month, 1)
+                _, last_day = monthrange(today.year, today.month)
+                month_end = date(today.year, today.month, last_day)
+                month_start_datetime = datetime.combine(month_start, datetime.min.time())
+                month_end_datetime = datetime.combine(month_end, datetime.max.time())
+                subquery = subquery.where(AdData.date >= month_start_datetime)
+                subquery = subquery.where(AdData.date <= month_end_datetime)
+            
+            # 分组去重
+            subquery = subquery.group_by(
+                func.date(AdData.date),
+                Product.id
             )
-            subquery = subquery.join(Client, ProductAssignment.client_id == Client.id)
-        else:
-            subquery = subquery.join(Client, Product.client_id == Client.id)
-        
-        # 应用相同的过滤条件
-        if current_user.role != UserRole.ADMIN:
-            subquery = subquery.where(Client.user_id == current_user.id)
-        else:
-            if client_id:
-                subquery = subquery.where(Client.id == client_id)
-        
-        if product_id and product_id.strip():
-            try:
-                product_id_int = int(product_id)
-                subquery = subquery.where(AdData.product_id == product_id_int)
-            except ValueError:
-                pass
-        
-        if start_date:
-            start_datetime = datetime.combine(start_date, datetime.min.time())
-            subquery = subquery.where(AdData.date >= start_datetime)
-        if end_date:
-            end_datetime = datetime.combine(end_date, datetime.max.time())
-            subquery = subquery.where(AdData.date <= end_datetime)
-        elif not start_date and not end_date:
-            today = date.today()
-            month_start = date(today.year, today.month, 1)
-            _, last_day = monthrange(today.year, today.month)
-            month_end = date(today.year, today.month, last_day)
-            month_start_datetime = datetime.combine(month_start, datetime.min.time())
-            month_end_datetime = datetime.combine(month_end, datetime.max.time())
-            subquery = subquery.where(AdData.date >= month_start_datetime)
-            subquery = subquery.where(AdData.date <= month_end_datetime)
-        
-        # 分组去重
-        subquery = subquery.group_by(
-            func.date(AdData.date),
-            Product.id
-        )
-        
-        # 外层查询计数
-        count_query = select(func.count()).select_from(subquery.alias("distinct_groups"))
-        count_result = await db.execute(count_query)
-        total = count_result.scalar() or 0
-    except Exception as e:
-        logger.error(f"计算每日汇总总数失败: {str(e)}")
+            
+            # 外层查询计数
+            count_query = select(func.count()).select_from(subquery.alias("distinct_groups"))
+            count_result = await db.execute(count_query)
+            total = count_result.scalar() or 0
+        except Exception as e:
+            logger.error(f"计算每日汇总总数失败: {str(e)}")
+            total = 0
+    else:
+        # 内存排序时，总数会在排序后计算
         total = 0
     
     # ====== 分页查询 ======
-    offset = (page - 1) * page_size
-    result = await db.execute(query.offset(offset).limit(page_size))
-    summary_data = result.all()
+    # 如果需要在内存中排序，先获取所有数据，排序后再分页
+    # 否则直接使用SQL分页
+    if need_memory_sort:
+        # 获取所有数据（不分页）
+        result = await db.execute(query)
+        all_summary_data = result.all()
+    else:
+        # 使用SQL分页
+        offset = (page - 1) * page_size
+        result = await db.execute(query.offset(offset).limit(page_size))
+        all_summary_data = result.all()
     
     # ====== 转换为响应格式 ======
     ad_data_responses = []
-    for row in summary_data:
+    for row in all_summary_data:
         date_obj = row.date if isinstance(row.date, date) else row.date.date() if hasattr(row.date, 'date') else row.date
         date_str = date_obj.isoformat() if hasattr(date_obj, 'isoformat') else str(date_obj)
         
@@ -998,7 +1048,7 @@ async def get_daily_summary(
         total_revenue_after = float(row.revenue_after_deduct or 0.0)
         total_revenue_before = float(row.revenue_before_deduct or 0.0)
         
-        # 根据汇总后的数值重新计算比率
+        # 根据汇总后的数值重新计算比率（每日汇总时，使用汇总后的数值计算）
         # 覆盖率 = 匹配数 / 请求数 * 100
         coverage_rate = round(
             (total_match_count / total_request_count * 100) if total_request_count > 0 else 0.0,
@@ -1061,6 +1111,20 @@ async def get_daily_summary(
             })
         
         ad_data_responses.append(AdDataResponse(**response_data))
+    
+    # ====== 内存排序（如果需要） ======
+    if need_memory_sort:
+        # 按计算字段排序
+        reverse_order = sort_order.lower() == "desc"
+        
+        # 注意：coverage_rate、display_rate、click_rate 现在可以在SQL中排序，不需要内存排序
+        if sort_by == "ecpm_before_deduct":
+            ad_data_responses.sort(key=lambda x: x.ecpm_before_deduct or 0, reverse=reverse_order)
+        
+        # 内存排序后，需要重新计算总数和分页
+        total = len(ad_data_responses)
+        offset = (page - 1) * page_size
+        ad_data_responses = ad_data_responses[offset:offset + page_size]
     
     return ResponseBaseSchema.success(data=AdDataListResponse(
         data=ad_data_responses,
@@ -1191,10 +1255,19 @@ async def get_ad_data_detail(
             detail=f"查询广告数据失败：{str(e)}。请稍后重试或联系管理员"
         )
 
-    # 计算各种比率
-    coverage_rate = ad_data.coverage_rate
-    display_rate = ad_data.display_rate
-    click_rate = ad_data.click_rate
+    # 使用数据库字段中的比率（如果为空则计算）
+    coverage_rate = ad_data.coverage_rate if ad_data.coverage_rate is not None else round(
+        (ad_data.match_count / ad_data.request_count * 100) if ad_data.request_count > 0 else 0.0,
+        2
+    )
+    display_rate = ad_data.display_rate if ad_data.display_rate is not None else round(
+        (ad_data.display_count / ad_data.match_count * 100) if ad_data.match_count > 0 else 0.0,
+        2
+    )
+    click_rate = ad_data.click_rate if ad_data.click_rate is not None else round(
+        (ad_data.click_count / ad_data.display_count * 100) if ad_data.display_count > 0 else 0.0,
+        2
+    )
 
     # 将 DateTime 转换为 date
     date_value = ad_data.date
@@ -1371,6 +1444,10 @@ async def update_ad_data(
     for key, value in update_data.items():
         if key in allowed_fields and hasattr(ad_data, key):
             setattr(ad_data, key, value)
+    
+    # 如果基础数据字段有变化，重新计算比率字段
+    if any(key in update_data for key in ['request_count', 'match_count', 'display_count', 'click_count']):
+        ad_data.calculate_rates()
 
     # 保存更新
     try:
@@ -1661,6 +1738,7 @@ async def get_ad_data_summary(
     use_assignment_table = await check_use_assignment_table(db)
     
     # 构建查询基础
+    # 使用数据库字段计算平均值，如果字段为空则使用计算值（使用 COALESCE 确保向后兼容）
     query = select(
         func.sum(AdData.request_count).label("total_requests"),
         func.sum(AdData.match_count).label("total_matches"),
@@ -1668,9 +1746,24 @@ async def get_ad_data_summary(
         func.sum(AdData.click_count).label("total_clicks"),
         func.sum(AdData.ecpm_after_deduct).label("total_ecpm_after"),
         func.sum(AdData.revenue_after_deduct).label("total_revenue_after"),
-        func.avg(AdData.coverage_rate).label("avg_coverage_rate"),
-        func.avg(AdData.display_rate).label("avg_display_rate"),
-        func.avg(AdData.click_rate).label("avg_click_rate")
+        func.coalesce(
+            func.avg(AdData.coverage_rate),
+            case((func.sum(AdData.request_count) == 0, 0),
+                 else_=func.cast(func.sum(AdData.match_count), Float) * 100.0 / func.cast(
+                     func.sum(AdData.request_count), Float))
+        ).label("avg_coverage_rate"),
+        func.coalesce(
+            func.avg(AdData.display_rate),
+            case((func.sum(AdData.match_count) == 0, 0),
+                 else_=func.cast(func.sum(AdData.display_count), Float) * 100.0 / func.cast(
+                     func.sum(AdData.match_count), Float))
+        ).label("avg_display_rate"),
+        func.coalesce(
+            func.avg(AdData.click_rate),
+            case((func.sum(AdData.display_count) == 0, 0),
+                 else_=func.cast(func.sum(AdData.click_count), Float) * 100.0 / func.cast(
+                     func.sum(AdData.display_count), Float))
+        ).label("avg_click_rate")
     )
     query = query.join(Product, AdData.product_id == Product.id)
     

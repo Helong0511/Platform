@@ -92,23 +92,24 @@
         stripe
         style="width: 100%"
         @selection-change="handleSelectionChange"
+        @sort-change="handleSortChange"
       >
         <el-table-column type="selection" width="55"></el-table-column>
-        <el-table-column prop="date" label="数据日期"></el-table-column>
+        <el-table-column prop="date" label="数据日期" sortable="custom"></el-table-column>
         <el-table-column v-if="isAdmin" prop="user_name" label="所属客户"></el-table-column>
-        <el-table-column prop="product_name" label="产品名称"></el-table-column>
+        <el-table-column prop="product_name" label="产品名称" sortable="custom" sort-by="product"></el-table-column>
         <el-table-column prop="country_name_zh" label="国家"></el-table-column>
-        <el-table-column prop="request_count" label="请求数"></el-table-column>
-        <el-table-column prop="match_count" label="匹配数"></el-table-column>
-        <el-table-column prop="coverage_rate" label="覆盖率" :formatter="formatPercentage"></el-table-column>
-        <el-table-column prop="display_count" label="展示数"></el-table-column>
-        <el-table-column prop="display_rate" label="展示率" :formatter="formatPercentage"></el-table-column>
-        <el-table-column prop="click_count" label="点击数"></el-table-column>
-        <el-table-column prop="click_rate" label="点击率" :formatter="formatPercentage"></el-table-column>
-        <el-table-column prop="ecpm_after_deduct" :label="isAdmin ? 'eCPM(扣)' : 'eCPM'" :formatter="formatCurrency"></el-table-column>
-        <el-table-column v-if="isAdmin" prop="ecpm_before_deduct" label="eCPM" :formatter="formatCurrency"></el-table-column>
-        <el-table-column prop="revenue_after_deduct" :label="isAdmin ? '收益(扣)' : '收益'" :formatter="formatCurrency"></el-table-column>
-        <el-table-column v-if="isAdmin" prop="revenue_before_deduct" label="收益" :formatter="formatCurrency"></el-table-column>
+        <el-table-column prop="request_count" label="请求数" sortable="custom"></el-table-column>
+        <el-table-column prop="match_count" label="匹配数" sortable="custom"></el-table-column>
+        <el-table-column prop="coverage_rate" label="覆盖率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column prop="display_count" label="展示数" sortable="custom"></el-table-column>
+        <el-table-column prop="display_rate" label="展示率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column prop="click_count" label="点击数" sortable="custom"></el-table-column>
+        <el-table-column prop="click_rate" label="点击率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column prop="ecpm_after_deduct" :label="isAdmin ? 'eCPM(扣)' : 'eCPM'" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="isAdmin" prop="ecpm_before_deduct" label="eCPM" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column prop="revenue_after_deduct" :label="isAdmin ? '收益(扣)' : '收益'" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="isAdmin" prop="revenue_before_deduct" label="收益" :formatter="formatCurrency" sortable="custom"></el-table-column>
         <el-table-column v-if="isAdmin" label="操作" width="180">
           <template #default="scope">
             <el-button size="small" type="primary" @click="handleEdit(scope.row)">修改</el-button>
@@ -244,6 +245,12 @@ const pagination = ref({
   total: 0
 });
 
+// 排序状态
+const sortInfo = ref({
+  prop: 'date',
+  order: 'descending' // 'ascending' 或 'descending'
+});
+
 // 筛选表单
 const searchForm = ref({
   clientId: '', // 筛选表单的客户ID（仅管理员可见）
@@ -305,6 +312,12 @@ const fetchAdData = async () => {
   if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
     params.start_date = searchForm.value.dateRange[0];
     params.end_date = searchForm.value.dateRange[1];
+  }
+  
+  // 添加排序参数
+  if (sortInfo.value.prop) {
+    params.sort_by = sortInfo.value.prop;
+    params.sort_order = sortInfo.value.order === 'ascending' ? 'asc' : 'desc';
   }
   
   // 检查是否为重复请求（相同的参数且正在请求中）
@@ -648,6 +661,24 @@ const handleDateRangeChange = async () => {
   }
 };
 
+// 处理排序变化
+const handleSortChange = ({ prop, order }) => {
+  if (prop) {
+    // 处理特殊字段映射
+    let sortProp = prop;
+    if (prop === 'product_name') {
+      sortProp = 'product'; // 后端使用 'product' 作为产品名称排序字段
+    }
+    
+    sortInfo.value.prop = sortProp;
+    sortInfo.value.order = order || 'descending';
+    // 重置到第一页
+    pagination.value.current = 1;
+    // 重新获取数据
+    fetchAdData();
+  }
+};
+
 // 重置筛选条件
 const resetFilter = async () => {
   searchForm.value = {
@@ -657,6 +688,11 @@ const resetFilter = async () => {
     countryCode: '' // 重置国家代码筛选
   };
   pagination.value.current = 1;
+  // 重置排序
+  sortInfo.value = {
+    prop: 'date',
+    order: 'descending'
+  };
   
   // 重新加载有数据的客户列表（管理员）
   if (isAdmin.value) {

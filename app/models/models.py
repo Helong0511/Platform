@@ -118,8 +118,11 @@ class AdData(Base):
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, comment='产品ID')
     request_count = Column(Integer, default=0, comment='请求数')
     match_count = Column(Integer, default=0, comment='匹配数')
+    coverage_rate = Column(Float, default=0.0, comment='覆盖率（%）')
     display_count = Column(Integer, default=0, comment='展示数')
+    display_rate = Column(Float, default=0.0, comment='展示率（%）')
     click_count = Column(Integer, default=0, comment='点击数')
+    click_rate = Column(Float, default=0.0, comment='点击率（%）')
     ecpm_before_deduct = Column(Float, default=0.0, comment='eCPM未减扣')
     ecpm_after_deduct = Column(Float, default=0.0, comment='eCPM已减扣')
     revenue_before_deduct = Column(Float, default=0.0, comment='收益未减扣')
@@ -136,21 +139,27 @@ class AdData(Base):
         UniqueConstraint("date", "product_id", "country_code", name="uq_ad_data_date_product_country"),
     )
 
-    # 计算字段
-    @property
-    def coverage_rate(self) -> float:
-        # 覆盖率 = 匹配数 / 请求数
-        return round(self.match_count / self.request_count * 100 if self.request_count > 0 else 0, 2)
-
-    @property
-    def display_rate(self) -> float:
-        # 展示率 = 展示数 / 匹配数
-        return round(self.display_count / self.match_count * 100 if self.match_count > 0 else 0, 2)
-
-    @property
-    def click_rate(self) -> float:
-        # 点击率 = 点击数 / 展示数
-        return round(self.click_count / self.display_count * 100 if self.display_count > 0 else 0, 2)
+    # 辅助方法：计算并更新比率字段（用于数据插入/更新时自动计算）
+    def calculate_rates(self) -> None:
+        """
+        计算并更新覆盖率、展示率、点击率
+        在数据插入或更新时调用此方法，确保这些字段始终是最新的
+        """
+        # 覆盖率 = 匹配数 / 请求数 * 100
+        self.coverage_rate = round(
+            (self.match_count / self.request_count * 100) if self.request_count > 0 else 0.0,
+            2
+        )
+        # 展示率 = 展示数 / 匹配数 * 100
+        self.display_rate = round(
+            (self.display_count / self.match_count * 100) if self.match_count > 0 else 0.0,
+            2
+        )
+        # 点击率 = 点击数 / 展示数 * 100
+        self.click_rate = round(
+            (self.click_count / self.display_count * 100) if self.display_count > 0 else 0.0,
+            2
+        )
 
 
     # 关系

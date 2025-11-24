@@ -282,10 +282,19 @@ async def export_ad_data_handler(
         # 创建数据列表
         data = []
         for item, country_info in ad_data_results:
-            # 计算各种比率
-            coverage_rate = item.coverage_rate
-            display_rate = item.display_rate
-            click_rate = item.click_rate
+            # 使用数据库字段中的比率（如果为空则计算）
+            coverage_rate = item.coverage_rate if item.coverage_rate is not None else round(
+                (item.match_count / item.request_count * 100) if item.request_count > 0 else 0.0,
+                2
+            )
+            display_rate = item.display_rate if item.display_rate is not None else round(
+                (item.display_count / item.match_count * 100) if item.match_count > 0 else 0.0,
+                2
+            )
+            click_rate = item.click_rate if item.click_rate is not None else round(
+                (item.click_count / item.display_count * 100) if item.display_count > 0 else 0.0,
+                2
+            )
 
             # 处理日期格式
             date_value = item.date

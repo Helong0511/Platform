@@ -278,6 +278,10 @@ async def process_api_ad_data(
                         update_fields.append(f"点击数: {existing_data.click_count} -> {item_data['click_count']}")
                         existing_data.click_count = item_data["click_count"]
                     
+                    # 如果基础数据有变化，重新计算比率字段
+                    if need_update:
+                        existing_data.calculate_rates()
+                    
                     if abs(existing_data.ecpm_before_deduct - final_ecpm) > 0.01:
                         need_update = True
                         update_fields.append(f"eCPM(减扣前): {existing_data.ecpm_before_deduct:.2f} -> {final_ecpm:.2f}")
@@ -349,6 +353,8 @@ async def process_api_ad_data(
                         revenue_before_deduct=total_revenue,
                         revenue_after_deduct=revenue_after_deduct
                     )
+                    # 计算并设置比率字段
+                    new_ad_data.calculate_rates()
                     
                     db.add(new_ad_data)
                     await db.flush()
@@ -486,6 +492,10 @@ async def process_api_ad_data(
                         update_fields.append(f"点击数: {existing_data.click_count} -> {grouped_data['click_count']}")
                         existing_data.click_count = grouped_data["click_count"]
                     
+                    # 如果基础数据有变化，重新计算比率字段
+                    if need_update:
+                        existing_data.calculate_rates()
+                    
                     if abs(existing_data.ecpm_before_deduct - final_ecpm) > 0.01:
                         need_update = True
                         update_fields.append(f"eCPM(减扣前): {existing_data.ecpm_before_deduct:.2f} -> {final_ecpm:.2f}")
@@ -557,6 +567,8 @@ async def process_api_ad_data(
                         revenue_before_deduct=total_revenue,
                         revenue_after_deduct=revenue_after_deduct
                     )
+                    # 计算并设置比率字段
+                    new_ad_data.calculate_rates()
                     
                     db.add(new_ad_data)
                     await db.flush()
