@@ -1182,6 +1182,39 @@ async def import_ad_data_handler(
             f"失败 {result.get('failed_rows', 0)} 行"
         )
 
+        # 发送 Telegram 通知（仅在成功导入时）
+        if result['success_rows'] > 0:
+            try:
+                from app.core.auto_bot import send_telegram_message
+                import asyncio
+                
+                # 构建通知消息
+                telegram_msg = f"📊 Excel 导入成功\n\n"
+                telegram_msg += f"用户: {current_user.username}\n"
+                telegram_msg += f"文件: {file.filename}\n"
+                telegram_msg += f"总计: {result['total_rows']} 行\n"
+                telegram_msg += f"✅ 成功: {result['success_rows']} 条"
+                
+                if result.get('new_rows', 0) > 0:
+                    telegram_msg += f"（新增 {result['new_rows']} 条"
+                if result.get('updated_rows', 0) > 0:
+                    if result.get('new_rows', 0) > 0:
+                        telegram_msg += f"，更新 {result['updated_rows']} 条）"
+                    else:
+                        telegram_msg += f"（更新 {result['updated_rows']} 条）"
+                else:
+                    if result.get('new_rows', 0) > 0:
+                        telegram_msg += "）"
+                
+                if result.get('failed_rows', 0) > 0:
+                    telegram_msg += f"\n❌ 失败: {result['failed_rows']} 条"
+                
+                # 异步发送消息（不阻塞响应）
+                asyncio.create_task(send_telegram_message(telegram_msg))
+            except Exception as telegram_err:
+                # Telegram 通知失败不影响导入结果
+                logger.warning(f"发送 Telegram 通知失败: {telegram_err}")
+
         return import_response
 
     except HTTPException:

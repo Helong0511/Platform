@@ -647,6 +647,27 @@ async def get_client_data(
             # 日志记录失败不应该影响API响应
             logger.warning(f"记录客户API访问日志失败: {log_error}")
 
+        # 发送 Telegram 通知（仅在成功获取数据时）
+        if len(data_list) > 0:
+            try:
+                from app.core.auto_bot import send_telegram_message
+                import asyncio
+                
+                # 构建通知消息
+                telegram_msg = f"📡 API 数据获取成功\n\n"
+                telegram_msg += f"客户: {client.company_name}\n"
+                telegram_msg += f"数据类型: {data_type}\n"
+                telegram_msg += f"✅ 成功获取: {len(data_list)} 条数据"
+                
+                if start_date_obj and end_date_obj:
+                    telegram_msg += f"\n日期范围: {start_date_obj.strftime('%Y-%m-%d')} 至 {end_date_obj.strftime('%Y-%m-%d')}"
+                
+                # 异步发送消息（不阻塞响应）
+                asyncio.create_task(send_telegram_message(telegram_msg))
+            except Exception as telegram_err:
+                # Telegram 通知失败不影响API响应
+                logger.warning(f"发送 Telegram 通知失败: {telegram_err}")
+
         # 确保data字段不为None（Java客户端兼容性）
         # 如果列表为空，返回空列表[]而不是None
         return ResponseBaseSchema.success(
