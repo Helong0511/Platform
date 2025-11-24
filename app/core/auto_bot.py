@@ -10,11 +10,9 @@ import json
 import os
 import logging  # 日志记录模块
 import re
-
-import telebot  # pip3 install --upgrade pyTelegramBotAPI
-from telebot import types
-from telebot.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 import threading
+import fcntl  # 文件锁（Unix/Linux）
+from pathlib import Path
 from app.core.config import settings  # 应用配置
 from app.core.database import AsyncSessionLocal  # 异步数据库会话工厂
 from sqlalchemy import select  # SQLAlchemy查询构建器
@@ -22,25 +20,42 @@ from sqlalchemy import select  # SQLAlchemy查询构建器
 logger = logging.getLogger(__name__)
 bot = None
 bot_initialized = False  # 添加初始化状态标志
+_bot_lock_file = None  # Bot 锁文件句柄
+_bot_lock_acquired = False  # 是否已获取锁（用于多进程环境）
 
+# 尝试导入 telebot 模块
 try:
-    logger.info("正在加载 Telegram token...")
-    token = getattr(settings, 'TELEGRAM_TOKEN', None) or None
-    if token and isinstance(token, str) and token.strip():
-        # 初始化 Telegram Bot
-        bot = telebot.TeleBot(token=token)
-        bot_initialized = True
-        logger.info(f"Telegram Bot 初始化成功，token: {token[:4]}****")
-    else:
-        logger.warning("Telegram token 未设置或为空，Telegram Bot 功能将不可用")
+    import telebot  # pip3 install --upgrade pyTelegramBotAPI
+    from telebot import types
+    from telebot.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
+    TELEBOT_AVAILABLE = True
+except ImportError as import_err:
+    TELEBOT_AVAILABLE = False
+    logger.warning(f"pyTelegramBotAPI 模块未安装，Telegram Bot 功能将不可用。请运行: pip install pyTelegramBotAPI")
+    logger.warning(f"导入错误详情: {import_err}")
+
+# 初始化 Telegram Bot（仅在模块可用时）
+if TELEBOT_AVAILABLE:
+    try:
+        logger.info("正在加载 Telegram token...")
+        token = getattr(settings, 'TELEGRAM_TOKEN', None) or None
+        if token and isinstance(token, str) and token.strip():
+            # 初始化 Telegram Bot
+            bot = telebot.TeleBot(token=token)
+            bot_initialized = True
+            logger.info(f"Telegram Bot 初始化成功，token: {token[:4]}****")
+        else:
+            logger.warning("Telegram token 未设置或为空，Telegram Bot 功能将不可用")
+            bot_initialized = False
+    except Exception as err:
         bot_initialized = False
-except Exception as err:
-    bot_initialized = False
-    logger.error(f"初始化 Telegram Bot 失败: {err}", exc_info=True)
+        logger.error(f"初始化 Telegram Bot 失败: {err}", exc_info=True)
+else:
+    logger.info("Telegram Bot 功能已禁用（pyTelegramBotAPI 未安装）")
 
 
 def get_chat_id_handler(message):
-    if not bot_initialized:
+    if not bot_initialized or not TELEBOT_AVAILABLE:
         logger.error("Bot 未初始化，无法处理消息")
         return
 
@@ -48,7 +63,7 @@ def get_chat_id_handler(message):
     bot.reply_to(message, f"你的聊天ID是: {chat_id}")
 
 
-if bot_initialized:
+if bot_initialized and TELEBOT_AVAILABLE:
     @bot.message_handler(commands=['test'])
     def handle_bot_click(message):
         if not bot_initialized:
@@ -79,7 +94,7 @@ if bot_initialized:
 
         bot.send_message(chat_id, "这是测试内联按钮：", reply_markup=markup)
 
-if bot_initialized:
+if bot_initialized and TELEBOT_AVAILABLE:
     @bot.message_handler(commands=['clock'])
     def handle_bot_click(message):
         if not bot_initialized:
@@ -97,7 +112,7 @@ if bot_initialized:
         bot.send_message(chat_id, "确认是否要打卡？", reply_markup=markup)
 
 # 处理按钮点击事件
-if bot_initialized:
+if bot_initialized and TELEBOT_AVAILABLE:
     @bot.callback_query_handler(func=lambda call: True)
     def handle_callback_query(call):
         if call.data == "View":
@@ -118,7 +133,7 @@ if bot_initialized:
         else:
             bot.answer_callback_query(callback_query_id=call.id, text="未知操作")
 
-if bot_initialized:
+if bot_initialized and TELEBOT_AVAILABLE:
     @bot.message_handler(content_types=["photo"])
     def handle_image(message):
         if not bot_initialized:
@@ -129,7 +144,7 @@ if bot_initialized:
 
 
 def run_bot():
-    if not bot_initialized:
+    if not bot_initialized or not TELEBOT_AVAILABLE:
         logger.error("Bot 未初始化，无法启动轮询")
         return
 
@@ -161,14 +176,93 @@ def run_bot():
         logger.error("机器人已停止运行")
 
 
+def _acquire_bot_lock():
+    """
+    尝试获取 Bot 启动锁（文件锁）
+    在多进程环境下，确保只有一个进程启动 Bot
+    
+    Returns:
+        bool: 是否成功获取锁
+    """
+    global _bot_lock_file, _bot_lock_acquired
+    
+    if _bot_lock_acquired:
+        return True
+    
+    try:
+        # 创建锁文件路径（在项目根目录的 logs 目录下）
+        lock_file_path = Path(__file__).parent.parent.parent / "logs" / "telegram_bot.lock"
+        lock_file_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 打开锁文件（创建模式）
+        _bot_lock_file = open(lock_file_path, 'w')
+        
+        # 尝试获取非阻塞锁
+        fcntl.flock(_bot_lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _bot_lock_acquired = True
+        
+        # 写入当前进程信息
+        import os
+        _bot_lock_file.write(f"PID: {os.getpid()}\n")
+        _bot_lock_file.flush()
+        
+        logger.info(f"[PID:{os.getpid()}] 成功获取 Telegram Bot 启动锁")
+        return True
+    except (IOError, OSError) as e:
+        # 无法获取锁（其他进程已持有）
+        if _bot_lock_file:
+            try:
+                _bot_lock_file.close()
+            except:
+                pass
+            _bot_lock_file = None
+        
+        logger.info(f"[PID:{os.getpid()}] 无法获取 Telegram Bot 启动锁（其他进程可能已启动）: {e}")
+        return False
+    except Exception as e:
+        logger.warning(f"获取 Telegram Bot 启动锁时发生错误: {e}")
+        if _bot_lock_file:
+            try:
+                _bot_lock_file.close()
+            except:
+                pass
+            _bot_lock_file = None
+        return False
+
+
+def _release_bot_lock():
+    """释放 Bot 启动锁"""
+    global _bot_lock_file, _bot_lock_acquired
+    
+    if _bot_lock_file and _bot_lock_acquired:
+        try:
+            fcntl.flock(_bot_lock_file.fileno(), fcntl.LOCK_UN)
+            _bot_lock_file.close()
+            logger.info(f"[PID:{os.getpid()}] 已释放 Telegram Bot 启动锁")
+        except Exception as e:
+            logger.warning(f"释放 Telegram Bot 启动锁时发生错误: {e}")
+        finally:
+            _bot_lock_file = None
+            _bot_lock_acquired = False
+
+
 def start_bot():
-    """启动 Telegram Bot 轮询线程"""
+    """启动 Telegram Bot 轮询线程（仅在获取到锁的进程中启动）"""
+    if not TELEBOT_AVAILABLE:
+        logger.error("pyTelegramBotAPI 未安装，无法启动 Bot")
+        return False
+    
     if not bot_initialized:
         logger.error("Bot 未初始化，无法启动")
         return False
 
     if not bot:
         logger.error("Bot 对象不存在，无法启动")
+        return False
+
+    # 尝试获取锁（多进程环境下，只有一个进程能获取到）
+    if not _acquire_bot_lock():
+        logger.info(f"[PID:{os.getpid()}] 其他进程已启动 Telegram Bot，跳过启动")
         return False
 
     try:
@@ -196,24 +290,28 @@ def start_bot():
         # 启动轮询线程（守护线程，主进程退出时自动退出）
         bot_thread = threading.Thread(target=run_bot, daemon=True, name="TelegramBot")
         bot_thread.start()
-        logger.info("Telegram Bot 轮询线程已启动")
+        logger.info(f"[PID:{os.getpid()}] Telegram Bot 轮询线程已启动（已获取锁）")
         return True
     except Exception as e:
         logger.error(f"启动 Telegram Bot 时发生错误: {e}", exc_info=True)
+        _release_bot_lock()
         return False
 
 
 def stop_bot():
-    """停止 Telegram Bot 轮询"""
-    if bot_initialized and bot:
+    """停止 Telegram Bot 轮询（仅在持有锁的进程中停止）"""
+    # 只有持有锁的进程才需要停止 Bot
+    if _bot_lock_acquired and TELEBOT_AVAILABLE and bot_initialized and bot:
         try:
             bot.stop_polling()
-            logger.info("Telegram Bot 轮询已停止")
+            logger.info(f"[PID:{os.getpid()}] Telegram Bot 轮询已停止")
         except Exception as e:
             logger.error(f"停止 Telegram Bot 时发生错误: {e}", exc_info=True)
+        finally:
+            _release_bot_lock()
 
 
-if bot_initialized:
+if bot_initialized and TELEBOT_AVAILABLE:
     @bot.message_handler(commands=['id'])
     def gei_chat_id(message):
         if not bot_initialized:
@@ -233,6 +331,10 @@ async def send_telegram_message(message: str, chat_id: str | None = None):
     Returns:
         bool: 发送是否成功
     """
+    if not TELEBOT_AVAILABLE:
+        logger.error("pyTelegramBotAPI 未安装，无法发送消息。请运行: pip install pyTelegramBotAPI")
+        return False
+    
     if not bot_initialized:
         logger.error("Telegram机器人未初始化，无法发送消息")
         return False
@@ -260,11 +362,12 @@ async def send_telegram_message(message: str, chat_id: str | None = None):
         )
         logger.info(f"Telegram消息发送成功: {chat_id}")
         return True
-    except telebot.apihelper.ApiException as api_error:
-        logger.error(f"发送Telegram消息失败（API错误）: {api_error}")
-        return False
     except Exception as e:
-        logger.error(f"发送Telegram消息失败: {e}", exc_info=True)
+        # 检查是否是 telebot 的 API 异常
+        if TELEBOT_AVAILABLE and 'telebot' in str(type(e).__module__):
+            logger.error(f"发送Telegram消息失败（API错误）: {e}")
+        else:
+            logger.error(f"发送Telegram消息失败: {e}", exc_info=True)
         return False
 
 
@@ -301,7 +404,7 @@ def format_title_display(title: str) -> str:
 
 
 # 处理成员变动
-if bot_initialized:
+if bot_initialized and TELEBOT_AVAILABLE:
     @bot.chat_member_handler()
     def handle_member_changes(update: types.ChatMemberUpdated):
         try:
