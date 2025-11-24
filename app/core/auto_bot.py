@@ -301,13 +301,19 @@ def start_bot():
         return False
 
 
+def has_bot_lock():
+    """检查当前进程是否持有 Bot 启动锁"""
+    return _bot_lock_acquired
+
+
 def stop_bot():
     """停止 Telegram Bot 轮询（仅在持有锁的进程中停止）"""
     # 只有持有锁的进程才需要停止 Bot
     if _bot_lock_acquired and TELEBOT_AVAILABLE and bot_initialized and bot:
+        current_pid = os.getpid()
         try:
             bot.stop_polling()
-            logger.info(f"[PID:{os.getpid()}] Telegram Bot 轮询已停止")
+            logger.info(f"[PID:{current_pid}] Telegram Bot 轮询已停止")
         except Exception as e:
             logger.error(f"停止 Telegram Bot 时发生错误: {e}", exc_info=True)
         finally:

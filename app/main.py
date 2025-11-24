@@ -218,12 +218,11 @@ async def lifespan(app: FastAPI):
         logger.warning(f"关闭Redis连接时出现错误: {e}")
 
     try:
-        from app.core.auto_bot import stop_bot, send_telegram_message, bot_initialized
-        # 只有持有锁的进程才会执行 stop_bot，所以这里不需要额外检查
-        if bot_initialized:
+        from app.core.auto_bot import stop_bot, send_telegram_message, bot_initialized, has_bot_lock
+        # 只有持有锁的进程才发送关闭消息和停止 Bot
+        if bot_initialized and has_bot_lock():
             try:
                 # 尝试发送关闭消息（可能失败，因为连接可能已断开）
-                # 注意：只有持有锁的进程才会发送消息，避免重复
                 import asyncio
                 await asyncio.wait_for(
                     send_telegram_message(f"🧩 服务 [{settings.SERVER_NAME}] 已关闭"),
@@ -232,7 +231,11 @@ async def lifespan(app: FastAPI):
             except (asyncio.TimeoutError, Exception) as msg_err:
                 logger.debug(f"发送关闭消息失败（可能连接已断开）: {msg_err}")
             finally:
-                stop_bot()  # stop_bot 内部会检查是否持有锁
+                stop_bot()  # stop_bot 内部会检查是否持有锁并释放
+        else:
+            # 其他进程不需要执行任何操作
+            if bot_initialized:
+                logger.debug(f"[PID:{os.getpid()}] 未持有 Bot 锁，跳过关闭操作")
     except Exception as e:
         logger.warning(f"关闭 Telegram 机器人时出现错误: {e}")
 
