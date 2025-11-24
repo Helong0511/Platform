@@ -2,6 +2,7 @@ import axios from 'axios';
 import { normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
 import { ElMessage } from 'element-plus';
 import { getWarningMessage } from '../utils/messages';
+import { logger } from '../utils/logger';
 
 /**
  * 验证Excel列名映射
@@ -201,27 +202,59 @@ export const previewExcelData = async (file, rows = 10) => {
  * @returns {Promise<Object>} 导入结果
  */
 export const importTrainingData = async (file) => {
-  try {
-    // 确保CSRF令牌存在
-    await ensureCsrfToken();
-    
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    // 获取CSRF令牌（如果存在）
-    const csrfToken = sessionStorage.getItem('csrf_token');
-    
-    // 构建headers，确保包含CSRF令牌
-    // 注意：不要手动设置 Content-Type，让 axios 自动处理 multipart/form-data 的 boundary
-    const headers = {};
-    if (csrfToken) {
-      headers['X-CSRF-Token'] = csrfToken;
+  // 重试函数，用于在CSRF token失败时自动重试
+  const attemptImport = async (retryCount = 0) => {
+    try {
+      // 如果是重试，先强制获取新的CSRF令牌
+      if (retryCount > 0) {
+        // 清除旧的token
+        sessionStorage.removeItem('csrf_token');
+        // 强制获取新的CSRF令牌
+        await ensureCsrfToken();
+        // 等待一小段时间，确保令牌已更新
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } else {
+        // 首次尝试，确保CSRF令牌存在
+        await ensureCsrfToken();
+      }
+      
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      // 获取CSRF令牌（如果存在）
+      const csrfToken = sessionStorage.getItem('csrf_token');
+      
+      if (!csrfToken) {
+        throw new Error('CSRF令牌缺失，请刷新页面后重试');
+      }
+      
+      // 构建headers，确保包含CSRF令牌
+      // 注意：不要手动设置 Content-Type，让 axios 自动处理 multipart/form-data 的 boundary
+      const headers = {
+        'X-CSRF-Token': csrfToken
+      };
+      
+      const response = await axios.post('/api/v1/ml-model/import', formData, {
+        headers
+      });
+      return normalizeResponse(response, { returnDataOnly: true });
+    } catch (error) {
+      // 如果是CSRF相关错误（403），且还没有重试过，尝试重试一次
+      if (error.response?.status === 403 && retryCount === 0) {
+        const errorMsg = extractErrorMessage(error);
+        if (errorMsg.includes('CSRF') || errorMsg.includes('csrf') || errorMsg.includes('令牌')) {
+          logger.warn(`[importTrainingData] CSRF token验证失败，尝试重新获取token并重试`);
+          // 重试一次
+          return attemptImport(1);
+        }
+      }
+      // 其他错误或重试后仍然失败，抛出错误
+      throw error;
     }
-    
-    const response = await axios.post('/api/v1/ml-model/import', formData, {
-      headers: Object.keys(headers).length > 0 ? headers : undefined
-    });
-    return normalizeResponse(response, { returnDataOnly: true });
+  };
+  
+  try {
+    return await attemptImport(0);
   } catch (error) {
     if (isErrorHandled(error)) {
       throw error;

@@ -259,8 +259,40 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         
         # 如果是GET请求，生成并返回CSRF令牌
         if request.method == "GET":
-            # 生成新的CSRF令牌
-            csrf_token = generate_csrf_token()
+            # 先检查Redis中是否已存在令牌（多进程环境下，避免重复生成）
+            csrf_token = None
+            if redis_client:
+                try:
+                    existing_token = await redis_client.get(csrf_key)
+                    if existing_token:
+                        csrf_token = existing_token.decode('utf-8') if isinstance(existing_token, bytes) else existing_token
+                        # 更新内存存储（作为备份）
+                        _csrf_tokens[session_id] = csrf_token
+                        logger.debug(f"从Redis获取现有CSRF令牌: {request.method} {path}")
+                except Exception as e:
+                    error_msg = str(e) or repr(e) or "未知错误"
+                    logger.warning(f"Redis CSRF令牌获取失败: {error_msg}，将生成新令牌")
+            
+            # 如果Redis中没有，检查内存存储
+            if not csrf_token:
+                csrf_token = _csrf_tokens.get(session_id)
+                if csrf_token:
+                    logger.debug(f"从内存存储获取现有CSRF令牌: {request.method} {path}")
+                    # 如果Redis可用，同步到Redis
+                    if redis_client:
+                        try:
+                            await redis_client.setex(
+                                csrf_key,
+                                settings.CSRF_TOKEN_EXPIRE_SECONDS,
+                                csrf_token
+                            )
+                        except Exception:
+                            pass
+            
+            # 如果都没有，生成新的CSRF令牌
+            if not csrf_token:
+                csrf_token = generate_csrf_token()
+                logger.debug(f"生成新的CSRF令牌: {request.method} {path}")
             
             # 存储令牌（优先使用Redis）
             if redis_client:

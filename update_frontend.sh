@@ -12,7 +12,8 @@ else
     echo "虚拟环境不存在，跳过pip安装步骤。"
 fi
 
-sudo chmod -R 777 /data/Platform/update_frontend.sh
+# 设置脚本执行权限（更安全的权限设置）
+chmod +x /data/Platform/update_frontend.sh
 
 cd /data/Platform/frontend
 sudo rm -rf /data/Platform/logs/*

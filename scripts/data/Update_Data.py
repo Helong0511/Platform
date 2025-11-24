@@ -125,6 +125,7 @@ for exp in need_exp:
             else:
                 hand.write(",\n")
 
+        print('表', table_name.replace('`', ''), f'{i}条数据生成完毕！')
 
 
     if table_name == "`users`":
@@ -136,7 +137,7 @@ for exp in need_exp:
         hand.write("UPDATE `ad_data` SET `display_rate` = CASE WHEN `match_count` > 0 THEN ROUND(`display_count` / `match_count` * 100, 2) ELSE 0 END;\n")
         hand.write("UPDATE `ad_data` SET `click_rate` = CASE WHEN `display_count` > 0 THEN ROUND(`click_count` / `display_count` * 100, 2) ELSE 0 END;\n")
 
-    print('表', table_name.replace('`',''), '生成完毕！')
+
 
 
 wr = """\nINSERT INTO `scheduled_tasks` (`task_name`, `cron_expression`, `description`, `function_path`, `is_active`) VALUES 
