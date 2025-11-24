@@ -23,6 +23,8 @@ if os.path.exists(sql_file):
 
 hand = open(sql_file, "w", encoding="utf-8")
 
+hand.write("USE platform;\n\n")
+
 need_exp = [
     {
         "table_name": "`users`",
@@ -130,9 +132,9 @@ for exp in need_exp:
 
     if table_name == "`ad_data`":
         hand.write("\n-- 更新广告数据统计字段（避免除零错误）\n")
-        hand.write("UPDATE `ad_data` SET `coverage_rate` = CASE WHEN `request_count` > 0 THEN (`match_count` / `request_count` * 100) ELSE 0 END;\n")
-        hand.write("UPDATE `ad_data` SET `display_rate` = CASE WHEN `match_count` > 0 THEN (`display_count` / `match_count` * 100) ELSE 0 END;\n")
-        hand.write("UPDATE `ad_data` SET `click_rate` = CASE WHEN `display_count` > 0 THEN (`click_count` / `display_count` * 100) ELSE 0 END;\n")
+        hand.write("UPDATE `ad_data` SET `coverage_rate` = CASE WHEN `request_count` > 0 THEN ROUND(`match_count` / `request_count` * 100, 2) ELSE 0 END;\n")
+        hand.write("UPDATE `ad_data` SET `display_rate` = CASE WHEN `match_count` > 0 THEN ROUND(`display_count` / `match_count` * 100, 2) ELSE 0 END;\n")
+        hand.write("UPDATE `ad_data` SET `click_rate` = CASE WHEN `display_count` > 0 THEN ROUND(`click_count` / `display_count` * 100, 2) ELSE 0 END;\n")
 
 
 wr = """\nINSERT INTO `scheduled_tasks` (`task_name`, `cron_expression`, `description`, `function_path`, `is_active`) VALUES 

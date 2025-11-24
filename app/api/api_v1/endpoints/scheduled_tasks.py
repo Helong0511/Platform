@@ -65,117 +65,9 @@ class ScheduledTaskResponse(BaseSchema):
     updated_at: datetime
 
 
-class ScheduledTaskCreate(BaseModel):
-    """定时任务创建模型"""
-    task_name: str = Field(..., min_length=1, max_length=MAX_TASK_NAME_LENGTH)
-    cron_expression: Optional[str] = Field(None, max_length=100)
-    description: Optional[str] = Field(None, max_length=MAX_DESCRIPTION_LENGTH)
-    function_path: Optional[str] = Field(None, max_length=MAX_FUNCTION_PATH_LENGTH)
-    is_active: bool = Field(True)
-
-    @field_validator('task_name')
-    @classmethod
-    def validate_task_name(cls, v: str) -> str:
-        """验证并清理任务名称"""
-        if not v or not v.strip():
-            raise ValueError("任务名称不能为空")
-        cleaned = sanitize_input(v.strip(), max_length=MAX_TASK_NAME_LENGTH)
-        if len(cleaned) < 1:
-            raise ValueError("任务名称无效")
-        return cleaned
-
-    @field_validator('cron_expression')
-    @classmethod
-    def validate_cron_expression(cls, v: Optional[str]) -> Optional[str]:
-        """验证 Cron 表达式"""
-        if v is not None:
-            v = v.strip()
-            if v:
-                is_valid, error_msg = validate_cron_expression(v)
-                if not is_valid:
-                    raise ValueError(error_msg or "Cron表达式格式错误")
-        return v
-
-    @field_validator('description')
-    @classmethod
-    def validate_description(cls, v: Optional[str]) -> Optional[str]:
-        """验证并清理描述"""
-        if v is not None:
-            v = v.strip() if v else None
-            if v:
-                return sanitize_input(v, max_length=MAX_DESCRIPTION_LENGTH)
-        return v
-
-    @field_validator('function_path')
-    @classmethod
-    def validate_function_path(cls, v: Optional[str]) -> Optional[str]:
-        """验证函数路径格式"""
-        if v is not None:
-            v = v.strip() if v else None
-            if v:
-                if not all(c.isalnum() or c in '._' for c in v):
-                    raise ValueError("函数路径包含非法字符")
-                if len(v) > MAX_FUNCTION_PATH_LENGTH:
-                    raise ValueError(f"函数路径长度不能超过{MAX_FUNCTION_PATH_LENGTH}个字符")
-                if '.' not in v:
-                    raise ValueError("函数路径格式错误，应为 module.path.function_name")
-        return v
-
-
 class ScheduledTaskUpdate(BaseModel):
-    """定时任务更新模型（支持完整编辑）"""
-    task_name: Optional[str] = Field(None, min_length=1, max_length=MAX_TASK_NAME_LENGTH)
-    is_active: Optional[bool] = None
-    description: Optional[str] = Field(None, max_length=MAX_DESCRIPTION_LENGTH)
-    cron_expression: Optional[str] = Field(None, max_length=100)
-    function_path: Optional[str] = Field(None, max_length=MAX_FUNCTION_PATH_LENGTH)
-
-    @field_validator('task_name')
-    @classmethod
-    def validate_task_name(cls, v: Optional[str]) -> Optional[str]:
-        """验证并清理任务名称"""
-        if v is not None:
-            if not v or not v.strip():
-                raise ValueError("任务名称不能为空")
-            return sanitize_input(v.strip(), max_length=MAX_TASK_NAME_LENGTH)
-        return v
-
-    @field_validator('cron_expression')
-    @classmethod
-    def validate_cron_expression(cls, v: Optional[str]) -> Optional[str]:
-        """验证 Cron 表达式"""
-        if v is not None:
-            v = v.strip()
-            if v:
-                is_valid, error_msg = validate_cron_expression(v)
-                if not is_valid:
-                    raise ValueError(error_msg or "Cron表达式格式错误")
-        return v
-
-    @field_validator('description')
-    @classmethod
-    def validate_description(cls, v: Optional[str]) -> Optional[str]:
-        """验证并清理描述"""
-        if v is not None:
-            v = v.strip() if v else None
-            if v:
-                return sanitize_input(v, max_length=MAX_DESCRIPTION_LENGTH)
-        return v
-
-    @field_validator('function_path')
-    @classmethod
-    def validate_function_path(cls, v: Optional[str]) -> Optional[str]:
-        """验证函数路径格式"""
-        if v is not None:
-            v = v.strip() if v else None
-            if v:
-                if not all(c.isalnum() or c in '._' for c in v):
-                    raise ValueError("函数路径包含非法字符")
-                if len(v) > MAX_FUNCTION_PATH_LENGTH:
-                    raise ValueError(f"函数路径长度不能超过{MAX_FUNCTION_PATH_LENGTH}个字符")
-                if '.' not in v:
-                    raise ValueError("函数路径格式错误，应为 module.path.function_name")
-        return v
+    """定时任务更新模型（仅支持启用/禁用）"""
+    is_active: bool
 
 
 # ====== API 端点 ======
@@ -344,141 +236,10 @@ async def get_scheduled_task(
         )
 
 
-@router.post(
-    "/",
-    response_model=ResponseBaseSchema[ScheduledTaskResponse],
-    status_code=status.HTTP_201_CREATED,
-    summary="创建定时任务"
-)
-async def create_scheduled_task(
-        request: Request,
-        task_create: ScheduledTaskCreate = Body(...),
-        db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(require_admin)
-):
-    """
-    创建新的定时任务
-    - 仅管理员可访问
-    - 需要提供任务名称、Cron表达式等信息
-    - 创建后如果启用，会自动注册到调度器
-    """
-    try:
-        # 验证必填字段（在获取锁之前验证，避免不必要的锁等待）
-        if not task_create.cron_expression:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="创建任务时必须提供 cron_expression"
-            )
-
-        # 使用数据库锁检查任务名称是否已存在（防止并发创建同名任务）
-        result = await db.execute(
-            select(ScheduledTask)
-            .where(ScheduledTask.task_name == task_create.task_name)
-            .with_for_update(of=ScheduledTask)
-        )
-        existing_task = result.scalar_one_or_none()
-
-        if existing_task:
-            await db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"任务名称 '{task_create.task_name}' 已存在"
-            )
-
-        # 创建新任务（在持有锁的情况下创建，确保原子性）
-        new_task = ScheduledTask(
-            task_name=task_create.task_name,
-            cron_expression=task_create.cron_expression,
-            description=task_create.description,
-            function_path=task_create.function_path,
-            is_active=task_create.is_active,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
-        )
-
-        db.add(new_task)
-        await db.flush()  # 刷新以获取ID，但不提交（保持锁）
-        await db.commit()  # 提交事务，释放锁
-        await db.refresh(new_task)
-
-        # 如果任务被启用，注册到调度器
-        if new_task.is_active:
-            from app.scheduler_module import get_scheduler
-            from app.scheduler_module.task_registry import get_task_function_by_name_or_path
-            from app.scheduler_module.scheduler import register_scheduled_task
-
-            sched = get_scheduler()
-            task_func = get_task_function_by_name_or_path(new_task.task_name, new_task.function_path)
-
-            if task_func is None:
-                logger.warning(
-                    f"新创建的任务 '{new_task.task_name}' 已启用，但未找到对应的任务函数 "
-                    f"(function_path: {new_task.function_path})，无法注册到调度器"
-                )
-            else:
-                try:
-                    register_scheduled_task(
-                        task_name=new_task.task_name,
-                        task_func=task_func,
-                        cron_expression=new_task.cron_expression,
-                        description=new_task.description or f"自动注册的任务: {new_task.task_name}"
-                    )
-                    logger.info(
-                        f"新创建的任务 '{new_task.task_name}' 已注册到调度器 "
-                        f"(Cron: {new_task.cron_expression})"
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"注册新创建的任务 '{new_task.task_name}' 失败: {e}",
-                        exc_info=True
-                    )
-
-        logger.info(f"管理员 {current_user.username} 创建了定时任务: {new_task.task_name}")
-
-        # 记录创建操作
-        await log_create(
-            db=db,
-            user=current_user,
-            resource_type="SCHEDULED_TASK",
-            resource_id=new_task.id,
-            resource_name=new_task.task_name,
-            request=request,
-            details={
-                "task_name": new_task.task_name,
-                "cron_expression": new_task.cron_expression,
-                "function_path": new_task.function_path,
-                "is_active": new_task.is_active,
-                "description": new_task.description
-            }
-        )
-
-        # 转换为响应模型并添加函数信息
-        task_dict = ScheduledTaskResponse.model_validate(new_task).model_dump()
-        func_info = get_task_function_info(new_task.task_name, new_task.function_path)
-        if func_info:
-            task_dict["function_name"] = func_info["function_name"]
-            task_dict["function_module"] = func_info["function_module"]
-
-        return ResponseBaseSchema.success(
-            data=ScheduledTaskResponse(**task_dict),
-            message="定时任务创建成功"
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"创建定时任务失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"创建定时任务失败: {str(e)}"
-        )
-
-
 @router.patch(
     "/{task_name}",
     response_model=ResponseBaseSchema[ScheduledTaskResponse],
-    summary="更新定时任务（支持完整编辑）"
+    summary="更新定时任务状态"
 )
 async def update_scheduled_task(
         request: Request,
@@ -488,11 +249,9 @@ async def update_scheduled_task(
         current_user: User = Depends(require_admin)
 ):
     """
-    更新定时任务（支持完整编辑）
+    更新定时任务状态
     - 仅管理员可访问
-    - 可以编辑任务名称、启用/禁用状态、描述、Cron表达式、函数路径等
-    - 如果修改了任务名称，需要确保新名称唯一
-    - 如果修改了关键配置（Cron表达式、启用状态、函数路径），会自动重新注册到调度器
+    - 仅支持启用/禁用定时任务
     """
     try:
         # URL 解码（FastAPI 应该自动解码，但为了安全起见手动处理一次）
@@ -522,68 +281,24 @@ async def update_scheduled_task(
                 detail="定时任务不存在"
             )
 
-        # 如果修改任务名称，检查新名称是否已存在（也需要加锁）
-        task_name_changed = False
-        new_task_name = task_name
-        if task_update.task_name is not None and task_update.task_name != task_name:
-            # 检查新名称是否已存在（使用锁防止并发）
-            check_result = await db.execute(
-                select(ScheduledTask)
-                .where(ScheduledTask.task_name == task_update.task_name)
-                .with_for_update(of=ScheduledTask)
-            )
-            existing_task = check_result.scalar_one_or_none()
-            if existing_task:
-                await db.rollback()
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"任务名称 '{task_update.task_name}' 已存在"
-                )
-            new_task_name = task_update.task_name
-            task_name_changed = True
-
         # 记录更新前的状态，用于判断是否需要重新注册任务
         old_is_active = task.is_active
-        old_cron_expression = task.cron_expression
-        old_function_path = task.function_path
-        old_task_name = task.task_name
-        cron_expression_changed = False
-        is_active_changed = False
-        function_path_changed = False
+        is_active_changed = (old_is_active != task_update.is_active)
 
-        # 更新字段（先比较再更新）
-        if task_update.task_name is not None:
-            task.task_name = task_update.task_name
-        if task_update.is_active is not None:
-            is_active_changed = (old_is_active != task_update.is_active)
-            task.is_active = task_update.is_active
-        if task_update.description is not None:
-            task.description = task_update.description
-        if task_update.cron_expression is not None:
-            cron_expression_changed = (old_cron_expression != task_update.cron_expression)
-            task.cron_expression = task_update.cron_expression
-        if task_update.function_path is not None:
-            function_path_changed = (old_function_path != task_update.function_path)
-            task.function_path = task_update.function_path
-
+        # 更新状态
+        task.is_active = task_update.is_active
         task.updated_at = datetime.now(timezone.utc)
 
         await db.commit()
         await db.refresh(task)
 
-        # 如果任务名称、Cron表达式、启用状态或函数路径发生变化，需要重新注册任务
-        if task_name_changed or cron_expression_changed or is_active_changed or function_path_changed:
+        # 如果启用状态发生变化，需要重新注册任务或从调度器中移除
+        if is_active_changed:
             from app.scheduler_module import get_scheduler
             from app.scheduler_module.task_registry import get_task_function_by_name_or_path
             from app.scheduler_module.scheduler import register_scheduled_task
 
             sched = get_scheduler()
-
-            # 如果任务名称改变，需要先移除旧任务
-            if task_name_changed:
-                if sched.get_job(old_task_name):
-                    sched.remove_job(old_task_name)
-                    logger.info(f"任务名称已更改，已从调度器中移除旧任务: '{old_task_name}'")
 
             # 如果任务被禁用，从调度器中移除
             if not task.is_active:
@@ -591,7 +306,7 @@ async def update_scheduled_task(
                     sched.remove_job(task.task_name)
                     logger.info(f"任务 '{task.task_name}' 已禁用，已从调度器中移除")
             else:
-                # 如果任务被启用或配置改变，重新注册任务（使用统一的获取逻辑）
+                # 如果任务被启用，重新注册
                 task_func = get_task_function_by_name_or_path(task.task_name, task.function_path)
 
                 if task_func is None:
@@ -621,13 +336,12 @@ async def update_scheduled_task(
                             exc_info=True
                         )
 
-        logger.info(f"管理员 {current_user.username} 更新了定时任务: {task_name} -> {task.task_name}")
+        logger.info(f"管理员 {current_user.username} 更新了定时任务状态: {task_name} (Active: {task.is_active})")
 
         # 在 commit 后，重新查询任务以确保对象是最新的
-        # 因为 commit 后对象可能已过期
         await db.refresh(task)
         
-        # 如果 is_active 改变，记录激活/禁用日志
+        # 记录激活/禁用日志
         if is_active_changed:
             try:
                 if task.is_active:
@@ -651,30 +365,6 @@ async def update_scheduled_task(
             except Exception as log_error:
                 # 日志记录失败不应该影响主操作
                 logger.warning(f"记录激活/禁用日志失败: {log_error}", exc_info=True)
-
-        # 记录更新操作
-        try:
-            update_data = task_update.model_dump(exclude_unset=True)
-            # 如果只更新了 is_active，不记录 UPDATE 日志（避免重复）
-            if len(update_data) > 1 or "is_active" not in update_data:
-                await log_update(
-                    db=db,
-                    user=current_user,
-                    resource_type="SCHEDULED_TASK",
-                    resource_id=task.id,
-                    resource_name=task.task_name,
-                    request=request,
-                    details={
-                        **update_data,
-                        "task_name_changed": task_name_changed,
-                        "cron_expression_changed": cron_expression_changed,
-                        "is_active_changed": is_active_changed,
-                        "function_path_changed": function_path_changed
-                    }
-                )
-        except Exception as log_error:
-            # 日志记录失败不应该影响主操作
-            logger.warning(f"记录更新日志失败: {log_error}", exc_info=True)
 
         # 转换为响应模型并添加函数信息
         try:

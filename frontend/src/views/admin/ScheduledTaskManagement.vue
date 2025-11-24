@@ -71,9 +71,6 @@
       <template #header>
         <div class="table-header">
           <span>任务列表</span>
-          <el-button type="primary" @click="handleCreate" size="small" :icon="Plus">
-            创建任务
-          </el-button>
         </div>
       </template>
       <el-table
@@ -171,15 +168,6 @@
           <template #default="scope">
             <div class="action-buttons">
               <el-button
-                type="success"
-                size="small"
-                @click="handleEdit(scope.row)"
-                class="action-btn"
-                :icon="Edit"
-              >
-                编辑
-              </el-button>
-              <el-button
                 type="primary"
                 size="small"
                 @click="handleTrigger(scope.row)"
@@ -216,69 +204,6 @@
         />
       </div>
     </el-card>
-
-    <!-- 编辑对话框 -->
-    <el-dialog
-      v-model="editDialogVisible"
-      :title="editDialogTitle"
-      width="600px"
-      :close-on-click-modal="false"
-      @close="resetEditForm"
-    >
-      <el-form
-        ref="editFormRef"
-        :model="editForm"
-        :rules="editFormRules"
-        label-width="120px"
-      >
-        <el-form-item label="任务名称" prop="task_name">
-          <el-input
-            v-model="editForm.task_name"
-            placeholder="请输入任务名称"
-          />
-          <div class="form-tip" v-if="currentEditTask">
-            修改任务名称后，系统会重新注册任务
-          </div>
-        </el-form-item>
-        <el-form-item label="Cron表达式" prop="cron_expression">
-          <el-input
-            v-model="editForm.cron_expression"
-            placeholder="例如: 0 0 * * * (每天0点)"
-          />
-          <div class="form-tip">
-            Cron格式: 分钟 小时 日 月 星期
-          </div>
-        </el-form-item>
-        <el-form-item label="任务描述" prop="description">
-          <el-input
-            v-model="editForm.description"
-            type="textarea"
-            :rows="3"
-            placeholder="请输入任务描述"
-          />
-        </el-form-item>
-        <el-form-item label="函数路径" prop="function_path">
-          <el-input
-            v-model="editForm.function_path"
-            placeholder="例如: app.scheduler_module.tasks.simple_task.simple_info_task"
-          />
-          <div class="form-tip">
-            可选，如果不填写则从注册表查找
-          </div>
-        </el-form-item>
-        <el-form-item label="启用状态" prop="is_active">
-          <el-switch v-model="editForm.is_active" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="editDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleSaveEdit" :loading="saving">
-            保存
-          </el-button>
-        </div>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -286,11 +211,10 @@
 import { ref, reactive, onMounted, onUnmounted, computed, onBeforeUnmount, watch, nextTick } from 'vue';
 import { onBeforeRouteLeave, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Search, Refresh, VideoPlay, Unlock, Document, Folder, Edit, Plus } from '@element-plus/icons-vue';
+import { Search, Refresh, VideoPlay, Unlock, Document, Folder } from '@element-plus/icons-vue';
 import {
   getScheduledTasks,
   updateScheduledTask,
-  createScheduledTask,
   triggerScheduledTask,
   releaseTaskLock
 } from '../../api/scheduledTask';
@@ -570,84 +494,6 @@ const handleTrigger = async (task) => {
     if (error !== 'cancel') {
       // 错误已在ElMessage中显示，不需要额外日志
     }
-  }
-};
-
-// 创建新任务
-const handleCreate = () => {
-  resetEditForm();
-  editDialogVisible.value = true;
-};
-
-// 编辑任务
-const handleEdit = (task) => {
-  currentEditTask.value = task;
-  editForm.task_name = task.task_name || '';
-  editForm.cron_expression = task.cron_expression || '';
-  editForm.description = task.description || '';
-  editForm.function_path = task.function_path || '';
-  editForm.is_active = task.is_active !== undefined ? task.is_active : true;
-  editDialogVisible.value = true;
-};
-
-// 重置编辑表单（用于创建新任务）
-const resetEditForm = () => {
-  currentEditTask.value = null;
-  editForm.task_name = '';
-  editForm.cron_expression = '';
-  editForm.description = '';
-  editForm.function_path = '';
-  editForm.is_active = true;
-  if (editFormRef.value) {
-    editFormRef.value.clearValidate();
-  }
-};
-
-// 保存编辑
-const handleSaveEdit = async () => {
-  if (!editFormRef.value) return;
-  
-  try {
-    await editFormRef.value.validate();
-    saving.value = true;
-    
-    const updateData = {
-      cron_expression: editForm.cron_expression,
-      description: editForm.description,
-      function_path: editForm.function_path || null,
-      is_active: editForm.is_active
-    };
-    
-    // 确保CSRF令牌存在
-    await ensureCsrfToken(() => fetchTasks());
-    
-    // 如果是编辑模式，可以修改任务名称
-    if (currentEditTask.value) {
-      // 如果任务名称改变了，添加到更新数据中
-      if (editForm.task_name !== currentEditTask.value.task_name) {
-        updateData.task_name = editForm.task_name;
-      }
-      
-      await updateScheduledTask(currentEditTask.value.task_name, updateData);
-    } else {
-      // 创建模式
-      updateData.task_name = editForm.task_name;
-      await createScheduledTask(updateData);
-    }
-    
-    editDialogVisible.value = false;
-    resetEditForm();
-    // 刷新列表
-    fetchTasks(true);
-  } catch (error) {
-    if (error !== false) { // false 表示表单验证失败
-      if (!isErrorHandled(error)) {
-        const errorMsg = extractErrorMessage(error);
-        ElMessage.error(errorMsg);
-      }
-    }
-  } finally {
-    saving.value = false;
   }
 };
 
