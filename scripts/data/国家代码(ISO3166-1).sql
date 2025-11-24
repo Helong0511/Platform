@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS `countries`  (
   INDEX `idx_country_name_en`(`country_name_en` ASC) USING BTREE,
   INDEX `idx_continent`(`continent` ASC) USING BTREE,
   INDEX `idx_subregion`(`subregion` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 250 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = 'ISO 3166-1国家代码表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 0 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = 'ISO 3166-1国家代码表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Records of countries

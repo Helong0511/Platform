@@ -28,7 +28,7 @@ hand.write("USE platform;\n\n")
 need_exp = [
     {
         "table_name": "`users`",
-        "field_name": "`id`, `username`, `hashed_password`, `role`, `is_active`",
+        "field_name": "`id`, `username`, `hashed_password`, `full_name`, `email`, `role`, `is_active`",
         "order": "`id`",
         "note": "-- 添加用户数据\n"
     },

@@ -1,21 +1,21 @@
 USE platform;
 
 -- 添加用户数据
-INSERT INTO `users` (`id`, `username`, `hashed_password`, `role`, `is_active`) VALUES 
-(1,'admin','$2b$12$VsqK4/DVKDDp14UqNabPvOBPQhSW7amZL/Jnu/WrbPRZQehYV8gja','admin',1),
-(2,'data','$2b$12$BOHTtubZePvpDN.Sls7EbO3ANHMwjouG104GVdfdKcyPxM6wR/gYy','admin',0),
-(3,'yipaijihe','$2b$12$F3EWj6vrp2ZzmaMPbV4ZwexOOCGBDKEbKU6bsCDEWlN3/lapQFtnu','client',1),
-(4,'ecovital','$2b$12$uwZQuAY37wLO3vxmLC9kLuGgKEWmwMT5YeMGXBNwTtXFrc3slHnua','client',1),
-(5,'mengting1','$2b$12$zmK8cr0h1RWv67b5foPAvuP7Gn4ruuq97CSdVR.l8ObngXGSqwo1C','client',1),
-(6,'hehemobi','$2b$12$B1A4hdGELolxcUECzdzMMOl8suqprIKUVMeUiOL7W93khv7d1Z6Sq','client',1),
-(7,'mengting2','$2b$12$lpE.1kXqXinEmwTAOoefBusXZzIP1fmAGt5jFLatGtUhnaB.eA/te','client',1),
-(8,'leadwin','$2b$12$YeuwoLi5rJWLdLcvnY1iG.kt5vjl2.yGHOs2WwDNekZ12NOGLdi7K','client',1),
-(9,'mengting3','$2b$12$ZomV536j03hKrG7JWGq...iVY9mB5I7ffn8zrwV7u/RG5nYiwXfjm','client',1),
-(10,'mengting4','$2b$12$w7.kiIgUgC.yBcCqXzLGVeWnKGeEk9k8JGhuAoWUDm/Y5UxefOv8u','client',1),
-(11,'fulong','$2b$12$HZqrcI/SMAsygsBACO7o4OTHkHvhiu1qekVAxvm51FWk5NEhV4JOS','client',1),
-(12,'mengting5','$2b$12$Nt9FHDt806cQxKtYe4N7pOrUEi.1uF6zC9idGIWOHY4foiak7Ecqa','client',1),
-(13,'zhuzhouyiya','$2b$12$lcj4bGqw4o/4S709JjEbrusqkyoXfvTFmGxB06A2rxx9b/cVT8AQC','client',1),
-(14,'winner','$2b$12$lanvDaMNEdMoz9GLAAO2y.O5LI8Gj31YRMGY6fqO9zVj1T38NsuNq','client',1);
+INSERT INTO `users` (`id`, `username`, `hashed_password`, `full_name`, `email`, `role`, `is_active`) VALUES 
+(1,'admin','$2b$12$VsqK4/DVKDDp14UqNabPvOBPQhSW7amZL/Jnu/WrbPRZQehYV8gja','管理员','admin@btfrx.online','admin',1),
+(2,'data','$2b$12$BOHTtubZePvpDN.Sls7EbO3ANHMwjouG104GVdfdKcyPxM6wR/gYy','数据挂靠','data@btfrx.online','admin',0),
+(3,'yipaijihe','$2b$12$F3EWj6vrp2ZzmaMPbV4ZwexOOCGBDKEbKU6bsCDEWlN3/lapQFtnu','yipaijihe','yipaijihe@btfrx.online','client',1),
+(4,'ecovital','$2b$12$uwZQuAY37wLO3vxmLC9kLuGgKEWmwMT5YeMGXBNwTtXFrc3slHnua','ev','ev@btfrx.online','client',1),
+(5,'mengting1','$2b$12$zmK8cr0h1RWv67b5foPAvuP7Gn4ruuq97CSdVR.l8ObngXGSqwo1C','mengting1','mengting1@btfrx.online','client',1),
+(6,'hehemobi','$2b$12$B1A4hdGELolxcUECzdzMMOl8suqprIKUVMeUiOL7W93khv7d1Z6Sq','hehemobi','hehemobi@btfrx.online','client',1),
+(7,'mengting2','$2b$12$lpE.1kXqXinEmwTAOoefBusXZzIP1fmAGt5jFLatGtUhnaB.eA/te','mengting2','mengting2@btfrx.online','client',1),
+(8,'leadwin','$2b$12$YeuwoLi5rJWLdLcvnY1iG.kt5vjl2.yGHOs2WwDNekZ12NOGLdi7K','leadwin','leadwin@btfrx.online','client',1),
+(9,'mengting3','$2b$12$ZomV536j03hKrG7JWGq...iVY9mB5I7ffn8zrwV7u/RG5nYiwXfjm','mengting3','mengting3@btfrx.online','client',1),
+(10,'mengting4','$2b$12$w7.kiIgUgC.yBcCqXzLGVeWnKGeEk9k8JGhuAoWUDm/Y5UxefOv8u','mengting4','mengting4@btfrx.online','client',1),
+(11,'fulong','$2b$12$HZqrcI/SMAsygsBACO7o4OTHkHvhiu1qekVAxvm51FWk5NEhV4JOS','fulong','moobai@outlook.com','client',1),
+(12,'mengting5','$2b$12$Nt9FHDt806cQxKtYe4N7pOrUEi.1uF6zC9idGIWOHY4foiak7Ecqa','mengting5','mengting5@btfrx.online','client',1),
+(13,'zhuzhouyiya','$2b$12$lcj4bGqw4o/4S709JjEbrusqkyoXfvTFmGxB06A2rxx9b/cVT8AQC','zhuzhouyiya','1914442009@qq.com','client',1),
+(14,'winner','$2b$12$lanvDaMNEdMoz9GLAAO2y.O5LI8Gj31YRMGY6fqO9zVj1T38NsuNq','winner','winner@btfrx.online','client',1);
 
 UPDATE `users` SET `hashed_password` = '$2b$12$geFYoAmb0ZA7Be4LJX/40uudVPltdtwCGFxC5aDIP7xQ/ImTJPIdO' WHERE `username` = 'admin';
 

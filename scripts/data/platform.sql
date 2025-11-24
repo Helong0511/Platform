@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS `clients` (
   `is_active` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否激活',
   `api_enabled` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否允许API访问（开启后允许客户通过API查询产品和广告数据，并显示API对接菜单）',
   `password_change_enabled` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否允许客户修改密码（开启后客户可以修改自己的密码）',
-  `chat_id` bigint NULL DEFAULT NULL COMMENT '15位聊天ID',
+  `chat_id` VARCHAR(20) NULL DEFAULT NULL COMMENT '15位聊天ID',
   `notify_url` VARCHAR(200) NULL COMMENT '客户广告数据通知地址',
   `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
   `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
