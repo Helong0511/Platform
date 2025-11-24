@@ -38,3 +38,6 @@ pytz==2024.1  # 时区支持
 # 配置管理
 pydantic-settings==2.1.0
 email-validator==2.1.0
+
+# Telegram Bot
+pyTelegramBotAPI==4.14.0

@@ -25,19 +25,18 @@ bot_initialized = False  # 添加初始化状态标志
 
 try:
     logger.info("正在加载 Telegram token...")
-    # token = public_config.get(key='telegram.token', get_type=str)
     token = getattr(settings, 'TELEGRAM_TOKEN', None) or None
-    logger.info(f"加载 Telegram token 成功，token: {token[:4]}****")
     if token and isinstance(token, str) and token.strip():
         # 初始化 Telegram Bot
         bot = telebot.TeleBot(token=token)
         bot_initialized = True
-        logger.info("Telegram Bot 初始化成功")
+        logger.info(f"Telegram Bot 初始化成功，token: {token[:4]}****")
     else:
-        logger.error("获取 Telegram token 失败或 token 为空")
+        logger.warning("Telegram token 未设置或为空，Telegram Bot 功能将不可用")
+        bot_initialized = False
 except Exception as err:
     bot_initialized = False
-    logger.info(f"初始化 Telegram Bot 失败: {err}")
+    logger.error(f"初始化 Telegram Bot 失败: {err}", exc_info=True)
 
 
 def get_chat_id_handler(message):
@@ -46,7 +45,7 @@ def get_chat_id_handler(message):
         return
 
     chat_id = message.chat.id
-    bot.reply_to(chat_id, f"你的聊天ID是: {chat_id}")
+    bot.reply_to(message, f"你的聊天ID是: {chat_id}")
 
 
 if bot_initialized:
@@ -163,35 +162,55 @@ def run_bot():
 
 
 def start_bot():
+    """启动 Telegram Bot 轮询线程"""
     if not bot_initialized:
         logger.error("Bot 未初始化，无法启动")
-        return
+        return False
 
-    # 启动轮询线程
-    threading.Thread(target=run_bot, daemon=True).start()
+    if not bot:
+        logger.error("Bot 对象不存在，无法启动")
+        return False
 
-    # 删除旧命令
-    bot.delete_my_commands(scope=None, language_code=None)
+    try:
+        # 设置 Bot 命令
+        commands_list = [
+            ("id", "查询聊天ID"),
+            ("test", "测试内联按钮"),
+            ("clock", "打卡")
+        ]
 
-    commands_list = [
-        ("id", "查询聊天ID"),
-        ("test", "测试内联按钮"),
-        ("clock", "打卡")
-    ]
+        com_set = []
+        for com, desc in commands_list:
+            try:
+                com_set.append(BotCommand(command=com, description=desc))
+            except Exception as er:
+                logger.warning(f"添加命令 {com} 时发生错误: {er}")
 
-    com_set = []
-    for com, desc in commands_list:
-        try:
-            com_set.append(BotCommand(command=com, description=desc))
-        except Exception as er:
-            print(f"添加命令 {com} 时发生错误: {er}")
+        if com_set:
+            try:
+                bot.set_my_commands(commands=com_set)
+                logger.info("Telegram Bot 命令设置成功")
+            except Exception as e:
+                logger.warning(f"设置 Telegram Bot 命令时发生错误: {e}")
 
-    bot.set_my_commands(commands=com_set)
+        # 启动轮询线程（守护线程，主进程退出时自动退出）
+        bot_thread = threading.Thread(target=run_bot, daemon=True, name="TelegramBot")
+        bot_thread.start()
+        logger.info("Telegram Bot 轮询线程已启动")
+        return True
+    except Exception as e:
+        logger.error(f"启动 Telegram Bot 时发生错误: {e}", exc_info=True)
+        return False
 
 
 def stop_bot():
-    if bot_initialized:
-        bot.stop_polling()
+    """停止 Telegram Bot 轮询"""
+    if bot_initialized and bot:
+        try:
+            bot.stop_polling()
+            logger.info("Telegram Bot 轮询已停止")
+        except Exception as e:
+            logger.error(f"停止 Telegram Bot 时发生错误: {e}", exc_info=True)
 
 
 if bot_initialized:
@@ -203,23 +222,50 @@ if bot_initialized:
         bot.reply_to(message, f"{message.chat.id}")
 
 
-async def send_telegram_message(message: str):
+async def send_telegram_message(message: str, chat_id: str | None = None):
+    """
+    发送 Telegram 消息
+    
+    Args:
+        message: 要发送的消息内容
+        chat_id: 目标聊天ID（可选，默认使用配置中的 TELEGRAM_ADMIN）
+    
+    Returns:
+        bool: 发送是否成功
+    """
     if not bot_initialized:
         logger.error("Telegram机器人未初始化，无法发送消息")
-        return
+        return False
 
-    if bot:
-        try:
-            chat_id = getattr(settings, 'TELEGRAM_ADMIN', None) or None
-            logger.info(f"加载 Telegram token 成功，token: {token[:4]}****")
-            if chat_id and isinstance(chat_id, str) and chat_id.strip():
-                bot.send_message(chat_id=chat_id, text=message)
-            else:
-                logger.error(f"发送Telegram消息失败:无法获得收信息的用户，或者群组信息！")
-        except Exception as e:
-            logger.error(f"发送Telegram消息失败: {e}")
-    else:
+    if not bot:
         logger.error("Telegram机器人未初始化，无法发送消息")
+        return False
+
+    try:
+        # 如果没有指定 chat_id，使用配置中的 TELEGRAM_ADMIN
+        if chat_id is None:
+            chat_id = getattr(settings, 'TELEGRAM_ADMIN', None) or None
+        
+        if not chat_id or not isinstance(chat_id, str) or not chat_id.strip():
+            logger.error("发送Telegram消息失败: 无法获得收信息的用户或群组ID（请设置 TELEGRAM_ADMIN 环境变量）")
+            return False
+
+        # pyTelegramBotAPI 的 send_message 是同步的，需要在线程中执行
+        # 使用 threading 来避免阻塞异步事件循环
+        import asyncio
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: bot.send_message(chat_id=chat_id.strip(), text=message)
+        )
+        logger.info(f"Telegram消息发送成功: {chat_id}")
+        return True
+    except telebot.apihelper.ApiException as api_error:
+        logger.error(f"发送Telegram消息失败（API错误）: {api_error}")
+        return False
+    except Exception as e:
+        logger.error(f"发送Telegram消息失败: {e}", exc_info=True)
+        return False
 
 
 def get_custom_title_safe(member) -> str | None:
@@ -267,10 +313,10 @@ if bot_initialized:
             if old.status in ["left", "kicked", None] and new.status == "member":
                 # 排除机器人自己
                 if new.user.is_bot:
-                    print(f"检测到机器人加入，跳过欢迎: {new.user.first_name}")
+                    logger.debug(f"检测到机器人加入，跳过欢迎: {new.user.first_name}")
                     return
 
-                print(f"检测到新成员加入: {new.user.first_name} 在群组 {chat.id}")
+                logger.info(f"检测到新成员加入: {new.user.first_name} 在群组 {chat.id}")
 
                 welcome_msg = f"欢迎 {new.user.first_name} 加入群组！🎉"
                 bot.send_message(chat.id, welcome_msg)
@@ -280,10 +326,10 @@ if bot_initialized:
             elif old.status == "member" and new.status in ["left", "kicked"]:
                 # 排除机器人自己
                 if new.user.is_bot:
-                    print(f"检测到机器人离开，跳过告别: {new.user.first_name}")
+                    logger.debug(f"检测到机器人离开，跳过告别: {new.user.first_name}")
                     return
 
-                print(f"检测到成员离开: {new.user.first_name} 从群组 {chat.id}")
+                logger.info(f"检测到成员离开: {new.user.first_name} 从群组 {chat.id}")
 
                 farewell_msg = f"{new.user.first_name} 已离开群组。👋"
                 bot.send_message(chat.id, farewell_msg)
@@ -309,4 +355,4 @@ if bot_initialized:
                     bot.send_message(update.chat.id, msg)
 
         except Exception as t_err:
-            print(f"处理管理员变更出错: {t_err}")
+            logger.error(f"处理管理员变更出错: {t_err}", exc_info=True)

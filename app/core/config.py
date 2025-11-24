@@ -350,6 +350,45 @@ class Settings(BaseSettings):
     # - 时间戳字段（如created_at、updated_at）存储为UTC时区
     TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Shanghai")
 
+    # ====== Telegram Bot 配置 ======
+    # Telegram Bot Token（从 BotFather 获取）
+    # 生产环境必须通过环境变量设置
+    TELEGRAM_TOKEN: str | None = os.getenv("TELEGRAM_TOKEN", None)
+
+    @field_validator("TELEGRAM_TOKEN")
+    @classmethod
+    def validate_telegram_token(cls, v: str | None) -> str | None:
+        """验证 Telegram Token"""
+        production_env = os.getenv("PRODUCTION_ENV", "development").lower()
+        is_prod = production_env in ["production", "prod"]
+        
+        if is_prod:
+            # 生产环境：如果设置了但为空，给出警告
+            if v is not None and (not isinstance(v, str) or not v.strip()):
+                logger.warning("生产环境 TELEGRAM_TOKEN 为空，Telegram Bot 将无法启动")
+        else:
+            # 开发环境：允许为空（Telegram Bot 可选功能）
+            if v is None or (isinstance(v, str) and not v.strip()):
+                logger.info("开发环境未设置 TELEGRAM_TOKEN，Telegram Bot 功能将不可用")
+        
+        return v
+
+    # Telegram 管理员 Chat ID（用于接收系统通知）
+    # 可以是用户 ID（如 "123456789"）或群组 ID（如 "-1001234567890"）
+    # 获取方式：向 Bot 发送 /id 命令，或使用 @userinfobot
+    TELEGRAM_ADMIN: str | None = os.getenv("TELEGRAM_ADMIN", None)
+
+    @field_validator("TELEGRAM_ADMIN")
+    @classmethod
+    def validate_telegram_admin(cls, v: str | None) -> str | None:
+        """验证 Telegram Admin Chat ID"""
+        if v is not None and isinstance(v, str):
+            v = v.strip()
+            # 验证格式：应该是数字字符串（可能带负号）
+            if v and not v.replace("-", "").isdigit():
+                logger.warning(f"TELEGRAM_ADMIN 格式可能不正确: {v}（应为数字字符串）")
+        return v
+
 
 # 创建配置实例
 settings = Settings()

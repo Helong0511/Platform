@@ -23,6 +23,7 @@ from app.api.api_v1.endpoints import (
     client_api,
     product_assignments,
     sessions,
+    telegram,
 )
 
 # 认证路由
@@ -63,3 +64,6 @@ api_router.include_router(client_api.router, prefix="", tags=["客户API"])
 
 # 会话管理路由
 api_router.include_router(sessions.router, prefix="/sessions", tags=["会话管理"])
+
+# Telegram Bot 管理路由
+api_router.include_router(telegram.router, prefix="/telegram", tags=["Telegram Bot"])

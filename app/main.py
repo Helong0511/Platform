@@ -169,19 +169,34 @@ async def lifespan(app: FastAPI):
         logger.error(f"[Worker PID:{worker_pid}] 定时任务初始化失败: {e}", exc_info=True)
         logger.warning(f"[Worker PID:{worker_pid}] 应用将继续启动，但定时任务功能可能不可用")
 
-    # 初始化Telegram Bot
-    # try:
-    #     from app.core.auto_bot import start_bot, send_telegram_message
-    #     import os
-    #     worker_pid = os.getpid()
-    #     logger.info(f"[Worker PID:{worker_pid}] 启动 Telegram 机器人线程...")
-    #     start_bot()
-    #     await send_telegram_message("✅ Telegram 机器人已启动")
-    # except Exception as e:
-    #     import os
-    #     worker_pid = os.getpid()
-    #     logger.error(f"[Worker PID:{worker_pid}] 启动 Telegram 机器人初始化失败: {e}", exc_info=True)
-    #     logger.warning(f"[Worker PID:{worker_pid}] 应用将继续启动，但Telegram 机器人可能不可用")
+    # 初始化Telegram Bot（仅在主 worker 中启动，避免多进程重复启动）
+    try:
+        from app.core.auto_bot import start_bot, send_telegram_message, bot_initialized
+        import os
+        worker_pid = os.getpid()
+        
+        # 只在第一个 worker 中启动（通过环境变量或进程ID判断）
+        # 或者简单地在所有 worker 中启动，但使用守护线程，不会影响主进程
+        if bot_initialized:
+            logger.info(f"[Worker PID:{worker_pid}] 启动 Telegram 机器人线程...")
+            start_success = start_bot()
+            if start_success:
+                # 延迟发送启动消息，确保 Bot 已完全启动
+                import asyncio
+                await asyncio.sleep(2)  # 等待2秒确保 Bot 连接建立
+                try:
+                    await send_telegram_message("✅ Telegram 机器人已启动")
+                except Exception as msg_err:
+                    logger.warning(f"[Worker PID:{worker_pid}] 发送启动消息失败: {msg_err}")
+            else:
+                logger.warning(f"[Worker PID:{worker_pid}] Telegram 机器人启动失败")
+        else:
+            logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 未配置（TELEGRAM_TOKEN 未设置），跳过启动")
+    except Exception as e:
+        import os
+        worker_pid = os.getpid()
+        logger.error(f"[Worker PID:{worker_pid}] 启动 Telegram 机器人初始化失败: {e}", exc_info=True)
+        logger.warning(f"[Worker PID:{worker_pid}] 应用将继续启动，但Telegram 机器人可能不可用")
 
     logger.info("应用启动完成")
 
@@ -204,12 +219,22 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"关闭Redis连接时出现错误: {e}")
 
-    # try:
-    #     from app.core.auto_bot import stop_bot, send_telegram_message
-    #     await send_telegram_message(f"🧩 服务 [{app.openapi()['info']['title']}] 已关闭")
-    #     stop_bot()
-    # except Exception as e:
-    #     logger.warning(f"关闭 Telegram 机器人 时出现错误: {e}")
+    try:
+        from app.core.auto_bot import stop_bot, send_telegram_message, bot_initialized
+        if bot_initialized:
+            try:
+                # 尝试发送关闭消息（可能失败，因为连接可能已断开）
+                import asyncio
+                await asyncio.wait_for(
+                    send_telegram_message(f"🧩 服务 [{settings.SERVER_NAME}] 已关闭"),
+                    timeout=3.0
+                )
+            except (asyncio.TimeoutError, Exception) as msg_err:
+                logger.debug(f"发送关闭消息失败（可能连接已断开）: {msg_err}")
+            finally:
+                stop_bot()
+    except Exception as e:
+        logger.warning(f"关闭 Telegram 机器人时出现错误: {e}")
 
     try:
         # 清理数据库连接池
