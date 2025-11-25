@@ -1,4 +1,3 @@
-import hashlib  # 用于生成MD5签名
 import httpx  # 异步HTTP客户端，用于调用外部API
 import logging  # 日志记录模块
 from datetime import datetime, timedelta  # 日期时间处理
@@ -49,7 +48,7 @@ password = '5e2296fa9fd1434bf8a60c03cf745ce9'
 
 async def tbsj_api_task() -> None:
     """
-    TQT定时任务主函数
+    Tongbaishijia定时任务主函数
     
     功能说明：
     1. 从Tongbaishijia API获取昨天的广告数据
@@ -178,11 +177,11 @@ async def tbsj_api_task() -> None:
                     raise Exception(f'API返回空响应: {response.text[:100]}')
 
                 # 检查API响应状态
-                # Tongbaishijia API使用state字段：'ok'表示成功，其他值表示失败
+                # Tongbaishijia API使用code字段：20000表示成功，其他值表示失败
 
-                api_code = json_data.get('code')  # 兼容可能的code字段
+                api_code = json_data.get('code')  # 获取code字段
 
-                # 判断API是否成功：state='ok' 或 code=200
+                # 判断API是否成功：code=20000表示成功
                 if api_code == 20000:
                     # API调用成功，获取数据列表
                     # 数据可能在data.list中，也可能直接在list中
@@ -223,7 +222,7 @@ async def tbsj_api_task() -> None:
                                 source="Tongbaishijia定时任务",
                                 field_mapping={
                                     # 数据日期
-                                    "date": "dt",
+                                    "date": "date",
 
                                     # 产品名称
                                     "product_name": "product",
@@ -317,7 +316,7 @@ async def tbsj_api_task() -> None:
                                                 timeout=5.0
                                             )
                                             logger.info(
-                                                f"Telegram 通知发送成功: TQT任务, 插入:{inserted_count}, 更新:{updated_count}")
+                                                f"Telegram 通知发送成功: Tongbaishijia任务, 插入:{inserted_count}, 更新:{updated_count}")
                                         except asyncio.TimeoutError:
                                             logger.warning(f"发送 Telegram 通知超时: Tongbaishijia API获取数据任务")
                                         except Exception as send_err:
