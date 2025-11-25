@@ -31,13 +31,13 @@ def set_task_result(task_name: str, result: str) -> None:
 # 用于将本地时间转换为标准时区
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
-# Tongbaishijia API获取数据 配置
+# yangyangdeyi API获取数据 配置
 
 # HTTP请求头配置
 Headers = {'Content-Type': 'application/json;charset=utf-8'}
 
 # 请求地址
-tbsj_url = 'https://data.tongbaishijia.com/api/thirdservice'
+tbsj_url = 'https://data.yangyangdeyi.com/api/thirdservice'
 
 # 用户名
 username = 'BOFIT'
@@ -48,16 +48,16 @@ password = '5e2296fa9fd1434bf8a60c03cf745ce9'
 
 async def tbsj_api_task() -> None:
     """
-    Tongbaishijia定时任务主函数
+    yangyangdeyi定时任务主函数
     
     功能说明：
-    1. 从Tongbaishijia API获取昨天的广告数据
+    1. 从yangyangdeyi API获取昨天的广告数据
     2. 对每条数据进行验证和重复检查
     3. 将新数据插入到数据库的ad_data表中
     4. 根据产品的减扣比例自动计算减扣后的eCPM和收益
     
     处理流程：
-    - 调用Tongbaishijia API获取数据
+    - 调用yangyangdeyi API获取数据
     - 遍历返回的数据列表
     - 验证日期和产品名称
     - 查找对应的产品记录
@@ -78,7 +78,7 @@ async def tbsj_api_task() -> None:
     # 使用 logger.warning 确保即使日志级别设置为 WARNING 也能看到执行信息
     logger.info(f"{TBSJ_API_TASK_NAME} 开始执行 - {current_time_str}（时区: {settings.TIMEZONE}）")
     logger.warning(
-        f"[Tongbaishijia API获取数据] 每隔10分钟执行一次 开始执行 - {current_time_str}（时区: {settings.TIMEZONE}）")
+        f"[yangyangdeyi API获取数据] 每隔10分钟执行一次 开始执行 - {current_time_str}（时区: {settings.TIMEZONE}）")
 
     try:
         # ============================================
@@ -96,7 +96,7 @@ async def tbsj_api_task() -> None:
 
                 if t_res.status_code != 200:
                     error_text = t_res.text[:500]  # 限制错误文本长度
-                    logger.error(f'Tongbaishijia API HTTP错误: 状态码={t_res.status_code}, 响应内容={error_text}')
+                    logger.error(f'yangyangdeyi API HTTP错误: 状态码={t_res.status_code}, 响应内容={error_text}')
                     raise Exception(f'API HTTP错误: 状态码={t_res.status_code}, 响应内容={error_text[:100]}')
 
                 # 解析JSON响应
@@ -104,27 +104,27 @@ async def tbsj_api_task() -> None:
                     json_data = t_res.json()
                 except Exception as json_error:
                     error_text = t_res.text[:500]  # 限制错误文本长度
-                    logger.error(f'Tongbaishijia API JSON解析错误: {str(json_error)}, 响应内容={error_text}')
+                    logger.error(f'yangyangdeyi API JSON解析错误: {str(json_error)}, 响应内容={error_text}')
                     raise Exception(f'API响应格式错误: 无法解析JSON, 响应内容={error_text[:100]}')
 
                 # 记录API响应的详细信息（用于调试和排查问题）
                 # 使用info级别确保能看到响应内容
-                logger.info(f'Tongbaishijia API响应: {json_data}')
-                logger.debug(f'Tongbaishijia API响应详情: state={json_data.get("state")}, code={json_data.get("code")}')
+                logger.info(f'yangyangdeyi API响应: {json_data}')
+                logger.debug(f'yangyangdeyi API响应详情: state={json_data.get("state")}, code={json_data.get("code")}')
 
                 # 检查json_data是否为空或None
                 if not json_data:
-                    logger.error(f'Tongbaishijia API返回空响应: {t_res.text[:500]}')
+                    logger.error(f'yangyangdeyi API返回空响应: {t_res.text[:500]}')
                     raise Exception(f'API返回空响应: {t_res.text[:100]}')
 
                 access_token = json_data.get('access_token', '')
                 Headers['Authorization'] = f'Bearer {access_token}'
         except httpx.TimeoutException as timeout_error:
-            logger.error(f'Tongbaishijia API获取 token 请求超时: {str(timeout_error)}')
+            logger.error(f'yangyangdeyi API获取 token 请求超时: {str(timeout_error)}')
             raise Exception(f'API请求超时: 超过20秒未响应')
         except httpx.RequestError as request_error:
-            logger.error(f'Tongbaishijia API获取token请求错误: {str(request_error)}')
-            raise Exception(f'Tongbaishijia API获取token请求失败: {str(request_error)}')
+            logger.error(f'yangyangdeyi API获取token请求错误: {str(request_error)}')
+            raise Exception(f'yangyangdeyi API获取token请求失败: {str(request_error)}')
 
         app_now = datetime.now()
         app_yesterday = app_now - timedelta(days=1)
@@ -146,16 +146,16 @@ async def tbsj_api_task() -> None:
                 "end": today_str
             }
 
-        # 使用异步HTTP客户端调用Tongbaishijia API
+        # 使用异步HTTP客户端调用yangyangdeyi API
         try:
             async with httpx.AsyncClient(timeout=20) as client:
-                # 发送POST请求到Tongbaishijia API
+                # 发送POST请求到yangyangdeyi API
                 response = await client.post(tbsj_url + '/adunit', headers=Headers, json=tbsj_params)
 
                 # 检查HTTP响应状态码
                 if response.status_code != 200:
                     error_text = response.text[:500]  # 限制错误文本长度
-                    logger.error(f'Tongbaishijia API HTTP错误: 状态码={response.status_code}, 响应内容={error_text}')
+                    logger.error(f'yangyangdeyi API HTTP错误: 状态码={response.status_code}, 响应内容={error_text}')
                     raise Exception(f'API HTTP错误: 状态码={response.status_code}, 响应内容={error_text[:100]}')
 
                 # 解析JSON响应
@@ -163,21 +163,21 @@ async def tbsj_api_task() -> None:
                     json_data = response.json()
                 except Exception as json_error:
                     error_text = response.text[:500]  # 限制错误文本长度
-                    logger.error(f'Tongbaishijia API JSON解析错误: {str(json_error)}, 响应内容={error_text}')
+                    logger.error(f'yangyangdeyi API JSON解析错误: {str(json_error)}, 响应内容={error_text}')
                     raise Exception(f'API响应格式错误: 无法解析JSON, 响应内容={error_text[:100]}')
 
                 # 记录API响应的详细信息（用于调试和排查问题）
                 # 使用info级别确保能看到响应内容
-                logger.info(f'Tongbaishijia API响应: {json_data}')
-                logger.debug(f'Tongbaishijia API响应详情: state={json_data.get("state")}, code={json_data.get("code")}')
+                logger.info(f'yangyangdeyi API响应: {json_data}')
+                logger.debug(f'yangyangdeyi API响应详情: state={json_data.get("state")}, code={json_data.get("code")}')
 
                 # 检查json_data是否为空或None
                 if not json_data:
-                    logger.error(f'Tongbaishijia API返回空响应: {response.text[:500]}')
+                    logger.error(f'yangyangdeyi API返回空响应: {response.text[:500]}')
                     raise Exception(f'API返回空响应: {response.text[:100]}')
 
                 # 检查API响应状态
-                # Tongbaishijia API使用code字段：20000表示成功，其他值表示失败
+                # yangyangdeyi API使用code字段：20000表示成功，其他值表示失败
 
                 api_code = json_data.get('code')  # 获取code字段
 
@@ -219,7 +219,7 @@ async def tbsj_api_task() -> None:
                                 data=data,
                                 db=db,
                                 admin_user=admin_user,
-                                source="Tongbaishijia定时任务",
+                                source="yangyangdeyi定时任务",
                                 field_mapping={
                                     # 数据日期
                                     "date": "date",
@@ -299,7 +299,7 @@ async def tbsj_api_task() -> None:
                                         logger.debug("Telegram Bot 未初始化，跳过通知")
                                     else:
                                         # 构建通知消息
-                                        telegram_msg = f"⏰ Tongbaishijia 定时任务执行完成\n\n"
+                                        telegram_msg = f"⏰ yangyangdeyi 定时任务执行完成\n\n"
                                         telegram_msg += f"执行时间: {current_time_str}\n"
                                         telegram_msg += f"✅ 成功插入: {inserted_count} 条\n"
                                         telegram_msg += f"✅ 成功更新: {updated_count} 条"
@@ -316,9 +316,9 @@ async def tbsj_api_task() -> None:
                                                 timeout=5.0
                                             )
                                             logger.info(
-                                                f"Telegram 通知发送成功: Tongbaishijia任务, 插入:{inserted_count}, 更新:{updated_count}")
+                                                f"Telegram 通知发送成功: yangyangdeyi任务, 插入:{inserted_count}, 更新:{updated_count}")
                                         except asyncio.TimeoutError:
-                                            logger.warning(f"发送 Telegram 通知超时: Tongbaishijia API获取数据任务")
+                                            logger.warning(f"发送 Telegram 通知超时: yangyangdeyi API获取数据任务")
                                         except Exception as send_err:
                                             logger.warning(f"发送 Telegram 通知失败: {send_err}")
                                 except Exception as telegram_err:
@@ -353,25 +353,25 @@ async def tbsj_api_task() -> None:
                     else:
                         # 既没有state也没有code，说明响应格式异常
                         logger.error(
-                            f'Tongbaishijia API获取数据响应格式异常: 缺少state和code字段, 完整响应={json_data}')
-                        logger.warning(f'[Tongbaishijia API获取数据定时任务执行] API响应格式异常: 缺少state和code字段')
-                        logger.info(f'Tongbaishijia API获取数据完整响应内容: {json_data}')
+                            f'yangyangdeyi API获取数据响应格式异常: 缺少state和code字段, 完整响应={json_data}')
+                        logger.warning(f'[yangyangdeyi API获取数据定时任务执行] API响应格式异常: 缺少state和code字段')
+                        logger.info(f'yangyangdeyi API获取数据完整响应内容: {json_data}')
                         raise Exception(f'API响应格式异常: 缺少state和code字段, 响应内容={str(json_data)[:200]}')
 
                     # 记录完整的错误信息
-                    logger.error(f'Tongbaishijia API获取数据业务错误: {error_details}')
-                    logger.warning(f'[Tongbaishijia API获取数据 定时任务执行] API错误: {error_details}')
+                    logger.error(f'yangyangdeyi API获取数据业务错误: {error_details}')
+                    logger.warning(f'[yangyangdeyi API获取数据 定时任务执行] API错误: {error_details}')
                     # 记录完整的响应内容（用于调试）
-                    logger.info(f'Tongbaishijia API获取数据完整响应: {json_data}')
+                    logger.info(f'yangyangdeyi API获取数据完整响应: {json_data}')
                     # 抛出异常，让上层错误处理机制捕获
                     raise Exception(f'API错误: {error_details}')
 
         except httpx.TimeoutException as timeout_error:
-            logger.error(f'Tongbaishijia API获取数据请求超时: {str(timeout_error)}')
+            logger.error(f'yangyangdeyi API获取数据请求超时: {str(timeout_error)}')
             raise Exception(f'API请求超时: 超过20秒未响应')
         except httpx.RequestError as request_error:
-            logger.error(f'Tongbaishijia API获取数据请求错误: {str(request_error)}')
-            raise Exception(f'Tongbaishijia API获取数据请求失败: {str(request_error)}')
+            logger.error(f'yangyangdeyi API获取数据请求错误: {str(request_error)}')
+            raise Exception(f'yangyangdeyi API获取数据请求失败: {str(request_error)}')
 
     except Exception as e:
         # ========== 全局错误处理 ==========
@@ -384,7 +384,7 @@ async def tbsj_api_task() -> None:
         # 记录详细错误信息（包括完整的堆栈跟踪）
         logger.error(error_msg, exc_info=True)
         # 同时使用 logger.warning 确保即使日志级别设置为 WARNING 也能看到错误信息
-        logger.warning(f"[Tongbaishijia API获取数据] {error_msg}")
+        logger.warning(f"[yangyangdeyi API获取数据] {error_msg}")
 
         # 重新抛出异常，让定时任务调度器的锁机制能够记录错误状态
         # 这样可以在数据库中标记任务执行失败，便于后续排查问题

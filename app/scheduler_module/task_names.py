@@ -26,7 +26,7 @@ TQT_API_TASK_NAME = "TQT API获取数据"
 SKYMOBI_API_TASK_NAME = "Skymobi API获取数据"
 
 # Skymobi API获取数据任务
-TBSJ_API_TASK_NAME = "Tongbaishijia API获取数据"
+TBSJ_API_TASK_NAME = "yangyangdeyi API获取数据"
 
 # ==================== 任务名称映射 ====================
 # 用于快速查找任务名称，格式：{任务模块名: 任务名称常量}
