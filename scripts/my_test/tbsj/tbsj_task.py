@@ -1,109 +1,98 @@
 import hashlib
-
 import pytz
 import requests
 import json
 from datetime import datetime, timedelta  # 日期时间处理
+from typing import Dict, Any, Optional
 
-Headers = {'Content-Type': 'application/json;;charset=utf-8'}
+Headers = {'Content-Type': 'application/json;charset=utf-8'}
 
-url = 'https://data.tongbaishijia.com/api/thirdservice'
+base_url = 'https://data.tongbaishijia.com/api/thirdservice'
 
-appKey = '07ycrvnf'
+username = 'BOFIT'
 
-apiSecret = 'cglnhl8pbg8zl4b9a44c4qofdrb6rwn4'
+password = '5e2296fa9fd1434bf8a60c03cf745ce9'
 
 
-def generate_sign(params: dict, api_secret: str = apiSecret) -> str:
-    """
-    根据参数和 apiSecret 生成签名
-    规则：
-    1. 按参数名 ASCII 升序排序（排除 sign）
-    2. 拼接成 key + value 的字符串
-    3. 在首尾拼接 apiSecret
-    4. 全部转为小写
-    5. 进行 MD5，结果转小写
-    """
-    # 1. 排序并拼接参数
-    sorted_items = sorted((k, v) for k, v in params.items() if k != "sign")
-    query_str = "".join(f"{k}{v}" for k, v in sorted_items)
+def get_token() -> Optional[str]:
+    pa = {
+        "username": username,
+        "password": password
+    }
 
-    # 2. 拼接 apiSecret
-    full_str = f"{api_secret}{query_str}{api_secret}".lower()
+    try:
+        response = requests.post(
+            url=base_url + '/token',
+            headers=Headers,
+            json=pa,
+            timeout=20
+        )
 
-    # 3. 进行 md5
-    md5_hash = hashlib.md5(full_str.encode("utf-8")).hexdigest().lower()
-    return md5_hash
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                access_token = data.get('access_token', '')
+                if access_token:
+                    Headers['Authorization'] = f'Bearer {access_token}'
+                    return access_token
+                else:
+                    print(f"❌ Token获取失败: 响应中未找到access_token")
+                    print(f"响应内容: {json.dumps(data, indent=2, ensure_ascii=False)}")
+                    return None
+            except json.JSONDecodeError:
+                print(f"❌ 响应不是有效的JSON格式")
+                print(f"原始响应: {response.text[:500]}")
+                return None
 
+        else:
+            print(f"❌ Token获取失败，状态码: {response.status_code}")
+            try:
+                error_data = response.json()
+                print(f"错误信息: {json.dumps(error_data, indent=2, ensure_ascii=False)}")
+            except:
+                print(f"原始响应: {response.text[:500]}")
+            return None
+
+    except requests.exceptions.RequestException as e:
+        print(f"❌ 请求失败: {str(e)}")
+        return None
+
+
+Headers['Authorization'] = f'Bearer {get_token()}'
+
+print(Headers)
 
 try:
-    APP_TIMEZONE = pytz.timezone("Asia/Shanghai")
-    app_now = datetime.now(APP_TIMEZONE)
-    app_yesterday = app_now - timedelta(days=1)
-    yesterday_str = app_yesterday.strftime("%Y-%m-%d")
-    today_str = app_now.strftime("%Y-%m-%d")
-
-    tqt_params = {
-        "appKey": appKey,
-        "startDate": today_str,
-        "endDate": today_str,
+    ad_pr = {
         "page": 1,
-        "pageSize": 500,
-        "type": "country"
+        "limit": 5000,
+        "start": "2025-11-01",
+        "end": "2025-11-25"
     }
-    tqt_params['sign'] = generate_sign(tqt_params)
-    print(tqt_params)
-
     response = requests.post(
-        url=url,
+        url=base_url + '/adunit',
         headers=Headers,
-        json=tqt_params,
+        json=ad_pr,
         timeout=20
     )
 
-    status_code = response.status_code
+    if response.status_code == 200:
+        data = response.json()
+        print(data)
+        ad_data = data['data']['items']
+        pro = []
+        for item in ad_data:
+            print(item)
+            if len(item.get('country_code'))>2:
+                print(item.get('country_code'))
 
-    try:
-        json_data = response.json()
-        print(json_data)
-        data = None
-        if 'data' in json_data and isinstance(json_data['data'], dict):
-            data = json_data['data'].get('list', [])
-        else:
-            data = json_data.get('list', [])
-        print(len(data))
-        cp = []
-        if data:
-            for item in data:
-                item_date = item.get('date', '')
+            if item.get('product')  not in pro:
+                pro.append(item.get('product'))
 
-                if item.get('url', '') not in cp:
-                    cp.append(item.get('url', ''))
+        print(pro)
 
-                # print('\n⽇期', item.get('date', ''))
-                # print('产品', item.get('url', ''))
-
-                # print('国家代码', item.get('country_code', ''))
-                # print('国家名称', item.get('country_name', ''))
-
-                # print('请求数', item.get('requests', 0))
-                # print('匹配数', item.get('matche_que', 0))
-                # print('覆盖率', item.get('coverage', ''))
-                # print('展示数', item.get('adimpressions', 0))
-                # print('展示率', item.get('display_rate', ''))
-                # print('点击数', item.get('clicks', 0))
-                # print('点击率', item.get('ctr', ''))
-
-                # print('eCPM', item.get('ecpm', ''))
-
-                # print('收益', item.get('estirevenue', ''))
-                # print('网页展示', item.get('page_views', ''))
-            print(len(cp), cp)
-
-        else:
-            print('  暂无产品数据')
-    except json.JSONDecodeError:
-        print(f'原始响应: {response.text}')
-
+    else:
+        error_data = response.json()
+        print(error_data)
 except requests.exceptions.RequestException as e:
-    print(f'\n❌ 请求失败: {str(e)}')
+    print(f"❌ 请求失败: {str(e)}")

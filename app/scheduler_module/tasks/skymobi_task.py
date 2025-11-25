@@ -64,7 +64,7 @@ async def skymobi_api_task() -> None:
         today_str = app_now.strftime("%Y-%m-%d")
 
         today_str = app_now.strftime("%Y-%m-%d")
-        if datetime.now().hour >=0 and datetime.now().hour <= 8:
+        if 0 <= datetime.now().hour <= 8:
             Skymobi_url = f'https://crm.skymobi.online/api/adxh5?apikey={api_key}&date={yesterday_str}&uid={api_id}&page=1&limit=500'
         else:
             Skymobi_url = f'https://crm.skymobi.online/api/adxh5?apikey={api_key}&date={today_str}&uid={api_id}&page=1&limit=500'
@@ -118,8 +118,9 @@ async def skymobi_api_task() -> None:
                             # ========== 获取管理员用户（用于产品查找/创建） ==========
 
                             # 查找管理员用户（优先查找username为'admin'的管理员）
-                            admin_user_query = select(User).where(User.role == UserRole.ADMIN,
-                                                                  User.username == 'admin').limit(1)
+                            admin_user_query = select(User).where(
+                                User.role == UserRole.ADMIN,
+                                User.username == 'admin').limit(1)
                             admin_user_result = await db.execute(admin_user_query)
                             admin_user = admin_user_result.scalar_one_or_none()
 
@@ -143,7 +144,7 @@ async def skymobi_api_task() -> None:
                                     "date": "dt",
 
                                     # 产品名称
-                                    "product_name": "link",  # 产品名称 -> API: url (用于查找产品)
+                                    "product_name": "link",
 
                                     # 国家代码
                                     "country_code": "country",
@@ -211,7 +212,7 @@ async def skymobi_api_task() -> None:
                                 try:
                                     from app.core.auto_bot import send_telegram_message, bot_initialized
                                     import asyncio
-                                    
+
                                     # 检查 Bot 是否已初始化
                                     if not bot_initialized:
                                         logger.debug("Telegram Bot 未初始化，跳过通知")
@@ -221,19 +222,20 @@ async def skymobi_api_task() -> None:
                                         telegram_msg += f"执行时间: {current_time_str}\n"
                                         telegram_msg += f"✅ 成功插入: {inserted_count} 条\n"
                                         telegram_msg += f"✅ 成功更新: {updated_count} 条"
-                                        
+
                                         if skipped_count > 0:
                                             telegram_msg += f"\n⏭️ 跳过重复: {skipped_count} 条"
                                         if error_count > 0:
                                             telegram_msg += f"\n❌ 错误: {error_count} 条"
-                                        
+
                                         # 使用 await 发送消息，设置超时避免阻塞太久
                                         try:
                                             await asyncio.wait_for(
                                                 send_telegram_message(telegram_msg),
                                                 timeout=5.0
                                             )
-                                            logger.info(f"Telegram 通知发送成功: Skymobi任务, 插入:{inserted_count}, 更新:{updated_count}")
+                                            logger.info(
+                                                f"Telegram 通知发送成功: Skymobi任务, 插入:{inserted_count}, 更新:{updated_count}")
                                         except asyncio.TimeoutError:
                                             logger.warning(f"发送 Telegram 通知超时: Skymobi任务")
                                         except Exception as send_err:

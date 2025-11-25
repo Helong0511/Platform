@@ -125,7 +125,7 @@ async def tqt_api_task() -> None:
         yesterday_str = app_yesterday.strftime("%Y-%m-%d")
         today_str = app_now.strftime("%Y-%m-%d")
 
-        if datetime.now().hour >=0 and datetime.now().hour <= 8:
+        if 0 <= datetime.now().hour <= 8:
             tqt_params = {
                 "appKey": tqt_app_key,  # 应用密钥
                 "startDate": yesterday_str,  # 开始日期：系统时区的昨天

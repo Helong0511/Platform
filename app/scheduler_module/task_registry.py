@@ -180,6 +180,7 @@ def auto_register_tasks() -> None:
         ARCHIVE_DATA_TASK_NAME,
         CLEANUP_SESSIONS_TASK_NAME,
         CLEANUP_LOGS_TASK_NAME,
+        TBSJ_API_TASK_NAME,
     )
     
     # 注册数据归档任务
@@ -211,6 +212,7 @@ def auto_register_tasks() -> None:
     # 注册 Skymobi API获取数据 任务
     from app.scheduler_module.tasks.skymobi_task import skymobi_api_task
     register_task_function(SKYMOBI_API_TASK_NAME, skymobi_api_task)
-    
-    
-    
+
+    # 注册 Tongbaishijia API获取数据 任务
+    from app.scheduler_module.tasks.tbsj_task import tbsj_api_task
+    register_task_function(TBSJ_API_TASK_NAME, tbsj_api_task)

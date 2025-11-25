@@ -13,11 +13,11 @@
 # 数据归档任务
 ARCHIVE_DATA_TASK_NAME = "数据归档任务"
 
-# 清理过期会话和黑名单任务
-CLEANUP_SESSIONS_TASK_NAME = "清理过期会话和黑名单"
-
 # 清理旧日志任务
 CLEANUP_LOGS_TASK_NAME = "清理旧日志"
+
+# 清理过期会话和黑名单任务
+CLEANUP_SESSIONS_TASK_NAME = "清理过期会话和黑名单"
 
 # TQT API获取数据任务
 TQT_API_TASK_NAME = "TQT API获取数据"
@@ -25,15 +25,19 @@ TQT_API_TASK_NAME = "TQT API获取数据"
 # Skymobi API获取数据任务
 SKYMOBI_API_TASK_NAME = "Skymobi API获取数据"
 
+# Skymobi API获取数据任务
+TBSJ_API_TASK_NAME = "Tongbaishijia API获取数据"
+
 # ==================== 任务名称映射 ====================
 # 用于快速查找任务名称，格式：{任务模块名: 任务名称常量}
 
 TASK_NAME_MAP = {
+    "archive_old_data": ARCHIVE_DATA_TASK_NAME,
+    "cleanup_old_logs": CLEANUP_LOGS_TASK_NAME,
+    "cleanup_expired_sessions": CLEANUP_SESSIONS_TASK_NAME,
     "tqt_task": TQT_API_TASK_NAME,
     "skymobi_task": SKYMOBI_API_TASK_NAME,
-    "archive_old_data": ARCHIVE_DATA_TASK_NAME,
-    "cleanup_expired_sessions": CLEANUP_SESSIONS_TASK_NAME,
-    "cleanup_old_logs": CLEANUP_LOGS_TASK_NAME,
+    "tbsj_task": TBSJ_API_TASK_NAME,
 }
 
 # ==================== 所有任务名称列表 ====================
@@ -45,7 +49,9 @@ ALL_TASK_NAMES = [
     CLEANUP_LOGS_TASK_NAME,
     TQT_API_TASK_NAME,
     SKYMOBI_API_TASK_NAME,
+    TBSJ_API_TASK_NAME,
 ]
+
 
 # ==================== 辅助函数 ====================
 
@@ -73,4 +79,3 @@ def is_valid_task_name(task_name: str) -> bool:
         如果任务名称在列表中返回 True，否则返回 False
     """
     return task_name in ALL_TASK_NAMES
-
