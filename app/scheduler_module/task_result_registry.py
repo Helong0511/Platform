@@ -52,74 +52,44 @@ def get_task_result(task_name: str) -> Optional[str]:
 def auto_register_task_results() -> None:
     """
     自动注册所有任务的结果获取函数
-    
-    注册规则：
-    1. 从 task_names.py 导入任务名称常量
-    2. 从对应的任务模块导入 get_task_result 函数
-    3. 使用任务名称常量注册结果获取函数
+    从 task_config.py 统一配置文件读取所有任务配置并自动注册
     
     添加新任务时：
-    1. 在 task_names.py 中定义任务名称常量
-    2. 在任务模块中实现 get_task_result 函数
-    3. 在这里添加注册代码（参考下面的示例）
+    1. 在任务模块中实现 get_task_result 函数
+    2. 在 task_config.py 中添加任务配置即可（无需修改此文件）
     """
-    # 导入任务名称常量
-    from app.scheduler_module.task_names import (
-        TQT_API_TASK_NAME,
-        SKYMOBI_API_TASK_NAME,
-        TBSJ_API_TASK_NAME,
-        ARCHIVE_DATA_TASK_NAME,
-    )
+    from app.scheduler_module.task_config import TASK_CONFIGS
     
-    # ========== 注册 TQT API获取数据 任务的结果获取函数 ==========
-    try:
-        from app.scheduler_module.tasks.tqt_task import get_task_result as tqt_get_result
-        register_task_result_getter(TQT_API_TASK_NAME, tqt_get_result)
-        logger.debug(f"已注册任务结果获取函数: {TQT_API_TASK_NAME}")
-    except ImportError as e:
-        logger.warning(f"无法导入 TQT 任务结果获取函数: {e}")
-    except Exception as e:
-        logger.error(f"注册 TQT 任务结果获取函数失败: {e}")
+    registered_count = 0
+    failed_count = 0
     
-    # ========== 注册 Skymobi API获取数据 任务的结果获取函数 ==========
-    try:
-        from app.scheduler_module.tasks.skymobi_task import get_task_result as skymobi_get_result
-        register_task_result_getter(SKYMOBI_API_TASK_NAME, skymobi_get_result)
-        logger.debug(f"已注册任务结果获取函数: {SKYMOBI_API_TASK_NAME}")
-    except ImportError as e:
-        logger.warning(f"无法导入 Skymobi 任务结果获取函数: {e}")
-    except Exception as e:
-        logger.error(f"注册 Skymobi 任务结果获取函数失败: {e}")
+    for config_key, config in TASK_CONFIGS.items():
+        try:
+            task_name = config["task_name"]
+            result_getter_module = config["result_getter_module"]
+            result_getter_function = config["result_getter_function"]
+            
+            # 动态导入结果获取函数
+            module = __import__(result_getter_module, fromlist=[result_getter_function])
+            get_result_func = getattr(module, result_getter_function)
+            
+            # 注册结果获取函数
+            register_task_result_getter(task_name, get_result_func)
+            registered_count += 1
+            logger.debug(f"已注册任务结果获取函数: {task_name}")
+            
+        except KeyError as e:
+            logger.error(f"任务配置 '{config_key}' 缺少必要字段: {e}")
+            failed_count += 1
+        except ImportError as e:
+            logger.warning(f"无法导入任务结果获取函数模块 '{result_getter_module}': {e}")
+            failed_count += 1
+        except AttributeError as e:
+            logger.error(f"任务模块 '{result_getter_module}' 中不存在函数 '{result_getter_function}': {e}")
+            failed_count += 1
+        except Exception as e:
+            logger.error(f"注册任务结果获取函数 '{config_key}' 失败: {e}", exc_info=True)
+            failed_count += 1
     
-    # ========== 注册 yangyangdeyi API获取数据 任务的结果获取函数 ==========
-    try:
-        from app.scheduler_module.tasks.tbsj_task import get_task_result as tbsj_get_result
-        register_task_result_getter(TBSJ_API_TASK_NAME, tbsj_get_result)
-        logger.debug(f"已注册任务结果获取函数: {TBSJ_API_TASK_NAME}")
-    except ImportError as e:
-        logger.warning(f"无法导入 yangyangdeyi 任务结果获取函数: {e}")
-    except Exception as e:
-        logger.error(f"注册 yangyangdeyi 任务结果获取函数失败: {e}")
-    
-    # ========== 注册数据归档任务的结果获取函数 ==========
-    try:
-        from app.scheduler_module.tasks.archive_old_data import get_task_result as archive_get_result
-        register_task_result_getter(ARCHIVE_DATA_TASK_NAME, archive_get_result)
-        logger.debug(f"已注册任务结果获取函数: {ARCHIVE_DATA_TASK_NAME}")
-    except ImportError as e:
-        logger.warning(f"无法导入数据归档任务结果获取函数: {e}")
-    except Exception as e:
-        logger.error(f"注册数据归档任务结果获取函数失败: {e}")
-    
-    # ========== 在这里添加更多任务的结果获取函数注册 ==========
-    # 示例：
-    # from app.scheduler_module.task_names import NEW_TASK_NAME
-    # try:
-    #     from app.scheduler_module.tasks.new_task import get_task_result as new_task_get_result
-    #     register_task_result_getter(NEW_TASK_NAME, new_task_get_result)
-    #     logger.debug(f"已注册任务结果获取函数: {NEW_TASK_NAME}")
-    # except ImportError as e:
-    #     logger.warning(f"无法导入新任务结果获取函数: {e}")
-    # except Exception as e:
-    #     logger.error(f"注册新任务结果获取函数失败: {e}")
+    logger.info(f"任务结果获取函数注册完成: 成功 {registered_count} 个, 失败 {failed_count} 个")
 

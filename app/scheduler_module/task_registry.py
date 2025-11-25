@@ -171,48 +171,51 @@ def get_all_registered_tasks() -> Dict[str, Callable[..., Any]]:
 
 # 自动注册所有可用的任务函数
 def auto_register_tasks() -> None:
-    """自动注册所有任务函数"""
-    
-    # 导入任务名称常量
-    from app.scheduler_module.task_names import (
-        TQT_API_TASK_NAME,
-        SKYMOBI_API_TASK_NAME,
-        ARCHIVE_DATA_TASK_NAME,
-        CLEANUP_SESSIONS_TASK_NAME,
-        CLEANUP_LOGS_TASK_NAME,
-        TBSJ_API_TASK_NAME,
-    )
-    
-    # 注册数据归档任务
-    from app.scheduler_module.tasks.archive_old_data import archive_old_ad_data
-    register_task_function(ARCHIVE_DATA_TASK_NAME, archive_old_ad_data)
-
-    # 注册清理过期会话和黑名单记录任务（使用 cleanup_expired_sessions，功能更完整）
-    from app.scheduler_module.tasks.cleanup_expired_sessions import cleanup_expired_sessions
-    register_task_function(CLEANUP_SESSIONS_TASK_NAME, cleanup_expired_sessions)
-
-    # 注册清理旧日志任务
-    from app.scheduler_module.tasks.cleanup_old_logs import cleanup_old_audit_logs
+    """
+    自动注册所有任务函数
+    从 task_config.py 统一配置文件读取所有任务配置并自动注册
+    """
+    from app.scheduler_module.task_config import TASK_CONFIGS
     from app.core.config import settings
     
-    # 创建包装函数，使用配置中的参数
-    async def cleanup_old_logs_wrapper():
-        """清理旧日志任务的包装函数，使用配置中的参数"""
-        return await cleanup_old_audit_logs(
-            days=settings.AUDIT_LOG_RETENTION_DAYS,
-            archive=settings.AUDIT_LOG_ARCHIVE
-        )
+    registered_count = 0
+    failed_count = 0
     
-    register_task_function(CLEANUP_LOGS_TASK_NAME, cleanup_old_logs_wrapper)
-
-    # 注册 TQT API获取数据 任务
-    from app.scheduler_module.tasks.tqt_task import tqt_api_task
-    register_task_function(TQT_API_TASK_NAME, tqt_api_task)
+    for config_key, config in TASK_CONFIGS.items():
+        try:
+            task_name = config["task_name"]
+            task_module = config["task_module"]
+            task_function = config["task_function"]
+            wrapper = config.get("wrapper", False)
+            
+            # 动态导入任务模块和函数
+            module = __import__(task_module, fromlist=[task_function])
+            task_func = getattr(module, task_function)
+            
+            # 特殊处理：清理旧日志任务需要包装函数
+            if wrapper and task_name == "清理旧日志":
+                # 创建包装函数，使用配置中的参数（使用默认参数避免闭包问题）
+                async def cleanup_old_logs_wrapper(func=task_func, days=settings.AUDIT_LOG_RETENTION_DAYS, archive=settings.AUDIT_LOG_ARCHIVE):
+                    """清理旧日志任务的包装函数，使用配置中的参数"""
+                    return await func(days=days, archive=archive)
+                register_task_function(task_name, cleanup_old_logs_wrapper)
+            else:
+                register_task_function(task_name, task_func)
+            
+            registered_count += 1
+            logger.debug(f"已注册任务: {task_name}")
+            
+        except KeyError as e:
+            logger.error(f"任务配置 '{config_key}' 缺少必要字段: {e}")
+            failed_count += 1
+        except ImportError as e:
+            logger.error(f"无法导入任务模块 '{task_module}': {e}")
+            failed_count += 1
+        except AttributeError as e:
+            logger.error(f"任务模块 '{task_module}' 中不存在函数 '{task_function}': {e}")
+            failed_count += 1
+        except Exception as e:
+            logger.error(f"注册任务 '{config_key}' 失败: {e}", exc_info=True)
+            failed_count += 1
     
-    # 注册 Skymobi API获取数据 任务
-    from app.scheduler_module.tasks.skymobi_task import skymobi_api_task
-    register_task_function(SKYMOBI_API_TASK_NAME, skymobi_api_task)
-
-    # 注册 yangyangdeyi API获取数据 任务
-    from app.scheduler_module.tasks.tbsj_task import tbsj_api_task
-    register_task_function(TBSJ_API_TASK_NAME, tbsj_api_task)
+    logger.info(f"任务注册完成: 成功 {registered_count} 个, 失败 {failed_count} 个")

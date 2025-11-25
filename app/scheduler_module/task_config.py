@@ -1,0 +1,130 @@
+"""
+定时任务统一配置文件
+在这里配置所有定时任务，系统会自动完成注册
+
+==========================================
+添加新任务的步骤：
+==========================================
+
+1. 创建任务文件（如 app/scheduler_module/tasks/my_task.py）
+   - 实现任务函数（如 async def my_task_function()）
+   - 实现 get_task_result 函数（用于获取执行结果）
+   - 实现 set_task_result 函数（用于保存执行结果）
+   - 在任务执行时调用 set_task_result() 保存结果
+
+2. 在 task_names.py 中添加任务名称常量（可选，但推荐）
+   - MY_TASK_NAME = "我的新任务"
+
+3. 在这里添加任务配置（只需添加一个配置项即可）
+   - 取消注释下面的示例代码
+   - 修改为你的任务信息
+
+4. 完成！系统会自动：
+   - 注册任务函数
+   - 注册结果获取函数
+   - 无需修改其他文件
+
+==========================================
+配置格式说明：
+==========================================
+
+{
+    "任务名称（用于配置键）": {
+        "task_name": "任务名称（与数据库中的 task_name 对应）",
+        "task_module": "任务模块路径（如：app.scheduler_module.tasks.my_task）",
+        "task_function": "任务函数名（如：my_task_function）",
+        "result_getter_module": "结果获取函数模块路径（通常与 task_module 相同）",
+        "result_getter_function": "结果获取函数名（通常是 get_task_result）",
+        "wrapper": False,  # 可选，如果需要包装函数（如清理旧日志任务）设为 True
+    }
+}
+"""
+from typing import Dict, Any, Optional
+
+# 任务配置类型定义
+TaskConfig = Dict[str, Any]
+
+# ==============================================================================
+# 定时任务配置
+# ==============================================================================
+# 格式说明：
+# {
+#     "任务名称": {
+#         "task_name": "任务名称（与数据库中的 task_name 对应）",
+#         "task_module": "任务模块路径（如：app.scheduler_module.tasks.tqt_task）",
+#         "task_function": "任务函数名（如：tqt_api_task）",
+#         "result_getter_module": "结果获取函数模块路径（通常与 task_module 相同）",
+#         "result_getter_function": "结果获取函数名（通常是 get_task_result）",
+#     }
+# }
+# ==============================================================================
+
+TASK_CONFIGS: Dict[str, TaskConfig] = {
+    # ========== 数据归档任务 ==========
+    "数据归档任务": {
+        "task_name": "数据归档任务",
+        "task_module": "app.scheduler_module.tasks.archive_old_data",
+        "task_function": "archive_old_ad_data",
+        "result_getter_module": "app.scheduler_module.tasks.archive_old_data",
+        "result_getter_function": "get_task_result",
+    },
+    
+    # ========== 清理旧日志任务 ==========
+    "清理旧日志": {
+        "task_name": "清理旧日志",
+        "task_module": "app.scheduler_module.tasks.cleanup_old_logs",
+        "task_function": "cleanup_old_audit_logs",
+        "result_getter_module": "app.scheduler_module.tasks.cleanup_old_logs",
+        "result_getter_function": "get_task_result",
+        # 特殊处理：需要包装函数使用配置参数
+        "wrapper": True,
+    },
+    
+    # ========== 清理过期会话和黑名单任务 ==========
+    "清理过期会话和黑名单": {
+        "task_name": "清理过期会话和黑名单",
+        "task_module": "app.scheduler_module.tasks.cleanup_expired_sessions",
+        "task_function": "cleanup_expired_sessions",
+        "result_getter_module": "app.scheduler_module.tasks.cleanup_expired_sessions",
+        "result_getter_function": "get_task_result",
+    },
+    
+    # ========== TQT API获取数据任务 ==========
+    "TQT API获取数据": {
+        "task_name": "TQT API获取数据",
+        "task_module": "app.scheduler_module.tasks.tqt_task",
+        "task_function": "tqt_api_task",
+        "result_getter_module": "app.scheduler_module.tasks.tqt_task",
+        "result_getter_function": "get_task_result",
+    },
+    
+    # ========== Skymobi API获取数据任务 ==========
+    "Skymobi API获取数据": {
+        "task_name": "Skymobi API获取数据",
+        "task_module": "app.scheduler_module.tasks.skymobi_task",
+        "task_function": "skymobi_api_task",
+        "result_getter_module": "app.scheduler_module.tasks.skymobi_task",
+        "result_getter_function": "get_task_result",
+    },
+    
+    # ========== yangyangdeyi API获取数据任务 ==========
+    "yangyangdeyi API获取数据": {
+        "task_name": "yangyangdeyi API获取数据",
+        "task_module": "app.scheduler_module.tasks.tbsj_task",
+        "task_function": "tbsj_api_task",
+        "result_getter_module": "app.scheduler_module.tasks.tbsj_task",
+        "result_getter_function": "get_task_result",
+    },
+    
+    # ==============================================================================
+    # 添加新任务示例（取消注释并修改即可）
+    # ==============================================================================
+    # "新任务名称": {
+    #     "task_name": "新任务名称",
+    #     "task_module": "app.scheduler_module.tasks.my_new_task",
+    #     "task_function": "my_new_task_function",
+    #     "result_getter_module": "app.scheduler_module.tasks.my_new_task",
+    #     "result_getter_function": "get_task_result",
+    # },
+}
+
