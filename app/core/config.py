@@ -16,7 +16,21 @@ logger = logging.getLogger(__name__)
 
 # 加载环境变量
 # 使用 override=True 确保 .env 文件中的值覆盖系统环境变量
-load_dotenv(override=True)
+# 如果无法读取 .env 文件（如权限问题），静默失败
+# 因为 systemd 可能已经通过 EnvironmentFile 加载了环境变量
+try:
+    load_dotenv(override=True)
+except (PermissionError, IOError, OSError) as e:
+    # 如果无法读取 .env 文件，记录警告但继续运行
+    # 这通常发生在 systemd 服务中，因为环境变量可能已经通过 EnvironmentFile 加载
+    import os
+    if os.getenv("PRODUCTION_ENV"):
+        # 生产环境：如果环境变量已设置，说明 systemd 已加载，可以继续
+        logger.warning(f"无法读取 .env 文件（可能已通过 systemd EnvironmentFile 加载）: {e}")
+    else:
+        # 开发环境：给出更明确的提示
+        logger.warning(f"无法读取 .env 文件: {e}")
+        logger.info("如果使用 systemd 服务，请确保 .env 文件权限正确：sudo chown www-data:www-data /data/Platform/.env && sudo chmod 640 /data/Platform/.env")
 
 
 class Settings(BaseSettings):

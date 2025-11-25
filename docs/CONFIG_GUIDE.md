@@ -16,9 +16,20 @@
 # 复制模板文件
 cp env.example .env
 
-# 设置文件权限（仅所有者可读）
-chmod 600 .env
+# 设置文件所有者和权限（systemd 服务使用 www-data 用户）
+# 方法1：设置为 640（推荐，所有者可读写，组可读）
+sudo chown www-data:www-data /data/Platform/.env
+sudo chmod 640 /data/Platform/.env
+
+# 方法2：设置为 600（仅所有者可读写，需要确保所有者是 www-data）
+# sudo chown www-data:www-data /data/Platform/.env
+# sudo chmod 600 /data/Platform/.env
 ```
+
+**重要提示**：
+- 如果使用 systemd 服务，`.env` 文件的所有者必须是 `www-data`（或服务运行的用户）
+- 权限不能设置为 `600` 且所有者不是 `www-data`，否则服务无法读取
+- 如果遇到权限错误，请参考 [修复 .env 文件权限问题](DEPLOYMENT_FIX_ENV_PERMISSIONS.md)
 
 ### 2. 编辑配置文件
 
@@ -191,12 +202,27 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"
 
 1. **定期更换密钥**：建议每3-6个月更换一次 `SECRET_KEY`
 2. **使用强密码**：所有密码应包含大小写字母、数字、特殊字符
-3. **限制文件权限**：确保 `.env` 文件权限为 `600`
-   ```bash
-   chmod 600 .env
-   ```
+3. **限制文件权限**：
+   - 如果使用 systemd 服务：设置为 `640`，所有者 `www-data`
+     ```bash
+     sudo chown www-data:www-data /data/Platform/.env
+     sudo chmod 640 /data/Platform/.env
+     ```
+   - 如果手动运行：可以设置为 `600`（仅所有者可读写）
+     ```bash
+     chmod 600 .env
+     ```
 4. **不要提交到Git**：确保 `.env` 在 `.gitignore` 中
 5. **使用密钥管理工具**：生产环境建议使用 Vault、AWS Secrets Manager 等工具
+
+## 权限问题排查
+
+如果遇到权限错误：
+```
+PermissionError: [Errno 13] Permission denied: '/data/Platform/.env'
+```
+
+请参考 [修复 .env 文件权限问题](DEPLOYMENT_FIX_ENV_PERMISSIONS.md) 文档。
 
 ## 配置示例
 
