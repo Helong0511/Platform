@@ -131,15 +131,17 @@ async def get_process_for_task(
         )
         process_running_counts = {pid: count for pid, count in result.all() if pid}
         
-        # 获取所有可能的进程ID（从所有任务的last_run_pid）
-        # 但是，我们只关心当前正在运行的进程，而不是历史记录
-        # 所以应该从 is_running=True 的任务中获取 PID
+        # 获取所有可能的进程ID
+        # 策略：不仅查询正在运行任务的进程，还查询最近运行过任务的进程
+        # 这样可以发现所有可用的worker进程，即使它们当前没有运行任务
+        
+        # 1. 查询正在运行任务的进程
         result = await db.execute(
             select(ScheduledTask.last_run_pid)
             .where(
                 and_(
                     ScheduledTask.is_active == True,
-                    ScheduledTask.is_running == True,  # 只考虑正在运行的任务
+                    ScheduledTask.is_running == True,
                     ScheduledTask.last_run_pid.isnot(None)
                 )
             )
@@ -147,16 +149,35 @@ async def get_process_for_task(
         )
         running_processes = sorted([pid for pid, in result.all() if pid])
         
-        # 如果当前进程不在运行进程列表中，添加它（因为当前进程可能还没有运行过任务）
-        if current_pid not in running_processes:
-            running_processes.append(current_pid)
-            running_processes.sort()
+        # 2. 查询最近运行过任务的进程（即使当前没有运行任务）
+        # 这样可以发现所有可用的worker进程
+        from datetime import timedelta
+        recent_time = datetime.now(timezone.utc) - timedelta(minutes=10)  # 最近10分钟内运行过任务的进程
+        result = await db.execute(
+            select(ScheduledTask.last_run_pid)
+            .where(
+                and_(
+                    ScheduledTask.is_active == True,
+                    ScheduledTask.last_run_pid.isnot(None),
+                    ScheduledTask.last_run_time >= recent_time
+                )
+            )
+            .distinct()
+        )
+        recent_processes = sorted([pid for pid, in result.all() if pid])
         
-        # 如果没有任何运行中的任务，只有当前进程
-        if not running_processes:
+        # 合并所有进程（去重）
+        all_processes_set = set(running_processes + recent_processes)
+        
+        # 如果当前进程不在列表中，添加它（因为当前进程可能还没有运行过任务）
+        if current_pid not in all_processes_set:
+            all_processes_set.add(current_pid)
+        
+        all_processes = sorted(list(all_processes_set))
+        
+        # 如果仍然没有任何进程，使用当前进程
+        if not all_processes:
             all_processes = [current_pid]
-        else:
-            all_processes = running_processes
         
         logger.info(
             f"任务 '{task_name}' 进程分配检查: "
@@ -180,65 +201,72 @@ async def get_process_for_task(
             # 这样可以确保所有任务都能执行，只是需要等待
             return True, current_pid
         
-        # 根据任务索引和进程数量，轮询分配进程
-        # 相同cron的任务按顺序分配到不同进程
-        # 但是，如果只有一个进程，所有任务都应该在这个进程执行（可以并发）
-        if len(all_processes) == 1:
-            # 只有一个进程，所有任务都在这个进程执行（可以并发）
-            assigned_pid = all_processes[0]
+        # 优先查找空闲的进程（未达到并发上限的进程）
+        # 策略：1. 先查找所有空闲进程 2. 如果都满载，再按轮询分配
+        assigned_pid = None
+        
+        # 获取所有进程的当前运行任务数
+        process_loads = {}
+        for pid in all_processes:
+            if pid == current_pid:
+                # 当前进程：从队列状态获取
+                queue = get_task_queue()
+                queue_status = await queue.get_queue_status()
+                process_loads[pid] = queue_status['current_running']
+            else:
+                # 其他进程：从数据库状态获取
+                process_loads[pid] = process_running_counts.get(pid, 0)
+        
+        # 查找空闲进程（未达到并发上限的进程）
+        idle_processes = [pid for pid in all_processes if process_loads.get(pid, 0) < max_concurrent]
+        
+        if idle_processes:
+            # 有空闲进程，优先选择负载最低的进程
+            idle_processes.sort(key=lambda pid: process_loads.get(pid, 0))
+            assigned_pid = idle_processes[0]
             logger.info(
-                f"任务 '{task_name}' 单进程环境，"
-                f"所有相同cron的任务都在进程 {assigned_pid} 执行（可以并发）"
+                f"任务 '{task_name}' 分配给空闲进程 {assigned_pid} "
+                f"（负载: {process_loads.get(assigned_pid, 0)}/{max_concurrent}，"
+                f"空闲进程: {idle_processes}）"
             )
         else:
-            # 多个进程，按索引轮询分配
-            assigned_process_index = task_index % len(all_processes)
-            assigned_pid = all_processes[assigned_process_index]
+            # 所有进程都满载，按任务索引轮询分配（确保相同cron的任务分配到不同进程）
+            if len(all_processes) == 1:
+                assigned_pid = all_processes[0]
+                logger.info(
+                    f"任务 '{task_name}' 单进程环境，"
+                    f"所有相同cron的任务都在进程 {assigned_pid} 执行（可以并发）"
+                )
+            else:
+                # 多个进程，按索引轮询分配
+                assigned_process_index = task_index % len(all_processes)
+                assigned_pid = all_processes[assigned_process_index]
+                logger.info(
+                    f"任务 '{task_name}' 所有进程都满载，按轮询分配到进程 {assigned_pid} "
+                    f"（任务索引: {task_index}, 进程负载: {process_loads}）"
+                )
         
         # 如果分配的是当前进程
         if assigned_pid == current_pid:
-            # 检查当前进程是否达到上限
+            # 检查当前进程是否真的可以执行（可能在上面的分配逻辑中已经检查过，但这里再次确认）
             queue = get_task_queue()
             queue_status = await queue.get_queue_status()
             current_running = queue_status['current_running']
-            current_running_count = process_running_counts.get(current_pid, 0)
-            # 使用队列状态和数据库状态中的较大值
-            actual_running = max(current_running, current_running_count)
             
-            # 如果只有一个进程，允许所有任务在这个进程执行（可以并发）
-            # 即使达到上限，也允许排队等待，确保所有任务都能执行
-            if len(all_processes) == 1:
-                logger.info(
-                    f"任务 '{task_name}' 分配给当前进程 {current_pid} "
-                    f"（单进程环境，相同cron的任务可以并发执行，"
-                    f"当前运行: {actual_running}/{max_concurrent}）"
-                )
-                return True, current_pid  # 单进程环境，允许排队等待
-            
-            if actual_running < max_concurrent:
+            # 如果当前进程未满载，直接执行
+            if current_running < max_concurrent:
                 logger.debug(
                     f"任务 '{task_name}' 分配给当前进程 {current_pid} "
-                    f"（轮询分配，当前运行: {actual_running}/{max_concurrent}）"
+                    f"（当前运行: {current_running}/{max_concurrent}）"
                 )
                 return True, current_pid
             else:
-                # 当前进程已满载，查找其他空闲进程
-                for pid in all_processes:
-                    if pid != current_pid:
-                        pid_running = process_running_counts.get(pid, 0)
-                        # 假设其他进程也有相同的max_concurrent限制
-                        if pid_running < max_concurrent:
-                            logger.info(
-                                f"任务 '{task_name}' 当前进程 {current_pid} 已满载 "
-                                f"（运行: {actual_running}/{max_concurrent}），"
-                                f"分配给其他进程 {pid}（运行: {pid_running}/{max_concurrent}）"
-                            )
-                            return False, pid
-                
-                # 所有进程都满载，使用当前进程（排队）
-                logger.warning(
-                    f"任务 '{task_name}' 所有进程都已满载，"
-                    f"将在当前进程 {current_pid} 排队等待"
+                # 当前进程已满载，但上面已经分配给了当前进程（可能是所有进程都满载）
+                # 允许在当前进程排队等待
+                logger.info(
+                    f"任务 '{task_name}' 当前进程 {current_pid} 已满载 "
+                    f"（运行: {current_running}/{max_concurrent}），"
+                    f"将在当前进程排队等待"
                 )
                 return True, current_pid
         else:
