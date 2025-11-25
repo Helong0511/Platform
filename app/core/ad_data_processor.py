@@ -20,6 +20,96 @@ from app.core.country_code import find_country_code_by_any_format
 logger = logging.getLogger(__name__)
 
 
+async def check_and_notify_data_decrease(
+    existing_data: Any,
+    new_request_count: int,
+    new_match_count: int,
+    new_display_count: int,
+    new_click_count: int,
+    new_revenue_before: float,
+    new_revenue_after: float,
+    date_str: str,
+    product_name: str,
+    country_code: str,
+    source: str = "API"
+) -> None:
+    """
+    检查待更新数据是否比原有数据减少，如果减少则发送Telegram通知给管理员
+    
+    Args:
+        existing_data: 数据库中现有的数据对象
+        new_request_count: 新的请求数
+        new_match_count: 新的匹配数
+        new_display_count: 新的展示数
+        new_click_count: 新的点击数
+        new_revenue_before: 新的收益（减扣前）
+        new_revenue_after: 新的收益（减扣后）
+        date_str: 日期字符串
+        product_name: 产品名称
+        country_code: 国家代码
+        source: 数据来源（默认"API"）
+    """
+    try:
+        # 检查关键指标是否减少
+        decreased_fields = []
+        
+        if new_request_count < existing_data.request_count:
+            decreased_fields.append(f"请求数: {existing_data.request_count} → {new_request_count} (减少 {existing_data.request_count - new_request_count})")
+        
+        if new_match_count < existing_data.match_count:
+            decreased_fields.append(f"匹配数: {existing_data.match_count} → {new_match_count} (减少 {existing_data.match_count - new_match_count})")
+        
+        if new_display_count < existing_data.display_count:
+            decreased_fields.append(f"展示数: {existing_data.display_count} → {new_display_count} (减少 {existing_data.display_count - new_display_count})")
+        
+        if new_click_count < existing_data.click_count:
+            decreased_fields.append(f"点击数: {existing_data.click_count} → {new_click_count} (减少 {existing_data.click_count - new_click_count})")
+        
+        if new_revenue_before < existing_data.revenue_before_deduct:
+            decreased_fields.append(f"收益(减扣前): {existing_data.revenue_before_deduct:.2f} → {new_revenue_before:.2f} (减少 {existing_data.revenue_before_deduct - new_revenue_before:.2f})")
+        
+        if new_revenue_after < existing_data.revenue_after_deduct:
+            decreased_fields.append(f"收益(减扣后): {existing_data.revenue_after_deduct:.2f} → {new_revenue_after:.2f} (减少 {existing_data.revenue_after_deduct - new_revenue_after:.2f})")
+        
+        # 如果有数据减少，发送通知
+        if decreased_fields:
+            from app.core.auto_bot import send_telegram_message
+            import asyncio
+            
+            country_display = country_code if country_code else "未知"
+            if country_code == "AA":
+                country_display = "未知区域"
+            elif country_code == "ZZ":
+                country_display = "全部区域"
+            
+            telegram_msg = f"⚠️ 数据减少警告\n\n"
+            telegram_msg += f"数据来源: {source}\n"
+            telegram_msg += f"日期: {date_str}\n"
+            telegram_msg += f"产品: {product_name}\n"
+            telegram_msg += f"国家: {country_display}\n\n"
+            telegram_msg += f"减少的字段:\n"
+            for field in decreased_fields:
+                telegram_msg += f"• {field}\n"
+            
+            # 发送通知（异步，不阻塞）
+            try:
+                await asyncio.wait_for(
+                    send_telegram_message(telegram_msg),
+                    timeout=5.0
+                )
+                logger.warning(
+                    f"数据减少警告已发送: 日期={date_str}, 产品={product_name}, 国家={country_code}, "
+                    f"减少字段数={len(decreased_fields)}"
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"发送数据减少警告超时: 日期={date_str}, 产品={product_name}")
+            except Exception as notify_err:
+                logger.warning(f"发送数据减少警告失败: {notify_err}")
+    except Exception as e:
+        # 通知失败不应该影响数据更新流程
+        logger.warning(f"检查数据减少时出错: {e}")
+
+
 async def process_api_ad_data(
     data: List[Dict[str, Any]],
     db: AsyncSession,
@@ -254,6 +344,21 @@ async def process_api_ad_data(
                 
                 # 处理数据（新建或更新）
                 if existing_data:
+                    # 检查数据是否减少（在更新之前）
+                    await check_and_notify_data_decrease(
+                        existing_data=existing_data,
+                        new_request_count=item_data["request_count"],
+                        new_match_count=item_data["match_count"],
+                        new_display_count=item_data["display_count"],
+                        new_click_count=item_data["click_count"],
+                        new_revenue_before=total_revenue,
+                        new_revenue_after=revenue_after_deduct,
+                        date_str=date_str,
+                        product_name=product_name,
+                        country_code=country_code,
+                        source=source
+                    )
+                    
                     # 检查是否需要更新
                     need_update = False
                     update_fields = []
@@ -468,6 +573,21 @@ async def process_api_ad_data(
                 
                 # 处理数据（新建或更新）
                 if existing_data:
+                    # 检查数据是否减少（在更新之前）
+                    await check_and_notify_data_decrease(
+                        existing_data=existing_data,
+                        new_request_count=grouped_data["request_count"],
+                        new_match_count=grouped_data["match_count"],
+                        new_display_count=grouped_data["display_count"],
+                        new_click_count=grouped_data["click_count"],
+                        new_revenue_before=total_revenue,
+                        new_revenue_after=revenue_after_deduct,
+                        date_str=date_str,
+                        product_name=product_name,
+                        country_code=country_code,
+                        source=f"{source}（无法识别国家代码，已累加）"
+                    )
+                    
                     # 检查是否需要更新
                     need_update = False
                     update_fields = []

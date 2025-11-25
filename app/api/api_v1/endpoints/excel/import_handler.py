@@ -853,6 +853,30 @@ async def process_row_data(
                     )
                     country_code = "ZZ"
             
+            # 检查数据是否减少（在更新之前）
+            from app.core.ad_data_processor import check_and_notify_data_decrease
+            # 格式化日期字符串（data_date 可能是 date 或 datetime 类型）
+            if isinstance(data_date, datetime):
+                date_str = data_date.date().isoformat()
+            elif hasattr(data_date, 'isoformat'):
+                date_str = data_date.isoformat()
+            else:
+                date_str = str(data_date)
+            
+            await check_and_notify_data_decrease(
+                existing_data=existing_data,
+                new_request_count=request_count,
+                new_match_count=match_count,
+                new_display_count=display_count,
+                new_click_count=click_count,
+                new_revenue_before=revenue_before,
+                new_revenue_after=revenue_after,
+                date_str=date_str,
+                product_name=product_name,
+                country_code=country_code,
+                source=f"Excel导入（用户: {current_user.username}）"
+            )
+            
             existing_data.country_code = country_code  # 更新国家代码
             existing_data.request_count = request_count
             existing_data.match_count = match_count
@@ -1184,51 +1208,41 @@ async def import_ad_data_handler(
 
         # 发送 Telegram 通知（仅在成功导入时）
         if result['success_rows'] > 0:
-            try:
-                from app.core.auto_bot import send_telegram_message, bot_initialized
-                
-                # 检查 Bot 是否已初始化
-                if not bot_initialized:
-                    logger.debug("Telegram Bot 未初始化，跳过通知")
+            from app.core.auto_bot import send_telegram_message
+            import asyncio
+            
+            # 构建通知消息
+            telegram_msg = f"📊 Excel 导入成功\n\n"
+            telegram_msg += f"用户: {current_user.username}\n"
+            telegram_msg += f"文件: {file.filename}\n"
+            telegram_msg += f"总计: {result['total_rows']} 行\n"
+            telegram_msg += f"✅ 成功: {result['success_rows']} 条"
+            
+            if result.get('new_rows', 0) > 0:
+                telegram_msg += f"（新增 {result['new_rows']} 条"
+            if result.get('updated_rows', 0) > 0:
+                if result.get('new_rows', 0) > 0:
+                    telegram_msg += f"，更新 {result['updated_rows']} 条）"
                 else:
-                    import asyncio
-                    
-                    # 构建通知消息
-                    telegram_msg = f"📊 Excel 导入成功\n\n"
-                    telegram_msg += f"用户: {current_user.username}\n"
-                    telegram_msg += f"文件: {file.filename}\n"
-                    telegram_msg += f"总计: {result['total_rows']} 行\n"
-                    telegram_msg += f"✅ 成功: {result['success_rows']} 条"
-                    
-                    if result.get('new_rows', 0) > 0:
-                        telegram_msg += f"（新增 {result['new_rows']} 条"
-                    if result.get('updated_rows', 0) > 0:
-                        if result.get('new_rows', 0) > 0:
-                            telegram_msg += f"，更新 {result['updated_rows']} 条）"
-                        else:
-                            telegram_msg += f"（更新 {result['updated_rows']} 条）"
-                    else:
-                        if result.get('new_rows', 0) > 0:
-                            telegram_msg += "）"
-                    
-                    if result.get('failed_rows', 0) > 0:
-                        telegram_msg += f"\n❌ 失败: {result['failed_rows']} 条"
-                    
-                    # 使用 await 发送消息，设置超时避免阻塞太久
-                    # 超时时间 5 秒，如果超时则记录警告但不影响响应
-                    try:
-                        await asyncio.wait_for(
-                            send_telegram_message(telegram_msg),
-                            timeout=5.0
-                        )
-                        logger.info(f"Telegram 通知发送成功，用户: {current_user.username}, 文件: {file.filename}, 成功: {result['success_rows']} 条")
-                    except asyncio.TimeoutError:
-                        logger.warning(f"发送 Telegram 通知超时，用户: {current_user.username}, 文件: {file.filename}")
-                    except Exception as send_err:
-                        logger.warning(f"发送 Telegram 通知失败: {send_err}")
-            except Exception as telegram_err:
-                # Telegram 通知失败不影响导入结果
-                logger.warning(f"发送 Telegram 通知时发生错误: {telegram_err}", exc_info=True)
+                    telegram_msg += f"（更新 {result['updated_rows']} 条）"
+            else:
+                if result.get('new_rows', 0) > 0:
+                    telegram_msg += "）"
+            
+            if result.get('failed_rows', 0) > 0:
+                telegram_msg += f"\n❌ 失败: {result['failed_rows']} 条"
+            
+            # 使用 await 发送消息，设置超时避免阻塞太久
+            # send_telegram_message 内部已有完整的容错处理
+            try:
+                await asyncio.wait_for(
+                    send_telegram_message(telegram_msg),
+                    timeout=5.0
+                )
+                logger.info(f"Telegram 通知发送成功，用户: {current_user.username}, 文件: {file.filename}, 成功: {result['success_rows']} 条")
+            except asyncio.TimeoutError:
+                logger.warning(f"发送 Telegram 通知超时，用户: {current_user.username}, 文件: {file.filename}")
+            # 其他异常已在 send_telegram_message 内部处理，这里不需要捕获
 
         return import_response
 

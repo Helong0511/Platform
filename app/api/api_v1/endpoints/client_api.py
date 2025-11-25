@@ -649,39 +649,29 @@ async def get_client_data(
 
         # 发送 Telegram 通知（仅在成功获取数据时）
         if len(data_list) > 0:
+            from app.core.auto_bot import send_telegram_message
+            import asyncio
+            
+            # 构建通知消息
+            telegram_msg = f"📡 API 数据获取成功\n\n"
+            telegram_msg += f"客户: {client.company_name}\n"
+            telegram_msg += f"数据类型: {data_type}\n"
+            telegram_msg += f"✅ 成功获取: {len(data_list)} 条数据"
+            
+            if start_date_obj and end_date_obj:
+                telegram_msg += f"\n日期范围: {start_date_obj.strftime('%Y-%m-%d')} 至 {end_date_obj.strftime('%Y-%m-%d')}"
+            
+            # 使用 await 发送消息，设置超时避免阻塞太久
+            # send_telegram_message 内部已有完整的容错处理
             try:
-                from app.core.auto_bot import send_telegram_message, bot_initialized
-                
-                # 检查 Bot 是否已初始化
-                if not bot_initialized:
-                    logger.debug("Telegram Bot 未初始化，跳过通知")
-                else:
-                    import asyncio
-                    
-                    # 构建通知消息
-                    telegram_msg = f"📡 API 数据获取成功\n\n"
-                    telegram_msg += f"客户: {client.company_name}\n"
-                    telegram_msg += f"数据类型: {data_type}\n"
-                    telegram_msg += f"✅ 成功获取: {len(data_list)} 条数据"
-                    
-                    if start_date_obj and end_date_obj:
-                        telegram_msg += f"\n日期范围: {start_date_obj.strftime('%Y-%m-%d')} 至 {end_date_obj.strftime('%Y-%m-%d')}"
-                    
-                    # 使用 await 发送消息，设置超时避免阻塞太久
-                    # 超时时间 5 秒，如果超时则记录警告但不影响响应
-                    try:
-                        await asyncio.wait_for(
-                            send_telegram_message(telegram_msg),
-                            timeout=5.0
-                        )
-                        logger.info(f"Telegram 通知发送成功，客户: {client.company_name}, 数据条数: {len(data_list)}")
-                    except asyncio.TimeoutError:
-                        logger.warning(f"发送 Telegram 通知超时，客户: {client.company_name}")
-                    except Exception as send_err:
-                        logger.warning(f"发送 Telegram 通知失败: {send_err}")
-            except Exception as telegram_err:
-                # Telegram 通知失败不影响API响应
-                logger.warning(f"发送 Telegram 通知时发生错误: {telegram_err}", exc_info=True)
+                await asyncio.wait_for(
+                    send_telegram_message(telegram_msg),
+                    timeout=5.0
+                )
+                logger.info(f"Telegram 通知发送成功，客户: {client.company_name}, 数据条数: {len(data_list)}")
+            except asyncio.TimeoutError:
+                logger.warning(f"发送 Telegram 通知超时，客户: {client.company_name}")
+            # 其他异常已在 send_telegram_message 内部处理，这里不需要捕获
 
         # 确保data字段不为None（Java客户端兼容性）
         # 如果列表为空，返回空列表[]而不是None

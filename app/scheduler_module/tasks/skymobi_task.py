@@ -209,40 +209,32 @@ async def skymobi_api_task() -> None:
 
                             # 发送 Telegram 通知（仅在成功导入或更新数据时）
                             if inserted_count > 0 or updated_count > 0:
+                                from app.core.auto_bot import send_telegram_message
+                                import asyncio
+
+                                # 构建通知消息
+                                telegram_msg = f"⏰ Skymobi 定时任务执行完成\n\n"
+                                telegram_msg += f"执行时间: {current_time_str}\n"
+                                telegram_msg += f"✅ 成功插入: {inserted_count} 条\n"
+                                telegram_msg += f"✅ 成功更新: {updated_count} 条"
+
+                                if skipped_count > 0:
+                                    telegram_msg += f"\n⏭️ 跳过重复: {skipped_count} 条"
+                                if error_count > 0:
+                                    telegram_msg += f"\n❌ 错误: {error_count} 条"
+
+                                # 使用 await 发送消息，设置超时避免阻塞太久
+                                # send_telegram_message 内部已有完整的容错处理
                                 try:
-                                    from app.core.auto_bot import send_telegram_message, bot_initialized
-                                    import asyncio
-
-                                    # 检查 Bot 是否已初始化
-                                    if not bot_initialized:
-                                        logger.debug("Telegram Bot 未初始化，跳过通知")
-                                    else:
-                                        # 构建通知消息
-                                        telegram_msg = f"⏰ Skymobi 定时任务执行完成\n\n"
-                                        telegram_msg += f"执行时间: {current_time_str}\n"
-                                        telegram_msg += f"✅ 成功插入: {inserted_count} 条\n"
-                                        telegram_msg += f"✅ 成功更新: {updated_count} 条"
-
-                                        if skipped_count > 0:
-                                            telegram_msg += f"\n⏭️ 跳过重复: {skipped_count} 条"
-                                        if error_count > 0:
-                                            telegram_msg += f"\n❌ 错误: {error_count} 条"
-
-                                        # 使用 await 发送消息，设置超时避免阻塞太久
-                                        try:
-                                            await asyncio.wait_for(
-                                                send_telegram_message(telegram_msg),
-                                                timeout=5.0
-                                            )
-                                            logger.info(
-                                                f"Telegram 通知发送成功: Skymobi任务, 插入:{inserted_count}, 更新:{updated_count}")
-                                        except asyncio.TimeoutError:
-                                            logger.warning(f"发送 Telegram 通知超时: Skymobi任务")
-                                        except Exception as send_err:
-                                            logger.warning(f"发送 Telegram 通知失败: {send_err}")
-                                except Exception as telegram_err:
-                                    # Telegram 通知失败不影响任务执行
-                                    logger.warning(f"发送 Telegram 通知时发生错误: {telegram_err}", exc_info=True)
+                                    await asyncio.wait_for(
+                                        send_telegram_message(telegram_msg),
+                                        timeout=5.0
+                                    )
+                                    logger.info(
+                                        f"Telegram 通知发送成功: Skymobi任务, 插入:{inserted_count}, 更新:{updated_count}")
+                                except asyncio.TimeoutError:
+                                    logger.warning(f"发送 Telegram 通知超时: Skymobi任务")
+                                # 其他异常已在 send_telegram_message 内部处理，这里不需要捕获
 
                             # 保存执行结果到全局存储（用于保存到last_error字段）
                             set_task_result(SKYMOBI_API_TASK_NAME, f"执行成功: {result_summary}")

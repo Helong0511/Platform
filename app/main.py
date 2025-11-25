@@ -196,10 +196,8 @@ async def lifespan(app: FastAPI):
                     # 延迟发送启动消息，确保 Bot 已完全启动
                     import asyncio
                     await asyncio.sleep(2)  # 等待2秒确保 Bot 连接建立
-                    try:
-                        await send_telegram_message("✅ Telegram 机器人已启动")
-                    except Exception as msg_err:
-                        logger.warning(f"[Worker PID:{worker_pid}] 发送启动消息失败: {msg_err}")
+                    # send_telegram_message 内部已有完整的容错处理
+                    await send_telegram_message("✅ Telegram 机器人已启动")
                 else:
                     logger.info(f"[Worker PID:{worker_pid}] Telegram 机器人未启动（其他进程可能已启动或未获取到锁）")
             else:
@@ -238,15 +236,16 @@ async def lifespan(app: FastAPI):
             from app.core.auto_bot import stop_bot, send_telegram_message, bot_initialized, has_bot_lock
             # 只有持有锁的进程才发送关闭消息和停止 Bot
             if bot_initialized and has_bot_lock():
+                # 尝试发送关闭消息（可能失败，因为连接可能已断开）
+                import asyncio
                 try:
-                    # 尝试发送关闭消息（可能失败，因为连接可能已断开）
-                    import asyncio
                     await asyncio.wait_for(
                         send_telegram_message(f"🧩 服务 [{settings.SERVER_NAME}] 已关闭"),
                         timeout=3.0
                     )
-                except (asyncio.TimeoutError, Exception) as msg_err:
-                    logger.debug(f"发送关闭消息失败（可能连接已断开）: {msg_err}")
+                except asyncio.TimeoutError:
+                    logger.debug(f"发送关闭消息超时（可能连接已断开）")
+                # 其他异常已在 send_telegram_message 内部处理，这里不需要捕获
                 finally:
                     stop_bot()  # stop_bot 内部会检查是否持有锁并释放
             else:
