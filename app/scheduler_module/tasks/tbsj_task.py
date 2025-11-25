@@ -31,19 +31,7 @@ def set_task_result(task_name: str, result: str) -> None:
 # 用于将本地时间转换为标准时区
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
-# yangyangdeyi API获取数据 配置
 
-# HTTP请求头配置
-Headers = {'Content-Type': 'application/json;charset=utf-8'}
-
-# 请求地址
-tbsj_url = 'https://data.yangyangdeyi.com/api/thirdservice'
-
-# 用户名
-username = 'BOFIT'
-
-# 密码
-password = '5e2296fa9fd1434bf8a60c03cf745ce9'
 
 
 async def tbsj_api_task() -> None:
@@ -70,6 +58,20 @@ async def tbsj_api_task() -> None:
     - 所有数据库操作都在事务中执行，确保数据一致性
     - 单条数据出错不会影响其他数据的处理
     """
+    # yangyangdeyi API获取数据 配置
+
+    # HTTP请求头配置
+    Headers = {'Content-Type': 'application/json;charset=utf-8'}
+
+    # 请求地址
+    tbsj_url = 'https://data.yangyangdeyi.com/api/thirdservice'
+
+    # 用户名
+    username = 'BOFIT'
+
+    # 密码
+    password = '5e2296fa9fd1434bf8a60c03cf745ce9'
+
     # 获取应用配置时区的当前时间（用于日志记录）
     app_time = datetime.now()
     current_time_str = app_time.strftime("%Y-%m-%d %H:%M:%S")
@@ -84,18 +86,25 @@ async def tbsj_api_task() -> None:
         # ============================================
         # 任务主逻辑开始
         # ============================================
+        
+        # 使用局部变量存储 URL，避免修改全局变量
+        current_tbsj_url = tbsj_url
 
         token_post = {
             "username": username,
             "password": password
         }
 
+        # 尝试获取 token，如果 HTTPS 失败则尝试 HTTP
+        t_res = None
+        json_data = None
+        ssl_error_occurred = False
+        
         try:
-            # 创建 HTTP 客户端
-            # 如果遇到 SSL 错误，可能是服务器证书问题，暂时禁用验证
-            # 注意：生产环境建议修复服务器证书问题，而不是禁用验证
+            # 首先尝试使用 HTTPS
+            # 创建 HTTP 客户端，禁用 SSL 验证（如果服务器证书有问题）
             async with httpx.AsyncClient(timeout=20, verify=False) as token:
-                t_res = await token.post(tbsj_url + '/token', headers=Headers, json=token_post)
+                t_res = await token.post(current_tbsj_url + '/token', headers=Headers, json=token_post)
 
                 if t_res.status_code != 200:
                     error_text = t_res.text[:500]  # 限制错误文本长度
@@ -110,24 +119,68 @@ async def tbsj_api_task() -> None:
                     logger.error(f'yangyangdeyi API JSON解析错误: {str(json_error)}, 响应内容={error_text}')
                     raise Exception(f'API响应格式错误: 无法解析JSON, 响应内容={error_text[:100]}')
 
-                # 记录API响应的详细信息（用于调试和排查问题）
-                # 使用info级别确保能看到响应内容
-                logger.info(f'yangyangdeyi API响应: {json_data}')
-                logger.debug(f'yangyangdeyi API响应详情: state={json_data.get("state")}, code={json_data.get("code")}')
+        except (httpx.TimeoutException, httpx.RequestError) as e:
+            # 检查是否是 SSL 相关错误
+            error_str = str(e).lower()
+            if 'ssl' in error_str or 'wrong_version_number' in error_str or 'tls' in error_str:
+                ssl_error_occurred = True
+                logger.warning(f'yangyangdeyi API HTTPS 连接失败（SSL错误），尝试使用 HTTP: {str(e)}')
+                
+                # 尝试使用 HTTP 替代 HTTPS
+                http_url = current_tbsj_url.replace('https://', 'http://')
+                try:
+                    async with httpx.AsyncClient(timeout=20) as token:
+                        t_res = await token.post(http_url + '/token', headers=Headers, json=token_post)
 
-                # 检查json_data是否为空或None
-                if not json_data:
-                    logger.error(f'yangyangdeyi API返回空响应: {t_res.text[:500]}')
-                    raise Exception(f'API返回空响应: {t_res.text[:100]}')
+                        if t_res.status_code != 200:
+                            error_text = t_res.text[:500]
+                            logger.error(f'yangyangdeyi API HTTP错误: 状态码={t_res.status_code}, 响应内容={error_text}')
+                            raise Exception(f'API HTTP错误: 状态码={t_res.status_code}, 响应内容={error_text[:100]}')
 
-                access_token = json_data.get('access_token', '')
-                Headers['Authorization'] = f'Bearer {access_token}'
-        except httpx.TimeoutException as timeout_error:
-            logger.error(f'yangyangdeyi API获取 token 请求超时: {str(timeout_error)}')
-            raise Exception(f'API请求超时: 超过20秒未响应')
-        except httpx.RequestError as request_error:
-            logger.error(f'yangyangdeyi API获取token请求错误: {str(request_error)}')
-            raise Exception(f'yangyangdeyi API获取token请求失败: {str(request_error)}')
+                        try:
+                            json_data = t_res.json()
+                        except Exception as json_error:
+                            error_text = t_res.text[:500]
+                            logger.error(f'yangyangdeyi API JSON解析错误: {str(json_error)}, 响应内容={error_text}')
+                            raise Exception(f'API响应格式错误: 无法解析JSON, 响应内容={error_text[:100]}')
+                        
+                        # 如果 HTTP 成功，更新当前 URL 为 HTTP
+                        current_tbsj_url = http_url
+                        logger.info(f'yangyangdeyi API 已切换到 HTTP 协议: {current_tbsj_url}')
+                except Exception as http_error:
+                    logger.error(f'yangyangdeyi API HTTP 连接也失败: {str(http_error)}')
+                    raise Exception(f'yangyangdeyi API连接失败（HTTPS和HTTP都失败）: HTTPS错误={str(e)}, HTTP错误={str(http_error)}')
+            else:
+                # 非 SSL 错误，直接抛出
+                if isinstance(e, httpx.TimeoutException):
+                    logger.error(f'yangyangdeyi API获取 token 请求超时: {str(e)}')
+                    raise Exception(f'API请求超时: 超过20秒未响应')
+                else:
+                    logger.error(f'yangyangdeyi API获取token请求错误: {str(e)}')
+                    raise Exception(f'yangyangdeyi API获取token请求失败: {str(e)}')
+        except Exception as e:
+            # 其他异常直接抛出
+            raise
+
+        # 记录API响应的详细信息（用于调试和排查问题）
+        if json_data:
+            logger.info(f'yangyangdeyi API响应: {json_data}')
+            logger.debug(f'yangyangdeyi API响应详情: state={json_data.get("state")}, code={json_data.get("code")}')
+
+            # 检查json_data是否为空或None
+            if not json_data:
+                error_text = t_res.text[:500] if t_res else '无响应'
+                logger.error(f'yangyangdeyi API返回空响应: {error_text}')
+                raise Exception(f'API返回空响应: {error_text[:100]}')
+
+            access_token = json_data.get('access_token', '')
+            if not access_token:
+                logger.error(f'yangyangdeyi API返回的响应中缺少 access_token: {json_data}')
+                raise Exception(f'API响应中缺少 access_token')
+            
+            Headers['Authorization'] = f'Bearer {access_token}'
+        else:
+            raise Exception('未能获取有效的 API 响应')
 
         app_now = datetime.now()
         app_yesterday = app_now - timedelta(days=1)
@@ -152,11 +205,12 @@ async def tbsj_api_task() -> None:
         # 使用异步HTTP客户端调用yangyangdeyi API
         try:
             # 创建 HTTP 客户端
-            # 如果遇到 SSL 错误，可能是服务器证书问题，暂时禁用验证
+            # 如果之前已经切换到 HTTP，则使用普通客户端；否则尝试 HTTPS（禁用验证）
             # 注意：生产环境建议修复服务器证书问题，而不是禁用验证
-            async with httpx.AsyncClient(timeout=20, verify=False) as client:
+            use_http = current_tbsj_url.startswith('http://')
+            async with httpx.AsyncClient(timeout=20, verify=False if not use_http else True) as client:
                 # 发送POST请求到yangyangdeyi API
-                response = await client.post(tbsj_url + '/adunit', headers=Headers, json=tbsj_params)
+                response = await client.post(current_tbsj_url + '/adunit', headers=Headers, json=tbsj_params)
 
                 # 检查HTTP响应状态码
                 if response.status_code != 200:
@@ -376,7 +430,13 @@ async def tbsj_api_task() -> None:
             logger.error(f'yangyangdeyi API获取数据请求超时: {str(timeout_error)}')
             raise Exception(f'API请求超时: 超过20秒未响应')
         except httpx.RequestError as request_error:
-            logger.error(f'yangyangdeyi API获取数据请求错误: {str(request_error)}')
+            # 如果之前没有切换到 HTTP，且遇到 SSL 错误，记录警告
+            error_str = str(request_error).lower()
+            if not current_tbsj_url.startswith('http://') and ('ssl' in error_str or 'wrong_version_number' in error_str or 'tls' in error_str):
+                logger.error(f'yangyangdeyi API获取数据请求错误（SSL错误）: {str(request_error)}')
+                logger.warning('提示：如果持续出现SSL错误，请检查API服务器是否支持HTTPS，或联系API提供方')
+            else:
+                logger.error(f'yangyangdeyi API获取数据请求错误: {str(request_error)}')
             raise Exception(f'yangyangdeyi API获取数据请求失败: {str(request_error)}')
 
     except Exception as e:
