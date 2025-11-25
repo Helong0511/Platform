@@ -240,7 +240,7 @@ async def tbsj_api_task() -> None:
                                     "product_name": "product",
 
                                     # 国家代码
-                                    "country_code": "country",
+                                    "country_code": "country_code",
 
                                     # 请求数
                                     "request_count": "ad_requests",
