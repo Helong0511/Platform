@@ -144,6 +144,7 @@ import { ref, watch, computed } from 'vue';
 import { ElMessage, ElMessageBox, ElAlert } from 'element-plus';
 import { OfficeBuilding, Edit } from '@element-plus/icons-vue';
 import { getProductAssignments, updateAssignmentDates, batchUpdateAssignmentDates } from '../../api/product';
+import { logger } from '../../utils/logger';
 
 // 格式化客户全名（优先显示用户全名，如果没有则显示公司名称、联系人、电话）
 const formatClientFullName = (assignment) => {
@@ -201,7 +202,7 @@ watch(() => props.modelValue, (newVal) => {
     // 使用 void 确保 Promise 被正确处理，避免未捕获的 Promise 错误
     void fetchAssignments().catch(error => {
       // 错误已在 fetchAssignments 内部处理，这里只是确保 Promise 被捕获
-      console.debug('加载分配历史时出错:', error);
+      logger.debug('加载分配历史时出错:', error);
     });
   }
 });
@@ -665,7 +666,7 @@ const handleBatchSave = async () => {
       // 等待响应拦截器处理完响应头
       await new Promise(resolve => setTimeout(resolve, 200));
     } catch (tokenError) {
-      console.warn('批量保存前获取CSRF token时出错:', tokenError);
+      logger.warn('批量保存前获取CSRF token时出错:', tokenError);
       // 继续执行，因为axios拦截器可能会自动处理
     }
     
@@ -746,7 +747,7 @@ const handleBatchSave = async () => {
     // 清除所有暂存的修改
     pendingChanges.value.clear();
   } catch (error) {
-    console.error('保存时出错:', error);
+    logger.error('保存时出错:', error);
     const errorMsg = error.response?.data?.detail || error.message || '保存失败';
     
     // 显示详细的错误信息

@@ -66,11 +66,15 @@ async def tbsj_api_task() -> None:
     # 请求地址
     tbsj_url = 'https://data.tongbaishijia.com/api/thirdservice'
 
-    # 用户名
-    username = 'BOFIT'
-
-    # 密码
-    password = '5e2296fa9fd1434bf8a60c03cf745ce9'
+    # 从环境变量获取用户名和密码
+    username = settings.TBSJ_API_USERNAME
+    password = settings.TBSJ_API_PASSWORD
+    
+    # 验证凭证是否配置
+    if not username or not password:
+        error_msg = "TBSJ API 凭证未配置，请设置 TBSJ_API_USERNAME 和 TBSJ_API_PASSWORD 环境变量"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
 
     # 获取应用配置时区的当前时间（用于日志记录）
     app_time = datetime.now()

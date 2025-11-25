@@ -4,6 +4,7 @@
 """
 from enum import IntEnum
 from typing import Optional, Dict, Any
+from fastapi import HTTPException, Request
 
 
 class ErrorCode(IntEnum):
@@ -247,3 +248,96 @@ def create_error_response(
         response["data"] = data
 
     return response
+
+
+async def record_http_exception_log(
+        exc: HTTPException,
+        request: Request,
+        error_type: str = "HTTPException"
+) -> None:
+    """
+    记录 HTTPException 日志的公共函数
+    用于统一处理 HTTPException 的日志记录逻辑
+    
+    Args:
+        exc: HTTPException 异常对象
+        request: 请求对象
+        error_type: 错误类型（用于日志分类）
+    """
+    from app.core.audit_log import log_runtime_error
+    from app.core.database import AsyncSessionLocal
+    from app.core.security import JWTUtils
+    from app.models.models import User
+    from sqlalchemy.future import select
+    import asyncio
+    
+    # 只在 500/503 错误时记录日志
+    if exc.status_code < 500:
+        return
+    
+    async def record_error_log():
+        audit_db = None
+        try:
+            audit_db = AsyncSessionLocal()
+            
+            # 尝试从请求中获取当前用户
+            current_user = None
+            username = None
+            try:
+                token = request.headers.get("Authorization", "").replace("Bearer ", "")
+                if token:
+                    payload = await JWTUtils.verify_token(token)
+                    if payload and "sub" in payload:
+                        user_id = payload.get("sub")
+                        if user_id:
+                            try:
+                                user_id_int = int(user_id)
+                                result = await audit_db.execute(select(User).where(User.id == user_id_int))
+                                current_user = result.scalar_one_or_none()
+                                if current_user:
+                                    username = current_user.username
+                            except (ValueError, Exception):
+                                pass
+            except Exception:
+                pass
+            
+            error_message = str(exc.detail) if hasattr(exc, 'detail') else str(exc)
+            # 限制错误信息长度
+            max_error_length = 1000
+            truncated_error = error_message[:max_error_length] if len(error_message) > max_error_length else error_message
+            
+            await log_runtime_error(
+                db=audit_db,
+                error_type=f"{error_type}_{exc.status_code}",
+                error_message=truncated_error,
+                request=request,
+                user=current_user,
+                username=username,
+                resource_type="SYSTEM",
+                resource_name=request.url.path,
+                details={
+                    "path": request.url.path,
+                    "method": request.method,
+                    "status_code": exc.status_code,
+                    "detail": exc.detail if hasattr(exc, 'detail') else str(exc)
+                }
+            )
+            await audit_db.commit()
+        except Exception as log_error:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"记录{error_type}日志失败: {log_error}")
+        finally:
+            if audit_db:
+                try:
+                    await audit_db.close()
+                except Exception:
+                    pass
+    
+    # 在后台任务中记录日志
+    try:
+        asyncio.create_task(record_error_log())
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"启动{error_type}日志记录任务失败: {e}")
