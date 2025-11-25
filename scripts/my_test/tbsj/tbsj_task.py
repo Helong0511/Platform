@@ -91,7 +91,7 @@ try:
 
         print(pro)
         print(err_co)
-
+        print(ad_data)
     else:
         error_data = response.json()
         print(error_data)
