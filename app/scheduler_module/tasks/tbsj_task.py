@@ -2,6 +2,7 @@ import httpx  # 异步HTTP客户端，用于调用外部API
 import logging  # 日志记录模块
 from datetime import datetime, timedelta  # 日期时间处理
 import pytz  # 时区处理
+from app.core.config import settings  # 应用配置（含时区等）
 from app.core.database import AsyncSessionLocal  # 异步数据库会话工厂
 from app.models.models import User, UserRole  # 数据模型
 from sqlalchemy import select  # SQLAlchemy查询构建器
