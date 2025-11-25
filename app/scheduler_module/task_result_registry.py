@@ -67,6 +67,7 @@ def auto_register_task_results() -> None:
     from app.scheduler_module.task_names import (
         TQT_API_TASK_NAME,
         SKYMOBI_API_TASK_NAME,
+        TBSJ_API_TASK_NAME,
         ARCHIVE_DATA_TASK_NAME,
     )
     
@@ -89,6 +90,16 @@ def auto_register_task_results() -> None:
         logger.warning(f"无法导入 Skymobi 任务结果获取函数: {e}")
     except Exception as e:
         logger.error(f"注册 Skymobi 任务结果获取函数失败: {e}")
+    
+    # ========== 注册 yangyangdeyi API获取数据 任务的结果获取函数 ==========
+    try:
+        from app.scheduler_module.tasks.tbsj_task import get_task_result as tbsj_get_result
+        register_task_result_getter(TBSJ_API_TASK_NAME, tbsj_get_result)
+        logger.debug(f"已注册任务结果获取函数: {TBSJ_API_TASK_NAME}")
+    except ImportError as e:
+        logger.warning(f"无法导入 yangyangdeyi 任务结果获取函数: {e}")
+    except Exception as e:
+        logger.error(f"注册 yangyangdeyi 任务结果获取函数失败: {e}")
     
     # ========== 注册数据归档任务的结果获取函数 ==========
     try:

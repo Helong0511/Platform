@@ -50,10 +50,16 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
     # 如果未配置Redis，返回None（使用内存存储）
     if not redis_host:
         if settings.is_production:
-            logger.warning("生产环境未配置Redis，将使用内存存储（多进程环境下可能不一致）")
+            logger.warning(
+                f"生产环境未配置Redis，将使用内存存储（多进程环境下可能不一致）。"
+                f"请检查 .env 文件中的 REDIS_HOST 配置（当前值: {redis_host}）"
+            )
         else:
-            logger.info("开发环境未配置Redis，使用内存存储")
+            logger.info(f"开发环境未配置Redis，使用内存存储（REDIS_HOST={redis_host}）")
         return None
+    
+    # 记录尝试连接的配置信息（不记录密码）
+    logger.debug(f"尝试连接Redis: {redis_host}:{redis_port}/{redis_db} (密码: {'已设置' if redis_password else '未设置'})")
     
     try:
         # 创建Redis连接
@@ -75,7 +81,12 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
         
         return _redis_client
     except Exception as e:
-        logger.error(f"Redis连接失败: {e}，将使用内存存储")
+        error_msg = str(e)
+        logger.error(
+            f"Redis连接失败: {error_msg}，将使用内存存储。"
+            f"连接配置: {redis_host}:{redis_port}/{redis_db}。"
+            f"请检查：1) Redis服务是否运行 2) 端口是否正确 3) 密码是否正确 4) 防火墙是否阻止连接"
+        )
         _redis_client = None
         return None
 
