@@ -8,8 +8,23 @@ from sqlalchemy import select, delete
 
 from app.core.database import AsyncSessionLocal
 from app.models.session import UserSession, TokenBlacklist
+from app.scheduler_module.task_names import CLEANUP_SESSIONS_TASK_NAME
 
 logger = logging.getLogger(__name__)
+
+# 任务执行结果存储（用于保存到last_error字段）
+# key: 任务名称, value: 执行结果信息
+_task_results: dict[str, str] = {}
+
+
+def get_task_result(task_name: str) -> str | None:
+    """获取任务执行结果"""
+    return _task_results.get(task_name)
+
+
+def set_task_result(task_name: str, result: str) -> None:
+    """设置任务执行结果"""
+    _task_results[task_name] = result
 
 
 async def cleanup_expired_sessions():
@@ -62,11 +77,16 @@ async def cleanup_expired_sessions():
             # 提交事务
             await db.commit()
             
-            logger.info(
-                f"清理完成：删除了 {deleted_sessions_count} 条会话记录，"
-                f"{deleted_blacklist_count} 条黑名单记录，"
+            result_summary = (
+                f"删除了 {deleted_sessions_count} 条会话记录, "
+                f"{deleted_blacklist_count} 条黑名单记录, "
                 f"标记了 {updated_sessions_count} 个非活跃会话"
             )
+            
+            logger.info(f"清理完成：{result_summary}")
+            
+            # 保存执行结果到全局存储（用于保存到last_error字段）
+            set_task_result(CLEANUP_SESSIONS_TASK_NAME, f"执行成功: {result_summary}")
             
             return {
                 "deleted_sessions": deleted_sessions_count,
@@ -74,6 +94,9 @@ async def cleanup_expired_sessions():
                 "updated_sessions": updated_sessions_count
             }
     except Exception as e:
-        logger.error(f"清理过期会话失败: {e}", exc_info=True)
+        error_msg = f"清理过期会话失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        # 保存错误结果到全局存储
+        set_task_result(CLEANUP_SESSIONS_TASK_NAME, error_msg)
         raise
 

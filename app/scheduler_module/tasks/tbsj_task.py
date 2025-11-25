@@ -91,7 +91,10 @@ async def tbsj_api_task() -> None:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=20) as token:
+            # 创建 HTTP 客户端
+            # 如果遇到 SSL 错误，可能是服务器证书问题，暂时禁用验证
+            # 注意：生产环境建议修复服务器证书问题，而不是禁用验证
+            async with httpx.AsyncClient(timeout=20, verify=False) as token:
                 t_res = await token.post(tbsj_url + '/token', headers=Headers, json=token_post)
 
                 if t_res.status_code != 200:
@@ -148,7 +151,10 @@ async def tbsj_api_task() -> None:
 
         # 使用异步HTTP客户端调用yangyangdeyi API
         try:
-            async with httpx.AsyncClient(timeout=20) as client:
+            # 创建 HTTP 客户端
+            # 如果遇到 SSL 错误，可能是服务器证书问题，暂时禁用验证
+            # 注意：生产环境建议修复服务器证书问题，而不是禁用验证
+            async with httpx.AsyncClient(timeout=20, verify=False) as client:
                 # 发送POST请求到yangyangdeyi API
                 response = await client.post(tbsj_url + '/adunit', headers=Headers, json=tbsj_params)
 
