@@ -78,18 +78,19 @@ try:
 
     if response.status_code == 200:
         data = response.json()
-        print(data)
         ad_data = data['data']['items']
         pro = []
+        err_co = []
         for item in ad_data:
-            print(item)
             if len(item.get('country_code'))>2:
-                print(item.get('country_code'))
+                if item.get('country_code') not in err_co:
+                    err_co.append(item.get('country_code'))
 
             if item.get('product')  not in pro:
                 pro.append(item.get('product'))
 
         print(pro)
+        print(err_co)
 
     else:
         error_data = response.json()
