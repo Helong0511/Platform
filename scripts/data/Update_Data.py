@@ -51,8 +51,15 @@ need_exp = [
         "note": "-- 添加产品历史分配数据\n"
     },
     {
+        "table_name": "`scheduled_tasks`",
+        "field_name": "`task_name`, `cron_expression`, `description`, `function_path`, `is_active`",
+        "order": "`id`",
+        "note": "-- 添加产品历史分配数据\n"
+    },
+
+    {
         "table_name": "`ad_data`",
-        "field_name": "`date`, `product_id`, `request_count`, `match_count`, `display_count`, `click_count`, `ecpm_before_deduct`, `ecpm_after_deduct`, `revenue_before_deduct`, `revenue_after_deduct`",
+        "field_name": "`date`, `country_code`, `product_id`, `request_count`, `match_count`, `display_count`, `click_count`, `ecpm_before_deduct`, `ecpm_after_deduct`, `revenue_before_deduct`, `revenue_after_deduct`",
         "order": "`date`, `product_id`",
         "note": "-- 添加广告数据\n",
         "exclude_today": True  # 添加标记，表示需要排除当天数据
@@ -127,26 +134,20 @@ for exp in need_exp:
 
         print('表', table_name.replace('`', ''), f'{i}条数据生成完毕！')
 
-
     if table_name == "`users`":
-        hand.write("\nUPDATE `users` SET `hashed_password` = '$2b$12$geFYoAmb0ZA7Be4LJX/40uudVPltdtwCGFxC5aDIP7xQ/ImTJPIdO' WHERE `username` = 'admin';\n")
+        hand.write(
+            "\nUPDATE `users` SET `hashed_password` = '$2b$12$geFYoAmb0ZA7Be4LJX/40uudVPltdtwCGFxC5aDIP7xQ/ImTJPIdO' WHERE `username` = 'admin';\n")
 
     if table_name == "`ad_data`":
         hand.write("\n-- 更新广告数据统计字段（避免除零错误）\n")
-        hand.write("UPDATE `ad_data` SET `coverage_rate` = CASE WHEN `request_count` > 0 THEN ROUND(`match_count` / `request_count` * 100, 2) ELSE 0 END;\n")
-        hand.write("UPDATE `ad_data` SET `display_rate` = CASE WHEN `match_count` > 0 THEN ROUND(`display_count` / `match_count` * 100, 2) ELSE 0 END;\n")
-        hand.write("UPDATE `ad_data` SET `click_rate` = CASE WHEN `display_count` > 0 THEN ROUND(`click_count` / `display_count` * 100, 2) ELSE 0 END;\n")
+        hand.write(
+            "UPDATE `ad_data` SET `coverage_rate` = CASE WHEN `request_count` > 0 THEN ROUND(`match_count` / `request_count` * 100, 2) ELSE 0 END;\n")
+        hand.write(
+            "UPDATE `ad_data` SET `display_rate` = CASE WHEN `match_count` > 0 THEN ROUND(`display_count` / `match_count` * 100, 2) ELSE 0 END;\n")
+        hand.write(
+            "UPDATE `ad_data` SET `click_rate` = CASE WHEN `display_count` > 0 THEN ROUND(`click_count` / `display_count` * 100, 2) ELSE 0 END;\n")
 
 
-
-
-wr = """\nINSERT INTO `scheduled_tasks` (`task_name`, `cron_expression`, `description`, `function_path`, `is_active`) VALUES 
-('数据归档任务', '0 1 1 * *', '归档6个月前的数据','app.scheduler_module.tasks.archive_old_data.archive_old_ad_data', 1),
-('清理旧日志', '0 2 1 * *','清理90天前的用户操作日志，减少日志表数据量','app.scheduler_module.tasks.cleanup_old_logs.cleanup_old_audit_logs', 1),
-('清理过期会话和黑名单', '0 2 * * *','清理过期超过30天的会话记录和黑名单记录，标记超过7天未活动的会话为非活跃','app.scheduler_module.tasks.cleanup_expired_sessions.cleanup_expired_sessions', 1),
-('TQT API获取数据', '*/10 * * * *', '每隔10分钟执行一次，从TQT API获取广告数据并导入到数据库','app.scheduler_module.tasks.tqt_task.tqt_api_task', 1),
-('Skymobi API获取数据', '*/10 * * * *', '每隔10分钟执行一次，从Skymobi API获取广告数据','app.scheduler_module.tasks.skymobi_task.skymobi_api_task', 1);\n"""
-hand.write(wr)
 
 wr = """\nINSERT INTO `countries` (`alpha_2_code`, `alpha_3_code`, `numeric_code`, `country_name_zh`, `country_name_en`, `official_name_zh`, `official_name_en`, `independent_status`, `continent`, `subregion`) VALUES 
 ('AA', 'AAA', '000', '未知区域', 'unknown', '未知区域', 'unknown', 1, '全球', '任意地区'),
