@@ -36,6 +36,9 @@
         "result_getter_module": "结果获取函数模块路径（通常与 task_module 相同）",
         "result_getter_function": "结果获取函数名（通常是 get_task_result）",
         "wrapper": False,  # 可选，如果需要包装函数（如清理旧日志任务）设为 True
+        # 数据库配置（可选，如果数据库中不存在，使用这些默认值）
+        "cron_expression": "0 * * * *",  # Cron表达式（如：每10分钟 "*/10 * * * *"）
+        "description": "任务描述",
     }
 }
 """
@@ -67,6 +70,9 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "task_function": "archive_old_ad_data",
         "result_getter_module": "app.scheduler_module.tasks.archive_old_data",
         "result_getter_function": "get_task_result",
+        # 数据库配置（如果数据库中不存在，使用这些默认值）
+        "cron_expression": "0 1 1 * *",  # 每月1号凌晨1点
+        "description": "归档6个月前的数据",
     },
     
     # ========== 清理旧日志任务 ==========
@@ -78,6 +84,9 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "result_getter_function": "get_task_result",
         # 特殊处理：需要包装函数使用配置参数
         "wrapper": True,
+        # 数据库配置
+        "cron_expression": "0 2 1 * *",  # 每月1号凌晨2点
+        "description": "清理90天前的用户操作日志，减少日志表数据量",
     },
     
     # ========== 清理过期会话和黑名单任务 ==========
@@ -87,6 +96,9 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "task_function": "cleanup_expired_sessions",
         "result_getter_module": "app.scheduler_module.tasks.cleanup_expired_sessions",
         "result_getter_function": "get_task_result",
+        # 数据库配置
+        "cron_expression": "0 2 * * *",  # 每天凌晨2点
+        "description": "清理过期超过30天的会话记录和黑名单记录，标记超过7天未活动的会话为非活跃",
     },
     
     # ========== TQT API获取数据任务 ==========
@@ -96,6 +108,9 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "task_function": "tqt_api_task",
         "result_getter_module": "app.scheduler_module.tasks.tqt_task",
         "result_getter_function": "get_task_result",
+        # 数据库配置
+        "cron_expression": "*/10 * * * *",  # 每10分钟
+        "description": "每隔10分钟执行一次，从TQT API获取广告数据并导入到数据库",
     },
     
     # ========== Skymobi API获取数据任务 ==========
@@ -105,6 +120,9 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "task_function": "skymobi_api_task",
         "result_getter_module": "app.scheduler_module.tasks.skymobi_task",
         "result_getter_function": "get_task_result",
+        # 数据库配置
+        "cron_expression": "*/10 * * * *",  # 每10分钟
+        "description": "每隔10分钟执行一次，从Skymobi API获取广告数据",
     },
     
     # ========== yangyangdeyi API获取数据任务 ==========
@@ -114,6 +132,9 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "task_function": "tbsj_api_task",
         "result_getter_module": "app.scheduler_module.tasks.tbsj_task",
         "result_getter_function": "get_task_result",
+        # 数据库配置
+        "cron_expression": "*/10 * * * *",  # 每10分钟
+        "description": "每隔10分钟执行一次，从yangyangdeyi API获取广告数据",
     },
     
     # ==============================================================================
@@ -125,6 +146,9 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
     #     "task_function": "my_new_task_function",
     #     "result_getter_module": "app.scheduler_module.tasks.my_new_task",
     #     "result_getter_function": "get_task_result",
+    #     # 数据库配置（可选，如果不提供会使用默认值）
+    #     "cron_expression": "0 * * * *",  # 默认每小时
+    #     "description": "任务描述",
     # },
 }
 

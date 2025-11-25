@@ -156,9 +156,18 @@ async def lifespan(app: FastAPI):
     # 初始化定时任务（多进程环境：每个 worker 独立初始化调度器）
     try:
         from app.scheduler_module import init_scheduled_tasks, start_scheduler
+        from app.scheduler_module.task_init import init_scheduled_tasks_in_db
         import os
         worker_pid = os.getpid()
         logger.info(f"[Worker PID:{worker_pid}] 开始初始化定时任务...")
+        
+        # 首先检查并添加任务到数据库（确保所有配置的任务都在数据库中有记录）
+        try:
+            await init_scheduled_tasks_in_db()
+        except Exception as db_init_error:
+            logger.warning(f"[Worker PID:{worker_pid}] 初始化任务到数据库失败: {db_init_error}，继续启动...")
+        
+        # 然后初始化调度器
         await init_scheduled_tasks()
         logger.info(f"[Worker PID:{worker_pid}] 定时任务初始化完成，正在启动调度器...")
         await start_scheduler()
