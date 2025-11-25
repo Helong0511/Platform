@@ -407,28 +407,6 @@ class Settings(BaseSettings):
                 logger.warning(f"TELEGRAM_ADMIN 格式可能不正确: {v}（应为数字字符串）")
         return v
 
-    # ====== 第三方 API 配置 ======
-    # TBSJ API 配置（tongbaishijia API）
-    # 用于定时任务获取广告数据
-    TBSJ_API_USERNAME: str = os.getenv("TBSJ_API_USERNAME", "BOFIT")
-    TBSJ_API_PASSWORD: str = os.getenv("TBSJ_API_PASSWORD", "")
-
-    @field_validator("TBSJ_API_PASSWORD")
-    @classmethod
-    def validate_tbsj_api_password(cls, v: str) -> str:
-        """验证 TBSJ API 密码"""
-        production_env = os.getenv("PRODUCTION_ENV", "development").lower()
-        is_prod = production_env in ["production", "prod"]
-        
-        if is_prod:
-            if not v or not v.strip():
-                logger.warning("生产环境 TBSJ_API_PASSWORD 未设置，定时任务可能无法执行")
-        else:
-            if not v or not v.strip():
-                logger.info("开发环境 TBSJ_API_PASSWORD 未设置，将使用默认值")
-        
-        return v
-
 
 # 创建配置实例
 settings = Settings()
