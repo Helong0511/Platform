@@ -171,25 +171,30 @@ async def lifespan(app: FastAPI):
 
     # 初始化Telegram Bot（使用文件锁确保只有一个进程启动）
     try:
-        from app.core.auto_bot import start_bot, send_telegram_message, bot_initialized
-        import os
-        worker_pid = os.getpid()
-        
-        if bot_initialized:
-            logger.info(f"[Worker PID:{worker_pid}] 尝试启动 Telegram 机器人线程...")
-            start_success = start_bot()
-            if start_success:
-                # 延迟发送启动消息，确保 Bot 已完全启动
-                import asyncio
-                await asyncio.sleep(2)  # 等待2秒确保 Bot 连接建立
-                try:
-                    await send_telegram_message("✅ Telegram 机器人已启动")
-                except Exception as msg_err:
-                    logger.warning(f"[Worker PID:{worker_pid}] 发送启动消息失败: {msg_err}")
-            else:
-                logger.info(f"[Worker PID:{worker_pid}] Telegram 机器人未启动（其他进程可能已启动或未获取到锁）")
+        # 检查是否启用 Telegram
+        telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+        if not telegram_enabled:
+            logger.info(f"[Worker PID:{os.getpid()}] Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过启动")
         else:
-            logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 未配置（TELEGRAM_TOKEN 未设置），跳过启动")
+            from app.core.auto_bot import start_bot, send_telegram_message, bot_initialized
+            import os
+            worker_pid = os.getpid()
+            
+            if bot_initialized:
+                logger.info(f"[Worker PID:{worker_pid}] 尝试启动 Telegram 机器人线程...")
+                start_success = start_bot()
+                if start_success:
+                    # 延迟发送启动消息，确保 Bot 已完全启动
+                    import asyncio
+                    await asyncio.sleep(2)  # 等待2秒确保 Bot 连接建立
+                    try:
+                        await send_telegram_message("✅ Telegram 机器人已启动")
+                    except Exception as msg_err:
+                        logger.warning(f"[Worker PID:{worker_pid}] 发送启动消息失败: {msg_err}")
+                else:
+                    logger.info(f"[Worker PID:{worker_pid}] Telegram 机器人未启动（其他进程可能已启动或未获取到锁）")
+            else:
+                logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 未配置（TELEGRAM_TOKEN 未设置），跳过启动")
     except Exception as e:
         import os
         worker_pid = os.getpid()
@@ -218,24 +223,27 @@ async def lifespan(app: FastAPI):
         logger.warning(f"关闭Redis连接时出现错误: {e}")
 
     try:
-        from app.core.auto_bot import stop_bot, send_telegram_message, bot_initialized, has_bot_lock
-        # 只有持有锁的进程才发送关闭消息和停止 Bot
-        if bot_initialized and has_bot_lock():
-            try:
-                # 尝试发送关闭消息（可能失败，因为连接可能已断开）
-                import asyncio
-                await asyncio.wait_for(
-                    send_telegram_message(f"🧩 服务 [{settings.SERVER_NAME}] 已关闭"),
-                    timeout=3.0
-                )
-            except (asyncio.TimeoutError, Exception) as msg_err:
-                logger.debug(f"发送关闭消息失败（可能连接已断开）: {msg_err}")
-            finally:
-                stop_bot()  # stop_bot 内部会检查是否持有锁并释放
-        else:
-            # 其他进程不需要执行任何操作
-            if bot_initialized:
-                logger.debug(f"[PID:{os.getpid()}] 未持有 Bot 锁，跳过关闭操作")
+        # 检查是否启用 Telegram
+        telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+        if telegram_enabled:
+            from app.core.auto_bot import stop_bot, send_telegram_message, bot_initialized, has_bot_lock
+            # 只有持有锁的进程才发送关闭消息和停止 Bot
+            if bot_initialized and has_bot_lock():
+                try:
+                    # 尝试发送关闭消息（可能失败，因为连接可能已断开）
+                    import asyncio
+                    await asyncio.wait_for(
+                        send_telegram_message(f"🧩 服务 [{settings.SERVER_NAME}] 已关闭"),
+                        timeout=3.0
+                    )
+                except (asyncio.TimeoutError, Exception) as msg_err:
+                    logger.debug(f"发送关闭消息失败（可能连接已断开）: {msg_err}")
+                finally:
+                    stop_bot()  # stop_bot 内部会检查是否持有锁并释放
+            else:
+                # 其他进程不需要执行任何操作
+                if bot_initialized:
+                    logger.debug(f"[PID:{os.getpid()}] 未持有 Bot 锁，跳过关闭操作")
     except Exception as e:
         logger.warning(f"关闭 Telegram 机器人时出现错误: {e}")
 

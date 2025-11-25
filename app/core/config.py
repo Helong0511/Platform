@@ -351,6 +351,10 @@ class Settings(BaseSettings):
     TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Shanghai")
 
     # ====== Telegram Bot 配置 ======
+    # 是否启用 Telegram Bot 功能（默认启用）
+    # 设置为 false/0/no 可禁用 Telegram 功能
+    TELEGRAM_ENABLE: bool = os.getenv("TELEGRAM_ENABLE", "true").lower() in ["true", "1", "yes"]
+    
     # Telegram Bot Token（从 BotFather 获取）
     # 生产环境必须通过环境变量设置
     TELEGRAM_TOKEN: str | None = os.getenv("TELEGRAM_TOKEN", None)

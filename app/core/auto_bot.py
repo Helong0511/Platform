@@ -34,8 +34,12 @@ except ImportError as import_err:
     logger.warning(f"pyTelegramBotAPI 模块未安装，Telegram Bot 功能将不可用。请运行: pip install pyTelegramBotAPI")
     logger.warning(f"导入错误详情: {import_err}")
 
-# 初始化 Telegram Bot（仅在模块可用时）
-if TELEBOT_AVAILABLE:
+# 初始化 Telegram Bot（仅在模块可用且启用时）
+telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+if not telegram_enabled:
+    logger.info("Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false）")
+    bot_initialized = False
+elif TELEBOT_AVAILABLE:
     try:
         logger.info("正在加载 Telegram token...")
         token = getattr(settings, 'TELEGRAM_TOKEN', None) or None
@@ -251,6 +255,12 @@ def _release_bot_lock():
 
 def start_bot():
     """启动 Telegram Bot 轮询线程（仅在获取到锁的进程中启动）"""
+    # 检查是否启用 Telegram
+    telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+    if not telegram_enabled:
+        logger.info("Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过启动")
+        return False
+    
     if not TELEBOT_AVAILABLE:
         logger.error("pyTelegramBotAPI 未安装，无法启动 Bot")
         return False
@@ -340,6 +350,12 @@ async def send_telegram_message(message: str, chat_id: str | None = None):
     Returns:
         bool: 发送是否成功
     """
+    # 检查是否启用 Telegram
+    telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+    if not telegram_enabled:
+        logger.debug("Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过发送消息")
+        return False
+    
     if not TELEBOT_AVAILABLE:
         logger.error("pyTelegramBotAPI 未安装，无法发送消息。请运行: pip install pyTelegramBotAPI")
         return False

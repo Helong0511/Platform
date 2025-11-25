@@ -64,7 +64,7 @@ async def skymobi_api_task() -> None:
         today_str = app_now.strftime("%Y-%m-%d")
 
         today_str = app_now.strftime("%Y-%m-%d")
-        if datetime.now().hour >0 and datetime.now().hour < 8:
+        if datetime.now().hour >=0 and datetime.now().hour <= 8:
             Skymobi_url = f'https://crm.skymobi.online/api/adxh5?apikey={api_key}&date={yesterday_str}&uid={api_id}&page=1&limit=500'
         else:
             Skymobi_url = f'https://crm.skymobi.online/api/adxh5?apikey={api_key}&date={today_str}&uid={api_id}&page=1&limit=500'

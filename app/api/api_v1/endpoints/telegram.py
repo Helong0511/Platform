@@ -65,6 +65,16 @@ async def get_bot_status(
             status_code=status.HTTP_403_FORBIDDEN
         )
 
+    # 检查是否启用 Telegram
+    telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+    if not telegram_enabled:
+        return BotStatusResponse(
+            initialized=False,
+            token_configured=False,
+            admin_configured=False,
+            message="Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false）"
+        )
+
     try:
         from app.core.auto_bot import bot_initialized
         
@@ -123,6 +133,15 @@ async def send_message(
             status_code=status.HTTP_403_FORBIDDEN
         )
 
+    # 检查是否启用 Telegram
+    telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+    if not telegram_enabled:
+        raise_api_exception(
+            error_code=ErrorCode.SERVICE_UNAVAILABLE,
+            message="Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false）",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
     try:
         from app.core.auto_bot import send_telegram_message, bot_initialized
 
@@ -179,6 +198,15 @@ async def test_bot_connection(
             error_code=ErrorCode.FORBIDDEN,
             message="仅管理员可以测试 Telegram Bot 连接",
             status_code=status.HTTP_403_FORBIDDEN
+        )
+
+    # 检查是否启用 Telegram
+    telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+    if not telegram_enabled:
+        raise_api_exception(
+            error_code=ErrorCode.SERVICE_UNAVAILABLE,
+            message="Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false）",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE
         )
 
     try:
