@@ -104,7 +104,7 @@ async def tqt_api_task() -> None:
     - 单条数据出错不会影响其他数据的处理
     """
     # 获取应用配置时区的当前时间（用于日志记录）
-    app_time = datetime.now(APP_TIMEZONE)
+    app_time = datetime.now()
     current_time_str = app_time.strftime("%Y-%m-%d %H:%M:%S")
 
     # 记录任务开始执行的日志
@@ -120,19 +120,29 @@ async def tqt_api_task() -> None:
         # 构建TQT API请求参数
         # TQT API返回的日期默认是系统时区，使用系统时区计算日期
         # 计算系统时区的昨天和今天
-        app_now = datetime.now(APP_TIMEZONE)
+        app_now = datetime.now()
         app_yesterday = app_now - timedelta(days=1)
         yesterday_str = app_yesterday.strftime("%Y-%m-%d")
         today_str = app_now.strftime("%Y-%m-%d")
 
-        tqt_params = {
-            "appKey": tqt_app_key,  # 应用密钥
-            "startDate": today_str,  # 开始日期：系统时区的昨天
-            "endDate": today_str,  # 结束日期：系统时区的今天
-            "page": 1,  # 页码：从第1页开始
-            "pageSize": 500,  # 每页数据量：500条
-            "type": "country"  # 数据类型：country:国家 all:全部
-        }
+        if datetime.now().hour >0 and datetime.now().hour < 8:
+            tqt_params = {
+                "appKey": tqt_app_key,  # 应用密钥
+                "startDate": yesterday_str,  # 开始日期：系统时区的昨天
+                "endDate": today_str,  # 结束日期：系统时区的今天
+                "page": 1,  # 页码：从第1页开始
+                "pageSize": 500,  # 每页数据量：500条
+                "type": "country"  # 数据类型：country:国家 all:全部
+            }
+        else:
+            tqt_params = {
+                "appKey": tqt_app_key,  # 应用密钥
+                "startDate": today_str,  # 开始日期：系统时区的今天
+                "endDate": today_str,  # 结束日期：系统时区的今天
+                "page": 1,  # 页码：从第1页开始
+                "pageSize": 500,  # 每页数据量：500条
+                "type": "country"  # 数据类型：country:国家 all:全部
+            }
 
         # 生成API签名（TQT API要求所有请求都必须包含签名）
         sign = generate_sign(tqt_params, tqt_api_secret)
