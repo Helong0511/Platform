@@ -437,6 +437,21 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
         # 尝试返回响应，但如果连接已断开，捕获异常
         try:
+            # 再次检查连接状态（在返回响应前）
+            try:
+                if hasattr(request, '_is_disconnected') and request._is_disconnected:
+                    logger.debug("客户端已断开连接，无法发送HTTPException响应")
+                    from anyio import EndOfStream
+                    raise EndOfStream("客户端已断开连接")
+            except (ConnectionError, OSError, RuntimeError) as conn_err:
+                error_type = type(conn_err).__name__
+                error_module = type(conn_err).__module__
+                if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+                    "anyio" in error_module):
+                    raise
+            except Exception:
+                pass
+            
             # 检查是否有CSRF token需要添加到响应头
             response = JSONResponse(
                 status_code=response_status_code,
@@ -564,23 +579,26 @@ async def global_exception_handler(request: Request, exc: Exception):
         request: 请求对象
         exc: 异常对象
     """
-    # 如果是 HTTPException，检查连接是否仍然有效
+    # HTTPException 应该由专门的处理器处理，不应该到达这里
+    # 但如果到达这里，说明可能在异常处理过程中连接已断开
     if isinstance(exc, HTTPException):
-        # 检查是否是流关闭相关的异常（可能在抛出HTTPException时连接已断开）
-        # 这种情况下，HTTPException 可能是在连接断开后抛出的
-        # 我们需要检查请求的连接状态
+        # 检查连接是否已断开
         try:
-            # 尝试获取请求对象（如果可用）
+            # 检查请求的连接状态
             if hasattr(request, '_is_disconnected') and request._is_disconnected:
-                # 客户端已断开连接，不抛出异常，直接返回空响应
                 logger.debug("客户端已断开连接，跳过HTTPException处理")
-                # 返回一个简单的响应，但连接可能已经关闭，所以可能无法发送
+                # 连接已断开，直接返回，不抛出异常
                 from starlette.responses import Response
-                return Response(status_code=exc.status_code, content=exc.detail)
+                try:
+                    return Response(status_code=exc.status_code, content=exc.detail)
+                except Exception:
+                    # 如果无法发送响应，说明连接已完全断开，直接返回
+                    return Response(status_code=exc.status_code)
         except Exception:
             pass
         
-        # 尝试抛出HTTPException，但如果连接已断开，捕获异常
+        # 如果连接仍然有效，重新抛出 HTTPException 让专门的处理器处理
+        # 但如果重新抛出时连接断开，会被下面的流异常检查捕获
         try:
             raise exc
         except (ConnectionError, OSError, RuntimeError) as stream_error:
