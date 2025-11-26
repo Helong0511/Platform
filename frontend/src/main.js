@@ -369,6 +369,16 @@ window.addEventListener('error', (event) => {
   const errorMessage = event?.message || event?.error?.message || '';
   const errorFilename = event?.filename || '';
   
+  // 忽略浏览器扩展相关的错误（通常由广告拦截器、开发者工具扩展等引起）
+  if (typeof errorMessage === 'string' && (
+    errorMessage.includes('message channel closed') ||
+    errorMessage.includes('asynchronous response') ||
+    errorMessage.includes('listener indicated an asynchronous response')
+  )) {
+    event.preventDefault(); // 阻止默认的错误处理
+    return;
+  }
+  
   if (typeof errorMessage === 'string' && errorMessage.includes('ElOnlyChild')) {
     return;
   }
@@ -441,6 +451,16 @@ window.addEventListener('unhandledrejection', (event) => {
     (typeof errorMessage === 'string' && errorMessage.includes('InvalidStateError'));
   
   if (isInspectorError || (isResponseTextError && isInvalidStateError)) {
+    event.preventDefault(); // 阻止默认的错误处理
+    return;
+  }
+  
+  // 忽略浏览器扩展相关的错误（通常由广告拦截器、开发者工具扩展等引起）
+  if (typeof errorMessage === 'string' && (
+    errorMessage.includes('message channel closed') ||
+    errorMessage.includes('asynchronous response') ||
+    errorMessage.includes('listener indicated an asynchronous response')
+  )) {
     event.preventDefault(); // 阻止默认的错误处理
     return;
   }
