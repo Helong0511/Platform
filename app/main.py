@@ -456,20 +456,30 @@ async def http_exception_handler(request: Request, exc: HTTPException):
                 pass
             
             # 检查是否有CSRF token需要添加到响应头
-            response = JSONResponse(
-                status_code=response_status_code,
-                content=exc.detail,
-            )
-            
-            # 如果HTTPException中包含了新的CSRF token，添加到响应头
-            if hasattr(exc, '_csrf_token') and exc._csrf_token:
-                try:
-                    response.headers["X-CSRF-Token"] = exc._csrf_token
-                    logger.debug("已在403错误响应中添加新的CSRF token（服务器重启后自动生成）")
-                except Exception:
-                    pass
-            
-            return response
+            try:
+                response = JSONResponse(
+                    status_code=response_status_code,
+                    content=exc.detail,
+                )
+                
+                # 如果HTTPException中包含了新的CSRF token，添加到响应头
+                if hasattr(exc, '_csrf_token') and exc._csrf_token:
+                    try:
+                        response.headers["X-CSRF-Token"] = exc._csrf_token
+                        logger.debug("已在403错误响应中添加新的CSRF token（服务器重启后自动生成）")
+                    except Exception:
+                        pass
+                
+                return response
+            except (ConnectionError, OSError, RuntimeError) as create_error:
+                # 在创建响应时捕获流异常
+                error_type = type(create_error).__name__
+                error_module = type(create_error).__module__
+                if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+                    "anyio" in error_module):
+                    logger.debug("连接已断开，无法创建HTTPException响应")
+                    raise create_error
+                raise
         except (ConnectionError, OSError, RuntimeError) as stream_error:
             error_type = type(stream_error).__name__
             error_module = type(stream_error).__module__
@@ -559,20 +569,30 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             pass
         
         # 检查是否有CSRF token需要添加到响应头（服务器重启后自动生成新token）
-        response = JSONResponse(
-            status_code=response_status_code,
-            content=error_response,
-        )
-        
-        # 如果HTTPException中包含了新的CSRF token（服务器重启后自动生成），添加到响应头
-        if hasattr(exc, '_csrf_token') and exc._csrf_token:
-            try:
-                response.headers["X-CSRF-Token"] = exc._csrf_token
-                logger.debug("已在403错误响应中添加新的CSRF token（服务器重启后自动生成）")
-            except Exception:
-                pass
-        
-        return response
+        try:
+            response = JSONResponse(
+                status_code=response_status_code,
+                content=error_response,
+            )
+            
+            # 如果HTTPException中包含了新的CSRF token（服务器重启后自动生成），添加到响应头
+            if hasattr(exc, '_csrf_token') and exc._csrf_token:
+                try:
+                    response.headers["X-CSRF-Token"] = exc._csrf_token
+                    logger.debug("已在403错误响应中添加新的CSRF token（服务器重启后自动生成）")
+                except Exception:
+                    pass
+            
+            return response
+        except (ConnectionError, OSError, RuntimeError) as create_error:
+            # 在创建响应时捕获流异常
+            error_type = type(create_error).__name__
+            error_module = type(create_error).__module__
+            if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+                "anyio" in error_module):
+                logger.debug("连接已断开，无法创建HTTPException响应")
+                raise create_error
+            raise
     except (ConnectionError, OSError, RuntimeError) as stream_error:
         # 检查是否是流关闭异常
         error_type = type(stream_error).__name__
