@@ -1,4 +1,4 @@
-cp -f /data/placement/nginx/king-sms.com/nginx.conf /etc/nginx/
+cp -f /data/Platform/nginx/king-sms.com/nginx.conf /etc/nginx/
 
 sudo nginx -t
 
