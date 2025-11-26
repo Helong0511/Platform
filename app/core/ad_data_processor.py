@@ -3,6 +3,7 @@
 提供标准化的API数据后处理函数，供多个API调用
 """
 import logging
+import asyncio
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,9 +17,45 @@ from app.api.api_v1.endpoints.excel.import_handler import (
 from app.core.audit_log import log_user_action
 from app.core.country_code import find_country_code_by_any_format
 from app.core.utils import truncate_to_2_decimal
+from app.core.auto_bot import send_telegram_message
 
 # 获取当前模块的日志记录器
 logger = logging.getLogger(__name__)
+
+
+def get_date_range(date_obj: datetime | Any) -> tuple[datetime, datetime]:
+    """
+    获取日期范围（当天的开始和结束时间）
+    
+    Args:
+        date_obj: 日期对象（datetime 或 date 类型）
+    
+    Returns:
+        (date_start, date_end): 当天的开始和结束时间
+    """
+    if isinstance(date_obj, datetime):
+        date_start = date_obj.replace(hour=0, minute=0, second=0, microsecond=0)
+        date_end = date_obj.replace(hour=23, minute=59, second=59, microsecond=999999)
+    else:
+        date_start = datetime.combine(date_obj, datetime.min.time())
+        date_end = datetime.combine(date_obj, datetime.max.time())
+    return date_start, date_end
+
+
+def normalize_date_for_ad_data(date_obj: datetime | Any) -> datetime:
+    """
+    规范化日期对象用于 AdData（转换为当天的 00:00:00）
+    
+    Args:
+        date_obj: 日期对象（datetime 或 date 类型）
+    
+    Returns:
+        datetime: 规范化后的日期对象（当天的 00:00:00）
+    """
+    if isinstance(date_obj, datetime):
+        return date_obj.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        return datetime.combine(date_obj, datetime.min.time())
 
 
 async def check_and_notify_data_decrease(
@@ -93,9 +130,6 @@ async def check_and_notify_data_decrease(
 
         # 如果有数据减少，发送通知
         if decreased_fields:
-            from app.core.auto_bot import send_telegram_message
-            import asyncio
-
             country_display = country_code if country_code else "未知"
             if country_code == "AA":
                 country_display = "未知区域"
@@ -199,6 +233,10 @@ async def process_api_ad_data(
 
     # 存储无法识别国家代码的数据：key = (date_str, product_name), value = 累加的数据
     unrecognized_data: Dict[tuple, Dict[str, Any]] = {}
+    
+    # 存储无法识别的国家代码信息（用于发送Telegram通知，去重）
+    # key = (date_str, product_name, country_input), value = 是否已发送通知
+    unrecognized_country_notifications: Dict[tuple, bool] = {}
 
     # 遍历API返回的每条数据，进行预处理和分组
     for item in data:
@@ -254,17 +292,19 @@ async def process_api_ad_data(
             # 尝试识别国家代码
             item_country_input = get_field(item, "country_code", None)
             item_country_code = None
+            has_country_input = False  # 标记是否提供了国家代码输入
 
             if item_country_input and isinstance(item_country_input, str):
                 item_country_input = item_country_input.strip()
                 if item_country_input:
+                    has_country_input = True  # 有提供国家代码输入
                     found_country_code = await find_country_code_by_any_format(db, item_country_input)
                     if found_country_code:
                         item_country_code = found_country_code
 
             # 根据是否能识别国家代码，分组数据
             if item_country_code:
-                # 能识别国家代码，不累加，每条单独存储
+                # 能识别国家代码（正常情况），不累加，每条单独存储
                 recognized_data.append({
                     "date_str": item_date_str,
                     "date": item_date,
@@ -305,9 +345,39 @@ async def process_api_ad_data(
                     "ecpm": item_ecpm
                 })
 
-                # 记录无法识别国家代码的警告
-                str_war = f"无法识别国家代码: [{item_country_input}], 日期={item_date_str}, 产品={item_product_name}"
-                logger.warning(str_war)
+                # 只有当提供了国家代码输入但无法识别时，才发送Telegram通知
+                # 如果没有提供国家代码输入，这是正常的（可能数据源就没有提供），不需要通知
+                if has_country_input:
+                    # 记录无法识别国家代码的警告
+                    str_war = f"无法识别国家代码: [{item_country_input}], 日期={item_date_str}, 产品={item_product_name}"
+                    logger.warning(str_war)
+                    
+                    # 发送Telegram通知（去重，避免重复发送相同的信息）
+                    notification_key = (item_date_str, item_product_name, item_country_input)
+                    if notification_key not in unrecognized_country_notifications:
+                        unrecognized_country_notifications[notification_key] = True
+                        try:
+                            telegram_msg = f"⚠️ 无法识别国家代码警告\n\n"
+                            telegram_msg += f"数据来源: {source}\n"
+                            telegram_msg += f"日期: {item_date_str}\n"
+                            telegram_msg += f"产品: {item_product_name}\n"
+                            telegram_msg += f"国家代码输入: [{item_country_input}]\n\n"
+                            telegram_msg += f"说明：提供了国家代码但无法识别，该数据将累加后使用'AA'（未知区域）作为国家代码存储"
+                            
+                            # 发送通知（异步，不阻塞）
+                            try:
+                                await asyncio.wait_for(
+                                    send_telegram_message(telegram_msg),
+                                    timeout=5.0
+                                )
+                                logger.info(f"无法识别国家代码警告已发送: 日期={item_date_str}, 产品={item_product_name}, 国家代码输入=[{item_country_input}]")
+                            except asyncio.TimeoutError:
+                                logger.warning(f"发送无法识别国家代码警告超时: 日期={item_date_str}, 产品={item_product_name}")
+                            except Exception as notify_err:
+                                logger.warning(f"发送无法识别国家代码警告失败: {notify_err}")
+                        except Exception as e:
+                            # 通知失败不应该影响数据处理流程
+                            logger.warning(f"发送无法识别国家代码通知时出错: {e}")
 
         except Exception as e:
             logger.error(f"预处理数据时出错: {str(e)}", exc_info=True)
@@ -348,12 +418,7 @@ async def process_api_ad_data(
                 revenue_after_deduct = truncate_to_2_decimal(total_revenue * (1 - revenue_deduct_ratio))
 
                 # 检查数据是否重复（按日期、产品、国家）
-                if isinstance(item_date, datetime):
-                    date_start = item_date.replace(hour=0, minute=0, second=0, microsecond=0)
-                    date_end = item_date.replace(hour=23, minute=59, second=59, microsecond=999999)
-                else:
-                    date_start = datetime.combine(item_date, datetime.min.time())
-                    date_end = datetime.combine(item_date, datetime.max.time())
+                date_start, date_end = get_date_range(item_date)
 
                 existing_query = select(AdData).where(
                     AdData.date >= date_start,
@@ -466,10 +531,7 @@ async def process_api_ad_data(
                         logger.info(f"数据完全相同，跳过: 日期={date_str}, 产品={product_name}, 国家={country_code}")
                 else:
                     # 创建新记录
-                    if isinstance(item_date, datetime):
-                        ad_data_date = item_date.replace(hour=0, minute=0, second=0, microsecond=0)
-                    else:
-                        ad_data_date = datetime.combine(item_date, datetime.min.time())
+                    ad_data_date = normalize_date_for_ad_data(item_date)
 
                     new_ad_data = AdData(
                         date=ad_data_date,
@@ -581,12 +643,7 @@ async def process_api_ad_data(
 
                 # 检查数据是否重复（按日期、产品、国家代码'AA'）
                 item_date = grouped_data["date"]
-                if isinstance(item_date, datetime):
-                    date_start = item_date.replace(hour=0, minute=0, second=0, microsecond=0)
-                    date_end = item_date.replace(hour=23, minute=59, second=59, microsecond=999999)
-                else:
-                    date_start = datetime.combine(item_date, datetime.min.time())
-                    date_end = datetime.combine(item_date, datetime.max.time())
+                date_start, date_end = get_date_range(item_date)
 
                 existing_query = select(AdData).where(
                     AdData.date >= date_start,
@@ -700,10 +757,7 @@ async def process_api_ad_data(
                         logger.info(f"数据完全相同，跳过: 日期={date_str}, 产品={product_name}, 国家=AA")
                 else:
                     # 创建新记录
-                    if isinstance(item_date, datetime):
-                        ad_data_date = item_date.replace(hour=0, minute=0, second=0, microsecond=0)
-                    else:
-                        ad_data_date = datetime.combine(item_date, datetime.min.time())
+                    ad_data_date = normalize_date_for_ad_data(item_date)
 
                     new_ad_data = AdData(
                         date=ad_data_date,
