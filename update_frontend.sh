@@ -7,10 +7,11 @@ git pull
 chmod +x /data/Platform/update_frontend.sh
 
 cd /data/Platform/frontend
-sudo rm -rf /data/Platform/logs/*
+
 sudo systemctl stop Platform-backend.service
 sudo systemctl stop mysql
 
+sudo rm -rf /data/Platform/logs/*
 sudo rm -rf dist
 sudo rm -rf node_modules
 sudo rm -rf package-lock.json
