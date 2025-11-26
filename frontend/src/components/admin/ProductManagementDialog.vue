@@ -260,6 +260,7 @@
               active-text="活跃"
               inactive-text="禁用"
               size="large"
+              aria-label="切换产品状态"
             ></el-switch>
             <div class="form-hint">
               <el-icon :size="16"><InfoFilled /></el-icon>

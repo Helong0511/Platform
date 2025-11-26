@@ -128,6 +128,9 @@
               @change="(val) => handleApiSwitchChange(scope.row, val)"
               :loading="scope.row._apiSwitchLoading"
               :disabled="scope.row._apiSwitchLoading || loading"
+              :active-text="scope.row.api_enabled ? '启用' : ''"
+              :inactive-text="!scope.row.api_enabled ? '禁用' : ''"
+              aria-label="切换API访问权限"
             ></el-switch>
             <span v-else class="text-muted">-</span>
           </template>
@@ -140,6 +143,9 @@
               @change="(val) => handlePasswordSwitchChange(scope.row, val)"
               :loading="scope.row._passwordSwitchLoading"
               :disabled="scope.row._passwordSwitchLoading || loading"
+              :active-text="scope.row.password_change_enabled ? '允许' : ''"
+              :inactive-text="!scope.row.password_change_enabled ? '禁止' : ''"
+              aria-label="切换密码修改权限"
             ></el-switch>
             <span v-else class="text-muted">-</span>
           </template>
@@ -294,6 +300,7 @@
                 v-model="userForm.is_active"
                 active-text="启用"
                 inactive-text="禁用"
+                aria-label="切换用户状态"
               ></el-switch>
             </el-form-item>
           </el-col>

@@ -197,6 +197,7 @@
             active-text="活跃"
             inactive-text="禁用"
             size="large"
+            aria-label="切换客户状态"
           ></el-switch>
           <div class="form-hint">活跃状态的客户可以正常使用系统功能</div>
         </div>
@@ -209,6 +210,7 @@
             active-text="启用"
             inactive-text="禁用"
             size="large"
+            aria-label="切换API访问权限"
           ></el-switch>
           <div class="form-hint">开启后允许客户通过API查询产品和广告数据，并在客户端显示API对接菜单</div>
         </div>
@@ -221,6 +223,7 @@
             active-text="允许"
             inactive-text="禁止"
             size="large"
+            aria-label="切换密码修改权限"
           ></el-switch>
           <div class="form-hint">开启后允许客户修改自己的登录密码，关闭后客户无法修改密码</div>
         </div>

@@ -18,6 +18,7 @@
           placeholder="全部状态"
           clearable
           style="width: 150px;"
+          aria-label="选择客户状态"
         >
           <el-option label="全部" :value="null"></el-option>
           <el-option label="活跃" :value="true"></el-option>

@@ -42,14 +42,26 @@
           </el-input>
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="searchForm.is_active" placeholder="全部状态" clearable style="width: 150px;">
+          <el-select 
+            v-model="searchForm.is_active" 
+            placeholder="全部状态" 
+            clearable 
+            style="width: 150px;"
+            aria-label="选择任务状态"
+          >
             <el-option label="全部状态" value=""></el-option>
             <el-option label="启用" :value="true"></el-option>
             <el-option label="禁用" :value="false"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="运行状态">
-          <el-select v-model="searchForm.is_running" placeholder="全部" clearable style="width: 150px;">
+          <el-select 
+            v-model="searchForm.is_running" 
+            placeholder="全部" 
+            clearable 
+            style="width: 150px;"
+            aria-label="选择运行状态"
+          >
             <el-option label="全部" value=""></el-option>
             <el-option label="运行中" :value="true"></el-option>
             <el-option label="空闲" :value="false"></el-option>
@@ -130,6 +142,9 @@
               v-model="scope.row.is_active"
               @change="handleToggleActive(scope.row)"
               :disabled="scope.row.is_running"
+              :active-text="scope.row.is_active ? '启用' : ''"
+              :inactive-text="!scope.row.is_active ? '禁用' : ''"
+              aria-label="切换任务状态"
             />
           </template>
         </el-table-column>
