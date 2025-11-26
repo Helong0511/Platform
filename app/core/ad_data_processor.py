@@ -16,46 +16,11 @@ from app.api.api_v1.endpoints.excel.import_handler import (
 )
 from app.core.audit_log import log_user_action
 from app.core.country_code import find_country_code_by_any_format
-from app.core.utils import truncate_to_2_decimal
+from app.core.utils import truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data
 from app.core.auto_bot import send_telegram_message
 
 # 获取当前模块的日志记录器
 logger = logging.getLogger(__name__)
-
-
-def get_date_range(date_obj: datetime | Any) -> tuple[datetime, datetime]:
-    """
-    获取日期范围（当天的开始和结束时间）
-    
-    Args:
-        date_obj: 日期对象（datetime 或 date 类型）
-    
-    Returns:
-        (date_start, date_end): 当天的开始和结束时间
-    """
-    if isinstance(date_obj, datetime):
-        date_start = date_obj.replace(hour=0, minute=0, second=0, microsecond=0)
-        date_end = date_obj.replace(hour=23, minute=59, second=59, microsecond=999999)
-    else:
-        date_start = datetime.combine(date_obj, datetime.min.time())
-        date_end = datetime.combine(date_obj, datetime.max.time())
-    return date_start, date_end
-
-
-def normalize_date_for_ad_data(date_obj: datetime | Any) -> datetime:
-    """
-    规范化日期对象用于 AdData（转换为当天的 00:00:00）
-    
-    Args:
-        date_obj: 日期对象（datetime 或 date 类型）
-    
-    Returns:
-        datetime: 规范化后的日期对象（当天的 00:00:00）
-    """
-    if isinstance(date_obj, datetime):
-        return date_obj.replace(hour=0, minute=0, second=0, microsecond=0)
-    else:
-        return datetime.combine(date_obj, datetime.min.time())
 
 
 async def check_and_notify_data_decrease(

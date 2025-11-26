@@ -29,8 +29,7 @@ from app.api.api_v1.endpoints.excel.utils import (
     allowed_file, ALLOWED_MIME_TYPES, parse_date_value, calculate_rates
 )
 from app.core.product_assignment import initialize_product_assignment
-from app.core.utils import truncate_to_2_decimal
-from app.core.ad_data_processor import get_date_range, normalize_date_for_ad_data
+from app.core.utils import truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data
 from datetime import date
 
 logger = logging.getLogger(__name__)
