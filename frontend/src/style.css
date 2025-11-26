@@ -102,18 +102,32 @@
   user-select: inherit;
 }
 
-/* 为 mask 相关属性添加 webkit 前缀（Edge 79+ 支持） */
+/* 为 mask 相关属性添加 webkit 前缀（Edge 79+ 和 Firefox 53+ 支持） */
 /* 注意：这些属性可能在第三方库中使用，这里提供全局兼容性支持 */
-[style*="mask-image"],
-[style*="mask-position"],
-[style*="mask-repeat"],
-[style*="mask-size"],
-[style*="mask"] {
+/* 属性顺序：先写 -webkit- 版本，再写标准版本（Firefox 支持） */
+[style*="mask-image"] {
   -webkit-mask-image: inherit;
+  mask-image: inherit;
+}
+
+[style*="mask-position"] {
   -webkit-mask-position: inherit;
+  mask-position: inherit;
+}
+
+[style*="mask-repeat"] {
   -webkit-mask-repeat: inherit;
+  mask-repeat: inherit;
+}
+
+[style*="mask-size"] {
   -webkit-mask-size: inherit;
+  mask-size: inherit;
+}
+
+[style*="mask"] {
   -webkit-mask: inherit;
+  mask: inherit;
 }
 
 /* 为 appearance 添加标准属性（Chrome 84+, Edge 84+, Safari 15.4+ 支持） */
