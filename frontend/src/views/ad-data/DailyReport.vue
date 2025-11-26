@@ -65,6 +65,8 @@
         stripe
         style="width: 100%"
         @sort-change="handleSortChange"
+        :summary-method="getSummaries"
+        show-summary
       >
         <el-table-column prop="date" label="数据日期" sortable="custom"></el-table-column>
         <el-table-column v-if="isAdmin" prop="user_name" label="所属客户"></el-table-column>
@@ -158,6 +160,84 @@ const formatCurrency = (row, column, value) => {
     return '$0.00';
   }
   return `$${numValue.toFixed(2)}`;
+};
+
+// 计算合计行
+const getSummaries = (param) => {
+  const { columns, data } = param;
+  const sums = [];
+  
+  columns.forEach((column, index) => {
+    if (index === 0) {
+      sums[index] = '合计';
+      return;
+    }
+    
+    const prop = column.property;
+    const values = data.map(item => Number(item[prop]) || 0);
+    
+    if (!values.every(value => isNaN(value))) {
+      if (prop === 'request_count' || prop === 'match_count' || prop === 'display_count' || prop === 'click_count') {
+        // 数值列：求和
+        sums[index] = values.reduce((prev, curr) => {
+          const value = Number(curr);
+          if (!isNaN(value)) {
+            return prev + curr;
+          } else {
+            return prev;
+          }
+        }, 0).toLocaleString();
+      } else if (prop === 'revenue_after_deduct' || prop === 'revenue_before_deduct') {
+        // 收益列：求和
+        const sum = values.reduce((prev, curr) => {
+          const value = Number(curr);
+          if (!isNaN(value)) {
+            return prev + curr;
+          } else {
+            return prev;
+          }
+        }, 0);
+        sums[index] = `$${sum.toFixed(2)}`;
+      } else if (prop === 'coverage_rate') {
+        // 覆盖率 = (匹配数总和 / 请求数总和) * 100
+        const totalRequest = data.reduce((sum, item) => sum + (Number(item.request_count) || 0), 0);
+        const totalMatch = data.reduce((sum, item) => sum + (Number(item.match_count) || 0), 0);
+        const rate = totalRequest > 0 ? (totalMatch / totalRequest * 100) : 0;
+        sums[index] = `${rate.toFixed(2)}%`;
+      } else if (prop === 'display_rate') {
+        // 展示率 = (展示数总和 / 匹配数总和) * 100
+        const totalMatch = data.reduce((sum, item) => sum + (Number(item.match_count) || 0), 0);
+        const totalDisplay = data.reduce((sum, item) => sum + (Number(item.display_count) || 0), 0);
+        const rate = totalMatch > 0 ? (totalDisplay / totalMatch * 100) : 0;
+        sums[index] = `${rate.toFixed(2)}%`;
+      } else if (prop === 'click_rate') {
+        // 点击率 = (点击数总和 / 展示数总和) * 100
+        const totalDisplay = data.reduce((sum, item) => sum + (Number(item.display_count) || 0), 0);
+        const totalClick = data.reduce((sum, item) => sum + (Number(item.click_count) || 0), 0);
+        const rate = totalDisplay > 0 ? (totalClick / totalDisplay * 100) : 0;
+        sums[index] = `${rate.toFixed(2)}%`;
+      } else if (prop === 'ecpm_after_deduct') {
+        // eCPM(扣) = (收益(扣)总和 / 展示数总和) * 1000
+        const totalDisplay = data.reduce((sum, item) => sum + (Number(item.display_count) || 0), 0);
+        const totalRevenue = data.reduce((sum, item) => sum + (Number(item.revenue_after_deduct) || 0), 0);
+        const ecpm = totalDisplay > 0 ? (totalRevenue / totalDisplay * 1000) : 0;
+        sums[index] = `$${ecpm.toFixed(2)}`;
+      } else if (prop === 'ecpm_before_deduct') {
+        // eCPM = (收益总和 / 展示数总和) * 1000
+        const totalDisplay = data.reduce((sum, item) => sum + (Number(item.display_count) || 0), 0);
+        const totalRevenue = data.reduce((sum, item) => sum + (Number(item.revenue_before_deduct) || 0), 0);
+        const ecpm = totalDisplay > 0 ? (totalRevenue / totalDisplay * 1000) : 0;
+        sums[index] = `$${ecpm.toFixed(2)}`;
+      } else {
+        // 其他列（日期、客户、产品、国家）显示空
+        sums[index] = '';
+      }
+    } else {
+      sums[index] = '';
+    }
+  });
+  
+  return sums;
 };
 
 // 防抖定时器
