@@ -3,7 +3,6 @@
 提供标准化的API数据后处理函数，供多个API调用
 """
 import logging
-import math
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,23 +15,10 @@ from app.api.api_v1.endpoints.excel.import_handler import (
 )
 from app.core.audit_log import log_user_action
 from app.core.country_code import find_country_code_by_any_format
+from app.core.utils import truncate_to_2_decimal
 
 # 获取当前模块的日志记录器
 logger = logging.getLogger(__name__)
-
-
-def truncate_to_2_decimal(value: float) -> float:
-    """
-    截断浮点数到两位小数（砍掉第三位及之后的所有数字）
-    不使用四舍五入，直接向下截断
-    
-    Args:
-        value: 要截断的浮点数
-    
-    Returns:
-        截断到两位小数的浮点数
-    """
-    return math.floor(value * 100) / 100
 
 
 async def check_and_notify_data_decrease(

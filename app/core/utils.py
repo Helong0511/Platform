@@ -2,6 +2,7 @@
 工具函数模块
 提供通用的工具函数，避免代码重复
 """
+import math
 from fastapi import Request
 from app.core.middleware import get_device_type
 
@@ -63,3 +64,17 @@ def optimize_page_size_for_device(request: Request, page_size: int, default_page
     else:  # mobile
         # 手机端：限制最大值为15
         return min(page_size, 15)
+
+
+def truncate_to_2_decimal(value: float) -> float:
+    """
+    截断浮点数到两位小数（砍掉第三位及之后的所有数字）
+    不使用四舍五入，直接向下截断
+    
+    Args:
+        value: 要截断的浮点数
+    
+    Returns:
+        截断到两位小数的浮点数
+    """
+    return math.floor(value * 100) / 100
