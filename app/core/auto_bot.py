@@ -6,7 +6,6 @@
 # @IDE       : PyCharm
 # @Function  :
 import datetime
-import json
 import os
 import logging  # 日志记录模块
 import re
@@ -14,8 +13,6 @@ import threading
 import fcntl  # 文件锁（Unix/Linux）
 from pathlib import Path
 from app.core.config import settings  # 应用配置
-from app.core.database import AsyncSessionLocal  # 异步数据库会话工厂
-from sqlalchemy import select  # SQLAlchemy查询构建器
 
 logger = logging.getLogger(__name__)
 bot = None
@@ -28,6 +25,7 @@ try:
     import telebot  # pip3 install --upgrade pyTelegramBotAPI
     from telebot import types
     from telebot.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
+
     TELEBOT_AVAILABLE = True
 except ImportError as import_err:
     TELEBOT_AVAILABLE = False
@@ -189,29 +187,29 @@ def _acquire_bot_lock():
         bool: 是否成功获取锁
     """
     global _bot_lock_file, _bot_lock_acquired
-    
+
     if _bot_lock_acquired:
         return True
-    
+
     # os 模块已在文件顶部导入，直接使用
     current_pid = os.getpid()
-    
+
     try:
         # 创建锁文件路径（在项目根目录的 logs 目录下）
         lock_file_path = Path(__file__).parent.parent.parent / "logs" / "telegram_bot.lock"
         lock_file_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # 打开锁文件（创建模式）
         _bot_lock_file = open(lock_file_path, 'w')
-        
+
         # 尝试获取非阻塞锁
         fcntl.flock(_bot_lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         _bot_lock_acquired = True
-        
+
         # 写入当前进程信息
         _bot_lock_file.write(f"PID: {current_pid}\n")
         _bot_lock_file.flush()
-        
+
         logger.info(f"[PID:{current_pid}] 成功获取 Telegram Bot 启动锁")
         return True
     except (IOError, OSError) as e:
@@ -222,7 +220,7 @@ def _acquire_bot_lock():
             except:
                 pass
             _bot_lock_file = None
-        
+
         logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（其他进程可能已启动）: {e}")
         return False
     except Exception as e:
@@ -239,7 +237,7 @@ def _acquire_bot_lock():
 def _release_bot_lock():
     """释放 Bot 启动锁"""
     global _bot_lock_file, _bot_lock_acquired
-    
+
     if _bot_lock_file and _bot_lock_acquired:
         current_pid = os.getpid()
         try:
@@ -260,11 +258,11 @@ def start_bot():
     if not telegram_enabled:
         logger.info("Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过启动")
         return False
-    
+
     if not TELEBOT_AVAILABLE:
         logger.error("pyTelegramBotAPI 未安装，无法启动 Bot")
         return False
-    
+
     if not bot_initialized:
         logger.error("Bot 未初始化，无法启动")
         return False
@@ -355,11 +353,11 @@ async def send_telegram_message(message: str, chat_id: str | None = None):
     if not telegram_enabled:
         logger.debug("Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过发送消息")
         return False
-    
+
     if not TELEBOT_AVAILABLE:
         logger.error("pyTelegramBotAPI 未安装，无法发送消息。请运行: pip install pyTelegramBotAPI")
         return False
-    
+
     if not bot_initialized:
         logger.error("Telegram机器人未初始化，无法发送消息")
         return False
@@ -372,7 +370,7 @@ async def send_telegram_message(message: str, chat_id: str | None = None):
         # 如果没有指定 chat_id，使用配置中的 TELEGRAM_ADMIN
         if chat_id is None:
             chat_id = getattr(settings, 'TELEGRAM_ADMIN', None) or None
-        
+
         if not chat_id or not isinstance(chat_id, str) or not chat_id.strip():
             logger.error("发送Telegram消息失败: 无法获得收信息的用户或群组ID（请设置 TELEGRAM_ADMIN 环境变量）")
             return False
