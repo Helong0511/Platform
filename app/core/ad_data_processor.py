@@ -648,8 +648,7 @@ async def process_api_ad_data(
                     if need_update:
                         updated_count += 1
                         logger.info(
-                            f"更新广告数据（无法识别国家代码，已累加）: 日期={date_str}, 产品={product_name}, 国家=AA, "
-                            f"变化字段: {', '.join(update_fields)}"
+                            f"更新广告数据（无法识别国家代码，已累加）: 日期={date_str}, 产品={product_name}, 国家=AA, 变化字段: {', '.join(update_fields)}"
                         )
                         
                         try:
