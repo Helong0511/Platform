@@ -35,6 +35,7 @@
             clearable
             @keyup.enter="fetchLogs"
             style="width: 200px;"
+            name="username"
           >
             <template #prefix>
               <el-icon :size="16"><Search /></el-icon>
@@ -42,7 +43,7 @@
           </el-input>
         </el-form-item>
         <el-form-item label="操作类型">
-          <el-select v-model="searchForm.action_type" placeholder="全部" clearable style="width: 150px;">
+          <el-select v-model="searchForm.action_type" placeholder="全部" clearable style="width: 150px;" name="action_type">
             <el-option label="全部" value=""></el-option>
             <el-option label="登录" value="LOGIN"></el-option>
             <el-option label="登出" value="LOGOUT"></el-option>
@@ -59,7 +60,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="资源类型">
-          <el-select v-model="searchForm.resource_type" placeholder="全部" clearable style="width: 150px;">
+          <el-select v-model="searchForm.resource_type" placeholder="全部" clearable style="width: 150px;" name="resource_type">
             <el-option label="全部" value=""></el-option>
             <el-option label="用户" value="USER"></el-option>
             <el-option label="客户" value="CLIENT"></el-option>
@@ -76,10 +77,11 @@
             placeholder="输入IP地址" 
             clearable
             style="width: 150px;"
+            name="ip_address"
           />
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="searchForm.success" placeholder="全部" clearable style="width: 120px;">
+          <el-select v-model="searchForm.success" placeholder="全部" clearable style="width: 120px;" name="success">
             <el-option label="全部" value=""></el-option>
             <el-option label="成功" :value="true"></el-option>
             <el-option label="失败" :value="false"></el-option>

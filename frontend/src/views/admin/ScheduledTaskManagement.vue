@@ -35,6 +35,7 @@
             clearable
             @keyup.enter="() => fetchTasks(true)"
             style="width: 200px;"
+            name="task_name"
           >
             <template #prefix>
               <el-icon :size="16"><Search /></el-icon>
@@ -48,6 +49,7 @@
             clearable 
             style="width: 150px;"
             aria-label="选择任务状态"
+            name="is_active"
           >
             <el-option label="全部状态" value=""></el-option>
             <el-option label="启用" :value="true"></el-option>
@@ -61,6 +63,7 @@
             clearable 
             style="width: 150px;"
             aria-label="选择运行状态"
+            name="is_running"
           >
             <el-option label="全部" value=""></el-option>
             <el-option label="运行中" :value="true"></el-option>

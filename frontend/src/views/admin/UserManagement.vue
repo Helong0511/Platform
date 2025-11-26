@@ -45,18 +45,19 @@
             @keyup.enter="fetchUsers"
             style="width: 200px;"
             :prefix-icon="Search"
+            name="username"
           >
           </el-input>
         </el-form-item>
         <el-form-item label="角色">
-          <el-select v-model="searchForm.role" placeholder="全部角色" clearable style="width: 180px;">
+          <el-select v-model="searchForm.role" placeholder="全部角色" clearable style="width: 180px;" name="role">
             <el-option label="全部角色" value=""></el-option>
             <el-option label="管理员" value="admin"></el-option>
             <el-option label="客户" value="client"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="searchForm.status" placeholder="全部状态" clearable style="width: 180px;">
+          <el-select v-model="searchForm.status" placeholder="全部状态" clearable style="width: 180px;" name="status">
             <el-option label="全部状态" value=""></el-option>
             <el-option label="启用" value="active"></el-option>
             <el-option label="禁用" value="inactive"></el-option>
