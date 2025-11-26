@@ -17,6 +17,7 @@ from sqlalchemy.future import select
 from sqlalchemy import and_, func
 from typing import Optional
 import logging
+import asyncio
 from datetime import datetime, timezone
 
 from app.core.database import get_db
@@ -142,27 +143,82 @@ async def get_scheduled_tasks(
         if conditions:
             count_query = count_query.where(and_(*conditions))
         
-        total_result = await db.execute(count_query)
-        total = total_result.scalar() or 0
+        # 获取总数（添加超时保护）
+        try:
+            total_result = await asyncio.wait_for(
+                db.execute(count_query),
+                timeout=30.0  # 30秒超时
+            )
+            total = total_result.scalar() or 0
+        except asyncio.TimeoutError:
+            logger.error("获取定时任务总数查询超时（30秒）")
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="查询超时，请稍后重试"
+            )
 
         # 分页
         offset = (page - 1) * page_size
         query = query.offset(offset).limit(page_size)
 
-        # 执行查询
-        result = await db.execute(query)
-        tasks = result.scalars().all()
+        # 执行查询（添加超时保护，避免长时间阻塞）
+        try:
+            result = await asyncio.wait_for(
+                db.execute(query),
+                timeout=30.0  # 30秒超时
+            )
+            tasks = result.scalars().all()
+        except asyncio.TimeoutError:
+            logger.error("获取定时任务列表查询超时（30秒）")
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="查询超时，请稍后重试"
+            )
 
         # 转换为响应模型，并添加函数信息
         task_list = []
         for task in tasks:
-            task_dict = ScheduledTaskResponse.model_validate(task).model_dump()
-            # 获取函数信息（优先使用 function_path）
-            func_info = get_task_function_info(task.task_name, task.function_path)
-            if func_info:
-                task_dict["function_name"] = func_info["function_name"]
-                task_dict["function_module"] = func_info["function_module"]
-            task_list.append(ScheduledTaskResponse(**task_dict))
+            try:
+                task_dict = ScheduledTaskResponse.model_validate(task).model_dump()
+                # 获取函数信息（优先使用 function_path）
+                # 如果获取函数信息失败，不影响任务列表的返回
+                try:
+                    func_info = get_task_function_info(task.task_name, task.function_path)
+                    if func_info:
+                        task_dict["function_name"] = func_info["function_name"]
+                        task_dict["function_module"] = func_info["function_module"]
+                except Exception as func_err:
+                    # 获取函数信息失败，记录警告但不影响任务列表
+                    logger.warning(f"获取任务 {task.task_name} 的函数信息失败: {func_err}")
+                task_list.append(ScheduledTaskResponse(**task_dict))
+            except Exception as task_err:
+                # 单个任务转换失败，记录错误但继续处理其他任务
+                logger.error(f"转换任务 {task.task_name if hasattr(task, 'task_name') else '未知'} 失败: {task_err}", exc_info=True)
+                # 尝试使用基本字段构建响应
+                try:
+                    task_dict = {
+                        "id": task.id,
+                        "task_name": task.task_name,
+                        "last_run_time": task.last_run_time,
+                        "is_running": task.is_running,
+                        "last_run_pid": task.last_run_pid,
+                        "last_run_host": task.last_run_host,
+                        "run_count": task.run_count,
+                        "success_count": task.success_count,
+                        "error_count": task.error_count,
+                        "last_error": task.last_error,
+                        "is_active": task.is_active,
+                        "cron_expression": task.cron_expression,
+                        "description": task.description,
+                        "function_path": task.function_path,
+                        "created_at": task.created_at,
+                        "updated_at": task.updated_at
+                    }
+                    task_list.append(ScheduledTaskResponse(**task_dict))
+                except Exception:
+                    # 如果基本字段也失败，跳过这个任务
+                    logger.error(f"无法构建任务 {task.id} 的响应，跳过该任务")
+                    continue
 
         return PaginatedResponseBaseSchema.success(
             data=task_list,
