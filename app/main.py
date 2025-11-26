@@ -437,11 +437,15 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         # 尝试返回响应，但如果连接已断开，捕获异常
         try:
             # 再次检查连接状态（在返回响应前）
+            # 如果连接已断开，直接抛出流异常，不尝试创建响应
             try:
                 if hasattr(request, '_is_disconnected') and request._is_disconnected:
                     logger.debug("客户端已断开连接，无法发送HTTPException响应")
                     from anyio import EndOfStream
                     raise EndOfStream("客户端已断开连接")
+            except EndOfStream:
+                # 如果已经是流异常，直接重新抛出
+                raise
             except (ConnectionError, OSError, RuntimeError) as conn_err:
                 error_type = type(conn_err).__name__
                 error_module = type(conn_err).__module__
@@ -535,6 +539,25 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
     # 尝试返回响应，但如果连接已断开，捕获异常
     try:
+        # 再次检查连接状态（在创建响应前）
+        # 如果连接已断开，直接抛出流异常，不尝试创建响应
+        try:
+            if hasattr(request, '_is_disconnected') and request._is_disconnected:
+                logger.debug("客户端已断开连接，无法发送HTTPException响应")
+                from anyio import EndOfStream
+                raise EndOfStream("客户端已断开连接")
+        except EndOfStream:
+            # 如果已经是流异常，直接重新抛出
+            raise
+        except (ConnectionError, OSError, RuntimeError) as conn_err:
+            error_type = type(conn_err).__name__
+            error_module = type(conn_err).__module__
+            if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+                "anyio" in error_module):
+                raise
+        except Exception:
+            pass
+        
         # 检查是否有CSRF token需要添加到响应头（服务器重启后自动生成新token）
         response = JSONResponse(
             status_code=response_status_code,
@@ -582,19 +605,27 @@ async def global_exception_handler(request: Request, exc: Exception):
     # 但如果到达这里，说明可能在异常处理过程中连接已断开
     if isinstance(exc, HTTPException):
         # 检查连接是否已断开
+        # 如果连接已断开，不应该尝试发送响应，直接抛出流异常
         try:
             # 检查请求的连接状态
             if hasattr(request, '_is_disconnected') and request._is_disconnected:
                 logger.debug("客户端已断开连接，跳过HTTPException处理")
-                # 连接已断开，直接返回，不抛出异常
-                from starlette.responses import Response
-                try:
-                    return Response(status_code=exc.status_code, content=exc.detail)
-                except Exception:
-                    # 如果无法发送响应，说明连接已完全断开，直接返回
-                    return Response(status_code=exc.status_code)
+                # 连接已断开，直接抛出流异常，让ASGI服务器处理
+                from anyio import EndOfStream
+                raise EndOfStream("客户端已断开连接")
+        except EndOfStream:
+            # 如果已经是流异常，直接重新抛出
+            raise
         except Exception:
             pass
+        
+        # 检查是否是流关闭异常（可能在检查连接状态时已经抛出）
+        error_type = type(exc).__name__
+        error_module = type(exc).__module__
+        if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+            "anyio" in error_module):
+            # 如果HTTPException本身就是流异常包装的，直接重新抛出
+            raise exc
         
         # 如果连接仍然有效，重新抛出 HTTPException 让专门的处理器处理
         # 但如果重新抛出时连接断开，会被下面的流异常检查捕获

@@ -3,8 +3,8 @@ import time
 import requests
 import json
 
-# domain = 'king-sms.com'
-domain = 'btfrx.online'
+domain = 'king-sms.com'
+# domain = 'btfrx.online'
 
 product_url = f'https://client.{domain}/api/v1/client_products'
 data_url = f'https://client.{domain}/api/v1/client_data'
@@ -32,8 +32,8 @@ product_params['sign'] = sign.lower()
 ad_data_params = {
     'client_id': str(APP_ID),
     'req_time': str(int(time.time())),
-    'data_type': 'day',  # all:表示全部国家的详细数据；day:表示产品按天统计的数据
-    'start_date': '2025-11-20',
+    'data_type': 'all',  # all:表示全部国家的详细数据；day:表示产品按天统计的数据
+    'start_date': '2025-10-20',
     'end_date': '2025-11-26'
 }
 

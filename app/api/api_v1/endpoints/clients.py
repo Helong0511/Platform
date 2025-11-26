@@ -433,8 +433,11 @@ async def update_client_switches(
     - 仅管理员可访问
     - 可以单独更新api_enabled或password_change_enabled，或同时更新两者
     """
-    # 获取客户
-    result = await db.execute(select(Client).where(Client.id == client_id))
+    # 获取客户（使用selectinload预加载用户关系，保持与其他端点一致）
+    from sqlalchemy.orm import selectinload
+    result = await db.execute(
+        select(Client).options(selectinload(Client.user)).where(Client.id == client_id)
+    )
     client = result.scalars().first()
 
     if not client:
@@ -479,8 +482,10 @@ async def update_client_switches(
         # 提交事务
         await db.commit()
         
-        # 重新查询以获取最新数据
-        result = await db.execute(select(Client).where(Client.id == client_id))
+        # 重新查询以获取最新数据（使用selectinload预加载用户关系，保持与其他端点一致）
+        result = await db.execute(
+            select(Client).options(selectinload(Client.user)).where(Client.id == client_id)
+        )
         client = result.scalars().first()
         if not client:
             logger.error(f"更新后无法找到客户 {client_id}")
@@ -490,6 +495,13 @@ async def update_client_switches(
             )
         
         await db.refresh(client)
+        
+        # 确保布尔字段不是 None（数据库约束应该保证，但为了安全起见）
+        if client.api_enabled is None:
+            client.api_enabled = False
+        if client.password_change_enabled is None:
+            client.password_change_enabled = False
+            
     except Exception as e:
         await db.rollback()
         # 如果是我们自己的异常，直接抛出
