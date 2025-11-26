@@ -133,7 +133,7 @@ INSERT INTO `scheduled_tasks` (`task_name`, `cron_expression`, `description`, `f
 ('清理过期会话和黑名单','0 2 * * *','清理过期超过30天的会话记录和黑名单记录，标记超过7天未活动的会话为非活跃','app.scheduler_module.tasks.cleanup_expired_sessions.cleanup_expired_sessions',1),
 ('TQT API获取数据','*/10 * * * *','每隔10分钟执行一次，从TQT API获取广告数据并导入到数据库','app.scheduler_module.tasks.tqt_task.tqt_api_task',1),
 ('Skymobi API获取数据','*/10 * * * *','每隔10分钟执行一次，从Skymobi API获取广告数据','app.scheduler_module.tasks.skymobi_task.skymobi_api_task',1),
-('yangyangdeyi API获取数据','*/10 * * * *','每隔10分钟执行一次，从yangyangdeyi API获取广告数据','app.scheduler_module.tasks.tbsj_task.tbsj_api_task',1);
+('yangyangdeyi API获取数据','*/10 * * * *','每隔10分钟执行一次，从yangyangdeyi API获取广告数据','app.scheduler_module.tasks.tbsj_task.tbsj_api_task',0);
 
 -- 添加广告数据
 INSERT INTO `ad_data` (`date`, `country_code`, `product_id`, `request_count`, `match_count`, `display_count`, `click_count`, `ecpm_before_deduct`, `ecpm_after_deduct`, `revenue_before_deduct`, `revenue_after_deduct`) VALUES 
