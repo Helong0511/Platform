@@ -3,8 +3,8 @@ import time
 import requests
 import json
 
-domain = 'king-sms.com'
-# domain = 'btfrx.online'
+# domain = 'king-sms.com'
+domain = 'btfrx.online'
 
 product_url = f'https://client.{domain}/api/v1/client_products'
 data_url = f'https://client.{domain}/api/v1/client_data'
@@ -13,8 +13,8 @@ if domain == 'king-sms.com':
     APP_ID = 1010
     SECRET_KEY = 'a481444f-3a12-471a-8c89-2d2576b7fa14'
 else:
-    APP_ID = 1000
-    SECRET_KEY = 'a8117b66-acda-4c18-9ef4-f4b796c9debf'
+    APP_ID = 1007
+    SECRET_KEY = 'ec5875f0-d100-4e1f-8304-4903121f5560'
 
 Headers = {'Content-Type': 'application/json'}
 
@@ -32,9 +32,9 @@ product_params['sign'] = sign.lower()
 ad_data_params = {
     'client_id': str(APP_ID),
     'req_time': str(int(time.time())),
-    'data_type': 'all',  # all:表示全部国家的详细数据；day:表示产品按天统计的数据
+    'data_type': 'day',  # all:表示全部国家的详细数据；day:表示产品按天统计的数据
     'start_date': '2025-11-20',
-    'end_date': '2025-11-21'
+    'end_date': '2025-11-26'
 }
 
 sorted_keys = sorted(ad_data_params.keys())

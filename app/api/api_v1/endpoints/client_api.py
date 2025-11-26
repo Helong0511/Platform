@@ -652,9 +652,27 @@ async def get_client_data(
         if len(data_list) > 0:
             from app.core.auto_bot import send_telegram_message
             
+            # 获取用户全名
+            user_full_name = f"CLIENT_{client.id}"
+            if client.user_id:
+                user_result = await db.execute(
+                    select(User.full_name).where(User.id == client.user_id)
+                )
+                user_full_name_result = user_result.scalar_one_or_none()
+                if user_full_name_result:
+                    user_full_name = user_full_name_result
+                # 如果全名为空，尝试使用用户名
+                if not user_full_name or user_full_name == f"CLIENT_{client.id}":
+                    user_result = await db.execute(
+                        select(User.username).where(User.id == client.user_id)
+                    )
+                    user_username = user_result.scalar_one_or_none()
+                    if user_username:
+                        user_full_name = user_username
+            
             # 构建通知消息
             telegram_msg = f"📡 API 数据获取成功\n\n"
-            telegram_msg += f"客户: {client.company_name}\n"
+            telegram_msg += f"客户: {user_full_name}\n"
             telegram_msg += f"数据类型: {data_type}\n"
             telegram_msg += f"✅ 成功获取: {len(data_list)} 条数据"
             
@@ -668,9 +686,9 @@ async def get_client_data(
                     send_telegram_message(telegram_msg),
                     timeout=5.0
                 )
-                logger.info(f"Telegram 通知发送成功，客户: {client.company_name}, 数据条数: {len(data_list)}")
+                logger.info(f"Telegram 通知发送成功，客户: {user_full_name}, 数据条数: {len(data_list)}")
             except asyncio.TimeoutError:
-                logger.warning(f"发送 Telegram 通知超时，客户: {client.company_name}")
+                logger.warning(f"发送 Telegram 通知超时，客户: {user_full_name}")
             # 其他异常已在 send_telegram_message 内部处理，这里不需要捕获
 
         # 确保data字段不为None（Java客户端兼容性）

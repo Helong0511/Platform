@@ -448,26 +448,33 @@ async def update_client_switches(
     update_values = {}
     
     if switch_data.api_enabled is not None:
-        old_value = client.api_enabled
+        # 处理 None 值，确保 old_value 是布尔值
+        old_value = bool(client.api_enabled) if client.api_enabled is not None else False
         # 确保是布尔值
         new_value = bool(switch_data.api_enabled)
         update_values['api_enabled'] = new_value
         update_details['api_enabled'] = {'old': old_value, 'new': new_value}
 
     if switch_data.password_change_enabled is not None:
-        old_value = client.password_change_enabled
+        # 处理 None 值，确保 old_value 是布尔值
+        old_value = bool(client.password_change_enabled) if client.password_change_enabled is not None else False
         # 确保是布尔值
         new_value = bool(switch_data.password_change_enabled)
         update_values['password_change_enabled'] = new_value
         update_details['password_change_enabled'] = {'old': old_value, 'new': new_value}
 
+    # 如果没有要更新的值，直接返回
+    if not update_values:
+        raise_api_exception(
+            ErrorCode.VALIDATION_ERROR,
+            detail="请至少提供一个要更新的开关值（api_enabled 或 password_change_enabled）"
+        )
+
     # 保存到数据库
     try:
         # 使用 SQLAlchemy 的 update 语句直接更新数据库，确保数据被保存
-        if update_values:
-            # 使用 update 语句直接更新数据库
-            stmt = update(Client).where(Client.id == client_id).values(**update_values)
-            await db.execute(stmt)
+        stmt = update(Client).where(Client.id == client_id).values(**update_values)
+        await db.execute(stmt)
         
         # 提交事务
         await db.commit()
@@ -475,12 +482,19 @@ async def update_client_switches(
         # 重新查询以获取最新数据
         result = await db.execute(select(Client).where(Client.id == client_id))
         client = result.scalars().first()
-        if client:
-            await db.refresh(client)
-        else:
+        if not client:
             logger.error(f"更新后无法找到客户 {client_id}")
+            raise_api_exception(
+                ErrorCode.CLIENT_NOT_FOUND,
+                detail=f"更新后无法找到客户ID {client_id}，请刷新页面重试"
+            )
+        
+        await db.refresh(client)
     except Exception as e:
         await db.rollback()
+        # 如果是我们自己的异常，直接抛出
+        if isinstance(e, HTTPException):
+            raise e
         logger.error(f"更新客户开关失败: {str(e)}", exc_info=True)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
@@ -490,18 +504,30 @@ async def update_client_switches(
     logger.info(f"Client {client.company_name} switches updated by {current_user.username}: {update_details}")
 
     # 记录更新操作
-    await log_update(
-        db=db,
-        user=current_user,
-        resource_type="CLIENT",
-        resource_id=client_id,
-        resource_name=client.company_name,
-        request=request,
-        details=update_details
-    )
+    try:
+        await log_update(
+            db=db,
+            user=current_user,
+            resource_type="CLIENT",
+            resource_id=client_id,
+            resource_name=client.company_name,
+            request=request,
+            details=update_details
+        )
+    except Exception as log_error:
+        # 日志记录失败不应该影响API响应，只记录警告
+        logger.warning(f"记录更新日志失败: {str(log_error)}")
 
     # 确保返回的数据包含最新的开关状态
-    client_data = ClientResponse.model_validate(client)
+    try:
+        client_data = ClientResponse.model_validate(client)
+    except Exception as validation_error:
+        logger.error(f"验证客户响应数据失败: {str(validation_error)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"验证客户数据失败：{str(validation_error)}。请刷新页面重试"
+        )
+    
     return ResponseBaseSchema.success(data=client_data)
 
 
