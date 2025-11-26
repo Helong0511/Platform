@@ -37,6 +37,11 @@ async def check_and_notify_data_decrease(
     """
     检查待更新数据是否比原有数据减少，如果减少则发送Telegram通知给管理员
     
+    重要说明：
+    - API获取的数据正常情况下应该比上一次获得的数据大（累积增长）
+    - 如果数据减少，可能是数据源异常或数据被重置，需要检查数据源
+    - 此检查仅用于警告，不会阻止数据更新
+    
     Args:
         existing_data: 数据库中现有的数据对象
         new_request_count: 新的请求数
@@ -96,6 +101,8 @@ async def check_and_notify_data_decrease(
             telegram_msg += f"日期: {date_str}\n"
             telegram_msg += f"产品: {product_name}\n"
             telegram_msg += f"国家: {country_display}\n\n"
+            telegram_msg += f"⚠️ 注意：API获取的数据正常情况下应该比上一次获得的数据大（累积增长）\n"
+            telegram_msg += f"如果数据减少，可能是数据源异常或数据被重置，请检查数据源！\n\n"
             telegram_msg += f"减少的字段:\n"
             for field in decreased_fields:
                 telegram_msg += f"• {field}\n"
@@ -108,7 +115,9 @@ async def check_and_notify_data_decrease(
                 )
                 logger.warning(
                     f"数据减少警告已发送: 日期={date_str}, 产品={product_name}, 国家={country_code}, "
-                    f"减少字段数={len(decreased_fields)}"
+                    f"减少字段数={len(decreased_fields)}。"
+                    f"注意：API获取的数据正常情况下应该比上一次获得的数据大（累积增长），"
+                    f"如果数据减少可能是数据源异常或数据被重置"
                 )
             except asyncio.TimeoutError:
                 logger.warning(f"发送数据减少警告超时: 日期={date_str}, 产品={product_name}")
