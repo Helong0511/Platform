@@ -94,3 +94,28 @@
   border-radius: var(--radius-sm);
   font-weight: var(--font-weight-medium);
 }
+
+/* ====== CSS 兼容性修复 ====== */
+/* 为 user-select 添加 webkit 前缀（Safari 支持） */
+* {
+  -webkit-user-select: inherit;
+  user-select: inherit;
+}
+
+/* 为 mask 相关属性添加 webkit 前缀（Edge 79+ 支持） */
+/* 注意：这些属性可能在第三方库中使用，这里提供全局兼容性支持 */
+[style*="mask-image"],
+[style*="mask-position"],
+[style*="mask-repeat"],
+[style*="mask-size"] {
+  -webkit-mask-image: inherit;
+  -webkit-mask-position: inherit;
+  -webkit-mask-repeat: inherit;
+  -webkit-mask-size: inherit;
+}
+
+/* 为 appearance 添加标准属性（Chrome 84+, Edge 84+, Safari 15.4+ 支持） */
+/* 注意：-moz-appearance 可能在第三方库中使用，这里提供标准属性支持 */
+[style*="-moz-appearance"] {
+  appearance: inherit;
+}

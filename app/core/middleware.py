@@ -210,14 +210,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # X-Content-Type-Options: 防止MIME类型嗅探
         response.headers["X-Content-Type-Options"] = "nosniff"
 
-        # X-Frame-Options: 防止点击劫持攻击（完全禁止iframe嵌入）
-        response.headers["X-Frame-Options"] = "DENY"
-
-        # X-XSS-Protection: XSS保护（虽然现代浏览器已内置，但为兼容性保留）
-        response.headers["X-XSS-Protection"] = "1; mode=block"
+        # 注意：X-Frame-Options 和 X-XSS-Protection 已过时
+        # 使用 Content-Security-Policy 的 frame-ancestors 替代 X-Frame-Options
+        # 现代浏览器已内置 XSS 保护，X-XSS-Protection 已不再需要
 
         # Referrer-Policy: 控制referrer信息，防止信息泄露
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        
+        # Cache-Control: API 响应不应该被缓存
+        # 注意：对于静态资源，应该由 nginx 设置缓存策略
+        if not response.headers.get("Cache-Control"):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
 
         # Permissions-Policy: 限制浏览器功能，防止恶意使用
         response.headers["Permissions-Policy"] = (

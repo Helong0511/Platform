@@ -48,6 +48,7 @@
                   @click="handleEdit(assignment)"
                   circle
                   title="编辑日期"
+                  aria-label="编辑日期"
                 />
               </div>
             </div>

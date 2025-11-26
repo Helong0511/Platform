@@ -173,31 +173,31 @@
           </div>
         </el-form-item>
         <el-form-item label="请求数" prop="request_count">
-          <el-input v-model.number="editForm.request_count" type="number" min="0"></el-input>
+          <el-input v-model.number="editForm.request_count" type="number" min="0" placeholder="请输入请求数"></el-input>
         </el-form-item>
         <el-form-item label="匹配数" prop="match_count">
-          <el-input v-model.number="editForm.match_count" type="number" min="0"></el-input>
+          <el-input v-model.number="editForm.match_count" type="number" min="0" placeholder="请输入匹配数"></el-input>
         </el-form-item>
         <el-form-item label="展示数" prop="display_count">
-          <el-input v-model.number="editForm.display_count" type="number" min="0"></el-input>
+          <el-input v-model.number="editForm.display_count" type="number" min="0" placeholder="请输入展示数"></el-input>
         </el-form-item>
         <el-form-item label="点击数" prop="click_count">
-          <el-input v-model.number="editForm.click_count" type="number" min="0"></el-input>
+          <el-input v-model.number="editForm.click_count" type="number" min="0" placeholder="请输入点击数"></el-input>
         </el-form-item>
         <el-form-item label="点击率" prop="click_rate">
-          <el-input v-model.number="editForm.click_rate" type="number" step="0.01" min="0"></el-input>
+          <el-input v-model.number="editForm.click_rate" type="number" step="0.01" min="0" placeholder="请输入点击率"></el-input>
         </el-form-item>
         <el-form-item label="eCPM(扣)" prop="ecpm_after_deduct">
-          <el-input v-model.number="editForm.ecpm_after_deduct" type="number" step="0.01" min="0"></el-input>
+          <el-input v-model.number="editForm.ecpm_after_deduct" type="number" step="0.01" min="0" placeholder="请输入扣除后的eCPM"></el-input>
         </el-form-item>
         <el-form-item label="eCPM" prop="ecpm_before_deduct">
-          <el-input v-model.number="editForm.ecpm_before_deduct" type="number" step="0.01" min="0"></el-input>
+          <el-input v-model.number="editForm.ecpm_before_deduct" type="number" step="0.01" min="0" placeholder="请输入eCPM"></el-input>
         </el-form-item>
         <el-form-item label="收益(扣)" prop="revenue_after_deduct">
-          <el-input v-model.number="editForm.revenue_after_deduct" type="number" step="0.01" min="0"></el-input>
+          <el-input v-model.number="editForm.revenue_after_deduct" type="number" step="0.01" min="0" placeholder="请输入扣除后的收益"></el-input>
         </el-form-item>
         <el-form-item label="收益" prop="revenue_before_deduct">
-          <el-input v-model.number="editForm.revenue_before_deduct" type="number" step="0.01" min="0"></el-input>
+          <el-input v-model.number="editForm.revenue_before_deduct" type="number" step="0.01" min="0" placeholder="请输入收益"></el-input>
         </el-form-item>
       </el-form>
       <template #footer>

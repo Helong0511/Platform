@@ -1,4 +1,4 @@
-cp -f /data/placement/Nginx/btfrx.online/nginx.conf /etc/nginx/
+cp -f /data/placement/nginx/btfrx.online/nginx.conf /etc/nginx/
 
 sudo nginx -t
 

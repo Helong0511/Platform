@@ -27,6 +27,8 @@
               :icon="Menu"
               text
               circle
+              aria-label="切换侧边栏菜单"
+              title="切换侧边栏菜单"
             ></el-button>
             <h1 class="header-title">广告数据平台</h1>
           </div>
