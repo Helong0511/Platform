@@ -4,7 +4,14 @@
     <!-- 趋势图表 -->
     <el-card class="chart-card">
       <h2>广告效果趋势</h2>
-      <el-select v-model="timeRange" @change="handleTimeRangeChange" class="time-select" placeholder="选择时间范围">
+      <el-select 
+        v-model="timeRange" 
+        @change="handleTimeRangeChange" 
+        class="time-select" 
+        placeholder="选择时间范围"
+        aria-label="选择时间范围"
+        name="timeRange"
+      >
         <el-option label="今日" value="day"></el-option>
         <el-option label="本周" value="week"></el-option>
         <el-option label="本月" value="month"></el-option>
