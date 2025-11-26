@@ -11,6 +11,7 @@
 """
 import hashlib
 import logging
+import asyncio
 from calendar import monthrange
 from datetime import date, datetime, timezone
 
@@ -650,7 +651,6 @@ async def get_client_data(
         # 发送 Telegram 通知（仅在成功获取数据时）
         if len(data_list) > 0:
             from app.core.auto_bot import send_telegram_message
-            import asyncio
             
             # 构建通知消息
             telegram_msg = f"📡 API 数据获取成功\n\n"

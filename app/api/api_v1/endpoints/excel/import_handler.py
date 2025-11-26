@@ -10,6 +10,7 @@ from sqlalchemy import or_, and_
 from sqlalchemy.exc import IntegrityError
 from typing import Any
 import logging
+import asyncio
 import uuid
 from io import BytesIO
 from datetime import datetime
@@ -29,6 +30,7 @@ from app.api.api_v1.endpoints.excel.utils import (
 )
 from app.core.product_assignment import initialize_product_assignment
 from app.core.utils import truncate_to_2_decimal
+from app.core.ad_data_processor import get_date_range, normalize_date_for_ad_data
 from datetime import date
 
 logger = logging.getLogger(__name__)
@@ -771,13 +773,7 @@ async def process_row_data(
         else:
             # 如果没有预查询结果，则单独查询（向后兼容）
             # 注意：AdData.date是DateTime类型，需要使用日期范围查询
-            if isinstance(data_date, datetime):
-                date_start = data_date.replace(hour=0, minute=0, second=0, microsecond=0)
-                date_end = data_date.replace(hour=23, minute=59, second=59, microsecond=999999)
-            else:
-                # data_date是date类型，转换为datetime范围
-                date_start = datetime.combine(data_date, datetime.min.time())
-                date_end = datetime.combine(data_date, datetime.max.time())
+            date_start, date_end = get_date_range(data_date)
 
             # 获取国家代码（如果Excel中有，支持多种格式）
             # 支持的格式：alpha_2_code（二字母）、alpha_3_code（三字母）、numeric_code（数字）、country_name_en（英文名称）、country_name_zh（中文名称）、official_name_en（官方英文名称）、official_name_zh（官方中文名称）
@@ -909,11 +905,7 @@ async def process_row_data(
             # 注意：如果data_date是date类型，需要转换为datetime（使用当天的00:00:00）
             # Excel导入的日期默认是系统时区，不需要进行时区转换
             # 确保与数据库中的DateTime类型一致
-            if isinstance(data_date, datetime):
-                ad_data_date = data_date.replace(hour=0, minute=0, second=0, microsecond=0)
-            else:
-                # data_date是date类型，转换为datetime（使用当天的00:00:00，系统时区）
-                ad_data_date = datetime.combine(data_date, datetime.min.time())
+            ad_data_date = normalize_date_for_ad_data(data_date)
             
             # 获取国家代码（如果Excel中有，支持多种格式）
             # 支持的格式：alpha_2_code（二字母）、alpha_3_code（三字母）、numeric_code（数字）、country_name_en（英文名称）、country_name_zh（中文名称）、official_name_en（官方英文名称）、official_name_zh（官方中文名称）
@@ -1085,14 +1077,8 @@ async def import_ad_data_handler(
             conditions = []
             for date, product_id in date_product_pairs:
                 # 确保日期格式正确（AdData.date是DateTime类型，需要转换为datetime进行比较）
-                if isinstance(date, datetime):
-                    # 如果已经是datetime，使用当天的开始时间
-                    date_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
-                    date_end = date.replace(hour=23, minute=59, second=59, microsecond=999999)
-                else:
-                    # 如果是date，转换为datetime（使用当天的00:00:00和23:59:59）
-                    date_start = datetime.combine(date, datetime.min.time())
-                    date_end = datetime.combine(date, datetime.max.time())
+                # 使用统一的日期范围函数
+                date_start, date_end = get_date_range(date)
                 conditions.append(
                     and_(
                         AdData.date >= date_start,
@@ -1210,7 +1196,6 @@ async def import_ad_data_handler(
         # 发送 Telegram 通知（仅在成功导入时）
         if result['success_rows'] > 0:
             from app.core.auto_bot import send_telegram_message
-            import asyncio
             
             # 构建通知消息
             telegram_msg = f"📊 Excel 导入成功\n\n"

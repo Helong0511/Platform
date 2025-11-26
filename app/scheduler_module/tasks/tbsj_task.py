@@ -1,5 +1,6 @@
 import httpx  # 异步HTTP客户端，用于调用外部API
 import logging  # 日志记录模块
+import asyncio  # 异步操作支持
 from datetime import datetime, timedelta  # 日期时间处理
 import pytz  # 时区处理
 from app.core.config import settings  # 应用配置（含时区等）
@@ -7,6 +8,7 @@ from app.core.database import AsyncSessionLocal  # 异步数据库会话工厂
 from app.models.models import User, UserRole  # 数据模型
 from sqlalchemy import select  # SQLAlchemy查询构建器
 from app.core.ad_data_processor import process_api_ad_data  # 标准化的API数据处理函数
+from app.core.auto_bot import send_telegram_message  # Telegram消息发送
 from app.scheduler_module.task_names import TBSJ_API_TASK_NAME  # 任务名称常量
 
 # 获取当前模块的日志记录器
@@ -302,9 +304,6 @@ async def tbsj_api_task() -> None:
 
                             # 发送 Telegram 通知（仅在成功导入或更新数据时）
                             if inserted_count > 0 or updated_count > 0:
-                                from app.core.auto_bot import send_telegram_message
-                                import asyncio
-
                                 # 构建通知消息
                                 telegram_msg = f"⏰ yangyangdeyi 定时任务执行完成\n\n"
                                 telegram_msg += f"执行时间: {current_time_str}\n"

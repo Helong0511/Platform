@@ -18,6 +18,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 import base64
+import asyncio
 
 # 抑制 APScheduler 的 pkg_resources 弃用警告
 # 这是 APScheduler 库内部使用已弃用的 pkg_resources 导致的警告
@@ -194,7 +195,6 @@ async def lifespan(app: FastAPI):
                 start_success = start_bot()
                 if start_success:
                     # 延迟发送启动消息，确保 Bot 已完全启动
-                    import asyncio
                     await asyncio.sleep(2)  # 等待2秒确保 Bot 连接建立
                     # send_telegram_message 内部已有完整的容错处理
                     await send_telegram_message("✅ Telegram 机器人已启动")
@@ -237,7 +237,6 @@ async def lifespan(app: FastAPI):
             # 只有持有锁的进程才发送关闭消息和停止 Bot
             if bot_initialized and has_bot_lock():
                 # 尝试发送关闭消息（可能失败，因为连接可能已断开）
-                import asyncio
                 try:
                     await asyncio.wait_for(
                         send_telegram_message(f"🧩 服务 [{settings.SERVER_NAME}] 已关闭"),
