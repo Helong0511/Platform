@@ -3,6 +3,7 @@
 提供标准化的API数据后处理函数，供多个API调用
 """
 import logging
+import math
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,20 @@ from app.core.country_code import find_country_code_by_any_format
 
 # 获取当前模块的日志记录器
 logger = logging.getLogger(__name__)
+
+
+def truncate_to_2_decimal(value: float) -> float:
+    """
+    截断浮点数到两位小数（砍掉第三位及之后的所有数字）
+    不使用四舍五入，直接向下截断
+    
+    Args:
+        value: 要截断的浮点数
+    
+    Returns:
+        截断到两位小数的浮点数
+    """
+    return math.floor(value * 100) / 100
 
 
 async def check_and_notify_data_decrease(
@@ -329,9 +344,9 @@ async def process_api_ad_data(
                 final_ecpm = item_data["ecpm"]
                 total_revenue = item_data["revenue"]
                 
-                # 计算减扣后的值
-                ecpm_after_deduct = final_ecpm * (1 - ecpm_deduct_ratio)
-                revenue_after_deduct = total_revenue * (1 - revenue_deduct_ratio)
+                # 计算减扣后的值（截断到两位小数，不使用四舍五入）
+                ecpm_after_deduct = truncate_to_2_decimal(final_ecpm * (1 - ecpm_deduct_ratio))
+                revenue_after_deduct = truncate_to_2_decimal(total_revenue * (1 - revenue_deduct_ratio))
                 
                 # 检查数据是否重复（按日期、产品、国家）
                 if isinstance(item_date, datetime):
@@ -557,9 +572,9 @@ async def process_api_ad_data(
                 
                 final_ecpm = calculated_ecpm
                 
-                # 计算减扣后的值
-                ecpm_after_deduct = final_ecpm * (1 - ecpm_deduct_ratio)
-                revenue_after_deduct = total_revenue * (1 - revenue_deduct_ratio)
+                # 计算减扣后的值（截断到两位小数，不使用四舍五入）
+                ecpm_after_deduct = truncate_to_2_decimal(final_ecpm * (1 - ecpm_deduct_ratio))
+                revenue_after_deduct = truncate_to_2_decimal(total_revenue * (1 - revenue_deduct_ratio))
                 
                 # 检查数据是否重复（按日期、产品、国家代码'AA'）
                 item_date = grouped_data["date"]

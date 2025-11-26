@@ -15,6 +15,7 @@ from io import BytesIO
 from datetime import datetime
 
 import pandas as pd
+import math
 # 延迟导入 openpyxl，避免多进程环境下的导入问题
 
 from app.core.database import get_db
@@ -31,6 +32,20 @@ from app.core.product_assignment import initialize_product_assignment
 from datetime import date
 
 logger = logging.getLogger(__name__)
+
+
+def truncate_to_2_decimal(value: float) -> float:
+    """
+    截断浮点数到两位小数（砍掉第三位及之后的所有数字）
+    不使用四舍五入，直接向下截断
+    
+    Args:
+        value: 要截断的浮点数
+    
+    Returns:
+        截断到两位小数的浮点数
+    """
+    return math.floor(value * 100) / 100
 
 
 async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes]:
@@ -746,9 +761,9 @@ async def process_row_data(
         if ecpm_before < 0 or revenue_before < 0:
             raise ValueError("eCPM和收益不能为负数")
 
-        # 计算减扣后的值
-        ecpm_after = ecpm_before * (1 - ecpm_deduct_ratio)
-        revenue_after = revenue_before * (1 - revenue_deduct_ratio)
+        # 计算减扣后的值（截断到两位小数，不使用四舍五入）
+        ecpm_after = truncate_to_2_decimal(ecpm_before * (1 - ecpm_deduct_ratio))
+        revenue_after = truncate_to_2_decimal(revenue_before * (1 - revenue_deduct_ratio))
 
         logger.debug(
             f"产品: {product_name}, 客户ID: {product_info['client_id']}, "
