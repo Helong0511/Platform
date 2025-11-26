@@ -107,15 +107,38 @@
 [style*="mask-image"],
 [style*="mask-position"],
 [style*="mask-repeat"],
-[style*="mask-size"] {
+[style*="mask-size"],
+[style*="mask"] {
   -webkit-mask-image: inherit;
   -webkit-mask-position: inherit;
   -webkit-mask-repeat: inherit;
   -webkit-mask-size: inherit;
+  -webkit-mask: inherit;
 }
 
 /* 为 appearance 添加标准属性（Chrome 84+, Edge 84+, Safari 15.4+ 支持） */
 /* 注意：-moz-appearance 可能在第三方库中使用，这里提供标准属性支持 */
 [style*="-moz-appearance"] {
   appearance: inherit;
+}
+
+/* scrollbar-width 兼容性处理（Safari 不支持，使用 webkit 滚动条样式作为降级方案） */
+/* 注意：scrollbar-width 可能在第三方库中使用，Safari 需要使用 ::-webkit-scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary, #f5f5f5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-base, #d0d0d0);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary, #909399);
 }
