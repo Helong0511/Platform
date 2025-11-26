@@ -58,27 +58,27 @@ async def check_and_notify_data_decrease(
         
         request_decrease = existing_data.request_count - new_request_count
         if request_decrease > 0:
-            decreased_fields.append(f"请求数: {existing_data.request_count} → {new_request_count} (减少 {request_decrease})")
+            decreased_fields.append(f"请求数: 原有 {existing_data.request_count} → 新获取 {new_request_count} (减少 {request_decrease})")
         
         match_decrease = existing_data.match_count - new_match_count
         if match_decrease > 0:
-            decreased_fields.append(f"匹配数: {existing_data.match_count} → {new_match_count} (减少 {match_decrease})")
+            decreased_fields.append(f"匹配数: 原有 {existing_data.match_count} → 新获取 {new_match_count} (减少 {match_decrease})")
         
         display_decrease = existing_data.display_count - new_display_count
         if display_decrease > 0:
-            decreased_fields.append(f"展示数: {existing_data.display_count} → {new_display_count} (减少 {display_decrease})")
+            decreased_fields.append(f"展示数: 原有 {existing_data.display_count} → 新获取 {new_display_count} (减少 {display_decrease})")
         
         click_decrease = existing_data.click_count - new_click_count
         if click_decrease > 0:
-            decreased_fields.append(f"点击数: {existing_data.click_count} → {new_click_count} (减少 {click_decrease})")
+            decreased_fields.append(f"点击数: 原有 {existing_data.click_count} → 新获取 {new_click_count} (减少 {click_decrease})")
         
         revenue_before_decrease = existing_data.revenue_before_deduct - new_revenue_before
         if revenue_before_decrease > FLOAT_THRESHOLD:
-            decreased_fields.append(f"收益(减扣前): {existing_data.revenue_before_deduct:.2f} → {new_revenue_before:.2f} (减少 {revenue_before_decrease:.2f})")
+            decreased_fields.append(f"收益(减扣前): 原有 {existing_data.revenue_before_deduct:.2f} → 新获取 {new_revenue_before:.2f} (减少 {revenue_before_decrease:.2f})")
         
         revenue_after_decrease = existing_data.revenue_after_deduct - new_revenue_after
         if revenue_after_decrease > FLOAT_THRESHOLD:
-            decreased_fields.append(f"收益(减扣后): {existing_data.revenue_after_deduct:.2f} → {new_revenue_after:.2f} (减少 {revenue_after_decrease:.2f})")
+            decreased_fields.append(f"收益(减扣后): 原有 {existing_data.revenue_after_deduct:.2f} → 新获取 {new_revenue_after:.2f} (减少 {revenue_after_decrease:.2f})")
         
         # 如果有数据减少，发送通知
         if decreased_fields:
