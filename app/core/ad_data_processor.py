@@ -250,10 +250,19 @@ async def process_api_ad_data(
 
             # 解析数值字段
             try:
+                # 请求数
                 item_request_count = int(get_field(item, "request_count", 0) or 0)
+
+                # 匹配数
                 item_match_count = int(get_field(item, "match_count", 0) or 0)
+
+                # 展示数
                 item_display_count = int(get_field(item, "display_count", 0) or 0)
+
+                # 点击数
                 item_click_count = int(get_field(item, "click_count", 0) or 0)
+
+                # 收益
                 item_revenue = float(get_field(item, "revenue_before_deduct", 0) or 0)
             except (ValueError, TypeError) as e:
                 logger.warning(f"数值字段格式错误: {str(e)}, 跳过该条数据")
@@ -302,10 +311,19 @@ async def process_api_ad_data(
                         "items": []  # 存储原始数据项，用于后续计算eCPM
                     }
                 # 累加数据
+                # 请求数
                 recognized_data[key]["request_count"] += item_request_count
+
+                # 匹配数
                 recognized_data[key]["match_count"] += item_match_count
+
+                # 展示数
                 recognized_data[key]["display_count"] += item_display_count
+
+                # 点击数
                 recognized_data[key]["click_count"] += item_click_count
+
+                # 收益
                 recognized_data[key]["revenue"] += item_revenue
                 recognized_data[key]["items"].append({
                     "revenue": item_revenue,
@@ -329,10 +347,19 @@ async def process_api_ad_data(
                         "items": []  # 存储原始数据项，用于后续计算
                     }
                 # 累加数据
+                # 请求数
                 unrecognized_data[key]["request_count"] += item_request_count
+
+                # 匹配数
                 unrecognized_data[key]["match_count"] += item_match_count
+
+                # 展示数
                 unrecognized_data[key]["display_count"] += item_display_count
+
+                # 点击数
                 unrecognized_data[key]["click_count"] += item_click_count
+
+                # 收益
                 unrecognized_data[key]["revenue"] += item_revenue
                 unrecognized_data[key]["items"].append({
                     "revenue": item_revenue,
