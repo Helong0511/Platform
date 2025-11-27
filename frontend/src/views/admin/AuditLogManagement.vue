@@ -90,6 +90,7 @@
         <el-form-item label="时间范围" class="date-range-item">
           <el-date-picker
             v-model="dateRange"
+            name="dateRange"
             type="datetimerange"
             range-separator="至"
             start-placeholder="开始时间"

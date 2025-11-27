@@ -14,6 +14,7 @@
         <el-form-item label="日期范围">
           <el-date-picker
             v-model="searchForm.dateRange"
+            name="dateRange"
             type="daterange"
             range-separator="至"
             start-placeholder="开始日期"
@@ -27,6 +28,7 @@
         <el-form-item v-if="isAdmin" label="客户">
           <el-select 
             v-model="searchForm.clientId" 
+            name="clientId"
             placeholder="全部客户" 
             style="width: 100%;"
             @change="handleFilterClientChange"
@@ -38,6 +40,7 @@
         <el-form-item label="产品">
           <el-select 
             v-model="searchForm.productId" 
+            name="productId"
             placeholder="全部产品" 
             style="width: 100%;"
             clearable

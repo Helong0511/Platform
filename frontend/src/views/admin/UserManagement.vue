@@ -245,6 +245,7 @@
             <el-form-item label="登录名" prop="username">
               <el-input 
                 v-model="userForm.username" 
+                name="username"
                 placeholder="请输入登录名（用户名）" 
                 clearable
                 :disabled="!!currentUserId && (users.find(u => u.id === currentUserId)?.role === 'admin')"
@@ -254,7 +255,7 @@
           </el-col>
           <el-col :xs="24" :sm="24" :md="12" :lg="12">
             <el-form-item label="全名" prop="full_name">
-              <el-input v-model="userForm.full_name" placeholder="请输入全名" clearable></el-input>
+              <el-input v-model="userForm.full_name" name="full_name" placeholder="请输入全名" clearable></el-input>
             </el-form-item>
             <div class="form-hint" style="margin-top: 4px; margin-left: 120px;">
               <el-icon :size="16"><InfoFilled /></el-icon>
@@ -265,13 +266,14 @@
         <el-row :gutter="20">
           <el-col :xs="24" :sm="24" :md="12" :lg="12">
             <el-form-item label="邮箱" prop="email">
-              <el-input v-model="userForm.email" type="email" placeholder="请输入邮箱" clearable></el-input>
+              <el-input v-model="userForm.email" name="email" type="email" placeholder="请输入邮箱" clearable></el-input>
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="24" :md="12" :lg="12">
             <el-form-item label="角色" prop="role">
               <el-select 
                 v-model="userForm.role" 
+                name="role"
                 placeholder="请选择角色" 
                 style="width: 100%;" 
                 @change="handleRoleChange"
@@ -288,6 +290,7 @@
             <el-form-item label="密码" :prop="!currentUserId ? 'password' : undefined">
               <el-input 
                 v-model="userForm.password" 
+                name="password"
                 type="password" 
                 :placeholder="!currentUserId ? '请输入密码（至少6位）' : '留空则不修改密码'"
                 show-password 
@@ -316,6 +319,7 @@
                   <div @dblclick="handleKeyDoubleClick" class="key-input-wrapper">
                     <el-input 
                       v-model="userForm.client_key" 
+                      name="client_key"
                       placeholder="客户API密钥UUID（创建时自动生成）"
                       :disabled="!userForm.isKeyEditable && !currentUserId"
                       class="key-input-field"
@@ -346,25 +350,26 @@
           <el-row :gutter="20">
             <el-col :xs="24" :sm="24" :md="12" :lg="12">
               <el-form-item label="公司名称" prop="company_name">
-                <el-input v-model="userForm.company_name" placeholder="请输入公司名称" clearable></el-input>
+                <el-input v-model="userForm.company_name" name="company_name" placeholder="请输入公司名称" clearable></el-input>
               </el-form-item>
             </el-col>
             <el-col :xs="24" :sm="24" :md="12" :lg="12">
               <el-form-item label="联系人" prop="contact_person">
-                <el-input v-model="userForm.contact_person" placeholder="请输入联系人姓名" clearable></el-input>
+                <el-input v-model="userForm.contact_person" name="contact_person" placeholder="请输入联系人姓名" clearable></el-input>
               </el-form-item>
             </el-col>
           </el-row>
           <el-row :gutter="20">
             <el-col :xs="24" :sm="24" :md="12" :lg="12">
               <el-form-item label="联系电话" prop="phone">
-                <el-input v-model="userForm.phone" placeholder="请输入联系电话" clearable></el-input>
+                <el-input v-model="userForm.phone" name="phone" placeholder="请输入联系电话" clearable></el-input>
               </el-form-item>
             </el-col>
             <el-col :xs="24" :sm="24" :md="24" :lg="24">
               <el-form-item label="地址" prop="address">
                 <el-input 
                   v-model="userForm.address" 
+                  name="address"
                   type="textarea" 
                   :rows="3" 
                   placeholder="请输入公司地址" 
