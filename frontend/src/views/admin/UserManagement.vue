@@ -678,32 +678,52 @@ const handleRoleChange = () => {
   }
 };
 
-// 获取用户列表
-const fetchUsers = async () => {
-  try {
-    loading.value = true;
-    
-    // 检查token是否有效
-    const token = sessionStorage.getItem('token');
-    if (!token) {
-      ElMessage.warning('登录已过期，请重新登录');
-      router.push('/login').catch(() => {
-        window.location.href = '/login';
-      });
-      return;
-    }
-    
-    const params = {
-      page: pagination.value.current,
-      page_size: pagination.value.size,
-      username: searchForm.username,
-      role: searchForm.role,
-      status: searchForm.status
-    };
+// 请求去重和防抖机制
+let fetchUsersPromise = null;
+let fetchStatsPromise = null;
+let fetchUsersTimer = null;
+let fetchStatsTimer = null;
 
-    const response = await getUsers(params);
-    // 确保每个用户都有开关字段的默认值和客户信息
-    users.value = response.data.map(user => {
+// 获取用户列表（带防抖和去重）
+const fetchUsers = async (immediate = false) => {
+  // 如果已有正在进行的请求，直接返回该请求的 Promise
+  if (fetchUsersPromise && !immediate) {
+    return fetchUsersPromise;
+  }
+  
+  // 防抖：如果不是立即执行，延迟 300ms
+  if (!immediate && fetchUsersTimer) {
+    clearTimeout(fetchUsersTimer);
+  }
+  
+  const executeFetch = async () => {
+    try {
+      loading.value = true;
+      
+      // 检查token是否有效
+      const token = sessionStorage.getItem('token');
+      if (!token) {
+        ElMessage.warning('登录已过期，请重新登录');
+        router.push('/login').catch(() => {
+          window.location.href = '/login';
+        });
+        return;
+      }
+      
+      const params = {
+        page: pagination.value.current,
+        page_size: pagination.value.size,
+        username: searchForm.username,
+        role: searchForm.role,
+        status: searchForm.status
+      };
+
+      fetchUsersPromise = getUsers(params);
+      const response = await fetchUsersPromise;
+      fetchUsersPromise = null; // 请求完成后清除
+      
+      // 确保每个用户都有开关字段的默认值和客户信息
+      users.value = response.data.map(user => {
       // 如果是客户角色，确保有开关字段和客户信息
       if (user.role === 'client') {
         // 确保开关字段有值（只有真正为 undefined 或 null 时才设置默认值 false）
@@ -754,20 +774,43 @@ const fetchUsers = async () => {
       return;
     }
     // 错误已在API中处理
-  } finally {
-    loading.value = false;
+    fetchUsersPromise = null; // 请求完成后清除
+    } finally {
+      loading.value = false;
+      fetchUsersPromise = null; // 请求完成后清除
+    }
+  };
+  
+  // 如果使用防抖，返回包装后的函数
+  if (!immediate) {
+    return new Promise((resolve) => {
+      fetchUsersTimer = setTimeout(() => {
+        executeFetch().then(resolve).catch(() => resolve());
+      }, 300);
+    });
+  } else {
+    return executeFetch();
   }
 };
 
-// 获取统计信息
+// 获取统计信息（带去重）
 const fetchStats = async () => {
+  // 如果已有正在进行的请求，直接返回该请求的 Promise
+  if (fetchStatsPromise) {
+    return fetchStatsPromise;
+  }
+  
   try {
-    const data = await getUserStats();
+    fetchStatsPromise = getUserStats();
+    const data = await fetchStatsPromise;
     stats.value = data;
+    fetchStatsPromise = null; // 请求完成后清除
   } catch (error) {
+    fetchStatsPromise = null; // 请求完成后清除
     // 静默失败
   }
 };
+
 
 // 重置筛选条件
 const resetFilter = () => {
@@ -1089,7 +1132,9 @@ const handleSaveUser = async () => {
     }
 
     dialogVisible.value = false;
-    await fetchUsers();
+    // 优化：先获取用户列表，延迟后再获取统计信息，避免同时发送导致限流
+    await fetchUsers(true);
+    await new Promise(resolve => setTimeout(resolve, 200));
     await fetchStats();
     ElMessage.success(currentUserId.value ? '用户更新成功' : '用户创建成功');
   } catch (error) {
@@ -1128,7 +1173,9 @@ const handleStatusChange = async (user) => {
     }
 
     ElMessage.success(`用户${confirmText}成功`);
-    await fetchUsers();
+    // 优化：先获取用户列表，延迟后再获取统计信息，避免同时发送导致限流
+    await fetchUsers(true);
+    await new Promise(resolve => setTimeout(resolve, 200));
     await fetchStats();
   } catch (error) {
     if (error !== 'cancel') {
@@ -1348,7 +1395,9 @@ const handleDelete = async (id) => {
 
     await deleteUser(id);
     ElMessage.success('用户删除成功');
-    await fetchUsers();
+    // 优化：先获取用户列表，延迟后再获取统计信息，避免同时发送导致限流
+    await fetchUsers(true);
+    await new Promise(resolve => setTimeout(resolve, 200));
     await fetchStats();
   } catch (error) {
     // 删除失败时的错误处理
@@ -1433,8 +1482,15 @@ onMounted(async () => {
         }, 20000);
       });
       
+      // 优化请求顺序：先获取用户列表，再获取统计信息，避免同时发送导致限流
       await Promise.race([
-        Promise.allSettled([fetchUsers(), fetchStats()]),
+        (async () => {
+          // 先获取用户列表
+          await fetchUsers(true);
+          // 延迟 200ms 后再获取统计信息，避免同时发送
+          await new Promise(resolve => setTimeout(resolve, 200));
+          await fetchStats();
+        })(),
         timeoutPromise
       ]);
     } catch (error) {
