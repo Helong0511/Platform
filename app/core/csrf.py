@@ -368,9 +368,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         "CSRF令牌缺失，请刷新页面后重试",
                         status.HTTP_403_FORBIDDEN
                     )
-                except RuntimeError as e:
+                except Exception as e:
                     # 如果连接已断开，直接重新抛出流异常，不调用 call_next
-                    if "Connection disconnected" in str(e):
+                    error_type = type(e).__name__
+                    error_module = type(e).__module__
+                    if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+                        "anyio" in error_module or "Connection disconnected" in str(e)):
                         logger.debug("客户端已断开连接，跳过CSRF验证")
                         # 不调用 call_next，因为连接已断开，直接抛出流异常
                         from anyio import EndOfStream
@@ -458,9 +461,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         "CSRF令牌无效或已过期，请刷新页面后重试",
                         status.HTTP_403_FORBIDDEN
                     )
-                except RuntimeError as e:
+                except Exception as e:
                     # 如果连接已断开，直接重新抛出流异常，不调用 call_next
-                    if "Connection disconnected" in str(e):
+                    error_type = type(e).__name__
+                    error_module = type(e).__module__
+                    if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+                        "anyio" in error_module or "Connection disconnected" in str(e)):
                         logger.debug("客户端已断开连接，跳过CSRF验证")
                         # 不调用 call_next，因为连接已断开，直接抛出流异常
                         from anyio import EndOfStream
@@ -503,11 +509,16 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         "CSRF令牌验证失败，请刷新页面后重试",
                         status.HTTP_403_FORBIDDEN
                     )
-                except RuntimeError as e:
-                    # 如果连接已断开，直接返回，不抛出异常
-                    if "Connection disconnected" in str(e):
+                except Exception as e:
+                    # 如果连接已断开，直接重新抛出流异常
+                    error_type = type(e).__name__
+                    error_module = type(e).__module__
+                    if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+                        "anyio" in error_module or "Connection disconnected" in str(e)):
                         logger.debug("客户端已断开连接，跳过CSRF验证")
-                        return await call_next(request)
+                        # 不调用 call_next，因为连接已断开，直接抛出流异常
+                        from anyio import EndOfStream
+                        raise EndOfStream("客户端已断开连接")
                     raise
             
             # 验证通过，继续处理请求
@@ -541,10 +552,13 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     logger.debug("客户端已断开连接，跳过CSRF异常处理")
                     from anyio import EndOfStream
                     raise EndOfStream("客户端已断开连接")
-            except EndOfStream:
-                raise
-            except Exception:
-                pass
+            except Exception as e:
+                # 如果已经是 EndOfStream，直接重新抛出
+                error_type = type(e).__name__
+                error_module = type(e).__module__
+                if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+                    "anyio" in error_module):
+                    raise
             
             # 检查 scope 中是否有连接断开标记
             try:
@@ -553,21 +567,29 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         logger.debug("从 scope 检测到连接已断开，跳过CSRF异常处理")
                         from anyio import EndOfStream
                         raise EndOfStream("客户端已断开连接")
-            except EndOfStream:
-                raise
-            except Exception:
-                pass
+            except Exception as e:
+                # 如果已经是 EndOfStream，直接重新抛出
+                error_type = type(e).__name__
+                error_module = type(e).__module__
+                if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+                    "anyio" in error_module):
+                    raise
             
             # 重新抛出HTTPException，让异常处理器处理
             # 注意：如果连接已断开，异常处理器会在尝试发送响应时捕获EndOfStream异常
             raise http_exc
-        except RuntimeError as runtime_exc:
+        except Exception as stream_exc:
             # 捕获 safe_raise_csrf_exception 抛出的连接断开异常
-            if "Connection disconnected" in str(runtime_exc):
+            error_type = type(stream_exc).__name__
+            error_module = type(stream_exc).__module__
+            if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+                "anyio" in error_module or "Connection disconnected" in str(stream_exc)):
                 logger.debug("客户端已断开连接，跳过CSRF异常处理")
                 # 不调用 call_next，因为连接已断开，直接抛出流异常
                 from anyio import EndOfStream
                 raise EndOfStream("客户端已断开连接")
+            # 其他异常，重新抛出
+            raise
             # 其他 RuntimeError 重新抛出
             raise
         except (ConnectionError, OSError, RuntimeError) as e:

@@ -308,25 +308,50 @@ const loadDashboardData = async () => {
 // 标记是否已经初始化
 let isInitialized = false;
 
-// 全局错误处理器，捕获并忽略 ElOnlyChild 错误
+// 全局错误处理器，捕获并忽略常见无害错误
 const handleGlobalError = (event) => {
-  // 忽略 Element Plus 的 ElOnlyChild 错误
   const errorMessage = event?.message || event?.error?.message || '';
+  
+  // 忽略 Element Plus 的 ElOnlyChild 错误
   if (typeof errorMessage === 'string' && errorMessage.includes('ElOnlyChild')) {
     event.preventDefault();
     event.stopPropagation();
     return true;
   }
+  
+  // 忽略浏览器扩展相关的错误（通常由广告拦截器、开发者工具扩展等引起）
+  if (typeof errorMessage === 'string' && (
+    errorMessage.includes('message channel closed') ||
+    errorMessage.includes('asynchronous response') ||
+    errorMessage.includes('listener indicated an asynchronous response')
+  )) {
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
+  }
+  
   return false;
 };
 
 const handleUnhandledRejection = (event) => {
-  // 处理未捕获的 Promise 拒绝
   const errorMessage = event?.reason?.message || event?.reason?.error?.message || '';
+  
+  // 忽略 Element Plus 的 ElOnlyChild 错误
   if (typeof errorMessage === 'string' && errorMessage.includes('ElOnlyChild')) {
     event.preventDefault();
     return true;
   }
+  
+  // 忽略浏览器扩展相关的错误（通常由广告拦截器、开发者工具扩展等引起）
+  if (typeof errorMessage === 'string' && (
+    errorMessage.includes('message channel closed') ||
+    errorMessage.includes('asynchronous response') ||
+    errorMessage.includes('listener indicated an asynchronous response')
+  )) {
+    event.preventDefault();
+    return true;
+  }
+  
   return false;
 };
 

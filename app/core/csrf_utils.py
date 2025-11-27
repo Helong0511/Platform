@@ -28,40 +28,49 @@ def safe_raise_csrf_exception(
     Raises:
         HTTPException: 如果连接仍然有效
         RuntimeError: 如果连接已断开（包含 "Connection disconnected" 消息）
+        EndOfStream: 如果连接已断开（直接抛出流异常）
     """
     # 检查连接是否仍然有效
     # 方法1: 检查 _is_disconnected 属性
     try:
         if hasattr(request, '_is_disconnected') and request._is_disconnected:
             logger.debug("客户端已断开连接，跳过CSRF异常抛出")
-            raise RuntimeError("Connection disconnected")
-    except RuntimeError as e:
-        if "Connection disconnected" in str(e):
+            from anyio import EndOfStream
+            raise EndOfStream("客户端已断开连接")
+    except Exception as e:
+        # 如果已经是 EndOfStream，直接重新抛出
+        error_type = type(e).__name__
+        error_module = type(e).__module__
+        if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+            "anyio" in error_module):
             raise
-    except Exception:
-        pass
+        # 如果是 RuntimeError 且包含 "Connection disconnected"，转换为 EndOfStream
+        if isinstance(e, RuntimeError) and "Connection disconnected" in str(e):
+            from anyio import EndOfStream
+            raise EndOfStream("客户端已断开连接")
     
-    # 方法2: 尝试检查请求流是否仍然有效
-    # 如果连接已断开，尝试访问请求体可能会触发异常
+    # 方法2: 检查 scope 中是否有连接断开标记
+    try:
+        if hasattr(request, 'scope') and isinstance(request.scope, dict):
+            if request.scope.get('_disconnected', False):
+                logger.debug("从 scope 检测到连接已断开，跳过CSRF异常抛出")
+                from anyio import EndOfStream
+                raise EndOfStream("客户端已断开连接")
+    except Exception as e:
+        # 如果已经是 EndOfStream，直接重新抛出
+        error_type = type(e).__name__
+        error_module = type(e).__module__
+        if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+            "anyio" in error_module):
+            raise
+    
+    # 方法3: 尝试检查请求流是否仍然有效
     # 注意：我们不能实际接收数据，因为这会消耗请求体
-    # 所以我们只能检查属性，不能实际调用 receive
     try:
         # 检查请求的 receive 函数是否存在（表示连接可能仍然有效）
         if hasattr(request, '_receive'):
             # 请求流存在，连接可能仍然有效
             pass
-        # 检查 scope 中是否有连接信息
-        if hasattr(request, 'scope'):
-            # 如果 scope 中存在连接信息，检查是否已断开
-            scope = request.scope
-            if isinstance(scope, dict):
-                # 检查是否有连接断开标记
-                if scope.get('_disconnected', False):
-                    logger.debug("从 scope 检测到连接已断开，跳过CSRF异常抛出")
-                    raise RuntimeError("Connection disconnected")
-    except RuntimeError as e:
-        if "Connection disconnected" in str(e):
-            raise
     except (ConnectionError, OSError, RuntimeError) as stream_error:
         # 如果检查过程中发现流已关闭，抛出连接断开异常
         error_type_name = type(stream_error).__name__
@@ -69,7 +78,8 @@ def safe_raise_csrf_exception(
         if ("EndOfStream" in error_type_name or "WouldBlock" in error_type_name or 
             "anyio" in error_module):
             logger.debug("检测到流已关闭，跳过CSRF异常抛出")
-            raise RuntimeError("Connection disconnected")
+            from anyio import EndOfStream
+            raise EndOfStream("客户端已断开连接")
         # 其他连接错误，重新抛出
         raise
     except Exception:
