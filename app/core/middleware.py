@@ -219,8 +219,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         
         # Cache-Control: API 响应不应该被缓存
         # 注意：对于静态资源，应该由 nginx 设置缓存策略
+        # 使用 no-store 即可，无需 must-revalidate（no-store 已经足够禁止缓存）
         if not response.headers.get("Cache-Control"):
-            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Cache-Control"] = "no-store"
 
         # Permissions-Policy: 限制浏览器功能，防止恶意使用
         response.headers["Permissions-Policy"] = (
@@ -235,33 +236,39 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         )
 
         # Content-Security-Policy: 内容安全策略（严格模式，防止XSS和网络劫持）
-        # 生产环境使用更严格的CSP，禁止内联脚本和eval
-        if settings.is_production:
-            # 生产环境：严格CSP，禁止unsafe-inline和unsafe-eval
-            csp = (
-                "default-src 'self'; "
-                "script-src 'self'; "  # 生产环境禁止unsafe-inline和unsafe-eval
-                "style-src 'self' 'unsafe-inline'; "  # CSS允许内联（Element Plus需要）
-                "img-src 'self' data: https:; "
-                "font-src 'self' data:; "
-                "connect-src 'self'; "
-                "frame-ancestors 'none'; "  # 禁止被iframe嵌入
-                "base-uri 'self'; "  # 限制base标签
-                "form-action 'self'; "  # 限制表单提交目标
-                "upgrade-insecure-requests;"  # 自动升级HTTP到HTTPS
-            )
-        else:
-            # 开发环境：允许unsafe-inline和unsafe-eval（用于开发调试）
-            csp = (
-                "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-                "style-src 'self' 'unsafe-inline'; "
-                "img-src 'self' data: https:; "
-                "font-src 'self' data:; "
-                "connect-src 'self'; "
-                "frame-ancestors 'none';"
-            )
-        response.headers["Content-Security-Policy"] = csp
+        # 注意：CSP主要用于HTML页面，API响应（JSON）不需要CSP头
+        # 只对HTML响应设置CSP，避免在API响应中添加不必要的头
+        content_type = response.headers.get("Content-Type", "").lower()
+        is_html_response = "text/html" in content_type or request.url.path.endswith(".html")
+        
+        if is_html_response:
+            # 生产环境使用更严格的CSP，禁止内联脚本和eval
+            if settings.is_production:
+                # 生产环境：严格CSP，禁止unsafe-inline和unsafe-eval
+                csp = (
+                    "default-src 'self'; "
+                    "script-src 'self'; "  # 生产环境禁止unsafe-inline和unsafe-eval
+                    "style-src 'self' 'unsafe-inline'; "  # CSS允许内联（Element Plus需要）
+                    "img-src 'self' data: https:; "
+                    "font-src 'self' data:; "
+                    "connect-src 'self'; "
+                    "frame-ancestors 'none'; "  # 禁止被iframe嵌入
+                    "base-uri 'self'; "  # 限制base标签
+                    "form-action 'self'; "  # 限制表单提交目标
+                    "upgrade-insecure-requests;"  # 自动升级HTTP到HTTPS
+                )
+            else:
+                # 开发环境：允许unsafe-inline和unsafe-eval（用于开发调试）
+                csp = (
+                    "default-src 'self'; "
+                    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                    "style-src 'self' 'unsafe-inline'; "
+                    "img-src 'self' data: https:; "
+                    "font-src 'self' data:; "
+                    "connect-src 'self'; "
+                    "frame-ancestors 'none';"
+                )
+            response.headers["Content-Security-Policy"] = csp
 
         # Strict-Transport-Security (HSTS): 强制HTTPS，防止中间人攻击
         # 生产环境启用，max-age=1年，包含子域名
