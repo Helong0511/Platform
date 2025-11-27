@@ -161,17 +161,20 @@
 
 /* ====== Element Plus CSS 兼容性修复 ====== */
 /* 修复 -moz-appearance 兼容性问题（为 Element Plus 组件添加标准 appearance 属性） */
+/* 注意：appearance 应该在 -moz-appearance 之后 */
 .el-pagination .el-input__inner,
 .el-pagination .el-input__wrapper {
-  appearance: textfield;
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 /* 修复 mask 属性顺序问题（确保 -webkit- 前缀在标准属性之前） */
 .el-select-dropdown.is-multiple .el-select-dropdown__item.is-selected:after {
   /* 如果 element-plus 的 CSS 顺序错误，这里提供覆盖 */
+  /* mask-size 必须在 -webkit-mask-size 之后 */
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
+  /* mask 必须在 -webkit-mask 之后 */
   -webkit-mask: inherit;
   mask: inherit;
 }
