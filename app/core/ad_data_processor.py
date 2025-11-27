@@ -218,8 +218,22 @@ async def process_api_ad_data(
                 error_count += 1
                 continue
 
+            # 解析日期，支持多种格式：'YYYY-MM-DD' 或 'YYYY-MM-DD HH:MM:SS'
+            item_date_str_clean = item_date_str.strip()
+            item_date = None
             try:
-                item_date = datetime.strptime(item_date_str.strip(), '%Y-%m-%d')
+                # 先尝试解析完整格式（日期+时间）
+                try:
+                    item_date = datetime.strptime(item_date_str_clean, '%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    # 如果失败，尝试只解析日期部分
+                    try:
+                        item_date = datetime.strptime(item_date_str_clean, '%Y-%m-%d')
+                    except ValueError:
+                        # 如果还是失败，尝试提取日期部分（处理可能的前后空格或格式问题）
+                        date_part = item_date_str_clean.split()[0] if ' ' in item_date_str_clean else item_date_str_clean
+                        item_date = datetime.strptime(date_part, '%Y-%m-%d')
+                # 统一设置为当天的0点0分0秒
                 item_date = item_date.replace(hour=0, minute=0, second=0, microsecond=0)
             except (ValueError, TypeError) as e:
                 logger.warning(f"日期格式错误: {item_date_str}, 错误: {str(e)}, 跳过该条数据")
