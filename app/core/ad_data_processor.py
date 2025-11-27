@@ -394,68 +394,6 @@ async def process_api_ad_data(
                 existing_result = await db.execute(existing_query)
                 existing_data = existing_result.scalars().first()
 
-                # 如果没找到相同国家代码的记录，检查是否存在同一天、同一产品但国家代码不同的记录
-                # 这种情况可能是之前获取的数据国家代码有问题，现在已经被修正
-                if not existing_data:
-                    # 查找同一天、同一产品但国家代码不同的记录
-                    different_country_query = select(AdData).where(
-                        AdData.date >= date_start,
-                        AdData.date <= date_end,
-                        AdData.product_id == product_id,
-                        AdData.country_code != country_code
-                    )
-                    different_country_result = await db.execute(different_country_query)
-                    different_country_data_list = different_country_result.scalars().all()
-                    
-                    if different_country_data_list:
-                        # 发现国家代码不同的记录，说明国家代码可能被修正了
-                        # 删除所有旧记录（理论上应该只有一条，但为了安全起见，删除所有）
-                        deleted_count = 0
-                        for different_country_data in different_country_data_list:
-                            old_country_code = different_country_data.country_code or "未知"
-                            
-                            # 记录操作日志
-                            try:
-                                await log_user_action(
-                                    db=db,
-                                    action_type="DELETE",
-                                    username="SYSTEM",
-                                    resource_type="AD_DATA",
-                                    resource_id=different_country_data.id,
-                                    resource_name=f"{product_name} - {date_str}",
-                                    ip_address=source,
-                                    success=True,
-                                    details={
-                                        "date": date_str,
-                                        "product_id": product_id,
-                                        "product_name": product_name,
-                                        "old_country_code": old_country_code,
-                                        "new_country_code": country_code,
-                                        "reason": "国家代码修正：检测到同一天、同一产品但国家代码不同的记录，删除旧记录",
-                                        "source": f"{source}自动修正"
-                                    }
-                                )
-                            except Exception as log_error:
-                                logger.warning(f"记录国家代码修正删除操作日志失败: {log_error}")
-                            
-                            # 删除旧记录
-                            await db.delete(different_country_data)
-                            deleted_count += 1
-                            logger.info(
-                                f"已删除国家代码错误的旧记录: 日期={date_str}, 产品={product_name}, "
-                                f"旧国家代码={old_country_code}, 记录ID={different_country_data.id}"
-                            )
-                        
-                        await db.flush()
-                        
-                        if deleted_count > 0:
-                            old_country_codes = [d.country_code or "未知" for d in different_country_data_list]
-                            logger.warning(
-                                f"检测到国家代码修正: 日期={date_str}, 产品={product_name}, "
-                                f"删除了 {deleted_count} 条旧记录（旧国家代码: {', '.join(old_country_codes)}） -> 新国家代码={country_code}, "
-                                f"将创建新记录"
-                            )
-
                 # 处理数据（新建或更新）
                 if existing_data:
                     # 检查数据是否减少（在更新之前）
