@@ -7,21 +7,27 @@
         <el-form-item prop="username">
           <el-input
             v-model="loginForm.username"
+            name="username"
+            id="username"
             placeholder="请输入用户名"
             :prefix-icon="User"
             size="large"
             clearable
+            autocomplete="username"
           ></el-input>
         </el-form-item>
         <el-form-item prop="password">
           <el-input
             v-model="loginForm.password"
+            name="password"
+            id="password"
             type="password"
             placeholder="请输入密码"
             :prefix-icon="Lock"
             size="large"
             show-password
             clearable
+            autocomplete="current-password"
           ></el-input>
         </el-form-item>
         <el-form-item class="login-actions">

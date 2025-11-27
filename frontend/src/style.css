@@ -120,11 +120,13 @@
   mask-repeat: inherit;
 }
 
+/* mask-size 必须在 -webkit-mask-size 之后 */
 [style*="mask-size"] {
   -webkit-mask-size: inherit;
   mask-size: inherit;
 }
 
+/* mask 必须在 -webkit-mask 之后 */
 [style*="mask"] {
   -webkit-mask: inherit;
   mask: inherit;

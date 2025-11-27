@@ -29,6 +29,7 @@
         <el-form-item label="日期范围">
           <el-date-picker
             v-model="searchForm.dateRange"
+            name="dateRange"
             type="daterange"
             range-separator="至"
             start-placeholder="开始日期"
@@ -42,6 +43,7 @@
         <el-form-item v-if="isAdmin" label="客户">
           <el-select 
             v-model="searchForm.clientId" 
+            name="clientId"
             placeholder="全部客户" 
             style="width: 100%;"
             @change="handleFilterClientChange"
@@ -53,6 +55,7 @@
         <el-form-item label="产品">
           <el-select 
             v-model="searchForm.productId" 
+            name="productId"
             placeholder="全部产品" 
             style="width: 100%;"
             clearable
@@ -64,6 +67,7 @@
         <el-form-item label="国家">
           <el-select 
             v-model="searchForm.countryCode" 
+            name="countryCode"
             placeholder="全部区域" 
             style="width: 100%;"
             clearable
@@ -143,6 +147,7 @@
         <el-form-item label="数据日期" prop="date">
           <el-date-picker
             v-model="editForm.date"
+            name="date"
             type="date"
             format="YYYY-MM-DD"
             value-format="YYYY-MM-DD"
@@ -151,18 +156,19 @@
           ></el-date-picker>
         </el-form-item>
         <el-form-item label="所属用户" prop="client_id">
-          <el-select v-model="editForm.client_id" placeholder="选择用户" style="width: 100%;">
+          <el-select v-model="editForm.client_id" name="client_id" placeholder="选择用户" style="width: 100%;">
             <el-option v-for="user in users" :key="user.value" :label="user.label" :value="user.value"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="产品" prop="product_id">
-          <el-select v-model="editForm.product_id" placeholder="选择产品" style="width: 100%;" @change="handleProductChange" :disabled="!editForm.client_id">
+          <el-select v-model="editForm.product_id" name="product_id" placeholder="选择产品" style="width: 100%;" @change="handleProductChange" :disabled="!editForm.client_id">
             <el-option v-for="product in products" :key="product.value" :label="product.label" :value="product.value"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="国家" prop="country_code">
           <el-input 
             v-model="editForm.country_code" 
+            name="country_code"
             placeholder="输入国家代码（如：US、USA、840、United States of America、美国）"
             style="width: 100%;"
           >
@@ -175,31 +181,31 @@
           </div>
         </el-form-item>
         <el-form-item label="请求数" prop="request_count">
-          <el-input v-model.number="editForm.request_count" type="number" min="0" placeholder="请输入请求数"></el-input>
+          <el-input v-model.number="editForm.request_count" name="request_count" type="number" min="0" placeholder="请输入请求数"></el-input>
         </el-form-item>
         <el-form-item label="匹配数" prop="match_count">
-          <el-input v-model.number="editForm.match_count" type="number" min="0" placeholder="请输入匹配数"></el-input>
+          <el-input v-model.number="editForm.match_count" name="match_count" type="number" min="0" placeholder="请输入匹配数"></el-input>
         </el-form-item>
         <el-form-item label="展示数" prop="display_count">
-          <el-input v-model.number="editForm.display_count" type="number" min="0" placeholder="请输入展示数"></el-input>
+          <el-input v-model.number="editForm.display_count" name="display_count" type="number" min="0" placeholder="请输入展示数"></el-input>
         </el-form-item>
         <el-form-item label="点击数" prop="click_count">
-          <el-input v-model.number="editForm.click_count" type="number" min="0" placeholder="请输入点击数"></el-input>
+          <el-input v-model.number="editForm.click_count" name="click_count" type="number" min="0" placeholder="请输入点击数"></el-input>
         </el-form-item>
         <el-form-item label="点击率" prop="click_rate">
-          <el-input v-model.number="editForm.click_rate" type="number" step="0.01" min="0" placeholder="请输入点击率"></el-input>
+          <el-input v-model.number="editForm.click_rate" name="click_rate" type="number" step="0.01" min="0" placeholder="请输入点击率"></el-input>
         </el-form-item>
         <el-form-item label="eCPM(扣)" prop="ecpm_after_deduct">
-          <el-input v-model.number="editForm.ecpm_after_deduct" type="number" step="0.01" min="0" placeholder="请输入扣除后的eCPM"></el-input>
+          <el-input v-model.number="editForm.ecpm_after_deduct" name="ecpm_after_deduct" type="number" step="0.01" min="0" placeholder="请输入扣除后的eCPM"></el-input>
         </el-form-item>
         <el-form-item label="eCPM" prop="ecpm_before_deduct">
-          <el-input v-model.number="editForm.ecpm_before_deduct" type="number" step="0.01" min="0" placeholder="请输入eCPM"></el-input>
+          <el-input v-model.number="editForm.ecpm_before_deduct" name="ecpm_before_deduct" type="number" step="0.01" min="0" placeholder="请输入eCPM"></el-input>
         </el-form-item>
         <el-form-item label="收益(扣)" prop="revenue_after_deduct">
-          <el-input v-model.number="editForm.revenue_after_deduct" type="number" step="0.01" min="0" placeholder="请输入扣除后的收益"></el-input>
+          <el-input v-model.number="editForm.revenue_after_deduct" name="revenue_after_deduct" type="number" step="0.01" min="0" placeholder="请输入扣除后的收益"></el-input>
         </el-form-item>
         <el-form-item label="收益" prop="revenue_before_deduct">
-          <el-input v-model.number="editForm.revenue_before_deduct" type="number" step="0.01" min="0" placeholder="请输入收益"></el-input>
+          <el-input v-model.number="editForm.revenue_before_deduct" name="revenue_before_deduct" type="number" step="0.01" min="0" placeholder="请输入收益"></el-input>
         </el-form-item>
       </el-form>
       <template #footer>
