@@ -754,6 +754,56 @@ const fixMozAppearance = () => {
       el.style.appearance = 'textfield';
     }
   });
+  
+  // 方法4：直接修改 Element Plus 样式表中的规则
+  // 扫描所有样式表，查找包含 .el-pagination .el-input_inner 的规则
+  try {
+    const styleSheets = document.styleSheets;
+    for (let i = 0; i < styleSheets.length; i++) {
+      try {
+        const sheet = styleSheets[i];
+        // 跳过跨域样式表
+        if (!sheet.cssRules) continue;
+        
+        // 检查是否是 Element Plus 样式表
+        const href = sheet.href || '';
+        const isElementPlus = href.includes('element-plus') || href.includes('elementPlus');
+        
+        for (let j = 0; j < sheet.cssRules.length; j++) {
+          const rule = sheet.cssRules[j];
+          if (rule.style && rule.selectorText) {
+            // 查找包含 .el-pagination .el-input_inner 的规则
+            if (rule.selectorText.includes('.el-pagination') && 
+                (rule.selectorText.includes('.el-input_inner') || rule.selectorText.includes('.el-input__inner'))) {
+              const mozAppearance = rule.style.getPropertyValue('-moz-appearance');
+              const appearance = rule.style.getPropertyValue('appearance');
+              
+              // 如果规则有 -moz-appearance 但没有 appearance，添加它
+              if (mozAppearance && mozAppearance.trim() === 'textfield' && (!appearance || appearance === 'none' || appearance === 'auto')) {
+                try {
+                  rule.style.setProperty('appearance', 'textfield', 'important');
+                } catch (e) {
+                  // 如果无法修改规则，尝试通过内联样式修复匹配的元素
+                  try {
+                    const elements = document.querySelectorAll(rule.selectorText);
+                    elements.forEach((el) => {
+                      el.style.setProperty('appearance', 'textfield', 'important');
+                    });
+                  } catch (e2) {
+                    // 忽略选择器解析错误
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // 忽略跨域样式表访问错误
+      }
+    }
+  } catch (e) {
+    // 忽略样式表访问错误
+  }
 };
 
 // 修复 mask 相关属性的兼容性问题：为所有使用 mask 相关属性的元素添加 -webkit- 前缀
@@ -847,6 +897,46 @@ const fixMaskProperties = () => {
       fixMaskRepeat(el);
     }
   });
+  
+  // 方法3：扫描所有样式表，查找使用 mask-image 的规则，并动态修复
+  // 注意：这可以修复通过外部样式表（如第三方库）添加的 mask-image
+  try {
+    const styleSheets = document.styleSheets;
+    for (let i = 0; i < styleSheets.length; i++) {
+      try {
+        const sheet = styleSheets[i];
+        // 跳过跨域样式表
+        if (!sheet.cssRules) continue;
+        
+        for (let j = 0; j < sheet.cssRules.length; j++) {
+          const rule = sheet.cssRules[j];
+          if (rule.style && rule.style.maskImage && rule.style.maskImage !== 'none') {
+            // 如果规则有 mask-image 但没有 -webkit-mask-image，尝试添加
+            if (!rule.style.webkitMaskImage) {
+              rule.style.webkitMaskImage = rule.style.maskImage;
+            }
+            
+            // 查找匹配的元素并应用修复
+            try {
+              const selector = rule.selectorText;
+              if (selector) {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach((el) => {
+                  fixMaskImage(el);
+                });
+              }
+            } catch (e) {
+              // 忽略选择器解析错误
+            }
+          }
+        }
+      } catch (e) {
+        // 忽略跨域样式表访问错误
+      }
+    }
+  } catch (e) {
+    // 忽略样式表访问错误
+  }
 };
 
 // 在应用挂载后，根据当前路由决定是否初始化认证和时区

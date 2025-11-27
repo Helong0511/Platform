@@ -206,6 +206,7 @@
 /* 注意：根据 CSS 规范，appearance 应该在 -moz-appearance 之后 */
 /* 使用更具体的选择器确保覆盖 element-plus 的样式 */
 /* 注意：Element Plus 编译后的 CSS 可能使用 .el-input_inner（单下划线）或 .el-input__inner（双下划线） */
+/* 使用更高的选择器优先级确保覆盖编译后的 CSS */
 .el-pagination .el-input__inner,
 .el-pagination .el-input_inner,
 .el-pagination .el-input__wrapper,
@@ -219,6 +220,21 @@
   /* 确保同时设置 -moz-appearance 和 appearance */
   -moz-appearance: textfield !important;
   appearance: textfield !important;
+}
+
+/* 增强覆盖：使用更高的选择器优先级，确保覆盖 Element Plus 编译后的 CSS */
+/* 这是专门针对 .el-pagination .el-input_inner 的修复 */
+.el-pagination .el-input_inner.el-input_inner,
+.el-pagination .el-input_inner[class*="el-input"],
+.el-pagination .el-input_inner[type="number"],
+.el-pagination .el-input_inner[type="text"],
+.el-pagination input.el-input_inner,
+.el-pagination .el-input__wrapper .el-input_inner,
+body .el-pagination .el-input_inner,
+#app .el-pagination .el-input_inner {
+  /* 强制添加 appearance 属性，覆盖 Element Plus 编译后的 CSS */
+  appearance: textfield !important;
+  -moz-appearance: textfield !important;
 }
 
 /* 为所有使用 -moz-appearance 的元素添加标准 appearance 属性 */
