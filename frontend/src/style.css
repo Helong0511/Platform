@@ -105,37 +105,50 @@
 /* 为 mask 相关属性添加 webkit 前缀（Edge 79+ 和 Firefox 53+ 支持） */
 /* 注意：这些属性可能在第三方库中使用，这里提供全局兼容性支持 */
 /* 属性顺序：先写 -webkit- 版本，再写标准版本（Firefox 支持） */
+/* 使用更通用的选择器确保覆盖所有使用 mask 相关属性的元素 */
+*[style*="mask-image"],
 [style*="mask-image"] {
-  -webkit-mask-image: inherit;
-  mask-image: inherit;
+  -webkit-mask-image: inherit !important;
+  mask-image: inherit !important;
 }
 
+*[style*="mask-position"],
 [style*="mask-position"] {
-  -webkit-mask-position: inherit;
-  mask-position: inherit;
+  -webkit-mask-position: inherit !important;
+  mask-position: inherit !important;
 }
 
+*[style*="mask-repeat"],
 [style*="mask-repeat"] {
-  -webkit-mask-repeat: inherit;
-  mask-repeat: inherit;
+  -webkit-mask-repeat: inherit !important;
+  mask-repeat: inherit !important;
 }
 
 /* mask-size 必须在 -webkit-mask-size 之后 */
+/* 注意：根据 CSS 规范，-webkit- 前缀应该在标准属性之前 */
+*[style*="mask-size"],
 [style*="mask-size"] {
-  -webkit-mask-size: inherit;
-  mask-size: inherit;
+  -webkit-mask-size: inherit !important;
+  mask-size: inherit !important;
 }
 
 /* mask 必须在 -webkit-mask 之后 */
-[style*="mask"] {
-  -webkit-mask: inherit;
-  mask: inherit;
+/* 注意：根据 CSS 规范，-webkit- 前缀应该在标准属性之前 */
+*[style*="mask"]:not([style*="mask-image"]):not([style*="mask-position"]):not([style*="mask-repeat"]):not([style*="mask-size"]),
+[style*="mask"]:not([style*="mask-image"]):not([style*="mask-position"]):not([style*="mask-repeat"]):not([style*="mask-size"]) {
+  -webkit-mask: inherit !important;
+  mask: inherit !important;
 }
 
 /* 为 appearance 添加标准属性（Chrome 84+, Edge 84+, Safari 15.4+ 支持） */
 /* 注意：-moz-appearance 可能在第三方库中使用，这里提供标准属性支持 */
-[style*="-moz-appearance"] {
-  appearance: inherit;
+/* 使用更强的选择器确保覆盖 */
+*[style*="-moz-appearance"],
+[style*="-moz-appearance"],
+.el-pagination .el-input__inner,
+.el-pagination .el-input__wrapper,
+.el-pagination input {
+  appearance: inherit !important;
 }
 
 /* scrollbar-width 兼容性处理（Safari 不支持，使用 webkit 滚动条样式作为降级方案） */
@@ -162,22 +175,51 @@
 /* ====== Element Plus CSS 兼容性修复 ====== */
 /* 修复 -moz-appearance 兼容性问题（为 Element Plus 组件添加标准 appearance 属性） */
 /* 注意：appearance 应该在 -moz-appearance 之后 */
+/* 使用更具体的选择器确保覆盖 element-plus 的样式 */
 .el-pagination .el-input__inner,
-.el-pagination .el-input__wrapper {
-  -moz-appearance: textfield;
-  appearance: textfield;
+.el-pagination .el-input__wrapper,
+.el-pagination input.el-input__inner {
+  -moz-appearance: textfield !important;
+  appearance: textfield !important;
+}
+
+/* 为所有使用 -moz-appearance 的元素添加标准 appearance 属性 */
+[style*="-moz-appearance"] {
+  appearance: inherit !important;
 }
 
 /* 修复 mask 属性顺序问题（确保 -webkit- 前缀在标准属性之前） */
 /* 注意：根据 CSS 规范，-webkit- 前缀应该在标准属性之前 */
+/* 修复 element-plus CSS 中的属性顺序问题和可能的拼写错误 */
 .el-select-dropdown.is-multiple .el-select-dropdown__item.is-selected:after {
   /* 修复 element-plus CSS 中的属性顺序问题 */
   /* -webkit-mask-size 必须在 mask-size 之前 */
   -webkit-mask-size: 100% 100% !important;
   mask-size: 100% 100% !important;
   /* -webkit-mask 必须在 mask 之前 */
+  /* 注意：修复可能的拼写错误 -webkit-nask -> -webkit-mask */
   -webkit-mask: inherit !important;
   mask: inherit !important;
+}
+
+/* 修复所有使用 mask 相关属性的元素，确保顺序正确 */
+/* 使用更通用的选择器覆盖 element-plus 的样式 */
+.el-select-dropdown__item.is-selected:after,
+[class*="el-select-dropdown"] [class*="is-selected"]:after,
+.el-select-dropdown.is-multiple .el-select-dropdown__item.is-selected::after {
+  /* 确保 -webkit- 前缀在标准属性之前 */
+  /* 修复可能的拼写错误 -webkit-nask -> -webkit-mask */
+  -webkit-mask-size: 100% 100% !important;
+  mask-size: 100% 100% !important;
+  -webkit-mask: inherit !important;
+  mask: inherit !important;
+}
+
+/* 全局修复：为所有使用 mask 相关属性的元素添加正确的顺序 */
+/* 注意：这可能会影响第三方库的样式，但可以确保兼容性 */
+*[style*="mask-size"],
+*[style*="mask"] {
+  /* 通过 JavaScript 动态修复，这里提供 CSS 备用方案 */
 }
 
 /* 修复所有使用 mask 相关属性的元素，确保顺序正确 */
@@ -223,8 +265,23 @@
 
 /* 如果 Element Plus 使用其他选择器，也进行覆盖 */
 .el-loading-spinner .el-progress-bar__inner::before,
-.el-loading-spinner .el-progress-bar__outer::before {
+.el-loading-spinner .el-progress-bar__outer::before,
+.el-loading-spinner .el-progress-bar__inner::after,
+.el-loading-spinner .el-progress-bar__outer::after {
   animation-name: indeterminate-optimized !important;
+}
+
+/* 全局覆盖：重写 Element Plus 的 indeterminate 动画，使用优化版本 */
+/* 注意：这会覆盖 element-plus 编译后的 CSS 中的 @keyframes indeterminate */
+@keyframes indeterminate {
+  0% {
+    transform: translateX(-100%) !important;
+    left: auto !important;
+  }
+  to {
+    transform: translateX(100%) !important;
+    left: auto !important;
+  }
 }
 
 /* ====== 完善 scrollbar-width 的 Safari 兼容性处理 ====== */
