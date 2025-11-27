@@ -158,3 +158,20 @@
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-secondary, #909399);
 }
+
+/* ====== Element Plus CSS 兼容性修复 ====== */
+/* 修复 -moz-appearance 兼容性问题（为 Element Plus 组件添加标准 appearance 属性） */
+.el-pagination .el-input__inner,
+.el-pagination .el-input__wrapper {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+/* 修复 mask 属性顺序问题（确保 -webkit- 前缀在标准属性之前） */
+.el-select-dropdown.is-multiple .el-select-dropdown__item.is-selected:after {
+  /* 如果 element-plus 的 CSS 顺序错误，这里提供覆盖 */
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask: inherit;
+  mask: inherit;
+}
