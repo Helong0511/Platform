@@ -7,7 +7,7 @@ import os
 import logging
 import hashlib
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import and_, func
@@ -17,6 +17,14 @@ from app.models.models import ScheduledTask
 from app.scheduler_module.lock import CURRENT_PID, CURRENT_HOST
 
 logger = logging.getLogger(__name__)
+
+# 尝试导入psutil，如果不可用则使用备用方法
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    logger.warning("psutil未安装，将使用备用方法检查进程存在性。建议安装: pip install psutil>=5.9.0")
 
 # 进程任务分配缓存（进程ID -> 任务名称列表）
 _process_task_assignments: Dict[int, List[str]] = {}
@@ -36,6 +44,62 @@ def get_cron_hash(cron_expression: str) -> str:
         Cron表达式的哈希值
     """
     return hashlib.md5(cron_expression.encode('utf-8')).hexdigest()[:8]
+
+
+def is_process_alive(pid: int) -> bool:
+    """
+    检查进程是否还存在
+    
+    Args:
+        pid: 进程ID
+        
+    Returns:
+        bool: True表示进程存在，False表示进程不存在
+    """
+    if not pid or pid <= 0:
+        return False
+    
+    if PSUTIL_AVAILABLE:
+        try:
+            return psutil.pid_exists(pid)
+        except Exception as e:
+            logger.debug(f"检查进程 {pid} 存在性时出错: {e}")
+            # 如果检查失败，假设进程存在（保守策略）
+            return True
+    else:
+        # 备用方法：尝试向进程发送信号0（不实际发送信号，只检查进程是否存在）
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            # 进程不存在或没有权限
+            return False
+        except Exception as e:
+            logger.debug(f"检查进程 {pid} 存在性时出错: {e}")
+            # 如果检查失败，假设进程存在（保守策略）
+            return True
+
+
+def filter_alive_processes(processes: List[int]) -> List[int]:
+    """
+    过滤掉不存在的进程
+    
+    Args:
+        processes: 进程ID列表
+        
+    Returns:
+        过滤后的进程ID列表（只包含存在的进程）
+    """
+    alive_processes = [pid for pid in processes if is_process_alive(pid)]
+    
+    if len(alive_processes) < len(processes):
+        dead_processes = set(processes) - set(alive_processes)
+        logger.debug(
+            f"过滤掉不存在的进程: {sorted(dead_processes)} "
+            f"（剩余活跃进程: {sorted(alive_processes)}）"
+        )
+    
+    return alive_processes
 
 
 async def get_process_for_task(
@@ -150,9 +214,9 @@ async def get_process_for_task(
         running_processes = sorted([pid for pid, in result.all() if pid])
         
         # 2. 查询最近运行过任务的进程（即使当前没有运行任务）
-        # 这样可以发现所有可用的worker进程
-        from datetime import timedelta
-        recent_time = datetime.now(timezone.utc) - timedelta(minutes=10)  # 最近10分钟内运行过任务的进程
+        # 优化：缩短时间窗口到2分钟，避免使用过期的进程ID
+        # 这样可以发现所有可用的worker进程，但不会使用太旧的进程记录
+        recent_time = datetime.now(timezone.utc) - timedelta(minutes=2)  # 最近2分钟内运行过任务的进程
         result = await db.execute(
             select(ScheduledTask.last_run_pid)
             .where(
@@ -175,13 +239,30 @@ async def get_process_for_task(
         
         all_processes = sorted(list(all_processes_set))
         
+        # 过滤掉不存在的进程（重要：避免使用已退出的进程）
+        all_processes = filter_alive_processes(all_processes)
+        
+        # 如果当前进程被过滤掉了（不应该发生），重新添加
+        if current_pid not in all_processes:
+            logger.warning(
+                f"当前进程 {current_pid} 不在活跃进程列表中，重新添加。"
+                f"这可能表示进程ID获取有问题。"
+            )
+            all_processes.append(current_pid)
+            all_processes = sorted(all_processes)
+        
         # 如果仍然没有任何进程，使用当前进程
         if not all_processes:
+            logger.warning(
+                f"没有找到任何活跃进程，使用当前进程 {current_pid}。"
+                f"这可能表示这是首次运行或所有进程都已退出。"
+            )
             all_processes = [current_pid]
         
         logger.info(
             f"任务 '{task_name}' 进程分配检查: "
-            f"当前进程={current_pid}, 运行中的进程={all_processes}, "
+            f"当前进程={current_pid}@{CURRENT_HOST}, "
+            f"活跃进程={all_processes} (已过滤不存在的进程), "
             f"任务索引={task_index}, 相同cron任务数={len(tasks_with_same_cron)}"
         )
         
@@ -222,13 +303,24 @@ async def get_process_for_task(
         
         if idle_processes:
             # 有空闲进程，优先选择负载最低的进程
-            idle_processes.sort(key=lambda pid: process_loads.get(pid, 0))
-            assigned_pid = idle_processes[0]
-            logger.info(
-                f"任务 '{task_name}' 分配给空闲进程 {assigned_pid} "
-                f"（负载: {process_loads.get(assigned_pid, 0)}/{max_concurrent}，"
-                f"空闲进程: {idle_processes}）"
-            )
+            # 再次验证进程存在性（双重检查，确保分配的进程真的存在）
+            idle_processes = filter_alive_processes(idle_processes)
+            
+            if not idle_processes:
+                # 所有空闲进程都不存在了，使用当前进程
+                logger.warning(
+                    f"任务 '{task_name}' 所有空闲进程都不存在，"
+                    f"使用当前进程 {current_pid} 执行"
+                )
+                assigned_pid = current_pid
+            else:
+                idle_processes.sort(key=lambda pid: process_loads.get(pid, 0))
+                assigned_pid = idle_processes[0]
+                logger.info(
+                    f"任务 '{task_name}' 分配给空闲进程 {assigned_pid}@{CURRENT_HOST} "
+                    f"（负载: {process_loads.get(assigned_pid, 0)}/{max_concurrent}，"
+                    f"空闲进程: {idle_processes}）"
+                )
         else:
             # 所有进程都满载，按任务索引轮询分配（确保相同cron的任务分配到不同进程）
             if len(all_processes) == 1:
@@ -239,12 +331,23 @@ async def get_process_for_task(
                 )
             else:
                 # 多个进程，按索引轮询分配
-                assigned_process_index = task_index % len(all_processes)
-                assigned_pid = all_processes[assigned_process_index]
-                logger.info(
-                    f"任务 '{task_name}' 所有进程都满载，按轮询分配到进程 {assigned_pid} "
-                    f"（任务索引: {task_index}, 进程负载: {process_loads}）"
-                )
+                # 再次验证进程存在性
+                all_processes = filter_alive_processes(all_processes)
+                
+                if not all_processes:
+                    # 所有进程都不存在了，使用当前进程
+                    logger.warning(
+                        f"任务 '{task_name}' 所有进程都不存在，"
+                        f"使用当前进程 {current_pid} 执行"
+                    )
+                    assigned_pid = current_pid
+                else:
+                    assigned_process_index = task_index % len(all_processes)
+                    assigned_pid = all_processes[assigned_process_index]
+                    logger.info(
+                        f"任务 '{task_name}' 所有进程都满载，按轮询分配到进程 {assigned_pid}@{CURRENT_HOST} "
+                        f"（任务索引: {task_index}, 进程负载: {process_loads}）"
+                    )
         
         # 如果分配的是当前进程
         if assigned_pid == current_pid:
@@ -270,10 +373,19 @@ async def get_process_for_task(
                 )
                 return True, current_pid
         else:
+            # 分配给了其他进程，验证该进程是否真的存在
+            if not is_process_alive(assigned_pid):
+                # 分配的进程不存在，使用当前进程执行
+                logger.warning(
+                    f"任务 '{task_name}' 分配的进程 {assigned_pid} 不存在，"
+                    f"改用当前进程 {current_pid} 执行"
+                )
+                return True, current_pid
+            
             # 分配给了其他进程，当前进程应该跳过
             logger.debug(
-                f"任务 '{task_name}' 已分配给进程 {assigned_pid} "
-                f"（轮询分配），当前进程 {current_pid} 跳过执行"
+                f"任务 '{task_name}' 已分配给进程 {assigned_pid}@{CURRENT_HOST} "
+                f"（轮询分配），当前进程 {current_pid}@{CURRENT_HOST} 跳过执行"
             )
             return False, assigned_pid
         
@@ -380,4 +492,91 @@ def get_cron_process_groups() -> Dict[str, List[int]]:
         Cron表达式哈希到进程ID列表的映射
     """
     return _cron_process_groups.copy()
+
+
+async def cleanup_stale_process_records(
+    db: Optional[AsyncSession] = None,
+    max_age_minutes: int = 5
+) -> int:
+    """
+    清理数据库中过期的进程记录（超过指定时间未运行的进程）
+    
+    这个函数可以定期调用，清理不再存在的进程记录，避免进程分配逻辑使用过期的进程ID
+    
+    Args:
+        db: 数据库会话（可选）
+        max_age_minutes: 进程记录的最大保留时间（分钟），超过此时间的进程记录将被清理
+        
+    Returns:
+        int: 清理的记录数
+    """
+    if db is None:
+        db = AsyncSessionLocal()
+        should_close = True
+    else:
+        should_close = False
+    
+    try:
+        # 计算过期时间
+        expire_time = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+        
+        # 查询所有活跃任务，获取它们的last_run_pid
+        result = await db.execute(
+            select(ScheduledTask.last_run_pid)
+            .where(
+                and_(
+                    ScheduledTask.is_active == True,
+                    ScheduledTask.last_run_pid.isnot(None),
+                    ScheduledTask.last_run_time < expire_time
+                )
+            )
+            .distinct()
+        )
+        stale_pids = [pid for pid, in result.all() if pid]
+        
+        if not stale_pids:
+            return 0
+        
+        # 检查这些进程是否真的不存在
+        dead_pids = [pid for pid in stale_pids if not is_process_alive(pid)]
+        
+        if not dead_pids:
+            return 0
+        
+        # 清理这些进程的记录（将last_run_pid设为NULL，但保留其他信息）
+        # 注意：这里不删除任务记录，只是清理进程ID，让系统重新分配
+        cleaned_count = 0
+        for pid in dead_pids:
+            result = await db.execute(
+                select(ScheduledTask)
+                .where(
+                    and_(
+                        ScheduledTask.last_run_pid == pid,
+                        ScheduledTask.last_run_time < expire_time,
+                        ScheduledTask.is_running == False  # 只清理未运行的任务
+                    )
+                )
+            )
+            tasks = result.scalars().all()
+            for task in tasks:
+                task.last_run_pid = None
+                cleaned_count += 1
+        
+        if cleaned_count > 0:
+            await db.commit()
+            logger.info(
+                f"清理了 {cleaned_count} 条过期进程记录 "
+                f"（进程ID: {sorted(dead_pids)}，超过 {max_age_minutes} 分钟未运行）"
+            )
+        
+        return cleaned_count
+        
+    except Exception as e:
+        logger.error(f"清理过期进程记录失败: {e}", exc_info=True)
+        if should_close and db:
+            await db.rollback()
+        return 0
+    finally:
+        if should_close and db:
+            await db.close()
 

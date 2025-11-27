@@ -41,3 +41,6 @@ email-validator==2.1.0
 
 # Telegram Bot
 pyTelegramBotAPI==4.14.0
+
+# 系统工具
+psutil>=5.9.0  # 进程和系统监控（用于进程存在性检查）
