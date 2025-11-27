@@ -660,11 +660,15 @@ async def shutdown_scheduler() -> None:
     
     等待所有正在执行的任务完成后再关闭
     """
+    import asyncio
     sched = get_scheduler()
     if sched.running:
         try:
             sched.shutdown(wait=True)
             logger.info("定时任务调度器已关闭")
+        except asyncio.CancelledError:
+            # 应用关闭时任务被取消是正常的，不需要记录错误
+            logger.debug("调度器关闭时任务被取消（正常关闭流程）")
         except Exception as e:
             logger.error(f"关闭调度器时出错: {e}", exc_info=True)
     else:

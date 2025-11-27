@@ -77,7 +77,7 @@ today_str = datetime.now().strftime("%Y-%m-%d")
 try:
     p1 = [
         {"name": "Revenue_time",
-         "value": '2025-11-20',
+         "value": today_str,
          "displayType": "thanorequal"
          },
         {"name": "Revenue_time",

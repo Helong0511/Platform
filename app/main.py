@@ -219,6 +219,9 @@ async def lifespan(app: FastAPI):
         # 关闭定时任务调度器
         from app.scheduler_module import shutdown_scheduler
         await shutdown_scheduler()
+    except asyncio.CancelledError:
+        # 应用关闭时任务被取消是正常的，不需要记录错误
+        logger.debug("定时任务调度器关闭时任务被取消（正常关闭流程）")
     except Exception as e:
         logger.warning(f"关闭定时任务调度器时出现错误: {e}")
 
@@ -226,6 +229,9 @@ async def lifespan(app: FastAPI):
         # 关闭Redis连接
         from app.core.redis_client import close_redis_client
         await close_redis_client()
+    except asyncio.CancelledError:
+        # 应用关闭时任务被取消是正常的，不需要记录错误
+        logger.debug("Redis连接关闭时任务被取消（正常关闭流程）")
     except Exception as e:
         logger.warning(f"关闭Redis连接时出现错误: {e}")
 
@@ -242,6 +248,9 @@ async def lifespan(app: FastAPI):
                         send_telegram_message(f"🧩 服务 [{settings.SERVER_NAME}] 已关闭"),
                         timeout=3.0
                     )
+                except asyncio.CancelledError:
+                    # 应用关闭时任务被取消是正常的
+                    logger.debug("发送关闭消息时任务被取消（正常关闭流程）")
                 except asyncio.TimeoutError:
                     logger.debug(f"发送关闭消息超时（可能连接已断开）")
                 # 其他异常已在 send_telegram_message 内部处理，这里不需要捕获
@@ -251,6 +260,9 @@ async def lifespan(app: FastAPI):
                 # 其他进程不需要执行任何操作
                 if bot_initialized:
                     logger.debug(f"[PID:{os.getpid()}] 未持有 Bot 锁，跳过关闭操作")
+    except asyncio.CancelledError:
+        # 应用关闭时任务被取消是正常的，不需要记录错误
+        logger.debug("关闭 Telegram 机器人时任务被取消（正常关闭流程）")
     except Exception as e:
         logger.warning(f"关闭 Telegram 机器人时出现错误: {e}")
 
@@ -258,6 +270,9 @@ async def lifespan(app: FastAPI):
         # 清理数据库连接池
         await engine.dispose()
         logger.info("数据库连接池已关闭")
+    except asyncio.CancelledError:
+        # 应用关闭时任务被取消是正常的，不需要记录错误
+        logger.debug("关闭数据库连接池时任务被取消（正常关闭流程）")
     except Exception as e:
         # 关闭时的错误不应该影响应用关闭流程
         logger.warning(f"关闭数据库连接池时出现错误: {e}")
