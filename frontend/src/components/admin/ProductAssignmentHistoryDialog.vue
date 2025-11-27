@@ -4,6 +4,8 @@
     title="产品分配历史"
     width="800px"
     :close-on-click-modal="false"
+    :append-to-body="true"
+    :z-index="3000"
     @close="handleClose"
     class="product-assignment-history-dialog"
   >
@@ -802,6 +804,15 @@ const handleDiscardAll = async () => {
 </script>
 
 <style scoped>
+/* 确保对话框显示在最前层 */
+.product-assignment-history-dialog :deep(.el-dialog) {
+  z-index: 3000 !important;
+}
+
+.product-assignment-history-dialog :deep(.el-overlay) {
+  z-index: 2999 !important;
+}
+
 .product-assignment-history-dialog {
   --spacing-xs: 8px;
   --spacing-sm: 12px;
