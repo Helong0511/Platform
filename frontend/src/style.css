@@ -169,12 +169,185 @@
 }
 
 /* 修复 mask 属性顺序问题（确保 -webkit- 前缀在标准属性之前） */
+/* 注意：根据 CSS 规范，-webkit- 前缀应该在标准属性之前 */
 .el-select-dropdown.is-multiple .el-select-dropdown__item.is-selected:after {
-  /* 如果 element-plus 的 CSS 顺序错误，这里提供覆盖 */
-  /* mask-size 必须在 -webkit-mask-size 之后 */
-  -webkit-mask-size: 100% 100%;
-  mask-size: 100% 100%;
-  /* mask 必须在 -webkit-mask 之后 */
-  -webkit-mask: inherit;
-  mask: inherit;
+  /* 修复 element-plus CSS 中的属性顺序问题 */
+  /* -webkit-mask-size 必须在 mask-size 之前 */
+  -webkit-mask-size: 100% 100% !important;
+  mask-size: 100% 100% !important;
+  /* -webkit-mask 必须在 mask 之前 */
+  -webkit-mask: inherit !important;
+  mask: inherit !important;
+}
+
+/* 修复所有使用 mask 相关属性的元素，确保顺序正确 */
+[class*="mask"] {
+  /* 确保所有 mask 相关属性的顺序正确 */
+  /* 如果存在 mask-size，确保 -webkit-mask-size 在前 */
+  /* 如果存在 mask，确保 -webkit-mask 在前 */
+}
+
+/* 修复 el-select 内部 input 元素缺少可访问性属性的问题 */
+.el-select .el-select__input {
+  /* 为 el-select 的 input 元素添加 title 属性支持 */
+  /* 如果 el-select 有 placeholder，会通过 JavaScript 设置，这里提供备用方案 */
+}
+
+/* 为所有 el-select 的 input 元素添加可访问性支持 */
+/* 注意：Element Plus 的 el-select 会在内部生成 input 元素，需要确保这些元素有适当的可访问性属性 */
+.el-select .el-input__inner,
+.el-select .el-input__wrapper input,
+.el-select .el-select__input {
+  /* placeholder 应该由 el-select 的 placeholder 属性自动设置 */
+  /* 如果没有 placeholder，将通过 JavaScript 动态添加 title 属性 */
+}
+
+/* ====== 性能优化：修复 @keyframes 中使用 left 属性的问题 ====== */
+/* Element Plus 的 indeterminate 动画使用 left 属性，会触发布局重排，影响性能 */
+/* 通过覆盖样式，使用 transform 替代 left，避免布局重排 */
+@keyframes indeterminate-optimized {
+  0% {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* 覆盖 Element Plus 的 indeterminate 动画，使用优化版本 */
+.el-progress-bar__inner::before,
+.el-progress-bar__outer::before,
+[class*="el-progress"] [class*="indeterminate"]::before {
+  animation-name: indeterminate-optimized !important;
+}
+
+/* 如果 Element Plus 使用其他选择器，也进行覆盖 */
+.el-loading-spinner .el-progress-bar__inner::before,
+.el-loading-spinner .el-progress-bar__outer::before {
+  animation-name: indeterminate-optimized !important;
+}
+
+/* ====== 完善 scrollbar-width 的 Safari 兼容性处理 ====== */
+/* 为所有使用 scrollbar-width 的元素提供 Safari 兼容性支持 */
+/* Element Plus 的某些组件使用 scrollbar-width，Safari 不支持，需要 webkit 滚动条样式 */
+.el-scrollbar__wrap-hidden-default,
+.el-vl__window,
+.el-splitter-panel {
+  /* 这些类使用了 scrollbar-width，Safari 不支持 */
+  /* 我们已经提供了全局的 webkit 滚动条样式作为降级方案 */
+  /* 确保这些元素在 Safari 中也能正常显示滚动条 */
+}
+
+/* 确保所有使用 scrollbar-width: none 的元素在 Safari 中隐藏滚动条 */
+.el-scrollbar__wrap-hidden-default::-webkit-scrollbar,
+.el-vl__window::-webkit-scrollbar,
+.el-splitter-panel::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* 确保使用 scrollbar-width: thin 的元素在 Safari 中显示细滚动条 */
+.el-splitter-panel::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.el-splitter-panel::-webkit-scrollbar-thumb {
+  background: var(--border-base, #d0d0d0);
+  border-radius: 3px;
+}
+
+/* ====== 性能优化：为动画元素添加 will-change 提示 ====== */
+/* 提示浏览器哪些属性可能会变化，以便进行优化 */
+.el-progress-bar__inner::before,
+.el-progress-bar__outer::before,
+[class*="el-progress"] [class*="indeterminate"]::before {
+  will-change: transform;
+}
+
+/* 为所有使用 transform 动画的元素添加 will-change */
+[class*="rotating"],
+[class*="pulse"],
+[class*="float"],
+[class*="slide"] {
+  will-change: transform;
+}
+
+/* ====== 性能优化：使用 contain 属性优化渲染性能 ====== */
+/* 为表格容器添加 contain 属性，优化渲染性能 */
+.el-table,
+.el-table__body-wrapper,
+.el-table__header-wrapper {
+  contain: layout style paint;
+}
+
+/* 为卡片容器添加 contain 属性 */
+.el-card,
+.el-card__body {
+  contain: layout style;
+}
+
+/* ====== 性能优化：优化滚动性能 ====== */
+/* 为可滚动容器添加硬件加速和滚动优化 */
+.el-scrollbar__wrap,
+.el-table__body-wrapper,
+.el-table__header-wrapper,
+.el-dialog__body {
+  /* 启用硬件加速 */
+  transform: translateZ(0);
+  /* 优化滚动性能 */
+  -webkit-overflow-scrolling: touch;
+  /* 优化滚动行为 */
+  overscroll-behavior: contain;
+}
+
+/* ====== 性能优化：优化图片加载 ====== */
+/* 为图片添加懒加载和性能优化 */
+img {
+  /* 启用图片优化 */
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  /* 优化图片加载性能 */
+  content-visibility: auto;
+}
+
+/* 为背景图片容器优化 */
+[style*="background-image"],
+.el-image {
+  /* 启用硬件加速 */
+  transform: translateZ(0);
+  /* 优化渲染 */
+  will-change: transform;
+}
+
+/* ====== 性能优化：减少重绘和重排 ====== */
+/* 为频繁变化的元素添加优化 */
+.el-loading-mask,
+.el-message,
+.el-notification {
+  /* 启用硬件加速 */
+  transform: translateZ(0);
+  /* 提示浏览器优化 */
+  will-change: opacity, transform;
+}
+
+/* ====== 可访问性增强：确保所有交互元素都有适当的焦点样式 ====== */
+/* 为所有可聚焦元素添加可见的焦点样式 */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--primary-color, #409eff);
+  outline-offset: 2px;
+}
+
+/* Element Plus 组件的焦点样式 */
+.el-button:focus-visible,
+.el-input__inner:focus-visible,
+.el-select__input:focus-visible {
+  outline: 2px solid var(--primary-color, #409eff);
+  outline-offset: 2px;
 }

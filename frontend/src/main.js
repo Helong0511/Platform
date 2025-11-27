@@ -584,6 +584,125 @@ const initializeTimezone = () => {
 // 挂载应用
 app.mount('#app');
 
+// 修复表单元素可访问性问题：为缺少 title 和 placeholder 的 input 元素添加可访问性属性
+const fixSelectAccessibility = () => {
+  // 使用 MutationObserver 监听 DOM 变化，确保动态创建的表单元素也能被修复
+  const observer = new MutationObserver(() => {
+    fixSelectInputs();
+    fixDatePickerInputs();
+    fixOtherFormInputs();
+  });
+  
+  // 修复 el-select 的 input 元素
+  const fixSelectInputs = () => {
+    const selectInputs = document.querySelectorAll('.el-select .el-select__input, .el-select .el-input__inner, .el-select .el-input__wrapper input');
+    selectInputs.forEach((input) => {
+      if (!input.getAttribute('title') && !input.getAttribute('placeholder')) {
+        const selectEl = input.closest('.el-select');
+        if (selectEl) {
+          let placeholder = selectEl.getAttribute('placeholder') || 
+                           selectEl.getAttribute('data-placeholder') ||
+                           '请选择';
+          
+          input.setAttribute('title', placeholder);
+          if (input.tagName === 'INPUT' && !input.getAttribute('placeholder')) {
+            input.setAttribute('placeholder', placeholder);
+          }
+          if (!input.getAttribute('aria-label')) {
+            input.setAttribute('aria-label', placeholder);
+          }
+        } else {
+          input.setAttribute('title', '请选择');
+          if (!input.getAttribute('aria-label')) {
+            input.setAttribute('aria-label', '请选择');
+          }
+        }
+      } else if (!input.getAttribute('aria-label')) {
+        const label = input.getAttribute('title') || input.getAttribute('placeholder') || '请选择';
+        input.setAttribute('aria-label', label);
+      }
+    });
+  };
+  
+  // 修复 el-date-picker 的 input 元素
+  const fixDatePickerInputs = () => {
+    const datePickerInputs = document.querySelectorAll('.el-date-picker .el-input__inner, .el-date-editor .el-input__inner, .el-date-editor input');
+    datePickerInputs.forEach((input) => {
+      if (!input.getAttribute('title') && !input.getAttribute('placeholder')) {
+        const datePickerEl = input.closest('.el-date-picker, .el-date-editor');
+        if (datePickerEl) {
+          let placeholder = datePickerEl.getAttribute('placeholder') || 
+                           datePickerEl.getAttribute('start-placeholder') ||
+                           datePickerEl.getAttribute('end-placeholder') ||
+                           '请选择日期';
+          
+          input.setAttribute('title', placeholder);
+          if (input.tagName === 'INPUT' && !input.getAttribute('placeholder')) {
+            input.setAttribute('placeholder', placeholder);
+          }
+          if (!input.getAttribute('aria-label')) {
+            input.setAttribute('aria-label', placeholder);
+          }
+        } else {
+          input.setAttribute('title', '请选择日期');
+          if (!input.getAttribute('aria-label')) {
+            input.setAttribute('aria-label', '请选择日期');
+          }
+        }
+      } else if (!input.getAttribute('aria-label')) {
+        const label = input.getAttribute('title') || input.getAttribute('placeholder') || '请选择日期';
+        input.setAttribute('aria-label', label);
+      }
+    });
+  };
+  
+  // 修复其他表单元素的 input（el-autocomplete, el-cascader 等）
+  const fixOtherFormInputs = () => {
+    const otherInputs = document.querySelectorAll('.el-autocomplete input, .el-cascader input, .el-time-picker input');
+    otherInputs.forEach((input) => {
+      if (!input.getAttribute('title') && !input.getAttribute('placeholder') && !input.getAttribute('aria-label')) {
+        const parentEl = input.closest('.el-autocomplete, .el-cascader, .el-time-picker');
+        let placeholder = '请输入';
+        
+        if (parentEl) {
+          placeholder = parentEl.getAttribute('placeholder') || 
+                       parentEl.getAttribute('data-placeholder') ||
+                       placeholder;
+        }
+        
+        input.setAttribute('title', placeholder);
+        if (input.tagName === 'INPUT' && !input.getAttribute('placeholder')) {
+          input.setAttribute('placeholder', placeholder);
+        }
+        input.setAttribute('aria-label', placeholder);
+      }
+    });
+  };
+  
+  // 立即执行一次修复
+  const fixAllInputs = () => {
+    fixSelectInputs();
+    fixDatePickerInputs();
+    fixOtherFormInputs();
+  };
+  
+  // 延迟执行，确保 DOM 已完全加载
+  setTimeout(fixAllInputs, 100);
+  
+  // 在路由变化后也执行修复（Vue Router 导航后）
+  if (router) {
+    router.afterEach(() => {
+      setTimeout(fixAllInputs, 200);
+    });
+  }
+  
+  // 开始观察 DOM 变化
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+};
+
 // 在应用挂载后，根据当前路由决定是否初始化认证和时区
 // 使用 nextTick 确保路由已初始化
 nextTick(() => {
@@ -591,5 +710,6 @@ nextTick(() => {
   setTimeout(() => {
     initializeAuth();
     initializeTimezone();
+    fixSelectAccessibility();
   }, 0);
 });
