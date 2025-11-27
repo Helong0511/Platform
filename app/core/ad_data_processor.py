@@ -394,6 +394,113 @@ async def process_api_ad_data(
                 existing_result = await db.execute(existing_query)
                 existing_data = existing_result.scalars().first()
 
+                # 如果没找到相同国家代码的记录，检查是否存在同一天、同一产品但国家代码不同的记录
+                # 这种情况可能是之前获取的数据国家代码有问题，现在已经被修正
+                if not existing_data:
+                    # 查找同一天、同一产品但国家代码不同的记录
+                    different_country_query = select(AdData).where(
+                        AdData.date >= date_start,
+                        AdData.date <= date_end,
+                        AdData.product_id == product_id,
+                        AdData.country_code != country_code
+                    )
+                    different_country_result = await db.execute(different_country_query)
+                    different_country_data_list = different_country_result.scalars().all()
+                    
+                    if different_country_data_list:
+                        # 发现国家代码不同的记录，说明国家代码可能被修正了
+                        # 删除所有旧记录（理论上应该只有一条，但为了安全起见，删除所有）
+                        deleted_count = 0
+                        for different_country_data in different_country_data_list:
+                            old_country_code = different_country_data.country_code or "未知"
+                            
+                            # 记录操作日志
+                            try:
+                                await log_user_action(
+                                    db=db,
+                                    action_type="DELETE",
+                                    username="SYSTEM",
+                                    resource_type="AD_DATA",
+                                    resource_id=different_country_data.id,
+                                    resource_name=f"{product_name} - {date_str}",
+                                    ip_address=source,
+                                    success=True,
+                                    details={
+                                        "date": date_str,
+                                        "product_id": product_id,
+                                        "product_name": product_name,
+                                        "old_country_code": old_country_code,
+                                        "new_country_code": country_code,
+                                        "reason": "国家代码修正：检测到同一天、同一产品但国家代码不同的记录，删除旧记录",
+                                        "source": f"{source}自动修正"
+                                    }
+                                )
+                            except Exception as log_error:
+                                logger.warning(f"记录国家代码修正删除操作日志失败: {log_error}")
+                            
+                            # 删除旧记录
+                            await db.delete(different_country_data)
+                            deleted_count += 1
+                            logger.info(
+                                f"已删除国家代码错误的旧记录: 日期={date_str}, 产品={product_name}, "
+                                f"旧国家代码={old_country_code}, 记录ID={different_country_data.id}"
+                            )
+                        
+                        await db.flush()
+                        
+                        if deleted_count > 0:
+                            old_country_codes = [d.country_code or "未知" for d in different_country_data_list]
+                            logger.warning(
+                                f"检测到国家代码修正: 日期={date_str}, 产品={product_name}, "
+                                f"删除了 {deleted_count} 条旧记录（旧国家代码: {', '.join(old_country_codes)}） -> 新国家代码={country_code}, "
+                                f"将创建新记录"
+                            )
+                            
+                            # 发送 Telegram 通知给管理员
+                            try:
+                                # 格式化国家代码显示
+                                def format_country_code(code: str) -> str:
+                                    if code == "AA":
+                                        return "未知区域"
+                                    elif code == "ZZ":
+                                        return "全部区域"
+                                    elif code == "未知":
+                                        return "未知"
+                                    else:
+                                        return code
+                                
+                                old_country_display = ", ".join([format_country_code(c) for c in old_country_codes])
+                                new_country_display = format_country_code(country_code)
+                                
+                                telegram_msg = f"🔄 国家代码修正通知\n\n"
+                                telegram_msg += f"数据来源: {source}\n"
+                                telegram_msg += f"日期: {date_str}\n"
+                                telegram_msg += f"产品: {product_name}\n"
+                                telegram_msg += f"旧国家代码: {old_country_display}\n"
+                                telegram_msg += f"新国家代码: {new_country_display}\n"
+                                telegram_msg += f"删除记录数: {deleted_count} 条\n\n"
+                                telegram_msg += f"说明：检测到同一天、同一产品但国家代码不同的记录，\n"
+                                telegram_msg += f"已自动删除旧记录，将创建新记录。\n"
+                                telegram_msg += f"这通常是因为API之前返回的国家代码有误，现在已修正。"
+                                
+                                # 发送通知（异步，不阻塞）
+                                try:
+                                    await asyncio.wait_for(
+                                        send_telegram_message(telegram_msg),
+                                        timeout=5.0
+                                    )
+                                    logger.info(
+                                        f"国家代码修正通知已发送: 日期={date_str}, 产品={product_name}, "
+                                        f"旧国家代码={old_country_display} -> 新国家代码={new_country_display}"
+                                    )
+                                except asyncio.TimeoutError:
+                                    logger.warning(f"发送国家代码修正通知超时: 日期={date_str}, 产品={product_name}")
+                                except Exception as notify_err:
+                                    logger.warning(f"发送国家代码修正通知失败: {notify_err}")
+                            except Exception as e:
+                                # 通知失败不应该影响数据处理流程
+                                logger.warning(f"发送国家代码修正通知时出错: {e}")
+
                 # 处理数据（新建或更新）
                 if existing_data:
                     # 检查数据是否减少（在更新之前）
