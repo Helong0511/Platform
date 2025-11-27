@@ -205,13 +205,17 @@
 /* 修复 -moz-appearance 兼容性问题（为 Element Plus 组件添加标准 appearance 属性） */
 /* 注意：根据 CSS 规范，appearance 应该在 -moz-appearance 之后 */
 /* 使用更具体的选择器确保覆盖 element-plus 的样式 */
+/* 注意：Element Plus 编译后的 CSS 可能使用 .el-input_inner（单下划线）或 .el-input__inner（双下划线） */
 .el-pagination .el-input__inner,
+.el-pagination .el-input_inner,
 .el-pagination .el-input__wrapper,
 .el-pagination input.el-input__inner,
+.el-pagination input.el-input_inner,
 .el-pagination .el-input__wrapper input,
 .el-pagination input[type="number"],
 .el-pagination input[type="text"],
-.el-pagination .el-input__wrapper .el-input__inner {
+.el-pagination .el-input__wrapper .el-input__inner,
+.el-pagination .el-input__wrapper .el-input_inner {
   /* 确保同时设置 -moz-appearance 和 appearance */
   -moz-appearance: textfield !important;
   appearance: textfield !important;
@@ -230,12 +234,16 @@ input[style*="-moz-appearance"] {
 
 /* 全局修复：为所有可能使用 -moz-appearance 的输入元素添加 appearance */
 /* 这包括 element-plus 的分页组件和其他可能使用 -moz-appearance 的组件 */
+/* 注意：Element Plus 编译后的 CSS 可能使用 .el-input_inner（单下划线）或 .el-input__inner（双下划线） */
 .el-pagination input,
 .el-pagination .el-input__inner,
+.el-pagination .el-input_inner,
 .el-input-number input,
 .el-input-number .el-input__inner,
+.el-input-number .el-input_inner,
 input[type="number"],
-input[type="text"].el-input__inner {
+input[type="text"].el-input__inner,
+input[type="text"].el-input_inner {
   /* 如果元素有 -moz-appearance，确保也有 appearance */
   appearance: textfield !important;
 }

@@ -723,12 +723,35 @@ const fixMozAppearance = () => {
   });
   
   // 方法2：通过计算样式修复
-  const allInputs = document.querySelectorAll('input, .el-input__inner, .el-input__wrapper');
+  // 注意：Element Plus 编译后的 CSS 可能使用 .el-input_inner（单下划线）或 .el-input__inner（双下划线）
+  const allInputs = document.querySelectorAll('input, .el-input__inner, .el-input_inner, .el-input__wrapper');
   allInputs.forEach((el) => {
     const computedStyle = window.getComputedStyle(el);
     const mozAppearance = computedStyle.getPropertyValue('-moz-appearance');
-    if (mozAppearance && mozAppearance !== 'none' && !computedStyle.getPropertyValue('appearance')) {
-      el.style.appearance = mozAppearance;
+    const appearance = computedStyle.getPropertyValue('appearance');
+    
+    // 如果元素有 -moz-appearance 但没有 appearance，添加它
+    if (mozAppearance && mozAppearance !== 'none' && (!appearance || appearance === 'none' || appearance === 'auto')) {
+      // 如果 -moz-appearance 是 textfield，设置 appearance 为 textfield
+      if (mozAppearance.trim() === 'textfield') {
+        el.style.appearance = 'textfield';
+      } else {
+        el.style.appearance = mozAppearance;
+      }
+    }
+  });
+  
+  // 方法3：专门修复 Element Plus 分页组件中的输入框
+  // 查找所有在 .el-pagination 中的输入元素
+  const paginationInputs = document.querySelectorAll('.el-pagination input, .el-pagination .el-input__inner, .el-pagination .el-input_inner');
+  paginationInputs.forEach((el) => {
+    const computedStyle = window.getComputedStyle(el);
+    const mozAppearance = computedStyle.getPropertyValue('-moz-appearance');
+    const appearance = computedStyle.getPropertyValue('appearance');
+    
+    // 如果元素有 -moz-appearance: textfield 但没有 appearance，强制添加
+    if (mozAppearance && mozAppearance.trim() === 'textfield' && (!appearance || appearance === 'none' || appearance === 'auto')) {
+      el.style.appearance = 'textfield';
     }
   });
 };
