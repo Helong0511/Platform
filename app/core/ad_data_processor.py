@@ -144,10 +144,11 @@ async def process_api_ad_data(
     标准化的API广告数据处理函数
     
     功能说明：
-    1. 先按照日期、产品、国家检查是否有重复数据
-    2. 识别不出来国家代码的数据，将数据累加后添加或更新到广告数据里
-    3. 根据产品的减扣比例自动计算减扣后的eCPM和收益
-    4. 如果数据已存在，会检查是否需要更新
+    1. 先按照日期、产品、国家对API返回的数据进行分组累加
+    2. 累加后按照日期、产品、国家检查是否有重复数据
+    3. 识别不出来国家代码的数据，将数据累加后添加或更新到广告数据里（使用'AA'作为国家代码）
+    4. 根据产品的减扣比例自动计算减扣后的eCPM和收益
+    5. 如果数据已存在，会检查是否需要更新
     
     参数:
         data: API返回的数据列表，每条数据应包含以下字段（字段名通过field_mapping映射）：
@@ -193,8 +194,9 @@ async def process_api_ad_data(
     error_count = 0
 
     # ========== 第一步：预处理所有数据，识别国家代码并分组 ==========
-    # 存储能识别国家代码的数据：不累加，每条单独存储
-    recognized_data: List[Dict[str, Any]] = []
+    # 存储能识别国家代码的数据：按 (date_str, product_name, country_code) 分组累加
+    # key = (date_str, product_name, country_code), value = 累加的数据
+    recognized_data: Dict[tuple, Dict[str, Any]] = {}
 
     # 存储无法识别国家代码的数据：key = (date_str, product_name), value = 累加的数据
     unrecognized_data: Dict[tuple, Dict[str, Any]] = {}
@@ -269,17 +271,31 @@ async def process_api_ad_data(
 
             # 根据是否能识别国家代码，分组数据
             if item_country_code:
-                # 能识别国家代码（正常情况），不累加，每条单独存储
-                recognized_data.append({
-                    "date_str": item_date_str,
-                    "date": item_date,
-                    "product_name": item_product_name,
-                    "country_code": item_country_code,
-                    "request_count": item_request_count,
-                    "match_count": item_match_count,
-                    "display_count": item_display_count,
-                    "click_count": item_click_count,
+                # 能识别国家代码（正常情况），按 (date_str, product_name, country_code) 分组累加
+                key = (item_date_str, item_product_name, item_country_code)
+                if key not in recognized_data:
+                    recognized_data[key] = {
+                        "date_str": item_date_str,
+                        "date": item_date,
+                        "product_name": item_product_name,
+                        "country_code": item_country_code,
+                        "request_count": 0,
+                        "match_count": 0,
+                        "display_count": 0,
+                        "click_count": 0,
+                        "revenue": 0.0,
+                        "ecpm": 0.0,
+                        "items": []  # 存储原始数据项，用于后续计算eCPM
+                    }
+                # 累加数据
+                recognized_data[key]["request_count"] += item_request_count
+                recognized_data[key]["match_count"] += item_match_count
+                recognized_data[key]["display_count"] += item_display_count
+                recognized_data[key]["click_count"] += item_click_count
+                recognized_data[key]["revenue"] += item_revenue
+                recognized_data[key]["items"].append({
                     "revenue": item_revenue,
+                    "display_count": item_display_count,
                     "ecpm": item_ecpm
                 })
             else:
@@ -349,14 +365,14 @@ async def process_api_ad_data(
             error_count += 1
             continue
 
-    # ========== 第二步：处理能识别国家代码的数据（按日期、产品、国家检查重复，不累加，每条单独处理） ==========
-    for item_data in recognized_data:
+    # ========== 第二步：处理能识别国家代码的数据（按日期、产品、国家检查重复，累加后处理） ==========
+    for key, grouped_data in recognized_data.items():
         async with db.begin_nested():
             try:
-                date_str = item_data["date_str"]
-                product_name = item_data["product_name"]
-                country_code = item_data["country_code"]
-                item_date = item_data["date"]
+                date_str = grouped_data["date_str"]
+                product_name = grouped_data["product_name"]
+                country_code = grouped_data["country_code"]
+                item_date = grouped_data["date"]
 
                 # 查找或创建产品
                 product_info = await find_or_create_product(
@@ -374,9 +390,15 @@ async def process_api_ad_data(
                 ecpm_deduct_ratio = product_info.get("ecpm_deduct_ratio", 0.0)
                 revenue_deduct_ratio = product_info.get("revenue_deduct_ratio", 0.0)
 
-                # 使用原始数据的eCPM（不累加）
-                final_ecpm = item_data["ecpm"]
-                total_revenue = item_data["revenue"]
+                # 计算累加后的eCPM（加权平均）
+                total_revenue = grouped_data["revenue"]
+                total_display = grouped_data["display_count"]
+                if total_display > 0:
+                    calculated_ecpm = (total_revenue / total_display * 1000)
+                else:
+                    calculated_ecpm = 0.0
+
+                final_ecpm = calculated_ecpm
 
                 # 计算减扣后的值（截断到两位小数，不使用四舍五入）
                 ecpm_after_deduct = truncate_to_2_decimal(final_ecpm * (1 - ecpm_deduct_ratio))
@@ -399,10 +421,10 @@ async def process_api_ad_data(
                     # 检查数据是否减少（在更新之前）
                     await check_and_notify_data_decrease(
                         existing_data=existing_data,
-                        new_request_count=item_data["request_count"],
-                        new_match_count=item_data["match_count"],
-                        new_display_count=item_data["display_count"],
-                        new_click_count=item_data["click_count"],
+                        new_request_count=grouped_data["request_count"],
+                        new_match_count=grouped_data["match_count"],
+                        new_display_count=grouped_data["display_count"],
+                        new_click_count=grouped_data["click_count"],
                         new_revenue_before=total_revenue,
                         new_revenue_after=revenue_after_deduct,
                         date_str=date_str,
@@ -415,25 +437,25 @@ async def process_api_ad_data(
                     need_update = False
                     update_fields = []
 
-                    if existing_data.request_count != item_data["request_count"]:
+                    if existing_data.request_count != grouped_data["request_count"]:
                         need_update = True
-                        update_fields.append(f"请求数: {existing_data.request_count} -> {item_data['request_count']}")
-                        existing_data.request_count = item_data["request_count"]
+                        update_fields.append(f"请求数: {existing_data.request_count} -> {grouped_data['request_count']}")
+                        existing_data.request_count = grouped_data["request_count"]
 
-                    if existing_data.match_count != item_data["match_count"]:
+                    if existing_data.match_count != grouped_data["match_count"]:
                         need_update = True
-                        update_fields.append(f"匹配数: {existing_data.match_count} -> {item_data['match_count']}")
-                        existing_data.match_count = item_data["match_count"]
+                        update_fields.append(f"匹配数: {existing_data.match_count} -> {grouped_data['match_count']}")
+                        existing_data.match_count = grouped_data["match_count"]
 
-                    if existing_data.display_count != item_data["display_count"]:
+                    if existing_data.display_count != grouped_data["display_count"]:
                         need_update = True
-                        update_fields.append(f"展示数: {existing_data.display_count} -> {item_data['display_count']}")
-                        existing_data.display_count = item_data["display_count"]
+                        update_fields.append(f"展示数: {existing_data.display_count} -> {grouped_data['display_count']}")
+                        existing_data.display_count = grouped_data["display_count"]
 
-                    if existing_data.click_count != item_data["click_count"]:
+                    if existing_data.click_count != grouped_data["click_count"]:
                         need_update = True
-                        update_fields.append(f"点击数: {existing_data.click_count} -> {item_data['click_count']}")
-                        existing_data.click_count = item_data["click_count"]
+                        update_fields.append(f"点击数: {existing_data.click_count} -> {grouped_data['click_count']}")
+                        existing_data.click_count = grouped_data["click_count"]
 
                     # 如果基础数据有变化，重新计算比率字段
                     if need_update:
@@ -502,10 +524,10 @@ async def process_api_ad_data(
                         date=ad_data_date,
                         product_id=product_id,
                         country_code=country_code,
-                        request_count=item_data["request_count"],
-                        match_count=item_data["match_count"],
-                        display_count=item_data["display_count"],
-                        click_count=item_data["click_count"],
+                        request_count=grouped_data["request_count"],
+                        match_count=grouped_data["match_count"],
+                        display_count=grouped_data["display_count"],
+                        click_count=grouped_data["click_count"],
                         ecpm_before_deduct=final_ecpm,
                         ecpm_after_deduct=ecpm_after_deduct,
                         revenue_before_deduct=total_revenue,
@@ -521,8 +543,8 @@ async def process_api_ad_data(
 
                     logger.info(
                         f"添加广告数据: 日期={date_str}, 产品={product_name}, 国家={country_code}, "
-                        f"请求数={item_data['request_count']}, 匹配数={item_data['match_count']}, "
-                        f"展示数={item_data['display_count']}, 点击数={item_data['click_count']}, "
+                        f"请求数={grouped_data['request_count']}, 匹配数={grouped_data['match_count']}, "
+                        f"展示数={grouped_data['display_count']}, 点击数={grouped_data['click_count']}, "
                         f"eCPM={final_ecpm:.2f}->{ecpm_after_deduct:.2f}, "
                         f"收益={total_revenue:.2f}->{revenue_after_deduct:.2f}"
                     )
@@ -542,10 +564,10 @@ async def process_api_ad_data(
                                 "product_id": product_id,
                                 "product_name": product_name,
                                 "country_code": country_code,
-                                "request_count": item_data["request_count"],
-                                "match_count": item_data["match_count"],
-                                "display_count": item_data["display_count"],
-                                "click_count": item_data["click_count"],
+                                "request_count": grouped_data["request_count"],
+                                "match_count": grouped_data["match_count"],
+                                "display_count": grouped_data["display_count"],
+                                "click_count": grouped_data["click_count"],
                                 "ecpm_before_deduct": round(final_ecpm, 2),
                                 "ecpm_after_deduct": round(ecpm_after_deduct, 2),
                                 "revenue_before_deduct": round(total_revenue, 2),

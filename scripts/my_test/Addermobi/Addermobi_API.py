@@ -2,14 +2,13 @@ import requests
 import json
 import mysql.connector  # pip3 install mysql-connector-python
 from typing import Optional
+from datetime import datetime, timedelta  # 日期时间处理
 
-Headers = {'Content-Type': 'application/json'}
+Headers = {}
 
-base_url = 'https://api.addermobi.com/api/User/loginApi'
+username = 'Leadwin'
 
-username = 'BOFIT'
-
-password = '5e2296fa9fd1434bf8a60c03cf745ce9'
+password = 'lw145667'
 
 config = {
     'user': 'remote',
@@ -38,13 +37,17 @@ def get_token() -> Optional[str]:
 
         if response.status_code == 200:
             try:
-                data = response.json()
-                access_token = data.get('access_token', '')
-                if access_token:
-                    Headers['Authorization'] = f'Bearer {access_token}'
-                    return access_token
+                token_data = response.json()
+
+                data = None
+                if 'data' in token_data and isinstance(token_data['data'], dict):
+                    data = token_data['data'].get('token', [])
                 else:
-                    print(f"❌ Token获取失败: 响应中未找到access_token")
+                    data = token_data.get('token', [])
+                if data:
+                    return data
+                else:
+                    print(f"❌ Token获取失败: 响应中未找到token")
                     print(f"响应内容: {json.dumps(data, indent=2, ensure_ascii=False)}")
                     return None
             except json.JSONDecodeError:
@@ -67,64 +70,102 @@ def get_token() -> Optional[str]:
 
 
 Headers['Authorization'] = f'Bearer {get_token()}'
+Headers['Content-Type'] = 'application/json'
 
-print(Headers)
+today_str = datetime.now().strftime("%Y-%m-%d")
 
 try:
+    p1 = [
+        {"name": "Revenue_time",
+         "value": '2025-11-20',
+         "displayType": "thanorequal"
+         },
+        {"name": "Revenue_time",
+         "value": today_str,
+         "displayType": "lessorequal"
+         }
+    ]
     ad_pr = {
         "page": 1,
-        "limit": 5000,
-        "start": "2025-11-27",
-        "end": "2025-11-27"
+        "rows": 500,
+        "sort": "Revenue_time,Product_id",
+        "order": "desc",
+        "wheres": json.dumps(p1)
     }
     response = requests.post(
-        url=base_url + '/adunit',
+        url='https://api.addermobi.com/api/Revenue_DetailReports/GetData',
         headers=Headers,
         json=ad_pr,
         timeout=20
     )
 
     if response.status_code == 200:
-        data = response.json()
-        ad_data = data['data']['items']
-        pro = []
-        country = []
-        err_co = []
-        for item in ad_data:
-            if item.get('country_code', '') == 'XX' or item.get('country_code', '') == 'XK':
-                print(item)
+        return_data = response.json()
+        print(return_data)
+        ad_data = None
+        if 'rows' in return_data and isinstance(return_data['rows'], dict):
+            ad_data = return_data.get('rows', [])
+        else:
+            ad_data = return_data.get('rows', [])
 
-            if len(item.get('country_code', '')) > 2:
-                if item.get('country_code', '') not in err_co:
-                    err_co.append(item.get('country_code', ''))
-            else:
-                if item.get('country_code', '') not in country:
-                    country.append(item.get('country_code', ''))
-            if item.get('product') not in pro:
-                pro.append(item.get('product'))
+        if ad_data:
+            pro = []
+            country = []
+            err_co = []
+            for item in ad_data:
+                if len(item.get('Country_Code', '')) > 2:
+                    if item.get('Country_Code', '') not in err_co:
+                        err_co.append(item.get('Country_Code', ''))
+                else:
+                    if item.get('Country_Code', '') not in country:
+                        country.append(item.get('Country_Code', ''))
+                if item.get('link') not in pro:
+                    pro.append(item.get('link'))
 
-        co_in = []
-        for code in country:
-            q_c = f"SELECT `country_name_zh` FROM `countries` WHERE `alpha_2_code` = '{code}'"
-            cur = conn.cursor()
-            cur.execute(q_c)
-            ret = cur.fetchall()
-            if ret:
-                country_info = {
-                    'country_code': code,
-                    'country_name_zh': ret[0][0]
-                }
-                if country_info not in co_in:
-                    co_in.append(country_info)
-            else:
-                if code not in err_co:
-                    err_co.append(code)
-            cur.close()
+                # print(f"\n产品id：{item.get('Product_id', '')}")
+                # print(f"用户id：{item.get('User_Id', '')}")
+                # print(f"智能链接：{item.get('shortUrl', '')}")
+                # print(f"AdsLinkId：{item.get('AdsLinkId', '')}")
+                # print(f"收入时间：{item.get('Revenue_time', '')}")
+                # print(f"广告链接：{item.get('link', '')}")
+                # print(f"广告单元：{item.get('Ad_Unit', '')}")
+                # print(f"国家代码：{item.get('Country_Code', '')}")
+                # print(f"用户名：{item.get('UserName', '')}")
+                # print(f"广告请求：{item.get('AdRequests', 0)}")
+                # print(f"匹配数：{item.get('MatchedAdRequests', 0)}")
+                # print(f"覆盖率：{item.get('AdRequestsCoverage', 0)}")
+                # print(f"广告展示：{item.get('Impressions', 0)}")
+                # print(f"广告点击：{item.get('Clicks', 0)}")
+                # print(f"预估收益：{item.get('EstimatedEarnings', 0)}")
+                # print(f"可见度：{item.get('ActiveViewViewability', '')}")
+                # print(f"可见时长(毫秒)：{item.get('ActiveViewTime', '')}")
+                # print(f"CTR：{item.get('CTR', 0)}")
+                # print(f"ecpm：{item.get('eCPM', 0)}")
+                # print(f"cpc：{item.get('CPC', 0)}")
+                # print(f"产品名称：{item.get('ProductName', '')}")
+                print(f"匹配数：{item.get('MatchedAdRequests', 0)}")
 
-        print(pro)
-        print(err_co)
-        print(len(co_in), co_in)
+            co_in = []
+            for code in country:
+                q_c = f"SELECT `country_name_zh` FROM `countries` WHERE `alpha_2_code` = '{code}'"
+                cur = conn.cursor()
+                cur.execute(q_c)
+                ret = cur.fetchall()
+                if ret:
+                    country_info = {
+                        'Country_Code': code,
+                        'country_name_zh': ret[0][0]
+                    }
+                    if country_info not in co_in:
+                        co_in.append(country_info)
+                else:
+                    if code not in err_co:
+                        err_co.append(code)
+                cur.close()
 
+            print(pro)
+            print(err_co)
+            print(len(co_in), co_in)
     else:
         error_data = response.json()
         print(error_data)

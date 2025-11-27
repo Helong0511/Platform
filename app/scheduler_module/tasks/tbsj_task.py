@@ -34,8 +34,6 @@ def set_task_result(task_name: str, result: str) -> None:
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
 
-
-
 async def tbsj_api_task() -> None:
     """
     yangyangdeyi定时任务主函数
@@ -71,7 +69,7 @@ async def tbsj_api_task() -> None:
     # 从环境变量获取用户名和密码
     username = 'BOFIT'
     password = '5e2296fa9fd1434bf8a60c03cf745ce9'
-    
+
     # 验证凭证是否配置
     if not username or not password:
         error_msg = "TBSJ API 凭证未配置，请设置 TBSJ_API_USERNAME 和 TBSJ_API_PASSWORD 环境变量"
@@ -130,7 +128,7 @@ async def tbsj_api_task() -> None:
                 if not access_token:
                     logger.error(f'yangyangdeyi API返回的响应中缺少 access_token: {json_data}')
                     raise Exception(f'API响应中缺少 access_token')
-                
+
                 Headers['Authorization'] = f'Bearer {access_token}'
         except httpx.TimeoutException as timeout_error:
             logger.error(f'yangyangdeyi API获取 token 请求超时: {str(timeout_error)}')

@@ -137,6 +137,17 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "每隔10分钟执行一次，从yangyangdeyi API获取广告数据",
     },
     
+    # ========== yangyangdeyi API获取数据任务 ==========
+    "Addermobi  API获取数据": {
+        "task_name": "Addermobi API获取数据",
+        "task_module": "app.scheduler_module.tasks.tbsj_task",
+        "task_function": "tbsj_api_task",
+        "result_getter_module": "app.scheduler_module.tasks.tbsj_task",
+        "result_getter_function": "get_task_result",
+        # 数据库配置
+        "cron_expression": "*/10 * * * *",  # 每10分钟
+        "description": "每隔10分钟执行一次，从Addermobi API获取广告数据",
+    },
     # ==============================================================================
     # 添加新任务示例（取消注释并修改即可）
     # ==============================================================================

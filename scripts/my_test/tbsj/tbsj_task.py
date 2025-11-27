@@ -74,8 +74,8 @@ try:
     ad_pr = {
         "page": 1,
         "limit": 5000,
-        "start": "2025-11-01",
-        "end": "2025-11-26"
+        "start": "2025-11-27",
+        "end": "2025-11-27"
     }
     response = requests.post(
         url=base_url + '/adunit',
