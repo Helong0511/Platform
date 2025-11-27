@@ -455,51 +455,6 @@ async def process_api_ad_data(
                                 f"删除了 {deleted_count} 条旧记录（旧国家代码: {', '.join(old_country_codes)}） -> 新国家代码={country_code}, "
                                 f"将创建新记录"
                             )
-                            
-                            # 发送 Telegram 通知给管理员
-                            try:
-                                # 格式化国家代码显示
-                                def format_country_code(code: str) -> str:
-                                    if code == "AA":
-                                        return "未知区域"
-                                    elif code == "ZZ":
-                                        return "全部区域"
-                                    elif code == "未知":
-                                        return "未知"
-                                    else:
-                                        return code
-                                
-                                old_country_display = ", ".join([format_country_code(c) for c in old_country_codes])
-                                new_country_display = format_country_code(country_code)
-                                
-                                telegram_msg = f"🔄 国家代码修正通知\n\n"
-                                telegram_msg += f"数据来源: {source}\n"
-                                telegram_msg += f"日期: {date_str}\n"
-                                telegram_msg += f"产品: {product_name}\n"
-                                telegram_msg += f"旧国家代码: {old_country_display}\n"
-                                telegram_msg += f"新国家代码: {new_country_display}\n"
-                                telegram_msg += f"删除记录数: {deleted_count} 条\n\n"
-                                telegram_msg += f"说明：检测到同一天、同一产品但国家代码不同的记录，\n"
-                                telegram_msg += f"已自动删除旧记录，将创建新记录。\n"
-                                telegram_msg += f"这通常是因为API之前返回的国家代码有误，现在已修正。"
-                                
-                                # 发送通知（异步，不阻塞）
-                                try:
-                                    await asyncio.wait_for(
-                                        send_telegram_message(telegram_msg),
-                                        timeout=5.0
-                                    )
-                                    logger.info(
-                                        f"国家代码修正通知已发送: 日期={date_str}, 产品={product_name}, "
-                                        f"旧国家代码={old_country_display} -> 新国家代码={new_country_display}"
-                                    )
-                                except asyncio.TimeoutError:
-                                    logger.warning(f"发送国家代码修正通知超时: 日期={date_str}, 产品={product_name}")
-                                except Exception as notify_err:
-                                    logger.warning(f"发送国家代码修正通知失败: {notify_err}")
-                            except Exception as e:
-                                # 通知失败不应该影响数据处理流程
-                                logger.warning(f"发送国家代码修正通知时出错: {e}")
 
                 # 处理数据（新建或更新）
                 if existing_data:
