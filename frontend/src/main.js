@@ -703,6 +703,129 @@ const fixSelectAccessibility = () => {
   });
 };
 
+// 修复 -moz-appearance 兼容性问题：为所有使用 -moz-appearance 的元素添加 appearance 属性
+const fixMozAppearance = () => {
+  // 查找所有使用 -moz-appearance 的元素
+  const styleSheets = document.styleSheets;
+  
+  // 方法1：通过内联样式修复
+  const elementsWithMozAppearance = document.querySelectorAll('[style*="-moz-appearance"]');
+  elementsWithMozAppearance.forEach((el) => {
+    const style = el.getAttribute('style') || '';
+    if (style.includes('-moz-appearance') && !style.includes('appearance:')) {
+      // 获取 -moz-appearance 的值
+      const match = style.match(/-moz-appearance:\s*([^;]+)/);
+      if (match) {
+        const value = match[1].trim();
+        el.style.appearance = value;
+      }
+    }
+  });
+  
+  // 方法2：通过计算样式修复
+  const allInputs = document.querySelectorAll('input, .el-input__inner, .el-input__wrapper');
+  allInputs.forEach((el) => {
+    const computedStyle = window.getComputedStyle(el);
+    const mozAppearance = computedStyle.getPropertyValue('-moz-appearance');
+    if (mozAppearance && mozAppearance !== 'none' && !computedStyle.getPropertyValue('appearance')) {
+      el.style.appearance = mozAppearance;
+    }
+  });
+};
+
+// 修复 mask 相关属性的兼容性问题：为所有使用 mask 相关属性的元素添加 -webkit- 前缀
+const fixMaskProperties = () => {
+  // 修复 mask-image
+  const fixMaskImage = (el) => {
+    const computedStyle = window.getComputedStyle(el);
+    const maskImage = computedStyle.getPropertyValue('mask-image');
+    const webkitMaskImage = computedStyle.getPropertyValue('-webkit-mask-image');
+    
+    // 如果有 mask-image 但没有 -webkit-mask-image，添加它
+    if (maskImage && maskImage !== 'none' && !webkitMaskImage) {
+      el.style.setProperty('-webkit-mask-image', maskImage, 'important');
+    }
+    
+    // 检查内联样式
+    const style = el.getAttribute('style') || '';
+    if (style.includes('mask-image:') && !style.includes('-webkit-mask-image:')) {
+      const match = style.match(/mask-image:\s*([^;]+)/);
+      if (match) {
+        const value = match[1].trim();
+        el.style.setProperty('-webkit-mask-image', value, 'important');
+      }
+    }
+  };
+  
+  // 修复 mask-position
+  const fixMaskPosition = (el) => {
+    const computedStyle = window.getComputedStyle(el);
+    const maskPosition = computedStyle.getPropertyValue('mask-position');
+    const webkitMaskPosition = computedStyle.getPropertyValue('-webkit-mask-position');
+    
+    if (maskPosition && maskPosition !== 'initial' && !webkitMaskPosition) {
+      el.style.setProperty('-webkit-mask-position', maskPosition, 'important');
+    }
+    
+    const style = el.getAttribute('style') || '';
+    if (style.includes('mask-position:') && !style.includes('-webkit-mask-position:')) {
+      const match = style.match(/mask-position:\s*([^;]+)/);
+      if (match) {
+        const value = match[1].trim();
+        el.style.setProperty('-webkit-mask-position', value, 'important');
+      }
+    }
+  };
+  
+  // 修复 mask-repeat
+  const fixMaskRepeat = (el) => {
+    const computedStyle = window.getComputedStyle(el);
+    const maskRepeat = computedStyle.getPropertyValue('mask-repeat');
+    const webkitMaskRepeat = computedStyle.getPropertyValue('-webkit-mask-repeat');
+    
+    if (maskRepeat && maskRepeat !== 'initial' && !webkitMaskRepeat) {
+      el.style.setProperty('-webkit-mask-repeat', maskRepeat, 'important');
+    }
+    
+    const style = el.getAttribute('style') || '';
+    if (style.includes('mask-repeat:') && !style.includes('-webkit-mask-repeat:')) {
+      const match = style.match(/mask-repeat:\s*([^;]+)/);
+      if (match) {
+        const value = match[1].trim();
+        el.style.setProperty('-webkit-mask-repeat', value, 'important');
+      }
+    }
+  };
+  
+  // 优化：只检查可能使用 mask 相关属性的元素，而不是所有元素
+  // 方法1：检查内联样式
+  const elementsWithMaskInStyle = document.querySelectorAll('[style*="mask-image"], [style*="mask-position"], [style*="mask-repeat"]');
+  elementsWithMaskInStyle.forEach((el) => {
+    fixMaskImage(el);
+    fixMaskPosition(el);
+    fixMaskRepeat(el);
+  });
+  
+  // 方法2：检查计算样式（只检查特定类名的元素，提高性能）
+  const potentialMaskElements = document.querySelectorAll('[class*="mask"], [class*="close-button"], [class*="button"], .el-select-dropdown__item');
+  potentialMaskElements.forEach((el) => {
+    const computedStyle = window.getComputedStyle(el);
+    const hasMaskImage = computedStyle.getPropertyValue('mask-image') !== 'none';
+    const hasMaskPosition = computedStyle.getPropertyValue('mask-position') !== 'initial' && computedStyle.getPropertyValue('mask-position') !== '';
+    const hasMaskRepeat = computedStyle.getPropertyValue('mask-repeat') !== 'initial' && computedStyle.getPropertyValue('mask-repeat') !== '';
+    
+    if (hasMaskImage) {
+      fixMaskImage(el);
+    }
+    if (hasMaskPosition) {
+      fixMaskPosition(el);
+    }
+    if (hasMaskRepeat) {
+      fixMaskRepeat(el);
+    }
+  });
+};
+
 // 在应用挂载后，根据当前路由决定是否初始化认证和时区
 // 使用 nextTick 确保路由已初始化
 nextTick(() => {
@@ -711,5 +834,19 @@ nextTick(() => {
     initializeAuth();
     initializeTimezone();
     fixSelectAccessibility();
+    fixMozAppearance();
+    fixMaskProperties();
+    
+    // 使用 MutationObserver 监听 DOM 变化，确保动态创建的元素也能被修复
+    const observer = new MutationObserver(() => {
+      fixMozAppearance();
+      fixMaskProperties();
+    });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['style', 'class']
+    });
   }, 0);
 });
