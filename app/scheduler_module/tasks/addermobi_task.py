@@ -250,6 +250,36 @@ async def addermobi_api_task() -> None:
                                 logger.error("未找到管理员用户，无法处理产品，跳过本次任务")
                                 return
 
+                            # ========== 数据预处理：修正匹配数 ==========
+                            # 如果匹配数为0但覆盖率不为0，则计算：匹配数 = 请求数 * 覆盖率
+                            for item in ad_data:
+                                try:
+                                    # 获取匹配数、请求数和覆盖率
+                                    match_count = item.get("MatchedAdRequests", 0) or 0
+                                    request_count = item.get("AdRequests", 0) or 0
+                                    coverage_rate = item.get("AdRequestsCoverage", 0) or 0
+                                    
+                                    # 尝试转换为数值类型
+                                    try:
+                                        match_count = float(match_count) if match_count else 0
+                                        request_count = float(request_count) if request_count else 0
+                                        coverage_rate = float(coverage_rate) if coverage_rate else 0
+                                    except (ValueError, TypeError):
+                                        continue
+                                    
+                                    # 如果匹配数为0但覆盖率不为0，计算匹配数
+                                    if match_count == 0 and coverage_rate != 0 and request_count > 0:
+                                        calculated_match_count = request_count * coverage_rate
+                                        item["MatchedAdRequests"] = int(calculated_match_count)
+                                        logger.debug(
+                                            f"修正匹配数: 请求数={request_count}, 覆盖率={coverage_rate}, "
+                                            f"原匹配数=0, 计算后匹配数={calculated_match_count:.2f}"
+                                        )
+                                except Exception as e:
+                                    # 单条数据处理失败不影响其他数据
+                                    logger.warning(f"预处理数据项时出错: {str(e)}")
+                                    continue
+
                             # ========== 使用标准化的数据处理函数 ==========
                             result = await process_api_ad_data(
                                 data=ad_data,
