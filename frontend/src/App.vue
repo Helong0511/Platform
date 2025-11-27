@@ -1,5 +1,57 @@
 <script setup>
 import { RouterView } from 'vue-router';
+import { onMounted, onBeforeUnmount } from 'vue';
+
+// 错误处理函数 - 专门处理浏览器扩展相关的错误
+const handleError = (event) => {
+  const errorMessage = event?.message || event?.error?.message || '';
+  const errorString = String(errorMessage).toLowerCase();
+  
+  // 忽略浏览器扩展相关的错误（Edge 浏览器扩展可能引起的错误）
+  if (typeof errorMessage === 'string' && (
+    errorString.includes('message channel closed') ||
+    errorString.includes('asynchronous response') ||
+    errorString.includes('listener indicated an asynchronous response') ||
+    errorString.includes('message channel') ||
+    errorString.includes('channel closed')
+  )) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    return true;
+  }
+  return false;
+};
+
+const handleRejection = (event) => {
+  const errorMessage = event?.reason?.message || event?.reason?.toString() || '';
+  const errorString = String(errorMessage).toLowerCase();
+  
+  // 忽略浏览器扩展相关的错误
+  if (typeof errorMessage === 'string' && (
+    errorString.includes('message channel closed') ||
+    errorString.includes('asynchronous response') ||
+    errorString.includes('listener indicated an asynchronous response') ||
+    errorString.includes('message channel') ||
+    errorString.includes('channel closed')
+  )) {
+    event.preventDefault();
+    return true;
+  }
+  return false;
+};
+
+onMounted(() => {
+  // 在应用挂载时添加错误监听器（使用 capture 模式，确保优先处理）
+  window.addEventListener('error', handleError, true);
+  window.addEventListener('unhandledrejection', handleRejection, true);
+});
+
+onBeforeUnmount(() => {
+  // 清理错误监听器
+  window.removeEventListener('error', handleError, true);
+  window.removeEventListener('unhandledrejection', handleRejection, true);
+});
 </script>
 
 <template>

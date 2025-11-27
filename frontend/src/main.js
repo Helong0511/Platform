@@ -364,19 +364,26 @@ app.config.globalProperties.$axios = axios;
 
 // ====== 全局错误捕获 ======
 // 捕获JavaScript运行时错误
+// 使用 capture 模式确保在早期阶段捕获错误
 window.addEventListener('error', (event) => {
   // 忽略 Element Plus 的 ElOnlyChild 错误
   const errorMessage = event?.message || event?.error?.message || '';
   const errorFilename = event?.filename || '';
+  const errorString = String(errorMessage).toLowerCase();
   
   // 忽略浏览器扩展相关的错误（通常由广告拦截器、开发者工具扩展等引起）
+  // 包括 Edge 浏览器扩展可能引起的错误
   if (typeof errorMessage === 'string' && (
-    errorMessage.includes('message channel closed') ||
-    errorMessage.includes('asynchronous response') ||
-    errorMessage.includes('listener indicated an asynchronous response')
+    errorString.includes('message channel closed') ||
+    errorString.includes('asynchronous response') ||
+    errorString.includes('listener indicated an asynchronous response') ||
+    errorString.includes('message channel') ||
+    errorString.includes('channel closed')
   )) {
     event.preventDefault(); // 阻止默认的错误处理
-    return;
+    event.stopPropagation(); // 阻止事件冒泡
+    event.stopImmediatePropagation(); // 阻止其他监听器处理
+    return false; // 返回 false 表示已处理
   }
   
   if (typeof errorMessage === 'string' && errorMessage.includes('ElOnlyChild')) {
@@ -431,11 +438,13 @@ window.addEventListener('error', (event) => {
 });
 
 // 捕获未处理的Promise拒绝
+// 使用 capture 模式确保在早期阶段捕获错误
 window.addEventListener('unhandledrejection', (event) => {
   // 忽略 inspector.js 中关于 responseText 的错误（这是浏览器开发者工具的问题，不是代码问题）
   const errorMessage = event?.reason?.message || event?.reason?.toString() || '';
   const errorStack = event?.reason?.stack || '';
   const errorName = event?.reason?.name || '';
+  const errorString = String(errorMessage).toLowerCase();
   
   // 检查错误堆栈中是否包含 inspector.js
   const isInspectorError = typeof errorStack === 'string' && errorStack.includes('inspector.js');
@@ -456,10 +465,18 @@ window.addEventListener('unhandledrejection', (event) => {
   }
   
   // 忽略浏览器扩展相关的错误（通常由广告拦截器、开发者工具扩展等引起）
+  // 包括 Edge 浏览器扩展可能引起的错误
   if (typeof errorMessage === 'string' && (
-    errorMessage.includes('message channel closed') ||
-    errorMessage.includes('asynchronous response') ||
-    errorMessage.includes('listener indicated an asynchronous response')
+    errorString.includes('message channel closed') ||
+    errorString.includes('asynchronous response') ||
+    errorString.includes('listener indicated an asynchronous response') ||
+    errorString.includes('message channel') ||
+    errorString.includes('channel closed') ||
+    // 检查错误对象本身
+    (event?.reason && typeof event.reason === 'object' && (
+      String(event.reason.message || '').toLowerCase().includes('message channel') ||
+      String(event.reason.message || '').toLowerCase().includes('asynchronous response')
+    ))
   )) {
     event.preventDefault(); // 阻止默认的错误处理
     return;

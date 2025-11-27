@@ -320,13 +320,18 @@ const handleGlobalError = (event) => {
   }
   
   // 忽略浏览器扩展相关的错误（通常由广告拦截器、开发者工具扩展等引起）
+  // 包括 Edge 浏览器扩展可能引起的错误
+  const errorString = typeof errorMessage === 'string' ? errorMessage.toLowerCase() : '';
   if (typeof errorMessage === 'string' && (
-    errorMessage.includes('message channel closed') ||
-    errorMessage.includes('asynchronous response') ||
-    errorMessage.includes('listener indicated an asynchronous response')
+    errorString.includes('message channel closed') ||
+    errorString.includes('asynchronous response') ||
+    errorString.includes('listener indicated an asynchronous response') ||
+    errorString.includes('message channel') ||
+    errorString.includes('channel closed')
   )) {
     event.preventDefault();
     event.stopPropagation();
+    event.stopImmediatePropagation(); // 阻止其他监听器处理
     return true;
   }
   
@@ -343,10 +348,14 @@ const handleUnhandledRejection = (event) => {
   }
   
   // 忽略浏览器扩展相关的错误（通常由广告拦截器、开发者工具扩展等引起）
+  // 包括 Edge 浏览器扩展可能引起的错误
+  const errorString = typeof errorMessage === 'string' ? errorMessage.toLowerCase() : '';
   if (typeof errorMessage === 'string' && (
-    errorMessage.includes('message channel closed') ||
-    errorMessage.includes('asynchronous response') ||
-    errorMessage.includes('listener indicated an asynchronous response')
+    errorString.includes('message channel closed') ||
+    errorString.includes('asynchronous response') ||
+    errorString.includes('listener indicated an asynchronous response') ||
+    errorString.includes('message channel') ||
+    errorString.includes('channel closed')
   )) {
     event.preventDefault();
     return true;
