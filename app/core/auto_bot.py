@@ -124,11 +124,11 @@ if bot_initialized and TELEBOT_AVAILABLE:
                 text="你点击了查看按钮"
             )
         elif call.data == "clock":
+            from app.core.utils import get_app_now
+            current_time = get_app_now()
             bot.edit_message_text(
                 chat_id=call.message.chat.id,
                 message_id=call.message.message_id,
-                from app.core.utils import get_app_now
-                current_time = get_app_now()
                 text=f"打卡成功！时间：{current_time.strftime('%Y-%m-%d %H:%M:%S')}（时区: {settings.TIMEZONE}）"
             )
         elif call.data == "Cancel":
