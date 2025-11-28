@@ -308,6 +308,9 @@ async def addermobi_api_task() -> None:
                                     # 点击数
                                     "click_count": "Clicks",
 
+                                    # CPC
+                                    "cpc": "CPC",
+
                                     # ecpm
                                     "ecpm_before_deduct": "eCPM",
 

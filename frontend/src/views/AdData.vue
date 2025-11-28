@@ -112,6 +112,8 @@
         <el-table-column prop="display_rate" label="展示率" :formatter="formatPercentage" sortable="custom"></el-table-column>
         <el-table-column prop="click_count" label="点击数" sortable="custom"></el-table-column>
         <el-table-column prop="click_rate" label="点击率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column prop="cpc" label="CPC" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column prop="pageviews" label="PageViews" sortable="custom"></el-table-column>
         <el-table-column prop="ecpm_after_deduct" :label="isAdmin ? 'eCPM(扣)' : 'eCPM'" :formatter="formatCurrency" sortable="custom"></el-table-column>
         <el-table-column v-if="isAdmin" prop="ecpm_before_deduct" label="eCPM" :formatter="formatCurrency" sortable="custom"></el-table-column>
         <el-table-column prop="revenue_after_deduct" :label="isAdmin ? '收益(扣)' : '收益'" :formatter="formatCurrency" sortable="custom"></el-table-column>
@@ -194,6 +196,12 @@
         </el-form-item>
         <el-form-item label="点击率" prop="click_rate">
           <el-input v-model.number="editForm.click_rate" name="click_rate" type="number" step="0.01" min="0" placeholder="请输入点击率"></el-input>
+        </el-form-item>
+        <el-form-item label="CPC" prop="cpc">
+          <el-input v-model.number="editForm.cpc" name="cpc" type="number" step="0.01" min="0" placeholder="请输入CPC"></el-input>
+        </el-form-item>
+        <el-form-item label="PageViews" prop="pageviews">
+          <el-input v-model.number="editForm.pageviews" name="pageviews" type="number" min="0" placeholder="请输入PageViews"></el-input>
         </el-form-item>
         <el-form-item label="eCPM(扣)" prop="ecpm_after_deduct">
           <el-input v-model.number="editForm.ecpm_after_deduct" name="ecpm_after_deduct" type="number" step="0.01" min="0" placeholder="请输入扣除后的eCPM"></el-input>
@@ -307,6 +315,27 @@ const getSummaries = (param) => {
     if (!values.every(value => isNaN(value))) {
       if (prop === 'request_count' || prop === 'match_count' || prop === 'display_count' || prop === 'click_count') {
         // 数值列：求和
+        sums[index] = values.reduce((prev, curr) => {
+          const value = Number(curr);
+          if (!isNaN(value)) {
+            return prev + curr;
+          } else {
+            return prev;
+          }
+        }, 0).toLocaleString();
+      } else if (prop === 'cpc') {
+        // CPC列：求和
+        const sum = values.reduce((prev, curr) => {
+          const value = Number(curr);
+          if (!isNaN(value)) {
+            return prev + curr;
+          } else {
+            return prev;
+          }
+        }, 0);
+        sums[index] = `$${sum.toFixed(2)}`;
+      } else if (prop === 'pageviews') {
+        // PageViews列：求和
         sums[index] = values.reduce((prev, curr) => {
           const value = Number(curr);
           if (!isNaN(value)) {
@@ -862,6 +891,8 @@ const editForm = ref({
   display_rate: 0,
   click_count: 0,
   click_rate: 0,
+  cpc: 0,
+  pageviews: 0,
   ecpm_after_deduct: 0,
   ecpm_before_deduct: 0,
   revenue_after_deduct: 0,
@@ -954,6 +985,8 @@ const handleEdit = async (row) => {
     display_rate: row.display_rate || 0,
     click_count: row.click_count || 0,
     click_rate: row.click_rate || 0,
+    cpc: row.cpc || 0,
+    pageviews: row.pageviews || 0,
     ecpm_after_deduct: row.ecpm_after_deduct || 0,
     ecpm_before_deduct: row.ecpm_before_deduct || 0,
     revenue_after_deduct: row.revenue_after_deduct || 0,
@@ -1077,6 +1110,8 @@ const saveEdit = async () => {
       match_count: editForm.value.match_count,
       display_count: editForm.value.display_count,
       click_count: editForm.value.click_count,
+      cpc: editForm.value.cpc,
+      pageviews: editForm.value.pageviews,
       ecpm_after_deduct: editForm.value.ecpm_after_deduct,
       ecpm_before_deduct: editForm.value.ecpm_before_deduct,
       revenue_after_deduct: editForm.value.revenue_after_deduct,

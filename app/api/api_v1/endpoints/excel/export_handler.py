@@ -331,6 +331,8 @@ async def export_ad_data_handler(
                     "展示率": f"{display_rate}%",
                     "点击数": item.click_count,
                     "点击率": f"{click_rate}%",
+                    "CPC($)": round(item.cpc or 0.0, 2),
+                    "PageViews": item.pageviews or 0,
                     "eCPM(扣)($)": round(item.ecpm_after_deduct, 4),
                     "eCPM($)": round(item.ecpm_before_deduct, 4),
                     "收益(扣)($)": round(item.revenue_after_deduct, 4),
@@ -350,6 +352,8 @@ async def export_ad_data_handler(
                     "展示率": f"{display_rate}%",
                     "点击数": item.click_count,
                     "点击率": f"{click_rate}%",
+                    "CPC($)": round(item.cpc or 0.0, 2),
+                    "PageViews": item.pageviews or 0,
                     "eCPM($)": round(item.ecpm_after_deduct, 4),
                     "收益($)": round(item.revenue_after_deduct, 4)
                 }

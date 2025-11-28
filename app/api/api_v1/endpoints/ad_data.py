@@ -222,6 +222,8 @@ async def get_ad_data(
         "match_count": AdData.match_count,
         "display_count": AdData.display_count,
         "click_count": AdData.click_count,
+        "cpc": AdData.cpc,
+        "pageviews": AdData.pageviews,
         "ecpm_after_deduct": AdData.ecpm_after_deduct,
         "ecpm_before_deduct": AdData.ecpm_before_deduct,
         "revenue_after_deduct": AdData.revenue_after_deduct,
@@ -407,6 +409,8 @@ async def get_ad_data(
             "display_rate": display_rate,
             "click_count": ad_data.click_count,
             "click_rate": click_rate,
+            "cpc": round(ad_data.cpc or 0.0, 2),
+            "pageviews": ad_data.pageviews or 0,
             "ecpm_after_deduct": round(ad_data.ecpm_after_deduct, 4),
             "revenue_after_deduct": round(ad_data.revenue_after_deduct, 4)
         }
@@ -826,6 +830,8 @@ async def get_daily_summary(
         func.sum(AdData.match_count).label("match_count"),
         func.sum(AdData.display_count).label("display_count"),
         func.sum(AdData.click_count).label("click_count"),
+        func.sum(AdData.cpc).label("cpc"),
+        func.sum(AdData.pageviews).label("pageviews"),
         func.sum(AdData.revenue_after_deduct).label("revenue_after_deduct"),
         func.sum(AdData.revenue_before_deduct).label("revenue_before_deduct")
     ).join(
@@ -910,6 +916,8 @@ async def get_daily_summary(
         "match_count": func.sum(AdData.match_count),
         "display_count": func.sum(AdData.display_count),
         "click_count": func.sum(AdData.click_count),
+        "cpc": func.sum(AdData.cpc),
+        "pageviews": func.sum(AdData.pageviews),
         "coverage_rate": func.avg(AdData.coverage_rate),  # 使用平均值作为排序依据
         "display_rate": func.avg(AdData.display_rate),
         "click_rate": func.avg(AdData.click_rate),
@@ -1045,6 +1053,8 @@ async def get_daily_summary(
         total_match_count = int(row.match_count or 0)
         total_display_count = int(row.display_count or 0)
         total_click_count = int(row.click_count or 0)
+        total_cpc = float(row.cpc or 0.0)
+        total_pageviews = int(row.pageviews or 0)
         total_revenue_after = float(row.revenue_after_deduct or 0.0)
         total_revenue_before = float(row.revenue_before_deduct or 0.0)
         
@@ -1096,6 +1106,8 @@ async def get_daily_summary(
             "display_rate": display_rate,
             "click_count": total_click_count,
             "click_rate": click_rate,
+            "cpc": round(total_cpc, 2),
+            "pageviews": total_pageviews,
             "ecpm_after_deduct": ecpm_after_deduct,
             "revenue_after_deduct": round(total_revenue_after, 4),
             "user_name": user_name

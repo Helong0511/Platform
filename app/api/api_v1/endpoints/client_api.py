@@ -92,6 +92,7 @@ class AdDataItemResponse(BaseModel):
     display_rate: float = Field(..., description="展示率（%，浮点数，保留2位小数）")
     click_count: int = Field(..., description="点击数（整数）")
     click_rate: float = Field(..., description="点击率（%，浮点数，保留2位小数）")
+    pageviews: int = Field(..., description="PageViews（整数）")
     ecpm: float = Field(..., description="eCPM（减扣后的，浮点数，保留2位小数）")
     revenue: float = Field(..., description="收益（减扣后的，浮点数，保留2位小数）")
 
@@ -403,6 +404,7 @@ async def get_client_data(
                 func.sum(AdData.match_count).label("match_count"),
                 func.sum(AdData.display_count).label("display_count"),
                 func.sum(AdData.click_count).label("click_count"),
+                func.sum(AdData.pageviews).label("pageviews"),
                 func.sum(AdData.revenue_after_deduct).label("revenue")
             ).join(
                 Product, AdData.product_id == Product.id
@@ -459,6 +461,7 @@ async def get_client_data(
                 total_match_count = int(row.match_count or 0)
                 total_display_count = int(row.display_count or 0)
                 total_click_count = int(row.click_count or 0)
+                total_pageviews = int(row.pageviews or 0)
                 total_revenue = float(row.revenue or 0.0)
                 
                 # 根据汇总后的数值重新计算比率
@@ -498,6 +501,7 @@ async def get_client_data(
                     display_rate=float(display_rate),
                     click_count=total_click_count,
                     click_rate=float(click_rate),
+                    pageviews=total_pageviews,
                     ecpm=float(ecpm),
                     revenue=round(total_revenue, 2)
                 ))
@@ -600,6 +604,7 @@ async def get_client_data(
                     display_rate=float(display_rate),
                     click_count=int(ad_data.click_count),
                     click_rate=float(click_rate),
+                    pageviews=int(ad_data.pageviews or 0),
                     ecpm=float(round(ad_data.ecpm_after_deduct, 2)),
                     revenue=float(round(ad_data.revenue_after_deduct, 2))
                 ))

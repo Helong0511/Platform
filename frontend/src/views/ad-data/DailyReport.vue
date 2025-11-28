@@ -82,6 +82,8 @@
         <el-table-column prop="display_rate" label="展示率" :formatter="formatPercentage" sortable="custom"></el-table-column>
         <el-table-column prop="click_count" label="点击数" sortable="custom"></el-table-column>
         <el-table-column prop="click_rate" label="点击率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column prop="cpc" label="CPC" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column prop="pageviews" label="PageViews" sortable="custom"></el-table-column>
         <el-table-column prop="ecpm_after_deduct" :label="isAdmin ? 'eCPM(扣)' : 'eCPM'" :formatter="formatCurrency" sortable="custom"></el-table-column>
         <el-table-column v-if="isAdmin" prop="ecpm_before_deduct" label="eCPM" :formatter="formatCurrency" sortable="custom"></el-table-column>
         <el-table-column prop="revenue_after_deduct" :label="isAdmin ? '收益(扣)' : '收益'" :formatter="formatCurrency" sortable="custom"></el-table-column>
@@ -182,6 +184,27 @@ const getSummaries = (param) => {
     if (!values.every(value => isNaN(value))) {
       if (prop === 'request_count' || prop === 'match_count' || prop === 'display_count' || prop === 'click_count') {
         // 数值列：求和
+        sums[index] = values.reduce((prev, curr) => {
+          const value = Number(curr);
+          if (!isNaN(value)) {
+            return prev + curr;
+          } else {
+            return prev;
+          }
+        }, 0).toLocaleString();
+      } else if (prop === 'cpc') {
+        // CPC列：求和
+        const sum = values.reduce((prev, curr) => {
+          const value = Number(curr);
+          if (!isNaN(value)) {
+            return prev + curr;
+          } else {
+            return prev;
+          }
+        }, 0);
+        sums[index] = `$${sum.toFixed(2)}`;
+      } else if (prop === 'pageviews') {
+        // PageViews列：求和
         sums[index] = values.reduce((prev, curr) => {
           const value = Number(curr);
           if (!isNaN(value)) {

@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS `ad_data` (
   `click_count` INT NOT NULL DEFAULT 0 COMMENT '点击数',
   `click_rate` FLOAT NULL DEFAULT 0.00 COMMENT '点击率',
 
+  `cpc` FLOAT NULL DEFAULT 0.00 COMMENT 'CPC',
+  `pageviews` INT NULL DEFAULT 0 COMMENT 'PageViews',
+
   `ecpm_before_deduct` FLOAT NOT NULL DEFAULT 0.00 COMMENT 'eCPM未减扣',
   `ecpm_after_deduct` FLOAT NOT NULL DEFAULT 0.00 COMMENT 'eCPM已减扣',
 

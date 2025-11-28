@@ -41,6 +41,8 @@ class AdDataBase(BaseModel):
     display_rate: float | None = None
     click_count: int | None = None
     click_rate: float | None = None
+    cpc: float | None = None
+    pageviews: int | None = None
     ecpm_after_deduct: float | None = None
     revenue_after_deduct: float | None = None
 
@@ -84,6 +86,8 @@ class AdDataUpdate(BaseModel):
     match_count: int | None = None
     display_count: int | None = None
     click_count: int | None = None
+    cpc: float | None = None
+    pageviews: int | None = None
     ecpm_after_deduct: float | None = None
     ecpm_before_deduct: float | None = None
     revenue_after_deduct: float | None = None
