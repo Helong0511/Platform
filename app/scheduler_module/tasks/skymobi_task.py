@@ -58,15 +58,13 @@ async def skymobi_api_task() -> None:
         # ============================================
 
         # 构建Skymobi API请求参数
-        # Skymobi API返回的日期默认是系统时区，使用系统时区计算日期
-        # 计算系统时区的昨天和今天
-        app_now = datetime.now()
+        # 使用应用时区（北京时间）计算日期
+        app_now = datetime.now(APP_TIMEZONE)
         app_yesterday = app_now - timedelta(days=1)
         yesterday_str = app_yesterday.strftime("%Y-%m-%d")
         today_str = app_now.strftime("%Y-%m-%d")
 
-        today_str = app_now.strftime("%Y-%m-%d")
-        if 0 <= datetime.now().hour <= 8:
+        if 0 <= app_now.hour <= 8:
             Skymobi_url = f'https://crm.skymobi.online/api/adxh5?apikey={api_key}&date={yesterday_str}&uid={api_id}&page=1&limit=500'
         else:
             Skymobi_url = f'https://crm.skymobi.online/api/adxh5?apikey={api_key}&date={today_str}&uid={api_id}&page=1&limit=500'

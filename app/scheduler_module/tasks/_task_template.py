@@ -99,7 +99,8 @@ async def my_new_task() -> None:
     - 任务名称要与 task_config.py 和数据库中的 task_name 保持一致
     """
     # 获取应用配置时区的当前时间（用于日志记录）
-    app_time = datetime.now()
+    from app.core.utils import get_app_now
+    app_time = get_app_now()
     current_time_str = app_time.strftime("%Y-%m-%d %H:%M:%S")
     
     # 记录任务开始执行的日志

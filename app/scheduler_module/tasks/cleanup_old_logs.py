@@ -62,8 +62,9 @@ async def cleanup_old_audit_logs(
     """
     TASK_NAME = CLEANUP_LOGS_TASK_NAME
     
-    # 计算清理日期阈值
-    cutoff_date = datetime.now() - timedelta(days=days)
+    # 计算清理日期阈值（使用应用时区）
+    from app.core.utils import get_app_now_naive
+    cutoff_date = get_app_now_naive() - timedelta(days=days)
     cutoff_date_str = cutoff_date.strftime('%Y-%m-%d %H:%M:%S')
     
     # 记录任务开始

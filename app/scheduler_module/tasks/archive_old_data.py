@@ -59,8 +59,9 @@ async def archive_old_ad_data(months: int = 6) -> dict:
     
     async with AsyncSessionLocal() as db:
         try:
-            # 计算归档日期阈值（精确计算月份，考虑不同月份的天数差异）
-            today = datetime.now()
+            # 计算归档日期阈值（精确计算月份，考虑不同月份的天数差异，使用应用时区）
+            from app.core.utils import get_app_now_naive
+            today = get_app_now_naive()
             target_year = today.year
             target_month = today.month - months
             # 处理跨年情况

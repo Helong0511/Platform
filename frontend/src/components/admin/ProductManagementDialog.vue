@@ -430,18 +430,19 @@ const { isMobile, isTablet } = useDevice();
 // 计算表格最大高度
 const tableMaxHeight = computed(() => {
   if (isMobile.value) {
-    // 移动端：视口高度 - 对话框头部 - 操作栏 - 内边距 - 安全边距
-    // 头部约80px + 操作栏约120px + 内边距约40px + 安全边距约40px = 约280px
+    // 移动端：视口高度 - 对话框头部 - 操作栏 - 内边距
+    // 头部约50px + 操作栏约80px + 内边距约20px = 约150px
     const viewportHeight = window.innerHeight || 667;
-    return Math.max(300, viewportHeight - 280);
+    return Math.max(200, viewportHeight - 150);
   }
   if (isTablet.value) {
-    return 450;
+    const viewportHeight = window.innerHeight || 768;
+    return Math.max(400, viewportHeight - 200);
   }
   // 桌面端：根据视口高度动态计算，留出足够的头部和操作栏空间
   const viewportHeight = window.innerHeight;
-  // 对话框头部约120px + 操作栏约80px + 内容padding约60px + 底部空间约40px = 约300px
-  return Math.max(400, viewportHeight - 320);
+  // 对话框头部约120px + 操作栏约80px + 内容padding约60px = 约260px
+  return Math.max(400, viewportHeight - 260);
 });
 
 const visible = ref(props.modelValue);
@@ -1494,6 +1495,7 @@ const handleDelete = async (id) => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  height: 100%;
 }
 
 /* 对话框头部 */
@@ -1609,6 +1611,8 @@ const handleDelete = async (id) => {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 /* 操作栏 */
@@ -1659,6 +1663,7 @@ const handleDelete = async (id) => {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  margin-bottom: 0;
 }
 
 .product-table {
@@ -1687,6 +1692,7 @@ const handleDelete = async (id) => {
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
   min-height: 0;
+  max-height: 100%;
 }
 
 /* 优化滚动条样式 */
@@ -1956,6 +1962,7 @@ const handleDelete = async (id) => {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    height: 100%;
   }
   
   .product-management-dialog :deep(.el-dialog__footer) {
@@ -2018,12 +2025,13 @@ const handleDelete = async (id) => {
 
   /* 内容区域移动端优化 - 更紧凑 */
   .product-management-content {
-    padding: 8px;
+    padding: 8px 8px 0 8px;
     flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    height: 100%;
   }
 
   /* 操作栏移动端优化 - 更紧凑 */
@@ -2065,6 +2073,10 @@ const handleDelete = async (id) => {
     flex: 1;
     min-height: 0;
     border-radius: 8px;
+    margin-bottom: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
   
   /* 表格移动端优化 */
@@ -2091,6 +2103,9 @@ const handleDelete = async (id) => {
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
+    flex: 1;
+    min-height: 0;
+    max-height: 100%;
   }
 
   /* 表格容器添加滚动提示 */

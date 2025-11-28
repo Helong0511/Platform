@@ -6,6 +6,7 @@ import logging
 import asyncio
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+import pytz
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 
@@ -18,9 +19,13 @@ from app.core.audit_log import log_user_action
 from app.core.country_code import find_country_code_by_any_format
 from app.core.utils import truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data
 from app.core.auto_bot import send_telegram_message
+from app.core.config import settings
 
 # 获取当前模块的日志记录器
 logger = logging.getLogger(__name__)
+
+# 应用时区配置（从统一配置读取）
+APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
 
 async def check_and_notify_data_decrease(
@@ -101,11 +106,16 @@ async def check_and_notify_data_decrease(
             elif country_code == "ZZ":
                 country_display = "全部区域"
 
+            # 获取当前时间（使用时区）
+            current_time = datetime.now(APP_TIMEZONE)
+            current_time_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
+
             telegram_msg = f"⚠️ 数据减少警告\n\n"
             telegram_msg += f"数据来源: {source}\n"
-            telegram_msg += f"日期: {date_str}\n"
+            telegram_msg += f"数据日期: {date_str}\n"
             telegram_msg += f"产品: {product_name}\n"
-            telegram_msg += f"国家: {country_display}\n\n"
+            telegram_msg += f"国家: {country_display}\n"
+            telegram_msg += f"发送时间: {current_time_str}（时区: {settings.TIMEZONE}）\n\n"
             telegram_msg += f"⚠️ 注意：API获取的数据正常情况下应该比上一次获得的数据大（累积增长）\n"
             telegram_msg += f"如果数据减少，可能是数据源异常或数据被重置，请检查数据源！\n\n"
             telegram_msg += f"减少的字段:\n"

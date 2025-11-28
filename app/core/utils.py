@@ -3,10 +3,15 @@
 提供通用的工具函数，避免代码重复
 """
 import math
+import pytz
 from datetime import datetime
 from typing import Any
 from fastapi import Request
 from app.core.middleware import get_device_type
+from app.core.config import settings
+
+# 应用时区配置（从统一配置读取）
+APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
 
 def get_client_ip(request: Request) -> str:
@@ -115,3 +120,27 @@ def normalize_date_for_ad_data(date_obj: datetime | Any) -> datetime:
         return date_obj.replace(hour=0, minute=0, second=0, microsecond=0)
     else:
         return datetime.combine(date_obj, datetime.min.time())
+
+
+def get_app_now() -> datetime:
+    """
+    获取应用时区的当前时间
+    
+    无论系统使用什么时区（UTC 或本地时间），都返回应用配置时区（默认北京时间）的当前时间
+    
+    Returns:
+        datetime: 应用时区的当前时间（带时区信息）
+    """
+    return datetime.now(APP_TIMEZONE)
+
+
+def get_app_now_naive() -> datetime:
+    """
+    获取应用时区的当前时间（naive datetime，不带时区信息）
+    
+    用于业务日期字段，与数据库存储格式一致
+    
+    Returns:
+        datetime: 应用时区的当前时间（naive，不带时区信息）
+    """
+    return datetime.now(APP_TIMEZONE).replace(tzinfo=None)

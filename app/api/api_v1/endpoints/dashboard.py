@@ -53,7 +53,8 @@ async def get_dashboard_stats(period: str = "week", db: AsyncSession = Depends(g
         # ====== 查询逻辑 ======
         # ====== 确定时间范围 ======
         # 根据period参数计算开始和结束日期
-        today = datetime.now().date()
+        from app.core.utils import get_app_now_naive
+        today = get_app_now_naive().date()
         if period == "day":
             # 今天
             start_date = today
@@ -387,7 +388,8 @@ async def get_recent_ad_data(
     """
     try:
         # 查询最近7天的数据
-        end_date = datetime.now().date()
+        from app.core.utils import get_app_now_naive
+        end_date = get_app_now_naive().date()
         start_date = end_date - timedelta(days=7)
 
         # 构建查询
@@ -512,7 +514,8 @@ async def get_trend_data(period: str = "week", db: AsyncSession = Depends(get_db
                 # 缓存数据格式错误，继续执行查询
         
         # 确定时间范围
-        today = datetime.now().date()
+        from app.core.utils import get_app_now_naive
+        today = get_app_now_naive().date()
         if period == "day":
             start_date = today
             end_date = today

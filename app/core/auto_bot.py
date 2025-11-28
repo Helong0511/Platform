@@ -127,7 +127,9 @@ if bot_initialized and TELEBOT_AVAILABLE:
             bot.edit_message_text(
                 chat_id=call.message.chat.id,
                 message_id=call.message.message_id,
-                text=f"打卡成功！时间：{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                from app.core.utils import get_app_now
+                current_time = get_app_now()
+                text=f"打卡成功！时间：{current_time.strftime('%Y-%m-%d %H:%M:%S')}（时区: {settings.TIMEZONE}）"
             )
         elif call.data == "Cancel":
             bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="你取消了操作")

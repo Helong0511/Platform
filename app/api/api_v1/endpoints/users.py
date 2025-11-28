@@ -383,7 +383,8 @@ async def export_users_excel(
             worksheet.column_dimensions[column_cells[0].column_letter].width = min(max_length + 2, 50)
 
     output.seek(0)
-    filename = f"用户数据_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    from app.core.utils import get_app_now_naive
+    filename = f"用户数据_{get_app_now_naive().strftime('%Y%m%d_%H%M%S')}.xlsx"
     encoded_filename = quote(filename.encode('utf-8'))
 
     logger.info(f"User data exported by {current_user.username}, total: {len(data)} users")

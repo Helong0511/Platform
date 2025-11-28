@@ -76,7 +76,7 @@ async def addermobi_api_task() -> None:
         raise ValueError(error_msg)
 
     # 获取应用配置时区的当前时间（用于日志记录）
-    app_time = datetime.now()
+    app_time = datetime.now(APP_TIMEZONE)
     current_time_str = app_time.strftime("%Y-%m-%d %H:%M:%S")
 
     # 记录任务开始执行的日志
@@ -142,12 +142,12 @@ async def addermobi_api_task() -> None:
             logger.error(f'Addermobi API获取token请求错误: {str(request_error)}')
             raise Exception(f'Addermobi API获取token请求失败: {str(request_error)}')
 
-        app_now = datetime.now()
+        app_now = datetime.now(APP_TIMEZONE)
         app_yesterday = app_now - timedelta(days=1)
         yesterday_str = app_yesterday.strftime("%Y-%m-%d")
         today_str = app_now.strftime("%Y-%m-%d")
 
-        if 0 <= datetime.now().hour <= 8:
+        if 0 <= app_now.hour <= 8:
             p1 = [
                 {"name": "Revenue_time",
                  "value": yesterday_str,

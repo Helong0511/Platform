@@ -220,7 +220,9 @@ async def test_bot_connection(
             )
 
         # 发送测试消息
-        test_message = f"🧪 Telegram Bot 连接测试\n\n发送时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n测试用户: {current_user.username}"
+        from app.core.utils import get_app_now
+        current_time = get_app_now()
+        test_message = f"🧪 Telegram Bot 连接测试\n\n发送时间: {current_time.strftime('%Y-%m-%d %H:%M:%S')}（时区: {settings.TIMEZONE}）\n测试用户: {current_user.username}"
         
         success = await send_telegram_message(message=test_message)
 

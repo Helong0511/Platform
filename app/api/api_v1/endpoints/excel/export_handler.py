@@ -375,7 +375,8 @@ async def export_ad_data_handler(
 
     # 准备响应
     output.seek(0)
-    filename = f"广告数据_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    from app.core.utils import get_app_now_naive
+    filename = f"广告数据_{get_app_now_naive().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
     # 对文件名进行URL编码以支持中文字符
     encoded_filename = quote(filename, safe='')

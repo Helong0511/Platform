@@ -13,6 +13,7 @@ from app.core.errors import ErrorCode, create_error_response
 from app.core.middleware import RateLimitMiddleware, SecurityHeadersMiddleware, RequestLoggingMiddleware, \
     CompressionMiddleware, PerformanceMonitoringMiddleware
 from app.core.https_middleware import HTTPSRedirectMiddleware
+from app.core.timezone_utils import log_timezone_info
 from app.api.api_v1 import api_router
 import logging
 from logging.handlers import RotatingFileHandler
@@ -118,6 +119,12 @@ async def lifespan(app: FastAPI):
     import os
     worker_pid = os.getpid()
     logger.info(f"[Worker PID:{worker_pid}] 应用启动中...")
+    
+    # 记录时区配置信息（用于诊断时区问题）
+    try:
+        log_timezone_info()
+    except Exception as e:
+        logger.warning(f"记录时区信息时出错: {e}，继续启动...")
 
     # 确保数据库存在并创建表（多进程环境：每个 worker 都会执行，但数据库操作是安全的）
     try:
