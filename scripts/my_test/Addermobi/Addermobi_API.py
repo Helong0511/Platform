@@ -143,7 +143,7 @@ try:
                 # print(f"ecpm：{item.get('eCPM', 0)}")
                 # print(f"cpc：{item.get('CPC', 0)}")
                 # print(f"产品名称：{item.get('ProductName', '')}")
-                print(f"匹配数：{item.get('MatchedAdRequests', 0)}")
+                print(f"覆盖率：{item.get('AdRequestsCoverage', 0)}")
 
             co_in = []
             for code in country:

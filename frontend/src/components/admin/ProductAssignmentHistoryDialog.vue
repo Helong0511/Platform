@@ -312,7 +312,9 @@ const handleClose = () => {
       {
         confirmButtonText: '确定关闭',
         cancelButtonText: '取消',
-        type: 'warning'
+        type: 'warning',
+        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
+        zIndex: 3001 // 确保 z-index 高于对话框（3000）
       }
     ).then(() => {
       // 用户确认关闭，清除所有修改
@@ -634,7 +636,9 @@ const handleBatchSave = async () => {
       '验证失败',
       {
         type: 'error',
-        confirmButtonText: '确定'
+        confirmButtonText: '确定',
+        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
+        zIndex: 3001 // 确保 z-index 高于对话框（3000）
       }
     );
     return;
@@ -648,7 +652,9 @@ const handleBatchSave = async () => {
       {
         confirmButtonText: '确定保存',
         cancelButtonText: '取消',
-        type: 'warning'
+        type: 'warning',
+        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
+        zIndex: 3001 // 确保 z-index 高于对话框（3000）
       }
     );
   } catch {
@@ -761,7 +767,9 @@ const handleBatchSave = async () => {
         {
           type: 'error',
           confirmButtonText: '确定',
-          dangerouslyUseHTMLString: false
+          dangerouslyUseHTMLString: false,
+          appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
+          zIndex: 3001 // 确保 z-index 高于对话框（3000）
         }
       );
     } else {
@@ -786,7 +794,9 @@ const handleDiscardAll = async () => {
       {
         confirmButtonText: '确定放弃',
         cancelButtonText: '取消',
-        type: 'warning'
+        type: 'warning',
+        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
+        zIndex: 3001 // 确保 z-index 高于对话框（3000）
       }
     );
     
