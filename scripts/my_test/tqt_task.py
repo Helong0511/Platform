@@ -75,6 +75,7 @@ try:
         cp = []
         if data:
             for item in data:
+                print(item)
                 item_date = item.get('date', '')
 
                 if item.get('url', '') not in cp:

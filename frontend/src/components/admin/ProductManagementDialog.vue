@@ -1613,8 +1613,31 @@ const handleDelete = async (id) => {
 }
 
 .product-table :deep(.el-table__body-wrapper) {
-  max-height: 500px;
+  max-height: calc(100vh - 400px);
+  min-height: 300px;
   overflow-y: auto;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 优化滚动条样式 */
+.product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar {
+  width: 8px;
+}
+
+.product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar-thumb:hover {
+  background: #555;
 }
 
 .product-table :deep(.el-table__row) {
