@@ -70,12 +70,12 @@
             padding: '10px 0'
           }"
         >
-          <el-table-column prop="id" label="ID" width="80" align="center">
+          <el-table-column prop="id" label="ID" :width="isMobile ? 60 : 80" align="center" class-name="id-column">
             <template #default="scope">
-              <el-tag type="info" effect="plain" size="small">{{ scope.row.id }}</el-tag>
+              <el-tag type="info" effect="plain" :size="isMobile ? 'small' : 'small'">{{ scope.row.id }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="name" label="产品名称" min-width="300">
+          <el-table-column prop="name" label="产品名称" :min-width="isMobile ? 200 : 300" class-name="name-column">
             <template #default="scope">
               <div class="product-name-cell">
                 <el-icon class="product-icon"><Box /></el-icon>
@@ -83,25 +83,25 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column prop="ecpm_deduct_ratio" label="eCPM减扣比例" width="120" align="center">
+          <el-table-column prop="ecpm_deduct_ratio" :label="isMobile ? 'eCPM' : 'eCPM减扣比例'" :width="isMobile ? 90 : 120" align="center" class-name="ecpm-column">
             <template #default="scope">
-              <el-tag type="warning" effect="dark" size="default">
+              <el-tag type="warning" effect="dark" :size="isMobile ? 'small' : 'default'">
                 {{ formatPercentage(scope.row.ecpm_deduct_ratio) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="revenue_deduct_ratio" label="收益减扣比例" width="100" align="center">
+          <el-table-column prop="revenue_deduct_ratio" :label="isMobile ? '收益' : '收益减扣比例'" :width="isMobile ? 80 : 100" align="center" class-name="revenue-column">
             <template #default="scope">
-              <el-tag type="success" effect="dark" size="default">
+              <el-tag type="success" effect="dark" :size="isMobile ? 'small' : 'default'">
                 {{ formatPercentage(scope.row.revenue_deduct_ratio) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="is_active" label="状态" width="80" align="center">
+          <el-table-column prop="is_active" label="状态" :width="isMobile ? 70 : 80" align="center" class-name="status-column">
             <template #default="scope">
               <el-tag 
                 :type="scope.row.is_active ? 'success' : 'danger'" 
-                size="default"
+                :size="isMobile ? 'small' : 'default'"
                 effect="dark"
                 :icon="scope.row.is_active ? CircleCheck : CircleClose"
               >
@@ -109,43 +109,49 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="created_at" label="创建时间" width="180" align="center">
+          <el-table-column prop="created_at" :label="isMobile ? '时间' : '创建时间'" :width="isMobile ? 140 : 180" align="center" class-name="time-column">
             <template #default="scope">
               <div class="time-cell">
-                <el-icon :size="16"><Clock /></el-icon>
+                <el-icon :size="isMobile ? 14 : 16"><Clock /></el-icon>
                 <span>{{ formatDate(scope.row.created_at) }}</span>
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="280" fixed="right" align="center">
+          <el-table-column label="操作" :width="isMobile ? 100 : 280" :fixed="isMobile ? false : 'right'" align="center" class-name="action-column">
             <template #default="scope">
-              <div class="action-buttons">
+              <div class="action-buttons" :class="{ 'mobile-actions': isMobile }">
                 <el-button 
                   type="info" 
-                  size="default"
+                  :size="isMobile ? 'small' : 'default'"
                   :icon="Clock"
                   @click="handleViewHistory(scope.row)"
                   class="action-btn history-btn"
+                  :circle="isMobile"
+                  :title="isMobile ? '历史' : ''"
                 >
-                  历史
+                  <span v-if="!isMobile">历史</span>
                 </el-button>
                 <el-button 
                   type="primary" 
-                  size="default"
+                  :size="isMobile ? 'small' : 'default'"
                   :icon="Edit"
                   @click="handleEdit(scope.row)"
                   class="action-btn edit-btn"
+                  :circle="isMobile"
+                  :title="isMobile ? '编辑' : ''"
                 >
-                  编辑
+                  <span v-if="!isMobile">编辑</span>
                 </el-button>
                 <el-button 
                   type="danger" 
-                  size="default"
+                  :size="isMobile ? 'small' : 'default'"
                   :icon="Delete"
                   @click="handleDelete(scope.row.id)"
                   class="action-btn delete-btn"
+                  :circle="isMobile"
+                  :title="isMobile ? '删除' : ''"
                 >
-                  删除
+                  <span v-if="!isMobile">删除</span>
                 </el-button>
               </div>
             </template>
@@ -424,7 +430,10 @@ const { isMobile, isTablet } = useDevice();
 // 计算表格最大高度
 const tableMaxHeight = computed(() => {
   if (isMobile.value) {
-    return 350;
+    // 移动端：视口高度 - 对话框头部 - 操作栏 - 内边距 - 安全边距
+    // 头部约80px + 操作栏约120px + 内边距约40px + 安全边距约40px = 约280px
+    const viewportHeight = window.innerHeight || 667;
+    return Math.max(300, viewportHeight - 280);
   }
   if (isTablet.value) {
     return 450;
@@ -1913,122 +1922,438 @@ const handleDelete = async (id) => {
 }
 
 @media (max-width: 767px) {
+  /* 对话框移动端优化 */
   .product-management-dialog :deep(.el-dialog) {
-    width: 95% !important;
-    max-width: 95% !important;
-    margin: 2vh auto !important;
-    top: 0;
-    transform: translateY(0);
-    max-height: 96vh;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+    transform: none !important;
+    max-height: 100vh;
+    height: 100vh;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
   }
   
   .product-management-dialog :deep(.el-dialog__wrapper) {
     display: flex;
-    align-items: center;
+    align-items: stretch;
     justify-content: center;
+    padding: 0;
   }
   
   .product-management-dialog :deep(.el-dialog__header) {
-    padding: var(--spacing-md) var(--spacing-lg);
+    padding: 12px 16px;
+    flex-shrink: 0;
   }
   
   .product-management-dialog :deep(.el-dialog__body) {
-    padding: var(--spacing-md);
-    max-height: calc(100vh - 200px);
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    padding: 0;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
   
   .product-management-dialog :deep(.el-dialog__footer) {
-    padding: var(--spacing-md) var(--spacing-lg);
-  }
-
-  .dialog-header {
-    padding: var(--spacing-md);
-  }
-
-  .header-title {
-    font-size: var(--font-size-lg);
+    padding: 12px 16px;
+    flex-shrink: 0;
   }
   
-  .header-subtitle {
-    font-size: var(--font-size-sm);
+  .product-management-dialog :deep(.el-dialog__headerbtn) {
+    top: 12px;
+    right: 16px;
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+  }
+
+  /* 对话框头部移动端优化 */
+  .dialog-header {
+    padding: 12px 16px;
+    min-height: 60px;
+  }
+
+  .header-content {
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .header-left {
+    width: 100%;
+    gap: 12px;
   }
 
   .header-icon {
-    font-size: var(--font-size-xxl);
+    font-size: 32px;
   }
 
+  .header-title {
+    font-size: 18px;
+    line-height: 1.2;
+  }
+  
+  .header-subtitle {
+    font-size: 13px;
+    line-height: 1.2;
+  }
+
+  .header-right {
+    width: 100%;
+    padding: 12px 16px;
+    border-radius: 12px;
+  }
+
+  .header-right :deep(.el-statistic__number) {
+    font-size: 24px;
+  }
+
+  .header-right :deep(.el-statistic__head) {
+    font-size: 12px;
+  }
+
+  /* 内容区域移动端优化 */
   .product-management-content {
-    padding: var(--spacing-md);
+    padding: 12px;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
 
+  /* 操作栏移动端优化 */
   .action-bar {
     flex-direction: column;
-    gap: var(--spacing-md);
+    gap: 12px;
     align-items: stretch;
+    margin-bottom: 12px;
+    padding: 12px;
+    height: auto;
+    min-height: auto;
+  }
+
+  .action-left,
+  .action-right {
+    width: 100%;
   }
 
   .add-button {
     width: 100%;
-    min-height: var(--touch-target-size);
+    height: 48px;
+    min-height: 48px;
+    font-size: 16px;
+    padding: 0 20px;
+    border-radius: 12px;
+  }
+
+  .action-right .el-tag {
+    width: 100%;
+    justify-content: center;
+    padding: 12px;
+    font-size: 14px;
+    border-radius: 12px;
+  }
+
+  /* 表格包装器移动端优化 */
+  .table-wrapper {
+    padding: 8px;
+    flex: 1;
+    min-height: 0;
+    border-radius: 12px;
   }
   
   /* 表格移动端优化 */
   .product-table {
-    font-size: var(--font-size-sm);
+    font-size: 13px;
+    border-radius: 8px;
+  }
+
+  .product-table :deep(.el-table__header-wrapper) {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
-  
-  .product-table :deep(.el-table__cell) {
-    padding: var(--spacing-xs) var(--spacing-sm);
-    word-break: break-word;
+
+  .product-table :deep(.el-table__body-wrapper) {
+    overflow-x: auto;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 移动端滚动条优化 */
+  .product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 2px;
+  }
+
+  .product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.3);
+  }
+
+  /* 表格空状态移动端优化 */
+  .product-table :deep(.el-table__empty-block) {
+    padding: 40px 20px;
+  }
+
+  .product-table :deep(.el-table__empty-text) {
+    font-size: 14px;
+    color: #909399;
   }
   
-  .product-table :deep(.el-table__header th),
+  .product-table :deep(.el-table__cell) {
+    padding: 10px 8px;
+    word-break: break-word;
+    white-space: normal;
+  }
+  
+  .product-table :deep(.el-table__header th) {
+    font-size: 12px;
+    padding: 10px 8px;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+  
   .product-table :deep(.el-table__body td) {
-    font-size: var(--font-size-xs);
-    padding: var(--spacing-xs);
+    font-size: 12px;
+    padding: 10px 8px;
+    vertical-align: middle;
+  }
+
+  .product-table :deep(.el-table__header-cell) {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+  }
+
+  /* 表格列移动端优化 */
+  .product-table :deep(.el-table-column--selection) {
+    width: 50px !important;
+    min-width: 50px !important;
+  }
+
+  /* 产品名称单元格移动端优化 */
+  .product-name-cell {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .product-icon {
+    font-size: 16px;
+  }
+
+  .product-name {
+    font-size: 12px;
+    line-height: 1.4;
+    word-break: break-all;
+  }
+
+  /* 时间单元格移动端优化 */
+  .time-cell {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    font-size: 11px;
+  }
+
+  .time-cell .el-icon {
+    font-size: 14px;
+  }
+
+  /* 操作按钮移动端优化 */
+  .action-buttons.mobile-actions {
+    flex-direction: row;
+    gap: 6px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .action-buttons.mobile-actions .action-btn {
+    width: auto;
+    min-width: 36px;
+    height: 36px;
+    min-height: 36px;
+    padding: 0;
+    border-radius: 50%;
+    margin: 0;
+  }
+
+  .action-buttons.mobile-actions .action-btn .el-icon {
+    margin-right: 0;
+    font-size: 16px;
+  }
+
+  .action-buttons.mobile-actions .action-btn.is-circle {
+    width: 36px;
+    height: 36px;
+  }
+
+  /* 标签移动端优化 */
+  .product-table :deep(.el-tag) {
+    font-size: 11px;
+    padding: 4px 8px;
+    line-height: 1.4;
+    white-space: nowrap;
+  }
+
+  /* 表格行触摸反馈优化 */
+  .product-table :deep(.el-table__row) {
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.05);
+    transition: background-color 0.2s;
+  }
+
+  .product-table :deep(.el-table__row:active) {
+    background-color: #f0f2f5;
+  }
+
+  /* 按钮触摸反馈优化 */
+  .action-btn,
+  .add-button {
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+    touch-action: manipulation;
+  }
+
+  .action-btn:active,
+  .add-button:active {
+    opacity: 0.8;
+    transform: scale(0.98);
+  }
+
+  /* 加载状态移动端优化 */
+  .product-table :deep(.el-loading-mask) {
+    border-radius: 8px;
+  }
+
+  .product-table :deep(.el-loading-spinner) {
+    margin-top: -25px;
+  }
+
+  .product-table :deep(.el-loading-text) {
+    font-size: 14px;
+    margin-top: 8px;
+  }
+
+  /* 表格固定列移动端优化 */
+  .product-table :deep(.el-table__fixed),
+  .product-table :deep(.el-table__fixed-right) {
+    box-shadow: none;
+  }
+
+  /* 表格边框移动端优化 */
+  .product-table :deep(.el-table) {
+    border: 1px solid #ebeef5;
+  }
+
+  .product-table :deep(.el-table th),
+  .product-table :deep(.el-table td) {
+    border-right: 1px solid #ebeef5;
+  }
+
+  /* 操作栏标签移动端优化 */
+  .action-right .el-tag {
+    font-size: 13px;
+    padding: 8px 12px;
   }
   
   /* 产品表单对话框移动端优化 */
   .product-form-dialog :deep(.el-dialog) {
-    width: 95% !important;
-    max-width: 95% !important;
-    margin: var(--spacing-md) auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+    transform: none !important;
+    max-height: 100vh;
+    height: 100vh;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .product-form-dialog :deep(.el-dialog__wrapper) {
+    padding: 0;
+  }
+  
+  .product-form-dialog :deep(.el-dialog__header) {
+    padding: 16px;
+    flex-shrink: 0;
+    border-bottom: 1px solid #ebeef5;
+  }
+
+  .product-form-dialog :deep(.el-dialog__title) {
+    font-size: 18px;
+    font-weight: 600;
   }
   
   .product-form-dialog :deep(.el-dialog__body) {
-    padding: var(--spacing-md);
-    max-height: calc(100vh - 200px);
+    padding: 16px;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
   }
   
   .product-form-dialog :deep(.el-dialog__footer) {
-    padding: var(--spacing-md) var(--spacing-lg);
+    padding: 12px 16px;
     display: flex;
     flex-direction: row;
-    gap: var(--spacing-sm);
+    gap: 12px;
+    border-top: 1px solid #ebeef5;
+    flex-shrink: 0;
   }
   
   .product-form-dialog :deep(.el-dialog__footer .el-button) {
     flex: 1;
-    min-height: var(--touch-target-size);
+    height: 48px;
+    min-height: 48px;
+    font-size: 16px;
+    border-radius: 12px;
+  }
+
+  .product-form-dialog :deep(.el-dialog__headerbtn) {
+    top: 16px;
+    right: 16px;
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
   }
   
   /* 表单移动端优化 */
+  .product-form {
+    padding: 0;
+  }
+
+  .product-form :deep(.el-form-item) {
+    margin-bottom: 24px;
+  }
+
   .product-form :deep(.el-form-item__label) {
     width: 100% !important;
     text-align: left !important;
-    margin-bottom: var(--spacing-xs) !important;
+    margin-bottom: 8px !important;
     padding: 0 !important;
+    font-size: 14px;
+    font-weight: 600;
+    color: #303133;
+    line-height: 1.5;
   }
   
   .product-form :deep(.el-form-item__content) {
     width: 100% !important;
     margin-left: 0 !important;
+    line-height: normal;
   }
   
   .product-form :deep(.el-input),
@@ -2039,11 +2364,23 @@ const handleDelete = async (id) => {
   }
   
   .product-form :deep(.el-input__wrapper) {
-    min-height: var(--touch-target-size);
+    min-height: 48px;
+    font-size: 16px;
+    border-radius: 8px;
+  }
+
+  .product-form :deep(.el-input__inner) {
+    font-size: 16px;
+    padding: 0 16px;
   }
   
   .product-form :deep(.el-select .el-input__wrapper) {
-    min-height: var(--touch-target-size);
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  .product-form :deep(.el-select .el-input__inner) {
+    font-size: 16px;
   }
   
   .product-form :deep(.el-input-number) {
@@ -2051,24 +2388,108 @@ const handleDelete = async (id) => {
   }
   
   .product-form :deep(.el-input-number .el-input__wrapper) {
-    min-height: var(--touch-target-size);
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  .product-form :deep(.el-input-number .el-input__inner) {
+    font-size: 16px;
+  }
+
+  .product-form :deep(.el-autocomplete .el-input__wrapper) {
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  .product-form :deep(.el-autocomplete .el-input__inner) {
+    font-size: 16px;
   }
   
   /* 开关移动端优化 */
-  .el-switch {
-    min-width: 44px;
-    min-height: var(--touch-target-size);
+  .status-wrapper .el-switch {
+    min-width: 50px;
+    min-height: 28px;
+  }
+
+  .status-wrapper .el-switch :deep(.el-switch__core) {
+    min-width: 50px;
+    height: 28px;
+  }
+
+  .status-wrapper .el-switch :deep(.el-switch__action) {
+    width: 24px;
+    height: 24px;
   }
   
-  /* 操作按钮移动端优化 */
-  .action-buttons {
-    flex-direction: column;
-    gap: var(--spacing-xs);
+  /* 表单提示移动端优化 */
+  .form-hint {
+    font-size: 12px;
+    padding: 8px 12px;
+    line-height: 1.5;
+    margin-top: 8px;
   }
-  
-  .action-buttons .el-button {
+
+  .form-hint .el-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  .form-hint span {
+    flex: 1;
+    word-break: break-word;
+  }
+
+  .product-name-wrapper {
+    min-height: auto;
+  }
+
+  .form-hint-container {
+    min-height: auto;
+  }
+
+  /* 日期选择器移动端优化 */
+  .product-form :deep(.el-date-editor) {
+    width: 100% !important;
+  }
+
+  .product-form :deep(.el-date-editor .el-input__wrapper) {
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  .product-form :deep(.el-date-editor .el-input__inner) {
+    font-size: 16px;
+  }
+
+  /* 对话框底部按钮移动端优化 */
+  .dialog-footer-buttons {
     width: 100%;
-    min-height: var(--touch-target-size);
+    gap: 12px;
+  }
+
+  .dialog-footer-buttons .el-button {
+    flex: 1;
+    height: 48px;
+    min-height: 48px;
+    font-size: 16px;
+    border-radius: 12px;
+  }
+
+  /* 产品转移日期对话框移动端优化 */
+  .el-dialog[aria-label="选择产品转移日期"] {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    max-height: 100vh;
+    height: 100vh;
+    border-radius: 0;
+  }
+
+  .el-dialog[aria-label="选择产品转移日期"] :deep(.el-dialog__body) {
+    padding: 16px;
+    max-height: calc(100vh - 140px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }
 </style>
