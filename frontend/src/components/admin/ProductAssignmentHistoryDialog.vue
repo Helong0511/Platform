@@ -317,7 +317,7 @@ const handleClose = () => {
         confirmButtonText: '确定关闭',
         cancelButtonText: '取消',
         type: 'warning',
-        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
+        appendToBody: true, // 确保弹窗附加到 body，避免被对话框遮挡
         zIndex: 3001 // 确保 z-index 高于对话框（3000）
       }
     ).then(() => {
@@ -627,21 +627,26 @@ const validateAssignmentsState = (assignmentsList) => {
 
 // 批量保存所有修改
 const handleBatchSave = async () => {
+  logger.info('批量保存按钮被点击');
+  
   if (pendingChanges.value.size === 0) {
     ElMessage.info('没有需要保存的修改');
     return;
   }
   
+  logger.info(`准备保存 ${pendingChanges.value.size} 条修改`);
+  
   // 先进行验证
   const validation = validateAllChanges();
   if (!validation.valid) {
+    logger.warn('验证失败:', validation.errors);
     ElMessageBox.alert(
       `验证失败，发现以下问题：\n\n${validation.errors.join('\n')}\n\n请修正后重试。`,
       '验证失败',
       {
         type: 'error',
         confirmButtonText: '确定',
-        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
+        appendToBody: true, // 确保弹窗附加到 body，避免被对话框遮挡
         zIndex: 3001 // 确保 z-index 高于对话框（3000）
       }
     );
@@ -650,6 +655,7 @@ const handleBatchSave = async () => {
   
   // 确认保存
   try {
+    logger.info('显示确认弹窗');
     await ElMessageBox.confirm(
       `确定要保存 ${pendingChanges.value.size} 条修改吗？保存后将进行完整的时间连贯性验证。`,
       '确认保存',
@@ -657,12 +663,14 @@ const handleBatchSave = async () => {
         confirmButtonText: '确定保存',
         cancelButtonText: '取消',
         type: 'warning',
-        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
+        appendToBody: true, // 确保弹窗附加到 body，避免被对话框遮挡
         zIndex: 3001 // 确保 z-index 高于对话框（3000）
       }
     );
-  } catch {
+    logger.info('用户确认保存');
+  } catch (error) {
     // 用户取消
+    logger.info('用户取消保存');
     return;
   }
   
@@ -772,7 +780,7 @@ const handleBatchSave = async () => {
           type: 'error',
           confirmButtonText: '确定',
           dangerouslyUseHTMLString: false,
-          appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
+          appendToBody: true, // 确保弹窗附加到 body，避免被对话框遮挡
           zIndex: 3001 // 确保 z-index 高于对话框（3000）
         }
       );
@@ -799,7 +807,7 @@ const handleDiscardAll = async () => {
         confirmButtonText: '确定放弃',
         cancelButtonText: '取消',
         type: 'warning',
-        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
+        appendToBody: true, // 确保弹窗附加到 body，避免被对话框遮挡
         zIndex: 3001 // 确保 z-index 高于对话框（3000）
       }
     );
