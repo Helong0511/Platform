@@ -6,6 +6,8 @@
     @close="handleClose"
     class="product-management-dialog"
     :show-close="true"
+    align-center
+    :center="true"
   >
     <template #header>
       <div class="dialog-header">
@@ -1458,6 +1460,15 @@ const handleDelete = async (id) => {
   display: flex;
   flex-direction: column;
   max-height: 90vh;
+  margin: 5vh auto !important;
+  top: 0;
+  transform: translateY(0);
+}
+
+.product-management-dialog :deep(.el-dialog__wrapper) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .product-management-dialog :deep(.el-dialog__header) {
@@ -1895,7 +1906,9 @@ const handleDelete = async (id) => {
   .product-management-dialog :deep(.el-dialog) {
     width: 95% !important;
     max-width: 1400px;
-    margin: 5vh auto;
+    margin: 5vh auto !important;
+    top: 0;
+    transform: translateY(0);
   }
 }
 
@@ -1903,7 +1916,16 @@ const handleDelete = async (id) => {
   .product-management-dialog :deep(.el-dialog) {
     width: 95% !important;
     max-width: 95% !important;
-    margin: var(--spacing-md) auto !important;
+    margin: 2vh auto !important;
+    top: 0;
+    transform: translateY(0);
+    max-height: 96vh;
+  }
+  
+  .product-management-dialog :deep(.el-dialog__wrapper) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   
   .product-management-dialog :deep(.el-dialog__header) {
