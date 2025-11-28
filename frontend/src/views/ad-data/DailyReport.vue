@@ -243,6 +243,20 @@ const getSummaries = (param) => {
         const totalClick = data.reduce((sum, item) => sum + (Number(item.click_count) || 0), 0);
         const rate = totalDisplay > 0 ? (totalClick / totalDisplay * 100) : 0;
         sums[index] = `${rate.toFixed(2)}%`;
+      } else if (prop === 'viewability_rate') {
+        // 可见率：使用加权平均（基于点击数）
+        let totalWeighted = 0;
+        let totalWeight = 0;
+        data.forEach(item => {
+          const viewabilityRate = Number(item.viewability_rate) || 0;
+          const clickCount = Number(item.click_count) || 0;
+          if (viewabilityRate > 0 && clickCount > 0) {
+            totalWeighted += viewabilityRate * clickCount;
+            totalWeight += clickCount;
+          }
+        });
+        const rate = totalWeight > 0 ? (totalWeighted / totalWeight) : 0;
+        sums[index] = `${rate.toFixed(2)}%`;
       } else if (prop === 'ecpm_after_deduct') {
         // eCPM(扣) = (收益(扣)总和 / 展示数总和) * 1000
         const totalDisplay = data.reduce((sum, item) => sum + (Number(item.display_count) || 0), 0);
