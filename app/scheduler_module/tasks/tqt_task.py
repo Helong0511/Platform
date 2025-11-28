@@ -202,7 +202,7 @@ async def tqt_api_task() -> None:
                         async with AsyncSessionLocal() as db:
                             # ========== 获取管理员用户（用于产品查找/创建） ==========
                             from app.scheduler_module.task_utils import get_admin_user
-                            
+
                             admin_user = await get_admin_user(db)
                             if not admin_user:
                                 logger.error("未找到管理员用户，无法处理产品，跳过本次任务")
@@ -230,26 +230,28 @@ async def tqt_api_task() -> None:
                                 source="TQT定时任务",
                                 field_mapping={
                                     # 基础字段
-                                    "date": "date",                             # 数据库: date -> API: date
-                                    "product_name": "url",                      # 产品名称 -> API: url (用于查找产品)
-                                    
+                                    "date": "date",  # 数据库: date -> API: date
+                                    "product_name": "url",  # 产品名称 -> API: url (用于查找产品)
+
                                     # 国家代码字段（如果TQT API返回）
-                                    "country_code": "country_code",             # 数据库: country_code -> API: country_code (可选，默认'ZZ')
-                                    
+                                    "country_code": "country_code",
+                                    # 数据库: country_code -> API: country_code (可选，默认'ZZ')
+
                                     # 统计数据字段（对应数据库字段）
-                                    "request_count": "requests",                # 数据库: request_count -> API: requests
-                                    "match_count": "matche_que",                # 数据库: match_count -> API: matche_que
-                                    "display_count": "adimpressions",           # 数据库: display_count -> API: adimpressions
-                                    "click_count": "clicks",                    # 数据库: click_count -> API: clicks
-                                    
+                                    "request_count": "requests",  # 数据库: request_count -> API: requests
+                                    "match_count": "matche_que",  # 数据库: match_count -> API: matche_que
+                                    "display_count": "adimpressions",  # 数据库: display_count -> API: adimpressions
+                                    "click_count": "clicks",  # 数据库: click_count -> API: clicks
+
                                     # 收益字段（对应数据库字段）
-                                    "revenue_before_deduct": "estirevenue",     # 数据库: revenue_before_deduct -> API: estirevenue
-                                    "ecpm_before_deduct": "ecpm",               # 数据库: ecpm_before_deduct -> API: ecpm (可选)
-                                    
+                                    "revenue_before_deduct": "estirevenue",
+                                    # 数据库: revenue_before_deduct -> API: estirevenue
+                                    "ecpm_before_deduct": "ecpm",  # 数据库: ecpm_before_deduct -> API: ecpm (可选)
+
                                     # 比率字段（可选，会自动计算）
-                                    "coverage_rate": "coverage",                # 覆盖率（可选，会自动计算）
-                                    "display_rate": "display_rate",             # 展示率（可选，会自动计算）
-                                    "click_rate": "ctr",                        # 点击率（可选，会自动计算）
+                                    "coverage_rate": "coverage",  # 覆盖率（可选，会自动计算）
+                                    "display_rate": "display_rate",  # 展示率（可选，会自动计算）
+                                    "click_rate": "ctr",  # 点击率（可选，会自动计算）
                                 }
                             )
 
@@ -271,7 +273,7 @@ async def tqt_api_task() -> None:
                             updated_count = result.get("updated_count", 0)
                             skipped_count = result.get("skipped_count", 0)
                             error_count = result.get("error_count", 0)
-                            
+
                             # 使用工具函数格式化结果摘要
                             from app.scheduler_module.task_utils import format_result_summary
                             result_summary = format_result_summary(
@@ -291,12 +293,12 @@ async def tqt_api_task() -> None:
                                 telegram_msg += f"执行时间: {current_time_str}\n"
                                 telegram_msg += f"✅ 成功插入: {inserted_count} 条\n"
                                 telegram_msg += f"✅ 成功更新: {updated_count} 条"
-                                
+
                                 if skipped_count > 0:
                                     telegram_msg += f"\n⏭️ 跳过重复: {skipped_count} 条"
                                 if error_count > 0:
                                     telegram_msg += f"\n❌ 错误: {error_count} 条"
-                                
+
                                 # 使用 await 发送消息，设置超时避免阻塞太久
                                 # send_telegram_message 内部已有完整的容错处理
                                 try:
@@ -304,7 +306,8 @@ async def tqt_api_task() -> None:
                                         send_telegram_message(telegram_msg),
                                         timeout=5.0
                                     )
-                                    logger.info(f"Telegram 通知发送成功: TQT任务, 插入:{inserted_count}, 更新:{updated_count}")
+                                    logger.info(
+                                        f"Telegram 通知发送成功: TQT任务, 插入:{inserted_count}, 更新:{updated_count}")
                                 except asyncio.TimeoutError:
                                     logger.warning(f"发送 Telegram 通知超时: TQT任务")
                                 # 其他异常已在 send_telegram_message 内部处理，这里不需要捕获

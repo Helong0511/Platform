@@ -213,7 +213,7 @@ async def tbsj_api_task() -> None:
                         async with AsyncSessionLocal() as db:
                             # ========== 获取管理员用户（用于产品查找/创建） ==========
                             from app.scheduler_module.task_utils import get_admin_user
-                            
+
                             admin_user = await get_admin_user(db)
                             if not admin_user:
                                 logger.error("未找到管理员用户，无法处理产品，跳过本次任务")
