@@ -355,9 +355,8 @@ async def process_api_ad_data(
                 # 点击数
                 recognized_data[key]["click_count"] += item_click_count
 
-                # CPC（如果字段映射存在则累加）
-                if field_mapping and "cpc" in field_mapping:
-                    recognized_data[key]["cpc"] += item_cpc
+                # CPC：如果有字段映射，保存到items中用于后续计算；如果没有字段映射，将在分组后根据公式计算
+                # 不累加，保存单个值到items中
 
                 # PageViews（如果字段映射存在则累加）
                 if field_mapping and "pageviews" in field_mapping:
@@ -365,11 +364,17 @@ async def process_api_ad_data(
 
                 # 收益
                 recognized_data[key]["revenue"] += item_revenue
-                recognized_data[key]["items"].append({
+                # 保存原始数据项，包括CPC（如果有字段映射）
+                item_data = {
                     "revenue": item_revenue,
                     "display_count": item_display_count,
-                    "ecpm": item_ecpm
-                })
+                    "ecpm": item_ecpm,
+                    "click_count": item_click_count
+                }
+                # 如果有字段映射且有CPC值，保存到items中
+                if field_mapping and "cpc" in field_mapping and item_cpc > 0:
+                    item_data["cpc"] = item_cpc
+                recognized_data[key]["items"].append(item_data)
             else:
                 # 无法识别国家代码，按 (date_str, product_name) 分组累加
                 key = (item_date_str, item_product_name)
@@ -401,9 +406,8 @@ async def process_api_ad_data(
                 # 点击数
                 unrecognized_data[key]["click_count"] += item_click_count
 
-                # CPC（如果字段映射存在则累加）
-                if field_mapping and "cpc" in field_mapping:
-                    unrecognized_data[key]["cpc"] += item_cpc
+                # CPC：如果有字段映射，保存到items中用于后续计算；如果没有字段映射，将在分组后根据公式计算
+                # 不累加，保存单个值到items中
 
                 # PageViews（如果字段映射存在则累加）
                 if field_mapping and "pageviews" in field_mapping:
@@ -411,11 +415,17 @@ async def process_api_ad_data(
 
                 # 收益
                 unrecognized_data[key]["revenue"] += item_revenue
-                unrecognized_data[key]["items"].append({
+                # 保存原始数据项，包括CPC（如果有字段映射）
+                item_data = {
                     "revenue": item_revenue,
                     "display_count": item_display_count,
-                    "ecpm": item_ecpm
-                })
+                    "ecpm": item_ecpm,
+                    "click_count": item_click_count
+                }
+                # 如果有字段映射且有CPC值，保存到items中
+                if field_mapping and "cpc" in field_mapping and item_cpc > 0:
+                    item_data["cpc"] = item_cpc
+                unrecognized_data[key]["items"].append(item_data)
 
                 # 只有当提供了国家代码输入但无法识别时，才发送Telegram通知
                 # 如果没有提供国家代码输入，这是正常的（可能数据源就没有提供），不需要通知
@@ -494,12 +504,42 @@ async def process_api_ad_data(
                 # 计算累加后的eCPM（加权平均）
                 total_revenue = grouped_data["revenue"]
                 total_display = grouped_data["display_count"]
+                total_clicks = grouped_data["click_count"]
                 if total_display > 0:
                     calculated_ecpm = (total_revenue / total_display * 1000)
                 else:
                     calculated_ecpm = 0.0
 
                 final_ecpm = calculated_ecpm
+
+                # 计算CPC：对于同一时间、产品、国家的多条数据，先累加收益和点击数，然后统一计算
+                # 如果有字段映射且有CPC值，使用加权平均（基于点击数）；否则使用公式计算
+                calculated_cpc = 0.0
+                if field_mapping and "cpc" in field_mapping:
+                    # 有字段映射，检查items中是否有CPC值
+                    has_cpc_values = False
+                    total_cpc_weighted = 0.0
+                    total_weight = 0
+                    for item in grouped_data.get("items", []):
+                        if "cpc" in item and item.get("cpc", 0) > 0:
+                            has_cpc_values = True
+                            item_clicks = item.get("click_count", 0)
+                            if item_clicks > 0:
+                                total_cpc_weighted += item["cpc"] * item_clicks
+                                total_weight += item_clicks
+                    if has_cpc_values and total_weight > 0:
+                        # 有CPC值，使用加权平均（基于点击数）
+                        calculated_cpc = total_cpc_weighted / total_weight
+                    else:
+                        # 有字段映射但没有CPC值，使用累加后的数据计算：CPC = 累加后的收益 / 累加后的点击数
+                        if total_clicks > 0:
+                            calculated_cpc = total_revenue / total_clicks
+                else:
+                    # 没有字段映射，使用累加后的数据计算：CPC = 累加后的收益 / 累加后的点击数
+                    if total_clicks > 0:
+                        calculated_cpc = total_revenue / total_clicks
+                # 更新分组数据中的CPC值
+                grouped_data["cpc"] = calculated_cpc
 
                 # 计算减扣后的值（截断到两位小数，不使用四舍五入）
                 ecpm_after_deduct = truncate_to_2_decimal(final_ecpm * (1 - ecpm_deduct_ratio))
@@ -558,13 +598,12 @@ async def process_api_ad_data(
                         update_fields.append(f"点击数: {existing_data.click_count} -> {grouped_data['click_count']}")
                         existing_data.click_count = grouped_data["click_count"]
 
-                    # CPC（如果字段映射存在则更新）
-                    if field_mapping and "cpc" in field_mapping:
-                        grouped_cpc = grouped_data.get("cpc", 0.0)
-                        if abs(existing_data.cpc - grouped_cpc) > 0.01:
-                            need_update = True
-                            update_fields.append(f"CPC: {existing_data.cpc:.2f} -> {grouped_cpc:.2f}")
-                            existing_data.cpc = grouped_cpc
+                    # CPC（有字段映射则使用加权平均，否则使用公式计算：CPC = 收益 / 点击数）
+                    grouped_cpc = grouped_data.get("cpc", 0.0)
+                    if abs(existing_data.cpc - grouped_cpc) > 0.01:
+                        need_update = True
+                        update_fields.append(f"CPC: {existing_data.cpc:.2f} -> {grouped_cpc:.2f}")
+                        existing_data.cpc = grouped_cpc
 
                     # PageViews（如果字段映射存在则更新）
                     if field_mapping and "pageviews" in field_mapping:
@@ -645,7 +684,7 @@ async def process_api_ad_data(
                         match_count=grouped_data["match_count"],
                         display_count=grouped_data["display_count"],
                         click_count=grouped_data["click_count"],
-                        cpc=grouped_data.get("cpc", 0.0) if (field_mapping and "cpc" in field_mapping) else 0.0,
+                        cpc=grouped_data.get("cpc", 0.0),  # CPC：有字段映射则使用加权平均，否则使用公式计算（收益/点击数）
                         pageviews=grouped_data.get("pageviews", 0) if (field_mapping and "pageviews" in field_mapping) else 0,
                         ecpm_before_deduct=final_ecpm,
                         ecpm_after_deduct=ecpm_after_deduct,
@@ -736,12 +775,42 @@ async def process_api_ad_data(
                 # 计算累加后的eCPM（加权平均）
                 total_revenue = grouped_data["revenue"]
                 total_display = grouped_data["display_count"]
+                total_clicks = grouped_data["click_count"]
                 if total_display > 0:
                     calculated_ecpm = (total_revenue / total_display * 1000)
                 else:
                     calculated_ecpm = 0.0
 
                 final_ecpm = calculated_ecpm
+
+                # 计算CPC：对于同一时间、产品、国家的多条数据，先累加收益和点击数，然后统一计算
+                # 如果有字段映射且有CPC值，使用加权平均（基于点击数）；否则使用公式计算
+                calculated_cpc = 0.0
+                if field_mapping and "cpc" in field_mapping:
+                    # 有字段映射，检查items中是否有CPC值
+                    has_cpc_values = False
+                    total_cpc_weighted = 0.0
+                    total_weight = 0
+                    for item in grouped_data.get("items", []):
+                        if "cpc" in item and item.get("cpc", 0) > 0:
+                            has_cpc_values = True
+                            item_clicks = item.get("click_count", 0)
+                            if item_clicks > 0:
+                                total_cpc_weighted += item["cpc"] * item_clicks
+                                total_weight += item_clicks
+                    if has_cpc_values and total_weight > 0:
+                        # 有CPC值，使用加权平均（基于点击数）
+                        calculated_cpc = total_cpc_weighted / total_weight
+                    else:
+                        # 有字段映射但没有CPC值，使用累加后的数据计算：CPC = 累加后的收益 / 累加后的点击数
+                        if total_clicks > 0:
+                            calculated_cpc = total_revenue / total_clicks
+                else:
+                    # 没有字段映射，使用累加后的数据计算：CPC = 累加后的收益 / 累加后的点击数
+                    if total_clicks > 0:
+                        calculated_cpc = total_revenue / total_clicks
+                # 更新分组数据中的CPC值
+                grouped_data["cpc"] = calculated_cpc
 
                 # 计算减扣后的值（截断到两位小数，不使用四舍五入）
                 ecpm_after_deduct = truncate_to_2_decimal(final_ecpm * (1 - ecpm_deduct_ratio))
@@ -803,13 +872,12 @@ async def process_api_ad_data(
                         update_fields.append(f"点击数: {existing_data.click_count} -> {grouped_data['click_count']}")
                         existing_data.click_count = grouped_data["click_count"]
 
-                    # CPC（如果字段映射存在则更新）
-                    if field_mapping and "cpc" in field_mapping:
-                        grouped_cpc = grouped_data.get("cpc", 0.0)
-                        if abs(existing_data.cpc - grouped_cpc) > 0.01:
-                            need_update = True
-                            update_fields.append(f"CPC: {existing_data.cpc:.2f} -> {grouped_cpc:.2f}")
-                            existing_data.cpc = grouped_cpc
+                    # CPC（有字段映射则使用加权平均，否则使用公式计算：CPC = 收益 / 点击数）
+                    grouped_cpc = grouped_data.get("cpc", 0.0)
+                    if abs(existing_data.cpc - grouped_cpc) > 0.01:
+                        need_update = True
+                        update_fields.append(f"CPC: {existing_data.cpc:.2f} -> {grouped_cpc:.2f}")
+                        existing_data.cpc = grouped_cpc
 
                     # PageViews（如果字段映射存在则更新）
                     if field_mapping and "pageviews" in field_mapping:
@@ -889,7 +957,7 @@ async def process_api_ad_data(
                         match_count=grouped_data["match_count"],
                         display_count=grouped_data["display_count"],
                         click_count=grouped_data["click_count"],
-                        cpc=grouped_data.get("cpc", 0.0) if (field_mapping and "cpc" in field_mapping) else 0.0,
+                        cpc=grouped_data.get("cpc", 0.0),  # CPC：有字段映射则使用加权平均，否则使用公式计算（收益/点击数）
                         pageviews=grouped_data.get("pageviews", 0) if (field_mapping and "pageviews" in field_mapping) else 0,
                         ecpm_before_deduct=final_ecpm,
                         ecpm_after_deduct=ecpm_after_deduct,

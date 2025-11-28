@@ -112,6 +112,8 @@ try:
             pro = []
             country = []
             err_co = []
+
+            cpc = 0
             for item in ad_data:
                 if len(item.get('Country_Code', '')) > 2:
                     if item.get('Country_Code', '') not in err_co:
@@ -141,9 +143,10 @@ try:
                 # print(f"可见时长(毫秒)：{item.get('ActiveViewTime', '')}")
                 # print(f"CTR：{item.get('CTR', 0)}")
                 # print(f"ecpm：{item.get('eCPM', 0)}")
-                # print(f"cpc：{item.get('CPC', 0)}")
+                print(f"cpc：{item.get('CPC', 0)}")
                 # print(f"产品名称：{item.get('ProductName', '')}")
                 print(f"覆盖率：{item.get('AdRequestsCoverage', 0)}")
+                cpc = cpc + item.get('CPC', 0)
 
             co_in = []
             for code in country:
@@ -166,6 +169,7 @@ try:
             print(pro)
             print(err_co)
             print(len(co_in), co_in)
+            print(cpc, cpc/4)
     else:
         error_data = response.json()
         print(error_data)
