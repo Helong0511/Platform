@@ -9,7 +9,7 @@ api_key = '67b7c7fac2154bb8f59546d9b23058c9'
 
 try:
     today_str = datetime.today().strftime('%Y-%m-%d')
-    ext_path = f'https://crm.skymobi.online/api/adxh5?apikey={api_key}&date={today_str}&uid={api_id}&page=1&limit=500'
+    ext_path = f'https://crm.skymobi.online/api/adxh5?apikey={api_key}&date={today_str}&uid={api_id}&page=1&limit=1000'
     print(ext_path)
     # 发送POST请求
     response = requests.get(url=ext_path, timeout=10)

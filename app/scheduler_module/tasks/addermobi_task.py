@@ -203,11 +203,11 @@ async def addermobi_api_task(
                     raise Exception(f'API返回空响应: {response.text[:100]}')
 
                 # 检查API响应状态
-                # Addermobi API使用code字段：20000表示成功，其他值表示失败
+                # Addermobi API使用status字段：0表示成功，其他值表示失败
 
-                api_code = json_data.get('status')  # 获取code字段
+                api_code = json_data.get('status')  # 获取status字段
 
-                # 判断API是否成功：code=0表示成功
+                # 判断API是否成功：status=0表示成功
                 if api_code == 0:
                     # API调用成功，获取数据列表
                     # Addermobi API数据在 rows 字段中（可能是列表或字典）
@@ -311,7 +311,7 @@ async def addermobi_api_task(
                                     "display_rate": "ad_impression_rate",
 
                                     # 点击率（可选，会自动计算）
-                                    "click_rate": "ctr",
+                                    "click_rate": "CTR",
 
                                     # 收益
                                     "revenue_before_deduct": "EstimatedEarnings"
@@ -384,29 +384,23 @@ async def addermobi_api_task(
                         # 保存执行结果到全局存储
                         set_task_result(ADDERMOBI_API_TASK_NAME, "执行成功: 暂无产品数据")
                 else:
-                    # API返回错误状态（state != 'ok' 或 code != 200）
-                    api_state = json_data.get('state')
-                    api_code = json_data.get('code')
-                    error_message = json_data.get('message', json_data.get('msg', '未知错误'))
+                    # API返回错误状态（status != 0）
+                    # Addermobi API使用status字段：0表示成功，其他值表示失败
+                    api_status = json_data.get('status')
+                    error_message = json_data.get('msg', json_data.get('message', '未知错误'))
 
                     # 构建错误详情
-                    if api_state:
-                        error_details = f'state={api_state}'
-                        if api_code:
-                            error_details += f', code={api_code}'
+                    if api_status is not None:
+                        error_details = f'status={api_status}'
                         if error_message and error_message != '未知错误':
-                            error_details += f', message={error_message}'
-                    elif api_code:
-                        error_details = f'code={api_code}'
-                        if error_message and error_message != '未知错误':
-                            error_details += f', message={error_message}'
+                            error_details += f', msg={error_message}'
                     else:
-                        # 既没有state也没有code，说明响应格式异常
+                        # 没有status字段，说明响应格式异常
                         logger.error(
-                            f'Addermobi API获取数据响应格式异常: 缺少state和code字段, 完整响应={json_data}')
-                        logger.warning(f'[Addermobi API获取数据定时任务执行] API响应格式异常: 缺少state和code字段')
+                            f'Addermobi API获取数据响应格式异常: 缺少status字段, 完整响应={json_data}')
+                        logger.warning(f'[Addermobi API获取数据定时任务执行] API响应格式异常: 缺少status字段')
                         logger.info(f'Addermobi API获取数据完整响应内容: {json_data}')
-                        raise Exception(f'API响应格式异常: 缺少state和code字段, 响应内容={str(json_data)[:200]}')
+                        raise Exception(f'API响应格式异常: 缺少status字段, 响应内容={str(json_data)[:200]}')
 
                     # 记录完整的错误信息
                     logger.error(f'Addermobi API获取数据业务错误: {error_details}')
