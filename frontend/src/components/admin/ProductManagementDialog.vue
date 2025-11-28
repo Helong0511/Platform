@@ -2071,17 +2071,44 @@ const handleDelete = async (id) => {
   .product-table {
     font-size: 13px;
     border-radius: 8px;
+    min-width: 100%;
+    width: 100%;
+  }
+
+  .product-table :deep(.el-table) {
+    min-width: 800px; /* 确保表格有最小宽度，可以横向滚动 */
+    width: 100%;
   }
 
   .product-table :deep(.el-table__header-wrapper) {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
   }
 
   .product-table :deep(.el-table__body-wrapper) {
     overflow-x: auto;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  /* 表格容器添加滚动提示 */
+  .table-wrapper {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .table-wrapper::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 30px;
+    background: linear-gradient(to right, transparent, rgba(0, 0, 0, 0.05));
+    pointer-events: none;
+    z-index: 1;
   }
 
   /* 移动端滚动条优化 */
@@ -2114,22 +2141,78 @@ const handleDelete = async (id) => {
   }
   
   .product-table :deep(.el-table__cell) {
-    padding: 10px 8px;
+    padding: 10px 6px;
     word-break: break-word;
-    white-space: normal;
+    white-space: nowrap;
+    min-width: 60px;
   }
   
   .product-table :deep(.el-table__header th) {
-    font-size: 12px;
-    padding: 10px 8px;
+    font-size: 11px;
+    padding: 8px 6px;
     white-space: nowrap;
     font-weight: 600;
+    min-width: 60px;
   }
   
   .product-table :deep(.el-table__body td) {
-    font-size: 12px;
-    padding: 10px 8px;
+    font-size: 11px;
+    padding: 8px 6px;
     vertical-align: middle;
+    white-space: nowrap;
+    min-width: 60px;
+  }
+
+  /* ID列优化 */
+  .product-table :deep(.id-column) {
+    width: 50px !important;
+    min-width: 50px !important;
+    max-width: 50px !important;
+  }
+
+  /* 产品名称列优化 */
+  .product-table :deep(.name-column) {
+    min-width: 150px !important;
+    max-width: 200px !important;
+  }
+
+  /* eCPM列优化 */
+  .product-table :deep(.ecpm-column) {
+    width: 80px !important;
+    min-width: 80px !important;
+    max-width: 80px !important;
+  }
+
+  /* 收益列优化 */
+  .product-table :deep(.revenue-column) {
+    width: 70px !important;
+    min-width: 70px !important;
+    max-width: 70px !important;
+  }
+
+  /* 状态列优化 */
+  .product-table :deep(.status-column) {
+    width: 70px !important;
+    min-width: 70px !important;
+    max-width: 70px !important;
+  }
+
+  /* 时间列优化 */
+  .product-table :deep(.time-column) {
+    width: 120px !important;
+    min-width: 120px !important;
+    max-width: 120px !important;
+  }
+
+  /* 操作列优化 */
+  .product-table :deep(.action-column) {
+    width: 120px !important;
+    min-width: 120px !important;
+    max-width: 120px !important;
+    position: sticky;
+    right: 0;
+    background: var(--bg-primary);
+    z-index: 10;
   }
 
   .product-table :deep(.el-table__header-cell) {
@@ -2145,67 +2228,107 @@ const handleDelete = async (id) => {
 
   /* 产品名称单元格移动端优化 */
   .product-name-cell {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    max-width: 200px;
+    overflow: hidden;
   }
 
   .product-icon {
-    font-size: 16px;
+    font-size: 14px;
+    flex-shrink: 0;
   }
 
   .product-name {
-    font-size: 12px;
-    line-height: 1.4;
-    word-break: break-all;
+    font-size: 11px;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
   }
 
   /* 时间单元格移动端优化 */
   .time-cell {
-    flex-direction: column;
-    align-items: flex-start;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .time-cell .el-icon {
-    font-size: 14px;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  .time-cell span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* 操作按钮移动端优化 */
   .action-buttons.mobile-actions {
+    display: flex;
     flex-direction: row;
-    gap: 6px;
+    gap: 4px;
     justify-content: center;
-    flex-wrap: wrap;
+    align-items: center;
+    flex-wrap: nowrap;
+    width: 100%;
   }
 
   .action-buttons.mobile-actions .action-btn {
-    width: auto;
-    min-width: 36px;
-    height: 36px;
-    min-height: 36px;
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
     padding: 0;
     border-radius: 50%;
     margin: 0;
+    flex-shrink: 0;
   }
 
   .action-buttons.mobile-actions .action-btn .el-icon {
     margin-right: 0;
-    font-size: 16px;
+    font-size: 14px;
   }
 
   .action-buttons.mobile-actions .action-btn.is-circle {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
+  }
+
+  /* 确保操作按钮在固定列中正确显示 */
+  .product-table :deep(.action-column .action-buttons) {
+    justify-content: center;
+    width: 100%;
   }
 
   /* 标签移动端优化 */
   .product-table :deep(.el-tag) {
-    font-size: 11px;
-    padding: 4px 8px;
-    line-height: 1.4;
+    font-size: 10px;
+    padding: 2px 6px;
+    line-height: 1.3;
     white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 确保标签不会换行 */
+  .product-table :deep(.el-tag span) {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
   }
 
   /* 表格行触摸反馈优化 */
