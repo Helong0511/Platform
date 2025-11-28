@@ -81,7 +81,7 @@ async def skymobi_api_task(
             else:
                 date_str = today_str
         
-        Skymobi_url = f'https://crm.skymobi.online/api/adxh5?apikey={api_key}&date={date_str}&uid={api_id}&page=1&limit=500'
+        Skymobi_url = f'https://crm.skymobi.online/api/adxh5?apikey={api_key}&date={date_str}&uid={api_id}&page=1&limit=1000'
 
         # 使用异步HTTP客户端调用Skymobi API
         try:

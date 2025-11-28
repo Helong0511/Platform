@@ -162,7 +162,7 @@ async def addermobi_api_task(
 
         tbsj_params = {
             "page": 1,
-            "rows": 500,
+            "rows": 1000,
             "sort": "Revenue_time,Product_id",
             "order": "desc",
             "wheres": json.dumps(p1)

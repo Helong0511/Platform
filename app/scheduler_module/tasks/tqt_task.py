@@ -134,7 +134,7 @@ async def tqt_api_task(
             "startDate": tqt_start_date,
             "endDate": tqt_end_date,
             "page": 1,
-            "pageSize": 500,
+            "pageSize": 1000,
             "type": "country"
         }
 

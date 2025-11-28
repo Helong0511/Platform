@@ -152,7 +152,7 @@ async def tbsj_api_task(
         
         tbsj_params = {
             "page": 1,
-            "limit": 5000,
+            "limit": 1000,
             "start": tbsj_start,
             "end": tbsj_end
         }

@@ -309,6 +309,14 @@ const editDialogVisible = ref(false);
 const editFormRef = ref(null);
 const currentEditTask = ref(null);
 const saving = ref(false);
+
+// 手动触发任务对话框相关
+const triggerDialogVisible = ref(false);
+const currentTriggerTask = ref(null);
+const triggerParams = ref({
+  start_date: '',
+  end_date: ''
+});
 const editForm = reactive({
   task_name: '',
   cron_expression: '',
