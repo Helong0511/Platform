@@ -82,6 +82,7 @@
         <el-table-column prop="display_rate" label="展示率" :formatter="formatPercentage" sortable="custom"></el-table-column>
         <el-table-column prop="click_count" label="点击数" sortable="custom"></el-table-column>
         <el-table-column prop="click_rate" label="点击率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column prop="viewability_rate" label="可见率" :formatter="formatPercentage" sortable="custom"></el-table-column>
         <el-table-column prop="cpc" label="CPC" :formatter="formatCurrency" sortable="custom"></el-table-column>
         <el-table-column prop="pageviews" label="PageViews" sortable="custom"></el-table-column>
         <el-table-column prop="ecpm_after_deduct" :label="isAdmin ? 'eCPM(扣)' : 'eCPM'" :formatter="formatCurrency" sortable="custom"></el-table-column>

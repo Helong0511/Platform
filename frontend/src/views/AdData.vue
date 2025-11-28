@@ -112,6 +112,7 @@
         <el-table-column prop="display_rate" label="展示率" :formatter="formatPercentage" sortable="custom"></el-table-column>
         <el-table-column prop="click_count" label="点击数" sortable="custom"></el-table-column>
         <el-table-column prop="click_rate" label="点击率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column prop="viewability_rate" label="可见率" :formatter="formatPercentage" sortable="custom"></el-table-column>
         <el-table-column prop="cpc" label="CPC" :formatter="formatCurrency" sortable="custom"></el-table-column>
         <el-table-column prop="pageviews" label="PageViews" sortable="custom"></el-table-column>
         <el-table-column prop="ecpm_after_deduct" :label="isAdmin ? 'eCPM(扣)' : 'eCPM'" :formatter="formatCurrency" sortable="custom"></el-table-column>
@@ -196,6 +197,9 @@
         </el-form-item>
         <el-form-item label="点击率" prop="click_rate">
           <el-input v-model.number="editForm.click_rate" name="click_rate" type="number" step="0.01" min="0" placeholder="请输入点击率"></el-input>
+        </el-form-item>
+        <el-form-item label="可见率" prop="viewability_rate">
+          <el-input v-model.number="editForm.viewability_rate" name="viewability_rate" type="number" step="0.01" min="0" placeholder="请输入可见率"></el-input>
         </el-form-item>
         <el-form-item label="CPC" prop="cpc">
           <el-input v-model.number="editForm.cpc" name="cpc" type="number" step="0.01" min="0" placeholder="请输入CPC"></el-input>
@@ -891,6 +895,7 @@ const editForm = ref({
   display_rate: 0,
   click_count: 0,
   click_rate: 0,
+  viewability_rate: 0,
   cpc: 0,
   pageviews: 0,
   ecpm_after_deduct: 0,
@@ -985,6 +990,7 @@ const handleEdit = async (row) => {
     display_rate: row.display_rate || 0,
     click_count: row.click_count || 0,
     click_rate: row.click_rate || 0,
+    viewability_rate: row.viewability_rate || 0,
     cpc: row.cpc || 0,
     pageviews: row.pageviews || 0,
     ecpm_after_deduct: row.ecpm_after_deduct || 0,
@@ -1110,6 +1116,7 @@ const saveEdit = async () => {
       match_count: editForm.value.match_count,
       display_count: editForm.value.display_count,
       click_count: editForm.value.click_count,
+      viewability_rate: editForm.value.viewability_rate,
       cpc: editForm.value.cpc,
       pageviews: editForm.value.pageviews,
       ecpm_after_deduct: editForm.value.ecpm_after_deduct,

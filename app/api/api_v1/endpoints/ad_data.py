@@ -230,7 +230,8 @@ async def get_ad_data(
         "revenue_before_deduct": AdData.revenue_before_deduct,
         "coverage_rate": AdData.coverage_rate,  # 覆盖率（数据库字段）
         "display_rate": AdData.display_rate,   # 展示率（数据库字段）
-        "click_rate": AdData.click_rate        # 点击率（数据库字段）
+        "click_rate": AdData.click_rate,       # 点击率（数据库字段）
+        "viewability_rate": AdData.viewability_rate  # 可见率（数据库字段）
     }
     
     # 默认排序字段
@@ -376,6 +377,7 @@ async def get_ad_data(
             (ad_data.click_count / ad_data.display_count * 100) if ad_data.display_count > 0 else 0.0,
             2
         )
+        viewability_rate = ad_data.viewability_rate if ad_data.viewability_rate is not None else 0.0
 
         # 根据用户角色决定返回哪些字段
         # 将 DateTime 转换为 date
@@ -409,6 +411,7 @@ async def get_ad_data(
             "display_rate": display_rate,
             "click_count": ad_data.click_count,
             "click_rate": click_rate,
+            "viewability_rate": round(viewability_rate, 2),
             "cpc": round(ad_data.cpc or 0.0, 2),
             "pageviews": ad_data.pageviews or 0,
             "ecpm_after_deduct": round(ad_data.ecpm_after_deduct, 4),
@@ -921,6 +924,7 @@ async def get_daily_summary(
         "coverage_rate": func.avg(AdData.coverage_rate),  # 使用平均值作为排序依据
         "display_rate": func.avg(AdData.display_rate),
         "click_rate": func.avg(AdData.click_rate),
+        "viewability_rate": func.avg(AdData.viewability_rate),
         "ecpm_after_deduct": func.sum(AdData.revenue_after_deduct),  # 使用收益排序作为eCPM的近似排序
         "revenue_after_deduct": func.sum(AdData.revenue_after_deduct),
         "revenue_before_deduct": func.sum(AdData.revenue_before_deduct)
@@ -1053,6 +1057,7 @@ async def get_daily_summary(
         total_match_count = int(row.match_count or 0)
         total_display_count = int(row.display_count or 0)
         total_click_count = int(row.click_count or 0)
+        total_viewability_rate = float(row.viewability_rate or 0.0)
         total_cpc = float(row.cpc or 0.0)
         total_pageviews = int(row.pageviews or 0)
         total_revenue_after = float(row.revenue_after_deduct or 0.0)
@@ -1106,6 +1111,7 @@ async def get_daily_summary(
             "display_rate": display_rate,
             "click_count": total_click_count,
             "click_rate": click_rate,
+            "viewability_rate": round(total_viewability_rate, 2),
             "cpc": round(total_cpc, 2),
             "pageviews": total_pageviews,
             "ecpm_after_deduct": ecpm_after_deduct,
@@ -1316,6 +1322,7 @@ async def get_ad_data_detail(
         "display_rate": display_rate,
         "click_count": ad_data.click_count,
         "click_rate": click_rate,
+        "viewability_rate": round(ad_data.viewability_rate or 0.0, 2),
         "ecpm_before_deduct": round(ad_data.ecpm_before_deduct, 4),
         "ecpm_after_deduct": round(ad_data.ecpm_after_deduct, 4),
         "revenue_before_deduct": round(ad_data.revenue_before_deduct, 4),
@@ -1361,7 +1368,7 @@ async def update_ad_data(
     # 定义允许更新的字段白名单
     allowed_fields = {
         'product_id', 'country_code', 'request_count', 'match_count', 'display_count',
-        'click_count', 'ecpm_after_deduct', 'ecpm_before_deduct',
+        'click_count', 'viewability_rate', 'ecpm_after_deduct', 'ecpm_before_deduct',
         'revenue_after_deduct', 'revenue_before_deduct'
     }
 

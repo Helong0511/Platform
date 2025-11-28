@@ -512,32 +512,50 @@ async def process_api_ad_data(
 
                 final_ecpm = calculated_ecpm
 
-                # 计算CPC：对于同一时间、产品、国家的多条数据，先累加收益和点击数，然后统一计算
-                # 如果有字段映射且有CPC值，使用加权平均（基于点击数）；否则使用公式计算
+                # 计算CPC：按照日期、产品、国家分组
+                # 如果分组内只有单一条数据：有字段映射用映射字段，没有字段映射用公式算
+                # 如果分组内有多条相同数据：累加后用算法计算
+                items_list = grouped_data.get("items", [])
+                items_count = len(items_list)
+                
                 calculated_cpc = 0.0
-                if field_mapping and "cpc" in field_mapping:
-                    # 有字段映射，检查items中是否有CPC值
-                    has_cpc_values = False
-                    total_cpc_weighted = 0.0
-                    total_weight = 0
-                    for item in grouped_data.get("items", []):
-                        if "cpc" in item and item.get("cpc", 0) > 0:
-                            has_cpc_values = True
-                            item_clicks = item.get("click_count", 0)
-                            if item_clicks > 0:
-                                total_cpc_weighted += item["cpc"] * item_clicks
-                                total_weight += item_clicks
-                    if has_cpc_values and total_weight > 0:
-                        # 有CPC值，使用加权平均（基于点击数）
-                        calculated_cpc = total_cpc_weighted / total_weight
+                if items_count == 1:
+                    # 单一条数据
+                    single_item = items_list[0]
+                    if field_mapping and "cpc" in field_mapping and "cpc" in single_item:
+                        # 有字段映射，直接用映射字段的CPC值
+                        calculated_cpc = single_item.get("cpc", 0.0)
                     else:
-                        # 有字段映射但没有CPC值，使用累加后的数据计算：CPC = 累加后的收益 / 累加后的点击数
+                        # 没有字段映射，用公式计算：CPC = 收益 / 点击数
+                        item_clicks = single_item.get("click_count", 0)
+                        item_revenue = single_item.get("revenue", 0.0)
+                        if item_clicks > 0:
+                            calculated_cpc = item_revenue / item_clicks
+                else:
+                    # 多条相同数据，累加后用算法计算
+                    if field_mapping and "cpc" in field_mapping:
+                        # 有字段映射，检查items中是否有CPC值
+                        has_cpc_values = False
+                        total_cpc_weighted = 0.0
+                        total_weight = 0
+                        for item in items_list:
+                            if "cpc" in item and item.get("cpc", 0) > 0:
+                                has_cpc_values = True
+                                item_clicks = item.get("click_count", 0)
+                                if item_clicks > 0:
+                                    total_cpc_weighted += item["cpc"] * item_clicks
+                                    total_weight += item_clicks
+                        if has_cpc_values and total_weight > 0:
+                            # 有CPC值，使用加权平均（基于点击数）
+                            calculated_cpc = total_cpc_weighted / total_weight
+                        else:
+                            # 有字段映射但没有CPC值，使用累加后的数据计算：CPC = 累加后的收益 / 累加后的点击数
+                            if total_clicks > 0:
+                                calculated_cpc = total_revenue / total_clicks
+                    else:
+                        # 没有字段映射，使用累加后的数据计算：CPC = 累加后的收益 / 累加后的点击数
                         if total_clicks > 0:
                             calculated_cpc = total_revenue / total_clicks
-                else:
-                    # 没有字段映射，使用累加后的数据计算：CPC = 累加后的收益 / 累加后的点击数
-                    if total_clicks > 0:
-                        calculated_cpc = total_revenue / total_clicks
                 # 更新分组数据中的CPC值
                 grouped_data["cpc"] = calculated_cpc
 
@@ -783,32 +801,50 @@ async def process_api_ad_data(
 
                 final_ecpm = calculated_ecpm
 
-                # 计算CPC：对于同一时间、产品、国家的多条数据，先累加收益和点击数，然后统一计算
-                # 如果有字段映射且有CPC值，使用加权平均（基于点击数）；否则使用公式计算
+                # 计算CPC：按照日期、产品、国家分组
+                # 如果分组内只有单一条数据：有字段映射用映射字段，没有字段映射用公式算
+                # 如果分组内有多条相同数据：累加后用算法计算
+                items_list = grouped_data.get("items", [])
+                items_count = len(items_list)
+                
                 calculated_cpc = 0.0
-                if field_mapping and "cpc" in field_mapping:
-                    # 有字段映射，检查items中是否有CPC值
-                    has_cpc_values = False
-                    total_cpc_weighted = 0.0
-                    total_weight = 0
-                    for item in grouped_data.get("items", []):
-                        if "cpc" in item and item.get("cpc", 0) > 0:
-                            has_cpc_values = True
-                            item_clicks = item.get("click_count", 0)
-                            if item_clicks > 0:
-                                total_cpc_weighted += item["cpc"] * item_clicks
-                                total_weight += item_clicks
-                    if has_cpc_values and total_weight > 0:
-                        # 有CPC值，使用加权平均（基于点击数）
-                        calculated_cpc = total_cpc_weighted / total_weight
+                if items_count == 1:
+                    # 单一条数据
+                    single_item = items_list[0]
+                    if field_mapping and "cpc" in field_mapping and "cpc" in single_item:
+                        # 有字段映射，直接用映射字段的CPC值
+                        calculated_cpc = single_item.get("cpc", 0.0)
                     else:
-                        # 有字段映射但没有CPC值，使用累加后的数据计算：CPC = 累加后的收益 / 累加后的点击数
+                        # 没有字段映射，用公式计算：CPC = 收益 / 点击数
+                        item_clicks = single_item.get("click_count", 0)
+                        item_revenue = single_item.get("revenue", 0.0)
+                        if item_clicks > 0:
+                            calculated_cpc = item_revenue / item_clicks
+                else:
+                    # 多条相同数据，累加后用算法计算
+                    if field_mapping and "cpc" in field_mapping:
+                        # 有字段映射，检查items中是否有CPC值
+                        has_cpc_values = False
+                        total_cpc_weighted = 0.0
+                        total_weight = 0
+                        for item in items_list:
+                            if "cpc" in item and item.get("cpc", 0) > 0:
+                                has_cpc_values = True
+                                item_clicks = item.get("click_count", 0)
+                                if item_clicks > 0:
+                                    total_cpc_weighted += item["cpc"] * item_clicks
+                                    total_weight += item_clicks
+                        if has_cpc_values and total_weight > 0:
+                            # 有CPC值，使用加权平均（基于点击数）
+                            calculated_cpc = total_cpc_weighted / total_weight
+                        else:
+                            # 有字段映射但没有CPC值，使用累加后的数据计算：CPC = 累加后的收益 / 累加后的点击数
+                            if total_clicks > 0:
+                                calculated_cpc = total_revenue / total_clicks
+                    else:
+                        # 没有字段映射，使用累加后的数据计算：CPC = 累加后的收益 / 累加后的点击数
                         if total_clicks > 0:
                             calculated_cpc = total_revenue / total_clicks
-                else:
-                    # 没有字段映射，使用累加后的数据计算：CPC = 累加后的收益 / 累加后的点击数
-                    if total_clicks > 0:
-                        calculated_cpc = total_revenue / total_clicks
                 # 更新分组数据中的CPC值
                 grouped_data["cpc"] = calculated_cpc
 

@@ -123,6 +123,7 @@ class AdData(Base):
     display_rate = Column(Float, default=0.0, comment='展示率（%）')
     click_count = Column(Integer, default=0, comment='点击数')
     click_rate = Column(Float, default=0.0, comment='点击率（%）')
+    viewability_rate = Column(Float, default=0.0, comment='可见率（%）')
     cpc = Column(Float, default=0.0, comment='CPC')
     pageviews = Column(Integer, default=0, comment='PageViews')
     ecpm_before_deduct = Column(Float, default=0.0, comment='eCPM未减扣')
