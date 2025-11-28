@@ -13,7 +13,22 @@
       :size="isTablet ? '320px' : '280px'"
       class="mobile-drawer"
       :z-index="1080"
+      :modal="true"
+      :close-on-click-modal="true"
+      :close-on-press-escape="true"
+      :show-close="false"
     >
+      <div class="drawer-header">
+        <h3 class="drawer-title">菜单</h3>
+        <el-button
+          @click="drawerVisible = false"
+          :icon="Close"
+          text
+          circle
+          class="drawer-close-btn"
+          aria-label="关闭菜单"
+        ></el-button>
+      </div>
       <Sidebar @menu-click="handleMenuClick" />
     </el-drawer>
     
@@ -65,7 +80,7 @@ import { useRouter } from 'vue-router';
 import { useAuthStore } from '../../store';
 import { useDevice } from '../../composables/useDevice';
 import { ElContainer, ElAside, ElHeader, ElMain, ElIcon, ElButton, ElTag, ElMessageBox, ElDrawer } from 'element-plus';
-import { Menu, User, SwitchButton } from '@element-plus/icons-vue';
+import { Menu, User, SwitchButton, Close } from '@element-plus/icons-vue';
 import Sidebar from './Sidebar.vue';
 
 const router = useRouter();
@@ -154,6 +169,39 @@ const handleLogout = async () => {
 .mobile-drawer :deep(.el-drawer__body) {
   padding: 0;
   background-color: var(--bg-dark);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-lg) var(--spacing-xl);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: var(--bg-dark);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.drawer-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-white);
+}
+
+.drawer-close-btn {
+  color: var(--text-white);
+  min-width: var(--touch-target-size);
+  min-height: var(--touch-target-size);
+}
+
+.drawer-close-btn:hover {
+  color: var(--primary-color);
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 .header {
@@ -333,6 +381,38 @@ const handleLogout = async () => {
   
   .main-content {
     padding: var(--mobile-content-padding);
+  }
+
+  /* 移动端抽屉优化 */
+  .drawer-header {
+    padding: var(--spacing-md) var(--spacing-lg);
+  }
+
+  .drawer-title {
+    font-size: var(--font-size-base);
+  }
+
+  /* 移动端头部优化 */
+  .header-content {
+    flex-wrap: nowrap;
+  }
+
+  .header-left {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .header-title {
+    font-size: var(--font-size-base);
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .header-right {
+    flex-shrink: 0;
   }
 }
 

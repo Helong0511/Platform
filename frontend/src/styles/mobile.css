@@ -532,3 +532,387 @@
   }
 }
 
+/* ====== 移动端滚动优化 ====== */
+@media (max-width: 767px) {
+  /* 全局滚动优化 */
+  html {
+    -webkit-overflow-scrolling: touch;
+    overflow-scrolling: touch;
+  }
+
+  body {
+    -webkit-overflow-scrolling: touch;
+    overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    /* 防止下拉刷新时的橡皮筋效果 */
+    overscroll-behavior-x: none;
+  }
+
+  /* 主内容区域滚动优化 */
+  .main-content,
+  .el-main,
+  [class*="scroll"],
+  [class*="container"] {
+    -webkit-overflow-scrolling: touch;
+    overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  /* 表格滚动优化 */
+  .el-table__body-wrapper,
+  .el-table__header-wrapper {
+    -webkit-overflow-scrolling: touch;
+    overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    /* 添加滚动指示器 */
+    scrollbar-width: thin;
+  }
+
+  /* 对话框内容滚动优化 */
+  .el-dialog__body,
+  .el-drawer__body {
+    -webkit-overflow-scrolling: touch;
+    overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+}
+
+/* ====== 移动端触摸反馈优化 ====== */
+@media (max-width: 767px) {
+  /* 按钮触摸反馈 */
+  .el-button:active {
+    opacity: 0.7;
+    transform: scale(0.98);
+    transition: transform 0.1s ease, opacity 0.1s ease;
+  }
+
+  /* 菜单项触摸反馈 */
+  .el-menu-item:active,
+  .el-sub-menu__title:active {
+    opacity: 0.8;
+    background-color: rgba(255, 255, 255, 0.1);
+    transition: background-color 0.1s ease, opacity 0.1s ease;
+  }
+
+  /* 卡片触摸反馈 */
+  .el-card:active {
+    transform: scale(0.99);
+    transition: transform 0.1s ease;
+  }
+
+  /* 标签页触摸反馈 */
+  .el-tabs__item:active {
+    opacity: 0.7;
+    transition: opacity 0.1s ease;
+  }
+
+  /* 输入框聚焦优化 */
+  .el-input__wrapper:focus-within,
+  .el-select .el-input__wrapper:focus-within {
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+    transition: box-shadow 0.2s ease;
+  }
+}
+
+/* ====== 移动端表格增强优化 ====== */
+@media (max-width: 767px) {
+  /* 表格容器添加滚动提示 */
+  .el-table__body-wrapper::after,
+  .el-table__header-wrapper::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 20px;
+    background: linear-gradient(to right, transparent, rgba(0, 0, 0, 0.05));
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  .el-table__body-wrapper:hover::after,
+  .el-table__header-wrapper:hover::after {
+    opacity: 1;
+  }
+
+  /* 表格行优化 */
+  .el-table :deep(.el-table__row) {
+    transition: background-color 0.2s ease;
+  }
+
+  .el-table :deep(.el-table__row:hover) {
+    background-color: var(--bg-secondary);
+  }
+
+  .el-table :deep(.el-table__row:active) {
+    background-color: var(--bg-tertiary);
+  }
+
+  /* 表格操作列优化 */
+  .el-table :deep(.el-table__cell .el-button) {
+    margin: var(--spacing-xs);
+    min-width: auto;
+    padding: var(--spacing-xs) var(--spacing-sm);
+  }
+
+  /* 表格固定列优化 */
+  .el-table :deep(.el-table__fixed),
+  .el-table :deep(.el-table__fixed-right) {
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+  }
+}
+
+/* ====== 移动端表单增强优化 ====== */
+@media (max-width: 767px) {
+  /* 表单标签优化 */
+  .el-form-item__label {
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: var(--spacing-sm);
+    color: var(--text-primary);
+  }
+
+  /* 表单输入框组优化 */
+  .el-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+  }
+
+  .el-input-group__prepend,
+  .el-input-group__append {
+    width: 100%;
+    margin: 0;
+  }
+
+  /* 表单验证消息优化 */
+  .el-form-item__error {
+    font-size: var(--font-size-xs);
+    padding-top: var(--spacing-xs);
+    line-height: 1.4;
+  }
+
+  /* 表单按钮组优化 */
+  .el-form-item:last-child {
+    margin-bottom: 0;
+  }
+
+  /* 搜索表单优化 */
+  .search-form,
+  .filter-form {
+    background-color: var(--bg-primary);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-md);
+  }
+}
+
+/* ====== 移动端对话框增强优化 ====== */
+@media (max-width: 767px) {
+  /* 对话框遮罩优化 */
+  .el-overlay {
+    background-color: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+
+  /* 对话框动画优化 */
+  .el-dialog {
+    animation: slideUpMobile 0.3s ease;
+  }
+
+  @keyframes slideUpMobile {
+    from {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  /* 对话框关闭按钮优化 */
+  .el-dialog__headerbtn {
+    width: var(--touch-target-size);
+    height: var(--touch-target-size);
+    top: var(--spacing-md);
+    right: var(--spacing-md);
+  }
+
+  .el-dialog__close {
+    font-size: var(--font-size-lg);
+  }
+
+  /* 对话框按钮组优化 */
+  .el-dialog__footer {
+    display: flex;
+    flex-direction: column-reverse;
+    gap: var(--spacing-sm);
+  }
+
+  .el-dialog__footer .el-button {
+    width: 100%;
+    margin: 0;
+    min-height: var(--touch-target-size);
+  }
+}
+
+/* ====== 移动端加载状态优化 ====== */
+@media (max-width: 767px) {
+  /* 加载遮罩优化 */
+  .el-loading-mask {
+    background-color: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+
+  /* 加载文字优化 */
+  .el-loading-text {
+    font-size: var(--font-size-base);
+    color: var(--text-primary);
+    margin-top: var(--spacing-md);
+  }
+
+  /* 骨架屏优化 */
+  .el-skeleton__item {
+    border-radius: var(--radius-md);
+  }
+}
+
+/* ====== 移动端性能优化 ====== */
+@media (max-width: 767px) {
+  /* 启用硬件加速 */
+  .el-card,
+  .el-table,
+  .el-dialog,
+  .el-drawer {
+    transform: translateZ(0);
+    will-change: transform;
+  }
+
+  /* 优化动画性能 */
+  * {
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+  }
+
+  /* 减少重绘 */
+  .el-table__body,
+  .el-table__header {
+    contain: layout style paint;
+  }
+
+  /* 优化图片加载 */
+  img {
+    content-visibility: auto;
+    image-rendering: -webkit-optimize-contrast;
+  }
+}
+
+/* ====== 移动端安全区域适配（iPhone X等） ====== */
+@supports (padding: max(0px)) {
+  @media (max-width: 767px) {
+    .header {
+      padding-left: max(var(--spacing-md), env(safe-area-inset-left));
+      padding-right: max(var(--spacing-md), env(safe-area-inset-right));
+    }
+
+    .main-content {
+      padding-left: max(var(--mobile-content-padding), env(safe-area-inset-left));
+      padding-right: max(var(--mobile-content-padding), env(safe-area-inset-right));
+      padding-bottom: max(var(--mobile-content-padding), env(safe-area-inset-bottom));
+    }
+
+    .el-dialog {
+      margin-left: max(var(--spacing-md), env(safe-area-inset-left));
+      margin-right: max(var(--spacing-md), env(safe-area-inset-right));
+    }
+
+    .el-drawer {
+      padding-top: max(0px, env(safe-area-inset-top));
+      padding-bottom: max(0px, env(safe-area-inset-bottom));
+    }
+  }
+}
+
+/* ====== 移动端打印优化 ====== */
+@media print {
+  @media (max-width: 767px) {
+    .header,
+    .sidebar,
+    .el-drawer,
+    .el-pagination,
+    .action-buttons {
+      display: none !important;
+    }
+
+    .main-content {
+      padding: 0;
+    }
+
+    .el-card {
+      box-shadow: none;
+      border: 1px solid var(--border-base);
+    }
+
+    .el-table {
+      font-size: 10px;
+    }
+  }
+}
+
+/* ====== 移动端无障碍优化 ====== */
+@media (max-width: 767px) {
+  /* 确保所有交互元素都有足够的触摸目标 */
+  button,
+  a,
+  .el-button,
+  .el-menu-item,
+  .el-tabs__item,
+  .el-radio,
+  .el-checkbox {
+    min-height: var(--touch-target-size);
+    min-width: var(--touch-target-size);
+  }
+
+  /* 增强焦点可见性 */
+  *:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  /* 确保文字可读性 */
+  .el-text,
+  .el-card__body,
+  .el-dialog__body {
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-base);
+    color: var(--text-primary);
+  }
+}
+
+/* ====== 移动端网络状态优化 ====== */
+@media (max-width: 767px) {
+  /* 离线状态提示 */
+  .offline-indicator {
+    position: fixed;
+    top: var(--header-height);
+    left: 0;
+    right: 0;
+    background-color: var(--warning-color);
+    color: var(--text-white);
+    padding: var(--spacing-sm);
+    text-align: center;
+    z-index: 9999;
+    font-size: var(--font-size-sm);
+  }
+
+  /* 慢速网络优化 */
+  .slow-network .el-image,
+  .slow-network img {
+    image-rendering: -webkit-optimize-contrast;
+    content-visibility: auto;
+  }
+}

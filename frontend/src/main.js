@@ -13,6 +13,7 @@ import { ElMessage } from 'element-plus';
 // 本地导入
 import './style.css';
 import './styles/mobile.css'; // 移动端优化样式
+import { useViewportHeight, disableDoubleTapZoom } from './composables/useMobileTouch';
 import pinia from './store';
 import { useAuthStore, validateAuthData, clearAuthData } from './store';
 import router from './router/index.js';
@@ -939,11 +940,23 @@ const fixMaskProperties = () => {
   }
 };
 
+// 移动端优化初始化
+const initMobileOptimizations = () => {
+  // 修复视口高度（解决移动端浏览器地址栏问题）
+  useViewportHeight();
+  
+  // 禁用双击缩放
+  disableDoubleTapZoom();
+};
+
 // 在应用挂载后，根据当前路由决定是否初始化认证和时区
 // 使用 nextTick 确保路由已初始化
 nextTick(() => {
   // 延迟初始化，不阻塞首次渲染
   setTimeout(() => {
+    // 初始化移动端优化
+    initMobileOptimizations();
+    
     initializeAuth();
     initializeTimezone();
     fixSelectAccessibility();

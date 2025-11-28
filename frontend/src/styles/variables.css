@@ -122,6 +122,7 @@
   --mobile-header-height: 56px;
   --mobile-content-padding: 16px;
   --mobile-sidebar-width: 280px;
+  --vh: 1vh; /* 视口高度单位，由JS动态设置 */
 }
 
 /* ====== 平板端断点 (768px - 1024px) ====== */

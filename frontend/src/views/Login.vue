@@ -365,42 +365,134 @@ onBeforeUnmount(() => {
   .login-container {
     padding: var(--spacing-md);
     align-items: flex-start;
-    padding-top: 20vh;
+    padding-top: 10vh;
+    min-height: 100vh;
+    /* 安全区域适配 */
+    padding-top: max(10vh, env(safe-area-inset-top));
+    padding-bottom: max(var(--spacing-md), env(safe-area-inset-bottom));
+    padding-left: max(var(--spacing-md), env(safe-area-inset-left));
+    padding-right: max(var(--spacing-md), env(safe-area-inset-right));
   }
   
   .login-card {
     max-width: 100%;
     padding: var(--spacing-xl);
     border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-medium);
+    width: 100%;
+    animation: slideUpMobile 0.4s ease;
+  }
+
+  @keyframes slideUpMobile {
+    from {
+      opacity: 0;
+      transform: translateY(30px) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
   }
   
   .login-title {
     font-size: var(--font-size-xxl);
     margin-bottom: var(--spacing-xl);
+    font-weight: var(--font-weight-bold);
   }
   
   .login-form :deep(.el-form-item) {
-    margin-bottom: var(--spacing-lg);
+    margin-bottom: var(--spacing-xl);
   }
   
   .login-form :deep(.el-input) {
     height: var(--touch-target-size);
-    font-size: var(--font-size-base);
+    font-size: 16px; /* 防止iOS自动缩放 */
   }
   
   .login-form :deep(.el-input__wrapper) {
     min-height: var(--touch-target-size);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-light);
+    transition: all 0.2s ease;
+  }
+
+  .login-form :deep(.el-input__wrapper:hover) {
+    box-shadow: var(--shadow-medium);
+  }
+
+  .login-form :deep(.el-input__wrapper.is-focus) {
+    box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.2);
   }
   
   .login-btn {
     height: var(--touch-target-size);
-    font-size: var(--font-size-base);
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-medium);
+    transition: all 0.2s ease;
+  }
+
+  .login-btn:active {
+    transform: scale(0.98);
+    box-shadow: var(--shadow-light);
   }
   
   .login-footer {
-    padding: var(--spacing-md);
-    margin-top: var(--spacing-lg);
+    padding: var(--spacing-lg);
+    margin-top: var(--spacing-xl);
+    font-size: var(--font-size-sm);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  }
+
+  /* 移动端输入框图标优化 */
+  .login-form :deep(.el-input__prefix) {
+    left: var(--spacing-md);
+  }
+
+  .login-form :deep(.el-input__suffix) {
+    right: var(--spacing-md);
+  }
+
+  /* 移动端表单验证消息优化 */
+  .login-form :deep(.el-form-item__error) {
     font-size: var(--font-size-xs);
+    padding-top: var(--spacing-xs);
+    line-height: 1.4;
+  }
+}
+
+/* 小屏手机进一步优化 */
+@media (max-width: 480px) {
+  .login-container {
+    padding-top: 5vh;
+    padding-top: max(5vh, env(safe-area-inset-top));
+  }
+
+  .login-card {
+    padding: var(--spacing-lg);
+  }
+
+  .login-title {
+    font-size: var(--font-size-xl);
+    margin-bottom: var(--spacing-lg);
+  }
+
+  .login-form :deep(.el-form-item) {
+    margin-bottom: var(--spacing-lg);
+  }
+}
+
+/* 横屏优化 */
+@media (max-width: 767px) and (orientation: landscape) {
+  .login-container {
+    padding-top: 5vh;
+    align-items: center;
+  }
+
+  .login-card {
+    max-width: 400px;
+    padding: var(--spacing-xl);
   }
 }
 </style>
