@@ -41,26 +41,16 @@ api_id = '10177'
 api_key = '67b7c7fac2154bb8f59546d9b23058c9'
 
 
-async def skymobi_api_task() -> None:
+async def skymobi_api_task(
+    start_date: str | None = None,
+    end_date: str | None = None
+) -> None:
     """
     Skymobi API定时任务主函数
     
-    功能说明：
-    1. 从Skymobi API获取广告数据（根据时间自动选择昨天或今天的数据）
-    2. 对每条数据进行验证和重复检查
-    3. 将新数据插入到数据库的ad_data表中
-    4. 根据产品的减扣比例自动计算减扣后的eCPM和收益
-    
-    处理流程：
-    - 调用Skymobi API获取数据
-    - 使用标准化的数据处理函数处理所有数据
-    - 提交事务并记录结果
-    
-    注意：
-    - 这是异步函数，可以直接使用await
-    - 所有数据库操作都在事务中执行，确保数据一致性
-    - 单条数据出错不会影响其他数据的处理
-    - 0-8点获取昨天的数据，其他时间获取今天的数据
+    参数:
+        start_date: 可选，日期 (格式: YYYY-MM-DD)，如果不提供则根据时间自动选择
+        end_date: 可选，忽略（Skymobi API只使用一个日期参数）
     """
     # 获取应用配置时区的当前时间（用于日志记录）
     app_time = datetime.now(APP_TIMEZONE)
@@ -76,16 +66,22 @@ async def skymobi_api_task() -> None:
         # ============================================
 
         # 构建Skymobi API请求参数
-        # 使用应用时区（北京时间）计算日期
-        app_now = datetime.now(APP_TIMEZONE)
-        app_yesterday = app_now - timedelta(days=1)
-        yesterday_str = app_yesterday.strftime("%Y-%m-%d")
-        today_str = app_now.strftime("%Y-%m-%d")
-
-        if 0 <= app_now.hour <= 8:
-            Skymobi_url = f'https://crm.skymobi.online/api/adxh5?apikey={api_key}&date={yesterday_str}&uid={api_id}&page=1&limit=500'
+        if start_date:
+            # 使用传入的日期（Skymobi只使用一个日期）
+            date_str = start_date
         else:
-            Skymobi_url = f'https://crm.skymobi.online/api/adxh5?apikey={api_key}&date={today_str}&uid={api_id}&page=1&limit=500'
+            # 原有的自动计算逻辑
+            app_now = datetime.now(APP_TIMEZONE)
+            app_yesterday = app_now - timedelta(days=1)
+            yesterday_str = app_yesterday.strftime("%Y-%m-%d")
+            today_str = app_now.strftime("%Y-%m-%d")
+            
+            if 0 <= app_now.hour <= 8:
+                date_str = yesterday_str
+            else:
+                date_str = today_str
+        
+        Skymobi_url = f'https://crm.skymobi.online/api/adxh5?apikey={api_key}&date={date_str}&uid={api_id}&page=1&limit=500'
 
         # 使用异步HTTP客户端调用Skymobi API
         try:

@@ -80,29 +80,16 @@ def generate_sign(params: dict, api_secret: str = tqt_api_secret) -> str:
     return md5_hash
 
 
-async def tqt_api_task() -> None:
+async def tqt_api_task(
+    start_date: str | None = None,
+    end_date: str | None = None
+) -> None:
     """
     TQT定时任务主函数
     
-    功能说明：
-    1. 从TQT API获取昨天的广告数据
-    2. 对每条数据进行验证和重复检查
-    3. 将新数据插入到数据库的ad_data表中
-    4. 根据产品的减扣比例自动计算减扣后的eCPM和收益
-    
-    处理流程：
-    - 调用TQT API获取数据
-    - 遍历返回的数据列表
-    - 验证日期和产品名称
-    - 查找对应的产品记录
-    - 检查是否已存在相同日期和产品的数据（防重复）
-    - 解析数值字段并计算减扣后的值
-    - 插入新数据到数据库
-    
-    注意：
-    - 这是异步函数，可以直接使用await
-    - 所有数据库操作都在事务中执行，确保数据一致性
-    - 单条数据出错不会影响其他数据的处理
+    参数:
+        start_date: 可选，起始日期 (格式: YYYY-MM-DD)，如果不提供则根据时间自动选择
+        end_date: 可选，结束日期 (格式: YYYY-MM-DD)，如果不提供则使用start_date
     """
     # 获取应用配置时区的当前时间（用于日志记录）
     app_time = datetime.now(APP_TIMEZONE)
@@ -119,31 +106,37 @@ async def tqt_api_task() -> None:
         # ============================================
 
         # 构建TQT API请求参数
-        # TQT API返回的日期默认是系统时区，使用系统时区计算日期
-        # 计算系统时区的昨天和今天
-        app_now = datetime.now(APP_TIMEZONE)
-        app_yesterday = app_now - timedelta(days=1)
-        yesterday_str = app_yesterday.strftime("%Y-%m-%d")
-        today_str = app_now.strftime("%Y-%m-%d")
-
-        if 0 <= app_now.hour <= 8:
-            tqt_params = {
-                "appKey": tqt_app_key,  # 应用密钥
-                "startDate": yesterday_str,  # 开始日期：系统时区的昨天
-                "endDate": yesterday_str,  # 结束日期：系统时区的今天
-                "page": 1,  # 页码：从第1页开始
-                "pageSize": 500,  # 每页数据量：500条
-                "type": "country"  # 数据类型：country:国家 all:全部
-            }
+        if start_date:
+            # 使用传入的日期
+            if end_date:
+                tqt_start_date = start_date
+                tqt_end_date = end_date
+            else:
+                # 如果没有提供end_date，使用start_date
+                tqt_start_date = start_date
+                tqt_end_date = start_date
         else:
-            tqt_params = {
-                "appKey": tqt_app_key,  # 应用密钥
-                "startDate": today_str,  # 开始日期：系统时区的今天
-                "endDate": today_str,  # 结束日期：系统时区的今天
-                "page": 1,  # 页码：从第1页开始
-                "pageSize": 500,  # 每页数据量：500条
-                "type": "country"  # 数据类型：country:国家 all:全部
-            }
+            # 原有的自动计算逻辑
+            app_now = datetime.now(APP_TIMEZONE)
+            app_yesterday = app_now - timedelta(days=1)
+            yesterday_str = app_yesterday.strftime("%Y-%m-%d")
+            today_str = app_now.strftime("%Y-%m-%d")
+            
+            if 0 <= app_now.hour <= 8:
+                tqt_start_date = yesterday_str
+                tqt_end_date = yesterday_str
+            else:
+                tqt_start_date = today_str
+                tqt_end_date = today_str
+        
+        tqt_params = {
+            "appKey": tqt_app_key,
+            "startDate": tqt_start_date,
+            "endDate": tqt_end_date,
+            "page": 1,
+            "pageSize": 500,
+            "type": "country"
+        }
 
         # 生成API签名（TQT API要求所有请求都必须包含签名）
         sign = generate_sign(tqt_params, tqt_api_secret)

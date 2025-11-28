@@ -127,16 +127,18 @@ export const updateScheduledTask = async (taskName, data) => {
 /**
  * 手动触发定时任务
  * @param {string} taskName - 任务名称
+ * @param {Object} params - 可选参数 { start_date?: string, end_date?: string }
  * @returns {Promise<Object>} 触发结果
  */
-export const triggerScheduledTask = async (taskName) => {
+export const triggerScheduledTask = async (taskName, params = {}) => {
   try {
-    // 确保CSRF令牌存在（虽然定时任务接口可能跳过CSRF检查，但为了统一性还是确保令牌存在）
     await ensureCsrfToken();
     
-    // 对任务名称进行 URL 编码，确保中文路径正确传输
     const encodedTaskName = encodeURIComponent(taskName);
-    const response = await axios.post(`/api/v1/scheduled-tasks/${encodedTaskName}/trigger`);
+    const response = await axios.post(
+      `/api/v1/scheduled-tasks/${encodedTaskName}/trigger`,
+      Object.keys(params).length > 0 ? params : undefined  // 如果有参数才发送body
+    );
     ElMessage.success(getSuccessMessage('TASK_TRIGGER_SUCCESS'));
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {

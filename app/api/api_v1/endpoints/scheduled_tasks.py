@@ -462,6 +462,14 @@ async def update_scheduled_task(
         )
 
 
+from pydantic import BaseModel, Field
+from typing import Optional
+
+class TriggerTaskParams(BaseModel):
+    """手动触发任务的参数"""
+    start_date: Optional[str] = Field(None, description="起始日期 (YYYY-MM-DD)")
+    end_date: Optional[str] = Field(None, description="结束日期 (YYYY-MM-DD)")
+
 @router.post(
     "/{task_name}/trigger",
     response_model=ResponseBaseSchema[dict],
@@ -470,6 +478,7 @@ async def update_scheduled_task(
 async def trigger_scheduled_task(
         request: Request,
         task_name: str = Path(..., description="任务名称", max_length=MAX_TASK_NAME_LENGTH),
+        params: Optional[TriggerTaskParams] = Body(None, description="任务参数"),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin)
 ):
@@ -590,16 +599,26 @@ async def trigger_scheduled_task(
         async def trigger_task():
             try:
                 logger.info(f"开始手动触发任务 '{task_name}'（跳过进程分配检查）")
+                
+                # 准备任务参数
+                task_kwargs = {}
+                if params:
+                    if params.start_date:
+                        task_kwargs['start_date'] = params.start_date
+                    if params.end_date:
+                        task_kwargs['end_date'] = params.end_date
+                
                 await execute_task_with_lock(
                     task_name=task_name,
                     task_func=task_func,
-                    skip_process_check=True  # 手动触发，跳过进程分配检查
+                    skip_process_check=True,
+                    **task_kwargs  # 传递日期参数
                 )
                 logger.info(f"手动触发任务 '{task_name}' 已提交到执行队列")
             except Exception as e:
                 logger.error(f"手动触发任务执行失败: {e}", exc_info=True)
                 raise
-
+        
         # 异步触发任务（不等待完成）
         asyncio.create_task(trigger_task())
 

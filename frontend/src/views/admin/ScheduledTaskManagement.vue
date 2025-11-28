@@ -222,6 +222,54 @@
         />
       </div>
     </el-card>
+
+    <!-- 手动触发任务日期选择对话框 -->
+    <el-dialog
+      v-model="triggerDialogVisible"
+      title="手动触发任务"
+      width="500px"
+    >
+      <el-form :model="triggerParams" label-width="100px">
+        <el-form-item label="起始日期">
+          <el-date-picker
+            v-model="triggerParams.start_date"
+            type="date"
+            placeholder="选择起始日期（可选）"
+            format="YYYY-MM-DD"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="结束日期">
+          <el-date-picker
+            v-model="triggerParams.end_date"
+            type="date"
+            placeholder="选择结束日期（可选，不填则使用起始日期）"
+            format="YYYY-MM-DD"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+          >
+            <template #title>
+              <div>提示：</div>
+              <div>• 不填写日期则使用默认逻辑（0-8点获取昨天，其他时间获取今天）</div>
+              <div>• 只填写起始日期时，结束日期将使用起始日期</div>
+              <div>• 部分任务只需要一个日期参数</div>
+            </template>
+          </el-alert>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="triggerDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmTrigger">确定触发</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -489,59 +537,68 @@ const handleToggleActive = async (task) => {
 
 // 手动触发任务
 const handleTrigger = async (task) => {
-  try {
-    await ElMessageBox.confirm(
-      `确定要手动触发任务 "${task.task_name}" 吗？`,
-      '确认触发',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
-        zIndex: 3001 // 确保 z-index 高于对话框
+  // 检查是否是日期相关的任务
+  const dateRelatedTasks = [
+    'Addermobi API获取数据',
+    'Skymobi API获取数据', 
+    'yangyangdeyi API获取数据',
+    'TQT API获取数据'
+  ];
+  
+  if (dateRelatedTasks.includes(task.task_name)) {
+    // 显示日期选择对话框
+    currentTriggerTask.value = task;
+    triggerParams.value = {
+      start_date: '',
+      end_date: ''
+    };
+    triggerDialogVisible.value = true;
+  } else {
+    // 原有逻辑：直接触发
+    try {
+      await ElMessageBox.confirm(
+        `确定要手动触发任务 "${task.task_name}" 吗？`,
+        '确认触发',
+        {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          type: 'warning',
+        }
+      );
+      
+      await triggerScheduledTask(task.task_name);
+      ElMessage.success('任务已触发，正在后台执行');
+      setTimeout(() => {
+        fetchTasks();
+      }, 2000);
+    } catch (error) {
+      if (error !== 'cancel') {
+        // 错误已在ElMessage中显示，不需要额外日志
       }
-    );
-    
-    await triggerScheduledTask(task.task_name);
-    ElMessage.success('任务已触发，正在后台执行');
-    
-    // 延迟刷新，等待任务状态更新（使用防抖版本）
-    // 不立即刷新，让防抖机制处理，避免连续请求
-    setTimeout(() => {
-      fetchTasks(); // 使用防抖版本
-    }, 2000); // 延迟2秒，与防抖时间一致
-  } catch (error) {
-    if (error !== 'cancel') {
-      // 错误已在ElMessage中显示，不需要额外日志
     }
   }
 };
 
-// 释放任务锁
-const handleReleaseLock = async (task) => {
+// 确认触发（带参数）
+const confirmTrigger = async () => {
   try {
-    await ElMessageBox.confirm(
-      `确定要释放任务 "${task.task_name}" 的锁吗？\n\n这通常用于任务异常中断导致锁未释放的情况。`,
-      '确认释放锁',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
-        zIndex: 3001 // 确保 z-index 高于对话框
-      }
-    );
-    
-    // 确保CSRF令牌存在
-    await ensureCsrfToken(() => fetchTasks());
-    
-    await releaseTaskLock(task.task_name);
-    // 使用防抖版本，避免立即刷新
-    fetchTasks();
-  } catch (error) {
-    if (error !== 'cancel') {
-      // 错误已在ElMessage中显示，不需要额外日志
+    const params = {};
+    if (triggerParams.value.start_date) {
+      params.start_date = triggerParams.value.start_date;
     }
+    if (triggerParams.value.end_date) {
+      params.end_date = triggerParams.value.end_date;
+    }
+    
+    await triggerScheduledTask(currentTriggerTask.value.task_name, params);
+    ElMessage.success('任务已触发，正在后台执行');
+    triggerDialogVisible.value = false;
+    
+    setTimeout(() => {
+      fetchTasks();
+    }, 2000);
+  } catch (error) {
+    // 错误已在ElMessage中显示，不需要额外日志
   }
 };
 

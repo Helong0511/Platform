@@ -37,29 +37,16 @@ def set_task_result(task_name: str, result: str) -> None:
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
 
-async def tbsj_api_task() -> None:
+async def tbsj_api_task(
+    start_date: str | None = None,
+    end_date: str | None = None
+) -> None:
     """
     yangyangdeyi定时任务主函数
     
-    功能说明：
-    1. 从yangyangdeyi API获取昨天的广告数据
-    2. 对每条数据进行验证和重复检查
-    3. 将新数据插入到数据库的ad_data表中
-    4. 根据产品的减扣比例自动计算减扣后的eCPM和收益
-    
-    处理流程：
-    - 调用yangyangdeyi API获取数据
-    - 遍历返回的数据列表
-    - 验证日期和产品名称
-    - 查找对应的产品记录
-    - 检查是否已存在相同日期和产品的数据（防重复）
-    - 解析数值字段并计算减扣后的值
-    - 插入新数据到数据库
-    
-    注意：
-    - 这是异步函数，可以直接使用await
-    - 所有数据库操作都在事务中执行，确保数据一致性
-    - 单条数据出错不会影响其他数据的处理
+    参数:
+        start_date: 可选，起始日期 (格式: YYYY-MM-DD)，如果不提供则根据时间自动选择
+        end_date: 可选，结束日期 (格式: YYYY-MM-DD)，如果不提供则使用start_date
     """
     # ========== yangyangdeyi API配置 ==========
     # HTTP请求头配置
@@ -140,25 +127,35 @@ async def tbsj_api_task() -> None:
             logger.error(f'yangyangdeyi API获取token请求错误: {str(request_error)}')
             raise Exception(f'yangyangdeyi API获取token请求失败: {str(request_error)}')
 
-        app_now = datetime.now(APP_TIMEZONE)
-        app_yesterday = app_now - timedelta(days=1)
-        yesterday_str = app_yesterday.strftime("%Y-%m-%d")
-        today_str = app_now.strftime("%Y-%m-%d")
-
-        if 0 <= app_now.hour <= 8:
-            tbsj_params = {
-                "page": 1,
-                "limit": 5000,
-                "start": yesterday_str,
-                "end": yesterday_str
-            }
+        # 修改日期计算逻辑
+        if start_date:
+            # 使用传入的日期
+            if end_date:
+                tbsj_start = start_date
+                tbsj_end = end_date
+            else:
+                tbsj_start = start_date
+                tbsj_end = start_date
         else:
-            tbsj_params = {
-                "page": 1,
-                "limit": 5000,
-                "start": today_str,
-                "end": today_str
-            }
+            # 原有的自动计算逻辑
+            app_now = datetime.now(APP_TIMEZONE)
+            app_yesterday = app_now - timedelta(days=1)
+            yesterday_str = app_yesterday.strftime("%Y-%m-%d")
+            today_str = app_now.strftime("%Y-%m-%d")
+            
+            if 0 <= app_now.hour <= 8:
+                tbsj_start = yesterday_str
+                tbsj_end = yesterday_str
+            else:
+                tbsj_start = today_str
+                tbsj_end = today_str
+        
+        tbsj_params = {
+            "page": 1,
+            "limit": 5000,
+            "start": tbsj_start,
+            "end": tbsj_end
+        }
 
         # 使用异步HTTP客户端调用yangyangdeyi API
         try:

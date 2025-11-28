@@ -38,28 +38,16 @@ def set_task_result(task_name: str, result: str) -> None:
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
 
-async def addermobi_api_task() -> None:
+async def addermobi_api_task(
+    start_date: str | None = None,
+    end_date: str | None = None
+) -> None:
     """
     Addermobi定时任务主函数
     
-    功能说明：
-    1. 从Addermobi API获取广告数据（根据时间自动选择昨天或今天的数据）
-    2. 对每条数据进行验证和重复检查
-    3. 将新数据插入到数据库的ad_data表中
-    4. 根据产品的减扣比例自动计算减扣后的eCPM和收益
-    
-    处理流程：
-    - 获取访问令牌（通过登录API）
-    - 调用Addermobi API获取数据
-    - 预处理数据（修正匹配数等）
-    - 使用标准化的数据处理函数处理所有数据
-    - 提交事务并记录结果
-    
-    注意：
-    - 这是异步函数，可以直接使用await
-    - 所有数据库操作都在事务中执行，确保数据一致性
-    - 单条数据出错不会影响其他数据的处理
-    - 0-8点获取昨天的数据，其他时间获取今天的数据
+    参数:
+        start_date: 可选，起始日期 (格式: YYYY-MM-DD)，如果不提供则根据时间自动选择
+        end_date: 可选，结束日期 (格式: YYYY-MM-DD)，如果不提供则使用start_date
     """
     # ========== Addermobi API配置 ==========
     # HTTP请求头配置
@@ -142,33 +130,35 @@ async def addermobi_api_task() -> None:
             logger.error(f'Addermobi API获取token请求错误: {str(request_error)}')
             raise Exception(f'Addermobi API获取token请求失败: {str(request_error)}')
 
-        app_now = datetime.now(APP_TIMEZONE)
-        app_yesterday = app_now - timedelta(days=1)
-        yesterday_str = app_yesterday.strftime("%Y-%m-%d")
-        today_str = app_now.strftime("%Y-%m-%d")
-
-        if 0 <= app_now.hour <= 8:
-            p1 = [
-                {"name": "Revenue_time",
-                 "value": yesterday_str,
-                 "displayType": "thanorequal"
-                 },
-                {"name": "Revenue_time",
-                 "value": yesterday_str,
-                 "displayType": "lessorequal"
-                 }
-            ]
+        # 修改日期计算逻辑
+        if start_date:
+            # 使用传入的日期
+            if end_date:
+                start_date_str = start_date
+                end_date_str = end_date
+            else:
+                # 如果没有提供end_date，使用start_date
+                start_date_str = start_date
+                end_date_str = start_date
         else:
-            p1 = [
-                {"name": "Revenue_time",
-                 "value": today_str,
-                 "displayType": "thanorequal"
-                 },
-                {"name": "Revenue_time",
-                 "value": today_str,
-                 "displayType": "lessorequal"
-                 }
-            ]
+            # 原有的自动计算逻辑
+            app_now = datetime.now(APP_TIMEZONE)
+            app_yesterday = app_now - timedelta(days=1)
+            yesterday_str = app_yesterday.strftime("%Y-%m-%d")
+            today_str = app_now.strftime("%Y-%m-%d")
+            
+            if 0 <= app_now.hour <= 8:
+                start_date_str = yesterday_str
+                end_date_str = yesterday_str
+            else:
+                start_date_str = today_str
+                end_date_str = today_str
+        
+        # Addermobi API使用两个条件：大于等于起始日期，小于等于结束日期
+        p1 = [
+            {"name": "Revenue_time", "value": start_date_str, "displayType": "thanorequal"},
+            {"name": "Revenue_time", "value": end_date_str, "displayType": "lessorequal"}
+        ]
 
         tbsj_params = {
             "page": 1,
