@@ -989,6 +989,8 @@ const handleDelete = async (row) => {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
         type: 'warning',
+        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
+        zIndex: 3001 // 确保 z-index 高于对话框
       }
     );
     
@@ -1024,6 +1026,8 @@ const handleBatchDelete = async () => {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
         type: 'warning',
+        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
+        zIndex: 3001 // 确保 z-index 高于对话框
       }
     );
     
