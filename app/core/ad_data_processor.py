@@ -264,6 +264,26 @@ async def process_api_ad_data(
 
                 # 收益
                 item_revenue = float(get_field(item, "revenue_before_deduct", 0) or 0)
+
+                # CPC（如果字段映射存在则解析，否则使用默认值0.0）
+                item_cpc = 0.0
+                if field_mapping and "cpc" in field_mapping:
+                    cpc_val = get_field(item, "cpc")
+                    if cpc_val is not None and cpc_val != "":
+                        try:
+                            item_cpc = float(cpc_val)
+                        except (ValueError, TypeError):
+                            item_cpc = 0.0
+
+                # PageViews（如果字段映射存在则解析，否则使用默认值0）
+                item_pageviews = 0
+                if field_mapping and "pageviews" in field_mapping:
+                    pageviews_val = get_field(item, "pageviews")
+                    if pageviews_val is not None and pageviews_val != "":
+                        try:
+                            item_pageviews = int(pageviews_val)
+                        except (ValueError, TypeError):
+                            item_pageviews = 0
             except (ValueError, TypeError) as e:
                 logger.warning(f"数值字段格式错误: {str(e)}, 跳过该条数据")
                 error_count += 1
@@ -306,6 +326,8 @@ async def process_api_ad_data(
                         "match_count": 0,
                         "display_count": 0,
                         "click_count": 0,
+                        "cpc": 0.0,
+                        "pageviews": 0,
                         "revenue": 0.0,
                         "ecpm": 0.0,
                         "items": []  # 存储原始数据项，用于后续计算eCPM
@@ -322,6 +344,14 @@ async def process_api_ad_data(
 
                 # 点击数
                 recognized_data[key]["click_count"] += item_click_count
+
+                # CPC（如果字段映射存在则累加）
+                if field_mapping and "cpc" in field_mapping:
+                    recognized_data[key]["cpc"] += item_cpc
+
+                # PageViews（如果字段映射存在则累加）
+                if field_mapping and "pageviews" in field_mapping:
+                    recognized_data[key]["pageviews"] += item_pageviews
 
                 # 收益
                 recognized_data[key]["revenue"] += item_revenue
@@ -342,6 +372,8 @@ async def process_api_ad_data(
                         "match_count": 0,
                         "display_count": 0,
                         "click_count": 0,
+                        "cpc": 0.0,
+                        "pageviews": 0,
                         "revenue": 0.0,
                         "ecpm": 0.0,
                         "items": []  # 存储原始数据项，用于后续计算
@@ -358,6 +390,14 @@ async def process_api_ad_data(
 
                 # 点击数
                 unrecognized_data[key]["click_count"] += item_click_count
+
+                # CPC（如果字段映射存在则累加）
+                if field_mapping and "cpc" in field_mapping:
+                    unrecognized_data[key]["cpc"] += item_cpc
+
+                # PageViews（如果字段映射存在则累加）
+                if field_mapping and "pageviews" in field_mapping:
+                    unrecognized_data[key]["pageviews"] += item_pageviews
 
                 # 收益
                 unrecognized_data[key]["revenue"] += item_revenue
@@ -498,6 +538,22 @@ async def process_api_ad_data(
                         update_fields.append(f"点击数: {existing_data.click_count} -> {grouped_data['click_count']}")
                         existing_data.click_count = grouped_data["click_count"]
 
+                    # CPC（如果字段映射存在则更新）
+                    if field_mapping and "cpc" in field_mapping:
+                        grouped_cpc = grouped_data.get("cpc", 0.0)
+                        if abs(existing_data.cpc - grouped_cpc) > 0.01:
+                            need_update = True
+                            update_fields.append(f"CPC: {existing_data.cpc:.2f} -> {grouped_cpc:.2f}")
+                            existing_data.cpc = grouped_cpc
+
+                    # PageViews（如果字段映射存在则更新）
+                    if field_mapping and "pageviews" in field_mapping:
+                        grouped_pageviews = grouped_data.get("pageviews", 0)
+                        if existing_data.pageviews != grouped_pageviews:
+                            need_update = True
+                            update_fields.append(f"PageViews: {existing_data.pageviews} -> {grouped_pageviews}")
+                            existing_data.pageviews = grouped_pageviews
+
                     # 如果基础数据有变化，重新计算比率字段
                     if need_update:
                         existing_data.calculate_rates()
@@ -569,6 +625,8 @@ async def process_api_ad_data(
                         match_count=grouped_data["match_count"],
                         display_count=grouped_data["display_count"],
                         click_count=grouped_data["click_count"],
+                        cpc=grouped_data.get("cpc", 0.0) if (field_mapping and "cpc" in field_mapping) else 0.0,
+                        pageviews=grouped_data.get("pageviews", 0) if (field_mapping and "pageviews" in field_mapping) else 0,
                         ecpm_before_deduct=final_ecpm,
                         ecpm_after_deduct=ecpm_after_deduct,
                         revenue_before_deduct=total_revenue,
@@ -725,6 +783,22 @@ async def process_api_ad_data(
                         update_fields.append(f"点击数: {existing_data.click_count} -> {grouped_data['click_count']}")
                         existing_data.click_count = grouped_data["click_count"]
 
+                    # CPC（如果字段映射存在则更新）
+                    if field_mapping and "cpc" in field_mapping:
+                        grouped_cpc = grouped_data.get("cpc", 0.0)
+                        if abs(existing_data.cpc - grouped_cpc) > 0.01:
+                            need_update = True
+                            update_fields.append(f"CPC: {existing_data.cpc:.2f} -> {grouped_cpc:.2f}")
+                            existing_data.cpc = grouped_cpc
+
+                    # PageViews（如果字段映射存在则更新）
+                    if field_mapping and "pageviews" in field_mapping:
+                        grouped_pageviews = grouped_data.get("pageviews", 0)
+                        if existing_data.pageviews != grouped_pageviews:
+                            need_update = True
+                            update_fields.append(f"PageViews: {existing_data.pageviews} -> {grouped_pageviews}")
+                            existing_data.pageviews = grouped_pageviews
+
                     # 如果基础数据有变化，重新计算比率字段
                     if need_update:
                         existing_data.calculate_rates()
@@ -795,6 +869,8 @@ async def process_api_ad_data(
                         match_count=grouped_data["match_count"],
                         display_count=grouped_data["display_count"],
                         click_count=grouped_data["click_count"],
+                        cpc=grouped_data.get("cpc", 0.0) if (field_mapping and "cpc" in field_mapping) else 0.0,
+                        pageviews=grouped_data.get("pageviews", 0) if (field_mapping and "pageviews" in field_mapping) else 0,
                         ecpm_before_deduct=final_ecpm,
                         ecpm_after_deduct=ecpm_after_deduct,
                         revenue_before_deduct=total_revenue,

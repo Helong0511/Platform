@@ -62,7 +62,7 @@ need_exp = [
         "field_name": "`date`, `country_code`, `product_id`, `request_count`, `match_count`, `display_count`, `click_count`, `ecpm_before_deduct`, `ecpm_after_deduct`, `revenue_before_deduct`, `revenue_after_deduct`",
         "order": "`date`, `product_id`",
         "note": "-- 添加广告数据\n",
-        "exclude_today": True  # 添加标记，表示需要排除当天数据
+        "exclude_today": False  # 添加标记，表示需要排除当天数据
     }
 ]
 

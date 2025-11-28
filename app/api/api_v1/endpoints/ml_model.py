@@ -46,6 +46,15 @@ REQUIRED_FIELDS = {
     "revenue_before_deduct": "收益"
 }
 
+# 可选字段（如果Excel中有这些字段，会被识别和导入，但不影响mapping_complete判断）
+OPTIONAL_FIELDS = {
+    "cpc": "CPC",
+    "pageviews": "PageViews"
+}
+
+# 所有字段（包含必需字段和可选字段）
+ALL_FIELDS = {**REQUIRED_FIELDS, **OPTIONAL_FIELDS}
+
 
 def _read_excel_file(contents: bytes, filename: Optional[str] = None) -> pd.DataFrame:
     """
@@ -455,23 +464,23 @@ class ColumnMappingService:
                 logger.warning("映射规则文件存在但为空")
                 return None
 
-            # 验证映射规则的字段值是否有效
-            required_fields = list(REQUIRED_FIELDS.keys())
+            # 验证映射规则的字段值是否有效（包括必需字段和可选字段）
+            all_valid_fields = list(ALL_FIELDS.keys())
             invalid_fields = []
             for excel_col, db_field in mapping.items():
-                if db_field not in required_fields:
+                if db_field not in all_valid_fields:
                     invalid_fields.append(f"'{excel_col}' -> '{db_field}'")
 
             if invalid_fields:
                 logger.error(
                     f"映射规则包含无效的字段名: {invalid_fields}, "
-                    f"有效字段: {required_fields}"
+                    f"有效字段: {all_valid_fields}"
                 )
-                # 不返回None，而是过滤掉无效字段，继续使用有效的映射
+                # 不返回None，而是过滤掉无效字段，继续使用有效的映射（包括必需字段和可选字段）
                 valid_mapping = {
                     excel_col: db_field
                     for excel_col, db_field in mapping.items()
-                    if db_field in required_fields
+                    if db_field in all_valid_fields
                 }
                 if len(valid_mapping) == 0:
                     logger.error("映射规则中所有字段都无效，无法使用")
@@ -754,10 +763,13 @@ class ColumnMappingService:
                 else:
                     logger.debug(f"未找到合适的推断匹配: '{excel_col}'")
 
-        # 检查缺失的必需字段
+        # 检查缺失的必需字段（不包括可选字段）
         required_fields = list(REQUIRED_FIELDS.keys())
+        optional_fields = list(OPTIONAL_FIELDS.keys())
         mapped_fields = set(fuzzy_mapping.values())
-        missing_columns = [REQUIRED_FIELDS[col] for col in required_fields if col not in mapped_fields]
+        # 只检查必需字段是否缺失，可选字段不影响mapping_complete判断
+        missing_required_fields = [col for col in required_fields if col not in mapped_fields]
+        missing_columns = [REQUIRED_FIELDS[col] for col in missing_required_fields]
 
         # 记录未匹配的Excel列（用于调试）
         # 过滤掉未命名列（Unnamed: X）和空列
@@ -771,9 +783,8 @@ class ColumnMappingService:
 
         # 记录缺失的必需字段（用于调试）
         if missing_columns:
-            missing_db_fields = [col for col in required_fields if col not in mapped_fields]
             logger.warning(
-                f"缺失的必需字段: {missing_columns} (数据库字段: {missing_db_fields})。"
+                f"缺失的必需字段: {missing_columns} (数据库字段: {missing_required_fields})。"
                 f"未匹配的Excel列: {unmatched_excel_cols}"
             )
 
@@ -782,7 +793,7 @@ class ColumnMappingService:
             "missing_columns": missing_columns,
             "mapped_count": len(fuzzy_mapping),
             "required_count": len(required_fields),
-            "mapping_complete": len(missing_columns) == 0,
+            "mapping_complete": len(missing_columns) == 0,  # 只检查必需字段
             "unmatched_excel_columns": unmatched_excel_cols,  # 添加未匹配的Excel列信息
             "training_rules_count": len(user_mapping_rules) if user_mapping_rules else 0,  # 训练数据数量
             "match_details": match_details  # 匹配方式详情：{excel_col: (match_type, rule_col, score)}
@@ -840,7 +851,11 @@ async def parse_excel_columns(
             "excel_columns": excel_columns_clean,
             "recommended_mapping": recommended_mapping_clean,
             "required_fields": list(REQUIRED_FIELDS.keys()),
-            "field_names_cn": list(REQUIRED_FIELDS.values())
+            "optional_fields": list(OPTIONAL_FIELDS.keys()),
+            "all_fields": list(ALL_FIELDS.keys()),
+            "field_names_cn": list(REQUIRED_FIELDS.values()),
+            "optional_field_names_cn": list(OPTIONAL_FIELDS.values()),
+            "all_field_names_cn": list(ALL_FIELDS.values())
         })
 
     except HTTPException:
@@ -937,12 +952,13 @@ async def save_user_mapping(
                 detail=f"缺少必需字段映射: {', '.join(missing_names)}。请确保所有11个必需字段都已选择对应的Excel列。"
             )
 
-        # ====== 检查5：验证映射值是否都是有效的字段名 ======
-        invalid_fields = [field for field in mapped_fields_set if field not in required_fields]
+        # ====== 检查5：验证映射值是否都是有效的字段名（包括必需字段和可选字段） ======
+        all_valid_fields = list(ALL_FIELDS.keys())
+        invalid_fields = [field for field in mapped_fields_set if field not in all_valid_fields]
         if invalid_fields:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"无效的字段名: {', '.join(invalid_fields)}。必须是以下字段之一: {', '.join(required_fields)}"
+                detail=f"无效的字段名: {', '.join(invalid_fields)}。必须是以下字段之一: {', '.join(all_valid_fields)}"
             )
 
         # ====== 检查6：验证映射数量是否正确 ======
@@ -1185,8 +1201,12 @@ async def get_mapping_status(
             "mapping_rules_exists": os.path.exists(MAPPING_RULES_FILE),
             "has_user_mapping": user_mapping_rules is not None and len(user_mapping_rules) > 0,
             "required_fields": list(REQUIRED_FIELDS.keys()),
+            "optional_fields": list(OPTIONAL_FIELDS.keys()),
+            "all_fields": list(ALL_FIELDS.keys()),
             "field_names_cn": list(REQUIRED_FIELDS.values()),
-            "total_fields": len(REQUIRED_FIELDS)
+            "optional_field_names_cn": list(OPTIONAL_FIELDS.values()),
+            "total_fields": len(REQUIRED_FIELDS),
+            "total_optional_fields": len(OPTIONAL_FIELDS)
         }
 
         if user_mapping_rules:
@@ -1295,9 +1315,9 @@ async def preview_excel_data(
         else:
             logger.warning(f"没有找到可映射的列，mapping: {mapping}, df_mapped.columns: {list(df_mapped.columns)}")
 
-        # 只保留映射后的字段
-        required_fields = list(REQUIRED_FIELDS.keys())
-        available_fields = [f for f in required_fields if f in df_mapped.columns]
+        # 只保留映射后的字段（包括必需字段和可选字段）
+        all_fields = list(ALL_FIELDS.keys())
+        available_fields = [f for f in all_fields if f in df_mapped.columns]
 
         # 如果没有可用字段，返回空数据
         if not available_fields:
@@ -1332,11 +1352,11 @@ async def preview_excel_data(
                         row_dict[field] = str(value)
             preview_data.append(row_dict)
 
-        # 构建字段信息（包含中文名称）
+        # 构建字段信息（包含中文名称，支持必需字段和可选字段）
         field_info = {}
         for field in available_fields:
             field_info[field] = {
-                "name": REQUIRED_FIELDS.get(field, field),
+                "name": ALL_FIELDS.get(field, field),
                 "key": field
             }
 
@@ -1444,6 +1464,8 @@ async def import_training_data(
                                 "match_count": row.get("match_count", 0),
                                 "display_count": row.get("display_count", 0),
                                 "click_count": row.get("click_count", 0),
+                                "cpc": row.get("cpc", 0.0),
+                                "pageviews": row.get("pageviews", 0),
                                 "ecpm_before_deduct": row.get("ecpm_before_deduct", 0),
                                 "revenue_before_deduct": row.get("revenue_before_deduct", 0),
                             }
@@ -1505,6 +1527,8 @@ async def import_training_data(
                                 "match_count": existing["ad_data"].match_count,
                                 "display_count": existing["ad_data"].display_count,
                                 "click_count": existing["ad_data"].click_count,
+                                "cpc": existing["ad_data"].cpc or 0.0,
+                                "pageviews": existing["ad_data"].pageviews or 0,
                                 "ecpm_before_deduct": existing["ad_data"].ecpm_before_deduct,
                                 "revenue_before_deduct": existing["ad_data"].revenue_before_deduct,
                                 "created_at": existing["ad_data"].created_at,
@@ -1531,6 +1555,10 @@ async def import_training_data(
                 logger.warning(f"    匹配数: {new['data']['match_count']}")
                 logger.warning(f"    展示数: {new['data']['display_count']}")
                 logger.warning(f"    点击数: {new['data']['click_count']}")
+                if 'cpc' in new['data'] and new['data']['cpc'] != 0.0:
+                    logger.warning(f"    CPC: {new['data']['cpc']}")
+                if 'pageviews' in new['data'] and new['data']['pageviews'] != 0:
+                    logger.warning(f"    PageViews: {new['data']['pageviews']}")
                 logger.warning(f"    eCPM: {new['data']['ecpm_before_deduct']}")
                 logger.warning(f"    收益: {new['data']['revenue_before_deduct']}")
                 logger.warning(f"\n  💾 数据库中已有的数据 (ID: {existing['id']})：")
@@ -1538,6 +1566,10 @@ async def import_training_data(
                 logger.warning(f"    匹配数: {existing['match_count']}")
                 logger.warning(f"    展示数: {existing['display_count']}")
                 logger.warning(f"    点击数: {existing['click_count']}")
+                if existing.get('cpc', 0.0) != 0.0:
+                    logger.warning(f"    CPC: {existing['cpc']}")
+                if existing.get('pageviews', 0) != 0:
+                    logger.warning(f"    PageViews: {existing['pageviews']}")
                 logger.warning(f"    eCPM: {existing['ecpm_before_deduct']}")
                 logger.warning(f"    收益: {existing['revenue_before_deduct']}")
                 logger.warning(f"    创建时间: {existing['created_at']}")

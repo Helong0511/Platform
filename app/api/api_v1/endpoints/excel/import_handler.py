@@ -274,7 +274,7 @@ async def process_column_mapping(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[s
         "display_count", "click_count", "revenue_before_deduct"
     ]
     # 可选字段（如果不存在会自动计算）
-    optional_columns = ["coverage_rate", "display_rate", "click_rate", "ecpm_before_deduct"]
+    optional_columns = ["coverage_rate", "display_rate", "click_rate", "ecpm_before_deduct", "cpc", "pageviews"]
     missing_columns = [col for col in required_columns if col not in df.columns]
 
     # 规则2：字段映射不完整，报错不导入（完全基于训练数据，不能识别就不导入）
@@ -738,6 +738,20 @@ async def process_row_data(
                 ecpm_before = float(ecpm_before_val)
             else:
                 ecpm_before = (revenue_before / display_count * 1000) if display_count > 0 else 0.0
+            
+            # CPC（可选字段，如果Excel中有则使用，否则使用默认值0.0）
+            cpc_val = row.get("cpc")
+            if cpc_val is not None and pd.notna(cpc_val) and str(cpc_val).strip() != "":
+                cpc = float(cpc_val)
+            else:
+                cpc = 0.0
+            
+            # PageViews（可选字段，如果Excel中有则使用，否则使用默认值0）
+            pageviews_val = row.get("pageviews")
+            if pageviews_val is not None and pd.notna(pageviews_val) and str(pageviews_val).strip() != "":
+                pageviews = int(pageviews_val)
+            else:
+                pageviews = 0
                 
         except (ValueError, TypeError) as e:
             raise ValueError(f"数值字段格式错误: {str(e)}")
@@ -878,6 +892,8 @@ async def process_row_data(
             existing_data.match_count = match_count
             existing_data.display_count = display_count
             existing_data.click_count = click_count
+            existing_data.cpc = cpc
+            existing_data.pageviews = pageviews
             existing_data.ecpm_before_deduct = ecpm_before
             existing_data.ecpm_after_deduct = ecpm_after
             existing_data.revenue_before_deduct = revenue_before
@@ -938,6 +954,8 @@ async def process_row_data(
                 match_count=match_count,
                 display_count=display_count,
                 click_count=click_count,
+                cpc=cpc,
+                pageviews=pageviews,
                 ecpm_before_deduct=ecpm_before,
                 ecpm_after_deduct=ecpm_after,
                 revenue_before_deduct=revenue_before,
