@@ -833,6 +833,7 @@ async def get_daily_summary(
         func.sum(AdData.match_count).label("match_count"),
         func.sum(AdData.display_count).label("display_count"),
         func.sum(AdData.click_count).label("click_count"),
+        func.avg(AdData.viewability_rate).label("viewability_rate"),
         func.sum(AdData.cpc).label("cpc"),
         func.sum(AdData.pageviews).label("pageviews"),
         func.sum(AdData.revenue_after_deduct).label("revenue_after_deduct"),
