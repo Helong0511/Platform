@@ -158,6 +158,17 @@ def get_task_function_info(task_name: str, function_path: Optional[str] = None) 
     task_func = get_task_function_by_name_or_path(task_name, function_path)
 
     if task_func is None:
+        # 如果无法找到函数，记录警告信息（但不抛出异常，避免影响任务列表显示）
+        if function_path:
+            logger.warning(
+                f"无法找到任务 '{task_name}' 的函数（function_path: {function_path}）。"
+                f"请检查：1. 函数路径是否正确 2. 函数是否已正确导入 3. 任务是否已注册"
+            )
+        else:
+            logger.warning(
+                f"无法找到任务 '{task_name}' 的函数（未提供 function_path，且注册表中不存在）。"
+                f"请检查：1. 任务是否已注册 2. 任务名称是否正确"
+            )
         return None
 
     # 获取函数名
