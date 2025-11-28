@@ -298,6 +298,9 @@ async def addermobi_api_task(
                                     # 点击数
                                     "click_count": "Clicks",
 
+                                    # 可见率
+                                    "viewability_rate": "ActiveViewViewability",
+
                                     # CPC
                                     "cpc": "CPC",
 

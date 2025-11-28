@@ -92,6 +92,7 @@ class AdDataItemResponse(BaseModel):
     display_rate: float = Field(..., description="展示率（%，浮点数，保留2位小数）")
     click_count: int = Field(..., description="点击数（整数）")
     click_rate: float = Field(..., description="点击率（%，浮点数，保留2位小数）")
+    viewability_rate: float = Field(default=0.0, description="可见率（%，浮点数，保留2位小数）")
     cpc: float = Field(..., description="CPC（浮点数，保留2位小数）")
     pageviews: int = Field(..., description="PageViews（整数）")
     ecpm: float = Field(..., description="eCPM（减扣后的，浮点数，保留2位小数）")
@@ -405,6 +406,7 @@ async def get_client_data(
                 func.sum(AdData.match_count).label("match_count"),
                 func.sum(AdData.display_count).label("display_count"),
                 func.sum(AdData.click_count).label("click_count"),
+                func.avg(AdData.viewability_rate).label("viewability_rate"),
                 func.sum(AdData.cpc).label("cpc"),
                 func.sum(AdData.pageviews).label("pageviews"),
                 func.sum(AdData.revenue_after_deduct).label("revenue")
@@ -463,6 +465,7 @@ async def get_client_data(
                 total_match_count = int(row.match_count or 0)
                 total_display_count = int(row.display_count or 0)
                 total_click_count = int(row.click_count or 0)
+                total_viewability_rate = float(row.viewability_rate or 0.0)
                 total_cpc = float(row.cpc or 0.0)
                 total_pageviews = int(row.pageviews or 0)
                 total_revenue = float(row.revenue or 0.0)
@@ -504,6 +507,7 @@ async def get_client_data(
                     display_rate=float(display_rate),
                     click_count=total_click_count,
                     click_rate=float(click_rate),
+                    viewability_rate=round(total_viewability_rate, 2),
                     cpc=round(total_cpc, 2),
                     pageviews=total_pageviews,
                     ecpm=float(ecpm),
@@ -582,6 +586,7 @@ async def get_client_data(
                     if ad_data.display_count > 0 else 0.0,
                     2
                 )
+                viewability_rate = ad_data.viewability_rate if ad_data.viewability_rate is not None else 0.0
 
                 # 处理国家代码和国家名称
                 country_code_str = ad_data.country_code or ""
@@ -608,6 +613,7 @@ async def get_client_data(
                     display_rate=float(display_rate),
                     click_count=int(ad_data.click_count),
                     click_rate=float(click_rate),
+                    viewability_rate=float(round(viewability_rate, 2)),
                     cpc=float(round(ad_data.cpc or 0.0, 2)),
                     pageviews=int(ad_data.pageviews or 0),
                     ecpm=float(round(ad_data.ecpm_after_deduct, 2)),

@@ -285,6 +285,16 @@ async def process_api_ad_data(
                         except (ValueError, TypeError):
                             item_cpc = 0.0
 
+                # 可见率（如果字段映射存在则解析，否则使用默认值0.0）
+                item_viewability_rate = 0.0
+                if field_mapping and "viewability_rate" in field_mapping:
+                    viewability_rate_val = get_field(item, "viewability_rate")
+                    if viewability_rate_val is not None and viewability_rate_val != "":
+                        try:
+                            item_viewability_rate = float(viewability_rate_val)
+                        except (ValueError, TypeError):
+                            item_viewability_rate = 0.0
+
                 # PageViews（如果字段映射存在则解析，否则使用默认值0）
                 item_pageviews = 0
                 if field_mapping and "pageviews" in field_mapping:
@@ -374,6 +384,9 @@ async def process_api_ad_data(
                 # 如果有字段映射且有CPC值，保存到items中
                 if field_mapping and "cpc" in field_mapping and item_cpc > 0:
                     item_data["cpc"] = item_cpc
+                # 如果有字段映射且有可见率值，保存到items中
+                if field_mapping and "viewability_rate" in field_mapping and item_viewability_rate > 0:
+                    item_data["viewability_rate"] = item_viewability_rate
                 recognized_data[key]["items"].append(item_data)
             else:
                 # 无法识别国家代码，按 (date_str, product_name) 分组累加
@@ -387,6 +400,7 @@ async def process_api_ad_data(
                         "match_count": 0,
                         "display_count": 0,
                         "click_count": 0,
+                        "viewability_rate": 0.0,
                         "cpc": 0.0,
                         "pageviews": 0,
                         "revenue": 0.0,
@@ -425,6 +439,9 @@ async def process_api_ad_data(
                 # 如果有字段映射且有CPC值，保存到items中
                 if field_mapping and "cpc" in field_mapping and item_cpc > 0:
                     item_data["cpc"] = item_cpc
+                # 如果有字段映射且有可见率值，保存到items中
+                if field_mapping and "viewability_rate" in field_mapping and item_viewability_rate > 0:
+                    item_data["viewability_rate"] = item_viewability_rate
                 unrecognized_data[key]["items"].append(item_data)
 
                 # 只有当提供了国家代码输入但无法识别时，才发送Telegram通知
@@ -559,6 +576,31 @@ async def process_api_ad_data(
                 # 更新分组数据中的CPC值
                 grouped_data["cpc"] = calculated_cpc
 
+                # 计算可见率：如果有字段映射且有可见率值，使用加权平均（基于点击数）；否则使用默认值0.0
+                calculated_viewability_rate = 0.0
+                if field_mapping and "viewability_rate" in field_mapping:
+                    if items_count == 1:
+                        # 单一条数据
+                        single_item = items_list[0]
+                        if "viewability_rate" in single_item:
+                            calculated_viewability_rate = single_item.get("viewability_rate", 0.0)
+                    else:
+                        # 多条相同数据，使用加权平均（基于点击数）
+                        has_viewability_values = False
+                        total_viewability_weighted = 0.0
+                        total_weight = 0
+                        for item in items_list:
+                            if "viewability_rate" in item and item.get("viewability_rate", 0) > 0:
+                                has_viewability_values = True
+                                item_clicks = item.get("click_count", 0)
+                                if item_clicks > 0:
+                                    total_viewability_weighted += item["viewability_rate"] * item_clicks
+                                    total_weight += item_clicks
+                        if has_viewability_values and total_weight > 0:
+                            calculated_viewability_rate = total_viewability_weighted / total_weight
+                # 更新分组数据中的可见率值
+                grouped_data["viewability_rate"] = calculated_viewability_rate
+
                 # 计算减扣后的值（截断到两位小数，不使用四舍五入）
                 ecpm_after_deduct = truncate_to_2_decimal(final_ecpm * (1 - ecpm_deduct_ratio))
                 revenue_after_deduct = truncate_to_2_decimal(total_revenue * (1 - revenue_deduct_ratio))
@@ -622,6 +664,13 @@ async def process_api_ad_data(
                         need_update = True
                         update_fields.append(f"CPC: {existing_data.cpc:.2f} -> {grouped_cpc:.2f}")
                         existing_data.cpc = grouped_cpc
+
+                    # 可见率（如果有字段映射则更新）
+                    grouped_viewability_rate = grouped_data.get("viewability_rate", 0.0)
+                    if abs(existing_data.viewability_rate - grouped_viewability_rate) > 0.01:
+                        need_update = True
+                        update_fields.append(f"可见率: {existing_data.viewability_rate:.2f} -> {grouped_viewability_rate:.2f}")
+                        existing_data.viewability_rate = grouped_viewability_rate
 
                     # PageViews（如果字段映射存在则更新）
                     if field_mapping and "pageviews" in field_mapping:
@@ -702,6 +751,7 @@ async def process_api_ad_data(
                         match_count=grouped_data["match_count"],
                         display_count=grouped_data["display_count"],
                         click_count=grouped_data["click_count"],
+                        viewability_rate=grouped_data.get("viewability_rate", 0.0),  # 可见率：有字段映射则使用加权平均，否则使用默认值0.0
                         cpc=grouped_data.get("cpc", 0.0),  # CPC：有字段映射则使用加权平均，否则使用公式计算（收益/点击数）
                         pageviews=grouped_data.get("pageviews", 0) if (field_mapping and "pageviews" in field_mapping) else 0,
                         ecpm_before_deduct=final_ecpm,
@@ -848,6 +898,33 @@ async def process_api_ad_data(
                 # 更新分组数据中的CPC值
                 grouped_data["cpc"] = calculated_cpc
 
+                # 计算可见率：如果有字段映射且有可见率值，使用加权平均（基于点击数）；否则使用默认值0.0
+                calculated_viewability_rate = 0.0
+                if field_mapping and "viewability_rate" in field_mapping:
+                    items_list = grouped_data.get("items", [])
+                    items_count = len(items_list)
+                    if items_count == 1:
+                        # 单一条数据
+                        single_item = items_list[0]
+                        if "viewability_rate" in single_item:
+                            calculated_viewability_rate = single_item.get("viewability_rate", 0.0)
+                    else:
+                        # 多条相同数据，使用加权平均（基于点击数）
+                        has_viewability_values = False
+                        total_viewability_weighted = 0.0
+                        total_weight = 0
+                        for item in items_list:
+                            if "viewability_rate" in item and item.get("viewability_rate", 0) > 0:
+                                has_viewability_values = True
+                                item_clicks = item.get("click_count", 0)
+                                if item_clicks > 0:
+                                    total_viewability_weighted += item["viewability_rate"] * item_clicks
+                                    total_weight += item_clicks
+                        if has_viewability_values and total_weight > 0:
+                            calculated_viewability_rate = total_viewability_weighted / total_weight
+                # 更新分组数据中的可见率值
+                grouped_data["viewability_rate"] = calculated_viewability_rate
+
                 # 计算减扣后的值（截断到两位小数，不使用四舍五入）
                 ecpm_after_deduct = truncate_to_2_decimal(final_ecpm * (1 - ecpm_deduct_ratio))
                 revenue_after_deduct = truncate_to_2_decimal(total_revenue * (1 - revenue_deduct_ratio))
@@ -993,6 +1070,7 @@ async def process_api_ad_data(
                         match_count=grouped_data["match_count"],
                         display_count=grouped_data["display_count"],
                         click_count=grouped_data["click_count"],
+                        viewability_rate=grouped_data.get("viewability_rate", 0.0),  # 可见率：有字段映射则使用加权平均，否则使用默认值0.0
                         cpc=grouped_data.get("cpc", 0.0),  # CPC：有字段映射则使用加权平均，否则使用公式计算（收益/点击数）
                         pageviews=grouped_data.get("pageviews", 0) if (field_mapping and "pageviews" in field_mapping) else 0,
                         ecpm_before_deduct=final_ecpm,

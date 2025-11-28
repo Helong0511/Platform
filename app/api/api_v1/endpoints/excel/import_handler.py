@@ -274,7 +274,7 @@ async def process_column_mapping(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[s
         "display_count", "click_count", "revenue_before_deduct"
     ]
     # 可选字段（如果不存在会自动计算）
-    optional_columns = ["coverage_rate", "display_rate", "click_rate", "ecpm_before_deduct", "cpc", "pageviews"]
+    optional_columns = ["coverage_rate", "display_rate", "click_rate", "viewability_rate", "ecpm_before_deduct", "cpc", "pageviews"]
     missing_columns = [col for col in required_columns if col not in df.columns]
 
     # 规则2：字段映射不完整，报错不导入（完全基于训练数据，不能识别就不导入）
@@ -732,6 +732,13 @@ async def process_row_data(
             else:
                 click_rate = (click_count / display_count * 100) if display_count > 0 else 0.0
             
+            # 可见率（可选字段，如果Excel中有则使用，否则使用默认值0.0）
+            viewability_rate_val = row.get("viewability_rate")
+            if viewability_rate_val is not None and pd.notna(viewability_rate_val) and str(viewability_rate_val).strip() != "":
+                viewability_rate = float(viewability_rate_val)
+            else:
+                viewability_rate = 0.0
+            
             # eCPM = 收益/展示数 * 1000
             ecpm_before_val = row.get("ecpm_before_deduct")
             if ecpm_before_val is not None and pd.notna(ecpm_before_val) and str(ecpm_before_val).strip() != "":
@@ -892,6 +899,7 @@ async def process_row_data(
             existing_data.match_count = match_count
             existing_data.display_count = display_count
             existing_data.click_count = click_count
+            existing_data.viewability_rate = viewability_rate
             existing_data.cpc = cpc
             existing_data.pageviews = pageviews
             existing_data.ecpm_before_deduct = ecpm_before
@@ -911,6 +919,7 @@ async def process_row_data(
                 existing_data.click_rate = float(click_rate_val)
             else:
                 existing_data.click_rate = click_rate
+            existing_data.viewability_rate = viewability_rate
             # 如果基础数据有变化，重新计算比率字段（确保一致性）
             existing_data.calculate_rates()
             result["updated_rows"] += 1
@@ -954,6 +963,7 @@ async def process_row_data(
                 match_count=match_count,
                 display_count=display_count,
                 click_count=click_count,
+                viewability_rate=viewability_rate,
                 cpc=cpc,
                 pageviews=pageviews,
                 ecpm_before_deduct=ecpm_before,
@@ -974,6 +984,7 @@ async def process_row_data(
                 ad_data.click_rate = float(click_rate_val)
             else:
                 ad_data.click_rate = click_rate
+            ad_data.viewability_rate = viewability_rate
             # 调用计算方法确保比率字段正确（如果基础数据有变化，会重新计算）
             ad_data.calculate_rates()
             db.add(ad_data)
