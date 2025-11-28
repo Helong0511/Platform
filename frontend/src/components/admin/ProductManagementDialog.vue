@@ -64,7 +64,8 @@
             color: '#fff',
             fontWeight: 'bold',
             fontSize: '14px',
-            height: '50px'
+            height: '44px',
+            padding: '10px 0'
           }"
         >
           <el-table-column prop="id" label="ID" width="80" align="center">
@@ -421,13 +422,15 @@ const { isMobile, isTablet } = useDevice();
 // 计算表格最大高度
 const tableMaxHeight = computed(() => {
   if (isMobile.value) {
-    return 400;
+    return 350;
   }
   if (isTablet.value) {
-    return 500;
+    return 450;
   }
-  // 桌面端：使用固定高度，确保有足够空间显示并启用滚动
-  return 600;
+  // 桌面端：根据视口高度动态计算，留出足够的头部和操作栏空间
+  const viewportHeight = window.innerHeight;
+  // 对话框头部约120px + 操作栏约80px + 内容padding约60px + 底部空间约40px = 约300px
+  return Math.max(400, viewportHeight - 320);
 });
 
 const visible = ref(props.modelValue);
@@ -1452,16 +1455,25 @@ const handleDelete = async (id) => {
 .product-management-dialog :deep(.el-dialog) {
   border-radius: 16px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
 }
 
 .product-management-dialog :deep(.el-dialog__header) {
   padding: 0;
   margin: 0;
   border-bottom: none;
+  flex-shrink: 0;
 }
 
 .product-management-dialog :deep(.el-dialog__body) {
   padding: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 对话框头部 */
@@ -1571,8 +1583,12 @@ const handleDelete = async (id) => {
 
 /* 内容区域 */
 .product-management-content {
-  padding: var(--spacing-lg) var(--spacing-xxxxl) var(--spacing-xxxl);
+  padding: var(--spacing-lg) var(--spacing-xxxxl) var(--spacing-lg);
   background: var(--bg-page);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
 }
 
 /* 操作栏 */
@@ -1580,12 +1596,13 @@ const handleDelete = async (id) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: var(--spacing-xxl);
+  margin-bottom: var(--spacing-lg);
   padding: 0 var(--spacing-xl);
   height: 50px;
   background: var(--bg-primary);
   border-radius: var(--radius-xxl);
   box-shadow: var(--shadow-light);
+  flex-shrink: 0;
 }
 
 .add-button {
@@ -1615,26 +1632,41 @@ const handleDelete = async (id) => {
 .table-wrapper {
   background: var(--bg-primary);
   border-radius: var(--radius-xxl);
-  padding: var(--spacing-xl);
+  padding: var(--spacing-lg);
   box-shadow: var(--shadow-light);
-  overflow: visible;
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .product-table {
   border-radius: var(--radius-lg);
-  overflow: visible;
+  overflow: hidden;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .product-table :deep(.el-table) {
-  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.product-table :deep(.el-table__header-wrapper) {
+  flex-shrink: 0;
 }
 
 .product-table :deep(.el-table__body-wrapper) {
+  flex: 1;
   overflow-y: auto !important;
   overflow-x: hidden !important;
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
-  position: relative;
+  min-height: 0;
 }
 
 /* 优化滚动条样式 */
@@ -1657,16 +1689,19 @@ const handleDelete = async (id) => {
 }
 
 .product-table :deep(.el-table__row) {
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
 }
 
 .product-table :deep(.el-table__row:hover) {
   background-color: #f5f7fa;
-  transform: scale(1.01);
 }
 
 .product-table :deep(.el-table td) {
-  padding: 18px 0;
+  padding: 12px 0;
+}
+
+.product-table :deep(.el-table th) {
+  padding: 12px 0;
 }
 
 /* 产品名称单元格 */
