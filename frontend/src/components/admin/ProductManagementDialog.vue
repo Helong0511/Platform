@@ -57,6 +57,7 @@
           border
           stripe
           class="product-table"
+          :max-height="tableMaxHeight"
           empty-text="暂无产品数据，点击添加产品开始创建"
           :header-cell-style="{ 
             background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
@@ -416,6 +417,18 @@ const emit = defineEmits(['update:modelValue', 'add', 'edit', 'delete', 'save', 
 
 // 设备检测
 const { isMobile, isTablet } = useDevice();
+
+// 计算表格最大高度
+const tableMaxHeight = computed(() => {
+  if (isMobile.value) {
+    return 400;
+  }
+  if (isTablet.value) {
+    return 500;
+  }
+  // 桌面端：使用固定高度，确保有足够空间显示并启用滚动
+  return 600;
+});
 
 const visible = ref(props.modelValue);
 const formDialogVisible = ref(false);
@@ -1604,21 +1617,24 @@ const handleDelete = async (id) => {
   border-radius: var(--radius-xxl);
   padding: var(--spacing-xl);
   box-shadow: var(--shadow-light);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .product-table {
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow: visible;
+}
+
+.product-table :deep(.el-table) {
+  overflow: visible;
 }
 
 .product-table :deep(.el-table__body-wrapper) {
-  max-height: calc(100vh - 400px);
-  min-height: 300px;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
+  position: relative;
 }
 
 /* 优化滚动条样式 */
