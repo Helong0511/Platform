@@ -81,7 +81,9 @@ INSERT INTO `products` (`id`, `client_id`, `name`, `ecpm_deduct_ratio`, `revenue
 (59,1007,'https://pxvnpl.xyz/',0.00,0.00,1),
 (60,1008,'https://active.dalyfeds.com/news/index.html?portal=ac101',0.20,0.20,1),
 (61,1003,'https://zpfxtb.xyz/',0.00,0.00,1),
-(62,1001,'https://api.addermobi.com/short/1074/3435/118',0.05,0.05,1);
+(62,1001,'https://api.addermobi.com/short/1074/3435/118',0.05,0.05,1),
+(63,1001,'titme.top',0.05,0.05,1),
+(64,1001,'https://pjrzlz.xyz/',0.35,0.35,1);
 
 -- 添加产品历史分配数据
 INSERT INTO `product_assignments` (`product_id`, `client_id`, `start_date`, `end_date`) VALUES 
@@ -136,7 +138,9 @@ INSERT INTO `product_assignments` (`product_id`, `client_id`, `start_date`, `end
 (59,1007,'2025-11-26',NULL),
 (60,1008,'2025-11-26',NULL),
 (61,1003,'2025-11-26',NULL),
-(62,1001,'2025-11-26',NULL);
+(62,1001,'2025-11-26',NULL),
+(63,1001,'2025-11-28',NULL),
+(64,1001,'2025-11-28',NULL);
 
 -- 添加产品历史分配数据
 INSERT INTO `scheduled_tasks` (`task_name`, `cron_expression`, `description`, `function_path`, `is_active`) VALUES 
@@ -146,7 +150,7 @@ INSERT INTO `scheduled_tasks` (`task_name`, `cron_expression`, `description`, `f
 ('TQT API获取数据','*/10 * * * *','每隔10分钟执行一次，从TQT API获取广告数据并导入到数据库','app.scheduler_module.tasks.tqt_task.tqt_api_task',1),
 ('Skymobi API获取数据','*/10 * * * *','每隔10分钟执行一次，从Skymobi API获取广告数据','app.scheduler_module.tasks.skymobi_task.skymobi_api_task',1),
 ('yangyangdeyi API获取数据','*/10 * * * *','每隔10分钟执行一次，从yangyangdeyi API获取广告数据','app.scheduler_module.tasks.tbsj_task.tbsj_api_task',0),
-('Addermobi API获取数据','*/10 * * * *','每隔10分钟执行一次，从Addermobi API获取广告数据','app.scheduler_module.tasks.addermobi_task.addermobi_api_task',0);
+('Addermobi API获取数据','*/10 * * * *','每隔10分钟执行一次，从Addermobi API获取广告数据','app.scheduler_module.tasks.addermobi_task.addermobi_api_task',1);
 
 -- 添加广告数据
 INSERT INTO `ad_data` (`date`, `country_code`, `product_id`, `request_count`, `match_count`, `display_count`, `click_count`, `ecpm_before_deduct`, `ecpm_after_deduct`, `revenue_before_deduct`, `revenue_after_deduct`) VALUES 
@@ -972,7 +976,8 @@ INSERT INTO `ad_data` (`date`, `country_code`, `product_id`, `request_count`, `m
 ('2025-11-27 00:00:00','ZZ',61,4146,2137,1835,33,0.40,0.40,0.74,0.74),
 ('2025-11-27 00:00:00','ZZ',62,18638,18278,12270,276,12.55,12.55,154.04,154.04),
 ('2025-11-28 00:00:00','CN',40,1,0,0,0,0.00,0.00,0.00,0.00),
-('2025-11-28 00:00:00','CN',41,9,0,0,0,0.00,0.00,0.00,0.00);
+('2025-11-28 00:00:00','CN',41,9,0,0,0,0.00,0.00,0.00,0.00),
+('2025-11-28 00:00:00','US',63,11293,10921,7434,134,10.86,10.31,80.75,76.71);
 
 -- 更新广告数据统计字段（避免除零错误）
 UPDATE `ad_data` SET `coverage_rate` = CASE WHEN `request_count` > 0 THEN ROUND(`match_count` / `request_count` * 100, 2) ELSE 0 END;

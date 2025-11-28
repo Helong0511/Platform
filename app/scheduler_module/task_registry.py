@@ -96,6 +96,10 @@ def load_function_by_path(function_path: str) -> Optional[Callable[..., Any]]:
     Returns:
         函数对象，如果加载失败返回 None
     """
+    if not function_path:
+        logger.error("函数路径为空")
+        return None
+        
     try:
         # 分割模块路径和函数名
         parts = function_path.rsplit('.', 1)
@@ -106,7 +110,12 @@ def load_function_by_path(function_path: str) -> Optional[Callable[..., Any]]:
         module_path, function_name = parts
 
         # 动态导入模块
-        module = __import__(module_path, fromlist=[function_name])
+        try:
+            module = __import__(module_path, fromlist=[function_name])
+        except ImportError as import_err:
+            # 尝试更详细的错误信息
+            logger.error(f"导入模块失败: {function_path}, 模块路径: {module_path}, 错误: {import_err}")
+            return None
 
         # 获取函数
         if hasattr(module, function_name):
@@ -115,14 +124,19 @@ def load_function_by_path(function_path: str) -> Optional[Callable[..., Any]]:
                 logger.info(f"成功加载函数: {function_path}")
                 return func
             else:
-                logger.error(f"'{function_path}' 不是可调用对象")
+                logger.error(f"'{function_path}' 不是可调用对象，类型: {type(func)}")
                 return None
         else:
-            logger.error(f"模块 '{module_path}' 中不存在函数 '{function_name}'")
+            # 列出模块中可用的属性，帮助调试
+            available_attrs = [attr for attr in dir(module) if not attr.startswith('_')]
+            logger.error(
+                f"模块 '{module_path}' 中不存在函数 '{function_name}'。"
+                f"可用属性: {', '.join(available_attrs[:20])}"  # 只显示前20个
+            )
             return None
 
     except ImportError as e:
-        logger.error(f"导入模块失败: {function_path}, 错误: {e}")
+        logger.error(f"导入模块失败: {function_path}, 错误: {e}", exc_info=True)
         return None
     except Exception as e:
         logger.error(f"加载函数失败: {function_path}, 错误: {e}", exc_info=True)
@@ -189,8 +203,33 @@ def auto_register_tasks() -> None:
             wrapper = config.get("wrapper", False)
             
             # 动态导入任务模块和函数
-            module = __import__(task_module, fromlist=[task_function])
+            try:
+                module = __import__(task_module, fromlist=[task_function])
+            except ImportError as import_err:
+                logger.error(
+                    f"无法导入任务模块 '{task_module}' (任务: '{task_name}'): {import_err}",
+                    exc_info=True
+                )
+                failed_count += 1
+                continue
+                
+            if not hasattr(module, task_function):
+                # 列出模块中可用的属性，帮助调试
+                available_attrs = [attr for attr in dir(module) if not attr.startswith('_')]
+                logger.error(
+                    f"任务模块 '{task_module}' 中不存在函数 '{task_function}' (任务: '{task_name}')。"
+                    f"可用属性: {', '.join(available_attrs[:20])}"
+                )
+                failed_count += 1
+                continue
+                
             task_func = getattr(module, task_function)
+            if not callable(task_func):
+                logger.error(
+                    f"任务模块 '{task_module}' 中的 '{task_function}' 不是可调用对象 (任务: '{task_name}')，类型: {type(task_func)}"
+                )
+                failed_count += 1
+                continue
             
             # 特殊处理：清理旧日志任务需要包装函数
             if wrapper and task_name == "清理旧日志":
@@ -207,12 +246,6 @@ def auto_register_tasks() -> None:
             
         except KeyError as e:
             logger.error(f"任务配置 '{config_key}' 缺少必要字段: {e}")
-            failed_count += 1
-        except ImportError as e:
-            logger.error(f"无法导入任务模块 '{task_module}': {e}")
-            failed_count += 1
-        except AttributeError as e:
-            logger.error(f"任务模块 '{task_module}' 中不存在函数 '{task_function}': {e}")
             failed_count += 1
         except Exception as e:
             logger.error(f"注册任务 '{config_key}' 失败: {e}", exc_info=True)
