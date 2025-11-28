@@ -70,12 +70,12 @@
             padding: '10px 0'
           }"
         >
-          <el-table-column prop="id" label="ID" :width="isMobile ? 60 : 80" align="center" class-name="id-column">
+          <el-table-column prop="id" label="ID" :width="isMobile ? 40 : 80" align="center" class-name="id-column">
             <template #default="scope">
               <el-tag type="info" effect="plain" :size="isMobile ? 'small' : 'small'">{{ scope.row.id }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="name" label="产品名称" :min-width="isMobile ? 200 : 300" class-name="name-column">
+          <el-table-column prop="name" label="产品名称" :min-width="isMobile ? 120 : 300" class-name="name-column">
             <template #default="scope">
               <div class="product-name-cell">
                 <el-icon class="product-icon"><Box /></el-icon>
@@ -83,21 +83,21 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column prop="ecpm_deduct_ratio" :label="isMobile ? 'eCPM' : 'eCPM减扣比例'" :width="isMobile ? 90 : 120" align="center" class-name="ecpm-column">
+          <el-table-column prop="ecpm_deduct_ratio" :label="isMobile ? 'eCPM' : 'eCPM减扣比例'" :width="isMobile ? 65 : 120" align="center" class-name="ecpm-column">
             <template #default="scope">
               <el-tag type="warning" effect="dark" :size="isMobile ? 'small' : 'default'">
                 {{ formatPercentage(scope.row.ecpm_deduct_ratio) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="revenue_deduct_ratio" :label="isMobile ? '收益' : '收益减扣比例'" :width="isMobile ? 80 : 100" align="center" class-name="revenue-column">
+          <el-table-column prop="revenue_deduct_ratio" :label="isMobile ? '收益' : '收益减扣比例'" :width="isMobile ? 60 : 100" align="center" class-name="revenue-column">
             <template #default="scope">
               <el-tag type="success" effect="dark" :size="isMobile ? 'small' : 'default'">
                 {{ formatPercentage(scope.row.revenue_deduct_ratio) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="is_active" label="状态" :width="isMobile ? 70 : 80" align="center" class-name="status-column">
+          <el-table-column prop="is_active" label="状态" :width="isMobile ? 60 : 80" align="center" class-name="status-column">
             <template #default="scope">
               <el-tag 
                 :type="scope.row.is_active ? 'success' : 'danger'" 
@@ -109,7 +109,7 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="created_at" :label="isMobile ? '时间' : '创建时间'" :width="isMobile ? 140 : 180" align="center" class-name="time-column">
+          <el-table-column prop="created_at" :label="isMobile ? '时间' : '创建时间'" :width="isMobile ? 100 : 180" align="center" class-name="time-column">
             <template #default="scope">
               <div class="time-cell">
                 <el-icon :size="isMobile ? 14 : 16"><Clock /></el-icon>
@@ -117,7 +117,7 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="操作" :width="isMobile ? 100 : 280" :fixed="isMobile ? false : 'right'" align="center" class-name="action-column">
+          <el-table-column label="操作" :width="isMobile ? 100 : 280" :fixed="isMobile ? 'right' : 'right'" align="center" class-name="action-column">
             <template #default="scope">
               <div class="action-buttons" :class="{ 'mobile-actions': isMobile }">
                 <el-button 
@@ -1971,10 +1971,10 @@ const handleDelete = async (id) => {
     font-size: 20px;
   }
 
-  /* 对话框头部移动端优化 */
+  /* 对话框头部移动端优化 - 更紧凑 */
   .dialog-header {
-    padding: 12px 16px;
-    min-height: 60px;
+    padding: 8px 12px;
+    min-height: 50px;
   }
 
   .header-content {
@@ -2016,9 +2016,9 @@ const handleDelete = async (id) => {
     font-size: 12px;
   }
 
-  /* 内容区域移动端优化 */
+  /* 内容区域移动端优化 - 更紧凑 */
   .product-management-content {
-    padding: 12px;
+    padding: 8px;
     flex: 1;
     min-height: 0;
     display: flex;
@@ -2026,13 +2026,13 @@ const handleDelete = async (id) => {
     overflow: hidden;
   }
 
-  /* 操作栏移动端优化 */
+  /* 操作栏移动端优化 - 更紧凑 */
   .action-bar {
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
     align-items: stretch;
-    margin-bottom: 12px;
-    padding: 12px;
+    margin-bottom: 8px;
+    padding: 8px;
     height: auto;
     min-height: auto;
   }
@@ -2059,24 +2059,24 @@ const handleDelete = async (id) => {
     border-radius: 12px;
   }
 
-  /* 表格包装器移动端优化 */
+  /* 表格包装器移动端优化 - 更紧凑 */
   .table-wrapper {
-    padding: 8px;
+    padding: 6px;
     flex: 1;
     min-height: 0;
-    border-radius: 12px;
+    border-radius: 8px;
   }
   
   /* 表格移动端优化 */
   .product-table {
-    font-size: 13px;
+    font-size: 12px;
     border-radius: 8px;
     min-width: 100%;
     width: 100%;
   }
 
   .product-table :deep(.el-table) {
-    min-width: 800px; /* 确保表格有最小宽度，可以横向滚动 */
+    min-width: 600px; /* 减小最小宽度，让表格更紧凑 */
     width: 100%;
   }
 
@@ -2141,74 +2141,74 @@ const handleDelete = async (id) => {
   }
   
   .product-table :deep(.el-table__cell) {
-    padding: 10px 6px;
+    padding: 6px 4px;
     word-break: break-word;
     white-space: nowrap;
-    min-width: 60px;
+    min-width: 40px;
   }
   
   .product-table :deep(.el-table__header th) {
-    font-size: 11px;
-    padding: 8px 6px;
+    font-size: 10px;
+    padding: 6px 4px;
     white-space: nowrap;
     font-weight: 600;
-    min-width: 60px;
+    min-width: 40px;
   }
   
   .product-table :deep(.el-table__body td) {
-    font-size: 11px;
-    padding: 8px 6px;
+    font-size: 10px;
+    padding: 6px 4px;
     vertical-align: middle;
     white-space: nowrap;
-    min-width: 60px;
+    min-width: 40px;
   }
 
-  /* ID列优化 */
+  /* ID列优化 - 更紧凑 */
   .product-table :deep(.id-column) {
-    width: 50px !important;
-    min-width: 50px !important;
-    max-width: 50px !important;
+    width: 40px !important;
+    min-width: 40px !important;
+    max-width: 40px !important;
   }
 
-  /* 产品名称列优化 */
+  /* 产品名称列优化 - 增加宽度显示更多内容 */
   .product-table :deep(.name-column) {
-    min-width: 150px !important;
-    max-width: 200px !important;
+    min-width: 120px !important;
+    max-width: 180px !important;
   }
 
-  /* eCPM列优化 */
+  /* eCPM列优化 - 更紧凑 */
   .product-table :deep(.ecpm-column) {
-    width: 80px !important;
-    min-width: 80px !important;
-    max-width: 80px !important;
+    width: 65px !important;
+    min-width: 65px !important;
+    max-width: 65px !important;
   }
 
-  /* 收益列优化 */
+  /* 收益列优化 - 更紧凑 */
   .product-table :deep(.revenue-column) {
-    width: 70px !important;
-    min-width: 70px !important;
-    max-width: 70px !important;
+    width: 60px !important;
+    min-width: 60px !important;
+    max-width: 60px !important;
   }
 
-  /* 状态列优化 */
+  /* 状态列优化 - 更紧凑 */
   .product-table :deep(.status-column) {
-    width: 70px !important;
-    min-width: 70px !important;
-    max-width: 70px !important;
+    width: 60px !important;
+    min-width: 60px !important;
+    max-width: 60px !important;
   }
 
-  /* 时间列优化 */
+  /* 时间列优化 - 更紧凑 */
   .product-table :deep(.time-column) {
-    width: 120px !important;
-    min-width: 120px !important;
-    max-width: 120px !important;
+    width: 100px !important;
+    min-width: 100px !important;
+    max-width: 100px !important;
   }
 
-  /* 操作列优化 */
+  /* 操作列优化 - 更紧凑 */
   .product-table :deep(.action-column) {
-    width: 120px !important;
-    min-width: 120px !important;
-    max-width: 120px !important;
+    width: 100px !important;
+    min-width: 100px !important;
+    max-width: 100px !important;
     position: sticky;
     right: 0;
     background: var(--bg-primary);
@@ -2226,45 +2226,46 @@ const handleDelete = async (id) => {
     min-width: 50px !important;
   }
 
-  /* 产品名称单元格移动端优化 */
+  /* 产品名称单元格移动端优化 - 更紧凑 */
   .product-name-cell {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 6px;
-    max-width: 200px;
+    gap: 4px;
+    max-width: 180px;
     overflow: hidden;
   }
 
   .product-icon {
-    font-size: 14px;
+    font-size: 12px;
     flex-shrink: 0;
   }
 
   .product-name {
-    font-size: 11px;
-    line-height: 1.3;
+    font-size: 10px;
+    line-height: 1.2;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     flex: 1;
     min-width: 0;
+    max-width: 160px;
   }
 
-  /* 时间单元格移动端优化 */
+  /* 时间单元格移动端优化 - 更紧凑 */
   .time-cell {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 4px;
-    font-size: 10px;
+    gap: 3px;
+    font-size: 9px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
   .time-cell .el-icon {
-    font-size: 12px;
+    font-size: 10px;
     flex-shrink: 0;
   }
 
@@ -2272,24 +2273,26 @@ const handleDelete = async (id) => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: 9px;
   }
 
-  /* 操作按钮移动端优化 */
+  /* 操作按钮移动端优化 - 更紧凑 */
   .action-buttons.mobile-actions {
     display: flex;
     flex-direction: row;
-    gap: 4px;
+    gap: 3px;
     justify-content: center;
     align-items: center;
     flex-wrap: nowrap;
     width: 100%;
+    padding: 0;
   }
 
   .action-buttons.mobile-actions .action-btn {
-    width: 32px;
-    height: 32px;
-    min-width: 32px;
-    min-height: 32px;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
     padding: 0;
     border-radius: 50%;
     margin: 0;
@@ -2298,29 +2301,36 @@ const handleDelete = async (id) => {
 
   .action-buttons.mobile-actions .action-btn .el-icon {
     margin-right: 0;
-    font-size: 14px;
+    font-size: 12px;
   }
 
   .action-buttons.mobile-actions .action-btn.is-circle {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
   }
 
   /* 确保操作按钮在固定列中正确显示 */
   .product-table :deep(.action-column .action-buttons) {
     justify-content: center;
     width: 100%;
+    gap: 3px;
   }
 
-  /* 标签移动端优化 */
+  .product-table :deep(.action-column) {
+    padding: 4px !important;
+  }
+
+  /* 标签移动端优化 - 更紧凑 */
   .product-table :deep(.el-tag) {
-    font-size: 10px;
-    padding: 2px 6px;
-    line-height: 1.3;
+    font-size: 9px;
+    padding: 1px 4px;
+    line-height: 1.2;
     white-space: nowrap;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
+    height: auto;
+    min-height: 18px;
   }
 
   /* 确保标签不会换行 */
@@ -2329,6 +2339,8 @@ const handleDelete = async (id) => {
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100%;
+    font-size: 9px;
+    line-height: 1.2;
   }
 
   /* 表格行触摸反馈优化 */
