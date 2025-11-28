@@ -5,7 +5,6 @@
 # @Time      : 2025/9/18 11:58
 # @IDE       : PyCharm
 # @Function  :
-import datetime
 import os
 import logging  # 日志记录模块
 import re
@@ -13,6 +12,7 @@ import threading
 import fcntl  # 文件锁（Unix/Linux）
 from pathlib import Path
 from app.core.config import settings  # 应用配置
+from app.core.utils import get_app_now  # 应用时区时间获取函数
 
 logger = logging.getLogger(__name__)
 bot = None
@@ -56,8 +56,14 @@ else:
     logger.info("Telegram Bot 功能已禁用（pyTelegramBotAPI 未安装）")
 
 
+def _check_bot_available() -> bool:
+    """检查 Bot 是否可用"""
+    return bot_initialized and TELEBOT_AVAILABLE and bot is not None
+
+
 def get_chat_id_handler(message):
-    if not bot_initialized or not TELEBOT_AVAILABLE:
+    """获取聊天ID处理器（已废弃，使用 /id 命令）"""
+    if not _check_bot_available():
         logger.error("Bot 未初始化，无法处理消息")
         return
 
@@ -67,8 +73,9 @@ def get_chat_id_handler(message):
 
 if bot_initialized and TELEBOT_AVAILABLE:
     @bot.message_handler(commands=['test'])
-    def handle_bot_click(message):
-        if not bot_initialized:
+    def handle_test_command(message):
+        """处理 /test 命令：显示测试内联按钮"""
+        if not _check_bot_available():
             logger.error("Bot 未初始化，无法处理消息")
             return
 
@@ -96,10 +103,10 @@ if bot_initialized and TELEBOT_AVAILABLE:
 
         bot.send_message(chat_id, "这是测试内联按钮：", reply_markup=markup)
 
-if bot_initialized and TELEBOT_AVAILABLE:
     @bot.message_handler(commands=['clock'])
-    def handle_bot_click(message):
-        if not bot_initialized:
+    def handle_clock_command(message):
+        """处理 /clock 命令：显示打卡确认按钮"""
+        if not _check_bot_available():
             logger.error("Bot 未初始化，无法处理消息")
             return
 
@@ -107,8 +114,6 @@ if bot_initialized and TELEBOT_AVAILABLE:
         markup = InlineKeyboardMarkup()
 
         markup.row(InlineKeyboardButton(text='打卡', callback_data='clock'))
-
-        # 第四行：一个按钮（取消）
         markup.row(InlineKeyboardButton(text='取消', callback_data='Cancel'))
 
         bot.send_message(chat_id, "确认是否要打卡？", reply_markup=markup)
@@ -117,30 +122,49 @@ if bot_initialized and TELEBOT_AVAILABLE:
 if bot_initialized and TELEBOT_AVAILABLE:
     @bot.callback_query_handler(func=lambda call: True)
     def handle_callback_query(call):
-        if call.data == "View":
-            bot.edit_message_text(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                text="你点击了查看按钮"
-            )
-        elif call.data == "clock":
-            from app.core.utils import get_app_now
-            current_time = get_app_now()
-            bot.edit_message_text(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                text=f"打卡成功！时间：{current_time.strftime('%Y-%m-%d %H:%M:%S')}（时区: {settings.TIMEZONE}）"
-            )
-        elif call.data == "Cancel":
-            bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="你取消了操作")
-            bot.delete_message(chat_id=call.message.chat.id, message_id=call.message.message_id)
-        else:
-            bot.answer_callback_query(callback_query_id=call.id, text="未知操作")
+        """处理内联按钮回调查询"""
+        if not _check_bot_available():
+            logger.error("Bot 未初始化，无法处理回调查询")
+            return
+
+        try:
+            if call.data == "View":
+                bot.edit_message_text(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    text="你点击了查看按钮"
+                )
+            elif call.data == "clock":
+                current_time = get_app_now()
+                bot.edit_message_text(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    text=f"打卡成功！时间：{current_time.strftime('%Y-%m-%d %H:%M:%S')}（时区: {settings.TIMEZONE}）"
+                )
+            elif call.data == "Cancel":
+                bot.edit_message_text(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    text="你取消了操作"
+                )
+                bot.delete_message(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id
+                )
+            else:
+                bot.answer_callback_query(callback_query_id=call.id, text="未知操作")
+        except Exception as e:
+            logger.error(f"处理回调查询时发生错误: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(callback_query_id=call.id, text="处理失败，请稍后重试")
+            except Exception:
+                pass
 
 if bot_initialized and TELEBOT_AVAILABLE:
     @bot.message_handler(content_types=["photo"])
     def handle_image(message):
-        if not bot_initialized:
+        """处理图片消息"""
+        if not _check_bot_available():
             logger.error("Bot 未初始化，无法处理消息")
             return
 
@@ -148,7 +172,8 @@ if bot_initialized and TELEBOT_AVAILABLE:
 
 
 def run_bot():
-    if not bot_initialized or not TELEBOT_AVAILABLE:
+    """运行 Bot 轮询（在独立线程中执行）"""
+    if not _check_bot_available():
         logger.error("Bot 未初始化，无法启动轮询")
         return
 
@@ -171,13 +196,13 @@ def run_bot():
             ]
         )
     except KeyboardInterrupt:
-        logger.error("收到终止信号，正在优雅关闭机器人...")
+        logger.info("收到终止信号，正在优雅关闭机器人...")
     except telebot.apihelper.ApiException as api_error:
-        logger.error(f"Telegram API 错误: {api_error}")
+        logger.error(f"Telegram API 错误: {api_error}", exc_info=True)
     except Exception as e:
-        logger.error(f"机器人运行时发生错误: {str(e)}")
+        logger.error(f"机器人运行时发生错误: {e}", exc_info=True)
     finally:
-        logger.error("机器人已停止运行")
+        logger.info("机器人已停止运行")
 
 
 def _acquire_bot_lock():
@@ -216,24 +241,25 @@ def _acquire_bot_lock():
         return True
     except (IOError, OSError) as e:
         # 无法获取锁（其他进程已持有）
-        if _bot_lock_file:
-            try:
-                _bot_lock_file.close()
-            except:
-                pass
-            _bot_lock_file = None
-
+        _close_lock_file()
         logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（其他进程可能已启动）: {e}")
         return False
     except Exception as e:
         logger.warning(f"[PID:{current_pid}] 获取 Telegram Bot 启动锁时发生错误: {e}")
-        if _bot_lock_file:
-            try:
-                _bot_lock_file.close()
-            except:
-                pass
-            _bot_lock_file = None
+        _close_lock_file()
         return False
+
+
+def _close_lock_file():
+    """安全关闭锁文件"""
+    global _bot_lock_file
+    if _bot_lock_file:
+        try:
+            _bot_lock_file.close()
+        except Exception:
+            pass
+        finally:
+            _bot_lock_file = None
 
 
 def _release_bot_lock():
@@ -332,11 +358,12 @@ def stop_bot():
 
 if bot_initialized and TELEBOT_AVAILABLE:
     @bot.message_handler(commands=['id'])
-    def gei_chat_id(message):
-        if not bot_initialized:
+    def get_chat_id(message):
+        """处理 /id 命令：返回聊天ID"""
+        if not _check_bot_available():
             logger.error("Bot 未初始化，无法处理消息")
             return
-        bot.reply_to(message, f"{message.chat.id}")
+        bot.reply_to(message, f"你的聊天ID是: {message.chat.id}")
 
 
 async def send_telegram_message(message: str, chat_id: str | None = None):
@@ -378,7 +405,7 @@ async def send_telegram_message(message: str, chat_id: str | None = None):
             return False
 
         # pyTelegramBotAPI 的 send_message 是同步的，需要在线程中执行
-        # 使用 threading 来避免阻塞异步事件循环
+        # 使用 asyncio 来避免阻塞异步事件循环
         import asyncio
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(

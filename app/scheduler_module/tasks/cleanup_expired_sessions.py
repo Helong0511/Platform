@@ -4,7 +4,7 @@
 """
 import logging
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 
 from app.core.database import AsyncSessionLocal
 from app.models.session import UserSession, TokenBlacklist
@@ -35,6 +35,14 @@ async def cleanup_expired_sessions():
     1. 删除过期超过30天的会话记录
     2. 删除过期超过30天的黑名单记录
     3. 标记超过7天未活动的会话为非活跃
+    
+    Returns:
+        dict: 清理结果统计
+        {
+            "deleted_sessions": 删除的会话记录数,
+            "deleted_blacklist": 删除的黑名单记录数,
+            "updated_sessions": 标记为非活跃的会话数
+        }
     """
     try:
         async with AsyncSessionLocal() as db:
@@ -60,18 +68,13 @@ async def cleanup_expired_sessions():
             deleted_blacklist_count = result.rowcount
             logger.info(f"清理了 {deleted_blacklist_count} 条过期黑名单记录")
             
-            # 3. 标记超过7天未活动的会话为非活跃
-            update_query = select(UserSession).where(
-                UserSession.is_active == True,
+            # 3. 标记超过7天未活动的会话为非活跃（使用批量更新提高性能）
+            update_stmt = update(UserSession).where(
+                UserSession.is_active.is_(True),  # 使用 is_() 方法更安全
                 UserSession.last_activity < inactive_threshold
-            )
-            result = await db.execute(update_query)
-            inactive_sessions = result.scalars().all()
-            
-            for session in inactive_sessions:
-                session.is_active = False
-            
-            updated_sessions_count = len(inactive_sessions)
+            ).values(is_active=False)
+            result = await db.execute(update_stmt)
+            updated_sessions_count = result.rowcount
             logger.info(f"标记了 {updated_sessions_count} 个非活跃会话")
             
             # 提交事务

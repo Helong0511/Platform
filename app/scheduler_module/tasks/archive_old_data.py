@@ -2,9 +2,11 @@
 数据归档任务
 定期归档旧数据到归档表，减少主表数据量，提升查询性能
 """
-from sqlalchemy import text
-from datetime import datetime, timedelta
+import logging
 from calendar import monthrange
+from datetime import datetime, timedelta
+from sqlalchemy import text
+
 from app.core.database import AsyncSessionLocal
 from app.scheduler_module.task_names import ARCHIVE_DATA_TASK_NAME
 from app.scheduler_module.task_utils import (
@@ -13,7 +15,6 @@ from app.scheduler_module.task_utils import (
     log_task_error,
     format_result_summary,
 )
-import logging
 
 logger = logging.getLogger(__name__)
 

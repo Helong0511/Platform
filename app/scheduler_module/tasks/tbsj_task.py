@@ -1,15 +1,18 @@
-import httpx  # 异步HTTP客户端，用于调用外部API
-import logging  # 日志记录模块
-import asyncio  # 异步操作支持
-from datetime import datetime, timedelta  # 日期时间处理
-import pytz  # 时区处理
-from app.core.config import settings  # 应用配置（含时区等）
-from app.core.database import AsyncSessionLocal  # 异步数据库会话工厂
-from app.models.models import User, UserRole  # 数据模型
-from sqlalchemy import select  # SQLAlchemy查询构建器
-from app.core.ad_data_processor import process_api_ad_data  # 标准化的API数据处理函数
-from app.core.auto_bot import send_telegram_message  # Telegram消息发送
-from app.scheduler_module.task_names import TBSJ_API_TASK_NAME  # 任务名称常量
+"""
+yangyangdeyi定时任务模块
+功能：从yangyangdeyi API获取广告数据，检查重复后插入到数据库
+"""
+import asyncio
+import logging
+from datetime import datetime, timedelta
+import pytz
+import httpx
+
+from app.core.config import settings
+from app.core.database import AsyncSessionLocal
+from app.core.ad_data_processor import process_api_ad_data
+from app.core.auto_bot import send_telegram_message
+from app.scheduler_module.task_names import TBSJ_API_TASK_NAME
 
 # 获取当前模块的日志记录器
 logger = logging.getLogger(__name__)
@@ -58,21 +61,21 @@ async def tbsj_api_task() -> None:
     - 所有数据库操作都在事务中执行，确保数据一致性
     - 单条数据出错不会影响其他数据的处理
     """
-    # yangyangdeyi API获取数据 配置
-
+    # ========== yangyangdeyi API配置 ==========
     # HTTP请求头配置
     Headers = {'Content-Type': 'application/json;charset=utf-8'}
 
-    # 请求地址
+    # API请求地址
     tbsj_url = 'https://data.tongbaishijia.com/api/thirdservice'
 
-    # 从环境变量获取用户名和密码
+    # API凭证（建议从环境变量或配置文件读取，避免硬编码）
+    # TODO: 将凭证移到配置文件或环境变量
     username = 'BOFIT'
     password = '5e2296fa9fd1434bf8a60c03cf745ce9'
 
     # 验证凭证是否配置
     if not username or not password:
-        error_msg = "TBSJ API 凭证未配置，请设置 TBSJ_API_USERNAME 和 TBSJ_API_PASSWORD 环境变量"
+        error_msg = "yangyangdeyi API 凭证未配置，请设置 TBSJ_API_USERNAME 和 TBSJ_API_PASSWORD 环境变量"
         logger.error(error_msg)
         raise ValueError(error_msg)
 
@@ -209,19 +212,9 @@ async def tbsj_api_task() -> None:
                         # 使用上下文管理器确保会话正确关闭
                         async with AsyncSessionLocal() as db:
                             # ========== 获取管理员用户（用于产品查找/创建） ==========
-
-                            # 查找管理员用户（优先查找username为'admin'的管理员）
-                            admin_user_query = select(User).where(User.role == UserRole.ADMIN,
-                                                                  User.username == 'admin').limit(1)
-                            admin_user_result = await db.execute(admin_user_query)
-                            admin_user = admin_user_result.scalar_one_or_none()
-
-                            # 如果没有找到username为'admin'的管理员，查找任意一个管理员
-                            if not admin_user:
-                                admin_user_query = select(User).where(User.role == UserRole.ADMIN).limit(1)
-                                admin_user_result = await db.execute(admin_user_query)
-                                admin_user = admin_user_result.scalar_one_or_none()
-
+                            from app.scheduler_module.task_utils import get_admin_user
+                            
+                            admin_user = await get_admin_user(db)
                             if not admin_user:
                                 logger.error("未找到管理员用户，无法处理产品，跳过本次任务")
                                 return
@@ -290,11 +283,13 @@ async def tbsj_api_task() -> None:
                             skipped_count = result.get("skipped_count", 0)
                             error_count = result.get("error_count", 0)
 
-                            result_summary = (
-                                f"成功插入 {inserted_count} 条, "
-                                f"成功更新 {updated_count} 条, "
-                                f"跳过重复 {skipped_count} 条, "
-                                f"错误 {error_count} 条"
+                            # 使用工具函数格式化结果摘要
+                            from app.scheduler_module.task_utils import format_result_summary
+                            result_summary = format_result_summary(
+                                inserted=inserted_count,
+                                updated=updated_count,
+                                skipped=skipped_count,
+                                error=error_count
                             )
                             logger.info(f"数据导入完成: {result_summary}")
                             # 使用warning级别确保日志可见

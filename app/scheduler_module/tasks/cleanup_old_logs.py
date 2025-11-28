@@ -2,9 +2,12 @@
 日志清理任务
 定期清理或归档旧的用户操作日志，减少日志表数据量，提升查询性能
 """
+import logging
+from datetime import datetime, timedelta
 from sqlalchemy import text, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime, timedelta
+
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.models import UserAuditLog
 from app.scheduler_module.task_names import CLEANUP_LOGS_TASK_NAME
@@ -14,8 +17,6 @@ from app.scheduler_module.task_utils import (
     log_task_error,
     format_result_summary,
 )
-from app.core.config import settings
-import logging
 
 logger = logging.getLogger(__name__)
 

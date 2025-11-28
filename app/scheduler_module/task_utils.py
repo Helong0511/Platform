@@ -6,7 +6,11 @@ import logging
 from datetime import datetime
 import pytz
 from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
 from app.core.config import settings
+from app.models.models import User, UserRole
 
 logger = logging.getLogger(__name__)
 
@@ -127,4 +131,33 @@ def format_result_summary(
         return "无数据"
     
     return ", ".join(parts)
+
+
+async def get_admin_user(db: AsyncSession) -> Optional[User]:
+    """
+    获取管理员用户（用于产品查找/创建等操作）
+    
+    优先查找 username 为 'data' 的管理员，如果不存在则查找任意一个管理员
+    
+    Args:
+        db: 数据库会话
+        
+    Returns:
+        管理员用户对象，如果不存在返回 None
+    """
+    # 优先查找 username 为 'data' 的管理员
+    admin_user_query = select(User).where(
+        User.role == UserRole.ADMIN,
+        User.username == 'data'
+    ).limit(1)
+    admin_user_result = await db.execute(admin_user_query)
+    admin_user = admin_user_result.scalar_one_or_none()
+    
+    # 如果没有找到 username 为 'data' 的管理员，查找任意一个管理员
+    if not admin_user:
+        admin_user_query = select(User).where(User.role == UserRole.ADMIN).limit(1)
+        admin_user_result = await db.execute(admin_user_query)
+        admin_user = admin_user_result.scalar_one_or_none()
+    
+    return admin_user
 

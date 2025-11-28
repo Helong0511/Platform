@@ -2,19 +2,17 @@
 Skymobi定时任务模块
 功能：从Skymobi API获取广告数据，检查重复后插入到数据库
 """
-import hashlib  # 用于生成MD5签名
-import httpx  # 异步HTTP客户端，用于调用外部API
-import logging  # 日志记录模块
-import asyncio  # 异步操作支持
-from datetime import datetime, timedelta  # 日期时间处理
-import pytz  # 时区处理
-from app.core.config import settings  # 应用配置
-from app.core.database import AsyncSessionLocal  # 异步数据库会话工厂
-from app.models.models import User, UserRole  # 数据模型
-from sqlalchemy import select  # SQLAlchemy查询构建器
-from app.core.ad_data_processor import process_api_ad_data  # 标准化的API数据处理函数
-from app.core.auto_bot import send_telegram_message  # Telegram消息发送
-from app.scheduler_module.task_names import SKYMOBI_API_TASK_NAME  # 任务名称常量
+import asyncio
+import logging
+from datetime import datetime, timedelta
+import pytz
+import httpx
+
+from app.core.config import settings
+from app.core.database import AsyncSessionLocal
+from app.core.ad_data_processor import process_api_ad_data
+from app.core.auto_bot import send_telegram_message
+from app.scheduler_module.task_names import SKYMOBI_API_TASK_NAME
 
 # 获取当前模块的日志记录器
 logger = logging.getLogger(__name__)
@@ -38,19 +36,39 @@ def set_task_result(task_name: str, result: str) -> None:
 # 用于将本地时间转换为标准时区
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
+# ========== Skymobi API配置 ==========
 api_id = '10177'
 api_key = '67b7c7fac2154bb8f59546d9b23058c9'
 
 
 async def skymobi_api_task() -> None:
+    """
+    Skymobi API定时任务主函数
+    
+    功能说明：
+    1. 从Skymobi API获取广告数据（根据时间自动选择昨天或今天的数据）
+    2. 对每条数据进行验证和重复检查
+    3. 将新数据插入到数据库的ad_data表中
+    4. 根据产品的减扣比例自动计算减扣后的eCPM和收益
+    
+    处理流程：
+    - 调用Skymobi API获取数据
+    - 使用标准化的数据处理函数处理所有数据
+    - 提交事务并记录结果
+    
+    注意：
+    - 这是异步函数，可以直接使用await
+    - 所有数据库操作都在事务中执行，确保数据一致性
+    - 单条数据出错不会影响其他数据的处理
+    - 0-8点获取昨天的数据，其他时间获取今天的数据
+    """
     # 获取应用配置时区的当前时间（用于日志记录）
     app_time = datetime.now(APP_TIMEZONE)
     current_time_str = app_time.strftime("%Y-%m-%d %H:%M:%S")
 
     # 记录任务开始执行的日志
-    # 使用 logger.warning 确保即使日志级别设置为 WARNING 也能看到执行信息
     logger.info(f"{SKYMOBI_API_TASK_NAME} 开始执行 - {current_time_str}（时区: {settings.TIMEZONE}）")
-    logger.warning(f"[定时任务执行] 每隔5分钟执行一次 开始执行 - {current_time_str}（时区: {settings.TIMEZONE}）")
+    logger.warning(f"[定时任务执行] {SKYMOBI_API_TASK_NAME} 开始执行 - {current_time_str}（时区: {settings.TIMEZONE}）")
 
     try:
         # ============================================
@@ -116,20 +134,9 @@ async def skymobi_api_task() -> None:
                         # 使用上下文管理器确保会话正确关闭
                         async with AsyncSessionLocal() as db:
                             # ========== 获取管理员用户（用于产品查找/创建） ==========
-
-                            # 查找管理员用户（优先查找username为'admin'的管理员）
-                            admin_user_query = select(User).where(
-                                User.role == UserRole.ADMIN,
-                                User.username == 'admin').limit(1)
-                            admin_user_result = await db.execute(admin_user_query)
-                            admin_user = admin_user_result.scalar_one_or_none()
-
-                            # 如果没有找到username为'admin'的管理员，查找任意一个管理员
-                            if not admin_user:
-                                admin_user_query = select(User).where(User.role == UserRole.ADMIN).limit(1)
-                                admin_user_result = await db.execute(admin_user_query)
-                                admin_user = admin_user_result.scalar_one_or_none()
-
+                            from app.scheduler_module.task_utils import get_admin_user
+                            
+                            admin_user = await get_admin_user(db)
                             if not admin_user:
                                 logger.error("未找到管理员用户，无法处理产品，跳过本次任务")
                                 return
@@ -197,11 +204,13 @@ async def skymobi_api_task() -> None:
                             skipped_count = result.get("skipped_count", 0)
                             error_count = result.get("error_count", 0)
 
-                            result_summary = (
-                                f"成功插入 {inserted_count} 条, "
-                                f"成功更新 {updated_count} 条, "
-                                f"跳过重复 {skipped_count} 条, "
-                                f"错误 {error_count} 条"
+                            # 使用工具函数格式化结果摘要
+                            from app.scheduler_module.task_utils import format_result_summary
+                            result_summary = format_result_summary(
+                                inserted=inserted_count,
+                                updated=updated_count,
+                                skipped=skipped_count,
+                                error=error_count
                             )
                             logger.info(f"数据导入完成: {result_summary}")
                             # 使用warning级别确保日志可见
