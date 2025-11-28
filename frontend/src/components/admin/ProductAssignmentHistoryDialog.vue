@@ -147,7 +147,7 @@
 </template>
 
 <script setup>
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, nextTick } from 'vue';
 import { ElMessage, ElMessageBox, ElAlert } from 'element-plus';
 import { OfficeBuilding, Edit } from '@element-plus/icons-vue';
 import { getProductAssignments, updateAssignmentDates, batchUpdateAssignmentDates } from '../../api/product';
@@ -317,7 +317,7 @@ const handleClose = () => {
         confirmButtonText: '确定关闭',
         cancelButtonText: '取消',
         type: 'warning',
-        appendToBody: true, // 确保弹窗附加到 body，避免被对话框遮挡
+        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
         zIndex: 3001 // 确保 z-index 高于对话框（3000）
       }
     ).then(() => {
@@ -646,7 +646,7 @@ const handleBatchSave = async () => {
       {
         type: 'error',
         confirmButtonText: '确定',
-        appendToBody: true, // 确保弹窗附加到 body，避免被对话框遮挡
+        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
         zIndex: 3001 // 确保 z-index 高于对话框（3000）
       }
     );
@@ -656,21 +656,37 @@ const handleBatchSave = async () => {
   // 确认保存
   try {
     logger.info('显示确认弹窗');
-    await ElMessageBox.confirm(
+    const confirmPromise = ElMessageBox.confirm(
       `确定要保存 ${pendingChanges.value.size} 条修改吗？保存后将进行完整的时间连贯性验证。`,
       '确认保存',
       {
         confirmButtonText: '确定保存',
         cancelButtonText: '取消',
         type: 'warning',
-        appendToBody: true, // 确保弹窗附加到 body，避免被对话框遮挡
+        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
         zIndex: 3001 // 确保 z-index 高于对话框（3000）
       }
     );
-    logger.info('用户确认保存');
+    
+    // 等待弹窗显示后，调整 z-index
+    await nextTick();
+    // 使用 setTimeout 确保弹窗已完全渲染
+    setTimeout(() => {
+      const messageBoxEl = document.querySelector('.el-message-box__wrapper');
+      if (messageBoxEl) {
+        messageBoxEl.style.zIndex = '3001';
+      }
+      const overlayEl = document.querySelector('.el-overlay.is-message-box');
+      if (overlayEl) {
+        overlayEl.style.zIndex = '3000';
+      }
+    }, 50);
+    
+    const result = await confirmPromise;
+    logger.info('用户确认保存', result);
   } catch (error) {
     // 用户取消
-    logger.info('用户取消保存');
+    logger.info('用户取消保存', error);
     return;
   }
   
@@ -780,7 +796,7 @@ const handleBatchSave = async () => {
           type: 'error',
           confirmButtonText: '确定',
           dangerouslyUseHTMLString: false,
-          appendToBody: true, // 确保弹窗附加到 body，避免被对话框遮挡
+          appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
           zIndex: 3001 // 确保 z-index 高于对话框（3000）
         }
       );
@@ -807,7 +823,7 @@ const handleDiscardAll = async () => {
         confirmButtonText: '确定放弃',
         cancelButtonText: '取消',
         type: 'warning',
-        appendToBody: true, // 确保弹窗附加到 body，避免被对话框遮挡
+        appendTo: document.body, // 确保弹窗附加到 body，避免被对话框遮挡
         zIndex: 3001 // 确保 z-index 高于对话框（3000）
       }
     );
@@ -833,6 +849,15 @@ const handleDiscardAll = async () => {
 
 .product-assignment-history-dialog :deep(.el-overlay) {
   z-index: 2999 !important;
+}
+
+/* 确保 MessageBox 弹窗显示在对话框之上 */
+:deep(.el-message-box__wrapper) {
+  z-index: 3001 !important;
+}
+
+:deep(.el-overlay.is-message-box) {
+  z-index: 3000 !important;
 }
 
 .product-assignment-history-dialog {
