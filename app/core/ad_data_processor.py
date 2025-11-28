@@ -456,6 +456,16 @@ async def process_api_ad_data(
             error_count += 1
             continue
 
+    # 记录预处理结果统计
+    total_original_items = len(data)
+    total_grouped_items = len(recognized_data) + len(unrecognized_data)
+    if total_original_items > 0:
+        logger.info(
+            f"数据预处理完成: 原始数据 {total_original_items} 条, "
+            f"合并后 {total_grouped_items} 条 "
+            f"(能识别国家: {len(recognized_data)}, 无法识别国家: {len(unrecognized_data)})"
+        )
+
     # ========== 第二步：处理能识别国家代码的数据（按日期、产品、国家检查重复，累加后处理） ==========
     for key, grouped_data in recognized_data.items():
         async with db.begin_nested():
