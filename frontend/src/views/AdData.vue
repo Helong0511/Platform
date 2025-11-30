@@ -328,16 +328,20 @@ const getSummaries = (param) => {
           }
         }, 0).toLocaleString();
       } else if (prop === 'cpc') {
-        // CPC列：求和
-        const sum = values.reduce((prev, curr) => {
-          const value = Number(curr);
-          if (!isNaN(value)) {
-            return prev + curr;
-          } else {
-            return prev;
-          }
-        }, 0);
-        sums[index] = `$${sum.toFixed(2)}`;
+        // CPC列：按公式计算
+        // 管理员登录：CPC = 收益（扣前）/ 点击数
+        // 客户端登录：CPC = 收益（扣后）/ 点击数
+        const totalClick = data.reduce((sum, item) => sum + (Number(item.click_count) || 0), 0);
+        let totalRevenue = 0;
+        if (isAdmin.value) {
+          // 管理员：使用收益（扣前）
+          totalRevenue = data.reduce((sum, item) => sum + (Number(item.revenue_before_deduct) || 0), 0);
+        } else {
+          // 客户端：使用收益（扣后）
+          totalRevenue = data.reduce((sum, item) => sum + (Number(item.revenue_after_deduct) || 0), 0);
+        }
+        const cpc = totalClick > 0 ? (totalRevenue / totalClick) : 0;
+        sums[index] = `$${cpc.toFixed(2)}`;
       } else if (prop === 'pageviews') {
         // PageViews列：求和
         sums[index] = values.reduce((prev, curr) => {
