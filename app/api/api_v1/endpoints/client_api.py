@@ -397,7 +397,7 @@ async def get_client_data(
             from app.models.models import CountryInfo
             
             # 构建汇总查询
-            # 注意：覆盖率、展示率、点击率、eCPM 不在查询中计算，而是在返回数据时根据汇总后的数值重新计算
+            # 注意：覆盖率、展示率、点击率、eCPM、CPC 不在查询中计算，而是在返回数据时根据汇总后的数值重新计算
             query = select(
                 func.date(AdData.date).label("date"),
                 Product.id.label("product_id"),
@@ -407,7 +407,6 @@ async def get_client_data(
                 func.sum(AdData.display_count).label("display_count"),
                 func.sum(AdData.click_count).label("click_count"),
                 func.avg(AdData.viewability_rate).label("viewability_rate"),
-                func.sum(AdData.cpc).label("cpc"),
                 func.sum(AdData.pageviews).label("pageviews"),
                 func.sum(AdData.revenue_after_deduct).label("revenue")
             ).join(
@@ -466,7 +465,6 @@ async def get_client_data(
                 total_display_count = int(row.display_count or 0)
                 total_click_count = int(row.click_count or 0)
                 total_viewability_rate = float(row.viewability_rate or 0.0)
-                total_cpc = float(row.cpc or 0.0)
                 total_pageviews = int(row.pageviews or 0)
                 total_revenue = float(row.revenue or 0.0)
                 
@@ -489,6 +487,12 @@ async def get_client_data(
                     2
                 )
                 
+                # CPC = 收益（扣后）/ 点击数（客户端登录使用扣后收益）
+                cpc = round(
+                    (total_revenue / total_click_count) if total_click_count > 0 else 0.0,
+                    2
+                )
+                
                 # eCPM = 收益 / 展示数 * 1000
                 ecpm = round(
                     (total_revenue / total_display_count * 1000) if total_display_count > 0 else 0.0,
@@ -508,7 +512,7 @@ async def get_client_data(
                     click_count=total_click_count,
                     click_rate=float(click_rate),
                     viewability_rate=round(total_viewability_rate, 2),
-                    cpc=round(total_cpc, 2),
+                    cpc=float(cpc),
                     pageviews=total_pageviews,
                     ecpm=float(ecpm),
                     revenue=round(total_revenue, 2)
