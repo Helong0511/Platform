@@ -103,11 +103,14 @@ def retrieve_keys_from_db(app_id: str) -> Optional[Dict[str, str]]:
 # ----------------------------------------------------
 
 print("\n=== 1. 密钥生成与插入真实 MySQL ===")
-keys = generate_rsa_keypair(bits=2048)
+keys = generate_rsa_keypair(bits=4096)
 
 if not keys:
     print("密钥生成失败，测试终止。")
     exit()
+
+for item in keys:
+    print(item, keys.get(item))
 
 # 1. 存储密钥
 storage_success = store_keys_to_db(
