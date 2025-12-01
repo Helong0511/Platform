@@ -3,18 +3,18 @@ import time
 import requests
 import json
 
-domain = 'king-sms.com'
-# domain = 'btfrx.online'
+# domain = 'king-sms.com'
+domain = 'btfrx.online'
 
 product_url = f'https://client.{domain}/api/v1/client_products'
 data_url = f'https://client.{domain}/api/v1/client_data'
 
 if domain == 'king-sms.com':
-    APP_ID = 1010
-    SECRET_KEY = 'a481444f-3a12-471a-8c89-2d2576b7fa14'
+    APP_ID = 1
+    SECRET_KEY = '8bc85bd7-c69b-4dc8-8728-f1b7be669ec5'
 else:
-    APP_ID = 1007
-    SECRET_KEY = 'ec5875f0-d100-4e1f-8304-4903121f5560'
+    APP_ID = 1
+    SECRET_KEY = '8bc85bd7-c69b-4dc8-8728-f1b7be669ec5'
 
 Headers = {'Content-Type': 'application/json'}
 

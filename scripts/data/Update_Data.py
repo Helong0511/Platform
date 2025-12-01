@@ -2,6 +2,9 @@ import datetime
 import os
 import mysql.connector as mysql
 
+
+DEBUG = False
+
 config = {
     "host": "43.156.101.243",
     "port": 3306,
@@ -134,9 +137,10 @@ for exp in need_exp:
 
         print('表', table_name.replace('`', ''), f'{i}条数据生成完毕！')
 
-    if table_name == "`users`":
-        hand.write(
-            "\nUPDATE `users` SET `hashed_password` = '$2b$12$geFYoAmb0ZA7Be4LJX/40uudVPltdtwCGFxC5aDIP7xQ/ImTJPIdO' WHERE `username` = 'admin';\n")
+    if DEBUG:
+        if table_name == "`users`":
+            hand.write(
+                "\nUPDATE `users` SET `hashed_password` = '$2b$12$geFYoAmb0ZA7Be4LJX/40uudVPltdtwCGFxC5aDIP7xQ/ImTJPIdO' WHERE `username` = 'admin';\n")
 
     if table_name == "`ad_data`":
         hand.write("\n-- 更新广告数据统计字段（避免除零错误）\n")

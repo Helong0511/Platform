@@ -3,6 +3,8 @@ import wx.grid
 import pymysql
 import threading
 import time
+import json
+from collections import OrderedDict
 
 # ==========================================
 # 0. 用户自定义默认配置 (请在此处修改)
@@ -16,8 +18,8 @@ SOURCE_DEFAULTS = {
 }
 
 TARGET_DEFAULTS = {
-    'host': '159.138.133',
-    'port': '3307',  # 建议使用不同端口以区分实例
+    'host': '159.138.133.34',
+    'port': '3306',  # 建议使用不同端口以区分实例
     'user': 'remote',
     'password': 'kb7$rL3d8!tQ',  # 数据库连接密码
     'db': 'platform'  # 默认数据库名
@@ -30,6 +32,8 @@ TARGET_DEFAULTS = {
 class DBSyncCore:
     def __init__(self):
         self.sqls = []
+        self.data_sqls = []  # 数据同步SQL
+        self.data_diff_report = []  # 数据差异报告
 
     def _get_conn(self, conf):
         """根据配置字典创建并返回 pymysql 数据库连接"""
@@ -91,6 +95,239 @@ class DBSyncCore:
                     tables[t]['indexes'][idx]['columns'].append(row['COLUMN_NAME'])
         return tables
 
+    def get_primary_key(self, conn, db_name, table_name):
+        """获取表的主键列名列表，如果没有主键则尝试获取唯一索引"""
+        with conn.cursor() as cursor:
+            # 先尝试获取主键
+            cursor.execute("""
+                SELECT COLUMN_NAME
+                FROM information_schema.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = %s
+                  AND TABLE_NAME = %s
+                  AND CONSTRAINT_NAME = 'PRIMARY'
+                ORDER BY ORDINAL_POSITION
+            """, (db_name, table_name))
+            result = cursor.fetchall()
+            pk_columns = [row['COLUMN_NAME'] for row in result]
+            
+            # 如果有主键，直接返回
+            if pk_columns:
+                return pk_columns
+            
+            # 如果没有主键，尝试获取第一个唯一索引
+            cursor.execute("""
+                SELECT DISTINCT INDEX_NAME
+                FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = %s
+                  AND TABLE_NAME = %s
+                  AND NON_UNIQUE = 0
+                  AND INDEX_NAME != 'PRIMARY'
+                ORDER BY INDEX_NAME
+                LIMIT 1
+            """, (db_name, table_name))
+            unique_idx = cursor.fetchone()
+            if unique_idx:
+                idx_name = unique_idx['INDEX_NAME']
+                cursor.execute("""
+                    SELECT COLUMN_NAME
+                    FROM information_schema.STATISTICS
+                    WHERE TABLE_SCHEMA = %s
+                      AND TABLE_NAME = %s
+                      AND INDEX_NAME = %s
+                    ORDER BY SEQ_IN_INDEX
+                """, (db_name, table_name, idx_name))
+                result = cursor.fetchall()
+                return [row['COLUMN_NAME'] for row in result]
+            
+            # 如果都没有，返回空列表，后续会使用所有列
+            return []
+
+    def _escape_sql_value(self, value):
+        """转义SQL值"""
+        if value is None:
+            return 'NULL'
+        if isinstance(value, (int, float)):
+            return str(value)
+        if isinstance(value, bool):
+            return '1' if value else '0'
+        # 字符串需要转义
+        value_str = str(value)
+        value_str = value_str.replace('\\', '\\\\')
+        value_str = value_str.replace("'", "''")
+        return f"'{value_str}'"
+
+    def _get_row_key(self, row, key_columns):
+        """根据主键列生成行的唯一标识"""
+        return tuple(row.get(col) for col in key_columns)
+
+    def _generate_where_clause(self, row, key_columns):
+        """根据主键生成WHERE子句"""
+        conditions = []
+        for col in key_columns:
+            val = row.get(col)
+            if val is None:
+                conditions.append(f"`{col}` IS NULL")
+            else:
+                conditions.append(f"`{col}` = {self._escape_sql_value(val)}")
+        return " AND ".join(conditions)
+
+    def _generate_insert_sql(self, table_name, row, columns):
+        """生成INSERT SQL"""
+        cols = ", ".join([f"`{c}`" for c in columns])
+        vals = ", ".join([self._escape_sql_value(row.get(c)) for c in columns])
+        return f"INSERT INTO `{table_name}` ({cols}) VALUES ({vals});"
+
+    def _generate_update_sql(self, table_name, row, key_columns, all_columns):
+        """生成UPDATE SQL"""
+        set_clauses = []
+        for col in all_columns:
+            if col not in key_columns:
+                set_clauses.append(f"`{col}` = {self._escape_sql_value(row.get(col))}")
+        if not set_clauses:
+            return None
+        where_clause = self._generate_where_clause(row, key_columns)
+        return f"UPDATE `{table_name}` SET {', '.join(set_clauses)} WHERE {where_clause};"
+
+    def _generate_delete_sql(self, table_name, row, key_columns):
+        """生成DELETE SQL"""
+        where_clause = self._generate_where_clause(row, key_columns)
+        return f"DELETE FROM `{table_name}` WHERE {where_clause};"
+
+    def compare_table_data(self, source_conf, target_conf, table_name, log_callback=None):
+        """对比单个表的数据，返回差异统计和SQL"""
+        conn_src = self._get_conn(source_conf)
+        conn_tgt = self._get_conn(target_conf)
+        
+        try:
+            # 获取主键或唯一索引
+            pk_columns = self.get_primary_key(conn_src, source_conf['db'], table_name)
+            if not pk_columns:
+                # 如果没有主键和唯一索引，使用所有列作为标识（不推荐，但可以工作）
+                with conn_src.cursor() as cursor:
+                    cursor.execute(f"SELECT * FROM `{table_name}` LIMIT 0")
+                    pk_columns = [desc[0] for desc in cursor.description]
+                if log_callback:
+                    log_callback(f"警告: 表 {table_name} 无主键和唯一索引，使用所有列作为标识（可能影响性能）")
+            
+            # 获取所有列名
+            with conn_src.cursor() as cursor:
+                cursor.execute(f"SELECT * FROM `{table_name}` LIMIT 0")
+                all_columns = [desc[0] for desc in cursor.description]
+            
+            # 读取源库数据
+            if log_callback:
+                log_callback(f"读取源库表 {table_name} 数据...")
+            with conn_src.cursor() as cursor:
+                cursor.execute(f"SELECT * FROM `{table_name}`")
+                src_rows = cursor.fetchall()
+            
+            # 读取目标库数据
+            if log_callback:
+                log_callback(f"读取目标库表 {table_name} 数据...")
+            with conn_tgt.cursor() as cursor:
+                cursor.execute(f"SELECT * FROM `{table_name}`")
+                tgt_rows = cursor.fetchall()
+            
+            # 构建索引字典
+            src_dict = {}
+            for row in src_rows:
+                key = self._get_row_key(row, pk_columns)
+                src_dict[key] = row
+            
+            tgt_dict = {}
+            for row in tgt_rows:
+                key = self._get_row_key(row, pk_columns)
+                tgt_dict[key] = row
+            
+            # 对比差异
+            insert_count = 0
+            update_count = 0
+            delete_count = 0
+            sqls = []
+            diff_details = []
+            
+            # 找出需要插入的记录（源有目标无）
+            for key, row in src_dict.items():
+                if key not in tgt_dict:
+                    insert_count += 1
+                    sqls.append(self._generate_insert_sql(table_name, row, all_columns))
+                    # 记录差异详情（只记录前几个字段，避免太长）
+                    key_str = ", ".join([f"{pk_columns[i]}={row.get(pk_columns[i])}" for i in range(min(3, len(pk_columns)))])
+                    diff_details.append(f"需插入: {key_str}")
+            
+            # 找出需要删除的记录（目标有源无）
+            for key, row in tgt_dict.items():
+                if key not in src_dict:
+                    delete_count += 1
+                    sqls.append(self._generate_delete_sql(table_name, row, pk_columns))
+                    key_str = ", ".join([f"{pk_columns[i]}={row.get(pk_columns[i])}" for i in range(min(3, len(pk_columns)))])
+                    diff_details.append(f"需删除: {key_str}")
+            
+            # 找出需要更新的记录（两边都有但内容不同）
+            for key, src_row in src_dict.items():
+                if key in tgt_dict:
+                    tgt_row = tgt_dict[key]
+                    # 对比所有非主键列
+                    has_diff = False
+                    diff_fields = []
+                    for col in all_columns:
+                        if col not in pk_columns:
+                            src_val = src_row.get(col)
+                            tgt_val = tgt_row.get(col)
+                            # 处理None值
+                            if src_val != tgt_val and not (src_val is None and tgt_val is None):
+                                has_diff = True
+                                diff_fields.append(col)
+                    
+                    if has_diff:
+                        update_count += 1
+                        update_sql = self._generate_update_sql(table_name, src_row, pk_columns, all_columns)
+                        if update_sql:
+                            sqls.append(update_sql)
+                        key_str = ", ".join([f"{pk_columns[i]}={src_row.get(pk_columns[i])}" for i in range(min(3, len(pk_columns)))])
+                        diff_details.append(f"需更新: {key_str} (字段: {', '.join(diff_fields[:5])})")
+            
+            return {
+                'table': table_name,
+                'insert_count': insert_count,
+                'update_count': update_count,
+                'delete_count': delete_count,
+                'sqls': sqls,
+                'details': diff_details[:20]  # 只保留前20条详情
+            }
+            
+        finally:
+            conn_src.close()
+            conn_tgt.close()
+
+    def compare_all_data(self, source_conf, target_conf, table_names, log_callback=None):
+        """对比所有表的数据"""
+        self.data_sqls = []
+        self.data_diff_report = []
+        
+        total_tables = len(table_names)
+        for idx, table_name in enumerate(table_names, 1):
+            if log_callback:
+                log_callback(f"对比数据 [{idx}/{total_tables}]: {table_name}")
+            try:
+                result = self.compare_table_data(source_conf, target_conf, table_name, log_callback)
+                if result['insert_count'] > 0 or result['update_count'] > 0 or result['delete_count'] > 0:
+                    self.data_diff_report.append(result)
+                    self.data_sqls.extend(result['sqls'])
+            except Exception as e:
+                if log_callback:
+                    log_callback(f"表 {table_name} 数据对比失败: {e}")
+                self.data_diff_report.append({
+                    'table': table_name,
+                    'insert_count': 0,
+                    'update_count': 0,
+                    'delete_count': 0,
+                    'sqls': [],
+                    'details': [f"对比失败: {e}"]
+                })
+        
+        return self.data_diff_report, self.data_sqls
+
     def get_create_table_sql(self, source_conf, table_name):
         """获取创建表的完整 DDL 语句"""
         conn = self._get_conn(source_conf)
@@ -123,9 +360,11 @@ class DBSyncCore:
 
         return definition
 
-    def analyze(self, source_conf, target_conf, log_callback=None):
+    def analyze(self, source_conf, target_conf, compare_data=False, log_callback=None):
         """核心对比逻辑：包含明确的异常源标记"""
         self.sqls = []
+        self.data_sqls = []
+        self.data_diff_report = []
         report = []
 
         if log_callback: log_callback("正在连接并分析结构 (1/2)...")
@@ -251,6 +490,19 @@ class DBSyncCore:
                 else:
                     report.append(('OK', t, s_rows, t_rows, '一致'))
 
+        # 如果启用数据对比，进行逐条数据对比
+        if compare_data:
+            if log_callback:
+                log_callback("开始逐条数据对比...")
+            # 只对比结构一致且都存在的表
+            tables_to_compare = [t for t in all_tables 
+                                if t in src_struct and t in tgt_struct 
+                                and src_struct[t]['columns'].keys() == tgt_struct[t]['columns'].keys()]
+            if tables_to_compare:
+                self.compare_all_data(source_conf, target_conf, tables_to_compare, log_callback)
+                if log_callback:
+                    log_callback(f"数据对比完成，发现 {len(self.data_diff_report)} 个表有数据差异")
+
         return report, self.sqls
 
     def execute_sql(self, target_conf, sql_list, log_callback):
@@ -308,9 +560,10 @@ class DBConfigPanel(wx.Panel):
 
 class MainFrame(wx.Frame):
     def __init__(self):
-        super().__init__(None, title="Python 终极数据库对比工具 (结构/注释/行数)", size=(1100, 700))
+        super().__init__(None, title="Python 终极数据库对比工具 (结构/注释/行数/数据)", size=(1200, 750))
         self.core = DBSyncCore()
         self.current_sqls = []
+        self.current_data_sqls = []
 
         panel = wx.Panel(self)
         main_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -325,9 +578,12 @@ class MainFrame(wx.Frame):
         main_sizer.Add(config_sizer, 0, wx.EXPAND)
 
         btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.btn_compare = wx.Button(panel, label="开始全面分析 (结构+行数)", size=(200, 40))
-        self.btn_compare.Bind(wx.EVT_BUTTON, self.on_compare)
+        self.chk_compare_data = wx.CheckBox(panel, label="同时进行数据逐条对比 (较慢，需主键)")
+        self.chk_compare_data.SetValue(False)
+        btn_sizer.Add(self.chk_compare_data, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 10)
         btn_sizer.AddStretchSpacer(1)
+        self.btn_compare = wx.Button(panel, label="开始全面分析", size=(200, 40))
+        self.btn_compare.Bind(wx.EVT_BUTTON, self.on_compare)
         btn_sizer.Add(self.btn_compare, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 10)
         btn_sizer.AddStretchSpacer(1)
         main_sizer.Add(btn_sizer, 0, wx.EXPAND)
@@ -348,18 +604,40 @@ class MainFrame(wx.Frame):
         self.txt_sql.SetFont(wx.Font(10, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
         self.notebook.AddPage(self.txt_sql, "结构同步 SQL")
 
+        # 数据差异详情列表
+        self.list_data_diff = wx.ListCtrl(self.notebook, style=wx.LC_REPORT | wx.LC_HRULES | wx.LC_VRULES)
+        self.list_data_diff.InsertColumn(0, "表名", width=200)
+        self.list_data_diff.InsertColumn(1, "需插入", width=80, format=wx.LIST_FORMAT_RIGHT)
+        self.list_data_diff.InsertColumn(2, "需更新", width=80, format=wx.LIST_FORMAT_RIGHT)
+        self.list_data_diff.InsertColumn(3, "需删除", width=80, format=wx.LIST_FORMAT_RIGHT)
+        self.list_data_diff.InsertColumn(4, "差异详情", width=500)
+        self.notebook.AddPage(self.list_data_diff, "数据差异详情")
+
+        # 数据同步SQL
+        self.txt_data_sql = wx.TextCtrl(self.notebook, style=wx.TE_MULTILINE | wx.HSCROLL)
+        self.txt_data_sql.SetFont(wx.Font(10, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
+        self.notebook.AddPage(self.txt_data_sql, "数据同步 SQL")
+
         main_sizer.Add(self.notebook, 1, wx.EXPAND | wx.ALL, 5)
 
         self.txt_log = wx.TextCtrl(panel, style=wx.TE_MULTILINE | wx.TE_READONLY, size=(-1, 100))
         main_sizer.Add(self.txt_log, 0, wx.EXPAND | wx.ALL, 5)
 
         exec_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.btn_exec = wx.Button(panel, label="执行同步 SQL", size=(150, 40))
+        self.btn_exec = wx.Button(panel, label="执行结构同步 SQL", size=(150, 40))
         self.btn_exec.Disable()
         self.btn_exec.Bind(wx.EVT_BUTTON, self.on_execute)
         self.btn_exec.SetForegroundColour(wx.RED)
+        
+        self.btn_exec_data = wx.Button(panel, label="执行数据同步 SQL", size=(150, 40))
+        self.btn_exec_data.Disable()
+        self.btn_exec_data.Bind(wx.EVT_BUTTON, self.on_execute_data)
+        self.btn_exec_data.SetForegroundColour(wx.Colour(200, 0, 0))
+        
         exec_sizer.AddStretchSpacer(1)
         exec_sizer.Add(self.btn_exec, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        exec_sizer.Add(self.btn_exec_data, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+        exec_sizer.AddStretchSpacer(1)
         main_sizer.Add(exec_sizer, 0, wx.EXPAND)
 
         panel.SetSizer(main_sizer)
@@ -389,17 +667,24 @@ class MainFrame(wx.Frame):
             wx.MessageBox("请输入数据库名！", "错误", wx.OK | wx.ICON_ERROR)
             return
         self.list_ctrl.DeleteAllItems()
+        self.list_data_diff.DeleteAllItems()
         self.txt_sql.Clear()
+        self.txt_data_sql.Clear()
         self.btn_compare.Disable()
         self.btn_exec.Disable()
-        threading.Thread(target=self._run_compare, args=(src, tgt), daemon=True).start()
+        self.btn_exec_data.Disable()
+        compare_data = self.chk_compare_data.GetValue()
+        threading.Thread(target=self._run_compare, args=(src, tgt, compare_data), daemon=True).start()
 
-    def _run_compare(self, src, tgt):
+    def _run_compare(self, src, tgt, compare_data):
         try:
             self.log("任务开始...")
-            report, sqls = self.core.analyze(src, tgt, log_callback=self.log)
+            if compare_data:
+                self.log("已启用数据逐条对比，这将需要较长时间...")
+            report, sqls = self.core.analyze(src, tgt, compare_data=compare_data, log_callback=self.log)
             self.current_sqls = sqls
-            wx.CallAfter(self._update_ui_results, report, sqls)
+            self.current_data_sqls = self.core.data_sqls
+            wx.CallAfter(self._update_ui_results, report, sqls, compare_data)
         except Exception as e:
             # 此处捕获到了 DBSyncCore.analyze 中抛出的带有【源数据库】或【目标数据库】的明确错误信息
             wx.CallAfter(wx.MessageBox, f"出错: {e}", "错误", wx.OK | wx.ICON_ERROR)
@@ -407,7 +692,7 @@ class MainFrame(wx.Frame):
         finally:
             wx.CallAfter(self.btn_compare.Enable)
 
-    def _update_ui_results(self, report, sqls):
+    def _update_ui_results(self, report, sqls, compare_data=False):
         for status, table, s_rows, t_rows, detail in report:
             idx = self.list_ctrl.InsertItem(self.list_ctrl.GetItemCount(), status)
             self.list_ctrl.SetItem(idx, 1, table)
@@ -426,21 +711,55 @@ class MainFrame(wx.Frame):
             else:
                 self.list_ctrl.SetItemTextColour(idx, wx.Colour(120, 120, 120))
 
+        # 显示数据差异
+        if compare_data and self.core.data_diff_report:
+            for diff_info in self.core.data_diff_report:
+                idx = self.list_data_diff.InsertItem(self.list_data_diff.GetItemCount(), diff_info['table'])
+                self.list_data_diff.SetItem(idx, 1, str(diff_info['insert_count']))
+                self.list_data_diff.SetItem(idx, 2, str(diff_info['update_count']))
+                self.list_data_diff.SetItem(idx, 3, str(diff_info['delete_count']))
+                details_text = "; ".join(diff_info['details'][:3])  # 只显示前3条详情
+                if len(diff_info['details']) > 3:
+                    details_text += f" ... (共{len(diff_info['details'])}条)"
+                self.list_data_diff.SetItem(idx, 4, details_text)
+                
+                # 根据差异类型设置颜色
+                total_diff = diff_info['insert_count'] + diff_info['update_count'] + diff_info['delete_count']
+                if total_diff > 0:
+                    self.list_data_diff.SetItemTextColour(idx, wx.Colour(255, 100, 0))
+            
+            if self.current_data_sqls:
+                self.txt_data_sql.SetValue("\n".join(self.current_data_sqls))
+                self.btn_exec_data.Enable()
+                self.log(f"数据对比完成。发现 {len(self.core.data_diff_report)} 个表有数据差异，共 {len(self.current_data_sqls)} 条SQL。")
+
         if sqls:
             self.txt_sql.SetValue("\n".join(sqls))
             self.btn_exec.Enable()
             self.log(f"对比完成。结构差异语句: {len(sqls)} 条。")
-            wx.MessageBox(f"发现差异！结构差异语句: {len(sqls)} 条。", "完成", wx.OK | wx.ICON_WARNING)
+            msg = f"发现差异！结构差异语句: {len(sqls)} 条。"
+            if compare_data and self.core.data_diff_report:
+                msg += f"\n数据差异: {len(self.core.data_diff_report)} 个表，{len(self.current_data_sqls)} 条SQL。"
+            wx.MessageBox(msg, "完成", wx.OK | wx.ICON_WARNING)
         else:
             has_data_diff = any(r[0] == 'DAT' for r in report)
             if has_data_diff:
                 self.txt_sql.SetValue("-- 结构一致，但数据行数不同 (见列表 DAT 项)")
                 self.log("对比完成。结构一致，数据有差异。")
-                wx.MessageBox("结构一致，但发现数据量差异 (DAT)！", "提醒", wx.OK | wx.ICON_INFORMATION)
+                msg = "结构一致，但发现数据量差异 (DAT)！"
+                if compare_data and self.core.data_diff_report:
+                    msg += f"\n数据逐条对比: {len(self.core.data_diff_report)} 个表有差异。"
+                wx.MessageBox(msg, "提醒", wx.OK | wx.ICON_INFORMATION)
             else:
                 self.txt_sql.SetValue("-- 完美一致 (结构 & 行数)")
+                msg = "完美！结构与行数均一致。"
+                if compare_data:
+                    if self.core.data_diff_report:
+                        msg += f"\n但数据逐条对比发现 {len(self.core.data_diff_report)} 个表有差异。"
+                    else:
+                        msg += "\n数据逐条对比也完全一致！"
                 self.log("对比完成。完全一致。")
-                wx.MessageBox("完美！结构与行数均一致。", "完成", wx.OK | wx.ICON_INFORMATION)
+                wx.MessageBox(msg, "完成", wx.OK | wx.ICON_INFORMATION)
 
     def on_execute(self, event):
         if not self.current_sqls: return
@@ -453,7 +772,7 @@ class MainFrame(wx.Frame):
         dlg.Destroy()
 
     def _run_execute(self, tgt):
-        self.log("开始执行同步...")
+        self.log("开始执行结构同步...")
         # 核心 SQL 执行方法现在会返回带有 "目标数据库" 前缀的错误信息
         success, msg = self.core.execute_sql(tgt, self.current_sqls, self.log)
         if success:
@@ -463,6 +782,33 @@ class MainFrame(wx.Frame):
             wx.CallAfter(wx.MessageBox, f"执行失败: {msg}", "失败", wx.OK | wx.ICON_ERROR)
             self.log(f"执行结束: 失败 - {msg}")
         wx.CallAfter(self.btn_exec.Enable)
+
+    def on_execute_data(self, event):
+        if not self.current_data_sqls:
+            wx.MessageBox("没有数据同步SQL可执行！", "提示", wx.OK | wx.ICON_INFORMATION)
+            return
+        dlg = wx.MessageDialog(self, 
+                              f"⚠️ 确定执行数据同步？\n此操作将执行 {len(self.current_data_sqls)} 条SQL语句！\n"
+                              "包括 INSERT、UPDATE、DELETE 操作，将修改目标数据库的数据！\n\n"
+                              "强烈建议先备份目标数据库！", 
+                              "确认", wx.YES_NO | wx.ICON_WARNING)
+        if dlg.ShowModal() == wx.ID_YES:
+            self.btn_exec_data.Disable()
+            tgt = self.tgt_panel.get_config()
+            threading.Thread(target=self._run_execute_data, args=(tgt,), daemon=True).start()
+        dlg.Destroy()
+
+    def _run_execute_data(self, tgt):
+        self.log("开始执行数据同步...")
+        success, msg = self.core.execute_sql(tgt, self.current_data_sqls, self.log)
+        if success:
+            wx.CallAfter(wx.MessageBox, f"数据同步成功！共执行 {len(self.current_data_sqls)} 条SQL。", 
+                        "成功", wx.OK | wx.ICON_INFORMATION)
+            self.log("执行结束: 成功")
+        else:
+            wx.CallAfter(wx.MessageBox, f"执行失败: {msg}", "失败", wx.OK | wx.ICON_ERROR)
+            self.log(f"执行结束: 失败 - {msg}")
+        wx.CallAfter(self.btn_exec_data.Enable)
 
 
 if __name__ == "__main__":
