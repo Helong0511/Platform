@@ -1,7 +1,9 @@
+import datetime
 import hashlib
-import time
-import requests
 import json
+import time
+
+import requests
 
 # domain = 'king-sms.com'
 domain = 'btfrx.online'
@@ -34,7 +36,7 @@ ad_data_params = {
     'req_time': str(int(time.time())),
     'data_type': 'all',  # all:表示全部国家的详细数据；day:表示产品按天统计的数据
     'start_date': '2025-10-20',
-    'end_date': '2025-11-26'
+    'end_date': datetime.datetime.now().strftime('%Y-%m-%d'),
 }
 
 sorted_keys = sorted(ad_data_params.keys())
@@ -119,6 +121,9 @@ try:
                         print(f'展示率: {item.get("display_rate")}%')
                         print(f'点击数: {item.get("click_count")}')
                         print(f'点击率: {item.get("click_rate")}%')
+                        print(f'可见率: {item.get("viewability_rate")}%')
+                        print(f'点击成本: {item.get("cpc")}%')
+                        print(f'页面浏览量: {item.get("pageviews")}')
                         print(f'eCPM: {item.get("ecpm")}')
                         print(f'收益: {item.get("revenue")}')
                 else:
