@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS rsa_app_keys (
 """
 
 APP_ID = str(random.randint(1000, 9999))
-MESSAGE_TO_TEST = "Testing key retrieval from real MySQL database."
+
+MESSAGE_TO_TEST = f"Testing key {APP_ID} retrieval from real MySQL database."
 
 
 # ----------------------------------------------------
