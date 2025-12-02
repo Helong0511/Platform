@@ -150,7 +150,7 @@ for exp in need_exp:
         hand.write(
             "UPDATE `ad_data` SET `click_rate` = CASE WHEN `display_count` > 0 THEN ROUND(`click_count` / `display_count` * 100, 2) ELSE 0 END;\n")
 
-    hand.write(
+hand.write(
         "\nUPDATE `ad_data` SET `cpc` = `revenue_after_deduct` / `click_count` WHERE `revenue_after_deduct` > 0 AND `click_count` > 0;\n")
 
 wr = """\nINSERT INTO `countries` (`alpha_2_code`, `alpha_3_code`, `numeric_code`, `country_name_zh`, `country_name_en`, `official_name_zh`, `official_name_en`, `independent_status`, `continent`, `subregion`) VALUES 

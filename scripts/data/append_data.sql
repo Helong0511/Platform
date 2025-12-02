@@ -15,9 +15,8 @@ INSERT INTO `users` (`id`, `username`, `hashed_password`, `full_name`, `email`, 
 (11,'fulong','$2b$12$HZqrcI/SMAsygsBACO7o4OTHkHvhiu1qekVAxvm51FWk5NEhV4JOS','fulong','moobai@outlook.com','client',1),
 (12,'mengting5','$2b$12$Nt9FHDt806cQxKtYe4N7pOrUEi.1uF6zC9idGIWOHY4foiak7Ecqa','mengting5','mengting5@btfrx.online','client',1),
 (13,'zhuzhouyiya','$2b$12$lcj4bGqw4o/4S709JjEbrusqkyoXfvTFmGxB06A2rxx9b/cVT8AQC','zhuzhouyiya','1914442009@qq.com','client',1),
-(14,'winner','$2b$12$lanvDaMNEdMoz9GLAAO2y.O5LI8Gj31YRMGY6fqO9zVj1T38NsuNq','winner','winner@btfrx.online','client',1);
-
-UPDATE `ad_data` SET `cpc` = `revenue_after_deduct` / `click_count` WHERE `revenue_after_deduct` > 0 AND `click_count` > 0;
+(14,'winner','$2b$12$lanvDaMNEdMoz9GLAAO2y.O5LI8Gj31YRMGY6fqO9zVj1T38NsuNq','winner','winner@btfrx.online','client',1),
+(15,'airmobi','$2b$12$sEEyx4/H.dtGLHfaGDnNY.SpXE6g7QXkm77mCg5RuBnEMJe5BN9iW','airmobi','airmobi@btfrx.online','client',1);
 
 -- 添加客户数据
 INSERT INTO `clients` (`id`, `user_id`, `company_name`, `key`, `is_active`, `api_enabled`, `password_change_enabled`) VALUES 
@@ -33,9 +32,8 @@ INSERT INTO `clients` (`id`, `user_id`, `company_name`, `key`, `is_active`, `api
 (1008,11,'fulong Company','d34c76dc-fd6c-40f7-80f9-bfd83ea5662f',1,0,0),
 (1009,12,'mengting5 Company','1a409436-774b-41b4-b475-8e72b6a360a7',1,0,0),
 (1010,13,'zhuzhouyiya','a481444f-3a12-471a-8c89-2d2576b7fa14',1,0,0),
-(1011,14,'winner','d0af08fe-df73-4130-9120-ac21599ef08b',1,0,0);
-
-UPDATE `ad_data` SET `cpc` = `revenue_after_deduct` / `click_count` WHERE `revenue_after_deduct` > 0 AND `click_count` > 0;
+(1011,14,'winner','d0af08fe-df73-4130-9120-ac21599ef08b',1,0,0),
+(1012,15,'airmobi','3a8f2757-ab46-4492-bb2e-eb85d8011dd6',1,0,0);
 
 -- 添加产品数据
 INSERT INTO `products` (`id`, `client_id`, `name`, `ecpm_deduct_ratio`, `revenue_deduct_ratio`, `is_active`) VALUES 
@@ -68,7 +66,7 @@ INSERT INTO `products` (`id`, `client_id`, `name`, `ecpm_deduct_ratio`, `revenue
 (43,1001,'https://yu4.arctix.pro',0.30,0.30,1),
 (45,1000,'https://playhop.com/?utm_source=distrib&utm_medium=jianshan1010&clid=13944648',0.00,0.00,1),
 (46,1000,'https://playhop.com/?utm_source=distrib&utm_medium=jianshan1010&clid=13944645',0.00,0.00,1),
-(47,1001,'https://yu6.arctix.pro',0.30,0.30,1),
+(47,1012,'https://yu6.arctix.pro',0.00,0.00,1),
 (48,1008,'https://prt.iplayful.lol',0.30,0.30,1),
 (49,1001,'https://vty.gamerland.top',0.20,0.20,1),
 (50,1008,'gamewarlock',0.30,0.30,1),
@@ -89,9 +87,10 @@ INSERT INTO `products` (`id`, `client_id`, `name`, `ecpm_deduct_ratio`, `revenue
 (65,1007,'https://game.zpfxtb.xyz/',0.00,0.00,1),
 (66,1008,'https://hot.zpfxtb.xyz/',0.20,0.20,1),
 (67,1003,'https://top.zpfxtb.xyz/',0.00,0.00,1),
-(68,1000,'https://adcloudentertainment.com?channel=9612',0.00,0.00,1);
-
-UPDATE `ad_data` SET `cpc` = `revenue_after_deduct` / `click_count` WHERE `revenue_after_deduct` > 0 AND `click_count` > 0;
+(68,1000,'https://adcloudentertainment.com?channel=9612',0.00,0.00,1),
+(69,1003,'fgha.speedstars-us.com/',0.00,0.00,1),
+(70,1,'fgha.speedstars-us.com',0.00,0.00,1),
+(71,1,'https://laq.xaivip.com/',0.00,0.00,1);
 
 -- 添加产品历史分配数据
 INSERT INTO `product_assignments` (`product_id`, `client_id`, `start_date`, `end_date`) VALUES 
@@ -129,7 +128,8 @@ INSERT INTO `product_assignments` (`product_id`, `client_id`, `start_date`, `end
 (43,1001,'2025-10-20',NULL),
 (45,1000,'2025-10-20',NULL),
 (46,1000,'2025-10-20',NULL),
-(47,1001,'2025-10-20',NULL),
+(47,1001,'2025-10-20','2025-11-30'),
+(47,1012,'2025-12-01',NULL),
 (48,1007,'2025-11-19','2025-11-26'),
 (48,1008,'2025-11-28',NULL),
 (49,1001,'2025-11-19',NULL),
@@ -152,9 +152,10 @@ INSERT INTO `product_assignments` (`product_id`, `client_id`, `start_date`, `end
 (65,1007,'2025-11-28',NULL),
 (66,1008,'2025-11-28',NULL),
 (67,1003,'2025-11-28',NULL),
-(68,1000,'2025-11-28',NULL);
-
-UPDATE `ad_data` SET `cpc` = `revenue_after_deduct` / `click_count` WHERE `revenue_after_deduct` > 0 AND `click_count` > 0;
+(68,1000,'2025-11-28',NULL),
+(69,1003,'2025-12-01',NULL),
+(70,1,'2025-12-02',NULL),
+(71,1,'2025-12-02',NULL);
 
 -- 添加产品历史分配数据
 INSERT INTO `scheduled_tasks` (`task_name`, `cron_expression`, `description`, `function_path`, `is_active`) VALUES 
@@ -165,8 +166,6 @@ INSERT INTO `scheduled_tasks` (`task_name`, `cron_expression`, `description`, `f
 ('Skymobi API获取数据','*/10 * * * *','每隔10分钟执行一次，从Skymobi API获取广告数据','app.scheduler_module.tasks.skymobi_task.skymobi_api_task',1),
 ('yangyangdeyi API获取数据','*/10 * * * *','每隔10分钟执行一次，从yangyangdeyi API获取广告数据','app.scheduler_module.tasks.tbsj_task.tbsj_api_task',0),
 ('Addermobi API获取数据','*/10 * * * *','每隔10分钟执行一次，从Addermobi API获取广告数据','app.scheduler_module.tasks.addermobi_task.addermobi_api_task',1);
-
-UPDATE `ad_data` SET `cpc` = `revenue_after_deduct` / `click_count` WHERE `revenue_after_deduct` > 0 AND `click_count` > 0;
 
 -- 添加广告数据
 INSERT INTO `ad_data` (`date`, `country_code`, `product_id`, `request_count`, `match_count`, `display_count`, `click_count`, `ecpm_before_deduct`, `ecpm_after_deduct`, `revenue_before_deduct`, `revenue_after_deduct`) VALUES 
@@ -1062,15 +1061,32 @@ INSERT INTO `ad_data` (`date`, `country_code`, `product_id`, `request_count`, `m
 ('2025-11-30 00:00:00','ZZ',66,5603,4873,4635,138,3.27,2.61,15.16,12.12),
 ('2025-11-30 00:00:00','ZZ',67,26725,11888,10368,83,0.23,0.23,2.38,2.38),
 ('2025-11-30 00:00:00','ZZ',68,25673,23694,17260,275,0.58,0.57,10.01,10.01),
+('2025-12-01 00:00:00','ZZ',15,54551,54551,54551,5662,4.18,2.92,228.32,159.82),
+('2025-12-01 00:00:00','ZZ',34,23754,21531,21002,60,5.37,3.75,112.83,78.98),
+('2025-12-01 00:00:00','ZZ',35,11762,10838,10401,35,4.45,3.56,46.29,37.03),
 ('2025-12-01 00:00:00','US',40,46,19,19,0,0.53,0.36,0.00,0.00),
 ('2025-12-01 00:00:00','GB',40,4,2,1,0,0.00,0.00,0.00,0.00),
 ('2025-12-01 00:00:00','US',41,12,3,3,0,0.00,0.00,0.00,0.00),
-('2025-12-01 00:00:00','ZZ',43,81,13,2,1,7.00,4.89,0.01,0.00),
-('2025-12-01 00:00:00','ZZ',57,234,172,147,8,9.67,7.73,1.42,1.13),
+('2025-12-01 00:00:00','ZZ',43,195,32,13,1,3.77,2.63,0.05,0.03),
+('2025-12-01 00:00:00','ZZ',47,8926,7734,6937,48,0.49,0.34,3.37,2.35),
+('2025-12-01 00:00:00','ZZ',50,15619,15008,12382,895,7.46,5.22,92.36,64.65),
+('2025-12-01 00:00:00','ZZ',57,1156,610,538,30,7.92,6.33,4.26,3.41),
+('2025-12-01 00:00:00','ZZ',59,14,1,0,0,0.00,0.00,0.00,0.00),
+('2025-12-01 00:00:00','ZZ',61,306,90,81,0,0.25,0.25,0.02,0.02),
 ('2025-12-01 00:00:00','US',63,8143,7858,5343,12,7.66,7.27,40.94,38.89),
 ('2025-12-01 00:00:00','VN',63,5,0,0,0,0.00,0.00,0.00,0.00),
-('2025-12-01 00:00:00','CN',63,3,2,2,0,0.00,0.00,0.00,0.00),
-('2025-12-01 00:00:00','SG',63,3,1,0,0,0.00,0.00,0.00,0.00);
+('2025-12-01 00:00:00','CN',63,5,2,2,0,0.00,0.00,0.00,0.00),
+('2025-12-01 00:00:00','SG',63,3,1,0,0,0.00,0.00,0.00,0.00),
+('2025-12-01 00:00:00','ZZ',64,2872,1918,1903,15,5.56,3.61,10.58,6.87),
+('2025-12-01 00:00:00','ZZ',65,18244,13698,23214,155,0.66,0.66,15.44,15.44),
+('2025-12-01 00:00:00','ZZ',66,5402,4726,4498,154,3.30,2.64,14.84,11.87),
+('2025-12-01 00:00:00','ZZ',67,29505,12056,10138,94,0.16,0.16,1.63,1.63),
+('2025-12-01 00:00:00','ZZ',70,4991,4287,2173,69,0.59,0.59,1.29,1.29),
+('2025-12-01 00:00:00','ZZ',71,54551,54551,54551,5662,4.18,4.18,228.32,228.32),
+('2025-12-02 00:00:00','VN',63,2,0,0,0,0.00,0.00,0.00,0.00),
+('2025-12-02 00:00:00','CN',63,1,0,0,0,0.00,0.00,0.00,0.00),
+('2025-12-02 00:00:00','MY',63,1,0,0,0,0.00,0.00,0.00,0.00),
+('2025-12-02 00:00:00','SG',63,2,0,0,0,0.00,0.00,0.00,0.00);
 
 -- 更新广告数据统计字段（避免除零错误）
 UPDATE `ad_data` SET `coverage_rate` = CASE WHEN `request_count` > 0 THEN ROUND(`match_count` / `request_count` * 100, 2) ELSE 0 END;
