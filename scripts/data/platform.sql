@@ -21,7 +21,7 @@ USE `platform`;
 DROP TABLE IF EXISTS `ad_data`;
 CREATE TABLE IF NOT EXISTS `ad_data` (
   `id` INT NOT NULL AUTO_INCREMENT COMMENT '广告数据ID',
-  `date` DATETIME NOT NULL COMMENT '数据日期',
+  `date` DATE NOT NULL COMMENT '数据日期',
   `country_code` VARCHAR(5) NULL DEFAULT 'ZZ' COMMENT '国家代码（ISO 3166-1 二字母代码）',
   `product_id` INT NOT NULL COMMENT '产品ID',
   `request_count` INT NOT NULL DEFAULT 0 COMMENT '请求数',
@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS `ad_data` (
 DROP TABLE IF EXISTS `ad_data_archive`;
 CREATE TABLE IF NOT EXISTS `ad_data_archive` (
   `id` INT NOT NULL AUTO_INCREMENT COMMENT '广告数据ID',
-  `date` DATETIME NOT NULL COMMENT '数据日期',
+  `date` DATE NOT NULL COMMENT '数据日期',
   `country_code` VARCHAR(5) NULL DEFAULT 'ZZ' COMMENT '国家代码（ISO 3166-1 二字母代码）',
   `product_id` INT NOT NULL COMMENT '产品ID',
   `request_count` INT NOT NULL DEFAULT 0 COMMENT '请求数',
