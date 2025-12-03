@@ -35,6 +35,39 @@ from datetime import date
 logger = logging.getLogger(__name__)
 
 
+def clean_numeric_value(value: Any) -> float:
+    """
+    清理并转换数值字段，支持百分比格式（如 '100.00%'）
+    
+    参数:
+        value: 要转换的值（可能是字符串、数字或包含百分号的字符串）
+    
+    返回:
+        浮点数值
+    
+    异常:
+        ValueError: 如果无法转换为数值
+    """
+    if value is None:
+        raise ValueError("值不能为None")
+    
+    # 转换为字符串并去除首尾空格
+    str_value = str(value).strip()
+    
+    if not str_value:
+        raise ValueError("值不能为空")
+    
+    # 去除百分号（如果存在）
+    if str_value.endswith('%'):
+        str_value = str_value[:-1].strip()
+    
+    # 转换为浮点数
+    try:
+        return float(str_value)
+    except ValueError as e:
+        raise ValueError(f"无法转换为数值: '{value}'") from e
+
+
 async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes]:
     """
     验证并读取Excel文件
@@ -708,48 +741,48 @@ async def process_row_data(
             match_count = int(row["match_count"])
             display_count = int(row["display_count"])
             click_count = int(row["click_count"])
-            revenue_before = float(row["revenue_before_deduct"])
+            revenue_before = clean_numeric_value(row["revenue_before_deduct"])
             
             # 优先使用Excel表中的映射关系数据，如果不存在或为空/NaN，才按照计算公式计算
             # 覆盖率（匹配率）= 匹配数/请求数 * 100
             coverage_rate_val = row.get("coverage_rate")
             if coverage_rate_val is not None and pd.notna(coverage_rate_val) and str(coverage_rate_val).strip() != "":
-                coverage_rate = float(coverage_rate_val)
+                coverage_rate = clean_numeric_value(coverage_rate_val)
             else:
                 coverage_rate = (match_count / request_count * 100) if request_count > 0 else 0.0
             
             # 展示率 = 展示数/匹配数 * 100
             display_rate_val = row.get("display_rate")
             if display_rate_val is not None and pd.notna(display_rate_val) and str(display_rate_val).strip() != "":
-                display_rate = float(display_rate_val)
+                display_rate = clean_numeric_value(display_rate_val)
             else:
                 display_rate = (display_count / match_count * 100) if match_count > 0 else 0.0
             
             # 点击率 = 点击数/展示数 * 100
             click_rate_val = row.get("click_rate")
             if click_rate_val is not None and pd.notna(click_rate_val) and str(click_rate_val).strip() != "":
-                click_rate = float(click_rate_val)
+                click_rate = clean_numeric_value(click_rate_val)
             else:
                 click_rate = (click_count / display_count * 100) if display_count > 0 else 0.0
             
             # 可见率（可选字段，如果Excel中有则使用，否则使用默认值0.0）
             viewability_rate_val = row.get("viewability_rate")
             if viewability_rate_val is not None and pd.notna(viewability_rate_val) and str(viewability_rate_val).strip() != "":
-                viewability_rate = float(viewability_rate_val)
+                viewability_rate = clean_numeric_value(viewability_rate_val)
             else:
                 viewability_rate = 0.0
             
             # eCPM = 收益/展示数 * 1000
             ecpm_before_val = row.get("ecpm_before_deduct")
             if ecpm_before_val is not None and pd.notna(ecpm_before_val) and str(ecpm_before_val).strip() != "":
-                ecpm_before = float(ecpm_before_val)
+                ecpm_before = clean_numeric_value(ecpm_before_val)
             else:
                 ecpm_before = (revenue_before / display_count * 1000) if display_count > 0 else 0.0
             
             # CPC（可选字段，如果Excel中有则使用，否则使用默认值0.0）
             cpc_val = row.get("cpc")
             if cpc_val is not None and pd.notna(cpc_val) and str(cpc_val).strip() != "":
-                cpc = float(cpc_val)
+                cpc = clean_numeric_value(cpc_val)
             else:
                 cpc = 0.0
             
@@ -907,18 +940,10 @@ async def process_row_data(
             existing_data.revenue_before_deduct = revenue_before
             existing_data.revenue_after_deduct = revenue_after
             # 如果Excel中提供了比率字段，使用Excel的值；否则使用计算值
-            if coverage_rate_val is not None and pd.notna(coverage_rate_val) and str(coverage_rate_val).strip() != "":
-                existing_data.coverage_rate = float(coverage_rate_val)
-            else:
-                existing_data.coverage_rate = coverage_rate
-            if display_rate_val is not None and pd.notna(display_rate_val) and str(display_rate_val).strip() != "":
-                existing_data.display_rate = float(display_rate_val)
-            else:
-                existing_data.display_rate = display_rate
-            if click_rate_val is not None and pd.notna(click_rate_val) and str(click_rate_val).strip() != "":
-                existing_data.click_rate = float(click_rate_val)
-            else:
-                existing_data.click_rate = click_rate
+            # 注意：coverage_rate, display_rate, click_rate 已经在前面使用 clean_numeric_value() 转换过了
+            existing_data.coverage_rate = coverage_rate
+            existing_data.display_rate = display_rate
+            existing_data.click_rate = click_rate
             existing_data.viewability_rate = viewability_rate
             # 如果基础数据有变化，重新计算比率字段（确保一致性）
             existing_data.calculate_rates()
@@ -972,18 +997,10 @@ async def process_row_data(
                 revenue_after_deduct=revenue_after
             )
             # 如果Excel中提供了比率字段，使用Excel的值；否则使用计算值
-            if coverage_rate_val is not None and pd.notna(coverage_rate_val) and str(coverage_rate_val).strip() != "":
-                ad_data.coverage_rate = float(coverage_rate_val)
-            else:
-                ad_data.coverage_rate = coverage_rate
-            if display_rate_val is not None and pd.notna(display_rate_val) and str(display_rate_val).strip() != "":
-                ad_data.display_rate = float(display_rate_val)
-            else:
-                ad_data.display_rate = display_rate
-            if click_rate_val is not None and pd.notna(click_rate_val) and str(click_rate_val).strip() != "":
-                ad_data.click_rate = float(click_rate_val)
-            else:
-                ad_data.click_rate = click_rate
+            # 注意：coverage_rate, display_rate, click_rate 已经在前面使用 clean_numeric_value() 转换过了
+            ad_data.coverage_rate = coverage_rate
+            ad_data.display_rate = display_rate
+            ad_data.click_rate = click_rate
             ad_data.viewability_rate = viewability_rate
             # 调用计算方法确保比率字段正确（如果基础数据有变化，会重新计算）
             ad_data.calculate_rates()
