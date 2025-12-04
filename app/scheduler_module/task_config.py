@@ -109,8 +109,8 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "result_getter_module": "app.scheduler_module.tasks.tqt_task",
         "result_getter_function": "get_task_result",
         # 数据库配置
-        "cron_expression": "*/10 * * * *",  # 每10分钟
-        "description": "每隔10分钟执行一次，从TQT API获取广告数据并导入到数据库",
+        "cron_expression": "*/30 * * * *",  # 每10分钟
+        "description": "每隔30分钟执行一次，从TQT API获取广告数据并导入到数据库",
     },
     
     # ========== Skymobi API获取数据任务 ==========
@@ -134,7 +134,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "result_getter_function": "get_task_result",
         # 数据库配置
         "cron_expression": "*/30 * * * *",  # 每10分钟
-        "description": "每隔10分钟执行一次，从yangyangdeyi API获取广告数据",
+        "description": "每隔30分钟执行一次，从yangyangdeyi API获取广告数据",
     },
     
     # ========== Addermobi API获取数据任务 ==========
@@ -146,7 +146,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "result_getter_function": "get_task_result",
         # 数据库配置
         "cron_expression": "*/30 * * * *",  # 每10分钟
-        "description": "每隔10分钟执行一次，从Addermobi API获取广告数据",
+        "description": "每隔30分钟执行一次，从Addermobi API获取广告数据",
     },
     # ==============================================================================
     # 添加新任务示例（取消注释并修改即可）
