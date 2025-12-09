@@ -37,7 +37,7 @@ class MacanPostBackRequest(BaseModel):
     os: Optional[str] = Field(None, description="IOS 或 Android")
     ip: Optional[str] = Field(None, description="Click IP（点击IP）")
     gid: Optional[str] = Field(None, description="Channel ID（渠道ID）")
-    
+
     # 可选：用于关联产品和客户
     product_id: Optional[int] = Field(None, description="产品ID（可选，用于关联产品）")
     client_id: Optional[int] = Field(None, description="客户ID（可选，用于关联客户）")
