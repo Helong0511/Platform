@@ -119,7 +119,8 @@ def should_skip_csrf_check(request: Request) -> bool:
     1. 安全方法（GET, HEAD, OPTIONS, TRACE）
     2. 登录接口（使用JWT，不需要CSRF）
     3. 客户API接口（使用签名验证，不需要CSRF）
-    4. 静态资源
+    4. Macan S2S PostBack接口（外部回调接口，使用参数验证，不需要CSRF）
+    5. 静态资源
     """
     path = request.url.path
     method = request.method
@@ -137,6 +138,11 @@ def should_skip_csrf_check(request: Request) -> bool:
     # 客户API接口使用签名验证，不需要CSRF
     # 精确匹配客户API接口
     if path == "/api/v1/client_products" or path == "/api/v1/client_data":
+        return True
+    
+    # Macan S2S PostBack接口（外部回调接口，使用参数验证，不需要CSRF）
+    if path == "/api/v1/macan/postback":
+        logger.debug(f"跳过CSRF检查（Macan PostBack接口）: {method} {path}")
         return True
     
     # 静态资源不需要CSRF
@@ -166,6 +172,11 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         # 精确匹配登录/登出接口
         if path == "/api/v1/auth/login" or path == "/api/v1/auth/logout":
             logger.debug(f"跳过CSRF检查（登录接口）: {request.method} {path}")
+            return await call_next(request)
+        
+        # Macan S2S PostBack接口（外部回调接口，不需要CSRF）
+        if path == "/api/v1/macan/postback":
+            logger.debug(f"跳过CSRF检查（Macan PostBack接口）: {request.method} {path}")
             return await call_next(request)
         
         # 定时任务接口已有JWT认证和管理员权限检查，跳过CSRF
