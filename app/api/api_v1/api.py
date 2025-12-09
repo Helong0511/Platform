@@ -24,6 +24,7 @@ from app.api.api_v1.endpoints import (
     product_assignments,
     sessions,
     telegram,
+    macan_postback,
 )
 
 # 认证路由
@@ -67,3 +68,6 @@ api_router.include_router(sessions.router, prefix="/sessions", tags=["会话管�
 
 # Telegram Bot 管理路由
 api_router.include_router(telegram.router, prefix="/telegram", tags=["Telegram Bot"])
+
+# Macan S2S PostBack 路由（外部回调接口）
+api_router.include_router(macan_postback.router, prefix="", tags=["Macan S2S"])
