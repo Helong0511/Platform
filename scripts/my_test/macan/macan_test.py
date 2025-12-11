@@ -51,7 +51,7 @@ def test_post_postback():
     print("=" * 50)
     print("测试 POST 请求")
     print("=" * 50)
-    
+
     data = {
         "clk_id": "test_clk_67890",
         "event_name": "install",
@@ -65,7 +65,7 @@ def test_post_postback():
         "product_id": 1,  # 可选
         "client_id": 1,  # 可选
     }
-    
+
     try:
         response = requests.post(
             API_ENDPOINT,
@@ -83,7 +83,7 @@ def test_post_postback():
             
     except requests.exceptions.RequestException as e:
         print(f"❌ 请求失败: {str(e)}")
-    
+
     print()
 
 
@@ -92,25 +92,25 @@ def test_minimal_params():
     print("=" * 50)
     print("测试最小参数（仅必填参数）")
     print("=" * 50)
-    
+
     params = {
         "clk_id": "minimal_test_123",
         "event_name": "test_event",
     }
-    
+
     try:
         response = requests.get(API_ENDPOINT, params=params, timeout=10)
         print(f"状态码: {response.status_code}")
         print(f"响应内容: {json.dumps(response.json(), indent=2, ensure_ascii=False)}")
-        
+
         if response.status_code == 200:
             print("✅ 最小参数测试成功")
         else:
             print(f"❌ 最小参数测试失败，状态码: {response.status_code}")
-            
+
     except requests.exceptions.RequestException as e:
         print(f"❌ 请求失败: {str(e)}")
-    
+
     print()
 
 
@@ -119,7 +119,7 @@ def test_missing_required_params():
     print("=" * 50)
     print("测试缺少必填参数（应该返回错误）")
     print("=" * 50)
-    
+
     # 缺少 event_name
     params = {
         "clk_id": "test_clk_12345",

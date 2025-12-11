@@ -27,7 +27,7 @@ async def create_database(engine: AsyncEngine | None = None):
     temp_engine = create_async_engine(db_url, echo=False)
     try:
         async with temp_engine.connect() as conn:
-            await conn.execute(text("CREATE DATABASE IF NOT EXISTS platform"))
+            await conn.execute(text("CREATE DATABASE IF NOT EXISTS `platform`"))
             await conn.commit()
         logger.info("数据库 platform 创建成功或已存在")
     except Exception as e:
