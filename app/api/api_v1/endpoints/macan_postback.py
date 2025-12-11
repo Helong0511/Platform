@@ -228,6 +228,28 @@ async def _process_macan_postback(
         # 或者：更新 AdData 表中的转化数据
         # 目前先记录日志，后续可以根据业务需求扩展
         
+        # 发送 Telegram 通知
+        try:
+            from app.core.auto_bot import send_telegram_message
+            import asyncio
+            
+            telegram_msg = f"🔔 Macan PostBack 回调收到\n\n"
+            telegram_msg += f"Event: {event_name}\n"
+            telegram_msg += f"Click ID: {clk_id}\n"
+            if payout:
+                 telegram_msg += f"Payout: {payout}\n"
+            if product_id:
+                 telegram_msg += f"Product ID: {product_id}\n"
+            if client_id:
+                 telegram_msg += f"Client ID: {client_id}\n"
+            
+            await asyncio.wait_for(
+                send_telegram_message(telegram_msg),
+                timeout=5.0
+            )
+        except Exception as e:
+            logger.warning(f"发送 Macan PostBack Telegram 通知失败: {e}")
+
         # 5. 返回成功响应
         return MacanPostBackResponse(
             success=True,
@@ -243,4 +265,3 @@ async def _process_macan_postback(
             ErrorCode.OPERATION_FAILED,
             detail=f"处理 PostBack 回调失败：{str(e)}"
         )
-
