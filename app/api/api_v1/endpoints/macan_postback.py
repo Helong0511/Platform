@@ -233,7 +233,12 @@ async def _process_macan_postback(
             from app.core.auto_bot import send_telegram_message
             import asyncio
             
+            if request.method == "GET":
+                method = "GET"
+            else:
+                method = "POST"
             telegram_msg = f"🔔 Macan PostBack 回调收到\n\n"
+            telegram_msg += f"Method: {method}\n"
             telegram_msg += f"Event: {event_name}\n"
             telegram_msg += f"Click ID: {clk_id}\n"
             if payout:
