@@ -332,7 +332,8 @@ async def import_tb_search_data(
     required_cols = ["DATE", "SUBID", "GEO"]
     missing = [col for col in required_cols if col not in df.columns]
     if missing:
-        raise_api_exception(ErrorCode.INVALID_PARAMS, detail=f"缺少必要列: {', '.join(missing)}")
+        #raise_api_exception(ErrorCode.INVALID_PARAMS, detail=f"缺少必要列: {', '.join(missing)}")
+        return ResponseBaseSchema.success(data={"message": f"导入失败：缺少必要列 {', '.join(missing)}。请检查Excel文件格式。", "errors": [f"缺少必要列: {', '.join(missing)}"]})
         
     success_count = 0
     errors = []
