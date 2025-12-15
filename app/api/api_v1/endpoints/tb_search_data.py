@@ -377,6 +377,23 @@ async def import_tb_search_data(
         
     return ResponseBaseSchema.success(data={"message": msg, "errors": errors[:10]}) # 只返回前10个错误
 
+@router.delete("/batch", response_model=ResponseBaseSchema[dict], summary="批量删除TB搜索数据")
+async def batch_delete_tb_search_data(
+    data_ids: list[int] = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != UserRole.ADMIN:
+        raise_api_exception(ErrorCode.PERMISSION_DENIED, detail="仅管理员可删除")
+        
+    if not data_ids:
+        raise_api_exception(ErrorCode.INVALID_PARAMS, detail="ID列表不能为空")
+        
+    stmt = delete(TBSearchData).where(TBSearchData.id.in_(data_ids))
+    result = await db.execute(stmt)
+    await db.commit()
+    
+    return ResponseBaseSchema.success(data={"message": f"成功删除 {result.rowcount} 条数据"})
 
 @router.delete("/{data_id}", response_model=ResponseBaseSchema[dict], summary="删除TB搜索数据")
 async def delete_tb_search_data(
@@ -398,24 +415,6 @@ async def delete_tb_search_data(
     await db.commit()
     
     return ResponseBaseSchema.success(data={"message": "删除成功"})
-
-@router.delete("/batch", response_model=ResponseBaseSchema[dict], summary="批量删除TB搜索数据")
-async def batch_delete_tb_search_data(
-    data_ids: list[int] = Body(...),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    if current_user.role != UserRole.ADMIN:
-        raise_api_exception(ErrorCode.PERMISSION_DENIED, detail="仅管理员可删除")
-        
-    if not data_ids:
-        raise_api_exception(ErrorCode.INVALID_PARAMS, detail="ID列表不能为空")
-        
-    stmt = delete(TBSearchData).where(TBSearchData.id.in_(data_ids))
-    result = await db.execute(stmt)
-    await db.commit()
-    
-    return ResponseBaseSchema.success(data={"message": f"成功删除 {result.rowcount} 条数据"})
 
 @router.post("/{data_id}", response_model=ResponseBaseSchema[TBSearchDataResponse], summary="更新TB搜索数据")
 async def update_tb_search_data(

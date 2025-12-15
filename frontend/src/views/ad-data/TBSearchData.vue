@@ -180,6 +180,7 @@ import { useAuthStore } from '../../store';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Upload, Delete } from '@element-plus/icons-vue';
 import { getTBSearchDataList, updateTBSearchData, deleteTBSearchData, batchDeleteTBSearchData, importTBSearchData } from '../../api/tbSearchData';
+import { getUsersForSelect, getProductsForSelect } from '../../api/adData';
 import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../../utils/api';
 
 const authStore = useAuthStore();
@@ -333,7 +334,35 @@ const handleImport = async (options) => {
       }, 500);
     }
     
-    fetchData();
+    // 导入成功后，重置筛选条件并刷新数据，确保能看到新导入的数据
+    // 重置到第一页
+    pagination.value.current = 1;
+    
+    // 如果用户没有选择日期范围，后端默认只显示当前月的数据
+    // 为了确保能看到新导入的数据，如果当前没有选择日期范围，清除客户筛选
+    // 这样至少能看到"默认客户（导入数据）"的数据
+    if (!searchForm.value.dateRange || searchForm.value.dateRange.length === 0) {
+      // 没有选择日期范围时，清除客户筛选，确保能看到所有客户的数据（包括默认客户）
+      if (isAdmin.value) {
+        searchForm.value.clientId = '';
+      }
+    }
+    
+    // 刷新数据
+    await fetchData();
+    
+    // 如果导入成功但数据没有显示，提示用户调整筛选条件
+    if (res.data?.message && res.data.message.includes('成功导入')) {
+      setTimeout(() => {
+        if (tableData.value.length === 0 && pagination.value.total === 0) {
+          ElMessage.info({
+            message: '导入成功！如果看不到数据，请检查日期范围筛选条件是否包含导入数据的日期。',
+            duration: 5000,
+            showClose: true
+          });
+        }
+      }, 1000);
+    }
   } catch (error) {
     console.error(error);
     if (!isErrorHandled(error)) {
