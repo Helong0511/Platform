@@ -1,7 +1,7 @@
 import datetime
 import os
-import mysql.connector as mysql
 
+import mysql.connector as mysql
 
 DEBUG = False
 
@@ -66,7 +66,13 @@ need_exp = [
         "order": "`date`, `product_id`",
         "note": "-- 添加广告数据\n",
         "exclude_today": False  # 添加标记，表示需要排除当天数据
-    }
+    },
+    {
+        "table_name": "`tb_search_data`",
+        "field_name": "`date`, `product_id`, `country_code`, `redirects`, `searches`, `monetized`, `clicks`, `revenue`, `rpm`, `revenue_before_deduct`, `rpm_before_deduct`",
+        "order": "`date`",
+        "note": "-- 添加TB搜索数据\n"
+    },
 ]
 
 a = 0
@@ -139,7 +145,8 @@ for exp in need_exp:
 
     if DEBUG:
         if table_name == "`users`":
-            hand.write("\nUPDATE `users` SET `hashed_password` = '$2b$12$geFYoAmb0ZA7Be4LJX/40uudVPltdtwCGFxC5aDIP7xQ/ImTJPIdO' WHERE `username` = 'admin';\n")
+            hand.write(
+                "\nUPDATE `users` SET `hashed_password` = '$2b$12$geFYoAmb0ZA7Be4LJX/40uudVPltdtwCGFxC5aDIP7xQ/ImTJPIdO' WHERE `username` = 'admin';\n")
 
     if table_name == "`ad_data`":
         hand.write("\n-- 更新广告数据统计字段（避免除零错误）\n")
@@ -151,7 +158,7 @@ for exp in need_exp:
             "UPDATE `ad_data` SET `click_rate` = CASE WHEN `display_count` > 0 THEN ROUND(`click_count` / `display_count` * 100, 2) ELSE 0 END;\n")
 
 hand.write(
-        "\nUPDATE `ad_data` SET `cpc` = `revenue_after_deduct` / `click_count` WHERE `revenue_after_deduct` > 0 AND `click_count` > 0;\n")
+    "\nUPDATE `ad_data` SET `cpc` = `revenue_after_deduct` / `click_count` WHERE `revenue_after_deduct` > 0 AND `click_count` > 0;\n")
 
 wr = """\nINSERT INTO `countries` (`alpha_2_code`, `alpha_3_code`, `numeric_code`, `country_name_zh`, `country_name_en`, `official_name_zh`, `official_name_en`, `independent_status`, `continent`, `subregion`) VALUES 
 ('AA', 'AAA', '000', '未知区域', 'unknown', '未知区域', 'unknown', 1, '全球', '任意地区'),

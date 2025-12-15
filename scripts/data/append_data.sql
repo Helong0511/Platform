@@ -95,7 +95,8 @@ INSERT INTO `products` (`id`, `client_id`, `name`, `ecpm_deduct_ratio`, `revenue
 (72,1,'https://adcloudentertair',0.00,0.00,1),
 (73,1003,'xer.gamecock.top',0.20,0.20,1),
 (74,1013,'https://state.juhubvm.com',0.20,0.20,1),
-(75,1005,'4532',0.00,0.00,1);
+(75,1000,'4532',0.00,0.00,1),
+(76,1006,'4531',0.00,0.00,1);
 
 -- 添加产品历史分配数据
 INSERT INTO `product_assignments` (`product_id`, `client_id`, `start_date`, `end_date`) VALUES 
@@ -166,7 +167,9 @@ INSERT INTO `product_assignments` (`product_id`, `client_id`, `start_date`, `end
 (73,1,'2025-12-08','2025-12-09'),
 (73,1003,'2025-12-10',NULL),
 (74,1013,'2025-12-12',NULL),
-(75,1005,'2025-12-15',NULL);
+(75,1005,'2025-12-01','2025-12-14'),
+(75,1000,'2025-12-15',NULL),
+(76,1006,'2025-12-11',NULL);
 
 -- 添加产品历史分配数据
 INSERT INTO `scheduled_tasks` (`task_name`, `cron_expression`, `description`, `function_path`, `is_active`) VALUES 
@@ -1408,6 +1411,18 @@ INSERT INTO `ad_data` (`date`, `country_code`, `product_id`, `request_count`, `m
 UPDATE `ad_data` SET `coverage_rate` = CASE WHEN `request_count` > 0 THEN ROUND(`match_count` / `request_count` * 100, 2) ELSE 0 END;
 UPDATE `ad_data` SET `display_rate` = CASE WHEN `match_count` > 0 THEN ROUND(`display_count` / `match_count` * 100, 2) ELSE 0 END;
 UPDATE `ad_data` SET `click_rate` = CASE WHEN `display_count` > 0 THEN ROUND(`click_count` / `display_count` * 100, 2) ELSE 0 END;
+
+-- 添加TB搜索数据
+INSERT INTO `tb_search_data` (`date`, `product_id`, `country_code`, `redirects`, `searches`, `monetized`, `clicks`, `revenue`, `rpm`, `revenue_before_deduct`, `rpm_before_deduct`) VALUES 
+('2025-12-11 00:00:00',76,'US',2423,2423,2432,697,3.87,1.60,3.87,1.60),
+('2025-12-11 00:00:00',75,'US',1737,1737,2014,481,2.22,1.44,2.78,1.60),
+('2025-12-12 00:00:00',76,'US',3032,3032,2021,564,3.43,1.12,3.43,1.13),
+('2025-12-12 00:00:00',75,'US',2335,2335,1967,504,2.37,1.14,2.97,1.27),
+('2025-12-13 00:00:00',76,'US',3003,3003,2534,689,3.82,1.27,3.82,1.27),
+('2025-12-13 00:00:00',75,'US',2293,2293,2032,506,2.11,1.03,2.64,1.15),
+('2025-12-14 00:00:00',76,'US',2959,2959,0,0,0.00,0.00,0.00,0.00),
+('2025-12-14 00:00:00',75,'US',2323,2323,0,0,0.00,0.00,0.00,0.00),
+('2025-12-15 00:00:00',76,'US',48,48,0,0,0.00,0.00,0.00,0.00);
 
 UPDATE `ad_data` SET `cpc` = `revenue_after_deduct` / `click_count` WHERE `revenue_after_deduct` > 0 AND `click_count` > 0;
 
