@@ -90,7 +90,7 @@
       >
         <el-table-column type="selection" width="55"></el-table-column>
         <el-table-column prop="date" label="DATE" sortable="custom" width="120"></el-table-column>
-        <el-table-column v-if="isAdmin" prop="client_name" label="所属客户" sortable="custom"></el-table-column>
+        <el-table-column v-if="isAdmin" prop="user_name" label="所属客户" sortable="custom"></el-table-column>
         <el-table-column prop="product_name" label="SUBID" sortable="custom"></el-table-column>
         <el-table-column prop="country_name_zh" label="GEO" width="120">
           <template #default="{ row }">
