@@ -216,14 +216,55 @@ const editForm = ref({});
 
 onMounted(async () => {
   if (isAdmin.value) {
-    users.value = await getUsersForSelect();
+    await loadUsers();
   }
-  products.value = await getProductsForSelect();
+  await loadProducts();
   fetchData();
 });
 
+const loadUsers = async () => {
+  try {
+    const data = await getUsersForSelect();
+    // 添加"全部客户"选项，并移除编号前缀
+    users.value = [
+      { label: '全部客户', value: '' },
+      ...data.map(item => ({
+        value: item.value,
+        label: item.label.replace(/^\d+\s*-\s*/, '') // 移除编号前缀
+      }))
+    ];
+  } catch (error) {
+    console.error('加载客户列表失败:', error);
+    users.value = [{ label: '全部客户', value: '' }];
+  }
+};
+
+const loadProducts = async (clientId = null) => {
+  try {
+    const data = await getProductsForSelect(clientId);
+    // 添加"全部产品"选项，并移除编号前缀
+    products.value = [
+      { label: '全部产品', value: '' },
+      ...data.map(item => ({
+        value: String(item.value), // 确保是字符串类型
+        label: item.label.replace(/^\d+\s*-\s*/, '') // 移除编号前缀
+      }))
+    ];
+  } catch (error) {
+    console.error('加载产品列表失败:', error);
+    products.value = [{ label: '全部产品', value: '' }];
+  }
+};
+
 const handleClientChange = async (val) => {
-  products.value = await getProductsForSelect(val);
+  await loadProducts(val || null);
+  // 如果当前选择的产品不在新列表中，清空产品选择
+  if (searchForm.value.productId) {
+    const productExists = products.value.some(p => p.value === searchForm.value.productId);
+    if (!productExists) {
+      searchForm.value.productId = '';
+    }
+  }
   fetchData();
 };
 
