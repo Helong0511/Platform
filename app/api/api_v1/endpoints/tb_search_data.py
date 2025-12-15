@@ -101,8 +101,8 @@ async def get_tb_search_data(
         query = query.where(Client.id == client_id)
 
     # 产品状态过滤：只显示激活状态的产品（如果产品存在）
-    # 注意：使用 outerjoin 时，Product 可能为 None，所以需要检查
-    query = query.where(or_(Product.is_(None), Product.is_active == True))
+    # 使用 Product.id 判断是否有产品行
+    query = query.where(or_(Product.id.is_(None), Product.is_active == True))
 
     # 过滤条件
     if product_id and product_id.strip():
@@ -184,7 +184,7 @@ async def get_tb_search_data(
         count_query = count_query.where(Client.id == client_id)
     
     # 产品状态过滤：只显示激活状态的产品（如果产品存在）
-    count_query = count_query.where(or_(Product.is_(None), Product.is_active == True))
+    count_query = count_query.where(or_(Product.id.is_(None), Product.is_active == True))
         
     if product_id and product_id.strip():
         try:
