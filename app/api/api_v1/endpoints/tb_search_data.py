@@ -170,8 +170,8 @@ async def get_tb_search_data(
         tb_data, product, client, user, country_info = row
         
         # 处理可能为None的关联数据
-        if not product:
-            continue  # 如果产品不存在，跳过这条数据
+        # 即使产品不存在，也显示数据，但标记为"未知产品"
+        # 这样可以发现数据完整性问题
         
         country_name = "未知区域"
         if country_info:
@@ -185,8 +185,8 @@ async def get_tb_search_data(
         item = TBSearchDataResponse(
             id=tb_data.id,
             date=date_val,
-            product_id=product.id if product else 0,
-            product_name=product.name if product else "未知产品",
+            product_id=product.id if product else tb_data.product_id,  # 使用原始product_id
+            product_name=product.name if product else f"未知产品(ID:{tb_data.product_id})",
             country_code=tb_data.country_code,
             country_name_zh=country_name,
             redirects=tb_data.redirects,
