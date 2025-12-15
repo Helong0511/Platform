@@ -33,7 +33,7 @@ print(url)
 # post method
 body = {
     "appId": appid,
-    "numbers": "+5585992330734",
+    "numbers": "5585992330734",
     "content": "Hello!",
     "senderId": ""
 }
@@ -44,12 +44,18 @@ print(body)
 #     res = json.loads(rsp.text)
 #     print(res)
 
-url = f"https://api.itniotech.com/sms/getReport?appId={appid}&msgIds=2511251751181017988"
+# url = f"https://api.itniotech.com/sms/getReport?appId={appid}&msgIds=2511251751181017988"
+url = f"https://api.itniotech.com/sms/getReport?appId={appid}&msgIds=2512121025551093945"
 
 status = requests.get(url, headers=headers)
 if status.status_code == 200:
     json_data = status.json()
     print(json_data)
+
+data = ['12345', '']
+
+print(','.join(json_data.keys()))
+
 """
 查询
 {

@@ -23,6 +23,7 @@ const createAsyncComponent = (importFn, componentName) => {
 const Login = createAsyncComponent(() => import(/* webpackChunkName: "login" */ '../views/Login.vue'), 'Login');
 const Dashboard = createAsyncComponent(() => import(/* webpackChunkName: "dashboard" */ '../views/Dashboard.vue'), 'Dashboard');
 const AdData = createAsyncComponent(() => import(/* webpackChunkName: "ad-data" */ '../views/AdData.vue'), 'AdData');
+const TBSearchData = createAsyncComponent(() => import(/* webpackChunkName: "tb-search-data" */ '../views/ad-data/TBSearchData.vue'), 'TBSearchData');
 const DailyReport = createAsyncComponent(() => import(/* webpackChunkName: "daily-report" */ '../views/ad-data/DailyReport.vue'), 'DailyReport');
 const MLModelManagement = createAsyncComponent(() => import(/* webpackChunkName: "ml-model" */ '../views/admin/MLModelManagement.vue'), 'MLModelManagement');
 const NotFound = createAsyncComponent(() => import(/* webpackChunkName: "not-found" */ '../views/NotFound.vue'), 'NotFound');
@@ -61,6 +62,11 @@ const routes = [
         path: 'ad-data/detail-report', 
         name: 'AdData', 
         component: AdData 
+      },
+      { 
+        path: 'ad-data/tb-search-data', 
+        name: 'TBSearchData', 
+        component: TBSearchData 
       },
       { 
         path: 'admin/users', 

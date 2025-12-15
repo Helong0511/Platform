@@ -24,6 +24,9 @@
       <el-menu-item index="/app/ad-data/detail-report">
         <span>详细报表</span>
       </el-menu-item>
+      <el-menu-item index="/app/ad-data/tb-search-data">
+        <span>TB搜索数据</span>
+      </el-menu-item>
     </el-sub-menu>
 
     <el-menu-item v-if="isAdmin" index="/app/admin/import-training">

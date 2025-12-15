@@ -98,6 +98,7 @@ class Product(Base):
     client = relationship("Client", back_populates="products")
     ad_data = relationship("AdData", back_populates="product")
     assignments = relationship("ProductAssignment", back_populates="product", cascade="all, delete-orphan")
+    tb_search_data = relationship("TBSearchData", back_populates="product")
 
     __table_args__ = (
         Index("idx_product_client", "client_id"),
@@ -168,6 +169,38 @@ class AdData(Base):
     # 关系
     product = relationship("Product", back_populates="ad_data")
     country = relationship("CountryInfo", foreign_keys=[country_code])
+
+
+# TB搜索数据模型
+class TBSearchData(Base):
+    __tablename__ = "tb_search_data"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='ID')
+    date = Column(DateTime, nullable=False, comment='日期')
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False, comment='产品ID')
+    country_code = Column(String(2), ForeignKey("countries.alpha_2_code", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, comment='国家代码')
+    redirects = Column(Integer, default=0, comment='REDIRECTS')
+    searches = Column(Integer, default=0, comment='SEARCHES')
+    monetized = Column(Integer, default=0, comment='MONETIZED')
+    clicks = Column(Integer, default=0, comment='CLICKS')
+    revenue = Column(Float, default=0.0, comment='REVENUE')
+    rpm = Column(Float, default=0.0, comment='RPM')
+    
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+
+    # 关系
+    product = relationship("Product", back_populates="tb_search_data")
+    country = relationship("CountryInfo", foreign_keys=[country_code])
+
+    __table_args__ = (
+        Index("idx_tb_search_data_date", "date"),
+        Index("idx_tb_search_data_product", "product_id"),
+        Index("idx_tb_search_data_date_product", "date", "product_id"),
+        # 唯一性约束
+        UniqueConstraint("date", "product_id", "country_code", name="uq_tb_search_data_date_product_country"),
+    )
 
 
 # 产品分配历史模型

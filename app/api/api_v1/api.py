@@ -25,6 +25,7 @@ from app.api.api_v1.endpoints import (
     sessions,
     telegram,
     macan_postback,
+    tb_search_data,
 )
 
 # 认证路由
@@ -44,6 +45,7 @@ api_router.include_router(product_assignments.router, prefix="/product-assignmen
 
 # 广告数据路由
 api_router.include_router(ad_data.router, prefix="/ad-data", tags=["广告数据"])
+api_router.include_router(tb_search_data.router, prefix="/tb-search-data", tags=["TB搜索数据"])
 
 # 仪表盘路由
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["仪表盘"])
