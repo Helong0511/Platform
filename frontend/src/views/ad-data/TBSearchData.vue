@@ -504,6 +504,69 @@ const saveEdit = async () => {
 .filter-card {
   margin-bottom: 20px;
 }
+
+/* 筛选表单样式优化 */
+.filter-form {
+  margin-bottom: 0;
+}
+
+.filter-form :deep(.el-form-item) {
+  width: 300px;
+  margin-bottom: 16px;
+  margin-right: 16px;
+  vertical-align: top;
+}
+
+/* 确保所有输入框和选择框宽度一致 */
+.filter-form :deep(.el-input),
+.filter-form :deep(.el-select),
+.filter-form :deep(.el-date-editor) {
+  width: 100%;
+}
+
+/* 下拉框宽度优化 */
+.filter-form :deep(.el-select) {
+  min-width: 100%;
+}
+
+/* 日期选择器宽度优化 */
+.filter-form :deep(.el-date-editor) {
+  width: 100%;
+}
+
+/* 按钮组不限制宽度 */
+.filter-form :deep(.el-form-item:last-child) {
+  width: auto;
+  margin-right: 0;
+}
+
+/* 响应式优化 */
+@media (min-width: 1200px) {
+  .filter-form :deep(.el-form-item) {
+    width: 280px;
+  }
+}
+
+@media (min-width: 1400px) {
+  .filter-form :deep(.el-form-item) {
+    width: 300px;
+  }
+}
+
+/* 移动端优化 */
+@media (max-width: 767px) {
+  .filter-form :deep(.el-form-item) {
+    width: 100% !important;
+    margin-right: 0 !important;
+  }
+  
+  .filter-form :deep(.el-input),
+  .filter-form :deep(.el-select),
+  .filter-form :deep(.el-date-editor) {
+    width: 100% !important;
+  }
+}
+
 .pagination-container {
   margin-top: 20px;
   display: flex;
