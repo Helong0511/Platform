@@ -203,8 +203,8 @@ async def get_tb_search_data(
 
 @router.post("/{data_id}", response_model=ResponseBaseSchema[TBSearchDataResponse], summary="更新TB搜索数据")
 async def update_tb_search_data(
-    data_id: int,
-    data_update: TBSearchDataUpdate,
+    data_id: int = Path(..., ge=1, description="TB搜索数据ID"),
+    data_update: TBSearchDataUpdate = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -269,7 +269,7 @@ async def update_tb_search_data(
 
 @router.delete("/{data_id}", response_model=ResponseBaseSchema[dict], summary="删除TB搜索数据")
 async def delete_tb_search_data(
-    data_id: int,
+    data_id: int = Path(..., ge=1, description="TB搜索数据ID"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
