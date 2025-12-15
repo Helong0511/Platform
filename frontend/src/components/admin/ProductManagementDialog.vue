@@ -174,6 +174,7 @@
       :width="isMobile ? '95%' : '800px'"
       :close-on-click-modal="false"
       class="product-form-dialog"
+      append-to-body
     >
       <el-form 
         ref="formRef" 
@@ -295,6 +296,7 @@
       title="选择产品转移日期"
       width="700px"
       :close-on-click-modal="false"
+      append-to-body
     >
       <el-form :model="transferDateForm" label-width="120px">
         <el-form-item label="上一个客户">
