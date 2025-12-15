@@ -41,6 +41,7 @@ INSERT INTO `clients` (`id`, `user_id`, `company_name`, `key`, `is_active`, `api
 INSERT INTO `products` (`id`, `client_id`, `name`, `ecpm_deduct_ratio`, `revenue_deduct_ratio`, `is_active`) VALUES 
 (1,1007,'game06.shyfxx.xyz',0.00,0.00,1),
 (2,1006,'shocktech.top',0.00,0.00,1),
+
 (4,1004,'rjhhhj.xyz/',0.00,0.00,1),
 (5,1003,'api.news-headlines.co/v1/quick-links/LNV2201MG?sub_id=LNV11',0.00,0.00,1),
 (6,1002,'fkicy.top',0.00,0.00,1),
@@ -48,10 +49,12 @@ INSERT INTO `products` (`id`, `client_id`, `name`, `ecpm_deduct_ratio`, `revenue
 (8,1000,'11613682',0.00,0.00,1),
 (9,1008,'rmlreadingcenter.com?channel=9514',0.20,0.20,1),
 (10,1006,'carzreview.com',0.00,0.00,1),
+
 (12,1003,'www.tudouweb.com',0.00,0.00,1),
 (13,1001,'nsab.fluffgameburrow.com/',0.10,0.10,1),
 (14,1000,'11613684',0.00,0.00,1),
 (15,1006,'laq.xaivip.com/',0.30,0.30,1),
+
 (17,1001,'pjrzlz.xyz/',0.35,0.35,1),
 (18,1000,'nsaa.fluffgameburrow.com/',0.00,0.00,1),
 (19,1000,'playjoust.xyz',0.00,0.00,1),
@@ -59,13 +62,16 @@ INSERT INTO `products` (`id`, `client_id`, `name`, `ecpm_deduct_ratio`, `revenue
 (21,1000,'1878301',0.00,0.00,1),
 (22,1000,'www.rugame.top',0.10,0.10,1),
 (23,1000,'www.xogame.top',0.00,0.00,1),
+
 (34,1008,'https://rjhhhj.xyz/',0.30,0.30,1),
 (35,1008,'https://fkicy.top/',0.20,0.20,1),
 (36,1003,'au.flygames.vip',0.20,0.20,1),
+
 (40,1008,'kde.casualrush.top',0.30,0.30,1),
 (41,1008,'ner.casualrush.top',0.20,0.20,1),
 (42,1009,'https://kde.casualrush.top',0.30,0.30,1),
 (43,1003,'https://yu4.arctix.pro',0.30,0.30,1),
+
 (45,1000,'https://playhop.com/?utm_source=distrib&utm_medium=jianshan1010&clid=13944648',0.00,0.00,1),
 (46,1000,'https://playhop.com/?utm_source=distrib&utm_medium=jianshan1010&clid=13944645',0.00,0.00,1),
 (47,1012,'https://yu6.arctix.pro',0.00,0.00,1),
@@ -90,6 +96,7 @@ INSERT INTO `products` (`id`, `client_id`, `name`, `ecpm_deduct_ratio`, `revenue
 (66,1008,'https://hot.zpfxtb.xyz/',0.20,0.20,1),
 (67,1003,'https://top.zpfxtb.xyz/',0.00,0.00,1),
 (68,1000,'https://adcloudentertainment.com?channel=9612',0.00,0.00,1),
+
 (70,1003,'fgha.speedstars-us.com',0.00,0.00,1),
 (71,1,'https://laq.xaivip.com/',0.00,0.00,1),
 (72,1,'https://adcloudentertair',0.00,0.00,1),
