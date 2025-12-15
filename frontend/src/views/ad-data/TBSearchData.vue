@@ -257,8 +257,22 @@ const fetchData = async () => {
     if (searchForm.value.countryCode) params.country_code = searchForm.value.countryCode;
 
     const res = await getTBSearchDataList(params);
-    tableData.value = res.data || [];
-    pagination.value.total = res.total || 0;
+    
+    // 检查响应结构
+    if (res.code !== 200) {
+      const errorMsg = res.detail || res.message || '获取数据失败';
+      ElMessage.error(errorMsg);
+      tableData.value = [];
+      pagination.value.total = 0;
+      return;
+    }
+    
+    // 提取数据 - 后端返回的数据结构是嵌套的：{ code, message, data: { data: [...], total, page, page_size } }
+    const listResponse = res.data || {};
+    tableData.value = Array.isArray(listResponse.data) ? listResponse.data : [];
+    // 确保total是数字类型
+    const totalValue = typeof listResponse.total === 'number' ? listResponse.total : parseInt(listResponse.total || 0, 10);
+    pagination.value.total = totalValue;
     
     // 如果查询结果为空，且没有选择任何筛选条件，提示用户
     if (tableData.value.length === 0 && pagination.value.total === 0 && 
@@ -303,24 +317,29 @@ const formatCurrency = (val) => {
 const getSummaries = (param) => {
   const { columns, data } = param;
   const sums = [];
+  
+  // 确保 data 是数组
+  if (!Array.isArray(data)) {
+    return columns.map(() => '');
+  }
+  
   columns.forEach((column, index) => {
     if (index === 0) {
       sums[index] = '合计';
       return;
     }
     const prop = column.property;
-    if (['redirects', 'searches', 'monetized', 'clicks', 'revenue', 'revenue_before_deduct'].includes(prop)) {
-      const values = data.map(item => Number(item[prop]));
-      if (!values.every(value => Number.isNaN(value))) {
-        const sum = values.reduce((prev, curr) => {
-          const value = Number(curr);
-          if (!Number.isNaN(value)) {
-            return prev + curr;
-          } else {
-            return prev;
-          }
-        }, 0);
-        sums[index] = ['revenue', 'revenue_before_deduct'].includes(prop) ? formatCurrency(sum) : sum;
+    if (['redirects', 'searches', 'monetized', 'clicks', 'revenue', 'revenue_before_deduct', 'rpm', 'rpm_before_deduct'].includes(prop)) {
+      const values = data.map(item => {
+        const value = item?.[prop];
+        return value !== null && value !== undefined ? Number(value) : 0;
+      }).filter(val => !Number.isNaN(val));
+      
+      if (values.length > 0) {
+        const sum = values.reduce((prev, curr) => prev + curr, 0);
+        sums[index] = ['revenue', 'revenue_before_deduct', 'rpm', 'rpm_before_deduct'].includes(prop) ? formatCurrency(sum) : sum;
+      } else {
+        sums[index] = '';
       }
     } else {
       sums[index] = '';
