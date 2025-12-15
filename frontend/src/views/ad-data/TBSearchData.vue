@@ -180,7 +180,7 @@ import { useAuthStore } from '../../store';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Upload, Delete } from '@element-plus/icons-vue';
 import { getTBSearchDataList, updateTBSearchData, deleteTBSearchData, batchDeleteTBSearchData, importTBSearchData } from '../../api/tbSearchData';
-import { getUsersForSelect, getProductsForSelect } from '../../api/adData';
+import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../../utils/api';
 
 const authStore = useAuthStore();
 const isAdmin = computed(() => authStore.isAdmin);
@@ -315,10 +315,30 @@ const handleImport = async (options) => {
   importing.value = true;
   try {
     const res = await importTBSearchData(formData);
-    ElMessage.success(res.message || '导入成功');
+    // 优先显示 data.message（后端业务消息），其次显示外层 message，最后是默认消息
+    const msg = res.data?.message || res.message || '导入成功';
+    ElMessage.success(msg);
+    
+    // 如果有部分错误，也显示出来
+    if (res.data?.errors && res.data.errors.length > 0) {
+      setTimeout(() => {
+        const errorMsg = `部分数据导入失败（${res.data.errors.length}条）：\n` + res.data.errors.join('\n');
+        ElMessage.warning({
+          message: errorMsg,
+          duration: 10000,
+          showClose: true,
+          dangerouslyUseHTMLString: true,
+          formatter: (msg) => msg.replace(/\n/g, '<br/>')
+        });
+      }, 500);
+    }
+    
     fetchData();
   } catch (error) {
     console.error(error);
+    if (!isErrorHandled(error)) {
+      ElMessage.error(extractErrorMessage(error));
+    }
   } finally {
     importing.value = false;
   }
