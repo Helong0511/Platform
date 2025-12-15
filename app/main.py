@@ -401,11 +401,23 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     errors = exc.errors()
     serializable_errors = _make_json_serializable(errors)
 
+    # 尝试提取第一个错误的详细信息
+    error_detail = "请检查请求参数格式"
+    if errors and len(errors) > 0:
+        first_error = errors[0]
+        loc = first_error.get("loc", [])
+        msg = first_error.get("msg", "")
+        if loc:
+            field_name = loc[-1]
+            error_detail = f"参数 '{field_name}' 错误: {msg}"
+        else:
+            error_detail = f"参数错误: {msg}"
+
     logger.warning(f"请求验证失败: {request.url.path} | 错误: {serializable_errors}")
     error_response = create_error_response(
         error_code=ErrorCode.VALIDATION_ERROR,
         message="请求参数验证失败",
-        detail="请检查请求参数格式",
+        detail=error_detail,
         data={"errors": serializable_errors}
     )
     # 业务错误返回200状态码，通过响应体中的code字段表示错误

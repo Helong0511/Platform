@@ -6,7 +6,7 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, status, UploadFile
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, status, UploadFile, File
 from sqlalchemy import delete, func, select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
@@ -308,7 +308,7 @@ async def batch_delete_tb_search_data(
 
 @router.post("/import", response_model=ResponseBaseSchema[dict], summary="导入Excel数据")
 async def import_tb_search_data(
-    file: UploadFile,
+    file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
