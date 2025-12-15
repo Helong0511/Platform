@@ -60,7 +60,13 @@
           </el-select>
         </el-form-item>
         <el-form-item label="国家">
-          <el-input v-model="searchForm.countryCode" placeholder="国家代码" clearable @keyup.enter="fetchData" />
+          <el-input 
+            v-model="searchForm.countryCode" 
+            placeholder="国家代码" 
+            clearable 
+            @keyup.enter="fetchData"
+            style="width: 100%;"
+          />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="fetchData" :loading="loading">查询</el-button>
@@ -84,6 +90,7 @@
       >
         <el-table-column type="selection" width="55"></el-table-column>
         <el-table-column prop="date" label="DATE" sortable="custom" width="120"></el-table-column>
+        <el-table-column v-if="isAdmin" prop="client_name" label="所属客户" sortable="custom"></el-table-column>
         <el-table-column prop="product_name" label="SUBID" sortable="custom"></el-table-column>
         <el-table-column prop="country_name_zh" label="GEO" width="120">
           <template #default="{ row }">
@@ -515,6 +522,23 @@ const saveEdit = async () => {
   margin-bottom: 16px;
   margin-right: 16px;
   vertical-align: top;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* 确保标签宽度一致 */
+.filter-form :deep(.el-form-item__label) {
+  width: auto;
+  min-width: 60px;
+  text-align: right;
+  padding-right: 12px;
+  line-height: 32px;
+}
+
+/* 确保内容区域对齐 */
+.filter-form :deep(.el-form-item__content) {
+  flex: 1;
+  line-height: 32px;
 }
 
 /* 确保所有输入框和选择框宽度一致 */
@@ -522,6 +546,13 @@ const saveEdit = async () => {
 .filter-form :deep(.el-select),
 .filter-form :deep(.el-date-editor) {
   width: 100%;
+}
+
+/* 确保输入框和选择框的高度一致 */
+.filter-form :deep(.el-input__wrapper),
+.filter-form :deep(.el-select .el-input__wrapper) {
+  height: 32px;
+  min-height: 32px;
 }
 
 /* 下拉框宽度优化 */
@@ -532,6 +563,12 @@ const saveEdit = async () => {
 /* 日期选择器宽度优化 */
 .filter-form :deep(.el-date-editor) {
   width: 100%;
+}
+
+/* 确保输入框内部元素对齐 */
+.filter-form :deep(.el-input__inner) {
+  height: 100%;
+  line-height: 1;
 }
 
 /* 按钮组不限制宽度 */
