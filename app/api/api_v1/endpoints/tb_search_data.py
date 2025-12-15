@@ -16,7 +16,7 @@ from io import BytesIO
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.config import settings
-from app.models.models import TBSearchData, Client, Product, User, UserRole, CountryInfo
+from app.models.models import TBSearchData, Client, Product, User, UserRole, CountryInfo, ProductAssignment
 from app.schemas.tb_search_data import (
     TBSearchDataListResponse,
     TBSearchDataResponse,
@@ -25,6 +25,7 @@ from app.schemas.tb_search_data import (
 from app.schemas.base import ResponseBaseSchema
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.query_utils import product_assignment_join_condition, check_use_assignment_table
 from app.api.api_v1.endpoints.excel.utils import allowed_file, ALLOWED_MIME_TYPES, parse_date_value
 
 router = APIRouter()
@@ -55,19 +56,53 @@ async def get_tb_search_data(
     from app.core.utils import optimize_page_size_for_device
     page_size = optimize_page_size_for_device(request, page_size, default_page_size=10)
 
+    # 检查是否使用产品分配历史表
+    use_assignment_table = await check_use_assignment_table(db)
+    if not settings.is_production:
+        if use_assignment_table:
+            logger.debug("TB搜索数据：使用产品分配历史表查询")
+        else:
+            logger.debug("TB搜索数据：使用旧的查询方式（直接通过Product.client_id关联）")
+
     # 构建查询
     # 使用LEFT JOIN确保即使关联数据缺失也能查询到TB搜索数据
-    query = select(TBSearchData, Product, Client, User, CountryInfo)
-    query = query.outerjoin(Product, TBSearchData.product_id == Product.id)
-    query = query.outerjoin(Client, Product.client_id == Client.id)
-    query = query.outerjoin(User, Client.user_id == User.id)
-    query = join_country_info(query)
+    if use_assignment_table:
+        # 使用产品分配历史表进行查询
+        query = select(TBSearchData, Product, Client, User, ProductAssignment, CountryInfo)
+        query = query.outerjoin(Product, TBSearchData.product_id == Product.id)
+        # 关联产品分配历史表：根据TB搜索数据的日期匹配正确的分配记录
+        query = query.outerjoin(
+            ProductAssignment,
+            and_(
+                ProductAssignment.product_id == Product.id,
+                product_assignment_join_condition(
+                    TBSearchData.date,
+                    ProductAssignment.start_date,
+                    ProductAssignment.end_date
+                )
+            )
+        )
+        # 通过产品分配历史表关联客户
+        query = query.outerjoin(Client, ProductAssignment.client_id == Client.id)
+        query = query.outerjoin(User, Client.user_id == User.id)
+        query = join_country_info(query)
+    else:
+        # 旧的查询方式：直接通过Product.client_id关联
+        query = select(TBSearchData, Product, Client, User, CountryInfo)
+        query = query.outerjoin(Product, TBSearchData.product_id == Product.id)
+        query = query.outerjoin(Client, Product.client_id == Client.id)
+        query = query.outerjoin(User, Client.user_id == User.id)
+        query = join_country_info(query)
 
     # 权限过滤
     if current_user.role != UserRole.ADMIN:
         query = query.where(Client.user_id == current_user.id)
     elif client_id:
         query = query.where(Client.id == client_id)
+
+    # 产品状态过滤：只显示激活状态的产品（如果产品存在）
+    # 注意：使用 outerjoin 时，Product 可能为 None，所以需要检查
+    query = query.where(or_(Product.is_(None), Product.is_active == True))
 
     # 过滤条件
     if product_id and product_id.strip():
@@ -123,13 +158,33 @@ async def get_tb_search_data(
     # 简化计数查询，使用LEFT JOIN确保即使关联数据缺失也能正确计数
     count_query = select(func.count(TBSearchData.id))
     count_query = count_query.outerjoin(Product, TBSearchData.product_id == Product.id)
-    count_query = count_query.outerjoin(Client, Product.client_id == Client.id)
+    
+    if use_assignment_table:
+        # 使用产品分配历史表
+        count_query = count_query.outerjoin(
+            ProductAssignment,
+            and_(
+                ProductAssignment.product_id == Product.id,
+                product_assignment_join_condition(
+                    TBSearchData.date,
+                    ProductAssignment.start_date,
+                    ProductAssignment.end_date
+                )
+            )
+        )
+        count_query = count_query.outerjoin(Client, ProductAssignment.client_id == Client.id)
+    else:
+        # 旧的查询方式
+        count_query = count_query.outerjoin(Client, Product.client_id == Client.id)
     
     # 应用相同的过滤条件
     if current_user.role != UserRole.ADMIN:
         count_query = count_query.where(Client.user_id == current_user.id)
     elif client_id:
         count_query = count_query.where(Client.id == client_id)
+    
+    # 产品状态过滤：只显示激活状态的产品（如果产品存在）
+    count_query = count_query.where(or_(Product.is_(None), Product.is_active == True))
         
     if product_id and product_id.strip():
         try:
@@ -167,7 +222,12 @@ async def get_tb_search_data(
 
     response_list = []
     for row in data:
-        tb_data, product, client, user, country_info = row
+        # 根据是否使用产品分配历史表，解包不同的结果
+        if use_assignment_table:
+            tb_data, product, client, user, product_assignment, country_info = row
+        else:
+            tb_data, product, client, user, country_info = row
+            product_assignment = None
         
         # 处理可能为None的关联数据
         # 即使产品不存在，也显示数据，但标记为"未知产品"
