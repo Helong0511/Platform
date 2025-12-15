@@ -237,9 +237,20 @@ const fetchData = async () => {
       sort_order: sortInfo.value.order === 'ascending' ? 'asc' : 'desc'
     };
     
+    // 如果选择了日期范围，使用选择的日期范围
+    // 如果没有选择日期范围，后端默认只显示当前月的数据
+    // 为了能看到所有数据，我们需要传递一个很大的日期范围，或者不传递日期参数
+    // 但根据后端逻辑，不传递日期参数会默认使用当前月
+    // 所以我们需要传递一个足够大的日期范围来显示所有数据
     if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
       params.start_date = searchForm.value.dateRange[0];
       params.end_date = searchForm.value.dateRange[1];
+    } else {
+      // 如果没有选择日期范围，传递一个很大的日期范围来显示所有数据
+      // 或者不传递，让后端使用默认的当前月（但这样可能看不到历史数据）
+      // 为了能看到所有数据，我们传递一个足够大的日期范围
+      params.start_date = '2000-01-01';
+      params.end_date = '2099-12-31';
     }
     if (searchForm.value.clientId) params.client_id = searchForm.value.clientId;
     if (searchForm.value.productId) params.product_id = searchForm.value.productId;
@@ -248,8 +259,18 @@ const fetchData = async () => {
     const res = await getTBSearchDataList(params);
     tableData.value = res.data || [];
     pagination.value.total = res.total || 0;
+    
+    // 如果查询结果为空，且没有选择任何筛选条件，提示用户
+    if (tableData.value.length === 0 && pagination.value.total === 0 && 
+        !searchForm.value.dateRange && !searchForm.value.clientId && 
+        !searchForm.value.productId && !searchForm.value.countryCode) {
+      // 已经在使用大日期范围，如果还是没有数据，说明确实没有数据
+    }
   } catch (error) {
     console.error(error);
+    if (!isErrorHandled(error)) {
+      ElMessage.error(extractErrorMessage(error));
+    }
   } finally {
     loading.value = false;
   }

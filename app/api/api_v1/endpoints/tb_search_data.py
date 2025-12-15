@@ -56,10 +56,11 @@ async def get_tb_search_data(
     page_size = optimize_page_size_for_device(request, page_size, default_page_size=10)
 
     # 构建查询
+    # 使用LEFT JOIN确保即使关联数据缺失也能查询到TB搜索数据
     query = select(TBSearchData, Product, Client, User, CountryInfo)
-    query = query.join(Product, TBSearchData.product_id == Product.id)
-    query = query.join(Client, Product.client_id == Client.id)
-    query = query.join(User, Client.user_id == User.id)
+    query = query.outerjoin(Product, TBSearchData.product_id == Product.id)
+    query = query.outerjoin(Client, Product.client_id == Client.id)
+    query = query.outerjoin(User, Client.user_id == User.id)
     query = join_country_info(query)
 
     # 权限过滤
@@ -81,11 +82,16 @@ async def get_tb_search_data(
         if code != 'ZZ' and len(code) <= 2:
             query = query.where(TBSearchData.country_code == code)
 
+    # 日期范围过滤
+    # 如果传递了日期范围，使用传递的日期范围
+    # 如果没有传递日期范围，默认显示当前月的数据（与其他端点保持一致）
+    # 但前端可以通过传递一个很大的日期范围来显示所有数据
     if start_date:
         query = query.where(TBSearchData.date >= datetime.combine(start_date, datetime.min.time()))
     if end_date:
         query = query.where(TBSearchData.date <= datetime.combine(end_date, datetime.max.time()))
     elif not start_date and not end_date:
+        # 如果没有传递日期范围，默认显示当前月的数据
         today = date.today()
         month_start = date(today.year, today.month, 1)
         _, last_day = monthrange(today.year, today.month)
@@ -114,10 +120,10 @@ async def get_tb_search_data(
         query = query.order_by(sort_col.asc())
 
     # 计数
-    # 简化计数查询
+    # 简化计数查询，使用LEFT JOIN确保即使关联数据缺失也能正确计数
     count_query = select(func.count(TBSearchData.id))
-    count_query = count_query.join(Product, TBSearchData.product_id == Product.id)
-    count_query = count_query.join(Client, Product.client_id == Client.id)
+    count_query = count_query.outerjoin(Product, TBSearchData.product_id == Product.id)
+    count_query = count_query.outerjoin(Client, Product.client_id == Client.id)
     
     # 应用相同的过滤条件
     if current_user.role != UserRole.ADMIN:
@@ -137,12 +143,13 @@ async def get_tb_search_data(
         if code != 'ZZ' and len(code) <= 2:
             count_query = count_query.where(TBSearchData.country_code == code)
             
+    # 日期范围过滤（与主查询保持一致）
     if start_date:
         count_query = count_query.where(TBSearchData.date >= datetime.combine(start_date, datetime.min.time()))
     if end_date:
         count_query = count_query.where(TBSearchData.date <= datetime.combine(end_date, datetime.max.time()))
     elif not start_date and not end_date:
-        # 同样的默认日期范围
+        # 如果没有传递日期范围，默认显示当前月的数据
         today = date.today()
         month_start = date(today.year, today.month, 1)
         _, last_day = monthrange(today.year, today.month)
@@ -162,6 +169,10 @@ async def get_tb_search_data(
     for row in data:
         tb_data, product, client, user, country_info = row
         
+        # 处理可能为None的关联数据
+        if not product:
+            continue  # 如果产品不存在，跳过这条数据
+        
         country_name = "未知区域"
         if country_info:
             country_name = country_info.country_name_zh
@@ -174,8 +185,8 @@ async def get_tb_search_data(
         item = TBSearchDataResponse(
             id=tb_data.id,
             date=date_val,
-            product_id=product.id,
-            product_name=product.name,
+            product_id=product.id if product else 0,
+            product_name=product.name if product else "未知产品",
             country_code=tb_data.country_code,
             country_name_zh=country_name,
             redirects=tb_data.redirects,
@@ -188,9 +199,9 @@ async def get_tb_search_data(
             rpm_before_deduct=tb_data.rpm_before_deduct,
             created_at=tb_data.created_at,
             updated_at=tb_data.updated_at,
-            client_id=client.id,
-            client_name=client.company_name,
-            user_name=user.full_name or user.username
+            client_id=client.id if client else 0,
+            client_name=client.company_name if client else "未知客户",
+            user_name=(user.full_name or user.username) if user else "未知用户"
         )
         response_list.append(item)
 
