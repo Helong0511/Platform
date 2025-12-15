@@ -90,3 +90,63 @@ export const importTBSearchData = async (formData) => {
   }
 };
 
+// 获取有TB搜索数据的客户列表
+export const getClientsWithTBSearchData = async (startDate = null, endDate = null) => {
+  try {
+    const params = {};
+    if (startDate) params.start_date = startDate;
+    if (endDate) params.end_date = endDate;
+    
+    const response = await axios.get('/api/v1/tb-search-data/clients-with-data', { params });
+    return normalizeResponse(response, { returnDataOnly: false });
+  } catch (error) {
+    if (isErrorHandled(error)) {
+      throw error;
+    }
+    const errorMsg = extractErrorMessage(error);
+    ElMessage.error(errorMsg);
+    throw error;
+  }
+};
+
+// 获取有TB搜索数据的产品列表
+export const getProductsWithTBSearchData = async (clientId = null, startDate = null, endDate = null) => {
+  try {
+    const params = {};
+    if (clientId) params.client_id = clientId;
+    if (startDate) params.start_date = startDate;
+    if (endDate) params.end_date = endDate;
+    
+    const response = await axios.get('/api/v1/tb-search-data/products-with-data', { params });
+    return normalizeResponse(response, { returnDataOnly: false });
+  } catch (error) {
+    if (isErrorHandled(error)) {
+      throw error;
+    }
+    const errorMsg = extractErrorMessage(error);
+    ElMessage.error(errorMsg);
+    throw error;
+  }
+};
+
+// 获取有TB搜索数据的国家列表
+export const getCountriesWithTBSearchData = async (clientId = null, productId = null, startDate = null, endDate = null) => {
+  try {
+    const params = {};
+    if (clientId) params.client_id = clientId;
+    if (productId) params.product_id = productId;
+    if (startDate) params.start_date = startDate;
+    if (endDate) params.end_date = endDate;
+    
+    const response = await axios.get('/api/v1/tb-search-data/countries-with-data', { params });
+    return normalizeResponse(response, { returnDataOnly: false });
+  } catch (error) {
+    if (isErrorHandled(error)) {
+      throw error;
+    }
+    const errorMsg = extractErrorMessage(error);
+    ElMessage.error(errorMsg);
+    throw error;
+  }
+};
+

@@ -36,7 +36,7 @@
             end-placeholder="结束日期"
             format="YYYY-MM-DD"
             value-format="YYYY-MM-DD"
-            @change="fetchData"
+            @change="handleDateRangeChange"
           ></el-date-picker>
         </el-form-item>
         <el-form-item v-if="isAdmin" label="客户">
@@ -54,19 +54,21 @@
             v-model="searchForm.productId" 
             placeholder="全部产品" 
             clearable
-            @change="fetchData"
+            @change="handleProductChange"
           >
             <el-option v-for="product in products" :key="product.value" :label="product.label" :value="product.value"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="国家">
-          <el-input 
+          <el-select 
             v-model="searchForm.countryCode" 
-            placeholder="国家代码" 
-            clearable 
-            @keyup.enter="fetchData"
+            placeholder="全部区域" 
+            clearable
+            @change="fetchData"
             style="width: 100%;"
-          />
+          >
+            <el-option v-for="country in countries" :key="country.code" :label="country.name_zh" :value="country.code"></el-option>
+          </el-select>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="fetchData" :loading="loading">查询</el-button>
@@ -186,8 +188,7 @@ import { ref, onMounted, computed } from 'vue';
 import { useAuthStore } from '../../store';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Upload, Delete } from '@element-plus/icons-vue';
-import { getTBSearchDataList, updateTBSearchData, deleteTBSearchData, batchDeleteTBSearchData, importTBSearchData } from '../../api/tbSearchData';
-import { getUsersForSelect, getProductsForSelect } from '../../api/adData';
+import { getTBSearchDataList, updateTBSearchData, deleteTBSearchData, batchDeleteTBSearchData, importTBSearchData, getClientsWithTBSearchData, getProductsWithTBSearchData, getCountriesWithTBSearchData } from '../../api/tbSearchData';
 import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../../utils/api';
 
 const authStore = useAuthStore();
@@ -198,6 +199,7 @@ const importing = ref(false);
 const tableData = ref([]);
 const users = ref([]);
 const products = ref([]);
+const countries = ref([]);
 const selectedRows = ref([]);
 
 const pagination = ref({
@@ -222,49 +224,118 @@ const editDialogVisible = ref(false);
 const editForm = ref({});
 
 onMounted(async () => {
-  if (isAdmin.value) {
-    await loadUsers();
-  }
-  await loadProducts();
+  await loadFilterOptions();
   fetchData();
 });
 
-const loadUsers = async () => {
+// 获取当前日期范围（用于筛选条件）
+const getDateRange = () => {
+  let startDate = null;
+  let endDate = null;
+  if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
+    startDate = searchForm.value.dateRange[0];
+    endDate = searchForm.value.dateRange[1];
+  }
+  return { startDate, endDate };
+};
+
+// 加载所有筛选条件
+const loadFilterOptions = async () => {
+  const { startDate, endDate } = getDateRange();
+  
+  if (isAdmin.value) {
+    await loadUsers(startDate, endDate);
+  }
+  await loadProducts(searchForm.value.clientId || null, startDate, endDate);
+  await loadCountries(searchForm.value.clientId || null, searchForm.value.productId || null, startDate, endDate);
+};
+
+const loadUsers = async (startDate = null, endDate = null) => {
   try {
-    const data = await getUsersForSelect();
-    // 添加"全部客户"选项，并移除编号前缀
+    const result = await getClientsWithTBSearchData(startDate, endDate);
+    const data = result.data || [];
+    
     users.value = [
       { label: '全部客户', value: '' },
       ...data.map(item => ({
-        value: item.value,
-        label: item.label.replace(/^\d+\s*-\s*/, '') // 移除编号前缀
+        value: item.id,
+        label: item.full_name || '未知客户'
       }))
     ];
   } catch (error) {
-    console.error('加载客户列表失败:', error);
+    if (!isErrorHandled(error)) {
+      console.error('加载客户列表失败:', error);
+    }
     users.value = [{ label: '全部客户', value: '' }];
   }
 };
 
-const loadProducts = async (clientId = null) => {
+const loadProducts = async (clientId = null, startDate = null, endDate = null) => {
   try {
-    const data = await getProductsForSelect(clientId);
-    // 添加"全部产品"选项，并移除编号前缀
+    const result = await getProductsWithTBSearchData(clientId, startDate, endDate);
+    const data = result.data || [];
+    
     products.value = [
       { label: '全部产品', value: '' },
       ...data.map(item => ({
-        value: String(item.value), // 确保是字符串类型
-        label: item.label.replace(/^\d+\s*-\s*/, '') // 移除编号前缀
+        value: String(item.id),
+        label: item.name || '未知产品'
       }))
     ];
   } catch (error) {
-    console.error('加载产品列表失败:', error);
+    if (!isErrorHandled(error)) {
+      console.error('加载产品列表失败:', error);
+    }
     products.value = [{ label: '全部产品', value: '' }];
   }
 };
 
+const loadCountries = async (clientId = null, productId = null, startDate = null, endDate = null) => {
+  try {
+    const result = await getCountriesWithTBSearchData(clientId, productId, startDate, endDate);
+    const data = result.data || [];
+    
+    countries.value = [
+      { code: '', name_zh: '全部区域' },
+      ...data.map(item => ({
+        code: item.code,
+        name_zh: item.name_zh || item.code
+      }))
+    ];
+  } catch (error) {
+    if (!isErrorHandled(error)) {
+      console.error('加载国家列表失败:', error);
+    }
+    countries.value = [{ code: '', name_zh: '全部区域' }];
+  }
+};
+
+// 日期范围变化时的处理
+const handleDateRangeChange = async () => {
+  // 重新加载所有筛选条件（基于新的日期范围）
+  await loadFilterOptions();
+  // 如果当前选择的产品或国家不在新列表中，清空选择
+  if (searchForm.value.productId) {
+    const productExists = products.value.some(p => p.value === searchForm.value.productId);
+    if (!productExists) {
+      searchForm.value.productId = '';
+    }
+  }
+  if (searchForm.value.countryCode) {
+    const countryExists = countries.value.some(c => c.code === searchForm.value.countryCode);
+    if (!countryExists) {
+      searchForm.value.countryCode = '';
+    }
+  }
+  // 重置分页并获取数据
+  pagination.value.current = 1;
+  fetchData();
+};
+
 const handleClientChange = async (val) => {
-  await loadProducts(val || null);
+  const { startDate, endDate } = getDateRange();
+  await loadProducts(val || null, startDate, endDate);
+  await loadCountries(val || null, null, startDate, endDate);
   // 如果当前选择的产品不在新列表中，清空产品选择
   if (searchForm.value.productId) {
     const productExists = products.value.some(p => p.value === searchForm.value.productId);
@@ -272,6 +343,24 @@ const handleClientChange = async (val) => {
       searchForm.value.productId = '';
     }
   }
+  // 清空国家选择，因为产品变化了
+  searchForm.value.countryCode = '';
+  pagination.value.current = 1;
+  fetchData();
+};
+
+// 产品选择变化时的处理
+const handleProductChange = async () => {
+  const { startDate, endDate } = getDateRange();
+  await loadCountries(searchForm.value.clientId || null, searchForm.value.productId || null, startDate, endDate);
+  // 如果当前选择的国家不在新列表中，清空国家选择
+  if (searchForm.value.countryCode) {
+    const countryExists = countries.value.some(c => c.code === searchForm.value.countryCode);
+    if (!countryExists) {
+      searchForm.value.countryCode = '';
+    }
+  }
+  pagination.value.current = 1;
   fetchData();
 };
 
@@ -286,20 +375,13 @@ const fetchData = async () => {
     };
     
     // 如果选择了日期范围，使用选择的日期范围
-    // 如果没有选择日期范围，后端默认只显示当前月的数据
-    // 为了能看到所有数据，我们需要传递一个很大的日期范围，或者不传递日期参数
-    // 但根据后端逻辑，不传递日期参数会默认使用当前月
-    // 所以我们需要传递一个足够大的日期范围来显示所有数据
+    // 如果没有选择日期范围，后端默认使用当前月的数据
     if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
       params.start_date = searchForm.value.dateRange[0];
       params.end_date = searchForm.value.dateRange[1];
-    } else {
-      // 如果没有选择日期范围，传递一个很大的日期范围来显示所有数据
-      // 或者不传递，让后端使用默认的当前月（但这样可能看不到历史数据）
-      // 为了能看到所有数据，我们传递一个足够大的日期范围
-      params.start_date = '2000-01-01';
-      params.end_date = '2099-12-31';
     }
+    // 如果没有选择日期范围，不传递日期参数，让后端使用默认的当前月
+    
     if (searchForm.value.clientId) params.client_id = searchForm.value.clientId;
     if (searchForm.value.productId) params.product_id = searchForm.value.productId;
     if (searchForm.value.countryCode) params.country_code = searchForm.value.countryCode;
@@ -347,7 +429,7 @@ const handleSelectionChange = (val) => {
   selectedRows.value = val;
 };
 
-const resetFilter = () => {
+const resetFilter = async () => {
   searchForm.value = {
     dateRange: [],
     clientId: '',
@@ -355,6 +437,7 @@ const resetFilter = () => {
     countryCode: ''
   };
   pagination.value.current = 1;
+  await loadFilterOptions();
   fetchData();
 };
 
@@ -422,7 +505,7 @@ const handleImport = async (options) => {
       }, 500);
     }
     
-    // 导入成功后，重置筛选条件并刷新数据，确保能看到新导入的数据
+    // 导入成功后，重新加载筛选条件并刷新数据，确保能看到新导入的数据
     // 重置到第一页
     pagination.value.current = 1;
     
@@ -435,6 +518,9 @@ const handleImport = async (options) => {
         searchForm.value.clientId = '';
       }
     }
+    
+    // 重新加载筛选条件（基于当前日期范围）
+    await loadFilterOptions();
     
     // 刷新数据
     await fetchData();

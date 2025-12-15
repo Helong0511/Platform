@@ -22,7 +22,7 @@ from app.schemas.tb_search_data import (
     TBSearchDataResponse,
     TBSearchDataUpdate,
 )
-from app.schemas.base import ResponseBaseSchema
+from app.schemas.base import ResponseBaseSchema, ListResponseBaseSchema
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.query_utils import product_assignment_join_condition, check_use_assignment_table
@@ -548,8 +548,308 @@ async def update_tb_search_data(
         rpm_before_deduct=tb_data.rpm_before_deduct,
         created_at=tb_data.created_at,
         updated_at=tb_data.updated_at,
-        client_id=client.id,
-        client_name=client.company_name,
-        user_name=user.full_name or user.username
+        client_id=client.id if client else 0,
+        client_name=client.company_name if client else "未知客户",
+        user_name=(user.full_name or user.username) if user else "未知用户"
     ))
+
+@router.get("/clients-with-data", response_model=ListResponseBaseSchema[list[dict]], summary="获取有TB搜索数据的客户列表")
+async def get_clients_with_tb_search_data(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    start_date: date | None = Query(None, description="开始日期，格式YYYY-MM-DD"),
+    end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD")
+):
+    """
+    获取有TB搜索数据的客户列表（用于下拉选择）
+    - 只返回在指定日期范围内有数据的客户
+    - 如果没有指定日期范围，使用当前月作为默认范围
+    - 管理员可查看所有有数据的客户
+    - 客户只能看到自己
+    """
+    try:
+        # 检查是否使用产品分配历史表
+        use_assignment_table = await check_use_assignment_table(db)
+        
+        # 构建基础查询 - 返回 Client.id 和 User.full_name
+        if use_assignment_table:
+            # 使用产品分配历史表
+            query = select(func.distinct(Client.id), User.full_name, User.username, Client.user_id)
+            query = query.select_from(TBSearchData)
+            query = query.join(Product, TBSearchData.product_id == Product.id)
+            query = query.join(
+                ProductAssignment,
+                and_(
+                    ProductAssignment.product_id == Product.id,
+                    product_assignment_join_condition(
+                        TBSearchData.date,
+                        ProductAssignment.start_date,
+                        ProductAssignment.end_date
+                    )
+                )
+            )
+            query = query.join(Client, ProductAssignment.client_id == Client.id)
+        else:
+            # 旧的查询方式
+            query = select(func.distinct(Client.id), User.full_name, User.username, Client.user_id)
+            query = query.select_from(Client)
+            query = query.join(Product, Product.client_id == Client.id)
+            query = query.join(TBSearchData, TBSearchData.product_id == Product.id)
+        
+        query = query.join(User, Client.user_id == User.id)
+        
+        # 只显示激活状态的产品
+        query = query.where(Product.is_active == True)
+        
+        # 权限过滤
+        if current_user.role != UserRole.ADMIN:
+            query = query.where(Client.user_id == current_user.id)
+        
+        # 日期范围过滤
+        if start_date:
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            query = query.where(TBSearchData.date >= start_datetime)
+        if end_date:
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            query = query.where(TBSearchData.date <= end_datetime)
+        # 如果没有指定日期范围，默认查询当前月的数据
+        elif not start_date and not end_date:
+            today = date.today()
+            month_start = date(today.year, today.month, 1)
+            _, last_day = monthrange(today.year, today.month)
+            month_end = date(today.year, today.month, last_day)
+            
+            month_start_datetime = datetime.combine(month_start, datetime.min.time())
+            month_end_datetime = datetime.combine(month_end, datetime.max.time())
+            query = query.where(TBSearchData.date >= month_start_datetime)
+            query = query.where(TBSearchData.date <= month_end_datetime)
+        
+        # 执行查询
+        result = await db.execute(query)
+        clients_data = result.all()
+        
+        # 转换为响应格式
+        clients_list = []
+        for client_id, full_name, username, user_id in clients_data:
+            clients_list.append({
+                "id": client_id,
+                "full_name": full_name or username or "未知客户",
+                "user_id": user_id
+            })
+        
+        # 按用户名称排序
+        clients_list.sort(key=lambda x: x["full_name"])
+        
+        return ListResponseBaseSchema.success(data=clients_list, count=len(clients_list))
+    except Exception as e:
+        logger.error(f"获取有TB搜索数据的客户列表失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取有数据的客户列表失败：{str(e)}。请稍后重试或联系管理员"
+        )
+
+@router.get("/products-with-data", response_model=ListResponseBaseSchema[list[dict]], summary="获取有TB搜索数据的产品列表")
+async def get_products_with_tb_search_data(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    client_id: int | None = Query(None, description="客户ID过滤，None表示全部客户"),
+    start_date: date | None = Query(None, description="开始日期，格式YYYY-MM-DD"),
+    end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD")
+):
+    """
+    获取有TB搜索数据的产品列表（用于下拉选择）
+    - 只返回在指定日期范围内有数据的产品
+    - 如果没有指定日期范围，使用当前月作为默认范围
+    - 只返回激活状态的产品
+    - 使用产品分配历史表时，会根据日期匹配正确的客户归属
+    """
+    try:
+        # 检查是否使用产品分配历史表
+        use_assignment_table = await check_use_assignment_table(db)
+        
+        # 构建基础查询
+        if use_assignment_table:
+            # 使用产品分配历史表
+            query = select(func.distinct(Product.id), Product.name, Product.client_id)
+            query = query.join(TBSearchData, TBSearchData.product_id == Product.id)
+            query = query.join(
+                ProductAssignment,
+                and_(
+                    ProductAssignment.product_id == Product.id,
+                    product_assignment_join_condition(
+                        TBSearchData.date,
+                        ProductAssignment.start_date,
+                        ProductAssignment.end_date
+                    )
+                )
+            )
+            query = query.join(Client, ProductAssignment.client_id == Client.id)
+        else:
+            # 旧的查询方式
+            query = select(func.distinct(Product.id), Product.name, Product.client_id)
+            query = query.join(Client, Product.client_id == Client.id)
+            query = query.join(TBSearchData, TBSearchData.product_id == Product.id)
+        
+        # 只显示激活状态的产品
+        query = query.where(Product.is_active == True)
+        
+        # 权限过滤
+        if current_user.role != UserRole.ADMIN:
+            query = query.where(Client.user_id == current_user.id)
+        elif client_id:
+            query = query.where(Client.id == client_id)
+        
+        # 日期范围过滤
+        if start_date:
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            query = query.where(TBSearchData.date >= start_datetime)
+        if end_date:
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            query = query.where(TBSearchData.date <= end_datetime)
+        # 如果没有指定日期范围，默认查询当前月的数据
+        elif not start_date and not end_date:
+            today = date.today()
+            month_start = date(today.year, today.month, 1)
+            _, last_day = monthrange(today.year, today.month)
+            month_end = date(today.year, today.month, last_day)
+            
+            month_start_datetime = datetime.combine(month_start, datetime.min.time())
+            month_end_datetime = datetime.combine(month_end, datetime.max.time())
+            query = query.where(TBSearchData.date >= month_start_datetime)
+            query = query.where(TBSearchData.date <= month_end_datetime)
+        
+        # 执行查询
+        result = await db.execute(query)
+        products_data = result.all()
+        
+        # 转换为响应格式
+        products_list = []
+        for product_id, product_name, product_client_id in products_data:
+            products_list.append({
+                "id": product_id,
+                "name": product_name or "未知产品"
+            })
+        
+        # 按产品名称排序
+        products_list.sort(key=lambda x: x["name"])
+        
+        return ListResponseBaseSchema.success(data=products_list, count=len(products_list))
+    except Exception as e:
+        logger.error(f"获取有TB搜索数据的产品列表失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取有数据的产品列表失败：{str(e)}。请稍后重试或联系管理员"
+        )
+
+@router.get("/countries-with-data", response_model=ListResponseBaseSchema[list[dict]], summary="获取有TB搜索数据的国家列表")
+async def get_countries_with_tb_search_data(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    client_id: int | None = Query(None, description="客户ID过滤，None表示全部客户"),
+    product_id: int | None = Query(None, description="产品ID过滤，None表示全部产品"),
+    start_date: date | None = Query(None, description="开始日期，格式YYYY-MM-DD"),
+    end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD")
+):
+    """
+    获取有TB搜索数据的国家列表（用于下拉选择）
+    - 只返回在指定条件下有数据的国家
+    - 如果没有指定日期范围，使用当前月作为默认范围
+    """
+    try:
+        # 检查是否使用产品分配历史表
+        use_assignment_table = await check_use_assignment_table(db)
+        
+        # 构建基础查询
+        if use_assignment_table:
+            # 使用产品分配历史表
+            query = select(func.distinct(TBSearchData.country_code), CountryInfo.country_name_zh)
+            query = query.select_from(TBSearchData)
+            query = query.join(Product, TBSearchData.product_id == Product.id)
+            query = query.join(
+                ProductAssignment,
+                and_(
+                    ProductAssignment.product_id == Product.id,
+                    product_assignment_join_condition(
+                        TBSearchData.date,
+                        ProductAssignment.start_date,
+                        ProductAssignment.end_date
+                    )
+                )
+            )
+            query = query.join(Client, ProductAssignment.client_id == Client.id)
+        else:
+            # 旧的查询方式
+            query = select(func.distinct(TBSearchData.country_code), CountryInfo.country_name_zh)
+            query = query.select_from(TBSearchData)
+            query = query.join(Product, TBSearchData.product_id == Product.id)
+            query = query.join(Client, Product.client_id == Client.id)
+        
+        query = join_country_info(query)
+        
+        # 只显示激活状态的产品
+        query = query.where(Product.is_active == True)
+        
+        # 权限过滤
+        if current_user.role != UserRole.ADMIN:
+            query = query.where(Client.user_id == current_user.id)
+        elif client_id:
+            query = query.where(Client.id == client_id)
+        
+        # 产品ID过滤
+        if product_id:
+            try:
+                pid = int(product_id)
+                query = query.where(TBSearchData.product_id == pid)
+            except ValueError:
+                pass
+        
+        # 日期范围过滤
+        if start_date:
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            query = query.where(TBSearchData.date >= start_datetime)
+        if end_date:
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            query = query.where(TBSearchData.date <= end_datetime)
+        # 如果没有指定日期范围，默认查询当前月的数据
+        elif not start_date and not end_date:
+            today = date.today()
+            month_start = date(today.year, today.month, 1)
+            _, last_day = monthrange(today.year, today.month)
+            month_end = date(today.year, today.month, last_day)
+            
+            month_start_datetime = datetime.combine(month_start, datetime.min.time())
+            month_end_datetime = datetime.combine(month_end, datetime.max.time())
+            query = query.where(TBSearchData.date >= month_start_datetime)
+            query = query.where(TBSearchData.date <= month_end_datetime)
+        
+        # 执行查询
+        result = await db.execute(query)
+        countries_data = result.all()
+        
+        # 转换为响应格式
+        countries_list = []
+        for country_code, country_name_zh in countries_data:
+            if country_code and country_code != 'ZZ':
+                countries_list.append({
+                    "code": country_code,
+                    "name_zh": country_name_zh or country_code or "未知区域"
+                })
+        
+        # 去重并排序
+        seen = set()
+        unique_countries = []
+        for country in countries_list:
+            if country["code"] not in seen:
+                seen.add(country["code"])
+                unique_countries.append(country)
+        
+        unique_countries.sort(key=lambda x: x["name_zh"])
+        
+        return ListResponseBaseSchema.success(data=unique_countries, count=len(unique_countries))
+    except Exception as e:
+        logger.error(f"获取有TB搜索数据的国家列表失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取有数据的国家列表失败：{str(e)}。请稍后重试或联系管理员"
+        )
 
