@@ -13,6 +13,8 @@ class TBSearchDataBase(BaseModel):
     clicks: int | None = 0
     revenue: float | None = 0.0
     rpm: float | None = 0.0
+    revenue_before_deduct: float | None = 0.0
+    rpm_before_deduct: float | None = 0.0
 
 class TBSearchDataInDBBase(TBSearchDataBase):
     id: int
@@ -42,4 +44,6 @@ class TBSearchDataUpdate(BaseModel):
     clicks: int | None = None
     revenue: float | None = None
     rpm: float | None = None
+    revenue_before_deduct: float | None = None
+    rpm_before_deduct: float | None = None
 

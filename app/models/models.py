@@ -183,12 +183,15 @@ class TBSearchData(Base):
     searches = Column(Integer, default=0, comment='SEARCHES')
     monetized = Column(Integer, default=0, comment='MONETIZED')
     clicks = Column(Integer, default=0, comment='CLICKS')
-    revenue = Column(Float, default=0.0, comment='REVENUE')
-    rpm = Column(Float, default=0.0, comment='RPM')
+
+    revenue = Column(Float, default=0.0, comment='REVENUE（扣减后）')
+    rpm = Column(Float, default=0.0, comment='RPM（扣减后）')
+    
+    revenue_before_deduct = Column(Float, default=0.0, comment='REVENUE（扣减前）')
+    rpm_before_deduct = Column(Float, default=0.0, comment='RPM（扣减前）')
     
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
 
     # 关系
     product = relationship("Product", back_populates="tb_search_data")

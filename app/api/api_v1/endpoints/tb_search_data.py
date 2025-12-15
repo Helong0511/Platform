@@ -102,7 +102,9 @@ async def get_tb_search_data(
         "monetized": TBSearchData.monetized,
         "clicks": TBSearchData.clicks,
         "revenue": TBSearchData.revenue,
-        "rpm": TBSearchData.rpm
+        "rpm": TBSearchData.rpm,
+        "revenue_before_deduct": TBSearchData.revenue_before_deduct,
+        "rpm_before_deduct": TBSearchData.rpm_before_deduct
     }
     
     sort_col = sort_fields.get(sort_by, TBSearchData.date)
@@ -182,6 +184,8 @@ async def get_tb_search_data(
             clicks=tb_data.clicks,
             revenue=tb_data.revenue,
             rpm=tb_data.rpm,
+            revenue_before_deduct=tb_data.revenue_before_deduct,
+            rpm_before_deduct=tb_data.rpm_before_deduct,
             created_at=tb_data.created_at,
             updated_at=tb_data.updated_at,
             client_id=client.id,
@@ -254,6 +258,8 @@ async def update_tb_search_data(
         clicks=tb_data.clicks,
         revenue=tb_data.revenue,
         rpm=tb_data.rpm,
+        revenue_before_deduct=tb_data.revenue_before_deduct,
+        rpm_before_deduct=tb_data.rpm_before_deduct,
         created_at=tb_data.created_at,
         updated_at=tb_data.updated_at,
         client_id=client.id,
@@ -407,13 +413,29 @@ async def import_tb_search_data(
             existing_res = await db.execute(existing_query)
             existing = existing_res.scalar_one_or_none()
             
+            from app.core.utils import truncate_to_2_decimal
+
             # 解析数值
             redirects = int(row.get("REDIRECTS", 0)) if pd.notna(row.get("REDIRECTS")) else 0
             searches = int(row.get("SEARCHES", 0)) if pd.notna(row.get("SEARCHES")) else 0
             monetized = int(row.get("MONETIZED", 0)) if pd.notna(row.get("MONETIZED")) else 0
             clicks = int(row.get("CLICKS", 0)) if pd.notna(row.get("CLICKS")) else 0
-            revenue = float(row.get("REVENUE", 0.0)) if pd.notna(row.get("REVENUE")) else 0.0
-            rpm = float(row.get("RPM", 0.0)) if pd.notna(row.get("RPM")) else 0.0
+            
+            # 原始收入和RPM
+            revenue_origin = float(row.get("REVENUE", 0.0)) if pd.notna(row.get("REVENUE")) else 0.0
+            rpm_origin = float(row.get("RPM", 0.0)) if pd.notna(row.get("RPM")) else 0.0
+            
+            # 如果 RPM 没有值，根据公式计算：RPM = REVENUE / SEARCHES * 1000
+            if (rpm_origin == 0 or pd.isna(rpm_origin)) and searches > 0:
+                rpm_origin = (revenue_origin / searches) * 1000
+            
+            # 获取扣减比例
+            revenue_deduct_ratio = product.revenue_deduct_ratio or 0.0
+            ecpm_deduct_ratio = product.ecpm_deduct_ratio or 0.0 # RPM 对应 eCPM 扣减比例
+            
+            # 计算扣减后的值（保留两位小数）
+            revenue = truncate_to_2_decimal(revenue_origin * (1 - revenue_deduct_ratio))
+            rpm = truncate_to_2_decimal(rpm_origin * (1 - ecpm_deduct_ratio))
             
             if existing:
                 # 更新
@@ -423,6 +445,8 @@ async def import_tb_search_data(
                 existing.clicks = clicks
                 existing.revenue = revenue
                 existing.rpm = rpm
+                existing.revenue_before_deduct = revenue_origin
+                existing.rpm_before_deduct = rpm_origin
             else:
                 # 创建
                 new_data = TBSearchData(
@@ -434,7 +458,9 @@ async def import_tb_search_data(
                     monetized=monetized,
                     clicks=clicks,
                     revenue=revenue,
-                    rpm=rpm
+                    rpm=rpm,
+                    revenue_before_deduct=revenue_origin,
+                    rpm_before_deduct=rpm_origin
                 )
                 db.add(new_data)
                 

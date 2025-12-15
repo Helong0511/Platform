@@ -94,16 +94,29 @@
         <el-table-column prop="searches" label="SEARCHES" sortable="custom"></el-table-column>
         <el-table-column prop="monetized" label="MONETIZED" sortable="custom"></el-table-column>
         <el-table-column prop="clicks" label="CLICKS" sortable="custom"></el-table-column>
-        <el-table-column prop="revenue" label="REVENUE" sortable="custom">
+        
+        <el-table-column prop="revenue" :label="isAdmin ? 'REVENUE(扣)' : 'REVENUE'" sortable="custom">
           <template #default="{ row }">
             {{ formatCurrency(row.revenue) }}
           </template>
         </el-table-column>
-        <el-table-column prop="rpm" label="RPM" sortable="custom">
+        <el-table-column v-if="isAdmin" prop="revenue_before_deduct" label="REVENUE" sortable="custom">
+          <template #default="{ row }">
+            {{ formatCurrency(row.revenue_before_deduct) }}
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="rpm" :label="isAdmin ? 'RPM(扣)' : 'RPM'" sortable="custom">
           <template #default="{ row }">
             {{ formatCurrency(row.rpm) }}
           </template>
         </el-table-column>
+        <el-table-column v-if="isAdmin" prop="rpm_before_deduct" label="RPM" sortable="custom">
+          <template #default="{ row }">
+            {{ formatCurrency(row.rpm_before_deduct) }}
+          </template>
+        </el-table-column>
+
         <el-table-column v-if="isAdmin" label="操作" width="150" fixed="right">
           <template #default="scope">
             <el-button size="small" type="primary" @click="handleEdit(scope.row)">修改</el-button>
@@ -140,11 +153,17 @@
         <el-form-item label="CLICKS">
           <el-input v-model.number="editForm.clicks" type="number"></el-input>
         </el-form-item>
-        <el-form-item label="REVENUE">
+        <el-form-item label="REVENUE(扣)">
           <el-input v-model.number="editForm.revenue" type="number" step="0.01"></el-input>
         </el-form-item>
-        <el-form-item label="RPM">
+        <el-form-item label="REVENUE">
+          <el-input v-model.number="editForm.revenue_before_deduct" type="number" step="0.01"></el-input>
+        </el-form-item>
+        <el-form-item label="RPM(扣)">
           <el-input v-model.number="editForm.rpm" type="number" step="0.01"></el-input>
+        </el-form-item>
+        <el-form-item label="RPM">
+          <el-input v-model.number="editForm.rpm_before_deduct" type="number" step="0.01"></el-input>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -268,7 +287,7 @@ const getSummaries = (param) => {
       return;
     }
     const prop = column.property;
-    if (['redirects', 'searches', 'monetized', 'clicks', 'revenue'].includes(prop)) {
+    if (['redirects', 'searches', 'monetized', 'clicks', 'revenue', 'revenue_before_deduct'].includes(prop)) {
       const values = data.map(item => Number(item[prop]));
       if (!values.every(value => Number.isNaN(value))) {
         const sum = values.reduce((prev, curr) => {
@@ -279,7 +298,7 @@ const getSummaries = (param) => {
             return prev;
           }
         }, 0);
-        sums[index] = prop === 'revenue' ? formatCurrency(sum) : sum;
+        sums[index] = ['revenue', 'revenue_before_deduct'].includes(prop) ? formatCurrency(sum) : sum;
       }
     } else {
       sums[index] = '';
@@ -361,4 +380,3 @@ const saveEdit = async () => {
   justify-content: flex-end;
 }
 </style>
-
