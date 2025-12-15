@@ -388,13 +388,24 @@ async def import_tb_search_data(
             monetized = int(row.get("MONETIZED", 0)) if pd.notna(row.get("MONETIZED")) else 0
             clicks = int(row.get("CLICKS", 0)) if pd.notna(row.get("CLICKS")) else 0
             
-            # 原始收入和RPM
+            # 原始收入
             revenue_origin = float(row.get("REVENUE", 0.0)) if pd.notna(row.get("REVENUE")) else 0.0
-            rpm_origin = float(row.get("RPM", 0.0)) if pd.notna(row.get("RPM")) else 0.0
-            
-            # 如果 RPM 没有值，根据公式计算：RPM = REVENUE / SEARCHES * 1000
-            if (rpm_origin == 0 or pd.isna(rpm_origin)) and searches > 0:
+
+            # RPM：只有在单元格为空/NaN时才按公式计算；如果有值（包括0），则直接使用
+            rpm_cell = row.get("RPM", None)
+            rpm_origin: float | None = None
+            if rpm_cell is None or (isinstance(rpm_cell, float) and pd.isna(rpm_cell)) or (isinstance(rpm_cell, str) and rpm_cell.strip() == ""):
+                rpm_origin = None
+            else:
+                try:
+                    rpm_origin = float(rpm_cell)
+                except Exception:
+                    rpm_origin = None
+
+            if rpm_origin is None and searches > 0:
                 rpm_origin = (revenue_origin / searches) * 1000
+            if rpm_origin is None:
+                rpm_origin = 0.0
             
             # 获取扣减比例
             revenue_deduct_ratio = product.revenue_deduct_ratio or 0.0
