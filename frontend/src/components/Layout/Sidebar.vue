@@ -48,6 +48,11 @@
       <template #icon><Document /></template>
       <span>操作日志</span>
     </el-menu-item>
+
+    <el-menu-item v-if="isAdmin" index="/app/admin/postback">
+      <template #icon><Connection /></template>
+      <span>Postback管理</span>
+    </el-menu-item>
     
     <el-menu-item v-if="!isAdmin" index="/app/client/user-management">
       <template #icon><UserFilled /></template>
@@ -67,7 +72,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useAuthStore } from '../../store';
 import { ElMenu, ElMenuItem, ElSubMenu, ElIcon } from 'element-plus';
-import { PieChart, Document, UserFilled, Upload, Timer, Link } from '@element-plus/icons-vue';
+import { PieChart, Document, UserFilled, Upload, Timer, Link, Connection } from '@element-plus/icons-vue';
 
 const authStore = useAuthStore();
 const route = useRoute();

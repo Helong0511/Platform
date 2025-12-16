@@ -311,7 +311,7 @@ CREATE TABLE IF NOT EXISTS `countries`  (
 ) ENGINE = InnoDB AUTO_INCREMENT = 0 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC COMMENT = 'ISO 3166-1国家代码表';
 
 DROP TABLE IF EXISTS `tb_search_data`;
-CREATE TABLE `tb_search_data`  (
+CREATE TABLE IF NOT EXISTS `tb_search_data`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT 'ID',
   `date` datetime NOT NULL COMMENT '日期',
   `product_id` int NOT NULL COMMENT '产品ID',
@@ -335,6 +335,50 @@ CREATE TABLE `tb_search_data`  (
   INDEX `ix_tb_search_data_id`(`id` ASC) USING BTREE,
   CONSTRAINT `tb_search_data_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `tb_search_data_ibfk_2` FOREIGN KEY (`country_code`) REFERENCES `countries` (`alpha_2_code`) ON DELETE SET NULL ON UPDATE CASCADE
-) ENGINE = InnoDB AUTO_INCREMENT = 3 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic COMMENT = 'TB搜索数据';
+) ENGINE = InnoDB AUTO_INCREMENT = 0 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic COMMENT = 'TB搜索数据';
+
+DROP TABLE IF EXISTS `postback_conversions`;
+CREATE TABLE IF NOT EXISTS `postback_conversions` (
+    -- 主键
+    `id` INT AUTO_INCREMENT PRIMARY KEY COMMENT '转化记录ID',
+
+    -- 平台和转化信息
+    `platform` VARCHAR(50) NOT NULL COMMENT '平台名称：macan, addermobi等',
+    `conversion_id` VARCHAR(255) NOT NULL COMMENT '转化ID（各平台唯一标识，如Macan的clk_id）',
+    `event_name` VARCHAR(100) COMMENT '事件名称（如purchase, install等）',
+    `event_value` FLOAT COMMENT '事件价值（购买价格等）',
+    `payout` FLOAT COMMENT '支付金额（确认的广告单元价格）',
+
+    -- 设备信息
+    `devad_id` VARCHAR(255) COMMENT '设备广告ID（IDFA或GAID）',
+    `os` VARCHAR(20) COMMENT '操作系统（IOS或Android）',
+    `carrier` VARCHAR(50) COMMENT '用户运营商',
+    `ip` VARCHAR(50) COMMENT '点击IP地址',
+    `gid` VARCHAR(100) COMMENT '渠道ID（Channel ID）',
+
+    -- 关联信息（可选）
+    `product_id` INT COMMENT '关联的产品ID（可选，用于关联产品）',
+    `client_id` INT COMMENT '关联的客户ID（可选，用于关联客户）',
+
+    -- 原始数据
+    `raw_data` TEXT COMMENT '原始回调数据（JSON格式，保存完整回调数据以便后续分析）',
+
+    -- 元数据
+    `created_at` DATETIME NOT NULL COMMENT '创建时间（记录回调接收时间）',
+
+    -- 索引（优化查询性能）
+    INDEX `idx_postback_platform_conversion` (`platform`, `conversion_id`) COMMENT '平台和转化ID复合索引（优化平台查询）',
+    INDEX `idx_postback_product` (`product_id`) COMMENT '产品ID索引（优化产品关联查询）',
+    INDEX `idx_postback_client` (`client_id`) COMMENT '客户ID索引（优化客户关联查询）',
+    INDEX `idx_postback_created_at` (`created_at`) COMMENT '创建时间索引（优化时间范围查询）',
+    INDEX `idx_postback_platform_event` (`platform`, `event_name`) COMMENT '平台和事件名称复合索引（优化事件统计查询）',
+
+    -- 唯一性约束（防止重复处理相同的转化事件）
+    UNIQUE KEY `uq_postback_platform_conversion_event` (`platform`, `conversion_id`, `event_name`) COMMENT '防止同一平台的同一转化ID和事件名称重复处理',
+
+    -- 外键约束（关联产品和客户表）
+    FOREIGN KEY (`product_id`) REFERENCES products(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`client_id`) REFERENCES clients(`id`) ON DELETE SET NULL
+) ENGINE = InnoDB AUTO_INCREMENT = 0 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic COMMENT='Postback转化事件表，统一存储所有平台的postback回调数据';
 
 SET FOREIGN_KEY_CHECKS = 1;

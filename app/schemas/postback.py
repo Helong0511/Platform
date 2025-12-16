@@ -1,0 +1,86 @@
+"""
+Postback 相关的 Schema 定义
+用于统一处理各平台的 postback 回调数据
+"""
+from typing import Optional, Dict, Any
+from datetime import datetime
+from pydantic import BaseModel, Field
+
+
+# ====== 请求模型 ======
+class PostbackRequest(BaseModel):
+    """通用 Postback 请求模型（用于POST请求）"""
+    # 基础字段（各平台通用）
+    conversion_id: Optional[str] = Field(None, description="转化ID（各平台唯一标识）")
+    event_name: Optional[str] = Field(None, description="事件名称")
+    event_value: Optional[float] = Field(None, description="事件价值")
+    payout: Optional[float] = Field(None, description="支付金额")
+    
+    # 设备信息
+    devad_id: Optional[str] = Field(None, description="设备广告ID")
+    os: Optional[str] = Field(None, description="操作系统")
+    carrier: Optional[str] = Field(None, description="运营商")
+    ip: Optional[str] = Field(None, description="IP地址")
+    gid: Optional[str] = Field(None, description="渠道ID")
+    
+    # 关联信息
+    product_id: Optional[int] = Field(None, description="产品ID")
+    client_id: Optional[int] = Field(None, description="客户ID")
+    
+    # 允许其他字段（用于存储平台特定的字段）
+    class Config:
+        extra = "allow"
+
+
+# ====== 响应模型 ======
+class PostbackResponse(BaseModel):
+    """Postback 响应模型"""
+    success: bool = Field(..., description="是否成功")
+    message: str = Field(..., description="响应消息")
+    conversion_id: Optional[str] = Field(None, description="转化ID")
+    platform: Optional[str] = Field(None, description="平台名称")
+
+
+# ====== 查询和统计模型 ======
+class PostbackConversionResponse(BaseModel):
+    """Postback 转化记录响应模型"""
+    id: int
+    platform: str
+    conversion_id: str
+    event_name: Optional[str]
+    event_value: Optional[float]
+    payout: Optional[float]
+    devad_id: Optional[str]
+    os: Optional[str]
+    carrier: Optional[str]
+    ip: Optional[str]
+    gid: Optional[str]
+    product_id: Optional[int]
+    client_id: Optional[int]
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class PostbackStatsResponse(BaseModel):
+    """Postback 统计响应模型"""
+    platform: str = Field(..., description="平台名称")
+    total_conversions: int = Field(..., description="总转化数")
+    total_payout: float = Field(..., description="总支付金额")
+    total_event_value: float = Field(..., description="总事件价值")
+    unique_events: int = Field(..., description="唯一事件数")
+    date_range: Optional[Dict[str, str]] = Field(None, description="日期范围")
+
+
+class PostbackQueryParams(BaseModel):
+    """Postback 查询参数模型"""
+    platform: Optional[str] = Field(None, description="平台名称")
+    product_id: Optional[int] = Field(None, description="产品ID")
+    client_id: Optional[int] = Field(None, description="客户ID")
+    event_name: Optional[str] = Field(None, description="事件名称")
+    start_date: Optional[str] = Field(None, description="起始日期（YYYY-MM-DD）")
+    end_date: Optional[str] = Field(None, description="结束日期（YYYY-MM-DD）")
+    page: int = Field(1, ge=1, description="页码")
+    page_size: int = Field(20, ge=1, le=100, description="每页数量")
+

@@ -3,7 +3,7 @@
 统一导出所有模型，确保SQLAlchemy能够发现所有表
 """
 # 导入基础模型（必须首先导入）
-from app.models.models import Base, User, Client, Product, AdData, ProductAssignment, ScheduledTask, UserAuditLog
+from app.models.models import Base, User, Client, Product, AdData, ProductAssignment, ScheduledTask, UserAuditLog, PostbackConversion
 
 # 导入会话模型
 from app.models.session import UserSession, TokenBlacklist
@@ -18,6 +18,7 @@ __all__ = [
     "ProductAssignment",
     "ScheduledTask",
     "UserAuditLog",
+    "PostbackConversion",
     "UserSession",
     "TokenBlacklist",
 ]

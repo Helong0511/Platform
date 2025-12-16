@@ -25,6 +25,7 @@ from app.api.api_v1.endpoints import (
     sessions,
     telegram,
     macan_postback,
+    postback,
     tb_search_data,
 )
 
@@ -71,5 +72,8 @@ api_router.include_router(sessions.router, prefix="/sessions", tags=["会话管�
 # Telegram Bot 管理路由
 api_router.include_router(telegram.router, prefix="/telegram", tags=["Telegram Bot"])
 
-# Macan S2S PostBack 路由（外部回调接口）
+# Macan S2S PostBack 路由（外部回调接口，保留向后兼容）
 api_router.include_router(macan_postback.router, prefix="", tags=["Macan S2S"])
+
+# 统一 Postback 服务路由（推荐使用）
+api_router.include_router(postback.router, prefix="", tags=["Postback服务"])

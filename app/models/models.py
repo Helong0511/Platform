@@ -348,3 +348,47 @@ class CountryInfo(Base):
     def name_zh(self) -> str:
         """向后兼容属性：返回 country_name_zh"""
         return self.country_name_zh
+
+
+# Postback 转化事件模型
+class PostbackConversion(Base):
+    __tablename__ = "postback_conversions"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='转化记录ID')
+    platform = Column(String(50), nullable=False, index=True, comment='平台名称：macan, addermobi等')
+    conversion_id = Column(String(255), nullable=False, comment='转化ID（各平台唯一标识，如clk_id）')
+    event_name = Column(String(100), nullable=True, index=True, comment='事件名称')
+    event_value = Column(Float, nullable=True, comment='事件价值（购买价格等）')
+    payout = Column(Float, nullable=True, comment='支付金额（确认的广告单元价格）')
+
+    # 设备信息
+    devad_id = Column(String(255), nullable=True, comment='设备广告ID（IDFA或GAID）')
+    os = Column(String(20), nullable=True, comment='操作系统（IOS或Android）')
+    carrier = Column(String(50), nullable=True, comment='用户运营商')
+    ip = Column(String(50), nullable=True, comment='点击IP地址')
+    gid = Column(String(100), nullable=True, comment='渠道ID（Channel ID）')
+
+    # 关联信息
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True, comment='关联的产品ID')
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, comment='关联的客户ID')
+
+    # 原始数据（JSON格式，保存完整回调数据）
+    raw_data = Column(Text, nullable=True, comment='原始回调数据（JSON格式）')
+
+    # 元数据
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True, comment='创建时间')
+
+    # 关系（用于通过 ORM 访问关联对象，例如：conversion.product.name）
+    # 注意：当前查询接口未使用这些关系，但保留以备将来扩展使用（如返回产品名称、客户名称等）
+    product = relationship("Product", foreign_keys=[product_id])
+    client = relationship("Client", foreign_keys=[client_id])
+
+    __table_args__ = (
+        Index("idx_postback_platform_conversion", "platform", "conversion_id"),
+        Index("idx_postback_product", "product_id"),
+        Index("idx_postback_client", "client_id"),
+        Index("idx_postback_created_at", "created_at"),
+        Index("idx_postback_platform_event", "platform", "event_name"),
+        # 唯一性约束：同一平台的同一转化ID只能有一条记录（防止重复处理）
+        UniqueConstraint("platform", "conversion_id", "event_name", name="uq_postback_platform_conversion_event"),
+    )

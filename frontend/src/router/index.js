@@ -30,6 +30,7 @@ const NotFound = createAsyncComponent(() => import(/* webpackChunkName: "not-fou
 const UserManagement = createAsyncComponent(() => import(/* webpackChunkName: "user-management" */ '../views/admin/UserManagement.vue'), 'UserManagement');
 const ScheduledTaskManagement = createAsyncComponent(() => import(/* webpackChunkName: "scheduled-task" */ '../views/admin/ScheduledTaskManagement.vue'), 'ScheduledTaskManagement');
 const AuditLogManagement = createAsyncComponent(() => import(/* webpackChunkName: "audit-log" */ '../views/admin/AuditLogManagement.vue'), 'AuditLogManagement');
+const PostbackManagement = createAsyncComponent(() => import(/* webpackChunkName: "postback-management" */ '../views/admin/PostbackManagement.vue'), 'PostbackManagement');
 const ClientUserManagement = createAsyncComponent(() => import(/* webpackChunkName: "client-user-management" */ '../views/client/ClientUserManagement.vue'), 'ClientUserManagement');
 const ApiDocumentation = createAsyncComponent(() => import(/* webpackChunkName: "api-documentation" */ '../views/ApiDocumentation.vue'), 'ApiDocumentation');
 const MainLayout = createAsyncComponent(() => import(/* webpackChunkName: "layout" */ '../components/Layout/MainLayout.vue'), 'MainLayout');
@@ -90,6 +91,12 @@ const routes = [
         path: 'admin/audit-logs', 
         name: 'AuditLogManagement', 
         component: AuditLogManagement, 
+        meta: { requiresAdmin: true } 
+      },
+      { 
+        path: 'admin/postback', 
+        name: 'PostbackManagement', 
+        component: PostbackManagement, 
         meta: { requiresAdmin: true } 
       },
       { 

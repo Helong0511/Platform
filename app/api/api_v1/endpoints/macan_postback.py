@@ -3,21 +3,21 @@ Macan S2S PostBack 接收接口
 用于接收 Macan 发送的转化事件回调
 
 参考文档：https://macan-native.com/docs/advertiser/S2S/
+
+注意：此接口已优化，内部调用统一的 postback 服务进行处理
+保留此接口是为了向后兼容，建议使用 /api/v1/postback/macan 接口
 """
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, Request, Query, HTTPException, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import and_
 
 from app.core.database import get_db
+from app.core.postback import PostbackProcessor
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
-from app.models.models import Client, Product
 
 # 创建路由实例
 router = APIRouter()
@@ -150,6 +150,19 @@ async def receive_macan_postback_post(
     )
 
 
+def _get_client_ip(request: Request) -> Optional[str]:
+    """获取客户端IP地址"""
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip.strip()
+    if request.client:
+        return request.client.host
+    return None
+
+
 async def _process_macan_postback(
     request: Request,
     clk_id: str,
@@ -168,85 +181,63 @@ async def _process_macan_postback(
     """
     处理 Macan PostBack 回调的核心逻辑
     
-    1. 验证必填参数
-    2. 验证产品和客户（如果提供）
-    3. 记录日志
-    4. 存储数据（可选，根据需求实现）
+    优化：内部调用统一的 postback 服务进行处理
+    保留此函数是为了向后兼容，实际处理由统一服务完成
     """
     try:
-        # 1. 验证必填参数
-        if not clk_id or not clk_id.strip():
-            logger.warning(f"Macan PostBack 回调失败: clk_id 为空")
-            raise_api_exception(
-                ErrorCode.OPERATION_FAILED,
-                detail="clk_id 参数不能为空"
-            )
+        # 获取客户端IP
+        client_ip = _get_client_ip(request) or ip
         
-        if not event_name or not event_name.strip():
-            logger.warning(f"Macan PostBack 回调失败: event_name 为空")
-            raise_api_exception(
-                ErrorCode.OPERATION_FAILED,
-                detail="event_name 参数不能为空"
-            )
+        # 构建原始数据字典
+        raw_data: Dict[str, Any] = {
+            "clk_id": clk_id,
+            "event_name": event_name,
+        }
         
-        # 2. 验证产品和客户（如果提供）
-        if product_id:
-            result = await db.execute(
-                select(Product).where(Product.id == product_id, Product.is_active == True)
-            )
-            product = result.scalars().first()
-            if not product:
-                logger.warning(f"Macan PostBack 回调失败: 产品不存在或未激活, product_id={product_id}")
-                raise_api_exception(
-                    ErrorCode.OPERATION_FAILED,
-                    detail=f"产品不存在或未激活: product_id={product_id}"
-                )
+        # 添加可选字段
+        if devad_id:
+            raw_data["devad_id"] = devad_id
+        if event_value is not None:
+            raw_data["event_value"] = event_value
+        if payout is not None:
+            raw_data["payout"] = payout
+        if carrier:
+            raw_data["carrier"] = carrier
+        if os:
+            raw_data["os"] = os
+        if client_ip:
+            raw_data["ip"] = client_ip
+        if gid:
+            raw_data["gid"] = gid
+        if product_id is not None:
+            raw_data["product_id"] = product_id
+        if client_id is not None:
+            raw_data["client_id"] = client_id
         
-        if client_id:
-            result = await db.execute(
-                select(Client).where(Client.id == client_id, Client.is_active == True)
-            )
-            client = result.scalars().first()
-            if not client:
-                logger.warning(f"Macan PostBack 回调失败: 客户不存在或未激活, client_id={client_id}")
-                raise_api_exception(
-                    ErrorCode.OPERATION_FAILED,
-                    detail=f"客户不存在或未激活: client_id={client_id}"
-                )
-        
-        # 3. 记录日志
-        logger.info(
-            f"Macan PostBack 回调接收成功: "
-            f"clk_id={clk_id}, event_name={event_name}, "
-            f"devad_id={devad_id}, event_value={event_value}, "
-            f"payout={payout}, carrier={carrier}, os={os}, "
-            f"ip={ip}, gid={gid}, product_id={product_id}, client_id={client_id}"
+        # 调用统一服务处理
+        result = await PostbackProcessor.process(
+            platform="macan",
+            raw_data=raw_data,
+            db=db,
+            request_ip=client_ip
         )
         
-        # 4. 存储数据（这里可以根据需求实现数据库存储逻辑）
-        # 例如：创建 MacanConversion 表并存储数据
-        # 或者：更新 AdData 表中的转化数据
-        # 目前先记录日志，后续可以根据业务需求扩展
-        
-        # 发送 Telegram 通知
+        # 发送 Telegram 通知（保持原有功能）
         try:
             from app.core.auto_bot import send_telegram_message
             import asyncio
             
-            if request.method == "GET":
-                method = "GET"
-            else:
-                method = "POST"
+            method = request.method
             telegram_msg = f"🔔 Macan PostBack 回调收到\n\n"
             telegram_msg += f"Method: {method}\n"
             telegram_msg += f"Event: {event_name}\n"
             telegram_msg += f"Click ID: {clk_id}\n"
             if payout:
-                 telegram_msg += f"Payout: {payout}\n"
+                telegram_msg += f"Payout: {payout}\n"
             if product_id:
-                 telegram_msg += f"Product ID: {product_id}\n"
+                telegram_msg += f"Product ID: {product_id}\n"
             if client_id:
-                 telegram_msg += f"Client ID: {client_id}\n"
+                telegram_msg += f"Client ID: {client_id}\n"
             
             await asyncio.wait_for(
                 send_telegram_message(telegram_msg),
@@ -255,11 +246,11 @@ async def _process_macan_postback(
         except Exception as e:
             logger.warning(f"发送 Macan PostBack Telegram 通知失败: {e}")
 
-        # 5. 返回成功响应
+        # 返回成功响应（保持原有响应格式）
         return MacanPostBackResponse(
-            success=True,
-            message="PostBack 接收成功",
-            clk_id=clk_id
+            success=result.get("success", True),
+            message=result.get("message", "PostBack 接收成功"),
+            clk_id=result.get("conversion_id", clk_id)
         )
     
     except HTTPException:
