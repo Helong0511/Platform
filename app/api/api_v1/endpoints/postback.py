@@ -6,7 +6,7 @@ import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
 
-from fastapi import APIRouter, Request, Query, Depends, HTTPException, Path
+from fastapi import APIRouter, Request, Query, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -273,7 +273,7 @@ RESERVED_PATHS = {"conversions", "stats"}
 
 @router.post("/postback/{platform}", response_model=PostbackResponse, summary="接收 PostBack 回调（POST）")
 async def receive_postback_post(
-    platform: str = Path(..., description="平台名称", regex="^(?!conversions|stats$).+"),
+    platform: str,
     request: Request,
     postback_data: PostbackRequest,
     db: AsyncSession = Depends(get_db)
@@ -324,7 +324,7 @@ async def receive_postback_post(
 
 @router.get("/postback/{platform}", response_model=PostbackResponse, summary="接收 PostBack 回调（GET）")
 async def receive_postback_get(
-    platform: str = Path(..., description="平台名称", regex="^(?!conversions|stats$).+"),
+    platform: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
     # 通用参数（通过 Query 接收）
