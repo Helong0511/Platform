@@ -6,7 +6,7 @@ import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
 
-from fastapi import APIRouter, Request, Query, Depends, HTTPException
+from fastapi import APIRouter, Request, Query, Depends, HTTPException, Path
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -58,143 +58,7 @@ def get_client_ip(request: Request) -> Optional[str]:
     return None
 
 
-# ====== Postback 接收接口 ======
-@router.post("/postback/{platform}", response_model=PostbackResponse, summary="接收 PostBack 回调（POST）")
-async def receive_postback_post(
-    platform: str,
-    request: Request,
-    postback_data: PostbackRequest,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    接收指定平台的 PostBack 回调（POST 方式）
-    
-    支持的平台：
-    - macan: Macan S2S PostBack
-    
-    参数说明：
-    - platform: 平台名称（路径参数）
-    - postback_data: PostBack 数据（请求体）
-    """
-    try:
-        # 获取客户端IP
-        client_ip = get_client_ip(request)
-        
-        # 将 Pydantic 模型转换为字典
-        raw_data = postback_data.model_dump(exclude_none=False)
-        
-        # 处理 postback
-        result = await PostbackProcessor.process(
-            platform=platform.lower(),
-            raw_data=raw_data,
-            db=db,
-            request_ip=client_ip
-        )
-        
-        return PostbackResponse(**result)
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"处理 {platform} postback 时发生错误: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"处理 PostBack 回调失败：{str(e)}"
-        )
-
-
-@router.get("/postback/{platform}", response_model=PostbackResponse, summary="接收 PostBack 回调（GET）")
-async def receive_postback_get(
-    platform: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    # 通用参数（通过 Query 接收）
-    conversion_id: Optional[str] = Query(None, description="转化ID"),
-    event_name: Optional[str] = Query(None, description="事件名称"),
-    event_value: Optional[float] = Query(None, description="事件价值"),
-    payout: Optional[float] = Query(None, description="支付金额"),
-    devad_id: Optional[str] = Query(None, description="设备广告ID"),
-    os: Optional[str] = Query(None, description="操作系统"),
-    carrier: Optional[str] = Query(None, description="运营商"),
-    ip: Optional[str] = Query(None, description="IP地址"),
-    gid: Optional[str] = Query(None, description="渠道ID"),
-    product_id: Optional[int] = Query(None, description="产品ID"),
-    client_id: Optional[int] = Query(None, description="客户ID"),
-    # Macan 特定参数（兼容性）
-    clk_id: Optional[str] = Query(None, description="Macan click ID（兼容参数）"),
-    click_id: Optional[str] = Query(None, description="Click ID（兼容参数）"),
-    event_id: Optional[str] = Query(None, description="Event ID（兼容参数）"),
-):
-    """
-    接收指定平台的 PostBack 回调（GET 方式）
-    
-    支持的平台：
-    - macan: Macan S2S PostBack
-    
-    参数说明：
-    - platform: 平台名称（路径参数）
-    - 其他参数通过查询字符串传递
-    """
-    try:
-        # 获取客户端IP
-        client_ip = get_client_ip(request) or ip
-        
-        # 构建原始数据字典
-        raw_data: Dict[str, Any] = {}
-        
-        # 处理通用参数
-        if conversion_id:
-            raw_data["conversion_id"] = conversion_id
-        if event_name:
-            raw_data["event_name"] = event_name
-        if event_value is not None:
-            raw_data["event_value"] = event_value
-        if payout is not None:
-            raw_data["payout"] = payout
-        if devad_id:
-            raw_data["devad_id"] = devad_id
-        if os:
-            raw_data["os"] = os
-        if carrier:
-            raw_data["carrier"] = carrier
-        if ip:
-            raw_data["ip"] = ip
-        if gid:
-            raw_data["gid"] = gid
-        if product_id is not None:
-            raw_data["product_id"] = product_id
-        if client_id is not None:
-            raw_data["client_id"] = client_id
-        
-        # 处理 Macan 特定参数（兼容性）
-        if clk_id:
-            raw_data["clk_id"] = clk_id
-        if click_id:
-            raw_data["click_id"] = click_id
-        if event_id:
-            raw_data["event_id"] = event_id
-        
-        # 处理 postback
-        result = await PostbackProcessor.process(
-            platform=platform.lower(),
-            raw_data=raw_data,
-            db=db,
-            request_ip=client_ip
-        )
-        
-        return PostbackResponse(**result)
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"处理 {platform} postback 时发生错误: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"处理 PostBack 回调失败：{str(e)}"
-        )
-
-
-# ====== 查询接口 ======
+# ====== 查询接口（必须在动态路径之前定义） ======
 @router.get("/postback/conversions", 
             response_model=ResponseBaseSchema[list[PostbackConversionResponse]],
             summary="查询 PostBack 转化记录（管理员）")
@@ -301,7 +165,6 @@ async def get_postback_conversions(
         )
 
 
-# ====== 统计接口 ======
 @router.get("/postback/stats",
             response_model=ResponseBaseSchema[list[PostbackStatsResponse]],
             summary="PostBack 统计信息（管理员）")
@@ -401,5 +264,158 @@ async def get_postback_stats(
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"查询失败：{str(e)}"
+        )
+
+
+# ====== Postback 接收接口（动态路径，必须在具体路径之后） ======
+# 保留的路径关键字，不能作为平台名称
+RESERVED_PATHS = {"conversions", "stats"}
+
+@router.post("/postback/{platform}", response_model=PostbackResponse, summary="接收 PostBack 回调（POST）")
+async def receive_postback_post(
+    platform: str = Path(..., description="平台名称", regex="^(?!conversions|stats$).+"),
+    request: Request,
+    postback_data: PostbackRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    接收指定平台的 PostBack 回调（POST 方式）
+    
+    支持的平台：
+    - macan: Macan S2S PostBack
+    
+    参数说明：
+    - platform: 平台名称（路径参数）
+    - postback_data: PostBack 数据（请求体）
+    """
+    # 检查是否为保留路径
+    if platform.lower() in RESERVED_PATHS:
+        raise_api_exception(
+            ErrorCode.NOT_FOUND,
+            detail=f"路径 /postback/{platform} 是保留路径，请使用正确的 API 端点"
+        )
+    
+    try:
+        # 获取客户端IP
+        client_ip = get_client_ip(request)
+        
+        # 将 Pydantic 模型转换为字典
+        raw_data = postback_data.model_dump(exclude_none=False)
+        
+        # 处理 postback
+        result = await PostbackProcessor.process(
+            platform=platform.lower(),
+            raw_data=raw_data,
+            db=db,
+            request_ip=client_ip
+        )
+        
+        return PostbackResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"处理 {platform} postback 时发生错误: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"处理 PostBack 回调失败：{str(e)}"
+        )
+
+
+@router.get("/postback/{platform}", response_model=PostbackResponse, summary="接收 PostBack 回调（GET）")
+async def receive_postback_get(
+    platform: str = Path(..., description="平台名称", regex="^(?!conversions|stats$).+"),
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    # 通用参数（通过 Query 接收）
+    conversion_id: Optional[str] = Query(None, description="转化ID"),
+    event_name: Optional[str] = Query(None, description="事件名称"),
+    event_value: Optional[float] = Query(None, description="事件价值"),
+    payout: Optional[float] = Query(None, description="支付金额"),
+    devad_id: Optional[str] = Query(None, description="设备广告ID"),
+    os: Optional[str] = Query(None, description="操作系统"),
+    carrier: Optional[str] = Query(None, description="运营商"),
+    ip: Optional[str] = Query(None, description="IP地址"),
+    gid: Optional[str] = Query(None, description="渠道ID"),
+    product_id: Optional[int] = Query(None, description="产品ID"),
+    client_id: Optional[int] = Query(None, description="客户ID"),
+    # Macan 特定参数（兼容性）
+    clk_id: Optional[str] = Query(None, description="Macan click ID（兼容参数）"),
+    click_id: Optional[str] = Query(None, description="Click ID（兼容参数）"),
+    event_id: Optional[str] = Query(None, description="Event ID（兼容参数）"),
+):
+    """
+    接收指定平台的 PostBack 回调（GET 方式）
+    
+    支持的平台：
+    - macan: Macan S2S PostBack
+    
+    参数说明：
+    - platform: 平台名称（路径参数）
+    - 其他参数通过查询字符串传递
+    """
+    # 检查是否为保留路径
+    if platform.lower() in RESERVED_PATHS:
+        raise_api_exception(
+            ErrorCode.NOT_FOUND,
+            detail=f"路径 /postback/{platform} 是保留路径，请使用正确的 API 端点"
+        )
+    
+    try:
+        # 获取客户端IP
+        client_ip = get_client_ip(request) or ip
+        
+        # 构建原始数据字典
+        raw_data: Dict[str, Any] = {}
+        
+        # 处理通用参数
+        if conversion_id:
+            raw_data["conversion_id"] = conversion_id
+        if event_name:
+            raw_data["event_name"] = event_name
+        if event_value is not None:
+            raw_data["event_value"] = event_value
+        if payout is not None:
+            raw_data["payout"] = payout
+        if devad_id:
+            raw_data["devad_id"] = devad_id
+        if os:
+            raw_data["os"] = os
+        if carrier:
+            raw_data["carrier"] = carrier
+        if ip:
+            raw_data["ip"] = ip
+        if gid:
+            raw_data["gid"] = gid
+        if product_id is not None:
+            raw_data["product_id"] = product_id
+        if client_id is not None:
+            raw_data["client_id"] = client_id
+        
+        # 处理 Macan 特定参数（兼容性）
+        if clk_id:
+            raw_data["clk_id"] = clk_id
+        if click_id:
+            raw_data["click_id"] = click_id
+        if event_id:
+            raw_data["event_id"] = event_id
+        
+        # 处理 postback
+        result = await PostbackProcessor.process(
+            platform=platform.lower(),
+            raw_data=raw_data,
+            db=db,
+            request_ip=client_ip
+        )
+        
+        return PostbackResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"处理 {platform} postback 时发生错误: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"处理 PostBack 回调失败：{str(e)}"
         )
 
