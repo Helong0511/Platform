@@ -511,3 +511,31 @@ class PostbackNotification(Base):
         Index("idx_postback_notification_status", "notification_status"),
         Index("idx_postback_notification_created_at", "created_at"),
     )
+
+
+# 短链接模型
+class ShortLink(Base):
+    __tablename__ = "short_links"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='短链接ID')
+    short_code = Column(String(20), unique=True, nullable=False, index=True, comment='短链接代码（唯一）')
+    original_url = Column(Text, nullable=False, comment='原始URL')
+    title = Column(String(200), nullable=True, comment='短链接标题（可选）')
+    description = Column(Text, nullable=True, comment='短链接描述（可选）')
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True, comment='创建者用户ID')
+    click_count = Column(Integer, default=0, comment='点击次数')
+    is_active = Column(Boolean, default=True, comment='是否激活')
+    expires_at = Column(DateTime, nullable=True, comment='过期时间（可选）')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True, comment='创建时间')
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+
+    # 关系
+    creator = relationship("User", foreign_keys=[created_by])
+
+    __table_args__ = (
+        Index("idx_short_link_code", "short_code"),
+        Index("idx_short_link_created_by", "created_by"),
+        Index("idx_short_link_active", "is_active"),
+        Index("idx_short_link_created_at", "created_at"),
+    )

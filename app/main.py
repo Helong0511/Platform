@@ -830,6 +830,59 @@ async def root():
 # 包含API路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+# 短链接重定向路由（公开访问，无需认证）
+# 注意：这个路由必须在 API 路由之后注册，避免与 API 路由冲突
+from fastapi import Depends
+from fastapi.responses import RedirectResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from datetime import datetime, timezone
+from app.core.database import get_db
+from app.core.exceptions import raise_api_exception
+from app.core.errors import ErrorCode
+from app.models.models import ShortLink
+
+@app.get("/s/{short_code}", summary="短链接重定向", tags=["短链接服务"])
+async def redirect_short_link_public(
+    short_code: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """短链接重定向（公开接口，无需认证）"""
+    result = await db.execute(
+        select(ShortLink).where(ShortLink.short_code == short_code)
+    )
+    short_link = result.scalars().first()
+    
+    if not short_link:
+        raise_api_exception(
+            ErrorCode.RESOURCE_NOT_FOUND,
+            detail=f"短链接不存在: {short_code}"
+        )
+    
+    if not short_link.is_active:
+        raise_api_exception(
+            ErrorCode.RESOURCE_NOT_FOUND,
+            detail="短链接已禁用"
+        )
+    
+    if short_link.expires_at and short_link.expires_at < datetime.now(timezone.utc):
+        raise_api_exception(
+            ErrorCode.RESOURCE_NOT_FOUND,
+            detail="短链接已过期"
+        )
+    
+    try:
+        short_link.click_count += 1
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"更新短链接点击次数失败: {str(e)}")
+    
+    return RedirectResponse(url=short_link.original_url, status_code=302)
+
+# 短链接重定向路由（公开访问，无需认证）
+from app.api.api_v1.endpoints.short_links import redirect_short_link
+app.get("/s/{short_code}", summary="短链接重定向")(redirect_short_link)
+
 if __name__ == "__main__":
     import uvicorn
 

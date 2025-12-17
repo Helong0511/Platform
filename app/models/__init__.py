@@ -6,7 +6,8 @@
 from app.models.models import (
     Base, User, Client, Product, AdData, ProductAssignment, ScheduledTask, 
     UserAuditLog, PostbackConversion, PostbackForwardLog,
-    ClientNotificationConfig, ProductNotificationConfig, PostbackNotification
+    ClientNotificationConfig, ProductNotificationConfig, PostbackNotification,
+    ShortLink
 )
 
 # 导入会话模型
@@ -27,6 +28,7 @@ __all__ = [
     "ClientNotificationConfig",
     "ProductNotificationConfig",
     "PostbackNotification",
+    "ShortLink",
     "UserSession",
     "TokenBlacklist",
 ]

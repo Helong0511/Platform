@@ -79,6 +79,10 @@ class ErrorCode(IntEnum):
     CANNOT_MODIFY_SELF_ROLE = 2504  # 不能修改自己的角色
     USER_HAS_CLIENTS = 2505  # 用户有关联客户，无法删除
     NO_ADMIN_USERS = 2506  # 系统中没有管理员用户
+    RESOURCE_NOT_FOUND = 2507  # 资源不存在
+    RESOURCE_ALREADY_EXISTS = 2508  # 资源已存在
+    ACCESS_DENIED = 2509  # 访问被拒绝
+    INVALID_PARAMETER = 2510  # 参数无效
 
 
 class ErrorMessage:

@@ -28,6 +28,7 @@ from app.api.api_v1.endpoints import (
     postback,
     tb_search_data,
     notification_configs,
+    short_links,
 )
 
 # 认证路由
@@ -81,3 +82,6 @@ api_router.include_router(postback.router, prefix="", tags=["Postback服务"])
 
 # 通知配置管理路由
 api_router.include_router(notification_configs.router, prefix="/notification-configs", tags=["通知配置管理"])
+
+# 短链接服务路由
+api_router.include_router(short_links.router, prefix="/short-links", tags=["短链接服务"])
