@@ -468,36 +468,45 @@ async def get_short_link_stats(
     current_user: User = Depends(get_current_user)
 ):
     """获取短链接统计信息"""
-    query = select(ShortLink)
-    
-    # 权限检查：普通用户只能查看自己的统计
+    # 构建基础查询条件
+    base_conditions = []
     if current_user.role != UserRole.ADMIN:
-        query = query.where(ShortLink.created_by == current_user.id)
+        # 普通用户只能查看自己的统计
+        base_conditions.append(ShortLink.created_by == current_user.id)
     
     # 计算总数
-    total_result = await db.execute(select(func.count()).select_from(query.subquery()))
+    total_query = select(func.count(ShortLink.id))
+    if base_conditions:
+        total_query = total_query.where(and_(*base_conditions))
+    total_result = await db.execute(total_query)
     total_links = total_result.scalar() or 0
     
     # 计算总点击次数
-    click_result = await db.execute(
-        select(func.sum(ShortLink.click_count)).select_from(query.subquery())
-    )
+    click_query = select(func.sum(ShortLink.click_count))
+    if base_conditions:
+        click_query = click_query.where(and_(*base_conditions))
+    click_result = await db.execute(click_query)
     total_clicks = click_result.scalar() or 0
+    # 确保 total_clicks 是整数
+    if total_clicks is None:
+        total_clicks = 0
+    else:
+        total_clicks = int(total_clicks)
     
     # 计算激活数量
-    active_query = query.where(ShortLink.is_active == True)
-    active_result = await db.execute(select(func.count()).select_from(active_query.subquery()))
+    active_conditions = base_conditions + [ShortLink.is_active == True]
+    active_query = select(func.count(ShortLink.id)).where(and_(*active_conditions))
+    active_result = await db.execute(active_query)
     active_links = active_result.scalar() or 0
     
     # 计算过期数量
     now = datetime.now(timezone.utc)
-    expired_query = query.where(
-        and_(
-            ShortLink.expires_at.isnot(None),
-            ShortLink.expires_at < now
-        )
-    )
-    expired_result = await db.execute(select(func.count()).select_from(expired_query.subquery()))
+    expired_conditions = base_conditions + [
+        ShortLink.expires_at.isnot(None),
+        ShortLink.expires_at < now
+    ]
+    expired_query = select(func.count(ShortLink.id)).where(and_(*expired_conditions))
+    expired_result = await db.execute(expired_query)
     expired_links = expired_result.scalar() or 0
     
     return ResponseBaseSchema.success(data=ShortLinkStatsResponse(
