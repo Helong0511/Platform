@@ -10,7 +10,13 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Base62 字符集：0-9, a-z, A-Z
-BASE62_CHARS = string.digits + string.ascii_lowercase + string.ascii_uppercase
+# 排除容易混淆的字符：0（零）、O（大写O）、o（小写o）、I（大写i）、l（小写L）
+# 保留的字符：1-9, a-h, j-k, m-n, p-z, A-H, J-K, M-N, P-Z
+BASE62_CHARS = (
+    '123456789' +  # 数字（排除0）
+    'abcdefghjkmnpqrstuvwxyz' +  # 小写字母（排除o, i, l）
+    'ABCDEFGHJKLMNPQRSTUVWXYZ'  # 大写字母（排除O, I）
+)
 BASE62_BASE = len(BASE62_CHARS)
 
 
