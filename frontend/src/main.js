@@ -249,7 +249,9 @@ axios.interceptors.response.use(
               const endpoints = [
                 '/api/v1/users/stats',
                 '/api/v1/dashboard/stats',
-                '/api/v1/products/?page_size=1'
+                '/api/v1/products/?page_size=1',
+                '/api/v1/short-links/?page_size=1',
+                '/api/v1/clients/?page_size=1'
               ];
               
               for (const endpoint of endpoints) {
