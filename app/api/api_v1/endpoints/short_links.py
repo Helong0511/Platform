@@ -49,16 +49,41 @@ async def generate_short_code(
     result = await db.execute(select(ShortLink.short_code))
     existing_codes = {row[0] for row in result.all()}
     
-    # 生成唯一代码（尝试最多100次）
-    code = generate_unique_short_code(existing_codes, length=6, max_attempts=100)
+    # 初始长度为6位
+    length = 6
+    max_length = 20  # 最大长度限制
+    consecutive_failures = 0
+    max_consecutive_failures = 5  # 连续5次失败后增加位数
     
-    if not code:
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail="生成短链接代码失败，请稍后重试"
-        )
+    # 尝试生成唯一代码
+    while length <= max_length:
+        # 每次尝试最多100次
+        code = generate_unique_short_code(existing_codes, length=length, max_attempts=100)
+        
+        if code:
+            # 生成成功
+            logger.info(f"成功生成短链接代码: {code} (长度: {length})")
+            return ResponseBaseSchema.success(data={"short_code": code})
+        
+        # 生成失败，记录连续失败次数
+        consecutive_failures += 1
+        logger.warning(f"生成短链接代码失败 (长度: {length}, 连续失败: {consecutive_failures})")
+        
+        # 如果连续失败5次，增加位数
+        if consecutive_failures >= max_consecutive_failures:
+            length += 1
+            consecutive_failures = 0  # 重置计数器
+            logger.info(f"增加短链接代码长度到 {length} 位")
+            
+            # 如果达到最大长度，停止尝试
+            if length > max_length:
+                break
     
-    return ResponseBaseSchema.success(data={"short_code": code})
+    # 所有尝试都失败
+    raise_api_exception(
+        ErrorCode.OPERATION_FAILED,
+        detail="生成短链接代码失败，请稍后重试"
+    )
 
 
 @router.get("/check-code/{short_code}",
