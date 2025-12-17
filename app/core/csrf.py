@@ -173,19 +173,22 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # 快速检查：登录接口和定时任务接口直接跳过（最优先）
         path = request.url.path
+        method = request.method.upper()
+        
+        # 短链接重定向路由（公开访问，无需认证）- 最优先检查
+        # 检查路径是否以 /s/ 开头（支持 /s/xxx 格式）
+        if path and path.startswith("/s/"):
+            logger.info(f"跳过CSRF检查（短链接重定向）: {method} {path}")
+            return await call_next(request)
+        
         # 精确匹配登录/登出接口
         if path == "/api/v1/auth/login" or path == "/api/v1/auth/logout":
-            logger.debug(f"跳过CSRF检查（登录接口）: {request.method} {path}")
+            logger.debug(f"跳过CSRF检查（登录接口）: {method} {path}")
             return await call_next(request)
         
         # Macan S2S PostBack接口（外部回调接口，不需要CSRF）
         if path == "/api/v1/macan/postback":
-            logger.debug(f"跳过CSRF检查（Macan PostBack接口）: {request.method} {path}")
-            return await call_next(request)
-        
-        # 短链接重定向路由（公开访问，无需认证）
-        if path.startswith("/s/"):
-            logger.debug(f"跳过CSRF检查（短链接重定向）: {request.method} {path}")
+            logger.debug(f"跳过CSRF检查（Macan PostBack接口）: {method} {path}")
             return await call_next(request)
         
         # 定时任务接口已有JWT认证和管理员权限检查，跳过CSRF
