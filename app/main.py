@@ -846,39 +846,72 @@ async def redirect_short_link_public(
     db: AsyncSession = Depends(get_db)
 ):
     """短链接重定向（公开接口，无需认证）"""
-    result = await db.execute(
-        select(ShortLink).where(ShortLink.short_code == short_code)
-    )
-    short_link = result.scalars().first()
-    
-    if not short_link:
-        # 短链接不存在，返回真正的 404 状态码
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"短链接不存在: {short_code}"
-        )
-    
-    if not short_link.is_active:
-        # 短链接已禁用，返回 404
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="短链接已禁用"
-        )
-    
-    if short_link.expires_at and short_link.expires_at < datetime.now(timezone.utc):
-        # 短链接已过期，返回 404
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="短链接已过期"
-        )
+    logger.info(f"[短链接] 收到访问请求: short_code={short_code}")
     
     try:
-        short_link.click_count += 1
-        await db.commit()
+        # 查询短链接
+        result = await db.execute(
+            select(ShortLink).where(ShortLink.short_code == short_code)
+        )
+        short_link = result.scalars().first()
+        
+        if not short_link:
+            logger.warning(f"[短链接] 记录不存在: short_code={short_code}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"短链接不存在: {short_code}"
+            )
+        
+        logger.info(f"[短链接] 记录找到: short_code={short_code}, is_active={short_link.is_active}, expires_at={short_link.expires_at}, original_url={short_link.original_url}")
+        
+        # 检查是否激活
+        if not short_link.is_active:
+            logger.warning(f"[短链接] 已禁用: short_code={short_code}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="短链接已禁用"
+            )
+        
+        # 检查是否过期
+        now = datetime.now(timezone.utc)
+        if short_link.expires_at and short_link.expires_at < now:
+            logger.warning(f"[短链接] 已过期: short_code={short_code}, expires_at={short_link.expires_at}, now={now}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="短链接已过期"
+            )
+        
+        # 验证原始URL格式
+        original_url = short_link.original_url
+        if not original_url or not original_url.startswith(('http://', 'https://')):
+            logger.error(f"[短链接] URL格式无效: short_code={short_code}, original_url={original_url}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="短链接配置错误：原始URL格式无效"
+            )
+        
+        # 更新点击次数
+        try:
+            short_link.click_count += 1
+            await db.commit()
+            logger.info(f"[短链接] 点击次数已更新: short_code={short_code}, click_count={short_link.click_count}")
+        except Exception as e:
+            logger.warning(f"[短链接] 更新点击次数失败: short_code={short_code}, error={str(e)}")
+            # 点击次数更新失败不影响重定向
+        
+        # 执行重定向
+        logger.info(f"[短链接] 执行重定向: short_code={short_code}, original_url={original_url}")
+        return RedirectResponse(url=original_url, status_code=302)
+        
+    except HTTPException:
+        # 重新抛出 HTTP 异常
+        raise
     except Exception as e:
-        logger.warning(f"更新短链接点击次数失败: {str(e)}")
-    
-    return RedirectResponse(url=short_link.original_url, status_code=302)
+        logger.error(f"[短链接] 处理异常: short_code={short_code}, error={str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"短链接重定向失败: {str(e)}"
+        )
 
 if __name__ == "__main__":
     import uvicorn
