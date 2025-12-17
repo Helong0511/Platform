@@ -10,12 +10,18 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Base62 字符集：0-9, a-z, A-Z
-# 排除容易混淆的字符：0（零）、O（大写O）、o（小写o）、I（大写i）、l（小写L）
-# 保留的字符：1-9, a-h, j-k, m-n, p-z, A-H, J-K, M-N, P-Z
+# 排除容易混淆的字符，提高可读性：
+# 数字：0（零）、1（一）、2（二）、5（五）、6（六）、8（八）
+#   0 vs O/o, 1 vs I/l, 2 vs Z, 5 vs S, 6 vs G, 8 vs B
+# 小写字母：o（小写o）、i（小写i）、l（小写L）、u（小写u）、v（小写v）
+#   容易混淆：o vs 0/O, i vs 1/I, l vs 1/I, u vs v, v vs u
+# 大写字母：O（大写O）、I（大写i）、Z（大写Z）、S（大写S）、G（大写G）、B（大写B）、Q（大写Q）、D（大写D）、U（大写U）、V（大写V）
+#   容易混淆：O vs 0/o, I vs 1/i/l, Z vs 2, S vs 5, G vs 6, B vs 8, Q vs O, D vs O, U vs V, V vs U
+# 保留的字符：3, 4, 7, 9, a-h, j-k, m, n, p-r, t, w-z, A-H, J-K, M, N, P-R, T, W-X, Y
 BASE62_CHARS = (
-    '123456789' +  # 数字（排除0）
-    'abcdefghjkmnpqrstuvwxyz' +  # 小写字母（排除o, i, l）
-    'ABCDEFGHJKLMNPQRSTUVWXYZ'  # 大写字母（排除O, I）
+    '3479' +  # 数字（排除0,1,2,5,6,8）
+    'abcdefghjkmnprtwxyz' +  # 小写字母（排除o, i, l, u, v, s, q, d）
+    'ABCDEFGHJKMNPRTWXY'  # 大写字母（排除O, I, Z, S, G, B, Q, D, U, V）
 )
 BASE62_BASE = len(BASE62_CHARS)
 
