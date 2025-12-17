@@ -70,11 +70,19 @@
           <el-tag type="success">{{ scope.row.click_count }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="is_active" label="状态" width="100" align="center">
+      <el-table-column prop="expires_at" label="过期时间" width="180" align="center">
         <template #default="scope">
-          <el-tag :type="scope.row.is_active ? 'success' : 'danger'">
-            {{ scope.row.is_active ? '激活' : '禁用' }}
-          </el-tag>
+          <span v-if="scope.row.expires_at">{{ formatDate(scope.row.expires_at) }}</span>
+          <el-tag v-else type="info" size="small">永不过期</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="is_active" label="激活" width="80" align="center">
+        <template #default="scope">
+          <el-switch
+            v-model="scope.row.is_active"
+            @change="handleToggleActive(scope.row)"
+            :loading="scope.row._toggleLoading"
+          />
         </template>
       </el-table-column>
       <el-table-column prop="created_at" label="创建时间" width="180">
@@ -297,7 +305,11 @@ const loadData = async () => {
       ...filters
     };
     const result = await getShortLinks(params);
-    links.value = result.data || [];
+    // 初始化每个链接的加载状态
+    links.value = (result.data || []).map(link => ({
+      ...link,
+      _toggleLoading: false
+    }));
     pagination.total = result.total || 0;
   } catch (error) {
     logger.error('加载短链接列表失败:', error);
@@ -392,6 +404,36 @@ const handleDelete = async (linkId) => {
     if (error !== 'cancel') {
       logger.error('删除短链接失败:', error);
     }
+  }
+};
+
+// 切换激活状态
+const handleToggleActive = async (link) => {
+  // 防止重复点击
+  if (link._toggleLoading) {
+    return;
+  }
+  
+  // 保存原始值（因为 switch 已经切换了，所以取反得到原值）
+  const originalValue = !link.is_active;
+  const newValue = link.is_active;
+  
+  // 设置加载状态
+  link._toggleLoading = true;
+  
+  try {
+    // 只更新 is_active 字段
+    await updateShortLink(link.id, { is_active: newValue });
+    ElMessage.success(newValue ? '短链接已激活' : '短链接已禁用');
+    // 更新统计
+    await loadStats();
+  } catch (error) {
+    // 如果失败，恢复原值
+    link.is_active = originalValue;
+    // 错误消息已经在 updateShortLink 中显示了，这里不需要再显示
+    logger.error('切换激活状态失败:', error);
+  } finally {
+    link._toggleLoading = false;
   }
 };
 
