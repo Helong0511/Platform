@@ -873,13 +873,23 @@ async def redirect_short_link_public(
             )
         
         # 检查是否过期
-        now = datetime.now(timezone.utc)
-        if short_link.expires_at and short_link.expires_at < now:
-            logger.warning(f"[短链接] 已过期: short_code={short_code}, expires_at={short_link.expires_at}, now={now}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="短链接已过期"
-            )
+        if short_link.expires_at:
+            # 确保 expires_at 是 aware datetime（有时区信息）
+            expires_at = short_link.expires_at
+            if expires_at.tzinfo is None:
+                # 如果是 naive datetime，假设它是 UTC 时区（数据库通常存储 UTC 时间）
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            else:
+                # 如果已经是 aware datetime，转换为 UTC 以确保一致性
+                expires_at = expires_at.astimezone(timezone.utc)
+            
+            now = datetime.now(timezone.utc)
+            if expires_at < now:
+                logger.warning(f"[短链接] 已过期: short_code={short_code}, expires_at={expires_at}, now={now}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="短链接已过期"
+                )
         
         # 验证原始URL格式
         original_url = short_link.original_url

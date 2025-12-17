@@ -66,11 +66,22 @@ async def redirect_short_link(
         )
     
     # 检查是否过期
-    if short_link.expires_at and short_link.expires_at < datetime.now(timezone.utc):
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail="短链接已过期"
-        )
+    if short_link.expires_at:
+        # 确保 expires_at 是 aware datetime（有时区信息）
+        expires_at = short_link.expires_at
+        if expires_at.tzinfo is None:
+            # 如果是 naive datetime，假设它是 UTC 时区（数据库通常存储 UTC 时间）
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        else:
+            # 如果已经是 aware datetime，转换为 UTC 以确保一致性
+            expires_at = expires_at.astimezone(timezone.utc)
+        
+        now = datetime.now(timezone.utc)
+        if expires_at < now:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail="短链接已过期"
+            )
     
     # 增加点击次数
     try:
