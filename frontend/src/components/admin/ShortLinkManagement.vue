@@ -188,7 +188,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage, ElMessageBox, ElStatistic } from 'element-plus';
 import { Plus, Search, DocumentCopy, InfoFilled } from '@element-plus/icons-vue';
 import {
   createShortLink,

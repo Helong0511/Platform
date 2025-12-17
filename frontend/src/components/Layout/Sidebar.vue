@@ -53,6 +53,11 @@
       <template #icon><Connection /></template>
       <span>Postback管理</span>
     </el-menu-item>
+
+    <el-menu-item index="/app/admin/short-links">
+      <template #icon><Link /></template>
+      <span>短链接管理</span>
+    </el-menu-item>
     
     <el-menu-item v-if="!isAdmin" index="/app/client/user-management">
       <template #icon><UserFilled /></template>
