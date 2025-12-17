@@ -29,6 +29,16 @@
       </el-menu-item>
     </el-sub-menu>
 
+    <el-menu-item v-if="isAdmin" index="/app/admin/postback">
+      <template #icon><Connection /></template>
+      <span>Postback管理</span>
+    </el-menu-item>
+
+    <el-menu-item index="/app/admin/short-links">
+      <template #icon><Link /></template>
+      <span>短链接管理</span>
+    </el-menu-item>
+
     <el-menu-item v-if="isAdmin" index="/app/admin/import-training">
       <template #icon><Upload /></template>
       <span>训练导入</span>
@@ -47,16 +57,6 @@
     <el-menu-item v-if="isAdmin" index="/app/admin/audit-logs">
       <template #icon><Document /></template>
       <span>操作日志</span>
-    </el-menu-item>
-
-    <el-menu-item v-if="isAdmin" index="/app/admin/postback">
-      <template #icon><Connection /></template>
-      <span>Postback管理</span>
-    </el-menu-item>
-
-    <el-menu-item index="/app/admin/short-links">
-      <template #icon><Link /></template>
-      <span>短链接管理</span>
     </el-menu-item>
     
     <el-menu-item v-if="!isAdmin" index="/app/client/user-management">
