@@ -1,6 +1,8 @@
 -- 短链接服务数据表
 -- 用于实现类似 Bitly 的短链接功能
+USE `platform`;
 
+DROP TABLE IF EXISTS short_links;
 CREATE TABLE IF NOT EXISTS short_links (
     id INT AUTO_INCREMENT PRIMARY KEY COMMENT '短链接ID',
     short_code VARCHAR(20) NOT NULL UNIQUE COMMENT '短链接代码（唯一）',

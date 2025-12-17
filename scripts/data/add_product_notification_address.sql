@@ -1,11 +1,11 @@
 -- 在 products 表中添加通知地址字段
 -- 用于接收 Postback 转化通知
-
+USE `platform`;
 -- 添加通知地址字段
 ALTER TABLE products 
 ADD COLUMN notification_address VARCHAR(500) NULL 
 COMMENT '通知地址（Telegram Chat ID、邮箱地址、Webhook URL等，用于接收转化通知）' 
-AFTER downstream_postback_method;
+AFTER is_active;
 
 -- 使用说明：
 -- 1. Telegram Chat ID：直接填写数字，如 '123456789'

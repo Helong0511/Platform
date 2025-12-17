@@ -2,6 +2,9 @@
 -- 用于支持按客户和产品进行转化通知
 
 -- 1. 客户通知配置表
+USE `platform`;
+
+DROP TABLE IF EXISTS client_notification_configs;
 CREATE TABLE IF NOT EXISTS client_notification_configs (
     id INT AUTO_INCREMENT PRIMARY KEY COMMENT '通知配置ID',
     client_id INT NOT NULL UNIQUE COMMENT '客户ID',
@@ -26,6 +29,7 @@ CREATE TABLE IF NOT EXISTS client_notification_configs (
 ) COMMENT='客户通知配置表';
 
 -- 2. 产品通知配置表
+DROP TABLE IF EXISTS product_notification_configs;
 CREATE TABLE IF NOT EXISTS product_notification_configs (
     id INT AUTO_INCREMENT PRIMARY KEY COMMENT '通知配置ID',
     product_id INT NOT NULL UNIQUE COMMENT '产品ID',
@@ -50,6 +54,7 @@ CREATE TABLE IF NOT EXISTS product_notification_configs (
 ) COMMENT='产品通知配置表';
 
 -- 3. Postback 通知记录表
+DROP TABLE IF EXISTS postback_notifications;
 CREATE TABLE IF NOT EXISTS postback_notifications (
     id INT AUTO_INCREMENT PRIMARY KEY COMMENT '通知记录ID',
     conversion_id INT NOT NULL COMMENT '转化记录ID',
