@@ -838,8 +838,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from datetime import datetime, timezone
 from app.core.database import get_db
-from app.core.exceptions import raise_api_exception
-from app.core.errors import ErrorCode
 from app.models.models import ShortLink
 
 @app.get("/s/{short_code}", summary="短链接重定向", tags=["短链接服务"])
@@ -854,20 +852,23 @@ async def redirect_short_link_public(
     short_link = result.scalars().first()
     
     if not short_link:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
+        # 短链接不存在，返回真正的 404 状态码
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=f"短链接不存在: {short_code}"
         )
     
     if not short_link.is_active:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
+        # 短链接已禁用，返回 404
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="短链接已禁用"
         )
     
     if short_link.expires_at and short_link.expires_at < datetime.now(timezone.utc):
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
+        # 短链接已过期，返回 404
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="短链接已过期"
         )
     
