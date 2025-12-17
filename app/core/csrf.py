@@ -153,6 +153,10 @@ def should_skip_csrf_check(request: Request) -> bool:
     if path.startswith("/api/v1/docs") or path.startswith("/api/v1/redoc") or path.startswith("/api/v1/openapi.json"):
         return True
     
+    # 短链接重定向路由（公开访问，无需认证）
+    if path.startswith("/s/"):
+        return True
+    
     return False
 
 
@@ -177,6 +181,11 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         # Macan S2S PostBack接口（外部回调接口，不需要CSRF）
         if path == "/api/v1/macan/postback":
             logger.debug(f"跳过CSRF检查（Macan PostBack接口）: {request.method} {path}")
+            return await call_next(request)
+        
+        # 短链接重定向路由（公开访问，无需认证）
+        if path.startswith("/s/"):
+            logger.debug(f"跳过CSRF检查（短链接重定向）: {request.method} {path}")
             return await call_next(request)
         
         # 定时任务接口已有JWT认证和管理员权限检查，跳过CSRF

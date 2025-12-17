@@ -879,10 +879,6 @@ async def redirect_short_link_public(
     
     return RedirectResponse(url=short_link.original_url, status_code=302)
 
-# 短链接重定向路由（公开访问，无需认证）
-from app.api.api_v1.endpoints.short_links import redirect_short_link
-app.get("/s/{short_code}", summary="短链接重定向")(redirect_short_link)
-
 if __name__ == "__main__":
     import uvicorn
 
