@@ -137,15 +137,27 @@
         </el-form-item>
 
         <el-form-item label="自定义代码" prop="short_code">
-          <el-input
-            v-model="formData.short_code"
-            placeholder="留空则自动生成（3-20个字符，字母、数字、连字符、下划线）"
-            clearable
-            :disabled="isEdit"
-          />
+          <div style="display: flex; gap: 8px;">
+            <el-input
+              v-model="formData.short_code"
+              placeholder="留空则自动生成（3-20个字符，字母、数字、连字符、下划线）"
+              clearable
+              :disabled="isEdit"
+              style="flex: 1;"
+            />
+            <el-button
+              v-if="!isEdit"
+              @click="handleGenerateCode"
+              :loading="generatingCode"
+              :icon="Refresh"
+            >
+              自动生成
+            </el-button>
+          </div>
           <div class="form-hint">
             <el-icon :size="16"><InfoFilled /></el-icon>
-            <span>编辑时不可修改代码</span>
+            <span v-if="isEdit">编辑时不可修改代码</span>
+            <span v-else>点击"自动生成"按钮生成唯一代码，或手动输入自定义代码</span>
           </div>
         </el-form-item>
 
@@ -197,13 +209,15 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue';
 import { ElMessage, ElMessageBox, ElStatistic } from 'element-plus';
-import { Plus, Search, DocumentCopy, InfoFilled } from '@element-plus/icons-vue';
+import { Plus, Search, DocumentCopy, InfoFilled, Refresh } from '@element-plus/icons-vue';
 import {
   createShortLink,
   getShortLinks,
   updateShortLink,
   deleteShortLink,
-  getShortLinkStats
+  getShortLinkStats,
+  generateShortCode,
+  checkShortCode
 } from '../../api/shortLink';
 import { useDevice } from '../../composables/useDevice';
 import { logger } from '../../utils/logger';
@@ -213,6 +227,7 @@ const { isMobile } = useDevice();
 
 const loading = ref(false);
 const saving = ref(false);
+const generatingCode = ref(false);
 const dialogVisible = ref(false);
 const isEdit = ref(false);
 const currentLinkId = ref(null);
@@ -465,6 +480,26 @@ const copyToClipboard = async (text) => {
 // 格式化日期
 const formatDate = (dateString) => {
   return formatDateWithTimezone(dateString);
+};
+
+// 自动生成代码
+const handleGenerateCode = async () => {
+  if (isEdit.value) {
+    return; // 编辑模式下不允许生成
+  }
+  
+  generatingCode.value = true;
+  try {
+    const result = await generateShortCode();
+    if (result && result.short_code) {
+      formData.short_code = result.short_code;
+      ElMessage.success('代码已生成');
+    }
+  } catch (error) {
+    logger.error('生成代码失败:', error);
+  } finally {
+    generatingCode.value = false;
+  }
 };
 
 // 关闭对话框

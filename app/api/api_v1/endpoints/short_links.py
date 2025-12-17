@@ -35,6 +35,47 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+# ==================== 短链接工具接口（必须在动态路径之前） ====================
+
+@router.get("/generate-code",
+            summary="生成短链接代码")
+async def generate_short_code(
+    db: AsyncSession = Depends(get_db)
+):
+    """生成唯一的短链接代码（公开接口，用于前端自动生成）"""
+    from app.core.short_link.generator import generate_short_code, generate_unique_short_code
+    
+    # 获取所有已存在的代码
+    result = await db.execute(select(ShortLink.short_code))
+    existing_codes = {row[0] for row in result.all()}
+    
+    # 生成唯一代码（尝试最多100次）
+    code = generate_unique_short_code(existing_codes, length=6, max_attempts=100)
+    
+    if not code:
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail="生成短链接代码失败，请稍后重试"
+        )
+    
+    return ResponseBaseSchema.success(data={"short_code": code})
+
+
+@router.get("/check-code/{short_code}",
+            summary="检查短链接代码是否存在")
+async def check_short_code(
+    short_code: str = Path(..., description="短链接代码"),
+    db: AsyncSession = Depends(get_db)
+):
+    """检查短链接代码是否存在（公开接口，用于前端验证）"""
+    result = await db.execute(
+        select(ShortLink).where(ShortLink.short_code == short_code)
+    )
+    exists = result.scalars().first() is not None
+    
+    return ResponseBaseSchema.success(data={"exists": exists, "short_code": short_code})
+
+
 # ==================== 短链接重定向 ====================
 
 @router.get("/{short_code}", summary="短链接重定向")

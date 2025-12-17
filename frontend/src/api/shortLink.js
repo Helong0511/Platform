@@ -89,3 +89,31 @@ export const getShortLinkStats = async () => {
   }
 };
 
+/**
+ * 检查短链接代码是否存在
+ */
+export const checkShortCode = async (shortCode) => {
+  try {
+    const response = await axios.get(`/api/v1/short-links/check-code/${shortCode}`);
+    return normalizeResponse(response, { returnDataOnly: true });
+  } catch (error) {
+    const errorMsg = extractErrorMessage(error);
+    ElMessage.error(errorMsg);
+    throw error;
+  }
+};
+
+/**
+ * 生成短链接代码
+ */
+export const generateShortCode = async () => {
+  try {
+    const response = await axios.get('/api/v1/short-links/generate-code');
+    return normalizeResponse(response, { returnDataOnly: true });
+  } catch (error) {
+    const errorMsg = extractErrorMessage(error);
+    ElMessage.error(errorMsg);
+    throw error;
+  }
+};
+
