@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.postback.handlers import get_handler
-from app.models.models import PostbackConversion
+from app.core.postback.forwarder import PostbackForwarder
+from app.core.postback.notifier import PostbackNotifier
+from app.models.models import PostbackConversion, Product
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 
@@ -144,7 +146,64 @@ class PostbackProcessor:
                 f"product_id={product_id}, client_id={client_id}"
             )
             
-            # 9. 返回成功响应
+            # 9. 异步发送通知（按客户和产品）
+            try:
+                await PostbackNotifier.notify_conversion(
+                    conversion=conversion,
+                    db=db,
+                    product=None,  # 将在通知函数中查询
+                    client=None   # 将在通知函数中查询
+                )
+            except Exception as e:
+                # 通知失败不影响主流程
+                logger.warning(
+                    f"发送转化通知失败: conversion_id={conversion_id}, "
+                    f"error={str(e)}"
+                )
+            
+            # 10. 异步转发给下游（如果产品配置了下游 URL）
+            product = None
+            if product_id:
+                result = await db.execute(
+                    select(Product).where(Product.id == product_id)
+                )
+                product = result.scalars().first()
+            
+            if product and product.downstream_postback_url:
+                # 异步转发，不阻塞主流程
+                # 注意：需要在后台任务中使用新的数据库会话
+                try:
+                    import asyncio
+                    from app.core.database import AsyncSessionLocal
+                    
+                    async def forward_task():
+                        """后台转发任务"""
+                        async with AsyncSessionLocal() as new_db:
+                            # 重新查询转化记录和产品（使用新的会话）
+                            conv_result = await new_db.execute(
+                                select(PostbackConversion).where(PostbackConversion.id == conversion.id)
+                            )
+                            new_conversion = conv_result.scalars().first()
+                            
+                            prod_result = await new_db.execute(
+                                select(Product).where(Product.id == product_id)
+                            )
+                            new_product = prod_result.scalars().first()
+                            
+                            if new_conversion and new_product:
+                                await PostbackForwarder.forward_to_downstream(
+                                    new_conversion, new_product, new_db
+                                )
+                    
+                    asyncio.create_task(forward_task())
+                except Exception as e:
+                    # 转发失败不影响主流程，只记录日志
+                    logger.warning(
+                        f"创建下游转发任务失败: conversion_id={conversion_id}, "
+                        f"product_id={product_id}, error={str(e)}"
+                    )
+            
+            # 11. 返回成功响应
             return {
                 "success": True,
                 "message": "PostBack 接收成功",

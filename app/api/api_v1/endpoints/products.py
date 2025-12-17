@@ -373,6 +373,14 @@ async def create_product(
         admin_default_product.ecpm_deduct_ratio = product_in.ecpm_deduct_ratio
         admin_default_product.revenue_deduct_ratio = product_in.revenue_deduct_ratio
         admin_default_product.is_active = product_in.is_active if product_in.is_active is not None else True
+        # 更新下游 Postback 配置
+        if product_in.downstream_postback_url is not None:
+            admin_default_product.downstream_postback_url = product_in.downstream_postback_url
+        if product_in.downstream_postback_method is not None:
+            admin_default_product.downstream_postback_method = product_in.downstream_postback_method
+        # 更新通知地址
+        if product_in.notification_address is not None:
+            admin_default_product.notification_address = product_in.notification_address
 
         try:
             await db.commit()
@@ -396,7 +404,10 @@ async def create_product(
         name=product_in.name,
         ecpm_deduct_ratio=product_in.ecpm_deduct_ratio,
         revenue_deduct_ratio=product_in.revenue_deduct_ratio,
-        is_active=product_in.is_active if product_in.is_active is not None else True
+        is_active=product_in.is_active if product_in.is_active is not None else True,
+        downstream_postback_url=product_in.downstream_postback_url,
+        downstream_postback_method=product_in.downstream_postback_method or 'GET',
+        notification_address=product_in.notification_address
     )
 
     # 保存到数据库
@@ -446,7 +457,10 @@ async def create_product(
                 "client_id": product.client_id,
                 "ecpm_deduct_ratio": product.ecpm_deduct_ratio,
                 "revenue_deduct_ratio": product.revenue_deduct_ratio,
-                "is_active": product.is_active
+                "is_active": product.is_active,
+                "downstream_postback_url": product.downstream_postback_url,
+                "downstream_postback_method": product.downstream_postback_method,
+                "notification_address": product.notification_address
             }
         )
         # 提交审计日志

@@ -279,6 +279,67 @@
             </div>
           </div>
         </el-form-item>
+        
+        <el-divider content-position="left">
+          <el-icon :size="16"><Connection /></el-icon>
+          <span style="margin-left: 8px;">下游 Postback 配置（可选）</span>
+        </el-divider>
+        
+        <el-form-item label="下游 Postback URL" prop="downstream_postback_url">
+          <div>
+            <el-input
+              v-model="formData.downstream_postback_url"
+              placeholder="https://example.com/api/postback"
+              clearable
+              size="large"
+            >
+              <template #prefix>
+                <el-icon :size="16"><Link /></el-icon>
+              </template>
+            </el-input>
+            <div class="form-hint">
+              <el-icon :size="16"><InfoFilled /></el-icon>
+              <span>配置后，该产品的 postback 转化数据将自动转发到此 URL</span>
+            </div>
+          </div>
+        </el-form-item>
+        
+        <el-form-item label="请求方式" prop="downstream_postback_method">
+          <div>
+            <el-radio-group v-model="formData.downstream_postback_method" size="large">
+              <el-radio label="GET">GET</el-radio>
+              <el-radio label="POST">POST</el-radio>
+            </el-radio-group>
+            <div class="form-hint">
+              <el-icon :size="16"><InfoFilled /></el-icon>
+              <span>GET：数据作为 URL 参数传递；POST：数据作为 JSON body 传递</span>
+            </div>
+          </div>
+        </el-form-item>
+        
+        <el-divider content-position="left">
+          <el-icon :size="16"><Bell /></el-icon>
+          <span style="margin-left: 8px;">通知配置（可选）</span>
+        </el-divider>
+        
+        <el-form-item label="通知地址" prop="notification_address">
+          <div>
+            <el-input
+              v-model="formData.notification_address"
+              placeholder="Telegram Chat ID、邮箱地址或 Webhook URL"
+              clearable
+              size="large"
+            >
+              <template #prefix>
+                <el-icon :size="16"><Message /></el-icon>
+              </template>
+            </el-input>
+            <div class="form-hint">
+              <el-icon :size="16"><InfoFilled /></el-icon>
+              <span>配置后，该产品的转化通知将发送到此地址。支持：Telegram Chat ID（纯数字）、邮箱地址（包含@）、Webhook URL（http://或https://开头）</span>
+            </div>
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer-buttons">
@@ -393,7 +454,7 @@
 <script setup>
 import { ref, watch, reactive, computed, onMounted, nextTick } from 'vue';
 import { ElDialog, ElButton, ElTable, ElTableColumn, ElTag, ElForm, ElFormItem, ElInput, ElInputNumber, ElSwitch, ElIcon, ElMessage, ElMessageBox, ElStatistic, ElSelect, ElOption, ElAutocomplete, ElDatePicker, ElTimeline, ElTimelineItem } from 'element-plus';
-import { Plus, Edit, Delete, Box, Clock, InfoFilled, Check, CircleCheck, CircleClose, Loading } from '@element-plus/icons-vue';
+import { Plus, Edit, Delete, Box, Clock, InfoFilled, Check, CircleCheck, CircleClose, Loading, Connection, Link, Bell, Message } from '@element-plus/icons-vue';
 import { getAvailableProductNames, getProductDetail, getProductAssignments } from '../../api/product';
 import { getClientDetail } from '../../api/client';
 import { logger } from '../../utils/logger';
@@ -540,7 +601,10 @@ const formData = reactive({
   name: '',
   ecpm_deduct_ratio: 0,
   revenue_deduct_ratio: 0,
-  is_active: true
+  is_active: true,
+  downstream_postback_url: '',
+  downstream_postback_method: 'GET',
+  notification_address: ''
 });
 
 // 监听 formData.name 的变化，更新备份
@@ -773,7 +837,10 @@ const handleAdd = async () => {
     name: '',
     ecpm_deduct_ratio: 0,
     revenue_deduct_ratio: 0,
-    is_active: true
+    is_active: true,
+    downstream_postback_url: '',
+    downstream_postback_method: 'GET',
+    notification_address: ''
   });
   
   // 重置备份值和选中的产品对象
@@ -800,7 +867,10 @@ const handleEdit = async (product) => {
     name: product.name || '',
     ecpm_deduct_ratio: product.ecpm_deduct_ratio || 0,
     revenue_deduct_ratio: product.revenue_deduct_ratio || 0,
-    is_active: product.is_active !== undefined ? product.is_active : true
+    is_active: product.is_active !== undefined ? product.is_active : true,
+    downstream_postback_url: product.downstream_postback_url || '',
+    downstream_postback_method: product.downstream_postback_method || 'GET',
+    notification_address: product.notification_address || ''
   });
   
   
@@ -1005,6 +1075,9 @@ const handleSave = async () => {
       ecpm_deduct_ratio: formData.ecpm_deduct_ratio,
       revenue_deduct_ratio: formData.revenue_deduct_ratio,
       is_active: formData.is_active,
+      downstream_postback_url: formData.downstream_postback_url ? String(formData.downstream_postback_url).trim() : null,
+      downstream_postback_method: formData.downstream_postback_method || 'GET',
+      notification_address: formData.notification_address ? String(formData.notification_address).trim() : null,
       client_id: props.clientId  // 新的客户ID
     };
     
@@ -1018,6 +1091,9 @@ const handleSave = async () => {
       delete submitData.ecpm_deduct_ratio;
       delete submitData.revenue_deduct_ratio;
       delete submitData.is_active;
+      delete submitData.downstream_postback_url;
+      delete submitData.downstream_postback_method;
+      delete submitData.notification_address;
       
       // 添加 transfer_date（新客户开始日期）和 old_client_end_date（旧客户结束日期）
       if (pendingTransferData.value.startDate) {
@@ -1099,7 +1175,10 @@ const handleSave = async () => {
       name: '',
       ecpm_deduct_ratio: 0,
       revenue_deduct_ratio: 0,
-      is_active: true
+      is_active: true,
+      downstream_postback_url: '',
+      downstream_postback_method: 'GET',
+      notification_address: ''
     });
     currentProductId.value = null;
     
@@ -1413,7 +1492,10 @@ const continueSaveAfterDateSelection = async () => {
       name: '',
       ecpm_deduct_ratio: 0,
       revenue_deduct_ratio: 0,
-      is_active: true
+      is_active: true,
+      downstream_postback_url: '',
+      downstream_postback_method: 'GET',
+      notification_address: ''
     });
     currentProductId.value = null;
     

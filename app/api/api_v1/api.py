@@ -27,6 +27,7 @@ from app.api.api_v1.endpoints import (
     macan_postback,
     postback,
     tb_search_data,
+    notification_configs,
 )
 
 # 认证路由
@@ -77,3 +78,6 @@ api_router.include_router(macan_postback.router, prefix="", tags=["Macan S2S"])
 
 # 统一 Postback 服务路由（推荐使用）
 api_router.include_router(postback.router, prefix="", tags=["Postback服务"])
+
+# 通知配置管理路由
+api_router.include_router(notification_configs.router, prefix="/notification-configs", tags=["通知配置管理"])

@@ -8,6 +8,19 @@ class ProductBase(BaseModel):
     revenue_deduct_ratio: float | None = Field(None, ge=0, le=1)
     is_active: bool | None = True
     client_id: int | None = None
+    downstream_postback_url: str | None = Field(
+        None,
+        description="下游 Postback URL（可选，配置后将自动转发转化数据）"
+    )
+    downstream_postback_method: str | None = Field(
+        None,
+        description="下游 Postback 请求方式：GET 或 POST（默认GET）"
+    )
+    notification_address: str | None = Field(
+        None,
+        max_length=500,
+        description="通知地址（Telegram Chat ID、邮箱地址、Webhook URL等，用于接收转化通知）"
+    )
     transfer_date: date | None = Field(
         None, 
         description="产品转移日期（新客户开始拥有该产品的日期，可选，仅在更改client_id时生效）。如果不指定，默认使用当前日期。用于补录历史转移记录。"

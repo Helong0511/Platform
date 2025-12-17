@@ -84,3 +84,24 @@ class PostbackQueryParams(BaseModel):
     page: int = Field(1, ge=1, description="页码")
     page_size: int = Field(20, ge=1, le=100, description="每页数量")
 
+
+class PostbackForwardLogResponse(BaseModel):
+    """Postback 下游转发日志响应模型"""
+    id: int
+    conversion_id: int
+    product_id: Optional[int]
+    downstream_url: str
+    request_method: str
+    request_data: Optional[str]
+    request_params: Optional[str]
+    response_status: Optional[int]
+    response_body: Optional[str]
+    success: bool
+    error_message: Optional[str]
+    retry_count: int
+    created_at: datetime
+    completed_at: Optional[datetime]
+    
+    class Config:
+        from_attributes = True
+

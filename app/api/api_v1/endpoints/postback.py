@@ -17,13 +17,14 @@ from app.core.postback import PostbackProcessor, register_handler
 from app.core.postback.macan_handler import MacanPostbackHandler
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
-from app.models.models import PostbackConversion, Product, Client
+from app.models.models import PostbackConversion, Product, Client, PostbackForwardLog
 from app.schemas.postback import (
     PostbackRequest,
     PostbackResponse,
     PostbackConversionResponse,
     PostbackStatsResponse,
-    PostbackQueryParams
+    PostbackQueryParams,
+    PostbackForwardLogResponse
 )
 from app.schemas.base import ResponseBaseSchema
 from app.core.security import get_current_user
@@ -267,9 +268,114 @@ async def get_postback_stats(
         )
 
 
+# ====== 转发日志查询接口（必须在动态路径之前定义） ======
+@router.get("/postback/forward-logs",
+            response_model=ResponseBaseSchema[list[PostbackForwardLogResponse]],
+            summary="查询 PostBack 下游转发日志（管理员）")
+async def get_postback_forward_logs(
+    request: Request,
+    conversion_id: Optional[int] = Query(None, description="转化记录ID"),
+    product_id: Optional[int] = Query(None, description="产品ID"),
+    success: Optional[bool] = Query(None, description="是否成功"),
+    start_date: Optional[str] = Query(None, description="起始日期（YYYY-MM-DD）"),
+    end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    查询 PostBack 下游转发日志
+    
+    仅管理员可访问
+    """
+    # 检查管理员权限
+    if current_user.role != UserRole.ADMIN:
+        raise_api_exception(
+            ErrorCode.FORBIDDEN,
+            detail="仅管理员可访问此接口"
+        )
+    
+    try:
+        # 构建查询条件
+        conditions = []
+        
+        if conversion_id:
+            conditions.append(PostbackForwardLog.conversion_id == conversion_id)
+        if product_id:
+            conditions.append(PostbackForwardLog.product_id == product_id)
+        if success is not None:
+            conditions.append(PostbackForwardLog.success == success)
+        
+        # 日期范围过滤
+        if start_date:
+            try:
+                start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+                conditions.append(PostbackForwardLog.created_at >= start_dt)
+            except ValueError:
+                raise_api_exception(
+                    ErrorCode.VALIDATION_ERROR,
+                    detail="起始日期格式错误，应为 YYYY-MM-DD"
+                )
+        
+        if end_date:
+            try:
+                end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+                # 结束日期包含整天，所以加一天
+                from datetime import timedelta
+                end_dt = end_dt + timedelta(days=1)
+                conditions.append(PostbackForwardLog.created_at < end_dt)
+            except ValueError:
+                raise_api_exception(
+                    ErrorCode.VALIDATION_ERROR,
+                    detail="结束日期格式错误，应为 YYYY-MM-DD"
+                )
+        
+        # 构建查询
+        query = select(PostbackForwardLog)
+        if conditions:
+            query = query.where(and_(*conditions))
+        
+        # 按创建时间倒序排列
+        query = query.order_by(PostbackForwardLog.created_at.desc())
+        
+        # 分页
+        offset = (page - 1) * page_size
+        query = query.offset(offset).limit(page_size)
+        
+        # 执行查询
+        result = await db.execute(query)
+        logs = result.scalars().all()
+        
+        # 获取总数
+        count_query = select(func.count()).select_from(PostbackForwardLog)
+        if conditions:
+            count_query = count_query.where(and_(*conditions))
+        count_result = await db.execute(count_query)
+        total = count_result.scalar() or 0
+        
+        return ResponseBaseSchema(
+            code=200,
+            message="查询成功",
+            data=[PostbackForwardLogResponse.model_validate(log) for log in logs],
+            total=total,
+            page=page,
+            page_size=page_size
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"查询 PostBack 转发日志失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"查询失败：{str(e)}"
+        )
+
+
 # ====== Postback 接收接口（动态路径，必须在具体路径之后） ======
 # 保留的路径关键字，不能作为平台名称
-RESERVED_PATHS = {"conversions", "stats"}
+RESERVED_PATHS = {"conversions", "stats", "forward-logs"}
 
 @router.post("/postback/{platform}", response_model=PostbackResponse, summary="接收 PostBack 回调（POST）")
 async def receive_postback_post(

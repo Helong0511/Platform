@@ -89,6 +89,9 @@ class Product(Base):
     name = Column(String(100), nullable=False, comment='产品名称')
     ecpm_deduct_ratio = Column(Float, default=0.0, comment='eCPM减扣比例')
     revenue_deduct_ratio = Column(Float, default=0.0, comment='收益减扣比例')
+    downstream_postback_url = Column(String(500), nullable=True, comment='下游 Postback URL（可选，配置后将自动转发转化数据）')
+    downstream_postback_method = Column(String(10), default='GET', comment='下游 Postback 请求方式：GET 或 POST（默认GET）')
+    notification_address = Column(String(500), nullable=True, comment='通知地址（Telegram Chat ID、邮箱地址、Webhook URL等，用于接收转化通知）')
     is_active = Column(Boolean, default=True, comment='是否激活')
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
@@ -391,4 +394,120 @@ class PostbackConversion(Base):
         Index("idx_postback_platform_event", "platform", "event_name"),
         # 唯一性约束：同一平台的同一转化ID只能有一条记录（防止重复处理）
         UniqueConstraint("platform", "conversion_id", "event_name", name="uq_postback_platform_conversion_event"),
+    )
+
+
+# Postback 下游转发日志模型
+class PostbackForwardLog(Base):
+    __tablename__ = "postback_forward_logs"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='转发日志ID')
+    conversion_id = Column(Integer, ForeignKey("postback_conversions.id", ondelete="CASCADE"), nullable=False, index=True, comment='关联的转化记录ID')
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True, index=True, comment='产品ID')
+    downstream_url = Column(String(500), nullable=False, comment='下游URL')
+    request_method = Column(String(10), nullable=False, comment='请求方式：GET 或 POST')
+    request_data = Column(Text, nullable=True, comment='请求数据（JSON格式，用于POST请求）')
+    request_params = Column(Text, nullable=True, comment='请求参数（URL参数，用于GET请求）')
+    response_status = Column(Integer, nullable=True, comment='响应状态码')
+    response_body = Column(Text, nullable=True, comment='响应内容')
+    success = Column(Boolean, default=False, index=True, comment='是否转发成功')
+    error_message = Column(Text, nullable=True, comment='错误信息（如果转发失败）')
+    retry_count = Column(Integer, default=0, comment='重试次数')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True, comment='创建时间')
+    completed_at = Column(DateTime, nullable=True, comment='完成时间')
+
+    # 关系
+    conversion = relationship("PostbackConversion", foreign_keys=[conversion_id])
+    product = relationship("Product", foreign_keys=[product_id])
+
+    __table_args__ = (
+        Index("idx_forward_log_conversion", "conversion_id"),
+        Index("idx_forward_log_product", "product_id"),
+        Index("idx_forward_log_created_at", "created_at"),
+        Index("idx_forward_log_success", "success"),
+    )
+
+
+# 客户通知配置模型
+class ClientNotificationConfig(Base):
+    __tablename__ = "client_notification_configs"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='通知配置ID')
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, unique=True, index=True, comment='客户ID')
+    notification_enabled = Column(Boolean, default=True, comment='是否启用通知')
+    notify_on_conversion = Column(Boolean, default=True, comment='转化时通知')
+    notify_on_high_value = Column(Boolean, default=False, comment='高价值转化通知')
+    high_value_threshold = Column(Float, nullable=True, comment='高价值阈值')
+    notify_channels = Column(Text, nullable=True, comment='通知渠道（JSON格式：["telegram", "email", "sms"]）')
+    telegram_chat_id = Column(String(100), nullable=True, comment='Telegram Chat ID')
+    email_address = Column(String(255), nullable=True, comment='邮箱地址')
+    phone_number = Column(String(20), nullable=True, comment='手机号')
+    notification_frequency = Column(String(20), default='realtime', comment='通知频率：realtime, hourly, daily')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+
+    # 关系
+    client = relationship("Client", foreign_keys=[client_id])
+
+    __table_args__ = (
+        Index("idx_client_notification_config_client", "client_id"),
+        Index("idx_client_notification_config_enabled", "notification_enabled"),
+    )
+
+
+# 产品通知配置模型
+class ProductNotificationConfig(Base):
+    __tablename__ = "product_notification_configs"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='通知配置ID')
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False, unique=True, index=True, comment='产品ID')
+    notification_enabled = Column(Boolean, default=True, comment='是否启用通知')
+    notify_on_conversion = Column(Boolean, default=True, comment='转化时通知')
+    notify_on_high_value = Column(Boolean, default=False, comment='高价值转化通知')
+    high_value_threshold = Column(Float, nullable=True, comment='高价值阈值')
+    notify_channels = Column(Text, nullable=True, comment='通知渠道（JSON格式：["telegram", "email", "sms"]）')
+    telegram_chat_id = Column(String(100), nullable=True, comment='Telegram Chat ID')
+    email_address = Column(String(255), nullable=True, comment='邮箱地址')
+    phone_number = Column(String(20), nullable=True, comment='手机号')
+    notification_frequency = Column(String(20), default='realtime', comment='通知频率：realtime, hourly, daily')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+
+    # 关系
+    product = relationship("Product", foreign_keys=[product_id])
+
+    __table_args__ = (
+        Index("idx_product_notification_config_product", "product_id"),
+        Index("idx_product_notification_config_enabled", "notification_enabled"),
+    )
+
+
+# Postback 通知记录模型
+class PostbackNotification(Base):
+    __tablename__ = "postback_notifications"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='通知记录ID')
+    conversion_id = Column(Integer, ForeignKey("postback_conversions.id", ondelete="CASCADE"), nullable=False, index=True, comment='转化记录ID')
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, index=True, comment='客户ID')
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True, index=True, comment='产品ID')
+    notification_type = Column(String(50), nullable=True, comment='通知类型：conversion, high_value, error')
+    notification_channel = Column(String(50), nullable=False, comment='通知渠道：telegram, email, sms')
+    notification_status = Column(String(20), default='pending', index=True, comment='通知状态：sent, failed, pending')
+    notification_message = Column(Text, nullable=True, comment='通知消息内容')
+    error_message = Column(Text, nullable=True, comment='错误信息（如果失败）')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True, comment='创建时间')
+
+    # 关系
+    conversion = relationship("PostbackConversion", foreign_keys=[conversion_id])
+    client = relationship("Client", foreign_keys=[client_id])
+    product = relationship("Product", foreign_keys=[product_id])
+
+    __table_args__ = (
+        Index("idx_postback_notification_conversion", "conversion_id"),
+        Index("idx_postback_notification_client", "client_id"),
+        Index("idx_postback_notification_product", "product_id"),
+        Index("idx_postback_notification_status", "notification_status"),
+        Index("idx_postback_notification_created_at", "created_at"),
     )
