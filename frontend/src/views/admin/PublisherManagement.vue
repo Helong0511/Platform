@@ -188,8 +188,8 @@ const loadData = async () => {
     }
     const response = await getPublishers(params)
     if (response.code === 200) {
-      tableData.value = response.data.data || []
-      pagination.total = response.data.total || 0
+      tableData.value = response.data || []
+      pagination.total = response.total || 0
     } else {
       ElMessage.error(response.message || '获取数据失败')
     }

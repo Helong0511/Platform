@@ -377,7 +377,7 @@ const loadAdvertisers = async () => {
   try {
     const response = await getAdvertisers({ page: 1, page_size: 100 })
     if (response.code === 200) {
-      advertiserList.value = response.data.data || []
+      advertiserList.value = response.data || []
     }
   } catch (error) {
     logger.error('加载广告主列表失败:', error)
@@ -389,7 +389,7 @@ const loadPublishers = async () => {
   try {
     const response = await getPublishers({ page: 1, page_size: 100 })
     if (response.code === 200) {
-      publisherList.value = response.data.data || []
+      publisherList.value = response.data || []
     }
   } catch (error) {
     logger.error('加载渠道列表失败:', error)
@@ -410,8 +410,8 @@ const loadData = async () => {
     }
     const response = await getOffers(params)
     if (response.code === 200) {
-      tableData.value = response.data.data || []
-      pagination.total = response.data.total || 0
+      tableData.value = response.data || []
+      pagination.total = response.total || 0
     } else {
       ElMessage.error(response.message || '获取数据失败')
     }
