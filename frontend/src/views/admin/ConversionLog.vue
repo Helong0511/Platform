@@ -206,7 +206,7 @@ const publisherList = ref([])
 // 加载基础数据
 const loadOffers = async () => {
   try {
-    const response = await getOffers({ page: 1, page_size: 1000 })
+    const response = await getOffers({ page: 1, page_size: 100 })
     if (response.code === 200) {
       offerList.value = response.data.data || []
     }
