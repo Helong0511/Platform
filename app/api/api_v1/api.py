@@ -29,6 +29,16 @@ from app.api.api_v1.endpoints import (
     tb_search_data,
     notification_configs,
     short_links,
+    tracking,
+    advertisers,
+    publishers,
+    offers,
+    caps,
+    discounts,
+    advertiser_tests,
+    affiliate_tests,
+    conversion_summary,
+    conversion_log,
 )
 
 # 认证路由
@@ -85,3 +95,17 @@ api_router.include_router(notification_configs.router, prefix="/notification-con
 
 # 短链接服务路由
 api_router.include_router(short_links.router, prefix="/short-links", tags=["短链接服务"])
+
+# 点击追踪路由（必须在其他路由之前，避免路径冲突）
+api_router.include_router(tracking.router, prefix="", tags=["点击追踪"])
+
+# CPL 系统路由
+api_router.include_router(advertisers.router, prefix="/advertisers", tags=["广告主管理"])
+api_router.include_router(publishers.router, prefix="/publishers", tags=["渠道管理"])
+api_router.include_router(offers.router, prefix="/offers", tags=["Offer管理"])
+api_router.include_router(caps.router, prefix="/caps", tags=["Cap管理"])
+api_router.include_router(discounts.router, prefix="/discounts", tags=["扣量管理"])
+api_router.include_router(advertiser_tests.router, prefix="/advertiser-tests", tags=["上游测试"])
+api_router.include_router(affiliate_tests.router, prefix="/affiliate-tests", tags=["下游测试"])
+api_router.include_router(conversion_summary.router, prefix="/conversion-summary", tags=["转化统计"])
+api_router.include_router(conversion_log.router, prefix="/conversion-logs", tags=["转化日志"])

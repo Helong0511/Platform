@@ -32,6 +32,15 @@ const ScheduledTaskManagement = createAsyncComponent(() => import(/* webpackChun
 const AuditLogManagement = createAsyncComponent(() => import(/* webpackChunkName: "audit-log" */ '../views/admin/AuditLogManagement.vue'), 'AuditLogManagement');
 const PostbackManagement = createAsyncComponent(() => import(/* webpackChunkName: "postback-management" */ '../views/admin/PostbackManagement.vue'), 'PostbackManagement');
 const ShortLinkManagement = createAsyncComponent(() => import(/* webpackChunkName: "short-link-management" */ '../views/admin/ShortLinkManagement.vue'), 'ShortLinkManagement');
+const AdvertiserManagement = createAsyncComponent(() => import(/* webpackChunkName: "advertiser-management" */ '../views/admin/AdvertiserManagement.vue'), 'AdvertiserManagement');
+const PublisherManagement = createAsyncComponent(() => import(/* webpackChunkName: "publisher-management" */ '../views/admin/PublisherManagement.vue'), 'PublisherManagement');
+const OfferManagement = createAsyncComponent(() => import(/* webpackChunkName: "offer-management" */ '../views/admin/OfferManagement.vue'), 'OfferManagement');
+const CapManagement = createAsyncComponent(() => import(/* webpackChunkName: "cap-management" */ '../views/admin/CapManagement.vue'), 'CapManagement');
+const DiscountManagement = createAsyncComponent(() => import(/* webpackChunkName: "discount-management" */ '../views/admin/DiscountManagement.vue'), 'DiscountManagement');
+const AdvertiserTest = createAsyncComponent(() => import(/* webpackChunkName: "advertiser-test" */ '../views/admin/AdvertiserTest.vue'), 'AdvertiserTest');
+const AffiliateTest = createAsyncComponent(() => import(/* webpackChunkName: "affiliate-test" */ '../views/admin/AffiliateTest.vue'), 'AffiliateTest');
+const ConversionSummary = createAsyncComponent(() => import(/* webpackChunkName: "conversion-summary" */ '../views/admin/ConversionSummary.vue'), 'ConversionSummary');
+const ConversionLog = createAsyncComponent(() => import(/* webpackChunkName: "conversion-log" */ '../views/admin/ConversionLog.vue'), 'ConversionLog');
 const ClientUserManagement = createAsyncComponent(() => import(/* webpackChunkName: "client-user-management" */ '../views/client/ClientUserManagement.vue'), 'ClientUserManagement');
 const ApiDocumentation = createAsyncComponent(() => import(/* webpackChunkName: "api-documentation" */ '../views/ApiDocumentation.vue'), 'ApiDocumentation');
 const MainLayout = createAsyncComponent(() => import(/* webpackChunkName: "layout" */ '../components/Layout/MainLayout.vue'), 'MainLayout');
@@ -105,6 +114,60 @@ const routes = [
         name: 'ShortLinkManagement', 
         component: ShortLinkManagement, 
         meta: { requiresAdmin: false } 
+      },
+      { 
+        path: 'admin/advertisers', 
+        name: 'AdvertiserManagement', 
+        component: AdvertiserManagement, 
+        meta: { requiresAdmin: true } 
+      },
+      { 
+        path: 'admin/publishers', 
+        name: 'PublisherManagement', 
+        component: PublisherManagement, 
+        meta: { requiresAdmin: true } 
+      },
+      { 
+        path: 'admin/offers', 
+        name: 'OfferManagement', 
+        component: OfferManagement, 
+        meta: { requiresAdmin: true } 
+      },
+      { 
+        path: 'admin/caps', 
+        name: 'CapManagement', 
+        component: CapManagement, 
+        meta: { requiresAdmin: true } 
+      },
+      { 
+        path: 'admin/discounts', 
+        name: 'DiscountManagement', 
+        component: DiscountManagement, 
+        meta: { requiresAdmin: true } 
+      },
+      { 
+        path: 'admin/advertiser-test', 
+        name: 'AdvertiserTest', 
+        component: AdvertiserTest, 
+        meta: { requiresAdmin: true } 
+      },
+      { 
+        path: 'admin/affiliate-test', 
+        name: 'AffiliateTest', 
+        component: AffiliateTest, 
+        meta: { requiresAdmin: true } 
+      },
+      { 
+        path: 'admin/conversion-summary', 
+        name: 'ConversionSummary', 
+        component: ConversionSummary, 
+        meta: { requiresAdmin: true } 
+      },
+      { 
+        path: 'admin/conversion-log', 
+        name: 'ConversionLog', 
+        component: ConversionLog, 
+        meta: { requiresAdmin: true } 
       },
       { 
         path: 'client/user-management', 

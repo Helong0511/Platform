@@ -7,7 +7,10 @@ from app.models.models import (
     Base, User, Client, Product, AdData, ProductAssignment, ScheduledTask, 
     UserAuditLog, PostbackConversion, PostbackForwardLog,
     ClientNotificationConfig, ProductNotificationConfig, PostbackNotification,
-    ShortLink
+    ShortLink,
+    # CPL 系统模型
+    Advertiser, Publisher, Offer, OfferPublisherAssignment, Click,
+    OfferCap, OfferDiscount, AdvertiserTest, AffiliateTest
 )
 
 # 导入会话模型
@@ -29,6 +32,16 @@ __all__ = [
     "ProductNotificationConfig",
     "PostbackNotification",
     "ShortLink",
+    # CPL 系统模型
+    "Advertiser",
+    "Publisher",
+    "Offer",
+    "OfferPublisherAssignment",
+    "Click",
+    "OfferCap",
+    "OfferDiscount",
+    "AdvertiserTest",
+    "AffiliateTest",
     "UserSession",
     "TokenBlacklist",
 ]

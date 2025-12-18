@@ -97,13 +97,6 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="cplpo_deduct_ratio" :label="isMobile ? 'CPL PO' : 'CPL PO扣减比例'" :width="isMobile ? 70 : 120" align="center" class-name="cplpo-column">
-            <template #default="scope">
-              <el-tag type="info" effect="dark" :size="isMobile ? 'small' : 'default'">
-                {{ formatPercentage(scope.row.cplpo_deduct_ratio) }}
-              </el-tag>
-            </template>
-          </el-table-column>
           <el-table-column prop="is_active" label="状态" :width="isMobile ? 60 : 80" align="center" class-name="status-column">
             <template #default="scope">
               <el-tag 
@@ -187,7 +180,7 @@
         ref="formRef" 
         :model="formData" 
         :rules="formRules" 
-        label-width="140px"
+        label-width="130px"
         class="product-form"
       >
         <el-form-item label="产品名称" prop="name" class="product-name-item">
@@ -268,25 +261,6 @@
             <div class="form-hint">
               <el-icon :size="16"><InfoFilled /></el-icon>
               <span>范围：0.00 - 1.00（例如：0.10 表示 10%）</span>
-            </div>
-          </div>
-        </el-form-item>
-        <el-form-item label="CPL PO扣减比例" prop="cplpo_deduct_ratio">
-          <div>
-            <el-input-number
-              v-model="formData.cplpo_deduct_ratio"
-              :min="0"
-              :max="1"
-              :step="0.01"
-              :precision="4"
-              style="width: 100%;"
-              placeholder="0.00-1.00"
-              size="large"
-              controls-position="right"
-            ></el-input-number>
-            <div class="form-hint">
-              <el-icon :size="16"><InfoFilled /></el-icon>
-              <span>CPL 系统的 PO (Price Out), 范围: 0.00 - 1.00 (例如: 0.10 表示 10%)</span>
             </div>
           </div>
         </el-form-item>
@@ -627,8 +601,6 @@ const formData = reactive({
   name: '',
   ecpm_deduct_ratio: 0,
   revenue_deduct_ratio: 0,
-  cplpo_deduct_ratio: 0,
-  cplpo_deduct_ratio: 0,
   is_active: true,
   downstream_postback_url: '',
   downstream_postback_method: 'GET',
@@ -697,10 +669,6 @@ const formRules = {
     { required: true, message: '请输入eCPM减扣比例', trigger: 'blur' },
     { type: 'number', min: 0, max: 1, message: 'eCPM减扣比例范围：0.00 - 1.00', trigger: 'blur' }
   ],
-  cplpo_deduct_ratio: [
-    { required: true, message: '请输入CPL PO扣减比例', trigger: 'blur' },
-    { type: 'number', min: 0, max: 1, message: 'CPL PO扣减比例范围：0.00 - 1.00', trigger: 'blur' }
-  ],
   revenue_deduct_ratio: [
     { required: true, message: '请输入收益减扣比例', trigger: 'blur' },
     { type: 'number', min: 0, max: 1, message: '收益减扣比例范围：0.00 - 1.00', trigger: 'blur' }
@@ -767,7 +735,6 @@ const handleProductNameSelect = async (item) => {
           if (originalProduct) {
             formData.ecpm_deduct_ratio = originalProduct.ecpm_deduct_ratio || 0;
             formData.revenue_deduct_ratio = originalProduct.revenue_deduct_ratio || 0;
-            formData.cplpo_deduct_ratio = originalProduct.cplpo_deduct_ratio || 0;
           }
           
           // 获取上一个客户的完整信息（使用缓存避免重复请求）
@@ -900,7 +867,6 @@ const handleEdit = async (product) => {
     name: product.name || '',
     ecpm_deduct_ratio: product.ecpm_deduct_ratio || 0,
     revenue_deduct_ratio: product.revenue_deduct_ratio || 0,
-    cplpo_deduct_ratio: product.cplpo_deduct_ratio || 0,
     is_active: product.is_active !== undefined ? product.is_active : true,
     downstream_postback_url: product.downstream_postback_url || '',
     downstream_postback_method: product.downstream_postback_method || 'GET',
@@ -1108,7 +1074,6 @@ const handleSave = async () => {
       name: String(formData.name).trim(),
       ecpm_deduct_ratio: formData.ecpm_deduct_ratio,
       revenue_deduct_ratio: formData.revenue_deduct_ratio,
-      cplpo_deduct_ratio: formData.cplpo_deduct_ratio,
       is_active: formData.is_active,
       downstream_postback_url: formData.downstream_postback_url ? String(formData.downstream_postback_url).trim() : null,
       downstream_postback_method: formData.downstream_postback_method || 'GET',
@@ -1125,7 +1090,6 @@ const handleSave = async () => {
       delete submitData.name;
       delete submitData.ecpm_deduct_ratio;
       delete submitData.revenue_deduct_ratio;
-      delete submitData.cplpo_deduct_ratio;
       delete submitData.is_active;
       delete submitData.downstream_postback_url;
       delete submitData.downstream_postback_method;
@@ -1154,10 +1118,6 @@ const handleSave = async () => {
         ElMessage.error('请输入eCPM减扣比例');
         saving.value = false;
         return;
-      }
-      
-      if (submitData.cplpo_deduct_ratio === undefined || submitData.cplpo_deduct_ratio === null) {
-        submitData.cplpo_deduct_ratio = 0;
       }
       
       if (submitData.revenue_deduct_ratio === undefined || submitData.revenue_deduct_ratio === null) {

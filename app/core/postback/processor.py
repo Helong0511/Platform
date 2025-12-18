@@ -12,9 +12,11 @@ from sqlalchemy.future import select
 from app.core.postback.handlers import get_handler
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
-from app.models.models import PostbackConversion, Product
+from app.models.models import PostbackConversion, Product, Click, Offer
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.cap import check_cap, increment_cap_count
+from app.core.discount import calculate_discount
 
 logger = logging.getLogger(__name__)
 
@@ -117,13 +119,73 @@ class PostbackProcessor:
             if request_ip and not normalized_data.get("ip"):
                 normalized_data["ip"] = request_ip
             
+            # 7.5. CPL 系统：尝试关联 Click ID 和进行 Cap/扣量检查
+            click_id = None
+            click_time = None
+            offer_id = None
+            publisher_id = None
+            advertiser_id = None
+            final_payout = normalized_data.get("payout")
+            discount_info = None
+            
+            # 尝试从 raw_data 中提取 click_id（可能是 our_click_id 或其他字段）
+            click_id = (raw_data.get("our_click_id") or 
+                       raw_data.get("click_id") or 
+                       normalized_data.get("click_id"))
+            
+            if click_id:
+                # 查找 Click 记录
+                click_result = await db.execute(
+                    select(Click).where(Click.click_id == click_id)
+                )
+                click_record = click_result.scalars().first()
+                
+                if click_record:
+                    click_time = click_record.click_time
+                    offer_id = click_record.offer_id
+                    publisher_id = click_record.publisher_id
+                    advertiser_id = click_record.advertiser_id
+                    
+                    # 检查 Cap 限制
+                    if offer_id:
+                        is_allowed, cap_reason = await check_cap(
+                            db=db,
+                            offer_id=offer_id,
+                            publisher_id=publisher_id,
+                            advertiser_id=advertiser_id
+                        )
+                        
+                        if not is_allowed:
+                            logger.warning(
+                                f"转化被Cap限制拒绝: conversion_id={conversion_id}, "
+                                f"offer_id={offer_id}, reason={cap_reason}"
+                            )
+                            # 可以选择拒绝转化或标记为特殊状态
+                            # 这里我们仍然保存转化，但标记状态
+                            # 也可以选择直接拒绝：raise_api_exception(...)
+                    
+                    # 计算扣量
+                    if offer_id and publisher_id and final_payout:
+                        final_payout, discount_amount, discount_info = await calculate_discount(
+                            db=db,
+                            offer_id=offer_id,
+                            publisher_id=publisher_id,
+                            original_payout=final_payout
+                        )
+                        if discount_info:
+                            logger.info(
+                                f"应用扣量: conversion_id={conversion_id}, "
+                                f"original={normalized_data.get('payout')}, "
+                                f"final={final_payout}, info={discount_info}"
+                            )
+            
             # 8. 创建转化记录
             conversion = PostbackConversion(
                 platform=platform,
                 conversion_id=conversion_id,
                 event_name=normalized_data.get("event_name"),
                 event_value=normalized_data.get("event_value"),
-                payout=normalized_data.get("payout"),
+                payout=final_payout,  # 使用扣量后的金额
                 devad_id=normalized_data.get("devad_id"),
                 os=normalized_data.get("os"),
                 carrier=normalized_data.get("carrier"),
@@ -131,6 +193,9 @@ class PostbackProcessor:
                 gid=normalized_data.get("gid"),
                 product_id=product_id,
                 client_id=client_id,
+                click_id=click_id,  # CPL 系统字段
+                click_time=click_time,  # CPL 系统字段
+                conversion_status='Pending',  # CPL 系统字段，默认待处理
                 raw_data=raw_data_json,
                 created_at=datetime.now(timezone.utc)
             )
@@ -139,11 +204,25 @@ class PostbackProcessor:
             await db.commit()
             await db.refresh(conversion)
             
+            # 8.5. 如果通过了 Cap 检查，增加 Cap 计数
+            if offer_id and click_id:
+                try:
+                    await increment_cap_count(
+                        db=db,
+                        offer_id=offer_id,
+                        publisher_id=publisher_id,
+                        advertiser_id=advertiser_id
+                    )
+                except Exception as e:
+                    # Cap 计数失败不影响主流程
+                    logger.warning(f"增加Cap计数失败: {str(e)}")
+            
             logger.info(
                 f"平台 {platform} postback 转化记录已保存: "
                 f"conversion_id={conversion_id}, event_name={event_name}, "
-                f"payout={normalized_data.get('payout')}, "
-                f"product_id={product_id}, client_id={client_id}"
+                f"payout={final_payout} (original={normalized_data.get('payout')}), "
+                f"product_id={product_id}, client_id={client_id}, "
+                f"click_id={click_id}, offer_id={offer_id}"
             )
             
             # 9. 异步发送通知（按客户和产品）

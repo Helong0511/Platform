@@ -34,6 +34,40 @@
       <span>Postback管理</span>
     </el-menu-item>
 
+    <el-sub-menu v-if="isAdmin" index="/app/admin/cpl">
+      <template #title>
+        <el-icon><Box /></el-icon>
+        <span>CPL系统</span>
+      </template>
+      <el-menu-item index="/app/admin/advertisers">
+        <span>广告主管理</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/publishers">
+        <span>渠道管理</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/offers">
+        <span>Offer管理</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/caps">
+        <span>Cap管理</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/discounts">
+        <span>扣量管理</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/advertiser-test">
+        <span>上游测试</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/affiliate-test">
+        <span>下游测试</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/conversion-summary">
+        <span>转化总览</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/conversion-log">
+        <span>转化日志</span>
+      </el-menu-item>
+    </el-sub-menu>
+
     <el-menu-item index="/app/admin/short-links">
       <template #icon><Link /></template>
       <span>短链接管理</span>
@@ -77,7 +111,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useAuthStore } from '../../store';
 import { ElMenu, ElMenuItem, ElSubMenu, ElIcon } from 'element-plus';
-import { PieChart, Document, UserFilled, Upload, Timer, Link, Connection } from '@element-plus/icons-vue';
+import { PieChart, Document, UserFilled, Upload, Timer, Link, Connection, Box } from '@element-plus/icons-vue';
 
 const authStore = useAuthStore();
 const route = useRoute();

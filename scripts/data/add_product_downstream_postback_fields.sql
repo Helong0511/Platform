@@ -6,7 +6,7 @@ USE `platform`;
 -- 添加下游 Postback URL 字段（如果不存在）
 SET @dbname = DATABASE();
 SET @tablename = 'products';
-SET @columnname = 'cplpo_deduct_ratio';
+SET @columnname = 'downstream_postback_url';
 SET @preparedStatement = (SELECT IF(
   (
     SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
@@ -16,7 +16,7 @@ SET @preparedStatement = (SELECT IF(
       AND (COLUMN_NAME = @columnname)
   ) > 0,
   'SELECT 1',
-  CONCAT('ALTER TABLE ', @tablename, ' ADD COLUMN ', @columnname, ' FLOAT NOT NULL DEFAULT 0.00 COMMENT ''CPL PO减扣比例 '' AFTER revenue_deduct_ratio')
+  CONCAT('ALTER TABLE ', @tablename, ' ADD COLUMN ', @columnname, ' VARCHAR(500) NULL COMMENT ''下游 Postback URL（可选，配置后将自动转发转化数据）'' AFTER revenue_deduct_ratio')
 ));
 PREPARE alterIfNotExists FROM @preparedStatement;
 EXECUTE alterIfNotExists;

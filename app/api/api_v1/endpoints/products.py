@@ -322,11 +322,10 @@ async def create_product(
 
     # 验证减扣比例是否在有效范围内
     if (product_in.ecpm_deduct_ratio < 0 or product_in.ecpm_deduct_ratio > 1) or \
-            (product_in.revenue_deduct_ratio < 0 or product_in.revenue_deduct_ratio > 1) or \
-            (product_in.cplpo_deduct_ratio is not None and (product_in.cplpo_deduct_ratio < 0 or product_in.cplpo_deduct_ratio > 1)):
+            (product_in.revenue_deduct_ratio < 0 or product_in.revenue_deduct_ratio > 1):
         raise_api_exception(
             ErrorCode.PRODUCT_DEDUCT_RATIO_INVALID,
-            detail=f"减扣比例必须在0到1之间。当前值：eCPM减扣比例={product_in.ecpm_deduct_ratio}, 收益减扣比例={product_in.revenue_deduct_ratio}, CPL PO减扣比例={product_in.cplpo_deduct_ratio}"
+            detail=f"减扣比例必须在0到1之间。当前值：eCPM减扣比例={product_in.ecpm_deduct_ratio}, 收益减扣比例={product_in.revenue_deduct_ratio}"
         )
 
     # 检查当前客户是否已存在同名产品
@@ -373,7 +372,6 @@ async def create_product(
         admin_default_product.client_id = client_id
         admin_default_product.ecpm_deduct_ratio = product_in.ecpm_deduct_ratio
         admin_default_product.revenue_deduct_ratio = product_in.revenue_deduct_ratio
-        admin_default_product.cplpo_deduct_ratio = product_in.cplpo_deduct_ratio if product_in.cplpo_deduct_ratio is not None else 0.0
         admin_default_product.is_active = product_in.is_active if product_in.is_active is not None else True
         # 更新下游 Postback 配置
         if product_in.downstream_postback_url is not None:
@@ -406,7 +404,6 @@ async def create_product(
         name=product_in.name,
         ecpm_deduct_ratio=product_in.ecpm_deduct_ratio,
         revenue_deduct_ratio=product_in.revenue_deduct_ratio,
-        cplpo_deduct_ratio=product_in.cplpo_deduct_ratio if product_in.cplpo_deduct_ratio is not None else 0.0,
         is_active=product_in.is_active if product_in.is_active is not None else True,
         downstream_postback_url=product_in.downstream_postback_url,
         downstream_postback_method=product_in.downstream_postback_method or 'GET',
@@ -460,7 +457,6 @@ async def create_product(
                 "client_id": product.client_id,
                 "ecpm_deduct_ratio": product.ecpm_deduct_ratio,
                 "revenue_deduct_ratio": product.revenue_deduct_ratio,
-                "cplpo_deduct_ratio": product.cplpo_deduct_ratio,
                 "is_active": product.is_active,
                 "downstream_postback_url": product.downstream_postback_url,
                 "downstream_postback_method": product.downstream_postback_method,
@@ -538,7 +534,6 @@ async def update_product(
     # 记录旧的扣减比例，用于记录变更历史
     old_ecpm_deduct_ratio = product.ecpm_deduct_ratio
     old_revenue_deduct_ratio = product.revenue_deduct_ratio
-    old_cplpo_deduct_ratio = product.cplpo_deduct_ratio
 
     # 检查 is_active 是否改变（用于记录激活/禁用日志）
     old_is_active = product.is_active
@@ -561,13 +556,6 @@ async def update_product(
         raise_api_exception(
             ErrorCode.PRODUCT_DEDUCT_RATIO_INVALID,
             detail=f"收益减扣比例必须在0到1之间。当前值：{product_in.revenue_deduct_ratio}"
-        )
-    
-    if product_in.cplpo_deduct_ratio is not None and (
-            product_in.cplpo_deduct_ratio < 0 or product_in.cplpo_deduct_ratio > 1):
-        raise_api_exception(
-            ErrorCode.PRODUCT_DEDUCT_RATIO_INVALID,
-            detail=f"CPL PO减扣比例必须在0到1之间。当前值：{product_in.cplpo_deduct_ratio}"
         )
 
     # 如果是管理员且更改了 client_id，需要检查新客户是否已有同名产品，并记录分配历史
@@ -710,7 +698,7 @@ async def update_product(
     }
 
     # 如果修改了扣减比例，记录变更历史
-    if "ecpm_deduct_ratio" in update_data or "revenue_deduct_ratio" in update_data or "cplpo_deduct_ratio" in update_data:
+    if "ecpm_deduct_ratio" in update_data or "revenue_deduct_ratio" in update_data:
         deduct_ratio_changes = {}
 
         if "ecpm_deduct_ratio" in update_data:
@@ -729,15 +717,6 @@ async def update_product(
                 "new_value": new_revenue_ratio,
                 "change": f"{old_revenue_deduct_ratio} → {new_revenue_ratio}",
                 "change_percentage": f"{(new_revenue_ratio - old_revenue_deduct_ratio) * 100:.2f}%"
-            }
-        
-        if "cplpo_deduct_ratio" in update_data:
-            new_cplpo_ratio = update_data["cplpo_deduct_ratio"]
-            deduct_ratio_changes["cplpo_deduct_ratio"] = {
-                "old_value": old_cplpo_deduct_ratio,
-                "new_value": new_cplpo_ratio,
-                "change": f"{old_cplpo_deduct_ratio} → {new_cplpo_ratio}",
-                "change_percentage": f"{(new_cplpo_ratio - old_cplpo_deduct_ratio) * 100:.2f}%"
             }
 
         log_details["deduct_ratio_changes"] = deduct_ratio_changes
@@ -884,13 +863,11 @@ async def delete_product(
             product.client_id = admin_default_client.id
             product.ecpm_deduct_ratio = 0.0
             product.revenue_deduct_ratio = 0.0
-            product.cplpo_deduct_ratio = 0.0
         else:
             # 将产品的 client_id 改为默认客户（导入数据）
             product.client_id = admin_default_client.id
             product.ecpm_deduct_ratio = 0.0
             product.revenue_deduct_ratio = 0.0
-            product.cplpo_deduct_ratio = 0.0
 
             logger.info(
                 f"产品 '{product.name}' (ID: {product_id}) 已从客户ID {old_client_id} "

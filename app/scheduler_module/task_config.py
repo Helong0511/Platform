@@ -101,6 +101,18 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "清理过期超过30天的会话记录和黑名单记录，标记超过7天未活动的会话为非活跃",
     },
     
+    # ========== CPL 系统定时任务 ==========
+    "每日Cap重置": {
+        "task_name": "每日Cap重置",
+        "task_module": "app.scheduler.cpl_tasks",
+        "task_function": "reset_daily_caps_task",
+        "result_getter_module": "app.scheduler.cpl_tasks",
+        "result_getter_function": "get_task_result",
+        # 数据库配置
+        "cron_expression": "0 0 * * *",  # 每天 00:00 UTC
+        "description": "重置所有Cap配置的每日计数，每天执行一次",
+    },
+    
     # ========== TQT API获取数据任务 ==========
     "TQT API获取数据": {
         "task_name": "TQT API获取数据",

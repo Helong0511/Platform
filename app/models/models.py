@@ -89,7 +89,6 @@ class Product(Base):
     name = Column(String(100), nullable=False, comment='产品名称')
     ecpm_deduct_ratio = Column(Float, default=0.0, comment='eCPM减扣比例')
     revenue_deduct_ratio = Column(Float, default=0.0, comment='收益减扣比例')
-    cplpo_deduct_ratio = Column(Float, default=0.0, comment='CPL PO减扣比例')
     downstream_postback_url = Column(String(500), nullable=True, comment='下游 Postback URL（可选，配置后将自动转发转化数据）')
     downstream_postback_method = Column(String(10), default='GET', comment='下游 Postback 请求方式：GET 或 POST（默认GET）')
     notification_address = Column(String(500), nullable=True, comment='通知地址（Telegram Chat ID、邮箱地址、Webhook URL等，用于接收转化通知）')
@@ -375,6 +374,11 @@ class PostbackConversion(Base):
     # 关联信息
     product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True, comment='关联的产品ID')
     client_id = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, comment='关联的客户ID')
+    
+    # CPL 系统字段
+    click_id = Column(String(255), nullable=True, index=True, comment='关联的Click ID')
+    click_time = Column(DateTime, nullable=True, comment='点击时间')
+    conversion_status = Column(String(20), default='Pending', index=True, comment='转化状态：Approved/Pending')
 
     # 原始数据（JSON格式，保存完整回调数据）
     raw_data = Column(Text, nullable=True, comment='原始回调数据（JSON格式）')
@@ -393,6 +397,8 @@ class PostbackConversion(Base):
         Index("idx_postback_client", "client_id"),
         Index("idx_postback_created_at", "created_at"),
         Index("idx_postback_platform_event", "platform", "event_name"),
+        Index("idx_postback_click_id", "click_id"),
+        Index("idx_postback_conversion_status", "conversion_status"),
         # 唯一性约束：同一平台的同一转化ID只能有一条记录（防止重复处理）
         UniqueConstraint("platform", "conversion_id", "event_name", name="uq_postback_platform_conversion_event"),
     )
@@ -539,4 +545,274 @@ class ShortLink(Base):
         Index("idx_short_link_created_by", "created_by"),
         Index("idx_short_link_active", "is_active"),
         Index("idx_short_link_created_at", "created_at"),
+    )
+
+
+# ==================== CPL 系统数据模型 ====================
+
+# 广告主模型（上游）
+class Advertiser(Base):
+    __tablename__ = "advertisers"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='广告主ID')
+    advertiser_id = Column(String(50), unique=True, nullable=False, index=True, comment='广告主ID（系统生成，唯一标识）')
+    advertiser_name = Column(String(100), nullable=False, index=True, comment='广告主名称')
+    email = Column(String(255), nullable=True, comment='邮箱（可选）')
+    mobile = Column(String(20), nullable=True, comment='手机号')
+    is_active = Column(Boolean, default=True, index=True, comment='是否激活')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+
+    # 关系
+    offers = relationship("Offer", back_populates="advertiser", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_advertiser_id", "advertiser_id"),
+        Index("idx_advertiser_name", "advertiser_name"),
+        Index("idx_is_active", "is_active"),
+    )
+
+
+# 渠道模型（下游）
+class Publisher(Base):
+    __tablename__ = "publishers"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='渠道ID')
+    publisher_id = Column(String(50), unique=True, nullable=False, index=True, comment='渠道ID（系统生成，唯一标识）')
+    publisher_name = Column(String(100), nullable=False, index=True, comment='渠道名称')
+    email = Column(String(255), nullable=True, comment='邮箱（可选）')
+    price_discount = Column(Float, default=0.0, comment='渠道级别的价格扣量比例（0-100）')
+    active_advertiser_count = Column(Integer, default=0, comment='活跃的广告主数量')
+    is_active = Column(Boolean, default=True, index=True, comment='是否激活')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+
+    # 关系
+    offer_assignments = relationship("OfferPublisherAssignment", back_populates="publisher", cascade="all, delete-orphan")
+    clicks = relationship("Click", back_populates="publisher")
+    discounts = relationship("OfferDiscount", back_populates="publisher", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_publisher_id", "publisher_id"),
+        Index("idx_publisher_name", "publisher_name"),
+        Index("idx_is_active", "is_active"),
+    )
+
+
+# Offer模型（单子）
+class Offer(Base):
+    __tablename__ = "offers"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='Offer ID（主键）')
+    offer_id = Column(String(50), unique=True, nullable=False, index=True, comment='Offer ID（系统生成的唯一标识）')
+    offer_name = Column(String(200), nullable=False, comment='Offer名称')
+    advertiser_offer_id = Column(String(100), nullable=True, comment='上游系统中的Offer ID（ADV Offer ID）')
+    advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="RESTRICT"), nullable=False, index=True, comment='关联的广告主ID')
+    preview_link = Column(Text, nullable=True, comment='预览链接')
+    payout = Column(Float, nullable=True, comment='上游支付金额（PO）')
+    affiliate_payout = Column(Float, nullable=True, comment='扣价后给渠道的金额（PO扣价后）')
+    country = Column(String(50), nullable=True, index=True, comment='国家')
+    category = Column(String(50), nullable=True, comment='分类')
+    type = Column(String(50), nullable=True, comment='类型')
+    status = Column(String(20), default='Active', index=True, comment='状态：Active/Inactive')
+    upstream_cap = Column(Integer, nullable=True, comment='上游转化上限')
+    downstream_cap = Column(Integer, nullable=True, comment='下游转化上限')
+    advertiser_tracklink = Column(Text, nullable=True, comment='上游的Tracklink（不显示给下游，建立单子时配置我们的参数）')
+    downstream_tracklink = Column(Text, nullable=True, comment='生成给下游的Tracklink')
+    postback_url = Column(Text, nullable=True, comment='Postback URL（配置我们的参数）')
+    postback_method = Column(String(10), default='GET', comment='Postback请求方式：GET/POST')
+    is_active = Column(Boolean, default=True, index=True, comment='是否激活')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+
+    # 关系
+    advertiser = relationship("Advertiser", back_populates="offers")
+    offer_assignments = relationship("OfferPublisherAssignment", back_populates="offer", cascade="all, delete-orphan")
+    clicks = relationship("Click", back_populates="offer")
+    caps = relationship("OfferCap", back_populates="offer", cascade="all, delete-orphan")
+    discounts = relationship("OfferDiscount", back_populates="offer", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_offer_id", "offer_id"),
+        Index("idx_advertiser_id", "advertiser_id"),
+        Index("idx_status", "status"),
+        Index("idx_is_active", "is_active"),
+        Index("idx_country", "country"),
+    )
+
+
+# Offer-渠道分配模型
+class OfferPublisherAssignment(Base):
+    __tablename__ = "offer_publisher_assignments"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='分配ID')
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False, index=True, comment='Offer ID')
+    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="CASCADE"), nullable=False, index=True, comment='渠道ID')
+    is_active = Column(Boolean, default=True, index=True, comment='是否激活')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+
+    # 关系
+    offer = relationship("Offer", back_populates="offer_assignments")
+    publisher = relationship("Publisher", back_populates="offer_assignments")
+
+    __table_args__ = (
+        UniqueConstraint("offer_id", "publisher_id", name="uq_offer_publisher"),
+        Index("idx_offer_id", "offer_id"),
+        Index("idx_publisher_id", "publisher_id"),
+        Index("idx_is_active", "is_active"),
+    )
+
+
+# 点击记录模型
+class Click(Base):
+    __tablename__ = "clicks"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='点击记录ID')
+    click_id = Column(String(255), unique=True, nullable=False, index=True, comment='点击ID（系统生成，唯一标识）')
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的Offer ID')
+    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的渠道ID')
+    advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的广告主ID')
+    click_time = Column(DateTime, nullable=False, index=True, comment='点击时间')
+    ip = Column(String(50), nullable=True, comment='点击IP地址')
+    device = Column(String(100), nullable=True, comment='设备信息')
+    country = Column(String(50), nullable=True, comment='国家')
+    user_agent = Column(Text, nullable=True, comment='User Agent')
+    referer = Column(Text, nullable=True, comment='来源页面')
+    conversion_id = Column(Integer, nullable=True, index=True, comment='关联的转化ID（如果已转化）')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
+
+    # 关系
+    offer = relationship("Offer", back_populates="clicks")
+    publisher = relationship("Publisher", back_populates="clicks")
+    advertiser = relationship("Advertiser", foreign_keys=[advertiser_id])
+
+    __table_args__ = (
+        Index("idx_click_id", "click_id"),
+        Index("idx_offer_id", "offer_id"),
+        Index("idx_publisher_id", "publisher_id"),
+        Index("idx_advertiser_id", "advertiser_id"),
+        Index("idx_click_time", "click_time"),
+        Index("idx_conversion_id", "conversion_id"),
+    )
+
+
+# Cap配置模型
+class OfferCap(Base):
+    __tablename__ = "offer_caps"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='Cap配置ID')
+    cap_type = Column(String(50), nullable=False, index=True, comment='Cap类型：advertiser_offer/offer')
+    advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="CASCADE"), nullable=True, index=True, comment='广告主ID（如果是advertiser_offer类型）')
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False, index=True, comment='Offer ID')
+    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="CASCADE"), nullable=True, index=True, comment='渠道ID（如果为空，表示所有渠道）')
+    daily_cap = Column(Integer, nullable=True, comment='每日Cap')
+    total_cap = Column(Integer, nullable=True, comment='总Cap')
+    current_daily_count = Column(Integer, default=0, comment='当前每日计数')
+    current_total_count = Column(Integer, default=0, comment='当前总计数')
+    cap_start_date = Column(DateTime, nullable=True, comment='Cap开始日期（用于Total Cap）')
+    is_active = Column(Boolean, default=True, index=True, comment='是否激活')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+
+    # 关系
+    offer = relationship("Offer", back_populates="caps")
+    advertiser = relationship("Advertiser", foreign_keys=[advertiser_id])
+    publisher = relationship("Publisher", foreign_keys=[publisher_id])
+
+    __table_args__ = (
+        Index("idx_cap_type", "cap_type"),
+        Index("idx_offer_id", "offer_id"),
+        Index("idx_advertiser_id", "advertiser_id"),
+        Index("idx_publisher_id", "publisher_id"),
+        Index("idx_is_active", "is_active"),
+    )
+
+
+# 扣量配置模型
+class OfferDiscount(Base):
+    __tablename__ = "offer_discounts"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='扣量配置ID')
+    discount_type = Column(String(50), nullable=False, index=True, comment='扣量类型：offer/channel')
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=True, index=True, comment='Offer ID（如果是offer类型）')
+    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="CASCADE"), nullable=False, index=True, comment='渠道ID')
+    discount_ratio = Column(Float, nullable=False, comment='扣量比例（0-100）')
+    is_active = Column(Boolean, default=True, index=True, comment='是否激活')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+
+    # 关系
+    offer = relationship("Offer", back_populates="discounts")
+    publisher = relationship("Publisher", back_populates="discounts")
+
+    __table_args__ = (
+        Index("idx_discount_type", "discount_type"),
+        Index("idx_offer_id", "offer_id"),
+        Index("idx_publisher_id", "publisher_id"),
+        Index("idx_is_active", "is_active"),
+    )
+
+
+# 上游测试记录模型
+class AdvertiserTest(Base):
+    __tablename__ = "advertiser_tests"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='测试记录ID')
+    advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="CASCADE"), nullable=False, index=True, comment='广告主ID')
+    advertiser_name = Column(String(100), nullable=True, comment='广告主名称')
+    advertiser_offer_id = Column(String(100), nullable=True, comment='上游系统中的Offer ID')
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False, index=True, comment='平台内的Offer ID')
+    offer_name = Column(String(200), nullable=True, comment='Offer名称')
+    price = Column(Float, nullable=True, comment='价格')
+    country = Column(String(50), nullable=True, comment='国家')
+    click_id = Column(String(255), nullable=True, comment='测试生成的Click ID')
+    click_url = Column(Text, nullable=True, comment='测试生成的Click Url')
+    test_time = Column(DateTime, nullable=True, index=True, comment='测试时间')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
+
+    # 关系
+    advertiser = relationship("Advertiser", foreign_keys=[advertiser_id])
+    offer = relationship("Offer", foreign_keys=[offer_id])
+
+    __table_args__ = (
+        Index("idx_advertiser_id", "advertiser_id"),
+        Index("idx_offer_id", "offer_id"),
+        Index("idx_test_time", "test_time"),
+    )
+
+
+# 下游测试记录模型
+class AffiliateTest(Base):
+    __tablename__ = "affiliate_tests"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='测试记录ID')
+    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="CASCADE"), nullable=False, index=True, comment='渠道ID')
+    click_id = Column(String(255), nullable=False, index=True, comment='下游提供的Click ID')
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False, index=True, comment='Offer ID')
+    offer_name = Column(String(200), nullable=True, comment='Offer名称')
+    price = Column(Float, nullable=True, comment='价格')
+    country = Column(String(50), nullable=True, comment='国家')
+    platform = Column(String(50), nullable=True, comment='平台')
+    postback_time = Column(DateTime, nullable=True, index=True, comment='Postback发送时间')
+    status = Column(String(50), nullable=True, index=True, comment='发送状态：Send Success/Failed')
+    affiliate_return_content = Column(Text, nullable=True, comment='渠道返回内容')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
+
+    # 关系
+    publisher = relationship("Publisher", foreign_keys=[publisher_id])
+    offer = relationship("Offer", foreign_keys=[offer_id])
+
+    __table_args__ = (
+        Index("idx_publisher_id", "publisher_id"),
+        Index("idx_offer_id", "offer_id"),
+        Index("idx_click_id", "click_id"),
+        Index("idx_status", "status"),
+        Index("idx_postback_time", "postback_time"),
     )

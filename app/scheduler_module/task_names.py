@@ -31,6 +31,9 @@ TBSJ_API_TASK_NAME = "yangyangdeyi API获取数据"
 # yangyangdeyi API获取数据任务
 ADDERMOBI_API_TASK_NAME = "Addermobi API获取数据"
 
+# CPL 系统定时任务
+RESET_DAILY_CAPS_TASK_NAME = "每日Cap重置"
+
 # ==================== 任务名称映射 ====================
 # 用于快速查找任务名称，格式：{任务模块名: 任务名称常量}
 
@@ -42,6 +45,7 @@ TASK_NAME_MAP = {
     "skymobi_task": SKYMOBI_API_TASK_NAME,
     "tbsj_task": TBSJ_API_TASK_NAME,
     "addermobi_task": ADDERMOBI_API_TASK_NAME,
+    "cpl_tasks": RESET_DAILY_CAPS_TASK_NAME,
 }
 
 # ==================== 所有任务名称列表 ====================
@@ -55,6 +59,7 @@ ALL_TASK_NAMES = [
     SKYMOBI_API_TASK_NAME,
     TBSJ_API_TASK_NAME,
     ADDERMOBI_API_TASK_NAME,
+    RESET_DAILY_CAPS_TASK_NAME,
 ]
 
 
