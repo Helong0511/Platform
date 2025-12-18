@@ -6,6 +6,7 @@ class ProductBase(BaseModel):
     name: str | None = None
     ecpm_deduct_ratio: float | None = Field(None, ge=0, le=1)
     revenue_deduct_ratio: float | None = Field(None, ge=0, le=1)
+    cplpo_deduct_ratio: float | None = Field(None, ge=0, le=1, description='CPL PO减扣比例')
     is_active: bool | None = True
     client_id: int | None = None
     downstream_postback_url: str | None = Field(
@@ -35,6 +36,7 @@ class ProductCreate(ProductBase):
     name: str
     ecpm_deduct_ratio: float = Field(..., ge=0, le=1)
     revenue_deduct_ratio: float = Field(..., ge=0, le=1)
+    cplpo_deduct_ratio: float = Field(0.0, ge=0, le=1, description='CPL PO减扣比例')
     client_id: int
 
 

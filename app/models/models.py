@@ -89,6 +89,7 @@ class Product(Base):
     name = Column(String(100), nullable=False, comment='产品名称')
     ecpm_deduct_ratio = Column(Float, default=0.0, comment='eCPM减扣比例')
     revenue_deduct_ratio = Column(Float, default=0.0, comment='收益减扣比例')
+    cplpo_deduct_ratio = Column(Float, default=0.0, comment='CPL PO减扣比例')
     downstream_postback_url = Column(String(500), nullable=True, comment='下游 Postback URL（可选，配置后将自动转发转化数据）')
     downstream_postback_method = Column(String(10), default='GET', comment='下游 Postback 请求方式：GET 或 POST（默认GET）')
     notification_address = Column(String(500), nullable=True, comment='通知地址（Telegram Chat ID、邮箱地址、Webhook URL等，用于接收转化通知）')

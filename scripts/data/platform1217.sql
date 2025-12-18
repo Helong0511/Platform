@@ -307,6 +307,7 @@ CREATE TABLE IF NOT EXISTS `products`  (
   `name` varchar(100) NOT NULL COMMENT '产品名称',
   `ecpm_deduct_ratio` float NOT NULL DEFAULT 0 COMMENT 'eCPM减扣比例',
   `revenue_deduct_ratio` float NOT NULL DEFAULT 0 COMMENT '收益减扣比例',
+  `cplpo_deduct_ratio` float NOT NULL DEFAULT 0 COMMENT 'CPL PO减扣比例',
   `is_active` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否激活',
   `notification_address` varchar(500) NULL DEFAULT NULL COMMENT '通知地址（Telegram Chat ID、邮箱地址、Webhook URL等，用于接收转化通知）',
   `downstream_postback_method` varchar(10) NULL DEFAULT 'GET' COMMENT '下游 Postback 请求方式：GET 或 POST（默认GET）',
