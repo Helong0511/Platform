@@ -298,7 +298,7 @@ const loadData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: pagination.pageSize,
+      page_size: Math.min(pagination.pageSize, 100),
       discount_type: filterDiscountType.value || undefined,
       offer_id: filterOffer.value || undefined,
       publisher_id: filterPublisher.value || undefined,

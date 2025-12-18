@@ -83,6 +83,7 @@
           v-model:page-size="pagination.pageSize"
           :total="pagination.total"
           :page-sizes="[10, 20, 50, 100]"
+          :max-page-size="100"
           layout="total, sizes, prev, pager, next, jumper"
           @size-change="handleSizeChange"
           @current-change="handlePageChange"
@@ -177,9 +178,11 @@ const formRules = {
 const loadData = async () => {
   loading.value = true
   try {
+    // 限制 page_size 最大值为 100
+    const pageSize = Math.min(pagination.pageSize, 100)
     const params = {
       page: pagination.page,
-      page_size: pagination.pageSize,
+      page_size: pageSize,
       search: searchKeyword.value || undefined,
       is_active: filterActive.value !== null ? filterActive.value : undefined
     }

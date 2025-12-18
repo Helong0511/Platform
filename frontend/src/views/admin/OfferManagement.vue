@@ -402,7 +402,7 @@ const loadData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: pagination.pageSize,
+      page_size: Math.min(pagination.pageSize, 100),
       search: searchKeyword.value || undefined,
       advertiser_id: filterAdvertiser.value || undefined,
       status: filterStatus.value || undefined,

@@ -160,9 +160,11 @@ const formRules = {
 const loadData = async () => {
   loading.value = true
   try {
+    // 限制 page_size 最大值为 100
+    const pageSize = Math.min(pagination.pageSize, 100)
     const params = {
       page: pagination.page,
-      page_size: pagination.pageSize,
+      page_size: pageSize,
       search: searchKeyword.value || undefined,
       is_active: filterActive.value !== null ? filterActive.value : undefined
     }

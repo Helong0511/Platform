@@ -232,7 +232,7 @@ const loadData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: pagination.pageSize,
+      page_size: Math.min(pagination.pageSize, 100),
       click_id: filterClickId.value || undefined,
       offer_id: filterOffer.value || undefined,
       publisher_id: filterPublisher.value || undefined,
