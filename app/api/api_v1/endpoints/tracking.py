@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, Query, Path, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from fastapi.responses import RedirectResponse
+from fastapi import BackgroundTasks
+from app.core.database import AsyncSessionLocal
 
 from app.core.database import get_db
 from app.core.security import get_current_user
@@ -23,10 +25,24 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+# 后台任务：创建点击记录
+async def create_click_background(click_data: dict):
+    """异步创建点击记录"""
+    async with AsyncSessionLocal() as session:
+        try:
+            click = Click(**click_data)
+            session.add(click)
+            await session.commit()
+            # 不需要refresh，因为不需要返回给用户
+        except Exception as e:
+            logger.error(f"异步保存点击记录失败: {e}", exc_info=True)
+
+
 @router.get("/track/click/{offer_id}", summary="点击追踪", tags=["点击追踪"])
 async def track_click(
     offer_id: str = Path(..., description="Offer ID"),
     publisher_id: Optional[str] = Query(None, description="渠道ID"),
+    background_tasks: BackgroundTasks = None,  # 注入 BackgroundTasks
     request: Request = None,
     db: AsyncSession = Depends(get_db)
 ):
@@ -90,23 +106,28 @@ async def track_click(
         referer = request.headers.get("referer") if request else None
         
         # 5. 创建点击记录
-        click = Click(
-            click_id=click_id,
-            offer_id=offer.id,
-            publisher_id=publisher.id if publisher else None,
-            advertiser_id=offer.advertiser_id,
-            click_time=datetime.now(timezone.utc),
-            ip=client_ip,
-            user_agent=user_agent,
-            referer=referer,
-            country=None  # 可以通过 IP 解析国家，这里暂时留空
-        )
+        click_data = {
+            "click_id": click_id,
+            "offer_id": offer.id,
+            "publisher_id": publisher.id if publisher else None,
+            "advertiser_id": offer.advertiser_id,
+            "click_time": datetime.now(timezone.utc),
+            "ip": client_ip,
+            "user_agent": user_agent,
+            "referer": referer,
+            "country": None
+        }
         
-        db.add(click)
-        await db.commit()
-        await db.refresh(click)
+        # 使用后台任务异步写入
+        # 注意：使用 BackgroundTasks 不会阻塞响应
+        background_tasks.add_task(create_click_background, click_data)
         
-        logger.info(f"点击记录创建成功: click_id={click_id}, offer_id={offer_id}, publisher_id={publisher_id}")
+        # 原同步代码注释掉
+        # click = Click(...)
+        # db.add(click)
+        # await db.commit()
+        
+        logger.info(f"点击请求已接收 (异步写入): click_id={click_id}, offer_id={offer_id}")
         
         # 6. 生成重定向 URL（使用下游 Tracklink 或 Preview Link）
         if offer.downstream_tracklink:

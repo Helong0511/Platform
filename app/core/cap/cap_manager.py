@@ -13,6 +13,9 @@ from app.models.models import OfferCap, Offer, Click, PostbackConversion
 
 logger = logging.getLogger(__name__)
 
+from app.core.cap.redis_counter import RedisCapManager, get_daily_cap_key, get_total_cap_key
+from app.core.redis_client import get_redis_client
+
 
 async def check_cap(
     db: AsyncSession,
@@ -80,64 +83,49 @@ async def check_cap(
         for cap in caps:
             # 检查每日 Cap
             if cap.daily_cap:
-                # 统计今日转化数量（从实际转化记录统计）
-                now = datetime.now(timezone.utc)
-                today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                # ====== 优化：使用 Redis 获取当前计数 ======
+                redis = await get_redis_client()
+                actual_count = 0
                 
-                # 通过 Click 记录关联统计今日转化
-                # 注意：这里需要 PostbackConversion 有 click_id 字段
-                # 如果字段不存在，使用 current_daily_count
-                if hasattr(PostbackConversion, 'click_id'):
-                    # 从实际转化记录统计
-                    conversion_count_query = select(func.count(PostbackConversion.id)).join(
-                        Click, PostbackConversion.click_id == Click.click_id
-                    ).where(
-                        and_(
-                            Click.offer_id == offer_id,
-                            Click.click_time >= today_start,
-                            Click.click_time < now
-                        )
-                    )
-                    if publisher_id:
-                        conversion_count_query = conversion_count_query.where(Click.publisher_id == publisher_id)
-                    if advertiser_id:
-                        conversion_count_query = conversion_count_query.where(Click.advertiser_id == advertiser_id)
+                if redis:
+                    # 尝试从 Redis 读取
+                    now = datetime.now(timezone.utc)
+                    redis_key = get_daily_cap_key(cap.offer_id, now, cap.publisher_id)
+                    redis_val = await redis.get(redis_key)
                     
-                    actual_count = (await db.execute(conversion_count_query)).scalar() or 0
+                    if redis_val is not None:
+                        actual_count = int(redis_val)
+                    else:
+                        # Redis 未命中（冷启动），从 DB 初始化
+                        # 使用原子 SQL 查询避免大表 COUNT
+                        # 注意：这里为了性能，如果 DB 也很大，可以直接信任 OfferCap 表的缓存字段 current_daily_count
+                        # 或者只在 Redis 失效时查一次大表
+                        if cap.cap_start_date and cap.cap_start_date.date() == today_start.date():
+                             actual_count = cap.current_daily_count
+                        else:
+                             actual_count = 0
+                        
+                        # 回写 Redis (设置过期时间)
+                        try:
+                            await redis.setex(redis_key, 48 * 3600, actual_count)
+                        except Exception as e:
+                            logger.warning(f"Redis回写失败: {e}")
                 else:
-                    # 使用缓存的计数
-                    actual_count = cap.current_daily_count
+                    # Redis 不可用，降级到 DB 缓存字段 (不再执行实时 COUNT)
+                    if cap.cap_start_date and cap.cap_start_date.date() == today_start.date():
+                        actual_count = cap.current_daily_count
+                    else:
+                        actual_count = 0
                 
                 if actual_count >= cap.daily_cap:
                     return False, f"已达到每日Cap限制: {cap.daily_cap} (当前: {actual_count})"
             
             # 检查总 Cap
             if cap.total_cap:
-                # 优先从实际转化记录统计（更准确）
-                if hasattr(PostbackConversion, 'click_id') and hasattr(PostbackConversion, 'conversion_status'):
-                    # 从实际转化记录统计总转化（只统计 Approved 状态的转化）
-                    total_count_query = select(func.count(PostbackConversion.id)).join(
-                        Click, PostbackConversion.click_id == Click.click_id
-                    ).where(
-                        and_(
-                            Click.offer_id == offer_id,
-                            PostbackConversion.conversion_status == 'Approved'  # 只统计已批准的转化
-                        )
-                    )
-                    if publisher_id:
-                        total_count_query = total_count_query.where(Click.publisher_id == publisher_id)
-                    if advertiser_id:
-                        total_count_query = total_count_query.where(Click.advertiser_id == advertiser_id)
-                    if cap.cap_start_date:
-                        total_count_query = total_count_query.where(Click.click_time >= cap.cap_start_date)
-                    
-                    actual_total_count = (await db.execute(total_count_query)).scalar() or 0
-                else:
-                    # 使用缓存的计数
-                    actual_total_count = cap.current_total_count
-                
+                # 使用 DB 缓存字段优化
+                actual_total_count = cap.current_total_count
                 if actual_total_count >= cap.total_cap:
-                    return False, f"已达到总Cap限制: {cap.total_cap} (当前: {actual_total_count})"
+                     return False, f"已达到总Cap限制: {cap.total_cap} (当前: {actual_total_count})"
         
         return True, None
     except Exception as e:
@@ -206,13 +194,31 @@ async def increment_cap_count(
                 if cap.cap_start_date and cap.cap_start_date.date() < today_start.date():
                     cap.current_daily_count = 0
                     cap.cap_start_date = today_start
+                
+                # DB 更新
                 cap.current_daily_count += 1
+
+                # ====== 优化：Redis 原子递增 ======
+                try:
+                    await RedisCapManager.check_and_increment_daily(
+                         cap.offer_id, cap.daily_cap, cap.publisher_id
+                    )
+                except Exception as e:
+                    logger.warning(f"Redis计数递增失败: {e}")
             
             # 增加总计数
             if cap.total_cap:
                 if not cap.cap_start_date:
                     cap.cap_start_date = now
                 cap.current_total_count += 1
+                
+                # Redis 更新 (Total Cap)
+                try:
+                    await RedisCapManager.check_and_increment_total(
+                        cap.offer_id, cap.total_cap, cap.publisher_id
+                    )
+                except Exception as e:
+                    logger.warning(f"Redis总计数递增失败: {e}")
         
         await db.commit()
     except Exception as e:
