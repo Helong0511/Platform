@@ -111,7 +111,8 @@
           </el-table-column>
           <el-table-column prop="po" label="支付 (PO)" width="120" align="right">
             <template #default="scope">
-              {{ scope.row.po.toFixed(2) }}
+              <span v-if="scope.row.po !== undefined && scope.row.po !== null">{{ scope.row.po.toFixed(2) }}</span>
+              <span v-else>0.00</span>
             </template>
           </el-table-column>
         </el-table>

@@ -329,6 +329,14 @@ const handlePageChange = () => {
 onMounted(() => {
   loadOffers()
   loadPublishers()
+  // 默认查询最近30天
+  const endDate = new Date()
+  const startDate = new Date()
+  startDate.setDate(startDate.getDate() - 30)
+  dateRange.value = [
+    startDate.toISOString().split('T')[0],
+    endDate.toISOString().split('T')[0]
+  ]
   loadData()
 })
 </script>
