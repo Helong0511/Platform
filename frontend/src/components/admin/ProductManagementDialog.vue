@@ -187,7 +187,7 @@
         ref="formRef" 
         :model="formData" 
         :rules="formRules" 
-        label-width="130px"
+        label-width="140px"
         class="product-form"
       >
         <el-form-item label="产品名称" prop="name" class="product-name-item">
@@ -286,7 +286,7 @@
             ></el-input-number>
             <div class="form-hint">
               <el-icon :size="16"><InfoFilled /></el-icon>
-              <span>CPL 系统的 PO（Price Out）扣减比例，范围：0.00 - 1.00（例如：0.10 表示 10%）</span>
+              <span>CPL 系统的 PO (Price Out) 扣减比例, 范围: 0.00 - 1.00 (例如: 0.10 表示 10%)</span>
             </div>
           </div>
         </el-form-item>
