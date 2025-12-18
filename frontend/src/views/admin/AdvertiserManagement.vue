@@ -269,6 +269,10 @@ const handleSubmit = async () => {
       if (response.code === 200) {
         ElMessage.success(isEdit.value ? '更新成功' : '创建成功')
         dialogVisible.value = false
+        // 创建成功后重置到第一页并刷新列表
+        if (!isEdit.value) {
+          pagination.page = 1
+        }
         loadData()
       } else {
         ElMessage.error(response.message || '操作失败')
