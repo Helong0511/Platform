@@ -73,7 +73,7 @@
       >
         <el-table-column prop="date" label="数据日期" sortable="custom"></el-table-column>
         <el-table-column v-if="isAdmin" prop="user_name" label="所属客户"></el-table-column>
-        <el-table-column prop="product_name" label="产品名称" sortable="custom" sort-by="product"></el-table-column>
+        <el-table-column prop="product_name" label="产品名称" sortable="custom" sort-by="product" :min-width="150"></el-table-column>
         <el-table-column prop="country_name_zh" label="国家"></el-table-column>
         <el-table-column prop="request_count" label="请求数" sortable="custom"></el-table-column>
         <el-table-column prop="match_count" label="匹配数" sortable="custom"></el-table-column>
