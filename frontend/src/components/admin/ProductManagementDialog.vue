@@ -97,7 +97,7 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="cplpo_deduct_ratio" :label="isMobile ? 'CPL PO' : 'CPL PO减扣比例'" :width="isMobile ? 70 : 120" align="center" class-name="cplpo-column">
+          <el-table-column prop="cplpo_deduct_ratio" :label="isMobile ? 'CPL PO' : 'CPL PO扣减比例'" :width="isMobile ? 70 : 120" align="center" class-name="cplpo-column">
             <template #default="scope">
               <el-tag type="info" effect="dark" :size="isMobile ? 'small' : 'default'">
                 {{ formatPercentage(scope.row.cplpo_deduct_ratio) }}
@@ -268,6 +268,25 @@
             <div class="form-hint">
               <el-icon :size="16"><InfoFilled /></el-icon>
               <span>范围：0.00 - 1.00（例如：0.10 表示 10%）</span>
+            </div>
+          </div>
+        </el-form-item>
+        <el-form-item label="CPL PO扣减比例" prop="cplpo_deduct_ratio">
+          <div>
+            <el-input-number
+              v-model="formData.cplpo_deduct_ratio"
+              :min="0"
+              :max="1"
+              :step="0.01"
+              :precision="4"
+              style="width: 100%;"
+              placeholder="0.00-1.00"
+              size="large"
+              controls-position="right"
+            ></el-input-number>
+            <div class="form-hint">
+              <el-icon :size="16"><InfoFilled /></el-icon>
+              <span>CPL 系统的 PO（Price Out）扣减比例，范围：0.00 - 1.00（例如：0.10 表示 10%）</span>
             </div>
           </div>
         </el-form-item>
@@ -679,8 +698,8 @@ const formRules = {
     { type: 'number', min: 0, max: 1, message: 'eCPM减扣比例范围：0.00 - 1.00', trigger: 'blur' }
   ],
   cplpo_deduct_ratio: [
-    { required: true, message: '请输入CPL PO减扣比例', trigger: 'blur' },
-    { type: 'number', min: 0, max: 1, message: 'CPL PO减扣比例范围：0.00 - 1.00', trigger: 'blur' }
+    { required: true, message: '请输入CPL PO扣减比例', trigger: 'blur' },
+    { type: 'number', min: 0, max: 1, message: 'CPL PO扣减比例范围：0.00 - 1.00', trigger: 'blur' }
   ],
   revenue_deduct_ratio: [
     { required: true, message: '请输入收益减扣比例', trigger: 'blur' },
