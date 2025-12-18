@@ -74,7 +74,7 @@
         style="width: 100%; margin-top: 20px;"
       >
         <el-table-column prop="offer_id" label="Offer ID" width="150" />
-        <el-table-column prop="offer_name" label="Offer名称" min-width="200" />
+        <el-table-column prop="offer_name" label="Offer名称" width="180" show-overflow-tooltip />
         <el-table-column prop="advertiser_name" label="广告主" width="150" />
         <el-table-column prop="advertiser_offer_id" label="上游Offer ID" width="150" />
         <el-table-column prop="payout" label="上游PO" width="100" align="right">
