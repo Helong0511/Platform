@@ -51,6 +51,8 @@ async def create_publisher(
         publisher_name=publisher_in.publisher_name,
         email=publisher_in.email,
         price_discount=publisher_in.price_discount,
+        postback_url=publisher_in.postback_url,
+        postback_method=publisher_in.postback_method,
         is_active=publisher_in.is_active
     )
     

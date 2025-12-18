@@ -662,6 +662,14 @@ async def global_exception_handler(request: Request, exc: Exception):
     # HTTPException 应该由专门的处理器处理，不应该到达这里
     # 但如果到达这里，说明可能在异常处理过程中连接已断开
     if isinstance(exc, HTTPException):
+        # 首先检查是否是流关闭异常（可能在异常链中）
+        error_type = type(exc).__name__
+        error_module = type(exc).__module__
+        if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+            "anyio" in error_module):
+            # 如果HTTPException本身就是流异常包装的，直接重新抛出
+            raise exc
+        
         # 检查连接是否已断开
         # 如果连接已断开，不应该尝试发送响应，直接抛出流异常
         try:
@@ -677,13 +685,16 @@ async def global_exception_handler(request: Request, exc: Exception):
         except Exception:
             pass
         
-        # 检查是否是流关闭异常（可能在检查连接状态时已经抛出）
-        error_type = type(exc).__name__
-        error_module = type(exc).__module__
-        if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
-            "anyio" in error_module):
-            # 如果HTTPException本身就是流异常包装的，直接重新抛出
-            raise exc
+        # 尝试检查连接状态（通过检查异常上下文）
+        # 如果HTTPException是在连接断开时抛出的，其上下文可能包含流异常信息
+        if hasattr(exc, '__context__') and exc.__context__:
+            context_type = type(exc.__context__).__name__
+            context_module = type(exc.__context__).__module__
+            if ("EndOfStream" in context_type or "WouldBlock" in context_type or 
+                "anyio" in context_module):
+                logger.debug("检测到连接断开上下文，跳过HTTPException处理")
+                from anyio import EndOfStream
+                raise EndOfStream("客户端已断开连接")
         
         # 如果连接仍然有效，重新抛出 HTTPException 让专门的处理器处理
         # 但如果重新抛出时连接断开，会被下面的流异常检查捕获
@@ -699,6 +710,16 @@ async def global_exception_handler(request: Request, exc: Exception):
                 # 连接已断开，直接重新抛出流异常，让ASGI服务器处理
                 raise stream_error
             # 其他连接错误，重新抛出
+            raise
+        except Exception as e:
+            # 如果重新抛出时捕获到其他异常，检查是否是流异常
+            error_type = type(e).__name__
+            error_module = type(e).__module__
+            if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+                "anyio" in error_module):
+                logger.debug("检测到流异常，跳过HTTPException处理")
+                raise e
+            # 其他异常，重新抛出
             raise
 
     # 检查是否是流关闭相关的异常（客户端提前关闭连接）

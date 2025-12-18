@@ -516,11 +516,16 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 stored_prefix = stored_token[:10] if stored_token and len(stored_token) > 10 else (stored_token or "None")
                 csrf_prefix = csrf_token[:10] if csrf_token and len(csrf_token) > 10 else (csrf_token or "None")
                 logger.warning(f"CSRF令牌不匹配: {request.method} {request.url.path}, IP: {client_ip}, session_id: {session_id}, user_id: {user_id}, 期望: {stored_prefix}..., 实际: {csrf_prefix}...")
-                # 检查连接是否仍然有效
+                # 检查连接是否仍然有效（在抛出异常前）
                 try:
                     if hasattr(request, '_is_disconnected') and request._is_disconnected:
                         logger.debug("客户端已断开连接，跳过CSRF验证")
-                        return await call_next(request)
+                        # 连接已断开，直接抛出流异常，不调用 call_next
+                        from anyio import EndOfStream
+                        raise EndOfStream("客户端已断开连接")
+                except EndOfStream:
+                    # 如果已经是流异常，直接重新抛出
+                    raise
                 except Exception:
                     pass
                 

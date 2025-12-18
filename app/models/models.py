@@ -583,6 +583,8 @@ class Publisher(Base):
     publisher_name = Column(String(100), nullable=False, index=True, comment='渠道名称')
     email = Column(String(255), nullable=True, comment='邮箱（可选）')
     price_discount = Column(Float, default=0.0, comment='渠道级别的价格扣量比例（0-100）')
+    postback_url = Column(Text, nullable=True, comment='Postback URL（渠道的Postback配置）')
+    postback_method = Column(String(10), default='GET', comment='Postback请求方式：GET/POST')
     active_advertiser_count = Column(Integer, default=0, comment='活跃的广告主数量')
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
