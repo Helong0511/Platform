@@ -242,7 +242,7 @@ const filteredOffers = computed(() => {
 // 加载基础数据
 const loadAdvertisers = async () => {
   try {
-    const response = await getAdvertisers({ page: 1, page_size: 1000 })
+    const response = await getAdvertisers({ page: 1, page_size: 100 })
     if (response.code === 200) {
       advertiserList.value = response.data.data || []
     }

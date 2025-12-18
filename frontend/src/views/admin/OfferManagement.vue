@@ -375,7 +375,7 @@ const formRules = {
 // 加载广告主列表
 const loadAdvertisers = async () => {
   try {
-    const response = await getAdvertisers({ page: 1, page_size: 1000 })
+    const response = await getAdvertisers({ page: 1, page_size: 100 })
     if (response.code === 200) {
       advertiserList.value = response.data.data || []
     }
@@ -387,7 +387,7 @@ const loadAdvertisers = async () => {
 // 加载渠道列表
 const loadPublishers = async () => {
   try {
-    const response = await getPublishers({ page: 1, page_size: 1000 })
+    const response = await getPublishers({ page: 1, page_size: 100 })
     if (response.code === 200) {
       publisherList.value = response.data.data || []
     }

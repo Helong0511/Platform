@@ -217,7 +217,7 @@ const loadOffers = async () => {
 
 const loadPublishers = async () => {
   try {
-    const response = await getPublishers({ page: 1, page_size: 1000 })
+    const response = await getPublishers({ page: 1, page_size: 100 })
     if (response.code === 200) {
       publisherList.value = response.data.data || []
     }
