@@ -49,7 +49,7 @@
           <el-tag type="primary">{{ scope.row.short_code }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="short_url" label="短链接" width="250">
+      <el-table-column prop="short_url" label="短链接" width="350" show-overflow-tooltip>
         <template #default="scope">
           <el-link :href="scope.row.short_url" target="_blank" type="primary">
             {{ scope.row.short_url }}
