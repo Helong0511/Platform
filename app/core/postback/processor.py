@@ -12,7 +12,7 @@ from sqlalchemy.future import select
 from app.core.postback.handlers import get_handler
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
-from app.models.models import PostbackConversion, Product, Click, Offer
+from app.models.models import PostbackConversion, Product, Click, Offer, PostbackForwardQueue
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.cap import check_cap, increment_cap_count
@@ -146,6 +146,23 @@ class PostbackProcessor:
                     publisher_id = click_record.publisher_id
                     advertiser_id = click_record.advertiser_id
                     
+                    # 0. 检查点击有效期 (Click Validity)
+                    if offer_id:
+                        offer = await db.execute(select(Offer).where(Offer.id == offer_id))
+                        offer_obj = offer.scalars().first()
+                        if offer_obj:
+                            validity_hours = offer_obj.click_validity_hours or 720  # 默认30天
+                            # 计算小时差
+                            hours_diff = (datetime.now() - click_time).total_seconds() / 3600
+                            if hours_diff > validity_hours:
+                                logger.warning(
+                                    f"转化被点击有效期拒绝: conversion_id={conversion_id}, "
+                                    f"click_age={hours_diff:.1f}h, limit={validity_hours}h"
+                                )
+                                # 标记状态为 ClickExpired，由后续逻辑处理
+                                normalized_data["status_override"] = "ClickExpired"
+                                normalized_data["rejection_reason"] = f"Click expired ({hours_diff:.1f}h > {validity_hours}h)"
+
                     # 检查 Cap 限制
                     if offer_id:
                         is_allowed, cap_reason = await check_cap(
@@ -205,17 +222,41 @@ class PostbackProcessor:
             await db.refresh(conversion)
             
             # 8.5. 如果通过了 Cap 检查，增加 Cap 计数
-            if offer_id and click_id:
-                try:
-                    await increment_cap_count(
-                        db=db,
-                        offer_id=offer_id,
-                        publisher_id=publisher_id,
-                        advertiser_id=advertiser_id
-                    )
-                except Exception as e:
-                    # Cap 计数失败不影响主流程
-                    logger.warning(f"增加Cap计数失败: {str(e)}")
+            # 只有当转化状态正常(Pending/Approved)时才增加计数
+            if offer_id and click_id and conversion.conversion_status in ['Pending', 'Approved']:
+                # 检查是否有 Override 状态
+                if normalized_data.get("status_override"):
+                    conversion.conversion_status = normalized_data.get("status_override")
+                    if normalized_data.get("rejection_reason"):
+                         # 记录拒绝原因到 raw_data 或其他字段? 暂时只改状态
+                         pass
+                else:
+                    # 尝试增加计数
+                    try:
+                        is_within_cap = await increment_cap_count(
+                            db=db,
+                            offer_id=offer_id,
+                            publisher_id=publisher_id,
+                            advertiser_id=advertiser_id
+                        )
+                        
+                        if not is_within_cap:
+                            # 严重：计数递增后发现超限 (Race Condition 捕获)
+                            logger.warning(
+                                f"转化在计数后被判定超限 (Race Condition): conversion_id={conversion_id}, "
+                                f"offer_id={offer_id}. 更新状态为 CapReached"
+                            )
+                            conversion.conversion_status = 'CapReached'
+                            # 注意：这里我们不需要回滚计数，因为 Redis 计数已经加了。
+                            # 实际上这会导致 Cap 计数略微超过限制，但这是为了防止超发给下游。
+                            # 如果想回滚，可以在 cap_manager 中增加 decrement 方法。
+                            
+                    except Exception as e:
+                        # Cap 计数失败不影响主流程，但记录严重错误
+                        logger.error(f"增加Cap计数失败: {str(e)}")
+            
+            # 再次提交以保存状态更新
+            await db.commit()
             
             logger.info(
                 f"平台 {platform} postback 转化记录已保存: "
@@ -248,38 +289,39 @@ class PostbackProcessor:
                 )
                 product = result.scalars().first()
             
-            if product and product.downstream_postback_url:
-                # 异步转发，不阻塞主流程
-                # 注意：需要在后台任务中使用新的数据库会话
+            if product and product.downstream_postback_url and conversion.conversion_status in ['Pending', 'Approved']:
+                # 使用可靠的队列机制
                 try:
+                     # 插入转发队列
+                    queue_item = PostbackForwardQueue(
+                        conversion_id=conversion.id,
+                        product_id=product.id,
+                        downstream_url=product.downstream_postback_url,
+                        request_method=product.downstream_postback_method or 'GET',
+                        # 这里简简化处理，实际可能需要根据 method 构造 data/params
+                        # 暂时先用 raw_data_json 作为 data，后续由 forwarder 处理
+                        request_data=raw_data_json if product.downstream_postback_method == 'POST' else None,
+                        request_params=None, # 如果是GET，参数组合逻辑在 forwarder 中
+                        created_at=datetime.now(timezone.utc),
+                        next_retry_time=datetime.now(timezone.utc)
+                    )
+                    db.add(queue_item)
+                    await db.commit()
+                    
+                    # 触发后台任务处理队列 (Fire & Forget)
+                    # 即使这里触发失败，定时任务也会兜底
+                    from app.scheduler.forward_tasks import trigger_forward_processing
                     import asyncio
-                    from app.core.database import AsyncSessionLocal
-                    
-                    async def forward_task():
-                        """后台转发任务"""
-                        async with AsyncSessionLocal() as new_db:
-                            # 重新查询转化记录和产品（使用新的会话）
-                            conv_result = await new_db.execute(
-                                select(PostbackConversion).where(PostbackConversion.id == conversion.id)
-                            )
-                            new_conversion = conv_result.scalars().first()
-                            
-                            prod_result = await new_db.execute(
-                                select(Product).where(Product.id == product_id)
-                            )
-                            new_product = prod_result.scalars().first()
-                            
-                            if new_conversion and new_product:
-                                await PostbackForwarder.forward_to_downstream(
-                                    new_conversion, new_product, new_db
-                                )
-                    
-                    asyncio.create_task(forward_task())
+                    try:
+                         asyncio.create_task(trigger_forward_processing())
+                    except:
+                         pass
+                         
                 except Exception as e:
-                    # 转发失败不影响主流程，只记录日志
-                    logger.warning(
-                        f"创建下游转发任务失败: conversion_id={conversion_id}, "
-                        f"product_id={product_id}, error={str(e)}"
+                    # 转发入队失败
+                    logger.error(
+                        f"下游转发入队失败: conversion_id={conversion_id}, "
+                        f"error={str(e)}"
                     )
             
             # 11. 返回成功响应

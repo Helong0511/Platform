@@ -139,7 +139,7 @@ async def increment_cap_count(
     offer_id: int,
     publisher_id: Optional[int] = None,
     advertiser_id: Optional[int] = None
-) -> None:
+) -> bool:
     """
     增加 Cap 计数
     
@@ -148,6 +148,9 @@ async def increment_cap_count(
         offer_id: Offer ID
         publisher_id: 渠道ID（可选）
         advertiser_id: 广告主ID（可选）
+        
+    Returns:
+        bool: True=计数增加成功且未超限, False=计数增加后发现超限
     """
     try:
         # 查询所有相关的 Cap 配置
@@ -187,6 +190,8 @@ async def increment_cap_count(
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
+        all_passed = True
+        
         for cap in caps:
             # 增加每日计数
             if cap.daily_cap:
@@ -200,9 +205,13 @@ async def increment_cap_count(
 
                 # ====== 优化：Redis 原子递增 ======
                 try:
-                    await RedisCapManager.check_and_increment_daily(
+                    # 获取原子递增结果
+                    passed = await RedisCapManager.check_and_increment_daily(
                          cap.offer_id, cap.daily_cap, cap.publisher_id
                     )
+                    if not passed:
+                        all_passed = False
+                        logger.warning(f"每日Cap超限: offer={cap.offer_id}, limit={cap.daily_cap}")
                 except Exception as e:
                     logger.warning(f"Redis计数递增失败: {e}")
             
@@ -214,16 +223,23 @@ async def increment_cap_count(
                 
                 # Redis 更新 (Total Cap)
                 try:
-                    await RedisCapManager.check_and_increment_total(
+                    passed = await RedisCapManager.check_and_increment_total(
                         cap.offer_id, cap.total_cap, cap.publisher_id
                     )
+                    if not passed:
+                        all_passed = False
+                        logger.warning(f"总Cap超限: offer={cap.offer_id}, limit={cap.total_cap}")
                 except Exception as e:
                     logger.warning(f"Redis总计数递增失败: {e}")
         
         await db.commit()
+        return all_passed
+        
     except Exception as e:
         logger.error(f"增加Cap计数失败: {str(e)}", exc_info=True)
         await db.rollback()
+        # 如果出错，保守起见返回 True（Fail Open），或者根据策略返回 False
+        return True
 
 
 async def reset_daily_caps(db: AsyncSession) -> None:

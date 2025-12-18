@@ -435,6 +435,31 @@ class PostbackForwardLog(Base):
     )
 
 
+# Postback 转发队列模型
+class PostbackForwardQueue(Base):
+    __tablename__ = "postback_forward_queue"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='队列ID')
+    conversion_id = Column(Integer, ForeignKey("postback_conversions.id", ondelete="CASCADE"), nullable=False, index=True, comment='关联的转化记录ID')
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True, comment='产品ID')
+    downstream_url = Column(String(500), nullable=False, comment='下游URL')
+    request_method = Column(String(10), nullable=False, comment='请求方式：GET 或 POST')
+    request_data = Column(Text, nullable=True, comment='请求数据（JSON格式，用于POST请求）')
+    request_params = Column(Text, nullable=True, comment='请求参数（URL参数，用于GET请求）')
+    retry_count = Column(Integer, default=0, comment='已重试次数')
+    next_retry_time = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True, comment='下次重试时间')
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True, comment='创建时间')
+
+    # 关系
+    conversion = relationship("PostbackConversion", foreign_keys=[conversion_id])
+    product = relationship("Product", foreign_keys=[product_id])
+
+    __table_args__ = (
+        Index("idx_forward_queue_time", "next_retry_time"),
+        Index("idx_forward_queue_conversion", "conversion_id"),
+    )
+
+
 # 客户通知配置模型
 class ClientNotificationConfig(Base):
     __tablename__ = "client_notification_configs"
@@ -625,6 +650,7 @@ class Offer(Base):
     downstream_tracklink = Column(Text, nullable=True, comment='生成给下游的Tracklink')
     postback_url = Column(Text, nullable=True, comment='Postback URL（配置我们的参数）')
     postback_method = Column(String(10), default='GET', comment='Postback请求方式：GET/POST')
+    click_validity_hours = Column(Integer, default=720, comment='点击有效期（小时），默认720小时（30天）')
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
