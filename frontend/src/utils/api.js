@@ -312,3 +312,33 @@ export const ensureCsrfToken = async (getRequestFn = null) => {
   }
 };
 
+/**
+ * 统一的请求函数（封装 axios）
+ * 用于简化API调用，自动处理响应格式化和错误处理
+ * @param {Object} config - axios 配置对象
+ * @returns {Promise} 返回处理后的响应数据
+ */
+export const request = async (config) => {
+  const axios = (await import('axios')).default;
+  const { ElMessage } = await import('element-plus');
+  
+  try {
+    const response = await axios(config);
+    
+    // 使用 normalizeResponse 处理响应
+    return normalizeResponse(response, { returnDataOnly: false });
+  } catch (error) {
+    // 如果错误已被处理（如429限流），直接抛出
+    if (isErrorHandled(error)) {
+      throw error;
+    }
+    
+    // 提取错误消息并显示
+    const errorMsg = extractErrorMessage(error);
+    ElMessage.error(errorMsg);
+    
+    // 重新抛出错误，让调用方可以处理
+    throw error;
+  }
+};
+
