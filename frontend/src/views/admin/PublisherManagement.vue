@@ -125,7 +125,7 @@
           <el-input
             v-model="formData.postback_url"
             type="textarea"
-            :rows="3"
+            :rows="5"
             placeholder="Postback URL（可选）"
           />
         </el-form-item>
