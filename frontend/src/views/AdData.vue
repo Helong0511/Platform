@@ -235,7 +235,7 @@ import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../store';
 import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElTag, ElIcon, ElLoading, ElMessage, ElMessageBox } from 'element-plus';
 import { Download, Search, Delete, InfoFilled } from '@element-plus/icons-vue';
-import { getAdDataList, exportAdData, getProductsForSelect, getClientsWithData, getProductsWithData, getCountriesWithData, updateAdData, getProductById, deleteAdData, batchDeleteAdData } from '../api/adData';
+import { getAdDataList, exportAdData, getProductsForSelect, getClientsWithData, getProductsWithData, getCountriesWithData, updateAdData, getProductById, deleteAdData, batchDeleteAdData, getAdDataDateRange } from '../api/adData';
 import { useRouter, useRoute } from 'vue-router';
 import { getSuccessMessage, getWarningMessage } from '../utils/messages';
 import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
@@ -544,14 +544,33 @@ const fetchAdData = async () => {
         'dataArray.length': dataArray.length
       });
       
-      // 如果没有数据且没有选择日期范围，提示用户
+      // 如果没有数据且没有选择日期范围，尝试获取数据的日期范围并提示用户
       if (adDataList.value.length === 0 && pagination.value.total === 0 && 
           (!searchForm.value.dateRange || searchForm.value.dateRange.length === 0)) {
-        ElMessage.info({
-          message: '当前月暂无数据。如果数据在其他月份，请选择对应的日期范围进行查询。',
-          duration: 5000,
-          showClose: true
-        });
+        try {
+          const clientId = isAdmin.value && searchForm.value.clientId ? searchForm.value.clientId : null;
+          const dateRange = await getAdDataDateRange(clientId);
+          if (dateRange && dateRange.min_date && dateRange.max_date) {
+            ElMessage.info({
+              message: `当前月暂无数据。数据日期范围：${dateRange.min_date} 至 ${dateRange.max_date}，请选择对应的日期范围进行查询。`,
+              duration: 8000,
+              showClose: true
+            });
+          } else {
+            ElMessage.info({
+              message: '当前月暂无数据。如果数据在其他月份，请选择对应的日期范围进行查询。',
+              duration: 5000,
+              showClose: true
+            });
+          }
+        } catch (error) {
+          // 如果获取日期范围失败，显示通用提示
+          ElMessage.info({
+            message: '当前月暂无数据。如果数据在其他月份，请选择对应的日期范围进行查询。',
+            duration: 5000,
+            showClose: true
+          });
+        }
       }
       
         // 验证数据完整性

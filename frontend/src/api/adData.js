@@ -418,3 +418,20 @@ export const getProductById = async (productId) => {
 };
 
 // 注意：getAdDataTrend 已移除，因为未在代码中使用
+
+// 获取数据的日期范围
+export const getAdDataDateRange = async (clientId = null) => {
+  try {
+    const params = {};
+    if (clientId) params.client_id = clientId;
+    const response = await axios.get('/api/v1/ad-data/date-range', { params });
+    return normalizeResponse(response, { returnDataOnly: true });
+  } catch (error) {
+    if (isErrorHandled(error)) {
+      throw error;
+    }
+    const errorMsg = extractErrorMessage(error);
+    ElMessage.error(errorMsg);
+    throw error;
+  }
+};
