@@ -92,6 +92,17 @@ export const normalizePaginatedResponse = (response) => {
   // 处理嵌套的 data 字段（后端返回的格式是 { code: 200, data: { data: [...], total: ..., page: ..., page_size: ... } }）
   let paginatedData = normalized.data || {};
   
+  // 调试：打印原始响应和标准化后的数据
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[normalizePaginatedResponse] 原始响应:', {
+      'response.data': response?.data,
+      'normalized': normalized,
+      'paginatedData': paginatedData,
+      'paginatedData.data': paginatedData?.data,
+      'paginatedData.total': paginatedData?.total
+    });
+  }
+  
   // 如果 data 是一个对象且包含 data 字段，说明是嵌套的分页响应
   // 检查 paginatedData 是否有 data 属性（数组）和 total 属性（数字）
   if (paginatedData && 
@@ -101,7 +112,7 @@ export const normalizePaginatedResponse = (response) => {
       Array.isArray(paginatedData.data) &&
       typeof paginatedData.total !== 'undefined') {
     // 使用嵌套的 data 对象
-    return {
+    const result = {
       code: normalized.code || 200,
       message: normalized.message || 'success',
       data: paginatedData, // 返回整个 AdDataListResponse 对象 { data: [...], total: ..., page: ..., page_size: ... }
@@ -110,11 +121,17 @@ export const normalizePaginatedResponse = (response) => {
       page_size: paginatedData.page_size || 10,
       total_pages: paginatedData.total_pages || Math.ceil((paginatedData.total || 0) / (paginatedData.page_size || 10))
     };
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[normalizePaginatedResponse] 返回嵌套格式:', result);
+    }
+    
+    return result;
   }
   
   // 如果不是嵌套格式，检查是否 normalized.data 本身就是数组（扁平格式）
   if (Array.isArray(normalized.data)) {
-    return {
+    const result = {
       code: normalized.code || 200,
       message: normalized.message || 'success',
       data: normalized.data || [],
@@ -123,10 +140,16 @@ export const normalizePaginatedResponse = (response) => {
       page_size: normalized.page_size || 10,
       total_pages: normalized.total_pages || Math.ceil((normalized.total || normalized.data.length || 0) / (normalized.page_size || 10))
     };
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[normalizePaginatedResponse] 返回数组格式:', result);
+    }
+    
+    return result;
   }
   
   // 其他情况，使用扁平格式（兼容旧格式）
-  return {
+  const result = {
     code: normalized.code || 200,
     message: normalized.message || 'success',
     data: normalized.data || [],
@@ -135,6 +158,12 @@ export const normalizePaginatedResponse = (response) => {
     page_size: normalized.page_size || 10,
     total_pages: normalized.total_pages || Math.ceil((normalized.total || 0) / (normalized.page_size || 10))
   };
+  
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[normalizePaginatedResponse] 返回扁平格式:', result);
+  }
+  
+  return result;
 };
 
 /**

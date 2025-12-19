@@ -364,20 +364,41 @@ const fetchDailyData = async () => {
       }
       
       const listResponse = response.data || {};
-      // 调试：打印响应结构
-      if (!listResponse.data && listResponse.total === undefined) {
-        console.warn('每日报表响应格式异常:', {
-          response,
-          listResponse,
-          'response.data': response.data,
-          'response.data.data': response.data?.data,
-          'response.data.total': response.data?.total
-        });
+      
+      // 调试：打印完整的响应结构
+      console.log('[DailyReport] 完整响应:', {
+        response,
+        'response.code': response.code,
+        'response.data': response.data,
+        listResponse,
+        'listResponse.data': listResponse.data,
+        'listResponse.total': listResponse.total,
+        'listResponse.data类型': Array.isArray(listResponse.data) ? '数组' : typeof listResponse.data,
+        'listResponse.data长度': Array.isArray(listResponse.data) ? listResponse.data.length : 'N/A'
+      });
+      
+      // 尝试多种方式访问数据
+      let dataArray = [];
+      if (Array.isArray(listResponse.data)) {
+        dataArray = listResponse.data;
+      } else if (Array.isArray(listResponse)) {
+        dataArray = listResponse;
+      } else if (Array.isArray(response.data)) {
+        dataArray = response.data;
       }
-      dailyDataList.value = listResponse.data || [];
+      
+      dailyDataList.value = dataArray;
+      
       // 确保total是数字类型，避免字符串类型导致的计算错误
-        const totalValue = typeof listResponse.total === 'number' ? listResponse.total : parseInt(listResponse.total || 0, 10);
-        pagination.value.total = totalValue;
+      const totalValue = typeof listResponse.total === 'number' ? listResponse.total : 
+                        (typeof response.total === 'number' ? response.total : parseInt(listResponse.total || response.total || 0, 10));
+      pagination.value.total = totalValue;
+      
+      console.log('[DailyReport] 最终数据:', {
+        'dailyDataList.value.length': dailyDataList.value.length,
+        'pagination.value.total': pagination.value.total,
+        'dataArray.length': dataArray.length
+      });
       } catch (error) {
         if (error.response?.status === 401) {
           loading.value = false;
