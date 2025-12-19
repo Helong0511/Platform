@@ -113,6 +113,18 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "重置所有Cap配置的每日计数，每天执行一次",
     },
     
+    # ========== 短链接服务定时任务 ==========
+    "短链接点击次数同步": {
+        "task_name": "短链接点击次数同步",
+        "task_module": "app.scheduler.short_link_tasks",
+        "task_function": "sync_short_link_clicks_task",
+        "result_getter_module": "app.scheduler.short_link_tasks",
+        "result_getter_function": "get_task_result",
+        # 数据库配置
+        "cron_expression": "*/5 * * * *",  # 每5分钟执行一次
+        "description": "将Redis中的短链接点击次数批量同步到数据库，每5分钟执行一次",
+    },
+    
     # ========== TQT API获取数据任务 ==========
     "TQT API获取数据": {
         "task_name": "TQT API获取数据",

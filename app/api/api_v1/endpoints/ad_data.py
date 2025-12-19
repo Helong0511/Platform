@@ -319,6 +319,7 @@ async def get_ad_data(
 
     # 记录查询日志（仅在开发环境或数据为空时）
     if len(data) == 0:
+        pass
 
     # 转换为响应模型
     ad_data_responses = []

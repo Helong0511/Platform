@@ -247,18 +247,20 @@ class Settings(BaseSettings):
 
     # 数据库连接池配置
     # 多进程环境优化：每个 worker 进程有独立的连接池
-    # 推荐配置：pool_size = 10-15, max_overflow = 5-10
-    # 对于 3 个 workers：总连接数 = (15 + 10) × 3 = 75（在 MySQL 默认 151 连接限制内）
-    DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "15"))  # 连接池大小（每个 worker）
-    DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "10"))  # 最大溢出连接数（每个 worker）
+    # 高并发优化：对于短链接服务，大部分请求使用缓存，数据库压力较小
+    # 推荐配置：pool_size = 10-12, max_overflow = 5-8（减少连接数以节省内存）
+    # 对于 3 个 workers：总连接数 = (12 + 8) × 3 = 60（在 MySQL 默认 151 连接限制内，节省内存）
+    DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "12"))  # 连接池大小（每个 worker），高并发优化
+    DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "8"))  # 最大溢出连接数（每个 worker）
     DB_POOL_RECYCLE: int = int(os.getenv("DB_POOL_RECYCLE", "3600"))  # 连接回收时间（秒，1小时）
 
     # ====== Redis配置 ======
     # Redis连接URL（用于缓存和会话存储）
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-    # Redis连接池配置
-    REDIS_MAX_CONNECTIONS: int = int(os.getenv("REDIS_MAX_CONNECTIONS", "10"))
+    # Redis连接池配置（高并发优化）
+    # 短链接和CPL服务大量使用Redis，需要更多连接
+    REDIS_MAX_CONNECTIONS: int = int(os.getenv("REDIS_MAX_CONNECTIONS", "20"))  # 增加连接数以支持高并发
 
     # ====== 管理员默认账户 ======
     # 首次启动时创建的管理员账户

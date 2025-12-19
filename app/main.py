@@ -866,28 +866,81 @@ async def redirect_short_link_public(
     short_code: str,
     db: AsyncSession = Depends(get_db)
 ):
-    """短链接重定向（公开接口，无需认证）"""
-    logger.info(f"[短链接] 收到访问请求: short_code={short_code}")
+    """
+    短链接重定向（公开接口，无需认证）
+    高并发优化：使用Redis缓存减少数据库查询，异步更新点击次数
+    """
+    from app.core.short_link_cache import (
+        get_short_link_from_cache, 
+        set_short_link_to_cache,
+        serialize_short_link
+    )
+    from app.core.short_link_click_counter import increment_click_count_async
     
     try:
-        # 查询短链接
+        # ====== 第一步：尝试从缓存获取 ======
+        cached_data = await get_short_link_from_cache(short_code)
+        
+        if cached_data:
+            # 缓存命中，直接使用缓存数据
+            original_url = cached_data["original_url"]
+            is_active = cached_data["is_active"]
+            expires_at_str = cached_data.get("expires_at")
+            
+            # 检查是否激活
+            if not is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="短链接已禁用"
+                )
+            
+            # 检查是否过期
+            if expires_at_str:
+                # 解析ISO格式的日期时间字符串
+                try:
+                    expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+                    if expires_at.tzinfo is None:
+                        expires_at = expires_at.replace(tzinfo=timezone.utc)
+                    else:
+                        expires_at = expires_at.astimezone(timezone.utc)
+                except (ValueError, AttributeError):
+                    # 如果解析失败，从数据库重新查询
+                    expires_at = None
+                
+                now = datetime.now(timezone.utc)
+                if expires_at < now:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="短链接已过期"
+                    )
+            
+            # 验证URL格式
+            if not original_url or not original_url.startswith(('http://', 'https://')):
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="短链接配置错误：原始URL格式无效"
+                )
+            
+            # 异步更新点击次数（不阻塞重定向）
+            await increment_click_count_async(short_code)
+            
+            # 直接重定向（最快路径）
+            return RedirectResponse(url=original_url, status_code=302)
+        
+        # ====== 第二步：缓存未命中，查询数据库 ======
         result = await db.execute(
             select(ShortLink).where(ShortLink.short_code == short_code)
         )
         short_link = result.scalars().first()
         
         if not short_link:
-            logger.warning(f"[短链接] 记录不存在: short_code={short_code}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"短链接不存在: {short_code}"
             )
         
-        logger.info(f"[短链接] 记录找到: short_code={short_code}, is_active={short_link.is_active}, expires_at={short_link.expires_at}, original_url={short_link.original_url}")
-        
         # 检查是否激活
         if not short_link.is_active:
-            logger.warning(f"[短链接] 已禁用: short_code={short_code}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="短链接已禁用"
@@ -895,18 +948,14 @@ async def redirect_short_link_public(
         
         # 检查是否过期
         if short_link.expires_at:
-            # 确保 expires_at 是 aware datetime（有时区信息）
             expires_at = short_link.expires_at
             if expires_at.tzinfo is None:
-                # 如果是 naive datetime，假设它是 UTC 时区（数据库通常存储 UTC 时间）
                 expires_at = expires_at.replace(tzinfo=timezone.utc)
             else:
-                # 如果已经是 aware datetime，转换为 UTC 以确保一致性
                 expires_at = expires_at.astimezone(timezone.utc)
             
             now = datetime.now(timezone.utc)
             if expires_at < now:
-                logger.warning(f"[短链接] 已过期: short_code={short_code}, expires_at={expires_at}, now={now}")
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="短链接已过期"
@@ -915,23 +964,18 @@ async def redirect_short_link_public(
         # 验证原始URL格式
         original_url = short_link.original_url
         if not original_url or not original_url.startswith(('http://', 'https://')):
-            logger.error(f"[短链接] URL格式无效: short_code={short_code}, original_url={original_url}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="短链接配置错误：原始URL格式无效"
             )
         
-        # 更新点击次数
-        try:
-            short_link.click_count += 1
-            await db.commit()
-            logger.info(f"[短链接] 点击次数已更新: short_code={short_code}, click_count={short_link.click_count}")
-        except Exception as e:
-            logger.warning(f"[短链接] 更新点击次数失败: short_code={short_code}, error={str(e)}")
-            # 点击次数更新失败不影响重定向
+        # 写入缓存（供后续请求使用）
+        await set_short_link_to_cache(short_code, serialize_short_link(short_link))
+        
+        # 异步更新点击次数（不阻塞重定向）
+        await increment_click_count_async(short_code)
         
         # 执行重定向
-        logger.info(f"[短链接] 执行重定向: short_code={short_code}, original_url={original_url}")
         return RedirectResponse(url=original_url, status_code=302)
         
     except HTTPException:

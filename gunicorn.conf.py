@@ -41,18 +41,19 @@ else:
         workers = min(workers, max_workers)
 
 # 2核CPU + 4GB内存，固定为 3 个 worker
+# 高并发优化：对于短链接和CPL服务，3个worker可以处理约3000并发连接
 if cpu_count == 2:
     workers = 3
 
 worker_class = "uvicorn.workers.UvicornWorker"  # 使用 Uvicorn Worker
-worker_connections = 1000  # 每个 worker 的最大连接数
-max_requests = 500  # 每个 worker 处理的最大请求数（防止内存泄漏，4GB内存减少到500）
-max_requests_jitter = 25  # 随机抖动，避免所有 worker 同时重启
+worker_connections = 1000  # 每个 worker 的最大连接数（Uvicorn默认1000，适合高并发）
+max_requests = 1000  # 每个 worker 处理的最大请求数（提高以支持高并发，定期重启防止内存泄漏）
+max_requests_jitter = 50  # 随机抖动，避免所有 worker 同时重启
 
 # ====== 超时配置 ======
-# Ubuntu 22.04.5 生产环境优化
-timeout = 120  # Worker 超时时间（秒），处理长时间请求
-keepalive = 5  # Keep-alive 连接时间（秒），减少连接开销
+# Ubuntu 22.04.5 生产环境优化（高并发场景）
+timeout = 60  # Worker 超时时间（秒），短链接重定向应该很快，减少超时时间
+keepalive = 10  # Keep-alive 连接时间（秒），增加以支持高并发短连接复用
 graceful_timeout = 30  # 优雅关闭超时时间（秒），确保任务完成
 timeout_graceful_shutdown = 30  # 优雅关闭超时（秒），等待 worker 完成当前请求
 

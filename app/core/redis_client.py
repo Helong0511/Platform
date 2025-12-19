@@ -62,7 +62,9 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
     logger.debug(f"尝试连接Redis: {redis_host}:{redis_port}/{redis_db} (密码: {'已设置' if redis_password else '未设置'})")
     
     try:
-        # 创建Redis连接
+        # 创建Redis连接池（高并发优化）
+        # 使用连接池提高并发性能，避免连接竞争
+        max_connections = getattr(settings, 'REDIS_MAX_CONNECTIONS', 10)
         _redis_client = aioredis.Redis(
             host=redis_host,
             port=redis_port,
@@ -73,6 +75,9 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
             socket_timeout=5,  # 操作超时5秒
             retry_on_timeout=True,  # 超时重试
             health_check_interval=30,  # 健康检查间隔30秒
+            max_connections=max_connections,  # 连接池最大连接数
+            socket_keepalive=True,  # 启用TCP keepalive
+            socket_keepalive_options={},  # TCP keepalive选项
         )
         
         # 测试连接
