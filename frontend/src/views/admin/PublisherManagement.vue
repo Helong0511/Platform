@@ -121,21 +121,20 @@
           />
           <div class="form-hint">渠道级别的价格扣量比例（0-100）</div>
         </el-form-item>
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="Postback URL" prop="postback_url">
-              <el-input v-model="formData.postback_url" placeholder="Postback URL（可选）" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="Postback方法" prop="postback_method">
-              <el-select v-model="formData.postback_method" style="width: 100%;">
-                <el-option label="GET" value="GET" />
-                <el-option label="POST" value="POST" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <el-form-item label="Postback URL" prop="postback_url">
+          <el-input
+            v-model="formData.postback_url"
+            type="textarea"
+            :rows="3"
+            placeholder="Postback URL（可选）"
+          />
+        </el-form-item>
+        <el-form-item label="Postback方法" prop="postback_method">
+          <el-select v-model="formData.postback_method" style="width: 100%;">
+            <el-option label="GET" value="GET" />
+            <el-option label="POST" value="POST" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="状态" prop="is_active">
           <el-switch v-model="formData.is_active" />
         </el-form-item>
