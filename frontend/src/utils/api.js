@@ -89,7 +89,24 @@ export const normalizeResponse = (response, options = {}) => {
 export const normalizePaginatedResponse = (response) => {
   const normalized = normalizeResponse(response, { returnDataOnly: false });
   
-  // 确保分页字段存在
+  // 处理嵌套的 data 字段（后端返回的格式是 { code: 200, data: { data: [...], total: ..., page: ..., page_size: ... } }）
+  let paginatedData = normalized.data || {};
+  
+  // 如果 data 是一个对象且包含 data 字段，说明是嵌套的分页响应
+  if (paginatedData && typeof paginatedData === 'object' && !Array.isArray(paginatedData) && paginatedData.data !== undefined) {
+    // 使用嵌套的 data 对象
+    return {
+      code: normalized.code || 200,
+      message: normalized.message || 'success',
+      data: paginatedData, // 返回整个 AdDataListResponse 对象
+      total: paginatedData.total || 0,
+      page: paginatedData.page || 1,
+      page_size: paginatedData.page_size || 10,
+      total_pages: paginatedData.total_pages || Math.ceil((paginatedData.total || 0) / (paginatedData.page_size || 10))
+    };
+  }
+  
+  // 如果不是嵌套格式，使用扁平格式（兼容旧格式）
   return {
     code: normalized.code || 200,
     message: normalized.message || 'success',
