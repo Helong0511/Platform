@@ -22,22 +22,7 @@ export default defineConfig({
         // 错误处理
         configure: (proxy, options) => {
           proxy.on('error', (err, req, res) => {
-            console.error('代理错误:', err.message);
-            console.log('提示: 请确保后端服务已启动在 http://localhost:8960');
-          });
-          // 自定义代理日志，解码 URL 编码的路径
-          proxy.on('proxyReq', (proxyReq, req, res) => {
-            // 解码 URL 路径以便在日志中显示中文
-            try {
-              const decodedPath = decodeURIComponent(req.url);
-              // 始终记录解码后的路径（更易读）
-              if (decodedPath !== req.url) {
-                console.log(`[代理] ${req.method} ${decodedPath} -> ${options.target}${decodedPath}`);
-              }
-            } catch (e) {
-              // 如果解码失败，使用原始路径
-              console.log(`[代理] ${req.method} ${req.url} -> ${options.target}${req.url}`);
-            }
+            // 代理错误已处理
           });
         }
       }

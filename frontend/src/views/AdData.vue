@@ -509,18 +509,6 @@ const fetchAdData = async () => {
       // 提取数据
       const listResponse = response.data || {};
       
-      // 调试：打印完整的响应结构
-      console.log('[AdData] 完整响应:', {
-        response,
-        'response.code': response.code,
-        'response.data': response.data,
-        listResponse,
-        'listResponse.data': listResponse.data,
-        'listResponse.total': listResponse.total,
-        'listResponse.data类型': Array.isArray(listResponse.data) ? '数组' : typeof listResponse.data,
-        'listResponse.data长度': Array.isArray(listResponse.data) ? listResponse.data.length : 'N/A'
-      });
-      
       // 尝试多种方式访问数据
       let dataArray = [];
       if (Array.isArray(listResponse.data)) {
@@ -537,12 +525,6 @@ const fetchAdData = async () => {
       const totalValue = typeof listResponse.total === 'number' ? listResponse.total : 
                         (typeof response.total === 'number' ? response.total : parseInt(listResponse.total || response.total || 0, 10));
       pagination.value.total = totalValue;
-      
-      console.log('[AdData] 最终数据:', {
-        'adDataList.value.length': adDataList.value.length,
-        'pagination.value.total': pagination.value.total,
-        'dataArray.length': dataArray.length
-      });
       
       // 如果没有数据且没有选择日期范围，尝试获取数据的日期范围并提示用户
       if (adDataList.value.length === 0 && pagination.value.total === 0 && 

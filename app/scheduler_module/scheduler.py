@@ -225,8 +225,6 @@ async def _execute_task_with_lock_internal(
             f"（进程ID: {CURRENT_PID}, 主机: {CURRENT_HOST}）"
         )
         logger.info(start_msg)
-        # 同时输出到控制台（确保能看到）
-        print(f"[{datetime.now(timezone.utc).isoformat()}] {start_msg}")
 
         # 执行任务
         try:
@@ -255,8 +253,6 @@ async def _execute_task_with_lock_internal(
             await release_task_lock(lock_db, task_name, success=True, result_message=result_message)
             success_msg = f"任务 '{task_name}' 执行成功（耗时: {round(execution_duration, 2)}秒）"
             logger.info(success_msg)
-            # 同时输出到控制台（确保能看到）
-            print(f"[{datetime.now(timezone.utc).isoformat()}] {success_msg}")
 
             # 记录审计日志（成功）- 使用新的数据库会话避免事务冲突
             audit_db = None

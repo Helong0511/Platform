@@ -264,7 +264,7 @@ const loadUsers = async (startDate = null, endDate = null) => {
     ];
   } catch (error) {
     if (!isErrorHandled(error)) {
-      console.error('加载客户列表失败:', error);
+      // 错误已通过 isErrorHandled 处理
     }
     users.value = [{ label: '全部客户', value: '' }];
   }
@@ -284,7 +284,7 @@ const loadProducts = async (clientId = null, startDate = null, endDate = null) =
     ];
   } catch (error) {
     if (!isErrorHandled(error)) {
-      console.error('加载产品列表失败:', error);
+      // 错误已通过 isErrorHandled 处理
     }
     products.value = [{ label: '全部产品', value: '' }];
   }
@@ -304,7 +304,7 @@ const loadCountries = async (clientId = null, productId = null, startDate = null
     ];
   } catch (error) {
     if (!isErrorHandled(error)) {
-      console.error('加载国家列表失败:', error);
+      // 错误已通过 isErrorHandled 处理
     }
     countries.value = [{ code: '', name_zh: '全部区域' }];
   }
@@ -411,7 +411,6 @@ const fetchData = async () => {
       // 已经在使用大日期范围，如果还是没有数据，说明确实没有数据
     }
   } catch (error) {
-    console.error(error);
     if (!isErrorHandled(error)) {
       ElMessage.error(extractErrorMessage(error));
     }
@@ -538,7 +537,6 @@ const handleImport = async (options) => {
       }, 1000);
     }
   } catch (error) {
-    console.error(error);
     if (!isErrorHandled(error)) {
       ElMessage.error(extractErrorMessage(error));
     }
@@ -554,7 +552,9 @@ const handleDelete = async (row) => {
     ElMessage.success('删除成功');
     fetchData();
   } catch (e) {
-    if (e !== 'cancel') console.error(e);
+    if (e !== 'cancel') {
+      // 错误已处理
+    }
   }
 };
 
@@ -566,7 +566,9 @@ const handleBatchDelete = async () => {
     selectedRows.value = [];
     fetchData();
   } catch (e) {
-    if (e !== 'cancel') console.error(e);
+    if (e !== 'cancel') {
+      // 错误已处理
+    }
   }
 };
 
@@ -582,7 +584,7 @@ const saveEdit = async () => {
     editDialogVisible.value = false;
     fetchData();
   } catch (error) {
-    console.error(error);
+    // 错误已处理
   }
 };
 </script>

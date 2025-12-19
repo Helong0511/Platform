@@ -94,11 +94,6 @@ async def get_ad_data(
     
     # 检查product_assignments表是否存在且有数据，如果不存在或没有数据则使用旧的查询方式
     use_assignment_table = await check_use_assignment_table(db)
-    if not settings.is_production:
-        if use_assignment_table:
-            logger.debug("使用产品分配历史表查询")
-        else:
-            logger.debug("使用旧的查询方式（直接通过Product.client_id关联）")
     
     if use_assignment_table:
         # 使用产品分配历史表进行查询
@@ -145,10 +140,6 @@ async def get_ad_data(
         query = query.join(Client, Product.client_id == Client.id)  # 关联客户
         query = query.join(User, Client.user_id == User.id)  # 关联用户
         query = join_country_info(query)  # 左关联国家信息（已处理排序规则冲突）
-
-    # 记录查询日志（仅在开发环境）
-    if not settings.is_production:
-        logger.debug(f"查询广告数据: 用户={current_user.username}, 页码={page}, 每页={page_size}")
 
     # ====== 权限过滤 ======
     # 根据用户角色设置权限过滤（数据隔离）
@@ -327,11 +318,7 @@ async def get_ad_data(
     data = result.unique().all()
 
     # 记录查询日志（仅在开发环境或数据为空时）
-    if not settings.is_production:
-        logger.debug(f"查询广告数据: 用户={current_user.username}, 总数={total}, 当前页数据量={len(data)}")
     if len(data) == 0:
-        logger.debug(
-            f"未查询到数据: page={page}, page_size={page_size}, start_date={start_date}, end_date={end_date}, product_id={product_id}")
 
     # 转换为响应模型
     ad_data_responses = []
@@ -459,7 +446,6 @@ async def get_clients_with_data(
         cache_key = generate_cache_key("clients_with_data", current_user.id, start_date, end_date)
         cached = await get_cached(cache_key)
         if cached:
-            logger.debug(f"缓存命中: clients_with_data, user={current_user.id}")
             return ListResponseBaseSchema.success(data=cached.get("data", []), count=cached.get("count", 0))
         
         # 检查是否使用产品分配历史表
@@ -700,7 +686,6 @@ async def get_products_with_data(
         cache_key = generate_cache_key("products_with_data", current_user.id, client_id, start_date, end_date)
         cached = await get_cached(cache_key)
         if cached:
-            logger.debug(f"缓存命中: products_with_data, user={current_user.id}")
             return ListResponseBaseSchema.success(data=cached.get("data", []), count=cached.get("count", 0))
         
         # 检查是否使用产品分配历史表
@@ -818,10 +803,6 @@ async def get_daily_summary(
 
     # ====== 构建汇总查询 ======
     use_assignment_table = await check_use_assignment_table(db)
-    
-    # 调试：记录使用的查询方式
-    if not settings.is_production:
-        logger.debug(f"每日汇总查询：使用分配历史表={use_assignment_table}, 用户={current_user.username}, 角色={current_user.role}")
     
     # 构建汇总查询：按产品+日期分组
     # 注意：覆盖率、展示率、点击率、eCPM 不在查询中计算，而是在返回数据时根据汇总后的数值重新计算
@@ -1050,10 +1031,6 @@ async def get_daily_summary(
         offset = (page - 1) * page_size
         result = await db.execute(query.offset(offset).limit(page_size))
         all_summary_data = result.all()
-    
-    # 调试：记录查询结果
-    if not settings.is_production:
-        logger.debug(f"每日汇总查询结果：总数={total}, 当前页数据量={len(all_summary_data)}, 使用分配历史表={use_assignment_table}")
     
     # ====== 转换为响应格式 ======
     ad_data_responses = []
@@ -1759,7 +1736,6 @@ async def get_ad_data_summary(
     cache_key = generate_cache_key("ad_data_summary", current_user.id, start_date, end_date, client_id, product_id)
     cached = await get_cached(cache_key)
     if cached:
-        logger.debug(f"缓存命中: ad_data_summary, user={current_user.id}")
         return ResponseBaseSchema.success(data=AdDataSummaryResponse(**cached))
     
     # 检查是否使用产品分配历史表

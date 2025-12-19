@@ -365,18 +365,6 @@ const fetchDailyData = async () => {
       
       const listResponse = response.data || {};
       
-      // 调试：打印完整的响应结构
-      console.log('[DailyReport] 完整响应:', {
-        response,
-        'response.code': response.code,
-        'response.data': response.data,
-        listResponse,
-        'listResponse.data': listResponse.data,
-        'listResponse.total': listResponse.total,
-        'listResponse.data类型': Array.isArray(listResponse.data) ? '数组' : typeof listResponse.data,
-        'listResponse.data长度': Array.isArray(listResponse.data) ? listResponse.data.length : 'N/A'
-      });
-      
       // 尝试多种方式访问数据
       let dataArray = [];
       if (Array.isArray(listResponse.data)) {
@@ -394,21 +382,12 @@ const fetchDailyData = async () => {
                         (typeof response.total === 'number' ? response.total : parseInt(listResponse.total || response.total || 0, 10));
       pagination.value.total = totalValue;
       
-      console.log('[DailyReport] 最终数据:', {
-        'dailyDataList.value.length': dailyDataList.value.length,
-        'pagination.value.total': pagination.value.total,
-        'dataArray.length': dataArray.length
-      });
-      
       // 如果没有数据且没有选择日期范围，尝试获取数据的日期范围并提示用户
       if (dailyDataList.value.length === 0 && pagination.value.total === 0 && 
           (!searchForm.value.dateRange || searchForm.value.dateRange.length === 0)) {
         try {
-          console.log('[DailyReport] 尝试获取日期范围...');
           const clientId = isAdmin.value && searchForm.value.clientId ? searchForm.value.clientId : null;
-          console.log('[DailyReport] 调用 getAdDataDateRange, clientId:', clientId);
           const dateRange = await getAdDataDateRange(clientId);
-          console.log('[DailyReport] 日期范围API返回:', dateRange);
           if (dateRange && dateRange.min_date && dateRange.max_date) {
             ElMessage.info({
               message: `当前月暂无数据。数据日期范围：${dateRange.min_date} 至 ${dateRange.max_date}，请选择对应的日期范围进行查询。`,
@@ -416,7 +395,6 @@ const fetchDailyData = async () => {
               showClose: true
             });
           } else {
-            console.log('[DailyReport] 日期范围为null，可能没有数据或权限问题');
             ElMessage.warning({
               message: '当前月暂无数据。可能原因：1) 数据在其他月份，请选择日期范围查询；2) 产品未激活；3) 没有权限查看数据。',
               duration: 8000,
@@ -424,7 +402,6 @@ const fetchDailyData = async () => {
             });
           }
         } catch (error) {
-          console.error('[DailyReport] 获取日期范围失败:', error);
           // 如果获取日期范围失败，显示通用提示
           ElMessage.warning({
             message: '当前月暂无数据。如果数据在其他月份，请选择对应的日期范围进行查询。',

@@ -368,7 +368,7 @@ const fetchConversions = async () => {
     conversions.value = response.data || [];
     pagination.total = response.total || 0;
   } catch (error) {
-    console.error('获取转化记录失败:', error);
+    // 错误已通过 isErrorHandled 处理
   } finally {
     loading.value = false;
   }
@@ -391,7 +391,7 @@ const fetchStats = async () => {
     const response = await getPostbackStats(params);
     stats.value = response || [];
   } catch (error) {
-    console.error('获取统计信息失败:', error);
+    // 错误已通过 isErrorHandled 处理
   }
 };
 
