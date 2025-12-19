@@ -93,12 +93,18 @@ export const normalizePaginatedResponse = (response) => {
   let paginatedData = normalized.data || {};
   
   // 如果 data 是一个对象且包含 data 字段，说明是嵌套的分页响应
-  if (paginatedData && typeof paginatedData === 'object' && !Array.isArray(paginatedData) && paginatedData.data !== undefined) {
+  // 检查 paginatedData 是否有 data 属性（数组）和 total 属性（数字）
+  if (paginatedData && 
+      typeof paginatedData === 'object' && 
+      !Array.isArray(paginatedData) && 
+      paginatedData.data !== undefined && 
+      Array.isArray(paginatedData.data) &&
+      typeof paginatedData.total !== 'undefined') {
     // 使用嵌套的 data 对象
     return {
       code: normalized.code || 200,
       message: normalized.message || 'success',
-      data: paginatedData, // 返回整个 AdDataListResponse 对象
+      data: paginatedData, // 返回整个 AdDataListResponse 对象 { data: [...], total: ..., page: ..., page_size: ... }
       total: paginatedData.total || 0,
       page: paginatedData.page || 1,
       page_size: paginatedData.page_size || 10,
@@ -106,7 +112,20 @@ export const normalizePaginatedResponse = (response) => {
     };
   }
   
-  // 如果不是嵌套格式，使用扁平格式（兼容旧格式）
+  // 如果不是嵌套格式，检查是否 normalized.data 本身就是数组（扁平格式）
+  if (Array.isArray(normalized.data)) {
+    return {
+      code: normalized.code || 200,
+      message: normalized.message || 'success',
+      data: normalized.data || [],
+      total: normalized.total || normalized.data.length || 0,
+      page: normalized.page || 1,
+      page_size: normalized.page_size || 10,
+      total_pages: normalized.total_pages || Math.ceil((normalized.total || normalized.data.length || 0) / (normalized.page_size || 10))
+    };
+  }
+  
+  // 其他情况，使用扁平格式（兼容旧格式）
   return {
     code: normalized.code || 200,
     message: normalized.message || 'success',

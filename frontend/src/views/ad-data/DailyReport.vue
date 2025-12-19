@@ -364,6 +364,16 @@ const fetchDailyData = async () => {
       }
       
       const listResponse = response.data || {};
+      // 调试：打印响应结构
+      if (!listResponse.data && listResponse.total === undefined) {
+        console.warn('每日报表响应格式异常:', {
+          response,
+          listResponse,
+          'response.data': response.data,
+          'response.data.data': response.data?.data,
+          'response.data.total': response.data?.total
+        });
+      }
       dailyDataList.value = listResponse.data || [];
       // 确保total是数字类型，避免字符串类型导致的计算错误
         const totalValue = typeof listResponse.total === 'number' ? listResponse.total : parseInt(listResponse.total || 0, 10);
