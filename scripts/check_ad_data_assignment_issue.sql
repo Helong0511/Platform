@@ -1,6 +1,8 @@
 -- 检查广告数据是否有对应的产品分配记录
 -- 这个查询可以帮助诊断为什么查询不到数据
 
+use platform;
+
 -- 1. 检查 ad_data 表中的数据总数
 SELECT 
     COUNT(*) AS ad_data总数,
