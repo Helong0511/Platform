@@ -544,6 +544,16 @@ const fetchAdData = async () => {
         'dataArray.length': dataArray.length
       });
       
+      // 如果没有数据且没有选择日期范围，提示用户
+      if (adDataList.value.length === 0 && pagination.value.total === 0 && 
+          (!searchForm.value.dateRange || searchForm.value.dateRange.length === 0)) {
+        ElMessage.info({
+          message: '当前月暂无数据。如果数据在其他月份，请选择对应的日期范围进行查询。',
+          duration: 5000,
+          showClose: true
+        });
+      }
+      
         // 验证数据完整性
         if (adDataList.value.length > 0) {
           const requiredFields = ['date', 'product_name', 'request_count', 'match_count'];

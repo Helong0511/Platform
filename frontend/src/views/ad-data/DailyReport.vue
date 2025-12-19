@@ -399,6 +399,16 @@ const fetchDailyData = async () => {
         'pagination.value.total': pagination.value.total,
         'dataArray.length': dataArray.length
       });
+      
+      // 如果没有数据且没有选择日期范围，提示用户
+      if (dailyDataList.value.length === 0 && pagination.value.total === 0 && 
+          (!searchForm.value.dateRange || searchForm.value.dateRange.length === 0)) {
+        ElMessage.info({
+          message: '当前月暂无数据。如果数据在其他月份，请选择对应的日期范围进行查询。',
+          duration: 5000,
+          showClose: true
+        });
+      }
       } catch (error) {
         if (error.response?.status === 401) {
           loading.value = false;
