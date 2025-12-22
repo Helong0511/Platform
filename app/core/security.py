@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 # 第三方库导入
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from jose.exceptions import ExpiredSignatureError, JWSError, JWTClaimsError

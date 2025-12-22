@@ -18,13 +18,7 @@ from app.api.api_v1 import api_router
 import logging
 from logging.handlers import RotatingFileHandler
 import os
-import base64
 import asyncio
-
-"""
-43.156.101.243
-]2psEMz#ytm4NZ
-"""
 # 抑制 APScheduler 的 pkg_resources 弃用警告
 # 这是 APScheduler 库内部使用已弃用的 pkg_resources 导致的警告
 # 不影响功能，等待库更新修复
