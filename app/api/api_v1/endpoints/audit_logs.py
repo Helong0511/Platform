@@ -348,7 +348,8 @@ async def log_client_error(
             if auth_header.startswith("Bearer "):
                 token = auth_header.replace("Bearer ", "")
                 if token:
-                    payload = JWTUtils.verify_token(token)
+                    # verify_token 是异步方法，需要使用 await
+                    payload = await JWTUtils.verify_token(token, db=db)
                     if payload and "sub" in payload:
                         user_id = payload.get("sub")
                         if user_id:
