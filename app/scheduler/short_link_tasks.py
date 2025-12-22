@@ -16,6 +16,7 @@ async def sync_short_link_clicks_task():
     每5分钟执行一次，将Redis中的点击次数批量更新到数据库
     """
     try:
+        logger.info("=" * 80)
         logger.info("开始执行短链接点击次数同步任务...")
         
         # 创建数据库会话
@@ -24,13 +25,16 @@ async def sync_short_link_clicks_task():
             synced_count = await sync_click_counts_to_db(db)
             
             if synced_count > 0:
-                logger.info(f"短链接点击次数同步成功: 更新了 {synced_count} 条记录")
+                logger.info(f"✅ 短链接点击次数同步成功: 更新了 {synced_count} 条记录")
             else:
-                logger.debug("短链接点击次数同步: 没有需要更新的记录")
+                logger.info("ℹ️ 短链接点击次数同步: 没有需要更新的记录（Redis中可能没有待同步的计数器）")
         
         logger.info("短链接点击次数同步任务执行成功")
+        logger.info("=" * 80)
     except Exception as e:
-        logger.error(f"短链接点击次数同步任务执行失败: {e}", exc_info=True)
+        logger.error("=" * 80)
+        logger.error(f"❌ 短链接点击次数同步任务执行失败: {e}", exc_info=True)
+        logger.error("=" * 80)
         raise
 
 

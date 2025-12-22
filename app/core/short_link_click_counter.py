@@ -172,7 +172,7 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                     continue
                 
                 count_value = int(count)
-                logger.debug(f"准备同步短链接点击次数: short_code={short_code}, count={count_value}")
+                logger.info(f"准备同步短链接点击次数: short_code={short_code}, count={count_value}")
                 
                 # 更新数据库
                 result = await db.execute(
@@ -186,8 +186,8 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                     short_link.click_count += count_value
                     new_count = short_link.click_count
                     
-                    logger.debug(
-                        f"更新短链接点击次数: short_code={short_code}, "
+                    logger.info(
+                        f"✅ 更新短链接点击次数: short_code={short_code}, "
                         f"旧值={old_count}, 增量={count_value}, 新值={new_count}"
                     )
                     
