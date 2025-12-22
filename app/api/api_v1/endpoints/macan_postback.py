@@ -187,6 +187,59 @@ def _get_client_ip(request: Request) -> Optional[str]:
     return None
 
 
+def _collect_request_info(request: Request) -> Dict[str, Any]:
+    """收集请求的软硬件详细信息"""
+    info = {
+        "请求方法": request.method,
+        "请求URL": str(request.url),
+        "请求路径": request.url.path,
+        "查询参数": dict(request.query_params),
+        "协议": request.url.scheme,
+        "主机": request.url.hostname,
+        "端口": request.url.port,
+    }
+    
+    # 客户端信息
+    if request.client:
+        info["客户端IP"] = request.client.host
+        info["客户端端口"] = request.client.port
+    else:
+        info["客户端IP"] = "未知"
+        info["客户端端口"] = "未知"
+    
+    # 从请求头获取真实IP
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        info["X-Forwarded-For"] = forwarded_for
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        info["X-Real-IP"] = real_ip
+    
+    # 收集所有请求头
+    headers = {}
+    for key, value in request.headers.items():
+        headers[key] = value
+    info["请求头"] = headers
+    
+    # User-Agent 详细信息
+    user_agent = request.headers.get("User-Agent", "未知")
+    info["User-Agent"] = user_agent
+    
+    # 其他重要请求头
+    important_headers = [
+        "Accept", "Accept-Language", "Accept-Encoding",
+        "Content-Type", "Content-Length", "Referer",
+        "Origin", "Connection", "Cache-Control",
+        "X-Forwarded-Proto", "X-Forwarded-Host", "X-Forwarded-Port"
+    ]
+    for header_name in important_headers:
+        header_value = request.headers.get(header_name)
+        if header_value:
+            info[f"请求头-{header_name}"] = header_value
+    
+    return info
+
+
 async def _process_macan_postback(
     request: Request,
     clk_id: str,
@@ -209,6 +262,20 @@ async def _process_macan_postback(
     保留此函数是为了向后兼容，实际处理由统一服务完成
     """
     try:
+        # 收集并记录请求的软硬件详细信息
+        request_info = _collect_request_info(request)
+        logger.info("=" * 80)
+        logger.info(f"Macan PostBack 请求详细信息 - clk_id: {clk_id}, event_name: {event_name}")
+        logger.info("-" * 80)
+        for key, value in request_info.items():
+            if isinstance(value, dict):
+                logger.info(f"{key}:")
+                for sub_key, sub_value in value.items():
+                    logger.info(f"  {sub_key}: {sub_value}")
+            else:
+                logger.info(f"{key}: {value}")
+        logger.info("=" * 80)
+        
         # 获取客户端IP
         client_ip = _get_client_ip(request) or ip
         
