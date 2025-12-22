@@ -188,14 +188,14 @@ async def login(
 
     logger.info(f"User {user.username} logged in successfully")
 
-    # 先返回响应，不阻塞登录流程
+    # ====== 返回响应 ======
     # 如果是客户角色，获取客户的api_enabled信息
     api_enabled = False
     if user.role == UserRole.CLIENT and user.clients:
         # 客户用户：获取第一个客户的api_enabled状态
         client = user.clients[0]
         api_enabled = client.api_enabled if client else False
-    
+
     response_data = {
         "access_token": access_token,
         "token_type": "bearer",
@@ -209,18 +209,36 @@ async def login(
         }
     }
 
+    # ====== 设置 HttpOnly Cookie (安全增强) ======
+    from fastapi import Response
+    # 创建响应对象并设置 Cookie
+    # 我们仍然通过 JSON 返回 token 以保持向后兼容，但通过 Cookie 提供更高的安全性
+    response = Response()
+    # 转换为 JSONResponse 格式以包含数据
+    from fastapi.responses import JSONResponse
+    json_response = JSONResponse(content=response_data)
+    
+    # 设置 Cookie
+    # httponly=True 防止 XSS 攻击读取 token
+    # secure=True 仅允许通过 HTTPS 发送
+    # samesite="Lax" 提供基本的 CSRF 防御
+    json_response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=settings.is_production,  # 生产环境必须为 True
+        samesite="lax",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    )
+
     # 异步记录登录日志（不阻塞响应）
-    # 使用后台任务记录日志，避免阻塞登录响应
     try:
         from app.core.audit_log import log_login
-        # 在后台记录日志，不等待完成
         await log_login(db=db, user=user, request=request, success=True)
-        # 注意：这里不commit，由get_db的finally块自动commit
     except Exception as e:
-        # 日志记录失败不应该影响登录
         logger.warning(f"记录登录日志失败: {e}")
 
-    return response_data
+    return json_response
 
 
 @router.post("/logout", summary="用户退出登录")

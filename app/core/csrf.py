@@ -30,12 +30,16 @@ def extract_user_id_from_token(request: Request) -> Optional[str]:
         用户ID字符串，如果无法提取则返回None
     """
     try:
-        # 从Authorization头获取token
+        # 1. 优先从 Authorization 头获取 token
+        token = None
         auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
-            return None
+        if auth_header.startswith("Bearer "):
+            token = auth_header.replace("Bearer ", "").strip()
         
-        token = auth_header.replace("Bearer ", "").strip()
+        # 2. 如果头中没有，从 Cookie 中获取 (支持安全增强模式)
+        if not token:
+            token = request.cookies.get("access_token")
+            
         if not token:
             return None
         

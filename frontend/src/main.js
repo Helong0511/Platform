@@ -28,15 +28,14 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component);
 }
 
+// 配置Axios
+axios.defaults.withCredentials = true;
 // 配置Axios拦截器
 axios.interceptors.request.use(
   (config) => {
-    // 添加认证token
-    const token = sessionStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    
+    // 认证 token 现在由浏览器通过 HttpOnly Cookie 自动处理
+    // 不再需要手动从 sessionStorage 提取并添加到 Header
+
     // 添加CSRF令牌（如果存在）
     const csrfToken = sessionStorage.getItem('csrf_token');
     if (csrfToken) {
@@ -47,7 +46,7 @@ axios.interceptors.request.use(
       const method = config.method?.toUpperCase();
       const url = config.url || '';
       const isLoginEndpoint = url.includes('/auth/login') || url.includes('/auth/logout');
-      
+
       if (method && !['GET', 'HEAD', 'OPTIONS'].includes(method) && !isLoginEndpoint) {
         logger.error(`[CSRF] CSRF令牌缺失: ${method} ${config.url} - 请求将被拒绝`);
       }
@@ -57,7 +56,7 @@ axios.interceptors.request.use(
     if (!config.timeout) {
       // 检测是否为移动设备
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      
+
       // 文件上传使用更长的超时时间
       if (config.method === 'post' && config.data instanceof FormData) {
         config.timeout = isMobile ? 60000 : 30000; // 移动端60秒，桌面端30秒
@@ -65,7 +64,7 @@ axios.interceptors.request.use(
         // 普通请求：移动端使用更长的超时时间
         // 对于广告数据查询请求，使用更长的超时时间（因为涉及复杂查询和大量数据）
         const isAdDataRequest = config.url && (
-          config.url.includes('/ad-data/') && 
+          config.url.includes('/ad-data/') &&
           !config.url.includes('/export') // 导出请求使用默认超时
         );
         const isDataListRequest = config.url && (
@@ -110,26 +109,26 @@ axios.interceptors.response.use(
         sessionStorage.setItem('csrf_token', csrfToken);
       }
     }
-    
+
     // 处理403 CSRF令牌错误（服务器重启后token可能失效）
     if (error.response && error.response.status === 403) {
       const errorData = error.response.data;
       const errorDetail = (errorData && typeof errorData === 'object' && !(errorData instanceof Blob))
         ? (errorData.detail || errorData.message || '')
         : '';
-      
+
       // 检查是否是CSRF相关错误
       if (errorDetail && (errorDetail.includes('CSRF') || errorDetail.includes('csrf') || errorDetail.includes('令牌'))) {
         // 清除旧的CSRF token
         sessionStorage.removeItem('csrf_token');
-        
+
         // 尝试自动获取新的CSRF token并重试请求
         const originalRequest = error.config;
-        
+
         // 检查是否已经重试过（避免无限重试）
         if (!originalRequest._retry) {
           originalRequest._retry = true;
-          
+
           try {
             // 发送一个GET请求获取新的CSRF token
             // axios已在文件顶部导入，直接使用
@@ -141,7 +140,7 @@ axios.interceptors.response.use(
                 '/api/v1/dashboard/stats',
                 '/api/v1/products/?page_size=1'
               ];
-              
+
               for (const endpoint of endpoints) {
                 try {
                   const response = await axios.get(endpoint, {
@@ -149,12 +148,12 @@ axios.interceptors.response.use(
                       'Authorization': `Bearer ${token}`
                     }
                   });
-                  
+
                   // 从响应头获取新的CSRF token
                   const newCsrfToken = response.headers['x-csrf-token'] || response.headers['X-CSRF-Token'];
                   if (newCsrfToken) {
                     sessionStorage.setItem('csrf_token', newCsrfToken);
-                    
+
                     // 更新原始请求的CSRF token并重试
                     originalRequest.headers['X-CSRF-Token'] = newCsrfToken;
                     return axios(originalRequest);
@@ -170,29 +169,29 @@ axios.interceptors.response.use(
             logger.warning('自动获取CSRF token失败，将显示错误信息');
           }
         }
-        
+
         // 如果自动重试失败，显示友好的错误信息
         if (!originalRequest._retrySuccess) {
           ElMessage.warning('CSRF令牌已过期，请刷新页面后重试');
         }
-        
+
         return Promise.reject(error);
       }
     }
-    
+
     // 处理401未授权错误
     if (error.response && error.response.status === 401) {
       // 检查是否是登录请求失败（登录请求返回401是正常的，不应该触发认证清除和跳转）
       const requestUrl = error.config?.url || '';
       const isLoginRequest = requestUrl.includes('/auth/login');
-      
+
       // 如果是登录请求失败，不处理401错误，让登录组件自己处理
       if (isLoginRequest) {
         // 登录失败是正常的业务错误，不需要清除认证信息或跳转
         // 错误消息会由登录组件显示
         return Promise.reject(error);
       }
-      
+
       // 检查是否是 blob 响应，如果是则使用默认消息
       const errorData = error.response.data;
       const errorDetail = (errorData && typeof errorData === 'object' && !(errorData instanceof Blob))
@@ -227,20 +226,20 @@ axios.interceptors.response.use(
       const errorDetail = (errorData && typeof errorData === 'object' && !(errorData instanceof Blob))
         ? (errorData.detail || errorData.message || '请求被拒绝')
         : '请求被拒绝';
-      
+
       // 检查是否是CSRF相关错误
       if (errorDetail.includes('CSRF') || errorDetail.includes('csrf') || errorDetail.includes('令牌')) {
         // 清除旧的CSRF令牌
         sessionStorage.removeItem('csrf_token');
-        
+
         // 尝试自动获取新的CSRF token并重试请求（仅对非GET请求）
         const originalRequest = error.config;
         const isGetRequest = !originalRequest || !originalRequest.method || ['get', 'GET'].includes(originalRequest.method);
-        
+
         // 对于非GET请求，尝试自动重试
         if (!isGetRequest && originalRequest && !originalRequest._csrfRetry) {
           originalRequest._csrfRetry = true;
-          
+
           try {
             // 发送一个GET请求获取新的CSRF token
             const token = sessionStorage.getItem('token');
@@ -253,7 +252,7 @@ axios.interceptors.response.use(
                 '/api/v1/short-links/?page_size=1',
                 '/api/v1/clients/?page_size=1'
               ];
-              
+
               for (const endpoint of endpoints) {
                 try {
                   const response = await axios.get(endpoint, {
@@ -261,16 +260,16 @@ axios.interceptors.response.use(
                       'Authorization': `Bearer ${token}`
                     }
                   });
-                  
+
                   // 从响应头获取新的CSRF token
                   const newCsrfToken = response.headers['x-csrf-token'] || response.headers['X-CSRF-Token'];
                   if (newCsrfToken) {
                     sessionStorage.setItem('csrf_token', newCsrfToken);
-                    
+
                     // 更新原始请求的CSRF token并重试
                     originalRequest.headers = originalRequest.headers || {};
                     originalRequest.headers['X-CSRF-Token'] = newCsrfToken;
-                    
+
                     // 重试原始请求
                     logger.info('CSRF token已更新，自动重试请求');
                     return axios(originalRequest);
@@ -286,12 +285,12 @@ axios.interceptors.response.use(
             logger.warning('自动获取CSRF token失败:', e);
           }
         }
-        
+
         // 如果自动重试失败或未执行，显示友好的错误信息
         if (isGetRequest || !originalRequest || !originalRequest._csrfRetrySuccess) {
           ElMessage.warning('CSRF令牌已过期，请刷新页面后重试');
         }
-        
+
         // 标记错误已处理
         error._handled = true;
       } else {
@@ -318,12 +317,12 @@ axios.interceptors.response.use(
       let errorDetail = (errorData && typeof errorData === 'object' && !(errorData instanceof Blob))
         ? (errorData.detail || errorData.message || '请求失败，请检查输入')
         : '请求失败，请检查输入';
-      
+
       // 对于 403 错误（如客户被禁用），如果没有具体错误信息，使用通用提示
       if (status === 403 && (!errorData || errorData instanceof Blob || (!errorData.detail && !errorData.message))) {
         errorDetail = '禁止登录，请联系管理员';
       }
-      
+
       // 只有未被标记为已处理的错误才显示
       if (!error._handled) {
         ElMessage.error(errorDetail);
@@ -340,8 +339,8 @@ axios.interceptors.response.use(
       // 检查是否为超时错误
       if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-        const errorMsg = isMobile 
-          ? '网络连接超时，请检查网络连接或稍后重试' 
+        const errorMsg = isMobile
+          ? '网络连接超时，请检查网络连接或稍后重试'
           : '请求超时，请检查网络连接';
         ElMessage.error(errorMsg);
       } else {
@@ -373,7 +372,7 @@ window.addEventListener('error', (event) => {
   const errorMessage = event?.message || event?.error?.message || '';
   const errorFilename = event?.filename || '';
   const errorString = String(errorMessage).toLowerCase();
-  
+
   // 忽略浏览器扩展相关的错误（通常由广告拦截器、开发者工具扩展等引起）
   // 包括 Edge 浏览器扩展可能引起的错误
   if (typeof errorMessage === 'string' && (
@@ -388,16 +387,16 @@ window.addEventListener('error', (event) => {
     event.stopImmediatePropagation(); // 阻止其他监听器处理
     return false; // 返回 false 表示已处理
   }
-  
+
   if (typeof errorMessage === 'string' && errorMessage.includes('ElOnlyChild')) {
     return;
   }
-  
+
   // 忽略 ResizeObserver 错误（这是浏览器的一个无害警告，通常由 UI 库触发）
   if (typeof errorMessage === 'string' && errorMessage.includes('ResizeObserver loop completed with undelivered notifications')) {
     return;
   }
-  
+
   // 忽略 inspector.js 中关于 responseText 的错误（这是浏览器开发者工具的问题，不是代码问题）
   // 检查文件名、错误消息和错误名称
   const errorName = event?.error?.name || '';
@@ -409,13 +408,13 @@ window.addEventListener('error', (event) => {
     errorMessage.includes('The value is only accessible if the object\'s \'responseType\'')
   );
   const isInvalidStateError = errorName === 'InvalidStateError' || errorMessage.includes('InvalidStateError');
-  
+
   if (isInspectorFile || (isResponseTextError && isInvalidStateError)) {
     // 阻止错误传播和记录
     event.preventDefault();
     return;
   }
-  
+
   // 记录前端运行错误
   try {
     const error = event.error || new Error(event.message);
@@ -423,7 +422,7 @@ window.addEventListener('error', (event) => {
     const errorMsg = error.message || event.message || '未知错误';
     const errorStack = error.stack || '';
     const errorUrl = event.filename || window.location.href;
-    
+
     // 异步记录错误，不阻塞页面
     recordFrontendError({
       error_type: errorType,
@@ -448,10 +447,10 @@ window.addEventListener('unhandledrejection', (event) => {
   const errorStack = event?.reason?.stack || '';
   const errorName = event?.reason?.name || '';
   const errorString = String(errorMessage).toLowerCase();
-  
+
   // 检查错误堆栈中是否包含 inspector.js
   const isInspectorError = typeof errorStack === 'string' && errorStack.includes('inspector.js');
-  
+
   // 检查是否是 responseText 相关的 InvalidStateError
   const isResponseTextError = typeof errorMessage === 'string' && (
     (errorMessage.includes('responseText') && errorMessage.includes('responseType')) ||
@@ -459,14 +458,14 @@ window.addEventListener('unhandledrejection', (event) => {
     (errorMessage.includes('InvalidStateError') && errorMessage.includes('responseText')) ||
     errorMessage.includes('The value is only accessible if the object\'s \'responseType\'')
   );
-  const isInvalidStateError = errorName === 'InvalidStateError' || 
+  const isInvalidStateError = errorName === 'InvalidStateError' ||
     (typeof errorMessage === 'string' && errorMessage.includes('InvalidStateError'));
-  
+
   if (isInspectorError || (isResponseTextError && isInvalidStateError)) {
     event.preventDefault(); // 阻止默认的错误处理
     return;
   }
-  
+
   // 忽略浏览器扩展相关的错误（通常由广告拦截器、开发者工具扩展等引起）
   // 包括 Edge 浏览器扩展可能引起的错误
   if (typeof errorMessage === 'string' && (
@@ -484,17 +483,17 @@ window.addEventListener('unhandledrejection', (event) => {
     event.preventDefault(); // 阻止默认的错误处理
     return;
   }
-  
+
   // 忽略 Element Plus 的 ElOnlyChild 错误
   if (typeof errorMessage === 'string' && errorMessage.includes('ElOnlyChild')) {
     return;
   }
-  
+
   // 忽略 ResizeObserver 错误（这是浏览器的一个无害警告，通常由 UI 库触发）
   if (typeof errorMessage === 'string' && errorMessage.includes('ResizeObserver loop completed with undelivered notifications')) {
     return;
   }
-  
+
   // 记录前端运行错误
   try {
     const error = event.reason || new Error('Unhandled Promise Rejection');
@@ -502,7 +501,7 @@ window.addEventListener('unhandledrejection', (event) => {
     const errorMsg = error.message || String(event.reason) || '未处理的Promise拒绝';
     const errorStack = error.stack || '';
     const errorUrl = window.location.href;
-    
+
     // 异步记录错误，不阻塞页面
     recordFrontendError({
       error_type: errorType,
@@ -524,7 +523,7 @@ async function recordFrontendError(errorInfo) {
   try {
     // 检查是否有token（可选，未登录用户也可以记录错误）
     const token = sessionStorage.getItem('token');
-    
+
     // 构建请求参数
     const params = new URLSearchParams({
       error_type: errorInfo.error_type || 'JavaScriptError',
@@ -533,7 +532,7 @@ async function recordFrontendError(errorInfo) {
       ...(errorInfo.error_url && { error_url: errorInfo.error_url }),
       ...(errorInfo.user_agent && { user_agent: errorInfo.user_agent })
     });
-    
+
     // 发送错误日志（使用POST请求，避免URL过长）
     await axios.post(`/api/v1/audit-logs/client-error?${params.toString()}`, {}, {
       timeout: 5000, // 5秒超时，避免阻塞
@@ -560,7 +559,7 @@ const initializeAuth = () => {
   if (window.location.pathname === '/login' || window.location.pathname === '/') {
     return;
   }
-  
+
   // 先验证认证数据完整性，再恢复状态
   validateAuthData();
   const authStore = useAuthStore();
@@ -595,7 +594,7 @@ const fixSelectAccessibility = () => {
     fixDatePickerInputs();
     fixOtherFormInputs();
   });
-  
+
   // 修复 el-select 的 input 元素
   const fixSelectInputs = () => {
     const selectInputs = document.querySelectorAll('.el-select .el-select__input, .el-select .el-input__inner, .el-select .el-input__wrapper input');
@@ -603,10 +602,10 @@ const fixSelectAccessibility = () => {
       if (!input.getAttribute('title') && !input.getAttribute('placeholder')) {
         const selectEl = input.closest('.el-select');
         if (selectEl) {
-          let placeholder = selectEl.getAttribute('placeholder') || 
-                           selectEl.getAttribute('data-placeholder') ||
-                           '请选择';
-          
+          let placeholder = selectEl.getAttribute('placeholder') ||
+            selectEl.getAttribute('data-placeholder') ||
+            '请选择';
+
           input.setAttribute('title', placeholder);
           if (input.tagName === 'INPUT' && !input.getAttribute('placeholder')) {
             input.setAttribute('placeholder', placeholder);
@@ -626,7 +625,7 @@ const fixSelectAccessibility = () => {
       }
     });
   };
-  
+
   // 修复 el-date-picker 的 input 元素
   const fixDatePickerInputs = () => {
     const datePickerInputs = document.querySelectorAll('.el-date-picker .el-input__inner, .el-date-editor .el-input__inner, .el-date-editor input');
@@ -634,11 +633,11 @@ const fixSelectAccessibility = () => {
       if (!input.getAttribute('title') && !input.getAttribute('placeholder')) {
         const datePickerEl = input.closest('.el-date-picker, .el-date-editor');
         if (datePickerEl) {
-          let placeholder = datePickerEl.getAttribute('placeholder') || 
-                           datePickerEl.getAttribute('start-placeholder') ||
-                           datePickerEl.getAttribute('end-placeholder') ||
-                           '请选择日期';
-          
+          let placeholder = datePickerEl.getAttribute('placeholder') ||
+            datePickerEl.getAttribute('start-placeholder') ||
+            datePickerEl.getAttribute('end-placeholder') ||
+            '请选择日期';
+
           input.setAttribute('title', placeholder);
           if (input.tagName === 'INPUT' && !input.getAttribute('placeholder')) {
             input.setAttribute('placeholder', placeholder);
@@ -658,7 +657,7 @@ const fixSelectAccessibility = () => {
       }
     });
   };
-  
+
   // 修复其他表单元素的 input（el-autocomplete, el-cascader 等）
   const fixOtherFormInputs = () => {
     const otherInputs = document.querySelectorAll('.el-autocomplete input, .el-cascader input, .el-time-picker input');
@@ -666,13 +665,13 @@ const fixSelectAccessibility = () => {
       if (!input.getAttribute('title') && !input.getAttribute('placeholder') && !input.getAttribute('aria-label')) {
         const parentEl = input.closest('.el-autocomplete, .el-cascader, .el-time-picker');
         let placeholder = '请输入';
-        
+
         if (parentEl) {
-          placeholder = parentEl.getAttribute('placeholder') || 
-                       parentEl.getAttribute('data-placeholder') ||
-                       placeholder;
+          placeholder = parentEl.getAttribute('placeholder') ||
+            parentEl.getAttribute('data-placeholder') ||
+            placeholder;
         }
-        
+
         input.setAttribute('title', placeholder);
         if (input.tagName === 'INPUT' && !input.getAttribute('placeholder')) {
           input.setAttribute('placeholder', placeholder);
@@ -681,24 +680,24 @@ const fixSelectAccessibility = () => {
       }
     });
   };
-  
+
   // 立即执行一次修复
   const fixAllInputs = () => {
     fixSelectInputs();
     fixDatePickerInputs();
     fixOtherFormInputs();
   };
-  
+
   // 延迟执行，确保 DOM 已完全加载
   setTimeout(fixAllInputs, 100);
-  
+
   // 在路由变化后也执行修复（Vue Router 导航后）
   if (router) {
     router.afterEach(() => {
       setTimeout(fixAllInputs, 200);
     });
   }
-  
+
   // 开始观察 DOM 变化
   observer.observe(document.body, {
     childList: true,
@@ -710,7 +709,7 @@ const fixSelectAccessibility = () => {
 const fixMozAppearance = () => {
   // 查找所有使用 -moz-appearance 的元素
   const styleSheets = document.styleSheets;
-  
+
   // 方法1：通过内联样式修复
   const elementsWithMozAppearance = document.querySelectorAll('[style*="-moz-appearance"]');
   elementsWithMozAppearance.forEach((el) => {
@@ -724,7 +723,7 @@ const fixMozAppearance = () => {
       }
     }
   });
-  
+
   // 方法2：通过计算样式修复
   // 注意：Element Plus 编译后的 CSS 可能使用 .el-input_inner（单下划线）或 .el-input__inner（双下划线）
   const allInputs = document.querySelectorAll('input, .el-input__inner, .el-input_inner, .el-input__wrapper');
@@ -732,7 +731,7 @@ const fixMozAppearance = () => {
     const computedStyle = window.getComputedStyle(el);
     const mozAppearance = computedStyle.getPropertyValue('-moz-appearance');
     const appearance = computedStyle.getPropertyValue('appearance');
-    
+
     // 如果元素有 -moz-appearance 但没有 appearance，添加它
     if (mozAppearance && mozAppearance !== 'none' && (!appearance || appearance === 'none' || appearance === 'auto')) {
       // 如果 -moz-appearance 是 textfield，设置 appearance 为 textfield
@@ -743,7 +742,7 @@ const fixMozAppearance = () => {
       }
     }
   });
-  
+
   // 方法3：专门修复 Element Plus 分页组件中的输入框
   // 查找所有在 .el-pagination 中的输入元素
   const paginationInputs = document.querySelectorAll('.el-pagination input, .el-pagination .el-input__inner, .el-pagination .el-input_inner');
@@ -751,13 +750,13 @@ const fixMozAppearance = () => {
     const computedStyle = window.getComputedStyle(el);
     const mozAppearance = computedStyle.getPropertyValue('-moz-appearance');
     const appearance = computedStyle.getPropertyValue('appearance');
-    
+
     // 如果元素有 -moz-appearance: textfield 但没有 appearance，强制添加
     if (mozAppearance && mozAppearance.trim() === 'textfield' && (!appearance || appearance === 'none' || appearance === 'auto')) {
       el.style.appearance = 'textfield';
     }
   });
-  
+
   // 方法4：直接修改 Element Plus 样式表中的规则
   // 扫描所有样式表，查找包含 .el-pagination .el-input_inner 的规则
   try {
@@ -767,20 +766,20 @@ const fixMozAppearance = () => {
         const sheet = styleSheets[i];
         // 跳过跨域样式表
         if (!sheet.cssRules) continue;
-        
+
         // 检查是否是 Element Plus 样式表
         const href = sheet.href || '';
         const isElementPlus = href.includes('element-plus') || href.includes('elementPlus');
-        
+
         for (let j = 0; j < sheet.cssRules.length; j++) {
           const rule = sheet.cssRules[j];
           if (rule.style && rule.selectorText) {
             // 查找包含 .el-pagination .el-input_inner 的规则
-            if (rule.selectorText.includes('.el-pagination') && 
-                (rule.selectorText.includes('.el-input_inner') || rule.selectorText.includes('.el-input__inner'))) {
+            if (rule.selectorText.includes('.el-pagination') &&
+              (rule.selectorText.includes('.el-input_inner') || rule.selectorText.includes('.el-input__inner'))) {
               const mozAppearance = rule.style.getPropertyValue('-moz-appearance');
               const appearance = rule.style.getPropertyValue('appearance');
-              
+
               // 如果规则有 -moz-appearance 但没有 appearance，添加它
               if (mozAppearance && mozAppearance.trim() === 'textfield' && (!appearance || appearance === 'none' || appearance === 'auto')) {
                 try {
@@ -816,12 +815,12 @@ const fixMaskProperties = () => {
     const computedStyle = window.getComputedStyle(el);
     const maskImage = computedStyle.getPropertyValue('mask-image');
     const webkitMaskImage = computedStyle.getPropertyValue('-webkit-mask-image');
-    
+
     // 如果有 mask-image 但没有 -webkit-mask-image，添加它
     if (maskImage && maskImage !== 'none' && !webkitMaskImage) {
       el.style.setProperty('-webkit-mask-image', maskImage, 'important');
     }
-    
+
     // 检查内联样式
     const style = el.getAttribute('style') || '';
     if (style.includes('mask-image:') && !style.includes('-webkit-mask-image:')) {
@@ -832,17 +831,17 @@ const fixMaskProperties = () => {
       }
     }
   };
-  
+
   // 修复 mask-position
   const fixMaskPosition = (el) => {
     const computedStyle = window.getComputedStyle(el);
     const maskPosition = computedStyle.getPropertyValue('mask-position');
     const webkitMaskPosition = computedStyle.getPropertyValue('-webkit-mask-position');
-    
+
     if (maskPosition && maskPosition !== 'initial' && !webkitMaskPosition) {
       el.style.setProperty('-webkit-mask-position', maskPosition, 'important');
     }
-    
+
     const style = el.getAttribute('style') || '';
     if (style.includes('mask-position:') && !style.includes('-webkit-mask-position:')) {
       const match = style.match(/mask-position:\s*([^;]+)/);
@@ -852,17 +851,17 @@ const fixMaskProperties = () => {
       }
     }
   };
-  
+
   // 修复 mask-repeat
   const fixMaskRepeat = (el) => {
     const computedStyle = window.getComputedStyle(el);
     const maskRepeat = computedStyle.getPropertyValue('mask-repeat');
     const webkitMaskRepeat = computedStyle.getPropertyValue('-webkit-mask-repeat');
-    
+
     if (maskRepeat && maskRepeat !== 'initial' && !webkitMaskRepeat) {
       el.style.setProperty('-webkit-mask-repeat', maskRepeat, 'important');
     }
-    
+
     const style = el.getAttribute('style') || '';
     if (style.includes('mask-repeat:') && !style.includes('-webkit-mask-repeat:')) {
       const match = style.match(/mask-repeat:\s*([^;]+)/);
@@ -872,7 +871,7 @@ const fixMaskProperties = () => {
       }
     }
   };
-  
+
   // 优化：只检查可能使用 mask 相关属性的元素，而不是所有元素
   // 方法1：检查内联样式
   const elementsWithMaskInStyle = document.querySelectorAll('[style*="mask-image"], [style*="mask-position"], [style*="mask-repeat"]');
@@ -881,7 +880,7 @@ const fixMaskProperties = () => {
     fixMaskPosition(el);
     fixMaskRepeat(el);
   });
-  
+
   // 方法2：检查计算样式（只检查特定类名的元素，提高性能）
   const potentialMaskElements = document.querySelectorAll('[class*="mask"], [class*="close-button"], [class*="button"], .el-select-dropdown__item');
   potentialMaskElements.forEach((el) => {
@@ -889,7 +888,7 @@ const fixMaskProperties = () => {
     const hasMaskImage = computedStyle.getPropertyValue('mask-image') !== 'none';
     const hasMaskPosition = computedStyle.getPropertyValue('mask-position') !== 'initial' && computedStyle.getPropertyValue('mask-position') !== '';
     const hasMaskRepeat = computedStyle.getPropertyValue('mask-repeat') !== 'initial' && computedStyle.getPropertyValue('mask-repeat') !== '';
-    
+
     if (hasMaskImage) {
       fixMaskImage(el);
     }
@@ -900,7 +899,7 @@ const fixMaskProperties = () => {
       fixMaskRepeat(el);
     }
   });
-  
+
   // 方法3：扫描所有样式表，查找使用 mask-image 的规则，并动态修复
   // 注意：这可以修复通过外部样式表（如第三方库）添加的 mask-image
   try {
@@ -910,7 +909,7 @@ const fixMaskProperties = () => {
         const sheet = styleSheets[i];
         // 跳过跨域样式表
         if (!sheet.cssRules) continue;
-        
+
         for (let j = 0; j < sheet.cssRules.length; j++) {
           const rule = sheet.cssRules[j];
           if (rule.style && rule.style.maskImage && rule.style.maskImage !== 'none') {
@@ -918,7 +917,7 @@ const fixMaskProperties = () => {
             if (!rule.style.webkitMaskImage) {
               rule.style.webkitMaskImage = rule.style.maskImage;
             }
-            
+
             // 查找匹配的元素并应用修复
             try {
               const selector = rule.selectorText;
@@ -946,7 +945,7 @@ const fixMaskProperties = () => {
 const initMobileOptimizations = () => {
   // 修复视口高度（解决移动端浏览器地址栏问题）
   useViewportHeight();
-  
+
   // 禁用双击缩放
   disableDoubleTapZoom();
 };
@@ -958,13 +957,13 @@ nextTick(() => {
   setTimeout(() => {
     // 初始化移动端优化
     initMobileOptimizations();
-    
+
     initializeAuth();
     initializeTimezone();
     fixSelectAccessibility();
     fixMozAppearance();
     fixMaskProperties();
-    
+
     // 使用 MutationObserver 监听 DOM 变化，确保动态创建的元素也能被修复
     const observer = new MutationObserver(() => {
       fixMozAppearance();

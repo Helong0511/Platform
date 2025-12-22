@@ -42,8 +42,6 @@ class User(Base):
     clients = relationship("Client", back_populates="user", cascade="all, delete-orphan")
 
     def verify_password(self, password: str) -> bool:
-        # Truncate password to 72 characters as per bcrypt's example
-        truncated_password = password[:72]
         return pwd_context.verify(password, self.hashed_password)
 
     def get_password_hash(self, password: str) -> str:

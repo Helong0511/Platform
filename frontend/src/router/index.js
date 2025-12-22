@@ -49,139 +49,139 @@ const MainLayout = createAsyncComponent(() => import(/* webpackChunkName: "layou
 const routes = [
   { path: '/', redirect: '/login' },
   { path: '/login', name: 'Login', component: Login, meta: { requiresAuth: false } },
-  { 
-    path: '/app', 
+  {
+    path: '/app',
     component: MainLayout,
     meta: { requiresAuth: true },
     children: [
       { path: '', redirect: '/app/dashboard' },
-      { 
-        path: 'dashboard', 
-        name: 'Dashboard', 
-        component: Dashboard 
+      {
+        path: 'dashboard',
+        name: 'Dashboard',
+        component: Dashboard
       },
-      { 
-        path: 'ad-data', 
+      {
+        path: 'ad-data',
         redirect: '/app/ad-data/detail-report'
       },
-      { 
-        path: 'ad-data/daily-report', 
-        name: 'DailyReport', 
-        component: DailyReport 
+      {
+        path: 'ad-data/daily-report',
+        name: 'DailyReport',
+        component: DailyReport
       },
-      { 
-        path: 'ad-data/detail-report', 
-        name: 'AdData', 
-        component: AdData 
+      {
+        path: 'ad-data/detail-report',
+        name: 'AdData',
+        component: AdData
       },
-      { 
-        path: 'ad-data/tb-search-data', 
-        name: 'TBSearchData', 
-        component: TBSearchData 
+      {
+        path: 'ad-data/tb-search-data',
+        name: 'TBSearchData',
+        component: TBSearchData
       },
-      { 
-        path: 'admin/users', 
-        name: 'UserManagement', 
-        component: UserManagement, 
-        meta: { requiresAdmin: true } 
+      {
+        path: 'admin/users',
+        name: 'UserManagement',
+        component: UserManagement,
+        meta: { requiresAdmin: true }
       },
-      { 
-        path: 'admin/import-training', 
-        name: 'ImportTraining', 
-        component: MLModelManagement, 
-        meta: { requiresAdmin: true } 
+      {
+        path: 'admin/import-training',
+        name: 'ImportTraining',
+        component: MLModelManagement,
+        meta: { requiresAdmin: true }
       },
-      { 
-        path: 'admin/scheduled-tasks', 
-        name: 'ScheduledTaskManagement', 
-        component: ScheduledTaskManagement, 
-        meta: { requiresAdmin: true } 
+      {
+        path: 'admin/scheduled-tasks',
+        name: 'ScheduledTaskManagement',
+        component: ScheduledTaskManagement,
+        meta: { requiresAdmin: true }
       },
-      { 
-        path: 'admin/audit-logs', 
-        name: 'AuditLogManagement', 
-        component: AuditLogManagement, 
-        meta: { requiresAdmin: true } 
+      {
+        path: 'admin/audit-logs',
+        name: 'AuditLogManagement',
+        component: AuditLogManagement,
+        meta: { requiresAdmin: true }
       },
-      { 
-        path: 'admin/postback', 
-        name: 'PostbackManagement', 
-        component: PostbackManagement, 
-        meta: { requiresAdmin: true } 
+      {
+        path: 'admin/postback',
+        name: 'PostbackManagement',
+        component: PostbackManagement,
+        meta: { requiresAdmin: true }
       },
-      { 
-        path: 'admin/short-links', 
-        name: 'ShortLinkManagement', 
-        component: ShortLinkManagement, 
-        meta: { requiresAdmin: false } 
+      {
+        path: 'admin/short-links',
+        name: 'ShortLinkManagement',
+        component: ShortLinkManagement,
+        meta: { requiresAdmin: false }
       },
-      { 
-        path: 'admin/advertisers', 
-        name: 'AdvertiserManagement', 
-        component: AdvertiserManagement, 
-        meta: { requiresAdmin: true } 
+      {
+        path: 'admin/advertisers',
+        name: 'AdvertiserManagement',
+        component: AdvertiserManagement,
+        meta: { requiresAdmin: true }
       },
-      { 
-        path: 'admin/publishers', 
-        name: 'PublisherManagement', 
-        component: PublisherManagement, 
-        meta: { requiresAdmin: true } 
+      {
+        path: 'admin/publishers',
+        name: 'PublisherManagement',
+        component: PublisherManagement,
+        meta: { requiresAdmin: true }
       },
-      { 
-        path: 'admin/offers', 
-        name: 'OfferManagement', 
-        component: OfferManagement, 
-        meta: { requiresAdmin: true } 
+      {
+        path: 'admin/offers',
+        name: 'OfferManagement',
+        component: OfferManagement,
+        meta: { requiresAdmin: true }
       },
-      { 
-        path: 'admin/caps', 
-        name: 'CapManagement', 
-        component: CapManagement, 
-        meta: { requiresAdmin: true } 
+      {
+        path: 'admin/caps',
+        name: 'CapManagement',
+        component: CapManagement,
+        meta: { requiresAdmin: true }
       },
-      { 
-        path: 'admin/discounts', 
-        name: 'DiscountManagement', 
-        component: DiscountManagement, 
-        meta: { requiresAdmin: true } 
+      {
+        path: 'admin/discounts',
+        name: 'DiscountManagement',
+        component: DiscountManagement,
+        meta: { requiresAdmin: true }
       },
-      { 
-        path: 'admin/advertiser-test', 
-        name: 'AdvertiserTest', 
-        component: AdvertiserTest, 
-        meta: { requiresAdmin: true } 
+      {
+        path: 'admin/advertiser-test',
+        name: 'AdvertiserTest',
+        component: AdvertiserTest,
+        meta: { requiresAdmin: true }
       },
-      { 
-        path: 'admin/affiliate-test', 
-        name: 'AffiliateTest', 
-        component: AffiliateTest, 
-        meta: { requiresAdmin: true } 
+      {
+        path: 'admin/affiliate-test',
+        name: 'AffiliateTest',
+        component: AffiliateTest,
+        meta: { requiresAdmin: true }
       },
-      { 
-        path: 'admin/conversion-summary', 
-        name: 'ConversionSummary', 
-        component: ConversionSummary, 
-        meta: { requiresAdmin: true } 
+      {
+        path: 'admin/conversion-summary',
+        name: 'ConversionSummary',
+        component: ConversionSummary,
+        meta: { requiresAdmin: true }
       },
-      { 
-        path: 'admin/conversion-log', 
-        name: 'ConversionLog', 
-        component: ConversionLog, 
-        meta: { requiresAdmin: true } 
+      {
+        path: 'admin/conversion-log',
+        name: 'ConversionLog',
+        component: ConversionLog,
+        meta: { requiresAdmin: true }
       },
-      { 
-        path: 'client/user-management', 
-        name: 'ClientUserManagement', 
+      {
+        path: 'client/user-management',
+        name: 'ClientUserManagement',
         component: ClientUserManagement
       },
-      { 
-        path: 'api-documentation', 
-        name: 'ApiDocumentation', 
+      {
+        path: 'api-documentation',
+        name: 'ApiDocumentation',
         component: ApiDocumentation
       }
-  ]
-},
-{ path: '/:pathMatch(.*)*', name: 'NotFound', component: NotFound }
+    ]
+  },
+  { path: '/:pathMatch(.*)*', name: 'NotFound', component: NotFound }
 ];
 
 // 创建路由实例
@@ -197,70 +197,38 @@ router.beforeEach((to, from, next) => {
     if (to.path === '/login' || to.path === '/') {
       return next();
     }
-    
-    // 先验证认证数据完整性
-    const isValid = validateAuthData();
-    
-    // 获取存储的token（如果数据有效）
-    const token = isValid ? sessionStorage.getItem('token') : null;
-    
-    // 如果数据无效但token存在，清除认证数据
-    if (!isValid && token) {
-      clearAuthData();
-    }
-    
+
+    // 先验证认证数据完整性（现在基于 userInfo，初始化时会自动同步）
+    const isAuthenticated = validateAuthData();
     const authStore = useAuthStore();
-    
+
     // ====== 需要认证的路由 ======
-    // 对于需要认证的路由，确保store状态同步
     if (to.meta.requiresAuth) {
-      // 如果有token但store未认证，先同步状态
-      if (token && !authStore.isAuthenticated) {
-        const authResult = authStore.checkAuth();
-        // 如果checkAuth返回false，说明token或userInfo无效，清除数据并跳转
-        if (!authResult) {
+      // 如果未认证，或者是 store 状态显示未登录
+      if (!isAuthenticated || !authStore.isAuthenticated) {
+        // 尝试执行一次 checkAuth (如果是因为 store 还没初始化)
+        if (isAuthenticated && !authStore.isAuthenticated) {
+          authStore.checkAuth();
+        }
+
+        // 再次检查
+        if (!authStore.isAuthenticated) {
           clearAuthData();
-          const shouldShowMessage = to.path !== '/login' && 
-                                    from.path !== '/login' && 
-                                    from.path !== '/' && 
-                                    from.name !== null;
+          const shouldShowMessage = to.path !== '/login' &&
+            from.path !== '/login' &&
+            from.path !== '/' &&
+            from.name !== null;
           if (shouldShowMessage) {
-            ElMessage.warning('登录已过期，请重新登录');
+            ElMessage.warning('请登录后访问');
           }
           return next('/login');
         }
       }
-      
-      // 如果没有token，直接跳转到登录页
-      if (!token) {
-        const shouldShowMessage = to.path !== '/login' && 
-                                  from.path !== '/login' && 
-                                  from.path !== '/' && 
-                                  from.name !== null;
-        if (shouldShowMessage) {
-          ElMessage.warning('请先登录');
-        }
-        return next('/login');
-      }
-      
-      // 如果store状态显示未认证，也跳转到登录页
-      if (!authStore.isAuthenticated) {
-        clearAuthData();
-        const shouldShowMessage = to.path !== '/login' && 
-                                  from.path !== '/login' && 
-                                  from.path !== '/' && 
-                                  from.name !== null;
-        if (shouldShowMessage) {
-          ElMessage.warning('登录已过期，请重新登录');
-        }
-        return next('/login');
-      }
     }
-    
+
     // ====== 已登录用户访问登录页 ======
-    // 如果已登录（有token且store状态为已登录），访问登录页时重定向到仪表盘
-    if (to.path === '/login' && token && authStore.isAuthenticated) {
-      ElMessage.info('已登录，跳转到首页');
+    if (to.path === '/login' && authStore.isAuthenticated) {
+      ElMessage.info('您已登录');
       return next('/app/dashboard');
     }
 
@@ -270,22 +238,22 @@ router.beforeEach((to, from, next) => {
       // 如果未认证，跳转到登录页（上面已经检查过，这里应该不会执行到）
       if (!authStore.isAuthenticated) {
         clearAuthData();
-        const shouldShowMessage = to.path !== '/login' && 
-                                  from.path !== '/login' && 
-                                  from.path !== '/' && 
-                                  from.name !== null;
+        const shouldShowMessage = to.path !== '/login' &&
+          from.path !== '/login' &&
+          from.path !== '/' &&
+          from.name !== null;
         if (shouldShowMessage) {
           ElMessage.warning('请先登录');
         }
         return next('/login');
       }
-      
+
       // 检查管理员权限
       if (!authStore.isAdmin) {
         ElMessage.error('没有权限访问该页面');
         // 如果是从其他页面跳转过来的，返回原页面；否则跳转到仪表盘
-        const fallbackPath = from.path && from.path !== '/login' && from.path.startsWith('/app') 
-          ? from.path 
+        const fallbackPath = from.path && from.path !== '/login' && from.path.startsWith('/app')
+          ? from.path
           : '/app/dashboard';
         return next(fallbackPath);
       }

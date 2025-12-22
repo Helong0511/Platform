@@ -10,23 +10,22 @@ import { ElMessage } from 'element-plus';
 export function usePageAuth() {
   const router = useRouter();
   const authStore = useAuthStore();
-  
+
   /**
    * 检查认证状态，如果未认证则跳转到登录页
    * @returns {boolean} 是否已认证
    */
   const checkAuthBeforeLoad = () => {
-    const token = sessionStorage.getItem('token');
-    
-    // 检查token是否存在
-    if (!token) {
+    // 检查是否已认证（现在基于 HttpOnly Cookie，JS 无法直接读取 token）
+    // 因此这里依赖 store 中的状态，初始化时会根据 userInfo 判断
+    if (!authStore.isAuthenticated) {
       ElMessage.warning('请先登录');
       router.push('/login').catch(() => {
         window.location.href = '/login';
       });
       return false;
     }
-    
+
     // 确保store状态同步
     if (!authStore.isAuthenticated) {
       authStore.checkAuth();
@@ -38,10 +37,10 @@ export function usePageAuth() {
         return false;
       }
     }
-    
+
     return true;
   };
-  
+
   /**
    * 创建带超时保护的Promise
    * @param {Promise} promise - 要保护的Promise
@@ -55,10 +54,10 @@ export function usePageAuth() {
         reject(new Error(errorMessage));
       }, timeout);
     });
-    
+
     return Promise.race([promise, timeoutPromise]);
   };
-  
+
   /**
    * 安全执行异步操作，自动处理401错误
    * @param {Function} asyncFn - 异步函数
@@ -72,7 +71,7 @@ export function usePageAuth() {
       onError = null,
       stopLoading = null
     } = options;
-    
+
     try {
       return await withTimeout(asyncFn(), timeout, timeoutMessage);
     } catch (error) {
@@ -83,7 +82,7 @@ export function usePageAuth() {
         }
         return null;
       }
-      
+
       // 超时错误
       if (error.message && error.message.includes('超时')) {
         if (stopLoading && typeof stopLoading === 'function') {
@@ -94,7 +93,7 @@ export function usePageAuth() {
         }
         throw error;
       }
-      
+
       // 其他错误
       if (onError && typeof onError === 'function') {
         onError(error);
@@ -102,7 +101,7 @@ export function usePageAuth() {
       throw error;
     }
   };
-  
+
   return {
     checkAuthBeforeLoad,
     withTimeout,

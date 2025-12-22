@@ -24,9 +24,8 @@ axios.defaults.timeout = isMobileDevice ? 30000 : 15000; // 移动端30秒，桌
  */
 export const clearAuthData = () => {
   try {
-    sessionStorage.removeItem('token');
     sessionStorage.removeItem('userInfo');
-    delete axios.defaults.headers.common['Authorization'];
+    // 注意：HttpOnly cookie 的清除需要由后端在 logout 接口中处理
   } catch (e) {
     logger.warn('清除认证信息时出错:', e);
   }
@@ -38,33 +37,28 @@ export const clearAuthData = () => {
  */
 export const validateAuthData = () => {
   try {
-    const token = sessionStorage.getItem('token');
     const userInfoStr = sessionStorage.getItem('userInfo');
-    
-    // 如果只有 token 没有 userInfo，或者 userInfo 无效，清除所有数据
-    if (token && (!userInfoStr || userInfoStr === 'null' || userInfoStr === 'undefined')) {
-      logger.warn('检测到 token 存在但 userInfo 无效，清除认证数据');
-      clearAuthData();
+
+    // 如果没有 userInfo，说明未登录或会话已过期
+    if (!userInfoStr || userInfoStr === 'null' || userInfoStr === 'undefined') {
       return false;
     }
-    
+
     // 如果 userInfo 存在，尝试解析验证
-    if (userInfoStr) {
-      try {
-        const userInfo = JSON.parse(userInfoStr);
-        // 验证 userInfo 是否为有效对象
-        if (!userInfo || typeof userInfo !== 'object') {
-          logger.warn('userInfo 格式无效，清除认证数据');
-          clearAuthData();
-          return false;
-        }
-      } catch (e) {
-        logger.warn('解析 userInfo 失败，清除认证数据:', e);
+    try {
+      const userInfo = JSON.parse(userInfoStr);
+      // 验证 userInfo 是否为有效对象
+      if (!userInfo || typeof userInfo !== 'object') {
+        logger.warn('userInfo 格式无效，清除认证数据');
         clearAuthData();
         return false;
       }
+    } catch (e) {
+      logger.warn('解析 userInfo 失败，清除认证数据:', e);
+      clearAuthData();
+      return false;
     }
-    
+
     return true;
   } catch (e) {
     logger.error('验证认证数据时出错:', e);
@@ -78,11 +72,10 @@ export const useAuthStore = defineStore('auth', {
   state: () => {
     // 验证认证数据完整性
     const isValid = validateAuthData();
-    
+
     // 安全解析用户信息
     let userInfo = {};
-    let token = null;
-    
+
     if (isValid) {
       try {
         const userInfoStr = sessionStorage.getItem('userInfo');
@@ -90,19 +83,14 @@ export const useAuthStore = defineStore('auth', {
           userInfo = JSON.parse(userInfoStr);
         }
       } catch (e) {
-        // JSON解析失败，清除无效数据
-        logger.warn('初始化时解析用户信息失败，清除无效数据:', e);
-        sessionStorage.removeItem('userInfo');
+        logger.warn('初始化时解析用户信息失败:', e);
         userInfo = {};
       }
-      
-      token = sessionStorage.getItem('token') || null;
     }
-    
+
     return {
-      token: token,
       userInfo: userInfo,
-      isAuthenticated: !!token && isValid, // 如果有token且数据有效，初始化为已认证
+      isAuthenticated: isValid, // 基于 userInfo 的有效性判断
       loading: false,
       error: null
     };
@@ -118,9 +106,9 @@ export const useAuthStore = defineStore('auth', {
         // 检测是否为移动设备，移动端使用更长的超时时间
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         const timeout = isMobile ? 30000 : 15000; // 移动端30秒，桌面端15秒
-        
-        const response = await axios.post('/api/v1/auth/login', new URLSearchParams({ 
-          username: credentials.username, 
+
+        const response = await axios.post('/api/v1/auth/login', new URLSearchParams({
+          username: credentials.username,
           password: credentials.password,
           grant_type: 'password'
         }), {
@@ -129,10 +117,10 @@ export const useAuthStore = defineStore('auth', {
           },
           timeout: timeout
         });
-        
+
         // 安全解构响应数据，防止数据格式错误导致登录失败
         const responseData = response.data || {};
-        
+
         // 检查响应体格式：如果是错误格式（有 code 字段且 code !== 200），说明是业务错误
         // 这种情况不应该发生（因为错误应该返回非 200 状态码），但为了安全起见还是检查
         if (responseData.code !== undefined && responseData.code !== 200) {
@@ -144,42 +132,30 @@ export const useAuthStore = defineStore('auth', {
           };
           throw error;
         }
-        
+
         // 正常响应格式：{access_token, token_type, user}
-        const token = responseData.access_token;
+        // 注意：token 已经过 set-cookie 设置到 HttpOnly cookie 中
         const user_info = responseData.user;
-        
+
         // 验证响应数据完整性
-        if (!token || !user_info) {
-          // 如果响应中没有 token 或 user，说明响应格式错误
-          // 这通常不应该发生，但为了安全起见还是检查
-          const error = new Error('登录响应数据格式错误：缺少必要的认证信息');
-          error.response = {
-            status: response.status,
-            data: responseData
-          };
-          throw error;
+        if (!user_info) {
+          throw new Error('登录响应数据格式错误：缺少用户信息');
         }
 
-        // 保存到sessionStorage（关闭浏览器后自动清除）
-        sessionStorage.setItem('token', token);
+        // 只保存用户信息到sessionStorage (token 存储在 cookie 中)
         sessionStorage.setItem('userInfo', JSON.stringify(user_info));
 
         // 更新状态
-        this.token = token;
         this.userInfo = user_info;
         this.isAuthenticated = true;
 
-        // 设置Axios默认header
-        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-
         ElMessage.success('登录成功');
-        
+
         // 登录成功后初始化时区配置
         initTimezone().catch(() => {
           // 静默处理错误，使用默认值
         });
-        
+
         // 跳转到仪表盘页面
         // 注意：路由守卫会检查token，所以这里直接跳转即可
         router.push('/app/dashboard').catch(err => {
@@ -193,12 +169,12 @@ export const useAuthStore = defineStore('auth', {
       } catch (err) {
         // 处理错误信息
         let errorMsg = '登录失败';
-        
+
         if (err.response) {
           // 后端返回的错误
           const status = err.response.status;
           const detail = err.response.data?.detail || err.response.data?.message;
-          
+
           // 403 错误通常是权限问题（如客户被禁用、用户被禁用等）
           if (status === 403) {
             errorMsg = detail || '禁止登录，请联系管理员';
@@ -210,8 +186,8 @@ export const useAuthStore = defineStore('auth', {
         } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
           // 超时错误
           const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-          errorMsg = isMobile 
-            ? '网络连接超时，请检查网络连接或稍后重试' 
+          errorMsg = isMobile
+            ? '网络连接超时，请检查网络连接或稍后重试'
             : '请求超时，请检查网络连接';
         } else if (err.message) {
           // 其他错误（包括响应数据格式错误）
@@ -223,7 +199,7 @@ export const useAuthStore = defineStore('auth', {
             errorMsg = '登录失败，请检查用户名和密码';
           }
         }
-        
+
         this.error = errorMsg;
         // 错误消息已在axios拦截器中显示，这里不再重复显示
         // 但如果拦截器没有处理（_handled标记），则显示
@@ -245,20 +221,15 @@ export const useAuthStore = defineStore('auth', {
         // API调用失败不影响退出登录流程（可能是token已过期）
         // 静默处理，不显示错误消息
       }
-      
+
       // ====== 清除会话存储 ======
       // 清除token和用户信息，确保下次访问需要重新登录
       clearAuthData();
 
       // ====== 重置Store状态 ======
       // 清空所有认证相关的状态
-      this.token = null;
       this.userInfo = {};
       this.isAuthenticated = false;
-
-      // ====== 清除Axios请求头 ======
-      // 移除Authorization头，后续请求不再携带token
-      delete axios.defaults.headers.common['Authorization'];
 
       // ====== 跳转到登录页 ======
       // 重定向到登录页面
@@ -268,19 +239,18 @@ export const useAuthStore = defineStore('auth', {
           // 路由跳转失败已由路由系统处理，无需额外日志
         }
       });
-      
+
       ElMessage.success('已退出登录');
     },
     checkAuth() {
       // 先验证认证数据完整性
       const isValid = validateAuthData();
-      
+
       // 检查会话存储中的token（如果数据有效）
-      const token = isValid ? sessionStorage.getItem('token') : null;
-      
-      if (token && isValid) {
-        this.token = token;
-        // 安全解析用户信息
+      // 认证 token 现在由浏览器通过 HttpOnly Cookie 自动处理
+      // 不再需要手动从 sessionStorage 提取并添加到 Header
+      // 安全解析用户信息
+      if (isValid) {
         try {
           const userInfoStr = sessionStorage.getItem('userInfo');
           if (userInfoStr) {
@@ -318,8 +288,8 @@ export const useAuthStore = defineStore('auth', {
       try {
         const response = await axios.get('/api/v1/users/me');
         // 使用统一的响应处理
-        const normalized = response.data?.code === 200 
-          ? response.data.data 
+        const normalized = response.data?.code === 200
+          ? response.data.data
           : (response.data?.data || response.data);
         this.userInfo = normalized || {};
         sessionStorage.setItem('userInfo', JSON.stringify(this.userInfo));
@@ -332,12 +302,12 @@ export const useAuthStore = defineStore('auth', {
           this.token = null;
           this.userInfo = {};
           this.isAuthenticated = false;
-          
+
           // 只在非登录页显示错误信息
           if (window.location.pathname !== '/login') {
             ElMessage.error('会话已过期，请重新登录');
             // 跳转到登录页
-            router.push('/login').catch(() => {});
+            router.push('/login').catch(() => { });
           }
         } else {
           // 其他错误，正常显示

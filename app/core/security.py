@@ -32,7 +32,11 @@ logger = logging.getLogger(__name__)
 
 # ====== OAuth2配置 ======
 # 配置OAuth2密码持有者模式，指定令牌获取端点
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
+# auto_error=False 允许我们在 header 缺失时，在程序逻辑中从 cookie 提取 token
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl=f"{settings.API_V1_STR}/auth/login",
+    auto_error=False
+)
 
 
 # ====== JWT工具类 ======
@@ -172,24 +176,35 @@ class JWTUtils:
 
 # ====== 获取当前用户依赖 ======
 async def get_current_user(
+        request: Request,
         db: AsyncSession = Depends(get_db),
         token: str = Depends(oauth2_scheme)
 ) -> User:
     """
     从JWT令牌中获取当前用户
     
-    这是一个FastAPI依赖项，会自动从请求头中提取Bearer令牌并验证
+    支持两种方式：
+    1. Authorization: Bearer <token> 请求头 (传统前端方式)
+    2. HttpOnly Cookie: access_token (安全增强方式)
     
     参数:
+        request: FastAPI 请求对象
         db: 数据库会话
         token: JWT令牌（从请求头自动提取）
-    
-    返回:
-        当前用户对象
-    
-    异常:
-        HTTPException: 如果令牌无效、用户不存在、用户被禁用或登录受限
     """
+    # ====== 令牌提取优先级 ======
+    # 如果请求头中没有 token (oauth2_scheme 返回 None 或解析失败)
+    # 则尝试从 Cookie 中获取
+    if not token:
+        token = request.cookies.get("access_token")
+        
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     # ====== 验证令牌 ======
     # 验证JWT令牌并获取载荷（同时检查黑名单）
     payload = await JWTUtils.verify_token(token, db=db)

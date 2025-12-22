@@ -39,11 +39,31 @@ def get_total_cap_key(offer_id: int, publisher_id: Optional[int] = None) -> str:
 class RedisCapManager:
     """Redis Cap 管理器"""
     
+    # Lua 脚本：原子递增并设置过期时间
+    # KEYS[1]: cap_key
+    # ARGV[1]: expire_seconds
+    # ARGV[2]: initial_value (可选，用于冷启动同步)
+    _INCR_LUA = """
+    local current = redis.call('GET', KEYS[1])
+    if not current then
+        local val = 1
+        if ARGV[2] and ARGV[2] ~= "" then
+            val = tonumber(ARGV[2]) + 1
+        end
+        redis.call('SET', KEYS[1], val)
+        redis.call('EXPIRE', KEYS[1], ARGV[1])
+        return val
+    else
+        return redis.call('INCR', KEYS[1])
+    end
+    """
+
     @staticmethod
     async def check_and_increment_daily(
         offer_id: int, 
         limit: int, 
-        publisher_id: Optional[int] = None
+        publisher_id: Optional[int] = None,
+        initial_value: Optional[int] = None
     ) -> bool:
         """
         检查并增加每日计数 (原子操作)
@@ -52,14 +72,13 @@ class RedisCapManager:
             offer_id: Offer ID
             limit: 限制数量
             publisher_id: 渠道 ID (可选)
+            initial_value: 如果 Key 不存在，使用的初始值 (通常来自 DB)
             
         Returns:
             bool: True=允许通过(未超量), False=已超量
         """
         redis = await get_redis_client()
         if not redis:
-            # 降级策略：如果 Redis 不可用，返回 True (允许通过) 或抛出异常
-            # 这里选择谨慎策略，记录日志并允许通过（依赖后续 DB 检查或由业务决定）
             logger.warning("Redis不可用，Cap检查跳过 (Fail Open)")
             return True
             
@@ -67,33 +86,28 @@ class RedisCapManager:
         key = get_daily_cap_key(offer_id, now, publisher_id)
         
         try:
-            # 原子递增
-            # 1. INCR key
-            # 2. 如果是新 key (value=1)，设置过期时间
-            current = await redis.incr(key)
+            # 执行 Lua 脚本实现原子操作
+            # initial_value 如果为 None，传空字符串给 Lua
+            init_val = str(initial_value) if initial_value is not None else ""
+            current = await redis.eval(
+                RedisCapManager._INCR_LUA, 1, key, DEFAULT_EXPIRE_SECONDS, init_val
+            )
             
-            if current == 1:
-                await redis.expire(key, DEFAULT_EXPIRE_SECONDS)
-                
             # 检查是否超量
             if current > limit:
-                # 即使超量也保留计数，以便统计超量程度
-                # 但为了防止无限增长，可以考虑不再递增? 
-                # 不，INCR 已经执行了。如果不想污染计数，可以使用 Lua 脚本做到 "check and incr"
-                # 但简单的 INCR 即使超量也无所谓，只需返回 False
                 return False
                 
             return True
-            
         except Exception as e:
-            logger.error(f"Redis操作失败: {e}", exc_info=True)
+            logger.error(f"Redis Lua操作失败: {e}", exc_info=True)
             return True  # Fail Open
 
     @staticmethod
     async def check_and_increment_total(
         offer_id: int, 
         limit: int, 
-        publisher_id: Optional[int] = None
+        publisher_id: Optional[int] = None,
+        initial_value: Optional[int] = None
     ) -> bool:
         """
         检查并增加总计数
@@ -105,14 +119,17 @@ class RedisCapManager:
         key = get_total_cap_key(offer_id, publisher_id)
         
         try:
-            current = await redis.incr(key)
-            # 总 Cap 的 key 不设过期时间，或设得很长
+            init_val = str(initial_value) if initial_value is not None else ""
+            # 总 Cap 过期时间设长一点（比如 30 天）或者不设，这里设 30 天作为兜底
+            current = await redis.eval(
+                RedisCapManager._INCR_LUA, 1, key, 30 * 24 * 3600, init_val
+            )
             
             if current > limit:
                 return False
             return True
         except Exception as e:
-            logger.error(f"Redis操作失败: {e}", exc_info=True)
+            logger.error(f"Redis Lua操作失败: {e}", exc_info=True)
             return True
             
     @staticmethod
