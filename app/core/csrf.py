@@ -149,6 +149,11 @@ def should_skip_csrf_check(request: Request) -> bool:
         logger.debug(f"跳过CSRF检查（Macan PostBack接口）: {method} {path}")
         return True
     
+    # 客户端错误记录接口（用于记录前端错误，即使失败也不应影响用户体验，跳过CSRF检查）
+    if path == "/api/v1/audit-logs/client-error":
+        logger.debug(f"跳过CSRF检查（客户端错误记录接口）: {method} {path}")
+        return True
+    
     # 静态资源不需要CSRF
     if path.startswith("/static/") or path.startswith("/assets/"):
         return True
@@ -193,6 +198,11 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         # Macan S2S PostBack接口（外部回调接口，不需要CSRF）
         if path == "/api/v1/macan/postback":
             logger.debug(f"跳过CSRF检查（Macan PostBack接口）: {method} {path}")
+            return await call_next(request)
+        
+        # 客户端错误记录接口（用于记录前端错误，即使失败也不应影响用户体验，跳过CSRF检查）
+        if path == "/api/v1/audit-logs/client-error":
+            logger.debug(f"跳过CSRF检查（客户端错误记录接口）: {method} {path}")
             return await call_next(request)
         
         # 定时任务接口已有JWT认证和管理员权限检查，跳过CSRF

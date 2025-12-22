@@ -15,9 +15,6 @@ post_data = {
     "ip":"127.0.0.1"
 }
 
-
-
-
 try:
     response = requests.get(URL, params=post_data, timeout=10)
 except Exception as e:
