@@ -634,6 +634,32 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     f"  期望的令牌: {stored_prefix}...\n"
                     f"  实际的令牌: {csrf_prefix}..."
                 )
+                
+                # 检查是否是服务器重启后的情况（内存中没有该session的token）
+                # 如果是，生成新token并在响应头返回，方便前端自动重试
+                memory_token = _csrf_tokens.get(session_id)
+                is_server_restart = (memory_token is None) and (stored_token is not None)
+                
+                if is_server_restart:
+                    logger.info(
+                        f"检测到可能是服务器重启后的CSRF令牌不匹配，生成新token: {request.method} {request.url.path}, "
+                        f"IP: {client_ip}, session_id: {session_id}"
+                    )
+                    # 生成新的CSRF token并存储
+                    new_csrf_token = generate_csrf_token()
+                    if redis_client:
+                        try:
+                            await redis_client.setex(
+                                csrf_key,
+                                settings.CSRF_TOKEN_EXPIRE_SECONDS,
+                                new_csrf_token
+                            )
+                            _csrf_tokens[session_id] = new_csrf_token
+                        except Exception:
+                            _csrf_tokens[session_id] = new_csrf_token
+                    else:
+                        _csrf_tokens[session_id] = new_csrf_token
+                
                 # 检查连接是否仍然有效（在抛出异常前）
                 try:
                     if hasattr(request, '_is_disconnected') and request._is_disconnected:
@@ -650,11 +676,26 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 # 使用安全的异常抛出机制
                 from app.core.csrf_utils import safe_raise_csrf_exception
                 try:
-                    safe_raise_csrf_exception(
-                        request,
-                        "CSRF令牌验证失败，请刷新页面后重试",
-                        status.HTTP_403_FORBIDDEN
-                    )
+                    # 如果是服务器重启后的情况，在异常中附加新token，让异常处理器在响应头返回
+                    http_exc = None
+                    if is_server_restart:
+                        try:
+                            safe_raise_csrf_exception(
+                                request,
+                                "CSRF令牌验证失败（可能是服务器重启导致），请刷新页面后重试",
+                                status.HTTP_403_FORBIDDEN
+                            )
+                        except HTTPException as exc:
+                            # 在异常中附加新token，让异常处理器在响应头返回
+                            exc._csrf_token = new_csrf_token
+                            http_exc = exc
+                            raise exc
+                    else:
+                        safe_raise_csrf_exception(
+                            request,
+                            "CSRF令牌验证失败，请刷新页面后重试",
+                            status.HTTP_403_FORBIDDEN
+                        )
                 except Exception as e:
                     # 如果连接已断开，直接重新抛出流异常
                     error_type = type(e).__name__
