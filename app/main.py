@@ -910,8 +910,14 @@ async def redirect_short_link_public(
         return urlunparse(new_parsed)
     
     try:
-        # 获取请求的查询参数（转换为字典）
+        # 记录请求详细信息（用于调试）
+        request_url = str(request.url)
         request_params = dict(request.query_params)
+        logger.info(
+            f"[短链接重定向] 收到请求: short_code={short_code}, "
+            f"完整URL={request_url}, 查询参数={request_params}"
+        )
+        
         # ====== 第一步：尝试从缓存获取 ======
         cached_data = await get_short_link_from_cache(short_code)
         
@@ -956,10 +962,18 @@ async def redirect_short_link_public(
                 )
             
             # 异步更新点击次数（不阻塞重定向）
-            await increment_click_count_async(short_code)
+            try:
+                await increment_click_count_async(short_code)
+                logger.info(f"[短链接重定向] 点击计数已记录（缓存路径）: short_code={short_code}")
+            except Exception as e:
+                logger.error(
+                    f"[短链接重定向] 点击计数失败（缓存路径）: short_code={short_code}, error={e}",
+                    exc_info=True
+                )
             
             # 合并查询参数到原始URL
             final_url = merge_url_params(original_url, request_params)
+            logger.debug(f"[短链接重定向] 重定向到: {final_url}")
             
             # 直接重定向（最快路径）
             return RedirectResponse(url=final_url, status_code=302)
@@ -1010,19 +1024,41 @@ async def redirect_short_link_public(
         await set_short_link_to_cache(short_code, serialize_short_link(short_link))
         
         # 异步更新点击次数（不阻塞重定向）
-        await increment_click_count_async(short_code)
+        try:
+            await increment_click_count_async(short_code)
+            logger.info(f"[短链接重定向] 点击计数已记录（数据库路径）: short_code={short_code}")
+        except Exception as e:
+            logger.error(
+                f"[短链接重定向] 点击计数失败（数据库路径）: short_code={short_code}, error={e}",
+                exc_info=True
+            )
         
         # 合并查询参数到原始URL
         final_url = merge_url_params(original_url, request_params)
+        logger.debug(f"[短链接重定向] 重定向到: {final_url}")
         
         # 执行重定向
         return RedirectResponse(url=final_url, status_code=302)
         
-    except HTTPException:
+    except HTTPException as http_exc:
+        # 记录HTTP异常（404等）
+        logger.warning(
+            f"[短链接重定向] HTTP异常: short_code={short_code}, "
+            f"完整URL={str(request.url) if 'request' in locals() else 'N/A'}, "
+            f"状态码={http_exc.status_code}, 详情={http_exc.detail}"
+        )
         # 重新抛出 HTTP 异常
         raise
     except Exception as e:
-        logger.error(f"[短链接] 处理异常: short_code={short_code}, error={str(e)}", exc_info=True)
+        # 记录所有其他异常
+        request_url = str(request.url) if 'request' in locals() else 'N/A'
+        logger.error(
+            f"[短链接重定向] 处理异常: short_code={short_code}, "
+            f"完整URL={request_url}, "
+            f"查询参数={request_params if 'request_params' in locals() else 'N/A'}, "
+            f"error={str(e)}",
+            exc_info=True
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"短链接重定向失败: {str(e)}"

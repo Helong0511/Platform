@@ -149,12 +149,13 @@ async def redirect_short_link(
                 detail="短链接已过期"
             )
     
-    # 增加点击次数
+    # 异步更新点击次数（使用Redis计数器，不阻塞重定向）
     try:
-        short_link.click_count += 1
-        await db.commit()
+        from app.core.short_link_click_counter import increment_click_count_async
+        await increment_click_count_async(short_code)
+        logger.debug(f"短链接点击计数已记录: short_code={short_code}")
     except Exception as e:
-        logger.warning(f"更新短链接点击次数失败: {str(e)}")
+        logger.warning(f"更新短链接点击次数失败: short_code={short_code}, error={str(e)}")
         # 点击次数更新失败不影响重定向
     
     # 重定向到原始URL
@@ -551,3 +552,62 @@ async def sync_short_link_clicks(
             ErrorCode.OPERATION_FAILED,
             detail=f"同步点击次数失败: {str(e)}"
         )
+
+
+@router.get("/click-stats",
+            response_model=ResponseBaseSchema,
+            summary="检查点击计数系统状态（管理员）")
+async def check_click_count_stats(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    检查短链接点击计数系统的状态
+    包括Redis计数器、进程内计数器和数据库中的点击次数
+    
+    注意：此接口需要管理员权限
+    """
+    from app.core.short_link_click_counter import CLICK_COUNTER_PREFIX, _click_counters
+    from app.core.redis_client import get_redis_client
+    
+    stats = {
+        "redis_available": False,
+        "redis_counters": 0,
+        "redis_counter_details": [],
+        "memory_counters": len(_click_counters),
+        "memory_counter_details": list(_click_counters.items()) if _click_counters else [],
+        "database_total_clicks": 0,
+    }
+    
+    # 检查Redis状态
+    redis = await get_redis_client()
+    if redis:
+        stats["redis_available"] = True
+        try:
+            # 获取所有计数器键
+            pattern = f"{CLICK_COUNTER_PREFIX}*"
+            keys = await redis.keys(pattern)
+            stats["redis_counters"] = len(keys)
+            
+            # 获取每个计数器的详细信息
+            for key in keys[:20]:  # 最多显示20个
+                short_code = key.replace(CLICK_COUNTER_PREFIX, "")
+                count = await redis.get(key)
+                count_value = int(count) if count else 0
+                stats["redis_counter_details"].append({
+                    "short_code": short_code,
+                    "count": count_value,
+                    "key": key
+                })
+        except Exception as e:
+            stats["redis_error"] = str(e)
+    
+    # 获取数据库中的总点击次数
+    try:
+        result = await db.execute(select(func.sum(ShortLink.click_count)))
+        total_clicks = result.scalar() or 0
+        stats["database_total_clicks"] = int(total_clicks)
+    except Exception as e:
+        stats["database_error"] = str(e)
+    
+    return ResponseBaseSchema.success(data=stats)

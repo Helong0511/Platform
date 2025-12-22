@@ -34,19 +34,35 @@ async def increment_click_count_async(short_code: str) -> None:
     redis = await get_redis_client()
     if not redis:
         # Redis不可用时，使用进程内计数器
-        _click_counters[short_code] = _click_counters.get(short_code, 0) + 1
+        old_count = _click_counters.get(short_code, 0)
+        _click_counters[short_code] = old_count + 1
+        new_count = _click_counters[short_code]
+        logger.info(
+            f"短链接点击计数（进程内）: short_code={short_code}, "
+            f"旧值={old_count}, 新值={new_count}"
+        )
         return
     
     try:
         # 使用Redis原子递增
         counter_key = f"{CLICK_COUNTER_PREFIX}{short_code}"
-        await redis.incr(counter_key)
+        new_count = await redis.incr(counter_key)
         # 设置过期时间（48小时）
         await redis.expire(counter_key, 48 * 3600)
+        logger.info(
+            f"短链接点击计数（Redis）: short_code={short_code}, "
+            f"计数器键={counter_key}, 当前值={new_count}"
+        )
     except Exception as e:
-        logger.debug(f"Redis点击计数递增失败: {e}")
+        logger.warning(f"Redis点击计数递增失败: short_code={short_code}, error={e}")
         # 降级到进程内计数器
-        _click_counters[short_code] = _click_counters.get(short_code, 0) + 1
+        old_count = _click_counters.get(short_code, 0)
+        _click_counters[short_code] = old_count + 1
+        new_count = _click_counters[short_code]
+        logger.info(
+            f"短链接点击计数（降级到进程内）: short_code={short_code}, "
+            f"旧值={old_count}, 新值={new_count}"
+        )
 
 
 async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = None) -> int:
