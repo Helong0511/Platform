@@ -4,7 +4,7 @@
 """
 import logging
 from datetime import datetime, timezone
-from sqlalchemy.ext.asyncio import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal
 from app.core.short_link_click_counter import sync_click_counts_to_db
 
 logger = logging.getLogger(__name__)
