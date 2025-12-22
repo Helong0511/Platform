@@ -858,11 +858,16 @@ from app.models.models import ShortLink
 @app.get("/s/{short_code}", summary="短链接重定向", tags=["短链接服务"])
 async def redirect_short_link_public(
     short_code: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
     短链接重定向（公开接口，无需认证）
     高并发优化：使用Redis缓存减少数据库查询，异步更新点击次数
+    
+    支持查询参数传递：
+    - 如果访问短链接时带有查询参数，这些参数会被合并到真实URL中
+    - 例如：/s/abc123?param1=value1 会重定向到 original_url?param1=value1
     """
     from app.core.short_link_cache import (
         get_short_link_from_cache, 
@@ -870,8 +875,43 @@ async def redirect_short_link_public(
         serialize_short_link
     )
     from app.core.short_link_click_counter import increment_click_count_async
+    from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
+    
+    def merge_url_params(base_url: str, query_params: dict) -> str:
+        """
+        将查询参数合并到基础URL中
+        如果基础URL已有参数，则合并；如果没有，则添加
+        新参数会覆盖基础URL中的同名参数
+        """
+        if not query_params:
+            return base_url
+        
+        # 解析基础URL
+        parsed = urlparse(base_url)
+        
+        # 解析基础URL中已有的查询参数
+        existing_params = parse_qs(parsed.query, keep_blank_values=True)
+        
+        # 合并新参数（新参数优先，会覆盖同名参数）
+        for key, value in query_params.items():
+            # FastAPI 的 query_params 值可能是字符串或列表
+            if isinstance(value, list):
+                # 如果已经是列表，直接使用
+                existing_params[key] = [str(v) for v in value]
+            else:
+                # 如果是字符串，转换为列表
+                existing_params[key] = [str(value)]
+        
+        # 重新构建查询字符串
+        new_query = urlencode(existing_params, doseq=True)
+        
+        # 重新构建URL
+        new_parsed = parsed._replace(query=new_query)
+        return urlunparse(new_parsed)
     
     try:
+        # 获取请求的查询参数（转换为字典）
+        request_params = dict(request.query_params)
         # ====== 第一步：尝试从缓存获取 ======
         cached_data = await get_short_link_from_cache(short_code)
         
@@ -918,8 +958,11 @@ async def redirect_short_link_public(
             # 异步更新点击次数（不阻塞重定向）
             await increment_click_count_async(short_code)
             
+            # 合并查询参数到原始URL
+            final_url = merge_url_params(original_url, request_params)
+            
             # 直接重定向（最快路径）
-            return RedirectResponse(url=original_url, status_code=302)
+            return RedirectResponse(url=final_url, status_code=302)
         
         # ====== 第二步：缓存未命中，查询数据库 ======
         result = await db.execute(
@@ -969,8 +1012,11 @@ async def redirect_short_link_public(
         # 异步更新点击次数（不阻塞重定向）
         await increment_click_count_async(short_code)
         
+        # 合并查询参数到原始URL
+        final_url = merge_url_params(original_url, request_params)
+        
         # 执行重定向
-        return RedirectResponse(url=original_url, status_code=302)
+        return RedirectResponse(url=final_url, status_code=302)
         
     except HTTPException:
         # 重新抛出 HTTP 异常

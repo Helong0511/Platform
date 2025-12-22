@@ -10,7 +10,7 @@ Macan S2S PostBack 接收接口
 import logging
 from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, Request, Query, HTTPException, Depends
+from fastapi import APIRouter, Request, Query, HTTPException, Depends, Body
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,11 +52,19 @@ class MacanPostBackResponse(BaseModel):
 
 
 # ====== API端点 ======
-@router.get("/macan/postback", response_model=MacanPostBackResponse, summary="接收 Macan PostBack 回调（GET）")
-async def receive_macan_postback_get(
+@router.api_route(
+    "/macan/postback",
+    methods=["GET", "POST"],
+    response_model=MacanPostBackResponse,
+    summary="接收 Macan PostBack 回调（支持 GET 和 POST）"
+)
+async def receive_macan_postback(
     request: Request,
-    clk_id: str = Query(..., description="Macan click ID（必填）"),
-    event_name: str = Query(..., description="Event ID（事件ID，必填）"),
+    # POST 请求的 Body 数据（可选）
+    postback_data: Optional[MacanPostBackRequest] = Body(None, description="PostBack 数据（JSON Body，仅 POST 请求使用）"),
+    # Query 参数（GET 和 POST 都支持）
+    clk_id: Optional[str] = Query(None, description="Macan click ID（必填，可通过 body 或 query 传递）"),
+    event_name: Optional[str] = Query(None, description="Event ID（事件ID，必填，可通过 body 或 query 传递）"),
     devad_id: Optional[str] = Query(None, description="Apple IDFA 或 Google Advertising ID"),
     event_value: Optional[float] = Query(None, description="purchase price（购买价格）"),
     payout: Optional[float] = Query(None, description="payout confirmed ad unit price（确认的广告单元价格）"),
@@ -69,16 +77,27 @@ async def receive_macan_postback_get(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    接收 Macan S2S PostBack 回调（GET 方式）
+    接收 Macan S2S PostBack 回调（同时支持 GET 和 POST 请求）
     
     这是 Macan 转化事件追踪的回调接口。当用户在 Macan 平台上发生转化事件时，
     Macan 会向此接口发送回调请求。
     
-    必填参数：
+    **GET 请求**：
+    - 通过 Query 参数传递所有数据
+    - 必填参数：clk_id, event_name
+    - 其他参数均为可选
+    
+    **POST 请求**：
+    支持三种方式传递数据：
+    1. JSON Body（推荐）：通过请求体传递 JSON 数据
+    2. Query 参数：通过 URL 查询参数传递数据
+    3. 混合方式：可以同时使用 body 和 query，body 中的值优先
+    
+    **必填参数**（可通过 body 或 query 传递）：
     - clk_id: Macan click ID
     - event_name: Event ID（事件ID）
     
-    可选参数：
+    **可选参数**：
     - devad_id: 设备广告ID（IDFA 或 GAID）
     - event_value: 购买价格
     - payout: 确认的广告单元价格
@@ -89,63 +108,68 @@ async def receive_macan_postback_get(
     - product_id: 产品ID（用于关联产品）
     - client_id: 客户ID（用于关联客户）
     """
+    # 根据请求方法处理数据
+    if request.method == "GET":
+        # GET 请求：只使用 Query 参数
+        final_clk_id = clk_id
+        final_event_name = event_name
+        final_devad_id = devad_id
+        final_event_value = event_value
+        final_payout = payout
+        final_carrier = carrier
+        final_os = os
+        final_ip = ip
+        final_gid = gid
+        final_product_id = product_id
+        final_client_id = client_id
+    else:
+        # POST 请求：合并 body 和 query 参数，body 优先，query 作为补充
+        if postback_data:
+            # 从 body 获取数据，如果 body 中某些字段为空，则使用 query 参数补充
+            final_clk_id = postback_data.clk_id or clk_id
+            final_event_name = postback_data.event_name or event_name
+            final_devad_id = postback_data.devad_id or devad_id
+            final_event_value = postback_data.event_value if postback_data.event_value is not None else event_value
+            final_payout = postback_data.payout if postback_data.payout is not None else payout
+            final_carrier = postback_data.carrier or carrier
+            final_os = postback_data.os or os
+            final_ip = postback_data.ip or ip
+            final_gid = postback_data.gid or gid
+            final_product_id = postback_data.product_id if postback_data.product_id is not None else product_id
+            final_client_id = postback_data.client_id if postback_data.client_id is not None else client_id
+        else:
+            # 如果没有 body，完全使用 query 参数
+            final_clk_id = clk_id
+            final_event_name = event_name
+            final_devad_id = devad_id
+            final_event_value = event_value
+            final_payout = payout
+            final_carrier = carrier
+            final_os = os
+            final_ip = ip
+            final_gid = gid
+            final_product_id = product_id
+            final_client_id = client_id
+    
+    # 验证必填参数
+    if not final_clk_id:
+        raise HTTPException(status_code=400, detail="clk_id 是必填参数")
+    if not final_event_name:
+        raise HTTPException(status_code=400, detail="event_name 是必填参数")
+    
     return await _process_macan_postback(
         request=request,
-        clk_id=clk_id,
-        event_name=event_name,
-        devad_id=devad_id,
-        event_value=event_value,
-        payout=payout,
-        carrier=carrier,
-        os=os,
-        ip=ip,
-        gid=gid,
-        product_id=product_id,
-        client_id=client_id,
-        db=db
-    )
-
-
-@router.post("/macan/postback", response_model=MacanPostBackResponse, summary="接收 Macan PostBack 回调（POST）")
-async def receive_macan_postback_post(
-    request: Request,
-    postback_data: MacanPostBackRequest,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    接收 Macan S2S PostBack 回调（POST 方式）
-    
-    这是 Macan 转化事件追踪的回调接口。当用户在 Macan 平台上发生转化事件时，
-    Macan 会向此接口发送回调请求。
-    
-    必填参数：
-    - clk_id: Macan click ID
-    - event_name: Event ID（事件ID）
-    
-    可选参数：
-    - devad_id: 设备广告ID（IDFA 或 GAID）
-    - event_value: 购买价格
-    - payout: 确认的广告单元价格
-    - carrier: 用户运营商
-    - os: 操作系统（IOS 或 Android）
-    - ip: 点击IP
-    - gid: 渠道ID
-    - product_id: 产品ID（用于关联产品）
-    - client_id: 客户ID（用于关联客户）
-    """
-    return await _process_macan_postback(
-        request=request,
-        clk_id=postback_data.clk_id,
-        event_name=postback_data.event_name,
-        devad_id=postback_data.devad_id,
-        event_value=postback_data.event_value,
-        payout=postback_data.payout,
-        carrier=postback_data.carrier,
-        os=postback_data.os,
-        ip=postback_data.ip,
-        gid=postback_data.gid,
-        product_id=postback_data.product_id,
-        client_id=postback_data.client_id,
+        clk_id=final_clk_id,
+        event_name=final_event_name,
+        devad_id=final_devad_id,
+        event_value=final_event_value,
+        payout=final_payout,
+        carrier=final_carrier,
+        os=final_os,
+        ip=final_ip,
+        gid=final_gid,
+        product_id=final_product_id,
+        client_id=final_client_id,
         db=db
     )
 

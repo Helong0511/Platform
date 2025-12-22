@@ -10,6 +10,9 @@ from datetime import datetime
 BASE_URL = "https://client.btfrx.online"  # 修改为您的服务器地址
 API_ENDPOINT = f"{BASE_URL}/api/v1/macan/postback"
 
+
+
+
 def test_get_postback():
     """测试 GET 请求"""
     print("=" * 50)
@@ -29,7 +32,7 @@ def test_get_postback():
         "product_id": 1,  # 可选
         "client_id": 1,  # 可选
     }
-    
+
     try:
         response = requests.get(API_ENDPOINT, params=params, timeout=10)
         print(f"状态码: {response.status_code}")
