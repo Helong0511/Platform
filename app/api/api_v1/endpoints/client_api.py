@@ -50,7 +50,7 @@ class ClientProductsRequest(ClientAPIBaseRequest):
 
 class ClientDataRequest(ClientAPIBaseRequest):
     """查询广告数据请求模型"""
-    data_type: str = Field(..., description="数据类型：'all' 表示详细数据（按国家），'day' 表示每日汇总（按产品+日期）")
+    data_type: str = Field(default="all", description="数据类型：'all' 表示详细数据（按国家），'day' 表示每日汇总（按产品+日期），默认为 'all'")
     start_date: str | None = Field(default=None, description="起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天")
     end_date: str | None = Field(default=None, description="终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天")
 
@@ -389,8 +389,8 @@ async def get_client_data(
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(db)
         
-        # 根据 data_type 决定查询逻辑（data_type 现在是必填参数）
-        data_type = api_request.data_type
+        # 根据 data_type 决定查询逻辑（data_type 默认为 'all'）
+        data_type = api_request.data_type or "all"
         
         if data_type == "day":
             # 每日汇总模式：按产品+日期汇总，国家显示"全部区域"
