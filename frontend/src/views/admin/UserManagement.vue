@@ -700,9 +700,8 @@ const fetchUsers = async (immediate = false) => {
     try {
       loading.value = true;
       
-      // 检查token是否有效
-      const token = sessionStorage.getItem('token');
-      if (!token) {
+      // 检查状态是否已认证
+      if (!authStore.isAuthenticated) {
         ElMessage.warning('登录已过期，请重新登录');
         router.push('/login').catch(() => {
           window.location.href = '/login';

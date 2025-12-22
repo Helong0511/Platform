@@ -255,29 +255,42 @@ async def increment_cap_count(
 async def reset_daily_caps(db: AsyncSession) -> None:
     """
     重置每日 Cap 计数（定时任务调用）
+    使用批量更新以提高性能和原子性
     
     Args:
         db: 数据库会话
     """
     try:
-        # 查询所有激活的 Cap 配置
-        result = await db.execute(
-            select(OfferCap).where(OfferCap.is_active == True)
-        )
-        caps = result.scalars().all()
-        
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
-        for cap in caps:
-            # 如果 cap_start_date 不是今天，重置每日计数
-            if cap.cap_start_date and cap.cap_start_date.date() < today_start.date():
-                cap.current_daily_count = 0
-                cap.cap_start_date = today_start
+        # 批量更新所有需要重置的 Cap
+        # 条件：1. 开启了每日 Cap；2. 最后重置时间早于今天；3. 配置是活跃的
+        from sqlalchemy import update
+        stmt = (
+            update(OfferCap)
+            .where(
+                and_(
+                    OfferCap.is_active == True,
+                    OfferCap.daily_cap > 0,
+                    or_(
+                        OfferCap.cap_start_date.is_(None),
+                        OfferCap.cap_start_date < today_start
+                    )
+                )
+            )
+            .values(
+                current_daily_count=0,
+                cap_start_date=today_start
+            )
+        )
         
+        result = await db.execute(stmt)
         await db.commit()
-        logger.info(f"已重置 {len(caps)} 个Cap配置的每日计数")
+        
+        logger.info(f"成功执行批量每日Cap重置，更新了 {result.rowcount} 条记录")
+        
     except Exception as e:
-        logger.error(f"重置每日Cap计数失败: {str(e)}", exc_info=True)
+        logger.error(f"批量重置每日Cap失败: {str(e)}", exc_info=True)
         await db.rollback()
-
+        raise
