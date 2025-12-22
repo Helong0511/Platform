@@ -516,3 +516,38 @@ async def get_short_link_stats(
         expired_links=expired_links
     ))
 
+
+@router.post("/sync-clicks",
+             response_model=ResponseBaseSchema,
+             summary="手动同步点击次数到数据库（管理员）")
+async def sync_short_link_clicks(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    手动触发短链接点击次数同步
+    将Redis中的点击次数同步到数据库
+    
+    注意：此接口需要管理员权限
+    """
+    from app.core.short_link_click_counter import sync_click_counts_to_db
+    
+    try:
+        logger.info(f"管理员 {current_user.id} 手动触发短链接点击次数同步")
+        synced_count = await sync_click_counts_to_db(db)
+        
+        if synced_count > 0:
+            logger.info(f"手动同步成功: 更新了 {synced_count} 条记录")
+            return ResponseBaseSchema.success(
+                data={"synced_count": synced_count, "message": f"成功同步 {synced_count} 个短链接的点击次数"}
+            )
+        else:
+            return ResponseBaseSchema.success(
+                data={"synced_count": 0, "message": "没有需要同步的点击次数"}
+            )
+    except Exception as e:
+        logger.error(f"手动同步短链接点击次数失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"同步点击次数失败: {str(e)}"
+        )

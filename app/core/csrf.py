@@ -295,7 +295,16 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         csrf_token = existing_token.decode('utf-8') if isinstance(existing_token, bytes) else existing_token
                         # 更新内存存储（作为备份）
                         _csrf_tokens[session_id] = csrf_token
-                        logger.debug(f"从Redis获取现有CSRF令牌: {request.method} {path}")
+                        user_agent = request.headers.get("User-Agent", "")
+                        user_agent_hash = hashlib.sha256(user_agent.encode('utf-8')).hexdigest()[:16]
+                        logger.debug(
+                            f"从Redis获取现有CSRF令牌: {request.method} {path}\n"
+                            f"  IP: {client_ip}\n"
+                            f"  Session ID: {session_id}\n"
+                            f"  User ID: {user_id}\n"
+                            f"  CSRF Key: {csrf_key}\n"
+                            f"  令牌: {csrf_token[:10]}..."
+                        )
                 except Exception as e:
                     error_msg = str(e) or repr(e) or "未知错误"
                     logger.warning(f"Redis CSRF令牌获取失败: {error_msg}，将生成新令牌")
@@ -304,7 +313,16 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             if not csrf_token:
                 csrf_token = _csrf_tokens.get(session_id)
                 if csrf_token:
-                    logger.debug(f"从内存存储获取现有CSRF令牌: {request.method} {path}")
+                    user_agent = request.headers.get("User-Agent", "")
+                    user_agent_hash = hashlib.sha256(user_agent.encode('utf-8')).hexdigest()[:16]
+                    logger.debug(
+                        f"从内存存储获取现有CSRF令牌: {request.method} {path}\n"
+                        f"  IP: {client_ip}\n"
+                        f"  Session ID: {session_id}\n"
+                        f"  User ID: {user_id}\n"
+                        f"  CSRF Key: {csrf_key}\n"
+                        f"  令牌: {csrf_token[:10]}..."
+                    )
                     # 如果Redis可用，同步到Redis
                     if redis_client:
                         try:
@@ -313,13 +331,25 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                                 settings.CSRF_TOKEN_EXPIRE_SECONDS,
                                 csrf_token
                             )
-                        except Exception:
-                            pass
+                            logger.debug(f"已将内存中的CSRF令牌同步到Redis: {csrf_key}")
+                        except Exception as e:
+                            logger.warning(f"同步CSRF令牌到Redis失败: {str(e)}")
             
             # 如果都没有，生成新的CSRF令牌
             if not csrf_token:
                 csrf_token = generate_csrf_token()
-                logger.debug(f"生成新的CSRF令牌: {request.method} {path}")
+                user_agent = request.headers.get("User-Agent", "")
+                user_agent_hash = hashlib.sha256(user_agent.encode('utf-8')).hexdigest()[:16]
+                logger.info(
+                    f"生成新的CSRF令牌: {request.method} {path}\n"
+                    f"  IP: {client_ip}\n"
+                    f"  User-Agent: {user_agent[:100]}\n"
+                    f"  User-Agent Hash: {user_agent_hash}\n"
+                    f"  Session ID: {session_id}\n"
+                    f"  User ID: {user_id}\n"
+                    f"  CSRF Key: {csrf_key}\n"
+                    f"  令牌: {csrf_token[:10]}..."
+                )
             
             # 存储令牌（优先使用Redis）
             if redis_client:
@@ -331,12 +361,24 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     )
                     # 同时更新内存存储（作为备份）
                     _csrf_tokens[session_id] = csrf_token
+                    logger.debug(
+                        f"已存储CSRF令牌到Redis和内存: {request.method} {path}\n"
+                        f"  CSRF Key: {csrf_key}\n"
+                        f"  Session ID: {session_id}\n"
+                        f"  过期时间: {settings.CSRF_TOKEN_EXPIRE_SECONDS}秒\n"
+                        f"  令牌: {csrf_token[:10]}..."
+                    )
                 except Exception as e:
                     error_msg = str(e) or repr(e) or "未知错误"
                     logger.warning(f"Redis CSRF令牌存储失败: {error_msg}，使用内存存储")
                     _csrf_tokens[session_id] = csrf_token
             else:
                 _csrf_tokens[session_id] = csrf_token
+                logger.debug(
+                    f"已存储CSRF令牌到内存: {request.method} {path}\n"
+                    f"  Session ID: {session_id}\n"
+                    f"  令牌: {csrf_token[:10]}..."
+                )
             
             # 处理请求
             try:
@@ -409,18 +451,36 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             
             # 验证CSRF令牌（优先从Redis获取）
             stored_token = None
+            redis_available = False
             if redis_client:
                 try:
                     stored_token = await redis_client.get(csrf_key)
                     if stored_token:
                         stored_token = stored_token.decode('utf-8') if isinstance(stored_token, bytes) else stored_token
+                        # 从Redis获取到令牌后，同步更新内存存储（确保多进程一致性）
+                        _csrf_tokens[session_id] = stored_token
+                        redis_available = True
+                        logger.debug(f"从Redis获取CSRF令牌并同步到内存: {csrf_key}, 令牌: {stored_token[:10]}...")
                 except Exception as e:
                     error_msg = str(e) or repr(e) or "未知错误"
-                    logger.warning(f"Redis CSRF令牌获取失败: {error_msg}，使用内存存储")
+                    logger.warning(f"Redis CSRF令牌获取失败: {error_msg}，尝试使用内存存储")
             
-            # 如果使用user_id的session_id找不到令牌，尝试使用不带user_id的session_id（向后兼容）
+            # 如果Redis中没有找到令牌，尝试从内存存储获取（仅当Redis不可用或Redis中没有时）
             if not stored_token:
                 stored_token = _csrf_tokens.get(session_id)
+                if stored_token:
+                    logger.debug(f"从内存存储获取CSRF令牌: {session_id}, 令牌: {stored_token[:10]}...")
+                    # 如果Redis可用，尝试将内存中的令牌同步到Redis（可能内存中的令牌是最新的）
+                    if redis_client and not redis_available:
+                        try:
+                            await redis_client.setex(
+                                csrf_key,
+                                settings.CSRF_TOKEN_EXPIRE_SECONDS,
+                                stored_token
+                            )
+                            logger.debug(f"已将内存中的CSRF令牌同步到Redis: {csrf_key}")
+                        except Exception as e:
+                            logger.warning(f"同步内存令牌到Redis失败: {str(e)}")
                 # 如果仍然找不到，且使用了user_id，尝试不带user_id的session_id
                 if not stored_token and user_id:
                     fallback_session_id = f"{client_ip}:{user_agent_hash}"
@@ -438,7 +498,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         stored_token = _csrf_tokens.get(fallback_session_id)
                         # 如果找到了，更新到正确的session_id（使用user_id的）
                         if stored_token:
-                            logger.debug(f"使用回退session_id找到CSRF令牌，更新到正确session_id: {session_id}")
+                            logger.debug(
+                                f"使用回退session_id找到CSRF令牌，更新到正确session_id\n"
+                                f"  回退session_id: {fallback_session_id}\n"
+                                f"  正确session_id: {session_id}\n"
+                                f"  令牌: {stored_token[:10]}..."
+                            )
                             if redis_client:
                                 try:
                                     await redis_client.setex(
@@ -446,8 +511,9 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                                         settings.CSRF_TOKEN_EXPIRE_SECONDS,
                                         stored_token
                                     )
-                                except Exception:
-                                    pass
+                                    logger.debug(f"已将回退令牌同步到Redis: {csrf_key}")
+                                except Exception as e:
+                                    logger.warning(f"同步回退令牌到Redis失败: {str(e)}")
                             _csrf_tokens[session_id] = stored_token
             
             if not stored_token:
@@ -519,7 +585,45 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 # 安全地显示令牌前缀（避免空字符串或None导致的错误）
                 stored_prefix = stored_token[:10] if stored_token and len(stored_token) > 10 else (stored_token or "None")
                 csrf_prefix = csrf_token[:10] if csrf_token and len(csrf_token) > 10 else (csrf_token or "None")
-                logger.warning(f"CSRF令牌不匹配: {request.method} {request.url.path}, IP: {client_ip}, session_id: {session_id}, user_id: {user_id}, 期望: {stored_prefix}..., 实际: {csrf_prefix}...")
+                
+                # 记录详细的调试信息
+                user_agent = request.headers.get("User-Agent", "")
+                user_agent_hash = hashlib.sha256(user_agent.encode('utf-8')).hexdigest()[:16]
+                
+                # 检查Redis和内存存储中的令牌
+                redis_token_info = "未检查"
+                memory_token_info = "未检查"
+                if redis_client:
+                    try:
+                        redis_token = await redis_client.get(csrf_key)
+                        if redis_token:
+                            redis_token = redis_token.decode('utf-8') if isinstance(redis_token, bytes) else redis_token
+                            redis_token_info = f"存在: {redis_token[:10]}..." if len(redis_token) > 10 else f"存在: {redis_token}"
+                        else:
+                            redis_token_info = "不存在"
+                    except Exception as e:
+                        redis_token_info = f"检查失败: {str(e)}"
+                
+                memory_token = _csrf_tokens.get(session_id)
+                if memory_token:
+                    memory_token_info = f"存在: {memory_token[:10]}..." if len(memory_token) > 10 else f"存在: {memory_token}"
+                else:
+                    memory_token_info = "不存在"
+                
+                # 记录完整的调试信息
+                logger.warning(
+                    f"CSRF令牌不匹配: {request.method} {request.url.path}\n"
+                    f"  IP: {client_ip}\n"
+                    f"  User-Agent: {user_agent[:100]}\n"
+                    f"  User-Agent Hash: {user_agent_hash}\n"
+                    f"  Session ID: {session_id}\n"
+                    f"  User ID: {user_id}\n"
+                    f"  CSRF Key: {csrf_key}\n"
+                    f"  Redis中的令牌: {redis_token_info}\n"
+                    f"  内存中的令牌: {memory_token_info}\n"
+                    f"  期望的令牌: {stored_prefix}...\n"
+                    f"  实际的令牌: {csrf_prefix}..."
+                )
                 # 检查连接是否仍然有效（在抛出异常前）
                 try:
                     if hasattr(request, '_is_disconnected') and request._is_disconnected:

@@ -64,9 +64,14 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
     if not redis:
         # Redis不可用时，同步进程内计数器
         if not _click_counters:
+            logger.debug("进程内计数器为空，无需同步")
             return 0
         
+        logger.info(f"Redis不可用，同步进程内计数器: {len(_click_counters)} 个短链接")
+        
         synced = 0
+        failed_codes = []  # 记录同步失败的短链接代码
+        
         for short_code, count in _click_counters.items():
             if short_codes and short_code not in short_codes:
                 continue
@@ -77,19 +82,50 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                 )
                 short_link = result.scalars().first()
                 if short_link:
+                    old_count = short_link.click_count
                     short_link.click_count += count
+                    new_count = short_link.click_count
+                    
+                    logger.debug(
+                        f"更新短链接点击次数（进程内）: short_code={short_code}, "
+                        f"旧值={old_count}, 增量={count}, 新值={new_count}"
+                    )
                     synced += 1
+                else:
+                    logger.warning(f"短链接不存在（进程内）: short_code={short_code}")
             except Exception as e:
-                logger.warning(f"同步点击次数失败: short_code={short_code}, error={e}")
+                logger.error(
+                    f"同步点击次数失败（进程内）: short_code={short_code}, error={e}",
+                    exc_info=True
+                )
+                failed_codes.append(short_code)
         
-        # 清空计数器
-        if short_codes:
-            for code in short_codes:
-                _click_counters.pop(code, None)
-        else:
-            _click_counters.clear()
+        # 提交所有成功的更新
+        if synced > 0:
+            try:
+                await db.commit()
+                logger.info(f"成功同步 {synced} 个短链接的点击次数到数据库（进程内）")
+            except Exception as e:
+                logger.error(f"提交数据库事务失败（进程内）: {e}", exc_info=True)
+                await db.rollback()
+                synced = 0
         
-        await db.commit()
+        # 只清空成功同步的计数器
+        if synced > 0:
+            if short_codes:
+                # 只清空指定列表中成功同步的
+                for code in short_codes:
+                    if code not in failed_codes:
+                        _click_counters.pop(code, None)
+            else:
+                # 清空所有成功同步的，但保留失败的
+                for code in list(_click_counters.keys()):
+                    if code not in failed_codes:
+                        _click_counters.pop(code, None)
+        
+        if failed_codes:
+            logger.warning(f"有 {len(failed_codes)} 个短链接同步失败，将在下次同步时重试")
+        
         return synced
     
     try:
@@ -98,37 +134,84 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
         keys = await redis.keys(pattern)
         
         if not keys:
+            logger.debug("没有需要同步的短链接点击计数器")
             return 0
         
+        logger.info(f"找到 {len(keys)} 个短链接点击计数器需要同步")
+        
         synced = 0
+        failed_keys = []  # 记录同步失败的键，稍后重试
+        
         for key in keys:
             short_code = key.replace(CLICK_COUNTER_PREFIX, "")
             if short_codes and short_code not in short_codes:
                 continue
             
             try:
-                # 获取并重置计数器
+                # 先获取计数器值（不删除）
                 count = await redis.get(key)
-                if count and int(count) > 0:
-                    # 从Redis删除计数器（已获取）
+                if not count or int(count) <= 0:
+                    # 计数器为0或不存在，直接删除
+                    await redis.delete(key)
+                    continue
+                
+                count_value = int(count)
+                logger.debug(f"准备同步短链接点击次数: short_code={short_code}, count={count_value}")
+                
+                # 更新数据库
+                result = await db.execute(
+                    select(ShortLink).where(ShortLink.short_code == short_code)
+                )
+                short_link = result.scalars().first()
+                
+                if short_link:
+                    # 更新点击次数
+                    old_count = short_link.click_count
+                    short_link.click_count += count_value
+                    new_count = short_link.click_count
+                    
+                    logger.debug(
+                        f"更新短链接点击次数: short_code={short_code}, "
+                        f"旧值={old_count}, 增量={count_value}, 新值={new_count}"
+                    )
+                    
+                    # 数据库更新成功后才删除Redis中的计数器（避免数据丢失）
+                    await redis.delete(key)
+                    synced += 1
+                else:
+                    # 短链接不存在，删除计数器
+                    logger.warning(f"短链接不存在，删除计数器: short_code={short_code}")
                     await redis.delete(key)
                     
-                    # 更新数据库
-                    result = await db.execute(
-                        select(ShortLink).where(ShortLink.short_code == short_code)
-                    )
-                    short_link = result.scalars().first()
-                    if short_link:
-                        short_link.click_count += int(count)
-                        synced += 1
             except Exception as e:
-                logger.warning(f"同步点击次数失败: short_code={short_code}, error={e}")
+                # 同步失败，保留计数器以便下次重试
+                logger.error(
+                    f"同步点击次数失败: short_code={short_code}, key={key}, error={e}",
+                    exc_info=True
+                )
+                failed_keys.append(key)
         
+        # 提交所有成功的更新
         if synced > 0:
-            await db.commit()
+            try:
+                await db.commit()
+                logger.info(f"成功同步 {synced} 个短链接的点击次数到数据库")
+            except Exception as e:
+                logger.error(f"提交数据库事务失败: {e}", exc_info=True)
+                await db.rollback()
+                # 注意：这里已经删除了Redis中的计数器，但数据库更新失败
+                # 这是数据不一致的情况，需要记录警告
+                logger.warning(
+                    f"警告：已删除 {synced} 个Redis计数器，但数据库更新失败。"
+                    f"可能导致点击次数丢失。"
+                )
+                synced = 0
+        
+        if failed_keys:
+            logger.warning(f"有 {len(failed_keys)} 个计数器同步失败，将在下次同步时重试")
         
         return synced
     except Exception as e:
-        logger.error(f"同步点击次数到数据库失败: {e}")
+        logger.error(f"同步点击次数到数据库失败: {e}", exc_info=True)
         return 0
 
