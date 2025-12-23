@@ -676,9 +676,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 # 使用安全的异常抛出机制
                 from app.core.csrf_utils import safe_raise_csrf_exception
                 try:
-                    # 如果是服务器重启后的情况，在异常中附加新token，让异常处理器在响应头返回
-                    http_exc = None
+                    # 无论是服务器重启还是令牌不同步，都在响应头中返回正确的令牌
+                    # 这样前端可以自动更新令牌并重试请求
+                    token_to_return = None
                     if is_server_restart:
+                        # 服务器重启：使用新生成的令牌
+                        token_to_return = new_csrf_token
                         try:
                             safe_raise_csrf_exception(
                                 request,
@@ -687,15 +690,21 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                             )
                         except HTTPException as exc:
                             # 在异常中附加新token，让异常处理器在响应头返回
-                            exc._csrf_token = new_csrf_token
-                            http_exc = exc
+                            exc._csrf_token = token_to_return
                             raise exc
                     else:
-                        safe_raise_csrf_exception(
-                            request,
-                            "CSRF令牌验证失败，请刷新页面后重试",
-                            status.HTTP_403_FORBIDDEN
-                        )
+                        # 令牌不同步：返回存储的正确令牌
+                        token_to_return = stored_token
+                        try:
+                            safe_raise_csrf_exception(
+                                request,
+                                "CSRF令牌验证失败，请刷新页面后重试",
+                                status.HTTP_403_FORBIDDEN
+                            )
+                        except HTTPException as exc:
+                            # 在异常中附加正确的token，让异常处理器在响应头返回
+                            exc._csrf_token = token_to_return
+                            raise exc
                 except Exception as e:
                     # 如果连接已断开，直接重新抛出流异常
                     error_type = type(e).__name__

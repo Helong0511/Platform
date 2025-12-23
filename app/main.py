@@ -498,7 +498,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
                 if hasattr(exc, '_csrf_token') and exc._csrf_token:
                     try:
                         response.headers["X-CSRF-Token"] = exc._csrf_token
-                        logger.debug("已在403错误响应中添加新的CSRF token（服务器重启后自动生成）")
+                        logger.debug("已在403错误响应中添加正确的CSRF token（供前端自动更新）")
                     except Exception:
                         pass
                 
@@ -607,11 +607,11 @@ async def http_exception_handler(request: Request, exc: HTTPException):
                 content=error_response,
             )
             
-            # 如果HTTPException中包含了新的CSRF token（服务器重启后自动生成），添加到响应头
+            # 如果HTTPException中包含了新的CSRF token（令牌不匹配时返回正确的令牌），添加到响应头
             if hasattr(exc, '_csrf_token') and exc._csrf_token:
                 try:
                     response.headers["X-CSRF-Token"] = exc._csrf_token
-                    logger.debug("已在403错误响应中添加新的CSRF token（服务器重启后自动生成）")
+                    logger.debug("已在403错误响应中添加正确的CSRF token（供前端自动更新）")
                 except Exception:
                     pass
             
