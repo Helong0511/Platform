@@ -262,6 +262,36 @@ export const isErrorHandled = (error) => {
 };
 
 /**
+ * 刷新CSRF令牌（通过发送GET请求）
+ * @param {string} endpoint - 用于刷新令牌的端点，默认为 '/api/v1/dashboard/stats'
+ * @returns {Promise<void>}
+ */
+export const refreshCsrfToken = async (endpoint = '/api/v1/dashboard/stats') => {
+  try {
+    const axios = (await import('axios')).default;
+    // 发送一个轻量级的GET请求来刷新CSRF令牌
+    const response = await axios.get(endpoint);
+    
+    // 直接从响应头获取CSRF令牌（不依赖响应拦截器）
+    const csrfToken = response.headers['x-csrf-token'] || response.headers['X-CSRF-Token'];
+    if (csrfToken) {
+      sessionStorage.setItem('csrf_token', csrfToken);
+    }
+    
+    // 额外等待一小段时间，确保响应拦截器也处理完成
+    await new Promise(resolve => setTimeout(resolve, 50));
+  } catch (error) {
+    // 即使请求失败，响应头中也可能有CSRF令牌
+    if (error.response?.headers) {
+      const csrfToken = error.response.headers['x-csrf-token'] || error.response.headers['X-CSRF-Token'];
+      if (csrfToken) {
+        sessionStorage.setItem('csrf_token', csrfToken);
+      }
+    }
+  }
+};
+
+/**
  * 确保CSRF令牌存在
  * 如果CSRF令牌不存在，通过发送GET请求获取
  * @param {Function} getRequestFn - 获取数据的函数（用于触发GET请求获取CSRF令牌）

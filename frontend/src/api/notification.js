@@ -23,6 +23,9 @@ export const getClientNotificationConfig = async (clientId) => {
  */
 export const saveClientNotificationConfig = async (clientId, configData) => {
   try {
+    // 在保存前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/dashboard/stats');
     await ensureCsrfToken();
     const response = await axios.post(
       `/api/v1/notification-configs/clients/${clientId}/config`,
@@ -41,6 +44,9 @@ export const saveClientNotificationConfig = async (clientId, configData) => {
  */
 export const deleteClientNotificationConfig = async (clientId) => {
   try {
+    // 在删除前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/dashboard/stats');
     await ensureCsrfToken();
     const response = await axios.delete(`/api/v1/notification-configs/clients/${clientId}/config`);
     return normalizeResponse(response, { returnDataOnly: true });
@@ -72,6 +78,9 @@ export const getProductNotificationConfig = async (productId) => {
  */
 export const saveProductNotificationConfig = async (productId, configData) => {
   try {
+    // 在保存前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/dashboard/stats');
     await ensureCsrfToken();
     const response = await axios.post(
       `/api/v1/notification-configs/products/${productId}/config`,
@@ -90,6 +99,9 @@ export const saveProductNotificationConfig = async (productId, configData) => {
  */
 export const deleteProductNotificationConfig = async (productId) => {
   try {
+    // 在删除前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/dashboard/stats');
     await ensureCsrfToken();
     const response = await axios.delete(`/api/v1/notification-configs/products/${productId}/config`);
     return normalizeResponse(response, { returnDataOnly: true });

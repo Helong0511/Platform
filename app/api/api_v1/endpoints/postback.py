@@ -436,15 +436,15 @@ async def receive_postback_get(
     # 通用参数（通过 Query 接收）
     conversion_id: Optional[str] = Query(None, description="转化ID"),
     event_name: Optional[str] = Query(None, description="事件名称"),
-    event_value: Optional[float] = Query(None, description="事件价值"),
-    payout: Optional[float] = Query(None, description="支付金额"),
+    event_value: Optional[str] = Query(None, description="事件价值（字符串格式，会自动转换为浮点数）"),
+    payout: Optional[str] = Query(None, description="支付金额（字符串格式，会自动转换为浮点数）"),
     devad_id: Optional[str] = Query(None, description="设备广告ID"),
     os: Optional[str] = Query(None, description="操作系统"),
     carrier: Optional[str] = Query(None, description="运营商"),
     ip: Optional[str] = Query(None, description="IP地址"),
     gid: Optional[str] = Query(None, description="渠道ID"),
-    product_id: Optional[int] = Query(None, description="产品ID"),
-    client_id: Optional[int] = Query(None, description="客户ID"),
+    product_id: Optional[str] = Query(None, description="产品ID（字符串格式，会自动转换为整数）"),
+    client_id: Optional[str] = Query(None, description="客户ID（字符串格式，会自动转换为整数）"),
     # Macan 特定参数（兼容性）
     clk_id: Optional[str] = Query(None, description="Macan click ID（兼容参数）"),
     click_id: Optional[str] = Query(None, description="Click ID（兼容参数）"),
@@ -468,6 +468,32 @@ async def receive_postback_get(
         )
     
     try:
+        # 辅助函数：安全地将字符串转换为浮点数
+        def _to_float(value: Optional[str]) -> Optional[float]:
+            """将字符串安全地转换为浮点数，处理占位符和无效值"""
+            if value is None or value == "":
+                return None
+            # 如果是占位符格式（如 {event_value}），返回 None
+            if isinstance(value, str) and value.startswith("{") and value.endswith("}"):
+                return None
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return None
+        
+        # 辅助函数：安全地将字符串转换为整数
+        def _to_int(value: Optional[str]) -> Optional[int]:
+            """将字符串安全地转换为整数，处理占位符和无效值"""
+            if value is None or value == "":
+                return None
+            # 如果是占位符格式（如 {product_id}），返回 None
+            if isinstance(value, str) and value.startswith("{") and value.endswith("}"):
+                return None
+            try:
+                return int(value)
+            except (ValueError, TypeError):
+                return None
+        
         # 获取客户端IP
         client_ip = get_client_ip(request) or ip
         
@@ -479,10 +505,12 @@ async def receive_postback_get(
             raw_data["conversion_id"] = conversion_id
         if event_name:
             raw_data["event_name"] = event_name
-        if event_value is not None:
-            raw_data["event_value"] = event_value
-        if payout is not None:
-            raw_data["payout"] = payout
+        event_value_float = _to_float(event_value)
+        if event_value_float is not None:
+            raw_data["event_value"] = event_value_float
+        payout_float = _to_float(payout)
+        if payout_float is not None:
+            raw_data["payout"] = payout_float
         if devad_id:
             raw_data["devad_id"] = devad_id
         if os:
@@ -493,10 +521,12 @@ async def receive_postback_get(
             raw_data["ip"] = ip
         if gid:
             raw_data["gid"] = gid
-        if product_id is not None:
-            raw_data["product_id"] = product_id
-        if client_id is not None:
-            raw_data["client_id"] = client_id
+        product_id_int = _to_int(product_id)
+        if product_id_int is not None:
+            raw_data["product_id"] = product_id_int
+        client_id_int = _to_int(client_id)
+        if client_id_int is not None:
+            raw_data["client_id"] = client_id_int
         
         # 处理 Macan 特定参数（兼容性）
         if clk_id:

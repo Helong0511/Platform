@@ -61,7 +61,9 @@ export const getScheduledTask = async (taskName) => {
  */
 export const createScheduledTask = async (data) => {
   try {
-    // 确保CSRF令牌存在
+    // 在保存前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/dashboard/stats');
     await ensureCsrfToken();
     
     const response = await axios.post('/api/v1/scheduled-tasks/', data);
@@ -90,7 +92,9 @@ export const createScheduledTask = async (data) => {
  */
 export const updateScheduledTask = async (taskName, data) => {
   try {
-    // 确保CSRF令牌存在
+    // 在保存前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/dashboard/stats');
     await ensureCsrfToken();
     
     // 对任务名称进行 URL 编码，确保中文路径正确传输
@@ -132,6 +136,9 @@ export const updateScheduledTask = async (taskName, data) => {
  */
 export const triggerScheduledTask = async (taskName, params = {}) => {
   try {
+    // 在触发前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/dashboard/stats');
     await ensureCsrfToken();
     
     const encodedTaskName = encodeURIComponent(taskName);
@@ -158,7 +165,9 @@ export const triggerScheduledTask = async (taskName, params = {}) => {
  */
 export const releaseTaskLock = async (taskName) => {
   try {
-    // 确保CSRF令牌存在（虽然定时任务接口可能跳过CSRF检查，但为了统一性还是确保令牌存在）
+    // 在操作前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/dashboard/stats');
     await ensureCsrfToken();
     
     // 对任务名称进行 URL 编码，确保中文路径正确传输

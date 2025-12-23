@@ -66,14 +66,14 @@ async def receive_macan_postback(
     clk_id: Optional[str] = Query(None, description="Macan click ID（必填，可通过 body 或 query 传递）"),
     event_name: Optional[str] = Query(None, description="Event ID（事件ID，必填，可通过 body 或 query 传递）"),
     devad_id: Optional[str] = Query(None, description="Apple IDFA 或 Google Advertising ID"),
-    event_value: Optional[float] = Query(None, description="purchase price（购买价格）"),
-    payout: Optional[float] = Query(None, description="payout confirmed ad unit price（确认的广告单元价格）"),
+    event_value: Optional[str] = Query(None, description="purchase price（购买价格，字符串格式，会自动转换为浮点数）"),
+    payout: Optional[str] = Query(None, description="payout confirmed ad unit price（确认的广告单元价格，字符串格式，会自动转换为浮点数）"),
     carrier: Optional[str] = Query(None, description="User carrier（用户运营商）"),
     os: Optional[str] = Query(None, description="IOS 或 Android"),
     ip: Optional[str] = Query(None, description="Click IP（点击IP）"),
     gid: Optional[str] = Query(None, description="Channel ID（渠道ID）"),
-    product_id: Optional[int] = Query(None, description="产品ID（可选）"),
-    client_id: Optional[int] = Query(None, description="客户ID（可选）"),
+    product_id: Optional[str] = Query(None, description="产品ID（可选，字符串格式，会自动转换为整数）"),
+    client_id: Optional[str] = Query(None, description="客户ID（可选，字符串格式，会自动转换为整数）"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -108,20 +108,46 @@ async def receive_macan_postback(
     - product_id: 产品ID（用于关联产品）
     - client_id: 客户ID（用于关联客户）
     """
+    # 辅助函数：安全地将字符串转换为浮点数
+    def _to_float(value: Optional[str]) -> Optional[float]:
+        """将字符串安全地转换为浮点数，处理占位符和无效值"""
+        if value is None or value == "":
+            return None
+        # 如果是占位符格式（如 {event_value}），返回 None
+        if isinstance(value, str) and value.startswith("{") and value.endswith("}"):
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+    
+    # 辅助函数：安全地将字符串转换为整数
+    def _to_int(value: Optional[str]) -> Optional[int]:
+        """将字符串安全地转换为整数，处理占位符和无效值"""
+        if value is None or value == "":
+            return None
+        # 如果是占位符格式（如 {product_id}），返回 None
+        if isinstance(value, str) and value.startswith("{") and value.endswith("}"):
+            return None
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return None
+    
     # 根据请求方法处理数据
     if request.method == "GET":
-        # GET 请求：只使用 Query 参数
+        # GET 请求：只使用 Query 参数，需要转换类型
         final_clk_id = clk_id
         final_event_name = event_name
         final_devad_id = devad_id
-        final_event_value = event_value
-        final_payout = payout
+        final_event_value = _to_float(event_value)
+        final_payout = _to_float(payout)
         final_carrier = carrier
         final_os = os
         final_ip = ip
         final_gid = gid
-        final_product_id = product_id
-        final_client_id = client_id
+        final_product_id = _to_int(product_id)
+        final_client_id = _to_int(client_id)
     else:
         # POST 请求：合并 body 和 query 参数，body 优先，query 作为补充
         if postback_data:
@@ -129,27 +155,27 @@ async def receive_macan_postback(
             final_clk_id = postback_data.clk_id or clk_id
             final_event_name = postback_data.event_name or event_name
             final_devad_id = postback_data.devad_id or devad_id
-            final_event_value = postback_data.event_value if postback_data.event_value is not None else event_value
-            final_payout = postback_data.payout if postback_data.payout is not None else payout
+            final_event_value = postback_data.event_value if postback_data.event_value is not None else _to_float(event_value)
+            final_payout = postback_data.payout if postback_data.payout is not None else _to_float(payout)
             final_carrier = postback_data.carrier or carrier
             final_os = postback_data.os or os
             final_ip = postback_data.ip or ip
             final_gid = postback_data.gid or gid
-            final_product_id = postback_data.product_id if postback_data.product_id is not None else product_id
-            final_client_id = postback_data.client_id if postback_data.client_id is not None else client_id
+            final_product_id = postback_data.product_id if postback_data.product_id is not None else _to_int(product_id)
+            final_client_id = postback_data.client_id if postback_data.client_id is not None else _to_int(client_id)
         else:
-            # 如果没有 body，完全使用 query 参数
+            # 如果没有 body，完全使用 query 参数，需要转换类型
             final_clk_id = clk_id
             final_event_name = event_name
             final_devad_id = devad_id
-            final_event_value = event_value
-            final_payout = payout
+            final_event_value = _to_float(event_value)
+            final_payout = _to_float(payout)
             final_carrier = carrier
             final_os = os
             final_ip = ip
             final_gid = gid
-            final_product_id = product_id
-            final_client_id = client_id
+            final_product_id = _to_int(product_id)
+            final_client_id = _to_int(client_id)
     
     # 验证必填参数
     if not final_clk_id:

@@ -124,11 +124,10 @@ export const getCurrentUserInfo = async () => {
  */
 export const createUser = async (userData) => {
   try {
-    // 确保CSRF令牌存在
-    const csrfTokenExists = await ensureCsrfToken(() => axios.get('/api/v1/users/stats'));
-    if (!csrfTokenExists) {
-      throw new Error('无法获取CSRF令牌，请刷新页面后重试');
-    }
+    // 在保存前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/users/stats');
+    await ensureCsrfToken();
     
     const response = await axios.post('/api/v1/users/', userData);
     return normalizeResponse(response);
@@ -150,7 +149,9 @@ export const createUser = async (userData) => {
  */
 export const updateUser = async (id, userData) => {
   try {
-    // 确保CSRF令牌存在
+    // 在保存前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/users/stats');
     await ensureCsrfToken();
     
     const response = await axios.put(`/api/v1/users/${id}`, userData);
@@ -172,7 +173,9 @@ export const updateUser = async (id, userData) => {
  */
 export const deleteUser = async (id) => {
   try {
-    // 确保CSRF令牌存在
+    // 在删除前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/users/stats');
     await ensureCsrfToken();
     
     await axios.delete(`/api/v1/users/${id}`);
@@ -268,7 +271,9 @@ export const getUserStats = async () => {
  */
 export const changePassword = async (passwordData) => {
   try {
-    // 确保CSRF令牌存在
+    // 在保存前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/users/stats');
     await ensureCsrfToken();
     
     const response = await axios.put('/api/v1/users/me/password', passwordData);

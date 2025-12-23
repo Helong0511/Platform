@@ -43,7 +43,9 @@ import { logger } from '../utils/logger';
 // 创建产品
 export const createProduct = async (productData) => {
   try {
-    // 确保CSRF令牌存在
+    // 在保存前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/products/?page_size=1');
     await ensureCsrfToken();
     
     const response = await axios.post('/api/v1/products/', productData);
@@ -56,7 +58,9 @@ export const createProduct = async (productData) => {
 // 更新产品
 export const updateProduct = async (id, productData) => {
   try {
-    // 确保CSRF令牌存在
+    // 在保存前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/products/?page_size=1');
     await ensureCsrfToken();
     
     const response = await axios.put(`/api/v1/products/${id}`, productData);
@@ -69,7 +73,9 @@ export const updateProduct = async (id, productData) => {
 // 删除产品
 export const deleteProduct = async (id) => {
   try {
-    // 确保CSRF令牌存在
+    // 在删除前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/products/?page_size=1');
     await ensureCsrfToken();
     
     const response = await axios.delete(`/api/v1/products/${id}`);

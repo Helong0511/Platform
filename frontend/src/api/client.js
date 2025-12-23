@@ -109,7 +109,9 @@ export const getClientDetail = async (id, options = {}) => {
 // 创建客户
 export const createClient = async (clientData) => {
   try {
-    // 确保CSRF令牌存在
+    // 在保存前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/clients/?page_size=1');
     await ensureCsrfToken();
     
     const response = await axios.post('/api/v1/clients/', clientData);
@@ -137,7 +139,9 @@ export const clearClientDetailCache = (id = null) => {
 // 更新客户
 export const updateClient = async (id, clientData) => {
   try {
-    // 确保CSRF令牌存在
+    // 在保存前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/clients/?page_size=1');
     await ensureCsrfToken();
     
     const response = await axios.put(`/api/v1/clients/${id}`, clientData);
@@ -158,7 +162,9 @@ export const updateClient = async (id, clientData) => {
 // 快速更新客户开关
 export const updateClientSwitches = async (id, switchData) => {
   try {
-    // 确保CSRF令牌存在
+    // 在保存前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/clients/?page_size=1');
     await ensureCsrfToken();
     
     const response = await axios.patch(`/api/v1/clients/${id}/switches`, switchData);
@@ -179,7 +185,9 @@ export const updateClientSwitches = async (id, switchData) => {
 // 删除客户
 export const deleteClient = async (id) => {
   try {
-    // 确保CSRF令牌存在
+    // 在删除前刷新CSRF令牌，确保使用最新的令牌
+    const { refreshCsrfToken } = await import('../utils/api');
+    await refreshCsrfToken('/api/v1/clients/?page_size=1');
     await ensureCsrfToken();
     
     await axios.delete(`/api/v1/clients/${id}`);
