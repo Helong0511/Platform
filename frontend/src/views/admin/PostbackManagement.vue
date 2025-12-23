@@ -561,6 +561,16 @@ onMounted(() => {
   margin-bottom: var(--spacing-lg);
 }
 
+.data-table-card :deep(.el-card__body) {
+  padding: var(--spacing-xl);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.data-table-card :deep(.el-table) {
+  min-width: 1400px;
+}
+
 .table-header {
   font-weight: var(--font-weight-semibold);
   font-size: var(--font-size-lg);
@@ -616,6 +626,21 @@ onMounted(() => {
 
   .date-picker-full {
     width: 100% !important;
+  }
+
+  .data-table-card :deep(.el-card__body) {
+    padding: var(--spacing-sm);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .data-table-card :deep(.el-table) {
+    min-width: 1300px;
+    font-size: 12px;
+  }
+
+  .data-table-card :deep(.el-table__cell) {
+    padding: 8px 4px;
   }
 }
 </style>

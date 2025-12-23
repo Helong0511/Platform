@@ -15,9 +15,9 @@
       <div class="search-bar">
         <el-select
           v-model="filterDiscountType"
-          placeholder="扣量类型"
+          placeholder="请选择扣量类型"
           clearable
-          style="width: 180px;"
+          style="width: 160px; min-width: 160px;"
           @change="handleSearch"
         >
           <el-option label="全部" :value="null" />
@@ -26,10 +26,10 @@
         </el-select>
         <el-select
           v-model="filterOffer"
-          placeholder="Offer"
+          placeholder="请选择Offer"
           clearable
           filterable
-          style="width: 200px; margin-left: 10px;"
+          style="width: 180px; margin-left: 10px; min-width: 180px;"
           @change="handleSearch"
         >
           <el-option
@@ -41,10 +41,10 @@
         </el-select>
         <el-select
           v-model="filterPublisher"
-          placeholder="渠道"
+          placeholder="请选择渠道"
           clearable
           filterable
-          style="width: 200px; margin-left: 10px;"
+          style="width: 180px; margin-left: 10px; min-width: 180px;"
           @change="handleSearch"
         >
           <el-option
@@ -56,9 +56,9 @@
         </el-select>
         <el-select
           v-model="filterActive"
-          placeholder="激活状态"
+          placeholder="请选择激活状态"
           clearable
-          style="width: 150px; margin-left: 10px;"
+          style="width: 160px; margin-left: 10px; min-width: 160px;"
           @change="handleSearch"
         >
           <el-option label="全部" :value="null" />
@@ -487,6 +487,35 @@ onMounted(() => {
   margin-bottom: 20px;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+/* 确保输入框和下拉框文字不被遮盖 */
+.search-bar :deep(.el-input__wrapper) {
+  padding-right: 30px; /* 为清除按钮留出空间 */
+}
+
+.search-bar :deep(.el-select .el-input__wrapper) {
+  padding-right: 30px; /* 为清除按钮和下拉箭头留出空间 */
+}
+
+.search-bar :deep(.el-input__inner),
+.search-bar :deep(.el-select__input) {
+  padding-right: 8px; /* 文字与清除按钮之间的间距 */
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* 确保清除按钮不遮挡文字 */
+.search-bar :deep(.el-input__suffix) {
+  right: 8px;
+}
+
+.search-bar :deep(.el-select .el-input__suffix) {
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .pagination-container {

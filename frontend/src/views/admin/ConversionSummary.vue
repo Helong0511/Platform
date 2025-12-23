@@ -96,53 +96,56 @@
             <span>转化总览</span>
           </div>
         </template>
-        <el-table
-          :data="statsList"
-          stripe
-          style="width: 100%;"
-        >
-          <el-table-column prop="offer_id" label="Offer ID" width="100" align="right" />
-          <el-table-column prop="offer_name" label="Offer Name" min-width="200" />
-          <el-table-column 
-            v-if="isAdmin"
-            prop="advertiser_name" 
-            label="Advertiser" 
-            min-width="150" 
-          />
-          <el-table-column prop="publisher_name" label="Publisher" min-width="150" />
-          <el-table-column prop="click_count" label="Click" width="120" align="right" />
-          <el-table-column prop="conversion_count" label="Conversion" width="120" align="right" />
-          <el-table-column prop="cr" label="CR" width="120" align="right">
-            <template #default="scope">
-              {{ scope.row.cr }}%
-            </template>
-          </el-table-column>
-          <el-table-column 
-            v-if="isAdmin"
-            prop="po" 
-            label="PO" 
-            width="150" 
-            align="right"
+        <div class="table-wrapper">
+          <el-table
+            :data="statsList"
+            stripe
+            style="width: 100%;"
           >
-            <template #default="scope">
-              <span v-if="scope.row.po !== undefined && scope.row.po !== null">{{ scope.row.po.toFixed(2) }}</span>
-              <span v-else>0.00</span>
-            </template>
-          </el-table-column>
-          <el-table-column 
-            prop="po_after_discount" 
-            :label="isAdmin ? 'PO(扣)' : 'PO'" 
-            width="150" 
-            align="right"
-          >
-            <template #default="scope">
-              <span v-if="scope.row.po_after_discount !== undefined && scope.row.po_after_discount !== null">
-                {{ scope.row.po_after_discount.toFixed(2) }}
-              </span>
-              <span v-else>0.00</span>
-            </template>
-          </el-table-column>
-        </el-table>
+            <el-table-column prop="offer_id" label="Offer ID" width="100" align="right" />
+            <el-table-column prop="offer_name" label="Offer Name" min-width="200" show-overflow-tooltip />
+            <el-table-column 
+              v-if="isAdmin"
+              prop="advertiser_name" 
+              label="Advertiser" 
+              min-width="150"
+              show-overflow-tooltip
+            />
+            <el-table-column prop="publisher_name" label="Publisher" min-width="150" show-overflow-tooltip />
+            <el-table-column prop="click_count" label="Click" width="120" align="right" />
+            <el-table-column prop="conversion_count" label="Conversion" width="120" align="right" />
+            <el-table-column prop="cr" label="CR" width="120" align="right">
+              <template #default="scope">
+                {{ scope.row.cr }}%
+              </template>
+            </el-table-column>
+            <el-table-column 
+              v-if="isAdmin"
+              prop="po" 
+              label="PO" 
+              width="150" 
+              align="right"
+            >
+              <template #default="scope">
+                <span v-if="scope.row.po !== undefined && scope.row.po !== null">{{ scope.row.po.toFixed(2) }}</span>
+                <span v-else>0.00</span>
+              </template>
+            </el-table-column>
+            <el-table-column 
+              prop="po_after_discount" 
+              :label="isAdmin ? 'PO(扣)' : 'PO'" 
+              width="150" 
+              align="right"
+            >
+              <template #default="scope">
+                <span v-if="scope.row.po_after_discount !== undefined && scope.row.po_after_discount !== null">
+                  {{ scope.row.po_after_discount.toFixed(2) }}
+                </span>
+                <span v-else>0.00</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
       </el-card>
     </el-card>
   </div>
@@ -299,6 +302,44 @@ onMounted(() => {
   gap: 10px;
 }
 
+/* 确保输入框和下拉框文字不被遮盖 */
+.filter-bar :deep(.el-input__wrapper) {
+  padding-right: 30px; /* 为清除按钮留出空间 */
+}
+
+.filter-bar :deep(.el-select .el-input__wrapper) {
+  padding-right: 30px; /* 为清除按钮和下拉箭头留出空间 */
+}
+
+.filter-bar :deep(.el-input__inner),
+.filter-bar :deep(.el-select__input) {
+  padding-right: 8px; /* 文字与清除按钮之间的间距 */
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* 确保清除按钮不遮挡文字 */
+.filter-bar :deep(.el-input__suffix) {
+  right: 8px;
+}
+
+.filter-bar :deep(.el-select .el-input__suffix) {
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 日期选择器特殊处理 */
+.filter-bar :deep(.el-date-editor .el-input__wrapper) {
+  padding-right: 30px;
+}
+
+.filter-bar :deep(.el-date-editor .el-input__inner) {
+  padding-right: 8px;
+}
+
 .stats-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -310,9 +351,69 @@ onMounted(() => {
   text-align: center;
 }
 
+.table-card {
+  margin-top: 20px;
+}
+
+.table-card :deep(.el-card__body) {
+  padding: 20px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-wrapper :deep(.el-table) {
+  min-width: 1000px;
+}
+
+.table-wrapper :deep(.el-table__header-wrapper),
+.table-wrapper :deep(.el-table__body-wrapper) {
+  overflow-x: visible;
+}
+
 .table-header {
   font-weight: 600;
   font-size: 16px;
+}
+
+/* 移动端优化 */
+@media (max-width: 767px) {
+  .conversion-summary {
+    padding: 10px;
+  }
+
+  .filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filter-bar > * {
+    width: 100% !important;
+    margin-left: 0 !important;
+  }
+
+  .stats-cards {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .table-card :deep(.el-card__body) {
+    padding: 10px;
+  }
+
+  .table-wrapper :deep(.el-table) {
+    min-width: 900px;
+    font-size: 12px;
+  }
+
+  .table-wrapper :deep(.el-table__cell) {
+    padding: 8px 4px;
+  }
 }
 </style>
 

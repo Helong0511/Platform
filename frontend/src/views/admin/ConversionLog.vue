@@ -26,10 +26,10 @@
         </el-input>
         <el-select
           v-model="filterOffer"
-          placeholder="Offer"
+          placeholder="请选择Offer"
           clearable
           filterable
-          style="width: 200px; margin-left: 10px;"
+          style="width: 180px; margin-left: 10px; min-width: 180px;"
           @change="handleSearch"
         >
           <el-option
@@ -41,10 +41,10 @@
         </el-select>
         <el-select
           v-model="filterPublisher"
-          placeholder="渠道"
+          placeholder="请选择渠道"
           clearable
           filterable
-          style="width: 200px; margin-left: 10px;"
+          style="width: 180px; margin-left: 10px; min-width: 180px;"
           @change="handleSearch"
         >
           <el-option
@@ -56,9 +56,9 @@
         </el-select>
         <el-select
           v-model="filterStatus"
-          placeholder="状态"
+          placeholder="请选择状态"
           clearable
-          style="width: 150px; margin-left: 10px;"
+          style="width: 140px; margin-left: 10px; min-width: 140px;"
           @change="handleSearch"
         >
           <el-option label="全部" :value="null" />
@@ -378,6 +378,44 @@ onMounted(() => {
   margin-bottom: 20px;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+/* 确保输入框和下拉框文字不被遮盖 */
+.filter-bar :deep(.el-input__wrapper) {
+  padding-right: 30px; /* 为清除按钮留出空间 */
+}
+
+.filter-bar :deep(.el-select .el-input__wrapper) {
+  padding-right: 30px; /* 为清除按钮和下拉箭头留出空间 */
+}
+
+.filter-bar :deep(.el-input__inner),
+.filter-bar :deep(.el-select__input) {
+  padding-right: 8px; /* 文字与清除按钮之间的间距 */
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* 确保清除按钮不遮挡文字 */
+.filter-bar :deep(.el-input__suffix) {
+  right: 8px;
+}
+
+.filter-bar :deep(.el-select .el-input__suffix) {
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 日期选择器特殊处理 */
+.filter-bar :deep(.el-date-editor .el-input__wrapper) {
+  padding-right: 30px;
+}
+
+.filter-bar :deep(.el-date-editor .el-input__inner) {
+  padding-right: 8px;
 }
 
 .pagination-container {

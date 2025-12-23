@@ -27,9 +27,9 @@
         </el-input>
         <el-select
           v-model="filterActive"
-          placeholder="激活状态"
+          placeholder="请选择激活状态"
           clearable
-          style="width: 150px; margin-left: 10px;"
+          style="width: 160px; margin-left: 10px; min-width: 160px;"
           @change="handleSearch"
         >
           <el-option label="全部" :value="null" />
@@ -41,12 +41,13 @@
       </div>
 
       <!-- 表格 -->
-      <el-table
-        v-loading="loading"
-        :data="tableData"
-        stripe
-        style="width: 100%; margin-top: 20px;"
-      >
+      <div class="table-wrapper">
+        <el-table
+          v-loading="loading"
+          :data="tableData"
+          stripe
+          style="width: 100%; margin-top: 20px;"
+        >
         <el-table-column prop="id" label="广告主ID" width="150" />
         <el-table-column prop="advertiser_name" label="广告主名称" min-width="200" />
         <el-table-column prop="email" label="邮箱" min-width="200" />
@@ -70,6 +71,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
 
       <!-- 分页 -->
       <div class="pagination-container">
@@ -340,12 +342,79 @@ onMounted(() => {
   display: flex;
   align-items: center;
   margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* 确保输入框和下拉框文字不被遮盖 */
+.search-bar :deep(.el-input__wrapper) {
+  padding-right: 30px; /* 为清除按钮留出空间 */
+}
+
+.search-bar :deep(.el-select .el-input__wrapper) {
+  padding-right: 30px; /* 为清除按钮和下拉箭头留出空间 */
+}
+
+.search-bar :deep(.el-input__inner),
+.search-bar :deep(.el-select__input) {
+  padding-right: 8px; /* 文字与清除按钮之间的间距 */
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* 确保清除按钮不遮挡文字 */
+.search-bar :deep(.el-input__suffix) {
+  right: 8px;
+}
+
+.search-bar :deep(.el-select .el-input__suffix) {
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-wrapper :deep(.el-table) {
+  min-width: 1000px;
 }
 
 .pagination-container {
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
+}
+
+/* 移动端优化 */
+@media (max-width: 767px) {
+  .advertiser-management {
+    padding: 10px;
+  }
+
+  .search-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-bar > * {
+    width: 100% !important;
+    margin-left: 0 !important;
+  }
+
+  .table-wrapper :deep(.el-table) {
+    min-width: 900px;
+    font-size: 12px;
+  }
+
+  .table-wrapper :deep(.el-table__cell) {
+    padding: 8px 4px;
+  }
 }
 </style>
 

@@ -27,10 +27,10 @@
         </el-input>
         <el-select
           v-model="filterAdvertiser"
-          placeholder="广告主"
+          placeholder="请选择广告主"
           clearable
           filterable
-          style="width: 200px; margin-left: 10px;"
+          style="width: 180px; margin-left: 10px; min-width: 180px;"
           @change="handleSearch"
         >
           <el-option
@@ -42,9 +42,9 @@
         </el-select>
         <el-select
           v-model="filterStatus"
-          placeholder="状态"
+          placeholder="请选择状态"
           clearable
-          style="width: 150px; margin-left: 10px;"
+          style="width: 140px; margin-left: 10px; min-width: 140px;"
           @change="handleSearch"
         >
           <el-option label="全部" :value="null" />
@@ -53,9 +53,9 @@
         </el-select>
         <el-select
           v-model="filterActive"
-          placeholder="激活状态"
+          placeholder="请选择激活状态"
           clearable
-          style="width: 150px; margin-left: 10px;"
+          style="width: 160px; margin-left: 10px; min-width: 160px;"
           @change="handleSearch"
         >
           <el-option label="全部" :value="null" />
@@ -67,12 +67,13 @@
       </div>
 
       <!-- 表格 -->
-      <el-table
-        v-loading="loading"
-        :data="tableData"
-        stripe
-        style="width: 100%; margin-top: 20px;"
-      >
+      <div class="table-wrapper">
+        <el-table
+          v-loading="loading"
+          :data="tableData"
+          stripe
+          style="width: 100%; margin-top: 20px;"
+        >
         <el-table-column prop="id" label="Offer ID" width="100" align="center" />
         <el-table-column prop="offer_name" label="Offer名称" width="180" show-overflow-tooltip />
         <el-table-column prop="advertiser_name" label="广告主" width="150" />
@@ -116,6 +117,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
 
       <!-- 分页 -->
       <div class="pagination-container">
@@ -610,10 +612,75 @@ onMounted(() => {
   gap: 10px;
 }
 
+/* 确保输入框和下拉框文字不被遮盖 */
+.search-bar :deep(.el-input__wrapper) {
+  padding-right: 30px; /* 为清除按钮留出空间 */
+}
+
+.search-bar :deep(.el-select .el-input__wrapper) {
+  padding-right: 30px; /* 为清除按钮和下拉箭头留出空间 */
+}
+
+.search-bar :deep(.el-input__inner),
+.search-bar :deep(.el-select__input) {
+  padding-right: 8px; /* 文字与清除按钮之间的间距 */
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* 确保清除按钮不遮挡文字 */
+.search-bar :deep(.el-input__suffix) {
+  right: 8px;
+}
+
+.search-bar :deep(.el-select .el-input__suffix) {
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-wrapper :deep(.el-table) {
+  min-width: 1200px;
+}
+
 .pagination-container {
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
+}
+
+/* 移动端优化 */
+@media (max-width: 767px) {
+  .offer-management {
+    padding: 10px;
+  }
+
+  .search-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-bar > * {
+    width: 100% !important;
+    margin-left: 0 !important;
+  }
+
+  .table-wrapper :deep(.el-table) {
+    min-width: 1100px;
+    font-size: 12px;
+  }
+
+  .table-wrapper :deep(.el-table__cell) {
+    padding: 8px 4px;
+  }
 }
 </style>
 
