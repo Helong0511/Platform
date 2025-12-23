@@ -40,7 +40,7 @@ async def create_click_background(click_data: dict):
 
 @router.get("/track/click/{offer_id}", summary="点击追踪", tags=["点击追踪"])
 async def track_click(
-    offer_id: str = Path(..., description="Offer ID"),
+    offer_id: int = Path(..., ge=1, description="Offer ID"),
     publisher_id: Optional[int] = Query(None, description="渠道ID"),
     background_tasks: BackgroundTasks = None,  # 注入 BackgroundTasks
     request: Request = None,
@@ -53,7 +53,7 @@ async def track_click(
     try:
         # 1. 查询 Offer
         result = await db.execute(
-            select(Offer).where(Offer.offer_id == offer_id)
+            select(Offer).where(Offer.id == offer_id)
         )
         offer = result.scalars().first()
         

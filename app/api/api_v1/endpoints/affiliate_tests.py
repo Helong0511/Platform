@@ -63,14 +63,14 @@ async def create_affiliate_test(
         try:
             # 替换URL中的占位符
             postback_url = postback_url.replace('{click_id}', test_in.click_id)
-            postback_url = postback_url.replace('{offer_id}', offer.offer_id)
+            postback_url = postback_url.replace('{offer_id}', str(offer.id))
             postback_url = postback_url.replace('{publisher_id}', str(publisher.id))
             
             async with httpx.AsyncClient(timeout=10.0) as client:
                 if postback_method.upper() == 'POST':
                     response = await client.post(postback_url, json={
                         'click_id': test_in.click_id,
-                        'offer_id': offer.offer_id,
+                        'offer_id': offer.id,
                         'publisher_id': publisher.id
                     })
                 else:

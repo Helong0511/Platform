@@ -15,25 +15,10 @@ from app.core.errors import ErrorCode
 from app.models.models import User, Offer, Advertiser, Publisher, OfferPublisherAssignment
 from app.schemas.cpl.offer import OfferCreate, OfferUpdate, OfferResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
-from app.core.short_link.generator import generate_unique_short_code
-from app.core.tracking.tracklink_generator import generate_downstream_tracklink, generate_postback_url
 from app.core.config import settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-async def generate_offer_id(db: AsyncSession) -> str:
-    """生成唯一的Offer ID"""
-    result = await db.execute(select(Offer.offer_id))
-    existing_ids = {row[0] for row in result.all()}
-    
-    offer_id = generate_unique_short_code(existing_ids, length=8, max_attempts=100)
-    if not offer_id:
-        import time
-        offer_id = f"OFFER{int(time.time())}"
-    
-    return offer_id
 
 
 @router.post("/",
@@ -57,19 +42,7 @@ async def create_offer(
             detail=f"广告主ID {offer_in.advertiser_id} 不存在"
         )
     
-    # 生成唯一的 offer_id
-    offer_id = await generate_offer_id(db)
-    
-    # 生成下游 Tracklink（使用模板，实际使用时替换占位符）
-    base_url = getattr(settings, 'TRACKING_BASE_URL', 'https://client.btfrx.online')
-    # 下游 Tracklink 模板，实际使用时需要替换 {publisher_id} 和 {click_id}
-    downstream_tracklink = f"{base_url.rstrip('/')}/api/v1/track/click/{offer_id}?publisher_id={{publisher_id}}"
-    
-    # 生成 Postback URL（使用模板，实际使用时替换占位符）
-    postback_url = f"{base_url.rstrip('/')}/api/v1/postback?click_id={{click_id}}&offer_id={offer_id}"
-    
     offer = Offer(
-        offer_id=offer_id,
         offer_name=offer_in.offer_name,
         advertiser_offer_id=offer_in.advertiser_offer_id,
         advertiser_id=offer_in.advertiser_id,
@@ -83,8 +56,6 @@ async def create_offer(
         upstream_cap=offer_in.upstream_cap,
         downstream_cap=offer_in.downstream_cap,
         advertiser_tracklink=offer_in.advertiser_tracklink,
-        downstream_tracklink=downstream_tracklink,
-        postback_url=postback_url,
         postback_method=offer_in.postback_method,
         is_active=offer_in.is_active
     )
@@ -92,6 +63,18 @@ async def create_offer(
     try:
         db.add(offer)
         await db.flush()  # 获取 offer.id
+        
+        # 生成下游 Tracklink（使用自增ID）
+        base_url = getattr(settings, 'TRACKING_BASE_URL', 'https://client.btfrx.online')
+        # 下游 Tracklink 模板，实际使用时需要替换 {publisher_id} 和 {click_id}
+        downstream_tracklink = f"{base_url.rstrip('/')}/api/v1/track/click/{offer.id}?publisher_id={{publisher_id}}"
+        
+        # 生成 Postback URL（使用模板，实际使用时替换占位符）
+        postback_url = f"{base_url.rstrip('/')}/api/v1/postback?click_id={{click_id}}&offer_id={offer.id}"
+        
+        # 更新下游tracklink和postback_url
+        offer.downstream_tracklink = downstream_tracklink
+        offer.postback_url = postback_url
         
         # 处理渠道分配
         if offer_in.publisher_ids:
@@ -116,7 +99,7 @@ async def create_offer(
         offer_data = OfferResponse.model_validate(offer)
         offer_data.advertiser_name = advertiser.advertiser_name
         
-        logger.info(f"Offer创建成功: {offer_id}")
+        logger.info(f"Offer创建成功: id={offer.id}")
         return ResponseBaseSchema.success(data=offer_data)
     except Exception as e:
         await db.rollback()
@@ -147,9 +130,10 @@ async def get_offers(
     
     # 搜索过滤
     if search:
+        from sqlalchemy import String
         query = query.where(
             (Offer.offer_name.like(f"%{search}%")) |
-            (Offer.offer_id.like(f"%{search}%")) |
+            (Offer.id.cast(String).like(f"%{search}%")) |
             (Offer.advertiser_offer_id.like(f"%{search}%"))
         )
     
@@ -341,7 +325,7 @@ async def update_offer(
         offer_data = OfferResponse.model_validate(offer)
         offer_data.advertiser_name = advertiser.advertiser_name if advertiser else None
         
-        logger.info(f"Offer更新成功: {offer.offer_id}")
+        logger.info(f"Offer更新成功: id={offer.id}")
         return ResponseBaseSchema.success(data=offer_data)
     except Exception as e:
         await db.rollback()
@@ -378,7 +362,7 @@ async def delete_offer(
         await db.execute(delete(Offer).where(Offer.id == offer_id))
         await db.commit()
         
-        logger.info(f"Offer删除成功: {offer.offer_id}")
+        logger.info(f"Offer删除成功: id={offer.id}")
         return ResponseBaseSchema.success(data={"message": "Offer已删除"})
     except Exception as e:
         await db.rollback()

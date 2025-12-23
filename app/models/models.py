@@ -627,7 +627,6 @@ class Offer(Base):
     __tablename__ = "offers"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='Offer ID（主键）')
-    offer_id = Column(String(50), unique=True, nullable=False, index=True, comment='Offer ID（系统生成的唯一标识）')
     offer_name = Column(String(200), nullable=False, comment='Offer名称')
     advertiser_offer_id = Column(String(100), nullable=True, comment='上游系统中的Offer ID（ADV Offer ID）')
     advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="RESTRICT"), nullable=False, index=True, comment='关联的广告主ID')
@@ -658,7 +657,6 @@ class Offer(Base):
     discounts = relationship("OfferDiscount", back_populates="offer", cascade="all, delete-orphan")
 
     __table_args__ = (
-        Index("idx_offer_id", "offer_id"),
         Index("idx_advertiser_id", "advertiser_id"),
         Index("idx_status", "status"),
         Index("idx_is_active", "is_active"),

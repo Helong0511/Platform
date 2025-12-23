@@ -69,7 +69,6 @@ class OfferUpdate(BaseModel):
 class OfferResponse(OfferBase):
     """Offer响应"""
     id: int
-    offer_id: str
     downstream_tracklink: Optional[str] = None
     created_at: datetime
     updated_at: datetime

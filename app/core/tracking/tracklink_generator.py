@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 def generate_upstream_tracklink(
     advertiser_tracklink: str,
     click_id: str,
-    offer_id: str,
+    offer_id: str | int,
     publisher_id: Optional[str | int] = None
 ) -> str:
     """
@@ -34,7 +34,7 @@ def generate_upstream_tracklink(
         
         # 添加我们的参数
         query_params['our_click_id'] = [click_id]
-        query_params['our_offer_id'] = [offer_id]
+        query_params['our_offer_id'] = [str(offer_id)]
         if publisher_id:
             query_params['our_publisher_id'] = [str(publisher_id)]
         
@@ -47,12 +47,12 @@ def generate_upstream_tracklink(
         logger.error(f"生成上游 Tracklink 失败: {str(e)}")
         # 如果解析失败，简单追加参数
         separator = '&' if '?' in advertiser_tracklink else '?'
-        return f"{advertiser_tracklink}{separator}our_click_id={click_id}&our_offer_id={offer_id}"
+        return f"{advertiser_tracklink}{separator}our_click_id={click_id}&our_offer_id={str(offer_id)}"
 
 
 def generate_downstream_tracklink(
     base_url: str,
-    offer_id: str,
+    offer_id: str | int,
     publisher_id: str | int,
     click_id: str,
     additional_params: Optional[Dict[str, Any]] = None
@@ -73,7 +73,7 @@ def generate_downstream_tracklink(
     try:
         # 构建参数
         params = {
-            'offer_id': offer_id,
+            'offer_id': str(offer_id),
             'publisher_id': str(publisher_id),
             'click_id': click_id
         }
@@ -89,13 +89,13 @@ def generate_downstream_tracklink(
         return tracklink
     except Exception as e:
         logger.error(f"生成下游 Tracklink 失败: {str(e)}")
-        return f"{base_url}/track/click?offer_id={offer_id}&publisher_id={publisher_id}&click_id={click_id}"
+        return f"{base_url}/track/click?offer_id={str(offer_id)}&publisher_id={str(publisher_id)}&click_id={click_id}"
 
 
 def generate_postback_url(
     base_url: str,
     click_id: str,
-    offer_id: str,
+    offer_id: str | int,
     publisher_id: Optional[str | int] = None,
     additional_params: Optional[Dict[str, Any]] = None
 ) -> str:
@@ -115,7 +115,7 @@ def generate_postback_url(
     try:
         params = {
             'click_id': click_id,
-            'offer_id': offer_id
+            'offer_id': str(offer_id)
         }
         
         if publisher_id:
@@ -130,5 +130,5 @@ def generate_postback_url(
         return postback_url
     except Exception as e:
         logger.error(f"生成 Postback URL 失败: {str(e)}")
-        return f"{base_url}?click_id={click_id}&offer_id={offer_id}"
+        return f"{base_url}?click_id={click_id}&offer_id={str(offer_id)}"
 

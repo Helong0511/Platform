@@ -64,7 +64,7 @@ async def create_advertiser_test(
         click_url = generate_upstream_tracklink(
             advertiser_tracklink=offer.advertiser_tracklink,
             click_id=click_id,
-            offer_id=offer.offer_id,
+            offer_id=offer.id,
             publisher_id=None
         )
     

@@ -118,7 +118,7 @@ async def get_conversion_summary(
                 )).scalar() or 0
                 
                 offer_stats.append({
-                    "offer_id": offer.offer_id,
+                    "offer_id": offer.id,
                     "offer_name": offer.offer_name,
                     "click_count": offer_click_count,
                     "conversion_count": offer_conversion_count,
@@ -163,7 +163,7 @@ async def get_conversion_summary(
                 )).scalar() or 0
                 
                 offer_stats.append({
-                    "offer_id": offer.offer_id,
+                    "offer_id": offer.id,
                     "offer_name": offer.offer_name,
                     "click_count": click_count_val,
                     "conversion_count": conversion_count_val,
@@ -251,7 +251,7 @@ async def get_summary_by_offer(
             )).scalar() or 0
             
             stats_list.append({
-                "offer_id": offer.offer_id,
+                "offer_id": offer.id,
                 "offer_name": offer.offer_name,
                 "click_count": click_count,
                 "conversion_count": conversion_count,
