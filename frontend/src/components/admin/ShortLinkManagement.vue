@@ -44,6 +44,7 @@
       stripe
       style="width: 100%"
     >
+      <el-table-column prop="id" label="ID" width="100" align="center" />
       <el-table-column prop="short_code" label="短链接代码" width="150">
         <template #default="scope">
           <el-tag type="primary">{{ scope.row.short_code }}</el-tag>

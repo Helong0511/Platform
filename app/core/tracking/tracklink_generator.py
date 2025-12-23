@@ -13,7 +13,7 @@ def generate_upstream_tracklink(
     advertiser_tracklink: str,
     click_id: str,
     offer_id: str,
-    publisher_id: Optional[str] = None
+    publisher_id: Optional[str | int] = None
 ) -> str:
     """
     生成上游 Tracklink（包含我们的参数）
@@ -22,7 +22,7 @@ def generate_upstream_tracklink(
         advertiser_tracklink: 上游的原始 Tracklink
         click_id: 我们生成的 Click ID
         offer_id: Offer ID
-        publisher_id: 渠道ID（可选）
+        publisher_id: 渠道ID（可选，可以是字符串或整数）
         
     Returns:
         包含我们参数的上游 Tracklink
@@ -36,7 +36,7 @@ def generate_upstream_tracklink(
         query_params['our_click_id'] = [click_id]
         query_params['our_offer_id'] = [offer_id]
         if publisher_id:
-            query_params['our_publisher_id'] = [publisher_id]
+            query_params['our_publisher_id'] = [str(publisher_id)]
         
         # 重新构建 URL
         new_query = urlencode(query_params, doseq=True)
@@ -53,7 +53,7 @@ def generate_upstream_tracklink(
 def generate_downstream_tracklink(
     base_url: str,
     offer_id: str,
-    publisher_id: str,
+    publisher_id: str | int,
     click_id: str,
     additional_params: Optional[Dict[str, Any]] = None
 ) -> str:
@@ -63,7 +63,7 @@ def generate_downstream_tracklink(
     Args:
         base_url: 基础URL（我们的追踪域名）
         offer_id: Offer ID
-        publisher_id: 渠道ID
+        publisher_id: 渠道ID（可以是字符串或整数）
         click_id: Click ID
         additional_params: 额外参数（可选）
         
@@ -74,7 +74,7 @@ def generate_downstream_tracklink(
         # 构建参数
         params = {
             'offer_id': offer_id,
-            'publisher_id': publisher_id,
+            'publisher_id': str(publisher_id),
             'click_id': click_id
         }
         
@@ -96,7 +96,7 @@ def generate_postback_url(
     base_url: str,
     click_id: str,
     offer_id: str,
-    publisher_id: Optional[str] = None,
+    publisher_id: Optional[str | int] = None,
     additional_params: Optional[Dict[str, Any]] = None
 ) -> str:
     """
@@ -106,7 +106,7 @@ def generate_postback_url(
         base_url: 基础URL（我们的Postback接收地址）
         click_id: Click ID
         offer_id: Offer ID
-        publisher_id: 渠道ID（可选）
+        publisher_id: 渠道ID（可选，可以是字符串或整数）
         additional_params: 额外参数（可选）
         
     Returns:
@@ -119,7 +119,7 @@ def generate_postback_url(
         }
         
         if publisher_id:
-            params['publisher_id'] = publisher_id
+            params['publisher_id'] = str(publisher_id)
         
         if additional_params:
             params.update(additional_params)

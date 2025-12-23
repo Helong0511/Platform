@@ -47,7 +47,7 @@
         stripe
         style="width: 100%; margin-top: 20px;"
       >
-        <el-table-column prop="advertiser_id" label="广告主ID" width="150" />
+        <el-table-column prop="id" label="广告主ID" width="150" />
         <el-table-column prop="advertiser_name" label="广告主名称" min-width="200" />
         <el-table-column prop="email" label="邮箱" min-width="200" />
         <el-table-column prop="mobile" label="手机号" width="150" />

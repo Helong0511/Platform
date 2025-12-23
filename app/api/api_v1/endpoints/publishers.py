@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func
+from sqlalchemy import func, String
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
@@ -15,23 +15,9 @@ from app.core.errors import ErrorCode
 from app.models.models import User, Publisher
 from app.schemas.cpl.publisher import PublisherCreate, PublisherUpdate, PublisherResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
-from app.core.short_link.generator import generate_unique_short_code
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-async def generate_publisher_id(db: AsyncSession) -> str:
-    """生成唯一的渠道ID"""
-    result = await db.execute(select(Publisher.publisher_id))
-    existing_ids = {row[0] for row in result.all()}
-    
-    publisher_id = generate_unique_short_code(existing_ids, length=6, max_attempts=100)
-    if not publisher_id:
-        import time
-        publisher_id = f"PUB{int(time.time())}"
-    
-    return publisher_id
 
 
 @router.post("/",
@@ -44,10 +30,7 @@ async def create_publisher(
     current_user: User = Depends(get_current_user)
 ):
     """创建渠道（仅管理员）"""
-    publisher_id = await generate_publisher_id(db)
-    
     publisher = Publisher(
-        publisher_id=publisher_id,
         publisher_name=publisher_in.publisher_name,
         email=publisher_in.email,
         price_discount=publisher_in.price_discount,
@@ -61,7 +44,7 @@ async def create_publisher(
         await db.commit()
         await db.refresh(publisher)
         
-        logger.info(f"渠道创建成功: {publisher_id}")
+        logger.info(f"渠道创建成功: id={publisher.id}")
         return ResponseBaseSchema.success(data=PublisherResponse.model_validate(publisher))
     except Exception as e:
         await db.rollback()
@@ -90,7 +73,7 @@ async def get_publishers(
     if search:
         query = query.where(
             (Publisher.publisher_name.like(f"%{search}%")) |
-            (Publisher.publisher_id.like(f"%{search}%"))
+            (Publisher.id.cast(String).like(f"%{search}%"))
         )
     
     if is_active is not None:
@@ -167,7 +150,7 @@ async def update_publisher(
         await db.commit()
         await db.refresh(publisher)
         
-        logger.info(f"渠道更新成功: {publisher.publisher_id}")
+        logger.info(f"渠道更新成功: id={publisher.id}")
         return ResponseBaseSchema.success(data=PublisherResponse.model_validate(publisher))
     except Exception as e:
         await db.rollback()
@@ -204,7 +187,7 @@ async def delete_publisher(
         await db.execute(delete(Publisher).where(Publisher.id == publisher_id))
         await db.commit()
         
-        logger.info(f"渠道删除成功: {publisher.publisher_id}")
+        logger.info(f"渠道删除成功: id={publisher.id}")
         return ResponseBaseSchema.success(data={"message": "渠道已删除"})
     except Exception as e:
         await db.rollback()

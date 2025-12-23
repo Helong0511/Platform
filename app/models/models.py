@@ -578,7 +578,6 @@ class Advertiser(Base):
     __tablename__ = "advertisers"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='广告主ID')
-    advertiser_id = Column(String(50), unique=True, nullable=False, index=True, comment='广告主ID（系统生成，唯一标识）')
     advertiser_name = Column(String(100), nullable=False, index=True, comment='广告主名称')
     email = Column(String(255), nullable=True, comment='邮箱（可选）')
     mobile = Column(String(20), nullable=True, comment='手机号')
@@ -591,7 +590,6 @@ class Advertiser(Base):
     offers = relationship("Offer", back_populates="advertiser", cascade="all, delete-orphan")
 
     __table_args__ = (
-        Index("idx_advertiser_id", "advertiser_id"),
         Index("idx_advertiser_name", "advertiser_name"),
         Index("idx_is_active", "is_active"),
     )
@@ -602,7 +600,6 @@ class Publisher(Base):
     __tablename__ = "publishers"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='渠道ID')
-    publisher_id = Column(String(50), unique=True, nullable=False, index=True, comment='渠道ID（系统生成，唯一标识）')
     publisher_name = Column(String(100), nullable=False, index=True, comment='渠道名称')
     email = Column(String(255), nullable=True, comment='邮箱（可选）')
     price_discount = Column(Float, default=0.0, comment='渠道级别的价格扣量比例（0-100）')
@@ -620,7 +617,6 @@ class Publisher(Base):
     discounts = relationship("OfferDiscount", back_populates="publisher", cascade="all, delete-orphan")
 
     __table_args__ = (
-        Index("idx_publisher_id", "publisher_id"),
         Index("idx_publisher_name", "publisher_name"),
         Index("idx_is_active", "is_active"),
     )

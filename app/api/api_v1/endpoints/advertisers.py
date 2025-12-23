@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query, Path, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func
+from sqlalchemy import func, String
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
@@ -16,26 +16,9 @@ from app.core.errors import ErrorCode
 from app.models.models import User, UserRole, Advertiser
 from app.schemas.cpl.advertiser import AdvertiserCreate, AdvertiserUpdate, AdvertiserResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
-from app.core.short_link.generator import generate_unique_short_code
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-async def generate_advertiser_id(db: AsyncSession) -> str:
-    """生成唯一的广告主ID"""
-    # 获取所有已存在的 advertiser_id
-    result = await db.execute(select(Advertiser.advertiser_id))
-    existing_ids = {row[0] for row in result.all()}
-    
-    # 生成唯一ID（6位）
-    advertiser_id = generate_unique_short_code(existing_ids, length=6, max_attempts=100)
-    if not advertiser_id:
-        # 如果生成失败，使用时间戳
-        import time
-        advertiser_id = f"ADV{int(time.time())}"
-    
-    return advertiser_id
 
 
 @router.post("/",
@@ -48,11 +31,7 @@ async def create_advertiser(
     current_user: User = Depends(get_current_user)
 ):
     """创建广告主（仅管理员）"""
-    # 生成唯一的 advertiser_id
-    advertiser_id = await generate_advertiser_id(db)
-    
     advertiser = Advertiser(
-        advertiser_id=advertiser_id,
         advertiser_name=advertiser_in.advertiser_name,
         email=advertiser_in.email,
         mobile=advertiser_in.mobile,
@@ -64,7 +43,7 @@ async def create_advertiser(
         await db.commit()
         await db.refresh(advertiser)
         
-        logger.info(f"广告主创建成功: {advertiser_id}")
+        logger.info(f"广告主创建成功: id={advertiser.id}")
         return ResponseBaseSchema.success(data=AdvertiserResponse.model_validate(advertiser))
     except Exception as e:
         await db.rollback()
@@ -94,7 +73,7 @@ async def get_advertisers(
     if search:
         query = query.where(
             (Advertiser.advertiser_name.like(f"%{search}%")) |
-            (Advertiser.advertiser_id.like(f"%{search}%"))
+            (Advertiser.id.cast(String).like(f"%{search}%"))
         )
     
     # 激活状态过滤
@@ -175,7 +154,7 @@ async def update_advertiser(
         await db.commit()
         await db.refresh(advertiser)
         
-        logger.info(f"广告主更新成功: {advertiser.advertiser_id}")
+        logger.info(f"广告主更新成功: id={advertiser.id}")
         return ResponseBaseSchema.success(data=AdvertiserResponse.model_validate(advertiser))
     except Exception as e:
         await db.rollback()
@@ -212,7 +191,7 @@ async def delete_advertiser(
         await db.execute(delete(Advertiser).where(Advertiser.id == advertiser_id))
         await db.commit()
         
-        logger.info(f"广告主删除成功: {advertiser.advertiser_id}")
+        logger.info(f"广告主删除成功: id={advertiser.id}")
         return ResponseBaseSchema.success(data={"message": "广告主已删除"})
     except Exception as e:
         await db.rollback()

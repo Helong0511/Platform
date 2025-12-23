@@ -203,7 +203,6 @@ async def get_offers(
         offer_data.assigned_publishers = [
             {
                 "id": pub.id,
-                "publisher_id": pub.publisher_id,
                 "publisher_name": pub.publisher_name
             }
             for _, pub in assignments
@@ -259,7 +258,6 @@ async def get_offer(
     offer_data.assigned_publishers = [
         {
             "id": pub.id,
-            "publisher_id": pub.publisher_id,
             "publisher_name": pub.publisher_name
         }
         for _, pub in assignments

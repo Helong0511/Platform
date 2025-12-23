@@ -34,7 +34,6 @@ class PublisherUpdate(BaseModel):
 class PublisherResponse(PublisherBase):
     """渠道响应"""
     id: int
-    publisher_id: str
     active_advertiser_count: int
     created_at: datetime
     updated_at: datetime

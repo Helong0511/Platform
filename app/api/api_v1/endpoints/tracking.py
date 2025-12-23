@@ -41,7 +41,7 @@ async def create_click_background(click_data: dict):
 @router.get("/track/click/{offer_id}", summary="点击追踪", tags=["点击追踪"])
 async def track_click(
     offer_id: str = Path(..., description="Offer ID"),
-    publisher_id: Optional[str] = Query(None, description="渠道ID"),
+    publisher_id: Optional[int] = Query(None, description="渠道ID"),
     background_tasks: BackgroundTasks = None,  # 注入 BackgroundTasks
     request: Request = None,
     db: AsyncSession = Depends(get_db)
@@ -73,7 +73,7 @@ async def track_click(
         publisher = None
         if publisher_id:
             pub_result = await db.execute(
-                select(Publisher).where(Publisher.publisher_id == publisher_id)
+                select(Publisher).where(Publisher.id == publisher_id)
             )
             publisher = pub_result.scalars().first()
         
@@ -133,6 +133,8 @@ async def track_click(
         if offer.downstream_tracklink:
             # 如果有下游 Tracklink，使用它
             redirect_url = offer.downstream_tracklink.replace('{click_id}', click_id)
+            if publisher:
+                redirect_url = redirect_url.replace('{publisher_id}', str(publisher.id))
         elif offer.preview_link:
             # 否则使用 Preview Link，添加 Click ID 参数
             separator = '&' if '?' in offer.preview_link else '?'

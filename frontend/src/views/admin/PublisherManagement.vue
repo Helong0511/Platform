@@ -47,7 +47,7 @@
         stripe
         style="width: 100%; margin-top: 20px;"
       >
-        <el-table-column prop="publisher_id" label="渠道ID" width="150" />
+        <el-table-column prop="id" label="渠道ID" width="150" />
         <el-table-column prop="publisher_name" label="渠道名称" min-width="200" />
         <el-table-column prop="email" label="邮箱" min-width="200" />
         <el-table-column prop="price_discount" label="扣量比例" width="120" align="center">

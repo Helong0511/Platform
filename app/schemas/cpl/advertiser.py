@@ -30,7 +30,6 @@ class AdvertiserUpdate(BaseModel):
 class AdvertiserResponse(AdvertiserBase):
     """广告主响应"""
     id: int
-    advertiser_id: str
     created_at: datetime
     updated_at: datetime
 
