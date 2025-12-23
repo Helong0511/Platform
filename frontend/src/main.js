@@ -131,37 +131,30 @@ axios.interceptors.response.use(
 
           try {
             // 发送一个GET请求获取新的CSRF token
-            // axios已在文件顶部导入，直接使用
-            const token = sessionStorage.getItem('token');
-            if (token) {
-              // 尝试多个轻量级的GET请求端点
-              const endpoints = [
-                '/api/v1/users/stats',
-                '/api/v1/dashboard/stats',
-                '/api/v1/products/?page_size=1'
-              ];
+            // 系统使用 HttpOnly Cookie，axios 会自动携带认证信息，不需要手动设置 Authorization header
+            // 尝试多个轻量级的GET请求端点
+            const endpoints = [
+              '/api/v1/users/stats',
+              '/api/v1/dashboard/stats',
+              '/api/v1/products/?page_size=1'
+            ];
 
-              for (const endpoint of endpoints) {
-                try {
-                  const response = await axios.get(endpoint, {
-                    headers: {
-                      'Authorization': `Bearer ${token}`
-                    }
-                  });
+            for (const endpoint of endpoints) {
+              try {
+                const response = await axios.get(endpoint);
 
-                  // 从响应头获取新的CSRF token
-                  const newCsrfToken = response.headers['x-csrf-token'] || response.headers['X-CSRF-Token'];
-                  if (newCsrfToken) {
-                    sessionStorage.setItem('csrf_token', newCsrfToken);
+                // 从响应头获取新的CSRF token
+                const newCsrfToken = response.headers['x-csrf-token'] || response.headers['X-CSRF-Token'];
+                if (newCsrfToken) {
+                  sessionStorage.setItem('csrf_token', newCsrfToken);
 
-                    // 更新原始请求的CSRF token并重试
-                    originalRequest.headers['X-CSRF-Token'] = newCsrfToken;
-                    return axios(originalRequest);
-                  }
-                } catch (e) {
-                  // 继续尝试下一个端点
-                  continue;
+                  // 更新原始请求的CSRF token并重试
+                  originalRequest.headers['X-CSRF-Token'] = newCsrfToken;
+                  return axios(originalRequest);
                 }
+              } catch (e) {
+                // 继续尝试下一个端点
+                continue;
               }
             }
           } catch (e) {
@@ -242,42 +235,36 @@ axios.interceptors.response.use(
 
           try {
             // 发送一个GET请求获取新的CSRF token
-            const token = sessionStorage.getItem('token');
-            if (token) {
-              // 尝试多个轻量级的GET请求端点
-              const endpoints = [
-                '/api/v1/users/stats',
-                '/api/v1/dashboard/stats',
-                '/api/v1/products/?page_size=1',
-                '/api/v1/short-links/?page_size=1',
-                '/api/v1/clients/?page_size=1'
-              ];
+            // 系统使用 HttpOnly Cookie，axios 会自动携带认证信息，不需要手动设置 Authorization header
+            // 尝试多个轻量级的GET请求端点
+            const endpoints = [
+              '/api/v1/users/stats',
+              '/api/v1/dashboard/stats',
+              '/api/v1/products/?page_size=1',
+              '/api/v1/short-links/?page_size=1',
+              '/api/v1/clients/?page_size=1'
+            ];
 
-              for (const endpoint of endpoints) {
-                try {
-                  const response = await axios.get(endpoint, {
-                    headers: {
-                      'Authorization': `Bearer ${token}`
-                    }
-                  });
+            for (const endpoint of endpoints) {
+              try {
+                const response = await axios.get(endpoint);
 
-                  // 从响应头获取新的CSRF token
-                  const newCsrfToken = response.headers['x-csrf-token'] || response.headers['X-CSRF-Token'];
-                  if (newCsrfToken) {
-                    sessionStorage.setItem('csrf_token', newCsrfToken);
+                // 从响应头获取新的CSRF token
+                const newCsrfToken = response.headers['x-csrf-token'] || response.headers['X-CSRF-Token'];
+                if (newCsrfToken) {
+                  sessionStorage.setItem('csrf_token', newCsrfToken);
 
-                    // 更新原始请求的CSRF token并重试
-                    originalRequest.headers = originalRequest.headers || {};
-                    originalRequest.headers['X-CSRF-Token'] = newCsrfToken;
+                  // 更新原始请求的CSRF token并重试
+                  originalRequest.headers = originalRequest.headers || {};
+                  originalRequest.headers['X-CSRF-Token'] = newCsrfToken;
 
-                    // 重试原始请求
-                    logger.info('CSRF token已更新，自动重试请求');
-                    return axios(originalRequest);
-                  }
-                } catch (e) {
-                  // 继续尝试下一个端点
-                  continue;
+                  // 重试原始请求
+                  logger.info('CSRF token已更新，自动重试请求');
+                  return axios(originalRequest);
                 }
+              } catch (e) {
+                // 继续尝试下一个端点
+                continue;
               }
             }
           } catch (e) {
@@ -521,9 +508,7 @@ window.addEventListener('unhandledrejection', (event) => {
 // 记录前端错误的函数
 async function recordFrontendError(errorInfo) {
   try {
-    // 检查是否有token（可选，未登录用户也可以记录错误）
-    const token = sessionStorage.getItem('token');
-
+    // 系统使用 HttpOnly Cookie，axios 会自动携带认证信息，不需要手动设置 Authorization header
     // 构建请求参数
     const params = new URLSearchParams({
       error_type: errorInfo.error_type || 'JavaScriptError',
@@ -535,8 +520,7 @@ async function recordFrontendError(errorInfo) {
 
     // 发送错误日志（使用POST请求，避免URL过长）
     await axios.post(`/api/v1/audit-logs/client-error?${params.toString()}`, {}, {
-      timeout: 5000, // 5秒超时，避免阻塞
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
+      timeout: 5000 // 5秒超时，避免阻塞
     });
   } catch (error) {
     // 静默失败，不影响用户体验
@@ -575,8 +559,13 @@ app.use(ElementPlus, {
 // 初始化时区配置（延迟执行，不阻塞应用启动）
 // 只在已登录时初始化时区配置
 const initializeTimezone = () => {
-  const token = sessionStorage.getItem('token');
-  if (token && window.location.pathname !== '/login' && window.location.pathname !== '/') {
+  if (window.location.pathname === '/login' || window.location.pathname === '/') {
+    return;
+  }
+  
+  // 使用 authStore 检查是否已登录
+  const authStore = useAuthStore();
+  if (authStore.isAuthenticated) {
     initTimezone().catch(() => {
       // 静默处理错误，使用默认值
     });

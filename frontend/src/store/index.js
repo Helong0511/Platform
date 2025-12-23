@@ -271,18 +271,18 @@ export const useAuthStore = defineStore('auth', {
           return false;
         }
         this.isAuthenticated = true;
-        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        // 注意：系统使用 HttpOnly Cookie，axios 会自动携带认证信息，不需要手动设置 Authorization header
       } else {
-        // 如果没有token或数据无效，确保状态一致
-        this.token = null;
+        // 如果数据无效，确保状态一致
         this.userInfo = {};
         this.isAuthenticated = false;
-        delete axios.defaults.headers.common['Authorization'];
+        // 注意：系统使用 HttpOnly Cookie，不需要手动删除 Authorization header
       }
       return this.isAuthenticated;
     },
     async fetchUserInfo() {
-      if (!this.token) return;
+      // 检查是否已认证（系统使用 HttpOnly Cookie，不需要检查 token）
+      if (!this.isAuthenticated) return;
 
       this.loading = true;
       try {
@@ -299,7 +299,6 @@ export const useAuthStore = defineStore('auth', {
         if (err.response?.status === 401) {
           // 清除认证信息
           clearAuthData();
-          this.token = null;
           this.userInfo = {};
           this.isAuthenticated = false;
 

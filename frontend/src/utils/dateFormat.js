@@ -15,22 +15,15 @@ export const initTimezone = async () => {
     return;
   }
   
-  // 检查是否有登录 token，如果没有则不请求（避免 401 错误）
-  const token = sessionStorage.getItem('token');
-  if (!token) {
-    // 没有 token，使用默认值，不发起请求
-    cachedTimezone = 'Asia/Shanghai';
-    timezoneInitialized = true;
-    return;
-  }
-  
+  // 直接尝试获取时区配置，如果失败（如未登录）则使用默认值
+  // 系统使用 HttpOnly Cookie，axios 会自动携带认证信息
   if (!timezonePromise) {
     timezonePromise = getTimezone().then(tz => {
       cachedTimezone = tz;
       timezoneInitialized = true;
       return tz;
     }).catch(() => {
-      // 如果获取失败，使用默认值
+      // 如果获取失败（如未登录或网络错误），使用默认值
       cachedTimezone = 'Asia/Shanghai';
       timezoneInitialized = true;
       return cachedTimezone;

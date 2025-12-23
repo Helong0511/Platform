@@ -1287,8 +1287,7 @@ const handleSelectionChange = (selection) => {
 const loadPageData = async () => {
   try {
     // 检查认证状态，如果token过期，直接返回
-    const token = sessionStorage.getItem('token');
-    if (!token || !authStore.isAuthenticated) {
+    if (!authStore.isAuthenticated) {
       // token不存在或已过期，跳转到登录页
       ElMessage.warning('登录已过期，请重新登录');
       router.push('/login').catch(() => {
