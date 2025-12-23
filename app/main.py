@@ -875,6 +875,7 @@ async def redirect_short_link_public(
         serialize_short_link
     )
     from app.core.short_link_click_counter import increment_click_count_async
+    from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
     from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
     
     def merge_url_params(base_url: str, query_params: dict) -> str:
@@ -961,18 +962,52 @@ async def redirect_short_link_public(
                     detail="短链接配置错误：原始URL格式无效"
                 )
             
+            # 生成点击值（UUID风格的click_id）
+            click_id = generate_click_id_from_timestamp()
+            
+            # 获取当前点击次数（从缓存数据中获取，如果缓存中没有则从数据库查询）
+            current_click_count = cached_data.get("click_count", 0)
+            if not current_click_count:
+                # 如果缓存中没有点击次数，从数据库查询
+                try:
+                    result = await db.execute(
+                        select(ShortLink.click_count).where(ShortLink.short_code == short_code)
+                    )
+                    current_click_count = result.scalar() or 0
+                except Exception:
+                    current_click_count = 0
+            
             # 异步更新点击次数（不阻塞重定向）
             try:
                 await increment_click_count_async(short_code)
-                logger.info(f"[短链接重定向] 点击计数已记录（缓存路径）: short_code={short_code}")
+                # 获取Redis中的增量点击次数（用于日志记录）
+                from app.core.redis_client import get_redis_client
+                redis = await get_redis_client()
+                redis_count = 0
+                if redis:
+                    try:
+                        counter_key = f"short_link:click:{short_code}"
+                        redis_count = await redis.get(counter_key)
+                        redis_count = int(redis_count) if redis_count else 0
+                    except Exception:
+                        pass
+                
+                logger.info(
+                    f"[短链接重定向] 点击计数已记录（缓存路径）: short_code={short_code}, "
+                    f"click_id={click_id}, 数据库点击次数={current_click_count}, Redis增量={redis_count}"
+                )
             except Exception as e:
                 logger.error(
-                    f"[短链接重定向] 点击计数失败（缓存路径）: short_code={short_code}, error={e}",
+                    f"[短链接重定向] 点击计数失败（缓存路径）: short_code={short_code}, click_id={click_id}, error={e}",
                     exc_info=True
                 )
             
-            # 合并查询参数到原始URL
-            final_url = merge_url_params(original_url, request_params)
+            # 将click_id添加到查询参数中
+            request_params_with_click = dict(request_params)
+            request_params_with_click['click_id'] = click_id
+            
+            # 合并查询参数到原始URL（包含click_id）
+            final_url = merge_url_params(original_url, request_params_with_click)
             logger.debug(f"[短链接重定向] 重定向到: {final_url}")
             
             # 直接重定向（最快路径）
@@ -1023,18 +1058,43 @@ async def redirect_short_link_public(
         # 写入缓存（供后续请求使用）
         await set_short_link_to_cache(short_code, serialize_short_link(short_link))
         
+        # 生成点击值（UUID风格的click_id）
+        click_id = generate_click_id_from_timestamp()
+        
+        # 获取当前点击次数（数据库中的点击次数）
+        current_click_count = short_link.click_count or 0
+        
         # 异步更新点击次数（不阻塞重定向）
         try:
             await increment_click_count_async(short_code)
-            logger.info(f"[短链接重定向] 点击计数已记录（数据库路径）: short_code={short_code}")
+            # 获取Redis中的增量点击次数（用于日志记录）
+            from app.core.redis_client import get_redis_client
+            redis = await get_redis_client()
+            redis_count = 0
+            if redis:
+                try:
+                    counter_key = f"short_link:click:{short_code}"
+                    redis_count = await redis.get(counter_key)
+                    redis_count = int(redis_count) if redis_count else 0
+                except Exception:
+                    pass
+            
+            logger.info(
+                f"[短链接重定向] 点击计数已记录（数据库路径）: short_code={short_code}, "
+                f"click_id={click_id}, 数据库点击次数={current_click_count}, Redis增量={redis_count}"
+            )
         except Exception as e:
             logger.error(
-                f"[短链接重定向] 点击计数失败（数据库路径）: short_code={short_code}, error={e}",
+                f"[短链接重定向] 点击计数失败（数据库路径）: short_code={short_code}, click_id={click_id}, error={e}",
                 exc_info=True
             )
         
-        # 合并查询参数到原始URL
-        final_url = merge_url_params(original_url, request_params)
+        # 将click_id添加到查询参数中
+        request_params_with_click = dict(request_params)
+        request_params_with_click['click_id'] = click_id
+        
+        # 合并查询参数到原始URL（包含click_id）
+        final_url = merge_url_params(original_url, request_params_with_click)
         logger.debug(f"[短链接重定向] 重定向到: {final_url}")
         
         # 执行重定向
