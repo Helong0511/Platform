@@ -112,7 +112,7 @@
           <el-table-column prop="publisher_name" label="Publisher" min-width="150" />
           <el-table-column prop="click_count" label="Click" width="120" align="right" />
           <el-table-column prop="conversion_count" label="Conversion" width="120" align="right" />
-          <el-table-column prop="cr" label="CR（点击率）" width="120" align="right">
+          <el-table-column prop="cr" label="CR" width="120" align="right">
             <template #default="scope">
               {{ scope.row.cr }}%
             </template>
@@ -120,7 +120,7 @@
           <el-table-column 
             v-if="isAdmin"
             prop="po" 
-            label="PO（仅管理员可）" 
+            label="PO" 
             width="150" 
             align="right"
           >
@@ -129,7 +129,7 @@
               <span v-else>0.00</span>
             </template>
           </el-table-column>
-          <el-table-column prop="po_after_discount" label="PO（扣价后）" width="150" align="right">
+          <el-table-column prop="po_after_discount" label="PO" width="150" align="right">
             <template #default="scope">
               <span v-if="scope.row.po_after_discount !== undefined && scope.row.po_after_discount !== null">
                 {{ scope.row.po_after_discount.toFixed(2) }}
