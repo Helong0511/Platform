@@ -883,6 +883,7 @@ async def redirect_short_link_public(
         将查询参数合并到基础URL中
         如果基础URL已有参数，则合并；如果没有，则添加
         新参数会覆盖基础URL中的同名参数
+        注意：click_id 参数会始终放在最前面
         """
         if not query_params:
             return base_url
@@ -893,18 +894,46 @@ async def redirect_short_link_public(
         # 解析基础URL中已有的查询参数
         existing_params = parse_qs(parsed.query, keep_blank_values=True)
         
-        # 合并新参数（新参数优先，会覆盖同名参数）
-        for key, value in query_params.items():
-            # FastAPI 的 query_params 值可能是字符串或列表
-            if isinstance(value, list):
-                # 如果已经是列表，直接使用
-                existing_params[key] = [str(v) for v in value]
-            else:
-                # 如果是字符串，转换为列表
-                existing_params[key] = [str(value)]
+        # 分离 click_id 和其他参数
+        click_id_value = None
+        other_params = {}
         
-        # 重新构建查询字符串
-        new_query = urlencode(existing_params, doseq=True)
+        for key, value in query_params.items():
+            if key == 'click_id':
+                # 保存 click_id 的值
+                if isinstance(value, list):
+                    click_id_value = [str(v) for v in value]
+                else:
+                    click_id_value = [str(value)]
+            else:
+                # 其他参数
+                if isinstance(value, list):
+                    other_params[key] = [str(v) for v in value]
+                else:
+                    other_params[key] = [str(value)]
+        
+        # 合并参数：先合并其他参数，再添加 click_id（确保 click_id 在最前面）
+        for key, value in other_params.items():
+            existing_params[key] = value
+        
+        # 如果有 click_id，将其放在最前面
+        if click_id_value:
+            existing_params['click_id'] = click_id_value
+        
+        # 重新构建查询字符串（使用 OrderedDict 确保 click_id 在最前面）
+        from collections import OrderedDict
+        ordered_params = OrderedDict()
+        
+        # 先添加 click_id（如果存在）
+        if 'click_id' in existing_params:
+            ordered_params['click_id'] = existing_params['click_id']
+        
+        # 然后添加其他参数
+        for key, value in existing_params.items():
+            if key != 'click_id':
+                ordered_params[key] = value
+        
+        new_query = urlencode(ordered_params, doseq=True)
         
         # 重新构建URL
         new_parsed = parsed._replace(query=new_query)
@@ -1002,11 +1031,12 @@ async def redirect_short_link_public(
                     exc_info=True
                 )
             
-            # 将click_id添加到查询参数中
-            request_params_with_click = dict(request_params)
-            request_params_with_click['click_id'] = click_id
+            # 将click_id添加到查询参数的最前面
+            request_params_with_click = {'click_id': click_id}
+            # 将原有参数添加到后面
+            request_params_with_click.update(request_params)
             
-            # 合并查询参数到原始URL（包含click_id）
+            # 合并查询参数到原始URL（包含click_id，click_id在最前面）
             final_url = merge_url_params(original_url, request_params_with_click)
             logger.debug(f"[短链接重定向] 重定向到: {final_url}")
             
@@ -1089,11 +1119,12 @@ async def redirect_short_link_public(
                 exc_info=True
             )
         
-        # 将click_id添加到查询参数中
-        request_params_with_click = dict(request_params)
-        request_params_with_click['click_id'] = click_id
+        # 将click_id添加到查询参数的最前面
+        request_params_with_click = {'click_id': click_id}
+        # 将原有参数添加到后面
+        request_params_with_click.update(request_params)
         
-        # 合并查询参数到原始URL（包含click_id）
+        # 合并查询参数到原始URL（包含click_id，click_id在最前面）
         final_url = merge_url_params(original_url, request_params_with_click)
         logger.debug(f"[短链接重定向] 重定向到: {final_url}")
         
