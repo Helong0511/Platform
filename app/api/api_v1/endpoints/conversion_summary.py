@@ -148,26 +148,27 @@ async def get_conversion_summary(
         
         # 处理转化数据
         for product_id_val, pub_id_val, conv_count_val, total_po_val in conversion_groups:
-            if not product_id_val:
-                continue
-            
-            # 允许没有publisher_id的转化（click_id为空或未匹配到点击）
+            # 允许 offer 为空（未关联产品/点击），使用占位 0
+            safe_offer_id = product_id_val if product_id_val is not None else 0
+            # 允许没有publisher_id的转化（click_id为空或未匹配到点击），使用占位 0
             safe_pub_id = pub_id_val if pub_id_val is not None else 0
             
-            key = (product_id_val, safe_pub_id)
+            key = (safe_offer_id, safe_pub_id)
             if key not in stats_dict:
                 stats_dict[key] = {
-                    "offer_id": product_id_val,
+                    "offer_id": safe_offer_id,
                     "publisher_id": safe_pub_id,
                     "click_count": 0,
                     "conversion_count": 0,
                     "po": 0.0,
                     "po_after_discount": 0.0,
-                    "publisher_missing": pub_id_val is None
+                    "publisher_missing": pub_id_val is None,
+                    "offer_missing": product_id_val is None
                 }
             else:
                 # 标记如果当前组合缺失publisher
                 stats_dict[key]["publisher_missing"] = pub_id_val is None
+                stats_dict[key]["offer_missing"] = product_id_val is None
             
             stats_dict[key]["conversion_count"] = conv_count_val
             stats_dict[key]["po"] = float(total_po_val) if total_po_val else 0.0
@@ -177,22 +178,26 @@ async def get_conversion_summary(
             offer_id_val, publisher_id_val = key
             
             # 获取Offer信息
-            offer_result = await db.execute(
-                select(Offer).where(Offer.id == offer_id_val)
-            )
-            offer = offer_result.scalars().first()
-            # 如果找不到Offer，使用占位信息（可能是product_id与offer_id未映射）
-            if not offer:
-                offer_name = f"未找到Offer(ID={offer_id_val})"
-                advertiser = None
-                advertiser_id = None
-            else:
-                offer_name = offer.offer_name
-                advertiser_result = await db.execute(
-                    select(Advertiser).where(Advertiser.id == offer.advertiser_id)
+            offer_name = None
+            advertiser = None
+            advertiser_id = None
+            if offer_id_val:
+                offer_result = await db.execute(
+                    select(Offer).where(Offer.id == offer_id_val)
                 )
-                advertiser = advertiser_result.scalars().first()
-                advertiser_id = offer.advertiser_id
+                offer = offer_result.scalars().first()
+                # 如果找不到Offer，使用占位信息（可能是product_id与offer_id未映射）
+                if not offer:
+                    offer_name = f"未找到Offer(ID={offer_id_val})"
+                else:
+                    offer_name = offer.offer_name
+                    advertiser_result = await db.execute(
+                        select(Advertiser).where(Advertiser.id == offer.advertiser_id)
+                    )
+                    advertiser = advertiser_result.scalars().first()
+                    advertiser_id = offer.advertiser_id
+            else:
+                offer_name = "未关联Offer"
             
             # 获取Publisher信息
             publisher = None
@@ -230,7 +235,7 @@ async def get_conversion_summary(
                     if conversion.payout:
                         final_payout, _, _ = await calculate_discount(
                             db=db,
-                            offer_id=offer_id_val,
+                            offer_id=offer_id_val if offer_id_val else 0,
                             publisher_id=publisher_id_val,
                             original_payout=conversion.payout
                         )
