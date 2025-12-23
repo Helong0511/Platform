@@ -205,6 +205,16 @@ const loadPublishers = async () => {
   }
 }
 
+const setDefaultMonthRange = () => {
+  const today = new Date()
+  const start = new Date(today.getFullYear(), today.getMonth(), 1)
+  const end = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+  dateRange.value = [
+    start.toISOString().split('T')[0],
+    end.toISOString().split('T')[0]
+  ]
+}
+
 // 加载统计数据
 const loadData = async () => {
   loading.value = true
@@ -242,7 +252,7 @@ const handleSearch = () => {
 
 // 重置
 const handleReset = () => {
-  dateRange.value = []
+  setDefaultMonthRange()
   filterOffer.value = null
   filterPublisher.value = null
   loadData()
@@ -251,14 +261,8 @@ const handleReset = () => {
 onMounted(() => {
   loadOffers()
   loadPublishers()
-  // 默认查询最近30天
-  const endDate = new Date()
-  const startDate = new Date()
-  startDate.setDate(startDate.getDate() - 30)
-  dateRange.value = [
-    startDate.toISOString().split('T')[0],
-    endDate.toISOString().split('T')[0]
-  ]
+  // 默认查询当月
+  setDefaultMonthRange()
   loadData()
 })
 </script>
