@@ -772,12 +772,9 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
                 "anyio" in error_module or "Connection disconnected" in str(stream_exc)):
                 logger.debug("客户端已断开连接，跳过CSRF异常处理")
-                # 不调用 call_next，因为连接已断开，直接抛出流异常
-                from anyio import EndOfStream
-                raise EndOfStream("客户端已断开连接")
+                # 直接重新抛出原始的流异常，而不是创建新的
+                raise stream_exc
             # 其他异常，重新抛出
-            raise
-            # 其他 RuntimeError 重新抛出
             raise
         except (ConnectionError, OSError, RuntimeError) as e:
             # 处理连接中断或流关闭的情况

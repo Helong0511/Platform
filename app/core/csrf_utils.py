@@ -78,8 +78,8 @@ def safe_raise_csrf_exception(
         if ("EndOfStream" in error_type_name or "WouldBlock" in error_type_name or 
             "anyio" in error_module):
             logger.debug("检测到流已关闭，跳过CSRF异常抛出")
-            from anyio import EndOfStream
-            raise EndOfStream("客户端已断开连接")
+            # 直接重新抛出原始的流异常，而不是创建新的
+            raise stream_error
         # 其他连接错误，重新抛出
         raise
     except Exception:

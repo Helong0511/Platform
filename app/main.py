@@ -682,13 +682,14 @@ async def global_exception_handler(request: Request, exc: Exception):
         # 尝试检查连接状态（通过检查异常上下文）
         # 如果HTTPException是在连接断开时抛出的，其上下文可能包含流异常信息
         if hasattr(exc, '__context__') and exc.__context__:
-            context_type = type(exc.__context__).__name__
-            context_module = type(exc.__context__).__module__
+            context_exc = exc.__context__
+            context_type = type(context_exc).__name__
+            context_module = type(context_exc).__module__
             if ("EndOfStream" in context_type or "WouldBlock" in context_type or 
                 "anyio" in context_module):
                 logger.debug("检测到连接断开上下文，跳过HTTPException处理")
-                from anyio import EndOfStream
-                raise EndOfStream("客户端已断开连接")
+                # 直接重新抛出原始的流异常，而不是创建新的
+                raise context_exc
         
         # 如果连接仍然有效，重新抛出 HTTPException 让专门的处理器处理
         # 但如果重新抛出时连接断开，会被下面的流异常检查捕获
