@@ -130,7 +130,7 @@ async def get_conversion_summary(
         click_alias = aliased(Click)
         
         conversion_group_query = select(
-            PostbackConversion.product_id,
+            func.coalesce(PostbackConversion.product_id, click_alias.offer_id).label("offer_id"),
             click_alias.publisher_id,
             func.count(PostbackConversion.id).label('conversion_count'),
             func.sum(PostbackConversion.payout).label('total_po')
@@ -138,7 +138,7 @@ async def get_conversion_summary(
             click_alias, PostbackConversion.click_id == click_alias.click_id
         ).where(
             and_(*conversion_conditions)
-        ).group_by(PostbackConversion.product_id, click_alias.publisher_id)
+        ).group_by(func.coalesce(PostbackConversion.product_id, click_alias.offer_id), click_alias.publisher_id)
         
         if publisher_id:
             conversion_group_query = conversion_group_query.where(click_alias.publisher_id == publisher_id)
@@ -214,7 +214,10 @@ async def get_conversion_summary(
                     click_alias, PostbackConversion.click_id == click_alias.click_id
                 ).where(
                     and_(
-                        PostbackConversion.product_id == offer_id_val,
+                        or_(
+                            PostbackConversion.product_id == offer_id_val,
+                            and_(PostbackConversion.product_id.is_(None), click_alias.offer_id == offer_id_val)
+                        ),
                         click_alias.publisher_id == publisher_id_val,
                         *conversion_conditions[:2]
                     )
