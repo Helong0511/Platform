@@ -252,7 +252,7 @@ async def _process_macan_postback(
             if click_id:
                 mapped_data["clk_id"] = click_id
         
-        # 映射 event_name 相关参数（按优先级）
+        # 映射 event_name 相关参数（按优先级，可选）
         if not mapped_data.get("event_name"):
             # 尝试从其他可能的参数名获取
             event_name = (
@@ -264,6 +264,7 @@ async def _process_macan_postback(
             )
             if event_name:
                 mapped_data["event_name"] = event_name
+            # 如果没有提供 event_name，不设置默认值，因为它是可选的
         
         # 调用统一服务处理（使用映射后的数据）
         result = await PostbackProcessor.process(

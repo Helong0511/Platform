@@ -22,17 +22,26 @@ class MacanPostbackHandler(PostbackHandler):
         验证 Macan postback 数据
         
         Macan 必填参数：
-        - clk_id: Macan click ID
-        - event_name: Event ID（事件ID）
+        - clk_id 或 cid: Macan click ID（必填）
+        
+        可选参数：
+        - event_name: Event ID（事件ID，可选）
         """
-        clk_id = data.get("clk_id") or data.get("click_id")
-        event_name = data.get("event_name") or data.get("event_id")
+        # 支持多种参数名：clk_id, click_id, cid, clickid, conversion_id 等
+        clk_id = (
+            data.get("clk_id") or
+            data.get("click_id") or
+            data.get("cid") or
+            data.get("clickid") or
+            data.get("clickId") or
+            data.get("ClickId") or
+            data.get("conversion_id") or
+            data.get("conversionId")
+        )
         
+        # 只验证 clk_id 是必填的，event_name 是可选的
         if not clk_id or not str(clk_id).strip():
-            return False, "clk_id 参数不能为空"
-        
-        if not event_name or not str(event_name).strip():
-            return False, "event_name 参数不能为空"
+            return False, "clk_id 或 cid 参数不能为空"
         
         return True, None
     
@@ -53,8 +62,17 @@ class MacanPostbackHandler(PostbackHandler):
         - product_id -> product_id
         - client_id -> client_id
         """
-        # 处理 clk_id（可能以不同字段名出现）
-        conversion_id = data.get("clk_id") or data.get("click_id") or data.get("conversion_id")
+        # 处理 clk_id（可能以不同字段名出现，包括 cid）
+        conversion_id = (
+            data.get("clk_id") or
+            data.get("click_id") or
+            data.get("cid") or
+            data.get("clickid") or
+            data.get("clickId") or
+            data.get("ClickId") or
+            data.get("conversion_id") or
+            data.get("conversionId")
+        )
         
         # 处理 event_name（可能以不同字段名出现）
         event_name = data.get("event_name") or data.get("event_id")
