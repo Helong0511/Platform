@@ -198,8 +198,21 @@ async def _process_macan_postback(
     try:
         # 收集并记录请求的软硬件详细信息
         request_info = _collect_request_info(request)
-        clk_id = raw_data.get("clk_id", "未知")
-        event_name = raw_data.get("event_name", "未知")
+        
+        # 先尝试从原始数据获取（用于日志显示）
+        clk_id = (
+            raw_data.get("clk_id") or
+            raw_data.get("click_id") or
+            raw_data.get("cid") or
+            raw_data.get("conversion_id") or
+            "未知"
+        )
+        event_name = (
+            raw_data.get("event_name") or
+            raw_data.get("event_id") or
+            raw_data.get("event") or
+            "未知"
+        )
         
         logger.info("=" * 80)
         logger.info(f"Macan PostBack 请求详细信息 - clk_id: {clk_id}, event_name: {event_name}")
@@ -220,10 +233,42 @@ async def _process_macan_postback(
         if client_ip and "ip" not in raw_data:
             raw_data["ip"] = client_ip
         
-        # 调用统一服务处理
+        # 参数映射：支持多种参数名变体，映射到标准参数名
+        # 这样可以让接口更灵活，支持任意参数名传入
+        mapped_data = raw_data.copy()
+        
+        # 映射 click ID 相关参数（按优先级）
+        if not mapped_data.get("clk_id"):
+            # 尝试从其他可能的参数名获取
+            click_id = (
+                mapped_data.get("click_id") or
+                mapped_data.get("cid") or
+                mapped_data.get("clickid") or
+                mapped_data.get("clickId") or
+                mapped_data.get("ClickId") or
+                mapped_data.get("conversion_id") or
+                mapped_data.get("conversionId")
+            )
+            if click_id:
+                mapped_data["clk_id"] = click_id
+        
+        # 映射 event_name 相关参数（按优先级）
+        if not mapped_data.get("event_name"):
+            # 尝试从其他可能的参数名获取
+            event_name = (
+                mapped_data.get("event_id") or
+                mapped_data.get("eventId") or
+                mapped_data.get("event") or
+                mapped_data.get("eventName") or
+                mapped_data.get("EventName")
+            )
+            if event_name:
+                mapped_data["event_name"] = event_name
+        
+        # 调用统一服务处理（使用映射后的数据）
         result = await PostbackProcessor.process(
             platform="macan",
-            raw_data=raw_data,
+            raw_data=mapped_data,
             db=db,
             request_ip=client_ip
         )
