@@ -129,7 +129,12 @@
               <span v-else>0.00</span>
             </template>
           </el-table-column>
-          <el-table-column prop="po_after_discount" label="PO" width="150" align="right">
+          <el-table-column 
+            prop="po_after_discount" 
+            :label="isAdmin ? 'PO(扣)' : 'PO'" 
+            width="150" 
+            align="right"
+          >
             <template #default="scope">
               <span v-if="scope.row.po_after_discount !== undefined && scope.row.po_after_discount !== null">
                 {{ scope.row.po_after_discount.toFixed(2) }}
