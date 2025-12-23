@@ -181,8 +181,18 @@ async def get_conversion_summary(
                 select(Offer).where(Offer.id == offer_id_val)
             )
             offer = offer_result.scalars().first()
+            # 如果找不到Offer，使用占位信息（可能是product_id与offer_id未映射）
             if not offer:
-                continue
+                offer_name = f"未找到Offer(ID={offer_id_val})"
+                advertiser = None
+                advertiser_id = None
+            else:
+                offer_name = offer.offer_name
+                advertiser_result = await db.execute(
+                    select(Advertiser).where(Advertiser.id == offer.advertiser_id)
+                )
+                advertiser = advertiser_result.scalars().first()
+                advertiser_id = offer.advertiser_id
             
             # 获取Publisher信息
             publisher = None
@@ -194,12 +204,6 @@ async def get_conversion_summary(
             
             # 没有关联渠道时，使用占位名称
             publisher_name = publisher.publisher_name if publisher else "未关联渠道"
-            
-            # 获取Advertiser信息
-            advertiser_result = await db.execute(
-                select(Advertiser).where(Advertiser.id == offer.advertiser_id)
-            )
-            advertiser = advertiser_result.scalars().first()
             
             # 计算PO（扣价后）
             # 需要获取该组合下的所有转化记录来计算扣价后的金额
@@ -237,8 +241,8 @@ async def get_conversion_summary(
             
             stats_list.append({
                 "offer_id": offer_id_val,
-                "offer_name": offer.offer_name,
-                "advertiser_id": offer.advertiser_id,
+                "offer_name": offer_name,
+                "advertiser_id": advertiser_id,
                 "advertiser_name": advertiser.advertiser_name if advertiser else None,
                 "publisher_id": publisher_id_val,
                 "publisher_name": publisher_name,
