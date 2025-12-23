@@ -344,8 +344,8 @@ const fetchDailyData = async () => {
       try {
         loading.value = true;
         
-        const token = sessionStorage.getItem('token');
-        if (!token) {
+        // 检查状态是否已认证（使用 authStore 而不是 sessionStorage）
+        if (!authStore.isAuthenticated) {
           ElMessage.warning('登录已过期，请重新登录');
           router.push('/login').catch(() => {
             window.location.href = '/login';
@@ -626,8 +626,9 @@ watch(
 // 加载页面数据
 const loadPageData = async () => {
   try {
-    const token = sessionStorage.getItem('token');
-    if (!token || !authStore.isAuthenticated) {
+    // 检查认证状态，如果token过期，直接返回
+    if (!authStore.isAuthenticated) {
+      // token不存在或已过期，跳转到登录页
       ElMessage.warning('登录已过期，请重新登录');
       router.push('/login').catch(() => {
         window.location.href = '/login';
