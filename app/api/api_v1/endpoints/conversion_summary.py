@@ -151,20 +151,23 @@ async def get_conversion_summary(
             if not product_id_val:
                 continue
             
-            # 如果publisher_id为None，跳过（这些转化没有关联的点击记录）
-            if not pub_id_val:
-                continue
+            # 允许没有publisher_id的转化（click_id为空或未匹配到点击）
+            safe_pub_id = pub_id_val if pub_id_val is not None else 0
             
-            key = (product_id_val, pub_id_val)
+            key = (product_id_val, safe_pub_id)
             if key not in stats_dict:
                 stats_dict[key] = {
                     "offer_id": product_id_val,
-                    "publisher_id": pub_id_val,
+                    "publisher_id": safe_pub_id,
                     "click_count": 0,
                     "conversion_count": 0,
                     "po": 0.0,
-                    "po_after_discount": 0.0
+                    "po_after_discount": 0.0,
+                    "publisher_missing": pub_id_val is None
                 }
+            else:
+                # 标记如果当前组合缺失publisher
+                stats_dict[key]["publisher_missing"] = pub_id_val is None
             
             stats_dict[key]["conversion_count"] = conv_count_val
             stats_dict[key]["po"] = float(total_po_val) if total_po_val else 0.0
@@ -182,12 +185,15 @@ async def get_conversion_summary(
                 continue
             
             # 获取Publisher信息
-            publisher_result = await db.execute(
-                select(Publisher).where(Publisher.id == publisher_id_val)
-            )
-            publisher = publisher_result.scalars().first()
-            if not publisher:
-                continue
+            publisher = None
+            if publisher_id_val:
+                publisher_result = await db.execute(
+                    select(Publisher).where(Publisher.id == publisher_id_val)
+                )
+                publisher = publisher_result.scalars().first()
+            
+            # 没有关联渠道时，使用占位名称
+            publisher_name = publisher.publisher_name if publisher else "未关联渠道"
             
             # 获取Advertiser信息
             advertiser_result = await db.execute(
@@ -198,29 +204,33 @@ async def get_conversion_summary(
             # 计算PO（扣价后）
             # 需要获取该组合下的所有转化记录来计算扣价后的金额
             # 使用join因为我们已经在前面过滤了有publisher_id的记录
-            conversions_query = select(PostbackConversion).join(
-                click_alias, PostbackConversion.click_id == click_alias.click_id
-            ).where(
-                and_(
-                    PostbackConversion.product_id == offer_id_val,
-                    click_alias.publisher_id == publisher_id_val,
-                    *conversion_conditions[:2]
-                )
-            )
-            
-            conversions_result = await db.execute(conversions_query)
-            conversions = conversions_result.scalars().all()
-            
             po_after_discount = 0.0
-            for conversion in conversions:
-                if conversion.payout:
-                    final_payout, _, _ = await calculate_discount(
-                        db=db,
-                        offer_id=offer_id_val,
-                        publisher_id=publisher_id_val,
-                        original_payout=conversion.payout
+            if publisher_id_val:
+                conversions_query = select(PostbackConversion).join(
+                    click_alias, PostbackConversion.click_id == click_alias.click_id
+                ).where(
+                    and_(
+                        PostbackConversion.product_id == offer_id_val,
+                        click_alias.publisher_id == publisher_id_val,
+                        *conversion_conditions[:2]
                     )
-                    po_after_discount += final_payout
+                )
+                
+                conversions_result = await db.execute(conversions_query)
+                conversions = conversions_result.scalars().all()
+                
+                for conversion in conversions:
+                    if conversion.payout:
+                        final_payout, _, _ = await calculate_discount(
+                            db=db,
+                            offer_id=offer_id_val,
+                            publisher_id=publisher_id_val,
+                            original_payout=conversion.payout
+                        )
+                        po_after_discount += final_payout
+            else:
+                # 没有关联渠道，无法计算扣量，使用原始PO
+                po_after_discount = stat["po"]
             
             # 计算CR
             cr_val = (stat["conversion_count"] / stat["click_count"] * 100) if stat["click_count"] > 0 else 0
@@ -231,7 +241,7 @@ async def get_conversion_summary(
                 "advertiser_id": offer.advertiser_id,
                 "advertiser_name": advertiser.advertiser_name if advertiser else None,
                 "publisher_id": publisher_id_val,
-                "publisher_name": publisher.publisher_name,
+                "publisher_name": publisher_name,
                 "click_count": stat["click_count"],
                 "conversion_count": stat["conversion_count"],
                 "cr": round(cr_val, 2),
