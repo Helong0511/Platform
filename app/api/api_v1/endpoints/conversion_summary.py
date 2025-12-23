@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.models.models import User, Click, PostbackConversion, Offer, Publisher, Advertiser
 from app.schemas.base import ResponseBaseSchema
+from app.core.discount.discount_manager import calculate_discount
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -33,11 +34,16 @@ async def get_conversion_summary(
 ):
     """
     获取转化总览统计（仅管理员）
-    统计指标：
+    按Offer和Publisher分组统计，返回：
+    - Offer ID
+    - Offer Name
+    - Advertiser（仅管理员可）
+    - Publisher
     - Click: 点击数量
     - Conversion: 转化数量
     - CR (Conversion Rate): 转化率 = Conversion / Click
-    - PO (Payout): 总支付金额
+    - PO: 总支付金额（仅管理员可）
+    - PO（扣价后）: 扣价后的总支付金额
     """
     try:
         # 解析日期
@@ -60,123 +66,188 @@ async def get_conversion_summary(
         
         if offer_id:
             click_conditions.append(Click.offer_id == offer_id)
-            # 注意：PostbackConversion 使用 product_id，需要建立 Offer 和 Product 的映射关系
-            # 这里暂时使用 product_id，后续需要根据实际业务逻辑调整
             conversion_conditions.append(PostbackConversion.product_id == offer_id)
         
         if publisher_id:
             click_conditions.append(Click.publisher_id == publisher_id)
+            # PostbackConversion通过click_id关联Click，间接关联publisher_id
+            # 需要通过join来过滤
         
         if advertiser_id:
             click_conditions.append(Click.advertiser_id == advertiser_id)
-            # 如果PostbackConversion表有advertiser_id字段，也需要添加
         
-        # 统计点击数量
+        # 统计总点击数量
         click_query = select(func.count(Click.id)).where(and_(*click_conditions))
         click_count = (await db.execute(click_query)).scalar() or 0
         
-        # 统计转化数量
+        # 统计总转化数量
         conversion_query = select(func.count(PostbackConversion.id)).where(and_(*conversion_conditions))
         conversion_count = (await db.execute(conversion_query)).scalar() or 0
         
-        # 计算转化率
+        # 计算总转化率
         cr = (conversion_count / click_count * 100) if click_count > 0 else 0
         
         # 统计总支付金额（PO）
-        # 注意：这里需要根据实际的PostbackConversion表结构来获取payout字段
         po_query = select(func.sum(PostbackConversion.payout)).where(and_(*conversion_conditions))
         po_result = await db.execute(po_query)
         total_po = po_result.scalar() or 0
         
-        # 按Offer统计
-        offer_stats = []
-        if offer_id:
-            # 单个Offer统计
+        # 按Offer和Publisher分组统计
+        # 先获取所有有点击的Offer-Publisher组合
+        click_group_query = select(
+            Click.offer_id,
+            Click.publisher_id,
+            func.count(Click.id).label('click_count')
+        ).where(
+            and_(*click_conditions)
+        ).group_by(Click.offer_id, Click.publisher_id)
+        
+        click_group_result = await db.execute(click_group_query)
+        click_groups = click_group_result.all()
+        
+        # 构建统计列表
+        stats_list = []
+        stats_dict = {}  # 用于快速查找，key为(offer_id, publisher_id)
+        
+        # 处理点击数据
+        for offer_id_val, publisher_id_val, click_count_val in click_groups:
+            if not offer_id_val or not publisher_id_val:
+                continue
+            
+            key = (offer_id_val, publisher_id_val)
+            stats_dict[key] = {
+                "offer_id": offer_id_val,
+                "publisher_id": publisher_id_val,
+                "click_count": click_count_val,
+                "conversion_count": 0,
+                "po": 0.0,
+                "po_after_discount": 0.0
+            }
+        
+        # 获取所有转化记录，按product_id和关联的publisher_id分组
+        # 需要通过click_id关联Click表来获取publisher_id
+        from sqlalchemy.orm import aliased
+        click_alias = aliased(Click)
+        
+        conversion_group_query = select(
+            PostbackConversion.product_id,
+            click_alias.publisher_id,
+            func.count(PostbackConversion.id).label('conversion_count'),
+            func.sum(PostbackConversion.payout).label('total_po')
+        ).outerjoin(
+            click_alias, PostbackConversion.click_id == click_alias.click_id
+        ).where(
+            and_(*conversion_conditions)
+        ).group_by(PostbackConversion.product_id, click_alias.publisher_id)
+        
+        if publisher_id:
+            conversion_group_query = conversion_group_query.where(click_alias.publisher_id == publisher_id)
+        
+        conversion_group_result = await db.execute(conversion_group_query)
+        conversion_groups = conversion_group_result.all()
+        
+        # 处理转化数据
+        for product_id_val, pub_id_val, conv_count_val, total_po_val in conversion_groups:
+            if not product_id_val:
+                continue
+            
+            # 如果publisher_id为None，跳过（这些转化没有关联的点击记录）
+            if not pub_id_val:
+                continue
+            
+            key = (product_id_val, pub_id_val)
+            if key not in stats_dict:
+                stats_dict[key] = {
+                    "offer_id": product_id_val,
+                    "publisher_id": pub_id_val,
+                    "click_count": 0,
+                    "conversion_count": 0,
+                    "po": 0.0,
+                    "po_after_discount": 0.0
+                }
+            
+            stats_dict[key]["conversion_count"] = conv_count_val
+            stats_dict[key]["po"] = float(total_po_val) if total_po_val else 0.0
+        
+        # 计算PO（扣价后）和填充其他信息
+        for key, stat in stats_dict.items():
+            offer_id_val, publisher_id_val = key
+            
+            # 获取Offer信息
             offer_result = await db.execute(
-                select(Offer).where(Offer.id == offer_id)
+                select(Offer).where(Offer.id == offer_id_val)
             )
             offer = offer_result.scalars().first()
-            if offer:
-                offer_click_count = (await db.execute(
-                    select(func.count(Click.id)).where(
-                        and_(Click.offer_id == offer_id, *click_conditions[:2])
-                    )
-                )).scalar() or 0
-                
-                offer_conversion_count = (await db.execute(
-                    select(func.count(PostbackConversion.id)).where(
-                        and_(PostbackConversion.product_id == offer_id, *conversion_conditions[:2])
-                    )
-                )).scalar() or 0
-                
-                offer_cr = (offer_conversion_count / offer_click_count * 100) if offer_click_count > 0 else 0
-                
-                offer_po = (await db.execute(
-                    select(func.sum(PostbackConversion.payout)).where(
-                        and_(PostbackConversion.product_id == offer_id, *conversion_conditions[:2])
-                    )
-                )).scalar() or 0
-                
-                offer_stats.append({
-                    "offer_id": offer.id,
-                    "offer_name": offer.offer_name,
-                    "click_count": offer_click_count,
-                    "conversion_count": offer_conversion_count,
-                    "cr": round(offer_cr, 2),
-                    "po": float(offer_po) if offer_po else 0
-                })
-        else:
-            # 所有Offer统计（Top 10）
-            offer_click_query = select(
-                Click.offer_id,
-                func.count(Click.id).label('click_count')
+            if not offer:
+                continue
+            
+            # 获取Publisher信息
+            publisher_result = await db.execute(
+                select(Publisher).where(Publisher.id == publisher_id_val)
+            )
+            publisher = publisher_result.scalars().first()
+            if not publisher:
+                continue
+            
+            # 获取Advertiser信息
+            advertiser_result = await db.execute(
+                select(Advertiser).where(Advertiser.id == offer.advertiser_id)
+            )
+            advertiser = advertiser_result.scalars().first()
+            
+            # 计算PO（扣价后）
+            # 需要获取该组合下的所有转化记录来计算扣价后的金额
+            # 使用join因为我们已经在前面过滤了有publisher_id的记录
+            conversions_query = select(PostbackConversion).join(
+                click_alias, PostbackConversion.click_id == click_alias.click_id
             ).where(
-                and_(*click_conditions)
-            ).group_by(Click.offer_id).order_by(func.count(Click.id).desc()).limit(10)
-            
-            offer_click_result = await db.execute(offer_click_query)
-            top_offers = offer_click_result.all()
-            
-            for offer_id_val, click_count_val in top_offers:
-                if not offer_id_val:
-                    continue
-                
-                offer_result = await db.execute(
-                    select(Offer).where(Offer.id == offer_id_val)
+                and_(
+                    PostbackConversion.product_id == offer_id_val,
+                    click_alias.publisher_id == publisher_id_val,
+                    *conversion_conditions[:2]
                 )
-                offer = offer_result.scalars().first()
-                if not offer:
-                    continue
-                
-                conversion_count_val = (await db.execute(
-                    select(func.count(PostbackConversion.id)).where(
-                        and_(PostbackConversion.product_id == offer_id_val, *conversion_conditions[:2])
+            )
+            
+            conversions_result = await db.execute(conversions_query)
+            conversions = conversions_result.scalars().all()
+            
+            po_after_discount = 0.0
+            for conversion in conversions:
+                if conversion.payout:
+                    final_payout, _, _ = await calculate_discount(
+                        db=db,
+                        offer_id=offer_id_val,
+                        publisher_id=publisher_id_val,
+                        original_payout=conversion.payout
                     )
-                )).scalar() or 0
-                
-                cr_val = (conversion_count_val / click_count_val * 100) if click_count_val > 0 else 0
-                
-                po_val = (await db.execute(
-                    select(func.sum(PostbackConversion.payout)).where(
-                        and_(PostbackConversion.product_id == offer_id_val, *conversion_conditions[:2])
-                    )
-                )).scalar() or 0
-                
-                offer_stats.append({
-                    "offer_id": offer.id,
-                    "offer_name": offer.offer_name,
-                    "click_count": click_count_val,
-                    "conversion_count": conversion_count_val,
-                    "cr": round(cr_val, 2),
-                    "po": float(po_val) if po_val else 0
-                })
+                    po_after_discount += final_payout
+            
+            # 计算CR
+            cr_val = (stat["conversion_count"] / stat["click_count"] * 100) if stat["click_count"] > 0 else 0
+            
+            stats_list.append({
+                "offer_id": offer_id_val,
+                "offer_name": offer.offer_name,
+                "advertiser_id": offer.advertiser_id,
+                "advertiser_name": advertiser.advertiser_name if advertiser else None,
+                "publisher_id": publisher_id_val,
+                "publisher_name": publisher.publisher_name,
+                "click_count": stat["click_count"],
+                "conversion_count": stat["conversion_count"],
+                "cr": round(cr_val, 2),
+                "po": stat["po"],
+                "po_after_discount": round(po_after_discount, 2)
+            })
+        
+        # 按点击数量排序
+        stats_list.sort(key=lambda x: x['click_count'], reverse=True)
         
         summary = {
             "total_clicks": click_count,
             "total_conversions": conversion_count,
             "cr": round(cr, 2),
             "total_po": float(total_po),
-            "offer_stats": offer_stats,
+            "stats_list": stats_list,
             "start_date": start_date or (start_datetime.strftime("%Y-%m-%d")),
             "end_date": end_date or (end_datetime.strftime("%Y-%m-%d"))
         }

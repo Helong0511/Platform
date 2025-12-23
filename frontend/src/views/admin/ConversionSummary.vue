@@ -93,25 +93,47 @@
       <el-card class="table-card" style="margin-top: 20px;">
         <template #header>
           <div class="table-header">
-            <span>Offer统计</span>
+            <span>转化总览</span>
           </div>
         </template>
         <el-table
-          :data="offerStats"
+          :data="statsList"
           stripe
           style="width: 100%;"
         >
-          <el-table-column prop="offer_name" label="Offer名称" min-width="200" />
-          <el-table-column prop="click_count" label="点击" width="120" align="right" />
-          <el-table-column prop="conversion_count" label="转化" width="120" align="right" />
-          <el-table-column prop="cr" label="转化率 (CR)" width="120" align="right">
+          <el-table-column prop="offer_id" label="Offer ID" width="100" align="right" />
+          <el-table-column prop="offer_name" label="Offer Name" min-width="200" />
+          <el-table-column 
+            v-if="isAdmin"
+            prop="advertiser_name" 
+            label="Advertiser" 
+            min-width="150" 
+          />
+          <el-table-column prop="publisher_name" label="Publisher" min-width="150" />
+          <el-table-column prop="click_count" label="Click" width="120" align="right" />
+          <el-table-column prop="conversion_count" label="Conversion" width="120" align="right" />
+          <el-table-column prop="cr" label="CR（点击率）" width="120" align="right">
             <template #default="scope">
               {{ scope.row.cr }}%
             </template>
           </el-table-column>
-          <el-table-column prop="po" label="支付 (PO)" width="120" align="right">
+          <el-table-column 
+            v-if="isAdmin"
+            prop="po" 
+            label="PO（仅管理员可）" 
+            width="150" 
+            align="right"
+          >
             <template #default="scope">
               <span v-if="scope.row.po !== undefined && scope.row.po !== null">{{ scope.row.po.toFixed(2) }}</span>
+              <span v-else>0.00</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="po_after_discount" label="PO（扣价后）" width="150" align="right">
+            <template #default="scope">
+              <span v-if="scope.row.po_after_discount !== undefined && scope.row.po_after_discount !== null">
+                {{ scope.row.po_after_discount.toFixed(2) }}
+              </span>
               <span v-else>0.00</span>
             </template>
           </el-table-column>
@@ -122,13 +144,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, DataAnalysis, Mouse, Check, TrendCharts, Money } from '@element-plus/icons-vue'
 import { getConversionSummary } from '@/api/conversionSummary'
 import { getOffers } from '@/api/offer'
 import { getPublishers } from '@/api/publisher'
 import { logger } from '@/utils/logger'
+import { useAuthStore } from '@/store'
+
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.isAdmin)
 
 const loading = ref(false)
 const dateRange = ref([])
@@ -143,10 +169,10 @@ const summaryData = reactive({
   total_conversions: 0,
   cr: 0,
   total_po: 0,
-  offer_stats: []
+  stats_list: []
 })
 
-const offerStats = ref([])
+const statsList = ref([])
 
 // 加载基础数据
 const loadOffers = async () => {
@@ -184,7 +210,7 @@ const loadData = async () => {
     const response = await getConversionSummary(params)
     if (response.code === 200) {
       Object.assign(summaryData, response.data)
-      offerStats.value = response.data.offer_stats || []
+      statsList.value = response.data.stats_list || []
     } else {
       ElMessage.error(response.message || '获取数据失败')
     }
