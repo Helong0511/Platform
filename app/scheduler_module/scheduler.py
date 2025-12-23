@@ -118,7 +118,7 @@ async def execute_task_with_lock(
         )
         return
     
-    # 查询任务的cron表达式
+    # 查询任务的cron表达式和运行状态
     db = AsyncSessionLocal()
     try:
         result = await db.execute(
@@ -126,13 +126,40 @@ async def execute_task_with_lock(
         )
         task_record = result.scalar_one_or_none()
         
+        # 先检查任务是否正在运行（避免不必要的进程分配检查）
+        if task_record and task_record.is_running:
+            # 检查是否超时（可能是上次执行异常导致锁未释放）
+            if task_record.last_run_time:
+                from datetime import datetime, timezone, timedelta
+                from app.scheduler_module.lock import DEFAULT_TIMEOUT_SECONDS
+                # 确保 last_run_time 是 timezone-aware 的 datetime
+                if task_record.last_run_time.tzinfo is None:
+                    from app.scheduler_module.lock import UTC_TZ
+                    last_run_utc = UTC_TZ.localize(task_record.last_run_time)
+                else:
+                    last_run_utc = task_record.last_run_time
+                
+                now_utc = datetime.now(timezone.utc)
+                elapsed = (now_utc - last_run_utc).total_seconds()
+                
+                if elapsed < DEFAULT_TIMEOUT_SECONDS:
+                    # 任务正在运行且未超时，直接跳过（避免重复执行）
+                    import os
+                    worker_pid = os.getpid()
+                    logger.debug(
+                        f"[Worker PID:{worker_pid}] 任务 '{task_name}' 正在运行中"
+                        f"（进程ID: {task_record.last_run_pid}, 主机: {task_record.last_run_host}, "
+                        f"运行时间: {elapsed:.1f}秒），跳过本次执行"
+                    )
+                    return
+        
         if not task_record or not task_record.cron_expression:
             # 如果没有找到任务记录或没有cron表达式，直接执行
             cron_expression = None
         else:
             cron_expression = task_record.cron_expression
     except Exception as e:
-        logger.warning(f"查询任务cron表达式失败: {e}，将直接执行")
+        logger.warning(f"查询任务信息失败: {e}，将直接执行")
         cron_expression = None
     finally:
         await db.close()
