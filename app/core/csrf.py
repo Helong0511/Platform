@@ -632,7 +632,8 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     f"  Redis中的令牌: {redis_token_info}\n"
                     f"  内存中的令牌: {memory_token_info}\n"
                     f"  期望的令牌: {stored_prefix}...\n"
-                    f"  实际的令牌: {csrf_prefix}..."
+                    f"  实际的令牌: {csrf_prefix}...\n"
+                    f"  提示: 将在响应头中返回正确的令牌供前端更新"
                 )
                 
                 # 检查是否是服务器重启后的情况（内存中没有该session的token）
@@ -695,6 +696,11 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     else:
                         # 令牌不同步：返回存储的正确令牌
                         token_to_return = stored_token
+                        logger.info(
+                            f"CSRF令牌不匹配，将在响应头中返回正确的令牌: {request.method} {request.url.path}, "
+                            f"IP: {client_ip}, session_id: {session_id}, "
+                            f"返回的令牌: {token_to_return[:10] if token_to_return else 'None'}..."
+                        )
                         try:
                             safe_raise_csrf_exception(
                                 request,
@@ -704,6 +710,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         except HTTPException as exc:
                             # 在异常中附加正确的token，让异常处理器在响应头返回
                             exc._csrf_token = token_to_return
+                            logger.debug(f"已在HTTPException中附加CSRF令牌，将在响应头返回: {token_to_return[:10] if token_to_return else 'None'}...")
                             raise exc
                 except Exception as e:
                     # 如果连接已断开，直接重新抛出流异常

@@ -119,9 +119,6 @@ axios.interceptors.response.use(
 
       // 检查是否是CSRF相关错误
       if (errorDetail && (errorDetail.includes('CSRF') || errorDetail.includes('csrf') || errorDetail.includes('令牌'))) {
-        // 清除旧的CSRF token
-        sessionStorage.removeItem('csrf_token');
-
         // 尝试自动获取新的CSRF token并重试请求
         const originalRequest = error.config;
 
@@ -129,6 +126,26 @@ axios.interceptors.response.use(
         if (!originalRequest._retry) {
           originalRequest._retry = true;
 
+          // 优先使用响应头中的CSRF token（如果存在）
+          const csrfTokenFromHeader = error.response?.headers?.['x-csrf-token'] || error.response?.headers?.['X-CSRF-Token'];
+          
+          if (csrfTokenFromHeader) {
+            // 响应头中已经有新的token，直接使用它重试
+            sessionStorage.setItem('csrf_token', csrfTokenFromHeader);
+            originalRequest.headers = originalRequest.headers || {};
+            originalRequest.headers['X-CSRF-Token'] = csrfTokenFromHeader;
+            logger.info('从响应头获取到新的CSRF token，自动重试请求');
+            try {
+              const retryResponse = await axios(originalRequest);
+              originalRequest._retrySuccess = true;
+              return retryResponse;
+            } catch (retryError) {
+              // 重试失败，继续原有的错误处理流程
+              logger.warning('使用响应头中的CSRF token重试失败:', retryError);
+            }
+          }
+
+          // 如果响应头中没有token，尝试通过GET请求获取新的CSRF token
           try {
             // 发送一个GET请求获取新的CSRF token
             // 系统使用 HttpOnly Cookie，axios 会自动携带认证信息，不需要手动设置 Authorization header
@@ -136,7 +153,9 @@ axios.interceptors.response.use(
             const endpoints = [
               '/api/v1/users/stats',
               '/api/v1/dashboard/stats',
-              '/api/v1/products/?page_size=1'
+              '/api/v1/products/?page_size=1',
+              '/api/v1/short-links/?page_size=1',
+              '/api/v1/clients/?page_size=1'
             ];
 
             for (const endpoint of endpoints) {
@@ -149,8 +168,12 @@ axios.interceptors.response.use(
                   sessionStorage.setItem('csrf_token', newCsrfToken);
 
                   // 更新原始请求的CSRF token并重试
+                  originalRequest.headers = originalRequest.headers || {};
                   originalRequest.headers['X-CSRF-Token'] = newCsrfToken;
-                  return axios(originalRequest);
+                  logger.info('通过GET请求获取到新的CSRF token，自动重试请求');
+                  const retryResponse = await axios(originalRequest);
+                  originalRequest._retrySuccess = true;
+                  return retryResponse;
                 }
               } catch (e) {
                 // 继续尝试下一个端点
