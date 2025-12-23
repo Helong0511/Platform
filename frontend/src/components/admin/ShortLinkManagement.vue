@@ -127,6 +127,8 @@
         <el-form-item label="原始URL" prop="original_url">
           <el-input
             v-model="formData.original_url"
+            type="textarea"
+            :rows="5"
             placeholder="https://example.com/very/long/url"
             clearable
           />
