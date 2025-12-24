@@ -191,7 +191,19 @@ def run_bot():
         logger.error("Bot 未初始化，无法启动轮询")
         return
 
+    logger.info(f"[线程: {threading.current_thread().name}] 开始启动 Telegram Bot 轮询...")
+    
     try:
+        # 先测试 Bot 连接
+        try:
+            bot_info = bot.get_me()
+            logger.info(f"Telegram Bot 连接成功: @{bot_info.username} (ID: {bot_info.id})")
+        except Exception as test_error:
+            logger.error(f"Telegram Bot 连接测试失败: {test_error}", exc_info=True)
+            logger.error("请检查 TELEGRAM_TOKEN 是否正确，以及网络连接是否正常")
+            return
+        
+        logger.info("开始轮询 Telegram 更新...")
         bot.infinity_polling(
             allowed_updates=[  # 明确指定需要处理的更新类型
                 "message",  # 处理消息
@@ -207,14 +219,18 @@ def run_bot():
                 "edited_message",  # 处理编辑过的消息
                 "channel_post",  # 处理频道帖子
                 "edited_channel_post"  # 处理编辑过的频道帖子
-            ]
+            ],
+            timeout=20,  # 设置超时时间
+            long_polling_timeout=20  # 长轮询超时时间
         )
     except KeyboardInterrupt:
         logger.info("收到终止信号，正在优雅关闭机器人...")
     except telebot.apihelper.ApiException as api_error:
         logger.error(f"Telegram API 错误: {api_error}", exc_info=True)
+        logger.error(f"API 错误详情: {type(api_error).__name__}: {str(api_error)}")
     except Exception as e:
         logger.error(f"机器人运行时发生错误: {e}", exc_info=True)
+        logger.error(f"错误类型: {type(e).__name__}")
     finally:
         logger.info("机器人已停止运行")
 
@@ -370,30 +386,34 @@ def _release_bot_lock():
 
 def start_bot():
     """启动 Telegram Bot 轮询线程（仅在获取到锁的进程中启动）"""
+    current_pid = os.getpid()
+    logger.info(f"[PID:{current_pid}] 开始启动 Telegram Bot...")
+    
     # 检查是否启用 Telegram
     telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
     if not telegram_enabled:
-        logger.info("Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过启动")
+        logger.info(f"[PID:{current_pid}] Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过启动")
         return False
 
     if not TELEBOT_AVAILABLE:
-        logger.error("pyTelegramBotAPI 未安装，无法启动 Bot")
+        logger.error(f"[PID:{current_pid}] pyTelegramBotAPI 未安装，无法启动 Bot")
         return False
 
     if not bot_initialized:
-        logger.error("Bot 未初始化，无法启动")
+        logger.error(f"[PID:{current_pid}] Bot 未初始化，无法启动")
         return False
 
     if not bot:
-        logger.error("Bot 对象不存在，无法启动")
+        logger.error(f"[PID:{current_pid}] Bot 对象不存在，无法启动")
         return False
 
     # 尝试获取锁（多进程环境下，只有一个进程能获取到）
     if not _acquire_bot_lock():
-        logger.info(f"[PID:{os.getpid()}] 其他进程已启动 Telegram Bot，跳过启动")
+        logger.info(f"[PID:{current_pid}] 其他进程已启动 Telegram Bot，跳过启动")
         return False
 
     try:
+        logger.info(f"[PID:{current_pid}] 正在设置 Telegram Bot 命令...")
         # 设置 Bot 命令
         commands_list = [
             ("id", "查询聊天ID"),
@@ -411,17 +431,26 @@ def start_bot():
         if com_set:
             try:
                 bot.set_my_commands(commands=com_set)
-                logger.info("Telegram Bot 命令设置成功")
+                logger.info(f"[PID:{current_pid}] Telegram Bot 命令设置成功")
             except Exception as e:
-                logger.warning(f"设置 Telegram Bot 命令时发生错误: {e}")
+                logger.warning(f"[PID:{current_pid}] 设置 Telegram Bot 命令时发生错误: {e}")
 
         # 启动轮询线程（守护线程，主进程退出时自动退出）
+        logger.info(f"[PID:{current_pid}] 正在启动 Telegram Bot 轮询线程...")
         bot_thread = threading.Thread(target=run_bot, daemon=True, name="TelegramBot")
         bot_thread.start()
-        logger.info(f"[PID:{os.getpid()}] Telegram Bot 轮询线程已启动（已获取锁）")
+        
+        # 等待一小段时间，检查线程是否正常启动
+        import time
+        time.sleep(0.5)
+        if bot_thread.is_alive():
+            logger.info(f"[PID:{current_pid}] Telegram Bot 轮询线程已启动（线程ID: {bot_thread.ident}, 已获取锁）")
+        else:
+            logger.warning(f"[PID:{current_pid}] Telegram Bot 轮询线程启动后立即退出，可能存在问题")
+        
         return True
     except Exception as e:
-        logger.error(f"启动 Telegram Bot 时发生错误: {e}", exc_info=True)
+        logger.error(f"[PID:{current_pid}] 启动 Telegram Bot 时发生错误: {e}", exc_info=True)
         _release_bot_lock()
         return False
 
@@ -600,3 +629,54 @@ if bot_initialized and TELEBOT_AVAILABLE:
 
         except Exception as t_err:
             logger.error(f"处理管理员变更出错: {t_err}", exc_info=True)
+
+
+def get_bot_status_info() -> dict:
+    """
+    获取 Bot 状态信息（用于诊断）
+    
+    Returns:
+        dict: 包含 Bot 状态信息的字典
+    """
+    status_info = {
+        "telegram_enabled": getattr(settings, 'TELEGRAM_ENABLE', True),
+        "telebot_available": TELEBOT_AVAILABLE,
+        "bot_initialized": bot_initialized,
+        "bot_exists": bot is not None,
+        "has_lock": _bot_lock_acquired,
+        "token_configured": bool(
+            getattr(settings, 'TELEGRAM_TOKEN', None) and 
+            isinstance(getattr(settings, 'TELEGRAM_TOKEN', None), str) and
+            getattr(settings, 'TELEGRAM_TOKEN', None).strip()
+        ),
+        "admin_configured": bool(
+            getattr(settings, 'TELEGRAM_ADMIN', None) and
+            isinstance(getattr(settings, 'TELEGRAM_ADMIN', None), str) and
+            getattr(settings, 'TELEGRAM_ADMIN', None).strip()
+        ),
+    }
+    
+    # 尝试获取 Bot 信息
+    if bot_initialized and bot:
+        try:
+            bot_info = bot.get_me()
+            status_info["bot_username"] = bot_info.username
+            status_info["bot_id"] = bot_info.id
+            status_info["bot_first_name"] = bot_info.first_name
+            status_info["connection_test"] = "成功"
+        except Exception as e:
+            status_info["connection_test"] = f"失败: {str(e)}"
+            status_info["bot_username"] = None
+            status_info["bot_id"] = None
+    
+    # 检查线程状态
+    for thread in threading.enumerate():
+        if thread.name == "TelegramBot":
+            status_info["bot_thread_alive"] = thread.is_alive()
+            status_info["bot_thread_id"] = thread.ident
+            break
+    else:
+        status_info["bot_thread_alive"] = False
+        status_info["bot_thread_id"] = None
+    
+    return status_info

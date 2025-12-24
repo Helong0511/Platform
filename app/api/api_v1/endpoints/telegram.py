@@ -76,26 +76,30 @@ async def get_bot_status(
         )
 
     try:
-        from app.core.auto_bot import bot_initialized
+        from app.core.auto_bot import bot_initialized, get_bot_status_info
         
-        token_configured = bool(
-            getattr(settings, 'TELEGRAM_TOKEN', None) and 
-            isinstance(getattr(settings, 'TELEGRAM_TOKEN', None), str) and
-            getattr(settings, 'TELEGRAM_TOKEN', None).strip()
-        )
+        # 获取详细状态信息
+        status_info = get_bot_status_info()
         
-        admin_configured = bool(
-            getattr(settings, 'TELEGRAM_ADMIN', None) and
-            isinstance(getattr(settings, 'TELEGRAM_ADMIN', None), str) and
-            getattr(settings, 'TELEGRAM_ADMIN', None).strip()
-        )
-
+        token_configured = status_info.get("token_configured", False)
+        admin_configured = status_info.get("admin_configured", False)
+        bot_thread_alive = status_info.get("bot_thread_alive", False)
+        connection_test = status_info.get("connection_test", "未测试")
+        
+        # 构建状态消息
         if bot_initialized and token_configured:
-            status_message = "Telegram Bot 已初始化并运行中"
+            if bot_thread_alive:
+                status_message = "Telegram Bot 已初始化并运行中"
+            else:
+                status_message = "Telegram Bot 已初始化，但轮询线程未运行"
         elif token_configured:
             status_message = "Token 已配置，但 Bot 未初始化"
         else:
             status_message = "Token 未配置，请设置 TELEGRAM_TOKEN 环境变量"
+        
+        # 添加连接测试信息
+        if connection_test != "成功" and bot_initialized:
+            status_message += f" | 连接测试: {connection_test}"
 
         return BotStatusResponse(
             initialized=bot_initialized,
