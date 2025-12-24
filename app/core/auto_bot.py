@@ -293,25 +293,8 @@ def run_bot():
         logger.info("开始轮询 Telegram 更新...")
         logger.info("如果收到消息但没有日志，可能是轮询没有正常运行")
         
-        # 测试获取更新（用于调试）
-        try:
-            logger.info("测试：尝试获取待处理的更新...")
-            # 先获取 offset，避免重复处理
-            try:
-                updates = bot.get_updates(timeout=1)
-                if updates:
-                    # 获取最后一个 update_id
-                    last_update_id = updates[-1].update_id
-                    logger.info(f"测试：获取到 {len(updates)} 个待处理的更新，最后一个 update_id: {last_update_id}")
-                    # 确认这些更新，避免重复处理
-                    bot.get_updates(offset=last_update_id + 1, timeout=1)
-                    logger.info("测试：已确认更新，避免重复处理")
-                else:
-                    logger.info("测试：没有待处理的更新")
-            except Exception as get_updates_error:
-                logger.warning(f"测试获取更新时出错: {get_updates_error}", exc_info=True)
-        except Exception as test_updates_error:
-            logger.warning(f"测试获取更新时出错: {test_updates_error}", exc_info=True)
+        # 跳过测试获取更新（可能会阻塞），直接开始轮询
+        logger.info("跳过测试获取更新，直接开始轮询...")
         
         # 再次检查消息处理器
         try:
@@ -331,27 +314,40 @@ def run_bot():
             logger.info("   2. 消息处理器数量是否大于 0")
             logger.info("   3. 网络连接是否正常")
             
-            # 使用更简单的配置，不限制 allowed_updates
-            # 添加日志回调来监控轮询状态
+            # 使用手动轮询方式（更可靠）
+            logger.info("📡 开始使用手动轮询方式监听 Telegram 消息...")
+            logger.info("💡 提示：现在可以向 Bot 发送 /id 命令测试")
+            
             import time
-            last_log_time = time.time()
+            last_update_id = None
+            poll_count = 0
             
-            def log_polling_status():
-                """定期记录轮询状态"""
-                nonlocal last_log_time
-                current_time = time.time()
-                if current_time - last_log_time > 60:  # 每60秒记录一次
-                    logger.info(f"⏰ 轮询仍在运行中... (已运行 {int((current_time - last_log_time) / 60)} 分钟)")
-                    last_log_time = current_time
-            
-            bot.infinity_polling(
-                timeout=20,  # 设置超时时间
-                long_polling_timeout=20,  # 长轮询超时时间
-                none_stop=True,  # 即使出现错误也继续运行
-                skip_pending=False,  # 不跳过待处理的更新
-                interval=0,  # 立即处理更新
-                logger_level=logging.DEBUG  # 启用 pyTelegramBotAPI 的调试日志
-            )
+            while True:
+                try:
+                    poll_count += 1
+                    if poll_count % 100 == 0:  # 每100次轮询记录一次
+                        logger.info(f"⏰ 轮询仍在运行中... (已轮询 {poll_count} 次)")
+                    
+                    # 获取更新
+                    updates = bot.get_updates(timeout=20, offset=last_update_id, long_polling_timeout=20)
+                    
+                    if updates:
+                        logger.info(f"✅ 收到 {len(updates)} 个更新")
+                        # 处理更新
+                        bot.process_new_updates(updates)
+                        # 更新 offset
+                        last_update_id = updates[-1].update_id + 1
+                        logger.info(f"✅ 已处理更新，新的 offset: {last_update_id}")
+                    else:
+                        # 没有更新是正常的，继续轮询
+                        pass
+                        
+                except KeyboardInterrupt:
+                    logger.info("收到键盘中断信号，停止轮询")
+                    raise
+                except Exception as poll_error:
+                    logger.error(f"❌ 轮询错误: {poll_error}", exc_info=True)
+                    time.sleep(1)  # 出错后等待1秒再继续
             logger.info("infinity_polling 已退出（这不应该发生）")
         except KeyboardInterrupt:
             logger.info("收到键盘中断信号")
