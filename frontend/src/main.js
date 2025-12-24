@@ -20,6 +20,29 @@ import router from './router/index.js';
 import { initTimezone } from './utils/dateFormat';
 import { logger } from './utils/logger';
 
+// ====== 早期错误过滤（在应用初始化之前） ======
+// 过滤浏览器扩展相关的控制台错误
+const originalConsoleError = console.error;
+console.error = function(...args) {
+  // 检查是否是浏览器扩展相关的错误
+  const errorMessage = args.join(' ').toLowerCase();
+  const isExtensionError = errorMessage.includes('message channel closed') ||
+    errorMessage.includes('asynchronous response') ||
+    errorMessage.includes('listener indicated an asynchronous response') ||
+    errorMessage.includes('message channel') ||
+    errorMessage.includes('channel closed') ||
+    errorMessage.includes('a listener indicated an asynchronous response') ||
+    errorMessage.includes('but the message channel closed');
+  
+  // 如果是扩展错误，静默忽略
+  if (isExtensionError) {
+    return;
+  }
+  
+  // 否则正常输出
+  originalConsoleError.apply(console, args);
+};
+
 // 创建Vue应用
 const app = createApp(App);
 
@@ -385,13 +408,26 @@ window.addEventListener('error', (event) => {
 
   // 忽略浏览器扩展相关的错误（通常由广告拦截器、开发者工具扩展等引起）
   // 包括 Edge 浏览器扩展可能引起的错误
-  if (typeof errorMessage === 'string' && (
+  // 检查错误消息、错误名称和文件名
+  const errorName = event?.error?.name || '';
+  const isExtensionError = typeof errorMessage === 'string' && (
     errorString.includes('message channel closed') ||
     errorString.includes('asynchronous response') ||
     errorString.includes('listener indicated an asynchronous response') ||
     errorString.includes('message channel') ||
-    errorString.includes('channel closed')
-  )) {
+    errorString.includes('channel closed') ||
+    errorString.includes('a listener indicated an asynchronous response') ||
+    errorString.includes('but the message channel closed')
+  );
+  const isExtensionFile = typeof errorFilename === 'string' && (
+    errorFilename.includes('extension') ||
+    errorFilename.includes('chrome-extension') ||
+    errorFilename.includes('moz-extension') ||
+    errorFilename.includes('safari-extension') ||
+    errorFilename.includes('edge-extension')
+  );
+  
+  if (isExtensionError || isExtensionFile || errorName === 'ExtensionError') {
     event.preventDefault(); // 阻止默认的错误处理
     event.stopPropagation(); // 阻止事件冒泡
     event.stopImmediatePropagation(); // 阻止其他监听器处理
@@ -478,19 +514,33 @@ window.addEventListener('unhandledrejection', (event) => {
 
   // 忽略浏览器扩展相关的错误（通常由广告拦截器、开发者工具扩展等引起）
   // 包括 Edge 浏览器扩展可能引起的错误
-  if (typeof errorMessage === 'string' && (
+  // 检查错误消息、错误名称和堆栈信息
+  const isExtensionError = typeof errorMessage === 'string' && (
     errorString.includes('message channel closed') ||
     errorString.includes('asynchronous response') ||
     errorString.includes('listener indicated an asynchronous response') ||
     errorString.includes('message channel') ||
     errorString.includes('channel closed') ||
-    // 检查错误对象本身
-    (event?.reason && typeof event.reason === 'object' && (
-      String(event.reason.message || '').toLowerCase().includes('message channel') ||
-      String(event.reason.message || '').toLowerCase().includes('asynchronous response')
-    ))
-  )) {
+    errorString.includes('a listener indicated an asynchronous response') ||
+    errorString.includes('but the message channel closed')
+  );
+  const isExtensionStack = typeof errorStack === 'string' && (
+    errorStack.includes('extension') ||
+    errorStack.includes('chrome-extension') ||
+    errorStack.includes('moz-extension') ||
+    errorStack.includes('safari-extension') ||
+    errorStack.includes('edge-extension')
+  );
+  const isExtensionReason = event?.reason && typeof event.reason === 'object' && (
+    String(event.reason.message || '').toLowerCase().includes('message channel') ||
+    String(event.reason.message || '').toLowerCase().includes('asynchronous response') ||
+    String(event.reason.message || '').toLowerCase().includes('listener indicated') ||
+    String(event.reason.message || '').toLowerCase().includes('channel closed')
+  );
+  
+  if (isExtensionError || isExtensionStack || isExtensionReason || errorName === 'ExtensionError') {
     event.preventDefault(); // 阻止默认的错误处理
+    event.stopPropagation(); // 阻止事件冒泡
     return;
   }
 
