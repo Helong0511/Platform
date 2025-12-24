@@ -1,17 +1,17 @@
+import uuid
+import platform
 import requests
 import json
 from datetime import datetime
 
 URL = 'https://client.btfrx.online/api/v1/macan/postback'
 
+uuid.uuid4()
+
 post_data = {
-    "clk_id":1,
-    "devad_id":1,
-    "event_name":1,
-    "event_value":1,
-    "clkcarrier_id":1,
-    "os":1,
-    "payout":1,
+    "clk_id":uuid.uuid4(),
+    "os":platform.system(),
+    "payout":10.00,
     "ip":"127.0.0.1"
 }
 

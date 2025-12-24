@@ -1139,6 +1139,86 @@ async def get_daily_summary(
     ))
 
 
+@router.get("/date-range", response_model=ResponseBaseSchema[dict], summary="获取数据的日期范围")
+async def get_ad_data_date_range(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    client_id: int | None = Query(None, description="客户ID过滤"),
+):
+    """
+    获取广告数据的日期范围（最早日期和最新日期）
+    用于前端自动选择有数据的日期范围
+    - 管理员可查看所有数据的日期范围
+    - 客户只能查看自己数据的日期范围
+    """
+    try:
+        # 检查是否使用产品分配历史表
+        use_assignment_table = await check_use_assignment_table(db)
+        
+        # 构建查询：获取日期的最小值和最大值
+        if use_assignment_table:
+            # 使用产品分配历史表
+            query = select(
+                func.min(func.date(AdData.date)).label("min_date"),
+                func.max(func.date(AdData.date)).label("max_date")
+            )
+            query = query.join(Product, AdData.product_id == Product.id)
+            
+            end_date_with_default = func.coalesce(
+                func.date_add(ProductAssignment.end_date, text("INTERVAL 1 DAY")),
+                literal_column("'2099-12-31'")
+            )
+            query = query.join(
+                ProductAssignment,
+                and_(
+                    ProductAssignment.product_id == Product.id,
+                    AdData.date >= ProductAssignment.start_date,
+                    AdData.date < end_date_with_default
+                )
+            )
+            query = query.join(Client, ProductAssignment.client_id == Client.id)
+        else:
+            # 旧的查询方式
+            query = select(
+                func.min(func.date(AdData.date)).label("min_date"),
+                func.max(func.date(AdData.date)).label("max_date")
+            )
+            query = query.join(Product, AdData.product_id == Product.id)
+            query = query.join(Client, Product.client_id == Client.id)
+        
+        # 只显示激活状态的产品
+        query = query.where(Product.is_active == True)
+        
+        # 权限过滤
+        if current_user.role != UserRole.ADMIN:
+            query = query.where(Client.user_id == current_user.id)
+        else:
+            if client_id:
+                query = query.where(Client.id == client_id)
+        
+        # 执行查询
+        result = await db.execute(query)
+        row = result.first()
+        
+        if row and row.min_date and row.max_date:
+            return ResponseBaseSchema.success(data={
+                "min_date": row.min_date.isoformat() if hasattr(row.min_date, 'isoformat') else str(row.min_date),
+                "max_date": row.max_date.isoformat() if hasattr(row.max_date, 'isoformat') else str(row.max_date)
+            })
+        else:
+            # 没有数据
+            return ResponseBaseSchema.success(data={
+                "min_date": None,
+                "max_date": None
+            })
+    except Exception as e:
+        logger.error(f"获取日期范围失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取日期范围失败: {str(e)}"
+        )
+
+
 @router.get("/{data_id}", response_model=ResponseBaseSchema[AdDataResponse], summary="获取广告数据详情")
 async def get_ad_data_detail(
         data_id: int = Path(..., ge=1, description="广告数据ID"),
@@ -1955,83 +2035,3 @@ async def get_ad_data_summary(
     await set_cached(cache_key, response_data, ttl=120)
 
     return ResponseBaseSchema.success(data=AdDataSummaryResponse(**response_data))
-
-
-@router.get("/date-range", response_model=ResponseBaseSchema[dict], summary="获取数据的日期范围")
-async def get_ad_data_date_range(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    client_id: int | None = Query(None, description="客户ID过滤"),
-):
-    """
-    获取广告数据的日期范围（最早日期和最新日期）
-    用于前端自动选择有数据的日期范围
-    - 管理员可查看所有数据的日期范围
-    - 客户只能查看自己数据的日期范围
-    """
-    try:
-        # 检查是否使用产品分配历史表
-        use_assignment_table = await check_use_assignment_table(db)
-        
-        # 构建查询：获取日期的最小值和最大值
-        if use_assignment_table:
-            # 使用产品分配历史表
-            query = select(
-                func.min(func.date(AdData.date)).label("min_date"),
-                func.max(func.date(AdData.date)).label("max_date")
-            )
-            query = query.join(Product, AdData.product_id == Product.id)
-            
-            end_date_with_default = func.coalesce(
-                func.date_add(ProductAssignment.end_date, text("INTERVAL 1 DAY")),
-                literal_column("'2099-12-31'")
-            )
-            query = query.join(
-                ProductAssignment,
-                and_(
-                    ProductAssignment.product_id == Product.id,
-                    AdData.date >= ProductAssignment.start_date,
-                    AdData.date < end_date_with_default
-                )
-            )
-            query = query.join(Client, ProductAssignment.client_id == Client.id)
-        else:
-            # 旧的查询方式
-            query = select(
-                func.min(func.date(AdData.date)).label("min_date"),
-                func.max(func.date(AdData.date)).label("max_date")
-            )
-            query = query.join(Product, AdData.product_id == Product.id)
-            query = query.join(Client, Product.client_id == Client.id)
-        
-        # 只显示激活状态的产品
-        query = query.where(Product.is_active == True)
-        
-        # 权限过滤
-        if current_user.role != UserRole.ADMIN:
-            query = query.where(Client.user_id == current_user.id)
-        else:
-            if client_id:
-                query = query.where(Client.id == client_id)
-        
-        # 执行查询
-        result = await db.execute(query)
-        row = result.first()
-        
-        if row and row.min_date and row.max_date:
-            return ResponseBaseSchema.success(data={
-                "min_date": row.min_date.isoformat() if hasattr(row.min_date, 'isoformat') else str(row.min_date),
-                "max_date": row.max_date.isoformat() if hasattr(row.max_date, 'isoformat') else str(row.max_date)
-            })
-        else:
-            # 没有数据
-            return ResponseBaseSchema.success(data={
-                "min_date": None,
-                "max_date": None
-            })
-    except Exception as e:
-        logger.error(f"获取日期范围失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"获取日期范围失败: {str(e)}"
-        )

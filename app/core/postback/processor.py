@@ -4,32 +4,32 @@ Postback 统一处理器
 """
 import json
 import logging
-from typing import Dict, Any, Optional
 from datetime import datetime, timezone
+from typing import Dict, Any, Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.postback.handlers import get_handler
-from app.core.postback.forwarder import PostbackForwarder
-from app.core.postback.notifier import PostbackNotifier
-from app.models.models import PostbackConversion, Product, Click, Offer, PostbackForwardQueue
-from app.core.exceptions import raise_api_exception
-from app.core.errors import ErrorCode
 from app.core.cap import check_cap, increment_cap_count
 from app.core.discount import calculate_discount
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
+from app.core.postback.handlers import get_handler
+from app.core.postback.notifier import PostbackNotifier
+from app.models.models import PostbackConversion, Product, Click, Offer, PostbackForwardQueue
 
 logger = logging.getLogger(__name__)
 
 
 class PostbackProcessor:
     """Postback 统一处理器"""
-    
+
     @staticmethod
     async def process(
-        platform: str,
-        raw_data: Dict[str, Any],
-        db: AsyncSession,
-        request_ip: Optional[str] = None
+            platform: str,
+            raw_data: Dict[str, Any],
+            db: AsyncSession,
+            request_ip: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         处理 postback 回调
@@ -54,7 +54,7 @@ class PostbackProcessor:
                 ErrorCode.NOT_FOUND,
                 detail=f"不支持的平台: {platform}"
             )
-        
+
         try:
             # 2. 验证数据
             is_valid, error_msg = await handler.validate(raw_data)
@@ -64,18 +64,18 @@ class PostbackProcessor:
                     ErrorCode.VALIDATION_ERROR,
                     detail=error_msg or "数据验证失败"
                 )
-            
+
             # 3. 标准化数据
             normalized_data = await handler.normalize(raw_data)
             conversion_id = normalized_data.get("conversion_id")
-            
+
             if not conversion_id:
                 logger.warning(f"平台 {platform} postback 数据缺少 conversion_id")
                 raise_api_exception(
                     ErrorCode.VALIDATION_ERROR,
                     detail="缺少必填字段: conversion_id"
                 )
-            
+
             # 4. 验证产品和客户（如果提供）
             product_id = normalized_data.get("product_id")
             client_id = normalized_data.get("client_id")
@@ -88,7 +88,7 @@ class PostbackProcessor:
                     ErrorCode.OPERATION_FAILED,
                     detail=error_msg or "产品和客户验证失败"
                 )
-            
+
             # 5. 检查是否已存在（防重复处理）
             event_name = normalized_data.get("event_name")
             existing = await db.execute(
@@ -99,7 +99,7 @@ class PostbackProcessor:
                 )
             )
             existing_record = existing.scalars().first()
-            
+
             if existing_record:
                 logger.info(
                     f"平台 {platform} postback 转化已存在，跳过重复处理: "
@@ -111,14 +111,14 @@ class PostbackProcessor:
                     "conversion_id": conversion_id,
                     "platform": platform
                 }
-            
+
             # 6. 保存原始数据（JSON格式）
             raw_data_json = json.dumps(raw_data, ensure_ascii=False)
-            
+
             # 7. 如果提供了IP，添加到标准化数据中
             if request_ip and not normalized_data.get("ip"):
                 normalized_data["ip"] = request_ip
-            
+
             # 7.5. CPL 系统：尝试关联 Click ID 和进行 Cap/扣量检查
             click_id = None
             click_time = None
@@ -127,25 +127,25 @@ class PostbackProcessor:
             advertiser_id = None
             final_payout = normalized_data.get("payout")
             discount_info = None
-            
+
             # 尝试从 raw_data 中提取 click_id（可能是 our_click_id 或其他字段）
-            click_id = (raw_data.get("our_click_id") or 
-                       raw_data.get("click_id") or 
-                       normalized_data.get("click_id"))
-            
+            click_id = (raw_data.get("our_click_id") or
+                        raw_data.get("click_id") or
+                        normalized_data.get("click_id"))
+
             if click_id:
                 # 查找 Click 记录
                 click_result = await db.execute(
                     select(Click).where(Click.click_id == click_id)
                 )
                 click_record = click_result.scalars().first()
-                
+
                 if click_record:
                     click_time = click_record.click_time
                     offer_id = click_record.offer_id
                     publisher_id = click_record.publisher_id
                     advertiser_id = click_record.advertiser_id
-                    
+
                     # 0. 检查点击有效期 (Click Validity)
                     if offer_id:
                         offer = await db.execute(select(Offer).where(Offer.id == offer_id))
@@ -161,7 +161,8 @@ class PostbackProcessor:
                                 )
                                 # 标记状态为 ClickExpired，由后续逻辑处理
                                 normalized_data["status_override"] = "ClickExpired"
-                                normalized_data["rejection_reason"] = f"Click expired ({hours_diff:.1f}h > {validity_hours}h)"
+                                normalized_data[
+                                    "rejection_reason"] = f"Click expired ({hours_diff:.1f}h > {validity_hours}h)"
 
                     # 检查 Cap 限制
                     if offer_id:
@@ -171,7 +172,7 @@ class PostbackProcessor:
                             publisher_id=publisher_id,
                             advertiser_id=advertiser_id
                         )
-                        
+
                         if not is_allowed:
                             logger.warning(
                                 f"转化被Cap限制拒绝: conversion_id={conversion_id}, "
@@ -180,7 +181,7 @@ class PostbackProcessor:
                             # 可以选择拒绝转化或标记为特殊状态
                             # 这里我们仍然保存转化，但标记状态
                             # 也可以选择直接拒绝：raise_api_exception(...)
-                    
+
                     # 计算扣量
                     if offer_id and publisher_id and final_payout:
                         final_payout, discount_amount, discount_info = await calculate_discount(
@@ -195,7 +196,7 @@ class PostbackProcessor:
                                 f"original={normalized_data.get('payout')}, "
                                 f"final={final_payout}, info={discount_info}"
                             )
-            
+
             # 8. 创建转化记录
             conversion = PostbackConversion(
                 platform=platform,
@@ -216,11 +217,11 @@ class PostbackProcessor:
                 raw_data=raw_data_json,
                 created_at=datetime.now(timezone.utc)
             )
-            
+
             db.add(conversion)
             await db.commit()
             await db.refresh(conversion)
-            
+
             # 8.5. 如果通过了 Cap 检查，增加 Cap 计数
             # 只有当转化状态正常(Pending/Approved)时才增加计数
             if offer_id and click_id and conversion.conversion_status in ['Pending', 'Approved']:
@@ -228,8 +229,8 @@ class PostbackProcessor:
                 if normalized_data.get("status_override"):
                     conversion.conversion_status = normalized_data.get("status_override")
                     if normalized_data.get("rejection_reason"):
-                         # 记录拒绝原因到 raw_data 或其他字段? 暂时只改状态
-                         pass
+                        # 记录拒绝原因到 raw_data 或其他字段? 暂时只改状态
+                        pass
                 else:
                     # 尝试增加计数
                     try:
@@ -239,7 +240,7 @@ class PostbackProcessor:
                             publisher_id=publisher_id,
                             advertiser_id=advertiser_id
                         )
-                        
+
                         if not is_within_cap:
                             # 严重：计数递增后发现超限 (Race Condition 捕获)
                             logger.warning(
@@ -250,14 +251,14 @@ class PostbackProcessor:
                             # 注意：这里我们不需要回滚计数，因为 Redis 计数已经加了。
                             # 实际上这会导致 Cap 计数略微超过限制，但这是为了防止超发给下游。
                             # 如果想回滚，可以在 cap_manager 中增加 decrement 方法。
-                            
+
                     except Exception as e:
                         # Cap 计数失败不影响主流程，但记录严重错误
                         logger.error(f"增加Cap计数失败: {str(e)}")
-            
+
             # 再次提交以保存状态更新
             await db.commit()
-            
+
             logger.info(
                 f"平台 {platform} postback 转化记录已保存: "
                 f"conversion_id={conversion_id}, event_name={event_name}, "
@@ -265,14 +266,14 @@ class PostbackProcessor:
                 f"product_id={product_id}, client_id={client_id}, "
                 f"click_id={click_id}, offer_id={offer_id}"
             )
-            
+
             # 9. 异步发送通知（按客户和产品）
             try:
                 await PostbackNotifier.notify_conversion(
                     conversion=conversion,
                     db=db,
                     product=None,  # 将在通知函数中查询
-                    client=None   # 将在通知函数中查询
+                    client=None  # 将在通知函数中查询
                 )
             except Exception as e:
                 # 通知失败不影响主流程
@@ -280,7 +281,7 @@ class PostbackProcessor:
                     f"发送转化通知失败: conversion_id={conversion_id}, "
                     f"error={str(e)}"
                 )
-            
+
             # 10. 异步转发给下游（如果产品配置了下游 URL）
             product = None
             if product_id:
@@ -288,11 +289,11 @@ class PostbackProcessor:
                     select(Product).where(Product.id == product_id)
                 )
                 product = result.scalars().first()
-            
+
             if product and product.downstream_postback_url and conversion.conversion_status in ['Pending', 'Approved']:
                 # 使用可靠的队列机制
                 try:
-                     # 插入转发队列
+                    # 插入转发队列
                     queue_item = PostbackForwardQueue(
                         conversion_id=conversion.id,
                         product_id=product.id,
@@ -301,29 +302,29 @@ class PostbackProcessor:
                         # 这里简简化处理，实际可能需要根据 method 构造 data/params
                         # 暂时先用 raw_data_json 作为 data，后续由 forwarder 处理
                         request_data=raw_data_json if product.downstream_postback_method == 'POST' else None,
-                        request_params=None, # 如果是GET，参数组合逻辑在 forwarder 中
+                        request_params=None,  # 如果是GET，参数组合逻辑在 forwarder 中
                         created_at=datetime.now(timezone.utc),
                         next_retry_time=datetime.now(timezone.utc)
                     )
                     db.add(queue_item)
                     await db.commit()
-                    
+
                     # 触发后台任务处理队列 (Fire & Forget)
                     # 即使这里触发失败，定时任务也会兜底
                     from app.scheduler.forward_tasks import trigger_forward_processing
                     import asyncio
                     try:
-                         asyncio.create_task(trigger_forward_processing())
+                        asyncio.create_task(trigger_forward_processing())
                     except:
-                         pass
-                         
+                        pass
+
                 except Exception as e:
                     # 转发入队失败
                     logger.error(
                         f"下游转发入队失败: conversion_id={conversion_id}, "
                         f"error={str(e)}"
                     )
-            
+
             # 11. 返回成功响应
             return {
                 "success": True,
@@ -331,7 +332,7 @@ class PostbackProcessor:
                 "conversion_id": conversion_id,
                 "platform": platform
             }
-            
+
         except Exception as e:
             await db.rollback()
             logger.error(
@@ -346,4 +347,3 @@ class PostbackProcessor:
                 ErrorCode.OPERATION_FAILED,
                 detail=f"处理 PostBack 回调失败：{str(e)}"
             )
-
