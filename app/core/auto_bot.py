@@ -358,10 +358,38 @@ def run_bot():
                             handlers_count = len(bot.message_handlers) if hasattr(bot, 'message_handlers') else 0
                             logger.info(f"🔍 处理前，消息处理器数量: {handlers_count}")
                             
-                            # 处理更新
+                            # 使用 process_new_updates（标准方式）
                             logger.info("🔄 调用 bot.process_new_updates()...")
-                            bot.process_new_updates(updates)
-                            logger.info("✅ bot.process_new_updates() 调用完成")
+                            try:
+                                bot.process_new_updates(updates)
+                                logger.info("✅ bot.process_new_updates() 调用完成")
+                            except Exception as process_error:
+                                logger.error(f"❌ process_new_updates 出错: {process_error}", exc_info=True)
+                                import traceback
+                                logger.error(f"❌ 错误堆栈: {traceback.format_exc()}")
+                            
+                            # 如果 process_new_updates 没有触发处理器，尝试手动调用
+                            # 检查是否有消息需要处理
+                            for update in updates:
+                                if hasattr(update, 'message') and update.message:
+                                    msg = update.message
+                                    text = getattr(msg, 'text', '') or ''
+                                    logger.info(f"🔍 检查消息是否需要手动处理: text='{text}'")
+                                    
+                                    # 如果是命令，尝试手动调用处理器
+                                    if text.startswith('/id'):
+                                        logger.info("🔍 检测到 /id 命令，尝试手动调用处理器...")
+                                        try:
+                                            # 从 bot.message_handlers 中找到 get_chat_id 处理器并调用
+                                            for handler in bot.message_handlers:
+                                                handler_func = handler.get('function')
+                                                if handler_func and handler_func.__name__ == 'get_chat_id':
+                                                    logger.info(f"✅ 找到 get_chat_id 处理器，准备调用...")
+                                                    handler_func(msg)
+                                                    logger.info("✅ 手动调用 get_chat_id 完成")
+                                                    break
+                                        except Exception as manual_call_error:
+                                            logger.error(f"❌ 手动调用处理器出错: {manual_call_error}", exc_info=True)
                             
                             # 检查是否有异常被静默吞掉
                             logger.info("✅ 更新处理完成")
