@@ -333,8 +333,18 @@ def run_bot():
                     
                     if updates:
                         logger.info(f"✅ 收到 {len(updates)} 个更新")
+                        # 记录更新内容（用于调试）
+                        for update in updates:
+                            if hasattr(update, 'message') and update.message:
+                                msg = update.message
+                                text = getattr(msg, 'text', '') or ''
+                                chat_id = getattr(msg.chat, 'id', '未知') if hasattr(msg, 'chat') else '未知'
+                                logger.info(f"📨 更新内容: update_id={update.update_id}, message_id={getattr(msg, 'message_id', '未知')}, text='{text[:50]}', chat_id={chat_id}")
+                        
                         # 处理更新
+                        logger.info("🔄 开始处理更新...")
                         bot.process_new_updates(updates)
+                        logger.info("✅ 更新处理完成")
                         # 更新 offset
                         last_update_id = updates[-1].update_id + 1
                         logger.info(f"✅ 已处理更新，新的 offset: {last_update_id}")
