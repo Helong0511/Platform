@@ -341,13 +341,18 @@ input[type="text"].el-input_inner {
 .el-select.is-focus .el-select__placeholder,
 .el-select:not(.is-empty) .el-select__placeholder,
 .el-select[class*="is-empty"]:not([class*="is-empty"]) .el-select__placeholder,
-.el-select .el-select__placeholder:not(:empty) {
+.el-select .el-select__placeholder:not(:empty),
+/* 当有选中值时，隐藏 placeholder */
+.el-select:has(.el-select__selected-item) .el-select__placeholder,
+.el-select .el-input__wrapper:has(.el-select__selected-item) ~ .el-select__placeholder {
   display: none !important;
   opacity: 0 !important;
   visibility: hidden !important;
   height: 0 !important;
   width: 0 !important;
   overflow: hidden !important;
+  position: absolute !important;
+  left: -9999px !important;
 }
 
 /* 确保选中值文本正确显示 */
@@ -361,6 +366,10 @@ input[type="text"].el-input_inner {
   opacity: 1 !important;
   visibility: visible !important;
   color: var(--el-text-color-regular, #606266) !important;
+  position: relative !important;
+  z-index: 2 !important;
+  width: auto !important;
+  min-width: 0 !important;
 }
 
 /* 确保选中值容器正确显示 */

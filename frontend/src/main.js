@@ -632,35 +632,107 @@ const fixSelectAccessibility = () => {
   const fixSelectDisplay = () => {
     const selects = document.querySelectorAll('.el-select');
     selects.forEach((selectEl) => {
-      // 检查是否有选中值
-      const hasValue = selectEl.querySelector('.el-select__selected-item') !== null;
-      const placeholder = selectEl.querySelector('.el-select__placeholder');
+      // 检查是否有选中值 - 使用多种方式检查
       const selectedItem = selectEl.querySelector('.el-select__selected-item');
+      const placeholder = selectEl.querySelector('.el-select__placeholder');
+      const inputWrapper = selectEl.querySelector('.el-input__wrapper');
+      const input = selectEl.querySelector('.el-select__input, .el-input__inner');
+      
+      // 检查 v-model 绑定的值（通过 Vue 实例）
+      let hasValue = false;
+      if (selectedItem) {
+        hasValue = true;
+      } else {
+        // 检查 input 的 value 属性
+        if (input && input.value && input.value !== '') {
+          hasValue = true;
+        }
+        // 检查是否有 is-empty 类
+        if (!selectEl.classList.contains('is-empty')) {
+          hasValue = true;
+        }
+        // 检查 input wrapper 的文本内容
+        if (inputWrapper && inputWrapper.textContent && inputWrapper.textContent.trim() !== '') {
+          const text = inputWrapper.textContent.trim();
+          // 排除 placeholder 文本
+          if (text && !text.includes('全部') && !text.includes('请选择') && !text.includes('选择')) {
+            hasValue = true;
+          }
+        }
+      }
       
       // 如果有选中值，确保显示
-      if (hasValue && selectedItem) {
+      if (hasValue) {
         // 确保选中值可见
-        selectedItem.style.display = 'inline-block';
-        selectedItem.style.opacity = '1';
-        selectedItem.style.visibility = 'visible';
-        selectedItem.style.color = '';
+        if (selectedItem) {
+          selectedItem.style.display = 'inline-block';
+          selectedItem.style.opacity = '1';
+          selectedItem.style.visibility = 'visible';
+          selectedItem.style.color = '';
+          selectedItem.style.width = 'auto';
+          selectedItem.style.maxWidth = '100%';
+          selectedItem.style.position = 'relative';
+          selectedItem.style.zIndex = '2';
+        }
         
         // 隐藏 placeholder
         if (placeholder) {
           placeholder.style.display = 'none';
           placeholder.style.opacity = '0';
           placeholder.style.visibility = 'hidden';
+          placeholder.style.height = '0';
+          placeholder.style.width = '0';
+          placeholder.style.overflow = 'hidden';
+          placeholder.style.position = 'absolute';
+          placeholder.style.left = '-9999px';
         }
         
         // 移除 is-empty 类（如果存在）
         selectEl.classList.remove('is-empty');
-      } else if (!hasValue && placeholder) {
+        
+        // 确保 input wrapper 正确显示
+        if (inputWrapper) {
+          inputWrapper.style.position = 'relative';
+        }
+      } else {
         // 如果没有选中值，显示 placeholder
-        placeholder.style.display = '';
-        placeholder.style.opacity = '';
-        placeholder.style.visibility = '';
+        if (placeholder) {
+          placeholder.style.display = '';
+          placeholder.style.opacity = '';
+          placeholder.style.visibility = '';
+          placeholder.style.height = '';
+          placeholder.style.width = '';
+          placeholder.style.overflow = '';
+          placeholder.style.position = '';
+          placeholder.style.left = '';
+        }
       }
     });
+  };
+  
+  // 监听 el-select 的 change 事件，强制更新显示
+  const setupSelectChangeListeners = () => {
+    // 使用事件委托监听所有 el-select 的 change 事件
+    document.addEventListener('change', (e) => {
+      const selectEl = e.target.closest('.el-select');
+      if (selectEl) {
+        // 延迟执行，确保 DOM 已更新
+        setTimeout(() => {
+          fixSelectDisplay();
+        }, 10);
+      }
+    }, true); // 使用捕获阶段
+    
+    // 监听点击事件（当用户点击选项时）
+    document.addEventListener('click', (e) => {
+      const optionEl = e.target.closest('.el-select-dropdown__item');
+      if (optionEl) {
+        // 延迟执行，确保 DOM 已更新
+        setTimeout(() => {
+          fixSelectDisplay();
+        }, 50);
+      }
+    }, true);
   };
 
   // 修复 el-select 的 input 元素
@@ -754,22 +826,36 @@ const fixSelectAccessibility = () => {
     fixSelectInputs();
     fixDatePickerInputs();
     fixOtherFormInputs();
+    fixSelectDisplay(); // 修复选中值显示
   };
 
+  // 设置 el-select change 事件监听
+  setupSelectChangeListeners();
+
   // 延迟执行，确保 DOM 已完全加载
-  setTimeout(fixAllInputs, 100);
+  setTimeout(() => {
+    fixAllInputs();
+    // 多次执行，确保修复生效
+    setTimeout(fixSelectDisplay, 200);
+    setTimeout(fixSelectDisplay, 500);
+  }, 100);
 
   // 在路由变化后也执行修复（Vue Router 导航后）
   if (router) {
     router.afterEach(() => {
-      setTimeout(fixAllInputs, 200);
+      setTimeout(() => {
+        fixAllInputs();
+        fixSelectDisplay();
+      }, 200);
     });
   }
 
   // 开始观察 DOM 变化
   observer.observe(document.body, {
     childList: true,
-    subtree: true
+    subtree: true,
+    attributes: true, // 监听属性变化（如 class 变化）
+    attributeFilter: ['class'] // 只监听 class 属性变化
   });
 };
 
