@@ -273,15 +273,22 @@ def run_bot():
         # 检查并删除可能存在的 webhook（webhook 会阻止 polling）
         try:
             webhook_info = bot.get_webhook_info()
+            logger.info(f"Webhook 信息: url={webhook_info.url}, pending_update_count={webhook_info.pending_update_count}, has_custom_certificate={webhook_info.has_custom_certificate}")
             if webhook_info.url:
-                logger.warning(f"检测到 Bot 已设置 webhook: {webhook_info.url}，这将阻止 polling 工作")
+                logger.warning(f"⚠️ 检测到 Bot 已设置 webhook: {webhook_info.url}，这将阻止 polling 工作！")
                 logger.info("正在删除 webhook...")
-                bot.delete_webhook(drop_pending_updates=True)
-                logger.info("Webhook 已删除，现在可以正常使用 polling")
+                result = bot.delete_webhook(drop_pending_updates=True)
+                logger.info(f"Webhook 删除结果: {result}")
+                # 再次检查确认
+                webhook_info_after = bot.get_webhook_info()
+                if webhook_info_after.url:
+                    logger.error(f"❌ Webhook 删除失败！仍然存在: {webhook_info_after.url}")
+                else:
+                    logger.info("✅ Webhook 已成功删除，现在可以正常使用 polling")
             else:
-                logger.info("Bot 未设置 webhook，可以使用 polling")
+                logger.info("✅ Bot 未设置 webhook，可以使用 polling")
         except Exception as webhook_error:
-            logger.warning(f"检查 webhook 时出错: {webhook_error}")
+            logger.error(f"❌ 检查 webhook 时出错: {webhook_error}", exc_info=True)
         
         logger.info("开始轮询 Telegram 更新...")
         logger.info("如果收到消息但没有日志，可能是轮询没有正常运行")
@@ -289,23 +296,61 @@ def run_bot():
         # 测试获取更新（用于调试）
         try:
             logger.info("测试：尝试获取待处理的更新...")
-            updates = bot.get_updates(timeout=5, long_polling_timeout=5)
-            logger.info(f"测试：获取到 {len(updates)} 个待处理的更新")
-            if updates:
-                logger.info(f"测试：第一个更新的内容: {updates[0]}")
+            # 先获取 offset，避免重复处理
+            try:
+                updates = bot.get_updates(timeout=1)
+                if updates:
+                    # 获取最后一个 update_id
+                    last_update_id = updates[-1].update_id
+                    logger.info(f"测试：获取到 {len(updates)} 个待处理的更新，最后一个 update_id: {last_update_id}")
+                    # 确认这些更新，避免重复处理
+                    bot.get_updates(offset=last_update_id + 1, timeout=1)
+                    logger.info("测试：已确认更新，避免重复处理")
+                else:
+                    logger.info("测试：没有待处理的更新")
+            except Exception as get_updates_error:
+                logger.warning(f"测试获取更新时出错: {get_updates_error}", exc_info=True)
         except Exception as test_updates_error:
-            logger.warning(f"测试获取更新时出错: {test_updates_error}")
+            logger.warning(f"测试获取更新时出错: {test_updates_error}", exc_info=True)
+        
+        # 再次检查消息处理器
+        try:
+            handlers_count = len(bot.message_handlers) if hasattr(bot, 'message_handlers') else 0
+            logger.info(f"轮询开始前，再次检查消息处理器数量: {handlers_count}")
+            if hasattr(bot, 'message_handlers'):
+                for i, handler in enumerate(bot.message_handlers):
+                    logger.info(f"  处理器 {i+1}: {handler}")
+        except Exception as e:
+            logger.warning(f"检查消息处理器详情时出错: {e}")
         
         # 添加异常处理，确保能看到轮询过程中的错误
         try:
             logger.info("开始 infinity_polling...")
+            logger.info("⚠️ 重要：如果发送消息后没有日志，请检查：")
+            logger.info("   1. Webhook 是否已删除（应该看到 'Webhook 已成功删除'）")
+            logger.info("   2. 消息处理器数量是否大于 0")
+            logger.info("   3. 网络连接是否正常")
+            
             # 使用更简单的配置，不限制 allowed_updates
+            # 添加日志回调来监控轮询状态
+            import time
+            last_log_time = time.time()
+            
+            def log_polling_status():
+                """定期记录轮询状态"""
+                nonlocal last_log_time
+                current_time = time.time()
+                if current_time - last_log_time > 60:  # 每60秒记录一次
+                    logger.info(f"⏰ 轮询仍在运行中... (已运行 {int((current_time - last_log_time) / 60)} 分钟)")
+                    last_log_time = current_time
+            
             bot.infinity_polling(
                 timeout=20,  # 设置超时时间
                 long_polling_timeout=20,  # 长轮询超时时间
                 none_stop=True,  # 即使出现错误也继续运行
                 skip_pending=False,  # 不跳过待处理的更新
-                interval=0  # 立即处理更新
+                interval=0,  # 立即处理更新
+                logger_level=logging.DEBUG  # 启用 pyTelegramBotAPI 的调试日志
             )
             logger.info("infinity_polling 已退出（这不应该发生）")
         except KeyboardInterrupt:
