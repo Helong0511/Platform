@@ -32,7 +32,9 @@ console.error = function(...args) {
     errorMessage.includes('message channel') ||
     errorMessage.includes('channel closed') ||
     errorMessage.includes('a listener indicated an asynchronous response') ||
-    errorMessage.includes('but the message channel closed');
+    errorMessage.includes('but the message channel closed') ||
+    errorMessage.includes('listener indicated') ||
+    errorMessage.includes('response by returning true');
   
   // 如果是扩展错误，静默忽略
   if (isExtensionError) {
@@ -410,6 +412,7 @@ window.addEventListener('error', (event) => {
   // 包括 Edge 浏览器扩展可能引起的错误
   // 检查错误消息、错误名称和文件名
   const errorName = event?.error?.name || '';
+  const errorStack = event?.error?.stack || '';
   const isExtensionError = typeof errorMessage === 'string' && (
     errorString.includes('message channel closed') ||
     errorString.includes('asynchronous response') ||
@@ -417,7 +420,9 @@ window.addEventListener('error', (event) => {
     errorString.includes('message channel') ||
     errorString.includes('channel closed') ||
     errorString.includes('a listener indicated an asynchronous response') ||
-    errorString.includes('but the message channel closed')
+    errorString.includes('but the message channel closed') ||
+    errorString.includes('listener indicated') ||
+    errorString.includes('response by returning true')
   );
   const isExtensionFile = typeof errorFilename === 'string' && (
     errorFilename.includes('extension') ||
@@ -426,8 +431,15 @@ window.addEventListener('error', (event) => {
     errorFilename.includes('safari-extension') ||
     errorFilename.includes('edge-extension')
   );
+  const isExtensionStack = typeof errorStack === 'string' && (
+    errorStack.includes('extension') ||
+    errorStack.includes('chrome-extension') ||
+    errorStack.includes('moz-extension') ||
+    errorStack.includes('safari-extension') ||
+    errorStack.includes('edge-extension')
+  );
   
-  if (isExtensionError || isExtensionFile || errorName === 'ExtensionError') {
+  if (isExtensionError || isExtensionFile || isExtensionStack || errorName === 'ExtensionError') {
     event.preventDefault(); // 阻止默认的错误处理
     event.stopPropagation(); // 阻止事件冒泡
     event.stopImmediatePropagation(); // 阻止其他监听器处理
@@ -522,7 +534,9 @@ window.addEventListener('unhandledrejection', (event) => {
     errorString.includes('message channel') ||
     errorString.includes('channel closed') ||
     errorString.includes('a listener indicated an asynchronous response') ||
-    errorString.includes('but the message channel closed')
+    errorString.includes('but the message channel closed') ||
+    errorString.includes('listener indicated') ||
+    errorString.includes('response by returning true')
   );
   const isExtensionStack = typeof errorStack === 'string' && (
     errorStack.includes('extension') ||
@@ -535,7 +549,8 @@ window.addEventListener('unhandledrejection', (event) => {
     String(event.reason.message || '').toLowerCase().includes('message channel') ||
     String(event.reason.message || '').toLowerCase().includes('asynchronous response') ||
     String(event.reason.message || '').toLowerCase().includes('listener indicated') ||
-    String(event.reason.message || '').toLowerCase().includes('channel closed')
+    String(event.reason.message || '').toLowerCase().includes('channel closed') ||
+    String(event.reason.message || '').toLowerCase().includes('response by returning true')
   );
   
   if (isExtensionError || isExtensionStack || isExtensionReason || errorName === 'ExtensionError') {

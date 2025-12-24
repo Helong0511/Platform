@@ -118,7 +118,6 @@ sudo ufw allow 443/tcp
 
 
 
-
 # 将MySQL导出SQL
 
 # 结构和数据一起
@@ -156,7 +155,6 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8960
 
 # 删除 /data/20251114 目录下的所有文件
 sudo rm -rf /data/20251114/*
-
 
 
 

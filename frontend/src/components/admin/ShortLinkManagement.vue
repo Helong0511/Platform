@@ -476,6 +476,42 @@ const copyToClipboard = async (text) => {
     await navigator.clipboard.writeText(text);
     ElMessage.success('已复制到剪贴板');
   } catch (error) {
+    // 忽略浏览器扩展相关的错误（这些错误不影响复制功能）
+    const errorMessage = error?.message || String(error || '').toLowerCase();
+    const isExtensionError = typeof errorMessage === 'string' && (
+      errorMessage.includes('message channel closed') ||
+      errorMessage.includes('asynchronous response') ||
+      errorMessage.includes('listener indicated') ||
+      errorMessage.includes('channel closed')
+    );
+    
+    // 如果是扩展错误，尝试使用备用方法复制
+    if (isExtensionError) {
+      try {
+        // 使用传统的 execCommand 方法作为备用
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        
+        if (successful) {
+          ElMessage.success('已复制到剪贴板');
+          return;
+        }
+      } catch (fallbackError) {
+        // 备用方法也失败，静默处理
+      }
+      // 扩展错误不影响功能，静默处理
+      return;
+    }
+    
+    // 其他错误才显示错误消息
     ElMessage.error('复制失败');
   }
 };
