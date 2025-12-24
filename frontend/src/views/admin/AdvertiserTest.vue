@@ -424,5 +424,27 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
 }
+
+/* 修复对话框中的下拉框显示问题 */
+.el-dialog :deep(.el-select .el-input__wrapper) {
+  padding-right: 30px;
+}
+
+.el-dialog :deep(.el-select .el-select__input) {
+  padding-right: 8px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  width: 100% !important;
+  max-width: 100%;
+}
+
+/* 确保对话框中的placeholder正确隐藏 */
+.el-dialog :deep(.el-select.is-focus .el-select__placeholder),
+.el-dialog :deep(.el-select:not(.is-empty) .el-select__placeholder) {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
 </style>
 

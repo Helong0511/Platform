@@ -77,13 +77,14 @@ const loginForm = reactive({
 // 表单验证规则
 const rules = reactive({
   username: [
-    { required: true, message: '请输入用户名', trigger: 'blur' },
+    { required: true, message: '请输入用户名', trigger: ['blur', 'change'] },
     {
       validator: (rule, value, callback) => {
         // 使用 try-catch 确保错误被正确捕获
         try {
-          if (!value || typeof value !== 'string') {
-            callback(new Error('请输入用户名'));
+          // 如果值为空，不进行长度验证（由required规则处理）
+          if (!value || typeof value !== 'string' || value.trim().length === 0) {
+            callback();
             return;
           }
           const trimmedValue = value.trim();
@@ -99,17 +100,18 @@ const rules = reactive({
           callback();
         }
       },
-      trigger: 'blur'
+      trigger: ['blur', 'change']
     }
   ],
   password: [
-    { required: true, message: '请输入密码', trigger: 'blur' },
+    { required: true, message: '请输入密码', trigger: ['blur', 'change'] },
     {
       validator: (rule, value, callback) => {
         // 使用 try-catch 确保错误被正确捕获
         try {
-          if (!value || typeof value !== 'string') {
-            callback(new Error('请输入密码'));
+          // 如果值为空，不进行长度验证（由required规则处理）
+          if (!value || typeof value !== 'string' || value.length === 0) {
+            callback();
             return;
           }
           if (value.length < 6) {
@@ -124,7 +126,7 @@ const rules = reactive({
           callback();
         }
       },
-      trigger: 'blur'
+      trigger: ['blur', 'change']
     }
   ]
 });
@@ -319,6 +321,35 @@ onBeforeUnmount(() => {
 .login-form :deep(.el-input:focus-within) {
   border-color: var(--primary-color);
   box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+/* 修复输入框验证状态显示 */
+.login-form :deep(.el-form-item.is-error .el-input__wrapper) {
+  border-color: var(--danger-color, #f56c6c);
+}
+
+.login-form :deep(.el-form-item.is-success .el-input__wrapper) {
+  border-color: var(--success-color, #67c23a);
+}
+
+/* 确保验证错误消息正确显示 */
+.login-form :deep(.el-form-item__error) {
+  color: var(--danger-color, #f56c6c);
+  font-size: 12px;
+  line-height: 1;
+  padding-top: 4px;
+  position: absolute;
+  top: 100%;
+  left: 0;
+}
+
+/* 修复输入框获得焦点时的验证状态 */
+.login-form :deep(.el-input.is-focus .el-input__wrapper) {
+  border-color: var(--primary-color);
+}
+
+.login-form :deep(.el-form-item.is-error .el-input.is-focus .el-input__wrapper) {
+  border-color: var(--danger-color, #f56c6c);
 }
 
 .login-actions {

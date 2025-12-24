@@ -319,6 +319,108 @@ input[type="text"].el-input_inner {
   /* 如果没有 placeholder，将通过 JavaScript 动态添加 title 属性 */
 }
 
+/* ====== 修复 el-select 文本显示问题 ====== */
+/* 确保选中值和placeholder不会重叠显示 */
+.el-select .el-select__input {
+  width: 100% !important;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  padding-right: 8px;
+  max-width: 100%;
+}
+
+/* 确保 el-select 的 wrapper 有足够的空间 */
+.el-select .el-input__wrapper {
+  padding-right: 30px; /* 为清除按钮和下拉箭头留出空间 */
+  position: relative;
+}
+
+/* 确保选中值文本正确显示，隐藏placeholder */
+.el-select.is-focus .el-select__placeholder,
+.el-select:not(.is-empty) .el-select__placeholder {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+/* 确保选中值文本正确显示 */
+.el-select__selected-item {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 100%;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* 修复 el-select 在对话框中的显示问题 */
+.el-dialog .el-select .el-input__wrapper {
+  padding-right: 30px;
+  position: relative;
+}
+
+.el-dialog .el-select .el-select__input {
+  padding-right: 8px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  width: 100% !important;
+  max-width: 100%;
+}
+
+/* 确保对话框中的placeholder正确隐藏 */
+.el-dialog .el-select.is-focus .el-select__placeholder,
+.el-dialog .el-select:not(.is-empty) .el-select__placeholder {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+/* 修复表单中的下拉框显示问题 */
+.el-form .el-select .el-input__wrapper {
+  padding-right: 30px;
+}
+
+.el-form .el-select .el-select__input {
+  padding-right: 8px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  width: 100% !important;
+  max-width: 100%;
+}
+
+/* 确保表单中的placeholder正确隐藏 */
+.el-form .el-select.is-focus .el-select__placeholder,
+.el-form .el-select:not(.is-empty) .el-select__placeholder {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+/* 修复所有下拉框的清除按钮位置 */
+.el-select .el-input__suffix {
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: auto;
+}
+
+/* 确保下拉框输入框在获得焦点时正确显示 */
+.el-select.is-focus .el-select__input {
+  width: 100% !important;
+  padding-right: 8px;
+}
+
+/* 修复多选下拉框的显示问题 */
+.el-select.is-multiple .el-select__input {
+  width: auto !important;
+  min-width: 0;
+  flex: 1;
+}
+
 /* ====== 性能优化：修复 @keyframes 中使用 left 属性的问题 ====== */
 /* Element Plus 的 indeterminate 动画使用 left 属性，会触发布局重排，影响性能 */
 /* 通过覆盖样式，使用 transform 替代 left，避免布局重排 */

@@ -569,6 +569,7 @@ onMounted(() => {
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
+  width: 100% !important;
 }
 
 /* 确保清除按钮不遮挡文字 */
@@ -581,6 +582,34 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* 修复对话框中的下拉框显示问题 */
+.el-dialog :deep(.el-select .el-input__wrapper) {
+  padding-right: 30px;
+}
+
+.el-dialog :deep(.el-select .el-select__input) {
+  padding-right: 8px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  width: 100% !important;
+}
+
+/* 确保选中值文本正确显示，隐藏placeholder */
+.el-dialog :deep(.el-select.is-focus .el-select__placeholder),
+.el-dialog :deep(.el-select:not(.is-empty) .el-select__placeholder) {
+  display: none !important;
+}
+
+/* 确保选中值文本正确显示 */
+.el-dialog :deep(.el-select__selected-item) {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 100%;
+  display: inline-block;
 }
 
 .pagination-container {
