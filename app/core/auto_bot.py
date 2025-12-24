@@ -86,52 +86,87 @@ def get_chat_id_handler(message):
     bot.reply_to(message, f"你的聊天ID是: {chat_id}")
 
 
+# 注册命令处理器（确保在 Bot 初始化后注册）
+def _register_command_handlers():
+    """注册所有命令处理器"""
+    if not bot_initialized or not TELEBOT_AVAILABLE or not bot:
+        logger.warning("Bot 未初始化，无法注册命令处理器")
+        return False
+    
+    try:
+        @bot.message_handler(commands=['test'])
+        def handle_test_command(message):
+            """处理 /test 命令：显示测试内联按钮"""
+            if not _check_bot_available():
+                logger.error("Bot 未初始化，无法处理消息")
+                return
+
+            chat_id = message.chat.id
+            markup = InlineKeyboardMarkup()
+
+            # 第一行：三个按钮
+            markup.row(
+                InlineKeyboardButton(text='选项1', callback_data='Option1'),
+                InlineKeyboardButton(text='选项2', callback_data='Option2'),
+                InlineKeyboardButton(text='选项3', callback_data='Option3')
+            )
+
+            # 第二行：两个按钮
+            markup.row(
+                InlineKeyboardButton(text='选项4', callback_data='Option4'),
+                InlineKeyboardButton(text='选项5', callback_data='Option5')
+            )
+
+            # 第三行：一个按钮（查看）
+            markup.row(InlineKeyboardButton(text='查看', callback_data='View'))
+
+            # 第四行：一个按钮（取消）
+            markup.row(InlineKeyboardButton(text='取消', callback_data='Cancel'))
+
+            bot.send_message(chat_id, "这是测试内联按钮：", reply_markup=markup)
+
+        @bot.message_handler(commands=['clock'])
+        def handle_clock_command(message):
+            """处理 /clock 命令：显示打卡确认按钮"""
+            if not _check_bot_available():
+                logger.error("Bot 未初始化，无法处理消息")
+                return
+
+            chat_id = message.chat.id
+            markup = InlineKeyboardMarkup()
+
+            markup.row(InlineKeyboardButton(text='打卡', callback_data='clock'))
+            markup.row(InlineKeyboardButton(text='取消', callback_data='Cancel'))
+
+            bot.send_message(chat_id, "确认是否要打卡？", reply_markup=markup)
+        
+        @bot.message_handler(commands=['id'])
+        def get_chat_id(message):
+            """处理 /id 命令：返回聊天ID"""
+            logger.info(f"收到 /id 命令，来自用户: {message.from_user.username or message.from_user.first_name}")
+            if not _check_bot_available():
+                logger.error("Bot 未初始化，无法处理消息")
+                return
+            try:
+                chat_id = message.chat.id
+                bot.reply_to(message, f"你的聊天ID是: {chat_id}")
+                logger.info(f"成功回复 /id 命令，聊天ID: {chat_id}")
+            except Exception as e:
+                logger.error(f"处理 /id 命令时发生错误: {e}", exc_info=True)
+                try:
+                    bot.reply_to(message, "处理命令时发生错误，请稍后重试")
+                except:
+                    pass
+        
+        logger.info("Telegram Bot 命令处理器注册成功: /id, /test, /clock")
+        return True
+    except Exception as e:
+        logger.error(f"注册命令处理器时发生错误: {e}", exc_info=True)
+        return False
+
+# 如果 Bot 已初始化，立即注册命令处理器
 if bot_initialized and TELEBOT_AVAILABLE:
-    @bot.message_handler(commands=['test'])
-    def handle_test_command(message):
-        """处理 /test 命令：显示测试内联按钮"""
-        if not _check_bot_available():
-            logger.error("Bot 未初始化，无法处理消息")
-            return
-
-        chat_id = message.chat.id
-        markup = InlineKeyboardMarkup()
-
-        # 第一行：三个按钮
-        markup.row(
-            InlineKeyboardButton(text='选项1', callback_data='Option1'),
-            InlineKeyboardButton(text='选项2', callback_data='Option2'),
-            InlineKeyboardButton(text='选项3', callback_data='Option3')
-        )
-
-        # 第二行：两个按钮
-        markup.row(
-            InlineKeyboardButton(text='选项4', callback_data='Option4'),
-            InlineKeyboardButton(text='选项5', callback_data='Option5')
-        )
-
-        # 第三行：一个按钮（查看）
-        markup.row(InlineKeyboardButton(text='查看', callback_data='View'))
-
-        # 第四行：一个按钮（取消）
-        markup.row(InlineKeyboardButton(text='取消', callback_data='Cancel'))
-
-        bot.send_message(chat_id, "这是测试内联按钮：", reply_markup=markup)
-
-    @bot.message_handler(commands=['clock'])
-    def handle_clock_command(message):
-        """处理 /clock 命令：显示打卡确认按钮"""
-        if not _check_bot_available():
-            logger.error("Bot 未初始化，无法处理消息")
-            return
-
-        chat_id = message.chat.id
-        markup = InlineKeyboardMarkup()
-
-        markup.row(InlineKeyboardButton(text='打卡', callback_data='clock'))
-        markup.row(InlineKeyboardButton(text='取消', callback_data='Cancel'))
-
-        bot.send_message(chat_id, "确认是否要打卡？", reply_markup=markup)
+    _register_command_handlers()
 
 # 处理按钮点击事件
 if bot_initialized and TELEBOT_AVAILABLE:
@@ -414,6 +449,11 @@ def start_bot():
         return False
 
     try:
+        # 确保命令处理器已注册
+        logger.info(f"[PID:{current_pid}] 正在注册命令处理器...")
+        if not _register_command_handlers():
+            logger.warning(f"[PID:{current_pid}] 命令处理器注册失败，但将继续启动 Bot")
+        
         logger.info(f"[PID:{current_pid}] 正在设置 Telegram Bot 命令...")
         # 设置 Bot 命令
         commands_list = [
@@ -475,14 +515,7 @@ def stop_bot():
             _release_bot_lock()
 
 
-if bot_initialized and TELEBOT_AVAILABLE:
-    @bot.message_handler(commands=['id'])
-    def get_chat_id(message):
-        """处理 /id 命令：返回聊天ID"""
-        if not _check_bot_available():
-            logger.error("Bot 未初始化，无法处理消息")
-            return
-        bot.reply_to(message, f"你的聊天ID是: {message.chat.id}")
+# /id 命令处理器已在 _register_command_handlers() 中注册
 
 
 async def send_telegram_message(message: str, chat_id: str | None = None):
