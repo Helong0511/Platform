@@ -2,43 +2,56 @@
 import { RouterView } from 'vue-router';
 import { onMounted, onBeforeUnmount } from 'vue';
 
+// 检查是否是浏览器扩展相关的错误（统一函数）
+const isExtensionError = (message) => {
+  if (!message || typeof message !== 'string') return false;
+  const lowerMessage = message.toLowerCase();
+  return lowerMessage.includes('message channel closed') ||
+    lowerMessage.includes('message port closed') ||
+    lowerMessage.includes('asynchronous response') ||
+    lowerMessage.includes('listener indicated an asynchronous response') ||
+    lowerMessage.includes('message channel') ||
+    lowerMessage.includes('channel closed') ||
+    lowerMessage.includes('port closed') ||
+    lowerMessage.includes('a listener indicated an asynchronous response') ||
+    lowerMessage.includes('but the message channel closed') ||
+    lowerMessage.includes('before a response was received') ||
+    lowerMessage.includes('listener indicated') ||
+    lowerMessage.includes('response by returning true') ||
+    lowerMessage.includes('extensioncontextinvalidated') ||
+    lowerMessage.includes('extension context invalidated');
+};
+
 // 错误处理函数 - 专门处理浏览器扩展相关的错误
 const handleError = (event) => {
   const errorMessage = event?.message || event?.error?.message || '';
-  const errorString = String(errorMessage).toLowerCase();
   
   // 忽略浏览器扩展相关的错误（Edge 浏览器扩展可能引起的错误）
   // 检查错误消息、错误名称和文件名
   const errorName = event?.error?.name || '';
   const errorFilename = event?.filename || '';
   const errorStack = event?.error?.stack || '';
-  const isExtensionError = typeof errorMessage === 'string' && (
-    errorString.includes('message channel closed') ||
-    errorString.includes('asynchronous response') ||
-    errorString.includes('listener indicated an asynchronous response') ||
-    errorString.includes('message channel') ||
-    errorString.includes('channel closed') ||
-    errorString.includes('a listener indicated an asynchronous response') ||
-    errorString.includes('but the message channel closed') ||
-    errorString.includes('listener indicated') ||
-    errorString.includes('response by returning true')
-  );
+  const isExtensionErrorMsg = isExtensionError(errorMessage);
   const isExtensionFile = typeof errorFilename === 'string' && (
     errorFilename.includes('extension') ||
     errorFilename.includes('chrome-extension') ||
     errorFilename.includes('moz-extension') ||
     errorFilename.includes('safari-extension') ||
-    errorFilename.includes('edge-extension')
+    errorFilename.includes('edge-extension') ||
+    errorFilename.includes('content.js') ||
+    errorFilename.includes('content-script')
   );
   const isExtensionStack = typeof errorStack === 'string' && (
     errorStack.includes('extension') ||
     errorStack.includes('chrome-extension') ||
     errorStack.includes('moz-extension') ||
     errorStack.includes('safari-extension') ||
-    errorStack.includes('edge-extension')
+    errorStack.includes('edge-extension') ||
+    errorStack.includes('content.js') ||
+    errorStack.includes('content-script')
   );
   
-  if (isExtensionError || isExtensionFile || isExtensionStack || errorName === 'ExtensionError') {
+  if (isExtensionErrorMsg || isExtensionFile || isExtensionStack || errorName === 'ExtensionError') {
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
@@ -49,23 +62,12 @@ const handleError = (event) => {
 
 const handleRejection = (event) => {
   const errorMessage = event?.reason?.message || event?.reason?.toString() || '';
-  const errorString = String(errorMessage).toLowerCase();
   
   // 忽略浏览器扩展相关的错误
   // 检查错误消息、错误名称和堆栈信息
   const errorName = event?.reason?.name || '';
   const errorStack = event?.reason?.stack || '';
-  const isExtensionError = typeof errorMessage === 'string' && (
-    errorString.includes('message channel closed') ||
-    errorString.includes('asynchronous response') ||
-    errorString.includes('listener indicated an asynchronous response') ||
-    errorString.includes('message channel') ||
-    errorString.includes('channel closed') ||
-    errorString.includes('a listener indicated an asynchronous response') ||
-    errorString.includes('but the message channel closed') ||
-    errorString.includes('listener indicated') ||
-    errorString.includes('response by returning true')
-  );
+  const isExtensionErrorMsg = isExtensionError(errorMessage);
   const isExtensionStack = typeof errorStack === 'string' && (
     errorStack.includes('extension') ||
     errorStack.includes('chrome-extension') ||
@@ -74,14 +76,11 @@ const handleRejection = (event) => {
     errorStack.includes('edge-extension')
   );
   const isExtensionReason = event?.reason && typeof event.reason === 'object' && (
-    String(event.reason.message || '').toLowerCase().includes('message channel') ||
-    String(event.reason.message || '').toLowerCase().includes('asynchronous response') ||
-    String(event.reason.message || '').toLowerCase().includes('listener indicated') ||
-    String(event.reason.message || '').toLowerCase().includes('channel closed') ||
-    String(event.reason.message || '').toLowerCase().includes('response by returning true')
+    isExtensionError(String(event.reason.message || '')) ||
+    isExtensionError(String(event.reason.toString || ''))
   );
   
-  if (isExtensionError || isExtensionStack || isExtensionReason || errorName === 'ExtensionError') {
+  if (isExtensionErrorMsg || isExtensionStack || isExtensionReason || errorName === 'ExtensionError') {
     event.preventDefault();
     event.stopPropagation();
     return true;

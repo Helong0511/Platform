@@ -1,3 +1,32 @@
+// ====== 最早期的错误处理（在所有导入之前） ======
+// 捕获未处理的 Promise rejection（浏览器扩展相关）
+if (typeof window !== 'undefined') {
+  window.addEventListener('unhandledrejection', (event) => {
+    const errorMessage = event?.reason?.message || event?.reason?.toString() || '';
+    const errorString = String(errorMessage).toLowerCase();
+    
+    // 检查是否是浏览器扩展相关的错误
+    if (errorString.includes('message channel closed') ||
+        errorString.includes('message port closed') ||
+        errorString.includes('asynchronous response') ||
+        errorString.includes('listener indicated an asynchronous response') ||
+        errorString.includes('message channel') ||
+        errorString.includes('channel closed') ||
+        errorString.includes('port closed') ||
+        errorString.includes('a listener indicated an asynchronous response') ||
+        errorString.includes('but the message channel closed') ||
+        errorString.includes('before a response was received') ||
+        errorString.includes('listener indicated') ||
+        errorString.includes('response by returning true') ||
+        errorString.includes('extensioncontextinvalidated') ||
+        errorString.includes('extension context invalidated')) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+  }, true); // 使用 capture 模式，确保优先处理
+}
+
 // Vue核心
 import { createApp, nextTick } from 'vue';
 import App from './App.vue';
@@ -22,27 +51,64 @@ import { logger } from './utils/logger';
 
 // ====== 早期错误过滤（在应用初始化之前） ======
 // 过滤浏览器扩展相关的控制台错误
+// 必须在最早阶段设置，确保捕获所有错误
 const originalConsoleError = console.error;
+const originalConsoleWarn = console.warn;
+
+// 检查是否是浏览器扩展相关的错误
+const isExtensionError = (message) => {
+  if (!message || typeof message !== 'string') return false;
+  const lowerMessage = message.toLowerCase();
+  return lowerMessage.includes('message channel closed') ||
+    lowerMessage.includes('message port closed') ||
+    lowerMessage.includes('asynchronous response') ||
+    lowerMessage.includes('listener indicated an asynchronous response') ||
+    lowerMessage.includes('message channel') ||
+    lowerMessage.includes('channel closed') ||
+    lowerMessage.includes('port closed') ||
+    lowerMessage.includes('a listener indicated an asynchronous response') ||
+    lowerMessage.includes('but the message channel closed') ||
+    lowerMessage.includes('before a response was received') ||
+    lowerMessage.includes('listener indicated') ||
+    lowerMessage.includes('response by returning true') ||
+    lowerMessage.includes('extensioncontextinvalidated') ||
+    lowerMessage.includes('extension context invalidated');
+};
+
 console.error = function(...args) {
-  // 检查是否是浏览器扩展相关的错误
-  const errorMessage = args.join(' ').toLowerCase();
-  const isExtensionError = errorMessage.includes('message channel closed') ||
-    errorMessage.includes('asynchronous response') ||
-    errorMessage.includes('listener indicated an asynchronous response') ||
-    errorMessage.includes('message channel') ||
-    errorMessage.includes('channel closed') ||
-    errorMessage.includes('a listener indicated an asynchronous response') ||
-    errorMessage.includes('but the message channel closed') ||
-    errorMessage.includes('listener indicated') ||
-    errorMessage.includes('response by returning true');
+  // 检查所有参数，包括错误对象
+  const errorMessages = args.map(arg => {
+    if (arg instanceof Error) {
+      return arg.message || arg.toString();
+    }
+    return String(arg);
+  }).join(' ');
   
   // 如果是扩展错误，静默忽略
-  if (isExtensionError) {
+  if (isExtensionError(errorMessages)) {
     return;
   }
   
   // 否则正常输出
   originalConsoleError.apply(console, args);
+};
+
+console.warn = function(...args) {
+  // 检查所有参数
+  const errorMessages = args.map(arg => {
+    if (arg instanceof Error) {
+      return arg.message || arg.toString();
+    }
+    return String(arg);
+  }).join(' ');
+  
+  // 如果是扩展错误，静默忽略
+  if (isExtensionError(errorMessages)) {
+    return;
+  }
+  
+  // 否则正常输出
+  originalConsoleWarn.apply(console, args);
 };
 
 // 创建Vue应用
@@ -413,23 +479,17 @@ window.addEventListener('error', (event) => {
   // 检查错误消息、错误名称和文件名
   const errorName = event?.error?.name || '';
   const errorStack = event?.error?.stack || '';
-  const isExtensionError = typeof errorMessage === 'string' && (
-    errorString.includes('message channel closed') ||
-    errorString.includes('asynchronous response') ||
-    errorString.includes('listener indicated an asynchronous response') ||
-    errorString.includes('message channel') ||
-    errorString.includes('channel closed') ||
-    errorString.includes('a listener indicated an asynchronous response') ||
-    errorString.includes('but the message channel closed') ||
-    errorString.includes('listener indicated') ||
-    errorString.includes('response by returning true')
-  );
+  
+  // 使用统一的扩展错误检查函数
+  const isExtensionErrorMsg = isExtensionError(errorMessage);
   const isExtensionFile = typeof errorFilename === 'string' && (
     errorFilename.includes('extension') ||
     errorFilename.includes('chrome-extension') ||
     errorFilename.includes('moz-extension') ||
     errorFilename.includes('safari-extension') ||
-    errorFilename.includes('edge-extension')
+    errorFilename.includes('edge-extension') ||
+    errorFilename.includes('content.js') ||
+    errorFilename.includes('content-script')
   );
   const isExtensionStack = typeof errorStack === 'string' && (
     errorStack.includes('extension') ||
@@ -439,7 +499,7 @@ window.addEventListener('error', (event) => {
     errorStack.includes('edge-extension')
   );
   
-  if (isExtensionError || isExtensionFile || isExtensionStack || errorName === 'ExtensionError') {
+  if (isExtensionErrorMsg || isExtensionFile || isExtensionStack || errorName === 'ExtensionError') {
     event.preventDefault(); // 阻止默认的错误处理
     event.stopPropagation(); // 阻止事件冒泡
     event.stopImmediatePropagation(); // 阻止其他监听器处理
@@ -527,33 +587,22 @@ window.addEventListener('unhandledrejection', (event) => {
   // 忽略浏览器扩展相关的错误（通常由广告拦截器、开发者工具扩展等引起）
   // 包括 Edge 浏览器扩展可能引起的错误
   // 检查错误消息、错误名称和堆栈信息
-  const isExtensionError = typeof errorMessage === 'string' && (
-    errorString.includes('message channel closed') ||
-    errorString.includes('asynchronous response') ||
-    errorString.includes('listener indicated an asynchronous response') ||
-    errorString.includes('message channel') ||
-    errorString.includes('channel closed') ||
-    errorString.includes('a listener indicated an asynchronous response') ||
-    errorString.includes('but the message channel closed') ||
-    errorString.includes('listener indicated') ||
-    errorString.includes('response by returning true')
-  );
+  const isExtensionErrorMsg = isExtensionError(errorMessage);
   const isExtensionStack = typeof errorStack === 'string' && (
     errorStack.includes('extension') ||
     errorStack.includes('chrome-extension') ||
     errorStack.includes('moz-extension') ||
     errorStack.includes('safari-extension') ||
-    errorStack.includes('edge-extension')
+    errorStack.includes('edge-extension') ||
+    errorStack.includes('content.js') ||
+    errorStack.includes('content-script')
   );
   const isExtensionReason = event?.reason && typeof event.reason === 'object' && (
-    String(event.reason.message || '').toLowerCase().includes('message channel') ||
-    String(event.reason.message || '').toLowerCase().includes('asynchronous response') ||
-    String(event.reason.message || '').toLowerCase().includes('listener indicated') ||
-    String(event.reason.message || '').toLowerCase().includes('channel closed') ||
-    String(event.reason.message || '').toLowerCase().includes('response by returning true')
+    isExtensionError(String(event.reason.message || '')) ||
+    isExtensionError(String(event.reason.toString || ''))
   );
   
-  if (isExtensionError || isExtensionStack || isExtensionReason || errorName === 'ExtensionError') {
+  if (isExtensionErrorMsg || isExtensionStack || isExtensionReason || errorName === 'ExtensionError') {
     event.preventDefault(); // 阻止默认的错误处理
     event.stopPropagation(); // 阻止事件冒泡
     return;
