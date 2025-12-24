@@ -93,14 +93,17 @@ if bot_initialized and TELEBOT_AVAILABLE:
     @bot.message_handler(commands=['id'])
     def get_chat_id(message):
         """处理 /id 命令：返回聊天ID"""
-        logger.info(f"[命令处理器] ✅ 收到 /id 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat ID: {message.chat.id})")
+        logger.info(f"[命令处理器] ✅✅✅ 收到 /id 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat ID: {message.chat.id})")
+        logger.info(f"[命令处理器] 消息对象: {message}")
+        logger.info(f"[命令处理器] 消息文本: {message.text}")
         if not _check_bot_available():
             logger.error("[命令处理器] Bot 未初始化，无法处理消息")
             return
         try:
             chat_id = message.chat.id
+            logger.info(f"[命令处理器] 准备回复，chat_id: {chat_id}")
             bot.reply_to(message, f"你的聊天ID是: {chat_id}")
-            logger.info(f"[命令处理器] ✅ 成功回复 /id 命令，聊天ID: {chat_id}")
+            logger.info(f"[命令处理器] ✅✅✅ 成功回复 /id 命令，聊天ID: {chat_id}")
         except Exception as e:
             logger.error(f"[命令处理器] ❌ 处理 /id 命令时发生错误: {e}", exc_info=True)
             try:
@@ -343,8 +346,29 @@ def run_bot():
                         
                         # 处理更新
                         logger.info("🔄 开始处理更新...")
-                        bot.process_new_updates(updates)
-                        logger.info("✅ 更新处理完成")
+                        try:
+                            # 确保更新被正确处理
+                            for update in updates:
+                                if hasattr(update, 'message') and update.message:
+                                    msg = update.message
+                                    text = getattr(msg, 'text', '') or ''
+                                    logger.info(f"🔍 准备处理消息: text='{text}', chat_id={msg.chat.id if hasattr(msg, 'chat') else '未知'}")
+                            
+                            # 检查消息处理器
+                            handlers_count = len(bot.message_handlers) if hasattr(bot, 'message_handlers') else 0
+                            logger.info(f"🔍 处理前，消息处理器数量: {handlers_count}")
+                            
+                            # 处理更新
+                            logger.info("🔄 调用 bot.process_new_updates()...")
+                            bot.process_new_updates(updates)
+                            logger.info("✅ bot.process_new_updates() 调用完成")
+                            
+                            # 检查是否有异常被静默吞掉
+                            logger.info("✅ 更新处理完成")
+                        except Exception as process_error:
+                            logger.error(f"❌ 处理更新时出错: {process_error}", exc_info=True)
+                            import traceback
+                            logger.error(f"❌ 错误堆栈: {traceback.format_exc()}")
                         # 更新 offset
                         last_update_id = updates[-1].update_id + 1
                         logger.info(f"✅ 已处理更新，新的 offset: {last_update_id}")
