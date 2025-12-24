@@ -445,7 +445,7 @@ window.addEventListener('error', (event) => {
 
   // 忽略 inspector.js 中关于 responseText 的错误（这是浏览器开发者工具的问题，不是代码问题）
   // 检查文件名、错误消息和错误名称
-  const errorName = event?.error?.name || '';
+  // errorName 已在上面声明，直接使用
   const isInspectorFile = typeof errorFilename === 'string' && errorFilename.includes('inspector.js');
   const isResponseTextError = typeof errorMessage === 'string' && (
     (errorMessage.includes('responseText') && errorMessage.includes('responseType')) ||
