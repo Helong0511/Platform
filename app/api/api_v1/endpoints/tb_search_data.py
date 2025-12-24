@@ -477,93 +477,6 @@ async def batch_delete_tb_search_data(
     
     return ResponseBaseSchema.success(data={"message": f"成功删除 {result.rowcount} 条数据"})
 
-@router.delete("/{data_id}", response_model=ResponseBaseSchema[dict], summary="删除TB搜索数据")
-async def delete_tb_search_data(
-    data_id: int = Path(..., ge=1, description="TB搜索数据ID"),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    if current_user.role != UserRole.ADMIN:
-        raise_api_exception(ErrorCode.PERMISSION_DENIED, detail="仅管理员可删除")
-
-    query = select(TBSearchData).where(TBSearchData.id == data_id)
-    result = await db.execute(query)
-    tb_data = result.scalar_one_or_none()
-    
-    if not tb_data:
-        raise_api_exception(ErrorCode.NOT_FOUND, detail="数据不存在")
-        
-    await db.delete(tb_data)
-    await db.commit()
-    
-    return ResponseBaseSchema.success(data={"message": "删除成功"})
-
-@router.post("/{data_id}", response_model=ResponseBaseSchema[TBSearchDataResponse], summary="更新TB搜索数据")
-async def update_tb_search_data(
-    data_id: int = Path(..., ge=1, description="TB搜索数据ID"),
-    data_update: TBSearchDataUpdate = Body(...),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    if current_user.role != UserRole.ADMIN:
-        raise_api_exception(ErrorCode.PERMISSION_DENIED, detail="仅管理员可修改")
-
-    query = select(TBSearchData).where(TBSearchData.id == data_id)
-    result = await db.execute(query)
-    tb_data = result.scalar_one_or_none()
-    
-    if not tb_data:
-        raise_api_exception(ErrorCode.NOT_FOUND, detail="数据不存在")
-
-    update_dict = data_update.model_dump(exclude_unset=True)
-    for k, v in update_dict.items():
-        setattr(tb_data, k, v)
-    
-    await db.commit()
-    await db.refresh(tb_data)
-    
-    # 重新查询以获取关联信息
-    query = select(TBSearchData, Product, Client, User, CountryInfo)
-    query = query.join(Product, TBSearchData.product_id == Product.id)
-    query = query.join(Client, Product.client_id == Client.id)
-    query = query.join(User, Client.user_id == User.id)
-    query = join_country_info(query)
-    query = query.where(TBSearchData.id == data_id)
-    
-    result = await db.execute(query)
-    row = result.unique().first()
-    tb_data, product, client, user, country_info = row
-    
-    country_name = "未知区域"
-    if country_info:
-        country_name = country_info.country_name_zh
-    elif tb_data.country_code == "ZZ":
-        country_name = "全部区域"
-
-    date_val = tb_data.date.date() if isinstance(tb_data.date, datetime) else tb_data.date
-
-    return ResponseBaseSchema.success(data=TBSearchDataResponse(
-        id=tb_data.id,
-        date=date_val,
-        product_id=product.id,
-        product_name=product.name,
-        country_code=tb_data.country_code,
-        country_name_zh=country_name,
-        redirects=tb_data.redirects,
-        searches=tb_data.searches,
-        monetized=tb_data.monetized,
-        clicks=tb_data.clicks,
-        revenue=tb_data.revenue,
-        rpm=tb_data.rpm,
-        revenue_before_deduct=tb_data.revenue_before_deduct,
-        rpm_before_deduct=tb_data.rpm_before_deduct,
-        created_at=tb_data.created_at,
-        updated_at=tb_data.updated_at,
-        client_id=client.id if client else 0,
-        client_name=client.company_name if client else "未知客户",
-        user_name=(user.full_name or user.username) if user else "未知用户"
-    ))
-
 @router.get("/clients-with-data", response_model=ListResponseBaseSchema[list[dict]], summary="获取有TB搜索数据的客户列表")
 async def get_clients_with_tb_search_data(
     db: AsyncSession = Depends(get_db),
@@ -863,4 +776,91 @@ async def get_countries_with_tb_search_data(
             ErrorCode.OPERATION_FAILED,
             detail=f"获取有数据的国家列表失败：{str(e)}。请稍后重试或联系管理员"
         )
+
+@router.delete("/{data_id}", response_model=ResponseBaseSchema[dict], summary="删除TB搜索数据")
+async def delete_tb_search_data(
+    data_id: int = Path(..., ge=1, description="TB搜索数据ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != UserRole.ADMIN:
+        raise_api_exception(ErrorCode.PERMISSION_DENIED, detail="仅管理员可删除")
+
+    query = select(TBSearchData).where(TBSearchData.id == data_id)
+    result = await db.execute(query)
+    tb_data = result.scalar_one_or_none()
+    
+    if not tb_data:
+        raise_api_exception(ErrorCode.NOT_FOUND, detail="数据不存在")
+        
+    await db.delete(tb_data)
+    await db.commit()
+    
+    return ResponseBaseSchema.success(data={"message": "删除成功"})
+
+@router.post("/{data_id}", response_model=ResponseBaseSchema[TBSearchDataResponse], summary="更新TB搜索数据")
+async def update_tb_search_data(
+    data_id: int = Path(..., ge=1, description="TB搜索数据ID"),
+    data_update: TBSearchDataUpdate = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != UserRole.ADMIN:
+        raise_api_exception(ErrorCode.PERMISSION_DENIED, detail="仅管理员可修改")
+
+    query = select(TBSearchData).where(TBSearchData.id == data_id)
+    result = await db.execute(query)
+    tb_data = result.scalar_one_or_none()
+    
+    if not tb_data:
+        raise_api_exception(ErrorCode.NOT_FOUND, detail="数据不存在")
+
+    update_dict = data_update.model_dump(exclude_unset=True)
+    for k, v in update_dict.items():
+        setattr(tb_data, k, v)
+    
+    await db.commit()
+    await db.refresh(tb_data)
+    
+    # 重新查询以获取关联信息
+    query = select(TBSearchData, Product, Client, User, CountryInfo)
+    query = query.join(Product, TBSearchData.product_id == Product.id)
+    query = query.join(Client, Product.client_id == Client.id)
+    query = query.join(User, Client.user_id == User.id)
+    query = join_country_info(query)
+    query = query.where(TBSearchData.id == data_id)
+    
+    result = await db.execute(query)
+    row = result.unique().first()
+    tb_data, product, client, user, country_info = row
+    
+    country_name = "未知区域"
+    if country_info:
+        country_name = country_info.country_name_zh
+    elif tb_data.country_code == "ZZ":
+        country_name = "全部区域"
+
+    date_val = tb_data.date.date() if isinstance(tb_data.date, datetime) else tb_data.date
+
+    return ResponseBaseSchema.success(data=TBSearchDataResponse(
+        id=tb_data.id,
+        date=date_val,
+        product_id=product.id,
+        product_name=product.name,
+        country_code=tb_data.country_code,
+        country_name_zh=country_name,
+        redirects=tb_data.redirects,
+        searches=tb_data.searches,
+        monetized=tb_data.monetized,
+        clicks=tb_data.clicks,
+        revenue=tb_data.revenue,
+        rpm=tb_data.rpm,
+        revenue_before_deduct=tb_data.revenue_before_deduct,
+        rpm_before_deduct=tb_data.rpm_before_deduct,
+        created_at=tb_data.created_at,
+        updated_at=tb_data.updated_at,
+        client_id=client.id if client else 0,
+        client_name=client.company_name if client else "未知客户",
+        user_name=(user.full_name or user.username) if user else "未知用户"
+    ))
 
