@@ -77,6 +77,7 @@ sudo chmod 640 /data/Platform/logs/*.log
 
 # 测试数据
 mysql -u remote -p'kb7$rL3d8!tQ' -h 127.0.0.1 -P 3306 < /data/Platform/scripts/debug.sql
+mysql -u remote -p'kb7$rL3d8!tQ' -h 127.0.0.1 -P 3306 < /data/Platform/scripts/check_ad_data_assignment_issue.sql
 
 # 生产数据
 mysql -u remote -p'kb7$rL3d8!tQ' -h 127.0.0.1 -P 3306 < /data/Platform/scripts/platform.sql
@@ -151,12 +152,16 @@ frontend/package-lock.json
 -----------------------------------------------------------
 sudo rsync -av --exclude-from='/data/exclude-list.txt' /data/Platform/ /data/20251114/
 
-
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8960
 
 # 删除 /data/20251114 目录下的所有文件
 sudo rm -rf /data/20251114/*
 
 
 
+
+邮件地址：hel290390@gmail.com
+pop.gmail.com
+smtp.gmail.com
 
 

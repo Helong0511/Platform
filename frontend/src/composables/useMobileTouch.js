@@ -290,9 +290,11 @@ export function usePullToRefresh(onRefresh, options = {}) {
 
 /**
  * 移动端双击缩放禁用
+ * 注意：此函数可以在全局作用域中调用，不使用 Vue 生命周期钩子
  */
 export function disableDoubleTapZoom() {
   let lastTouchEnd = 0;
+  let isInitialized = false;
 
   const handleTouchEnd = (e) => {
     const now = Date.now();
@@ -302,37 +304,75 @@ export function disableDoubleTapZoom() {
     lastTouchEnd = now;
   };
 
-  onMounted(() => {
-    document.addEventListener('touchend', handleTouchEnd, { passive: false });
-  });
+  // 如果已经初始化，直接返回
+  if (isInitialized) {
+    return;
+  }
 
-  onUnmounted(() => {
-    document.removeEventListener('touchend', handleTouchEnd);
-  });
+  // 直接添加事件监听器（不依赖组件生命周期）
+  if (typeof document !== 'undefined') {
+    document.addEventListener('touchend', handleTouchEnd, { passive: false });
+    isInitialized = true;
+  }
+
+  // 返回清理函数（可选，用于手动清理）
+  return () => {
+    if (isInitialized && typeof document !== 'undefined') {
+      document.removeEventListener('touchend', handleTouchEnd);
+      isInitialized = false;
+    }
+  };
 }
 
 /**
  * 移动端视口高度修复（解决移动端浏览器地址栏导致的高度问题）
+ * 注意：此函数可以在全局作用域中调用，不使用 Vue 生命周期钩子
  */
 export function useViewportHeight() {
+  let isInitialized = false;
+  let resizeHandler = null;
+  let orientationHandler = null;
+
   const setViewportHeight = () => {
-    const vh = window.innerHeight * 0.01;
-    document.documentElement.style.setProperty('--vh', `${vh}px`);
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      const vh = window.innerHeight * 0.01;
+      document.documentElement.style.setProperty('--vh', `${vh}px`);
+    }
   };
 
-  onMounted(() => {
-    setViewportHeight();
-    window.addEventListener('resize', setViewportHeight);
-    window.addEventListener('orientationchange', setViewportHeight);
-  });
+  // 如果已经初始化，直接返回
+  if (isInitialized) {
+    return { setViewportHeight };
+  }
 
-  onUnmounted(() => {
-    window.removeEventListener('resize', setViewportHeight);
-    window.removeEventListener('orientationchange', setViewportHeight);
-  });
+  // 直接设置和添加事件监听器（不依赖组件生命周期）
+  if (typeof window !== 'undefined') {
+    setViewportHeight();
+    
+    resizeHandler = setViewportHeight;
+    orientationHandler = setViewportHeight;
+    
+    window.addEventListener('resize', resizeHandler);
+    window.addEventListener('orientationchange', orientationHandler);
+    isInitialized = true;
+  }
+
+  // 返回清理函数（可选，用于手动清理）
+  const cleanup = () => {
+    if (isInitialized && typeof window !== 'undefined') {
+      if (resizeHandler) {
+        window.removeEventListener('resize', resizeHandler);
+      }
+      if (orientationHandler) {
+        window.removeEventListener('orientationchange', orientationHandler);
+      }
+      isInitialized = false;
+    }
+  };
 
   return {
-    setViewportHeight
+    setViewportHeight,
+    cleanup
   };
 }
 

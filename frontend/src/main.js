@@ -19,6 +19,7 @@ import { useAuthStore, validateAuthData, clearAuthData } from './store';
 import router from './router/index.js';
 import { initTimezone } from './utils/dateFormat';
 import { logger } from './utils/logger';
+import { suppressExtensionErrors } from './utils/suppressExtensionErrors';
 
 // 创建Vue应用
 const app = createApp(App);
@@ -390,7 +391,11 @@ window.addEventListener('error', (event) => {
     errorString.includes('asynchronous response') ||
     errorString.includes('listener indicated an asynchronous response') ||
     errorString.includes('message channel') ||
-    errorString.includes('channel closed')
+    errorString.includes('channel closed') ||
+    errorString.includes('runtime.lasterror') ||
+    errorString.includes('runtime.lasterror') ||
+    errorString.includes('message port closed') ||
+    errorString.includes('port closed before a response')
   )) {
     event.preventDefault(); // 阻止默认的错误处理
     event.stopPropagation(); // 阻止事件冒泡
@@ -484,14 +489,29 @@ window.addEventListener('unhandledrejection', (event) => {
     errorString.includes('listener indicated an asynchronous response') ||
     errorString.includes('message channel') ||
     errorString.includes('channel closed') ||
-    // 检查错误对象本身
-    (event?.reason && typeof event.reason === 'object' && (
-      String(event.reason.message || '').toLowerCase().includes('message channel') ||
-      String(event.reason.message || '').toLowerCase().includes('asynchronous response')
-    ))
+    errorString.includes('runtime.lasterror') ||
+    errorString.includes('runtime.lasterror') ||
+    errorString.includes('message port closed') ||
+    errorString.includes('port closed before a response') ||
+    errorString.includes('unchecked runtime.lasterror')
   )) {
     event.preventDefault(); // 阻止默认的错误处理
     return;
+  }
+  
+  // 检查错误对象本身（包括 runtime.lastError）
+  if (event?.reason && typeof event.reason === 'object') {
+    const reasonMessage = String(event.reason.message || '').toLowerCase();
+    if (
+      reasonMessage.includes('message channel') ||
+      reasonMessage.includes('asynchronous response') ||
+      reasonMessage.includes('runtime.lasterror') ||
+      reasonMessage.includes('message port closed') ||
+      reasonMessage.includes('port closed before a response')
+    ) {
+      event.preventDefault();
+      return;
+    }
   }
 
   // 忽略 Element Plus 的 ElOnlyChild 错误
@@ -961,6 +981,9 @@ const initMobileOptimizations = () => {
   // 禁用双击缩放
   disableDoubleTapZoom();
 };
+
+// 抑制浏览器扩展相关的错误和警告（在应用初始化前调用）
+suppressExtensionErrors();
 
 // 在应用挂载后，根据当前路由决定是否初始化认证和时区
 // 使用 nextTick 确保路由已初始化
