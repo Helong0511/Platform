@@ -211,6 +211,14 @@ router.beforeEach((to, from, next) => {
           authStore.checkAuth();
         }
 
+        // 如果是从登录页跳转过来的，并且 sessionStorage 中有 userInfo，允许通过
+        // 这可以解决登录后立即跳转时状态还未完全同步的问题
+        if (from.path === '/login' && isAuthenticated) {
+          // 从登录页跳转，并且 sessionStorage 中有有效数据，允许通过
+          // store 状态会在路由守卫执行后自动同步
+          return next();
+        }
+
         // 再次检查
         if (!authStore.isAuthenticated) {
           clearAuthData();
