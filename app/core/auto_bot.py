@@ -17,17 +17,18 @@ from app.core.utils import get_app_now  # 应用时区时间获取函数
 logger = logging.getLogger(__name__)
 
 # 跨平台文件锁支持
+HAS_FCNTL = False
+HAS_MSVCRT = False
+
 try:
     import fcntl  # Unix/Linux 文件锁
     HAS_FCNTL = True
 except ImportError:
-    HAS_FCNTL = False
     # Windows 使用 msvcrt 实现文件锁
     try:
         import msvcrt
         HAS_MSVCRT = True
     except ImportError:
-        HAS_MSVCRT = False
         logger.warning("无法导入文件锁模块（fcntl/msvcrt），文件锁功能将不可用")
 bot = None
 bot_initialized = False  # 添加初始化状态标志
