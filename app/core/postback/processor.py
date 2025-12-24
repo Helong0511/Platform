@@ -182,19 +182,25 @@ class PostbackProcessor:
                             # 这里我们仍然保存转化，但标记状态
                             # 也可以选择直接拒绝：raise_api_exception(...)
 
-                    # 计算扣量
-                    if offer_id and publisher_id and final_payout:
+                    # 计算扣量（只有当有有效的支付金额时才计算）
+                    if offer_id and publisher_id and final_payout is not None and final_payout > 0:
+                        original_payout = final_payout
                         final_payout, discount_amount, discount_info = await calculate_discount(
                             db=db,
                             offer_id=offer_id,
                             publisher_id=publisher_id,
-                            original_payout=final_payout
+                            original_payout=original_payout
                         )
                         if discount_info:
                             logger.info(
                                 f"应用扣量: conversion_id={conversion_id}, "
-                                f"original={normalized_data.get('payout')}, "
-                                f"final={final_payout}, info={discount_info}"
+                                f"original={original_payout}, "
+                                f"final={final_payout}, discount={discount_amount}, info={discount_info}"
+                            )
+                        elif discount_amount > 0:
+                            logger.debug(
+                                f"扣量计算完成但无说明: conversion_id={conversion_id}, "
+                                f"original={original_payout}, final={final_payout}"
                             )
 
             # 8. 创建转化记录

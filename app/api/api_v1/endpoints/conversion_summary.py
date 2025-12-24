@@ -71,7 +71,7 @@ async def get_conversion_summary(
         if publisher_id:
             click_conditions.append(Click.publisher_id == publisher_id)
             # PostbackConversion通过click_id关联Click，间接关联publisher_id
-            # 需要通过join来过滤
+            # 在转化查询中，会通过JOIN来过滤（见conversion_group_query）
         
         if advertiser_id:
             click_conditions.append(Click.advertiser_id == advertiser_id)
@@ -80,15 +80,31 @@ async def get_conversion_summary(
         click_query = select(func.count(Click.id)).where(and_(*click_conditions))
         click_count = (await db.execute(click_query)).scalar() or 0
         
-        # 统计总转化数量
-        conversion_query = select(func.count(PostbackConversion.id)).where(and_(*conversion_conditions))
-        conversion_count = (await db.execute(conversion_query)).scalar() or 0
+        # 统计总转化数量（需要考虑publisher_id过滤）
+        from sqlalchemy.orm import aliased
+        click_alias_for_count = aliased(Click)
+        conversion_count_query = select(func.count(PostbackConversion.id)).outerjoin(
+            click_alias_for_count, PostbackConversion.click_id == click_alias_for_count.click_id
+        ).where(and_(*conversion_conditions))
+        
+        # 如果指定了publisher_id，添加过滤条件
+        if publisher_id:
+            conversion_count_query = conversion_count_query.where(click_alias_for_count.publisher_id == publisher_id)
+        
+        conversion_count = (await db.execute(conversion_count_query)).scalar() or 0
         
         # 计算总转化率
         cr = (conversion_count / click_count * 100) if click_count > 0 else 0
         
-        # 统计总支付金额（PO）
-        po_query = select(func.sum(PostbackConversion.payout)).where(and_(*conversion_conditions))
+        # 统计总支付金额（PO）（需要考虑publisher_id过滤）
+        po_query = select(func.sum(PostbackConversion.payout)).outerjoin(
+            click_alias_for_count, PostbackConversion.click_id == click_alias_for_count.click_id
+        ).where(and_(*conversion_conditions))
+        
+        # 如果指定了publisher_id，添加过滤条件
+        if publisher_id:
+            po_query = po_query.where(click_alias_for_count.publisher_id == publisher_id)
+        
         po_result = await db.execute(po_query)
         total_po = po_result.scalar() or 0
         

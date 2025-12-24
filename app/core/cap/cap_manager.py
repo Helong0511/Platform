@@ -256,6 +256,7 @@ async def reset_daily_caps(db: AsyncSession) -> None:
     """
     重置每日 Cap 计数（定时任务调用）
     使用批量更新以提高性能和原子性
+    同时清理Redis中的旧key
     
     Args:
         db: 数据库会话
@@ -289,6 +290,15 @@ async def reset_daily_caps(db: AsyncSession) -> None:
         await db.commit()
         
         logger.info(f"成功执行批量每日Cap重置，更新了 {result.rowcount} 条记录")
+        
+        # 清理Redis中的旧每日Cap key（清理所有，因为新的一天会使用新的key）
+        try:
+            from app.core.cap.redis_counter import RedisCapManager
+            await RedisCapManager.clear_daily_cap_keys()
+            logger.info("成功清理Redis中的旧每日Cap key")
+        except Exception as e:
+            # Redis清理失败不影响主流程
+            logger.warning(f"清理Redis每日Cap key失败: {e}")
         
     except Exception as e:
         logger.error(f"批量重置每日Cap失败: {str(e)}", exc_info=True)

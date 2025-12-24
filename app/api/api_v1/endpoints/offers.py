@@ -79,18 +79,27 @@ async def create_offer(
         # 处理渠道分配
         if offer_in.publisher_ids:
             for pub_id in offer_in.publisher_ids:
-                # 验证渠道是否存在
+                # 验证渠道是否存在且激活
                 pub_result = await db.execute(
                     select(Publisher).where(Publisher.id == pub_id)
                 )
                 publisher = pub_result.scalars().first()
-                if publisher:
-                    assignment = OfferPublisherAssignment(
-                        offer_id=offer.id,
-                        publisher_id=pub_id,
-                        is_active=True
+                if not publisher:
+                    raise_api_exception(
+                        ErrorCode.RESOURCE_NOT_FOUND,
+                        detail=f"渠道ID {pub_id} 不存在"
                     )
-                    db.add(assignment)
+                if not publisher.is_active:
+                    raise_api_exception(
+                        ErrorCode.INVALID_PARAMS,
+                        detail=f"渠道ID {pub_id} ({publisher.publisher_name}) 未激活，无法分配"
+                    )
+                assignment = OfferPublisherAssignment(
+                    offer_id=offer.id,
+                    publisher_id=pub_id,
+                    is_active=True
+                )
+                db.add(assignment)
         
         await db.commit()
         await db.refresh(offer)
@@ -304,13 +313,22 @@ async def update_offer(
                     select(Publisher).where(Publisher.id == pub_id)
                 )
                 publisher = pub_result.scalars().first()
-                if publisher:
-                    assignment = OfferPublisherAssignment(
-                        offer_id=offer.id,
-                        publisher_id=pub_id,
-                        is_active=True
+                if not publisher:
+                    raise_api_exception(
+                        ErrorCode.RESOURCE_NOT_FOUND,
+                        detail=f"渠道ID {pub_id} 不存在"
                     )
-                    db.add(assignment)
+                if not publisher.is_active:
+                    raise_api_exception(
+                        ErrorCode.INVALID_PARAMS,
+                        detail=f"渠道ID {pub_id} ({publisher.publisher_name}) 未激活，无法分配"
+                    )
+                assignment = OfferPublisherAssignment(
+                    offer_id=offer.id,
+                    publisher_id=pub_id,
+                    is_active=True
+                )
+                db.add(assignment)
     
     try:
         await db.commit()

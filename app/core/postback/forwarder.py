@@ -126,6 +126,7 @@ class PostbackForwarder:
         构建转发给下游的数据
         
         将转化记录转换为字典格式，用于转发给下游系统
+        包含CPL系统的关键字段（click_id, offer_id, publisher_id等）
         """
         data = {
             "conversion_id": conversion.conversion_id,
@@ -152,6 +153,14 @@ class PostbackForwarder:
             data["product_id"] = conversion.product_id
         if conversion.client_id:
             data["client_id"] = conversion.client_id
+        
+        # 添加CPL系统字段（如果存在）
+        if hasattr(conversion, 'click_id') and conversion.click_id:
+            data["click_id"] = conversion.click_id
+        if hasattr(conversion, 'click_time') and conversion.click_time:
+            data["click_time"] = conversion.click_time.isoformat()
+        if hasattr(conversion, 'conversion_status') and conversion.conversion_status:
+            data["conversion_status"] = conversion.conversion_status
 
         # 添加时间戳
         if conversion.created_at:
