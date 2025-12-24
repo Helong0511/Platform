@@ -57,6 +57,7 @@ async def create_offer(
         downstream_cap=offer_in.downstream_cap,
         advertiser_tracklink=offer_in.advertiser_tracklink,
         postback_method=offer_in.postback_method,
+        click_validity_hours=offer_in.click_validity_hours,
         is_active=offer_in.is_active
     )
     
@@ -65,11 +66,13 @@ async def create_offer(
         await db.flush()  # 获取 offer.id
         
         # 生成下游 Tracklink（使用自增ID）
-        base_url = getattr(settings, 'TRACKING_BASE_URL', 'https://client.btfrx.online')
-        # 下游 Tracklink 模板，实际使用时需要替换 {publisher_id} 和 {click_id}
+        base_url = settings.TRACKING_BASE_URL
+        # 下游 Tracklink 格式：/api/v1/track/click/{offer_id}?publisher_id={publisher_id}
+        # 实际使用时，publisher_id 会通过查询参数传入
         downstream_tracklink = f"{base_url.rstrip('/')}/api/v1/track/click/{offer.id}?publisher_id={{publisher_id}}"
         
         # 生成 Postback URL（使用模板，实际使用时替换占位符）
+        # 格式：/api/v1/postback?click_id={click_id}&offer_id={offer_id}
         postback_url = f"{base_url.rstrip('/')}/api/v1/postback?click_id={{click_id}}&offer_id={offer.id}"
         
         # 更新下游tracklink和postback_url
@@ -79,27 +82,18 @@ async def create_offer(
         # 处理渠道分配
         if offer_in.publisher_ids:
             for pub_id in offer_in.publisher_ids:
-                # 验证渠道是否存在且激活
+                # 验证渠道是否存在
                 pub_result = await db.execute(
                     select(Publisher).where(Publisher.id == pub_id)
                 )
                 publisher = pub_result.scalars().first()
-                if not publisher:
-                    raise_api_exception(
-                        ErrorCode.RESOURCE_NOT_FOUND,
-                        detail=f"渠道ID {pub_id} 不存在"
+                if publisher:
+                    assignment = OfferPublisherAssignment(
+                        offer_id=offer.id,
+                        publisher_id=pub_id,
+                        is_active=True
                     )
-                if not publisher.is_active:
-                    raise_api_exception(
-                        ErrorCode.INVALID_PARAMS,
-                        detail=f"渠道ID {pub_id} ({publisher.publisher_name}) 未激活，无法分配"
-                    )
-                assignment = OfferPublisherAssignment(
-                    offer_id=offer.id,
-                    publisher_id=pub_id,
-                    is_active=True
-                )
-                db.add(assignment)
+                    db.add(assignment)
         
         await db.commit()
         await db.refresh(offer)
@@ -170,36 +164,40 @@ async def get_offers(
     query = query.order_by(Offer.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
     
+    # 使用joinedload优化关联查询，减少N+1查询问题
+    from sqlalchemy.orm import joinedload, selectinload
+    query = query.options(joinedload(Offer.advertiser))
     result = await db.execute(query)
     offers = result.scalars().all()
     
     # 加载关联信息
     offer_list = []
-    for offer in offers:
-        # 加载广告主信息
-        adv_result = await db.execute(
-            select(Advertiser).where(Advertiser.id == offer.advertiser_id)
-        )
-        advertiser = adv_result.scalars().first()
-        
-        # 加载分配的渠道
+    # 批量加载所有offer的渠道分配
+    offer_ids = [offer.id for offer in offers]
+    if offer_ids:
         pub_result = await db.execute(
             select(OfferPublisherAssignment, Publisher)
             .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
-            .where(OfferPublisherAssignment.offer_id == offer.id)
+            .where(OfferPublisherAssignment.offer_id.in_(offer_ids))
             .where(OfferPublisherAssignment.is_active == True)
         )
-        assignments = pub_result.all()
-        
+        assignments_map = {}
+        for assignment, publisher in pub_result.all():
+            if assignment.offer_id not in assignments_map:
+                assignments_map[assignment.offer_id] = []
+            assignments_map[assignment.offer_id].append({
+                "id": publisher.id,
+                "publisher_name": publisher.publisher_name
+            })
+    else:
+        assignments_map = {}
+    
+    for offer in offers:
         offer_data = OfferResponse.model_validate(offer)
-        offer_data.advertiser_name = advertiser.advertiser_name if advertiser else None
-        offer_data.assigned_publishers = [
-            {
-                "id": pub.id,
-                "publisher_name": pub.publisher_name
-            }
-            for _, pub in assignments
-        ]
+        # 从已加载的关联中获取广告主名称
+        offer_data.advertiser_name = offer.advertiser.advertiser_name if offer.advertiser else None
+        # 从批量查询的结果中获取渠道分配
+        offer_data.assigned_publishers = assignments_map.get(offer.id, [])
         
         offer_list.append(offer_data)
     
@@ -221,9 +219,10 @@ async def get_offer(
     current_user: User = Depends(get_current_user)
 ):
     """获取Offer详情（仅管理员）"""
-    result = await db.execute(
-        select(Offer).where(Offer.id == offer_id)
-    )
+    # 使用joinedload优化关联查询
+    from sqlalchemy.orm import joinedload
+    query = select(Offer).where(Offer.id == offer_id).options(joinedload(Offer.advertiser))
+    result = await db.execute(query)
     offer = result.scalars().first()
     
     if not offer:
@@ -232,12 +231,7 @@ async def get_offer(
             detail=f"Offer ID {offer_id} 不存在"
         )
     
-    # 加载关联信息
-    adv_result = await db.execute(
-        select(Advertiser).where(Advertiser.id == offer.advertiser_id)
-    )
-    advertiser = adv_result.scalars().first()
-    
+    # 加载分配的渠道
     pub_result = await db.execute(
         select(OfferPublisherAssignment, Publisher)
         .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
@@ -247,7 +241,8 @@ async def get_offer(
     assignments = pub_result.all()
     
     offer_data = OfferResponse.model_validate(offer)
-    offer_data.advertiser_name = advertiser.advertiser_name if advertiser else None
+    # 从已加载的关联中获取广告主名称
+    offer_data.advertiser_name = offer.advertiser.advertiser_name if offer.advertiser else None
     offer_data.assigned_publishers = [
         {
             "id": pub.id,
@@ -313,35 +308,41 @@ async def update_offer(
                     select(Publisher).where(Publisher.id == pub_id)
                 )
                 publisher = pub_result.scalars().first()
-                if not publisher:
-                    raise_api_exception(
-                        ErrorCode.RESOURCE_NOT_FOUND,
-                        detail=f"渠道ID {pub_id} 不存在"
+                if publisher:
+                    assignment = OfferPublisherAssignment(
+                        offer_id=offer.id,
+                        publisher_id=pub_id,
+                        is_active=True
                     )
-                if not publisher.is_active:
-                    raise_api_exception(
-                        ErrorCode.INVALID_PARAMS,
-                        detail=f"渠道ID {pub_id} ({publisher.publisher_name}) 未激活，无法分配"
-                    )
-                assignment = OfferPublisherAssignment(
-                    offer_id=offer.id,
-                    publisher_id=pub_id,
-                    is_active=True
-                )
-                db.add(assignment)
+                    db.add(assignment)
     
     try:
         await db.commit()
-        await db.refresh(offer)
         
-        # 加载关联信息
-        adv_result = await db.execute(
-            select(Advertiser).where(Advertiser.id == offer.advertiser_id)
+        # 重新加载关联信息（使用joinedload优化）
+        from sqlalchemy.orm import joinedload
+        query = select(Offer).where(Offer.id == offer.id).options(joinedload(Offer.advertiser))
+        result = await db.execute(query)
+        offer = result.scalars().first()
+        
+        # 加载分配的渠道
+        pub_result = await db.execute(
+            select(OfferPublisherAssignment, Publisher)
+            .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
+            .where(OfferPublisherAssignment.offer_id == offer.id)
+            .where(OfferPublisherAssignment.is_active == True)
         )
-        advertiser = adv_result.scalars().first()
+        assignments = pub_result.all()
         
         offer_data = OfferResponse.model_validate(offer)
-        offer_data.advertiser_name = advertiser.advertiser_name if advertiser else None
+        offer_data.advertiser_name = offer.advertiser.advertiser_name if offer.advertiser else None
+        offer_data.assigned_publishers = [
+            {
+                "id": pub.id,
+                "publisher_name": pub.publisher_name
+            }
+            for _, pub in assignments
+        ]
         
         logger.info(f"Offer更新成功: id={offer.id}")
         return ResponseBaseSchema.success(data=offer_data)

@@ -25,40 +25,41 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-# 后台任务：创建点击记录
-async def create_click_background(click_data: dict):
-    """异步创建点击记录"""
+# 后台任务：创建点击记录（带重试机制）
+async def create_click_background(click_data: dict, max_retries: int = 3):
+    """
+    异步创建点击记录，带重试机制
+    
+    Args:
+        click_data: 点击记录数据
+        max_retries: 最大重试次数
+    """
     async with AsyncSessionLocal() as session:
-        try:
-            click = Click(**click_data)
-            session.add(click)
-            await session.commit()
-            logger.debug(f"点击记录已保存: click_id={click_data.get('click_id')}")
-        except Exception as e:
-            # 检查是否是唯一性约束错误（Click ID重复）
-            error_str = str(e).lower()
-            if 'duplicate' in error_str or 'unique' in error_str or 'integrity' in error_str:
-                original_click_id = click_data.get('click_id')
-                logger.warning(
-                    f"Click ID重复（可能的时间戳冲突）: click_id={original_click_id}, "
-                    f"error={str(e)}"
-                )
-                # 尝试生成新的Click ID并重试一次
-                try:
-                    from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
-                    new_click_id = generate_click_id_from_timestamp()
-                    click_data['click_id'] = new_click_id
-                    click = Click(**click_data)
-                    session.add(click)
-                    await session.commit()
-                    logger.info(f"使用新Click ID重试成功: original={original_click_id}, new={new_click_id}")
-                except Exception as retry_error:
-                    logger.error(
-                        f"重试保存点击记录也失败: original_click_id={original_click_id}, "
-                        f"new_click_id={new_click_id}, error={str(retry_error)}", exc_info=True
+        for attempt in range(max_retries):
+            try:
+                click = Click(**click_data)
+                session.add(click)
+                await session.commit()
+                logger.debug(f"点击记录保存成功: click_id={click_data.get('click_id')}")
+                return  # 成功则返回
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"异步保存点击记录失败（尝试 {attempt + 1}/{max_retries}）: {e}, "
+                        f"click_id={click_data.get('click_id')}"
                     )
-            else:
-                logger.error(f"异步保存点击记录失败: {e}", exc_info=True)
+                    await session.rollback()
+                    # 等待后重试（指数退避）
+                    import asyncio
+                    await asyncio.sleep(2 ** attempt)
+                else:
+                    # 最后一次尝试失败，记录错误
+                    logger.error(
+                        f"异步保存点击记录最终失败（已重试 {max_retries} 次）: {e}, "
+                        f"click_id={click_data.get('click_id')}",
+                        exc_info=True
+                    )
+                    await session.rollback()
 
 
 @router.get("/track/click/{offer_id}", summary="点击追踪", tags=["点击追踪"])
@@ -99,34 +100,6 @@ async def track_click(
                 select(Publisher).where(Publisher.id == publisher_id)
             )
             publisher = pub_result.scalars().first()
-            
-            if not publisher:
-                raise_api_exception(
-                    ErrorCode.RESOURCE_NOT_FOUND,
-                    detail=f"渠道ID {publisher_id} 不存在"
-                )
-            
-            if not publisher.is_active:
-                raise_api_exception(
-                    ErrorCode.RESOURCE_NOT_FOUND,
-                    detail=f"渠道ID {publisher_id} 未激活"
-                )
-            
-            # 验证该渠道是否被分配给了这个Offer
-            from app.models.models import OfferPublisherAssignment
-            assignment_result = await db.execute(
-                select(OfferPublisherAssignment).where(
-                    OfferPublisherAssignment.offer_id == offer_id,
-                    OfferPublisherAssignment.publisher_id == publisher_id,
-                    OfferPublisherAssignment.is_active == True
-                )
-            )
-            assignment = assignment_result.scalars().first()
-            if not assignment:
-                raise_api_exception(
-                    ErrorCode.INVALID_PARAMS,
-                    detail=f"渠道ID {publisher_id} 未分配给Offer ID {offer_id}"
-                )
         
         # 3. 生成 Click ID
         # 先检查是否有重复的 Click ID

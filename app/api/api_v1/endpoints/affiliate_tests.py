@@ -102,11 +102,17 @@ async def create_affiliate_test(
     try:
         db.add(test)
         await db.commit()
-        await db.refresh(test)
         
-        # 加载关联信息
+        # 重新加载关联信息（使用joinedload优化）
+        from sqlalchemy.orm import joinedload
+        query = select(AffiliateTest).where(AffiliateTest.id == test.id).options(
+            joinedload(AffiliateTest.publisher)
+        )
+        result = await db.execute(query)
+        test = result.scalars().first()
+        
         test_data = AffiliateTestResponse.model_validate(test)
-        test_data.publisher_name = publisher.publisher_name
+        test_data.publisher_name = test.publisher.publisher_name if test.publisher else None
         
         logger.info(f"下游测试记录创建成功: test_id={test.id}, status={status}")
         return ResponseBaseSchema.success(data=test_data)
@@ -155,15 +161,21 @@ async def get_affiliate_tests(
     result = await db.execute(query)
     tests = result.scalars().all()
     
-    # 加载关联信息
+    # 批量加载关联信息（优化N+1查询）
+    publisher_ids = [test.publisher_id for test in tests if test.publisher_id]
+    publishers_map = {}
+    if publisher_ids:
+        publishers_result = await db.execute(
+            select(Publisher).where(Publisher.id.in_(publisher_ids))
+        )
+        publishers = publishers_result.scalars().all()
+        publishers_map = {publisher.id: publisher for publisher in publishers}
+    
+    # 构建返回数据
     test_list = []
     for test in tests:
-        pub_result = await db.execute(
-            select(Publisher).where(Publisher.id == test.publisher_id)
-        )
-        publisher = pub_result.scalars().first()
-        
         test_data = AffiliateTestResponse.model_validate(test)
+        publisher = publishers_map.get(test.publisher_id)
         test_data.publisher_name = publisher.publisher_name if publisher else None
         test_list.append(test_data)
     
@@ -185,9 +197,12 @@ async def get_affiliate_test(
     current_user: User = Depends(get_current_user)
 ):
     """获取下游测试记录详情（仅管理员）"""
-    result = await db.execute(
-        select(AffiliateTest).where(AffiliateTest.id == test_id)
+    # 使用joinedload优化关联查询
+    from sqlalchemy.orm import joinedload
+    query = select(AffiliateTest).where(AffiliateTest.id == test_id).options(
+        joinedload(AffiliateTest.publisher)
     )
+    result = await db.execute(query)
     test = result.scalars().first()
     
     if not test:
@@ -196,14 +211,9 @@ async def get_affiliate_test(
             detail=f"测试记录ID {test_id} 不存在"
         )
     
-    # 加载关联信息
-    pub_result = await db.execute(
-        select(Publisher).where(Publisher.id == test.publisher_id)
-    )
-    publisher = pub_result.scalars().first()
-    
+    # 从已加载的关联中获取信息
     test_data = AffiliateTestResponse.model_validate(test)
-    test_data.publisher_name = publisher.publisher_name if publisher else None
+    test_data.publisher_name = test.publisher.publisher_name if test.publisher else None
     
     return ResponseBaseSchema.success(data=test_data)
 

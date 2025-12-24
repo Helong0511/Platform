@@ -298,35 +298,11 @@ const loadData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: Math.min(pagination.pageSize, 100)
-    }
-    
-    // 只添加非空值
-    if (filterDiscountType.value !== null && filterDiscountType.value !== undefined && filterDiscountType.value !== '') {
-      params.discount_type = filterDiscountType.value
-    }
-    
-    if (filterOffer.value !== null && filterOffer.value !== undefined && filterOffer.value !== '') {
-      const offerId = parseInt(filterOffer.value, 10)
-      if (!isNaN(offerId)) {
-        params.offer_id = offerId
-      }
-    }
-    
-    if (filterPublisher.value !== null && filterPublisher.value !== undefined && filterPublisher.value !== '') {
-      const publisherId = parseInt(filterPublisher.value, 10)
-      if (!isNaN(publisherId)) {
-        params.publisher_id = publisherId
-      }
-    }
-    
-    if (filterActive.value !== null && filterActive.value !== undefined) {
-      params.is_active = filterActive.value
-    }
-    
-    // 调试：输出查询参数（开发环境）
-    if (import.meta.env.DEV) {
-      console.log('[DiscountManagement] 查询参数:', JSON.stringify(params, null, 2))
+      page_size: Math.min(pagination.pageSize, 100),
+      discount_type: filterDiscountType.value || undefined,
+      offer_id: filterOffer.value || undefined,
+      publisher_id: filterPublisher.value || undefined,
+      is_active: filterActive.value !== null ? filterActive.value : undefined
     }
     const response = await getDiscounts(params)
     if (response.code === 200) {
@@ -528,8 +504,6 @@ onMounted(() => {
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
-  width: 100% !important;
-  max-width: 100%;
 }
 
 /* 确保清除按钮不遮挡文字 */
@@ -542,28 +516,6 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-/* 修复对话框中的下拉框显示问题 */
-.el-dialog :deep(.el-select .el-input__wrapper) {
-  padding-right: 30px;
-}
-
-.el-dialog :deep(.el-select .el-select__input) {
-  padding-right: 8px;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-  width: 100% !important;
-  max-width: 100%;
-}
-
-/* 确保对话框中的placeholder正确隐藏 */
-.el-dialog :deep(.el-select.is-focus .el-select__placeholder),
-.el-dialog :deep(.el-select:not(.is-empty) .el-select__placeholder) {
-  display: none !important;
-  opacity: 0 !important;
-  visibility: hidden !important;
 }
 
 .pagination-container {

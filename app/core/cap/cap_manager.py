@@ -256,7 +256,7 @@ async def reset_daily_caps(db: AsyncSession) -> None:
     """
     重置每日 Cap 计数（定时任务调用）
     使用批量更新以提高性能和原子性
-    同时清理Redis中的旧key
+    同时清除Redis中的每日Cap计数
     
     Args:
         db: 数据库会话
@@ -265,8 +265,55 @@ async def reset_daily_caps(db: AsyncSession) -> None:
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
-        # 批量更新所有需要重置的 Cap
-        # 条件：1. 开启了每日 Cap；2. 最后重置时间早于今天；3. 配置是活跃的
+        # 1. 查询所有需要重置的 Cap 配置（用于清除Redis）
+        query = select(OfferCap).where(
+            and_(
+                OfferCap.is_active == True,
+                OfferCap.daily_cap > 0,
+                or_(
+                    OfferCap.cap_start_date.is_(None),
+                    OfferCap.cap_start_date < today_start
+                )
+            )
+        )
+        result = await db.execute(query)
+        caps_to_reset = result.scalars().all()
+        
+        # 2. 清除Redis中的每日Cap计数
+        redis = await get_redis_client()
+        if redis:
+            try:
+                # 清除今天和昨天的key（防止时区问题）
+                for date_offset in [0, -1]:
+                    reset_date = today_start + timedelta(days=date_offset)
+                    for cap in caps_to_reset:
+                        # 清除所有渠道的每日Cap key
+                        # 包括特定渠道和全局渠道的key
+                        keys_to_delete = []
+                        
+                        # 全局渠道key
+                        global_key = get_daily_cap_key(cap.offer_id, reset_date, None)
+                        keys_to_delete.append(global_key)
+                        
+                        # 如果有特定渠道，也需要清除（虽然可能不存在，但为了安全）
+                        if cap.publisher_id:
+                            pub_key = get_daily_cap_key(cap.offer_id, reset_date, cap.publisher_id)
+                            keys_to_delete.append(pub_key)
+                        
+                        # 批量删除
+                        for key in keys_to_delete:
+                            try:
+                                await redis.delete(key)
+                            except Exception as e:
+                                logger.warning(f"清除Redis key失败: {key}, error: {e}")
+                
+                logger.info(f"成功清除Redis中的每日Cap计数，涉及 {len(caps_to_reset)} 个Cap配置")
+            except Exception as e:
+                logger.warning(f"清除Redis每日Cap计数时出错: {e}，继续执行DB重置")
+        else:
+            logger.warning("Redis不可用，跳过清除Redis计数")
+        
+        # 3. 批量更新数据库
         from sqlalchemy import update
         stmt = (
             update(OfferCap)
@@ -290,15 +337,6 @@ async def reset_daily_caps(db: AsyncSession) -> None:
         await db.commit()
         
         logger.info(f"成功执行批量每日Cap重置，更新了 {result.rowcount} 条记录")
-        
-        # 清理Redis中的旧每日Cap key（清理所有，因为新的一天会使用新的key）
-        try:
-            from app.core.cap.redis_counter import RedisCapManager
-            await RedisCapManager.clear_daily_cap_keys()
-            logger.info("成功清理Redis中的旧每日Cap key")
-        except Exception as e:
-            # Redis清理失败不影响主流程
-            logger.warning(f"清理Redis每日Cap key失败: {e}")
         
     except Exception as e:
         logger.error(f"批量重置每日Cap失败: {str(e)}", exc_info=True)

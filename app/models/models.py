@@ -376,7 +376,7 @@ class PostbackConversion(Base):
     # CPL 系统字段
     click_id = Column(String(255), nullable=True, index=True, comment='关联的Click ID')
     click_time = Column(DateTime, nullable=True, comment='点击时间')
-    conversion_status = Column(String(20), default='Pending', index=True, comment='转化状态：Pending(待处理)/Approved(已批准)/ClickExpired(点击已过期)/CapReached(达到上限)')
+    conversion_status = Column(String(20), default='Pending', index=True, comment='转化状态：Approved/Pending')
 
     # 原始数据（JSON格式，保存完整回调数据）
     raw_data = Column(Text, nullable=True, comment='原始回调数据（JSON格式）')
@@ -751,9 +751,6 @@ class OfferCap(Base):
         Index("idx_advertiser_id", "advertiser_id"),
         Index("idx_publisher_id", "publisher_id"),
         Index("idx_is_active", "is_active"),
-        # 复合索引：优化常见查询场景
-        Index("idx_cap_offer_active", "offer_id", "is_active"),  # 查询某个offer的活跃cap配置
-        Index("idx_cap_offer_publisher_active", "offer_id", "publisher_id", "is_active"),  # 查询特定offer和publisher的cap配置
     )
 
 
@@ -780,9 +777,6 @@ class OfferDiscount(Base):
         Index("idx_offer_id", "offer_id"),
         Index("idx_publisher_id", "publisher_id"),
         Index("idx_is_active", "is_active"),
-        # 复合索引：优化常见查询场景
-        Index("idx_discount_offer_publisher_active", "offer_id", "publisher_id", "is_active"),  # 查询特定offer和publisher的折扣配置
-        Index("idx_discount_publisher_active", "publisher_id", "is_active"),  # 查询某个publisher的活跃折扣配置
     )
 
 

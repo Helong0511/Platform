@@ -16,59 +16,10 @@ logger = logging.getLogger(__name__)
 
 # 加载环境变量
 # 使用 override=True 确保 .env 文件中的值覆盖系统环境变量
-# 如果无法读取 .env 文件（如权限问题或编码问题），静默失败
+# 如果无法读取 .env 文件（如权限问题），静默失败
 # 因为 systemd 可能已经通过 EnvironmentFile 加载了环境变量
 try:
-    # 尝试以 UTF-8 编码加载 .env 文件
-    import os
-    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
-    if os.path.exists(env_path):
-        # 如果文件存在，尝试多种编码读取
-        content = None
-        used_encoding = None
-        
-        # 尝试多种编码
-        for encoding in ['utf-8', 'gbk', 'gb2312', 'latin-1', 'cp1252']:
-            try:
-                with open(env_path, 'r', encoding=encoding) as f:
-                    content = f.read()
-                used_encoding = encoding
-                break
-            except (UnicodeDecodeError, UnicodeError):
-                continue
-            except Exception:
-                continue
-        
-        if content is None:
-            # 所有编码都失败
-            logger.error(".env 文件无法读取，尝试了多种编码都失败")
-            logger.error("请运行修复脚本：python 修复env编码.py")
-            import os
-            if not os.getenv("PRODUCTION_ENV"):
-                raise UnicodeDecodeError('utf-8', b'', 0, 1, "无法读取 .env 文件")
-        elif used_encoding != 'utf-8':
-            # 成功读取但编码不是 UTF-8，自动转换
-            try:
-                # 备份原文件
-                backup_path = f'{env_path}.backup'
-                import shutil
-                if not os.path.exists(backup_path):
-                    shutil.copy2(env_path, backup_path)
-                
-                # 写入 UTF-8 编码
-                with open(env_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                logger.warning(f".env 文件原编码为 {used_encoding}，已自动转换为 UTF-8")
-                logger.info(f"原文件已备份为 {backup_path}")
-            except Exception as e:
-                logger.warning(f"自动转换 .env 文件编码失败: {e}")
-                logger.warning("请手动修复：使用记事本打开 .env，另存为 UTF-8 编码")
-        
-        # 加载环境变量
-        load_dotenv(override=True, encoding='utf-8')
-    else:
-        # 文件不存在，使用默认方式加载（会查找 .env 文件）
-        load_dotenv(override=True, encoding='utf-8')
+    load_dotenv(override=True)
 except (PermissionError, IOError, OSError) as e:
     # 如果无法读取 .env 文件，记录警告但继续运行
     # 这通常发生在 systemd 服务中，因为环境变量可能已经通过 EnvironmentFile 加载
@@ -80,13 +31,6 @@ except (PermissionError, IOError, OSError) as e:
         # 开发环境：给出更明确的提示
         logger.warning(f"无法读取 .env 文件: {e}")
         logger.info("如果使用 systemd 服务，请确保 .env 文件权限正确：sudo chown www-data:www-data /data/Platform/.env && sudo chmod 640 /data/Platform/.env")
-except UnicodeDecodeError as e:
-    # 处理编码错误
-    logger.error(f".env 文件编码错误: {e}")
-    logger.error("请确保 .env 文件使用 UTF-8 编码保存")
-    import os
-    if not os.getenv("PRODUCTION_ENV"):
-        raise
 
 
 class Settings(BaseSettings):
@@ -317,6 +261,13 @@ class Settings(BaseSettings):
     # Redis连接池配置（高并发优化）
     # 短链接和CPL服务大量使用Redis，需要更多连接
     REDIS_MAX_CONNECTIONS: int = int(os.getenv("REDIS_MAX_CONNECTIONS", "20"))  # 增加连接数以支持高并发
+
+    # ====== CPL系统配置 ======
+    # 追踪服务基础URL（用于生成下游Tracklink和Postback URL）
+    TRACKING_BASE_URL: str = Field(
+        default="https://client.btfrx.online",
+        description="追踪服务基础URL，用于生成下游Tracklink和Postback URL"
+    )
 
     # ====== 管理员默认账户 ======
     # 首次启动时创建的管理员账户

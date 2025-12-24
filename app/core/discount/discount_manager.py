@@ -34,14 +34,6 @@ async def calculate_discount(
         (扣量后金额, 扣量金额, 扣量类型说明)
     """
     try:
-        # 验证输入参数
-        if original_payout is None or original_payout <= 0:
-            logger.debug(f"原始支付金额无效或为0，跳过扣量计算: offer_id={offer_id}, publisher_id={publisher_id}, payout={original_payout}")
-            return original_payout or 0.0, 0.0, None
-        
-        if not offer_id or not publisher_id:
-            logger.debug(f"Offer ID或Publisher ID无效，跳过扣量计算: offer_id={offer_id}, publisher_id={publisher_id}")
-            return original_payout, 0.0, None
         # 1. 优先查找 offer 级别的扣量配置
         offer_discount_result = await db.execute(
             select(OfferDiscount).where(

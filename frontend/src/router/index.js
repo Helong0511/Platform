@@ -191,7 +191,7 @@ const router = createRouter({
 });
 
 // 路由守卫
-router.beforeEach(async (to, from, next) => {
+router.beforeEach((to, from, next) => {
   try {
     // 如果是登录页，直接放行，不执行任何检查
     if (to.path === '/login' || to.path === '/') {
@@ -204,42 +204,19 @@ router.beforeEach(async (to, from, next) => {
 
     // ====== 需要认证的路由 ======
     if (to.meta.requiresAuth) {
-      // 如果 sessionStorage 中有认证数据，但 store 状态未同步，强制同步
-      if (isAuthenticated && !authStore.isAuthenticated) {
-        authStore.checkAuth();
-        // 等待一下让状态同步
-        await new Promise(resolve => setTimeout(resolve, 50));
-      }
-
       // 如果未认证，或者是 store 状态显示未登录
       if (!isAuthenticated || !authStore.isAuthenticated) {
-        // 如果 sessionStorage 中有有效数据，说明是页面刷新或状态未同步
-        // 强制同步 store 状态并允许通过
-        if (isAuthenticated) {
+        // 尝试执行一次 checkAuth (如果是因为 store 还没初始化)
+        if (isAuthenticated && !authStore.isAuthenticated) {
           authStore.checkAuth();
-          await new Promise(resolve => setTimeout(resolve, 50));
-          // 同步后再次检查
-          if (authStore.isAuthenticated || isAuthenticated) {
-            return next();
-          }
         }
 
-        // 如果是从登录页跳转过来的，并且 sessionStorage 中有 userInfo，允许通过
-        // 这可以解决登录后立即跳转时状态还未完全同步的问题
-        if ((from.path === '/login' || from.path === '/' || from.path === '') && isAuthenticated) {
-          // 从登录页跳转，并且 sessionStorage 中有有效数据，允许通过
-          // 强制同步 store 状态
-          authStore.checkAuth();
-          return next();
-        }
-
-        // 最终检查：如果确实未认证，跳转到登录页
-        if (!authStore.isAuthenticated && !isAuthenticated) {
+        // 再次检查
+        if (!authStore.isAuthenticated) {
           clearAuthData();
           const shouldShowMessage = to.path !== '/login' &&
             from.path !== '/login' &&
             from.path !== '/' &&
-            from.path !== '' &&
             from.name !== null;
           if (shouldShowMessage) {
             ElMessage.warning('请登录后访问');

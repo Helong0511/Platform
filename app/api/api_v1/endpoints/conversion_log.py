@@ -50,49 +50,22 @@ async def get_conversion_logs(
             end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
         
         # 构建查询条件
-        # 使用 LEFT JOIN 关联 Click 表以支持通过 Click 字段过滤
-        query = select(PostbackConversion, Click, Offer, Publisher, Advertiser).outerjoin(
-            Click, PostbackConversion.click_id == Click.click_id
-        ).outerjoin(
-            Offer, Click.offer_id == Offer.id
-        ).outerjoin(
-            Publisher, Click.publisher_id == Publisher.id
-        ).outerjoin(
-            Advertiser, Click.advertiser_id == Advertiser.id
-        )
-        
+        query = select(PostbackConversion)
         conditions = []
         
-        # Click ID 过滤：直接使用 PostbackConversion.click_id 字段
         if click_id:
+            # PostbackConversion 表已有 click_id 字段和索引，直接查询
             conditions.append(PostbackConversion.click_id == click_id)
         
-        # Offer ID 过滤：通过 Click 表关联
         if offer_id:
-            conditions.append(Click.offer_id == offer_id)
+            # 注意：PostbackConversion 使用 product_id，需要建立映射
+            conditions.append(PostbackConversion.product_id == offer_id)
         
-        # Publisher ID 过滤：通过 Click 表关联
-        if publisher_id:
-            conditions.append(Click.publisher_id == publisher_id)
-        
-        # Advertiser ID 过滤：通过 Click 表关联
-        if advertiser_id:
-            conditions.append(Click.advertiser_id == advertiser_id)
-        
-        # 转化状态过滤
         if conversion_status:
+            # 通过 conversion_status 字段查询
             if hasattr(PostbackConversion, 'conversion_status'):
-                # 验证状态值
-                if conversion_status not in ['Approved', 'Pending']:
-                    from app.core.exceptions import raise_api_exception
-                    from app.core.errors import ErrorCode
-                    raise_api_exception(
-                        ErrorCode.INVALID_PARAMS,
-                        detail=f"无效的转化状态: {conversion_status}，只支持 Approved 或 Pending"
-                    )
                 conditions.append(PostbackConversion.conversion_status == conversion_status)
         
-        # 日期范围过滤
         if start_datetime:
             conditions.append(PostbackConversion.created_at >= start_datetime)
         if end_datetime:
@@ -101,43 +74,9 @@ async def get_conversion_logs(
         if conditions:
             query = query.where(and_(*conditions))
         
-        # 总数查询：使用相同的条件，但只计数 PostbackConversion
-        # 对于需要通过 Click 表过滤的条件，需要 JOIN
-        count_query = select(func.count(PostbackConversion.id))
-        
-        # 构建计数查询的条件
-        count_conditions = []
-        needs_click_join = False
-        
-        if click_id:
-            count_conditions.append(PostbackConversion.click_id == click_id)
-        
-        if offer_id or publisher_id or advertiser_id:
-            needs_click_join = True
-            count_query = count_query.select_from(
-                PostbackConversion.outerjoin(Click, PostbackConversion.click_id == Click.click_id)
-            )
-            if offer_id:
-                count_conditions.append(Click.offer_id == offer_id)
-            if publisher_id:
-                count_conditions.append(Click.publisher_id == publisher_id)
-            if advertiser_id:
-                count_conditions.append(Click.advertiser_id == advertiser_id)
-        else:
-            count_query = count_query.select_from(PostbackConversion)
-        
-        if conversion_status and hasattr(PostbackConversion, 'conversion_status'):
-            count_conditions.append(PostbackConversion.conversion_status == conversion_status)
-        
-        if start_datetime:
-            count_conditions.append(PostbackConversion.created_at >= start_datetime)
-        if end_datetime:
-            count_conditions.append(PostbackConversion.created_at <= end_datetime)
-        
-        if count_conditions:
-            count_query = count_query.where(and_(*count_conditions))
-        
-        total_result = await db.execute(count_query)
+        # 总数
+        total_query = select(func.count()).select_from(query.subquery())
+        total_result = await db.execute(total_query)
         total = total_result.scalar() or 0
         
         # 分页
@@ -145,31 +84,98 @@ async def get_conversion_logs(
         query = query.offset((page - 1) * page_size).limit(page_size)
         
         result = await db.execute(query)
-        rows = result.unique().all()
+        conversions = result.scalars().all()
+        
+        # 批量加载Click记录（优化N+1查询）
+        click_ids = [conv.click_id for conv in conversions if hasattr(conv, 'click_id') and conv.click_id]
+        clicks_map = {}
+        if click_ids:
+            clicks_result = await db.execute(
+                select(Click).where(Click.click_id.in_(click_ids))
+            )
+            clicks = clicks_result.scalars().all()
+            clicks_map = {click.click_id: click for click in clicks}
+        
+        # 批量加载关联的Offer、Publisher、Advertiser（进一步优化）
+        offer_ids = set()
+        publisher_ids = set()
+        advertiser_ids = set()
+        for click in clicks_map.values():
+            if click.offer_id:
+                offer_ids.add(click.offer_id)
+            if click.publisher_id:
+                publisher_ids.add(click.publisher_id)
+            if click.advertiser_id:
+                advertiser_ids.add(click.advertiser_id)
+        
+        offers_map = {}
+        if offer_ids:
+            offers_result = await db.execute(
+                select(Offer).where(Offer.id.in_(offer_ids))
+            )
+            offers = offers_result.scalars().all()
+            offers_map = {offer.id: offer for offer in offers}
+        
+        publishers_map = {}
+        if publisher_ids:
+            publishers_result = await db.execute(
+                select(Publisher).where(Publisher.id.in_(publisher_ids))
+            )
+            publishers = publishers_result.scalars().all()
+            publishers_map = {publisher.id: publisher for publisher in publishers}
+        
+        advertisers_map = {}
+        if advertiser_ids:
+            advertisers_result = await db.execute(
+                select(Advertiser).where(Advertiser.id.in_(advertiser_ids))
+            )
+            advertisers = advertisers_result.scalars().all()
+            advertisers_map = {advertiser.id: advertiser for advertiser in advertisers}
         
         # 构建返回数据
         log_list = []
-        for row in rows:
-            # 解构查询结果
-            conv = row[0]  # PostbackConversion
-            click_record = row[1] if len(row) > 1 else None  # Click
-            offer = row[2] if len(row) > 2 else None  # Offer
-            publisher = row[3] if len(row) > 3 else None  # Publisher
-            advertiser = row[4] if len(row) > 4 else None  # Advertiser
+        for conv in conversions:
+            # 从批量加载的map中获取Click记录
+            click_record = None
+            if hasattr(conv, 'click_id') and conv.click_id:
+                click_record = clicks_map.get(conv.click_id)
+            
+            # 从批量加载的map中获取关联信息
+            offer_name = None
+            publisher_name = None
+            advertiser_name = None
+            click_time = None
+            
+            if click_record:
+                click_time = click_record.click_time
+                if click_record.offer_id:
+                    offer = offers_map.get(click_record.offer_id)
+                    if offer:
+                        offer_name = offer.offer_name
+                
+                if click_record.publisher_id:
+                    publisher = publishers_map.get(click_record.publisher_id)
+                    if publisher:
+                        publisher_name = publisher.publisher_name
+                
+                if click_record.advertiser_id:
+                    advertiser = advertisers_map.get(click_record.advertiser_id)
+                    if advertiser:
+                        advertiser_name = advertiser.advertiser_name
             
             log_data = {
                 "id": conv.id,
-                "click_id": conv.click_id if hasattr(conv, 'click_id') and conv.click_id else (click_record.click_id if click_record else None),
-                "click_time": click_record.click_time.isoformat() if click_record and click_record.click_time else (conv.click_time.isoformat() if hasattr(conv, 'click_time') and conv.click_time else None),
+                "click_id": getattr(conv, 'click_id', None) or (click_record.click_id if click_record else None),
+                "click_time": click_time.isoformat() if click_time else None,
                 "conversion_time": conv.created_at.isoformat() if conv.created_at else None,
                 "conversion_status": getattr(conv, 'conversion_status', 'Pending'),
                 "offer_id": click_record.offer_id if click_record else None,
-                "offer_name": offer.offer_name if offer else None,
+                "offer_name": offer_name,
                 "publisher_id": click_record.publisher_id if click_record else None,
-                "publisher_name": publisher.publisher_name if publisher else None,
+                "publisher_name": publisher_name,
                 "advertiser_id": click_record.advertiser_id if click_record else None,
-                "advertiser_name": advertiser.advertiser_name if advertiser else None,
-                "ip": click_record.ip if click_record else (conv.ip if hasattr(conv, 'ip') else None),
+                "advertiser_name": advertiser_name,
+                "ip": click_record.ip if click_record else conv.ip,
                 "device": click_record.device if click_record else None,
                 "country": click_record.country if click_record else None,
                 "platform": conv.platform,
@@ -202,16 +208,6 @@ async def update_conversion_status(
 ):
     """更新转化状态（仅管理员）"""
     try:
-        # 验证状态值
-        valid_statuses = ['Approved', 'Pending']
-        if status not in valid_statuses:
-            from app.core.exceptions import raise_api_exception
-            from app.core.errors import ErrorCode
-            raise_api_exception(
-                ErrorCode.INVALID_PARAMS,
-                detail=f"无效的转化状态: {status}，只支持 {', '.join(valid_statuses)}"
-            )
-        
         result = await db.execute(
             select(PostbackConversion).where(PostbackConversion.id == conversion_id)
         )
@@ -227,21 +223,14 @@ async def update_conversion_status(
         
         # 更新转化状态
         if hasattr(conversion, 'conversion_status'):
-            old_status = conversion.conversion_status
             conversion.conversion_status = status
             await db.commit()
             await db.refresh(conversion)
-            logger.info(f"转化状态已更新: conversion_id={conversion_id}, old_status={old_status}, new_status={status}")
+            logger.info(f"转化状态已更新: conversion_id={conversion_id}, status={status}")
         else:
             logger.warning(f"PostbackConversion 模型缺少 conversion_status 字段")
-            from app.core.exceptions import raise_api_exception
-            from app.core.errors import ErrorCode
-            raise_api_exception(
-                ErrorCode.OPERATION_FAILED,
-                detail="转化状态字段不存在，请检查数据库模型"
-            )
         
-        return ResponseBaseSchema.success(data={"message": "状态更新成功", "conversion_id": conversion_id, "status": status})
+        return ResponseBaseSchema.success(data={"message": "状态更新成功"})
     except Exception as e:
         logger.error(f"更新转化状态失败: {str(e)}", exc_info=True)
         raise

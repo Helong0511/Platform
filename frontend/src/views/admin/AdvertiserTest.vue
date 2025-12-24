@@ -268,27 +268,9 @@ const loadData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: Math.min(pagination.pageSize, 100)
-    }
-    
-    // 只添加非空值
-    if (filterAdvertiser.value !== null && filterAdvertiser.value !== undefined && filterAdvertiser.value !== '') {
-      const advertiserId = parseInt(filterAdvertiser.value, 10)
-      if (!isNaN(advertiserId)) {
-        params.advertiser_id = advertiserId
-      }
-    }
-    
-    if (filterOffer.value !== null && filterOffer.value !== undefined && filterOffer.value !== '') {
-      const offerId = parseInt(filterOffer.value, 10)
-      if (!isNaN(offerId)) {
-        params.offer_id = offerId
-      }
-    }
-    
-    // 调试：输出查询参数（开发环境）
-    if (import.meta.env.DEV) {
-      console.log('[AdvertiserTest] 查询参数:', JSON.stringify(params, null, 2))
+      page_size: Math.min(pagination.pageSize, 100),
+      advertiser_id: filterAdvertiser.value || undefined,
+      offer_id: filterOffer.value || undefined
     }
     const response = await getAdvertiserTests(params)
     if (response.code === 200) {
@@ -441,28 +423,6 @@ onMounted(() => {
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
-}
-
-/* 修复对话框中的下拉框显示问题 */
-.el-dialog :deep(.el-select .el-input__wrapper) {
-  padding-right: 30px;
-}
-
-.el-dialog :deep(.el-select .el-select__input) {
-  padding-right: 8px;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-  width: 100% !important;
-  max-width: 100%;
-}
-
-/* 确保对话框中的placeholder正确隐藏 */
-.el-dialog :deep(.el-select.is-focus .el-select__placeholder),
-.el-dialog :deep(.el-select:not(.is-empty) .el-select__placeholder) {
-  display: none !important;
-  opacity: 0 !important;
-  visibility: hidden !important;
 }
 </style>
 

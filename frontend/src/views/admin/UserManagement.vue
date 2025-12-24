@@ -711,24 +711,11 @@ const fetchUsers = async (immediate = false) => {
       
       const params = {
         page: pagination.value.current,
-        page_size: pagination.value.size
+        page_size: pagination.value.size,
+        username: searchForm.username,
+        role: searchForm.role,
+        status: searchForm.status
       };
-      
-      // 只添加非空值
-      if (searchForm.username && searchForm.username !== '') {
-        params.username = searchForm.username;
-      }
-      if (searchForm.role && searchForm.role !== '') {
-        params.role = searchForm.role;
-      }
-      if (searchForm.status && searchForm.status !== '') {
-        params.status = searchForm.status;
-      }
-      
-      // 调试：输出查询参数（开发环境）
-      if (import.meta.env.DEV) {
-        console.log('[UserManagement] 查询参数:', JSON.stringify(params, null, 2));
-      }
 
       fetchUsersPromise = getUsers(params);
       const response = await fetchUsersPromise;
@@ -1998,24 +1985,6 @@ onMounted(async () => {
   
   .el-form :deep(.el-select .el-input__wrapper) {
     min-height: var(--touch-target-size);
-    padding-right: 30px;
-  }
-
-  .el-form :deep(.el-select .el-select__input) {
-    padding-right: 8px;
-    text-overflow: ellipsis;
-    overflow: hidden;
-    white-space: nowrap;
-    width: 100% !important;
-    max-width: 100%;
-  }
-
-  /* 确保对话框中的placeholder正确隐藏 */
-  .el-dialog :deep(.el-select.is-focus .el-select__placeholder),
-  .el-dialog :deep(.el-select:not(.is-empty) .el-select__placeholder) {
-    display: none !important;
-    opacity: 0 !important;
-    visibility: hidden !important;
   }
   
   /* 分隔线优化 */

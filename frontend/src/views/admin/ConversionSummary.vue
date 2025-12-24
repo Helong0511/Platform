@@ -35,7 +35,7 @@
             v-for="offer in offerList"
             :key="offer.id"
             :label="offer.offer_name"
-            :value="String(offer.id)"
+            :value="offer.id"
           />
         </el-select>
         <el-select
@@ -50,7 +50,7 @@
             v-for="pub in publisherList"
             :key="pub.id"
             :label="pub.publisher_name"
-            :value="String(pub.id)"
+            :value="pub.id"
           />
         </el-select>
         <el-button type="primary" :icon="Search" @click="handleSearch" style="margin-left: 10px;">查询</el-button>
@@ -219,45 +219,16 @@ const setDefaultMonthRange = () => {
 const loadData = async () => {
   loading.value = true
   try {
-    const params = {}
-    
-    // 只添加非空值
-    if (dateRange.value && Array.isArray(dateRange.value) && dateRange.value.length === 2) {
-      params.start_date = dateRange.value[0]
-      params.end_date = dateRange.value[1]
+    const params = {
+      start_date: dateRange.value?.[0] || undefined,
+      end_date: dateRange.value?.[1] || undefined,
+      offer_id: filterOffer.value || undefined,
+      publisher_id: filterPublisher.value || undefined
     }
-    
-    if (filterOffer.value !== null && filterOffer.value !== undefined && filterOffer.value !== '') {
-      const offerId = parseInt(filterOffer.value, 10)
-      if (!isNaN(offerId)) {
-        params.offer_id = offerId
-      }
-    }
-    
-    if (filterPublisher.value !== null && filterPublisher.value !== undefined && filterPublisher.value !== '') {
-      const publisherId = parseInt(filterPublisher.value, 10)
-      if (!isNaN(publisherId)) {
-        params.publisher_id = publisherId
-      }
-    }
-    
-    // 调试：输出查询参数（开发环境）
-    if (import.meta.env.DEV) {
-      console.log('[ConversionSummary] 查询参数:', JSON.stringify(params, null, 2))
-    }
-    
     const response = await getConversionSummary(params)
     if (response.code === 200) {
       Object.assign(summaryData, response.data)
       statsList.value = response.data.stats_list || []
-      
-      // 调试：输出查询结果（开发环境）
-      if (import.meta.env.DEV) {
-        console.log('[ConversionSummary] 查询结果:', {
-          statsCount: statsList.value.length,
-          summaryData: summaryData
-        })
-      }
     } else {
       ElMessage.error(response.message || '获取数据失败')
     }
@@ -350,8 +321,6 @@ onMounted(() => {
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
-  width: 100% !important;
-  max-width: 100%;
 }
 
 /* 确保清除按钮不遮挡文字 */
@@ -364,28 +333,6 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-/* 修复对话框中的下拉框显示问题 */
-.el-dialog :deep(.el-select .el-input__wrapper) {
-  padding-right: 30px;
-}
-
-.el-dialog :deep(.el-select .el-select__input) {
-  padding-right: 8px;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-  width: 100% !important;
-  max-width: 100%;
-}
-
-/* 确保对话框中的placeholder正确隐藏 */
-.el-dialog :deep(.el-select.is-focus .el-select__placeholder),
-.el-dialog :deep(.el-select:not(.is-empty) .el-select__placeholder) {
-  display: none !important;
-  opacity: 0 !important;
-  visibility: hidden !important;
 }
 
 /* 日期选择器特殊处理 */

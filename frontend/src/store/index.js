@@ -156,31 +156,15 @@ export const useAuthStore = defineStore('auth', {
           // 静默处理错误，使用默认值
         });
 
-        // 确保状态更新完成后再跳转
-        // 使用 setTimeout 确保 sessionStorage 和 store 状态都已更新
-        // 然后使用 nextTick 确保 Vue 响应式系统已更新状态
-        await new Promise(resolve => setTimeout(resolve, 150));
-        
-        // 再次验证状态已更新
-        const isAuthValid = validateAuthData();
-        if (isAuthValid && this.isAuthenticated) {
-          // 使用 router.push 跳转，路由守卫会检查认证状态
-          try {
-            await router.push('/app/dashboard');
-          } catch (err) {
-            // 忽略重复导航的错误（Vue Router 的特性）
-            if (err.name !== 'NavigationDuplicated') {
-              // 如果路由跳转失败，使用 window.location 强制跳转
-              logger.warn('路由跳转失败，使用 window.location 跳转:', err);
-              window.location.href = '/app/dashboard';
-            }
+        // 跳转到仪表盘页面
+        // 注意：路由守卫会检查token，所以这里直接跳转即可
+        router.push('/app/dashboard').catch(err => {
+          // 忽略重复导航的错误（Vue Router 的特性）
+          if (err.name !== 'NavigationDuplicated') {
+            // 生产环境可以记录到错误监控服务
+            // 路由跳转失败已由路由系统处理
           }
-        } else {
-          // 如果状态更新失败，使用 window.location 强制跳转
-          logger.warn('认证状态更新失败，使用 window.location 跳转');
-          window.location.href = '/app/dashboard';
-        }
-        
+        });
         return true;
       } catch (err) {
         // 处理错误信息

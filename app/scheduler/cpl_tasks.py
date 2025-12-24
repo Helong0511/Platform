@@ -3,22 +3,18 @@ CPL 系统定时任务
 """
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
 from app.core.cap import reset_daily_caps
+from app.scheduler_module.task_names import RESET_DAILY_CAPS_TASK_NAME
 
 logger = logging.getLogger(__name__)
 
 # 任务执行结果存储（用于定时任务系统）
-_task_result = {
-    "last_run_time": None,
-    "last_run_status": None,
-    "last_run_message": None,
-    "run_count": 0,
-    "success_count": 0,
-    "error_count": 0
-}
+# 格式化为字符串，用于保存到数据库的last_error字段
+_task_result_message: Optional[str] = None
 
 
 async def reset_daily_caps_task():
@@ -26,29 +22,35 @@ async def reset_daily_caps_task():
     重置每日 Cap 计数任务
     建议每天 00:00 UTC 执行
     """
-    global _task_result
+    global _task_result_message
     
     logger.info("开始执行每日Cap重置任务...")
-    _task_result["last_run_time"] = datetime.now(timezone.utc)
-    _task_result["run_count"] += 1
+    start_time = datetime.now(timezone.utc)
     
     try:
         async with AsyncSessionLocal() as db:
             await reset_daily_caps(db)
-            _task_result["last_run_status"] = "success"
-            _task_result["last_run_message"] = "每日Cap重置任务执行成功"
-            _task_result["success_count"] += 1
-            logger.info("每日Cap重置任务执行成功")
+            end_time = datetime.now(timezone.utc)
+            duration = (end_time - start_time).total_seconds()
+            _task_result_message = f"每日Cap重置任务执行成功（耗时: {round(duration, 2)}秒）"
+            logger.info(_task_result_message)
     except Exception as e:
-        _task_result["last_run_status"] = "error"
-        _task_result["last_run_message"] = f"执行失败: {str(e)}"
-        _task_result["error_count"] += 1
+        end_time = datetime.now(timezone.utc)
+        duration = (end_time - start_time).total_seconds()
+        _task_result_message = f"执行失败（耗时: {round(duration, 2)}秒）: {str(e)}"
         logger.error(f"每日Cap重置任务执行失败: {str(e)}", exc_info=True)
         raise
 
 
-def get_task_result() -> dict:
+def get_task_result(task_name: str) -> Optional[str]:
     """
     获取任务执行结果（用于定时任务系统）
+    返回字符串格式的结果，用于保存到数据库
+    
+    Args:
+        task_name: 任务名称（用于兼容任务结果注册表接口）
+        
+    Returns:
+        任务执行结果字符串，如果不存在返回 None
     """
-    return _task_result.copy()
+    return _task_result_message

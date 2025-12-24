@@ -288,31 +288,10 @@ const loadData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: Math.min(pagination.pageSize, 100)
-    }
-    
-    // 只添加非空值
-    if (filterPublisher.value !== null && filterPublisher.value !== undefined && filterPublisher.value !== '') {
-      const publisherId = parseInt(filterPublisher.value, 10)
-      if (!isNaN(publisherId)) {
-        params.publisher_id = publisherId
-      }
-    }
-    
-    if (filterOffer.value !== null && filterOffer.value !== undefined && filterOffer.value !== '') {
-      const offerId = parseInt(filterOffer.value, 10)
-      if (!isNaN(offerId)) {
-        params.offer_id = offerId
-      }
-    }
-    
-    if (filterStatus.value !== null && filterStatus.value !== undefined && filterStatus.value !== '') {
-      params.status = filterStatus.value
-    }
-    
-    // 调试：输出查询参数（开发环境）
-    if (import.meta.env.DEV) {
-      console.log('[AffiliateTest] 查询参数:', JSON.stringify(params, null, 2))
+      page_size: Math.min(pagination.pageSize, 100),
+      publisher_id: filterPublisher.value || undefined,
+      offer_id: filterOffer.value || undefined,
+      status: filterStatus.value || undefined
     }
     const response = await getAffiliateTests(params)
     if (response.code === 200) {
@@ -468,28 +447,6 @@ onMounted(() => {
   font-size: 12px;
   color: #909399;
   margin-top: 5px;
-}
-
-/* 修复对话框中的下拉框显示问题 */
-.el-dialog :deep(.el-select .el-input__wrapper) {
-  padding-right: 30px;
-}
-
-.el-dialog :deep(.el-select .el-select__input) {
-  padding-right: 8px;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-  width: 100% !important;
-  max-width: 100%;
-}
-
-/* 确保对话框中的placeholder正确隐藏 */
-.el-dialog :deep(.el-select.is-focus .el-select__placeholder),
-.el-dialog :deep(.el-select:not(.is-empty) .el-select__placeholder) {
-  display: none !important;
-  opacity: 0 !important;
-  visibility: hidden !important;
 }
 </style>
 

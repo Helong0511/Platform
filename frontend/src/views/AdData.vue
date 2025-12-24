@@ -438,34 +438,18 @@ const fetchAdData = async () => {
     page: pagination.value.current,
     page_size: pagination.value.size
   };
-  
-  // 添加筛选条件（只添加非空值）
-  if (isAdmin.value && searchForm.value.clientId && searchForm.value.clientId !== '') {
-    // 确保 client_id 是数字类型
-    const clientId = parseInt(searchForm.value.clientId, 10);
-    if (!isNaN(clientId)) {
-      params.client_id = clientId;
-    }
+  if (isAdmin.value && searchForm.value.clientId) {
+    params.client_id = searchForm.value.clientId;
   }
-  
-  if (searchForm.value.productId && searchForm.value.productId !== '') {
-    // product_id 可能是字符串或数字，保持原样（后端接受字符串）
+  if (searchForm.value.productId) {
     params.product_id = searchForm.value.productId;
   }
-  
-  if (searchForm.value.countryCode && searchForm.value.countryCode !== '') {
+  if (searchForm.value.countryCode) {
     params.country_code = searchForm.value.countryCode;
   }
-  
-  if (searchForm.value.dateRange && Array.isArray(searchForm.value.dateRange) && searchForm.value.dateRange.length === 2) {
+  if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
     params.start_date = searchForm.value.dateRange[0];
     params.end_date = searchForm.value.dateRange[1];
-  }
-  
-  // 调试：输出查询参数（开发环境）
-  if (import.meta.env.DEV) {
-    console.log('[AdData] 查询参数:', JSON.stringify(params, null, 2));
-    console.log('[AdData] 筛选表单值:', JSON.stringify(searchForm.value, null, 2));
   }
   
   // 添加排序参数
@@ -524,26 +508,14 @@ const fetchAdData = async () => {
       // 提取数据
       const listResponse = response.data || {};
       
-      // 尝试多种方式访问数据（兼容不同的响应格式）
+      // 尝试多种方式访问数据
       let dataArray = [];
       if (Array.isArray(listResponse.data)) {
-        // 标准格式：{ data: [...], total: ... }
         dataArray = listResponse.data;
       } else if (Array.isArray(listResponse)) {
-        // 扁平格式：直接是数组
         dataArray = listResponse;
       } else if (Array.isArray(response.data)) {
-        // 响应数据直接是数组
         dataArray = response.data;
-      }
-      
-      // 如果仍然没有数据，检查响应结构
-      if (dataArray.length === 0 && import.meta.env.DEV) {
-        console.warn('[AdData] 数据为空，响应结构:', {
-          response: response,
-          listResponse: listResponse,
-          responseData: response.data
-        });
       }
       
       adDataList.value = dataArray;
@@ -552,44 +524,6 @@ const fetchAdData = async () => {
       const totalValue = typeof listResponse.total === 'number' ? listResponse.total : 
                         (typeof response.total === 'number' ? response.total : parseInt(listResponse.total || response.total || 0, 10));
       pagination.value.total = totalValue;
-      
-      // 调试：输出查询结果（开发环境）
-      if (import.meta.env.DEV) {
-        console.log('[AdData] 查询结果:', {
-          dataCount: dataArray.length,
-          total: totalValue,
-          currentPage: pagination.value.current,
-          pageSize: pagination.value.size,
-          hasData: dataArray.length > 0,
-          firstItem: dataArray[0] || null,
-          responseStructure: {
-            hasResponseData: !!response.data,
-            hasListResponseData: !!listResponse.data,
-            listResponseType: Array.isArray(listResponse) ? 'array' : typeof listResponse,
-            listResponseDataType: Array.isArray(listResponse.data) ? 'array' : typeof listResponse.data
-          }
-        });
-      }
-      
-      // 如果查询有筛选条件但没有数据，给出提示
-      if (dataArray.length === 0 && totalValue === 0) {
-        const hasFilters = searchForm.value.clientId || 
-                          searchForm.value.productId || 
-                          searchForm.value.countryCode || 
-                          (searchForm.value.dateRange && searchForm.value.dateRange.length === 2);
-        
-        if (hasFilters && import.meta.env.DEV) {
-          console.warn('[AdData] 查询有筛选条件但无数据:', {
-            filters: {
-              clientId: searchForm.value.clientId,
-              productId: searchForm.value.productId,
-              countryCode: searchForm.value.countryCode,
-              dateRange: searchForm.value.dateRange
-            },
-            params: params
-          });
-        }
-      }
       
       // 如果没有数据且没有选择日期范围，尝试获取数据的日期范围并提示用户
       if (adDataList.value.length === 0 && pagination.value.total === 0 && 
@@ -672,14 +606,13 @@ const fetchClientsWithData = async () => {
     const result = await getClientsWithData(startDate, endDate);
     const data = result.data || [];
     // 转换为下拉选择格式，添加"全部客户"选项
-    // 注意：value 统一使用字符串类型，确保与 v-model 绑定一致
     users.value = [
       { label: '全部客户', value: '' },
       ...data
         .filter(item => item && item.id != null) // 过滤掉无效的客户
         .map(item => ({
           label: item.full_name || '未知客户',
-          value: String(item.id) // 统一转换为字符串类型
+          value: item.id
         }))
     ];
   } catch (error) {
@@ -1303,30 +1236,24 @@ const handleExport = async () => {
     // 如果是管理员，可以选择指定客户ID，也可以不指定（导出所有客户的数据）
     if (isAdmin.value) {
       // 如果选择了客户，使用选择的客户ID
-      if (searchForm.value.clientId && searchForm.value.clientId !== '') {
-        const clientId = parseInt(searchForm.value.clientId, 10);
-        if (!isNaN(clientId)) {
-          params.client_id = clientId;
-        }
+      if (searchForm.value.clientId) {
+        params.client_id = parseInt(searchForm.value.clientId);
       }
       // 如果没有选择客户（全部客户），不传递client_id参数，后端会导出所有客户的数据
     }
     
-    // 添加产品ID过滤（只添加非空值）
-    if (searchForm.value.productId && searchForm.value.productId !== '') {
-      const productId = parseInt(searchForm.value.productId, 10);
-      if (!isNaN(productId)) {
-        params.product_id = productId;
-      }
+    // 添加产品ID过滤
+    if (searchForm.value.productId) {
+      params.product_id = parseInt(searchForm.value.productId);
     }
 
-    // 添加国家代码过滤（只添加非空值）
-    if (searchForm.value.countryCode && searchForm.value.countryCode !== '') {
+    // 添加国家代码过滤
+    if (searchForm.value.countryCode) {
       params.country_code = searchForm.value.countryCode;
     }
 
-    // 添加日期范围过滤（只添加有效的日期范围）
-    if (searchForm.value.dateRange && Array.isArray(searchForm.value.dateRange) && searchForm.value.dateRange.length === 2) {
+    // 添加日期范围过滤
+    if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
       params.start_date = searchForm.value.dateRange[0];
       params.end_date = searchForm.value.dateRange[1];
     }
@@ -1961,28 +1888,6 @@ watch(
   
   .el-dialog :deep(.el-dialog__body) {
     padding: var(--spacing-lg);
-  }
-
-  /* 修复对话框中的下拉框显示问题 */
-  .el-dialog :deep(.el-select .el-input__wrapper) {
-    padding-right: 30px;
-  }
-
-  .el-dialog :deep(.el-select .el-select__input) {
-    padding-right: 8px;
-    text-overflow: ellipsis;
-    overflow: hidden;
-    white-space: nowrap;
-    width: 100% !important;
-    max-width: 100%;
-  }
-
-  /* 确保对话框中的placeholder正确隐藏 */
-  .el-dialog :deep(.el-select.is-focus .el-select__placeholder),
-  .el-dialog :deep(.el-select:not(.is-empty) .el-select__placeholder) {
-    display: none !important;
-    opacity: 0 !important;
-    visibility: hidden !important;
   }
 }
 

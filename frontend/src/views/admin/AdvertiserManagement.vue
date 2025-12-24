@@ -166,21 +166,9 @@ const loadData = async () => {
     const pageSize = Math.min(pagination.pageSize, 100)
     const params = {
       page: pagination.page,
-      page_size: pageSize
-    }
-    
-    // 只添加非空值
-    if (searchKeyword.value && searchKeyword.value !== '') {
-      params.search = searchKeyword.value
-    }
-    
-    if (filterActive.value !== null && filterActive.value !== undefined) {
-      params.is_active = filterActive.value
-    }
-    
-    // 调试：输出查询参数（开发环境）
-    if (import.meta.env.DEV) {
-      console.log('[AdvertiserManagement] 查询参数:', JSON.stringify(params, null, 2))
+      page_size: pageSize,
+      search: searchKeyword.value || undefined,
+      is_active: filterActive.value !== null ? filterActive.value : undefined
     }
     const response = await getAdvertisers(params)
     if (response.code === 200) {
@@ -373,8 +361,6 @@ onMounted(() => {
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
-  width: 100% !important;
-  max-width: 100%;
 }
 
 /* 确保清除按钮不遮挡文字 */
@@ -387,28 +373,6 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-/* 修复对话框中的下拉框显示问题 */
-.el-dialog :deep(.el-select .el-input__wrapper) {
-  padding-right: 30px;
-}
-
-.el-dialog :deep(.el-select .el-select__input) {
-  padding-right: 8px;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-  width: 100% !important;
-  max-width: 100%;
-}
-
-/* 确保对话框中的placeholder正确隐藏 */
-.el-dialog :deep(.el-select.is-focus .el-select__placeholder),
-.el-dialog :deep(.el-select:not(.is-empty) .el-select__placeholder) {
-  display: none !important;
-  opacity: 0 !important;
-  visibility: hidden !important;
 }
 
 .table-wrapper {

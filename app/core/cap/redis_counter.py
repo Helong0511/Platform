@@ -164,50 +164,6 @@ class RedisCapManager:
         
         key = get_total_cap_key(offer_id, publisher_id)
         try:
-            val = await redis.decr(key)
-            # 避免减成负数
-            if val < 0:
-                await redis.set(key, 0)
+            await redis.decr(key)
         except Exception as e:
             logger.error(f"Redis回滚失败: {e}")
-    
-    @staticmethod
-    async def clear_daily_cap_keys(offer_id: Optional[int] = None, publisher_id: Optional[int] = None):
-        """
-        清理每日Cap的Redis key（用于定时任务重置）
-        
-        Args:
-            offer_id: 如果指定，只清理该Offer的key；如果为None，清理所有
-            publisher_id: 如果指定，只清理该Publisher的key；如果为None，清理所有
-        """
-        redis = await get_redis_client()
-        if not redis:
-            logger.warning("Redis不可用，跳过清理每日Cap key")
-            return
-        
-        try:
-            # 构建匹配模式
-            if offer_id:
-                pattern = f"{KEY_PREFIX}:daily:{offer_id}:*"
-            else:
-                pattern = f"{KEY_PREFIX}:daily:*"
-            
-            if publisher_id:
-                pattern += f":pub:{publisher_id}"
-            
-            # 使用SCAN迭代所有匹配的key（避免阻塞）
-            deleted_count = 0
-            cursor = 0
-            while True:
-                cursor, keys = await redis.scan(cursor, match=pattern, count=100)
-                if keys:
-                    # 批量删除
-                    deleted = await redis.delete(*keys)
-                    deleted_count += deleted
-                if cursor == 0:
-                    break
-            
-            if deleted_count > 0:
-                logger.info(f"清理了 {deleted_count} 个每日Cap Redis key (pattern={pattern})")
-        except Exception as e:
-            logger.error(f"清理每日Cap Redis key失败: {e}", exc_info=True)

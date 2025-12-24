@@ -16,6 +16,7 @@ from app.core.errors import ErrorCode
 from app.models.models import User, OfferCap, Offer, Advertiser, Publisher
 from app.schemas.cpl.cap import OfferCapCreate, OfferCapUpdate, OfferCapResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
+from app.core.cap.consistency_checker import check_cap_consistency
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -87,25 +88,22 @@ async def create_cap(
     try:
         db.add(cap)
         await db.commit()
-        await db.refresh(cap)
         
-        # 加载关联信息
+        # 重新加载关联信息（使用joinedload优化）
+        from sqlalchemy.orm import joinedload
+        query = select(OfferCap).where(OfferCap.id == cap.id).options(
+            joinedload(OfferCap.offer),
+            joinedload(OfferCap.advertiser),
+            joinedload(OfferCap.publisher)
+        )
+        result = await db.execute(query)
+        cap = result.scalars().first()
+        
         cap_data = OfferCapResponse.model_validate(cap)
-        cap_data.offer_name = offer.offer_name
-        if cap.advertiser_id:
-            adv_result = await db.execute(
-                select(Advertiser).where(Advertiser.id == cap.advertiser_id)
-            )
-            advertiser = adv_result.scalars().first()
-            if advertiser:
-                cap_data.advertiser_name = advertiser.advertiser_name
-        if cap.publisher_id:
-            pub_result = await db.execute(
-                select(Publisher).where(Publisher.id == cap.publisher_id)
-            )
-            publisher = pub_result.scalars().first()
-            if publisher:
-                cap_data.publisher_name = publisher.publisher_name
+        # 从已加载的关联中获取信息
+        cap_data.offer_name = cap.offer.offer_name if cap.offer else None
+        cap_data.advertiser_name = cap.advertiser.advertiser_name if cap.advertiser else None
+        cap_data.publisher_name = cap.publisher.publisher_name if cap.publisher else None
         
         logger.info(f"Cap配置创建成功: cap_id={cap.id}")
         return ResponseBaseSchema.success(data=cap_data)
@@ -159,38 +157,24 @@ async def get_caps(
     query = query.order_by(OfferCap.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
     
-    # 使用JOIN优化查询，避免N+1问题
-    from sqlalchemy.orm import aliased
-    offer_alias = aliased(Offer)
-    advertiser_alias = aliased(Advertiser)
-    publisher_alias = aliased(Publisher)
-    
-    query = query.outerjoin(offer_alias, OfferCap.offer_id == offer_alias.id)
-    query = query.outerjoin(advertiser_alias, OfferCap.advertiser_id == advertiser_alias.id)
-    query = query.outerjoin(publisher_alias, OfferCap.publisher_id == publisher_alias.id)
-    
-    # 选择所有需要的字段
-    query = query.add_columns(
-        offer_alias.offer_name,
-        advertiser_alias.advertiser_name,
-        publisher_alias.publisher_name
+    # 使用joinedload优化关联查询，减少N+1查询问题
+    from sqlalchemy.orm import joinedload
+    query = query.options(
+        joinedload(OfferCap.offer),
+        joinedload(OfferCap.advertiser),
+        joinedload(OfferCap.publisher)
     )
-    
     result = await db.execute(query)
-    rows = result.all()
+    caps = result.scalars().all()
     
-    # 构建响应数据
+    # 加载关联信息（已通过joinedload预加载）
     cap_list = []
-    for row in rows:
-        cap = row[0]  # OfferCap对象
-        offer_name = row[1] if len(row) > 1 else None
-        advertiser_name = row[2] if len(row) > 2 else None
-        publisher_name = row[3] if len(row) > 3 else None
-        
+    for cap in caps:
         cap_data = OfferCapResponse.model_validate(cap)
-        cap_data.offer_name = offer_name
-        cap_data.advertiser_name = advertiser_name
-        cap_data.publisher_name = publisher_name
+        # 从已加载的关联中获取信息
+        cap_data.offer_name = cap.offer.offer_name if cap.offer else None
+        cap_data.advertiser_name = cap.advertiser.advertiser_name if cap.advertiser else None
+        cap_data.publisher_name = cap.publisher.publisher_name if cap.publisher else None
         
         cap_list.append(cap_data)
     
@@ -212,9 +196,14 @@ async def get_cap(
     current_user: User = Depends(get_current_user)
 ):
     """获取Cap配置详情（仅管理员）"""
-    result = await db.execute(
-        select(OfferCap).where(OfferCap.id == cap_id)
+    # 使用joinedload优化关联查询
+    from sqlalchemy.orm import joinedload
+    query = select(OfferCap).where(OfferCap.id == cap_id).options(
+        joinedload(OfferCap.offer),
+        joinedload(OfferCap.advertiser),
+        joinedload(OfferCap.publisher)
     )
+    result = await db.execute(query)
     cap = result.scalars().first()
     
     if not cap:
@@ -223,30 +212,11 @@ async def get_cap(
             detail=f"Cap配置ID {cap_id} 不存在"
         )
     
-    # 加载关联信息
-    offer_result = await db.execute(
-        select(Offer).where(Offer.id == cap.offer_id)
-    )
-    offer = offer_result.scalars().first()
-    
+    # 从已加载的关联中获取信息
     cap_data = OfferCapResponse.model_validate(cap)
-    cap_data.offer_name = offer.offer_name if offer else None
-    
-    if cap.advertiser_id:
-        adv_result = await db.execute(
-            select(Advertiser).where(Advertiser.id == cap.advertiser_id)
-        )
-        advertiser = adv_result.scalars().first()
-        if advertiser:
-            cap_data.advertiser_name = advertiser.advertiser_name
-    
-    if cap.publisher_id:
-        pub_result = await db.execute(
-            select(Publisher).where(Publisher.id == cap.publisher_id)
-        )
-        publisher = pub_result.scalars().first()
-        if publisher:
-            cap_data.publisher_name = publisher.publisher_name
+    cap_data.offer_name = cap.offer.offer_name if cap.offer else None
+    cap_data.advertiser_name = cap.advertiser.advertiser_name if cap.advertiser else None
+    cap_data.publisher_name = cap.publisher.publisher_name if cap.publisher else None
     
     return ResponseBaseSchema.success(data=cap_data)
 
@@ -285,32 +255,22 @@ async def update_cap(
     
     try:
         await db.commit()
-        await db.refresh(cap)
         
-        # 加载关联信息
-        offer_result = await db.execute(
-            select(Offer).where(Offer.id == cap.offer_id)
+        # 重新加载关联信息（使用joinedload优化）
+        from sqlalchemy.orm import joinedload
+        query = select(OfferCap).where(OfferCap.id == cap.id).options(
+            joinedload(OfferCap.offer),
+            joinedload(OfferCap.advertiser),
+            joinedload(OfferCap.publisher)
         )
-        offer = offer_result.scalars().first()
+        result = await db.execute(query)
+        cap = result.scalars().first()
         
         cap_data = OfferCapResponse.model_validate(cap)
-        cap_data.offer_name = offer.offer_name if offer else None
-        
-        if cap.advertiser_id:
-            adv_result = await db.execute(
-                select(Advertiser).where(Advertiser.id == cap.advertiser_id)
-            )
-            advertiser = adv_result.scalars().first()
-            if advertiser:
-                cap_data.advertiser_name = advertiser.advertiser_name
-        
-        if cap.publisher_id:
-            pub_result = await db.execute(
-                select(Publisher).where(Publisher.id == cap.publisher_id)
-            )
-            publisher = pub_result.scalars().first()
-            if publisher:
-                cap_data.publisher_name = publisher.publisher_name
+        # 从已加载的关联中获取信息
+        cap_data.offer_name = cap.offer.offer_name if cap.offer else None
+        cap_data.advertiser_name = cap.advertiser.advertiser_name if cap.advertiser else None
+        cap_data.publisher_name = cap.publisher.publisher_name if cap.publisher else None
         
         logger.info(f"Cap配置更新成功: cap_id={cap_id}")
         return ResponseBaseSchema.success(data=cap_data)
@@ -357,5 +317,46 @@ async def delete_cap(
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"删除Cap配置失败: {str(e)}"
+        )
+
+
+@router.post("/check-consistency",
+             response_model=ResponseBaseSchema[list],
+             summary="检查Cap计数一致性",
+             dependencies=[Depends(require_admin)])
+async def check_cap_consistency_api(
+    offer_id: Optional[int] = Query(None, description="可选的Offer ID，如果提供则只检查该Offer的Cap"),
+    fix: bool = Query(False, description="是否自动修复不一致的数据"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    检查Cap计数一致性（DB vs Redis）
+    仅管理员
+    """
+    try:
+        inconsistencies = await check_cap_consistency(
+            db=db,
+            offer_id=offer_id,
+            fix_inconsistencies=fix
+        )
+        
+        if inconsistencies:
+            message = f"发现 {len(inconsistencies)} 个不一致的记录"
+            if fix:
+                message += "，已自动修复"
+        else:
+            message = "所有Cap计数一致"
+        
+        logger.info(f"Cap计数一致性检查完成: {message}")
+        return ResponseBaseSchema.success(
+            data=inconsistencies,
+            message=message
+        )
+    except Exception as e:
+        logger.error(f"检查Cap计数一致性失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"检查Cap计数一致性失败: {str(e)}"
         )
 

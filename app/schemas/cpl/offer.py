@@ -24,6 +24,7 @@ class OfferBase(BaseModel):
     advertiser_tracklink: Optional[str] = Field(None, description="上游的Tracklink")
     postback_url: Optional[str] = Field(None, description="Postback URL")
     postback_method: str = Field("GET", description="Postback请求方式：GET/POST")
+    click_validity_hours: Optional[int] = Field(720, ge=1, le=8760, description="点击有效期（小时），默认720小时（30天）")
     is_active: bool = Field(True, description="是否激活")
 
     @field_validator('preview_link', 'advertiser_tracklink', 'postback_url')
@@ -62,6 +63,7 @@ class OfferUpdate(BaseModel):
     advertiser_tracklink: Optional[str] = Field(None, description="上游Tracklink")
     postback_url: Optional[str] = Field(None, description="Postback URL")
     postback_method: Optional[str] = Field(None, description="Postback方法")
+    click_validity_hours: Optional[int] = Field(None, ge=1, le=8760, description="点击有效期（小时）")
     is_active: Optional[bool] = Field(None, description="是否激活")
     publisher_ids: Optional[list[int]] = Field(None, description="分配的渠道ID列表")
 
@@ -70,6 +72,7 @@ class OfferResponse(OfferBase):
     """Offer响应"""
     id: int
     downstream_tracklink: Optional[str] = None
+    click_validity_hours: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     # 关联信息

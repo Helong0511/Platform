@@ -291,6 +291,17 @@
           </el-select>
         </el-form-item>
 
+        <el-form-item label="点击有效期(小时)" prop="click_validity_hours">
+          <el-input-number
+            v-model="formData.click_validity_hours"
+            :min="1"
+            :max="8760"
+            placeholder="默认720小时(30天)"
+            style="width: 100%;"
+          />
+          <div class="form-hint">点击有效期，超过此时间的点击将无法关联转化。默认720小时（30天）</div>
+        </el-form-item>
+
         <el-row :gutter="20">
           <el-col :span="12">
             <el-form-item label="状态" prop="status">
@@ -361,6 +372,7 @@ const formData = reactive({
   advertiser_tracklink: '',
   postback_url: '',
   postback_method: 'GET',
+  click_validity_hours: 720,
   publisher_ids: [],
   is_active: true
 })
@@ -404,32 +416,11 @@ const loadData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: Math.min(pagination.pageSize, 100)
-    }
-    
-    // 只添加非空值
-    if (searchKeyword.value && searchKeyword.value !== '') {
-      params.search = searchKeyword.value
-    }
-    
-    if (filterAdvertiser.value !== null && filterAdvertiser.value !== undefined && filterAdvertiser.value !== '') {
-      const advertiserId = parseInt(filterAdvertiser.value, 10)
-      if (!isNaN(advertiserId)) {
-        params.advertiser_id = advertiserId
-      }
-    }
-    
-    if (filterStatus.value !== null && filterStatus.value !== undefined && filterStatus.value !== '') {
-      params.status = filterStatus.value
-    }
-    
-    if (filterActive.value !== null && filterActive.value !== undefined) {
-      params.is_active = filterActive.value
-    }
-    
-    // 调试：输出查询参数（开发环境）
-    if (import.meta.env.DEV) {
-      console.log('[OfferManagement] 查询参数:', JSON.stringify(params, null, 2))
+      page_size: Math.min(pagination.pageSize, 100),
+      search: searchKeyword.value || undefined,
+      advertiser_id: filterAdvertiser.value || undefined,
+      status: filterStatus.value || undefined,
+      is_active: filterActive.value !== null ? filterActive.value : undefined
     }
     const response = await getOffers(params)
     if (response.code === 200) {
@@ -481,6 +472,7 @@ const handleAdd = () => {
     advertiser_tracklink: '',
     postback_url: '',
     postback_method: 'GET',
+    click_validity_hours: 720,
     publisher_ids: [],
     is_active: true
   })
@@ -507,6 +499,7 @@ const handleEdit = (row) => {
     advertiser_tracklink: row.advertiser_tracklink || '',
     postback_url: row.postback_url || '',
     postback_method: row.postback_method || 'GET',
+    click_validity_hours: row.click_validity_hours || 720,
     publisher_ids: row.assigned_publishers ? row.assigned_publishers.map(p => p.id) : [],
     is_active: row.is_active
   })
@@ -648,8 +641,6 @@ onMounted(() => {
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
-  width: 100% !important;
-  max-width: 100%;
 }
 
 /* 确保清除按钮不遮挡文字 */
@@ -662,28 +653,6 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-/* 修复对话框中的下拉框显示问题 */
-.el-dialog :deep(.el-select .el-input__wrapper) {
-  padding-right: 30px;
-}
-
-.el-dialog :deep(.el-select .el-select__input) {
-  padding-right: 8px;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-  width: 100% !important;
-  max-width: 100%;
-}
-
-/* 确保对话框中的placeholder正确隐藏 */
-.el-dialog :deep(.el-select.is-focus .el-select__placeholder),
-.el-dialog :deep(.el-select:not(.is-empty) .el-select__placeholder) {
-  display: none !important;
-  opacity: 0 !important;
-  visibility: hidden !important;
 }
 
 .table-wrapper {
@@ -700,6 +669,12 @@ onMounted(() => {
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
+}
+
+.form-hint {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 5px;
 }
 
 /* 移动端优化 */

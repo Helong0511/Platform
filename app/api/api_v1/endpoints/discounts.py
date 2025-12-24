@@ -64,19 +64,20 @@ async def create_discount(
     try:
         db.add(discount)
         await db.commit()
-        await db.refresh(discount)
         
-        # 加载关联信息
+        # 重新加载关联信息（使用joinedload优化）
+        from sqlalchemy.orm import joinedload
+        query = select(OfferDiscount).where(OfferDiscount.id == discount.id).options(
+            joinedload(OfferDiscount.publisher),
+            joinedload(OfferDiscount.offer)
+        )
+        result = await db.execute(query)
+        discount = result.scalars().first()
+        
         discount_data = OfferDiscountResponse.model_validate(discount)
-        discount_data.publisher_name = publisher.publisher_name
-        
-        if discount.offer_id:
-            offer_result = await db.execute(
-                select(Offer).where(Offer.id == discount.offer_id)
-            )
-            offer = offer_result.scalars().first()
-            if offer:
-                discount_data.offer_name = offer.offer_name
+        # 从已加载的关联中获取信息
+        discount_data.publisher_name = discount.publisher.publisher_name if discount.publisher else None
+        discount_data.offer_name = discount.offer.offer_name if discount.offer else None
         
         logger.info(f"扣量配置创建成功: discount_id={discount.id}")
         return ResponseBaseSchema.success(data=discount_data)
@@ -126,33 +127,22 @@ async def get_discounts(
     query = query.order_by(OfferDiscount.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
     
-    # 使用JOIN优化查询，避免N+1问题
-    from sqlalchemy.orm import aliased
-    offer_alias = aliased(Offer)
-    publisher_alias = aliased(Publisher)
-    
-    query = query.outerjoin(publisher_alias, OfferDiscount.publisher_id == publisher_alias.id)
-    query = query.outerjoin(offer_alias, OfferDiscount.offer_id == offer_alias.id)
-    
-    # 选择所有需要的字段
-    query = query.add_columns(
-        publisher_alias.publisher_name,
-        offer_alias.offer_name
+    # 使用joinedload优化关联查询，减少N+1查询问题
+    from sqlalchemy.orm import joinedload
+    query = query.options(
+        joinedload(OfferDiscount.publisher),
+        joinedload(OfferDiscount.offer)
     )
-    
     result = await db.execute(query)
-    rows = result.all()
+    discounts = result.scalars().all()
     
-    # 构建响应数据
+    # 加载关联信息（已通过joinedload预加载）
     discount_list = []
-    for row in rows:
-        discount = row[0]  # OfferDiscount对象
-        publisher_name = row[1] if len(row) > 1 else None
-        offer_name = row[2] if len(row) > 2 else None
-        
+    for discount in discounts:
         discount_data = OfferDiscountResponse.model_validate(discount)
-        discount_data.publisher_name = publisher_name
-        discount_data.offer_name = offer_name
+        # 从已加载的关联中获取信息
+        discount_data.publisher_name = discount.publisher.publisher_name if discount.publisher else None
+        discount_data.offer_name = discount.offer.offer_name if discount.offer else None
         
         discount_list.append(discount_data)
     
@@ -174,9 +164,13 @@ async def get_discount(
     current_user: User = Depends(get_current_user)
 ):
     """获取扣量配置详情（仅管理员）"""
-    result = await db.execute(
-        select(OfferDiscount).where(OfferDiscount.id == discount_id)
+    # 使用joinedload优化关联查询
+    from sqlalchemy.orm import joinedload
+    query = select(OfferDiscount).where(OfferDiscount.id == discount_id).options(
+        joinedload(OfferDiscount.publisher),
+        joinedload(OfferDiscount.offer)
     )
+    result = await db.execute(query)
     discount = result.scalars().first()
     
     if not discount:
@@ -185,22 +179,10 @@ async def get_discount(
             detail=f"扣量配置ID {discount_id} 不存在"
         )
     
-    # 加载关联信息
-    pub_result = await db.execute(
-        select(Publisher).where(Publisher.id == discount.publisher_id)
-    )
-    publisher = pub_result.scalars().first()
-    
+    # 从已加载的关联中获取信息
     discount_data = OfferDiscountResponse.model_validate(discount)
-    discount_data.publisher_name = publisher.publisher_name if publisher else None
-    
-    if discount.offer_id:
-        offer_result = await db.execute(
-            select(Offer).where(Offer.id == discount.offer_id)
-        )
-        offer = offer_result.scalars().first()
-        if offer:
-            discount_data.offer_name = offer.offer_name
+    discount_data.publisher_name = discount.publisher.publisher_name if discount.publisher else None
+    discount_data.offer_name = discount.offer.offer_name if discount.offer else None
     
     return ResponseBaseSchema.success(data=discount_data)
 
@@ -234,24 +216,20 @@ async def update_discount(
     
     try:
         await db.commit()
-        await db.refresh(discount)
         
-        # 加载关联信息
-        pub_result = await db.execute(
-            select(Publisher).where(Publisher.id == discount.publisher_id)
+        # 重新加载关联信息（使用joinedload优化）
+        from sqlalchemy.orm import joinedload
+        query = select(OfferDiscount).where(OfferDiscount.id == discount.id).options(
+            joinedload(OfferDiscount.publisher),
+            joinedload(OfferDiscount.offer)
         )
-        publisher = pub_result.scalars().first()
+        result = await db.execute(query)
+        discount = result.scalars().first()
         
         discount_data = OfferDiscountResponse.model_validate(discount)
-        discount_data.publisher_name = publisher.publisher_name if publisher else None
-        
-        if discount.offer_id:
-            offer_result = await db.execute(
-                select(Offer).where(Offer.id == discount.offer_id)
-            )
-            offer = offer_result.scalars().first()
-            if offer:
-                discount_data.offer_name = offer.offer_name
+        # 从已加载的关联中获取信息
+        discount_data.publisher_name = discount.publisher.publisher_name if discount.publisher else None
+        discount_data.offer_name = discount.offer.offer_name if discount.offer else None
         
         logger.info(f"扣量配置更新成功: discount_id={discount_id}")
         return ResponseBaseSchema.success(data=discount_data)
