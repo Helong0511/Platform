@@ -89,36 +89,46 @@ def get_chat_id_handler(message):
 # 命令处理器必须在模块级别注册（pyTelegramBotAPI 的要求）
 # 这些装饰器会在模块加载时执行，注册到 bot 对象上
 if bot_initialized and TELEBOT_AVAILABLE:
-    # 添加通用消息处理器用于调试（放在最前面，但优先级较低）
-    # 注意：这个处理器会捕获所有消息，包括命令
-    @bot.message_handler(func=lambda message: True, content_types=['text'])
-    def handle_all_messages(message):
-        """处理所有文本消息（用于调试）"""
-        try:
-            text = message.text or ""
-            # 使用 INFO 级别确保日志可见
-            logger.info(f"[消息接收] ✅ 收到消息: {text[:50]}... 来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat ID: {message.chat.id})")
-            logger.info(f"[消息接收] 消息对象类型: {type(message)}, 消息ID: {message.message_id}")
-        except Exception as e:
-            logger.error(f"[消息接收] ❌ 处理消息时出错: {e}", exc_info=True)
-    
+    # 命令处理器（优先级高，先注册）
     @bot.message_handler(commands=['id'])
     def get_chat_id(message):
         """处理 /id 命令：返回聊天ID"""
-        logger.info(f"[命令处理器] 收到 /id 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat ID: {message.chat.id})")
+        logger.info(f"[命令处理器] ✅ 收到 /id 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat ID: {message.chat.id})")
         if not _check_bot_available():
             logger.error("[命令处理器] Bot 未初始化，无法处理消息")
             return
         try:
             chat_id = message.chat.id
             bot.reply_to(message, f"你的聊天ID是: {chat_id}")
-            logger.info(f"[命令处理器] 成功回复 /id 命令，聊天ID: {chat_id}")
+            logger.info(f"[命令处理器] ✅ 成功回复 /id 命令，聊天ID: {chat_id}")
         except Exception as e:
-            logger.error(f"[命令处理器] 处理 /id 命令时发生错误: {e}", exc_info=True)
+            logger.error(f"[命令处理器] ❌ 处理 /id 命令时发生错误: {e}", exc_info=True)
             try:
                 bot.reply_to(message, "处理命令时发生错误，请稍后重试")
             except:
                 pass
+    
+    # 添加通用消息处理器用于调试（放在命令处理器之后，优先级较低）
+    # 注意：命令处理器会优先匹配，这个处理器只处理非命令消息
+    @bot.message_handler(func=lambda message: message.text and not message.text.startswith('/'), content_types=['text'])
+    def handle_all_messages(message):
+        """处理所有非命令文本消息（用于调试）"""
+        try:
+            text = message.text or ""
+            # 使用 INFO 级别确保日志可见
+            logger.info(f"[消息接收] ✅ 收到非命令消息: {text[:50]}... 来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat ID: {message.chat.id})")
+        except Exception as e:
+            logger.error(f"[消息接收] ❌ 处理消息时出错: {e}", exc_info=True)
+    
+    # 添加一个捕获所有消息的处理器（最低优先级，用于调试）
+    @bot.message_handler(func=lambda message: True)
+    def handle_any_message(message):
+        """捕获所有消息（用于调试，最低优先级）"""
+        try:
+            text = getattr(message, 'text', '') or ''
+            logger.info(f"[调试] 🔍 收到任何类型的消息: {text[:30] if text else '非文本'} (Chat ID: {message.chat.id}, 类型: {type(message).__name__})")
+        except Exception as e:
+            logger.error(f"[调试] ❌ 处理消息时出错: {e}", exc_info=True)
 
     @bot.message_handler(commands=['test'])
     def handle_test_command(message):
@@ -276,31 +286,34 @@ def run_bot():
         logger.info("开始轮询 Telegram 更新...")
         logger.info("如果收到消息但没有日志，可能是轮询没有正常运行")
         
+        # 测试获取更新（用于调试）
+        try:
+            logger.info("测试：尝试获取待处理的更新...")
+            updates = bot.get_updates(timeout=5, long_polling_timeout=5)
+            logger.info(f"测试：获取到 {len(updates)} 个待处理的更新")
+            if updates:
+                logger.info(f"测试：第一个更新的内容: {updates[0]}")
+        except Exception as test_updates_error:
+            logger.warning(f"测试获取更新时出错: {test_updates_error}")
+        
         # 添加异常处理，确保能看到轮询过程中的错误
         try:
+            logger.info("开始 infinity_polling...")
+            # 使用更简单的配置，不限制 allowed_updates
             bot.infinity_polling(
-                allowed_updates=[  # 明确指定需要处理的更新类型
-                    "message",  # 处理消息
-                    "callback_query",  # 处理回调查询（按钮点击）
-                    "inline_query",  # 处理内联查询（搜索框）
-                    "chosen_inline_result",  # 处理选择的内联结果
-                    "shipping_query",  # 处理货运查询
-                    "pre_checkout_query",  # 处理预结账查询
-                    "poll",  # 处理投票
-                    "poll_answer",  # 处理投票答案
-                    "my_chat_member",  # 添加成员状态更新，用于检测机器人被添加/删除
-                    "chat_member",  # 添加群组成员变动监控
-                    "edited_message",  # 处理编辑过的消息
-                    "channel_post",  # 处理频道帖子
-                    "edited_channel_post"  # 处理编辑过的频道帖子
-                ],
                 timeout=20,  # 设置超时时间
                 long_polling_timeout=20,  # 长轮询超时时间
                 none_stop=True,  # 即使出现错误也继续运行
-                skip_pending=False  # 不跳过待处理的更新
+                skip_pending=False,  # 不跳过待处理的更新
+                interval=0  # 立即处理更新
             )
+            logger.info("infinity_polling 已退出（这不应该发生）")
+        except KeyboardInterrupt:
+            logger.info("收到键盘中断信号")
+            raise
         except Exception as polling_error:
             logger.error(f"轮询过程中发生错误: {polling_error}", exc_info=True)
+            logger.error(f"错误类型: {type(polling_error).__name__}")
             raise
     except KeyboardInterrupt:
         logger.info("收到终止信号，正在优雅关闭机器人...")
