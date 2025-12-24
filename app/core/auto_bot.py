@@ -89,19 +89,30 @@ def get_chat_id_handler(message):
 # 命令处理器必须在模块级别注册（pyTelegramBotAPI 的要求）
 # 这些装饰器会在模块加载时执行，注册到 bot 对象上
 if bot_initialized and TELEBOT_AVAILABLE:
+    # 添加通用消息处理器用于调试（放在最前面，但优先级较低）
+    @bot.message_handler(func=lambda message: True, content_types=['text'])
+    def handle_all_messages(message):
+        """处理所有文本消息（用于调试）"""
+        try:
+            text = message.text or ""
+            # 使用 INFO 级别确保日志可见
+            logger.info(f"[消息接收] 收到消息: {text[:50]}... 来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat ID: {message.chat.id})")
+        except Exception as e:
+            logger.error(f"[消息接收] 处理消息时出错: {e}", exc_info=True)
+    
     @bot.message_handler(commands=['id'])
     def get_chat_id(message):
         """处理 /id 命令：返回聊天ID"""
-        logger.info(f"收到 /id 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'}")
+        logger.info(f"[命令处理器] 收到 /id 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat ID: {message.chat.id})")
         if not _check_bot_available():
-            logger.error("Bot 未初始化，无法处理消息")
+            logger.error("[命令处理器] Bot 未初始化，无法处理消息")
             return
         try:
             chat_id = message.chat.id
             bot.reply_to(message, f"你的聊天ID是: {chat_id}")
-            logger.info(f"成功回复 /id 命令，聊天ID: {chat_id}")
+            logger.info(f"[命令处理器] 成功回复 /id 命令，聊天ID: {chat_id}")
         except Exception as e:
-            logger.error(f"处理 /id 命令时发生错误: {e}", exc_info=True)
+            logger.error(f"[命令处理器] 处理 /id 命令时发生错误: {e}", exc_info=True)
             try:
                 bot.reply_to(message, "处理命令时发生错误，请稍后重试")
             except:
@@ -156,6 +167,16 @@ if bot_initialized and TELEBOT_AVAILABLE:
         bot.send_message(chat_id, "确认是否要打卡？", reply_markup=markup)
     
     logger.info("Telegram Bot 命令处理器已注册: /id, /test, /clock")
+    # 验证处理器是否真的注册了
+    try:
+        # 检查 bot 的 registered_next_step_handlers 和 message_handlers
+        handlers_count = len(bot.message_handlers) if hasattr(bot, 'message_handlers') else 0
+        logger.info(f"Bot 消息处理器数量: {handlers_count}")
+    except Exception as e:
+        logger.warning(f"无法检查消息处理器数量: {e}")
+else:
+    logger.warning("Bot 未初始化或 TELEBOT_AVAILABLE 为 False，命令处理器未注册")
+    logger.warning(f"bot_initialized={bot_initialized}, TELEBOT_AVAILABLE={TELEBOT_AVAILABLE}, bot={bot}")
 
 # 处理按钮点击事件
 if bot_initialized and TELEBOT_AVAILABLE:
@@ -228,7 +249,17 @@ def run_bot():
             logger.error("请检查 TELEGRAM_TOKEN 是否正确，以及网络连接是否正常")
             return
         
+        # 检查消息处理器
+        try:
+            handlers_count = len(bot.message_handlers) if hasattr(bot, 'message_handlers') else 0
+            logger.info(f"开始轮询前，Bot 消息处理器数量: {handlers_count}")
+            if handlers_count == 0:
+                logger.warning("警告：没有注册任何消息处理器！命令可能无法工作")
+        except Exception as e:
+            logger.warning(f"无法检查消息处理器: {e}")
+        
         logger.info("开始轮询 Telegram 更新...")
+        logger.info("如果收到消息但没有日志，可能是轮询没有正常运行")
         bot.infinity_polling(
             allowed_updates=[  # 明确指定需要处理的更新类型
                 "message",  # 处理消息
@@ -246,7 +277,8 @@ def run_bot():
                 "edited_channel_post"  # 处理编辑过的频道帖子
             ],
             timeout=20,  # 设置超时时间
-            long_polling_timeout=20  # 长轮询超时时间
+            long_polling_timeout=20,  # 长轮询超时时间
+            none_stop=True  # 即使出现错误也继续运行
         )
     except KeyboardInterrupt:
         logger.info("收到终止信号，正在优雅关闭机器人...")
