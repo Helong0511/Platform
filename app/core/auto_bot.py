@@ -377,17 +377,27 @@ def run_bot():
                                     logger.info(f"🔍 检查消息是否需要手动处理: text='{text}'")
                                     
                                     # 如果是命令，尝试手动调用处理器
-                                    if text.startswith('/id'):
-                                        logger.info("🔍 检测到 /id 命令，尝试手动调用处理器...")
+                                    if text.startswith('/'):
+                                        command = text.split()[0] if text else ''  # 获取命令部分（如 '/id'）
+                                        logger.info(f"🔍 检测到命令: {command}，尝试手动调用处理器...")
                                         try:
-                                            # 从 bot.message_handlers 中找到 get_chat_id 处理器并调用
+                                            # 从 bot.message_handlers 中找到匹配的处理器并调用
+                                            handler_found = False
                                             for handler in bot.message_handlers:
                                                 handler_func = handler.get('function')
-                                                if handler_func and handler_func.__name__ == 'get_chat_id':
-                                                    logger.info(f"✅ 找到 get_chat_id 处理器，准备调用...")
+                                                filters = handler.get('filters', {})
+                                                commands = filters.get('commands', [])
+                                                
+                                                # 检查是否是匹配的命令处理器
+                                                if commands and command in [f'/{cmd}' for cmd in commands]:
+                                                    logger.info(f"✅ 找到匹配的命令处理器: {handler_func.__name__} (命令: {commands})")
                                                     handler_func(msg)
-                                                    logger.info("✅ 手动调用 get_chat_id 完成")
+                                                    logger.info(f"✅ 手动调用 {handler_func.__name__} 完成")
+                                                    handler_found = True
                                                     break
+                                            
+                                            if not handler_found:
+                                                logger.warning(f"⚠️ 未找到命令 {command} 的处理器")
                                         except Exception as manual_call_error:
                                             logger.error(f"❌ 手动调用处理器出错: {manual_call_error}", exc_info=True)
                             
