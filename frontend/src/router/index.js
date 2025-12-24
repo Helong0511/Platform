@@ -191,7 +191,7 @@ const router = createRouter({
 });
 
 // 路由守卫
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   try {
     // 如果是登录页，直接放行，不执行任何检查
     if (to.path === '/login' || to.path === '/') {
@@ -213,14 +213,23 @@ router.beforeEach((to, from, next) => {
 
         // 如果是从登录页跳转过来的，并且 sessionStorage 中有 userInfo，允许通过
         // 这可以解决登录后立即跳转时状态还未完全同步的问题
-        if (from.path === '/login' && isAuthenticated) {
+        if ((from.path === '/login' || from.path === '/') && isAuthenticated) {
           // 从登录页跳转，并且 sessionStorage 中有有效数据，允许通过
-          // store 状态会在路由守卫执行后自动同步
+          // 强制同步 store 状态
+          authStore.checkAuth();
           return next();
         }
 
-        // 再次检查
-        if (!authStore.isAuthenticated) {
+        // 再次检查（给 checkAuth 一些时间同步状态）
+        if (isAuthenticated && !authStore.isAuthenticated) {
+          // 如果 sessionStorage 中有数据但 store 状态未同步，强制同步
+          authStore.checkAuth();
+          // 等待一下让状态同步
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+
+        // 最终检查
+        if (!authStore.isAuthenticated && !isAuthenticated) {
           clearAuthData();
           const shouldShowMessage = to.path !== '/login' &&
             from.path !== '/login' &&
