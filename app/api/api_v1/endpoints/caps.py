@@ -159,38 +159,38 @@ async def get_caps(
     query = query.order_by(OfferCap.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
     
-    result = await db.execute(query)
-    caps = result.scalars().all()
+    # 使用JOIN优化查询，避免N+1问题
+    from sqlalchemy.orm import aliased
+    offer_alias = aliased(Offer)
+    advertiser_alias = aliased(Advertiser)
+    publisher_alias = aliased(Publisher)
     
-    # 加载关联信息
+    query = query.outerjoin(offer_alias, OfferCap.offer_id == offer_alias.id)
+    query = query.outerjoin(advertiser_alias, OfferCap.advertiser_id == advertiser_alias.id)
+    query = query.outerjoin(publisher_alias, OfferCap.publisher_id == publisher_alias.id)
+    
+    # 选择所有需要的字段
+    query = query.add_columns(
+        offer_alias.offer_name,
+        advertiser_alias.advertiser_name,
+        publisher_alias.publisher_name
+    )
+    
+    result = await db.execute(query)
+    rows = result.all()
+    
+    # 构建响应数据
     cap_list = []
-    for cap in caps:
-        # 加载Offer信息
-        offer_result = await db.execute(
-            select(Offer).where(Offer.id == cap.offer_id)
-        )
-        offer = offer_result.scalars().first()
+    for row in rows:
+        cap = row[0]  # OfferCap对象
+        offer_name = row[1] if len(row) > 1 else None
+        advertiser_name = row[2] if len(row) > 2 else None
+        publisher_name = row[3] if len(row) > 3 else None
         
         cap_data = OfferCapResponse.model_validate(cap)
-        cap_data.offer_name = offer.offer_name if offer else None
-        
-        # 加载广告主信息
-        if cap.advertiser_id:
-            adv_result = await db.execute(
-                select(Advertiser).where(Advertiser.id == cap.advertiser_id)
-            )
-            advertiser = adv_result.scalars().first()
-            if advertiser:
-                cap_data.advertiser_name = advertiser.advertiser_name
-        
-        # 加载渠道信息
-        if cap.publisher_id:
-            pub_result = await db.execute(
-                select(Publisher).where(Publisher.id == cap.publisher_id)
-            )
-            publisher = pub_result.scalars().first()
-            if publisher:
-                cap_data.publisher_name = publisher.publisher_name
+        cap_data.offer_name = offer_name
+        cap_data.advertiser_name = advertiser_name
+        cap_data.publisher_name = publisher_name
         
         cap_list.append(cap_data)
     

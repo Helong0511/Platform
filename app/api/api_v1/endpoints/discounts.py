@@ -126,29 +126,33 @@ async def get_discounts(
     query = query.order_by(OfferDiscount.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
     
-    result = await db.execute(query)
-    discounts = result.scalars().all()
+    # 使用JOIN优化查询，避免N+1问题
+    from sqlalchemy.orm import aliased
+    offer_alias = aliased(Offer)
+    publisher_alias = aliased(Publisher)
     
-    # 加载关联信息
+    query = query.outerjoin(publisher_alias, OfferDiscount.publisher_id == publisher_alias.id)
+    query = query.outerjoin(offer_alias, OfferDiscount.offer_id == offer_alias.id)
+    
+    # 选择所有需要的字段
+    query = query.add_columns(
+        publisher_alias.publisher_name,
+        offer_alias.offer_name
+    )
+    
+    result = await db.execute(query)
+    rows = result.all()
+    
+    # 构建响应数据
     discount_list = []
-    for discount in discounts:
-        # 加载渠道信息
-        pub_result = await db.execute(
-            select(Publisher).where(Publisher.id == discount.publisher_id)
-        )
-        publisher = pub_result.scalars().first()
+    for row in rows:
+        discount = row[0]  # OfferDiscount对象
+        publisher_name = row[1] if len(row) > 1 else None
+        offer_name = row[2] if len(row) > 2 else None
         
         discount_data = OfferDiscountResponse.model_validate(discount)
-        discount_data.publisher_name = publisher.publisher_name if publisher else None
-        
-        # 加载Offer信息
-        if discount.offer_id:
-            offer_result = await db.execute(
-                select(Offer).where(Offer.id == discount.offer_id)
-            )
-            offer = offer_result.scalars().first()
-            if offer:
-                discount_data.offer_name = offer.offer_name
+        discount_data.publisher_name = publisher_name
+        discount_data.offer_name = offer_name
         
         discount_list.append(discount_data)
     
