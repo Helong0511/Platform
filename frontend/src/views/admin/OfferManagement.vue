@@ -404,11 +404,32 @@ const loadData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: Math.min(pagination.pageSize, 100),
-      search: searchKeyword.value || undefined,
-      advertiser_id: filterAdvertiser.value || undefined,
-      status: filterStatus.value || undefined,
-      is_active: filterActive.value !== null ? filterActive.value : undefined
+      page_size: Math.min(pagination.pageSize, 100)
+    }
+    
+    // 只添加非空值
+    if (searchKeyword.value && searchKeyword.value !== '') {
+      params.search = searchKeyword.value
+    }
+    
+    if (filterAdvertiser.value !== null && filterAdvertiser.value !== undefined && filterAdvertiser.value !== '') {
+      const advertiserId = parseInt(filterAdvertiser.value, 10)
+      if (!isNaN(advertiserId)) {
+        params.advertiser_id = advertiserId
+      }
+    }
+    
+    if (filterStatus.value !== null && filterStatus.value !== undefined && filterStatus.value !== '') {
+      params.status = filterStatus.value
+    }
+    
+    if (filterActive.value !== null && filterActive.value !== undefined) {
+      params.is_active = filterActive.value
+    }
+    
+    // 调试：输出查询参数（开发环境）
+    if (import.meta.env.DEV) {
+      console.log('[OfferManagement] 查询参数:', JSON.stringify(params, null, 2))
     }
     const response = await getOffers(params)
     if (response.code === 200) {

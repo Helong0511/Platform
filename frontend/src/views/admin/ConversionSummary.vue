@@ -219,16 +219,45 @@ const setDefaultMonthRange = () => {
 const loadData = async () => {
   loading.value = true
   try {
-    const params = {
-      start_date: dateRange.value?.[0] || undefined,
-      end_date: dateRange.value?.[1] || undefined,
-      offer_id: filterOffer.value || undefined,
-      publisher_id: filterPublisher.value || undefined
+    const params = {}
+    
+    // 只添加非空值
+    if (dateRange.value && Array.isArray(dateRange.value) && dateRange.value.length === 2) {
+      params.start_date = dateRange.value[0]
+      params.end_date = dateRange.value[1]
     }
+    
+    if (filterOffer.value !== null && filterOffer.value !== undefined && filterOffer.value !== '') {
+      const offerId = parseInt(filterOffer.value, 10)
+      if (!isNaN(offerId)) {
+        params.offer_id = offerId
+      }
+    }
+    
+    if (filterPublisher.value !== null && filterPublisher.value !== undefined && filterPublisher.value !== '') {
+      const publisherId = parseInt(filterPublisher.value, 10)
+      if (!isNaN(publisherId)) {
+        params.publisher_id = publisherId
+      }
+    }
+    
+    // 调试：输出查询参数（开发环境）
+    if (import.meta.env.DEV) {
+      console.log('[ConversionSummary] 查询参数:', JSON.stringify(params, null, 2))
+    }
+    
     const response = await getConversionSummary(params)
     if (response.code === 200) {
       Object.assign(summaryData, response.data)
       statsList.value = response.data.stats_list || []
+      
+      // 调试：输出查询结果（开发环境）
+      if (import.meta.env.DEV) {
+        console.log('[ConversionSummary] 查询结果:', {
+          statsCount: statsList.value.length,
+          summaryData: summaryData
+        })
+      }
     } else {
       ElMessage.error(response.message || '获取数据失败')
     }

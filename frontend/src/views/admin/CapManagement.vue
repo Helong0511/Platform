@@ -358,11 +358,35 @@ const loadData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: Math.min(pagination.pageSize, 100),
-      cap_type: filterCapType.value || undefined,
-      offer_id: filterOffer.value || undefined,
-      publisher_id: filterPublisher.value || undefined,
-      is_active: filterActive.value !== null ? filterActive.value : undefined
+      page_size: Math.min(pagination.pageSize, 100)
+    }
+    
+    // 只添加非空值
+    if (filterCapType.value !== null && filterCapType.value !== undefined && filterCapType.value !== '') {
+      params.cap_type = filterCapType.value
+    }
+    
+    if (filterOffer.value !== null && filterOffer.value !== undefined && filterOffer.value !== '') {
+      const offerId = parseInt(filterOffer.value, 10)
+      if (!isNaN(offerId)) {
+        params.offer_id = offerId
+      }
+    }
+    
+    if (filterPublisher.value !== null && filterPublisher.value !== undefined && filterPublisher.value !== '') {
+      const publisherId = parseInt(filterPublisher.value, 10)
+      if (!isNaN(publisherId)) {
+        params.publisher_id = publisherId
+      }
+    }
+    
+    if (filterActive.value !== null && filterActive.value !== undefined) {
+      params.is_active = filterActive.value
+    }
+    
+    // 调试：输出查询参数（开发环境）
+    if (import.meta.env.DEV) {
+      console.log('[CapManagement] 查询参数:', JSON.stringify(params, null, 2))
     }
     const response = await getCaps(params)
     if (response.code === 200) {

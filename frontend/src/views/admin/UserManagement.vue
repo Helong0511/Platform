@@ -711,11 +711,24 @@ const fetchUsers = async (immediate = false) => {
       
       const params = {
         page: pagination.value.current,
-        page_size: pagination.value.size,
-        username: searchForm.username,
-        role: searchForm.role,
-        status: searchForm.status
+        page_size: pagination.value.size
       };
+      
+      // 只添加非空值
+      if (searchForm.username && searchForm.username !== '') {
+        params.username = searchForm.username;
+      }
+      if (searchForm.role && searchForm.role !== '') {
+        params.role = searchForm.role;
+      }
+      if (searchForm.status && searchForm.status !== '') {
+        params.status = searchForm.status;
+      }
+      
+      // 调试：输出查询参数（开发环境）
+      if (import.meta.env.DEV) {
+        console.log('[UserManagement] 查询参数:', JSON.stringify(params, null, 2));
+      }
 
       fetchUsersPromise = getUsers(params);
       const response = await fetchUsersPromise;

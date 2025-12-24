@@ -166,9 +166,21 @@ const loadData = async () => {
     const pageSize = Math.min(pagination.pageSize, 100)
     const params = {
       page: pagination.page,
-      page_size: pageSize,
-      search: searchKeyword.value || undefined,
-      is_active: filterActive.value !== null ? filterActive.value : undefined
+      page_size: pageSize
+    }
+    
+    // 只添加非空值
+    if (searchKeyword.value && searchKeyword.value !== '') {
+      params.search = searchKeyword.value
+    }
+    
+    if (filterActive.value !== null && filterActive.value !== undefined) {
+      params.is_active = filterActive.value
+    }
+    
+    // 调试：输出查询参数（开发环境）
+    if (import.meta.env.DEV) {
+      console.log('[AdvertiserManagement] 查询参数:', JSON.stringify(params, null, 2))
     }
     const response = await getAdvertisers(params)
     if (response.code === 200) {

@@ -298,11 +298,35 @@ const loadData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: Math.min(pagination.pageSize, 100),
-      discount_type: filterDiscountType.value || undefined,
-      offer_id: filterOffer.value || undefined,
-      publisher_id: filterPublisher.value || undefined,
-      is_active: filterActive.value !== null ? filterActive.value : undefined
+      page_size: Math.min(pagination.pageSize, 100)
+    }
+    
+    // 只添加非空值
+    if (filterDiscountType.value !== null && filterDiscountType.value !== undefined && filterDiscountType.value !== '') {
+      params.discount_type = filterDiscountType.value
+    }
+    
+    if (filterOffer.value !== null && filterOffer.value !== undefined && filterOffer.value !== '') {
+      const offerId = parseInt(filterOffer.value, 10)
+      if (!isNaN(offerId)) {
+        params.offer_id = offerId
+      }
+    }
+    
+    if (filterPublisher.value !== null && filterPublisher.value !== undefined && filterPublisher.value !== '') {
+      const publisherId = parseInt(filterPublisher.value, 10)
+      if (!isNaN(publisherId)) {
+        params.publisher_id = publisherId
+      }
+    }
+    
+    if (filterActive.value !== null && filterActive.value !== undefined) {
+      params.is_active = filterActive.value
+    }
+    
+    // 调试：输出查询参数（开发环境）
+    if (import.meta.env.DEV) {
+      console.log('[DiscountManagement] 查询参数:', JSON.stringify(params, null, 2))
     }
     const response = await getDiscounts(params)
     if (response.code === 200) {

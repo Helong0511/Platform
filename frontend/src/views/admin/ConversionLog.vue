@@ -232,18 +232,56 @@ const loadData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: Math.min(pagination.pageSize, 100),
-      click_id: filterClickId.value || undefined,
-      offer_id: filterOffer.value || undefined,
-      publisher_id: filterPublisher.value || undefined,
-      conversion_status: filterStatus.value || undefined,
-      start_date: dateRange.value?.[0] || undefined,
-      end_date: dateRange.value?.[1] || undefined
+      page_size: Math.min(pagination.pageSize, 100)
     }
+    
+    // 只添加非空值
+    if (filterClickId.value && filterClickId.value !== '') {
+      params.click_id = filterClickId.value
+    }
+    
+    if (filterOffer.value !== null && filterOffer.value !== undefined && filterOffer.value !== '') {
+      const offerId = parseInt(filterOffer.value, 10)
+      if (!isNaN(offerId)) {
+        params.offer_id = offerId
+      }
+    }
+    
+    if (filterPublisher.value !== null && filterPublisher.value !== undefined && filterPublisher.value !== '') {
+      const publisherId = parseInt(filterPublisher.value, 10)
+      if (!isNaN(publisherId)) {
+        params.publisher_id = publisherId
+      }
+    }
+    
+    if (filterStatus.value !== null && filterStatus.value !== undefined && filterStatus.value !== '') {
+      params.conversion_status = filterStatus.value
+    }
+    
+    if (dateRange.value && Array.isArray(dateRange.value) && dateRange.value.length === 2) {
+      params.start_date = dateRange.value[0]
+      params.end_date = dateRange.value[1]
+    }
+    
+    // 调试：输出查询参数（开发环境）
+    if (import.meta.env.DEV) {
+      console.log('[ConversionLog] 查询参数:', JSON.stringify(params, null, 2))
+    }
+    
     const response = await getConversionLogs(params)
     if (response.code === 200) {
       tableData.value = response.data || []
       pagination.total = response.total || 0
+      
+      // 调试：输出查询结果（开发环境）
+      if (import.meta.env.DEV) {
+        console.log('[ConversionLog] 查询结果:', {
+          dataCount: tableData.value.length,
+          total: pagination.total,
+          currentPage: pagination.page,
+          pageSize: pagination.pageSize
+        })
+      }
     } else {
       ElMessage.error(response.message || '获取数据失败')
     }

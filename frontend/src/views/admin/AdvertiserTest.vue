@@ -268,9 +268,27 @@ const loadData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: Math.min(pagination.pageSize, 100),
-      advertiser_id: filterAdvertiser.value || undefined,
-      offer_id: filterOffer.value || undefined
+      page_size: Math.min(pagination.pageSize, 100)
+    }
+    
+    // 只添加非空值
+    if (filterAdvertiser.value !== null && filterAdvertiser.value !== undefined && filterAdvertiser.value !== '') {
+      const advertiserId = parseInt(filterAdvertiser.value, 10)
+      if (!isNaN(advertiserId)) {
+        params.advertiser_id = advertiserId
+      }
+    }
+    
+    if (filterOffer.value !== null && filterOffer.value !== undefined && filterOffer.value !== '') {
+      const offerId = parseInt(filterOffer.value, 10)
+      if (!isNaN(offerId)) {
+        params.offer_id = offerId
+      }
+    }
+    
+    // 调试：输出查询参数（开发环境）
+    if (import.meta.env.DEV) {
+      console.log('[AdvertiserTest] 查询参数:', JSON.stringify(params, null, 2))
     }
     const response = await getAdvertiserTests(params)
     if (response.code === 200) {

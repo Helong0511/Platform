@@ -374,17 +374,32 @@ const fetchData = async () => {
       sort_order: sortInfo.value.order === 'ascending' ? 'asc' : 'desc'
     };
     
-    // 如果选择了日期范围，使用选择的日期范围
-    // 如果没有选择日期范围，后端默认使用当前月的数据
-    if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
+    // 添加筛选条件（只添加非空值）
+    if (searchForm.value.dateRange && Array.isArray(searchForm.value.dateRange) && searchForm.value.dateRange.length === 2) {
       params.start_date = searchForm.value.dateRange[0];
       params.end_date = searchForm.value.dateRange[1];
     }
-    // 如果没有选择日期范围，不传递日期参数，让后端使用默认的当前月
     
-    if (searchForm.value.clientId) params.client_id = searchForm.value.clientId;
-    if (searchForm.value.productId) params.product_id = searchForm.value.productId;
-    if (searchForm.value.countryCode) params.country_code = searchForm.value.countryCode;
+    if (searchForm.value.clientId && searchForm.value.clientId !== '') {
+      const clientId = parseInt(searchForm.value.clientId, 10);
+      if (!isNaN(clientId)) {
+        params.client_id = clientId;
+      }
+    }
+    
+    if (searchForm.value.productId && searchForm.value.productId !== '') {
+      params.product_id = searchForm.value.productId;
+    }
+    
+    if (searchForm.value.countryCode && searchForm.value.countryCode !== '') {
+      params.country_code = searchForm.value.countryCode;
+    }
+    
+    // 调试：输出查询参数（开发环境）
+    if (import.meta.env.DEV) {
+      console.log('[TBSearchData] 查询参数:', JSON.stringify(params, null, 2));
+      console.log('[TBSearchData] 筛选表单值:', JSON.stringify(searchForm.value, null, 2));
+    }
 
     const res = await getTBSearchDataList(params);
     
@@ -399,10 +414,54 @@ const fetchData = async () => {
     
     // 提取数据 - 后端返回的数据结构是嵌套的：{ code, message, data: { data: [...], total, page, page_size } }
     const listResponse = res.data || {};
-    tableData.value = Array.isArray(listResponse.data) ? listResponse.data : [];
+    
+    // 尝试多种方式访问数据（兼容不同的响应格式）
+    let dataArray = [];
+    if (Array.isArray(listResponse.data)) {
+      dataArray = listResponse.data;
+    } else if (Array.isArray(listResponse)) {
+      dataArray = listResponse;
+    } else if (Array.isArray(res.data)) {
+      dataArray = res.data;
+    }
+    
+    tableData.value = dataArray;
+    
     // 确保total是数字类型
     const totalValue = typeof listResponse.total === 'number' ? listResponse.total : parseInt(listResponse.total || 0, 10);
     pagination.value.total = totalValue;
+    
+    // 调试：输出查询结果（开发环境）
+    if (import.meta.env.DEV) {
+      console.log('[TBSearchData] 查询结果:', {
+        dataCount: dataArray.length,
+        total: totalValue,
+        currentPage: pagination.value.current,
+        pageSize: pagination.value.size,
+        hasData: dataArray.length > 0,
+        firstItem: dataArray[0] || null
+      });
+    }
+    
+    // 如果查询有筛选条件但没有数据，给出提示
+    if (dataArray.length === 0 && totalValue === 0) {
+      const hasFilters = searchForm.value.clientId || 
+                        searchForm.value.productId || 
+                        searchForm.value.countryCode || 
+                        (searchForm.value.dateRange && searchForm.value.dateRange.length === 2);
+      
+      if (hasFilters && import.meta.env.DEV) {
+        console.warn('[TBSearchData] 查询有筛选条件但无数据:', {
+          filters: {
+            clientId: searchForm.value.clientId,
+            productId: searchForm.value.productId,
+            countryCode: searchForm.value.countryCode,
+            dateRange: searchForm.value.dateRange
+          },
+          params: params
+        });
+      }
+    }
     
     // 如果查询结果为空，且没有选择任何筛选条件，提示用户
     if (tableData.value.length === 0 && pagination.value.total === 0 && 

@@ -300,15 +300,27 @@ const fetchDailyData = async () => {
     page: pagination.value.current,
     page_size: pagination.value.size
   };
-  if (isAdmin.value && searchForm.value.clientId) {
-    params.client_id = searchForm.value.clientId;
+  
+  // 添加筛选条件（只添加非空值）
+  if (isAdmin.value && searchForm.value.clientId && searchForm.value.clientId !== '') {
+    const clientId = parseInt(searchForm.value.clientId, 10);
+    if (!isNaN(clientId)) {
+      params.client_id = clientId;
+    }
   }
-  if (searchForm.value.productId) {
+  
+  if (searchForm.value.productId && searchForm.value.productId !== '') {
     params.product_id = searchForm.value.productId;
   }
-  if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
+  
+  if (searchForm.value.dateRange && Array.isArray(searchForm.value.dateRange) && searchForm.value.dateRange.length === 2) {
     params.start_date = searchForm.value.dateRange[0];
     params.end_date = searchForm.value.dateRange[1];
+  }
+  
+  // 调试：输出查询参数（开发环境）
+  if (import.meta.env.DEV) {
+    console.log('[DailyReport] 查询参数:', JSON.stringify(params, null, 2));
   }
   
   // 添加排序参数
@@ -365,7 +377,7 @@ const fetchDailyData = async () => {
       
       const listResponse = response.data || {};
       
-      // 尝试多种方式访问数据
+      // 尝试多种方式访问数据（兼容不同的响应格式）
       let dataArray = [];
       if (Array.isArray(listResponse.data)) {
         dataArray = listResponse.data;
@@ -375,12 +387,51 @@ const fetchDailyData = async () => {
         dataArray = response.data;
       }
       
+      // 如果仍然没有数据，检查响应结构
+      if (dataArray.length === 0 && import.meta.env.DEV) {
+        console.warn('[DailyReport] 数据为空，响应结构:', {
+          response: response,
+          listResponse: listResponse,
+          responseData: response.data
+        });
+      }
+      
       dailyDataList.value = dataArray;
       
       // 确保total是数字类型，避免字符串类型导致的计算错误
       const totalValue = typeof listResponse.total === 'number' ? listResponse.total : 
                         (typeof response.total === 'number' ? response.total : parseInt(listResponse.total || response.total || 0, 10));
       pagination.value.total = totalValue;
+      
+      // 调试：输出查询结果（开发环境）
+      if (import.meta.env.DEV) {
+        console.log('[DailyReport] 查询结果:', {
+          dataCount: dataArray.length,
+          total: totalValue,
+          currentPage: pagination.value.current,
+          pageSize: pagination.value.size,
+          hasData: dataArray.length > 0,
+          firstItem: dataArray[0] || null
+        });
+      }
+      
+      // 如果查询有筛选条件但没有数据，给出提示
+      if (dataArray.length === 0 && totalValue === 0) {
+        const hasFilters = searchForm.value.clientId || 
+                          searchForm.value.productId || 
+                          (searchForm.value.dateRange && searchForm.value.dateRange.length === 2);
+        
+        if (hasFilters && import.meta.env.DEV) {
+          console.warn('[DailyReport] 查询有筛选条件但无数据:', {
+            filters: {
+              clientId: searchForm.value.clientId,
+              productId: searchForm.value.productId,
+              dateRange: searchForm.value.dateRange
+            },
+            params: params
+          });
+        }
+      }
       
       // 如果没有数据且没有选择日期范围，尝试获取数据的日期范围并提示用户
       if (dailyDataList.value.length === 0 && pagination.value.total === 0 && 
@@ -574,15 +625,22 @@ const handleExport = async () => {
     
     const params = {};
     
-    if (isAdmin.value && searchForm.value.clientId) {
-      params.client_id = parseInt(searchForm.value.clientId);
+    // 只添加非空值
+    if (isAdmin.value && searchForm.value.clientId && searchForm.value.clientId !== '') {
+      const clientId = parseInt(searchForm.value.clientId, 10);
+      if (!isNaN(clientId)) {
+        params.client_id = clientId;
+      }
     }
     
-    if (searchForm.value.productId) {
-      params.product_id = parseInt(searchForm.value.productId);
+    if (searchForm.value.productId && searchForm.value.productId !== '') {
+      const productId = parseInt(searchForm.value.productId, 10);
+      if (!isNaN(productId)) {
+        params.product_id = productId;
+      }
     }
 
-    if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
+    if (searchForm.value.dateRange && Array.isArray(searchForm.value.dateRange) && searchForm.value.dateRange.length === 2) {
       params.start_date = searchForm.value.dateRange[0];
       params.end_date = searchForm.value.dateRange[1];
     }

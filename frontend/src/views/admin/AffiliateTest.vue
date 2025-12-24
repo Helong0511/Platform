@@ -288,10 +288,31 @@ const loadData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: Math.min(pagination.pageSize, 100),
-      publisher_id: filterPublisher.value || undefined,
-      offer_id: filterOffer.value || undefined,
-      status: filterStatus.value || undefined
+      page_size: Math.min(pagination.pageSize, 100)
+    }
+    
+    // 只添加非空值
+    if (filterPublisher.value !== null && filterPublisher.value !== undefined && filterPublisher.value !== '') {
+      const publisherId = parseInt(filterPublisher.value, 10)
+      if (!isNaN(publisherId)) {
+        params.publisher_id = publisherId
+      }
+    }
+    
+    if (filterOffer.value !== null && filterOffer.value !== undefined && filterOffer.value !== '') {
+      const offerId = parseInt(filterOffer.value, 10)
+      if (!isNaN(offerId)) {
+        params.offer_id = offerId
+      }
+    }
+    
+    if (filterStatus.value !== null && filterStatus.value !== undefined && filterStatus.value !== '') {
+      params.status = filterStatus.value
+    }
+    
+    // 调试：输出查询参数（开发环境）
+    if (import.meta.env.DEV) {
+      console.log('[AffiliateTest] 查询参数:', JSON.stringify(params, null, 2))
     }
     const response = await getAffiliateTests(params)
     if (response.code === 200) {
