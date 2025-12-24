@@ -625,7 +625,43 @@ const fixSelectAccessibility = () => {
     fixSelectInputs();
     fixDatePickerInputs();
     fixOtherFormInputs();
+    fixSelectDisplay(); // 修复选中值显示问题
   });
+
+  // 修复 el-select 选中值显示问题
+  const fixSelectDisplay = () => {
+    const selects = document.querySelectorAll('.el-select');
+    selects.forEach((selectEl) => {
+      // 检查是否有选中值
+      const hasValue = selectEl.querySelector('.el-select__selected-item') !== null;
+      const placeholder = selectEl.querySelector('.el-select__placeholder');
+      const selectedItem = selectEl.querySelector('.el-select__selected-item');
+      
+      // 如果有选中值，确保显示
+      if (hasValue && selectedItem) {
+        // 确保选中值可见
+        selectedItem.style.display = 'inline-block';
+        selectedItem.style.opacity = '1';
+        selectedItem.style.visibility = 'visible';
+        selectedItem.style.color = '';
+        
+        // 隐藏 placeholder
+        if (placeholder) {
+          placeholder.style.display = 'none';
+          placeholder.style.opacity = '0';
+          placeholder.style.visibility = 'hidden';
+        }
+        
+        // 移除 is-empty 类（如果存在）
+        selectEl.classList.remove('is-empty');
+      } else if (!hasValue && placeholder) {
+        // 如果没有选中值，显示 placeholder
+        placeholder.style.display = '';
+        placeholder.style.opacity = '';
+        placeholder.style.visibility = '';
+      }
+    });
+  };
 
   // 修复 el-select 的 input 元素
   const fixSelectInputs = () => {

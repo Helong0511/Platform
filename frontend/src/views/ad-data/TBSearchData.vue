@@ -258,7 +258,7 @@ const loadUsers = async (startDate = null, endDate = null) => {
     users.value = [
       { label: '全部客户', value: '' },
       ...data.map(item => ({
-        value: item.id,
+        value: String(item.id), // 统一转换为字符串类型
         label: item.full_name || '未知客户'
       }))
     ];

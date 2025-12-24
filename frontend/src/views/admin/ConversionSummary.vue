@@ -35,7 +35,7 @@
             v-for="offer in offerList"
             :key="offer.id"
             :label="offer.offer_name"
-            :value="offer.id"
+            :value="String(offer.id)"
           />
         </el-select>
         <el-select
@@ -50,7 +50,7 @@
             v-for="pub in publisherList"
             :key="pub.id"
             :label="pub.publisher_name"
-            :value="pub.id"
+            :value="String(pub.id)"
           />
         </el-select>
         <el-button type="primary" :icon="Search" @click="handleSearch" style="margin-left: 10px;">查询</el-button>

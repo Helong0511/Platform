@@ -672,13 +672,14 @@ const fetchClientsWithData = async () => {
     const result = await getClientsWithData(startDate, endDate);
     const data = result.data || [];
     // 转换为下拉选择格式，添加"全部客户"选项
+    // 注意：value 统一使用字符串类型，确保与 v-model 绑定一致
     users.value = [
       { label: '全部客户', value: '' },
       ...data
         .filter(item => item && item.id != null) // 过滤掉无效的客户
         .map(item => ({
           label: item.full_name || '未知客户',
-          value: item.id
+          value: String(item.id) // 统一转换为字符串类型
         }))
     ];
   } catch (error) {

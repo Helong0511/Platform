@@ -507,7 +507,7 @@ const fetchClientsWithData = async () => {
         .filter(item => item && item.id != null)
         .map(item => ({
           label: item.full_name || '未知客户',
-          value: item.id
+          value: String(item.id) // 统一转换为字符串类型
         }))
     ];
   } catch (error) {

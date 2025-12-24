@@ -337,11 +337,17 @@ input[type="text"].el-input_inner {
 }
 
 /* 确保选中值文本正确显示，隐藏placeholder */
+/* 使用多种选择器确保覆盖所有情况 */
 .el-select.is-focus .el-select__placeholder,
-.el-select:not(.is-empty) .el-select__placeholder {
+.el-select:not(.is-empty) .el-select__placeholder,
+.el-select[class*="is-empty"]:not([class*="is-empty"]) .el-select__placeholder,
+.el-select .el-select__placeholder:not(:empty) {
   display: none !important;
   opacity: 0 !important;
   visibility: hidden !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
 }
 
 /* 确保选中值文本正确显示 */
@@ -350,8 +356,33 @@ input[type="text"].el-input_inner {
   overflow: hidden;
   white-space: nowrap;
   max-width: 100%;
-  display: inline-block;
+  display: inline-block !important;
   vertical-align: middle;
+  opacity: 1 !important;
+  visibility: visible !important;
+  color: var(--el-text-color-regular, #606266) !important;
+}
+
+/* 确保选中值容器正确显示 */
+.el-select .el-input__inner,
+.el-select .el-input__wrapper {
+  position: relative;
+}
+
+/* 确保选中值在输入框内正确显示 */
+.el-select .el-input__wrapper .el-select__selected-item {
+  position: relative;
+  z-index: 1;
+  display: inline-block !important;
+  max-width: calc(100% - 40px); /* 为清除按钮和下拉箭头留出空间 */
+}
+
+/* 修复当有选中值时的显示 */
+.el-select:not([class*="is-empty"]) .el-select__selected-item,
+.el-select[class*="has-value"] .el-select__selected-item {
+  display: inline-block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
 }
 
 /* 修复 el-select 在对话框中的显示问题 */
@@ -371,10 +402,22 @@ input[type="text"].el-input_inner {
 
 /* 确保对话框中的placeholder正确隐藏 */
 .el-dialog .el-select.is-focus .el-select__placeholder,
-.el-dialog .el-select:not(.is-empty) .el-select__placeholder {
+.el-dialog .el-select:not(.is-empty) .el-select__placeholder,
+.el-dialog .el-select[class*="has-value"] .el-select__placeholder {
   display: none !important;
   opacity: 0 !important;
   visibility: hidden !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+}
+
+/* 确保对话框中的选中值正确显示 */
+.el-dialog .el-select__selected-item {
+  display: inline-block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  color: var(--el-text-color-regular, #606266) !important;
 }
 
 /* 修复表单中的下拉框显示问题 */
@@ -393,10 +436,22 @@ input[type="text"].el-input_inner {
 
 /* 确保表单中的placeholder正确隐藏 */
 .el-form .el-select.is-focus .el-select__placeholder,
-.el-form .el-select:not(.is-empty) .el-select__placeholder {
+.el-form .el-select:not(.is-empty) .el-select__placeholder,
+.el-form .el-select[class*="has-value"] .el-select__placeholder {
   display: none !important;
   opacity: 0 !important;
   visibility: hidden !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+}
+
+/* 确保表单中的选中值正确显示 */
+.el-form .el-select__selected-item {
+  display: inline-block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  color: var(--el-text-color-regular, #606266) !important;
 }
 
 /* 修复所有下拉框的清除按钮位置 */
