@@ -90,15 +90,17 @@ def get_chat_id_handler(message):
 # 这些装饰器会在模块加载时执行，注册到 bot 对象上
 if bot_initialized and TELEBOT_AVAILABLE:
     # 添加通用消息处理器用于调试（放在最前面，但优先级较低）
+    # 注意：这个处理器会捕获所有消息，包括命令
     @bot.message_handler(func=lambda message: True, content_types=['text'])
     def handle_all_messages(message):
         """处理所有文本消息（用于调试）"""
         try:
             text = message.text or ""
             # 使用 INFO 级别确保日志可见
-            logger.info(f"[消息接收] 收到消息: {text[:50]}... 来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat ID: {message.chat.id})")
+            logger.info(f"[消息接收] ✅ 收到消息: {text[:50]}... 来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat ID: {message.chat.id})")
+            logger.info(f"[消息接收] 消息对象类型: {type(message)}, 消息ID: {message.message_id}")
         except Exception as e:
-            logger.error(f"[消息接收] 处理消息时出错: {e}", exc_info=True)
+            logger.error(f"[消息接收] ❌ 处理消息时出错: {e}", exc_info=True)
     
     @bot.message_handler(commands=['id'])
     def get_chat_id(message):
@@ -258,28 +260,48 @@ def run_bot():
         except Exception as e:
             logger.warning(f"无法检查消息处理器: {e}")
         
+        # 检查并删除可能存在的 webhook（webhook 会阻止 polling）
+        try:
+            webhook_info = bot.get_webhook_info()
+            if webhook_info.url:
+                logger.warning(f"检测到 Bot 已设置 webhook: {webhook_info.url}，这将阻止 polling 工作")
+                logger.info("正在删除 webhook...")
+                bot.delete_webhook(drop_pending_updates=True)
+                logger.info("Webhook 已删除，现在可以正常使用 polling")
+            else:
+                logger.info("Bot 未设置 webhook，可以使用 polling")
+        except Exception as webhook_error:
+            logger.warning(f"检查 webhook 时出错: {webhook_error}")
+        
         logger.info("开始轮询 Telegram 更新...")
         logger.info("如果收到消息但没有日志，可能是轮询没有正常运行")
-        bot.infinity_polling(
-            allowed_updates=[  # 明确指定需要处理的更新类型
-                "message",  # 处理消息
-                "callback_query",  # 处理回调查询（按钮点击）
-                "inline_query",  # 处理内联查询（搜索框）
-                "chosen_inline_result",  # 处理选择的内联结果
-                "shipping_query",  # 处理货运查询
-                "pre_checkout_query",  # 处理预结账查询
-                "poll",  # 处理投票
-                "poll_answer",  # 处理投票答案
-                "my_chat_member",  # 添加成员状态更新，用于检测机器人被添加/删除
-                "chat_member",  # 添加群组成员变动监控
-                "edited_message",  # 处理编辑过的消息
-                "channel_post",  # 处理频道帖子
-                "edited_channel_post"  # 处理编辑过的频道帖子
-            ],
-            timeout=20,  # 设置超时时间
-            long_polling_timeout=20,  # 长轮询超时时间
-            none_stop=True  # 即使出现错误也继续运行
-        )
+        
+        # 添加异常处理，确保能看到轮询过程中的错误
+        try:
+            bot.infinity_polling(
+                allowed_updates=[  # 明确指定需要处理的更新类型
+                    "message",  # 处理消息
+                    "callback_query",  # 处理回调查询（按钮点击）
+                    "inline_query",  # 处理内联查询（搜索框）
+                    "chosen_inline_result",  # 处理选择的内联结果
+                    "shipping_query",  # 处理货运查询
+                    "pre_checkout_query",  # 处理预结账查询
+                    "poll",  # 处理投票
+                    "poll_answer",  # 处理投票答案
+                    "my_chat_member",  # 添加成员状态更新，用于检测机器人被添加/删除
+                    "chat_member",  # 添加群组成员变动监控
+                    "edited_message",  # 处理编辑过的消息
+                    "channel_post",  # 处理频道帖子
+                    "edited_channel_post"  # 处理编辑过的频道帖子
+                ],
+                timeout=20,  # 设置超时时间
+                long_polling_timeout=20,  # 长轮询超时时间
+                none_stop=True,  # 即使出现错误也继续运行
+                skip_pending=False  # 不跳过待处理的更新
+            )
+        except Exception as polling_error:
+            logger.error(f"轮询过程中发生错误: {polling_error}", exc_info=True)
+            raise
     except KeyboardInterrupt:
         logger.info("收到终止信号，正在优雅关闭机器人...")
     except telebot.apihelper.ApiException as api_error:
