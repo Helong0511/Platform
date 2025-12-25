@@ -159,6 +159,18 @@ async def redirect_short_link(
     final_offer_id = offer_id or short_link.offer_id
     final_channel_id = channel_id or short_link.channel_id
     
+    # 打印获得的参数
+    logger.info(
+        f"[短链接点击] 参数信息: "
+        f"short_code={short_code}, "
+        f"URL参数_offer_id={offer_id}, "
+        f"URL参数_channel_id={channel_id}, "
+        f"短链接关联_offer_id={short_link.offer_id}, "
+        f"短链接关联_channel_id={short_link.channel_id}, "
+        f"最终使用_offer_id={final_offer_id}, "
+        f"最终使用_channel_id={final_channel_id}"
+    )
+    
     # 如果从URL参数获取了offer_id，验证Offer是否存在并获取advertiser_id
     advertiser_id = None
     if final_offer_id:
@@ -168,6 +180,12 @@ async def redirect_short_link(
         offer = offer_result.scalars().first()
         if offer:
             advertiser_id = offer.advertiser_id
+            logger.info(
+                f"[短链接点击] Offer信息: "
+                f"offer_id={final_offer_id}, "
+                f"offer_name={offer.offer_name}, "
+                f"advertiser_id={advertiser_id}"
+            )
         else:
             # 如果offer_id无效，记录警告但继续处理
             logger.warning(f"短链接点击时提供的offer_id无效: offer_id={final_offer_id}, short_code={short_code}")
@@ -194,6 +212,14 @@ async def redirect_short_link(
     user_agent = request.headers.get("user-agent") if request else None
     referer = request.headers.get("referer") if request else None
     
+    # 打印客户端信息
+    logger.info(
+        f"[短链接点击] 客户端信息: "
+        f"ip={client_ip}, "
+        f"user_agent={user_agent}, "
+        f"referer={referer}"
+    )
+    
     # 生成Click ID
     click_id = generate_click_id_from_timestamp()
     
@@ -214,13 +240,25 @@ async def redirect_short_link(
             "country": None
         }
         
+        # 打印完整的点击记录数据
+        logger.info(
+            f"[短链接点击] 点击记录数据: "
+            f"click_id={click_id}, "
+            f"short_link_id={short_link.id}, "
+            f"offer_id={final_offer_id}, "
+            f"publisher_id={final_channel_id}, "
+            f"advertiser_id={advertiser_id}, "
+            f"click_time={click_data['click_time']}, "
+            f"ip={client_ip}, "
+            f"user_agent={user_agent}, "
+            f"referer={referer}"
+        )
+        
         background_tasks.add_task(create_click_background, click_data)
         logger.info(
-            f"短链接点击记录已创建（异步）: "
+            f"[短链接点击] 点击记录已提交异步保存: "
             f"click_id={click_id}, "
-            f"short_code={short_code}, "
-            f"offer_id={final_offer_id}, "
-            f"channel_id={final_channel_id}"
+            f"short_code={short_code}"
         )
     
     # 异步更新点击次数（使用Redis计数器，不阻塞重定向）
