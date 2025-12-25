@@ -66,6 +66,12 @@
       </el-table-column>
       <el-table-column prop="original_url" label="原始URL" min-width="300" show-overflow-tooltip />
       <el-table-column prop="title" label="标题" width="150" show-overflow-tooltip />
+      <el-table-column prop="creator_name" label="创建者" width="120" show-overflow-tooltip>
+        <template #default="scope">
+          <span v-if="scope.row.creator_name">{{ scope.row.creator_name }}</span>
+          <el-tag v-else type="info" size="small">未知</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="click_count" label="点击次数" width="100" align="center">
         <template #default="scope">
           <el-tag type="success">{{ scope.row.click_count }}</el-tag>

@@ -12,7 +12,7 @@ import gzip
 from io import BytesIO
 # 类型注解已迁移到内置类型（Python 3.10+）
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Iterator, Optional
 from app.core.config import settings
 from app.core.redis_client import get_redis_client
@@ -44,16 +44,27 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.app = app
 
     async def dispatch(self, request: Request, call_next):
+        logger.info(f"RateLimitMiddleware处理请求: {request.method} {request.url.path}")
+        
         # ====== 获取客户端标识 ======
         # 使用IP地址作为限流标识（生产环境可结合用户ID）
-        from app.core.utils import get_client_ip
-        client_ip = get_client_ip(request)
+        try:
+            from app.core.utils import get_client_ip
+            client_ip = get_client_ip(request)
+            logger.info(f"获取到客户端IP: {client_ip}")
+        except Exception as e:
+            logger.warning(f"获取客户端IP失败: {e}，使用默认IP 'testclient'")
+            client_ip = "testclient"
 
         # ====== 检查是否为登录接口 ======
         # 登录接口使用更严格的限流策略（防止暴力破解）
         is_login = request.url.path.endswith("/login") and request.method == "POST"
+        logger.info(f"是否为登录接口: {is_login}")
+        logger.info(f"路径: {request.url.path}")
+        logger.info(f"方法: {request.method}")
         limit = LOGIN_RATE_LIMIT if is_login else DEFAULT_RATE_LIMIT
         window = LOGIN_RATE_WINDOW if is_login else DEFAULT_RATE_WINDOW
+        logger.info(f"限流配置: 限制={limit}/{window}秒")
 
         # ====== 生产环境：对敏感接口增加额外限流 ======
         if settings.is_production:
@@ -64,7 +75,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # ====== 尝试使用Redis进行限流 ======
         redis_client = await get_redis_client()
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         current_window_key = f"{int(now.timestamp() / window)}"
         rate_limit_key = f"rate_limit:{client_ip}:{current_window_key}"
         
@@ -182,9 +193,14 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
         
         # 记录慢请求
         if process_time > self.slow_request_threshold:
+            try:
+                client_ip = get_client_ip(request)
+            except Exception as e:
+                logger.warning(f"获取客户端IP失败: {e}，使用默认IP 'testclient'")
+                client_ip = "testclient"
             logger.warning(
                 f"慢请求: {request.method} {request.url.path} "
-                f"耗时 {process_time:.2f}s, IP: {get_client_ip(request)}"
+                f"耗时 {process_time:.2f}s, IP: {client_ip}"
             )
         
         # 添加性能头
@@ -303,8 +319,12 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         start_time = time.time()
 
         # ====== 获取请求信息 ======
-        from app.core.utils import get_client_ip
-        client_ip = get_client_ip(request)
+        try:
+            from app.core.utils import get_client_ip
+            client_ip = get_client_ip(request)
+        except Exception as e:
+            logger.warning(f"获取客户端IP失败: {e}，使用默认IP 'testclient'")
+            client_ip = "testclient"
 
         method = request.method
         # URL 解码路径，使中文可读

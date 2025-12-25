@@ -110,6 +110,50 @@ def get_system_time_info() -> dict:
     }
 
 
+def check_and_validate_timezone() -> bool:
+    """
+    检查并验证系统时区与配置时区是否一致
+    
+    Returns:
+        bool: 如果时区一致或无法检测系统时区返回 True，不一致返回 False
+    """
+    time_info = get_system_time_info()
+    system_tz = time_info['system_timezone']
+    app_tz = time_info['app_timezone']
+    timezone_match = time_info['timezone_match']
+    
+    # 如果无法检测系统时区，返回 True（允许继续运行）
+    if timezone_match is None:
+        logger.warning("⚠️  无法检测系统时区，应用将使用配置的时区（应用时区）")
+        return True
+    
+    # 如果时区一致，返回 True
+    if timezone_match is True:
+        logger.info(f"✓ 系统时区 ({system_tz}) 与应用时区 ({app_tz}) 一致")
+        return True
+    
+    # 时区不一致，返回 False 并记录警告
+    logger.warning("=" * 60)
+    logger.warning("⚠️  时区配置不匹配警告")
+    logger.warning("=" * 60)
+    logger.warning(f"系统时区: {system_tz}")
+    logger.warning(f"应用配置时区: {app_tz}")
+    logger.warning(f"UTC 时间: {time_info['utc_time']}")
+    logger.warning(f"应用时间: {time_info['app_time']}")
+    logger.warning(f"系统时间: {time_info['system_time']}")
+    logger.warning("")
+    logger.warning("处理方式：")
+    logger.warning("  应用将统一使用配置的时区（应用时区）处理所有时间，不受系统时区影响。")
+    logger.warning("  所有时间相关的操作（如业务日期、定时任务等）都将基于配置的时区。")
+    logger.warning("")
+    logger.warning("建议：")
+    logger.warning("  1. 如果系统时区与应用时区应该一致，请调整系统时区设置")
+    logger.warning("  2. 如果系统使用 UTC 而应用使用其他时区，这是正常的配置，无需调整")
+    logger.warning("=" * 60)
+    
+    return False
+
+
 def log_timezone_info() -> None:
     """
     在应用启动时记录时区信息

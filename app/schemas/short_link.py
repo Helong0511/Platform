@@ -72,6 +72,7 @@ class ShortLinkResponse(ShortLinkBase):
     id: int
     click_count: int
     created_by: Optional[int] = None
+    creator_name: Optional[str] = None  # 创建者用户名
     created_at: datetime
     updated_at: datetime
     short_url: Optional[str] = None  # 完整的短链接URL

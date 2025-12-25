@@ -38,9 +38,14 @@ async def login(
     - 为管理员返回未读通知
     - 客户IP白名单验证（127.0.0.1始终允许）
     """
+    logger.info("登录API被调用，开始处理请求")
+    logger.info(f"请求方法: {request.method}, 请求路径: {request.url.path}")
+    logger.info(f"请求头: {dict(request.headers)}")
+    
     # ====== 获取客户端IP ======
     from app.core.utils import get_client_ip
     client_ip = get_client_ip(request)
+    logger.info(f"客户端IP: {client_ip}")
 
     # ====== 查询用户 ======
     # 根据用户名查询用户（使用用户名而不是ID，因为登录时只有用户名）
@@ -151,40 +156,56 @@ async def login(
     
     # ====== 记录会话信息 ======
     # 解析token获取jti
+    token_jti = None
     try:
         from jose import jwt
+        
+        # 根据配置的算法选择密钥
+        if settings.JWT_ALGORITHM == "RS256":
+            # 使用RS256算法（非对称加密），需要公钥验证
+            from app.core.security import JWTUtils
+            public_key = JWTUtils._load_rsa_key(
+                settings.RSA_PUBLIC_KEY,
+                settings.RSA_PUBLIC_KEY_PATH,
+                "public"
+            )
+            key = public_key
+        else:
+            # 使用HS256算法（对称加密），使用相同的密钥
+            key = settings.SECRET_KEY
+        
         payload = jwt.decode(
             access_token,
-            settings.SECRET_KEY,
-            algorithms=["HS256"],
+            key,
+            algorithms=[settings.JWT_ALGORITHM],
             options={"verify_exp": False}  # 不验证过期时间，只获取jti
         )
         token_jti = payload.get("jti")
-        
-        if token_jti:
-            # 记录会话到数据库
-            from app.models.session import UserSession
-            from app.core.utils import get_client_ip, get_device_type
-            
-            expires_at = datetime.now(timezone.utc) + access_token_expires
-            device_type_str = get_device_type(request)
-            user_agent = request.headers.get("User-Agent", "")[:500]
-            
-            session = UserSession(
-                user_id=user.id,
-                token_jti=token_jti,
-                ip_address=client_ip,
-                user_agent=user_agent,
-                device_info=device_type_str,
-                is_active=True,
-                last_activity=datetime.now(timezone.utc),
-                expires_at=expires_at
-            )
-            db.add(session)
-            # 不在这里commit，由get_db的finally块自动commit
     except Exception as e:
         # 会话记录失败不应该影响登录
         logger.warning(f"记录会话信息失败: {e}")
+    
+    if token_jti:
+        # 记录会话到数据库
+        from app.models.session import UserSession
+        from app.core.utils import get_client_ip, get_device_type
+        
+        expires_at = datetime.now(timezone.utc) + access_token_expires
+        device_type_str = get_device_type(request)
+        user_agent = request.headers.get("User-Agent", "")[:500]
+        
+        session = UserSession(
+            user_id=user.id,
+            token_jti=token_jti,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            device_info=device_type_str,
+            is_active=True,
+            last_activity=datetime.now(timezone.utc),
+            expires_at=expires_at
+        )
+        db.add(session)
+        # 不在这里commit，由get_db的finally块自动commit
 
     logger.info(f"User {user.username} logged in successfully")
 

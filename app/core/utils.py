@@ -25,11 +25,15 @@ def get_client_ip(request: Request) -> str:
     Returns:
         客户端IP地址字符串，如果无法获取则返回"unknown"
     """
-    client_ip = request.client.host if request.client else "unknown"
-    if "x-forwarded-for" in request.headers:
-        forwarded_ips = request.headers["x-forwarded-for"].split(",")
-        client_ip = forwarded_ips[0].strip()
-    return client_ip
+    try:
+        client_ip = request.client.host if request.client else "unknown"
+        if "x-forwarded-for" in request.headers:
+            forwarded_ips = request.headers["x-forwarded-for"].split(",")
+            client_ip = forwarded_ips[0].strip()
+        return client_ip
+    except AttributeError:
+        # 处理request.client为None的情况
+        return "unknown"
 
 
 def optimize_page_size_for_device(request: Request, page_size: int, default_page_size: int = 10) -> int:

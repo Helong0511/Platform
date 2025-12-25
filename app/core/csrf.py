@@ -184,6 +184,9 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         method = request.method.upper()
         
+        logger.info(f"CSRF中间件处理请求: {method} {path}")
+        logger.info(f"请求头: {dict(request.headers)}")
+        
         # 短链接重定向路由（公开访问，无需认证）- 最优先检查
         # 检查路径是否以 /s/ 开头（支持 /s/xxx 格式）
         if path and path.startswith("/s/"):
@@ -191,8 +194,11 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         
         # 精确匹配登录/登出接口
+        logger.info(f"检查是否为登录/登出接口: path={path}")
+        logger.info(f"匹配 /api/v1/auth/login: {path == '/api/v1/auth/login'}")
+        logger.info(f"匹配 /api/v1/auth/logout: {path == '/api/v1/auth/logout'}")
         if path == "/api/v1/auth/login" or path == "/api/v1/auth/logout":
-            logger.debug(f"跳过CSRF检查（登录接口）: {method} {path}")
+            logger.info(f"跳过CSRF检查（登录接口）: {method} {path}")
             return await call_next(request)
         
         # Macan S2S PostBack接口（外部回调接口，不需要CSRF）

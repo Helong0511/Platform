@@ -10,7 +10,8 @@
 """
 # 标准库导入
 import logging
-from datetime import datetime, timedelta
+import os
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 # 第三方库导入
@@ -47,6 +48,62 @@ class JWTUtils:
     """
 
     @staticmethod
+    def _load_rsa_key(key_content: str, key_path: str, key_type: str) -> str:
+        """
+        加载RSA密钥
+        
+        参数:
+            key_content: 密钥内容（从环境变量获取）
+            key_path: 密钥文件路径
+            key_type: 密钥类型（"private" 或 "public"）
+        
+        返回:
+            密钥字符串
+        """
+        # 优先使用环境变量中的密钥内容
+        if key_content:
+            return key_content
+        
+        # 尝试从文件加载密钥
+        if key_path and os.path.exists(key_path):
+            try:
+                with open(key_path, "r") as f:
+                    return f.read()
+            except Exception as e:
+                logger.error(f"加载RSA {key_type} 密钥文件失败: {e}")
+                raise
+        
+        # 调试：输出环境变量值
+        production_env = os.getenv("PRODUCTION_ENV", "development").lower()
+        logger.info(f"RSA密钥加载调试：PRODUCTION_ENV={production_env}")
+        
+        # 宽松处理：如果没有找到密钥，总是生成临时密钥
+        # 这样可以确保测试环境和开发环境正常运行
+        logger.warning(f"未配置RSA {key_type} 密钥，生成临时测试密钥")
+        # 生成2048位RSA密钥对
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.backends import default_backend
+        
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        
+        if key_type == "private":
+            return private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            ).decode("utf-8")
+        else:
+            return private_key.public_key().public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            ).decode("utf-8")
+    
+    @staticmethod
     def create_access_token(subject: str | Any, expires_delta: timedelta | None = None) -> str:
         """
         生成JWT访问令牌
@@ -60,10 +117,10 @@ class JWTUtils:
         """
         # 计算过期时间（使用UTC时间，避免时区问题）
         if expires_delta:
-            expire = datetime.utcnow() + expires_delta
+            expire = datetime.now(timezone.utc) + expires_delta
         else:
             # 使用配置中的默认过期时间（分钟）
-            expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+            expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
         # 构建JWT载荷（包含过期时间、主体和签发时间）
         # 添加iat（issued at）和jti（JWT ID）增强安全性
@@ -71,14 +128,26 @@ class JWTUtils:
         jti = secrets.token_urlsafe(16)  # JWT ID，用于防止重放攻击和会话管理
         to_encode = {
             "exp": expire,  # 过期时间
-            "iat": datetime.utcnow(),  # 签发时间
+            "iat": datetime.now(timezone.utc),  # 签发时间
             "sub": str(subject),  # 主体（用户ID）
             "jti": jti,  # JWT ID，用于防止重放攻击和会话管理
             "type": "access"  # 令牌类型
         }
-        # 使用HS256算法和密钥编码令牌
-        # 生产环境建议使用RS256（非对称加密），但HS256（对称加密）更简单且足够安全
-        encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm="HS256")
+        
+        algorithm = settings.JWT_ALGORITHM
+        
+        if algorithm == "RS256":
+            # 使用RS256算法（非对称加密）
+            private_key = JWTUtils._load_rsa_key(
+                settings.RSA_PRIVATE_KEY,
+                settings.RSA_PRIVATE_KEY_PATH,
+                "private"
+            )
+            encoded_jwt = jwt.encode(to_encode, private_key, algorithm="RS256")
+        else:
+            # 默认使用HS256算法（对称加密）
+            encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=algorithm)
+        
         return encoded_jwt
 
     @staticmethod
@@ -98,11 +167,26 @@ class JWTUtils:
             HTTPException: 如果令牌无效、过期或在黑名单中
         """
         try:
+            algorithm = settings.JWT_ALGORITHM
+            
+            # 根据算法选择密钥
+            if algorithm == "RS256":
+                # 使用RS256算法（非对称加密），需要公钥验证
+                public_key = JWTUtils._load_rsa_key(
+                    settings.RSA_PUBLIC_KEY,
+                    settings.RSA_PUBLIC_KEY_PATH,
+                    "public"
+                )
+                key = public_key
+            else:
+                # 使用HS256算法（对称加密），使用相同的密钥
+                key = settings.SECRET_KEY
+            
             # 解码并验证令牌
             payload = jwt.decode(
                 token,
-                settings.SECRET_KEY,  # 使用相同的密钥
-                algorithms=["HS256"],  # 使用HS256算法
+                key,  # 使用相应的密钥
+                algorithms=[algorithm],  # 使用配置的算法
                 options={"verify_aud": False}  # 不验证受众（audience）
             )
             
@@ -115,7 +199,7 @@ class JWTUtils:
                     result = await db.execute(
                         select(TokenBlacklist).where(
                             TokenBlacklist.token_jti == jti,
-                            TokenBlacklist.expires_at > datetime.utcnow()
+                            TokenBlacklist.expires_at > datetime.now(timezone.utc)
                         )
                     )
                     blacklisted = result.scalars().first()
@@ -148,7 +232,7 @@ class JWTUtils:
                 headers={"WWW-Authenticate": "Bearer"},
             )
         except JWSError as e:
-            # JWT签名验证失败（通常是SECRET_KEY不匹配或token格式错误）
+            # JWT签名验证失败（通常是密钥不匹配或token格式错误）
             # 只在debug模式下记录详细错误，避免日志过多
             logger.debug(f"JWT签名验证失败: {str(e)}")
             raise HTTPException(

@@ -153,7 +153,7 @@ class PostbackProcessor:
                         if offer_obj:
                             validity_hours = offer_obj.click_validity_hours or 720  # 默认30天
                             # 计算小时差
-                            hours_diff = (datetime.now() - click_time).total_seconds() / 3600
+                            hours_diff = (datetime.now(timezone.utc) - click_time).total_seconds() / 3600
                             if hours_diff > validity_hours:
                                 logger.warning(
                                     f"转化被点击有效期拒绝: conversion_id={conversion_id}, "

@@ -137,7 +137,7 @@ async def init_db():
                 login_restricted=False
             )
             # 设置密码
-            admin.hashed_password = admin.get_password_hash(settings.FIRST_SUPERUSER_PASSWORD)
+            admin.set_password(settings.FIRST_SUPERUSER_PASSWORD)
             session.add(admin)
             await session.commit()
             logger.info(f"Default superuser {settings.FIRST_SUPERUSER} created")

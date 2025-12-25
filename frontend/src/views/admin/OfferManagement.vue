@@ -91,6 +91,66 @@
           </template>
         </el-table-column>
         <el-table-column prop="country" label="国家" width="100" />
+        <el-table-column prop="category" label="分类" width="120" show-overflow-tooltip>
+          <template #default="scope">
+            <span v-if="scope.row.category">{{ scope.row.category }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="type" label="类型" width="100" show-overflow-tooltip>
+          <template #default="scope">
+            <span v-if="scope.row.type">{{ scope.row.type }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="upstream_cap" label="上游Cap" width="100" align="center">
+          <template #default="scope">
+            <span v-if="scope.row.upstream_cap">{{ scope.row.upstream_cap }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="downstream_cap" label="下游Cap" width="100" align="center">
+          <template #default="scope">
+            <span v-if="scope.row.downstream_cap">{{ scope.row.downstream_cap }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="preview_link" label="预览链接" width="200" show-overflow-tooltip>
+          <template #default="scope">
+            <el-link v-if="scope.row.preview_link" :href="scope.row.preview_link" target="_blank" type="primary" :underline="false">
+              预览
+            </el-link>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="postback_method" label="Postback方法" width="120" align="center">
+          <template #default="scope">
+            <el-tag :type="scope.row.postback_method === 'POST' ? 'success' : 'info'" size="small">
+              {{ scope.row.postback_method || 'GET' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="click_validity_hours" label="点击有效期(小时)" width="140" align="center">
+          <template #default="scope">
+            <span v-if="scope.row.click_validity_hours">{{ scope.row.click_validity_hours }}</span>
+            <span v-else>720</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="assigned_publishers" label="分配渠道" width="200" show-overflow-tooltip>
+          <template #default="scope">
+            <div v-if="scope.row.assigned_publishers && scope.row.assigned_publishers.length > 0">
+              <el-tag
+                v-for="pub in scope.row.assigned_publishers"
+                :key="pub.id"
+                size="small"
+                style="margin-right: 4px; margin-bottom: 4px;"
+              >
+                {{ pub.publisher_name }}
+              </el-tag>
+            </div>
+            <el-tag v-else type="info" size="small">未分配</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="100" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.status === 'Active' ? 'success' : 'info'">
@@ -662,7 +722,7 @@ onMounted(() => {
 }
 
 .table-wrapper :deep(.el-table) {
-  min-width: 1200px;
+  min-width: 2000px;
 }
 
 .pagination-container {

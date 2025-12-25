@@ -47,7 +47,11 @@ class User(Base):
     def get_password_hash(self, password: str) -> str:
         # Truncate password to 72 bytes before hashing
         truncated_password = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
-        return pwd_context.hash(password)
+        return pwd_context.hash(truncated_password)
+    
+    def set_password(self, password: str) -> None:
+        """设置用户密码"""
+        self.hashed_password = self.get_password_hash(password)
 
 
 # 客户模型

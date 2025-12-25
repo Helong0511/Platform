@@ -13,12 +13,13 @@ from app.core.errors import ErrorCode, create_error_response
 from app.core.middleware import RateLimitMiddleware, SecurityHeadersMiddleware, RequestLoggingMiddleware, \
     CompressionMiddleware, PerformanceMonitoringMiddleware
 from app.core.https_middleware import HTTPSRedirectMiddleware
-from app.core.timezone_utils import log_timezone_info
+from app.core.timezone_utils import log_timezone_info, check_and_validate_timezone
 from app.api.api_v1 import api_router
 import logging
 from logging.handlers import RotatingFileHandler
 import os
 import asyncio
+import base64
 # 抑制 APScheduler 的 pkg_resources 弃用警告
 # 这是 APScheduler 库内部使用已弃用的 pkg_resources 导致的警告
 # 不影响功能，等待库更新修复
@@ -118,11 +119,18 @@ async def lifespan(app: FastAPI):
     worker_pid = os.getpid()
     logger.info(f"[Worker PID:{worker_pid}] 应用启动中...")
     
-    # 记录时区配置信息（用于诊断时区问题）
+    # 检查并验证时区配置（启动时首先检查）
     try:
+        timezone_consistent = check_and_validate_timezone()
+        if not timezone_consistent:
+            logger.warning(
+                f"[Worker PID:{worker_pid}] 系统时区与配置时区不一致，"
+                "应用将使用配置的时区处理所有时间操作"
+            )
+        # 记录详细的时区信息
         log_timezone_info()
     except Exception as e:
-        logger.warning(f"记录时区信息时出错: {e}，继续启动...")
+        logger.warning(f"时区检查时出错: {e}，继续启动...")
 
     # 确保数据库存在并创建表（多进程环境：每个 worker 都会执行，但数据库操作是安全的）
     try:
@@ -142,11 +150,20 @@ async def lifespan(app: FastAPI):
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
-        logger.info(f"[Worker PID:{worker_pid}] 数据库初始化完成")
+        logger.info(f"[Worker PID:{worker_pid}] 数据库表创建完成")
     except Exception as e:
-        logger.error(f"[Worker PID:{worker_pid}] 数据库初始化失败: {e}", exc_info=True)
+        logger.error(f"[Worker PID:{worker_pid}] 数据库表创建失败: {e}", exc_info=True)
         # 不抛出异常，允许应用继续启动（可能是表已存在或其他 worker 已创建）
         logger.warning(f"[Worker PID:{worker_pid}] 继续启动应用...")
+    
+    # 初始化数据库，创建默认管理员账户
+    try:
+        from app.core.database import init_db
+        await init_db()
+        logger.info(f"[Worker PID:{worker_pid}] 数据库初始化完成（包括默认管理员账户）")
+    except Exception as e:
+        logger.error(f"[Worker PID:{worker_pid}] 数据库初始化失败: {e}", exc_info=True)
+        # 不抛出异常，允许应用继续启动
 
     # 初始化Redis连接（如果配置了）
     try:

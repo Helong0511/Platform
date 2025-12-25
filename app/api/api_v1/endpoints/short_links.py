@@ -296,7 +296,7 @@ async def get_short_links(
     # 排序：最新的在前
     query = query.order_by(ShortLink.created_at.desc())
     
-    # 计算总数
+    # 计算总数（在加载关联之前）
     count_query = select(func.count()).select_from(query.subquery())
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
@@ -305,7 +305,9 @@ async def get_short_links(
     offset = (page - 1) * page_size
     query = query.offset(offset).limit(page_size)
     
-    # 执行查询
+    # 执行查询，加载创建者信息（在分页之后）
+    from sqlalchemy.orm import joinedload
+    query = query.options(joinedload(ShortLink.creator))
     result = await db.execute(query)
     short_links = result.scalars().all()
     
@@ -315,6 +317,9 @@ async def get_short_links(
     for link in short_links:
         link_data = ShortLinkResponse.model_validate(link)
         link_data.short_url = f"{base_url}/s/{link.short_code}"
+        # 添加创建者名称
+        if link.creator:
+            link_data.creator_name = link.creator.username
         links_data.append(link_data)
     
     return PaginatedResponseBaseSchema.success(
@@ -406,6 +411,10 @@ async def update_short_link(
         response_data = ShortLinkResponse.model_validate(short_link)
         response_data.short_url = f"{base_url}/s/{short_link.short_code}"
         
+        # 清除缓存，确保数据一致性
+        from app.core.short_link_cache import invalidate_short_link_cache
+        await invalidate_short_link_cache(short_link.short_code)
+        
         logger.info(f"短链接更新成功: {short_link.short_code}")
         return ResponseBaseSchema.success(data=response_data)
         
@@ -446,10 +455,17 @@ async def delete_short_link(
                 detail="无权删除该短链接"
             )
     
+    short_code = short_link.short_code
+    
     try:
         from sqlalchemy import delete
         await db.execute(delete(ShortLink).where(ShortLink.id == link_id))
         await db.commit()
+        
+        # 清除缓存，确保数据一致性
+        from app.core.short_link_cache import invalidate_short_link_cache
+        await invalidate_short_link_cache(short_code)
+        
         logger.info(f"短链接删除成功: {link_id}")
         return ResponseBaseSchema.success(data={"message": "短链接已删除"})
     except Exception as e:

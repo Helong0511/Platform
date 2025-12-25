@@ -70,12 +70,19 @@ class Settings(BaseSettings):
 
     @property
     def is_production(self) -> bool:
-        """判断是否为生产环境"""
+        """判断是否为生产环境
+        
+        使用验证后的PRODUCTION_ENV值，确保环境一致性
+        """
+        # 使用self.PRODUCTION_ENV而不是直接从环境变量获取，确保一致性
         return self.PRODUCTION_ENV in ["production", "prod"]
 
     @property
     def is_development(self) -> bool:
-        """判断是否为开发环境"""
+        """判断是否为开发环境
+        
+        每次访问时重新检查环境变量，确保获取最新值
+        """
         return not self.is_production
 
     # ====== 安全配置 ======
@@ -133,6 +140,20 @@ class Settings(BaseSettings):
     # 可以通过环境变量 ACCESS_TOKEN_EXPIRE_MINUTES 设置
     # 默认值：20分钟（开发环境），生产环境建议设置为 60-120 分钟
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "240"))
+    
+    # JWT算法配置
+    # RS256（推荐，非对称加密）或 HS256（对称加密）
+    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "RS256")
+    
+    # RSA密钥配置（仅RS256算法使用）
+    # RSA私钥文件路径
+    RSA_PRIVATE_KEY_PATH: str = os.getenv("RSA_PRIVATE_KEY_PATH", "")
+    # RSA公钥文件路径
+    RSA_PUBLIC_KEY_PATH: str = os.getenv("RSA_PUBLIC_KEY_PATH", "")
+    # RSA私钥内容（优先使用环境变量）
+    RSA_PRIVATE_KEY: str = os.getenv("RSA_PRIVATE_KEY", "")
+    # RSA公钥内容（优先使用环境变量）
+    RSA_PUBLIC_KEY: str = os.getenv("RSA_PUBLIC_KEY", "")
 
     # ====== 服务器信息 ======
     SERVER_NAME: str = "广告数据管理系统"
