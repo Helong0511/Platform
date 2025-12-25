@@ -4,7 +4,7 @@ FastAPI应用主入口
 """
 import warnings
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, status, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request, status, HTTPException, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -877,8 +877,10 @@ from app.models.models import ShortLink
 @app.get("/s/{short_code}", summary="短链接重定向", tags=["短链接服务"])
 async def redirect_short_link_public(
     short_code: str,
-    request: Request,
-    background_tasks: BackgroundTasks,
+    offer_id: Optional[int] = Query(None, description="Offer ID（从URL参数获取）"),
+    channel_id: Optional[int] = Query(None, description="渠道ID（从URL参数获取）"),
+    request: Request = None,
+    background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -1179,13 +1181,44 @@ async def redirect_short_link_public(
         user_agent = request.headers.get("user-agent")
         referer = request.headers.get("referer")
         
+        # 从URL参数或短链接关联信息中获取offer_id和channel_id
+        final_offer_id = offer_id or short_link.offer_id
+        final_channel_id = channel_id or short_link.channel_id
+        
+        # 如果从URL参数获取了offer_id，验证Offer是否存在并获取advertiser_id
+        advertiser_id = None
+        if final_offer_id:
+            try:
+                from app.models.models import Offer
+                offer_result = await db.execute(
+                    select(Offer).where(Offer.id == final_offer_id)
+                )
+                offer = offer_result.scalars().first()
+                if offer:
+                    advertiser_id = offer.advertiser_id
+            except Exception as e:
+                logger.warning(f"查询Offer失败: offer_id={final_offer_id}, error={e}")
+        
+        # 打印获得的参数
+        logger.info(
+            f"[短链接点击-数据库路径] 参数信息: "
+            f"short_code={short_code}, "
+            f"URL参数_offer_id={offer_id}, "
+            f"URL参数_channel_id={channel_id}, "
+            f"短链接关联_offer_id={short_link.offer_id}, "
+            f"短链接关联_channel_id={short_link.channel_id}, "
+            f"最终使用_offer_id={final_offer_id}, "
+            f"最终使用_channel_id={final_channel_id}, "
+            f"advertiser_id={advertiser_id}"
+        )
+        
         # 创建点击记录（异步保存，不阻塞重定向）
         click_data = {
             "click_id": click_id,
             "short_link_id": short_link.id,
-            "offer_id": None,
-            "publisher_id": None,
-            "advertiser_id": None,
+            "offer_id": final_offer_id,
+            "publisher_id": final_channel_id,  # publisher_id对应channel_id
+            "advertiser_id": advertiser_id,
             "click_time": datetime.now(timezone.utc),
             "ip": client_ip,
             "user_agent": user_agent,
@@ -1193,7 +1226,14 @@ async def redirect_short_link_public(
             "country": None
         }
         background_tasks.add_task(create_click_background, click_data)
-        logger.debug(f"[短链接重定向] 点击记录已创建（数据库路径）: click_id={click_id}, short_link_id={short_link.id}")
+        logger.info(
+            f"[短链接重定向] 点击记录已创建（数据库路径）: "
+            f"click_id={click_id}, "
+            f"short_link_id={short_link.id}, "
+            f"offer_id={final_offer_id}, "
+            f"publisher_id={final_channel_id}, "
+            f"advertiser_id={advertiser_id}"
+        )
         
         # 获取当前点击次数（数据库中的点击次数）
         current_click_count = short_link.click_count or 0

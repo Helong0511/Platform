@@ -107,5 +107,7 @@ def serialize_short_link(short_link) -> Dict[str, Any]:
         "is_active": short_link.is_active,
         "expires_at": short_link.expires_at.isoformat() if short_link.expires_at else None,
         "click_count": short_link.click_count,
+        "offer_id": short_link.offer_id,
+        "channel_id": short_link.channel_id,
     }
 
