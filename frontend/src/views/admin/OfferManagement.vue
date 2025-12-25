@@ -911,56 +911,21 @@ const handleSubmit = async () => {
       }
       
       if (response.code === 200 && offerData) {
-        // 创建短链接（新建时自动创建，编辑时如果有标记则创建）
-        const shouldCreateShortLink = !isEdit.value || formData.downstream_tracklink_short === '[将在保存时创建]'
-        
-        if (shouldCreateShortLink) {
-          try {
-            const tracklink = offerData.downstream_tracklink
-            if (tracklink) {
-              // 检查是否已存在
-              const existingLinks = await getShortLinks({
-                page: 1,
-                page_size: 10,
-                search: tracklink
-              })
-              
-              let shortLinkExists = false
-              let existingShortUrl = null
-              if (existingLinks.data && existingLinks.data.length > 0) {
-                const matchedLink = existingLinks.data.find(link => link.original_url === tracklink)
-                if (matchedLink && matchedLink.short_url) {
-                  shortLinkExists = true
-                  existingShortUrl = matchedLink.short_url
-                }
-              }
-              
-              // 如果不存在，创建短链接
-              if (!shortLinkExists) {
-                const shortLinkData = {
-                  original_url: tracklink,
-                  title: `${offerData.offer_name || formData.offer_name || 'Offer'} - 下游Tracklink`,
-                  description: `Offer: ${offerData.offer_name || formData.offer_name || '未命名'}, 下游Tracklink`,
-                  offer_id: offerData.id || formData.id,
-                  is_active: true
-                }
-                
-                const shortLinkResponse = await createShortLink(shortLinkData)
-                if (shortLinkResponse && shortLinkResponse.short_url) {
-                  ElMessage.success(`Offer保存成功，短链接已创建: ${shortLinkResponse.short_url}`)
-                }
-              } else if (existingShortUrl) {
-                ElMessage.success(`Offer保存成功，短链接已存在: ${existingShortUrl}`)
-              }
-            }
-          } catch (error) {
-            logger.error('创建短链接失败:', error)
-            // 短链接创建失败不影响Offer保存
-            ElMessage.warning('Offer保存成功，但短链接创建失败')
-          }
+        // 后端已自动创建短链接，使用后端返回的消息
+        // downstream_tracklink 已经是短链接URL（如果创建成功）
+        if (response.message) {
+          // 显示后端返回的详细消息（包含短链接信息）
+          ElMessage.success(response.message)
+        } else {
+          ElMessage.success(isEdit.value ? '更新成功' : '创建成功')
         }
         
-        ElMessage.success(isEdit.value ? '更新成功' : '创建成功')
+        // 更新表单中的downstream_tracklink（可能是短链接URL）
+        if (offerData.downstream_tracklink) {
+          formData.downstream_tracklink = offerData.downstream_tracklink
+          formData.downstream_tracklink_short = offerData.downstream_tracklink
+        }
+        
         dialogVisible.value = false
         loadData()
       } else {
@@ -984,10 +949,18 @@ const handleDialogClose = () => {
 // 生成短链接状态
 const generatingShortLink = ref(false)
 
-// 检查是否已有短链接
+// 检查是否已有短链接（用于编辑时显示）
 const checkExistingShortLink = async (tracklink) => {
   if (!tracklink) return
   
+  // downstream_tracklink现在可能是短链接URL，直接使用
+  // 如果是短链接格式（包含/s/），直接使用
+  if (tracklink.includes('/s/')) {
+    formData.downstream_tracklink_short = tracklink
+    return
+  }
+  
+  // 否则尝试查找对应的短链接
   try {
     const existingLinks = await getShortLinks({
       page: 1,
@@ -1007,29 +980,34 @@ const checkExistingShortLink = async (tracklink) => {
 }
 
 // 为Offer生成短链接（预览，不立即创建）
+// 注意：后端已自动创建短链接，此函数主要用于检查现有短链接
 const generateShortLinkForOffer = async () => {
-  if (!formData.downstream_tracklink) {
-    ElMessage.warning('请先等待下游Tracklink生成')
+  if (!formData.advertiser_tracklink) {
+    ElMessage.warning('请先配置上游Tracklink')
     return
   }
 
   // 如果是新建，提示需要先保存
   if (!isEdit.value) {
-    ElMessage.info('新建Offer需要先保存才能生成短链接（保存时会自动生成）')
+    ElMessage.info('新建Offer需要先保存才能生成短链接（保存时会根据分配的渠道自动生成）')
     return
   }
 
   generatingShortLink.value = true
   try {
-    // 先检查是否已存在
+    // 使用advertiser_tracklink查找短链接
     const existingLinks = await getShortLinks({
       page: 1,
       page_size: 10,
-      search: formData.downstream_tracklink
+      search: formData.advertiser_tracklink
     })
     
     if (existingLinks.data && existingLinks.data.length > 0) {
-      const matchedLink = existingLinks.data.find(link => link.original_url === formData.downstream_tracklink)
+      // 查找该Offer的短链接（如果有多个渠道，使用第一个）
+      const matchedLink = existingLinks.data.find(link => 
+        link.original_url === formData.advertiser_tracklink &&
+        link.offer_id === formData.id
+      )
       if (matchedLink && matchedLink.short_url) {
         formData.downstream_tracklink_short = matchedLink.short_url
         ElMessage.success('已找到现有短链接')
@@ -1037,11 +1015,7 @@ const generateShortLinkForOffer = async () => {
       }
     }
     
-    // 标记需要生成短链接（在保存时创建）
-    // 这里只是标记，不立即创建
-    // 实际创建会在 handleSubmit 中完成
-    formData.downstream_tracklink_short = '[将在保存时创建]'
-    ElMessage.info('已标记生成短链接，将在保存时创建')
+    ElMessage.info('保存Offer时会根据分配的渠道自动创建短链接')
   } catch (error) {
     logger.error('查找短链接失败:', error)
     ElMessage.error('操作失败')
@@ -1064,21 +1038,28 @@ const handleViewDetails = async (row) => {
     if (response.code === 200) {
       currentOffer.value = response.data
       
-      // 自动为每个渠道查找或创建短链接
+      // 自动为每个渠道查找短链接（后端已自动创建，这里只需要查找）
       if (currentOffer.value.assigned_publishers && currentOffer.value.assigned_publishers.length > 0) {
-        // 并行查找所有渠道的短链接
-        const tracklinkPromises = currentOffer.value.assigned_publishers.map(async (publisher) => {
-          const tracklink = getPublisherTracklink(publisher.id)
-          if (tracklink) {
+        // 使用advertiser_tracklink作为原始URL查找短链接
+        const advertiserTracklink = currentOffer.value.advertiser_tracklink
+        if (advertiserTracklink) {
+          // 并行查找所有渠道的短链接（基于offer_id和channel_id）
+          const shortLinkPromises = currentOffer.value.assigned_publishers.map(async (publisher) => {
             try {
+              // 查找该Offer和渠道的短链接
               const existingLinks = await getShortLinks({
                 page: 1,
                 page_size: 10,
-                search: tracklink
+                search: advertiserTracklink
               })
               
               if (existingLinks.data && existingLinks.data.length > 0) {
-                const matchedLink = existingLinks.data.find(link => link.original_url === tracklink)
+                // 查找匹配的短链接（original_url是advertiser_tracklink，channel_id匹配）
+                const matchedLink = existingLinks.data.find(link => 
+                  link.original_url === advertiserTracklink && 
+                  link.channel_id === publisher.id &&
+                  link.offer_id === currentOffer.value.id
+                )
                 if (matchedLink && matchedLink.short_url) {
                   publisherShortLinks.value[publisher.id] = matchedLink.short_url
                 }
@@ -1086,9 +1067,9 @@ const handleViewDetails = async (row) => {
             } catch (error) {
               logger.error(`查找渠道${publisher.id}的短链接失败:`, error)
             }
-          }
-        })
-        await Promise.all(tracklinkPromises)
+          })
+          await Promise.all(shortLinkPromises)
+        }
       }
     } else {
       ElMessage.error(response.message || '获取详情失败')
@@ -1173,25 +1154,32 @@ const getPublisherShortLink = (publisherId) => {
   return publisherShortLinks.value[publisherId] || null
 }
 
-// 为渠道创建短链接
+// 为渠道创建短链接（使用上游Tracklink作为原始URL）
 const createPublisherShortLink = async (publisherId) => {
-  const tracklink = getPublisherTracklink(publisherId)
-  if (!tracklink) {
-    ElMessage.warning('无法生成Tracklink')
+  if (!currentOffer.value?.advertiser_tracklink) {
+    ElMessage.warning('Offer没有配置上游Tracklink，无法创建短链接')
     return
   }
+
+  const advertiserTracklink = currentOffer.value.advertiser_tracklink
+  const publisher = currentOffer.value.assigned_publishers.find(p => p.id === publisherId)
+  const publisherName = publisher?.publisher_name || `渠道${publisherId}`
 
   // 先检查是否已存在该URL的短链接
   try {
     const existingLinks = await getShortLinks({
       page: 1,
-      page_size: 1,
-      search: tracklink
+      page_size: 10,
+      search: advertiserTracklink
     })
     
     if (existingLinks.data && existingLinks.data.length > 0) {
-      // 查找匹配的短链接
-      const matchedLink = existingLinks.data.find(link => link.original_url === tracklink)
+      // 查找匹配的短链接（original_url是advertiser_tracklink，channel_id匹配）
+      const matchedLink = existingLinks.data.find(link => 
+        link.original_url === advertiserTracklink && 
+        link.channel_id === publisherId &&
+        link.offer_id === currentOffer.value.id
+      )
       if (matchedLink && matchedLink.short_url) {
         publisherShortLinks.value[publisherId] = matchedLink.short_url
         ElMessage.success('已找到现有短链接')
@@ -1202,13 +1190,15 @@ const createPublisherShortLink = async (publisherId) => {
     logger.error('查找短链接失败:', error)
   }
 
-  // 创建新的短链接
+  // 创建新的短链接（使用上游Tracklink作为原始URL）
   creatingShortLinks.value[publisherId] = true
   try {
     const shortLinkData = {
-      original_url: tracklink,
-      title: `${currentOffer.value.offer_name} - ${currentOffer.value.assigned_publishers.find(p => p.id === publisherId)?.publisher_name || '渠道' + publisherId}`,
-      description: `Offer: ${currentOffer.value.offer_name}, 渠道ID: ${publisherId}`,
+      original_url: advertiserTracklink,  // 使用上游Tracklink
+      title: `${currentOffer.value.offer_name} - ${publisherName}`,
+      description: `Offer: ${currentOffer.value.offer_name}, 渠道: ${publisherName}`,
+      offer_id: currentOffer.value.id,
+      channel_id: publisherId,
       is_active: true
     }
     
