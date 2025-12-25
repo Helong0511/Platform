@@ -557,6 +557,7 @@ class ShortLink(Base):
     title = Column(String(200), nullable=True, comment='短链接标题（可选）')
     description = Column(Text, nullable=True, comment='短链接描述（可选）')
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True, comment='创建者用户ID')
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的Offer ID')
     click_count = Column(Integer, default=0, comment='点击次数')
     is_active = Column(Boolean, default=True, comment='是否激活')
     expires_at = Column(DateTime, nullable=True, comment='过期时间（可选）')
@@ -566,10 +567,12 @@ class ShortLink(Base):
 
     # 关系
     creator = relationship("User", foreign_keys=[created_by])
+    offer = relationship("Offer", foreign_keys=[offer_id])
 
     __table_args__ = (
         Index("idx_short_link_code", "short_code"),
         Index("idx_short_link_created_by", "created_by"),
+        Index("idx_short_link_offer_id", "offer_id"),
         Index("idx_short_link_active", "is_active"),
         Index("idx_short_link_created_at", "created_at"),
     )

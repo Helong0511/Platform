@@ -20,7 +20,7 @@ from app.core.short_link.generator import (
     generate_short_code_from_id,
     generate_unique_short_code
 )
-from app.models.models import User, UserRole, ShortLink
+from app.models.models import User, UserRole, ShortLink, Offer
 from app.schemas.short_link import (
     ShortLinkCreate,
     ShortLinkUpdate,
@@ -192,6 +192,18 @@ async def create_short_link(
         # 如果失败，使用随机生成
         short_code = None
     
+    # 验证 Offer 是否存在（如果提供了 offer_id）
+    if link_in.offer_id:
+        offer_result = await db.execute(
+            select(Offer).where(Offer.id == link_in.offer_id)
+        )
+        offer = offer_result.scalars().first()
+        if not offer:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail=f"Offer ID {link_in.offer_id} 不存在"
+            )
+    
     # 创建短链接
     short_link = ShortLink(
         original_url=link_in.original_url,
@@ -199,6 +211,7 @@ async def create_short_link(
         description=link_in.description,
         short_code=short_code or "temp",  # 临时代码，稍后更新
         created_by=current_user.id,
+        offer_id=link_in.offer_id,
         is_active=link_in.is_active,
         expires_at=link_in.expires_at,
         click_count=0
@@ -397,8 +410,20 @@ async def update_short_link(
                 detail="无权修改该短链接"
             )
     
-    # 更新字段
+    # 验证 Offer 是否存在（如果提供了 offer_id）
     update_data = link_in.model_dump(exclude_unset=True)
+    if 'offer_id' in update_data and update_data['offer_id'] is not None:
+        offer_result = await db.execute(
+            select(Offer).where(Offer.id == update_data['offer_id'])
+        )
+        offer = offer_result.scalars().first()
+        if not offer:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail=f"Offer ID {update_data['offer_id']} 不存在"
+            )
+    
+    # 更新字段
     for key, value in update_data.items():
         setattr(short_link, key, value)
     

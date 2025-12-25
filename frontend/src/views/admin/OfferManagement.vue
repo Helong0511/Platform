@@ -319,6 +319,61 @@
           />
         </el-form-item>
 
+        <el-form-item label="下游Tracklink" prop="downstream_tracklink">
+          <div v-if="isEdit && formData.downstream_tracklink" style="display: flex; align-items: flex-start; gap: 8px;">
+            <el-input
+              v-model="formData.downstream_tracklink"
+              type="textarea"
+              :rows="2"
+              placeholder="生成给下游的Tracklink（自动生成）"
+              readonly
+              style="flex: 1;"
+            />
+            <el-button
+              type="primary"
+              :loading="generatingShortLink"
+              @click="generateShortLinkForOffer"
+            >
+              生成短链接
+            </el-button>
+          </div>
+          <div v-else-if="!isEdit" style="padding: 12px; background: #f5f7fa; border-radius: 4px;">
+            <el-text type="info">
+              下游Tracklink将在保存时自动生成，并自动创建短链接
+            </el-text>
+          </div>
+          <div v-if="formData.downstream_tracklink_short" style="margin-top: 8px;">
+            <el-alert
+              :title="`短链接: ${formData.downstream_tracklink_short}`"
+              type="success"
+              :closable="false"
+              show-icon
+            >
+              <template #default>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <el-link
+                    :href="formData.downstream_tracklink_short"
+                    target="_blank"
+                    type="primary"
+                  >
+                    {{ formData.downstream_tracklink_short }}
+                  </el-link>
+                  <el-button
+                    text
+                    type="primary"
+                    :icon="DocumentCopy"
+                    @click="copyToClipboard(formData.downstream_tracklink_short)"
+                    title="复制短链接"
+                  />
+                </div>
+              </template>
+            </el-alert>
+          </div>
+          <div v-if="isEdit && formData.downstream_tracklink" class="form-hint">
+            您可以生成短链接，短链接将在保存时创建。
+          </div>
+        </el-form-item>
+
         <el-row :gutter="20">
           <el-col :span="12">
             <el-form-item label="Postback URL" prop="postback_url">
@@ -608,6 +663,7 @@ import { getDiscounts } from '@/api/discount'
 import { createShortLink, getShortLinks } from '@/api/shortLink'
 import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
+import { ElMessage } from 'element-plus'
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -655,6 +711,8 @@ const formData = reactive({
   upstream_cap: null,
   downstream_cap: null,
   advertiser_tracklink: '',
+  downstream_tracklink: '',
+  downstream_tracklink_short: '',
   postback_url: '',
   postback_method: 'GET',
   click_validity_hours: 720,
@@ -755,6 +813,8 @@ const handleAdd = () => {
     upstream_cap: null,
     downstream_cap: null,
     advertiser_tracklink: '',
+    downstream_tracklink: '',
+    downstream_tracklink_short: '',
     postback_url: '',
     postback_method: 'GET',
     click_validity_hours: 720,
@@ -782,12 +842,18 @@ const handleEdit = (row) => {
     upstream_cap: row.upstream_cap,
     downstream_cap: row.downstream_cap,
     advertiser_tracklink: row.advertiser_tracklink || '',
+    downstream_tracklink: row.downstream_tracklink || '',
+    downstream_tracklink_short: '',
     postback_url: row.postback_url || '',
     postback_method: row.postback_method || 'GET',
     click_validity_hours: row.click_validity_hours || 720,
     publisher_ids: row.assigned_publishers ? row.assigned_publishers.map(p => p.id) : [],
     is_active: row.is_active
   })
+  // 检查是否已有短链接
+  if (row.downstream_tracklink) {
+    checkExistingShortLink(row.downstream_tracklink)
+  }
   dialogVisible.value = true
 }
 
@@ -829,13 +895,72 @@ const handleSubmit = async () => {
     submitting.value = true
     try {
       let response
+      let offerData = null
+      
       if (isEdit.value) {
+        // 编辑：先更新Offer
         response = await updateOffer(formData.id, formData)
+        if (response.code === 200) {
+          offerData = response.data
+        }
       } else {
+        // 新建：先创建Offer获取id
         response = await createOffer(formData)
+        if (response.code === 200) {
+          offerData = response.data
+        }
       }
       
-      if (response.code === 200) {
+      if (response.code === 200 && offerData) {
+        // 创建短链接（新建时自动创建，编辑时如果有标记则创建）
+        const shouldCreateShortLink = !isEdit.value || formData.downstream_tracklink_short === '[将在保存时创建]'
+        
+        if (shouldCreateShortLink) {
+          try {
+            const tracklink = offerData.downstream_tracklink
+            if (tracklink) {
+              // 检查是否已存在
+              const existingLinks = await getShortLinks({
+                page: 1,
+                page_size: 10,
+                search: tracklink
+              })
+              
+              let shortLinkExists = false
+              let existingShortUrl = null
+              if (existingLinks.data && existingLinks.data.length > 0) {
+                const matchedLink = existingLinks.data.find(link => link.original_url === tracklink)
+                if (matchedLink && matchedLink.short_url) {
+                  shortLinkExists = true
+                  existingShortUrl = matchedLink.short_url
+                }
+              }
+              
+              // 如果不存在，创建短链接
+              if (!shortLinkExists) {
+                const shortLinkData = {
+                  original_url: tracklink,
+                  title: `${offerData.offer_name || formData.offer_name || 'Offer'} - 下游Tracklink`,
+                  description: `Offer: ${offerData.offer_name || formData.offer_name || '未命名'}, 下游Tracklink`,
+                  offer_id: offerData.id || formData.id,
+                  is_active: true
+                }
+                
+                const shortLinkResponse = await createShortLink(shortLinkData)
+                if (shortLinkResponse && shortLinkResponse.short_url) {
+                  ElMessage.success(`Offer保存成功，短链接已创建: ${shortLinkResponse.short_url}`)
+                }
+              } else if (existingShortUrl) {
+                ElMessage.success(`Offer保存成功，短链接已存在: ${existingShortUrl}`)
+              }
+            }
+          } catch (error) {
+            logger.error('创建短链接失败:', error)
+            // 短链接创建失败不影响Offer保存
+            ElMessage.warning('Offer保存成功，但短链接创建失败')
+          }
+        }
+        
         ElMessage.success(isEdit.value ? '更新成功' : '创建成功')
         dialogVisible.value = false
         loadData()
@@ -854,6 +979,76 @@ const handleSubmit = async () => {
 // 对话框关闭
 const handleDialogClose = () => {
   formRef.value?.resetFields()
+  formData.downstream_tracklink_short = ''
+}
+
+// 生成短链接状态
+const generatingShortLink = ref(false)
+
+// 检查是否已有短链接
+const checkExistingShortLink = async (tracklink) => {
+  if (!tracklink) return
+  
+  try {
+    const existingLinks = await getShortLinks({
+      page: 1,
+      page_size: 1,
+      search: tracklink
+    })
+    
+    if (existingLinks.data && existingLinks.data.length > 0) {
+      const matchedLink = existingLinks.data.find(link => link.original_url === tracklink)
+      if (matchedLink && matchedLink.short_url) {
+        formData.downstream_tracklink_short = matchedLink.short_url
+      }
+    }
+  } catch (error) {
+    logger.error('查找短链接失败:', error)
+  }
+}
+
+// 为Offer生成短链接（预览，不立即创建）
+const generateShortLinkForOffer = async () => {
+  if (!formData.downstream_tracklink) {
+    ElMessage.warning('请先等待下游Tracklink生成')
+    return
+  }
+
+  // 如果是新建，提示需要先保存
+  if (!isEdit.value) {
+    ElMessage.info('新建Offer需要先保存才能生成短链接（保存时会自动生成）')
+    return
+  }
+
+  generatingShortLink.value = true
+  try {
+    // 先检查是否已存在
+    const existingLinks = await getShortLinks({
+      page: 1,
+      page_size: 10,
+      search: formData.downstream_tracklink
+    })
+    
+    if (existingLinks.data && existingLinks.data.length > 0) {
+      const matchedLink = existingLinks.data.find(link => link.original_url === formData.downstream_tracklink)
+      if (matchedLink && matchedLink.short_url) {
+        formData.downstream_tracklink_short = matchedLink.short_url
+        ElMessage.success('已找到现有短链接')
+        return
+      }
+    }
+    
+    // 标记需要生成短链接（在保存时创建）
+    // 这里只是标记，不立即创建
+    // 实际创建会在 handleSubmit 中完成
+    formData.downstream_tracklink_short = '[将在保存时创建]'
+    ElMessage.info('已标记生成短链接，将在保存时创建')
+  } catch (error) {
+    logger.error('查找短链接失败:', error)
+    ElMessage.error('操作失败')
+  } finally {
+    generatingShortLink.value = false
+  }
 }
 
 // 查看详情
