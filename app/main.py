@@ -870,6 +870,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from datetime import datetime, timezone
+from typing import Optional
 from app.core.database import get_db
 from app.models.models import ShortLink
 
@@ -877,6 +878,7 @@ from app.models.models import ShortLink
 async def redirect_short_link_public(
     short_code: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -894,6 +896,9 @@ async def redirect_short_link_public(
     )
     from app.core.short_link_click_counter import increment_click_count_async
     from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
+    from app.api.api_v1.endpoints.tracking import create_click_background
+    from app.models.models import Click, ShortLink
+    from fastapi import BackgroundTasks
     from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
     
     def merge_url_params(base_url: str, query_params: dict) -> str:
@@ -1012,6 +1017,53 @@ async def redirect_short_link_public(
             # 生成点击值（UUID风格的click_id）
             click_id = generate_click_id_from_timestamp()
             
+            # 获取短链接ID（从缓存中获取，如果没有则从数据库查询）
+            short_link_id = cached_data.get("id")
+            if not short_link_id:
+                try:
+                    result = await db.execute(
+                        select(ShortLink.id).where(ShortLink.short_code == short_code)
+                    )
+                    short_link_id = result.scalar()
+                except Exception:
+                    short_link_id = None
+            
+            # 获取客户端信息
+            def get_client_ip(req: Request) -> Optional[str]:
+                """获取客户端真实IP"""
+                if not req:
+                    return None
+                forwarded_for = req.headers.get("X-Forwarded-For")
+                if forwarded_for:
+                    return forwarded_for.split(",")[0].strip()
+                real_ip = req.headers.get("X-Real-IP")
+                if real_ip:
+                    return real_ip
+                if req.client:
+                    return req.client.host
+                return None
+            
+            client_ip = get_client_ip(request)
+            user_agent = request.headers.get("user-agent")
+            referer = request.headers.get("referer")
+            
+            # 创建点击记录（异步保存，不阻塞重定向）
+            if short_link_id:
+                click_data = {
+                    "click_id": click_id,
+                    "short_link_id": short_link_id,
+                    "offer_id": None,
+                    "publisher_id": None,
+                    "advertiser_id": None,
+                    "click_time": datetime.now(timezone.utc),
+                    "ip": client_ip,
+                    "user_agent": user_agent,
+                    "referer": referer,
+                    "country": None
+                }
+                background_tasks.add_task(create_click_background, click_data)
+                logger.debug(f"[短链接重定向] 点击记录已创建（缓存路径）: click_id={click_id}, short_link_id={short_link_id}")
+            
             # 获取当前点击次数（从缓存数据中获取，如果缓存中没有则从数据库查询）
             current_click_count = cached_data.get("click_count", 0)
             if not current_click_count:
@@ -1041,7 +1093,7 @@ async def redirect_short_link_public(
                 
                 logger.info(
                     f"[短链接重定向] 点击计数已记录（缓存路径）: short_code={short_code}, "
-                    f"click_id={click_id}, 数据库点击次数={current_click_count}, Redis增量={redis_count}"
+                    f"click_id={click_id}, short_link_id={short_link_id}, 数据库点击次数={current_click_count}, Redis增量={redis_count}"
                 )
             except Exception as e:
                 logger.error(
@@ -1109,6 +1161,41 @@ async def redirect_short_link_public(
         # 生成点击值（UUID风格的click_id）
         click_id = generate_click_id_from_timestamp()
         
+        # 获取客户端信息
+        def get_client_ip(req: Request) -> Optional[str]:
+            """获取客户端真实IP"""
+            if not req:
+                return None
+            forwarded_for = req.headers.get("X-Forwarded-For")
+            if forwarded_for:
+                return forwarded_for.split(",")[0].strip()
+            real_ip = req.headers.get("X-Real-IP")
+            if real_ip:
+                return real_ip
+            if req.client:
+                return req.client.host
+            return None
+        
+        client_ip = get_client_ip(request)
+        user_agent = request.headers.get("user-agent")
+        referer = request.headers.get("referer")
+        
+        # 创建点击记录（异步保存，不阻塞重定向）
+        click_data = {
+            "click_id": click_id,
+            "short_link_id": short_link.id,
+            "offer_id": None,
+            "publisher_id": None,
+            "advertiser_id": None,
+            "click_time": datetime.now(timezone.utc),
+            "ip": client_ip,
+            "user_agent": user_agent,
+            "referer": referer,
+            "country": None
+        }
+        background_tasks.add_task(create_click_background, click_data)
+        logger.debug(f"[短链接重定向] 点击记录已创建（数据库路径）: click_id={click_id}, short_link_id={short_link.id}")
+        
         # 获取当前点击次数（数据库中的点击次数）
         current_click_count = short_link.click_count or 0
         
@@ -1129,7 +1216,7 @@ async def redirect_short_link_public(
             
             logger.info(
                 f"[短链接重定向] 点击计数已记录（数据库路径）: short_code={short_code}, "
-                f"click_id={click_id}, 数据库点击次数={current_click_count}, Redis增量={redis_count}"
+                f"click_id={click_id}, short_link_id={short_link.id}, 数据库点击次数={current_click_count}, Redis增量={redis_count}"
             )
         except Exception as e:
             logger.error(

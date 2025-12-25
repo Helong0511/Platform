@@ -701,6 +701,7 @@ class Click(Base):
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的Offer ID')
     publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的渠道ID')
     advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的广告主ID')
+    short_link_id = Column(Integer, ForeignKey("short_links.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的短链接ID')
     click_time = Column(DateTime, nullable=False, index=True, comment='点击时间')
     ip = Column(String(50), nullable=True, comment='点击IP地址')
     device = Column(String(100), nullable=True, comment='设备信息')
@@ -714,12 +715,14 @@ class Click(Base):
     offer = relationship("Offer", back_populates="clicks")
     publisher = relationship("Publisher", back_populates="clicks")
     advertiser = relationship("Advertiser", foreign_keys=[advertiser_id])
+    short_link = relationship("ShortLink", foreign_keys=[short_link_id])
 
     __table_args__ = (
         Index("idx_click_id", "click_id"),
         Index("idx_offer_id", "offer_id"),
         Index("idx_publisher_id", "publisher_id"),
         Index("idx_advertiser_id", "advertiser_id"),
+        Index("idx_short_link_id", "short_link_id"),
         Index("idx_click_time", "click_time"),
         Index("idx_conversion_id", "conversion_id"),
     )
