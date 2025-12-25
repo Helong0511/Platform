@@ -46,6 +46,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         logger.info(f"RateLimitMiddleware处理请求: {request.method} {request.url.path}")
         
+        # ====== 排除短链接路由（不限流） ======
+        # 短链接访问需要高并发支持，不能限流
+        path = request.url.path
+        is_short_link = (
+            path.startswith("/s/") or  # /s/{short_code} 路由
+            path.startswith("/api/v1/short-links/")  # /api/v1/short-links/{short_code} 路由
+        )
+        
+        if is_short_link:
+            logger.debug(f"短链接路由跳过限流: {path}")
+            response = await call_next(request)
+            return response
+        
         # ====== 获取客户端标识 ======
         # 使用IP地址作为限流标识（生产环境可结合用户ID）
         try:
