@@ -465,6 +465,42 @@
               <el-table :data="currentOffer.assigned_publishers" stripe style="width: 100%">
                 <el-table-column prop="id" label="渠道ID" width="100" align="center" />
                 <el-table-column prop="publisher_name" label="渠道名称" />
+                <el-table-column label="Tracklink" min-width="400" show-overflow-tooltip>
+                  <template #default="scope">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <el-link
+                        v-if="getPublisherShortLink(scope.row.id)"
+                        :href="getPublisherShortLink(scope.row.id)"
+                        target="_blank"
+                        type="primary"
+                        style="flex: 1; word-break: break-all;"
+                      >
+                        {{ getPublisherShortLink(scope.row.id) }}
+                      </el-link>
+                      <span v-else-if="creatingShortLinks[scope.row.id]" style="color: #909399;">
+                        <el-icon class="is-loading"><Loading /></el-icon>
+                        生成中...
+                      </span>
+                      <span v-else style="color: #909399;">-</span>
+                      <el-button
+                        v-if="getPublisherShortLink(scope.row.id)"
+                        text
+                        type="primary"
+                        :icon="DocumentCopy"
+                        @click="copyToClipboard(getPublisherShortLink(scope.row.id))"
+                        title="复制Tracklink"
+                      />
+                      <el-button
+                        v-else-if="!creatingShortLinks[scope.row.id] && getPublisherTracklink(scope.row.id)"
+                        text
+                        type="primary"
+                        :icon="Plus"
+                        @click="createPublisherShortLink(scope.row.id)"
+                        title="生成短链接"
+                      />
+                    </div>
+                  </template>
+                </el-table-column>
               </el-table>
             </div>
             <el-empty v-else description="暂无分配的渠道" />
@@ -563,12 +599,13 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Refresh, Edit, Delete, Box, View } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, Edit, Delete, Box, View, DocumentCopy, Loading } from '@element-plus/icons-vue'
 import { getOffers, createOffer, updateOffer, deleteOffer, getOffer } from '@/api/offer'
 import { getAdvertisers } from '@/api/advertiser'
 import { getPublishers } from '@/api/publisher'
 import { getCaps } from '@/api/cap'
 import { getDiscounts } from '@/api/discount'
+import { createShortLink, getShortLinks } from '@/api/shortLink'
 import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
 
@@ -591,6 +628,8 @@ const relatedCaps = ref([])
 const relatedDiscounts = ref([])
 const capsLoading = ref(false)
 const discountsLoading = ref(false)
+const publisherShortLinks = ref({}) // 存储渠道ID对应的短链接
+const creatingShortLinks = ref({}) // 正在创建短链接的渠道ID
 
 const pagination = reactive({
   page: 1,
@@ -822,12 +861,41 @@ const handleViewDetails = async (row) => {
   detailDialogVisible.value = true
   activeTab.value = 'basic'
   detailLoading.value = true
+  publisherShortLinks.value = {} // 清空短链接缓存
+  creatingShortLinks.value = {} // 清空创建状态
   
   try {
     // 加载Offer详情
     const response = await getOffer(row.id)
     if (response.code === 200) {
       currentOffer.value = response.data
+      
+      // 自动为每个渠道查找或创建短链接
+      if (currentOffer.value.assigned_publishers && currentOffer.value.assigned_publishers.length > 0) {
+        // 并行查找所有渠道的短链接
+        const tracklinkPromises = currentOffer.value.assigned_publishers.map(async (publisher) => {
+          const tracklink = getPublisherTracklink(publisher.id)
+          if (tracklink) {
+            try {
+              const existingLinks = await getShortLinks({
+                page: 1,
+                page_size: 10,
+                search: tracklink
+              })
+              
+              if (existingLinks.data && existingLinks.data.length > 0) {
+                const matchedLink = existingLinks.data.find(link => link.original_url === tracklink)
+                if (matchedLink && matchedLink.short_url) {
+                  publisherShortLinks.value[publisher.id] = matchedLink.short_url
+                }
+              }
+            } catch (error) {
+              logger.error(`查找渠道${publisher.id}的短链接失败:`, error)
+            }
+          }
+        })
+        await Promise.all(tracklinkPromises)
+      }
     } else {
       ElMessage.error(response.message || '获取详情失败')
       detailDialogVisible.value = false
@@ -891,7 +959,110 @@ const handleDetailDialogClose = () => {
   currentOffer.value = null
   relatedCaps.value = []
   relatedDiscounts.value = []
+  publisherShortLinks.value = {}
+  creatingShortLinks.value = {}
   activeTab.value = 'basic'
+}
+
+// 生成渠道的Tracklink（原始URL）
+const getPublisherTracklink = (publisherId) => {
+  if (!currentOffer.value?.downstream_tracklink || !publisherId) {
+    return null
+  }
+  // downstream_tracklink格式：{base_url}/api/v1/track/click/{offer_id}?publisher_id={publisher_id}
+  // 替换{publisher_id}为实际的publisher_id
+  return currentOffer.value.downstream_tracklink.replace('{publisher_id}', publisherId)
+}
+
+// 获取渠道的短链接
+const getPublisherShortLink = (publisherId) => {
+  return publisherShortLinks.value[publisherId] || null
+}
+
+// 为渠道创建短链接
+const createPublisherShortLink = async (publisherId) => {
+  const tracklink = getPublisherTracklink(publisherId)
+  if (!tracklink) {
+    ElMessage.warning('无法生成Tracklink')
+    return
+  }
+
+  // 先检查是否已存在该URL的短链接
+  try {
+    const existingLinks = await getShortLinks({
+      page: 1,
+      page_size: 1,
+      search: tracklink
+    })
+    
+    if (existingLinks.data && existingLinks.data.length > 0) {
+      // 查找匹配的短链接
+      const matchedLink = existingLinks.data.find(link => link.original_url === tracklink)
+      if (matchedLink && matchedLink.short_url) {
+        publisherShortLinks.value[publisherId] = matchedLink.short_url
+        ElMessage.success('已找到现有短链接')
+        return
+      }
+    }
+  } catch (error) {
+    logger.error('查找短链接失败:', error)
+  }
+
+  // 创建新的短链接
+  creatingShortLinks.value[publisherId] = true
+  try {
+    const shortLinkData = {
+      original_url: tracklink,
+      title: `${currentOffer.value.offer_name} - ${currentOffer.value.assigned_publishers.find(p => p.id === publisherId)?.publisher_name || '渠道' + publisherId}`,
+      description: `Offer: ${currentOffer.value.offer_name}, 渠道ID: ${publisherId}`,
+      is_active: true
+    }
+    
+    const response = await createShortLink(shortLinkData)
+    if (response && response.short_url) {
+      publisherShortLinks.value[publisherId] = response.short_url
+      ElMessage.success('短链接创建成功')
+    } else {
+      ElMessage.error('创建短链接失败')
+    }
+  } catch (error) {
+    logger.error('创建短链接失败:', error)
+    ElMessage.error('创建短链接失败')
+  } finally {
+    creatingShortLinks.value[publisherId] = false
+  }
+}
+
+// 复制到剪贴板
+const copyToClipboard = async (text) => {
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制到剪贴板')
+  } catch (error) {
+    // 如果clipboard API失败，使用备用方法
+    try {
+      const textArea = document.createElement('textarea')
+      textArea.value = text
+      textArea.style.position = 'fixed'
+      textArea.style.left = '-999999px'
+      textArea.style.top = '-999999px'
+      document.body.appendChild(textArea)
+      textArea.focus()
+      textArea.select()
+      const successful = document.execCommand('copy')
+      document.body.removeChild(textArea)
+      
+      if (successful) {
+        ElMessage.success('已复制到剪贴板')
+      } else {
+        ElMessage.error('复制失败')
+      }
+    } catch (fallbackError) {
+      logger.error('复制失败:', fallbackError)
+      ElMessage.error('复制失败')
+    }
+  }
 }
 
 // 分页
