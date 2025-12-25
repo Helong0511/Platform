@@ -163,7 +163,7 @@ async def login(
         # 根据配置的算法选择密钥
         if settings.JWT_ALGORITHM == "RS256":
             # 使用RS256算法（非对称加密），需要公钥验证
-            from app.core.security import JWTUtils
+            # 注意：JWTUtils 已在文件顶部导入，不需要重复导入
             public_key = JWTUtils._load_rsa_key(
                 settings.RSA_PUBLIC_KEY,
                 settings.RSA_PUBLIC_KEY_PATH,
