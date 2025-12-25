@@ -58,9 +58,36 @@ graceful_timeout = 30  # 优雅关闭超时时间（秒），确保任务完成
 timeout_graceful_shutdown = 30  # 优雅关闭超时（秒），等待 worker 完成当前请求
 
 # ====== 日志配置 ======
+# 确保日志目录存在并设置权限
+log_dir = os.path.join(os.path.dirname(__file__), "logs")
+try:
+    os.makedirs(log_dir, exist_ok=True, mode=0o755)
+    # 尝试设置目录权限（如果可能）
+    try:
+        import stat
+        os.chmod(log_dir, 0o755)
+    except (OSError, PermissionError):
+        pass  # 如果没有权限设置，继续执行
+except (OSError, PermissionError) as e:
+    logger.warning(f"无法创建日志目录 {log_dir}: {e}")
+
 # 日志文件路径
-accesslog = os.path.join(os.path.dirname(__file__), "logs", "gunicorn_access.log")
-errorlog = os.path.join(os.path.dirname(__file__), "logs", "gunicorn_error.log")
+accesslog = os.path.join(log_dir, "gunicorn_access.log")
+errorlog = os.path.join(log_dir, "gunicorn_error.log")
+
+# 尝试创建日志文件并设置权限（如果可能）
+for log_file in [accesslog, errorlog]:
+    try:
+        # 如果文件不存在，创建空文件
+        if not os.path.exists(log_file):
+            open(log_file, 'a').close()
+        # 尝试设置文件权限
+        try:
+            os.chmod(log_file, 0o644)
+        except (OSError, PermissionError):
+            pass  # 如果没有权限设置，继续执行
+    except (OSError, PermissionError) as e:
+        logger.warning(f"无法创建或设置权限日志文件 {log_file}: {e}")
 
 # 日志级别
 loglevel = "warning"  # 生产环境使用 warning，减少日志量
@@ -76,7 +103,17 @@ proc_name = "platform_backend"
 daemon = False
 
 # PID 文件
-pidfile = os.path.join(os.path.dirname(__file__), "logs", "gunicorn.pid")
+pidfile = os.path.join(log_dir, "gunicorn.pid")
+# 尝试创建 PID 文件目录并设置权限（如果可能）
+try:
+    if not os.path.exists(pidfile):
+        open(pidfile, 'a').close()
+    try:
+        os.chmod(pidfile, 0o644)
+    except (OSError, PermissionError):
+        pass
+except (OSError, PermissionError) as e:
+    logger.warning(f"无法创建或设置权限 PID 文件 {pidfile}: {e}")
 
 # ====== 性能配置 ======
 # 预加载应用（提高性能，但会增加内存使用）

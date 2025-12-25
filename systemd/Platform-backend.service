@@ -16,6 +16,10 @@ EnvironmentFile=/data/Platform/.env
 ExecStartPre=/bin/mkdir -p /data/Platform/logs
 ExecStartPre=/bin/chown -R www-data:www-data /data/Platform/logs
 ExecStartPre=/bin/chmod 755 /data/Platform/logs
+# 确保 Gunicorn 日志文件存在并设置权限
+ExecStartPre=/bin/touch /data/Platform/logs/gunicorn_access.log /data/Platform/logs/gunicorn_error.log /data/Platform/logs/gunicorn.pid
+ExecStartPre=/bin/chown www-data:www-data /data/Platform/logs/gunicorn_access.log /data/Platform/logs/gunicorn_error.log /data/Platform/logs/gunicorn.pid
+ExecStartPre=/bin/chmod 644 /data/Platform/logs/gunicorn_access.log /data/Platform/logs/gunicorn_error.log /data/Platform/logs/gunicorn.pid
 
 # 启动命令
 # 使用 Gunicorn 配置文件（推荐，统一管理所有配置）
