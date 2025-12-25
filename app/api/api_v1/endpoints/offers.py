@@ -79,6 +79,7 @@ async def create_short_link_for_channel(
             return existing_link, True
         
         # 创建新的短链接（确保保存 offer_id 和 channel_id）
+        # 先设置临时的short_code，避免NOT NULL约束错误
         short_link = ShortLink(
             original_url=original_url,
             title=f"{offer_name} - {publisher_name}",
@@ -87,7 +88,8 @@ async def create_short_link_for_channel(
             channel_id=channel_id,  # 保存渠道 ID (Publisher ID)
             created_by=current_user_id,
             is_active=True,
-            click_count=0
+            click_count=0,
+            short_code="temp"  # 临时代码，稍后更新
         )
         
         db.add(short_link)
@@ -95,7 +97,7 @@ async def create_short_link_for_channel(
         
         # 生成短链接代码
         result = await db.execute(select(ShortLink.short_code))
-        existing_codes = {row[0] for row in result.all()}
+        existing_codes = {row[0] for row in result.all() if row[0] != "temp"}  # 排除临时代码
         
         # 尝试从ID生成
         code_from_id = generate_short_code_from_id(short_link.id, min_length=4)
