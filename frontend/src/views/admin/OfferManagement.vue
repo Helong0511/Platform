@@ -170,8 +170,9 @@
             {{ formatDate(scope.row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="250" fixed="right">
           <template #default="scope">
+            <el-button type="info" link :icon="View" @click="handleViewDetails(scope.row)">详情</el-button>
             <el-button type="primary" link :icon="Edit" @click="handleEdit(scope.row)">编辑</el-button>
             <el-button type="danger" link :icon="Delete" @click="handleDelete(scope.row)">删除</el-button>
           </template>
@@ -383,16 +384,191 @@
         <el-button type="primary" :loading="submitting" @click="handleSubmit">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 详情对话框 -->
+    <el-dialog
+      v-model="detailDialogVisible"
+      title="Offer详情 - 相关联数据项"
+      width="1200px"
+      @close="handleDetailDialogClose"
+    >
+      <div v-loading="detailLoading">
+        <el-tabs v-model="activeTab" type="border-card">
+          <!-- 基本信息 -->
+          <el-tab-pane label="基本信息" name="basic">
+            <el-descriptions :column="2" border>
+              <el-descriptions-item label="Offer ID">{{ currentOffer?.id }}</el-descriptions-item>
+              <el-descriptions-item label="Offer名称">{{ currentOffer?.offer_name }}</el-descriptions-item>
+              <el-descriptions-item label="广告主">{{ currentOffer?.advertiser_name }}</el-descriptions-item>
+              <el-descriptions-item label="上游Offer ID">{{ currentOffer?.advertiser_offer_id || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="上游PO">
+                <span v-if="currentOffer?.payout">{{ currentOffer.payout.toFixed(2) }}</span>
+                <span v-else>-</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="下游PO">
+                <span v-if="currentOffer?.affiliate_payout">{{ currentOffer.affiliate_payout.toFixed(2) }}</span>
+                <span v-else>-</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="国家">{{ currentOffer?.country || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="分类">{{ currentOffer?.category || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="类型">{{ currentOffer?.type || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="状态">
+                <el-tag :type="currentOffer?.status === 'Active' ? 'success' : 'info'">
+                  {{ currentOffer?.status }}
+                </el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="激活状态">
+                <el-tag :type="currentOffer?.is_active ? 'success' : 'danger'">
+                  {{ currentOffer?.is_active ? '是' : '否' }}
+                </el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="上游Cap">{{ currentOffer?.upstream_cap || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="下游Cap">{{ currentOffer?.downstream_cap || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="点击有效期(小时)">{{ currentOffer?.click_validity_hours || 720 }}</el-descriptions-item>
+              <el-descriptions-item label="Postback方法">
+                <el-tag :type="currentOffer?.postback_method === 'POST' ? 'success' : 'info'" size="small">
+                  {{ currentOffer?.postback_method || 'GET' }}
+                </el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="预览链接" :span="2">
+                <el-link v-if="currentOffer?.preview_link" :href="currentOffer.preview_link" target="_blank" type="primary">
+                  {{ currentOffer.preview_link }}
+                </el-link>
+                <span v-else>-</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="上游Tracklink" :span="2">
+                <span v-if="currentOffer?.advertiser_tracklink" style="word-break: break-all;">
+                  {{ currentOffer.advertiser_tracklink }}
+                </span>
+                <span v-else>-</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="下游Tracklink" :span="2">
+                <span v-if="currentOffer?.downstream_tracklink" style="word-break: break-all;">
+                  {{ currentOffer.downstream_tracklink }}
+                </span>
+                <span v-else>-</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="Postback URL" :span="2">
+                <span v-if="currentOffer?.postback_url" style="word-break: break-all;">
+                  {{ currentOffer.postback_url }}
+                </span>
+                <span v-else>-</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="创建时间">{{ formatDate(currentOffer?.created_at) }}</el-descriptions-item>
+              <el-descriptions-item label="更新时间">{{ formatDate(currentOffer?.updated_at) }}</el-descriptions-item>
+            </el-descriptions>
+          </el-tab-pane>
+
+          <!-- 渠道分配 -->
+          <el-tab-pane label="渠道分配" name="publishers">
+            <div v-if="currentOffer?.assigned_publishers && currentOffer.assigned_publishers.length > 0">
+              <el-table :data="currentOffer.assigned_publishers" stripe style="width: 100%">
+                <el-table-column prop="id" label="渠道ID" width="100" align="center" />
+                <el-table-column prop="publisher_name" label="渠道名称" />
+              </el-table>
+            </div>
+            <el-empty v-else description="暂无分配的渠道" />
+          </el-tab-pane>
+
+          <!-- Cap配置 -->
+          <el-tab-pane label="Cap配置" name="caps">
+            <el-table :data="relatedCaps" stripe style="width: 100%" v-loading="capsLoading">
+              <el-table-column prop="id" label="ID" width="80" align="center" />
+              <el-table-column prop="cap_type" label="Cap类型" width="150">
+                <template #default="scope">
+                  <el-tag :type="scope.row.cap_type === 'advertiser_offer' ? 'warning' : 'primary'" size="small">
+                    {{ scope.row.cap_type }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="publisher_name" label="渠道" width="150">
+                <template #default="scope">
+                  {{ scope.row.publisher_name || '全部渠道' }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="daily_cap" label="每日Cap" width="100" align="center">
+                <template #default="scope">
+                  {{ scope.row.daily_cap || '-' }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="total_cap" label="总Cap" width="100" align="center">
+                <template #default="scope">
+                  {{ scope.row.total_cap || '-' }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="current_daily_count" label="当前每日计数" width="120" align="center" />
+              <el-table-column prop="current_total_count" label="当前总计数" width="120" align="center" />
+              <el-table-column prop="is_active" label="激活" width="80" align="center">
+                <template #default="scope">
+                  <el-tag :type="scope.row.is_active ? 'success' : 'danger'" size="small">
+                    {{ scope.row.is_active ? '是' : '否' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="created_at" label="创建时间" width="180">
+                <template #default="scope">
+                  {{ formatDate(scope.row.created_at) }}
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-if="!capsLoading && relatedCaps.length === 0" description="暂无Cap配置" />
+          </el-tab-pane>
+
+          <!-- 扣量配置 -->
+          <el-tab-pane label="扣量配置" name="discounts">
+            <el-table :data="relatedDiscounts" stripe style="width: 100%" v-loading="discountsLoading">
+              <el-table-column prop="id" label="ID" width="80" align="center" />
+              <el-table-column prop="discount_type" label="扣量类型" width="120">
+                <template #default="scope">
+                  <el-tag :type="scope.row.discount_type === 'offer' ? 'primary' : 'warning'" size="small">
+                    {{ scope.row.discount_type }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="publisher_name" label="渠道" width="200" />
+              <el-table-column prop="discount_ratio" label="扣量比例(%)" width="120" align="center">
+                <template #default="scope">
+                  {{ scope.row.discount_ratio.toFixed(2) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="is_active" label="激活" width="80" align="center">
+                <template #default="scope">
+                  <el-tag :type="scope.row.is_active ? 'success' : 'danger'" size="small">
+                    {{ scope.row.is_active ? '是' : '否' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="created_at" label="创建时间" width="180">
+                <template #default="scope">
+                  {{ formatDate(scope.row.created_at) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="updated_at" label="更新时间" width="180">
+                <template #default="scope">
+                  {{ formatDate(scope.row.updated_at) }}
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-if="!discountsLoading && relatedDiscounts.length === 0" description="暂无扣量配置" />
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+      <template #footer>
+        <el-button @click="detailDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Refresh, Edit, Delete, Box } from '@element-plus/icons-vue'
-import { getOffers, createOffer, updateOffer, deleteOffer } from '@/api/offer'
+import { Plus, Search, Refresh, Edit, Delete, Box, View } from '@element-plus/icons-vue'
+import { getOffers, createOffer, updateOffer, deleteOffer, getOffer } from '@/api/offer'
 import { getAdvertisers } from '@/api/advertiser'
 import { getPublishers } from '@/api/publisher'
+import { getCaps } from '@/api/cap'
+import { getDiscounts } from '@/api/discount'
 import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
 
@@ -405,6 +581,16 @@ const filterAdvertiser = ref(null)
 const filterStatus = ref(null)
 const filterActive = ref(null)
 const formRef = ref(null)
+
+// 详情对话框相关
+const detailDialogVisible = ref(false)
+const detailLoading = ref(false)
+const activeTab = ref('basic')
+const currentOffer = ref(null)
+const relatedCaps = ref([])
+const relatedDiscounts = ref([])
+const capsLoading = ref(false)
+const discountsLoading = ref(false)
 
 const pagination = reactive({
   page: 1,
@@ -629,6 +815,83 @@ const handleSubmit = async () => {
 // 对话框关闭
 const handleDialogClose = () => {
   formRef.value?.resetFields()
+}
+
+// 查看详情
+const handleViewDetails = async (row) => {
+  detailDialogVisible.value = true
+  activeTab.value = 'basic'
+  detailLoading.value = true
+  
+  try {
+    // 加载Offer详情
+    const response = await getOffer(row.id)
+    if (response.code === 200) {
+      currentOffer.value = response.data
+    } else {
+      ElMessage.error(response.message || '获取详情失败')
+      detailDialogVisible.value = false
+      return
+    }
+    
+    // 并行加载关联数据
+    await Promise.all([
+      loadRelatedCaps(row.id),
+      loadRelatedDiscounts(row.id)
+    ])
+  } catch (error) {
+    logger.error('获取Offer详情失败:', error)
+    ElMessage.error('获取详情失败')
+    detailDialogVisible.value = false
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+// 加载关联的Cap配置
+const loadRelatedCaps = async (offerId) => {
+  capsLoading.value = true
+  try {
+    const response = await getCaps({
+      page: 1,
+      page_size: 100,
+      offer_id: offerId
+    })
+    if (response.code === 200) {
+      relatedCaps.value = response.data || []
+    }
+  } catch (error) {
+    logger.error('加载Cap配置失败:', error)
+  } finally {
+    capsLoading.value = false
+  }
+}
+
+// 加载关联的扣量配置
+const loadRelatedDiscounts = async (offerId) => {
+  discountsLoading.value = true
+  try {
+    const response = await getDiscounts({
+      page: 1,
+      page_size: 100,
+      offer_id: offerId
+    })
+    if (response.code === 200) {
+      relatedDiscounts.value = response.data || []
+    }
+  } catch (error) {
+    logger.error('加载扣量配置失败:', error)
+  } finally {
+    discountsLoading.value = false
+  }
+}
+
+// 详情对话框关闭
+const handleDetailDialogClose = () => {
+  currentOffer.value = null
+  relatedCaps.value = []
+  relatedDiscounts.value = []
+  activeTab.value = 'basic'
 }
 
 // 分页
