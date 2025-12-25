@@ -4,7 +4,7 @@ FastAPI应用主入口
 """
 import warnings
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, status, HTTPException
+from fastapi import FastAPI, Request, status, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -898,7 +898,6 @@ async def redirect_short_link_public(
     from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
     from app.api.api_v1.endpoints.tracking import create_click_background
     from app.models.models import Click, ShortLink
-    from fastapi import BackgroundTasks
     from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
     
     def merge_url_params(base_url: str, query_params: dict) -> str:
