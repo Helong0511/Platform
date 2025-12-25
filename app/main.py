@@ -1048,14 +1048,44 @@ async def redirect_short_link_public(
             user_agent = request.headers.get("user-agent")
             referer = request.headers.get("referer")
             
+            # 只使用URL参数中的offer_id和channel_id（如果有的话）
+            # 如果URL参数中没有，则不保存这些值
+            final_offer_id = offer_id  # 只使用URL参数
+            final_channel_id = channel_id  # 只使用URL参数
+            
+            # 如果从URL参数获取了offer_id，验证Offer是否存在并获取advertiser_id
+            advertiser_id = None
+            if final_offer_id:
+                try:
+                    from app.models.models import Offer
+                    offer_result = await db.execute(
+                        select(Offer).where(Offer.id == final_offer_id)
+                    )
+                    offer = offer_result.scalars().first()
+                    if offer:
+                        advertiser_id = offer.advertiser_id
+                except Exception as e:
+                    logger.warning(f"查询Offer失败: offer_id={final_offer_id}, error={e}")
+            
+            # 打印获得的参数
+            logger.info(
+                f"[短链接点击-缓存路径] 参数信息: "
+                f"short_code={short_code}, "
+                f"URL参数_offer_id={offer_id}, "
+                f"URL参数_channel_id={channel_id}, "
+                f"最终保存_offer_id={final_offer_id}, "
+                f"最终保存_channel_id={final_channel_id}, "
+                f"advertiser_id={advertiser_id}"
+            )
+            
             # 创建点击记录（异步保存，不阻塞重定向）
             if short_link_id:
                 click_data = {
                     "click_id": click_id,
                     "short_link_id": short_link_id,
-                    "offer_id": None,
-                    "publisher_id": None,
-                    "advertiser_id": None,
+                    "offer_id": final_offer_id,  # 只保存URL参数中的值（如果有）
+                    "publisher_id": final_channel_id,  # 只保存URL参数中的值（如果有），publisher_id对应channel_id
+                    "advertiser_id": advertiser_id,
                     "click_time": datetime.now(timezone.utc),
                     "ip": client_ip,
                     "user_agent": user_agent,
@@ -1063,7 +1093,14 @@ async def redirect_short_link_public(
                     "country": None
                 }
                 background_tasks.add_task(create_click_background, click_data)
-                logger.debug(f"[短链接重定向] 点击记录已创建（缓存路径）: click_id={click_id}, short_link_id={short_link_id}")
+                logger.info(
+                    f"[短链接重定向] 点击记录已创建（缓存路径）: "
+                    f"click_id={click_id}, "
+                    f"short_link_id={short_link_id}, "
+                    f"offer_id={final_offer_id}, "
+                    f"publisher_id={final_channel_id}, "
+                    f"advertiser_id={advertiser_id}"
+                )
             
             # 获取当前点击次数（从缓存数据中获取，如果缓存中没有则从数据库查询）
             current_click_count = cached_data.get("click_count", 0)
@@ -1181,9 +1218,10 @@ async def redirect_short_link_public(
         user_agent = request.headers.get("user-agent")
         referer = request.headers.get("referer")
         
-        # 从URL参数或短链接关联信息中获取offer_id和channel_id
-        final_offer_id = offer_id or short_link.offer_id
-        final_channel_id = channel_id or short_link.channel_id
+        # 只使用URL参数中的offer_id和channel_id（如果有的话）
+        # 如果URL参数中没有，则不保存这些值
+        final_offer_id = offer_id  # 只使用URL参数
+        final_channel_id = channel_id  # 只使用URL参数
         
         # 如果从URL参数获取了offer_id，验证Offer是否存在并获取advertiser_id
         advertiser_id = None
@@ -1205,10 +1243,8 @@ async def redirect_short_link_public(
             f"short_code={short_code}, "
             f"URL参数_offer_id={offer_id}, "
             f"URL参数_channel_id={channel_id}, "
-            f"短链接关联_offer_id={short_link.offer_id}, "
-            f"短链接关联_channel_id={short_link.channel_id}, "
-            f"最终使用_offer_id={final_offer_id}, "
-            f"最终使用_channel_id={final_channel_id}, "
+            f"最终保存_offer_id={final_offer_id}, "
+            f"最终保存_channel_id={final_channel_id}, "
             f"advertiser_id={advertiser_id}"
         )
         

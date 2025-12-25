@@ -155,9 +155,10 @@ async def redirect_short_link(
                 detail="短链接已过期"
             )
     
-    # 从URL参数或短链接关联信息中获取offer_id和channel_id
-    final_offer_id = offer_id or short_link.offer_id
-    final_channel_id = channel_id or short_link.channel_id
+    # 只使用URL参数中的offer_id和channel_id（如果有的话）
+    # 如果URL参数中没有，则不保存这些值
+    final_offer_id = offer_id  # 只使用URL参数
+    final_channel_id = channel_id  # 只使用URL参数
     
     # 打印获得的参数
     logger.info(
@@ -165,10 +166,8 @@ async def redirect_short_link(
         f"short_code={short_code}, "
         f"URL参数_offer_id={offer_id}, "
         f"URL参数_channel_id={channel_id}, "
-        f"短链接关联_offer_id={short_link.offer_id}, "
-        f"短链接关联_channel_id={short_link.channel_id}, "
-        f"最终使用_offer_id={final_offer_id}, "
-        f"最终使用_channel_id={final_channel_id}"
+        f"最终保存_offer_id={final_offer_id}, "
+        f"最终保存_channel_id={final_channel_id}"
     )
     
     # 如果从URL参数获取了offer_id，验证Offer是否存在并获取advertiser_id
