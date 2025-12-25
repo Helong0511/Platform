@@ -2,23 +2,181 @@
 Offer 管理 API
 """
 import logging
-from typing import Optional
+from typing import Optional, Set
 from fastapi import APIRouter, Depends, Query, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func, and_, or_, delete
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
-from app.models.models import User, Offer, Advertiser, Publisher, OfferPublisherAssignment
+from app.models.models import User, Offer, Advertiser, Publisher, OfferPublisherAssignment, ShortLink
 from app.schemas.cpl.offer import OfferCreate, OfferUpdate, OfferResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.core.config import settings
+from app.core.short_link.generator import (
+    generate_short_code_from_id,
+    generate_unique_short_code
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+async def create_short_link_for_channel(
+    db: AsyncSession,
+    offer_id: int,
+    channel_id: int,
+    offer_name: str,
+    publisher_name: str,
+    base_url: str,
+    current_user_id: int
+) -> Optional[ShortLink]:
+    """
+    为指定渠道创建短链接
+    
+    Args:
+        db: 数据库会话
+        offer_id: Offer ID
+        channel_id: 渠道ID (Publisher ID)
+        offer_name: Offer名称
+        publisher_name: 渠道名称
+        base_url: 追踪服务基础URL
+        current_user_id: 当前用户ID
+        
+    Returns:
+        创建的短链接对象，如果失败返回None
+    """
+    try:
+        # 生成短链接的原始URL（包含offer_id和channel_id参数）
+        # 格式：{base_url}/api/v1/track/click/{offer_id}?publisher_id={channel_id}
+        original_url = f"{base_url.rstrip('/')}/api/v1/track/click/{offer_id}?publisher_id={channel_id}"
+        
+        # 检查是否已存在相同URL的短链接
+        existing_result = await db.execute(
+            select(ShortLink).where(
+                ShortLink.original_url == original_url,
+                ShortLink.offer_id == offer_id,
+                ShortLink.channel_id == channel_id
+            )
+        )
+        existing_link = existing_result.scalars().first()
+        
+        if existing_link:
+            # 如果已存在，直接返回
+            logger.info(f"短链接已存在: offer_id={offer_id}, channel_id={channel_id}")
+            return existing_link
+        
+        # 创建新的短链接
+        short_link = ShortLink(
+            original_url=original_url,
+            title=f"{offer_name} - {publisher_name}",
+            description=f"Offer: {offer_name}, 渠道: {publisher_name}",
+            offer_id=offer_id,
+            channel_id=channel_id,
+            created_by=current_user_id,
+            is_active=True,
+            click_count=0
+        )
+        
+        db.add(short_link)
+        await db.flush()  # 先flush以获取ID
+        
+        # 生成短链接代码
+        result = await db.execute(select(ShortLink.short_code))
+        existing_codes = {row[0] for row in result.all()}
+        
+        # 尝试从ID生成
+        code_from_id = generate_short_code_from_id(short_link.id, min_length=4)
+        if code_from_id not in existing_codes:
+            short_link.short_code = code_from_id
+        else:
+            # 如果ID生成的代码已存在，使用随机生成
+            unique_code = generate_unique_short_code(existing_codes, length=6)
+            if not unique_code:
+                logger.error(f"生成短链接代码失败: offer_id={offer_id}, channel_id={channel_id}")
+                return None
+            short_link.short_code = unique_code
+        
+        logger.info(f"为渠道创建短链接成功: offer_id={offer_id}, channel_id={channel_id}, short_code={short_link.short_code}")
+        return short_link
+        
+    except Exception as e:
+        logger.error(f"为渠道创建短链接失败: offer_id={offer_id}, channel_id={channel_id}, error={str(e)}", exc_info=True)
+        return None
+
+
+async def sync_short_links_for_offer(
+    db: AsyncSession,
+    offer_id: int,
+    publisher_ids: Optional[list[int]],
+    offer_name: str,
+    base_url: str,
+    current_user_id: int
+) -> None:
+    """
+    同步Offer的短链接（根据分配的渠道）
+    
+    Args:
+        db: 数据库会话
+        offer_id: Offer ID
+        publisher_ids: 分配的渠道ID列表
+        offer_name: Offer名称
+        base_url: 追踪服务基础URL
+        current_user_id: 当前用户ID
+    """
+    try:
+        # 获取当前已存在的短链接（该Offer的所有短链接）
+        existing_links_result = await db.execute(
+            select(ShortLink).where(ShortLink.offer_id == offer_id)
+        )
+        existing_links = existing_links_result.scalars().all()
+        
+        # 构建现有短链接的渠道ID集合
+        existing_channel_ids: Set[int] = {link.channel_id for link in existing_links if link.channel_id}
+        
+        # 构建目标渠道ID集合
+        target_channel_ids: Set[int] = set(publisher_ids or [])
+        
+        # 1. 删除不再分配的渠道的短链接
+        channels_to_remove = existing_channel_ids - target_channel_ids
+        if channels_to_remove:
+            for channel_id in channels_to_remove:
+                await db.execute(
+                    delete(ShortLink).where(
+                        ShortLink.offer_id == offer_id,
+                        ShortLink.channel_id == channel_id
+                    )
+                )
+            logger.info(f"删除不再分配的渠道短链接: offer_id={offer_id}, channels={channels_to_remove}")
+        
+        # 2. 为新分配的渠道创建短链接
+        channels_to_add = target_channel_ids - existing_channel_ids
+        if channels_to_add:
+            for channel_id in channels_to_add:
+                # 获取渠道信息
+                pub_result = await db.execute(
+                    select(Publisher).where(Publisher.id == channel_id)
+                )
+                publisher = pub_result.scalars().first()
+                
+                if publisher:
+                    await create_short_link_for_channel(
+                        db=db,
+                        offer_id=offer_id,
+                        channel_id=channel_id,
+                        offer_name=offer_name,
+                        publisher_name=publisher.publisher_name,
+                        base_url=base_url,
+                        current_user_id=current_user_id
+                    )
+            logger.info(f"为新分配的渠道创建短链接: offer_id={offer_id}, channels={channels_to_add}")
+            
+    except Exception as e:
+        logger.error(f"同步Offer短链接失败: offer_id={offer_id}, error={str(e)}", exc_info=True)
+        # 不抛出异常，避免影响Offer的创建/更新
 
 
 @router.post("/",
@@ -97,6 +255,18 @@ async def create_offer(
         
         await db.commit()
         await db.refresh(offer)
+        
+        # 为分配的渠道创建短链接
+        if offer_in.publisher_ids:
+            await sync_short_links_for_offer(
+                db=db,
+                offer_id=offer.id,
+                publisher_ids=offer_in.publisher_ids,
+                offer_name=offer.offer_name,
+                base_url=base_url,
+                current_user_id=current_user.id
+            )
+            await db.commit()  # 提交短链接创建
         
         # 加载关联信息
         offer_data = OfferResponse.model_validate(offer)
@@ -294,9 +464,16 @@ async def update_offer(
         setattr(offer, key, value)
     
     # 处理渠道分配
+    old_publisher_ids = None
     if 'publisher_ids' in offer_in.model_dump(exclude_unset=True):
+        # 获取旧的渠道分配列表（用于比较）
+        old_assignments_result = await db.execute(
+            select(OfferPublisherAssignment).where(OfferPublisherAssignment.offer_id == offer.id)
+        )
+        old_assignments = old_assignments_result.scalars().all()
+        old_publisher_ids = {assignment.publisher_id for assignment in old_assignments}
+        
         # 先删除所有现有分配
-        from sqlalchemy import delete
         await db.execute(
             delete(OfferPublisherAssignment).where(OfferPublisherAssignment.offer_id == offer.id)
         )
@@ -318,6 +495,22 @@ async def update_offer(
     
     try:
         await db.commit()
+        
+        # 如果渠道分配有变化，同步短链接
+        if 'publisher_ids' in offer_in.model_dump(exclude_unset=True):
+            new_publisher_ids = set(offer_in.publisher_ids or [])
+            if old_publisher_ids != new_publisher_ids:
+                # 渠道分配有变化，同步短链接
+                base_url = settings.TRACKING_BASE_URL
+                await sync_short_links_for_offer(
+                    db=db,
+                    offer_id=offer.id,
+                    publisher_ids=offer_in.publisher_ids,
+                    offer_name=offer.offer_name,
+                    base_url=base_url,
+                    current_user_id=current_user.id
+                )
+                await db.commit()  # 提交短链接变更
         
         # 重新加载关联信息（使用joinedload优化）
         from sqlalchemy.orm import joinedload

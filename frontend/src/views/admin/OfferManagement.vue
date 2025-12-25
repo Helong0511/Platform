@@ -663,7 +663,6 @@ import { getDiscounts } from '@/api/discount'
 import { createShortLink, getShortLinks } from '@/api/shortLink'
 import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
-import { ElMessage } from 'element-plus'
 
 const loading = ref(false)
 const submitting = ref(false)
