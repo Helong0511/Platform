@@ -69,20 +69,20 @@ async def create_short_link_for_channel(
             logger.info(f"短链接已存在: offer_id={offer_id}, channel_id={channel_id}")
             return existing_link
         
-        # 创建新的短链接
+        # 创建新的短链接（确保保存 offer_id 和 channel_id）
         short_link = ShortLink(
             original_url=original_url,
             title=f"{offer_name} - {publisher_name}",
             description=f"Offer: {offer_name}, 渠道: {publisher_name}",
-            offer_id=offer_id,
-            channel_id=channel_id,
+            offer_id=offer_id,  # 保存 Offer ID
+            channel_id=channel_id,  # 保存渠道 ID (Publisher ID)
             created_by=current_user_id,
             is_active=True,
             click_count=0
         )
         
         db.add(short_link)
-        await db.flush()  # 先flush以获取ID
+        await db.flush()  # 先flush以获取ID，此时 offer_id 和 channel_id 已写入数据库会话
         
         # 生成短链接代码
         result = await db.execute(select(ShortLink.short_code))
@@ -100,7 +100,15 @@ async def create_short_link_for_channel(
                 return None
             short_link.short_code = unique_code
         
-        logger.info(f"为渠道创建短链接成功: offer_id={offer_id}, channel_id={channel_id}, short_code={short_link.short_code}")
+        # 验证 offer_id 和 channel_id 已正确设置
+        logger.info(
+            f"为渠道创建短链接成功: "
+            f"short_link_id={short_link.id}, "
+            f"short_code={short_link.short_code}, "
+            f"offer_id={short_link.offer_id}, "
+            f"channel_id={short_link.channel_id}, "
+            f"original_url={original_url}"
+        )
         return short_link
         
     except Exception as e:
