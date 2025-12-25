@@ -897,7 +897,7 @@ async def redirect_short_link_public(
     from app.core.short_link_click_counter import increment_click_count_async
     from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
     from app.api.api_v1.endpoints.tracking import create_click_background
-    from app.models.models import Click, ShortLink
+    from app.models.models import Click
     from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
     
     def merge_url_params(base_url: str, query_params: dict) -> str:
