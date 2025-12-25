@@ -522,14 +522,40 @@ openssl rsa -in private_key.pem -pubout | diff - public_key.pem
 **问题：**
 ```
 错误: 无法读取密钥文件：权限被拒绝
+PermissionError: [Errno 13] Permission denied: '/data/Platform/keys/private_key.pem'
 ```
 
 **解决方案：**
 
+**方法1：使用自动修复脚本（推荐）**
+```bash
+cd /data/Platform
+sudo bash scripts/fix_rsa_keys_permissions.sh
+```
+
+**方法2：手动修复权限**
 ```bash
 # Ubuntu 生产环境
+# 设置密钥目录权限
+sudo chown -R www-data:www-data /data/Platform/keys
+sudo chmod 750 /data/Platform/keys
+
+# 设置私钥文件权限（仅所有者可读）
 sudo chown www-data:www-data /data/Platform/keys/private_key.pem
 sudo chmod 600 /data/Platform/keys/private_key.pem
+
+# 设置公钥文件权限（所有人可读）
+sudo chown www-data:www-data /data/Platform/keys/public_key.pem
+sudo chmod 644 /data/Platform/keys/public_key.pem
+
+# 验证权限
+ls -la /data/Platform/keys/
+
+# 测试 www-data 用户是否可以读取
+sudo -u www-data test -r /data/Platform/keys/private_key.pem && echo "✓ 权限正确" || echo "✗ 权限错误"
+
+# 重启服务
+sudo systemctl restart Platform-backend.service
 ```
 
 ### Q4: JWT Token 验证失败
