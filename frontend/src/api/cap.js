@@ -56,3 +56,13 @@ export function deleteCap(id) {
   })
 }
 
+/**
+ * 检查Cap一致性
+ */
+export function checkConsistency() {
+  return request({
+    url: '/api/v1/caps/check-consistency',
+    method: 'post'
+  })
+}
+
