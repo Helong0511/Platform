@@ -72,6 +72,22 @@
           <span v-else style="color: #909399;">-</span>
         </template>
       </el-table-column>
+      <el-table-column prop="offer_id" label="关联Offer" width="200" show-overflow-tooltip>
+        <template #default="scope">
+          <el-tag v-if="scope.row.offer_id" type="info">
+            {{ getOfferName(scope.row.offer_id) || `ID: ${scope.row.offer_id}` }}
+          </el-tag>
+          <span v-else style="color: #909399;">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="channel_id" label="渠道" width="200" show-overflow-tooltip>
+        <template #default="scope">
+          <el-tag v-if="scope.row.channel_id" type="success">
+            {{ getChannelName(scope.row.channel_id) || `ID: ${scope.row.channel_id}` }}
+          </el-tag>
+          <span v-else style="color: #909399;">-</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="creator_name" label="创建者" width="120" show-overflow-tooltip>
         <template #default="scope">
           <span v-if="scope.row.creator_name">{{ scope.row.creator_name }}</span>
@@ -197,6 +213,48 @@
           />
         </el-form-item>
 
+        <el-form-item label="关联Offer" prop="offer_id">
+          <el-select
+            v-model="formData.offer_id"
+            placeholder="选择关联的Offer（可选）"
+            filterable
+            clearable
+            style="width: 100%;"
+          >
+            <el-option
+              v-for="offer in offerList"
+              :key="offer.id"
+              :label="`${offer.offer_name} (ID: ${offer.id})`"
+              :value="offer.id"
+            />
+          </el-select>
+          <div class="form-hint">
+            <el-icon :size="16"><InfoFilled /></el-icon>
+            <span>选择关联的Offer，用于标识短链接所属的Offer</span>
+          </div>
+        </el-form-item>
+
+        <el-form-item label="关联渠道" prop="channel_id">
+          <el-select
+            v-model="formData.channel_id"
+            placeholder="选择关联的渠道（可选）"
+            filterable
+            clearable
+            style="width: 100%;"
+          >
+            <el-option
+              v-for="channel in channelList"
+              :key="channel.id"
+              :label="`${channel.publisher_name} (ID: ${channel.id})`"
+              :value="channel.id"
+            />
+          </el-select>
+          <div class="form-hint">
+            <el-icon :size="16"><InfoFilled /></el-icon>
+            <span>选择关联的渠道，用于标识短链接所属的渠道</span>
+          </div>
+        </el-form-item>
+
         <el-form-item label="过期时间" prop="expires_at">
           <el-date-picker
             v-model="formData.expires_at"
@@ -234,6 +292,8 @@ import {
   generateShortCode,
   checkShortCode
 } from '../../api/shortLink';
+import { getOffers } from '../../api/offer';
+import { getPublishers } from '../../api/publisher';
 import { useDevice } from '../../composables/useDevice';
 import { logger } from '../../utils/logger';
 import { formatDate as formatDateWithTimezone } from '../../utils/dateFormat';
@@ -248,6 +308,8 @@ const isEdit = ref(false);
 const currentLinkId = ref(null);
 
 const links = ref([]);
+const offerList = ref([]);
+const channelList = ref([]);
 const stats = reactive({
   total_links: 0,
   total_clicks: 0,
@@ -272,6 +334,8 @@ const formData = reactive({
   short_code: '',
   title: '',
   description: '',
+  offer_id: null,
+  channel_id: null,
   expires_at: null,
   is_active: true
 });
@@ -358,6 +422,44 @@ const loadStats = async () => {
   }
 };
 
+// 加载Offer列表
+const loadOffers = async () => {
+  try {
+    const response = await getOffers({ page: 1, page_size: 100 });
+    if (response.code === 200) {
+      offerList.value = response.data || [];
+    }
+  } catch (error) {
+    logger.error('加载Offer列表失败:', error);
+  }
+};
+
+// 加载渠道列表
+const loadChannels = async () => {
+  try {
+    const response = await getPublishers({ page: 1, page_size: 100 });
+    if (response.code === 200) {
+      channelList.value = response.data || [];
+    }
+  } catch (error) {
+    logger.error('加载渠道列表失败:', error);
+  }
+};
+
+// 获取Offer名称
+const getOfferName = (offerId) => {
+  if (!offerId) return null;
+  const offer = offerList.value.find(o => o.id === offerId);
+  return offer ? offer.offer_name : null;
+};
+
+// 获取渠道名称
+const getChannelName = (channelId) => {
+  if (!channelId) return null;
+  const channel = channelList.value.find(c => c.id === channelId);
+  return channel ? channel.publisher_name : null;
+};
+
 // 创建
 const handleCreate = () => {
   isEdit.value = false;
@@ -367,6 +469,8 @@ const handleCreate = () => {
     short_code: '',
     title: '',
     description: '',
+    offer_id: null,
+    channel_id: null,
     expires_at: null,
     is_active: true
   });
@@ -382,6 +486,8 @@ const handleEdit = async (link) => {
     short_code: link.short_code,
     title: link.title || '',
     description: link.description || '',
+    offer_id: link.offer_id || null,
+    channel_id: link.channel_id || null,
     expires_at: link.expires_at || null,
     is_active: link.is_active
   });
@@ -565,6 +671,8 @@ const handleDialogClose = () => {
 onMounted(() => {
   loadData();
   loadStats();
+  loadOffers();
+  loadChannels();
 });
 </script>
 

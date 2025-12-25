@@ -14,6 +14,7 @@ class ShortLinkBase(BaseModel):
     description: Optional[str] = Field(None, description="短链接描述（可选）")
     short_code: Optional[str] = Field(None, max_length=20, description="自定义短链接代码（可选，不填则自动生成）")
     offer_id: Optional[int] = Field(None, description="关联的Offer ID（可选）")
+    channel_id: Optional[int] = Field(None, description="关联的渠道ID（可选）")
     expires_at: Optional[datetime] = Field(None, description="过期时间（可选）")
     is_active: bool = Field(True, description="是否激活")
 
@@ -55,6 +56,7 @@ class ShortLinkUpdate(BaseModel):
     title: Optional[str] = Field(None, max_length=200, description="短链接标题")
     description: Optional[str] = Field(None, description="短链接描述")
     offer_id: Optional[int] = Field(None, description="关联的Offer ID")
+    channel_id: Optional[int] = Field(None, description="关联的渠道ID")
     is_active: Optional[bool] = Field(None, description="是否激活")
     expires_at: Optional[datetime] = Field(None, description="过期时间")
 
@@ -76,6 +78,8 @@ class ShortLinkResponse(ShortLinkBase):
     created_by: Optional[int] = None
     creator_name: Optional[str] = None  # 创建者用户名
     offer_id: Optional[int] = None
+    channel_id: Optional[int] = None
+    channel_name: Optional[str] = None  # 渠道名称
     created_at: datetime
     updated_at: datetime
     short_url: Optional[str] = None  # 完整的短链接URL

@@ -20,7 +20,7 @@ from app.core.short_link.generator import (
     generate_short_code_from_id,
     generate_unique_short_code
 )
-from app.models.models import User, UserRole, ShortLink, Offer
+from app.models.models import User, UserRole, ShortLink, Offer, Publisher
 from app.schemas.short_link import (
     ShortLinkCreate,
     ShortLinkUpdate,
@@ -204,6 +204,18 @@ async def create_short_link(
                 detail=f"Offer ID {link_in.offer_id} 不存在"
             )
     
+    # 验证渠道是否存在（如果提供了 channel_id）
+    if link_in.channel_id:
+        channel_result = await db.execute(
+            select(Publisher).where(Publisher.id == link_in.channel_id)
+        )
+        channel = channel_result.scalars().first()
+        if not channel:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail=f"渠道ID {link_in.channel_id} 不存在"
+            )
+    
     # 创建短链接
     short_link = ShortLink(
         original_url=link_in.original_url,
@@ -212,6 +224,7 @@ async def create_short_link(
         short_code=short_code or "temp",  # 临时代码，稍后更新
         created_by=current_user.id,
         offer_id=link_in.offer_id,
+        channel_id=link_in.channel_id,
         is_active=link_in.is_active,
         expires_at=link_in.expires_at,
         click_count=0
@@ -318,9 +331,9 @@ async def get_short_links(
     offset = (page - 1) * page_size
     query = query.offset(offset).limit(page_size)
     
-    # 执行查询，加载创建者信息（在分页之后）
+    # 执行查询，加载创建者和渠道信息（在分页之后）
     from sqlalchemy.orm import joinedload
-    query = query.options(joinedload(ShortLink.creator))
+    query = query.options(joinedload(ShortLink.creator), joinedload(ShortLink.channel))
     result = await db.execute(query)
     short_links = result.scalars().all()
     
@@ -333,6 +346,9 @@ async def get_short_links(
         # 添加创建者名称
         if link.creator:
             link_data.creator_name = link.creator.username
+        # 添加渠道名称
+        if link.channel:
+            link_data.channel_name = link.channel.publisher_name
         links_data.append(link_data)
     
     return PaginatedResponseBaseSchema.success(
@@ -353,8 +369,11 @@ async def get_short_link_detail(
     current_user: User = Depends(get_current_user)
 ):
     """获取短链接详情"""
+    from sqlalchemy.orm import joinedload
     result = await db.execute(
-        select(ShortLink).where(ShortLink.id == link_id)
+        select(ShortLink)
+        .where(ShortLink.id == link_id)
+        .options(joinedload(ShortLink.creator), joinedload(ShortLink.channel))
     )
     short_link = result.scalars().first()
     
@@ -376,6 +395,12 @@ async def get_short_link_detail(
     base_url = str(request.base_url).rstrip('/')
     response_data = ShortLinkResponse.model_validate(short_link)
     response_data.short_url = f"{base_url}/s/{short_link.short_code}"
+    # 添加创建者名称
+    if short_link.creator:
+        response_data.creator_name = short_link.creator.username
+    # 添加渠道名称
+    if short_link.channel:
+        response_data.channel_name = short_link.channel.publisher_name
     
     return ResponseBaseSchema.success(data=response_data)
 
@@ -391,8 +416,11 @@ async def update_short_link(
     current_user: User = Depends(get_current_user)
 ):
     """更新短链接"""
+    from sqlalchemy.orm import joinedload
     result = await db.execute(
-        select(ShortLink).where(ShortLink.id == link_id)
+        select(ShortLink)
+        .where(ShortLink.id == link_id)
+        .options(joinedload(ShortLink.channel))
     )
     short_link = result.scalars().first()
     
@@ -423,6 +451,18 @@ async def update_short_link(
                 detail=f"Offer ID {update_data['offer_id']} 不存在"
             )
     
+    # 验证渠道是否存在（如果提供了 channel_id）
+    if 'channel_id' in update_data and update_data['channel_id'] is not None:
+        channel_result = await db.execute(
+            select(Publisher).where(Publisher.id == update_data['channel_id'])
+        )
+        channel = channel_result.scalars().first()
+        if not channel:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail=f"渠道ID {update_data['channel_id']} 不存在"
+            )
+    
     # 更新字段
     for key, value in update_data.items():
         setattr(short_link, key, value)
@@ -435,6 +475,9 @@ async def update_short_link(
         base_url = str(request.base_url).rstrip('/')
         response_data = ShortLinkResponse.model_validate(short_link)
         response_data.short_url = f"{base_url}/s/{short_link.short_code}"
+        # 添加渠道名称
+        if short_link.channel:
+            response_data.channel_name = short_link.channel.publisher_name
         
         # 清除缓存，确保数据一致性
         from app.core.short_link_cache import invalidate_short_link_cache
