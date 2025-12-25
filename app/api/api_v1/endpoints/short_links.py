@@ -170,24 +170,37 @@ async def redirect_short_link(
         f"最终保存_channel_id={final_channel_id}"
     )
     
-    # 如果从URL参数获取了offer_id，验证Offer是否存在并获取advertiser_id
+    # 如果从URL参数获取了offer_id，尝试从缓存获取advertiser_id（高并发优化）
     advertiser_id = None
     if final_offer_id:
-        offer_result = await db.execute(
-            select(Offer).where(Offer.id == final_offer_id)
-        )
-        offer = offer_result.scalars().first()
-        if offer:
-            advertiser_id = offer.advertiser_id
-            logger.info(
-                f"[短链接点击] Offer信息: "
-                f"offer_id={final_offer_id}, "
-                f"offer_name={offer.offer_name}, "
-                f"advertiser_id={advertiser_id}"
-            )
+        # 优先从缓存获取（减少数据库查询）
+        from app.core.offer_cache import get_offer_advertiser_id
+        advertiser_id = await get_offer_advertiser_id(final_offer_id)
+        
+        # 如果缓存中没有，查询数据库并缓存
+        if advertiser_id is None:
+            try:
+                offer_result = await db.execute(
+                    select(Offer).where(Offer.id == final_offer_id)
+                )
+                offer = offer_result.scalars().first()
+                if offer:
+                    advertiser_id = offer.advertiser_id
+                    # 缓存Offer信息
+                    from app.core.offer_cache import set_offer_cache
+                    await set_offer_cache(final_offer_id, advertiser_id, offer.offer_name)
+                    logger.info(
+                        f"[短链接点击] Offer信息（数据库）: "
+                        f"offer_id={final_offer_id}, "
+                        f"offer_name={offer.offer_name}, "
+                        f"advertiser_id={advertiser_id}"
+                    )
+                else:
+                    logger.warning(f"短链接点击时提供的offer_id无效: offer_id={final_offer_id}, short_code={short_code}")
+            except Exception as e:
+                logger.warning(f"查询Offer失败: offer_id={final_offer_id}, error={e}")
         else:
-            # 如果offer_id无效，记录警告但继续处理
-            logger.warning(f"短链接点击时提供的offer_id无效: offer_id={final_offer_id}, short_code={short_code}")
+            logger.debug(f"[短链接点击] Offer信息（缓存）: offer_id={final_offer_id}, advertiser_id={advertiser_id}")
     
     # 获取客户端信息
     def get_client_ip(req: Request) -> Optional[str]:
@@ -222,43 +235,40 @@ async def redirect_short_link(
     # 生成Click ID
     click_id = generate_click_id_from_timestamp()
     
-    # 创建点击记录（异步保存，不阻塞重定向）
-    if background_tasks:
-        from app.api.api_v1.endpoints.tracking import create_click_background
-        
-        click_data = {
-            "click_id": click_id,
-            "short_link_id": short_link.id,
-            "offer_id": final_offer_id,
-            "publisher_id": final_channel_id,  # publisher_id对应channel_id
-            "advertiser_id": advertiser_id,
-            "click_time": datetime.now(timezone.utc),
-            "ip": client_ip,
-            "user_agent": user_agent,
-            "referer": referer,
-            "country": None
-        }
-        
-        # 打印完整的点击记录数据
-        logger.info(
-            f"[短链接点击] 点击记录数据: "
+    # 创建点击记录（使用Redis队列，高并发优化）
+    click_data = {
+        "click_id": click_id,
+        "short_link_id": short_link.id,
+        "offer_id": final_offer_id,
+        "publisher_id": final_channel_id,  # publisher_id对应channel_id
+        "advertiser_id": advertiser_id,  # 可能为None，批量处理时会补充
+        "click_time": datetime.now(timezone.utc).isoformat(),
+        "ip": client_ip,
+        "user_agent": user_agent,
+        "referer": referer,
+        "country": None
+    }
+    
+    # 使用Redis队列缓冲（非阻塞，高并发优化）
+    from app.core.clicks_queue import enqueue_click
+    enqueued = await enqueue_click(click_data)
+    
+    if enqueued:
+        logger.debug(
+            f"[短链接点击] 点击记录已加入队列: "
             f"click_id={click_id}, "
-            f"short_link_id={short_link.id}, "
+            f"short_code={short_code}, "
             f"offer_id={final_offer_id}, "
-            f"publisher_id={final_channel_id}, "
-            f"advertiser_id={advertiser_id}, "
-            f"click_time={click_data['click_time']}, "
-            f"ip={client_ip}, "
-            f"user_agent={user_agent}, "
-            f"referer={referer}"
+            f"publisher_id={final_channel_id}"
         )
-        
-        background_tasks.add_task(create_click_background, click_data)
-        logger.info(
-            f"[短链接点击] 点击记录已提交异步保存: "
-            f"click_id={click_id}, "
-            f"short_code={short_code}"
-        )
+    else:
+        # 队列失败，降级到后台任务（兼容性）
+        logger.warning(f"Redis队列不可用，降级到后台任务: click_id={click_id}")
+        if background_tasks:
+            from app.api.api_v1.endpoints.tracking import create_click_background
+            # 转换时间格式
+            click_data['click_time'] = datetime.now(timezone.utc)
+            background_tasks.add_task(create_click_background, click_data)
     
     # 异步更新点击次数（使用Redis计数器，不阻塞重定向）
     try:

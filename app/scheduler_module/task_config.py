@@ -125,6 +125,17 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "将Redis中的短链接点击次数批量同步到数据库，每5分钟执行一次",
     },
     
+    "点击记录队列批量处理": {
+        "task_name": "点击记录队列批量处理",
+        "task_module": "app.scheduler.short_link_tasks",
+        "task_function": "process_clicks_queue_task",
+        "result_getter_module": "app.scheduler.short_link_tasks",
+        "result_getter_function": "get_task_result",
+        # 数据库配置
+        "cron_expression": "* * * * *",  # 每分钟执行一次（高并发优化，实际处理时会循环处理直到队列为空）
+        "description": "从Redis队列批量取出点击记录并插入到数据库，每分钟执行一次，每次处理最多1000条（高并发优化）",
+    },
+    
     # ========== TQT API获取数据任务 ==========
     "TQT API获取数据": {
         "task_name": "TQT API获取数据",
