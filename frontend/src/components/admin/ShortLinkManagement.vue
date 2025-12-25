@@ -66,6 +66,12 @@
       </el-table-column>
       <el-table-column prop="original_url" label="原始URL" min-width="300" show-overflow-tooltip />
       <el-table-column prop="title" label="标题" width="150" show-overflow-tooltip />
+      <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip>
+        <template #default="scope">
+          <span v-if="scope.row.description">{{ scope.row.description }}</span>
+          <span v-else style="color: #909399;">-</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="creator_name" label="创建者" width="120" show-overflow-tooltip>
         <template #default="scope">
           <span v-if="scope.row.creator_name">{{ scope.row.creator_name }}</span>
