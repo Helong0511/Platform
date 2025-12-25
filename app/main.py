@@ -25,9 +25,21 @@ import base64
 # 不影响功能，等待库更新修复
 warnings.filterwarnings('ignore', message='.*pkg_resources is deprecated.*', category=UserWarning)
 
-# 确保日志目录存在
+# 确保日志目录存在并设置权限
 log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
-os.makedirs(log_dir, exist_ok=True)
+try:
+    os.makedirs(log_dir, exist_ok=True, mode=0o755)
+    # 尝试设置目录权限（如果可能）
+    try:
+        import stat
+        os.chmod(log_dir, 0o755)
+    except (OSError, PermissionError):
+        pass  # 如果没有权限设置，继续执行
+except (OSError, PermissionError) as e:
+    # 如果无法创建日志目录，使用临时目录或当前目录
+    import tempfile
+    log_dir = tempfile.gettempdir()
+    print(f"警告: 无法创建日志目录，使用临时目录: {log_dir}, 错误: {e}")
 
 # ====== 配置根日志记录器 ======
 # 这样所有子模块的日志都会被记录
@@ -37,22 +49,37 @@ root_logger = logging.getLogger()
 log_level = settings.LOG_LEVEL if hasattr(settings, 'LOG_LEVEL') else ("WARNING" if settings.is_production else "INFO")
 root_logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
 
-# 创建轮转文件处理器
-file_handler = RotatingFileHandler(
-    os.path.join(log_dir, 'app.log'),
-    maxBytes=1024 * 1024 * 5,  # 5MB
-    backupCount=5,
-    encoding='utf-8'
-)
 # 多进程环境优化：在日志中包含进程ID，便于区分不同 worker
 formatter = logging.Formatter(
     '%(asctime)s - [PID:%(process)d] - %(name)s - %(levelname)s - %(message)s'
 )
-file_handler.setFormatter(formatter)
-file_handler.setLevel(getattr(logging, log_level.upper(), logging.INFO))
 
-# 添加到根日志记录器（这样所有子模块的日志都会被记录）
-root_logger.addHandler(file_handler)
+# 创建轮转文件处理器（带错误处理）
+file_handler = None
+log_file_path = os.path.join(log_dir, 'app.log')
+try:
+    file_handler = RotatingFileHandler(
+        log_file_path,
+        maxBytes=1024 * 1024 * 5,  # 5MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+    # 添加到根日志记录器（这样所有子模块的日志都会被记录）
+    root_logger.addHandler(file_handler)
+    print(f"日志文件已创建: {log_file_path}")
+except (OSError, PermissionError) as e:
+    # 如果无法创建日志文件，只使用控制台输出
+    print(f"警告: 无法创建日志文件 {log_file_path}，将只使用控制台输出。错误: {e}")
+    print(f"请检查日志目录权限: {log_dir}")
+    print(f"建议执行: sudo chown -R $(whoami):$(whoami) {log_dir} 或 sudo chmod 755 {log_dir}")
+    # 确保至少有一个控制台处理器
+    if not any(isinstance(h, logging.StreamHandler) for h in root_logger.handlers):
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        console_handler.setLevel(logging.INFO)
+        root_logger.addHandler(console_handler)
 
 
 # 重定向 stdout 和 stderr 到日志文件（捕获 print() 输出）
@@ -78,12 +105,26 @@ class LoggingStream:
 # 创建专门的 logger 用于捕获 stdout/stderr
 stdout_logger = logging.getLogger('stdout')
 stdout_logger.setLevel(logging.INFO)
-stdout_logger.addHandler(file_handler)
+if file_handler:
+    stdout_logger.addHandler(file_handler)
+else:
+    # 如果没有文件处理器，使用控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)
+    stdout_logger.addHandler(console_handler)
 stdout_logger.propagate = False  # 防止重复输出
 
 stderr_logger = logging.getLogger('stderr')
 stderr_logger.setLevel(logging.WARNING)
-stderr_logger.addHandler(file_handler)
+if file_handler:
+    stderr_logger.addHandler(file_handler)
+else:
+    # 如果没有文件处理器，使用控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.WARNING)
+    stderr_logger.addHandler(console_handler)
 stderr_logger.propagate = False  # 防止重复输出
 
 # 重定向 stdout 和 stderr（生产环境也重定向，确保 print() 输出被记录）

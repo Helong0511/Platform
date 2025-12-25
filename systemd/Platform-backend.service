@@ -12,8 +12,10 @@ Environment="PATH=/data/Platform/venv/bin"
 Environment="PRODUCTION_ENV=production"
 EnvironmentFile=/data/Platform/.env
 
-# 确保日志目录存在（注意：目录权限需要在部署时手动设置）
+# 确保日志目录存在并设置权限
 ExecStartPre=/bin/mkdir -p /data/Platform/logs
+ExecStartPre=/bin/chown -R www-data:www-data /data/Platform/logs
+ExecStartPre=/bin/chmod 755 /data/Platform/logs
 
 # 启动命令
 # 使用 Gunicorn 配置文件（推荐，统一管理所有配置）
