@@ -203,6 +203,7 @@ async def sync_short_links_for_offer(
             )
             offer = offer_result.scalars().first()
             
+            if offer:
                 offer.downstream_tracklink = short_link_url
                 logger.info(f"更新Offer的downstream_tracklink: offer_id={offer_id}, tracklink={short_link_url}")
         else:
