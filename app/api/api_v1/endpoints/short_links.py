@@ -5,7 +5,7 @@
 import logging
 from typing import Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, Query, Path, Request, HTTPException
+from fastapi import APIRouter, Depends, Query, Path, Request, HTTPException, BackgroundTasks
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -20,7 +20,8 @@ from app.core.short_link.generator import (
     generate_short_code_from_id,
     generate_unique_short_code
 )
-from app.models.models import User, UserRole, ShortLink, Offer, Publisher
+from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
+from app.models.models import User, UserRole, ShortLink, Offer, Publisher, Click
 from app.schemas.short_link import (
     ShortLinkCreate,
     ShortLinkUpdate,
@@ -106,11 +107,16 @@ async def check_short_code(
 @router.get("/{short_code}", summary="短链接重定向")
 async def redirect_short_link(
     short_code: str = Path(..., description="短链接代码"),
+    offer_id: Optional[int] = Query(None, description="Offer ID（从URL参数获取）"),
+    channel_id: Optional[int] = Query(None, description="渠道ID（从URL参数获取）"),
+    request: Request = None,
+    background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db)
 ):
     """
     短链接重定向（公开接口，无需认证）
     访问短链接时自动重定向到原始URL
+    从URL参数中提取offer_id和channel_id并保存到点击记录
     """
     # 查询短链接
     result = await db.execute(
@@ -148,6 +154,74 @@ async def redirect_short_link(
                 ErrorCode.RESOURCE_NOT_FOUND,
                 detail="短链接已过期"
             )
+    
+    # 从URL参数或短链接关联信息中获取offer_id和channel_id
+    final_offer_id = offer_id or short_link.offer_id
+    final_channel_id = channel_id or short_link.channel_id
+    
+    # 如果从URL参数获取了offer_id，验证Offer是否存在并获取advertiser_id
+    advertiser_id = None
+    if final_offer_id:
+        offer_result = await db.execute(
+            select(Offer).where(Offer.id == final_offer_id)
+        )
+        offer = offer_result.scalars().first()
+        if offer:
+            advertiser_id = offer.advertiser_id
+        else:
+            # 如果offer_id无效，记录警告但继续处理
+            logger.warning(f"短链接点击时提供的offer_id无效: offer_id={final_offer_id}, short_code={short_code}")
+    
+    # 获取客户端信息
+    def get_client_ip(req: Request) -> Optional[str]:
+        """获取客户端真实IP"""
+        if not req:
+            return None
+        # 优先从 X-Forwarded-For 获取（经过代理时）
+        forwarded_for = req.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
+        # 其次从 X-Real-IP 获取
+        real_ip = req.headers.get("X-Real-IP")
+        if real_ip:
+            return real_ip
+        # 最后从 client.host 获取
+        if req.client:
+            return req.client.host
+        return None
+    
+    client_ip = get_client_ip(request)
+    user_agent = request.headers.get("user-agent") if request else None
+    referer = request.headers.get("referer") if request else None
+    
+    # 生成Click ID
+    click_id = generate_click_id_from_timestamp()
+    
+    # 创建点击记录（异步保存，不阻塞重定向）
+    if background_tasks:
+        from app.api.api_v1.endpoints.tracking import create_click_background
+        
+        click_data = {
+            "click_id": click_id,
+            "short_link_id": short_link.id,
+            "offer_id": final_offer_id,
+            "publisher_id": final_channel_id,  # publisher_id对应channel_id
+            "advertiser_id": advertiser_id,
+            "click_time": datetime.now(timezone.utc),
+            "ip": client_ip,
+            "user_agent": user_agent,
+            "referer": referer,
+            "country": None
+        }
+        
+        background_tasks.add_task(create_click_background, click_data)
+        logger.info(
+            f"短链接点击记录已创建（异步）: "
+            f"click_id={click_id}, "
+            f"short_code={short_code}, "
+            f"offer_id={final_offer_id}, "
+            f"channel_id={final_channel_id}"
+        )
     
     # 异步更新点击次数（使用Redis计数器，不阻塞重定向）
     try:
