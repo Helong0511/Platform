@@ -746,23 +746,8 @@ const fixSelectDisplay = () => {
         if (modelValue !== null && modelValue !== undefined) {
           hasVueValue = true;
           
-          // 如果 Vue 实例有 updateModelValue 方法，尝试强制更新显示
-          if (vueInstance.updateModelValue && typeof vueInstance.updateModelValue === 'function') {
-            try {
-              vueInstance.updateModelValue(modelValue);
-            } catch (e) {
-              // 忽略错误
-            }
-          }
-          
-          // 如果 Vue 实例有 $forceUpdate 方法，强制更新
-          if (vueInstance.$forceUpdate && typeof vueInstance.$forceUpdate === 'function') {
-            try {
-              vueInstance.$forceUpdate();
-            } catch (e) {
-              // 忽略错误
-            }
-          }
+          // 注意：不要调用 updateModelValue 或 $forceUpdate，这可能导致无限循环
+          // 只检查值，不强制更新 Vue 实例
         }
       }
     } catch (e) {
@@ -927,11 +912,23 @@ window.debugSelectDisplay = debugSelectDisplay;
 // 修复表单元素可访问性问题：为缺少 title 和 placeholder 的 input 元素添加可访问性属性
 const fixSelectAccessibility = () => {
   // 使用 MutationObserver 监听 DOM 变化，确保动态创建的表单元素也能被修复
+  // 使用防抖，避免频繁调用导致性能问题
+  let mutationTimeout = null;
   const observer = new MutationObserver(() => {
-    fixSelectInputs();
-    fixDatePickerInputs();
-    fixOtherFormInputs();
-    fixSelectDisplay(); // 同时修复选中值显示
+    // 清除之前的定时器
+    if (mutationTimeout) {
+      clearTimeout(mutationTimeout);
+    }
+    // 防抖：300ms 内只执行最后一次
+    mutationTimeout = setTimeout(() => {
+      fixSelectInputs();
+      fixDatePickerInputs();
+      fixOtherFormInputs();
+      // 只在有 el-select 元素时才调用 fixSelectDisplay
+      if (document.querySelector('.el-select')) {
+        fixSelectDisplay();
+      }
+    }, 300);
   });
 
   // 修复 el-select 的 input 元素
@@ -1046,35 +1043,41 @@ const fixSelectAccessibility = () => {
     });
   }
 
-  // 开始观察 DOM 变化
+  // 开始观察 DOM 变化（使用更保守的配置，避免性能问题）
   observer.observe(document.body, {
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ['class', 'style']
+    attributeFilter: ['class'] // 只监听 class 变化，不监听 style（避免频繁触发）
   });
   
-  // 监听所有 el-select 的 change 事件
+  // 监听所有 el-select 的 change 事件（使用防抖，避免频繁调用）
+  let changeTimeout = null;
   document.addEventListener('change', (e) => {
     if (e.target.closest('.el-select')) {
-      setTimeout(() => {
+      // 清除之前的定时器
+      if (changeTimeout) {
+        clearTimeout(changeTimeout);
+      }
+      // 防抖：100ms 后执行
+      changeTimeout = setTimeout(() => {
         fixSelectDisplay();
-      }, 50);
-      setTimeout(() => {
-        fixSelectDisplay();
-      }, 200);
+      }, 100);
     }
   }, true);
   
-  // 监听所有 el-select 的 click 事件（选择选项时）
+  // 监听所有 el-select 的 click 事件（选择选项时，使用防抖）
+  let clickTimeout = null;
   document.addEventListener('click', (e) => {
     if (e.target.closest('.el-select-dropdown__item')) {
-      setTimeout(() => {
+      // 清除之前的定时器
+      if (clickTimeout) {
+        clearTimeout(clickTimeout);
+      }
+      // 防抖：100ms 后执行
+      clickTimeout = setTimeout(() => {
         fixSelectDisplay();
-      }, 50);
-      setTimeout(() => {
-        fixSelectDisplay();
-      }, 200);
+      }, 100);
     }
   }, true);
   
