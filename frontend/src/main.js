@@ -948,27 +948,29 @@ const fixSelectDisplay = () => {
                            inputWrapper.querySelector('[class*="selection"]');
         
         if (selectionEl) {
-          // 确保选中值元素可见
+          // 确保选中值元素可见，z-index 要足够高，不被 tooltip 遮盖
           selectionEl.style.cssText = `
             opacity: 1 !important;
             visibility: visible !important;
-            z-index: 9999 !important;
+            z-index: 102 !important;
             position: relative !important;
             display: block !important;
             color: var(--el-text-color-regular) !important;
+            background: transparent !important;
           `;
         }
         
-        // 确保 input 元素可见
+        // 确保 input 元素可见，z-index 要足够高，不被 tooltip 遮盖
         const inputs = inputWrapper.querySelectorAll('input');
         inputs.forEach(input => {
           input.style.cssText = `
             opacity: 1 !important;
             visibility: visible !important;
             color: var(--el-text-color-regular) !important;
-            z-index: 9999 !important;
+            z-index: 102 !important;
             position: relative !important;
             display: block !important;
+            background: transparent !important;
           `;
         });
         
@@ -979,14 +981,16 @@ const fixSelectDisplay = () => {
           if (child !== placeholderEl && !child.classList.contains('el-select__placeholder')) {
             const childText = child.textContent?.trim() || '';
             // 如果子元素有文本，且不是原始 placeholder，确保可见
+            // z-index 要足够高，不被 tooltip 遮盖
             if (childText && childText !== originalPlaceholder) {
               child.style.cssText = `
                 opacity: 1 !important;
                 visibility: visible !important;
-                z-index: 9999 !important;
+                z-index: 102 !important;
                 position: relative !important;
                 display: block !important;
                 color: var(--el-text-color-regular) !important;
+                background: transparent !important;
               `;
             }
           }
