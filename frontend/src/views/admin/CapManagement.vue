@@ -169,8 +169,6 @@
           <el-select 
             v-model="formData.cap_type" 
             style="width: 100%;" 
-            :popper-append-to-body="true"
-            :popper-options="{ strategy: 'fixed' }"
             @change="handleCapTypeChange"
           >
             <el-option label="advertiser_offer" value="advertiser_offer" />
@@ -188,8 +186,6 @@
             placeholder="请选择广告主"
             filterable
             style="width: 100%;"
-            :popper-append-to-body="true"
-            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option
               v-for="adv in advertiserList"
@@ -206,8 +202,6 @@
             placeholder="请选择Offer"
             filterable
             style="width: 100%;"
-            :popper-append-to-body="true"
-            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option
               v-for="offer in offerList"
@@ -225,7 +219,6 @@
             clearable
             filterable
             style="width: 100%;"
-            :popper-append-to-body="true"
           >
             <el-option
               v-for="pub in publisherList"
