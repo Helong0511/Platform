@@ -1026,16 +1026,21 @@ const fixSelectDisplay = () => {
 
 // 渠道选择变化处理
 const handlePublisherChange = (index) => {
-  fixSelectDisplay()
+  // 延迟修复，确保 Element Plus 先完成下拉菜单的关闭
+  nextTick(() => {
+    setTimeout(() => {
+      fixSelectDisplay()
+    }, 100)
+  })
 }
 
 // 渠道选择失去焦点处理
 const handlePublisherBlur = (index) => {
-  // 失去焦点时，确保选中值正确显示
+  // 失去焦点时，延迟修复以确保下拉菜单已关闭
   nextTick(() => {
     setTimeout(() => {
       fixSelectDisplay()
-    }, 10)
+    }, 150)
   })
 }
 
@@ -1049,7 +1054,12 @@ const handlePublisherFocus = (index) => {
 
 // 监听 publisher_configs 的变化，自动修复显示
 watch(() => formData.publisher_configs, () => {
-  fixSelectDisplay()
+  // 延迟修复，避免干扰下拉菜单的打开/关闭
+  nextTick(() => {
+    setTimeout(() => {
+      fixSelectDisplay()
+    }, 100)
+  })
 }, { deep: true })
 
 // 监听对话框打开，确保选中值正确显示
@@ -1069,6 +1079,7 @@ watch(() => dialogVisible.value, (newVal) => {
 
 // MutationObserver 用于监听 el-select 的 DOM 变化
 let selectObserver = null
+let fixTimer = null
 
 const startSelectObserver = () => {
   if (selectObserver) return
@@ -1076,9 +1087,20 @@ const startSelectObserver = () => {
   const targetNode = document.querySelector('.publisher-config-content')
   if (!targetNode) return
   
-  selectObserver = new MutationObserver(() => {
-    // DOM 变化时，修复显示
-    fixSelectDisplay()
+  selectObserver = new MutationObserver((mutations) => {
+    // 检查是否有下拉菜单打开，如果有则不修复（避免干扰下拉菜单）
+    const hasOpenDropdown = document.querySelector('.el-select-dropdown:not([style*="display: none"])')
+    if (hasOpenDropdown) {
+      return // 下拉菜单打开时，不修复
+    }
+    
+    // 防抖处理，避免频繁触发
+    if (fixTimer) {
+      clearTimeout(fixTimer)
+    }
+    fixTimer = setTimeout(() => {
+      fixSelectDisplay()
+    }, 50)
   })
   
   selectObserver.observe(targetNode, {
@@ -1093,6 +1115,10 @@ const stopSelectObserver = () => {
   if (selectObserver) {
     selectObserver.disconnect()
     selectObserver = null
+  }
+  if (fixTimer) {
+    clearTimeout(fixTimer)
+    fixTimer = null
   }
 }
 
