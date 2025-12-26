@@ -290,24 +290,44 @@ async def create_offer(
         
         # 处理渠道分配
         publisher_ids_for_short_link = []
-        if offer_in.publisher_configs:
+        if offer_in.publisher_configs is not None:
             # 使用新的渠道配置方式
+            # 验证不能为空数组
+            if len(offer_in.publisher_configs) == 0:
+                raise_api_exception(
+                    ErrorCode.INVALID_PARAMETER,
+                    detail="渠道配置不能为空，请至少添加一个渠道"
+                )
+            
+            # 验证是否有重复的publisher_id
+            publisher_ids = [config.publisher_id for config in offer_in.publisher_configs]
+            if len(publisher_ids) != len(set(publisher_ids)):
+                raise_api_exception(
+                    ErrorCode.INVALID_PARAMETER,
+                    detail="渠道配置中存在重复的渠道ID"
+                )
+            
             for config in offer_in.publisher_configs:
                 # 验证渠道是否存在
                 pub_result = await db.execute(
                     select(Publisher).where(Publisher.id == config.publisher_id)
                 )
                 publisher = pub_result.scalars().first()
-                if publisher:
-                    assignment = OfferPublisherAssignment(
-                        offer_id=offer.id,
-                        publisher_id=config.publisher_id,
-                        downstream_cap=config.downstream_cap,
-                        affiliate_payout=config.affiliate_payout,
-                        is_active=True
+                if not publisher:
+                    raise_api_exception(
+                        ErrorCode.RESOURCE_NOT_FOUND,
+                        detail=f"渠道ID {config.publisher_id} 不存在"
                     )
-                    db.add(assignment)
-                    publisher_ids_for_short_link.append(config.publisher_id)
+                
+                assignment = OfferPublisherAssignment(
+                    offer_id=offer.id,
+                    publisher_id=config.publisher_id,
+                    downstream_cap=config.downstream_cap,
+                    affiliate_payout=config.affiliate_payout,
+                    is_active=True
+                )
+                db.add(assignment)
+                publisher_ids_for_short_link.append(config.publisher_id)
         elif offer_in.publisher_ids:
             # 向后兼容：使用旧的publisher_ids方式
             for pub_id in offer_in.publisher_ids:
@@ -616,22 +636,42 @@ async def update_offer(
         )
         
         # 添加新分配
-        if offer_in.publisher_configs:
+        if offer_in.publisher_configs is not None:
+            # 验证不能为空数组
+            if len(offer_in.publisher_configs) == 0:
+                raise_api_exception(
+                    ErrorCode.INVALID_PARAMETER,
+                    detail="渠道配置不能为空，请至少添加一个渠道"
+                )
+            
+            # 验证是否有重复的publisher_id
+            publisher_ids = [config.publisher_id for config in offer_in.publisher_configs]
+            if len(publisher_ids) != len(set(publisher_ids)):
+                raise_api_exception(
+                    ErrorCode.INVALID_PARAMETER,
+                    detail="渠道配置中存在重复的渠道ID"
+                )
+            
             for config in offer_in.publisher_configs:
                 pub_result = await db.execute(
                     select(Publisher).where(Publisher.id == config.publisher_id)
                 )
                 publisher = pub_result.scalars().first()
-                if publisher:
-                    assignment = OfferPublisherAssignment(
-                        offer_id=offer.id,
-                        publisher_id=config.publisher_id,
-                        downstream_cap=config.downstream_cap,
-                        affiliate_payout=config.affiliate_payout,
-                        is_active=True
+                if not publisher:
+                    raise_api_exception(
+                        ErrorCode.RESOURCE_NOT_FOUND,
+                        detail=f"渠道ID {config.publisher_id} 不存在"
                     )
-                    db.add(assignment)
-                    publisher_ids_for_short_link.append(config.publisher_id)
+                
+                assignment = OfferPublisherAssignment(
+                    offer_id=offer.id,
+                    publisher_id=config.publisher_id,
+                    downstream_cap=config.downstream_cap,
+                    affiliate_payout=config.affiliate_payout,
+                    is_active=True
+                )
+                db.add(assignment)
+                publisher_ids_for_short_link.append(config.publisher_id)
     elif 'publisher_ids' in offer_in.model_dump(exclude_unset=True):
         # 向后兼容：使用旧的publisher_ids方式
         # 获取旧的渠道分配列表（用于比较）

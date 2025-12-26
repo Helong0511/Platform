@@ -1022,6 +1022,14 @@ const handleSubmit = async () => {
       return
     }
     
+    // 验证是否有重复的渠道ID
+    const publisherIds = validConfigs.map(config => config.publisher_id)
+    const uniquePublisherIds = new Set(publisherIds)
+    if (publisherIds.length !== uniquePublisherIds.size) {
+      ElMessage.warning('渠道配置中存在重复的渠道，请检查')
+      return
+    }
+    
     submitting.value = true
     try {
       // 构建提交数据
