@@ -43,14 +43,10 @@
         <el-form-item v-if="isAdmin" label="客户">
           <el-select 
             v-model="searchForm.clientId" 
-            name="clientId"
             placeholder="全部客户" 
             style="width: 100%;"
             @change="handleFilterClientChange"
-            @blur="() => fixFilterSelectDisplay()"
             clearable
-            :popper-append-to-body="true"
-            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option v-for="user in users" :key="user.value" :label="user.label" :value="user.value"></el-option>
           </el-select>
@@ -58,14 +54,10 @@
         <el-form-item label="产品">
           <el-select 
             v-model="searchForm.productId" 
-            name="productId"
             placeholder="全部产品" 
             style="width: 100%;"
             clearable
             @change="handleFilterProductChange"
-            @blur="() => fixFilterSelectDisplay()"
-            :popper-append-to-body="true"
-            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option v-for="product in filterProducts" :key="product.value" :label="product.label" :value="product.value"></el-option>
           </el-select>
@@ -73,14 +65,10 @@
         <el-form-item label="国家">
           <el-select 
             v-model="searchForm.countryCode" 
-            name="countryCode"
             placeholder="全部区域" 
             style="width: 100%;"
             clearable
             @change="handleCountryChange"
-            @blur="() => fixFilterSelectDisplay()"
-            :popper-append-to-body="true"
-            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option v-for="country in filterCountries" :key="country.code" :label="country.name_zh" :value="country.code"></el-option>
           </el-select>
@@ -171,11 +159,8 @@
         <el-form-item label="所属用户" prop="client_id">
           <el-select 
             v-model="editForm.client_id" 
-            name="client_id" 
             placeholder="选择用户" 
             style="width: 100%;"
-            :popper-append-to-body="true"
-            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option v-for="user in users" :key="user.value" :label="user.label" :value="user.value"></el-option>
           </el-select>
@@ -183,13 +168,10 @@
         <el-form-item label="产品" prop="product_id">
           <el-select 
             v-model="editForm.product_id" 
-            name="product_id" 
             placeholder="选择产品" 
             style="width: 100%;" 
             @change="handleProductChange" 
             :disabled="!editForm.client_id"
-            :popper-append-to-body="true"
-            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option v-for="product in products" :key="product.value" :label="product.label" :value="product.value"></el-option>
           </el-select>
@@ -747,7 +729,7 @@ const handleFilterClientChange = async (clientId) => {
   // 修复选中值显示
   nextTick(() => {
     setTimeout(() => {
-      fixFilterSelectDisplay()
+
     }, 100)
   })
 };
@@ -776,7 +758,7 @@ const handleFilterProductChange = async () => {
   // 修复选中值显示
   nextTick(() => {
     setTimeout(() => {
-      fixFilterSelectDisplay()
+
     }, 100)
   })
 };
@@ -841,148 +823,12 @@ const handleCountryChange = () => {
   // 修复选中值显示
   nextTick(() => {
     setTimeout(() => {
-      fixFilterSelectDisplay()
+
     }, 100)
   })
 };
 
-/**
- * 修复筛选表单中 el-select 的显示问题
- */
-const fixFilterSelectDisplay = () => {
-  try {
-    nextTick(() => {
-      setTimeout(() => {
-        try {
-          const selectElements = document.querySelectorAll('.filter-form .el-select')
-          selectElements.forEach((selectEl) => {
-            try {
-              // 获取对应的 v-model 值
-              const selectComponent = selectEl.__vueParentComponent
-              let hasValue = false
-              let selectedLabel = ''
-              
-              // 检查是否有值 - 通过多种方式
-              if (!selectEl.classList.contains('is-empty')) {
-                hasValue = true
-              }
-              
-              // 通过检查 input 的值来判断
-              const input = selectEl.querySelector('.el-input__inner, .el-input__wrapper input, .el-select__input')
-              if (input && input.value && input.value.trim() !== '') {
-                hasValue = true
-                selectedLabel = input.value
-              }
-              
-              // 通过检查 selected-item 来判断
-              const selectedItem = selectEl.querySelector('.el-select__selected-item')
-              if (selectedItem) {
-                hasValue = true
-                selectedLabel = selectedItem.textContent || selectedItem.innerText
-              }
-              
-              // 通过检查 searchForm 的值来判断
-              const nameAttr = selectEl.querySelector('input')?.getAttribute('name')
-              if (nameAttr) {
-                if (nameAttr === 'clientId' && searchForm.value.clientId) {
-                  hasValue = true
-                  const user = users.value.find(u => u.value === searchForm.value.clientId)
-                  if (user) selectedLabel = user.label
-                } else if (nameAttr === 'productId' && searchForm.value.productId) {
-                  hasValue = true
-                  const product = filterProducts.value.find(p => p.value === searchForm.value.productId)
-                  if (product) selectedLabel = product.label
-                } else if (nameAttr === 'countryCode' && searchForm.value.countryCode) {
-                  hasValue = true
-                  const country = filterCountries.value.find(c => c.code === searchForm.value.countryCode)
-                  if (country) selectedLabel = country.name_zh
-                }
-              }
-              
-              if (hasValue) {
-                // 移除 is-empty 类
-                selectEl.classList.remove('is-empty')
-                
-                // 隐藏 placeholder
-                const placeholder = selectEl.querySelector('.el-select__placeholder')
-                if (placeholder) {
-                  placeholder.style.display = 'none'
-                  placeholder.style.visibility = 'hidden'
-                  placeholder.style.opacity = '0'
-                  placeholder.style.height = '0'
-                  placeholder.style.width = '0'
-                  placeholder.style.overflow = 'hidden'
-                  placeholder.style.pointerEvents = 'none'
-                }
-                
-                // 确保选中值显示
-                if (input) {
-                  if (selectedLabel && input.value !== selectedLabel) {
-                    input.value = selectedLabel
-                  }
-                  input.style.opacity = '1'
-                  input.style.visibility = 'visible'
-                  input.style.color = 'var(--el-text-color-regular)'
-                  input.style.zIndex = '2'
-                  input.style.display = 'block'
-                }
-                
-                const inputInner = selectEl.querySelector('.el-input__inner')
-                if (inputInner) {
-                  if (selectedLabel && inputInner.textContent !== selectedLabel) {
-                    inputInner.textContent = selectedLabel
-                    inputInner.innerText = selectedLabel
-                  }
-                  inputInner.style.opacity = '1'
-                  inputInner.style.visibility = 'visible'
-                  inputInner.style.color = 'var(--el-text-color-regular)'
-                  inputInner.style.zIndex = '2'
-                  inputInner.style.display = 'block'
-                }
-                
-                // 确保 selected-item 显示
-                if (selectedItem) {
-                  selectedItem.style.display = 'inline-block'
-                  selectedItem.style.visibility = 'visible'
-                  selectedItem.style.opacity = '1'
-                  selectedItem.style.zIndex = '2'
-                }
-              } else {
-                // 没有值时，显示 placeholder
-                selectEl.classList.add('is-empty')
-                const placeholder = selectEl.querySelector('.el-select__placeholder')
-                if (placeholder) {
-                  placeholder.style.display = ''
-                  placeholder.style.visibility = ''
-                  placeholder.style.opacity = ''
-                  placeholder.style.height = ''
-                  placeholder.style.width = ''
-                  placeholder.style.overflow = ''
-                  placeholder.style.pointerEvents = ''
-                }
-              }
-            } catch (err) {
-              console.debug('修复单个 el-select 时出错:', err)
-            }
-          })
-        } catch (err) {
-          console.debug('修复 filter-form el-select 显示时出错:', err)
-        }
-      }, 100)
-    })
-  } catch (err) {
-    console.debug('fixFilterSelectDisplay 出错:', err)
-  }
-}
 
-// 监听筛选表单的变化，自动修复显示
-watch(() => [searchForm.value.clientId, searchForm.value.productId, searchForm.value.countryCode], () => {
-  nextTick(() => {
-    setTimeout(() => {
-      fixFilterSelectDisplay()
-    }, 100)
-  })
-}, { deep: true })
 
 /**
  * 日期范围变化时的处理函数
@@ -1846,32 +1692,7 @@ watch(
   width: 100% !important;
 }
 
-/* 修复 filter-form 中的 el-select placeholder 遮盖选中值的问题 */
-.filter-form :deep(.el-select .el-select__placeholder) {
-  z-index: 0 !important;
-  pointer-events: none !important;
-  position: absolute !important;
-}
 
-.filter-form :deep(.el-select:not(.is-empty) .el-select__placeholder),
-.filter-form :deep(.el-select:hover .el-select__placeholder),
-.filter-form :deep(.el-select:focus .el-select__placeholder) {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  z-index: 0 !important;
-  pointer-events: none !important;
-}
-
-.filter-form :deep(.el-select .el-input__inner),
-.filter-form :deep(.el-select .el-input__wrapper input),
-.filter-form :deep(.el-select .el-select__input) {
-  z-index: 2 !important;
-  position: relative !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-  color: var(--el-text-color-regular) !important;
-}
   
   .filter-form :deep(.el-date-editor.el-input__wrapper) {
     width: 100% !important;

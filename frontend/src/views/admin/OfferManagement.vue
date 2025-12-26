@@ -440,13 +440,6 @@
                     placeholder="请选择渠道"
                     filterable
                     style="width: 100%;"
-                    popper-class="publisher-select-dropdown"
-                    :popper-append-to-body="true"
-                    :popper-options="{ strategy: 'fixed' }"
-                    @change="() => fixPlaceholderDisplay()"
-                    @blur="() => fixPlaceholderDisplay()"
-                    @mouseenter="() => fixPlaceholderDisplay()"
-                    @mouseleave="() => fixPlaceholderDisplay()"
                   >
                     <el-option
                       v-for="pub in publisherList"
@@ -937,124 +930,7 @@ const getPublisherName = (publisherId) => {
 }
 
 // 修复函数：确保选中值后 placeholder 隐藏，选中值显示
-const fixPlaceholderDisplay = () => {
-  try {
-    nextTick(() => {
-      setTimeout(() => {
-        try {
-          const selectElements = document.querySelectorAll('.publisher-config-content .el-select')
-          selectElements.forEach((selectEl, idx) => {
-            try {
-              const config = formData.publisher_configs[idx]
-              if (!config) return
-              
-              const publisherId = config.publisher_id
-              const hasValue = publisherId !== null && publisherId !== undefined && publisherId !== ''
-              
-              if (hasValue && publisherId) {
-                // 获取对应的渠道名称
-                const publisher = publisherList.value.find(p => p.id === publisherId)
-                if (!publisher) return
-                
-                // 移除 is-empty 类（如果存在）
-                selectEl.classList.remove('is-empty')
-                
-                // 隐藏 placeholder
-                const placeholder = selectEl.querySelector('.el-select__placeholder')
-                if (placeholder) {
-                  placeholder.style.display = 'none'
-                  placeholder.style.visibility = 'hidden'
-                  placeholder.style.opacity = '0'
-                  placeholder.style.height = '0'
-                  placeholder.style.width = '0'
-                  placeholder.style.overflow = 'hidden'
-                  placeholder.style.pointerEvents = 'none'
-                }
-                
-                // 确保选中值显示
-                const input = selectEl.querySelector('.el-input__inner, .el-input__wrapper input, .el-select__input')
-                const inputInner = selectEl.querySelector('.el-input__inner')
-                const selectedItem = selectEl.querySelector('.el-select__selected-item')
-                
-                if (input) {
-                  // 设置 input 的值
-                  if (input.value !== publisher.publisher_name) {
-                    input.value = publisher.publisher_name
-                  }
-                  // 确保 input 可见
-                  input.style.opacity = '1'
-                  input.style.visibility = 'visible'
-                  input.style.color = 'var(--el-text-color-regular)'
-                  input.style.zIndex = '2'
-                  input.style.display = 'block'
-                }
-                
-                if (inputInner) {
-                  // 设置 inputInner 的文本
-                  if (inputInner.textContent !== publisher.publisher_name) {
-                    inputInner.textContent = publisher.publisher_name
-                    inputInner.innerText = publisher.publisher_name
-                  }
-                  // 确保 inputInner 可见
-                  inputInner.style.opacity = '1'
-                  inputInner.style.visibility = 'visible'
-                  inputInner.style.color = 'var(--el-text-color-regular)'
-                  inputInner.style.zIndex = '2'
-                  inputInner.style.display = 'block'
-                }
-                
-                // 确保 selected-item 显示
-                if (selectedItem) {
-                  selectedItem.style.display = 'inline-block'
-                  selectedItem.style.visibility = 'visible'
-                  selectedItem.style.opacity = '1'
-                  selectedItem.style.zIndex = '2'
-                }
-              } else {
-                // 没有值时，显示 placeholder
-                selectEl.classList.add('is-empty')
-                const placeholder = selectEl.querySelector('.el-select__placeholder')
-                if (placeholder) {
-                  placeholder.style.display = ''
-                  placeholder.style.visibility = ''
-                  placeholder.style.opacity = ''
-                  placeholder.style.height = ''
-                  placeholder.style.width = ''
-                  placeholder.style.overflow = ''
-                  placeholder.style.pointerEvents = ''
-                }
-              }
-            } catch (err) {
-              // 静默处理单个元素的错误，不影响其他元素
-              console.debug('修复单个 el-select 时出错:', err)
-            }
-          })
-        } catch (err) {
-          // 静默处理错误，避免影响用户体验
-          console.debug('修复 el-select 显示时出错:', err)
-        }
-      }, 150)
-    })
-  } catch (err) {
-    // 静默处理错误，避免影响用户体验
-    console.debug('fixPlaceholderDisplay 出错:', err)
-  }
-}
 
-// 监听 publisher_configs 的变化
-watch(() => formData.publisher_configs, () => {
-  fixPlaceholderDisplay()
-}, { deep: true })
-
-// 监听对话框打开
-watch(() => dialogVisible.value, (newVal) => {
-  if (newVal) {
-    // 对话框打开时，延迟修复以确保 DOM 已渲染
-    setTimeout(() => {
-      fixPlaceholderDisplay()
-    }, 200)
-  }
-})
 
 // 添加
 const handleAdd = () => {
