@@ -936,24 +936,19 @@ const getPublisherName = (publisherId) => {
 }
 
 // 修复 el-select 显示问题的通用函数
-const fixSelectDisplay = () => {
-  // 首先检查是否有下拉菜单打开，如果有则不修复
-  const hasOpenDropdown = document.querySelector('.el-select-dropdown:not([style*="display: none"]):not([style*="display:none"])')
-  const hasVisiblePopper = document.querySelector('.el-select__popper:not([style*="display: none"]):not([style*="display:none"])')
-  
-  if (hasOpenDropdown || hasVisiblePopper) {
-    return // 下拉菜单打开时，完全不修复
+const fixSelectDisplay = (force = false) => {
+  // 如果不是强制修复，检查是否有下拉菜单打开
+  if (!force) {
+    const hasOpenDropdown = document.querySelector('.el-select-dropdown:not([style*="display: none"]):not([style*="display:none"])')
+    const hasVisiblePopper = document.querySelector('.el-select__popper:not([style*="display: none"]):not([style*="display:none"])')
+    
+    if (hasOpenDropdown || hasVisiblePopper) {
+      return // 下拉菜单打开时，不修复
+    }
   }
   
   nextTick(() => {
     setTimeout(() => {
-      // 再次检查下拉菜单是否关闭
-      const stillOpen = document.querySelector('.el-select-dropdown:not([style*="display: none"]):not([style*="display:none"])') ||
-                       document.querySelector('.el-select__popper:not([style*="display: none"]):not([style*="display:none"])')
-      if (stillOpen) {
-        return // 如果下拉菜单仍然打开，不修复
-      }
-      
       const selectElements = document.querySelectorAll('.publisher-config-content .el-select')
       selectElements.forEach((selectEl, idx) => {
         const placeholder = selectEl.querySelector('.el-select__placeholder')
@@ -1055,8 +1050,8 @@ const handlePublisherBlur = (index) => {
   // 失去焦点时，延迟修复以确保下拉菜单已关闭
   nextTick(() => {
     setTimeout(() => {
-      fixSelectDisplay()
-    }, 150)
+      fixSelectDisplay(true) // 强制修复
+    }, 200)
   })
 }
 
@@ -1070,12 +1065,12 @@ const handlePublisherFocus = (index) => {
 
 // 渠道选择下拉菜单显示状态变化处理
 const handlePublisherVisibleChange = (index, visible) => {
-  // 当下拉菜单关闭时，修复显示
+  // 当下拉菜单关闭时，强制修复显示
   if (!visible) {
     nextTick(() => {
       setTimeout(() => {
-        fixSelectDisplay()
-      }, 100)
+        fixSelectDisplay(true) // 强制修复，不检查下拉菜单状态
+      }, 150)
     })
   }
 }
