@@ -789,6 +789,92 @@ const fixSelectDisplay = () => {
       }
     }
     
+    // 如果还是获取不到，尝试从 Vue 组件的实际渲染中获取
+    // 查找 el-select 组件在 Vue 组件树中的位置，获取其 props
+    if (!originalPlaceholder || originalPlaceholder === '请选择') {
+      try {
+        // 方法1: 从 Vue 实例的 setupState 或 ctx 中获取
+        const vueInstance = selectEl.__vueParentComponent || selectEl.__vue__;
+        if (vueInstance) {
+          // 尝试从 setupState 获取
+          if (vueInstance.setupState && vueInstance.setupState.placeholder) {
+            originalPlaceholder = vueInstance.setupState.placeholder;
+          }
+          // 尝试从 ctx 获取
+          if ((!originalPlaceholder || originalPlaceholder === '请选择') && vueInstance.ctx) {
+            const ctxPlaceholder = vueInstance.ctx.placeholder || vueInstance.ctx.$attrs?.placeholder;
+            if (ctxPlaceholder && ctxPlaceholder !== '请选择') {
+              originalPlaceholder = ctxPlaceholder;
+            }
+          }
+          // 尝试从 props 的原始值获取（如果 props 是响应式的，可能需要特殊处理）
+          if ((!originalPlaceholder || originalPlaceholder === '请选择') && vueInstance.props) {
+            const propsPlaceholder = vueInstance.props.placeholder;
+            if (propsPlaceholder && propsPlaceholder !== '请选择' && typeof propsPlaceholder === 'string') {
+              originalPlaceholder = propsPlaceholder;
+            }
+          }
+        }
+        
+        // 方法2: 从父组件中查找 el-select 的 placeholder 属性
+        if ((!originalPlaceholder || originalPlaceholder === '请选择') && selectEl.parentElement) {
+          // 查找最近的 Vue 组件实例
+          let parent = selectEl.parentElement;
+          let depth = 0;
+          while (parent && depth < 5) {
+            const parentVue = parent.__vueParentComponent || parent.__vue__;
+            if (parentVue) {
+              // 尝试从父组件的 data 或 props 中查找
+              if (parentVue.setupState) {
+                const setupPlaceholder = parentVue.setupState.placeholder;
+                if (setupPlaceholder && setupPlaceholder !== '请选择') {
+                  originalPlaceholder = setupPlaceholder;
+                  break;
+                }
+              }
+            }
+            parent = parent.parentElement;
+            depth++;
+          }
+        }
+        
+        // 方法3: 如果 placeholder 是 "请选择"，尝试从常见的完整 placeholder 推断
+        // 比如 "请选择广告主"、"请选择客户" 等
+        if (originalPlaceholder === '请选择' && placeholderEl) {
+          // 检查是否有其他 el-select 有完整的 placeholder，作为参考
+          const otherSelects = document.querySelectorAll('.el-select');
+          for (const otherSelect of otherSelects) {
+            if (otherSelect !== selectEl) {
+              const otherPlaceholder = otherSelect.getAttribute('placeholder') || 
+                                     otherSelect.querySelector('.el-select__placeholder')?.textContent?.trim();
+              if (otherPlaceholder && otherPlaceholder.includes('请选择') && otherPlaceholder.length > 3) {
+                // 如果其他 select 有完整的 placeholder，且当前 select 的 placeholder 文本是 "请选择"
+                // 可能是同一个组件，使用相同的完整 placeholder
+                originalPlaceholder = otherPlaceholder;
+                break;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // 忽略错误
+        if (window.DEBUG_SELECT) {
+          console.warn('[fixSelectDisplay] 获取 originalPlaceholder 失败:', e);
+        }
+      }
+    }
+    
+    // 如果 originalPlaceholder 仍然是 "请选择"，尝试从 DOM 中查找完整的 placeholder
+    // 有时候 Element Plus 会在内部存储完整的 placeholder
+    if (originalPlaceholder === '请选择' && placeholderEl) {
+      // 检查 placeholder 元素的 data 属性或其他属性
+      const dataPlaceholder = placeholderEl.getAttribute('data-placeholder') || 
+                             placeholderEl.getAttribute('data-original-placeholder');
+      if (dataPlaceholder && dataPlaceholder !== '请选择') {
+        originalPlaceholder = dataPlaceholder;
+      }
+    }
+    
     // 获取 placeholder 文本（在 if 块外定义，确保作用域正确）
     const currentPlaceholderText = placeholderEl ? (placeholderEl.textContent?.trim() || '') : '';
     
@@ -879,8 +965,13 @@ const fixSelectDisplay = () => {
     }
     
     // 方法4: 检查是否有选中的标签（多选模式）
-    const hasSelectedTags = selectEl.querySelector('.el-select__tags') !== null ||
-      selectEl.querySelector('.el-select__selected-item') !== null;
+    // 不仅要检查元素是否存在，还要检查它是否有实际内容（不是空的）
+    const tagsEl = selectEl.querySelector('.el-select__tags');
+    const selectedItemEl = selectEl.querySelector('.el-select__selected-item');
+    const hasSelectedTags = (tagsEl && tagsEl.children.length > 0) ||
+      (selectedItemEl && selectedItemEl.textContent?.trim() && 
+       selectedItemEl.textContent.trim() !== originalPlaceholder &&
+       selectedItemEl.textContent.trim().length > 0);
     
     // 方法5: 检查是否有清除按钮（如果有清除按钮，说明有选中值）
     const hasClearButton = selectEl.querySelector('.el-select__clear') !== null ||
