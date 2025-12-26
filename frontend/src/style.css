@@ -319,6 +319,46 @@ input[type="text"].el-input_inner {
   /* 如果没有 placeholder，将通过 JavaScript 动态添加 title 属性 */
 }
 
+/* ====== 全局修复：el-select placeholder 遮盖选中值的问题 ====== */
+/* 确保所有 el-select 组件在选中值后，placeholder 不会遮盖选中值 */
+
+/* 确保 placeholder 的 z-index 不会覆盖选中值，并且不会拦截点击事件 */
+.el-select .el-select__placeholder {
+  z-index: 0 !important;
+  pointer-events: none !important;
+  position: relative;
+}
+
+/* 当有选中值时，确保 placeholder 完全隐藏 */
+/* Element Plus 会在有值时移除某些类或添加某些类，这里确保 placeholder 隐藏 */
+.el-select:not(.is-empty) .el-select__placeholder,
+.el-select .el-select__placeholder[style*="display: none"],
+.el-select.has-value .el-select__placeholder {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+}
+
+/* 确保选中值的显示层级高于 placeholder */
+.el-select .el-select__selected-item,
+.el-select .el-select__input,
+.el-select .el-input__inner,
+.el-select .el-input__wrapper {
+  position: relative;
+  z-index: 1 !important;
+}
+
+/* 确保当 el-select 有值时，placeholder 元素不显示 */
+.el-select[data-value] .el-select__placeholder,
+.el-select:has(.el-select__selected-item) .el-select__placeholder {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
 /* ====== 性能优化：修复 @keyframes 中使用 left 属性的问题 ====== */
 /* Element Plus 的 indeterminate 动画使用 left 属性，会触发布局重排，影响性能 */
 /* 通过覆盖样式，使用 transform 替代 left，避免布局重排 */
