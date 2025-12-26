@@ -681,6 +681,8 @@ class OfferPublisherAssignment(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='分配ID')
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False, index=True, comment='Offer ID')
     publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="CASCADE"), nullable=False, index=True, comment='渠道ID')
+    downstream_cap = Column(Integer, nullable=True, comment='该渠道的下游转化上限')
+    affiliate_payout = Column(Float, nullable=True, comment='该渠道的扣价后给渠道的金额（PO扣价后）')
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),

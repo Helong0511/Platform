@@ -271,20 +271,6 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="下游PO" prop="affiliate_payout">
-              <el-input-number
-                v-model="formData.affiliate_payout"
-                :min="0"
-                :precision="2"
-                placeholder="扣价后给渠道的金额"
-                style="width: 100%;"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="20">
-          <el-col :span="12">
             <el-form-item label="上游Cap" prop="upstream_cap">
               <el-input-number
                 v-model="formData.upstream_cap"
@@ -294,17 +280,14 @@
               />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
-            <el-form-item label="下游Cap" prop="downstream_cap">
-              <el-input-number
-                v-model="formData.downstream_cap"
-                :min="0"
-                placeholder="下游转化上限"
-                style="width: 100%;"
-              />
-            </el-form-item>
-          </el-col>
         </el-row>
+        
+        <div style="margin: 16px 0; padding: 12px; background: #e6f7ff; border: 1px solid #91d5ff; border-radius: 4px;">
+          <el-text type="info" size="small">
+            <el-icon :size="16" style="vertical-align: middle; margin-right: 4px;"><InfoFilled /></el-icon>
+            注意：下游PO和下游Cap现在需要在"分配渠道"部分为每个渠道单独配置
+          </el-text>
+        </div>
 
         <el-form-item label="预览链接" prop="preview_link">
           <el-input v-model="formData.preview_link" placeholder="预览链接（可选）" />
@@ -390,21 +373,66 @@
           </el-col>
         </el-row>
 
-        <el-form-item label="分配渠道" prop="publisher_ids">
-          <el-select
-            v-model="formData.publisher_ids"
-            multiple
-            placeholder="请选择分配的渠道"
-            filterable
-            style="width: 100%;"
-          >
-            <el-option
-              v-for="pub in publisherList"
-              :key="pub.id"
-              :label="pub.publisher_name"
-              :value="pub.id"
-            />
-          </el-select>
+        <el-form-item label="分配渠道" prop="publisher_configs">
+          <div style="width: 100%;">
+            <div v-for="(config, index) in formData.publisher_configs" :key="index" style="margin-bottom: 16px; padding: 16px; border: 1px solid #dcdfe6; border-radius: 4px; background: #f5f7fa;">
+              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                <el-select
+                  v-model="config.publisher_id"
+                  placeholder="请选择渠道"
+                  filterable
+                  style="flex: 1;"
+                  @change="handlePublisherChange(index)"
+                >
+                  <el-option
+                    v-for="pub in publisherList"
+                    :key="pub.id"
+                    :label="pub.publisher_name"
+                    :value="pub.id"
+                    :disabled="isPublisherSelected(pub.id, index)"
+                  />
+                </el-select>
+                <el-button
+                  type="danger"
+                  :icon="Delete"
+                  circle
+                  @click="removePublisherConfig(index)"
+                  :disabled="formData.publisher_configs.length <= 1"
+                />
+              </div>
+              <el-row :gutter="12">
+                <el-col :span="12">
+                  <el-form-item :label="`下游PO (${getPublisherName(config.publisher_id)})`" :prop="`publisher_configs.${index}.affiliate_payout`">
+                    <el-input-number
+                      v-model="config.affiliate_payout"
+                      :min="0"
+                      :precision="2"
+                      placeholder="扣价后给渠道的金额"
+                      style="width: 100%;"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item :label="`下游Cap (${getPublisherName(config.publisher_id)})`" :prop="`publisher_configs.${index}.downstream_cap`">
+                    <el-input-number
+                      v-model="config.downstream_cap"
+                      :min="0"
+                      placeholder="下游转化上限"
+                      style="width: 100%;"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </div>
+            <el-button
+              type="primary"
+              :icon="Plus"
+              @click="addPublisherConfig"
+              style="width: 100%;"
+            >
+              添加渠道
+            </el-button>
+          </div>
         </el-form-item>
 
         <el-form-item label="点击有效期(小时)" prop="click_validity_hours">
@@ -654,7 +682,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Refresh, Edit, Delete, Box, View, DocumentCopy, Loading } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, Edit, Delete, Box, View, DocumentCopy, Loading, InfoFilled } from '@element-plus/icons-vue'
 import { getOffers, createOffer, updateOffer, deleteOffer, getOffer } from '@/api/offer'
 import { getAdvertisers } from '@/api/advertiser'
 import { getPublishers } from '@/api/publisher'
@@ -715,7 +743,7 @@ const formData = reactive({
   postback_url: '',
   postback_method: 'GET',
   click_validity_hours: 720,
-  publisher_ids: [],
+  publisher_configs: [{ publisher_id: null, affiliate_payout: null, downstream_cap: null }],
   is_active: true
 })
 
@@ -795,6 +823,40 @@ const handleReset = () => {
   loadData()
 }
 
+// 添加渠道配置
+const addPublisherConfig = () => {
+  formData.publisher_configs.push({
+    publisher_id: null,
+    affiliate_payout: null,
+    downstream_cap: null
+  })
+}
+
+// 删除渠道配置
+const removePublisherConfig = (index) => {
+  formData.publisher_configs.splice(index, 1)
+}
+
+// 检查渠道是否已被选择
+const isPublisherSelected = (publisherId, currentIndex) => {
+  if (!publisherId) return false
+  return formData.publisher_configs.some((config, index) => 
+    index !== currentIndex && config.publisher_id === publisherId
+  )
+}
+
+// 获取渠道名称
+const getPublisherName = (publisherId) => {
+  if (!publisherId) return ''
+  const publisher = publisherList.value.find(p => p.id === publisherId)
+  return publisher ? publisher.publisher_name : ''
+}
+
+// 渠道选择变化处理
+const handlePublisherChange = (index) => {
+  // 可以在这里添加额外的逻辑
+}
+
 // 添加
 const handleAdd = () => {
   isEdit.value = false
@@ -817,42 +879,104 @@ const handleAdd = () => {
     postback_url: '',
     postback_method: 'GET',
     click_validity_hours: 720,
-    publisher_ids: [],
+    publisher_configs: [{ publisher_id: null, affiliate_payout: null, downstream_cap: null }],
     is_active: true
   })
   dialogVisible.value = true
 }
 
 // 编辑
-const handleEdit = (row) => {
+const handleEdit = async (row) => {
   isEdit.value = true
-  Object.assign(formData, {
-    id: row.id,
-    offer_name: row.offer_name,
-    advertiser_id: row.advertiser_id,
-    advertiser_offer_id: row.advertiser_offer_id || '',
-    preview_link: row.preview_link || '',
-    payout: row.payout,
-    affiliate_payout: row.affiliate_payout,
-    country: row.country || '',
-    category: row.category || '',
-    type: row.type || '',
-    status: row.status,
-    upstream_cap: row.upstream_cap,
-    downstream_cap: row.downstream_cap,
-    advertiser_tracklink: row.advertiser_tracklink || '',
-    downstream_tracklink: row.downstream_tracklink || '',
-    downstream_tracklink_short: '',
-    postback_url: row.postback_url || '',
-    postback_method: row.postback_method || 'GET',
-    click_validity_hours: row.click_validity_hours || 720,
-    publisher_ids: row.assigned_publishers ? row.assigned_publishers.map(p => p.id) : [],
-    is_active: row.is_active
-  })
-  // 检查是否已有短链接
-  if (row.downstream_tracklink) {
-    checkExistingShortLink(row.downstream_tracklink)
+  
+  // 获取完整的Offer详情（包含渠道配置信息）
+  try {
+    const response = await getOffer(row.id)
+    if (response.code === 200 && response.data) {
+      const offerData = response.data
+      
+      // 构建渠道配置
+      let publisherConfigs = []
+      if (offerData.assigned_publishers && offerData.assigned_publishers.length > 0) {
+        publisherConfigs = offerData.assigned_publishers.map(p => ({
+          publisher_id: p.id,
+          affiliate_payout: p.affiliate_payout || null,
+          downstream_cap: p.downstream_cap || null
+        }))
+      } else {
+        publisherConfigs = [{ publisher_id: null, affiliate_payout: null, downstream_cap: null }]
+      }
+      
+      Object.assign(formData, {
+        id: offerData.id,
+        offer_name: offerData.offer_name,
+        advertiser_id: offerData.advertiser_id,
+        advertiser_offer_id: offerData.advertiser_offer_id || '',
+        preview_link: offerData.preview_link || '',
+        payout: offerData.payout,
+        affiliate_payout: offerData.affiliate_payout,
+        country: offerData.country || '',
+        category: offerData.category || '',
+        type: offerData.type || '',
+        status: offerData.status,
+        upstream_cap: offerData.upstream_cap,
+        downstream_cap: offerData.downstream_cap,
+        advertiser_tracklink: offerData.advertiser_tracklink || '',
+        downstream_tracklink: offerData.downstream_tracklink || '',
+        downstream_tracklink_short: '',
+        postback_url: offerData.postback_url || '',
+        postback_method: offerData.postback_method || 'GET',
+        click_validity_hours: offerData.click_validity_hours || 720,
+        publisher_configs: publisherConfigs,
+        is_active: offerData.is_active
+      })
+      
+      // 检查是否已有短链接
+      if (offerData.downstream_tracklink) {
+        checkExistingShortLink(offerData.downstream_tracklink)
+      }
+    } else {
+      // 如果获取详情失败，使用列表中的数据（向后兼容）
+      Object.assign(formData, {
+        id: row.id,
+        offer_name: row.offer_name,
+        advertiser_id: row.advertiser_id,
+        advertiser_offer_id: row.advertiser_offer_id || '',
+        preview_link: row.preview_link || '',
+        payout: row.payout,
+        affiliate_payout: row.affiliate_payout,
+        country: row.country || '',
+        category: row.category || '',
+        type: row.type || '',
+        status: row.status,
+        upstream_cap: row.upstream_cap,
+        downstream_cap: row.downstream_cap,
+        advertiser_tracklink: row.advertiser_tracklink || '',
+        downstream_tracklink: row.downstream_tracklink || '',
+        downstream_tracklink_short: '',
+        postback_url: row.postback_url || '',
+        postback_method: row.postback_method || 'GET',
+        click_validity_hours: row.click_validity_hours || 720,
+        publisher_configs: row.assigned_publishers && row.assigned_publishers.length > 0
+          ? row.assigned_publishers.map(p => ({
+              publisher_id: p.id,
+              affiliate_payout: p.affiliate_payout || null,
+              downstream_cap: p.downstream_cap || null
+            }))
+          : [{ publisher_id: null, affiliate_payout: null, downstream_cap: null }],
+        is_active: row.is_active
+      })
+      
+      if (row.downstream_tracklink) {
+        checkExistingShortLink(row.downstream_tracklink)
+      }
+    }
+  } catch (error) {
+    logger.error('获取Offer详情失败:', error)
+    ElMessage.error('获取Offer详情失败')
+    return
   }
+  
   dialogVisible.value = true
 }
 
@@ -891,20 +1015,36 @@ const handleSubmit = async () => {
   await formRef.value.validate(async (valid) => {
     if (!valid) return
     
+    // 验证渠道配置
+    const validConfigs = formData.publisher_configs.filter(config => config.publisher_id !== null)
+    if (validConfigs.length === 0) {
+      ElMessage.warning('请至少添加一个渠道配置')
+      return
+    }
+    
     submitting.value = true
     try {
+      // 构建提交数据
+      const submitData = { ...formData }
+      
+      // 过滤掉publisher_id为null的配置
+      submitData.publisher_configs = validConfigs
+      
+      // 移除publisher_ids（使用publisher_configs）
+      delete submitData.publisher_ids
+      
       let response
       let offerData = null
       
       if (isEdit.value) {
         // 编辑：先更新Offer
-        response = await updateOffer(formData.id, formData)
+        response = await updateOffer(formData.id, submitData)
         if (response.code === 200) {
           offerData = response.data
         }
       } else {
         // 新建：先创建Offer获取id
-        response = await createOffer(formData)
+        response = await createOffer(submitData)
         if (response.code === 200) {
           offerData = response.data
         }

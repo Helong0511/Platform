@@ -289,7 +289,27 @@ async def create_offer(
         offer.postback_url = postback_url
         
         # 处理渠道分配
-        if offer_in.publisher_ids:
+        publisher_ids_for_short_link = []
+        if offer_in.publisher_configs:
+            # 使用新的渠道配置方式
+            for config in offer_in.publisher_configs:
+                # 验证渠道是否存在
+                pub_result = await db.execute(
+                    select(Publisher).where(Publisher.id == config.publisher_id)
+                )
+                publisher = pub_result.scalars().first()
+                if publisher:
+                    assignment = OfferPublisherAssignment(
+                        offer_id=offer.id,
+                        publisher_id=config.publisher_id,
+                        downstream_cap=config.downstream_cap,
+                        affiliate_payout=config.affiliate_payout,
+                        is_active=True
+                    )
+                    db.add(assignment)
+                    publisher_ids_for_short_link.append(config.publisher_id)
+        elif offer_in.publisher_ids:
+            # 向后兼容：使用旧的publisher_ids方式
             for pub_id in offer_in.publisher_ids:
                 # 验证渠道是否存在
                 pub_result = await db.execute(
@@ -303,17 +323,18 @@ async def create_offer(
                         is_active=True
                     )
                     db.add(assignment)
+                    publisher_ids_for_short_link.append(pub_id)
         
         await db.commit()
         await db.refresh(offer)
         
         # 为分配的渠道创建短链接（使用上游Tracklink作为原始URL）
         short_link_info = None
-        if offer_in.publisher_ids and offer.advertiser_tracklink:
+        if publisher_ids_for_short_link and offer.advertiser_tracklink:
             short_link_info = await sync_short_links_for_offer(
                 db=db,
                 offer_id=offer.id,
-                publisher_ids=offer_in.publisher_ids,
+                publisher_ids=publisher_ids_for_short_link,
                 offer_name=offer.offer_name,
                 base_url=base_url,
                 current_user_id=current_user.id,
@@ -323,7 +344,7 @@ async def create_offer(
             
             # 刷新offer以获取更新后的downstream_tracklink
             await db.refresh(offer)
-        elif offer_in.publisher_ids and not offer.advertiser_tracklink:
+        elif publisher_ids_for_short_link and not offer.advertiser_tracklink:
             logger.warning(f"Offer {offer.id} 没有配置上游Tracklink，无法创建短链接")
         
         # 加载关联信息
@@ -437,7 +458,9 @@ async def get_offers(
                 assignments_map[assignment.offer_id] = []
             assignments_map[assignment.offer_id].append({
                 "id": publisher.id,
-                "publisher_name": publisher.publisher_name
+                "publisher_name": publisher.publisher_name,
+                "downstream_cap": assignment.downstream_cap,
+                "affiliate_payout": assignment.affiliate_payout
             })
     else:
         assignments_map = {}
@@ -496,9 +519,11 @@ async def get_offer(
     offer_data.assigned_publishers = [
         {
             "id": pub.id,
-            "publisher_name": pub.publisher_name
+            "publisher_name": pub.publisher_name,
+            "downstream_cap": assignment.downstream_cap,
+            "affiliate_payout": assignment.affiliate_payout
         }
-        for _, pub in assignments
+        for assignment, pub in assignments
     ]
     
     return ResponseBaseSchema.success(data=offer_data)
@@ -543,7 +568,7 @@ async def update_offer(
     old_advertiser_tracklink = offer.advertiser_tracklink
     
     # 更新字段
-    update_data = offer_in.model_dump(exclude_unset=True, exclude={'publisher_ids'})
+    update_data = offer_in.model_dump(exclude_unset=True, exclude={'publisher_ids', 'publisher_configs'})
     for key, value in update_data.items():
         setattr(offer, key, value)
     
@@ -575,7 +600,40 @@ async def update_offer(
     
     # 处理渠道分配
     old_publisher_ids = None
-    if 'publisher_ids' in offer_in.model_dump(exclude_unset=True):
+    publisher_ids_for_short_link = []
+    if 'publisher_configs' in offer_in.model_dump(exclude_unset=True):
+        # 使用新的渠道配置方式
+        # 获取旧的渠道分配列表（用于比较）
+        old_assignments_result = await db.execute(
+            select(OfferPublisherAssignment).where(OfferPublisherAssignment.offer_id == offer.id)
+        )
+        old_assignments = old_assignments_result.scalars().all()
+        old_publisher_ids = {assignment.publisher_id for assignment in old_assignments}
+        
+        # 先删除所有现有分配
+        await db.execute(
+            delete(OfferPublisherAssignment).where(OfferPublisherAssignment.offer_id == offer.id)
+        )
+        
+        # 添加新分配
+        if offer_in.publisher_configs:
+            for config in offer_in.publisher_configs:
+                pub_result = await db.execute(
+                    select(Publisher).where(Publisher.id == config.publisher_id)
+                )
+                publisher = pub_result.scalars().first()
+                if publisher:
+                    assignment = OfferPublisherAssignment(
+                        offer_id=offer.id,
+                        publisher_id=config.publisher_id,
+                        downstream_cap=config.downstream_cap,
+                        affiliate_payout=config.affiliate_payout,
+                        is_active=True
+                    )
+                    db.add(assignment)
+                    publisher_ids_for_short_link.append(config.publisher_id)
+    elif 'publisher_ids' in offer_in.model_dump(exclude_unset=True):
+        # 向后兼容：使用旧的publisher_ids方式
         # 获取旧的渠道分配列表（用于比较）
         old_assignments_result = await db.execute(
             select(OfferPublisherAssignment).where(OfferPublisherAssignment.offer_id == offer.id)
@@ -602,6 +660,7 @@ async def update_offer(
                         is_active=True
                     )
                     db.add(assignment)
+                    publisher_ids_for_short_link.append(pub_id)
     
     try:
         await db.commit()
@@ -634,7 +693,11 @@ async def update_offer(
         need_sync_short_links = False
         
         # 检查是否需要同步短链接
-        if 'publisher_ids' in offer_in.model_dump(exclude_unset=True):
+        if 'publisher_configs' in offer_in.model_dump(exclude_unset=True):
+            new_publisher_ids = set(publisher_ids_for_short_link)
+            if old_publisher_ids != new_publisher_ids:
+                need_sync_short_links = True
+        elif 'publisher_ids' in offer_in.model_dump(exclude_unset=True):
             new_publisher_ids = set(offer_in.publisher_ids or [])
             if old_publisher_ids != new_publisher_ids:
                 need_sync_short_links = True
@@ -646,7 +709,9 @@ async def update_offer(
             # 获取当前的上游Tracklink（可能是新更新的）
             current_advertiser_tracklink = offer.advertiser_tracklink
             # 获取当前的渠道分配
-            if 'publisher_ids' in offer_in.model_dump(exclude_unset=True):
+            if 'publisher_configs' in offer_in.model_dump(exclude_unset=True):
+                current_publisher_ids = publisher_ids_for_short_link
+            elif 'publisher_ids' in offer_in.model_dump(exclude_unset=True):
                 current_publisher_ids = offer_in.publisher_ids
             else:
                 # 如果没有明确指定publisher_ids，使用现有的分配
@@ -694,9 +759,11 @@ async def update_offer(
         offer_data.assigned_publishers = [
             {
                 "id": pub.id,
-                "publisher_name": pub.publisher_name
+                "publisher_name": pub.publisher_name,
+                "downstream_cap": assignment.downstream_cap,
+                "affiliate_payout": assignment.affiliate_payout
             }
-            for _, pub in assignments
+            for assignment, pub in assignments
         ]
         
         # 构建响应消息，包含短链接信息
