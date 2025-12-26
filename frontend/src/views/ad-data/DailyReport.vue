@@ -503,6 +503,15 @@ const fetchFilterProducts = async (clientId) => {
 const handleFilterClientChange = async (clientId) => {
   searchForm.value.productId = '';
   await fetchFilterProducts(clientId || null);
+  
+  // 修复选中值显示
+  nextTick(() => {
+    setTimeout(() => {
+      if (typeof window.fixSelectDisplay === 'function') {
+        window.fixSelectDisplay();
+      }
+    }, 100);
+  });
 };
 
 // 日期范围变化时的处理函数
@@ -520,6 +529,15 @@ const handleDateRangeChange = async () => {
       searchForm.value.productId = '';
     }
   }
+  
+  // 修复选中值显示
+  nextTick(() => {
+    setTimeout(() => {
+      if (typeof window.fixSelectDisplay === 'function') {
+        window.fixSelectDisplay();
+      }
+    }, 100);
+  });
 };
 
 // 处理排序变化

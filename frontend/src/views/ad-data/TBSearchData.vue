@@ -189,7 +189,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, nextTick } from 'vue';
 import { useAuthStore } from '../../store';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Upload, Delete } from '@element-plus/icons-vue';
@@ -351,6 +351,16 @@ const handleClientChange = async (val) => {
   // 清空国家选择，因为产品变化了
   searchForm.value.countryCode = '';
   pagination.value.current = 1;
+  
+  // 修复选中值显示
+  nextTick(() => {
+    setTimeout(() => {
+      if (typeof window.fixSelectDisplay === 'function') {
+        window.fixSelectDisplay();
+      }
+    }, 100);
+  });
+  
   fetchData();
 };
 
@@ -366,6 +376,16 @@ const handleProductChange = async () => {
     }
   }
   pagination.value.current = 1;
+  
+  // 修复选中值显示
+  nextTick(() => {
+    setTimeout(() => {
+      if (typeof window.fixSelectDisplay === 'function') {
+        window.fixSelectDisplay();
+      }
+    }, 100);
+  });
+  
   fetchData();
 };
 
