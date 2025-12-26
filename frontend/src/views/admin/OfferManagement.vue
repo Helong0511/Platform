@@ -760,7 +760,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Refresh, Edit, Delete, Box, View, DocumentCopy, Loading, InfoFilled, User } from '@element-plus/icons-vue'
 import { getOffers, createOffer, updateOffer, deleteOffer, getOffer } from '@/api/offer'
@@ -934,7 +934,30 @@ const getPublisherName = (publisherId) => {
 
 // 渠道选择变化处理
 const handlePublisherChange = (index) => {
-  // 可以在这里添加额外的逻辑
+  // 强制隐藏 placeholder，确保选中值正常显示
+  nextTick(() => {
+    // 查找当前配置对应的 el-select
+    const formItems = document.querySelectorAll('.publisher-config-content .el-form-item')
+    if (formItems[index]) {
+      const selectEl = formItems[index].querySelector('.el-select')
+      if (selectEl) {
+        const placeholder = selectEl.querySelector('.el-select__placeholder')
+        // 检查 el-select 是否有值（通过检查是否有 is-empty 类，或者检查 v-model 绑定的值）
+        const hasValue = !selectEl.classList.contains('is-empty') || 
+                        formData.publisher_configs[index]?.publisher_id !== null
+        
+        if (placeholder && hasValue) {
+          // 强制隐藏 placeholder
+          placeholder.style.setProperty('display', 'none', 'important')
+          placeholder.style.setProperty('visibility', 'hidden', 'important')
+          placeholder.style.setProperty('opacity', '0', 'important')
+          placeholder.style.setProperty('height', '0', 'important')
+          placeholder.style.setProperty('width', '0', 'important')
+          placeholder.style.setProperty('overflow', 'hidden', 'important')
+        }
+      }
+    }
+  })
 }
 
 // 添加
@@ -1645,21 +1668,44 @@ onMounted(() => {
 .publisher-config-content :deep(.el-select .el-select__placeholder) {
   z-index: 0 !important;
   pointer-events: none !important;
+  position: absolute !important;
 }
 
 /* 确保 input 中的选中值正常显示，层级高于 placeholder */
 .publisher-config-content :deep(.el-select .el-input__inner),
 .publisher-config-content :deep(.el-select .el-input__wrapper),
 .publisher-config-content :deep(.el-select .el-select__input) {
-  position: relative;
+  position: relative !important;
   z-index: 1 !important;
 }
 
+/* 确保选中值的文本正常显示 */
+.publisher-config-content :deep(.el-select .el-input__inner),
+.publisher-config-content :deep(.el-select .el-input__wrapper input) {
+  color: var(--el-text-color-regular) !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
 /* 当 el-select 有值时，隐藏 placeholder */
-.publisher-config-content :deep(.el-select:not(.is-empty) .el-select__placeholder),
-.publisher-config-content :deep(.el-select .el-select__placeholder[style*="display: none"]) {
+.publisher-config-content :deep(.el-select:not(.is-empty) .el-select__placeholder) {
   display: none !important;
   visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+.publisher-config-content :deep(.el-select:has(.el-input__inner:not(:placeholder-shown)) .el-select__placeholder),
+.publisher-config-content :deep(.el-select:has(.el-input__wrapper input:not(:placeholder-shown)) .el-select__placeholder) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+.publisher-config-content :deep(.el-select .el-select__placeholder[style*="display: none"]),
+.publisher-config-content :deep(.el-select .el-select__placeholder[style*="display:none"]) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
 }
 
 .publisher-config-content :deep(.el-select__popper) {
