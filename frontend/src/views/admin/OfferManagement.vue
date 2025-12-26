@@ -445,6 +445,7 @@
                     @change="handlePublisherChange(index)"
                     @blur="handlePublisherBlur(index)"
                     @focus="handlePublisherFocus(index)"
+                    @visible-change="handlePublisherVisibleChange(index, $event)"
                   >
                     <el-option
                       v-for="pub in publisherList"
@@ -936,8 +937,23 @@ const getPublisherName = (publisherId) => {
 
 // 修复 el-select 显示问题的通用函数
 const fixSelectDisplay = () => {
+  // 首先检查是否有下拉菜单打开，如果有则不修复
+  const hasOpenDropdown = document.querySelector('.el-select-dropdown:not([style*="display: none"]):not([style*="display:none"])')
+  const hasVisiblePopper = document.querySelector('.el-select__popper:not([style*="display: none"]):not([style*="display:none"])')
+  
+  if (hasOpenDropdown || hasVisiblePopper) {
+    return // 下拉菜单打开时，完全不修复
+  }
+  
   nextTick(() => {
     setTimeout(() => {
+      // 再次检查下拉菜单是否关闭
+      const stillOpen = document.querySelector('.el-select-dropdown:not([style*="display: none"]):not([style*="display:none"])') ||
+                       document.querySelector('.el-select__popper:not([style*="display: none"]):not([style*="display:none"])')
+      if (stillOpen) {
+        return // 如果下拉菜单仍然打开，不修复
+      }
+      
       const selectElements = document.querySelectorAll('.publisher-config-content .el-select')
       selectElements.forEach((selectEl, idx) => {
         const placeholder = selectEl.querySelector('.el-select__placeholder')
@@ -1052,13 +1068,30 @@ const handlePublisherFocus = (index) => {
   })
 }
 
+// 渠道选择下拉菜单显示状态变化处理
+const handlePublisherVisibleChange = (index, visible) => {
+  // 当下拉菜单关闭时，修复显示
+  if (!visible) {
+    nextTick(() => {
+      setTimeout(() => {
+        fixSelectDisplay()
+      }, 100)
+    })
+  }
+}
+
 // 监听 publisher_configs 的变化，自动修复显示
 watch(() => formData.publisher_configs, () => {
   // 延迟修复，避免干扰下拉菜单的打开/关闭
   nextTick(() => {
     setTimeout(() => {
-      fixSelectDisplay()
-    }, 100)
+      // 检查下拉菜单是否关闭
+      const hasOpenDropdown = document.querySelector('.el-select-dropdown:not([style*="display: none"]):not([style*="display:none"])')
+      const hasVisiblePopper = document.querySelector('.el-select__popper:not([style*="display: none"]):not([style*="display:none"])')
+      if (!hasOpenDropdown && !hasVisiblePopper) {
+        fixSelectDisplay()
+      }
+    }, 200)
   })
 }, { deep: true })
 
@@ -1068,9 +1101,7 @@ watch(() => dialogVisible.value, (newVal) => {
     // 对话框打开时，延迟修复以确保 DOM 已渲染
     setTimeout(() => {
       fixSelectDisplay()
-      // 启动 MutationObserver 监听 DOM 变化
-      startSelectObserver()
-    }, 100)
+    }, 200)
   } else {
     // 对话框关闭时，停止监听
     stopSelectObserver()
@@ -1089,9 +1120,11 @@ const startSelectObserver = () => {
   
   selectObserver = new MutationObserver((mutations) => {
     // 检查是否有下拉菜单打开，如果有则不修复（避免干扰下拉菜单）
-    const hasOpenDropdown = document.querySelector('.el-select-dropdown:not([style*="display: none"])')
-    if (hasOpenDropdown) {
-      return // 下拉菜单打开时，不修复
+    const hasOpenDropdown = document.querySelector('.el-select-dropdown:not([style*="display: none"]):not([style*="display:none"])')
+    const hasVisiblePopper = document.querySelector('.el-select__popper:not([style*="display: none"]):not([style*="display:none"])')
+    
+    if (hasOpenDropdown || hasVisiblePopper) {
+      return // 下拉菜单打开时，完全不修复
     }
     
     // 防抖处理，避免频繁触发
@@ -1099,8 +1132,13 @@ const startSelectObserver = () => {
       clearTimeout(fixTimer)
     }
     fixTimer = setTimeout(() => {
-      fixSelectDisplay()
-    }, 50)
+      // 再次检查下拉菜单是否关闭
+      const stillOpen = document.querySelector('.el-select-dropdown:not([style*="display: none"]):not([style*="display:none"])') ||
+                       document.querySelector('.el-select__popper:not([style*="display: none"]):not([style*="display:none"])')
+      if (!stillOpen) {
+        fixSelectDisplay()
+      }
+    }, 100)
   })
   
   selectObserver.observe(targetNode, {
