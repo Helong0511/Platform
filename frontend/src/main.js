@@ -759,7 +759,8 @@ const fixSelectDisplay = () => {
     const inputWrapper = selectEl.querySelector('.el-input__wrapper');
     let hasVisibleText = false;
     let displayedText = '';
-    const originalPlaceholder = selectEl.getAttribute('placeholder') || '';
+    const originalPlaceholder = selectEl.getAttribute('placeholder') || 
+                               selectEl.querySelector('[placeholder]')?.getAttribute('placeholder') || '';
     
     if (inputWrapper) {
       // 获取 input wrapper 内的所有文本
@@ -768,15 +769,31 @@ const fixSelectDisplay = () => {
       
       // 关键修复：如果 placeholder 显示的文本不是原始的 placeholder 属性值，
       // 说明这个文本可能是选中值，而不是真正的 placeholder
-      if (currentPlaceholderText && currentPlaceholderText !== originalPlaceholder) {
-        // placeholder 显示的文本与原始 placeholder 不同，说明这是选中值
-        hasVisibleText = true;
-        displayedText = currentPlaceholderText;
-      } else {
-        // 正常情况：排除 placeholder 文本后检查是否有其他文本
-        const cleanText = allText.replace(currentPlaceholderText, '').trim();
-        hasVisibleText = cleanText.length > 0;
-        displayedText = cleanText;
+      // 特别处理：如果 placeholder 文本包含原始 placeholder 的一部分（如"请选择"），
+      // 但后面还有其他文本（如"请选择Sweepsone"），说明选中值被错误地显示在 placeholder 中
+      if (currentPlaceholderText) {
+        // 检查是否是选中值被错误地放在 placeholder 中
+        if (currentPlaceholderText !== originalPlaceholder) {
+          // 如果 placeholder 文本以原始 placeholder 开头，但后面有额外文本，说明选中值在 placeholder 中
+          if (originalPlaceholder && currentPlaceholderText.startsWith(originalPlaceholder)) {
+            // 提取选中值部分（去掉原始 placeholder）
+            const selectedValueText = currentPlaceholderText.replace(originalPlaceholder, '').trim();
+            if (selectedValueText) {
+              hasVisibleText = true;
+              displayedText = selectedValueText;
+              // 关键修复：将选中值从 placeholder 中提取出来，放到正确的位置
+              // 清空 placeholder 的文本，恢复为原始 placeholder
+              placeholderEl.textContent = originalPlaceholder;
+            }
+          } else if (currentPlaceholderText !== originalPlaceholder) {
+            // placeholder 显示的文本与原始 placeholder 完全不同，说明这是选中值
+            hasVisibleText = true;
+            displayedText = currentPlaceholderText;
+            // 关键修复：将选中值从 placeholder 中提取出来
+            // 清空 placeholder 的文本，恢复为原始 placeholder
+            placeholderEl.textContent = originalPlaceholder;
+          }
+        }
       }
       
       // 检查是否有选中的文本元素（Element Plus 可能使用特殊元素显示选中值）
@@ -789,7 +806,21 @@ const fixSelectDisplay = () => {
         // 如果选中的文本不是原始 placeholder，说明有选中值
         if (selectedText !== originalPlaceholder) {
           hasVisibleText = true;
-          displayedText = selectedText;
+          if (!displayedText) {
+            displayedText = selectedText;
+          }
+        }
+      }
+      
+      // 如果还没有找到选中文本，检查 input 元素的值
+      if (!hasVisibleText) {
+        const inputEl = inputWrapper.querySelector('input');
+        if (inputEl && inputEl.value && inputEl.value.trim() !== originalPlaceholder) {
+          const inputValue = inputEl.value.trim();
+          if (inputValue && inputValue !== originalPlaceholder) {
+            hasVisibleText = true;
+            displayedText = inputValue;
+          }
         }
       }
     }
@@ -905,6 +936,34 @@ const fixSelectDisplay = () => {
                 console.warn('[fixSelectDisplay] 尝试更新 Vue modelValue 失败:', e);
               }
             }
+          } else {
+            // 如果没有找到匹配的值，尝试从全局广告主列表中查找
+            // 这是针对"请选择广告主"下拉框的特殊处理
+            if (originalPlaceholder && originalPlaceholder.includes('广告主')) {
+              try {
+                // 尝试从 window 对象获取广告主列表（如果组件已经加载）
+                const advertiserList = window.advertiserList || [];
+                const matchedAdvertiser = advertiserList.find(adv => {
+                  const name = adv.advertiser_name || adv.name || '';
+                  return name === displayedText || name.includes(displayedText);
+                });
+                if (matchedAdvertiser && matchedAdvertiser.id) {
+                  // 找到了匹配的广告主，尝试更新 Vue 状态
+                  const advertiserId = matchedAdvertiser.id;
+                  if (vueInstance.$emit) {
+                    vueInstance.$emit('update:modelValue', advertiserId);
+                  } else if (vueInstance.emit) {
+                    vueInstance.emit('update:modelValue', advertiserId);
+                  }
+                  // 触发 change 事件
+                  const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+                  changeEvent.value = advertiserId;
+                  selectEl.dispatchEvent(changeEvent);
+                }
+              } catch (e) {
+                // 忽略错误
+              }
+            }
           }
         } catch (e) {
           // 忽略错误，继续其他修复
@@ -924,6 +983,33 @@ const fixSelectDisplay = () => {
     if (hasSelectedValue) {
       // 强制移除 is-empty 类（这是关键！）
       selectEl.classList.remove('is-empty');
+      
+      // 如果检测到选中值被错误地放在 placeholder 中，需要将其移动到正确位置
+      if (displayedText && displayedText !== originalPlaceholder && inputWrapper) {
+        // 检查是否有显示选中值的元素
+        let selectionEl = inputWrapper.querySelector('.el-select__selection') ||
+                         inputWrapper.querySelector('.el-select__selected-item') ||
+                         inputWrapper.querySelector('[class*="selection"]');
+        
+        // 如果没有找到选中值显示元素，创建一个
+        if (!selectionEl) {
+          // 尝试在 input wrapper 中创建或更新选中值显示
+          const inputEl = inputWrapper.querySelector('input');
+          if (inputEl) {
+            // 设置 input 的 value 为选中值（如果可能）
+            try {
+              inputEl.value = displayedText;
+            } catch (e) {
+              // 忽略错误
+            }
+          }
+        } else {
+          // 如果找到了选中值元素，确保它的文本是正确的
+          if (selectionEl.textContent?.trim() !== displayedText) {
+            selectionEl.textContent = displayedText;
+          }
+        }
+      }
       
       // 强制隐藏 placeholder
       placeholderEl.style.cssText = `
