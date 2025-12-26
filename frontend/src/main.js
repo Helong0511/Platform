@@ -898,10 +898,11 @@ const fixSelectDisplay = () => {
     
     // 综合判断：优先检查清除按钮（最可靠的信号）
     // 如果有清除按钮，说明有选中值（即使 Vue modelValue 为 null）
-    let hasSelectedValue = false;
+    // 使用 undefined 作为初始值，表示还没有明确判断
+    let hasSelectedValue = undefined;
     
     // 关键修复0: 首先检查 placeholder 文本状态
-    // 如果 placeholder 文本是空的或者是原始 placeholder 的一部分，肯定没有选中值
+    // 如果 placeholder 文本是空的或者是原始 placeholder 的一部分，且没有任何选中值信号，肯定没有选中值
     const isPartialPlaceholder = originalPlaceholder && 
                                  currentPlaceholderText &&
                                  currentPlaceholderText.length < originalPlaceholder.length &&
@@ -910,17 +911,29 @@ const fixSelectDisplay = () => {
     
     const isEmptyPlaceholder = !currentPlaceholderText || currentPlaceholderText.length === 0;
     
-    if (isPartialPlaceholder || isEmptyPlaceholder) {
-      // 是部分 placeholder 或空 placeholder，肯定没有选中值
+    // 关键判断：如果没有任何选中值信号，且 placeholder 是部分或空的，肯定没有选中值
+    // 这个判断的优先级最高，确保在没有选中值信号时，部分 placeholder 被正确识别
+    const hasNoSelectionSignals = !hasClearButton && 
+                                  !hasVisibleText && 
+                                  !hasSelectedTags && 
+                                  !hasInputValue &&
+                                  modelValue === null;
+    
+    if ((isPartialPlaceholder || isEmptyPlaceholder) && hasNoSelectionSignals) {
+      // 是部分 placeholder 或空 placeholder，且没有任何选中值信号，肯定没有选中值
       hasSelectedValue = false;
       // 恢复为完整的原始 placeholder
       if (placeholderEl && originalPlaceholder && placeholderEl.textContent !== originalPlaceholder) {
         placeholderEl.textContent = originalPlaceholder;
       }
+      // 跳过后续的选中值检测，直接处理没有选中值的情况
     }
     // 关键修复1: 优先检查清除按钮（最可靠的信号）
     // 如果有清除按钮，说明用户已经选择了值，只是 Vue 状态没有同步
-    else if (hasClearButton) {
+    // 注意：只有当 hasSelectedValue 还没有被设置时，才执行这个检查
+    if (hasSelectedValue === false && (isPartialPlaceholder || isEmptyPlaceholder) && hasNoSelectionSignals) {
+      // 已经在上面处理过了，跳过
+    } else if (hasClearButton) {
       hasSelectedValue = true;
       // 如果还没有找到选中文本，尝试从其他方式获取
       if (!displayedText) {
@@ -1203,7 +1216,22 @@ const fixSelectDisplay = () => {
       }
     } else {
       // 其他情况：使用其他检测方法
-      hasSelectedValue = !hasIsEmptyClass || hasVisibleText || hasSelectedTags || hasInputValue || hasClearButton;
+      // 注意：只有当 hasSelectedValue 还没有被明确设置时，才使用这个逻辑
+      // 如果 hasSelectedValue 已经被设置为 false（比如检测到部分 placeholder），不应该被覆盖
+      if (hasSelectedValue === undefined) {
+        // 优先相信我们的检测结果，而不是 hasIsEmptyClass（因为 Element Plus 可能没有正确更新）
+        hasSelectedValue = hasClearButton || hasVisibleText || hasSelectedTags || hasInputValue;
+        // 如果 hasIsEmptyClass 是 false，但我们的检测都表明没有选中值，保持 false
+        // 如果 hasIsEmptyClass 是 true，肯定没有选中值
+        if (hasIsEmptyClass && !hasSelectedValue) {
+          hasSelectedValue = false;
+        }
+      }
+    }
+    
+    // 如果仍然是 undefined，默认认为没有选中值（安全起见）
+    if (hasSelectedValue === undefined) {
+      hasSelectedValue = false;
     }
     
     if (hasSelectedValue) {
