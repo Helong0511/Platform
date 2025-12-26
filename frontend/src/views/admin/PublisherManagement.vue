@@ -136,7 +136,6 @@
           <el-select 
             v-model="formData.postback_method" 
             style="width: 100%;"
-            :popper-append-to-body="true"
           >
             <el-option label="GET" value="GET" />
             <el-option label="POST" value="POST" />

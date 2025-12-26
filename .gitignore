@@ -62,6 +62,7 @@ models/*.pt
 tmp/
 temp/
 *.tmp
+package-lock.json
 
 # Coverage reports
 htmlcov/
