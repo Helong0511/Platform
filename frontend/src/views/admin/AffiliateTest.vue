@@ -134,8 +134,6 @@
             placeholder="请选择渠道"
             filterable
             style="width: 100%;"
-            :popper-append-to-body="true"
-            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option
               v-for="pub in publisherList"
@@ -152,8 +150,6 @@
             placeholder="请选择Offer"
             filterable
             style="width: 100%;"
-            :popper-append-to-body="true"
-            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option
               v-for="offer in offerList"
