@@ -1253,6 +1253,21 @@ const fixSelectDisplay = () => {
       hasSelectedValue = false;
     }
     
+    // 调试信息（仅在需要时）
+    if (window.DEBUG_SELECT && currentPlaceholderText === '请选择' && originalPlaceholder && originalPlaceholder.includes('请选择')) {
+      console.log('[fixSelectDisplay] 检测到部分 placeholder:', {
+        currentPlaceholderText,
+        originalPlaceholder,
+        modelValue,
+        hasClearButton,
+        hasVisibleText,
+        hasSelectedTags,
+        hasInputValue,
+        hasSelectedValue,
+        hasIsEmptyClass
+      });
+    }
+    
     // 最终检查：如果 Vue modelValue 是 null，且没有清除按钮，且 placeholder 是空的或部分的，肯定没有选中值
     // 这个检查的优先级最高，确保不会误判
     if (modelValue === null && 
@@ -1294,12 +1309,57 @@ const fixSelectDisplay = () => {
     }
     
     // 最终强制检查：如果 placeholder 文本是 "请选择" 而原始 placeholder 是 "请选择广告主"，肯定没有选中值
+    // 这个检查必须在所有其他检查之后，优先级最高
+    if (modelValue === null && 
+        currentPlaceholderText && 
+        originalPlaceholder && 
+        originalPlaceholder.includes('请选择') &&
+        currentPlaceholderText.length < originalPlaceholder.length &&
+        currentPlaceholderText.length > 0 &&
+        originalPlaceholder.startsWith(currentPlaceholderText) &&
+        !hasClearButton &&
+        !hasVisibleText &&
+        !hasSelectedTags &&
+        !hasInputValue) {
+      // 强制设置为没有选中值，覆盖之前的所有判断
+      hasSelectedValue = false;
+      if (placeholderEl && placeholderEl.textContent !== originalPlaceholder) {
+        placeholderEl.textContent = originalPlaceholder;
+      }
+    }
+    
+    // 额外检查：如果 placeholder 文本是 "请选择"（常见的不完整 placeholder），肯定没有选中值
+    // 这个检查必须在 if (hasSelectedValue) 之前，确保优先级最高
     if (modelValue === null && 
         currentPlaceholderText === '请选择' && 
         originalPlaceholder && 
-        originalPlaceholder.includes('请选择') &&
+        originalPlaceholder !== '请选择' &&
         originalPlaceholder.length > currentPlaceholderText.length &&
-        !hasClearButton) {
+        !hasClearButton &&
+        !hasVisibleText &&
+        !hasSelectedTags &&
+        !hasInputValue) {
+      // 强制设置为没有选中值，覆盖之前的所有判断
+      hasSelectedValue = false;
+      if (placeholderEl && placeholderEl.textContent !== originalPlaceholder) {
+        placeholderEl.textContent = originalPlaceholder;
+      }
+    }
+    
+    // 最终强制覆盖：如果所有信号都表明没有选中值，强制设置为 false
+    // 这个检查必须在 if (hasSelectedValue) 之前，确保优先级最高
+    if (hasSelectedValue && 
+        modelValue === null && 
+        !hasClearButton && 
+        !hasVisibleText && 
+        !hasSelectedTags && 
+        !hasInputValue &&
+        currentPlaceholderText &&
+        originalPlaceholder &&
+        currentPlaceholderText.length < originalPlaceholder.length &&
+        currentPlaceholderText.length > 0 &&
+        originalPlaceholder.startsWith(currentPlaceholderText)) {
+      // 即使之前判断为有选中值，也要强制改为没有选中值
       hasSelectedValue = false;
       if (placeholderEl && placeholderEl.textContent !== originalPlaceholder) {
         placeholderEl.textContent = originalPlaceholder;
@@ -1725,6 +1785,70 @@ const fixSelectAccessibility = () => {
     subtree: true,
     attributes: true,
     attributeFilter: ['class'] // 只监听 class 变化，不监听 style（避免频繁触发）
+  });
+  
+  // 专门监听 el-select 的 is-empty 类变化，确保当类被移除时能立即修复
+  const selectObserver = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+        const target = mutation.target;
+        if (target.classList.contains('el-select')) {
+          // 检查 is-empty 类是否被移除
+          const hadIsEmpty = mutation.oldValue && mutation.oldValue.includes('is-empty');
+          const hasIsEmpty = target.classList.contains('is-empty');
+          
+          // 如果 is-empty 类被移除了，立即检查并修复
+          if (hadIsEmpty && !hasIsEmpty) {
+            // 延迟一点执行，避免与 Element Plus 的内部逻辑冲突
+            setTimeout(() => {
+              fixSelectDisplay();
+            }, 10);
+          }
+        }
+      }
+    });
+  });
+  
+  // 观察所有 el-select 元素的 class 变化
+  document.querySelectorAll('.el-select').forEach((selectEl) => {
+    selectObserver.observe(selectEl, {
+      attributes: true,
+      attributeFilter: ['class'],
+      attributeOldValue: true // 记录旧值，用于检测 is-empty 类是否被移除
+    });
+  });
+  
+  // 当新的 el-select 元素被添加到 DOM 时，也观察它们
+  const selectObserver2 = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (node.nodeType === 1) { // Element node
+          if (node.classList && node.classList.contains('el-select')) {
+            selectObserver.observe(node, {
+              attributes: true,
+              attributeFilter: ['class'],
+              attributeOldValue: true
+            });
+          }
+          // 检查子元素
+          const childSelects = node.querySelectorAll && node.querySelectorAll('.el-select');
+          if (childSelects) {
+            childSelects.forEach((selectEl) => {
+              selectObserver.observe(selectEl, {
+                attributes: true,
+                attributeFilter: ['class'],
+                attributeOldValue: true
+              });
+            });
+          }
+        }
+      });
+    });
+  });
+  
+  selectObserver2.observe(document.body, {
+    childList: true,
+    subtree: true
   });
   
   // 监听所有 el-select 的 change 事件（立即执行，然后延迟再执行一次确保修复）
