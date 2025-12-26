@@ -912,7 +912,9 @@ const fixSelectDisplay = () => {
         }
       } else {
         // 是部分 placeholder，恢复为完整的原始 placeholder
-        if (placeholderEl.textContent !== originalPlaceholder) {
+        // 这种情况不应该认为是选中值，应该添加 is-empty 类
+        hasSelectedValue = false;
+        if (placeholderEl && placeholderEl.textContent !== originalPlaceholder) {
           placeholderEl.textContent = originalPlaceholder;
         }
       }
@@ -1079,6 +1081,16 @@ const fixSelectDisplay = () => {
       } else {
         // 没有明确的选中值信号，认为没有选中值
         hasSelectedValue = false;
+        
+        // 关键修复：如果 placeholder 文本是空的或者是部分 placeholder，确保恢复为完整的原始 placeholder
+        if (placeholderEl && originalPlaceholder) {
+          const currentText = placeholderEl.textContent?.trim() || '';
+          // 如果 placeholder 文本是空的或者是原始 placeholder 的一部分，恢复为完整的原始 placeholder
+          if (!currentText || 
+              (currentText.length < originalPlaceholder.length && originalPlaceholder.startsWith(currentText))) {
+            placeholderEl.textContent = originalPlaceholder;
+          }
+        }
       }
     } else {
       // 其他情况：使用其他检测方法
@@ -1192,8 +1204,14 @@ const fixSelectDisplay = () => {
       selectEl.classList.add('is-empty');
       
       // 确保 placeholder 文本是完整的原始 placeholder
-      if (placeholderEl && originalPlaceholder && placeholderEl.textContent !== originalPlaceholder) {
-        placeholderEl.textContent = originalPlaceholder;
+      if (placeholderEl && originalPlaceholder) {
+        const currentText = placeholderEl.textContent?.trim() || '';
+        // 如果 placeholder 文本是空的、是原始 placeholder 的一部分，或者不是完整的原始 placeholder，恢复为完整的原始 placeholder
+        if (!currentText || 
+            currentText !== originalPlaceholder ||
+            (currentText.length < originalPlaceholder.length && originalPlaceholder.startsWith(currentText))) {
+          placeholderEl.textContent = originalPlaceholder;
+        }
       }
       
       placeholderEl.style.cssText = `
