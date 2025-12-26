@@ -1254,11 +1254,16 @@ const fixSelectDisplay = () => {
     }
     
     // 最终检查：如果 Vue modelValue 是 null，且没有清除按钮，且 placeholder 是空的或部分的，肯定没有选中值
-    if (hasSelectedValue && 
-        modelValue === null && 
+    // 这个检查的优先级最高，确保不会误判
+    if (modelValue === null && 
         !hasClearButton && 
-        (isEmptyPlaceholder || isPartialPlaceholder)) {
-      // 这种情况下，即使之前判断为有选中值，也应该改为没有选中值
+        !hasVisibleText && 
+        !hasSelectedTags && 
+        !hasInputValue &&
+        (isEmptyPlaceholder || isPartialPlaceholder || 
+         (currentPlaceholderText && currentPlaceholderText !== originalPlaceholder && 
+          originalPlaceholder && originalPlaceholder.startsWith(currentPlaceholderText)))) {
+      // 这种情况下，肯定没有选中值
       hasSelectedValue = false;
       // 恢复 placeholder
       if (placeholderEl && originalPlaceholder) {
@@ -1266,6 +1271,38 @@ const fixSelectDisplay = () => {
         if (currentText !== originalPlaceholder) {
           placeholderEl.textContent = originalPlaceholder;
         }
+      }
+    }
+    
+    // 强制检查：如果 Vue modelValue 是 null，且 placeholder 文本不完整，强制认为没有选中值
+    // 这个检查必须在最后执行，确保优先级最高
+    if (modelValue === null && 
+        currentPlaceholderText && 
+        originalPlaceholder &&
+        currentPlaceholderText.length < originalPlaceholder.length &&
+        currentPlaceholderText.length > 0 &&
+        originalPlaceholder.startsWith(currentPlaceholderText) &&
+        !hasClearButton &&
+        !hasVisibleText &&
+        !hasSelectedTags &&
+        !hasInputValue) {
+      // 强制设置为没有选中值
+      hasSelectedValue = false;
+      if (placeholderEl && placeholderEl.textContent !== originalPlaceholder) {
+        placeholderEl.textContent = originalPlaceholder;
+      }
+    }
+    
+    // 最终强制检查：如果 placeholder 文本是 "请选择" 而原始 placeholder 是 "请选择广告主"，肯定没有选中值
+    if (modelValue === null && 
+        currentPlaceholderText === '请选择' && 
+        originalPlaceholder && 
+        originalPlaceholder.includes('请选择') &&
+        originalPlaceholder.length > currentPlaceholderText.length &&
+        !hasClearButton) {
+      hasSelectedValue = false;
+      if (placeholderEl && placeholderEl.textContent !== originalPlaceholder) {
+        placeholderEl.textContent = originalPlaceholder;
       }
     }
     
@@ -1427,7 +1464,19 @@ const fixSelectDisplay = () => {
       }
     } else {
       // 如果没有选中值，添加 is-empty 类并显示 placeholder
+      // 强制添加 is-empty 类（使用多种方法确保生效）
       selectEl.classList.add('is-empty');
+      // 如果 classList.add 没有生效，使用 setAttribute 强制设置
+      if (!selectEl.classList.contains('is-empty')) {
+        const currentClass = selectEl.getAttribute('class') || '';
+        if (!currentClass.includes('is-empty')) {
+          selectEl.setAttribute('class', currentClass.trim() + ' is-empty');
+        }
+      }
+      // 再次检查，确保 is-empty 类存在
+      if (!selectEl.classList.contains('is-empty')) {
+        selectEl.className = (selectEl.className || '').trim() + ' is-empty';
+      }
       
       // 确保 placeholder 文本是完整的原始 placeholder
       // 尝试获取原始 placeholder（多种方式）
