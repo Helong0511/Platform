@@ -266,7 +266,7 @@ async def _process_bft_postback(
         
         # 调用统一服务处理（使用映射后的数据）
         result = await PostbackProcessor.process(
-            platform="macan",
+            platform="bft",
             raw_data=mapped_data,
             db=db,
             request_ip=client_ip

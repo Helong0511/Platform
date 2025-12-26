@@ -15,6 +15,7 @@ from sqlalchemy import func, and_, or_
 from app.core.database import get_db
 from app.core.postback import PostbackProcessor, register_handler
 from app.core.postback.macan_handler import MacanPostbackHandler
+from app.core.postback.bft_handler import BftPostbackHandler
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.models.models import PostbackConversion, Product, Client, PostbackForwardLog
@@ -37,6 +38,10 @@ logger = logging.getLogger(__name__)
 # 注册 Macan 处理器
 macan_handler = MacanPostbackHandler()
 register_handler(macan_handler)
+
+# 注册 BFT 处理器
+bft_handler = BftPostbackHandler()
+register_handler(bft_handler)
 
 
 def get_client_ip(request: Request) -> Optional[str]:

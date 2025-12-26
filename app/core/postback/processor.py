@@ -12,7 +12,7 @@ from sqlalchemy.future import select
 from app.core.postback.handlers import get_handler
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
-from app.models.models import PostbackConversion, Product, Click, Offer, PostbackForwardQueue
+from app.models.models import PostbackConversion, Product, Click, Offer, PostbackForwardQueue, Advertiser
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.cap import check_cap, increment_cap_count
@@ -89,44 +89,13 @@ class PostbackProcessor:
                     detail=error_msg or "产品和客户验证失败"
                 )
             
-            # 5. 检查是否已存在（防重复处理）
-            event_name = normalized_data.get("event_name")
-            existing = await db.execute(
-                select(PostbackConversion).where(
-                    PostbackConversion.platform == platform,
-                    PostbackConversion.conversion_id == conversion_id,
-                    PostbackConversion.event_name == event_name
-                )
-            )
-            existing_record = existing.scalars().first()
-            
-            if existing_record:
-                logger.info(
-                    f"平台 {platform} postback 转化已存在，跳过重复处理: "
-                    f"conversion_id={conversion_id}, event_name={event_name}"
-                )
-                return {
-                    "success": True,
-                    "message": "PostBack 接收成功（已存在，跳过重复处理）",
-                    "conversion_id": conversion_id,
-                    "platform": platform
-                }
-            
-            # 6. 保存原始数据（JSON格式）
-            raw_data_json = json.dumps(raw_data, ensure_ascii=False)
-            
-            # 7. 如果提供了IP，添加到标准化数据中
-            if request_ip and not normalized_data.get("ip"):
-                normalized_data["ip"] = request_ip
-            
-            # 7.5. CPL 系统：尝试关联 Click ID 和进行 Cap/扣量检查
+            # 4.5. CPL 系统：尝试关联 Click ID 获取广告主信息（在检查重复之前）
             click_id = None
             click_time = None
             offer_id = None
             publisher_id = None
             advertiser_id = None
-            final_payout = normalized_data.get("payout")
-            discount_info = None
+            advertiser_name = None  # 广告主名称，将用作平台名称
             
             # 尝试从 raw_data 中提取 click_id（可能是 our_click_id 或其他字段）
             click_id = (raw_data.get("our_click_id") or 
@@ -146,70 +115,125 @@ class PostbackProcessor:
                     publisher_id = click_record.publisher_id
                     advertiser_id = click_record.advertiser_id
                     
-                    # 0. 检查点击有效期 (Click Validity)
-                    if offer_id:
-                        offer = await db.execute(select(Offer).where(Offer.id == offer_id))
-                        offer_obj = offer.scalars().first()
-                        if offer_obj:
-                            validity_hours = offer_obj.click_validity_hours or 720  # 默认30天
-                            # 计算小时差
-                            # 确保 click_time 是 aware datetime（如果数据库存储的是 naive，需要添加时区）
-                            now_utc = datetime.now(timezone.utc)
-                            if click_time:
-                                # 如果 click_time 是 naive，假设它是 UTC 时间
-                                if click_time.tzinfo is None:
-                                    click_time_aware = click_time.replace(tzinfo=timezone.utc)
-                                else:
-                                    click_time_aware = click_time
-                                hours_diff = (now_utc - click_time_aware).total_seconds() / 3600
-                            else:
-                                hours_diff = 0  # 如果没有 click_time，跳过有效期检查
-                            
-                            if hours_diff > validity_hours:
-                                logger.warning(
-                                    f"转化被点击有效期拒绝: conversion_id={conversion_id}, "
-                                    f"click_age={hours_diff:.1f}h, limit={validity_hours}h"
-                                )
-                                # 标记状态为 ClickExpired，由后续逻辑处理
-                                normalized_data["status_override"] = "ClickExpired"
-                                normalized_data["rejection_reason"] = f"Click expired ({hours_diff:.1f}h > {validity_hours}h)"
-
-                    # 检查 Cap 限制
-                    if offer_id:
-                        is_allowed, cap_reason = await check_cap(
-                            db=db,
-                            offer_id=offer_id,
-                            publisher_id=publisher_id,
-                            advertiser_id=advertiser_id
+                    # 根据 advertiser_id 查询广告主名称，用作平台名称
+                    if advertiser_id:
+                        advertiser_result = await db.execute(
+                            select(Advertiser).where(Advertiser.id == advertiser_id)
                         )
-                        
-                        if not is_allowed:
-                            logger.warning(
-                                f"转化被Cap限制拒绝: conversion_id={conversion_id}, "
-                                f"offer_id={offer_id}, reason={cap_reason}"
-                            )
-                            # 可以选择拒绝转化或标记为特殊状态
-                            # 这里我们仍然保存转化，但标记状态
-                            # 也可以选择直接拒绝：raise_api_exception(...)
-                    
-                    # 计算扣量
-                    if offer_id and publisher_id and final_payout:
-                        final_payout, discount_amount, discount_info = await calculate_discount(
-                            db=db,
-                            offer_id=offer_id,
-                            publisher_id=publisher_id,
-                            original_payout=final_payout
-                        )
-                        if discount_info:
+                        advertiser_obj = advertiser_result.scalars().first()
+                        if advertiser_obj:
+                            advertiser_name = advertiser_obj.advertiser_name
+                            # 将平台名称设置为广告主名称
+                            platform = advertiser_name
                             logger.info(
-                                f"应用扣量: conversion_id={conversion_id}, "
-                                f"original={normalized_data.get('payout')}, "
-                                f"final={final_payout}, info={discount_info}"
+                                f"根据 click_id={click_id} 找到广告主: "
+                                f"advertiser_id={advertiser_id}, advertiser_name={advertiser_name}, "
+                                f"平台名称已更新为: {platform}"
                             )
             
-            # 8. 创建转化记录
+            # 5. 检查是否已存在（防重复处理）- 使用更新后的平台名称
+            event_name = normalized_data.get("event_name")
+            final_platform = advertiser_name if advertiser_name else platform
+            existing = await db.execute(
+                select(PostbackConversion).where(
+                    PostbackConversion.platform == final_platform,
+                    PostbackConversion.conversion_id == conversion_id,
+                    PostbackConversion.event_name == event_name
+                )
+            )
+            existing_record = existing.scalars().first()
+            
+            if existing_record:
+                logger.info(
+                    f"平台 {final_platform} postback 转化已存在，跳过重复处理: "
+                    f"conversion_id={conversion_id}, event_name={event_name}"
+                )
+                return {
+                    "success": True,
+                    "message": "PostBack 接收成功（已存在，跳过重复处理）",
+                    "conversion_id": conversion_id,
+                    "platform": final_platform
+                }
+            
+            # 6. 保存原始数据（JSON格式）
+            raw_data_json = json.dumps(raw_data, ensure_ascii=False)
+            
+            # 7. 如果提供了IP，添加到标准化数据中
+            if request_ip and not normalized_data.get("ip"):
+                normalized_data["ip"] = request_ip
+            
+            # 7.5. CPL 系统：进行 Cap/扣量检查（广告主信息已在上面获取）
+            final_payout = normalized_data.get("payout")
+            discount_info = None
+            
+            # 如果之前找到了 click_record，进行 Cap 和扣量检查
+            if click_id and offer_id is not None:
+                # 0. 检查点击有效期 (Click Validity)
+                if offer_id:
+                    offer = await db.execute(select(Offer).where(Offer.id == offer_id))
+                    offer_obj = offer.scalars().first()
+                    if offer_obj:
+                        validity_hours = offer_obj.click_validity_hours or 720  # 默认30天
+                        # 计算小时差
+                        # 确保 click_time 是 aware datetime（如果数据库存储的是 naive，需要添加时区）
+                        now_utc = datetime.now(timezone.utc)
+                        if click_time:
+                            # 如果 click_time 是 naive，假设它是 UTC 时间
+                            if click_time.tzinfo is None:
+                                click_time_aware = click_time.replace(tzinfo=timezone.utc)
+                            else:
+                                click_time_aware = click_time
+                            hours_diff = (now_utc - click_time_aware).total_seconds() / 3600
+                        else:
+                            hours_diff = 0  # 如果没有 click_time，跳过有效期检查
+                        
+                        if hours_diff > validity_hours:
+                            logger.warning(
+                                f"转化被点击有效期拒绝: conversion_id={conversion_id}, "
+                                f"click_age={hours_diff:.1f}h, limit={validity_hours}h"
+                            )
+                            # 标记状态为 ClickExpired，由后续逻辑处理
+                            normalized_data["status_override"] = "ClickExpired"
+                            normalized_data["rejection_reason"] = f"Click expired ({hours_diff:.1f}h > {validity_hours}h)"
+
+                # 检查 Cap 限制
+                if offer_id:
+                    is_allowed, cap_reason = await check_cap(
+                        db=db,
+                        offer_id=offer_id,
+                        publisher_id=publisher_id,
+                        advertiser_id=advertiser_id
+                    )
+                    
+                    if not is_allowed:
+                        logger.warning(
+                            f"转化被Cap限制拒绝: conversion_id={conversion_id}, "
+                            f"offer_id={offer_id}, reason={cap_reason}"
+                        )
+                        # 可以选择拒绝转化或标记为特殊状态
+                        # 这里我们仍然保存转化，但标记状态
+                        # 也可以选择直接拒绝：raise_api_exception(...)
+                
+                # 计算扣量
+                if offer_id and publisher_id and final_payout:
+                    final_payout, discount_amount, discount_info = await calculate_discount(
+                        db=db,
+                        offer_id=offer_id,
+                        publisher_id=publisher_id,
+                        original_payout=final_payout
+                    )
+                    if discount_info:
+                        logger.info(
+                            f"应用扣量: conversion_id={conversion_id}, "
+                            f"original={normalized_data.get('payout')}, "
+                            f"final={final_payout}, info={discount_info}"
+                        )
+            
+            # 8. 创建转化记录（使用广告主名称作为平台名称）
+            # 如果找到了广告主名称，使用广告主名称；否则使用传入的 platform 参数
+            final_platform = advertiser_name if advertiser_name else platform
             conversion = PostbackConversion(
-                platform=platform,
+                platform=final_platform,
                 conversion_id=conversion_id,
                 event_name=normalized_data.get("event_name"),
                 event_value=normalized_data.get("event_value"),
