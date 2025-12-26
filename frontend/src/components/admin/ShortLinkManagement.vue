@@ -222,6 +222,7 @@
             clearable
             style="width: 100%;"
             :popper-append-to-body="true"
+            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option
               v-for="offer in offerList"
@@ -244,6 +245,7 @@
             clearable
             style="width: 100%;"
             :popper-append-to-body="true"
+            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option
               v-for="channel in channelList"

@@ -148,6 +148,7 @@
             v-model="formData.discount_type" 
             style="width: 100%;" 
             :popper-append-to-body="true"
+            :popper-options="{ strategy: 'fixed' }"
             @change="handleDiscountTypeChange"
           >
             <el-option label="offer（Offer级别）" value="offer" />
@@ -166,6 +167,7 @@
             filterable
             style="width: 100%;"
             :popper-append-to-body="true"
+            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option
               v-for="offer in offerList"
@@ -183,6 +185,7 @@
             filterable
             style="width: 100%;"
             :popper-append-to-body="true"
+            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option
               v-for="pub in publisherList"

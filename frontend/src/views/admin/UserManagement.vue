@@ -278,6 +278,7 @@
                 placeholder="请选择角色" 
                 style="width: 100%;" 
                 :popper-append-to-body="true"
+                :popper-options="{ strategy: 'fixed' }"
                 @change="handleRoleChange"
                 :disabled="!!currentUserId && (users.find(u => u.id === currentUserId)?.role === 'admin')"
               >

@@ -48,6 +48,8 @@
             style="width: 100%;"
             @change="handleFilterClientChange"
             clearable
+            :popper-append-to-body="true"
+            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option v-for="user in users" :key="user.value" :label="user.label" :value="user.value"></el-option>
           </el-select>
@@ -60,6 +62,8 @@
             style="width: 100%;"
             clearable
             @change="handleFilterProductChange"
+            :popper-append-to-body="true"
+            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option v-for="product in filterProducts" :key="product.value" :label="product.label" :value="product.value"></el-option>
           </el-select>
@@ -72,6 +76,8 @@
             style="width: 100%;"
             clearable
             @change="handleCountryChange"
+            :popper-append-to-body="true"
+            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option v-for="country in filterCountries" :key="country.code" :label="country.name_zh" :value="country.code"></el-option>
           </el-select>
@@ -166,6 +172,7 @@
             placeholder="选择用户" 
             style="width: 100%;"
             :popper-append-to-body="true"
+            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option v-for="user in users" :key="user.value" :label="user.label" :value="user.value"></el-option>
           </el-select>
@@ -179,6 +186,7 @@
             @change="handleProductChange" 
             :disabled="!editForm.client_id"
             :popper-append-to-body="true"
+            :popper-options="{ strategy: 'fixed' }"
           >
             <el-option v-for="product in products" :key="product.value" :label="product.label" :value="product.value"></el-option>
           </el-select>
@@ -732,6 +740,13 @@ const handleFilterClientChange = async (clientId) => {
   
   // 重新加载国家列表（清空产品后，国家列表基于客户和日期范围）
   await fetchFilterCountries(clientId || null, null);
+  
+  // 修复选中值显示
+  nextTick(() => {
+    setTimeout(() => {
+      fixFilterSelectDisplay()
+    }, 100)
+  })
 };
 
 /**
@@ -754,6 +769,13 @@ const handleFilterProductChange = async () => {
       searchForm.value.countryCode = '';
     }
   }
+  
+  // 修复选中值显示
+  nextTick(() => {
+    setTimeout(() => {
+      fixFilterSelectDisplay()
+    }, 100)
+  })
 };
 
 /**
@@ -812,7 +834,82 @@ const fetchFilterCountries = async (clientId = null, productId = null) => {
 const handleCountryChange = () => {
   // 国家选择变化时不需要重新加载其他数据
   // 只需要在查询时使用新的国家筛选条件
+  
+  // 修复选中值显示
+  nextTick(() => {
+    setTimeout(() => {
+      fixFilterSelectDisplay()
+    }, 100)
+  })
 };
+
+/**
+ * 修复筛选表单中 el-select 的显示问题
+ */
+const fixFilterSelectDisplay = () => {
+  try {
+    nextTick(() => {
+      setTimeout(() => {
+        try {
+          const selectElements = document.querySelectorAll('.filter-form .el-select')
+          selectElements.forEach((selectEl) => {
+            try {
+              // 检查是否有值
+              const isNotEmpty = !selectEl.classList.contains('is-empty')
+              
+              if (isNotEmpty) {
+                // 隐藏 placeholder
+                const placeholder = selectEl.querySelector('.el-select__placeholder')
+                if (placeholder) {
+                  placeholder.style.display = 'none'
+                  placeholder.style.visibility = 'hidden'
+                  placeholder.style.opacity = '0'
+                  placeholder.style.height = '0'
+                  placeholder.style.width = '0'
+                  placeholder.style.overflow = 'hidden'
+                  placeholder.style.pointerEvents = 'none'
+                }
+                
+                // 确保选中值显示
+                const input = selectEl.querySelector('.el-input__inner, .el-input__wrapper input, .el-select__input')
+                const inputInner = selectEl.querySelector('.el-input__inner')
+                
+                if (input) {
+                  input.style.opacity = '1'
+                  input.style.visibility = 'visible'
+                  input.style.color = 'var(--el-text-color-regular)'
+                  input.style.zIndex = '2'
+                }
+                
+                if (inputInner) {
+                  inputInner.style.opacity = '1'
+                  inputInner.style.visibility = 'visible'
+                  inputInner.style.color = 'var(--el-text-color-regular)'
+                  inputInner.style.zIndex = '2'
+                }
+              }
+            } catch (err) {
+              console.debug('修复单个 el-select 时出错:', err)
+            }
+          })
+        } catch (err) {
+          console.debug('修复 filter-form el-select 显示时出错:', err)
+        }
+      }, 50)
+    })
+  } catch (err) {
+    console.debug('fixFilterSelectDisplay 出错:', err)
+  }
+}
+
+// 监听筛选表单的变化，自动修复显示
+watch(() => [searchForm.value.clientId, searchForm.value.productId, searchForm.value.countryCode], () => {
+  nextTick(() => {
+    setTimeout(() => {
+      fixFilterSelectDisplay()
+    }, 100)
+  })
+}, { deep: true })
 
 /**
  * 日期范围变化时的处理函数
@@ -1671,10 +1768,37 @@ watch(
     width: 100% !important;
   }
   
-  .filter-form :deep(.el-select .el-input__wrapper) {
-    min-height: var(--touch-target-size);
-    width: 100% !important;
-  }
+.filter-form :deep(.el-select .el-input__wrapper) {
+  min-height: var(--touch-target-size);
+  width: 100% !important;
+}
+
+/* 修复 filter-form 中的 el-select placeholder 遮盖选中值的问题 */
+.filter-form :deep(.el-select .el-select__placeholder) {
+  z-index: 0 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+}
+
+.filter-form :deep(.el-select:not(.is-empty) .el-select__placeholder),
+.filter-form :deep(.el-select:hover .el-select__placeholder),
+.filter-form :deep(.el-select:focus .el-select__placeholder) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+}
+
+.filter-form :deep(.el-select .el-input__inner),
+.filter-form :deep(.el-select .el-input__wrapper input),
+.filter-form :deep(.el-select .el-select__input) {
+  z-index: 2 !important;
+  position: relative !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  color: var(--el-text-color-regular) !important;
+}
   
   .filter-form :deep(.el-date-editor.el-input__wrapper) {
     width: 100% !important;
