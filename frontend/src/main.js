@@ -831,7 +831,13 @@ const fixSelectDisplay = () => {
     const hasSelectedTags = selectEl.querySelector('.el-select__tags') !== null ||
       selectEl.querySelector('.el-select__selected-item') !== null;
     
-    // 方法5: 检查 input 元素的值
+    // 方法5: 检查是否有清除按钮（如果有清除按钮，说明有选中值）
+    const hasClearButton = selectEl.querySelector('.el-select__clear') !== null ||
+                           selectEl.querySelector('.el-icon--circle-close') !== null ||
+                           selectEl.querySelector('[class*="clear"]') !== null ||
+                           selectEl.querySelector('[class*="close"]') !== null;
+    
+    // 方法6: 检查 input 元素的值
     const inputEl = selectEl.querySelector('.el-select__input') ||
       selectEl.querySelector('.el-input__wrapper input') ||
       selectEl.querySelector('.el-input__inner');
@@ -843,14 +849,30 @@ const fixSelectDisplay = () => {
       hasInputValue = inputValue && inputValue !== placeholderText && inputValue.length > 0;
     }
     
-    // 综合判断：优先检查 placeholder 文本（最直接的方式）
-    // 如果 placeholder 显示的文本不是原始 placeholder，说明有选中值（即使 Vue modelValue 为 null）
+    // 综合判断：优先检查清除按钮（最可靠的信号）
+    // 如果有清除按钮，说明有选中值（即使 Vue modelValue 为 null）
     let hasSelectedValue = false;
     
-    // 关键修复：优先检查 placeholder 文本
+    // 关键修复1: 优先检查清除按钮（最可靠的信号）
+    // 如果有清除按钮，说明用户已经选择了值，只是 Vue 状态没有同步
+    if (hasClearButton) {
+      hasSelectedValue = true;
+      // 如果还没有找到选中文本，尝试从其他方式获取
+      if (!displayedText) {
+        // 尝试从 input wrapper 中查找选中值
+        if (inputWrapper) {
+          const allText = inputWrapper.innerText || inputWrapper.textContent || '';
+          // 排除 placeholder 文本后，查找选中值
+          const cleanText = allText.replace(currentPlaceholderText, '').trim();
+          if (cleanText && cleanText !== originalPlaceholder) {
+            displayedText = cleanText;
+          }
+        }
+      }
+    }
+    // 关键修复2: 检查 placeholder 文本
     // 如果 placeholder 显示的文本不是原始 placeholder，说明有选中值
-    // 这是最可靠的检测方式，因为即使 Vue modelValue 没有更新，DOM 中已经显示了选中值
-    if (currentPlaceholderText && currentPlaceholderText !== originalPlaceholder) {
+    else if (currentPlaceholderText && currentPlaceholderText !== originalPlaceholder) {
       hasSelectedValue = true;
       
       // 如果 placeholder 文本包含原始 placeholder 的一部分，提取选中值
@@ -864,8 +886,9 @@ const fixSelectDisplay = () => {
       if (placeholderEl.textContent !== originalPlaceholder) {
         placeholderEl.textContent = originalPlaceholder;
       }
-    } else if (displayedText && displayedText !== originalPlaceholder && displayedText.length > 0) {
-      // 如果通过其他方式检测到选中文本，也认为有选中值
+    } 
+    // 关键修复3: 如果通过其他方式检测到选中文本，也认为有选中值
+    else if (displayedText && displayedText !== originalPlaceholder && displayedText.length > 0) {
       hasSelectedValue = true;
       
       // 关键修复：如果 Vue modelValue 为 null，但检测到有选中文本，
@@ -990,12 +1013,21 @@ const fixSelectDisplay = () => {
     } else if (hasVueValue) {
       // Vue 有值（包括空字符串），肯定有选中值
       hasSelectedValue = true;
+    } else if (hasVueValue) {
+      // Vue 有值（包括空字符串），肯定有选中值
+      hasSelectedValue = true;
     } else if (modelValue === null || modelValue === undefined) {
-      // Vue 值为 null 或 undefined，且没有检测到选中文本，肯定没有选中值
-      hasSelectedValue = false;
+      // Vue 值为 null 或 undefined
+      // 但如果检测到清除按钮或其他信号，仍然认为有选中值
+      if (!hasClearButton && !hasVisibleText && !hasSelectedTags && !hasInputValue) {
+        hasSelectedValue = false;
+      } else {
+        // 有其他信号表明有选中值
+        hasSelectedValue = true;
+      }
     } else {
       // 其他情况：使用其他检测方法
-      hasSelectedValue = !hasIsEmptyClass || hasVisibleText || hasSelectedTags || hasInputValue;
+      hasSelectedValue = !hasIsEmptyClass || hasVisibleText || hasSelectedTags || hasInputValue || hasClearButton;
     }
     
     if (hasSelectedValue) {
