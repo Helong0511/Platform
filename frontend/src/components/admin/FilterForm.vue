@@ -17,6 +17,8 @@
           @update:model-value="updateValue('is_active', $event)"
           placeholder="全部状态"
           clearable
+          popper-class="select-dropdown"
+          :teleported="true"
           style="width: 150px;"
           aria-label="选择客户状态"
         >
