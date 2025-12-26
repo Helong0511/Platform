@@ -324,9 +324,10 @@ input[type="text"].el-input_inner {
 
 /* 核心修复：确保 placeholder 的层级低于选中值，且不拦截交互 */
 .el-select .el-select__placeholder {
-  z-index: 0 !important;
+  z-index: -1 !important;
   pointer-events: none !important;
   position: absolute !important;
+  left: -9999px !important;
 }
 
 /* 确保 input 中的选中值正常显示，层级高于 placeholder */
@@ -334,7 +335,16 @@ input[type="text"].el-input_inner {
 .el-select .el-input__wrapper,
 .el-select .el-select__input {
   position: relative !important;
-  z-index: 1 !important;
+  z-index: 10 !important;
+}
+
+/* 确保 input wrapper 内的 input 元素可见 */
+.el-select .el-input__wrapper input {
+  position: relative !important;
+  z-index: 10 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  color: var(--el-text-color-regular) !important;
 }
 
 /* 确保选中值的文本正常显示 */

@@ -760,56 +760,69 @@ const fixSelectAccessibility = () => {
       const placeholderEl = selectEl.querySelector('.el-select__placeholder');
       if (!placeholderEl) return;
       
-      // 检查是否有选中的值（通过多种方式检测）
-      // 1. 检查是否有选中的标签或文本元素（多选模式）
-      const hasSelectedItem = selectEl.querySelector('.el-select__selected-item') ||
-        selectEl.querySelector('.el-select__tags') ||
-        selectEl.querySelector('.el-select__tags .el-tag');
+      // 方法1: 检查是否有 is-empty 类（最直接的方式）
+      const hasIsEmptyClass = selectEl.classList.contains('is-empty');
       
-      // 2. 检查 input 元素
+      // 方法2: 检查 input wrapper 内的所有可见文本内容
+      const inputWrapper = selectEl.querySelector('.el-input__wrapper');
+      let hasVisibleText = false;
+      let visibleText = '';
+      
+      if (inputWrapper) {
+        // 获取所有子元素和文本节点
+        const walker = document.createTreeWalker(
+          inputWrapper,
+          NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+          null
+        );
+        
+        const texts = [];
+        let node;
+        while (node = walker.nextNode()) {
+          if (node.nodeType === Node.TEXT_NODE) {
+            const text = node.textContent?.trim();
+            if (text && text.length > 0) {
+              texts.push(text);
+            }
+          } else if (node.nodeType === Node.ELEMENT_NODE) {
+            // 检查元素内的文本（排除 placeholder）
+            const elementText = node.textContent?.trim();
+            if (elementText && elementText.length > 0 && 
+                !node.classList.contains('el-select__placeholder') &&
+                node !== placeholderEl) {
+              texts.push(elementText);
+            }
+          }
+        }
+        
+        // 检查是否有非 placeholder 的文本
+        const placeholderText = placeholderEl.textContent?.trim() || '';
+        const nonPlaceholderTexts = texts.filter(text => text !== placeholderText);
+        hasVisibleText = nonPlaceholderTexts.length > 0;
+        visibleText = nonPlaceholderTexts.join(' ');
+      }
+      
+      // 方法3: 检查是否有选中的标签（多选模式）
+      const hasSelectedTags = selectEl.querySelector('.el-select__tags') !== null ||
+        selectEl.querySelector('.el-select__selected-item') !== null;
+      
+      // 方法4: 检查 input 元素的值
       const inputEl = selectEl.querySelector('.el-select__input') ||
         selectEl.querySelector('.el-input__wrapper input') ||
         selectEl.querySelector('.el-input__inner');
       
-      // 3. 检查是否有选中的文本内容
-      let hasSelectedText = false;
+      let hasInputValue = false;
       if (inputEl) {
-        // 获取 input 的文本内容（可能是 value 或 textContent）
         const inputValue = (inputEl.value || inputEl.textContent || '').trim();
-        const inputPlaceholder = (inputEl.getAttribute('placeholder') || '').trim();
-        const selectPlaceholder = (selectEl.getAttribute('placeholder') || '').trim();
-        
-        // 如果 input 有文本内容，且不是 placeholder，则认为有选中值
-        // 注意：即使值是空字符串，如果 label 有值，Element Plus 也会在 input 中显示 label
-        hasSelectedText = inputValue && 
-          inputValue !== inputPlaceholder && 
-          inputValue !== selectPlaceholder &&
-          inputValue !== placeholderEl.textContent?.trim();
-      }
-      
-      // 4. 检查 el-select 内部是否有实际显示的文本（通过检查 input wrapper 的内容）
-      const inputWrapper = selectEl.querySelector('.el-input__wrapper');
-      let hasDisplayedText = false;
-      if (inputWrapper) {
-        // 获取 input wrapper 内的所有文本节点
-        const textNodes = Array.from(inputWrapper.childNodes)
-          .filter(node => node.nodeType === Node.TEXT_NODE)
-          .map(node => node.textContent?.trim())
-          .filter(text => text && text.length > 0);
-        
-        // 检查是否有非 placeholder 的文本
         const placeholderText = placeholderEl.textContent?.trim() || '';
-        hasDisplayedText = textNodes.some(text => text !== placeholderText);
+        hasInputValue = inputValue && inputValue !== placeholderText && inputValue.length > 0;
       }
       
-      // 5. 检查 el-select 是否有 is-empty 类（如果没有，说明有值）
-      const isNotEmpty = !selectEl.classList.contains('is-empty');
-      
-      // 综合判断：如果有选中项、有选中文本、有显示的文本、或者没有 is-empty 类，则认为有选中值
-      const hasSelectedValue = hasSelectedItem || hasSelectedText || hasDisplayedText || isNotEmpty;
+      // 综合判断：如果没有 is-empty 类，或者有可见文本，或者有选中标签，或者有 input 值，则认为有选中值
+      const hasSelectedValue = !hasIsEmptyClass || hasVisibleText || hasSelectedTags || hasInputValue;
       
       if (hasSelectedValue) {
-        // 如果有选中值，强制隐藏 placeholder
+        // 强制隐藏 placeholder
         placeholderEl.style.setProperty('display', 'none', 'important');
         placeholderEl.style.setProperty('visibility', 'hidden', 'important');
         placeholderEl.style.setProperty('opacity', '0', 'important');
@@ -818,12 +831,25 @@ const fixSelectAccessibility = () => {
         placeholderEl.style.setProperty('overflow', 'hidden', 'important');
         placeholderEl.style.setProperty('pointer-events', 'none', 'important');
         placeholderEl.style.setProperty('position', 'absolute', 'important');
-        placeholderEl.style.setProperty('z-index', '0', 'important');
+        placeholderEl.style.setProperty('z-index', '-1', 'important');
+        placeholderEl.style.setProperty('left', '-9999px', 'important');
         
-        // 移除 is-empty 类（如果存在）
+        // 强制移除 is-empty 类
         selectEl.classList.remove('is-empty');
+        
+        // 确保选中值可见
+        if (inputWrapper) {
+          const input = inputWrapper.querySelector('input');
+          if (input) {
+            input.style.setProperty('opacity', '1', 'important');
+            input.style.setProperty('visibility', 'visible', 'important');
+            input.style.setProperty('color', 'var(--el-text-color-regular)', 'important');
+            input.style.setProperty('z-index', '10', 'important');
+            input.style.setProperty('position', 'relative', 'important');
+          }
+        }
       } else {
-        // 如果没有选中值，确保 placeholder 显示
+        // 如果没有选中值，恢复 placeholder 显示
         placeholderEl.style.removeProperty('display');
         placeholderEl.style.removeProperty('visibility');
         placeholderEl.style.removeProperty('opacity');
@@ -833,6 +859,7 @@ const fixSelectAccessibility = () => {
         placeholderEl.style.removeProperty('pointer-events');
         placeholderEl.style.removeProperty('position');
         placeholderEl.style.removeProperty('z-index');
+        placeholderEl.style.removeProperty('left');
       }
     });
   };
@@ -902,19 +929,52 @@ const fixSelectAccessibility = () => {
 
   // 延迟执行，确保 DOM 已完全加载
   setTimeout(fixAllInputs, 100);
+  
+  // 增加修复频率，确保选中值能正确显示
+  setTimeout(fixSelectDisplay, 200);
+  setTimeout(fixSelectDisplay, 500);
+  setTimeout(fixSelectDisplay, 1000);
 
   // 在路由变化后也执行修复（Vue Router 导航后）
   if (router) {
     router.afterEach(() => {
       setTimeout(fixAllInputs, 200);
+      setTimeout(fixSelectDisplay, 500);
+      setTimeout(fixSelectDisplay, 1000);
     });
   }
 
   // 开始观察 DOM 变化
   observer.observe(document.body, {
     childList: true,
-    subtree: true
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['class', 'style']
   });
+  
+  // 监听所有 el-select 的 change 事件
+  document.addEventListener('change', (e) => {
+    if (e.target.closest('.el-select')) {
+      setTimeout(() => {
+        fixSelectDisplay();
+      }, 50);
+      setTimeout(() => {
+        fixSelectDisplay();
+      }, 200);
+    }
+  }, true);
+  
+  // 监听所有 el-select 的 click 事件（选择选项时）
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.el-select-dropdown__item')) {
+      setTimeout(() => {
+        fixSelectDisplay();
+      }, 50);
+      setTimeout(() => {
+        fixSelectDisplay();
+      }, 200);
+    }
+  }, true);
   
   // 导出修复函数供其他组件使用
   window.fixSelectDisplay = fixSelectDisplay;
