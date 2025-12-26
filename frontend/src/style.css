@@ -360,7 +360,9 @@ input[type="text"].el-input_inner {
 
 /* 当 el-select 有值时，隐藏 placeholder - 使用多种方法确保生效 */
 .el-select:not(.is-empty) .el-select__placeholder,
-.el-select:not(.is-empty) .el-select__placeholder.is-hidden {
+.el-select:not(.is-empty) .el-select__placeholder.is-hidden,
+.el-select:not(.is-empty):not(:focus) .el-select__placeholder,
+.el-select:not(.is-empty):not(:focus-within) .el-select__placeholder {
   display: none !important;
   visibility: hidden !important;
   opacity: 0 !important;
@@ -416,7 +418,8 @@ input[type="text"].el-input_inner {
 .el-dialog .el-select:not(.is-empty) .el-select__placeholder,
 .el-dialog .el-select:hover .el-select__placeholder,
 .el-dialog .el-select:focus .el-select__placeholder,
-.el-dialog .el-select:focus-within .el-select__placeholder {
+.el-dialog .el-select:focus-within .el-select__placeholder,
+.el-dialog .el-select:not(.is-empty):not(:focus) .el-select__placeholder {
   display: none !important;
   visibility: hidden !important;
   opacity: 0 !important;

@@ -47,6 +47,7 @@
             placeholder="全部客户" 
             style="width: 100%;"
             @change="handleFilterClientChange"
+            @blur="() => fixFilterSelectDisplay()"
             clearable
             :popper-append-to-body="true"
             :popper-options="{ strategy: 'fixed' }"
@@ -62,6 +63,7 @@
             style="width: 100%;"
             clearable
             @change="handleFilterProductChange"
+            @blur="() => fixFilterSelectDisplay()"
             :popper-append-to-body="true"
             :popper-options="{ strategy: 'fixed' }"
           >
@@ -76,6 +78,7 @@
             style="width: 100%;"
             clearable
             @change="handleCountryChange"
+            @blur="() => fixFilterSelectDisplay()"
             :popper-append-to-body="true"
             :popper-options="{ strategy: 'fixed' }"
           >
@@ -854,10 +857,52 @@ const fixFilterSelectDisplay = () => {
           const selectElements = document.querySelectorAll('.filter-form .el-select')
           selectElements.forEach((selectEl) => {
             try {
-              // 检查是否有值
-              const isNotEmpty = !selectEl.classList.contains('is-empty')
+              // 获取对应的 v-model 值
+              const selectComponent = selectEl.__vueParentComponent
+              let hasValue = false
+              let selectedLabel = ''
               
-              if (isNotEmpty) {
+              // 检查是否有值 - 通过多种方式
+              if (!selectEl.classList.contains('is-empty')) {
+                hasValue = true
+              }
+              
+              // 通过检查 input 的值来判断
+              const input = selectEl.querySelector('.el-input__inner, .el-input__wrapper input, .el-select__input')
+              if (input && input.value && input.value.trim() !== '') {
+                hasValue = true
+                selectedLabel = input.value
+              }
+              
+              // 通过检查 selected-item 来判断
+              const selectedItem = selectEl.querySelector('.el-select__selected-item')
+              if (selectedItem) {
+                hasValue = true
+                selectedLabel = selectedItem.textContent || selectedItem.innerText
+              }
+              
+              // 通过检查 searchForm 的值来判断
+              const nameAttr = selectEl.querySelector('input')?.getAttribute('name')
+              if (nameAttr) {
+                if (nameAttr === 'clientId' && searchForm.value.clientId) {
+                  hasValue = true
+                  const user = users.value.find(u => u.value === searchForm.value.clientId)
+                  if (user) selectedLabel = user.label
+                } else if (nameAttr === 'productId' && searchForm.value.productId) {
+                  hasValue = true
+                  const product = filterProducts.value.find(p => p.value === searchForm.value.productId)
+                  if (product) selectedLabel = product.label
+                } else if (nameAttr === 'countryCode' && searchForm.value.countryCode) {
+                  hasValue = true
+                  const country = filterCountries.value.find(c => c.code === searchForm.value.countryCode)
+                  if (country) selectedLabel = country.name_zh
+                }
+              }
+              
+              if (hasValue) {
+                // 移除 is-empty 类
+                selectEl.classList.remove('is-empty')
+                
                 // 隐藏 placeholder
                 const placeholder = selectEl.querySelector('.el-select__placeholder')
                 if (placeholder) {
@@ -871,21 +916,49 @@ const fixFilterSelectDisplay = () => {
                 }
                 
                 // 确保选中值显示
-                const input = selectEl.querySelector('.el-input__inner, .el-input__wrapper input, .el-select__input')
-                const inputInner = selectEl.querySelector('.el-input__inner')
-                
                 if (input) {
+                  if (selectedLabel && input.value !== selectedLabel) {
+                    input.value = selectedLabel
+                  }
                   input.style.opacity = '1'
                   input.style.visibility = 'visible'
                   input.style.color = 'var(--el-text-color-regular)'
                   input.style.zIndex = '2'
+                  input.style.display = 'block'
                 }
                 
+                const inputInner = selectEl.querySelector('.el-input__inner')
                 if (inputInner) {
+                  if (selectedLabel && inputInner.textContent !== selectedLabel) {
+                    inputInner.textContent = selectedLabel
+                    inputInner.innerText = selectedLabel
+                  }
                   inputInner.style.opacity = '1'
                   inputInner.style.visibility = 'visible'
                   inputInner.style.color = 'var(--el-text-color-regular)'
                   inputInner.style.zIndex = '2'
+                  inputInner.style.display = 'block'
+                }
+                
+                // 确保 selected-item 显示
+                if (selectedItem) {
+                  selectedItem.style.display = 'inline-block'
+                  selectedItem.style.visibility = 'visible'
+                  selectedItem.style.opacity = '1'
+                  selectedItem.style.zIndex = '2'
+                }
+              } else {
+                // 没有值时，显示 placeholder
+                selectEl.classList.add('is-empty')
+                const placeholder = selectEl.querySelector('.el-select__placeholder')
+                if (placeholder) {
+                  placeholder.style.display = ''
+                  placeholder.style.visibility = ''
+                  placeholder.style.opacity = ''
+                  placeholder.style.height = ''
+                  placeholder.style.width = ''
+                  placeholder.style.overflow = ''
+                  placeholder.style.pointerEvents = ''
                 }
               }
             } catch (err) {
@@ -895,7 +968,7 @@ const fixFilterSelectDisplay = () => {
         } catch (err) {
           console.debug('修复 filter-form el-select 显示时出错:', err)
         }
-      }, 50)
+      }, 100)
     })
   } catch (err) {
     console.debug('fixFilterSelectDisplay 出错:', err)

@@ -444,6 +444,7 @@
                     :popper-append-to-body="true"
                     :popper-options="{ strategy: 'fixed' }"
                     @change="() => fixPlaceholderDisplay()"
+                    @blur="() => fixPlaceholderDisplay()"
                     @mouseenter="() => fixPlaceholderDisplay()"
                     @mouseleave="() => fixPlaceholderDisplay()"
                   >
@@ -948,12 +949,15 @@ const fixPlaceholderDisplay = () => {
               if (!config) return
               
               const publisherId = config.publisher_id
-              const hasValue = publisherId !== null && publisherId !== undefined
+              const hasValue = publisherId !== null && publisherId !== undefined && publisherId !== ''
               
               if (hasValue && publisherId) {
                 // 获取对应的渠道名称
                 const publisher = publisherList.value.find(p => p.id === publisherId)
                 if (!publisher) return
+                
+                // 移除 is-empty 类（如果存在）
+                selectEl.classList.remove('is-empty')
                 
                 // 隐藏 placeholder
                 const placeholder = selectEl.querySelector('.el-select__placeholder')
@@ -970,6 +974,7 @@ const fixPlaceholderDisplay = () => {
                 // 确保选中值显示
                 const input = selectEl.querySelector('.el-input__inner, .el-input__wrapper input, .el-select__input')
                 const inputInner = selectEl.querySelector('.el-input__inner')
+                const selectedItem = selectEl.querySelector('.el-select__selected-item')
                 
                 if (input) {
                   // 设置 input 的值
@@ -981,6 +986,7 @@ const fixPlaceholderDisplay = () => {
                   input.style.visibility = 'visible'
                   input.style.color = 'var(--el-text-color-regular)'
                   input.style.zIndex = '2'
+                  input.style.display = 'block'
                 }
                 
                 if (inputInner) {
@@ -994,12 +1000,19 @@ const fixPlaceholderDisplay = () => {
                   inputInner.style.visibility = 'visible'
                   inputInner.style.color = 'var(--el-text-color-regular)'
                   inputInner.style.zIndex = '2'
+                  inputInner.style.display = 'block'
                 }
                 
-                // 移除 is-empty 类（如果存在）
-                selectEl.classList.remove('is-empty')
+                // 确保 selected-item 显示
+                if (selectedItem) {
+                  selectedItem.style.display = 'inline-block'
+                  selectedItem.style.visibility = 'visible'
+                  selectedItem.style.opacity = '1'
+                  selectedItem.style.zIndex = '2'
+                }
               } else {
                 // 没有值时，显示 placeholder
+                selectEl.classList.add('is-empty')
                 const placeholder = selectEl.querySelector('.el-select__placeholder')
                 if (placeholder) {
                   placeholder.style.display = ''
