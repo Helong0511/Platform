@@ -359,13 +359,17 @@ input[type="text"].el-input_inner {
 }
 
 /* 当 el-select 有值时，隐藏 placeholder - 使用多种方法确保生效 */
-.el-select:not(.is-empty) .el-select__placeholder {
+.el-select:not(.is-empty) .el-select__placeholder,
+.el-select:not(.is-empty) .el-select__placeholder.is-hidden {
   display: none !important;
   visibility: hidden !important;
   opacity: 0 !important;
   height: 0 !important;
   width: 0 !important;
   overflow: hidden !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  z-index: 0 !important;
 }
 
 /* 通过检查 input 是否有值来隐藏 placeholder（如果浏览器支持 :has） */

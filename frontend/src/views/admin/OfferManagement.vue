@@ -443,6 +443,8 @@
                     popper-class="publisher-select-dropdown"
                     :popper-append-to-body="true"
                     @change="handlePublisherChange(index)"
+                    @blur="handlePublisherBlur(index)"
+                    @focus="handlePublisherFocus(index)"
                   >
                     <el-option
                       v-for="pub in publisherList"
@@ -956,9 +958,13 @@ const fixSelectDisplay = () => {
         // 如果有值，获取对应的渠道名称并设置到 input
         if (hasValue && publisherId) {
           const publisher = publisherList.value.find(p => p.id === publisherId)
-          if (publisher && input) {
+          if (publisher) {
             // 直接设置 input 的 value 和显示文本
-            input.value = publisher.publisher_name
+            if (input) {
+              input.value = publisher.publisher_name
+              // 触发 input 事件，让 Element Plus 更新显示
+              input.dispatchEvent(new Event('input', { bubbles: true }))
+            }
             if (inputInner) {
               inputInner.textContent = publisher.publisher_name
               inputInner.innerText = publisher.publisher_name
@@ -968,23 +974,50 @@ const fixSelectDisplay = () => {
         
         if (placeholder) {
           if (actuallyHasValue) {
-            // 有值时，强制隐藏 placeholder
-            placeholder.style.cssText = 'display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; width: 0 !important; overflow: hidden !important; pointer-events: none !important; position: absolute !important; z-index: 0 !important;'
+            // 有值时，强制隐藏 placeholder - 使用多种方法确保生效
+            placeholder.style.setProperty('display', 'none', 'important')
+            placeholder.style.setProperty('visibility', 'hidden', 'important')
+            placeholder.style.setProperty('opacity', '0', 'important')
+            placeholder.style.setProperty('height', '0', 'important')
+            placeholder.style.setProperty('width', '0', 'important')
+            placeholder.style.setProperty('overflow', 'hidden', 'important')
+            placeholder.style.setProperty('pointer-events', 'none', 'important')
+            placeholder.style.setProperty('position', 'absolute', 'important')
+            placeholder.style.setProperty('z-index', '0', 'important')
+            // 添加类名标记已隐藏
+            placeholder.classList.add('is-hidden')
           } else {
             // 没有值时，显示 placeholder
-            placeholder.style.cssText = ''
+            placeholder.style.removeProperty('display')
+            placeholder.style.removeProperty('visibility')
+            placeholder.style.removeProperty('opacity')
+            placeholder.style.removeProperty('height')
+            placeholder.style.removeProperty('width')
+            placeholder.style.removeProperty('overflow')
+            placeholder.classList.remove('is-hidden')
           }
         }
         
         // 确保 input 和 wrapper 中的选中值正常显示
         if (input) {
-          input.style.cssText = 'opacity: 1 !important; visibility: visible !important; color: var(--el-text-color-regular) !important; display: block !important; z-index: 1 !important; position: relative !important;'
+          input.style.setProperty('opacity', '1', 'important')
+          input.style.setProperty('visibility', 'visible', 'important')
+          input.style.setProperty('color', 'var(--el-text-color-regular)', 'important')
+          input.style.setProperty('display', 'block', 'important')
+          input.style.setProperty('z-index', '2', 'important')
+          input.style.setProperty('position', 'relative', 'important')
         }
         if (inputInner) {
-          inputInner.style.cssText = 'opacity: 1 !important; visibility: visible !important; color: var(--el-text-color-regular) !important; display: block !important; z-index: 1 !important; position: relative !important;'
+          inputInner.style.setProperty('opacity', '1', 'important')
+          inputInner.style.setProperty('visibility', 'visible', 'important')
+          inputInner.style.setProperty('color', 'var(--el-text-color-regular)', 'important')
+          inputInner.style.setProperty('display', 'block', 'important')
+          inputInner.style.setProperty('z-index', '2', 'important')
+          inputInner.style.setProperty('position', 'relative', 'important')
         }
         if (inputWrapper) {
-          inputWrapper.style.cssText = 'z-index: 1 !important; position: relative !important;'
+          inputWrapper.style.setProperty('z-index', '1', 'important')
+          inputWrapper.style.setProperty('position', 'relative', 'important')
         }
       })
     }, 50)
@@ -994,6 +1027,24 @@ const fixSelectDisplay = () => {
 // 渠道选择变化处理
 const handlePublisherChange = (index) => {
   fixSelectDisplay()
+}
+
+// 渠道选择失去焦点处理
+const handlePublisherBlur = (index) => {
+  // 失去焦点时，确保选中值正确显示
+  nextTick(() => {
+    setTimeout(() => {
+      fixSelectDisplay()
+    }, 10)
+  })
+}
+
+// 渠道选择获得焦点处理
+const handlePublisherFocus = (index) => {
+  // 获得焦点时，也确保显示正确
+  nextTick(() => {
+    fixSelectDisplay()
+  })
 }
 
 // 监听 publisher_configs 的变化，自动修复显示
@@ -1007,9 +1058,43 @@ watch(() => dialogVisible.value, (newVal) => {
     // 对话框打开时，延迟修复以确保 DOM 已渲染
     setTimeout(() => {
       fixSelectDisplay()
+      // 启动 MutationObserver 监听 DOM 变化
+      startSelectObserver()
     }, 100)
+  } else {
+    // 对话框关闭时，停止监听
+    stopSelectObserver()
   }
 })
+
+// MutationObserver 用于监听 el-select 的 DOM 变化
+let selectObserver = null
+
+const startSelectObserver = () => {
+  if (selectObserver) return
+  
+  const targetNode = document.querySelector('.publisher-config-content')
+  if (!targetNode) return
+  
+  selectObserver = new MutationObserver(() => {
+    // DOM 变化时，修复显示
+    fixSelectDisplay()
+  })
+  
+  selectObserver.observe(targetNode, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['class', 'style']
+  })
+}
+
+const stopSelectObserver = () => {
+  if (selectObserver) {
+    selectObserver.disconnect()
+    selectObserver = null
+  }
+}
 
 // 添加
 const handleAdd = () => {
@@ -1738,11 +1823,18 @@ onMounted(() => {
   visibility: visible !important;
 }
 
-/* 当 el-select 有值时，隐藏 placeholder */
-.publisher-config-content :deep(.el-select:not(.is-empty) .el-select__placeholder) {
+/* 当 el-select 有值时，隐藏 placeholder - 确保失去焦点后也隐藏 */
+.publisher-config-content :deep(.el-select:not(.is-empty) .el-select__placeholder),
+.publisher-config-content :deep(.el-select:not(.is-empty) .el-select__placeholder.is-hidden) {
   display: none !important;
   visibility: hidden !important;
   opacity: 0 !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  z-index: 0 !important;
 }
 
 .publisher-config-content :deep(.el-select:has(.el-input__inner:not(:placeholder-shown)) .el-select__placeholder),
