@@ -8,6 +8,7 @@
     :show-close="true"
     align-center
     :center="true"
+    :append-to-body="true"
   >
     <template #header>
       <div class="dialog-header">
@@ -372,6 +373,8 @@
             value-format="YYYY-MM-DD"
             style="width: 100%;"
             :disabled-date="(date) => date > new Date()"
+            append-to-body
+            :z-index="3002"
             @change="handleStartDateChange"
           />
           <div style="margin-top: 8px; color: #909399; font-size: 12px;">
@@ -386,6 +389,8 @@
             format="YYYY-MM-DD"
             value-format="YYYY-MM-DD"
             style="width: 100%;"
+            append-to-body
+            :z-index="3002"
             :disabled-date="(date) => {
               // 不能选择未来日期
               if (date > new Date()) {

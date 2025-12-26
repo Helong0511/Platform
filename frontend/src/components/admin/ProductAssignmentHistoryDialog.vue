@@ -107,6 +107,8 @@
                     :clearable="true"
                     append-to-body
                     :z-index="3002"
+                    append-to-body
+                    :z-index="3002"
                     style="width: 100%"
                   />
                   <div class="form-tip">留空表示当前有效</div>

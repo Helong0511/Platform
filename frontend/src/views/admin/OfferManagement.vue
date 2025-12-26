@@ -1575,32 +1575,64 @@ onMounted(() => {
   text-align: center;
 }
 
-/* 下拉选择框样式优化 */
+/* 下拉选择框样式优化 - 确保下拉选项显示在对话框之上 */
 .publisher-select-dropdown {
-  z-index: 3000 !important;
+  z-index: 3001 !important;
+  position: fixed !important;
 }
 
 /* 确保表单容器不会裁剪下拉选项 */
 :deep(.el-form-item) {
-  overflow: visible;
+  overflow: visible !important;
 }
 
 :deep(.el-form-item__content) {
-  overflow: visible;
+  overflow: visible !important;
 }
 
 :deep(.el-select) {
   z-index: auto;
 }
 
+/* 确保下拉框的 popper 显示在对话框之上 */
 :deep(.el-select__popper) {
-  z-index: 3000 !important;
+  z-index: 3001 !important;
+  position: fixed !important;
+}
+
+/* 确保所有下拉框的 popper 都显示在对话框之上 */
+:deep(.el-select__popper.el-popper) {
+  z-index: 3001 !important;
+}
+
+/* 确保对话框内容区域不会裁剪下拉选项 */
+:deep(.el-dialog__body) {
+  overflow: visible !important;
+}
+
+:deep(.el-dialog__wrapper) {
+  overflow: visible !important;
+}
+
+/* 确保对话框遮罩层不会遮挡下拉框 */
+:deep(.el-overlay) {
+  z-index: 2000 !important;
+}
+
+:deep(.el-overlay-dialog) {
+  z-index: 2000 !important;
+}
+
+/* 确保对话框本身不会遮挡下拉框 */
+:deep(.el-dialog) {
+  z-index: 2001 !important;
 }
 
 /* 确保卡片内容区域不会裁剪下拉选项 */
 .publisher-config-content {
   position: relative;
   z-index: 1;
+  overflow: visible !important;
 }
 
 .publisher-config-content :deep(.el-select) {
@@ -1609,7 +1641,30 @@ onMounted(() => {
 }
 
 .publisher-config-content :deep(.el-select__popper) {
-  z-index: 3000 !important;
+  z-index: 3001 !important;
+  position: fixed !important;
+}
+
+.publisher-config-content :deep(.el-select__popper.el-popper) {
+  z-index: 3001 !important;
+  position: fixed !important;
+}
+
+/* 确保渠道配置卡片容器不会裁剪下拉选项 */
+.publisher-config-card {
+  overflow: visible !important;
+}
+
+.publisher-configs-container {
+  overflow: visible !important;
+}
+
+.publisher-configs-section {
+  overflow: visible !important;
+}
+
+.publisher-configs-section :deep(.el-form-item__content) {
+  overflow: visible !important;
 }
 
 /* 移动端优化 */

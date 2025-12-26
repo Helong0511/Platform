@@ -12,14 +12,26 @@
       <div class="filter-bar">
         <el-form :inline="true" :model="filters">
           <el-form-item label="状态">
-            <el-select v-model="filters.notification_status" clearable placeholder="全部" style="width: 120px">
+            <el-select 
+              v-model="filters.notification_status" 
+              clearable 
+              placeholder="全部" 
+              style="width: 120px"
+              :popper-append-to-body="true"
+            >
               <el-option label="已发送" value="sent" />
               <el-option label="失败" value="failed" />
               <el-option label="待发送" value="pending" />
             </el-select>
           </el-form-item>
           <el-form-item label="渠道">
-            <el-select v-model="filters.notification_channel" clearable placeholder="全部" style="width: 120px">
+            <el-select 
+              v-model="filters.notification_channel" 
+              clearable 
+              placeholder="全部" 
+              style="width: 120px"
+              :popper-append-to-body="true"
+            >
               <el-option label="Telegram" value="telegram" />
               <el-option label="邮箱" value="email" />
               <el-option label="短信" value="sms" />

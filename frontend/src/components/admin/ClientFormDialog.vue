@@ -7,6 +7,7 @@
     @close="handleClose"
     class="client-form-dialog"
     :destroy-on-close="true"
+    :append-to-body="true"
   >
     <el-form 
       ref="formRef" 
