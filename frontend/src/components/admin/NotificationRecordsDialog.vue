@@ -17,7 +17,6 @@
               clearable 
               placeholder="全部" 
               style="width: 120px"
-              :popper-append-to-body="true"
             >
               <el-option label="已发送" value="sent" />
               <el-option label="失败" value="failed" />
@@ -30,7 +29,6 @@
               clearable 
               placeholder="全部" 
               style="width: 120px"
-              :popper-append-to-body="true"
             >
               <el-option label="Telegram" value="telegram" />
               <el-option label="邮箱" value="email" />
