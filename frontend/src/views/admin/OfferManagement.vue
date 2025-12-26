@@ -932,7 +932,43 @@ const getPublisherName = (publisherId) => {
   return publisher ? publisher.publisher_name : ''
 }
 
-// 移除所有复杂的修复逻辑，只依赖 CSS 和 Element Plus 的默认行为
+// 简单的修复函数：确保选中值后 placeholder 隐藏
+const fixPlaceholderDisplay = () => {
+  nextTick(() => {
+    setTimeout(() => {
+      const selectElements = document.querySelectorAll('.publisher-config-content .el-select')
+      selectElements.forEach((selectEl, idx) => {
+        const config = formData.publisher_configs[idx]
+        const hasValue = config && config.publisher_id !== null && config.publisher_id !== undefined
+        
+        if (hasValue) {
+          const placeholder = selectEl.querySelector('.el-select__placeholder')
+          if (placeholder) {
+            // 简单隐藏 placeholder
+            placeholder.style.display = 'none'
+            placeholder.style.visibility = 'hidden'
+            placeholder.style.opacity = '0'
+          }
+        }
+      })
+    }, 100)
+  })
+}
+
+// 监听 publisher_configs 的变化
+watch(() => formData.publisher_configs, () => {
+  fixPlaceholderDisplay()
+}, { deep: true })
+
+// 监听对话框打开
+watch(() => dialogVisible.value, (newVal) => {
+  if (newVal) {
+    // 对话框打开时，延迟修复以确保 DOM 已渲染
+    setTimeout(() => {
+      fixPlaceholderDisplay()
+    }, 200)
+  }
+})
 
 // 添加
 const handleAdd = () => {
@@ -1660,10 +1696,24 @@ onMounted(() => {
 
 /* 确保选中值的文本正常显示 */
 .publisher-config-content :deep(.el-select .el-input__inner),
-.publisher-config-content :deep(.el-select .el-input__wrapper input) {
+.publisher-config-content :deep(.el-select .el-input__wrapper input),
+.publisher-config-content :deep(.el-select .el-select__input) {
   color: var(--el-text-color-regular) !important;
   opacity: 1 !important;
   visibility: visible !important;
+  z-index: 2 !important;
+  position: relative !important;
+}
+
+/* 确保有值时，选中值文本显示在上层 */
+.publisher-config-content :deep(.el-select:not(.is-empty) .el-input__inner),
+.publisher-config-content :deep(.el-select:not(.is-empty) .el-input__wrapper input),
+.publisher-config-content :deep(.el-select:not(.is-empty) .el-select__input) {
+  color: var(--el-text-color-regular) !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  z-index: 2 !important;
+  position: relative !important;
 }
 
 /* 当 el-select 有值时，隐藏 placeholder - 确保失去焦点后也隐藏 */
