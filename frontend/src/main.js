@@ -841,47 +841,63 @@ const fixSelectDisplay = () => {
       hasInputValue = inputValue && inputValue !== placeholderText && inputValue.length > 0;
     }
     
-    // 综合判断：优先使用 Vue modelValue（最可靠）
-    // 如果 Vue modelValue 为 null 或 undefined，即使 is-empty 为 false，也应该显示 placeholder
+    // 综合判断：优先检查 placeholder 文本（最直接的方式）
+    // 如果 placeholder 显示的文本不是原始 placeholder，说明有选中值（即使 Vue modelValue 为 null）
     let hasSelectedValue = false;
     
-    // 特殊情况：如果 placeholder 显示的文本与原始 placeholder 不同，说明有选中值
-    // 这是关键修复：即使 Vue modelValue 为 null，如果 placeholder 显示的文本不是原始 placeholder，
-    // 说明用户已经选择了值，只是 Vue 状态没有同步
-    if (displayedText && displayedText !== originalPlaceholder && displayedText.length > 0) {
+    // 关键修复：优先检查 placeholder 文本
+    // 如果 placeholder 显示的文本不是原始 placeholder，说明有选中值
+    // 这是最可靠的检测方式，因为即使 Vue modelValue 没有更新，DOM 中已经显示了选中值
+    if (currentPlaceholderText && currentPlaceholderText !== originalPlaceholder) {
+      hasSelectedValue = true;
+      
+      // 如果 placeholder 文本包含原始 placeholder 的一部分，提取选中值
+      if (originalPlaceholder && currentPlaceholderText.startsWith(originalPlaceholder)) {
+        displayedText = currentPlaceholderText.replace(originalPlaceholder, '').trim();
+      } else {
+        displayedText = currentPlaceholderText;
+      }
+      
+      // 立即恢复 placeholder 为原始文本
+      if (placeholderEl.textContent !== originalPlaceholder) {
+        placeholderEl.textContent = originalPlaceholder;
+      }
+    } else if (displayedText && displayedText !== originalPlaceholder && displayedText.length > 0) {
+      // 如果通过其他方式检测到选中文本，也认为有选中值
       hasSelectedValue = true;
       
       // 关键修复：如果 Vue modelValue 为 null，但检测到有选中文本，
       // 尝试从 DOM 中找到对应的 option 值，并强制更新 Vue 状态
-      if ((modelValue === null || modelValue === undefined) && vueInstance) {
+      // 注意：即使没有 vueInstance，也要继续修复显示问题
+      if ((modelValue === null || modelValue === undefined) && displayedText) {
         try {
-          // 查找所有 option 元素，找到 label 匹配的 option
-          const allOptions = selectEl.querySelectorAll('.el-select-dropdown__item, [role="option"]');
-          let matchedOption = null;
           let matchedValue = null;
           
+          // 方法1: 从下拉选项列表中查找（如果下拉框已打开）
+          const allOptions = selectEl.querySelectorAll('.el-select-dropdown__item, [role="option"]');
           for (const option of allOptions) {
             const optionText = option.textContent?.trim() || '';
-            if (optionText === displayedText) {
+            // 支持部分匹配（因为可能包含原始 placeholder）
+            if (optionText === displayedText || optionText.includes(displayedText) || displayedText.includes(optionText)) {
               // 找到匹配的 option，尝试获取其 value
-              matchedOption = option;
-              // 尝试从 data-value 或 data-option-value 属性获取值
               matchedValue = option.getAttribute('data-value') || 
                            option.getAttribute('data-option-value') ||
-                           option.getAttribute('value');
-              
-              // 如果还是找不到，尝试从 Vue 实例中获取 options
-              if (!matchedValue && vueInstance.options) {
-                const optionData = vueInstance.options.find(opt => {
-                  const label = opt.label || opt.name || '';
-                  return label === displayedText;
-                });
-                if (optionData) {
-                  matchedValue = optionData.value;
-                }
-              }
-              
+                           option.getAttribute('value') ||
+                           option.getAttribute('data-id');
               break;
+            }
+          }
+          
+          // 方法2: 如果 vueInstance 存在，尝试从 Vue 实例中获取 options
+          if (!matchedValue && vueInstance) {
+            if (vueInstance.options && Array.isArray(vueInstance.options)) {
+              const optionData = vueInstance.options.find(opt => {
+                const label = opt.label || opt.name || opt.text || '';
+                return label === displayedText || label.includes(displayedText) || displayedText.includes(label);
+              });
+              if (optionData) {
+                matchedValue = optionData.value || optionData.id;
+              }
             }
           }
           
@@ -1159,7 +1175,7 @@ const fixSelectAccessibility = () => {
     if (mutationTimeout) {
       clearTimeout(mutationTimeout);
     }
-    // 防抖：300ms 内只执行最后一次
+    // 防抖：100ms 内只执行最后一次（缩短时间，更快响应）
     mutationTimeout = setTimeout(() => {
       fixSelectInputs();
       fixDatePickerInputs();
@@ -1168,7 +1184,7 @@ const fixSelectAccessibility = () => {
       if (document.querySelector('.el-select')) {
         fixSelectDisplay();
       }
-    }, 300);
+    }, 100);
   });
 
   // 修复 el-select 的 input 元素
@@ -1291,35 +1307,88 @@ const fixSelectAccessibility = () => {
     attributeFilter: ['class'] // 只监听 class 变化，不监听 style（避免频繁触发）
   });
   
-  // 监听所有 el-select 的 change 事件（使用防抖，避免频繁调用）
+  // 监听所有 el-select 的 change 事件（立即执行，然后延迟再执行一次确保修复）
   let changeTimeout = null;
   document.addEventListener('change', (e) => {
     if (e.target.closest('.el-select')) {
+      // 立即执行一次修复
+      fixSelectDisplay();
       // 清除之前的定时器
       if (changeTimeout) {
         clearTimeout(changeTimeout);
       }
-      // 防抖：100ms 后执行
+      // 延迟再执行一次，确保 DOM 更新后也能修复
       changeTimeout = setTimeout(() => {
         fixSelectDisplay();
-      }, 100);
+      }, 50);
+      // 再延迟一次，确保所有更新都完成
+      setTimeout(() => {
+        fixSelectDisplay();
+      }, 200);
     }
   }, true);
   
-  // 监听所有 el-select 的 click 事件（选择选项时，使用防抖）
+  // 监听所有 el-select 的 click 事件（选择选项时，立即执行）
   let clickTimeout = null;
   document.addEventListener('click', (e) => {
     if (e.target.closest('.el-select-dropdown__item')) {
+      // 立即执行一次修复
+      fixSelectDisplay();
       // 清除之前的定时器
       if (clickTimeout) {
         clearTimeout(clickTimeout);
       }
-      // 防抖：100ms 后执行
+      // 延迟再执行一次，确保 DOM 更新后也能修复
       clickTimeout = setTimeout(() => {
         fixSelectDisplay();
-      }, 100);
+      }, 50);
+      // 再延迟一次，确保所有更新都完成
+      setTimeout(() => {
+        fixSelectDisplay();
+      }, 200);
     }
   }, true);
+  
+  // 监听 placeholder 文本变化（通过 MutationObserver）
+  const placeholderObserver = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      if (mutation.type === 'childList' || mutation.type === 'characterData') {
+        const target = mutation.target;
+        if (target.classList && target.classList.contains('el-select__placeholder')) {
+          // placeholder 文本变化，立即修复
+          fixSelectDisplay();
+          // 延迟再执行一次
+          setTimeout(() => {
+            fixSelectDisplay();
+          }, 50);
+        }
+      }
+    });
+  });
+  
+  // 观察所有 placeholder 元素的变化
+  const observePlaceholders = () => {
+    const placeholders = document.querySelectorAll('.el-select__placeholder');
+    placeholders.forEach((placeholder) => {
+      placeholderObserver.observe(placeholder, {
+        childList: true,
+        characterData: true,
+        subtree: true
+      });
+    });
+  };
+  
+  // 初始观察
+  setTimeout(observePlaceholders, 100);
+  
+  // 当有新的 placeholder 创建时，也观察它
+  const placeholderMutationObserver = new MutationObserver(() => {
+    observePlaceholders();
+  });
+  placeholderMutationObserver.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
   
 };
 
