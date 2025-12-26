@@ -778,14 +778,25 @@ async def send_telegram_message(message: str, chat_id: str | None = None):
 
         # pyTelegramBotAPI 的 send_message 是同步的，需要在线程中执行
         # 使用 asyncio 来避免阻塞异步事件循环
+        # 同时设置超时，避免网络问题导致长时间阻塞
         import asyncio
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: bot.send_message(chat_id=chat_id.strip(), text=message)
-        )
-        logger.info(f"Telegram消息发送成功: {chat_id}")
-        return True
+        
+        # 使用 asyncio.wait_for 包装，设置 8 秒超时（比外层的 10 秒稍短）
+        # 这样可以确保即使内部的 requests 库超时（默认 15 秒），也能及时返回
+        try:
+            await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: bot.send_message(chat_id=chat_id.strip(), text=message)
+                ),
+                timeout=8.0
+            )
+            logger.info(f"Telegram消息发送成功: {chat_id}")
+            return True
+        except asyncio.TimeoutError:
+            logger.warning(f"发送Telegram消息超时（超过8秒）: chat_id={chat_id}")
+            return False
     except Exception as e:
         # 检查是否是 telebot 的 API 异常
         if TELEBOT_AVAILABLE and 'telebot' in str(type(e).__module__):
