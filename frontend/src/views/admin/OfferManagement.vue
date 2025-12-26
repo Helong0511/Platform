@@ -444,6 +444,8 @@
                     :popper-append-to-body="true"
                     :popper-options="{ strategy: 'fixed' }"
                     @change="() => fixPlaceholderDisplay()"
+                    @mouseenter="() => fixPlaceholderDisplay()"
+                    @mouseleave="() => fixPlaceholderDisplay()"
                   >
                     <el-option
                       v-for="pub in publisherList"
@@ -1755,6 +1757,20 @@ onMounted(() => {
   z-index: 0 !important;
   pointer-events: none !important;
   position: absolute !important;
+}
+
+/* 确保鼠标悬停时，placeholder 也不会显示（即使有值） */
+.publisher-config-content :deep(.el-select:hover .el-select__placeholder),
+.publisher-config-content :deep(.el-select:focus .el-select__placeholder),
+.publisher-config-content :deep(.el-select:focus-within .el-select__placeholder),
+.publisher-config-content :deep(.el-select:not(.is-empty):hover .el-select__placeholder),
+.publisher-config-content :deep(.el-select:not(.is-empty):focus .el-select__placeholder),
+.publisher-config-content :deep(.el-select:not(.is-empty):focus-within .el-select__placeholder) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
 }
 
 /* 确保 input 中的选中值正常显示，层级高于 placeholder */
