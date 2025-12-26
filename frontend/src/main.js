@@ -1082,9 +1082,25 @@ const fixSelectDisplay = () => {
         // 如果还是没有找到，尝试从下拉选项中查找当前选中的选项
         if (!displayedText) {
           // 方法1: 查找当前选中的选项（可能有 selected 类或其他标记）
-          const selectedOption = selectEl.querySelector('.el-select-dropdown__item.is-selected') ||
-                                selectEl.querySelector('.el-select-dropdown__item.selected') ||
-                                selectEl.querySelector('[role="option"][aria-selected="true"]');
+          // 注意：下拉选项可能在 body 的其他位置（因为使用了 teleported）
+          const allDropdowns = document.querySelectorAll('.el-select-dropdown, .el-popper');
+          let selectedOption = null;
+          for (const dropdown of allDropdowns) {
+            selectedOption = dropdown.querySelector('.el-select-dropdown__item.is-selected') ||
+                            dropdown.querySelector('.el-select-dropdown__item.selected') ||
+                            dropdown.querySelector('[role="option"][aria-selected="true"]') ||
+                            dropdown.querySelector('.el-select-dropdown__item.hover') ||
+                            dropdown.querySelector('.el-select-dropdown__item:active');
+            if (selectedOption) {
+              break;
+            }
+          }
+          // 如果在下拉菜单中没找到，尝试在 selectEl 内部查找
+          if (!selectedOption) {
+            selectedOption = selectEl.querySelector('.el-select-dropdown__item.is-selected') ||
+                            selectEl.querySelector('.el-select-dropdown__item.selected') ||
+                            selectEl.querySelector('[role="option"][aria-selected="true"]');
+          }
           if (selectedOption) {
             displayedText = selectedOption.textContent?.trim() || '';
           }
@@ -2162,6 +2178,29 @@ const fixSelectAccessibility = () => {
       setTimeout(() => {
         fixSelectDisplay();
       }, 200);
+      // 再延迟一次，确保 Vue 状态更新后也能修复
+      setTimeout(() => {
+        fixSelectDisplay();
+      }, 500);
+    }
+  }, true);
+  
+  // 监听 el-select 的下拉选项点击事件（更精确的监听）
+  document.addEventListener('mousedown', (e) => {
+    const dropdownItem = e.target.closest('.el-select-dropdown__item');
+    if (dropdownItem) {
+      // 立即执行修复
+      fixSelectDisplay();
+      // 延迟执行，确保选择完成
+      setTimeout(() => {
+        fixSelectDisplay();
+      }, 100);
+      setTimeout(() => {
+        fixSelectDisplay();
+      }, 300);
+      setTimeout(() => {
+        fixSelectDisplay();
+      }, 600);
     }
   }, true);
   
