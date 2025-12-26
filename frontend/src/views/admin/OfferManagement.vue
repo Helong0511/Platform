@@ -442,10 +442,7 @@
                     style="width: 100%;"
                     popper-class="publisher-select-dropdown"
                     :popper-append-to-body="true"
-                    @change="handlePublisherChange(index)"
-                    @blur="handlePublisherBlur(index)"
-                    @focus="handlePublisherFocus(index)"
-                    @visible-change="handlePublisherVisibleChange(index, $event)"
+                    :popper-options="{ strategy: 'fixed' }"
                   >
                     <el-option
                       v-for="pub in publisherList"
@@ -1795,8 +1792,13 @@ onMounted(() => {
 
 /* 下拉选择框样式优化 - 确保下拉选项显示在对话框之上 */
 .publisher-select-dropdown {
-  z-index: 3001 !important;
-  position: fixed !important;
+  z-index: 3000 !important;
+}
+
+/* 确保卡片和容器不会裁剪下拉选项 */
+:deep(.el-card),
+:deep(.el-card__body) {
+  overflow: visible !important;
 }
 
 /* 确保表单容器不会裁剪下拉选项 */
