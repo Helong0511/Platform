@@ -5,7 +5,7 @@
     :background-color="bgDark"
     :text-color="textWhite"
     :active-text-color="primaryColor"
-    router
+    :router="true"
     @select="handleMenuSelect"
   >
     <el-menu-item index="/app/dashboard">
@@ -158,6 +158,7 @@ const emit = defineEmits(['menu-click']);
 const handleMenuSelect = (index) => {
   // router 属性会自动处理导航，这里只需要触发菜单点击事件
   // 用于移动端/平板端关闭抽屉
+  console.log('[Sidebar] 菜单选择:', index);
   emit('menu-click');
 };
 </script>
