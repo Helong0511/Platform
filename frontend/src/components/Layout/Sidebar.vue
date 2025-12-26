@@ -108,13 +108,14 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../../store';
 import { ElMenu, ElMenuItem, ElSubMenu, ElIcon } from 'element-plus';
 import { PieChart, Document, UserFilled, Upload, Timer, Link, Connection, Box } from '@element-plus/icons-vue';
 
 const authStore = useAuthStore();
 const route = useRoute();
+const router = useRouter();
 const isAdmin = computed(() => authStore.isAdmin);
 
 // 获取 CSS 变量值
@@ -159,6 +160,22 @@ const handleMenuSelect = (index) => {
   // router 属性会自动处理导航，这里只需要触发菜单点击事件
   // 用于移动端/平板端关闭抽屉
   console.log('[Sidebar] 菜单选择:', index);
+  
+  // 如果 router 属性没有自动导航，手动导航
+  const router = useRouter();
+  if (index && typeof index === 'string') {
+    try {
+      router.push(index).catch(err => {
+        // 忽略重复导航错误
+        if (err.name !== 'NavigationDuplicated') {
+          console.error('[Sidebar] 导航失败:', err);
+        }
+      });
+    } catch (e) {
+      console.error('[Sidebar] 导航异常:', e);
+    }
+  }
+  
   emit('menu-click');
 };
 </script>
