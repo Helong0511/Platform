@@ -717,6 +717,10 @@ const fixSelectDisplay = () => {
   const selectElements = document.querySelectorAll('.el-select');
   let fixedCount = 0;
   
+  if (selectElements.length === 0) {
+    return; // 如果没有 el-select 元素，直接返回
+  }
+  
   selectElements.forEach((selectEl) => {
     // 检查 placeholder 元素
     const placeholderEl = selectEl.querySelector('.el-select__placeholder');
@@ -923,10 +927,24 @@ const fixSelectDisplay = () => {
       // 是部分 placeholder 或空 placeholder，且没有任何选中值信号，肯定没有选中值
       hasSelectedValue = false;
       // 恢复为完整的原始 placeholder
-      if (placeholderEl && originalPlaceholder && placeholderEl.textContent !== originalPlaceholder) {
-        placeholderEl.textContent = originalPlaceholder;
+      if (placeholderEl && originalPlaceholder) {
+        const currentText = placeholderEl.textContent?.trim() || '';
+        if (currentText !== originalPlaceholder) {
+          placeholderEl.textContent = originalPlaceholder;
+        }
       }
       // 跳过后续的选中值检测，直接处理没有选中值的情况
+    } else if (isEmptyPlaceholder && !hasClearButton && modelValue === null) {
+      // 如果 placeholder 是空的，且没有清除按钮，且 Vue modelValue 是 null，肯定没有选中值
+      // 这是一个更宽松的判断，确保空 placeholder 时能正确识别
+      hasSelectedValue = false;
+      // 恢复为完整的原始 placeholder
+      if (placeholderEl && originalPlaceholder) {
+        const currentText = placeholderEl.textContent?.trim() || '';
+        if (currentText !== originalPlaceholder) {
+          placeholderEl.textContent = originalPlaceholder;
+        }
+      }
     }
     // 关键修复1: 优先检查清除按钮（最可靠的信号）
     // 如果有清除按钮，说明用户已经选择了值，只是 Vue 状态没有同步
@@ -1220,10 +1238,11 @@ const fixSelectDisplay = () => {
       // 如果 hasSelectedValue 已经被设置为 false（比如检测到部分 placeholder），不应该被覆盖
       if (hasSelectedValue === undefined) {
         // 优先相信我们的检测结果，而不是 hasIsEmptyClass（因为 Element Plus 可能没有正确更新）
-        hasSelectedValue = hasClearButton || hasVisibleText || hasSelectedTags || hasInputValue;
-        // 如果 hasIsEmptyClass 是 false，但我们的检测都表明没有选中值，保持 false
-        // 如果 hasIsEmptyClass 是 true，肯定没有选中值
-        if (hasIsEmptyClass && !hasSelectedValue) {
+        // 只有当有明确的选中值信号时，才认为有选中值
+        if (hasClearButton || hasVisibleText || hasSelectedTags || hasInputValue) {
+          hasSelectedValue = true;
+        } else {
+          // 没有任何选中值信号，认为没有选中值
           hasSelectedValue = false;
         }
       }
@@ -1232,6 +1251,22 @@ const fixSelectDisplay = () => {
     // 如果仍然是 undefined，默认认为没有选中值（安全起见）
     if (hasSelectedValue === undefined) {
       hasSelectedValue = false;
+    }
+    
+    // 最终检查：如果 Vue modelValue 是 null，且没有清除按钮，且 placeholder 是空的或部分的，肯定没有选中值
+    if (hasSelectedValue && 
+        modelValue === null && 
+        !hasClearButton && 
+        (isEmptyPlaceholder || isPartialPlaceholder)) {
+      // 这种情况下，即使之前判断为有选中值，也应该改为没有选中值
+      hasSelectedValue = false;
+      // 恢复 placeholder
+      if (placeholderEl && originalPlaceholder) {
+        const currentText = placeholderEl.textContent?.trim() || '';
+        if (currentText !== originalPlaceholder) {
+          placeholderEl.textContent = originalPlaceholder;
+        }
+      }
     }
     
     if (hasSelectedValue) {
@@ -1395,22 +1430,33 @@ const fixSelectDisplay = () => {
       selectEl.classList.add('is-empty');
       
       // 确保 placeholder 文本是完整的原始 placeholder
-      if (placeholderEl && originalPlaceholder) {
+      // 尝试获取原始 placeholder（多种方式）
+      let finalPlaceholder = originalPlaceholder;
+      if (!finalPlaceholder) {
+        finalPlaceholder = selectEl.getAttribute('placeholder') || 
+                         selectEl.querySelector('[placeholder]')?.getAttribute('placeholder') || '';
+      }
+      if (!finalPlaceholder) {
+        try {
+          const vueInstance = selectEl.__vueParentComponent || selectEl.__vue__;
+          if (vueInstance) {
+            const props = vueInstance.props || vueInstance.$props || vueInstance.propsData || {};
+            finalPlaceholder = props.placeholder || vueInstance.placeholder || '';
+          }
+        } catch (e) {
+          // 忽略错误
+        }
+      }
+      
+      if (placeholderEl && finalPlaceholder) {
         const currentText = placeholderEl.textContent?.trim() || '';
         // 如果 placeholder 文本是空的、是原始 placeholder 的一部分，或者不是完整的原始 placeholder，恢复为完整的原始 placeholder
         if (!currentText || 
-            currentText !== originalPlaceholder ||
-            (currentText.length < originalPlaceholder.length && 
+            currentText !== finalPlaceholder ||
+            (currentText.length < finalPlaceholder.length && 
              currentText.length > 0 &&
-             originalPlaceholder.startsWith(currentText))) {
-          placeholderEl.textContent = originalPlaceholder;
-        }
-      } else if (placeholderEl && !originalPlaceholder) {
-        // 如果没有原始 placeholder，尝试从 DOM 属性中获取
-        const attrPlaceholder = selectEl.getAttribute('placeholder') || 
-                               selectEl.querySelector('[placeholder]')?.getAttribute('placeholder') || '';
-        if (attrPlaceholder && placeholderEl.textContent !== attrPlaceholder) {
-          placeholderEl.textContent = attrPlaceholder;
+             finalPlaceholder.startsWith(currentText))) {
+          placeholderEl.textContent = finalPlaceholder;
         }
       }
       
