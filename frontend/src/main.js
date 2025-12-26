@@ -759,8 +759,31 @@ const fixSelectDisplay = () => {
     const inputWrapper = selectEl.querySelector('.el-input__wrapper');
     let hasVisibleText = false;
     let displayedText = '';
-    const originalPlaceholder = selectEl.getAttribute('placeholder') || 
-                               selectEl.querySelector('[placeholder]')?.getAttribute('placeholder') || '';
+    
+    // 获取原始 placeholder（多种方式尝试）
+    let originalPlaceholder = selectEl.getAttribute('placeholder') || 
+                             selectEl.querySelector('[placeholder]')?.getAttribute('placeholder') || '';
+    
+    // 如果从 DOM 属性中获取不到，尝试从 Vue 实例中获取
+    if (!originalPlaceholder) {
+      try {
+        const vueInstance = selectEl.__vueParentComponent || selectEl.__vue__;
+        if (vueInstance) {
+          const props = vueInstance.props || vueInstance.$props || vueInstance.propsData || {};
+          originalPlaceholder = props.placeholder || vueInstance.placeholder || '';
+        }
+      } catch (e) {
+        // 忽略错误
+      }
+    }
+    
+    // 如果还是获取不到，尝试从 input 元素的 placeholder 属性获取
+    if (!originalPlaceholder && inputWrapper) {
+      const inputEl = inputWrapper.querySelector('input');
+      if (inputEl) {
+        originalPlaceholder = inputEl.getAttribute('placeholder') || '';
+      }
+    }
     
     // 获取 placeholder 文本（在 if 块外定义，确保作用域正确）
     const currentPlaceholderText = placeholderEl ? (placeholderEl.textContent?.trim() || '') : '';
@@ -877,18 +900,21 @@ const fixSelectDisplay = () => {
     // 如果有清除按钮，说明有选中值（即使 Vue modelValue 为 null）
     let hasSelectedValue = false;
     
-    // 关键修复0: 首先检查 placeholder 文本是否是部分文本
-    // 如果 placeholder 文本是原始 placeholder 的一部分，肯定没有选中值
+    // 关键修复0: 首先检查 placeholder 文本状态
+    // 如果 placeholder 文本是空的或者是原始 placeholder 的一部分，肯定没有选中值
     const isPartialPlaceholder = originalPlaceholder && 
                                  currentPlaceholderText &&
                                  currentPlaceholderText.length < originalPlaceholder.length &&
+                                 currentPlaceholderText.length > 0 &&
                                  originalPlaceholder.startsWith(currentPlaceholderText);
     
-    if (isPartialPlaceholder) {
-      // 是部分 placeholder，肯定没有选中值
+    const isEmptyPlaceholder = !currentPlaceholderText || currentPlaceholderText.length === 0;
+    
+    if (isPartialPlaceholder || isEmptyPlaceholder) {
+      // 是部分 placeholder 或空 placeholder，肯定没有选中值
       hasSelectedValue = false;
       // 恢复为完整的原始 placeholder
-      if (placeholderEl && placeholderEl.textContent !== originalPlaceholder) {
+      if (placeholderEl && originalPlaceholder && placeholderEl.textContent !== originalPlaceholder) {
         placeholderEl.textContent = originalPlaceholder;
       }
     }
@@ -914,12 +940,70 @@ const fixSelectDisplay = () => {
         
         // 如果还是没有找到，尝试从下拉选项中查找当前选中的选项
         if (!displayedText) {
-          // 查找当前选中的选项（可能有 selected 类或其他标记）
+          // 方法1: 查找当前选中的选项（可能有 selected 类或其他标记）
           const selectedOption = selectEl.querySelector('.el-select-dropdown__item.is-selected') ||
                                 selectEl.querySelector('.el-select-dropdown__item.selected') ||
                                 selectEl.querySelector('[role="option"][aria-selected="true"]');
           if (selectedOption) {
             displayedText = selectedOption.textContent?.trim() || '';
+          }
+          
+          // 方法2: 如果 vueInstance 存在，尝试从 Vue 实例中获取当前选中的 label
+          if (!displayedText && vueInstance) {
+            try {
+              // 尝试获取 options 和当前值
+              if (vueInstance.options && Array.isArray(vueInstance.options)) {
+                // 尝试从内部状态获取选中值
+                const selectedValue = vueInstance.selectedLabel || 
+                                     vueInstance.displayValue ||
+                                     vueInstance.value;
+                if (selectedValue) {
+                  // 如果是对象，尝试获取 label
+                  if (typeof selectedValue === 'object') {
+                    displayedText = selectedValue.label || selectedValue.name || '';
+                  } else {
+                    // 如果是值，从 options 中查找对应的 label
+                    const option = vueInstance.options.find(opt => 
+                      (opt.value || opt.id) === selectedValue
+                    );
+                    if (option) {
+                      displayedText = option.label || option.name || '';
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              // 忽略错误
+            }
+          }
+          
+          // 方法3: 尝试从 input wrapper 的所有文本中提取（排除 placeholder）
+          if (!displayedText && inputWrapper) {
+            const allTextNodes = [];
+            const walker = document.createTreeWalker(
+              inputWrapper,
+              NodeFilter.SHOW_TEXT,
+              {
+                acceptNode: function(node) {
+                  // 排除 placeholder 元素内的文本
+                  if (node.parentElement && node.parentElement.classList.contains('el-select__placeholder')) {
+                    return NodeFilter.FILTER_REJECT;
+                  }
+                  return NodeFilter.FILTER_ACCEPT;
+                }
+              },
+              false
+            );
+            let node;
+            while (node = walker.nextNode()) {
+              const text = node.textContent?.trim() || '';
+              if (text && text !== originalPlaceholder && !originalPlaceholder.startsWith(text)) {
+                allTextNodes.push(text);
+              }
+            }
+            if (allTextNodes.length > 0) {
+              displayedText = allTextNodes.join(' ').trim();
+            }
           }
         }
       }
@@ -1092,9 +1176,6 @@ const fixSelectDisplay = () => {
     } else if (hasVueValue) {
       // Vue 有值（包括空字符串），肯定有选中值
       hasSelectedValue = true;
-    } else if (hasVueValue) {
-      // Vue 有值（包括空字符串），肯定有选中值
-      hasSelectedValue = true;
     } else if (modelValue === null || modelValue === undefined) {
       // Vue 值为 null 或 undefined
       // 只有当检测到明确的选中值信号时，才认为有选中值
@@ -1113,7 +1194,9 @@ const fixSelectDisplay = () => {
           const currentText = placeholderEl.textContent?.trim() || '';
           // 如果 placeholder 文本是空的或者是原始 placeholder 的一部分，恢复为完整的原始 placeholder
           if (!currentText || 
-              (currentText.length < originalPlaceholder.length && originalPlaceholder.startsWith(currentText))) {
+              (currentText.length < originalPlaceholder.length && 
+               currentText.length > 0 &&
+               originalPlaceholder.startsWith(currentText))) {
             placeholderEl.textContent = originalPlaceholder;
           }
         }
@@ -1134,14 +1217,34 @@ const fixSelectDisplay = () => {
                          inputWrapper.querySelector('.el-select__selected-item') ||
                          inputWrapper.querySelector('[class*="selection"]');
         
-        // 如果没有找到选中值显示元素，创建一个
+        // 如果没有找到选中值显示元素，尝试创建或更新
         if (!selectionEl) {
-          // 尝试在 input wrapper 中创建或更新选中值显示
+          // 方法1: 尝试在 input wrapper 中创建选中值显示元素
           const inputEl = inputWrapper.querySelector('input');
           if (inputEl) {
-            // 设置 input 的 value 为选中值（如果可能）
+            // 尝试设置 input 的 value（某些情况下可能有效）
             try {
-              inputEl.value = displayedText;
+              if (inputEl.type !== 'hidden') {
+                inputEl.value = displayedText;
+              }
+            } catch (e) {
+              // 忽略错误
+            }
+            
+            // 方法2: 尝试在 input 前插入一个显示选中值的元素
+            try {
+              const displaySpan = document.createElement('span');
+              displaySpan.className = 'el-select__selected-item';
+              displaySpan.textContent = displayedText;
+              displaySpan.style.cssText = `
+                position: relative;
+                z-index: 102;
+                color: var(--el-text-color-regular);
+                opacity: 1;
+                visibility: visible;
+              `;
+              inputEl.parentNode.insertBefore(displaySpan, inputEl);
+              selectionEl = displaySpan;
             } catch (e) {
               // 忽略错误
             }
@@ -1150,6 +1253,40 @@ const fixSelectDisplay = () => {
           // 如果找到了选中值元素，确保它的文本是正确的
           if (selectionEl.textContent?.trim() !== displayedText) {
             selectionEl.textContent = displayedText;
+          }
+          // 确保选中值元素可见
+          selectionEl.style.cssText = `
+            opacity: 1 !important;
+            visibility: visible !important;
+            z-index: 102 !important;
+            position: relative !important;
+            display: block !important;
+            color: var(--el-text-color-regular) !important;
+          `;
+        }
+      } else if (hasClearButton && !displayedText && inputWrapper) {
+        // 如果有清除按钮但没有找到选中文本，尝试从其他方式获取
+        // 这可能是因为选中值在某个隐藏的元素中
+        const allElements = inputWrapper.querySelectorAll('*');
+        for (const el of allElements) {
+          if (el !== placeholderEl && !el.classList.contains('el-select__placeholder')) {
+            const text = el.textContent?.trim() || '';
+            if (text && 
+                text !== originalPlaceholder && 
+                !originalPlaceholder.startsWith(text) &&
+                text.length > 0) {
+              displayedText = text;
+              // 确保这个元素可见
+              el.style.cssText = `
+                opacity: 1 !important;
+                visibility: visible !important;
+                z-index: 102 !important;
+                position: relative !important;
+                display: block !important;
+                color: var(--el-text-color-regular) !important;
+              `;
+              break;
+            }
           }
         }
       }
@@ -1235,24 +1372,35 @@ const fixSelectDisplay = () => {
         // 如果 placeholder 文本是空的、是原始 placeholder 的一部分，或者不是完整的原始 placeholder，恢复为完整的原始 placeholder
         if (!currentText || 
             currentText !== originalPlaceholder ||
-            (currentText.length < originalPlaceholder.length && originalPlaceholder.startsWith(currentText))) {
+            (currentText.length < originalPlaceholder.length && 
+             currentText.length > 0 &&
+             originalPlaceholder.startsWith(currentText))) {
           placeholderEl.textContent = originalPlaceholder;
+        }
+      } else if (placeholderEl && !originalPlaceholder) {
+        // 如果没有原始 placeholder，尝试从 DOM 属性中获取
+        const attrPlaceholder = selectEl.getAttribute('placeholder') || 
+                               selectEl.querySelector('[placeholder]')?.getAttribute('placeholder') || '';
+        if (attrPlaceholder && placeholderEl.textContent !== attrPlaceholder) {
+          placeholderEl.textContent = attrPlaceholder;
         }
       }
       
-      placeholderEl.style.cssText = `
-        display: block !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-        position: absolute !important;
-        left: 11px !important;
-        top: 50% !important;
-        transform: translateY(-50%) !important;
-        z-index: 1 !important;
-        height: auto !important;
-        width: auto !important;
-        pointer-events: none !important;
-      `;
+      if (placeholderEl) {
+        placeholderEl.style.cssText = `
+          display: block !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          position: absolute !important;
+          left: 11px !important;
+          top: 50% !important;
+          transform: translateY(-50%) !important;
+          z-index: 1 !important;
+          height: auto !important;
+          width: auto !important;
+          pointer-events: none !important;
+        `;
+      }
     }
     
     fixedCount++;
