@@ -863,28 +863,58 @@ const fixSelectDisplay = () => {
         if (inputWrapper) {
           const allText = inputWrapper.innerText || inputWrapper.textContent || '';
           // 排除 placeholder 文本后，查找选中值
-          const cleanText = allText.replace(currentPlaceholderText, '').trim();
-          if (cleanText && cleanText !== originalPlaceholder) {
+          let cleanText = allText.replace(currentPlaceholderText, '').trim();
+          // 如果 cleanText 是原始 placeholder 的一部分，继续清理
+          if (originalPlaceholder && cleanText === originalPlaceholder.substring(0, cleanText.length)) {
+            cleanText = '';
+          }
+          if (cleanText && cleanText !== originalPlaceholder && cleanText.length > 0) {
             displayedText = cleanText;
+          }
+        }
+        
+        // 如果还是没有找到，尝试从下拉选项中查找当前选中的选项
+        if (!displayedText) {
+          // 查找当前选中的选项（可能有 selected 类或其他标记）
+          const selectedOption = selectEl.querySelector('.el-select-dropdown__item.is-selected') ||
+                                selectEl.querySelector('.el-select-dropdown__item.selected') ||
+                                selectEl.querySelector('[role="option"][aria-selected="true"]');
+          if (selectedOption) {
+            displayedText = selectedOption.textContent?.trim() || '';
           }
         }
       }
     }
     // 关键修复2: 检查 placeholder 文本
     // 如果 placeholder 显示的文本不是原始 placeholder，说明有选中值
+    // 但要注意：如果 placeholder 文本只是原始 placeholder 的一部分（如 "请选择" 是 "请选择广告主" 的一部分），
+    // 这可能是 Element Plus 的显示问题，不应该认为是选中值
     else if (currentPlaceholderText && currentPlaceholderText !== originalPlaceholder) {
-      hasSelectedValue = true;
+      // 检查是否是原始 placeholder 的一部分（这种情况不应该认为是选中值）
+      const isPartialPlaceholder = originalPlaceholder && 
+                                   currentPlaceholderText.length < originalPlaceholder.length &&
+                                   originalPlaceholder.startsWith(currentPlaceholderText);
       
-      // 如果 placeholder 文本包含原始 placeholder 的一部分，提取选中值
-      if (originalPlaceholder && currentPlaceholderText.startsWith(originalPlaceholder)) {
-        displayedText = currentPlaceholderText.replace(originalPlaceholder, '').trim();
+      if (!isPartialPlaceholder) {
+        // 不是部分 placeholder，说明可能是选中值
+        hasSelectedValue = true;
+        
+        // 如果 placeholder 文本包含原始 placeholder 的一部分，提取选中值
+        if (originalPlaceholder && currentPlaceholderText.startsWith(originalPlaceholder)) {
+          displayedText = currentPlaceholderText.replace(originalPlaceholder, '').trim();
+        } else {
+          displayedText = currentPlaceholderText;
+        }
+        
+        // 立即恢复 placeholder 为原始文本
+        if (placeholderEl.textContent !== originalPlaceholder) {
+          placeholderEl.textContent = originalPlaceholder;
+        }
       } else {
-        displayedText = currentPlaceholderText;
-      }
-      
-      // 立即恢复 placeholder 为原始文本
-      if (placeholderEl.textContent !== originalPlaceholder) {
-        placeholderEl.textContent = originalPlaceholder;
+        // 是部分 placeholder，恢复为完整的原始 placeholder
+        if (placeholderEl.textContent !== originalPlaceholder) {
+          placeholderEl.textContent = originalPlaceholder;
+        }
       }
     } 
     // 关键修复3: 如果通过其他方式检测到选中文本，也认为有选中值
@@ -1018,12 +1048,16 @@ const fixSelectDisplay = () => {
       hasSelectedValue = true;
     } else if (modelValue === null || modelValue === undefined) {
       // Vue 值为 null 或 undefined
-      // 但如果检测到清除按钮或其他信号，仍然认为有选中值
-      if (!hasClearButton && !hasVisibleText && !hasSelectedTags && !hasInputValue) {
-        hasSelectedValue = false;
-      } else {
+      // 只有当检测到明确的选中值信号时，才认为有选中值
+      // 清除按钮是最可靠的信号
+      if (hasClearButton) {
+        hasSelectedValue = true;
+      } else if (hasVisibleText || hasSelectedTags || hasInputValue) {
         // 有其他信号表明有选中值
         hasSelectedValue = true;
+      } else {
+        // 没有明确的选中值信号，认为没有选中值
+        hasSelectedValue = false;
       }
     } else {
       // 其他情况：使用其他检测方法
@@ -1135,6 +1169,12 @@ const fixSelectDisplay = () => {
     } else {
       // 如果没有选中值，添加 is-empty 类并显示 placeholder
       selectEl.classList.add('is-empty');
+      
+      // 确保 placeholder 文本是完整的原始 placeholder
+      if (placeholderEl && originalPlaceholder && placeholderEl.textContent !== originalPlaceholder) {
+        placeholderEl.textContent = originalPlaceholder;
+      }
+      
       placeholderEl.style.cssText = `
         display: block !important;
         visibility: visible !important;
