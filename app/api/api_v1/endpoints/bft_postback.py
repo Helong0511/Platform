@@ -295,10 +295,13 @@ async def _process_bft_postback(
             if client_id:
                 telegram_msg += f"Client ID: {client_id}\n"
             
+            # 设置较长的超时时间，并明确捕获超时异常
             await asyncio.wait_for(
                 send_telegram_message(telegram_msg),
-                timeout=5.0
+                timeout=10.0
             )
+        except asyncio.TimeoutError:
+            logger.warning(f"发送 BFT PostBack Telegram 通知超时（超过10秒）")
         except Exception as e:
             logger.warning(f"发送 BFT PostBack Telegram 通知失败: {e}")
 
