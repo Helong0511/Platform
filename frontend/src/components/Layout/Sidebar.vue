@@ -5,10 +5,10 @@
     :background-color="bgDark"
     :text-color="textWhite"
     :active-text-color="primaryColor"
-    :router="true"
+    :router="false"
     @select="handleMenuSelect"
   >
-    <el-menu-item index="/app/dashboard">
+    <el-menu-item index="/app/dashboard" @click="() => console.log('[Sidebar] 菜单项点击: /app/dashboard')">
       <template #icon><PieChart /></template>
       <span>数据仪表</span>
     </el-menu-item>
@@ -157,25 +157,32 @@ const activeMenu = computed(() => {
 const emit = defineEmits(['menu-click']);
 
 const handleMenuSelect = (index) => {
-  // router 属性会自动处理导航，这里只需要触发菜单点击事件
-  // 用于移动端/平板端关闭抽屉
-  console.log('[Sidebar] 菜单选择:', index);
+  // 手动处理导航（因为 router 属性可能不工作）
+  console.log('[Sidebar] 菜单选择事件触发，index:', index);
+  console.log('[Sidebar] router 对象:', router);
+  console.log('[Sidebar] 当前路由:', route.path);
   
-  // 如果 router 属性没有自动导航，手动导航
-  const router = useRouter();
   if (index && typeof index === 'string') {
     try {
-      router.push(index).catch(err => {
+      console.log('[Sidebar] 准备导航到:', index);
+      router.push(index).then(() => {
+        console.log('[Sidebar] 导航成功:', index);
+      }).catch(err => {
         // 忽略重复导航错误
         if (err.name !== 'NavigationDuplicated') {
           console.error('[Sidebar] 导航失败:', err);
+        } else {
+          console.log('[Sidebar] 重复导航，已忽略');
         }
       });
     } catch (e) {
       console.error('[Sidebar] 导航异常:', e);
     }
+  } else {
+    console.warn('[Sidebar] 无效的菜单索引:', index);
   }
   
+  // 触发菜单点击事件（用于移动端关闭抽屉）
   emit('menu-click');
 };
 </script>
