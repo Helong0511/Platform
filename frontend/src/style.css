@@ -338,10 +338,12 @@ input[type="text"].el-input_inner {
 
 /* 确保选中值的文本正常显示 */
 .el-select .el-input__inner,
-.el-select .el-input__wrapper input {
+.el-select .el-input__wrapper input,
+.el-select .el-select__input {
   color: var(--el-text-color-regular) !important;
   opacity: 1 !important;
   visibility: visible !important;
+  display: block !important;
 }
 
 /* 当 el-select 有值时，隐藏 placeholder - 使用多种方法确保生效 */

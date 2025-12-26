@@ -760,7 +760,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick } from 'vue'
+import { ref, reactive, onMounted, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Refresh, Edit, Delete, Box, View, DocumentCopy, Loading, InfoFilled, User } from '@element-plus/icons-vue'
 import { getOffers, createOffer, updateOffer, deleteOffer, getOffer } from '@/api/offer'
@@ -932,33 +932,78 @@ const getPublisherName = (publisherId) => {
   return publisher ? publisher.publisher_name : ''
 }
 
-// 渠道选择变化处理
-const handlePublisherChange = (index) => {
-  // 强制隐藏 placeholder，确保选中值正常显示
+// 修复 el-select 显示问题的通用函数
+const fixSelectDisplay = () => {
   nextTick(() => {
-    // 查找当前配置对应的 el-select
-    const formItems = document.querySelectorAll('.publisher-config-content .el-form-item')
-    if (formItems[index]) {
-      const selectEl = formItems[index].querySelector('.el-select')
-      if (selectEl) {
-        const placeholder = selectEl.querySelector('.el-select__placeholder')
-        // 检查 el-select 是否有值（通过检查是否有 is-empty 类，或者检查 v-model 绑定的值）
-        const hasValue = !selectEl.classList.contains('is-empty') || 
-                        formData.publisher_configs[index]?.publisher_id !== null
-        
-        if (placeholder && hasValue) {
-          // 强制隐藏 placeholder
+    const selectElements = document.querySelectorAll('.publisher-config-content .el-select')
+    selectElements.forEach((selectEl) => {
+      const placeholder = selectEl.querySelector('.el-select__placeholder')
+      const input = selectEl.querySelector('.el-input__inner, .el-input__wrapper input, .el-select__input')
+      const inputWrapper = selectEl.querySelector('.el-input__wrapper')
+      
+      // 检查是否有值：通过检查 is-empty 类或实际值
+      const isNotEmpty = !selectEl.classList.contains('is-empty')
+      const hasInputValue = input && input.value && input.value.trim() !== ''
+      const hasValue = isNotEmpty || hasInputValue
+      
+      if (placeholder) {
+        if (hasValue) {
+          // 有值时，强制隐藏 placeholder
           placeholder.style.setProperty('display', 'none', 'important')
           placeholder.style.setProperty('visibility', 'hidden', 'important')
           placeholder.style.setProperty('opacity', '0', 'important')
           placeholder.style.setProperty('height', '0', 'important')
           placeholder.style.setProperty('width', '0', 'important')
           placeholder.style.setProperty('overflow', 'hidden', 'important')
+          placeholder.style.setProperty('pointer-events', 'none', 'important')
+          placeholder.style.setProperty('position', 'absolute', 'important')
+        } else {
+          // 没有值时，显示 placeholder
+          placeholder.style.removeProperty('display')
+          placeholder.style.removeProperty('visibility')
+          placeholder.style.removeProperty('opacity')
+          placeholder.style.removeProperty('height')
+          placeholder.style.removeProperty('width')
+          placeholder.style.removeProperty('overflow')
         }
       }
-    }
+      
+      // 确保 input 和 wrapper 中的选中值正常显示
+      if (hasValue) {
+        if (input) {
+          input.style.setProperty('opacity', '1', 'important')
+          input.style.setProperty('visibility', 'visible', 'important')
+          input.style.setProperty('color', 'var(--el-text-color-regular)', 'important')
+          input.style.setProperty('display', 'block', 'important')
+          input.style.setProperty('z-index', '1', 'important')
+        }
+        if (inputWrapper) {
+          inputWrapper.style.setProperty('z-index', '1', 'important')
+        }
+      }
+    })
   })
 }
+
+// 渠道选择变化处理
+const handlePublisherChange = (index) => {
+  fixSelectDisplay()
+}
+
+// 监听 publisher_configs 的变化，自动修复显示
+watch(() => formData.publisher_configs, () => {
+  fixSelectDisplay()
+}, { deep: true })
+
+// 监听对话框打开，确保选中值正确显示
+watch(() => dialogVisible.value, (newVal) => {
+  if (newVal) {
+    // 对话框打开时，延迟修复以确保 DOM 已渲染
+    setTimeout(() => {
+      fixSelectDisplay()
+    }, 100)
+  }
+})
 
 // 添加
 const handleAdd = () => {
