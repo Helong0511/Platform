@@ -762,10 +762,12 @@ const fixSelectDisplay = () => {
     const originalPlaceholder = selectEl.getAttribute('placeholder') || 
                                selectEl.querySelector('[placeholder]')?.getAttribute('placeholder') || '';
     
+    // 获取 placeholder 文本（在 if 块外定义，确保作用域正确）
+    const currentPlaceholderText = placeholderEl ? (placeholderEl.textContent?.trim() || '') : '';
+    
     if (inputWrapper) {
       // 获取 input wrapper 内的所有文本
       const allText = inputWrapper.innerText || inputWrapper.textContent || '';
-      const currentPlaceholderText = placeholderEl.textContent?.trim() || '';
       
       // 关键修复：如果 placeholder 显示的文本不是原始的 placeholder 属性值，
       // 说明这个文本可能是选中值，而不是真正的 placeholder
