@@ -741,13 +741,11 @@ const fixSelectDisplay = () => {
                     (vueInstance.modelValue !== undefined ? vueInstance.modelValue :
                     (vueInstance.$attrs?.modelValue !== undefined ? vueInstance.$attrs.modelValue : null));
         
-        // 检查值是否存在（包括空字符串，因为空字符串也可能是有效选择）
-        // 但需要排除 null 和 undefined
+        // 检查值是否存在
+        // 注意：空字符串 '' 也可能是有效选择（如"全部客户"），所以也要检查
+        // 但 null 和 undefined 表示没有选择
         if (modelValue !== null && modelValue !== undefined) {
           hasVueValue = true;
-          
-          // 注意：不要调用 updateModelValue 或 $forceUpdate，这可能导致无限循环
-          // 只检查值，不强制更新 Vue 实例
         }
       }
     } catch (e) {
@@ -760,6 +758,7 @@ const fixSelectDisplay = () => {
     // 方法3: 检查 input wrapper 内的所有可见文本内容
     const inputWrapper = selectEl.querySelector('.el-input__wrapper');
     let hasVisibleText = false;
+    let displayedText = '';
     
     if (inputWrapper) {
       // 获取 input wrapper 内的所有文本（排除 placeholder）
@@ -767,6 +766,16 @@ const fixSelectDisplay = () => {
       const placeholderText = placeholderEl.textContent?.trim() || '';
       const cleanText = allText.replace(placeholderText, '').trim();
       hasVisibleText = cleanText.length > 0;
+      displayedText = cleanText;
+      
+      // 检查是否有选中的文本元素（Element Plus 可能使用特殊元素显示选中值）
+      const selectedTextEl = inputWrapper.querySelector('.el-select__selected-item') ||
+                            inputWrapper.querySelector('[class*="selected"]') ||
+                            inputWrapper.querySelector('[class*="value"]');
+      if (selectedTextEl && selectedTextEl.textContent?.trim()) {
+        hasVisibleText = true;
+        displayedText = selectedTextEl.textContent.trim();
+      }
     }
     
     // 方法4: 检查是否有选中的标签（多选模式）
@@ -785,8 +794,20 @@ const fixSelectDisplay = () => {
       hasInputValue = inputValue && inputValue !== placeholderText && inputValue.length > 0;
     }
     
-    // 综合判断：如果有 Vue 值，或者没有 is-empty 类，或者有可见文本，或者有选中标签，或者有 input 值
-    const hasSelectedValue = hasVueValue || !hasIsEmptyClass || hasVisibleText || hasSelectedTags || hasInputValue;
+    // 综合判断：优先使用 Vue modelValue（最可靠）
+    // 如果 Vue modelValue 为 null 或 undefined，即使 is-empty 为 false，也应该显示 placeholder
+    let hasSelectedValue = false;
+    
+    if (hasVueValue) {
+      // Vue 有值（包括空字符串），肯定有选中值
+      hasSelectedValue = true;
+    } else if (modelValue === null || modelValue === undefined) {
+      // Vue 值为 null 或 undefined，肯定没有选中值
+      hasSelectedValue = false;
+    } else {
+      // 其他情况：使用其他检测方法
+      hasSelectedValue = !hasIsEmptyClass || hasVisibleText || hasSelectedTags || hasInputValue;
+    }
     
     if (hasSelectedValue) {
       // 强制移除 is-empty 类（这是关键！）
