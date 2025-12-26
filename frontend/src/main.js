@@ -759,22 +759,38 @@ const fixSelectDisplay = () => {
     const inputWrapper = selectEl.querySelector('.el-input__wrapper');
     let hasVisibleText = false;
     let displayedText = '';
+    const originalPlaceholder = selectEl.getAttribute('placeholder') || '';
     
     if (inputWrapper) {
-      // 获取 input wrapper 内的所有文本（排除 placeholder）
+      // 获取 input wrapper 内的所有文本
       const allText = inputWrapper.innerText || inputWrapper.textContent || '';
-      const placeholderText = placeholderEl.textContent?.trim() || '';
-      const cleanText = allText.replace(placeholderText, '').trim();
-      hasVisibleText = cleanText.length > 0;
-      displayedText = cleanText;
+      const currentPlaceholderText = placeholderEl.textContent?.trim() || '';
+      
+      // 关键修复：如果 placeholder 显示的文本不是原始的 placeholder 属性值，
+      // 说明这个文本可能是选中值，而不是真正的 placeholder
+      if (currentPlaceholderText && currentPlaceholderText !== originalPlaceholder) {
+        // placeholder 显示的文本与原始 placeholder 不同，说明这是选中值
+        hasVisibleText = true;
+        displayedText = currentPlaceholderText;
+      } else {
+        // 正常情况：排除 placeholder 文本后检查是否有其他文本
+        const cleanText = allText.replace(currentPlaceholderText, '').trim();
+        hasVisibleText = cleanText.length > 0;
+        displayedText = cleanText;
+      }
       
       // 检查是否有选中的文本元素（Element Plus 可能使用特殊元素显示选中值）
       const selectedTextEl = inputWrapper.querySelector('.el-select__selected-item') ||
+                            inputWrapper.querySelector('.el-select__selection') ||
                             inputWrapper.querySelector('[class*="selected"]') ||
                             inputWrapper.querySelector('[class*="value"]');
       if (selectedTextEl && selectedTextEl.textContent?.trim()) {
-        hasVisibleText = true;
-        displayedText = selectedTextEl.textContent.trim();
+        const selectedText = selectedTextEl.textContent.trim();
+        // 如果选中的文本不是原始 placeholder，说明有选中值
+        if (selectedText !== originalPlaceholder) {
+          hasVisibleText = true;
+          displayedText = selectedText;
+        }
       }
     }
     
@@ -798,11 +814,14 @@ const fixSelectDisplay = () => {
     // 如果 Vue modelValue 为 null 或 undefined，即使 is-empty 为 false，也应该显示 placeholder
     let hasSelectedValue = false;
     
-    if (hasVueValue) {
+    // 特殊情况：如果 placeholder 显示的文本与原始 placeholder 不同，说明有选中值
+    if (displayedText && displayedText !== originalPlaceholder && displayedText.length > 0) {
+      hasSelectedValue = true;
+    } else if (hasVueValue) {
       // Vue 有值（包括空字符串），肯定有选中值
       hasSelectedValue = true;
     } else if (modelValue === null || modelValue === undefined) {
-      // Vue 值为 null 或 undefined，肯定没有选中值
+      // Vue 值为 null 或 undefined，且没有检测到选中文本，肯定没有选中值
       hasSelectedValue = false;
     } else {
       // 其他情况：使用其他检测方法
@@ -830,19 +849,34 @@ const fixSelectDisplay = () => {
       
       // 确保选中值可见 - 找到所有可能的显示元素
       if (inputWrapper) {
+        // 找到显示选中值的元素（可能是 .el-select__selection 或其他）
+        const selectionEl = inputWrapper.querySelector('.el-select__selection') ||
+                           inputWrapper.querySelector('.el-select__selected-item') ||
+                           inputWrapper.querySelector('[class*="selection"]');
+        
+        if (selectionEl) {
+          // 确保选中值元素可见
+          selectionEl.style.cssText = `
+            opacity: 1 !important;
+            visibility: visible !important;
+            z-index: 9999 !important;
+            position: relative !important;
+            display: block !important;
+            color: var(--el-text-color-regular) !important;
+          `;
+        }
+        
         // 确保 input 元素可见
         const inputs = inputWrapper.querySelectorAll('input');
         inputs.forEach(input => {
-          if (input.value || input.textContent) {
-            input.style.cssText = `
-              opacity: 1 !important;
-              visibility: visible !important;
-              color: var(--el-text-color-regular) !important;
-              z-index: 9999 !important;
-              position: relative !important;
-              display: block !important;
-            `;
-          }
+          input.style.cssText = `
+            opacity: 1 !important;
+            visibility: visible !important;
+            color: var(--el-text-color-regular) !important;
+            z-index: 9999 !important;
+            position: relative !important;
+            display: block !important;
+          `;
         });
         
         // 确保所有非 placeholder 的子元素可见
@@ -851,13 +885,15 @@ const fixSelectDisplay = () => {
           const child = children[i];
           if (child !== placeholderEl && !child.classList.contains('el-select__placeholder')) {
             const childText = child.textContent?.trim() || '';
-            if (childText) {
+            // 如果子元素有文本，且不是原始 placeholder，确保可见
+            if (childText && childText !== originalPlaceholder) {
               child.style.cssText = `
                 opacity: 1 !important;
                 visibility: visible !important;
                 z-index: 9999 !important;
                 position: relative !important;
                 display: block !important;
+                color: var(--el-text-color-regular) !important;
               `;
             }
           }
