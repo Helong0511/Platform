@@ -957,38 +957,52 @@ const fixSelectDisplay = () => {
           }
           
           // 如果找到了匹配的值，尝试触发 change 事件来更新 Vue 状态
-          if (matchedValue !== null && matchedValue !== undefined) {
+          if (matchedValue !== null && matchedValue !== undefined && vueInstance) {
             // 尝试直接更新 Vue 实例的 modelValue（如果可能）
+            // 添加严格的空值检查，避免 Vue 内部错误
             try {
               // 方法1: 尝试通过 Vue 实例的方法更新
-              if (vueInstance.setValue) {
+              if (vueInstance && typeof vueInstance.setValue === 'function') {
                 vueInstance.setValue(matchedValue);
-              } else if (vueInstance.handleChange) {
+              } else if (vueInstance && typeof vueInstance.handleChange === 'function') {
                 vueInstance.handleChange(matchedValue);
               }
               
               // 方法2: 尝试通过 emit 事件更新（Vue 3 的 v-model 使用 update:modelValue）
-              if (vueInstance.$emit) {
+              if (vueInstance && typeof vueInstance.$emit === 'function') {
                 vueInstance.$emit('update:modelValue', matchedValue);
-              } else if (vueInstance.emit) {
+              } else if (vueInstance && typeof vueInstance.emit === 'function') {
                 vueInstance.emit('update:modelValue', matchedValue);
               }
               
               // 方法3: 尝试直接设置 props（不推荐，但作为最后手段）
-              if (vueInstance.props && typeof vueInstance.props === 'object') {
-                vueInstance.props.modelValue = matchedValue;
+              // 注意：直接修改 props 可能导致 Vue 警告，但作为最后手段
+              if (vueInstance && vueInstance.props && typeof vueInstance.props === 'object' && !Object.isFrozen(vueInstance.props)) {
+                try {
+                  vueInstance.props.modelValue = matchedValue;
+                } catch (e) {
+                  // props 可能是只读的，忽略错误
+                }
               }
               
               // 方法4: 尝试访问父组件并更新（如果可能）
-              const parentComponent = vueInstance.parent || vueInstance.$parent;
-              if (parentComponent) {
-                // 尝试找到绑定到这个 select 的变量
-                // 这需要知道变量名，但我们可以尝试通过查找 v-model 属性
-                const vModelAttr = selectEl.getAttribute('v-model') || 
-                                  selectEl.getAttribute(':model-value') ||
-                                  selectEl.getAttribute('v-bind:model-value');
-                if (vModelAttr && parentComponent[vModelAttr]) {
-                  parentComponent[vModelAttr] = matchedValue;
+              // 添加严格的空值检查，避免 Vue 内部错误
+              try {
+                const parentComponent = vueInstance?.parent || vueInstance?.$parent;
+                if (parentComponent && typeof parentComponent === 'object') {
+                  // 尝试找到绑定到这个 select 的变量
+                  // 这需要知道变量名，但我们可以尝试通过查找 v-model 属性
+                  const vModelAttr = selectEl.getAttribute('v-model') || 
+                                    selectEl.getAttribute(':model-value') ||
+                                    selectEl.getAttribute('v-bind:model-value');
+                  if (vModelAttr && parentComponent[vModelAttr] !== undefined) {
+                    parentComponent[vModelAttr] = matchedValue;
+                  }
+                }
+              } catch (e) {
+                // 忽略父组件访问错误，继续其他修复
+                if (window.DEBUG_SELECT) {
+                  console.warn('[fixSelectDisplay] 访问父组件失败:', e);
                 }
               }
               
@@ -1018,18 +1032,25 @@ const fixSelectDisplay = () => {
                   const name = adv.advertiser_name || adv.name || '';
                   return name === displayedText || name.includes(displayedText);
                 });
-                if (matchedAdvertiser && matchedAdvertiser.id) {
+                if (matchedAdvertiser && matchedAdvertiser.id && vueInstance) {
                   // 找到了匹配的广告主，尝试更新 Vue 状态
                   const advertiserId = matchedAdvertiser.id;
-                  if (vueInstance.$emit) {
-                    vueInstance.$emit('update:modelValue', advertiserId);
-                  } else if (vueInstance.emit) {
-                    vueInstance.emit('update:modelValue', advertiserId);
+                  try {
+                    if (typeof vueInstance.$emit === 'function') {
+                      vueInstance.$emit('update:modelValue', advertiserId);
+                    } else if (typeof vueInstance.emit === 'function') {
+                      vueInstance.emit('update:modelValue', advertiserId);
+                    }
+                    // 触发 change 事件
+                    const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+                    changeEvent.value = advertiserId;
+                    selectEl.dispatchEvent(changeEvent);
+                  } catch (e) {
+                    // 忽略错误，继续其他修复
+                    if (window.DEBUG_SELECT) {
+                      console.warn('[fixSelectDisplay] 更新广告主值失败:', e);
+                    }
                   }
-                  // 触发 change 事件
-                  const changeEvent = new Event('change', { bubbles: true, cancelable: true });
-                  changeEvent.value = advertiserId;
-                  selectEl.dispatchEvent(changeEvent);
                 }
               } catch (e) {
                 // 忽略错误
@@ -1235,9 +1256,19 @@ const debugSelectDisplay = () => {
   console.log('=== 调试信息结束 ===');
 };
 
-// 导出到 window 对象，供全局使用
-window.fixSelectDisplay = fixSelectDisplay;
-window.debugSelectDisplay = debugSelectDisplay;
+// 导出到 window 对象，供全局使用（确保在全局作用域中）
+if (typeof window !== 'undefined') {
+  window.fixSelectDisplay = fixSelectDisplay;
+  window.debugSelectDisplay = debugSelectDisplay;
+  
+  // 确保函数在页面加载后立即可用
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      window.fixSelectDisplay = fixSelectDisplay;
+      window.debugSelectDisplay = debugSelectDisplay;
+    });
+  }
+}
 
 // 修复表单元素可访问性问题：为缺少 title 和 placeholder 的 input 元素添加可访问性属性
 const fixSelectAccessibility = () => {
