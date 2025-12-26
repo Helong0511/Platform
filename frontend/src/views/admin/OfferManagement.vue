@@ -1645,37 +1645,21 @@ onMounted(() => {
 .publisher-config-content :deep(.el-select .el-select__placeholder) {
   z-index: 0 !important;
   pointer-events: none !important;
-  position: relative;
 }
 
-/* 当有选中值时，确保 placeholder 完全隐藏 */
-/* Element Plus 会在有值时移除某些类或添加某些类，这里确保 placeholder 隐藏 */
-.publisher-config-content :deep(.el-select:not(.is-empty) .el-select__placeholder),
-.publisher-config-content :deep(.el-select .el-select__placeholder[style*="display: none"]),
-.publisher-config-content :deep(.el-select.has-value .el-select__placeholder) {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  height: 0 !important;
-  width: 0 !important;
-  overflow: hidden !important;
-}
-
-/* 确保选中值的显示层级高于 placeholder */
-.publisher-config-content :deep(.el-select .el-select__selected-item),
-.publisher-config-content :deep(.el-select .el-select__input),
+/* 确保 input 中的选中值正常显示，层级高于 placeholder */
 .publisher-config-content :deep(.el-select .el-input__inner),
-.publisher-config-content :deep(.el-select .el-input__wrapper) {
+.publisher-config-content :deep(.el-select .el-input__wrapper),
+.publisher-config-content :deep(.el-select .el-select__input) {
   position: relative;
   z-index: 1 !important;
 }
 
-/* 确保当 el-select 有值时，placeholder 元素不显示 */
-.publisher-config-content :deep(.el-select[data-value] .el-select__placeholder),
-.publisher-config-content :deep(.el-select:has(.el-select__selected-item) .el-select__placeholder) {
+/* 当 el-select 有值时，隐藏 placeholder */
+.publisher-config-content :deep(.el-select:not(.is-empty) .el-select__placeholder),
+.publisher-config-content :deep(.el-select .el-select__placeholder[style*="display: none"]) {
   display: none !important;
   visibility: hidden !important;
-  opacity: 0 !important;
 }
 
 .publisher-config-content :deep(.el-select__popper) {
