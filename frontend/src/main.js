@@ -806,10 +806,34 @@ const fixSelectDisplay = () => {
       if (selectedTextEl && selectedTextEl.textContent?.trim()) {
         const selectedText = selectedTextEl.textContent.trim();
         // 如果选中的文本不是原始 placeholder，说明有选中值
-        if (selectedText !== originalPlaceholder) {
+        if (selectedText !== originalPlaceholder && selectedText.length > 0) {
           hasVisibleText = true;
           if (!displayedText) {
             displayedText = selectedText;
+          }
+        }
+      }
+      
+      // 额外检查：查找所有可能的选中值显示元素
+      if (!hasVisibleText && !displayedText) {
+        // 检查 input wrapper 内的所有文本节点
+        const walker = document.createTreeWalker(
+          inputWrapper,
+          NodeFilter.SHOW_TEXT,
+          null,
+          false
+        );
+        let node;
+        while (node = walker.nextNode()) {
+          const text = node.textContent?.trim() || '';
+          // 如果文本不是原始 placeholder 的一部分，且不是空字符串，可能是选中值
+          if (text && 
+              text !== originalPlaceholder && 
+              !originalPlaceholder.startsWith(text) &&
+              text.length > 0) {
+            hasVisibleText = true;
+            displayedText = text;
+            break;
           }
         }
       }
@@ -853,9 +877,24 @@ const fixSelectDisplay = () => {
     // 如果有清除按钮，说明有选中值（即使 Vue modelValue 为 null）
     let hasSelectedValue = false;
     
+    // 关键修复0: 首先检查 placeholder 文本是否是部分文本
+    // 如果 placeholder 文本是原始 placeholder 的一部分，肯定没有选中值
+    const isPartialPlaceholder = originalPlaceholder && 
+                                 currentPlaceholderText &&
+                                 currentPlaceholderText.length < originalPlaceholder.length &&
+                                 originalPlaceholder.startsWith(currentPlaceholderText);
+    
+    if (isPartialPlaceholder) {
+      // 是部分 placeholder，肯定没有选中值
+      hasSelectedValue = false;
+      // 恢复为完整的原始 placeholder
+      if (placeholderEl && placeholderEl.textContent !== originalPlaceholder) {
+        placeholderEl.textContent = originalPlaceholder;
+      }
+    }
     // 关键修复1: 优先检查清除按钮（最可靠的信号）
     // 如果有清除按钮，说明用户已经选择了值，只是 Vue 状态没有同步
-    if (hasClearButton) {
+    else if (hasClearButton) {
       hasSelectedValue = true;
       // 如果还没有找到选中文本，尝试从其他方式获取
       if (!displayedText) {
@@ -889,34 +928,21 @@ const fixSelectDisplay = () => {
     // 如果 placeholder 显示的文本不是原始 placeholder，说明有选中值
     // 但要注意：如果 placeholder 文本只是原始 placeholder 的一部分（如 "请选择" 是 "请选择广告主" 的一部分），
     // 这可能是 Element Plus 的显示问题，不应该认为是选中值
-    else if (currentPlaceholderText && currentPlaceholderText !== originalPlaceholder) {
-      // 检查是否是原始 placeholder 的一部分（这种情况不应该认为是选中值）
-      const isPartialPlaceholder = originalPlaceholder && 
-                                   currentPlaceholderText.length < originalPlaceholder.length &&
-                                   originalPlaceholder.startsWith(currentPlaceholderText);
+    // 注意：这个检查已经在上面处理过了（isPartialPlaceholder），所以这里只需要处理非部分的情况
+    else if (currentPlaceholderText && currentPlaceholderText !== originalPlaceholder && !isPartialPlaceholder) {
+      // 不是部分 placeholder，说明可能是选中值
+      hasSelectedValue = true;
       
-      if (!isPartialPlaceholder) {
-        // 不是部分 placeholder，说明可能是选中值
-        hasSelectedValue = true;
-        
-        // 如果 placeholder 文本包含原始 placeholder 的一部分，提取选中值
-        if (originalPlaceholder && currentPlaceholderText.startsWith(originalPlaceholder)) {
-          displayedText = currentPlaceholderText.replace(originalPlaceholder, '').trim();
-        } else {
-          displayedText = currentPlaceholderText;
-        }
-        
-        // 立即恢复 placeholder 为原始文本
-        if (placeholderEl.textContent !== originalPlaceholder) {
-          placeholderEl.textContent = originalPlaceholder;
-        }
+      // 如果 placeholder 文本包含原始 placeholder 的一部分，提取选中值
+      if (originalPlaceholder && currentPlaceholderText.startsWith(originalPlaceholder)) {
+        displayedText = currentPlaceholderText.replace(originalPlaceholder, '').trim();
       } else {
-        // 是部分 placeholder，恢复为完整的原始 placeholder
-        // 这种情况不应该认为是选中值，应该添加 is-empty 类
-        hasSelectedValue = false;
-        if (placeholderEl && placeholderEl.textContent !== originalPlaceholder) {
-          placeholderEl.textContent = originalPlaceholder;
-        }
+        displayedText = currentPlaceholderText;
+      }
+      
+      // 立即恢复 placeholder 为原始文本
+      if (placeholderEl && placeholderEl.textContent !== originalPlaceholder) {
+        placeholderEl.textContent = originalPlaceholder;
       }
     } 
     // 关键修复3: 如果通过其他方式检测到选中文本，也认为有选中值
