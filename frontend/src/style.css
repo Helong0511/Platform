@@ -346,6 +346,18 @@ input[type="text"].el-input_inner {
   display: block !important;
 }
 
+/* 确保选中值的文本内容可见 */
+.el-select:not(.is-empty) .el-input__inner,
+.el-select:not(.is-empty) .el-input__wrapper input,
+.el-select:not(.is-empty) .el-select__input {
+  color: var(--el-text-color-regular) !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+  z-index: 2 !important;
+  position: relative !important;
+}
+
 /* 当 el-select 有值时，隐藏 placeholder - 使用多种方法确保生效 */
 .el-select:not(.is-empty) .el-select__placeholder {
   display: none !important;

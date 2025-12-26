@@ -935,53 +935,59 @@ const getPublisherName = (publisherId) => {
 // 修复 el-select 显示问题的通用函数
 const fixSelectDisplay = () => {
   nextTick(() => {
-    const selectElements = document.querySelectorAll('.publisher-config-content .el-select')
-    selectElements.forEach((selectEl) => {
-      const placeholder = selectEl.querySelector('.el-select__placeholder')
-      const input = selectEl.querySelector('.el-input__inner, .el-input__wrapper input, .el-select__input')
-      const inputWrapper = selectEl.querySelector('.el-input__wrapper')
-      
-      // 检查是否有值：通过检查 is-empty 类或实际值
-      const isNotEmpty = !selectEl.classList.contains('is-empty')
-      const hasInputValue = input && input.value && input.value.trim() !== ''
-      const hasValue = isNotEmpty || hasInputValue
-      
-      if (placeholder) {
-        if (hasValue) {
-          // 有值时，强制隐藏 placeholder
-          placeholder.style.setProperty('display', 'none', 'important')
-          placeholder.style.setProperty('visibility', 'hidden', 'important')
-          placeholder.style.setProperty('opacity', '0', 'important')
-          placeholder.style.setProperty('height', '0', 'important')
-          placeholder.style.setProperty('width', '0', 'important')
-          placeholder.style.setProperty('overflow', 'hidden', 'important')
-          placeholder.style.setProperty('pointer-events', 'none', 'important')
-          placeholder.style.setProperty('position', 'absolute', 'important')
-        } else {
-          // 没有值时，显示 placeholder
-          placeholder.style.removeProperty('display')
-          placeholder.style.removeProperty('visibility')
-          placeholder.style.removeProperty('opacity')
-          placeholder.style.removeProperty('height')
-          placeholder.style.removeProperty('width')
-          placeholder.style.removeProperty('overflow')
+    setTimeout(() => {
+      const selectElements = document.querySelectorAll('.publisher-config-content .el-select')
+      selectElements.forEach((selectEl, idx) => {
+        const placeholder = selectEl.querySelector('.el-select__placeholder')
+        const input = selectEl.querySelector('.el-input__inner, .el-input__wrapper input, .el-select__input')
+        const inputWrapper = selectEl.querySelector('.el-input__wrapper')
+        const inputInner = selectEl.querySelector('.el-input__inner')
+        
+        // 检查对应的配置是否有值
+        const config = formData.publisher_configs[idx]
+        const publisherId = config?.publisher_id
+        const hasValue = publisherId !== null && publisherId !== undefined
+        
+        // 也检查 Element Plus 的 is-empty 类
+        const isNotEmpty = !selectEl.classList.contains('is-empty')
+        const hasInputValue = input && input.value && input.value.trim() !== ''
+        const actuallyHasValue = hasValue || isNotEmpty || hasInputValue
+        
+        // 如果有值，获取对应的渠道名称并设置到 input
+        if (hasValue && publisherId) {
+          const publisher = publisherList.value.find(p => p.id === publisherId)
+          if (publisher && input) {
+            // 直接设置 input 的 value 和显示文本
+            input.value = publisher.publisher_name
+            if (inputInner) {
+              inputInner.textContent = publisher.publisher_name
+              inputInner.innerText = publisher.publisher_name
+            }
+          }
         }
-      }
-      
-      // 确保 input 和 wrapper 中的选中值正常显示
-      if (hasValue) {
+        
+        if (placeholder) {
+          if (actuallyHasValue) {
+            // 有值时，强制隐藏 placeholder
+            placeholder.style.cssText = 'display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; width: 0 !important; overflow: hidden !important; pointer-events: none !important; position: absolute !important; z-index: 0 !important;'
+          } else {
+            // 没有值时，显示 placeholder
+            placeholder.style.cssText = ''
+          }
+        }
+        
+        // 确保 input 和 wrapper 中的选中值正常显示
         if (input) {
-          input.style.setProperty('opacity', '1', 'important')
-          input.style.setProperty('visibility', 'visible', 'important')
-          input.style.setProperty('color', 'var(--el-text-color-regular)', 'important')
-          input.style.setProperty('display', 'block', 'important')
-          input.style.setProperty('z-index', '1', 'important')
+          input.style.cssText = 'opacity: 1 !important; visibility: visible !important; color: var(--el-text-color-regular) !important; display: block !important; z-index: 1 !important; position: relative !important;'
+        }
+        if (inputInner) {
+          inputInner.style.cssText = 'opacity: 1 !important; visibility: visible !important; color: var(--el-text-color-regular) !important; display: block !important; z-index: 1 !important; position: relative !important;'
         }
         if (inputWrapper) {
-          inputWrapper.style.setProperty('z-index', '1', 'important')
+          inputWrapper.style.cssText = 'z-index: 1 !important; position: relative !important;'
         }
-      }
-    })
+      })
+    }, 50)
   })
 }
 
