@@ -156,6 +156,7 @@
       v-model="dialogVisible"
       :title="isEdit ? '编辑Cap配置' : '添加Cap配置'"
       width="700px"
+      :append-to-body="true"
       @close="handleDialogClose"
     >
       <el-form
@@ -165,7 +166,12 @@
         label-width="120px"
       >
         <el-form-item label="Cap类型" prop="cap_type">
-          <el-select v-model="formData.cap_type" style="width: 100%;" @change="handleCapTypeChange">
+          <el-select 
+            v-model="formData.cap_type" 
+            style="width: 100%;" 
+            :popper-append-to-body="true"
+            @change="handleCapTypeChange"
+          >
             <el-option label="advertiser_offer" value="advertiser_offer" />
             <el-option label="offer" value="offer" />
           </el-select>
@@ -181,6 +187,7 @@
             placeholder="请选择广告主"
             filterable
             style="width: 100%;"
+            :popper-append-to-body="true"
           >
             <el-option
               v-for="adv in advertiserList"
@@ -197,6 +204,7 @@
             placeholder="请选择Offer"
             filterable
             style="width: 100%;"
+            :popper-append-to-body="true"
           >
             <el-option
               v-for="offer in offerList"
@@ -214,6 +222,7 @@
             clearable
             filterable
             style="width: 100%;"
+            :popper-append-to-body="true"
           >
             <el-option
               v-for="pub in publisherList"

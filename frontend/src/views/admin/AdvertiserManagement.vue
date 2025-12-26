@@ -92,6 +92,7 @@
       v-model="dialogVisible"
       :title="isEdit ? '编辑广告主' : '添加广告主'"
       width="600px"
+      :append-to-body="true"
       @close="handleDialogClose"
     >
       <el-form

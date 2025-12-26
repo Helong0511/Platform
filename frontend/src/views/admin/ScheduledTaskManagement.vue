@@ -228,6 +228,7 @@
       v-model="triggerDialogVisible"
       title="手动触发任务"
       width="500px"
+      :append-to-body="true"
     >
       <el-form :model="triggerParams" label-width="100px">
         <el-form-item label="起始日期">

@@ -134,6 +134,7 @@
       v-model="dialogVisible"
       :title="isEdit ? '编辑扣量配置' : '添加扣量配置'"
       width="600px"
+      :append-to-body="true"
       @close="handleDialogClose"
     >
       <el-form
@@ -143,7 +144,12 @@
         label-width="120px"
       >
         <el-form-item label="扣量类型" prop="discount_type">
-          <el-select v-model="formData.discount_type" style="width: 100%;" @change="handleDiscountTypeChange">
+          <el-select 
+            v-model="formData.discount_type" 
+            style="width: 100%;" 
+            :popper-append-to-body="true"
+            @change="handleDiscountTypeChange"
+          >
             <el-option label="offer（Offer级别）" value="offer" />
             <el-option label="channel（渠道级别）" value="channel" />
           </el-select>
@@ -159,6 +165,7 @@
             placeholder="请选择Offer"
             filterable
             style="width: 100%;"
+            :popper-append-to-body="true"
           >
             <el-option
               v-for="offer in offerList"
@@ -175,6 +182,7 @@
             placeholder="请选择渠道"
             filterable
             style="width: 100%;"
+            :popper-append-to-body="true"
           >
             <el-option
               v-for="pub in publisherList"

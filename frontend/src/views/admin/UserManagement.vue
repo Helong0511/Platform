@@ -230,6 +230,7 @@
       :title="dialogTitle" 
       :width="isMobile ? '95%' : '800px'"
       :close-on-click-modal="false"
+      :append-to-body="true"
       destroy-on-close
     >
       <el-form 
@@ -276,6 +277,7 @@
                 name="role"
                 placeholder="请选择角色" 
                 style="width: 100%;" 
+                :popper-append-to-body="true"
                 @change="handleRoleChange"
                 :disabled="!!currentUserId && (users.find(u => u.id === currentUserId)?.role === 'admin')"
               >

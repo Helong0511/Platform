@@ -145,6 +145,7 @@
       v-model="dialogVisible"
       :title="dialogTitle"
       :width="isMobile ? '95%' : '600px'"
+      :append-to-body="true"
       @close="handleDialogClose"
     >
       <el-form
@@ -220,6 +221,7 @@
             filterable
             clearable
             style="width: 100%;"
+            :popper-append-to-body="true"
           >
             <el-option
               v-for="offer in offerList"
@@ -241,6 +243,7 @@
             filterable
             clearable
             style="width: 100%;"
+            :popper-append-to-body="true"
           >
             <el-option
               v-for="channel in channelList"

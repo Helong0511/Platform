@@ -14,7 +14,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
-from app.models.models import User, AffiliateTest, Publisher, Offer
+from app.models.models import User, AffiliateTest, Publisher, Offer, OfferPublisherAssignment
 from app.schemas.cpl.test import AffiliateTestCreate, AffiliateTestResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 
@@ -52,6 +52,23 @@ async def create_affiliate_test(
             ErrorCode.RESOURCE_NOT_FOUND,
             detail=f"Offer ID {test_in.offer_id} 不存在"
         )
+    
+    # 获取渠道级别的下游PO（如果存在）
+    assignment_result = await db.execute(
+        select(OfferPublisherAssignment).where(
+            OfferPublisherAssignment.offer_id == test_in.offer_id,
+            OfferPublisherAssignment.publisher_id == test_in.publisher_id,
+            OfferPublisherAssignment.is_active == True
+        )
+    )
+    assignment = assignment_result.scalars().first()
+    
+    # 优先使用渠道级别的下游PO，如果没有则使用Offer级别的（向后兼容）
+    affiliate_payout = None
+    if assignment and assignment.affiliate_payout is not None:
+        affiliate_payout = assignment.affiliate_payout
+    elif offer.affiliate_payout is not None:
+        affiliate_payout = offer.affiliate_payout
     
     # 发送Postback
     postback_url = offer.postback_url
@@ -91,7 +108,7 @@ async def create_affiliate_test(
         click_id=test_in.click_id,
         offer_id=test_in.offer_id,
         offer_name=offer.offer_name,
-        price=offer.affiliate_payout,
+        price=affiliate_payout,
         country=offer.country,
         platform=None,
         postback_time=datetime.now(timezone.utc),

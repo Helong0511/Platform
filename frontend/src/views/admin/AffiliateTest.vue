@@ -119,6 +119,7 @@
       v-model="dialogVisible"
       title="创建下游测试"
       width="600px"
+      :append-to-body="true"
       @close="handleDialogClose"
     >
       <el-form
@@ -133,6 +134,7 @@
             placeholder="请选择渠道"
             filterable
             style="width: 100%;"
+            :popper-append-to-body="true"
           >
             <el-option
               v-for="pub in publisherList"
@@ -149,6 +151,7 @@
             placeholder="请选择Offer"
             filterable
             style="width: 100%;"
+            :popper-append-to-body="true"
           >
             <el-option
               v-for="offer in offerList"

@@ -148,7 +148,12 @@
     </el-card>
 
     <!-- 编辑对话框 -->
-    <el-dialog v-model="editDialogVisible" title="修改数据" width="500px">
+    <el-dialog 
+      v-model="editDialogVisible" 
+      title="修改数据" 
+      width="500px"
+      :append-to-body="true"
+    >
       <el-form :model="editForm" label-width="120px">
         <el-form-item label="REDIRECTS">
           <el-input v-model.number="editForm.redirects" type="number"></el-input>

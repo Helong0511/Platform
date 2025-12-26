@@ -145,6 +145,7 @@
       v-model="editDialogVisible"
       title="编辑广告数据"
       :width="isMobile ? '95%' : '600px'"
+      :append-to-body="true"
     >
       <el-form ref="editFormRef" :model="editForm" :rules="editRules" :label-width="isMobile ? '0' : '140px'" class="edit-form">
         <el-form-item label="数据日期" prop="date">
@@ -159,12 +160,26 @@
           ></el-date-picker>
         </el-form-item>
         <el-form-item label="所属用户" prop="client_id">
-          <el-select v-model="editForm.client_id" name="client_id" placeholder="选择用户" style="width: 100%;">
+          <el-select 
+            v-model="editForm.client_id" 
+            name="client_id" 
+            placeholder="选择用户" 
+            style="width: 100%;"
+            :popper-append-to-body="true"
+          >
             <el-option v-for="user in users" :key="user.value" :label="user.label" :value="user.value"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="产品" prop="product_id">
-          <el-select v-model="editForm.product_id" name="product_id" placeholder="选择产品" style="width: 100%;" @change="handleProductChange" :disabled="!editForm.client_id">
+          <el-select 
+            v-model="editForm.product_id" 
+            name="product_id" 
+            placeholder="选择产品" 
+            style="width: 100%;" 
+            @change="handleProductChange" 
+            :disabled="!editForm.client_id"
+            :popper-append-to-body="true"
+          >
             <el-option v-for="product in products" :key="product.value" :label="product.label" :value="product.value"></el-option>
           </el-select>
         </el-form-item>

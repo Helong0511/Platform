@@ -98,6 +98,7 @@
       v-model="dialogVisible"
       :title="isEdit ? '编辑渠道' : '添加渠道'"
       width="600px"
+      :append-to-body="true"
       @close="handleDialogClose"
     >
       <el-form
@@ -132,7 +133,11 @@
           />
         </el-form-item>
         <el-form-item label="Postback方法" prop="postback_method">
-          <el-select v-model="formData.postback_method" style="width: 100%;">
+          <el-select 
+            v-model="formData.postback_method" 
+            style="width: 100%;"
+            :popper-append-to-body="true"
+          >
             <el-option label="GET" value="GET" />
             <el-option label="POST" value="POST" />
           </el-select>

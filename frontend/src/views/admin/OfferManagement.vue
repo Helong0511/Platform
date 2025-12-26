@@ -199,6 +199,7 @@
       v-model="dialogVisible"
       :title="isEdit ? '编辑Offer' : '添加Offer'"
       width="900px"
+      :append-to-body="true"
       @close="handleDialogClose"
     >
       <el-form
@@ -282,12 +283,22 @@
           </el-col>
         </el-row>
         
-        <div style="margin: 16px 0; padding: 12px; background: #e6f7ff; border: 1px solid #91d5ff; border-radius: 4px;">
-          <el-text type="info" size="small">
-            <el-icon :size="16" style="vertical-align: middle; margin-right: 4px;"><InfoFilled /></el-icon>
-            注意：下游PO和下游Cap现在需要在"分配渠道"部分为每个渠道单独配置
-          </el-text>
-        </div>
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin: 16px 0;"
+        >
+          <template #title>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <el-icon :size="16"><InfoFilled /></el-icon>
+              <span>重要提示</span>
+            </div>
+          </template>
+          <div style="margin-top: 8px; line-height: 1.6;">
+            下游PO和下游Cap现在需要在<strong>"分配渠道"</strong>部分为每个渠道单独配置。每个渠道可以设置不同的下游PO和下游Cap值。
+          </div>
+        </el-alert>
 
         <el-form-item label="预览链接" prop="preview_link">
           <el-input v-model="formData.preview_link" placeholder="预览链接（可选）" />
@@ -373,65 +384,134 @@
           </el-col>
         </el-row>
 
-        <el-form-item label="分配渠道" prop="publisher_configs">
+        <el-divider content-position="left">
+          <el-icon :size="16" style="vertical-align: middle; margin-right: 4px;"><User /></el-icon>
+          <span style="font-weight: 600; font-size: 15px;">渠道配置</span>
+        </el-divider>
+        
+        <el-form-item label="分配渠道" prop="publisher_configs" style="margin-top: 8px;">
           <div style="width: 100%;">
-            <div v-for="(config, index) in formData.publisher_configs" :key="index" style="margin-bottom: 16px; padding: 16px; border: 1px solid #dcdfe6; border-radius: 4px; background: #f5f7fa;">
-              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
-                <el-select
-                  v-model="config.publisher_id"
-                  placeholder="请选择渠道"
-                  filterable
-                  style="flex: 1;"
-                  @change="handlePublisherChange(index)"
-                >
-                  <el-option
-                    v-for="pub in publisherList"
-                    :key="pub.id"
-                    :label="pub.publisher_name"
-                    :value="pub.id"
-                    :disabled="isPublisherSelected(pub.id, index)"
-                  />
-                </el-select>
+            <div 
+              v-for="(config, index) in formData.publisher_configs" 
+              :key="index" 
+              class="publisher-config-card"
+            >
+              <div class="publisher-config-header">
+                <div class="publisher-config-title">
+                  <el-icon :size="18" style="margin-right: 6px; color: #409eff;"><User /></el-icon>
+                  <span class="publisher-config-label">渠道配置 {{ index + 1 }}</span>
+                  <el-tag 
+                    v-if="config.publisher_id" 
+                    type="success" 
+                    size="small" 
+                    style="margin-left: 8px;"
+                  >
+                    {{ getPublisherName(config.publisher_id) }}
+                  </el-tag>
+                  <el-tag 
+                    v-else 
+                    type="info" 
+                    size="small" 
+                    style="margin-left: 8px;"
+                  >
+                    未选择渠道
+                  </el-tag>
+                </div>
                 <el-button
                   type="danger"
                   :icon="Delete"
                   circle
+                  size="small"
                   @click="removePublisherConfig(index)"
                   :disabled="formData.publisher_configs.length <= 1"
+                  title="删除此渠道配置"
                 />
               </div>
-              <el-row :gutter="12">
-                <el-col :span="12">
-                  <el-form-item :label="`下游PO (${getPublisherName(config.publisher_id)})`" :prop="`publisher_configs.${index}.affiliate_payout`">
-                    <el-input-number
-                      v-model="config.affiliate_payout"
-                      :min="0"
-                      :precision="2"
-                      placeholder="扣价后给渠道的金额"
-                      style="width: 100%;"
+              
+              <div class="publisher-config-content">
+                <el-form-item 
+                  label="选择渠道" 
+                  :prop="`publisher_configs.${index}.publisher_id`"
+                  :rules="[{ required: true, message: '请选择渠道', trigger: 'change' }]"
+                  style="margin-bottom: 16px;"
+                >
+                  <el-select
+                    v-model="config.publisher_id"
+                    placeholder="请选择渠道"
+                    filterable
+                    style="width: 100%;"
+                    popper-class="publisher-select-dropdown"
+                    :popper-append-to-body="true"
+                    @change="handlePublisherChange(index)"
+                  >
+                    <el-option
+                      v-for="pub in publisherList"
+                      :key="pub.id"
+                      :label="pub.publisher_name"
+                      :value="pub.id"
+                      :disabled="isPublisherSelected(pub.id, index)"
                     />
-                  </el-form-item>
-                </el-col>
-                <el-col :span="12">
-                  <el-form-item :label="`下游Cap (${getPublisherName(config.publisher_id)})`" :prop="`publisher_configs.${index}.downstream_cap`">
-                    <el-input-number
-                      v-model="config.downstream_cap"
-                      :min="0"
-                      placeholder="下游转化上限"
-                      style="width: 100%;"
-                    />
-                  </el-form-item>
-                </el-col>
-              </el-row>
+                  </el-select>
+                </el-form-item>
+                
+                <el-row :gutter="16" v-if="config.publisher_id">
+                  <el-col :span="12">
+                    <el-form-item 
+                      label="下游PO" 
+                      :prop="`publisher_configs.${index}.affiliate_payout`"
+                    >
+                      <el-input-number
+                        v-model="config.affiliate_payout"
+                        :min="0"
+                        :precision="2"
+                        placeholder="扣价后给渠道的金额"
+                        style="width: 100%;"
+                      />
+                      <div class="field-hint">
+                        该渠道的扣价后支付金额
+                      </div>
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="12">
+                    <el-form-item 
+                      label="下游Cap" 
+                      :prop="`publisher_configs.${index}.downstream_cap`"
+                    >
+                      <el-input-number
+                        v-model="config.downstream_cap"
+                        :min="0"
+                        placeholder="下游转化上限"
+                        style="width: 100%;"
+                      />
+                      <div class="field-hint">
+                        该渠道的转化上限
+                      </div>
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+                <div v-else class="publisher-config-placeholder">
+                  <el-empty 
+                    description="请先选择渠道，然后配置该渠道的下游PO和下游Cap" 
+                    :image-size="80"
+                  />
+                </div>
+              </div>
             </div>
+            
             <el-button
               type="primary"
               :icon="Plus"
               @click="addPublisherConfig"
-              style="width: 100%;"
+              style="width: 100%; margin-top: 12px;"
+              plain
             >
-              添加渠道
+              添加渠道配置
             </el-button>
+            
+            <div class="form-hint" style="margin-top: 12px;">
+              <el-icon :size="14" style="vertical-align: middle; margin-right: 4px;"><InfoFilled /></el-icon>
+              每个渠道可以配置独立的下游PO和下游Cap。至少需要添加一个渠道配置。
+            </div>
           </div>
         </el-form-item>
 
@@ -682,7 +762,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Refresh, Edit, Delete, Box, View, DocumentCopy, Loading, InfoFilled } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, Edit, Delete, Box, View, DocumentCopy, Loading, InfoFilled, User } from '@element-plus/icons-vue'
 import { getOffers, createOffer, updateOffer, deleteOffer, getOffer } from '@/api/offer'
 import { getAdvertisers } from '@/api/advertiser'
 import { getPublishers } from '@/api/publisher'
@@ -1438,6 +1518,98 @@ onMounted(() => {
   font-size: 12px;
   color: #909399;
   margin-top: 5px;
+}
+
+/* 渠道配置卡片样式 */
+.publisher-config-card {
+  margin-bottom: 16px;
+  padding: 20px;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: visible;
+}
+
+.publisher-config-card:hover {
+  border-color: #409eff;
+  box-shadow: 0 4px 8px rgba(64, 158, 255, 0.1);
+}
+
+.publisher-config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.publisher-config-title {
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  font-size: 14px;
+  color: #303133;
+}
+
+.publisher-config-label {
+  margin-right: 8px;
+}
+
+.publisher-config-content {
+  padding-top: 8px;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.publisher-config-placeholder {
+  padding: 20px 0;
+  text-align: center;
+}
+
+/* 下拉选择框样式优化 */
+.publisher-select-dropdown {
+  z-index: 3000 !important;
+}
+
+/* 确保表单容器不会裁剪下拉选项 */
+:deep(.el-form-item) {
+  overflow: visible;
+}
+
+:deep(.el-form-item__content) {
+  overflow: visible;
+}
+
+:deep(.el-select) {
+  z-index: auto;
+}
+
+:deep(.el-select__popper) {
+  z-index: 3000 !important;
+}
+
+/* 确保卡片内容区域不会裁剪下拉选项 */
+.publisher-config-content {
+  position: relative;
+  z-index: 1;
+}
+
+.publisher-config-content :deep(.el-select) {
+  position: relative;
+  z-index: 2;
+}
+
+.publisher-config-content :deep(.el-select__popper) {
+  z-index: 3000 !important;
 }
 
 /* 移动端优化 */

@@ -216,6 +216,7 @@
       :width="isMobile ? '95%' : '900px'"
       class="log-detail-dialog"
       :close-on-click-modal="false"
+      :append-to-body="true"
     >
       <div v-if="currentLog" class="log-detail-content">
         <el-descriptions :column="isMobile ? 1 : 2" border>

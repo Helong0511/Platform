@@ -232,6 +232,7 @@
       :width="isMobile ? '95%' : '900px'"
       class="conversion-detail-dialog"
       :close-on-click-modal="false"
+      :append-to-body="true"
     >
       <div v-if="currentConversion" class="conversion-detail-content">
         <el-descriptions :column="isMobile ? 1 : 2" border>

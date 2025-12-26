@@ -109,6 +109,7 @@
       v-model="dialogVisible"
       title="创建上游测试"
       width="600px"
+      :append-to-body="true"
       @close="handleDialogClose"
     >
       <el-form
@@ -123,6 +124,7 @@
             placeholder="请选择广告主"
             filterable
             style="width: 100%;"
+            :popper-append-to-body="true"
             @change="handleAdvertiserChange"
           >
             <el-option
@@ -140,6 +142,7 @@
             placeholder="请选择Offer"
             filterable
             style="width: 100%;"
+            :popper-append-to-body="true"
           >
             <el-option
               v-for="offer in filteredOffers"
@@ -161,6 +164,7 @@
       v-model="detailDialogVisible"
       title="测试详情"
       width="800px"
+      :append-to-body="true"
     >
       <el-descriptions :column="2" border>
         <el-descriptions-item label="广告主">{{ currentTest?.advertiser_name }}</el-descriptions-item>
