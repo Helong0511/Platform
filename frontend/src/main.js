@@ -752,6 +752,91 @@ const fixSelectAccessibility = () => {
     });
   };
 
+  // 修复 el-select 选中值显示问题：强制更新 el-select 状态
+  const fixSelectDisplay = () => {
+    const selectElements = document.querySelectorAll('.el-select');
+    selectElements.forEach((selectEl) => {
+      // 检查 placeholder 元素
+      const placeholderEl = selectEl.querySelector('.el-select__placeholder');
+      if (!placeholderEl) return;
+      
+      // 检查是否有选中的值（通过多种方式检测）
+      // 1. 检查是否有选中的标签或文本元素（多选模式）
+      const hasSelectedItem = selectEl.querySelector('.el-select__selected-item') ||
+        selectEl.querySelector('.el-select__tags') ||
+        selectEl.querySelector('.el-select__tags .el-tag');
+      
+      // 2. 检查 input 元素
+      const inputEl = selectEl.querySelector('.el-select__input') ||
+        selectEl.querySelector('.el-input__wrapper input') ||
+        selectEl.querySelector('.el-input__inner');
+      
+      // 3. 检查是否有选中的文本内容
+      let hasSelectedText = false;
+      if (inputEl) {
+        // 获取 input 的文本内容（可能是 value 或 textContent）
+        const inputValue = (inputEl.value || inputEl.textContent || '').trim();
+        const inputPlaceholder = (inputEl.getAttribute('placeholder') || '').trim();
+        const selectPlaceholder = (selectEl.getAttribute('placeholder') || '').trim();
+        
+        // 如果 input 有文本内容，且不是 placeholder，则认为有选中值
+        // 注意：即使值是空字符串，如果 label 有值，Element Plus 也会在 input 中显示 label
+        hasSelectedText = inputValue && 
+          inputValue !== inputPlaceholder && 
+          inputValue !== selectPlaceholder &&
+          inputValue !== placeholderEl.textContent?.trim();
+      }
+      
+      // 4. 检查 el-select 内部是否有实际显示的文本（通过检查 input wrapper 的内容）
+      const inputWrapper = selectEl.querySelector('.el-input__wrapper');
+      let hasDisplayedText = false;
+      if (inputWrapper) {
+        // 获取 input wrapper 内的所有文本节点
+        const textNodes = Array.from(inputWrapper.childNodes)
+          .filter(node => node.nodeType === Node.TEXT_NODE)
+          .map(node => node.textContent?.trim())
+          .filter(text => text && text.length > 0);
+        
+        // 检查是否有非 placeholder 的文本
+        const placeholderText = placeholderEl.textContent?.trim() || '';
+        hasDisplayedText = textNodes.some(text => text !== placeholderText);
+      }
+      
+      // 5. 检查 el-select 是否有 is-empty 类（如果没有，说明有值）
+      const isNotEmpty = !selectEl.classList.contains('is-empty');
+      
+      // 综合判断：如果有选中项、有选中文本、有显示的文本、或者没有 is-empty 类，则认为有选中值
+      const hasSelectedValue = hasSelectedItem || hasSelectedText || hasDisplayedText || isNotEmpty;
+      
+      if (hasSelectedValue) {
+        // 如果有选中值，强制隐藏 placeholder
+        placeholderEl.style.setProperty('display', 'none', 'important');
+        placeholderEl.style.setProperty('visibility', 'hidden', 'important');
+        placeholderEl.style.setProperty('opacity', '0', 'important');
+        placeholderEl.style.setProperty('height', '0', 'important');
+        placeholderEl.style.setProperty('width', '0', 'important');
+        placeholderEl.style.setProperty('overflow', 'hidden', 'important');
+        placeholderEl.style.setProperty('pointer-events', 'none', 'important');
+        placeholderEl.style.setProperty('position', 'absolute', 'important');
+        placeholderEl.style.setProperty('z-index', '0', 'important');
+        
+        // 移除 is-empty 类（如果存在）
+        selectEl.classList.remove('is-empty');
+      } else {
+        // 如果没有选中值，确保 placeholder 显示
+        placeholderEl.style.removeProperty('display');
+        placeholderEl.style.removeProperty('visibility');
+        placeholderEl.style.removeProperty('opacity');
+        placeholderEl.style.removeProperty('height');
+        placeholderEl.style.removeProperty('width');
+        placeholderEl.style.removeProperty('overflow');
+        placeholderEl.style.removeProperty('pointer-events');
+        placeholderEl.style.removeProperty('position');
+        placeholderEl.style.removeProperty('z-index');
+      }
+    });
+  };
+
   // 修复 el-date-picker 的 input 元素
   const fixDatePickerInputs = () => {
     const datePickerInputs = document.querySelectorAll('.el-date-picker .el-input__inner, .el-date-editor .el-input__inner, .el-date-editor input');
@@ -812,6 +897,7 @@ const fixSelectAccessibility = () => {
     fixSelectInputs();
     fixDatePickerInputs();
     fixOtherFormInputs();
+    fixSelectDisplay(); // 修复 el-select 选中值显示问题
   };
 
   // 延迟执行，确保 DOM 已完全加载
@@ -829,6 +915,9 @@ const fixSelectAccessibility = () => {
     childList: true,
     subtree: true
   });
+  
+  // 导出修复函数供其他组件使用
+  window.fixSelectDisplay = fixSelectDisplay;
 };
 
 // 修复 -moz-appearance 兼容性问题：为所有使用 -moz-appearance 的元素添加 appearance 属性

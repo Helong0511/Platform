@@ -729,7 +729,10 @@ const handleFilterClientChange = async (clientId) => {
   // 修复选中值显示
   nextTick(() => {
     setTimeout(() => {
-
+      // 强制更新 el-select 状态，确保选中值正确显示
+      if (typeof window.fixSelectDisplay === 'function') {
+        window.fixSelectDisplay();
+      }
     }, 100)
   })
 };
@@ -758,7 +761,10 @@ const handleFilterProductChange = async () => {
   // 修复选中值显示
   nextTick(() => {
     setTimeout(() => {
-
+      // 强制更新 el-select 状态，确保选中值正确显示
+      if (typeof window.fixSelectDisplay === 'function') {
+        window.fixSelectDisplay();
+      }
     }, 100)
   })
 };
@@ -823,7 +829,10 @@ const handleCountryChange = () => {
   // 修复选中值显示
   nextTick(() => {
     setTimeout(() => {
-
+      // 强制更新 el-select 状态，确保选中值正确显示
+      if (typeof window.fixSelectDisplay === 'function') {
+        window.fixSelectDisplay();
+      }
     }, 100)
   })
 };
