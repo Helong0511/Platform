@@ -220,6 +220,8 @@
             placeholder="选择关联的Offer（可选）"
             filterable
             clearable
+            popper-class="select-dropdown"
+            :teleported="true"
             style="width: 100%;"
           >
             <el-option
@@ -241,6 +243,8 @@
             placeholder="选择关联的渠道（可选）"
             filterable
             clearable
+            popper-class="select-dropdown"
+            :teleported="true"
             style="width: 100%;"
           >
             <el-option

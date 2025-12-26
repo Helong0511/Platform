@@ -29,6 +29,8 @@
           v-model="filterActive"
           placeholder="请选择激活状态"
           clearable
+          popper-class="select-dropdown"
+          :teleported="true"
           style="width: 160px; margin-left: 10px; min-width: 160px;"
           @change="handleSearch"
         >
@@ -133,8 +135,10 @@
           />
         </el-form-item>
         <el-form-item label="Postback方法" prop="postback_method">
-          <el-select 
-            v-model="formData.postback_method" 
+          <el-select
+            v-model="formData.postback_method"
+            popper-class="select-dropdown"
+            :teleported="true"
             style="width: 100%;"
           >
             <el-option label="GET" value="GET" />

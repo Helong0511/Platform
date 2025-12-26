@@ -68,6 +68,8 @@
                     <el-select
                       v-model="scope.row.selectedColumn"
                       placeholder="请选择Excel列"
+                      popper-class="select-dropdown"
+                      :teleported="true"
                       style="width: 100%"
                       @change="handleMappingChange"
                     >
@@ -988,128 +990,138 @@ onMounted(() => {
   .ml-model-management {
     padding: var(--spacing-md);
   }
-  
+
   .header-card {
     margin-bottom: var(--spacing-md);
   }
-  
+
   .header-card :deep(.el-card__body) {
     padding: var(--spacing-md);
   }
-  
+
   .card-header h2 {
     font-size: var(--font-size-xl);
   }
-  
+
   .section-header {
     font-size: var(--font-size-base);
   }
-  
+
   .train-section,
   .validate-section {
     min-height: auto;
   }
-  
+
   /* 按钮移动端优化 */
   .el-button {
     min-height: var(--touch-target-size);
     width: 100%;
     margin-bottom: var(--spacing-sm);
   }
-  
+
   .el-row :deep(.el-col) {
     margin-bottom: var(--spacing-md);
   }
-  
+
   /* 表格移动端优化 */
   .el-table {
     font-size: var(--font-size-sm);
-    min-width: 600px; /* 确保表格有最小宽度，可以横向滚动 */
+    min-width: 600px;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
-  
+
   /* 表格容器优化 */
   .el-card :deep(.el-card__body) {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
-  
+
   .el-table :deep(.el-table__header-wrapper) {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
-  
+
   .el-table :deep(.el-table__body-wrapper) {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
-  
+
   .el-table :deep(.el-table__cell) {
     padding: var(--spacing-xs) var(--spacing-sm);
     word-break: break-word;
   }
-  
+
   .el-table :deep(.el-table__header th),
   .el-table :deep(.el-table__body td) {
     font-size: var(--font-size-xs);
     padding: var(--spacing-xs);
   }
-  
+
   /* 选择器移动端优化 */
   .el-select {
     width: 100% !important;
   }
-  
+
   .el-select :deep(.el-input__wrapper) {
     min-height: var(--touch-target-size);
   }
-  
+
   /* 文件上传移动端优化 */
   .el-upload {
     width: 100%;
   }
-  
+
   :deep(.el-upload-dragger) {
     padding: var(--spacing-md);
   }
-  
+
   /* 状态卡片移动端优化 */
   .status-item {
     flex-direction: column;
     align-items: flex-start;
     gap: var(--spacing-sm);
   }
-  
+
   .status-value {
     font-size: var(--font-size-base);
   }
-  
+
   /* 映射卡片移动端优化 */
   .mapping-card {
     padding: var(--spacing-md);
   }
-  
+
   .mapping-status {
     gap: var(--spacing-sm);
   }
-  
+
   .status-title {
     font-size: var(--font-size-base);
   }
-  
+
   .status-detail {
     font-size: var(--font-size-sm);
   }
-  
+
   /* 按钮组移动端优化 */
   .el-row :deep(.el-col) {
     width: 100% !important;
     margin-bottom: var(--spacing-sm);
   }
-  
+
   .el-row :deep(.el-col .el-button) {
     width: 100%;
   }
+}
+
+/* 全局下拉选择框样式 */
+.select-dropdown {
+  z-index: 3000 !important;
+}
+
+:deep(.el-select__popper.select-dropdown) {
+  z-index: 3000 !important;
+  position: fixed !important;
 }
 </style>

@@ -43,7 +43,7 @@
           </el-input>
         </el-form-item>
         <el-form-item label="操作类型">
-          <el-select v-model="searchForm.action_type" placeholder="全部" clearable style="width: 150px;" name="action_type">
+          <el-select v-model="searchForm.action_type" placeholder="全部" clearable style="width: 150px;" name="action_type" popper-class="select-dropdown" :teleported="true">
             <el-option label="全部" value=""></el-option>
             <el-option label="登录" value="LOGIN"></el-option>
             <el-option label="登出" value="LOGOUT"></el-option>
@@ -60,7 +60,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="资源类型">
-          <el-select v-model="searchForm.resource_type" placeholder="全部" clearable style="width: 150px;" name="resource_type">
+          <el-select v-model="searchForm.resource_type" placeholder="全部" clearable style="width: 150px;" name="resource_type" popper-class="select-dropdown" :teleported="true">
             <el-option label="全部" value=""></el-option>
             <el-option label="用户" value="USER"></el-option>
             <el-option label="客户" value="CLIENT"></el-option>
@@ -81,7 +81,7 @@
           />
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="searchForm.success" placeholder="全部" clearable style="width: 120px;" name="success">
+          <el-select v-model="searchForm.success" placeholder="全部" clearable style="width: 120px;" name="success" popper-class="select-dropdown" :teleported="true">
             <el-option label="全部" value=""></el-option>
             <el-option label="成功" :value="true"></el-option>
             <el-option label="失败" :value="false"></el-option>
@@ -675,11 +675,6 @@ onMounted(async () => {
   margin-bottom: var(--spacing-xl);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-light);
-  overflow: visible;
-}
-
-.filter-card :deep(.el-card__body) {
-  overflow: visible;
 }
 
 .data-table-card {

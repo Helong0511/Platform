@@ -272,11 +272,13 @@
           </el-col>
           <el-col :xs="24" :sm="24" :md="12" :lg="12">
             <el-form-item label="角色" prop="role">
-              <el-select 
-                v-model="userForm.role" 
+              <el-select
+                v-model="userForm.role"
                 name="role"
-                placeholder="请选择角色" 
+                placeholder="请选择角色"
                 style="width: 100%;"
+                popper-class="select-dropdown"
+                :teleported="true"
                 @change="handleRoleChange"
                 :disabled="!!currentUserId && (users.find(u => u.id === currentUserId)?.role === 'admin')"
               >

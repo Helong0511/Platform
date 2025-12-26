@@ -220,6 +220,8 @@
                 v-model="formData.advertiser_id"
                 placeholder="请选择广告主"
                 filterable
+                popper-class="select-dropdown"
+                :teleported="true"
                 style="width: 100%;"
               >
                 <el-option
@@ -439,6 +441,8 @@
                     v-model="config.publisher_id"
                     placeholder="请选择渠道"
                     filterable
+                    popper-class="select-dropdown"
+                    :teleported="true"
                     style="width: 100%;"
                   >
                     <el-option
@@ -526,7 +530,7 @@
         <el-row :gutter="20">
           <el-col :span="12">
             <el-form-item label="状态" prop="status">
-              <el-select v-model="formData.status" style="width: 100%;">
+              <el-select v-model="formData.status" popper-class="select-dropdown" :teleported="true" style="width: 100%;">
                 <el-option label="Active" value="Active" />
                 <el-option label="Inactive" value="Inactive" />
               </el-select>
@@ -1570,183 +1574,6 @@ onMounted(() => {
   text-align: center;
 }
 
-/* 下拉选择框样式优化 - 确保下拉选项显示在对话框之上 */
-.publisher-select-dropdown {
-  z-index: 3000 !important;
-}
-
-/* 确保卡片和容器不会裁剪下拉选项 */
-:deep(.el-card),
-:deep(.el-card__body) {
-  overflow: visible !important;
-}
-
-/* 确保表单容器不会裁剪下拉选项 */
-:deep(.el-form-item) {
-  overflow: visible !important;
-}
-
-:deep(.el-form-item__content) {
-  overflow: visible !important;
-}
-
-:deep(.el-select) {
-  z-index: auto;
-}
-
-/* 确保下拉框的 popper 显示在对话框之上 */
-:deep(.el-select__popper) {
-  z-index: 3001 !important;
-  position: fixed !important;
-}
-
-/* 确保所有下拉框的 popper 都显示在对话框之上 */
-:deep(.el-select__popper.el-popper) {
-  z-index: 3001 !important;
-}
-
-/* 确保对话框内容区域不会裁剪下拉选项 */
-:deep(.el-dialog__body) {
-  overflow: visible !important;
-}
-
-:deep(.el-dialog__wrapper) {
-  overflow: visible !important;
-}
-
-/* 确保对话框遮罩层不会遮挡下拉框 */
-:deep(.el-overlay) {
-  z-index: 2000 !important;
-}
-
-:deep(.el-overlay-dialog) {
-  z-index: 2000 !important;
-}
-
-/* 确保对话框本身不会遮挡下拉框 */
-:deep(.el-dialog) {
-  z-index: 2001 !important;
-}
-
-/* 确保卡片内容区域不会裁剪下拉选项 */
-.publisher-config-content {
-  position: relative;
-  z-index: 1;
-  overflow: visible !important;
-}
-
-.publisher-config-content :deep(.el-select) {
-  position: relative;
-  z-index: 2;
-}
-
-/* 修复 placeholder 遮盖选中值的问题 */
-/* 确保 placeholder 的 z-index 不会覆盖选中值，并且不会拦截点击事件 */
-.publisher-config-content :deep(.el-select .el-select__placeholder) {
-  z-index: 0 !important;
-  pointer-events: none !important;
-  position: absolute !important;
-}
-
-/* 确保鼠标悬停时，placeholder 也不会显示（即使有值） */
-.publisher-config-content :deep(.el-select:hover .el-select__placeholder),
-.publisher-config-content :deep(.el-select:focus .el-select__placeholder),
-.publisher-config-content :deep(.el-select:focus-within .el-select__placeholder),
-.publisher-config-content :deep(.el-select:not(.is-empty):hover .el-select__placeholder),
-.publisher-config-content :deep(.el-select:not(.is-empty):focus .el-select__placeholder),
-.publisher-config-content :deep(.el-select:not(.is-empty):focus-within .el-select__placeholder) {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  z-index: 0 !important;
-  pointer-events: none !important;
-}
-
-/* 确保 input 中的选中值正常显示，层级高于 placeholder */
-.publisher-config-content :deep(.el-select .el-input__inner),
-.publisher-config-content :deep(.el-select .el-input__wrapper),
-.publisher-config-content :deep(.el-select .el-select__input) {
-  position: relative !important;
-  z-index: 1 !important;
-}
-
-/* 确保选中值的文本正常显示 */
-.publisher-config-content :deep(.el-select .el-input__inner),
-.publisher-config-content :deep(.el-select .el-input__wrapper input),
-.publisher-config-content :deep(.el-select .el-select__input) {
-  color: var(--el-text-color-regular) !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-  z-index: 2 !important;
-  position: relative !important;
-}
-
-/* 确保有值时，选中值文本显示在上层 */
-.publisher-config-content :deep(.el-select:not(.is-empty) .el-input__inner),
-.publisher-config-content :deep(.el-select:not(.is-empty) .el-input__wrapper input),
-.publisher-config-content :deep(.el-select:not(.is-empty) .el-select__input) {
-  color: var(--el-text-color-regular) !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-  z-index: 2 !important;
-  position: relative !important;
-}
-
-/* 当 el-select 有值时，隐藏 placeholder - 确保失去焦点后也隐藏 */
-.publisher-config-content :deep(.el-select:not(.is-empty) .el-select__placeholder),
-.publisher-config-content :deep(.el-select:not(.is-empty) .el-select__placeholder.is-hidden) {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  height: 0 !important;
-  width: 0 !important;
-  overflow: hidden !important;
-  pointer-events: none !important;
-  position: absolute !important;
-  z-index: 0 !important;
-}
-
-.publisher-config-content :deep(.el-select:has(.el-input__inner:not(:placeholder-shown)) .el-select__placeholder),
-.publisher-config-content :deep(.el-select:has(.el-input__wrapper input:not(:placeholder-shown)) .el-select__placeholder) {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-}
-
-.publisher-config-content :deep(.el-select .el-select__placeholder[style*="display: none"]),
-.publisher-config-content :deep(.el-select .el-select__placeholder[style*="display:none"]) {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-}
-
-.publisher-config-content :deep(.el-select__popper) {
-  z-index: 3001 !important;
-  position: fixed !important;
-}
-
-.publisher-config-content :deep(.el-select__popper.el-popper) {
-  z-index: 3001 !important;
-  position: fixed !important;
-}
-
-/* 确保渠道配置卡片容器不会裁剪下拉选项 */
-.publisher-config-card {
-  overflow: visible !important;
-}
-
-.publisher-configs-container {
-  overflow: visible !important;
-}
-
-.publisher-configs-section {
-  overflow: visible !important;
-}
-
-.publisher-configs-section :deep(.el-form-item__content) {
-  overflow: visible !important;
-}
-
 /* 移动端优化 */
 @media (max-width: 767px) {
   .offer-management {
@@ -1771,6 +1598,16 @@ onMounted(() => {
   .table-wrapper :deep(.el-table__cell) {
     padding: 8px 4px;
   }
+}
+
+/* 全局下拉选择框样式 */
+.select-dropdown {
+  z-index: 3000 !important;
+}
+
+:deep(.el-select__popper.select-dropdown) {
+  z-index: 3000 !important;
+  position: fixed !important;
 }
 </style>
 

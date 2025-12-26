@@ -21,10 +21,9 @@
     <el-card class="filter-card" shadow="never">
       <el-form :inline="true" :model="searchForm" class="filter-form">
         <el-form-item label="平台">
-          <el-select v-model="searchForm.platform" placeholder="全部" clearable style="width: 150px;" name="platform">
+          <el-select v-model="searchForm.platform" placeholder="全部" clearable style="width: 150px;" name="platform" popper-class="select-dropdown" :teleported="true">
             <el-option label="全部" value=""></el-option>
             <el-option label="Macan" value="macan"></el-option>
-            <!-- 可以添加更多平台 -->
           </el-select>
         </el-form-item>
         <el-form-item label="事件名称">
