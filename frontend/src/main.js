@@ -815,8 +815,101 @@ const fixSelectDisplay = () => {
     let hasSelectedValue = false;
     
     // 特殊情况：如果 placeholder 显示的文本与原始 placeholder 不同，说明有选中值
+    // 这是关键修复：即使 Vue modelValue 为 null，如果 placeholder 显示的文本不是原始 placeholder，
+    // 说明用户已经选择了值，只是 Vue 状态没有同步
     if (displayedText && displayedText !== originalPlaceholder && displayedText.length > 0) {
       hasSelectedValue = true;
+      
+      // 关键修复：如果 Vue modelValue 为 null，但检测到有选中文本，
+      // 尝试从 DOM 中找到对应的 option 值，并强制更新 Vue 状态
+      if ((modelValue === null || modelValue === undefined) && vueInstance) {
+        try {
+          // 查找所有 option 元素，找到 label 匹配的 option
+          const allOptions = selectEl.querySelectorAll('.el-select-dropdown__item, [role="option"]');
+          let matchedOption = null;
+          let matchedValue = null;
+          
+          for (const option of allOptions) {
+            const optionText = option.textContent?.trim() || '';
+            if (optionText === displayedText) {
+              // 找到匹配的 option，尝试获取其 value
+              matchedOption = option;
+              // 尝试从 data-value 或 data-option-value 属性获取值
+              matchedValue = option.getAttribute('data-value') || 
+                           option.getAttribute('data-option-value') ||
+                           option.getAttribute('value');
+              
+              // 如果还是找不到，尝试从 Vue 实例中获取 options
+              if (!matchedValue && vueInstance.options) {
+                const optionData = vueInstance.options.find(opt => {
+                  const label = opt.label || opt.name || '';
+                  return label === displayedText;
+                });
+                if (optionData) {
+                  matchedValue = optionData.value;
+                }
+              }
+              
+              break;
+            }
+          }
+          
+          // 如果找到了匹配的值，尝试触发 change 事件来更新 Vue 状态
+          if (matchedValue !== null && matchedValue !== undefined) {
+            // 尝试直接更新 Vue 实例的 modelValue（如果可能）
+            try {
+              // 方法1: 尝试通过 Vue 实例的方法更新
+              if (vueInstance.setValue) {
+                vueInstance.setValue(matchedValue);
+              } else if (vueInstance.handleChange) {
+                vueInstance.handleChange(matchedValue);
+              }
+              
+              // 方法2: 尝试通过 emit 事件更新（Vue 3 的 v-model 使用 update:modelValue）
+              if (vueInstance.$emit) {
+                vueInstance.$emit('update:modelValue', matchedValue);
+              } else if (vueInstance.emit) {
+                vueInstance.emit('update:modelValue', matchedValue);
+              }
+              
+              // 方法3: 尝试直接设置 props（不推荐，但作为最后手段）
+              if (vueInstance.props && typeof vueInstance.props === 'object') {
+                vueInstance.props.modelValue = matchedValue;
+              }
+              
+              // 方法4: 尝试访问父组件并更新（如果可能）
+              const parentComponent = vueInstance.parent || vueInstance.$parent;
+              if (parentComponent) {
+                // 尝试找到绑定到这个 select 的变量
+                // 这需要知道变量名，但我们可以尝试通过查找 v-model 属性
+                const vModelAttr = selectEl.getAttribute('v-model') || 
+                                  selectEl.getAttribute(':model-value') ||
+                                  selectEl.getAttribute('v-bind:model-value');
+                if (vModelAttr && parentComponent[vModelAttr]) {
+                  parentComponent[vModelAttr] = matchedValue;
+                }
+              }
+              
+              // 方法5: 创建并触发 change 事件（可能触发 Element Plus 的内部更新）
+              const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+              changeEvent.value = matchedValue;
+              selectEl.dispatchEvent(changeEvent);
+              
+              // 方法6: 尝试触发 input 事件（某些情况下可能有效）
+              const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+              inputEvent.value = matchedValue;
+              selectEl.dispatchEvent(inputEvent);
+            } catch (e) {
+              // 忽略错误，继续其他修复
+              if (window.DEBUG_SELECT) {
+                console.warn('[fixSelectDisplay] 尝试更新 Vue modelValue 失败:', e);
+              }
+            }
+          }
+        } catch (e) {
+          // 忽略错误，继续其他修复
+        }
+      }
     } else if (hasVueValue) {
       // Vue 有值（包括空字符串），肯定有选中值
       hasSelectedValue = true;
