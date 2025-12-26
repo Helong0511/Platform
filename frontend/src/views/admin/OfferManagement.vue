@@ -31,7 +31,7 @@
           clearable
           filterable
           style="width: 180px; margin-left: 10px; min-width: 180px;"
-          @change="handleSearch"
+          @change="handleAdvertiserChange"
         >
           <el-option
             v-for="adv in advertiserList"
@@ -45,7 +45,7 @@
           placeholder="请选择状态"
           clearable
           style="width: 140px; margin-left: 10px; min-width: 140px;"
-          @change="handleSearch"
+          @change="handleStatusChange"
         >
           <el-option label="全部" :value="null" />
           <el-option label="Active" value="Active" />
@@ -56,7 +56,7 @@
           placeholder="请选择激活状态"
           clearable
           style="width: 160px; margin-left: 10px; min-width: 160px;"
-          @change="handleSearch"
+          @change="handleActiveChange"
         >
           <el-option label="全部" :value="null" />
           <el-option label="激活" :value="true" />
@@ -888,6 +888,45 @@ const loadData = async () => {
   }
 }
 
+// 广告主选择变化
+const handleAdvertiserChange = () => {
+  // 修复选中值显示
+  nextTick(() => {
+    setTimeout(() => {
+      if (typeof window.fixSelectDisplay === 'function') {
+        window.fixSelectDisplay();
+      }
+    }, 100);
+  });
+  handleSearch();
+}
+
+// 状态选择变化
+const handleStatusChange = () => {
+  // 修复选中值显示
+  nextTick(() => {
+    setTimeout(() => {
+      if (typeof window.fixSelectDisplay === 'function') {
+        window.fixSelectDisplay();
+      }
+    }, 100);
+  });
+  handleSearch();
+}
+
+// 激活状态选择变化
+const handleActiveChange = () => {
+  // 修复选中值显示
+  nextTick(() => {
+    setTimeout(() => {
+      if (typeof window.fixSelectDisplay === 'function') {
+        window.fixSelectDisplay();
+      }
+    }, 100);
+  });
+  handleSearch();
+}
+
 // 搜索
 const handleSearch = () => {
   pagination.page = 1
@@ -902,6 +941,15 @@ const handleReset = () => {
   filterActive.value = null
   pagination.page = 1
   loadData()
+  
+  // 修复选中值显示
+  nextTick(() => {
+    setTimeout(() => {
+      if (typeof window.fixSelectDisplay === 'function') {
+        window.fixSelectDisplay();
+      }
+    }, 100);
+  });
 }
 
 // 添加渠道配置
