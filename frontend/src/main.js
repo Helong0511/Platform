@@ -712,6 +712,218 @@ const initializeTimezone = () => {
 // 挂载应用
 app.mount('#app');
 
+// 修复 el-select 选中值显示问题：强制更新 el-select 状态（全局函数）
+const fixSelectDisplay = () => {
+  const selectElements = document.querySelectorAll('.el-select');
+  let fixedCount = 0;
+  
+  selectElements.forEach((selectEl) => {
+    // 检查 placeholder 元素
+    const placeholderEl = selectEl.querySelector('.el-select__placeholder');
+    if (!placeholderEl) return;
+    
+    // 方法1: 通过 Vue 实例检查 modelValue（最可靠的方式）
+    let hasVueValue = false;
+    let vueInstance = null;
+    let modelValue = null;
+    
+    try {
+      // 尝试获取 Vue 实例（多种方式）
+      vueInstance = selectEl.__vueParentComponent || 
+                   selectEl.__vue__ || 
+                   selectEl._vnode?.ctx ||
+                   selectEl._vnode?.component;
+      
+      if (vueInstance) {
+        // 尝试多种方式获取 modelValue
+        const props = vueInstance.props || vueInstance.$props || vueInstance.propsData || {};
+        modelValue = props.modelValue !== undefined ? props.modelValue : 
+                    (vueInstance.modelValue !== undefined ? vueInstance.modelValue :
+                    (vueInstance.$attrs?.modelValue !== undefined ? vueInstance.$attrs.modelValue : null));
+        
+        // 检查值是否存在（包括空字符串，因为空字符串也可能是有效选择）
+        // 但需要排除 null 和 undefined
+        if (modelValue !== null && modelValue !== undefined) {
+          hasVueValue = true;
+          
+          // 如果 Vue 实例有 updateModelValue 方法，尝试强制更新显示
+          if (vueInstance.updateModelValue && typeof vueInstance.updateModelValue === 'function') {
+            try {
+              vueInstance.updateModelValue(modelValue);
+            } catch (e) {
+              // 忽略错误
+            }
+          }
+          
+          // 如果 Vue 实例有 $forceUpdate 方法，强制更新
+          if (vueInstance.$forceUpdate && typeof vueInstance.$forceUpdate === 'function') {
+            try {
+              vueInstance.$forceUpdate();
+            } catch (e) {
+              // 忽略错误
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // 忽略错误，继续其他检测方法
+    }
+    
+    // 方法2: 检查是否有 is-empty 类
+    const hasIsEmptyClass = selectEl.classList.contains('is-empty');
+    
+    // 方法3: 检查 input wrapper 内的所有可见文本内容
+    const inputWrapper = selectEl.querySelector('.el-input__wrapper');
+    let hasVisibleText = false;
+    
+    if (inputWrapper) {
+      // 获取 input wrapper 内的所有文本（排除 placeholder）
+      const allText = inputWrapper.innerText || inputWrapper.textContent || '';
+      const placeholderText = placeholderEl.textContent?.trim() || '';
+      const cleanText = allText.replace(placeholderText, '').trim();
+      hasVisibleText = cleanText.length > 0;
+    }
+    
+    // 方法4: 检查是否有选中的标签（多选模式）
+    const hasSelectedTags = selectEl.querySelector('.el-select__tags') !== null ||
+      selectEl.querySelector('.el-select__selected-item') !== null;
+    
+    // 方法5: 检查 input 元素的值
+    const inputEl = selectEl.querySelector('.el-select__input') ||
+      selectEl.querySelector('.el-input__wrapper input') ||
+      selectEl.querySelector('.el-input__inner');
+    
+    let hasInputValue = false;
+    if (inputEl) {
+      const inputValue = (inputEl.value || inputEl.textContent || '').trim();
+      const placeholderText = placeholderEl.textContent?.trim() || '';
+      hasInputValue = inputValue && inputValue !== placeholderText && inputValue.length > 0;
+    }
+    
+    // 综合判断：如果有 Vue 值，或者没有 is-empty 类，或者有可见文本，或者有选中标签，或者有 input 值
+    const hasSelectedValue = hasVueValue || !hasIsEmptyClass || hasVisibleText || hasSelectedTags || hasInputValue;
+    
+    if (hasSelectedValue) {
+      // 强制移除 is-empty 类（这是关键！）
+      selectEl.classList.remove('is-empty');
+      
+      // 强制隐藏 placeholder
+      placeholderEl.style.cssText = `
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        height: 0 !important;
+        width: 0 !important;
+        overflow: hidden !important;
+        pointer-events: none !important;
+        position: absolute !important;
+        z-index: -9999 !important;
+        left: -9999px !important;
+        top: -9999px !important;
+      `;
+      
+      // 确保选中值可见 - 找到所有可能的显示元素
+      if (inputWrapper) {
+        // 确保 input 元素可见
+        const inputs = inputWrapper.querySelectorAll('input');
+        inputs.forEach(input => {
+          if (input.value || input.textContent) {
+            input.style.cssText = `
+              opacity: 1 !important;
+              visibility: visible !important;
+              color: var(--el-text-color-regular) !important;
+              z-index: 9999 !important;
+              position: relative !important;
+              display: block !important;
+            `;
+          }
+        });
+        
+        // 确保所有非 placeholder 的子元素可见
+        const children = inputWrapper.children;
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i];
+          if (child !== placeholderEl && !child.classList.contains('el-select__placeholder')) {
+            const childText = child.textContent?.trim() || '';
+            if (childText) {
+              child.style.cssText = `
+                opacity: 1 !important;
+                visibility: visible !important;
+                z-index: 9999 !important;
+                position: relative !important;
+                display: block !important;
+              `;
+            }
+          }
+        }
+      }
+    } else {
+      // 如果没有选中值，添加 is-empty 类并显示 placeholder
+      selectEl.classList.add('is-empty');
+      placeholderEl.style.cssText = `
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        position: absolute !important;
+        left: 11px !important;
+        top: 50% !important;
+        transform: translateY(-50%) !important;
+        z-index: 1 !important;
+        height: auto !important;
+        width: auto !important;
+        pointer-events: none !important;
+      `;
+    }
+    
+    fixedCount++;
+  });
+  
+  // 调试输出（仅在开发环境或需要时）
+  if (fixedCount > 0 && window.DEBUG_SELECT) {
+    console.log(`[fixSelectDisplay] 已处理 ${fixedCount} 个下拉选择框`);
+  }
+};
+
+// 添加调试函数，帮助诊断问题（全局函数）
+const debugSelectDisplay = () => {
+  const selectElements = document.querySelectorAll('.el-select');
+  console.log('=== el-select 调试信息 ===');
+  selectElements.forEach((selectEl, index) => {
+    const placeholderEl = selectEl.querySelector('.el-select__placeholder');
+    const inputWrapper = selectEl.querySelector('.el-input__wrapper');
+    const inputEl = selectEl.querySelector('input');
+    const hasIsEmpty = selectEl.classList.contains('is-empty');
+    
+    // 尝试获取 Vue 实例
+    let vueValue = null;
+    try {
+      const vueInstance = selectEl.__vueParentComponent || selectEl.__vue__;
+      if (vueInstance) {
+        const props = vueInstance.props || vueInstance.$props || {};
+        vueValue = props.modelValue !== undefined ? props.modelValue : 
+                  (vueInstance.modelValue !== undefined ? vueInstance.modelValue : null);
+      }
+    } catch (e) {
+      vueValue = '无法获取: ' + e.message;
+    }
+    
+    console.log(`\n下拉框 ${index + 1}:`, {
+      'is-empty 类': hasIsEmpty,
+      'Vue modelValue': vueValue,
+      'placeholder 文本': placeholderEl?.textContent?.trim(),
+      'input value': inputEl?.value,
+      'input textContent': inputEl?.textContent?.trim(),
+      'wrapper innerText': inputWrapper?.innerText?.trim(),
+      'DOM 结构': selectEl.outerHTML.substring(0, 200)
+    });
+  });
+  console.log('=== 调试信息结束 ===');
+};
+
+// 导出到 window 对象，供全局使用
+window.fixSelectDisplay = fixSelectDisplay;
+window.debugSelectDisplay = debugSelectDisplay;
+
 // 修复表单元素可访问性问题：为缺少 title 和 placeholder 的 input 元素添加可访问性属性
 const fixSelectAccessibility = () => {
   // 使用 MutationObserver 监听 DOM 变化，确保动态创建的表单元素也能被修复
@@ -719,6 +931,7 @@ const fixSelectAccessibility = () => {
     fixSelectInputs();
     fixDatePickerInputs();
     fixOtherFormInputs();
+    fixSelectDisplay(); // 同时修复选中值显示
   });
 
   // 修复 el-select 的 input 元素
@@ -752,117 +965,6 @@ const fixSelectAccessibility = () => {
     });
   };
 
-  // 修复 el-select 选中值显示问题：强制更新 el-select 状态
-  const fixSelectDisplay = () => {
-    const selectElements = document.querySelectorAll('.el-select');
-    selectElements.forEach((selectEl) => {
-      // 检查 placeholder 元素
-      const placeholderEl = selectEl.querySelector('.el-select__placeholder');
-      if (!placeholderEl) return;
-      
-      // 方法1: 检查是否有 is-empty 类（最直接的方式）
-      const hasIsEmptyClass = selectEl.classList.contains('is-empty');
-      
-      // 方法2: 检查 input wrapper 内的所有可见文本内容
-      const inputWrapper = selectEl.querySelector('.el-input__wrapper');
-      let hasVisibleText = false;
-      let visibleText = '';
-      
-      if (inputWrapper) {
-        // 获取所有子元素和文本节点
-        const walker = document.createTreeWalker(
-          inputWrapper,
-          NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
-          null
-        );
-        
-        const texts = [];
-        let node;
-        while (node = walker.nextNode()) {
-          if (node.nodeType === Node.TEXT_NODE) {
-            const text = node.textContent?.trim();
-            if (text && text.length > 0) {
-              texts.push(text);
-            }
-          } else if (node.nodeType === Node.ELEMENT_NODE) {
-            // 检查元素内的文本（排除 placeholder）
-            const elementText = node.textContent?.trim();
-            if (elementText && elementText.length > 0 && 
-                !node.classList.contains('el-select__placeholder') &&
-                node !== placeholderEl) {
-              texts.push(elementText);
-            }
-          }
-        }
-        
-        // 检查是否有非 placeholder 的文本
-        const placeholderText = placeholderEl.textContent?.trim() || '';
-        const nonPlaceholderTexts = texts.filter(text => text !== placeholderText);
-        hasVisibleText = nonPlaceholderTexts.length > 0;
-        visibleText = nonPlaceholderTexts.join(' ');
-      }
-      
-      // 方法3: 检查是否有选中的标签（多选模式）
-      const hasSelectedTags = selectEl.querySelector('.el-select__tags') !== null ||
-        selectEl.querySelector('.el-select__selected-item') !== null;
-      
-      // 方法4: 检查 input 元素的值
-      const inputEl = selectEl.querySelector('.el-select__input') ||
-        selectEl.querySelector('.el-input__wrapper input') ||
-        selectEl.querySelector('.el-input__inner');
-      
-      let hasInputValue = false;
-      if (inputEl) {
-        const inputValue = (inputEl.value || inputEl.textContent || '').trim();
-        const placeholderText = placeholderEl.textContent?.trim() || '';
-        hasInputValue = inputValue && inputValue !== placeholderText && inputValue.length > 0;
-      }
-      
-      // 综合判断：如果没有 is-empty 类，或者有可见文本，或者有选中标签，或者有 input 值，则认为有选中值
-      const hasSelectedValue = !hasIsEmptyClass || hasVisibleText || hasSelectedTags || hasInputValue;
-      
-      if (hasSelectedValue) {
-        // 强制隐藏 placeholder
-        placeholderEl.style.setProperty('display', 'none', 'important');
-        placeholderEl.style.setProperty('visibility', 'hidden', 'important');
-        placeholderEl.style.setProperty('opacity', '0', 'important');
-        placeholderEl.style.setProperty('height', '0', 'important');
-        placeholderEl.style.setProperty('width', '0', 'important');
-        placeholderEl.style.setProperty('overflow', 'hidden', 'important');
-        placeholderEl.style.setProperty('pointer-events', 'none', 'important');
-        placeholderEl.style.setProperty('position', 'absolute', 'important');
-        placeholderEl.style.setProperty('z-index', '-1', 'important');
-        placeholderEl.style.setProperty('left', '-9999px', 'important');
-        
-        // 强制移除 is-empty 类
-        selectEl.classList.remove('is-empty');
-        
-        // 确保选中值可见
-        if (inputWrapper) {
-          const input = inputWrapper.querySelector('input');
-          if (input) {
-            input.style.setProperty('opacity', '1', 'important');
-            input.style.setProperty('visibility', 'visible', 'important');
-            input.style.setProperty('color', 'var(--el-text-color-regular)', 'important');
-            input.style.setProperty('z-index', '10', 'important');
-            input.style.setProperty('position', 'relative', 'important');
-          }
-        }
-      } else {
-        // 如果没有选中值，恢复 placeholder 显示
-        placeholderEl.style.removeProperty('display');
-        placeholderEl.style.removeProperty('visibility');
-        placeholderEl.style.removeProperty('opacity');
-        placeholderEl.style.removeProperty('height');
-        placeholderEl.style.removeProperty('width');
-        placeholderEl.style.removeProperty('overflow');
-        placeholderEl.style.removeProperty('pointer-events');
-        placeholderEl.style.removeProperty('position');
-        placeholderEl.style.removeProperty('z-index');
-        placeholderEl.style.removeProperty('left');
-      }
-    });
-  };
 
   // 修复 el-date-picker 的 input 元素
   const fixDatePickerInputs = () => {
@@ -976,8 +1078,6 @@ const fixSelectAccessibility = () => {
     }
   }, true);
   
-  // 导出修复函数供其他组件使用
-  window.fixSelectDisplay = fixSelectDisplay;
 };
 
 // 修复 -moz-appearance 兼容性问题：为所有使用 -moz-appearance 的元素添加 appearance 属性

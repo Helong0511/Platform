@@ -322,12 +322,34 @@ input[type="text"].el-input_inner {
 /* ====== 全局修复：el-select placeholder 遮盖选中值的问题 ====== */
 /* 确保所有 el-select 组件在选中值后，placeholder 不会遮盖选中值 */
 
-/* 核心修复：确保 placeholder 的层级低于选中值，且不拦截交互 */
+/* 核心修复：默认隐藏所有 placeholder，只在确实没有值时通过 JavaScript 显示 */
 .el-select .el-select__placeholder {
-  z-index: -1 !important;
+  z-index: -9999 !important;
   pointer-events: none !important;
   position: absolute !important;
   left: -9999px !important;
+  top: -9999px !important;
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+}
+
+/* 只有当 el-select 明确标记为 empty 时才显示 placeholder */
+.el-select.is-empty .el-select__placeholder {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: absolute !important;
+  left: 11px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  z-index: 1 !important;
+  height: auto !important;
+  width: auto !important;
+  pointer-events: none !important;
 }
 
 /* 确保 input 中的选中值正常显示，层级高于 placeholder */
@@ -341,10 +363,18 @@ input[type="text"].el-input_inner {
 /* 确保 input wrapper 内的 input 元素可见 */
 .el-select .el-input__wrapper input {
   position: relative !important;
-  z-index: 10 !important;
+  z-index: 9999 !important;
   opacity: 1 !important;
   visibility: visible !important;
   color: var(--el-text-color-regular) !important;
+}
+
+/* 强制确保所有非 placeholder 的子元素可见 */
+.el-select .el-input__wrapper > *:not(.el-select__placeholder) {
+  position: relative !important;
+  z-index: 9999 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
 }
 
 /* 确保选中值的文本正常显示 */
