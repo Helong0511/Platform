@@ -721,6 +721,11 @@ const fixSelectDisplay = () => {
     return; // 如果没有 el-select 元素，直接返回
   }
   
+  // 调试信息：记录修复函数被调用
+  if (window.DEBUG_SELECT) {
+    console.log('[fixSelectDisplay] 开始修复，找到', selectElements.length, '个 el-select 元素');
+  }
+  
   selectElements.forEach((selectEl) => {
     // 检查 placeholder 元素
     const placeholderEl = selectEl.querySelector('.el-select__placeholder');
@@ -1110,10 +1115,13 @@ const fixSelectDisplay = () => {
             try {
               // 尝试获取 options 和当前值
               if (vueInstance.options && Array.isArray(vueInstance.options)) {
-                // 尝试从内部状态获取选中值
+                // 尝试从内部状态获取选中值（多种属性名）
                 const selectedValue = vueInstance.selectedLabel || 
                                      vueInstance.displayValue ||
-                                     vueInstance.value;
+                                     vueInstance.value ||
+                                     vueInstance.selected ||
+                                     vueInstance.currentValue ||
+                                     vueInstance.modelValue;
                 if (selectedValue) {
                   // 如果是对象，尝试获取 label
                   if (typeof selectedValue === 'object') {
@@ -1129,8 +1137,54 @@ const fixSelectDisplay = () => {
                   }
                 }
               }
+              
+              // 尝试从 Vue 实例的其他属性中获取选中值
+              if (!displayedText) {
+                // 检查 setupState
+                if (vueInstance.setupState) {
+                  const setupSelected = vueInstance.setupState.selectedLabel || 
+                                      vueInstance.setupState.displayValue ||
+                                      vueInstance.setupState.value ||
+                                      vueInstance.setupState.modelValue;
+                  if (setupSelected) {
+                    if (typeof setupSelected === 'object') {
+                      displayedText = setupSelected.label || setupSelected.name || '';
+                    } else if (vueInstance.options && Array.isArray(vueInstance.options)) {
+                      const option = vueInstance.options.find(opt => 
+                        (opt.value || opt.id) === setupSelected
+                      );
+                      if (option) {
+                        displayedText = option.label || option.name || '';
+                      }
+                    }
+                  }
+                }
+                
+                // 检查 ctx
+                if (!displayedText && vueInstance.ctx) {
+                  const ctxSelected = vueInstance.ctx.selectedLabel || 
+                                    vueInstance.ctx.displayValue ||
+                                    vueInstance.ctx.value ||
+                                    vueInstance.ctx.modelValue;
+                  if (ctxSelected) {
+                    if (typeof ctxSelected === 'object') {
+                      displayedText = ctxSelected.label || ctxSelected.name || '';
+                    } else if (vueInstance.options && Array.isArray(vueInstance.options)) {
+                      const option = vueInstance.options.find(opt => 
+                        (opt.value || opt.id) === ctxSelected
+                      );
+                      if (option) {
+                        displayedText = option.label || option.name || '';
+                      }
+                    }
+                  }
+                }
+              }
             } catch (e) {
               // 忽略错误
+              if (window.DEBUG_SELECT) {
+                console.warn('[fixSelectDisplay] 从 Vue 实例获取选中值失败:', e);
+              }
             }
           }
           
