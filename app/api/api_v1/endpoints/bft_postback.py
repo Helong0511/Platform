@@ -1,8 +1,6 @@
 """
-Macan S2S PostBack 接收接口
-用于接收 Macan 发送的转化事件回调
-
-参考文档：https://macan-native.com/docs/advertiser/S2S/
+BFT S2S PostBack 接收接口
+用于接收 BFT 发送的转化事件回调
 
 注意：此接口已优化，内部调用统一的 postback 服务进行处理
 保留此接口是为了向后兼容，建议使用 /api/v1/postback/macan 接口
@@ -29,26 +27,26 @@ logger = logging.getLogger(__name__)
 
 # ====== API端点 ======
 @router.api_route(
-    "/macan/postback",
+    "/bft/postback",
     methods=["GET", "POST"],
-    summary="接收 Macan PostBack 回调（支持 GET 和 POST，接收任意参数）"
+    summary="接收 BFT PostBack 回调（支持 GET 和 POST，接收任意参数）"
 )
-async def receive_macan_postback(
+async def receive_bft_postback(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    接收 Macan S2S PostBack 回调（同时支持 GET 和 POST 请求）
+    接收 BFT S2S PostBack 回调（同时支持 GET 和 POST 请求）
     
-    这是 Macan 转化事件追踪的回调接口。当用户在 Macan 平台上发生转化事件时，
-    Macan 会向此接口发送回调请求。
+    这是 BFT 转化事件追踪的回调接口。当用户在 BFT 平台上发生转化事件时，
+    BFT 会向此接口发送回调请求。
     
     此接口支持接收任意参数，不限制参数名称和类型：
     - GET 请求：通过 Query 参数传递所有数据
     - POST 请求：支持 JSON Body 和 Query 参数，可以混合使用，body 中的值优先
     
     **推荐参数**（非必填）：
-    - clk_id: Macan click ID
+    - clk_id: BFT click ID
     - event_name: Event ID（事件ID）
     """
     try:
@@ -102,7 +100,7 @@ async def receive_macan_postback(
         clk_id = raw_data.get("clk_id")
         event_name = raw_data.get("event_name")
         
-        return await _process_macan_postback(
+        return await _process_bft_postback(
             request=request,
             raw_data=raw_data,
             db=db
@@ -111,7 +109,7 @@ async def receive_macan_postback(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"接收 Macan PostBack 回调时发生错误: {str(e)}", exc_info=True)
+        logger.error(f"接收 BFT PostBack 回调时发生错误: {str(e)}", exc_info=True)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"处理 PostBack 回调失败：{str(e)}"
@@ -184,13 +182,13 @@ def _collect_request_info(request: Request) -> Dict[str, Any]:
     return info
 
 
-async def _process_macan_postback(
+async def _process_bft_postback(
     request: Request,
     raw_data: Dict[str, Any],
     db: AsyncSession
 ) -> Response:
     """
-    处理 Macan PostBack 回调的核心逻辑
+    处理 BFT PostBack 回调的核心逻辑
     
     优化：内部调用统一的 postback 服务进行处理
     保留此函数是为了向后兼容，实际处理由统一服务完成
@@ -215,7 +213,7 @@ async def _process_macan_postback(
         )
         
         logger.info("=" * 80)
-        logger.info(f"Macan PostBack 请求详细信息 - clk_id: {clk_id}, event_name: {event_name}")
+        logger.info(f"BFT PostBack 请求详细信息 - clk_id: {clk_id}, event_name: {event_name}")
         logger.info("-" * 80)
         for key, value in request_info.items():
             if isinstance(value, dict):
@@ -280,7 +278,7 @@ async def _process_macan_postback(
             import asyncio
             
             method = request.method
-            telegram_msg = f"🔔 Macan PostBack 回调收到\n\n"
+            telegram_msg = f"🔔 BFT PostBack 回调收到\n\n"
             telegram_msg += f"Method: {method}\n"
             telegram_msg += f"Event: {event_name}\n"
             telegram_msg += f"Click ID: {clk_id}\n"
@@ -302,7 +300,7 @@ async def _process_macan_postback(
                 timeout=5.0
             )
         except Exception as e:
-            logger.warning(f"发送 Macan PostBack Telegram 通知失败: {e}")
+            logger.warning(f"发送 BFT PostBack Telegram 通知失败: {e}")
 
         # 返回纯文本 "ok"，确保所有语言（Java、Go、Python 等）都能正确识别
         # 使用 UTF-8 编码，明确设置 Content-Type 为 text/plain
@@ -315,8 +313,9 @@ async def _process_macan_postback(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"处理 Macan PostBack 回调时发生错误: {str(e)}", exc_info=True)
+        logger.error(f"处理 BFT PostBack 回调时发生错误: {str(e)}", exc_info=True)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"处理 PostBack 回调失败：{str(e)}"
         )
+
