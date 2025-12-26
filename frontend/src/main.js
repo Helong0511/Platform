@@ -998,6 +998,7 @@ const fixSelectDisplay = () => {
     
     // 关键修复0: 首先检查 placeholder 文本状态
     // 如果 placeholder 文本是空的或者是原始 placeholder 的一部分，且没有任何选中值信号，肯定没有选中值
+    // 但是要注意：如果 placeholder 文本是 "请选择" + 选中值（如 "请选择Sweepsone"），这是有选中值的情况
     const isPartialPlaceholder = originalPlaceholder && 
                                  currentPlaceholderText &&
                                  currentPlaceholderText.length < originalPlaceholder.length &&
@@ -1006,7 +1007,15 @@ const fixSelectDisplay = () => {
     
     const isEmptyPlaceholder = !currentPlaceholderText || currentPlaceholderText.length === 0;
     
+    // 检查是否是 "请选择" + 选中值的情况（如 "请选择Sweepsone"）
+    const isPlaceholderWithValue = currentPlaceholderText && 
+                                   currentPlaceholderText.startsWith('请选择') && 
+                                   currentPlaceholderText.length > 3 &&
+                                   !currentPlaceholderText.endsWith('请选择') &&
+                                   currentPlaceholderText !== originalPlaceholder;
+    
     // 关键判断：如果没有任何选中值信号，且 placeholder 是部分或空的，肯定没有选中值
+    // 但是如果是 "请选择" + 选中值的情况，应该认为有选中值
     // 这个判断的优先级最高，确保在没有选中值信号时，部分 placeholder 被正确识别
     const hasNoSelectionSignals = !hasClearButton && 
                                   !hasVisibleText && 
@@ -1014,8 +1023,8 @@ const fixSelectDisplay = () => {
                                   !hasInputValue &&
                                   modelValue === null;
     
-    if ((isPartialPlaceholder || isEmptyPlaceholder) && hasNoSelectionSignals) {
-      // 是部分 placeholder 或空 placeholder，且没有任何选中值信号，肯定没有选中值
+    if ((isPartialPlaceholder || isEmptyPlaceholder) && hasNoSelectionSignals && !isPlaceholderWithValue) {
+      // 是部分 placeholder 或空 placeholder，且没有任何选中值信号，且不是 "请选择" + 选中值的情况，肯定没有选中值
       hasSelectedValue = false;
       // 恢复为完整的原始 placeholder
       if (placeholderEl && originalPlaceholder) {
@@ -1025,6 +1034,16 @@ const fixSelectDisplay = () => {
         }
       }
       // 跳过后续的选中值检测，直接处理没有选中值的情况
+    } else if (isPlaceholderWithValue) {
+      // 是 "请选择" + 选中值的情况，提取选中值
+      displayedText = currentPlaceholderText.substring(3).trim(); // 去掉 "请选择" 前缀
+      if (displayedText && displayedText.length > 0) {
+        hasSelectedValue = true;
+        // 恢复 placeholder 为原始文本
+        if (placeholderEl && originalPlaceholder && placeholderEl.textContent !== originalPlaceholder) {
+          placeholderEl.textContent = originalPlaceholder;
+        }
+      }
     } else if (isEmptyPlaceholder && !hasClearButton && modelValue === null) {
       // 如果 placeholder 是空的，且没有清除按钮，且 Vue modelValue 是 null，肯定没有选中值
       // 这是一个更宽松的判断，确保空 placeholder 时能正确识别
@@ -1136,19 +1155,53 @@ const fixSelectDisplay = () => {
     // 这可能是 Element Plus 的显示问题，不应该认为是选中值
     // 注意：这个检查已经在上面处理过了（isPartialPlaceholder），所以这里只需要处理非部分的情况
     else if (currentPlaceholderText && currentPlaceholderText !== originalPlaceholder && !isPartialPlaceholder) {
-      // 不是部分 placeholder，说明可能是选中值
-      hasSelectedValue = true;
-      
-      // 如果 placeholder 文本包含原始 placeholder 的一部分，提取选中值
+      // 检查 placeholder 文本是否包含原始 placeholder + 选中值（如 "请选择Sweepsone"）
       if (originalPlaceholder && currentPlaceholderText.startsWith(originalPlaceholder)) {
-        displayedText = currentPlaceholderText.replace(originalPlaceholder, '').trim();
-      } else {
-        displayedText = currentPlaceholderText;
-      }
-      
-      // 立即恢复 placeholder 为原始文本
-      if (placeholderEl && placeholderEl.textContent !== originalPlaceholder) {
-        placeholderEl.textContent = originalPlaceholder;
+        // placeholder 文本以原始 placeholder 开头，后面是选中值
+        displayedText = currentPlaceholderText.substring(originalPlaceholder.length).trim();
+        if (displayedText && displayedText.length > 0) {
+          hasSelectedValue = true;
+          // 立即恢复 placeholder 为原始文本
+          if (placeholderEl && placeholderEl.textContent !== originalPlaceholder) {
+            placeholderEl.textContent = originalPlaceholder;
+          }
+        }
+      } else if (currentPlaceholderText && currentPlaceholderText.length > 0) {
+        // placeholder 文本不是原始 placeholder，可能是选中值
+        // 检查是否包含 "请选择" 开头（说明是 "请选择" + 选中值，如 "请选择Sweepsone"）
+        if (currentPlaceholderText.startsWith('请选择') && currentPlaceholderText.length > 3) {
+          displayedText = currentPlaceholderText.substring(3).trim();
+          if (displayedText && displayedText.length > 0) {
+            hasSelectedValue = true;
+            // 恢复 placeholder 为原始文本
+            if (placeholderEl && originalPlaceholder && placeholderEl.textContent !== originalPlaceholder) {
+              placeholderEl.textContent = originalPlaceholder;
+            }
+          }
+        } else if (currentPlaceholderText.startsWith('请选择') && originalPlaceholder && originalPlaceholder.startsWith('请选择')) {
+          // placeholder 文本是 "请选择" + 选中值，且原始 placeholder 也是 "请选择" 开头
+          // 提取选中值部分（去掉 "请选择" 前缀）
+          displayedText = currentPlaceholderText.substring(originalPlaceholder.length).trim();
+          if (!displayedText || displayedText.length === 0) {
+            // 如果提取后为空，尝试直接去掉 "请选择" 前缀
+            displayedText = currentPlaceholderText.substring(3).trim();
+          }
+          if (displayedText && displayedText.length > 0) {
+            hasSelectedValue = true;
+            // 恢复 placeholder 为原始文本
+            if (placeholderEl && placeholderEl.textContent !== originalPlaceholder) {
+              placeholderEl.textContent = originalPlaceholder;
+            }
+          }
+        } else {
+          // 其他情况，可能是选中值
+          displayedText = currentPlaceholderText;
+          hasSelectedValue = true;
+          // 恢复 placeholder 为原始文本
+          if (placeholderEl && originalPlaceholder && placeholderEl.textContent !== originalPlaceholder) {
+            placeholderEl.textContent = originalPlaceholder;
+          }
+        }
       }
     } 
     // 关键修复3: 如果通过其他方式检测到选中文本，也认为有选中值
@@ -1256,40 +1309,86 @@ const fixSelectDisplay = () => {
               }
             }
           } else {
-            // 如果没有找到匹配的值，尝试从全局广告主列表中查找
-            // 这是针对"请选择广告主"下拉框的特殊处理
-            if (originalPlaceholder && originalPlaceholder.includes('广告主')) {
-              try {
-                // 尝试从 window 对象获取广告主列表（如果组件已经加载）
-                const advertiserList = window.advertiserList || [];
-                const matchedAdvertiser = advertiserList.find(adv => {
-                  const name = adv.advertiser_name || adv.name || '';
-                  return name === displayedText || name.includes(displayedText);
-                });
-                if (matchedAdvertiser && matchedAdvertiser.id && vueInstance) {
-                  // 找到了匹配的广告主，尝试更新 Vue 状态
-                  const advertiserId = matchedAdvertiser.id;
-                  try {
-                    if (typeof vueInstance.$emit === 'function') {
-                      vueInstance.$emit('update:modelValue', advertiserId);
-                    } else if (typeof vueInstance.emit === 'function') {
-                      vueInstance.emit('update:modelValue', advertiserId);
-                    }
-                    // 触发 change 事件
-                    const changeEvent = new Event('change', { bubbles: true, cancelable: true });
-                    changeEvent.value = advertiserId;
-                    selectEl.dispatchEvent(changeEvent);
-                  } catch (e) {
-                    // 忽略错误，继续其他修复
-                    if (window.DEBUG_SELECT) {
-                      console.warn('[fixSelectDisplay] 更新广告主值失败:', e);
+          // 如果没有找到匹配的值，尝试从全局广告主列表中查找
+          // 这是针对"请选择广告主"下拉框的特殊处理
+          if (originalPlaceholder && originalPlaceholder.includes('广告主')) {
+            try {
+              // 方法1: 尝试从 window 对象获取广告主列表（如果组件已经加载）
+              const advertiserList = window.advertiserList || [];
+              let matchedAdvertiser = advertiserList.find(adv => {
+                const name = adv.advertiser_name || adv.name || '';
+                return name === displayedText || name.includes(displayedText) || displayedText.includes(name);
+              });
+              
+              // 方法2: 如果 window 中没有，尝试从 Vue 实例中获取选项列表
+              if (!matchedAdvertiser && vueInstance) {
+                try {
+                  if (vueInstance.options && Array.isArray(vueInstance.options)) {
+                    matchedAdvertiser = vueInstance.options.find(opt => {
+                      const label = opt.label || opt.advertiser_name || opt.name || '';
+                      return label === displayedText || label.includes(displayedText) || displayedText.includes(label);
+                    });
+                  }
+                } catch (e) {
+                  // 忽略错误
+                }
+              }
+              
+              // 方法3: 如果还是没有找到，尝试从 DOM 中的选项元素查找
+              if (!matchedAdvertiser) {
+                const optionElements = selectEl.querySelectorAll('.el-select-dropdown__item, [role="option"]');
+                for (const optionEl of optionElements) {
+                  const optionText = optionEl.textContent?.trim() || '';
+                  if (optionText === displayedText || optionText.includes(displayedText) || displayedText.includes(optionText)) {
+                    // 尝试从选项元素中获取值
+                    const optionValue = optionEl.getAttribute('data-value') || 
+                                      optionEl.getAttribute('data-option-value') ||
+                                      optionEl.getAttribute('value') ||
+                                      optionEl.getAttribute('data-id');
+                    if (optionValue) {
+                      matchedAdvertiser = { id: optionValue, advertiser_name: displayedText };
+                      break;
                     }
                   }
                 }
-              } catch (e) {
-                // 忽略错误
+              }
+              
+              if (matchedAdvertiser && matchedAdvertiser.id && vueInstance) {
+                // 找到了匹配的广告主，尝试更新 Vue 状态
+                const advertiserId = matchedAdvertiser.id;
+                try {
+                  if (typeof vueInstance.$emit === 'function') {
+                    vueInstance.$emit('update:modelValue', advertiserId);
+                  } else if (typeof vueInstance.emit === 'function') {
+                    vueInstance.emit('update:modelValue', advertiserId);
+                  }
+                  // 触发 change 事件
+                  const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+                  changeEvent.value = advertiserId;
+                  selectEl.dispatchEvent(changeEvent);
+                  
+                  // 调试信息
+                  if (window.DEBUG_SELECT) {
+                    console.log('[fixSelectDisplay] 更新广告主值:', {
+                      displayedText,
+                      advertiserId,
+                      matchedAdvertiser
+                    });
+                  }
+                } catch (e) {
+                  // 忽略错误，继续其他修复
+                  if (window.DEBUG_SELECT) {
+                    console.warn('[fixSelectDisplay] 更新广告主值失败:', e);
+                  }
+                }
+              }
+            } catch (e) {
+              // 忽略错误
+              if (window.DEBUG_SELECT) {
+                console.warn('[fixSelectDisplay] 查找广告主失败:', e);
               }
             }
+          }
           }
         } catch (e) {
           // 忽略错误，继续其他修复
@@ -1632,23 +1731,79 @@ const fixSelectDisplay = () => {
       // 确保 placeholder 文本是完整的原始 placeholder
       // 尝试获取原始 placeholder（多种方式）
       let finalPlaceholder = originalPlaceholder;
-      if (!finalPlaceholder) {
+      
+      // 如果 originalPlaceholder 是 "请选择" 或不完整，尝试从其他方式获取
+      if (!finalPlaceholder || finalPlaceholder === '请选择' || finalPlaceholder.length <= 3) {
+        // 方法1: 从 DOM 属性获取
         finalPlaceholder = selectEl.getAttribute('placeholder') || 
                          selectEl.querySelector('[placeholder]')?.getAttribute('placeholder') || '';
-      }
-      if (!finalPlaceholder) {
-        try {
-          const vueInstance = selectEl.__vueParentComponent || selectEl.__vue__;
-          if (vueInstance) {
+        
+        // 方法2: 从 Vue 实例获取
+        if ((!finalPlaceholder || finalPlaceholder === '请选择') && vueInstance) {
+          try {
             const props = vueInstance.props || vueInstance.$props || vueInstance.propsData || {};
-            finalPlaceholder = props.placeholder || vueInstance.placeholder || '';
+            const propsPlaceholder = props.placeholder;
+            if (propsPlaceholder && propsPlaceholder !== '请选择' && propsPlaceholder.length > 3) {
+              finalPlaceholder = propsPlaceholder;
+            }
+            
+            // 尝试从 setupState 获取
+            if ((!finalPlaceholder || finalPlaceholder === '请选择') && vueInstance.setupState) {
+              const setupPlaceholder = vueInstance.setupState.placeholder;
+              if (setupPlaceholder && setupPlaceholder !== '请选择' && setupPlaceholder.length > 3) {
+                finalPlaceholder = setupPlaceholder;
+              }
+            }
+            
+            // 尝试从 ctx 获取
+            if ((!finalPlaceholder || finalPlaceholder === '请选择') && vueInstance.ctx) {
+              const ctxPlaceholder = vueInstance.ctx.placeholder || vueInstance.ctx.$attrs?.placeholder;
+              if (ctxPlaceholder && ctxPlaceholder !== '请选择' && ctxPlaceholder.length > 3) {
+                finalPlaceholder = ctxPlaceholder;
+              }
+            }
+          } catch (e) {
+            // 忽略错误
           }
-        } catch (e) {
-          // 忽略错误
+        }
+        
+        // 方法3: 如果还是 "请选择"，尝试从其他 el-select 中查找完整的 placeholder
+        if (finalPlaceholder === '请选择') {
+          const otherSelects = document.querySelectorAll('.el-select');
+          for (const otherSelect of otherSelects) {
+            if (otherSelect !== selectEl) {
+              const otherPlaceholder = otherSelect.getAttribute('placeholder');
+              if (otherPlaceholder && otherPlaceholder.includes('请选择') && otherPlaceholder.length > 3) {
+                // 检查是否是同一个组件（通过检查父元素或样式）
+                const otherParent = otherSelect.closest('[data-v-4ef97251]');
+                const currentParent = selectEl.closest('[data-v-4ef97251]');
+                if (otherParent === currentParent || 
+                    (otherSelect.style.width === selectEl.style.width && 
+                     otherSelect.style.marginLeft === selectEl.style.marginLeft)) {
+                  finalPlaceholder = otherPlaceholder;
+                  break;
+                }
+              }
+            }
+          }
+        }
+        
+        // 方法4: 如果还是 "请选择"，尝试从常见的完整 placeholder 推断
+        // 检查当前页面的上下文，推断可能的完整 placeholder
+        if (finalPlaceholder === '请选择') {
+          // 检查是否有 "广告主" 相关的文本，推断为 "请选择广告主"
+          const pageText = document.body.innerText || '';
+          if (pageText.includes('广告主') || pageText.includes('advertiser')) {
+            finalPlaceholder = '请选择广告主';
+          } else if (pageText.includes('客户') || pageText.includes('customer')) {
+            finalPlaceholder = '请选择客户';
+          } else if (pageText.includes('供应商') || pageText.includes('supplier')) {
+            finalPlaceholder = '请选择供应商';
+          }
         }
       }
       
-      if (placeholderEl && finalPlaceholder) {
+      if (placeholderEl && finalPlaceholder && finalPlaceholder !== '请选择') {
         const currentText = placeholderEl.textContent?.trim() || '';
         // 如果 placeholder 文本是空的、是原始 placeholder 的一部分，或者不是完整的原始 placeholder，恢复为完整的原始 placeholder
         if (!currentText || 
@@ -1657,6 +1812,32 @@ const fixSelectDisplay = () => {
              currentText.length > 0 &&
              finalPlaceholder.startsWith(currentText))) {
           placeholderEl.textContent = finalPlaceholder;
+          
+          // 调试信息
+          if (window.DEBUG_SELECT) {
+            console.log('[fixSelectDisplay] 恢复 placeholder:', {
+              currentText,
+              finalPlaceholder,
+              originalPlaceholder
+            });
+          }
+        }
+      } else if (placeholderEl && finalPlaceholder === '请选择') {
+        // 如果 finalPlaceholder 仍然是 "请选择"，但当前文本也是 "请选择"，尝试从 DOM 中查找
+        const currentText = placeholderEl.textContent?.trim() || '';
+        if (currentText === '请选择') {
+          // 检查是否有其他线索可以推断完整的 placeholder
+          // 比如从附近的 label 或其他元素
+          const labelEl = selectEl.previousElementSibling || 
+                         selectEl.parentElement?.querySelector('label');
+          if (labelEl) {
+            const labelText = labelEl.textContent?.trim() || '';
+            if (labelText.includes('广告主')) {
+              placeholderEl.textContent = '请选择广告主';
+            } else if (labelText.includes('客户')) {
+              placeholderEl.textContent = '请选择客户';
+            }
+          }
         }
       }
       
