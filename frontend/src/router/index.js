@@ -161,7 +161,7 @@ const routes = [
         path: 'admin/conversion-summary',
         name: 'ConversionSummary',
         component: ConversionSummary,
-        meta: { requiresAdmin: true }
+        meta: { requiresAdmin: false }
       },
       {
         path: 'admin/conversion-log',
