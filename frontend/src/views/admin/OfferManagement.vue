@@ -804,7 +804,18 @@ import { computed } from 'vue'
 
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.isAdmin)
-const currentClientId = computed(() => authStore.userInfo?.client?.id || null)
+// 获取客户ID，支持多种方式
+const currentClientId = computed(() => {
+  // 方式1: 从 userInfo.client.id 获取
+  if (authStore.userInfo?.client?.id) {
+    return authStore.userInfo.client.id
+  }
+  // 方式2: 从 userInfo.client_id 获取（如果存在）
+  if (authStore.userInfo?.client_id) {
+    return authStore.userInfo.client_id
+  }
+  return null
+})
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -1355,17 +1366,44 @@ const handleViewDetails = async (row) => {
       console.log('handleViewDetails: 检查条件', {
         isAdmin: isAdmin.value,
         currentClientId: currentClientId.value,
-        hasCurrentOffer: !!currentOffer.value
+        hasCurrentOffer: !!currentOffer.value,
+        userInfo: authStore.userInfo,
+        userInfoClient: authStore.userInfo?.client
       })
       
-      if (!isAdmin.value && currentClientId.value) {
-        console.log('开始获取客户Tracklink')
+      // 如果 currentClientId 为 null，尝试从 userInfo 中获取
+      let clientId = currentClientId.value
+      if (!clientId && !isAdmin.value && authStore.userInfo) {
+        // 尝试从 userInfo.client.id 获取
+        if (authStore.userInfo.client?.id) {
+          clientId = authStore.userInfo.client.id
+          console.log('从 userInfo.client.id 获取到 clientId:', clientId)
+        }
+        // 如果还是没有，尝试刷新用户信息
+        else if (authStore.userInfo.role === 'client') {
+          console.log('尝试刷新用户信息以获取 clientId')
+          try {
+            await authStore.fetchUserInfo()
+            if (authStore.userInfo?.client?.id) {
+              clientId = authStore.userInfo.client.id
+              console.log('刷新后获取到 clientId:', clientId)
+            }
+          } catch (error) {
+            console.error('刷新用户信息失败:', error)
+          }
+        }
+      }
+      
+      if (!isAdmin.value && clientId) {
+        console.log('开始获取客户Tracklink，clientId:', clientId)
         loadingClientTracklink.value = true
         clientPublisherTracklink.value = null // 先清空
         try {
           console.log('开始获取客户Tracklink，currentOffer:', currentOffer.value)
-          console.log('currentClientId:', currentClientId.value)
-          const tracklink = await getClientPublisherTracklink()
+          console.log('clientId:', clientId)
+          // 临时设置 currentClientId 的值（通过修改计算属性的依赖）
+          // 由于 currentClientId 是计算属性，我们需要在 getClientPublisherTracklink 中直接使用 clientId
+          const tracklink = await getClientPublisherTracklinkWithId(clientId)
           console.log('getClientPublisherTracklink返回结果:', tracklink)
           clientPublisherTracklink.value = tracklink
           console.log('clientPublisherTracklink.value已设置为:', clientPublisherTracklink.value)
@@ -1520,14 +1558,21 @@ const getPublisherShortLink = (publisherId) => {
 
 // 获取客户自己的渠道Tracklink（用于客户登录时显示）
 const getClientPublisherTracklink = async () => {
-  if (!currentOffer.value || !currentClientId.value) {
-    logger.warn('getClientPublisherTracklink: 缺少currentOffer或currentClientId')
+  return getClientPublisherTracklinkWithId(currentClientId.value)
+}
+
+// 获取客户自己的渠道Tracklink（带clientId参数版本）
+const getClientPublisherTracklinkWithId = async (clientId) => {
+  if (!currentOffer.value || !clientId) {
+    const warnMsg = `getClientPublisherTracklinkWithId: 缺少currentOffer或clientId - currentOffer: ${!!currentOffer.value}, clientId: ${clientId}`
+    console.warn(warnMsg)
+    logger.warn(warnMsg)
     return null
   }
   
   // 查找属于该客户的渠道
   const clientPublisher = currentOffer.value.assigned_publishers?.find(
-    pub => pub.client_id === currentClientId.value
+    pub => pub.client_id === clientId
   )
   
   if (!clientPublisher) {
