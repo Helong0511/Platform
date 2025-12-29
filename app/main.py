@@ -1251,14 +1251,17 @@ async def redirect_short_link_public(
                 detail="短链接配置错误：原始URL为空"
             )
         
+        # 先去除首尾空格
+        original_url = original_url.strip()
+        
         # 如果URL不是以http://或https://开头，尝试修复（添加https://）
         if not original_url.startswith(('http://', 'https://')):
             # 尝试修复：如果URL看起来像域名，添加https://
-            original_url = original_url.strip()
             if original_url and not original_url.startswith('/'):
                 # 可能是缺少协议的完整URL，添加https://
-                original_url = f"https://{original_url}"
-                logger.warning(f"短链接 {short_code} 的原始URL缺少协议，已自动添加https://: {short_link.original_url} -> {original_url}")
+                fixed_url = f"https://{original_url}"
+                logger.warning(f"短链接 {short_code} 的原始URL缺少协议，已自动添加https://: {short_link.original_url} -> {fixed_url}")
+                original_url = fixed_url
             else:
                 # 无法修复，抛出错误
                 raise HTTPException(
