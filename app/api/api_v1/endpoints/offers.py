@@ -12,7 +12,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
-from app.models.models import User, Offer, Advertiser, Publisher, OfferPublisherAssignment, ShortLink
+from app.models.models import User, UserRole, Offer, Advertiser, Publisher, OfferPublisherAssignment, ShortLink, Client
 from app.schemas.cpl.offer import OfferCreate, OfferUpdate, OfferResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.core.config import settings
@@ -425,6 +425,36 @@ async def get_offers(
     """获取Offer列表（所有登录用户可访问）"""
     query = select(Offer)
     
+    # ====== 权限过滤：客户只能查看分配给自己的渠道的Offer ======
+    if current_user.role == UserRole.CLIENT:
+        # 获取当前用户的client_id
+        client_result = await db.execute(
+            select(Client.id).where(Client.user_id == current_user.id).limit(1)
+        )
+        client_id = client_result.scalar_one_or_none()
+        
+        if client_id:
+            # 通过join过滤：只返回分配给该客户渠道的Offer
+            # Offer -> OfferPublisherAssignment -> Publisher -> Client
+            query = query.join(
+                OfferPublisherAssignment, Offer.id == OfferPublisherAssignment.offer_id
+            ).join(
+                Publisher, OfferPublisherAssignment.publisher_id == Publisher.id
+            ).where(
+                and_(
+                    Publisher.client_id == client_id,
+                    OfferPublisherAssignment.is_active == True
+                )
+            ).distinct()  # 去重，因为一个Offer可能分配给多个渠道
+        else:
+            # 如果客户没有关联的Client记录，返回空列表
+            return PaginatedResponseBaseSchema.success(
+                data=[],
+                total=0,
+                page=page,
+                page_size=page_size
+            )
+    
     # 搜索过滤
     if search:
         from sqlalchemy import String
@@ -469,12 +499,25 @@ async def get_offers(
     # 批量加载所有offer的渠道分配
     offer_ids = [offer.id for offer in offers]
     if offer_ids:
-        pub_result = await db.execute(
+        # 构建渠道分配查询
+        pub_query = (
             select(OfferPublisherAssignment, Publisher)
             .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
             .where(OfferPublisherAssignment.offer_id.in_(offer_ids))
             .where(OfferPublisherAssignment.is_active == True)
         )
+        
+        # 如果是客户用户，只加载属于该客户的渠道
+        if current_user.role == UserRole.CLIENT:
+            # 获取当前用户的client_id
+            client_result = await db.execute(
+                select(Client.id).where(Client.user_id == current_user.id).limit(1)
+            )
+            client_id = client_result.scalar_one_or_none()
+            if client_id:
+                pub_query = pub_query.where(Publisher.client_id == client_id)
+        
+        pub_result = await db.execute(pub_query)
         assignments_map = {}
         for assignment, publisher in pub_result.all():
             if assignment.offer_id not in assignments_map:
@@ -482,6 +525,7 @@ async def get_offers(
             assignments_map[assignment.offer_id].append({
                 "id": publisher.id,
                 "publisher_name": publisher.publisher_name,
+                "client_id": publisher.client_id,  # 添加client_id，用于前端筛选
                 "downstream_cap": assignment.downstream_cap,
                 "affiliate_payout": assignment.affiliate_payout
             })
@@ -526,13 +570,59 @@ async def get_offer(
             detail=f"Offer ID {offer_id} 不存在"
         )
     
+    # ====== 权限检查：客户只能查看分配给自己的渠道的Offer ======
+    if current_user.role == UserRole.CLIENT:
+        # 获取当前用户的client_id
+        client_result = await db.execute(
+            select(Client.id).where(Client.user_id == current_user.id).limit(1)
+        )
+        client_id = client_result.scalar_one_or_none()
+        
+        if client_id:
+            # 检查该Offer是否分配给该客户的渠道
+            check_result = await db.execute(
+                select(OfferPublisherAssignment)
+                .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
+                .where(
+                    and_(
+                        OfferPublisherAssignment.offer_id == offer.id,
+                        Publisher.client_id == client_id,
+                        OfferPublisherAssignment.is_active == True
+                    )
+                )
+                .limit(1)
+            )
+            if not check_result.scalar_one_or_none():
+                # 该Offer未分配给该客户的渠道，返回403错误
+                raise_api_exception(
+                    ErrorCode.RESOURCE_NOT_FOUND,
+                    detail=f"Offer ID {offer_id} 不存在或无权访问"
+                )
+        else:
+            # 客户没有关联的Client记录，返回403错误
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail=f"Offer ID {offer_id} 不存在或无权访问"
+            )
+    
     # 加载分配的渠道
-    pub_result = await db.execute(
+    pub_query = (
         select(OfferPublisherAssignment, Publisher)
         .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
         .where(OfferPublisherAssignment.offer_id == offer.id)
         .where(OfferPublisherAssignment.is_active == True)
     )
+    
+    # 如果是客户用户，只加载属于该客户的渠道
+    if current_user.role == UserRole.CLIENT:
+        client_result = await db.execute(
+            select(Client.id).where(Client.user_id == current_user.id).limit(1)
+        )
+        client_id = client_result.scalar_one_or_none()
+        if client_id:
+            pub_query = pub_query.where(Publisher.client_id == client_id)
+    
+    pub_result = await db.execute(pub_query)
     assignments = pub_result.all()
     
     offer_data = OfferResponse.model_validate(offer)
