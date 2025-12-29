@@ -12,7 +12,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
-from app.models.models import User, Publisher
+from app.models.models import User, Publisher, Client
 from app.schemas.cpl.publisher import PublisherCreate, PublisherUpdate, PublisherResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 
@@ -36,6 +36,7 @@ async def create_publisher(
         price_discount=publisher_in.price_discount,
         postback_url=publisher_in.postback_url,
         postback_method=publisher_in.postback_method,
+        client_id=publisher_in.client_id,
         is_active=publisher_in.is_active
     )
     
@@ -44,8 +45,21 @@ async def create_publisher(
         await db.commit()
         await db.refresh(publisher)
         
+        # 获取客户信息
+        client_name = None
+        if publisher.client_id:
+            client_result = await db.execute(
+                select(Client).where(Client.id == publisher.client_id)
+            )
+            client = client_result.scalars().first()
+            if client:
+                client_name = client.company_name
+        
+        publisher_data = PublisherResponse.model_validate(publisher)
+        publisher_data.client_name = client_name
+        
         logger.info(f"渠道创建成功: id={publisher.id}")
-        return ResponseBaseSchema.success(data=PublisherResponse.model_validate(publisher))
+        return ResponseBaseSchema.success(data=publisher_data)
     except Exception as e:
         await db.rollback()
         logger.error(f"创建渠道失败: {str(e)}", exc_info=True)
@@ -88,8 +102,25 @@ async def get_publishers(
     result = await db.execute(query)
     publishers = result.scalars().all()
     
+    # 获取所有客户信息
+    client_ids = [pub.client_id for pub in publishers if pub.client_id]
+    clients_dict = {}
+    if client_ids:
+        clients_result = await db.execute(
+            select(Client).where(Client.id.in_(client_ids))
+        )
+        clients = clients_result.scalars().all()
+        clients_dict = {client.id: client.company_name for client in clients}
+    
+    # 构建响应数据
+    publishers_data = []
+    for pub in publishers:
+        pub_data = PublisherResponse.model_validate(pub)
+        pub_data.client_name = clients_dict.get(pub.client_id) if pub.client_id else None
+        publishers_data.append(pub_data)
+    
     return PaginatedResponseBaseSchema.success(
-        data=[PublisherResponse.model_validate(pub) for pub in publishers],
+        data=publishers_data,
         total=total,
         page=page,
         page_size=page_size
@@ -117,7 +148,20 @@ async def get_publisher(
             detail=f"渠道ID {publisher_id} 不存在"
         )
     
-    return ResponseBaseSchema.success(data=PublisherResponse.model_validate(publisher))
+    # 获取客户信息
+    client_name = None
+    if publisher.client_id:
+        client_result = await db.execute(
+            select(Client).where(Client.id == publisher.client_id)
+        )
+        client = client_result.scalars().first()
+        if client:
+            client_name = client.company_name
+    
+    publisher_data = PublisherResponse.model_validate(publisher)
+    publisher_data.client_name = client_name
+    
+    return ResponseBaseSchema.success(data=publisher_data)
 
 
 @router.put("/{publisher_id}",
@@ -150,8 +194,21 @@ async def update_publisher(
         await db.commit()
         await db.refresh(publisher)
         
+        # 获取客户信息
+        client_name = None
+        if publisher.client_id:
+            client_result = await db.execute(
+                select(Client).where(Client.id == publisher.client_id)
+            )
+            client = client_result.scalars().first()
+            if client:
+                client_name = client.company_name
+        
+        publisher_data = PublisherResponse.model_validate(publisher)
+        publisher_data.client_name = client_name
+        
         logger.info(f"渠道更新成功: id={publisher.id}")
-        return ResponseBaseSchema.success(data=PublisherResponse.model_validate(publisher))
+        return ResponseBaseSchema.success(data=publisher_data)
     except Exception as e:
         await db.rollback()
         logger.error(f"更新渠道失败: {str(e)}", exc_info=True)

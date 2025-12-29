@@ -52,6 +52,11 @@
         >
         <el-table-column prop="id" label="渠道ID" width="120" />
         <el-table-column prop="publisher_name" label="渠道名称" min-width="200" />
+        <el-table-column prop="client_name" label="关联客户" min-width="150" show-overflow-tooltip>
+          <template #default="scope">
+            <span>{{ scope.row.client_name || '-' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="email" label="邮箱" min-width="80" />
         <el-table-column prop="price_discount" label="扣量比例" width="120" align="center">
           <template #default="scope">
@@ -158,6 +163,24 @@
             <el-option label="POST" value="POST" />
           </el-select>
         </el-form-item>
+        <el-form-item label="关联客户" prop="client_id">
+          <el-select
+            v-model="formData.client_id"
+            placeholder="请选择客户（可选）"
+            clearable
+            filterable
+            popper-class="select-dropdown"
+            :teleported="true"
+            style="width: 100%;"
+          >
+            <el-option
+              v-for="client in clientList"
+              :key="client.id"
+              :label="client.company_name"
+              :value="client.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="状态" prop="is_active">
           <el-switch v-model="formData.is_active" />
         </el-form-item>
@@ -175,6 +198,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Refresh, Edit, Delete, Connection } from '@element-plus/icons-vue'
 import { getPublishers, createPublisher, updatePublisher, deletePublisher } from '@/api/publisher'
+import { getClientList } from '@/api/client'
 import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
 
@@ -193,6 +217,7 @@ const pagination = reactive({
 })
 
 const tableData = ref([])
+const clientList = ref([])
 
 const formData = reactive({
   publisher_name: '',
@@ -200,6 +225,7 @@ const formData = reactive({
   price_discount: 0,
   postback_url: '',
   postback_method: 'GET',
+  client_id: null,
   is_active: true
 })
 
@@ -211,6 +237,18 @@ const formRules = {
     { required: true, message: '请输入扣量比例', trigger: 'blur' },
     { type: 'number', min: 0, max: 100, message: '扣量比例必须在0-100之间', trigger: 'blur' }
   ]
+}
+
+// 加载客户列表
+const loadClients = async () => {
+  try {
+    const response = await getClientList({ page: 1, page_size: 1000 })
+    if (response.code === 200) {
+      clientList.value = response.data || []
+    }
+  } catch (error) {
+    logger.error('获取客户列表失败:', error)
+  }
 }
 
 // 加载数据
@@ -263,6 +301,7 @@ const handleAdd = () => {
     price_discount: 0,
     postback_url: '',
     postback_method: 'GET',
+    client_id: null,
     is_active: true
   })
   dialogVisible.value = true
@@ -278,6 +317,7 @@ const handleEdit = (row) => {
     price_discount: row.price_discount || 0,
     postback_url: row.postback_url || '',
     postback_method: row.postback_method || 'GET',
+    client_id: row.client_id || null,
     is_active: row.is_active
   })
   dialogVisible.value = true
@@ -379,6 +419,7 @@ const handlePageChange = () => {
 }
 
 onMounted(() => {
+  loadClients()
   loadData()
 })
 </script>

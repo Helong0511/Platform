@@ -616,6 +616,7 @@ class Publisher(Base):
     postback_url = Column(Text, nullable=True, comment='Postback URL（渠道的Postback配置）')
     postback_method = Column(String(10), default='GET', comment='Postback请求方式：GET/POST')
     active_advertiser_count = Column(Integer, default=0, comment='活跃的广告主数量')
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的客户ID')
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
@@ -625,6 +626,7 @@ class Publisher(Base):
     offer_assignments = relationship("OfferPublisherAssignment", back_populates="publisher", cascade="all, delete-orphan")
     clicks = relationship("Click", back_populates="publisher")
     discounts = relationship("OfferDiscount", back_populates="publisher", cascade="all, delete-orphan")
+    client = relationship("Client", foreign_keys=[client_id])
 
     __table_args__ = (
         Index("idx_publisher_name", "publisher_name"),
