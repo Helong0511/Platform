@@ -1534,76 +1534,28 @@ const getClientPublisherTracklinkWithId = async (clientId) => {
     return null
   }
   
-  // 优先使用短链接（如果downstream_tracklink是短链接格式）
-  let shortLink = getPublisherShortLink(clientPublisher.id)
-  
-  if (shortLink) {
-    return shortLink
+  // 如果没有downstream_tracklink，返回null
+  if (!currentOffer.value.downstream_tracklink) {
+    logger.warn('getClientPublisherTracklink: downstream_tracklink为空')
+    return null
   }
   
-  // 如果getPublisherShortLink返回null，但downstream_tracklink是短链接格式，手动添加参数
-  if (currentOffer.value.downstream_tracklink && currentOffer.value.downstream_tracklink.includes('/s/')) {
-    let mainShortLink = currentOffer.value.downstream_tracklink.trim()
-    
-    // 如果是相对路径（以/s/开头），需要添加域名
-    if (mainShortLink.startsWith('/s/')) {
-      const baseUrl = window.location.origin
-      mainShortLink = `${baseUrl}${mainShortLink}`
-    }
-    
-    // 移除可能已存在的参数，重新添加
-    const urlParts = mainShortLink.split('?')
-    const baseUrl = urlParts[0]
-    
-    // 添加参数：?offer_id=X&channel_id=Y
-    const result = `${baseUrl}?offer_id=${currentOffer.value.id}&channel_id=${clientPublisher.id}`
-    return result
+  // 直接使用downstream_tracklink拼接offer_id和channel_id参数
+  let baseUrl = currentOffer.value.downstream_tracklink.trim()
+  
+  // 如果是相对路径（以/s/开头），需要添加域名
+  if (baseUrl.startsWith('/s/')) {
+    const origin = window.location.origin
+    baseUrl = `${origin}${baseUrl}`
   }
   
-  // 如果downstream_tracklink不是短链接格式，尝试通过offer_id查找主短链接
-  try {
-    // 通过offer_id查找该Offer的主短链接（channel_id为NULL）
-    const existingLinks = await getShortLinks({
-      page: 1,
-      page_size: 100,
-      offer_id: currentOffer.value.id
-    })
-    
-    if (existingLinks.code === 200 && existingLinks.data && existingLinks.data.length > 0) {
-      // 查找主短链接（channel_id为null或undefined）
-      const mainShortLink = existingLinks.data.find(link => 
-        link.offer_id === currentOffer.value.id && 
-        (link.channel_id === null || link.channel_id === undefined)
-      )
-      
-      if (mainShortLink && mainShortLink.short_code) {
-        // 使用找到的主短链接，添加参数
-        // 优先使用short_url（如果存在），否则构建URL
-        let shortLinkUrl
-        if (mainShortLink.short_url) {
-          shortLinkUrl = mainShortLink.short_url
-        } else {
-          const baseUrl = window.location.origin
-          shortLinkUrl = `${baseUrl}/s/${mainShortLink.short_code}`
-        }
-        
-        // 移除可能已存在的参数，重新添加
-        const urlParts = shortLinkUrl.split('?')
-        const baseUrl = urlParts[0]
-        
-        // 添加参数：?offer_id=X&channel_id=Y
-        const result = `${baseUrl}?offer_id=${currentOffer.value.id}&channel_id=${clientPublisher.id}`
-        logger.info('getClientPublisherTracklink: 通过API查找短链接结果:', result)
-        return result
-      }
-    }
-  } catch (error) {
-    logger.error('查找短链接失败:', error)
-  }
+  // 移除可能已存在的参数，重新添加
+  const urlParts = baseUrl.split('?')
+  const cleanBaseUrl = urlParts[0]
   
-  // 如果都没有，返回null（不显示原始Tracklink）
-  logger.warn('getClientPublisherTracklink: 未找到短链接')
-  return null
+  // 添加参数：?offer_id=X&channel_id=Y
+  const result = `${cleanBaseUrl}?offer_id=${currentOffer.value.id}&channel_id=${clientPublisher.id}`
+  return result
 }
 
 // 为渠道创建短链接（不再需要，因为使用主短链接 + 参数）
