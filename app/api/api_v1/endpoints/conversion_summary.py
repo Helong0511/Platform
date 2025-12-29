@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 
 @router.get("/",
             response_model=ResponseBaseSchema[dict],
-            summary="获取转化总览统计")
+            summary="获取转化总览统计",
+            dependencies=[Depends(require_admin)])
 async def get_conversion_summary(
     start_date: Optional[str] = Query(None, description="开始日期（YYYY-MM-DD）"),
     end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
@@ -32,16 +33,16 @@ async def get_conversion_summary(
     current_user: User = Depends(get_current_user)
 ):
     """
-    获取转化总览统计（所有登录用户可访问）
+    获取转化总览统计（仅管理员）
     按Offer和Publisher分组统计，返回：
     - Offer ID
     - Offer Name
-    - Advertiser（仅管理员可见）
+    - Advertiser（仅管理员可）
     - Publisher
     - Click: 点击数量
     - Conversion: 转化数量
     - CR (Conversion Rate): 转化率 = Conversion / Click
-    - PO: 总支付金额（仅管理员可见）
+    - PO: 总支付金额（仅管理员可）
     - PO（扣价后）: 扣价后的总支付金额
     """
     try:
@@ -281,14 +282,15 @@ async def get_conversion_summary(
 
 @router.get("/by-offer",
             response_model=ResponseBaseSchema[list],
-            summary="按Offer统计")
+            summary="按Offer统计",
+            dependencies=[Depends(require_admin)])
 async def get_summary_by_offer(
     start_date: Optional[str] = Query(None, description="开始日期（YYYY-MM-DD）"),
     end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """按Offer统计转化数据（所有登录用户可访问）"""
+    """按Offer统计转化数据（仅管理员）"""
     try:
         # 解析日期
         start_datetime = None

@@ -161,7 +161,7 @@ const routes = [
         path: 'admin/conversion-summary',
         name: 'ConversionSummary',
         component: ConversionSummary,
-        meta: { requiresAdmin: false }
+        meta: { requiresAdmin: true }
       },
       {
         path: 'admin/conversion-log',
@@ -250,7 +250,6 @@ router.beforeEach((to, from, next) => {
 
       // 检查管理员权限
       if (!authStore.isAdmin) {
-        ElMessage.error('没有权限访问该页面');
         // 如果是从其他页面跳转过来的，返回原页面；否则跳转到仪表盘
         const fallbackPath = from.path && from.path !== '/login' && from.path.startsWith('/app')
           ? from.path
