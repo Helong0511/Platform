@@ -8,7 +8,7 @@
     :router="false"
     @select="handleMenuSelect"
   >
-    <el-menu-item index="/app/dashboard" @click="() => console.log('[Sidebar] 菜单项点击: /app/dashboard')">
+    <el-menu-item index="/app/dashboard">
       <template #icon><PieChart /></template>
       <span>数据仪表</span>
     </el-menu-item>
@@ -166,28 +166,17 @@ const emit = defineEmits(['menu-click']);
 
 const handleMenuSelect = (index) => {
   // 手动处理导航（因为 router 属性可能不工作）
-  console.log('[Sidebar] 菜单选择事件触发，index:', index);
-  console.log('[Sidebar] router 对象:', router);
-  console.log('[Sidebar] 当前路由:', route.path);
-  
   if (index && typeof index === 'string') {
     try {
-      console.log('[Sidebar] 准备导航到:', index);
-      router.push(index).then(() => {
-        console.log('[Sidebar] 导航成功:', index);
-      }).catch(err => {
+      router.push(index).catch(err => {
         // 忽略重复导航错误
         if (err.name !== 'NavigationDuplicated') {
-          console.error('[Sidebar] 导航失败:', err);
-        } else {
-          console.log('[Sidebar] 重复导航，已忽略');
+          // 静默处理导航错误
         }
       });
     } catch (e) {
-      console.error('[Sidebar] 导航异常:', e);
+      // 静默处理导航异常
     }
-  } else {
-    console.warn('[Sidebar] 无效的菜单索引:', index);
   }
   
   // 触发菜单点击事件（用于移动端关闭抽屉）
