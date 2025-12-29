@@ -13,6 +13,7 @@ from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.models.models import User, Publisher, Client
+from sqlalchemy.orm import joinedload
 from app.schemas.cpl.publisher import PublisherCreate, PublisherUpdate, PublisherResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 
@@ -45,15 +46,15 @@ async def create_publisher(
         await db.commit()
         await db.refresh(publisher)
         
-        # 获取客户信息
+        # 获取客户信息（用户的 full_name）
         client_name = None
         if publisher.client_id:
             client_result = await db.execute(
-                select(Client).where(Client.id == publisher.client_id)
+                select(Client).options(joinedload(Client.user)).where(Client.id == publisher.client_id)
             )
             client = client_result.scalars().first()
-            if client:
-                client_name = client.company_name
+            if client and client.user:
+                client_name = client.user.full_name or client.company_name
         
         publisher_data = PublisherResponse.model_validate(publisher)
         publisher_data.client_name = client_name
@@ -102,15 +103,18 @@ async def get_publishers(
     result = await db.execute(query)
     publishers = result.scalars().all()
     
-    # 获取所有客户信息
+    # 获取所有客户信息（用户的 full_name）
     client_ids = [pub.client_id for pub in publishers if pub.client_id]
     clients_dict = {}
     if client_ids:
         clients_result = await db.execute(
-            select(Client).where(Client.id.in_(client_ids))
+            select(Client).options(joinedload(Client.user)).where(Client.id.in_(client_ids))
         )
         clients = clients_result.scalars().all()
-        clients_dict = {client.id: client.company_name for client in clients}
+        clients_dict = {
+            client.id: (client.user.full_name if client.user and client.user.full_name else client.company_name)
+            for client in clients
+        }
     
     # 构建响应数据
     publishers_data = []
@@ -148,15 +152,15 @@ async def get_publisher(
             detail=f"渠道ID {publisher_id} 不存在"
         )
     
-    # 获取客户信息
+    # 获取客户信息（用户的 full_name）
     client_name = None
     if publisher.client_id:
         client_result = await db.execute(
-            select(Client).where(Client.id == publisher.client_id)
+            select(Client).options(joinedload(Client.user)).where(Client.id == publisher.client_id)
         )
         client = client_result.scalars().first()
-        if client:
-            client_name = client.company_name
+        if client and client.user:
+            client_name = client.user.full_name or client.company_name
     
     publisher_data = PublisherResponse.model_validate(publisher)
     publisher_data.client_name = client_name
@@ -194,15 +198,15 @@ async def update_publisher(
         await db.commit()
         await db.refresh(publisher)
         
-        # 获取客户信息
+        # 获取客户信息（用户的 full_name）
         client_name = None
         if publisher.client_id:
             client_result = await db.execute(
-                select(Client).where(Client.id == publisher.client_id)
+                select(Client).options(joinedload(Client.user)).where(Client.id == publisher.client_id)
             )
             client = client_result.scalars().first()
-            if client:
-                client_name = client.company_name
+            if client and client.user:
+                client_name = client.user.full_name or client.company_name
         
         publisher_data = PublisherResponse.model_validate(publisher)
         publisher_data.client_name = client_name
