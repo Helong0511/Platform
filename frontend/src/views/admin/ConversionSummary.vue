@@ -1,15 +1,5 @@
 <template>
   <div class="conversion-summary">
-    <!-- 权限提示 -->
-    <el-alert
-      v-if="!isAdmin"
-      title="【需要管理员权限】"
-      type="warning"
-      :closable="false"
-      show-icon
-      style="margin-bottom: 20px;"
-    />
-    
     <el-card class="page-card">
       <template #header>
         <div class="card-header">
