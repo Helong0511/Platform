@@ -111,7 +111,13 @@
               min-width="150"
               show-overflow-tooltip
             />
-            <el-table-column prop="publisher_name" label="Publisher" min-width="150" show-overflow-tooltip />
+            <el-table-column 
+              v-if="isAdmin"
+              prop="publisher_name" 
+              label="Publisher" 
+              min-width="150" 
+              show-overflow-tooltip 
+            />
             <el-table-column prop="click_count" label="Click" width="120" align="right" />
             <el-table-column prop="conversion_count" label="Conversion" width="120" align="right" />
             <el-table-column prop="cr" label="CR" width="120" align="right">
@@ -132,8 +138,9 @@
               </template>
             </el-table-column>
             <el-table-column 
+              v-if="isAdmin"
               prop="po_after_discount" 
-              :label="isAdmin ? 'PO(扣)' : 'PO'" 
+              label="PO(扣)" 
               width="150" 
               align="right"
             >

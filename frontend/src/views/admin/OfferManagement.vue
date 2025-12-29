@@ -76,9 +76,9 @@
         >
         <el-table-column prop="id" label="Offer ID" width="100" align="center" />
         <el-table-column prop="offer_name" label="Offer名称" width="180" show-overflow-tooltip />
-        <el-table-column prop="advertiser_name" label="广告主" width="150" />
-        <el-table-column prop="advertiser_offer_id" label="上游Offer ID" width="150" />
-        <el-table-column prop="payout" label="上游PO" width="100" align="right">
+        <el-table-column v-if="isAdmin" prop="advertiser_name" label="广告主" width="150" />
+        <el-table-column v-if="isAdmin" prop="advertiser_offer_id" label="上游Offer ID" width="150" />
+        <el-table-column v-if="isAdmin" prop="payout" label="上游PO" width="100" align="right">
           <template #default="scope">
             <span v-if="scope.row.payout">{{ scope.row.payout.toFixed(2) }}</span>
             <span v-else>-</span>
@@ -90,32 +90,32 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="country" label="国家" width="100" />
-        <el-table-column prop="category" label="分类" width="120" show-overflow-tooltip>
+        <el-table-column v-if="isAdmin" prop="country" label="国家" width="100" />
+        <el-table-column v-if="isAdmin" prop="category" label="分类" width="120" show-overflow-tooltip>
           <template #default="scope">
             <span v-if="scope.row.category">{{ scope.row.category }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="type" label="类型" width="100" show-overflow-tooltip>
+        <el-table-column v-if="isAdmin" prop="type" label="类型" width="100" show-overflow-tooltip>
           <template #default="scope">
             <span v-if="scope.row.type">{{ scope.row.type }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="upstream_cap" label="上游Cap" width="100" align="center">
+        <el-table-column v-if="isAdmin" prop="upstream_cap" label="上游Cap" width="100" align="center">
           <template #default="scope">
             <span v-if="scope.row.upstream_cap">{{ scope.row.upstream_cap }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="downstream_cap" label="下游Cap" width="100" align="center">
+        <el-table-column v-if="isAdmin" prop="downstream_cap" label="下游Cap" width="100" align="center">
           <template #default="scope">
             <span v-if="scope.row.downstream_cap">{{ scope.row.downstream_cap }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="preview_link" label="预览链接" width="200" show-overflow-tooltip>
+        <el-table-column v-if="isAdmin" prop="preview_link" label="预览链接" width="200" show-overflow-tooltip>
           <template #default="scope">
             <el-link v-if="scope.row.preview_link" :href="scope.row.preview_link" target="_blank" type="primary" :underline="false">
               预览
@@ -123,20 +123,20 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="postback_method" label="Postback方法" width="120" align="center">
+        <el-table-column v-if="isAdmin" prop="postback_method" label="Postback方法" width="120" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.postback_method === 'POST' ? 'success' : 'info'" size="small">
               {{ scope.row.postback_method || 'GET' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="click_validity_hours" label="点击有效期(小时)" width="140" align="center">
+        <el-table-column v-if="isAdmin" prop="click_validity_hours" label="点击有效期(小时)" width="140" align="center">
           <template #default="scope">
             <span v-if="scope.row.click_validity_hours">{{ scope.row.click_validity_hours }}</span>
             <span v-else>720</span>
           </template>
         </el-table-column>
-        <el-table-column prop="assigned_publishers" label="分配渠道" width="200" show-overflow-tooltip>
+        <el-table-column v-if="isAdmin" prop="assigned_publishers" label="分配渠道" width="200" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="scope.row.assigned_publishers && scope.row.assigned_publishers.length > 0">
               <el-tag
@@ -151,21 +151,21 @@
             <el-tag v-else type="info" size="small">未分配</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100" align="center">
+        <el-table-column v-if="isAdmin" prop="status" label="状态" width="100" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.status === 'Active' ? 'success' : 'info'">
               {{ scope.row.status }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="is_active" label="激活" width="80" align="center">
+        <el-table-column v-if="isAdmin" prop="is_active" label="激活" width="80" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.is_active ? 'success' : 'danger'">
               {{ scope.row.is_active ? '是' : '否' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column v-if="isAdmin" prop="created_at" label="创建时间" width="180">
           <template #default="scope">
             {{ formatDate(scope.row.created_at) }}
           </template>
@@ -173,8 +173,8 @@
         <el-table-column label="操作" width="250" fixed="right">
           <template #default="scope">
             <el-button type="info" link :icon="View" @click="handleViewDetails(scope.row)">详情</el-button>
-            <el-button type="primary" link :icon="Edit" @click="handleEdit(scope.row)">编辑</el-button>
-            <el-button type="danger" link :icon="Delete" @click="handleDelete(scope.row)">删除</el-button>
+            <el-button v-if="isAdmin" type="primary" link :icon="Edit" @click="handleEdit(scope.row)">编辑</el-button>
+            <el-button v-if="isAdmin" type="danger" link :icon="Delete" @click="handleDelete(scope.row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -563,9 +563,9 @@
             <el-descriptions :column="2" border>
               <el-descriptions-item label="Offer ID">{{ currentOffer?.id }}</el-descriptions-item>
               <el-descriptions-item label="Offer名称">{{ currentOffer?.offer_name }}</el-descriptions-item>
-              <el-descriptions-item label="广告主">{{ currentOffer?.advertiser_name }}</el-descriptions-item>
-              <el-descriptions-item label="上游Offer ID">{{ currentOffer?.advertiser_offer_id || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="上游PO">
+              <el-descriptions-item v-if="isAdmin" label="广告主">{{ currentOffer?.advertiser_name }}</el-descriptions-item>
+              <el-descriptions-item v-if="isAdmin" label="上游Offer ID">{{ currentOffer?.advertiser_offer_id || '-' }}</el-descriptions-item>
+              <el-descriptions-item v-if="isAdmin" label="上游PO">
                 <span v-if="currentOffer?.payout">{{ currentOffer.payout.toFixed(2) }}</span>
                 <span v-else>-</span>
               </el-descriptions-item>
@@ -581,15 +581,15 @@
                   {{ currentOffer?.status }}
                 </el-tag>
               </el-descriptions-item>
-              <el-descriptions-item label="激活状态">
+              <el-descriptions-item v-if="isAdmin" label="激活状态">
                 <el-tag :type="currentOffer?.is_active ? 'success' : 'danger'">
                   {{ currentOffer?.is_active ? '是' : '否' }}
                 </el-tag>
               </el-descriptions-item>
-              <el-descriptions-item label="上游Cap">{{ currentOffer?.upstream_cap || '-' }}</el-descriptions-item>
+              <el-descriptions-item v-if="isAdmin" label="上游Cap">{{ currentOffer?.upstream_cap || '-' }}</el-descriptions-item>
               <el-descriptions-item label="下游Cap">{{ currentOffer?.downstream_cap || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="点击有效期(小时)">{{ currentOffer?.click_validity_hours || 720 }}</el-descriptions-item>
-              <el-descriptions-item label="Postback方法">
+              <el-descriptions-item v-if="isAdmin" label="点击有效期(小时)">{{ currentOffer?.click_validity_hours || 720 }}</el-descriptions-item>
+              <el-descriptions-item v-if="isAdmin" label="Postback方法">
                 <el-tag :type="currentOffer?.postback_method === 'POST' ? 'success' : 'info'" size="small">
                   {{ currentOffer?.postback_method || 'GET' }}
                 </el-tag>
@@ -600,7 +600,7 @@
                 </el-link>
                 <span v-else>-</span>
               </el-descriptions-item>
-              <el-descriptions-item label="上游Tracklink" :span="2">
+              <el-descriptions-item v-if="isAdmin" label="上游Tracklink" :span="2">
                 <span v-if="currentOffer?.advertiser_tracklink" style="word-break: break-all;">
                   {{ currentOffer.advertiser_tracklink }}
                 </span>
@@ -637,7 +637,7 @@
                   <span v-else>-</span>
                 </template>
               </el-descriptions-item>
-              <el-descriptions-item label="Postback URL" :span="2">
+              <el-descriptions-item v-if="isAdmin" label="Postback URL" :span="2">
                 <span v-if="currentOffer?.postback_url" style="word-break: break-all;">
                   {{ currentOffer.postback_url }}
                 </span>
