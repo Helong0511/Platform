@@ -58,12 +58,25 @@
             <el-tag type="warning">{{ scope.row.price_discount }}%</el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="postback_url" label="Postback URL" min-width="250" show-overflow-tooltip>
+          <template #default="scope">
+            <span>{{ scope.row.postback_url || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="postback_method" label="Postback方法" width="130" align="center">
+          <template #default="scope">
+            <el-tag :type="scope.row.postback_method === 'POST' ? 'success' : 'info'">
+              {{ scope.row.postback_method || 'GET' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="active_advertiser_count" label="活跃广告主数" width="140" align="center" />
         <el-table-column prop="is_active" label="状态" width="100" align="center">
           <template #default="scope">
-            <el-tag :type="scope.row.is_active ? 'success' : 'danger'">
-              {{ scope.row.is_active ? '激活' : '禁用' }}
-            </el-tag>
+            <el-switch
+              v-model="scope.row.is_active"
+              @change="handleStatusChange(scope.row)"
+            />
           </template>
         </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="180">
@@ -333,6 +346,27 @@ const handleSubmit = async () => {
 // 对话框关闭
 const handleDialogClose = () => {
   formRef.value?.resetFields()
+}
+
+// 状态切换
+const handleStatusChange = async (row) => {
+  try {
+    const response = await updatePublisher(row.id, {
+      is_active: row.is_active
+    })
+    if (response.code === 200) {
+      ElMessage.success('状态更新成功')
+    } else {
+      // 如果更新失败，恢复原状态
+      row.is_active = !row.is_active
+      ElMessage.error(response.message || '状态更新失败')
+    }
+  } catch (error) {
+    // 如果更新失败，恢复原状态
+    row.is_active = !row.is_active
+    logger.error('状态更新失败:', error)
+    ElMessage.error('状态更新失败')
+  }
 }
 
 // 分页
