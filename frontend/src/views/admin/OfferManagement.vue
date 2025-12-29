@@ -648,8 +648,8 @@
             </el-descriptions>
           </el-tab-pane>
 
-          <!-- 渠道分配 -->
-          <el-tab-pane label="渠道分配" name="publishers">
+          <!-- 渠道分配（仅管理员可见） -->
+          <el-tab-pane v-if="isAdmin" label="渠道分配" name="publishers">
             <div v-if="currentOffer?.assigned_publishers && currentOffer.assigned_publishers.length > 0">
               <el-table :data="currentOffer.assigned_publishers" stripe style="width: 100%">
                 <el-table-column prop="id" label="渠道ID" width="100" align="center" />
