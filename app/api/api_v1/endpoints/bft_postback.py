@@ -282,18 +282,31 @@ async def _process_bft_postback(
             telegram_msg += f"Method: {method}\n"
             telegram_msg += f"Event: {event_name}\n"
             telegram_msg += f"Click ID: {clk_id}\n"
+            telegram_msg += f"\n📋 所有参数:\n"
+            telegram_msg += "-" * 40 + "\n"
             
-            # 添加其他重要参数到通知
-            payout = raw_data.get("payout")
-            product_id = raw_data.get("product_id")
-            client_id = raw_data.get("client_id")
-            
-            if payout:
-                telegram_msg += f"Payout: {payout}\n"
-            if product_id:
-                telegram_msg += f"Product ID: {product_id}\n"
-            if client_id:
-                telegram_msg += f"Client ID: {client_id}\n"
+            # 遍历所有收到的参数，添加到通知中
+            if raw_data:
+                for key, value in sorted(raw_data.items()):
+                    # 格式化参数值，如果是 None 则显示为空字符串
+                    if value is None:
+                        value_str = "None"
+                    elif isinstance(value, (dict, list)):
+                        # 如果是复杂类型，转换为 JSON 字符串
+                        try:
+                            value_str = json.dumps(value, ensure_ascii=False)
+                        except:
+                            value_str = str(value)
+                    else:
+                        value_str = str(value)
+                    
+                    # 限制单个参数值的长度，避免消息过长
+                    if len(value_str) > 200:
+                        value_str = value_str[:200] + "..."
+                    
+                    telegram_msg += f"{key}: {value_str}\n"
+            else:
+                telegram_msg += "无参数\n"
             
             # 设置较长的超时时间，并明确捕获超时异常
             await asyncio.wait_for(
