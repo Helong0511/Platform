@@ -52,7 +52,7 @@ try:
     # 使用 GET 请求
     response = requests.get(URL, params=post_data, timeout=10)
     print(f"状态码: {response.status_code}")
-    print(f"响应: {response.text}")
+    print(f"响应内容: {response.text}")
         
 except requests.exceptions.RequestException as e:
     print(f"请求错误: {e}")

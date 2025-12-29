@@ -68,7 +68,7 @@
       </el-menu-item>
     </el-sub-menu>
 
-    <el-menu-item index="/app/admin/short-links">
+    <el-menu-item v-if="isAdmin" index="/app/admin/short-links">
       <template #icon><Link /></template>
       <span>短链接管理</span>
     </el-menu-item>
