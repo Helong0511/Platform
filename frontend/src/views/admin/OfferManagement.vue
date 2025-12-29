@@ -1449,9 +1449,14 @@ const getPublisherTracklink = (publisherId) => {
 const getPublisherShortLink = (publisherId) => {
   // 如果downstream_tracklink是主短链接URL，则添加参数
   if (currentOffer.value?.downstream_tracklink) {
-    const mainShortLink = currentOffer.value.downstream_tracklink
+    let mainShortLink = currentOffer.value.downstream_tracklink
     // 检查是否是短链接格式（包含/s/）
     if (mainShortLink.includes('/s/')) {
+      // 如果是相对路径（以/s/开头），需要添加域名
+      if (mainShortLink.startsWith('/s/')) {
+        const baseUrl = window.location.origin
+        mainShortLink = `${baseUrl}${mainShortLink}`
+      }
       // 添加参数：?offer_id=X&channel_id=Y
       const separator = mainShortLink.includes('?') ? '&' : '?'
       return `${mainShortLink}${separator}offer_id=${currentOffer.value.id}&channel_id=${publisherId}`
@@ -1483,33 +1488,39 @@ const getClientPublisherTracklink = async () => {
   }
   
   // 如果downstream_tracklink不是短链接格式，尝试通过offer_id查找主短链接
-  if (currentOffer.value.downstream_tracklink && !currentOffer.value.downstream_tracklink.includes('/s/')) {
-    try {
-      // 通过offer_id查找该Offer的主短链接（channel_id为NULL）
-      const existingLinks = await getShortLinks({
-        page: 1,
-        page_size: 100,
-        offer_id: currentOffer.value.id
-      })
+  try {
+    // 通过offer_id查找该Offer的主短链接（channel_id为NULL）
+    const existingLinks = await getShortLinks({
+      page: 1,
+      page_size: 100,
+      offer_id: currentOffer.value.id
+    })
+    
+    if (existingLinks.code === 200 && existingLinks.data && existingLinks.data.length > 0) {
+      // 查找主短链接（channel_id为null或undefined）
+      const mainShortLink = existingLinks.data.find(link => 
+        link.offer_id === currentOffer.value.id && 
+        (link.channel_id === null || link.channel_id === undefined)
+      )
       
-      if (existingLinks.code === 200 && existingLinks.data && existingLinks.data.length > 0) {
-        // 查找主短链接（channel_id为null或undefined）
-        const mainShortLink = existingLinks.data.find(link => 
-          link.offer_id === currentOffer.value.id && 
-          (link.channel_id === null || link.channel_id === undefined)
-        )
-        
-        if (mainShortLink && mainShortLink.short_code) {
-          // 使用找到的主短链接，添加参数
+      if (mainShortLink && mainShortLink.short_code) {
+        // 使用找到的主短链接，添加参数
+        // 优先使用short_url（如果存在），否则构建URL
+        let shortLinkUrl
+        if (mainShortLink.short_url) {
+          shortLinkUrl = mainShortLink.short_url
+        } else {
           const baseUrl = window.location.origin
-          const shortLinkUrl = `${baseUrl}/s/${mainShortLink.short_code}`
-          const separator = shortLinkUrl.includes('?') ? '&' : '?'
-          return `${shortLinkUrl}${separator}offer_id=${currentOffer.value.id}&channel_id=${clientPublisher.id}`
+          shortLinkUrl = `${baseUrl}/s/${mainShortLink.short_code}`
         }
+        
+        // 添加参数：?offer_id=X&channel_id=Y
+        const separator = shortLinkUrl.includes('?') ? '&' : '?'
+        return `${shortLinkUrl}${separator}offer_id=${currentOffer.value.id}&channel_id=${clientPublisher.id}`
       }
-    } catch (error) {
-      logger.error('查找短链接失败:', error)
     }
+  } catch (error) {
+    logger.error('查找短链接失败:', error)
   }
   
   // 如果都没有，返回null（不显示原始Tracklink）

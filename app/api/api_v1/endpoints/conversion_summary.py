@@ -11,7 +11,7 @@ from sqlalchemy import func, and_, or_
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
-from app.models.models import User, Click, PostbackConversion, Offer, Publisher, Advertiser
+from app.models.models import User, Click, PostbackConversion, Offer, Publisher, Advertiser, Client, UserRole
 from app.schemas.base import ResponseBaseSchema
 from app.core.discount.discount_manager import calculate_discount
 
@@ -43,8 +43,38 @@ async def get_conversion_summary(
     - CR (Conversion Rate): 转化率 = Conversion / Click
     - PO: 总支付金额（仅管理员可见）
     - PO（扣价后）: 扣价后的总支付金额（所有用户可见）
+    
+    客户登录时，只显示该客户关联的渠道的转化数据
     """
     try:
+        # 如果是客户用户，获取该客户关联的渠道ID列表
+        client_publisher_ids = None
+        if current_user.role == UserRole.CLIENT:
+            # 查询该用户关联的Client
+            from sqlalchemy.orm import selectinload
+            user_query = select(User).options(selectinload(User.clients)).where(User.id == current_user.id)
+            user_result = await db.execute(user_query)
+            user = user_result.scalars().unique().first()
+            
+            if user and user.clients:
+                # 获取该客户关联的所有渠道ID
+                client = user.clients[0]  # 通常一个用户只关联一个Client
+                publisher_query = select(Publisher.id).where(Publisher.client_id == client.id)
+                publisher_result = await db.execute(publisher_query)
+                client_publisher_ids = [pub_id for pub_id, in publisher_result.all()]
+                
+                # 如果客户没有关联任何渠道，返回空数据
+                if not client_publisher_ids:
+                    return ResponseBaseSchema.success(data={
+                        "total_clicks": 0,
+                        "total_conversions": 0,
+                        "cr": 0,
+                        "total_po": 0.0,
+                        "stats_list": [],
+                        "start_date": start_date or ((datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")),
+                        "end_date": end_date or (datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+                    })
+        
         # 解析日期
         start_datetime = None
         end_datetime = None
@@ -63,6 +93,10 @@ async def get_conversion_summary(
         click_conditions = [Click.click_time >= start_datetime, Click.click_time < end_datetime]
         conversion_conditions = [PostbackConversion.created_at >= start_datetime, PostbackConversion.created_at < end_datetime]
         
+        # 如果是客户用户，添加渠道过滤条件
+        if client_publisher_ids is not None:
+            click_conditions.append(Click.publisher_id.in_(client_publisher_ids))
+        
         if offer_id:
             click_conditions.append(Click.offer_id == offer_id)
             conversion_conditions.append(PostbackConversion.product_id == offer_id)
@@ -80,14 +114,41 @@ async def get_conversion_summary(
         click_count = (await db.execute(click_query)).scalar() or 0
         
         # 统计总转化数量
-        conversion_query = select(func.count(PostbackConversion.id)).where(and_(*conversion_conditions))
+        # 如果是客户用户，需要通过Click关联Publisher来过滤
+        from sqlalchemy.orm import aliased
+        click_alias_for_count = aliased(Click)
+        conversion_query = select(func.count(PostbackConversion.id))
+        if client_publisher_ids is not None:
+            conversion_query = conversion_query.join(
+                click_alias_for_count, PostbackConversion.click_id == click_alias_for_count.click_id
+            ).where(
+                and_(
+                    *conversion_conditions,
+                    click_alias_for_count.publisher_id.in_(client_publisher_ids)
+                )
+            )
+        else:
+            conversion_query = conversion_query.where(and_(*conversion_conditions))
         conversion_count = (await db.execute(conversion_query)).scalar() or 0
         
         # 计算总转化率
         cr = (conversion_count / click_count * 100) if click_count > 0 else 0
         
         # 统计总支付金额（PO）
-        po_query = select(func.sum(PostbackConversion.payout)).where(and_(*conversion_conditions))
+        # 如果是客户用户，需要通过Click关联Publisher来过滤
+        click_alias_for_po = aliased(Click)
+        po_query = select(func.sum(PostbackConversion.payout))
+        if client_publisher_ids is not None:
+            po_query = po_query.join(
+                click_alias_for_po, PostbackConversion.click_id == click_alias_for_po.click_id
+            ).where(
+                and_(
+                    *conversion_conditions,
+                    click_alias_for_po.publisher_id.in_(client_publisher_ids)
+                )
+            )
+        else:
+            po_query = po_query.where(and_(*conversion_conditions))
         po_result = await db.execute(po_query)
         total_po = po_result.scalar() or 0
         
@@ -125,7 +186,6 @@ async def get_conversion_summary(
         
         # 获取所有转化记录，按product_id和关联的publisher_id分组
         # 需要通过click_id关联Click表来获取publisher_id
-        from sqlalchemy.orm import aliased
         click_alias = aliased(Click)
         
         conversion_group_query = select(
@@ -137,7 +197,16 @@ async def get_conversion_summary(
             click_alias, PostbackConversion.click_id == click_alias.click_id
         ).where(
             and_(*conversion_conditions)
-        ).group_by(func.coalesce(PostbackConversion.product_id, click_alias.offer_id), click_alias.publisher_id)
+        )
+        
+        # 如果是客户用户，添加渠道过滤条件
+        if client_publisher_ids is not None:
+            conversion_group_query = conversion_group_query.where(click_alias.publisher_id.in_(client_publisher_ids))
+        
+        conversion_group_query = conversion_group_query.group_by(
+            func.coalesce(PostbackConversion.product_id, click_alias.offer_id), 
+            click_alias.publisher_id
+        )
         
         if publisher_id:
             conversion_group_query = conversion_group_query.where(click_alias.publisher_id == publisher_id)
