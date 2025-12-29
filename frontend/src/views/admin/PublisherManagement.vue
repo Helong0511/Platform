@@ -52,13 +52,13 @@
         >
         <el-table-column prop="id" label="渠道ID" width="120" />
         <el-table-column prop="publisher_name" label="渠道名称" min-width="200" />
-        <el-table-column prop="email" label="邮箱" min-width="50" />
+        <el-table-column prop="email" label="邮箱" min-width="80" />
         <el-table-column prop="price_discount" label="扣量比例" width="120" align="center">
           <template #default="scope">
             <el-tag type="warning">{{ scope.row.price_discount }}%</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="postback_url" label="Postback URL" min-width="350" show-overflow-tooltip>
+        <el-table-column prop="postback_url" label="Postback URL" min-width="400" show-overflow-tooltip>
           <template #default="scope">
             <span>{{ scope.row.postback_url || '-' }}</span>
           </template>
