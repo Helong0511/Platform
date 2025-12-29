@@ -569,7 +569,7 @@
                 <span v-if="currentOffer?.payout">{{ currentOffer.payout.toFixed(2) }}</span>
                 <span v-else>-</span>
               </el-descriptions-item>
-              <el-descriptions-item label="下游PO">
+              <el-descriptions-item :label="isAdmin ? '下游PO' : 'PO'">
                 <span v-if="currentOffer?.affiliate_payout">{{ currentOffer.affiliate_payout.toFixed(2) }}</span>
                 <span v-else>-</span>
               </el-descriptions-item>
@@ -587,7 +587,7 @@
                 </el-tag>
               </el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="上游Cap">{{ currentOffer?.upstream_cap || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="下游Cap">{{ currentOffer?.downstream_cap || '-' }}</el-descriptions-item>
+              <el-descriptions-item :label="isAdmin ? '下游Cap' : 'Cap'">{{ currentOffer?.downstream_cap || '-' }}</el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="点击有效期(小时)">{{ currentOffer?.click_validity_hours || 720 }}</el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="Postback方法">
                 <el-tag :type="currentOffer?.postback_method === 'POST' ? 'success' : 'info'" size="small">
@@ -606,7 +606,7 @@
                 </span>
                 <span v-else>-</span>
               </el-descriptions-item>
-              <el-descriptions-item label="下游Tracklink" :span="2">
+              <el-descriptions-item :label="isAdmin ? '下游Tracklink' : 'Tracklink'" :span="2">
                 <template v-if="!isAdmin && currentClientId">
                   <!-- 客户登录：显示该客户渠道的Tracklink（短链接+参数） -->
                   <template v-if="clientPublisherTracklink">
@@ -1448,27 +1448,48 @@ const getPublisherTracklink = (publisherId) => {
 // 获取渠道的短链接（主短链接 + 参数）
 const getPublisherShortLink = (publisherId) => {
   // 如果downstream_tracklink是主短链接URL，则添加参数
-  if (currentOffer.value?.downstream_tracklink) {
-    let mainShortLink = currentOffer.value.downstream_tracklink
-    // 检查是否是短链接格式（包含/s/）
-    if (mainShortLink.includes('/s/')) {
-      // 如果是相对路径（以/s/开头），需要添加域名
-      if (mainShortLink.startsWith('/s/')) {
-        const baseUrl = window.location.origin
-        mainShortLink = `${baseUrl}${mainShortLink}`
-      }
-      // 添加参数：?offer_id=X&channel_id=Y
-      const separator = mainShortLink.includes('?') ? '&' : '?'
-      return `${mainShortLink}${separator}offer_id=${currentOffer.value.id}&channel_id=${publisherId}`
-    }
+  if (!currentOffer.value?.downstream_tracklink || !currentOffer.value.id || !publisherId) {
+    logger.warn('getPublisherShortLink: 缺少必要参数', {
+      hasDownstreamTracklink: !!currentOffer.value?.downstream_tracklink,
+      offerId: currentOffer.value?.id,
+      publisherId
+    })
+    return null
   }
-  // 如果还没有主短链接，返回null
-  return null
+  
+  let mainShortLink = currentOffer.value.downstream_tracklink.trim()
+  // 检查是否是短链接格式（包含/s/）
+  if (!mainShortLink.includes('/s/')) {
+    logger.warn('getPublisherShortLink: downstream_tracklink不是短链接格式', mainShortLink)
+    return null
+  }
+  
+  // 如果是相对路径（以/s/开头），需要添加域名
+  if (mainShortLink.startsWith('/s/')) {
+    const baseUrl = window.location.origin
+    mainShortLink = `${baseUrl}${mainShortLink}`
+  }
+  
+  // 移除可能已存在的参数，重新添加
+  // 先分离URL和参数
+  const urlParts = mainShortLink.split('?')
+  const baseUrl = urlParts[0]
+  
+  // 添加参数：?offer_id=X&channel_id=Y
+  const result = `${baseUrl}?offer_id=${currentOffer.value.id}&channel_id=${publisherId}`
+  logger.info('getPublisherShortLink: 生成短链接', {
+    input: mainShortLink,
+    output: result,
+    offerId: currentOffer.value.id,
+    publisherId
+  })
+  return result
 }
 
 // 获取客户自己的渠道Tracklink（用于客户登录时显示）
 const getClientPublisherTracklink = async () => {
   if (!currentOffer.value || !currentClientId.value) {
+    logger.warn('getClientPublisherTracklink: 缺少currentOffer或currentClientId')
     return null
   }
   
@@ -1478,12 +1499,20 @@ const getClientPublisherTracklink = async () => {
   )
   
   if (!clientPublisher) {
+    logger.warn('getClientPublisherTracklink: 未找到客户关联的渠道')
     return null
   }
+  
+  logger.info('getClientPublisherTracklink:', {
+    offerId: currentOffer.value.id,
+    publisherId: clientPublisher.id,
+    downstreamTracklink: currentOffer.value.downstream_tracklink
+  })
   
   // 优先使用短链接（如果downstream_tracklink是短链接格式）
   let shortLink = getPublisherShortLink(clientPublisher.id)
   if (shortLink) {
+    logger.info('getClientPublisherTracklink: 使用getPublisherShortLink结果:', shortLink)
     return shortLink
   }
   
@@ -1514,9 +1543,14 @@ const getClientPublisherTracklink = async () => {
           shortLinkUrl = `${baseUrl}/s/${mainShortLink.short_code}`
         }
         
+        // 移除可能已存在的参数，重新添加
+        const urlParts = shortLinkUrl.split('?')
+        const baseUrl = urlParts[0]
+        
         // 添加参数：?offer_id=X&channel_id=Y
-        const separator = shortLinkUrl.includes('?') ? '&' : '?'
-        return `${shortLinkUrl}${separator}offer_id=${currentOffer.value.id}&channel_id=${clientPublisher.id}`
+        const result = `${baseUrl}?offer_id=${currentOffer.value.id}&channel_id=${clientPublisher.id}`
+        logger.info('getClientPublisherTracklink: 通过API查找短链接结果:', result)
+        return result
       }
     }
   } catch (error) {
@@ -1524,6 +1558,7 @@ const getClientPublisherTracklink = async () => {
   }
   
   // 如果都没有，返回null（不显示原始Tracklink）
+  logger.warn('getClientPublisherTracklink: 未找到短链接')
   return null
 }
 
