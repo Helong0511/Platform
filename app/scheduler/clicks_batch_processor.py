@@ -10,7 +10,7 @@ from sqlalchemy import insert
 from app.core.database import AsyncSessionLocal
 from app.core.clicks_queue import dequeue_clicks, get_queue_length
 from app.core.offer_cache import get_offer_advertiser_id, set_offer_cache
-from app.models.models import Click, Offer
+from app.models.models import Click, Offer, ShortLink
 from sqlalchemy.future import select
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,10 @@ async def process_clicks_queue() -> Dict[str, int]:
                     # 1. 补充advertiser_id（如果缺失）
                     await _enrich_clicks_with_advertiser_id(db, clicks)
                     
-                    # 2. 批量插入
+                    # 2. 验证并清理short_link_id（如果不存在则设置为NULL）
+                    await _validate_short_link_ids(db, clicks)
+                    
+                    # 3. 批量插入
                     inserted_count = await _batch_insert_clicks(db, clicks)
                     result['inserted'] += inserted_count
                     result['failed'] += len(clicks) - inserted_count
@@ -156,6 +159,50 @@ async def _enrich_clicks_with_advertiser_id(db: AsyncSession, clicks: List[Dict[
         if offer_id and offer_id in offer_advertiser_map:
             if not click.get('advertiser_id'):
                 click['advertiser_id'] = offer_advertiser_map[offer_id]
+
+
+async def _validate_short_link_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) -> None:
+    """
+    验证并清理short_link_id（如果不存在则设置为NULL）
+    防止外键约束失败
+    
+    Args:
+        db: 数据库会话
+        clicks: 点击记录列表
+    """
+    # 收集所有需要验证的short_link_id
+    short_link_ids_to_validate = set()
+    for click in clicks:
+        short_link_id = click.get('short_link_id')
+        if short_link_id is not None:
+            short_link_ids_to_validate.add(short_link_id)
+    
+    if not short_link_ids_to_validate:
+        return
+    
+    try:
+        # 批量查询存在的short_link_id
+        result = await db.execute(
+            select(ShortLink.id)
+            .where(ShortLink.id.in_(short_link_ids_to_validate))
+        )
+        valid_short_link_ids = {row[0] for row in result.all()}
+        
+        # 将不存在的short_link_id设置为NULL
+        for click in clicks:
+            short_link_id = click.get('short_link_id')
+            if short_link_id is not None and short_link_id not in valid_short_link_ids:
+                logger.warning(
+                    f"短链接ID {short_link_id} 不存在，将设置为NULL。"
+                    f"click_id={click.get('click_id')}, offer_id={click.get('offer_id')}"
+                )
+                click['short_link_id'] = None
+    except Exception as e:
+        logger.warning(f"验证short_link_id失败: error={e}，将清空所有short_link_id")
+        # 如果验证失败，清空所有short_link_id以避免外键约束错误
+        for click in clicks:
+            if click.get('short_link_id') is not None:
+                click['short_link_id'] = None
 
 
 async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -> int:
