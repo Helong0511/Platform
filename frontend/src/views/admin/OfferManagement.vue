@@ -607,10 +607,35 @@
                 <span v-else>-</span>
               </el-descriptions-item>
               <el-descriptions-item label="下游Tracklink" :span="2">
-                <span v-if="currentOffer?.downstream_tracklink" style="word-break: break-all;">
-                  {{ currentOffer.downstream_tracklink }}
-                </span>
-                <span v-else>-</span>
+                <template v-if="!isAdmin && currentClientId">
+                  <!-- 客户登录：显示该客户渠道的Tracklink -->
+                  <template v-if="getClientPublisherTracklink()">
+                    <el-link 
+                      :href="getClientPublisherTracklink()" 
+                      target="_blank" 
+                      type="primary"
+                      style="word-break: break-all;"
+                    >
+                      {{ getClientPublisherTracklink() }}
+                    </el-link>
+                    <el-button
+                      text
+                      type="primary"
+                      :icon="DocumentCopy"
+                      style="margin-left: 8px;"
+                      @click="copyToClipboard(getClientPublisherTracklink())"
+                      title="复制Tracklink"
+                    />
+                  </template>
+                  <span v-else style="color: #909399;">该Offer未分配给您的渠道</span>
+                </template>
+                <template v-else>
+                  <!-- 管理员：显示原始模板Tracklink -->
+                  <span v-if="currentOffer?.downstream_tracklink" style="word-break: break-all;">
+                    {{ currentOffer.downstream_tracklink }}
+                  </span>
+                  <span v-else>-</span>
+                </template>
               </el-descriptions-item>
               <el-descriptions-item label="Postback URL" :span="2">
                 <span v-if="currentOffer?.postback_url" style="word-break: break-all;">
@@ -714,8 +739,8 @@
             <el-empty v-if="!capsLoading && relatedCaps.length === 0" description="暂无Cap配置" />
           </el-tab-pane>
 
-          <!-- 扣量配置 -->
-          <el-tab-pane label="扣量配置" name="discounts">
+          <!-- 扣量配置（仅管理员可见） -->
+          <el-tab-pane v-if="isAdmin" label="扣量配置" name="discounts">
             <el-table :data="relatedDiscounts" stripe style="width: 100%" v-loading="discountsLoading">
               <el-table-column prop="id" label="ID" width="80" align="center" />
               <el-table-column prop="discount_type" label="扣量类型" width="120">
@@ -751,6 +776,7 @@
             </el-table>
             <el-empty v-if="!discountsLoading && relatedDiscounts.length === 0" description="暂无扣量配置" />
           </el-tab-pane>
+
         </el-tabs>
       </div>
       <template #footer>
@@ -772,6 +798,12 @@ import { getDiscounts } from '@/api/discount'
 import { createShortLink, getShortLinks } from '@/api/shortLink'
 import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
+import { useAuthStore } from '@/store'
+import { computed } from 'vue'
+
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.isAdmin)
+const currentClientId = computed(() => authStore.userInfo?.client?.id || null)
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -1321,11 +1353,13 @@ const handleViewDetails = async (row) => {
       return
     }
     
-    // 并行加载关联数据
-    await Promise.all([
-      loadRelatedCaps(row.id),
-      loadRelatedDiscounts(row.id)
-    ])
+    // 加载关联数据
+    const loadPromises = [loadRelatedCaps(row.id)]
+    // 仅管理员加载扣量配置
+    if (isAdmin.value) {
+      loadPromises.push(loadRelatedDiscounts(row.id))
+    }
+    await Promise.all(loadPromises)
   } catch (error) {
     logger.error('获取Offer详情失败:', error)
     ElMessage.error('获取详情失败')
@@ -1407,6 +1441,31 @@ const getPublisherShortLink = (publisherId) => {
   }
   // 如果还没有主短链接，返回null
   return null
+}
+
+// 获取客户自己的渠道Tracklink（用于客户登录时显示）
+const getClientPublisherTracklink = () => {
+  if (!currentOffer.value || !currentClientId.value) {
+    return null
+  }
+  
+  // 查找属于该客户的渠道
+  const clientPublisher = currentOffer.value.assigned_publishers?.find(
+    pub => pub.client_id === currentClientId.value
+  )
+  
+  if (!clientPublisher) {
+    return null
+  }
+  
+  // 优先使用短链接
+  const shortLink = getPublisherShortLink(clientPublisher.id)
+  if (shortLink) {
+    return shortLink
+  }
+  
+  // 如果没有短链接，使用原始Tracklink
+  return getPublisherTracklink(clientPublisher.id)
 }
 
 // 为渠道创建短链接（不再需要，因为使用主短链接 + 参数）

@@ -538,6 +538,7 @@ async def get_offer(
         {
             "id": pub.id,
             "publisher_name": pub.publisher_name,
+            "client_id": pub.client_id,  # 添加client_id，用于客户筛选
             "downstream_cap": assignment.downstream_cap,
             "affiliate_payout": assignment.affiliate_payout
         }
