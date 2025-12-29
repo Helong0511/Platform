@@ -60,13 +60,15 @@
       <el-menu-item index="/app/admin/affiliate-test">
         <span>下游测试</span>
       </el-menu-item>
-      <el-menu-item index="/app/admin/conversion-summary">
-        <span>转化总览</span>
-      </el-menu-item>
       <el-menu-item index="/app/admin/conversion-log">
         <span>转化日志</span>
       </el-menu-item>
     </el-sub-menu>
+
+    <el-menu-item index="/app/admin/conversion-summary">
+      <template #icon><DataAnalysis /></template>
+      <span>转化总览</span>
+    </el-menu-item>
 
     <el-menu-item v-if="isAdmin" index="/app/admin/short-links">
       <template #icon><Link /></template>
@@ -111,7 +113,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../../store';
 import { ElMenu, ElMenuItem, ElSubMenu, ElIcon } from 'element-plus';
-import { PieChart, Document, UserFilled, Upload, Timer, Link, Connection, Box } from '@element-plus/icons-vue';
+import { PieChart, Document, UserFilled, Upload, Timer, Link, Connection, Box, DataAnalysis } from '@element-plus/icons-vue';
 
 const authStore = useAuthStore();
 const route = useRoute();
