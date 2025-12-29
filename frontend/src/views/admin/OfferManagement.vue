@@ -7,7 +7,7 @@
             <el-icon class="header-icon"><Box /></el-icon>
             <span class="header-title">Offer管理</span>
           </div>
-          <el-button type="primary" :icon="Plus" @click="handleAdd">添加Offer</el-button>
+          <el-button v-if="isAdmin" type="primary" :icon="Plus" @click="handleAdd">添加Offer</el-button>
         </div>
       </template>
 

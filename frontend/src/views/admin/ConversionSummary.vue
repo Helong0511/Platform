@@ -39,6 +39,7 @@
           />
         </el-select>
         <el-select
+          v-if="isAdmin"
           v-model="filterPublisher"
           placeholder="渠道"
           clearable
