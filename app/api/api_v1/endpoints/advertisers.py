@@ -56,8 +56,7 @@ async def create_advertiser(
 
 @router.get("/",
             response_model=PaginatedResponseBaseSchema[list[AdvertiserResponse]],
-            summary="获取广告主列表",
-            dependencies=[Depends(require_admin)])
+            summary="获取广告主列表")
 async def get_advertisers(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
@@ -66,7 +65,7 @@ async def get_advertisers(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取广告主列表（仅管理员）"""
+    """获取广告主列表（所有登录用户可访问）"""
     query = select(Advertiser)
     
     # 搜索过滤

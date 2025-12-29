@@ -72,8 +72,7 @@ async def create_publisher(
 
 @router.get("/",
             response_model=PaginatedResponseBaseSchema[list[PublisherResponse]],
-            summary="获取渠道列表",
-            dependencies=[Depends(require_admin)])
+            summary="获取渠道列表")
 async def get_publishers(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
@@ -82,7 +81,7 @@ async def get_publishers(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取渠道列表（仅管理员）"""
+    """获取渠道列表（所有登录用户可访问）"""
     query = select(Publisher)
     
     if search:
