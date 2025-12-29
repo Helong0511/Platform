@@ -239,12 +239,28 @@ const formRules = {
   ]
 }
 
-// 加载客户列表
+// 加载客户列表（分页加载所有客户）
 const loadClients = async () => {
   try {
-    const response = await getClientList({ page: 1, page_size: 1000 })
-    if (response.code === 200) {
-      clientList.value = response.data || []
+    clientList.value = []
+    let page = 1
+    let hasMore = true
+    
+    while (hasMore) {
+      const response = await getClientList({ page, page_size: 100 })
+      if (response.code === 200) {
+        const clients = response.data || []
+        clientList.value.push(...clients)
+        
+        // 如果返回的数据少于 page_size，说明已经是最后一页
+        if (clients.length < 100) {
+          hasMore = false
+        } else {
+          page++
+        }
+      } else {
+        hasMore = false
+      }
     }
   } catch (error) {
     logger.error('获取客户列表失败:', error)
