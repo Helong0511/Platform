@@ -1511,9 +1511,28 @@ const getClientPublisherTracklink = async () => {
   
   // 优先使用短链接（如果downstream_tracklink是短链接格式）
   let shortLink = getPublisherShortLink(clientPublisher.id)
+  logger.info('getClientPublisherTracklink: getPublisherShortLink返回结果:', shortLink)
   if (shortLink) {
     logger.info('getClientPublisherTracklink: 使用getPublisherShortLink结果:', shortLink)
     return shortLink
+  }
+  
+  // 如果getPublisherShortLink返回null，但downstream_tracklink是短链接格式，手动添加参数
+  if (currentOffer.value.downstream_tracklink && currentOffer.value.downstream_tracklink.includes('/s/')) {
+    logger.warn('getClientPublisherTracklink: getPublisherShortLink返回null，但downstream_tracklink是短链接格式，手动添加参数')
+    let mainShortLink = currentOffer.value.downstream_tracklink.trim()
+    // 如果是相对路径（以/s/开头），需要添加域名
+    if (mainShortLink.startsWith('/s/')) {
+      const baseUrl = window.location.origin
+      mainShortLink = `${baseUrl}${mainShortLink}`
+    }
+    // 移除可能已存在的参数，重新添加
+    const urlParts = mainShortLink.split('?')
+    const baseUrl = urlParts[0]
+    // 添加参数：?offer_id=X&channel_id=Y
+    const result = `${baseUrl}?offer_id=${currentOffer.value.id}&channel_id=${clientPublisher.id}`
+    logger.info('getClientPublisherTracklink: 手动添加参数后的结果:', result)
+    return result
   }
   
   // 如果downstream_tracklink不是短链接格式，尝试通过offer_id查找主短链接
