@@ -1352,7 +1352,14 @@ const handleViewDetails = async (row) => {
       // 每个渠道的短链接通过getPublisherShortLink函数动态生成（主短链接 + 参数）
       
       // 如果是客户登录，加载客户渠道的Tracklink（短链接+参数）
+      console.log('handleViewDetails: 检查条件', {
+        isAdmin: isAdmin.value,
+        currentClientId: currentClientId.value,
+        hasCurrentOffer: !!currentOffer.value
+      })
+      
       if (!isAdmin.value && currentClientId.value) {
+        console.log('开始获取客户Tracklink')
         loadingClientTracklink.value = true
         clientPublisherTracklink.value = null // 先清空
         try {
@@ -1372,6 +1379,10 @@ const handleViewDetails = async (row) => {
           loadingClientTracklink.value = false
         }
       } else {
+        console.log('不是客户登录，清空clientPublisherTracklink', {
+          isAdmin: isAdmin.value,
+          currentClientId: currentClientId.value
+        })
         // 如果不是客户登录，清空clientPublisherTracklink
         clientPublisherTracklink.value = null
       }
