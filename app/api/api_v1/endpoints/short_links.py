@@ -407,6 +407,7 @@ async def get_short_links(
     search: Optional[str] = Query(None, description="搜索关键词（标题、URL、代码）"),
     is_active: Optional[bool] = Query(None, description="是否激活过滤"),
     created_by: Optional[int] = Query(None, description="创建者ID过滤"),
+    offer_id: Optional[int] = Query(None, description="Offer ID过滤"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -425,6 +426,9 @@ async def get_short_links(
     
     if created_by:
         conditions.append(ShortLink.created_by == created_by)
+    
+    if offer_id:
+        conditions.append(ShortLink.offer_id == offer_id)
     
     if search:
         search_pattern = f"%{search}%"

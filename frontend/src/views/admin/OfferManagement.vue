@@ -84,7 +84,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="affiliate_payout" label="下游PO" width="100" align="right">
+        <el-table-column prop="affiliate_payout" :label="isAdmin ? '下游PO' : 'PO'" width="100" align="right">
           <template #default="scope">
             <span v-if="scope.row.affiliate_payout">{{ scope.row.affiliate_payout.toFixed(2) }}</span>
             <span v-else>-</span>
@@ -608,26 +608,27 @@
               </el-descriptions-item>
               <el-descriptions-item label="下游Tracklink" :span="2">
                 <template v-if="!isAdmin && currentClientId">
-                  <!-- 客户登录：显示该客户渠道的Tracklink -->
-                  <template v-if="getClientPublisherTracklink()">
+                  <!-- 客户登录：显示该客户渠道的Tracklink（短链接+参数） -->
+                  <template v-if="clientPublisherTracklink">
                     <el-link 
-                      :href="getClientPublisherTracklink()" 
+                      :href="clientPublisherTracklink" 
                       target="_blank" 
                       type="primary"
                       style="word-break: break-all;"
                     >
-                      {{ getClientPublisherTracklink() }}
+                      {{ clientPublisherTracklink }}
                     </el-link>
                     <el-button
                       text
                       type="primary"
                       :icon="DocumentCopy"
                       style="margin-left: 8px;"
-                      @click="copyToClipboard(getClientPublisherTracklink())"
+                      @click="copyToClipboard(clientPublisherTracklink)"
                       title="复制Tracklink"
                     />
                   </template>
-                  <span v-else style="color: #909399;">该Offer未分配给您的渠道</span>
+                  <span v-else-if="loadingClientTracklink" style="color: #909399;">加载中...</span>
+                  <span v-else style="color: #909399;">该Offer未分配给您的渠道或未找到短链接</span>
                 </template>
                 <template v-else>
                   <!-- 管理员：显示原始模板Tracklink -->
@@ -826,6 +827,8 @@ const capsLoading = ref(false)
 const discountsLoading = ref(false)
 const publisherShortLinks = ref({}) // 存储渠道ID对应的短链接
 const creatingShortLinks = ref({}) // 正在创建短链接的渠道ID
+const clientPublisherTracklink = ref(null) // 客户渠道的Tracklink（短链接+参数）
+const loadingClientTracklink = ref(false) // 是否正在加载客户Tracklink
 
 const pagination = reactive({
   page: 1,
@@ -1347,6 +1350,19 @@ const handleViewDetails = async (row) => {
       
       // 主短链接已保存在downstream_tracklink中，不需要查找
       // 每个渠道的短链接通过getPublisherShortLink函数动态生成（主短链接 + 参数）
+      
+      // 如果是客户登录，加载客户渠道的Tracklink（短链接+参数）
+      if (!isAdmin.value && currentClientId.value) {
+        loadingClientTracklink.value = true
+        try {
+          const tracklink = await getClientPublisherTracklink()
+          clientPublisherTracklink.value = tracklink
+        } catch (error) {
+          logger.error('获取客户Tracklink失败:', error)
+        } finally {
+          loadingClientTracklink.value = false
+        }
+      }
     } else {
       ElMessage.error(response.message || '获取详情失败')
       detailDialogVisible.value = false
@@ -1414,6 +1430,8 @@ const handleDetailDialogClose = () => {
   relatedDiscounts.value = []
   publisherShortLinks.value = {}
   creatingShortLinks.value = {}
+  clientPublisherTracklink.value = null
+  loadingClientTracklink.value = false
   activeTab.value = 'basic'
 }
 
@@ -1444,7 +1462,7 @@ const getPublisherShortLink = (publisherId) => {
 }
 
 // 获取客户自己的渠道Tracklink（用于客户登录时显示）
-const getClientPublisherTracklink = () => {
+const getClientPublisherTracklink = async () => {
   if (!currentOffer.value || !currentClientId.value) {
     return null
   }
@@ -1458,14 +1476,44 @@ const getClientPublisherTracklink = () => {
     return null
   }
   
-  // 优先使用短链接
-  const shortLink = getPublisherShortLink(clientPublisher.id)
+  // 优先使用短链接（如果downstream_tracklink是短链接格式）
+  let shortLink = getPublisherShortLink(clientPublisher.id)
   if (shortLink) {
     return shortLink
   }
   
-  // 如果没有短链接，使用原始Tracklink
-  return getPublisherTracklink(clientPublisher.id)
+  // 如果downstream_tracklink不是短链接格式，尝试通过offer_id查找主短链接
+  if (currentOffer.value.downstream_tracklink && !currentOffer.value.downstream_tracklink.includes('/s/')) {
+    try {
+      // 通过offer_id查找该Offer的主短链接（channel_id为NULL）
+      const existingLinks = await getShortLinks({
+        page: 1,
+        page_size: 100,
+        offer_id: currentOffer.value.id
+      })
+      
+      if (existingLinks.code === 200 && existingLinks.data && existingLinks.data.length > 0) {
+        // 查找主短链接（channel_id为null或undefined）
+        const mainShortLink = existingLinks.data.find(link => 
+          link.offer_id === currentOffer.value.id && 
+          (link.channel_id === null || link.channel_id === undefined)
+        )
+        
+        if (mainShortLink && mainShortLink.short_code) {
+          // 使用找到的主短链接，添加参数
+          const baseUrl = window.location.origin
+          const shortLinkUrl = `${baseUrl}/s/${mainShortLink.short_code}`
+          const separator = shortLinkUrl.includes('?') ? '&' : '?'
+          return `${shortLinkUrl}${separator}offer_id=${currentOffer.value.id}&channel_id=${clientPublisher.id}`
+        }
+      }
+    } catch (error) {
+      logger.error('查找短链接失败:', error)
+    }
+  }
+  
+  // 如果都没有，返回null（不显示原始Tracklink）
+  return null
 }
 
 // 为渠道创建短链接（不再需要，因为使用主短链接 + 参数）
