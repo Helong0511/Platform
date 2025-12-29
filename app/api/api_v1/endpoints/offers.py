@@ -406,8 +406,7 @@ async def create_offer(
 
 @router.get("/",
             response_model=PaginatedResponseBaseSchema[list[OfferResponse]],
-            summary="获取Offer列表",
-            dependencies=[Depends(require_admin)])
+            summary="获取Offer列表")
 async def get_offers(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
@@ -419,7 +418,7 @@ async def get_offers(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取Offer列表（仅管理员）"""
+    """获取Offer列表（所有登录用户可访问）"""
     query = select(Offer)
     
     # 搜索过滤
@@ -504,14 +503,13 @@ async def get_offers(
 
 @router.get("/{offer_id}",
             response_model=ResponseBaseSchema[OfferResponse],
-            summary="获取Offer详情",
-            dependencies=[Depends(require_admin)])
+            summary="获取Offer详情")
 async def get_offer(
     offer_id: int = Path(..., ge=1, description="Offer ID"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取Offer详情（仅管理员）"""
+    """获取Offer详情（所有登录用户可访问）"""
     # 使用joinedload优化关联查询
     from sqlalchemy.orm import joinedload
     query = select(Offer).where(Offer.id == offer_id).options(joinedload(Offer.advertiser))

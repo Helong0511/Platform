@@ -8,12 +8,12 @@
     :router="false"
     @select="handleMenuSelect"
   >
-    <el-menu-item index="/app/dashboard" @click="() => console.log('[Sidebar] 菜单项点击: /app/dashboard')">
+    <el-menu-item v-if="isAdmin" index="/app/dashboard" @click="() => console.log('[Sidebar] 菜单项点击: /app/dashboard')">
       <template #icon><PieChart /></template>
       <span>数据仪表</span>
     </el-menu-item>
 
-    <el-sub-menu index="/app/ad-data">
+    <el-sub-menu v-if="isAdmin" index="/app/ad-data">
       <template #title>
         <el-icon><Document /></el-icon>
         <span>广告数据</span>
@@ -65,6 +65,12 @@
       </el-menu-item>
     </el-sub-menu>
 
+    <!-- 客户用户可见的CPL菜单 -->
+    <el-menu-item v-if="!isAdmin" index="/app/admin/offers">
+      <template #icon><Box /></template>
+      <span>Offer管理</span>
+    </el-menu-item>
+
     <el-menu-item index="/app/admin/conversion-summary">
       <template #icon><DataAnalysis /></template>
       <span>转化总览</span>
@@ -95,15 +101,6 @@
       <span>操作日志</span>
     </el-menu-item>
     
-    <el-menu-item v-if="!isAdmin" index="/app/client/user-management">
-      <template #icon><UserFilled /></template>
-      <span>用户管理</span>
-    </el-menu-item>
-
-    <el-menu-item v-if="!isAdmin && apiEnabled" index="/app/api-documentation">
-      <template #icon><Link /></template>
-      <span>API对接文档</span>
-    </el-menu-item>
 
   </el-menu>
 </template>

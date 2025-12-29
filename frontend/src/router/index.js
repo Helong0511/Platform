@@ -131,7 +131,7 @@ const routes = [
         path: 'admin/offers',
         name: 'OfferManagement',
         component: OfferManagement,
-        meta: { requiresAdmin: true }
+        meta: { requiresAdmin: false }
       },
       {
         path: 'admin/caps',
