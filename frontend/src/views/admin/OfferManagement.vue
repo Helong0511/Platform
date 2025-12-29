@@ -1354,14 +1354,26 @@ const handleViewDetails = async (row) => {
       // 如果是客户登录，加载客户渠道的Tracklink（短链接+参数）
       if (!isAdmin.value && currentClientId.value) {
         loadingClientTracklink.value = true
+        clientPublisherTracklink.value = null // 先清空
         try {
+          console.log('开始获取客户Tracklink，currentOffer:', currentOffer.value)
+          console.log('currentClientId:', currentClientId.value)
           const tracklink = await getClientPublisherTracklink()
+          console.log('getClientPublisherTracklink返回结果:', tracklink)
           clientPublisherTracklink.value = tracklink
+          console.log('clientPublisherTracklink.value已设置为:', clientPublisherTracklink.value)
+          if (!tracklink) {
+            console.warn('警告：getClientPublisherTracklink返回null，可能无法显示Tracklink')
+          }
         } catch (error) {
+          console.error('获取客户Tracklink失败:', error)
           logger.error('获取客户Tracklink失败:', error)
         } finally {
           loadingClientTracklink.value = false
         }
+      } else {
+        // 如果不是客户登录，清空clientPublisherTracklink
+        clientPublisherTracklink.value = null
       }
     } else {
       ElMessage.error(response.message || '获取详情失败')
@@ -1449,18 +1461,20 @@ const getPublisherTracklink = (publisherId) => {
 const getPublisherShortLink = (publisherId) => {
   // 如果downstream_tracklink是主短链接URL，则添加参数
   if (!currentOffer.value?.downstream_tracklink || !currentOffer.value.id || !publisherId) {
-    logger.warn('getPublisherShortLink: 缺少必要参数', {
-      hasDownstreamTracklink: !!currentOffer.value?.downstream_tracklink,
-      offerId: currentOffer.value?.id,
-      publisherId
-    })
+    const warnMsg = `getPublisherShortLink: 缺少必要参数 - hasDownstreamTracklink: ${!!currentOffer.value?.downstream_tracklink}, offerId: ${currentOffer.value?.id}, publisherId: ${publisherId}`
+    console.warn(warnMsg)
+    logger.warn(warnMsg)
     return null
   }
   
   let mainShortLink = currentOffer.value.downstream_tracklink.trim()
+  console.log('getPublisherShortLink: 原始downstream_tracklink:', mainShortLink)
+  
   // 检查是否是短链接格式（包含/s/）
   if (!mainShortLink.includes('/s/')) {
-    logger.warn('getPublisherShortLink: downstream_tracklink不是短链接格式', mainShortLink)
+    const warnMsg = `getPublisherShortLink: downstream_tracklink不是短链接格式: ${mainShortLink}`
+    console.warn(warnMsg)
+    logger.warn(warnMsg)
     return null
   }
   
@@ -1468,6 +1482,7 @@ const getPublisherShortLink = (publisherId) => {
   if (mainShortLink.startsWith('/s/')) {
     const baseUrl = window.location.origin
     mainShortLink = `${baseUrl}${mainShortLink}`
+    console.log('getPublisherShortLink: 添加域名后:', mainShortLink)
   }
   
   // 移除可能已存在的参数，重新添加
@@ -1477,6 +1492,12 @@ const getPublisherShortLink = (publisherId) => {
   
   // 添加参数：?offer_id=X&channel_id=Y
   const result = `${baseUrl}?offer_id=${currentOffer.value.id}&channel_id=${publisherId}`
+  console.log('getPublisherShortLink: 生成短链接', {
+    input: mainShortLink,
+    output: result,
+    offerId: currentOffer.value.id,
+    publisherId
+  })
   logger.info('getPublisherShortLink: 生成短链接', {
     input: mainShortLink,
     output: result,
@@ -1503,34 +1524,48 @@ const getClientPublisherTracklink = async () => {
     return null
   }
   
-  logger.info('getClientPublisherTracklink:', {
+  const logInfo = {
     offerId: currentOffer.value.id,
     publisherId: clientPublisher.id,
     downstreamTracklink: currentOffer.value.downstream_tracklink
-  })
+  }
+  console.log('getClientPublisherTracklink:', logInfo)
+  logger.info('getClientPublisherTracklink:', logInfo)
   
   // 优先使用短链接（如果downstream_tracklink是短链接格式）
   let shortLink = getPublisherShortLink(clientPublisher.id)
+  console.log('getClientPublisherTracklink: getPublisherShortLink返回结果:', shortLink)
   logger.info('getClientPublisherTracklink: getPublisherShortLink返回结果:', shortLink)
+  
   if (shortLink) {
+    console.log('getClientPublisherTracklink: 使用getPublisherShortLink结果:', shortLink)
     logger.info('getClientPublisherTracklink: 使用getPublisherShortLink结果:', shortLink)
     return shortLink
   }
   
   // 如果getPublisherShortLink返回null，但downstream_tracklink是短链接格式，手动添加参数
   if (currentOffer.value.downstream_tracklink && currentOffer.value.downstream_tracklink.includes('/s/')) {
-    logger.warn('getClientPublisherTracklink: getPublisherShortLink返回null，但downstream_tracklink是短链接格式，手动添加参数')
+    const warnMsg = 'getClientPublisherTracklink: getPublisherShortLink返回null，但downstream_tracklink是短链接格式，手动添加参数'
+    console.warn(warnMsg)
+    logger.warn(warnMsg)
+    
     let mainShortLink = currentOffer.value.downstream_tracklink.trim()
+    console.log('getClientPublisherTracklink: 手动处理，原始值:', mainShortLink)
+    
     // 如果是相对路径（以/s/开头），需要添加域名
     if (mainShortLink.startsWith('/s/')) {
       const baseUrl = window.location.origin
       mainShortLink = `${baseUrl}${mainShortLink}`
+      console.log('getClientPublisherTracklink: 添加域名后:', mainShortLink)
     }
+    
     // 移除可能已存在的参数，重新添加
     const urlParts = mainShortLink.split('?')
     const baseUrl = urlParts[0]
+    
     // 添加参数：?offer_id=X&channel_id=Y
     const result = `${baseUrl}?offer_id=${currentOffer.value.id}&channel_id=${clientPublisher.id}`
+    console.log('getClientPublisherTracklink: 手动添加参数后的结果:', result)
     logger.info('getClientPublisherTracklink: 手动添加参数后的结果:', result)
     return result
   }
