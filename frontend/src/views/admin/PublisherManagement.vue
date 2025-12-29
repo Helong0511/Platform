@@ -176,7 +176,7 @@
             <el-option
               v-for="client in clientList"
               :key="client.id"
-              :label="client.company_name"
+              :label="client.user_full_name || client.company_name"
               :value="client.id"
             />
           </el-select>

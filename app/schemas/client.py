@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field, EmailStr
+from typing import Optional
 
 
 class ClientBase(BaseModel):
@@ -38,7 +39,7 @@ class ClientInDBBase(ClientBase):
 
 
 class ClientResponse(ClientInDBBase):
-    pass
+    user_full_name: Optional[str] = None  # 用户全名（从关联的User获取）
 
 
 class ClientListResponse(BaseModel):

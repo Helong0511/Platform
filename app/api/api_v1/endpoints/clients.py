@@ -98,7 +98,13 @@ async def get_clients(
     clients = result.scalars().unique().all()
 
     # 转换为响应格式（用户信息已通过selectinload预加载）
-    client_responses = [ClientResponse.model_validate(client) for client in clients]
+    client_responses = []
+    for client in clients:
+        client_dict = ClientResponse.model_validate(client).model_dump()
+        # 添加用户全名
+        if client.user:
+            client_dict['user_full_name'] = client.user.full_name
+        client_responses.append(ClientResponse.model_validate(client_dict))
 
     return PaginatedResponseBaseSchema.success(
         data=client_responses,
