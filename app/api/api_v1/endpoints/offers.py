@@ -142,17 +142,20 @@ async def check_and_create_downstream_tracklink_short_link(
     db: AsyncSession,
     offer_id: int,
     downstream_tracklink: str,
+    advertiser_tracklink: str,
     offer_name: str,
     base_url: str,
     current_user_id: int
 ) -> tuple[Optional[ShortLink], bool]:
     """
     检查下游Tracklink是否在short_links表中存在，如果不存在则创建
+    注意：创建时使用上游Tracklink（advertiser_tracklink）作为original_url
     
     Args:
         db: 数据库会话
         offer_id: Offer ID
-        downstream_tracklink: 下游Tracklink URL
+        downstream_tracklink: 下游Tracklink URL（用于检查是否存在）
+        advertiser_tracklink: 上游Tracklink URL（用作短链接的original_url）
         offer_name: Offer名称
         base_url: 追踪服务基础URL
         current_user_id: 当前用户ID
@@ -166,15 +169,25 @@ async def check_and_create_downstream_tracklink_short_link(
             logger.warning(f"Offer {offer_id} 没有配置下游Tracklink，跳过检查")
             return None, False
         
-        # 验证URL格式，确保以http://或https://开头
-        original_url = downstream_tracklink.strip()
-        if not original_url.startswith(('http://', 'https://')):
-            logger.warning(f"Offer {offer_id} 的下游Tracklink格式无效（必须以http://或https://开头）: {downstream_tracklink}")
+        if not advertiser_tracklink:
+            logger.warning(f"Offer {offer_id} 没有配置上游Tracklink，无法创建短链接")
             return None, False
         
-        # 检查是否已存在该URL的短链接记录（通过original_url匹配）
+        # 验证上游Tracklink URL格式，确保以http://或https://开头
+        original_url = advertiser_tracklink.strip()
+        if not original_url.startswith(('http://', 'https://')):
+            logger.warning(f"Offer {offer_id} 的上游Tracklink格式无效（必须以http://或https://开头）: {advertiser_tracklink}")
+            return None, False
+        
+        # 检查是否已存在该Offer的短链接记录（通过offer_id和original_url匹配上游Tracklink）
         existing_result = await db.execute(
-            select(ShortLink).where(ShortLink.original_url == original_url)
+            select(ShortLink).where(
+                and_(
+                    ShortLink.offer_id == offer_id,
+                    ShortLink.original_url == original_url,
+                    ShortLink.channel_id.is_(None)  # 主短链接的channel_id为NULL
+                )
+            )
         )
         existing_link = existing_result.scalars().first()
         
@@ -188,11 +201,11 @@ async def check_and_create_downstream_tracklink_short_link(
             )
             return existing_link, False
         
-        # 不存在，创建新的短链接
+        # 不存在，创建新的短链接（使用上游Tracklink作为original_url）
         short_link = ShortLink(
-            original_url=original_url,
+            original_url=original_url,  # 使用上游Tracklink作为original_url
             title=f"{offer_name} - 下游Tracklink短链接",
-            description=f"Offer: {offer_name} 的下游Tracklink短链接",
+            description=f"Offer: {offer_name} 的下游Tracklink短链接（原始URL使用上游Tracklink）",
             offer_id=offer_id,
             channel_id=None,  # 下游Tracklink短链接不关联特定渠道
             created_by=current_user_id,
@@ -225,7 +238,7 @@ async def check_and_create_downstream_tracklink_short_link(
             f"short_link_id={short_link.id}, "
             f"short_code={short_link.short_code}, "
             f"offer_id={short_link.offer_id}, "
-            f"original_url={original_url}"
+            f"original_url={original_url} (使用上游Tracklink)"
         )
         return short_link, True  # 新创建的
         
@@ -969,14 +982,17 @@ async def update_offer(
                 logger.warning(f"Offer {offer.id} 没有配置上游Tracklink，无法创建短链接")
         
         # 检查下游Tracklink是否在short_links表中存在，如果不存在则创建
+        # 注意：创建时使用上游Tracklink（advertiser_tracklink）作为original_url
         downstream_tracklink_short_link_info = None
         current_downstream_tracklink = offer.downstream_tracklink
-        if current_downstream_tracklink:
+        current_advertiser_tracklink = offer.advertiser_tracklink
+        if current_downstream_tracklink and current_advertiser_tracklink:
             base_url = settings.TRACKING_BASE_URL
             downstream_short_link, is_new = await check_and_create_downstream_tracklink_short_link(
                 db=db,
                 offer_id=offer.id,
                 downstream_tracklink=current_downstream_tracklink,
+                advertiser_tracklink=current_advertiser_tracklink,
                 offer_name=offer.offer_name,
                 base_url=base_url,
                 current_user_id=current_user.id
