@@ -138,6 +138,102 @@ def get_short_link_url(base_url: str, short_code: str) -> str:
     return f"{base_url.rstrip('/')}/s/{short_code}"
 
 
+async def check_and_create_downstream_tracklink_short_link(
+    db: AsyncSession,
+    offer_id: int,
+    downstream_tracklink: str,
+    offer_name: str,
+    base_url: str,
+    current_user_id: int
+) -> tuple[Optional[ShortLink], bool]:
+    """
+    检查下游Tracklink是否在short_links表中存在，如果不存在则创建
+    
+    Args:
+        db: 数据库会话
+        offer_id: Offer ID
+        downstream_tracklink: 下游Tracklink URL
+        offer_name: Offer名称
+        base_url: 追踪服务基础URL
+        current_user_id: 当前用户ID
+        
+    Returns:
+        (短链接对象, 是否新创建) 元组，如果失败返回 (None, False)
+        is_new: True表示新创建的，False表示已存在
+    """
+    try:
+        if not downstream_tracklink:
+            logger.warning(f"Offer {offer_id} 没有配置下游Tracklink，跳过检查")
+            return None, False
+        
+        # 验证URL格式，确保以http://或https://开头
+        original_url = downstream_tracklink.strip()
+        if not original_url.startswith(('http://', 'https://')):
+            logger.warning(f"Offer {offer_id} 的下游Tracklink格式无效（必须以http://或https://开头）: {downstream_tracklink}")
+            return None, False
+        
+        # 检查是否已存在该URL的短链接记录（通过original_url匹配）
+        existing_result = await db.execute(
+            select(ShortLink).where(ShortLink.original_url == original_url)
+        )
+        existing_link = existing_result.scalars().first()
+        
+        if existing_link:
+            # 如果已存在，返回已存在的短链接
+            logger.info(
+                f"下游Tracklink的短链接已存在: "
+                f"offer_id={offer_id}, "
+                f"short_code={existing_link.short_code}, "
+                f"original_url={original_url}"
+            )
+            return existing_link, False
+        
+        # 不存在，创建新的短链接
+        short_link = ShortLink(
+            original_url=original_url,
+            title=f"{offer_name} - 下游Tracklink短链接",
+            description=f"Offer: {offer_name} 的下游Tracklink短链接",
+            offer_id=offer_id,
+            channel_id=None,  # 下游Tracklink短链接不关联特定渠道
+            created_by=current_user_id,
+            is_active=True,
+            click_count=0,
+            short_code="temp"  # 临时代码，稍后更新
+        )
+        
+        db.add(short_link)
+        await db.flush()  # 先flush以获取ID
+        
+        # 生成短链接代码
+        result = await db.execute(select(ShortLink.short_code))
+        existing_codes = {row[0] for row in result.all() if row[0] != "temp"}  # 排除临时代码
+        
+        # 尝试从ID生成
+        code_from_id = generate_short_code_from_id(short_link.id, min_length=4)
+        if code_from_id not in existing_codes:
+            short_link.short_code = code_from_id
+        else:
+            # 如果ID生成的代码已存在，使用随机生成
+            unique_code = generate_unique_short_code(existing_codes, length=6)
+            if not unique_code:
+                logger.error(f"生成下游Tracklink短链接代码失败: offer_id={offer_id}")
+                return None, False
+            short_link.short_code = unique_code
+        
+        logger.info(
+            f"为下游Tracklink创建短链接成功: "
+            f"short_link_id={short_link.id}, "
+            f"short_code={short_link.short_code}, "
+            f"offer_id={short_link.offer_id}, "
+            f"original_url={original_url}"
+        )
+        return short_link, True  # 新创建的
+        
+    except Exception as e:
+        logger.error(f"检查并创建下游Tracklink短链接失败: offer_id={offer_id}, error={str(e)}", exc_info=True)
+        return None, False
+
+
 async def sync_short_links_for_offer(
     db: AsyncSession,
     offer_id: int,
@@ -872,6 +968,29 @@ async def update_offer(
             elif not current_advertiser_tracklink:
                 logger.warning(f"Offer {offer.id} 没有配置上游Tracklink，无法创建短链接")
         
+        # 检查下游Tracklink是否在short_links表中存在，如果不存在则创建
+        downstream_tracklink_short_link_info = None
+        current_downstream_tracklink = offer.downstream_tracklink
+        if current_downstream_tracklink:
+            base_url = settings.TRACKING_BASE_URL
+            downstream_short_link, is_new = await check_and_create_downstream_tracklink_short_link(
+                db=db,
+                offer_id=offer.id,
+                downstream_tracklink=current_downstream_tracklink,
+                offer_name=offer.offer_name,
+                base_url=base_url,
+                current_user_id=current_user.id
+            )
+            
+            if downstream_short_link:
+                short_link_url = get_short_link_url(base_url, downstream_short_link.short_code)
+                downstream_tracklink_short_link_info = {
+                    'short_link': downstream_short_link,
+                    'short_link_url': short_link_url,
+                    'is_new': is_new
+                }
+                await db.commit()  # 提交新创建的短链接
+        
         # 重新加载关联信息（使用joinedload优化）
         from sqlalchemy.orm import joinedload
         query = select(Offer).where(Offer.id == offer.id).options(joinedload(Offer.advertiser))
@@ -923,6 +1042,13 @@ async def update_offer(
         
         if downstream_tracklink_changed:
             message += f" 已删除旧的短链接。"
+        
+        # 添加下游Tracklink短链接信息
+        if downstream_tracklink_short_link_info:
+            if downstream_tracklink_short_link_info['is_new']:
+                message += f" 已为下游Tracklink创建短链接: {downstream_tracklink_short_link_info['short_link_url']}。"
+            else:
+                message += f" 下游Tracklink短链接已存在: {downstream_tracklink_short_link_info['short_link_url']}。"
         
         logger.info(f"Offer更新成功: id={offer.id}, message={message}")
         return ResponseBaseSchema.success(data=offer_data, message=message)
