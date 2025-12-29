@@ -55,7 +55,11 @@ async def create_short_link_for_offer(
             logger.warning(f"Offer {offer_id} 没有配置上游Tracklink，无法创建短链接")
             return None, False
         
-        original_url = advertiser_tracklink
+        # 验证URL格式，确保以http://或https://开头
+        original_url = advertiser_tracklink.strip()
+        if not original_url.startswith(('http://', 'https://')):
+            logger.error(f"Offer {offer_id} 的上游Tracklink格式无效（必须以http://或https://开头）: {advertiser_tracklink}")
+            return None, False
         
         # 检查是否已存在该Offer的主短链接（channel_id为NULL）
         existing_result = await db.execute(

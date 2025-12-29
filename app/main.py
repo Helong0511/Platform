@@ -1245,11 +1245,26 @@ async def redirect_short_link_public(
         
         # 验证原始URL格式
         original_url = short_link.original_url
-        if not original_url or not original_url.startswith(('http://', 'https://')):
+        if not original_url:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="短链接配置错误：原始URL格式无效"
+                detail="短链接配置错误：原始URL为空"
             )
+        
+        # 如果URL不是以http://或https://开头，尝试修复（添加https://）
+        if not original_url.startswith(('http://', 'https://')):
+            # 尝试修复：如果URL看起来像域名，添加https://
+            original_url = original_url.strip()
+            if original_url and not original_url.startswith('/'):
+                # 可能是缺少协议的完整URL，添加https://
+                original_url = f"https://{original_url}"
+                logger.warning(f"短链接 {short_code} 的原始URL缺少协议，已自动添加https://: {short_link.original_url} -> {original_url}")
+            else:
+                # 无法修复，抛出错误
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"短链接配置错误：原始URL格式无效（必须以http://或https://开头）: {short_link.original_url}"
+                )
         
         # 写入缓存（供后续请求使用）
         await set_short_link_to_cache(short_code, serialize_short_link(short_link))
