@@ -4,6 +4,12 @@ import requests
 
 URL = 'https://client.btfrx.online/api/v1/bft/postback'
 
+
+Offer_Id = 6
+
+Channel_Id = 3
+
+
 # 生成一个唯一的 click_id（需要转换为字符串）
 click_id = str(uuid.uuid4())
 
@@ -37,8 +43,8 @@ post_data = {
     "ip": "127.0.0.1",  # 【可选】IP地址（如果不提供会自动获取）
     
     # 业务信息
-    "offer_id": 4,  # 【可选】Offer ID（整数或字符串）
-    "channel_id": 3,  # 【可选】渠道ID（字符串，也支持 publisher_id）
+    "offer_id": Offer_Id,  # 【可选】Offer ID（整数或字符串）
+    "channel_id": Channel_Id,  # 【可选】渠道ID（字符串，也支持 publisher_id）
     "gid": 3,  # 【可选】渠道ID（字符串）
     "product_id": 1,  # 【可选】产品ID（整数）
     "client_id": 1,  # 【可选】客户ID（整数）
