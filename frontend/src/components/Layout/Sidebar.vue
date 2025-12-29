@@ -65,7 +65,7 @@
       </el-menu-item>
     </el-sub-menu>
 
-    <el-menu-item v-if="isAdmin" index="/app/admin/conversion-summary">
+    <el-menu-item index="/app/admin/conversion-summary">
       <template #icon><DataAnalysis /></template>
       <span>转化总览</span>
     </el-menu-item>
