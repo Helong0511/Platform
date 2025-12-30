@@ -50,7 +50,15 @@ async def get_conversion_logs(
             end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
         
         # 构建查询条件
-        query = select(PostbackConversion)
+        # 如果需要通过 Click 表筛选 publisher_id 或 advertiser_id，需要 JOIN
+        need_join_click = publisher_id is not None or advertiser_id is not None
+        
+        if need_join_click:
+            # 需要 JOIN Click 表来筛选 publisher_id 或 advertiser_id
+            query = select(PostbackConversion).join(Click, PostbackConversion.click_id == Click.click_id)
+        else:
+            query = select(PostbackConversion)
+        
         conditions = []
         
         if click_id:
@@ -60,6 +68,14 @@ async def get_conversion_logs(
         if offer_id:
             # 注意：PostbackConversion 使用 product_id，需要建立映射
             conditions.append(PostbackConversion.product_id == offer_id)
+        
+        if publisher_id:
+            # 通过 Click 表筛选 publisher_id
+            conditions.append(Click.publisher_id == publisher_id)
+        
+        if advertiser_id:
+            # 通过 Click 表筛选 advertiser_id
+            conditions.append(Click.advertiser_id == advertiser_id)
         
         if conversion_status:
             # 通过 conversion_status 字段查询
@@ -74,8 +90,18 @@ async def get_conversion_logs(
         if conditions:
             query = query.where(and_(*conditions))
         
-        # 总数
-        total_query = select(func.count()).select_from(query.subquery())
+        # 总数（使用相同的查询条件）
+        total_query = select(func.count(PostbackConversion.id))
+        if need_join_click:
+            total_query = total_query.select_from(
+                PostbackConversion.__table__.join(Click.__table__, PostbackConversion.click_id == Click.click_id)
+            )
+        else:
+            total_query = total_query.select_from(PostbackConversion.__table__)
+        
+        if conditions:
+            total_query = total_query.where(and_(*conditions))
+        
         total_result = await db.execute(total_query)
         total = total_result.scalar() or 0
         
