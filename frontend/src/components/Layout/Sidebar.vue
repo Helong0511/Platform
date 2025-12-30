@@ -8,12 +8,14 @@
     :router="false"
     @select="handleMenuSelect"
   >
-    <el-menu-item index="/app/dashboard">
+    <!-- 数据仪表：客户登录且渠道关联了客户时不显示 -->
+    <el-menu-item v-if="!hasClientPublisher" index="/app/dashboard">
       <template #icon><PieChart /></template>
       <span>数据仪表</span>
     </el-menu-item>
 
-    <el-sub-menu index="/app/ad-data">
+    <!-- 广告数据：客户登录且渠道关联了客户时不显示 -->
+    <el-sub-menu v-if="!hasClientPublisher" index="/app/ad-data">
       <template #title>
         <el-icon><Document /></el-icon>
         <span>广告数据</span>
@@ -65,13 +67,14 @@
       </el-menu-item>
     </el-sub-menu>
 
-    <!-- 客户用户可见的CPL菜单 -->
-    <el-menu-item v-if="!isAdmin" index="/app/admin/offers">
+    <!-- 客户用户可见的CPL菜单：如果客户登录但没有关联渠道，则不显示 -->
+    <el-menu-item v-if="!isAdmin && hasClientPublisher" index="/app/admin/offers">
       <template #icon><Box /></template>
       <span>Offer管理</span>
     </el-menu-item>
 
-    <el-menu-item index="/app/admin/conversion-summary">
+    <!-- 转化总览：如果客户登录但没有关联渠道，则不显示 -->
+    <el-menu-item v-if="isAdmin || hasClientPublisher" index="/app/admin/conversion-summary">
       <template #icon><DataAnalysis /></template>
       <span>转化总览</span>
     </el-menu-item>
@@ -125,6 +128,14 @@ const authStore = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const isAdmin = computed(() => authStore.isAdmin);
+
+// 判断客户是否有关联的渠道（如果客户登录且有client信息，则认为可能有关联的渠道）
+const hasClientPublisher = computed(() => {
+  // 如果是管理员，不隐藏菜单
+  if (isAdmin.value) return false;
+  // 如果客户登录且有client信息，则认为有关联的渠道，需要隐藏菜单
+  return !isAdmin.value && !!authStore.userInfo?.client?.id;
+});
 
 // 获取 CSS 变量值
 const getCSSVariable = (variableName) => {
