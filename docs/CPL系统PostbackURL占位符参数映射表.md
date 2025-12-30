@@ -215,6 +215,6 @@ http://example.com/postback?click_id=click_abc123&conversion_id=conv_xyz789&even
 ---
 
 **文档版本**: v1.0  
-**最后更新**: 2025-01-15  
+**最后更新**: 2025-12-30  
 **维护者**: CPL 系统开发团队
 
