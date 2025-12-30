@@ -101,7 +101,7 @@
           style="width: 100%;"
           :default-sort="{ prop: 'conversion_time', order: 'descending' }"
         >
-          <el-table-column prop="conversion_time" label="转化时间" width="180" sortable>
+          <el-table-column prop="conversion_time" label="转化时间" width="150" sortable>
             <template #default="scope">
               {{ scope.row.conversion_time ? formatDate(scope.row.conversion_time) : '-' }}
             </template>
@@ -127,22 +127,22 @@
               <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="offer_name" label="Offer" min-width="180" show-overflow-tooltip>
+          <el-table-column prop="offer_name" label="Offer" min-width="120" show-overflow-tooltip>
             <template #default="scope">
               <span class="text-primary">{{ scope.row.offer_name || '-' }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="publisher_name" label="渠道" width="140" show-overflow-tooltip>
+          <el-table-column prop="publisher_name" label="渠道" width="120" show-overflow-tooltip>
             <template #default="scope">
               {{ scope.row.publisher_name || '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="advertiser_name" label="广告主" width="140" show-overflow-tooltip>
+          <el-table-column prop="advertiser_name" label="广告主" width="120" show-overflow-tooltip>
             <template #default="scope">
               {{ scope.row.advertiser_name || '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="payout" label="支付金额" width="110" align="right" sortable>
+          <el-table-column prop="payout" label="支付金额" width="120" align="right" sortable>
             <template #default="scope">
               <span v-if="scope.row.payout" class="text-success font-weight-medium">
                 {{ scope.row.payout.toFixed(2) }}
@@ -150,7 +150,7 @@
               <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="click_time" label="点击时间" width="160" sortable>
+          <el-table-column prop="click_time" label="点击时间" width="130" sortable>
             <template #default="scope">
               <span class="text-secondary">{{ scope.row.click_time ? formatDate(scope.row.click_time) : '-' }}</span>
             </template>
@@ -163,7 +163,7 @@
               <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="platform" label="平台" width="90" align="center">
+          <el-table-column prop="platform" label="平台" width="120" align="center">
             <template #default="scope">
               <el-tag v-if="scope.row.platform" size="small" type="primary">
                 {{ scope.row.platform }}
