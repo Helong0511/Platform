@@ -217,7 +217,7 @@ async def login(
         # 客户用户：获取第一个客户的api_enabled状态
         client = user.clients[0]
         if client:
-            api_enabled = client.api_enabled if client else False
+            api_enabled = client.api_enabled
             
             # 检查该客户是否有关联的渠道（只检查激活的渠道）
             from sqlalchemy import func, and_
