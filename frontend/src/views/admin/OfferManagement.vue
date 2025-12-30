@@ -26,6 +26,7 @@
           </template>
         </el-input>
         <el-select
+          v-if="isAdmin"
           v-model="filterAdvertiser"
           placeholder="请选择广告主"
           clearable
@@ -152,18 +153,23 @@
                 :href="getRowClientPublisherTracklink(scope.row)" 
                 target="_blank" 
                 type="primary"
-                :underline="false"
                 style="word-break: break-all;"
               >
-                查看
+                {{ getRowClientPublisherTracklink(scope.row) }}
               </el-link>
               <span v-else>-</span>
             </template>
             <template v-else>
               <!-- 管理员：显示原始Tracklink -->
-              <span v-if="scope.row.downstream_tracklink" style="word-break: break-all;">
+              <el-link 
+                v-if="scope.row.downstream_tracklink"
+                :href="scope.row.downstream_tracklink" 
+                target="_blank" 
+                type="primary"
+                style="word-break: break-all;"
+              >
                 {{ scope.row.downstream_tracklink }}
-              </span>
+              </el-link>
               <span v-else>-</span>
             </template>
           </template>
