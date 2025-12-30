@@ -59,6 +59,7 @@ class ClientInfo(BaseModel):
     is_active: bool | None = True
     api_enabled: bool | None = Field(False, description="是否允许API访问")
     password_change_enabled: bool | None = Field(False, description="是否允许客户修改密码")
+    has_publisher: bool | None = Field(False, description="是否有关联的渠道（用于前端菜单显示）")
 
 
 class UserResponse(UserInDBBase):
@@ -67,6 +68,7 @@ class UserResponse(UserInDBBase):
     created_at: datetime | None = None
     api_enabled: bool | None = Field(False, description="客户API访问开关状态（仅客户角色有效，用于前端菜单显示）")
     password_change_enabled: bool | None = Field(False, description="客户密码修改开关状态（仅客户角色有效）")
+    has_publisher: bool | None = Field(False, description="是否有关联的渠道（仅客户角色有效，用于前端菜单显示）")
     client: Optional[ClientInfo] = None  # 客户信息（仅当用户是客户角色时才有值）
 
 

@@ -25,7 +25,7 @@ import pandas as pd
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
-from app.models.models import User, UserRole, Client
+from app.models.models import User, UserRole, Client, Publisher
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, PasswordChange
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 import uuid
@@ -411,6 +411,7 @@ async def get_current_user_info(
     """
     # 获取关联的客户信息（如果用户是客户角色）- 使用selectinload预加载
     from sqlalchemy.orm import selectinload
+    from sqlalchemy import and_
     
     query = select(User).options(selectinload(User.clients)).where(User.id == current_user.id)
     result = await db.execute(query)
@@ -425,12 +426,26 @@ async def get_current_user_info(
     client_data = None
     api_enabled = False
     password_change_enabled = False
+    has_publisher = False
     if user.role == UserRole.CLIENT:
         # 客户信息已通过selectinload预加载，直接访问
         client = user.clients[0] if user.clients else None
         if client:
             api_enabled = client.api_enabled  # 获取API开关状态
             password_change_enabled = client.password_change_enabled  # 获取密码修改开关状态
+            
+            # 检查该客户是否有关联的渠道（只检查激活的渠道）
+            publisher_check = await db.execute(
+                select(func.count(Publisher.id)).where(
+                    and_(
+                        Publisher.client_id == client.id,
+                        Publisher.is_active == True
+                    )
+                )
+            )
+            publisher_count = publisher_check.scalar() or 0
+            has_publisher = publisher_count > 0
+            
             client_data = {
                 'id': client.id,
                 'key': client.key,  # 包含API密钥
@@ -440,7 +455,8 @@ async def get_current_user_info(
                 'address': client.address,
                 'is_active': client.is_active,
                 'api_enabled': client.api_enabled,  # 包含API开关状态
-                'password_change_enabled': client.password_change_enabled  # 包含密码修改开关状态
+                'password_change_enabled': client.password_change_enabled,  # 包含密码修改开关状态
+                'has_publisher': has_publisher  # 是否有关联的渠道
             }
 
     # 构建用户数据（包含客户信息）- 使用从数据库查询的user对象
@@ -455,6 +471,7 @@ async def get_current_user_info(
         'updated_at': user.updated_at,
         'api_enabled': api_enabled,  # API开关状态（用于前端菜单显示）
         'password_change_enabled': password_change_enabled,  # 密码修改开关状态
+        'has_publisher': has_publisher,  # 是否有关联的渠道（用于前端菜单显示）
         'client': client_data  # 客户信息（如果存在）
     }
     user_data = UserResponse.model_validate(user_dict).model_dump()

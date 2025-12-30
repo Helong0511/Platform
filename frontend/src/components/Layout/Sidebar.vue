@@ -129,12 +129,16 @@ const route = useRoute();
 const router = useRouter();
 const isAdmin = computed(() => authStore.isAdmin);
 
-// 判断客户是否有关联的渠道（如果客户登录且有client信息，则认为可能有关联的渠道）
+// 判断客户是否有关联的渠道（使用后端返回的has_publisher字段）
 const hasClientPublisher = computed(() => {
   // 如果是管理员，不隐藏菜单
   if (isAdmin.value) return false;
-  // 如果客户登录且有client信息，则认为有关联的渠道，需要隐藏菜单
-  return !isAdmin.value && !!authStore.userInfo?.client?.id;
+  // 使用后端返回的has_publisher字段（更准确的判断）
+  // 优先使用userInfo.has_publisher，如果没有则使用client.has_publisher作为后备
+  return !isAdmin.value && (
+    authStore.userInfo?.has_publisher === true || 
+    authStore.userInfo?.client?.has_publisher === true
+  );
 });
 
 // 获取 CSS 变量值
