@@ -7,6 +7,7 @@ from sqlalchemy.dialects.mysql import insert
 from sqlalchemy import func, Float
 from typing import List, Dict, Any
 import logging
+from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ async def batch_upsert_ad_data(
                 ecpm_after_deduct=stmt.inserted.ecpm_after_deduct,
                 revenue_before_deduct=stmt.inserted.revenue_before_deduct,
                 revenue_after_deduct=stmt.inserted.revenue_after_deduct,
-                updated_at=func.now()
+                updated_at=get_app_now_naive()  # 使用北京时间
             )
             
             result = await db.execute(stmt)

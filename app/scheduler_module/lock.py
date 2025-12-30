@@ -15,6 +15,7 @@ from sqlalchemy import select, and_
 from app.core.database import AsyncSessionLocal
 from app.models.models import ScheduledTask
 from app.core.config import settings
+from app.core.utils import get_app_now_naive, APP_TIMEZONE
 
 logger = logging.getLogger(__name__)
 
@@ -92,13 +93,14 @@ async def acquire_task_lock(
         if task_record.is_running:
             # 检查是否超时（可能是上次执行异常导致锁未释放）
             if task_record.last_run_time:
-                # 确保 last_run_time 是 timezone-aware 的 datetime
+                # 确保 last_run_time 是 naive datetime（数据库存储的是北京时间）
                 if task_record.last_run_time.tzinfo is None:
-                    # 如果数据库返回的是 naive datetime，假设是 UTC
-                    last_run_utc = UTC_TZ.localize(task_record.last_run_time)
+                    # 如果数据库返回的是 naive datetime，假设是北京时间
+                    last_run_app = task_record.last_run_time
                 else:
-                    last_run_utc = task_record.last_run_time
-                time_diff = (datetime.now(UTC_TZ) - last_run_utc).total_seconds()
+                    # 如果带时区信息，转换为北京时间（naive）
+                    last_run_app = task_record.last_run_time.astimezone(APP_TIMEZONE).replace(tzinfo=None)
+                time_diff = (get_app_now_naive() - last_run_app).total_seconds()
                 if time_diff > timeout_seconds:
                     # 超时，释放锁（在同一个事务中）
                     logger.warning(
@@ -126,8 +128,8 @@ async def acquire_task_lock(
         task_record.is_running = True
         task_record.last_run_pid = CURRENT_PID
         task_record.last_run_host = CURRENT_HOST
-        # 存储 UTC 时间到数据库（数据库统一使用 UTC）
-        task_record.last_run_time = datetime.now(UTC_TZ)
+        # 存储北京时间到数据库（数据库统一使用北京时间）
+        task_record.last_run_time = get_app_now_naive()
         task_record.run_count += 1
         task_record.last_error = None  # 清除上次错误
 
@@ -191,11 +193,14 @@ async def acquire_task_lock(
                 if task_record.is_running:
                     # 检查是否超时
                     if task_record.last_run_time:
+                        # 确保 last_run_time 是 naive datetime（数据库存储的是北京时间）
                         if task_record.last_run_time.tzinfo is None:
-                            last_run_utc = UTC_TZ.localize(task_record.last_run_time)
+                            # 如果数据库返回的是 naive datetime，假设是北京时间
+                            last_run_app = task_record.last_run_time
                         else:
-                            last_run_utc = task_record.last_run_time
-                        time_diff = (datetime.now(UTC_TZ) - last_run_utc).total_seconds()
+                            # 如果带时区信息，转换为北京时间（naive）
+                            last_run_app = task_record.last_run_time.astimezone(APP_TIMEZONE).replace(tzinfo=None)
+                        time_diff = (get_app_now_naive() - last_run_app).total_seconds()
                         if time_diff > timeout_seconds:
                             logger.warning(
                                 f"任务 {task_name} 执行超时（{time_diff:.1f}秒），释放锁。"
@@ -216,7 +221,7 @@ async def acquire_task_lock(
                 task_record.is_running = True
                 task_record.last_run_pid = CURRENT_PID
                 task_record.last_run_host = CURRENT_HOST
-                task_record.last_run_time = datetime.now(UTC_TZ)
+                task_record.last_run_time = get_app_now_naive()  # 使用北京时间
                 task_record.run_count += 1
                 task_record.last_error = None
 
@@ -280,8 +285,8 @@ async def release_task_lock(
 
             # 原子性更新：在持有行锁的情况下更新状态
             task_record.is_running = False
-            # 存储 UTC 时间到数据库（数据库统一使用 UTC）
-            task_record.updated_at = datetime.now(UTC_TZ)
+            # 存储北京时间到数据库（数据库统一使用北京时间）
+            task_record.updated_at = get_app_now_naive()
 
             if success:
                 task_record.success_count += 1
