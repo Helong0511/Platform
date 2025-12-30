@@ -15,6 +15,7 @@ from app.core.security import get_current_user, require_admin
 from app.core.config import settings
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.utils import get_app_now_naive
 from app.models.models import User, UserRole
 from app.models.session import UserSession, TokenBlacklist
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -57,14 +58,15 @@ async def get_my_sessions(
     - 用户可以查看自己的所有会话
     - 返回分页结果
     """
-    # 构建查询
+    # 构建查询（expires_at 存储的是北京时间，使用北京时间比较）
+    now = get_app_now_naive()
     query = select(UserSession).where(
         UserSession.user_id == current_user.id,
-        UserSession.expires_at > datetime.now(timezone.utc)  # 只返回未过期的会话
+        UserSession.expires_at > now  # 只返回未过期的会话
     )
     count_query = select(func.count(UserSession.id)).where(
         UserSession.user_id == current_user.id,
-        UserSession.expires_at > datetime.now(timezone.utc)
+        UserSession.expires_at > now
     )
     
     # 获取总数
@@ -187,7 +189,7 @@ async def revoke_all_my_sessions(
     query = select(UserSession).where(
         UserSession.user_id == current_user.id,
         UserSession.is_active == True,
-        UserSession.expires_at > datetime.now(timezone.utc)
+        UserSession.expires_at > get_app_now_naive()  # 使用北京时间比较
     )
     if current_jti:
         query = query.where(UserSession.token_jti != current_jti)
@@ -247,7 +249,7 @@ async def get_user_sessions(
     # 构建查询 - 使用JOIN验证用户存在性（如果用户不存在，会话查询将返回空结果）
     query = select(UserSession).where(
         UserSession.user_id == user_id,
-        UserSession.expires_at > datetime.now(timezone.utc)
+        UserSession.expires_at > get_app_now_naive()  # 使用北京时间比较
     )
     
     # 先执行一次查询检查用户是否存在（如果会话查询返回空，可能是用户不存在或没有会话）
@@ -262,7 +264,7 @@ async def get_user_sessions(
         )
     count_query = select(func.count(UserSession.id)).where(
         UserSession.user_id == user_id,
-        UserSession.expires_at > datetime.now(timezone.utc)
+        UserSession.expires_at > get_app_now_naive()  # 使用北京时间比较
     )
     
     # 获取总数
@@ -372,7 +374,7 @@ async def revoke_all_user_sessions(
     query = select(UserSession).where(
         UserSession.user_id == user_id,
         UserSession.is_active == True,
-        UserSession.expires_at > datetime.now(timezone.utc)
+        UserSession.expires_at > get_app_now_naive()  # 使用北京时间比较
     )
     
     result = await db.execute(query)

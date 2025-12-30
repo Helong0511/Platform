@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, delete, update
 
 from app.core.database import AsyncSessionLocal
+from app.core.utils import get_app_now_naive
 from app.models.session import UserSession, TokenBlacklist
 from app.scheduler_module.task_names import CLEANUP_SESSIONS_TASK_NAME
 
@@ -46,11 +47,11 @@ async def cleanup_expired_sessions():
     """
     try:
         async with AsyncSessionLocal() as db:
-            # 计算过期时间阈值（30天前）
-            expired_threshold = datetime.now(timezone.utc) - timedelta(days=30)
+            # 计算过期时间阈值（30天前，使用北京时间）
+            expired_threshold = get_app_now_naive() - timedelta(days=30)
 
-            # 计算非活跃时间阈值（7天前）
-            inactive_threshold = datetime.now(timezone.utc) - timedelta(days=7)
+            # 计算非活跃时间阈值（7天前，使用北京时间）
+            inactive_threshold = get_app_now_naive() - timedelta(days=7)
 
             # 1. 删除过期超过30天的会话记录
             delete_sessions_query = delete(UserSession).where(
