@@ -35,7 +35,7 @@ export const initTimezone = async () => {
 
 /**
  * 格式化日期时间（同步版本，使用缓存的时区）
- * @param {string} dateString - 日期字符串（UTC 时间）
+ * @param {string} dateString - 日期字符串（ISO 8601格式，带时区信息，后端返回的是应用时区）
  * @returns {string} 格式化后的日期字符串（应用配置的时区）
  */
 export const formatDate = (dateString) => {
@@ -54,7 +54,7 @@ export const formatDate = (dateString) => {
 
 /**
  * 格式化日期时间（完整格式，同步版本）
- * @param {string} dateString - 日期字符串（UTC 时间）
+ * @param {string} dateString - 日期字符串（ISO 8601格式，带时区信息，后端返回的是应用时区）
  * @returns {string} 格式化后的日期时间字符串（应用配置的时区）
  */
 export const formatDateTime = (dateString) => {

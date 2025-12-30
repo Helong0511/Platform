@@ -4,6 +4,7 @@
 import logging
 from typing import Optional
 from datetime import datetime, timezone
+from app.core.utils import parse_date_to_app_timezone
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -40,14 +41,13 @@ async def get_conversion_logs(
     仅管理员
     """
     try:
-        # 解析日期
+        # 解析日期（使用应用时区，与数据库时间一致）
         start_datetime = None
         end_datetime = None
         if start_date:
-            start_datetime = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            start_datetime = parse_date_to_app_timezone(start_date, is_end_date=False)
         if end_date:
-            end_datetime = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
+            end_datetime = parse_date_to_app_timezone(end_date, is_end_date=True)
         
         # 构建查询条件
         # 如果需要通过 Click 表筛选 offer_id、publisher_id 或 advertiser_id，需要 JOIN

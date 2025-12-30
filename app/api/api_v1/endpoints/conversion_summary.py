@@ -4,6 +4,7 @@
 import logging
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -84,15 +85,18 @@ async def get_conversion_summary(
         start_datetime = None
         end_datetime = None
         if start_date:
-            start_datetime = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            start_datetime = parse_date_to_app_timezone(start_date, is_end_date=False)
         if end_date:
-            end_datetime = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+            # 结束日期需要包含当天的所有时间，所以+1天并使用00:00:00作为上界（不包含）
+            end_datetime = parse_date_to_app_timezone(end_date, is_end_date=False) + timedelta(days=1)
         
-        # 如果没有指定日期，默认查询最近30天
+        # 如果没有指定日期，默认查询最近30天（使用应用时区）
         if not start_datetime:
-            start_datetime = datetime.now(timezone.utc) - timedelta(days=30)
+            start_datetime = get_app_now_naive() - timedelta(days=30)
+            start_datetime = start_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
         if not end_datetime:
-            end_datetime = datetime.now(timezone.utc)
+            end_datetime = get_app_now_naive()
+            end_datetime = end_datetime.replace(hour=23, minute=59, second=59, microsecond=999999)
         
         # 构建查询条件
         click_conditions = [Click.click_time >= start_datetime, Click.click_time < end_datetime]
@@ -425,18 +429,21 @@ async def get_summary_by_offer(
                 if not client_publisher_ids:
                     return ResponseBaseSchema.success(data=[])
         
-        # 解析日期
+        # 解析日期（使用应用时区，与数据库时间一致）
         start_datetime = None
         end_datetime = None
         if start_date:
-            start_datetime = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            start_datetime = parse_date_to_app_timezone(start_date, is_end_date=False)
         if end_date:
-            end_datetime = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+            # 结束日期需要包含当天的所有时间，所以+1天并使用00:00:00作为上界（不包含）
+            end_datetime = parse_date_to_app_timezone(end_date, is_end_date=False) + timedelta(days=1)
         
         if not start_datetime:
-            start_datetime = datetime.now(timezone.utc) - timedelta(days=30)
+            start_datetime = get_app_now_naive() - timedelta(days=30)
+            start_datetime = start_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
         if not end_datetime:
-            end_datetime = datetime.now(timezone.utc)
+            end_datetime = get_app_now_naive()
+            end_datetime = end_datetime.replace(hour=23, minute=59, second=59, microsecond=999999)
         
         # 获取所有Offer
         offers_result = await db.execute(select(Offer))

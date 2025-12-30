@@ -13,7 +13,7 @@ from app.core.postback.handlers import get_handler
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
 from app.models.models import PostbackConversion, Product, Click, Offer, PostbackForwardQueue, Advertiser
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.cap import check_cap, increment_cap_count
@@ -176,15 +176,17 @@ class PostbackProcessor:
                     if offer_obj:
                         validity_hours = offer_obj.click_validity_hours or 720  # 默认30天
                         # 计算小时差
-                        # 确保 click_time 是 aware datetime（如果数据库存储的是 naive，需要添加时区）
-                        now_utc = datetime.now(timezone.utc)
+                        # 数据库中的 click_time 是应用时区的 naive datetime（北京时间）
+                        now_app = get_app_now_naive()
                         if click_time:
-                            # 如果 click_time 是 naive，假设它是 UTC 时间
+                            # 如果 click_time 是 naive，假设它是应用时区（北京时间）
                             if click_time.tzinfo is None:
-                                click_time_aware = click_time.replace(tzinfo=timezone.utc)
+                                # 直接使用naive datetime进行比较（都是应用时区）
+                                hours_diff = (now_app - click_time).total_seconds() / 3600
                             else:
-                                click_time_aware = click_time
-                            hours_diff = (now_utc - click_time_aware).total_seconds() / 3600
+                                # 如果有时区信息，转换为应用时区的naive datetime
+                                click_time_app = click_time.astimezone(APP_TIMEZONE).replace(tzinfo=None)
+                                hours_diff = (now_app - click_time_app).total_seconds() / 3600
                         else:
                             hours_diff = 0  # 如果没有 click_time，跳过有效期检查
                         

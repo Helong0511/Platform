@@ -148,3 +148,28 @@ def get_app_now_naive() -> datetime:
         datetime: 应用时区的当前时间（naive，不带时区信息）
     """
     return datetime.now(APP_TIMEZONE).replace(tzinfo=None)
+
+
+def parse_date_to_app_timezone(date_str: str, is_end_date: bool = False) -> datetime:
+    """
+    将日期字符串解析为应用时区的datetime（naive）
+    
+    用于日期范围查询，确保与数据库中的时间（北京时间naive）一致
+    
+    Args:
+        date_str: 日期字符串（YYYY-MM-DD格式）
+        is_end_date: 是否为结束日期（如果是，设置为23:59:59，否则为00:00:00）
+    
+    Returns:
+        datetime: 应用时区的datetime（naive，不带时区信息）
+    
+    Example:
+        parse_date_to_app_timezone("2024-01-01", False) -> 2024-01-01 00:00:00
+        parse_date_to_app_timezone("2024-01-01", True) -> 2024-01-01 23:59:59
+    """
+    dt = datetime.strptime(date_str, "%Y-%m-%d")
+    if is_end_date:
+        dt = dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+    else:
+        dt = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    return dt
