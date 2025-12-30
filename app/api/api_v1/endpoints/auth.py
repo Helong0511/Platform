@@ -16,6 +16,7 @@ from sqlalchemy.future import select
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import JWTUtils, get_current_user
+from app.core.utils import get_app_now_naive
 from app.models.models import Client, User, UserRole, Publisher
 from app.schemas.auth import LoginResponse
 
@@ -190,7 +191,12 @@ async def login(
         from app.models.session import UserSession
         from app.core.utils import get_client_ip, get_device_type
         
-        expires_at = datetime.now(timezone.utc) + access_token_expires
+        # expires_at 需要保持UTC时间用于比较，但存储时转换为北京时间
+        expires_at_utc = datetime.now(timezone.utc) + access_token_expires
+        # 转换为北京时间（naive）存储到数据库
+        from app.core.utils import APP_TIMEZONE
+        expires_at = expires_at_utc.astimezone(APP_TIMEZONE).replace(tzinfo=None)
+        
         device_type_str = get_device_type(request)
         user_agent = request.headers.get("User-Agent", "")[:500]
         
@@ -201,8 +207,8 @@ async def login(
             user_agent=user_agent,
             device_info=device_type_str,
             is_active=True,
-            last_activity=datetime.now(timezone.utc),
-            expires_at=expires_at
+            last_activity=get_app_now_naive(),  # 使用北京时间
+            expires_at=expires_at  # 已转换为北京时间
         )
         db.add(session)
         # 不在这里commit，由get_db的finally块自动commit

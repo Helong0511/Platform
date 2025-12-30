@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.utils import get_app_now_naive
 from app.models.models import User, AdvertiserTest, Advertiser, Offer
 from app.schemas.cpl.test import AdvertiserTestCreate, AdvertiserTestResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -78,7 +79,7 @@ async def create_advertiser_test(
         country=offer.country,
         click_id=click_id,
         click_url=click_url,
-        test_time=datetime.now(timezone.utc)
+        test_time=get_app_now_naive()  # 使用北京时间
     )
     
     try:

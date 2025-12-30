@@ -14,6 +14,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.utils import get_app_now_naive
 from app.models.models import User, AffiliateTest, Publisher, Offer, OfferPublisherAssignment
 from app.schemas.cpl.test import AffiliateTestCreate, AffiliateTestResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -111,7 +112,7 @@ async def create_affiliate_test(
         price=affiliate_payout,
         country=offer.country,
         platform=None,
-        postback_time=datetime.now(timezone.utc),
+        postback_time=get_app_now_naive(),  # 使用北京时间
         status=status,
         affiliate_return_content=affiliate_return_content
     )

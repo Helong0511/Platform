@@ -358,7 +358,7 @@ class PostbackProcessor:
                             request_data=raw_data_json if product.downstream_postback_method == 'POST' else None,
                             request_params=None, # 如果是GET，参数组合逻辑在 forwarder 中
                             created_at=get_app_now_naive(),
-                            next_retry_time=datetime.now(timezone.utc)
+                            next_retry_time=get_app_now_naive()  # 使用北京时间
                         )
                         db.add(queue_item)
                         await db.commit()

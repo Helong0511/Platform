@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, func
 
 from app.core.database import AsyncSessionLocal
+from app.core.utils import get_app_now_naive
 from app.models.models import PostbackForwardQueue, PostbackForwardLog, PostbackConversion, Product
 from app.core.postback.forwarder import PostbackForwarder
 
@@ -42,8 +43,8 @@ async def process_forward_queue():
     """
     try:
         async with AsyncSessionLocal() as db:
-            # 1. 查询待处理任务
-            now = datetime.now(timezone.utc)
+            # 1. 查询待处理任务（使用北京时间比较，因为next_retry_time存储的是北京时间）
+            now = get_app_now_naive()
             query = select(PostbackForwardQueue).where(
                 PostbackForwardQueue.next_retry_time <= now
             ).order_by(PostbackForwardQueue.next_retry_time).limit(BATCH_SIZE)
@@ -145,7 +146,7 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
                 success=True,
                 retry_count=task.retry_count,
                 created_at=task.created_at, # 保持原始创建时间
-                completed_at=datetime.now(timezone.utc)
+                completed_at=get_app_now_naive()  # 使用北京时间
             )
             db.add(log_entry)
             await db.delete(task)
@@ -168,7 +169,7 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
                     error_message=error_msg,
                     retry_count=task.retry_count,
                     created_at=task.created_at,
-                    completed_at=datetime.now(timezone.utc)
+                    completed_at=get_app_now_naive()  # 使用北京时间
                 )
                 db.add(log_entry)
                 await db.delete(task)
@@ -177,7 +178,7 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
                 # 还可以重试：更新 retry_count 和 next_retry_time
                 delay = RETRY_DELAYS[min(task.retry_count, len(RETRY_DELAYS) - 1)]
                 task.retry_count += 1
-                task.next_retry_time = datetime.now(timezone.utc) + timedelta(seconds=delay)
+                task.next_retry_time = get_app_now_naive() + timedelta(seconds=delay)  # 使用北京时间
                 logger.info(f"转发任务失败，安排重试 ({task.retry_count}/{MAX_RETRIES}): queue_id={task.id}, delay={delay}s")
         
         await db.commit()

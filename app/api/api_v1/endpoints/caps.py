@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.utils import get_app_now_naive
 from app.models.models import User, OfferCap, Offer, Advertiser, Publisher
 from app.schemas.cpl.cap import OfferCapCreate, OfferCapUpdate, OfferCapResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -70,7 +71,7 @@ async def create_cap(
     # 设置Cap开始日期（用于Total Cap）
     cap_start_date = None
     if cap_in.total_cap:
-        cap_start_date = datetime.now(timezone.utc)
+        cap_start_date = get_app_now_naive()  # 使用北京时间
     
     cap = OfferCap(
         cap_type=cap_in.cap_type,
@@ -247,7 +248,7 @@ async def update_cap(
     
     # 如果更新了total_cap且之前没有cap_start_date，设置开始日期
     if 'total_cap' in update_data and update_data['total_cap'] and not cap.cap_start_date:
-        update_data['cap_start_date'] = datetime.now(timezone.utc)
+        update_data['cap_start_date'] = get_app_now_naive()  # 使用北京时间
     
     for key, value in update_data.items():
         setattr(cap, key, value)

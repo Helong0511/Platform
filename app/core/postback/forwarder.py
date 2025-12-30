@@ -135,7 +135,7 @@ class PostbackForwarder:
             forward_log.response_status = response.status_code
             forward_log.response_body = response.text[:2000]  # 限制响应内容长度
             forward_log.success = 200 <= response.status_code < 300
-            forward_log.completed_at = datetime.now(timezone.utc)
+            forward_log.completed_at = get_app_now_naive()  # 使用北京时间
             
             if forward_log.success:
                 logger.info(
@@ -183,21 +183,21 @@ class PostbackForwarder:
         
         except httpx.TimeoutException as e:
             forward_log.error_message = f"请求超时: {str(e)}"
-            forward_log.completed_at = datetime.now(timezone.utc)
+            forward_log.completed_at = get_app_now_naive()  # 使用北京时间
             logger.error(
                 f"转发 postback 到渠道超时: conversion_id={conversion.id}, "
                 f"publisher_id={publisher.id}, url={replaced_url[:100]}"
             )
         except httpx.RequestError as e:
             forward_log.error_message = f"请求错误: {str(e)}"
-            forward_log.completed_at = datetime.now(timezone.utc)
+            forward_log.completed_at = get_app_now_naive()  # 使用北京时间
             logger.error(
                 f"转发 postback 到渠道失败: conversion_id={conversion.id}, "
                 f"publisher_id={publisher.id}, url={replaced_url[:100]}, error={str(e)}"
             )
         except Exception as e:
             forward_log.error_message = f"未知错误: {str(e)}"
-            forward_log.completed_at = datetime.now(timezone.utc)
+            forward_log.completed_at = get_app_now_naive()  # 使用北京时间
             logger.error(
                 f"转发 postback 到渠道时发生异常: conversion_id={conversion.id}, "
                 f"publisher_id={publisher.id}, url={replaced_url[:100]}, error={str(e)}",
@@ -266,7 +266,7 @@ class PostbackForwarder:
             forward_log.response_status = response.status_code
             forward_log.response_body = response.text[:2000]  # 限制响应内容长度
             forward_log.success = 200 <= response.status_code < 300
-            forward_log.completed_at = datetime.now(timezone.utc)
+            forward_log.completed_at = get_app_now_naive()  # 使用北京时间
 
             if forward_log.success:
                 logger.info(
@@ -282,21 +282,21 @@ class PostbackForwarder:
 
         except httpx.TimeoutException as e:
             forward_log.error_message = f"请求超时: {str(e)}"
-            forward_log.completed_at = datetime.now(timezone.utc)
+            forward_log.completed_at = get_app_now_naive()  # 使用北京时间
             logger.error(
                 f"转发 postback 到下游超时: conversion_id={conversion.id}, "
                 f"product_id={product.id}, url={downstream_url}"
             )
         except httpx.RequestError as e:
             forward_log.error_message = f"请求错误: {str(e)}"
-            forward_log.completed_at = datetime.now(timezone.utc)
+            forward_log.completed_at = get_app_now_naive()  # 使用北京时间
             logger.error(
                 f"转发 postback 到下游失败: conversion_id={conversion.id}, "
                 f"product_id={product.id}, url={downstream_url}, error={str(e)}"
             )
         except Exception as e:
             forward_log.error_message = f"未知错误: {str(e)}"
-            forward_log.completed_at = datetime.now(timezone.utc)
+            forward_log.completed_at = get_app_now_naive()  # 使用北京时间
             logger.error(
                 f"转发 postback 到下游时发生异常: conversion_id={conversion.id}, "
                 f"product_id={product.id}, url={downstream_url}, error={str(e)}",
