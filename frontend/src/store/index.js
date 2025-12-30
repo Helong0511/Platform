@@ -19,6 +19,33 @@ const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera
 axios.defaults.timeout = isMobileDevice ? 30000 : 15000; // 移动端30秒，桌面端15秒
 
 /**
+ * 获取默认路由（根据用户角色和菜单显示情况）
+ * @param {Object} userInfo - 用户信息对象
+ * @returns {string} 默认路由路径
+ */
+export const getDefaultRoute = (userInfo) => {
+  if (!userInfo) {
+    return '/app/dashboard';
+  }
+  
+  const isAdmin = userInfo.role === 'admin';
+  const hasPublisher = userInfo.has_publisher === true || userInfo.client?.has_publisher === true;
+  
+  // 管理员：跳转到数据仪表
+  if (isAdmin) {
+    return '/app/dashboard';
+  }
+  
+  // 客户用户且有关联渠道：数据仪表和广告数据被隐藏，优先跳转到转化总览
+  if (hasPublisher) {
+    return '/app/admin/conversion-summary';
+  }
+  
+  // 客户用户但没有关联渠道：显示数据仪表和广告数据，跳转到数据仪表
+  return '/app/dashboard';
+};
+
+/**
  * 安全清除认证信息
  * 统一处理 token 和 userInfo 的清除，确保状态一致性
  */
@@ -156,9 +183,10 @@ export const useAuthStore = defineStore('auth', {
           // 静默处理错误，使用默认值
         });
 
-        // 跳转到仪表盘页面
+        // 根据用户角色和菜单显示情况跳转到合适的页面
         // 注意：路由守卫会检查token，所以这里直接跳转即可
-        router.push('/app/dashboard').catch(err => {
+        const defaultRoute = getDefaultRoute(user_info);
+        router.push(defaultRoute).catch(err => {
           // 忽略重复导航的错误（Vue Router 的特性）
           if (err.name !== 'NavigationDuplicated') {
             // 生产环境可以记录到错误监控服务

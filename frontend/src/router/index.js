@@ -54,7 +54,10 @@ const routes = [
     component: MainLayout,
     meta: { requiresAuth: true },
     children: [
-      { path: '', redirect: '/app/dashboard' },
+      { 
+        path: '', 
+        redirect: '/app/dashboard'  // 默认重定向到dashboard，实际跳转由登录逻辑和路由守卫处理
+      },
       {
         path: 'dashboard',
         name: 'Dashboard',
@@ -229,7 +232,9 @@ router.beforeEach((to, from, next) => {
     // ====== 已登录用户访问登录页 ======
     if (to.path === '/login' && authStore.isAuthenticated) {
       ElMessage.info('您已登录');
-      return next('/app/dashboard');
+      // 根据用户角色和菜单显示情况跳转到合适的页面
+      const defaultRoute = getDefaultRoute(authStore.userInfo);
+      return next(defaultRoute);
     }
 
     // ====== 管理员权限检查 ======
