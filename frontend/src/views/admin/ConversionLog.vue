@@ -11,154 +11,187 @@
       </template>
 
       <!-- 筛选栏 -->
-      <div class="filter-bar">
-        <el-input
-          v-model="filterClickId"
-          placeholder="Click ID"
-          clearable
-          style="width: 200px;"
-          @clear="handleSearch"
-          @keyup.enter="handleSearch"
-        >
-          <template #prefix>
-            <el-icon><Search /></el-icon>
-          </template>
-        </el-input>
-        <el-select
-          v-model="filterOffer"
-          placeholder="请选择Offer"
-          clearable
-          filterable
-          style="width: 180px; margin-left: 10px; min-width: 180px;"
-          @change="handleSearch"
-        >
-          <el-option
-            v-for="offer in offerList"
-            :key="offer.id"
-            :label="offer.offer_name"
-            :value="offer.id"
-          />
-        </el-select>
-        <el-select
-          v-model="filterPublisher"
-          placeholder="请选择渠道"
-          clearable
-          filterable
-          style="width: 180px; margin-left: 10px; min-width: 180px;"
-          @change="handleSearch"
-        >
-          <el-option
-            v-for="pub in publisherList"
-            :key="pub.id"
-            :label="pub.publisher_name"
-            :value="pub.id"
-          />
-        </el-select>
-        <el-select
-          v-model="filterStatus"
-          placeholder="请选择状态"
-          clearable
-          style="width: 140px; margin-left: 10px; min-width: 140px;"
-          @change="handleSearch"
-        >
-          <el-option label="全部" :value="null" />
-          <el-option label="Approved" value="Approved" />
-          <el-option label="Pending" value="Pending" />
-        </el-select>
-        <el-date-picker
-          v-model="dateRange"
-          type="daterange"
-          range-separator="至"
-          start-placeholder="开始日期"
-          end-placeholder="结束日期"
-          format="YYYY-MM-DD"
-          value-format="YYYY-MM-DD"
-          style="width: 300px; margin-left: 10px;"
-          @change="handleDateChange"
-        />
-        <el-button type="primary" :icon="Search" @click="handleSearch" style="margin-left: 10px;">搜索</el-button>
-        <el-button :icon="Refresh" @click="handleReset">重置</el-button>
+      <div class="filter-container">
+        <el-collapse v-model="filterCollapse" class="filter-collapse">
+          <el-collapse-item name="filter" :title="filterCollapse.includes('filter') ? '收起筛选条件' : '展开筛选条件'">
+            <div class="filter-bar">
+              <div class="filter-row">
+                <el-input
+                  v-model="filterClickId"
+                  placeholder="Click ID"
+                  clearable
+                  class="filter-item"
+                  @clear="handleSearch"
+                  @keyup.enter="handleSearch"
+                >
+                  <template #prefix>
+                    <el-icon><Search /></el-icon>
+                  </template>
+                </el-input>
+                <el-select
+                  v-model="filterOffer"
+                  placeholder="请选择Offer"
+                  clearable
+                  filterable
+                  class="filter-item"
+                  @change="handleSearch"
+                >
+                  <el-option
+                    v-for="offer in offerList"
+                    :key="offer.id"
+                    :label="offer.offer_name"
+                    :value="offer.id"
+                  />
+                </el-select>
+                <el-select
+                  v-model="filterPublisher"
+                  placeholder="请选择渠道"
+                  clearable
+                  filterable
+                  class="filter-item"
+                  @change="handleSearch"
+                >
+                  <el-option
+                    v-for="pub in publisherList"
+                    :key="pub.id"
+                    :label="pub.publisher_name"
+                    :value="pub.id"
+                  />
+                </el-select>
+                <el-select
+                  v-model="filterStatus"
+                  placeholder="请选择状态"
+                  clearable
+                  class="filter-item filter-item-small"
+                  @change="handleSearch"
+                >
+                  <el-option label="全部" :value="null" />
+                  <el-option label="Approved" value="Approved" />
+                  <el-option label="Pending" value="Pending" />
+                </el-select>
+              </div>
+              <div class="filter-row">
+                <el-date-picker
+                  v-model="dateRange"
+                  type="daterange"
+                  range-separator="至"
+                  start-placeholder="开始日期"
+                  end-placeholder="结束日期"
+                  format="YYYY-MM-DD"
+                  value-format="YYYY-MM-DD"
+                  class="filter-item filter-item-date"
+                  @change="handleDateChange"
+                />
+                <div class="filter-actions">
+                  <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
+                  <el-button :icon="Refresh" @click="handleReset">重置</el-button>
+                </div>
+              </div>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
       </div>
 
       <!-- 表格 -->
-      <el-table
-        v-loading="loading"
-        :data="tableData"
-        stripe
-        style="width: 100%; margin-top: 20px;"
-      >
-        <el-table-column prop="click_id" label="Click ID" min-width="200">
-          <template #default="scope">
-            <el-button v-if="scope.row.click_id" type="primary" link @click="copyToClipboard(scope.row.click_id)">
-              {{ scope.row.click_id }}
-            </el-button>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="click_time" label="点击时间" width="180">
-          <template #default="scope">
-            {{ scope.row.click_time ? formatDate(scope.row.click_time) : '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="conversion_time" label="转化时间" width="180">
-          <template #default="scope">
-            {{ scope.row.conversion_time ? formatDate(scope.row.conversion_time) : '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="conversion_status" label="状态" width="120" align="center">
-          <template #default="scope">
-            <el-tag :type="scope.row.conversion_status === 'Approved' ? 'success' : 'warning'">
-              {{ scope.row.conversion_status || 'Pending' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="offer_name" label="Offer" min-width="200">
-          <template #default="scope">
-            {{ scope.row.offer_name || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="publisher_name" label="渠道" width="150">
-          <template #default="scope">
-            {{ scope.row.publisher_name || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="advertiser_name" label="广告主" width="150">
-          <template #default="scope">
-            {{ scope.row.advertiser_name || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="country" label="国家" width="100">
-          <template #default="scope">
-            {{ scope.row.country || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="payout" label="支付金额" width="120" align="right">
-          <template #default="scope">
-            <span v-if="scope.row.payout">{{ scope.row.payout.toFixed(2) }}</span>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="platform" label="平台" width="100" />
-        <el-table-column label="操作" width="150" fixed="right">
-          <template #default="scope">
-            <el-dropdown @command="(cmd) => handleStatusChange(scope.row, cmd)">
-              <el-button type="primary" link>
-                状态 <el-icon class="el-icon--right"><arrow-down /></el-icon>
+      <div class="table-wrapper">
+        <el-table
+          v-loading="loading"
+          :data="tableData"
+          stripe
+          style="width: 100%;"
+          :default-sort="{ prop: 'conversion_time', order: 'descending' }"
+        >
+          <el-table-column prop="conversion_time" label="转化时间" width="180" sortable>
+            <template #default="scope">
+              {{ scope.row.conversion_time ? formatDate(scope.row.conversion_time) : '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="conversion_status" label="状态" width="100" align="center" sortable>
+            <template #default="scope">
+              <el-tag :type="scope.row.conversion_status === 'Approved' ? 'success' : 'warning'" size="small">
+                {{ scope.row.conversion_status || 'Pending' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="click_id" label="Click ID" min-width="180" show-overflow-tooltip>
+            <template #default="scope">
+              <el-button 
+                v-if="scope.row.click_id" 
+                type="primary" 
+                link 
+                size="small"
+                @click="copyToClipboard(scope.row.click_id)"
+              >
+                {{ scope.row.click_id }}
               </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="Approved" :disabled="scope.row.conversion_status === 'Approved'">
-                    批准
-                  </el-dropdown-item>
-                  <el-dropdown-item command="Pending" :disabled="scope.row.conversion_status === 'Pending'">
-                    待处理
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </template>
-        </el-table-column>
-      </el-table>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="offer_name" label="Offer" min-width="180" show-overflow-tooltip>
+            <template #default="scope">
+              <span class="text-primary">{{ scope.row.offer_name || '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="publisher_name" label="渠道" width="140" show-overflow-tooltip>
+            <template #default="scope">
+              {{ scope.row.publisher_name || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="advertiser_name" label="广告主" width="140" show-overflow-tooltip>
+            <template #default="scope">
+              {{ scope.row.advertiser_name || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="payout" label="支付金额" width="110" align="right" sortable>
+            <template #default="scope">
+              <span v-if="scope.row.payout" class="text-success font-weight-medium">
+                {{ scope.row.payout.toFixed(2) }}
+              </span>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="click_time" label="点击时间" width="160" sortable>
+            <template #default="scope">
+              <span class="text-secondary">{{ scope.row.click_time ? formatDate(scope.row.click_time) : '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="country" label="国家" width="80" align="center">
+            <template #default="scope">
+              <el-tag v-if="scope.row.country" size="small" type="info">
+                {{ scope.row.country }}
+              </el-tag>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="platform" label="平台" width="90" align="center">
+            <template #default="scope">
+              <el-tag v-if="scope.row.platform" size="small" type="primary">
+                {{ scope.row.platform }}
+              </el-tag>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="120" fixed="right" align="center">
+            <template #default="scope">
+              <el-dropdown @command="(cmd) => handleStatusChange(scope.row, cmd)" trigger="click">
+                <el-button type="primary" link size="small">
+                  状态 <el-icon class="el-icon--right"><arrow-down /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="Approved" :disabled="scope.row.conversion_status === 'Approved'">
+                      批准
+                    </el-dropdown-item>
+                    <el-dropdown-item command="Pending" :disabled="scope.row.conversion_status === 'Pending'">
+                      待处理
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
 
       <!-- 分页 -->
       <div class="pagination-container">
@@ -192,6 +225,7 @@ const filterOffer = ref(null)
 const filterPublisher = ref(null)
 const filterStatus = ref(null)
 const dateRange = ref([])
+const filterCollapse = ref(['filter']) // 默认展开筛选条件
 
 const pagination = reactive({
   page: 1,
@@ -391,32 +425,80 @@ onMounted(() => {
   font-weight: 600;
 }
 
+/* 筛选容器 */
+.filter-container {
+  margin-bottom: 20px;
+}
+
+.filter-collapse {
+  border: 1px solid var(--border-lighter, #ebeef5);
+  border-radius: var(--radius-md, 6px);
+  background: var(--bg-primary, #ffffff);
+}
+
+.filter-collapse :deep(.el-collapse-item__header) {
+  padding: 12px 16px;
+  font-weight: 500;
+  color: var(--text-primary, #303133);
+  background: var(--bg-secondary, #f5f7fa);
+  border-radius: var(--radius-md, 6px);
+}
+
+.filter-collapse :deep(.el-collapse-item__content) {
+  padding: 16px;
+}
+
 .filter-bar {
   display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.filter-row {
+  display: flex;
   align-items: center;
-  margin-bottom: 20px;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
+}
+
+.filter-item {
+  flex: 0 0 auto;
+  min-width: 160px;
+}
+
+.filter-item-small {
+  min-width: 120px;
+  width: 120px;
+}
+
+.filter-item-date {
+  min-width: 280px;
+  width: 280px;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
 }
 
 /* 确保输入框和下拉框文字不被遮盖 */
 .filter-bar :deep(.el-input__wrapper) {
-  padding-right: 30px; /* 为清除按钮留出空间 */
+  padding-right: 30px;
 }
 
 .filter-bar :deep(.el-select .el-input__wrapper) {
-  padding-right: 30px; /* 为清除按钮和下拉箭头留出空间 */
+  padding-right: 30px;
 }
 
 .filter-bar :deep(.el-input__inner),
 .filter-bar :deep(.el-select__input) {
-  padding-right: 8px; /* 文字与清除按钮之间的间距 */
+  padding-right: 8px;
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
 }
 
-/* 确保清除按钮不遮挡文字 */
 .filter-bar :deep(.el-input__suffix) {
   right: 8px;
 }
@@ -428,7 +510,6 @@ onMounted(() => {
   gap: 4px;
 }
 
-/* 日期选择器特殊处理 */
 .filter-bar :deep(.el-date-editor .el-input__wrapper) {
   padding-right: 30px;
 }
@@ -437,10 +518,111 @@ onMounted(() => {
   padding-right: 8px;
 }
 
+/* 表格容器 */
+.table-wrapper {
+  margin-top: 20px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-wrapper :deep(.el-table) {
+  min-width: 1400px;
+}
+
+/* 文本样式 */
+.text-muted {
+  color: var(--text-placeholder, #c0c4cc);
+}
+
+.text-primary {
+  color: var(--primary-color, #409eff);
+}
+
+.text-success {
+  color: var(--success-color, #67c23a);
+}
+
+.text-secondary {
+  color: var(--text-secondary, #909399);
+}
+
+.font-weight-medium {
+  font-weight: 500;
+}
+
 .pagination-container {
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
+  padding: 16px 0;
+}
+
+/* 移动端优化 */
+@media (max-width: 767px) {
+  .conversion-log {
+    padding: 10px;
+  }
+
+  .filter-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filter-item,
+  .filter-item-small,
+  .filter-item-date {
+    width: 100% !important;
+    min-width: 100% !important;
+  }
+
+  .filter-actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .filter-actions .el-button {
+    flex: 1;
+  }
+
+  .table-wrapper {
+    margin-top: 12px;
+  }
+
+  .table-wrapper :deep(.el-table) {
+    min-width: 1200px;
+    font-size: 12px;
+  }
+
+  .table-wrapper :deep(.el-table__cell) {
+    padding: 8px 4px;
+  }
+
+  .pagination-container {
+    justify-content: center;
+    padding: 12px 0;
+  }
+
+  .pagination-container :deep(.el-pagination) {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
+
+/* 平板端优化 */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .filter-item {
+    min-width: 140px;
+  }
+
+  .filter-item-date {
+    min-width: 240px;
+    width: 240px;
+  }
+
+  .table-wrapper :deep(.el-table) {
+    min-width: 1300px;
+  }
 }
 </style>
 
