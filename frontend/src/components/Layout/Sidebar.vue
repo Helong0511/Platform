@@ -65,6 +65,9 @@
       <el-menu-item index="/app/admin/conversion-log">
         <span>转化日志</span>
       </el-menu-item>
+      <el-menu-item index="/app/admin/click-log">
+        <span>短链接访问记录</span>
+      </el-menu-item>
     </el-sub-menu>
 
     <!-- 客户用户可见的CPL菜单：如果客户登录但没有关联渠道，则不显示 -->

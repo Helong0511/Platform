@@ -41,6 +41,7 @@ const AdvertiserTest = createAsyncComponent(() => import(/* webpackChunkName: "a
 const AffiliateTest = createAsyncComponent(() => import(/* webpackChunkName: "affiliate-test" */ '../views/admin/AffiliateTest.vue'), 'AffiliateTest');
 const ConversionSummary = createAsyncComponent(() => import(/* webpackChunkName: "conversion-summary" */ '../views/admin/ConversionSummary.vue'), 'ConversionSummary');
 const ConversionLog = createAsyncComponent(() => import(/* webpackChunkName: "conversion-log" */ '../views/admin/ConversionLog.vue'), 'ConversionLog');
+const ClickLog = createAsyncComponent(() => import(/* webpackChunkName: "click-log" */ '../views/admin/ClickLog.vue'), 'ClickLog');
 const ClientUserManagement = createAsyncComponent(() => import(/* webpackChunkName: "client-user-management" */ '../views/client/ClientUserManagement.vue'), 'ClientUserManagement');
 const ApiDocumentation = createAsyncComponent(() => import(/* webpackChunkName: "api-documentation" */ '../views/ApiDocumentation.vue'), 'ApiDocumentation');
 const MainLayout = createAsyncComponent(() => import(/* webpackChunkName: "layout" */ '../components/Layout/MainLayout.vue'), 'MainLayout');
@@ -170,6 +171,12 @@ const routes = [
         path: 'admin/conversion-log',
         name: 'ConversionLog',
         component: ConversionLog,
+        meta: { requiresAdmin: true }
+      },
+      {
+        path: 'admin/click-log',
+        name: 'ClickLog',
+        component: ClickLog,
         meta: { requiresAdmin: true }
       },
       {

@@ -39,6 +39,7 @@ from app.api.api_v1.endpoints import (
     affiliate_tests,
     conversion_summary,
     conversion_log,
+    clicks,
 )
 
 # 认证路由
@@ -109,3 +110,4 @@ api_router.include_router(advertiser_tests.router, prefix="/advertiser-tests", t
 api_router.include_router(affiliate_tests.router, prefix="/affiliate-tests", tags=["下游测试"])
 api_router.include_router(conversion_summary.router, prefix="/conversion-summary", tags=["转化统计"])
 api_router.include_router(conversion_log.router, prefix="/conversion-logs", tags=["转化日志"])
+api_router.include_router(clicks.router, prefix="/clicks", tags=["短链接访问记录"])
