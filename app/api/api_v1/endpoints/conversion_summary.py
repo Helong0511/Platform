@@ -367,8 +367,31 @@ async def get_summary_by_offer(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """按Offer统计转化数据（所有登录用户可访问）"""
+    """按Offer统计转化数据（所有登录用户可访问）
+    
+    客户登录时，只显示该客户关联的渠道的转化数据
+    """
     try:
+        # 如果是客户用户，获取该客户关联的渠道ID列表
+        client_publisher_ids = None
+        if current_user.role == UserRole.CLIENT:
+            # 查询该用户关联的Client
+            from sqlalchemy.orm import selectinload
+            user_query = select(User).options(selectinload(User.clients)).where(User.id == current_user.id)
+            user_result = await db.execute(user_query)
+            user = user_result.scalars().unique().first()
+            
+            if user and user.clients:
+                # 获取该客户关联的所有渠道ID
+                client = user.clients[0]  # 通常一个用户只关联一个Client
+                publisher_query = select(Publisher.id).where(Publisher.client_id == client.id)
+                publisher_result = await db.execute(publisher_query)
+                client_publisher_ids = [pub_id for pub_id, in publisher_result.all()]
+                
+                # 如果客户没有关联任何渠道，返回空数据
+                if not client_publisher_ids:
+                    return ResponseBaseSchema.success(data=[])
+        
         # 解析日期
         start_datetime = None
         end_datetime = None
@@ -388,37 +411,56 @@ async def get_summary_by_offer(
         
         stats_list = []
         for offer in offers:
+            # 构建点击查询条件
+            click_conditions = [
+                Click.offer_id == offer.id,
+                Click.click_time >= start_datetime,
+                Click.click_time < end_datetime
+            ]
+            # 如果是客户用户，添加渠道过滤条件
+            if client_publisher_ids is not None:
+                click_conditions.append(Click.publisher_id.in_(client_publisher_ids))
+            
             click_count = (await db.execute(
-                select(func.count(Click.id)).where(
-                    and_(
-                        Click.offer_id == offer.id,
-                        Click.click_time >= start_datetime,
-                        Click.click_time < end_datetime
-                    )
-                )
+                select(func.count(Click.id)).where(and_(*click_conditions))
             )).scalar() or 0
             
-            conversion_count = (await db.execute(
-                select(func.count(PostbackConversion.id)).where(
-                    and_(
-                        PostbackConversion.product_id == offer.id,
-                        PostbackConversion.created_at >= start_datetime,
-                        PostbackConversion.created_at < end_datetime
-                    )
+            # 转化查询需要通过Click表关联来筛选publisher_id
+            from sqlalchemy.orm import aliased
+            click_alias_for_conv = aliased(Click)
+            conversion_query = select(func.count(PostbackConversion.id)).join(
+                click_alias_for_conv, PostbackConversion.click_id == click_alias_for_conv.click_id
+            ).where(
+                and_(
+                    click_alias_for_conv.offer_id == offer.id,
+                    PostbackConversion.created_at >= start_datetime,
+                    PostbackConversion.created_at < end_datetime
                 )
-            )).scalar() or 0
+            )
+            # 如果是客户用户，添加渠道过滤条件
+            if client_publisher_ids is not None:
+                conversion_query = conversion_query.where(click_alias_for_conv.publisher_id.in_(client_publisher_ids))
+            
+            conversion_count = (await db.execute(conversion_query)).scalar() or 0
             
             cr = (conversion_count / click_count * 100) if click_count > 0 else 0
             
-            po = (await db.execute(
-                select(func.sum(PostbackConversion.payout)).where(
-                    and_(
-                        PostbackConversion.product_id == offer.id,
-                        PostbackConversion.created_at >= start_datetime,
-                        PostbackConversion.created_at < end_datetime
-                    )
+            # PO查询也需要通过Click表关联来筛选publisher_id
+            click_alias_for_po = aliased(Click)
+            po_query = select(func.sum(PostbackConversion.payout)).join(
+                click_alias_for_po, PostbackConversion.click_id == click_alias_for_po.click_id
+            ).where(
+                and_(
+                    click_alias_for_po.offer_id == offer.id,
+                    PostbackConversion.created_at >= start_datetime,
+                    PostbackConversion.created_at < end_datetime
                 )
-            )).scalar() or 0
+            )
+            # 如果是客户用户，添加渠道过滤条件
+            if client_publisher_ids is not None:
+                po_query = po_query.where(click_alias_for_po.publisher_id.in_(client_publisher_ids))
+            
+            po = (await db.execute(po_query)).scalar() or 0
             
             stats_list.append({
                 "offer_id": offer.id,
