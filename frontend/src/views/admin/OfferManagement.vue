@@ -570,8 +570,16 @@
                 <span v-else>-</span>
               </el-descriptions-item>
               <el-descriptions-item :label="isAdmin ? '下游PO' : 'PO'">
-                <span v-if="currentOffer?.affiliate_payout">{{ currentOffer.affiliate_payout.toFixed(2) }}</span>
-                <span v-else>-</span>
+                <template v-if="!isAdmin && currentClientId && currentOffer?.assigned_publishers">
+                  <!-- 客户登录：显示分配给该客户渠道的PO -->
+                  <span v-if="getClientPublisherPO()">{{ getClientPublisherPO().toFixed(2) }}</span>
+                  <span v-else>-</span>
+                </template>
+                <template v-else>
+                  <!-- 管理员：显示Offer级别的PO -->
+                  <span v-if="currentOffer?.affiliate_payout">{{ currentOffer.affiliate_payout.toFixed(2) }}</span>
+                  <span v-else>-</span>
+                </template>
               </el-descriptions-item>
               <el-descriptions-item label="国家">{{ currentOffer?.country || '-' }}</el-descriptions-item>
               <el-descriptions-item label="分类">{{ currentOffer?.category || '-' }}</el-descriptions-item>
@@ -587,7 +595,19 @@
                 </el-tag>
               </el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="上游Cap">{{ currentOffer?.upstream_cap || '-' }}</el-descriptions-item>
-              <el-descriptions-item :label="isAdmin ? '下游Cap' : 'Cap'">{{ currentOffer?.downstream_cap || '-' }}</el-descriptions-item>
+              <el-descriptions-item :label="isAdmin ? '下游Cap' : 'Cap'">
+                <template v-if="!isAdmin && currentClientId && currentOffer?.assigned_publishers">
+                  <!-- 客户登录：显示分配给该客户渠道的Cap -->
+                  <span v-if="getClientPublisherCap() !== null && getClientPublisherCap() !== undefined">
+                    {{ getClientPublisherCap() }}
+                  </span>
+                  <span v-else>-</span>
+                </template>
+                <template v-else>
+                  <!-- 管理员：显示Offer级别的Cap -->
+                  <span>{{ currentOffer?.downstream_cap || '-' }}</span>
+                </template>
+              </el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="点击有效期(小时)">{{ currentOffer?.click_validity_hours || 720 }}</el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="Postback方法">
                 <el-tag :type="currentOffer?.postback_method === 'POST' ? 'success' : 'info'" size="small">
@@ -1510,6 +1530,34 @@ const getPublisherShortLink = (publisherId) => {
   // 添加参数：?offer_id=X&channel_id=Y
   const result = `${baseUrl}?offer_id=${currentOffer.value.id}&channel_id=${publisherId}`
   return result
+}
+
+// 获取客户自己的渠道PO（下游PO）
+const getClientPublisherPO = () => {
+  if (!currentOffer.value || !currentClientId.value) {
+    return null
+  }
+  
+  // 查找属于该客户的渠道
+  const clientPublisher = currentOffer.value.assigned_publishers?.find(
+    pub => pub.client_id === currentClientId.value
+  )
+  
+  return clientPublisher?.affiliate_payout || null
+}
+
+// 获取客户自己的渠道Cap（下游Cap）
+const getClientPublisherCap = () => {
+  if (!currentOffer.value || !currentClientId.value) {
+    return null
+  }
+  
+  // 查找属于该客户的渠道
+  const clientPublisher = currentOffer.value.assigned_publishers?.find(
+    pub => pub.client_id === currentClientId.value
+  )
+  
+  return clientPublisher?.downstream_cap || null
 }
 
 // 获取客户自己的渠道Tracklink（用于客户登录时显示）
