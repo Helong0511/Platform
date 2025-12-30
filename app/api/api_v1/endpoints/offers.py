@@ -202,45 +202,106 @@ async def check_and_create_downstream_tracklink_short_link(
             return existing_link, False
         
         # 不存在，创建新的短链接（使用上游Tracklink作为original_url）
-        short_link = ShortLink(
-            original_url=original_url,  # 使用上游Tracklink作为original_url
-            title=f"{offer_name} - 下游Tracklink短链接",
-            description=f"Offer: {offer_name} 的下游Tracklink短链接（原始URL使用上游Tracklink）",
-            offer_id=offer_id,
-            channel_id=None,  # 下游Tracklink短链接不关联特定渠道
-            created_by=current_user_id,
-            is_active=True,
-            click_count=0,
-            short_code="temp"  # 临时代码，稍后更新
-        )
-        
-        db.add(short_link)
-        await db.flush()  # 先flush以获取ID
-        
-        # 生成短链接代码
-        result = await db.execute(select(ShortLink.short_code))
-        existing_codes = {row[0] for row in result.all() if row[0] != "temp"}  # 排除临时代码
-        
-        # 尝试从ID生成
-        code_from_id = generate_short_code_from_id(short_link.id, min_length=4)
-        if code_from_id not in existing_codes:
-            short_link.short_code = code_from_id
-        else:
-            # 如果ID生成的代码已存在，使用随机生成
-            unique_code = generate_unique_short_code(existing_codes, length=6)
-            if not unique_code:
-                logger.error(f"生成下游Tracklink短链接代码失败: offer_id={offer_id}")
-                return None, False
-            short_link.short_code = unique_code
-        
-        logger.info(
-            f"为下游Tracklink创建短链接成功: "
-            f"short_link_id={short_link.id}, "
-            f"short_code={short_link.short_code}, "
-            f"offer_id={short_link.offer_id}, "
-            f"original_url={original_url} (使用上游Tracklink)"
-        )
-        return short_link, True  # 新创建的
+        # 使用重试机制处理并发冲突
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                short_link = ShortLink(
+                    original_url=original_url,  # 使用上游Tracklink作为original_url
+                    title=f"{offer_name} - 下游Tracklink短链接",
+                    description=f"Offer: {offer_name} 的下游Tracklink短链接（原始URL使用上游Tracklink）",
+                    offer_id=offer_id,
+                    channel_id=None,  # 下游Tracklink短链接不关联特定渠道
+                    created_by=current_user_id,
+                    is_active=True,
+                    click_count=0,
+                    short_code="temp"  # 临时代码，稍后更新
+                )
+                
+                db.add(short_link)
+                await db.flush()  # 先flush以获取ID
+                
+                # 生成短链接代码
+                result = await db.execute(select(ShortLink.short_code))
+                existing_codes = {row[0] for row in result.all() if row[0] != "temp"}  # 排除临时代码
+                
+                # 尝试从ID生成
+                code_from_id = generate_short_code_from_id(short_link.id, min_length=4)
+                if code_from_id not in existing_codes:
+                    short_link.short_code = code_from_id
+                else:
+                    # 如果ID生成的代码已存在，使用随机生成
+                    unique_code = generate_unique_short_code(existing_codes, length=6)
+                    if not unique_code:
+                        logger.error(f"生成下游Tracklink短链接代码失败: offer_id={offer_id}")
+                        await db.rollback()
+                        return None, False
+                    short_link.short_code = unique_code
+                
+                # 尝试flush，如果发生唯一约束冲突，会在commit时抛出IntegrityError
+                # 注意：这里不commit，让外层函数commit，避免事务嵌套问题
+                await db.flush()
+                
+                logger.info(
+                    f"为下游Tracklink创建短链接成功: "
+                    f"short_link_id={short_link.id}, "
+                    f"short_code={short_link.short_code}, "
+                    f"offer_id={short_link.offer_id}, "
+                    f"original_url={original_url} (使用上游Tracklink)"
+                )
+                return short_link, True  # 新创建的
+                
+            except Exception as e:
+                # 检查是否是唯一约束冲突（并发冲突）
+                error_msg = str(e)
+                is_integrity_error = (
+                    "IntegrityError" in str(type(e)) or
+                    "Duplicate entry" in error_msg or
+                    "UNIQUE constraint" in error_msg or
+                    "unique constraint" in error_msg.lower() or
+                    "duplicate key" in error_msg.lower()
+                )
+                
+                if is_integrity_error and attempt < max_retries - 1:
+                    # 回滚当前事务
+                    await db.rollback()
+                    logger.warning(
+                        f"短链接代码冲突（并发冲突），重试中: "
+                        f"offer_id={offer_id}, "
+                        f"attempt={attempt + 1}/{max_retries}, "
+                        f"error={error_msg[:200]}"
+                    )
+                    # 重新检查是否已存在（可能另一个请求已经创建了）
+                    existing_result = await db.execute(
+                        select(ShortLink).where(
+                            and_(
+                                ShortLink.offer_id == offer_id,
+                                ShortLink.original_url == original_url,
+                                ShortLink.channel_id.is_(None)
+                            )
+                        )
+                    )
+                    existing_link = existing_result.scalars().first()
+                    if existing_link:
+                        # 另一个请求已经创建了，返回已存在的短链接
+                        logger.info(
+                            f"检测到并发创建，使用已存在的短链接: "
+                            f"offer_id={offer_id}, "
+                            f"short_code={existing_link.short_code}"
+                        )
+                        return existing_link, False
+                    # 继续重试
+                    continue
+                else:
+                    # 其他错误或重试次数用尽，记录错误并返回失败
+                    await db.rollback()
+                    if is_integrity_error:
+                        logger.error(
+                            f"短链接代码冲突，重试次数用尽: "
+                            f"offer_id={offer_id}, "
+                            f"error={error_msg[:200]}"
+                        )
+                    raise  # 重新抛出异常，让外层处理
         
     except Exception as e:
         logger.error(f"检查并创建下游Tracklink短链接失败: offer_id={offer_id}, error={str(e)}", exc_info=True)
@@ -1059,41 +1120,48 @@ async def update_offer(
         current_advertiser_tracklink = offer.advertiser_tracklink
         if current_downstream_tracklink and current_advertiser_tracklink:
             base_url = settings.TRACKING_BASE_URL
-            downstream_short_link, is_new = await check_and_create_downstream_tracklink_short_link(
-                db=db,
-                offer_id=offer.id,
-                downstream_tracklink=current_downstream_tracklink,
-                advertiser_tracklink=current_advertiser_tracklink,
-                offer_name=offer.offer_name,
-                base_url=base_url,
-                current_user_id=current_user.id
-            )
-            
-            if downstream_short_link:
-                short_link_url = get_short_link_url(base_url, downstream_short_link.short_code)
-                downstream_tracklink_short_link_info = {
-                    'short_link': downstream_short_link,
-                    'short_link_url': short_link_url,
-                    'is_new': is_new
-                }
+            try:
+                downstream_short_link, is_new = await check_and_create_downstream_tracklink_short_link(
+                    db=db,
+                    offer_id=offer.id,
+                    downstream_tracklink=current_downstream_tracklink,
+                    advertiser_tracklink=current_advertiser_tracklink,
+                    offer_name=offer.offer_name,
+                    base_url=base_url,
+                    current_user_id=current_user.id
+                )
                 
-                # 更新offer.downstream_tracklink为短链接URL（无论是否新创建）
-                # 这样可以确保downstream_tracklink始终指向正确的短链接URL
-                offer.downstream_tracklink = short_link_url
-                if is_new:
-                    logger.info(
-                        f"更新Offer的downstream_tracklink为短链接URL（新创建）: "
-                        f"offer_id={offer.id}, "
-                        f"short_link_url={short_link_url}"
-                    )
-                else:
-                    logger.info(
-                        f"更新Offer的downstream_tracklink为短链接URL（已存在）: "
-                        f"offer_id={offer.id}, "
-                        f"short_link_url={short_link_url}"
-                    )
-                
-                await db.commit()  # 提交新创建的短链接和更新的downstream_tracklink
+                if downstream_short_link:
+                    short_link_url = get_short_link_url(base_url, downstream_short_link.short_code)
+                    downstream_tracklink_short_link_info = {
+                        'short_link': downstream_short_link,
+                        'short_link_url': short_link_url,
+                        'is_new': is_new
+                    }
+                    
+                    # 更新offer.downstream_tracklink为短链接URL（无论是否新创建）
+                    # 这样可以确保downstream_tracklink始终指向正确的短链接URL
+                    offer.downstream_tracklink = short_link_url
+                    if is_new:
+                        logger.info(
+                            f"更新Offer的downstream_tracklink为短链接URL（新创建）: "
+                            f"offer_id={offer.id}, "
+                            f"short_link_url={short_link_url}"
+                        )
+                    else:
+                        logger.info(
+                            f"更新Offer的downstream_tracklink为短链接URL（已存在）: "
+                            f"offer_id={offer.id}, "
+                            f"short_link_url={short_link_url}"
+                        )
+            except Exception as e:
+                # 如果创建短链接失败，记录错误但不影响Offer更新
+                error_msg = str(e)
+                logger.error(
+                    f"创建下游Tracklink短链接失败（不影响Offer更新）: "
+                    f"offer_id={offer.id}, "
+                    f"error={error_msg[:200]}"
+                )
         
         # 重新加载关联信息（使用joinedload优化）
         from sqlalchemy.orm import joinedload
