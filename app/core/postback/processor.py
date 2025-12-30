@@ -316,48 +316,65 @@ class PostbackProcessor:
                     f"error={str(e)}"
                 )
             
-            # 10. 异步转发给下游（如果产品配置了下游 URL）
-            product = None
-            if product_id:
-                result = await db.execute(
-                    select(Product).where(Product.id == product_id)
-                )
-                product = result.scalars().first()
-            
-            if product and product.downstream_postback_url and conversion.conversion_status in ['Pending', 'Approved']:
-                # 使用可靠的队列机制
+            # 10. 异步转发给渠道（如果渠道配置了 Postback URL）
+            # 优先使用渠道的 Postback URL，如果没有则使用产品的下游 URL
+            if conversion.conversion_status in ['Pending', 'Approved']:
                 try:
-                     # 插入转发队列
-                    queue_item = PostbackForwardQueue(
-                        conversion_id=conversion.id,
-                        product_id=product.id,
-                        downstream_url=product.downstream_postback_url,
-                        request_method=product.downstream_postback_method or 'GET',
-                        # 这里简简化处理，实际可能需要根据 method 构造 data/params
-                        # 暂时先用 raw_data_json 作为 data，后续由 forwarder 处理
-                        request_data=raw_data_json if product.downstream_postback_method == 'POST' else None,
-                        request_params=None, # 如果是GET，参数组合逻辑在 forwarder 中
-                        created_at=datetime.now(timezone.utc),
-                        next_retry_time=datetime.now(timezone.utc)
+                    # 10.1 尝试转发到渠道的 Postback URL
+                    from app.core.postback.forwarder import PostbackForwarder
+                    await PostbackForwarder.forward_to_publisher(
+                        conversion=conversion,
+                        db=db
                     )
-                    db.add(queue_item)
-                    await db.commit()
-                    
-                    # 触发后台任务处理队列 (Fire & Forget)
-                    # 即使这里触发失败，定时任务也会兜底
-                    from app.scheduler.forward_tasks import trigger_forward_processing
-                    import asyncio
-                    try:
-                         asyncio.create_task(trigger_forward_processing())
-                    except:
-                         pass
-                         
                 except Exception as e:
-                    # 转发入队失败
-                    logger.error(
-                        f"下游转发入队失败: conversion_id={conversion_id}, "
+                    # 渠道转发失败不影响主流程
+                    logger.warning(
+                        f"转发到渠道 Postback URL 失败: conversion_id={conversion_id}, "
                         f"error={str(e)}"
                     )
+                
+                # 10.2 如果产品配置了下游 URL，也进行转发（兼容旧逻辑）
+                product = None
+                if product_id:
+                    result = await db.execute(
+                        select(Product).where(Product.id == product_id)
+                    )
+                    product = result.scalars().first()
+                
+                if product and product.downstream_postback_url:
+                    # 使用可靠的队列机制
+                    try:
+                         # 插入转发队列
+                        queue_item = PostbackForwardQueue(
+                            conversion_id=conversion.id,
+                            product_id=product.id,
+                            downstream_url=product.downstream_postback_url,
+                            request_method=product.downstream_postback_method or 'GET',
+                            # 这里简简化处理，实际可能需要根据 method 构造 data/params
+                            # 暂时先用 raw_data_json 作为 data，后续由 forwarder 处理
+                            request_data=raw_data_json if product.downstream_postback_method == 'POST' else None,
+                            request_params=None, # 如果是GET，参数组合逻辑在 forwarder 中
+                            created_at=datetime.now(timezone.utc),
+                            next_retry_time=datetime.now(timezone.utc)
+                        )
+                        db.add(queue_item)
+                        await db.commit()
+                        
+                        # 触发后台任务处理队列 (Fire & Forget)
+                        # 即使这里触发失败，定时任务也会兜底
+                        from app.scheduler.forward_tasks import trigger_forward_processing
+                        import asyncio
+                        try:
+                             asyncio.create_task(trigger_forward_processing())
+                        except:
+                             pass
+                             
+                    except Exception as e:
+                        # 转发入队失败
+                        logger.error(
+                            f"产品下游转发入队失败: conversion_id={conversion_id}, "
+                            f"error={str(e)}"
+                        )
             
             # 11. 返回成功响应
             return {
