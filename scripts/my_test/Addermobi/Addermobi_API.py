@@ -5,15 +5,12 @@ from typing import Optional
 from datetime import datetime, timedelta  # 日期时间处理
 
 Headers = {}
-
 username = 'Leadwin'
-
 password = 'lw145667'
-
 config = {
     'user': 'remote',
     'password': 'kb7$rL3d8!tQ',
-    'host': '159.138.133.34',
+    'host': '43.156.101.243',
     'database': 'platform',
     'raise_on_warnings': True
 }
