@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.models.models import UserAuditLog, User
-from app.core.utils import get_client_ip
+from app.core.utils import get_client_ip, get_app_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +170,7 @@ async def log_user_action(
             success=success,
             error_message=error_message[:1000] if error_message else None,  # 限制长度
             details=final_details,
-            created_at=datetime.now(timezone.utc)
+            created_at=get_app_now_naive()  # 使用北京时间
         )
 
         db.add(audit_log)

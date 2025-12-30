@@ -12,6 +12,7 @@ from app.core.clicks_queue import dequeue_clicks, get_queue_length
 from app.core.offer_cache import get_offer_advertiser_id, set_offer_cache
 from app.models.models import Click, Offer, ShortLink
 from sqlalchemy.future import select
+from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +223,7 @@ async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -
     try:
         # 准备批量插入数据
         insert_data = []
-        now = datetime.now(timezone.utc)
+        now = get_app_now_naive()  # 使用北京时间
         
         for click in clicks:
             # 处理click_time（可能是ISO格式字符串或datetime对象）

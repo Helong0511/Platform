@@ -25,6 +25,7 @@ from app.core.security import require_admin
 from app.core.validation import validate_cron_expression, sanitize_input
 from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
 from app.models.models import User, ScheduledTask
+from app.core.utils import get_app_now_naive
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.scheduler_module.task_registry import get_task_function_info
 from pydantic import BaseModel, field_validator, Field
@@ -343,7 +344,7 @@ async def update_scheduled_task(
 
         # 更新状态
         task.is_active = task_update.is_active
-        task.updated_at = datetime.now(timezone.utc)
+        task.updated_at = get_app_now_naive()
 
         await db.commit()
         await db.refresh(task)
@@ -922,7 +923,7 @@ async def release_task_lock(
 
         # 释放锁
         task.is_running = False
-        task.updated_at = datetime.now(timezone.utc)
+        task.updated_at = get_app_now_naive()
         task.last_error = "管理员手动释放锁"
 
         await db.commit()

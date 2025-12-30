@@ -11,14 +11,15 @@ def datetime_encoder(v: datetime) -> str:
     将 datetime 对象编码为 ISO 8601 格式（带时区信息）
     注意：
     - 对于AdData.date等业务日期字段，存储的是系统时区的naive datetime
-    - 对于created_at、updated_at等时间戳字段，存储的是UTC时区
-    - 如果没有时区信息，假设是UTC（用于时间戳字段）
+    - 对于created_at、updated_at等时间戳字段，存储的是应用配置时区（默认北京时间）的naive datetime
+    - 如果没有时区信息，假设是应用时区（用于时间戳字段）
     """
     if v.tzinfo is None:
-        # 如果没有时区信息，假设是 UTC（用于created_at、updated_at等时间戳字段）
-        # 注意：AdData.date等业务日期字段是系统时区的naive datetime，但为了API兼容性，也标记为UTC
-        v = v.replace(tzinfo=timezone.utc)
-    # 使用 isoformat() 生成 ISO 8601 格式，包含时区信息（Z 后缀表示 UTC）
+        # 如果没有时区信息，假设是应用时区（默认北京时间）
+        # 注意：AdData.date等业务日期字段是系统时区的naive datetime，但为了API兼容性，也标记为应用时区
+        from app.core.utils import APP_TIMEZONE
+        v = v.replace(tzinfo=APP_TIMEZONE)
+    # 使用 isoformat() 生成 ISO 8601 格式，包含时区信息
     return v.isoformat()
 
 

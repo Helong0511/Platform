@@ -19,6 +19,7 @@ from app.models.models import (
     Product, PostbackConversion, PostbackForwardLog,
     Click, Offer, Publisher, Advertiser
 )
+from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ class PostbackForwarder:
             downstream_url=replaced_url,
             request_method=method,
             success=False,
-            created_at=datetime.now(timezone.utc)
+            created_at=get_app_now_naive()
         )
         
         try:
@@ -246,7 +247,7 @@ class PostbackForwarder:
             downstream_url=downstream_url,
             request_method=method,
             success=False,
-            created_at=datetime.now(timezone.utc)
+            created_at=get_app_now_naive()
         )
 
         try:

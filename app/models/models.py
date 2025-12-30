@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import enum
 import uuid
 from passlib.context import CryptContext
+from app.core.utils import get_app_now_naive
 
 # 创建密码上下文
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -34,9 +35,9 @@ class User(Base):
     is_active = Column(Boolean, default=True, comment='是否激活')
     login_restricted = Column(Boolean, default=False, comment='是否限制登录')
     login_message = Column(Text, comment='登录提示消息')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
 
     # 关系
     clients = relationship("Client", back_populates="user", cascade="all, delete-orphan")
@@ -69,9 +70,9 @@ class Client(Base):
     is_active = Column(Boolean, default=True, comment='是否激活')
     api_enabled = Column(Boolean, default=False, comment='是否允许API访问（开启后允许客户通过API查询产品和广告数据，并显示API对接菜单）')
     password_change_enabled = Column(Boolean, default=False, comment='是否允许客户修改密码（开启后客户可以修改自己的密码）')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
 
     # 关系
     user = relationship("User", back_populates="clients")
@@ -95,9 +96,9 @@ class Product(Base):
     downstream_postback_method = Column(String(10), default='GET', comment='下游 Postback 请求方式：GET 或 POST（默认GET）')
     notification_address = Column(String(500), nullable=True, comment='通知地址（Telegram Chat ID、邮箱地址、Webhook URL等，用于接收转化通知）')
     is_active = Column(Boolean, default=True, comment='是否激活')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
 
     # 关系
     client = relationship("Client", back_populates="products")
@@ -136,9 +137,9 @@ class AdData(Base):
     ecpm_after_deduct = Column(Float, default=0.0, comment='eCPM已减扣')
     revenue_before_deduct = Column(Float, default=0.0, comment='收益未减扣')
     revenue_after_deduct = Column(Float, default=0.0, comment='收益已减扣')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
 
     __table_args__ = (
         Index("idx_ad_data_date", "date"),  # 优化日期范围查询
@@ -195,8 +196,8 @@ class TBSearchData(Base):
     revenue_before_deduct = Column(Float, default=0.0, comment='REVENUE（扣减前）')
     rpm_before_deduct = Column(Float, default=0.0, comment='RPM（扣减前）')
     
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive, onupdate=get_app_now_naive, comment='更新时间')
 
     # 关系
     product = relationship("Product", back_populates="tb_search_data")
@@ -220,9 +221,9 @@ class ProductAssignment(Base):
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=False, comment='客户ID')
     start_date = Column(Date, nullable=False, comment='分配开始日期')
     end_date = Column(Date, nullable=True, comment='分配结束日期（NULL表示当前有效）')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
 
     # 关系
     product = relationship("Product", back_populates="assignments")
@@ -255,9 +256,9 @@ class ScheduledTask(Base):
     description = Column(Text, nullable=True, comment='任务描述')
     function_path = Column(String(255), nullable=True,
                            comment='执行函数路径（例如：app.scheduler_module.tasks.simple_task.simple_info_task）')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
 
     __table_args__ = (
         Index("idx_scheduled_task_name", "task_name"),
@@ -289,7 +290,7 @@ class UserAuditLog(Base):
     success = Column(Boolean, default=True, index=True, comment='操作是否成功')
     error_message = Column(Text, nullable=True, comment='错误信息（如果失败）')
     details = Column(Text, nullable=True, comment='详细信息（JSON格式）')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True,
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True,
                         comment='创建时间')
 
     # 关系
@@ -386,7 +387,7 @@ class PostbackConversion(Base):
     raw_data = Column(Text, nullable=True, comment='原始回调数据（JSON格式）')
 
     # 元数据
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True, comment='创建时间')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
 
     # 关系（用于通过 ORM 访问关联对象，例如：conversion.product.name）
     # 注意：当前查询接口未使用这些关系，但保留以备将来扩展使用（如返回产品名称、客户名称等）
@@ -422,7 +423,7 @@ class PostbackForwardLog(Base):
     success = Column(Boolean, default=False, index=True, comment='是否转发成功')
     error_message = Column(Text, nullable=True, comment='错误信息（如果转发失败）')
     retry_count = Column(Integer, default=0, comment='重试次数')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True, comment='创建时间')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
     completed_at = Column(DateTime, nullable=True, comment='完成时间')
 
     # 关系
@@ -449,8 +450,8 @@ class PostbackForwardQueue(Base):
     request_data = Column(Text, nullable=True, comment='请求数据（JSON格式，用于POST请求）')
     request_params = Column(Text, nullable=True, comment='请求参数（URL参数，用于GET请求）')
     retry_count = Column(Integer, default=0, comment='已重试次数')
-    next_retry_time = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True, comment='下次重试时间')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True, comment='创建时间')
+    next_retry_time = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='下次重试时间')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
 
     # 关系
     conversion = relationship("PostbackConversion", foreign_keys=[conversion_id])
@@ -477,9 +478,9 @@ class ClientNotificationConfig(Base):
     email_address = Column(String(255), nullable=True, comment='邮箱地址')
     phone_number = Column(String(20), nullable=True, comment='手机号')
     notification_frequency = Column(String(20), default='realtime', comment='通知频率：realtime, hourly, daily')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
 
     # 关系
     client = relationship("Client", foreign_keys=[client_id])
@@ -505,9 +506,9 @@ class ProductNotificationConfig(Base):
     email_address = Column(String(255), nullable=True, comment='邮箱地址')
     phone_number = Column(String(20), nullable=True, comment='手机号')
     notification_frequency = Column(String(20), default='realtime', comment='通知频率：realtime, hourly, daily')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
 
     # 关系
     product = relationship("Product", foreign_keys=[product_id])
@@ -531,7 +532,7 @@ class PostbackNotification(Base):
     notification_status = Column(String(20), default='pending', index=True, comment='通知状态：sent, failed, pending')
     notification_message = Column(Text, nullable=True, comment='通知消息内容')
     error_message = Column(Text, nullable=True, comment='错误信息（如果失败）')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True, comment='创建时间')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
 
     # 关系
     conversion = relationship("PostbackConversion", foreign_keys=[conversion_id])
@@ -562,9 +563,9 @@ class ShortLink(Base):
     click_count = Column(Integer, default=0, comment='点击次数')
     is_active = Column(Boolean, default=True, comment='是否激活')
     expires_at = Column(DateTime, nullable=True, comment='过期时间（可选）')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True, comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
 
     # 关系
     creator = relationship("User", foreign_keys=[created_by])
@@ -592,9 +593,9 @@ class Advertiser(Base):
     email = Column(String(255), nullable=True, comment='邮箱（可选）')
     mobile = Column(String(20), nullable=True, comment='手机号')
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
 
     # 关系
     offers = relationship("Offer", back_populates="advertiser", cascade="all, delete-orphan")
@@ -618,9 +619,9 @@ class Publisher(Base):
     active_advertiser_count = Column(Integer, default=0, comment='活跃的广告主数量')
     client_id = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的客户ID')
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
 
     # 关系
     offer_assignments = relationship("OfferPublisherAssignment", back_populates="publisher", cascade="all, delete-orphan")
@@ -657,9 +658,9 @@ class Offer(Base):
     postback_method = Column(String(10), default='GET', comment='Postback请求方式：GET/POST')
     click_validity_hours = Column(Integer, default=720, comment='点击有效期（小时），默认720小时（30天）')
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
 
     # 关系
     advertiser = relationship("Advertiser", back_populates="offers")
@@ -686,9 +687,9 @@ class OfferPublisherAssignment(Base):
     downstream_cap = Column(Integer, nullable=True, comment='该渠道的下游转化上限')
     affiliate_payout = Column(Float, nullable=True, comment='该渠道的扣价后给渠道的金额（PO扣价后）')
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
 
     # 关系
     offer = relationship("Offer", back_populates="offer_assignments")
@@ -719,7 +720,7 @@ class Click(Base):
     user_agent = Column(Text, nullable=True, comment='User Agent')
     referer = Column(Text, nullable=True, comment='来源页面')
     conversion_id = Column(Integer, nullable=True, index=True, comment='关联的转化ID（如果已转化）')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
 
     # 关系
     offer = relationship("Offer", back_populates="clicks")
@@ -753,9 +754,9 @@ class OfferCap(Base):
     current_total_count = Column(Integer, default=0, comment='当前总计数')
     cap_start_date = Column(DateTime, nullable=True, comment='Cap开始日期（用于Total Cap）')
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
 
     # 关系
     offer = relationship("Offer", back_populates="caps")
@@ -781,9 +782,9 @@ class OfferDiscount(Base):
     publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="CASCADE"), nullable=False, index=True, comment='渠道ID')
     discount_ratio = Column(Float, nullable=False, comment='扣量比例（0-100）')
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), comment='更新时间')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
 
     # 关系
     offer = relationship("Offer", back_populates="discounts")
@@ -812,7 +813,7 @@ class AdvertiserTest(Base):
     click_id = Column(String(255), nullable=True, comment='测试生成的Click ID')
     click_url = Column(Text, nullable=True, comment='测试生成的Click Url')
     test_time = Column(DateTime, nullable=True, index=True, comment='测试时间')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
 
     # 关系
     advertiser = relationship("Advertiser", foreign_keys=[advertiser_id])
@@ -840,7 +841,7 @@ class AffiliateTest(Base):
     postback_time = Column(DateTime, nullable=True, index=True, comment='Postback发送时间')
     status = Column(String(50), nullable=True, index=True, comment='发送状态：Send Success/Failed')
     affiliate_return_content = Column(Text, nullable=True, comment='渠道返回内容')
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, comment='创建时间')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
 
     # 关系
     publisher = relationship("Publisher", foreign_keys=[publisher_id])

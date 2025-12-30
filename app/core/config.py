@@ -386,12 +386,12 @@ class Settings(BaseSettings):
     AUDIT_LOG_ARCHIVE: bool = os.getenv("AUDIT_LOG_ARCHIVE", "false").lower() in ["true", "1", "yes"]
 
     # ====== 时区配置 ======
-    # 应用时区（用于调度器、前端显示等）
+    # 应用时区（用于调度器、前端显示、数据库时间戳等）
     # 默认：Asia/Shanghai（中国时区，UTC+8）
     # 可选值：Asia/Shanghai, UTC, America/New_York 等（pytz 支持的时区）
     # 注意：
     # - 业务日期字段（如AdData.date）存储为系统时区的naive datetime
-    # - 时间戳字段（如created_at、updated_at）存储为UTC时区
+    # - 时间戳字段（如created_at、updated_at）存储为应用配置时区（默认北京时间）的naive datetime
     TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Shanghai")
 
     # ====== Telegram Bot 配置 ======

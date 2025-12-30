@@ -17,6 +17,7 @@ from app.models.models import (
     ClientNotificationConfig, ProductNotificationConfig, PostbackNotification
 )
 from app.core.auto_bot import send_telegram_message
+from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -317,7 +318,7 @@ class PostbackNotifier:
                 notification_channel=notification_channel,
                 notification_status='sent' if success else 'failed',
                 notification_message=message,
-                created_at=datetime.now(timezone.utc)
+                created_at=get_app_now_naive()
             )
             
             db.add(notification_record)
@@ -348,7 +349,7 @@ class PostbackNotifier:
                     notification_status='failed',
                     notification_message=message,
                     error_message=str(e)[:500],
-                    created_at=datetime.now(timezone.utc)
+                    created_at=get_app_now_naive()
                 )
                 db.add(notification_record)
                 await db.commit()

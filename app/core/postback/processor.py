@@ -13,6 +13,7 @@ from app.core.postback.handlers import get_handler
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
 from app.models.models import PostbackConversion, Product, Click, Offer, PostbackForwardQueue, Advertiser
+from app.core.utils import get_app_now_naive
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.cap import check_cap, increment_cap_count
@@ -249,7 +250,7 @@ class PostbackProcessor:
                 click_time=click_time,  # CPL 系统字段
                 conversion_status='Pending',  # CPL 系统字段，默认待处理
                 raw_data=raw_data_json,
-                created_at=datetime.now(timezone.utc)
+                created_at=get_app_now_naive()
             )
             
             db.add(conversion)
@@ -354,7 +355,7 @@ class PostbackProcessor:
                             # 暂时先用 raw_data_json 作为 data，后续由 forwarder 处理
                             request_data=raw_data_json if product.downstream_postback_method == 'POST' else None,
                             request_params=None, # 如果是GET，参数组合逻辑在 forwarder 中
-                            created_at=datetime.now(timezone.utc),
+                            created_at=get_app_now_naive(),
                             next_retry_time=datetime.now(timezone.utc)
                         )
                         db.add(queue_item)
