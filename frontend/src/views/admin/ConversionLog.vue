@@ -206,12 +206,24 @@ const publisherList = ref([])
 // 加载基础数据
 const loadOffers = async () => {
   try {
-    const response = await getOffers({ page: 1, page_size: 100 })
+    // 加载激活的Offer列表，增加page_size以获取更多数据
+    const response = await getOffers({ 
+      page: 1, 
+      page_size: 500,  // 增加到500，覆盖更多Offer
+      is_active: true  // 只加载激活的Offer
+    })
     if (response.code === 200) {
       offerList.value = response.data || []
+      // 如果总数超过500，提示用户
+      if (response.total && response.total > 500) {
+        logger.warning(`Offer列表仅加载了前500条，共${response.total}条`)
+      }
+    } else {
+      ElMessage.warning('加载Offer列表失败，筛选功能可能受限')
     }
   } catch (error) {
     logger.error('加载Offer列表失败:', error)
+    ElMessage.warning('加载Offer列表失败，筛选功能可能受限')
   }
 }
 

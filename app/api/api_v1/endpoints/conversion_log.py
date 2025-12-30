@@ -50,11 +50,11 @@ async def get_conversion_logs(
             end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
         
         # 构建查询条件
-        # 如果需要通过 Click 表筛选 publisher_id 或 advertiser_id，需要 JOIN
-        need_join_click = publisher_id is not None or advertiser_id is not None
+        # 如果需要通过 Click 表筛选 offer_id、publisher_id 或 advertiser_id，需要 JOIN
+        need_join_click = offer_id is not None or publisher_id is not None or advertiser_id is not None
         
         if need_join_click:
-            # 需要 JOIN Click 表来筛选 publisher_id 或 advertiser_id
+            # 需要 JOIN Click 表来筛选 offer_id、publisher_id 或 advertiser_id
             query = select(PostbackConversion).join(Click, PostbackConversion.click_id == Click.click_id)
         else:
             query = select(PostbackConversion)
@@ -66,8 +66,9 @@ async def get_conversion_logs(
             conditions.append(PostbackConversion.click_id == click_id)
         
         if offer_id:
-            # 注意：PostbackConversion 使用 product_id，需要建立映射
-            conditions.append(PostbackConversion.product_id == offer_id)
+            # 通过 Click 表筛选 offer_id（PostbackConversion 没有直接的 offer_id 字段）
+            # 关联路径：PostbackConversion.click_id → Click.click_id → Click.offer_id
+            conditions.append(Click.offer_id == offer_id)
         
         if publisher_id:
             # 通过 Click 表筛选 publisher_id
