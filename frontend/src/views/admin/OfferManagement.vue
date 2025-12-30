@@ -100,14 +100,14 @@
             </template>
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" prop="country" label="国家" width="100" />
-        <el-table-column v-if="isAdmin" prop="category" label="分类" width="120" show-overflow-tooltip>
+        <el-table-column prop="country" label="国家" width="100" />
+        <el-table-column prop="category" label="分类" width="120" show-overflow-tooltip>
           <template #default="scope">
             <span v-if="scope.row.category">{{ scope.row.category }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" prop="type" label="类型" width="100" show-overflow-tooltip>
+        <el-table-column prop="type" label="类型" width="100" show-overflow-tooltip>
           <template #default="scope">
             <span v-if="scope.row.type">{{ scope.row.type }}</span>
             <span v-else>-</span>
@@ -119,18 +119,53 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" prop="downstream_cap" label="下游Cap" width="100" align="center">
+        <el-table-column prop="downstream_cap" :label="isAdmin ? '下游Cap' : 'Cap'" width="100" align="center">
           <template #default="scope">
-            <span v-if="scope.row.downstream_cap">{{ scope.row.downstream_cap }}</span>
-            <span v-else>-</span>
+            <template v-if="!isAdmin && currentClientId && scope.row.assigned_publishers">
+              <!-- 客户登录：显示分配给该客户渠道的Cap -->
+              <span v-if="getRowClientPublisherCap(scope.row) !== null && getRowClientPublisherCap(scope.row) !== undefined">
+                {{ getRowClientPublisherCap(scope.row) }}
+              </span>
+              <span v-else>-</span>
+            </template>
+            <template v-else>
+              <!-- 管理员：显示Offer级别的Cap -->
+              <span v-if="scope.row.downstream_cap">{{ scope.row.downstream_cap }}</span>
+              <span v-else>-</span>
+            </template>
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" prop="preview_link" label="预览链接" width="200" show-overflow-tooltip>
+        <el-table-column prop="preview_link" label="预览链接" width="200" show-overflow-tooltip>
           <template #default="scope">
             <el-link v-if="scope.row.preview_link" :href="scope.row.preview_link" target="_blank" type="primary" :underline="false">
               预览
             </el-link>
             <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="isAdmin ? '下游Tracklink' : 'Tracklink'" width="300" show-overflow-tooltip>
+          <template #default="scope">
+            <template v-if="!isAdmin && currentClientId && scope.row.assigned_publishers">
+              <!-- 客户登录：显示该客户渠道的Tracklink -->
+              <el-link 
+                v-if="getRowClientPublisherTracklink(scope.row)"
+                :href="getRowClientPublisherTracklink(scope.row)" 
+                target="_blank" 
+                type="primary"
+                :underline="false"
+                style="word-break: break-all;"
+              >
+                查看
+              </el-link>
+              <span v-else>-</span>
+            </template>
+            <template v-else>
+              <!-- 管理员：显示原始Tracklink -->
+              <span v-if="scope.row.downstream_tracklink" style="word-break: break-all;">
+                {{ scope.row.downstream_tracklink }}
+              </span>
+              <span v-else>-</span>
+            </template>
           </template>
         </el-table-column>
         <el-table-column v-if="isAdmin" prop="postback_method" label="Postback方法" width="120" align="center">
@@ -161,7 +196,7 @@
             <el-tag v-else type="info" size="small">未分配</el-tag>
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" prop="status" label="状态" width="100" align="center">
+        <el-table-column prop="status" label="状态" width="100" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.status === 'Active' ? 'success' : 'info'">
               {{ scope.row.status }}
@@ -175,9 +210,14 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" prop="created_at" label="创建时间" width="180">
+        <el-table-column prop="created_at" label="创建时间" width="180">
           <template #default="scope">
             {{ formatDate(scope.row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="updated_at" label="更新时间" width="180">
+          <template #default="scope">
+            {{ formatDate(scope.row.updated_at) }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="250" fixed="right">
@@ -1568,6 +1608,53 @@ const getRowClientPublisherPO = (row) => {
   )
   
   return clientPublisher?.affiliate_payout || null
+}
+
+// 获取列表行中客户渠道的Cap（下游Cap）- 用于列表页
+const getRowClientPublisherCap = (row) => {
+  if (!row || !currentClientId.value || !row.assigned_publishers) {
+    return null
+  }
+  
+  // 查找属于该客户的渠道
+  const clientPublisher = row.assigned_publishers.find(
+    pub => pub.client_id === currentClientId.value
+  )
+  
+  return clientPublisher?.downstream_cap || null
+}
+
+// 获取列表行中客户渠道的Tracklink - 用于列表页
+const getRowClientPublisherTracklink = (row) => {
+  if (!row || !currentClientId.value || !row.assigned_publishers || !row.downstream_tracklink) {
+    return null
+  }
+  
+  // 查找属于该客户的渠道
+  const clientPublisher = row.assigned_publishers.find(
+    pub => pub.client_id === currentClientId.value
+  )
+  
+  if (!clientPublisher) {
+    return null
+  }
+  
+  // 构建Tracklink（短链接 + 参数）
+  let baseUrl = row.downstream_tracklink.trim()
+  
+  // 如果是相对路径（以/s/开头），需要添加域名
+  if (baseUrl.startsWith('/s/')) {
+    const origin = window.location.origin
+    baseUrl = `${origin}${baseUrl}`
+  }
+  
+  // 移除可能已存在的参数，重新添加
+  const urlParts = baseUrl.split('?')
+  const cleanBaseUrl = urlParts[0]
+  
+  // 添加参数：?offer_id=X&channel_id=Y
+  const result = `${cleanBaseUrl}?offer_id=${row.id}&channel_id=${clientPublisher.id}`
+  return result
 }
 
 // 获取客户自己的渠道Cap（下游Cap）
