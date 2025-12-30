@@ -26,6 +26,7 @@ from sqlalchemy.future import select
 # 本地导入
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.utils import get_app_now_naive
 from app.models.models import User, UserRole
 
 # 获取日志记录器
