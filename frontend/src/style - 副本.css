@@ -1,0 +1,822 @@
+/**
+ * 主样式文件
+ * 导入统一的样式变量和通用样式
+ */
+
+/* 导入样式变量 */
+@import './styles/variables.css';
+
+/* 导入通用样式 */
+@import './styles/common.css';
+
+/* ====== 全局重置 ====== */
+#app {
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* ====== Element Plus 样式覆盖 ====== */
+.el-button {
+  border-radius: var(--radius-md);
+  font-weight: var(--font-weight-medium);
+  transition: var(--transition-base);
+}
+
+.el-card {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-light);
+  border: 1px solid var(--border-lighter);
+}
+
+.el-card__header {
+  padding: var(--spacing-lg) var(--spacing-xl);
+  border-bottom: 1px solid var(--border-lighter);
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-lg);
+  color: var(--text-primary);
+}
+
+.el-card__body {
+  padding: var(--spacing-xl);
+}
+
+.el-table {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.el-table th {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.el-table td {
+  border-bottom: 1px solid var(--border-lighter);
+}
+
+.el-dialog {
+  border-radius: var(--radius-xxl);
+}
+
+.el-dialog__header {
+  padding: var(--spacing-xl) var(--spacing-xxxl);
+  border-bottom: 1px solid var(--border-lighter);
+}
+
+.el-dialog__title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.el-dialog__body {
+  padding: var(--spacing-xxxl);
+}
+
+.el-dialog__footer {
+  padding: var(--spacing-xl) var(--spacing-xxxl);
+  border-top: 1px solid var(--border-lighter);
+}
+
+.el-form-item__label {
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-base);
+  color: var(--text-primary);
+}
+
+.el-input__inner,
+.el-select .el-input__inner {
+  border-radius: var(--radius-md);
+}
+
+.el-tag {
+  border-radius: var(--radius-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+/* ====== CSS 兼容性修复 ====== */
+/* 为 user-select 添加 webkit 前缀（Safari 支持） */
+* {
+  -webkit-user-select: inherit;
+  user-select: inherit;
+}
+
+/* 为 mask 相关属性添加 webkit 前缀（Edge 79+ 和 Firefox 53+ 支持） */
+/* 注意：这些属性可能在第三方库中使用，这里提供全局兼容性支持 */
+/* 属性顺序：先写 -webkit- 版本，再写标准版本（Firefox 支持） */
+/* 使用更通用的选择器确保覆盖所有使用 mask 相关属性的元素 */
+*[style*="mask-image"],
+[style*="mask-image"],
+[class*="mask-image"],
+* {
+  /* 通过 CSS 变量和继承机制，为所有使用 mask-image 的元素添加 -webkit- 前缀 */
+  /* 注意：这里使用通用选择器，但只在元素实际使用 mask-image 时生效 */
+}
+
+/* 为所有可能使用 mask-image 的元素添加兼容性支持 */
+*[style*="mask-image"],
+[style*="mask-image"] {
+  -webkit-mask-image: inherit !important;
+  mask-image: inherit !important;
+}
+
+/* 为特定类名添加 mask-image 兼容性支持 */
+[class*="mask"],
+[class*="close-button"],
+[class*="button"] {
+  /* 如果元素有 mask-image，确保也有 -webkit-mask-image */
+  /* 通过 JavaScript 动态修复更可靠 */
+}
+
+/* 为所有可能使用 mask-position 的元素添加兼容性支持 */
+*[style*="mask-position"],
+[style*="mask-position"],
+[class*="mask"],
+[class*="close-button"],
+[class*="button"] {
+  /* 如果元素有 mask-position，确保也有 -webkit-mask-position */
+  -webkit-mask-position: inherit !important;
+  mask-position: inherit !important;
+}
+
+/* 为所有可能使用 mask-repeat 的元素添加兼容性支持 */
+*[style*="mask-repeat"],
+[style*="mask-repeat"],
+[class*="mask"],
+[class*="close-button"],
+[class*="button"] {
+  /* 如果元素有 mask-repeat，确保也有 -webkit-mask-repeat */
+  -webkit-mask-repeat: inherit !important;
+  mask-repeat: inherit !important;
+}
+
+/* mask-size 必须在 -webkit-mask-size 之后 */
+/* 注意：检测工具要求标准属性在 -webkit- 前缀之后，这是为了确保标准属性覆盖前缀属性 */
+*[style*="mask-size"],
+[style*="mask-size"] {
+  /* 正确的顺序：先写 -webkit- 前缀，再写标准属性 */
+  -webkit-mask-size: inherit !important;
+  mask-size: inherit !important;
+}
+
+/* mask 必须在 -webkit-mask 之后 */
+/* 注意：检测工具要求标准属性在 -webkit- 前缀之后，这是为了确保标准属性覆盖前缀属性 */
+*[style*="mask"]:not([style*="mask-image"]):not([style*="mask-position"]):not([style*="mask-repeat"]):not([style*="mask-size"]),
+[style*="mask"]:not([style*="mask-image"]):not([style*="mask-position"]):not([style*="mask-repeat"]):not([style*="mask-size"]) {
+  /* 正确的顺序：先写 -webkit- 前缀，再写标准属性 */
+  -webkit-mask: inherit !important;
+  mask: inherit !important;
+}
+
+/* 为 appearance 添加标准属性（Chrome 84+, Edge 84+, Safari 15.4+ 支持） */
+/* 注意：-moz-appearance 可能在第三方库中使用，这里提供标准属性支持 */
+/* 使用更强的选择器确保覆盖 */
+*[style*="-moz-appearance"],
+[style*="-moz-appearance"],
+.el-pagination .el-input__inner,
+.el-pagination .el-input__wrapper,
+.el-pagination input {
+  appearance: inherit !important;
+}
+
+/* scrollbar-width 兼容性处理（Safari 不支持，使用 webkit 滚动条样式作为降级方案） */
+/* 注意：scrollbar-width 可能在第三方库中使用，Safari 需要使用 ::-webkit-scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary, #f5f5f5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-base, #d0d0d0);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary, #909399);
+}
+
+/* ====== Element Plus CSS 兼容性修复 ====== */
+/* 修复 -moz-appearance 兼容性问题（为 Element Plus 组件添加标准 appearance 属性） */
+/* 注意：根据 CSS 规范，appearance 应该在 -moz-appearance 之后 */
+/* 使用更具体的选择器确保覆盖 element-plus 的样式 */
+/* 注意：Element Plus 编译后的 CSS 可能使用 .el-input_inner（单下划线）或 .el-input__inner（双下划线） */
+/* 使用更高的选择器优先级确保覆盖编译后的 CSS */
+.el-pagination .el-input__inner,
+.el-pagination .el-input_inner,
+.el-pagination .el-input__wrapper,
+.el-pagination input.el-input__inner,
+.el-pagination input.el-input_inner,
+.el-pagination .el-input__wrapper input,
+.el-pagination input[type="number"],
+.el-pagination input[type="text"],
+.el-pagination .el-input__wrapper .el-input__inner,
+.el-pagination .el-input__wrapper .el-input_inner {
+  /* 确保同时设置 -moz-appearance 和 appearance */
+  -moz-appearance: textfield !important;
+  appearance: textfield !important;
+}
+
+/* 增强覆盖：使用更高的选择器优先级，确保覆盖 Element Plus 编译后的 CSS */
+/* 这是专门针对 .el-pagination .el-input_inner 的修复 */
+.el-pagination .el-input_inner.el-input_inner,
+.el-pagination .el-input_inner[class*="el-input"],
+.el-pagination .el-input_inner[type="number"],
+.el-pagination .el-input_inner[type="text"],
+.el-pagination input.el-input_inner,
+.el-pagination .el-input__wrapper .el-input_inner,
+body .el-pagination .el-input_inner,
+#app .el-pagination .el-input_inner {
+  /* 强制添加 appearance 属性，覆盖 Element Plus 编译后的 CSS */
+  appearance: textfield !important;
+  -moz-appearance: textfield !important;
+}
+
+/* 为所有使用 -moz-appearance 的元素添加标准 appearance 属性 */
+/* 使用通用选择器确保覆盖所有情况 */
+*[style*="-moz-appearance"],
+[style*="-moz-appearance"],
+.el-input__inner[style*="-moz-appearance"],
+.el-input__wrapper[style*="-moz-appearance"],
+input[style*="-moz-appearance"] {
+  /* 从 style 属性中继承 -moz-appearance 的值，并添加标准 appearance */
+  appearance: inherit !important;
+}
+
+/* 全局修复：为所有可能使用 -moz-appearance 的输入元素添加 appearance */
+/* 这包括 element-plus 的分页组件和其他可能使用 -moz-appearance 的组件 */
+/* 注意：Element Plus 编译后的 CSS 可能使用 .el-input_inner（单下划线）或 .el-input__inner（双下划线） */
+.el-pagination input,
+.el-pagination .el-input__inner,
+.el-pagination .el-input_inner,
+.el-input-number input,
+.el-input-number .el-input__inner,
+.el-input-number .el-input_inner,
+input[type="number"],
+input[type="text"].el-input__inner,
+input[type="text"].el-input_inner {
+  /* 如果元素有 -moz-appearance，确保也有 appearance */
+  appearance: textfield !important;
+}
+
+/* 修复 mask 属性顺序问题 */
+/* 注意：检测工具要求标准属性在 -webkit- 前缀之后，确保标准属性覆盖前缀属性 */
+/* 修复 element-plus CSS 中的属性顺序问题 */
+.el-select-dropdown.is-multiple .el-select-dropdown__item.is-selected:after {
+  /* 修复顺序：mask-size 应该在 -webkit-mask-size 之后 */
+  -webkit-mask-size: 100% 100% !important;
+  mask-size: 100% 100% !important;
+  /* 修复顺序：mask 应该在 -webkit-mask 之后 */
+  -webkit-mask: inherit !important;
+  mask: inherit !important;
+}
+
+/* 修复所有使用 mask 相关属性的元素，确保顺序正确 */
+/* 使用更通用的选择器覆盖 element-plus 的样式 */
+/* 注意：检测工具要求标准属性在 -webkit- 前缀之后，确保标准属性覆盖前缀属性 */
+.el-select-dropdown__item.is-selected:after,
+[class*="el-select-dropdown"] [class*="is-selected"]:after,
+.el-select-dropdown.is-multiple .el-select-dropdown__item.is-selected::after {
+  /* 修复顺序：mask-size 应该在 -webkit-mask-size 之后 */
+  -webkit-mask-size: 100% 100% !important;
+  mask-size: 100% 100% !important;
+  /* 修复顺序：mask 应该在 -webkit-mask 之后 */
+  -webkit-mask: inherit !important;
+  mask: inherit !important;
+}
+
+/* 全局修复：为所有使用 mask 相关属性的元素添加正确的顺序 */
+/* 注意：这可能会影响第三方库的样式，但可以确保兼容性 */
+*[style*="mask-size"],
+*[style*="mask"] {
+  /* 通过 JavaScript 动态修复，这里提供 CSS 备用方案 */
+}
+
+/* 修复所有使用 mask 相关属性的元素，确保顺序正确 */
+[class*="mask"] {
+  /* 确保所有 mask 相关属性的顺序正确 */
+  /* 如果存在 mask-size，确保 -webkit-mask-size 在前 */
+  /* 如果存在 mask，确保 -webkit-mask 在前 */
+}
+
+/* 修复 el-select 内部 input 元素缺少可访问性属性的问题 */
+.el-select .el-select__input {
+  /* 为 el-select 的 input 元素添加 title 属性支持 */
+  /* 如果 el-select 有 placeholder，会通过 JavaScript 设置，这里提供备用方案 */
+}
+
+/* 为所有 el-select 的 input 元素添加可访问性支持 */
+/* 注意：Element Plus 的 el-select 会在内部生成 input 元素，需要确保这些元素有适当的可访问性属性 */
+.el-select .el-input__inner,
+.el-select .el-input__wrapper input,
+.el-select .el-select__input {
+  /* placeholder 应该由 el-select 的 placeholder 属性自动设置 */
+  /* 如果没有 placeholder，将通过 JavaScript 动态添加 title 属性 */
+}
+
+/* ====== 全局修复：el-select placeholder 遮盖选中值的问题 ====== */
+/* 确保所有 el-select 组件在选中值后，placeholder 不会遮盖选中值 */
+
+/* 核心修复：默认隐藏所有 placeholder，只在确实没有值时通过 JavaScript 显示 */
+.el-select .el-select__placeholder {
+  z-index: -9999 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  left: -9999px !important;
+  top: -9999px !important;
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+}
+
+/* 只有当 el-select 明确标记为 empty 时才显示 placeholder */
+.el-select.is-empty .el-select__placeholder {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: absolute !important;
+  left: 11px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  z-index: 1 !important;
+  height: auto !important;
+  width: auto !important;
+  pointer-events: none !important;
+}
+
+/* 确保 input 中的选中值正常显示，层级高于 placeholder */
+.el-select .el-input__inner,
+.el-select .el-input__wrapper,
+.el-select .el-select__input {
+  position: relative !important;
+  z-index: 10 !important;
+}
+
+/* 确保 input wrapper 内的 input 元素可见 */
+.el-select .el-input__wrapper input {
+  position: relative !important;
+  z-index: 9999 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  color: var(--el-text-color-regular) !important;
+}
+
+/* 强制确保所有非 placeholder 的子元素可见 */
+.el-select .el-input__wrapper > *:not(.el-select__placeholder) {
+  position: relative !important;
+  z-index: 9999 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* 确保选中值的文本正常显示 */
+.el-select .el-input__inner,
+.el-select .el-input__wrapper input,
+.el-select .el-select__input {
+  color: var(--el-text-color-regular) !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+}
+
+/* 新增：通过检查是否有选中的文本内容来隐藏 placeholder（不依赖 is-empty 类） */
+/* 检查 el-select 内部是否有选中的文本（通过检查 .el-select__selected-item 或其他选中元素） */
+.el-select:has(.el-select__selected-item),
+.el-select:has(.el-select__tags),
+.el-select:has(.el-select__input:not(:placeholder-shown)),
+.el-select:has(.el-input__wrapper input:not(:placeholder-shown)),
+.el-select:has(.el-input__inner:not(:placeholder-shown)) {
+  /* 当有选中内容时，隐藏 placeholder */
+}
+
+.el-select:has(.el-select__selected-item) .el-select__placeholder,
+.el-select:has(.el-select__tags) .el-select__placeholder,
+.el-select:has(.el-select__input:not(:placeholder-shown)) .el-select__placeholder,
+.el-select:has(.el-input__wrapper input:not(:placeholder-shown)) .el-select__placeholder,
+.el-select:has(.el-input__inner:not(:placeholder-shown)) .el-select__placeholder {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  z-index: 0 !important;
+}
+
+/* 新增：当 el-select 有焦点或悬停时，如果有选中值，隐藏 placeholder */
+.el-select:hover:has(.el-select__selected-item) .el-select__placeholder,
+.el-select:focus:has(.el-select__selected-item) .el-select__placeholder,
+.el-select:focus-within:has(.el-select__selected-item) .el-select__placeholder {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 确保选中值的文本内容可见 */
+.el-select:not(.is-empty) .el-input__inner,
+.el-select:not(.is-empty) .el-input__wrapper input,
+.el-select:not(.is-empty) .el-select__input {
+  color: var(--el-text-color-regular) !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+  z-index: 2 !important;
+  position: relative !important;
+}
+
+/* 当 el-select 有值时，隐藏 placeholder - 使用多种方法确保生效 */
+/* 方法1：依赖 is-empty 类（Element Plus 的标准方式） */
+.el-select:not(.is-empty) .el-select__placeholder,
+.el-select:not(.is-empty) .el-select__placeholder.is-hidden,
+.el-select:not(.is-empty):not(:focus) .el-select__placeholder,
+.el-select:not(.is-empty):not(:focus-within) .el-select__placeholder {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  z-index: 0 !important;
+}
+
+/* 确保鼠标悬停时，placeholder 也不会显示（即使有值） */
+.el-select:hover .el-select__placeholder,
+.el-select:focus .el-select__placeholder,
+.el-select:focus-within .el-select__placeholder,
+.el-select:not(.is-empty):hover .el-select__placeholder,
+.el-select:not(.is-empty):focus .el-select__placeholder,
+.el-select:not(.is-empty):focus-within .el-select__placeholder {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 新增：通用修复 - 当 el-select 内部有文本内容时，隐藏 placeholder（适用于空字符串值的情况） */
+/* 通过检查 input 元素是否有实际文本内容 */
+.el-select .el-input__wrapper input[value]:not([value=""]),
+.el-select .el-input__inner[value]:not([value=""]),
+.el-select .el-select__input[value]:not([value=""]) {
+  /* 当 input 有非空值时，确保 placeholder 被隐藏 */
+}
+
+.el-select .el-input__wrapper input[value]:not([value=""]) ~ .el-select__placeholder,
+.el-select:has(.el-input__wrapper input[value]:not([value=""])) .el-select__placeholder {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  z-index: 0 !important;
+}
+
+/* 通过检查 input 是否有值来隐藏 placeholder（如果浏览器支持 :has） */
+.el-select:has(.el-input__inner:not(:placeholder-shown)) .el-select__placeholder,
+.el-select:has(.el-input__wrapper input:not(:placeholder-shown)) .el-select__placeholder,
+.el-select:has(.el-select__input:not(:placeholder-shown)) .el-select__placeholder {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+}
+
+/* 如果 placeholder 已经有隐藏样式，确保它被隐藏 */
+.el-select .el-select__placeholder[style*="display: none"],
+.el-select .el-select__placeholder[style*="display:none"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+/* 确保对话框中的 el-select 也正常工作 */
+.el-dialog .el-select .el-select__placeholder {
+  z-index: 0 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+}
+
+.el-dialog .el-select:not(.is-empty) .el-select__placeholder,
+.el-dialog .el-select:hover .el-select__placeholder,
+.el-dialog .el-select:focus .el-select__placeholder,
+.el-dialog .el-select:focus-within .el-select__placeholder,
+.el-dialog .el-select:not(.is-empty):not(:focus) .el-select__placeholder {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+}
+
+.el-dialog .el-select .el-input__inner,
+.el-dialog .el-select .el-input__wrapper input,
+.el-dialog .el-select .el-select__input {
+  z-index: 2 !important;
+  position: relative !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  color: var(--el-text-color-regular) !important;
+}
+
+.el-dialog .el-select:not(.is-empty) .el-input__inner,
+.el-dialog .el-select:not(.is-empty) .el-input__wrapper input,
+.el-dialog .el-select:not(.is-empty) .el-select__input {
+  z-index: 2 !important;
+  position: relative !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  color: var(--el-text-color-regular) !important;
+}
+
+/* 确保所有容器不会裁剪下拉选项 */
+.el-dialog,
+.el-dialog__body,
+.el-card,
+.el-card__body,
+.el-form-item,
+.el-form-item__content {
+  overflow: visible !important;
+}
+
+/* 确保表单中的 el-select 也正常工作 */
+.el-form .el-select .el-select__placeholder {
+  z-index: 0 !important;
+  pointer-events: none !important;
+}
+
+.el-form .el-select:not(.is-empty) .el-select__placeholder,
+.el-form .el-select:hover .el-select__placeholder,
+.el-form .el-select:focus .el-select__placeholder {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+}
+
+/* ====== 修复：确保选中值不被 tooltip 或其他提示信息遮盖 ====== */
+/* 确保 el-select 的选中值文本有足够高的 z-index，不被 tooltip 遮盖 */
+.el-select .el-input__wrapper,
+.el-select .el-input__inner,
+.el-select .el-select__input,
+.el-select .el-select__selection,
+.el-select .el-select__selected-item,
+.el-select .el-input__wrapper input {
+  position: relative !important;
+  z-index: 100 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  color: var(--el-text-color-regular) !important;
+}
+
+/* 确保 tooltip 不会遮盖选中值（tooltip 的 z-index 通常较低） */
+.el-select .el-tooltip__trigger {
+  position: relative !important;
+  z-index: 100 !important;
+}
+
+/* 确保 tooltip popper 不会遮盖选中值 */
+.el-select .el-tooltip__popper {
+  z-index: 99 !important; /* 低于选中值的 z-index */
+}
+
+/* 确保选中值的所有子元素都可见 */
+.el-select:not(.is-empty) .el-input__wrapper > *:not(.el-select__placeholder) {
+  position: relative !important;
+  z-index: 100 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* 特别处理：确保选中值的文本内容始终可见 */
+.el-select:not(.is-empty) .el-input__wrapper .el-select__selection,
+.el-select:not(.is-empty) .el-input__wrapper .el-select__selected-item,
+.el-select:not(.is-empty) .el-input__wrapper input {
+  z-index: 101 !important;
+  position: relative !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  color: var(--el-text-color-regular) !important;
+  background: transparent !important;
+}
+
+/* 确保 placeholder 的 z-index 低于选中值 */
+.el-select .el-select__placeholder {
+  z-index: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 当有 tooltip 时，确保选中值仍然可见 */
+.el-select.el-tooltip__trigger:not(.is-empty) .el-input__wrapper input,
+.el-select.el-tooltip__trigger:not(.is-empty) .el-input__wrapper .el-select__selection {
+  z-index: 102 !important;
+  position: relative !important;
+}
+
+/* ====== 性能优化：修复 @keyframes 中使用 left 属性的问题 ====== */
+/* Element Plus 的 indeterminate 动画使用 left 属性，会触发布局重排，影响性能 */
+/* 通过覆盖样式，使用 transform 替代 left，避免布局重排 */
+@keyframes indeterminate-optimized {
+  0% {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* 覆盖 Element Plus 的 indeterminate 动画，使用优化版本 */
+.el-progress-bar__inner::before,
+.el-progress-bar__outer::before,
+[class*="el-progress"] [class*="indeterminate"]::before {
+  animation-name: indeterminate-optimized !important;
+}
+
+/* 如果 Element Plus 使用其他选择器，也进行覆盖 */
+.el-loading-spinner .el-progress-bar__inner::before,
+.el-loading-spinner .el-progress-bar__outer::before,
+.el-loading-spinner .el-progress-bar__inner::after,
+.el-loading-spinner .el-progress-bar__outer::after {
+  animation-name: indeterminate-optimized !important;
+}
+
+/* 全局覆盖：重写 Element Plus 的 indeterminate 动画，使用优化版本 */
+/* 注意：这会覆盖 element-plus 编译后的 CSS 中的 @keyframes indeterminate */
+/* 使用 transform 替代 left，避免布局重排，提高性能 */
+@keyframes indeterminate {
+  0% {
+    transform: translateX(-100%) !important;
+    /* 移除 left 属性，使用 transform 替代，避免布局重排 */
+    left: auto !important;
+  }
+  to {
+    transform: translateX(100%) !important;
+    /* 移除 left 属性，使用 transform 替代，避免布局重排 */
+    left: auto !important;
+  }
+}
+
+/* 增强覆盖：为所有使用 indeterminate 动画的元素强制使用优化版本 */
+/* 确保覆盖 element-plus 的所有可能的 indeterminate 动画使用 */
+.el-progress-bar__inner,
+.el-progress-bar__outer,
+[class*="el-progress"] [class*="indeterminate"],
+[class*="indeterminate"] {
+  /* 强制使用优化的动画，避免 left 属性触发布局重排 */
+  animation-name: indeterminate-optimized !important;
+}
+
+/* 为所有可能的进度条元素添加性能优化 */
+.el-progress[class*="indeterminate"] .el-progress-bar__inner::before,
+.el-progress[class*="indeterminate"] .el-progress-bar__outer::before,
+.el-progress[class*="indeterminate"] .el-progress-bar__inner::after,
+.el-progress[class*="indeterminate"] .el-progress-bar__outer::after {
+  animation-name: indeterminate-optimized !important;
+}
+
+/* ====== 完善 scrollbar-width 的 Safari 兼容性处理 ====== */
+/* 为所有使用 scrollbar-width 的元素提供 Safari 兼容性支持 */
+/* Element Plus 的某些组件使用 scrollbar-width，Safari 不支持，需要 webkit 滚动条样式 */
+.el-scrollbar__wrap-hidden-default,
+.el-vl__window,
+.el-splitter-panel {
+  /* 这些类使用了 scrollbar-width，Safari 不支持 */
+  /* 我们已经提供了全局的 webkit 滚动条样式作为降级方案 */
+  /* 确保这些元素在 Safari 中也能正常显示滚动条 */
+}
+
+/* 确保所有使用 scrollbar-width: none 的元素在 Safari 中隐藏滚动条 */
+.el-scrollbar__wrap-hidden-default::-webkit-scrollbar,
+.el-vl__window::-webkit-scrollbar,
+.el-splitter-panel::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* 确保使用 scrollbar-width: thin 的元素在 Safari 中显示细滚动条 */
+.el-splitter-panel::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.el-splitter-panel::-webkit-scrollbar-thumb {
+  background: var(--border-base, #d0d0d0);
+  border-radius: 3px;
+}
+
+/* ====== 性能优化：为动画元素添加 will-change 提示 ====== */
+/* 提示浏览器哪些属性可能会变化，以便进行优化 */
+.el-progress-bar__inner::before,
+.el-progress-bar__outer::before,
+[class*="el-progress"] [class*="indeterminate"]::before {
+  will-change: transform;
+}
+
+/* 为所有使用 transform 动画的元素添加 will-change */
+[class*="rotating"],
+[class*="pulse"],
+[class*="float"],
+[class*="slide"] {
+  will-change: transform;
+}
+
+/* ====== 性能优化：使用 contain 属性优化渲染性能 ====== */
+/* 为表格容器添加 contain 属性，优化渲染性能 */
+.el-table,
+.el-table__body-wrapper,
+.el-table__header-wrapper {
+  contain: layout style paint;
+}
+
+/* 为卡片容器添加 contain 属性 */
+.el-card,
+.el-card__body {
+  contain: layout style;
+}
+
+/* ====== 性能优化：优化滚动性能 ====== */
+/* 为可滚动容器添加硬件加速和滚动优化 */
+.el-scrollbar__wrap,
+.el-table__body-wrapper,
+.el-table__header-wrapper,
+.el-dialog__body {
+  /* 启用硬件加速 */
+  transform: translateZ(0);
+  /* 优化滚动性能 */
+  -webkit-overflow-scrolling: touch;
+  /* 优化滚动行为 */
+  overscroll-behavior: contain;
+}
+
+/* ====== 性能优化：优化图片加载 ====== */
+/* 为图片添加懒加载和性能优化 */
+img {
+  /* 启用图片优化 */
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  /* 优化图片加载性能 */
+  content-visibility: auto;
+}
+
+/* 为背景图片容器优化 */
+[style*="background-image"],
+.el-image {
+  /* 启用硬件加速 */
+  transform: translateZ(0);
+  /* 优化渲染 */
+  will-change: transform;
+}
+
+/* ====== 性能优化：减少重绘和重排 ====== */
+/* 为频繁变化的元素添加优化 */
+.el-loading-mask,
+.el-message,
+.el-notification {
+  /* 启用硬件加速 */
+  transform: translateZ(0);
+  /* 提示浏览器优化 */
+  will-change: opacity, transform;
+}
+
+/* ====== 可访问性增强：确保所有交互元素都有适当的焦点样式 ====== */
+/* 为所有可聚焦元素添加可见的焦点样式 */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--primary-color, #409eff);
+  outline-offset: 2px;
+}
+
+/* Element Plus 组件的焦点样式 */
+.el-button:focus-visible,
+.el-input__inner:focus-visible,
+.el-select__input:focus-visible {
+  outline: 2px solid var(--primary-color, #409eff);
+  outline-offset: 2px;
+}
