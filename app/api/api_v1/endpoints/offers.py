@@ -552,7 +552,8 @@ async def get_offers(
             ).where(
                 and_(
                     Publisher.client_id == client_id,
-                    OfferPublisherAssignment.is_active == True
+                    Publisher.is_active == True,  # 只显示激活的渠道
+                    OfferPublisherAssignment.is_active == True  # 只显示激活的分配
                 )
             ).distinct()  # 去重，因为一个Offer可能分配给多个渠道
         else:
@@ -614,6 +615,7 @@ async def get_offers(
             .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
             .where(OfferPublisherAssignment.offer_id.in_(offer_ids))
             .where(OfferPublisherAssignment.is_active == True)
+            .where(Publisher.is_active == True)  # 只加载激活的渠道
         )
         
         # 如果是客户用户，只加载属于该客户的渠道

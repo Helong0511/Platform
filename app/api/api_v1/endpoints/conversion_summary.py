@@ -11,7 +11,7 @@ from sqlalchemy import func, and_, or_
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
-from app.models.models import User, Click, PostbackConversion, Offer, Publisher, Advertiser, Client, UserRole
+from app.models.models import User, Click, PostbackConversion, Offer, Publisher, Advertiser, Client, UserRole, OfferPublisherAssignment
 from app.schemas.base import ResponseBaseSchema
 from app.core.discount.discount_manager import calculate_discount
 
@@ -98,6 +98,29 @@ async def get_conversion_summary(
             click_conditions.append(Click.publisher_id.in_(client_publisher_ids))
         
         if offer_id:
+            # 如果是客户用户，验证该offer_id是否分配给该客户的渠道
+            if client_publisher_ids is not None:
+                # 检查该Offer是否分配给该客户的任何渠道
+                offer_check_query = select(OfferPublisherAssignment).where(
+                    and_(
+                        OfferPublisherAssignment.offer_id == offer_id,
+                        OfferPublisherAssignment.publisher_id.in_(client_publisher_ids),
+                        OfferPublisherAssignment.is_active == True
+                    )
+                ).limit(1)
+                offer_check_result = await db.execute(offer_check_query)
+                if not offer_check_result.scalar_one_or_none():
+                    # 该Offer未分配给该客户的渠道，返回空数据
+                    return ResponseBaseSchema.success(data={
+                        "total_clicks": 0,
+                        "total_conversions": 0,
+                        "cr": 0,
+                        "total_po": 0.0,
+                        "stats_list": [],
+                        "start_date": start_date or ((datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")),
+                        "end_date": end_date or (datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+                    })
+            
             click_conditions.append(Click.offer_id == offer_id)
             # 转化数据通过 Click 表关联筛选 offer_id，而不是直接使用 product_id
             # 因为 PostbackConversion.product_id 和 Click.offer_id 可能不一致
