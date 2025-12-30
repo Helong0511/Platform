@@ -99,7 +99,8 @@ async def get_conversion_summary(
         
         if offer_id:
             click_conditions.append(Click.offer_id == offer_id)
-            conversion_conditions.append(PostbackConversion.product_id == offer_id)
+            # 转化数据通过 Click 表关联筛选 offer_id，而不是直接使用 product_id
+            # 因为 PostbackConversion.product_id 和 Click.offer_id 可能不一致
         
         if publisher_id:
             click_conditions.append(Click.publisher_id == publisher_id)
@@ -118,15 +119,17 @@ async def get_conversion_summary(
         from sqlalchemy.orm import aliased
         click_alias_for_count = aliased(Click)
         conversion_query = select(func.count(PostbackConversion.id))
-        if client_publisher_ids is not None:
+        if client_publisher_ids is not None or offer_id is not None:
+            # 需要通过Click表关联来筛选offer_id或publisher_id
             conversion_query = conversion_query.join(
                 click_alias_for_count, PostbackConversion.click_id == click_alias_for_count.click_id
-            ).where(
-                and_(
-                    *conversion_conditions,
-                    click_alias_for_count.publisher_id.in_(client_publisher_ids)
-                )
             )
+            count_conditions = list(conversion_conditions[:2])  # 只保留日期条件
+            if client_publisher_ids is not None:
+                count_conditions.append(click_alias_for_count.publisher_id.in_(client_publisher_ids))
+            if offer_id is not None:
+                count_conditions.append(click_alias_for_count.offer_id == offer_id)
+            conversion_query = conversion_query.where(and_(*count_conditions))
         else:
             conversion_query = conversion_query.where(and_(*conversion_conditions))
         conversion_count = (await db.execute(conversion_query)).scalar() or 0
@@ -135,18 +138,20 @@ async def get_conversion_summary(
         cr = (conversion_count / click_count * 100) if click_count > 0 else 0
         
         # 统计总支付金额（PO）
-        # 如果是客户用户，需要通过Click关联Publisher来过滤
+        # 如果是客户用户或需要筛选offer_id，需要通过Click关联Publisher来过滤
         click_alias_for_po = aliased(Click)
         po_query = select(func.sum(PostbackConversion.payout))
-        if client_publisher_ids is not None:
+        if client_publisher_ids is not None or offer_id is not None:
+            # 需要通过Click表关联来筛选offer_id或publisher_id
             po_query = po_query.join(
                 click_alias_for_po, PostbackConversion.click_id == click_alias_for_po.click_id
-            ).where(
-                and_(
-                    *conversion_conditions,
-                    click_alias_for_po.publisher_id.in_(client_publisher_ids)
-                )
             )
+            po_conditions = list(conversion_conditions[:2])  # 只保留日期条件
+            if client_publisher_ids is not None:
+                po_conditions.append(click_alias_for_po.publisher_id.in_(client_publisher_ids))
+            if offer_id is not None:
+                po_conditions.append(click_alias_for_po.offer_id == offer_id)
+            po_query = po_query.where(and_(*po_conditions))
         else:
             po_query = po_query.where(and_(*conversion_conditions))
         po_result = await db.execute(po_query)
@@ -184,40 +189,46 @@ async def get_conversion_summary(
                 "po_after_discount": 0.0
             }
         
-        # 获取所有转化记录，按product_id和关联的publisher_id分组
-        # 需要通过click_id关联Click表来获取publisher_id
+        # 获取所有转化记录，按offer_id和关联的publisher_id分组
+        # 统一使用 Click.offer_id 作为分组依据，确保与点击数据分组一致
+        # 需要通过click_id关联Click表来获取publisher_id和offer_id
         click_alias = aliased(Click)
         
         conversion_group_query = select(
-            func.coalesce(PostbackConversion.product_id, click_alias.offer_id).label("offer_id"),
+            click_alias.offer_id.label("offer_id"),  # 统一使用 Click.offer_id，而不是 product_id
             click_alias.publisher_id,
             func.count(PostbackConversion.id).label('conversion_count'),
             func.sum(PostbackConversion.payout).label('total_po')
         ).outerjoin(
             click_alias, PostbackConversion.click_id == click_alias.click_id
-        ).where(
-            and_(*conversion_conditions)
         )
+        
+        # 构建转化查询条件（只保留日期条件，offer_id通过Click表筛选）
+        conversion_group_conditions = list(conversion_conditions[:2])  # 只保留日期条件
+        if offer_id is not None:
+            conversion_group_conditions.append(click_alias.offer_id == offer_id)
+        
+        conversion_group_query = conversion_group_query.where(and_(*conversion_group_conditions))
         
         # 如果是客户用户，添加渠道过滤条件
         if client_publisher_ids is not None:
             conversion_group_query = conversion_group_query.where(click_alias.publisher_id.in_(client_publisher_ids))
         
-        conversion_group_query = conversion_group_query.group_by(
-            func.coalesce(PostbackConversion.product_id, click_alias.offer_id), 
-            click_alias.publisher_id
-        )
-        
         if publisher_id:
             conversion_group_query = conversion_group_query.where(click_alias.publisher_id == publisher_id)
+        
+        conversion_group_query = conversion_group_query.group_by(
+            click_alias.offer_id,  # 统一使用 Click.offer_id
+            click_alias.publisher_id
+        )
         
         conversion_group_result = await db.execute(conversion_group_query)
         conversion_groups = conversion_group_result.all()
         
         # 处理转化数据
-        for product_id_val, pub_id_val, conv_count_val, total_po_val in conversion_groups:
-            # 允许 offer 为空（未关联产品/点击），使用占位 0
-            safe_offer_id = product_id_val if product_id_val is not None else 0
+        for offer_id_val, pub_id_val, conv_count_val, total_po_val in conversion_groups:
+            # 允许 offer 为空（未关联点击），使用占位 0
+            safe_offer_id = offer_id_val if offer_id_val is not None else 0
             # 允许没有publisher_id的转化（click_id为空或未匹配到点击），使用占位 0
             safe_pub_id = pub_id_val if pub_id_val is not None else 0
             
@@ -231,15 +242,16 @@ async def get_conversion_summary(
                     "po": 0.0,
                     "po_after_discount": 0.0,
                     "publisher_missing": pub_id_val is None,
-                    "offer_missing": product_id_val is None
+                    "offer_missing": offer_id_val is None
                 }
             else:
-                # 标记如果当前组合缺失publisher
+                # 标记如果当前组合缺失publisher或offer
                 stats_dict[key]["publisher_missing"] = pub_id_val is None
-                stats_dict[key]["offer_missing"] = product_id_val is None
+                stats_dict[key]["offer_missing"] = offer_id_val is None
             
-            stats_dict[key]["conversion_count"] = conv_count_val
-            stats_dict[key]["po"] = float(total_po_val) if total_po_val else 0.0
+            # 累加转化数量和PO（如果同一个组合有多条记录）
+            stats_dict[key]["conversion_count"] += conv_count_val
+            stats_dict[key]["po"] += float(total_po_val) if total_po_val else 0.0
         
         # 计算PO（扣价后）和填充其他信息
         for key, stat in stats_dict.items():
@@ -282,17 +294,15 @@ async def get_conversion_summary(
             # 需要获取该组合下的所有转化记录来计算扣价后的金额
             # 使用join因为我们已经在前面过滤了有publisher_id的记录
             po_after_discount = 0.0
-            if publisher_id_val:
+            if publisher_id_val and offer_id_val:
+                # 统一使用 Click.offer_id 来筛选转化记录
                 conversions_query = select(PostbackConversion).join(
                     click_alias, PostbackConversion.click_id == click_alias.click_id
                 ).where(
                     and_(
-                        or_(
-                            PostbackConversion.product_id == offer_id_val,
-                            and_(PostbackConversion.product_id.is_(None), click_alias.offer_id == offer_id_val)
-                        ),
+                        click_alias.offer_id == offer_id_val,  # 统一使用 Click.offer_id
                         click_alias.publisher_id == publisher_id_val,
-                        *conversion_conditions[:2]
+                        *conversion_conditions[:2]  # 日期条件
                     )
                 )
                 
@@ -303,13 +313,13 @@ async def get_conversion_summary(
                     if conversion.payout:
                         final_payout, _, _ = await calculate_discount(
                             db=db,
-                            offer_id=offer_id_val if offer_id_val else 0,
+                            offer_id=offer_id_val,
                             publisher_id=publisher_id_val,
                             original_payout=conversion.payout
                         )
                         po_after_discount += final_payout
             else:
-                # 没有关联渠道，无法计算扣量，使用原始PO
+                # 没有关联渠道或Offer，无法计算扣量，使用原始PO
                 po_after_discount = stat["po"]
             
             # 计算CR
