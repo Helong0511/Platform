@@ -14,6 +14,7 @@ from app.core.database import AsyncSessionLocal
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.core.utils import get_app_now_naive
 from app.core.tracking.click_id_generator import generate_click_id_from_timestamp, generate_unique_click_id
 from app.core.tracking.tracklink_generator import generate_downstream_tracklink
 from app.models.models import User, Offer, Publisher, Click
@@ -135,7 +136,7 @@ async def track_click(
             "offer_id": offer.id,
             "publisher_id": publisher.id if publisher else None,
             "advertiser_id": offer.advertiser_id,
-            "click_time": datetime.now(timezone.utc),
+            "click_time": get_app_now_naive(),  # 使用北京时间
             "ip": client_ip,
             "user_agent": user_agent,
             "referer": referer,

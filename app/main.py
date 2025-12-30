@@ -14,6 +14,7 @@ from app.core.middleware import RateLimitMiddleware, SecurityHeadersMiddleware, 
     CompressionMiddleware, PerformanceMonitoringMiddleware
 from app.core.https_middleware import HTTPSRedirectMiddleware
 from app.core.timezone_utils import log_timezone_info, check_and_validate_timezone
+from app.core.utils import get_app_now_naive
 from app.api.api_v1 import api_router
 import logging
 from logging.handlers import RotatingFileHandler
@@ -1136,7 +1137,7 @@ async def redirect_short_link_public(
                     "offer_id": final_offer_id,  # 只保存URL参数中的值（如果有）
                     "publisher_id": final_channel_id,  # 只保存URL参数中的值（如果有），publisher_id对应channel_id
                     "advertiser_id": advertiser_id,  # 可能为None，批量处理时会补充
-                    "click_time": datetime.now(timezone.utc).isoformat(),
+                    "click_time": get_app_now_naive().isoformat(),  # 使用北京时间
                     "ip": client_ip,
                     "user_agent": user_agent,
                     "referer": referer,
@@ -1156,8 +1157,8 @@ async def redirect_short_link_public(
                 else:
                     # 队列失败，降级到后台任务（兼容性）
                     logger.warning(f"Redis队列不可用，降级到后台任务: click_id={click_id}")
-                    # 转换时间格式
-                    click_data['click_time'] = datetime.now(timezone.utc)
+                    # 转换时间格式（使用北京时间）
+                    click_data['click_time'] = get_app_now_naive()
                     background_tasks.add_task(create_click_background, click_data)
             
             # 获取当前点击次数（从缓存数据中获取，如果缓存中没有则从数据库查询）
@@ -1340,7 +1341,7 @@ async def redirect_short_link_public(
             "offer_id": final_offer_id,
             "publisher_id": final_channel_id,  # publisher_id对应channel_id
             "advertiser_id": advertiser_id,  # 可能为None，批量处理时会补充
-            "click_time": datetime.now(timezone.utc).isoformat(),
+            "click_time": get_app_now_naive().isoformat(),  # 使用北京时间
             "ip": client_ip,
             "user_agent": user_agent,
             "referer": referer,
@@ -1360,8 +1361,8 @@ async def redirect_short_link_public(
         else:
             # 队列失败，降级到后台任务（兼容性）
             logger.warning(f"Redis队列不可用，降级到后台任务: click_id={click_id}")
-            # 转换时间格式
-            click_data['click_time'] = datetime.now(timezone.utc)
+            # 转换时间格式（使用北京时间）
+            click_data['click_time'] = get_app_now_naive()
             background_tasks.add_task(create_click_background, click_data)
         
         # 获取当前点击次数（数据库中的点击次数）

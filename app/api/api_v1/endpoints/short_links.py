@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query, Path, Request, HTTPException, BackgroundTasks
+from app.core.utils import get_app_now_naive
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -242,7 +243,7 @@ async def redirect_short_link(
         "offer_id": final_offer_id,
         "publisher_id": final_channel_id,  # publisher_id对应channel_id
         "advertiser_id": advertiser_id,  # 可能为None，批量处理时会补充
-        "click_time": datetime.now(timezone.utc).isoformat(),
+        "click_time": get_app_now_naive().isoformat(),  # 使用北京时间
         "ip": client_ip,
         "user_agent": user_agent,
         "referer": referer,
@@ -266,8 +267,8 @@ async def redirect_short_link(
         logger.warning(f"Redis队列不可用，降级到后台任务: click_id={click_id}")
         if background_tasks:
             from app.api.api_v1.endpoints.tracking import create_click_background
-            # 转换时间格式
-            click_data['click_time'] = datetime.now(timezone.utc)
+            # 转换时间格式（使用北京时间）
+            click_data['click_time'] = get_app_now_naive()
             background_tasks.add_task(create_click_background, click_data)
     
     # 异步更新点击次数（使用Redis计数器，不阻塞重定向）

@@ -12,7 +12,7 @@ from app.core.clicks_queue import dequeue_clicks, get_queue_length
 from app.core.offer_cache import get_offer_advertiser_id, set_offer_cache
 from app.models.models import Click, Offer, ShortLink
 from sqlalchemy.future import select
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, APP_TIMEZONE
 
 logger = logging.getLogger(__name__)
 
@@ -234,11 +234,28 @@ async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -
                     if click_time.endswith('Z'):
                         click_time = click_time[:-1] + '+00:00'
                     click_time = datetime.fromisoformat(click_time)
-                    if click_time.tzinfo is None:
-                        click_time = click_time.replace(tzinfo=timezone.utc)
+                    # 如果带时区信息，转换为北京时间（naive）
+                    if click_time.tzinfo is not None:
+                        # 转换为UTC时间，再转换为北京时间
+                        if click_time.tzinfo != timezone.utc:
+                            # 先转换为UTC
+                            click_time = click_time.astimezone(timezone.utc)
+                        # 从UTC转换为北京时间（naive）
+                        click_time = click_time.replace(tzinfo=timezone.utc).astimezone(APP_TIMEZONE).replace(tzinfo=None)
+                    # 如果已经是naive，假设是北京时间（新数据都是北京时间）
                 except (ValueError, AttributeError):
                     click_time = now
-            elif not isinstance(click_time, datetime):
+            elif isinstance(click_time, datetime):
+                # 如果是datetime对象
+                if click_time.tzinfo is not None:
+                    # 带时区信息，转换为北京时间（naive）
+                    if click_time.tzinfo != timezone.utc:
+                        # 先转换为UTC
+                        click_time = click_time.astimezone(timezone.utc)
+                    # 从UTC转换为北京时间（naive）
+                    click_time = click_time.replace(tzinfo=timezone.utc).astimezone(APP_TIMEZONE).replace(tzinfo=None)
+                # 如果已经是naive，假设是北京时间（新数据都是北京时间）
+            else:
                 click_time = now
             
             insert_data.append({
