@@ -710,38 +710,19 @@ async def check_offer_short_link(
         base_url = settings.TRACKING_BASE_URL
         short_link_url = get_short_link_url(base_url, existing_link.short_code)
         
-        # 检查downstream_tracklink是否等于生成的短链接URL
-        # 支持完整URL和相对路径两种格式
-        downstream_tracklink = offer.downstream_tracklink.strip()
-        
-        # 标准化URL进行比较（统一转换为完整URL）
-        def normalize_url(url, base):
-            """标准化URL，统一转换为完整URL格式"""
-            url = url.strip()
-            if url.startswith('/s/'):
-                # 相对路径，添加base_url
-                return f"{base.rstrip('/')}{url}"
-            elif url.startswith(('http://', 'https://')):
-                # 完整URL，直接返回
-                return url
-            else:
-                # 其他格式，尝试添加base_url
-                return f"{base.rstrip('/')}/{url.lstrip('/')}"
-        
-        short_link_url_normalized = normalize_url(short_link_url, base_url)
-        downstream_tracklink_normalized = normalize_url(downstream_tracklink, base_url)
-        
-        # 比较标准化后的URL（忽略末尾斜杠）
-        if short_link_url_normalized.rstrip('/') == downstream_tracklink_normalized.rstrip('/'):
-            return ResponseBaseSchema.success(data={
-                "exists": True,
-                "short_link": {
-                    "id": existing_link.id,
-                    "short_code": existing_link.short_code,
-                    "short_url": short_link_url,
-                    "original_url": existing_link.original_url
-                }
-            })
+        # 如果找到了短链接记录（offer_id和original_url匹配），就认为短链接已存在
+        # 不需要检查downstream_tracklink是否等于短链接URL，因为：
+        # 1. 短链接可能已创建，但downstream_tracklink可能还没有更新
+        # 2. 用户要求是检查"下游Tracklink在short_links表中存在，并且original_url等于上游Tracklink"
+        return ResponseBaseSchema.success(data={
+            "exists": True,
+            "short_link": {
+                "id": existing_link.id,
+                "short_code": existing_link.short_code,
+                "short_url": short_link_url,
+                "original_url": existing_link.original_url
+            }
+        })
     
     return ResponseBaseSchema.success(data={"exists": False, "short_link": None})
 
@@ -1095,7 +1076,24 @@ async def update_offer(
                     'short_link_url': short_link_url,
                     'is_new': is_new
                 }
-                await db.commit()  # 提交新创建的短链接
+                
+                # 更新offer.downstream_tracklink为短链接URL（无论是否新创建）
+                # 这样可以确保downstream_tracklink始终指向正确的短链接URL
+                offer.downstream_tracklink = short_link_url
+                if is_new:
+                    logger.info(
+                        f"更新Offer的downstream_tracklink为短链接URL（新创建）: "
+                        f"offer_id={offer.id}, "
+                        f"short_link_url={short_link_url}"
+                    )
+                else:
+                    logger.info(
+                        f"更新Offer的downstream_tracklink为短链接URL（已存在）: "
+                        f"offer_id={offer.id}, "
+                        f"short_link_url={short_link_url}"
+                    )
+                
+                await db.commit()  # 提交新创建的短链接和更新的downstream_tracklink
         
         # 重新加载关联信息（使用joinedload优化）
         from sqlalchemy.orm import joinedload
