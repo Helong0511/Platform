@@ -141,12 +141,44 @@ class PostbackForwarder:
                     f"成功转发 postback 到渠道: conversion_id={conversion.id}, "
                     f"publisher_id={publisher.id}, url={replaced_url[:100]}, status={response.status_code}"
                 )
+                
+                # 发送 Telegram 通知（异步，不阻塞）
+                try:
+                    asyncio.create_task(
+                        PostbackForwarder._send_telegram_notification(
+                            conversion=conversion,
+                            publisher=publisher,
+                            offer=offer,
+                            replaced_url=replaced_url,
+                            response_status=response.status_code,
+                            success=True
+                        )
+                    )
+                except Exception as e:
+                    # Telegram 通知失败不影响主流程
+                    logger.warning(f"创建 Telegram 通知任务失败: {str(e)}")
             else:
                 logger.warning(
                     f"渠道 Postback 返回非成功状态: conversion_id={conversion.id}, "
                     f"publisher_id={publisher.id}, url={replaced_url[:100]}, status={response.status_code}"
                 )
                 forward_log.error_message = f"HTTP {response.status_code}: {response.text[:500]}"
+                
+                # 转发失败也发送 Telegram 通知
+                try:
+                    asyncio.create_task(
+                        PostbackForwarder._send_telegram_notification(
+                            conversion=conversion,
+                            publisher=publisher,
+                            offer=offer,
+                            replaced_url=replaced_url,
+                            response_status=response.status_code,
+                            success=False,
+                            error_message=forward_log.error_message
+                        )
+                    )
+                except Exception as e:
+                    logger.warning(f"创建 Telegram 通知任务失败: {str(e)}")
         
         except httpx.TimeoutException as e:
             forward_log.error_message = f"请求超时: {str(e)}"
@@ -514,4 +546,83 @@ class PostbackForwarder:
             result_url = result_url.replace(f'{{{placeholder}}}', encoded_value)
         
         return result_url
+
+    @staticmethod
+    async def _send_telegram_notification(
+        conversion: PostbackConversion,
+        publisher: Publisher,
+        offer: Optional[Offer],
+        replaced_url: str,
+        response_status: int,
+        success: bool,
+        error_message: Optional[str] = None
+    ) -> None:
+        """
+        发送 Telegram 通知（转发结果）
+        
+        Args:
+            conversion: 转化记录
+            publisher: 渠道对象
+            offer: Offer 对象（可选）
+            replaced_url: 替换后的 URL
+            response_status: HTTP 响应状态码
+            success: 是否成功
+            error_message: 错误信息（如果失败）
+        """
+        try:
+            from app.core.auto_bot import send_telegram_message
+            
+            # 构建通知消息
+            if success:
+                msg = "✅ Postback 转发成功\n\n"
+            else:
+                msg = "❌ Postback 转发失败\n\n"
+            
+            # 基础信息
+            msg += f"转化ID: {conversion.conversion_id}\n"
+            msg += f"平台: {conversion.platform}\n"
+            
+            if conversion.event_name:
+                msg += f"事件: {conversion.event_name}\n"
+            
+            if conversion.payout is not None:
+                msg += f"金额: ${conversion.payout:.2f}\n"
+            
+            # 渠道信息
+            msg += f"\n渠道信息:\n"
+            msg += f"• 渠道ID: {publisher.id}\n"
+            msg += f"• 渠道名称: {publisher.publisher_name}\n"
+            
+            # Offer 信息
+            if offer:
+                msg += f"\nOffer 信息:\n"
+                msg += f"• Offer ID: {offer.id}\n"
+                msg += f"• Offer 名称: {offer.offer_name}\n"
+            
+            # 转发信息
+            msg += f"\n转发信息:\n"
+            msg += f"• 请求方式: {publisher.postback_method or 'GET'}\n"
+            msg += f"• 响应状态: {response_status}\n"
+            
+            # URL（截断，避免消息过长）
+            url_display = replaced_url[:150] + "..." if len(replaced_url) > 150 else replaced_url
+            msg += f"• URL: {url_display}\n"
+            
+            # 错误信息（如果失败）
+            if not success and error_message:
+                error_display = error_message[:200] + "..." if len(error_message) > 200 else error_message
+                msg += f"\n错误信息:\n{error_display}\n"
+            
+            # 时间戳
+            if conversion.created_at:
+                time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                msg += f"\n时间: {time_str}\n"
+            
+            # 发送 Telegram 消息（异步函数，直接 await）
+            await send_telegram_message(msg)
+            
+        except ImportError:
+            logger.debug("Telegram Bot 模块未导入，跳过通知")
+        except Exception as e:
+            logger.warning(f"构建或发送 Telegram 通知时出错: {str(e)}")
 
