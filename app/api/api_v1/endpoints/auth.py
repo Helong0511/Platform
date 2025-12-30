@@ -16,7 +16,7 @@ from sqlalchemy.future import select
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import JWTUtils, get_current_user
-from app.models.models import Client, User, UserRole
+from app.models.models import Client, User, UserRole, Publisher
 from app.schemas.auth import LoginResponse
 
 # 创建路由实例
@@ -210,12 +210,27 @@ async def login(
     logger.info(f"User {user.username} logged in successfully")
 
     # ====== 返回响应 ======
-    # 如果是客户角色，获取客户的api_enabled信息
+    # 如果是客户角色，获取客户的api_enabled和has_publisher信息
     api_enabled = False
+    has_publisher = False
     if user.role == UserRole.CLIENT and user.clients:
         # 客户用户：获取第一个客户的api_enabled状态
         client = user.clients[0]
-        api_enabled = client.api_enabled if client else False
+        if client:
+            api_enabled = client.api_enabled if client else False
+            
+            # 检查该客户是否有关联的渠道（只检查激活的渠道）
+            from sqlalchemy import func, and_
+            publisher_check = await db.execute(
+                select(func.count(Publisher.id)).where(
+                    and_(
+                        Publisher.client_id == client.id,
+                        Publisher.is_active == True
+                    )
+                )
+            )
+            publisher_count = publisher_check.scalar() or 0
+            has_publisher = publisher_count > 0
 
     response_data = {
         "access_token": access_token,
@@ -226,7 +241,8 @@ async def login(
             "full_name": user.full_name,
             "email": user.email,
             "role": user.role.value,
-            "api_enabled": api_enabled  # 客户API访问开关状态
+            "api_enabled": api_enabled,  # 客户API访问开关状态
+            "has_publisher": has_publisher  # 是否有关联的渠道（用于前端菜单显示）
         }
     }
 

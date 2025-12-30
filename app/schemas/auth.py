@@ -25,6 +25,7 @@ class UserInfoResponse(BaseSchema):
     email: str | None = None
     role: str
     api_enabled: bool | None = Field(False, description="客户API访问开关状态（仅客户角色有效）")
+    has_publisher: bool | None = Field(False, description="是否有关联的渠道（仅客户角色有效，用于前端菜单显示）")
 
 
 class LoginResponse(BaseSchema):
