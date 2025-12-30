@@ -18,6 +18,7 @@ from app.core.postback.macan_handler import MacanPostbackHandler
 from app.core.postback.bft_handler import BftPostbackHandler
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.utils import parse_date_to_app_timezone
 from app.models.models import PostbackConversion, Product, Client, PostbackForwardLog
 from app.schemas.postback import (
     PostbackRequest,
@@ -107,11 +108,11 @@ async def get_postback_conversions(
         if event_name:
             conditions.append(PostbackConversion.event_name == event_name)
         
-        # 日期范围过滤
+        # 日期范围过滤（使用应用时区，与数据库时间一致）
         if start_date:
             try:
-                start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
-                conditions.append(func.date(PostbackConversion.created_at) >= start_date_obj)
+                start_datetime = parse_date_to_app_timezone(start_date, is_end_date=False)
+                conditions.append(PostbackConversion.created_at >= start_datetime)
             except ValueError:
                 raise_api_exception(
                     ErrorCode.VALIDATION_ERROR,
@@ -120,8 +121,8 @@ async def get_postback_conversions(
         
         if end_date:
             try:
-                end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
-                conditions.append(func.date(PostbackConversion.created_at) <= end_date_obj)
+                end_datetime = parse_date_to_app_timezone(end_date, is_end_date=True)
+                conditions.append(PostbackConversion.created_at <= end_datetime)
             except ValueError:
                 raise_api_exception(
                     ErrorCode.VALIDATION_ERROR,
@@ -207,11 +208,11 @@ async def get_postback_stats(
         if platform:
             conditions.append(PostbackConversion.platform == platform)
         
-        # 日期范围过滤
+        # 日期范围过滤（使用应用时区，与数据库时间一致）
         if start_date:
             try:
-                start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
-                conditions.append(func.date(PostbackConversion.created_at) >= start_date_obj)
+                start_datetime = parse_date_to_app_timezone(start_date, is_end_date=False)
+                conditions.append(PostbackConversion.created_at >= start_datetime)
             except ValueError:
                 raise_api_exception(
                     ErrorCode.VALIDATION_ERROR,
@@ -220,8 +221,8 @@ async def get_postback_stats(
         
         if end_date:
             try:
-                end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
-                conditions.append(func.date(PostbackConversion.created_at) <= end_date_obj)
+                end_datetime = parse_date_to_app_timezone(end_date, is_end_date=True)
+                conditions.append(PostbackConversion.created_at <= end_datetime)
             except ValueError:
                 raise_api_exception(
                     ErrorCode.VALIDATION_ERROR,
@@ -312,10 +313,10 @@ async def get_postback_forward_logs(
         if success is not None:
             conditions.append(PostbackForwardLog.success == success)
         
-        # 日期范围过滤
+        # 日期范围过滤（使用应用时区，与数据库时间一致）
         if start_date:
             try:
-                start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+                start_dt = parse_date_to_app_timezone(start_date, is_end_date=False)
                 conditions.append(PostbackForwardLog.created_at >= start_dt)
             except ValueError:
                 raise_api_exception(
@@ -325,8 +326,8 @@ async def get_postback_forward_logs(
         
         if end_date:
             try:
-                end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-                # 结束日期包含整天，所以加一天
+                end_dt = parse_date_to_app_timezone(end_date, is_end_date=True)
+                # 结束日期已包含整天（23:59:59.999999）
                 from datetime import timedelta
                 end_dt = end_dt + timedelta(days=1)
                 conditions.append(PostbackForwardLog.created_at < end_dt)

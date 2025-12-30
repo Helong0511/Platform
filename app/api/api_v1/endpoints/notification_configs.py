@@ -14,6 +14,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.utils import parse_date_to_app_timezone
 from app.models.models import (
     Client, Product, User, UserRole,
     ClientNotificationConfig, ProductNotificationConfig, PostbackNotification
@@ -393,9 +394,8 @@ async def get_notification_records(
         conditions.append(PostbackNotification.notification_channel == notification_channel)
     
     if start_date:
-        from datetime import datetime
         try:
-            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            start_dt = parse_date_to_app_timezone(start_date, is_end_date=False)
             conditions.append(PostbackNotification.created_at >= start_dt)
         except ValueError:
             raise_api_exception(
@@ -404,10 +404,9 @@ async def get_notification_records(
             )
     
     if end_date:
-        from datetime import datetime, timedelta
         try:
-            end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-            conditions.append(PostbackNotification.created_at < end_dt)
+            end_dt = parse_date_to_app_timezone(end_date, is_end_date=True)
+            conditions.append(PostbackNotification.created_at <= end_dt)
         except ValueError:
             raise_api_exception(
                 ErrorCode.INVALID_PARAMETER,
