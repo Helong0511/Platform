@@ -86,8 +86,18 @@
         </el-table-column>
         <el-table-column prop="affiliate_payout" :label="isAdmin ? '下游PO' : 'PO'" width="100" align="right">
           <template #default="scope">
-            <span v-if="scope.row.affiliate_payout">{{ scope.row.affiliate_payout.toFixed(2) }}</span>
-            <span v-else>-</span>
+            <template v-if="!isAdmin && currentClientId && scope.row.assigned_publishers">
+              <!-- 客户登录：显示分配给该客户渠道的PO -->
+              <span v-if="getRowClientPublisherPO(scope.row)">
+                {{ getRowClientPublisherPO(scope.row).toFixed(2) }}
+              </span>
+              <span v-else>-</span>
+            </template>
+            <template v-else>
+              <!-- 管理员：显示Offer级别的PO -->
+              <span v-if="scope.row.affiliate_payout">{{ scope.row.affiliate_payout.toFixed(2) }}</span>
+              <span v-else>-</span>
+            </template>
           </template>
         </el-table-column>
         <el-table-column v-if="isAdmin" prop="country" label="国家" width="100" />
@@ -1532,7 +1542,7 @@ const getPublisherShortLink = (publisherId) => {
   return result
 }
 
-// 获取客户自己的渠道PO（下游PO）
+// 获取客户自己的渠道PO（下游PO）- 用于详情页
 const getClientPublisherPO = () => {
   if (!currentOffer.value || !currentClientId.value) {
     return null
@@ -1540,6 +1550,20 @@ const getClientPublisherPO = () => {
   
   // 查找属于该客户的渠道
   const clientPublisher = currentOffer.value.assigned_publishers?.find(
+    pub => pub.client_id === currentClientId.value
+  )
+  
+  return clientPublisher?.affiliate_payout || null
+}
+
+// 获取列表行中客户渠道的PO（下游PO）- 用于列表页
+const getRowClientPublisherPO = (row) => {
+  if (!row || !currentClientId.value || !row.assigned_publishers) {
+    return null
+  }
+  
+  // 查找属于该客户的渠道
+  const clientPublisher = row.assigned_publishers.find(
     pub => pub.client_id === currentClientId.value
   )
   
