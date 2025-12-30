@@ -1021,9 +1021,9 @@ async def save_user_mapping(
         mapping = merged_mapping
 
         # 保存合并后的映射规则到文件
-        from datetime import timezone
+        from app.core.utils import get_app_now_naive
         mapping_data = {
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": get_app_now_naive().isoformat(),  # 使用北京时间
             "created_by": current_user.username,
             "mapping": mapping,
             "required_fields": required_fields,

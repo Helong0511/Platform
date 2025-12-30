@@ -138,18 +138,15 @@ async def redirect_short_link(
             detail="短链接已禁用"
         )
     
-    # 检查是否过期
+    # 检查是否过期（expires_at 存储的是北京时间 naive）
     if short_link.expires_at:
-        # 确保 expires_at 是 aware datetime（有时区信息）
         expires_at = short_link.expires_at
-        if expires_at.tzinfo is None:
-            # 如果是 naive datetime，假设它是 UTC 时区（数据库通常存储 UTC 时间）
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        else:
-            # 如果已经是 aware datetime，转换为 UTC 以确保一致性
-            expires_at = expires_at.astimezone(timezone.utc)
+        # 如果带时区信息，转换为北京时间（naive）
+        if expires_at.tzinfo is not None:
+            from app.core.utils import APP_TIMEZONE
+            expires_at = expires_at.astimezone(APP_TIMEZONE).replace(tzinfo=None)
         
-        now = datetime.now(timezone.utc)
+        now = get_app_now_naive()  # 使用北京时间比较
         if expires_at < now:
             raise_api_exception(
                 ErrorCode.RESOURCE_NOT_FOUND,

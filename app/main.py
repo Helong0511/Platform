@@ -1032,19 +1032,19 @@ async def redirect_short_link_public(
             
             # 检查是否过期
             if expires_at_str:
-                # 解析ISO格式的日期时间字符串
+                # 解析ISO格式的日期时间字符串（expires_at 存储的是北京时间 naive）
                 try:
                     expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
-                    if expires_at.tzinfo is None:
-                        expires_at = expires_at.replace(tzinfo=timezone.utc)
-                    else:
-                        expires_at = expires_at.astimezone(timezone.utc)
+                    # 如果带时区信息，转换为北京时间（naive）
+                    if expires_at.tzinfo is not None:
+                        from app.core.utils import APP_TIMEZONE
+                        expires_at = expires_at.astimezone(APP_TIMEZONE).replace(tzinfo=None)
                 except (ValueError, AttributeError):
                     # 如果解析失败，从数据库重新查询
                     expires_at = None
                 
-                now = datetime.now(timezone.utc)
-                if expires_at < now:
+                now = get_app_now_naive()  # 使用北京时间比较
+                if expires_at and expires_at < now:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail="短链接已过期"
@@ -1229,15 +1229,15 @@ async def redirect_short_link_public(
                 detail="短链接已禁用"
             )
         
-        # 检查是否过期
+        # 检查是否过期（expires_at 存储的是北京时间 naive）
         if short_link.expires_at:
             expires_at = short_link.expires_at
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            else:
-                expires_at = expires_at.astimezone(timezone.utc)
+            # 如果带时区信息，转换为北京时间（naive）
+            if expires_at.tzinfo is not None:
+                from app.core.utils import APP_TIMEZONE
+                expires_at = expires_at.astimezone(APP_TIMEZONE).replace(tzinfo=None)
             
-            now = datetime.now(timezone.utc)
+            now = get_app_now_naive()  # 使用北京时间比较
             if expires_at < now:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
