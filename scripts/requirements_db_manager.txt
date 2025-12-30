@@ -1,0 +1,4 @@
+# 数据库管理工具依赖
+mysql-connector-python>=8.0.33
+PyQt5>=5.15.0
+
