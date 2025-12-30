@@ -690,7 +690,7 @@ async def get_offer(
         client_id = client_result.scalar_one_or_none()
         
         if client_id:
-            # 检查该Offer是否分配给该客户的渠道
+            # 检查该Offer是否分配给该客户的渠道（只检查激活的渠道和激活的分配）
             check_result = await db.execute(
                 select(OfferPublisherAssignment)
                 .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
@@ -698,7 +698,8 @@ async def get_offer(
                     and_(
                         OfferPublisherAssignment.offer_id == offer.id,
                         Publisher.client_id == client_id,
-                        OfferPublisherAssignment.is_active == True
+                        Publisher.is_active == True,  # 只检查激活的渠道
+                        OfferPublisherAssignment.is_active == True  # 只检查激活的分配
                     )
                 )
                 .limit(1)
@@ -716,12 +717,13 @@ async def get_offer(
                 detail=f"Offer ID {offer_id} 不存在或无权访问"
             )
     
-    # 加载分配的渠道
+    # 加载分配的渠道（只加载激活的渠道和激活的分配）
     pub_query = (
         select(OfferPublisherAssignment, Publisher)
         .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
         .where(OfferPublisherAssignment.offer_id == offer.id)
         .where(OfferPublisherAssignment.is_active == True)
+        .where(Publisher.is_active == True)  # 只加载激活的渠道
     )
     
     # 如果是客户用户，只加载属于该客户的渠道

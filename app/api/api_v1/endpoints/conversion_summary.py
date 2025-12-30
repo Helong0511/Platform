@@ -57,9 +57,14 @@ async def get_conversion_summary(
             user = user_result.scalars().unique().first()
             
             if user and user.clients:
-                # 获取该客户关联的所有渠道ID
+                # 获取该客户关联的所有渠道ID（只包括激活的渠道）
                 client = user.clients[0]  # 通常一个用户只关联一个Client
-                publisher_query = select(Publisher.id).where(Publisher.client_id == client.id)
+                publisher_query = select(Publisher.id).where(
+                    and_(
+                        Publisher.client_id == client.id,
+                        Publisher.is_active == True  # 只包括激活的渠道
+                    )
+                )
                 publisher_result = await db.execute(publisher_query)
                 client_publisher_ids = [pub_id for pub_id, in publisher_result.all()]
                 
@@ -405,9 +410,14 @@ async def get_summary_by_offer(
             user = user_result.scalars().unique().first()
             
             if user and user.clients:
-                # 获取该客户关联的所有渠道ID
+                # 获取该客户关联的所有渠道ID（只包括激活的渠道）
                 client = user.clients[0]  # 通常一个用户只关联一个Client
-                publisher_query = select(Publisher.id).where(Publisher.client_id == client.id)
+                publisher_query = select(Publisher.id).where(
+                    and_(
+                        Publisher.client_id == client.id,
+                        Publisher.is_active == True  # 只包括激活的渠道
+                    )
+                )
                 publisher_result = await db.execute(publisher_query)
                 client_publisher_ids = [pub_id for pub_id, in publisher_result.all()]
                 
