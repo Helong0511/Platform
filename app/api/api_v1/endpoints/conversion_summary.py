@@ -77,8 +77,8 @@ async def get_conversion_summary(
                         "cr": 0,
                         "total_po": 0.0,
                         "stats_list": [],
-                        "start_date": start_date or ((datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")),
-                        "end_date": end_date or (datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+                        "start_date": start_date or ((get_app_now_naive() - timedelta(days=30)).strftime("%Y-%m-%d")),  # 使用北京时间
+                        "end_date": end_date or (get_app_now_naive().strftime("%Y-%m-%d"))  # 使用北京时间
                     })
         
         # 解析日期
@@ -126,8 +126,8 @@ async def get_conversion_summary(
                         "cr": 0,
                         "total_po": 0.0,
                         "stats_list": [],
-                        "start_date": start_date or ((datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")),
-                        "end_date": end_date or (datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+                        "start_date": start_date or ((get_app_now_naive() - timedelta(days=30)).strftime("%Y-%m-%d")),  # 使用北京时间
+                        "end_date": end_date or (get_app_now_naive().strftime("%Y-%m-%d"))  # 使用北京时间
                     })
             
             click_conditions.append(Click.offer_id == offer_id)

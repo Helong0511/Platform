@@ -23,6 +23,7 @@ from sqlalchemy.future import select
 
 from app.scheduler_module.lock import acquire_task_lock, release_task_lock, CURRENT_PID, CURRENT_HOST
 from app.core.config import settings
+from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from app.models.models import ScheduledTask
 from app.core.audit_log import log_user_action
 from app.core.database import AsyncSessionLocal
@@ -130,17 +131,18 @@ async def execute_task_with_lock(
         if task_record and task_record.is_running:
             # 检查是否超时（可能是上次执行异常导致锁未释放）
             if task_record.last_run_time:
-                from datetime import datetime, timezone, timedelta
+                from datetime import timedelta
                 from app.scheduler_module.lock import DEFAULT_TIMEOUT_SECONDS
-                # 确保 last_run_time 是 timezone-aware 的 datetime
+                # 确保 last_run_time 是 naive datetime（数据库存储的是北京时间）
                 if task_record.last_run_time.tzinfo is None:
-                    from app.scheduler_module.lock import UTC_TZ
-                    last_run_utc = UTC_TZ.localize(task_record.last_run_time)
+                    # 如果数据库返回的是 naive datetime，假设是北京时间
+                    last_run_app = task_record.last_run_time
                 else:
-                    last_run_utc = task_record.last_run_time
+                    # 如果带时区信息，转换为北京时间（naive）
+                    last_run_app = task_record.last_run_time.astimezone(APP_TIMEZONE).replace(tzinfo=None)
                 
-                now_utc = datetime.now(timezone.utc)
-                elapsed = (now_utc - last_run_utc).total_seconds()
+                now_app = get_app_now_naive()  # 使用北京时间比较
+                elapsed = (now_app - last_run_app).total_seconds()
                 
                 if elapsed < DEFAULT_TIMEOUT_SECONDS:
                     # 任务正在运行且未超时，直接跳过（避免重复执行）
@@ -228,7 +230,7 @@ async def _execute_task_with_lock_internal(
     # 确保数据库会话在 finally 中关闭
     task_record = None
     task_id = None
-    start_time = datetime.now(timezone.utc)
+    start_time = get_app_now_naive()  # 使用北京时间记录开始时间
 
     try:
         # 查询任务信息（用于记录审计日志）
@@ -261,8 +263,8 @@ async def _execute_task_with_lock_internal(
                 # 同步函数，在线程池中执行，避免阻塞事件循环
                 await asyncio.to_thread(task_func, *args, **kwargs)
 
-            # 计算执行时间
-            end_time = datetime.now(timezone.utc)
+            # 计算执行时间（使用北京时间）
+            end_time = get_app_now_naive()
             execution_duration = (end_time - start_time).total_seconds()
 
             # 尝试从任务函数获取执行结果（如果任务保存了结果信息）
@@ -331,8 +333,8 @@ async def _execute_task_with_lock_internal(
             error_log = f"任务 '{task_name}' 执行失败: {error_msg}"
             logger.error(error_log, exc_info=True)
 
-            # 计算执行时间
-            end_time = datetime.now(timezone.utc)
+            # 计算执行时间（使用北京时间）
+            end_time = get_app_now_naive()
             execution_duration = (end_time - start_time).total_seconds()
 
             # 尝试从任务函数获取执行结果（即使失败也可能有部分结果信息）

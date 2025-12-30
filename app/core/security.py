@@ -199,7 +199,7 @@ class JWTUtils:
                     result = await db.execute(
                         select(TokenBlacklist).where(
                             TokenBlacklist.token_jti == jti,
-                            TokenBlacklist.expires_at > datetime.now(timezone.utc)
+                            TokenBlacklist.expires_at > get_app_now_naive()  # 使用北京时间比较
                         )
                     )
                     blacklisted = result.scalars().first()

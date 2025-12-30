@@ -707,8 +707,8 @@ async def get_short_link_stats(
     active_result = await db.execute(active_query)
     active_links = active_result.scalar() or 0
     
-    # 计算过期数量
-    now = datetime.now(timezone.utc)
+    # 计算过期数量（expires_at 存储的是北京时间，使用北京时间比较）
+    now = get_app_now_naive()
     expired_conditions = base_conditions + [
         ShortLink.expires_at.isnot(None),
         ShortLink.expires_at < now
