@@ -381,7 +381,9 @@
               readonly
               style="flex: 1;"
             />
+            <!-- 管理员登录且短链接不存在时显示生成按钮 -->
             <el-button
+              v-if="isAdmin && !shortLinkExists"
               type="primary"
               :loading="generatingShortLink"
               @click="generateShortLinkForOffer"
@@ -394,6 +396,7 @@
               下游Tracklink将在保存时自动生成，并自动创建短链接
             </el-text>
           </div>
+          <!-- 短链接显示区域 -->
           <div v-if="formData.downstream_tracklink_short" style="margin-top: 8px;">
             <el-alert
               :title="`短链接: ${formData.downstream_tracklink_short}`"
@@ -421,7 +424,8 @@
               </template>
             </el-alert>
           </div>
-          <div v-if="isEdit && formData.downstream_tracklink" class="form-hint">
+          <!-- 管理员登录且短链接不存在时显示提示 -->
+          <div v-if="isAdmin && isEdit && formData.downstream_tracklink && !shortLinkExists" class="form-hint">
             您可以生成短链接，短链接将在保存时创建。
           </div>
         </el-form-item>
@@ -867,7 +871,7 @@
 import { ref, reactive, onMounted, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Refresh, Edit, Delete, Box, View, DocumentCopy, Loading, InfoFilled, User } from '@element-plus/icons-vue'
-import { getOffers, createOffer, updateOffer, deleteOffer, getOffer } from '@/api/offer'
+import { getOffers, createOffer, updateOffer, deleteOffer, getOffer, checkOfferShortLink } from '@/api/offer'
 import { getAdvertisers } from '@/api/advertiser'
 import { getPublishers } from '@/api/publisher'
 import { getCaps } from '@/api/cap'
@@ -1180,9 +1184,9 @@ const handleEdit = async (row) => {
         is_active: offerData.is_active
       })
       
-      // 检查是否已有短链接
-      if (offerData.downstream_tracklink) {
-        checkExistingShortLink(offerData.downstream_tracklink)
+      // 检查是否已有短链接（管理员登录时检查）
+      if (isAdmin.value && offerData.id) {
+        await checkExistingShortLink(offerData.id)
       }
     } else {
       // 如果获取详情失败，使用列表中的数据（向后兼容）
@@ -1216,8 +1220,9 @@ const handleEdit = async (row) => {
         is_active: row.is_active
       })
       
-      if (row.downstream_tracklink) {
-        checkExistingShortLink(row.downstream_tracklink)
+      // 检查是否已有短链接（管理员登录时检查）
+      if (isAdmin.value && row.id) {
+        await checkExistingShortLink(row.id)
       }
     }
   } catch (error) {
@@ -1323,6 +1328,11 @@ const handleSubmit = async () => {
           formData.downstream_tracklink_short = offerData.downstream_tracklink
         }
         
+        // 如果是编辑且是管理员，重新检查短链接是否存在（更新UI状态）
+        if (isEdit.value && isAdmin.value && offerData.id) {
+          await checkExistingShortLink(offerData.id)
+        }
+        
         dialogVisible.value = false
         loadData()
       } else {
@@ -1341,43 +1351,46 @@ const handleSubmit = async () => {
 const handleDialogClose = () => {
   formRef.value?.resetFields()
   formData.downstream_tracklink_short = ''
+  shortLinkExists.value = false
 }
 
 // 生成短链接状态
 const generatingShortLink = ref(false)
+// 短链接是否存在（用于控制按钮显示）
+const shortLinkExists = ref(false)
 
 // 检查是否已有短链接（用于编辑时显示）
-const checkExistingShortLink = async (tracklink) => {
-  if (!tracklink) return
-  
-  // downstream_tracklink现在可能是短链接URL，直接使用
-  // 如果是短链接格式（包含/s/），直接使用
-  if (tracklink.includes('/s/')) {
-    formData.downstream_tracklink_short = tracklink
+// 检查条件：下游Tracklink在short_links表中存在，并且original_url等于上游Tracklink
+const checkExistingShortLink = async (offerId) => {
+  if (!offerId || !isEdit.value) {
+    shortLinkExists.value = false
     return
   }
   
-  // 否则尝试查找对应的短链接
   try {
-    const existingLinks = await getShortLinks({
-      page: 1,
-      page_size: 1,
-      search: tracklink
-    })
-    
-    if (existingLinks.data && existingLinks.data.length > 0) {
-      const matchedLink = existingLinks.data.find(link => link.original_url === tracklink)
-      if (matchedLink && matchedLink.short_url) {
-        formData.downstream_tracklink_short = matchedLink.short_url
+    const response = await checkOfferShortLink(offerId)
+    if (response.code === 200 && response.data) {
+      const { exists, short_link } = response.data
+      shortLinkExists.value = exists
+      
+      if (exists && short_link) {
+        formData.downstream_tracklink_short = short_link.short_url
+      } else {
+        formData.downstream_tracklink_short = ''
       }
+    } else {
+      shortLinkExists.value = false
+      formData.downstream_tracklink_short = ''
     }
   } catch (error) {
-    logger.error('查找短链接失败:', error)
+    logger.error('检查短链接失败:', error)
+    shortLinkExists.value = false
+    formData.downstream_tracklink_short = ''
   }
 }
 
 // 为Offer生成短链接（预览，不立即创建）
-// 注意：后端已自动创建短链接，此函数主要用于检查现有短链接
+// 注意：实际创建在保存时由后端自动完成
 const generateShortLinkForOffer = async () => {
   if (!formData.advertiser_tracklink) {
     ElMessage.warning('请先配置上游Tracklink')
@@ -1392,29 +1405,16 @@ const generateShortLinkForOffer = async () => {
 
   generatingShortLink.value = true
   try {
-    // 使用advertiser_tracklink查找短链接
-    const existingLinks = await getShortLinks({
-      page: 1,
-      page_size: 10,
-      search: formData.advertiser_tracklink
-    })
+    // 重新检查短链接是否存在
+    await checkExistingShortLink(formData.id)
     
-    if (existingLinks.data && existingLinks.data.length > 0) {
-      // 查找该Offer的短链接（如果有多个渠道，使用第一个）
-      const matchedLink = existingLinks.data.find(link => 
-        link.original_url === formData.advertiser_tracklink &&
-        link.offer_id === formData.id
-      )
-      if (matchedLink && matchedLink.short_url) {
-        formData.downstream_tracklink_short = matchedLink.short_url
-        ElMessage.success('已找到现有短链接')
-        return
-      }
+    if (shortLinkExists.value) {
+      ElMessage.success('短链接已存在')
+    } else {
+      ElMessage.info('保存Offer时会自动创建短链接（使用上游Tracklink作为原始URL）')
     }
-    
-    ElMessage.info('保存Offer时会根据分配的渠道自动创建短链接')
   } catch (error) {
-    logger.error('查找短链接失败:', error)
+    logger.error('检查短链接失败:', error)
     ElMessage.error('操作失败')
   } finally {
     generatingShortLink.value = false

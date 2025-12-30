@@ -660,6 +660,92 @@ async def get_offers(
     )
 
 
+@router.get("/{offer_id}/check-short-link",
+            response_model=ResponseBaseSchema[dict],
+            summary="检查Offer的短链接是否存在")
+async def check_offer_short_link(
+    offer_id: int = Path(..., ge=1, description="Offer ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    检查Offer的短链接是否存在
+    检查条件：下游Tracklink在short_links表中存在，并且original_url等于上游Tracklink
+    """
+    result = await db.execute(
+        select(Offer).where(Offer.id == offer_id)
+    )
+    offer = result.scalars().first()
+    
+    if not offer:
+        raise_api_exception(
+            ErrorCode.RESOURCE_NOT_FOUND,
+            detail=f"Offer ID {offer_id} 不存在"
+        )
+    
+    # 如果没有下游Tracklink或上游Tracklink，返回不存在
+    if not offer.downstream_tracklink or not offer.advertiser_tracklink:
+        return ResponseBaseSchema.success(data={"exists": False, "short_link": None})
+    
+    # 验证上游Tracklink URL格式
+    original_url = offer.advertiser_tracklink.strip()
+    if not original_url.startswith(('http://', 'https://')):
+        return ResponseBaseSchema.success(data={"exists": False, "short_link": None})
+    
+    # 检查是否已存在该Offer的短链接记录（通过offer_id和original_url匹配上游Tracklink）
+    existing_result = await db.execute(
+        select(ShortLink).where(
+            and_(
+                ShortLink.offer_id == offer_id,
+                ShortLink.original_url == original_url,
+                ShortLink.channel_id.is_(None)  # 主短链接的channel_id为NULL
+            )
+        )
+    )
+    existing_link = existing_result.scalars().first()
+    
+    if existing_link:
+        # 生成短链接URL
+        from app.core.config import settings
+        base_url = settings.TRACKING_BASE_URL
+        short_link_url = get_short_link_url(base_url, existing_link.short_code)
+        
+        # 检查downstream_tracklink是否等于生成的短链接URL
+        # 支持完整URL和相对路径两种格式
+        downstream_tracklink = offer.downstream_tracklink.strip()
+        
+        # 标准化URL进行比较（统一转换为完整URL）
+        def normalize_url(url, base):
+            """标准化URL，统一转换为完整URL格式"""
+            url = url.strip()
+            if url.startswith('/s/'):
+                # 相对路径，添加base_url
+                return f"{base.rstrip('/')}{url}"
+            elif url.startswith(('http://', 'https://')):
+                # 完整URL，直接返回
+                return url
+            else:
+                # 其他格式，尝试添加base_url
+                return f"{base.rstrip('/')}/{url.lstrip('/')}"
+        
+        short_link_url_normalized = normalize_url(short_link_url, base_url)
+        downstream_tracklink_normalized = normalize_url(downstream_tracklink, base_url)
+        
+        # 比较标准化后的URL（忽略末尾斜杠）
+        if short_link_url_normalized.rstrip('/') == downstream_tracklink_normalized.rstrip('/'):
+            return ResponseBaseSchema.success(data={
+                "exists": True,
+                "short_link": {
+                    "id": existing_link.id,
+                    "short_code": existing_link.short_code,
+                    "short_url": short_link_url,
+                    "original_url": existing_link.original_url
+                }
+            })
+    
+    return ResponseBaseSchema.success(data={"exists": False, "short_link": None})
+
+
 @router.get("/{offer_id}",
             response_model=ResponseBaseSchema[OfferResponse],
             summary="获取Offer详情")

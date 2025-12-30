@@ -56,3 +56,13 @@ export function deleteOffer(id) {
   })
 }
 
+/**
+ * 检查Offer的短链接是否存在
+ */
+export function checkOfferShortLink(id) {
+  return request({
+    url: `/api/v1/offers/${id}/check-short-link`,
+    method: 'get'
+  })
+}
+
