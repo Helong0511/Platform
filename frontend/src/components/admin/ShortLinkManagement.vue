@@ -83,7 +83,7 @@
       <el-table-column prop="channel_id" label="渠道" width="200" show-overflow-tooltip>
         <template #default="scope">
           <el-tag v-if="scope.row.channel_id" type="success">
-            {{ getChannelName(scope.row.channel_id) || `ID: ${scope.row.channel_id}` }}
+            {{ scope.row.channel_name || getChannelName(scope.row.channel_id) || `ID: ${scope.row.channel_id}` }}
           </el-tag>
           <span v-else style="color: #909399;">-</span>
         </template>
