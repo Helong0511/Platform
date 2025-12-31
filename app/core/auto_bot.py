@@ -366,7 +366,8 @@ def run_bot():
                         time.sleep(retry_delay)
                         retry_delay *= 2  # 指数退避
                     else:
-                        logger.error("❌ Telegram Bot 连接失败: 无法连接到 api.telegram.org")
+                        # 初始连接失败，但继续尝试（网络可能稍后恢复）
+                        logger.error("❌ Telegram Bot 初始连接失败: 无法连接到 api.telegram.org")
                         logger.error("   可能的原因:")
                         logger.error("   1. 服务器无法访问 api.telegram.org（防火墙/网络限制）")
                         logger.error("   2. 需要使用代理访问 Telegram API")
@@ -377,9 +378,60 @@ def run_bot():
                         logger.error("   - 检查防火墙设置")
                         logger.error("   - 如果在中国大陆，可能需要配置代理")
                         logger.error("   - 检查 DNS 设置")
-                        logger.warning("⚠️ Bot 轮询将不会启动，但应用会继续运行")
-                        logger.warning("⚠️ Telegram 通知功能将不可用，直到网络连接恢复")
-                        return
+                        logger.warning("⚠️ 将继续尝试连接，直到网络恢复...")
+                        logger.warning("⚠️ Telegram 通知功能暂时不可用，但会在连接恢复后自动启用")
+                        
+                        # 进入持续重试循环（而不是直接返回）
+                        import time
+                        reconnect_delay = 30  # 初始重连延迟30秒
+                        max_reconnect_delay = 300  # 最大重连延迟5分钟
+                        reconnect_count = 0
+                        
+                        while True:
+                            reconnect_count += 1
+                            logger.info(f"🔄 尝试重新连接 Telegram Bot (第 {reconnect_count} 次)...")
+                            
+                            try:
+                                bot_info = bot.get_me()
+                                logger.info(f"✅ Telegram Bot 连接成功: @{bot_info.username} (ID: {bot_info.id})")
+                                logger.info("✅ 网络连接已恢复，继续启动轮询...")
+                                connection_success = True
+                                break  # 连接成功，跳出重试循环
+                            except Exception as reconnect_error:
+                                error_msg = str(reconnect_error)
+                                error_type = type(reconnect_error).__name__
+                                
+                                is_network_error = any(keyword in error_msg.lower() for keyword in [
+                                    'network is unreachable',
+                                    'connection refused',
+                                    'connection timeout',
+                                    'name resolution failed',
+                                    'failed to establish',
+                                    'max retries exceeded'
+                                ])
+                                
+                                if is_network_error:
+                                    # 计算指数退避延迟
+                                    current_delay = min(reconnect_delay * (2 ** min((reconnect_count - 1) // 5, 4)), max_reconnect_delay)
+                                    
+                                    if reconnect_count % 5 == 0:  # 每5次记录一次详细日志
+                                        logger.warning(f"⚠️ 网络连接仍然失败 (已重试 {reconnect_count} 次)")
+                                        logger.warning(f"   将在 {current_delay} 秒后继续尝试...")
+                                    else:
+                                        logger.debug(f"⚠️ 网络连接失败，{current_delay} 秒后重试...")
+                                    
+                                    time.sleep(current_delay)
+                                else:
+                                    # 非网络错误（如 Token 错误），直接返回
+                                    logger.error(f"❌ Telegram Bot 连接测试失败: {error_type}")
+                                    logger.error(f"   错误信息: {error_msg[:200]}")
+                                    logger.error("   请检查 TELEGRAM_TOKEN 是否正确")
+                                    return
+                        
+                        # 如果连接成功，继续执行后续代码
+                        if not connection_success:
+                            logger.error("❌ 重连循环异常退出")
+                            return
                 else:
                     # 其他错误（如 Token 错误）
                     logger.error(f"❌ Telegram Bot 连接测试失败: {error_type}")
