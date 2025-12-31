@@ -1257,7 +1257,22 @@ const handleDelete = async (row) => {
   } catch (error) {
     if (error !== 'cancel') {
       logger.error('删除Offer失败:', error)
-      ElMessage.error('删除失败')
+      
+      // 检查是否是401未授权错误（token过期）
+      if (error.response && error.response.status === 401) {
+        // 401错误已被axios拦截器处理，直接返回
+        return
+      }
+      
+      // 检查是否是403错误（可能是CSRF token问题）
+      if (error.response && error.response.status === 403 && error._handled) {
+        // 错误已被处理，不显示错误信息
+        return
+      }
+      
+      // 其他错误显示具体错误信息
+      const errorMsg = error.response?.data?.detail || error.response?.data?.message || error.message || '删除失败'
+      ElMessage.error(errorMsg)
     }
   }
 }
@@ -1440,7 +1455,16 @@ const generateShortLinkForOffer = async () => {
     }
   } catch (error) {
     logger.error('检查短链接失败:', error)
-    ElMessage.error('操作失败')
+    
+    // 检查是否是401/403错误（虽然不太可能，但为了完整性）
+    if (error.response && (error.response.status === 401 || (error.response.status === 403 && error._handled))) {
+      // 错误已被处理，不显示错误信息
+      return
+    }
+    
+    // 其他错误显示具体错误信息
+    const errorMsg = error.response?.data?.detail || error.response?.data?.message || error.message || '操作失败'
+    ElMessage.error(errorMsg)
   } finally {
     generatingShortLink.value = false
   }

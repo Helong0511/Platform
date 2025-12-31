@@ -11,6 +11,9 @@
  * }
  */
 
+// 静态导入logger，避免Vite构建警告（动态导入与静态导入混用）
+import logger from './logger';
+
 /**
  * 标准化API响应处理
  * @param {Object} response - axios响应对象
@@ -265,6 +268,8 @@ export const isErrorHandled = (error) => {
  * 统一的API错误处理函数
  * 用于在组件的catch块中处理错误，避免重复显示已处理的错误
  * 
+ * 注意：此函数是同步的，内部异步操作不会阻塞调用
+ * 
  * @param {Error} error - 错误对象
  * @param {string} defaultMessage - 默认错误消息（当无法提取错误信息时使用）
  * @param {Object} options - 配置选项
@@ -274,13 +279,26 @@ export const isErrorHandled = (error) => {
  * @returns {boolean} 返回true表示错误已被处理（如401/403），返回false表示需要进一步处理
  * 
  * @example
+ * // 基本使用
  * try {
  *   await someApiCall();
  * } catch (error) {
  *   handleApiError(error, '操作失败', { logContext: '提交数据' });
  * }
+ * 
+ * @example
+ * // 不显示错误消息（仅记录日志）
+ * try {
+ *   await someApiCall();
+ * } catch (error) {
+ *   if (handleApiError(error, '操作失败', { showMessage: false })) {
+ *     // 错误已被处理（401/403），可以提前返回
+ *     return;
+ *   }
+ *   // 其他错误处理逻辑
+ * }
  */
-export const handleApiError = async (error, defaultMessage = '操作失败', options = {}) => {
+export const handleApiError = (error, defaultMessage = '操作失败', options = {}) => {
   const {
     showMessage = true,
     logError = true,
@@ -290,10 +308,9 @@ export const handleApiError = async (error, defaultMessage = '操作失败', opt
   // 记录错误日志
   if (logError) {
     try {
-      const logger = (await import('../utils/logger')).default;
       logger.error(`${logContext}失败:`, error);
     } catch (e) {
-      // 如果logger导入失败，使用console
+      // 如果logger调用失败，使用console作为后备
       console.error(`${logContext}失败:`, error);
     }
   }
@@ -316,11 +333,20 @@ export const handleApiError = async (error, defaultMessage = '操作失败', opt
     // 如果错误未被处理，继续显示错误信息
   }
 
-  // 其他错误：显示具体错误信息
+  // 其他错误：显示具体错误信息（异步，不阻塞）
   if (showMessage) {
-    const { ElMessage } = await import('element-plus');
-    const errorMsg = extractErrorMessage(error) || defaultMessage;
-    ElMessage.error(errorMsg);
+    // 使用立即执行的异步函数显示消息
+    (async () => {
+      try {
+        const { ElMessage } = await import('element-plus');
+        const errorMsg = extractErrorMessage(error) || defaultMessage;
+        ElMessage.error(errorMsg);
+      } catch (e) {
+        // 如果ElMessage导入失败，使用console
+        console.error('显示错误消息失败:', e);
+        console.error('错误信息:', extractErrorMessage(error) || defaultMessage);
+      }
+    })();
   }
 
   // 返回false表示错误需要进一步处理（已显示错误消息）
