@@ -776,6 +776,11 @@ async def send_telegram_message(message: str, chat_id: str | None = None):
             logger.error("发送Telegram消息失败: 无法获得收信息的用户或群组ID（请设置 TELEGRAM_ADMIN 环境变量）")
             return False
 
+        # 检查消息长度（Telegram 最大 4096 字符）
+        from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH
+        if len(message) > MAX_TELEGRAM_MESSAGE_LENGTH:
+            message = truncate_message(message)
+
         # pyTelegramBotAPI 的 send_message 是同步的，需要在线程中执行
         # 使用 asyncio 来避免阻塞异步事件循环
         # 同时设置超时，避免网络问题导致长时间阻塞

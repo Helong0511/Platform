@@ -159,7 +159,14 @@ async def receive_bft_postback(
             else:
                 telegram_msg += "无参数\n"
             
+            # 检查消息长度（Telegram 最大 4096 字符）
+            from app.core.telegram_utils import truncate_message
+            if len(telegram_msg) > 4096:
+                telegram_msg = truncate_message(telegram_msg)
+            
             # 异步发送通知，不阻塞主流程
+            # 使用 asyncio.create_task 创建任务，不等待完成（fire and forget）
+            # 但使用 asyncio.wait_for 确保有超时保护
             asyncio.create_task(
                 asyncio.wait_for(
                     send_telegram_message(telegram_msg),
@@ -343,51 +350,8 @@ async def _process_bft_postback(
             request_ip=client_ip
         )
         
-        # 发送 Telegram 通知（保持原有功能）
-        try:
-            from app.core.auto_bot import send_telegram_message
-            import asyncio
-            
-            method = request.method
-            telegram_msg = f"🔔 BFT PostBack 回调收到\n\n"
-            telegram_msg += f"Method: {method}\n"
-            telegram_msg += f"Event: {event_name}\n"
-            telegram_msg += f"Click ID: {clk_id}\n"
-            telegram_msg += f"\n📋 所有参数:\n"
-            telegram_msg += "-" * 40 + "\n"
-            
-            # 遍历所有收到的参数，添加到通知中
-            if raw_data:
-                for key, value in sorted(raw_data.items()):
-                    # 格式化参数值，如果是 None 则显示为空字符串
-                    if value is None:
-                        value_str = "None"
-                    elif isinstance(value, (dict, list)):
-                        # 如果是复杂类型，转换为 JSON 字符串
-                        try:
-                            value_str = json.dumps(value, ensure_ascii=False)
-                        except:
-                            value_str = str(value)
-                    else:
-                        value_str = str(value)
-                    
-                    # 限制单个参数值的长度，避免消息过长
-                    if len(value_str) > 200:
-                        value_str = value_str[:200] + "..."
-                    
-                    telegram_msg += f"{key}: {value_str}\n"
-            else:
-                telegram_msg += "无参数\n"
-            
-            # 设置较长的超时时间，并明确捕获超时异常
-            await asyncio.wait_for(
-                send_telegram_message(telegram_msg),
-                timeout=10.0
-            )
-        except asyncio.TimeoutError:
-            logger.warning(f"发送 BFT PostBack Telegram 通知超时（超过10秒）")
-        except Exception as e:
-            logger.warning(f"发送 BFT PostBack Telegram 通知失败: {e}")
+        # 注意：Telegram 通知已在 receive_bft_postback 函数中发送（接收到数据时立即通知）
+        # 这里不再重复发送，避免重复通知
 
         # 返回纯文本 "ok"，确保所有语言（Java、Go、Python 等）都能正确识别
         # 使用 UTF-8 编码，明确设置 Content-Type 为 text/plain
