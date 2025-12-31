@@ -129,6 +129,21 @@ async def get_clicks(
                 "short_link_id": click.short_link_id,
                 "short_code": click.short_link.short_code if click.short_link else None,
                 "short_link_url": click.short_link.original_url if click.short_link else None,
+                # 软件信息
+                "os": click.os,
+                "os_version": click.os_version,
+                "browser": click.browser,
+                "browser_version": click.browser_version,
+                "accept_language": click.accept_language,
+                "accept_encoding": click.accept_encoding,
+                "is_bot": click.is_bot,
+                # 硬件信息
+                "device_type": click.device_type,
+                "device_brand": click.device_brand,
+                "device_model": click.device_model,
+                # URL参数和请求头
+                "url_params": click.url_params,
+                "all_headers": click.all_headers,
             }
             click_list.append(click_data)
         

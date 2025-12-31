@@ -167,17 +167,46 @@
               <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="device" label="设备" width="120" show-overflow-tooltip>
+          <el-table-column prop="device_type" label="设备类型" width="100" align="center">
             <template #default="scope">
-              {{ scope.row.device || '-' }}
+              <el-tag 
+                v-if="scope.row.device_type" 
+                :type="scope.row.device_type === 'mobile' ? 'success' : scope.row.device_type === 'tablet' ? 'warning' : 'info'"
+                size="small"
+              >
+                {{ scope.row.device_type === 'mobile' ? '手机' : scope.row.device_type === 'tablet' ? '平板' : '桌面' }}
+              </el-tag>
+              <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="user_agent" label="User Agent" min-width="200" show-overflow-tooltip>
+          <el-table-column prop="os" label="操作系统" width="140" show-overflow-tooltip>
             <template #default="scope">
-              <span v-if="scope.row.user_agent" :title="scope.row.user_agent">
-                {{ scope.row.user_agent.length > 50 ? scope.row.user_agent.substring(0, 50) + '...' : scope.row.user_agent }}
+              <span v-if="scope.row.os">
+                {{ scope.row.os }}{{ scope.row.os_version ? ' ' + scope.row.os_version : '' }}
               </span>
               <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="browser" label="浏览器" width="140" show-overflow-tooltip>
+            <template #default="scope">
+              <span v-if="scope.row.browser">
+                {{ scope.row.browser }}{{ scope.row.browser_version ? ' ' + scope.row.browser_version : '' }}
+              </span>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="device_brand" label="设备品牌" width="120" show-overflow-tooltip>
+            <template #default="scope">
+              <span v-if="scope.row.device_brand || scope.row.device_model">
+                {{ scope.row.device_brand || '' }}{{ scope.row.device_brand && scope.row.device_model ? ' ' : '' }}{{ scope.row.device_model || '' }}
+              </span>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="is_bot" label="机器人" width="80" align="center">
+            <template #default="scope">
+              <el-tag v-if="scope.row.is_bot" type="danger" size="small">是</el-tag>
+              <el-tag v-else type="success" size="small">否</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="referer" label="来源页面" min-width="200" show-overflow-tooltip>
@@ -202,6 +231,18 @@
               <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
+          <el-table-column label="操作" width="100" align="center" fixed="right">
+            <template #default="scope">
+              <el-button 
+                type="primary" 
+                link 
+                size="small"
+                @click="showDetail(scope.row)"
+              >
+                详情
+              </el-button>
+            </template>
+          </el-table-column>
         </el-table>
       </div>
 
@@ -218,6 +259,117 @@
         />
       </div>
     </el-card>
+
+    <!-- 详情对话框 -->
+    <el-dialog
+      v-model="detailDialogVisible"
+      title="点击记录详情"
+      width="80%"
+      :close-on-click-modal="false"
+    >
+      <div v-if="currentDetail" class="detail-content">
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="Click ID" :span="2">
+            <el-button 
+              type="primary" 
+              link 
+              size="small"
+              @click="copyToClipboard(currentDetail.click_id)"
+            >
+              {{ currentDetail.click_id }}
+            </el-button>
+          </el-descriptions-item>
+          <el-descriptions-item label="访问时间">
+            {{ currentDetail.click_time ? formatDate(currentDetail.click_time) : '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="IP地址">
+            {{ currentDetail.ip || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="国家">
+            <el-tag v-if="currentDetail.country" size="small" type="info">
+              {{ currentDetail.country }}
+            </el-tag>
+            <span v-else>-</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="设备类型">
+            <el-tag 
+              v-if="currentDetail.device_type" 
+              :type="currentDetail.device_type === 'mobile' ? 'success' : currentDetail.device_type === 'tablet' ? 'warning' : 'info'"
+              size="small"
+            >
+              {{ currentDetail.device_type === 'mobile' ? '手机' : currentDetail.device_type === 'tablet' ? '平板' : '桌面' }}
+            </el-tag>
+            <span v-else>-</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="设备品牌">
+            {{ currentDetail.device_brand || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="设备型号">
+            {{ currentDetail.device_model || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="操作系统">
+            {{ currentDetail.os ? (currentDetail.os + (currentDetail.os_version ? ' ' + currentDetail.os_version : '')) : '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="浏览器">
+            {{ currentDetail.browser ? (currentDetail.browser + (currentDetail.browser_version ? ' ' + currentDetail.browser_version : '')) : '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="接受语言">
+            {{ currentDetail.accept_language || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="接受编码">
+            {{ currentDetail.accept_encoding || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="是否为机器人">
+            <el-tag v-if="currentDetail.is_bot" type="danger" size="small">是</el-tag>
+            <el-tag v-else type="success" size="small">否</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="Offer">
+            {{ currentDetail.offer_name || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="渠道">
+            {{ currentDetail.publisher_name || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="广告主">
+            {{ currentDetail.advertiser_name || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="短链接代码">
+            {{ currentDetail.short_code || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="来源页面" :span="2">
+            <el-link 
+              v-if="currentDetail.referer" 
+              :href="currentDetail.referer" 
+              target="_blank" 
+              type="primary"
+            >
+              {{ currentDetail.referer }}
+            </el-link>
+            <span v-else>-</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="User Agent" :span="2">
+            <div class="text-wrap">{{ currentDetail.user_agent || '-' }}</div>
+          </el-descriptions-item>
+          <el-descriptions-item label="URL参数" :span="2" v-if="currentDetail.url_params">
+            <pre class="json-content">{{ formatJSON(currentDetail.url_params) }}</pre>
+          </el-descriptions-item>
+          <el-descriptions-item label="请求头" :span="2" v-if="currentDetail.all_headers">
+            <pre class="json-content">{{ formatJSON(currentDetail.all_headers) }}</pre>
+          </el-descriptions-item>
+          <el-descriptions-item label="转化ID">
+            <el-tag v-if="currentDetail.conversion_id" type="success" size="small">
+              已转化 (ID: {{ currentDetail.conversion_id }})
+            </el-tag>
+            <span v-else>-</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="创建时间">
+            {{ currentDetail.created_at ? formatDate(currentDetail.created_at) : '-' }}
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+      <template #footer>
+        <el-button @click="detailDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -249,6 +401,8 @@ const pagination = reactive({
 const tableData = ref([])
 const offerList = ref([])
 const publisherList = ref([])
+const detailDialogVisible = ref(false)
+const currentDetail = ref(null)
 
 // 加载基础数据
 const loadOffers = async () => {
@@ -342,6 +496,23 @@ const copyToClipboard = async (text) => {
   } catch (error) {
     logger.error('复制失败:', error)
     ElMessage.error('复制失败')
+  }
+}
+
+// 显示详情
+const showDetail = (row) => {
+  currentDetail.value = row
+  detailDialogVisible.value = true
+}
+
+// 格式化JSON
+const formatJSON = (jsonString) => {
+  if (!jsonString) return '-'
+  try {
+    const obj = JSON.parse(jsonString)
+    return JSON.stringify(obj, null, 2)
+  } catch (e) {
+    return jsonString
   }
 }
 
@@ -461,6 +632,27 @@ onMounted(() => {
 
 .text-primary {
   color: #409eff;
+}
+
+.detail-content {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.json-content {
+  background-color: #f5f7fa;
+  padding: 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.text-wrap {
+  word-break: break-all;
+  white-space: pre-wrap;
 }
 </style>
 
