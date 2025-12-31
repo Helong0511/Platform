@@ -11,8 +11,10 @@
  * }
  */
 
-// 静态导入logger，避免Vite构建警告（动态导入与静态导入混用）
+// 静态导入所有依赖，避免Vite构建警告（动态导入与静态导入混用）
 import logger from './logger';
+import axios from 'axios';
+import { ElMessage } from 'element-plus';
 
 /**
  * 标准化API响应处理
@@ -338,7 +340,6 @@ export const handleApiError = (error, defaultMessage = '操作失败', options =
     // 使用立即执行的异步函数显示消息
     (async () => {
       try {
-        const { ElMessage } = await import('element-plus');
         const errorMsg = extractErrorMessage(error) || defaultMessage;
         ElMessage.error(errorMsg);
       } catch (e) {
@@ -360,7 +361,6 @@ export const handleApiError = (error, defaultMessage = '操作失败', options =
  */
 export const refreshCsrfToken = async (endpoint = '/api/v1/dashboard/stats') => {
   try {
-    const axios = (await import('axios')).default;
     // 发送一个轻量级的GET请求来刷新CSRF令牌
     const response = await axios.get(endpoint);
     
@@ -429,7 +429,6 @@ export const ensureCsrfToken = async (getRequestFn = null) => {
   
   // 如果没有提供函数，或者提供的函数失败，尝试发送一个简单的GET请求
   try {
-    const axios = (await import('axios')).default;
     // 尝试多个轻量级的GET请求端点，增加成功率
     const endpoints = [
       '/api/v1/users/stats',
@@ -502,10 +501,7 @@ export const handleError = (error, options = {}) => {
   // 如果不是静默模式，显示错误消息
   if (!silent) {
     const errorMsg = extractErrorMessage(error);
-    (async () => {
-      const { ElMessage } = await import('element-plus');
-      ElMessage.error(errorMsg);
-    })();
+    ElMessage.error(errorMsg);
   }
   
   // 重新抛出错误，让调用方可以处理
@@ -519,8 +515,6 @@ export const handleError = (error, options = {}) => {
  * @returns {Promise<void>}
  */
 export const refreshCsrfTokenBeforeRequest = async (endpoint = null) => {
-  const { refreshCsrfToken, ensureCsrfToken } = await import('./api');
-  
   // 如果提供了端点，使用该端点刷新token
   if (endpoint) {
     await refreshCsrfToken(endpoint);
@@ -588,9 +582,6 @@ export const handleFileDownload = (response, defaultFilename = 'download.xlsx', 
  * @returns {Promise} 返回处理后的响应数据
  */
 export const request = async (config, options = {}) => {
-  const axios = (await import('axios')).default;
-  const { ElMessage } = await import('element-plus');
-  
   const {
     returnDataOnly = false,
     paginated = false,
