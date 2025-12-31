@@ -1336,11 +1336,36 @@ const handleSubmit = async () => {
         dialogVisible.value = false
         loadData()
       } else {
+        // 检查是否是401/403错误（虽然不太可能，但为了完整性）
+        if (response.code === 401 || response.code === 403) {
+          // 这些错误应该由axios拦截器处理，但为了安全起见，这里也检查
+          return
+        }
         ElMessage.error(response.message || '操作失败')
       }
     } catch (error) {
       logger.error('提交失败:', error)
-      ElMessage.error('操作失败')
+      
+      // 检查是否是401未授权错误（token过期）
+      // 如果是401错误，axios拦截器已经处理了（清除认证信息并跳转到登录页）
+      // 这里不需要重复显示错误信息，避免干扰用户体验
+      if (error.response && error.response.status === 401) {
+        // 401错误已被axios拦截器处理，直接返回，不显示"操作失败"
+        return
+      }
+      
+      // 检查是否是403错误（可能是CSRF token问题）
+      // 403错误也可能已被axios拦截器处理（自动重试）
+      if (error.response && error.response.status === 403) {
+        // 如果错误已被处理（标记了_handled），不显示错误信息
+        if (error._handled) {
+          return
+        }
+      }
+      
+      // 其他错误显示具体错误信息
+      const errorMsg = error.response?.data?.detail || error.response?.data?.message || error.message || '操作失败'
+      ElMessage.error(errorMsg)
     } finally {
       submitting.value = false
     }

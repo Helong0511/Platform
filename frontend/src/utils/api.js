@@ -262,6 +262,72 @@ export const isErrorHandled = (error) => {
 };
 
 /**
+ * 统一的API错误处理函数
+ * 用于在组件的catch块中处理错误，避免重复显示已处理的错误
+ * 
+ * @param {Error} error - 错误对象
+ * @param {string} defaultMessage - 默认错误消息（当无法提取错误信息时使用）
+ * @param {Object} options - 配置选项
+ * @param {boolean} options.showMessage - 是否显示错误消息（默认：true）
+ * @param {boolean} options.logError - 是否记录错误日志（默认：true）
+ * @param {string} options.logContext - 日志上下文（用于标识错误来源）
+ * @returns {boolean} 返回true表示错误已被处理（如401/403），返回false表示需要进一步处理
+ * 
+ * @example
+ * try {
+ *   await someApiCall();
+ * } catch (error) {
+ *   handleApiError(error, '操作失败', { logContext: '提交数据' });
+ * }
+ */
+export const handleApiError = async (error, defaultMessage = '操作失败', options = {}) => {
+  const {
+    showMessage = true,
+    logError = true,
+    logContext = 'API调用'
+  } = options;
+
+  // 记录错误日志
+  if (logError) {
+    try {
+      const logger = (await import('../utils/logger')).default;
+      logger.error(`${logContext}失败:`, error);
+    } catch (e) {
+      // 如果logger导入失败，使用console
+      console.error(`${logContext}失败:`, error);
+    }
+  }
+
+  // 检查是否是401未授权错误（token过期）
+  // 如果是401错误，axios拦截器已经处理了（清除认证信息并跳转到登录页）
+  // 这里不需要重复显示错误信息，避免干扰用户体验
+  if (error.response && error.response.status === 401) {
+    // 401错误已被axios拦截器处理，直接返回true表示已处理
+    return true;
+  }
+
+  // 检查是否是403错误（可能是CSRF token问题）
+  // 403错误也可能已被axios拦截器处理（自动重试）
+  if (error.response && error.response.status === 403) {
+    // 如果错误已被处理（标记了_handled），不显示错误信息
+    if (error._handled) {
+      return true;
+    }
+    // 如果错误未被处理，继续显示错误信息
+  }
+
+  // 其他错误：显示具体错误信息
+  if (showMessage) {
+    const { ElMessage } = await import('element-plus');
+    const errorMsg = extractErrorMessage(error) || defaultMessage;
+    ElMessage.error(errorMsg);
+  }
+
+  // 返回false表示错误需要进一步处理（已显示错误消息）
+  return false;
+};
+
+/**
  * 刷新CSRF令牌（通过发送GET请求）
  * @param {string} endpoint - 用于刷新令牌的端点，默认为 '/api/v1/dashboard/stats'
  * @returns {Promise<void>}
