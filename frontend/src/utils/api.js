@@ -480,26 +480,48 @@ export const ensureCsrfToken = async (getRequestFn = null) => {
  * 统一的请求函数（封装 axios）
  * 用于简化API调用，自动处理响应格式化和错误处理
  * @param {Object} config - axios 配置对象
+ * @param {Object} options - 额外选项
+ * @param {boolean} options.returnDataOnly - 是否只返回data字段（默认：false）
+ * @param {boolean} options.paginated - 是否为分页响应（默认：false）
+ * @param {boolean} options.silent - 是否静默处理错误（不显示错误消息，默认：false）
  * @returns {Promise} 返回处理后的响应数据
  */
-export const request = async (config) => {
+export const request = async (config, options = {}) => {
   const axios = (await import('axios')).default;
   const { ElMessage } = await import('element-plus');
+  
+  const {
+    returnDataOnly = false,
+    paginated = false,
+    silent = false
+  } = options;
   
   try {
     const response = await axios(config);
     
+    // 如果是文件下载（blob响应），直接返回原始响应
+    if (config.responseType === 'blob') {
+      return response;
+    }
+    
+    // 如果是分页响应，使用 normalizePaginatedResponse
+    if (paginated) {
+      return normalizePaginatedResponse(response);
+    }
+    
     // 使用 normalizeResponse 处理响应
-    return normalizeResponse(response, { returnDataOnly: false });
+    return normalizeResponse(response, { returnDataOnly });
   } catch (error) {
     // 如果错误已被处理（如429限流），直接抛出
     if (isErrorHandled(error)) {
       throw error;
     }
     
-    // 提取错误消息并显示
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
+    // 如果不是静默模式，显示错误消息
+    if (!silent) {
+      const errorMsg = extractErrorMessage(error);
+      ElMessage.error(errorMsg);
+    }
     
     // 重新抛出错误，让调用方可以处理
     throw error;

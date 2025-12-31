@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
+import { request, normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
 import { ElMessage } from 'element-plus';
 import { getSuccessMessage, getWarningMessage } from '../utils/messages';
 
@@ -13,17 +13,11 @@ import { getSuccessMessage, getWarningMessage } from '../utils/messages';
  * @returns {Promise<Object>} 用户列表数据
  */
 export const getUsers = async (params) => {
-  try {
-    const response = await axios.get('/api/v1/users/', { params });
-    return normalizePaginatedResponse(response);
-  } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
-  }
+  return request({
+    url: '/api/v1/users/',
+    method: 'get',
+    params
+  }, { paginated: true });
 };
 
 /**
@@ -86,17 +80,10 @@ export const searchUser = async (searchTerm) => {
  * @returns {Promise<Object>} 用户详情数据
  */
 export const getUserDetail = async (id) => {
-  try {
-    const response = await axios.get(`/api/v1/users/${id}`);
-    return normalizeResponse(response, { returnDataOnly: true });
-  } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
-  }
+  return request({
+    url: `/api/v1/users/${id}`,
+    method: 'get'
+  }, { returnDataOnly: true });
 };
 
 /**
@@ -104,17 +91,10 @@ export const getUserDetail = async (id) => {
  * @returns {Promise<Object>} 当前用户信息
  */
 export const getCurrentUserInfo = async () => {
-  try {
-    const response = await axios.get('/api/v1/users/me');
-    return normalizeResponse(response, { returnDataOnly: true });
-  } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
-  }
+  return request({
+    url: '/api/v1/users/me',
+    method: 'get'
+  }, { returnDataOnly: true });
 };
 
 /**
@@ -249,17 +229,10 @@ export const exportUsers = async (params = {}) => {
  * @returns {Promise<Object>} 统计信息
  */
 export const getUserStats = async () => {
-  try {
-    const response = await axios.get('/api/v1/users/stats');
-    return normalizeResponse(response, { returnDataOnly: true });
-  } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
-  }
+  return request({
+    url: '/api/v1/users/stats',
+    method: 'get'
+  }, { returnDataOnly: true });
 };
 
 /**

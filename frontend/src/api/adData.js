@@ -224,7 +224,7 @@ export const updateAdData = async (adData) => {
       headers['X-CSRF-Token'] = csrfToken;
     }
     
-    const response = await axios.post(`/api/v1/ad-data/${id}`, updateData, {
+    const response = await axios.put(`/api/v1/ad-data/${id}`, updateData, {
       headers
     });
     // 返回标准化的响应

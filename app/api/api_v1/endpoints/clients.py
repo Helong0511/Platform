@@ -8,12 +8,17 @@
 - 删除客户（检查关联数据）
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, Path
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, update
+from sqlalchemy.orm import selectinload
 # Python 3.10+ 使用内置类型注解
 import logging
 from pydantic import BaseModel
+from io import BytesIO
+from urllib.parse import quote
+import pandas as pd
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin, require_admin_or_self
@@ -547,6 +552,118 @@ async def update_client_switches(
         )
     
     return ResponseBaseSchema.success(data=client_data)
+
+
+@router.get("/export", response_class=StreamingResponse, summary="导出客户数据")
+async def export_clients_excel(
+        company_name: str | None = Query(None, description="公司名称过滤"),
+        is_active: bool | None = Query(None, description="是否激活过滤"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    """
+    导出客户数据到Excel文件
+    - 仅管理员可访问
+    - 支持按公司名称和激活状态过滤
+    - 返回Excel文件流
+    """
+    # 构建查询（与get_clients相同的逻辑）
+    from sqlalchemy.orm import selectinload
+    
+    query = select(Client).options(selectinload(Client.user))
+    
+    # 应用过滤条件
+    if company_name:
+        # 使用全文搜索（优先）或LIKE查询
+        from app.core.fulltext_search import search_with_fulltext
+        query = await search_with_fulltext(
+            db=db,
+            model_class=Client,
+            search_fields=["company_name", "contact_person"],
+            search_term=company_name,
+            base_query=query,
+            use_fulltext=True
+        )
+    
+    if is_active is not None:
+        query = query.where(Client.is_active == is_active)
+    
+    # 获取所有客户数据
+    query = query.order_by(Client.id.desc())
+    result = await db.execute(query)
+    clients = result.scalars().unique().all()
+    
+    # 如果没有数据，抛出错误提示用户
+    if not clients:
+        raise_api_exception(
+            error_code=ErrorCode.NOT_FOUND,
+            message="无数据，不能导出",
+            detail="当前筛选条件下没有可导出的客户数据，请调整筛选条件后重试"
+        )
+    
+    # 准备导出数据
+    data = []
+    for client in clients:
+        user = client.user
+        row = {
+            "客户ID": client.id,
+            "公司名称": client.company_name or "",
+            "联系人": client.contact_person or "",
+            "联系电话": client.phone or "",
+            "地址": client.address or "",
+            "API密钥": client.key or "",
+            "允许的IP": client.allowed_ips or "",
+            "状态": "启用" if client.is_active else "禁用",
+            "API开关": "启用" if client.api_enabled else "禁用",
+            "密码修改开关": "启用" if client.password_change_enabled else "禁用",
+            "创建时间": client.created_at.strftime("%Y-%m-%d %H:%M:%S") if client.created_at else "",
+            "更新时间": client.updated_at.strftime("%Y-%m-%d %H:%M:%S") if client.updated_at else "",
+        }
+        
+        # 添加用户信息
+        if user:
+            row.update({
+                "用户ID": user.id,
+                "用户名": user.username or "",
+                "邮箱": user.email or "",
+                "全名": user.full_name or "",
+            })
+        else:
+            row.update({
+                "用户ID": "",
+                "用户名": "",
+                "邮箱": "",
+                "全名": "",
+            })
+        
+        data.append(row)
+    
+    # 创建Excel文件
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df = pd.DataFrame(data)
+        df.to_excel(writer, index=False, sheet_name="客户数据")
+        
+        # 设置列宽自适应
+        worksheet = writer.sheets["客户数据"]
+        for column_cells in worksheet.columns:
+            max_length = max(len(str(cell.value)) for cell in column_cells) if column_cells else 0
+            worksheet.column_dimensions[column_cells[0].column_letter].width = min(max_length + 2, 50)
+    
+    output.seek(0)
+    from app.core.utils import get_app_now_naive
+    filename = f"客户数据_{get_app_now_naive().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    encoded_filename = quote(filename.encode('utf-8'))
+    
+    logger.info(f"Client data exported by {current_user.username}, total: {len(data)} clients")
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+        }
+    )
 
 
 @router.delete("/{client_id}", response_model=ResponseBaseSchema[dict], summary="删除客户")

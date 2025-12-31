@@ -1321,7 +1321,7 @@ async def get_ad_data_detail(
     return ResponseBaseSchema.success(data=AdDataResponse(**response_data))
 
 
-@router.post("/{data_id}", response_model=ResponseBaseSchema[AdDataResponse], summary="更新广告数据")
+@router.put("/{data_id}", response_model=ResponseBaseSchema[AdDataResponse], summary="更新广告数据")
 async def update_ad_data(
         data_id: int = Path(..., ge=1, description="广告数据ID"),
         ad_data_update: AdDataUpdate = Body(...),
@@ -1333,6 +1333,7 @@ async def update_ad_data(
     - 仅管理员可更新广告数据
     - 支持部分字段更新
     - 不允许更新date、id、created_at等系统字段
+    - 使用PUT方法符合RESTful规范
     """
     # 权限检查
     if current_user.role != UserRole.ADMIN:
