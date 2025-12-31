@@ -575,10 +575,10 @@ const handlePageChange = () => {
 onMounted(() => {
   loadOffers()
   loadPublishers()
-  // 默认查询最近30天
+  // 默认查询最近7天（优化性能，减少数据量）
   const endDate = new Date()
   const startDate = new Date()
-  startDate.setDate(startDate.getDate() - 30)
+  startDate.setDate(startDate.getDate() - 7)
   const formatLocalDate = (date) => {
     const year = date.getFullYear()
     const month = String(date.getMonth() + 1).padStart(2, '0')

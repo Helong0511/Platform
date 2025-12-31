@@ -13,6 +13,8 @@ from sqlalchemy.orm import joinedload
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
+from app.core.exceptions import raise_api_exception
+from app.core.errors import ErrorCode
 from app.models.models import User, Click, Offer, Publisher, Advertiser, ShortLink
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 
@@ -42,15 +44,39 @@ async def get_clicks(
     """
     获取短链接访问记录列表（clicks 表数据）
     仅管理员可访问
+    
+    优化说明：
+    - 如果没有提供日期范围，默认查询最近7天的数据（优化性能）
+    - 最大查询范围限制为90天（防止查询过大数据量）
     """
     try:
+        from app.core.utils import get_app_now_naive
+        from datetime import timedelta
+        
         # 解析日期（使用应用时区，与数据库时间一致）
         start_datetime = None
         end_datetime = None
-        if start_date:
-            start_datetime = parse_date_to_app_timezone(start_date, is_end_date=False)
-        if end_date:
-            end_datetime = parse_date_to_app_timezone(end_date, is_end_date=True)
+        
+        # 如果没有提供日期范围，默认查询最近7天
+        if not start_date and not end_date:
+            now = get_app_now_naive()
+            end_datetime = now
+            start_datetime = now - timedelta(days=7)
+            logger.debug(f"未提供日期范围，默认查询最近7天: {start_datetime} 至 {end_datetime}")
+        else:
+            if start_date:
+                start_datetime = parse_date_to_app_timezone(start_date, is_end_date=False)
+            if end_date:
+                end_datetime = parse_date_to_app_timezone(end_date, is_end_date=True)
+        
+        # 如果提供了日期范围，检查是否超过90天（防止查询过大数据量）
+        if start_datetime and end_datetime:
+            date_range_days = (end_datetime - start_datetime).days
+            if date_range_days > 90:
+                raise_api_exception(
+                    ErrorCode.INVALID_PARAMETER,
+                    detail=f"查询日期范围不能超过90天，当前范围：{date_range_days}天。请缩小查询范围或使用筛选条件。"
+                )
         
         # 构建查询 - 使用 joinedload 预加载关联数据，避免 N+1 查询
         query = select(Click).options(

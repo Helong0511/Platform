@@ -136,6 +136,17 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "从Redis队列批量取出点击记录并插入到数据库，每分钟执行一次，每次处理最多1000条（高并发优化）",
     },
     
+    "点击记录归档": {
+        "task_name": "点击记录归档",
+        "task_module": "app.scheduler_module.tasks.archive_old_clicks",
+        "task_function": "archive_old_clicks",
+        "result_getter_module": "app.scheduler_module.tasks.archive_old_clicks",
+        "result_getter_function": "get_task_result",
+        # 数据库配置
+        "cron_expression": "0 3 1 * *",  # 每月1号凌晨3点执行
+        "description": "归档90天前的点击记录到归档表，减少主表数据量，提升查询性能",
+    },
+    
     # ========== TQT API获取数据任务 ==========
     "TQT API获取数据": {
         "task_name": "TQT API获取数据",
