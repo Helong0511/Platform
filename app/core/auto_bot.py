@@ -94,18 +94,49 @@ if bot_initialized and TELEBOT_AVAILABLE:
     def get_chat_id(message):
         """处理 /id 命令：返回聊天ID（支持私聊和群组）"""
         chat_type = message.chat.type if hasattr(message.chat, 'type') else '未知'
-        logger.info(f"[命令处理器] ✅✅✅ 收到 /id 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat ID: {message.chat.id}, Chat Type: {chat_type})")
+        is_group = chat_type in ['group', 'supergroup']
+        
+        # 检查群组中是否包含 Bot 的提及
+        bot_mentioned = False
+        bot_username = None
+        if is_group:
+            try:
+                bot_info = bot.get_me()
+                bot_username = bot_info.username if bot_info else None
+                if bot_username:
+                    text = message.text or ''
+                    if f'@{bot_username}' in text:
+                        bot_mentioned = True
+                    # 检查 entities
+                    if hasattr(message, 'entities') and message.entities:
+                        for entity in message.entities:
+                            if entity.type == 'mention':
+                                mention_text = text[entity.offset:entity.offset + entity.length]
+                                if mention_text == f'@{bot_username}':
+                                    bot_mentioned = True
+                                    break
+            except:
+                pass
+        
+        logger.info(f"[命令处理器] ✅✅✅ 收到 /id 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat ID: {message.chat.id}, Chat Type: {chat_type}, Bot Mentioned: {bot_mentioned})")
         logger.info(f"[命令处理器] 消息对象: {message}")
         logger.info(f"[命令处理器] 消息文本: {message.text}")
+        
         if not _check_bot_available():
             logger.error("[命令处理器] Bot 未初始化，无法处理消息")
             return
+        
+        # 在群组中，如果没有 @botname，记录警告（但继续处理，因为某些情况下仍可工作）
+        if is_group and not bot_mentioned and bot_username:
+            logger.warning(f"[命令处理器] ⚠️ 群组中的命令没有 @{bot_username}，可能无法响应（Telegram 隐私模式）")
+            logger.info(f"[命令处理器] 💡 提示：在群组中使用命令时，请使用 /id@{bot_username} 格式，或直接 @{bot_username} 后发送命令")
+        
         try:
             chat_id = message.chat.id
             logger.info(f"[命令处理器] 准备回复，chat_id: {chat_id}, chat_type: {chat_type}")
             
             # 在群组中，回复消息；在私聊中，也可以回复
-            if chat_type in ['group', 'supergroup']:
+            if is_group:
                 # 群组中回复
                 bot.reply_to(message, f"群组ID: {chat_id}\n你的用户ID: {message.from_user.id}")
             else:
@@ -145,10 +176,26 @@ if bot_initialized and TELEBOT_AVAILABLE:
     @bot.message_handler(commands=['test'])
     def handle_test_command(message):
         """处理 /test 命令：显示测试内联按钮"""
-        logger.info(f"收到 /test 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'}")
+        chat_type = message.chat.type if hasattr(message.chat, 'type') else '未知'
+        is_group = chat_type in ['group', 'supergroup']
+        logger.info(f"收到 /test 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat Type: {chat_type})")
+        
         if not _check_bot_available():
             logger.error("Bot 未初始化，无法处理消息")
             return
+
+        # 检查群组中是否包含 Bot 的提及
+        if is_group:
+            try:
+                bot_info = bot.get_me()
+                bot_username = bot_info.username if bot_info else None
+                if bot_username:
+                    text = message.text or ''
+                    bot_mentioned = f'@{bot_username}' in text
+                    if not bot_mentioned:
+                        logger.warning(f"⚠️ 群组中的命令没有 @{bot_username}，可能无法响应（Telegram 隐私模式）")
+            except:
+                pass
 
         chat_id = message.chat.id
         markup = InlineKeyboardMarkup()
@@ -177,10 +224,26 @@ if bot_initialized and TELEBOT_AVAILABLE:
     @bot.message_handler(commands=['clock'])
     def handle_clock_command(message):
         """处理 /clock 命令：显示打卡确认按钮"""
-        logger.info(f"收到 /clock 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'}")
+        chat_type = message.chat.type if hasattr(message.chat, 'type') else '未知'
+        is_group = chat_type in ['group', 'supergroup']
+        logger.info(f"收到 /clock 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat Type: {chat_type})")
+        
         if not _check_bot_available():
             logger.error("Bot 未初始化，无法处理消息")
             return
+
+        # 检查群组中是否包含 Bot 的提及
+        if is_group:
+            try:
+                bot_info = bot.get_me()
+                bot_username = bot_info.username if bot_info else None
+                if bot_username:
+                    text = message.text or ''
+                    bot_mentioned = f'@{bot_username}' in text
+                    if not bot_mentioned:
+                        logger.warning(f"⚠️ 群组中的命令没有 @{bot_username}，可能无法响应（Telegram 隐私模式）")
+            except:
+                pass
 
         chat_id = message.chat.id
         markup = InlineKeyboardMarkup()
@@ -439,10 +502,49 @@ def run_bot():
                                     text = getattr(msg, 'text', '') or ''
                                     chat_type = msg.chat.type if hasattr(msg, 'chat') and hasattr(msg.chat, 'type') else '未知'
                                     
+                                    # 检查是否是群组消息，以及是否包含 Bot 的提及
+                                    is_group = chat_type in ['group', 'supergroup']
+                                    bot_mentioned = False
+                                    bot_username = None
+                                    
+                                    # 获取 Bot 的用户名
+                                    try:
+                                        bot_info = bot.get_me()
+                                        bot_username = bot_info.username if bot_info else None
+                                    except:
+                                        pass
+                                    
+                                    # 检查消息中是否包含 Bot 的提及（群组中需要）
+                                    if is_group and bot_username:
+                                        # 检查消息文本中是否包含 @botname
+                                        if f'@{bot_username}' in text:
+                                            bot_mentioned = True
+                                        # 检查消息 entities 中是否有 mention
+                                        if hasattr(msg, 'entities') and msg.entities:
+                                            for entity in msg.entities:
+                                                if entity.type == 'mention':
+                                                    mention_text = text[entity.offset:entity.offset + entity.length]
+                                                    if mention_text == f'@{bot_username}':
+                                                        bot_mentioned = True
+                                                        break
+                                    
                                     # 如果是命令，优先手动处理
                                     if text and text.startswith('/'):
-                                        command = text.split()[0] if text else ''  # 获取命令部分（如 '/id'）
-                                        logger.info(f"🔍 检测到命令: {command} (chat_type={chat_type})，优先手动处理...")
+                                        command = text.split()[0] if text else ''  # 获取命令部分（如 '/id' 或 '/id@botname'）
+                                        # 移除 @botname 部分（如果有）
+                                        if '@' in command:
+                                            command = command.split('@')[0]
+                                        
+                                        # 在群组中，检查是否需要 @botname（Telegram 隐私模式）
+                                        if is_group:
+                                            logger.info(f"🔍 检测到群组命令: {command} (chat_type={chat_type}, bot_mentioned={bot_mentioned}, bot_username=@{bot_username})")
+                                            # 如果群组中命令没有 @botname，记录警告但继续处理（某些情况下仍可工作）
+                                            if not bot_mentioned and bot_username:
+                                                logger.warning(f"⚠️ 群组中的命令 {command} 没有 @{bot_username}，可能无法响应（Telegram 隐私模式）")
+                                                logger.info(f"💡 提示：在群组中使用命令时，请使用 /{command.split('/')[-1]}@{bot_username} 格式，或直接 @{bot_username} 后发送命令")
+                                        else:
+                                            logger.info(f"🔍 检测到私聊命令: {command} (chat_type={chat_type})")
+                                        
                                         try:
                                             handler_found = False
                                             for handler in bot.message_handlers:
@@ -717,9 +819,9 @@ def start_bot():
         logger.info(f"[PID:{current_pid}] 正在设置 Telegram Bot 命令...")
         # 设置 Bot 命令
         commands_list = [
-            ("id", "查询聊天ID"),
-            ("test", "测试内联按钮"),
-            ("clock", "打卡")
+            ("id", "查询聊天ID（群组中需使用 /id@botname）"),
+            ("test", "测试内联按钮（群组中需使用 /test@botname）"),
+            ("clock", "打卡（群组中需使用 /clock@botname）")
         ]
 
         com_set = []
@@ -733,6 +835,16 @@ def start_bot():
             try:
                 bot.set_my_commands(commands=com_set)
                 logger.info(f"[PID:{current_pid}] Telegram Bot 命令设置成功")
+                
+                # 获取 Bot 用户名，用于提示
+                try:
+                    bot_info = bot.get_me()
+                    bot_username = bot_info.username if bot_info else None
+                    if bot_username:
+                        logger.info(f"[PID:{current_pid}] 💡 提示：在群组中使用命令时，请使用 /命令@{bot_username} 格式，或直接 @{bot_username} 后发送命令")
+                        logger.info(f"[PID:{current_pid}] 💡 例如：/id@{bot_username} 或 @{bot_username} /id")
+                except:
+                    pass
             except Exception as e:
                 logger.warning(f"[PID:{current_pid}] 设置 Telegram Bot 命令时发生错误: {e}")
 
