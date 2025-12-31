@@ -100,6 +100,77 @@ async def receive_bft_postback(
         clk_id = raw_data.get("clk_id")
         event_name = raw_data.get("event_name")
         
+        # 立即发送 Telegram 通知（接收到数据就通知）
+        try:
+            from app.core.auto_bot import send_telegram_message
+            import asyncio
+            from datetime import datetime
+            
+            # 获取客户端IP
+            client_ip = None
+            forwarded_for = request.headers.get("X-Forwarded-For")
+            if forwarded_for:
+                client_ip = forwarded_for.split(",")[0].strip()
+            if not client_ip:
+                real_ip = request.headers.get("X-Real-IP")
+                if real_ip:
+                    client_ip = real_ip.strip()
+            if not client_ip and request.client:
+                client_ip = request.client.host
+            client_ip = client_ip or "未知"
+            
+            # 构建通知消息
+            method = request.method
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            telegram_msg = f"🔔 BFT PostBack 收到数据\n\n"
+            telegram_msg += f"⏰ 时间: {current_time}\n"
+            telegram_msg += f"📡 方法: {method}\n"
+            telegram_msg += f"🌐 IP: {client_ip}\n"
+            
+            if event_name:
+                telegram_msg += f"📌 事件: {event_name}\n"
+            if clk_id:
+                telegram_msg += f"🆔 Click ID: {clk_id}\n"
+            
+            telegram_msg += f"\n📋 接收到的参数 ({len(raw_data)} 个):\n"
+            telegram_msg += "-" * 40 + "\n"
+            
+            # 遍历所有收到的参数，添加到通知中
+            if raw_data:
+                for key, value in sorted(raw_data.items()):
+                    # 格式化参数值
+                    if value is None:
+                        value_str = "None"
+                    elif isinstance(value, (dict, list)):
+                        # 如果是复杂类型，转换为 JSON 字符串
+                        try:
+                            value_str = json.dumps(value, ensure_ascii=False)
+                        except:
+                            value_str = str(value)
+                    else:
+                        value_str = str(value)
+                    
+                    # 限制单个参数值的长度，避免消息过长
+                    if len(value_str) > 150:
+                        value_str = value_str[:150] + "..."
+                    
+                    telegram_msg += f"• {key}: {value_str}\n"
+            else:
+                telegram_msg += "无参数\n"
+            
+            # 异步发送通知，不阻塞主流程
+            asyncio.create_task(
+                asyncio.wait_for(
+                    send_telegram_message(telegram_msg),
+                    timeout=10.0
+                )
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"发送 BFT PostBack Telegram 通知超时（超过10秒）")
+        except Exception as e:
+            logger.warning(f"发送 BFT PostBack Telegram 通知失败: {e}")
+        
         return await _process_bft_postback(
             request=request,
             raw_data=raw_data,
