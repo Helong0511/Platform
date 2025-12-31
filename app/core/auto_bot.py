@@ -329,13 +329,66 @@ def run_bot():
     logger.info(f"[线程: {threading.current_thread().name}] 开始启动 Telegram Bot 轮询...")
     
     try:
-        # 先测试 Bot 连接
-        try:
-            bot_info = bot.get_me()
-            logger.info(f"Telegram Bot 连接成功: @{bot_info.username} (ID: {bot_info.id})")
-        except Exception as test_error:
-            logger.error(f"Telegram Bot 连接测试失败: {test_error}", exc_info=True)
-            logger.error("请检查 TELEGRAM_TOKEN 是否正确，以及网络连接是否正常")
+        # 先测试 Bot 连接（带重试机制）
+        max_retries = 3
+        retry_delay = 5  # 秒
+        connection_success = False
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                logger.info(f"尝试连接 Telegram Bot API (第 {attempt}/{max_retries} 次)...")
+                bot_info = bot.get_me()
+                logger.info(f"✅ Telegram Bot 连接成功: @{bot_info.username} (ID: {bot_info.id})")
+                connection_success = True
+                break
+            except Exception as test_error:
+                error_msg = str(test_error)
+                error_type = type(test_error).__name__
+                
+                # 判断错误类型
+                is_network_error = any(keyword in error_msg.lower() for keyword in [
+                    'network is unreachable',
+                    'connection refused',
+                    'connection timeout',
+                    'name resolution failed',
+                    'failed to establish',
+                    'max retries exceeded'
+                ])
+                
+                if is_network_error:
+                    logger.warning(f"⚠️ Telegram Bot 连接失败 (第 {attempt}/{max_retries} 次): 网络连接问题")
+                    logger.warning(f"   错误类型: {error_type}")
+                    logger.warning(f"   错误信息: {error_msg[:200]}")
+                    
+                    if attempt < max_retries:
+                        logger.info(f"   等待 {retry_delay} 秒后重试...")
+                        import time
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # 指数退避
+                    else:
+                        logger.error("❌ Telegram Bot 连接失败: 无法连接到 api.telegram.org")
+                        logger.error("   可能的原因:")
+                        logger.error("   1. 服务器无法访问 api.telegram.org（防火墙/网络限制）")
+                        logger.error("   2. 需要使用代理访问 Telegram API")
+                        logger.error("   3. 网络暂时不可用")
+                        logger.error("   4. DNS 解析失败")
+                        logger.error("   建议:")
+                        logger.error("   - 检查服务器网络连接: ping api.telegram.org")
+                        logger.error("   - 检查防火墙设置")
+                        logger.error("   - 如果在中国大陆，可能需要配置代理")
+                        logger.error("   - 检查 DNS 设置")
+                        logger.warning("⚠️ Bot 轮询将不会启动，但应用会继续运行")
+                        logger.warning("⚠️ Telegram 通知功能将不可用，直到网络连接恢复")
+                        return
+                else:
+                    # 其他错误（如 Token 错误）
+                    logger.error(f"❌ Telegram Bot 连接测试失败: {error_type}")
+                    logger.error(f"   错误信息: {error_msg[:200]}")
+                    logger.error("   请检查 TELEGRAM_TOKEN 是否正确")
+                    return
+        
+        if not connection_success:
+            logger.error("❌ Telegram Bot 连接失败，轮询将不会启动")
             return
         
         # 检查消息处理器
