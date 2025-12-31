@@ -109,7 +109,8 @@ async def process_clicks_queue() -> Dict[str, int]:
                         f"批量插入点击记录失败（第 {batch_count} 批）: error={e}",
                         exc_info=True
                     )
-                    result['failed'] += len(clicks)
+                    # 使用 valid_clicks 的长度（如果存在），否则使用 clicks
+                    result['failed'] += len(valid_clicks) if 'valid_clicks' in locals() else len(clicks)
         
         # 获取剩余队列长度
         result['queue_remaining'] = await get_queue_length()
