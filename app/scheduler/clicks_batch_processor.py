@@ -181,29 +181,27 @@ async def _enrich_clicks_with_advertiser_id(db: AsyncSession, clicks: List[Dict[
 
 async def _validate_offer_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    验证并过滤offer_id（如果不存在则移除该记录）
-    防止外键约束失败
+    验证并清理offer_id（如果不存在则设置为None）
+    防止外键约束失败，但允许保存记录（因为数据库允许offer_id为NULL）
     
     Args:
         db: 数据库会话
         clicks: 点击记录列表
         
     Returns:
-        有效的点击记录列表（已过滤掉无效的offer_id）
+        有效的点击记录列表（无效的offer_id已被设置为None）
     """
-    # 收集所有需要验证的offer_id
+    # 收集所有需要验证的offer_id（不为None的）
     offer_ids_to_validate = set()
     for click in clicks:
         offer_id = click.get('offer_id')
         if offer_id is not None:
             offer_ids_to_validate.add(offer_id)
     
+    # 如果没有需要验证的offer_id，直接返回所有记录（允许offer_id为None）
     if not offer_ids_to_validate:
-        # 如果没有offer_id需要验证，返回所有记录（但记录警告）
-        invalid_clicks = [c for c in clicks if c.get('offer_id') is None]
-        if invalid_clicks:
-            logger.warning(f"发现 {len(invalid_clicks)} 条点击记录没有offer_id，将被跳过")
-        return [c for c in clicks if c.get('offer_id') is not None]
+        logger.debug(f"所有点击记录的offer_id都为None，允许保存（数据库允许NULL）")
+        return clicks
     
     try:
         # 批量查询存在的offer_id
@@ -213,37 +211,33 @@ async def _validate_offer_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) ->
         )
         valid_offer_ids = {row[0] for row in result.all()}
         
-        # 过滤掉无效的offer_id
-        valid_clicks = []
-        invalid_count = 0
+        # 验证并清理无效的offer_id（设置为None而不是跳过记录）
+        cleaned_count = 0
         for click in clicks:
             offer_id = click.get('offer_id')
-            if offer_id is None:
+            if offer_id is not None and offer_id not in valid_offer_ids:
                 logger.warning(
-                    f"点击记录缺少offer_id，将被跳过。"
+                    f"Offer ID {offer_id} 不存在，将设置为None（允许保存记录）。"
                     f"click_id={click.get('click_id')}, short_link_id={click.get('short_link_id')}"
                 )
-                invalid_count += 1
-            elif offer_id not in valid_offer_ids:
-                logger.warning(
-                    f"Offer ID {offer_id} 不存在，点击记录将被跳过。"
-                    f"click_id={click.get('click_id')}, short_link_id={click.get('short_link_id')}"
-                )
-                invalid_count += 1
-            else:
-                valid_clicks.append(click)
+                click['offer_id'] = None
+                cleaned_count += 1
         
-        if invalid_count > 0:
-            logger.warning(
-                f"验证offer_id完成: 有效={len(valid_clicks)}, 无效={invalid_count}。"
-                f"无效记录将被跳过，不会插入数据库。"
+        if cleaned_count > 0:
+            logger.info(
+                f"验证offer_id完成: 有效={len(offer_ids_to_validate) - cleaned_count}, "
+                f"已清理={cleaned_count}（设置为None）。所有记录将被保存。"
             )
         
-        return valid_clicks
+        # 返回所有记录（无效的offer_id已被设置为None）
+        return clicks
     except Exception as e:
-        logger.error(f"验证offer_id失败: error={e}，将跳过所有记录以避免外键约束错误", exc_info=True)
-        # 如果验证失败，返回空列表以避免外键约束错误
-        return []
+        logger.error(f"验证offer_id失败: error={e}，将清空所有offer_id以避免外键约束错误", exc_info=True)
+        # 如果验证失败，清空所有offer_id以避免外键约束错误，但仍保存记录
+        for click in clicks:
+            if click.get('offer_id') is not None:
+                click['offer_id'] = None
+        return clicks
 
 
 async def _validate_short_link_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) -> None:
