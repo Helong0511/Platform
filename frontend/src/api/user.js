@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { request, normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
+import { request, normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken, refreshCsrfTokenBeforeRequest, handleError, handleFileDownload, refreshCsrfToken } from '../utils/api';
 import { ElMessage } from 'element-plus';
 import { getSuccessMessage, getWarningMessage } from '../utils/messages';
 
@@ -105,13 +105,11 @@ export const getCurrentUserInfo = async () => {
 export const createUser = async (userData) => {
   try {
     // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest('/api/v1/users/stats');
     
     const response = await axios.post('/api/v1/users/', userData);
     return normalizeResponse(response);
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -125,13 +123,11 @@ export const createUser = async (userData) => {
 export const updateUser = async (id, userData) => {
   try {
     // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest('/api/v1/users/stats');
     
     const response = await axios.put(`/api/v1/users/${id}`, userData);
     return normalizeResponse(response);
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -144,13 +140,11 @@ export const updateUser = async (id, userData) => {
 export const deleteUser = async (id) => {
   try {
     // 在删除前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest('/api/v1/users/stats');
     
     await axios.delete(`/api/v1/users/${id}`);
     return true;
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -162,8 +156,6 @@ export const deleteUser = async (id) => {
  */
 export const exportUsers = async (params = {}) => {
   try {
-    const { handleFileDownload, handleError, extractErrorMessage } = await import('../utils/api');
-    
     const response = await axios.get('/api/v1/users/export/excel', {
       params,
       responseType: 'blob'
@@ -175,14 +167,12 @@ export const exportUsers = async (params = {}) => {
     });
   } catch (error) {
     // 提取错误消息，优先使用 detail，然后是 message
-    const { extractErrorMessage } = await import('../utils/api');
     const errorMsg = extractErrorMessage(error) || '导出失败';
     
     // 如果是"无数据，不能导出"的错误，直接显示该消息
     if (errorMsg.includes('无数据') || errorMsg.includes('不能导出')) {
       ElMessage.warning(getWarningMessage('NO_DATA_TO_EXPORT'));
     } else {
-      const { handleError } = await import('../utils/api');
       handleError(error);
     }
   }
@@ -209,14 +199,12 @@ export const getUserStats = async () => {
 export const changePassword = async (passwordData) => {
   try {
     // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfToken } = await import('../utils/api');
     await refreshCsrfToken('/api/v1/users/stats');
     await ensureCsrfToken();
     
     const response = await axios.put('/api/v1/users/me/password', passwordData);
     return normalizeResponse(response);
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };

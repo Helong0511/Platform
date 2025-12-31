@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
+import { normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
 import { ElMessage } from 'element-plus';
 import { getWarningMessage } from '../utils/messages';
 import { logger } from '../utils/logger';
@@ -12,7 +12,6 @@ import { logger } from '../utils/logger';
 export const validateExcelData = async (file) => {
   try {
     // 确保CSRF令牌存在
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest();
 
     const formData = new FormData();
@@ -33,7 +32,6 @@ export const validateExcelData = async (file) => {
     });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -47,7 +45,6 @@ export const getModelStatus = async () => {
     const response = await axios.get('/api/v1/ml-model/status');
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -76,7 +73,6 @@ export const getTimezone = async () => {
 export const parseExcelColumns = async (file) => {
   try {
     // 确保CSRF令牌存在
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest();
 
     const formData = new FormData();
@@ -97,7 +93,6 @@ export const parseExcelColumns = async (file) => {
     });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -110,7 +105,6 @@ export const parseExcelColumns = async (file) => {
 export const saveMapping = async (mapping) => {
   try {
     // 确保CSRF令牌存在（如果不存在，会通过GET请求获取）
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest();
 
     // 获取CSRF令牌（如果存在）
@@ -131,7 +125,6 @@ export const saveMapping = async (mapping) => {
     });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -145,7 +138,6 @@ export const saveMapping = async (mapping) => {
 export const previewExcelData = async (file, rows = 10) => {
   try {
     // 确保CSRF令牌存在
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest();
 
     const formData = new FormData();
@@ -166,7 +158,6 @@ export const previewExcelData = async (file, rows = 10) => {
     });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -231,7 +222,6 @@ export const importTrainingData = async (file) => {
   try {
     return await attemptImport(0);
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };

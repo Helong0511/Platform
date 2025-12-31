@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
+import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
 import { ElMessage } from 'element-plus';
 import { getSuccessMessage } from '../utils/messages';
 import { logger } from '../utils/logger';
@@ -19,7 +19,6 @@ export const getScheduledTasks = async (params) => {
     const response = await axios.get('/api/v1/scheduled-tasks/', { params });
     return normalizePaginatedResponse(response);
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -36,7 +35,6 @@ export const getScheduledTask = async (taskName) => {
     const response = await axios.get(`/api/v1/scheduled-tasks/${encodedTaskName}`);
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -54,14 +52,12 @@ export const getScheduledTask = async (taskName) => {
 export const createScheduledTask = async (data) => {
   try {
     // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
     
     const response = await axios.post('/api/v1/scheduled-tasks/', data);
     ElMessage.success(getSuccessMessage('TASK_CREATE_SUCCESS'));
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -80,7 +76,6 @@ export const createScheduledTask = async (data) => {
 export const updateScheduledTask = async (taskName, data) => {
   try {
     // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
     
     // 对任务名称进行 URL 编码，确保中文路径正确传输
@@ -91,7 +86,6 @@ export const updateScheduledTask = async (taskName, data) => {
   } catch (error) {
     // axios拦截器应该已经处理了CSRF token的重试
     // 如果仍然失败，说明token确实有问题
-    const { handleError, extractErrorMessage } = await import('../utils/api');
     const errorMsg = extractErrorMessage(error);
     
     // 如果是CSRF相关错误，提供更友好的提示
@@ -119,7 +113,6 @@ export const updateScheduledTask = async (taskName, data) => {
 export const triggerScheduledTask = async (taskName, params = {}) => {
   try {
     // 在触发前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
     
     const encodedTaskName = encodeURIComponent(taskName);
@@ -130,7 +123,6 @@ export const triggerScheduledTask = async (taskName, params = {}) => {
     ElMessage.success(getSuccessMessage('TASK_TRIGGER_SUCCESS'));
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -143,7 +135,6 @@ export const triggerScheduledTask = async (taskName, params = {}) => {
 export const releaseTaskLock = async (taskName) => {
   try {
     // 在操作前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
     
     // 对任务名称进行 URL 编码，确保中文路径正确传输
@@ -152,7 +143,6 @@ export const releaseTaskLock = async (taskName) => {
     ElMessage.success(getSuccessMessage('TASK_LOCK_RELEASED'));
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
+import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
 import { ElMessage } from 'element-plus';
 
 // 获取产品列表
@@ -8,7 +8,6 @@ export const getProductList = async (params = {}) => {
     const response = await axios.get('/api/v1/products/', { params });
     return normalizePaginatedResponse(response);
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -23,7 +22,6 @@ export const getProductDetail = async (id, options = {}) => {
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
     // 使用统一的错误处理，但支持silent模式
-    const { handleError } = await import('../utils/api');
     if (silent) {
       handleError(error, { showMessage: false });
     } else {
@@ -39,7 +37,6 @@ import { logger } from '../utils/logger';
 export const createProduct = async (productData) => {
   try {
     // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest('/api/v1/products/?page_size=1');
     
     const response = await axios.post('/api/v1/products/', productData);
@@ -53,7 +50,6 @@ export const createProduct = async (productData) => {
 export const updateProduct = async (id, productData) => {
   try {
     // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest('/api/v1/products/?page_size=1');
     
     const response = await axios.put(`/api/v1/products/${id}`, productData);
@@ -67,7 +63,6 @@ export const updateProduct = async (id, productData) => {
 export const deleteProduct = async (id) => {
   try {
     // 在删除前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest('/api/v1/products/?page_size=1');
     
     const response = await axios.delete(`/api/v1/products/${id}`);
@@ -110,7 +105,6 @@ export const getProductAssignments = async (productId) => {
       throw error;
     }
     // 如果是超时错误，提供更友好的提示
-    const { handleError } = await import('../utils/api');
     if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
       handleError(error, { customErrorHandler: async () => {
         const { ElMessage } = await import('element-plus');
@@ -129,7 +123,6 @@ export const getClientAssignments = async (clientId) => {
     const response = await axios.get(`/api/v1/product-assignments/clients/${clientId}/assignments`);
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -141,13 +134,11 @@ export const updateAssignmentDates = async (assignmentId, dateUpdate) => {
     try {
       // 如果是重试，先获取新的CSRF token
       if (retryCount > 0) {
-        const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
         await refreshCsrfTokenBeforeRequest('/api/v1/products/');
         // 等待响应拦截器处理完响应头
         await new Promise(resolve => setTimeout(resolve, 200));
       } else {
         // 首次尝试，确保CSRF令牌存在
-        const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
         await refreshCsrfTokenBeforeRequest('/api/v1/products/');
       }
       
@@ -188,7 +179,6 @@ export const updateAssignmentDates = async (assignmentId, dateUpdate) => {
   } catch (error) {
     // 如果是CSRF相关错误，提供更友好的提示（但不显示错误消息，由调用方处理）
     if (error.response?.status === 403) {
-      const { extractErrorMessage } = await import('../utils/api');
       const errorMsg = extractErrorMessage(error);
       if (errorMsg.includes('CSRF') || errorMsg.includes('csrf') || errorMsg.includes('令牌')) {
         // 不在这里显示错误消息，由批量保存函数统一处理
@@ -208,13 +198,11 @@ export const batchUpdateAssignmentDates = async (updates) => {
     try {
       // 如果是重试，先获取新的CSRF token
       if (retryCount > 0) {
-        const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
         await refreshCsrfTokenBeforeRequest('/api/v1/products/');
         // 等待响应拦截器处理完响应头
         await new Promise(resolve => setTimeout(resolve, 200));
       } else {
         // 首次尝试，确保CSRF令牌存在
-        const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
         await refreshCsrfTokenBeforeRequest('/api/v1/products/');
       }
       
@@ -252,7 +240,6 @@ export const batchUpdateAssignmentDates = async (updates) => {
   try {
     return await attemptBatchUpdate(0);
   } catch (error) {
-    const { handleError, extractErrorMessage } = await import('../utils/api');
     const errorMsg = extractErrorMessage(error);
     
     // 如果是CSRF相关错误，提供更友好的提示

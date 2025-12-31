@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { normalizePaginatedResponse, normalizeResponse, ensureCsrfToken } from '../utils/api';
+import { normalizePaginatedResponse, normalizeResponse, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
 
 // 获取TB搜索数据列表
 export const getTBSearchDataList = async (params) => {
@@ -13,7 +13,6 @@ export const getTBSearchDataList = async (params) => {
     });
     return normalizePaginatedResponse(response);
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -21,7 +20,6 @@ export const getTBSearchDataList = async (params) => {
 // 更新TB搜索数据
 export const updateTBSearchData = async (data) => {
   try {
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest();
     
     const { id, ...updateData } = data;
@@ -39,7 +37,6 @@ export const updateTBSearchData = async (data) => {
 // 删除TB搜索数据
 export const deleteTBSearchData = async (dataId) => {
   try {
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest();
     
     const csrfToken = sessionStorage.getItem('csrf_token');
@@ -56,7 +53,6 @@ export const deleteTBSearchData = async (dataId) => {
 // 批量删除TB搜索数据
 export const batchDeleteTBSearchData = async (dataIds) => {
   try {
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest();
     
     const csrfToken = sessionStorage.getItem('csrf_token');
@@ -76,7 +72,6 @@ export const batchDeleteTBSearchData = async (dataIds) => {
 // 导入TB搜索数据
 export const importTBSearchData = async (formData) => {
   try {
-    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
     await refreshCsrfTokenBeforeRequest();
     
     const csrfToken = sessionStorage.getItem('csrf_token');
@@ -103,7 +98,6 @@ export const getClientsWithTBSearchData = async (startDate = null, endDate = nul
     const response = await axios.get('/api/v1/tb-search-data/clients-with-data', { params });
     return normalizeResponse(response, { returnDataOnly: false });
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -119,7 +113,6 @@ export const getProductsWithTBSearchData = async (clientId = null, startDate = n
     const response = await axios.get('/api/v1/tb-search-data/products-with-data', { params });
     return normalizeResponse(response, { returnDataOnly: false });
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
@@ -136,7 +129,6 @@ export const getCountriesWithTBSearchData = async (clientId = null, productId = 
     const response = await axios.get('/api/v1/tb-search-data/countries-with-data', { params });
     return normalizeResponse(response, { returnDataOnly: false });
   } catch (error) {
-    const { handleError } = await import('../utils/api');
     handleError(error);
   }
 };
