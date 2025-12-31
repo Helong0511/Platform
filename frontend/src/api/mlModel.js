@@ -12,7 +12,8 @@ import { logger } from '../utils/logger';
 export const validateExcelData = async (file) => {
   try {
     // 确保CSRF令牌存在
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest();
 
     const formData = new FormData();
     formData.append('file', file);
@@ -32,12 +33,8 @@ export const validateExcelData = async (file) => {
     });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -50,12 +47,8 @@ export const getModelStatus = async () => {
     const response = await axios.get('/api/v1/ml-model/status');
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -83,7 +76,8 @@ export const getTimezone = async () => {
 export const parseExcelColumns = async (file) => {
   try {
     // 确保CSRF令牌存在
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest();
 
     const formData = new FormData();
     formData.append('file', file);
@@ -103,12 +97,8 @@ export const parseExcelColumns = async (file) => {
     });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -120,7 +110,8 @@ export const parseExcelColumns = async (file) => {
 export const saveMapping = async (mapping) => {
   try {
     // 确保CSRF令牌存在（如果不存在，会通过GET请求获取）
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest();
 
     // 获取CSRF令牌（如果存在）
     const csrfToken = sessionStorage.getItem('csrf_token');
@@ -140,13 +131,8 @@ export const saveMapping = async (mapping) => {
     });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    // 如果错误已被拦截器处理（如401、429），不再重复显示
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -159,7 +145,8 @@ export const saveMapping = async (mapping) => {
 export const previewExcelData = async (file, rows = 10) => {
   try {
     // 确保CSRF令牌存在
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest();
 
     const formData = new FormData();
     formData.append('file', file);
@@ -179,12 +166,8 @@ export const previewExcelData = async (file, rows = 10) => {
     });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -248,11 +231,7 @@ export const importTrainingData = async (file) => {
   try {
     return await attemptImport(0);
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };

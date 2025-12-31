@@ -471,6 +471,12 @@ def run_bot():
                 logger.warning(f"⚠️ 重置 offset 时出错（可忽略）: {reset_error}")
                 last_update_id = None
             
+            # 网络错误重试计数和退避时间
+            network_error_count = 0
+            max_network_errors = 10  # 连续网络错误的最大次数
+            base_retry_delay = 5  # 基础重试延迟（秒）
+            max_retry_delay = 60  # 最大重试延迟（秒）
+            
             while True:
                 try:
                     poll_count += 1
@@ -483,9 +489,67 @@ def run_bot():
                             updates = bot.get_updates(timeout=20, offset=last_update_id, long_polling_timeout=20)
                         else:
                             updates = bot.get_updates(timeout=20, long_polling_timeout=20)
+                        
+                        # 成功获取更新，重置网络错误计数
+                        if network_error_count > 0:
+                            logger.info(f"✅ 网络连接已恢复（之前连续失败 {network_error_count} 次）")
+                            network_error_count = 0
+                            
                     except Exception as get_updates_error:
-                        logger.error(f"❌ 获取更新时出错: {get_updates_error}", exc_info=True)
-                        time.sleep(2)  # 出错后等待2秒再继续
+                        error_msg = str(get_updates_error)
+                        error_type = type(get_updates_error).__name__
+                        
+                        # 判断是否是网络连接错误
+                        is_network_error = any(keyword in error_msg.lower() for keyword in [
+                            'network is unreachable',
+                            'connection refused',
+                            'connection timeout',
+                            'connection error',
+                            'name resolution failed',
+                            'failed to establish',
+                            'max retries exceeded',
+                            'connection aborted',
+                            'dns',
+                            'timeout'
+                        ]) or 'ConnectionError' in error_type or 'Timeout' in error_type
+                        
+                        if is_network_error:
+                            network_error_count += 1
+                            
+                            # 计算指数退避延迟时间
+                            retry_delay = min(base_retry_delay * (2 ** min(network_error_count - 1, 4)), max_retry_delay)
+                            
+                            if network_error_count == 1:
+                                logger.warning(f"⚠️ 网络连接错误（第 {network_error_count} 次）: {error_type}")
+                                logger.warning(f"   错误信息: {error_msg[:200]}")
+                                logger.warning(f"   将在 {retry_delay} 秒后重试...")
+                            elif network_error_count <= 5:
+                                logger.warning(f"⚠️ 网络连接错误（连续第 {network_error_count} 次）: {error_type}")
+                                logger.warning(f"   将在 {retry_delay} 秒后重试...")
+                            elif network_error_count <= max_network_errors:
+                                logger.error(f"❌ 网络连接持续失败（连续第 {network_error_count} 次）: {error_type}")
+                                logger.error(f"   错误信息: {error_msg[:200]}")
+                                logger.error(f"   将在 {retry_delay} 秒后重试...")
+                                logger.error(f"   💡 提示：请检查服务器网络连接、防火墙设置和 DNS 配置")
+                            else:
+                                logger.error(f"❌ 网络连接严重失败（连续第 {network_error_count} 次，超过最大次数 {max_network_errors}）")
+                                logger.error(f"   错误类型: {error_type}")
+                                logger.error(f"   错误信息: {error_msg[:200]}")
+                                logger.error(f"   将在 {retry_delay} 秒后继续重试...")
+                                logger.error(f"   💡 建议：")
+                                logger.error(f"      1. 检查服务器网络连接状态")
+                                logger.error(f"      2. 检查防火墙是否阻止了 api.telegram.org")
+                                logger.error(f"      3. 检查 DNS 解析是否正常（尝试: ping api.telegram.org）")
+                                logger.error(f"      4. 检查是否需要配置代理")
+                                network_error_count = 0  # 重置计数，避免日志过多
+                        else:
+                            # 非网络错误，使用较短的延迟
+                            logger.error(f"❌ 获取更新时出错（非网络错误）: {error_type}")
+                            logger.error(f"   错误信息: {error_msg[:200]}")
+                            retry_delay = 2
+                            network_error_count = 0  # 重置网络错误计数
+                        
+                        time.sleep(retry_delay)
                         continue
                     
                     if updates:

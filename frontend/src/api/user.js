@@ -105,19 +105,14 @@ export const getCurrentUserInfo = async () => {
 export const createUser = async (userData) => {
   try {
     // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfToken } = await import('../utils/api');
-    await refreshCsrfToken('/api/v1/users/stats');
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest('/api/v1/users/stats');
     
     const response = await axios.post('/api/v1/users/', userData);
     return normalizeResponse(response);
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -130,19 +125,14 @@ export const createUser = async (userData) => {
 export const updateUser = async (id, userData) => {
   try {
     // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfToken } = await import('../utils/api');
-    await refreshCsrfToken('/api/v1/users/stats');
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest('/api/v1/users/stats');
     
     const response = await axios.put(`/api/v1/users/${id}`, userData);
     return normalizeResponse(response);
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -154,19 +144,14 @@ export const updateUser = async (id, userData) => {
 export const deleteUser = async (id) => {
   try {
     // 在删除前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfToken } = await import('../utils/api');
-    await refreshCsrfToken('/api/v1/users/stats');
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest('/api/v1/users/stats');
     
     await axios.delete(`/api/v1/users/${id}`);
     return true;
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -177,50 +162,29 @@ export const deleteUser = async (id) => {
  */
 export const exportUsers = async (params = {}) => {
   try {
+    const { handleFileDownload, handleError, extractErrorMessage } = await import('../utils/api');
+    
     const response = await axios.get('/api/v1/users/export/excel', {
       params,
       responseType: 'blob'
     });
     
-    // 创建下载链接
-    const blob = new Blob([response.data], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    // 处理文件下载
+    handleFileDownload(response, '用户数据.xlsx', () => {
+      ElMessage.success(getSuccessMessage('USER_EXPORT_SUCCESS'));
     });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    
-    // 从响应头获取文件名
-    const contentDisposition = response.headers['content-disposition'];
-    let filename = '用户数据.xlsx';
-    if (contentDisposition) {
-      const matches = contentDisposition.match(/filename\*=UTF-8''(.+)/);
-      if (matches && matches[1]) {
-        filename = decodeURIComponent(matches[1]);
-      }
-    }
-    
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
-    
-    ElMessage.success(getSuccessMessage('USER_EXPORT_SUCCESS'));
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
     // 提取错误消息，优先使用 detail，然后是 message
-    const errorMsg = error.response?.data?.detail || error.response?.data?.message || error.message || '导出失败';
+    const { extractErrorMessage } = await import('../utils/api');
+    const errorMsg = extractErrorMessage(error) || '导出失败';
     
     // 如果是"无数据，不能导出"的错误，直接显示该消息
     if (errorMsg.includes('无数据') || errorMsg.includes('不能导出')) {
       ElMessage.warning(getWarningMessage('NO_DATA_TO_EXPORT'));
     } else {
-      ElMessage.error(errorMsg);
+      const { handleError } = await import('../utils/api');
+      handleError(error);
     }
-    throw error;
   }
 };
 
@@ -252,12 +216,8 @@ export const changePassword = async (passwordData) => {
     const response = await axios.put('/api/v1/users/me/password', passwordData);
     return normalizeResponse(response);
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 

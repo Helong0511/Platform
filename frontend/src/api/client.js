@@ -14,12 +14,8 @@ export const getClientList = async (params = {}) => {
     const response = await axios.get('/api/v1/clients/', { params });
     return normalizePaginatedResponse(response);
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -87,18 +83,17 @@ export const getClientDetail = async (id, options = {}) => {
       });
     }
     
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    
     // 如果是429错误且silent为true，不显示错误消息
     if (error.response?.status === 429 && silent) {
       throw error;
     }
     
-    const errorMsg = extractErrorMessage(error);
-    if (!silent) {
-      ElMessage.error(errorMsg);
+    // 使用统一的错误处理，但支持silent模式
+    const { handleError } = await import('../utils/api');
+    if (silent) {
+      handleError(error, { showMessage: false });
+    } else {
+      handleError(error);
     }
     throw error;
   } finally {
@@ -110,20 +105,15 @@ export const getClientDetail = async (id, options = {}) => {
 export const createClient = async (clientData) => {
   try {
     // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfToken } = await import('../utils/api');
-    await refreshCsrfToken('/api/v1/clients/?page_size=1');
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest('/api/v1/clients/?page_size=1');
     
     const response = await axios.post('/api/v1/clients/', clientData);
     // 不在这里显示成功消息，由调用方处理
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -150,12 +140,8 @@ export const updateClient = async (id, clientData) => {
     // 不在这里显示成功消息，由调用方处理
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -173,12 +159,8 @@ export const updateClientSwitches = async (id, switchData) => {
     clearClientDetailCache(id);
     return result;
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -201,34 +183,28 @@ export const deleteClient = async (id) => {
 // 导出客户数据
 export const exportClients = async (params = {}) => {
   try {
+    const { handleFileDownload, handleError, extractErrorMessage } = await import('../utils/api');
+    
     const response = await axios.get('/api/v1/clients/export', {
       params,
       responseType: 'blob'
     });
 
     // 处理文件下载
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = url;
-    const fileName = '客户数据导出.xlsx';
-    link.setAttribute('download', fileName);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
-
-    ElMessage.success(getSuccessMessage('CLIENT_EXPORT_SUCCESS'));
+    handleFileDownload(response, '客户数据导出.xlsx', () => {
+      ElMessage.success(getSuccessMessage('CLIENT_EXPORT_SUCCESS'));
+    });
+    
     return true;
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
+    const { extractErrorMessage, handleError } = await import('../utils/api');
     const errorMsg = extractErrorMessage(error);
+    
+    // 特殊处理：无数据时的警告提示
     if (errorMsg.includes('无数据') || errorMsg.includes('不能导出')) {
       ElMessage.warning(getWarningMessage('NO_DATA_TO_EXPORT'));
     } else {
-      ElMessage.error(errorMsg);
+      handleError(error);
     }
-    throw error;
   }
 };

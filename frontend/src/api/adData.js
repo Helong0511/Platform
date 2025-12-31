@@ -1,6 +1,5 @@
 import axios from 'axios';
-import { ElMessage } from 'element-plus';
-import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
+import { normalizePaginatedResponse, normalizeResponse, ensureCsrfToken } from '../utils/api';
 
 // 获取广告数据列表
 export const getAdDataList = async (params) => {
@@ -16,12 +15,8 @@ export const getAdDataList = async (params) => {
     });
     return normalizePaginatedResponse(response);
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -39,12 +34,8 @@ export const getDailySummary = async (params) => {
     });
     return normalizePaginatedResponse(response);
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -159,12 +150,8 @@ export const exportAdData = async (params) => {
       }
     }
     
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -172,7 +159,8 @@ export const exportAdData = async (params) => {
 export const importAdData = async (formData) => {
   try {
     // 确保CSRF令牌存在
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest();
     
     // 获取CSRF令牌（如果存在）
     const csrfToken = sessionStorage.getItem('csrf_token');
@@ -196,7 +184,6 @@ export const importAdData = async (formData) => {
     // 返回 data 字段中的 ExcelImportResponse 对象
     return normalized?.data || normalized;
   } catch (error) {
-    const errorMsg = extractErrorMessage(error);
     // 不在API层显示错误消息，由调用方处理
     throw error;
   }
@@ -206,7 +193,8 @@ export const importAdData = async (formData) => {
 export const updateAdData = async (adData) => {
   try {
     // 确保CSRF令牌存在
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest();
     
     // 准备请求数据，排除id字段（id在URL中）
     const { id, ...updateData } = adData;
@@ -249,7 +237,8 @@ export const deleteAdData = async (dataId) => {
 export const batchDeleteAdData = async (dataIds) => {
   try {
     // 确保CSRF令牌存在
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest();
     
     // 获取CSRF令牌（如果存在）
     const csrfToken = sessionStorage.getItem('csrf_token');
@@ -302,11 +291,8 @@ export const getUsersForSelect = async () => {
       };
     }).filter(item => item !== null);
   } catch (error) {
-    if (isErrorHandled(error)) {
-      return [];
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
+    const { handleError } = await import('../utils/api');
+    handleError(error, { showMessage: true });
     return [];
   }
 };
@@ -326,12 +312,8 @@ export const getClientsWithData = async (startDate = null, endDate = null) => {
       count: normalized.count || 0
     };
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -350,12 +332,8 @@ export const getProductsWithData = async (clientId = null, startDate = null, end
       count: normalized.count || 0
     };
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -375,12 +353,8 @@ export const getCountriesWithData = async (clientId = null, productId = null, st
       count: normalized.count || 0
     };
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -427,11 +401,7 @@ export const getAdDataDateRange = async (clientId = null) => {
     const response = await axios.get('/api/v1/ad-data/date-range', { params });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };

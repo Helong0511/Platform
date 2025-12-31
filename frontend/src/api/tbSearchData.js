@@ -1,6 +1,5 @@
 import axios from 'axios';
-import { ElMessage } from 'element-plus';
-import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
+import { normalizePaginatedResponse, normalizeResponse, ensureCsrfToken } from '../utils/api';
 
 // 获取TB搜索数据列表
 export const getTBSearchDataList = async (params) => {
@@ -14,19 +13,17 @@ export const getTBSearchDataList = async (params) => {
     });
     return normalizePaginatedResponse(response);
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
 // 更新TB搜索数据
 export const updateTBSearchData = async (data) => {
   try {
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest();
+    
     const { id, ...updateData } = data;
     const csrfToken = sessionStorage.getItem('csrf_token');
     const headers = { 'Content-Type': 'application/json' };
@@ -42,7 +39,9 @@ export const updateTBSearchData = async (data) => {
 // 删除TB搜索数据
 export const deleteTBSearchData = async (dataId) => {
   try {
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest();
+    
     const csrfToken = sessionStorage.getItem('csrf_token');
     const headers = {};
     if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
@@ -57,7 +56,9 @@ export const deleteTBSearchData = async (dataId) => {
 // 批量删除TB搜索数据
 export const batchDeleteTBSearchData = async (dataIds) => {
   try {
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest();
+    
     const csrfToken = sessionStorage.getItem('csrf_token');
     const headers = { 'Content-Type': 'application/json' };
     if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
@@ -75,7 +76,9 @@ export const batchDeleteTBSearchData = async (dataIds) => {
 // 导入TB搜索数据
 export const importTBSearchData = async (formData) => {
   try {
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest();
+    
     const csrfToken = sessionStorage.getItem('csrf_token');
     const headers = {};
     if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
@@ -100,12 +103,8 @@ export const getClientsWithTBSearchData = async (startDate = null, endDate = nul
     const response = await axios.get('/api/v1/tb-search-data/clients-with-data', { params });
     return normalizeResponse(response, { returnDataOnly: false });
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -120,12 +119,8 @@ export const getProductsWithTBSearchData = async (clientId = null, startDate = n
     const response = await axios.get('/api/v1/tb-search-data/products-with-data', { params });
     return normalizeResponse(response, { returnDataOnly: false });
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -141,12 +136,8 @@ export const getCountriesWithTBSearchData = async (clientId = null, productId = 
     const response = await axios.get('/api/v1/tb-search-data/countries-with-data', { params });
     return normalizeResponse(response, { returnDataOnly: false });
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 

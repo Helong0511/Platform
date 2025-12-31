@@ -1,6 +1,5 @@
 import axios from 'axios';
-import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, ensureCsrfToken } from '../utils/api';
-import { ElMessage } from 'element-plus';
+import { normalizePaginatedResponse, normalizeResponse, ensureCsrfToken } from '../utils/api';
 
 // ==================== 客户通知配置 ====================
 
@@ -12,9 +11,8 @@ export const getClientNotificationConfig = async (clientId) => {
     const response = await axios.get(`/api/v1/notification-configs/clients/${clientId}/config`);
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -24,18 +22,17 @@ export const getClientNotificationConfig = async (clientId) => {
 export const saveClientNotificationConfig = async (clientId, configData) => {
   try {
     // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfToken } = await import('../utils/api');
-    await refreshCsrfToken('/api/v1/dashboard/stats');
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
+    
     const response = await axios.post(
       `/api/v1/notification-configs/clients/${clientId}/config`,
       configData
     );
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -45,15 +42,14 @@ export const saveClientNotificationConfig = async (clientId, configData) => {
 export const deleteClientNotificationConfig = async (clientId) => {
   try {
     // 在删除前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfToken } = await import('../utils/api');
-    await refreshCsrfToken('/api/v1/dashboard/stats');
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
+    
     const response = await axios.delete(`/api/v1/notification-configs/clients/${clientId}/config`);
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -67,9 +63,8 @@ export const getProductNotificationConfig = async (productId) => {
     const response = await axios.get(`/api/v1/notification-configs/products/${productId}/config`);
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -79,18 +74,17 @@ export const getProductNotificationConfig = async (productId) => {
 export const saveProductNotificationConfig = async (productId, configData) => {
   try {
     // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfToken } = await import('../utils/api');
-    await refreshCsrfToken('/api/v1/dashboard/stats');
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
+    
     const response = await axios.post(
       `/api/v1/notification-configs/products/${productId}/config`,
       configData
     );
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -100,15 +94,14 @@ export const saveProductNotificationConfig = async (productId, configData) => {
 export const deleteProductNotificationConfig = async (productId) => {
   try {
     // 在删除前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfToken } = await import('../utils/api');
-    await refreshCsrfToken('/api/v1/dashboard/stats');
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
+    
     const response = await axios.delete(`/api/v1/notification-configs/products/${productId}/config`);
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -122,9 +115,8 @@ export const getNotificationRecords = async (params = {}) => {
     const response = await axios.get('/api/v1/notification-configs/notifications', { params });
     return normalizePaginatedResponse(response);
   } catch (error) {
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -136,9 +128,8 @@ export const getNotificationRecord = async (notificationId) => {
     const response = await axios.get(`/api/v1/notification-configs/notifications/${notificationId}`);
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 

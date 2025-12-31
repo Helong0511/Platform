@@ -8,6 +8,8 @@ export const getDashboardStats = async (period = 'week') => {
     // 后端已返回标准格式，直接使用 normalizeResponse
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
+    // 这里使用自定义错误处理，因为需要抛出特定格式的错误
+    const { extractErrorMessage } = await import('../utils/api');
     const errorMsg = extractErrorMessage(error);
     throw new Error('获取仪表盘统计数据失败: ' + errorMsg);
   }
@@ -22,6 +24,8 @@ export const getTrendData = async (period = 'week') => {
     // 后端已返回标准格式，直接使用 normalizeResponse
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
+    // 这里使用自定义错误处理，因为需要抛出特定格式的错误
+    const { extractErrorMessage } = await import('../utils/api');
     const errorMsg = extractErrorMessage(error);
     throw new Error('获取趋势数据失败: ' + errorMsg);
   }

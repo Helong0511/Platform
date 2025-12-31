@@ -477,6 +477,107 @@ export const ensureCsrfToken = async (getRequestFn = null) => {
 };
 
 /**
+ * 统一的错误处理函数
+ * 用于在 catch 块中统一处理错误
+ * @param {Error} error - 错误对象
+ * @param {Object} options - 选项
+ * @param {boolean} options.silent - 是否静默处理（不显示错误消息，默认：false）
+ * @param {Function} options.customHandler - 自定义错误处理函数
+ * @returns {void}
+ */
+export const handleError = (error, options = {}) => {
+  const { silent = false, customHandler } = options;
+  
+  // 如果错误已被处理（如429限流），直接抛出
+  if (isErrorHandled(error)) {
+    throw error;
+  }
+  
+  // 如果有自定义处理函数，使用自定义处理
+  if (customHandler && typeof customHandler === 'function') {
+    customHandler(error);
+    throw error;
+  }
+  
+  // 如果不是静默模式，显示错误消息
+  if (!silent) {
+    const errorMsg = extractErrorMessage(error);
+    (async () => {
+      const { ElMessage } = await import('element-plus');
+      ElMessage.error(errorMsg);
+    })();
+  }
+  
+  // 重新抛出错误，让调用方可以处理
+  throw error;
+};
+
+/**
+ * 统一的CSRF Token刷新函数
+ * 用于在需要CSRF token的请求前刷新token
+ * @param {string} endpoint - 用于刷新token的端点（可选）
+ * @returns {Promise<void>}
+ */
+export const refreshCsrfTokenBeforeRequest = async (endpoint = null) => {
+  const { refreshCsrfToken, ensureCsrfToken } = await import('./api');
+  
+  // 如果提供了端点，使用该端点刷新token
+  if (endpoint) {
+    await refreshCsrfToken(endpoint);
+  }
+  
+  // 确保token存在
+  await ensureCsrfToken();
+};
+
+/**
+ * 统一的文件下载处理函数
+ * @param {Object} response - axios响应对象
+ * @param {string} defaultFilename - 默认文件名
+ * @param {Function} onSuccess - 成功回调（可选）
+ * @returns {void}
+ */
+export const handleFileDownload = (response, defaultFilename = 'download.xlsx', onSuccess = null) => {
+  try {
+    // 从响应头获取文件名
+    const contentDisposition = response.headers['content-disposition'];
+    let filename = defaultFilename;
+    
+    if (contentDisposition) {
+      // 支持 UTF-8 编码的文件名
+      const utf8Match = contentDisposition.match(/filename\*=UTF-8''(.+)/);
+      if (utf8Match && utf8Match[1]) {
+        filename = decodeURIComponent(utf8Match[1]);
+      } else {
+        const match = contentDisposition.match(/filename=(.*)/);
+        if (match && match[1]) {
+          filename = decodeURIComponent(match[1]);
+        }
+      }
+    }
+    
+    // 创建下载链接
+    const blob = new Blob([response.data]);
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+    
+    // 调用成功回调
+    if (onSuccess && typeof onSuccess === 'function') {
+      onSuccess(filename);
+    }
+  } catch (error) {
+    logger.error('文件下载处理失败:', error);
+    throw error;
+  }
+};
+
+/**
  * 统一的请求函数（封装 axios）
  * 用于简化API调用，自动处理响应格式化和错误处理
  * @param {Object} config - axios 配置对象
@@ -512,19 +613,8 @@ export const request = async (config, options = {}) => {
     // 使用 normalizeResponse 处理响应
     return normalizeResponse(response, { returnDataOnly });
   } catch (error) {
-    // 如果错误已被处理（如429限流），直接抛出
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    
-    // 如果不是静默模式，显示错误消息
-    if (!silent) {
-      const errorMsg = extractErrorMessage(error);
-      ElMessage.error(errorMsg);
-    }
-    
-    // 重新抛出错误，让调用方可以处理
-    throw error;
+    // 使用统一的错误处理函数
+    handleError(error, { silent });
   }
 };
 

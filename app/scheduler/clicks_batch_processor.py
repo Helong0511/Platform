@@ -69,16 +69,32 @@ async def process_clicks_queue() -> Dict[str, int]:
             # 批量插入到数据库
             async with AsyncSessionLocal() as db:
                 try:
-                    # 1. 补充advertiser_id（如果缺失）
-                    await _enrich_clicks_with_advertiser_id(db, clicks)
+                    # 1. 验证并过滤offer_id（如果不存在则移除该记录）
+                    valid_clicks = await _validate_offer_ids(db, clicks)
+                    if not valid_clicks:
+                        logger.warning(f"第 {batch_count} 批：所有点击记录的offer_id都无效，跳过插入")
+                        result['failed'] += len(clicks)
+                        continue
                     
-                    # 2. 验证并清理short_link_id（如果不存在则设置为NULL）
-                    await _validate_short_link_ids(db, clicks)
+                    # 记录被过滤的记录数
+                    filtered_count = len(clicks) - len(valid_clicks)
+                    if filtered_count > 0:
+                        result['failed'] += filtered_count
+                        logger.warning(
+                            f"第 {batch_count} 批：过滤了 {filtered_count} 条无效记录，"
+                            f"剩余 {len(valid_clicks)} 条有效记录"
+                        )
                     
-                    # 3. 批量插入
-                    inserted_count = await _batch_insert_clicks(db, clicks)
+                    # 2. 补充advertiser_id（如果缺失）
+                    await _enrich_clicks_with_advertiser_id(db, valid_clicks)
+                    
+                    # 3. 验证并清理short_link_id（如果不存在则设置为NULL）
+                    await _validate_short_link_ids(db, valid_clicks)
+                    
+                    # 4. 批量插入
+                    inserted_count = await _batch_insert_clicks(db, valid_clicks)
                     result['inserted'] += inserted_count
-                    result['failed'] += len(clicks) - inserted_count
+                    result['failed'] += len(valid_clicks) - inserted_count
                     
                     await db.commit()
                     logger.info(
@@ -160,6 +176,73 @@ async def _enrich_clicks_with_advertiser_id(db: AsyncSession, clicks: List[Dict[
         if offer_id and offer_id in offer_advertiser_map:
             if not click.get('advertiser_id'):
                 click['advertiser_id'] = offer_advertiser_map[offer_id]
+
+
+async def _validate_offer_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    验证并过滤offer_id（如果不存在则移除该记录）
+    防止外键约束失败
+    
+    Args:
+        db: 数据库会话
+        clicks: 点击记录列表
+        
+    Returns:
+        有效的点击记录列表（已过滤掉无效的offer_id）
+    """
+    # 收集所有需要验证的offer_id
+    offer_ids_to_validate = set()
+    for click in clicks:
+        offer_id = click.get('offer_id')
+        if offer_id is not None:
+            offer_ids_to_validate.add(offer_id)
+    
+    if not offer_ids_to_validate:
+        # 如果没有offer_id需要验证，返回所有记录（但记录警告）
+        invalid_clicks = [c for c in clicks if c.get('offer_id') is None]
+        if invalid_clicks:
+            logger.warning(f"发现 {len(invalid_clicks)} 条点击记录没有offer_id，将被跳过")
+        return [c for c in clicks if c.get('offer_id') is not None]
+    
+    try:
+        # 批量查询存在的offer_id
+        result = await db.execute(
+            select(Offer.id)
+            .where(Offer.id.in_(offer_ids_to_validate))
+        )
+        valid_offer_ids = {row[0] for row in result.all()}
+        
+        # 过滤掉无效的offer_id
+        valid_clicks = []
+        invalid_count = 0
+        for click in clicks:
+            offer_id = click.get('offer_id')
+            if offer_id is None:
+                logger.warning(
+                    f"点击记录缺少offer_id，将被跳过。"
+                    f"click_id={click.get('click_id')}, short_link_id={click.get('short_link_id')}"
+                )
+                invalid_count += 1
+            elif offer_id not in valid_offer_ids:
+                logger.warning(
+                    f"Offer ID {offer_id} 不存在，点击记录将被跳过。"
+                    f"click_id={click.get('click_id')}, short_link_id={click.get('short_link_id')}"
+                )
+                invalid_count += 1
+            else:
+                valid_clicks.append(click)
+        
+        if invalid_count > 0:
+            logger.warning(
+                f"验证offer_id完成: 有效={len(valid_clicks)}, 无效={invalid_count}。"
+                f"无效记录将被跳过，不会插入数据库。"
+            )
+        
+        return valid_clicks
+    except Exception as e:
+        logger.error(f"验证offer_id失败: error={e}，将跳过所有记录以避免外键约束错误", exc_info=True)
+        # 如果验证失败，返回空列表以避免外键约束错误
+        return []
 
 
 async def _validate_short_link_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) -> None:

@@ -1,6 +1,5 @@
 import axios from 'axios';
-import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled } from '../utils/api';
-import { ElMessage } from 'element-plus';
+import { normalizePaginatedResponse, normalizeResponse } from '../utils/api';
 
 /**
  * 获取 Postback 转化记录列表
@@ -20,12 +19,8 @@ export const getPostbackConversions = async (params) => {
     const response = await axios.get('/api/v1/postback/conversions', { params });
     return normalizePaginatedResponse(response);
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -42,12 +37,8 @@ export const getPostbackStats = async (params = {}) => {
     const response = await axios.get('/api/v1/postback/stats', { params });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 

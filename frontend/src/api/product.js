@@ -8,12 +8,8 @@ export const getProductList = async (params = {}) => {
     const response = await axios.get('/api/v1/products/', { params });
     return normalizePaginatedResponse(response);
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -26,13 +22,12 @@ export const getProductDetail = async (id, options = {}) => {
     });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    // 如果 silent 为 true，不显示错误消息
-    if (!silent) {
-      const errorMsg = extractErrorMessage(error);
-      ElMessage.error(errorMsg);
+    // 使用统一的错误处理，但支持silent模式
+    const { handleError } = await import('../utils/api');
+    if (silent) {
+      handleError(error, { showMessage: false });
+    } else {
+      handleError(error);
     }
     throw error;
   }
@@ -44,9 +39,8 @@ import { logger } from '../utils/logger';
 export const createProduct = async (productData) => {
   try {
     // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfToken } = await import('../utils/api');
-    await refreshCsrfToken('/api/v1/products/?page_size=1');
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest('/api/v1/products/?page_size=1');
     
     const response = await axios.post('/api/v1/products/', productData);
     return normalizeResponse(response, { returnDataOnly: true });
@@ -59,9 +53,8 @@ export const createProduct = async (productData) => {
 export const updateProduct = async (id, productData) => {
   try {
     // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfToken } = await import('../utils/api');
-    await refreshCsrfToken('/api/v1/products/?page_size=1');
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest('/api/v1/products/?page_size=1');
     
     const response = await axios.put(`/api/v1/products/${id}`, productData);
     return normalizeResponse(response, { returnDataOnly: true });
@@ -74,9 +67,8 @@ export const updateProduct = async (id, productData) => {
 export const deleteProduct = async (id) => {
   try {
     // 在删除前刷新CSRF令牌，确保使用最新的令牌
-    const { refreshCsrfToken } = await import('../utils/api');
-    await refreshCsrfToken('/api/v1/products/?page_size=1');
-    await ensureCsrfToken();
+    const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+    await refreshCsrfTokenBeforeRequest('/api/v1/products/?page_size=1');
     
     const response = await axios.delete(`/api/v1/products/${id}`);
     return normalizeResponse(response, { returnDataOnly: true });
@@ -117,12 +109,15 @@ export const getProductAssignments = async (productId) => {
     if (isErrorHandled(error)) {
       throw error;
     }
-    const errorMsg = extractErrorMessage(error);
     // 如果是超时错误，提供更友好的提示
+    const { handleError } = await import('../utils/api');
     if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-      ElMessage.error('请求超时，请稍后重试。如果问题持续，请联系管理员。');
+      handleError(error, { customErrorHandler: async () => {
+        const { ElMessage } = await import('element-plus');
+        ElMessage.error('请求超时，请稍后重试。如果问题持续，请联系管理员。');
+      }});
     } else {
-      ElMessage.error(errorMsg);
+      handleError(error);
     }
     throw error;
   }
@@ -134,12 +129,8 @@ export const getClientAssignments = async (clientId) => {
     const response = await axios.get(`/api/v1/product-assignments/clients/${clientId}/assignments`);
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -150,19 +141,14 @@ export const updateAssignmentDates = async (assignmentId, dateUpdate) => {
     try {
       // 如果是重试，先获取新的CSRF token
       if (retryCount > 0) {
-        try {
-          // 发送一个GET请求来获取最新的CSRF token
-          // 注意：使用productId可能不存在，使用一个通用的端点
-          await axios.get('/api/v1/products/', {
-            params: { page_size: 1 },
-            timeout: 5000,
-            validateStatus: () => true // 接受任何状态码
-          });
-          // 等待响应拦截器处理完响应头
-          await new Promise(resolve => setTimeout(resolve, 200));
-        } catch (tokenError) {
-          logger.warn(`[updateAssignmentDates] 获取CSRF token时出错: ${tokenError.message}`);
-        }
+        const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+        await refreshCsrfTokenBeforeRequest('/api/v1/products/');
+        // 等待响应拦截器处理完响应头
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } else {
+        // 首次尝试，确保CSRF令牌存在
+        const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+        await refreshCsrfTokenBeforeRequest('/api/v1/products/');
       }
       
       // 检查CSRF token是否存在
@@ -200,14 +186,10 @@ export const updateAssignmentDates = async (assignmentId, dateUpdate) => {
   try {
     return await attemptUpdate(0);
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    
-    const errorMsg = extractErrorMessage(error);
-    
     // 如果是CSRF相关错误，提供更友好的提示（但不显示错误消息，由调用方处理）
     if (error.response?.status === 403) {
+      const { extractErrorMessage } = await import('../utils/api');
+      const errorMsg = extractErrorMessage(error);
       if (errorMsg.includes('CSRF') || errorMsg.includes('csrf') || errorMsg.includes('令牌')) {
         // 不在这里显示错误消息，由批量保存函数统一处理
         // 清除旧的token
@@ -226,18 +208,14 @@ export const batchUpdateAssignmentDates = async (updates) => {
     try {
       // 如果是重试，先获取新的CSRF token
       if (retryCount > 0) {
-        try {
-          // 发送一个GET请求来获取最新的CSRF token
-          await axios.get('/api/v1/products/', {
-            params: { page_size: 1 },
-            timeout: 5000,
-            validateStatus: () => true // 接受任何状态码
-          });
-          // 等待响应拦截器处理完响应头
-          await new Promise(resolve => setTimeout(resolve, 200));
-        } catch (tokenError) {
-          logger.warn(`[batchUpdateAssignmentDates] 获取CSRF token时出错: ${tokenError.message}`);
-        }
+        const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+        await refreshCsrfTokenBeforeRequest('/api/v1/products/');
+        // 等待响应拦截器处理完响应头
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } else {
+        // 首次尝试，确保CSRF令牌存在
+        const { refreshCsrfTokenBeforeRequest } = await import('../utils/api');
+        await refreshCsrfTokenBeforeRequest('/api/v1/products/');
       }
       
       // 检查CSRF token是否存在
@@ -274,10 +252,7 @@ export const batchUpdateAssignmentDates = async (updates) => {
   try {
     return await attemptBatchUpdate(0);
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    
+    const { handleError, extractErrorMessage } = await import('../utils/api');
     const errorMsg = extractErrorMessage(error);
     
     // 如果是CSRF相关错误，提供更友好的提示
@@ -285,9 +260,13 @@ export const batchUpdateAssignmentDates = async (updates) => {
       if (errorMsg.includes('CSRF') || errorMsg.includes('csrf') || errorMsg.includes('令牌')) {
         ElMessage.error('安全验证失败，请刷新页面后重试');
         sessionStorage.removeItem('csrf_token');
+      } else {
+        handleError(error);
       }
     } else {
-      ElMessage.error(errorMsg || '批量更新失败，请稍后重试');
+      handleError(error, { customErrorHandler: () => {
+        ElMessage.error(errorMsg || '批量更新失败，请稍后重试');
+      }});
     }
     throw error;
   }

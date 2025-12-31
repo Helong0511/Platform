@@ -1,6 +1,5 @@
 import axios from 'axios';
-import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled } from '../utils/api';
-import { ElMessage } from 'element-plus';
+import { normalizePaginatedResponse, normalizeResponse } from '../utils/api';
 
 /**
  * 获取操作日志列表
@@ -22,13 +21,8 @@ export const getAuditLogs = async (params) => {
     const response = await axios.get('/api/v1/audit-logs/', { params });
     return normalizePaginatedResponse(response);
   } catch (error) {
-    // 如果错误已被拦截器处理（如429限流），不再重复显示
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -42,13 +36,8 @@ export const getAuditLog = async (logId) => {
     const response = await axios.get(`/api/v1/audit-logs/${logId}`);
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    // 如果错误已被拦截器处理（如429限流），不再重复显示
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
@@ -64,13 +53,8 @@ export const getAuditLogStats = async (params = {}) => {
     const response = await axios.get('/api/v1/audit-logs/stats/summary', { params });
     return normalizeResponse(response, { returnDataOnly: true });
   } catch (error) {
-    // 如果错误已被拦截器处理（如429限流），不再重复显示
-    if (isErrorHandled(error)) {
-      throw error;
-    }
-    const errorMsg = extractErrorMessage(error);
-    ElMessage.error(errorMsg);
-    throw error;
+    const { handleError } = await import('../utils/api');
+    handleError(error);
   }
 };
 
