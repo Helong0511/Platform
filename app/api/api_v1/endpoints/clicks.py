@@ -128,6 +128,7 @@ async def get_clicks(
                 "advertiser_name": click.advertiser.advertiser_name if click.advertiser else None,
                 "short_link_id": click.short_link_id,
                 "short_code": click.short_link.short_code if click.short_link else None,
+                "short_link_title": click.short_link.title if click.short_link else None,
                 "short_link_url": click.short_link.original_url if click.short_link else None,
                 # 软件信息
                 "os": click.os,

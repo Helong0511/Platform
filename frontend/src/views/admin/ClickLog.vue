@@ -323,17 +323,64 @@
             <el-tag v-if="currentDetail.is_bot" type="danger" size="small">是</el-tag>
             <el-tag v-else type="success" size="small">否</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="Offer">
+          <el-descriptions-item label="Offer ID">
+            <span v-if="currentDetail.offer_id" class="text-primary">
+              {{ currentDetail.offer_id }}
+            </span>
+            <span v-else class="text-muted">-</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="Offer名称">
             {{ currentDetail.offer_name || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="渠道">
+          <el-descriptions-item label="渠道ID">
+            <span v-if="currentDetail.publisher_id" class="text-primary">
+              {{ currentDetail.publisher_id }}
+            </span>
+            <span v-else class="text-muted">-</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="渠道名称">
             {{ currentDetail.publisher_name || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="广告主">
+          <el-descriptions-item label="广告主ID">
+            <span v-if="currentDetail.advertiser_id" class="text-primary">
+              {{ currentDetail.advertiser_id }}
+            </span>
+            <span v-else class="text-muted">-</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="广告主名称">
             {{ currentDetail.advertiser_name || '-' }}
           </el-descriptions-item>
+          <el-descriptions-item label="短链接ID">
+            <span v-if="currentDetail.short_link_id" class="text-primary">
+              {{ currentDetail.short_link_id }}
+            </span>
+            <span v-else class="text-muted">-</span>
+          </el-descriptions-item>
           <el-descriptions-item label="短链接代码">
-            {{ currentDetail.short_code || '-' }}
+            <el-button 
+              v-if="currentDetail.short_code" 
+              type="primary" 
+              link 
+              size="small"
+              @click="copyToClipboard(currentDetail.short_code)"
+            >
+              {{ currentDetail.short_code }}
+            </el-button>
+            <span v-else class="text-muted">-</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="短链接标题">
+            {{ currentDetail.short_link_title || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="短链接URL" :span="2">
+            <el-link 
+              v-if="currentDetail.short_link_url" 
+              :href="currentDetail.short_link_url" 
+              target="_blank" 
+              type="primary"
+            >
+              {{ currentDetail.short_link_url }}
+            </el-link>
+            <span v-else class="text-muted">-</span>
           </el-descriptions-item>
           <el-descriptions-item label="来源页面" :span="2">
             <el-link 
