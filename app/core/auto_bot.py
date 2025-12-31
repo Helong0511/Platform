@@ -336,14 +336,41 @@ def run_bot():
             last_update_id = None
             poll_count = 0
             
+            # 强制删除 webhook 并重置 offset（确保能获取新消息）
+            try:
+                logger.info("🔄 强制删除 webhook 并重置 offset...")
+                bot.delete_webhook(drop_pending_updates=True)
+                # 获取一次更新以确认连接正常，但不处理（用于重置 offset）
+                # 使用 offset=None 或不传 offset 来获取所有待处理的更新
+                test_updates = bot.get_updates(timeout=1)
+                if test_updates:
+                    # 如果有待处理的更新，更新 offset 到最新（跳过这些旧更新）
+                    last_update_id = test_updates[-1].update_id + 1
+                    logger.info(f"✅ 重置 offset 到: {last_update_id}，跳过了 {len(test_updates)} 个待处理更新")
+                    logger.info(f"💡 提示：这些旧更新将被跳过，只处理新消息")
+                else:
+                    last_update_id = None
+                    logger.info("✅ 没有待处理的更新，将从最新消息开始接收")
+            except Exception as reset_error:
+                logger.warning(f"⚠️ 重置 offset 时出错（可忽略）: {reset_error}")
+                last_update_id = None
+            
             while True:
                 try:
                     poll_count += 1
                     if poll_count % 100 == 0:  # 每100次轮询记录一次
-                        logger.info(f"⏰ 轮询仍在运行中... (已轮询 {poll_count} 次)")
+                        logger.info(f"⏰ 轮询仍在运行中... (已轮询 {poll_count} 次, offset={last_update_id})")
                     
-                    # 获取更新
-                    updates = bot.get_updates(timeout=20, offset=last_update_id, long_polling_timeout=20)
+                    # 获取更新（如果 last_update_id 为 None，不传 offset 参数）
+                    try:
+                        if last_update_id is not None:
+                            updates = bot.get_updates(timeout=20, offset=last_update_id, long_polling_timeout=20)
+                        else:
+                            updates = bot.get_updates(timeout=20, long_polling_timeout=20)
+                    except Exception as get_updates_error:
+                        logger.error(f"❌ 获取更新时出错: {get_updates_error}", exc_info=True)
+                        time.sleep(2)  # 出错后等待2秒再继续
+                        continue
                     
                     if updates:
                         logger.info(f"✅ 收到 {len(updates)} 个更新")
@@ -378,60 +405,19 @@ def run_bot():
                             handlers_count = len(bot.message_handlers) if hasattr(bot, 'message_handlers') else 0
                             logger.info(f"🔍 处理前，消息处理器数量: {handlers_count}")
                             
-                            # 使用 process_new_updates（标准方式）
-                            logger.info("🔄 调用 bot.process_new_updates()...")
-                            try:
-                                bot.process_new_updates(updates)
-                                logger.info("✅ bot.process_new_updates() 调用完成")
-                            except Exception as process_error:
-                                logger.error(f"❌ process_new_updates 出错: {process_error}", exc_info=True)
-                                import traceback
-                                logger.error(f"❌ 错误堆栈: {traceback.format_exc()}")
+                            # 优先使用手动调用处理器（更可靠，特别是对于命令）
+                            # 先手动处理命令和回调，确保能正确响应
+                            logger.info("🔄 开始手动处理更新（优先处理命令和回调）...")
                             
-                            # 如果 process_new_updates 没有触发处理器，尝试手动调用
-                            # 检查是否有消息或回调查询需要处理
+                            # 处理回调查询（优先级最高）
                             for update in updates:
-                                # 处理消息
-                                if hasattr(update, 'message') and update.message:
-                                    msg = update.message
-                                    text = getattr(msg, 'text', '') or ''
-                                    chat_type = msg.chat.type if hasattr(msg, 'chat') and hasattr(msg.chat, 'type') else '未知'
-                                    logger.info(f"🔍 检查消息是否需要手动处理: text='{text}', chat_type={chat_type}")
-                                    
-                                    # 如果是命令，尝试手动调用处理器（支持私聊和群组）
-                                    if text.startswith('/'):
-                                        command = text.split()[0] if text else ''  # 获取命令部分（如 '/id'）
-                                        logger.info(f"🔍 检测到命令: {command} (chat_type={chat_type})，尝试手动调用处理器...")
-                                        try:
-                                            # 从 bot.message_handlers 中找到匹配的处理器并调用
-                                            handler_found = False
-                                            for handler in bot.message_handlers:
-                                                handler_func = handler.get('function')
-                                                filters = handler.get('filters', {})
-                                                commands = filters.get('commands', [])
-                                                
-                                                # 检查是否是匹配的命令处理器（不限制 chat_types，支持群组）
-                                                if commands and command in [f'/{cmd}' for cmd in commands]:
-                                                    logger.info(f"✅ 找到匹配的命令处理器: {handler_func.__name__} (命令: {commands}, chat_type={chat_type})")
-                                                    handler_func(msg)
-                                                    logger.info(f"✅ 手动调用 {handler_func.__name__} 完成")
-                                                    handler_found = True
-                                                    break
-                                            
-                                            if not handler_found:
-                                                logger.warning(f"⚠️ 未找到命令 {command} 的处理器")
-                                        except Exception as manual_call_error:
-                                            logger.error(f"❌ 手动调用处理器出错: {manual_call_error}", exc_info=True)
-                                
-                                # 处理回调查询
-                                elif hasattr(update, 'callback_query') and update.callback_query:
+                                if hasattr(update, 'callback_query') and update.callback_query:
                                     callback = update.callback_query
                                     data = getattr(callback, 'data', '') or ''
                                     logger.info(f"🔍 检测到回调查询: callback_data='{data}'，尝试手动调用处理器...")
                                     try:
-                                        # 从 bot.callback_query_handlers 中找到处理器并调用
                                         handler_found = False
-                                        if hasattr(bot, 'callback_query_handlers'):
+                                        if hasattr(bot, 'callback_query_handlers') and bot.callback_query_handlers:
                                             for handler in bot.callback_query_handlers:
                                                 handler_func = handler.get('function')
                                                 if handler_func:
@@ -442,20 +428,74 @@ def run_bot():
                                                     break
                                         
                                         if not handler_found:
-                                            logger.warning(f"⚠️ 未找到回调查询处理器，尝试从 callback_query_handlers 获取...")
-                                            # 尝试从 bot.callback_query_handlers 中获取第一个处理器
-                                            if hasattr(bot, 'callback_query_handlers') and bot.callback_query_handlers:
-                                                handler_func = bot.callback_query_handlers[0].get('function')
-                                                if handler_func:
-                                                    logger.info(f"✅ 找到回调查询处理器函数: {handler_func.__name__}")
-                                                    handler_func(callback)
-                                                    logger.info("✅ 从 callback_query_handlers 调用完成")
-                                                else:
-                                                    logger.warning("⚠️ callback_query_handlers 中没有函数")
-                                            else:
-                                                logger.warning("⚠️ bot 没有 callback_query_handlers 属性或为空")
+                                            logger.warning(f"⚠️ 未找到回调查询处理器")
                                     except Exception as callback_error:
                                         logger.error(f"❌ 手动调用回调查询处理器出错: {callback_error}", exc_info=True)
+                            
+                            # 处理命令消息（优先级高）
+                            for update in updates:
+                                if hasattr(update, 'message') and update.message:
+                                    msg = update.message
+                                    text = getattr(msg, 'text', '') or ''
+                                    chat_type = msg.chat.type if hasattr(msg, 'chat') and hasattr(msg.chat, 'type') else '未知'
+                                    
+                                    # 如果是命令，优先手动处理
+                                    if text and text.startswith('/'):
+                                        command = text.split()[0] if text else ''  # 获取命令部分（如 '/id'）
+                                        logger.info(f"🔍 检测到命令: {command} (chat_type={chat_type})，优先手动处理...")
+                                        try:
+                                            handler_found = False
+                                            for handler in bot.message_handlers:
+                                                handler_func = handler.get('function')
+                                                filters = handler.get('filters', {})
+                                                commands = filters.get('commands', [])
+                                                
+                                                # 检查是否是匹配的命令处理器
+                                                # 支持 '/id' 匹配 commands=['id']
+                                                command_match = False
+                                                for cmd in commands:
+                                                    if command == f'/{cmd}' or command == cmd:
+                                                        command_match = True
+                                                        break
+                                                
+                                                if command_match:
+                                                    logger.info(f"✅ 找到匹配的命令处理器: {handler_func.__name__} (命令: {commands}, 匹配: {command})")
+                                                    try:
+                                                        handler_func(msg)
+                                                        logger.info(f"✅ 手动调用 {handler_func.__name__} 完成，命令: {command}")
+                                                        handler_found = True
+                                                        break
+                                                    except Exception as handler_error:
+                                                        logger.error(f"❌ 调用命令处理器 {handler_func.__name__} 时出错: {handler_error}", exc_info=True)
+                                                        import traceback
+                                                        logger.error(f"❌ 错误堆栈: {traceback.format_exc()}")
+                                            
+                                            if not handler_found:
+                                                logger.warning(f"⚠️ 未找到命令 {command} 的处理器，尝试使用 process_new_updates")
+                                        except Exception as manual_call_error:
+                                            logger.error(f"❌ 手动调用命令处理器出错: {manual_call_error}", exc_info=True)
+                            
+                            # 使用 process_new_updates 处理其他消息（标准方式，作为备用）
+                            logger.info("🔄 调用 bot.process_new_updates() 处理其他消息...")
+                            try:
+                                bot.process_new_updates(updates)
+                                logger.info("✅ bot.process_new_updates() 调用完成")
+                            except Exception as process_error:
+                                logger.error(f"❌ process_new_updates 出错: {process_error}", exc_info=True)
+                                import traceback
+                                logger.error(f"❌ 错误堆栈: {traceback.format_exc()}")
+                            
+                            # 如果 process_new_updates 没有触发处理器，尝试手动调用（备用方案）
+                            # 检查是否有消息或回调查询需要处理
+                            for update in updates:
+                                # 处理其他非命令消息（如果 process_new_updates 没有处理）
+                                if hasattr(update, 'message') and update.message:
+                                    msg = update.message
+                                    text = getattr(msg, 'text', '') or ''
+                                    # 只处理非命令消息（命令已在上面处理）
+                                    if text and not text.startswith('/'):
+                                        logger.info(f"🔍 检查非命令消息是否需要手动处理: text='{text[:30]}'")
+                                        # 这里可以添加其他消息类型的处理逻辑
                             
                             # 检查是否有异常被静默吞掉
                             logger.info("✅ 更新处理完成")

@@ -47,6 +47,16 @@ class BotStatusResponse(BaseModel):
     message: str = Field(..., description="状态描述")
 
 
+class DiagnosticResponse(BaseModel):
+    """诊断响应模型"""
+    bot_initialized: bool = Field(..., description="Bot 是否已初始化")
+    bot_thread_alive: bool = Field(..., description="轮询线程是否运行")
+    webhook_url: str | None = Field(None, description="Webhook URL（如果有）")
+    handlers_count: int = Field(..., description="消息处理器数量")
+    connection_test: str = Field(..., description="连接测试结果")
+    recommendations: list[str] = Field(default_factory=list, description="修复建议")
+
+
 # ====== API 端点 ======
 @router.get("/status", response_model=BotStatusResponse, summary="查询 Telegram Bot 状态")
 async def get_bot_status(
@@ -249,5 +259,204 @@ async def test_bot_connection(
         raise_api_exception(
             error_code=ErrorCode.INTERNAL_ERROR,
             message=f"测试连接失败: {str(e)}"
+        )
+
+
+@router.get("/diagnostic", response_model=DiagnosticResponse, summary="Telegram Bot 诊断")
+async def diagnostic_bot(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Telegram Bot 诊断工具
+    
+    检查 Bot 状态，诊断命令无响应问题
+    
+    需要管理员权限
+    """
+    # 检查权限（仅管理员）
+    if current_user.role != UserRole.ADMIN:
+        raise_api_exception(
+            error_code=ErrorCode.FORBIDDEN,
+            message="仅管理员可以使用诊断工具",
+            status_code=status.HTTP_403_FORBIDDEN
+        )
+
+    try:
+        from app.core.auto_bot import (
+            bot_initialized, 
+            get_bot_status_info,
+            bot,
+            TELEBOT_AVAILABLE
+        )
+        import threading
+        
+        recommendations = []
+        
+        # 1. 检查 Bot 初始化
+        if not bot_initialized:
+            recommendations.append("❌ Bot 未初始化，请检查 TELEGRAM_TOKEN 配置")
+            return DiagnosticResponse(
+                bot_initialized=False,
+                bot_thread_alive=False,
+                handlers_count=0,
+                connection_test="Bot 未初始化",
+                recommendations=recommendations
+            )
+        
+        # 2. 检查模块可用性
+        if not TELEBOT_AVAILABLE:
+            recommendations.append("❌ pyTelegramBotAPI 未安装，请运行: pip install pyTelegramBotAPI")
+            return DiagnosticResponse(
+                bot_initialized=False,
+                bot_thread_alive=False,
+                handlers_count=0,
+                connection_test="模块未安装",
+                recommendations=recommendations
+            )
+        
+        # 3. 检查 Bot 对象
+        if not bot:
+            recommendations.append("❌ Bot 对象不存在")
+            return DiagnosticResponse(
+                bot_initialized=False,
+                bot_thread_alive=False,
+                handlers_count=0,
+                connection_test="Bot 对象不存在",
+                recommendations=recommendations
+            )
+        
+        # 4. 检查线程状态
+        bot_thread_alive = False
+        for thread in threading.enumerate():
+            if thread.name == "TelegramBot":
+                bot_thread_alive = thread.is_alive()
+                break
+        
+        if not bot_thread_alive:
+            recommendations.append("⚠️ 轮询线程未运行，请重启应用或检查日志")
+        
+        # 5. 检查 Webhook
+        webhook_url = None
+        try:
+            webhook_info = bot.get_webhook_info()
+            webhook_url = webhook_info.url if webhook_info.url else None
+            if webhook_url:
+                recommendations.append(f"⚠️ 检测到 Webhook: {webhook_url}，这将阻止 polling 工作！请删除 webhook")
+        except Exception as e:
+            logger.warning(f"检查 webhook 时出错: {e}")
+        
+        # 6. 检查消息处理器
+        handlers_count = 0
+        try:
+            if hasattr(bot, 'message_handlers'):
+                handlers_count = len(bot.message_handlers)
+                if handlers_count == 0:
+                    recommendations.append("⚠️ 没有注册任何消息处理器！命令无法工作")
+                else:
+                    # 检查命令处理器
+                    command_handlers = []
+                    for handler in bot.message_handlers:
+                        filters = handler.get('filters', {})
+                        commands = filters.get('commands', [])
+                        if commands:
+                            command_handlers.extend(commands)
+                    
+                    expected_commands = ['id', 'test', 'clock']
+                    missing_commands = [cmd for cmd in expected_commands if cmd not in command_handlers]
+                    if missing_commands:
+                        recommendations.append(f"⚠️ 缺少命令处理器: {missing_commands}")
+                    else:
+                        recommendations.append(f"✅ 所有命令处理器已注册: {command_handlers}")
+        except Exception as e:
+            logger.warning(f"检查消息处理器时出错: {e}")
+        
+        # 7. 测试连接
+        connection_test = "未测试"
+        try:
+            bot_info = bot.get_me()
+            connection_test = f"成功: @{bot_info.username} (ID: {bot_info.id})"
+        except Exception as e:
+            connection_test = f"失败: {str(e)}"
+            recommendations.append(f"❌ Bot 连接测试失败: {str(e)}")
+        
+        # 8. 给出修复建议
+        if not bot_thread_alive:
+            recommendations.append("💡 如果轮询线程未运行，命令将无法响应。请检查应用日志或重启应用")
+        
+        if webhook_url:
+            recommendations.append("💡 删除 webhook 后，轮询才能正常工作。可以使用 /api/v1/telegram/reset_webhook 删除")
+        
+        if handlers_count > 0 and bot_thread_alive and not webhook_url:
+            recommendations.append("✅ 所有检查通过，如果命令仍无响应，请检查日志中的轮询信息")
+            recommendations.append("💡 查看日志中是否有 '收到 X 个更新' 或 '检测到命令' 的信息")
+        
+        return DiagnosticResponse(
+            bot_initialized=bot_initialized,
+            bot_thread_alive=bot_thread_alive,
+            webhook_url=webhook_url,
+            handlers_count=handlers_count,
+            connection_test=connection_test,
+            recommendations=recommendations
+        )
+        
+    except Exception as e:
+        logger.error(f"诊断 Telegram Bot 时发生错误: {e}", exc_info=True)
+        raise_api_exception(
+            error_code=ErrorCode.INTERNAL_ERROR,
+            message=f"诊断失败: {str(e)}"
+        )
+
+
+@router.post("/reset_webhook", response_model=SendMessageResponse, summary="强制删除 Webhook")
+async def reset_webhook(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    强制删除 Webhook 并重置 offset
+    
+    用于修复命令无响应问题
+    
+    需要管理员权限
+    """
+    # 检查权限（仅管理员）
+    if current_user.role != UserRole.ADMIN:
+        raise_api_exception(
+            error_code=ErrorCode.FORBIDDEN,
+            message="仅管理员可以重置 Webhook",
+            status_code=status.HTTP_403_FORBIDDEN
+        )
+    
+    try:
+        from app.core.auto_bot import bot, bot_initialized, TELEBOT_AVAILABLE
+        
+        if not bot_initialized or not TELEBOT_AVAILABLE or not bot:
+            raise_api_exception(
+                error_code=ErrorCode.SERVICE_UNAVAILABLE,
+                message="Bot 未初始化",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        
+        # 删除 webhook
+        result = bot.delete_webhook(drop_pending_updates=True)
+        
+        # 检查确认
+        webhook_info = bot.get_webhook_info()
+        
+        if webhook_info.url:
+            return SendMessageResponse(
+                success=False,
+                message=f"Webhook 删除失败，仍然存在: {webhook_info.url}"
+            )
+        else:
+            return SendMessageResponse(
+                success=True,
+                message="Webhook 已成功删除。请重启应用以使轮询正常工作，或等待轮询线程自动重新连接"
+            )
+        
+    except Exception as e:
+        logger.error(f"删除 Webhook 时发生错误: {e}", exc_info=True)
+        raise_api_exception(
+            error_code=ErrorCode.INTERNAL_ERROR,
+            message=f"删除 Webhook 失败: {str(e)}"
         )
 
