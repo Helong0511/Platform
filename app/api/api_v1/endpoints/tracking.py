@@ -108,27 +108,9 @@ async def track_click(
         # 这里可以优化：只检查最近生成的 Click ID，而不是全部
         click_id = generate_click_id_from_timestamp()
         
-        # 4. 获取点击信息
-        def get_client_ip(req: Request) -> Optional[str]:
-            """获取客户端真实IP"""
-            if not req:
-                return None
-            # 优先从 X-Forwarded-For 获取（经过代理时）
-            forwarded_for = req.headers.get("X-Forwarded-For")
-            if forwarded_for:
-                return forwarded_for.split(",")[0].strip()
-            # 其次从 X-Real-IP 获取
-            real_ip = req.headers.get("X-Real-IP")
-            if real_ip:
-                return real_ip
-            # 最后从 client.host 获取
-            if req.client:
-                return req.client.host
-            return None
-        
-        client_ip = get_client_ip(request)
-        user_agent = request.headers.get("user-agent") if request else None
-        referer = request.headers.get("referer") if request else None
+        # 4. 收集完整的请求信息（包括软件、硬件信息和URL参数）
+        from app.core.device_info import collect_request_info
+        request_info = collect_request_info(request) if request else {}
         
         # 5. 创建点击记录
         click_data = {
@@ -137,10 +119,27 @@ async def track_click(
             "publisher_id": publisher.id if publisher else None,
             "advertiser_id": offer.advertiser_id,
             "click_time": get_app_now_naive(),  # 使用北京时间
-            "ip": client_ip,
-            "user_agent": user_agent,
-            "referer": referer,
-            "country": None
+            "ip": request_info.get('ip'),
+            "user_agent": request_info.get('user_agent'),
+            "referer": request_info.get('referer'),
+            "country": None,
+            # 软件信息
+            "os": request_info.get('os'),
+            "os_version": request_info.get('os_version'),
+            "browser": request_info.get('browser'),
+            "browser_version": request_info.get('browser_version'),
+            "accept_language": request_info.get('accept_language'),
+            "accept_encoding": request_info.get('accept_encoding'),
+            "is_bot": request_info.get('is_bot', False),
+            # 硬件信息
+            "device_type": request_info.get('device_type'),
+            "device_brand": request_info.get('device_brand'),
+            "device_model": request_info.get('device_model'),
+            # URL参数和请求头
+            "url_params": request_info.get('url_params'),
+            "all_headers": request_info.get('all_headers'),
+            # 兼容旧字段
+            "device": request_info.get('device_type')  # 使用device_type作为device字段的值
         }
         
         # 使用后台任务异步写入

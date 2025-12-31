@@ -715,12 +715,30 @@ class Click(Base):
     short_link_id = Column(Integer, ForeignKey("short_links.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的短链接ID')
     click_time = Column(DateTime, nullable=False, index=True, comment='点击时间')
     ip = Column(String(50), nullable=True, comment='点击IP地址')
-    device = Column(String(100), nullable=True, comment='设备信息')
+    device = Column(String(100), nullable=True, comment='设备信息（兼容旧字段）')
     country = Column(String(50), nullable=True, comment='国家')
     user_agent = Column(Text, nullable=True, comment='User Agent')
     referer = Column(Text, nullable=True, comment='来源页面')
     conversion_id = Column(Integer, nullable=True, index=True, comment='关联的转化ID（如果已转化）')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
+    
+    # 软件信息
+    os = Column(String(50), nullable=True, comment='操作系统名称')
+    os_version = Column(String(50), nullable=True, comment='操作系统版本')
+    browser = Column(String(50), nullable=True, comment='浏览器名称')
+    browser_version = Column(String(50), nullable=True, comment='浏览器版本')
+    accept_language = Column(String(200), nullable=True, comment='接受的语言')
+    accept_encoding = Column(String(200), nullable=True, comment='接受的编码')
+    is_bot = Column(Boolean, default=False, nullable=False, comment='是否为机器人/爬虫')
+    
+    # 硬件信息
+    device_type = Column(String(20), nullable=True, index=True, comment='设备类型（mobile/tablet/desktop）')
+    device_brand = Column(String(50), nullable=True, comment='设备品牌')
+    device_model = Column(String(100), nullable=True, comment='设备型号')
+    
+    # URL参数和请求头（JSON格式存储）
+    url_params = Column(Text, nullable=True, comment='URL参数（JSON格式）')
+    all_headers = Column(Text, nullable=True, comment='所有请求头（JSON格式）')
 
     # 关系
     offer = relationship("Offer", back_populates="clicks")

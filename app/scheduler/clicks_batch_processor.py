@@ -355,7 +355,22 @@ async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -
                 'user_agent': click.get('user_agent'),
                 'referer': click.get('referer'),
                 'conversion_id': click.get('conversion_id'),
-                'created_at': now
+                'created_at': now,
+                # 软件信息
+                'os': click.get('os'),
+                'os_version': click.get('os_version'),
+                'browser': click.get('browser'),
+                'browser_version': click.get('browser_version'),
+                'accept_language': click.get('accept_language'),
+                'accept_encoding': click.get('accept_encoding'),
+                'is_bot': click.get('is_bot', False),
+                # 硬件信息
+                'device_type': click.get('device_type'),
+                'device_brand': click.get('device_brand'),
+                'device_model': click.get('device_model'),
+                # URL参数和请求头
+                'url_params': click.get('url_params'),
+                'all_headers': click.get('all_headers'),
             })
         
         # 批量插入（使用bulk insert提高性能）

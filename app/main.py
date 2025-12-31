@@ -1071,24 +1071,13 @@ async def redirect_short_link_public(
                 except Exception:
                     short_link_id = None
             
-            # 获取客户端信息
-            def get_client_ip(req: Request) -> Optional[str]:
-                """获取客户端真实IP"""
-                if not req:
-                    return None
-                forwarded_for = req.headers.get("X-Forwarded-For")
-                if forwarded_for:
-                    return forwarded_for.split(",")[0].strip()
-                real_ip = req.headers.get("X-Real-IP")
-                if real_ip:
-                    return real_ip
-                if req.client:
-                    return req.client.host
-                return None
+            # 收集完整的请求信息（包括软件、硬件信息和URL参数）
+            from app.core.device_info import collect_request_info
+            request_info = collect_request_info(request) if request else {}
             
-            client_ip = get_client_ip(request)
-            user_agent = request.headers.get("user-agent")
-            referer = request.headers.get("referer")
+            client_ip = request_info.get('ip')
+            user_agent = request_info.get('user_agent')
+            referer = request_info.get('referer')
             
             # 只使用URL参数中的offer_id和channel_id（如果有的话）
             # 如果URL参数中没有，则不保存这些值
@@ -1138,10 +1127,27 @@ async def redirect_short_link_public(
                     "publisher_id": final_channel_id,  # 只保存URL参数中的值（如果有），publisher_id对应channel_id
                     "advertiser_id": advertiser_id,  # 可能为None，批量处理时会补充
                     "click_time": get_app_now_naive().isoformat(),  # 使用北京时间
-                    "ip": client_ip,
-                    "user_agent": user_agent,
-                    "referer": referer,
-                    "country": None
+                    "ip": request_info.get('ip'),
+                    "user_agent": request_info.get('user_agent'),
+                    "referer": request_info.get('referer'),
+                    "country": None,
+                    # 软件信息
+                    "os": request_info.get('os'),
+                    "os_version": request_info.get('os_version'),
+                    "browser": request_info.get('browser'),
+                    "browser_version": request_info.get('browser_version'),
+                    "accept_language": request_info.get('accept_language'),
+                    "accept_encoding": request_info.get('accept_encoding'),
+                    "is_bot": request_info.get('is_bot', False),
+                    # 硬件信息
+                    "device_type": request_info.get('device_type'),
+                    "device_brand": request_info.get('device_brand'),
+                    "device_model": request_info.get('device_model'),
+                    # URL参数和请求头
+                    "url_params": request_info.get('url_params'),
+                    "all_headers": request_info.get('all_headers'),
+                    # 兼容旧字段
+                    "device": request_info.get('device_type')  # 使用device_type作为device字段的值
                 }
                 
                 # 使用Redis队列缓冲（非阻塞，高并发优化）
@@ -1276,24 +1282,13 @@ async def redirect_short_link_public(
         # 生成点击值（UUID风格的click_id）
         click_id = generate_click_id_from_timestamp()
         
-        # 获取客户端信息
-        def get_client_ip(req: Request) -> Optional[str]:
-            """获取客户端真实IP"""
-            if not req:
-                return None
-            forwarded_for = req.headers.get("X-Forwarded-For")
-            if forwarded_for:
-                return forwarded_for.split(",")[0].strip()
-            real_ip = req.headers.get("X-Real-IP")
-            if real_ip:
-                return real_ip
-            if req.client:
-                return req.client.host
-            return None
+        # 收集完整的请求信息（包括软件、硬件信息和URL参数）
+        from app.core.device_info import collect_request_info
+        request_info = collect_request_info(request) if request else {}
         
-        client_ip = get_client_ip(request)
-        user_agent = request.headers.get("user-agent")
-        referer = request.headers.get("referer")
+        client_ip = request_info.get('ip')
+        user_agent = request_info.get('user_agent')
+        referer = request_info.get('referer')
         
         # 只使用URL参数中的offer_id和channel_id（如果有的话）
         # 如果URL参数中没有，则不保存这些值
@@ -1342,10 +1337,27 @@ async def redirect_short_link_public(
             "publisher_id": final_channel_id,  # publisher_id对应channel_id
             "advertiser_id": advertiser_id,  # 可能为None，批量处理时会补充
             "click_time": get_app_now_naive().isoformat(),  # 使用北京时间
-            "ip": client_ip,
-            "user_agent": user_agent,
-            "referer": referer,
-            "country": None
+            "ip": request_info.get('ip'),
+            "user_agent": request_info.get('user_agent'),
+            "referer": request_info.get('referer'),
+            "country": None,
+            # 软件信息
+            "os": request_info.get('os'),
+            "os_version": request_info.get('os_version'),
+            "browser": request_info.get('browser'),
+            "browser_version": request_info.get('browser_version'),
+            "accept_language": request_info.get('accept_language'),
+            "accept_encoding": request_info.get('accept_encoding'),
+            "is_bot": request_info.get('is_bot', False),
+            # 硬件信息
+            "device_type": request_info.get('device_type'),
+            "device_brand": request_info.get('device_brand'),
+            "device_model": request_info.get('device_model'),
+            # URL参数和请求头
+            "url_params": request_info.get('url_params'),
+            "all_headers": request_info.get('all_headers'),
+            # 兼容旧字段
+            "device": request_info.get('device_type')  # 使用device_type作为device字段的值
         }
         
         # 使用Redis队列缓冲（非阻塞，高并发优化）

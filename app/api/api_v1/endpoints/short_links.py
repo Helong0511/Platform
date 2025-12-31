@@ -200,34 +200,19 @@ async def redirect_short_link(
         else:
             logger.debug(f"[短链接点击] Offer信息（缓存）: offer_id={final_offer_id}, advertiser_id={advertiser_id}")
     
-    # 获取客户端信息
-    def get_client_ip(req: Request) -> Optional[str]:
-        """获取客户端真实IP"""
-        if not req:
-            return None
-        # 优先从 X-Forwarded-For 获取（经过代理时）
-        forwarded_for = req.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
-        # 其次从 X-Real-IP 获取
-        real_ip = req.headers.get("X-Real-IP")
-        if real_ip:
-            return real_ip
-        # 最后从 client.host 获取
-        if req.client:
-            return req.client.host
-        return None
-    
-    client_ip = get_client_ip(request)
-    user_agent = request.headers.get("user-agent") if request else None
-    referer = request.headers.get("referer") if request else None
+    # 收集完整的请求信息（包括软件、硬件信息和URL参数）
+    from app.core.device_info import collect_request_info
+    request_info = collect_request_info(request) if request else {}
     
     # 打印客户端信息
     logger.info(
         f"[短链接点击] 客户端信息: "
-        f"ip={client_ip}, "
-        f"user_agent={user_agent}, "
-        f"referer={referer}"
+        f"ip={request_info.get('ip')}, "
+        f"user_agent={request_info.get('user_agent')}, "
+        f"referer={request_info.get('referer')}, "
+        f"os={request_info.get('os')}, "
+        f"browser={request_info.get('browser')}, "
+        f"device_type={request_info.get('device_type')}"
     )
     
     # 生成Click ID
@@ -241,10 +226,27 @@ async def redirect_short_link(
         "publisher_id": final_channel_id,  # publisher_id对应channel_id
         "advertiser_id": advertiser_id,  # 可能为None，批量处理时会补充
         "click_time": get_app_now_naive().isoformat(),  # 使用北京时间
-        "ip": client_ip,
-        "user_agent": user_agent,
-        "referer": referer,
-        "country": None
+        "ip": request_info.get('ip'),
+        "user_agent": request_info.get('user_agent'),
+        "referer": request_info.get('referer'),
+        "country": None,
+        # 软件信息
+        "os": request_info.get('os'),
+        "os_version": request_info.get('os_version'),
+        "browser": request_info.get('browser'),
+        "browser_version": request_info.get('browser_version'),
+        "accept_language": request_info.get('accept_language'),
+        "accept_encoding": request_info.get('accept_encoding'),
+        "is_bot": request_info.get('is_bot', False),
+        # 硬件信息
+        "device_type": request_info.get('device_type'),
+        "device_brand": request_info.get('device_brand'),
+        "device_model": request_info.get('device_model'),
+        # URL参数和请求头
+        "url_params": request_info.get('url_params'),
+        "all_headers": request_info.get('all_headers'),
+        # 兼容旧字段
+        "device": request_info.get('device_type')  # 使用device_type作为device字段的值
     }
     
     # 使用Redis队列缓冲（非阻塞，高并发优化）
