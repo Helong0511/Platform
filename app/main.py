@@ -40,7 +40,7 @@ except (OSError, PermissionError) as e:
     # 如果无法创建日志目录，使用临时目录或当前目录
     import tempfile
     log_dir = tempfile.gettempdir()
-    print(f"警告: 无法创建日志目录，使用临时目录: {log_dir}, 错误: {e}")
+    logger.warning(f"无法创建日志目录，使用临时目录: {log_dir}, 错误: {e}")
 
 # ====== 配置根日志记录器 ======
 # 这样所有子模块的日志都会被记录
@@ -69,12 +69,12 @@ try:
     file_handler.setLevel(getattr(logging, log_level.upper(), logging.INFO))
     # 添加到根日志记录器（这样所有子模块的日志都会被记录）
     root_logger.addHandler(file_handler)
-    print(f"日志文件已创建: {log_file_path}")
+    logger.info(f"日志文件已创建: {log_file_path}")
 except (OSError, PermissionError) as e:
     # 如果无法创建日志文件，只使用控制台输出
-    print(f"警告: 无法创建日志文件 {log_file_path}，将只使用控制台输出。错误: {e}")
-    print(f"请检查日志目录权限: {log_dir}")
-    print(f"建议执行: sudo chown -R $(whoami):$(whoami) {log_dir} 或 sudo chmod 755 {log_dir}")
+    logger.warning(f"无法创建日志文件 {log_file_path}，将只使用控制台输出。错误: {e}")
+    logger.warning(f"请检查日志目录权限: {log_dir}")
+    logger.warning(f"建议执行: sudo chown -R $(whoami):$(whoami) {log_dir} 或 sudo chmod 755 {log_dir}")
     # 确保至少有一个控制台处理器
     if not any(isinstance(h, logging.StreamHandler) for h in root_logger.handlers):
         console_handler = logging.StreamHandler()
@@ -418,6 +418,146 @@ if settings.BACKEND_CORS_ORIGINS:
 # 注意：FastAPI 会自动处理 HTTPException，不需要单独注册处理器
 # 但我们可以为特定异常类型添加自定义处理
 
+def _is_stream_error(exc: Exception) -> bool:
+    """
+    检查异常是否是流关闭相关的异常（客户端提前关闭连接）
+    
+    Args:
+        exc: 异常对象
+    
+    Returns:
+        如果是流异常返回True，否则返回False
+    """
+    error_type = type(exc).__name__
+    error_module = type(exc).__module__
+    return ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+            "anyio" in error_module)
+
+
+def _check_connection_disconnected(request: Request) -> bool:
+    """
+    检查请求连接是否已断开
+    
+    Args:
+        request: 请求对象
+    
+    Returns:
+        如果连接已断开返回True，否则返回False
+    """
+    return hasattr(request, '_is_disconnected') and request._is_disconnected
+
+
+def _raise_stream_error_if_disconnected(request: Request) -> None:
+    """
+    如果连接已断开，抛出流异常
+    
+    Args:
+        request: 请求对象
+    
+    Raises:
+        EndOfStream: 如果连接已断开
+    """
+    if _check_connection_disconnected(request):
+        logger.debug("客户端已断开连接")
+        from anyio import EndOfStream
+        raise EndOfStream("客户端已断开连接")
+
+
+def _determine_response_status_code(exc_status_code: int) -> int:
+    """
+    根据异常状态码确定响应状态码
+    
+    业务错误返回200，只有真正的服务器错误才返回500
+    但是 401 和 403 需要保持原状态码，以便前端正确处理
+    
+    Args:
+        exc_status_code: 异常状态码
+    
+    Returns:
+        响应状态码
+    """
+    if exc_status_code == status.HTTP_401_UNAUTHORIZED:
+        return status.HTTP_401_UNAUTHORIZED
+    elif exc_status_code == status.HTTP_403_FORBIDDEN:
+        return status.HTTP_403_FORBIDDEN
+    elif exc_status_code in (status.HTTP_500_INTERNAL_SERVER_ERROR, status.HTTP_503_SERVICE_UNAVAILABLE):
+        return exc_status_code
+    else:
+        return status.HTTP_200_OK
+
+
+def _add_csrf_token_to_response(response: JSONResponse, exc: HTTPException) -> None:
+    """
+    如果HTTPException中包含了新的CSRF token，添加到响应头
+    
+    Args:
+        response: JSONResponse对象
+        exc: HTTPException异常对象
+    """
+    if hasattr(exc, '_csrf_token') and exc._csrf_token:
+        try:
+            response.headers["X-CSRF-Token"] = exc._csrf_token
+            logger.debug("已在错误响应中添加正确的CSRF token（供前端自动更新）")
+        except Exception:
+            pass
+
+
+async def _create_http_exception_response(
+    request: Request,
+    exc: HTTPException,
+    content: dict | str,
+    response_status_code: int
+) -> JSONResponse:
+    """
+    创建HTTPException响应，处理连接检查和CSRF token
+    
+    Args:
+        request: 请求对象
+        exc: HTTPException异常对象
+        content: 响应内容（字典或字符串）
+        response_status_code: 响应状态码
+    
+    Returns:
+        JSONResponse对象
+    
+    Raises:
+        EndOfStream: 如果连接已断开
+    """
+    # 检查连接是否仍然有效
+    try:
+        _raise_stream_error_if_disconnected(request)
+    except Exception:
+        pass
+    
+    # 记录严重的 HTTPException (500/503) 到审计日志
+    if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+        from app.core.errors import record_http_exception_log
+        await record_http_exception_log(exc, request, "HTTPException")
+    
+    # 尝试返回响应，但如果连接已断开，捕获异常
+    try:
+        # 再次检查连接状态（在返回响应前）
+        _raise_stream_error_if_disconnected(request)
+        
+        # 创建响应
+        response = JSONResponse(
+            status_code=response_status_code,
+            content=content,
+        )
+        
+        # 添加CSRF token（如果存在）
+        _add_csrf_token_to_response(response, exc)
+        
+        return response
+    except Exception as e:
+        # 如果是流异常，直接重新抛出
+        if _is_stream_error(e):
+            logger.debug("连接已断开，无法发送HTTPException响应")
+            raise
+        # 其他异常，重新抛出
+        raise
+
+
 def _make_json_serializable(obj):
     """
     递归地将对象转换为JSON可序列化的格式
@@ -498,87 +638,8 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     # 如果 detail 已经是标准格式（字典，包含 code 字段），说明是通过 raise_api_exception 抛出的
     # 此时应该使用 exc.status_code（已经在 raise_api_exception 中正确设置）
     if isinstance(exc.detail, dict) and "code" in exc.detail:
-        # 业务错误应该返回200，只有真正的服务器错误才返回500
-        # 但如果是401（未授权），需要保持401状态码以便浏览器处理
-        response_status_code = exc.status_code
-        if exc.status_code == status.HTTP_401_UNAUTHORIZED:
-            # 401 未授权：保持401状态码，浏览器会自动处理
-            response_status_code = status.HTTP_401_UNAUTHORIZED
-        elif exc.status_code in (status.HTTP_500_INTERNAL_SERVER_ERROR, status.HTTP_503_SERVICE_UNAVAILABLE):
-            # 500/503 服务器错误：保持原状态码
-            response_status_code = exc.status_code
-        else:
-            # 其他业务错误：返回200状态码，通过响应体中的code字段表示错误
-            response_status_code = status.HTTP_200_OK
-
-        # 检查连接是否仍然有效
-        try:
-            if hasattr(request, '_is_disconnected') and request._is_disconnected:
-                logger.debug("客户端已断开连接，跳过HTTPException响应")
-                from anyio import EndOfStream
-                raise EndOfStream("客户端已断开连接")
-        except Exception:
-            pass
-        
-        # 记录严重的 HTTPException (500/503) 到审计日志
-        if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
-            from app.core.errors import record_http_exception_log
-            await record_http_exception_log(exc, request, "HTTPException")
-
-        # 尝试返回响应，但如果连接已断开，捕获异常
-        try:
-            # 再次检查连接状态（在返回响应前）
-            # 如果连接已断开，直接抛出流异常，不尝试创建响应
-            try:
-                if hasattr(request, '_is_disconnected') and request._is_disconnected:
-                    logger.debug("客户端已断开连接，无法发送HTTPException响应")
-                    from anyio import EndOfStream
-                    raise EndOfStream("客户端已断开连接")
-            except EndOfStream:
-                # 如果已经是流异常，直接重新抛出
-                raise
-            except (ConnectionError, OSError, RuntimeError) as conn_err:
-                error_type = type(conn_err).__name__
-                error_module = type(conn_err).__module__
-                if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
-                    "anyio" in error_module):
-                    raise
-            except Exception:
-                pass
-            
-            # 检查是否有CSRF token需要添加到响应头
-            try:
-                response = JSONResponse(
-                    status_code=response_status_code,
-                    content=exc.detail,
-                )
-                
-                # 如果HTTPException中包含了新的CSRF token，添加到响应头
-                if hasattr(exc, '_csrf_token') and exc._csrf_token:
-                    try:
-                        response.headers["X-CSRF-Token"] = exc._csrf_token
-                        logger.debug("已在403错误响应中添加正确的CSRF token（供前端自动更新）")
-                    except Exception:
-                        pass
-                
-                return response
-            except (ConnectionError, OSError, RuntimeError) as create_error:
-                # 在创建响应时捕获流异常
-                error_type = type(create_error).__name__
-                error_module = type(create_error).__module__
-                if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
-                    "anyio" in error_module):
-                    logger.debug("连接已断开，无法创建HTTPException响应")
-                    raise create_error
-                raise
-        except (ConnectionError, OSError, RuntimeError) as stream_error:
-            error_type = type(stream_error).__name__
-            error_module = type(stream_error).__module__
-            if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
-                "anyio" in error_module):
-                logger.debug("连接已断开，无法发送HTTPException响应")
-                raise stream_error
-            raise
+        response_status_code = _determine_response_status_code(exc.status_code)
+        return await _create_http_exception_response(request, exc, exc.detail, response_status_code)
 
     # 否则，从 HTTPException 的 detail 中提取错误信息
     # 这种情况通常是直接使用 HTTPException 抛出的（应该避免，应使用 raise_api_exception）
@@ -608,93 +669,8 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
     # 业务错误返回200，只有真正的服务器错误才返回500
     # 但是 401 和 403 需要保持原状态码，以便前端正确处理
-    response_status_code = exc.status_code
-    if exc.status_code == status.HTTP_401_UNAUTHORIZED:
-        # 401 未授权：保持401状态码
-        response_status_code = status.HTTP_401_UNAUTHORIZED
-    elif exc.status_code == status.HTTP_403_FORBIDDEN:
-        # 403 禁止访问：保持403状态码（如客户被禁用、用户被禁用等）
-        # 这样前端可以通过状态码直接判断错误类型，避免将错误响应误判为成功响应
-        response_status_code = status.HTTP_403_FORBIDDEN
-    elif exc.status_code in (status.HTTP_500_INTERNAL_SERVER_ERROR, status.HTTP_503_SERVICE_UNAVAILABLE):
-        # 500/503 服务器错误：保持原状态码
-        response_status_code = exc.status_code
-    else:
-        # 其他业务错误：返回200状态码
-        response_status_code = status.HTTP_200_OK
-
-    # 检查连接是否仍然有效（避免在连接断开时尝试发送响应）
-    try:
-        if hasattr(request, '_is_disconnected') and request._is_disconnected:
-            logger.debug("客户端已断开连接，跳过HTTPException响应")
-            # 连接已断开，重新抛出流异常，让ASGI服务器处理
-            from anyio import EndOfStream
-            raise EndOfStream("客户端已断开连接")
-    except Exception:
-        pass
-    
-    # 记录严重的 HTTPException (500/503) 到审计日志
-    if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
-        from app.core.errors import record_http_exception_log
-        await record_http_exception_log(exc, request, "HTTPException")
-
-    # 尝试返回响应，但如果连接已断开，捕获异常
-    try:
-        # 再次检查连接状态（在创建响应前）
-        # 如果连接已断开，直接抛出流异常，不尝试创建响应
-        try:
-            if hasattr(request, '_is_disconnected') and request._is_disconnected:
-                logger.debug("客户端已断开连接，无法发送HTTPException响应")
-                from anyio import EndOfStream
-                raise EndOfStream("客户端已断开连接")
-        except EndOfStream:
-            # 如果已经是流异常，直接重新抛出
-            raise
-        except (ConnectionError, OSError, RuntimeError) as conn_err:
-            error_type = type(conn_err).__name__
-            error_module = type(conn_err).__module__
-            if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
-                "anyio" in error_module):
-                raise
-        except Exception:
-            pass
-        
-        # 检查是否有CSRF token需要添加到响应头（服务器重启后自动生成新token）
-        try:
-            response = JSONResponse(
-                status_code=response_status_code,
-                content=error_response,
-            )
-            
-            # 如果HTTPException中包含了新的CSRF token（令牌不匹配时返回正确的令牌），添加到响应头
-            if hasattr(exc, '_csrf_token') and exc._csrf_token:
-                try:
-                    response.headers["X-CSRF-Token"] = exc._csrf_token
-                    logger.debug("已在403错误响应中添加正确的CSRF token（供前端自动更新）")
-                except Exception:
-                    pass
-            
-            return response
-        except (ConnectionError, OSError, RuntimeError) as create_error:
-            # 在创建响应时捕获流异常
-            error_type = type(create_error).__name__
-            error_module = type(create_error).__module__
-            if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
-                "anyio" in error_module):
-                logger.debug("连接已断开，无法创建HTTPException响应")
-                raise create_error
-            raise
-    except (ConnectionError, OSError, RuntimeError) as stream_error:
-        # 检查是否是流关闭异常
-        error_type = type(stream_error).__name__
-        error_module = type(stream_error).__module__
-        if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
-            "anyio" in error_module):
-            logger.debug("连接已断开，无法发送HTTPException响应")
-            # 连接已断开，重新抛出流异常，让ASGI服务器处理
-            raise stream_error
-        # 其他连接错误，重新抛出
-        raise
+    response_status_code = _determine_response_status_code(exc.status_code)
+    return await _create_http_exception_response(request, exc, error_response, response_status_code)
 
 
 @app.exception_handler(Exception)
@@ -715,72 +691,34 @@ async def global_exception_handler(request: Request, exc: Exception):
     # HTTPException 应该由专门的处理器处理，不应该到达这里
     # 但如果到达这里，说明可能在异常处理过程中连接已断开
     if isinstance(exc, HTTPException):
-        # 首先检查是否是流关闭异常（可能在异常链中）
-        error_type = type(exc).__name__
-        error_module = type(exc).__module__
-        if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
-            "anyio" in error_module):
-            # 如果HTTPException本身就是流异常包装的，直接重新抛出
+        # 检查是否是流关闭异常
+        if _is_stream_error(exc):
             raise exc
         
         # 检查连接是否已断开
-        # 如果连接已断开，不应该尝试发送响应，直接抛出流异常
         try:
-            # 检查请求的连接状态
-            if hasattr(request, '_is_disconnected') and request._is_disconnected:
-                logger.debug("客户端已断开连接，跳过HTTPException处理")
-                # 连接已断开，直接抛出流异常，让ASGI服务器处理
-                from anyio import EndOfStream
-                raise EndOfStream("客户端已断开连接")
-        except EndOfStream:
-            # 如果已经是流异常，直接重新抛出
-            raise
+            _raise_stream_error_if_disconnected(request)
         except Exception:
             pass
         
         # 尝试检查连接状态（通过检查异常上下文）
-        # 如果HTTPException是在连接断开时抛出的，其上下文可能包含流异常信息
-        if hasattr(exc, '__context__') and exc.__context__:
-            context_exc = exc.__context__
-            context_type = type(context_exc).__name__
-            context_module = type(context_exc).__module__
-            if ("EndOfStream" in context_type or "WouldBlock" in context_type or 
-                "anyio" in context_module):
-                logger.debug("检测到连接断开上下文，跳过HTTPException处理")
-                # 直接重新抛出原始的流异常，而不是创建新的
-                raise context_exc
+        if hasattr(exc, '__context__') and exc.__context__ and _is_stream_error(exc.__context__):
+            logger.debug("检测到连接断开上下文，跳过HTTPException处理")
+            raise exc.__context__
         
         # 如果连接仍然有效，重新抛出 HTTPException 让专门的处理器处理
-        # 但如果重新抛出时连接断开，会被下面的流异常检查捕获
         try:
             raise exc
-        except (ConnectionError, OSError, RuntimeError) as stream_error:
-            # 检查是否是流关闭异常
-            error_type = type(stream_error).__name__
-            error_module = type(stream_error).__module__
-            if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
-                "anyio" in error_module):
-                logger.debug("连接已断开，无法发送HTTPException响应")
-                # 连接已断开，直接重新抛出流异常，让ASGI服务器处理
-                raise stream_error
-            # 其他连接错误，重新抛出
-            raise
         except Exception as e:
-            # 如果重新抛出时捕获到其他异常，检查是否是流异常
-            error_type = type(e).__name__
-            error_module = type(e).__module__
-            if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
-                "anyio" in error_module):
-                logger.debug("检测到流异常，跳过HTTPException处理")
-                raise e
+            # 如果是流异常，直接重新抛出
+            if _is_stream_error(e):
+                logger.debug("连接已断开，无法发送HTTPException响应")
+                raise
             # 其他异常，重新抛出
             raise
 
     # 检查是否是流关闭相关的异常（客户端提前关闭连接）
-    error_type = type(exc).__name__
-    error_module = type(exc).__module__
-    if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
-        "anyio" in error_module):
+    if _is_stream_error(exc):
         # 流关闭异常是正常的（客户端提前关闭连接），不需要记录错误
         # 直接重新抛出，让 ASGI 服务器处理
         raise exc
@@ -1009,7 +947,7 @@ async def redirect_short_link_public(
         # 记录请求详细信息（用于调试）
         request_url = str(request.url)
         request_params = dict(request.query_params)
-        logger.info(
+        logger.debug(
             f"[短链接重定向] 收到请求: short_code={short_code}, "
             f"完整URL={request_url}, 查询参数={request_params}"
         )
@@ -1107,8 +1045,8 @@ async def redirect_short_link_public(
                     except Exception as e:
                         logger.warning(f"查询Offer失败: offer_id={final_offer_id}, error={e}")
             
-            # 打印获得的参数
-            logger.info(
+            # 打印获得的参数（调试信息）
+            logger.debug(
                 f"[短链接点击-缓存路径] 参数信息: "
                 f"short_code={short_code}, "
                 f"URL参数_offer_id={offer_id}, "
@@ -1318,8 +1256,8 @@ async def redirect_short_link_public(
                 except Exception as e:
                     logger.warning(f"查询Offer失败: offer_id={final_offer_id}, error={e}")
         
-        # 打印获得的参数
-        logger.info(
+        # 打印获得的参数（调试信息）
+        logger.debug(
             f"[短链接点击-数据库路径] 参数信息: "
             f"short_code={short_code}, "
             f"URL参数_offer_id={offer_id}, "

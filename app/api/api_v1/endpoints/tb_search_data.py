@@ -14,8 +14,10 @@ import pandas as pd
 from io import BytesIO
 
 from app.core.database import get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user, is_admin
+from app.core.constants import MAX_PAGE_SIZE
 from app.core.config import settings
+from app.core.validation import safe_strip
 from app.models.models import TBSearchData, Client, Product, User, UserRole, CountryInfo, ProductAssignment
 from app.schemas.tb_search_data import (
     TBSearchDataListResponse,
@@ -25,18 +27,25 @@ from app.schemas.tb_search_data import (
 from app.schemas.base import ResponseBaseSchema, ListResponseBaseSchema
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
-from app.core.query_utils import product_assignment_join_condition, check_use_assignment_table
-from app.api.api_v1.endpoints.excel.utils import allowed_file, ALLOWED_MIME_TYPES, parse_date_value
+from app.core.query_utils import (
+    product_assignment_join_condition, 
+    check_use_assignment_table, 
+    join_country_info as join_country_info_util,
+    apply_date_range_filter
+)
+from app.api.api_v1.endpoints.excel.utils import allowed_file, ALLOWED_MIME_TYPES, parse_date_value, normalize_date_key
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# 使用公共函数 join_country_info，传入 TBSearchData.country_code 列
 def join_country_info(query):
-    return query.outerjoin(
-        CountryInfo,
-        TBSearchData.country_code.collate('utf8mb4_unicode_ci') == 
-        CountryInfo.alpha_2_code.collate('utf8mb4_unicode_ci')
-    )
+    """
+    辅助函数：统一处理 CountryInfo 的 JOIN，解决排序规则冲突问题
+    
+    注意：此函数是对公共函数 join_country_info 的包装，传入 TBSearchData.country_code
+    """
+    return join_country_info_util(query, TBSearchData.country_code)
 
 @router.get("/", response_model=ResponseBaseSchema[TBSearchDataListResponse], summary="获取TB搜索数据列表")
 async def get_tb_search_data(
@@ -44,7 +53,7 @@ async def get_tb_search_data(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(10, ge=1, le=100, description="每页条数"),
+    page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
     start_date: date | None = Query(None, description="开始日期"),
     end_date: date | None = Query(None, description="结束日期"),
     client_id: int | None = Query(None, description="客户ID"),
@@ -95,7 +104,7 @@ async def get_tb_search_data(
         query = join_country_info(query)
 
     # 权限过滤
-    if current_user.role != UserRole.ADMIN:
+    if not is_admin(current_user):
         query = query.where(Client.user_id == current_user.id)
     elif client_id:
         query = query.where(Client.id == client_id)
@@ -105,17 +114,16 @@ async def get_tb_search_data(
     query = query.where(or_(Product.id.is_(None), Product.is_active == True))
 
     # 过滤条件
-    if product_id and product_id.strip():
+    if safe_strip(product_id):
         try:
             pid = int(product_id)
             query = query.where(TBSearchData.product_id == pid)
         except ValueError:
             pass
 
-    if country_code and country_code.strip():
-        code = country_code.strip()
-        if code != 'ZZ' and len(code) <= 2:
-            query = query.where(TBSearchData.country_code == code)
+    code = safe_strip(country_code)
+    if code and code != 'ZZ' and len(code) <= 2:
+        query = query.where(TBSearchData.country_code == code)
 
     # 日期范围过滤
     # 如果传递了日期范围，使用传递的日期范围
@@ -178,7 +186,7 @@ async def get_tb_search_data(
         count_query = count_query.outerjoin(Client, Product.client_id == Client.id)
     
     # 应用相同的过滤条件
-    if current_user.role != UserRole.ADMIN:
+    if not is_admin(current_user):
         count_query = count_query.where(Client.user_id == current_user.id)
     elif client_id:
         count_query = count_query.where(Client.id == client_id)
@@ -186,17 +194,16 @@ async def get_tb_search_data(
     # 产品状态过滤：只显示激活状态的产品（如果产品存在）
     count_query = count_query.where(or_(Product.id.is_(None), Product.is_active == True))
         
-    if product_id and product_id.strip():
+    if safe_strip(product_id):
         try:
             pid = int(product_id)
             count_query = count_query.where(TBSearchData.product_id == pid)
         except ValueError:
             pass
             
-    if country_code and country_code.strip():
-        code = country_code.strip()
-        if code != 'ZZ' and len(code) <= 2:
-            count_query = count_query.where(TBSearchData.country_code == code)
+    code = safe_strip(country_code)
+    if code and code != 'ZZ' and len(code) <= 2:
+        count_query = count_query.where(TBSearchData.country_code == code)
             
     # 日期范围过滤（与主查询保持一致）
     if start_date:
@@ -233,20 +240,26 @@ async def get_tb_search_data(
         # 即使产品不存在，也显示数据，但标记为"未知产品"
         # 这样可以发现数据完整性问题
         
-        country_name = "未知区域"
-        if country_info:
-            country_name = country_info.country_name_zh
-        elif tb_data.country_code == "ZZ":
-            country_name = "全部区域"
+        # 使用统一的国家名称解析函数
+        from app.core.country_code import resolve_country_name
+        country_name = resolve_country_name(
+            country_info, 
+            tb_data.country_code,
+            default_unknown="未知区域",
+            default_all="全部区域"
+        ) or "未知区域"
 
-        # 处理日期
-        date_val = tb_data.date.date() if isinstance(tb_data.date, datetime) else tb_data.date
+        # 处理日期：使用统一的日期键规范化函数
+        date_val = normalize_date_key(tb_data.date)
 
+        # 使用统一的名称获取函数
+        from app.core.utils import get_product_name, get_client_name, get_user_name
+        
         item = TBSearchDataResponse(
             id=tb_data.id,
             date=date_val,
             product_id=product.id if product else tb_data.product_id,  # 使用原始product_id
-            product_name=product.name if product else f"未知产品(ID:{tb_data.product_id})",
+            product_name=get_product_name(product, tb_data.product_id),
             country_code=tb_data.country_code,
             country_name_zh=country_name,
             redirects=tb_data.redirects,
@@ -260,8 +273,8 @@ async def get_tb_search_data(
             created_at=tb_data.created_at,
             updated_at=tb_data.updated_at,
             client_id=client.id if client else 0,
-            client_name=client.company_name if client else "未知客户",
-            user_name=(user.full_name or user.username) if user else "未知用户"
+            client_name=get_client_name(client),
+            user_name=get_user_name(user)
         )
         response_list.append(item)
 
@@ -278,13 +291,12 @@ async def import_tb_search_data(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != UserRole.ADMIN:
+    if not is_admin(current_user):
         raise_api_exception(ErrorCode.PERMISSION_DENIED, detail="仅管理员可导入")
 
-    if not allowed_file(file.filename):
-         raise_api_exception(ErrorCode.INVALID_PARAMS, detail="不支持的文件类型")
-         
-    contents = await file.read()
+    # 验证文件并读取内容（使用公共验证函数）
+    from app.api.api_v1.endpoints.excel.utils import validate_excel_file
+    contents = await validate_excel_file(file)
     try:
         df = pd.read_excel(BytesIO(contents))
     except Exception as e:
@@ -306,10 +318,8 @@ async def import_tb_search_data(
     
     for index, row in df.iterrows():
         try:
-            # 解析日期
-            date_val = parse_date_value(row["DATE"])
-            if isinstance(date_val, datetime):
-                date_val = date_val.date()
+            # 解析日期：使用统一的日期键规范化函数
+            date_val = normalize_date_key(parse_date_value(row["DATE"]))
                 
             # 解析产品名称（SUBID）
             product_name = str(row["SUBID"]).strip()
@@ -324,23 +334,9 @@ async def import_tb_search_data(
             
             if not product:
                 # 产品不存在，自动创建
-                # 1. 查找或创建默认客户
-                default_client_name = "默认客户（导入数据）"
-                client_res = await db.execute(select(Client).where(Client.company_name == default_client_name))
-                client = client_res.scalars().first()
-                
-                if not client:
-                    # 创建默认客户
-                    new_client = Client(
-                        user_id=current_user.id,
-                        key=str(uuid.uuid4()),
-                        company_name=default_client_name,
-                        is_active=True,
-                        api_enabled=False
-                    )
-                    db.add(new_client)
-                    await db.flush() # 获取ID
-                    client = new_client
+                # 1. 查找或创建默认客户：使用统一的辅助函数
+                from app.core.utils import find_or_create_default_client
+                client = await find_or_create_default_client(db, current_user.id)
                 
                 # 2. 创建新产品
                 new_product = Product(
@@ -447,11 +443,8 @@ async def import_tb_search_data(
         except Exception as e:
             errors.append(f"行 {index+2}: {str(e)}")
             
-    try:
-        await db.commit()
-    except Exception as e:
-        await db.rollback()
-        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"保存失败: {str(e)}")
+    # 注意：不需要手动提交事务，get_db 依赖会自动处理
+    # 如果发生异常，get_db 会自动回滚
         
     msg = f"成功导入 {success_count} 条数据"
     if errors:
@@ -465,7 +458,7 @@ async def batch_delete_tb_search_data(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != UserRole.ADMIN:
+    if not is_admin(current_user):
         raise_api_exception(ErrorCode.PERMISSION_DENIED, detail="仅管理员可删除")
         
     if not data_ids:
@@ -473,7 +466,7 @@ async def batch_delete_tb_search_data(
         
     stmt = delete(TBSearchData).where(TBSearchData.id.in_(data_ids))
     result = await db.execute(stmt)
-    await db.commit()
+    # 注意：不需要手动提交事务，get_db 依赖会自动处理
     
     return ResponseBaseSchema.success(data={"message": f"成功删除 {result.rowcount} 条数据"})
 
@@ -483,7 +476,7 @@ async def delete_tb_search_data(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != UserRole.ADMIN:
+    if not is_admin(current_user):
         raise_api_exception(ErrorCode.PERMISSION_DENIED, detail="仅管理员可删除")
 
     query = select(TBSearchData).where(TBSearchData.id == data_id)
@@ -494,7 +487,7 @@ async def delete_tb_search_data(
         raise_api_exception(ErrorCode.NOT_FOUND, detail="数据不存在")
         
     await db.delete(tb_data)
-    await db.commit()
+    # 注意：不需要手动提交事务，get_db 依赖会自动处理
     
     return ResponseBaseSchema.success(data={"message": "删除成功"})
 
@@ -505,7 +498,7 @@ async def update_tb_search_data(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != UserRole.ADMIN:
+    if not is_admin(current_user):
         raise_api_exception(ErrorCode.PERMISSION_DENIED, detail="仅管理员可修改")
 
     query = select(TBSearchData).where(TBSearchData.id == data_id)
@@ -519,7 +512,9 @@ async def update_tb_search_data(
     for k, v in update_dict.items():
         setattr(tb_data, k, v)
     
-    await db.commit()
+    # 注意：不需要手动提交事务，get_db 依赖会自动处理
+    # 刷新对象以获取最新数据（在自动提交之前）
+    await db.flush()
     await db.refresh(tb_data)
     
     # 重新查询以获取关联信息
@@ -534,19 +529,24 @@ async def update_tb_search_data(
     row = result.unique().first()
     tb_data, product, client, user, country_info = row
     
-    country_name = "未知区域"
-    if country_info:
-        country_name = country_info.country_name_zh
-    elif tb_data.country_code == "ZZ":
-        country_name = "全部区域"
+    # 使用统一的国家名称解析函数
+    country_name = resolve_country_name(
+        country_info,
+        tb_data.country_code,
+        default_unknown="未知区域",
+        default_all="全部区域"
+    ) or "未知区域"
 
-    date_val = tb_data.date.date() if isinstance(tb_data.date, datetime) else tb_data.date
+    date_val = normalize_date_key(tb_data.date)
 
+    # 使用统一的名称获取函数
+    from app.core.utils import get_product_name, get_client_name, get_user_name
+    
     return ResponseBaseSchema.success(data=TBSearchDataResponse(
         id=tb_data.id,
         date=date_val,
         product_id=product.id,
-        product_name=product.name,
+        product_name=get_product_name(product),
         country_code=tb_data.country_code,
         country_name_zh=country_name,
         redirects=tb_data.redirects,
@@ -560,8 +560,8 @@ async def update_tb_search_data(
         created_at=tb_data.created_at,
         updated_at=tb_data.updated_at,
         client_id=client.id if client else 0,
-        client_name=client.company_name if client else "未知客户",
-        user_name=(user.full_name or user.username) if user else "未知用户"
+        client_name=get_client_name(client),
+        user_name=get_user_name(user)
     ))
 
 @router.get("/clients-with-data", response_model=ListResponseBaseSchema[list[dict]], summary="获取有TB搜索数据的客户列表")
@@ -613,7 +613,7 @@ async def get_clients_with_tb_search_data(
         query = query.where(Product.is_active == True)
         
         # 权限过滤
-        if current_user.role != UserRole.ADMIN:
+        if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
         
         # 日期范围过滤
@@ -705,7 +705,7 @@ async def get_products_with_tb_search_data(
         query = query.where(Product.is_active == True)
         
         # 权限过滤
-        if current_user.role != UserRole.ADMIN:
+        if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
         elif client_id:
             query = query.where(Client.id == client_id)
@@ -801,7 +801,7 @@ async def get_countries_with_tb_search_data(
         query = query.where(Product.is_active == True)
         
         # 权限过滤
-        if current_user.role != UserRole.ADMIN:
+        if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
         elif client_id:
             query = query.where(Client.id == client_id)

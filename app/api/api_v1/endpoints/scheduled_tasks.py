@@ -37,7 +37,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # 常量
-MAX_TASK_NAME_LENGTH = 100
+from app.core.constants import MAX_TASK_NAME_LENGTH, QUERY_TIMEOUT, MAX_PAGE_SIZE
 MAX_DESCRIPTION_LENGTH = 500
 MAX_FUNCTION_PATH_LENGTH = 255
 
@@ -82,7 +82,7 @@ async def get_scheduled_tasks(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin),
         page: int = Query(1, ge=1, description="页码"),
-        page_size: int = Query(10, ge=1, le=100, description="每页条数"),
+        page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
         is_active: Optional[bool] = Query(None, description="是否启用过滤"),
         is_running: Optional[bool] = Query(None, description="是否运行中过滤"),
         task_name: Optional[str] = Query(None, description="任务名称搜索", max_length=MAX_TASK_NAME_LENGTH)
@@ -148,7 +148,7 @@ async def get_scheduled_tasks(
         try:
             total_result = await asyncio.wait_for(
                 db.execute(count_query),
-                timeout=30.0  # 30秒超时
+                timeout=QUERY_TIMEOUT
             )
             total = total_result.scalar() or 0
         except asyncio.TimeoutError:
@@ -166,7 +166,7 @@ async def get_scheduled_tasks(
         try:
             result = await asyncio.wait_for(
                 db.execute(query),
-                timeout=30.0  # 30秒超时
+                timeout=QUERY_TIMEOUT
             )
             tasks = result.scalars().all()
         except asyncio.TimeoutError:
@@ -909,14 +909,14 @@ async def release_task_lock(
         task = result.scalar_one_or_none()
 
         if not task:
-            await db.rollback()
+            # 注意：不需要手动回滚事务，get_db 依赖会自动处理
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="定时任务不存在"
             )
 
         if not task.is_running:
-            await db.rollback()
+            # 注意：不需要手动回滚事务，get_db 依赖会自动处理
             return ResponseBaseSchema.success(
                 data={"message": "任务未在运行，无需释放锁"}
             )
@@ -926,7 +926,7 @@ async def release_task_lock(
         task.updated_at = get_app_now_naive()
         task.last_error = "管理员手动释放锁"
 
-        await db.commit()
+        # 注意：不需要手动提交事务，get_db 依赖会自动处理
 
         logger.warning(f"管理员 {current_user.username} 手动释放了任务锁: {task_name}")
 

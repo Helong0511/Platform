@@ -173,3 +173,216 @@ def parse_date_to_app_timezone(date_str: str, is_end_date: bool = False) -> date
     else:
         dt = dt.replace(hour=0, minute=0, second=0, microsecond=0)
     return dt
+
+
+def get_product_name(product: Optional[Any], product_id: Optional[int] = None, default: str = "未知产品") -> str:
+    """
+    获取产品名称，处理 None 情况
+    
+    Args:
+        product: 产品对象（可能为 None）
+        product_id: 产品ID（用于构建 fallback 名称）
+        default: 默认名称（默认为 "未知产品"）
+    
+    Returns:
+        产品名称字符串
+    
+    Example:
+        product_name = get_product_name(product, tb_data.product_id)
+        # -> product.name if product else "未知产品(ID:123)"
+    """
+    if product and hasattr(product, 'name') and product.name:
+        return product.name
+    elif product_id:
+        return f"{default}(ID:{product_id})"
+    else:
+        return default
+
+
+def get_client_name(client: Optional[Any], default: str = "未知客户") -> str:
+    """
+    获取客户名称，处理 None 情况
+    
+    Args:
+        client: 客户对象（可能为 None）
+        default: 默认名称（默认为 "未知客户"）
+    
+    Returns:
+        客户名称字符串
+    
+    Example:
+        client_name = get_client_name(client)
+        # -> client.company_name if client else "未知客户"
+    """
+    if client and hasattr(client, 'company_name') and client.company_name:
+        return client.company_name
+    else:
+        return default
+
+
+def get_user_name(user: Optional[Any], default: str = "未知用户") -> str:
+    """
+    获取用户名称，优先使用 full_name，否则使用 username
+    
+    Args:
+        user: 用户对象（可能为 None）
+        default: 默认名称（默认为 "未知用户"）
+    
+    Returns:
+        用户名称字符串
+    
+    Example:
+        user_name = get_user_name(user)
+        # -> user.full_name or user.username if user else "未知用户"
+    """
+    if user:
+        if hasattr(user, 'full_name') and user.full_name:
+            return user.full_name
+        elif hasattr(user, 'username') and user.username:
+            return user.username
+    return default
+
+
+def format_error_details(errors: list[Any], row_prefix: str = "第", row_suffix: str = "行") -> list[str]:
+    """
+    格式化错误详情列表
+    
+    Args:
+        errors: 错误列表，每个错误可以是字典或字符串
+        row_prefix: 行号前缀（默认为 "第"）
+        row_suffix: 行号后缀（默认为 "行"）
+    
+    Returns:
+        格式化后的错误详情列表
+    
+    Example:
+        errors = [{"row": 5, "error": "产品不存在"}, "其他错误"]
+        error_details = format_error_details(errors)
+        # -> ["第5行: 产品不存在", "其他错误"]
+    """
+    error_details = []
+    for error in errors:
+        if isinstance(error, dict):
+            row = error.get('row', '?')
+            error_msg = error.get('error', '未知错误')
+            error_details.append(f"{row_prefix}{row}{row_suffix}: {error_msg}")
+        else:
+            error_details.append(str(error))
+    return error_details
+
+
+async def find_or_create_default_client(
+    db: AsyncSession,
+    user_id: int,
+    default_name: str = "默认客户（导入数据）"
+) -> Any:
+    """
+    查找或创建默认客户（用于导入数据）
+    
+    查找逻辑：
+    1. 首先在数据库中查找
+    2. 如果数据库中没有，检查会话中是否有待提交的对象
+    3. 如果都没有，创建新的默认客户
+    
+    Args:
+        db: 数据库会话
+        user_id: 用户ID（用于创建新客户时关联）
+        default_name: 默认客户名称（默认为 "默认客户（导入数据）"）
+    
+    Returns:
+        客户对象（Client）
+    
+    Example:
+        from app.models.models import Client
+        default_client = await find_or_create_default_client(db, current_user.id)
+    """
+    from app.models.models import Client
+    from sqlalchemy import select
+    import uuid
+    
+    # 步骤1: 先查找数据库中的默认客户
+    client_query = select(Client).where(Client.company_name == default_name).limit(1)
+    client_result = await db.execute(client_query)
+    default_client = client_result.scalars().first()
+    
+    if default_client:
+        return default_client
+    
+    # 步骤2: 检查会话中是否已经有待提交的默认客户对象
+    pending_default_client = None
+    try:
+        # 检查会话中的新对象（待提交的对象）
+        for obj in db.new:
+            if isinstance(obj, Client) and obj.company_name == default_name:
+                pending_default_client = obj
+                break
+    except AttributeError:
+        # 如果 db.new 不可用，尝试使用 identity_map
+        try:
+            for obj in db.identity_map.values():
+                if isinstance(obj, Client) and obj.company_name == default_name:
+                    pending_default_client = obj
+                    break
+        except AttributeError:
+            pass
+    
+    if pending_default_client:
+        return pending_default_client
+    
+    # 步骤3: 如果确实没有找到，创建新的默认客户
+    client_key = str(uuid.uuid4())
+    default_client = Client(
+        user_id=user_id,
+        key=client_key,  # 必需字段：客户唯一标识UUID
+        company_name=default_name,
+        is_active=True
+    )
+    db.add(default_client)
+    await db.flush()  # 刷新以获取客户ID
+    await db.refresh(default_client)
+    
+    return default_client
+
+
+def build_import_message(
+    imported_rows: int = 0,
+    failed_rows: int = 0,
+    new_rows: int = 0,
+    updated_rows: int = 0,
+    duplicate_rows: int = 0,
+    separator: str = "，",
+    default_message: str = "导入完成"
+) -> str:
+    """
+    构建导入操作的消息字符串
+    
+    Args:
+        imported_rows: 成功导入的行数
+        failed_rows: 失败的行数
+        new_rows: 新增的行数
+        updated_rows: 更新的行数
+        duplicate_rows: 重复的行数
+        separator: 消息部分之间的分隔符（默认为"，"）
+        default_message: 如果没有统计信息时的默认消息
+    
+    Returns:
+        构建好的消息字符串
+    
+    Example:
+        build_import_message(imported_rows=10, new_rows=8, updated_rows=2)
+        # -> "导入完成: 成功 10 条，新增 8 条，更新 2 条"
+    """
+    message_parts = []
+    
+    if imported_rows > 0:
+        message_parts.append(f"导入完成: 成功 {imported_rows} 条")
+    if new_rows > 0:
+        message_parts.append(f"新增 {new_rows} 条")
+    if updated_rows > 0:
+        message_parts.append(f"更新 {updated_rows} 条")
+    if duplicate_rows > 0:
+        message_parts.append(f"Excel内部重复 {duplicate_rows} 条")
+    if failed_rows > 0:
+        message_parts.append(f"失败 {failed_rows} 条")
+    
+    return separator.join(message_parts) if message_parts else default_message

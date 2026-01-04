@@ -162,3 +162,54 @@ async def clear_all_cache() -> int:
     """
     return await invalidate_cache("")
 
+
+async def get_or_set_cache(
+    cache_key: str,
+    fetch_func: Callable,
+    ttl: int = DEFAULT_TTL,
+    *args,
+    **kwargs
+) -> Any:
+    """
+    获取缓存，如果不存在则执行函数并缓存结果
+    
+    这是一个辅助函数，用于简化常见的缓存使用模式：
+    1. 尝试从缓存获取
+    2. 如果缓存不存在，执行 fetch_func 获取数据
+    3. 将结果缓存起来
+    
+    Args:
+        cache_key: 缓存键（已生成的完整键）
+        fetch_func: 获取数据的异步函数（如果缓存不存在时调用）
+        ttl: 缓存过期时间（秒），默认 5 分钟
+        *args: 传递给 fetch_func 的位置参数
+        **kwargs: 传递给 fetch_func 的关键字参数
+    
+    Returns:
+        缓存的值或 fetch_func 的返回值
+    
+    Example:
+        # 在端点中使用
+        cache_key = generate_cache_key("user_stats")
+        stats = await get_or_set_cache(
+            cache_key,
+            lambda: fetch_user_stats(db),
+            ttl=300
+        )
+    """
+    # 尝试从缓存获取
+    cached = await get_cached(cache_key)
+    if cached is not None:
+        logger.debug(f"缓存命中: {cache_key[:20]}...")
+        return cached
+    
+    # 缓存不存在，执行函数获取数据
+    logger.debug(f"缓存未命中，执行查询: {cache_key[:20]}...")
+    result = await fetch_func(*args, **kwargs)
+    
+    # 缓存结果（只缓存非 None 的结果）
+    if result is not None:
+        await set_cached(cache_key, result, ttl)
+        logger.debug(f"缓存已设置: {cache_key[:20]}..., TTL={ttl}s")
+    
+    return result

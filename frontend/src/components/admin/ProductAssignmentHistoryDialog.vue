@@ -526,19 +526,28 @@ const validateAssignmentsState = (assignmentsList) => {
     }
   }
   
-  // 验证2: 检查重叠（与后端逻辑一致）
+  // 验证2: 检查重叠（优化版本，与后端逻辑一致）
+  // 使用扫描线算法：对于每个记录，检查它与后续记录是否重叠
+  // 由于已排序，如果当前记录的结束日期 < 下一个记录的开始日期，则后续记录都不会重叠
   for (let i = 0; i < sortedAssignments.length; i++) {
+    const a1 = sortedAssignments[i];
+    const a1Start = new Date(a1.start_date);
+    const a1End = a1.end_date ? new Date(a1.end_date) : new Date('9999-12-31');
+    
+    // 只检查后续记录（避免重复检查）
     for (let j = i + 1; j < sortedAssignments.length; j++) {
-      const a1 = sortedAssignments[i];
       const a2 = sortedAssignments[j];
-      
-      const a1Start = new Date(a1.start_date);
-      const a1End = a1.end_date ? new Date(a1.end_date) : new Date('9999-12-31');
       const a2Start = new Date(a2.start_date);
+      
+      // 如果当前记录的结束日期 < 下一个记录的开始日期，后续记录都不会重叠
+      if (a1End < a2Start) {
+        break;
+      }
+      
       const a2End = a2.end_date ? new Date(a2.end_date) : new Date('9999-12-31');
       
       // 检查是否重叠：A.start <= B.end AND A.end >= B.start
-      if (a1Start <= a2End && a1End >= a2Start) {
+      if (a1End >= a2Start) {
         errors.push(
           `日期重叠：记录ID ${a1.id} (客户ID: ${a1.client_id}, ${a1.start_date} 至 ${a1.end_date || '当前有效'}) ` +
           `与记录ID ${a2.id} (客户ID: ${a2.client_id}, ${a2.start_date} 至 ${a2.end_date || '当前有效'}) 重叠`

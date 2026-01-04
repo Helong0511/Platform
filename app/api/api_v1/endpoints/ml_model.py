@@ -22,6 +22,8 @@ from app.core.security import get_current_user, require_admin
 from app.core.database import get_db
 from app.models.models import User
 from app.schemas.base import ResponseBaseSchema
+from app.api.api_v1.endpoints.excel.utils import validate_excel_file
+from app.core.constants import MAX_PAGE_SIZE
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -809,29 +811,8 @@ async def parse_excel_columns(
     解析Excel文件的列名，返回所有列名供用户选择映射
     """
     try:
-        # 验证文件类型
-        from app.core.config import settings
-        allowed_extensions = {".xlsx", ".xls"}
-        if not file.filename or not any(file.filename.lower().endswith(ext) for ext in allowed_extensions):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="不支持的文件类型。请上传Excel文件(.xlsx或.xls)"
-            )
-
-        # 检查文件大小
-        contents = await file.read()
-
-        if len(contents) > settings.MAX_UPLOAD_SIZE:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"文件大小超过限制（最大 {settings.MAX_UPLOAD_SIZE / 1024 / 1024:.1f}MB）"
-            )
-
-        if not contents:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="上传的文件为空"
-            )
+        # 验证文件并读取内容（使用公共验证函数）
+        contents = await validate_excel_file(file)
 
         # 解析Excel（支持 .xlsx 和 .xls 格式）
         df = _read_excel_file(contents, file.filename)
@@ -1120,29 +1101,8 @@ async def validate_excel_columns(
     - 返回列名映射结果和缺失字段提示
     """
     try:
-        # 验证文件类型
-        from app.core.config import settings
-        allowed_extensions = {".xlsx", ".xls"}
-        if not file.filename or not any(file.filename.lower().endswith(ext) for ext in allowed_extensions):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="不支持的文件类型。请上传Excel文件(.xlsx或.xls)"
-            )
-
-        # 检查文件大小
-        contents = await file.read()
-
-        if len(contents) > settings.MAX_UPLOAD_SIZE:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"文件大小超过限制（最大 {settings.MAX_UPLOAD_SIZE / 1024 / 1024:.1f}MB）"
-            )
-
-        if not contents:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="上传的文件为空"
-            )
+        # 验证文件并读取内容（使用公共验证函数）
+        contents = await validate_excel_file(file)
 
         # 解析Excel（支持 .xlsx 和 .xls 格式）
         df = _read_excel_file(contents, file.filename)
@@ -1249,7 +1209,7 @@ async def get_timezone_config(
 @router.post("/preview", response_model=ResponseBaseSchema[dict], summary="预览Excel数据")
 async def preview_excel_data(
         file: UploadFile = File(...),
-        rows: int = Query(10, ge=1, le=100, description="预览行数"),
+        rows: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="预览行数"),
         current_user: User = Depends(get_current_user)
 ):
     """
@@ -1258,29 +1218,8 @@ async def preview_excel_data(
     - 返回前N行数据供预览
     """
     try:
-        # 验证文件类型
-        from app.core.config import settings
-        allowed_extensions = {".xlsx", ".xls"}
-        if not file.filename or not any(file.filename.lower().endswith(ext) for ext in allowed_extensions):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="不支持的文件类型。请上传Excel文件(.xlsx或.xls)"
-            )
-
-        # 检查文件大小
-        contents = await file.read()
-
-        if len(contents) > settings.MAX_UPLOAD_SIZE:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"文件大小超过限制（最大 {settings.MAX_UPLOAD_SIZE / 1024 / 1024:.1f}MB）"
-            )
-
-        if not contents:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="上传的文件为空"
-            )
+        # 验证文件并读取内容（使用公共验证函数）
+        contents = await validate_excel_file(file)
 
         # 解析Excel（支持 .xlsx 和 .xls 格式）
         df = _read_excel_file(contents, file.filename)
@@ -1642,16 +1581,17 @@ async def import_training_data(
             }
         )
 
-        # 构建返回消息
-        message_parts = []
-        if import_response.imported_rows > 0:
-            message_parts.append(f"成功导入 {import_response.imported_rows} 条数据")
-        if import_response.failed_rows > 0:
-            message_parts.append(f"失败 {import_response.failed_rows} 条")
-        if import_response.duplicate_rows > 0:
-            message_parts.append(f"跳过重复 {import_response.duplicate_rows} 条")
-
-        message = "；".join(message_parts) if message_parts else "导入完成"
+        # 构建返回消息：使用统一的导入消息构建函数
+        from app.core.utils import build_import_message
+        message = build_import_message(
+            imported_rows=import_response.imported_rows,
+            failed_rows=import_response.failed_rows or 0,
+            new_rows=import_response.new_rows or 0,
+            updated_rows=import_response.updated_rows or 0,
+            duplicate_rows=import_response.duplicate_rows or 0,
+            separator="；",
+            default_message="导入完成"
+        )
 
         # 计算总行数（导入成功 + 失败）
         total_rows = import_response.imported_rows + (import_response.failed_rows or 0)

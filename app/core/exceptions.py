@@ -2,9 +2,13 @@
 统一的异常处理工具
 提供标准化的 HTTPException 创建函数
 """
+import logging
 from fastapi import HTTPException, status
 from typing import Optional, Any
+from sqlalchemy.exc import IntegrityError
 from app.core.errors import ErrorCode, get_error_message, create_error_response
+
+logger = logging.getLogger(__name__)
 
 
 def raise_api_exception(
@@ -90,3 +94,68 @@ def _map_error_code_to_status_code(error_code: int) -> int:
         # 所有其他业务错误（400, 403, 404, 409, 422, 429等）都返回200
         # 通过响应体中的 code 字段来区分不同的错误类型
         return status.HTTP_200_OK
+
+
+def handle_integrity_error(
+    error: IntegrityError,
+    constraint_name: Optional[str] = None,
+    custom_message: Optional[str] = None,
+    log_context: Optional[str] = None
+) -> None:
+    """
+    统一处理数据库完整性约束错误（IntegrityError）
+    
+    主要用于处理唯一性约束违反、外键约束违反等情况
+    
+    Args:
+        error: IntegrityError 异常对象
+        constraint_name: 约束名称（用于识别特定的约束，如 "uq_ad_data_date_product"）
+        custom_message: 自定义错误消息（如果为 None，会使用默认消息）
+        log_context: 日志上下文信息（用于记录更详细的错误信息）
+    
+    Raises:
+        HTTPException: 标准化的 HTTP 异常
+    """
+    # 提取错误消息
+    error_msg = str(error.orig) if hasattr(error, 'orig') else str(error)
+    
+    # 记录错误日志
+    log_msg = f"数据库完整性约束违反"
+    if log_context:
+        log_msg += f" ({log_context})"
+    log_msg += f": {error_msg}"
+    logger.error(log_msg)
+    
+    # 检查是否是唯一性约束错误
+    is_unique_constraint = (
+        "Duplicate entry" in error_msg or
+        "UNIQUE constraint" in error_msg or
+        (constraint_name and constraint_name in error_msg)
+    )
+    
+    if is_unique_constraint:
+        # 唯一性约束违反
+        if custom_message:
+            detail = custom_message
+        else:
+            detail = (
+                "检测到重复数据。"
+                "可能是并发操作导致的，或者数据库中已存在相同的记录。"
+                "请检查数据后重试。"
+            )
+        
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=detail
+        )
+    else:
+        # 其他完整性约束错误（如外键约束违反）
+        if custom_message:
+            detail = custom_message
+        else:
+            detail = f"数据保存失败：{error_msg}"
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=detail
+        )

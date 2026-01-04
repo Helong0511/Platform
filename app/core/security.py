@@ -414,3 +414,29 @@ async def require_admin_or_self(
         )
 
     return current_user
+
+
+def is_admin(user: User) -> bool:
+    """
+    检查用户是否为管理员
+    
+    参数:
+        user: 用户对象
+    
+    返回:
+        bool: 如果是管理员返回 True，否则返回 False
+    """
+    return user.role == UserRole.ADMIN
+
+
+def is_client(user: User) -> bool:
+    """
+    检查用户是否为客户
+    
+    参数:
+        user: 用户对象
+    
+    返回:
+        bool: 如果是客户返回 True，否则返回 False
+    """
+    return user.role == UserRole.CLIENT

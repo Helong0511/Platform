@@ -22,12 +22,18 @@ from sqlalchemy.future import select
 
 # 本地导入
 from app.core.database import get_db
-from app.core.security import get_current_user, require_admin
+from app.core.security import get_current_user, require_admin, is_admin
 from app.core.config import settings
+from app.core.constants import MAX_PAGE_SIZE, ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
 from app.models.models import AdData, Client, Product, User, UserRole, ProductAssignment, CountryInfo
 from sqlalchemy import and_, or_
 from datetime import date as date_type
-from app.core.query_utils import product_assignment_join_condition, check_use_assignment_table
+from app.core.query_utils import (
+    product_assignment_join_condition, 
+    check_use_assignment_table, 
+    join_country_info as join_country_info_util,
+    apply_date_range_filter
+)
 from app.schemas.ad_data import (
     AdDataListResponse,
     AdDataResponse,
@@ -44,19 +50,16 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+# 使用公共函数 join_country_info，传入 AdData.country_code 列
 def join_country_info(query):
     """
     辅助函数：统一处理 CountryInfo 的 JOIN，解决排序规则冲突问题
     临时方案：使用 COLLATE 统一排序规则
     永久方案：运行 scripts/fix_collation_issue.sql 修改表结构
+    
+    注意：此函数是对公共函数 join_country_info 的包装，传入 AdData.country_code
     """
-    # 使用列对象的 collate() 方法统一排序规则
-    # 这样可以确保 SQLAlchemy 正确处理表别名和列引用
-    return query.outerjoin(
-        CountryInfo,
-        AdData.country_code.collate('utf8mb4_unicode_ci') == 
-        CountryInfo.alpha_2_code.collate('utf8mb4_unicode_ci')
-    )
+    return join_country_info_util(query, AdData.country_code)
 
 
 @router.get("/", response_model=ResponseBaseSchema[AdDataListResponse], summary="获取广告数据列表")
@@ -65,7 +68,7 @@ async def get_ad_data(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
         page: int = Query(1, ge=1, description="页码"),
-        page_size: int = Query(10, ge=1, le=100, description="每页条数"),
+        page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
         start_date: date | None = Query(None, description="开始日期，格式YYYY-MM-DD"),
         end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD"),
         client_id: int | None = Query(None, description="客户ID过滤"),
@@ -143,7 +146,7 @@ async def get_ad_data(
 
     # ====== 权限过滤 ======
     # 根据用户角色设置权限过滤（数据隔离）
-    if current_user.role != UserRole.ADMIN:
+    if not is_admin(current_user):
         # 客户只能查看自己的广告数据（基于产品分配历史）
         # 通过ProductAssignment匹配的Client.user_id来过滤
         query = query.where(Client.user_id == current_user.id)
@@ -178,28 +181,14 @@ async def get_ad_data(
             logger.warning(f"国家代码长度超过2个字符: {country_code_clean}，将忽略此过滤条件")
 
     # ====== 日期范围过滤 ======
-    # 注意：AdData.date 是 DateTime 类型，需要转换为 datetime 进行比较
-    if start_date:
-        # 将 date 转换为 datetime 的开始时间（00:00:00）进行比较
-        start_datetime = datetime.combine(start_date, datetime.min.time())
-        query = query.where(AdData.date >= start_datetime)
-    if end_date:
-        # 将 date 转换为 datetime 的结束时间（23:59:59）进行比较
-        end_datetime = datetime.combine(end_date, datetime.max.time())
-        query = query.where(AdData.date <= end_datetime)
-    # 如果没有指定日期范围，默认查询当前月的数据（提高用户体验）
-    elif not start_date and not end_date:
-        today = date.today()
-        # 当前月的第一天
-        month_start = date(today.year, today.month, 1)
-        # 当前月的最后一天
-        _, last_day = monthrange(today.year, today.month)
-        month_end = date(today.year, today.month, last_day)
-
-        month_start_datetime = datetime.combine(month_start, datetime.min.time())
-        month_end_datetime = datetime.combine(month_end, datetime.max.time())
-        query = query.where(AdData.date >= month_start_datetime)
-        query = query.where(AdData.date <= month_end_datetime)
+    # 使用统一的日期范围过滤函数，如果没有指定日期范围，默认查询当前月的数据
+    query = apply_date_range_filter(
+        query,
+        AdData.date,
+        start_date,
+        end_date,
+        default_to_current_month=True
+    )
 
     # 验证排序字段并设置排序
     # 支持按日期、客户、产品以及广告数据字段排序
@@ -249,7 +238,7 @@ async def get_ad_data(
         filter_conditions = []
 
         # 权限过滤
-        if current_user.role != UserRole.ADMIN:
+        if not is_admin(current_user):
             filter_conditions.append(Client.user_id == current_user.id)
         elif client_id:
             filter_conditions.append(Client.id == client_id)
@@ -265,22 +254,28 @@ async def get_ad_data(
             except ValueError:
                 pass
 
-        # 日期范围过滤
-        if start_date:
-            start_datetime = datetime.combine(start_date, datetime.min.time())
-            filter_conditions.append(AdData.date >= start_datetime)
-        if end_date:
-            end_datetime = datetime.combine(end_date, datetime.max.time())
-            filter_conditions.append(AdData.date <= end_datetime)
-        elif not start_date and not end_date:
+        # 日期范围过滤：使用统一的日期范围条件函数
+        # 如果没有指定日期范围，默认使用当前月
+        date_range_start = start_date
+        date_range_end = end_date
+        if not date_range_start and not date_range_end:
             today = date.today()
             month_start = date(today.year, today.month, 1)
             _, last_day = monthrange(today.year, today.month)
             month_end = date(today.year, today.month, last_day)
-            month_start_datetime = datetime.combine(month_start, datetime.min.time())
-            month_end_datetime = datetime.combine(month_end, datetime.max.time())
-            filter_conditions.append(AdData.date >= month_start_datetime)
-            filter_conditions.append(AdData.date <= month_end_datetime)
+            date_range_start = month_start
+            date_range_end = month_end
+        
+        date_condition = date_range_condition(AdData.date, date_range_start, date_range_end)
+        if date_condition is not None:
+            # date_range_condition 可能返回单个条件或 and_() 组合的条件
+            # 对于 filter_conditions 列表，我们需要将条件拆解
+            if isinstance(date_condition, and_):
+                # 如果是 and_() 组合，提取其中的条件
+                filter_conditions.extend(date_condition.clauses)
+            else:
+                # 如果是单个条件，直接添加
+                filter_conditions.append(date_condition)
 
         # 优化：计数查询不需要JOIN User表，减少JOIN数量
         count_query = select(func.count(AdData.id))
@@ -358,32 +353,23 @@ async def get_ad_data(
             2
         )
         display_rate = ad_data.display_rate if ad_data.display_rate is not None else round(
-            (ad_data.display_count / ad_data.match_count * 100) if ad_data.match_count > 0 else 0.0,
+            (ad_data.display_count / ad_data.match_count * PERCENTAGE_MULTIPLIER) if ad_data.match_count > 0 else 0.0,
             2
         )
         click_rate = ad_data.click_rate if ad_data.click_rate is not None else round(
-            (ad_data.click_count / ad_data.display_count * 100) if ad_data.display_count > 0 else 0.0,
+            (ad_data.click_count / ad_data.display_count * PERCENTAGE_MULTIPLIER) if ad_data.display_count > 0 else 0.0,
             2
         )
         viewability_rate = ad_data.viewability_rate if ad_data.viewability_rate is not None else 0.0
 
         # 根据用户角色决定返回哪些字段
-        # 将 DateTime 转换为 date
-        date_value = ad_data.date
-        if isinstance(date_value, datetime):
-            date_value = date_value.date()
-        elif hasattr(date_value, 'date'):
-            date_value = date_value.date()
+        # 将 DateTime 转换为 date：使用统一的日期键规范化函数
+        from app.api.api_v1.endpoints.excel.utils import normalize_date_key
+        date_value = normalize_date_key(ad_data.date)
 
-        # 获取国家名称：如果通过JOIN找到了国家信息，使用它；否则根据country_code回退
-        if country_info:
-            country_name_zh = country_info.country_name_zh
-        elif ad_data.country_code == "AA":
-            country_name_zh = "未知区域"
-        elif ad_data.country_code == "ZZ":
-            country_name_zh = "全部区域"
-        else:
-            country_name_zh = None
+        # 获取国家名称：使用统一的国家名称解析函数
+        from app.core.country_code import resolve_country_name
+        country_name_zh = resolve_country_name(country_info, ad_data.country_code)
 
         response_data = {
             "id": ad_data.id,
@@ -407,7 +393,7 @@ async def get_ad_data(
         }
 
         # 管理员额外返回未减扣数据和客户信息
-        if current_user.role == UserRole.ADMIN:
+        if is_admin(current_user):
             response_data.update({
                 "client_id": client.id,
                 "client_name": client.company_name,
@@ -483,27 +469,17 @@ async def get_clients_with_data(
         query = query.where(Product.is_active == True)
 
         # 权限过滤
-        if current_user.role != UserRole.ADMIN:
+        if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
 
-        # 日期范围过滤
-        if start_date:
-            start_datetime = datetime.combine(start_date, datetime.min.time())
-            query = query.where(AdData.date >= start_datetime)
-        if end_date:
-            end_datetime = datetime.combine(end_date, datetime.max.time())
-            query = query.where(AdData.date <= end_datetime)
-        # 如果没有指定日期范围，默认查询当前月的数据
-        elif not start_date and not end_date:
-            today = date.today()
-            month_start = date(today.year, today.month, 1)
-            _, last_day = monthrange(today.year, today.month)
-            month_end = date(today.year, today.month, last_day)
-
-            month_start_datetime = datetime.combine(month_start, datetime.min.time())
-            month_end_datetime = datetime.combine(month_end, datetime.max.time())
-            query = query.where(AdData.date >= month_start_datetime)
-            query = query.where(AdData.date <= month_end_datetime)
+        # 日期范围过滤：使用统一的日期范围过滤函数，如果没有指定日期范围，默认查询当前月的数据
+        query = apply_date_range_filter(
+            query,
+            AdData.date,
+            start_date,
+            end_date,
+            default_to_current_month=True
+        )
 
         # 执行查询
         result = await db.execute(query)
@@ -582,7 +558,7 @@ async def get_countries_with_data(
         query = query.where(Product.is_active == True)
 
         # 权限过滤
-        if current_user.role != UserRole.ADMIN:
+        if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
         else:
             if client_id:
@@ -592,23 +568,14 @@ async def get_countries_with_data(
         if product_id:
             query = query.where(AdData.product_id == product_id)
 
-        # 日期范围过滤
-        if start_date:
-            start_datetime = datetime.combine(start_date, datetime.min.time())
-            query = query.where(AdData.date >= start_datetime)
-        if end_date:
-            end_datetime = datetime.combine(end_date, datetime.max.time())
-            query = query.where(AdData.date <= end_datetime)
-        elif not start_date and not end_date:
-            today = date.today()
-            month_start = date(today.year, today.month, 1)
-            _, last_day = monthrange(today.year, today.month)
-            month_end = date(today.year, today.month, last_day)
-
-            month_start_datetime = datetime.combine(month_start, datetime.min.time())
-            month_end_datetime = datetime.combine(month_end, datetime.max.time())
-            query = query.where(AdData.date >= month_start_datetime)
-            query = query.where(AdData.date <= month_end_datetime)
+        # 日期范围过滤：使用统一的日期范围过滤函数，如果没有指定日期范围，默认查询当前月的数据
+        query = apply_date_range_filter(
+            query,
+            AdData.date,
+            start_date,
+            end_date,
+            default_to_current_month=True
+        )
 
         # 过滤掉空的国家代码（使用 and_ 组合条件，更高效）
         query = query.where(
@@ -628,13 +595,14 @@ async def get_countries_with_data(
             if not country_code:
                 continue
             
-            # 处理特殊国家代码
-            if country_code == 'ZZ':
-                display_name = '全部区域'
-            elif country_code == 'AA':
-                display_name = '未知区域'
-            else:
-                display_name = country_name_zh or country_code
+            # 处理特殊国家代码：使用统一的国家名称解析函数
+            from app.core.country_code import resolve_country_name
+            display_name = resolve_country_name(
+                None,  # 没有 CountryInfo 对象，只有代码
+                country_code,
+                default_unknown='未知区域',
+                default_all='全部区域'
+            ) or country_name_zh or country_code
             
             countries_list.append({
                 "code": country_code,
@@ -720,7 +688,7 @@ async def get_products_with_data(
         query = query.where(Product.is_active == True)
 
         # 权限过滤
-        if current_user.role != UserRole.ADMIN:
+        if not is_admin(current_user):
             # 客户用户：通过 Client.user_id 过滤，只能看到自己的产品
             query = query.where(Client.user_id == current_user.id)
         elif client_id:
@@ -728,26 +696,14 @@ async def get_products_with_data(
             # 如果 client_id=None，返回所有客户的产品
             query = query.where(Client.id == client_id)
 
-        # 日期范围过滤
-        if start_date:
-            # 如果指定了开始日期，使用指定的日期范围
-            start_datetime = datetime.combine(start_date, datetime.min.time())
-            query = query.where(AdData.date >= start_datetime)
-        if end_date:
-            # 如果指定了结束日期，使用指定的日期范围
-            end_datetime = datetime.combine(end_date, datetime.max.time())
-            query = query.where(AdData.date <= end_datetime)
-        # 如果没有指定日期范围，默认查询当前月的数据
-        elif not start_date and not end_date:
-            today = date.today()
-            month_start = date(today.year, today.month, 1)
-            _, last_day = monthrange(today.year, today.month)
-            month_end = date(today.year, today.month, last_day)
-
-            month_start_datetime = datetime.combine(month_start, datetime.min.time())
-            month_end_datetime = datetime.combine(month_end, datetime.max.time())
-            query = query.where(AdData.date >= month_start_datetime)
-            query = query.where(AdData.date <= month_end_datetime)
+        # 日期范围过滤：使用统一的日期范围过滤函数，如果没有指定日期范围，默认查询当前月的数据
+        query = apply_date_range_filter(
+            query,
+            AdData.date,
+            start_date,
+            end_date,
+            default_to_current_month=True
+        )
 
         # 执行查询
         result = await db.execute(query)
@@ -783,7 +739,7 @@ async def get_daily_summary(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
         page: int = Query(1, ge=1, description="页码"),
-        page_size: int = Query(10, ge=1, le=100, description="每页条数"),
+        page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
         start_date: date | None = Query(None, description="开始日期，格式YYYY-MM-DD"),
         end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD"),
         client_id: int | None = Query(None, description="客户ID过滤"),
@@ -852,7 +808,7 @@ async def get_daily_summary(
     query = query.join(User, Client.user_id == User.id)
     
     # ====== 权限过滤 ======
-    if current_user.role != UserRole.ADMIN:
+    if not is_admin(current_user):
         query = query.where(Client.user_id == current_user.id)
     else:
         if client_id:
@@ -867,21 +823,14 @@ async def get_daily_summary(
             logger.warning(f"无效的产品ID参数: {product_id}")
     
     # ====== 日期范围过滤 ======
-    if start_date:
-        start_datetime = datetime.combine(start_date, datetime.min.time())
-        query = query.where(AdData.date >= start_datetime)
-    if end_date:
-        end_datetime = datetime.combine(end_date, datetime.max.time())
-        query = query.where(AdData.date <= end_datetime)
-    elif not start_date and not end_date:
-        today = date.today()
-        month_start = date(today.year, today.month, 1)
-        _, last_day = monthrange(today.year, today.month)
-        month_end = date(today.year, today.month, last_day)
-        month_start_datetime = datetime.combine(month_start, datetime.min.time())
-        month_end_datetime = datetime.combine(month_end, datetime.max.time())
-        query = query.where(AdData.date >= month_start_datetime)
-        query = query.where(AdData.date <= month_end_datetime)
+    # 使用统一的日期范围过滤函数，如果没有指定日期范围，默认查询当前月的数据
+    query = apply_date_range_filter(
+        query,
+        AdData.date,
+        start_date,
+        end_date,
+        default_to_current_month=True
+    )
     
     # ====== 分组和排序 ======
     query = query.group_by(
@@ -974,7 +923,7 @@ async def get_daily_summary(
                 subquery = subquery.join(Client, Product.client_id == Client.id)
             
             # 应用相同的过滤条件
-            if current_user.role != UserRole.ADMIN:
+            if not is_admin(current_user):
                 subquery = subquery.where(Client.user_id == current_user.id)
             else:
                 if client_id:
@@ -987,21 +936,14 @@ async def get_daily_summary(
                 except ValueError:
                     pass
             
-            if start_date:
-                start_datetime = datetime.combine(start_date, datetime.min.time())
-                subquery = subquery.where(AdData.date >= start_datetime)
-            if end_date:
-                end_datetime = datetime.combine(end_date, datetime.max.time())
-                subquery = subquery.where(AdData.date <= end_datetime)
-            elif not start_date and not end_date:
-                today = date.today()
-                month_start = date(today.year, today.month, 1)
-                _, last_day = monthrange(today.year, today.month)
-                month_end = date(today.year, today.month, last_day)
-                month_start_datetime = datetime.combine(month_start, datetime.min.time())
-                month_end_datetime = datetime.combine(month_end, datetime.max.time())
-                subquery = subquery.where(AdData.date >= month_start_datetime)
-                subquery = subquery.where(AdData.date <= month_end_datetime)
+            # 日期范围过滤：使用统一的日期范围过滤函数，如果没有指定日期范围，默认查询当前月的数据
+            subquery = apply_date_range_filter(
+                subquery,
+                AdData.date,
+                start_date,
+                end_date,
+                default_to_current_month=True
+            )
             
             # 分组去重
             subquery = subquery.group_by(
@@ -1053,13 +995,13 @@ async def get_daily_summary(
         # 根据汇总后的数值重新计算比率（每日汇总时，使用汇总后的数值计算）
         # 覆盖率 = 匹配数 / 请求数 * 100
         coverage_rate = round(
-            (total_match_count / total_request_count * 100) if total_request_count > 0 else 0.0,
+            (total_match_count / total_request_count * PERCENTAGE_MULTIPLIER) if total_request_count > 0 else 0.0,
             2
         )
         
         # 展示率 = 展示数 / 匹配数 * 100
         display_rate = round(
-            (total_display_count / total_match_count * 100) if total_match_count > 0 else 0.0,
+            (total_display_count / total_match_count * PERCENTAGE_MULTIPLIER) if total_match_count > 0 else 0.0,
             2
         )
         
@@ -1071,13 +1013,13 @@ async def get_daily_summary(
         
         # eCPM = 收益 / 展示数 * 1000
         ecpm_after_deduct = round(
-            (total_revenue_after / total_display_count * 1000) if total_display_count > 0 else 0.0,
+            (total_revenue_after / total_display_count * ECPM_MULTIPLIER) if total_display_count > 0 else 0.0,
             4
         )
         
         # 扣减前eCPM = 扣减前收益 / 展示数 * 1000
         ecpm_before_deduct = round(
-            (total_revenue_before / total_display_count * 1000) if total_display_count > 0 else 0.0,
+            (total_revenue_before / total_display_count * ECPM_MULTIPLIER) if total_display_count > 0 else 0.0,
             4
         )
         
@@ -1107,7 +1049,7 @@ async def get_daily_summary(
         }
         
         # 管理员额外返回未减扣数据
-        if current_user.role == UserRole.ADMIN:
+        if is_admin(current_user):
             response_data.update({
                 "client_id": row.client_id,
                 "client_name": client_name,
@@ -1246,7 +1188,7 @@ async def get_ad_data_detail(
             )
 
         # 权限检查
-        if current_user.role != UserRole.ADMIN and client.user_id != current_user.id:
+        if not is_admin(current_user) and client.user_id != current_user.id:
             raise_api_exception(
                 ErrorCode.AD_DATA_NO_PERMISSION,
                 detail=f"您没有权限访问广告数据ID {data_id}，该数据不属于您的客户账户"
@@ -1260,17 +1202,17 @@ async def get_ad_data_detail(
             detail=f"查询广告数据失败：{str(e)}。请稍后重试或联系管理员"
         )
 
-    # 使用数据库字段中的比率（如果为空则计算）
-    coverage_rate = ad_data.coverage_rate if ad_data.coverage_rate is not None else round(
-        (ad_data.match_count / ad_data.request_count * 100) if ad_data.request_count > 0 else 0.0,
-        2
-    )
-    display_rate = ad_data.display_rate if ad_data.display_rate is not None else round(
-        (ad_data.display_count / ad_data.match_count * 100) if ad_data.match_count > 0 else 0.0,
-        2
-    )
-    click_rate = ad_data.click_rate if ad_data.click_rate is not None else round(
-        (ad_data.click_count / ad_data.display_count * 100) if ad_data.display_count > 0 else 0.0,
+        # 使用数据库字段中的比率（如果为空则计算）
+        coverage_rate = ad_data.coverage_rate if ad_data.coverage_rate is not None else round(
+            (ad_data.match_count / ad_data.request_count * PERCENTAGE_MULTIPLIER) if ad_data.request_count > 0 else 0.0,
+            2
+        )
+        display_rate = ad_data.display_rate if ad_data.display_rate is not None else round(
+            (ad_data.display_count / ad_data.match_count * PERCENTAGE_MULTIPLIER) if ad_data.match_count > 0 else 0.0,
+            2
+        )
+        click_rate = ad_data.click_rate if ad_data.click_rate is not None else round(
+            (ad_data.click_count / ad_data.display_count * PERCENTAGE_MULTIPLIER) if ad_data.display_count > 0 else 0.0,
         2
     )
 
@@ -1336,7 +1278,7 @@ async def update_ad_data(
     - 使用PUT方法符合RESTful规范
     """
     # 权限检查
-    if current_user.role != UserRole.ADMIN:
+    if not is_admin(current_user):
         raise_api_exception(
             ErrorCode.AD_DATA_UPDATE_FORBIDDEN,
             detail="仅管理员可以更新广告数据。客户用户没有更新权限"
@@ -1459,14 +1401,17 @@ async def update_ad_data(
     # 保存更新
     try:
         db.add(ad_data)
-        await db.commit()
+        # 注意：不需要手动提交事务，get_db 依赖会自动处理
+        # 刷新对象以触发约束检查（在自动提交之前）
+        await db.flush()
         await db.refresh(ad_data)
     except Exception as e:
-        await db.rollback()
+        # 注意：不需要手动回滚事务，get_db 依赖会自动处理
         error_msg = str(e)
         
-        # 检查是否是唯一性约束冲突
-        if "IntegrityError" in str(type(e)) or "Duplicate entry" in error_msg or "uq_ad_data_date_product_country" in error_msg:
+        # 检查是否是 IntegrityError（唯一性约束冲突）
+        from sqlalchemy.exc import IntegrityError
+        if isinstance(e, IntegrityError):
             # 提取冲突信息
             conflict_info = ""
             if "Duplicate entry" in error_msg:
@@ -1502,9 +1447,16 @@ async def update_ad_data(
             elif hasattr(date_value, 'date'):
                 date_value = date_value.date()
             
-            raise_api_exception(
-                ErrorCode.OPERATION_FAILED,
-                detail=f"更新失败：已存在相同的记录（日期={date_value}，产品={product_name}，国家={country_name}）。同一日期、产品和国家的组合必须唯一，请先删除或修改冲突的记录。{conflict_info}"
+            # 使用统一的 IntegrityError 处理函数
+            from app.core.exceptions import handle_integrity_error
+            handle_integrity_error(
+                error=e,
+                constraint_name="uq_ad_data_date_product_country",
+                custom_message=(
+                    f"更新失败：已存在相同的记录（日期={date_value}，产品={product_name}，国家={country_name}）。"
+                    f"同一日期、产品和国家的组合必须唯一，请先删除或修改冲突的记录。{conflict_info}"
+                ),
+                log_context="Update ad data"
             )
         
         logger.error(f"更新广告数据失败: {error_msg}", exc_info=True)
@@ -1575,7 +1527,7 @@ async def batch_delete_ad_data(
 
     # 权限检查和过滤
     deletable_data = []
-    if current_user.role != UserRole.ADMIN:
+    if not is_admin(current_user):
         # 客户只能删除自己的广告数据
         for data_row in all_data:
             if use_assignment_table:
@@ -1611,10 +1563,10 @@ async def batch_delete_ad_data(
         result = await db.execute(delete_stmt)
         deleted_count = result.rowcount
 
-        await db.commit()
+        # 注意：不需要手动提交事务，get_db 依赖会自动处理
         logger.info(f"Batch deleted {deleted_count} ad data records by {current_user.username}")
     except Exception as e:
-        await db.rollback()
+        # 注意：不需要手动回滚事务，get_db 依赖会自动处理
         logger.error(f"批量删除广告数据失败: {str(e)}", exc_info=True)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
@@ -1691,7 +1643,7 @@ async def delete_ad_data(
         )
 
     # 权限检查
-    if current_user.role != UserRole.ADMIN:
+    if not is_admin(current_user):
         # 客户只能删除自己的广告数据
         if client.user_id != current_user.id:
             raise_api_exception(
@@ -1702,11 +1654,11 @@ async def delete_ad_data(
     # 删除广告数据
     try:
         await db.delete(ad_data)
-        await db.commit()
+        # 注意：不需要手动提交事务，get_db 依赖会自动处理
         logger.info(
             f"Ad data {data_id} (date: {ad_data.date}, product: {product.name}) deleted by {current_user.username}")
     except Exception as e:
-        await db.rollback()
+        # 注意：不需要手动回滚事务，get_db 依赖会自动处理
         logger.error(f"删除广告数据失败: {str(e)}", exc_info=True)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
@@ -1797,7 +1749,7 @@ async def get_ad_data_summary(
         query = query.join(Client, Product.client_id == Client.id)
 
     # 根据用户角色设置权限过滤
-    if current_user.role != UserRole.ADMIN:
+    if not is_admin(current_user):
         # 客户只能查看自己的广告数据汇总
         query = query.where(Client.user_id == current_user.id)
     else:
@@ -1812,27 +1764,14 @@ async def get_ad_data_summary(
     if product_id:
         query = query.where(AdData.product_id == product_id)
 
-    # 日期范围过滤
-    # 注意：AdData.date 是 DateTime 类型，需要转换为 datetime 进行比较
-    if start_date:
-        start_datetime = datetime.combine(start_date, datetime.min.time())
-        query = query.where(AdData.date >= start_datetime)
-    if end_date:
-        end_datetime = datetime.combine(end_date, datetime.max.time())
-        query = query.where(AdData.date <= end_datetime)
-    # 如果没有指定日期范围，默认查询当前月的数据
-    elif not start_date and not end_date:
-        today = date.today()
-        # 当前月的第一天
-        month_start = date(today.year, today.month, 1)
-        # 当前月的最后一天
-        _, last_day = monthrange(today.year, today.month)
-        month_end = date(today.year, today.month, last_day)
-
-        month_start_datetime = datetime.combine(month_start, datetime.min.time())
-        month_end_datetime = datetime.combine(month_end, datetime.max.time())
-        query = query.where(AdData.date >= month_start_datetime)
-        query = query.where(AdData.date <= month_end_datetime)
+    # 日期范围过滤：使用统一的日期范围过滤函数，如果没有指定日期范围，默认查询当前月的数据
+    query = apply_date_range_filter(
+        query,
+        AdData.date,
+        start_date,
+        end_date,
+        default_to_current_month=True
+    )
 
     # 执行汇总查询
     result = await db.execute(query)
@@ -1861,7 +1800,7 @@ async def get_ad_data_summary(
         avg_click_rate = summary.avg_click_rate or 0
 
     # 如果是管理员，还需要汇总未减扣的数据
-    if current_user.role == UserRole.ADMIN:
+    if is_admin(current_user):
         admin_query = select(
             func.sum(AdData.ecpm_before_deduct).label("total_ecpm_before"),
             func.sum(AdData.revenue_before_deduct).label("total_revenue_before")
@@ -1896,25 +1835,14 @@ async def get_ad_data_summary(
             admin_query = admin_query.where(Client.id == client_id)
         if product_id:
             admin_query = admin_query.where(AdData.product_id == product_id)
-        if start_date:
-            start_datetime = datetime.combine(start_date, datetime.min.time())
-            admin_query = admin_query.where(AdData.date >= start_datetime)
-        if end_date:
-            end_datetime = datetime.combine(end_date, datetime.max.time())
-            admin_query = admin_query.where(AdData.date <= end_datetime)
-        # 如果没有指定日期范围，默认查询当前月的数据
-        elif not start_date and not end_date:
-            today = date.today()
-            # 当前月的第一天
-            month_start = date(today.year, today.month, 1)
-            # 当前月的最后一天
-            _, last_day = monthrange(today.year, today.month)
-            month_end = date(today.year, today.month, last_day)
-
-            month_start_datetime = datetime.combine(month_start, datetime.min.time())
-            month_end_datetime = datetime.combine(month_end, datetime.max.time())
-            admin_query = admin_query.where(AdData.date >= month_start_datetime)
-            admin_query = admin_query.where(AdData.date <= month_end_datetime)
+        # 日期范围过滤：使用统一的日期范围过滤函数，如果没有指定日期范围，默认查询当前月的数据
+        admin_query = apply_date_range_filter(
+            admin_query,
+            AdData.date,
+            start_date,
+            end_date,
+            default_to_current_month=True
+        )
 
         admin_result = await db.execute(admin_query)
         admin_summary = admin_result.first()
@@ -2009,7 +1937,7 @@ async def get_ad_data_date_range(
         query = query.where(Product.is_active == True)
         
         # 权限过滤
-        if current_user.role != UserRole.ADMIN:
+        if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
         else:
             if client_id:

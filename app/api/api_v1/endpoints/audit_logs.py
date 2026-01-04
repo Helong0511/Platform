@@ -12,6 +12,7 @@ import logging
 
 from app.core.database import get_db
 from app.core.security import require_admin, get_current_user
+from app.core.constants import MAX_PAGE_SIZE
 from app.models.models import UserAuditLog, User
 from fastapi import Request
 from app.schemas.audit_log import (
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 )
 async def get_audit_logs(
         page: int = Query(1, ge=1, description="页码"),
-        page_size: int = Query(10, ge=1, le=100, description="每页数量"),
+        page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页数量"),
         user_id: Optional[int] = Query(None, description="用户ID筛选"),
         username: Optional[str] = Query(None, max_length=50, description="用户名筛选"),
         action_type: Optional[str] = Query(None, max_length=50, description="操作类型筛选"),

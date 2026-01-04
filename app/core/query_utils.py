@@ -182,3 +182,30 @@ async def check_use_assignment_table(db) -> bool:
         # 如果查询失败（例如表不存在），返回 False，使用旧的查询方式
         return False
 
+
+def join_country_info(query: Select, country_code_column: Column) -> Select:
+    """
+    统一处理 CountryInfo 的 JOIN，解决排序规则冲突问题
+    
+    临时方案：使用 COLLATE 统一排序规则
+    永久方案：运行 scripts/fix_collation_issue.sql 修改表结构
+    
+    Args:
+        query: SQLAlchemy 查询对象
+        country_code_column: 国家代码列（如 AdData.country_code 或 TBSearchData.country_code）
+    
+    Returns:
+        应用了 CountryInfo JOIN 的查询对象
+    
+    Example:
+        query = join_country_info(query, AdData.country_code)
+    """
+    from app.models.models import CountryInfo
+    
+    # 使用列对象的 collate() 方法统一排序规则
+    # 这样可以确保 SQLAlchemy 正确处理表别名和列引用
+    return query.outerjoin(
+        CountryInfo,
+        country_code_column.collate('utf8mb4_unicode_ci') == 
+        CountryInfo.alpha_2_code.collate('utf8mb4_unicode_ci')
+    )

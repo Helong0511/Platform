@@ -15,6 +15,7 @@ from app.core.security import get_current_user, require_admin
 from app.core.config import settings
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import get_app_now_naive
 from app.models.models import User, UserRole
 from app.models.session import UserSession, TokenBlacklist
@@ -51,7 +52,7 @@ async def get_my_sessions(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
         page: int = Query(1, ge=1, description="页码"),
-        page_size: int = Query(10, ge=1, le=100, description="每页条数")
+        page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数")
 ):
     """
     获取当前用户的活跃会话列表
@@ -240,7 +241,7 @@ async def get_user_sessions(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin),
         page: int = Query(1, ge=1, description="页码"),
-        page_size: int = Query(10, ge=1, le=100, description="每页条数")
+        page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数")
 ):
     """
     获取指定用户的活跃会话列表（仅管理员）

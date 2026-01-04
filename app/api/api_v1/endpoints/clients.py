@@ -23,6 +23,7 @@ import pandas as pd
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin, require_admin_or_self
 from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
+from app.core.constants import MAX_PAGE_SIZE
 from app.models.models import User, Client, UserRole, Product
 from app.schemas.client import ClientCreate, ClientUpdate, ClientResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -49,7 +50,7 @@ async def get_clients(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin),
         page: int = Query(1, ge=1, description="页码"),
-        page_size: int = Query(10, ge=1, le=100, description="每页条数"),
+        page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
         company_name: str | None = Query(None, description="公司名称过滤"),
         is_active: bool | None = Query(None, description="是否激活过滤")
 ):
@@ -268,7 +269,9 @@ async def create_client(
         )
 
         db.add(client)
-        await db.commit()
+        # 注意：不需要手动提交事务，get_db 依赖会自动处理
+        # 刷新对象以获取最新数据（在自动提交之前）
+        await db.flush()
         await db.refresh(client)
 
         logger.info(f"创建客户: {client.company_name} (ID: {client.id}), 关联用户: {user.username} (ID: {user.id})")
@@ -291,7 +294,7 @@ async def create_client(
         return ResponseBaseSchema.success(data=ClientResponse.model_validate(client))
 
     except Exception as e:
-        await db.rollback()
+        # 注意：不需要手动回滚事务，get_db 依赖会自动处理
         logger.error(f"创建客户失败: {str(e)}", exc_info=True)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
@@ -380,10 +383,12 @@ async def update_client(
 
     # 保存到数据库
     try:
-        await db.commit()
+        # 注意：不需要手动提交事务，get_db 依赖会自动处理
+        # 刷新对象以获取最新数据（在自动提交之前）
+        await db.flush()
         await db.refresh(client)
     except Exception as e:
-        await db.rollback()
+        # 注意：不需要手动回滚事务，get_db 依赖会自动处理
         logger.error(f"更新客户失败: {str(e)}", exc_info=True)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
@@ -490,8 +495,7 @@ async def update_client_switches(
         stmt = update(Client).where(Client.id == client_id).values(**update_values)
         await db.execute(stmt)
         
-        # 提交事务
-        await db.commit()
+        # 注意：不需要手动提交事务，get_db 依赖会自动处理
         
         # 重新查询以获取最新数据（使用selectinload预加载用户关系，保持与其他端点一致）
         result = await db.execute(
@@ -505,6 +509,8 @@ async def update_client_switches(
                 detail=f"更新后无法找到客户ID {client_id}，请刷新页面重试"
             )
         
+        # 刷新对象以获取最新数据（在自动提交之前）
+        await db.flush()
         await db.refresh(client)
         
         # 确保布尔字段不是 None（数据库约束应该保证，但为了安全起见）
@@ -514,7 +520,7 @@ async def update_client_switches(
             client.password_change_enabled = False
             
     except Exception as e:
-        await db.rollback()
+        # 注意：不需要手动回滚事务，get_db 依赖会自动处理
         # 如果是我们自己的异常，直接抛出
         if isinstance(e, HTTPException):
             raise e
@@ -713,7 +719,7 @@ async def delete_client(
 
     # 删除客户
     await db.delete(client)
-    await db.commit()
+    # 注意：不需要手动提交事务，get_db 依赖会自动处理
 
     logger.info(f"Client {client.company_name} deleted by {current_user.username}")
 

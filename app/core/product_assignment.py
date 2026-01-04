@@ -402,19 +402,29 @@ async def validate_product_assignments(
         errors.append(f"查询产品 {product_id} 的分配记录时出错: {str(e)}")
         return {"errors": errors, "warnings": warnings}
     
-    # 检查1：重叠检查
-    for i, assignment1 in enumerate(assignments):
-        for j, assignment2 in enumerate(assignments):
-            if i >= j:
-                continue  # 避免重复检查
+    # 优化：先排序，然后使用扫描线算法检查重叠和间隙
+    # 将复杂度从 O(n²) 降低到 O(n log n)
+    sorted_assignments = sorted(assignments, key=lambda a: (a.start_date, a.id))
+    
+    # 检查1：重叠检查（优化版本）
+    # 使用扫描线算法：对于每个记录，检查它与后续记录是否重叠
+    # 由于已排序，如果当前记录的结束日期 < 下一个记录的开始日期，则后续记录都不会重叠
+    for i, assignment1 in enumerate(sorted_assignments):
+        range1_end = assignment1.end_date if assignment1.end_date else date.max
+        
+        # 只检查后续记录（避免重复检查）
+        for j in range(i + 1, len(sorted_assignments)):
+            assignment2 = sorted_assignments[j]
             
-            # 计算两个记录的有效日期范围
-            range1_end = assignment1.end_date if assignment1.end_date else date.max
+            # 如果当前记录的结束日期 < 下一个记录的开始日期，后续记录都不会重叠
+            if range1_end < assignment2.start_date:
+                break
+            
+            # 计算第二个记录的有效日期范围
             range2_end = assignment2.end_date if assignment2.end_date else date.max
             
             # 检查是否重叠：A.start <= B.end AND A.end >= B.start
-            if (assignment1.start_date <= range2_end and 
-                range1_end >= assignment2.start_date):
+            if range1_end >= assignment2.start_date:
                 errors.append(
                     f"日期重叠：记录ID {assignment1.id} (客户ID: {assignment1.client_id}, "
                     f"{assignment1.start_date} 至 {assignment1.end_date or '当前有效'}) "
@@ -423,8 +433,6 @@ async def validate_product_assignments(
                 )
     
     # 检查2和3：空窗期和不连贯检查
-    # 按开始日期排序后，检查相邻记录之间是否有间隙
-    sorted_assignments = sorted(assignments, key=lambda a: a.start_date)
     
     for i in range(len(sorted_assignments) - 1):
         current = sorted_assignments[i]

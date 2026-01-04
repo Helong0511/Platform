@@ -44,7 +44,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.app = app
 
     async def dispatch(self, request: Request, call_next):
-        logger.info(f"RateLimitMiddleware处理请求: {request.method} {request.url.path}")
+        logger.debug(f"RateLimitMiddleware处理请求: {request.method} {request.url.path}")
         
         # ====== 排除短链接路由（不限流） ======
         # 短链接访问需要高并发支持，不能限流
@@ -64,7 +64,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         try:
             from app.core.utils import get_client_ip
             client_ip = get_client_ip(request)
-            logger.info(f"获取到客户端IP: {client_ip}")
+            logger.debug(f"获取到客户端IP: {client_ip}")
         except Exception as e:
             logger.warning(f"获取客户端IP失败: {e}，使用默认IP 'testclient'")
             client_ip = "testclient"
@@ -72,12 +72,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # ====== 检查是否为登录接口 ======
         # 登录接口使用更严格的限流策略（防止暴力破解）
         is_login = request.url.path.endswith("/login") and request.method == "POST"
-        logger.info(f"是否为登录接口: {is_login}")
-        logger.info(f"路径: {request.url.path}")
-        logger.info(f"方法: {request.method}")
+        logger.debug(f"是否为登录接口: {is_login}, 路径: {request.url.path}, 方法: {request.method}")
         limit = LOGIN_RATE_LIMIT if is_login else DEFAULT_RATE_LIMIT
         window = LOGIN_RATE_WINDOW if is_login else DEFAULT_RATE_WINDOW
-        logger.info(f"限流配置: 限制={limit}/{window}秒")
+        logger.debug(f"限流配置: 限制={limit}/{window}秒")
 
         # ====== 生产环境：对敏感接口增加额外限流 ======
         if settings.is_production:

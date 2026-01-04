@@ -365,21 +365,15 @@ export const refreshCsrfToken = async (endpoint = '/api/v1/dashboard/stats') => 
     const response = await axios.get(endpoint);
     
     // 直接从响应头获取CSRF令牌（不依赖响应拦截器）
-    const csrfToken = response.headers['x-csrf-token'] || response.headers['X-CSRF-Token'];
-    if (csrfToken) {
-      sessionStorage.setItem('csrf_token', csrfToken);
-    }
+    const { extractAndSaveCsrfToken } = await import('./csrfToken');
+    extractAndSaveCsrfToken(response);
     
     // 额外等待一小段时间，确保响应拦截器也处理完成
     await new Promise(resolve => setTimeout(resolve, 50));
   } catch (error) {
     // 即使请求失败，响应头中也可能有CSRF令牌
-    if (error.response?.headers) {
-      const csrfToken = error.response.headers['x-csrf-token'] || error.response.headers['X-CSRF-Token'];
-      if (csrfToken) {
-        sessionStorage.setItem('csrf_token', csrfToken);
-      }
-    }
+    const { extractAndSaveCsrfToken } = await import('./csrfToken');
+    extractAndSaveCsrfToken(error);
   }
 };
 
@@ -390,8 +384,10 @@ export const refreshCsrfToken = async (endpoint = '/api/v1/dashboard/stats') => 
  * @returns {Promise<boolean>} 是否成功获取CSRF令牌
  */
 export const ensureCsrfToken = async (getRequestFn = null) => {
+  const { getCsrfToken, extractAndSaveCsrfToken, fetchCsrfTokenFromEndpoints } = await import('./csrfToken');
+  
   // 检查CSRF令牌是否存在
-  let csrfToken = sessionStorage.getItem('csrf_token');
+  let csrfToken = getCsrfToken();
   
   if (csrfToken) {
     return true; // 已存在，直接返回
@@ -399,18 +395,13 @@ export const ensureCsrfToken = async (getRequestFn = null) => {
   
   // 如果提供了获取数据的函数，使用它来获取CSRF令牌
   if (getRequestFn && typeof getRequestFn === 'function') {
-    let requestSucceeded = false;
     try {
       await getRequestFn();
-      requestSucceeded = true;
     } catch (error) {
       // 检查响应中是否有CSRF令牌（即使请求失败，响应头中也可能有CSRF令牌）
-      if (error.response?.headers) {
-        const csrfTokenFromResponse = error.response.headers['x-csrf-token'] || error.response.headers['X-CSRF-Token'];
-        if (csrfTokenFromResponse) {
-          sessionStorage.setItem('csrf_token', csrfTokenFromResponse);
-          return true;
-        }
+      const csrfTokenFromResponse = extractAndSaveCsrfToken(error);
+      if (csrfTokenFromResponse) {
+        return true;
       }
       
       // 如果错误是401，可能是认证问题，不应该继续
@@ -421,7 +412,7 @@ export const ensureCsrfToken = async (getRequestFn = null) => {
     
     // 等待一小段时间，确保响应拦截器已经处理完响应头
     await new Promise(resolve => setTimeout(resolve, 150));
-    csrfToken = sessionStorage.getItem('csrf_token');
+    csrfToken = getCsrfToken();
     if (csrfToken) {
       return true;
     }
@@ -429,42 +420,10 @@ export const ensureCsrfToken = async (getRequestFn = null) => {
   
   // 如果没有提供函数，或者提供的函数失败，尝试发送一个简单的GET请求
   try {
-    // 尝试多个轻量级的GET请求端点，增加成功率
-    const endpoints = [
-      '/api/v1/users/stats',
-      '/api/v1/products/?page_size=1',
-      '/api/v1/clients/?page_size=1',
-      '/api/v1/short-links/?page_size=1',
-      '/api/v1/dashboard/stats'
-    ];
-    
-    for (const endpoint of endpoints) {
-      try {
-        await axios.get(endpoint);
-        // 等待一小段时间，确保响应拦截器已经处理完响应头
-        await new Promise(resolve => setTimeout(resolve, 150));
-        csrfToken = sessionStorage.getItem('csrf_token');
-        if (csrfToken) {
-          return true;
-        }
-      } catch (error) {
-        // 检查响应中是否有CSRF令牌
-        if (error.response?.headers) {
-          const csrfTokenFromResponse = error.response.headers['x-csrf-token'] || error.response.headers['X-CSRF-Token'];
-          if (csrfTokenFromResponse) {
-            sessionStorage.setItem('csrf_token', csrfTokenFromResponse);
-            return true;
-          }
-        }
-        
-        // 如果错误是401，可能是认证问题，不应该继续
-        if (error.response?.status === 401) {
-          throw error; // 重新抛出401错误
-        }
-      }
+    csrfToken = await fetchCsrfTokenFromEndpoints();
+    if (csrfToken) {
+      return true;
     }
-    
-    // 所有端点都失败了
     return false;
   } catch (error) {
     // 如果错误是401，可能是认证问题，不应该继续

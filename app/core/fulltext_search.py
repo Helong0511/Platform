@@ -11,6 +11,20 @@ from sqlalchemy.future import select
 logger = logging.getLogger(__name__)
 
 
+def _validate_field_name(field_name: str) -> bool:
+    """
+    验证字段名是否安全
+    只允许字母、数字、下划线
+    """
+    import re
+    if not field_name:
+        return False
+    # 移除反引号后检查
+    clean_name = field_name.strip('`')
+    # 只允许字母、数字、下划线
+    return bool(re.match(r'^[a-zA-Z0-9_]+$', clean_name))
+
+
 def build_fulltext_query(
     table_name: str,
     search_fields: list[str],
@@ -37,18 +51,30 @@ def build_fulltext_query(
     # 如果使用全文搜索且字段数量合适
     if use_fulltext and len(search_fields) > 0:
         try:
-            # 构建MATCH ... AGAINST查询
-            # 使用ngram解析器支持中文搜索
-            # 注意：字段名需要加表名前缀或使用反引号
-            fields_str = ", ".join([f"`{field}`" for field in search_fields])
-            # 转义特殊字符，防止SQL注入
-            escaped_term = search_term.replace("'", "''")
+            # 验证所有字段名
+            validated_fields = []
+            for field in search_fields:
+                if not _validate_field_name(field):
+                    logger.warning(f"无效的字段名，跳过: {field}")
+                    continue
+                # 清理字段名，移除可能的反引号并重新添加
+                clean_field = field.strip('`')
+                validated_fields.append(f"`{clean_field}`")
             
-            # 使用MATCH AGAINST进行全文搜索
-            # 支持中文的ngram解析器
+            if not validated_fields:
+                logger.warning("没有有效的字段名，回退到LIKE查询")
+                return None
+            
+            # 构建字段列表（已验证安全）
+            fields_str = ", ".join(validated_fields)
+            
+            # 使用参数化查询，search_term通过bindparams绑定，安全
+            # 注意：MATCH AGAINST的参数需要特殊处理，但我们已经通过bindparams绑定
             match_clause = text(
                 f"MATCH({fields_str}) AGAINST(:search_term IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION)"
             )
+            # 转义特殊字符，防止SQL注入（虽然使用参数绑定，但MATCH AGAINST可能需要转义）
+            escaped_term = search_term.replace("'", "''").replace("\\", "\\\\")
             return match_clause.bindparams(search_term=escaped_term)
         except Exception as e:
             logger.warning(f"构建全文搜索查询失败: {e}，回退到LIKE查询")

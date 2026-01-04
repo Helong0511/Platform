@@ -2,10 +2,13 @@
 Excel处理工具函数
 提供文件验证、数据处理等工具函数
 """
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, UploadFile
 from typing import Any
 import pandas as pd
 from datetime import datetime, timedelta
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 允许的Excel文件MIME类型
 ALLOWED_MIME_TYPES = [
@@ -25,8 +28,45 @@ def allowed_file(filename: str) -> bool:
     )
 
 
-# validate_file函数已移至import_handler.py中的validate_and_read_excel
-# 保留此文件用于其他工具函数
+async def validate_excel_file(file: UploadFile) -> bytes:
+    """
+    验证Excel文件并返回文件内容
+    
+    参数:
+        file: UploadFile对象
+    
+    返回:
+        文件内容（bytes）
+    
+    异常:
+        HTTPException: 如果文件验证失败
+    """
+    from app.core.config import settings
+    
+    # 验证文件类型
+    if file.content_type not in ALLOWED_MIME_TYPES or not allowed_file(file.filename):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不支持的文件类型。请上传Excel文件(.xlsx或.xls)"
+        )
+    
+    # 读取文件内容
+    contents = await file.read()
+    
+    # 检查文件大小
+    if len(contents) > settings.MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"文件大小超过限制（最大 {settings.MAX_UPLOAD_SIZE / 1024 / 1024:.1f}MB）"
+        )
+    
+    if not contents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="上传的文件为空"
+        )
+    
+    return contents
 
 
 def parse_date_value(date_value: Any) -> datetime.date:
@@ -101,6 +141,109 @@ def parse_date_value(date_value: Any) -> datetime.date:
     # 其他类型
     else:
         raise ValueError(f"日期格式无效: {str(date_value)} (类型: {type(date_value).__name__})")
+
+
+def safe_get_value(
+    row: pd.Series,
+    key: str,
+    default: Any = None,
+    allow_empty_string: bool = False
+) -> Any:
+    """
+    安全地从 pandas Series 获取值，处理 None、NaN 和空字符串
+    
+    Args:
+        row: pandas Series 对象（DataFrame 的一行）
+        key: 要获取的列名
+        default: 默认值（如果值为 None、NaN 或空字符串时返回）
+        allow_empty_string: 是否允许空字符串（如果为 False，空字符串也会返回 default）
+    
+    Returns:
+        列的值，如果为 None、NaN 或空字符串则返回 default
+    
+    Example:
+        value = safe_get_value(row, "coverage_rate", default=0.0)
+        # 如果 row["coverage_rate"] 是 None、NaN 或空字符串，返回 0.0
+    """
+    if key not in row:
+        return default
+    
+    value = row.get(key)
+    
+    # 检查是否为 None
+    if value is None:
+        return default
+    
+    # 检查是否为 NaN（pandas 的 NaN）
+    if pd.isna(value):
+        return default
+    
+    # 转换为字符串并检查是否为空
+    str_value = str(value).strip()
+    if not allow_empty_string and str_value == "":
+        return default
+    
+    return value
+
+
+def is_valid_numeric_value(value: Any) -> bool:
+    """
+    检查值是否为有效的数值（非 None、非 NaN、非空字符串）
+    
+    Args:
+        value: 要检查的值
+    
+    Returns:
+        如果值为有效的数值返回 True，否则返回 False
+    
+    Example:
+        if is_valid_numeric_value(row.get("coverage_rate")):
+            coverage_rate = clean_numeric_value(row["coverage_rate"])
+    """
+    if value is None:
+        return False
+    
+    if pd.isna(value):
+        return False
+    
+    str_value = str(value).strip()
+    if str_value == "":
+        return False
+    
+    return True
+
+
+def normalize_date_key(data_date: Any) -> date:
+    """
+    规范化日期键，确保返回 date 对象（不包含时间部分）
+    
+    用于在字典中使用日期作为键时，确保格式一致
+    
+    Args:
+        data_date: 日期值（可能是 date、datetime 或其他类型）
+    
+    Returns:
+        date 对象
+    
+    Example:
+        date_key = normalize_date_key(data_date)  # 确保是 date 对象
+        key = (date_key, product_id)
+    """
+    if isinstance(data_date, datetime):
+        return data_date.date()
+    elif isinstance(data_date, date):
+        return data_date
+    else:
+        # 尝试转换为 date
+        try:
+            if hasattr(data_date, 'date'):
+                return data_date.date()
+            else:
+                # 如果是字符串或其他格式，尝试解析
+                return parse_date_value(data_date)
+        except (ValueError, TypeError, AttributeError):
+            # 如果无法转换，返回原值（可能会在后续处理中出错）
+            return data_date
 
 
 def calculate_rates(df: pd.DataFrame) -> pd.DataFrame:

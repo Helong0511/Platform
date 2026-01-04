@@ -757,6 +757,28 @@ class Click(Base):
     )
 
 
+# 点击统计模型（轻量级，用于转化统计）
+class ClickStats(Base):
+    """
+    点击统计表（轻量级，用于转化统计）
+    只保存有转化的点击记录的核心字段，长期保留，不会被清理
+    """
+    __tablename__ = "click_stats"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='统计记录ID')
+    click_id = Column(String(255), unique=True, nullable=False, index=True, comment='点击ID（系统生成，唯一标识）')
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的Offer ID')
+    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的渠道ID')
+    advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的广告主ID')
+    click_time = Column(DateTime, nullable=False, index=True, comment='点击时间')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
+    
+    __table_args__ = (
+        Index("idx_click_stats_time_offer_publisher", "click_time", "offer_id", "publisher_id"),
+        Index("idx_click_stats_offer_publisher", "offer_id", "publisher_id"),
+    )
+
+
 # Cap配置模型
 class OfferCap(Base):
     __tablename__ = "offer_caps"

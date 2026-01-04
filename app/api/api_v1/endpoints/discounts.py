@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.constants import MAX_PAGE_SIZE
 from app.models.models import User, OfferDiscount, Offer, Publisher
 from app.schemas.cpl.discount import OfferDiscountCreate, OfferDiscountUpdate, OfferDiscountResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -95,7 +96,7 @@ async def create_discount(
             summary="获取扣量配置列表")
 async def get_discounts(
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
     discount_type: Optional[str] = Query(None, description="扣量类型过滤"),
     offer_id: Optional[int] = Query(None, description="Offer ID过滤"),
     publisher_id: Optional[int] = Query(None, description="渠道ID过滤"),

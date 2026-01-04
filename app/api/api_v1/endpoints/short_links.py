@@ -13,7 +13,8 @@ from sqlalchemy.future import select
 from sqlalchemy import func, and_, or_
 
 from app.core.database import get_db
-from app.core.security import get_current_user, require_admin
+from app.core.security import get_current_user
+from app.core.constants import MAX_PAGE_SIZE, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.short_link.generator import (
@@ -375,7 +376,9 @@ async def create_short_link(
                     )
                 short_link.short_code = unique_code
         
-        await db.commit()
+        # 注意：不需要手动提交事务，get_db 依赖会自动处理
+        # 刷新对象以获取最新数据（在自动提交之前）
+        await db.flush()
         await db.refresh(short_link)
         
         # 构建完整的短链接URL
@@ -389,7 +392,7 @@ async def create_short_link(
         return ResponseBaseSchema.success(data=response_data)
         
     except Exception as e:
-        await db.rollback()
+        # 注意：不需要手动回滚事务，get_db 依赖会自动处理
         logger.error(f"创建短链接失败: {str(e)}", exc_info=True)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
@@ -403,7 +406,7 @@ async def create_short_link(
 async def get_short_links(
     request: Request,
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
     search: Optional[str] = Query(None, description="搜索关键词（标题、URL、代码）"),
     is_active: Optional[bool] = Query(None, description="是否激活过滤"),
     created_by: Optional[int] = Query(None, description="创建者ID过滤"),
@@ -593,7 +596,9 @@ async def update_short_link(
         setattr(short_link, key, value)
     
     try:
-        await db.commit()
+        # 注意：不需要手动提交事务，get_db 依赖会自动处理
+        # 刷新对象以获取最新数据（在自动提交之前）
+        await db.flush()
         await db.refresh(short_link)
         
         # 构建完整的短链接URL
@@ -612,7 +617,7 @@ async def update_short_link(
         return ResponseBaseSchema.success(data=response_data)
         
     except Exception as e:
-        await db.rollback()
+        # 注意：不需要手动回滚事务，get_db 依赖会自动处理
         logger.error(f"更新短链接失败: {str(e)}", exc_info=True)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
@@ -653,7 +658,7 @@ async def delete_short_link(
     try:
         from sqlalchemy import delete
         await db.execute(delete(ShortLink).where(ShortLink.id == link_id))
-        await db.commit()
+        # 注意：不需要手动提交事务，get_db 依赖会自动处理
         
         # 清除缓存，确保数据一致性
         from app.core.short_link_cache import invalidate_short_link_cache
@@ -662,7 +667,7 @@ async def delete_short_link(
         logger.info(f"短链接删除成功: {link_id}")
         return ResponseBaseSchema.success(data={"message": "短链接已删除"})
     except Exception as e:
-        await db.rollback()
+        # 注意：不需要手动回滚事务，get_db 依赖会自动处理
         logger.error(f"删除短链接失败: {str(e)}", exc_info=True)
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,

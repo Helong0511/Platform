@@ -12,7 +12,7 @@ from sqlalchemy.future import select
 from app.core.postback.handlers import get_handler
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
-from app.models.models import PostbackConversion, Product, Click, Offer, PostbackForwardQueue, Advertiser
+from app.models.models import PostbackConversion, Product, Click, Offer, PostbackForwardQueue, Advertiser, ClickStats
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
@@ -115,6 +115,24 @@ class PostbackProcessor:
                     offer_id = click_record.offer_id
                     publisher_id = click_record.publisher_id
                     advertiser_id = click_record.advertiser_id
+                    
+                    # 将点击记录的核心字段保存到统计表（如果不存在）
+                    # 这样即使 clicks 表被清理，转化统计仍然可用
+                    existing_stats = await db.execute(
+                        select(ClickStats).where(ClickStats.click_id == click_id)
+                    )
+                    if not existing_stats.scalars().first():
+                        # 只有不存在时才创建，避免重复
+                        click_stats = ClickStats(
+                            click_id=click_id,
+                            offer_id=offer_id,
+                            publisher_id=publisher_id,
+                            advertiser_id=advertiser_id,
+                            click_time=click_time,
+                            created_at=get_app_now_naive()
+                        )
+                        db.add(click_stats)
+                        logger.debug(f"已创建点击统计记录: click_id={click_id}")
                     
                     # 根据 advertiser_id 查询广告主名称，用作平台名称
                     if advertiser_id:

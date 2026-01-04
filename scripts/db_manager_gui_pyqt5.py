@@ -181,7 +181,21 @@ class DatabaseManager:
     def __init__(self):
         self.connection = None
         self.cursor = None
-        
+    
+    @staticmethod
+    def _validate_table_name(table_name: str) -> bool:
+        """
+        验证表名是否安全
+        只允许字母、数字、下划线和反引号
+        """
+        if not table_name:
+            return False
+        # 移除反引号后检查
+        clean_name = table_name.strip('`')
+        # 只允许字母、数字、下划线
+        import re
+        return bool(re.match(r'^[a-zA-Z0-9_]+$', clean_name))
+    
     def connect(self, host: str, port: int, user: str, password: str, database: str) -> bool:
         """连接数据库"""
         try:
@@ -213,10 +227,19 @@ class DatabaseManager:
     
     def get_table_structure(self, table_name: str) -> Dict:
         """获取表结构"""
-        self.cursor.execute(f"DESCRIBE `{table_name}`")
+        # 验证表名安全性
+        if not self._validate_table_name(table_name):
+            raise ValueError(f"无效的表名: {table_name}")
+        
+        # 使用参数化查询（MySQL不支持表名参数化，但我们已经验证了表名）
+        # 清理表名，移除可能的反引号并重新添加
+        clean_table_name = table_name.strip('`')
+        safe_table_name = f"`{clean_table_name}`"
+        
+        self.cursor.execute(f"DESCRIBE {safe_table_name}")
         columns = self.cursor.fetchall()
         
-        self.cursor.execute(f"SHOW CREATE TABLE `{table_name}`")
+        self.cursor.execute(f"SHOW CREATE TABLE {safe_table_name}")
         create_table = self.cursor.fetchone()
         
         return {
@@ -226,12 +249,26 @@ class DatabaseManager:
     
     def get_table_data(self, table_name: str, limit: int = 100, offset: int = 0) -> Tuple[List[Dict], int]:
         """获取表数据"""
-        # 获取总数
-        self.cursor.execute(f"SELECT COUNT(*) as total FROM `{table_name}`")
+        # 验证表名安全性
+        if not self._validate_table_name(table_name):
+            raise ValueError(f"无效的表名: {table_name}")
+        
+        # 验证limit和offset参数
+        if not isinstance(limit, int) or limit < 0 or limit > 10000:
+            raise ValueError(f"无效的limit参数: {limit}")
+        if not isinstance(offset, int) or offset < 0:
+            raise ValueError(f"无效的offset参数: {offset}")
+        
+        # 清理表名，移除可能的反引号并重新添加
+        clean_table_name = table_name.strip('`')
+        safe_table_name = f"`{clean_table_name}`"
+        
+        # 获取总数（使用参数化查询）
+        self.cursor.execute(f"SELECT COUNT(*) as total FROM {safe_table_name}")
         total = self.cursor.fetchone()['total']
         
-        # 获取数据
-        self.cursor.execute(f"SELECT * FROM `{table_name}` LIMIT {limit} OFFSET {offset}")
+        # 获取数据（使用参数化查询，limit和offset是整数，安全）
+        self.cursor.execute(f"SELECT * FROM {safe_table_name} LIMIT %s OFFSET %s", (limit, offset))
         data = self.cursor.fetchall()
         
         return data, total

@@ -18,6 +18,7 @@ from app.core.postback.macan_handler import MacanPostbackHandler
 from app.core.postback.bft_handler import BftPostbackHandler
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import parse_date_to_app_timezone
 from app.models.models import PostbackConversion, Product, Client, PostbackForwardLog
 from app.schemas.postback import (
@@ -78,7 +79,7 @@ async def get_postback_conversions(
     start_date: Optional[str] = Query(None, description="起始日期（YYYY-MM-DD）"),
     end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="每页数量"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -286,7 +287,7 @@ async def get_postback_forward_logs(
     start_date: Optional[str] = Query(None, description="起始日期（YYYY-MM-DD）"),
     end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="每页数量"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):

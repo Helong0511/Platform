@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.constants import MAX_PAGE_SIZE
 from app.models.models import User, UserRole, Offer, Advertiser, Publisher, OfferPublisherAssignment, ShortLink, Client
 from app.schemas.cpl.offer import OfferCreate, OfferUpdate, OfferResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -583,7 +584,7 @@ async def create_offer(
             summary="获取Offer列表")
 async def get_offers(
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
     search: Optional[str] = Query(None, description="搜索关键词（名称、ID）"),
     advertiser_id: Optional[int] = Query(None, description="广告主ID过滤"),
     status: Optional[str] = Query(None, description="状态过滤"),

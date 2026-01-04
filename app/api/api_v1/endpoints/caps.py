@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import get_app_now_naive
 from app.models.models import User, OfferCap, Offer, Advertiser, Publisher
 from app.schemas.cpl.cap import OfferCapCreate, OfferCapUpdate, OfferCapResponse
@@ -122,7 +123,7 @@ async def create_cap(
             summary="获取Cap配置列表")
 async def get_caps(
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
     cap_type: Optional[str] = Query(None, description="Cap类型过滤"),
     offer_id: Optional[int] = Query(None, description="Offer ID过滤"),
     advertiser_id: Optional[int] = Query(None, description="广告主ID过滤"),

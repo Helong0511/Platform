@@ -26,7 +26,8 @@ from app.core.country_code import find_country_code_by_any_format
 from app.schemas.base import ResponseBaseSchema
 from app.schemas.excel import ExcelImportResponse
 from app.api.api_v1.endpoints.excel.utils import (
-    allowed_file, ALLOWED_MIME_TYPES, parse_date_value, calculate_rates
+    allowed_file, ALLOWED_MIME_TYPES, parse_date_value, calculate_rates,
+    safe_get_value, is_valid_numeric_value, normalize_date_key
 )
 from app.core.product_assignment import initialize_product_assignment
 from app.core.utils import truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data
@@ -526,68 +527,11 @@ async def find_or_create_product(
                 f"将创建新产品（默认客户为管理员）"
             )
 
-            # 获取或创建默认客户
+            # 获取或创建默认客户：使用统一的辅助函数
             create_client = None
             if not target_client_id:
-                # 步骤1: 先查找"默认客户（导入数据）"
-                # 不管是不是当前管理员的用户，只要有就直接使用，不用创建
-                admin_client_query = select(Client).where(
-                    Client.company_name == "默认客户（导入数据）"
-                ).limit(1)
-                admin_client_result = await db.execute(admin_client_query)
-                create_client = admin_client_result.scalars().first()
-
-                if create_client:
-                    logger.info(
-                        f"✅ 找到默认客户（导入数据）（ID: {create_client.id}，"
-                        f"关联到用户ID: {create_client.user_id}），直接使用"
-                    )
-                else:
-                    # 步骤2: 如果数据库中没有找到，检查会话中是否已经有待提交的默认客户对象
-                    # 防止在同一个导入过程中重复创建
-                    pending_default_client = None
-                    try:
-                        # 检查会话中的新对象（待提交的对象）
-                        for obj in db.new:
-                            if (isinstance(obj, Client) and 
-                                obj.company_name == "默认客户（导入数据）"):
-                                pending_default_client = obj
-                                break
-                    except AttributeError:
-                        # 如果 db.new 不可用，尝试使用 identity_map
-                        try:
-                            for obj in db.identity_map.values():
-                                if (isinstance(obj, Client) and 
-                                    obj.company_name == "默认客户（导入数据）"):
-                                    pending_default_client = obj
-                                    break
-                        except AttributeError:
-                            pass
-                    
-                    if pending_default_client:
-                        create_client = pending_default_client
-                        logger.info(
-                            f"✅ 在会话中找到待提交的默认客户（导入数据）（ID: {create_client.id if hasattr(create_client, 'id') else '待生成'}），直接使用"
-                        )
-                    else:
-                        # 步骤3: 如果确实没有找到，才创建新的默认客户（关联到当前管理员用户）
-                        logger.warning("没有找到默认客户（导入数据），将创建默认客户用于导入数据")
-                        # 生成唯一的UUID作为客户密钥
-                        client_key = str(uuid.uuid4())
-                        create_client = Client(
-                            user_id=current_user.id,
-                            key=client_key,  # 必需字段：客户唯一标识UUID
-                            company_name="默认客户（导入数据）",
-                            is_active=True
-                        )
-                        db.add(create_client)
-                        await db.flush()
-                        await db.refresh(create_client)
-                        logger.info(
-                            f"✅ 已创建默认客户（导入数据）（ID: {create_client.id}，"
-                            f"关联到用户: {current_user.username}）"
-                        )
-
+                from app.core.utils import find_or_create_default_client
+                create_client = await find_or_create_default_client(db, current_user.id)
                 target_client_id = create_client.id
                 logger.info(
                     f"使用管理员的默认客户（ID: {target_client_id}，"
@@ -766,29 +710,29 @@ async def process_row_data(
                 click_rate = (click_count / display_count * 100) if display_count > 0 else 0.0
             
             # 可见率（可选字段，如果Excel中有则使用，否则使用默认值0.0）
-            viewability_rate_val = row.get("viewability_rate")
-            if viewability_rate_val is not None and pd.notna(viewability_rate_val) and str(viewability_rate_val).strip() != "":
+            viewability_rate_val = safe_get_value(row, "viewability_rate")
+            if is_valid_numeric_value(viewability_rate_val):
                 viewability_rate = clean_numeric_value(viewability_rate_val)
             else:
                 viewability_rate = 0.0
             
             # eCPM = 收益/展示数 * 1000
-            ecpm_before_val = row.get("ecpm_before_deduct")
-            if ecpm_before_val is not None and pd.notna(ecpm_before_val) and str(ecpm_before_val).strip() != "":
+            ecpm_before_val = safe_get_value(row, "ecpm_before_deduct")
+            if is_valid_numeric_value(ecpm_before_val):
                 ecpm_before = clean_numeric_value(ecpm_before_val)
             else:
-                ecpm_before = (revenue_before / display_count * 1000) if display_count > 0 else 0.0
+                ecpm_before = (revenue_before / display_count * ECPM_MULTIPLIER) if display_count > 0 else 0.0
             
             # CPC（可选字段，如果Excel中有则使用，否则使用默认值0.0）
-            cpc_val = row.get("cpc")
-            if cpc_val is not None and pd.notna(cpc_val) and str(cpc_val).strip() != "":
+            cpc_val = safe_get_value(row, "cpc")
+            if is_valid_numeric_value(cpc_val):
                 cpc = clean_numeric_value(cpc_val)
             else:
                 cpc = 0.0
             
             # PageViews（可选字段，如果Excel中有则使用，否则使用默认值0）
-            pageviews_val = row.get("pageviews")
-            if pageviews_val is not None and pd.notna(pageviews_val) and str(pageviews_val).strip() != "":
+            pageviews_val = safe_get_value(row, "pageviews")
+            if is_valid_numeric_value(pageviews_val):
                 pageviews = int(pageviews_val)
             else:
                 pageviews = 0
@@ -817,10 +761,7 @@ async def process_row_data(
         if existing_records is not None:
             # 使用预查询的结果（优化性能）
             # 确保日期格式一致（使用date对象，不包含时间）
-            if isinstance(data_date, datetime):
-                date_key = data_date.date()
-            else:
-                date_key = data_date
+            date_key = normalize_date_key(data_date)
             key = (date_key, product_info["product_id"])
             existing_data = existing_records.get(key)
         else:
@@ -1012,10 +953,7 @@ async def process_row_data(
             # 这样可以避免同一批数据中的重复记录被插入（虽然数据库唯一性约束也会防止，但提前检测更好）
             if existing_records is not None:
                 # 确保日期格式一致（使用date对象，不包含时间）
-                if isinstance(data_date, datetime):
-                    date_key = data_date.date()
-                else:
-                    date_key = data_date
+                date_key = normalize_date_key(data_date)
                 key = (date_key, product_info["product_id"])
                 existing_records[key] = ad_data
 
@@ -1162,65 +1100,50 @@ async def import_ad_data_handler(
                 existing_records=existing_records  # 传入预查询的结果
             )
 
-        # 提交事务
+        # 注意：不需要手动提交事务，get_db 依赖会自动处理
+        # 但如果需要捕获 IntegrityError 并给出特定错误消息，可以在提交前检查
+        # 由于 get_db 会在函数正常返回时自动提交，我们只需要在提交前捕获可能的错误
+        logger.info(
+            f"Ad data import completed. Success: {result['success_rows']}, "
+            f"Failed: {result['failed_rows']}"
+        )
+        
+        # 提前刷新以触发可能的 IntegrityError（在 get_db 自动提交之前）
+        # 这样可以在提交前捕获错误并给出更友好的错误消息
         try:
-            await db.commit()
-            logger.info(
-                f"Ad data import completed. Success: {result['success_rows']}, "
-                f"Failed: {result['failed_rows']}"
-            )
+            await db.flush()  # 刷新到数据库但不提交，触发约束检查
         except IntegrityError as e:
-            # 处理唯一性约束违反（数据库层面的重复检查）
-            await db.rollback()
-            error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
-            logger.error(f"Ad data import commit failed: 唯一性约束违反 - {error_msg}")
-
-            # 检查是否是唯一性约束错误
-            if "uq_ad_data_date_product" in error_msg or "Duplicate entry" in error_msg or "UNIQUE constraint" in error_msg:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        "导入失败：检测到重复数据。"
-                        "可能是并发导入导致的，或者数据库中已存在相同日期和产品的记录。"
-                        "请检查数据后重试。"
-                    )
-                )
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"保存数据失败: {error_msg}"
-                )
-        except Exception as e:
-            await db.rollback()
-            logger.error(f"Ad data import commit failed: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"保存数据失败: {str(e)}"
+            # 使用统一的 IntegrityError 处理函数
+            from app.core.exceptions import handle_integrity_error
+            handle_integrity_error(
+                error=e,
+                constraint_name="uq_ad_data_date_product",
+                custom_message=(
+                    "导入失败：检测到重复数据。"
+                    "可能是并发导入导致的，或者数据库中已存在相同日期和产品的记录。"
+                    "请检查数据后重试。"
+                ),
+                log_context="Ad data import"
             )
 
-        # 构建响应
-        error_details = []
-        if result.get("errors"):
-            for error in result["errors"]:
-                if isinstance(error, dict):
-                    error_details.append(
-                        f"第{error.get('row', '?')}行: {error.get('error', '未知错误')}"
-                    )
-                else:
-                    error_details.append(str(error))
+        # 构建响应：使用统一的错误详情格式化函数
+        from app.core.utils import format_error_details
+        error_details = format_error_details(result.get("errors", []))
 
-        message_parts = [f"导入完成: 成功 {result['success_rows']} 条"]
-        if result.get("new_rows", 0) > 0:
-            message_parts.append(f"新增 {result['new_rows']} 条")
-        if result.get("updated_rows", 0) > 0:
-            message_parts.append(f"更新 {result['updated_rows']} 条")
-        if result.get("duplicate_rows", 0) > 0:
-            message_parts.append(f"Excel内部重复 {result['duplicate_rows']} 条")
-        if result.get("failed_rows", 0) > 0:
-            message_parts.append(f"失败 {result['failed_rows']} 条")
+        # 使用统一的导入消息构建函数
+        from app.core.utils import build_import_message
+        import_message = build_import_message(
+            imported_rows=result['success_rows'],
+            failed_rows=result.get("failed_rows", 0),
+            new_rows=result.get("new_rows", 0),
+            updated_rows=result.get("updated_rows", 0),
+            duplicate_rows=result.get("duplicate_rows", 0),
+            separator="，",
+            default_message="导入完成"
+        )
 
         import_response = ExcelImportResponse(
-            message="，".join(message_parts),
+            message=import_message,
             status=200,
             imported_rows=result["success_rows"],
             failed_rows=result.get("failed_rows", 0),

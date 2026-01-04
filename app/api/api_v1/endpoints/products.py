@@ -26,6 +26,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
 from app.core.validation import sanitize_input
+from app.core.constants import MAX_PAGE_SIZE
 from app.core.product_assignment import (
     transfer_product_assignment,
     initialize_product_assignment,
@@ -152,7 +153,7 @@ async def get_products(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
         page: int = Query(1, ge=1, description="页码"),
-        page_size: int = Query(10, ge=1, le=100, description="每页条数"),
+        page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
         client_id: int | None = Query(None, description="客户ID过滤"),
         name: str | None = Query(None, description="产品名称过滤"),
         is_active: bool | None = Query(None, description="是否激活过滤")
@@ -785,61 +786,9 @@ async def delete_product(
         # 当前用户必须是管理员（已通过require_admin验证）
         admin_user = current_user
 
-        # 步骤1: 先查找"默认客户（导入数据）"
-        # 不管是不是当前管理员的用户，只要有就直接使用，不用创建
-        admin_client_query = select(Client).where(
-            Client.company_name == "默认客户（导入数据）"
-        ).limit(1)
-        admin_client_result = await db.execute(admin_client_query)
-        admin_default_client = admin_client_result.scalars().first()
-
-        if admin_default_client:
-            logger.debug(
-                f"✅ 找到默认客户（导入数据）（ID: {admin_default_client.id}，"
-                f"关联到用户ID: {admin_default_client.user_id}），直接使用"
-            )
-        else:
-            # 步骤2: 如果数据库中没有找到，检查会话中是否已经有待提交的默认客户对象
-            # 防止在同一个操作过程中重复创建
-            pending_default_client = None
-            try:
-                # 检查会话中的新对象（待提交的对象）
-                for obj in db.new:
-                    if (isinstance(obj, Client) and 
-                        obj.company_name == "默认客户（导入数据）"):
-                        pending_default_client = obj
-                        break
-            except AttributeError:
-                # 如果 db.new 不可用，尝试使用 identity_map
-                try:
-                    for obj in db.identity_map.values():
-                        if (isinstance(obj, Client) and 
-                            obj.company_name == "默认客户（导入数据）"):
-                            pending_default_client = obj
-                            break
-                except AttributeError:
-                    pass
-            
-            if pending_default_client:
-                admin_default_client = pending_default_client
-                logger.debug(
-                    f"✅ 在会话中找到待提交的默认客户（导入数据）（ID: {admin_default_client.id if hasattr(admin_default_client, 'id') else '待生成'}），直接使用"
-                )
-            else:
-                # 步骤3: 如果确实没有找到，才创建新的默认客户（关联到当前管理员用户）
-                logger.debug(f"没有找到默认客户（导入数据），将创建默认客户（关联到用户: {admin_user.username}）")
-                # 生成唯一的UUID作为客户密钥
-                client_key = str(uuid.uuid4())
-                admin_default_client = Client(
-                    user_id=admin_user.id,
-                    key=client_key,  # 必需字段：客户唯一标识UUID
-                    company_name="默认客户（导入数据）",
-                    is_active=True
-                )
-                db.add(admin_default_client)
-                await db.flush()  # 刷新以获取客户ID
-                await db.refresh(admin_default_client)
-                logger.debug(f"✅ 已创建默认客户（导入数据）（ID: {admin_default_client.id}）")
+        # 查找或创建管理员的默认客户（导入数据）：使用统一的辅助函数
+        from app.core.utils import find_or_create_default_client
+        admin_default_client = await find_or_create_default_client(db, admin_user.id)
 
         # 保存旧客户ID（用于更新分配历史）
         old_client_id = product.client_id

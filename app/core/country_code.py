@@ -13,6 +13,47 @@ from app.models.models import CountryInfo
 logger = logging.getLogger(__name__)
 
 
+def resolve_country_name(
+    country_info: Optional[any],
+    country_code: Optional[str] = None,
+    default_unknown: str = "未知区域",
+    default_all: str = "全部区域"
+) -> Optional[str]:
+    """
+    解析国家名称，处理特殊国家代码和缺失的国家信息
+    
+    Args:
+        country_info: CountryInfo 对象（可能为 None）
+        country_code: 国家代码（用于回退处理特殊代码）
+        default_unknown: 未知区域的默认名称（默认为 "未知区域"）
+        default_all: 全部区域的默认名称（默认为 "全部区域"）
+    
+    Returns:
+        国家名称字符串，如果无法解析则返回 None
+    
+    Example:
+        # 有国家信息时
+        country_name = resolve_country_name(country_info, ad_data.country_code)
+        
+        # 处理特殊代码
+        country_name = resolve_country_name(None, "ZZ")  # -> "全部区域"
+        country_name = resolve_country_name(None, "AA")  # -> "未知区域"
+    """
+    # 优先使用 CountryInfo 中的名称
+    if country_info and hasattr(country_info, 'country_name_zh'):
+        return country_info.country_name_zh
+    
+    # 如果没有 CountryInfo，根据 country_code 处理特殊代码
+    if country_code:
+        if country_code == "ZZ":
+            return default_all
+        elif country_code == "AA":
+            return default_unknown
+    
+    # 无法解析
+    return None
+
+
 async def find_country_code_by_any_format(
     db: AsyncSession,
     country_input: str

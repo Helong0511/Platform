@@ -25,6 +25,7 @@ import pandas as pd
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
+from app.core.constants import MAX_PAGE_SIZE
 from app.models.models import User, UserRole, Client, Publisher
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, PasswordChange
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -43,7 +44,7 @@ async def get_users(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin),
         page: int = Query(1, ge=1, description="页码"),
-        page_size: int = Query(10, ge=1, le=100, description="每页条数"),
+        page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
         username: str | None = Query(None, description="用户名过滤"),
         role: str | None = Query(None, description="角色过滤"),
         status: str | None = Query(None, description="状态过滤: active/inactive")
@@ -737,8 +738,9 @@ async def create_user(
                 )
                 db.add(client)
 
-        # 一次性提交所有更改
-        await db.commit()
+        # 注意：不需要手动提交事务，get_db 依赖会自动处理
+        # 刷新对象以获取最新数据（在自动提交之前）
+        await db.flush()
         await db.refresh(user)
 
         # 如果创建了客户，刷新客户对象以获取完整信息（包括key）

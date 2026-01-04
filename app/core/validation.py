@@ -170,6 +170,55 @@ def sanitize_input(text: str, max_length: int | None = None) -> str:
     return sanitized
 
 
+def normalize_string(text: str | None, strip: bool = True, lower: bool = False) -> str | None:
+    """
+    规范化字符串（去除空格、转换为小写等）
+    
+    参数:
+        text: 输入文本（可以是None）
+        strip: 是否去除前后空格（默认：True）
+        lower: 是否转换为小写（默认：False）
+    
+    返回:
+        规范化后的文本，如果输入为None则返回None
+    
+    示例:
+        normalize_string("  Hello World  ", strip=True, lower=True) -> "hello world"
+        normalize_string(None) -> None
+    """
+    if text is None:
+        return None
+    
+    result = text
+    if strip:
+        result = result.strip()
+    if lower:
+        result = result.lower()
+    
+    return result if result else None
+
+
+def safe_strip(text: str | None) -> str | None:
+    """
+    安全地去除字符串前后空格
+    
+    参数:
+        text: 输入文本（可以是None）
+    
+    返回:
+        去除空格后的文本，如果输入为None或空字符串则返回None
+    
+    示例:
+        safe_strip("  hello  ") -> "hello"
+        safe_strip(None) -> None
+        safe_strip("") -> None
+    """
+    if not text:
+        return None
+    stripped = text.strip()
+    return stripped if stripped else None
+
+
 def detect_sql_injection(text: str) -> bool:
     """
     检测可能的SQL注入攻击

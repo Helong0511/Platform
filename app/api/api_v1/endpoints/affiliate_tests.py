@@ -14,6 +14,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import get_app_now_naive
 from app.models.models import User, AffiliateTest, Publisher, Offer, OfferPublisherAssignment
 from app.schemas.cpl.test import AffiliateTestCreate, AffiliateTestResponse
@@ -149,7 +150,7 @@ async def create_affiliate_test(
             dependencies=[Depends(require_admin)])
 async def get_affiliate_tests(
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
     publisher_id: Optional[int] = Query(None, description="渠道ID过滤"),
     offer_id: Optional[int] = Query(None, description="Offer ID过滤"),
     status: Optional[str] = Query(None, description="状态过滤"),

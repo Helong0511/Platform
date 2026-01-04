@@ -12,6 +12,7 @@ from sqlalchemy import func, and_, or_
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
+from app.core.constants import MAX_PAGE_SIZE
 from app.models.models import User, PostbackConversion, Click, Offer, Publisher, Advertiser
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
             dependencies=[Depends(require_admin)])
 async def get_conversion_logs(
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
     click_id: Optional[str] = Query(None, description="Click ID过滤"),
     offer_id: Optional[int] = Query(None, description="Offer ID过滤"),
     publisher_id: Optional[int] = Query(None, description="渠道ID过滤"),

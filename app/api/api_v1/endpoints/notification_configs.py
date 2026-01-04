@@ -14,6 +14,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import parse_date_to_app_timezone
 from app.models.models import (
     Client, Product, User, UserRole,
@@ -353,7 +354,7 @@ async def delete_product_notification_config(
             summary="获取通知记录列表")
 async def get_notification_records(
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
     client_id: Optional[int] = Query(None, description="客户ID过滤"),
     product_id: Optional[int] = Query(None, description="产品ID过滤"),
     notification_status: Optional[str] = Query(None, description="通知状态过滤（sent, failed, pending）"),

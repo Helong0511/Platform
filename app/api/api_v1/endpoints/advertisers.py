@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.constants import MAX_PAGE_SIZE
 from app.models.models import User, UserRole, Advertiser
 from app.schemas.cpl.advertiser import AdvertiserCreate, AdvertiserUpdate, AdvertiserResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -59,7 +60,7 @@ async def create_advertiser(
             summary="获取广告主列表")
 async def get_advertisers(
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
     search: Optional[str] = Query(None, description="搜索关键词（名称、ID）"),
     is_active: Optional[bool] = Query(None, description="是否激活过滤"),
     db: AsyncSession = Depends(get_db),
