@@ -3,8 +3,8 @@
 """
 import logging
 from typing import Optional
-from datetime import datetime, timezone
-from app.core.utils import parse_date_to_app_timezone
+from datetime import datetime, timezone, timedelta
+from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -50,9 +50,6 @@ async def get_clicks(
     - 最大查询范围限制为90天（防止查询过大数据量）
     """
     try:
-        from app.core.utils import get_app_now_naive
-        from datetime import timedelta
-        
         # 解析日期（使用应用时区，与数据库时间一致）
         start_datetime = None
         end_datetime = None
@@ -76,6 +73,11 @@ async def get_clicks(
                 raise_api_exception(
                     ErrorCode.INVALID_PARAMETER,
                     detail=f"查询日期范围不能超过90天，当前范围：{date_range_days}天。请缩小查询范围或使用筛选条件。"
+                )
+            if date_range_days < 0:
+                raise_api_exception(
+                    ErrorCode.INVALID_PARAMETER,
+                    detail="开始日期不能晚于结束日期"
                 )
         
         # 构建查询 - 使用 joinedload 预加载关联数据，避免 N+1 查询
