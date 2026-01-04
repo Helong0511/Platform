@@ -5,7 +5,7 @@ Excel处理工具函数
 from fastapi import HTTPException, status, UploadFile
 from typing import Any
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import logging
 
 logger = logging.getLogger(__name__)
