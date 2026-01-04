@@ -182,6 +182,10 @@ async def _enrich_clicks_with_advertiser_id(db: AsyncSession, clicks: List[Dict[
 async def _validate_offer_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     验证并清理offer_id（如果不存在则设置为None）
+    支持两种格式的offer_id：
+    1. 数据库主键ID（Offer.id）
+    2. 上游Offer ID（Offer.advertiser_offer_id）- 会自动转换为数据库主键ID
+    
     防止外键约束失败，但允许保存记录（因为数据库允许offer_id为NULL）
     
     Args:
@@ -189,7 +193,7 @@ async def _validate_offer_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) ->
         clicks: 点击记录列表
         
     Returns:
-        有效的点击记录列表（无效的offer_id已被设置为None）
+        有效的点击记录列表（无效的offer_id已被设置为None，上游Offer ID已转换为主键ID）
     """
     # 收集所有需要验证的offer_id（不为None的）
     offer_ids_to_validate = set()
@@ -204,32 +208,78 @@ async def _validate_offer_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) ->
         return clicks
     
     try:
-        # 批量查询存在的offer_id
+        # 1. 先尝试作为主键ID查询（Offer.id）
         result = await db.execute(
             select(Offer.id)
             .where(Offer.id.in_(offer_ids_to_validate))
         )
         valid_offer_ids = {row[0] for row in result.all()}
         
-        # 验证并清理无效的offer_id（设置为None而不是跳过记录）
+        # 2. 对于未找到的offer_id，尝试作为上游Offer ID查询（Offer.advertiser_offer_id）
+        # 注意：advertiser_offer_id 是字符串类型，需要转换
+        unmatched_offer_ids = offer_ids_to_validate - valid_offer_ids
+        upstream_offer_id_map = {}  # 上游Offer ID -> 数据库主键ID的映射
+        
+        if unmatched_offer_ids:
+            # 将数字转换为字符串，因为advertiser_offer_id是String类型
+            upstream_offer_id_strs = [str(oid) for oid in unmatched_offer_ids]
+            result = await db.execute(
+                select(Offer.id, Offer.advertiser_offer_id)
+                .where(Offer.advertiser_offer_id.in_(upstream_offer_id_strs))
+            )
+            for row in result.all():
+                db_offer_id, upstream_offer_id = row
+                # 将字符串转换回数字，用于匹配
+                try:
+                    upstream_id_int = int(upstream_offer_id)
+                    upstream_offer_id_map[upstream_id_int] = db_offer_id
+                except (ValueError, TypeError):
+                    # 如果转换失败，跳过
+                    pass
+        
+        # 3. 更新点击记录中的offer_id
+        # 如果offer_id是上游Offer ID，转换为数据库主键ID
         cleaned_count = 0
+        converted_count = 0
+        invalid_offer_ids = set()
+        
         for click in clicks:
             offer_id = click.get('offer_id')
-            if offer_id is not None and offer_id not in valid_offer_ids:
+            if offer_id is None:
+                continue
+            
+            # 如果已经是有效的主键ID，保持不变
+            if offer_id in valid_offer_ids:
+                continue
+            
+            # 如果是上游Offer ID，转换为数据库主键ID
+            if offer_id in upstream_offer_id_map:
+                db_offer_id = upstream_offer_id_map[offer_id]
+                click['offer_id'] = db_offer_id
+                converted_count += 1
+                logger.debug(
+                    f"将上游Offer ID {offer_id} 转换为数据库主键ID {db_offer_id}。"
+                    f"click_id={click.get('click_id')}, short_link_id={click.get('short_link_id')}"
+                )
+            else:
+                # 既不是主键ID，也不是上游Offer ID，设置为None
                 logger.warning(
-                    f"Offer ID {offer_id} 不存在，将设置为None（允许保存记录）。"
+                    f"Offer ID {offer_id} 不存在（既不是主键ID，也不是上游Offer ID），将设置为None（允许保存记录）。"
                     f"click_id={click.get('click_id')}, short_link_id={click.get('short_link_id')}"
                 )
                 click['offer_id'] = None
                 cleaned_count += 1
+                invalid_offer_ids.add(offer_id)
         
-        if cleaned_count > 0:
+        if cleaned_count > 0 or converted_count > 0:
             logger.info(
-                f"验证offer_id完成: 有效={len(offer_ids_to_validate) - cleaned_count}, "
-                f"已清理={cleaned_count}（设置为None）。所有记录将被保存。"
+                f"验证offer_id完成: 有效主键ID数={len(valid_offer_ids)}, "
+                f"已转换上游Offer ID数={converted_count}, "
+                f"无效offer_id数={len(invalid_offer_ids)}, "
+                f"已清理记录数={cleaned_count}（设置为None）。所有记录将被保存。"
             )
         
-        # 返回所有记录（无效的offer_id已被设置为None）
+        # 返回所有记录（无效的offer_id已被设置为None，上游Offer ID已转换为主键ID）
         return clicks
     except Exception as e:
         logger.error(f"验证offer_id失败: error={e}，将清空所有offer_id以避免外键约束错误", exc_info=True)

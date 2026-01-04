@@ -156,8 +156,52 @@ async def redirect_short_link(
     
     # 只使用URL参数中的offer_id和channel_id（如果有的话）
     # 如果URL参数中没有，则不保存这些值
-    final_offer_id = offer_id  # 只使用URL参数
     final_channel_id = channel_id  # 只使用URL参数
+    
+    # 如果从URL参数获取了offer_id，需要转换为数据库主键ID
+    # URL参数中的offer_id可能是主键ID，也可能是上游Offer ID
+    final_offer_id = None
+    advertiser_id = None
+    if offer_id:
+        try:
+            # 1. 先尝试作为主键ID查询
+            offer_result = await db.execute(
+                select(Offer).where(Offer.id == offer_id)
+            )
+            offer = offer_result.scalars().first()
+            
+            # 2. 如果找不到，尝试作为上游Offer ID查询
+            if not offer:
+                offer_result = await db.execute(
+                    select(Offer).where(Offer.advertiser_offer_id == str(offer_id))
+                )
+                offer = offer_result.scalars().first()
+                if offer:
+                    logger.info(
+                        f"[短链接点击] URL参数中的offer_id={offer_id} 是上游Offer ID，"
+                        f"已转换为数据库主键ID={offer.id}"
+                    )
+            
+            # 3. 如果找到了Offer，使用主键ID
+            if offer:
+                final_offer_id = offer.id  # 使用数据库主键ID
+                advertiser_id = offer.advertiser_id
+                # 缓存Offer信息（使用主键ID作为key）
+                from app.core.offer_cache import set_offer_cache
+                await set_offer_cache(final_offer_id, advertiser_id, offer.offer_name)
+                logger.info(
+                    f"[短链接点击] Offer信息: "
+                    f"数据库主键ID={final_offer_id}, "
+                    f"offer_name={offer.offer_name}, "
+                    f"advertiser_id={advertiser_id}"
+                )
+            else:
+                logger.warning(
+                    f"[短链接点击] URL参数中的offer_id={offer_id} 无效"
+                    f"（既不是主键ID，也不是上游Offer ID），short_code={short_code}"
+                )
+        except Exception as e:
+            logger.warning(f"查询Offer失败: offer_id={offer_id}, error={e}")
     
     # 打印获得的参数
     logger.info(
@@ -168,38 +212,6 @@ async def redirect_short_link(
         f"最终保存_offer_id={final_offer_id}, "
         f"最终保存_channel_id={final_channel_id}"
     )
-    
-    # 如果从URL参数获取了offer_id，尝试从缓存获取advertiser_id（高并发优化）
-    advertiser_id = None
-    if final_offer_id:
-        # 优先从缓存获取（减少数据库查询）
-        from app.core.offer_cache import get_offer_advertiser_id
-        advertiser_id = await get_offer_advertiser_id(final_offer_id)
-        
-        # 如果缓存中没有，查询数据库并缓存
-        if advertiser_id is None:
-            try:
-                offer_result = await db.execute(
-                    select(Offer).where(Offer.id == final_offer_id)
-                )
-                offer = offer_result.scalars().first()
-                if offer:
-                    advertiser_id = offer.advertiser_id
-                    # 缓存Offer信息
-                    from app.core.offer_cache import set_offer_cache
-                    await set_offer_cache(final_offer_id, advertiser_id, offer.offer_name)
-                    logger.info(
-                        f"[短链接点击] Offer信息（数据库）: "
-                        f"offer_id={final_offer_id}, "
-                        f"offer_name={offer.offer_name}, "
-                        f"advertiser_id={advertiser_id}"
-                    )
-                else:
-                    logger.warning(f"短链接点击时提供的offer_id无效: offer_id={final_offer_id}, short_code={short_code}")
-            except Exception as e:
-                logger.warning(f"查询Offer失败: offer_id={final_offer_id}, error={e}")
-        else:
-            logger.debug(f"[短链接点击] Offer信息（缓存）: offer_id={final_offer_id}, advertiser_id={advertiser_id}")
     
     # 收集完整的请求信息（包括软件、硬件信息和URL参数）
     from app.core.device_info import collect_request_info
