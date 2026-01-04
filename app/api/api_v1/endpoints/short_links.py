@@ -106,7 +106,10 @@ async def check_short_code(
 
 # ==================== 短链接重定向 ====================
 
-@router.get("/{short_code}", summary="短链接重定向")
+@router.get("/{short_code}", 
+            summary="短链接重定向",
+            deprecated=True,
+            description="⚠️ 已废弃：推荐使用 `/s/{short_code}` 路由（带缓存优化，性能更好）")
 async def redirect_short_link(
     short_code: str = Path(..., description="短链接代码"),
     offer_id: Optional[int] = Query(None, description="Offer ID（从URL参数获取）"),
@@ -117,8 +120,19 @@ async def redirect_short_link(
 ):
     """
     短链接重定向（公开接口，无需认证）
-    访问短链接时自动重定向到原始URL
-    从URL参数中提取offer_id和channel_id并保存到点击记录
+    
+    ⚠️ **已废弃**：此路由已废弃，推荐使用 `/s/{short_code}` 路由
+    
+    推荐路由：`/s/{short_code}`
+    - 使用Redis缓存优化，减少数据库查询
+    - 支持查询参数自动合并到原始URL
+    - 性能更好，适合高并发场景
+    
+    此路由保留仅用于向后兼容，新项目请使用 `/s/{short_code}`
+    
+    功能说明：
+    - 访问短链接时自动重定向到原始URL
+    - 从URL参数中提取offer_id和channel_id并保存到点击记录
     """
     # 查询短链接
     result = await db.execute(

@@ -871,7 +871,10 @@ from typing import Optional
 from app.core.database import get_db
 from app.models.models import ShortLink
 
-@app.get("/s/{short_code}", summary="短链接重定向", tags=["短链接服务"])
+@app.get("/s/{short_code}", 
+         summary="短链接重定向（推荐）", 
+         tags=["短链接服务"],
+         description="✅ 推荐使用的短链接重定向路由，带缓存优化，性能更好")
 async def redirect_short_link_public(
     short_code: str,
     offer_id: Optional[int] = Query(None, description="Offer ID（从URL参数获取）"),
@@ -882,11 +885,23 @@ async def redirect_short_link_public(
 ):
     """
     短链接重定向（公开接口，无需认证）
-    高并发优化：使用Redis缓存减少数据库查询，异步更新点击次数
     
-    支持查询参数传递：
-    - 如果访问短链接时带有查询参数，这些参数会被合并到真实URL中
-    - 例如：/s/abc123?param1=value1 会重定向到 original_url?param1=value1
+    ✅ **推荐路由**：这是系统推荐使用的短链接重定向路由
+    
+    性能优化：
+    - 使用Redis缓存减少数据库查询，提高响应速度
+    - 异步更新点击次数，不阻塞重定向
+    - 适合高并发场景
+    
+    功能特性：
+    - 支持查询参数自动合并到原始URL
+    - 自动生成click_id并添加到重定向URL
+    - 完整的点击记录追踪（IP、设备信息、浏览器信息等）
+    
+    使用示例：
+    - 基础访问：`/s/abc123` → 重定向到原始URL
+    - 带参数：`/s/abc123?param1=value1` → 重定向到 `original_url?click_id=xxx&param1=value1`
+    - 带追踪参数：`/s/abc123?offer_id=123&channel_id=456` → 自动记录到点击日志
     """
     from app.core.short_link_cache import (
         get_short_link_from_cache, 
