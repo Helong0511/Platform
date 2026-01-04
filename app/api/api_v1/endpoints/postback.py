@@ -199,21 +199,22 @@ async def get_postback_conversions(
                     client_name = f"客户_{row.id}"
                 clients_map[row.id] = client_name
         
-        # 批量查询点击记录信息（通过 click_id 关联）
-        click_ids = list(set([conv.click_id for conv in conversions if conv.click_id]))
+        # 批量查询点击记录信息（通过 conversion_id = clicks.click_id 关联）
+        conversion_ids = list(set([conv.conversion_id for conv in conversions if conv.conversion_id]))
         clicks_map = {}
         offer_ids = set()
         publisher_ids = set()
         advertiser_ids = set()
+        gid_publisher_ids = set()  # 通过 gid 关联的渠道ID
         
-        if click_ids:
+        if conversion_ids:
             clicks_query = select(
                 Click.click_id,
                 Click.offer_id,
                 Click.publisher_id,
                 Click.advertiser_id,
                 Click.click_time
-            ).where(Click.click_id.in_(click_ids))
+            ).where(Click.click_id.in_(conversion_ids))
             clicks_result = await db.execute(clicks_query)
             for row in clicks_result.all():
                 clicks_map[row.click_id] = {
@@ -229,6 +230,17 @@ async def get_postback_conversions(
                 if row.advertiser_id:
                     advertiser_ids.add(row.advertiser_id)
         
+        # 通过 gid 字段关联渠道（gid 是渠道ID）
+        for conv in conversions:
+            if conv.gid:
+                try:
+                    # gid 可能是字符串格式的渠道ID，尝试转换为整数
+                    gid_int = int(conv.gid)
+                    gid_publisher_ids.add(gid_int)
+                except (ValueError, TypeError):
+                    # 如果转换失败，跳过
+                    pass
+        
         # 批量查询 Offer、Publisher、Advertiser 信息
         offers_map = {}
         if offer_ids:
@@ -237,9 +249,11 @@ async def get_postback_conversions(
             for row in offers_result.all():
                 offers_map[row.id] = row.offer_name
         
+        # 合并通过点击记录和 gid 获取的渠道ID
+        all_publisher_ids = list(publisher_ids | gid_publisher_ids)
         publishers_map = {}
-        if publisher_ids:
-            publishers_query = select(Publisher.id, Publisher.publisher_name).where(Publisher.id.in_(list(publisher_ids)))
+        if all_publisher_ids:
+            publishers_query = select(Publisher.id, Publisher.publisher_name).where(Publisher.id.in_(all_publisher_ids))
             publishers_result = await db.execute(publishers_query)
             for row in publishers_result.all():
                 publishers_map[row.id] = row.publisher_name
@@ -262,9 +276,11 @@ async def get_postback_conversions(
             # 添加客户名称
             if conv.client_id and conv.client_id in clients_map:
                 conv_dict['client_name'] = clients_map[conv.client_id]
-            # 添加点击记录关联信息
-            if conv.click_id and conv.click_id in clicks_map:
-                click_info = clicks_map[conv.click_id]
+            
+            # 通过 conversion_id = clicks.click_id 关联点击记录
+            if conv.conversion_id and conv.conversion_id in clicks_map:
+                click_info = clicks_map[conv.conversion_id]
+                conv_dict['click_id'] = conv.conversion_id  # conversion_id 就是 click_id
                 conv_dict['click_offer_id'] = click_info['offer_id']
                 conv_dict['click_publisher_id'] = click_info['publisher_id']
                 conv_dict['click_advertiser_id'] = click_info['advertiser_id']
@@ -276,6 +292,22 @@ async def get_postback_conversions(
                     conv_dict['click_publisher_name'] = publishers_map[click_info['publisher_id']]
                 if click_info['advertiser_id'] and click_info['advertiser_id'] in advertisers_map:
                     conv_dict['click_advertiser_name'] = advertisers_map[click_info['advertiser_id']]
+            
+            # 通过 gid 关联渠道（gid 是渠道ID）
+            if conv.gid:
+                try:
+                    gid_int = int(conv.gid)
+                    if gid_int in publishers_map:
+                        # 如果点击记录中没有渠道信息，使用 gid 关联的渠道
+                        if not conv_dict.get('click_publisher_id'):
+                            conv_dict['click_publisher_id'] = gid_int
+                            conv_dict['click_publisher_name'] = publishers_map[gid_int]
+                        # 如果点击记录中已有渠道信息，也添加 gid 渠道信息（作为补充）
+                        conv_dict['gid_publisher_id'] = gid_int
+                        conv_dict['gid_publisher_name'] = publishers_map[gid_int]
+                except (ValueError, TypeError):
+                    pass
+            
             conversion_list.append(conv_dict)
         
         logger.info(

@@ -59,8 +59,8 @@ class PostbackConversionResponse(BaseModel):
     client_id: Optional[int]
     product_name: Optional[str] = Field(None, description="产品名称")
     client_name: Optional[str] = Field(None, description="客户名称")
-    # 点击记录关联信息
-    click_id: Optional[str] = Field(None, description="关联的Click ID")
+    # 点击记录关联信息（通过 conversion_id = clicks.click_id 关联）
+    click_id: Optional[str] = Field(None, description="关联的Click ID（等于conversion_id）")
     click_offer_id: Optional[int] = Field(None, description="点击记录的Offer ID")
     click_publisher_id: Optional[int] = Field(None, description="点击记录的渠道ID")
     click_advertiser_id: Optional[int] = Field(None, description="点击记录的广告主ID")
@@ -68,6 +68,9 @@ class PostbackConversionResponse(BaseModel):
     click_publisher_name: Optional[str] = Field(None, description="点击记录的渠道名称")
     click_advertiser_name: Optional[str] = Field(None, description="点击记录的广告主名称")
     click_time: Optional[datetime] = Field(None, description="点击时间")
+    # gid 关联的渠道信息（gid 字段是渠道ID）
+    gid_publisher_id: Optional[int] = Field(None, description="gid字段关联的渠道ID")
+    gid_publisher_name: Optional[str] = Field(None, description="gid字段关联的渠道名称")
     created_at: datetime
     notification_count: Optional[int] = Field(0, description="通知记录数量")
     

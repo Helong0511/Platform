@@ -148,16 +148,15 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="conversion_id" label="转化ID" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="click_id" label="点击ID" min-width="150" show-overflow-tooltip>
+        <el-table-column prop="conversion_id" label="转化ID/点击ID" min-width="150" show-overflow-tooltip>
           <template #default="scope">
             <el-link 
-              v-if="scope.row.click_id" 
+              v-if="scope.row.conversion_id" 
               type="primary" 
               :underline="false"
-              @click="handleViewClickDetail(scope.row.click_id)"
+              @click="handleViewClickDetail(scope.row.conversion_id)"
             >
-              {{ scope.row.click_id }}
+              {{ scope.row.conversion_id }}
             </el-link>
             <span v-else>-</span>
           </template>
@@ -233,6 +232,17 @@
             <el-tag v-if="scope.row.carrier" size="small" type="info">
               {{ scope.row.carrier }}
             </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="gid" label="渠道（gid）" min-width="150">
+          <template #default="scope">
+            <div v-if="scope.row.gid">
+              <div v-if="scope.row.gid_publisher_name" style="font-weight: 500;">
+                {{ scope.row.gid_publisher_name }}
+              </div>
+              <div style="font-size: 12px; color: #909399;">ID: {{ scope.row.gid }}</div>
+            </div>
             <span v-else>-</span>
           </template>
         </el-table-column>
@@ -361,7 +371,15 @@
           </el-descriptions-item>
           <el-descriptions-item label="运营商">{{ currentConversion.carrier || '-' }}</el-descriptions-item>
           <el-descriptions-item label="IP地址">{{ currentConversion.ip || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="渠道ID">{{ currentConversion.gid || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="渠道ID（gid）">
+            <div v-if="currentConversion.gid">
+              <div v-if="currentConversion.gid_publisher_name" style="font-weight: 500;">
+                {{ currentConversion.gid_publisher_name }}
+              </div>
+              <div style="font-size: 12px; color: #909399;">ID: {{ currentConversion.gid }}</div>
+            </div>
+            <span v-else>-</span>
+          </el-descriptions-item>
           <el-descriptions-item label="产品">
             <div v-if="currentConversion.product_id">
               <div style="font-weight: 500;">{{ currentConversion.product_name || `产品_${currentConversion.product_id}` }}</div>
@@ -378,15 +396,18 @@
           </el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ formatDateTime(currentConversion.created_at) }}</el-descriptions-item>
           
-          <!-- 点击记录关联信息 -->
-          <el-descriptions-item label="点击ID" :span="2" v-if="currentConversion.click_id">
+          <!-- 点击记录关联信息（conversion_id = click_id） -->
+          <el-descriptions-item label="点击ID" :span="2" v-if="currentConversion.conversion_id">
             <el-link 
               type="primary" 
               :underline="false"
-              @click="handleViewClickDetail(currentConversion.click_id)"
+              @click="handleViewClickDetail(currentConversion.conversion_id)"
             >
-              {{ currentConversion.click_id }}
+              {{ currentConversion.conversion_id }}
             </el-link>
+            <div style="font-size: 12px; color: #909399; margin-top: 4px;">
+              （转化ID = 点击ID）
+            </div>
           </el-descriptions-item>
           <el-descriptions-item label="关联Offer" v-if="currentConversion.click_offer_id">
             <div>
