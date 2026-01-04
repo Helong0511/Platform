@@ -1,9 +1,39 @@
 """
-用户认证API端点
-提供用户登录和身份验证功能，包括：
-- 用户登录（验证凭据并生成JWT令牌）
-- 验证用户状态（激活状态、登录限制）
-- 客户IP白名单验证
+用户认证API端点模块
+
+功能说明：
+提供用户登录和身份验证相关的所有API端点，包括：
+- 用户登录：验证用户名密码，生成JWT访问令牌
+- 用户登出：清除会话和令牌
+- 获取当前用户信息：验证令牌并返回用户信息
+- 刷新令牌：延长令牌有效期
+
+安全特性：
+- 密码使用bcrypt加密存储和验证
+- JWT令牌使用RS256算法（非对称加密）或HS256算法（对称加密）
+- 支持IP白名单验证（客户角色）
+- 登录限制检查（login_restricted字段）
+- 登录失败记录和审计日志
+
+认证流程：
+1. 用户提交用户名和密码
+2. 验证用户是否存在且密码正确
+3. 检查用户状态（is_active, login_restricted）
+4. 检查IP白名单（仅客户角色）
+5. 生成JWT访问令牌
+6. 返回令牌和用户信息
+
+令牌管理：
+- 访问令牌：用于API请求认证，默认240分钟有效期
+- 令牌存储在客户端（localStorage或cookie）
+- 令牌包含用户ID、角色等基本信息
+- 令牌过期后需要重新登录
+
+注意事项：
+1. 登录接口使用OAuth2PasswordRequestForm格式（username/password）
+2. 所有需要认证的接口都需要在请求头中携带Bearer令牌
+3. 客户角色的IP白名单验证：127.0.0.1始终允许
+4. 登录失败不会暴露具体原因（用户名不存在或密码错误都返回相同错误）
 """
 import logging
 from datetime import datetime, timedelta, timezone
@@ -26,18 +56,78 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.post("/login", response_model=LoginResponse, summary="用户登录")
+@router.post("/login", response_model=LoginResponse, summary="用户登录", tags=["认证管理"])
 async def login(
         request: Request,
         db: AsyncSession = Depends(get_db),
         form_data: OAuth2PasswordRequestForm = Depends()
 ):
     """
-    用户登录接口，验证凭据并返回JWT令牌
-    - 验证用户名和密码
-    - 生成访问令牌
-    - 为管理员返回未读通知
-    - 客户IP白名单验证（127.0.0.1始终允许）
+    用户登录接口
+    
+    功能说明：
+    验证用户凭据（用户名和密码），验证通过后生成JWT访问令牌并返回用户信息
+    
+    请求格式：
+    - Content-Type: application/x-www-form-urlencoded（OAuth2标准格式）
+    - 参数：
+      - username: 用户名（必填）
+      - password: 密码（必填）
+    
+    验证流程：
+    1. 根据用户名查询用户
+    2. 验证密码是否正确（使用bcrypt验证）
+    3. 检查用户是否激活（is_active）
+    4. 检查用户是否被限制登录（login_restricted）
+    5. 如果是客户角色，验证IP白名单
+    6. 生成JWT访问令牌
+    7. 记录登录日志（审计日志）
+    
+    安全特性：
+    - 密码验证使用安全的bcrypt算法
+    - 登录失败不暴露具体原因（防止用户名枚举攻击）
+    - 客户IP白名单验证（仅客户角色）
+    - 127.0.0.1始终允许（本地访问）
+    - 所有登录尝试都记录到审计日志
+    
+    响应内容：
+    - access_token: JWT访问令牌（用于后续API请求）
+    - token_type: 令牌类型（固定为"bearer"）
+    - user: 用户基本信息（ID、用户名、角色等）
+    - unread_notifications: 未读通知数量（仅管理员）
+    
+    Args:
+        request: FastAPI请求对象，用于获取客户端IP等信息
+        db: 数据库会话（依赖注入）
+        form_data: OAuth2密码请求表单，包含username和password
+    
+    Returns:
+        LoginResponse: 登录响应对象，包含访问令牌和用户信息
+    
+    Raises:
+        HTTPException: 
+            - 401: 用户名或密码错误
+            - 403: 用户被禁用或限制登录
+            - 403: IP不在白名单中（仅客户角色）
+    
+    Example:
+        # 使用curl测试
+        curl -X POST "http://localhost:8000/api/v1/auth/login" \\
+             -H "Content-Type: application/x-www-form-urlencoded" \\
+             -d "username=admin&password=admin123"
+        
+        # 响应示例
+        {
+            "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "token_type": "bearer",
+            "user": {
+                "id": 1,
+                "username": "admin",
+                "role": "admin",
+                ...
+            },
+            "unread_notifications": 5
+        }
     """
     logger.info("登录API被调用，开始处理请求")
     logger.info(f"请求方法: {request.method}, 请求路径: {request.url.path}")

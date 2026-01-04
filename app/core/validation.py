@@ -1,6 +1,50 @@
 """
 输入验证和清理工具模块
-提供安全的输入验证、清理和规范化功能
+
+功能说明：
+提供安全的输入验证、清理和规范化功能，包括：
+- 用户输入验证：用户名、邮箱、手机号（支持多国家格式）、密码强度等
+- 安全检测：SQL注入检测、XSS攻击检测
+- 文本清理：HTML转义、长度限制、规范化处理
+- 特殊格式验证：Cron表达式、Postback URL占位符等
+
+手机号验证特性：
+- 支持20+个国家的手机号格式验证
+- 根据ISO 3166-1二字母国家代码自动选择验证规则
+- 自动清理格式字符（空格、+、-、括号等）
+- 未指定国家时使用国际标准格式（8-15位数字）
+- 向后兼容：默认使用中国大陆格式（如果未指定国家）
+
+安全特性：
+1. SQL注入防护：
+   - 检测常见的SQL注入关键字（SELECT, INSERT, UPDATE等）
+   - 检测危险字符（引号、分号、注释符号等）
+   - 记录可疑的SQL注入尝试
+
+2. XSS攻击防护：
+   - 检测脚本标签（<script>, <iframe>等）
+   - 检测JavaScript协议（javascript:）
+   - 检测事件处理器（onerror=, onclick=等）
+   - 自动HTML转义（sanitize_input函数）
+
+3. 输入规范化：
+   - 去除前后空格
+   - 大小写转换
+   - 长度限制
+   - 特殊字符处理
+
+使用场景：
+- API端点参数验证
+- 用户注册/登录表单验证
+- 定时任务Cron表达式验证
+- Postback URL占位符验证
+- 数据导入前的验证
+
+注意事项：
+1. 所有用户输入都应该经过验证和清理
+2. 密码验证遵循bcrypt限制（最大72字节）
+3. SQL注入和XSS检测仅用于警告，实际防护依赖参数化查询和HTML转义
+4. Postback URL占位符验证确保只使用系统支持的变量
 """
 import re
 # Python 3.10+ 使用内置类型注解
@@ -16,8 +60,63 @@ USERNAME_PATTERN = re.compile(r'^[a-zA-Z0-9_]{3,20}$')
 # 邮箱：标准邮箱格式
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
-# 手机号：中国大陆手机号（11位数字）
-PHONE_PATTERN = re.compile(r'^1[3-9]\d{9}$')
+# ====== 手机号格式规则（按国家代码） ======
+# 定义不同国家的手机号格式验证规则
+# 格式：ISO 3166-1 二字母代码 -> 正则表达式模式
+PHONE_PATTERNS = {
+    # 中国大陆（CN）：11位数字，1开头，第二位3-9
+    'CN': re.compile(r'^1[3-9]\d{9}$'),
+    # 美国（US）：10位数字（不含国家代码）
+    'US': re.compile(r'^\d{10}$'),
+    # 英国（GB）：11位数字，0开头
+    'GB': re.compile(r'^0\d{10}$'),
+    # 日本（JP）：10-11位数字
+    'JP': re.compile(r'^\d{10,11}$'),
+    # 韩国（KR）：10-11位数字
+    'KR': re.compile(r'^\d{10,11}$'),
+    # 印度（IN）：10位数字
+    'IN': re.compile(r'^\d{10}$'),
+    # 德国（DE）：10-11位数字
+    'DE': re.compile(r'^\d{10,11}$'),
+    # 法国（FR）：10位数字
+    'FR': re.compile(r'^\d{10}$'),
+    # 意大利（IT）：10位数字
+    'IT': re.compile(r'^\d{10}$'),
+    # 西班牙（ES）：9位数字
+    'ES': re.compile(r'^\d{9}$'),
+    # 加拿大（CA）：10位数字（与美国相同）
+    'CA': re.compile(r'^\d{10}$'),
+    # 澳大利亚（AU）：10位数字
+    'AU': re.compile(r'^\d{10}$'),
+    # 巴西（BR）：10-11位数字
+    'BR': re.compile(r'^\d{10,11}$'),
+    # 俄罗斯（RU）：10位数字
+    'RU': re.compile(r'^\d{10}$'),
+    # 墨西哥（MX）：10位数字
+    'MX': re.compile(r'^\d{10}$'),
+    # 印度尼西亚（ID）：10-12位数字
+    'ID': re.compile(r'^\d{10,12}$'),
+    # 泰国（TH）：9-10位数字
+    'TH': re.compile(r'^\d{9,10}$'),
+    # 越南（VN）：9-10位数字
+    'VN': re.compile(r'^\d{9,10}$'),
+    # 菲律宾（PH）：10-11位数字
+    'PH': re.compile(r'^\d{10,11}$'),
+    # 马来西亚（MY）：10-11位数字
+    'MY': re.compile(r'^\d{10,11}$'),
+    # 新加坡（SG）：8位数字
+    'SG': re.compile(r'^\d{8}$'),
+    # 中国香港（HK）：8位数字
+    'HK': re.compile(r'^\d{8}$'),
+    # 中国台湾（TW）：9-10位数字
+    'TW': re.compile(r'^\d{9,10}$'),
+}
+
+# 默认手机号格式（如果国家代码未指定或不支持）：允许8-15位数字（国际标准）
+DEFAULT_PHONE_PATTERN = re.compile(r'^\d{8,15}$')
+
+# 向后兼容：保留原有的中国大陆手机号模式
+PHONE_PATTERN = PHONE_PATTERNS['CN']
 
 # SQL注入危险字符模式（用于检测）
 SQL_INJECTION_PATTERNS = [
@@ -47,7 +146,7 @@ def validate_username(username: str) -> tuple[bool, str | None]:
     if not username:
         return False, "用户名不能为空"
 
-    if len(username) < 3:
+    if len(username) < 2:
         return False, "用户名至少需要3个字符"
 
     if len(username) > 20:
@@ -81,23 +180,106 @@ def validate_email(email: str) -> tuple[bool, str | None]:
     return True, None
 
 
-def validate_phone(phone: str) -> tuple[bool, str | None]:
+def validate_phone(phone: str, country_code: str | None = None) -> tuple[bool, str | None]:
     """
-    验证手机号格式（中国大陆）
+    验证手机号格式（支持多国家）
+    
+    根据国家代码验证对应国家的手机号格式。如果未指定国家代码，使用默认格式（8-15位数字）。
+    
+    支持的国家：
+    - CN（中国大陆）：11位数字，1开头，第二位3-9
+    - US（美国）：10位数字
+    - GB（英国）：11位数字，0开头
+    - JP（日本）：10-11位数字
+    - KR（韩国）：10-11位数字
+    - IN（印度）：10位数字
+    - 其他：8-15位数字（国际标准）
     
     参数:
-        phone: 手机号
+        phone: 手机号字符串
+        country_code: 国家代码（ISO 3166-1 二字母代码，如 "CN", "US"），可选
+                     如果为None，使用默认格式验证
     
     返回:
-        (是否有效, 错误信息)
+        tuple[bool, str | None]: (是否有效, 错误信息)
+        - 如果手机号为空，返回 (True, None)（手机号是可选的）
+        - 如果格式正确，返回 (True, None)
+        - 如果格式错误，返回 (False, 错误信息)
+    
+    示例:
+        # 验证中国大陆手机号
+        is_valid, error = validate_phone("13800138000", "CN")  # True, None
+        
+        # 验证美国手机号
+        is_valid, error = validate_phone("1234567890", "US")  # True, None
+        
+        # 使用默认格式（未指定国家）
+        is_valid, error = validate_phone("1234567890")  # True, None
+        
+        # 格式错误
+        is_valid, error = validate_phone("123", "CN")  # False, "手机号格式不正确..."
     """
     if not phone:
         return True, None  # 手机号是可选的
-
-    if not PHONE_PATTERN.match(phone):
-        return False, "手机号格式不正确（应为11位数字）"
-
-    return True, None
+    
+    # 去除空格和常见格式字符（如 +、-、空格等）
+    phone_cleaned = re.sub(r'[\s+\-()]', '', phone)
+    
+    # 如果清理后为空，返回错误
+    if not phone_cleaned:
+        return False, "手机号不能只包含格式字符"
+    
+    # 根据国家代码选择验证规则
+    if country_code:
+        country_code = country_code.upper().strip()
+        pattern = PHONE_PATTERNS.get(country_code)
+        
+        if pattern:
+            # 使用对应国家的格式规则
+            if pattern.match(phone_cleaned):
+                return True, None
+            else:
+                # 生成友好的错误信息
+                country_names = {
+                    'CN': '中国大陆',
+                    'US': '美国',
+                    'GB': '英国',
+                    'JP': '日本',
+                    'KR': '韩国',
+                    'IN': '印度',
+                    'DE': '德国',
+                    'FR': '法国',
+                    'IT': '意大利',
+                    'ES': '西班牙',
+                    'CA': '加拿大',
+                    'AU': '澳大利亚',
+                    'BR': '巴西',
+                    'RU': '俄罗斯',
+                    'MX': '墨西哥',
+                    'ID': '印度尼西亚',
+                    'TH': '泰国',
+                    'VN': '越南',
+                    'PH': '菲律宾',
+                    'MY': '马来西亚',
+                    'SG': '新加坡',
+                    'HK': '中国香港',
+                    'TW': '中国台湾',
+                }
+                country_name = country_names.get(country_code, country_code)
+                return False, f"手机号格式不正确（{country_name}格式）"
+        else:
+            # 国家代码不支持，使用默认格式
+            logger.warning(f"未找到国家代码 {country_code} 的手机号格式规则，使用默认格式验证")
+            if DEFAULT_PHONE_PATTERN.match(phone_cleaned):
+                return True, None
+            else:
+                return False, f"手机号格式不正确（应为8-15位数字）"
+    else:
+        # 未指定国家代码，使用默认格式（8-15位数字）
+        if DEFAULT_PHONE_PATTERN.match(phone_cleaned):
+            return True, None
+        else:
+            return False, "手机号格式不正确（应为8-15位数字）"
 
 
 def validate_password_strength(password: str) -> tuple[bool, str | None]:
@@ -350,3 +532,114 @@ def validate_and_sanitize(text: str, field_name: str, max_length: int | None = N
         return False, f"{field_name}长度不能超过{max_length}个字符", sanitized[:max_length]
 
     return True, None, sanitized
+
+
+# ====== Postback URL 占位符验证 ======
+# CPL 系统支持的占位符变量列表（基于 app/core/postback/forwarder.py）
+# 这些变量在 Postback URL 替换时会被实际值替换
+SUPPORTED_PLACEHOLDERS = {
+    # PostbackConversion 直接字段
+    'conversion_id', 'platform', 'event_name', 'event_value', 'payout',
+    'devad_id', 'os', 'carrier', 'ip', 'gid', 'product_id', 'client_id',
+    'click_id', 'click_time', 'conversion_status', 'timestamp', 'created_at',
+    # Click 关联字段
+    'click_offer_id', 'click_publisher_id', 'click_advertiser_id', 'click_ip',
+    'click_device', 'click_country', 'click_user_agent', 'click_referer',
+    # Offer 关联字段
+    'offer_id', 'offer_name', 'advertiser_offer_id', 'offer_advertiser_id',
+    'offer_payout', 'affiliate_payout', 'offer_country', 'offer_category',
+    'offer_type', 'offer_status',
+    # Publisher 关联字段
+    'publisher_id', 'channel_id', 'publisher_name', 'publisher_email',
+    # Advertiser 关联字段
+    'advertiser_id', 'advertiser_name', 'advertiser_email',
+    # 支持的别名（转换为标准格式后验证）
+    'clickid', 'clickId', 'clk_id', 'cid',
+    'conversionId', 'conv_id',
+    'publisherId', 'channelId', 'offerId',
+    'eventName', 'eventId', 'event_id',
+}
+
+# 别名映射（用于规范化占位符名称）
+PLACEHOLDER_ALIAS_MAP = {
+    'clickid': 'click_id',
+    'clickId': 'click_id',
+    'clk_id': 'click_id',
+    'cid': 'click_id',
+    'conversionId': 'conversion_id',
+    'conv_id': 'conversion_id',
+    'publisherId': 'publisher_id',
+    'channelId': 'channel_id',
+    'offerId': 'offer_id',
+    'eventName': 'event_name',
+    'eventId': 'event_name',
+    'event_id': 'event_name',
+}
+
+
+def normalize_placeholder(placeholder: str) -> str:
+    """
+    规范化占位符名称（处理别名和大小写）
+    
+    参数:
+        placeholder: 占位符名称（不含花括号）
+    
+    返回:
+        规范化后的占位符名称
+    """
+    # 转换为小写
+    normalized = placeholder.lower()
+    
+    # 检查别名映射
+    if normalized in PLACEHOLDER_ALIAS_MAP:
+        return PLACEHOLDER_ALIAS_MAP[normalized]
+    
+    # 将驼峰命名转换为下划线命名
+    # 例如：clickId -> click_id
+    normalized = re.sub(r'(?<!^)(?=[A-Z])', '_', placeholder).lower()
+    
+    return normalized
+
+
+def validate_postback_url_placeholders(postback_url: str | None) -> tuple[bool, str | None]:
+    """
+    验证 Postback URL 中的占位符是否都在 CPL 系统支持的变量列表中
+    
+    参数:
+        postback_url: Postback URL 字符串（可以为 None）
+    
+    返回:
+        (是否有效, 错误信息)
+        如果 URL 为空或 None，返回 (True, None)
+        如果所有占位符都有效，返回 (True, None)
+        如果有无效占位符，返回 (False, 错误信息)
+    """
+    # 如果 URL 为空，直接返回有效
+    if not postback_url or not postback_url.strip():
+        return True, None
+    
+    # 使用正则表达式查找所有占位符 {变量名}
+    pattern = r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}'
+    placeholders = re.findall(pattern, postback_url)
+    
+    # 如果没有占位符，直接返回有效
+    if not placeholders:
+        return True, None
+    
+    # 检查每个占位符是否在支持的列表中
+    invalid_placeholders = []
+    for placeholder in placeholders:
+        # 规范化占位符名称
+        normalized = normalize_placeholder(placeholder)
+        
+        # 检查规范化后的名称是否在支持的列表中
+        # 同时也要检查原始占位符（支持别名）
+        if normalized not in SUPPORTED_PLACEHOLDERS and placeholder not in SUPPORTED_PLACEHOLDERS:
+            invalid_placeholders.append(placeholder)
+    
+    # 如果有无效占位符，返回错误信息
+    if invalid_placeholders:
+        invalid_list = ', '.join([f'{{{p}}}' for p in invalid_placeholders])
+        return False, f"Postback URL 中包含不支持的占位符: {invalid_list}。请使用 CPL 系统支持的变量。"
+    
+    return True, None

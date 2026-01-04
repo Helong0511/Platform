@@ -1,12 +1,71 @@
 """
 安全认证模块
-提供JWT令牌生成和验证、用户认证、权限检查等功能
-包括：
-- JWT工具类（创建和验证令牌）
-- 当前用户获取（从JWT令牌解析）
-- 管理员权限检查
-- 客户权限检查
-- 管理员或自己的权限检查
+
+功能说明：
+提供JWT令牌生成和验证、用户认证、权限检查等核心安全功能，包括：
+- JWT工具类：创建和验证JWT访问令牌
+- 用户认证：从JWT令牌解析用户信息
+- 权限检查：管理员权限、客户权限、资源所有权检查
+- OAuth2集成：支持OAuth2密码持有者模式
+
+JWT令牌管理：
+- 算法支持：RS256（非对称加密，推荐）或HS256（对称加密）
+- 令牌内容：用户ID（sub）、过期时间（exp）、签发时间（iat）、JWT ID（jti）
+- 过期时间：默认240分钟，可通过配置调整
+- 密钥管理：
+  - RS256：使用RSA密钥对（私钥签名，公钥验证）
+  - HS256：使用共享密钥（SECRET_KEY）
+  - 支持从环境变量或文件加载密钥
+
+安全特性：
+1. 令牌验证：
+   - 验证签名有效性
+   - 检查过期时间
+   - 验证令牌类型（access token）
+   - 支持令牌黑名单（可选）
+
+2. 权限控制：
+   - 管理员权限：只有ADMIN角色可以访问
+   - 客户权限：CLIENT角色只能访问自己的资源
+   - 资源所有权：用户可以访问自己的资源或管理员可以访问所有资源
+
+3. 错误处理：
+   - 令牌缺失：返回401 Unauthorized
+   - 令牌无效：返回401 Unauthorized
+   - 令牌过期：返回401 Unauthorized
+   - 权限不足：返回403 Forbidden
+
+使用方式：
+1. 登录获取令牌：
+   ```python
+   token = JWTUtils.create_access_token(user_id)
+   ```
+
+2. 在API端点中使用：
+   ```python
+   @router.get("/protected")
+   async def protected_route(current_user: User = Depends(get_current_user)):
+       # current_user 是已验证的用户对象
+       pass
+   ```
+
+3. 权限检查：
+   ```python
+   @router.delete("/users/{user_id}")
+   async def delete_user(
+       user_id: int,
+       current_user: User = Depends(get_current_admin_or_owner)
+   ):
+       # 只有管理员或资源所有者可以访问
+       pass
+   ```
+
+注意事项：
+1. 生产环境必须使用RS256算法和强密钥
+2. 令牌应存储在安全的客户端存储中（httpOnly cookie或localStorage）
+3. 敏感操作应使用短期令牌或刷新令牌机制
+4. 定期轮换密钥以提高安全性
+5. 考虑实现令牌黑名单机制（用于登出功能）
 """
 # 标准库导入
 import logging

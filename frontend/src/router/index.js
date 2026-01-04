@@ -1,10 +1,57 @@
+/**
+ * Vue Router 路由配置模块
+ * 
+ * 功能说明：
+ * - 定义应用的所有路由规则
+ * - 实现路由懒加载（代码分割）
+ * - 实现路由守卫（认证检查、权限检查）
+ * - 处理路由错误和重定向
+ * 
+ * 路由结构：
+ * - /login: 登录页（无需认证）
+ * - /app: 主应用区域（需要认证）
+ *   - /app/dashboard: 仪表盘
+ *   - /app/ad-data/*: 广告数据相关页面
+ *   - /app/admin/*: 管理员功能页面（需要管理员权限）
+ *   - /app/client/*: 客户功能页面
+ *   - /app/api-documentation: API文档页面
+ * 
+ * 权限控制：
+ * - requiresAuth: 需要登录才能访问
+ * - requiresAdmin: 需要管理员权限才能访问
+ * 
+ * @module router/index
+ */
+
 import { createRouter, createWebHistory } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { useAuthStore, validateAuthData, clearAuthData } from '../store';
 import { logger } from '../utils/logger';
 
-// 懒加载组件 - 使用动态导入实现代码分割
-// 添加错误处理，确保模块加载失败时能够重试或显示友好错误
+/**
+ * 创建异步组件加载器（支持错误处理和重试）
+ * 
+ * 功能说明：
+ * - 使用动态import实现代码分割，减少初始加载体积
+ * - 添加错误处理，模块加载失败时自动重试一次
+ * - 重试失败后显示友好的错误提示
+ * 
+ * 工作原理：
+ * 1. 首次加载组件时，动态import对应的Vue组件文件
+ * 2. 如果加载失败，自动重试一次
+ * 3. 重试失败后，显示错误提示并抛出异常
+ * 
+ * @param {Function} importFn - 动态导入函数，例如 () => import('./views/Login.vue')
+ * @param {string} componentName - 组件名称，用于错误日志记录
+ * 
+ * @returns {Function} 返回一个异步组件加载函数，供Vue Router使用
+ * 
+ * @example
+ * const Login = createAsyncComponent(
+ *   () => import('./views/Login.vue'),
+ *   'Login'
+ * );
+ */
 const createAsyncComponent = (importFn, componentName) => {
   return () => {
     return importFn().catch(error => {
@@ -46,10 +93,35 @@ const ClientUserManagement = createAsyncComponent(() => import(/* webpackChunkNa
 const ApiDocumentation = createAsyncComponent(() => import(/* webpackChunkName: "api-documentation" */ '../views/ApiDocumentation.vue'), 'ApiDocumentation');
 const MainLayout = createAsyncComponent(() => import(/* webpackChunkName: "layout" */ '../components/Layout/MainLayout.vue'), 'MainLayout');
 
-// 路由规则
+/**
+ * 路由规则配置
+ * 
+ * 路由配置说明：
+ * - path: 路由路径，支持动态参数和通配符
+ * - name: 路由名称，用于编程式导航
+ * - component: 路由组件，使用懒加载
+ * - meta: 路由元信息
+ *   - requiresAuth: 是否需要认证（默认true）
+ *   - requiresAdmin: 是否需要管理员权限（默认false）
+ * - redirect: 重定向路径
+ * - children: 嵌套路由（子路由）
+ * 
+ * 路由优先级：
+ * 1. 精确匹配的路由优先
+ * 2. 动态路由次之
+ * 3. 通配符路由最后（404页面）
+ */
 const routes = [
+  // 根路径重定向到登录页
   { path: '/', redirect: '/login' },
-  { path: '/login', name: 'Login', component: Login, meta: { requiresAuth: false } },
+  
+  // 登录页（无需认证）
+  { 
+    path: '/login', 
+    name: 'Login', 
+    component: Login, 
+    meta: { requiresAuth: false }  // 明确标记无需认证
+  },
   {
     path: '/app',
     component: MainLayout,
@@ -200,7 +272,38 @@ const router = createRouter({
   routes
 });
 
-// 路由守卫
+/**
+ * 路由守卫 - 全局前置守卫
+ * 
+ * 功能说明：
+ * 在每次路由跳转前执行，用于：
+ * 1. 检查用户认证状态
+ * 2. 检查用户权限（管理员权限）
+ * 3. 处理未认证用户的重定向
+ * 4. 处理已登录用户访问登录页的重定向
+ * 
+ * 执行流程：
+ * 1. 如果是登录页，直接放行
+ * 2. 检查路由是否需要认证（requiresAuth）
+ * 3. 如果未认证，重定向到登录页
+ * 4. 检查路由是否需要管理员权限（requiresAdmin）
+ * 5. 如果权限不足，重定向到仪表盘或原页面
+ * 6. 所有检查通过，允许访问
+ * 
+ * @param {Object} to - 目标路由对象
+ * @param {Object} from - 来源路由对象
+ * @param {Function} next - 路由跳转函数
+ *   - next(): 允许访问
+ *   - next('/path'): 重定向到指定路径
+ *   - next(false): 取消导航
+ * 
+ * @example
+ * // 路由守卫会自动执行，无需手动调用
+ * // 当用户访问 /app/dashboard 时：
+ * // 1. 检查是否已登录
+ * // 2. 如果未登录，重定向到 /login
+ * // 3. 如果已登录，允许访问
+ */
 router.beforeEach((to, from, next) => {
   try {
     // 如果是登录页，直接放行，不执行任何检查

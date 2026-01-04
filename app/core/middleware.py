@@ -1,6 +1,60 @@
 """
 安全中间件模块
-提供API限流、安全响应头、请求日志、响应压缩等功能
+
+功能说明：
+提供FastAPI应用的安全中间件，包括：
+- API限流：防止API滥用和暴力破解攻击
+- 安全响应头：防止XSS、点击劫持等攻击
+- 请求日志：记录所有API请求的详细信息
+- 响应压缩：压缩响应内容，减少网络传输
+- 性能监控：记录慢请求，优化性能
+
+中间件执行顺序（从外到内）：
+1. HTTPSRedirectMiddleware（生产环境强制HTTPS）
+2. PerformanceMonitoringMiddleware（性能监控）
+3. RequestLoggingMiddleware（请求日志）
+4. CompressionMiddleware（响应压缩）
+5. CSRFMiddleware（CSRF防护）
+6. RateLimitMiddleware（API限流）
+7. SecurityHeadersMiddleware（安全响应头）
+8. CORSMiddleware（跨域处理）
+
+API限流（RateLimitMiddleware）：
+- 默认限流：100次/分钟（可配置）
+- 登录接口限流：5次/分钟（防止暴力破解）
+- 短链接路由：不限流（支持高并发）
+- 存储方式：优先使用Redis，降级到内存存储
+- 限流标识：使用客户端IP地址
+
+安全响应头（SecurityHeadersMiddleware）：
+- X-Content-Type-Options: nosniff（防止MIME类型嗅探）
+- X-Frame-Options: DENY（防止点击劫持）
+- X-XSS-Protection: 1; mode=block（启用XSS过滤器）
+- Strict-Transport-Security: max-age=31536000（强制HTTPS）
+- Content-Security-Policy: 限制资源加载来源
+
+请求日志（RequestLoggingMiddleware）：
+- 记录所有API请求的详细信息
+- 支持中文路径解码
+- 记录请求方法、路径、参数、响应状态码、处理时间
+- 生产环境只记录错误请求，开发环境记录所有请求
+
+响应压缩（CompressionMiddleware）：
+- 使用gzip压缩响应内容
+- 只压缩文本类型（JSON、HTML、CSS、JS等）
+- 如果Nginx已配置压缩，可以禁用此中间件
+
+性能监控（PerformanceMonitoringMiddleware）：
+- 记录请求处理时间
+- 慢请求警告（超过1秒）
+- 在响应头中添加X-Process-Time
+
+注意事项：
+1. 中间件执行顺序很重要，后添加的中间件会先执行
+2. 限流使用滑动窗口算法，支持多进程环境
+3. 安全响应头在生产环境必须配置
+4. 请求日志可能包含敏感信息，注意日志安全
+5. 响应压缩会增加CPU开销，但减少网络传输
 """
 from fastapi import Request, Response, status
 from fastapi.responses import JSONResponse, StreamingResponse

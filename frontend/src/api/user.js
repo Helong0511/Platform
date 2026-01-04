@@ -1,16 +1,56 @@
+/**
+ * 用户管理API模块
+ * 
+ * 提供用户相关的所有API调用方法，包括：
+ * - 用户列表查询（支持分页、筛选）
+ * - 用户详情查询
+ * - 用户创建、更新、删除
+ * - 用户密码修改
+ * - 用户数据导出
+ * - 用户统计信息查询
+ * 
+ * 所有方法都包含完整的错误处理和CSRF令牌管理
+ * 
+ * @module api/user
+ */
+
 import axios from 'axios';
 import { request, normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken, refreshCsrfTokenBeforeRequest, handleError, handleFileDownload, refreshCsrfToken } from '../utils/api';
 import { ElMessage } from 'element-plus';
 import { getSuccessMessage, getWarningMessage } from '../utils/messages';
 
 /**
- * 获取用户列表
- * @param {Object} params - 查询参数
- * @param {number} params.page - 页码
- * @param {number} params.page_size - 每页条数
- * @param {string} [params.username] - 用户名筛选
- * @param {string} [params.role] - 角色筛选
- * @returns {Promise<Object>} 用户列表数据
+ * 获取用户列表（支持分页和筛选）
+ * 
+ * 功能说明：
+ * - 支持按用户名、角色等条件筛选
+ * - 支持分页查询
+ * - 返回标准化的分页响应格式
+ * 
+ * @param {Object} params - 查询参数对象
+ * @param {number} params.page - 页码，从1开始，默认1
+ * @param {number} params.page_size - 每页条数，默认10
+ * @param {string} [params.username] - 用户名筛选（支持模糊匹配）
+ * @param {string} [params.role] - 角色筛选，可选值：'admin' | 'client'
+ * @param {boolean} [params.is_active] - 是否激活筛选，true/false
+ * 
+ * @returns {Promise<Object>} 返回标准化的分页响应对象
+ * @returns {Object} 返回对象结构：
+ *   - data: {Array<Object>} 用户列表数组
+ *   - total: {number} 总记录数
+ *   - page: {number} 当前页码
+ *   - page_size: {number} 每页条数
+ *   - total_pages: {number} 总页数
+ * 
+ * @example
+ * // 获取第一页用户列表
+ * const result = await getUsers({ page: 1, page_size: 10 });
+ * console.log(result.data); // 用户列表
+ * 
+ * // 按角色筛选管理员
+ * const admins = await getUsers({ role: 'admin', page: 1 });
+ * 
+ * @throws {Error} 当API请求失败时抛出错误，错误会被handleError处理
  */
 export const getUsers = async (params) => {
   return request({

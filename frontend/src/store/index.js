@@ -1,3 +1,74 @@
+/**
+ * Pinia状态管理模块
+ * 
+ * 功能说明：
+ * 使用Pinia进行全局状态管理，包括：
+ * - 认证状态管理：用户登录状态、用户信息、令牌管理
+ * - 认证验证：验证认证数据完整性、检查登录状态
+ * - 认证操作：登录、登出、刷新认证状态
+ * - 路由跳转：根据用户角色和权限跳转到默认路由
+ * 
+ * 认证状态管理（useAuthStore）：
+ * - isAuthenticated: 是否已登录
+ * - userInfo: 用户信息对象（从sessionStorage恢复）
+ * - token: JWT访问令牌（从cookie或sessionStorage获取）
+ * - isAdmin: 是否为管理员角色
+ * 
+ * 状态持久化：
+ * - userInfo存储在sessionStorage中（页面刷新后保持）
+ * - token存储在HttpOnly cookie中（由后端管理）
+ * - 页面刷新时自动恢复认证状态
+ * 
+ * 认证验证流程：
+ * 1. 应用启动时验证sessionStorage中的userInfo
+ * 2. 如果userInfo无效，清除所有认证数据
+ * 3. 如果userInfo有效，恢复认证状态
+ * 4. 检查token是否有效（通过API调用验证）
+ * 
+ * 认证操作：
+ * - checkAuth(): 检查认证状态（验证token有效性）
+ * - login(): 用户登录（保存userInfo和token）
+ * - logout(): 用户登出（清除认证数据）
+ * - refreshAuth(): 刷新认证状态（重新获取用户信息）
+ * 
+ * 路由跳转：
+ * - 管理员：跳转到仪表盘（/app/dashboard）
+ * - 客户用户且有关联渠道：跳转到转化总览（/app/admin/conversion-summary）
+ * - 客户用户但没有关联渠道：跳转到仪表盘（/app/dashboard）
+ * 
+ * 安全特性：
+ * - 自动验证认证数据完整性
+ * - 自动处理token过期（401错误）
+ * - 自动清除无效的认证数据
+ * - 支持HttpOnly cookie存储token（更安全）
+ * 
+ * 使用示例：
+ * ```javascript
+ * // 在组件中使用
+ * import { useAuthStore } from '@/store';
+ * 
+ * const authStore = useAuthStore();
+ * 
+ * // 检查登录状态
+ * if (authStore.isAuthenticated) {
+ *   console.log('已登录');
+ * }
+ * 
+ * // 获取用户信息
+ * const userInfo = authStore.userInfo;
+ * 
+ * // 检查是否为管理员
+ * if (authStore.isAdmin) {
+ *   console.log('管理员');
+ * }
+ * 
+ * // 登出
+ * await authStore.logout();
+ * ```
+ * 
+ * @module store/index
+ */
+
 import { createPinia, defineStore } from 'pinia';
 import axios from 'axios';
 import { ElMessage } from 'element-plus';

@@ -1,3 +1,16 @@
+"""
+数据模型模块
+定义所有数据库表的ORM模型，包括用户、客户、产品、广告数据等核心业务模型
+
+本模块使用SQLAlchemy 2.0+的声明式基类，支持异步操作
+所有模型都继承自Base，通过SQLAlchemy ORM映射到数据库表
+
+注意事项：
+1. 所有时间字段使用get_app_now_naive()获取北京时间（naive datetime）
+2. 密码使用bcrypt加密存储，最大支持72字节
+3. 外键关系使用cascade选项控制级联操作
+4. 索引优化查询性能，复合索引用于常见查询场景
+"""
 from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, Enum, Text, Index, \
     UniqueConstraint, Date
 from sqlalchemy.orm import declarative_base  # SQLAlchemy 2.0+ 推荐方式
@@ -8,20 +21,64 @@ import uuid
 from passlib.context import CryptContext
 from app.core.utils import get_app_now_naive
 
-# 创建密码上下文
+# ====== 密码加密配置 ======
+# 使用bcrypt算法进行密码哈希
+# deprecated="auto"表示自动处理弃用警告
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# ====== SQLAlchemy基类 ======
+# 所有模型类都继承自Base，用于ORM映射
 Base = declarative_base()
 
 
-# 用户角色枚举
+# ====== 枚举类型定义 ======
+
 class UserRole(str, enum.Enum):
-    ADMIN = "admin"
-    CLIENT = "client"
+    """
+    用户角色枚举
+    
+    角色说明：
+    - ADMIN: 管理员，拥有所有权限，可以管理用户、客户、产品等
+    - CLIENT: 客户，只能查看和操作分配给自己的数据
+    
+    使用字符串枚举类型，便于数据库存储和序列化
+    """
+    ADMIN = "admin"      # 管理员角色
+    CLIENT = "client"    # 客户角色
 
 
-# 用户模型
+# ====== 用户和权限相关模型 ======
+
 class User(Base):
+    """
+    用户模型
+    
+    存储系统用户的基本信息，包括登录凭证、角色权限等
+    一个用户可以有多个客户（Client），通过一对多关系关联
+    
+    表名: users
+    
+    字段说明：
+    - id: 用户唯一标识，自增主键
+    - username: 登录用户名，唯一且必填，最大50字符
+    - hashed_password: 加密后的密码，使用bcrypt算法，最大191字符（MySQL限制）
+    - full_name: 用户全名，可选
+    - email: 用户邮箱，唯一且可选，用于找回密码等
+    - role: 用户角色，枚举类型（ADMIN/CLIENT），默认CLIENT
+    - is_active: 是否激活，False时无法登录
+    - login_restricted: 是否限制登录，True时显示login_message
+    - login_message: 登录限制提示消息，当login_restricted=True时显示
+    - created_at: 创建时间，自动设置为当前时间（北京时间）
+    - updated_at: 更新时间，每次更新时自动更新为当前时间
+    
+    关系：
+    - clients: 一对多关系，一个用户可以有多个客户
+    
+    方法：
+    - verify_password(password): 验证密码是否正确
+    - get_password_hash(password): 获取密码的哈希值
+    - set_password(password): 设置用户密码（自动加密）
+    """
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='用户ID')
@@ -43,20 +100,88 @@ class User(Base):
     clients = relationship("Client", back_populates="user", cascade="all, delete-orphan")
 
     def verify_password(self, password: str) -> bool:
+        """
+        验证用户密码是否正确
+        
+        Args:
+            password: 待验证的明文密码
+            
+        Returns:
+            bool: 密码正确返回True，否则返回False
+            
+        示例:
+            if user.verify_password("my_password"):
+                print("密码正确")
+        """
         return pwd_context.verify(password, self.hashed_password)
 
     def get_password_hash(self, password: str) -> str:
-        # Truncate password to 72 bytes before hashing
+        """
+        获取密码的bcrypt哈希值
+        
+        注意：bcrypt算法最大支持72字节的密码，超过部分会被截断
+        这是bcrypt算法的限制，不是bug
+        
+        Args:
+            password: 明文密码
+            
+        Returns:
+            str: 加密后的密码哈希值
+            
+        示例:
+            hashed = user.get_password_hash("my_password")
+        """
+        # bcrypt算法限制：密码最大72字节，超过部分会被截断
         truncated_password = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
         return pwd_context.hash(truncated_password)
     
     def set_password(self, password: str) -> None:
-        """设置用户密码"""
+        """
+        设置用户密码（自动加密存储）
+        
+        这是设置密码的推荐方法，会自动调用get_password_hash进行加密
+        
+        Args:
+            password: 明文密码
+            
+        示例:
+            user.set_password("new_password")
+            # 密码已自动加密并存储到hashed_password字段
+        """
         self.hashed_password = self.get_password_hash(password)
 
 
-# 客户模型
 class Client(Base):
+    """
+    客户模型
+    
+    代表系统中的客户（公司），一个客户可以有多个产品
+    客户通过user_id关联到User模型，实现用户-客户的多对一关系
+    
+    表名: clients
+    
+    字段说明：
+    - id: 客户唯一标识，自增主键
+    - user_id: 关联的用户ID，外键，必填
+    - key: 客户唯一标识UUID，用于API访问认证，唯一且必填
+    - company_name: 公司名称，必填，最大100字符
+    - contact_person: 联系人姓名，可选，最大50字符
+    - phone: 联系电话，可选，最大20字符
+    - address: 公司地址，可选，文本类型
+    - allowed_ips: IP白名单，多个IP用逗号分隔，为空则不限制IP访问
+    - is_active: 是否激活，False时客户无法访问系统
+    - api_enabled: 是否允许API访问，True时显示API对接菜单并允许通过API查询数据
+    - password_change_enabled: 是否允许客户修改密码，True时客户可以修改自己的登录密码
+    - created_at: 创建时间，自动设置为当前时间
+    - updated_at: 更新时间，每次更新时自动更新
+    
+    关系：
+    - user: 多对一关系，关联到User模型
+    - products: 一对多关系，一个客户可以有多个产品，级联删除
+    
+    索引：
+    - idx_client_user: 优化通过user_id查询客户的性能
+    """
     __tablename__ = "clients"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='客户ID')
@@ -74,12 +199,12 @@ class Client(Base):
     updated_at = Column(DateTime, default=get_app_now_naive,
                         onupdate=get_app_now_naive, comment='更新时间')
 
-    # 关系
+    # 关系定义
     user = relationship("User", back_populates="clients")
     products = relationship("Product", back_populates="client", cascade="all, delete-orphan")
 
     __table_args__ = (
-        Index("idx_client_user", "user_id"),  # 优化用户查询
+        Index("idx_client_user", "user_id"),  # 优化通过user_id查询客户的性能
     )
 
 

@@ -149,8 +149,66 @@
             v-model="formData.postback_url"
             type="textarea"
             :rows="5"
-            placeholder="Postback URL（可选）"
+            placeholder="Postback URL（可选），支持占位符变量，例如：https://example.com/postback?click_id={click_id}&payout={payout}"
           />
+          <div class="form-hint">
+            <el-link type="primary" @click="showPlaceholderHelp = !showPlaceholderHelp" style="font-size: 12px;">
+              <el-icon><InfoFilled /></el-icon>
+              {{ showPlaceholderHelp ? '隐藏' : '查看' }}支持的占位符变量
+            </el-link>
+          </div>
+          <el-collapse-transition>
+            <div v-show="showPlaceholderHelp" class="placeholder-help">
+              <div class="placeholder-help-title">支持的占位符变量：</div>
+              <div class="placeholder-help-content">
+                <div class="placeholder-group">
+                  <div class="placeholder-group-title">转化记录字段：</div>
+                  <div class="placeholder-list">
+                    <div v-for="(desc, varName) in placeholderDescriptions.conversion" :key="varName" class="placeholder-item">
+                      <code>{{ '{' + varName + '}' }}</code>
+                      <span class="placeholder-desc">{{ desc }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="placeholder-group">
+                  <div class="placeholder-group-title">点击记录字段：</div>
+                  <div class="placeholder-list">
+                    <div v-for="(desc, varName) in placeholderDescriptions.click" :key="varName" class="placeholder-item">
+                      <code>{{ '{' + varName + '}' }}</code>
+                      <span class="placeholder-desc">{{ desc }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="placeholder-group">
+                  <div class="placeholder-group-title">Offer 字段：</div>
+                  <div class="placeholder-list">
+                    <div v-for="(desc, varName) in placeholderDescriptions.offer" :key="varName" class="placeholder-item">
+                      <code>{{ '{' + varName + '}' }}</code>
+                      <span class="placeholder-desc">{{ desc }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="placeholder-group">
+                  <div class="placeholder-group-title">渠道字段：</div>
+                  <div class="placeholder-list">
+                    <div v-for="(desc, varName) in placeholderDescriptions.publisher" :key="varName" class="placeholder-item">
+                      <code>{{ '{' + varName + '}' }}</code>
+                      <span class="placeholder-desc">{{ desc }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="placeholder-group">
+                  <div class="placeholder-group-title">广告主字段：</div>
+                  <div class="placeholder-list">
+                    <div v-for="(desc, varName) in placeholderDescriptions.advertiser" :key="varName" class="placeholder-item">
+                      <code>{{ '{' + varName + '}' }}</code>
+                      <span class="placeholder-desc">{{ desc }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </el-collapse-transition>
         </el-form-item>
         <el-form-item label="Postback方法" prop="postback_method">
           <el-select
@@ -196,7 +254,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Refresh, Edit, Delete, Connection } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, Edit, Delete, Connection, InfoFilled } from '@element-plus/icons-vue'
 import { getPublishers, createPublisher, updatePublisher, deletePublisher } from '@/api/publisher'
 import { getClientList } from '@/api/client'
 import { logger } from '@/utils/logger'
@@ -209,6 +267,7 @@ const isEdit = ref(false)
 const searchKeyword = ref('')
 const filterActive = ref(null)
 const formRef = ref(null)
+const showPlaceholderHelp = ref(false)
 
 const pagination = reactive({
   page: 1,
@@ -229,6 +288,157 @@ const formData = reactive({
   is_active: true
 })
 
+// 占位符变量中文说明
+const placeholderDescriptions = {
+  conversion: {
+    'conversion_id': '转化ID（唯一标识）',
+    'platform': '平台名称',
+    'event_name': '事件名称',
+    'event_value': '事件值',
+    'payout': '支付金额',
+    'devad_id': '开发者广告ID',
+    'os': '操作系统',
+    'carrier': '运营商',
+    'ip': 'IP地址',
+    'gid': 'GID',
+    'product_id': '产品ID',
+    'client_id': '客户ID',
+    'click_id': '点击ID',
+    'click_time': '点击时间（ISO格式）',
+    'conversion_status': '转化状态',
+    'timestamp': '时间戳（ISO格式）',
+    'created_at': '创建时间（ISO格式）'
+  },
+  click: {
+    'click_offer_id': '点击关联的Offer ID',
+    'click_publisher_id': '点击关联的渠道ID',
+    'click_advertiser_id': '点击关联的广告主ID',
+    'click_ip': '点击IP地址',
+    'click_device': '点击设备信息',
+    'click_country': '点击国家',
+    'click_user_agent': '点击User Agent',
+    'click_referer': '点击来源页面'
+  },
+  offer: {
+    'offer_id': 'Offer ID',
+    'offer_name': 'Offer名称',
+    'advertiser_offer_id': '广告主Offer ID',
+    'offer_advertiser_id': 'Offer关联的广告主ID',
+    'offer_payout': 'Offer支付金额',
+    'affiliate_payout': '渠道支付金额',
+    'offer_country': 'Offer国家',
+    'offer_category': 'Offer分类',
+    'offer_type': 'Offer类型',
+    'offer_status': 'Offer状态'
+  },
+  publisher: {
+    'publisher_id': '渠道ID',
+    'channel_id': '渠道ID（别名）',
+    'publisher_name': '渠道名称',
+    'publisher_email': '渠道邮箱'
+  },
+  advertiser: {
+    'advertiser_id': '广告主ID',
+    'advertiser_name': '广告主名称',
+    'advertiser_email': '广告主邮箱'
+  }
+}
+
+// CPL 系统支持的占位符变量列表
+const SUPPORTED_PLACEHOLDERS = new Set([
+  // PostbackConversion 直接字段
+  'conversion_id', 'platform', 'event_name', 'event_value', 'payout',
+  'devad_id', 'os', 'carrier', 'ip', 'gid', 'product_id', 'client_id',
+  'click_id', 'click_time', 'conversion_status', 'timestamp', 'created_at',
+  // Click 关联字段
+  'click_offer_id', 'click_publisher_id', 'click_advertiser_id', 'click_ip',
+  'click_device', 'click_country', 'click_user_agent', 'click_referer',
+  // Offer 关联字段
+  'offer_id', 'offer_name', 'advertiser_offer_id', 'offer_advertiser_id',
+  'offer_payout', 'affiliate_payout', 'offer_country', 'offer_category',
+  'offer_type', 'offer_status',
+  // Publisher 关联字段
+  'publisher_id', 'channel_id', 'publisher_name', 'publisher_email',
+  // Advertiser 关联字段
+  'advertiser_id', 'advertiser_name', 'advertiser_email',
+  // 支持的别名
+  'clickid', 'clickId', 'clk_id', 'cid',
+  'conversionId', 'conv_id',
+  'publisherId', 'channelId', 'offerId',
+  'eventName', 'eventId', 'event_id',
+])
+
+// 别名映射
+const PLACEHOLDER_ALIAS_MAP = {
+  'clickid': 'click_id',
+  'clickId': 'click_id',
+  'clk_id': 'click_id',
+  'cid': 'click_id',
+  'conversionId': 'conversion_id',
+  'conv_id': 'conversion_id',
+  'publisherId': 'publisher_id',
+  'channelId': 'channel_id',
+  'offerId': 'offer_id',
+  'eventName': 'event_name',
+  'eventId': 'event_name',
+  'event_id': 'event_name',
+}
+
+// 规范化占位符名称
+const normalizePlaceholder = (placeholder) => {
+  const normalized = placeholder.toLowerCase()
+  if (normalized in PLACEHOLDER_ALIAS_MAP) {
+    return PLACEHOLDER_ALIAS_MAP[normalized]
+  }
+  // 将驼峰命名转换为下划线命名
+  return placeholder.replace(/([A-Z])/g, '_$1').toLowerCase()
+}
+
+// 验证 Postback URL 占位符
+const validatePostbackUrlPlaceholders = (rule, value, callback) => {
+  if (!value || !value.trim()) {
+    callback()
+    return
+  }
+  
+  // 使用正则表达式查找所有占位符 {变量名}
+  const pattern = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g
+  const placeholders = []
+  let match
+  while ((match = pattern.exec(value)) !== null) {
+    placeholders.push(match[1])
+  }
+  
+  if (placeholders.length === 0) {
+    callback()
+    return
+  }
+  
+  // 检查每个占位符是否在支持的列表中
+  const invalidPlaceholders = []
+  for (const placeholder of placeholders) {
+    // 检查原始占位符是否在支持的列表中（支持别名）
+    if (SUPPORTED_PLACEHOLDERS.has(placeholder)) {
+      continue
+    }
+    
+    // 规范化占位符名称
+    const normalized = normalizePlaceholder(placeholder)
+    
+    // 检查规范化后的名称是否在支持的列表中
+    if (!SUPPORTED_PLACEHOLDERS.has(normalized)) {
+      invalidPlaceholders.push(placeholder)
+    }
+  }
+  
+  if (invalidPlaceholders.length > 0) {
+    const invalidList = invalidPlaceholders.map(p => `{${p}}`).join(', ')
+    callback(new Error(`Postback URL 中包含不支持的占位符: ${invalidList}。请使用 CPL 系统支持的变量。`))
+  } else {
+    callback()
+  }
+}
+
 const formRules = {
   publisher_name: [
     { required: true, message: '请输入渠道名称', trigger: 'blur' }
@@ -236,6 +446,9 @@ const formRules = {
   price_discount: [
     { required: true, message: '请输入扣量比例', trigger: 'blur' },
     { type: 'number', min: 0, max: 100, message: '扣量比例必须在0-100之间', trigger: 'blur' }
+  ],
+  postback_url: [
+    { validator: validatePostbackUrlPlaceholders, trigger: 'blur' }
   ]
 }
 
@@ -573,6 +786,76 @@ onMounted(() => {
 
   .table-wrapper :deep(.el-table__cell) {
     padding: 8px 4px;
+  }
+}
+
+.placeholder-help {
+  margin-top: 10px;
+  padding: 12px;
+  background-color: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.placeholder-help-title {
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 10px;
+}
+
+.placeholder-help-content {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.placeholder-group {
+  margin-bottom: 15px;
+}
+
+.placeholder-group:last-child {
+  margin-bottom: 0;
+}
+
+.placeholder-group-title {
+  font-weight: 600;
+  color: #409eff;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.placeholder-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 8px;
+}
+
+.placeholder-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.placeholder-item code {
+  background-color: #f0f2f5;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: #e6a23c;
+  white-space: nowrap;
+  min-width: 120px;
+}
+
+.placeholder-desc {
+  color: #606266;
+  font-size: 12px;
+}
+
+@media (max-width: 767px) {
+  .placeholder-list {
+    grid-template-columns: 1fr;
   }
 }
 </style>

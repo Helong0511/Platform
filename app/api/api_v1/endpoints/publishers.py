@@ -13,6 +13,7 @@ from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
+from app.core.validation import validate_postback_url_placeholders
 from app.models.models import User, Publisher, Client
 from sqlalchemy.orm import joinedload
 from app.schemas.cpl.publisher import PublisherCreate, PublisherUpdate, PublisherResponse
@@ -32,6 +33,15 @@ async def create_publisher(
     current_user: User = Depends(get_current_user)
 ):
     """创建渠道（仅管理员）"""
+    # 验证 Postback URL 中的占位符
+    if publisher_in.postback_url:
+        is_valid, error_msg = validate_postback_url_placeholders(publisher_in.postback_url)
+        if not is_valid:
+            raise_api_exception(
+                ErrorCode.INVALID_INPUT,
+                detail=error_msg
+            )
+    
     publisher = Publisher(
         publisher_name=publisher_in.publisher_name,
         email=publisher_in.email,
@@ -179,6 +189,15 @@ async def update_publisher(
     current_user: User = Depends(get_current_user)
 ):
     """更新渠道（仅管理员）"""
+    # 验证 Postback URL 中的占位符（如果提供了 postback_url）
+    if publisher_in.postback_url is not None:
+        is_valid, error_msg = validate_postback_url_placeholders(publisher_in.postback_url)
+        if not is_valid:
+            raise_api_exception(
+                ErrorCode.INVALID_INPUT,
+                detail=error_msg
+            )
+    
     result = await db.execute(
         select(Publisher).where(Publisher.id == publisher_id)
     )

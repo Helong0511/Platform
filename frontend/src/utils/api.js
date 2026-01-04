@@ -1,14 +1,72 @@
 /**
- * API响应处理工具
- * 统一处理前后端API响应格式，确保数据解析的一致性
+ * API响应处理工具模块
+ * 
+ * 功能说明：
+ * 统一处理前后端API响应格式，确保数据解析的一致性，包括：
+ * - 响应标准化：将后端响应转换为统一格式
+ * - 分页数据处理：处理分页响应的嵌套结构
+ * - 错误处理：统一提取和显示错误信息
+ * - CSRF令牌管理：自动刷新和管理CSRF令牌
+ * - 文件下载处理：处理文件下载响应
+ * - 请求封装：封装axios请求，添加统一配置
  * 
  * 标准响应格式：
  * {
- *   code: number,      // 错误码（200表示成功）
- *   message: string,   // 错误信息
- *   detail?: string,   // 详细错误信息（可选）
- *   data?: any         // 响应数据（可选）
+ *   code: number,      // 错误码（200表示成功，其他表示错误）
+ *   message: string,   // 错误信息（简要描述）
+ *   detail?: string,   // 详细错误信息（可选，用于显示给用户）
+ *   data?: any         // 响应数据（可选，成功时包含实际数据）
  * }
+ * 
+ * 分页响应格式：
+ * {
+ *   code: 200,
+ *   message: "success",
+ *   data: {
+ *     data: [...],        // 数据列表
+ *     total: 100,          // 总记录数
+ *     page: 1,             // 当前页码
+ *     page_size: 10,       // 每页条数
+ *     total_pages: 10     // 总页数
+ *   }
+ * }
+ * 
+ * 错误处理：
+ * - 自动提取错误信息（优先使用detail，其次使用message）
+ * - 统一显示错误提示（使用Element Plus的ElMessage）
+ * - 支持错误码判断（401表示未授权，403表示禁止访问等）
+ * - 自动处理token过期（401时清除认证信息并跳转登录）
+ * 
+ * CSRF令牌管理：
+ * - 自动从响应头获取CSRF令牌（X-CSRF-Token）
+ * - 自动在请求头中添加CSRF令牌（X-CSRF-Token）
+ * - 支持令牌刷新（refreshCsrfToken函数）
+ * - 支持请求前刷新令牌（refreshCsrfTokenBeforeRequest函数）
+ * 
+ * 使用示例：
+ * ```javascript
+ * // 基本请求
+ * const response = await request({
+ *   url: '/api/v1/users/',
+ *   method: 'get',
+ *   params: { page: 1, page_size: 10 }
+ * }, { paginated: true });
+ * 
+ * // 分页请求
+ * const paginatedData = await request({
+ *   url: '/api/v1/users/',
+ *   method: 'get',
+ *   params: { page: 1 }
+ * }, { paginated: true });
+ * 
+ * // 只获取数据
+ * const userData = await request({
+ *   url: '/api/v1/users/1',
+ *   method: 'get'
+ * }, { returnDataOnly: true });
+ * ```
+ * 
+ * @module utils/api
  */
 
 // 静态导入所有依赖，避免Vite构建警告（动态导入与静态导入混用）

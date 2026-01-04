@@ -1,12 +1,61 @@
+"""
+数据库连接和会话管理模块
+
+功能说明：
+- 创建和管理SQLAlchemy异步数据库引擎
+- 提供数据库会话依赖项（FastAPI Depends）
+- 处理数据库初始化和表创建
+- 修复SQLAlchemy 2.0与aiomysql的兼容性问题
+
+数据库配置：
+- 使用异步引擎（create_async_engine）
+- 支持连接池配置（pool_size, max_overflow等）
+- 自动连接回收（pool_recycle）
+- 连接前检查（pool_pre_ping）
+
+多进程环境优化：
+- 每个worker进程有独立的连接池
+- 总连接数 = (pool_size + max_overflow) × workers
+- 建议配置：pool_size=12, max_overflow=8, workers=3
+- 总连接数 = (12 + 8) × 3 = 60（在MySQL默认151限制内）
+
+注意事项：
+1. 所有数据库操作都使用异步会话（AsyncSession）
+2. 会话自动提交和回滚（通过get_db依赖项）
+3. HTTPException不会触发数据库回滚
+4. 生产环境建议使用Alembic进行数据库迁移
+"""
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from app.core.config import settings
 from collections.abc import AsyncGenerator  # Python 3.10+ 推荐使用 collections.abc
 from fastapi import HTTPException
 import logging
 
+# ====== 日志记录器 ======
+logger = logging.getLogger(__name__)
+
 # ====== 修复 SQLAlchemy 2.0 与 aiomysql 0.2.0 的兼容性问题 ======
-# SQLAlchemy 2.0 可能会传递 read_timeout 和 write_timeout 参数，但 aiomysql 不支持
-# 使用猴子补丁来修复 SQLAlchemy 的 aiomysql 方言
+# 
+# 问题说明：
+# SQLAlchemy 2.0 可能会传递 read_timeout 和 write_timeout 参数给 aiomysql.connect()
+# 但 aiomysql 0.2.0 不支持这些参数，会导致连接失败
+# 
+# 解决方案：
+# 使用猴子补丁（monkey patch）拦截 aiomysql.connect() 调用
+# 过滤掉不支持的参数，只保留 aiomysql 支持的参数
+# 
+# 支持的参数列表：
+# - host, port, user, password, db: 连接基本信息
+# - charset: 字符集（默认utf8mb4）
+# - connect_timeout: 连接超时（秒）
+# - autocommit: 自动提交模式
+# - loop: 事件循环（已弃用，Python 3.10+不需要）
+# - minsize, maxsize: 连接池大小（用于连接池模式）
+# 
+# 不支持的参数（会被过滤）：
+# - read_timeout: 读取超时
+# - write_timeout: 写入超时
+# 
 logger = logging.getLogger(__name__)
 try:
     from sqlalchemy.dialects.mysql import aiomysql as sqlalchemy_aiomysql
@@ -117,13 +166,46 @@ async def create_tables():
     logger.info("Database tables created successfully")
 
 
-# 初始化数据库
 async def init_db():
+    """
+    初始化数据库
+    
+    功能说明：
+    - 检查是否存在管理员用户
+    - 如果不存在，创建默认管理员账户
+    - 默认管理员账户信息从settings配置读取
+    
+    默认管理员配置：
+    - 用户名：settings.FIRST_SUPERUSER（默认"admin"）
+    - 密码：settings.FIRST_SUPERUSER_PASSWORD（生产环境必须设置）
+    - 角色：ADMIN（管理员）
+    - 邮箱：{username}@example.com
+    
+    安全注意事项：
+    - 生产环境必须通过环境变量设置复杂的管理员密码
+    - 首次启动后建议修改默认管理员密码
+    - 建议创建额外的管理员账户，然后禁用默认账户
+    
+    执行时机：
+    - 应用启动时自动执行（在lifespan启动阶段）
+    - 只在没有管理员用户时创建，避免重复创建
+    
+    Returns:
+        None
+    
+    Raises:
+        Exception: 数据库操作失败时抛出异常
+    
+    Example:
+        # 在应用启动时自动调用，无需手动调用
+        await init_db()
+    """
     async with AsyncSessionLocal() as session:
         # 检查是否需要创建超级用户
         from app.models.models import User, UserRole
         from sqlalchemy.future import select
 
+        # 查询是否存在管理员用户
         result = await session.execute(select(User).where(User.role == UserRole.ADMIN))
         admin = result.scalars().first()
 
@@ -136,12 +218,12 @@ async def init_db():
                 is_active=True,
                 login_restricted=False
             )
-            # 设置密码
+            # 设置密码（自动加密）
             admin.set_password(settings.FIRST_SUPERUSER_PASSWORD)
             session.add(admin)
             await session.commit()
-            logger.info(f"Default superuser {settings.FIRST_SUPERUSER} created")
+            logger.info(f"默认管理员账户已创建: {settings.FIRST_SUPERUSER}")
         else:
-            logger.info("Superuser already exists")
+            logger.info("管理员账户已存在，跳过创建")
 
-    logger.info("Database initialization completed")
+    logger.info("数据库初始化完成")

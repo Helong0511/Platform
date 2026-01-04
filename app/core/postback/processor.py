@@ -1,6 +1,61 @@
 """
-Postback 统一处理器
-负责接收、验证、处理和存储 postback 数据
+Postback统一处理器模块
+
+功能说明：
+负责接收、验证、处理和存储来自上游平台的postback回调数据，包括：
+- 数据验证：验证postback数据的完整性和有效性
+- 数据标准化：将不同平台的数据格式转换为统一格式
+- 重复检测：防止重复处理相同的转化事件
+- 关联处理：关联Click ID、Offer、Publisher等信息
+- Cap检查：检查转化是否超过Cap限制
+- 扣量计算：根据配置计算扣量后的金额
+- 数据存储：保存转化记录到数据库
+- 下游转发：转发转化数据到下游系统（如果配置）
+- 通知发送：发送转化通知（Telegram、邮件等）
+
+处理流程：
+1. 获取平台处理器：根据平台名称获取对应的处理器
+2. 数据验证：验证postback数据的必填字段和格式
+3. 数据标准化：将平台特定格式转换为统一格式
+4. 关联Click ID：尝试通过click_id关联Click记录，获取Offer、Publisher等信息
+5. 重复检测：检查是否已处理过相同的转化事件
+6. Cap检查：检查是否超过转化上限（Daily Cap / Total Cap）
+7. 扣量计算：根据Offer和Publisher的扣量配置计算实际金额
+8. 保存转化记录：将转化数据保存到postback_conversions表
+9. 更新Click统计：更新click_stats表（如果有Click关联）
+10. 下游转发：如果配置了下游Postback URL，加入转发队列
+11. 发送通知：如果配置了通知，发送转化通知
+
+支持的平台：
+- macan: Macan平台
+- addermobi: AdderMobi平台
+- bft: BFT平台（向后兼容）
+- 其他平台：通过处理器注册机制扩展
+
+CPL系统集成：
+- 自动关联Click ID，获取Offer、Publisher、Advertiser信息
+- 支持Cap限制检查（Daily Cap和Total Cap）
+- 支持扣量计算（Offer级别和Publisher级别）
+- 支持下游Postback转发（自动替换占位符）
+
+安全特性：
+- 数据验证：确保必填字段存在且格式正确
+- 重复检测：防止重复处理相同的转化事件
+- IP验证：可选的支持IP白名单验证
+- 错误处理：完善的异常处理和日志记录
+
+性能优化：
+- 使用数据库索引优化查询性能
+- 批量操作减少数据库交互
+- 异步处理下游转发和通知发送
+- Redis缓存优化Cap检查性能
+
+注意事项：
+1. 所有postback数据都会保存原始数据（raw_data字段）
+2. 重复检测基于platform + conversion_id + event_name的唯一性
+3. Cap检查失败不会阻止转化记录保存，但会标记状态
+4. 下游转发失败会加入重试队列，自动重试
+5. 通知发送失败不会影响转化处理流程
 """
 import json
 import logging
