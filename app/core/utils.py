@@ -5,7 +5,7 @@
 import math
 import pytz
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 from fastapi import Request
 from app.core.middleware import get_device_type
 from app.core.config import settings

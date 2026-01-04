@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, and_, or_
 
-from app.models.models import OfferCap, Offer, Click, PostbackConversion
+from app.models.models import OfferCap, Offer, PostbackConversion
 
 logger = logging.getLogger(__name__)
 

@@ -118,21 +118,26 @@ class PostbackProcessor:
                     
                     # 将点击记录的核心字段保存到统计表（如果不存在）
                     # 这样即使 clicks 表被清理，转化统计仍然可用
-                    existing_stats = await db.execute(
-                        select(ClickStats).where(ClickStats.click_id == click_id)
-                    )
-                    if not existing_stats.scalars().first():
-                        # 只有不存在时才创建，避免重复
-                        click_stats = ClickStats(
-                            click_id=click_id,
-                            offer_id=offer_id,
-                            publisher_id=publisher_id,
-                            advertiser_id=advertiser_id,
-                            click_time=click_time,
-                            created_at=get_app_now_naive()
+                    # 注意：只有在转化创建成功时才会提交，如果转化失败则不会保存 ClickStats
+                    try:
+                        existing_stats = await db.execute(
+                            select(ClickStats).where(ClickStats.click_id == click_id)
                         )
-                        db.add(click_stats)
-                        logger.debug(f"已创建点击统计记录: click_id={click_id}")
+                        if not existing_stats.scalars().first():
+                            # 只有不存在时才创建，避免重复
+                            click_stats = ClickStats(
+                                click_id=click_id,
+                                offer_id=offer_id,
+                                publisher_id=publisher_id,
+                                advertiser_id=advertiser_id,
+                                click_time=click_time,
+                                created_at=get_app_now_naive()
+                            )
+                            db.add(click_stats)
+                            logger.debug(f"已创建点击统计记录: click_id={click_id}")
+                    except Exception as e:
+                        # ClickStats 写入失败不影响主流程，但记录警告
+                        logger.warning(f"创建点击统计记录失败: click_id={click_id}, error={str(e)}")
                     
                     # 根据 advertiser_id 查询广告主名称，用作平台名称
                     if advertiser_id:

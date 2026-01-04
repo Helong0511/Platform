@@ -17,7 +17,7 @@ from sqlalchemy.orm import joinedload
 
 from app.models.models import (
     Product, PostbackConversion, PostbackForwardLog,
-    Click, Offer, Publisher, Advertiser
+    ClickStats, Click, Offer, Publisher, Advertiser
 )
 from app.core.utils import get_app_now_naive
 
@@ -46,22 +46,54 @@ class PostbackForwarder:
         advertiser = None
         
         if conversion.click_id:
-            # 查询 Click 记录及其关联的 Publisher、Offer、Advertiser
-            click_result = await db.execute(
-                select(Click)
-                .options(
-                    joinedload(Click.publisher),
-                    joinedload(Click.offer).joinedload(Offer.advertiser)
-                )
-                .where(Click.click_id == conversion.click_id)
+            # 优先从 ClickStats 获取核心字段，然后查询关联的 Publisher、Offer、Advertiser
+            # 如果 Click 表还有数据，也可以从中获取（兼容性）
+            click_stats_result = await db.execute(
+                select(ClickStats).where(ClickStats.click_id == conversion.click_id)
             )
-            click_record = click_result.scalars().first()
+            click_stats = click_stats_result.scalars().first()
             
-            if click_record:
-                publisher = click_record.publisher
-                offer = click_record.offer
-                if offer:
-                    advertiser = offer.advertiser
+            if click_stats:
+                # 从 ClickStats 获取 publisher_id，然后查询 Publisher
+                if click_stats.publisher_id:
+                    publisher_result = await db.execute(
+                        select(Publisher).where(Publisher.id == click_stats.publisher_id)
+                    )
+                    publisher = publisher_result.scalars().first()
+                
+                # 从 ClickStats 获取 offer_id，然后查询 Offer 和 Advertiser
+                if click_stats.offer_id:
+                    offer_result = await db.execute(
+                        select(Offer)
+                        .options(joinedload(Offer.advertiser))
+                        .where(Offer.id == click_stats.offer_id)
+                    )
+                    offer = offer_result.scalars().first()
+                    if offer:
+                        advertiser = offer.advertiser
+            
+            # 如果 ClickStats 中没有找到 publisher，尝试从 Click 表获取（兼容性，如果数据还未清理）
+            # 或者 ClickStats 存在但没有 publisher_id（数据不完整的情况）
+            if (not publisher or not click_stats) and conversion.click_id:
+                try:
+                    click_result = await db.execute(
+                        select(Click)
+                        .options(
+                            joinedload(Click.publisher),
+                            joinedload(Click.offer).joinedload(Offer.advertiser)
+                        )
+                        .where(Click.click_id == conversion.click_id)
+                    )
+                    click_record = click_result.scalars().first()
+                    
+                    if click_record:
+                        publisher = click_record.publisher
+                        offer = click_record.offer
+                        if offer:
+                            advertiser = offer.advertiser
+                except Exception as e:
+                    # Click 表可能不存在或数据已清理，忽略错误
+                    logger.debug(f"无法从 Click 表加载数据: {e}")
         
         # 2. 如果没有找到 Publisher 或 Publisher 没有配置 Postback URL，则不转发
         if not publisher or not publisher.postback_url:

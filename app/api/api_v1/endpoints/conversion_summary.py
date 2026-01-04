@@ -152,7 +152,7 @@ async def get_conversion_summary(
         click_alias_for_count = aliased(ClickStats)
         conversion_query = select(func.count(PostbackConversion.id))
         if client_publisher_ids is not None or offer_id is not None:
-            # 需要通过Click表关联来筛选offer_id或publisher_id
+            # 需要通过ClickStats表关联来筛选offer_id或publisher_id
             conversion_query = conversion_query.join(
                 click_alias_for_count, PostbackConversion.click_id == click_alias_for_count.click_id
             )
@@ -174,7 +174,7 @@ async def get_conversion_summary(
         click_alias_for_po = aliased(ClickStats)
         po_query = select(func.sum(PostbackConversion.payout))
         if client_publisher_ids is not None or offer_id is not None:
-            # 需要通过Click表关联来筛选offer_id或publisher_id
+            # 需要通过ClickStats表关联来筛选offer_id或publisher_id
             po_query = po_query.join(
                 click_alias_for_po, PostbackConversion.click_id == click_alias_for_po.click_id
             )
