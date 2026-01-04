@@ -125,6 +125,13 @@ async def main():
         print(f"\n迁移结果: {result['message']}")
         if result.get('migrated_count', 0) > 0:
             print(f"迁移记录数: {result['migrated_count']}")
+        elif '缺少 click_id 字段' in result.get('message', ''):
+            print("\n提示: 如果需要迁移历史数据，请先运行以下 SQL 添加 click_id 字段:")
+            print("   mysql -u用户名 -p数据库名 < scripts/data/add_click_id_to_postback_conversions.sql")
+            print("   或者手动执行:")
+            print("   ALTER TABLE postback_conversions")
+            print("   ADD COLUMN click_id VARCHAR(255) NULL COMMENT '关联的Click ID' AFTER client_id,")
+            print("   ADD INDEX idx_postback_click_id (click_id);")
     except Exception as e:
         print(f"执行失败: {e}")
         sys.exit(1)
