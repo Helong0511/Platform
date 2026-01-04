@@ -20,7 +20,7 @@ from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import parse_date_to_app_timezone
-from app.models.models import PostbackConversion, Product, Client, PostbackForwardLog, PostbackNotification
+from app.models.models import PostbackConversion, Product, Client, PostbackForwardLog, PostbackNotification, Click, Offer, Publisher, Advertiser
 from app.schemas.postback import (
     PostbackRequest,
     PostbackResponse,
@@ -199,6 +199,58 @@ async def get_postback_conversions(
                     client_name = f"客户_{row.id}"
                 clients_map[row.id] = client_name
         
+        # 批量查询点击记录信息（通过 click_id 关联）
+        click_ids = list(set([conv.click_id for conv in conversions if conv.click_id]))
+        clicks_map = {}
+        offer_ids = set()
+        publisher_ids = set()
+        advertiser_ids = set()
+        
+        if click_ids:
+            clicks_query = select(
+                Click.click_id,
+                Click.offer_id,
+                Click.publisher_id,
+                Click.advertiser_id,
+                Click.click_time
+            ).where(Click.click_id.in_(click_ids))
+            clicks_result = await db.execute(clicks_query)
+            for row in clicks_result.all():
+                clicks_map[row.click_id] = {
+                    'offer_id': row.offer_id,
+                    'publisher_id': row.publisher_id,
+                    'advertiser_id': row.advertiser_id,
+                    'click_time': row.click_time
+                }
+                if row.offer_id:
+                    offer_ids.add(row.offer_id)
+                if row.publisher_id:
+                    publisher_ids.add(row.publisher_id)
+                if row.advertiser_id:
+                    advertiser_ids.add(row.advertiser_id)
+        
+        # 批量查询 Offer、Publisher、Advertiser 信息
+        offers_map = {}
+        if offer_ids:
+            offers_query = select(Offer.id, Offer.offer_name).where(Offer.id.in_(list(offer_ids)))
+            offers_result = await db.execute(offers_query)
+            for row in offers_result.all():
+                offers_map[row.id] = row.offer_name
+        
+        publishers_map = {}
+        if publisher_ids:
+            publishers_query = select(Publisher.id, Publisher.publisher_name).where(Publisher.id.in_(list(publisher_ids)))
+            publishers_result = await db.execute(publishers_query)
+            for row in publishers_result.all():
+                publishers_map[row.id] = row.publisher_name
+        
+        advertisers_map = {}
+        if advertiser_ids:
+            advertisers_query = select(Advertiser.id, Advertiser.advertiser_name).where(Advertiser.id.in_(list(advertiser_ids)))
+            advertisers_result = await db.execute(advertisers_query)
+            for row in advertisers_result.all():
+                advertisers_map[row.id] = row.advertiser_name
+        
         # 转换为响应格式，并添加关联信息
         conversion_list = []
         for conv in conversions:
@@ -210,6 +262,20 @@ async def get_postback_conversions(
             # 添加客户名称
             if conv.client_id and conv.client_id in clients_map:
                 conv_dict['client_name'] = clients_map[conv.client_id]
+            # 添加点击记录关联信息
+            if conv.click_id and conv.click_id in clicks_map:
+                click_info = clicks_map[conv.click_id]
+                conv_dict['click_offer_id'] = click_info['offer_id']
+                conv_dict['click_publisher_id'] = click_info['publisher_id']
+                conv_dict['click_advertiser_id'] = click_info['advertiser_id']
+                conv_dict['click_time'] = click_info['click_time']
+                # 添加关联名称
+                if click_info['offer_id'] and click_info['offer_id'] in offers_map:
+                    conv_dict['click_offer_name'] = offers_map[click_info['offer_id']]
+                if click_info['publisher_id'] and click_info['publisher_id'] in publishers_map:
+                    conv_dict['click_publisher_name'] = publishers_map[click_info['publisher_id']]
+                if click_info['advertiser_id'] and click_info['advertiser_id'] in advertisers_map:
+                    conv_dict['click_advertiser_name'] = advertisers_map[click_info['advertiser_id']]
             conversion_list.append(conv_dict)
         
         logger.info(

@@ -149,6 +149,51 @@
           </template>
         </el-table-column>
         <el-table-column prop="conversion_id" label="转化ID" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="click_id" label="点击ID" min-width="150" show-overflow-tooltip>
+          <template #default="scope">
+            <el-link 
+              v-if="scope.row.click_id" 
+              type="primary" 
+              :underline="false"
+              @click="handleViewClickDetail(scope.row.click_id)"
+            >
+              {{ scope.row.click_id }}
+            </el-link>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="click_offer_name" label="关联Offer" min-width="150">
+          <template #default="scope">
+            <div v-if="scope.row.click_offer_id">
+              <div style="font-weight: 500;">{{ scope.row.click_offer_name || `Offer_${scope.row.click_offer_id}` }}</div>
+              <div style="font-size: 12px; color: #909399;">ID: {{ scope.row.click_offer_id }}</div>
+            </div>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="click_publisher_name" label="关联渠道" min-width="150">
+          <template #default="scope">
+            <div v-if="scope.row.click_publisher_id">
+              <div style="font-weight: 500;">{{ scope.row.click_publisher_name || `渠道_${scope.row.click_publisher_id}` }}</div>
+              <div style="font-size: 12px; color: #909399;">ID: {{ scope.row.click_publisher_id }}</div>
+            </div>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="click_advertiser_name" label="关联广告主" min-width="150">
+          <template #default="scope">
+            <div v-if="scope.row.click_advertiser_id">
+              <div style="font-weight: 500;">{{ scope.row.click_advertiser_name || `广告主_${scope.row.click_advertiser_id}` }}</div>
+              <div style="font-size: 12px; color: #909399;">ID: {{ scope.row.click_advertiser_id }}</div>
+            </div>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="click_time" label="点击时间" width="180">
+          <template #default="scope">
+            {{ scope.row.click_time ? formatDateTime(scope.row.click_time) : '-' }}
+          </template>
+        </el-table-column>
         <el-table-column prop="event_name" label="事件名称" width="120">
           <template #default="scope">
             <el-tag v-if="scope.row.event_name" type="success" size="small">
@@ -317,9 +362,53 @@
           <el-descriptions-item label="运营商">{{ currentConversion.carrier || '-' }}</el-descriptions-item>
           <el-descriptions-item label="IP地址">{{ currentConversion.ip || '-' }}</el-descriptions-item>
           <el-descriptions-item label="渠道ID">{{ currentConversion.gid || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="产品ID">{{ currentConversion.product_id || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="客户ID">{{ currentConversion.client_id || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="产品">
+            <div v-if="currentConversion.product_id">
+              <div style="font-weight: 500;">{{ currentConversion.product_name || `产品_${currentConversion.product_id}` }}</div>
+              <div style="font-size: 12px; color: #909399;">ID: {{ currentConversion.product_id }}</div>
+            </div>
+            <span v-else>-</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="客户">
+            <div v-if="currentConversion.client_id">
+              <div style="font-weight: 500;">{{ currentConversion.client_name || `客户_${currentConversion.client_id}` }}</div>
+              <div style="font-size: 12px; color: #909399;">ID: {{ currentConversion.client_id }}</div>
+            </div>
+            <span v-else>-</span>
+          </el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ formatDateTime(currentConversion.created_at) }}</el-descriptions-item>
+          
+          <!-- 点击记录关联信息 -->
+          <el-descriptions-item label="点击ID" :span="2" v-if="currentConversion.click_id">
+            <el-link 
+              type="primary" 
+              :underline="false"
+              @click="handleViewClickDetail(currentConversion.click_id)"
+            >
+              {{ currentConversion.click_id }}
+            </el-link>
+          </el-descriptions-item>
+          <el-descriptions-item label="关联Offer" v-if="currentConversion.click_offer_id">
+            <div>
+              <div style="font-weight: 500;">{{ currentConversion.click_offer_name || `Offer_${currentConversion.click_offer_id}` }}</div>
+              <div style="font-size: 12px; color: #909399;">ID: {{ currentConversion.click_offer_id }}</div>
+            </div>
+          </el-descriptions-item>
+          <el-descriptions-item label="关联渠道" v-if="currentConversion.click_publisher_id">
+            <div>
+              <div style="font-weight: 500;">{{ currentConversion.click_publisher_name || `渠道_${currentConversion.click_publisher_id}` }}</div>
+              <div style="font-size: 12px; color: #909399;">ID: {{ currentConversion.click_publisher_id }}</div>
+            </div>
+          </el-descriptions-item>
+          <el-descriptions-item label="关联广告主" v-if="currentConversion.click_advertiser_id">
+            <div>
+              <div style="font-weight: 500;">{{ currentConversion.click_advertiser_name || `广告主_${currentConversion.click_advertiser_id}` }}</div>
+              <div style="font-size: 12px; color: #909399;">ID: {{ currentConversion.click_advertiser_id }}</div>
+            </div>
+          </el-descriptions-item>
+          <el-descriptions-item label="点击时间" v-if="currentConversion.click_time">
+            {{ formatDateTime(currentConversion.click_time) }}
+          </el-descriptions-item>
           <el-descriptions-item label="原始数据" :span="2" v-if="currentConversion.raw_data">
             <pre class="json-content">{{ formatJson(currentConversion.raw_data) }}</pre>
           </el-descriptions-item>
@@ -349,7 +438,7 @@ import { ref, reactive, onMounted, computed, watch } from 'vue';
 import { 
   ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, 
   ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage, ElMessageBox,
-  ElDescriptions, ElDescriptionsItem, ElDatePicker, ElInputNumber, ElRow, ElCol
+  ElDescriptions, ElDescriptionsItem, ElDatePicker, ElInputNumber, ElRow, ElCol, ElLink
 } from 'element-plus';
 import { Search, Refresh, Loading, Bell } from '@element-plus/icons-vue';
 import { getPostbackConversions, getPostbackStats } from '../../api/postback';
@@ -514,6 +603,14 @@ const handleNotificationDialogClose = (val) => {
     selectedClientId.value = null;
     selectedProductId.value = null;
   }
+};
+
+// 查看点击详情
+const handleViewClickDetail = (clickId) => {
+  if (!clickId) return;
+  // 打开新窗口或跳转到点击记录详情页
+  // 这里可以根据实际需求实现，比如打开对话框或跳转页面
+  window.open(`/app/admin/click-log?click_id=${clickId}`, '_blank');
 };
 
 // 补发通知
