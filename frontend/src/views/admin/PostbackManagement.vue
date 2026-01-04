@@ -15,6 +15,11 @@
           </span>
         </div>
       </div>
+      <div class="header-right">
+        <el-button type="info" :icon="Bell" @click="showNotificationRecords">
+          查看通知记录
+        </el-button>
+      </div>
     </div>
 
     <!-- 筛选控件 -->
@@ -198,7 +203,7 @@
             {{ formatDateTime(scope.row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
+        <el-table-column label="操作" width="180" fixed="right">
           <template #default="scope">
             <el-button 
               type="primary" 
@@ -207,6 +212,14 @@
               @click="handleViewDetail(scope.row)"
             >
               详情
+            </el-button>
+            <el-button 
+              type="info" 
+              link 
+              size="small" 
+              @click="handleViewNotifications(scope.row)"
+            >
+              通知记录
             </el-button>
           </template>
         </el-table-column>
@@ -281,6 +294,14 @@
         <el-button type="primary" @click="detailDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- 通知记录对话框 -->
+    <NotificationRecordsDialog
+      v-model="notificationRecordsVisible"
+      :client-id="selectedClientId"
+      :product-id="selectedProductId"
+      @update:modelValue="handleNotificationDialogClose"
+    />
   </div>
 </template>
 
@@ -291,10 +312,11 @@ import {
   ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage, 
   ElDescriptions, ElDescriptionsItem, ElDatePicker, ElInputNumber, ElRow, ElCol
 } from 'element-plus';
-import { Search, Refresh, Loading } from '@element-plus/icons-vue';
+import { Search, Refresh, Loading, Bell } from '@element-plus/icons-vue';
 import { getPostbackConversions, getPostbackStats } from '../../api/postback';
 import { formatDateTime } from '../../utils/dateFormat';
 import { useDevice } from '../../composables/useDevice';
+import NotificationRecordsDialog from '../../components/admin/NotificationRecordsDialog.vue';
 
 // 设备检测
 const { isMobile } = useDevice();
@@ -325,6 +347,11 @@ const dateRange = ref(null);
 // 详情对话框
 const detailDialogVisible = ref(false);
 const currentConversion = ref(null);
+
+// 通知记录对话框
+const notificationRecordsVisible = ref(false);
+const selectedClientId = ref(null);
+const selectedProductId = ref(null);
 
 // 监听日期范围变化
 watch(dateRange, (newVal) => {
@@ -415,6 +442,30 @@ const handleViewDetail = (row) => {
   detailDialogVisible.value = true;
 };
 
+// 查看通知记录（全部）
+const showNotificationRecords = () => {
+  selectedClientId.value = null;
+  selectedProductId.value = null;
+  notificationRecordsVisible.value = true;
+};
+
+// 查看指定转化的通知记录
+const handleViewNotifications = (row) => {
+  selectedClientId.value = row.client_id || null;
+  selectedProductId.value = row.product_id || null;
+  notificationRecordsVisible.value = true;
+};
+
+// 处理通知记录对话框关闭
+const handleNotificationDialogClose = (val) => {
+  notificationRecordsVisible.value = val;
+  // 对话框关闭时，重置过滤条件
+  if (!val) {
+    selectedClientId.value = null;
+    selectedProductId.value = null;
+  }
+};
+
 // 格式化货币
 const formatCurrency = (value) => {
   if (!value && value !== 0) return '-';
@@ -450,6 +501,14 @@ onMounted(() => {
 
 .page-header {
   margin-bottom: var(--spacing-lg);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.header-right {
+  display: flex;
+  gap: var(--spacing-md);
 }
 
 .page-header h1 {

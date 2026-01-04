@@ -210,8 +210,20 @@ const getStatusTagType = (status) => {
   return types[status] || 'info';
 };
 
+// 监听对话框显示/隐藏
 watch(visible, (val) => {
   if (val) {
+    // 对话框打开时，重置分页并加载数据
+    pagination.page = 1;
+    handleSearch();
+  }
+});
+
+// 监听 clientId 和 productId 变化，重新加载数据
+watch([() => props.clientId, () => props.productId], () => {
+  if (visible.value) {
+    // 如果对话框已打开，参数变化时重新加载数据
+    pagination.page = 1;
     handleSearch();
   }
 });
