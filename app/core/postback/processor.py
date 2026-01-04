@@ -223,6 +223,39 @@ class PostbackProcessor:
             existing_record = existing.scalars().first()
             
             if existing_record:
+                # 如果记录已存在，根据 click_id 更新数据
+                updated = False
+                if click_record:
+                    # 更新字段（如果 clicks 表中有数据且 postback_conversions 中没有）
+                    if not existing_record.os and click_record.os:
+                        existing_record.os = click_record.os
+                        updated = True
+                    
+                    if not existing_record.ip and click_record.ip:
+                        existing_record.ip = click_record.ip
+                        updated = True
+                    
+                    if not existing_record.gid and click_record.publisher_id:
+                        existing_record.gid = str(click_record.publisher_id)
+                        updated = True
+                    
+                    # 更新 click_id 和 click_time（如果之前没有）
+                    if not existing_record.click_id and click_id:
+                        existing_record.click_id = click_id
+                        updated = True
+                    
+                    if not existing_record.click_time and click_time:
+                        existing_record.click_time = click_time
+                        updated = True
+                    
+                    if updated:
+                        await db.commit()
+                        await db.refresh(existing_record)
+                        logger.info(
+                            f"平台 {final_platform} postback 转化已存在，已根据 click_id 更新数据: "
+                            f"conversion_id={conversion_id}, event_name={event_name}"
+                        )
+                
                 logger.info(
                     f"平台 {final_platform} postback 转化已存在，跳过重复处理: "
                     f"conversion_id={conversion_id}, event_name={event_name}"
@@ -313,6 +346,29 @@ class PostbackProcessor:
             # 8. 创建转化记录（使用广告主名称作为平台名称）
             # 如果找到了广告主名称，使用广告主名称；否则使用传入的 platform 参数
             final_platform = advertiser_name if advertiser_name else platform
+            
+            # 8.1. 根据 click_id 从 clicks 表获取数据，补充或更新字段
+            # 如果 postback 数据中没有某些字段，使用 clicks 表中的数据
+            final_os = normalized_data.get("os")
+            final_ip = normalized_data.get("ip") or request_ip
+            final_gid = normalized_data.get("gid")
+            
+            if click_record:
+                # 如果 postback 数据中没有 os，使用 clicks 表的 os
+                if not final_os and click_record.os:
+                    final_os = click_record.os
+                    logger.debug(f"从 clicks 表补充 os: {final_os}")
+                
+                # 如果 postback 数据中没有 ip，使用 clicks 表的 ip
+                if not final_ip and click_record.ip:
+                    final_ip = click_record.ip
+                    logger.debug(f"从 clicks 表补充 ip: {final_ip}")
+                
+                # 如果 postback 数据中没有 gid，使用 clicks 表的 publisher_id 作为 gid
+                if not final_gid and click_record.publisher_id:
+                    final_gid = str(click_record.publisher_id)
+                    logger.debug(f"从 clicks 表补充 gid (publisher_id): {final_gid}")
+            
             conversion = PostbackConversion(
                 platform=final_platform,
                 conversion_id=conversion_id,
@@ -320,10 +376,10 @@ class PostbackProcessor:
                 event_value=normalized_data.get("event_value"),
                 payout=final_payout,  # 使用扣量后的金额
                 devad_id=normalized_data.get("devad_id"),
-                os=normalized_data.get("os"),
+                os=final_os,  # 使用补充后的 os
                 carrier=normalized_data.get("carrier"),
-                ip=normalized_data.get("ip"),
-                gid=normalized_data.get("gid"),
+                ip=final_ip,  # 使用补充后的 ip
+                gid=final_gid,  # 使用补充后的 gid
                 product_id=product_id,
                 client_id=client_id,
                 click_id=click_id,  # CPL 系统字段
