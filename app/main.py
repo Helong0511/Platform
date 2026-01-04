@@ -999,9 +999,15 @@ async def redirect_short_link_public(
             values['offer_name'] = ''
             values['advertiser_offer_id'] = ''
         
-        if publisher_id:
-            values['publisher_id'] = str(publisher_id)
-            values['channel_id'] = str(publisher_id)  # 别名
+        # 处理 publisher_id（渠道ID）
+        # 注意：publisher_id 参数实际上就是 channel_id（渠道ID）
+        # 确保 channel_id 和 publisher_id 都有值（即使 publisher_id 为 None，也要确保 channel_id 有值）
+        if publisher_id is not None:
+            # 确保转换为字符串
+            publisher_id_str = str(publisher_id)
+            values['publisher_id'] = publisher_id_str
+            values['channel_id'] = publisher_id_str  # channel_id 就是 publisher_id
+            logger.info(f"[占位符替换] 设置渠道ID值: publisher_id={publisher_id_str}, channel_id={publisher_id_str}")
             # 查询 Publisher 详细信息
             try:
                 from app.models.models import Publisher
@@ -1015,10 +1021,12 @@ async def redirect_short_link_public(
             except Exception as e:
                 logger.warning(f"查询Publisher信息失败: publisher_id={publisher_id}, error={e}")
         else:
+            # 如果 publisher_id 为 None，设置为空字符串（占位符不会被替换）
             values['publisher_id'] = ''
             values['channel_id'] = ''
             values['publisher_name'] = ''
             values['publisher_email'] = ''
+            logger.warning(f"[占位符替换] publisher_id 为 None，channel_id 和 publisher_id 占位符将不会被替换")
         
         if advertiser_id:
             values['advertiser_id'] = str(advertiser_id)
@@ -1052,9 +1060,17 @@ async def redirect_short_link_public(
         
         # 替换占位符
         result_url = original_url
+        logger.info(
+            f"[占位符替换] 开始替换: 原始URL={original_url[:200]}, "
+            f"占位符列表={placeholders}, publisher_id参数={publisher_id}, "
+            f"values={values}"
+        )
+        
         for placeholder in placeholders:
             # 转换为小写加下划线格式
             normalized_key = placeholder.lower()
+            original_normalized = normalized_key
+            
             if normalized_key in alias_map:
                 normalized_key = alias_map[normalized_key]
             else:
@@ -1062,17 +1078,32 @@ async def redirect_short_link_public(
                 normalized_key = re.sub(r'(?<!^)(?=[A-Z])', '_', placeholder).lower()
             
             # 特殊处理：channel_id 和 publisher_id 是同一个值（渠道ID）
+            # 注意：channel_id 就是 publisher_id，所以直接使用 publisher_id 的值
             if normalized_key == 'channel_id':
                 # channel_id 就是 publisher_id，使用 publisher_id 的值
                 normalized_key = 'publisher_id'
+                logger.debug(f"占位符 {{{placeholder}}} (channel_id) 映射到 publisher_id")
             
             # 获取值
             value = values.get(normalized_key, '')
             
+            # 如果值为空且 normalized_key 是 publisher_id，尝试从 channel_id 获取（双重保险）
+            if not value and normalized_key == 'publisher_id':
+                value = values.get('channel_id', '')
+            
+            logger.debug(
+                f"占位符替换: {{{placeholder}}} -> normalized_key={normalized_key}, "
+                f"value='{value}', publisher_id参数={publisher_id}, "
+                f"values中的publisher_id={values.get('publisher_id')}, "
+                f"values中的channel_id={values.get('channel_id')}"
+            )
+            
             # 如果值为空，保持占位符不变（或者可以替换为空字符串）
             if not value:
-                logger.debug(
-                    f"占位符 {{{placeholder}}} 对应的值为空，保持占位符不变: url={original_url[:100]}"
+                logger.warning(
+                    f"占位符 {{{placeholder}}} (normalized_key={normalized_key}) 对应的值为空，"
+                    f"保持占位符不变: url={original_url[:100]}, "
+                    f"publisher_id参数={publisher_id}, channel_id参数={publisher_id}, values={values}"
                 )
                 continue
             
@@ -1085,7 +1116,23 @@ async def redirect_short_link_public(
                 encoded_value = quote(str(value), safe='')
             
             # 替换占位符（使用原始占位符名称，支持大小写敏感）
+            old_result = result_url
             result_url = result_url.replace(f'{{{placeholder}}}', encoded_value)
+            
+            if old_result != result_url:
+                logger.info(f"[占位符替换] 成功替换占位符 {{{placeholder}}} -> {encoded_value}")
+            else:
+                logger.warning(
+                    f"[占位符替换] 占位符 {{{placeholder}}} 未找到或未替换: "
+                    f"原始URL={original_url[:200]}, 当前URL={result_url[:200]}, "
+                    f"占位符格式检查: 是否包含{{{{placeholder}}}}={f'{{{placeholder}}}' in original_url}"
+                )
+        
+        logger.info(
+            f"[占位符替换] 替换完成: 原始URL={original_url[:200]}, "
+            f"替换后URL={result_url[:200]}, "
+            f"是否发生变化={original_url != result_url}"
+        )
         
         return result_url
     
@@ -1095,6 +1142,11 @@ async def redirect_short_link_public(
         如果基础URL已有参数，则合并；如果没有，则添加
         新参数会覆盖基础URL中的同名参数
         注意：click_id 参数会始终放在最前面
+        
+        如果原始URL中已经包含以下占位符（会被替换），则不在查询参数中添加这些参数：
+        - click_id
+        - offer_id
+        - channel_id / publisher_id
         """
         if not query_params:
             return base_url
@@ -1102,45 +1154,79 @@ async def redirect_short_link_public(
         # 解析基础URL
         parsed = urlparse(base_url)
         
-        # 解析基础URL中已有的查询参数
+        # 解析基础URL中已有的查询参数（键转小写）
         existing_params = parse_qs(parsed.query, keep_blank_values=True)
+        existing_params_lower = {k.lower(): v for k, v in existing_params.items()}
+        
+        # 检查原始URL中是否已经包含这些占位符（会被替换的参数）
+        # 这些占位符在替换后会在URL中，所以不需要再添加
+        placeholder_params = {'click_id', 'offer_id', 'channel_id', 'publisher_id'}
+        # 检查各种大小写格式的占位符
+        skip_params = set()
+        for param in placeholder_params:
+            # 检查各种格式的占位符：{click_id}, {clickId}, {ClickId}, {CLICK_ID} 等
+            placeholder_variants = [
+                f'{{{param}}}',  # {click_id}
+                f'{{{param.lower()}}}',  # {click_id}
+                f'{{{param.upper()}}}',  # {CLICK_ID}
+                f'{{{param.capitalize()}}}',  # {Click_id}
+            ]
+            # 检查驼峰命名
+            camel_case = ''.join(word.capitalize() if i > 0 else word.lower() for i, word in enumerate(param.split('_')))
+            placeholder_variants.extend([
+                f'{{{camel_case}}}',  # {clickId}
+                f'{{{camel_case.lower()}}}',  # {clickid}
+            ])
+            
+            # 如果URL中包含任何格式的占位符，则跳过该参数
+            if any(variant in base_url for variant in placeholder_variants):
+                skip_params.add(param)
+                logger.debug(f"[参数合并] 跳过参数 {param}，因为原始URL中已包含此占位符")
         
         # 分离 click_id 和其他参数
         click_id_value = None
         other_params = {}
         
         for key, value in query_params.items():
-            if key == 'click_id':
+            # 确保键是小写
+            key_lower = key.lower()
+            
+            # 如果这个参数应该被跳过，则不添加
+            if key_lower in skip_params:
+                logger.debug(f"[参数合并] 跳过参数 {key_lower}，因为原始URL中已包含此占位符")
+                continue
+            
+            if key_lower == 'click_id':
                 # 保存 click_id 的值
                 if isinstance(value, list):
                     click_id_value = [str(v) for v in value]
                 else:
                     click_id_value = [str(value)]
             else:
-                # 其他参数
+                # 其他参数（键转小写）
                 if isinstance(value, list):
-                    other_params[key] = [str(v) for v in value]
+                    other_params[key_lower] = [str(v) for v in value]
                 else:
-                    other_params[key] = [str(value)]
+                    other_params[key_lower] = [str(value)]
         
         # 合并参数：先合并其他参数，再添加 click_id（确保 click_id 在最前面）
         for key, value in other_params.items():
-            existing_params[key] = value
+            existing_params_lower[key] = value
         
-        # 如果有 click_id，将其放在最前面
-        if click_id_value:
-            existing_params['click_id'] = click_id_value
+        # 如果有 click_id 且不应该跳过，将其放在最前面
+        if click_id_value and 'click_id' not in skip_params:
+            existing_params_lower['click_id'] = click_id_value
         
         # 重新构建查询字符串（使用 OrderedDict 确保 click_id 在最前面）
         from collections import OrderedDict
         ordered_params = OrderedDict()
         
-        # 先添加 click_id（如果存在）
-        if 'click_id' in existing_params:
-            ordered_params['click_id'] = existing_params['click_id']
+        # 先添加 click_id（如果存在且不应该跳过）
+        if 'click_id' in existing_params_lower and 'click_id' not in skip_params:
+            ordered_params['click_id'] = existing_params_lower['click_id']
         
         # 然后添加其他参数
-        for key, value in existing_params.items():
+        for key, value in existing_params_lower.items():
             if key != 'click_id':
                 ordered_params[key] = value
         
@@ -1153,7 +1239,8 @@ async def redirect_short_link_public(
     try:
         # 记录请求详细信息（用于调试）
         request_url = str(request.url)
-        request_params = dict(request.query_params)
+        # 获取请求参数，并将参数名称全部转小写
+        request_params = {k.lower(): v for k, v in request.query_params.items()}
         logger.debug(
             f"[短链接重定向] 收到请求: short_code={short_code}, "
             f"完整URL={request_url}, 查询参数={request_params}"
@@ -1365,6 +1452,9 @@ async def redirect_short_link_public(
                     exc_info=True
                 )
             
+            # 保存替换前的原始URL（用于检查占位符）
+            original_url_before_replace = original_url
+            
             # 替换原始URL中的占位符（在合并查询参数之前）
             original_url = await _replace_short_link_placeholders(
                 original_url=original_url,
@@ -1376,10 +1466,37 @@ async def redirect_short_link_public(
                 db=db
             )
             
-            # 将click_id添加到查询参数的最前面
-            request_params_with_click = {'click_id': click_id}
-            # 将原有参数添加到后面
-            request_params_with_click.update(request_params)
+            # 准备要合并的查询参数
+            # 检查原始URL（替换前）中是否包含这些占位符，如果包含就不添加这些参数
+            request_params_with_click = {}
+            placeholder_params_to_check = {
+                'click_id': ['{click_id}', '{clickId}', '{clickid}', '{ClickId}', '{CLICK_ID}'],
+                'offer_id': ['{offer_id}', '{offerId}', '{offerid}', '{OfferId}', '{OFFER_ID}'],
+                'channel_id': ['{channel_id}', '{channelId}', '{channelid}', '{ChannelId}', '{CHANNEL_ID}'],
+                'publisher_id': ['{publisher_id}', '{publisherId}', '{publisherid}', '{PublisherId}', '{PUBLISHER_ID}'],
+            }
+            
+            # 检查原始URL中是否包含这些占位符
+            for param_name, variants in placeholder_params_to_check.items():
+                if not any(variant in original_url_before_replace for variant in variants):
+                    # 如果原始URL中没有这个占位符，则添加该参数
+                    if param_name == 'click_id':
+                        request_params_with_click['click_id'] = click_id
+                    elif param_name == 'offer_id' and offer_id:
+                        request_params_with_click['offer_id'] = offer_id
+                    elif param_name == 'channel_id' and channel_id:
+                        request_params_with_click['channel_id'] = channel_id
+                    elif param_name == 'publisher_id' and final_channel_id:
+                        request_params_with_click['publisher_id'] = final_channel_id
+                else:
+                    logger.debug(f"[参数合并] 跳过参数 {param_name}，因为原始URL中已包含此占位符")
+            
+            # 将原有参数添加到后面（参数名已转小写，但排除已跳过的参数）
+            for key, value in request_params.items():
+                key_lower = key.lower()
+                # 如果这个参数已经在占位符中，则跳过
+                if key_lower not in placeholder_params_to_check or key_lower not in request_params_with_click:
+                    request_params_with_click[key_lower] = value
             
             # 合并查询参数到原始URL（包含click_id，click_id在最前面）
             final_url = merge_url_params(original_url, request_params_with_click)
@@ -1593,6 +1710,9 @@ async def redirect_short_link_public(
                 exc_info=True
             )
         
+        # 保存替换前的原始URL（用于检查占位符）
+        original_url_before_replace = original_url
+        
         # 替换原始URL中的占位符（在合并查询参数之前）
         original_url = await _replace_short_link_placeholders(
             original_url=original_url,
@@ -1604,10 +1724,37 @@ async def redirect_short_link_public(
             db=db
         )
         
-        # 将click_id添加到查询参数的最前面
-        request_params_with_click = {'click_id': click_id}
-        # 将原有参数添加到后面
-        request_params_with_click.update(request_params)
+        # 准备要合并的查询参数
+        # 检查原始URL（替换前）中是否包含这些占位符，如果包含就不添加这些参数
+        request_params_with_click = {}
+        placeholder_params_to_check = {
+            'click_id': ['{click_id}', '{clickId}', '{clickid}', '{ClickId}', '{CLICK_ID}'],
+            'offer_id': ['{offer_id}', '{offerId}', '{offerid}', '{OfferId}', '{OFFER_ID}'],
+            'channel_id': ['{channel_id}', '{channelId}', '{channelid}', '{ChannelId}', '{CHANNEL_ID}'],
+            'publisher_id': ['{publisher_id}', '{publisherId}', '{publisherid}', '{PublisherId}', '{PUBLISHER_ID}'],
+        }
+        
+        # 检查原始URL中是否包含这些占位符
+        for param_name, variants in placeholder_params_to_check.items():
+            if not any(variant in original_url_before_replace for variant in variants):
+                # 如果原始URL中没有这个占位符，则添加该参数
+                if param_name == 'click_id':
+                    request_params_with_click['click_id'] = click_id
+                elif param_name == 'offer_id' and offer_id:
+                    request_params_with_click['offer_id'] = offer_id
+                elif param_name == 'channel_id' and channel_id:
+                    request_params_with_click['channel_id'] = channel_id
+                elif param_name == 'publisher_id' and final_channel_id:
+                    request_params_with_click['publisher_id'] = final_channel_id
+            else:
+                logger.debug(f"[参数合并] 跳过参数 {param_name}，因为原始URL中已包含此占位符")
+        
+        # 将原有参数添加到后面（参数名已转小写，但排除已跳过的参数）
+        for key, value in request_params.items():
+            key_lower = key.lower()
+            # 如果这个参数已经在占位符中，则跳过
+            if key_lower not in placeholder_params_to_check or key_lower not in request_params_with_click:
+                request_params_with_click[key_lower] = value
         
         # 合并查询参数到原始URL（包含click_id，click_id在最前面）
         final_url = merge_url_params(original_url, request_params_with_click)
