@@ -7,6 +7,7 @@ import pytz
 from datetime import datetime
 from typing import Any, Optional
 from fastapi import Request
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.middleware import get_device_type
 from app.core.config import settings
 
