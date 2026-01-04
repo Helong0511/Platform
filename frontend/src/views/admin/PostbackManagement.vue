@@ -203,7 +203,25 @@
             {{ formatDateTime(scope.row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="通知状态" width="120" align="center">
+          <template #default="scope">
+            <el-tag 
+              v-if="scope.row.has_notification" 
+              type="success" 
+              size="small"
+            >
+              已通知
+            </el-tag>
+            <el-tag 
+              v-else 
+              type="warning" 
+              size="small"
+            >
+              未通知
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="scope">
             <el-button 
               type="primary" 
@@ -220,6 +238,16 @@
               @click="handleViewNotifications(scope.row)"
             >
               通知记录
+            </el-button>
+            <el-button 
+              v-if="!scope.row.has_notification"
+              type="warning" 
+              link 
+              size="small" 
+              :loading="resendingNotifications[scope.row.id]"
+              @click="handleResendNotification(scope.row)"
+            >
+              补发通知
             </el-button>
           </template>
         </el-table-column>
@@ -317,6 +345,8 @@ import { getPostbackConversions, getPostbackStats } from '../../api/postback';
 import { formatDateTime } from '../../utils/dateFormat';
 import { useDevice } from '../../composables/useDevice';
 import NotificationRecordsDialog from '../../components/admin/NotificationRecordsDialog.vue';
+import { resendConversionNotification, getNotificationRecords } from '../../api/notification';
+import { ElMessage, ElMessageBox } from 'element-plus';
 
 // 设备检测
 const { isMobile } = useDevice();
@@ -352,6 +382,9 @@ const currentConversion = ref(null);
 const notificationRecordsVisible = ref(false);
 const selectedClientId = ref(null);
 const selectedProductId = ref(null);
+
+// 补发通知状态
+const resendingNotifications = ref({});
 
 // 监听日期范围变化
 watch(dateRange, (newVal) => {
@@ -392,7 +425,14 @@ const fetchConversions = async () => {
     });
 
     const response = await getPostbackConversions(params);
-    conversions.value = response.data || [];
+    const conversionList = response.data || [];
+    
+    // 根据通知数量判断是否有通知记录
+    conversionList.forEach(conversion => {
+      conversion.has_notification = (conversion.notification_count || 0) > 0;
+    });
+    
+    conversions.value = conversionList;
     pagination.total = response.total || 0;
   } catch (error) {
     // 错误已通过 isErrorHandled 处理
@@ -463,6 +503,49 @@ const handleNotificationDialogClose = (val) => {
   if (!val) {
     selectedClientId.value = null;
     selectedProductId.value = null;
+  }
+};
+
+// 补发通知
+const handleResendNotification = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要补发转化记录 ID ${row.id} 的通知吗？`,
+      '补发通知',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    );
+    
+    resendingNotifications.value[row.id] = true;
+    try {
+      await resendConversionNotification(row.id);
+      ElMessage.success('通知补发成功');
+      
+      // 更新该记录的通知状态
+      row.has_notification = true;
+      
+      // 刷新通知记录对话框（如果已打开）
+      if (notificationRecordsVisible.value && 
+          selectedClientId.value === row.client_id && 
+          selectedProductId.value === row.product_id) {
+        // 触发通知记录对话框重新加载
+        notificationRecordsVisible.value = false;
+        setTimeout(() => {
+          selectedClientId.value = row.client_id || null;
+          selectedProductId.value = row.product_id || null;
+          notificationRecordsVisible.value = true;
+        }, 100);
+      }
+    } catch (error) {
+      ElMessage.error('补发通知失败，请稍后重试');
+    } finally {
+      resendingNotifications.value[row.id] = false;
+    }
+  } catch (error) {
+    // 用户取消操作
   }
 };
 

@@ -20,7 +20,7 @@ from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import parse_date_to_app_timezone
-from app.models.models import PostbackConversion, Product, Client, PostbackForwardLog
+from app.models.models import PostbackConversion, Product, Client, PostbackForwardLog, PostbackNotification
 from app.schemas.postback import (
     PostbackRequest,
     PostbackResponse,
@@ -147,11 +147,27 @@ async def get_postback_conversions(
         result = await db.execute(query)
         conversions = result.scalars().all()
         
-        # 转换为响应格式
-        conversion_list = [
-            PostbackConversionResponse.model_validate(conv)
-            for conv in conversions
-        ]
+        # 批量查询通知记录数量
+        conversion_ids = [conv.id for conv in conversions]
+        notification_counts = {}
+        if conversion_ids:
+            notification_query = select(
+                PostbackNotification.conversion_id,
+                func.count(PostbackNotification.id).label('count')
+            ).where(
+                PostbackNotification.conversion_id.in_(conversion_ids)
+            ).group_by(PostbackNotification.conversion_id)
+            
+            notification_result = await db.execute(notification_query)
+            for row in notification_result.all():
+                notification_counts[row.conversion_id] = row.count
+        
+        # 转换为响应格式，并添加通知数量
+        conversion_list = []
+        for conv in conversions:
+            conv_dict = PostbackConversionResponse.model_validate(conv).model_dump()
+            conv_dict['notification_count'] = notification_counts.get(conv.id, 0)
+            conversion_list.append(conv_dict)
         
         logger.info(
             f"管理员 {current_user.username} 查询 PostBack 转化记录: "

@@ -471,3 +471,68 @@ async def get_notification_record(
     
     return ResponseBaseSchema.success(data=PostbackNotificationResponse.model_validate(notification))
 
+
+# ==================== 补发通知 ====================
+
+@router.post("/conversions/{conversion_id}/resend-notification",
+             response_model=ResponseBaseSchema[dict],
+             summary="补发转化通知")
+async def resend_conversion_notification(
+    conversion_id: int = Path(..., ge=1, description="转化记录ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    补发转化通知
+    
+    如果转化记录没有通知记录或通知失败，可以手动补发通知
+    """
+    from app.models.models import PostbackConversion
+    from app.core.postback.notifier import PostbackNotifier
+    
+    # 查询转化记录
+    result = await db.execute(
+        select(PostbackConversion).where(PostbackConversion.id == conversion_id)
+    )
+    conversion = result.scalars().first()
+    
+    if not conversion:
+        raise_api_exception(
+            ErrorCode.RESOURCE_NOT_FOUND,
+            detail=f"转化记录ID {conversion_id} 不存在"
+        )
+    
+    # 权限检查：管理员可以补发所有通知，客户只能补发自己客户的通知
+    if current_user.role != UserRole.ADMIN:
+        if not current_user.client_id or conversion.client_id != current_user.client_id:
+            raise_api_exception(
+                ErrorCode.ACCESS_DENIED,
+                detail="无权补发该转化记录的通知"
+            )
+    
+    try:
+        # 补发通知
+        await PostbackNotifier.notify_conversion(
+            conversion=conversion,
+            db=db,
+            product=None,  # 将在通知函数中查询
+            client=None   # 将在通知函数中查询
+        )
+        
+        logger.info(
+            f"用户 {current_user.id} 补发转化通知: conversion_id={conversion_id}"
+        )
+        
+        return ResponseBaseSchema.success(
+            data={"message": "通知已补发", "conversion_id": conversion_id}
+        )
+    except Exception as e:
+        logger.error(
+            f"补发转化通知失败: conversion_id={conversion_id}, error={str(e)}",
+            exc_info=True
+        )
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"补发通知失败: {str(e)}"
+        )
+

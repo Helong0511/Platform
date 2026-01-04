@@ -121,3 +121,20 @@ export const getNotificationRecord = async (notificationId) => {
   }
 };
 
+// ==================== 补发通知 ====================
+
+/**
+ * 补发转化通知
+ */
+export const resendConversionNotification = async (conversionId) => {
+  try {
+    await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
+    const response = await axios.post(
+      `/api/v1/notification-configs/conversions/${conversionId}/resend-notification`
+    );
+    return normalizeResponse(response, { returnDataOnly: true });
+  } catch (error) {
+    handleError(error);
+  }
+};
+

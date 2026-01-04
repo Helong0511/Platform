@@ -58,6 +58,7 @@ class PostbackConversionResponse(BaseModel):
     product_id: Optional[int]
     client_id: Optional[int]
     created_at: datetime
+    notification_count: Optional[int] = Field(0, description="通知记录数量")
     
     class Config:
         from_attributes = True
