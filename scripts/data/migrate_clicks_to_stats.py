@@ -40,7 +40,28 @@ async def migrate_converted_clicks_to_stats():
                     await conn.run_sync(Base.metadata.create_all)
                 print("click_stats 表创建成功")
             
-            # 2. 统计需要迁移的数据量
+            # 2. 检查 postback_conversions 表是否有 click_id 字段
+            check_column_sql = text("""
+                SELECT COUNT(*) as count
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'postback_conversions'
+                  AND column_name = 'click_id'
+            """)
+            column_result = await db.execute(check_column_sql)
+            has_click_id_column = column_result.scalar() > 0
+            
+            if not has_click_id_column:
+                print("警告: postback_conversions 表中没有 click_id 字段")
+                print("这意味着数据库表可能是旧版本，需要先添加 click_id 字段")
+                print("或者这些转化记录还没有关联到点击记录")
+                print("跳过迁移（新接收的 postback 数据会自动创建 ClickStats 记录）")
+                return {
+                    "migrated_count": 0,
+                    "message": "postback_conversions 表缺少 click_id 字段，跳过迁移"
+                }
+            
+            # 3. 统计需要迁移的数据量
             count_sql = text("""
                 SELECT COUNT(DISTINCT c.`click_id`) as count
                 FROM `clicks` c
@@ -60,7 +81,7 @@ async def migrate_converted_clicks_to_stats():
             
             print(f"发现 {total_count} 条需要迁移的记录")
             
-            # 3. 迁移数据：只迁移有转化的点击记录
+            # 4. 迁移数据：只迁移有转化的点击记录
             migrate_sql = text("""
                 INSERT IGNORE INTO `click_stats` 
                 (`click_id`, `offer_id`, `publisher_id`, `advertiser_id`, `click_time`, `created_at`)
