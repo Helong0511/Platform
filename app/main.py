@@ -1515,9 +1515,17 @@ async def redirect_short_link_public(
                     elif param_name == 'offer_id' and offer_id:
                         request_params_with_click['offer_id'] = offer_id
                     elif param_name == 'channel_id' and channel_id:
-                        request_params_with_click['channel_id'] = channel_id
+                        # 特殊处理：如果原始URL中有 {publisher_id} 占位符，channel_id 也不应该添加
+                        if not has_placeholder.get('publisher_id', False):
+                            request_params_with_click['channel_id'] = channel_id
+                        else:
+                            logger.info(f"[参数合并] 跳过参数 {param_name}，因为原始URL中已包含 publisher_id 占位符（publisher_id 和 channel_id 是同一个值）")
                     elif param_name == 'publisher_id' and final_channel_id:
-                        request_params_with_click['publisher_id'] = final_channel_id
+                        # 特殊处理：如果原始URL中有 {channel_id} 占位符，publisher_id 也不应该添加
+                        if not has_placeholder.get('channel_id', False):
+                            request_params_with_click['publisher_id'] = final_channel_id
+                        else:
+                            logger.info(f"[参数合并] 跳过参数 {param_name}，因为原始URL中已包含 channel_id 占位符（publisher_id 和 channel_id 是同一个值）")
                 else:
                     logger.info(f"[参数合并] 跳过参数 {param_name}，因为原始URL中已包含此占位符")
             
@@ -1543,6 +1551,16 @@ async def redirect_short_link_public(
                 # 如果这个参数对应某个占位符参数，且原始URL中已包含该占位符，则跳过
                 if corresponding_param_name and has_placeholder.get(corresponding_param_name, False):
                     logger.debug(f"[参数合并] 跳过请求参数 {key_lower}，因为原始URL中已包含 {corresponding_param_name} 占位符")
+                    continue
+                
+                # 特殊处理：publisher_id 和 channel_id 是同一个值
+                # 如果原始URL中有 {channel_id} 占位符，publisher_id 也应该被跳过
+                if key_lower == 'publisher_id' and has_placeholder.get('channel_id', False):
+                    logger.debug(f"[参数合并] 跳过请求参数 {key_lower}，因为原始URL中已包含 channel_id 占位符（publisher_id 和 channel_id 是同一个值）")
+                    continue
+                # 如果原始URL中有 {publisher_id} 占位符，channel_id 也应该被跳过
+                if key_lower == 'channel_id' and has_placeholder.get('publisher_id', False):
+                    logger.debug(f"[参数合并] 跳过请求参数 {key_lower}，因为原始URL中已包含 publisher_id 占位符（publisher_id 和 channel_id 是同一个值）")
                     continue
                 
                 # 否则添加该参数
@@ -1810,9 +1828,17 @@ async def redirect_short_link_public(
                 elif param_name == 'offer_id' and offer_id:
                     request_params_with_click['offer_id'] = offer_id
                 elif param_name == 'channel_id' and channel_id:
-                    request_params_with_click['channel_id'] = channel_id
+                    # 特殊处理：如果原始URL中有 {publisher_id} 占位符，channel_id 也不应该添加
+                    if not has_placeholder.get('publisher_id', False):
+                        request_params_with_click['channel_id'] = channel_id
+                    else:
+                        logger.info(f"[参数合并] 跳过参数 {param_name}，因为原始URL中已包含 publisher_id 占位符（publisher_id 和 channel_id 是同一个值）")
                 elif param_name == 'publisher_id' and final_channel_id:
-                    request_params_with_click['publisher_id'] = final_channel_id
+                    # 特殊处理：如果原始URL中有 {channel_id} 占位符，publisher_id 也不应该添加
+                    if not has_placeholder.get('channel_id', False):
+                        request_params_with_click['publisher_id'] = final_channel_id
+                    else:
+                        logger.info(f"[参数合并] 跳过参数 {param_name}，因为原始URL中已包含 channel_id 占位符（publisher_id 和 channel_id 是同一个值）")
             else:
                 logger.info(f"[参数合并] 跳过参数 {param_name}，因为原始URL中已包含此占位符")
         
@@ -1838,6 +1864,16 @@ async def redirect_short_link_public(
             # 如果这个参数对应某个占位符参数，且原始URL中已包含该占位符，则跳过
             if corresponding_param_name and has_placeholder.get(corresponding_param_name, False):
                 logger.debug(f"[参数合并] 跳过请求参数 {key_lower}，因为原始URL中已包含 {corresponding_param_name} 占位符")
+                continue
+            
+            # 特殊处理：publisher_id 和 channel_id 是同一个值
+            # 如果原始URL中有 {channel_id} 占位符，publisher_id 也应该被跳过
+            if key_lower == 'publisher_id' and has_placeholder.get('channel_id', False):
+                logger.debug(f"[参数合并] 跳过请求参数 {key_lower}，因为原始URL中已包含 channel_id 占位符（publisher_id 和 channel_id 是同一个值）")
+                continue
+            # 如果原始URL中有 {publisher_id} 占位符，channel_id 也应该被跳过
+            if key_lower == 'channel_id' and has_placeholder.get('publisher_id', False):
+                logger.debug(f"[参数合并] 跳过请求参数 {key_lower}，因为原始URL中已包含 publisher_id 占位符（publisher_id 和 channel_id 是同一个值）")
                 continue
             
             # 否则添加该参数
