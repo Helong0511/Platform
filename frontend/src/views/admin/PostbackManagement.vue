@@ -337,7 +337,7 @@
 import { ref, reactive, onMounted, computed, watch } from 'vue';
 import { 
   ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, 
-  ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage, 
+  ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage, ElMessageBox,
   ElDescriptions, ElDescriptionsItem, ElDatePicker, ElInputNumber, ElRow, ElCol
 } from 'element-plus';
 import { Search, Refresh, Loading, Bell } from '@element-plus/icons-vue';
@@ -346,7 +346,6 @@ import { formatDateTime } from '../../utils/dateFormat';
 import { useDevice } from '../../composables/useDevice';
 import NotificationRecordsDialog from '../../components/admin/NotificationRecordsDialog.vue';
 import { resendConversionNotification, getNotificationRecords } from '../../api/notification';
-import { ElMessage, ElMessageBox } from 'element-plus';
 
 // 设备检测
 const { isMobile } = useDevice();
