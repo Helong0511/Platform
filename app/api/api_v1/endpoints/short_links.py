@@ -13,8 +13,8 @@ from sqlalchemy.future import select
 from sqlalchemy import func, and_, or_
 
 from app.core.database import get_db
-from app.core.security import get_current_user
-from app.core.constants import MAX_PAGE_SIZE, require_admin
+from app.core.security import get_current_user, require_admin
+from app.core.constants import MAX_PAGE_SIZE
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.short_link.generator import (
