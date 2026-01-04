@@ -276,9 +276,6 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
         if failed_updates:
             logger.warning(f"有 {len(failed_updates)} 个计数器同步失败，将在下次同步时重试")
         
-        if failed_keys:
-            logger.warning(f"有 {len(failed_keys)} 个计数器同步失败，将在下次同步时重试")
-        
         return synced
     except Exception as e:
         logger.error(f"同步点击次数到数据库失败: {e}", exc_info=True)
