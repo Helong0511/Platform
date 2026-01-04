@@ -10,7 +10,7 @@ from sqlalchemy import insert
 from app.core.database import AsyncSessionLocal
 from app.core.clicks_queue import dequeue_clicks, get_queue_length
 from app.core.offer_cache import get_offer_advertiser_id, set_offer_cache
-from app.models.models import Click, Offer, ShortLink
+from app.models.models import Click, Offer, ShortLink, ClickStats
 from sqlalchemy.future import select
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
 
@@ -91,10 +91,14 @@ async def process_clicks_queue() -> Dict[str, int]:
                     # 3. 验证并清理short_link_id（如果不存在则设置为NULL）
                     await _validate_short_link_ids(db, valid_clicks)
                     
-                    # 4. 批量插入
+                    # 4. 批量插入 Click 记录
                     inserted_count = await _batch_insert_clicks(db, valid_clicks)
                     result['inserted'] += inserted_count
                     result['failed'] += len(valid_clicks) - inserted_count
+                    
+                    # 5. 批量插入 ClickStats 记录（同步到统计表）
+                    if inserted_count > 0:
+                        await _batch_insert_click_stats(db, valid_clicks)
                     
                     await db.commit()
                     logger.info(
@@ -426,4 +430,86 @@ async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -
     except Exception as e:
         logger.error(f"批量插入点击记录失败: error={e}", exc_info=True)
         raise
+
+
+async def _batch_insert_click_stats(db: AsyncSession, clicks: List[Dict[str, Any]]) -> int:
+    """
+    批量插入点击统计记录到 ClickStats 表
+    
+    Args:
+        db: 数据库会话
+        clicks: 点击记录列表（已插入到 Click 表）
+        
+    Returns:
+        成功插入的记录数
+    """
+    if not clicks:
+        return 0
+    
+    try:
+        # 收集所有 click_id
+        click_ids = [click.get('click_id') for click in clicks if click.get('click_id')]
+        if not click_ids:
+            return 0
+        
+        # 检查已存在的 ClickStats 记录（避免重复）
+        result = await db.execute(
+            select(ClickStats.click_id)
+            .where(ClickStats.click_id.in_(click_ids))
+        )
+        existing_click_ids = {row[0] for row in result.all()}
+        
+        # 准备批量插入数据（只插入不存在的记录）
+        insert_data = []
+        now = get_app_now_naive()
+        
+        for click in clicks:
+            click_id = click.get('click_id')
+            if not click_id or click_id in existing_click_ids:
+                continue
+            
+            # 处理click_time（与 _batch_insert_clicks 中的逻辑一致）
+            click_time = click.get('click_time')
+            if isinstance(click_time, str):
+                try:
+                    if click_time.endswith('Z'):
+                        click_time = click_time[:-1] + '+00:00'
+                    click_time = datetime.fromisoformat(click_time)
+                    if click_time.tzinfo is not None:
+                        if click_time.tzinfo != timezone.utc:
+                            click_time = click_time.astimezone(timezone.utc)
+                        click_time = click_time.replace(tzinfo=timezone.utc).astimezone(APP_TIMEZONE).replace(tzinfo=None)
+                except (ValueError, AttributeError):
+                    click_time = now
+            elif isinstance(click_time, datetime):
+                if click_time.tzinfo is not None:
+                    if click_time.tzinfo != timezone.utc:
+                        click_time = click_time.astimezone(timezone.utc)
+                    click_time = click_time.replace(tzinfo=timezone.utc).astimezone(APP_TIMEZONE).replace(tzinfo=None)
+            else:
+                click_time = now
+            
+            insert_data.append({
+                'click_id': click_id,
+                'offer_id': click.get('offer_id'),
+                'publisher_id': click.get('publisher_id'),
+                'advertiser_id': click.get('advertiser_id'),
+                'click_time': click_time,
+                'created_at': now,
+            })
+        
+        if not insert_data:
+            logger.debug("所有点击记录已存在于 ClickStats 表，无需插入")
+            return 0
+        
+        # 批量插入（使用bulk insert提高性能）
+        stmt = insert(ClickStats).values(insert_data)
+        await db.execute(stmt)
+        
+        logger.info(f"批量插入 {len(insert_data)} 条点击统计记录到 ClickStats 表")
+        return len(insert_data)
+    except Exception as e:
+        # ClickStats 插入失败不影响主流程，但记录警告
+        logger.warning(f"批量插入点击统计记录失败: error={e}", exc_info=True)
+        return 0
 
