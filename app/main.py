@@ -1061,6 +1061,11 @@ async def redirect_short_link_public(
                 # 将驼峰命名转换为下划线命名
                 normalized_key = re.sub(r'(?<!^)(?=[A-Z])', '_', placeholder).lower()
             
+            # 特殊处理：channel_id 和 publisher_id 是同一个值（渠道ID）
+            if normalized_key == 'channel_id':
+                # channel_id 就是 publisher_id，使用 publisher_id 的值
+                normalized_key = 'publisher_id'
+            
             # 获取值
             value = values.get(normalized_key, '')
             
@@ -1359,17 +1364,6 @@ async def redirect_short_link_public(
                     f"[短链接重定向] 点击计数失败（缓存路径）: short_code={short_code}, click_id={click_id}, error={e}",
                     exc_info=True
                 )
-            
-            # 替换原始URL中的占位符（在合并查询参数之前）
-            original_url = await _replace_short_link_placeholders(
-                original_url=original_url,
-                click_id=click_id,
-                offer_id=final_offer_id,
-                publisher_id=final_channel_id,
-                advertiser_id=advertiser_id,
-                request_info=request_info,
-                db=db
-            )
             
             # 替换原始URL中的占位符（在合并查询参数之前）
             original_url = await _replace_short_link_placeholders(
