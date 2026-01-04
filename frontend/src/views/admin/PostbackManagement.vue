@@ -175,27 +175,38 @@
             {{ scope.row.devad_id || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="os" label="操作系统" width="100">
+        <el-table-column prop="os" label="操作系统" width="120">
           <template #default="scope">
-            <el-tag v-if="scope.row.os" size="small">
-              {{ scope.row.os }}
+            <el-tag v-if="scope.row.os" size="small" :type="getOsTagType(scope.row.os)">
+              {{ formatOs(scope.row.os) }}
             </el-tag>
             <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column prop="carrier" label="运营商" width="120">
           <template #default="scope">
-            {{ scope.row.carrier || '-' }}
+            <el-tag v-if="scope.row.carrier" size="small" type="info">
+              {{ scope.row.carrier }}
+            </el-tag>
+            <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="product_id" label="产品ID" width="100" align="center">
+        <el-table-column prop="product_id" label="产品" min-width="150">
           <template #default="scope">
-            {{ scope.row.product_id || '-' }}
+            <div v-if="scope.row.product_id">
+              <div style="font-weight: 500;">{{ scope.row.product_name || `产品_${scope.row.product_id}` }}</div>
+              <div style="font-size: 12px; color: #909399;">ID: {{ scope.row.product_id }}</div>
+            </div>
+            <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="client_id" label="客户ID" width="100" align="center">
+        <el-table-column prop="client_id" label="客户" min-width="150">
           <template #default="scope">
-            {{ scope.row.client_id || '-' }}
+            <div v-if="scope.row.client_id">
+              <div style="font-weight: 500;">{{ scope.row.client_name || `客户_${scope.row.client_id}` }}</div>
+              <div style="font-size: 12px; color: #909399;">ID: {{ scope.row.client_id }}</div>
+            </div>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="180">
@@ -557,6 +568,39 @@ const formatCurrency = (value) => {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(value);
+};
+
+// 格式化操作系统显示
+const formatOs = (os) => {
+  if (!os) return '-';
+  const osMap = {
+    'IOS': 'iOS',
+    'ios': 'iOS',
+    'Android': 'Android',
+    'android': 'Android',
+    'iPhone': 'iOS',
+    'iPad': 'iOS',
+    'Windows': 'Windows',
+    'Mac': 'macOS',
+    'Linux': 'Linux'
+  };
+  return osMap[os] || os;
+};
+
+// 获取操作系统标签类型
+const getOsTagType = (os) => {
+  if (!os) return 'info';
+  const osLower = os.toLowerCase();
+  if (osLower.includes('ios') || osLower.includes('iphone') || osLower.includes('ipad')) {
+    return 'primary';
+  } else if (osLower.includes('android')) {
+    return 'success';
+  } else if (osLower.includes('windows')) {
+    return 'warning';
+  } else if (osLower.includes('mac')) {
+    return '';
+  }
+  return 'info';
 };
 
 // 格式化JSON

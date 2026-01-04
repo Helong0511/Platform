@@ -162,11 +162,54 @@ async def get_postback_conversions(
             for row in notification_result.all():
                 notification_counts[row.conversion_id] = row.count
         
-        # 转换为响应格式，并添加通知数量
+        # 批量查询产品和客户信息
+        product_ids = list(set([conv.product_id for conv in conversions if conv.product_id]))
+        client_ids = list(set([conv.client_id for conv in conversions if conv.client_id]))
+        
+        products_map = {}
+        if product_ids:
+            products_query = select(Product.id, Product.name).where(Product.id.in_(product_ids))
+            products_result = await db.execute(products_query)
+            for row in products_result.all():
+                products_map[row.id] = row.name
+        
+        clients_map = {}
+        if client_ids:
+            clients_query = select(Client.id, Client.company_name, Client.user_id).where(Client.id.in_(client_ids))
+            clients_result = await db.execute(clients_query)
+            # 获取用户信息以显示客户名称
+            # 先收集所有需要查询的用户ID
+            clients_result_temp = await db.execute(clients_query)
+            user_ids = list(set([row.user_id for row in clients_result_temp.all() if row.user_id]))
+            users_map = {}
+            if user_ids:
+                users_query = select(User.id, User.full_name, User.username).where(User.id.in_(user_ids))
+                users_result = await db.execute(users_query)
+                for row in users_result.all():
+                    users_map[row.id] = row.full_name or row.username
+            
+            # 重新查询客户（因为上面的查询结果已经被消费）
+            clients_result = await db.execute(clients_query)
+            for row in clients_result.all():
+                # 优先使用公司名称，如果没有则使用用户全名
+                client_name = row.company_name
+                if not client_name and row.user_id and row.user_id in users_map:
+                    client_name = users_map[row.user_id]
+                if not client_name:
+                    client_name = f"客户_{row.id}"
+                clients_map[row.id] = client_name
+        
+        # 转换为响应格式，并添加关联信息
         conversion_list = []
         for conv in conversions:
             conv_dict = PostbackConversionResponse.model_validate(conv).model_dump()
             conv_dict['notification_count'] = notification_counts.get(conv.id, 0)
+            # 添加产品名称
+            if conv.product_id and conv.product_id in products_map:
+                conv_dict['product_name'] = products_map[conv.product_id]
+            # 添加客户名称
+            if conv.client_id and conv.client_id in clients_map:
+                conv_dict['client_name'] = clients_map[conv.client_id]
             conversion_list.append(conv_dict)
         
         logger.info(

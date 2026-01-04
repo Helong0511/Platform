@@ -57,6 +57,8 @@ class PostbackConversionResponse(BaseModel):
     gid: Optional[str]
     product_id: Optional[int]
     client_id: Optional[int]
+    product_name: Optional[str] = Field(None, description="产品名称")
+    client_name: Optional[str] = Field(None, description="客户名称")
     created_at: datetime
     notification_count: Optional[int] = Field(0, description="通知记录数量")
     
