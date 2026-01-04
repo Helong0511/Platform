@@ -40,7 +40,8 @@ except (OSError, PermissionError) as e:
     # 如果无法创建日志目录，使用临时目录或当前目录
     import tempfile
     log_dir = tempfile.gettempdir()
-    logger.warning(f"无法创建日志目录，使用临时目录: {log_dir}, 错误: {e}")
+    # 使用 logging 模块直接记录，因为 logger 还未定义
+    logging.warning(f"无法创建日志目录，使用临时目录: {log_dir}, 错误: {e}")
 
 # ====== 配置根日志记录器 ======
 # 这样所有子模块的日志都会被记录
@@ -69,12 +70,12 @@ try:
     file_handler.setLevel(getattr(logging, log_level.upper(), logging.INFO))
     # 添加到根日志记录器（这样所有子模块的日志都会被记录）
     root_logger.addHandler(file_handler)
-    logger.info(f"日志文件已创建: {log_file_path}")
+    root_logger.info(f"日志文件已创建: {log_file_path}")
 except (OSError, PermissionError) as e:
     # 如果无法创建日志文件，只使用控制台输出
-    logger.warning(f"无法创建日志文件 {log_file_path}，将只使用控制台输出。错误: {e}")
-    logger.warning(f"请检查日志目录权限: {log_dir}")
-    logger.warning(f"建议执行: sudo chown -R $(whoami):$(whoami) {log_dir} 或 sudo chmod 755 {log_dir}")
+    root_logger.warning(f"无法创建日志文件 {log_file_path}，将只使用控制台输出。错误: {e}")
+    root_logger.warning(f"请检查日志目录权限: {log_dir}")
+    root_logger.warning(f"建议执行: sudo chown -R $(whoami):$(whoami) {log_dir} 或 sudo chmod 755 {log_dir}")
     # 确保至少有一个控制台处理器
     if not any(isinstance(h, logging.StreamHandler) for h in root_logger.handlers):
         console_handler = logging.StreamHandler()

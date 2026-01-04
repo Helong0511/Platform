@@ -345,6 +345,47 @@ async def find_or_create_default_client(
     return default_client
 
 
+def unpack_ad_data_query_result(
+    row: tuple,
+    use_assignment_table: bool
+) -> tuple[Any, Any, Any, Any, Any | None, Any | None]:
+    """
+    解包广告数据查询结果，统一处理不同查询结构
+    
+    Args:
+        row: 查询结果行（tuple）
+        use_assignment_table: 是否使用 ProductAssignment 表
+    
+    Returns:
+        (ad_data, product, client, user, assignment_or_none, country_info_or_none)
+        - assignment_or_none: 如果使用 ProductAssignment 表，返回 assignment，否则为 None
+        - country_info_or_none: CountryInfo 对象，如果不存在则为 None
+    
+    Example:
+        ad_data, product, client, user, assignment, country_info = unpack_ad_data_query_result(row, use_assignment_table)
+    """
+    if use_assignment_table:
+        # 使用ProductAssignment表时，返回6个对象（包含CountryInfo）
+        if len(row) >= 6:
+            return row[0], row[1], row[2], row[3], row[4], row[5]
+        elif len(row) >= 5:
+            # 兼容旧数据（没有CountryInfo）
+            return row[0], row[1], row[2], row[3], row[4], None
+        else:
+            # 数据不完整
+            raise ValueError(f"数据不完整，期望至少5个对象，实际得到{len(row)}个")
+    else:
+        # 不使用ProductAssignment表时，返回5个对象（包含CountryInfo）
+        if len(row) >= 5:
+            return row[0], row[1], row[2], row[3], None, row[4]
+        elif len(row) >= 4:
+            # 兼容旧数据（没有CountryInfo）
+            return row[0], row[1], row[2], row[3], None, None
+        else:
+            # 数据不完整
+            raise ValueError(f"数据不完整，期望至少4个对象，实际得到{len(row)}个")
+
+
 def build_import_message(
     imported_rows: int = 0,
     failed_rows: int = 0,

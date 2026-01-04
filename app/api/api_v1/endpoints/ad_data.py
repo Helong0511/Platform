@@ -316,36 +316,15 @@ async def get_ad_data(
     if len(data) == 0:
         pass
 
-    # 转换为响应模型
+    # 转换为响应模型：使用统一的查询结果解包函数
+    from app.core.utils import unpack_ad_data_query_result
+    
     ad_data_responses = []
     for row in data:
         try:
-            # 根据是否使用ProductAssignment表，解构数据
-            if use_assignment_table:
-                # 使用ProductAssignment表时，返回6个对象（包含CountryInfo）
-                if len(row) >= 6:
-                    ad_data, product, client, user, assignment, country_info = row
-                elif len(row) >= 5:
-                    # 兼容旧数据（没有CountryInfo）
-                    ad_data, product, client, user, assignment = row
-                    country_info = None
-                else:
-                    # 如果数据不完整，跳过这条记录
-                    logger.warning(f"数据不完整，跳过记录: {row}")
-                    continue
-            else:
-                # 不使用ProductAssignment表时，返回5个对象（包含CountryInfo）
-                if len(row) >= 5:
-                    ad_data, product, client, user, country_info = row
-                elif len(row) >= 4:
-                    # 兼容旧数据（没有CountryInfo）
-                    ad_data, product, client, user = row
-                    country_info = None
-                else:
-                    logger.warning(f"数据不完整，跳过记录: {row}")
-                    continue
-        except Exception as e:
-            logger.error(f"解构数据失败: {str(e)}, row={row}")
+            ad_data, product, client, user, assignment, country_info = unpack_ad_data_query_result(row, use_assignment_table)
+        except (ValueError, Exception) as e:
+            logger.warning(f"解构数据失败: {str(e)}, row={row}")
             continue
         # 使用数据库字段中的比率（如果为空则计算）
         coverage_rate = ad_data.coverage_rate if ad_data.coverage_rate is not None else round(
@@ -1146,24 +1125,12 @@ async def get_ad_data_detail(
                 detail=f"广告数据ID {data_id} 不存在"
             )
 
-        # 根据是否使用ProductAssignment表，解构数据
+        # 使用统一的查询结果解包函数
+        from app.core.utils import unpack_ad_data_query_result
+        
         try:
-            if use_assignment_table:
-                if len(data) >= 6:
-                    ad_data, product, client, user, assignment, country_info = data
-                elif len(data) >= 5:
-                    ad_data, product, client, user, assignment = data
-                    country_info = None
-                else:
-                    ad_data, product, client, user = data
-                    country_info = None
-            else:
-                if len(data) >= 5:
-                    ad_data, product, client, user, country_info = data
-                else:
-                    ad_data, product, client, user = data
-                    country_info = None
-        except Exception as e:
+            ad_data, product, client, user, assignment, country_info = unpack_ad_data_query_result(data, use_assignment_table)
+        except (ValueError, Exception) as e:
             logger.error(f"解构数据失败: {str(e)}, data={data}")
             raise_api_exception(
                 ErrorCode.AD_DATA_NOT_FOUND,
