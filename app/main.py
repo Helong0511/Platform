@@ -1522,21 +1522,31 @@ async def redirect_short_link_public(
                     logger.info(f"[参数合并] 跳过参数 {param_name}，因为原始URL中已包含此占位符")
             
             # 将原有参数添加到后面（参数名已转小写，但排除已跳过的参数）
-            # 注意：需要排除已经在占位符中替换的参数，以及已经在 request_params_with_click 中的参数
+            # 注意：需要排除已经在占位符中替换的参数
+            # 参数名映射：检查请求参数是否对应某个占位符参数
+            param_name_mapping = {
+                'click_id': ['click_id', 'aff_click_id', 'clickid', 'clickId', 'CLICK_ID', 'AFF_CLICK_ID'],
+                'offer_id': ['offer_id', 'offerid', 'offerId', 'OFFER_ID'],
+                'channel_id': ['channel_id', 'sub_affid', 'channelid', 'channelId', 'CHANNEL_ID', 'SUB_AFFID'],
+                'publisher_id': ['publisher_id', 'publisherid', 'publisherId', 'PUBLISHER_ID'],
+            }
+            
             for key, value in request_params.items():
                 key_lower = key.lower()
                 # 检查这个参数是否对应某个占位符参数
-                is_placeholder_param = False
-                for param_name, possible_names in placeholder_params_to_check.items():
+                corresponding_param_name = None
+                for param_name, possible_names in param_name_mapping.items():
                     if key_lower in [name.lower() for name in possible_names]:
-                        is_placeholder_param = True
+                        corresponding_param_name = param_name
                         break
                 
-                # 如果这个参数不是占位符参数，或者占位符参数没有被跳过（即需要添加），则添加
-                if not is_placeholder_param or key_lower in request_params_with_click:
-                    request_params_with_click[key_lower] = value
-                else:
-                    logger.debug(f"[参数合并] 跳过请求参数 {key_lower}，因为对应的占位符参数已被跳过")
+                # 如果这个参数对应某个占位符参数，且原始URL中已包含该占位符，则跳过
+                if corresponding_param_name and has_placeholder.get(corresponding_param_name, False):
+                    logger.debug(f"[参数合并] 跳过请求参数 {key_lower}，因为原始URL中已包含 {corresponding_param_name} 占位符")
+                    continue
+                
+                # 否则添加该参数
+                request_params_with_click[key_lower] = value
             
             logger.info(
                 f"[参数合并] 准备合并的参数: request_params_with_click={request_params_with_click}"
@@ -1807,21 +1817,31 @@ async def redirect_short_link_public(
                 logger.info(f"[参数合并] 跳过参数 {param_name}，因为原始URL中已包含此占位符")
         
         # 将原有参数添加到后面（参数名已转小写，但排除已跳过的参数）
-        # 注意：需要排除已经在占位符中替换的参数，以及已经在 request_params_with_click 中的参数
+        # 注意：需要排除已经在占位符中替换的参数
+        # 参数名映射：检查请求参数是否对应某个占位符参数
+        param_name_mapping = {
+            'click_id': ['click_id', 'aff_click_id', 'clickid', 'clickId', 'CLICK_ID', 'AFF_CLICK_ID'],
+            'offer_id': ['offer_id', 'offerid', 'offerId', 'OFFER_ID'],
+            'channel_id': ['channel_id', 'sub_affid', 'channelid', 'channelId', 'CHANNEL_ID', 'SUB_AFFID'],
+            'publisher_id': ['publisher_id', 'publisherid', 'publisherId', 'PUBLISHER_ID'],
+        }
+        
         for key, value in request_params.items():
             key_lower = key.lower()
             # 检查这个参数是否对应某个占位符参数
-            is_placeholder_param = False
-            for param_name, possible_names in placeholder_params_to_check.items():
+            corresponding_param_name = None
+            for param_name, possible_names in param_name_mapping.items():
                 if key_lower in [name.lower() for name in possible_names]:
-                    is_placeholder_param = True
+                    corresponding_param_name = param_name
                     break
             
-            # 如果这个参数不是占位符参数，或者占位符参数没有被跳过（即需要添加），则添加
-            if not is_placeholder_param or key_lower in request_params_with_click:
-                request_params_with_click[key_lower] = value
-            else:
-                logger.debug(f"[参数合并] 跳过请求参数 {key_lower}，因为对应的占位符参数已被跳过")
+            # 如果这个参数对应某个占位符参数，且原始URL中已包含该占位符，则跳过
+            if corresponding_param_name and has_placeholder.get(corresponding_param_name, False):
+                logger.debug(f"[参数合并] 跳过请求参数 {key_lower}，因为原始URL中已包含 {corresponding_param_name} 占位符")
+                continue
+            
+            # 否则添加该参数
+            request_params_with_click[key_lower] = value
         
         logger.info(
             f"[参数合并] 准备合并的参数: request_params_with_click={request_params_with_click}"
