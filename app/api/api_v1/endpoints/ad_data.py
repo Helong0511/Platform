@@ -326,18 +326,23 @@ async def get_ad_data(
         except (ValueError, Exception) as e:
             logger.warning(f"解构数据失败: {str(e)}, row={row}")
             continue
-        # 使用数据库字段中的比率（如果为空则计算）
-        coverage_rate = ad_data.coverage_rate if ad_data.coverage_rate is not None else round(
-            (ad_data.match_count / ad_data.request_count * 100) if ad_data.request_count > 0 else 0.0,
-            2
+        # 使用统一的比率计算函数
+        from app.core.utils import calculate_coverage_rate, calculate_display_rate, calculate_click_rate
+        
+        coverage_rate = calculate_coverage_rate(
+            ad_data.match_count,
+            ad_data.request_count,
+            ad_data.coverage_rate
         )
-        display_rate = ad_data.display_rate if ad_data.display_rate is not None else round(
-            (ad_data.display_count / ad_data.match_count * PERCENTAGE_MULTIPLIER) if ad_data.match_count > 0 else 0.0,
-            2
+        display_rate = calculate_display_rate(
+            ad_data.display_count,
+            ad_data.match_count,
+            ad_data.display_rate
         )
-        click_rate = ad_data.click_rate if ad_data.click_rate is not None else round(
-            (ad_data.click_count / ad_data.display_count * PERCENTAGE_MULTIPLIER) if ad_data.display_count > 0 else 0.0,
-            2
+        click_rate = calculate_click_rate(
+            ad_data.click_count,
+            ad_data.display_count,
+            ad_data.click_rate
         )
         viewability_rate = ad_data.viewability_rate if ad_data.viewability_rate is not None else 0.0
 
@@ -1169,18 +1174,23 @@ async def get_ad_data_detail(
             detail=f"查询广告数据失败：{str(e)}。请稍后重试或联系管理员"
         )
 
-        # 使用数据库字段中的比率（如果为空则计算）
-        coverage_rate = ad_data.coverage_rate if ad_data.coverage_rate is not None else round(
-            (ad_data.match_count / ad_data.request_count * PERCENTAGE_MULTIPLIER) if ad_data.request_count > 0 else 0.0,
-            2
-        )
-        display_rate = ad_data.display_rate if ad_data.display_rate is not None else round(
-            (ad_data.display_count / ad_data.match_count * PERCENTAGE_MULTIPLIER) if ad_data.match_count > 0 else 0.0,
-            2
-        )
-        click_rate = ad_data.click_rate if ad_data.click_rate is not None else round(
-            (ad_data.click_count / ad_data.display_count * PERCENTAGE_MULTIPLIER) if ad_data.display_count > 0 else 0.0,
-        2
+    # 使用统一的比率计算函数
+    from app.core.utils import calculate_coverage_rate, calculate_display_rate, calculate_click_rate
+    
+    coverage_rate = calculate_coverage_rate(
+        ad_data.match_count,
+        ad_data.request_count,
+        ad_data.coverage_rate
+    )
+    display_rate = calculate_display_rate(
+        ad_data.display_count,
+        ad_data.match_count,
+        ad_data.display_rate
+    )
+    click_rate = calculate_click_rate(
+        ad_data.click_count,
+        ad_data.display_count,
+        ad_data.click_rate
     )
 
     # 将 DateTime 转换为 date

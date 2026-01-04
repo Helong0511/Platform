@@ -10,6 +10,7 @@ from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.middleware import get_device_type
 from app.core.config import settings
+from app.core.constants import PERCENTAGE_MULTIPLIER
 
 # 应用时区配置（从统一配置读取）
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
@@ -384,6 +385,81 @@ def unpack_ad_data_query_result(
         else:
             # 数据不完整
             raise ValueError(f"数据不完整，期望至少4个对象，实际得到{len(row)}个")
+
+
+def calculate_coverage_rate(
+    match_count: int | float,
+    request_count: int | float,
+    stored_rate: float | None = None,
+    decimals: int = 2
+) -> float:
+    """
+    计算覆盖率（匹配率）= 匹配数/请求数 * 100
+    
+    Args:
+        match_count: 匹配数
+        request_count: 请求数
+        stored_rate: 存储的比率值（如果存在则优先使用）
+        decimals: 小数位数（默认为2）
+    
+    Returns:
+        覆盖率（百分比）
+    """
+    if stored_rate is not None:
+        return round(stored_rate, decimals)
+    if request_count > 0:
+        return round((match_count / request_count * PERCENTAGE_MULTIPLIER), decimals)
+    return 0.0
+
+
+def calculate_display_rate(
+    display_count: int | float,
+    match_count: int | float,
+    stored_rate: float | None = None,
+    decimals: int = 2
+) -> float:
+    """
+    计算展示率 = 展示数/匹配数 * 100
+    
+    Args:
+        display_count: 展示数
+        match_count: 匹配数
+        stored_rate: 存储的比率值（如果存在则优先使用）
+        decimals: 小数位数（默认为2）
+    
+    Returns:
+        展示率（百分比）
+    """
+    if stored_rate is not None:
+        return round(stored_rate, decimals)
+    if match_count > 0:
+        return round((display_count / match_count * PERCENTAGE_MULTIPLIER), decimals)
+    return 0.0
+
+
+def calculate_click_rate(
+    click_count: int | float,
+    display_count: int | float,
+    stored_rate: float | None = None,
+    decimals: int = 2
+) -> float:
+    """
+    计算点击率 = 点击数/展示数 * 100
+    
+    Args:
+        click_count: 点击数
+        display_count: 展示数
+        stored_rate: 存储的比率值（如果存在则优先使用）
+        decimals: 小数位数（默认为2）
+    
+    Returns:
+        点击率（百分比）
+    """
+    if stored_rate is not None:
+        return round(stored_rate, decimals)
+    if display_count > 0:
+        return round((click_count / display_count * PERCENTAGE_MULTIPLIER), decimals)
+    return 0.0
 
 
 def build_import_message(

@@ -87,11 +87,11 @@ async def archive_old_ad_data(months: int = 6) -> dict:
 
             if not table_exists:
                 # 创建归档表
-                # 注意：ARCHIVE 引擎只支持一个索引，所以不能使用 CREATE TABLE ... LIKE
-                # 需要手动创建表结构，只保留主键索引
                 logger.info("归档表不存在，正在创建...")
+                
                 # 创建归档表，结构与主表完全一致
                 # 注意：country_code 字段类型与主表保持一致（varchar(2)）
+                # 使用不同的外键约束名称和索引名称，避免与主表冲突
                 create_table_sql = text("""
                                         CREATE TABLE `ad_data_archive`
                                         (
@@ -110,18 +110,72 @@ async def archive_old_ad_data(months: int = 6) -> dict:
                                             `created_at`            datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
                                             `updated_at`            datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
                                             PRIMARY KEY (`id`) USING BTREE,
-                                            UNIQUE INDEX `uq_ad_data_date_product_country`(`date` ASC, `product_id` ASC, `country_code` ASC) USING BTREE,
-                                            INDEX                   `idx_ad_data_date`(`date` ASC) USING BTREE,
-                                            INDEX                   `idx_ad_data_product`(`product_id` ASC) USING BTREE,
-                                            INDEX                   `idx_ad_data_date_product`(`date` ASC, `product_id` ASC) USING BTREE,
-                                            INDEX                   `idx_ad_data_country_code`(`country_code` ASC) USING BTREE,
-                                            CONSTRAINT `fk_ad_data_country_code` FOREIGN KEY (`country_code`) REFERENCES `countries` (`alpha_2_code`) ON DELETE SET NULL ON UPDATE CASCADE,
-                                            CONSTRAINT `fk_ad_data_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+                                            UNIQUE INDEX `uq_ad_data_archive_date_product_country`(`date` ASC, `product_id` ASC, `country_code` ASC) USING BTREE,
+                                            INDEX                   `idx_ad_data_archive_date`(`date` ASC) USING BTREE,
+                                            INDEX                   `idx_ad_data_archive_product`(`product_id` ASC) USING BTREE,
+                                            INDEX                   `idx_ad_data_archive_date_product`(`date` ASC, `product_id` ASC) USING BTREE,
+                                            INDEX                   `idx_ad_data_archive_country_code`(`country_code` ASC) USING BTREE,
+                                            CONSTRAINT `fk_ad_data_archive_country_code` FOREIGN KEY (`country_code`) REFERENCES `countries` (`alpha_2_code`) ON DELETE SET NULL ON UPDATE CASCADE,
+                                            CONSTRAINT `fk_ad_data_archive_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
                                         ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = DYNAMIC COMMENT = '广告数据归档表';
                                         """)
                 await db.execute(create_table_sql)
                 await db.commit()
                 logger.info("归档表创建成功")
+            else:
+                # 表已存在，检查是否需要修复约束（如果之前创建失败导致约束名称冲突）
+                logger.debug("归档表已存在，检查约束...")
+                try:
+                    # 检查是否有冲突的约束名称
+                    check_constraints_sql = text("""
+                        SELECT CONSTRAINT_NAME 
+                        FROM information_schema.TABLE_CONSTRAINTS 
+                        WHERE TABLE_SCHEMA = DATABASE() 
+                          AND TABLE_NAME = 'ad_data_archive'
+                          AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+                          AND (CONSTRAINT_NAME = 'fk_ad_data_product' 
+                               OR CONSTRAINT_NAME = 'fk_ad_data_country_code')
+                    """)
+                    constraints_result = await db.execute(check_constraints_sql)
+                    conflicting_constraints = [row[0] for row in constraints_result.all()]
+                    
+                    if conflicting_constraints:
+                        logger.warning(f"发现冲突的外键约束: {conflicting_constraints}，尝试修复...")
+                        # 删除冲突的约束
+                        for constraint_name in conflicting_constraints:
+                            try:
+                                drop_sql = text(f"ALTER TABLE `ad_data_archive` DROP FOREIGN KEY `{constraint_name}`")
+                                await db.execute(drop_sql)
+                                logger.info(f"已删除冲突的外键约束: {constraint_name}")
+                            except Exception as e:
+                                logger.warning(f"删除约束失败: {constraint_name}, {e}")
+                        
+                        # 重新添加正确命名的约束
+                        if 'fk_ad_data_product' in conflicting_constraints:
+                            add_fk_product_sql = text("""
+                                ALTER TABLE `ad_data_archive` 
+                                ADD CONSTRAINT `fk_ad_data_archive_product` 
+                                FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) 
+                                ON DELETE CASCADE ON UPDATE RESTRICT
+                            """)
+                            await db.execute(add_fk_product_sql)
+                            logger.info("已添加正确命名的外键约束: fk_ad_data_archive_product")
+                        
+                        if 'fk_ad_data_country_code' in conflicting_constraints:
+                            add_fk_country_sql = text("""
+                                ALTER TABLE `ad_data_archive` 
+                                ADD CONSTRAINT `fk_ad_data_archive_country_code` 
+                                FOREIGN KEY (`country_code`) REFERENCES `countries` (`alpha_2_code`) 
+                                ON DELETE SET NULL ON UPDATE CASCADE
+                            """)
+                            await db.execute(add_fk_country_sql)
+                            logger.info("已添加正确命名的外键约束: fk_ad_data_archive_country_code")
+                        
+                        await db.commit()
+                        logger.info("约束修复完成")
+                except Exception as e:
+                    logger.debug(f"检查/修复约束时出错: {e}")
+                    await db.rollback()
 
             # 统计要归档的数据量
             count_sql = text("""
