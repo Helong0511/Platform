@@ -636,6 +636,14 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         request: 请求对象
         exc: HTTPException 异常对象
     """
+    # 首先检查异常上下文是否是流异常（连接已断开）
+    # 如果是，直接抛出流异常，不尝试创建响应
+    if hasattr(exc, '__context__') and exc.__context__:
+        context_exc = exc.__context__
+        if _is_stream_error(context_exc):
+            logger.debug("HTTPException的上下文是流异常，连接已断开，跳过响应创建")
+            raise context_exc
+    
     # 如果 detail 已经是标准格式（字典，包含 code 字段），说明是通过 raise_api_exception 抛出的
     # 此时应该使用 exc.status_code（已经在 raise_api_exception 中正确设置）
     if isinstance(exc.detail, dict) and "code" in exc.detail:
@@ -696,18 +704,26 @@ async def global_exception_handler(request: Request, exc: Exception):
         if _is_stream_error(exc):
             raise exc
         
+        # 尝试检查连接状态（通过检查异常上下文）
+        # 如果异常上下文是流异常，说明连接已断开，直接抛出流异常
+        if hasattr(exc, '__context__') and exc.__context__:
+            context_exc = exc.__context__
+            if _is_stream_error(context_exc):
+                logger.debug("检测到连接断开上下文，跳过HTTPException处理")
+                raise context_exc
+        
         # 检查连接是否已断开
         try:
             _raise_stream_error_if_disconnected(request)
-        except Exception:
-            pass
-        
-        # 尝试检查连接状态（通过检查异常上下文）
-        if hasattr(exc, '__context__') and exc.__context__ and _is_stream_error(exc.__context__):
-            logger.debug("检测到连接断开上下文，跳过HTTPException处理")
-            raise exc.__context__
+        except Exception as stream_exc:
+            # 如果检测到连接断开，抛出流异常
+            if _is_stream_error(stream_exc):
+                logger.debug("检测到连接已断开，跳过HTTPException处理")
+                raise stream_exc
+            # 其他异常，忽略（继续处理HTTPException）
         
         # 如果连接仍然有效，重新抛出 HTTPException 让专门的处理器处理
+        # 但需要捕获可能的流异常
         try:
             raise exc
         except Exception as e:
