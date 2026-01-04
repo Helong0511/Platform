@@ -913,6 +913,176 @@ async def redirect_short_link_public(
     from app.api.api_v1.endpoints.tracking import create_click_background
     from app.models.models import Click
     from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
+    from sqlalchemy.future import select
+    
+    async def _replace_short_link_placeholders(
+        original_url: str,
+        click_id: str,
+        offer_id: Optional[int],
+        publisher_id: Optional[int],
+        advertiser_id: Optional[int],
+        request_info: dict,
+        db: AsyncSession
+    ) -> str:
+        """
+        替换短链接原始URL中的占位符
+        
+        支持的占位符：
+        - {click_id}: 点击ID
+        - {offer_id}: Offer ID
+        - {publisher_id} 或 {channel_id}: 渠道ID
+        - {advertiser_id}: 广告主ID
+        - {ip}: IP地址
+        - {os}: 操作系统
+        - {device_type}: 设备类型
+        - {country}: 国家（如果有）
+        - 以及其他支持的占位符
+        
+        Args:
+            original_url: 原始URL（可能包含占位符）
+            click_id: 点击ID
+            offer_id: Offer ID（可选）
+            publisher_id: 渠道ID（可选）
+            advertiser_id: 广告主ID（可选）
+            request_info: 请求信息字典
+            db: 数据库会话
+            
+        Returns:
+            替换后的URL
+        """
+        import re
+        from urllib.parse import quote
+        
+        # 使用正则表达式查找所有占位符
+        pattern = r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}'
+        placeholders = re.findall(pattern, original_url)
+        
+        if not placeholders:
+            # 没有占位符，直接返回原 URL
+            return original_url
+        
+        # 构建参数值字典
+        values = {}
+        
+        # 基础字段
+        values['click_id'] = click_id
+        values['ip'] = request_info.get('ip', '')
+        values['os'] = request_info.get('os', '')
+        values['device_type'] = request_info.get('device_type', '')
+        values['country'] = request_info.get('country', '')
+        values['user_agent'] = request_info.get('user_agent', '')
+        values['referer'] = request_info.get('referer', '')
+        
+        # Offer、Publisher、Advertiser 字段
+        if offer_id:
+            values['offer_id'] = str(offer_id)
+            # 查询 Offer 详细信息
+            try:
+                from app.models.models import Offer
+                offer_result = await db.execute(
+                    select(Offer).where(Offer.id == offer_id)
+                )
+                offer = offer_result.scalars().first()
+                if offer:
+                    values['offer_name'] = offer.offer_name or ''
+                    values['advertiser_offer_id'] = offer.advertiser_offer_id or ''
+                    values['offer_payout'] = str(offer.payout) if offer.payout is not None else ''
+                    values['affiliate_payout'] = str(offer.affiliate_payout) if offer.affiliate_payout is not None else ''
+                    values['offer_country'] = offer.country or ''
+                    values['offer_category'] = offer.category or ''
+                    values['offer_type'] = offer.type or ''
+                    values['offer_status'] = offer.status or ''
+            except Exception as e:
+                logger.warning(f"查询Offer信息失败: offer_id={offer_id}, error={e}")
+        else:
+            values['offer_id'] = ''
+            values['offer_name'] = ''
+            values['advertiser_offer_id'] = ''
+        
+        if publisher_id:
+            values['publisher_id'] = str(publisher_id)
+            values['channel_id'] = str(publisher_id)  # 别名
+            # 查询 Publisher 详细信息
+            try:
+                from app.models.models import Publisher
+                publisher_result = await db.execute(
+                    select(Publisher).where(Publisher.id == publisher_id)
+                )
+                publisher = publisher_result.scalars().first()
+                if publisher:
+                    values['publisher_name'] = publisher.publisher_name or ''
+                    values['publisher_email'] = publisher.email or ''
+            except Exception as e:
+                logger.warning(f"查询Publisher信息失败: publisher_id={publisher_id}, error={e}")
+        else:
+            values['publisher_id'] = ''
+            values['channel_id'] = ''
+            values['publisher_name'] = ''
+            values['publisher_email'] = ''
+        
+        if advertiser_id:
+            values['advertiser_id'] = str(advertiser_id)
+            # 查询 Advertiser 详细信息
+            try:
+                from app.models.models import Advertiser
+                advertiser_result = await db.execute(
+                    select(Advertiser).where(Advertiser.id == advertiser_id)
+                )
+                advertiser = advertiser_result.scalars().first()
+                if advertiser:
+                    values['advertiser_name'] = advertiser.advertiser_name or ''
+                    values['advertiser_email'] = advertiser.email or ''
+            except Exception as e:
+                logger.warning(f"查询Advertiser信息失败: advertiser_id={advertiser_id}, error={e}")
+        else:
+            values['advertiser_id'] = ''
+            values['advertiser_name'] = ''
+            values['advertiser_email'] = ''
+        
+        # 支持别名（转换为小写加下划线格式）
+        alias_map = {
+            'clickid': 'click_id',
+            'clickId': 'click_id',
+            'clk_id': 'click_id',
+            'cid': 'click_id',
+            'publisherId': 'publisher_id',
+            'channelId': 'channel_id',
+            'offerId': 'offer_id',
+        }
+        
+        # 替换占位符
+        result_url = original_url
+        for placeholder in placeholders:
+            # 转换为小写加下划线格式
+            normalized_key = placeholder.lower()
+            if normalized_key in alias_map:
+                normalized_key = alias_map[normalized_key]
+            else:
+                # 将驼峰命名转换为下划线命名
+                normalized_key = re.sub(r'(?<!^)(?=[A-Z])', '_', placeholder).lower()
+            
+            # 获取值
+            value = values.get(normalized_key, '')
+            
+            # 如果值为空，保持占位符不变（或者可以替换为空字符串）
+            if not value:
+                logger.debug(
+                    f"占位符 {{{placeholder}}} 对应的值为空，保持占位符不变: url={original_url[:100]}"
+                )
+                continue
+            
+            # URL 编码值（保留 URL 中常用的安全字符，如 : / ? = & 等）
+            if isinstance(value, str):
+                # 对于字符串值，进行 URL 编码（保留一些安全字符）
+                encoded_value = quote(value, safe='')
+            else:
+                # 对于非字符串值，先转换为字符串再编码
+                encoded_value = quote(str(value), safe='')
+            
+            # 替换占位符（使用原始占位符名称，支持大小写敏感）
+            result_url = result_url.replace(f'{{{placeholder}}}', encoded_value)
+        
+        return result_url
     
     def merge_url_params(base_url: str, query_params: dict) -> str:
         """
@@ -1190,6 +1360,28 @@ async def redirect_short_link_public(
                     exc_info=True
                 )
             
+            # 替换原始URL中的占位符（在合并查询参数之前）
+            original_url = await _replace_short_link_placeholders(
+                original_url=original_url,
+                click_id=click_id,
+                offer_id=final_offer_id,
+                publisher_id=final_channel_id,
+                advertiser_id=advertiser_id,
+                request_info=request_info,
+                db=db
+            )
+            
+            # 替换原始URL中的占位符（在合并查询参数之前）
+            original_url = await _replace_short_link_placeholders(
+                original_url=original_url,
+                click_id=click_id,
+                offer_id=final_offer_id,
+                publisher_id=final_channel_id,
+                advertiser_id=advertiser_id,
+                request_info=request_info,
+                db=db
+            )
+            
             # 将click_id添加到查询参数的最前面
             request_params_with_click = {'click_id': click_id}
             # 将原有参数添加到后面
@@ -1406,6 +1598,17 @@ async def redirect_short_link_public(
                 f"[短链接重定向] 点击计数失败（数据库路径）: short_code={short_code}, click_id={click_id}, error={e}",
                 exc_info=True
             )
+        
+        # 替换原始URL中的占位符（在合并查询参数之前）
+        original_url = await _replace_short_link_placeholders(
+            original_url=original_url,
+            click_id=click_id,
+            offer_id=final_offer_id,
+            publisher_id=final_channel_id,
+            advertiser_id=advertiser_id,
+            request_info=request_info,
+            db=db
+        )
         
         # 将click_id添加到查询参数的最前面
         request_params_with_click = {'click_id': click_id}
