@@ -414,7 +414,7 @@ async def create_offer(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """创建Offer（仅管理员）"""
+    """创建Offer（已重构使用服务层）"""
     # 验证广告主是否存在
     adv_result = await db.execute(
         select(Advertiser).where(Advertiser.id == offer_in.advertiser_id)
