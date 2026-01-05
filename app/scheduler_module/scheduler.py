@@ -247,13 +247,11 @@ async def _execute_task_with_lock_internal(
         import os
         worker_pid = os.getpid()
         
-        logger.info(f"[Worker PID:{worker_pid}] 任务 '{task_name}' 开始执行（进程ID: {CURRENT_PID}, 主机: {CURRENT_HOST}）")
-        
-        start_msg = (
+        # 只记录一次任务开始执行的日志
+        logger.info(
             f"[Worker PID:{worker_pid}] 任务 '{task_name}' 开始执行 "
             f"（进程ID: {CURRENT_PID}, 主机: {CURRENT_HOST}）"
         )
-        logger.info(start_msg)
 
         # 执行任务
         try:

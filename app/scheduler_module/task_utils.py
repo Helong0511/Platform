@@ -41,11 +41,11 @@ def log_task_start(task_name: str, additional_info: Optional[str] = None) -> Non
     timezone_info = f"（时区: {settings.TIMEZONE}）"
     
     if additional_info:
+        # 只记录一次，使用info级别（定时任务调度器会记录执行结果）
         logger.info(f"{task_name} 开始执行 - {current_time_str}{timezone_info} - {additional_info}")
-        logger.warning(f"[定时任务执行] {task_name} 开始执行 - {current_time_str}{timezone_info} - {additional_info}")
     else:
+        # 只记录一次，使用info级别（定时任务调度器会记录执行结果）
         logger.info(f"{task_name} 开始执行 - {current_time_str}{timezone_info}")
-        logger.warning(f"[定时任务执行] {task_name} 开始执行 - {current_time_str}{timezone_info}")
 
 
 def log_task_result(task_name: str, result_summary: str, level: str = "info") -> None:

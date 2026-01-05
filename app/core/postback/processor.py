@@ -249,15 +249,17 @@ class PostbackProcessor:
                     if updated:
                         await db.commit()
                         await db.refresh(existing_record)
+                        # 已更新数据，只记录一次日志
                         logger.info(
                             f"平台 {final_platform} postback 转化已存在，已根据 click_id 更新数据: "
                             f"conversion_id={conversion_id}, event_name={event_name}"
                         )
-                
-                logger.info(
-                    f"平台 {final_platform} postback 转化已存在，跳过重复处理: "
-                    f"conversion_id={conversion_id}, event_name={event_name}"
-                )
+                    else:
+                        # 未更新数据，记录跳过日志
+                        logger.info(
+                            f"平台 {final_platform} postback 转化已存在，跳过重复处理: "
+                            f"conversion_id={conversion_id}, event_name={event_name}"
+                        )
                 return {
                     "success": True,
                     "message": "PostBack 接收成功（已存在，跳过重复处理）",
@@ -472,6 +474,7 @@ class PostbackProcessor:
                 )
             
             # 9. 异步发送通知（按客户和产品）
+            # 注意：notify_conversion 内部已处理异常并记录日志，这里不需要重复记录
             try:
                 await PostbackNotifier.notify_conversion(
                     conversion=conversion,
@@ -480,9 +483,10 @@ class PostbackProcessor:
                     client=None   # 将在通知函数中查询
                 )
             except Exception as e:
-                # 通知失败不影响主流程
-                logger.warning(
-                    f"发送转化通知失败: conversion_id={conversion_id}, "
+                # 只有在 notify_conversion 内部未捕获的异常才记录（通常不会发生）
+                # 内部异常已在 notify_conversion 中记录，这里只记录未预期的异常
+                logger.debug(
+                    f"通知函数调用异常（内部应已记录）: conversion_id={conversion_id}, "
                     f"error={str(e)}"
                 )
             

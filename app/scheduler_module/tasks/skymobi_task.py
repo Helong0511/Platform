@@ -56,9 +56,8 @@ async def skymobi_api_task(
     app_time = datetime.now(APP_TIMEZONE)
     current_time_str = app_time.strftime("%Y-%m-%d %H:%M:%S")
 
-    # 记录任务开始执行的日志
+    # 记录任务开始执行的日志（只记录一次）
     logger.info(f"{SKYMOBI_API_TASK_NAME} 开始执行 - {current_time_str}（时区: {settings.TIMEZONE}）")
-    logger.warning(f"[定时任务执行] {SKYMOBI_API_TASK_NAME} 开始执行 - {current_time_str}（时区: {settings.TIMEZONE}）")
 
     try:
         # ============================================
