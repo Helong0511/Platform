@@ -10,7 +10,7 @@ class PublisherBase(BaseModel):
     """渠道基础模型"""
     publisher_name: str = Field(..., max_length=100, description="渠道名称")
     email: Optional[str] = Field(None, max_length=255, description="邮箱（可选）")
-    price_discount: float = Field(0.0, ge=0, le=100, description="渠道级别的价格扣量比例（0-100）")
+    price_discount: float = Field(0.0, ge=0, le=100, description="渠道级别的价格折扣比例（0-100），用于旧价格折扣系统，计算给渠道的最终金额")
     postback_url: Optional[str] = Field(None, description="Postback URL（可选）")
     postback_method: str = Field('GET', description="Postback请求方式：GET/POST")
     client_id: Optional[int] = Field(None, description="关联的客户ID（可选）")
@@ -26,7 +26,7 @@ class PublisherUpdate(BaseModel):
     """更新渠道"""
     publisher_name: Optional[str] = Field(None, max_length=100, description="渠道名称")
     email: Optional[str] = Field(None, max_length=255, description="邮箱")
-    price_discount: Optional[float] = Field(None, ge=0, le=100, description="扣量比例")
+    price_discount: Optional[float] = Field(None, ge=0, le=100, description="价格折扣比例（0-100），用于旧价格折扣系统")
     postback_url: Optional[str] = Field(None, description="Postback URL")
     postback_method: Optional[str] = Field(None, description="Postback请求方式：GET/POST")
     client_id: Optional[int] = Field(None, description="关联的客户ID（可选）")

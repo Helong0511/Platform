@@ -58,9 +58,10 @@
           </template>
         </el-table-column>
         <el-table-column prop="email" label="邮箱" min-width="80" />
-        <el-table-column prop="price_discount" label="扣量比例" width="120" align="center">
+        <el-table-column prop="price_discount" label="价格折扣" width="120" align="center">
           <template #default="scope">
-            <el-tag type="warning">{{ scope.row.price_discount }}%</el-tag>
+            <el-tag v-if="scope.row.price_discount > 0" type="info">{{ scope.row.price_discount }}%</el-tag>
+            <span v-else style="color: #909399;">-</span>
           </template>
         </el-table-column>
         <el-table-column prop="postback_url" label="Postback URL" min-width="400" show-overflow-tooltip>
@@ -133,7 +134,7 @@
         <el-form-item label="邮箱" prop="email">
           <el-input v-model="formData.email" placeholder="请输入邮箱（可选）" />
         </el-form-item>
-        <el-form-item label="扣量比例" prop="price_discount">
+        <el-form-item label="价格折扣" prop="price_discount">
           <el-input-number
             v-model="formData.price_discount"
             :min="0"
@@ -142,7 +143,14 @@
             placeholder="0-100"
             style="width: 100%;"
           />
-          <div class="form-hint">渠道级别的价格扣量比例（0-100）</div>
+          <div class="form-hint">
+            <strong>价格折扣说明：</strong>渠道级别的价格折扣比例（0-100），用于计算给渠道的最终金额（affiliate_payout）。
+            <br>
+            <span style="color: #E6A23C;">
+              <el-icon><Warning /></el-icon>
+              <strong>注意：</strong>此字段为旧价格折扣系统，建议使用"扣减配置管理"页面配置更灵活的扣减规则（支持扣量和扣金额）。
+            </span>
+          </div>
         </el-form-item>
         <el-form-item label="Postback URL" prop="postback_url">
           <el-input
@@ -254,7 +262,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Refresh, Edit, Delete, Connection, InfoFilled } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, Edit, Delete, Connection, InfoFilled, Warning } from '@element-plus/icons-vue'
 import { getPublishers, createPublisher, updatePublisher, deletePublisher } from '@/api/publisher'
 import { getClientList } from '@/api/client'
 import { logger } from '@/utils/logger'
@@ -444,8 +452,8 @@ const formRules = {
     { required: true, message: '请输入渠道名称', trigger: 'blur' }
   ],
   price_discount: [
-    { required: true, message: '请输入扣量比例', trigger: 'blur' },
-    { type: 'number', min: 0, max: 100, message: '扣量比例必须在0-100之间', trigger: 'blur' }
+    { required: true, message: '请输入价格折扣', trigger: 'blur' },
+    { type: 'number', min: 0, max: 100, message: '价格折扣必须在0-100之间', trigger: 'blur' }
   ],
   postback_url: [
     { validator: validatePostbackUrlPlaceholders, trigger: 'blur' }
