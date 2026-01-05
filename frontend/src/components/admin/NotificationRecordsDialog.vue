@@ -33,6 +33,7 @@
               <el-option label="Telegram" value="telegram" />
               <el-option label="邮箱" value="email" />
               <el-option label="短信" value="sms" />
+              <el-option label="Webhook" value="webhook" />
             </el-select>
           </el-form-item>
           <el-form-item>
@@ -100,8 +101,10 @@ import { formatDate as formatDateWithTimezone } from '../../utils/dateFormat';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
+  conversionId: { type: Number, default: null },
   clientId: { type: Number, default: null },
-  productId: { type: Number, default: null }
+  productId: { type: Number, default: null },
+  publisherId: { type: Number, default: null }
 });
 
 const emit = defineEmits(['update:modelValue']);
@@ -134,8 +137,15 @@ const loadRecords = async () => {
       page_size: pagination.pageSize,
       ...filters
     };
-    if (props.clientId) params.client_id = props.clientId;
-    if (props.productId) params.product_id = props.productId;
+    // 优先使用 conversionId（最精确的过滤）
+    if (props.conversionId) {
+      params.conversion_id = props.conversionId;
+    } else {
+      // 如果没有 conversionId，使用其他过滤条件
+      if (props.clientId) params.client_id = props.clientId;
+      if (props.productId) params.product_id = props.productId;
+      if (props.publisherId) params.publisher_id = props.publisherId;
+    }
     
     const result = await getNotificationRecords(params);
     records.value = result.data || [];
@@ -178,7 +188,8 @@ const getChannelLabel = (channel) => {
   const labels = {
     telegram: 'Telegram',
     email: '邮箱',
-    sms: '短信'
+    sms: '短信',
+    webhook: 'Webhook'
   };
   return labels[channel] || channel;
 };
@@ -219,8 +230,8 @@ watch(visible, (val) => {
   }
 });
 
-// 监听 clientId 和 productId 变化，重新加载数据
-watch([() => props.clientId, () => props.productId], () => {
+// 监听 props 变化，重新加载数据
+watch([() => props.conversionId, () => props.clientId, () => props.productId, () => props.publisherId], () => {
   if (visible.value) {
     // 如果对话框已打开，参数变化时重新加载数据
     pagination.page = 1;

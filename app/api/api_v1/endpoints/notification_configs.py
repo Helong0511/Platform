@@ -355,10 +355,13 @@ async def delete_product_notification_config(
 async def get_notification_records(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
+    conversion_id: Optional[int] = Query(None, description="转化记录ID过滤"),
     client_id: Optional[int] = Query(None, description="客户ID过滤"),
     product_id: Optional[int] = Query(None, description="产品ID过滤"),
+    publisher_id: Optional[int] = Query(None, description="渠道ID过滤"),
     notification_status: Optional[str] = Query(None, description="通知状态过滤（sent, failed, pending）"),
-    notification_channel: Optional[str] = Query(None, description="通知渠道过滤（telegram, email, sms）"),
+    notification_channel: Optional[str] = Query(None, description="通知渠道过滤（telegram, email, sms, webhook）"),
+    notification_type: Optional[str] = Query(None, description="通知类型过滤（conversion, high_value, error, forward）"),
     start_date: Optional[str] = Query(None, description="开始日期（YYYY-MM-DD）"),
     end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
     db: AsyncSession = Depends(get_db),
@@ -382,17 +385,27 @@ async def get_notification_records(
     # 应用过滤条件
     conditions = []
     
+    # 优先使用 conversion_id 过滤（最精确）
+    if conversion_id:
+        conditions.append(PostbackNotification.conversion_id == conversion_id)
+    
     if client_id:
         conditions.append(PostbackNotification.client_id == client_id)
     
     if product_id:
         conditions.append(PostbackNotification.product_id == product_id)
     
+    if publisher_id:
+        conditions.append(PostbackNotification.publisher_id == publisher_id)
+    
     if notification_status:
         conditions.append(PostbackNotification.notification_status == notification_status)
     
     if notification_channel:
         conditions.append(PostbackNotification.notification_channel == notification_channel)
+    
+    if notification_type:
+        conditions.append(PostbackNotification.notification_type == notification_type)
     
     if start_date:
         try:

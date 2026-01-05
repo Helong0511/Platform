@@ -465,8 +465,10 @@
     <!-- 通知记录对话框 -->
     <NotificationRecordsDialog
       v-model="notificationRecordsVisible"
+      :conversion-id="selectedConversionId"
       :client-id="selectedClientId"
       :product-id="selectedProductId"
+      :publisher-id="selectedPublisherId"
       @update:modelValue="handleNotificationDialogClose"
     />
   </div>
@@ -523,8 +525,10 @@ const currentConversion = ref(null);
 
 // 通知记录对话框
 const notificationRecordsVisible = ref(false);
+const selectedConversionId = ref(null);
 const selectedClientId = ref(null);
 const selectedProductId = ref(null);
+const selectedPublisherId = ref(null);
 
 // 补发通知状态
 const resendingNotifications = ref({});
@@ -627,15 +631,20 @@ const handleViewDetail = (row) => {
 
 // 查看通知记录（全部）
 const showNotificationRecords = () => {
+  selectedConversionId.value = null;
   selectedClientId.value = null;
   selectedProductId.value = null;
+  selectedPublisherId.value = null;
   notificationRecordsVisible.value = true;
 };
 
-// 查看指定转化的通知记录
+// 查看指定转化的通知记录（对应当前行数据）
 const handleViewNotifications = (row) => {
+  // 优先使用转化记录ID（最精确）
+  selectedConversionId.value = row.id || null;
   selectedClientId.value = row.client_id || null;
   selectedProductId.value = row.product_id || null;
+  selectedPublisherId.value = null; // 可以从 row 中获取 publisher_id 如果有的话
   notificationRecordsVisible.value = true;
 };
 
@@ -644,8 +653,10 @@ const handleNotificationDialogClose = (val) => {
   notificationRecordsVisible.value = val;
   // 对话框关闭时，重置过滤条件
   if (!val) {
+    selectedConversionId.value = null;
     selectedClientId.value = null;
     selectedProductId.value = null;
+    selectedPublisherId.value = null;
   }
 };
 
