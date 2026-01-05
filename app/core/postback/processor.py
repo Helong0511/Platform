@@ -275,7 +275,33 @@ class PostbackProcessor:
                 normalized_data["ip"] = request_ip
             
             # 7.5. CPL 系统：进行 Cap/扣量检查（广告主信息已在上面获取）
-            original_payout = normalized_data.get("payout")  # 原始 payout (PO)
+            # 从标准化数据中获取 payout，如果不存在则尝试从原始数据中获取（支持多种字段名）
+            original_payout = normalized_data.get("payout")
+            if original_payout is None:
+                # 尝试从原始数据中获取（支持多种字段名：payout, PayOut, pay_out 等）
+                original_payout = (
+                    raw_data.get("payout") or
+                    raw_data.get("PayOut") or
+                    raw_data.get("pay_out") or
+                    raw_data.get("pay-out") or
+                    raw_data.get("Pay_Out") or
+                    raw_data.get("Payout") or
+                    raw_data.get("PAYOUT")
+                )
+                # 如果是字符串，尝试转换为浮点数
+                if original_payout is not None and isinstance(original_payout, str):
+                    try:
+                        original_payout = float(original_payout)
+                    except (ValueError, TypeError):
+                        original_payout = None
+                # 如果找到了，更新到 normalized_data 中
+                if original_payout is not None:
+                    normalized_data["payout"] = original_payout
+                    logger.debug(
+                        f"从原始数据中提取 payout: conversion_id={conversion_id}, "
+                        f"original_payout={original_payout}"
+                    )
+            
             final_payout = original_payout  # 扣后 payout (PO(扣))，初始值等于原始值
             discount_info = None
             
@@ -439,6 +465,13 @@ class PostbackProcessor:
                 f"product_id={product_id}, client_id={client_id}, "
                 f"click_id={click_id}, offer_id={offer_id}"
             )
+            
+            # 如果 original_payout 为 None，记录警告
+            if original_payout is None:
+                logger.warning(
+                    f"警告：转化记录缺少原始 payout (PO): conversion_id={conversion_id}, "
+                    f"platform={platform}, raw_data_keys={list(raw_data.keys())}"
+                )
             
             # 9. 异步发送通知（按客户和产品）
             try:

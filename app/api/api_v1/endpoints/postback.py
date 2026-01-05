@@ -777,7 +777,20 @@ async def receive_postback_get(
         event_value_float = _to_float(event_value)
         if event_value_float is not None:
             raw_data["event_value"] = event_value_float
+        
+        # 处理 payout（支持多种字段名：payout, PayOut, pay_out 等）
         payout_float = _to_float(payout)
+        if payout_float is None:
+            # 尝试从查询参数中获取其他字段名
+            query_params = dict(request.query_params)
+            payout_float = (
+                _to_float(query_params.get("PayOut")) or
+                _to_float(query_params.get("pay_out")) or
+                _to_float(query_params.get("pay-out")) or
+                _to_float(query_params.get("Pay_Out")) or
+                _to_float(query_params.get("Payout")) or
+                _to_float(query_params.get("PAYOUT"))
+            )
         if payout_float is not None:
             raw_data["payout"] = payout_float
         if devad_id:

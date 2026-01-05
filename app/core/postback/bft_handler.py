@@ -78,11 +78,22 @@ class BftPostbackHandler(PostbackHandler):
         # 处理 event_name（可能以不同字段名出现）
         event_name = data.get("event_name") or data.get("event_id")
         
+        # 处理 payout（支持多种字段名：payout, PayOut, pay_out, pay-out 等）
+        payout = (
+            data.get("payout") or
+            data.get("PayOut") or
+            data.get("pay_out") or
+            data.get("pay-out") or
+            data.get("Pay_Out") or
+            data.get("Payout") or
+            data.get("PAYOUT")
+        )
+        
         normalized = {
             "conversion_id": str(conversion_id).strip() if conversion_id else None,
             "event_name": str(event_name).strip() if event_name else None,
             "event_value": self._to_float(data.get("event_value")),
-            "payout": self._to_float(data.get("payout")),
+            "payout": self._to_float(payout),
             "devad_id": self._to_str(data.get("devad_id")),
             "os": self._to_str(data.get("os")),
             "carrier": self._to_str(data.get("carrier")),
