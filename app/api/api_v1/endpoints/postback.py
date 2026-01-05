@@ -709,8 +709,8 @@ async def receive_postback_get(
     gid: Optional[str] = Query(None, description="渠道ID"),
     product_id: Optional[str] = Query(None, description="产品ID（字符串格式，会自动转换为整数）"),
     client_id: Optional[str] = Query(None, description="客户ID（字符串格式，会自动转换为整数）"),
-    # Macan 特定参数（兼容性）
-    clk_id: Optional[str] = Query(None, description="Macan click ID（兼容参数）"),
+    # BFT 特定参数（兼容性）
+    clk_id: Optional[str] = Query(None, description="BFT click ID（兼容参数）"),
     click_id: Optional[str] = Query(None, description="Click ID（兼容参数）"),
     event_id: Optional[str] = Query(None, description="Event ID（兼容参数）"),
 ):
@@ -805,7 +805,7 @@ async def receive_postback_get(
         if client_id_int is not None:
             raw_data["client_id"] = client_id_int
         
-        # 处理 Macan 特定参数（兼容性）
+        # 处理 BFT 特定参数（兼容性）
         if clk_id:
             raw_data["clk_id"] = clk_id
         if click_id:
