@@ -123,7 +123,7 @@ def should_skip_csrf_check(request: Request) -> bool:
     1. 安全方法（GET, HEAD, OPTIONS, TRACE）
     2. 登录接口（使用JWT，不需要CSRF）
     3. 客户API接口（使用签名验证，不需要CSRF）
-    4. Macan S2S PostBack接口（外部回调接口，使用参数验证，不需要CSRF）
+    4. BFT S2S PostBack接口（外部回调接口，使用参数验证，不需要CSRF）
     5. 静态资源
     """
     path = request.url.path
@@ -144,9 +144,9 @@ def should_skip_csrf_check(request: Request) -> bool:
     if path == "/api/v1/client_products" or path == "/api/v1/client_data":
         return True
     
-    # Macan S2S PostBack接口（外部回调接口，使用参数验证，不需要CSRF）
-    if path == "/api/v1/macan/postback":
-        logger.debug(f"跳过CSRF检查（Macan PostBack接口）: {method} {path}")
+    # BFT S2S PostBack接口（外部回调接口，使用参数验证，不需要CSRF）
+    if path == "/api/v1/bft/postback" or path.startswith("/api/v1/postback/"):
+        logger.debug(f"跳过CSRF检查（BFT PostBack接口）: {method} {path}")
         return True
     
     # 客户端错误记录接口（用于记录前端错误，即使失败也不应影响用户体验，跳过CSRF检查）
@@ -201,9 +201,9 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             logger.info(f"跳过CSRF检查（登录接口）: {method} {path}")
             return await call_next(request)
         
-        # Macan S2S PostBack接口（外部回调接口，不需要CSRF）
-        if path == "/api/v1/macan/postback":
-            logger.debug(f"跳过CSRF检查（Macan PostBack接口）: {method} {path}")
+        # BFT S2S PostBack接口（外部回调接口，不需要CSRF）
+        if path == "/api/v1/bft/postback" or path.startswith("/api/v1/postback/"):
+            logger.debug(f"跳过CSRF检查（BFT PostBack接口）: {method} {path}")
             return await call_next(request)
         
         # 客户端错误记录接口（用于记录前端错误，即使失败也不应影响用户体验，跳过CSRF检查）

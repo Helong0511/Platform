@@ -10,7 +10,7 @@
             <span class="stat-value">{{ stat.total_conversions || 0 }}</span>
             <span class="stat-unit">条转化</span>
             <span class="stat-separator">|</span>
-            <span class="stat-label">总金额 (PO(扣))：</span>
+            <span class="stat-label">{{ isAdmin ? '总金额 (PayOut(扣))' : '总金额 (PayOut)' }}：</span>
             <span class="stat-value">{{ formatCurrency(stat.total_payout || 0) }}</span>
           </span>
         </div>
@@ -28,7 +28,7 @@
         <el-form-item label="平台">
           <el-select v-model="searchForm.platform" placeholder="全部" clearable style="width: 150px;" name="platform" popper-class="select-dropdown" :teleported="true">
             <el-option label="全部" value=""></el-option>
-            <el-option label="Macan" value="macan"></el-option>
+            <el-option label="BFT" value="bft"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="事件名称">
@@ -108,12 +108,12 @@
                 <span class="stat-label">总转化数：</span>
                 <span class="stat-value">{{ stat.total_conversions || 0 }}</span>
               </div>
-              <div class="stat-row" v-if="stat.total_original_payout">
+              <div class="stat-row" v-if="isAdmin && stat.total_original_payout">
                 <span class="stat-label">PayOut：</span>
                 <span class="stat-value">{{ formatCurrency(stat.total_original_payout || 0) }}</span>
               </div>
               <div class="stat-row">
-                <span class="stat-label">PayOut(扣)：</span>
+                <span class="stat-label">{{ isAdmin ? 'PayOut(扣)' : 'PayOut' }}：</span>
                 <span class="stat-value highlight">{{ formatCurrency(stat.total_payout || 0) }}</span>
               </div>
               <div class="stat-row">
@@ -210,7 +210,7 @@
             {{ scope.row.event_value ? formatCurrency(scope.row.event_value) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="original_payout" label="原始支付金额 (PO)" width="150" align="right">
+        <el-table-column v-if="isAdmin" prop="original_payout" label="PayOut" width="150" align="right">
           <template #default="scope">
             <span v-if="scope.row.original_payout">
               {{ formatCurrency(scope.row.original_payout) }}
@@ -218,7 +218,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="payout" label="扣后支付金额 (PO(扣))" width="150" align="right">
+        <el-table-column prop="payout" :label="isAdmin ? 'PayOut(扣)' : 'PayOut'" width="150" align="right">
           <template #default="scope">
             <span class="highlight" v-if="scope.row.payout">
               {{ formatCurrency(scope.row.payout) }}
@@ -368,13 +368,13 @@
           <el-descriptions-item label="事件价值">
             {{ currentConversion.event_value ? formatCurrency(currentConversion.event_value) : '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="PayOut">
+          <el-descriptions-item v-if="isAdmin" label="PayOut">
             <span v-if="currentConversion.original_payout">
               {{ formatCurrency(currentConversion.original_payout) }}
             </span>
             <span v-else>-</span>
           </el-descriptions-item>
-          <el-descriptions-item label="PayOut(扣)">
+          <el-descriptions-item :label="isAdmin ? 'PayOut(扣)' : 'PayOut'">
             <span class="highlight" v-if="currentConversion.payout">
               {{ formatCurrency(currentConversion.payout) }}
             </span>
@@ -485,9 +485,14 @@ import { formatDateTime } from '../../utils/dateFormat';
 import { useDevice } from '../../composables/useDevice';
 import NotificationRecordsDialog from '../../components/admin/NotificationRecordsDialog.vue';
 import { resendConversionNotification, getNotificationRecords } from '../../api/notification';
+import { useAuthStore } from '../../store';
 
 // 设备检测
 const { isMobile } = useDevice();
+
+// 用户角色
+const authStore = useAuthStore();
+const isAdmin = computed(() => authStore.isAdmin);
 
 // 状态管理
 const conversions = ref([]);

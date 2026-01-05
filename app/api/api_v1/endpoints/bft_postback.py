@@ -3,7 +3,7 @@ BFT S2S PostBack 接收接口
 用于接收 BFT 发送的转化事件回调
 
 注意：此接口已优化，内部调用统一的 postback 服务进行处理
-保留此接口是为了向后兼容，建议使用 /api/v1/postback/macan 接口
+保留此接口是为了向后兼容，建议使用 /api/v1/postback/bft 接口
 
 此接口支持接收任意参数，不限制参数名称和类型
 """

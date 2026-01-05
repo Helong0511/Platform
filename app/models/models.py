@@ -486,7 +486,7 @@ class PostbackConversion(Base):
     __tablename__ = "postback_conversions"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='转化记录ID')
-    platform = Column(String(50), nullable=False, index=True, comment='平台名称：macan, addermobi等')
+    platform = Column(String(50), nullable=False, index=True, comment='平台名称：bft等')
     conversion_id = Column(String(255), nullable=False, comment='转化ID（各平台唯一标识，如clk_id）')
     event_name = Column(String(100), nullable=True, index=True, comment='事件名称')
     event_value = Column(Float, nullable=True, comment='事件价值（购买价格等）')

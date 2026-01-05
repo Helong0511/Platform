@@ -142,7 +142,7 @@
               {{ scope.row.advertiser_name || '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="original_payout" label="原始支付金额 (PO)" width="150" align="right" sortable>
+          <el-table-column v-if="isAdmin" prop="original_payout" label="PayOut" width="150" align="right" sortable>
             <template #default="scope">
               <span v-if="scope.row.original_payout" class="text-primary font-weight-medium">
                 {{ scope.row.original_payout.toFixed(2) }}
@@ -150,7 +150,7 @@
               <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="payout" label="扣后支付金额 (PO(扣))" width="150" align="right" sortable>
+          <el-table-column prop="payout" :label="isAdmin ? 'PayOut(扣)' : 'PayOut'" width="150" align="right" sortable>
             <template #default="scope">
               <span v-if="scope.row.payout" class="text-success font-weight-medium">
                 {{ scope.row.payout.toFixed(2) }}
@@ -226,6 +226,12 @@ import { getOffers } from '@/api/offer'
 import { getPublishers } from '@/api/publisher'
 import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
+import { useAuthStore } from '@/store'
+import { computed } from 'vue'
+
+// 用户角色
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.isAdmin)
 
 const loading = ref(false)
 const filterClickId = ref('')

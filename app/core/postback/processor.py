@@ -27,9 +27,7 @@ Postback统一处理器模块
 11. 发送通知：如果配置了通知，发送转化通知
 
 支持的平台：
-- macan: Macan平台
-- addermobi: AdderMobi平台
-- bft: BFT平台（向后兼容）
+- bft: BFT平台
 - 其他平台：通过处理器注册机制扩展
 
 CPL系统集成：

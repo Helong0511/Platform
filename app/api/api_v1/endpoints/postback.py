@@ -14,7 +14,6 @@ from sqlalchemy import func, and_, or_
 
 from app.core.database import get_db
 from app.core.postback import PostbackProcessor, register_handler
-from app.core.postback.macan_handler import MacanPostbackHandler
 from app.core.postback.bft_handler import BftPostbackHandler
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
@@ -36,10 +35,6 @@ from app.models.models import User, UserRole
 # 创建路由实例
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-# 注册 Macan 处理器
-macan_handler = MacanPostbackHandler()
-register_handler(macan_handler)
 
 # 注册 BFT 处理器
 bft_handler = BftPostbackHandler()
@@ -657,7 +652,7 @@ async def receive_postback_post(
     接收指定平台的 PostBack 回调（POST 方式）
     
     支持的平台：
-    - macan: Macan S2S PostBack
+    - bft: BFT S2S PostBack
     
     参数说明：
     - platform: 平台名称（路径参数）
@@ -723,7 +718,7 @@ async def receive_postback_get(
     接收指定平台的 PostBack 回调（GET 方式）
     
     支持的平台：
-    - macan: Macan S2S PostBack
+    - bft: BFT S2S PostBack
     
     参数说明：
     - platform: 平台名称（路径参数）
