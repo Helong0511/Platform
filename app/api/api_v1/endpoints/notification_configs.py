@@ -18,8 +18,10 @@ from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import parse_date_to_app_timezone
 from app.models.models import (
     Client, Product, User, UserRole,
-    ClientNotificationConfig, ProductNotificationConfig, PostbackNotification
+    ClientNotificationConfig, ProductNotificationConfig, PostbackNotification,
+    PostbackConversion
 )
+from app.core.utils import get_app_now_naive
 from app.schemas.notification import (
     ClientNotificationConfigCreate,
     ClientNotificationConfigUpdate,
@@ -445,6 +447,91 @@ async def get_notification_records(
     # 执行查询
     result = await db.execute(query)
     notifications = result.scalars().all()
+    
+    # 如果指定了 conversion_id 且没有找到通知记录，检查是否真的没有任何通知记录
+    # 注意：这里需要检查不考虑其他过滤条件的情况
+    if conversion_id and total == 0:
+        # 检查该转化记录是否真的没有任何通知记录（不考虑其他过滤条件）
+        check_query = select(func.count(PostbackNotification.id)).where(
+            PostbackNotification.conversion_id == conversion_id
+        )
+        # 如果是客户用户，添加客户ID限制
+        if current_user.role != UserRole.ADMIN and current_user.client_id:
+            check_query = check_query.where(PostbackNotification.client_id == current_user.client_id)
+        
+        check_result = await db.execute(check_query)
+        existing_count = check_result.scalar() or 0
+        
+        # 如果确实没有任何通知记录，自动创建一个
+        if existing_count == 0:
+        try:
+            # 查询转化记录
+            conversion_result = await db.execute(
+                select(PostbackConversion).where(PostbackConversion.id == conversion_id)
+            )
+            conversion = conversion_result.scalars().first()
+            
+            if conversion:
+                # 构建通知消息
+                # 注意：payout 使用扣后的 payout（给下游的实际金额）
+                notification_message = f"转化记录通知\n\n"
+                notification_message += f"转化ID: {conversion.conversion_id}\n"
+                notification_message += f"平台: {conversion.platform}\n"
+                if conversion.event_name:
+                    notification_message += f"事件: {conversion.event_name}\n"
+                
+                # 优先显示扣后的 payout（给下游的实际金额）
+                if conversion.payout is not None:
+                    notification_message += f"金额 (PO): ${conversion.payout:.2f}\n"
+                elif conversion.original_payout is not None:
+                    # 如果没有扣后的 payout，使用原始的 payout
+                    notification_message += f"金额 (PO): ${conversion.original_payout:.2f}\n"
+                
+                # 原始金额作为参考（如果与扣后金额不同）
+                if conversion.original_payout is not None and conversion.payout is not None:
+                    if conversion.original_payout != conversion.payout:
+                        notification_message += f"原始金额 (PO): ${conversion.original_payout:.2f}\n"
+                
+                if conversion.created_at:
+                    time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                    notification_message += f"时间: {time_str}\n"
+                
+                # 创建通知记录
+                new_notification = PostbackNotification(
+                    conversion_id=conversion.id,
+                    client_id=conversion.client_id,
+                    product_id=conversion.product_id,
+                    publisher_id=None,  # 转化通知不关联渠道
+                    notification_type='conversion',
+                    notification_channel='telegram',  # 默认渠道
+                    notification_status='pending',  # 待发送状态
+                    notification_message=notification_message,
+                    auto_notify=False,  # 手动通知
+                    postback_url=None,
+                    created_at=get_app_now_naive()
+                )
+                
+                db.add(new_notification)
+                await db.commit()
+                await db.refresh(new_notification)
+                
+                # 将新创建的通知记录添加到结果中
+                notifications = [new_notification]
+                total = 1
+                
+                logger.info(
+                    f"自动创建通知记录: conversion_id={conversion_id}, "
+                    f"notification_id={new_notification.id}"
+                )
+            else:
+                logger.warning(f"转化记录不存在: conversion_id={conversion_id}")
+        except Exception as e:
+            logger.error(
+                f"自动创建通知记录失败: conversion_id={conversion_id}, error={str(e)}",
+                exc_info=True
+            )
+            # 创建失败不影响查询结果，继续返回空列表
+            await db.rollback()
     
     return PaginatedResponseBaseSchema.success(
         data=[PostbackNotificationResponse.model_validate(n) for n in notifications],

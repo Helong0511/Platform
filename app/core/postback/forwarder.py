@@ -415,6 +415,7 @@ class PostbackForwarder:
         构建转发给下游的数据
         
         将转化记录转换为字典格式，用于转发给下游系统
+        注意：payout 字段使用扣后的 payout（PO(扣)），这是给下游的实际金额
         """
         data = {
             "conversion_id": conversion.conversion_id,
@@ -425,10 +426,17 @@ class PostbackForwarder:
         # 添加可选字段（如果存在）
         if conversion.event_value is not None:
             data["event_value"] = conversion.event_value
-        if conversion.original_payout is not None:
-            data["original_payout"] = conversion.original_payout
+        
+        # payout 字段使用扣后的 payout（给下游的实际金额）
         if conversion.payout is not None:
             data["payout"] = conversion.payout
+        elif conversion.original_payout is not None:
+            # 如果没有扣后的 payout，使用原始的 payout
+            data["payout"] = conversion.original_payout
+        
+        # original_payout 作为参考字段（可选）
+        if conversion.original_payout is not None:
+            data["original_payout"] = conversion.original_payout
         if conversion.devad_id:
             data["devad_id"] = conversion.devad_id
         if conversion.os:
@@ -545,8 +553,16 @@ class PostbackForwarder:
             values['platform'] = conversion.platform
             values['event_name'] = conversion.event_name if conversion.event_name else ''
             values['event_value'] = str(conversion.event_value) if conversion.event_value is not None else ''
+            # payout 使用扣后的 payout（给下游的实际金额）
+            if conversion.payout is not None:
+                values['payout'] = str(conversion.payout)
+            elif conversion.original_payout is not None:
+                # 如果没有扣后的 payout，使用原始的 payout
+                values['payout'] = str(conversion.original_payout)
+            else:
+                values['payout'] = ''
+            # original_payout 作为参考字段
             values['original_payout'] = str(conversion.original_payout) if conversion.original_payout is not None else ''
-            values['payout'] = str(conversion.payout) if conversion.payout is not None else ''
             values['devad_id'] = conversion.devad_id if conversion.devad_id else ''
             values['os'] = conversion.os if conversion.os else ''
             values['carrier'] = conversion.carrier if conversion.carrier else ''
