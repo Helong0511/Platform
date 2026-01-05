@@ -657,23 +657,29 @@ class PostbackNotification(Base):
     conversion_id = Column(Integer, ForeignKey("postback_conversions.id", ondelete="CASCADE"), nullable=False, index=True, comment='转化记录ID')
     client_id = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, index=True, comment='客户ID')
     product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True, index=True, comment='产品ID')
-    notification_type = Column(String(50), nullable=True, comment='通知类型：conversion, high_value, error')
-    notification_channel = Column(String(50), nullable=False, comment='通知渠道：telegram, email, sms')
+    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="SET NULL"), nullable=True, index=True, comment='渠道ID（转发通知时使用）')
+    notification_type = Column(String(50), nullable=True, comment='通知类型：conversion, high_value, error, forward')
+    notification_channel = Column(String(50), nullable=False, comment='通知渠道：telegram, email, sms, webhook')
     notification_status = Column(String(20), default='pending', index=True, comment='通知状态：sent, failed, pending')
     notification_message = Column(Text, nullable=True, comment='通知消息内容')
     error_message = Column(Text, nullable=True, comment='错误信息（如果失败）')
+    auto_notify = Column(Boolean, default=False, index=True, comment='是否自动通知（True=自动通知，False=手动通知）')
+    postback_url = Column(Text, nullable=True, comment='Postback URL（转发通知时使用）')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
 
     # 关系
     conversion = relationship("PostbackConversion", foreign_keys=[conversion_id])
     client = relationship("Client", foreign_keys=[client_id])
     product = relationship("Product", foreign_keys=[product_id])
+    publisher = relationship("Publisher", foreign_keys=[publisher_id])
 
     __table_args__ = (
         Index("idx_postback_notification_conversion", "conversion_id"),
         Index("idx_postback_notification_client", "client_id"),
         Index("idx_postback_notification_product", "product_id"),
+        Index("idx_postback_notification_publisher", "publisher_id"),
         Index("idx_postback_notification_status", "notification_status"),
+        Index("idx_postback_notification_auto_notify", "auto_notify"),
         Index("idx_postback_notification_created_at", "created_at"),
     )
 

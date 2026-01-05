@@ -16,7 +16,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 
 from app.models.models import (
-    Product, PostbackConversion, PostbackForwardLog,
+    Product, PostbackConversion, PostbackForwardLog, PostbackNotification,
     ClickStats, Click, Offer, Publisher, Advertiser
 )
 from app.core.utils import get_app_now_naive
@@ -95,18 +95,68 @@ class PostbackForwarder:
                     # Click 表可能不存在或数据已清理，忽略错误
                     logger.debug(f"无法从 Click 表加载数据: {e}")
         
-        # 2. 如果没有找到 Publisher 或 Publisher 没有配置 Postback URL，则不转发
-        if not publisher or not publisher.postback_url:
-            if not publisher:
-                logger.debug(
-                    f"未找到关联的渠道，跳过转发: conversion_id={conversion.id}, "
-                    f"click_id={conversion.click_id}"
+        # 2. 如果没有找到 Publisher，创建通知记录后返回
+        if not publisher:
+            logger.debug(
+                f"未找到关联的渠道，跳过转发: conversion_id={conversion.id}, "
+                f"click_id={conversion.click_id}"
+            )
+            # 即使没有找到 Publisher，也创建通知记录（用于后续手动通知）
+            try:
+                notification_record = PostbackNotification(
+                    conversion_id=conversion.id,
+                    publisher_id=None,  # 没有找到 Publisher
+                    notification_type='forward',
+                    notification_channel='webhook',
+                    notification_status='pending',
+                    notification_message=f"未找到关联的渠道，无法转发: click_id={conversion.click_id}",
+                    auto_notify=False,  # 没有 postback_url，只能手动通知
+                    postback_url=None,
+                    created_at=get_app_now_naive()
                 )
-            else:
-                logger.debug(
-                    f"渠道未配置 Postback URL，跳过转发: conversion_id={conversion.id}, "
-                    f"publisher_id={publisher.id}"
-                )
+                db.add(notification_record)
+                await db.commit()
+            except Exception as e:
+                logger.error(f"创建转发通知记录失败: {str(e)}", exc_info=True)
+                await db.rollback()
+            return
+        
+        # 2.1. 无论是否有 postback_url，都创建通知记录
+        has_postback_url = bool(publisher.postback_url and publisher.postback_url.strip())
+        
+        # 构建通知消息
+        notification_message = PostbackForwarder._build_forward_notification_message(
+            conversion=conversion,
+            publisher=publisher,
+            offer=offer,
+            has_postback_url=has_postback_url
+        )
+        
+        # 创建通知记录（无论是否有 postback_url）
+        notification_record = PostbackNotification(
+            conversion_id=conversion.id,
+            publisher_id=publisher.id,
+            notification_type='forward',
+            notification_channel='webhook',
+            notification_status='pending',  # 初始状态为 pending
+            notification_message=notification_message,
+            auto_notify=has_postback_url,  # 如果有 postback_url，默认自动通知
+            postback_url=publisher.postback_url if has_postback_url else None,
+            created_at=get_app_now_naive()
+        )
+        db.add(notification_record)
+        
+        # 如果没有配置 Postback URL，保存通知记录后返回（不进行转发）
+        if not has_postback_url:
+            logger.debug(
+                f"渠道未配置 Postback URL，创建通知记录后跳过转发: conversion_id={conversion.id}, "
+                f"publisher_id={publisher.id}"
+            )
+            try:
+                await db.commit()
+            except Exception as e:
+                logger.error(f"保存转发通知记录失败: {str(e)}", exc_info=True)
+                await db.rollback()
             return
         
         downstream_url = publisher.postback_url.strip()
@@ -136,7 +186,8 @@ class PostbackForwarder:
             # 如果替换失败，使用原始 URL（可能包含未替换的占位符）
             replaced_url = downstream_url
         
-        # 4. 构建转发数据
+        # 4. 自动通知模式：执行转发（因为 has_postback_url=True，所以 auto_notify=True）
+        # 构建转发数据
         forward_data = PostbackForwarder._build_forward_data(conversion)
         
         # 5. 创建转发日志记录
@@ -169,6 +220,11 @@ class PostbackForwarder:
             forward_log.response_body = response.text[:2000]  # 限制响应内容长度
             forward_log.success = 200 <= response.status_code < 300
             forward_log.completed_at = get_app_now_naive()  # 使用北京时间
+            
+            # 更新通知记录状态
+            notification_record.notification_status = 'sent' if forward_log.success else 'failed'
+            if not forward_log.success:
+                notification_record.error_message = f"HTTP {response.status_code}: {response.text[:500]}"
             
             if forward_log.success:
                 logger.info(
@@ -217,6 +273,9 @@ class PostbackForwarder:
         except httpx.TimeoutException as e:
             forward_log.error_message = f"请求超时: {str(e)}"
             forward_log.completed_at = get_app_now_naive()  # 使用北京时间
+            # 更新通知记录状态
+            notification_record.notification_status = 'failed'
+            notification_record.error_message = f"请求超时: {str(e)}"
             logger.error(
                 f"转发 postback 到渠道超时: conversion_id={conversion.id}, "
                 f"publisher_id={publisher.id}, url={replaced_url[:100]}"
@@ -224,6 +283,9 @@ class PostbackForwarder:
         except httpx.RequestError as e:
             forward_log.error_message = f"请求错误: {str(e)}"
             forward_log.completed_at = get_app_now_naive()  # 使用北京时间
+            # 更新通知记录状态
+            notification_record.notification_status = 'failed'
+            notification_record.error_message = f"请求错误: {str(e)}"
             logger.error(
                 f"转发 postback 到渠道失败: conversion_id={conversion.id}, "
                 f"publisher_id={publisher.id}, url={replaced_url[:100]}, error={str(e)}"
@@ -231,18 +293,21 @@ class PostbackForwarder:
         except Exception as e:
             forward_log.error_message = f"未知错误: {str(e)}"
             forward_log.completed_at = get_app_now_naive()  # 使用北京时间
+            # 更新通知记录状态
+            notification_record.notification_status = 'failed'
+            notification_record.error_message = f"未知错误: {str(e)}"
             logger.error(
                 f"转发 postback 到渠道时发生异常: conversion_id={conversion.id}, "
                 f"publisher_id={publisher.id}, url={replaced_url[:100]}, error={str(e)}",
                 exc_info=True
             )
         finally:
-            # 8. 保存转发日志
+            # 8. 保存转发日志和通知记录
             db.add(forward_log)
             try:
                 await db.commit()
             except Exception as e:
-                logger.error(f"保存转发日志失败: {str(e)}", exc_info=True)
+                logger.error(f"保存转发日志和通知记录失败: {str(e)}", exc_info=True)
                 await db.rollback()
 
     @staticmethod
@@ -584,6 +649,66 @@ class PostbackForwarder:
         
         return result_url
 
+    @staticmethod
+    def _build_forward_notification_message(
+        conversion: PostbackConversion,
+        publisher: Publisher,
+        offer: Optional[Offer],
+        has_postback_url: bool
+    ) -> str:
+        """
+        构建转发通知消息
+        
+        Args:
+            conversion: 转化记录
+            publisher: 渠道对象
+            offer: Offer 对象（可选）
+            has_postback_url: 是否有 postback_url
+            
+        Returns:
+            通知消息文本
+        """
+        msg = "📤 Postback 转发通知\n\n"
+        msg += f"转化ID: {conversion.conversion_id}\n"
+        msg += f"平台: {conversion.platform}\n"
+        
+        if conversion.event_name:
+            msg += f"事件: {conversion.event_name}\n"
+        
+        if conversion.original_payout is not None:
+            msg += f"原始金额 (PO): ${conversion.original_payout:.2f}\n"
+        if conversion.payout is not None:
+            msg += f"扣后金额 (PO(扣)): ${conversion.payout:.2f}\n"
+        
+        # 渠道信息
+        msg += f"\n渠道信息:\n"
+        msg += f"• 渠道ID: {publisher.id}\n"
+        msg += f"• 渠道名称: {publisher.publisher_name}\n"
+        
+        # Offer 信息
+        if offer:
+            msg += f"\nOffer 信息:\n"
+            msg += f"• Offer ID: {offer.id}\n"
+            msg += f"• Offer 名称: {offer.offer_name}\n"
+        
+        # Postback URL 信息
+        msg += f"\n转发配置:\n"
+        if has_postback_url:
+            url_display = publisher.postback_url[:150] + "..." if len(publisher.postback_url) > 150 else publisher.postback_url
+            msg += f"• Postback URL: {url_display}\n"
+            msg += f"• 请求方式: {publisher.postback_method or 'GET'}\n"
+            msg += f"• 通知模式: 自动通知\n"
+        else:
+            msg += f"• Postback URL: 未配置\n"
+            msg += f"• 通知模式: 手动通知\n"
+        
+        # 时间戳
+        if conversion.created_at:
+            time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            msg += f"\n时间: {time_str}\n"
+        
+        return msg
+    
     @staticmethod
     async def _send_telegram_notification(
         conversion: PostbackConversion,

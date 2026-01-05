@@ -141,11 +141,14 @@ class PostbackNotificationResponse(BaseModel):
     conversion_id: int
     client_id: Optional[int] = None
     product_id: Optional[int] = None
+    publisher_id: Optional[int] = None
     notification_type: Optional[str] = None
     notification_channel: str
     notification_status: str
     notification_message: Optional[str] = None
     error_message: Optional[str] = None
+    auto_notify: bool = False
+    postback_url: Optional[str] = None
     created_at: datetime
 
     class Config:
