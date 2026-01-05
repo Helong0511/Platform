@@ -172,10 +172,10 @@ async def get_postback_conversions(
         if client_ids:
             clients_query = select(Client.id, Client.company_name, Client.user_id).where(Client.id.in_(client_ids))
             clients_result = await db.execute(clients_query)
-            # 获取用户信息以显示客户名称
-            # 先收集所有需要查询的用户ID
-            clients_result_temp = await db.execute(clients_query)
-            user_ids = list(set([row.user_id for row in clients_result_temp.all() if row.user_id]))
+            # 获取所有客户数据（一次性获取，避免重复查询）
+            clients_data = list(clients_result.all())
+            # 收集所有需要查询的用户ID
+            user_ids = list(set([row.user_id for row in clients_data if row.user_id]))
             users_map = {}
             if user_ids:
                 users_query = select(User.id, User.full_name, User.username).where(User.id.in_(user_ids))
@@ -183,9 +183,8 @@ async def get_postback_conversions(
                 for row in users_result.all():
                     users_map[row.id] = row.full_name or row.username
             
-            # 重新查询客户（因为上面的查询结果已经被消费）
-            clients_result = await db.execute(clients_query)
-            for row in clients_result.all():
+            # 使用已获取的客户数据（避免重复查询）
+            for row in clients_data:
                 # 优先使用公司名称，如果没有则使用用户全名
                 client_name = row.company_name
                 if not client_name and row.user_id and row.user_id in users_map:

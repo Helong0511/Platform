@@ -743,6 +743,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     # 记录详细的错误信息（包括堆栈跟踪）
     # 注意：RequestLoggingMiddleware 已经记录了简要异常信息，这里记录完整堆栈跟踪
     error_message = str(exc)
+    error_type = type(exc).__name__
     logger.error(
         f"未处理的异常: {request.method} {request.url.path} | 错误类型: {error_type} | 错误: {error_message}",
         exc_info=True
