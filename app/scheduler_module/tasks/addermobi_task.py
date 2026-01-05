@@ -348,9 +348,8 @@ async def addermobi_api_task(
                                 skipped=skipped_count,
                                 error=error_count
                             )
+                            # 只记录一次，使用info级别（定时任务调度器会记录执行结果）
                             logger.info(f"数据导入完成: {result_summary}")
-                            # 使用warning级别确保日志可见
-                            logger.warning(f"[定时任务执行] 数据导入完成: {result_summary}")
 
                             # 发送 Telegram 通知（仅在成功导入或更新数据时）
                             if inserted_count > 0 or updated_count > 0:

@@ -401,9 +401,8 @@ export const handleApiError = (error, defaultMessage = '操作失败', options =
         const errorMsg = extractErrorMessage(error) || defaultMessage;
         ElMessage.error(errorMsg);
       } catch (e) {
-        // 如果ElMessage导入失败，使用console
-        console.error('显示错误消息失败:', e);
-        console.error('错误信息:', extractErrorMessage(error) || defaultMessage);
+        // 如果ElMessage导入失败，使用console（只记录一次，避免重复）
+        console.error('显示错误消息失败:', e, '原始错误信息:', extractErrorMessage(error) || defaultMessage);
       }
     })();
   }

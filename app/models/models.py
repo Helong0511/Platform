@@ -111,7 +111,8 @@ class User(Base):
             
         示例:
             if user.verify_password("my_password"):
-                print("密码正确")
+                # 密码验证成功
+                pass
         """
         return pwd_context.verify(password, self.hashed_password)
 

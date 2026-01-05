@@ -129,14 +129,14 @@ async def login(
             "unread_notifications": 5
         }
     """
-    logger.info("登录API被调用，开始处理请求")
-    logger.info(f"请求方法: {request.method}, 请求路径: {request.url.path}")
-    logger.info(f"请求头: {dict(request.headers)}")
-    
-    # ====== 获取客户端IP ======
+    # 注意：请求基本信息已由 RequestLoggingMiddleware 记录，这里只记录登录相关的关键信息
     from app.core.utils import get_client_ip
+    from app.core.config import settings
     client_ip = get_client_ip(request)
-    logger.info(f"客户端IP: {client_ip}")
+    
+    # 只在开发环境记录详细请求头（生产环境可能包含敏感信息）
+    if not settings.is_production:
+        logger.debug(f"登录请求 - 方法: {request.method}, 路径: {request.url.path}, IP: {client_ip}")
 
     # ====== 查询用户 ======
     # 根据用户名查询用户（使用用户名而不是ID，因为登录时只有用户名）

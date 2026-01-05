@@ -290,17 +290,23 @@ async def _process_bft_postback(
             "未知"
         )
         
-        logger.info("=" * 80)
-        logger.info(f"BFT PostBack 请求详细信息 - clk_id: {clk_id}, event_name: {event_name}")
-        logger.info("-" * 80)
-        for key, value in request_info.items():
-            if isinstance(value, dict):
-                logger.info(f"{key}:")
-                for sub_key, sub_value in value.items():
-                    logger.info(f"  {sub_key}: {sub_value}")
-            else:
-                logger.info(f"{key}: {value}")
-        logger.info("=" * 80)
+        # 只在开发环境或需要调试时打印详细请求信息（避免生产环境日志过多）
+        from app.core.config import settings
+        if not settings.is_production:
+            logger.debug("=" * 80)
+            logger.debug(f"BFT PostBack 请求详细信息 - clk_id: {clk_id}, event_name: {event_name}")
+            logger.debug("-" * 80)
+            for key, value in request_info.items():
+                if isinstance(value, dict):
+                    logger.debug(f"{key}:")
+                    for sub_key, sub_value in value.items():
+                        logger.debug(f"  {sub_key}: {sub_value}")
+                else:
+                    logger.debug(f"{key}: {value}")
+            logger.debug("=" * 80)
+        else:
+            # 生产环境只记录关键信息
+            logger.info(f"BFT PostBack - clk_id: {clk_id}, event_name: {event_name}")
         
         # 获取客户端IP
         client_ip = _get_client_ip(request) or raw_data.get("ip")
@@ -364,7 +370,9 @@ async def _process_bft_postback(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"处理 BFT PostBack 回调时发生错误: {str(e)}", exc_info=True)
+        # 注意：外层已经记录了错误日志，这里只记录简要信息避免重复
+        # 详细错误信息由全局异常处理器记录
+        logger.warning(f"处理 BFT PostBack 回调时发生错误: {type(e).__name__}: {str(e)[:200]}")
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"处理 PostBack 回调失败：{str(e)}"

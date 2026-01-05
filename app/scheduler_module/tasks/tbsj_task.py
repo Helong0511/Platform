@@ -288,9 +288,8 @@ async def tbsj_api_task(
                                 skipped=skipped_count,
                                 error=error_count
                             )
+                            # 只记录一次，使用info级别（定时任务调度器会记录执行结果）
                             logger.info(f"数据导入完成: {result_summary}")
-                            # 使用warning级别确保日志可见
-                            logger.warning(f"[定时任务执行] 数据导入完成: {result_summary}")
 
                             # 发送 Telegram 通知（仅在成功导入或更新数据时）
                             if inserted_count > 0 or updated_count > 0:
@@ -351,11 +350,10 @@ async def tbsj_api_task(
                         logger.info(f'yangyangdeyi API获取数据完整响应内容: {json_data}')
                         raise Exception(f'API响应格式异常: 缺少state和code字段, 响应内容={str(json_data)[:200]}')
 
-                    # 记录完整的错误信息
+                    # 记录完整的错误信息（只记录一次，避免重复）
                     logger.error(f'yangyangdeyi API获取数据业务错误: {error_details}')
-                    logger.warning(f'[yangyangdeyi API获取数据 定时任务执行] API错误: {error_details}')
                     # 记录完整的响应内容（用于调试）
-                    logger.info(f'yangyangdeyi API获取数据完整响应: {json_data}')
+                    logger.debug(f'yangyangdeyi API获取数据完整响应: {json_data}')
                     # 抛出异常，让上层错误处理机制捕获
                     raise Exception(f'API错误: {error_details}')
 
@@ -375,9 +373,8 @@ async def tbsj_api_task(
 
         error_msg = f"{TBSJ_API_TASK_NAME} 执行失败: {str(e)}"
         # 记录详细错误信息（包括完整的堆栈跟踪）
+        # 注意：只记录一次，避免重复。如果业务层已记录错误，这里只记录简要信息
         logger.error(error_msg, exc_info=True)
-        # 同时使用 logger.warning 确保即使日志级别设置为 WARNING 也能看到错误信息
-        logger.warning(f"[yangyangdeyi API获取数据] {error_msg}")
 
         # 重新抛出异常，让定时任务调度器的锁机制能够记录错误状态
         # 这样可以在数据库中标记任务执行失败，便于后续排查问题

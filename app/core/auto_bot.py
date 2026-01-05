@@ -605,33 +605,35 @@ def run_bot():
                         continue
                     
                     if updates:
-                        logger.info(f"✅ 收到 {len(updates)} 个更新")
-                        # 记录更新内容（用于调试）
-                        for update in updates:
-                            if hasattr(update, 'message') and update.message:
-                                msg = update.message
-                                text = getattr(msg, 'text', '') or ''
-                                chat_id = getattr(msg.chat, 'id', '未知') if hasattr(msg, 'chat') else '未知'
-                                chat_type = getattr(msg.chat, 'type', '未知') if hasattr(msg, 'chat') else '未知'
-                                logger.info(f"📨 更新内容: update_id={update.update_id}, message_id={getattr(msg, 'message_id', '未知')}, text='{text[:50]}', chat_id={chat_id}, chat_type={chat_type}")
-                            elif hasattr(update, 'callback_query') and update.callback_query:
-                                callback = update.callback_query
-                                data = getattr(callback, 'data', '') or ''
-                                chat_id = getattr(callback.message.chat, 'id', '未知') if hasattr(callback, 'message') and callback.message else '未知'
-                                chat_type = getattr(callback.message.chat, 'type', '未知') if hasattr(callback, 'message') and callback.message and hasattr(callback.message, 'chat') else '未知'
-                                logger.info(f"📨 回调查询: update_id={update.update_id}, callback_data='{data}', chat_id={chat_id}, chat_type={chat_type}")
-                        
-                        # 处理更新
-                        logger.info("🔄 开始处理更新...")
-                        try:
-                            # 确保更新被正确处理
+                        # 只在开发环境或需要调试时记录详细更新信息
+                        from app.core.config import settings
+                        if not settings.is_production:
+                            logger.debug(f"✅ 收到 {len(updates)} 个更新")
+                            # 记录更新内容（用于调试）
                             for update in updates:
                                 if hasattr(update, 'message') and update.message:
                                     msg = update.message
                                     text = getattr(msg, 'text', '') or ''
-                                    chat_id = msg.chat.id if hasattr(msg, 'chat') else '未知'
-                                    chat_type = msg.chat.type if hasattr(msg, 'chat') and hasattr(msg.chat, 'type') else '未知'
-                                    logger.info(f"🔍 准备处理消息: text='{text}', chat_id={chat_id}, chat_type={chat_type}")
+                                    chat_id = getattr(msg.chat, 'id', '未知') if hasattr(msg, 'chat') else '未知'
+                                    chat_type = getattr(msg.chat, 'type', '未知') if hasattr(msg, 'chat') else '未知'
+                                    logger.debug(f"📨 更新内容: update_id={update.update_id}, message_id={getattr(msg, 'message_id', '未知')}, text='{text[:50]}', chat_id={chat_id}, chat_type={chat_type}")
+                                elif hasattr(update, 'callback_query') and update.callback_query:
+                                    callback = update.callback_query
+                                    data = getattr(callback, 'data', '') or ''
+                                    chat_id = getattr(callback.message.chat, 'id', '未知') if hasattr(callback, 'message') and callback.message else '未知'
+                                    chat_type = getattr(callback.message.chat, 'type', '未知') if hasattr(callback, 'message') and callback.message and hasattr(callback.message, 'chat') else '未知'
+                                    logger.debug(f"📨 回调查询: update_id={update.update_id}, callback_data='{data}', chat_id={chat_id}, chat_type={chat_type}")
+                        else:
+                            # 生产环境只记录简要信息
+                            logger.debug(f"收到 {len(updates)} 个更新")
+                        
+                        # 处理更新（不记录日志，避免重复）
+                        try:
+                            # 确保更新被正确处理
+                            for update in updates:
+                                # 处理更新（详细日志已在上面记录，这里不再重复）
+                                if hasattr(update, 'message') and update.message:
+                                    msg = update.message
                             
                             # 检查消息处理器
                             handlers_count = len(bot.message_handlers) if hasattr(bot, 'message_handlers') else 0

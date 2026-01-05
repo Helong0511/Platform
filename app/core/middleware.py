@@ -98,8 +98,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.app = app
 
     async def dispatch(self, request: Request, call_next):
-        logger.debug(f"RateLimitMiddleware处理请求: {request.method} {request.url.path}")
-        
         # ====== 排除短链接路由（不限流） ======
         # 短链接访问需要高并发支持，不能限流
         path = request.url.path
@@ -109,7 +107,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         )
         
         if is_short_link:
-            logger.debug(f"短链接路由跳过限流: {path}")
             response = await call_next(request)
             return response
         
@@ -118,7 +115,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         try:
             from app.core.utils import get_client_ip
             client_ip = get_client_ip(request)
-            logger.debug(f"获取到客户端IP: {client_ip}")
         except Exception as e:
             logger.warning(f"获取客户端IP失败: {e}，使用默认IP 'testclient'")
             client_ip = "testclient"
@@ -126,10 +122,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # ====== 检查是否为登录接口 ======
         # 登录接口使用更严格的限流策略（防止暴力破解）
         is_login = request.url.path.endswith("/login") and request.method == "POST"
-        logger.debug(f"是否为登录接口: {is_login}, 路径: {request.url.path}, 方法: {request.method}")
         limit = LOGIN_RATE_LIMIT if is_login else DEFAULT_RATE_LIMIT
         window = LOGIN_RATE_WINDOW if is_login else DEFAULT_RATE_WINDOW
-        logger.debug(f"限流配置: 限制={limit}/{window}秒")
 
         # ====== 生产环境：对敏感接口增加额外限流 ======
         if settings.is_production:
@@ -268,8 +262,7 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
                 f"耗时 {process_time:.2f}s, IP: {client_ip}"
             )
         
-        # 添加性能头
-        response.headers["X-Process-Time"] = str(round(process_time, 3))
+        # 注意：X-Process-Time 响应头由 RequestLoggingMiddleware 统一设置，避免重复
         
         return response
 
@@ -430,13 +423,15 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             return response
         except Exception as e:
             # ====== 记录异常 ======
+            # 注意：详细的异常信息会由全局异常处理器记录，这里只记录简要信息
+            # 避免重复记录完整的堆栈跟踪
             process_time = time.time() - start_time
-            logger.error(
+            # 只记录简要信息，详细错误由全局异常处理器记录
+            logger.warning(
                 f"请求异常: {method} {path} | "
-                f"错误: {str(e)} | "
+                f"错误类型: {type(e).__name__} | "
                 f"处理时间: {process_time:.3f}秒 | "
-                f"IP: {client_ip}",
-                exc_info=True
+                f"IP: {client_ip}"
             )
             raise
 
