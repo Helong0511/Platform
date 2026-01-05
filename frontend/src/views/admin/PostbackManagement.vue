@@ -109,11 +109,11 @@
                 <span class="stat-value">{{ stat.total_conversions || 0 }}</span>
               </div>
               <div class="stat-row" v-if="stat.total_original_payout">
-                <span class="stat-label">原始总支付金额 (PO)：</span>
+                <span class="stat-label">PayOut：</span>
                 <span class="stat-value">{{ formatCurrency(stat.total_original_payout || 0) }}</span>
               </div>
               <div class="stat-row">
-                <span class="stat-label">扣后总支付金额 (PO(扣))：</span>
+                <span class="stat-label">PayOut(扣)：</span>
                 <span class="stat-value highlight">{{ formatCurrency(stat.total_payout || 0) }}</span>
               </div>
               <div class="stat-row">
@@ -368,13 +368,13 @@
           <el-descriptions-item label="事件价值">
             {{ currentConversion.event_value ? formatCurrency(currentConversion.event_value) : '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="原始支付金额 (PO)">
+          <el-descriptions-item label="PayOut">
             <span v-if="currentConversion.original_payout">
               {{ formatCurrency(currentConversion.original_payout) }}
             </span>
             <span v-else>-</span>
           </el-descriptions-item>
-          <el-descriptions-item label="扣后支付金额 (PO(扣))">
+          <el-descriptions-item label="PayOut(扣)">
             <span class="highlight" v-if="currentConversion.payout">
               {{ formatCurrency(currentConversion.payout) }}
             </span>
