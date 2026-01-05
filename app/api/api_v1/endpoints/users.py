@@ -261,61 +261,28 @@ async def get_user_stats(
     - 使用缓存提升性能（缓存 5 分钟）
     """
     try:
-        # ====== 缓存优化 ======
-        from app.core.cache import get_cached, set_cached, generate_cache_key
-        cache_key = generate_cache_key("user_stats")
-        cached = await get_cached(cache_key)
-        if cached:
-            logger.debug("缓存命中: user_stats")
-            return ResponseBaseSchema.success(data=cached)
+        # 使用服务层（业务逻辑在UserService中）
+        from app.core.dependencies import get_user_service
+        from app.services.user_service import UserService
         
-        # 总用户数
-        total_result = await db.execute(select(func.count(User.id)))
-        total_users = total_result.scalar() or 0
-
-        # 按角色统计
-        admin_result = await db.execute(
-            select(func.count(User.id)).where(User.role == UserRole.ADMIN)
-        )
-        admin_count = admin_result.scalar() or 0
-
-        client_result = await db.execute(
-            select(func.count(User.id)).where(User.role == UserRole.CLIENT)
-        )
-        client_count = client_result.scalar() or 0
-
-        # 按状态统计
-        active_result = await db.execute(
-            select(func.count(User.id)).where(User.is_active == True)
-        )
-        active_count = active_result.scalar() or 0
-
-        inactive_result = await db.execute(
-            select(func.count(User.id)).where(User.is_active == False)
-        )
-        inactive_count = inactive_result.scalar() or 0
-
-        # 有客户信息的用户数
-        client_users_result = await db.execute(
-            select(func.count(func.distinct(Client.user_id)))
-        )
-        client_users_count = client_users_result.scalar() or 0
-
-        stats_data = {
-            "total_users": total_users,
-            "by_role": {
-                "admin": admin_count,
-                "client": client_count
-            },
-            "by_status": {
-                "active": active_count,
-                "inactive": inactive_count
-            },
-            "with_client_info": client_users_count
-        }
+        user_service: UserService = await get_user_service(db)
+        
+        # 使用缓存（如果服务层方法使用了@cached装饰器，会自动缓存）
+        # 这里手动使用缓存，因为服务层方法可能没有装饰器
+        from app.core.infrastructure.cache import get_cache_backend
+        cache = await get_cache_backend()
+        cache_key = "user_stats"
+        
+        cached_data = await cache.get(cache_key)
+        if cached_data:
+            logger.debug("缓存命中: user_stats")
+            return ResponseBaseSchema.success(data=cached_data)
+        
+        # 调用服务层获取统计信息
+        stats_data = await user_service.get_user_stats()
         
         # 缓存结果（缓存 5 分钟）
-        await set_cached(cache_key, stats_data, ttl=300)
+        await cache.set(cache_key, stats_data, ttl=300)
         
         return ResponseBaseSchema.success(data=stats_data)
     except Exception as e:
@@ -547,74 +514,24 @@ async def change_password(
         current_user: User = Depends(get_current_user)
 ):
     """
-    修改当前登录用户的密码
+    修改当前登录用户的密码（已重构使用服务层）
     - 需要认证（任何已登录用户都可以访问）
     - 需要验证当前密码
     - 只能修改自己的密码
     - 客户角色需要检查password_change_enabled开关
     """
-    # 如果是客户角色，检查是否允许修改密码 - 使用selectinload预加载
-    if current_user.role == UserRole.CLIENT:
-        from sqlalchemy.orm import selectinload
-        query = select(User).options(selectinload(User.clients)).where(User.id == current_user.id)
-        result = await db.execute(query)
-        user = result.scalars().unique().first()
-        client = user.clients[0] if user and user.clients else None
-        if client and not client.password_change_enabled:
-            raise_api_exception(
-                ErrorCode.FORBIDDEN,
-                detail="客户密码修改功能已被管理员禁用，请联系管理员修改密码"
-            )
+    # 使用服务层（业务逻辑在UserService中）
+    from app.core.dependencies import get_user_service
+    from app.services.user_service import UserService
     
-    # 验证当前密码
-    if not current_user.verify_password(password_data.old_password):
-        raise_api_exception(
-            ErrorCode.VALIDATION_ERROR,
-            detail="当前密码不正确，请重新输入"
-        )
-
-    # 验证新密码强度
-    from app.core.validation import validate_password_strength
-    is_valid, error_msg = validate_password_strength(password_data.new_password)
-    if not is_valid:
-        raise_api_exception(
-            ErrorCode.VALIDATION_ERROR,
-            detail=f"新密码验证失败：{error_msg}"
-        )
-
-    # 检查新密码是否与当前密码相同
-    if current_user.verify_password(password_data.new_password):
-        raise_api_exception(
-            ErrorCode.VALIDATION_ERROR,
-            detail="新密码不能与当前密码相同"
-        )
-
-    # 更新密码
-    current_user.hashed_password = current_user.get_password_hash(password_data.new_password)
-
-    # 保存到数据库
-    try:
-        await db.commit()
-        await db.refresh(current_user)
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"修改密码失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"修改密码失败：{str(e)}。请稍后重试或联系管理员"
-        )
-
-    logger.info(f"User {current_user.username} changed password")
-
-    # 记录操作日志
-    await log_update(
-        db=db,
-        user=current_user,
-        resource_type="USER",
-        resource_id=current_user.id,
-        resource_name=current_user.username,
-        request=request,
-        details={"action": "change_password"}
+    user_service: UserService = await get_user_service(db)
+    
+    # 调用服务层修改密码（服务层会处理所有验证和权限检查）
+    await user_service.change_password(
+        user_id=current_user.id,
+        old_password=password_data.old_password,
+        new_password=password_data.new_password,
+        current_user=current_user
     )
 
     return ResponseBaseSchema.success(data={"message": "密码修改成功"})
@@ -625,27 +542,60 @@ async def get_user(
         request: Request,
         user_id: int = Path(..., ge=1, description="用户ID"),
         db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(require_admin)
+        current_user: User = Depends(get_current_user)
 ):
     """
-    获取指定用户的详细信息
-    - 仅管理员可访问
+    获取指定用户的详细信息（已重构使用服务层）
+    - 管理员可访问所有用户，客户只能访问自己的信息
     - 返回用户完整信息，包括客户信息（如果用户是客户角色）
-    - 使用selectinload预加载客户信息，避免N+1查询
+    - 使用服务层，业务逻辑已优化
     """
-    # 使用selectinload预加载客户信息，避免N+1查询
-    from sqlalchemy.orm import selectinload
+    # 使用服务层（业务逻辑在UserService中）
+    from app.core.dependencies import get_user_service
+    from app.services.user_service import UserService
     
-    result = await db.execute(
-        select(User).options(selectinload(User.clients)).where(User.id == user_id)
-    )
-    user = result.scalars().unique().first()
+    user_service: UserService = await get_user_service(db)
+    user = await user_service.get_user_by_id(user_id, current_user, include_client=True)
+    
+    # 获取关联的客户信息（如果用户是客户角色）
+    client_data = None
+    api_enabled = False
+    password_change_enabled = False
+    if user.role == UserRole.CLIENT:
+        # 客户信息已通过selectinload预加载，直接访问
+        client = user.clients[0] if user.clients else None
+        if client:
+            api_enabled = client.api_enabled  # 获取API开关状态
+            password_change_enabled = client.password_change_enabled  # 获取密码修改开关状态
+            client_data = {
+                'id': client.id,
+                'key': client.key,  # 包含API密钥
+                'company_name': client.company_name,
+                'contact_person': client.contact_person,
+                'phone': client.phone,
+                'address': client.address,
+                'is_active': client.is_active,
+                'api_enabled': client.api_enabled,  # 包含API开关状态
+                'password_change_enabled': client.password_change_enabled  # 包含密码修改开关状态
+            }
 
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用户不存在"
-        )
+    # 构建用户数据（包含客户信息）
+    user_dict = {
+        'id': user.id,
+        'username': user.username,
+        'email': user.email,
+        'full_name': user.full_name,
+        'role': user.role.value if isinstance(user.role, UserRole) else str(user.role),
+        'is_active': user.is_active,
+        'created_at': user.created_at,
+        'updated_at': user.updated_at,
+        'api_enabled': api_enabled,  # API开关状态（用于前端菜单显示）
+        'password_change_enabled': password_change_enabled,  # 密码修改开关状态
+        'client': client_data  # 客户信息（如果存在）
+    }
+    user_data = UserResponse.model_validate(user_dict).model_dump()
+
+    return ResponseBaseSchema.success(data=user_data)
 
     # 获取关联的客户信息（如果用户是客户角色）- 客户信息已通过selectinload预加载
     client_data = None
@@ -729,101 +679,50 @@ async def create_user(
             detail=f"密码强度验证失败：{error_msg}"
         )
 
-    # ====== 唯一性检查 ======
-    # 优化：一次性检查用户名和邮箱是否存在，减少查询次数
-    from sqlalchemy import or_
-    conditions = [User.username == user_in.username]
-    if user_in.email:
-        conditions.append(User.email == user_in.email)
+    # 使用服务层（业务逻辑在UserService中）
+    from app.core.dependencies import get_user_service
+    from app.services.user_service import UserService
     
-    result = await db.execute(select(User).where(or_(*conditions)))
-    existing_users = result.scalars().all()
+    user_service: UserService = await get_user_service(db)
     
-    # 检查用户名是否已存在
-    username_exists = any(user.username == user_in.username for user in existing_users)
-    if username_exists:
-        raise_api_exception(
-            ErrorCode.USERNAME_TAKEN,
-            detail=f"用户名 '{user_in.username}' 已被使用，请选择其他用户名"
-        )
-
-    # 检查邮箱是否已存在
-    if user_in.email:
-        email_exists = any(user.email == user_in.email for user in existing_users)
-        if email_exists:
-            raise_api_exception(
-                ErrorCode.EMAIL_TAKEN,
-                detail=f"邮箱 '{user_in.email}' 已被使用，请使用其他邮箱地址"
-            )
-
-    # 创建用户对象
-    user = User(
-        username=user_in.username,
-        email=user_in.email,
-        full_name=user_in.full_name,
-        role=user_in.role,
-        is_active=user_in.is_active if user_in.is_active is not None else True,
-        login_restricted=user_in.login_restricted if user_in.login_restricted is not None else False,
-        login_message=user_in.login_message
-    )
-
-    # 设置密码
-    user.hashed_password = user.get_password_hash(user_in.password)
-
-    # 保存到数据库（使用事务确保数据一致性）
-    try:
-        db.add(user)
-        # 先刷新用户对象以获取 user.id（flush 但不提交，仍在同一事务中）
-        await db.flush()
-        await db.refresh(user)
-
-        # 如果提供了客户信息，同时创建客户（在同一事务中）
-        if user_in.company_name:
-            # 检查该用户是否已有客户关联 - 优化：只查询是否存在
-            result = await db.execute(select(func.count(Client.id)).where(Client.user_id == user.id))
-            client_exists = (result.scalar() or 0) > 0
-            if client_exists:
-                logger.warning(f"User {user.username} already has a client associated")
-            else:
-                # 创建客户对象（在同一事务中，此时 user.id 已经有值）
-                client = Client(
-                    user_id=user.id,  # 现在 user.id 已经有值了
-                    key=str(uuid.uuid4()),  # 生成UUID作为key字段的默认值
-                    company_name=user_in.company_name,
-                    contact_person=user_in.contact_person,
-                    phone=user_in.phone,
-                    address=user_in.address,
-                    is_active=user_in.is_active if user_in.is_active is not None else True
-                )
-                db.add(client)
-
-        # 注意：不需要手动提交事务，get_db 依赖会自动处理
-        # 刷新对象以获取最新数据（在自动提交之前）
-        await db.flush()
-        await db.refresh(user)
-
-        # 如果创建了客户，刷新客户对象以获取完整信息（包括key）
-        if user_in.company_name:
-            # 优化：使用selectinload预加载客户信息，避免额外查询
-            from sqlalchemy.orm import selectinload
-            user_query = select(User).options(selectinload(User.clients)).where(User.id == user.id)
-            user_result = await db.execute(user_query)
-            user_with_clients = user_result.scalars().unique().first()
-            if user_with_clients and user_with_clients.clients:
-                client = user_with_clients.clients[0]
-                await db.refresh(client)
-            logger.info(f"User {user.username} and client created successfully")
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"创建用户失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"创建用户失败：{str(e)}。请检查数据格式或联系管理员"
-        )
-
-    logger.info(f"User {user.username} created by {current_user.username}")
-
-    # 记录创建操作
+    # 准备用户数据（包含客户信息，如果提供）
+    user_data = user_in.model_dump()
+    if user_in.company_name:
+        user_data['company_name'] = user_in.company_name
+        user_data['contact_person'] = user_in.contact_person
+        user_data['phone'] = user_in.phone
+        user_data['address'] = user_in.address
+    
+    # 调用服务层创建用户（服务层会处理唯一性检查和客户创建）
+    user = await user_service.create_user(user_data, current_user)
+    
+    # 构建响应数据
+    user_dict = {
+        'id': user.id,
+        'username': user.username,
+        'email': user.email,
+        'full_name': user.full_name,
+        'role': user.role.value if isinstance(user.role, UserRole) else str(user.role),
+        'is_active': user.is_active,
+        'created_at': user.created_at,
+        'updated_at': user.updated_at
+    }
+    
+    # 如果创建了客户，添加客户信息到响应中（包括API密钥）
+    if user.clients:
+        client = user.clients[0]
+        user_dict['client'] = {
+            'id': client.id,
+            'key': client.key,  # 包含API密钥
+            'company_name': client.company_name,
+            'contact_person': client.contact_person,
+            'phone': client.phone,
+            'address': client.address,
+            'is_active': client.is_active
+        }
+    
+    # 记录创建操作（使用audit_log的log_create函数）
+    from app.core.audit_log import log_create
     await log_create(
         db=db,
         user=current_user,
@@ -839,33 +738,6 @@ async def create_user(
         }
     )
 
-    # 确保 role 转换为字符串
-    user_dict = {
-        'id': user.id,
-        'username': user.username,
-        'email': user.email,
-        'full_name': user.full_name,
-        'role': user.role.value if isinstance(user.role, UserRole) else str(user.role),
-        'is_active': user.is_active,
-        'created_at': user.created_at,
-        'updated_at': user.updated_at
-    }
-
-    # 如果创建了客户，添加客户信息到响应中（包括API密钥）
-    if user_in.company_name:
-        result = await db.execute(select(Client).where(Client.user_id == user.id))
-        client = result.scalars().first()
-        if client:
-            user_dict['client'] = {
-                'id': client.id,
-                'key': client.key,  # 包含API密钥
-                'company_name': client.company_name,
-                'contact_person': client.contact_person,
-                'phone': client.phone,
-                'address': client.address,
-                'is_active': client.is_active
-            }
-
     return ResponseBaseSchema.success(data=UserResponse.model_validate(user_dict))
 
 
@@ -879,140 +751,29 @@ async def update_user(
         current_user: User = Depends(require_admin)
 ):
     """
-    更新用户信息
+    更新用户信息（已重构使用服务层）
     - 仅管理员可访问
     - 可更新用户角色、状态和登录限制
     - 支持密码更新
     """
-    # 获取用户
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalars().first()
-
-    if not user:
-        raise_api_exception(
-            ErrorCode.USER_NOT_FOUND,
-            detail=f"用户ID {user_id} 不存在"
-        )
-
+    # 使用服务层（业务逻辑在UserService中）
+    from app.core.dependencies import get_user_service
+    from app.services.user_service import UserService
+    
+    user_service: UserService = await get_user_service(db)
+    
     # 获取更新数据（排除未设置的字段）
     update_data = user_in.model_dump(exclude_unset=True)
-
-    # 防止修改自己为非管理员
-    if user.id == current_user.id and "role" in update_data:
-        role_value = update_data.get("role")
-        if role_value and role_value != UserRole.ADMIN.value:
-            raise_api_exception(
-                ErrorCode.CANNOT_MODIFY_SELF_ROLE,
-                detail="不能将自己的角色修改为非管理员。如需修改角色，请联系其他管理员操作"
-            )
-
-    # 优化：一次性检查新用户名和邮箱是否存在，减少查询次数
-    from sqlalchemy import or_
-    conditions = []
-    new_username = None
-    new_email = None
     
-    if "username" in update_data and update_data.get("username") != user.username:
-        new_username = update_data.get("username")
-        if new_username:
-            conditions.append(User.username == new_username)
+    # 调用服务层更新用户（服务层会处理所有验证、权限检查和审计日志）
+    user = await user_service.update_user(user_id, update_data, current_user)
     
-    if "email" in update_data and update_data.get("email") != user.email:
-        new_email = update_data.get("email")
-        if new_email:
-            conditions.append(User.email == new_email)
-    
-    if conditions:
-        result = await db.execute(select(User).where(or_(*conditions)))
-        existing_users = result.scalars().all()
-        
-        # 检查用户名是否已存在（如果修改了用户名）
-        if new_username:
-            username_exists = any(u.username == new_username for u in existing_users)
-            if username_exists:
-                raise_api_exception(
-                    ErrorCode.USERNAME_TAKEN,
-                    detail=f"用户名 '{new_username}' 已被使用，请选择其他用户名"
-                )
-
-    # 检查邮箱是否已存在（如果修改了邮箱）
-        if new_email:
-            email_exists = any(u.email == new_email for u in existing_users)
-            if email_exists:
-                raise_api_exception(
-                    ErrorCode.EMAIL_TAKEN,
-                    detail=f"邮箱 '{new_email}' 已被使用，请使用其他邮箱地址"
-                )
-
-    # 如果更新密码
-    if "password" in update_data and update_data["password"]:
-        user.hashed_password = user.get_password_hash(update_data["password"])
-        del update_data["password"]
-
-    # 处理 role 字段（如果是字符串，需要转换为枚举）
-    if "role" in update_data and update_data["role"]:
-        role_value = update_data["role"]
-        if isinstance(role_value, str):
-            try:
-                update_data["role"] = UserRole(role_value)
-            except ValueError:
-                raise_api_exception(
-                    ErrorCode.VALIDATION_ERROR,
-                    detail=f"无效的角色值：{role_value}。支持的角色：admin, client"
-                )
-
-    # 检查 is_active 是否改变（用于记录激活/禁用日志）
-    old_is_active = user.is_active
-    is_active_changed = False
-
-    # 更新其他字段
-    for key, value in update_data.items():
-        if hasattr(user, key):
-            if key == "is_active" and value != old_is_active:
-                is_active_changed = True
-            setattr(user, key, value)
-
-    # 保存到数据库
-    try:
-        await db.commit()
-        await db.refresh(user)
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"更新用户失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"更新用户失败：{str(e)}。请检查数据格式或联系管理员"
-        )
-
-    logger.info(f"User {user.username} updated by {current_user.username}")
-
-    # 如果 is_active 改变，记录激活/禁用日志
-    if is_active_changed:
-        if user.is_active:
-            await log_activate(
-                db=db,
-                user=current_user,
-                resource_type="USER",
-                resource_id=user.id,
-                resource_name=user.username,
-                request=request
-            )
-        else:
-            await log_deactivate(
-                db=db,
-                user=current_user,
-                resource_type="USER",
-                resource_id=user.id,
-                resource_name=user.username,
-                request=request
-            )
-
-    # 记录更新操作（排除 is_active，因为已经单独记录）
-    update_data = user_in.model_dump(exclude_unset=True)
+    # 记录更新操作（使用audit_log的log_update函数）
+    from app.core.audit_log import log_update
     # 移除敏感信息
     if "password" in update_data:
         update_data["password"] = "***"
-    # 如果只更新了 is_active，不记录 UPDATE 日志（避免重复）
+    # 如果只更新了 is_active，不记录 UPDATE 日志（避免重复，因为服务层已记录激活/禁用日志）
     if len(update_data) > 1 or "is_active" not in update_data:
         await log_update(
             db=db,
@@ -1024,7 +785,7 @@ async def update_user(
             details=update_data
         )
 
-    # 确保 role 转换为字符串
+    # 构建响应数据
     user_dict = {
         'id': user.id,
         'username': user.username,
@@ -1046,7 +807,7 @@ async def delete_user(
         current_user: User = Depends(require_admin)
 ):
     """
-    删除用户
+    删除用户（已重构使用服务层）
     - 仅管理员可访问
     - 检查用户是否存在关联客户数据
     - 永久删除用户
@@ -1058,40 +819,17 @@ async def delete_user(
             detail="不能删除自己的账户。如需删除，请联系其他管理员操作"
         )
 
-    # 获取用户
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalars().first()
-
-    if not user:
-        raise_api_exception(
-            ErrorCode.USER_NOT_FOUND,
-            detail=f"用户ID {user_id} 不存在"
-        )
-
-    # 检查是否有关联客户
-    result = await db.execute(select(Client).where(Client.user_id == user_id))
-    clients = result.scalars().all()
-    if clients:
-        raise_api_exception(
-            ErrorCode.USER_HAS_CLIENTS,
-            detail=f"无法删除用户，该用户关联了 {len(clients)} 个客户数据。请先删除或转移关联的客户数据"
-        )
-
-    # 删除用户
-    try:
-        await db.delete(user)
-        await db.commit()
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"删除用户失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"删除用户失败：{str(e)}。请稍后重试或联系管理员"
-        )
-
-    logger.info(f"User {user.username} deleted by {current_user.username}")
-
+    # 使用服务层（业务逻辑在UserService中）
+    from app.core.dependencies import get_user_service
+    from app.services.user_service import UserService
+    
+    user_service: UserService = await get_user_service(db)
+    
+    # 获取用户信息（用于记录删除日志）
+    user = await user_service.get_user_by_id(user_id, current_user, include_client=True)
+    
     # 记录删除操作（在删除前记录，因为删除后user对象可能无法访问）
+    from app.core.audit_log import log_delete
     await log_delete(
         db=db,
         user=current_user,
@@ -1104,5 +842,8 @@ async def delete_user(
             "email": user.email
         }
     )
+    
+    # 调用服务层删除用户（服务层会检查关联数据）
+    await user_service.delete_user(user_id, current_user)
 
     return ResponseBaseSchema.success(data={"message": "用户已成功删除"})

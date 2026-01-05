@@ -31,28 +31,20 @@ async def create_advertiser(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """创建广告主（仅管理员）"""
-    advertiser = Advertiser(
-        advertiser_name=advertiser_in.advertiser_name,
-        email=advertiser_in.email,
-        mobile=advertiser_in.mobile,
-        is_active=advertiser_in.is_active
-    )
+    """创建广告主（已重构使用服务层）"""
+    # 使用服务层（业务逻辑在AdvertiserService中）
+    from app.core.dependencies import get_advertiser_service
+    from app.services.cpl.advertiser_service import AdvertiserService
     
-    try:
-        db.add(advertiser)
-        await db.commit()
-        await db.refresh(advertiser)
-        
-        logger.info(f"广告主创建成功: id={advertiser.id}")
-        return ResponseBaseSchema.success(data=AdvertiserResponse.model_validate(advertiser))
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"创建广告主失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"创建广告主失败: {str(e)}"
-        )
+    advertiser_service: AdvertiserService = await get_advertiser_service(db)
+    
+    # 准备广告主数据
+    advertiser_data = advertiser_in.model_dump()
+    
+    # 调用服务层创建广告主（服务层会处理所有验证和审计日志）
+    advertiser = await advertiser_service.create_advertiser(advertiser_data, current_user)
+    
+    return ResponseBaseSchema.success(data=AdvertiserResponse.model_validate(advertiser))
 
 
 @router.get("/",
@@ -66,30 +58,19 @@ async def get_advertisers(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取广告主列表（所有登录用户可访问）"""
-    query = select(Advertiser)
+    """获取广告主列表（已重构使用服务层）"""
+    # 使用服务层（业务逻辑在AdvertiserService中）
+    from app.core.dependencies import get_advertiser_service
+    from app.services.cpl.advertiser_service import AdvertiserService
     
-    # 搜索过滤
-    if search:
-        query = query.where(
-            (Advertiser.advertiser_name.like(f"%{search}%")) |
-            (Advertiser.id.cast(String).like(f"%{search}%"))
-        )
-    
-    # 激活状态过滤
-    if is_active is not None:
-        query = query.where(Advertiser.is_active == is_active)
-    
-    # 总数
-    total_result = await db.execute(select(func.count()).select_from(query.subquery()))
-    total = total_result.scalar() or 0
-    
-    # 分页
-    query = query.order_by(Advertiser.created_at.desc())
-    query = query.offset((page - 1) * page_size).limit(page_size)
-    
-    result = await db.execute(query)
-    advertisers = result.scalars().all()
+    advertiser_service: AdvertiserService = await get_advertiser_service(db)
+    advertisers, total = await advertiser_service.get_advertisers(
+        current_user=current_user,
+        page=page,
+        page_size=page_size,
+        search=search,
+        is_active=is_active
+    )
     
     return PaginatedResponseBaseSchema.success(
         data=[AdvertiserResponse.model_validate(adv) for adv in advertisers],
@@ -108,17 +89,13 @@ async def get_advertiser(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取广告主详情（仅管理员）"""
-    result = await db.execute(
-        select(Advertiser).where(Advertiser.id == advertiser_id)
-    )
-    advertiser = result.scalars().first()
+    """获取广告主详情（已重构使用服务层）"""
+    # 使用服务层（业务逻辑在AdvertiserService中）
+    from app.core.dependencies import get_advertiser_service
+    from app.services.cpl.advertiser_service import AdvertiserService
     
-    if not advertiser:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"广告主ID {advertiser_id} 不存在"
-        )
+    advertiser_service: AdvertiserService = await get_advertiser_service(db)
+    advertiser = await advertiser_service.get_advertiser_by_id(advertiser_id, current_user)
     
     return ResponseBaseSchema.success(data=AdvertiserResponse.model_validate(advertiser))
 
@@ -133,36 +110,20 @@ async def update_advertiser(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """更新广告主（仅管理员）"""
-    result = await db.execute(
-        select(Advertiser).where(Advertiser.id == advertiser_id)
-    )
-    advertiser = result.scalars().first()
+    """更新广告主（已重构使用服务层）"""
+    # 使用服务层（业务逻辑在AdvertiserService中）
+    from app.core.dependencies import get_advertiser_service
+    from app.services.cpl.advertiser_service import AdvertiserService
     
-    if not advertiser:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"广告主ID {advertiser_id} 不存在"
-        )
+    advertiser_service: AdvertiserService = await get_advertiser_service(db)
     
-    # 更新字段
+    # 获取更新数据（排除未设置的字段）
     update_data = advertiser_in.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(advertiser, key, value)
     
-    try:
-        await db.commit()
-        await db.refresh(advertiser)
-        
-        logger.info(f"广告主更新成功: id={advertiser.id}")
-        return ResponseBaseSchema.success(data=AdvertiserResponse.model_validate(advertiser))
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"更新广告主失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"更新广告主失败: {str(e)}"
-        )
+    # 调用服务层更新广告主（服务层会处理所有验证、缓存失效和审计日志）
+    advertiser = await advertiser_service.update_advertiser(advertiser_id, update_data, current_user)
+    
+    return ResponseBaseSchema.success(data=AdvertiserResponse.model_validate(advertiser))
 
 
 @router.delete("/{advertiser_id}",
@@ -174,30 +135,15 @@ async def delete_advertiser(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """删除广告主（仅管理员）"""
-    result = await db.execute(
-        select(Advertiser).where(Advertiser.id == advertiser_id)
-    )
-    advertiser = result.scalars().first()
+    """删除广告主（已重构使用服务层）"""
+    # 使用服务层（业务逻辑在AdvertiserService中）
+    from app.core.dependencies import get_advertiser_service
+    from app.services.cpl.advertiser_service import AdvertiserService
     
-    if not advertiser:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"广告主ID {advertiser_id} 不存在"
-        )
+    advertiser_service: AdvertiserService = await get_advertiser_service(db)
     
-    try:
-        from sqlalchemy import delete
-        await db.execute(delete(Advertiser).where(Advertiser.id == advertiser_id))
-        await db.commit()
-        
-        logger.info(f"广告主删除成功: id={advertiser.id}")
-        return ResponseBaseSchema.success(data={"message": "广告主已删除"})
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"删除广告主失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"删除广告主失败: {str(e)}"
-        )
+    # 调用服务层删除广告主（服务层会检查关联数据、记录审计日志）
+    await advertiser_service.delete_advertiser(advertiser_id, current_user)
+    
+    return ResponseBaseSchema.success(data={"message": "广告主已删除"})
 

@@ -32,53 +32,33 @@ async def create_publisher(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """创建渠道（仅管理员）"""
-    # 验证 Postback URL 中的占位符
-    if publisher_in.postback_url:
-        is_valid, error_msg = validate_postback_url_placeholders(publisher_in.postback_url)
-        if not is_valid:
-            raise_api_exception(
-                ErrorCode.INVALID_INPUT,
-                detail=error_msg
-            )
+    """创建渠道（已重构使用服务层）"""
+    # 使用服务层（业务逻辑在PublisherService中）
+    from app.core.dependencies import get_publisher_service
+    from app.services.cpl.publisher_service import PublisherService
     
-    publisher = Publisher(
-        publisher_name=publisher_in.publisher_name,
-        email=publisher_in.email,
-        price_discount=publisher_in.price_discount,
-        postback_url=publisher_in.postback_url,
-        postback_method=publisher_in.postback_method,
-        client_id=publisher_in.client_id,
-        is_active=publisher_in.is_active
-    )
+    publisher_service: PublisherService = await get_publisher_service(db)
     
-    try:
-        db.add(publisher)
-        await db.commit()
-        await db.refresh(publisher)
-        
-        # 获取客户信息（用户的 full_name）
-        client_name = None
-        if publisher.client_id:
-            client_result = await db.execute(
-                select(Client).options(joinedload(Client.user)).where(Client.id == publisher.client_id)
-            )
-            client = client_result.scalars().first()
-            if client and client.user:
-                client_name = client.user.full_name or client.company_name
-        
-        publisher_data = PublisherResponse.model_validate(publisher)
-        publisher_data.client_name = client_name
-        
-        logger.info(f"渠道创建成功: id={publisher.id}")
-        return ResponseBaseSchema.success(data=publisher_data)
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"创建渠道失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"创建渠道失败: {str(e)}"
-        )
+    # 准备渠道数据
+    publisher_data = publisher_in.model_dump()
+    
+    # 调用服务层创建渠道（服务层会处理验证和审计日志）
+    publisher = await publisher_service.create_publisher(publisher_data, current_user)
+    
+    # 获取客户信息（用户的 full_name）
+    client_name = None
+    if publisher.client_id:
+        # 重新加载以获取客户信息
+        publisher = await publisher_service.get_publisher_by_id(publisher.id, current_user, include_client=True)
+        if publisher.client and publisher.client.user:
+            client_name = publisher.client.user.full_name or publisher.client.company_name
+        elif publisher.client:
+            client_name = publisher.client.company_name
+    
+    publisher_response = PublisherResponse.model_validate(publisher)
+    publisher_response.client_name = client_name
+    
+    return ResponseBaseSchema.success(data=publisher_response)
 
 
 @router.get("/",
@@ -92,45 +72,29 @@ async def get_publishers(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取渠道列表（所有登录用户可访问）"""
-    query = select(Publisher)
+    """获取渠道列表（已重构使用服务层，批量加载客户信息）"""
+    # 使用服务层（业务逻辑在PublisherService中，已优化批量加载）
+    from app.core.dependencies import get_publisher_service
+    from app.services.cpl.publisher_service import PublisherService
     
-    if search:
-        query = query.where(
-            (Publisher.publisher_name.like(f"%{search}%")) |
-            (Publisher.id.cast(String).like(f"%{search}%"))
-        )
+    publisher_service: PublisherService = await get_publisher_service(db)
+    publishers, total = await publisher_service.get_publishers(
+        current_user=current_user,
+        page=page,
+        page_size=page_size,
+        search=search,
+        is_active=is_active
+    )
     
-    if is_active is not None:
-        query = query.where(Publisher.is_active == is_active)
-    
-    total_result = await db.execute(select(func.count()).select_from(query.subquery()))
-    total = total_result.scalar() or 0
-    
-    query = query.order_by(Publisher.created_at.desc())
-    query = query.offset((page - 1) * page_size).limit(page_size)
-    
-    result = await db.execute(query)
-    publishers = result.scalars().all()
-    
-    # 获取所有客户信息（用户的 full_name）
-    client_ids = [pub.client_id for pub in publishers if pub.client_id]
-    clients_dict = {}
-    if client_ids:
-        clients_result = await db.execute(
-            select(Client).options(joinedload(Client.user)).where(Client.id.in_(client_ids))
-        )
-        clients = clients_result.scalars().all()
-        clients_dict = {
-            client.id: (client.user.full_name if client.user and client.user.full_name else client.company_name)
-            for client in clients
-        }
-    
-    # 构建响应数据
+    # 构建响应数据（客户信息已通过selectinload预加载）
     publishers_data = []
     for pub in publishers:
         pub_data = PublisherResponse.model_validate(pub)
-        pub_data.client_name = clients_dict.get(pub.client_id) if pub.client_id else None
+        # 客户信息已预加载
+        if pub.client and pub.client.user:
+            pub_data.client_name = pub.client.user.full_name if pub.client.user.full_name else pub.client.company_name
+        elif pub.client:
+            pub_data.client_name = pub.client.company_name
         publishers_data.append(pub_data)
     
     return PaginatedResponseBaseSchema.success(
@@ -150,27 +114,22 @@ async def get_publisher(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取渠道详情（仅管理员）"""
-    result = await db.execute(
-        select(Publisher).where(Publisher.id == publisher_id)
-    )
-    publisher = result.scalars().first()
+    """获取渠道详情（已重构使用服务层）"""
+    # 使用服务层（业务逻辑在PublisherService中）
+    from app.core.dependencies import get_publisher_service
+    from app.services.cpl.publisher_service import PublisherService
     
-    if not publisher:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"渠道ID {publisher_id} 不存在"
-        )
+    publisher_service: PublisherService = await get_publisher_service(db)
+    
+    # 获取渠道（包含客户信息）
+    publisher = await publisher_service.get_publisher_by_id(publisher_id, current_user, include_client=True)
     
     # 获取客户信息（用户的 full_name）
     client_name = None
-    if publisher.client_id:
-        client_result = await db.execute(
-            select(Client).options(joinedload(Client.user)).where(Client.id == publisher.client_id)
-        )
-        client = client_result.scalars().first()
-        if client and client.user:
-            client_name = client.user.full_name or client.company_name
+    if publisher.client and publisher.client.user:
+        client_name = publisher.client.user.full_name or publisher.client.company_name
+    elif publisher.client:
+        client_name = publisher.client.company_name
     
     publisher_data = PublisherResponse.model_validate(publisher)
     publisher_data.client_name = client_name
@@ -188,57 +147,33 @@ async def update_publisher(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """更新渠道（仅管理员）"""
-    # 验证 Postback URL 中的占位符（如果提供了 postback_url）
-    if publisher_in.postback_url is not None:
-        is_valid, error_msg = validate_postback_url_placeholders(publisher_in.postback_url)
-        if not is_valid:
-            raise_api_exception(
-                ErrorCode.INVALID_INPUT,
-                detail=error_msg
-            )
+    """更新渠道（已重构使用服务层）"""
+    # 使用服务层（业务逻辑在PublisherService中）
+    from app.core.dependencies import get_publisher_service
+    from app.services.cpl.publisher_service import PublisherService
     
-    result = await db.execute(
-        select(Publisher).where(Publisher.id == publisher_id)
-    )
-    publisher = result.scalars().first()
+    publisher_service: PublisherService = await get_publisher_service(db)
     
-    if not publisher:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"渠道ID {publisher_id} 不存在"
-        )
-    
+    # 获取更新数据（排除未设置的字段）
     update_data = publisher_in.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(publisher, key, value)
     
-    try:
-        await db.commit()
-        await db.refresh(publisher)
-        
-        # 获取客户信息（用户的 full_name）
-        client_name = None
-        if publisher.client_id:
-            client_result = await db.execute(
-                select(Client).options(joinedload(Client.user)).where(Client.id == publisher.client_id)
-            )
-            client = client_result.scalars().first()
-            if client and client.user:
-                client_name = client.user.full_name or client.company_name
-        
-        publisher_data = PublisherResponse.model_validate(publisher)
-        publisher_data.client_name = client_name
-        
-        logger.info(f"渠道更新成功: id={publisher.id}")
-        return ResponseBaseSchema.success(data=publisher_data)
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"更新渠道失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"更新渠道失败: {str(e)}"
-        )
+    # 调用服务层更新渠道（服务层会处理验证、缓存失效和审计日志）
+    publisher = await publisher_service.update_publisher(publisher_id, update_data, current_user)
+    
+    # 获取客户信息（用户的 full_name）
+    client_name = None
+    if publisher.client_id:
+        # 重新加载以获取客户信息
+        publisher = await publisher_service.get_publisher_by_id(publisher.id, current_user, include_client=True)
+        if publisher.client and publisher.client.user:
+            client_name = publisher.client.user.full_name or publisher.client.company_name
+        elif publisher.client:
+            client_name = publisher.client.company_name
+    
+    publisher_data = PublisherResponse.model_validate(publisher)
+    publisher_data.client_name = client_name
+    
+    return ResponseBaseSchema.success(data=publisher_data)
 
 
 @router.delete("/{publisher_id}",
@@ -250,30 +185,15 @@ async def delete_publisher(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """删除渠道（仅管理员）"""
-    result = await db.execute(
-        select(Publisher).where(Publisher.id == publisher_id)
-    )
-    publisher = result.scalars().first()
+    """删除渠道（已重构使用服务层）"""
+    # 使用服务层（业务逻辑在PublisherService中）
+    from app.core.dependencies import get_publisher_service
+    from app.services.cpl.publisher_service import PublisherService
     
-    if not publisher:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"渠道ID {publisher_id} 不存在"
-        )
+    publisher_service: PublisherService = await get_publisher_service(db)
     
-    try:
-        from sqlalchemy import delete
-        await db.execute(delete(Publisher).where(Publisher.id == publisher_id))
-        await db.commit()
-        
-        logger.info(f"渠道删除成功: id={publisher.id}")
-        return ResponseBaseSchema.success(data={"message": "渠道已删除"})
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"删除渠道失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"删除渠道失败: {str(e)}"
-        )
+    # 调用服务层删除渠道（服务层会检查关联数据、记录审计日志）
+    await publisher_service.delete_publisher(publisher_id, current_user)
+    
+    return ResponseBaseSchema.success(data={"message": "渠道已删除"})
 
