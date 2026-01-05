@@ -35,6 +35,7 @@ from app.api.api_v1.endpoints import (
     offers,
     caps,
     discounts,
+    conversion_deductions,
     advertiser_tests,
     affiliate_tests,
     conversion_summary,
@@ -106,6 +107,7 @@ api_router.include_router(publishers.router, prefix="/publishers", tags=["渠道
 api_router.include_router(offers.router, prefix="/offers", tags=["Offer管理"])
 api_router.include_router(caps.router, prefix="/caps", tags=["Cap管理"])
 api_router.include_router(discounts.router, prefix="/discounts", tags=["扣量管理"])
+api_router.include_router(conversion_deductions.router, prefix="/conversion-deductions", tags=["转化扣减管理"])
 api_router.include_router(advertiser_tests.router, prefix="/advertiser-tests", tags=["上游测试"])
 api_router.include_router(affiliate_tests.router, prefix="/affiliate-tests", tags=["下游测试"])
 api_router.include_router(conversion_summary.router, prefix="/conversion-summary", tags=["转化统计"])

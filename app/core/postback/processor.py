@@ -58,7 +58,7 @@ CPL系统集成：
 import json
 import logging
 from typing import Dict, Any, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -211,6 +211,8 @@ class PostbackProcessor:
             # 5. 检查是否已存在（防重复处理）- 使用更新后的平台名称
             event_name = normalized_data.get("event_name")
             final_platform = advertiser_name if advertiser_name else platform
+            
+            # 5.1. 检查主表（PostbackConversion）
             existing = await db.execute(
                 select(PostbackConversion).where(
                     PostbackConversion.platform == final_platform,
@@ -219,6 +221,29 @@ class PostbackProcessor:
                 )
             )
             existing_record = existing.scalars().first()
+            
+            # 5.2. 如果主表中没有，检查扣减日志表（因为被扣量的转化不保存到主表）
+            if not existing_record and click_id:
+                from app.models.models import ConversionDeductionLog
+                log_check = await db.execute(
+                    select(ConversionDeductionLog).where(
+                        ConversionDeductionLog.click_id == click_id,
+                        ConversionDeductionLog.created_at >= get_app_now_naive() - timedelta(days=1)  # 最近1天内的记录
+                    ).order_by(ConversionDeductionLog.created_at.desc())
+                )
+                existing_log = log_check.scalars().first()
+                if existing_log:
+                    # 如果扣减日志中存在，说明已经处理过（可能被扣量了）
+                    logger.info(
+                        f"转化已在扣减日志中存在，跳过重复处理: conversion_id={conversion_id}, "
+                        f"click_id={click_id}, log_id={existing_log.id}"
+                    )
+                    return {
+                        "success": True,
+                        "message": "PostBack 接收成功（已在扣减日志中存在，跳过重复处理）",
+                        "conversion_id": conversion_id,
+                        "platform": final_platform
+                    }
             
             if existing_record:
                 # 如果记录已存在，根据 click_id 更新数据
@@ -355,7 +380,7 @@ class PostbackProcessor:
                         # 这里我们仍然保存转化，但标记状态
                         # 也可以选择直接拒绝：raise_api_exception(...)
                 
-                # 计算扣量
+                # 计算扣量（旧版扣量逻辑，保留兼容性）
                 if offer_id and publisher_id and final_payout:
                     final_payout, discount_amount, discount_info = await calculate_discount(
                         db=db,
@@ -369,6 +394,56 @@ class PostbackProcessor:
                             f"original_payout={original_payout}, "
                             f"final_payout={final_payout}, info={discount_info}"
                         )
+            
+            # 7.6. CPL 系统：应用新的扣减逻辑（按比例扣量和扣金额）
+            deduction_result = None
+            deduction_config = None
+            if advertiser_id or offer_id or publisher_id:
+                try:
+                    from app.core.deduction import find_deduction_config, apply_deduction
+                    
+                    # 查找扣减配置
+                    deduction_config = await find_deduction_config(
+                        db=db,
+                        advertiser_id=advertiser_id,
+                        offer_id=offer_id,
+                        publisher_id=publisher_id
+                    )
+                    
+                    if deduction_config:
+                        # 应用扣减
+                        conversion_data = {
+                            'original_payout': original_payout or 0.0
+                        }
+                        deduction_result = await apply_deduction(
+                            db=db,
+                            conversion_data=conversion_data,
+                            config=deduction_config,
+                            click_id=click_id,
+                            advertiser_id=advertiser_id,
+                            offer_id=offer_id,
+                            publisher_id=publisher_id
+                        )
+                        
+                        # 如果扣减了金额，更新final_payout
+                        if deduction_result.get('should_deduct_amount'):
+                            final_payout = deduction_result['final_amount']
+                            logger.info(
+                                f"应用扣减金额: conversion_id={conversion_id}, "
+                                f"original_payout={deduction_result['original_amount']}, "
+                                f"final_payout={final_payout}, "
+                                f"deducted_amount={deduction_result['deducted_amount']}"
+                            )
+                except Exception as e:
+                    # 扣减逻辑失败不影响主流程，但记录错误
+                    logger.error(
+                        f"应用扣减逻辑失败: conversion_id={conversion_id}, "
+                        f"error={str(e)}", 
+                        exc_info=True
+                    )
+                    # 继续处理，不使用扣减结果
+                    deduction_result = None
+                    deduction_config = None
             
             # 8. 创建转化记录（使用广告主名称作为平台名称）
             # 如果找到了广告主名称，使用广告主名称；否则使用传入的 platform 参数
@@ -396,34 +471,93 @@ class PostbackProcessor:
                     final_gid = str(click_record.publisher_id)
                     logger.debug(f"从 clicks 表补充 gid (publisher_id): {final_gid}")
             
-            conversion = PostbackConversion(
-                platform=final_platform,
-                conversion_id=conversion_id,
-                event_name=normalized_data.get("event_name"),
-                event_value=normalized_data.get("event_value"),
-                original_payout=original_payout,  # 原始 payout (PO)
-                payout=final_payout,  # 扣后 payout (PO(扣))
-                devad_id=normalized_data.get("devad_id"),
-                os=final_os,  # 使用补充后的 os
-                carrier=normalized_data.get("carrier"),
-                ip=final_ip,  # 使用补充后的 ip
-                gid=final_gid,  # 使用补充后的 gid
-                product_id=product_id,
-                client_id=client_id,
-                click_id=click_id,  # CPL 系统字段
-                click_time=click_time,  # CPL 系统字段
-                conversion_status='Pending',  # CPL 系统字段，默认待处理
-                raw_data=raw_data_json,
-                created_at=get_app_now_naive()
-            )
+            # 8. 判断是否应该保存转化记录（如果扣量了，可能不保存）
+            should_save_conversion = True
+            if deduction_result and deduction_result.get('should_deduct_volume'):
+                # 如果扣量了，不保存转化记录（隐藏扣减）
+                should_save_conversion = False
+                logger.info(
+                    f"转化被扣量，不保存到主表: conversion_id={conversion_id}, "
+                    f"click_id={click_id}"
+                )
             
-            db.add(conversion)
-            await db.commit()
-            await db.refresh(conversion)
+            conversion = None
+            conversion_id_for_log = None
+            
+            if should_save_conversion:
+                # 创建转化记录
+                conversion = PostbackConversion(
+                    platform=final_platform,
+                    conversion_id=conversion_id,
+                    event_name=normalized_data.get("event_name"),
+                    event_value=normalized_data.get("event_value"),
+                    original_payout=original_payout,  # 原始 payout (PO)
+                    payout=final_payout,  # 扣后 payout (PO(扣))
+                    devad_id=normalized_data.get("devad_id"),
+                    os=final_os,  # 使用补充后的 os
+                    carrier=normalized_data.get("carrier"),
+                    ip=final_ip,  # 使用补充后的 ip
+                    gid=final_gid,  # 使用补充后的 gid
+                    product_id=product_id,
+                    client_id=client_id,
+                    click_id=click_id,  # CPL 系统字段
+                    click_time=click_time,  # CPL 系统字段
+                    conversion_status='Pending',  # CPL 系统字段，默认待处理
+                    raw_data=raw_data_json,
+                    # 扣减相关字段
+                    is_deducted=bool(deduction_result and (deduction_result.get('should_deduct_volume') or deduction_result.get('should_deduct_amount'))),
+                    deduction_type=deduction_result.get('deduction_type') if deduction_result else None,
+                    original_volume=deduction_result.get('original_volume', 1) if deduction_result else 1,
+                    deducted_volume=deduction_result.get('deducted_volume', 0) if deduction_result else 0,
+                    created_at=get_app_now_naive()
+                )
+                
+                db.add(conversion)
+                await db.commit()
+                await db.refresh(conversion)
+                conversion_id_for_log = conversion.id
+            
+            # 8.1. 记录扣减日志（无论是否保存转化记录都要记录）
+            if deduction_result and deduction_config:
+                try:
+                    from app.core.deduction import log_deduction
+                    # 确定配置层级
+                    if deduction_config.advertiser_id:
+                        level_str = 'advertiser'
+                    elif deduction_config.offer_id:
+                        level_str = 'offer'
+                    else:
+                        level_str = 'publisher'
+                    deduction_reason = f"应用扣减配置: level={level_str}, config_id={deduction_config.id}"
+                    await log_deduction(
+                        db=db,
+                        deduction_result=deduction_result,
+                        conversion_id=conversion_id_for_log,
+                        click_id=click_id,
+                        advertiser_id=advertiser_id,
+                        offer_id=offer_id,
+                        publisher_id=publisher_id,
+                        config=deduction_config,
+                        deduction_reason=deduction_reason
+                    )
+                    await db.commit()
+                except Exception as e:
+                    # 日志记录失败不影响主流程，但记录错误
+                    logger.error(
+                        f"记录扣减日志失败: conversion_id={conversion_id}, "
+                        f"error={str(e)}", 
+                        exc_info=True
+                    )
+                    # 尝试回滚，但不影响主流程
+                    try:
+                        await db.rollback()
+                    except:
+                        pass
             
             # 8.5. 如果通过了 Cap 检查，增加 Cap 计数
             # 只有当转化状态正常(Pending/Approved)时才增加计数
-            if offer_id and click_id and conversion.conversion_status in ['Pending', 'Approved']:
+            # 注意：如果转化被扣量了（conversion为None），不执行后续逻辑
+            if conversion and offer_id and click_id and conversion.conversion_status in ['Pending', 'Approved']:
                 # 检查是否有 Override 状态
                 if normalized_data.get("status_override"):
                     conversion.conversion_status = normalized_data.get("status_override")
@@ -455,16 +589,26 @@ class PostbackProcessor:
                         # Cap 计数失败不影响主流程，但记录严重错误
                         logger.error(f"增加Cap计数失败: {str(e)}")
             
-            # 再次提交以保存状态更新
-            await db.commit()
+            # 再次提交以保存状态更新（如果conversion存在）
+            if conversion:
+                await db.commit()
             
-            logger.info(
-                f"平台 {platform} postback 转化记录已保存: "
-                f"conversion_id={conversion_id}, event_name={event_name}, "
-                f"original_payout={original_payout}, payout={final_payout}, "
-                f"product_id={product_id}, client_id={client_id}, "
-                f"click_id={click_id}, offer_id={offer_id}"
-            )
+            # 记录日志（区分是否保存了转化记录）
+            if conversion:
+                logger.info(
+                    f"平台 {platform} postback 转化记录已保存: "
+                    f"conversion_id={conversion_id}, event_name={event_name}, "
+                    f"original_payout={original_payout}, payout={final_payout}, "
+                    f"product_id={product_id}, client_id={client_id}, "
+                    f"click_id={click_id}, offer_id={offer_id}"
+                )
+            else:
+                logger.info(
+                    f"平台 {platform} postback 转化被扣量，未保存到主表: "
+                    f"conversion_id={conversion_id}, event_name={event_name}, "
+                    f"original_payout={original_payout}, "
+                    f"click_id={click_id}, offer_id={offer_id}"
+                )
             
             # 如果 original_payout 为 None，记录警告
             if original_payout is None:
@@ -474,25 +618,28 @@ class PostbackProcessor:
                 )
             
             # 9. 异步发送通知（按客户和产品）
+            # 注意：如果转化被扣量了（conversion为None），不发送通知
             # 注意：notify_conversion 内部已处理异常并记录日志，这里不需要重复记录
-            try:
-                await PostbackNotifier.notify_conversion(
-                    conversion=conversion,
-                    db=db,
-                    product=None,  # 将在通知函数中查询
-                    client=None   # 将在通知函数中查询
-                )
-            except Exception as e:
-                # 只有在 notify_conversion 内部未捕获的异常才记录（通常不会发生）
-                # 内部异常已在 notify_conversion 中记录，这里只记录未预期的异常
-                logger.debug(
-                    f"通知函数调用异常（内部应已记录）: conversion_id={conversion_id}, "
-                    f"error={str(e)}"
-                )
+            if conversion:
+                try:
+                    await PostbackNotifier.notify_conversion(
+                        conversion=conversion,
+                        db=db,
+                        product=None,  # 将在通知函数中查询
+                        client=None   # 将在通知函数中查询
+                    )
+                except Exception as e:
+                    # 只有在 notify_conversion 内部未捕获的异常才记录（通常不会发生）
+                    # 内部异常已在 notify_conversion 中记录，这里只记录未预期的异常
+                    logger.debug(
+                        f"通知函数调用异常（内部应已记录）: conversion_id={conversion_id}, "
+                        f"error={str(e)}"
+                    )
             
             # 10. 异步转发给渠道（如果渠道配置了 Postback URL）
             # 优先使用渠道的 Postback URL，如果没有则使用产品的下游 URL
-            if conversion.conversion_status in ['Pending', 'Approved']:
+            # 注意：如果转化被扣量了（conversion为None），不转发给下游
+            if conversion and conversion.conversion_status in ['Pending', 'Approved']:
                 try:
                     # 10.1 尝试转发到渠道的 Postback URL
                     from app.core.postback.forwarder import PostbackForwarder

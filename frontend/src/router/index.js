@@ -84,6 +84,7 @@ const PublisherManagement = createAsyncComponent(() => import(/* webpackChunkNam
 const OfferManagement = createAsyncComponent(() => import(/* webpackChunkName: "offer-management" */ '../views/admin/OfferManagement.vue'), 'OfferManagement');
 const CapManagement = createAsyncComponent(() => import(/* webpackChunkName: "cap-management" */ '../views/admin/CapManagement.vue'), 'CapManagement');
 const DiscountManagement = createAsyncComponent(() => import(/* webpackChunkName: "discount-management" */ '../views/admin/DiscountManagement.vue'), 'DiscountManagement');
+const ConversionDeductionManagement = createAsyncComponent(() => import(/* webpackChunkName: "conversion-deduction-management" */ '../views/admin/ConversionDeductionManagement.vue'), 'ConversionDeductionManagement');
 const AdvertiserTest = createAsyncComponent(() => import(/* webpackChunkName: "advertiser-test" */ '../views/admin/AdvertiserTest.vue'), 'AdvertiserTest');
 const AffiliateTest = createAsyncComponent(() => import(/* webpackChunkName: "affiliate-test" */ '../views/admin/AffiliateTest.vue'), 'AffiliateTest');
 const ConversionSummary = createAsyncComponent(() => import(/* webpackChunkName: "conversion-summary" */ '../views/admin/ConversionSummary.vue'), 'ConversionSummary');
@@ -219,6 +220,12 @@ const routes = [
         path: 'admin/discounts',
         name: 'DiscountManagement',
         component: DiscountManagement,
+        meta: { requiresAdmin: true }
+      },
+      {
+        path: 'admin/conversion-deductions',
+        name: 'ConversionDeductionManagement',
+        component: ConversionDeductionManagement,
         meta: { requiresAdmin: true }
       },
       {

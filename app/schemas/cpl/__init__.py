@@ -40,6 +40,14 @@ from app.schemas.cpl.test import (
     AffiliateTestCreate,
     AffiliateTestResponse
 )
+from app.schemas.cpl.deduction import (
+    ConversionDeductionConfigBase,
+    ConversionDeductionConfigCreate,
+    ConversionDeductionConfigUpdate,
+    ConversionDeductionConfigResponse,
+    ConversionDeductionLogResponse,
+    DeductionStatsResponse
+)
 
 __all__ = [
     "AdvertiserBase", "AdvertiserCreate", "AdvertiserUpdate", "AdvertiserResponse",
@@ -50,5 +58,7 @@ __all__ = [
     "OfferDiscountBase", "OfferDiscountCreate", "OfferDiscountUpdate", "OfferDiscountResponse",
     "AdvertiserTestBase", "AdvertiserTestCreate", "AdvertiserTestResponse",
     "AffiliateTestBase", "AffiliateTestCreate", "AffiliateTestResponse",
+    "ConversionDeductionConfigBase", "ConversionDeductionConfigCreate", "ConversionDeductionConfigUpdate", "ConversionDeductionConfigResponse",
+    "ConversionDeductionLogResponse", "DeductionStatsResponse",
 ]
 
