@@ -415,168 +415,52 @@ async def create_offer(
     current_user: User = Depends(get_current_user)
 ):
     """创建Offer（已重构使用服务层）"""
-    # 验证广告主是否存在
-    adv_result = await db.execute(
-        select(Advertiser).where(Advertiser.id == offer_in.advertiser_id)
-    )
-    advertiser = adv_result.scalars().first()
-    if not advertiser:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"广告主ID {offer_in.advertiser_id} 不存在"
-        )
+    # 使用服务层（业务逻辑在OfferService中）
+    from app.core.dependencies import get_offer_service
+    from app.services.cpl.offer_service import OfferService
     
-    offer = Offer(
-        offer_name=offer_in.offer_name,
-        advertiser_offer_id=offer_in.advertiser_offer_id,
-        advertiser_id=offer_in.advertiser_id,
-        preview_link=offer_in.preview_link,
-        payout=offer_in.payout,
-        affiliate_payout=offer_in.affiliate_payout,
-        country=offer_in.country,
-        category=offer_in.category,
-        type=offer_in.type,
-        status=offer_in.status,
-        upstream_cap=offer_in.upstream_cap,
-        downstream_cap=offer_in.downstream_cap,
-        advertiser_tracklink=offer_in.advertiser_tracklink,
-        postback_method=offer_in.postback_method,
-        click_validity_hours=offer_in.click_validity_hours,
-        is_active=offer_in.is_active
-    )
+    offer_service: OfferService = await get_offer_service(db)
     
-    try:
-        db.add(offer)
-        await db.flush()  # 获取 offer.id
-        
-        # 生成下游 Tracklink（使用自增ID）
-        base_url = settings.TRACKING_BASE_URL
-        # 下游 Tracklink 格式：/api/v1/track/click/{offer_id}?publisher_id={publisher_id}
-        # 实际使用时，publisher_id 会通过查询参数传入
-        downstream_tracklink = f"{base_url.rstrip('/')}/api/v1/track/click/{offer.id}?publisher_id={{publisher_id}}"
-        
-        # 生成 Postback URL（使用模板，实际使用时替换占位符）
-        # 格式：/api/v1/postback?click_id={click_id}&offer_id={offer_id}
-        postback_url = f"{base_url.rstrip('/')}/api/v1/postback?click_id={{click_id}}&offer_id={offer.id}"
-        
-        # 更新下游tracklink和postback_url
-        offer.downstream_tracklink = downstream_tracklink
-        offer.postback_url = postback_url
-        
-        # 处理渠道分配
-        publisher_ids_for_short_link = []
-        if offer_in.publisher_configs is not None:
-            # 使用新的渠道配置方式
-            # 验证不能为空数组
-            if len(offer_in.publisher_configs) == 0:
-                raise_api_exception(
-                    ErrorCode.INVALID_PARAMETER,
-                    detail="渠道配置不能为空，请至少添加一个渠道"
-                )
-            
-            # 验证是否有重复的publisher_id
-            publisher_ids = [config.publisher_id for config in offer_in.publisher_configs]
-            if len(publisher_ids) != len(set(publisher_ids)):
-                raise_api_exception(
-                    ErrorCode.INVALID_PARAMETER,
-                    detail="渠道配置中存在重复的渠道ID"
-                )
-            
-            for config in offer_in.publisher_configs:
-                # 验证渠道是否存在
-                pub_result = await db.execute(
-                    select(Publisher).where(Publisher.id == config.publisher_id)
-                )
-                publisher = pub_result.scalars().first()
-                if not publisher:
-                    raise_api_exception(
-                        ErrorCode.RESOURCE_NOT_FOUND,
-                        detail=f"渠道ID {config.publisher_id} 不存在"
-                    )
-                
-                assignment = OfferPublisherAssignment(
-                    offer_id=offer.id,
-                    publisher_id=config.publisher_id,
-                    downstream_cap=config.downstream_cap,
-                    affiliate_payout=config.affiliate_payout,
-                    is_active=True
-                )
-                db.add(assignment)
-                publisher_ids_for_short_link.append(config.publisher_id)
-        elif offer_in.publisher_ids:
-            # 向后兼容：使用旧的publisher_ids方式
-            for pub_id in offer_in.publisher_ids:
-                # 验证渠道是否存在
-                pub_result = await db.execute(
-                    select(Publisher).where(Publisher.id == pub_id)
-                )
-                publisher = pub_result.scalars().first()
-                if publisher:
-                    assignment = OfferPublisherAssignment(
-                        offer_id=offer.id,
-                        publisher_id=pub_id,
-                        is_active=True
-                    )
-                    db.add(assignment)
-                    publisher_ids_for_short_link.append(pub_id)
-        
-        await db.commit()
-        await db.refresh(offer)
-        
-        # 为分配的渠道创建短链接（使用上游Tracklink作为原始URL）
-        short_link_info = None
-        if publisher_ids_for_short_link and offer.advertiser_tracklink:
-            short_link_info = await sync_short_links_for_offer(
-                db=db,
-                offer_id=offer.id,
-                publisher_ids=publisher_ids_for_short_link,
-                offer_name=offer.offer_name,
-                base_url=base_url,
-                current_user_id=current_user.id,
-                advertiser_tracklink=offer.advertiser_tracklink
+    # 准备Offer数据（包含渠道配置）
+    offer_data = offer_in.model_dump()
+    if offer_in.publisher_configs is not None:
+        # 将Pydantic对象转换为字典
+        offer_data['publisher_configs'] = [config.model_dump() if hasattr(config, 'model_dump') else config for config in offer_in.publisher_configs]
+    
+    # 调用服务层创建Offer（服务层会处理渠道分配和短链接创建）
+    offer, short_link_info = await offer_service.create_offer(offer_data, current_user)
+    
+    # 重新加载以获取广告主信息
+    offer = await offer_service.get_offer_by_id(offer.id, current_user, include_advertiser=True, include_assignments=False)
+    
+    # 构建响应数据
+    offer_response = OfferResponse.model_validate(offer)
+    offer_response.advertiser_name = offer.advertiser.advertiser_name if offer.advertiser else None
+    
+    # 构建响应消息，包含短链接信息
+    message = "Offer创建成功"
+    if short_link_info:
+        if short_link_info.get('duplicate'):
+            message = (
+                f"Offer创建成功。"
+                f"主短链接已存在: {short_link_info.get('final_short_link_url', 'N/A')}。"
+                f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
             )
-            await db.commit()  # 提交短链接创建
-            
-            # 刷新offer以获取更新后的downstream_tracklink
-            await db.refresh(offer)
-        elif publisher_ids_for_short_link and not offer.advertiser_tracklink:
-            logger.warning(f"Offer {offer.id} 没有配置上游Tracklink，无法创建短链接")
-        
-        # 加载关联信息
-        offer_data = OfferResponse.model_validate(offer)
-        offer_data.advertiser_name = advertiser.advertiser_name
-        
-        # 构建响应消息，包含短链接信息
-        message = "Offer创建成功"
-        if short_link_info:
-            if short_link_info.get('duplicate'):
-                message = (
-                    f"Offer创建成功。"
-                    f"主短链接已存在: {short_link_info.get('final_short_link_url', 'N/A')}。"
-                    f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
-                )
-            elif short_link_info.get('created'):
-                message = (
-                    f"Offer创建成功。"
-                    f"已创建主短链接: {short_link_info.get('final_short_link_url', 'N/A')}。"
-                    f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
-                )
-            elif short_link_info.get('final_short_link_url'):
-                message = (
-                    f"Offer创建成功。"
-                    f"主短链接: {short_link_info.get('final_short_link_url', 'N/A')}。"
-                    f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
-                )
-        
-        logger.info(f"Offer创建成功: id={offer.id}, message={message}")
-        return ResponseBaseSchema.success(data=offer_data, message=message)
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"创建Offer失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"创建Offer失败: {str(e)}"
-        )
+        elif short_link_info.get('created'):
+            message = (
+                f"Offer创建成功。"
+                f"已创建主短链接: {short_link_info.get('final_short_link_url', 'N/A')}。"
+                f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
+            )
+        elif short_link_info.get('final_short_link_url'):
+            message = (
+                f"Offer创建成功。"
+                f"主短链接: {short_link_info.get('final_short_link_url', 'N/A')}。"
+                f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
+            )
+    
+    logger.info(f"Offer创建成功: id={offer.id}, message={message}")
+    return ResponseBaseSchema.success(data=offer_response, message=message)
 
 
 @router.get("/",
@@ -796,344 +680,85 @@ async def update_offer(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """更新Offer（仅管理员）"""
-    result = await db.execute(
-        select(Offer).where(Offer.id == offer_id)
-    )
-    offer = result.scalars().first()
+    """更新Offer（已重构使用服务层）"""
+    # 使用服务层（业务逻辑在OfferService中）
+    from app.core.dependencies import get_offer_service
+    from app.services.cpl.offer_service import OfferService
     
-    if not offer:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"Offer ID {offer_id} 不存在"
-        )
+    offer_service: OfferService = await get_offer_service(db)
     
-    # 如果更新广告主，验证新广告主是否存在
-    if offer_in.advertiser_id and offer_in.advertiser_id != offer.advertiser_id:
-        adv_result = await db.execute(
-            select(Advertiser).where(Advertiser.id == offer_in.advertiser_id)
-        )
-        advertiser = adv_result.scalars().first()
-        if not advertiser:
-            raise_api_exception(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                detail=f"广告主ID {offer_in.advertiser_id} 不存在"
-            )
-    
-    # 保存旧的tracklink，用于检测变化
-    old_downstream_tracklink = offer.downstream_tracklink
-    old_advertiser_tracklink = offer.advertiser_tracklink
-    
-    # 更新字段
+    # 准备更新数据（包含渠道配置）
     update_data = offer_in.model_dump(exclude_unset=True, exclude={'publisher_ids', 'publisher_configs'})
-    for key, value in update_data.items():
-        setattr(offer, key, value)
+    if offer_in.publisher_configs is not None:
+        # 将Pydantic对象转换为字典
+        update_data['publisher_configs'] = [config.model_dump() if hasattr(config, 'model_dump') else config for config in offer_in.publisher_configs]
+    elif offer_in.publisher_ids is not None:
+        update_data['publisher_ids'] = offer_in.publisher_ids
     
-    # 检查advertiser_tracklink是否改变（如果改变，需要重新创建短链接）
-    advertiser_tracklink_changed = False
-    if 'advertiser_tracklink' in update_data:
-        new_advertiser_tracklink = update_data.get('advertiser_tracklink')
-        if new_advertiser_tracklink != old_advertiser_tracklink:
-            advertiser_tracklink_changed = True
-            logger.info(
-                f"检测到advertiser_tracklink变化: "
-                f"offer_id={offer_id}, "
-                f"old={old_advertiser_tracklink}, "
-                f"new={new_advertiser_tracklink}"
+    # 调用服务层更新Offer（服务层会处理渠道分配、短链接同步等）
+    offer, short_link_info, downstream_tracklink_short_link_info, downstream_tracklink_changed = await offer_service.update_offer(
+        offer_id, update_data, current_user
+    )
+    
+    # 重新加载关联信息（使用joinedload优化）
+    from sqlalchemy.orm import joinedload
+    offer = await offer_service.get_offer_by_id(offer.id, current_user, include_advertiser=True, include_assignments=False)
+    
+    # 加载分配的渠道
+    pub_result = await db.execute(
+        select(OfferPublisherAssignment, Publisher)
+        .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
+        .where(OfferPublisherAssignment.offer_id == offer.id)
+        .where(OfferPublisherAssignment.is_active == True)
+    )
+    assignments = pub_result.all()
+    
+    offer_data = OfferResponse.model_validate(offer)
+    offer_data.advertiser_name = offer.advertiser.advertiser_name if offer.advertiser else None
+    offer_data.assigned_publishers = [
+        {
+            "id": pub.id,
+            "publisher_name": pub.publisher_name,
+            "downstream_cap": assignment.downstream_cap,
+            "affiliate_payout": assignment.affiliate_payout
+        }
+        for assignment, pub in assignments
+    ]
+    
+    # 构建响应消息，包含短链接信息
+    message = "Offer更新成功"
+    if short_link_info:
+        if short_link_info.get('duplicate'):
+            message = (
+                f"Offer更新成功。"
+                f"主短链接已存在: {short_link_info.get('final_short_link_url', 'N/A')}。"
+                f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
+            )
+        elif short_link_info.get('created'):
+            message = (
+                f"Offer更新成功。"
+                f"已创建主短链接: {short_link_info.get('final_short_link_url', 'N/A')}。"
+                f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
+            )
+        elif short_link_info.get('final_short_link_url'):
+            message = (
+                f"Offer更新成功。"
+                f"主短链接: {short_link_info.get('final_short_link_url', 'N/A')}。"
+                f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
             )
     
-    # 检查downstream_tracklink是否改变
-    downstream_tracklink_changed = False
-    if 'downstream_tracklink' in update_data:
-        new_downstream_tracklink = update_data.get('downstream_tracklink')
-        if new_downstream_tracklink != old_downstream_tracklink:
-            downstream_tracklink_changed = True
-            logger.info(
-                f"检测到downstream_tracklink变化: "
-                f"offer_id={offer_id}, "
-                f"old={old_downstream_tracklink}, "
-                f"new={new_downstream_tracklink}"
-            )
+    if downstream_tracklink_changed:
+        message += f" 已删除旧的短链接。"
     
-    # 处理渠道分配
-    old_publisher_ids = None
-    publisher_ids_for_short_link = []
-    if 'publisher_configs' in offer_in.model_dump(exclude_unset=True):
-        # 使用新的渠道配置方式
-        # 获取旧的渠道分配列表（用于比较）
-        old_assignments_result = await db.execute(
-            select(OfferPublisherAssignment).where(OfferPublisherAssignment.offer_id == offer.id)
-        )
-        old_assignments = old_assignments_result.scalars().all()
-        old_publisher_ids = {assignment.publisher_id for assignment in old_assignments}
-        
-        # 先删除所有现有分配
-        await db.execute(
-            delete(OfferPublisherAssignment).where(OfferPublisherAssignment.offer_id == offer.id)
-        )
-        
-        # 添加新分配
-        if offer_in.publisher_configs is not None:
-            # 验证不能为空数组
-            if len(offer_in.publisher_configs) == 0:
-                raise_api_exception(
-                    ErrorCode.INVALID_PARAMETER,
-                    detail="渠道配置不能为空，请至少添加一个渠道"
-                )
-            
-            # 验证是否有重复的publisher_id
-            publisher_ids = [config.publisher_id for config in offer_in.publisher_configs]
-            if len(publisher_ids) != len(set(publisher_ids)):
-                raise_api_exception(
-                    ErrorCode.INVALID_PARAMETER,
-                    detail="渠道配置中存在重复的渠道ID"
-                )
-            
-            for config in offer_in.publisher_configs:
-                pub_result = await db.execute(
-                    select(Publisher).where(Publisher.id == config.publisher_id)
-                )
-                publisher = pub_result.scalars().first()
-                if not publisher:
-                    raise_api_exception(
-                        ErrorCode.RESOURCE_NOT_FOUND,
-                        detail=f"渠道ID {config.publisher_id} 不存在"
-                    )
-                
-                assignment = OfferPublisherAssignment(
-                    offer_id=offer.id,
-                    publisher_id=config.publisher_id,
-                    downstream_cap=config.downstream_cap,
-                    affiliate_payout=config.affiliate_payout,
-                    is_active=True
-                )
-                db.add(assignment)
-                publisher_ids_for_short_link.append(config.publisher_id)
-    elif 'publisher_ids' in offer_in.model_dump(exclude_unset=True):
-        # 向后兼容：使用旧的publisher_ids方式
-        # 获取旧的渠道分配列表（用于比较）
-        old_assignments_result = await db.execute(
-            select(OfferPublisherAssignment).where(OfferPublisherAssignment.offer_id == offer.id)
-        )
-        old_assignments = old_assignments_result.scalars().all()
-        old_publisher_ids = {assignment.publisher_id for assignment in old_assignments}
-        
-        # 先删除所有现有分配
-        await db.execute(
-            delete(OfferPublisherAssignment).where(OfferPublisherAssignment.offer_id == offer.id)
-        )
-        
-        # 添加新分配
-        if offer_in.publisher_ids:
-            for pub_id in offer_in.publisher_ids:
-                pub_result = await db.execute(
-                    select(Publisher).where(Publisher.id == pub_id)
-                )
-                publisher = pub_result.scalars().first()
-                if publisher:
-                    assignment = OfferPublisherAssignment(
-                        offer_id=offer.id,
-                        publisher_id=pub_id,
-                        is_active=True
-                    )
-                    db.add(assignment)
-                    publisher_ids_for_short_link.append(pub_id)
+    # 添加下游Tracklink短链接信息
+    if downstream_tracklink_short_link_info:
+        if downstream_tracklink_short_link_info['is_new']:
+            message += f" 已为下游Tracklink创建短链接: {downstream_tracklink_short_link_info['short_link_url']}。"
+        else:
+            message += f" 下游Tracklink短链接已存在: {downstream_tracklink_short_link_info['short_link_url']}。"
     
-    try:
-        await db.commit()
-        
-        # 如果advertiser_tracklink改变了，删除该Offer的所有旧短链接（因为原始URL变了）
-        if advertiser_tracklink_changed:
-            # 删除该Offer的所有短链接（因为tracklink改变了，需要重新生成）
-            old_short_links_result = await db.execute(
-                select(ShortLink).where(ShortLink.offer_id == offer_id)
-            )
-            old_short_links = old_short_links_result.scalars().all()
-            
-            if old_short_links:
-                deleted_count = 0
-                for old_link in old_short_links:
-                    await db.execute(
-                        delete(ShortLink).where(ShortLink.id == old_link.id)
-                    )
-                    deleted_count += 1
-                logger.info(
-                    f"删除旧的短链接（advertiser_tracklink已改变）: "
-                    f"offer_id={offer_id}, "
-                    f"deleted_count={deleted_count}, "
-                    f"old_advertiser_tracklink={old_advertiser_tracklink}"
-                )
-                await db.commit()
-        
-        # 如果渠道分配有变化或advertiser_tracklink改变，同步短链接（使用上游Tracklink作为原始URL）
-        short_link_info = None
-        need_sync_short_links = False
-        
-        # 检查是否需要同步短链接
-        if 'publisher_configs' in offer_in.model_dump(exclude_unset=True):
-            new_publisher_ids = set(publisher_ids_for_short_link)
-            if old_publisher_ids != new_publisher_ids:
-                need_sync_short_links = True
-        elif 'publisher_ids' in offer_in.model_dump(exclude_unset=True):
-            new_publisher_ids = set(offer_in.publisher_ids or [])
-            if old_publisher_ids != new_publisher_ids:
-                need_sync_short_links = True
-        elif advertiser_tracklink_changed:
-            # advertiser_tracklink改变，需要重新创建短链接
-            need_sync_short_links = True
-        
-        if need_sync_short_links:
-            # 获取当前的上游Tracklink（可能是新更新的）
-            current_advertiser_tracklink = offer.advertiser_tracklink
-            # 获取当前的渠道分配
-            if 'publisher_configs' in offer_in.model_dump(exclude_unset=True):
-                current_publisher_ids = publisher_ids_for_short_link
-            elif 'publisher_ids' in offer_in.model_dump(exclude_unset=True):
-                current_publisher_ids = offer_in.publisher_ids
-            else:
-                # 如果没有明确指定publisher_ids，使用现有的分配
-                existing_assignments_result = await db.execute(
-                    select(OfferPublisherAssignment).where(OfferPublisherAssignment.offer_id == offer.id)
-                )
-                existing_assignments = existing_assignments_result.scalars().all()
-                current_publisher_ids = [assignment.publisher_id for assignment in existing_assignments]
-            
-            if current_advertiser_tracklink and current_publisher_ids:
-                base_url = settings.TRACKING_BASE_URL
-                short_link_info = await sync_short_links_for_offer(
-                    db=db,
-                    offer_id=offer.id,
-                    publisher_ids=current_publisher_ids,
-                    offer_name=offer.offer_name,
-                    base_url=base_url,
-                    current_user_id=current_user.id,
-                    advertiser_tracklink=current_advertiser_tracklink
-                )
-                await db.commit()  # 提交短链接变更
-                
-                # 刷新offer以获取更新后的downstream_tracklink
-                await db.refresh(offer)
-            elif not current_advertiser_tracklink:
-                logger.warning(f"Offer {offer.id} 没有配置上游Tracklink，无法创建短链接")
-        
-        # 检查下游Tracklink是否在short_links表中存在，如果不存在则创建
-        # 注意：创建时使用上游Tracklink（advertiser_tracklink）作为original_url
-        downstream_tracklink_short_link_info = None
-        current_downstream_tracklink = offer.downstream_tracklink
-        current_advertiser_tracklink = offer.advertiser_tracklink
-        if current_downstream_tracklink and current_advertiser_tracklink:
-            base_url = settings.TRACKING_BASE_URL
-            try:
-                downstream_short_link, is_new = await check_and_create_downstream_tracklink_short_link(
-                    db=db,
-                    offer_id=offer.id,
-                    downstream_tracklink=current_downstream_tracklink,
-                    advertiser_tracklink=current_advertiser_tracklink,
-                    offer_name=offer.offer_name,
-                    base_url=base_url,
-                    current_user_id=current_user.id
-                )
-                
-                if downstream_short_link:
-                    short_link_url = get_short_link_url(base_url, downstream_short_link.short_code)
-                    downstream_tracklink_short_link_info = {
-                        'short_link': downstream_short_link,
-                        'short_link_url': short_link_url,
-                        'is_new': is_new
-                    }
-                    
-                    # 更新offer.downstream_tracklink为短链接URL（无论是否新创建）
-                    # 这样可以确保downstream_tracklink始终指向正确的短链接URL
-                    offer.downstream_tracklink = short_link_url
-                    if is_new:
-                        logger.info(
-                            f"更新Offer的downstream_tracklink为短链接URL（新创建）: "
-                            f"offer_id={offer.id}, "
-                            f"short_link_url={short_link_url}"
-                        )
-                    else:
-                        logger.info(
-                            f"更新Offer的downstream_tracklink为短链接URL（已存在）: "
-                            f"offer_id={offer.id}, "
-                            f"short_link_url={short_link_url}"
-                        )
-            except Exception as e:
-                # 如果创建短链接失败，记录错误但不影响Offer更新
-                error_msg = str(e)
-                logger.error(
-                    f"创建下游Tracklink短链接失败（不影响Offer更新）: "
-                    f"offer_id={offer.id}, "
-                    f"error={error_msg[:200]}"
-                )
-        
-        # 重新加载关联信息（使用joinedload优化）
-        from sqlalchemy.orm import joinedload
-        query = select(Offer).where(Offer.id == offer.id).options(joinedload(Offer.advertiser))
-        result = await db.execute(query)
-        offer = result.scalars().first()
-        
-        # 加载分配的渠道
-        pub_result = await db.execute(
-            select(OfferPublisherAssignment, Publisher)
-            .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
-            .where(OfferPublisherAssignment.offer_id == offer.id)
-            .where(OfferPublisherAssignment.is_active == True)
-        )
-        assignments = pub_result.all()
-        
-        offer_data = OfferResponse.model_validate(offer)
-        offer_data.advertiser_name = offer.advertiser.advertiser_name if offer.advertiser else None
-        offer_data.assigned_publishers = [
-            {
-                "id": pub.id,
-                "publisher_name": pub.publisher_name,
-                "downstream_cap": assignment.downstream_cap,
-                "affiliate_payout": assignment.affiliate_payout
-            }
-            for assignment, pub in assignments
-        ]
-        
-        # 构建响应消息，包含短链接信息
-        message = "Offer更新成功"
-        if short_link_info:
-            if short_link_info.get('duplicate'):
-                message = (
-                    f"Offer更新成功。"
-                    f"主短链接已存在: {short_link_info.get('final_short_link_url', 'N/A')}。"
-                    f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
-                )
-            elif short_link_info.get('created'):
-                message = (
-                    f"Offer更新成功。"
-                    f"已创建主短链接: {short_link_info.get('final_short_link_url', 'N/A')}。"
-                    f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
-                )
-            elif short_link_info.get('final_short_link_url'):
-                message = (
-                    f"Offer更新成功。"
-                    f"主短链接: {short_link_info.get('final_short_link_url', 'N/A')}。"
-                    f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
-                )
-        
-        if downstream_tracklink_changed:
-            message += f" 已删除旧的短链接。"
-        
-        # 添加下游Tracklink短链接信息
-        if downstream_tracklink_short_link_info:
-            if downstream_tracklink_short_link_info['is_new']:
-                message += f" 已为下游Tracklink创建短链接: {downstream_tracklink_short_link_info['short_link_url']}。"
-            else:
-                message += f" 下游Tracklink短链接已存在: {downstream_tracklink_short_link_info['short_link_url']}。"
-        
-        logger.info(f"Offer更新成功: id={offer.id}, message={message}")
-        return ResponseBaseSchema.success(data=offer_data, message=message)
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"更新Offer失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"更新Offer失败: {str(e)}"
-        )
+    logger.info(f"Offer更新成功: id={offer.id}, message={message}")
+    return ResponseBaseSchema.success(data=offer_data, message=message)
 
 
 @router.delete("/{offer_id}",
