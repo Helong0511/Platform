@@ -49,7 +49,8 @@ class PostbackConversionResponse(BaseModel):
     conversion_id: str
     event_name: Optional[str]
     event_value: Optional[float]
-    payout: Optional[float]
+    original_payout: Optional[float] = Field(None, description="原始支付金额（PO）")
+    payout: Optional[float] = Field(None, description="扣后支付金额（PO(扣)）")
     devad_id: Optional[str]
     os: Optional[str]
     carrier: Optional[str]
@@ -82,7 +83,8 @@ class PostbackStatsResponse(BaseModel):
     """Postback 统计响应模型"""
     platform: str = Field(..., description="平台名称")
     total_conversions: int = Field(..., description="总转化数")
-    total_payout: float = Field(..., description="总支付金额")
+    total_original_payout: Optional[float] = Field(None, description="原始总支付金额（PO）")
+    total_payout: float = Field(..., description="扣后总支付金额（PO(扣)）")
     total_event_value: float = Field(..., description="总事件价值")
     unique_events: int = Field(..., description="唯一事件数")
     date_range: Optional[Dict[str, str]] = Field(None, description="日期范围")
@@ -105,6 +107,7 @@ class PostbackForwardLogResponse(BaseModel):
     id: int
     conversion_id: int
     product_id: Optional[int]
+    publisher_id: Optional[int] = Field(None, description="渠道ID（转发到渠道时使用）")
     downstream_url: str
     request_method: str
     request_data: Optional[str]

@@ -490,7 +490,8 @@ class PostbackConversion(Base):
     conversion_id = Column(String(255), nullable=False, comment='转化ID（各平台唯一标识，如clk_id）')
     event_name = Column(String(100), nullable=True, index=True, comment='事件名称')
     event_value = Column(Float, nullable=True, comment='事件价值（购买价格等）')
-    payout = Column(Float, nullable=True, comment='支付金额（确认的广告单元价格）')
+    original_payout = Column(Float, nullable=True, comment='原始支付金额（PO）')
+    payout = Column(Float, nullable=True, comment='扣后支付金额（PO(扣)）')
 
     # 设备信息
     devad_id = Column(String(255), nullable=True, comment='设备广告ID（IDFA或GAID）')
@@ -539,6 +540,7 @@ class PostbackForwardLog(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='转发日志ID')
     conversion_id = Column(Integer, ForeignKey("postback_conversions.id", ondelete="CASCADE"), nullable=False, index=True, comment='关联的转化记录ID')
     product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True, index=True, comment='产品ID')
+    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="SET NULL"), nullable=True, index=True, comment='渠道ID（转发到渠道时使用）')
     downstream_url = Column(String(500), nullable=False, comment='下游URL')
     request_method = Column(String(10), nullable=False, comment='请求方式：GET 或 POST')
     request_data = Column(Text, nullable=True, comment='请求数据（JSON格式，用于POST请求）')
@@ -554,10 +556,12 @@ class PostbackForwardLog(Base):
     # 关系
     conversion = relationship("PostbackConversion", foreign_keys=[conversion_id])
     product = relationship("Product", foreign_keys=[product_id])
+    publisher = relationship("Publisher", foreign_keys=[publisher_id])
 
     __table_args__ = (
         Index("idx_forward_log_conversion", "conversion_id"),
         Index("idx_forward_log_product", "product_id"),
+        Index("idx_forward_log_publisher", "publisher_id"),
         Index("idx_forward_log_created_at", "created_at"),
         Index("idx_forward_log_success", "success"),
     )

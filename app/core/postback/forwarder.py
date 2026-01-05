@@ -143,6 +143,7 @@ class PostbackForwarder:
         forward_log = PostbackForwardLog(
             conversion_id=conversion.id,
             product_id=None,  # 渠道转发不使用 product_id
+            publisher_id=publisher.id,  # 记录渠道ID
             downstream_url=replaced_url,
             request_method=method,
             success=False,
@@ -359,6 +360,8 @@ class PostbackForwarder:
         # 添加可选字段（如果存在）
         if conversion.event_value is not None:
             data["event_value"] = conversion.event_value
+        if conversion.original_payout is not None:
+            data["original_payout"] = conversion.original_payout
         if conversion.payout is not None:
             data["payout"] = conversion.payout
         if conversion.devad_id:
@@ -446,7 +449,7 @@ class PostbackForwarder:
         替换 URL 中的占位符
         
         支持的占位符格式：{变量名}
-        例如：{click_id}, {payout}, {offer_id} 等
+        例如：{click_id}, {original_payout}, {payout}, {offer_id} 等
         
         Args:
             url: 包含占位符的 URL
@@ -477,6 +480,7 @@ class PostbackForwarder:
             values['platform'] = conversion.platform
             values['event_name'] = conversion.event_name if conversion.event_name else ''
             values['event_value'] = str(conversion.event_value) if conversion.event_value is not None else ''
+            values['original_payout'] = str(conversion.original_payout) if conversion.original_payout is not None else ''
             values['payout'] = str(conversion.payout) if conversion.payout is not None else ''
             values['devad_id'] = conversion.devad_id if conversion.devad_id else ''
             values['os'] = conversion.os if conversion.os else ''
@@ -618,8 +622,10 @@ class PostbackForwarder:
             if conversion.event_name:
                 msg += f"事件: {conversion.event_name}\n"
             
+            if conversion.original_payout is not None:
+                msg += f"原始金额 (PO): ${conversion.original_payout:.2f}\n"
             if conversion.payout is not None:
-                msg += f"金额: ${conversion.payout:.2f}\n"
+                msg += f"扣后金额 (PO(扣)): ${conversion.payout:.2f}\n"
             
             # 渠道信息
             msg += f"\n渠道信息:\n"

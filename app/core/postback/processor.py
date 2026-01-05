@@ -275,7 +275,8 @@ class PostbackProcessor:
                 normalized_data["ip"] = request_ip
             
             # 7.5. CPL 系统：进行 Cap/扣量检查（广告主信息已在上面获取）
-            final_payout = normalized_data.get("payout")
+            original_payout = normalized_data.get("payout")  # 原始 payout (PO)
+            final_payout = original_payout  # 扣后 payout (PO(扣))，初始值等于原始值
             discount_info = None
             
             # 如果之前找到了 click_record，进行 Cap 和扣量检查
@@ -339,8 +340,8 @@ class PostbackProcessor:
                     if discount_info:
                         logger.info(
                             f"应用扣量: conversion_id={conversion_id}, "
-                            f"original={normalized_data.get('payout')}, "
-                            f"final={final_payout}, info={discount_info}"
+                            f"original_payout={original_payout}, "
+                            f"final_payout={final_payout}, info={discount_info}"
                         )
             
             # 8. 创建转化记录（使用广告主名称作为平台名称）
@@ -374,7 +375,8 @@ class PostbackProcessor:
                 conversion_id=conversion_id,
                 event_name=normalized_data.get("event_name"),
                 event_value=normalized_data.get("event_value"),
-                payout=final_payout,  # 使用扣量后的金额
+                original_payout=original_payout,  # 原始 payout (PO)
+                payout=final_payout,  # 扣后 payout (PO(扣))
                 devad_id=normalized_data.get("devad_id"),
                 os=final_os,  # 使用补充后的 os
                 carrier=normalized_data.get("carrier"),
@@ -433,7 +435,7 @@ class PostbackProcessor:
             logger.info(
                 f"平台 {platform} postback 转化记录已保存: "
                 f"conversion_id={conversion_id}, event_name={event_name}, "
-                f"payout={final_payout} (original={normalized_data.get('payout')}), "
+                f"original_payout={original_payout}, payout={final_payout}, "
                 f"product_id={product_id}, client_id={client_id}, "
                 f"click_id={click_id}, offer_id={offer_id}"
             )

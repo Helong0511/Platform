@@ -5,7 +5,7 @@
 import json
 import logging
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, Path, Request
+from fastapi import APIRouter, Depends, Query, Path, Request, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import and_, or_, func, delete
@@ -529,6 +529,88 @@ async def resend_conversion_notification(
     except Exception as e:
         logger.error(
             f"补发转化通知失败: conversion_id={conversion_id}, error={str(e)}",
+            exc_info=True
+        )
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"补发通知失败: {str(e)}"
+        )
+
+
+@router.post("/forward-logs/{forward_log_id}/resend-notification",
+             response_model=ResponseBaseSchema[dict],
+             summary="基于转发日志补发通知")
+async def resend_notification_from_forward_log(
+    forward_log_id: int = Path(..., ge=1, description="转发日志ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    基于转发日志补发通知
+    
+    根据转发日志中的转化记录，重新发送通知
+    仅管理员可访问
+    """
+    from app.models.models import PostbackConversion, PostbackForwardLog
+    from app.core.postback.notifier import PostbackNotifier
+    
+    # 检查管理员权限
+    if current_user.role != UserRole.ADMIN:
+        raise_api_exception(
+            ErrorCode.FORBIDDEN,
+            detail="仅管理员可访问此接口"
+        )
+    
+    try:
+        # 查询转发日志
+        result = await db.execute(
+            select(PostbackForwardLog).where(PostbackForwardLog.id == forward_log_id)
+        )
+        forward_log = result.scalars().first()
+        
+        if not forward_log:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail=f"转发日志ID {forward_log_id} 不存在"
+            )
+        
+        # 查询转化记录
+        conversion_result = await db.execute(
+            select(PostbackConversion).where(PostbackConversion.id == forward_log.conversion_id)
+        )
+        conversion = conversion_result.scalars().first()
+        
+        if not conversion:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail=f"转化记录ID {forward_log.conversion_id} 不存在"
+            )
+        
+        # 补发通知
+        await PostbackNotifier.notify_conversion(
+            conversion=conversion,
+            db=db,
+            product=None,  # 将在通知函数中查询
+            client=None   # 将在通知函数中查询
+        )
+        
+        logger.info(
+            f"用户 {current_user.id} 基于转发日志补发通知: forward_log_id={forward_log_id}, "
+            f"conversion_id={forward_log.conversion_id}"
+        )
+        
+        return ResponseBaseSchema.success(
+            data={
+                "message": "通知已补发",
+                "forward_log_id": forward_log_id,
+                "conversion_id": forward_log.conversion_id
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"基于转发日志补发通知失败: forward_log_id={forward_log_id}, error={str(e)}",
             exc_info=True
         )
         raise_api_exception(

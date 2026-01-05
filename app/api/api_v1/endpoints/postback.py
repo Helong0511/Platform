@@ -6,7 +6,7 @@ import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
 
-from fastapi import APIRouter, Request, Query, Depends, HTTPException
+from fastapi import APIRouter, Request, Query, Depends, HTTPException, Path
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -356,6 +356,7 @@ async def get_postback_stats(
         query = select(
             PostbackConversion.platform,
             func.count(PostbackConversion.id).label("total_conversions"),
+            func.sum(PostbackConversion.original_payout).label("total_original_payout"),
             func.sum(PostbackConversion.payout).label("total_payout"),
             func.sum(PostbackConversion.event_value).label("total_event_value"),
             func.count(func.distinct(PostbackConversion.event_name)).label("unique_events")
@@ -403,6 +404,7 @@ async def get_postback_stats(
             stats_list.append(PostbackStatsResponse(
                 platform=row.platform,
                 total_conversions=int(row.total_conversions or 0),
+                total_original_payout=float(row.total_original_payout or 0.0) if hasattr(row, 'total_original_payout') else None,
                 total_payout=float(row.total_payout or 0.0),
                 total_event_value=float(row.total_event_value or 0.0),
                 unique_events=int(row.unique_events or 0),
@@ -440,6 +442,7 @@ async def get_postback_forward_logs(
     request: Request,
     conversion_id: Optional[int] = Query(None, description="转化记录ID"),
     product_id: Optional[int] = Query(None, description="产品ID"),
+    publisher_id: Optional[int] = Query(None, description="渠道ID"),
     success: Optional[bool] = Query(None, description="是否成功"),
     start_date: Optional[str] = Query(None, description="起始日期（YYYY-MM-DD）"),
     end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
@@ -468,6 +471,8 @@ async def get_postback_forward_logs(
             conditions.append(PostbackForwardLog.conversion_id == conversion_id)
         if product_id:
             conditions.append(PostbackForwardLog.product_id == product_id)
+        if publisher_id:
+            conditions.append(PostbackForwardLog.publisher_id == publisher_id)
         if success is not None:
             conditions.append(PostbackForwardLog.success == success)
         
@@ -534,6 +539,106 @@ async def get_postback_forward_logs(
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"查询失败：{str(e)}"
+        )
+
+
+# ====== 补发转发接口 ======
+@router.post("/postback/forward-logs/{forward_log_id}/resend",
+            response_model=ResponseBaseSchema[dict],
+            summary="补发 PostBack 转发（管理员）")
+async def resend_postback_forward(
+    forward_log_id: int = Path(..., ge=1, description="转发日志ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    补发 PostBack 转发
+    
+    根据转发日志重新发送转发请求，用于处理转发失败的情况
+    仅管理员可访问
+    """
+    from app.core.postback.forwarder import PostbackForwarder
+    
+    # 检查管理员权限
+    if current_user.role != UserRole.ADMIN:
+        raise_api_exception(
+            ErrorCode.FORBIDDEN,
+            detail="仅管理员可访问此接口"
+        )
+    
+    try:
+        # 查询转发日志
+        result = await db.execute(
+            select(PostbackForwardLog).where(PostbackForwardLog.id == forward_log_id)
+        )
+        forward_log = result.scalars().first()
+        
+        if not forward_log:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail=f"转发日志ID {forward_log_id} 不存在"
+            )
+        
+        # 查询转化记录
+        conversion_result = await db.execute(
+            select(PostbackConversion).where(PostbackConversion.id == forward_log.conversion_id)
+        )
+        conversion = conversion_result.scalars().first()
+        
+        if not conversion:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail=f"转化记录ID {forward_log.conversion_id} 不存在"
+            )
+        
+        # 根据转发类型重新发送
+        if forward_log.publisher_id:
+            # 转发到渠道
+            await PostbackForwarder.forward_to_publisher(conversion, db)
+            message = f"已补发转发到渠道（Publisher ID: {forward_log.publisher_id}）"
+        elif forward_log.product_id:
+            # 转发到产品下游
+            product_result = await db.execute(
+                select(Product).where(Product.id == forward_log.product_id)
+            )
+            product = product_result.scalars().first()
+            if product:
+                await PostbackForwarder.forward_to_downstream(conversion, product, db)
+                message = f"已补发转发到产品下游（Product ID: {forward_log.product_id}）"
+            else:
+                raise_api_exception(
+                    ErrorCode.RESOURCE_NOT_FOUND,
+                    detail=f"产品ID {forward_log.product_id} 不存在"
+                )
+        else:
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="转发日志缺少 publisher_id 或 product_id，无法确定转发目标"
+            )
+        
+        logger.info(
+            f"用户 {current_user.id} 补发转发: forward_log_id={forward_log_id}, "
+            f"conversion_id={forward_log.conversion_id}"
+        )
+        
+        return ResponseBaseSchema.success(
+            data={
+                "message": message,
+                "forward_log_id": forward_log_id,
+                "conversion_id": forward_log.conversion_id
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"补发转发失败: forward_log_id={forward_log_id}, error={str(e)}",
+            exc_info=True
+        )
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"补发转发失败: {str(e)}"
         )
 
 

@@ -251,6 +251,7 @@ async def get_conversion_logs(
                 "device": device,
                 "country": country,
                 "platform": conv.platform,
+                "original_payout": float(conv.original_payout) if conv.original_payout else None,
                 "payout": float(conv.payout) if conv.payout else None,
                 "event_name": conv.event_name,
                 "created_at": conv.created_at.isoformat() if conv.created_at else None

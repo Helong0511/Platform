@@ -10,7 +10,7 @@
             <span class="stat-value">{{ stat.total_conversions || 0 }}</span>
             <span class="stat-unit">条转化</span>
             <span class="stat-separator">|</span>
-            <span class="stat-label">总金额：</span>
+            <span class="stat-label">总金额 (PO(扣))：</span>
             <span class="stat-value">{{ formatCurrency(stat.total_payout || 0) }}</span>
           </span>
         </div>
@@ -108,8 +108,12 @@
                 <span class="stat-label">总转化数：</span>
                 <span class="stat-value">{{ stat.total_conversions || 0 }}</span>
               </div>
+              <div class="stat-row" v-if="stat.total_original_payout">
+                <span class="stat-label">原始总支付金额 (PO)：</span>
+                <span class="stat-value">{{ formatCurrency(stat.total_original_payout || 0) }}</span>
+              </div>
               <div class="stat-row">
-                <span class="stat-label">总支付金额：</span>
+                <span class="stat-label">扣后总支付金额 (PO(扣))：</span>
                 <span class="stat-value highlight">{{ formatCurrency(stat.total_payout || 0) }}</span>
               </div>
               <div class="stat-row">
@@ -206,7 +210,15 @@
             {{ scope.row.event_value ? formatCurrency(scope.row.event_value) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="payout" label="支付金额" width="120" align="right">
+        <el-table-column prop="original_payout" label="原始支付金额 (PO)" width="150" align="right">
+          <template #default="scope">
+            <span v-if="scope.row.original_payout">
+              {{ formatCurrency(scope.row.original_payout) }}
+            </span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="payout" label="扣后支付金额 (PO(扣))" width="150" align="right">
           <template #default="scope">
             <span class="highlight" v-if="scope.row.payout">
               {{ formatCurrency(scope.row.payout) }}
@@ -356,7 +368,13 @@
           <el-descriptions-item label="事件价值">
             {{ currentConversion.event_value ? formatCurrency(currentConversion.event_value) : '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="支付金额">
+          <el-descriptions-item label="原始支付金额 (PO)">
+            <span v-if="currentConversion.original_payout">
+              {{ formatCurrency(currentConversion.original_payout) }}
+            </span>
+            <span v-else>-</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="扣后支付金额 (PO(扣))">
             <span class="highlight" v-if="currentConversion.payout">
               {{ formatCurrency(currentConversion.payout) }}
             </span>

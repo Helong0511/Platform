@@ -169,10 +169,10 @@ async def get_conversion_summary(
         # 计算总转化率
         cr = (conversion_count / click_count * 100) if click_count > 0 else 0
         
-        # 统计总支付金额（PO）
+        # 统计总支付金额（PO）- 使用原始 payout
         # 如果是客户用户或需要筛选offer_id，需要通过ClickStats关联Publisher来过滤
         click_alias_for_po = aliased(ClickStats)
-        po_query = select(func.sum(PostbackConversion.payout))
+        po_query = select(func.sum(PostbackConversion.original_payout))
         if client_publisher_ids is not None or offer_id is not None:
             # 需要通过ClickStats表关联来筛选offer_id或publisher_id
             po_query = po_query.join(
@@ -230,7 +230,7 @@ async def get_conversion_summary(
             click_alias.offer_id.label("offer_id"),  # 统一使用 ClickStats.offer_id，而不是 product_id
             click_alias.publisher_id,
             func.count(PostbackConversion.id).label('conversion_count'),
-            func.sum(PostbackConversion.payout).label('total_po')
+            func.sum(PostbackConversion.original_payout).label('total_po')  # 使用原始 payout 统计 PO
         ).outerjoin(
             click_alias, PostbackConversion.click_id == click_alias.click_id
         )
@@ -342,14 +342,9 @@ async def get_conversion_summary(
                 conversions = conversions_result.scalars().all()
                 
                 for conversion in conversions:
+                    # 直接使用扣后的 payout，因为 conversion.payout 已经是扣后的金额
                     if conversion.payout:
-                        final_payout, _, _ = await calculate_discount(
-                            db=db,
-                            offer_id=offer_id_val,
-                            publisher_id=publisher_id_val,
-                            original_payout=conversion.payout
-                        )
-                        po_after_discount += final_payout
+                        po_after_discount += conversion.payout
             else:
                 # 没有关联渠道或Offer，无法计算扣量，使用原始PO
                 po_after_discount = stat["po"]
@@ -485,9 +480,9 @@ async def get_summary_by_offer(
             
             cr = (conversion_count / click_count * 100) if click_count > 0 else 0
             
-            # PO查询也需要通过ClickStats表关联来筛选publisher_id
+            # PO查询也需要通过ClickStats表关联来筛选publisher_id - 使用原始 payout
             click_alias_for_po = aliased(ClickStats)
-            po_query = select(func.sum(PostbackConversion.payout)).join(
+            po_query = select(func.sum(PostbackConversion.original_payout)).join(
                 click_alias_for_po, PostbackConversion.click_id == click_alias_for_po.click_id
             ).where(
                 and_(

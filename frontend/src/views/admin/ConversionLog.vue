@@ -142,7 +142,15 @@
               {{ scope.row.advertiser_name || '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="payout" label="支付金额" width="120" align="right" sortable>
+          <el-table-column prop="original_payout" label="原始支付金额 (PO)" width="150" align="right" sortable>
+            <template #default="scope">
+              <span v-if="scope.row.original_payout" class="text-primary font-weight-medium">
+                {{ scope.row.original_payout.toFixed(2) }}
+              </span>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="payout" label="扣后支付金额 (PO(扣))" width="150" align="right" sortable>
             <template #default="scope">
               <span v-if="scope.row.payout" class="text-success font-weight-medium">
                 {{ scope.row.payout.toFixed(2) }}
