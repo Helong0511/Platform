@@ -76,24 +76,45 @@
         
         <el-table-column prop="target_name" label="配置对象" min-width="200" />
         
-        <el-table-column label="扣量配置" width="150" align="center">
+        <el-table-column label="扣量配置" width="180" align="center">
           <template #default="scope">
-            <div v-if="scope.row.enable_volume_deduction">
-              <el-tag type="warning">{{ (scope.row.volume_deduction_ratio * 100).toFixed(1) }}%</el-tag>
-              <div style="font-size: 12px; color: #909399; margin-top: 4px;">
-                {{ getStrategyLabel(scope.row.deduction_strategy) }}
+            <div v-if="scope.row.enable_volume_deduction" class="deduction-cell volume-deduction">
+              <div class="deduction-header">
+                <el-icon class="deduction-icon" style="color: #E6A23C;"><Remove /></el-icon>
+                <span class="deduction-label">扣量</span>
+              </div>
+              <el-tag type="warning" size="small" style="margin-top: 4px;">
+                {{ (scope.row.volume_deduction_ratio * 100).toFixed(1) }}%
+              </el-tag>
+              <div class="deduction-strategy">
+                <el-tag size="small" type="info" effect="plain">
+                  {{ getStrategyLabel(scope.row.deduction_strategy) }}
+                </el-tag>
               </div>
             </div>
-            <span v-else style="color: #909399;">未启用</span>
+            <div v-else class="deduction-disabled">
+              <el-icon><Close /></el-icon>
+              <span>未启用扣量</span>
+            </div>
           </template>
         </el-table-column>
         
-        <el-table-column label="扣金额配置" width="120" align="center">
+        <el-table-column label="扣金额配置" width="150" align="center">
           <template #default="scope">
-            <el-tag v-if="scope.row.enable_amount_deduction" type="danger">
-              {{ (scope.row.amount_deduction_ratio * 100).toFixed(1) }}%
-            </el-tag>
-            <span v-else style="color: #909399;">未启用</span>
+            <div v-if="scope.row.enable_amount_deduction" class="deduction-cell amount-deduction">
+              <div class="deduction-header">
+                <el-icon class="deduction-icon" style="color: #F56C6C;"><Money /></el-icon>
+                <span class="deduction-label">扣金额</span>
+              </div>
+              <el-tag type="danger" size="small" style="margin-top: 4px;">
+                {{ (scope.row.amount_deduction_ratio * 100).toFixed(1) }}%
+              </el-tag>
+              <div class="deduction-tip">每个转化扣减</div>
+            </div>
+            <div v-else class="deduction-disabled">
+              <el-icon><Close /></el-icon>
+              <span>未启用扣金额</span>
+            </div>
           </template>
         </el-table-column>
         
@@ -186,10 +207,24 @@
         </el-form-item>
         
         <!-- 按比例扣量配置 -->
-        <el-divider content-position="left">按比例扣量</el-divider>
+        <el-divider content-position="left">
+          <div class="divider-content">
+            <el-icon style="color: #E6A23C; margin-right: 8px;"><Remove /></el-icon>
+            <span style="font-weight: 600; color: #E6A23C;">按比例扣量</span>
+            <span class="divider-desc">（减少转化数量，下游不可见）</span>
+          </div>
+        </el-divider>
         
         <el-form-item label="启用扣量">
-          <el-switch v-model="form.enable_volume_deduction" />
+          <el-switch 
+            v-model="form.enable_volume_deduction" 
+            active-text="启用"
+            inactive-text="禁用"
+          />
+          <div class="form-item-tip" style="margin-top: 8px;">
+            <el-icon><InfoFilled /></el-icon>
+            扣量：减少转化数量，被扣减的转化不会保存到数据库，下游渠道无法看到
+          </div>
         </el-form-item>
         
         <template v-if="form.enable_volume_deduction">
@@ -212,10 +247,11 @@
                 :step="0.1"
                 style="width: 120px;"
               />
-              <span style="margin-left: 10px;">%</span>
+              <span style="margin-left: 10px; font-weight: 600; color: #E6A23C;">%</span>
             </div>
             <div class="form-item-tip">
-              扣量比例范围：0% - 100%，例如：10% 表示扣减10%的转化数量
+              <strong>扣量比例说明：</strong>范围 0% - 100%，例如：10% 表示扣减10%的转化数量。
+              被扣减的转化不会保存到数据库，下游渠道无法看到这些转化。
             </div>
           </el-form-item>
           
@@ -223,31 +259,48 @@
             <el-select v-model="form.deduction_strategy" style="width: 100%;">
               <el-option label="随机" value="random">
                 <div>
-                  <div>随机</div>
+                  <div><strong>随机</strong></div>
                   <div style="font-size: 12px; color: #909399;">随机选择转化进行扣减，分布更自然</div>
                 </div>
               </el-option>
               <el-option label="按比例" value="proportional">
                 <div>
-                  <div>按比例</div>
+                  <div><strong>按比例</strong></div>
                   <div style="font-size: 12px; color: #909399;">按时间顺序等比例选择转化进行扣减</div>
                 </div>
               </el-option>
               <el-option label="轮询" value="round_robin">
                 <div>
-                  <div>轮询</div>
+                  <div><strong>轮询</strong></div>
                   <div style="font-size: 12px; color: #909399;">轮询选择转化进行扣减</div>
                 </div>
               </el-option>
             </el-select>
+            <div class="form-item-tip">
+              选择扣量时的分配策略，影响哪些转化会被扣减
+            </div>
           </el-form-item>
         </template>
         
         <!-- 按比例扣金额配置 -->
-        <el-divider content-position="left">按比例扣金额</el-divider>
+        <el-divider content-position="left">
+          <div class="divider-content">
+            <el-icon style="color: #F56C6C; margin-right: 8px;"><Money /></el-icon>
+            <span style="font-weight: 600; color: #F56C6C;">按比例扣金额</span>
+            <span class="divider-desc">（减少转化金额，下游可见但金额减少）</span>
+          </div>
+        </el-divider>
         
         <el-form-item label="启用扣金额">
-          <el-switch v-model="form.enable_amount_deduction" />
+          <el-switch 
+            v-model="form.enable_amount_deduction" 
+            active-text="启用"
+            inactive-text="禁用"
+          />
+          <div class="form-item-tip" style="margin-top: 8px;">
+            <el-icon><InfoFilled /></el-icon>
+            扣金额：减少转化金额，转化仍然保存但金额会按比例减少，下游可以看到转化但金额已扣减
+          </div>
         </el-form-item>
         
         <template v-if="form.enable_amount_deduction">
@@ -270,10 +323,11 @@
                 :step="0.1"
                 style="width: 120px;"
               />
-              <span style="margin-left: 10px;">%</span>
+              <span style="margin-left: 10px; font-weight: 600; color: #F56C6C;">%</span>
             </div>
             <div class="form-item-tip">
-              扣金额比例范围：0% - 100%，例如：5% 表示每个转化金额扣减5%
+              <strong>扣金额比例说明：</strong>范围 0% - 100%，例如：5% 表示每个转化金额扣减5%。
+              转化仍然保存到数据库，但最终支付给下游的金额会按比例减少。
             </div>
           </el-form-item>
         </template>
@@ -310,7 +364,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Refresh, Plus, Setting } from '@element-plus/icons-vue'
+import { Search, Refresh, Plus, Setting, Remove, Money, Close, InfoFilled } from '@element-plus/icons-vue'
 import {
   getDeductionConfigs,
   createDeductionConfig,
@@ -690,6 +744,81 @@ onMounted(() => {
   font-size: 12px;
   color: #909399;
   margin-top: 4px;
+  line-height: 1.6;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.form-item-tip .el-icon {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.divider-content {
+  display: flex;
+  align-items: center;
+}
+
+.divider-desc {
+  font-size: 12px;
+  font-weight: normal;
+  color: #909399;
+  margin-left: 8px;
+}
+
+.deduction-cell {
+  padding: 8px;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.deduction-cell.volume-deduction {
+  background-color: #FDF6EC;
+  border: 1px solid #F5DAB1;
+}
+
+.deduction-cell.amount-deduction {
+  background-color: #FEF0F0;
+  border: 1px solid #FBC4C4;
+}
+
+.deduction-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.deduction-icon {
+  font-size: 16px;
+}
+
+.deduction-label {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.deduction-strategy {
+  margin-top: 6px;
+}
+
+.deduction-tip {
+  font-size: 11px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.deduction-disabled {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: #C0C4CC;
+  font-size: 12px;
+  padding: 8px;
 }
 </style>
+
 
