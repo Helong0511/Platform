@@ -140,31 +140,15 @@ class LoggingStream:
 # 创建专门的 logger 用于捕获 stdout/stderr
 stdout_logger = logging.getLogger('stdout')
 stdout_logger.setLevel(logging.INFO)
-if file_handler:
-    stdout_logger.addHandler(file_handler)
-else:
-    # 如果没有文件处理器，使用控制台处理器
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(logging.INFO)
-    stdout_logger.addHandler(console_handler)
+stdout_logger.addHandler(file_handler if file_handler else _create_console_handler(formatter, logging.INFO))
 stdout_logger.propagate = False  # 防止重复输出
 
 stderr_logger = logging.getLogger('stderr')
 stderr_logger.setLevel(logging.WARNING)
-if file_handler:
-    stderr_logger.addHandler(file_handler)
-else:
-    # 如果没有文件处理器，使用控制台处理器
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(logging.WARNING)
-    stderr_logger.addHandler(console_handler)
+stderr_logger.addHandler(file_handler if file_handler else _create_console_handler(formatter, logging.WARNING))
 stderr_logger.propagate = False  # 防止重复输出
 
 # 重定向 stdout 和 stderr（生产环境也重定向，确保 print() 输出被记录）
-import sys
-
 sys.stdout = LoggingStream(stdout_logger, logging.INFO)
 sys.stderr = LoggingStream(stderr_logger, logging.WARNING)
 
@@ -172,10 +156,7 @@ sys.stderr = LoggingStream(stderr_logger, logging.WARNING)
 if not root_logger.handlers or not any(isinstance(h, logging.StreamHandler) for h in root_logger.handlers):
     # 开发环境也输出到控制台
     if not settings.is_production:
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        console_handler.setLevel(logging.INFO)
-        root_logger.addHandler(console_handler)
+        root_logger.addHandler(_create_console_handler(formatter, logging.INFO))
 
 # 获取当前模块的日志记录器（用于向后兼容）
 logger = logging.getLogger(__name__)
@@ -191,7 +172,6 @@ async def lifespan(app: FastAPI):
     启动时初始化数据库，关闭时清理资源
     """
     # ====== 启动时执行 ======
-    import os
     worker_pid = os.getpid()
     logger.info(f"[Worker PID:{worker_pid}] 应用启动中...")
     
@@ -256,8 +236,7 @@ async def lifespan(app: FastAPI):
     try:
         from app.scheduler_module import init_scheduled_tasks, start_scheduler
         from app.scheduler_module.task_init import init_scheduled_tasks_in_db
-        import os
-        worker_pid = os.getpid()
+        
         logger.info(f"[Worker PID:{worker_pid}] 开始初始化定时任务...")
         
         # 首先检查并添加任务到数据库（确保所有配置的任务都在数据库中有记录）
@@ -272,8 +251,6 @@ async def lifespan(app: FastAPI):
         await start_scheduler()
         logger.info(f"[Worker PID:{worker_pid}] 定时任务调度器已启动")
     except Exception as e:
-        import os
-        worker_pid = os.getpid()
         logger.error(f"[Worker PID:{worker_pid}] 定时任务初始化失败: {e}", exc_info=True)
         logger.warning(f"[Worker PID:{worker_pid}] 应用将继续启动，但定时任务功能可能不可用")
 
@@ -282,18 +259,16 @@ async def lifespan(app: FastAPI):
         # 检查是否启用 Telegram
         telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
         if not telegram_enabled:
-            logger.info(f"[Worker PID:{os.getpid()}] Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过启动")
+            logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过启动")
         else:
-            from app.core.auto_bot import start_bot, send_telegram_message, bot_initialized
-            import os
-            worker_pid = os.getpid()
+            from app.core.auto_bot import bot_initialized, send_telegram_message, start_bot
             
             if bot_initialized:
                 logger.info(f"[Worker PID:{worker_pid}] 尝试启动 Telegram 机器人线程...")
                 start_success = start_bot()
                 if start_success:
                     # 延迟发送启动消息，确保 Bot 已完全启动
-                    await asyncio.sleep(2)  # 等待2秒确保 Bot 连接建立
+                    await asyncio.sleep(TELEGRAM_BOT_START_DELAY)
                     # send_telegram_message 内部已有完整的容错处理
                     await send_telegram_message("✅ Telegram 机器人已启动")
                 else:
@@ -301,8 +276,6 @@ async def lifespan(app: FastAPI):
             else:
                 logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 未配置（TELEGRAM_TOKEN 未设置），跳过启动")
     except Exception as e:
-        import os
-        worker_pid = os.getpid()
         logger.error(f"[Worker PID:{worker_pid}] 启动 Telegram 机器人初始化失败: {e}", exc_info=True)
         logger.warning(f"[Worker PID:{worker_pid}] 应用将继续启动，但Telegram 机器人可能不可用")
 
@@ -344,7 +317,7 @@ async def lifespan(app: FastAPI):
                 try:
                     await asyncio.wait_for(
                         send_telegram_message(f"🧩 服务 [{settings.SERVER_NAME}] 已关闭"),
-                        timeout=3.0
+                        timeout=TELEGRAM_SHUTDOWN_MESSAGE_TIMEOUT
                     )
                 except asyncio.CancelledError:
                     # 应用关闭时任务被取消是正常的
@@ -377,10 +350,8 @@ async def lifespan(app: FastAPI):
     finally:
         logger.info("应用已关闭")
 
-    
 
-
-# 初始化FastAPI应用
+# ====== 初始化FastAPI应用 ======
 # 生产环境禁用API文档
 app = FastAPI(
     title=settings.SERVER_NAME,
@@ -822,14 +793,19 @@ async def global_exception_handler(request: Request, exc: Exception):
                     pass
 
                 # 限制错误信息长度
-                max_error_length = 1000
-                truncated_error = error_message[:max_error_length] if len(
-                    error_message) > max_error_length else error_message
+                truncated_error = (
+                    error_message[:MAX_ERROR_MESSAGE_LENGTH]
+                    if len(error_message) > MAX_ERROR_MESSAGE_LENGTH
+                    else error_message
+                )
 
                 # 获取堆栈跟踪（限制长度）
                 stack_trace = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-                max_stack_length = 2000
-                truncated_stack = stack_trace[:max_stack_length] if len(stack_trace) > max_stack_length else stack_trace
+                truncated_stack = (
+                    stack_trace[:MAX_STACK_TRACE_LENGTH]
+                    if len(stack_trace) > MAX_STACK_TRACE_LENGTH
+                    else stack_trace
+                )
 
                 await log_runtime_error(
                     db=audit_db,
@@ -861,7 +837,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         asyncio.create_task(record_error_log())
     except Exception as e:
         # 如果导入或记录日志失败，不影响错误处理
-        logger.warning(f"记录运行错误日志时发生异常: {e}")
+        logger.warning(f"记录运行错误日志时发生异常: {e}", exc_info=True)
 
     # 生产环境不返回详细错误信息，避免泄露敏感信息
     error_detail = "服务器内部错误，请稍后重试"
@@ -892,6 +868,7 @@ async def root():
     }
 
 
+# ====== 注册路由 ======
 # 包含API路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
@@ -899,6 +876,7 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 # 注意：这个路由必须在 API 路由之后注册，避免与 API 路由冲突
 # 短链接重定向逻辑已迁移到 app/routes/short_link_redirect.py
 from app.routes.short_link_redirect import router as short_link_redirect_router
+
 app.include_router(short_link_redirect_router)
 
 if __name__ == "__main__":
