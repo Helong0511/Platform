@@ -246,44 +246,38 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                 batch = sorted(batch, key=lambda x: x[0])
                 
                 for short_code, count_value, redis_key in batch:
-                    try:
-                        # 使用原子更新，避免死锁
-                        # UPDATE short_links SET click_count = click_count + :count 
-                        # WHERE short_code = :code
-                        # 使用 text() 执行原始SQL，确保原子更新
-                        result = await db.execute(
-                            text("""
-                                UPDATE short_links 
-                                SET click_count = click_count + :count
-                                WHERE short_code = :code
-                            """),
-                            {"count": count_value, "code": short_code}
-                        )
-                        
-                        if result.rowcount > 0:
-                            # 更新成功
-                            logger.debug(
-                                f"原子更新短链接点击次数: short_code={short_code}, "
-                                f"增量={count_value}"
+                    # 使用带重试的更新函数，处理死锁
+                    success = await _update_click_count_with_retry(
+                        db, short_code, count_value
+                    )
+                    
+                    if success:
+                        batch_synced += 1
+                        batch_keys_to_delete.append(redis_key)
+                    else:
+                        # 更新失败，检查是否是短链接不存在
+                        # 如果短链接不存在，删除Redis计数器；否则保留以便重试
+                        try:
+                            result = await db.execute(
+                                select(ShortLink).where(ShortLink.short_code == short_code)
                             )
-                            batch_synced += 1
-                            batch_keys_to_delete.append(redis_key)
-                        else:
-                            # 短链接不存在，记录但不在数据库中更新
-                            logger.warning(f"短链接不存在: short_code={short_code}")
-                            # 仍然删除Redis中的计数器
-                            try:
-                                await redis.delete(redis_key)
-                            except:
-                                pass
-                    except Exception as e:
-                        # 单个更新失败，记录但继续处理其他记录
-                        logger.error(
-                            f"更新短链接点击次数失败: short_code={short_code}, error={e}",
-                            exc_info=True
-                        )
-                        # 保留这个计数器以便下次重试
-                        failed_updates.append((short_code, count_value, redis_key))
+                            short_link = result.scalars().first()
+                            if not short_link:
+                                # 短链接不存在，删除Redis中的计数器
+                                logger.warning(f"短链接不存在，删除Redis计数器: short_code={short_code}")
+                                try:
+                                    await redis.delete(redis_key)
+                                except Exception as e:
+                                    logger.warning(f"删除Redis计数器失败: key={redis_key}, error={e}")
+                            else:
+                                # 短链接存在但更新失败（可能是死锁等），保留以便重试
+                                failed_updates.append((short_code, count_value, redis_key))
+                        except Exception as e:
+                            # 查询失败，保守处理：保留以便重试
+                            logger.warning(
+                                f"查询短链接状态失败，保留计数器以便重试: short_code={short_code}, error={e}"
+                            )
+                            failed_updates.append((short_code, count_value, redis_key))
                 
                 # 提交当前批次（带死锁重试）
                 if batch_synced > 0:
@@ -338,6 +332,93 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                 logger.debug("成功释放同步锁")
             except Exception as e:
                 logger.warning(f"释放分布式锁失败: {e}")
+
+
+async def _update_click_count_with_retry(
+    db: AsyncSession, 
+    short_code: str, 
+    count_value: int,
+    max_retries: int = MAX_DEADLOCK_RETRIES
+) -> bool:
+    """
+    带重试机制的单个点击次数更新（处理死锁）
+    
+    Args:
+        db: 数据库会话
+        short_code: 短链接代码
+        count_value: 要增加的点击次数
+        max_retries: 最大重试次数
+        
+    Returns:
+        是否更新成功
+    """
+    for attempt in range(max_retries):
+        try:
+            result = await db.execute(
+                text("""
+                    UPDATE short_links 
+                    SET click_count = click_count + :count
+                    WHERE short_code = :code
+                """),
+                {"count": count_value, "code": short_code}
+            )
+            
+            if result.rowcount > 0:
+                logger.debug(
+                    f"原子更新短链接点击次数: short_code={short_code}, "
+                    f"增量={count_value}"
+                )
+                return True
+            else:
+                # 短链接不存在
+                logger.warning(f"短链接不存在: short_code={short_code}")
+                return False
+                
+        except OperationalError as e:
+            error_code = e.orig.args[0] if hasattr(e.orig, 'args') and e.orig.args else None
+            if error_code == 1213:  # Deadlock
+                if attempt < max_retries - 1:
+                    # 指数退避 + 随机抖动
+                    delay = DEADLOCK_RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.2)
+                    logger.warning(
+                        f"更新短链接点击次数时检测到死锁: short_code={short_code}, "
+                        f"第 {attempt + 1}/{max_retries} 次重试，等待 {delay:.2f} 秒后重试..."
+                    )
+                    await asyncio.sleep(delay)
+                    # MySQL在死锁时会自动回滚其中一个事务，所以这里不需要手动回滚
+                    # 直接重试即可
+                    continue
+                else:
+                    logger.error(
+                        f"更新短链接点击次数失败（死锁，已重试 {max_retries} 次）: "
+                        f"short_code={short_code}, error={e}",
+                        exc_info=True
+                    )
+                    # 死锁时MySQL已自动回滚，不需要手动回滚
+                    return False
+            else:
+                # 其他数据库错误，需要回滚
+                logger.error(
+                    f"更新短链接点击次数失败: short_code={short_code}, error={e}",
+                    exc_info=True
+                )
+                try:
+                    await db.rollback()
+                except:
+                    pass
+                return False
+        except Exception as e:
+            logger.error(
+                f"更新短链接点击次数失败: short_code={short_code}, error={e}",
+                exc_info=True
+            )
+            try:
+                await db.rollback()
+            except:
+                pass
+            return False
+    
+    return False
 
 
 async def _commit_with_retry(db: AsyncSession, synced_count: int, max_retries: int = MAX_DEADLOCK_RETRIES) -> bool:
