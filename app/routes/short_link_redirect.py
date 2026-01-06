@@ -854,7 +854,7 @@ async def _handle_cached_redirect(
     final_url = _build_final_url(original_url_before_replace, original_url_after_replace, click_id, offer_id, channel_id,
                                  final_channel_id, request_params, request_info, advertiser_id)
     
-    # 打印最终跳转链接详细信息
+    # 打印最终跳转链接详细信息   helong
     logger.warning("=" * 80)
     logger.warning(f"[短链接重定向] 短链接代码: {short_code}")
     logger.warning(f"[短链接重定向] 点击ID: {click_id}")
