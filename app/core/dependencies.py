@@ -1,17 +1,73 @@
 """
 依赖注入配置
 统一管理FastAPI依赖项，包括服务、仓储等
+
+优化：
+- 提供组合依赖项，简化endpoint代码
+- 统一服务实例化方式
+- 支持类型提示
 """
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Tuple
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models.models import User
+from app.models.models import User, UserRole
+from app.core.exceptions import raise_api_exception
+from app.core.errors import ErrorCode
 
-# 服务依赖
+# ====== 组合依赖项 ======
+
+async def get_current_admin_user(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    """
+    获取当前管理员用户（组合依赖）
+    
+    如果当前用户不是管理员，抛出异常
+    
+    Returns:
+        User: 管理员用户对象
+    
+    Raises:
+        APIException: 如果不是管理员
+    """
+    if current_user.role != UserRole.ADMIN:
+        raise_api_exception(
+            ErrorCode.FORBIDDEN,
+            detail="此操作需要管理员权限"
+        )
+    return current_user
+
+
+async def get_db_and_user(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Tuple[AsyncSession, User]:
+    """
+    获取数据库会话和当前用户（组合依赖）
+    
+    Returns:
+        (数据库会话, 当前用户)
+    """
+    return db, current_user
+
+
+async def get_db_and_admin(
+    db: AsyncSession = Depends(get_db),
+    current_admin: User = Depends(get_current_admin_user)
+) -> Tuple[AsyncSession, User]:
+    """
+    获取数据库会话和管理员用户（组合依赖）
+    
+    Returns:
+        (数据库会话, 管理员用户)
+    """
+    return db, current_admin
+
+# ====== 服务依赖 ======
 async def get_user_service(db: AsyncSession = Depends(get_db)):
     """获取用户服务实例"""
     from app.services.user_service import UserService
@@ -102,7 +158,24 @@ async def get_session_service(db: AsyncSession = Depends(get_db)):
     from app.services.session_service import SessionService
     return SessionService(db)
 
-# 类型别名，便于在endpoints中使用
+async def get_scheduled_task_service(db: AsyncSession = Depends(get_db)):
+    """获取定时任务服务实例"""
+    from app.services.scheduled_task_service import ScheduledTaskService
+    return ScheduledTaskService(db)
+
+async def get_dashboard_service(db: AsyncSession = Depends(get_db)):
+    """获取仪表盘服务实例"""
+    from app.services.dashboard_service import DashboardService
+    return DashboardService(db)
+
+# ====== 类型别名，便于在endpoints中使用 ======
+
+# 组合依赖项类型别名
+CurrentAdminDep = Annotated[User, Depends(get_current_admin_user)]
+DbAndUserDep = Annotated[Tuple[AsyncSession, User], Depends(get_db_and_user)]
+DbAndAdminDep = Annotated[Tuple[AsyncSession, User], Depends(get_db_and_admin)]
+
+# 服务依赖类型别名
 UserServiceDep = Annotated[object, Depends(get_user_service)]
 ProductServiceDep = Annotated[object, Depends(get_product_service)]
 AdvertiserServiceDep = Annotated[object, Depends(get_advertiser_service)]
@@ -111,7 +184,7 @@ OfferServiceDep = Annotated[object, Depends(get_offer_service)]
 ConversionServiceDep = Annotated[object, Depends(get_conversion_service)]
 ClientServiceDep = Annotated[object, Depends(get_client_service)]
 ShortLinkServiceDep = Annotated[object, Depends(get_short_link_service)]
-    AdDataServiceDep = Annotated[object, Depends(get_ad_data_service)]
+AdDataServiceDep = Annotated[object, Depends(get_ad_data_service)]
 CapServiceDep = Annotated[object, Depends(get_cap_service)]
 DiscountServiceDep = Annotated[object, Depends(get_discount_service)]
 ConversionDeductionServiceDep = Annotated[object, Depends(get_conversion_deduction_service)]
@@ -121,6 +194,10 @@ ConversionLogServiceDep = Annotated[object, Depends(get_conversion_log_service)]
 ClickServiceDep = Annotated[object, Depends(get_click_service)]
 AuditLogServiceDep = Annotated[object, Depends(get_audit_log_service)]
 SessionServiceDep = Annotated[object, Depends(get_session_service)]
+ScheduledTaskServiceDep = Annotated[object, Depends(get_scheduled_task_service)]
+DashboardServiceDep = Annotated[object, Depends(get_dashboard_service)]
+
+# 基础依赖类型别名
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
-    DatabaseDep = Annotated[AsyncSession, Depends(get_db)]
+DatabaseDep = Annotated[AsyncSession, Depends(get_db)]
 

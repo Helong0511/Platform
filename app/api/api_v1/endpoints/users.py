@@ -80,6 +80,7 @@ from datetime import datetime
 from io import BytesIO
 from urllib.parse import quote
 import pandas as pd
+import uuid
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
@@ -88,8 +89,6 @@ from app.core.constants import MAX_PAGE_SIZE
 from app.models.models import User, UserRole, Client, Publisher
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, PasswordChange
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
-import uuid
-from fastapi import Request
 
 # 创建路由实例
 router = APIRouter()
