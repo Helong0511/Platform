@@ -15,6 +15,8 @@ from app.core.security import get_current_user, require_admin
 from app.models.models import User, ClickStats, PostbackConversion, Offer, Publisher, Advertiser, Client, UserRole, OfferPublisherAssignment
 from app.schemas.base import ResponseBaseSchema
 from app.core.discount.discount_manager import calculate_discount
+from app.core.exceptions import raise_api_exception
+from app.core.errors import ErrorCode
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -64,10 +66,7 @@ async def get_conversion_summary(
             advertiser_id=advertiser_id
         )
         
-        # 构建响应数据（服务层已返回基础统计）
-        # 注意：原endpoint有更复杂的统计逻辑（包括总点击数、总转化率等）
-        # 如果需要完整功能，需要在ConversionService中实现完整的统计逻辑
-        # 目前返回服务层的基础统计结果
+        # 服务层已返回完整的统计数据（包括总点击数、总转化率等）
         return ResponseBaseSchema.success(data=summary)
     except Exception as e:
         logger.error(f"获取转化总览统计失败: {str(e)}", exc_info=True)
@@ -75,7 +74,6 @@ async def get_conversion_summary(
             ErrorCode.OPERATION_FAILED,
             detail=f"获取转化总览统计失败：{str(e)}"
         )
-        # 如果是客户用户，获取该客户关联的渠道ID列表
         client_publisher_ids = None
         if current_user.role == UserRole.CLIENT:
             # 查询该用户关联的Client
