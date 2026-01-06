@@ -146,13 +146,13 @@ class QueryBuilder:
         
         return self
     
-    def load_relations(self, *relations: str, use_selectin: bool = False) -> 'QueryBuilder':
+    def load_relations(self, *relations: str, use_selectin: bool = True) -> 'QueryBuilder':
         """
         预加载关联关系（避免N+1查询）
         
         Args:
             *relations: 关联关系名称列表
-            use_selectin: 是否使用selectinload（适合一对多关系）
+            use_selectin: 是否使用selectinload（默认True，适合一对多关系，避免重复行问题）
         
         Returns:
             QueryBuilder实例
@@ -173,6 +173,8 @@ class QueryBuilder:
         """
         执行查询并返回所有结果
         
+        注意：当使用joinedload加载一对多关系时，会自动调用unique()去重
+        
         Returns:
             结果列表
         """
@@ -180,11 +182,20 @@ class QueryBuilder:
             self.base()
         
         result = await self.db.execute(self._query)
-        return list(result.scalars().all())
+        scalars_result = result.scalars()
+        # 当使用joinedload加载一对多关系时，SQLAlchemy要求调用unique()
+        # 对于其他情况，调用unique()也不会出错，只是没有效果
+        try:
+            return list(scalars_result.unique().all())
+        except Exception:
+            # 如果unique()失败（不应该发生），回退到普通方式
+            return list(scalars_result.all())
     
     async def first(self) -> Optional[T]:
         """
         执行查询并返回第一个结果
+        
+        注意：当使用joinedload加载一对多关系时，会自动调用unique()去重
         
         Returns:
             第一个结果或None
@@ -193,7 +204,14 @@ class QueryBuilder:
             self.base()
         
         result = await self.db.execute(self._query)
-        return result.scalar_one_or_none()
+        scalars_result = result.scalars()
+        # 当使用joinedload加载一对多关系时，SQLAlchemy要求调用unique()
+        try:
+            unique_result = scalars_result.unique()
+            return unique_result.first()
+        except Exception:
+            # 如果unique()失败，回退到普通方式
+            return scalars_result.first()
     
     async def count(self) -> int:
         """
