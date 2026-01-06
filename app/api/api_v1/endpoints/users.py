@@ -108,7 +108,7 @@ async def get_users(
         status: str | None = Query(None, description="状态过滤: active/inactive")
 ):
     """
-    获取用户列表，支持分页和过滤
+    获取用户列表，支持分页和过滤（已重构使用服务层）
     - 仅管理员可访问
     - 支持按用户名、角色和状态过滤
     - 返回分页用户列表
@@ -117,89 +117,32 @@ async def get_users(
     # ====== 设备类型优化：自动调整分页大小 ======
     from app.core.utils import optimize_page_size_for_device
     page_size = optimize_page_size_for_device(request, page_size, default_page_size=10)
-    # ====== 构建查询 ======
-    query = select(User)
-
-    # 用户名搜索（优先使用全文搜索，回退到LIKE）
-    if username:
-        from app.core.fulltext_search import search_with_fulltext
-        query = await search_with_fulltext(
-            db=db,
-            model_class=User,
-            search_fields=["username", "full_name", "email"],
-            search_term=username,
-            base_query=query,
-            use_fulltext=True
-        )
-
-    # 角色精确匹配（处理空字符串）
-    role_filter = None
-    if role and role.strip():  # 如果role存在且不是空字符串
-        try:
-            role_filter = UserRole(role)  # 尝试转换为枚举
-        except ValueError:
-            # 如果不是有效的枚举值，忽略该过滤条件
-            logger.warning(f"Invalid role filter value: {role}")
-            role_filter = None
-
-    if role_filter:
-        query = query.where(User.role == role_filter)
-
-    # 状态过滤（处理空字符串）
-    status_filter = None
-    if status and status.strip():  # 如果status存在且不是空字符串
+    
+    # 使用服务层（业务逻辑在UserService中）
+    from app.core.dependencies import get_user_service
+    from app.services.user_service import UserService
+    
+    user_service: UserService = await get_user_service(db)
+    
+    # 转换status参数为布尔值（服务层期望布尔值）
+    is_active = None
+    if status and status.strip():
         if status.lower() == 'active':
-            status_filter = True
+            is_active = True
         elif status.lower() == 'inactive':
-            status_filter = False
-
-    if status_filter is not None:
-        query = query.where(User.is_active == status_filter)
-
-    # ====== 计算分页参数 ======
-    offset = (page - 1) * page_size
-
-    # ====== 执行查询获取总数 ======
-    # 使用func.count()提高性能和准确性（比查询所有数据再计数快）
-    count_query = select(func.count(User.id))
-    # 用户名搜索（优先使用全文搜索，回退到LIKE）
-    if username:
-        from app.core.fulltext_search import search_with_fulltext
-        count_query = await search_with_fulltext(
-            db=db,
-            model_class=User,
-            search_fields=["username", "full_name", "email"],
-            search_term=username,
-            base_query=count_query,
-            use_fulltext=True
-        )
-    if role_filter:
-        count_query = count_query.where(User.role == role_filter)
-    if status_filter is not None:
-        count_query = count_query.where(User.is_active == status_filter)
-
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0  # 如果为None，返回0
-
-    result = await db.execute(query.order_by(User.id).offset(offset).limit(page_size))
-    users = result.scalars().unique().all()
-
-    # 批量获取客户信息（避免N+1查询）
-    # 先收集所有客户角色的用户ID
-    client_user_ids = [user.id for user in users if user.role == UserRole.CLIENT]
-    client_map = {}
-    if client_user_ids:
-        try:
-            client_query = select(Client).where(Client.user_id.in_(client_user_ids))
-            client_result = await db.execute(client_query)
-            clients = client_result.scalars().all()
-            client_map = {client.user_id: client for client in clients}
-        except Exception as e:
-            logger.error(f"查询客户信息失败: {str(e)}", exc_info=True)
-            # 如果查询失败，继续执行，只是没有客户信息
-            client_map = {}
-
-    # 转换为响应模型并添加客户信息
+            is_active = False
+    
+    # 调用服务层获取用户列表（服务层会处理权限检查、查询和客户信息预加载）
+    users, total = await user_service.get_users(
+        current_user=current_user,
+        page=page,
+        page_size=page_size,
+        username=username,
+        role=role,
+        is_active=is_active
+    )
+    
+    # 转换为响应模型并添加客户信息（客户信息已通过selectinload预加载）
     user_responses = []
     for user in users:
         # 获取客户信息（如果用户是客户角色）
@@ -207,7 +150,8 @@ async def get_users(
         api_enabled = False
         password_change_enabled = False
         if user.role == UserRole.CLIENT:
-            client = client_map.get(user.id)
+            # 客户信息已通过selectinload预加载，直接访问
+            client = user.clients[0] if user.clients else None
             if client:
                 # 确保从数据库获取最新的开关状态（布尔值）
                 api_enabled = bool(client.api_enabled) if client.api_enabled is not None else False
@@ -301,41 +245,35 @@ async def export_users_excel(
         current_user: User = Depends(require_admin)
 ):
     """
-    导出用户数据到Excel文件
+    导出用户数据到Excel文件（已重构使用服务层）
     - 仅管理员可访问
     - 支持按用户名、角色和状态过滤
     - 返回Excel文件流
     """
-    # 构建查询（与get_users相同的逻辑）
-    query = select(User)
-
-    if username:
-        query = query.where(func.lower(User.username).like(f"%{username.lower()}%"))
-
-    role_filter = None
-    if role and role.strip():
-        try:
-            role_filter = UserRole(role)
-        except ValueError:
-            logger.warning(f"Invalid role filter value: {role}")
-            role_filter = None
-
-    if role_filter:
-        query = query.where(User.role == role_filter)
-
-    status_filter = None
+    # 使用服务层（业务逻辑在UserService中）
+    from app.core.dependencies import get_user_service
+    from app.services.user_service import UserService
+    
+    user_service: UserService = await get_user_service(db)
+    
+    # 转换status参数为布尔值（服务层期望布尔值）
+    is_active = None
     if status and status.strip():
         if status.lower() == 'active':
-            status_filter = True
+            is_active = True
         elif status.lower() == 'inactive':
-            status_filter = False
-
-    if status_filter is not None:
-        query = query.where(User.is_active == status_filter)
-
-    # 获取所有用户数据
-    result = await db.execute(query.order_by(User.id))
-    users = result.scalars().unique().all()
+            is_active = False
+    
+    # 调用服务层获取所有用户数据（不分页，获取全部数据用于导出）
+    # 使用一个很大的page_size来获取所有数据
+    users, total = await user_service.get_users(
+        current_user=current_user,
+        page=1,
+        page_size=10000,  # 使用大值获取所有数据
+        username=username,
+        role=role,
+        is_active=is_active
+    )
 
     # 如果没有数据，抛出错误提示用户
     if not users:
@@ -347,26 +285,13 @@ async def export_users_excel(
             detail="当前筛选条件下没有可导出的用户数据，请调整筛选条件后重试"
         )
 
-    # 获取所有客户用户的ID
-    client_user_ids = [user.id for user in users if user.role == UserRole.CLIENT]
+    # 客户信息已通过selectinload预加载，直接访问
 
-    # 批量获取客户信息
-    client_map = {}
-    if client_user_ids:
-        try:
-            client_query = select(Client).where(Client.user_id.in_(client_user_ids))
-            client_result = await db.execute(client_query)
-            clients = client_result.scalars().all()
-            client_map = {client.user_id: client for client in clients}
-        except Exception as e:
-            logger.error(f"查询客户信息失败: {str(e)}", exc_info=True)
-            # 如果查询失败，继续执行，只是没有客户信息
-            client_map = {}
-
-    # 准备导出数据
+    # 准备导出数据（客户信息已通过selectinload预加载）
     data = []
     for user in users:
-        client = client_map.get(user.id) if user.role == UserRole.CLIENT else None
+        # 客户信息已通过selectinload预加载，直接访问
+        client = user.clients[0] if user.role == UserRole.CLIENT and user.clients else None
 
         row = {
             "用户ID": user.id,
@@ -431,23 +356,18 @@ async def get_current_user_info(
         current_user: User = Depends(get_current_user)
 ):
     """
-    获取当前登录用户的详细信息
+    获取当前登录用户的详细信息（已重构使用服务层）
     - 需要认证（任何已登录用户都可以访问）
     - 返回当前用户的完整信息，包括客户信息（如果用户是客户角色）
     """
-    # 获取关联的客户信息（如果用户是客户角色）- 使用selectinload预加载
-    from sqlalchemy.orm import selectinload
-    from sqlalchemy import and_
+    # 使用服务层（业务逻辑在UserService中）
+    from app.core.dependencies import get_user_service
+    from app.services.user_service import UserService
     
-    query = select(User).options(selectinload(User.clients)).where(User.id == current_user.id)
-    result = await db.execute(query)
-    user = result.scalars().unique().first()
+    user_service: UserService = await get_user_service(db)
     
-    if not user:
-        raise_api_exception(
-            ErrorCode.UNAUTHORIZED,
-            detail="用户不存在"
-        )
+    # 获取用户信息（服务层会处理权限检查和客户信息预加载）
+    user = await user_service.get_user_by_id(current_user.id, current_user, include_client=True)
     
     client_data = None
     api_enabled = False
@@ -460,17 +380,8 @@ async def get_current_user_info(
             api_enabled = client.api_enabled  # 获取API开关状态
             password_change_enabled = client.password_change_enabled  # 获取密码修改开关状态
             
-            # 检查该客户是否有关联的渠道（只检查激活的渠道）
-            publisher_check = await db.execute(
-                select(func.count(Publisher.id)).where(
-                    and_(
-                        Publisher.client_id == client.id,
-                        Publisher.is_active == True
-                    )
-                )
-            )
-            publisher_count = publisher_check.scalar() or 0
-            has_publisher = publisher_count > 0
+            # 检查该客户是否有关联的渠道（只检查激活的渠道）- 使用服务层
+            has_publisher = await user_service.check_client_has_publisher(client.id)
             
             client_data = {
                 'id': client.id,

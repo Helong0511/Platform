@@ -8,12 +8,13 @@ from sqlalchemy.future import select
 from sqlalchemy import func, or_
 from sqlalchemy.orm import selectinload
 
-from app.models.models import User, Client, UserRole
+from app.models.models import User, Client, UserRole, Publisher
 from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.audit_log import log_user_action, log_activate, log_deactivate
 from app.core.utils import get_app_now_naive
+from sqlalchemy import and_
 import logging
 
 logger = logging.getLogger(__name__)
@@ -118,11 +119,6 @@ class UserService(BaseService[User]):
             desc_order=True,
             load_relations=["clients"]  # 预加载客户信息，避免N+1查询
         )
-        
-        result = await self.db.execute(query)
-        users = result.scalars().all()
-        
-        return users, total
     
     async def create_user(
         self,
@@ -543,4 +539,25 @@ class UserService(BaseService[User]):
             },
             "with_client_info": client_users_count
         }
+    
+    async def check_client_has_publisher(self, client_id: int) -> bool:
+        """
+        检查客户是否有关联的激活渠道
+        
+        Args:
+            client_id: 客户ID
+        
+        Returns:
+            bool: 如果客户有激活的渠道返回True，否则返回False
+        """
+        publisher_result = await self.db.execute(
+            select(func.count(Publisher.id)).where(
+                and_(
+                    Publisher.client_id == client_id,
+                    Publisher.is_active == True
+                )
+            )
+        )
+        publisher_count = publisher_result.scalar() or 0
+        return publisher_count > 0
 

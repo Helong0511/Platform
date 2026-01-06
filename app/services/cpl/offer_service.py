@@ -36,7 +36,7 @@ class OfferService(BaseService[Offer]):
         include_assignments: bool = False
     ) -> Offer:
         """
-        根据ID获取Offer详情（优化查询，避免N+1问题）
+        根据ID获取Offer详情（优化查询，避免N+1问题，包含权限检查）
         
         Args:
             offer_id: Offer ID
@@ -46,7 +46,44 @@ class OfferService(BaseService[Offer]):
         
         Returns:
             Offer: Offer对象
+        
+        Raises:
+            HTTPException: 如果Offer不存在或用户无权访问
         """
+        # 权限检查：客户只能查看分配给自己的渠道的Offer
+        if current_user.role == UserRole.CLIENT:
+            # 获取当前用户的client_id
+            client_result = await self.db.execute(
+                select(Client.id).where(Client.user_id == current_user.id).limit(1)
+            )
+            client_id = client_result.scalar_one_or_none()
+            
+            if client_id:
+                # 检查该Offer是否分配给该客户的渠道（只检查激活的渠道和激活的分配）
+                check_result = await self.db.execute(
+                    select(OfferPublisherAssignment)
+                    .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
+                    .where(
+                        and_(
+                            OfferPublisherAssignment.offer_id == offer_id,
+                            Publisher.client_id == client_id,
+                            Publisher.is_active == True,
+                            OfferPublisherAssignment.is_active == True
+                        )
+                    )
+                    .limit(1)
+                )
+                if not check_result.scalar_one_or_none():
+                    raise_api_exception(
+                        ErrorCode.RESOURCE_NOT_FOUND,
+                        detail=f"Offer ID {offer_id} 不存在或无权访问"
+                    )
+            else:
+                raise_api_exception(
+                    ErrorCode.RESOURCE_NOT_FOUND,
+                    detail=f"Offer ID {offer_id} 不存在或无权访问"
+                )
+        
         query = select(Offer).where(Offer.id == offer_id)
         
         # 使用joinedload/selectinload优化关联查询
@@ -69,6 +106,53 @@ class OfferService(BaseService[Offer]):
             )
         
         return offer
+    
+    async def get_offer_assignments(
+        self,
+        offer_id: int,
+        current_user: User
+    ) -> List[Dict[str, Any]]:
+        """
+        获取Offer的渠道分配列表（优化查询，批量加载）
+        
+        Args:
+            offer_id: Offer ID
+            current_user: 当前用户
+        
+        Returns:
+            List[Dict]: 渠道分配列表
+        """
+        # 加载分配的渠道（只加载激活的渠道和激活的分配）
+        pub_query = (
+            select(OfferPublisherAssignment, Publisher)
+            .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
+            .where(OfferPublisherAssignment.offer_id == offer_id)
+            .where(OfferPublisherAssignment.is_active == True)
+            .where(Publisher.is_active == True)
+        )
+        
+        # 如果是客户用户，只加载属于该客户的渠道
+        if current_user.role == UserRole.CLIENT:
+            client_result = await self.db.execute(
+                select(Client.id).where(Client.user_id == current_user.id).limit(1)
+            )
+            client_id = client_result.scalar_one_or_none()
+            if client_id:
+                pub_query = pub_query.where(Publisher.client_id == client_id)
+        
+        pub_result = await self.db.execute(pub_query)
+        assignments = pub_result.all()
+        
+        return [
+            {
+                "id": pub.id,
+                "publisher_name": pub.publisher_name,
+                "client_id": pub.client_id,
+                "downstream_cap": assignment.downstream_cap,
+                "affiliate_payout": assignment.affiliate_payout
+            }
+            for assignment, pub in assignments
+        ]
     
     async def get_offers(
         self,

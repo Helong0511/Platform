@@ -12,6 +12,8 @@ from sqlalchemy import select, func, case, Float, text, and_
 from datetime import datetime, timedelta
 import logging
 from app.core.database import get_db
+from app.core.exceptions import raise_api_exception
+from app.core.errors import ErrorCode
 from app.schemas.ad_data import DashboardStatsResponse, TrendDataResponse
 from app.schemas.base import ResponseBaseSchema
 from app.core.security import get_current_user
@@ -53,9 +55,9 @@ async def get_dashboard_stats(period: str = "week", db: AsyncSession = Depends(g
         raise
     except Exception as e:
         logger.error(f"获取仪表盘统计数据失败: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"获取统计数据失败: {str(e)}"
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取统计数据失败：{str(e)}"
         )
 
 
@@ -127,7 +129,7 @@ async def get_trend_data(period: str = "week", db: AsyncSession = Depends(get_db
         raise
     except Exception as e:
         logger.error(f"获取趋势数据失败: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"获取趋势数据失败: {str(e)}"
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取趋势数据失败：{str(e)}"
         )

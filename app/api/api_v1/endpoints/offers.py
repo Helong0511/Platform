@@ -588,84 +588,23 @@ async def get_offer(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取Offer详情（已重构使用服务层）"""
-    # 使用服务层（业务逻辑在OfferService中）
+    """获取Offer详情（已重构使用服务层，权限检查和数据加载都在服务层）"""
+    # 使用服务层（业务逻辑在OfferService中，包含权限检查）
     from app.core.dependencies import get_offer_service
     from app.services.cpl.offer_service import OfferService
     
     offer_service: OfferService = await get_offer_service(db)
     
-    # ====== 权限检查：客户只能查看分配给自己的渠道的Offer ======
-    if current_user.role == UserRole.CLIENT:
-        # 获取当前用户的client_id
-        client_result = await db.execute(
-            select(Client.id).where(Client.user_id == current_user.id).limit(1)
-        )
-        client_id = client_result.scalar_one_or_none()
-        
-        if client_id:
-            # 检查该Offer是否分配给该客户的渠道（只检查激活的渠道和激活的分配）
-            check_result = await db.execute(
-                select(OfferPublisherAssignment)
-                .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
-                .where(
-                    and_(
-                        OfferPublisherAssignment.offer_id == offer_id,
-                        Publisher.client_id == client_id,
-                        Publisher.is_active == True,
-                        OfferPublisherAssignment.is_active == True
-                    )
-                )
-                .limit(1)
-            )
-            if not check_result.scalar_one_or_none():
-                raise_api_exception(
-                    ErrorCode.RESOURCE_NOT_FOUND,
-                    detail=f"Offer ID {offer_id} 不存在或无权访问"
-                )
-        else:
-            raise_api_exception(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                detail=f"Offer ID {offer_id} 不存在或无权访问"
-            )
+    # 获取Offer（服务层会处理权限检查和关联数据加载）
+    offer = await offer_service.get_offer_by_id(offer_id, current_user, include_advertiser=True, include_assignments=False)
     
-    # 获取Offer（包含广告主和渠道分配信息）
-    offer = await offer_service.get_offer_by_id(offer_id, current_user, include_advertiser=True, include_assignments=True)
-    
-    # 加载分配的渠道（只加载激活的渠道和激活的分配）
-    pub_query = (
-        select(OfferPublisherAssignment, Publisher)
-        .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
-        .where(OfferPublisherAssignment.offer_id == offer.id)
-        .where(OfferPublisherAssignment.is_active == True)
-        .where(Publisher.is_active == True)
-    )
-    
-    # 如果是客户用户，只加载属于该客户的渠道
-    if current_user.role == UserRole.CLIENT:
-        client_result = await db.execute(
-            select(Client.id).where(Client.user_id == current_user.id).limit(1)
-        )
-        client_id = client_result.scalar_one_or_none()
-        if client_id:
-            pub_query = pub_query.where(Publisher.client_id == client_id)
-    
-    pub_result = await db.execute(pub_query)
-    assignments = pub_result.all()
+    # 获取渠道分配列表（服务层会处理权限过滤）
+    assignments = await offer_service.get_offer_assignments(offer_id, current_user)
     
     offer_data = OfferResponse.model_validate(offer)
     # 从已加载的关联中获取广告主名称
     offer_data.advertiser_name = offer.advertiser.advertiser_name if offer.advertiser else None
-    offer_data.assigned_publishers = [
-        {
-            "id": pub.id,
-            "publisher_name": pub.publisher_name,
-            "client_id": pub.client_id,
-            "downstream_cap": assignment.downstream_cap,
-            "affiliate_payout": assignment.affiliate_payout
-        }
-        for assignment, pub in assignments
-    ]
+    offer_data.assigned_publishers = assignments
     
     return ResponseBaseSchema.success(data=offer_data)
 
@@ -700,30 +639,15 @@ async def update_offer(
         offer_id, update_data, current_user
     )
     
-    # 重新加载关联信息（使用joinedload优化）
-    from sqlalchemy.orm import joinedload
+    # 重新加载关联信息（使用服务层方法）
     offer = await offer_service.get_offer_by_id(offer.id, current_user, include_advertiser=True, include_assignments=False)
     
-    # 加载分配的渠道
-    pub_result = await db.execute(
-        select(OfferPublisherAssignment, Publisher)
-        .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
-        .where(OfferPublisherAssignment.offer_id == offer.id)
-        .where(OfferPublisherAssignment.is_active == True)
-    )
-    assignments = pub_result.all()
+    # 获取渠道分配列表（使用服务层方法，包含权限过滤）
+    assignments = await offer_service.get_offer_assignments(offer.id, current_user)
     
     offer_data = OfferResponse.model_validate(offer)
     offer_data.advertiser_name = offer.advertiser.advertiser_name if offer.advertiser else None
-    offer_data.assigned_publishers = [
-        {
-            "id": pub.id,
-            "publisher_name": pub.publisher_name,
-            "downstream_cap": assignment.downstream_cap,
-            "affiliate_payout": assignment.affiliate_payout
-        }
-        for assignment, pub in assignments
-    ]
+    offer_data.assigned_publishers = assignments
     
     # 构建响应消息，包含短链接信息
     message = "Offer更新成功"

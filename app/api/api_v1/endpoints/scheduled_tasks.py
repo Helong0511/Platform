@@ -24,6 +24,8 @@ from app.core.database import get_db
 from app.core.security import require_admin
 from app.core.validation import validate_cron_expression, sanitize_input
 from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
+from app.core.exceptions import raise_api_exception
+from app.core.errors import ErrorCode
 from app.models.models import User, ScheduledTask
 from app.core.utils import get_app_now_naive
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -161,9 +163,9 @@ async def get_scheduled_tasks(
 
     except Exception as e:
         logger.error(f"获取定时任务列表失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="获取定时任务列表失败"
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取定时任务列表失败：{str(e)}"
         )
 
 
@@ -192,8 +194,8 @@ async def get_scheduled_task(
         task = await task_service.get_scheduled_task_by_name(task_name)
 
         if not task:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
                 detail="定时任务不存在"
             )
 
