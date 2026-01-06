@@ -97,9 +97,9 @@ async def get_audit_logs(
 
     except Exception as e:
         logger.error(f"获取用户操作日志列表失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取日志列表失败: {str(e)}"
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取日志列表失败：{str(e)}"
         )
 
 
@@ -147,9 +147,9 @@ async def get_audit_log_stats(
 
     except Exception as e:
         logger.error(f"获取日志统计信息失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取统计信息失败: {str(e)}"
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取统计信息失败：{str(e)}"
         )
 
 
@@ -178,8 +178,8 @@ async def get_audit_log(
         log = await audit_log_service.get_audit_log_by_id(log_id)
 
         if not log:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
                 detail="日志记录不存在"
             )
 
@@ -192,8 +192,8 @@ async def get_audit_log(
         raise
     except Exception as e:
         logger.error(f"获取用户操作日志详情失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
             detail=f"获取日志详情失败: {str(e)}"
         )
 
