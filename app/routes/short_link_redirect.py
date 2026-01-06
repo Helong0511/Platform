@@ -144,9 +144,16 @@ async def _replace_short_link_placeholders(
         'clickId': 'click_id',
         'clk_id': 'click_id',
         'cid': 'click_id',
+        'aff_click_id': 'click_id',
+        'affclickid': 'click_id',
         'publisherId': 'publisher_id',
+        'publisherid': 'publisher_id',
         'channelId': 'channel_id',
+        'channelid': 'channel_id',
+        'sub_affid': 'channel_id',
+        'subaffid': 'channel_id',
         'offerId': 'offer_id',
+        'offerid': 'offer_id',
     }
     
     # 替换占位符
@@ -159,12 +166,15 @@ async def _replace_short_link_placeholders(
         else:
             normalized_key = re.sub(r'(?<!^)(?=[A-Z])', '_', placeholder).lower()
         
-        if normalized_key == 'channel_id':
+        # channel_id 和 sub_affid 都映射到 publisher_id
+        if normalized_key == 'channel_id' or normalized_key == 'sub_affid':
             normalized_key = 'publisher_id'
         
         value = values.get(normalized_key, '')
         
         if not value:
+            # 如果值为空，记录警告但不替换（保留原始占位符）
+            logger.warning(f"占位符 {{{placeholder}}} 的值为空，将保留原始占位符")
             continue
         
         encoded_value = quote(str(value), safe='')
@@ -361,6 +371,13 @@ async def _handle_cached_redirect(
             short_link_id = None
     
     request_info = collect_request_info(request) if request else {}
+    
+    # 如果没有从URL参数传入，从短链接记录中获取offer_id和channel_id
+    if not offer_id:
+        offer_id = cached_data.get("offer_id")
+    if not channel_id:
+        channel_id = cached_data.get("channel_id")
+    
     final_channel_id = channel_id
     final_offer_id, advertiser_id = await _resolve_offer_id(offer_id, db)
     
@@ -374,13 +391,16 @@ async def _handle_cached_redirect(
     # 更新点击次数
     await increment_click_count_async(short_code)
     
+    # 保存原始URL用于检查占位符
+    original_url_before_replace = original_url
+    
     # 替换占位符并合并参数
     original_url = await _replace_short_link_placeholders(
         original_url, click_id, final_offer_id, final_channel_id,
         advertiser_id, request_info, db
     )
     
-    final_url = _build_final_url(original_url, click_id, offer_id, channel_id,
+    final_url = _build_final_url(original_url_before_replace, original_url, click_id, offer_id, channel_id,
                                  final_channel_id, request_params)
     
     # 打印最终跳转链接
@@ -451,6 +471,13 @@ async def _handle_database_redirect(
     
     click_id = generate_click_id_from_timestamp()
     request_info = collect_request_info(request) if request else {}
+    
+    # 如果没有从URL参数传入，从短链接记录中获取offer_id和channel_id
+    if not offer_id:
+        offer_id = short_link.offer_id
+    if not channel_id:
+        channel_id = short_link.channel_id
+    
     final_channel_id = channel_id
     final_offer_id, advertiser_id = await _resolve_offer_id(offer_id, db)
     
@@ -463,13 +490,16 @@ async def _handle_database_redirect(
     # 更新点击次数
     await increment_click_count_async(short_code)
     
+    # 保存原始URL用于检查占位符
+    original_url_before_replace = original_url
+    
     # 替换占位符并合并参数
     original_url = await _replace_short_link_placeholders(
         original_url, click_id, final_offer_id, final_channel_id,
         advertiser_id, request_info, db
     )
     
-    final_url = _build_final_url(original_url, click_id, offer_id, channel_id,
+    final_url = _build_final_url(original_url_before_replace, original_url, click_id, offer_id, channel_id,
                                  final_channel_id, request_params)
     
     # 打印最终跳转链接
@@ -550,43 +580,56 @@ async def _create_click_record(
 
 
 def _build_final_url(
-    original_url: str,
+    original_url_before_replace: str,
+    original_url_after_replace: str,
     click_id: str,
     offer_id: Optional[int],
     channel_id: Optional[int],
     final_channel_id: Optional[int],
     request_params: dict
 ) -> str:
-    """构建最终的重定向URL"""
-    # 检查占位符
+    """构建最终的重定向URL
+    
+    Args:
+        original_url_before_replace: 替换占位符之前的原始URL（用于检查占位符）
+        original_url_after_replace: 替换占位符之后的URL（用于合并参数）
+        click_id: 点击ID
+        offer_id: Offer ID
+        channel_id: 渠道ID（URL参数）
+        final_channel_id: 最终使用的渠道ID
+        request_params: 请求参数
+    """
+    # 检查占位符（使用替换前的原始URL）
     placeholder_params_to_check = {
-        'click_id': ['{click_id}', '{clickId}', '{clickid}', '{ClickId}', '{CLICK_ID}'],
+        'click_id': ['{click_id}', '{clickId}', '{clickid}', '{ClickId}', '{CLICK_ID}', '{aff_click_id}', '{AFF_CLICK_ID}'],
         'offer_id': ['{offer_id}', '{offerId}', '{offerid}', '{OfferId}', '{OFFER_ID}'],
-        'channel_id': ['{channel_id}', '{channelId}', '{channelid}', '{ChannelId}', '{CHANNEL_ID}'],
+        'channel_id': ['{channel_id}', '{channelId}', '{channelid}', '{ChannelId}', '{CHANNEL_ID}', '{sub_affid}', '{SUB_AFFID}'],
         'publisher_id': ['{publisher_id}', '{publisherId}', '{publisherid}', '{PublisherId}', '{PUBLISHER_ID}'],
     }
     
     has_placeholder = {}
     for param_name, placeholder_variants in placeholder_params_to_check.items():
-        has_placeholder[param_name] = any(variant in original_url for variant in placeholder_variants)
+        has_placeholder[param_name] = any(variant in original_url_before_replace for variant in placeholder_variants)
     
     # 准备要合并的参数
     request_params_with_click = {}
     
+    # 如果占位符已经被替换，就不需要再添加查询参数
     for param_name, has_placeholder_flag in has_placeholder.items():
         if not has_placeholder_flag:
+            # 占位符不存在，需要添加查询参数
             if param_name == 'click_id':
                 request_params_with_click['click_id'] = click_id
             elif param_name == 'offer_id' and offer_id:
                 request_params_with_click['offer_id'] = offer_id
-            elif param_name == 'channel_id' and channel_id:
+            elif param_name == 'channel_id' and final_channel_id:
                 if not has_placeholder.get('publisher_id', False):
-                    request_params_with_click['channel_id'] = channel_id
+                    request_params_with_click['channel_id'] = final_channel_id
             elif param_name == 'publisher_id' and final_channel_id:
                 if not has_placeholder.get('channel_id', False):
                     request_params_with_click['publisher_id'] = final_channel_id
     
-    # 添加其他请求参数
+    # 添加其他请求参数（排除已经在占位符中使用的参数）
     param_name_mapping = {
         'click_id': ['click_id', 'aff_click_id', 'clickid', 'clickId', 'CLICK_ID', 'AFF_CLICK_ID'],
         'offer_id': ['offer_id', 'offerid', 'offerId', 'OFFER_ID'],
@@ -602,9 +645,11 @@ def _build_final_url(
                 corresponding_param_name = param_name
                 break
         
+        # 如果该参数在原始URL中使用了占位符，跳过（因为已经被替换了）
         if corresponding_param_name and has_placeholder.get(corresponding_param_name, False):
             continue
         
+        # 处理channel_id和publisher_id的互斥关系
         if key_lower == 'publisher_id' and has_placeholder.get('channel_id', False):
             continue
         if key_lower == 'channel_id' and has_placeholder.get('publisher_id', False):
@@ -612,5 +657,6 @@ def _build_final_url(
         
         request_params_with_click[key_lower] = value
     
-    return merge_url_params(original_url, request_params_with_click)
+    # 使用替换后的URL作为基础URL
+    return merge_url_params(original_url_after_replace, request_params_with_click)
 
