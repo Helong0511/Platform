@@ -75,7 +75,7 @@ api_router.include_router(clients.router, prefix="/clients", tags=["客户管理
 
 # ---------- 产品管理模块 ----------
 api_router.include_router(products.router, prefix="/products", tags=["产品管理"])
-api_router.include_router(product_assignments.router, prefix="/product-assignments", tags=["产品分配历史"])
+api_router.include_router(product_assignments, prefix="/product-assignments", tags=["产品分配历史"])
 
 # ---------- 广告数据模块 ----------
 api_router.include_router(ad_data.router, prefix="/ad-data", tags=["广告数据"])
