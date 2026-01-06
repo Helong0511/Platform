@@ -46,6 +46,19 @@ class SessionResponse(BaseModel):
         from_attributes = True
 
 
+class BlacklistResponse(BaseModel):
+    """黑名单响应模型"""
+    id: int
+    token_jti: str
+    user_id: int
+    revoked_at: datetime
+    expires_at: datetime
+    reason: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 @router.get("/me/sessions", response_model=PaginatedResponseBaseSchema[list[SessionResponse]], summary="获取当前用户的活跃会话")
 async def get_my_sessions(
         request: Request,
@@ -307,5 +320,56 @@ async def revoke_all_user_sessions(
     return ResponseBaseSchema.success(
         data={"message": f"已撤销用户 {username} 的 {revoked_count} 个会话", "revoked_count": revoked_count},
         message=f"已撤销 {revoked_count} 个会话"
+    )
+
+
+@router.get("/blacklist", response_model=PaginatedResponseBaseSchema[list[BlacklistResponse]], summary="获取Token黑名单列表（管理员）")
+async def get_blacklist(
+        request: Request,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin),
+        page: int = Query(1, ge=1, description="页码"),
+        page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
+        user_id: Optional[int] = Query(None, ge=1, description="用户ID（可选，筛选指定用户的黑名单）")
+):
+    """
+    获取Token黑名单列表（仅管理员）
+    - 可以查看所有已撤销的Token
+    - 支持按用户ID筛选
+    - 返回分页结果
+    """
+    # 构建查询
+    query = select(TokenBlacklist)
+    
+    # 如果指定了用户ID，添加筛选条件
+    if user_id:
+        query = query.where(TokenBlacklist.user_id == user_id)
+    
+    # 按撤销时间倒序排列
+    query = query.order_by(TokenBlacklist.revoked_at.desc())
+    
+    # 获取总数
+    count_query = select(func.count()).select_from(TokenBlacklist)
+    if user_id:
+        count_query = count_query.where(TokenBlacklist.user_id == user_id)
+    
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+    
+    # 分页查询
+    offset = (page - 1) * page_size
+    query = query.offset(offset).limit(page_size)
+    
+    result = await db.execute(query)
+    blacklist_items = result.scalars().all()
+    
+    # 转换为响应格式
+    blacklist_responses = [BlacklistResponse.model_validate(item) for item in blacklist_items]
+    
+    return PaginatedResponseBaseSchema.success(
+        data=blacklist_responses,
+        total=total,
+        page=page,
+        page_size=page_size
     )
 
