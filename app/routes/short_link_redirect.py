@@ -250,6 +250,17 @@ def merge_url_params(base_url: str, query_params: dict) -> str:
     existing_params = parse_qs(parsed.query, keep_blank_values=True)
     existing_params_lower = {k.lower(): v for k, v in existing_params.items()}
     
+    # 定义所有可能的占位符模式（用于检查参数值中是否包含占位符）
+    all_placeholder_patterns = [
+        '{click_id}', '{clickId}', '{clickid}', '{ClickId}', '{CLICK_ID}',
+        '{aff_click_id}', '{AFF_CLICK_ID}', '{affclickid}', '{AFFCLICKID}',
+        '{offer_id}', '{offerId}', '{offerid}', '{OfferId}', '{OFFER_ID}',
+        '{channel_id}', '{channelId}', '{channelid}', '{ChannelId}', '{CHANNEL_ID}',
+        '{sub_affid}', '{SUB_AFFID}', '{subaffid}', '{SUBAFFID}',
+        '{publisher_id}', '{publisherId}', '{publisherid}', '{PublisherId}', '{PUBLISHER_ID}',
+        '{ip}', '{os}', '{device_type}', '{country}', '{advertiser_id}',
+    ]
+    
     # 检查占位符
     placeholder_params = {'click_id', 'offer_id', 'channel_id', 'publisher_id'}
     skip_params = set()
@@ -269,6 +280,22 @@ def merge_url_params(base_url: str, query_params: dict) -> str:
         
         if any(variant in base_url for variant in placeholder_variants):
             skip_params.add(param)
+    
+    # 过滤掉包含占位符的参数值
+    filtered_query_params = {}
+    for key, value in query_params.items():
+        # 检查参数值中是否包含占位符
+        param_value_str = str(value) if not isinstance(value, list) else str(value[0]) if value else ''
+        contains_placeholder = any(pattern in param_value_str for pattern in all_placeholder_patterns)
+        
+        if contains_placeholder:
+            logger.debug(f"[合并URL参数] 跳过参数 {key}={value}，因为参数值中包含占位符")
+            continue
+        
+        filtered_query_params[key] = value
+    
+    # 使用过滤后的参数
+    query_params = filtered_query_params
     
     # 分离 click_id 和其他参数
     click_id_value = None
@@ -706,7 +733,7 @@ def _build_final_url(
                 if not has_placeholder.get('channel_id', False):
                     request_params_with_click['publisher_id'] = final_channel_id
     
-    # 添加其他请求参数（排除已经在占位符中使用的参数）
+    # 添加其他请求参数（排除已经在占位符中使用的参数，以及包含占位符的参数值）
     param_name_mapping = {
         'click_id': ['click_id', 'aff_click_id', 'clickid', 'clickId', 'CLICK_ID', 'AFF_CLICK_ID'],
         'offer_id': ['offer_id', 'offerid', 'offerId', 'OFFER_ID'],
@@ -714,8 +741,28 @@ def _build_final_url(
         'publisher_id': ['publisher_id', 'publisherid', 'publisherId', 'PUBLISHER_ID'],
     }
     
+    # 定义所有可能的占位符模式（用于检查参数值中是否包含占位符）
+    all_placeholder_patterns = [
+        '{click_id}', '{clickId}', '{clickid}', '{ClickId}', '{CLICK_ID}',
+        '{aff_click_id}', '{AFF_CLICK_ID}', '{affclickid}', '{AFFCLICKID}',
+        '{offer_id}', '{offerId}', '{offerid}', '{OfferId}', '{OFFER_ID}',
+        '{channel_id}', '{channelId}', '{channelid}', '{ChannelId}', '{CHANNEL_ID}',
+        '{sub_affid}', '{SUB_AFFID}', '{subaffid}', '{SUBAFFID}',
+        '{publisher_id}', '{publisherId}', '{publisherid}', '{PublisherId}', '{PUBLISHER_ID}',
+        '{ip}', '{os}', '{device_type}', '{country}', '{advertiser_id}',
+    ]
+    
     for key, value in request_params.items():
         key_lower = key.lower()
+        
+        # 检查参数值中是否包含占位符
+        param_value_str = str(value) if not isinstance(value, list) else str(value[0]) if value else ''
+        contains_placeholder = any(pattern in param_value_str for pattern in all_placeholder_patterns)
+        
+        if contains_placeholder:
+            logger.warning(f"[构建最终URL] 跳过参数 {key}={value}，因为参数值中包含占位符")
+            continue
+        
         corresponding_param_name = None
         for param_name, possible_names in param_name_mapping.items():
             if key_lower in [name.lower() for name in possible_names]:
