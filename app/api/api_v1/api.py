@@ -91,38 +91,38 @@ api_router.include_router(excel.router, prefix="/excel", tags=["Excel处理"])
 api_router.include_router(ml_model.router, prefix="/ml-model", tags=["导入训练"])
 
 # ---------- 系统管理模块 ----------
-api_router.include_router(scheduled_tasks.router, prefix="/scheduled-tasks", tags=["定时任务管理"])
-api_router.include_router(audit_logs.router, prefix="/audit-logs", tags=["操作日志"])
-api_router.include_router(sessions.router, prefix="/sessions", tags=["会话管理"])
-api_router.include_router(notification_configs.router, prefix="/notification-configs", tags=["通知配置管理"])
+api_router.include_router(scheduled_tasks, prefix="/scheduled-tasks", tags=["定时任务管理"])
+api_router.include_router(audit_logs, prefix="/audit-logs", tags=["操作日志"])
+api_router.include_router(sessions, prefix="/sessions", tags=["会话管理"])
+api_router.include_router(notification_configs, prefix="/notification-configs", tags=["通知配置管理"])
 
 # ---------- 外部接口模块 ----------
 # 客户API路由（通过API密钥访问，无前缀）
-api_router.include_router(client_api.router, prefix="", tags=["客户API"])
+api_router.include_router(client_api, prefix="", tags=["客户API"])
 # Telegram Bot 管理路由
-api_router.include_router(telegram.router, prefix="/telegram", tags=["Telegram Bot"])
+api_router.include_router(telegram, prefix="/telegram", tags=["Telegram Bot"])
 
 # ---------- Postback模块 ----------
 # BFT S2S PostBack 路由（外部回调接口，保留向后兼容，无前缀）
-api_router.include_router(bft_postback.router, prefix="", tags=["BFT S2S"])
+api_router.include_router(bft_postback, prefix="", tags=["BFT S2S"])
 # 统一 Postback 服务路由（推荐使用，无前缀）
-api_router.include_router(postback.router, prefix="", tags=["Postback服务"])
+api_router.include_router(postback, prefix="", tags=["Postback服务"])
 
 # ---------- 追踪模块 ----------
 # 点击追踪路由（必须在其他路由之前，避免路径冲突，无前缀）
-api_router.include_router(tracking.router, prefix="", tags=["点击追踪"])
+api_router.include_router(tracking, prefix="", tags=["点击追踪"])
 # 短链接服务路由
-api_router.include_router(short_links.router, prefix="/short-links", tags=["短链接服务"])
+api_router.include_router(short_links, prefix="/short-links", tags=["短链接服务"])
 
 # ---------- CPL系统模块 ----------
-api_router.include_router(advertisers.router, prefix="/advertisers", tags=["广告主管理"])
-api_router.include_router(publishers.router, prefix="/publishers", tags=["渠道管理"])
-api_router.include_router(offers.router, prefix="/offers", tags=["Offer管理"])
-api_router.include_router(caps.router, prefix="/caps", tags=["Cap管理"])
-api_router.include_router(discounts.router, prefix="/discounts", tags=["扣量管理"])
-api_router.include_router(conversion_deductions.router, prefix="/conversion-deductions", tags=["转化扣减管理"])
-api_router.include_router(advertiser_tests.router, prefix="/advertiser-tests", tags=["上游测试"])
-api_router.include_router(affiliate_tests.router, prefix="/affiliate-tests", tags=["下游测试"])
-api_router.include_router(conversion_summary.router, prefix="/conversion-summary", tags=["转化统计"])
-api_router.include_router(conversion_log.router, prefix="/conversion-logs", tags=["转化日志"])
-api_router.include_router(clicks.router, prefix="/clicks", tags=["短链接访问记录"])
+api_router.include_router(advertisers, prefix="/advertisers", tags=["广告主管理"])
+api_router.include_router(publishers, prefix="/publishers", tags=["渠道管理"])
+api_router.include_router(offers, prefix="/offers", tags=["Offer管理"])
+api_router.include_router(caps, prefix="/caps", tags=["Cap管理"])
+api_router.include_router(discounts, prefix="/discounts", tags=["扣量管理"])
+api_router.include_router(conversion_deductions, prefix="/conversion-deductions", tags=["转化扣减管理"])
+api_router.include_router(advertiser_tests, prefix="/advertiser-tests", tags=["上游测试"])
+api_router.include_router(affiliate_tests, prefix="/affiliate-tests", tags=["下游测试"])
+api_router.include_router(conversion_summary, prefix="/conversion-summary", tags=["转化统计"])
+api_router.include_router(conversion_log, prefix="/conversion-logs", tags=["转化日志"])
+api_router.include_router(clicks, prefix="/clicks", tags=["短链接访问记录"])
