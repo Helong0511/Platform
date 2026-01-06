@@ -10,18 +10,22 @@ from datetime import datetime, timezone
 from app.core.redis_client import get_redis_client
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import update
+from sqlalchemy import update, text
 from sqlalchemy.exc import OperationalError
 from app.models.models import ShortLink
+import uuid
 
 logger = logging.getLogger(__name__)
 
 # 死锁重试配置
-MAX_DEADLOCK_RETRIES = 3
-DEADLOCK_RETRY_BASE_DELAY = 0.1  # 基础延迟（秒）
+MAX_DEADLOCK_RETRIES = 5  # 增加重试次数
+DEADLOCK_RETRY_BASE_DELAY = 0.2  # 增加基础延迟（秒）
 
 # Redis键前缀
 CLICK_COUNTER_PREFIX = "short_link:click:"
+SYNC_LOCK_PREFIX = "short_link:sync_lock:"  # 分布式锁前缀
+SYNC_LOCK_TIMEOUT = 300  # 锁超时时间（秒），5分钟
+
 # 批量更新阈值：每10次点击或每5秒更新一次
 BATCH_UPDATE_THRESHOLD = 10
 BATCH_UPDATE_INTERVAL = 5  # 秒
@@ -76,6 +80,8 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
     """
     将Redis中的点击次数同步到数据库
     
+    使用分布式锁确保同一时间只有一个进程在执行同步，避免并发死锁
+    
     Args:
         db: 数据库会话
         short_codes: 要同步的短链接代码列表，如果为None则同步所有
@@ -84,6 +90,33 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
         同步的记录数
     """
     redis = await get_redis_client()
+    
+    # 使用分布式锁，确保同一时间只有一个进程在执行同步
+    lock_key = f"{SYNC_LOCK_PREFIX}global"
+    lock_value = str(uuid.uuid4())
+    lock_acquired = False
+    
+    try:
+        # 尝试获取分布式锁（如果Redis可用）
+        if redis:
+            # 使用 SET key value NX EX timeout 实现分布式锁
+            lock_acquired = await redis.set(
+                lock_key, 
+                lock_value, 
+                nx=True,  # 只在键不存在时设置
+                ex=SYNC_LOCK_TIMEOUT  # 设置过期时间，防止死锁
+            )
+            
+            if not lock_acquired:
+                logger.info("另一个进程正在执行同步，跳过本次同步以避免并发死锁")
+                return 0
+            else:
+                logger.debug("成功获取同步锁，开始执行同步")
+    except Exception as e:
+        logger.warning(f"获取分布式锁失败，继续执行同步（可能发生并发）: {e}")
+        # 如果获取锁失败，仍然继续执行（降级处理）
+    
+    try:
     if not redis:
         # Redis不可用时，同步进程内计数器
         if not _click_counters:
@@ -195,7 +228,8 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
         logger.info(f"准备批量同步 {len(updates)} 个短链接的点击次数")
         
         # 使用批量更新（分批处理，减少死锁风险）
-        BATCH_SIZE = 20  # 每批处理20条记录
+        # 减小批量大小，进一步降低死锁风险
+        BATCH_SIZE = 10  # 每批处理10条记录（从20减少到10）
         synced = 0
         failed_updates = []  # 记录失败的更新
         
@@ -203,46 +237,53 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
             batch = updates[batch_idx:batch_idx + BATCH_SIZE]
             
             try:
-                # 获取所有 short_code
-                short_codes_batch = [code for code, _, _ in batch]
-                
-                # 查询所有短链接（按 ID 排序，避免死锁）
-                result = await db.execute(
-                    select(ShortLink)
-                    .where(ShortLink.short_code.in_(short_codes_batch))
-                    .order_by(ShortLink.id)
-                )
-                short_links = result.scalars().all()
-                
-                # 创建 short_code -> (count, redis_key) 映射
-                update_map = {code: (count, key) for code, count, key in batch}
-                short_link_map = {link.short_code: link for link in short_links}
-                
-                # 更新每个短链接
+                # 使用原子更新（UPDATE ... SET click_count = click_count + ? WHERE short_code = ?）
+                # 这样可以避免读取-修改-写入模式导致的死锁
                 batch_synced = 0
                 batch_keys_to_delete = []  # 成功同步后需要删除的键
                 
+                # 按 short_code 排序，确保更新顺序一致，减少死锁
+                batch = sorted(batch, key=lambda x: x[0])
+                
                 for short_code, count_value, redis_key in batch:
-                    if short_code in short_link_map:
-                        short_link = short_link_map[short_code]
-                        old_count = short_link.click_count
-                        short_link.click_count += count_value
-                        new_count = short_link.click_count
-                        
-                        logger.debug(
-                            f"批量更新短链接点击次数: short_code={short_code}, "
-                            f"旧值={old_count}, 增量={count_value}, 新值={new_count}"
+                    try:
+                        # 使用原子更新，避免死锁
+                        # UPDATE short_links SET click_count = click_count + :count 
+                        # WHERE short_code = :code
+                        # 使用 text() 执行原始SQL，确保原子更新
+                        result = await db.execute(
+                            text("""
+                                UPDATE short_links 
+                                SET click_count = click_count + :count
+                                WHERE short_code = :code
+                            """),
+                            {"count": count_value, "code": short_code}
                         )
-                        batch_synced += 1
-                        batch_keys_to_delete.append(redis_key)
-                    else:
-                        # 短链接不存在，记录但不在数据库中更新
-                        logger.warning(f"短链接不存在: short_code={short_code}")
-                        # 仍然删除Redis中的计数器
-                        try:
-                            await redis.delete(redis_key)
-                        except:
-                            pass
+                        
+                        if result.rowcount > 0:
+                            # 更新成功
+                            logger.debug(
+                                f"原子更新短链接点击次数: short_code={short_code}, "
+                                f"增量={count_value}"
+                            )
+                            batch_synced += 1
+                            batch_keys_to_delete.append(redis_key)
+                        else:
+                            # 短链接不存在，记录但不在数据库中更新
+                            logger.warning(f"短链接不存在: short_code={short_code}")
+                            # 仍然删除Redis中的计数器
+                            try:
+                                await redis.delete(redis_key)
+                            except:
+                                pass
+                    except Exception as e:
+                        # 单个更新失败，记录但继续处理其他记录
+                        logger.error(
+                            f"更新短链接点击次数失败: short_code={short_code}, error={e}",
+                            exc_info=True
+                        )
+                        # 保留这个计数器以便下次重试
+                        failed_updates.append((short_code, count_value, redis_key))
                 
                 # 提交当前批次（带死锁重试）
                 if batch_synced > 0:
@@ -257,7 +298,8 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                                 logger.warning(f"删除Redis计数器失败: key={key}, error={e}")
                     else:
                         # 提交失败，保留计数器以便下次重试
-                        failed_updates.extend(batch)
+                        failed_updates.extend([(code, count, key) for code, count, key in batch 
+                                              if (code, count, key) not in failed_updates])
                         logger.warning(f"批次 {batch_idx // BATCH_SIZE + 1} 提交失败，保留计数器以便重试")
                         await db.rollback()
                     
@@ -280,6 +322,22 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
     except Exception as e:
         logger.error(f"同步点击次数到数据库失败: {e}", exc_info=True)
         return 0
+    finally:
+        # 释放分布式锁
+        if redis and lock_acquired:
+            try:
+                # 使用 Lua 脚本确保只删除自己设置的锁
+                lua_script = """
+                if redis.call("get", KEYS[1]) == ARGV[1] then
+                    return redis.call("del", KEYS[1])
+                else
+                    return 0
+                end
+                """
+                await redis.eval(lua_script, 1, lock_key, lock_value)
+                logger.debug("成功释放同步锁")
+            except Exception as e:
+                logger.warning(f"释放分布式锁失败: {e}")
 
 
 async def _commit_with_retry(db: AsyncSession, synced_count: int, max_retries: int = MAX_DEADLOCK_RETRIES) -> bool:
@@ -303,14 +361,14 @@ async def _commit_with_retry(db: AsyncSession, synced_count: int, max_retries: i
             error_code = e.orig.args[0] if hasattr(e.orig, 'args') and e.orig.args else None
             if error_code == 1213:  # Deadlock
                 if attempt < max_retries - 1:
-                    # 指数退避 + 随机抖动
-                    delay = DEADLOCK_RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.1)
+                    # 指数退避 + 随机抖动（增加延迟时间）
+                    delay = DEADLOCK_RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.2)
                     logger.warning(
                         f"检测到死锁，第 {attempt + 1}/{max_retries} 次重试，"
                         f"等待 {delay:.2f} 秒后重试..."
                     )
                     await asyncio.sleep(delay)
-                    await db.rollback()
+                    # 注意：这里不需要rollback，因为事务已经因为死锁而回滚了
                     continue
                 else:
                     logger.error(
