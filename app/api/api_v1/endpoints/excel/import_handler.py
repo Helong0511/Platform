@@ -244,7 +244,7 @@ async def process_column_mapping(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[s
     返回:
         (处理后的DataFrame, 映射结果)
     """
-    from app.api.api_v1.endpoints.ml_model import ColumnMappingService, REQUIRED_FIELDS
+    from app.api.api_v1.endpoints.ml_model.ml_model import ColumnMappingService, REQUIRED_FIELDS
 
     # 步骤1：规范化Excel列名
     excel_columns_normalized = ColumnMappingService.normalize_excel_columns(df.columns)

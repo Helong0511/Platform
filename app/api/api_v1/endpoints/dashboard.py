@@ -6,10 +6,8 @@
 - 计算各种指标（覆盖率、展示率、点击率、ROI等）
 - 管理员可查看所有数据，客户只能查看自己的数据
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, case, Float, text, and_
-from datetime import datetime, timedelta
 import logging
 from app.core.database import get_db
 from app.core.exceptions import raise_api_exception
@@ -17,9 +15,7 @@ from app.core.errors import ErrorCode
 from app.schemas.ad_data import DashboardStatsResponse, TrendDataResponse
 from app.schemas.base import ResponseBaseSchema
 from app.core.security import get_current_user
-from app.models.models import User, AdData, Product, Client, UserRole, ProductAssignment
-from app.core.cache import get_cached, set_cached, generate_cache_key
-from app.core.query_utils import date_range_condition, product_assignment_join_condition, check_use_assignment_table
+from app.models.models import User
 
 # 创建路由实例
 router = APIRouter()
@@ -51,8 +47,6 @@ async def get_dashboard_stats(period: str = "week", db: AsyncSession = Depends(g
         )
         
         return ResponseBaseSchema.success(data=DashboardStatsResponse(**response_data))
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"获取仪表盘统计数据失败: {str(e)}", exc_info=True)
         raise_api_exception(
@@ -125,8 +119,6 @@ async def get_trend_data(period: str = "week", db: AsyncSession = Depends(get_db
         )
         
         return ResponseBaseSchema.success(data=TrendDataResponse(**response_data))
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"获取趋势数据失败: {str(e)}", exc_info=True)
         raise_api_exception(

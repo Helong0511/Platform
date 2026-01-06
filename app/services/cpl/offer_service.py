@@ -433,7 +433,7 @@ class OfferService(BaseService[Offer]):
         short_link_info = None
         if publisher_ids_for_short_link and offer.advertiser_tracklink:
             # 导入短链接同步函数
-            from app.api.api_v1.endpoints.offers import sync_short_links_for_offer
+            from app.api.api_v1.endpoints.cpl.offers import sync_short_links_for_offer
             short_link_info = await sync_short_links_for_offer(
                 db=self.db,
                 offer_id=offer.id,
@@ -701,7 +701,7 @@ class OfferService(BaseService[Offer]):
             
             if current_advertiser_tracklink and current_publisher_ids:
                 from app.core.config import settings
-                from app.api.api_v1.endpoints.offers import sync_short_links_for_offer
+                from app.api.api_v1.endpoints.cpl.offers import sync_short_links_for_offer
                 base_url = settings.TRACKING_BASE_URL
                 short_link_info = await sync_short_links_for_offer(
                     db=self.db,
@@ -723,7 +723,7 @@ class OfferService(BaseService[Offer]):
         current_advertiser_tracklink = offer.advertiser_tracklink
         if current_downstream_tracklink and current_advertiser_tracklink:
             from app.core.config import settings
-            from app.api.api_v1.endpoints.offers import (
+            from app.api.api_v1.endpoints.cpl.offers import (
                 check_and_create_downstream_tracklink_short_link,
                 get_short_link_url
             )
