@@ -212,9 +212,9 @@ async def get_scheduled_task(
         raise
     except Exception as e:
         logger.error(f"获取定时任务详情失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="获取定时任务详情失败"
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取定时任务详情失败：{str(e)}"
         )
 
 
