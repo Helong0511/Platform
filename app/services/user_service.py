@@ -34,6 +34,8 @@ class UserService(BaseService[User]):
         """
         根据ID获取用户详情
         
+        使用新的仓储层，代码更简洁
+        
         Args:
             user_id: 用户ID
             current_user: 当前用户（用于权限检查）
@@ -45,22 +47,12 @@ class UserService(BaseService[User]):
         Raises:
             HTTPException: 如果用户不存在或没有权限
         """
-        query = select(User).where(User.id == user_id)
-        
         # 权限检查：非管理员只能查看自己的信息
-        if current_user.role != UserRole.ADMIN:
-            if current_user.id != user_id:
-                raise_api_exception(
-                    ErrorCode.FORBIDDEN,
-                    detail="您只能查看自己的信息"
-                )
+        self.require_owner_or_admin(current_user, user_id)
         
-        # 如果需要客户信息，使用selectinload优化查询
-        if include_client:
-            query = query.options(selectinload(User.clients))
-        
-        result = await self.db.execute(query)
-        user = result.scalar_one_or_none()
+        # 通过仓储层获取数据
+        load_relations = ["clients"] if include_client else None
+        user = await self.repository.get_by_id(user_id, load_relations=load_relations)
         
         if not user:
             raise_api_exception(
@@ -83,6 +75,8 @@ class UserService(BaseService[User]):
         """
         获取用户列表（支持分页、筛选、搜索）
         
+        使用新的查询构建器和仓储层，代码更简洁，性能更优
+        
         Args:
             current_user: 当前用户（用于权限检查）
             page: 页码
@@ -96,57 +90,34 @@ class UserService(BaseService[User]):
             tuple: (用户列表, 总数)
         """
         # 权限检查：仅管理员可查看所有用户
-        if current_user.role != UserRole.ADMIN:
-            raise_api_exception(
-                ErrorCode.FORBIDDEN,
-                detail="此操作需要管理员权限"
-            )
+        self.require_admin(current_user)
         
-        # 构建查询
-        query = select(User)
-        
-        # 筛选条件
-        conditions = []
-        
-        if username:
-            conditions.append(func.lower(User.username).like(f"%{username.lower()}%"))
+        # 构建过滤条件
+        filters = {}
+        if is_active is not None:
+            filters["is_active"] = is_active
         
         if role:
             try:
                 role_enum = UserRole(role)
-                conditions.append(User.role == role_enum)
+                filters["role"] = role_enum
             except ValueError:
                 pass  # 无效的角色值，忽略
         
-        if is_active is not None:
-            conditions.append(User.is_active == is_active)
+        # 使用仓储层的分页查询（通过查询构建器）
+        # 如果提供了username，使用search参数；否则使用search参数（如果提供）
+        search_keyword = username or search
         
-        if search:
-            # 全文搜索：用户名、全名、邮箱
-            search_pattern = f"%{search.lower()}%"
-            conditions.append(
-                or_(
-                    func.lower(User.username).like(search_pattern),
-                    func.lower(User.full_name).like(search_pattern) if User.full_name else False,
-                    func.lower(User.email).like(search_pattern) if User.email else False
-                )
-            )
-        
-        if conditions:
-            query = query.where(and_(*conditions))
-        
-        # 总数查询（优化：不加载关联数据）
-        count_query = select(func.count(User.id))
-        if conditions:
-            count_query = count_query.where(and_(*conditions))
-        total_result = await self.db.execute(count_query)
-        total = total_result.scalar() or 0
-        
-        # 分页查询（使用selectinload优化客户信息加载）
-        offset = (page - 1) * page_size
-        query = query.options(selectinload(User.clients))
-        query = query.order_by(User.created_at.desc())
-        query = query.offset(offset).limit(page_size)
+        return await self.repository.paginated(
+            page=page,
+            page_size=page_size,
+            filters=filters,
+            search_fields=["username", "full_name", "email"],
+            search_keyword=search_keyword,
+            order_by_field="created_at",
+            desc_order=True,
+            load_relations=["clients"]  # 预加载客户信息，避免N+1查询
+        )
         
         result = await self.db.execute(query)
         users = result.scalars().all()
