@@ -55,32 +55,22 @@ async def get_my_sessions(
         page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数")
 ):
     """
-    获取当前用户的活跃会话列表
+    获取当前用户的活跃会话列表（已重构使用服务层）
     - 用户可以查看自己的所有会话
     - 返回分页结果
     """
-    # 构建查询（expires_at 存储的是北京时间，使用北京时间比较）
-    now = get_app_now_naive()
-    query = select(UserSession).where(
-        UserSession.user_id == current_user.id,
-        UserSession.expires_at > now  # 只返回未过期的会话
+    # 使用服务层（业务逻辑在SessionService中）
+    from app.core.dependencies import get_session_service
+    from app.services.session_service import SessionService
+    
+    session_service: SessionService = await get_session_service(db)
+    
+    # 调用服务层获取当前用户的会话列表（服务层会处理查询、分页）
+    sessions, total = await session_service.get_my_sessions(
+        user_id=current_user.id,
+        page=page,
+        page_size=page_size
     )
-    count_query = select(func.count(UserSession.id)).where(
-        UserSession.user_id == current_user.id,
-        UserSession.expires_at > now
-    )
-    
-    # 获取总数
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0
-    
-    # 应用分页和排序
-    query = query.order_by(UserSession.last_activity.desc())
-    query = query.offset((page - 1) * page_size).limit(page_size)
-    
-    # 执行查询
-    result = await db.execute(query)
-    sessions = result.scalars().all()
     
     # 转换为响应格式
     session_responses = [SessionResponse.model_validate(session) for session in sessions]
@@ -101,37 +91,19 @@ async def revoke_my_session(
         current_user: User = Depends(get_current_user)
 ):
     """
-    撤销当前用户的指定会话
+    撤销当前用户的指定会话（已重构使用服务层）
     - 用户只能撤销自己的会话
     - 将token加入黑名单
     - 标记会话为非活跃
     """
-    # 查询会话
-    result = await db.execute(
-        select(UserSession).where(
-            UserSession.id == session_id,
-            UserSession.user_id == current_user.id
-        )
-    )
-    session = result.scalars().first()
+    # 使用服务层（业务逻辑在SessionService中）
+    from app.core.dependencies import get_session_service
+    from app.services.session_service import SessionService
     
-    if not session:
-        raise_api_exception(
-            ErrorCode.NOT_FOUND,
-            detail="会话不存在或不属于当前用户"
-        )
+    session_service: SessionService = await get_session_service(db)
     
-    # 将token加入黑名单
-    blacklist_entry = TokenBlacklist(
-        token_jti=session.token_jti,
-        user_id=current_user.id,
-        expires_at=session.expires_at,
-        reason="用户主动撤销会话"
-    )
-    db.add(blacklist_entry)
-    
-    # 标记会话为非活跃
-    session.is_active = False
+    # 调用服务层撤销会话（服务层会处理验证、黑名单、标记等）
+    await session_service.revoke_my_session(session_id, current_user.id, current_user)
     
     # 记录审计日志
     try:
@@ -162,14 +134,19 @@ async def revoke_all_my_sessions(
         current_user: User = Depends(get_current_user)
 ):
     """
-    撤销当前用户的所有其他会话（保留当前会话）
+    撤销当前用户的所有其他会话（保留当前会话，已重构使用服务层）
     - 获取当前请求的token jti
     - 将所有其他会话的token加入黑名单
     - 标记所有其他会话为非活跃
     """
+    # 使用服务层（业务逻辑在SessionService中）
+    from app.core.dependencies import get_session_service
+    from app.services.session_service import SessionService
+    
+    session_service: SessionService = await get_session_service(db)
+    
     # 获取当前token的jti
-    from fastapi.security import HTTPBearer
-    from app.core.security import oauth2_scheme
+    from app.core.config import settings
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     current_jti = None
     
@@ -186,32 +163,12 @@ async def revoke_all_my_sessions(
         except Exception:
             pass
     
-    # 查询所有其他活跃会话
-    query = select(UserSession).where(
-        UserSession.user_id == current_user.id,
-        UserSession.is_active == True,
-        UserSession.expires_at > get_app_now_naive()  # 使用北京时间比较
+    # 调用服务层撤销所有其他会话（服务层会处理查询、黑名单、标记等）
+    revoked_count = await session_service.revoke_all_my_sessions(
+        user_id=current_user.id,
+        current_jti=current_jti,
+        current_user=current_user
     )
-    if current_jti:
-        query = query.where(UserSession.token_jti != current_jti)
-    
-    result = await db.execute(query)
-    sessions = result.scalars().all()
-    
-    revoked_count = 0
-    for session in sessions:
-        # 将token加入黑名单
-        blacklist_entry = TokenBlacklist(
-            token_jti=session.token_jti,
-            user_id=current_user.id,
-            expires_at=session.expires_at,
-            reason="用户撤销所有其他会话"
-        )
-        db.add(blacklist_entry)
-        
-        # 标记会话为非活跃
-        session.is_active = False
-        revoked_count += 1
     
     # 记录审计日志
     try:
@@ -244,41 +201,20 @@ async def get_user_sessions(
         page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数")
 ):
     """
-    获取指定用户的活跃会话列表（仅管理员）
+    获取指定用户的活跃会话列表（仅管理员，已重构使用服务层）
     """
-    # 优化：直接在查询会话时验证用户存在性，避免额外查询
-    # 构建查询 - 使用JOIN验证用户存在性（如果用户不存在，会话查询将返回空结果）
-    query = select(UserSession).where(
-        UserSession.user_id == user_id,
-        UserSession.expires_at > get_app_now_naive()  # 使用北京时间比较
+    # 使用服务层（业务逻辑在SessionService中）
+    from app.core.dependencies import get_session_service
+    from app.services.session_service import SessionService
+    
+    session_service: SessionService = await get_session_service(db)
+    
+    # 调用服务层获取指定用户的会话列表（服务层会处理用户验证、查询、分页）
+    sessions, total = await session_service.get_user_sessions(
+        user_id=user_id,
+        page=page,
+        page_size=page_size
     )
-    
-    # 先执行一次查询检查用户是否存在（如果会话查询返回空，可能是用户不存在或没有会话）
-    # 为了区分这两种情况，先检查用户是否存在
-    user_result = await db.execute(select(User.id).where(User.id == user_id))
-    user_exists = user_result.scalar() is not None
-    
-    if not user_exists:
-        raise_api_exception(
-            ErrorCode.USER_NOT_FOUND,
-            detail=f"用户ID {user_id} 不存在"
-        )
-    count_query = select(func.count(UserSession.id)).where(
-        UserSession.user_id == user_id,
-        UserSession.expires_at > get_app_now_naive()  # 使用北京时间比较
-    )
-    
-    # 获取总数
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0
-    
-    # 应用分页和排序
-    query = query.order_by(UserSession.last_activity.desc())
-    query = query.offset((page - 1) * page_size).limit(page_size)
-    
-    # 执行查询
-    result = await db.execute(query)
-    sessions = result.scalars().all()
     
     # 转换为响应格式
     session_responses = [SessionResponse.model_validate(session) for session in sessions]
@@ -300,34 +236,16 @@ async def revoke_user_session(
         current_user: User = Depends(require_admin)
 ):
     """
-    撤销指定用户的指定会话（仅管理员）
+    撤销指定用户的指定会话（仅管理员，已重构使用服务层）
     """
-    # 查询会话
-    result = await db.execute(
-        select(UserSession).where(
-            UserSession.id == session_id,
-            UserSession.user_id == user_id
-        )
-    )
-    session = result.scalars().first()
+    # 使用服务层（业务逻辑在SessionService中）
+    from app.core.dependencies import get_session_service
+    from app.services.session_service import SessionService
     
-    if not session:
-        raise_api_exception(
-            ErrorCode.NOT_FOUND,
-            detail="会话不存在"
-        )
+    session_service: SessionService = await get_session_service(db)
     
-    # 将token加入黑名单
-    blacklist_entry = TokenBlacklist(
-        token_jti=session.token_jti,
-        user_id=user_id,
-        expires_at=session.expires_at,
-        reason=f"管理员 {current_user.username} 强制撤销"
-    )
-    db.add(blacklist_entry)
-    
-    # 标记会话为非活跃
-    session.is_active = False
+    # 调用服务层撤销用户会话（服务层会处理验证、黑名单、标记等）
+    await session_service.revoke_user_session(user_id, session_id, current_user)
     
     # 记录审计日志
     try:
@@ -359,42 +277,16 @@ async def revoke_all_user_sessions(
         current_user: User = Depends(require_admin)
 ):
     """
-    撤销指定用户的所有会话（仅管理员）
+    撤销指定用户的所有会话（仅管理员，已重构使用服务层）
     """
-    # 检查用户是否存在
-    user_result = await db.execute(select(User).where(User.id == user_id))
-    user = user_result.scalars().first()
+    # 使用服务层（业务逻辑在SessionService中）
+    from app.core.dependencies import get_session_service
+    from app.services.session_service import SessionService
     
-    if not user:
-        raise_api_exception(
-            ErrorCode.USER_NOT_FOUND,
-            detail=f"用户ID {user_id} 不存在"
-        )
+    session_service: SessionService = await get_session_service(db)
     
-    # 查询所有活跃会话
-    query = select(UserSession).where(
-        UserSession.user_id == user_id,
-        UserSession.is_active == True,
-        UserSession.expires_at > get_app_now_naive()  # 使用北京时间比较
-    )
-    
-    result = await db.execute(query)
-    sessions = result.scalars().all()
-    
-    revoked_count = 0
-    for session in sessions:
-        # 将token加入黑名单
-        blacklist_entry = TokenBlacklist(
-            token_jti=session.token_jti,
-            user_id=user_id,
-            expires_at=session.expires_at,
-            reason=f"管理员 {current_user.username} 强制撤销所有会话"
-        )
-        db.add(blacklist_entry)
-        
-        # 标记会话为非活跃
-        session.is_active = False
-        revoked_count += 1
+    # 调用服务层撤销用户所有会话（服务层会处理用户验证、查询、黑名单、标记等）
+    revoked_count, username = await session_service.revoke_all_user_sessions(user_id, current_user)
     
     # 记录审计日志
     try:
@@ -405,7 +297,7 @@ async def revoke_all_user_sessions(
             user=current_user,
             resource_type="SESSION",
             resource_id=user_id,
-            resource_name=f"用户 {user.username} 的所有会话（{revoked_count}个）",
+            resource_name=f"用户 {username} 的所有会话（{revoked_count}个）",
             request=request,
             success=True
         )
@@ -413,7 +305,7 @@ async def revoke_all_user_sessions(
         logger.warning(f"记录审计日志失败: {e}")
     
     return ResponseBaseSchema.success(
-        data={"message": f"已撤销用户 {user.username} 的 {revoked_count} 个会话", "revoked_count": revoked_count},
+        data={"message": f"已撤销用户 {username} 的 {revoked_count} 个会话", "revoked_count": revoked_count},
         message=f"已撤销 {revoked_count} 个会话"
     )
 

@@ -30,65 +30,25 @@ async def create_discount(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """创建扣量配置（仅管理员）"""
-    # 验证渠道是否存在
-    pub_result = await db.execute(
-        select(Publisher).where(Publisher.id == discount_in.publisher_id)
-    )
-    publisher = pub_result.scalars().first()
-    if not publisher:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"渠道ID {discount_in.publisher_id} 不存在"
-        )
+    """创建扣量配置（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在DiscountService中）
+    from app.core.dependencies import get_discount_service
+    from app.services.cpl.discount_service import DiscountService
     
-    # 如果是offer类型，验证Offer
-    if discount_in.discount_type == 'offer' and discount_in.offer_id:
-        offer_result = await db.execute(
-            select(Offer).where(Offer.id == discount_in.offer_id)
-        )
-        offer = offer_result.scalars().first()
-        if not offer:
-            raise_api_exception(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                detail=f"Offer ID {discount_in.offer_id} 不存在"
-            )
+    discount_service: DiscountService = await get_discount_service(db)
     
-    discount = OfferDiscount(
-        discount_type=discount_in.discount_type,
-        offer_id=discount_in.offer_id,
-        publisher_id=discount_in.publisher_id,
-        discount_ratio=discount_in.discount_ratio,
-        is_active=discount_in.is_active
-    )
+    # 准备扣量配置数据
+    discount_data = discount_in.model_dump()
     
-    try:
-        db.add(discount)
-        await db.commit()
-        
-        # 重新加载关联信息（使用joinedload优化）
-        from sqlalchemy.orm import joinedload
-        query = select(OfferDiscount).where(OfferDiscount.id == discount.id).options(
-            joinedload(OfferDiscount.publisher),
-            joinedload(OfferDiscount.offer)
-        )
-        result = await db.execute(query)
-        discount = result.scalars().first()
-        
-        discount_data = OfferDiscountResponse.model_validate(discount)
-        # 从已加载的关联中获取信息
-        discount_data.publisher_name = discount.publisher.publisher_name if discount.publisher else None
-        discount_data.offer_name = discount.offer.offer_name if discount.offer else None
-        
-        logger.info(f"扣量配置创建成功: discount_id={discount.id}")
-        return ResponseBaseSchema.success(data=discount_data)
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"创建扣量配置失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"创建扣量配置失败: {str(e)}"
-        )
+    # 调用服务层创建扣量配置（服务层会处理所有验证）
+    discount = await discount_service.create_discount(discount_data, current_user)
+    
+    # 构建响应数据
+    discount_response = OfferDiscountResponse.model_validate(discount)
+    discount_response.publisher_name = discount.publisher.publisher_name if discount.publisher else None
+    discount_response.offer_name = discount.offer.offer_name if discount.offer else None
+    
+    return ResponseBaseSchema.success(data=discount_response)
 
 
 @router.get("/",
@@ -104,46 +64,29 @@ async def get_discounts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取扣量配置列表（所有登录用户可访问）"""
-    query = select(OfferDiscount)
+    """获取扣量配置列表（所有登录用户可访问，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在DiscountService中）
+    from app.core.dependencies import get_discount_service
+    from app.services.cpl.discount_service import DiscountService
     
-    if discount_type:
-        query = query.where(OfferDiscount.discount_type == discount_type)
+    discount_service: DiscountService = await get_discount_service(db)
     
-    if offer_id:
-        query = query.where(OfferDiscount.offer_id == offer_id)
-    
-    if publisher_id:
-        query = query.where(OfferDiscount.publisher_id == publisher_id)
-    
-    if is_active is not None:
-        query = query.where(OfferDiscount.is_active == is_active)
-    
-    # 总数
-    total_result = await db.execute(select(func.count()).select_from(query.subquery()))
-    total = total_result.scalar() or 0
-    
-    # 分页
-    query = query.order_by(OfferDiscount.created_at.desc())
-    query = query.offset((page - 1) * page_size).limit(page_size)
-    
-    # 使用joinedload优化关联查询，减少N+1查询问题
-    from sqlalchemy.orm import joinedload
-    query = query.options(
-        joinedload(OfferDiscount.publisher),
-        joinedload(OfferDiscount.offer)
+    # 调用服务层获取扣量配置列表（服务层会处理查询、过滤、分页）
+    discounts, total = await discount_service.get_discounts(
+        page=page,
+        page_size=page_size,
+        discount_type=discount_type,
+        offer_id=offer_id,
+        publisher_id=publisher_id,
+        is_active=is_active
     )
-    result = await db.execute(query)
-    discounts = result.scalars().all()
     
-    # 加载关联信息（已通过joinedload预加载）
+    # 构建响应数据
     discount_list = []
     for discount in discounts:
         discount_data = OfferDiscountResponse.model_validate(discount)
-        # 从已加载的关联中获取信息
         discount_data.publisher_name = discount.publisher.publisher_name if discount.publisher else None
         discount_data.offer_name = discount.offer.offer_name if discount.offer else None
-        
         discount_list.append(discount_data)
     
     return PaginatedResponseBaseSchema.success(
@@ -163,15 +106,15 @@ async def get_discount(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取扣量配置详情（仅管理员）"""
-    # 使用joinedload优化关联查询
-    from sqlalchemy.orm import joinedload
-    query = select(OfferDiscount).where(OfferDiscount.id == discount_id).options(
-        joinedload(OfferDiscount.publisher),
-        joinedload(OfferDiscount.offer)
-    )
-    result = await db.execute(query)
-    discount = result.scalars().first()
+    """获取扣量配置详情（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在DiscountService中）
+    from app.core.dependencies import get_discount_service
+    from app.services.cpl.discount_service import DiscountService
+    
+    discount_service: DiscountService = await get_discount_service(db)
+    
+    # 调用服务层获取扣量配置详情
+    discount = await discount_service.get_discount_by_id(discount_id)
     
     if not discount:
         raise_api_exception(
@@ -179,7 +122,7 @@ async def get_discount(
             detail=f"扣量配置ID {discount_id} 不存在"
         )
     
-    # 从已加载的关联中获取信息
+    # 构建响应数据
     discount_data = OfferDiscountResponse.model_validate(discount)
     discount_data.publisher_name = discount.publisher.publisher_name if discount.publisher else None
     discount_data.offer_name = discount.offer.offer_name if discount.offer else None
@@ -197,49 +140,25 @@ async def update_discount(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """更新扣量配置（仅管理员）"""
-    result = await db.execute(
-        select(OfferDiscount).where(OfferDiscount.id == discount_id)
-    )
-    discount = result.scalars().first()
+    """更新扣量配置（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在DiscountService中）
+    from app.core.dependencies import get_discount_service
+    from app.services.cpl.discount_service import DiscountService
     
-    if not discount:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"扣量配置ID {discount_id} 不存在"
-        )
+    discount_service: DiscountService = await get_discount_service(db)
     
-    # 更新字段
+    # 准备更新数据
     update_data = discount_in.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(discount, key, value)
     
-    try:
-        await db.commit()
-        
-        # 重新加载关联信息（使用joinedload优化）
-        from sqlalchemy.orm import joinedload
-        query = select(OfferDiscount).where(OfferDiscount.id == discount.id).options(
-            joinedload(OfferDiscount.publisher),
-            joinedload(OfferDiscount.offer)
-        )
-        result = await db.execute(query)
-        discount = result.scalars().first()
-        
-        discount_data = OfferDiscountResponse.model_validate(discount)
-        # 从已加载的关联中获取信息
-        discount_data.publisher_name = discount.publisher.publisher_name if discount.publisher else None
-        discount_data.offer_name = discount.offer.offer_name if discount.offer else None
-        
-        logger.info(f"扣量配置更新成功: discount_id={discount_id}")
-        return ResponseBaseSchema.success(data=discount_data)
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"更新扣量配置失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"更新扣量配置失败: {str(e)}"
-        )
+    # 调用服务层更新扣量配置（服务层会处理所有验证和逻辑）
+    discount = await discount_service.update_discount(discount_id, update_data, current_user)
+    
+    # 构建响应数据
+    discount_data = OfferDiscountResponse.model_validate(discount)
+    discount_data.publisher_name = discount.publisher.publisher_name if discount.publisher else None
+    discount_data.offer_name = discount.offer.offer_name if discount.offer else None
+    
+    return ResponseBaseSchema.success(data=discount_data)
 
 
 @router.delete("/{discount_id}",
@@ -251,30 +170,15 @@ async def delete_discount(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """删除扣量配置（仅管理员）"""
-    result = await db.execute(
-        select(OfferDiscount).where(OfferDiscount.id == discount_id)
-    )
-    discount = result.scalars().first()
+    """删除扣量配置（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在DiscountService中）
+    from app.core.dependencies import get_discount_service
+    from app.services.cpl.discount_service import DiscountService
     
-    if not discount:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"扣量配置ID {discount_id} 不存在"
-        )
+    discount_service: DiscountService = await get_discount_service(db)
     
-    try:
-        from sqlalchemy import delete
-        await db.execute(delete(OfferDiscount).where(OfferDiscount.id == discount_id))
-        await db.commit()
-        
-        logger.info(f"扣量配置删除成功: discount_id={discount_id}")
-        return ResponseBaseSchema.success(data={"message": "扣量配置已删除"})
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"删除扣量配置失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"删除扣量配置失败: {str(e)}"
-        )
+    # 调用服务层删除扣量配置（服务层会处理验证和删除）
+    await discount_service.delete_discount(discount_id, current_user)
+    
+    return ResponseBaseSchema.success(data={"message": "扣量配置已删除"})
 

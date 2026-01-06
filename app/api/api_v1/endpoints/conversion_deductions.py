@@ -46,131 +46,38 @@ async def create_deduction_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """创建扣减配置（仅管理员）"""
-    # 验证至少启用一种扣减方式
-    if not config_in.enable_volume_deduction and not config_in.enable_amount_deduction:
-        raise_api_exception(
-            ErrorCode.INVALID_PARAMETER,
-            detail="请至少启用一种扣减方式（扣量或扣金额）"
-        )
+    """创建扣减配置（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在ConversionDeductionService中）
+    from app.core.dependencies import get_conversion_deduction_service
+    from app.services.cpl.conversion_deduction_service import ConversionDeductionService
     
-    # 根据层级验证对象是否存在
-    if config_in.level == 'advertiser':
-        result = await db.execute(
-            select(Advertiser).where(Advertiser.id == config_in.target_id)
-        )
-        advertiser = result.scalars().first()
-        if not advertiser:
-            raise_api_exception(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                detail=f"广告主ID {config_in.target_id} 不存在"
-            )
-        # 检查是否已存在激活的配置
-        existing = await db.execute(
-            select(ConversionDeductionConfig).where(
-                and_(
-                    ConversionDeductionConfig.advertiser_id == config_in.target_id,
-                    ConversionDeductionConfig.is_active == True
-                )
-            )
-        )
-        if existing.scalars().first():
-            raise_api_exception(
-                ErrorCode.RESOURCE_ALREADY_EXISTS,
-                detail=f"广告主ID {config_in.target_id} 已存在激活的扣减配置"
-            )
-    elif config_in.level == 'offer':
-        result = await db.execute(
-            select(Offer).where(Offer.id == config_in.target_id)
-        )
-        offer = result.scalars().first()
-        if not offer:
-            raise_api_exception(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                detail=f"Offer ID {config_in.target_id} 不存在"
-            )
-        existing = await db.execute(
-            select(ConversionDeductionConfig).where(
-                and_(
-                    ConversionDeductionConfig.offer_id == config_in.target_id,
-                    ConversionDeductionConfig.is_active == True
-                )
-            )
-        )
-        if existing.scalars().first():
-            raise_api_exception(
-                ErrorCode.RESOURCE_ALREADY_EXISTS,
-                detail=f"Offer ID {config_in.target_id} 已存在激活的扣减配置"
-            )
-    elif config_in.level == 'publisher':
-        result = await db.execute(
-            select(Publisher).where(Publisher.id == config_in.target_id)
-        )
-        publisher = result.scalars().first()
-        if not publisher:
-            raise_api_exception(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                detail=f"渠道ID {config_in.target_id} 不存在"
-            )
-        existing = await db.execute(
-            select(ConversionDeductionConfig).where(
-                and_(
-                    ConversionDeductionConfig.publisher_id == config_in.target_id,
-                    ConversionDeductionConfig.is_active == True
-                )
-            )
-        )
-        if existing.scalars().first():
-            raise_api_exception(
-                ErrorCode.RESOURCE_ALREADY_EXISTS,
-                detail=f"渠道ID {config_in.target_id} 已存在激活的扣减配置"
-            )
-    else:
-        raise_api_exception(
-            ErrorCode.INVALID_PARAMETER,
-            detail=f"无效的配置层级: {config_in.level}"
-        )
+    deduction_service: ConversionDeductionService = await get_conversion_deduction_service(db)
     
-    # 创建配置
-    config = ConversionDeductionConfig(
-        advertiser_id=config_in.target_id if config_in.level == 'advertiser' else None,
-        offer_id=config_in.target_id if config_in.level == 'offer' else None,
-        publisher_id=config_in.target_id if config_in.level == 'publisher' else None,
-        enable_volume_deduction=config_in.enable_volume_deduction,
-        volume_deduction_ratio=config_in.volume_deduction_ratio,
-        deduction_strategy=config_in.deduction_strategy,
-        enable_amount_deduction=config_in.enable_amount_deduction,
-        amount_deduction_ratio=config_in.amount_deduction_ratio,
-        priority=config_in.priority,
-        is_active=config_in.is_active
-    )
+    # 准备扣减配置数据
+    config_data = config_in.model_dump()
     
-    try:
-        db.add(config)
-        await db.commit()
-        await db.refresh(config)
-        
-        # 加载关联信息
-        config_data = ConversionDeductionConfigResponse.model_validate(config)
-        if config.advertiser:
-            config_data.target_name = config.advertiser.advertiser_name
-            config_data.advertiser_name = config.advertiser.advertiser_name
-        elif config.offer:
-            config_data.target_name = config.offer.offer_name
-            config_data.offer_name = config.offer.offer_name
-        elif config.publisher:
-            config_data.target_name = config.publisher.publisher_name
-            config_data.publisher_name = config.publisher.publisher_name
-        
-        logger.info(f"扣减配置创建成功: config_id={config.id}, level={config_in.level}")
-        return ResponseBaseSchema.success(data=config_data)
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"创建扣减配置失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"创建扣减配置失败: {str(e)}"
-        )
+    # 调用服务层创建扣减配置（服务层会处理所有验证）
+    config = await deduction_service.create_deduction_config(config_data, current_user)
+    
+    # 构建响应数据
+    config_response = ConversionDeductionConfigResponse.model_validate(config)
+    if config.advertiser:
+        config_response.target_name = config.advertiser.advertiser_name
+        config_response.advertiser_name = config.advertiser.advertiser_name
+        config_response.level = 'advertiser'
+        config_response.target_id = config.advertiser_id
+    elif config.offer:
+        config_response.target_name = config.offer.offer_name
+        config_response.offer_name = config.offer.offer_name
+        config_response.level = 'offer'
+        config_response.target_id = config.offer_id
+    elif config.publisher:
+        config_response.target_name = config.publisher.publisher_name
+        config_response.publisher_name = config.publisher.publisher_name
+        config_response.level = 'publisher'
+        config_response.target_id = config.publisher_id
+    
+    return ResponseBaseSchema.success(data=config_response)
 
 
 @router.get("/",
@@ -185,47 +92,22 @@ async def get_deduction_configs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取扣减配置列表"""
+    """获取扣减配置列表（已重构使用服务层）"""
+    # 使用服务层（业务逻辑在ConversionDeductionService中）
+    from app.core.dependencies import get_conversion_deduction_service
+    from app.services.cpl.conversion_deduction_service import ConversionDeductionService
+    
+    deduction_service: ConversionDeductionService = await get_conversion_deduction_service(db)
+    
     try:
-        # 构建查询
-        query = select(ConversionDeductionConfig)
-        
-        # 应用过滤条件
-        conditions = []
-        if level:
-            if level == 'advertiser':
-                conditions.append(ConversionDeductionConfig.advertiser_id.isnot(None))
-            elif level == 'offer':
-                conditions.append(ConversionDeductionConfig.offer_id.isnot(None))
-            elif level == 'publisher':
-                conditions.append(ConversionDeductionConfig.publisher_id.isnot(None))
-        
-        if is_active is not None:
-            conditions.append(ConversionDeductionConfig.is_active == is_active)
-        
-        if conditions:
-            query = query.where(and_(*conditions))
-        
-        # 获取总数
-        count_query = select(func.count()).select_from(ConversionDeductionConfig)
-        if conditions:
-            count_query = count_query.where(and_(*conditions))
-        total_result = await db.execute(count_query)
-        total = total_result.scalar() or 0
-        
-        # 分页
-        query = query.order_by(ConversionDeductionConfig.priority.desc(), ConversionDeductionConfig.created_at.desc())
-        query = query.offset((page - 1) * page_size).limit(page_size)
-        
-        # 加载关联信息
-        query = query.options(
-            joinedload(ConversionDeductionConfig.advertiser),
-            joinedload(ConversionDeductionConfig.offer),
-            joinedload(ConversionDeductionConfig.publisher)
+        # 调用服务层获取扣减配置列表（服务层会处理查询、过滤、分页、搜索）
+        configs, total = await deduction_service.get_deduction_configs(
+            page=page,
+            page_size=page_size,
+            level=level,
+            is_active=is_active,
+            keyword=keyword
         )
-        
-        result = await db.execute(query)
-        configs = result.unique().scalars().all()
         
         # 转换为响应格式
         config_list = []
@@ -247,15 +129,6 @@ async def get_deduction_configs(
                 config_data.level = 'publisher'
                 config_data.target_id = config.publisher_id
             config_list.append(config_data)
-        
-        # 关键词搜索（在内存中过滤，因为需要关联查询）
-        if keyword:
-            keyword_lower = keyword.lower()
-            config_list = [
-                c for c in config_list
-                if keyword_lower in (c.target_name or '').lower()
-            ]
-            total = len(config_list)
         
         return PaginatedResponseBaseSchema.success(
             data=config_list,
@@ -281,54 +154,35 @@ async def update_deduction_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """更新扣减配置（仅管理员）"""
-    result = await db.execute(
-        select(ConversionDeductionConfig).where(ConversionDeductionConfig.id == config_id)
-    )
-    config = result.scalars().first()
+    """更新扣减配置（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在ConversionDeductionService中）
+    from app.core.dependencies import get_conversion_deduction_service
+    from app.services.cpl.conversion_deduction_service import ConversionDeductionService
     
-    if not config:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"扣减配置ID {config_id} 不存在"
-        )
+    deduction_service: ConversionDeductionService = await get_conversion_deduction_service(db)
     
-    # 更新字段
+    # 准备更新数据
     update_data = config_in.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        if field == 'level' or field == 'target_id':
-            # 层级和目标ID不能直接更新，需要重新创建
-            continue
-        setattr(config, field, value)
     
-    try:
-        await db.commit()
-        await db.refresh(config)
-        
-        # 加载关联信息
-        config_data = ConversionDeductionConfigResponse.model_validate(config)
-        if config.advertiser:
-            config_data.target_name = config.advertiser.advertiser_name
-            config_data.level = 'advertiser'
-            config_data.target_id = config.advertiser_id
-        elif config.offer:
-            config_data.target_name = config.offer.offer_name
-            config_data.level = 'offer'
-            config_data.target_id = config.offer_id
-        elif config.publisher:
-            config_data.target_name = config.publisher.publisher_name
-            config_data.level = 'publisher'
-            config_data.target_id = config.publisher_id
-        
-        logger.info(f"扣减配置更新成功: config_id={config_id}")
-        return ResponseBaseSchema.success(data=config_data)
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"更新扣减配置失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"更新扣减配置失败: {str(e)}"
-        )
+    # 调用服务层更新扣减配置（服务层会处理所有验证和逻辑）
+    config = await deduction_service.update_deduction_config(config_id, update_data, current_user)
+    
+    # 构建响应数据
+    config_data = ConversionDeductionConfigResponse.model_validate(config)
+    if config.advertiser:
+        config_data.target_name = config.advertiser.advertiser_name
+        config_data.level = 'advertiser'
+        config_data.target_id = config.advertiser_id
+    elif config.offer:
+        config_data.target_name = config.offer.offer_name
+        config_data.level = 'offer'
+        config_data.target_id = config.offer_id
+    elif config.publisher:
+        config_data.target_name = config.publisher.publisher_name
+        config_data.level = 'publisher'
+        config_data.target_id = config.publisher_id
+    
+    return ResponseBaseSchema.success(data=config_data)
 
 
 @router.delete("/{config_id}",
@@ -340,32 +194,17 @@ async def delete_deduction_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """删除扣减配置（仅管理员）"""
-    result = await db.execute(
-        select(ConversionDeductionConfig).where(ConversionDeductionConfig.id == config_id)
-    )
-    config = result.scalars().first()
+    """删除扣减配置（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在ConversionDeductionService中）
+    from app.core.dependencies import get_conversion_deduction_service
+    from app.services.cpl.conversion_deduction_service import ConversionDeductionService
     
-    if not config:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"扣减配置ID {config_id} 不存在"
-        )
+    deduction_service: ConversionDeductionService = await get_conversion_deduction_service(db)
     
-    try:
-        # 删除配置
-        await db.delete(config)
-        await db.commit()
-        
-        logger.info(f"扣减配置删除成功: config_id={config_id}")
-        return ResponseBaseSchema.success(data={"id": config_id})
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"删除扣减配置失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"删除扣减配置失败: {str(e)}"
-        )
+    # 调用服务层删除扣减配置（服务层会处理验证和删除）
+    await deduction_service.delete_deduction_config(config_id, current_user)
+    
+    return ResponseBaseSchema.success(data={"id": config_id})
 
 
 @router.patch("/{config_id}/status",
@@ -378,32 +217,17 @@ async def update_deduction_config_status(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """更新扣减配置状态（仅管理员）"""
-    result = await db.execute(
-        select(ConversionDeductionConfig).where(ConversionDeductionConfig.id == config_id)
-    )
-    config = result.scalars().first()
+    """更新扣减配置状态（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在ConversionDeductionService中）
+    from app.core.dependencies import get_conversion_deduction_service
+    from app.services.cpl.conversion_deduction_service import ConversionDeductionService
     
-    if not config:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"扣减配置ID {config_id} 不存在"
-        )
+    deduction_service: ConversionDeductionService = await get_conversion_deduction_service(db)
     
-    config.is_active = is_active
+    # 调用服务层更新扣减配置状态（服务层会处理验证和更新）
+    await deduction_service.update_deduction_config_status(config_id, is_active, current_user)
     
-    try:
-        await db.commit()
-        
-        logger.info(f"扣减配置状态更新成功: config_id={config_id}, is_active={is_active}")
-        return ResponseBaseSchema.success(data={"id": config_id, "is_active": is_active})
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"更新扣减配置状态失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"更新扣减配置状态失败: {str(e)}"
-        )
+    return ResponseBaseSchema.success(data={"id": config_id, "is_active": is_active})
 
 
 @router.get("/stats",
@@ -420,71 +244,25 @@ async def get_deduction_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取扣减统计（仅管理员）"""
+    """获取扣减统计（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在ConversionDeductionService中）
+    from app.core.dependencies import get_conversion_deduction_service
+    from app.services.cpl.conversion_deduction_service import ConversionDeductionService
+    
+    deduction_service: ConversionDeductionService = await get_conversion_deduction_service(db)
+    
     try:
-        # 解析日期
-        if start_date:
-            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        else:
-            start_dt = datetime.now() - timedelta(days=30)
-        
-        if end_date:
-            end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-        else:
-            end_dt = datetime.now()
-        
-        # 构建查询条件
-        conditions = [
-            ConversionDeductionLog.created_at >= start_dt,
-            ConversionDeductionLog.created_at < end_dt
-        ]
-        
-        if advertiser_id:
-            conditions.append(ConversionDeductionLog.advertiser_id == advertiser_id)
-        if offer_id:
-            conditions.append(ConversionDeductionLog.offer_id == offer_id)
-        if publisher_id:
-            conditions.append(ConversionDeductionLog.publisher_id == publisher_id)
-        
-        # 统计总体数据
-        stats_query = select(
-            func.sum(ConversionDeductionLog.original_volume).label('original_volume'),
-            func.sum(ConversionDeductionLog.deducted_volume).label('deducted_volume'),
-            func.sum(ConversionDeductionLog.final_volume).label('final_volume'),
-            func.sum(ConversionDeductionLog.original_amount).label('original_amount'),
-            func.sum(ConversionDeductionLog.deducted_amount).label('deducted_amount'),
-            func.sum(ConversionDeductionLog.final_amount).label('final_amount')
-        ).where(and_(*conditions))
-        
-        stats_result = await db.execute(stats_query)
-        stats_row = stats_result.first()
-        
-        original_volume = stats_row.original_volume or 0
-        deducted_volume = stats_row.deducted_volume or 0
-        final_volume = stats_row.final_volume or 0
-        original_amount = float(stats_row.original_amount or 0)
-        deducted_amount = float(stats_row.deducted_amount or 0)
-        final_amount = float(stats_row.final_amount or 0)
-        
-        # 计算比例
-        volume_deduction_ratio = deducted_volume / original_volume if original_volume > 0 else 0.0
-        amount_deduction_ratio = deducted_amount / original_amount if original_amount > 0 else 0.0
-        
-        # 分组统计（简化版，实际可以根据group_by参数进行更复杂的分组）
-        items = []  # 这里可以根据group_by参数实现分组统计
-        
-        stats = DeductionStatsResponse(
-            original_volume=int(original_volume),
-            deducted_volume=int(deducted_volume),
-            final_volume=int(final_volume),
-            volume_deduction_ratio=volume_deduction_ratio,
-            original_amount=original_amount,
-            deducted_amount=deducted_amount,
-            final_amount=final_amount,
-            amount_deduction_ratio=amount_deduction_ratio,
-            items=items
+        # 调用服务层获取扣减统计（服务层会处理查询和计算）
+        stats_data = await deduction_service.get_deduction_stats(
+            start_date=start_date,
+            end_date=end_date,
+            group_by=group_by,
+            advertiser_id=advertiser_id,
+            offer_id=offer_id,
+            publisher_id=publisher_id
         )
         
+        stats = DeductionStatsResponse(**stats_data)
         return ResponseBaseSchema.success(data=stats)
     except Exception as e:
         logger.error(f"获取扣减统计失败: {str(e)}", exc_info=True)
@@ -509,47 +287,24 @@ async def get_deduction_logs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取扣减日志（仅管理员）"""
+    """获取扣减日志（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在ConversionDeductionService中）
+    from app.core.dependencies import get_conversion_deduction_service
+    from app.services.cpl.conversion_deduction_service import ConversionDeductionService
+    
+    deduction_service: ConversionDeductionService = await get_conversion_deduction_service(db)
+    
     try:
-        # 解析日期
-        conditions = []
-        if start_date:
-            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-            conditions.append(ConversionDeductionLog.created_at >= start_dt)
-        if end_date:
-            end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-            conditions.append(ConversionDeductionLog.created_at < end_dt)
-        
-        if advertiser_id:
-            conditions.append(ConversionDeductionLog.advertiser_id == advertiser_id)
-        if offer_id:
-            conditions.append(ConversionDeductionLog.offer_id == offer_id)
-        if publisher_id:
-            conditions.append(ConversionDeductionLog.publisher_id == publisher_id)
-        
-        # 获取总数
-        count_query = select(func.count()).select_from(ConversionDeductionLog)
-        if conditions:
-            count_query = count_query.where(and_(*conditions))
-        total_result = await db.execute(count_query)
-        total = total_result.scalar() or 0
-        
-        # 分页查询
-        query = select(ConversionDeductionLog)
-        if conditions:
-            query = query.where(and_(*conditions))
-        query = query.order_by(ConversionDeductionLog.created_at.desc())
-        query = query.offset((page - 1) * page_size).limit(page_size)
-        
-        # 加载关联信息
-        query = query.options(
-            joinedload(ConversionDeductionLog.advertiser),
-            joinedload(ConversionDeductionLog.offer),
-            joinedload(ConversionDeductionLog.publisher)
+        # 调用服务层获取扣减日志（服务层会处理查询、过滤、分页）
+        logs, total = await deduction_service.get_deduction_logs(
+            page=page,
+            page_size=page_size,
+            start_date=start_date,
+            end_date=end_date,
+            advertiser_id=advertiser_id,
+            offer_id=offer_id,
+            publisher_id=publisher_id
         )
-        
-        result = await db.execute(query)
-        logs = result.unique().scalars().all()
         
         # 转换为响应格式
         log_list = []

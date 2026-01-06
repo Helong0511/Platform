@@ -33,89 +33,26 @@ async def create_cap(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """创建Cap配置（仅管理员）"""
-    # 验证Offer是否存在
-    offer_result = await db.execute(
-        select(Offer).where(Offer.id == cap_in.offer_id)
-    )
-    offer = offer_result.scalars().first()
-    if not offer:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"Offer ID {cap_in.offer_id} 不存在"
-        )
+    """创建Cap配置（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在CapService中）
+    from app.core.dependencies import get_cap_service
+    from app.services.cpl.cap_service import CapService
     
-    # 如果是advertiser_offer类型，验证广告主
-    if cap_in.cap_type == 'advertiser_offer' and cap_in.advertiser_id:
-        adv_result = await db.execute(
-            select(Advertiser).where(Advertiser.id == cap_in.advertiser_id)
-        )
-        advertiser = adv_result.scalars().first()
-        if not advertiser:
-            raise_api_exception(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                detail=f"广告主ID {cap_in.advertiser_id} 不存在"
-            )
+    cap_service: CapService = await get_cap_service(db)
     
-    # 如果指定了渠道，验证渠道
-    if cap_in.publisher_id:
-        pub_result = await db.execute(
-            select(Publisher).where(Publisher.id == cap_in.publisher_id)
-        )
-        publisher = pub_result.scalars().first()
-        if not publisher:
-            raise_api_exception(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                detail=f"渠道ID {cap_in.publisher_id} 不存在"
-            )
+    # 准备Cap数据
+    cap_data = cap_in.model_dump()
     
-    # 设置Cap开始日期（用于Total Cap）
-    cap_start_date = None
-    if cap_in.total_cap:
-        cap_start_date = get_app_now_naive()  # 使用北京时间
+    # 调用服务层创建Cap配置（服务层会处理所有验证）
+    cap = await cap_service.create_cap(cap_data, current_user)
     
-    cap = OfferCap(
-        cap_type=cap_in.cap_type,
-        advertiser_id=cap_in.advertiser_id,
-        offer_id=cap_in.offer_id,
-        publisher_id=cap_in.publisher_id,
-        daily_cap=cap_in.daily_cap,
-        total_cap=cap_in.total_cap,
-        current_daily_count=0,
-        current_total_count=0,
-        cap_start_date=cap_start_date,
-        is_active=cap_in.is_active
-    )
+    # 构建响应数据
+    cap_response = OfferCapResponse.model_validate(cap)
+    cap_response.offer_name = cap.offer.offer_name if cap.offer else None
+    cap_response.advertiser_name = cap.advertiser.advertiser_name if cap.advertiser else None
+    cap_response.publisher_name = cap.publisher.publisher_name if cap.publisher else None
     
-    try:
-        db.add(cap)
-        await db.commit()
-        
-        # 重新加载关联信息（使用joinedload优化）
-        from sqlalchemy.orm import joinedload
-        query = select(OfferCap).where(OfferCap.id == cap.id).options(
-            joinedload(OfferCap.offer),
-            joinedload(OfferCap.advertiser),
-            joinedload(OfferCap.publisher)
-        )
-        result = await db.execute(query)
-        cap = result.scalars().first()
-        
-        cap_data = OfferCapResponse.model_validate(cap)
-        # 从已加载的关联中获取信息
-        cap_data.offer_name = cap.offer.offer_name if cap.offer else None
-        cap_data.advertiser_name = cap.advertiser.advertiser_name if cap.advertiser else None
-        cap_data.publisher_name = cap.publisher.publisher_name if cap.publisher else None
-        
-        logger.info(f"Cap配置创建成功: cap_id={cap.id}")
-        return ResponseBaseSchema.success(data=cap_data)
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"创建Cap配置失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"创建Cap配置失败: {str(e)}"
-        )
+    return ResponseBaseSchema.success(data=cap_response)
 
 
 @router.get("/",
@@ -132,51 +69,31 @@ async def get_caps(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取Cap配置列表（所有登录用户可访问）"""
-    query = select(OfferCap)
+    """获取Cap配置列表（所有登录用户可访问，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在CapService中）
+    from app.core.dependencies import get_cap_service
+    from app.services.cpl.cap_service import CapService
     
-    if cap_type:
-        query = query.where(OfferCap.cap_type == cap_type)
+    cap_service: CapService = await get_cap_service(db)
     
-    if offer_id:
-        query = query.where(OfferCap.offer_id == offer_id)
-    
-    if advertiser_id:
-        query = query.where(OfferCap.advertiser_id == advertiser_id)
-    
-    if publisher_id:
-        query = query.where(OfferCap.publisher_id == publisher_id)
-    
-    if is_active is not None:
-        query = query.where(OfferCap.is_active == is_active)
-    
-    # 总数
-    total_result = await db.execute(select(func.count()).select_from(query.subquery()))
-    total = total_result.scalar() or 0
-    
-    # 分页
-    query = query.order_by(OfferCap.created_at.desc())
-    query = query.offset((page - 1) * page_size).limit(page_size)
-    
-    # 使用joinedload优化关联查询，减少N+1查询问题
-    from sqlalchemy.orm import joinedload
-    query = query.options(
-        joinedload(OfferCap.offer),
-        joinedload(OfferCap.advertiser),
-        joinedload(OfferCap.publisher)
+    # 调用服务层获取Cap配置列表（服务层会处理查询、过滤、分页）
+    caps, total = await cap_service.get_caps(
+        page=page,
+        page_size=page_size,
+        cap_type=cap_type,
+        offer_id=offer_id,
+        advertiser_id=advertiser_id,
+        publisher_id=publisher_id,
+        is_active=is_active
     )
-    result = await db.execute(query)
-    caps = result.scalars().all()
     
-    # 加载关联信息（已通过joinedload预加载）
+    # 构建响应数据
     cap_list = []
     for cap in caps:
         cap_data = OfferCapResponse.model_validate(cap)
-        # 从已加载的关联中获取信息
         cap_data.offer_name = cap.offer.offer_name if cap.offer else None
         cap_data.advertiser_name = cap.advertiser.advertiser_name if cap.advertiser else None
         cap_data.publisher_name = cap.publisher.publisher_name if cap.publisher else None
-        
         cap_list.append(cap_data)
     
     return PaginatedResponseBaseSchema.success(
@@ -196,16 +113,15 @@ async def get_cap(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取Cap配置详情（仅管理员）"""
-    # 使用joinedload优化关联查询
-    from sqlalchemy.orm import joinedload
-    query = select(OfferCap).where(OfferCap.id == cap_id).options(
-        joinedload(OfferCap.offer),
-        joinedload(OfferCap.advertiser),
-        joinedload(OfferCap.publisher)
-    )
-    result = await db.execute(query)
-    cap = result.scalars().first()
+    """获取Cap配置详情（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在CapService中）
+    from app.core.dependencies import get_cap_service
+    from app.services.cpl.cap_service import CapService
+    
+    cap_service: CapService = await get_cap_service(db)
+    
+    # 调用服务层获取Cap配置详情
+    cap = await cap_service.get_cap_by_id(cap_id)
     
     if not cap:
         raise_api_exception(
@@ -213,7 +129,7 @@ async def get_cap(
             detail=f"Cap配置ID {cap_id} 不存在"
         )
     
-    # 从已加载的关联中获取信息
+    # 构建响应数据
     cap_data = OfferCapResponse.model_validate(cap)
     cap_data.offer_name = cap.offer.offer_name if cap.offer else None
     cap_data.advertiser_name = cap.advertiser.advertiser_name if cap.advertiser else None
@@ -232,56 +148,26 @@ async def update_cap(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """更新Cap配置（仅管理员）"""
-    result = await db.execute(
-        select(OfferCap).where(OfferCap.id == cap_id)
-    )
-    cap = result.scalars().first()
+    """更新Cap配置（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在CapService中）
+    from app.core.dependencies import get_cap_service
+    from app.services.cpl.cap_service import CapService
     
-    if not cap:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"Cap配置ID {cap_id} 不存在"
-        )
+    cap_service: CapService = await get_cap_service(db)
     
-    # 更新字段
+    # 准备更新数据
     update_data = cap_in.model_dump(exclude_unset=True)
     
-    # 如果更新了total_cap且之前没有cap_start_date，设置开始日期
-    if 'total_cap' in update_data and update_data['total_cap'] and not cap.cap_start_date:
-        update_data['cap_start_date'] = get_app_now_naive()  # 使用北京时间
+    # 调用服务层更新Cap配置（服务层会处理所有验证和逻辑）
+    cap = await cap_service.update_cap(cap_id, update_data, current_user)
     
-    for key, value in update_data.items():
-        setattr(cap, key, value)
+    # 构建响应数据
+    cap_data = OfferCapResponse.model_validate(cap)
+    cap_data.offer_name = cap.offer.offer_name if cap.offer else None
+    cap_data.advertiser_name = cap.advertiser.advertiser_name if cap.advertiser else None
+    cap_data.publisher_name = cap.publisher.publisher_name if cap.publisher else None
     
-    try:
-        await db.commit()
-        
-        # 重新加载关联信息（使用joinedload优化）
-        from sqlalchemy.orm import joinedload
-        query = select(OfferCap).where(OfferCap.id == cap.id).options(
-            joinedload(OfferCap.offer),
-            joinedload(OfferCap.advertiser),
-            joinedload(OfferCap.publisher)
-        )
-        result = await db.execute(query)
-        cap = result.scalars().first()
-        
-        cap_data = OfferCapResponse.model_validate(cap)
-        # 从已加载的关联中获取信息
-        cap_data.offer_name = cap.offer.offer_name if cap.offer else None
-        cap_data.advertiser_name = cap.advertiser.advertiser_name if cap.advertiser else None
-        cap_data.publisher_name = cap.publisher.publisher_name if cap.publisher else None
-        
-        logger.info(f"Cap配置更新成功: cap_id={cap_id}")
-        return ResponseBaseSchema.success(data=cap_data)
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"更新Cap配置失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"更新Cap配置失败: {str(e)}"
-        )
+    return ResponseBaseSchema.success(data=cap_data)
 
 
 @router.delete("/{cap_id}",
@@ -293,32 +179,17 @@ async def delete_cap(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """删除Cap配置（仅管理员）"""
-    result = await db.execute(
-        select(OfferCap).where(OfferCap.id == cap_id)
-    )
-    cap = result.scalars().first()
+    """删除Cap配置（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在CapService中）
+    from app.core.dependencies import get_cap_service
+    from app.services.cpl.cap_service import CapService
     
-    if not cap:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"Cap配置ID {cap_id} 不存在"
-        )
+    cap_service: CapService = await get_cap_service(db)
     
-    try:
-        from sqlalchemy import delete
-        await db.execute(delete(OfferCap).where(OfferCap.id == cap_id))
-        await db.commit()
-        
-        logger.info(f"Cap配置删除成功: cap_id={cap_id}")
-        return ResponseBaseSchema.success(data={"message": "Cap配置已删除"})
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"删除Cap配置失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"删除Cap配置失败: {str(e)}"
-        )
+    # 调用服务层删除Cap配置（服务层会处理验证和删除）
+    await cap_service.delete_cap(cap_id, current_user)
+    
+    return ResponseBaseSchema.success(data={"message": "Cap配置已删除"})
 
 
 @router.post("/check-consistency",

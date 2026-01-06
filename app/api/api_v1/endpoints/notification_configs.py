@@ -49,29 +49,15 @@ async def get_client_notification_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取客户的通知配置"""
-    # 权限检查：管理员或客户本人
-    if current_user.role != UserRole.ADMIN:
-        if not current_user.client_id or current_user.client_id != client_id:
-            raise_api_exception(
-                ErrorCode.ACCESS_DENIED,
-                detail="无权访问该客户的通知配置"
-            )
+    """获取客户的通知配置（已重构使用服务层）"""
+    # 使用服务层（业务逻辑在NotificationConfigService中）
+    from app.core.dependencies import get_notification_config_service
+    from app.services.notification_config_service import NotificationConfigService
     
-    # 验证客户是否存在
-    result = await db.execute(select(Client).where(Client.id == client_id))
-    client = result.scalars().first()
-    if not client:
-        raise_api_exception(
-            ErrorCode.CLIENT_NOT_FOUND,
-            detail=f"客户ID {client_id} 不存在"
-        )
+    notification_service: NotificationConfigService = await get_notification_config_service(db)
     
-    # 获取配置
-    result = await db.execute(
-        select(ClientNotificationConfig).where(ClientNotificationConfig.client_id == client_id)
-    )
-    config = result.scalars().first()
+    # 调用服务层获取客户通知配置（服务层会处理权限检查和验证）
+    config = await notification_service.get_client_notification_config(client_id, current_user)
     
     if not config:
         # 如果不存在，返回默认配置
@@ -104,60 +90,22 @@ async def create_or_update_client_notification_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """创建或更新客户的通知配置（仅管理员）"""
-    # 验证客户是否存在
-    result = await db.execute(select(Client).where(Client.id == client_id))
-    client = result.scalars().first()
-    if not client:
-        raise_api_exception(
-            ErrorCode.CLIENT_NOT_FOUND,
-            detail=f"客户ID {client_id} 不存在"
-        )
+    """创建或更新客户的通知配置（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在NotificationConfigService中）
+    from app.core.dependencies import get_notification_config_service
+    from app.services.notification_config_service import NotificationConfigService
     
-    # 检查是否已存在配置
-    result = await db.execute(
-        select(ClientNotificationConfig).where(ClientNotificationConfig.client_id == client_id)
+    notification_service: NotificationConfigService = await get_notification_config_service(db)
+    
+    # 准备配置数据
+    config_data = config_in.model_dump(exclude_unset=True)
+    
+    # 调用服务层创建或更新客户通知配置（服务层会处理验证和逻辑）
+    config = await notification_service.create_or_update_client_notification_config(
+        client_id, config_data, current_user
     )
-    existing_config = result.scalars().first()
     
-    if existing_config:
-        # 更新现有配置
-        update_data = config_in.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            setattr(existing_config, key, value)
-        
-        try:
-            await db.commit()
-            await db.refresh(existing_config)
-            logger.info(f"客户 {client_id} 的通知配置已更新")
-            return ResponseBaseSchema.success(data=ClientNotificationConfigResponse.model_validate(existing_config))
-        except Exception as e:
-            await db.rollback()
-            logger.error(f"更新客户通知配置失败: {str(e)}", exc_info=True)
-            raise_api_exception(
-                ErrorCode.OPERATION_FAILED,
-                detail=f"更新客户通知配置失败: {str(e)}"
-            )
-    else:
-        # 创建新配置
-        new_config = ClientNotificationConfig(
-            client_id=client_id,
-            **config_in.model_dump()
-        )
-        
-        try:
-            db.add(new_config)
-            await db.commit()
-            await db.refresh(new_config)
-            logger.info(f"客户 {client_id} 的通知配置已创建")
-            return ResponseBaseSchema.success(data=ClientNotificationConfigResponse.model_validate(new_config))
-        except Exception as e:
-            await db.rollback()
-            logger.error(f"创建客户通知配置失败: {str(e)}", exc_info=True)
-            raise_api_exception(
-                ErrorCode.OPERATION_FAILED,
-                detail=f"创建客户通知配置失败: {str(e)}"
-            )
+    return ResponseBaseSchema.success(data=ClientNotificationConfigResponse.model_validate(config))
 
 
 @router.delete("/clients/{client_id}/config",
@@ -168,30 +116,17 @@ async def delete_client_notification_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """删除客户的通知配置（仅管理员）"""
-    result = await db.execute(
-        select(ClientNotificationConfig).where(ClientNotificationConfig.client_id == client_id)
-    )
-    config = result.scalars().first()
+    """删除客户的通知配置（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在NotificationConfigService中）
+    from app.core.dependencies import get_notification_config_service
+    from app.services.notification_config_service import NotificationConfigService
     
-    if not config:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"客户ID {client_id} 的通知配置不存在"
-        )
+    notification_service: NotificationConfigService = await get_notification_config_service(db)
     
-    try:
-        await db.execute(delete(ClientNotificationConfig).where(ClientNotificationConfig.id == config.id))
-        await db.commit()
-        logger.info(f"客户 {client_id} 的通知配置已删除")
-        return ResponseBaseSchema.success(data={"message": "通知配置已删除"})
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"删除客户通知配置失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"删除客户通知配置失败: {str(e)}"
-        )
+    # 调用服务层删除客户通知配置（服务层会处理验证和删除）
+    await notification_service.delete_client_notification_config(client_id, current_user)
+    
+    return ResponseBaseSchema.success(data={"message": "通知配置已删除"})
 
 
 # ==================== 产品通知配置 ====================
@@ -204,29 +139,15 @@ async def get_product_notification_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取产品的通知配置"""
-    # 验证产品是否存在
-    result = await db.execute(select(Product).where(Product.id == product_id))
-    product = result.scalars().first()
-    if not product:
-        raise_api_exception(
-            ErrorCode.PRODUCT_NOT_FOUND,
-            detail=f"产品ID {product_id} 不存在"
-        )
+    """获取产品的通知配置（已重构使用服务层）"""
+    # 使用服务层（业务逻辑在NotificationConfigService中）
+    from app.core.dependencies import get_notification_config_service
+    from app.services.notification_config_service import NotificationConfigService
     
-    # 权限检查：管理员或产品所属客户
-    if current_user.role != UserRole.ADMIN:
-        if not current_user.client_id or current_user.client_id != product.client_id:
-            raise_api_exception(
-                ErrorCode.ACCESS_DENIED,
-                detail="无权访问该产品的通知配置"
-            )
+    notification_service: NotificationConfigService = await get_notification_config_service(db)
     
-    # 获取配置
-    result = await db.execute(
-        select(ProductNotificationConfig).where(ProductNotificationConfig.product_id == product_id)
-    )
-    config = result.scalars().first()
+    # 调用服务层获取产品通知配置（服务层会处理权限检查和验证）
+    config = await notification_service.get_product_notification_config(product_id, current_user)
     
     if not config:
         # 如果不存在，返回默认配置
@@ -259,60 +180,22 @@ async def create_or_update_product_notification_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """创建或更新产品的通知配置（仅管理员）"""
-    # 验证产品是否存在
-    result = await db.execute(select(Product).where(Product.id == product_id))
-    product = result.scalars().first()
-    if not product:
-        raise_api_exception(
-            ErrorCode.PRODUCT_NOT_FOUND,
-            detail=f"产品ID {product_id} 不存在"
-        )
+    """创建或更新产品的通知配置（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在NotificationConfigService中）
+    from app.core.dependencies import get_notification_config_service
+    from app.services.notification_config_service import NotificationConfigService
     
-    # 检查是否已存在配置
-    result = await db.execute(
-        select(ProductNotificationConfig).where(ProductNotificationConfig.product_id == product_id)
+    notification_service: NotificationConfigService = await get_notification_config_service(db)
+    
+    # 准备配置数据
+    config_data = config_in.model_dump(exclude_unset=True)
+    
+    # 调用服务层创建或更新产品通知配置（服务层会处理验证和逻辑）
+    config = await notification_service.create_or_update_product_notification_config(
+        product_id, config_data, current_user
     )
-    existing_config = result.scalars().first()
     
-    if existing_config:
-        # 更新现有配置
-        update_data = config_in.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            setattr(existing_config, key, value)
-        
-        try:
-            await db.commit()
-            await db.refresh(existing_config)
-            logger.info(f"产品 {product_id} 的通知配置已更新")
-            return ResponseBaseSchema.success(data=ProductNotificationConfigResponse.model_validate(existing_config))
-        except Exception as e:
-            await db.rollback()
-            logger.error(f"更新产品通知配置失败: {str(e)}", exc_info=True)
-            raise_api_exception(
-                ErrorCode.OPERATION_FAILED,
-                detail=f"更新产品通知配置失败: {str(e)}"
-            )
-    else:
-        # 创建新配置
-        new_config = ProductNotificationConfig(
-            product_id=product_id,
-            **config_in.model_dump()
-        )
-        
-        try:
-            db.add(new_config)
-            await db.commit()
-            await db.refresh(new_config)
-            logger.info(f"产品 {product_id} 的通知配置已创建")
-            return ResponseBaseSchema.success(data=ProductNotificationConfigResponse.model_validate(new_config))
-        except Exception as e:
-            await db.rollback()
-            logger.error(f"创建产品通知配置失败: {str(e)}", exc_info=True)
-            raise_api_exception(
-                ErrorCode.OPERATION_FAILED,
-                detail=f"创建产品通知配置失败: {str(e)}"
-            )
+    return ResponseBaseSchema.success(data=ProductNotificationConfigResponse.model_validate(config))
 
 
 @router.delete("/products/{product_id}/config",
@@ -323,30 +206,17 @@ async def delete_product_notification_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """删除产品的通知配置（仅管理员）"""
-    result = await db.execute(
-        select(ProductNotificationConfig).where(ProductNotificationConfig.product_id == product_id)
-    )
-    config = result.scalars().first()
+    """删除产品的通知配置（仅管理员，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在NotificationConfigService中）
+    from app.core.dependencies import get_notification_config_service
+    from app.services.notification_config_service import NotificationConfigService
     
-    if not config:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"产品ID {product_id} 的通知配置不存在"
-        )
+    notification_service: NotificationConfigService = await get_notification_config_service(db)
     
-    try:
-        await db.execute(delete(ProductNotificationConfig).where(ProductNotificationConfig.id == config.id))
-        await db.commit()
-        logger.info(f"产品 {product_id} 的通知配置已删除")
-        return ResponseBaseSchema.success(data={"message": "通知配置已删除"})
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"删除产品通知配置失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"删除产品通知配置失败: {str(e)}"
-        )
+    # 调用服务层删除产品通知配置（服务层会处理验证和删除）
+    await notification_service.delete_product_notification_config(product_id, current_user)
+    
+    return ResponseBaseSchema.success(data={"message": "通知配置已删除"})
 
 
 # ==================== 通知记录查询 ====================
@@ -369,169 +239,28 @@ async def get_notification_records(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取通知记录列表（支持分页和过滤）"""
-    # 权限检查：管理员可以查看所有，客户只能查看自己的
-    query = select(PostbackNotification)
+    """获取通知记录列表（支持分页和过滤，已重构使用服务层）"""
+    # 使用服务层（业务逻辑在NotificationConfigService中）
+    from app.core.dependencies import get_notification_config_service
+    from app.services.notification_config_service import NotificationConfigService
     
-    if current_user.role != UserRole.ADMIN:
-        # 客户只能查看自己客户的通知记录
-        if not current_user.client_id:
-            return PaginatedResponseBaseSchema.success(
-                data=[],
-                total=0,
-                page=page,
-                page_size=page_size
-            )
-        query = query.where(PostbackNotification.client_id == current_user.client_id)
+    notification_service: NotificationConfigService = await get_notification_config_service(db)
     
-    # 应用过滤条件
-    conditions = []
-    
-    # 优先使用 conversion_id 过滤（最精确）
-    if conversion_id:
-        conditions.append(PostbackNotification.conversion_id == conversion_id)
-    
-    if client_id:
-        conditions.append(PostbackNotification.client_id == client_id)
-    
-    if product_id:
-        conditions.append(PostbackNotification.product_id == product_id)
-    
-    if publisher_id:
-        conditions.append(PostbackNotification.publisher_id == publisher_id)
-    
-    if notification_status:
-        conditions.append(PostbackNotification.notification_status == notification_status)
-    
-    if notification_channel:
-        conditions.append(PostbackNotification.notification_channel == notification_channel)
-    
-    if notification_type:
-        conditions.append(PostbackNotification.notification_type == notification_type)
-    
-    if start_date:
-        try:
-            start_dt = parse_date_to_app_timezone(start_date, is_end_date=False)
-            conditions.append(PostbackNotification.created_at >= start_dt)
-        except ValueError:
-            raise_api_exception(
-                ErrorCode.INVALID_PARAMETER,
-                detail="开始日期格式错误，应为 YYYY-MM-DD"
-            )
-    
-    if end_date:
-        try:
-            end_dt = parse_date_to_app_timezone(end_date, is_end_date=True)
-            conditions.append(PostbackNotification.created_at <= end_dt)
-        except ValueError:
-            raise_api_exception(
-                ErrorCode.INVALID_PARAMETER,
-                detail="结束日期格式错误，应为 YYYY-MM-DD"
-            )
-    
-    if conditions:
-        query = query.where(and_(*conditions))
-    
-    # 排序：最新的在前
-    query = query.order_by(PostbackNotification.created_at.desc())
-    
-    # 计算总数
-    count_query = select(func.count()).select_from(query.subquery())
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0
-    
-    # 分页
-    offset = (page - 1) * page_size
-    query = query.offset(offset).limit(page_size)
-    
-    # 执行查询
-    result = await db.execute(query)
-    notifications = result.scalars().all()
-    
-    # 如果指定了 conversion_id 且没有找到通知记录，检查是否真的没有任何通知记录
-    # 注意：这里需要检查不考虑其他过滤条件的情况
-    if conversion_id and total == 0:
-        # 检查该转化记录是否真的没有任何通知记录（不考虑其他过滤条件）
-        check_query = select(func.count(PostbackNotification.id)).where(
-            PostbackNotification.conversion_id == conversion_id
-        )
-        # 如果是客户用户，添加客户ID限制
-        if current_user.role != UserRole.ADMIN and current_user.client_id:
-            check_query = check_query.where(PostbackNotification.client_id == current_user.client_id)
-        
-        check_result = await db.execute(check_query)
-        existing_count = check_result.scalar() or 0
-        
-        # 如果确实没有任何通知记录，自动创建一个
-        if existing_count == 0:
-            try:
-                # 查询转化记录
-                conversion_result = await db.execute(
-                    select(PostbackConversion).where(PostbackConversion.id == conversion_id)
-                )
-                conversion = conversion_result.scalars().first()
-                
-                if conversion:
-                    # 构建通知消息
-                    # 注意：payout 使用扣后的 payout（给下游的实际金额）
-                    notification_message = f"转化记录通知\n\n"
-                    notification_message += f"转化ID: {conversion.conversion_id}\n"
-                    notification_message += f"平台: {conversion.platform}\n"
-                    if conversion.event_name:
-                        notification_message += f"事件: {conversion.event_name}\n"
-                    
-                    # 优先显示扣后的 payout（给下游的实际金额）
-                    if conversion.payout is not None:
-                        notification_message += f"金额 (PO): ${conversion.payout:.2f}\n"
-                    elif conversion.original_payout is not None:
-                        # 如果没有扣后的 payout，使用原始的 payout
-                        notification_message += f"金额 (PO): ${conversion.original_payout:.2f}\n"
-                    
-                    # 原始金额作为参考（如果与扣后金额不同）
-                    if conversion.original_payout is not None and conversion.payout is not None:
-                        if conversion.original_payout != conversion.payout:
-                            notification_message += f"原始金额 (PO): ${conversion.original_payout:.2f}\n"
-                    
-                    if conversion.created_at:
-                        time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
-                        notification_message += f"时间: {time_str}\n"
-                    
-                    # 创建通知记录
-                    new_notification = PostbackNotification(
-                        conversion_id=conversion.id,
-                        client_id=conversion.client_id,
-                        product_id=conversion.product_id,
-                        publisher_id=None,  # 转化通知不关联渠道
-                        notification_type='conversion',
-                        notification_channel='telegram',  # 默认渠道
-                        notification_status='pending',  # 待发送状态
-                        notification_message=notification_message,
-                        auto_notify=False,  # 手动通知
-                        postback_url=None,
-                        created_at=get_app_now_naive()
-                    )
-                    
-                    db.add(new_notification)
-                    await db.commit()
-                    await db.refresh(new_notification)
-                    
-                    # 将新创建的通知记录添加到结果中
-                    notifications = [new_notification]
-                    total = 1
-                    
-                    logger.info(
-                        f"自动创建通知记录: conversion_id={conversion_id}, "
-                        f"notification_id={new_notification.id}"
-                    )
-                else:
-                    logger.warning(f"转化记录不存在: conversion_id={conversion_id}")
-            except Exception as e:
-                logger.error(
-                    f"自动创建通知记录失败: conversion_id={conversion_id}, error={str(e)}",
-                    exc_info=True
-                )
-                # 创建失败不影响查询结果，继续返回空列表
-                await db.rollback()
+    # 调用服务层获取通知记录列表（服务层会处理查询、过滤、分页、自动创建等）
+    notifications, total = await notification_service.get_notification_records(
+        page=page,
+        page_size=page_size,
+        conversion_id=conversion_id,
+        client_id=client_id,
+        product_id=product_id,
+        publisher_id=publisher_id,
+        notification_status=notification_status,
+        notification_channel=notification_channel,
+        notification_type=notification_type,
+        start_date=start_date,
+        end_date=end_date,
+        current_user=current_user
+    )
     
     return PaginatedResponseBaseSchema.success(
         data=[PostbackNotificationResponse.model_validate(n) for n in notifications],
@@ -549,25 +278,15 @@ async def get_notification_record(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取通知记录详情"""
-    result = await db.execute(
-        select(PostbackNotification).where(PostbackNotification.id == notification_id)
-    )
-    notification = result.scalars().first()
+    """获取通知记录详情（已重构使用服务层）"""
+    # 使用服务层（业务逻辑在NotificationConfigService中）
+    from app.core.dependencies import get_notification_config_service
+    from app.services.notification_config_service import NotificationConfigService
     
-    if not notification:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"通知记录ID {notification_id} 不存在"
-        )
+    notification_service: NotificationConfigService = await get_notification_config_service(db)
     
-    # 权限检查
-    if current_user.role != UserRole.ADMIN:
-        if not current_user.client_id or notification.client_id != current_user.client_id:
-            raise_api_exception(
-                ErrorCode.ACCESS_DENIED,
-                detail="无权访问该通知记录"
-            )
+    # 调用服务层获取通知记录详情（服务层会处理权限检查）
+    notification = await notification_service.get_notification_record_by_id(notification_id, current_user)
     
     return ResponseBaseSchema.success(data=PostbackNotificationResponse.model_validate(notification))
 
@@ -583,58 +302,20 @@ async def resend_conversion_notification(
     current_user: User = Depends(get_current_user)
 ):
     """
-    补发转化通知
+    补发转化通知（已重构使用服务层）
     
     如果转化记录没有通知记录或通知失败，可以手动补发通知
     """
-    from app.models.models import PostbackConversion
-    from app.core.postback.notifier import PostbackNotifier
+    # 使用服务层（业务逻辑在NotificationConfigService中）
+    from app.core.dependencies import get_notification_config_service
+    from app.services.notification_config_service import NotificationConfigService
     
-    # 查询转化记录
-    result = await db.execute(
-        select(PostbackConversion).where(PostbackConversion.id == conversion_id)
-    )
-    conversion = result.scalars().first()
+    notification_service: NotificationConfigService = await get_notification_config_service(db)
     
-    if not conversion:
-        raise_api_exception(
-            ErrorCode.RESOURCE_NOT_FOUND,
-            detail=f"转化记录ID {conversion_id} 不存在"
-        )
+    # 调用服务层补发转化通知（服务层会处理权限检查和补发逻辑）
+    result = await notification_service.resend_conversion_notification(conversion_id, current_user)
     
-    # 权限检查：管理员可以补发所有通知，客户只能补发自己客户的通知
-    if current_user.role != UserRole.ADMIN:
-        if not current_user.client_id or conversion.client_id != current_user.client_id:
-            raise_api_exception(
-                ErrorCode.ACCESS_DENIED,
-                detail="无权补发该转化记录的通知"
-            )
-    
-    try:
-        # 补发通知
-        await PostbackNotifier.notify_conversion(
-            conversion=conversion,
-            db=db,
-            product=None,  # 将在通知函数中查询
-            client=None   # 将在通知函数中查询
-        )
-        
-        logger.info(
-            f"用户 {current_user.id} 补发转化通知: conversion_id={conversion_id}"
-        )
-        
-        return ResponseBaseSchema.success(
-            data={"message": "通知已补发", "conversion_id": conversion_id}
-        )
-    except Exception as e:
-        logger.error(
-            f"补发转化通知失败: conversion_id={conversion_id}, error={str(e)}",
-            exc_info=True
-        )
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"补发通知失败: {str(e)}"
-        )
+    return ResponseBaseSchema.success(data=result)
 
 
 @router.post("/forward-logs/{forward_log_id}/resend-notification",
@@ -646,75 +327,19 @@ async def resend_notification_from_forward_log(
     current_user: User = Depends(get_current_user)
 ):
     """
-    基于转发日志补发通知
+    基于转发日志补发通知（已重构使用服务层）
     
     根据转发日志中的转化记录，重新发送通知
     仅管理员可访问
     """
-    from app.models.models import PostbackConversion, PostbackForwardLog
-    from app.core.postback.notifier import PostbackNotifier
+    # 使用服务层（业务逻辑在NotificationConfigService中）
+    from app.core.dependencies import get_notification_config_service
+    from app.services.notification_config_service import NotificationConfigService
     
-    # 检查管理员权限
-    if current_user.role != UserRole.ADMIN:
-        raise_api_exception(
-            ErrorCode.FORBIDDEN,
-            detail="仅管理员可访问此接口"
-        )
+    notification_service: NotificationConfigService = await get_notification_config_service(db)
     
-    try:
-        # 查询转发日志
-        result = await db.execute(
-            select(PostbackForwardLog).where(PostbackForwardLog.id == forward_log_id)
-        )
-        forward_log = result.scalars().first()
-        
-        if not forward_log:
-            raise_api_exception(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                detail=f"转发日志ID {forward_log_id} 不存在"
-            )
-        
-        # 查询转化记录
-        conversion_result = await db.execute(
-            select(PostbackConversion).where(PostbackConversion.id == forward_log.conversion_id)
-        )
-        conversion = conversion_result.scalars().first()
-        
-        if not conversion:
-            raise_api_exception(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                detail=f"转化记录ID {forward_log.conversion_id} 不存在"
-            )
-        
-        # 补发通知
-        await PostbackNotifier.notify_conversion(
-            conversion=conversion,
-            db=db,
-            product=None,  # 将在通知函数中查询
-            client=None   # 将在通知函数中查询
-        )
-        
-        logger.info(
-            f"用户 {current_user.id} 基于转发日志补发通知: forward_log_id={forward_log_id}, "
-            f"conversion_id={forward_log.conversion_id}"
-        )
-        
-        return ResponseBaseSchema.success(
-            data={
-                "message": "通知已补发",
-                "forward_log_id": forward_log_id,
-                "conversion_id": forward_log.conversion_id
-            }
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            f"基于转发日志补发通知失败: forward_log_id={forward_log_id}, error={str(e)}",
-            exc_info=True
-        )
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"补发通知失败: {str(e)}"
-        )
+    # 调用服务层基于转发日志补发通知（服务层会处理权限检查和补发逻辑）
+    result = await notification_service.resend_notification_from_forward_log(forward_log_id, current_user)
+    
+    return ResponseBaseSchema.success(data=result)
 
