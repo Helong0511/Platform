@@ -383,6 +383,9 @@ async def _handle_cached_redirect(
     final_url = _build_final_url(original_url, click_id, offer_id, channel_id,
                                  final_channel_id, request_params)
     
+    # 打印最终跳转链接
+    logger.info(f"[短链接重定向] 最终跳转链接: {final_url}")
+    
     return RedirectResponse(url=final_url, status_code=302)
 
 
@@ -468,6 +471,10 @@ async def _handle_database_redirect(
     
     final_url = _build_final_url(original_url, click_id, offer_id, channel_id,
                                  final_channel_id, request_params)
+    
+    # 打印最终跳转链接
+    logger.info(f"[短链接重定向] 最终跳转链接: short_code={short_code}, final_url={final_url}, click_id={click_id}")
+    print(f"[短链接重定向] 最终跳转链接: short_code={short_code}, final_url={final_url}, click_id={click_id}")
     
     return RedirectResponse(url=final_url, status_code=302)
 
