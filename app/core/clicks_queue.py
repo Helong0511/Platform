@@ -92,7 +92,7 @@ async def dequeue_clicks(count: int = BATCH_SIZE) -> list[Dict[str, Any]]:
                 logger.warning(f"反序列化点击记录失败: {click_json[:100]}, error={e}")
         
         if clicks:
-            logger.info(f"从队列取出 {len(clicks)} 条点击记录")
+            logger.debug(f"从队列取出 {len(clicks)} 条点击记录")
         return clicks
     except Exception as e:
         logger.error(f"从队列取出点击记录失败: error={e}", exc_info=True)

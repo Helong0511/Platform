@@ -17,7 +17,7 @@ async def sync_short_link_clicks_task():
     每5分钟执行一次，将Redis中的点击次数批量更新到数据库
     """
     try:
-        logger.info("=" * 80)
+        # 详细日志输出到 scheduler.log，不输出到 app.log
         logger.info("开始执行短链接点击次数同步任务...")
         
         # 创建数据库会话
@@ -28,14 +28,12 @@ async def sync_short_link_clicks_task():
             if synced_count > 0:
                 logger.info(f"✅ 短链接点击次数同步成功: 更新了 {synced_count} 条记录")
             else:
-                logger.info("ℹ️ 短链接点击次数同步: 没有需要更新的记录（Redis中可能没有待同步的计数器）")
+                logger.debug("ℹ️ 短链接点击次数同步: 没有需要更新的记录（Redis中可能没有待同步的计数器）")
         
-        logger.info("短链接点击次数同步任务执行成功")
-        logger.info("=" * 80)
+        logger.debug("短链接点击次数同步任务执行成功")
     except Exception as e:
-        logger.error("=" * 80)
+        # 错误日志会输出到 app.log（WARNING 级别）
         logger.error(f"❌ 短链接点击次数同步任务执行失败: {e}", exc_info=True)
-        logger.error("=" * 80)
         raise
 
 
@@ -45,29 +43,22 @@ async def process_clicks_queue_task():
     每10秒执行一次，从Redis队列批量取出点击记录并插入到数据库
     """
     try:
-        logger.info("=" * 80)
-        logger.info("开始执行点击记录队列批量处理任务...")
-        
         # 批量处理队列
         result = await process_clicks_queue()
         
         if result['processed'] > 0:
+            # 处理结果输出到 scheduler.log（INFO 级别）
             logger.info(
-                f"✅ 点击记录队列处理成功: "
+                f"✅ 点击记录队列处理: "
                 f"处理={result['processed']}, "
                 f"插入={result['inserted']}, "
                 f"失败={result['failed']}, "
                 f"队列剩余={result['queue_remaining']}"
             )
-        else:
-            logger.debug("ℹ️ 点击记录队列处理: 队列为空，无需处理")
-        
-        logger.info("点击记录队列批量处理任务执行成功")
-        logger.info("=" * 80)
+        # 队列为空时不输出日志
     except Exception as e:
-        logger.error("=" * 80)
+        # 错误日志会输出到 app.log（WARNING 级别）
         logger.error(f"❌ 点击记录队列批量处理任务执行失败: {e}", exc_info=True)
-        logger.error("=" * 80)
         raise
 
 

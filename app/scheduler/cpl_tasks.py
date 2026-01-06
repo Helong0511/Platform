@@ -24,6 +24,7 @@ async def reset_daily_caps_task():
     """
     global _task_result_message
     
+    # 详细日志输出到 scheduler.log
     logger.info("开始执行每日Cap重置任务...")
     start_time = datetime.now(timezone.utc)
     
@@ -33,7 +34,7 @@ async def reset_daily_caps_task():
             end_time = datetime.now(timezone.utc)
             duration = (end_time - start_time).total_seconds()
             _task_result_message = f"每日Cap重置任务执行成功（耗时: {round(duration, 2)}秒）"
-            logger.info(_task_result_message)
+            logger.debug(_task_result_message)  # 成功信息降级为 DEBUG
     except Exception as e:
         end_time = datetime.now(timezone.utc)
         duration = (end_time - start_time).total_seconds()

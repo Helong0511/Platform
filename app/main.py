@@ -92,29 +92,74 @@ formatter = logging.Formatter(
     '%(asctime)s - [PID:%(process)d] - %(name)s - %(levelname)s - %(message)s'
 )
 
-# 创建轮转文件处理器（带错误处理）
-file_handler = None
-log_file_path = os.path.join(log_dir, 'app.log')
+# ====== 创建分类日志文件 ======
+# 1. app.log: 只记录 WARNING 及以上级别（重要日志）
+app_log_handler = None
+app_log_path = os.path.join(log_dir, 'app.log')
 try:
-    file_handler = RotatingFileHandler(
-        log_file_path,
+    app_log_handler = RotatingFileHandler(
+        app_log_path,
         maxBytes=LOG_FILE_MAX_BYTES,
         backupCount=LOG_FILE_BACKUP_COUNT,
         encoding='utf-8'
     )
-    file_handler.setFormatter(formatter)
-    file_handler.setLevel(getattr(logging, log_level.upper(), logging.INFO))
-    # 添加到根日志记录器（这样所有子模块的日志都会被记录）
-    root_logger.addHandler(file_handler)
-    root_logger.info(f"日志文件已创建: {log_file_path}")
+    app_log_handler.setFormatter(formatter)
+    app_log_handler.setLevel(logging.WARNING)  # 只记录 WARNING 及以上级别
+    root_logger.addHandler(app_log_handler)
 except (OSError, PermissionError) as e:
-    # 如果无法创建日志文件，只使用控制台输出
-    root_logger.warning(f"无法创建日志文件 {log_file_path}，将只使用控制台输出。错误: {e}")
-    root_logger.warning(f"请检查日志目录权限: {log_dir}")
-    root_logger.warning(f"建议执行: sudo chown -R $(whoami):$(whoami) {log_dir} 或 sudo chmod 755 {log_dir}")
-    # 确保至少有一个控制台处理器
-    if not any(isinstance(h, logging.StreamHandler) for h in root_logger.handlers):
-        root_logger.addHandler(_create_console_handler(formatter, logging.INFO))
+    root_logger.warning(f"无法创建 app.log 文件: {e}")
+
+# 2. scheduler.log: 记录调度器相关的详细日志（INFO级别）
+scheduler_log_handler = None
+scheduler_log_path = os.path.join(log_dir, 'scheduler.log')
+try:
+    scheduler_log_handler = RotatingFileHandler(
+        scheduler_log_path,
+        maxBytes=LOG_FILE_MAX_BYTES,
+        backupCount=LOG_FILE_BACKUP_COUNT,
+        encoding='utf-8'
+    )
+    scheduler_log_handler.setFormatter(formatter)
+    scheduler_log_handler.setLevel(logging.INFO)  # 记录 INFO 及以上级别
+    
+    # 只添加到调度器相关的 logger
+    # 注意：propagate=True，这样 WARNING 及以上级别会同时输出到 app.log
+    scheduler_logger = logging.getLogger('app.scheduler')
+    scheduler_logger.addHandler(scheduler_log_handler)
+    scheduler_logger.setLevel(logging.INFO)
+    scheduler_logger.propagate = True  # 允许传播，WARNING+ 会输出到 app.log
+    
+    # 调度器模块的 logger
+    scheduler_module_logger = logging.getLogger('app.scheduler_module')
+    scheduler_module_logger.addHandler(scheduler_log_handler)
+    scheduler_module_logger.setLevel(logging.INFO)
+    scheduler_module_logger.propagate = True  # 允许传播，WARNING+ 会输出到 app.log
+except (OSError, PermissionError) as e:
+    root_logger.warning(f"无法创建 scheduler.log 文件: {e}")
+
+# 3. debug.log: 记录 DEBUG 级别日志（仅开发环境）
+debug_log_handler = None
+if not settings.is_production:
+    debug_log_path = os.path.join(log_dir, 'debug.log')
+    try:
+        debug_log_handler = RotatingFileHandler(
+            debug_log_path,
+            maxBytes=LOG_FILE_MAX_BYTES,
+            backupCount=LOG_FILE_BACKUP_COUNT,
+            encoding='utf-8'
+        )
+        debug_log_handler.setFormatter(formatter)
+        debug_log_handler.setLevel(logging.DEBUG)
+        root_logger.addHandler(debug_log_handler)
+    except (OSError, PermissionError) as e:
+        root_logger.warning(f"无法创建 debug.log 文件: {e}")
+
+# 向后兼容：file_handler 指向 app_log_handler（用于 stdout/stderr 重定向）
+file_handler = app_log_handler
+
+# 记录日志文件创建信息
+if app_log_handler:
+    root_logger.warning(f"日志文件已创建: app.log (WARNING+), scheduler.log (INFO+), debug.log (DEBUG+, 仅开发环境)")
 
 
 # 重定向 stdout 和 stderr 到日志文件（捕获 print() 输出）
@@ -131,21 +176,34 @@ class LoggingStream:
             # 移除换行符，logger 会自动添加
             message = message.rstrip('\n\r')
             if message:
-                self.logger.log(self.log_level, f"[STDOUT] {message}")
+                # 避免重复输出：检查消息是否已经包含日志格式
+                if not message.startswith('[STDOUT]') and not message.startswith('[STDERR]'):
+                    self.logger.log(self.log_level, f"[STDOUT] {message}")
 
     def flush(self):
         pass
 
 
 # 创建专门的 logger 用于捕获 stdout/stderr
+# stdout/stderr 输出到 debug.log（开发环境，INFO+）或 app.log（生产环境，WARNING+）
 stdout_logger = logging.getLogger('stdout')
 stdout_logger.setLevel(logging.INFO)
-stdout_logger.addHandler(file_handler if file_handler else _create_console_handler(formatter, logging.INFO))
+# stdout 输出到 debug.log（开发环境）或 app.log（生产环境，WARNING+）
+if debug_log_handler:
+    stdout_logger.addHandler(debug_log_handler)
+elif app_log_handler:
+    stdout_logger.addHandler(app_log_handler)
+else:
+    stdout_logger.addHandler(_create_console_handler(formatter, logging.INFO))
 stdout_logger.propagate = False  # 防止重复输出
 
 stderr_logger = logging.getLogger('stderr')
 stderr_logger.setLevel(logging.WARNING)
-stderr_logger.addHandler(file_handler if file_handler else _create_console_handler(formatter, logging.WARNING))
+# stderr 输出到 app.log（WARNING+）
+if app_log_handler:
+    stderr_logger.addHandler(app_log_handler)
+else:
+    stderr_logger.addHandler(_create_console_handler(formatter, logging.WARNING))
 stderr_logger.propagate = False  # 防止重复输出
 
 # 重定向 stdout 和 stderr（生产环境也重定向，确保 print() 输出被记录）
@@ -157,6 +215,42 @@ if not root_logger.handlers or not any(isinstance(h, logging.StreamHandler) for 
     # 开发环境也输出到控制台
     if not settings.is_production:
         root_logger.addHandler(_create_console_handler(formatter, logging.INFO))
+
+# ====== 精简调度器相关日志 ======
+# ====== 精简调度器相关日志 ======
+# 将APScheduler的日志级别设置为WARNING，减少"Running job"等详细日志
+# 这些日志会输出到 scheduler.log（如果配置了），WARNING+ 会同时输出到 app.log
+apscheduler_logger = logging.getLogger('apscheduler')
+apscheduler_logger.setLevel(logging.WARNING)
+if scheduler_log_handler:
+    apscheduler_logger.addHandler(scheduler_log_handler)
+    apscheduler_logger.propagate = True  # WARNING+ 会传播到 root logger（app.log）
+
+apscheduler_executor_logger = logging.getLogger('apscheduler.executors.default')
+apscheduler_executor_logger.setLevel(logging.WARNING)
+if scheduler_log_handler:
+    apscheduler_executor_logger.addHandler(scheduler_log_handler)
+    apscheduler_executor_logger.propagate = True
+
+apscheduler_scheduler_logger = logging.getLogger('apscheduler.schedulers')
+apscheduler_scheduler_logger.setLevel(logging.WARNING)
+if scheduler_log_handler:
+    apscheduler_scheduler_logger.addHandler(scheduler_log_handler)
+    apscheduler_scheduler_logger.propagate = True
+
+# 调度器模块的详细日志输出到 scheduler.log
+# 这些模块的 INFO 级别日志会输出到 scheduler.log
+# WARNING 及以上级别会同时输出到 app.log（因为 propagate=True）
+if scheduler_log_handler:
+    # process_allocator, task_queue, lock 的详细日志输出到 scheduler.log
+    for module_name in ['app.scheduler_module.process_allocator', 
+                       'app.scheduler_module.task_queue', 
+                       'app.scheduler_module.lock',
+                       'app.scheduler_module.scheduler']:
+        module_logger = logging.getLogger(module_name)
+        module_logger.addHandler(scheduler_log_handler)
+        module_logger.setLevel(logging.INFO)  # 允许 INFO 级别输出到 scheduler.log
+        module_logger.propagate = True  # WARNING+ 会传播到 root logger（app.log）
 
 # 获取当前模块的日志记录器（用于向后兼容）
 logger = logging.getLogger(__name__)

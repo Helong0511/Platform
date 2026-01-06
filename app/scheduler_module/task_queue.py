@@ -77,7 +77,7 @@ class TaskQueue:
                     self._execute_task(task_name, task_func, *args, **kwargs)
                 )
                 self.running_tasks[task_name] = task
-                logger.info(
+                logger.debug(
                     f"任务 '{task_name}' 立即并发执行 "
                     f"（当前运行: {self.current_running}/{self.max_concurrent_tasks}，"
                     f"队列: {len(self.queue)}）"

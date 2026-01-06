@@ -111,7 +111,7 @@ async def acquire_task_lock(
                     task_record.last_error = "任务执行超时，自动释放锁"
                 else:
                     # 任务正在运行，无法获取锁
-                    logger.info(
+                    logger.debug(
                         f"任务 {task_name} 正在运行中（进程ID: {task_record.last_run_pid}, "
                         f"主机: {task_record.last_run_host}，运行时间: {time_diff:.1f}秒），跳过本次执行"
                     )
@@ -135,7 +135,7 @@ async def acquire_task_lock(
 
         # 提交事务，释放行锁
         await db.commit()
-        logger.info(
+        logger.debug(
             f"任务 {task_name} 成功获取锁（进程ID: {CURRENT_PID}, 主机: {CURRENT_HOST}）"
         )
         return True, db
@@ -209,7 +209,7 @@ async def acquire_task_lock(
                             task_record.is_running = False
                             task_record.last_error = "任务执行超时，自动释放锁"
                         else:
-                            logger.info(f"任务 {task_name} 正在运行中，跳过本次执行")
+                            logger.debug(f"任务 {task_name} 正在运行中，跳过本次执行")
                             await db.rollback()
                             await db.close()
                             return False, None
@@ -226,7 +226,7 @@ async def acquire_task_lock(
                 task_record.last_error = None
 
                 await db.commit()
-                logger.info(
+                logger.debug(
                     f"任务 {task_name} 成功获取锁（进程ID: {CURRENT_PID}, 主机: {CURRENT_HOST}）"
                 )
                 return True, db
@@ -306,7 +306,7 @@ async def release_task_lock(
                 # 失败时如果没有提供信息，last_error保持原值（可能是之前的错误）
 
             await db.commit()
-            logger.info(
+            logger.debug(
                 f"任务 {task_name} 锁已释放，执行{'成功' if success else '失败'} "
                 f"（进程ID: {CURRENT_PID}, 主机: {CURRENT_HOST}）"
             )

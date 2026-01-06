@@ -259,7 +259,7 @@ async def get_process_for_task(
             )
             all_processes = [current_pid]
         
-        logger.info(
+        logger.debug(
             f"任务 '{task_name}' 进程分配检查: "
             f"当前进程={current_pid}@{CURRENT_HOST}, "
             f"活跃进程={all_processes} (已过滤不存在的进程), "
@@ -272,7 +272,7 @@ async def get_process_for_task(
             queue = get_task_queue()
             queue_status = await queue.get_queue_status()
             current_running = queue_status['current_running']
-            logger.info(
+            logger.debug(
                 f"任务 '{task_name}' 单进程环境或首次运行，"
                 f"分配给当前进程 {current_pid} "
                 f"（当前运行: {current_running}/{max_concurrent}，"

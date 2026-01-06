@@ -175,7 +175,7 @@ async def execute_task_with_lock(
             # 不应该由当前进程执行，跳过
             import os
             worker_pid = os.getpid()
-            logger.info(
+            logger.debug(
                 f"[Worker PID:{worker_pid}] 任务 '{task_name}' 已分配给其他进程执行，"
                 f"当前进程跳过（这是正常的，多进程环境下任务会分配到不同进程）"
             )
@@ -192,7 +192,7 @@ async def execute_task_with_lock(
     # 将任务提交到队列，队列会管理并发执行
     import os
     worker_pid = os.getpid()
-    logger.info(
+    logger.debug(
         f"[Worker PID:{worker_pid}] 任务 '{task_name}' 已分配给当前进程，"
         f"提交到任务队列（优先级: {priority.name}）"
     )
@@ -248,7 +248,7 @@ async def _execute_task_with_lock_internal(
         worker_pid = os.getpid()
         
         # 只记录一次任务开始执行的日志
-        logger.info(
+        logger.debug(
             f"[Worker PID:{worker_pid}] 任务 '{task_name}' 开始执行 "
             f"（进程ID: {CURRENT_PID}, 主机: {CURRENT_HOST}）"
         )
@@ -279,7 +279,7 @@ async def _execute_task_with_lock_internal(
             # 如果任务提供了result_message，会保存到last_error字段
             await release_task_lock(lock_db, task_name, success=True, result_message=result_message)
             success_msg = f"任务 '{task_name}' 执行成功（耗时: {round(execution_duration, 2)}秒）"
-            logger.info(success_msg)
+            logger.debug(success_msg)
 
             # 记录审计日志（成功）- 使用新的数据库会话避免事务冲突
             audit_db = None

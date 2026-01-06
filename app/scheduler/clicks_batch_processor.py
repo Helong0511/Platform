@@ -53,10 +53,10 @@ async def process_clicks_queue() -> Dict[str, int]:
                 if batch_count == 0:
                     logger.debug("点击队列为空，无需处理")
                 else:
-                    logger.info(f"点击队列已处理完毕，共处理 {batch_count} 批")
+                    logger.debug(f"点击队列已处理完毕，共处理 {batch_count} 批")
                 break
             
-            logger.info(f"开始批量处理点击记录队列（第 {batch_count + 1} 批），队列长度: {queue_length}")
+            logger.debug(f"开始批量处理点击记录队列（第 {batch_count + 1} 批），队列长度: {queue_length}")
             
             # 批量从队列取出点击记录
             clicks = await dequeue_clicks(count=min(BATCH_SIZE, queue_length))
@@ -101,7 +101,7 @@ async def process_clicks_queue() -> Dict[str, int]:
                         await _batch_insert_click_stats(db, valid_clicks)
                     
                     await db.commit()
-                    logger.info(
+                    logger.debug(
                         f"批量插入点击记录成功（第 {batch_count} 批）: "
                         f"处理={len(clicks)}, "
                         f"插入={inserted_count}, "
@@ -119,14 +119,7 @@ async def process_clicks_queue() -> Dict[str, int]:
         # 获取剩余队列长度
         result['queue_remaining'] = await get_queue_length()
         
-        if result['processed'] > 0:
-            logger.info(
-                f"点击队列批量处理完成: "
-                f"总处理={result['processed']}, "
-                f"总插入={result['inserted']}, "
-                f"总失败={result['failed']}, "
-                f"队列剩余={result['queue_remaining']}"
-            )
+        # 注意：处理结果日志由调用方（short_link_tasks.py）统一输出，避免重复
         
     except Exception as e:
         logger.error(f"处理点击队列异常: error={e}", exc_info=True)
@@ -425,7 +418,7 @@ async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -
         stmt = insert(Click).values(insert_data)
         await db.execute(stmt)
         
-        logger.info(f"批量插入 {len(insert_data)} 条点击记录到数据库")
+        logger.debug(f"批量插入 {len(insert_data)} 条点击记录到数据库")
         return len(insert_data)
     except Exception as e:
         logger.error(f"批量插入点击记录失败: error={e}", exc_info=True)
@@ -506,7 +499,7 @@ async def _batch_insert_click_stats(db: AsyncSession, clicks: List[Dict[str, Any
         stmt = insert(ClickStats).values(insert_data)
         await db.execute(stmt)
         
-        logger.info(f"批量插入 {len(insert_data)} 条点击统计记录到 ClickStats 表")
+        logger.debug(f"批量插入 {len(insert_data)} 条点击统计记录到 ClickStats 表")
         return len(insert_data)
     except Exception as e:
         # ClickStats 插入失败不影响主流程，但记录警告
