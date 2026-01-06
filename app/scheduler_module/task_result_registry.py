@@ -4,8 +4,42 @@
 """
 from typing import Dict, Callable, Optional
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_module_path(module_path: str) -> bool:
+    """
+    验证模块路径是否安全（白名单验证）
+    
+    只允许导入 app. 开头的模块，防止代码注入攻击
+    
+    Args:
+        module_path: 模块路径
+        
+    Returns:
+        如果路径安全返回 True，否则返回 False
+    """
+    if not module_path:
+        return False
+    
+    # 只允许导入 app. 开头的模块（应用内部模块）
+    if not module_path.startswith('app.'):
+        logger.warning(f"拒绝导入非应用模块: {module_path}（只允许导入 app. 开头的模块）")
+        return False
+    
+    # 验证路径格式（只允许字母、数字、点、下划线）
+    if not re.match(r'^[a-zA-Z0-9_.]+$', module_path):
+        logger.warning(f"模块路径格式无效: {module_path}（包含非法字符）")
+        return False
+    
+    # 禁止相对导入（..）
+    if '..' in module_path:
+        logger.warning(f"拒绝相对导入: {module_path}")
+        return False
+    
+    return True
 
 # 任务结果获取函数注册表：任务名称 -> 结果获取函数
 TASK_RESULT_REGISTRY: Dict[str, Callable[[str], Optional[str]]] = {}
@@ -69,7 +103,23 @@ def auto_register_task_results() -> None:
             result_getter_module = config["result_getter_module"]
             result_getter_function = config["result_getter_function"]
             
-            # 动态导入结果获取函数
+            # ====== 安全验证：验证模块路径 ======
+            if not _validate_module_path(result_getter_module):
+                logger.error(
+                    f"任务结果获取模块路径验证失败: '{result_getter_module}' (任务: '{task_name}') - 安全策略拒绝"
+                )
+                failed_count += 1
+                continue
+
+            # 验证函数名格式
+            if not re.match(r'^[a-zA-Z0-9_]+$', result_getter_function):
+                logger.error(
+                    f"任务结果获取函数名格式无效: '{result_getter_function}' (任务: '{task_name}') - 只允许字母、数字、下划线"
+                )
+                failed_count += 1
+                continue
+
+            # 动态导入结果获取函数（已通过安全验证）
             module = __import__(result_getter_module, fromlist=[result_getter_function])
             get_result_func = getattr(module, result_getter_function)
             

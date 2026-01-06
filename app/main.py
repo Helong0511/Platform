@@ -807,6 +807,23 @@ async def global_exception_handler(request: Request, exc: Exception):
                     else stack_trace
                 )
 
+                # 收集详细的请求信息
+                request_details = {
+                    "path": request.url.path,
+                    "method": request.method,
+                    "stack_trace": truncated_stack,
+                    "query_params": str(request.query_params) if request.query_params else None,
+                    "client_ip": None,
+                    "user_agent": request.headers.get("User-Agent", None)
+                }
+                
+                # 获取客户端IP
+                try:
+                    from app.core.utils import get_client_ip
+                    request_details["client_ip"] = get_client_ip(request)
+                except Exception:
+                    pass
+                
                 await log_runtime_error(
                     db=audit_db,
                     error_type=error_type,
@@ -816,11 +833,7 @@ async def global_exception_handler(request: Request, exc: Exception):
                     username=username,
                     resource_type="SYSTEM",
                     resource_name=request.url.path,
-                    details={
-                        "path": request.url.path,
-                        "method": request.method,
-                        "stack_trace": truncated_stack
-                    }
+                    details=request_details
                 )
                 await audit_db.commit()
             except Exception as log_error:

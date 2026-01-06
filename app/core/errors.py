@@ -263,6 +263,12 @@ async def record_http_exception_log(
     记录 HTTPException 日志的公共函数
     用于统一处理 HTTPException 的日志记录逻辑
     
+    增强功能：
+    - 记录更详细的请求信息（方法、路径、参数、头部）
+    - 记录用户信息（如果已认证）
+    - 记录错误堆栈（如果是服务器错误）
+    - 限制日志长度，防止日志过大
+    
     Args:
         exc: HTTPException 异常对象
         request: 请求对象
@@ -274,6 +280,9 @@ async def record_http_exception_log(
     from app.models.models import User
     from sqlalchemy.future import select
     import asyncio
+    import logging
+    
+    logger = logging.getLogger(__name__)
     
     # 只在 500/503 错误时记录日志
     if exc.status_code < 500:
@@ -310,6 +319,43 @@ async def record_http_exception_log(
             max_error_length = 1000
             truncated_error = error_message[:max_error_length] if len(error_message) > max_error_length else error_message
             
+            # 收集详细的请求信息
+            request_details = {
+                "path": request.url.path,
+                "method": request.method,
+                "status_code": exc.status_code,
+                "detail": exc.detail if hasattr(exc, 'detail') else str(exc),
+                "query_params": str(request.query_params) if request.query_params else None,
+                "client_ip": None,
+                "user_agent": request.headers.get("User-Agent", None)
+            }
+            
+            # 获取客户端IP
+            try:
+                from app.core.utils import get_client_ip
+                request_details["client_ip"] = get_client_ip(request)
+            except Exception:
+                pass
+            
+            # 记录堆栈信息（如果是服务器错误）
+            if exc.status_code >= 500:
+                import traceback
+                try:
+                    # 尝试获取异常堆栈
+                    if hasattr(exc, '__traceback__') and exc.__traceback__:
+                        stack_trace = ''.join(traceback.format_exception(
+                            type(exc), exc, exc.__traceback__
+                        ))
+                        # 限制堆栈长度
+                        max_stack_length = 2000
+                        request_details["stack_trace"] = (
+                            stack_trace[:max_stack_length] 
+                            if len(stack_trace) > max_stack_length 
+                            else stack_trace
+                        )
+                except Exception:
+                    pass
+            
             await log_runtime_error(
                 db=audit_db,
                 error_type=f"{error_type}_{exc.status_code}",
@@ -319,12 +365,7 @@ async def record_http_exception_log(
                 username=username,
                 resource_type="SYSTEM",
                 resource_name=request.url.path,
-                details={
-                    "path": request.url.path,
-                    "method": request.method,
-                    "status_code": exc.status_code,
-                    "detail": exc.detail if hasattr(exc, 'detail') else str(exc)
-                }
+                details=request_details
             )
             await audit_db.commit()
         except Exception as log_error:
