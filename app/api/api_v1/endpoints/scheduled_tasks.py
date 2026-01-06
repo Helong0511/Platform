@@ -308,9 +308,9 @@ async def update_scheduled_task(
         raise
     except Exception as e:
         logger.error(f"更新定时任务失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="更新定时任务失败"
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"更新定时任务失败：{str(e)}"
         )
 
 
@@ -361,9 +361,9 @@ async def trigger_scheduled_task(
         raise
     except Exception as e:
         logger.error(f"触发定时任务失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"触发定时任务失败: {str(e)}"
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"触发定时任务失败：{str(e)}"
         )
 
 
@@ -402,9 +402,9 @@ async def reload_scheduled_task(
         raise
     except Exception as e:
         logger.error(f"重新加载定时任务失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"重新加载定时任务失败: {str(e)}"
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"重新加载定时任务失败：{str(e)}"
         )
 
 
@@ -437,9 +437,9 @@ async def reload_all_scheduled_tasks(
 
     except Exception as e:
         logger.error(f"重新加载所有定时任务失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"重新加载所有定时任务失败: {str(e)}"
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"重新加载所有定时任务失败：{str(e)}"
         )
 
 
@@ -483,9 +483,9 @@ async def get_task_queue_status(
         )
     except Exception as e:
         logger.error(f"获取任务队列状态失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取任务队列状态失败: {str(e)}"
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取任务队列状态失败：{str(e)}"
         )
 
 
@@ -516,9 +516,9 @@ async def get_scheduler_status(
         return ResponseBaseSchema.success(data=status_data)
     except Exception as e:
         logger.error(f"获取调度器状态失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取调度器状态失败: {str(e)}"
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取调度器状态失败：{str(e)}"
         )
 
 
