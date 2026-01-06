@@ -162,6 +162,9 @@ async def _replace_short_link_placeholders(
     logger.debug(f"[占位符替换] 找到的占位符: {placeholders}")
     logger.debug(f"[占位符替换] 可用值: click_id={click_id}, offer_id={offer_id}, publisher_id={publisher_id}, advertiser_id={advertiser_id}")
     
+    # 记录未替换的占位符（需要移除的参数）
+    unreplaced_placeholders = []
+    
     for placeholder in placeholders:
         normalized_key = placeholder.lower()
         original_normalized_key = normalized_key
@@ -182,17 +185,52 @@ async def _replace_short_link_placeholders(
         value = values.get(normalized_key, '')
         
         if not value:
-            # 如果值为空，记录警告但不替换（保留原始占位符）
-            logger.warning(f"[占位符替换] 占位符 {{{placeholder}}} (映射到 {normalized_key}) 的值为空，将保留原始占位符")
+            # 如果值为空，记录未替换的占位符，稍后移除包含该占位符的参数
+            logger.warning(f"[占位符替换] 占位符 {{{placeholder}}} (映射到 {normalized_key}) 的值为空，将移除包含该占位符的参数")
+            unreplaced_placeholders.append(placeholder)
             continue
         
         encoded_value = quote(str(value), safe='')
         result_url = result_url.replace(f'{{{placeholder}}}', encoded_value)
         logger.debug(f"[占位符替换] 占位符 {{{placeholder}}} -> {value} (编码后: {encoded_value})")
     
+    # 移除包含未替换占位符的参数
+    if unreplaced_placeholders:
+        parsed = urlparse(result_url)
+        if parsed.query:
+            query_params = parse_qs(parsed.query, keep_blank_values=True)
+            query_params_lower = {k.lower(): v for k, v in query_params.items()}
+            
+            # 检查每个参数值，如果包含未替换的占位符，则移除该参数
+            params_to_remove = []
+            for param_name, param_values in query_params_lower.items():
+                for param_value in param_values:
+                    # 检查参数值中是否包含未替换的占位符（可能是原始形式或URL编码形式）
+                    for unreplaced_placeholder in unreplaced_placeholders:
+                        placeholder_pattern = f'{{{unreplaced_placeholder}}}'
+                        # 检查原始占位符或URL编码后的占位符
+                        if placeholder_pattern in param_value:
+                            params_to_remove.append(param_name)
+                            logger.info(f"[占位符替换] 移除参数 {param_name}={param_value}，因为包含未替换的占位符 {{{unreplaced_placeholder}}}")
+                            break
+                    if param_name in params_to_remove:
+                        break
+            
+            # 移除参数
+            for param_name in params_to_remove:
+                query_params_lower.pop(param_name, None)
+            
+            # 重新构建查询字符串
+            if query_params_lower:
+                new_query = urlencode(query_params_lower, doseq=True)
+                result_url = urlunparse(parsed._replace(query=new_query))
+            else:
+                # 如果没有查询参数了，移除查询字符串
+                result_url = urlunparse(parsed._replace(query=''))
+    
     logger.debug(f"[占位符替换] 替换后的URL: {result_url}")
     
-    # 将URL中的所有参数名转小写
+    # 将URL中的所有参数名转小写（如果还有查询参数）
     parsed = urlparse(result_url)
     if parsed.query:
         query_params = parse_qs(parsed.query, keep_blank_values=True)
