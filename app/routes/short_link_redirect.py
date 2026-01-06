@@ -158,27 +158,39 @@ async def _replace_short_link_placeholders(
     
     # 替换占位符
     result_url = original_url
+    logger.debug(f"[占位符替换] 开始替换占位符，原始URL: {original_url}")
+    logger.debug(f"[占位符替换] 找到的占位符: {placeholders}")
+    logger.debug(f"[占位符替换] 可用值: click_id={click_id}, offer_id={offer_id}, publisher_id={publisher_id}, advertiser_id={advertiser_id}")
+    
     for placeholder in placeholders:
         normalized_key = placeholder.lower()
+        original_normalized_key = normalized_key
         
         if normalized_key in alias_map:
             normalized_key = alias_map[normalized_key]
+            logger.debug(f"[占位符替换] 占位符 {{{placeholder}}} 通过别名映射: {original_normalized_key} -> {normalized_key}")
         else:
             normalized_key = re.sub(r'(?<!^)(?=[A-Z])', '_', placeholder).lower()
+            if normalized_key != original_normalized_key:
+                logger.debug(f"[占位符替换] 占位符 {{{placeholder}}} 标准化: {original_normalized_key} -> {normalized_key}")
         
         # channel_id 和 sub_affid 都映射到 publisher_id
         if normalized_key == 'channel_id' or normalized_key == 'sub_affid':
+            logger.debug(f"[占位符替换] 占位符 {{{placeholder}}} 映射到 publisher_id")
             normalized_key = 'publisher_id'
         
         value = values.get(normalized_key, '')
         
         if not value:
             # 如果值为空，记录警告但不替换（保留原始占位符）
-            logger.warning(f"占位符 {{{placeholder}}} 的值为空，将保留原始占位符")
+            logger.warning(f"[占位符替换] 占位符 {{{placeholder}}} (映射到 {normalized_key}) 的值为空，将保留原始占位符")
             continue
         
         encoded_value = quote(str(value), safe='')
         result_url = result_url.replace(f'{{{placeholder}}}', encoded_value)
+        logger.debug(f"[占位符替换] 占位符 {{{placeholder}}} -> {value} (编码后: {encoded_value})")
+    
+    logger.debug(f"[占位符替换] 替换后的URL: {result_url}")
     
     # 将URL中的所有参数名转小写
     parsed = urlparse(result_url)
@@ -395,16 +407,25 @@ async def _handle_cached_redirect(
     original_url_before_replace = original_url
     
     # 替换占位符并合并参数
-    original_url = await _replace_short_link_placeholders(
+    original_url_after_replace = await _replace_short_link_placeholders(
         original_url, click_id, final_offer_id, final_channel_id,
         advertiser_id, request_info, db
     )
     
-    final_url = _build_final_url(original_url_before_replace, original_url, click_id, offer_id, channel_id,
+    final_url = _build_final_url(original_url_before_replace, original_url_after_replace, click_id, offer_id, channel_id,
                                  final_channel_id, request_params)
     
-    # 打印最终跳转链接
-    logger.info(f"[短链接重定向] 最终跳转链接: {final_url}")
+    # 打印最终跳转链接详细信息
+    logger.info("=" * 80)
+    logger.info(f"[短链接重定向] 短链接代码: {short_code}")
+    logger.info(f"[短链接重定向] 原始URL（替换前）: {original_url_before_replace}")
+    logger.info(f"[短链接重定向] 替换占位符后: {original_url_after_replace}")
+    logger.info(f"[短链接重定向] 最终跳转URL: {final_url}")
+    logger.info(f"[短链接重定向] 点击ID: {click_id}")
+    logger.info(f"[短链接重定向] Offer ID: {final_offer_id}")
+    logger.info(f"[短链接重定向] 渠道ID: {final_channel_id}")
+    logger.info(f"[短链接重定向] 广告主ID: {advertiser_id}")
+    logger.info("=" * 80)
     
     return RedirectResponse(url=final_url, status_code=302)
 
@@ -494,17 +515,35 @@ async def _handle_database_redirect(
     original_url_before_replace = original_url
     
     # 替换占位符并合并参数
-    original_url = await _replace_short_link_placeholders(
+    original_url_after_replace = await _replace_short_link_placeholders(
         original_url, click_id, final_offer_id, final_channel_id,
         advertiser_id, request_info, db
     )
     
-    final_url = _build_final_url(original_url_before_replace, original_url, click_id, offer_id, channel_id,
+    final_url = _build_final_url(original_url_before_replace, original_url_after_replace, click_id, offer_id, channel_id,
                                  final_channel_id, request_params)
     
-    # 打印最终跳转链接
-    logger.info(f"[短链接重定向] 最终跳转链接: short_code={short_code}, final_url={final_url}, click_id={click_id}")
-    print(f"[短链接重定向] 最终跳转链接: short_code={short_code}, final_url={final_url}, click_id={click_id}")
+    # 打印最终跳转链接详细信息
+    logger.info("=" * 80)
+    logger.info(f"[短链接重定向] 短链接代码: {short_code}")
+    logger.info(f"[短链接重定向] 原始URL（替换前）: {original_url_before_replace}")
+    logger.info(f"[短链接重定向] 替换占位符后: {original_url_after_replace}")
+    logger.info(f"[短链接重定向] 最终跳转URL: {final_url}")
+    logger.info(f"[短链接重定向] 点击ID: {click_id}")
+    logger.info(f"[短链接重定向] Offer ID: {final_offer_id}")
+    logger.info(f"[短链接重定向] 渠道ID: {final_channel_id}")
+    logger.info(f"[短链接重定向] 广告主ID: {advertiser_id}")
+    logger.info("=" * 80)
+    print("=" * 80)
+    print(f"[短链接重定向] 短链接代码: {short_code}")
+    print(f"[短链接重定向] 原始URL（替换前）: {original_url_before_replace}")
+    print(f"[短链接重定向] 替换占位符后: {original_url_after_replace}")
+    print(f"[短链接重定向] 最终跳转URL: {final_url}")
+    print(f"[短链接重定向] 点击ID: {click_id}")
+    print(f"[短链接重定向] Offer ID: {final_offer_id}")
+    print(f"[短链接重定向] 渠道ID: {final_channel_id}")
+    print(f"[短链接重定向] 广告主ID: {advertiser_id}")
+    print("=" * 80)
     
     return RedirectResponse(url=final_url, status_code=302)
 
