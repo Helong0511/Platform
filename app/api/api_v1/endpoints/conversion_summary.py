@@ -3,18 +3,13 @@
 """
 import logging
 from typing import Optional
-from datetime import datetime, timezone, timedelta
-from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func, and_, or_
 
 from app.core.database import get_db
-from app.core.security import get_current_user, require_admin
-from app.models.models import User, ClickStats, PostbackConversion, Offer, Publisher, Advertiser, Client, UserRole, OfferPublisherAssignment
+from app.core.security import get_current_user
+from app.models.models import User
 from app.schemas.base import ResponseBaseSchema
-from app.core.discount.discount_manager import calculate_discount
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 
@@ -106,5 +101,8 @@ async def get_summary_by_offer(
         return ResponseBaseSchema.success(data=stats_list)
     except Exception as e:
         logger.error(f"按Offer统计失败: {str(e)}", exc_info=True)
-        raise
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"按Offer统计失败：{str(e)}"
+        )
 

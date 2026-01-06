@@ -596,46 +596,6 @@ async def get_user(
 
     return ResponseBaseSchema.success(data=user_data)
 
-    # 获取关联的客户信息（如果用户是客户角色）- 客户信息已通过selectinload预加载
-    client_data = None
-    api_enabled = False
-    password_change_enabled = False
-    if user.role == UserRole.CLIENT:
-        # 客户信息已通过selectinload预加载，直接访问
-        client = user.clients[0] if user.clients else None
-        if client:
-            api_enabled = client.api_enabled  # 获取API开关状态
-            password_change_enabled = client.password_change_enabled  # 获取密码修改开关状态
-            client_data = {
-                'id': client.id,
-                'key': client.key,  # 包含API密钥
-                'company_name': client.company_name,
-                'contact_person': client.contact_person,
-                'phone': client.phone,
-                'address': client.address,
-                'is_active': client.is_active,
-                'api_enabled': client.api_enabled,  # 包含API开关状态
-                'password_change_enabled': client.password_change_enabled  # 包含密码修改开关状态
-            }
-
-    # 构建用户数据（包含客户信息）
-    user_dict = {
-        'id': user.id,
-        'username': user.username,
-        'email': user.email,
-        'full_name': user.full_name,
-        'role': user.role.value if isinstance(user.role, UserRole) else str(user.role),
-        'is_active': user.is_active,
-        'created_at': user.created_at,
-        'updated_at': user.updated_at,
-        'api_enabled': api_enabled,  # API开关状态（用于前端菜单显示）
-        'password_change_enabled': password_change_enabled,  # 密码修改开关状态
-        'client': client_data  # 客户信息（如果存在）
-    }
-    user_data = UserResponse.model_validate(user_dict).model_dump()
-
-    return ResponseBaseSchema.success(data=user_data)
-
 
 @router.post("/", response_model=ResponseBaseSchema[UserResponse], summary="创建用户")
 async def create_user(
