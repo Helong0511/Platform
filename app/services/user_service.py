@@ -115,7 +115,7 @@ class UserService(BaseService[User]):
             filters=filters,
             search_fields=["username", "full_name", "email"],
             search_keyword=search_keyword,
-            order_by_field="created_at",
+            order_by="created_at",
             desc_order=True,
             load_relations=["clients"]  # 预加载客户信息，避免N+1查询
         )
