@@ -857,14 +857,14 @@ async def _handle_cached_redirect(
     # 打印最终跳转链接详细信息
     logger.info("=" * 80)
     logger.info(f"[短链接重定向] 短链接代码: {short_code}")
-    logger.info(f"[短链接重定向] 原始URL（替换前）: {original_url_before_replace}")
-    logger.info(f"[短链接重定向] 替换占位符后: {original_url_after_replace}")
-    logger.info(f"[短链接重定向] 最终跳转URL: {final_url}")
     logger.info(f"[短链接重定向] 点击ID: {click_id}")
     logger.info(f"[短链接重定向] Offer ID: {final_offer_id}")
     logger.info(f"[短链接重定向] 渠道ID: {final_channel_id}")
     logger.info(f"[短链接重定向] 广告主ID: {advertiser_id}")
     logger.info(f"[短链接重定向] 点击携带的参数: {request_params}")
+    logger.info(f"[短链接重定向] 原始URL（替换前）: {original_url_before_replace}")
+    logger.info(f"[短链接重定向] 替换占位符后: {original_url_after_replace}")
+    logger.info(f"[短链接重定向] 最终跳转URL: {final_url}")
     logger.info("=" * 80)
     
     return RedirectResponse(url=final_url, status_code=302)
