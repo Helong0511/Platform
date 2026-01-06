@@ -80,7 +80,8 @@ class DiscountService(BaseService[OfferDiscount]):
                 joinedload(OfferDiscount.offer)
             )
             result = await self.db.execute(query)
-            discount = result.scalars().first()
+            # 使用joinedload时，为了安全起见使用unique()去重
+            discount = result.unique().scalars().first()
 
             logger.info(f"扣量配置创建成功: discount_id={discount.id}")
             return discount
@@ -143,7 +144,8 @@ class DiscountService(BaseService[OfferDiscount]):
             joinedload(OfferDiscount.offer)
         )
         result = await self.db.execute(query)
-        discounts = result.scalars().all()
+        # 使用joinedload时，为了安全起见使用unique()去重
+        discounts = result.unique().scalars().all()
 
         return discounts, total
 
@@ -163,7 +165,8 @@ class DiscountService(BaseService[OfferDiscount]):
             joinedload(OfferDiscount.offer)
         )
         result = await self.db.execute(query)
-        return result.scalars().first()
+        # 使用joinedload时，为了安全起见使用unique()去重
+        return result.unique().scalars().first()
 
     async def update_discount(
         self,
@@ -207,7 +210,8 @@ class DiscountService(BaseService[OfferDiscount]):
                 joinedload(OfferDiscount.offer)
             )
             result = await self.db.execute(query)
-            discount = result.scalars().first()
+            # 使用joinedload时，为了安全起见使用unique()去重
+            discount = result.unique().scalars().first()
 
             logger.info(f"扣量配置更新成功: discount_id={discount_id}")
             return discount

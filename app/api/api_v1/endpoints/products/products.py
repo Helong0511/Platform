@@ -175,7 +175,8 @@ async def get_available_product_names(
 
         # 5. 执行查询
         products_result = await db.execute(products_query)
-        products = products_result.scalars().unique().all()
+        # 虽然此查询没有使用joinedload，但为了安全起见使用unique()
+        products = products_result.unique().scalars().all()
 
         # 6. 转换为响应模型
         product_options = []

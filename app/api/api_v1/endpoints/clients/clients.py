@@ -101,7 +101,8 @@ async def get_clients(
 
     # 执行查询
     result = await db.execute(query)
-    clients = result.scalars().unique().all()
+    # selectinload不会产生重复行，但为了安全起见使用unique()
+    clients = result.unique().scalars().all()
 
     # 转换为响应格式（用户信息已通过selectinload预加载）
     client_responses = []
@@ -597,7 +598,8 @@ async def export_clients_excel(
     # 获取所有客户数据
     query = query.order_by(Client.id.desc())
     result = await db.execute(query)
-    clients = result.scalars().unique().all()
+    # selectinload不会产生重复行，但为了安全起见使用unique()
+    clients = result.unique().scalars().all()
     
     # 如果没有数据，抛出错误提示用户
     if not clients:

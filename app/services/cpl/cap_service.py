@@ -104,7 +104,8 @@ class CapService(BaseService[OfferCap]):
                 joinedload(OfferCap.publisher)
             )
             result = await self.db.execute(query)
-            cap = result.scalars().first()
+            # 使用joinedload时，为了安全起见使用unique()去重
+            cap = result.unique().scalars().first()
 
             logger.info(f"Cap配置创建成功: cap_id={cap.id}")
             return cap
@@ -173,7 +174,8 @@ class CapService(BaseService[OfferCap]):
             joinedload(OfferCap.publisher)
         )
         result = await self.db.execute(query)
-        caps = result.scalars().all()
+        # 使用joinedload时，为了安全起见使用unique()去重
+        caps = result.unique().scalars().all()
 
         return caps, total
 
@@ -194,7 +196,8 @@ class CapService(BaseService[OfferCap]):
             joinedload(OfferCap.publisher)
         )
         result = await self.db.execute(query)
-        return result.scalars().first()
+        # 使用joinedload时，为了安全起见使用unique()去重
+        return result.unique().scalars().first()
 
     async def update_cap(
         self,
@@ -243,7 +246,8 @@ class CapService(BaseService[OfferCap]):
                 joinedload(OfferCap.publisher)
             )
             result = await self.db.execute(query)
-            cap = result.scalars().first()
+            # 使用joinedload时，为了安全起见使用unique()去重
+            cap = result.unique().scalars().first()
 
             logger.info(f"Cap配置更新成功: cap_id={cap_id}")
             return cap

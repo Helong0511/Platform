@@ -161,7 +161,8 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 joinedload(ConversionDeductionConfig.publisher)
             )
             result = await self.db.execute(query)
-            config = result.scalars().first()
+            # 使用joinedload时，为了安全起见使用unique()去重
+            config = result.unique().scalars().first()
 
             logger.info(f"扣减配置创建成功: config_id={config.id}, level={level}")
             return config
@@ -275,7 +276,8 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             joinedload(ConversionDeductionConfig.publisher)
         )
         result = await self.db.execute(query)
-        return result.scalars().first()
+        # 使用joinedload时，为了安全起见使用unique()去重
+        return result.unique().scalars().first()
 
     async def update_deduction_config(
         self,
@@ -325,7 +327,8 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 joinedload(ConversionDeductionConfig.publisher)
             )
             result = await self.db.execute(query)
-            config = result.scalars().first()
+            # 使用joinedload时，为了安全起见使用unique()去重
+            config = result.unique().scalars().first()
 
             logger.info(f"扣减配置更新成功: config_id={config_id}")
             return config

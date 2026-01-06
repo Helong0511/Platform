@@ -30,7 +30,8 @@ class OfferRepository(BaseRepository[Offer]):
             query = query.options(joinedload(Offer.advertiser))
         
         result = await self.db.execute(query)
-        return result.scalars().all()
+        # 使用joinedload时，为了安全起见使用unique()去重
+        return result.unique().scalars().all()
     
     async def get_active_offers(
         self,
@@ -48,7 +49,8 @@ class OfferRepository(BaseRepository[Offer]):
             query = query.options(joinedload(Offer.advertiser))
         
         result = await self.db.execute(query)
-        return result.scalars().all()
+        # 使用joinedload时，为了安全起见使用unique()去重
+        return result.unique().scalars().all()
     
     async def get_with_assignments(
         self,

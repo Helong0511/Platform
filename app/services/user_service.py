@@ -219,7 +219,8 @@ class UserService(BaseService[User]):
             from sqlalchemy.orm import selectinload
             user_query = select(User).options(selectinload(User.clients)).where(User.id == user.id)
             user_result = await self.db.execute(user_query)
-            user = user_result.scalars().unique().first()
+            # selectinload不会产生重复行，但为了安全起见使用unique()
+            user = user_result.unique().scalars().first()
         
         # 记录审计日志
         await log_user_action(

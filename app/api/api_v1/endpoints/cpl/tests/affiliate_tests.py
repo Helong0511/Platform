@@ -128,7 +128,8 @@ async def create_affiliate_test(
             joinedload(AffiliateTest.publisher)
         )
         result = await db.execute(query)
-        test = result.scalars().first()
+        # 使用joinedload时，为了安全起见使用unique()去重
+        test = result.unique().scalars().first()
         
         test_data = AffiliateTestResponse.model_validate(test)
         test_data.publisher_name = test.publisher.publisher_name if test.publisher else None
@@ -222,7 +223,8 @@ async def get_affiliate_test(
         joinedload(AffiliateTest.publisher)
     )
     result = await db.execute(query)
-    test = result.scalars().first()
+    # 使用joinedload时，为了安全起见使用unique()去重
+    test = result.unique().scalars().first()
     
     if not test:
         raise_api_exception(

@@ -97,7 +97,12 @@ class OfferService(BaseService[Offer]):
             query = query.options(*options)
         
         result = await self.db.execute(query)
-        offer = result.scalar_one_or_none()
+        # 使用joinedload时，为了安全起见使用unique()去重
+        # 注意：scalar_one_or_none()用于标量值，这里应该使用scalars().one_or_none()
+        if options:
+            offer = result.unique().scalars().one_or_none()
+        else:
+            offer = result.scalars().one_or_none()
         
         if not offer:
             raise_api_exception(
@@ -249,7 +254,8 @@ class OfferService(BaseService[Offer]):
         query = query.offset(offset).limit(page_size)
         
         result = await self.db.execute(query)
-        offers = result.scalars().all()
+        # 使用joinedload时，为了安全起见使用unique()去重
+        offers = result.unique().scalars().all()
         
         # 批量加载所有offer的渠道分配（避免N+1查询）
         assignments_map = {}

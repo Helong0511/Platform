@@ -55,7 +55,12 @@ class ShortLinkService(BaseService[ShortLink]):
             )
         
         result = await self.db.execute(query)
-        short_link = result.scalar_one_or_none()
+        # 使用joinedload时，为了安全起见使用unique()去重
+        # 注意：scalar_one_or_none()用于标量值，这里应该使用scalars().one_or_none()
+        if include_relations:
+            short_link = result.unique().scalars().one_or_none()
+        else:
+            short_link = result.scalars().one_or_none()
         
         if not short_link:
             raise_api_exception(
@@ -149,7 +154,8 @@ class ShortLinkService(BaseService[ShortLink]):
         )
         
         result = await self.db.execute(query)
-        short_links = result.scalars().all()
+        # 使用joinedload时，为了安全起见使用unique()去重
+        short_links = result.unique().scalars().all()
         
         return short_links, total
     

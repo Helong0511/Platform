@@ -68,7 +68,8 @@ class PostbackForwarder:
                         .options(joinedload(Offer.advertiser))
                         .where(Offer.id == click_stats.offer_id)
                     )
-                    offer = offer_result.scalars().first()
+                    # 使用joinedload时，为了安全起见使用unique()去重
+                    offer = offer_result.unique().scalars().first()
                     if offer:
                         advertiser = offer.advertiser
             
@@ -84,7 +85,8 @@ class PostbackForwarder:
                         )
                         .where(Click.click_id == conversion.click_id)
                     )
-                    click_record = click_result.scalars().first()
+                    # 使用joinedload时，为了安全起见使用unique()去重
+                    click_record = click_result.unique().scalars().first()
                     
                     if click_record:
                         publisher = click_record.publisher

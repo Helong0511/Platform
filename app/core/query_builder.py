@@ -182,13 +182,18 @@ class QueryBuilder:
             self.base()
         
         result = await self.db.execute(self._query)
-        scalars_result = result.scalars()
-        # 当使用joinedload加载一对多关系时，SQLAlchemy要求调用unique()
-        # 对于其他情况，调用unique()也不会出错，只是没有效果
+        # 当使用joinedload加载一对多关系时，SQLAlchemy要求在result上调用unique()
+        # 然后再调用scalars()，而不是在scalars()之后调用unique()
+        # 对于selectinload或其他情况，调用unique()也不会出错，只是没有效果
         try:
-            return list(scalars_result.unique().all())
+            # 检查查询中是否使用了joinedload（通过检查options）
+            # 如果有joinedload，需要在result上调用unique()
+            unique_result = result.unique()
+            scalars_result = unique_result.scalars()
+            return list(scalars_result.all())
         except Exception:
-            # 如果unique()失败（不应该发生），回退到普通方式
+            # 如果unique()失败，回退到普通方式
+            scalars_result = result.scalars()
             return list(scalars_result.all())
     
     async def first(self) -> Optional[T]:
@@ -204,13 +209,15 @@ class QueryBuilder:
             self.base()
         
         result = await self.db.execute(self._query)
-        scalars_result = result.scalars()
-        # 当使用joinedload加载一对多关系时，SQLAlchemy要求调用unique()
+        # 当使用joinedload加载一对多关系时，SQLAlchemy要求在result上调用unique()
+        # 然后再调用scalars()，而不是在scalars()之后调用unique()
         try:
-            unique_result = scalars_result.unique()
-            return unique_result.first()
+            unique_result = result.unique()
+            scalars_result = unique_result.scalars()
+            return scalars_result.first()
         except Exception:
             # 如果unique()失败，回退到普通方式
+            scalars_result = result.scalars()
             return scalars_result.first()
     
     async def count(self) -> int:
