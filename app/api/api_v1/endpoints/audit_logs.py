@@ -13,6 +13,8 @@ import logging
 from app.core.database import get_db
 from app.core.security import require_admin, get_current_user
 from app.core.constants import MAX_PAGE_SIZE
+from app.core.exceptions import raise_api_exception
+from app.core.errors import ErrorCode
 from app.models.models import UserAuditLog, User
 from fastapi import Request
 from app.schemas.audit_log import (
