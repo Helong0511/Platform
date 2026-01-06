@@ -34,7 +34,7 @@
                 type="warning" 
                 @click="handleRevokeAllSessions" 
                 :loading="revokingAll"
-                :disabled="sessions.length === 0"
+                :disabled="sessionsTotal <= 1 || loading"
                 :icon="Delete"
               >
                 撤销所有其他会话
@@ -56,6 +56,7 @@
             border
             stripe
             style="width: 100%"
+            empty-text="暂无会话数据"
           >
             <el-table-column prop="id" label="ID" width="80" />
             <el-table-column prop="ip_address" label="IP地址" width="150">
@@ -172,9 +173,15 @@
             border
             stripe
             style="width: 100%"
+            empty-text="暂无黑名单记录"
           >
             <el-table-column prop="id" label="ID" width="80" />
             <el-table-column prop="user_id" label="用户ID" width="100" />
+            <el-table-column prop="username" label="用户名" min-width="120" show-overflow-tooltip>
+              <template #default="scope">
+                {{ scope.row.username || `用户${scope.row.user_id}` }}
+              </template>
+            </el-table-column>
             <el-table-column prop="token_jti" label="Token JTI" min-width="200" show-overflow-tooltip>
               <template #default="scope">
                 <span style="max-width: 200px; display: inline-block;">

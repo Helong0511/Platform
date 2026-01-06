@@ -51,6 +51,7 @@ class BlacklistResponse(BaseModel):
     id: int
     token_jti: str
     user_id: int
+    username: Optional[str] = None  # 用户名（可选）
     revoked_at: datetime
     expires_at: datetime
     reason: Optional[str] = None
@@ -338,8 +339,12 @@ async def get_blacklist(
     - 支持按用户ID筛选
     - 返回分页结果
     """
-    # 构建查询
-    query = select(TokenBlacklist)
+    # 构建查询，关联用户表获取用户名
+    from sqlalchemy.orm import selectinload
+    
+    query = select(TokenBlacklist, User.username).join(
+        User, TokenBlacklist.user_id == User.id, isouter=True
+    )
     
     # 如果指定了用户ID，添加筛选条件
     if user_id:
@@ -361,10 +366,21 @@ async def get_blacklist(
     query = query.offset(offset).limit(page_size)
     
     result = await db.execute(query)
-    blacklist_items = result.scalars().all()
+    rows = result.all()
     
-    # 转换为响应格式
-    blacklist_responses = [BlacklistResponse.model_validate(item) for item in blacklist_items]
+    # 转换为响应格式，包含用户名
+    blacklist_responses = []
+    for blacklist_item, username in rows:
+        blacklist_dict = {
+            "id": blacklist_item.id,
+            "token_jti": blacklist_item.token_jti,
+            "user_id": blacklist_item.user_id,
+            "username": username,
+            "revoked_at": blacklist_item.revoked_at,
+            "expires_at": blacklist_item.expires_at,
+            "reason": blacklist_item.reason
+        }
+        blacklist_responses.append(BlacklistResponse(**blacklist_dict))
     
     return PaginatedResponseBaseSchema.success(
         data=blacklist_responses,
