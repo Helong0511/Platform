@@ -352,38 +352,86 @@ const fetchStats = async () => {
 const loadGroupNames = async () => {
   try {
     if (filterForm.group_by === 'advertiser') {
-      const advertiserRes = await getAdvertisers({ page_size: 1000 })
-      if (advertiserRes.code === 200) {
-        const data = advertiserRes.data || {}
-        const advertisers = data.data || data.items || []
-        const advertiserMap = new Map(advertisers.map(a => [a.id, a.advertiser_name]))
-        detailStats.value = detailStats.value.map(item => ({
-          ...item,
-          advertiser_name: advertiserMap.get(item.advertiser_id) || `广告主${item.advertiser_id}`
-        }))
+      // 分页加载所有广告主
+      let allAdvertisers = []
+      let page = 1
+      const pageSize = 100
+      let hasMore = true
+      
+      while (hasMore) {
+        const advertiserRes = await getAdvertisers({ page, page_size: pageSize })
+        if (advertiserRes.code === 200) {
+          const data = advertiserRes.data || {}
+          const advertisers = data.data || data.items || []
+          allAdvertisers = allAdvertisers.concat(advertisers)
+          
+          const total = data.total || advertiserRes.total || 0
+          hasMore = allAdvertisers.length < total
+          page++
+        } else {
+          hasMore = false
+        }
       }
+      
+      const advertiserMap = new Map(allAdvertisers.map(a => [a.id, a.advertiser_name]))
+      detailStats.value = detailStats.value.map(item => ({
+        ...item,
+        advertiser_name: advertiserMap.get(item.advertiser_id) || `广告主${item.advertiser_id}`
+      }))
     } else if (filterForm.group_by === 'offer') {
-      const offerRes = await getOffers({ page_size: 1000 })
-      if (offerRes.code === 200) {
-        const data = offerRes.data || {}
-        const offers = data.data || data.items || []
-        const offerMap = new Map(offers.map(o => [o.id, o.offer_name]))
-        detailStats.value = detailStats.value.map(item => ({
-          ...item,
-          offer_name: offerMap.get(item.offer_id) || `Offer${item.offer_id}`
-        }))
+      // 分页加载所有Offer
+      let allOffers = []
+      let page = 1
+      const pageSize = 100
+      let hasMore = true
+      
+      while (hasMore) {
+        const offerRes = await getOffers({ page, page_size: pageSize })
+        if (offerRes.code === 200) {
+          const data = offerRes.data || {}
+          const offers = data.data || data.items || []
+          allOffers = allOffers.concat(offers)
+          
+          const total = data.total || offerRes.total || 0
+          hasMore = allOffers.length < total
+          page++
+        } else {
+          hasMore = false
+        }
       }
+      
+      const offerMap = new Map(allOffers.map(o => [o.id, o.offer_name]))
+      detailStats.value = detailStats.value.map(item => ({
+        ...item,
+        offer_name: offerMap.get(item.offer_id) || `Offer${item.offer_id}`
+      }))
     } else if (filterForm.group_by === 'publisher') {
-      const publisherRes = await getPublishers({ page_size: 1000 })
-      if (publisherRes.code === 200) {
-        const data = publisherRes.data || {}
-        const publishers = data.data || data.items || []
-        const publisherMap = new Map(publishers.map(p => [p.id, p.publisher_name]))
-        detailStats.value = detailStats.value.map(item => ({
-          ...item,
-          publisher_name: publisherMap.get(item.publisher_id) || `渠道${item.publisher_id}`
-        }))
+      // 分页加载所有渠道
+      let allPublishers = []
+      let page = 1
+      const pageSize = 100
+      let hasMore = true
+      
+      while (hasMore) {
+        const publisherRes = await getPublishers({ page, page_size: pageSize })
+        if (publisherRes.code === 200) {
+          const data = publisherRes.data || {}
+          const publishers = data.data || data.items || []
+          allPublishers = allPublishers.concat(publishers)
+          
+          const total = data.total || publisherRes.total || 0
+          hasMore = allPublishers.length < total
+          page++
+        } else {
+          hasMore = false
+        }
       }
+      
+      const publisherMap = new Map(allPublishers.map(p => [p.id, p.publisher_name]))
+      detailStats.value = detailStats.value.map(item => ({
+        ...item,
+        publisher_name: publisherMap.get(item.publisher_id) || `渠道${item.publisher_id}`
+      }))
     }
   } catch (error) {
     console.error('加载分组名称失败：', error)
@@ -424,40 +472,102 @@ const handleRefresh = () => {
   fetchStats()
 }
 
-// 加载选项数据
+// 加载选项数据（分页加载所有数据）
 const loadOptions = async () => {
   try {
-    // 加载广告主
-    const advertiserRes = await getAdvertisers({ page_size: 1000 })
-    if (advertiserRes.code === 200) {
-      const data = advertiserRes.data || {}
-      advertiserOptions.value = (data.data || data.items || []).map(item => ({
-        id: item.id,
-        name: item.advertiser_name
-      }))
+    // 加载广告主（分页加载所有）
+    let allAdvertisers = []
+    let page = 1
+    const pageSize = 100 // 后端最大限制
+    let hasMore = true
+    
+    while (hasMore) {
+      try {
+        const advertiserRes = await getAdvertisers({ page, page_size: pageSize })
+        if (advertiserRes && advertiserRes.code === 200) {
+          const data = advertiserRes.data || {}
+          const advertisers = data.data || data.items || []
+          allAdvertisers = allAdvertisers.concat(advertisers)
+          
+          const total = data.total || advertiserRes.total || 0
+          hasMore = allAdvertisers.length < total && advertisers.length > 0
+          page++
+        } else {
+          hasMore = false
+        }
+      } catch (err) {
+        console.error('加载广告主失败：', err)
+        hasMore = false
+      }
     }
     
-    // 加载Offer
-    const offerRes = await getOffers({ page_size: 1000 })
-    if (offerRes.code === 200) {
-      const data = offerRes.data || {}
-      offerOptions.value = (data.data || data.items || []).map(item => ({
-        id: item.id,
-        name: item.offer_name
-      }))
+    advertiserOptions.value = allAdvertisers.map(item => ({
+      id: item.id,
+      name: item.advertiser_name
+    }))
+    
+    // 加载Offer（分页加载所有）
+    let allOffers = []
+    page = 1
+    hasMore = true
+    
+    while (hasMore) {
+      try {
+        const offerRes = await getOffers({ page, page_size: pageSize })
+        if (offerRes && offerRes.code === 200) {
+          const data = offerRes.data || {}
+          const offers = data.data || data.items || []
+          allOffers = allOffers.concat(offers)
+          
+          const total = data.total || offerRes.total || 0
+          hasMore = allOffers.length < total && offers.length > 0
+          page++
+        } else {
+          hasMore = false
+        }
+      } catch (err) {
+        console.error('加载Offer失败：', err)
+        hasMore = false
+      }
     }
     
-    // 加载渠道
-    const publisherRes = await getPublishers({ page_size: 1000 })
-    if (publisherRes.code === 200) {
-      const data = publisherRes.data || {}
-      publisherOptions.value = (data.data || data.items || []).map(item => ({
-        id: item.id,
-        name: item.publisher_name
-      }))
+    offerOptions.value = allOffers.map(item => ({
+      id: item.id,
+      name: item.offer_name
+    }))
+    
+    // 加载渠道（分页加载所有）
+    let allPublishers = []
+    page = 1
+    hasMore = true
+    
+    while (hasMore) {
+      try {
+        const publisherRes = await getPublishers({ page, page_size: pageSize })
+        if (publisherRes && publisherRes.code === 200) {
+          const data = publisherRes.data || {}
+          const publishers = data.data || data.items || []
+          allPublishers = allPublishers.concat(publishers)
+          
+          const total = data.total || publisherRes.total || 0
+          hasMore = allPublishers.length < total && publishers.length > 0
+          page++
+        } else {
+          hasMore = false
+        }
+      } catch (err) {
+        console.error('加载渠道失败：', err)
+        hasMore = false
+      }
     }
+    
+    publisherOptions.value = allPublishers.map(item => ({
+      id: item.id,
+      name: item.publisher_name
+    }))
   } catch (error) {
     console.error('加载选项数据失败：', error)
+    ElMessage.error('加载选项数据失败：' + (error.message || '未知错误'))
   }
 }
 

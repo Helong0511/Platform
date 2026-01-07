@@ -647,23 +647,41 @@ const handleLevelChange = async (level) => {
   
   targetLoading.value = true
   try {
-    let response
-    if (level === 'advertiser') {
-      response = await getAdvertisers({ page_size: 1000 })
-    } else if (level === 'offer') {
-      response = await getOffers({ page_size: 1000 })
-    } else if (level === 'publisher') {
-      response = await getPublishers({ page_size: 1000 })
+    let allItems = []
+    let page = 1
+    const pageSize = 100 // 后端最大限制
+    let hasMore = true
+    
+    // 分页加载所有数据
+    while (hasMore) {
+      let response
+      if (level === 'advertiser') {
+        response = await getAdvertisers({ page, page_size: pageSize })
+      } else if (level === 'offer') {
+        response = await getOffers({ page, page_size: pageSize })
+      } else if (level === 'publisher') {
+        response = await getPublishers({ page, page_size: pageSize })
+      }
+      
+      if (response && response.code === 200) {
+        const data = response.data || {}
+        const items = data.data || data.items || (Array.isArray(data) ? data : [])
+        allItems = allItems.concat(items)
+        
+        // 检查是否还有更多数据
+        const total = data.total || response.total || 0
+        hasMore = allItems.length < total
+        page++
+      } else {
+        hasMore = false
+      }
     }
     
-    if (response && response.code === 200) {
-      const data = response.data || {}
-      const items = data.data || data.items || (Array.isArray(data) ? data : [])
-      targetOptions.value = items.map(item => ({
-        id: item.id,
-        name: item.advertiser_name || item.offer_name || item.publisher_name
-      }))
-    }
+    // 转换为选项格式
+    targetOptions.value = allItems.map(item => ({
+      id: item.id,
+      name: item.advertiser_name || item.offer_name || item.publisher_name
+    }))
   } catch (error) {
     ElMessage.error('加载配置对象列表失败：' + (error.message || '未知错误'))
   } finally {
