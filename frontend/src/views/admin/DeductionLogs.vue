@@ -365,7 +365,8 @@ const handlePageChange = (page) => {
 }
 
 const handleSizeChange = (size) => {
-  pagination.page_size = size
+  // 确保page_size不超过后端最大限制
+  pagination.page_size = Math.min(size, 100)
   pagination.page = 1
   fetchData()
 }

@@ -670,7 +670,7 @@ const handleLevelChange = async (level) => {
         
         // 检查是否还有更多数据
         const total = data.total || response.total || 0
-        hasMore = allItems.length < total
+        hasMore = allItems.length < total && items.length > 0
         page++
       } else {
         hasMore = false
@@ -768,7 +768,8 @@ const handlePageChange = (page) => {
 }
 
 const handleSizeChange = (size) => {
-  pagination.page_size = size
+  // 确保page_size不超过后端最大限制
+  pagination.page_size = Math.min(size, 100)
   pagination.page = 1
   fetchData()
 }
