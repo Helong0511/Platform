@@ -270,7 +270,7 @@
             prop="volume_deduction_ratio"
             :rules="[
               { required: true, message: '请设置扣量比例', trigger: 'blur' },
-              { type: 'number', min: 0.01, max: 1, message: '扣量比例必须在0.01%到100%之间', trigger: 'blur' }
+              { type: 'number', min: 0.01, max: 100, message: '扣量比例必须在0.01%到100%之间', trigger: 'blur' }
             ]"
           >
             <div style="display: flex; align-items: center; width: 100%;">
@@ -371,7 +371,7 @@
             prop="amount_deduction_ratio"
             :rules="[
               { required: true, message: '请设置扣金额比例', trigger: 'blur' },
-              { type: 'number', min: 0.01, max: 1, message: '扣金额比例必须在0.01%到100%之间', trigger: 'blur' }
+              { type: 'number', min: 0.01, max: 100, message: '扣金额比例必须在0.01%到100%之间', trigger: 'blur' }
             ]"
           >
             <div style="display: flex; align-items: center; width: 100%;">

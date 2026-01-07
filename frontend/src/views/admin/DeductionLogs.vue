@@ -294,7 +294,9 @@ const fetchData = async () => {
       page_size: pagination.page_size,
       advertiser_id: searchForm.advertiser_id,
       offer_id: searchForm.offer_id,
-      publisher_id: searchForm.publisher_id
+      publisher_id: searchForm.publisher_id,
+      conversion_id: searchForm.conversion_id ? parseInt(searchForm.conversion_id) : null,
+      click_id: searchForm.click_id || null
     }
     
     // 转换日期格式：从 YYYY-MM-DD HH:mm:ss 转换为 YYYY-MM-DD

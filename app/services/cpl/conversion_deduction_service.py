@@ -708,7 +708,9 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
         end_date: Optional[str] = None,
         advertiser_id: Optional[int] = None,
         offer_id: Optional[int] = None,
-        publisher_id: Optional[int] = None
+        publisher_id: Optional[int] = None,
+        conversion_id: Optional[int] = None,
+        click_id: Optional[str] = None
     ) -> Tuple[List[ConversionDeductionLog], int]:
         """
         获取扣减日志
@@ -721,6 +723,8 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             advertiser_id: 广告主ID过滤
             offer_id: Offer ID过滤
             publisher_id: 渠道ID过滤
+            conversion_id: 转化ID过滤
+            click_id: 点击ID过滤
 
         Returns:
             Tuple[List[ConversionDeductionLog], int]: (扣减日志列表, 总数)
@@ -740,6 +744,10 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             conditions.append(ConversionDeductionLog.offer_id == offer_id)
         if publisher_id:
             conditions.append(ConversionDeductionLog.publisher_id == publisher_id)
+        if conversion_id:
+            conditions.append(ConversionDeductionLog.conversion_id == conversion_id)
+        if click_id:
+            conditions.append(ConversionDeductionLog.click_id == click_id)
 
         # 获取总数
         count_query = select(func.count()).select_from(ConversionDeductionLog)

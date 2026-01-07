@@ -100,6 +100,8 @@ export function getDeductionStats(params) {
  * @param {number} params.advertiser_id - 广告主ID
  * @param {number} params.offer_id - Offer ID
  * @param {number} params.publisher_id - 渠道ID
+ * @param {number} params.conversion_id - 转化ID
+ * @param {string} params.click_id - 点击ID
  */
 export function getDeductionLogs(params) {
   return request({

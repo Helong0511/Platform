@@ -269,6 +269,8 @@ async def get_deduction_logs(
     advertiser_id: Optional[int] = Query(None, description="广告主ID过滤"),
     offer_id: Optional[int] = Query(None, description="Offer ID过滤"),
     publisher_id: Optional[int] = Query(None, description="渠道ID过滤"),
+    conversion_id: Optional[int] = Query(None, description="转化ID过滤"),
+    click_id: Optional[str] = Query(None, description="点击ID过滤"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -284,7 +286,9 @@ async def get_deduction_logs(
             end_date=end_date,
             advertiser_id=advertiser_id,
             offer_id=offer_id,
-            publisher_id=publisher_id
+            publisher_id=publisher_id,
+            conversion_id=conversion_id,
+            click_id=click_id
         )
         
         # 转换为响应格式

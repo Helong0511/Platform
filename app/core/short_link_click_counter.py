@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # 死锁重试配置
 MAX_DEADLOCK_RETRIES = 5  # 增加重试次数
-DEADLOCK_RETRY_BASE_DELAY = 0.2  # 增加基础延迟（秒）
+DEADLOCK_RETRY_BASE_DELAY = 0.3  # 增加基础延迟（秒），减少并发冲突
 
 # Redis键前缀
 CLICK_COUNTER_PREFIX = "short_link:click:"
@@ -185,9 +185,20 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
             return synced
         
         # Redis可用时，从Redis同步
-        # 获取所有计数器键
+        # 使用SCAN而不是KEYS，避免在生产环境阻塞
         pattern = f"{CLICK_COUNTER_PREFIX}*"
-        keys = await redis.keys(pattern)
+        keys = []
+        cursor = 0
+        try:
+            while True:
+                cursor, batch_keys = await redis.scan(cursor, match=pattern, count=100)
+                keys.extend(batch_keys)
+                if cursor == 0:
+                    break
+        except Exception as e:
+            # 如果SCAN失败，降级使用KEYS（不推荐，但作为后备方案）
+            logger.warning(f"Redis SCAN失败，降级使用KEYS: {e}")
+            keys = await redis.keys(pattern)
         
         if not keys:
             logger.debug("没有需要同步的短链接点击计数器")
@@ -229,7 +240,7 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
         
         # 使用批量更新（分批处理，减少死锁风险）
         # 减小批量大小，进一步降低死锁风险
-        BATCH_SIZE = 10  # 每批处理10条记录（从20减少到10）
+        BATCH_SIZE = 5  # 每批处理5条记录（进一步减小批量大小，减少锁竞争）
         synced = 0
         failed_updates = []  # 记录失败的更新
         
@@ -237,65 +248,26 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
             batch = updates[batch_idx:batch_idx + BATCH_SIZE]
             
             try:
-                # 使用原子更新（UPDATE ... SET click_count = click_count + ? WHERE short_code = ?）
-                # 这样可以避免读取-修改-写入模式导致的死锁
-                batch_synced = 0
-                batch_keys_to_delete = []  # 成功同步后需要删除的键
-                
                 # 按 short_code 排序，确保更新顺序一致，减少死锁
                 batch = sorted(batch, key=lambda x: x[0])
                 
-                for short_code, count_value, redis_key in batch:
-                    # 使用带重试的更新函数，处理死锁
-                    success = await _update_click_count_with_retry(
-                        db, short_code, count_value
-                    )
-                    
-                    if success:
-                        batch_synced += 1
-                        batch_keys_to_delete.append(redis_key)
-                    else:
-                        # 更新失败，检查是否是短链接不存在
-                        # 如果短链接不存在，删除Redis计数器；否则保留以便重试
-                        try:
-                            result = await db.execute(
-                                select(ShortLink).where(ShortLink.short_code == short_code)
-                            )
-                            short_link = result.scalars().first()
-                            if not short_link:
-                                # 短链接不存在，删除Redis中的计数器
-                                logger.warning(f"短链接不存在，删除Redis计数器: short_code={short_code}")
-                                try:
-                                    await redis.delete(redis_key)
-                                except Exception as e:
-                                    logger.warning(f"删除Redis计数器失败: key={redis_key}, error={e}")
-                            else:
-                                # 短链接存在但更新失败（可能是死锁等），保留以便重试
-                                failed_updates.append((short_code, count_value, redis_key))
-                        except Exception as e:
-                            # 查询失败，保守处理：保留以便重试
-                            logger.warning(
-                                f"查询短链接状态失败，保留计数器以便重试: short_code={short_code}, error={e}"
-                            )
-                            failed_updates.append((short_code, count_value, redis_key))
+                # 尝试使用批量更新（一次性更新多条记录，减少锁持有时间）
+                batch_synced, batch_keys_to_delete, batch_failed = await _batch_update_click_counts_with_retry(
+                    db, batch, redis
+                )
                 
-                # 提交当前批次（带死锁重试）
                 if batch_synced > 0:
-                    success = await _commit_with_retry(db, batch_synced)
-                    if success:
-                        synced += batch_synced
-                        # 删除Redis中的计数器（只在成功提交后删除）
-                        for key in batch_keys_to_delete:
-                            try:
-                                await redis.delete(key)
-                            except Exception as e:
-                                logger.warning(f"删除Redis计数器失败: key={key}, error={e}")
-                    else:
-                        # 提交失败，保留计数器以便下次重试
-                        failed_updates.extend([(code, count, key) for code, count, key in batch 
-                                              if (code, count, key) not in failed_updates])
-                        logger.warning(f"批次 {batch_idx // BATCH_SIZE + 1} 提交失败，保留计数器以便重试")
-                        await db.rollback()
+                    synced += batch_synced
+                    # 删除Redis中的计数器（只在成功提交后删除）
+                    for key in batch_keys_to_delete:
+                        try:
+                            await redis.delete(key)
+                        except Exception as e:
+                            logger.warning(f"删除Redis计数器失败: key={key}, error={e}")
+                
+                # 记录失败的更新
+                if batch_failed:
+                    failed_updates.extend(batch_failed)
                     
             except Exception as e:
                 # 批次处理失败，保留计数器以便下次重试
@@ -304,7 +276,10 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                     exc_info=True
                 )
                 failed_updates.extend(batch)
-                await db.rollback()
+                try:
+                    await db.rollback()
+                except:
+                    pass
         
         if synced > 0:
             logger.info(f"成功同步 {synced} 个短链接的点击次数到数据库")
@@ -332,6 +307,171 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                 logger.debug("成功释放同步锁")
             except Exception as e:
                 logger.warning(f"释放分布式锁失败: {e}")
+
+
+async def _batch_update_click_counts_with_retry(
+    db: AsyncSession,
+    batch: List[Tuple[str, int, str]],
+    redis,
+    max_retries: int = MAX_DEADLOCK_RETRIES
+) -> Tuple[int, List[str], List[Tuple[str, int, str]]]:
+    """
+    批量更新点击次数（带重试机制，减少死锁）
+    
+    使用批量 UPDATE 语句一次性更新多条记录，减少锁持有时间
+    
+    Args:
+        db: 数据库会话
+        batch: (short_code, count_value, redis_key) 元组列表
+        redis: Redis客户端
+        max_retries: 最大重试次数
+        
+    Returns:
+        (成功更新的数量, 需要删除的Redis键列表, 失败的更新列表)
+    """
+    for attempt in range(max_retries):
+        try:
+            # 设置事务隔离级别为READ COMMITTED，减少锁竞争
+            # READ COMMITTED 比 REPEATABLE READ 持有锁的时间更短，减少死锁概率
+            try:
+                await db.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED"))
+            except Exception as e:
+                # 如果设置失败，记录警告但继续执行
+                logger.debug(f"设置事务隔离级别失败（可忽略）: {e}")
+            
+            # 构建批量更新SQL（使用 CASE WHEN 实现批量更新）
+            # 这样可以一次性更新多条记录，减少锁竞争
+            short_codes = [code for code, _, _ in batch]
+            count_values = {code: count for code, count, _ in batch}
+            
+            # 构建批量更新SQL（使用 CASE WHEN 实现批量更新）
+            # 这样可以一次性更新多条记录，减少锁竞争
+            case_when_parts = []
+            params = {}
+            where_params = []
+            
+            for idx, (code, count, _) in enumerate(batch):
+                param_code = f"code_{idx}"
+                param_count = f"count_{idx}"
+                param_where = f"where_code_{idx}"
+                
+                case_when_parts.append(f"WHEN :{param_code} THEN click_count + :{param_count}")
+                params[param_code] = code
+                params[param_count] = count
+                params[param_where] = code
+                where_params.append(f":{param_where}")
+            
+            case_when_sql = " ".join(case_when_parts)
+            where_placeholders = ", ".join(where_params)
+            
+            # 执行批量更新
+            result = await db.execute(
+                text(f"""
+                    UPDATE short_links 
+                    SET click_count = CASE short_code
+                        {case_when_sql}
+                        ELSE click_count
+                    END
+                    WHERE short_code IN ({where_placeholders})
+                """),
+                params
+            )
+            
+            updated_count = result.rowcount
+            
+            # 提交事务（在查询之前提交，避免长时间持有锁）
+            await db.commit()
+            
+            if updated_count > 0:
+                # 如果更新成功，说明所有记录都存在（因为WHERE条件匹配）
+                # 直接标记所有更新为成功
+                batch_keys_to_delete = [redis_key for _, _, redis_key in batch]
+                
+                for short_code, count_value, redis_key in batch:
+                    logger.debug(
+                        f"批量更新短链接点击次数: short_code={short_code}, 增量={count_value}"
+                    )
+                
+                return len(batch_keys_to_delete), batch_keys_to_delete, []
+            else:
+                # 没有记录被更新，可能是所有短链接都不存在
+                # 需要检查哪些短链接不存在，以便清理Redis计数器
+                logger.warning(f"批量更新没有更新任何记录，检查短链接是否存在")
+                
+                # 查询哪些短链接存在
+                result = await db.execute(
+                    select(ShortLink.short_code).where(ShortLink.short_code.in_(short_codes))
+                )
+                existing_codes = {row[0] for row in result.fetchall()}
+                
+                # 删除不存在的短链接的Redis计数器
+                for short_code, count_value, redis_key in batch:
+                    if short_code not in existing_codes:
+                        logger.warning(f"短链接不存在，删除Redis计数器: short_code={short_code}")
+                        try:
+                            await redis.delete(redis_key)
+                        except Exception as e:
+                            logger.warning(f"删除Redis计数器失败: key={redis_key}, error={e}")
+                
+                return 0, [], batch
+                
+        except OperationalError as e:
+            # 检查死锁错误：MySQL错误码1213或错误消息包含"Deadlock"
+            error_code = e.orig.args[0] if hasattr(e.orig, 'args') and e.orig.args else None
+            error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+            is_deadlock = (
+                error_code == 1213 or  # MySQL死锁错误码
+                "Deadlock" in error_msg or  # 错误消息包含Deadlock
+                "deadlock" in error_msg.lower()  # 错误消息包含deadlock（小写）
+            )
+            
+            if is_deadlock:
+                if attempt < max_retries - 1:
+                    # 指数退避 + 随机抖动
+                    delay = DEADLOCK_RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.3)
+                    short_codes_str = ", ".join([code for code, _, _ in batch])
+                    logger.warning(
+                        f"批量更新短链接点击次数时检测到死锁: short_codes=[{short_codes_str}], "
+                        f"第 {attempt + 1}/{max_retries} 次重试，等待 {delay:.2f} 秒后重试..."
+                    )
+                    await asyncio.sleep(delay)
+                    # MySQL在死锁时会自动回滚其中一个事务，所以这里不需要手动回滚
+                    # 直接重试即可
+                    continue
+                else:
+                    short_codes_str = ", ".join([code for code, _, _ in batch])
+                    logger.error(
+                        f"批量更新短链接点击次数失败（死锁，已重试 {max_retries} 次）: "
+                        f"short_codes=[{short_codes_str}], error={e}",
+                        exc_info=True
+                    )
+                    # 死锁时MySQL已自动回滚，不需要手动回滚
+                    return 0, [], batch
+            else:
+                # 其他数据库错误，需要回滚
+                short_codes_str = ", ".join([code for code, _, _ in batch])
+                logger.error(
+                    f"批量更新短链接点击次数失败: short_codes=[{short_codes_str}], error={e}",
+                    exc_info=True
+                )
+                try:
+                    await db.rollback()
+                except:
+                    pass
+                return 0, [], batch
+        except Exception as e:
+            short_codes_str = ", ".join([code for code, _, _ in batch])
+            logger.error(
+                f"批量更新短链接点击次数失败: short_codes=[{short_codes_str}], error={e}",
+                exc_info=True
+            )
+            try:
+                await db.rollback()
+            except:
+                pass
+            return 0, [], batch
+    
+    return 0, [], batch
 
 
 async def _update_click_count_with_retry(
@@ -375,11 +515,19 @@ async def _update_click_count_with_retry(
                 return False
                 
         except OperationalError as e:
+            # 检查死锁错误：MySQL错误码1213或错误消息包含"Deadlock"
             error_code = e.orig.args[0] if hasattr(e.orig, 'args') and e.orig.args else None
-            if error_code == 1213:  # Deadlock
+            error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+            is_deadlock = (
+                error_code == 1213 or  # MySQL死锁错误码
+                "Deadlock" in error_msg or  # 错误消息包含Deadlock
+                "deadlock" in error_msg.lower()  # 错误消息包含deadlock（小写）
+            )
+            
+            if is_deadlock:
                 if attempt < max_retries - 1:
-                    # 指数退避 + 随机抖动
-                    delay = DEADLOCK_RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.2)
+                    # 指数退避 + 随机抖动（增加随机范围，减少并发冲突）
+                    delay = DEADLOCK_RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.3)
                     logger.warning(
                         f"更新短链接点击次数时检测到死锁: short_code={short_code}, "
                         f"第 {attempt + 1}/{max_retries} 次重试，等待 {delay:.2f} 秒后重试..."
@@ -439,11 +587,19 @@ async def _commit_with_retry(db: AsyncSession, synced_count: int, max_retries: i
             logger.info(f"成功同步 {synced_count} 个短链接的点击次数到数据库")
             return True
         except OperationalError as e:
+            # 检查死锁错误：MySQL错误码1213或错误消息包含"Deadlock"
             error_code = e.orig.args[0] if hasattr(e.orig, 'args') and e.orig.args else None
-            if error_code == 1213:  # Deadlock
+            error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+            is_deadlock = (
+                error_code == 1213 or  # MySQL死锁错误码
+                "Deadlock" in error_msg or  # 错误消息包含Deadlock
+                "deadlock" in error_msg.lower()  # 错误消息包含deadlock（小写）
+            )
+            
+            if is_deadlock:
                 if attempt < max_retries - 1:
-                    # 指数退避 + 随机抖动（增加延迟时间）
-                    delay = DEADLOCK_RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.2)
+                    # 指数退避 + 随机抖动（增加延迟时间，减少并发冲突）
+                    delay = DEADLOCK_RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.3)
                     logger.warning(
                         f"检测到死锁，第 {attempt + 1}/{max_retries} 次重试，"
                         f"等待 {delay:.2f} 秒后重试..."
