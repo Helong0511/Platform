@@ -141,8 +141,8 @@
           :page-sizes="[10, 20, 50, 100]"
           :total="pagination.total"
           layout="total, sizes, prev, pager, next, jumper"
-          @size-change="fetchData"
-          @current-change="fetchData"
+          @size-change="handleSizeChange"
+          @current-change="handlePageChange"
         ></el-pagination>
       </div>
     </el-card>
@@ -386,6 +386,18 @@ const handleProductChange = async () => {
     }, 100);
   });
   
+  fetchData();
+};
+
+// 分页处理
+const handleSizeChange = (size) => {
+  pagination.value.size = size;
+  pagination.value.current = 1;  // 分页大小变化时重置到第一页
+  fetchData();
+};
+
+const handlePageChange = (page) => {
+  pagination.value.current = page;
   fetchData();
 };
 

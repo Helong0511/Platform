@@ -168,11 +168,14 @@ const handleReset = () => {
   handleSearch();
 };
 
-const handleSizeChange = () => {
+const handleSizeChange = (size) => {
+  pagination.pageSize = size;
+  pagination.page = 1;  // 分页大小变化时重置到第一页
   loadRecords();
 };
 
-const handlePageChange = () => {
+const handlePageChange = (page) => {
+  pagination.page = page;
   loadRecords();
 };
 
