@@ -754,12 +754,15 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         exc: HTTPException 异常对象
     """
     # 首先检查异常上下文是否是流异常（连接已断开）
-    # 如果是，直接抛出流异常，不尝试创建响应
+    # 如果是，直接重新抛出流异常，让 ASGI 服务器处理
+    # 注意：不要在这里抛出，而是让异常自然传播，避免被 global_exception_handler 捕获后再次抛出
     if hasattr(exc, '__context__') and exc.__context__:
         context_exc = exc.__context__
         if _is_stream_error(context_exc):
             logger.debug("HTTPException的上下文是流异常，连接已断开，跳过响应创建")
-            raise context_exc
+            # 直接重新抛出流异常，让 ASGI 服务器处理
+            # 使用 from None 避免创建新的异常链，防止被 global_exception_handler 捕获
+            raise context_exc from None
     
     # 检查连接是否已断开（使用非阻塞方式）
     # 注意：这里不能尝试读取流，只能检查标记
@@ -833,16 +836,26 @@ async def global_exception_handler(request: Request, exc: Exception):
     if isinstance(exc, HTTPException):
         # 检查是否是流关闭异常
         if _is_stream_error(exc):
+            # 直接重新抛出，让 ASGI 服务器处理
             raise exc
         
         # 尝试检查连接状态（通过检查异常上下文）
-        # 如果异常上下文是流异常，说明连接已断开，直接抛出流异常
+        # 如果异常上下文是流异常，说明连接已断开，直接重新抛出流异常
+        # 注意：如果流异常是从 http_exception_handler 传播过来的，应该直接让它继续传播
+        # 检查异常链中是否有流异常（包括 __context__ 和 __cause__）
+        context_exc = None
         if hasattr(exc, '__context__') and exc.__context__:
-            context_exc = exc.__context__
-            if _is_stream_error(context_exc):
-                logger.debug("检测到连接断开上下文，跳过HTTPException处理")
-                # 直接抛出流异常，不进行任何其他操作
-                raise context_exc
+            if _is_stream_error(exc.__context__):
+                context_exc = exc.__context__
+        if not context_exc and hasattr(exc, '__cause__') and exc.__cause__:
+            if _is_stream_error(exc.__cause__):
+                context_exc = exc.__cause__
+        
+        if context_exc:
+            logger.debug("检测到连接断开上下文，跳过HTTPException处理")
+            # 直接重新抛出流异常，让 ASGI 服务器处理
+            # 使用 from None 避免创建新的异常链，防止被再次捕获
+            raise context_exc from None
         
         # 检查连接是否已断开（使用非阻塞方式）
         # 注意：这里不能尝试读取流，只能检查标记
