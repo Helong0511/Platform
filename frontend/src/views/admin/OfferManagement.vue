@@ -960,6 +960,13 @@ const formRules = {
   ],
   advertiser_id: [
     { required: true, message: '请选择广告主', trigger: 'change' }
+  ],
+  // 渠道配置验证规则
+  'publisher_configs.*.downstream_cap': [
+    { type: 'number', min: 0, message: '下游Cap不能为负数', trigger: 'blur' }
+  ],
+  'publisher_configs.*.affiliate_payout': [
+    { type: 'number', min: 0, message: '下游PO不能为负数', trigger: 'blur' }
   ]
 }
 
