@@ -111,3 +111,30 @@ export function getDeductionLogs(params) {
   })
 }
 
+/**
+ * 批量更新扣减配置状态
+ * @param {Object} data - 请求数据
+ * @param {Array<number>} data.config_ids - 配置ID列表
+ * @param {boolean} data.is_active - 是否激活
+ */
+export function batchUpdateDeductionConfigStatus(data) {
+  return request({
+    url: '/api/v1/conversion-deductions/batch/update-status',
+    method: 'post',
+    data
+  })
+}
+
+/**
+ * 批量删除扣减配置
+ * @param {Object} data - 请求数据
+ * @param {Array<number>} data.config_ids - 配置ID列表
+ */
+export function batchDeleteDeductionConfigs(data) {
+  return request({
+    url: '/api/v1/conversion-deductions/batch/delete',
+    method: 'post',
+    data
+  })
+}
+

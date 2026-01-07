@@ -569,6 +569,172 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 detail=f"删除扣减配置失败: {str(e)}"
             )
 
+    async def batch_update_status(
+        self,
+        config_ids: List[int],
+        is_active: bool,
+        current_user: User
+    ) -> int:
+        """
+        批量更新扣减配置状态
+
+        Args:
+            config_ids: 配置ID列表
+            is_active: 是否激活
+            current_user: 当前用户
+
+        Returns:
+            int: 成功更新的数量
+        """
+        if not config_ids:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail="配置ID列表不能为空"
+            )
+
+        # 验证所有配置是否存在
+        result = await self.db.execute(
+            select(ConversionDeductionConfig).where(
+                ConversionDeductionConfig.id.in_(config_ids)
+            )
+        )
+        configs = result.scalars().all()
+
+        if len(configs) != len(config_ids):
+            found_ids = {config.id for config in configs}
+            missing_ids = set(config_ids) - found_ids
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail=f"以下配置ID不存在: {', '.join(map(str, missing_ids))}"
+            )
+
+        # 批量更新状态
+        from sqlalchemy import update
+        stmt = update(ConversionDeductionConfig).where(
+            ConversionDeductionConfig.id.in_(config_ids)
+        ).values(is_active=is_active)
+        
+        try:
+            await self.db.execute(stmt)
+            await self.db.commit()
+
+            # 清除所有相关配置的缓存
+            for config in configs:
+                level: Optional[ConfigLevel] = None
+                target_id: Optional[int] = None
+                if config.advertiser_id:
+                    level = 'advertiser'
+                    target_id = config.advertiser_id
+                elif config.offer_id:
+                    level = 'offer'
+                    target_id = config.offer_id
+                elif config.publisher_id:
+                    level = 'publisher'
+                    target_id = config.publisher_id
+                
+                if level and target_id:
+                    await self._invalidate_config_cache(level, target_id)
+
+            logger.info(f"批量更新扣减配置状态成功: config_ids={config_ids}, is_active={is_active}, count={len(configs)}")
+            return len(configs)
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"批量更新扣减配置状态失败: config_ids={config_ids}, error={str(e)}", exc_info=True)
+            if isinstance(e, type(raise_api_exception)):
+                raise
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail=f"批量更新扣减配置状态失败: {str(e)}"
+            )
+
+    async def batch_delete(
+        self,
+        config_ids: List[int],
+        current_user: User
+    ) -> int:
+        """
+        批量删除扣减配置
+
+        Args:
+            config_ids: 配置ID列表
+            current_user: 当前用户
+
+        Returns:
+            int: 成功删除的数量
+        """
+        if not config_ids:
+            raise_api_exception(
+                ErrorCode.INVALID_PARAMETER,
+                detail="配置ID列表不能为空"
+            )
+
+        # 获取所有配置（用于记录日志和清除缓存）
+        result = await self.db.execute(
+            select(ConversionDeductionConfig).where(
+                ConversionDeductionConfig.id.in_(config_ids)
+            )
+        )
+        configs = result.scalars().all()
+
+        if len(configs) != len(config_ids):
+            found_ids = {config.id for config in configs}
+            missing_ids = set(config_ids) - found_ids
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail=f"以下配置ID不存在: {', '.join(map(str, missing_ids))}"
+            )
+
+        # 记录删除日志
+        from app.core.audit_log import log_delete
+        for config in configs:
+            await log_delete(
+                db=self.db,
+                user=current_user,
+                resource_type="CONVERSION_DEDUCTION_CONFIG",
+                resource_id=config.id,
+                resource_name=f"扣减配置-{config.id}",
+                request=None
+            )
+
+        # 批量删除配置
+        from sqlalchemy import delete
+        stmt = delete(ConversionDeductionConfig).where(
+            ConversionDeductionConfig.id.in_(config_ids)
+        )
+        
+        try:
+            await self.db.execute(stmt)
+            await self.db.commit()
+
+            # 清除所有相关配置的缓存
+            for config in configs:
+                level: Optional[ConfigLevel] = None
+                target_id: Optional[int] = None
+                if config.advertiser_id:
+                    level = 'advertiser'
+                    target_id = config.advertiser_id
+                elif config.offer_id:
+                    level = 'offer'
+                    target_id = config.offer_id
+                elif config.publisher_id:
+                    level = 'publisher'
+                    target_id = config.publisher_id
+                
+                if level and target_id:
+                    await self._invalidate_config_cache(level, target_id)
+
+            logger.info(f"批量删除扣减配置成功: config_ids={config_ids}, count={len(configs)}")
+            return len(configs)
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"批量删除扣减配置失败: config_ids={config_ids}, error={str(e)}", exc_info=True)
+            if isinstance(e, type(raise_api_exception)):
+                raise
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail=f"批量删除扣减配置失败: {str(e)}"
+            )
+
     async def get_deduction_stats(
         self,
         start_date: Optional[str] = None,

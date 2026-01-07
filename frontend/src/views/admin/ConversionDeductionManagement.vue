@@ -7,7 +7,36 @@
             <el-icon class="header-icon"><Setting /></el-icon>
             <span class="header-title">转化扣减配置管理</span>
           </div>
-          <el-button type="primary" :icon="Plus" @click="handleAdd">添加配置</el-button>
+          <div class="header-right">
+            <div class="batch-actions" v-if="selectedConfigs.length > 0">
+              <el-button 
+                type="success" 
+                :icon="Check" 
+                @click="handleBatchEnable"
+                :disabled="loading"
+              >
+                批量启用 ({{ selectedConfigs.length }})
+              </el-button>
+              <el-button 
+                type="warning" 
+                :icon="Close" 
+                @click="handleBatchDisable"
+                :disabled="loading"
+              >
+                批量禁用 ({{ selectedConfigs.length }})
+              </el-button>
+              <el-button 
+                type="danger" 
+                :icon="Delete" 
+                @click="handleBatchDelete"
+                :disabled="loading"
+              >
+                批量删除 ({{ selectedConfigs.length }})
+              </el-button>
+            </div>
+            <el-button type="primary" :icon="Download" @click="handleExport" :disabled="loading">导出配置</el-button>
+            <el-button type="primary" :icon="Plus" @click="handleAdd">添加配置</el-button>
+          </div>
         </div>
       </template>
 
@@ -92,7 +121,9 @@
         :data="tableData"
         stripe
         style="width: 100%; margin-top: 20px;"
+        @selection-change="handleSelectionChange"
       >
+        <el-table-column type="selection" width="55" />
         <el-table-column prop="id" label="ID" width="80" />
         
         <el-table-column prop="level" label="层级" width="100" align="center">
@@ -167,6 +198,14 @@
               @click="handleEdit(scope.row)"
             >
               编辑
+            </el-button>
+            <el-button
+              type="info"
+              link
+              size="small"
+              @click="handleCopy(scope.row)"
+            >
+              复制
             </el-button>
             <el-button
               type="danger"
@@ -445,13 +484,15 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Refresh, Plus, Setting, Remove, Money, Close, InfoFilled } from '@element-plus/icons-vue'
+import { Search, Refresh, Plus, Setting, Remove, Money, Close, InfoFilled, Check, Delete, Download } from '@element-plus/icons-vue'
 import {
   getDeductionConfigs,
   createDeductionConfig,
   updateDeductionConfig,
   deleteDeductionConfig,
-  updateDeductionConfigStatus
+  updateDeductionConfigStatus,
+  batchUpdateDeductionConfigStatus,
+  batchDeleteDeductionConfigs
 } from '@/api/deduction'
 import { getAdvertisers } from '@/api/advertiser'
 import { getOffers } from '@/api/offer'
@@ -459,6 +500,7 @@ import { getPublishers } from '@/api/publisher'
 
 const loading = ref(false)
 const tableData = ref([])
+const selectedConfigs = ref([])
 const dialogVisible = ref(false)
 const dialogMode = ref('add')
 const currentConfig = ref(null)
@@ -605,6 +647,31 @@ const handleEdit = (row) => {
   dialogVisible.value = true
 }
 
+// 复制配置
+const handleCopy = (row) => {
+  dialogMode.value = 'add'
+  currentConfig.value = null
+  
+  // 复制配置数据，但清空ID和创建时间，默认禁用状态
+  Object.assign(form, {
+    level: row.level,
+    target_id: row.target_id,
+    enable_volume_deduction: row.enable_volume_deduction,
+    volume_deduction_ratio: row.volume_deduction_ratio,
+    deduction_strategy: row.deduction_strategy,
+    enable_amount_deduction: row.enable_amount_deduction,
+    amount_deduction_ratio: row.amount_deduction_ratio,
+    priority: row.priority,
+    is_active: false // 复制时默认禁用，需要手动启用
+  })
+  
+  // 加载配置对象选项
+  handleLevelChange(row.level)
+  
+  dialogVisible.value = true
+  ElMessage.info('已复制配置，请检查并修改后保存（默认状态为禁用）')
+}
+
 // 删除配置
 const handleDelete = async (row) => {
   try {
@@ -635,6 +702,127 @@ const handleStatusChange = async (row) => {
   } catch (error) {
     row.is_active = !row.is_active // 回滚
     ElMessage.error('状态更新失败：' + (error.message || '未知错误'))
+  }
+}
+
+// 批量选择
+const handleSelectionChange = (selection) => {
+  selectedConfigs.value = selection
+}
+
+// 批量启用
+const handleBatchEnable = async () => {
+  if (selectedConfigs.value.length === 0) {
+    ElMessage.warning('请先选择要启用的配置')
+    return
+  }
+  
+  try {
+    await ElMessageBox.confirm(
+      `确定要启用选中的 ${selectedConfigs.value.length} 个配置吗？`,
+      '确认批量启用',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    
+    loading.value = true
+    const configIds = selectedConfigs.value.map(item => item.id)
+    const response = await batchUpdateDeductionConfigStatus({
+      config_ids: configIds,
+      is_active: true
+    })
+    
+    if (response.code === 200) {
+      ElMessage.success(`成功启用 ${response.data.updated_count} 个配置`)
+      selectedConfigs.value = []
+      fetchData()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('批量启用失败：' + (error.message || '未知错误'))
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
+// 批量禁用
+const handleBatchDisable = async () => {
+  if (selectedConfigs.value.length === 0) {
+    ElMessage.warning('请先选择要禁用的配置')
+    return
+  }
+  
+  try {
+    await ElMessageBox.confirm(
+      `确定要禁用选中的 ${selectedConfigs.value.length} 个配置吗？`,
+      '确认批量禁用',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    
+    loading.value = true
+    const configIds = selectedConfigs.value.map(item => item.id)
+    const response = await batchUpdateDeductionConfigStatus({
+      config_ids: configIds,
+      is_active: false
+    })
+    
+    if (response.code === 200) {
+      ElMessage.success(`成功禁用 ${response.data.updated_count} 个配置`)
+      selectedConfigs.value = []
+      fetchData()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('批量禁用失败：' + (error.message || '未知错误'))
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
+// 批量删除
+const handleBatchDelete = async () => {
+  if (selectedConfigs.value.length === 0) {
+    ElMessage.warning('请先选择要删除的配置')
+    return
+  }
+  
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedConfigs.value.length} 个配置吗？此操作不可恢复！`,
+      '确认批量删除',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    
+    loading.value = true
+    const configIds = selectedConfigs.value.map(item => item.id)
+    const response = await batchDeleteDeductionConfigs({
+      config_ids: configIds
+    })
+    
+    if (response.code === 200) {
+      ElMessage.success(`成功删除 ${response.data.deleted_count} 个配置`)
+      selectedConfigs.value = []
+      fetchData()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('批量删除失败：' + (error.message || '未知错误'))
+    }
+  } finally {
+    loading.value = false
   }
 }
 
@@ -774,6 +962,34 @@ const handleSizeChange = (size) => {
   fetchData()
 }
 
+// 导出配置
+const handleExport = async () => {
+  try {
+    loading.value = true
+    // 构建导出参数（使用当前筛选条件）
+    const params = new URLSearchParams()
+    if (searchForm.keyword) {
+      params.append('keyword', searchForm.keyword)
+    }
+    if (searchForm.level) {
+      params.append('level', searchForm.level)
+    }
+    if (searchForm.is_active !== null && searchForm.is_active !== undefined) {
+      params.append('is_active', searchForm.is_active.toString())
+    }
+    
+    // 使用window.open下载文件
+    const url = `/api/v1/conversion-deductions/export?${params.toString()}`
+    window.open(url, '_blank')
+    
+    ElMessage.success('导出请求已发送，请稍候...')
+  } catch (error) {
+    ElMessage.error('导出失败：' + (error.message || '未知错误'))
+  } finally {
+    loading.value = false
+  }
+}
+
 // 工具方法
 const getLevelLabel = (level) => {
   const map = {
@@ -836,6 +1052,19 @@ onMounted(() => {
 .header-left {
   display: flex;
   align-items: center;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-right: 10px;
 }
 
 .header-icon {

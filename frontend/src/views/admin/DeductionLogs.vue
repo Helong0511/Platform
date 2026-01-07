@@ -7,6 +7,9 @@
             <el-icon class="header-icon"><Document /></el-icon>
             <span class="header-title">扣减日志</span>
           </div>
+          <div class="header-right">
+            <el-button type="primary" :icon="Download" @click="handleExport" :disabled="loading">导出日志</el-button>
+          </div>
         </div>
       </template>
 
@@ -214,7 +217,65 @@
         </el-table-column>
         
         <el-table-column prop="created_at" label="创建时间" width="180" />
+        
+        <el-table-column label="操作" width="100" align="center" fixed="right">
+          <template #default="scope">
+            <el-button
+              type="primary"
+              link
+              size="small"
+              @click="handleViewDetail(scope.row)"
+            >
+              详情
+            </el-button>
+          </template>
+        </el-table-column>
       </el-table>
+      
+      <!-- 日志详情对话框 -->
+      <el-dialog
+        v-model="detailDialogVisible"
+        title="日志详情"
+        width="800px"
+      >
+        <el-descriptions :column="2" border v-if="currentLog">
+          <el-descriptions-item label="日志ID">{{ currentLog.id }}</el-descriptions-item>
+          <el-descriptions-item label="转化ID">
+            <span v-if="currentLog.conversion_id">{{ currentLog.conversion_id }}</span>
+            <el-tag v-else size="small" type="warning">已扣量</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="点击ID" :span="2">{{ currentLog.click_id || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="广告主">{{ currentLog.advertiser_name || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="Offer">{{ currentLog.offer_name || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="渠道">{{ currentLog.publisher_name || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="扣减策略">
+            {{ getStrategyLabel(currentLog.deduction_strategy) || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="扣量信息" :span="2">
+            <div v-if="currentLog.deducted_volume > 0">
+              <div>原始数量: {{ currentLog.original_volume }}</div>
+              <div>扣减数量: <span style="color: #E6A23C;">{{ currentLog.deducted_volume }}</span></div>
+              <div>最终数量: <span style="color: #67C23A;">{{ currentLog.final_volume }}</span></div>
+              <div>扣量比例: {{ ((currentLog.volume_deduction_ratio || 0) * 100).toFixed(2) }}%</div>
+            </div>
+            <span v-else>未扣量</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="扣金额信息" :span="2">
+            <div v-if="currentLog.deducted_amount > 0">
+              <div>原始金额: {{ formatCurrency(currentLog.original_amount) }}</div>
+              <div>扣减金额: <span style="color: #F56C6C;">{{ formatCurrency(currentLog.deducted_amount) }}</span></div>
+              <div>最终金额: <span style="color: #67C23A;">{{ formatCurrency(currentLog.final_amount) }}</span></div>
+              <div>扣金额比例: {{ ((currentLog.amount_deduction_ratio || 0) * 100).toFixed(2) }}%</div>
+            </div>
+            <span v-else>未扣金额</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="扣减原因" :span="2">{{ currentLog.deduction_reason || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="创建时间" :span="2">{{ currentLog.created_at || '-' }}</el-descriptions-item>
+        </el-descriptions>
+        <template #footer>
+          <el-button @click="detailDialogVisible = false">关闭</el-button>
+        </template>
+      </el-dialog>
       
       <!-- 分页 -->
       <div class="pagination-wrapper">
@@ -234,8 +295,8 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElTooltip } from 'element-plus'
-import { Search, Refresh, Document } from '@element-plus/icons-vue'
+import { ElMessage, ElTooltip, ElDescriptions, ElDescriptionsItem } from 'element-plus'
+import { Search, Refresh, Document, Download } from '@element-plus/icons-vue'
 import { getDeductionLogs } from '@/api/deduction'
 import { getAdvertisers } from '@/api/advertiser'
 import { getOffers } from '@/api/offer'
@@ -244,6 +305,8 @@ import { getPublishers } from '@/api/publisher'
 const loading = ref(false)
 const tableData = ref([])
 const dateRange = ref([])
+const detailDialogVisible = ref(false)
+const currentLog = ref(null)
 
 const searchForm = reactive({
   start_time: null,
@@ -283,6 +346,12 @@ const getStrategyLabel = (strategy) => {
     'round_robin': '轮询'
   }
   return map[strategy] || strategy
+}
+
+// 查看详情
+const handleViewDetail = (row) => {
+  currentLog.value = { ...row }
+  detailDialogVisible.value = true
 }
 
 // 获取日志列表
@@ -370,6 +439,44 @@ const handleSizeChange = (size) => {
   pagination.page = 1
   fetchData()
 }
+
+// 导出日志
+const handleExport = () => {
+  try {
+    // 构建导出参数（使用当前筛选条件）
+    const params = new URLSearchParams()
+    if (searchForm.start_time) {
+      params.append('start_date', searchForm.start_time.split(' ')[0])
+    }
+    if (searchForm.end_time) {
+      params.append('end_date', searchForm.end_time.split(' ')[0])
+    }
+    if (searchForm.conversion_id) {
+      params.append('conversion_id', searchForm.conversion_id.toString())
+    }
+    if (searchForm.click_id) {
+      params.append('click_id', searchForm.click_id)
+    }
+    if (searchForm.advertiser_id) {
+      params.append('advertiser_id', searchForm.advertiser_id.toString())
+    }
+    if (searchForm.offer_id) {
+      params.append('offer_id', searchForm.offer_id.toString())
+    }
+    if (searchForm.publisher_id) {
+      params.append('publisher_id', searchForm.publisher_id.toString())
+    }
+    
+    // 使用window.open下载文件
+    const url = `/api/v1/conversion-deductions/logs/export?${params.toString()}`
+    window.open(url, '_blank')
+    
+    ElMessage.success('导出请求已发送，请稍候...')
+  } catch (error) {
+    ElMessage.error('导出失败：' + (error.message || '未知错误'))
+  }
+}
+
 
 // 加载选项数据（分页加载所有数据）
 const loadOptions = async () => {

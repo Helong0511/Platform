@@ -186,3 +186,14 @@ class DeductionStatsResponse(BaseModel):
     amount_deduction_ratio: float = 0.0
     items: list = []
 
+
+class BatchUpdateStatusRequest(BaseModel):
+    """批量更新状态请求"""
+    config_ids: list[int] = Field(..., min_length=1, description="配置ID列表")
+    is_active: bool = Field(..., description="是否激活")
+
+
+class BatchDeleteRequest(BaseModel):
+    """批量删除请求"""
+    config_ids: list[int] = Field(..., min_length=1, description="配置ID列表")
+

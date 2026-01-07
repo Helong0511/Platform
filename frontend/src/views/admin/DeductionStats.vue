@@ -7,7 +7,10 @@
             <el-icon class="header-icon"><DataAnalysis /></el-icon>
             <span class="header-title">扣减统计</span>
           </div>
-          <el-button :icon="Refresh" @click="handleRefresh">刷新</el-button>
+          <div class="header-right">
+            <el-button type="primary" :icon="Download" @click="handleExport" :disabled="loading">导出统计</el-button>
+            <el-button :icon="Refresh" @click="handleRefresh">刷新</el-button>
+          </div>
         </div>
       </template>
 
@@ -189,6 +192,47 @@
         </el-card>
       </div>
 
+      <!-- 图表展示 -->
+      <div class="charts-section" v-if="!loading && (stats.original_volume > 0 || stats.original_amount > 0)">
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-card>
+              <template #header>
+                <div class="chart-header">扣量趋势</div>
+              </template>
+              <div ref="volumeChartRef" style="width: 100%; height: 300px;"></div>
+            </el-card>
+          </el-col>
+          <el-col :span="12">
+            <el-card>
+              <template #header>
+                <div class="chart-header">扣金额趋势</div>
+              </template>
+              <div ref="amountChartRef" style="width: 100%; height: 300px;"></div>
+            </el-card>
+          </el-col>
+        </el-row>
+        
+        <el-row :gutter="20" style="margin-top: 20px;">
+          <el-col :span="12">
+            <el-card>
+              <template #header>
+                <div class="chart-header">扣量比例分布</div>
+              </template>
+              <div ref="volumeRatioChartRef" style="width: 100%; height: 300px;"></div>
+            </el-card>
+          </el-col>
+          <el-col :span="12">
+            <el-card>
+              <template #header>
+                <div class="chart-header">扣金额比例分布</div>
+              </template>
+              <div ref="amountRatioChartRef" style="width: 100%; height: 300px;"></div>
+            </el-card>
+          </el-col>
+        </el-row>
+      </div>
+
       <!-- 详细统计表格 -->
       <div class="table-section" v-if="detailStats.length > 0">
         <h3>详细统计</h3>
@@ -259,18 +303,31 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick, watch, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Search, Refresh, DataAnalysis } from '@element-plus/icons-vue'
+import { Search, Refresh, DataAnalysis, Download } from '@element-plus/icons-vue'
 import { getDeductionStats } from '@/api/deduction'
 import { getAdvertisers } from '@/api/advertiser'
 import { getOffers } from '@/api/offer'
 import { getPublishers } from '@/api/publisher'
+import * as echarts from 'echarts'
 
 const loading = ref(false)
 const dateRange = ref([])
 const stats = ref({})
 const detailStats = ref([])
+
+// 图表引用
+const volumeChartRef = ref(null)
+const amountChartRef = ref(null)
+const volumeRatioChartRef = ref(null)
+const amountRatioChartRef = ref(null)
+
+// 图表实例
+let volumeChart = null
+let amountChart = null
+let volumeRatioChart = null
+let amountRatioChart = null
 
 const filterForm = reactive({
   start_time: null,
@@ -340,6 +397,10 @@ const fetchStats = async () => {
       if (filterForm.group_by && detailStats.value.length > 0) {
         await loadGroupNames()
       }
+      
+      // 更新图表
+      await nextTick()
+      updateCharts()
     }
   } catch (error) {
     ElMessage.error('获取统计数据失败：' + (error.message || '未知错误'))
@@ -487,6 +548,40 @@ const handleRefresh = () => {
   fetchStats()
 }
 
+// 导出统计
+const handleExport = () => {
+  try {
+    // 构建导出参数（使用当前筛选条件）
+    const params = new URLSearchParams()
+    if (filterForm.start_time) {
+      params.append('start_date', filterForm.start_time.split(' ')[0])
+    }
+    if (filterForm.end_time) {
+      params.append('end_date', filterForm.end_time.split(' ')[0])
+    }
+    if (filterForm.group_by) {
+      params.append('group_by', filterForm.group_by)
+    }
+    if (filterForm.advertiser_id) {
+      params.append('advertiser_id', filterForm.advertiser_id.toString())
+    }
+    if (filterForm.offer_id) {
+      params.append('offer_id', filterForm.offer_id.toString())
+    }
+    if (filterForm.publisher_id) {
+      params.append('publisher_id', filterForm.publisher_id.toString())
+    }
+    
+    // 使用window.open下载文件
+    const url = `/api/v1/conversion-deductions/stats/export?${params.toString()}`
+    window.open(url, '_blank')
+    
+    ElMessage.success('导出请求已发送，请稍候...')
+  } catch (error) {
+    ElMessage.error('导出失败：' + (error.message || '未知错误'))
+  }
+}
+
 // 加载选项数据（分页加载所有数据）
 const loadOptions = async () => {
   try {
@@ -612,6 +707,270 @@ onMounted(() => {
   
   loadOptions()
   fetchStats()
+  // 延迟初始化图表，确保DOM已渲染
+  setTimeout(() => {
+    initCharts()
+  }, 500)
+})
+
+// 初始化图表
+const initCharts = () => {
+  nextTick(() => {
+    // 扣量趋势图
+    if (volumeChartRef.value) {
+      volumeChart = echarts.init(volumeChartRef.value)
+    }
+    
+    // 扣金额趋势图
+    if (amountChartRef.value) {
+      amountChart = echarts.init(amountChartRef.value)
+    }
+    
+    // 扣量比例分布图
+    if (volumeRatioChartRef.value) {
+      volumeRatioChart = echarts.init(volumeRatioChartRef.value)
+    }
+    
+    // 扣金额比例分布图
+    if (amountRatioChartRef.value) {
+      amountRatioChart = echarts.init(amountRatioChartRef.value)
+    }
+    
+    // 监听窗口大小变化
+    window.addEventListener('resize', handleResize)
+    
+    // 初始更新图表
+    updateCharts()
+  })
+}
+
+// 更新图表
+const updateCharts = () => {
+  if (!stats.value || Object.keys(stats.value).length === 0) return
+  
+  // 更新扣量趋势图
+  if (volumeChart && volumeChartRef.value) {
+    const option = {
+      title: {
+        text: '扣量统计',
+        left: 'center',
+        textStyle: { fontSize: 14 }
+      },
+      tooltip: {
+        trigger: 'axis',
+        formatter: '{b}<br/>{a0}: {c0}<br/>{a1}: {c1}<br/>{a2}: {c2}'
+      },
+      legend: {
+        data: ['原始数量', '扣减数量', '最终数量'],
+        bottom: 10
+      },
+      xAxis: {
+        type: 'category',
+        data: ['统计汇总']
+      },
+      yAxis: {
+        type: 'value'
+      },
+      series: [
+        {
+          name: '原始数量',
+          type: 'bar',
+          data: [stats.value.original_volume || 0],
+          itemStyle: { color: '#409EFF' }
+        },
+        {
+          name: '扣减数量',
+          type: 'bar',
+          data: [stats.value.deducted_volume || 0],
+          itemStyle: { color: '#E6A23C' }
+        },
+        {
+          name: '最终数量',
+          type: 'bar',
+          data: [stats.value.final_volume || 0],
+          itemStyle: { color: '#67C23A' }
+        }
+      ]
+    }
+    volumeChart.setOption(option)
+  }
+  
+  // 更新扣金额趋势图
+  if (amountChart && amountChartRef.value) {
+    const option = {
+      title: {
+        text: '扣金额统计',
+        left: 'center',
+        textStyle: { fontSize: 14 }
+      },
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params) => {
+          let result = params[0].name + '<br/>'
+          params.forEach(param => {
+            result += `${param.seriesName}: $${param.value.toFixed(2)}<br/>`
+          })
+          return result
+        }
+      },
+      legend: {
+        data: ['原始金额', '扣减金额', '最终金额'],
+        bottom: 10
+      },
+      xAxis: {
+        type: 'category',
+        data: ['统计汇总']
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: {
+          formatter: '${value}'
+        }
+      },
+      series: [
+        {
+          name: '原始金额',
+          type: 'bar',
+          data: [stats.value.original_amount || 0],
+          itemStyle: { color: '#409EFF' }
+        },
+        {
+          name: '扣减金额',
+          type: 'bar',
+          data: [stats.value.deducted_amount || 0],
+          itemStyle: { color: '#F56C6C' }
+        },
+        {
+          name: '最终金额',
+          type: 'bar',
+          data: [stats.value.final_amount || 0],
+          itemStyle: { color: '#67C23A' }
+        }
+      ]
+    }
+    amountChart.setOption(option)
+  }
+  
+  // 更新扣量比例分布图
+  if (volumeRatioChart && volumeRatioChartRef.value) {
+    const ratio = (stats.value.volume_deduction_ratio || 0) * 100
+    const option = {
+      title: {
+        text: '扣量比例',
+        left: 'center',
+        textStyle: { fontSize: 14 }
+      },
+      tooltip: {
+        trigger: 'item',
+        formatter: '{b}: {c}% ({d}%)'
+      },
+      series: [
+        {
+          type: 'pie',
+          radius: ['40%', '70%'],
+          avoidLabelOverlap: false,
+          itemStyle: {
+            borderRadius: 10,
+            borderColor: '#fff',
+            borderWidth: 2
+          },
+          label: {
+            show: true,
+            formatter: '{b}: {c}%'
+          },
+          emphasis: {
+            label: {
+              show: true,
+              fontSize: 16,
+              fontWeight: 'bold'
+            }
+          },
+          data: [
+            { value: ratio, name: '扣量比例', itemStyle: { color: '#E6A23C' } },
+            { value: 100 - ratio, name: '未扣量比例', itemStyle: { color: '#67C23A' } }
+          ]
+        }
+      ]
+    }
+    volumeRatioChart.setOption(option)
+  }
+  
+  // 更新扣金额比例分布图
+  if (amountRatioChart && amountRatioChartRef.value) {
+    const ratio = (stats.value.amount_deduction_ratio || 0) * 100
+    const option = {
+      title: {
+        text: '扣金额比例',
+        left: 'center',
+        textStyle: { fontSize: 14 }
+      },
+      tooltip: {
+        trigger: 'item',
+        formatter: '{b}: {c}% ({d}%)'
+      },
+      series: [
+        {
+          type: 'pie',
+          radius: ['40%', '70%'],
+          avoidLabelOverlap: false,
+          itemStyle: {
+            borderRadius: 10,
+            borderColor: '#fff',
+            borderWidth: 2
+          },
+          label: {
+            show: true,
+            formatter: '{b}: {c}%'
+          },
+          emphasis: {
+            label: {
+              show: true,
+              fontSize: 16,
+              fontWeight: 'bold'
+            }
+          },
+          data: [
+            { value: ratio, name: '扣金额比例', itemStyle: { color: '#F56C6C' } },
+            { value: 100 - ratio, name: '未扣金额比例', itemStyle: { color: '#67C23A' } }
+          ]
+        }
+      ]
+    }
+    amountRatioChart.setOption(option)
+  }
+}
+
+// 处理窗口大小变化
+const handleResize = () => {
+  if (volumeChart) volumeChart.resize()
+  if (amountChart) amountChart.resize()
+  if (volumeRatioChart) volumeRatioChart.resize()
+  if (amountRatioChart) amountRatioChart.resize()
+}
+
+// 清理图表
+const disposeCharts = () => {
+  if (volumeChart) {
+    volumeChart.dispose()
+    volumeChart = null
+  }
+  if (amountChart) {
+    amountChart.dispose()
+    amountChart = null
+  }
+  if (volumeRatioChart) {
+    volumeRatioChart.dispose()
+    volumeRatioChart = null
+  }
+  if (amountRatioChart) {
+    amountRatioChart.dispose()
+    amountRatioChart = null
+  }
+  window.removeEventListener('resize', handleResize)
+}
+
+onBeforeUnmount(() => {
+  disposeCharts()
 })
 </script>
 
@@ -628,6 +987,12 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .header-left {
@@ -721,6 +1086,16 @@ onMounted(() => {
 .text-success {
   color: #67C23A;
   font-weight: 600;
+}
+
+.charts-section {
+  margin-top: 30px;
+}
+
+.chart-header {
+  font-size: 16px;
+  font-weight: 500;
+  color: #303133;
 }
 </style>
 

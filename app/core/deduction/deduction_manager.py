@@ -313,16 +313,33 @@ class DeductionManager:
         level: str,
         target_id: int
     ) -> Optional[ConversionDeductionConfig]:
-        """从缓存获取配置"""
+        """
+        从缓存获取配置ID，然后从数据库加载完整配置
+        
+        优化方案：只缓存配置ID，避免序列化问题
+        """
         cache_key = f"{CONFIG_CACHE_PREFIX}{level}:{target_id}"
-        cached_data = await get_cached(cache_key)
-        if cached_data:
-            # 从缓存数据重建配置对象（简化版，实际可能需要更复杂的序列化）
+        cached_config_id = await get_cached(cache_key)
+        if cached_config_id:
             try:
-                # 这里简化处理，实际应该从数据库重新加载以确保数据一致性
-                return None  # 暂时禁用配置缓存，避免序列化问题
+                # 从数据库加载完整配置对象
+                result = await self.db.execute(
+                    select(ConversionDeductionConfig).where(
+                        ConversionDeductionConfig.id == cached_config_id,
+                        ConversionDeductionConfig.is_active == True
+                    )
+                )
+                config = result.scalars().first()
+                if config:
+                    logger.debug(f"从缓存配置ID加载配置成功: config_id={config.id}")
+                    return config
+                else:
+                    # 配置已不存在或已禁用，清除缓存
+                    await invalidate_cache(cache_key)
             except Exception as e:
-                logger.debug(f"从缓存重建配置失败: {e}")
+                logger.debug(f"从缓存配置ID加载配置失败: {e}")
+                # 清除无效缓存
+                await invalidate_cache(cache_key)
         return None
     
     async def _cache_config(
@@ -331,10 +348,21 @@ class DeductionManager:
         target_id: int,
         config: ConversionDeductionConfig
     ) -> None:
-        """缓存配置"""
-        # 暂时禁用配置缓存，避免序列化问题
-        # 可以考虑只缓存配置ID，然后从数据库加载
-        pass
+        """
+        缓存配置ID（而不是整个配置对象）
+        
+        优化方案：只缓存配置ID，避免序列化问题，查询时再从数据库加载
+        """
+        if not config or not config.id:
+            return
+        
+        cache_key = f"{CONFIG_CACHE_PREFIX}{level}:{target_id}"
+        try:
+            # 只缓存配置ID（整数，易于序列化）
+            await set_cached(cache_key, config.id, CONFIG_CACHE_TTL)
+            logger.debug(f"缓存配置ID成功: cache_key={cache_key}, config_id={config.id}")
+        except Exception as e:
+            logger.warning(f"缓存配置ID失败: {e}")
     
     async def get_recent_stats(
         self,
