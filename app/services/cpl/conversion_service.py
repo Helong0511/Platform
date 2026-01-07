@@ -86,7 +86,7 @@ class ConversionService:
                         )
                     )
                 )
-                client_publisher_ids = [p.id for p in publisher_result.scalars().all()]
+                client_publisher_ids = list(publisher_result.scalars().all())
             else:
                 # 客户没有关联的Client记录，返回空统计
                 return {
@@ -387,7 +387,7 @@ class ConversionService:
                 publisher_result = await self.db.execute(
                     select(Publisher.id).where(Publisher.client_id == client_id)
                 )
-                client_publisher_ids = [p.id for p in publisher_result.scalars().all()]
+                client_publisher_ids = list(publisher_result.scalars().all())
             else:
                 return []
         
