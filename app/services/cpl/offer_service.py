@@ -395,6 +395,13 @@ class OfferService(BaseService[Offer]):
                     downstream_cap = config.downstream_cap
                     affiliate_payout = config.affiliate_payout
                 
+                # 验证publisher_id是否存在且有效
+                if pub_id is None:
+                    raise_api_exception(
+                        ErrorCode.INVALID_PARAMETER,
+                        detail="渠道配置中的publisher_id不能为空，请确保已选择渠道"
+                    )
+                
                 # 验证渠道是否存在
                 pub_result = await self.db.execute(
                     select(Publisher).where(Publisher.id == pub_id)
@@ -597,6 +604,13 @@ class OfferService(BaseService[Offer]):
                     pub_id = config.publisher_id
                     downstream_cap = config.downstream_cap
                     affiliate_payout = config.affiliate_payout
+                
+                # 验证publisher_id是否存在且有效
+                if pub_id is None:
+                    raise_api_exception(
+                        ErrorCode.INVALID_PARAMETER,
+                        detail="渠道配置中的publisher_id不能为空，请确保已选择渠道"
+                    )
                 
                 # 验证渠道是否存在
                 pub_result = await self.db.execute(

@@ -21,10 +21,32 @@ logger = logging.getLogger(__name__)
 MAX_DEADLOCK_RETRIES = 5  # 增加重试次数
 DEADLOCK_RETRY_BASE_DELAY = 0.3  # 增加基础延迟（秒），减少并发冲突
 
+# 死锁统计（用于监控）
+_deadlock_stats = {
+    "total_deadlocks": 0,
+    "deadlocks_by_batch_size": {},
+    "last_deadlock_time": None,
+}
+
 # Redis键前缀
 CLICK_COUNTER_PREFIX = "short_link:click:"
 SYNC_LOCK_PREFIX = "short_link:sync_lock:"  # 分布式锁前缀
 SYNC_LOCK_TIMEOUT = 300  # 锁超时时间（秒），5分钟
+
+# Lua脚本：原子获取并删除计数器值（避免竞态条件）
+# 返回：如果键存在且值>0，返回计数值并删除键；否则返回0
+_GET_AND_DELETE_COUNTER_LUA = """
+local val = redis.call('GET', KEYS[1])
+if val and tonumber(val) > 0 then
+    redis.call('DEL', KEYS[1])
+    return tonumber(val)
+else
+    if val then
+        redis.call('DEL', KEYS[1])
+    end
+    return 0
+end
+"""
 
 # 批量更新阈值：每10次点击或每5秒更新一次
 BATCH_UPDATE_THRESHOLD = 10
@@ -58,8 +80,14 @@ async def increment_click_count_async(short_code: str) -> None:
         # 使用Redis原子递增
         counter_key = f"{CLICK_COUNTER_PREFIX}{short_code}"
         new_count = await redis.incr(counter_key)
-        # 设置过期时间（48小时）
-        await redis.expire(counter_key, 48 * 3600)
+        # 设置过期时间（48小时）- 如果失败不影响计数，但记录警告
+        try:
+            await redis.expire(counter_key, 48 * 3600)
+        except Exception as expire_error:
+            logger.warning(
+                f"设置Redis计数器过期时间失败（不影响计数）: "
+                f"short_code={short_code}, key={counter_key}, error={expire_error}"
+            )
         logger.info(
             f"短链接点击计数（Redis）: short_code={short_code}, "
             f"计数器键={counter_key}, 当前值={new_count}"
@@ -125,46 +153,44 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
             
             logger.info(f"Redis不可用，同步进程内计数器: {len(_click_counters)} 个短链接")
             
-            synced = 0
-            failed_codes = []  # 记录同步失败的短链接代码
-            
+            # 收集需要更新的数据，按 short_code 排序（统一锁顺序，避免死锁）
+            updates: List[Tuple[str, int]] = []
             for short_code, count in _click_counters.items():
                 if short_codes and short_code not in short_codes:
                     continue
-                
-                try:
-                    result = await db.execute(
-                        select(ShortLink).where(ShortLink.short_code == short_code)
-                    )
-                    short_link = result.scalars().first()
-                    if short_link:
-                        old_count = short_link.click_count
-                        short_link.click_count += count
-                        new_count = short_link.click_count
-                        
-                        logger.debug(
-                            f"更新短链接点击次数（进程内）: short_code={short_code}, "
-                            f"旧值={old_count}, 增量={count}, 新值={new_count}"
-                        )
-                        synced += 1
-                    else:
-                        logger.warning(f"短链接不存在（进程内）: short_code={short_code}")
-                except Exception as e:
-                    logger.error(
-                        f"同步点击次数失败（进程内）: short_code={short_code}, error={e}",
-                        exc_info=True
-                    )
-                    failed_codes.append(short_code)
+                if count > 0:
+                    updates.append((short_code, count))
             
-            # 提交所有成功的更新
+            if not updates:
+                logger.debug("没有需要同步的进程内计数器")
+                return 0
+            
+            # 按 short_code 排序，确保所有进程以相同顺序锁定记录
+            updates = sorted(updates, key=lambda x: x[0])
+            
+            # 使用批量更新，减少死锁风险
+            synced = 0
+            failed_codes = []  # 记录同步失败的短链接代码
+            
+            # 批量处理，每批5条（与主函数保持一致）
+            BATCH_SIZE = 5
+            for batch_idx in range(0, len(updates), BATCH_SIZE):
+                batch = updates[batch_idx:batch_idx + BATCH_SIZE]
+                
+                # 使用原子更新，避免 ORM 方式导致的死锁
+                for short_code, count in batch:
+                    success = await _update_click_count_with_retry(db, short_code, count)
+                    if success:
+                        synced += 1
+                        logger.debug(
+                            f"更新短链接点击次数（进程内）: short_code={short_code}, 增量={count}"
+                        )
+                    else:
+                        failed_codes.append(short_code)
+                        logger.warning(f"更新短链接点击次数失败（进程内）: short_code={short_code}")
+            
             if synced > 0:
-                try:
-                    await db.commit()
-                    logger.info(f"成功同步 {synced} 个短链接的点击次数到数据库（进程内）")
-                except Exception as e:
-                    logger.error(f"提交数据库事务失败（进程内）: {e}", exc_info=True)
-                    await db.rollback()
-                    synced = 0
+                logger.info(f"成功同步 {synced} 个短链接的点击次数到数据库（进程内）")
             
             # 只清空成功同步的计数器
             if synced > 0:
@@ -215,18 +241,30 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                 continue
             
             try:
-                # 先获取计数器值（不删除）
-                count = await redis.get(key)
-                if not count or int(count) <= 0:
-                    # 计数器为0或不存在，直接删除
-                    await redis.delete(key)
+                # 使用Lua脚本原子获取并删除计数器值，避免竞态条件
+                # 这样可以确保在获取值和删除之间不会有新的点击进来导致数据丢失
+                count_value = await redis.eval(_GET_AND_DELETE_COUNTER_LUA, 1, key)
+                
+                # Lua脚本返回的是数字类型，需要转换为int
+                if isinstance(count_value, (int, float)):
+                    count_value = int(count_value)
+                else:
+                    # 如果返回的不是数字，可能是错误，记录并跳过
+                    logger.warning(
+                        f"Lua脚本返回非数字值: short_code={short_code}, key={key}, "
+                        f"value={count_value}, type={type(count_value)}"
+                    )
                     continue
                 
-                count_value = int(count)
+                if count_value <= 0:
+                    # 计数器为0或不存在，已由Lua脚本删除，跳过
+                    continue
+                
                 updates.append((short_code, count_value, key))
                 
             except Exception as e:
                 # 获取计数器值失败，保留以便下次重试
+                # 注意：如果Lua脚本执行失败，计数器可能没有被删除，会在下次同步时重试
                 logger.error(
                     f"获取计数器值失败: short_code={short_code}, key={key}, error={e}",
                     exc_info=True
@@ -258,12 +296,14 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                 
                 if batch_synced > 0:
                     synced += batch_synced
-                    # 删除Redis中的计数器（只在成功提交后删除）
-                    for key in batch_keys_to_delete:
-                        try:
-                            await redis.delete(key)
-                        except Exception as e:
-                            logger.warning(f"删除Redis计数器失败: key={key}, error={e}")
+                    # 注意：Redis计数器已经在获取时通过Lua脚本原子删除了
+                    # 这里只需要处理删除失败的情况（如果Lua脚本执行失败）
+                    # 但实际上Lua脚本已经处理了删除，所以这里主要是日志记录
+                    if batch_keys_to_delete:
+                        logger.debug(
+                            f"批次 {batch_idx // BATCH_SIZE + 1} 成功同步，"
+                            f"Redis计数器已通过Lua脚本原子删除: {len(batch_keys_to_delete)} 个"
+                        )
                 
                 # 记录失败的更新
                 if batch_failed:
@@ -341,6 +381,7 @@ async def _batch_update_click_counts_with_retry(
             
             # 构建批量更新SQL（使用 CASE WHEN 实现批量更新）
             # 这样可以一次性更新多条记录，减少锁竞争
+            # 按 short_code 排序，确保所有进程以相同顺序锁定记录，减少死锁
             short_codes = [code for code, _, _ in batch]
             count_values = {code: count for code, count, _ in batch}
             
@@ -364,7 +405,13 @@ async def _batch_update_click_counts_with_retry(
             case_when_sql = " ".join(case_when_parts)
             where_placeholders = ", ".join(where_params)
             
-            # 执行批量更新
+            # 执行批量更新（使用 FOR UPDATE 确保按顺序锁定，但这里不需要，因为已经按 short_code 排序）
+            # 添加超时设置，避免长时间等待
+            try:
+                await db.execute(text("SET SESSION innodb_lock_wait_timeout = 5"))
+            except Exception as e:
+                logger.debug(f"设置锁等待超时失败（可忽略）: {e}")
+            
             result = await db.execute(
                 text(f"""
                     UPDATE short_links 
@@ -373,6 +420,7 @@ async def _batch_update_click_counts_with_retry(
                         ELSE click_count
                     END
                     WHERE short_code IN ({where_placeholders})
+                    ORDER BY short_code
                 """),
                 params
             )
@@ -385,12 +433,19 @@ async def _batch_update_click_counts_with_retry(
             if updated_count > 0:
                 # 如果更新成功，说明所有记录都存在（因为WHERE条件匹配）
                 # 直接标记所有更新为成功
-                batch_keys_to_delete = [redis_key for _, _, redis_key in batch]
+                batch_keys_to_delete = [redis_key for _, _, redis_key in batch if redis_key]
                 
                 for short_code, count_value, redis_key in batch:
                     logger.debug(
                         f"批量更新短链接点击次数: short_code={short_code}, 增量={count_value}"
                     )
+                    # 清除缓存，确保缓存中的点击次数与数据库一致
+                    # 注意：这里不清除计数器键（redis_key），因为已经在获取时用Lua脚本删除了
+                    try:
+                        from app.core.short_link_cache import invalidate_short_link_cache
+                        await invalidate_short_link_cache(short_code)
+                    except Exception as e:
+                        logger.debug(f"清除短链接缓存失败（可忽略）: short_code={short_code}, error={e}")
                 
                 return len(batch_keys_to_delete), batch_keys_to_delete, []
             else:
@@ -405,13 +460,17 @@ async def _batch_update_click_counts_with_retry(
                 existing_codes = {row[0] for row in result.fetchall()}
                 
                 # 删除不存在的短链接的Redis计数器
+                # 注意：由于使用了Lua脚本，redis_key可能已经被删除，但为了安全起见，仍然尝试删除
                 for short_code, count_value, redis_key in batch:
                     if short_code not in existing_codes:
-                        logger.warning(f"短链接不存在，删除Redis计数器: short_code={short_code}")
-                        try:
-                            await redis.delete(redis_key)
-                        except Exception as e:
-                            logger.warning(f"删除Redis计数器失败: key={redis_key}, error={e}")
+                        logger.warning(f"短链接不存在，尝试删除Redis计数器: short_code={short_code}")
+                        if redis_key:  # 只有在redis_key存在时才尝试删除
+                            try:
+                                deleted = await redis.delete(redis_key)
+                                if deleted:
+                                    logger.debug(f"成功删除不存在的短链接的Redis计数器: short_code={short_code}")
+                            except Exception as e:
+                                logger.warning(f"删除Redis计数器失败: key={redis_key}, error={e}")
                 
                 return 0, [], batch
                 
@@ -426,9 +485,45 @@ async def _batch_update_click_counts_with_retry(
             )
             
             if is_deadlock:
+                # 更新死锁统计
+                _deadlock_stats["total_deadlocks"] += 1
+                _deadlock_stats["last_deadlock_time"] = datetime.now(timezone.utc)
+                batch_size = len(batch)
+                _deadlock_stats["deadlocks_by_batch_size"][batch_size] = \
+                    _deadlock_stats["deadlocks_by_batch_size"].get(batch_size, 0) + 1
+                
                 if attempt < max_retries - 1:
-                    # 指数退避 + 随机抖动
-                    delay = DEADLOCK_RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.3)
+                    # 如果批次较大且重试次数较多，考虑拆分批次
+                    if len(batch) > 2 and attempt >= 2:
+                        # 将批次拆分成两半，分别处理
+                        mid = len(batch) // 2
+                        first_half = batch[:mid]
+                        second_half = batch[mid:]
+                        
+                        short_codes_str = ", ".join([code for code, _, _ in batch])
+                        logger.warning(
+                            f"批量更新短链接点击次数时检测到死锁: short_codes=[{short_codes_str}], "
+                            f"第 {attempt + 1}/{max_retries} 次重试，将批次拆分为 {len(first_half)} 和 {len(second_half)} 条记录分别处理..."
+                        )
+                        
+                        # 先处理前半部分
+                        first_synced, first_keys, first_failed = await _batch_update_click_counts_with_retry(
+                            db, first_half, redis, max_retries - attempt
+                        )
+                        # 再处理后半部分
+                        second_synced, second_keys, second_failed = await _batch_update_click_counts_with_retry(
+                            db, second_half, redis, max_retries - attempt
+                        )
+                        
+                        # 合并结果
+                        total_synced = first_synced + second_synced
+                        all_keys = first_keys + second_keys
+                        all_failed = first_failed + second_failed
+                        
+                        return total_synced, all_keys, all_failed
+                    
+                    # 指数退避 + 随机抖动（增加随机范围以减少并发冲突）
+                    delay = DEADLOCK_RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.5)
                     short_codes_str = ", ".join([code for code, _, _ in batch])
                     logger.warning(
                         f"批量更新短链接点击次数时检测到死锁: short_codes=[{short_codes_str}], "
@@ -444,6 +539,11 @@ async def _batch_update_click_counts_with_retry(
                         f"批量更新短链接点击次数失败（死锁，已重试 {max_retries} 次）: "
                         f"short_codes=[{short_codes_str}], error={e}",
                         exc_info=True
+                    )
+                    logger.warning(
+                        f"死锁统计: 总死锁次数={_deadlock_stats['total_deadlocks']}, "
+                        f"批次大小分布={_deadlock_stats['deadlocks_by_batch_size']}, "
+                        f"最后死锁时间={_deadlock_stats['last_deadlock_time']}"
                     )
                     # 死锁时MySQL已自动回滚，不需要手动回滚
                     return 0, [], batch
@@ -494,6 +594,19 @@ async def _update_click_count_with_retry(
     """
     for attempt in range(max_retries):
         try:
+            # 设置事务隔离级别为READ COMMITTED，减少锁竞争
+            try:
+                await db.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED"))
+            except Exception as e:
+                logger.debug(f"设置事务隔离级别失败（可忽略）: {e}")
+            
+            # 设置锁等待超时，避免长时间等待
+            try:
+                await db.execute(text("SET SESSION innodb_lock_wait_timeout = 5"))
+            except Exception as e:
+                logger.debug(f"设置锁等待超时失败（可忽略）: {e}")
+            
+            # 使用原子更新，按 short_code 排序（虽然只有一条，但保持一致性）
             result = await db.execute(
                 text("""
                     UPDATE short_links 
@@ -642,15 +755,17 @@ async def _commit_with_retry(db: AsyncSession, synced_count: int, max_retries: i
 async def sync_click_counts_to_db_batch(
     db: AsyncSession, 
     updates: List[Tuple[str, int]],
-    batch_size: int = 10
+    batch_size: int = 5
 ) -> int:
     """
-    批量同步点击次数到数据库（使用批量更新，减少死锁风险）
+    批量同步点击次数到数据库（使用原子批量更新，减少死锁风险）
+    
+    注意：此函数已重构为使用原子批量更新，避免 ORM 方式导致的死锁
     
     Args:
         db: 数据库会话
         updates: (short_code, count) 元组列表
-        batch_size: 每批处理的记录数
+        batch_size: 每批处理的记录数（默认5，与主函数保持一致）
         
     Returns:
         成功同步的记录数
@@ -658,58 +773,74 @@ async def sync_click_counts_to_db_batch(
     if not updates:
         return 0
     
-    # 按 short_code 排序，避免死锁
+    # 按 short_code 排序，确保所有进程以相同顺序锁定记录（关键：避免死锁）
     updates = sorted(updates, key=lambda x: x[0])
     
     synced = 0
     total_batches = (len(updates) + batch_size - 1) // batch_size
     
+    redis = await get_redis_client()
+    
     for batch_idx in range(total_batches):
         batch = updates[batch_idx * batch_size:(batch_idx + 1) * batch_size]
         
-        # 获取所有 short_code
-        short_codes = [code for code, _ in batch]
+        # 转换为 (short_code, count, redis_key) 格式，redis_key 设为空字符串（不使用Redis）
+        batch_with_keys = [(code, count, "") for code, count in batch]
         
         try:
-            # 查询所有短链接（按 ID 排序，避免死锁）
-            result = await db.execute(
-                select(ShortLink)
-                .where(ShortLink.short_code.in_(short_codes))
-                .order_by(ShortLink.id)
+            # 使用与主函数相同的批量更新方法（原子更新，带重试机制）
+            batch_synced, _, batch_failed = await _batch_update_click_counts_with_retry(
+                db, batch_with_keys, redis
             )
-            short_links = result.scalars().all()
             
-            # 创建 short_code -> count 映射
-            count_map = {code: count for code, count in batch}
+            if batch_synced > 0:
+                synced += batch_synced
+                logger.debug(
+                    f"批量同步点击次数成功（批次 {batch_idx + 1}/{total_batches}）: "
+                    f"成功 {batch_synced} 条"
+                )
             
-            # 更新每个短链接
-            for short_link in short_links:
-                if short_link.short_code in count_map:
-                    count_value = count_map[short_link.short_code]
-                    old_count = short_link.click_count
-                    short_link.click_count += count_value
-                    new_count = short_link.click_count
-                    
-                    logger.debug(
-                        f"批量更新短链接点击次数: short_code={short_link.short_code}, "
-                        f"旧值={old_count}, 增量={count_value}, 新值={new_count}"
-                    )
-            
-            # 提交当前批次（带重试）
-            success = await _commit_with_retry(db, len(batch))
-            if success:
-                synced += len(batch)
-            else:
-                # 如果提交失败，回滚并跳过当前批次
-                logger.warning(f"批次 {batch_idx + 1}/{total_batches} 提交失败，跳过")
-                await db.rollback()
+            if batch_failed:
+                logger.warning(
+                    f"批量同步点击次数部分失败（批次 {batch_idx + 1}/{total_batches}）: "
+                    f"失败 {len(batch_failed)} 条"
+                )
                 
         except Exception as e:
             logger.error(
                 f"批量同步点击次数失败（批次 {batch_idx + 1}/{total_batches}）: {e}",
                 exc_info=True
             )
-            await db.rollback()
+            try:
+                await db.rollback()
+            except:
+                pass
     
     return synced
+
+
+def get_deadlock_stats() -> dict:
+    """
+    获取死锁统计信息（用于监控）
+    
+    Returns:
+        包含死锁统计信息的字典
+    """
+    return {
+        "total_deadlocks": _deadlock_stats["total_deadlocks"],
+        "deadlocks_by_batch_size": _deadlock_stats["deadlocks_by_batch_size"].copy(),
+        "last_deadlock_time": _deadlock_stats["last_deadlock_time"].isoformat() if _deadlock_stats["last_deadlock_time"] else None,
+    }
+
+
+def reset_deadlock_stats() -> None:
+    """
+    重置死锁统计信息
+    """
+    global _deadlock_stats
+    _deadlock_stats = {
+        "total_deadlocks": 0,
+        "deadlocks_by_batch_size": {},
+        "last_deadlock_time": None,
+    }
 
