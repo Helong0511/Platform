@@ -742,6 +742,20 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             logger.debug("HTTPException的上下文是流异常，连接已断开，跳过响应创建")
             raise context_exc
     
+    # 检查连接是否已断开（使用非阻塞方式）
+    # 注意：这里不能尝试读取流，只能检查标记
+    try:
+        if _check_connection_disconnected(request):
+            logger.debug("检测到连接已断开，跳过HTTPException响应创建")
+            from anyio import EndOfStream
+            raise EndOfStream("客户端已断开连接")
+    except Exception as stream_exc:
+        # 如果检测到连接断开，抛出流异常
+        if _is_stream_error(stream_exc):
+            logger.debug("检测到连接已断开，跳过HTTPException响应创建")
+            raise stream_exc
+        # 其他异常，忽略（继续处理HTTPException）
+    
     # 如果 detail 已经是标准格式（字典，包含 code 字段），说明是通过 raise_api_exception 抛出的
     # 此时应该使用 exc.status_code（已经在 raise_api_exception 中正确设置）
     if isinstance(exc.detail, dict) and "code" in exc.detail:
@@ -808,11 +822,16 @@ async def global_exception_handler(request: Request, exc: Exception):
             context_exc = exc.__context__
             if _is_stream_error(context_exc):
                 logger.debug("检测到连接断开上下文，跳过HTTPException处理")
+                # 直接抛出流异常，不进行任何其他操作
                 raise context_exc
         
-        # 检查连接是否已断开
+        # 检查连接是否已断开（使用非阻塞方式）
+        # 注意：这里不能尝试读取流，只能检查标记
         try:
-            _raise_stream_error_if_disconnected(request)
+            if _check_connection_disconnected(request):
+                logger.debug("检测到连接已断开，跳过HTTPException处理")
+                from anyio import EndOfStream
+                raise EndOfStream("客户端已断开连接")
         except Exception as stream_exc:
             # 如果检测到连接断开，抛出流异常
             if _is_stream_error(stream_exc):
@@ -821,16 +840,9 @@ async def global_exception_handler(request: Request, exc: Exception):
             # 其他异常，忽略（继续处理HTTPException）
         
         # 如果连接仍然有效，重新抛出 HTTPException 让专门的处理器处理
-        # 但需要捕获可能的流异常
-        try:
-            raise exc
-        except Exception as e:
-            # 如果是流异常，直接重新抛出
-            if _is_stream_error(e):
-                logger.debug("连接已断开，无法发送HTTPException响应")
-                raise
-            # 其他异常，重新抛出
-            raise
+        # HTTPException 应该由 http_exception_handler 处理，不应该到达这里
+        # 如果到达这里，可能是异常处理顺序问题，直接重新抛出让上层处理
+        raise exc
 
     # 检查是否是流关闭相关的异常（客户端提前关闭连接）
     if _is_stream_error(exc):
