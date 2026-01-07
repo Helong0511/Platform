@@ -596,17 +596,68 @@ class DeductionManager:
         offer_id: Optional[int],
         publisher_id: Optional[int]
     ) -> None:
-        """清除统计缓存"""
+        """
+        清除统计缓存
+        
+        注意：由于统计缓存键的格式是：
+        cpl:conversion_stats:adv:{id}:offer:{id}:pub:{id}:hours:{hours}
+        
+        我们需要清除所有包含指定ID的缓存键，因为统计会变化。
+        例如：如果有advertiser_id=1，需要清除所有包含adv:1的缓存。
+        """
         patterns = []
         if advertiser_id:
-            patterns.append(f"{STATS_CACHE_PREFIX}*adv:{advertiser_id}*")
+            # 匹配所有包含该广告主ID的缓存键
+            patterns.append(f"*adv:{advertiser_id}*")
         if offer_id:
-            patterns.append(f"{STATS_CACHE_PREFIX}*offer:{offer_id}*")
+            # 匹配所有包含该Offer ID的缓存键
+            patterns.append(f"*offer:{offer_id}*")
         if publisher_id:
-            patterns.append(f"{STATS_CACHE_PREFIX}*pub:{publisher_id}*")
+            # 匹配所有包含该渠道ID的缓存键
+            patterns.append(f"*pub:{publisher_id}*")
         
-        for pattern in patterns:
-            await invalidate_cache(pattern)
+        # 如果没有指定任何ID，清除所有统计缓存
+        if not patterns:
+            patterns.append("*")
+        
+        # 清除匹配的缓存
+        # 注意：set_cached和get_cached会在key前添加CACHE_PREFIX（query_cache:）
+        # 所以实际的缓存键是：query_cache:cpl:conversion_stats:adv:1:hours:24
+        # invalidate_cache函数也会添加CACHE_PREFIX并在末尾添加*，所以我们需要直接使用Redis删除
+        try:
+            from app.core.redis_client import get_redis_client
+            from app.core.cache import CACHE_PREFIX
+            redis = await get_redis_client()
+            if not redis:
+                return
+            
+            # 构建完整的缓存键模式（包含query_cache:前缀）
+            # 实际的缓存键格式：query_cache:cpl:conversion_stats:adv:1:hours:24
+            base_pattern = f"{CACHE_PREFIX}{STATS_CACHE_PREFIX}"
+            patterns_to_match = []
+            
+            for pattern in patterns:
+                # pattern格式：*adv:1* 或 *offer:2* 或 *pub:3*
+                # 构建完整匹配模式：query_cache:cpl:conversion_stats:*adv:1*
+                full_pattern = f"{base_pattern}{pattern}"
+                patterns_to_match.append(full_pattern)
+            
+            # 使用SCAN而不是KEYS（更安全，不会阻塞）
+            keys_to_delete = []
+            for pattern in patterns_to_match:
+                async for key in redis.scan_iter(match=pattern):
+                    keys_to_delete.append(key)
+                    # 批量删除，每100个删除一次
+                    if len(keys_to_delete) >= 100:
+                        await redis.delete(*keys_to_delete)
+                        keys_to_delete = []
+            
+            # 删除剩余的
+            if keys_to_delete:
+                deleted_count = await redis.delete(*keys_to_delete)
+                logger.debug(f"清除了 {deleted_count} 个统计缓存键")
+        except Exception as e:
+            logger.warning(f"清除统计缓存失败: {e}")
 
 
 # 向后兼容的函数接口
