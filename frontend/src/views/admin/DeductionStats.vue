@@ -355,20 +355,25 @@ const loadGroupNames = async () => {
       // 分页加载所有广告主
       let allAdvertisers = []
       let page = 1
-      const pageSize = 100
+      const pageSize = 100 // 后端最大限制
       let hasMore = true
       
       while (hasMore) {
-        const advertiserRes = await getAdvertisers({ page, page_size: pageSize })
-        if (advertiserRes.code === 200) {
-          const data = advertiserRes.data || {}
-          const advertisers = data.data || data.items || []
-          allAdvertisers = allAdvertisers.concat(advertisers)
-          
-          const total = data.total || advertiserRes.total || 0
-          hasMore = allAdvertisers.length < total
-          page++
-        } else {
+        try {
+          const advertiserRes = await getAdvertisers({ page, page_size: pageSize })
+          if (advertiserRes && advertiserRes.code === 200) {
+            const data = advertiserRes.data || {}
+            const advertisers = data.data || data.items || []
+            allAdvertisers = allAdvertisers.concat(advertisers)
+            
+            const total = data.total || advertiserRes.total || 0
+            hasMore = allAdvertisers.length < total && advertisers.length > 0
+            page++
+          } else {
+            hasMore = false
+          }
+        } catch (err) {
+          console.error('加载广告主失败：', err)
           hasMore = false
         }
       }
@@ -382,20 +387,25 @@ const loadGroupNames = async () => {
       // 分页加载所有Offer
       let allOffers = []
       let page = 1
-      const pageSize = 100
+      const pageSize = 100 // 后端最大限制
       let hasMore = true
       
       while (hasMore) {
-        const offerRes = await getOffers({ page, page_size: pageSize })
-        if (offerRes.code === 200) {
-          const data = offerRes.data || {}
-          const offers = data.data || data.items || []
-          allOffers = allOffers.concat(offers)
-          
-          const total = data.total || offerRes.total || 0
-          hasMore = allOffers.length < total
-          page++
-        } else {
+        try {
+          const offerRes = await getOffers({ page, page_size: pageSize })
+          if (offerRes && offerRes.code === 200) {
+            const data = offerRes.data || {}
+            const offers = data.data || data.items || []
+            allOffers = allOffers.concat(offers)
+            
+            const total = data.total || offerRes.total || 0
+            hasMore = allOffers.length < total && offers.length > 0
+            page++
+          } else {
+            hasMore = false
+          }
+        } catch (err) {
+          console.error('加载Offer失败：', err)
           hasMore = false
         }
       }
@@ -409,20 +419,25 @@ const loadGroupNames = async () => {
       // 分页加载所有渠道
       let allPublishers = []
       let page = 1
-      const pageSize = 100
+      const pageSize = 100 // 后端最大限制
       let hasMore = true
       
       while (hasMore) {
-        const publisherRes = await getPublishers({ page, page_size: pageSize })
-        if (publisherRes.code === 200) {
-          const data = publisherRes.data || {}
-          const publishers = data.data || data.items || []
-          allPublishers = allPublishers.concat(publishers)
-          
-          const total = data.total || publisherRes.total || 0
-          hasMore = allPublishers.length < total
-          page++
-        } else {
+        try {
+          const publisherRes = await getPublishers({ page, page_size: pageSize })
+          if (publisherRes && publisherRes.code === 200) {
+            const data = publisherRes.data || {}
+            const publishers = data.data || data.items || []
+            allPublishers = allPublishers.concat(publishers)
+            
+            const total = data.total || publisherRes.total || 0
+            hasMore = allPublishers.length < total && publishers.length > 0
+            page++
+          } else {
+            hasMore = false
+          }
+        } catch (err) {
+          console.error('加载渠道失败：', err)
           hasMore = false
         }
       }
