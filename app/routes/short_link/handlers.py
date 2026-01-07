@@ -28,6 +28,48 @@ from app.routes.short_link.url_builder import build_final_url
 logger = logging.getLogger(__name__)
 
 
+def log_redirect_details(
+    short_code: str,
+    click_id: str,
+    final_offer_id: Optional[int],
+    final_channel_id: Optional[int],
+    advertiser_id: Optional[int],
+    request_params: dict,
+    original_url_before_replace: str,
+    original_url_after_replace: str,
+    final_url: str,
+    request: Optional[Request] = None
+) -> None:
+    """
+    记录短链接重定向的详细信息
+    
+    Args:
+        short_code: 短链接代码
+        click_id: 点击ID
+        final_offer_id: 最终Offer ID
+        final_channel_id: 最终渠道ID
+        advertiser_id: 广告主ID
+        request_params: 点击携带的参数
+        original_url_before_replace: 原始URL（替换前）
+        original_url_after_replace: 替换占位符后
+        final_url: 最终跳转URL
+        request: FastAPI请求对象（可选）
+    """
+    original_request_url = str(request.url) if request else "N/A"
+    logger.warning("=" * 180)
+    logger.warning(f"[短链接重定向] 原始点击URL: {original_request_url}")
+    logger.warning(f"[短链接重定向] 短链接代码: {short_code}")
+    logger.warning(f"[短链接重定向] 点击ID: {click_id}")
+    logger.warning(f"[短链接重定向] Offer ID: {final_offer_id}")
+    logger.warning(f"[短链接重定向] 渠道ID: {final_channel_id}")
+    logger.warning(f"[短链接重定向] 广告主ID: {advertiser_id}")
+    logger.warning(f"[短链接重定向] 点击携带的参数: {request_params}")
+    logger.warning(f"[短链接重定向] 原始URL（替换前）: {original_url_before_replace}")
+    logger.warning(f"[短链接重定向] 替换占位符后: {original_url_after_replace}")
+    logger.warning(f"[短链接重定向] 最终跳转URL: {final_url}")
+    logger.warning("=" * 180)
+
+
 async def handle_cached_redirect(
     short_code: str,
     cached_data: dict,
@@ -136,19 +178,18 @@ async def handle_cached_redirect(
     )
     
     # 打印最终跳转链接详细信息
-    original_request_url = str(request.url) if request else "N/A"
-    logger.warning("=" * 180)
-    logger.warning(f"[短链接重定向] 原始点击URL: {original_request_url}")
-    logger.warning(f"[短链接重定向] 短链接代码: {short_code}")
-    logger.warning(f"[短链接重定向] 点击ID: {click_id}")
-    logger.warning(f"[短链接重定向] Offer ID: {final_offer_id}")
-    logger.warning(f"[短链接重定向] 渠道ID: {final_channel_id}")
-    logger.warning(f"[短链接重定向] 广告主ID: {advertiser_id}")
-    logger.warning(f"[短链接重定向] 点击携带的参数: {request_params}")
-    logger.warning(f"[短链接重定向] 原始URL（替换前）: {original_url_before_replace}")
-    logger.warning(f"[短链接重定向] 替换占位符后: {original_url_after_replace}")
-    logger.warning(f"[短链接重定向] 最终跳转URL: {final_url}")
-    logger.warning("=" * 180)
+    log_redirect_details(
+        short_code=short_code,
+        click_id=click_id,
+        final_offer_id=final_offer_id,
+        final_channel_id=final_channel_id,
+        advertiser_id=advertiser_id,
+        request_params=request_params,
+        original_url_before_replace=original_url_before_replace,
+        original_url_after_replace=original_url_after_replace,
+        final_url=final_url,
+        request=request
+    )
     
     return RedirectResponse(url=final_url, status_code=302)
 
@@ -266,17 +307,18 @@ async def handle_database_redirect(
     )
     
     # 打印最终跳转链接详细信息
-    logger.warning("=" * 80)
-    logger.warning(f"[短链接重定向] 短链接代码: {short_code}")
-    logger.warning(f"[短链接重定向] 原始URL（替换前）: {original_url_before_replace}")
-    logger.warning(f"[短链接重定向] 替换占位符后: {original_url_after_replace}")
-    logger.warning(f"[短链接重定向] 最终跳转URL: {final_url}")
-    logger.warning(f"[短链接重定向] 点击ID: {click_id}")
-    logger.warning(f"[短链接重定向] Offer ID: {final_offer_id}")
-    logger.warning(f"[短链接重定向] 渠道ID: {final_channel_id}")
-    logger.warning(f"[短链接重定向] 广告主ID: {advertiser_id}")
-    logger.warning(f"[短链接重定向] 点击携带的参数: {request_params}")
-    logger.warning("=" * 80)
+    log_redirect_details(
+        short_code=short_code,
+        click_id=click_id,
+        final_offer_id=final_offer_id,
+        final_channel_id=final_channel_id,
+        advertiser_id=advertiser_id,
+        request_params=request_params,
+        original_url_before_replace=original_url_before_replace,
+        original_url_after_replace=original_url_after_replace,
+        final_url=final_url,
+        request=request
+    )
     
     return RedirectResponse(url=final_url, status_code=302)
 
