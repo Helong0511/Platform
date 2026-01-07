@@ -10,6 +10,43 @@
         </div>
       </template>
 
+      <!-- 功能说明卡片 -->
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 20px;"
+      >
+        <template #title>
+          <div style="line-height: 1.8;">
+            <div style="font-weight: 600; margin-bottom: 8px;">日志说明：</div>
+            <div style="margin-left: 20px;">
+              <div style="margin-bottom: 6px;">
+                <strong style="color: #E6A23C;">扣量日志</strong>：
+                <ul style="margin: 4px 0 0 20px; padding: 0; line-height: 1.6;">
+                  <li>记录所有扣量操作的详细信息</li>
+                  <li>被扣量的转化<strong style="color: #F56C6C;">不会保存到主转化表</strong>，所以<strong style="color: #F56C6C;">转化ID为空</strong>（显示"已扣量"标签）</li>
+                  <li>但会在扣减日志表中记录，用于统计和审计</li>
+                  <li>下游渠道<strong style="color: #F56C6C;">完全看不到</strong>被扣量的转化</li>
+                </ul>
+              </div>
+              <div>
+                <strong style="color: #F56C6C;">扣金额日志</strong>：
+                <ul style="margin: 4px 0 0 20px; padding: 0; line-height: 1.6;">
+                  <li>记录所有扣金额操作的详细信息</li>
+                  <li>被扣金额的转化<strong style="color: #67C23A;">仍然保存到主转化表</strong>，所以<strong style="color: #67C23A;">有转化ID</strong></li>
+                  <li>下游渠道可以看到转化记录，但<strong style="color: #F56C6C;">金额已按比例减少</strong></li>
+                  <li>例如：原始金额$100，扣金额比例5%，最终支付$95给下游</li>
+                </ul>
+              </div>
+              <div style="margin-top: 8px; font-size: 12px; color: #909399;">
+                <strong>注意</strong>：所有转化都会记录到扣减日志表，即使未扣减也会记录（用于统计准确性）
+              </div>
+            </div>
+          </div>
+        </template>
+      </el-alert>
+
       <!-- 搜索筛选区 -->
       <div class="search-bar">
         <el-date-picker
@@ -108,7 +145,9 @@
         <el-table-column prop="conversion_id" label="转化ID" width="120">
           <template #default="scope">
             <span v-if="scope.row.conversion_id">{{ scope.row.conversion_id }}</span>
-            <el-tag v-else size="small" type="info">已扣量</el-tag>
+            <el-tooltip v-else content="该转化被扣量，不会保存到主转化表，下游渠道无法看到" placement="top">
+              <el-tag size="small" type="warning">已扣量</el-tag>
+            </el-tooltip>
           </template>
         </el-table-column>
         
@@ -195,7 +234,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElTooltip } from 'element-plus'
 import { Search, Refresh, Document } from '@element-plus/icons-vue'
 import { getDeductionLogs } from '@/api/deduction'
 import { getAdvertisers } from '@/api/advertiser'

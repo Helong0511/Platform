@@ -11,6 +11,40 @@
         </div>
       </template>
 
+      <!-- 功能说明卡片 -->
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 20px;"
+      >
+        <template #title>
+          <div style="line-height: 1.8;">
+            <div style="font-weight: 600; margin-bottom: 8px;">统计说明：</div>
+            <div style="margin-left: 20px;">
+              <div style="margin-bottom: 6px;">
+                <strong style="color: #E6A23C;">扣量统计</strong>：
+                <ul style="margin: 4px 0 0 20px; padding: 0; line-height: 1.6;">
+                  <li><strong>原始转化数量</strong>：统计时间范围内所有转化记录的总数（包括被扣量的和未扣量的）</li>
+                  <li><strong>扣减转化数量</strong>：被扣量的转化数量（这些转化<strong style="color: #F56C6C;">不会保存到主转化表</strong>，下游<strong style="color: #F56C6C;">无法看到</strong>）</li>
+                  <li><strong>最终转化数量</strong>：实际保存到数据库的转化数量（原始数量 - 扣减数量）</li>
+                  <li><strong>扣量比例</strong>：扣减数量 ÷ 原始数量 × 100%</li>
+                </ul>
+              </div>
+              <div>
+                <strong style="color: #F56C6C;">扣金额统计</strong>：
+                <ul style="margin: 4px 0 0 20px; padding: 0; line-height: 1.6;">
+                  <li><strong>原始转化金额</strong>：所有转化的原始金额总和</li>
+                  <li><strong>扣减转化金额</strong>：按比例扣减的金额总和（转化<strong style="color: #67C23A;">仍然保存</strong>，但金额减少）</li>
+                  <li><strong>最终转化金额</strong>：实际支付给下游的金额总和（原始金额 - 扣减金额）</li>
+                  <li><strong>扣金额比例</strong>：扣减金额 ÷ 原始金额 × 100%</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </template>
+      </el-alert>
+
       <!-- 筛选条件 -->
       <div class="filter-bar">
         <el-date-picker
