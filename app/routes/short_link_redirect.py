@@ -1267,15 +1267,13 @@ def _build_final_url(
                 # 只有当 offer_id 有值时才添加
                 request_params_with_click['offer_id'] = offer_id
             elif param_name == 'channel_id' and final_channel_id:
-                # 只有当 channel_id 有值且 publisher_id 没有占位符时才添加
-                # （避免 channel_id 和 publisher_id 重复）
+                # channel_id 和 publisher_id 是同一个概念（都代表渠道ID）
+                # 只有当 channel_id 有值且原始URL中没有 publisher_id 占位符时才添加
+                # （如果原始URL中有 {publisher_id} 占位符，它会被替换为 channel_id 的值，避免重复）
                 if not has_placeholder.get('publisher_id', False):
                     request_params_with_click['channel_id'] = final_channel_id
-            elif param_name == 'publisher_id' and final_channel_id:
-                # 只有当 publisher_id 有值且 channel_id 没有占位符时才添加
-                # （避免 channel_id 和 publisher_id 重复）
-                if not has_placeholder.get('channel_id', False):
-                    request_params_with_click['publisher_id'] = final_channel_id
+            # 注意：channel_id 和 publisher_id 是同一个概念，只使用 channel_id
+            # 不再自动添加 publisher_id 参数，避免在最终URL中同时出现两个相同含义的参数
     
     # ==================== 处理用户请求参数 ====================
     # 用户请求时可能携带额外的查询参数，需要合并到最终URL中
@@ -1358,12 +1356,15 @@ def _build_final_url(
             continue
         
         # 步骤6：处理 channel_id 和 publisher_id 的互斥关系
-        # 如果原始URL中已有 channel_id 的占位符，跳过 publisher_id 参数
-        if key_lower == 'publisher_id' and has_placeholder.get('channel_id', False):
-            continue
-        # 如果原始URL中已有 publisher_id 的占位符，跳过 channel_id 参数
+        # channel_id 和 publisher_id 是同一个概念（都代表渠道ID）
+        # 如果原始URL中已有 publisher_id 的占位符，跳过用户请求中的 channel_id 参数（避免重复）
         if key_lower == 'channel_id' and has_placeholder.get('publisher_id', False):
             continue
+        # 如果原始URL中已有 channel_id 的占位符，跳过用户请求中的 publisher_id 参数（避免重复）
+        if key_lower == 'publisher_id' and has_placeholder.get('channel_id', False):
+            continue
+        # 注意：如果用户在请求URL中明确提供了 publisher_id，会保留它
+        # 系统不会自动添加 publisher_id（只会在原始URL有占位符时替换）
         
         # 步骤7：参数通过所有检查，添加到合并列表
         request_params_with_click[key_lower] = value
@@ -1377,4 +1378,5 @@ def _build_final_url(
     # 使用 merge_url_params 函数将准备好的参数合并到替换后的URL中
     # merge_url_params 会处理参数冲突、占位符检测、参数排序等
     return merge_url_params(original_url_after_replace, request_params_with_click)
+
 
