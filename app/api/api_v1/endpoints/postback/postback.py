@@ -28,7 +28,7 @@ from app.schemas.postback import (
     PostbackQueryParams,
     PostbackForwardLogResponse
 )
-from app.schemas.base import ResponseBaseSchema
+from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.core.security import get_current_user
 
 # 创建路由实例
@@ -62,7 +62,7 @@ def get_client_ip(request: Request) -> Optional[str]:
 
 # ====== 查询接口（必须在动态路径之前定义） ======
 @router.get("/postback/conversions", 
-            response_model=ResponseBaseSchema[list[PostbackConversionResponse]],
+            response_model=PaginatedResponseBaseSchema[list[PostbackConversionResponse]],
             summary="查询 PostBack 转化记录（管理员）")
 async def get_postback_conversions(
     request: Request,
@@ -308,8 +308,11 @@ async def get_postback_conversions(
             f"platform={platform}, total={total}, page={page}, page_size={page_size}"
         )
         
-        return ResponseBaseSchema.success(
+        return PaginatedResponseBaseSchema.success(
             data=conversion_list,
+            total=total,
+            page=page,
+            page_size=page_size,
             message=f"成功获取 {len(conversion_list)} 条记录，共 {total} 条"
         )
         
@@ -429,7 +432,7 @@ async def get_postback_stats(
 
 # ====== 转发日志查询接口（必须在动态路径之前定义） ======
 @router.get("/postback/forward-logs",
-            response_model=ResponseBaseSchema[list[PostbackForwardLogResponse]],
+            response_model=PaginatedResponseBaseSchema[list[PostbackForwardLogResponse]],
             summary="查询 PostBack 下游转发日志（管理员）")
 async def get_postback_forward_logs(
     request: Request,
@@ -516,13 +519,12 @@ async def get_postback_forward_logs(
         count_result = await db.execute(count_query)
         total = count_result.scalar() or 0
         
-        return ResponseBaseSchema(
-            code=200,
-            message="查询成功",
+        return PaginatedResponseBaseSchema.success(
             data=[PostbackForwardLogResponse.model_validate(log) for log in logs],
             total=total,
             page=page,
-            page_size=page_size
+            page_size=page_size,
+            message="查询成功"
         )
         
     except HTTPException:
