@@ -40,7 +40,7 @@ async def get_short_link_from_cache(short_code: str) -> Optional[Dict[str, Any]]
     return None
 
 
-async def set_short_link_to_cache(short_code: str, short_link_data: Dict[str, Any], ttl: int = CACHE_TTL) -> bool:
+async def set_short_link_to_cache(short_code: str, short_link_data: Dict[str, Any], ttl: int = CACHE_TTL, add_tags: bool = True) -> bool:
     """
     将短链接数据写入缓存
     
@@ -48,6 +48,7 @@ async def set_short_link_to_cache(short_code: str, short_link_data: Dict[str, An
         short_code: 短链接代码
         short_link_data: 短链接数据字典
         ttl: 缓存过期时间（秒）
+        add_tags: 是否添加缓存标签（用于精确失效）
         
     Returns:
         是否设置成功
@@ -61,6 +62,22 @@ async def set_short_link_to_cache(short_code: str, short_link_data: Dict[str, An
         # 序列化数据
         data_str = json.dumps(short_link_data, default=str)
         await redis.setex(cache_key, ttl, data_str)
+        
+        # 添加缓存标签（用于精确失效）
+        if add_tags:
+            try:
+                from app.core.cache_manager import CacheManager
+                tags = [f"short_link:{short_code}"]
+                # 如果有offer_id，添加offer标签
+                if short_link_data.get("offer_id"):
+                    tags.append(f"offer:{short_link_data['offer_id']}")
+                # 如果有channel_id，添加channel标签
+                if short_link_data.get("channel_id"):
+                    tags.append(f"channel:{short_link_data['channel_id']}")
+                await CacheManager.add_cache_tag(cache_key, tags)
+            except Exception as tag_error:
+                logger.debug(f"添加缓存标签失败: {tag_error}，不影响缓存写入")
+        
         return True
     except Exception as e:
         logger.debug(f"写入短链接缓存失败: {e}")

@@ -42,7 +42,7 @@ async def get_offer_advertiser_id(offer_id: int) -> Optional[int]:
     return None
 
 
-async def set_offer_cache(offer_id: int, advertiser_id: int, offer_name: Optional[str] = None) -> bool:
+async def set_offer_cache(offer_id: int, advertiser_id: int, offer_name: Optional[str] = None, add_tags: bool = True) -> bool:
     """
     缓存Offer信息
     
@@ -50,6 +50,7 @@ async def set_offer_cache(offer_id: int, advertiser_id: int, offer_name: Optiona
         offer_id: Offer ID
         advertiser_id: 广告主ID
         offer_name: Offer名称（可选）
+        add_tags: 是否添加缓存标签（用于精确失效）
         
     Returns:
         是否设置成功
@@ -68,6 +69,18 @@ async def set_offer_cache(offer_id: int, advertiser_id: int, offer_name: Optiona
         }
         data_str = json.dumps(data, default=str)
         await redis.setex(cache_key, CACHE_TTL, data_str)
+        
+        # 添加缓存标签（用于精确失效）
+        if add_tags:
+            try:
+                from app.core.cache_manager import CacheManager
+                tags = [f"offer:{offer_id}"]
+                if advertiser_id:
+                    tags.append(f"advertiser:{advertiser_id}")
+                await CacheManager.add_cache_tag(cache_key, tags)
+            except Exception as tag_error:
+                logger.debug(f"添加缓存标签失败: {tag_error}，不影响缓存写入")
+        
         return True
     except Exception as e:
         logger.debug(f"缓存Offer信息失败: offer_id={offer_id}, error={e}")

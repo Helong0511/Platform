@@ -21,6 +21,7 @@
 - 异步处理：点击记录和计数更新不阻塞重定向
 - 批量处理：点击记录批量插入数据库
 """
+import asyncio
 import logging
 import re
 from typing import Optional, Dict, Any
@@ -141,91 +142,103 @@ async def _replace_short_link_placeholders(
         'referer': request_info.get('referer', ''),  # 来源页面URL
     }
     
-    # ==================== 处理Offer相关字段 ====================
-    # 如果提供了offer_id，从数据库查询Offer的详细信息，支持更多占位符
+    # ==================== 并行查询数据库（优化性能） ====================
+    # 使用 asyncio.gather 并行查询 Offer、Publisher、Advertiser
+    # 这样可以减少总查询时间，特别是在需要查询多个实体时
+    
+    # 准备查询任务
+    query_tasks = []
+    
+    # Offer 查询任务
     if offer_id:
-        # 基础字段：Offer ID（转换为字符串，因为URL参数都是字符串）
         values['offer_id'] = str(offer_id)
-        
-        # 从数据库查询Offer的详细信息（用于支持 {offer_name}、{offer_payout} 等占位符）
-        try:
-            offer_result = await db.execute(
-                select(Offer).where(Offer.id == offer_id)
-            )
-            offer = offer_result.scalars().first()
-            
-            if offer:
-                # Offer的详细信息字段，用于占位符替换
-                values['offer_name'] = offer.offer_name or ''  # Offer名称
-                values['advertiser_offer_id'] = offer.advertiser_offer_id or ''  # 上游Offer ID
-                values['offer_payout'] = str(offer.payout) if offer.payout is not None else ''  # Offer出价
-                values['affiliate_payout'] = str(offer.affiliate_payout) if offer.affiliate_payout is not None else ''  # 联盟出价
-                values['offer_country'] = offer.country or ''  # Offer国家
-                values['offer_category'] = offer.category or ''  # Offer分类
-                values['offer_type'] = offer.type or ''  # Offer类型
-                values['offer_status'] = offer.status or ''  # Offer状态
-        except Exception as e:
-            # 查询失败不影响主流程，只记录警告日志
-            logger.warning(f"查询Offer信息失败: offer_id={offer_id}, error={e}")
+        async def query_offer():
+            try:
+                offer_result = await db.execute(
+                    select(Offer).where(Offer.id == offer_id)
+                )
+                return offer_result.scalars().first()
+            except Exception as e:
+                logger.warning(f"查询Offer信息失败: offer_id={offer_id}, error={e}")
+                return None
+        query_tasks.append(('offer', query_offer()))
     else:
-        # 如果没有提供offer_id，设置空值（占位符将无法替换）
         values['offer_id'] = ''
         values['offer_name'] = ''
         values['advertiser_offer_id'] = ''
     
-    # ==================== 处理Publisher/Channel相关字段 ====================
-    # 注意：publisher_id 和 channel_id 在系统中是同一个概念（渠道ID）
-    # 如果提供了publisher_id，从数据库查询Publisher的详细信息
+    # Publisher 查询任务
     if publisher_id is not None:
         publisher_id_str = str(publisher_id)
-        # 同时设置 publisher_id 和 channel_id，因为它们指向同一个值
-        # 这样 {publisher_id} 和 {channel_id} 占位符都可以使用
         values['publisher_id'] = publisher_id_str
         values['channel_id'] = publisher_id_str
-        
-        # 从数据库查询Publisher的详细信息（用于支持 {publisher_name} 等占位符）
-        try:
-            publisher_result = await db.execute(
-                select(Publisher).where(Publisher.id == publisher_id)
-            )
-            publisher = publisher_result.scalars().first()
-            
-            if publisher:
-                values['publisher_name'] = publisher.publisher_name or ''  # 渠道名称
-                values['publisher_email'] = publisher.email or ''  # 渠道邮箱
-        except Exception as e:
-            # 查询失败不影响主流程，只记录警告日志
-            logger.warning(f"查询Publisher信息失败: publisher_id={publisher_id}, error={e}")
+        async def query_publisher():
+            try:
+                publisher_result = await db.execute(
+                    select(Publisher).where(Publisher.id == publisher_id)
+                )
+                return publisher_result.scalars().first()
+            except Exception as e:
+                logger.warning(f"查询Publisher信息失败: publisher_id={publisher_id}, error={e}")
+                return None
+        query_tasks.append(('publisher', query_publisher()))
     else:
-        # 如果没有提供publisher_id，设置空值（占位符将无法替换）
         values['publisher_id'] = ''
         values['channel_id'] = ''
         values['publisher_name'] = ''
         values['publisher_email'] = ''
     
-    # ==================== 处理Advertiser相关字段 ====================
-    # 如果提供了advertiser_id，从数据库查询Advertiser的详细信息
+    # Advertiser 查询任务
     if advertiser_id:
         values['advertiser_id'] = str(advertiser_id)
-        
-        # 从数据库查询Advertiser的详细信息（用于支持 {advertiser_name} 等占位符）
-        try:
-            advertiser_result = await db.execute(
-                select(Advertiser).where(Advertiser.id == advertiser_id)
-            )
-            advertiser = advertiser_result.scalars().first()
-            
-            if advertiser:
-                values['advertiser_name'] = advertiser.advertiser_name or ''  # 广告主名称
-                values['advertiser_email'] = advertiser.email or ''  # 广告主邮箱
-        except Exception as e:
-            # 查询失败不影响主流程，只记录警告日志
-            logger.warning(f"查询Advertiser信息失败: advertiser_id={advertiser_id}, error={e}")
+        async def query_advertiser():
+            try:
+                advertiser_result = await db.execute(
+                    select(Advertiser).where(Advertiser.id == advertiser_id)
+                )
+                return advertiser_result.scalars().first()
+            except Exception as e:
+                logger.warning(f"查询Advertiser信息失败: advertiser_id={advertiser_id}, error={e}")
+                return None
+        query_tasks.append(('advertiser', query_advertiser()))
     else:
-        # 如果没有提供advertiser_id，设置空值（占位符将无法替换）
         values['advertiser_id'] = ''
         values['advertiser_name'] = ''
         values['advertiser_email'] = ''
+    
+    # 并行执行所有查询
+    if query_tasks:
+        results = await asyncio.gather(*[task[1] for task in query_tasks], return_exceptions=True)
+        
+        # 处理查询结果
+        for i, (entity_type, _) in enumerate(query_tasks):
+            result = results[i]
+            
+            # 如果查询失败（异常），跳过
+            if isinstance(result, Exception) or result is None:
+                continue
+            
+            if entity_type == 'offer':
+                offer = result
+                if offer:
+                    values['offer_name'] = offer.offer_name or ''
+                    values['advertiser_offer_id'] = offer.advertiser_offer_id or ''
+                    values['offer_payout'] = str(offer.payout) if offer.payout is not None else ''
+                    values['affiliate_payout'] = str(offer.affiliate_payout) if offer.affiliate_payout is not None else ''
+                    values['offer_country'] = offer.country or ''
+                    values['offer_category'] = offer.category or ''
+                    values['offer_type'] = offer.type or ''
+                    values['offer_status'] = offer.status or ''
+            elif entity_type == 'publisher':
+                publisher = result
+                if publisher:
+                    values['publisher_name'] = publisher.publisher_name or ''
+                    values['publisher_email'] = publisher.email or ''
+            elif entity_type == 'advertiser':
+                advertiser = result
+                if advertiser:
+                    values['advertiser_name'] = advertiser.advertiser_name or ''
+                    values['advertiser_email'] = advertiser.email or ''
     
     # ==================== 占位符别名映射表 ====================
     # 支持多种命名格式的占位符，统一映射到标准键名

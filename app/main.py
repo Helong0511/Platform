@@ -373,6 +373,25 @@ async def lifespan(app: FastAPI):
         logger.error(f"[Worker PID:{worker_pid}] 启动 Telegram 机器人初始化失败: {e}", exc_info=True)
         logger.warning(f"[Worker PID:{worker_pid}] 应用将继续启动，但Telegram 机器人可能不可用")
 
+    # 缓存预热（可选，在后台异步执行，不阻塞启动）
+    try:
+        from app.core.cache_manager import CacheManager
+        from app.core.database import AsyncSessionLocal
+        
+        # 在后台任务中执行缓存预热，不阻塞应用启动
+        async def warmup_cache_background():
+            try:
+                async with AsyncSessionLocal() as db:
+                    await CacheManager.warmup_all(db)
+            except Exception as e:
+                logger.warning(f"缓存预热失败: {e}，不影响应用启动")
+        
+        # 延迟执行缓存预热，确保数据库和Redis都已初始化
+        asyncio.create_task(warmup_cache_background())
+        logger.info(f"[Worker PID:{worker_pid}] 缓存预热任务已启动（后台执行）")
+    except Exception as e:
+        logger.warning(f"[Worker PID:{worker_pid}] 启动缓存预热失败: {e}，继续启动...")
+
     logger.info("应用启动完成")
 
     # ====== 应用运行期间 ======
@@ -993,8 +1012,15 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 
 # 短链接重定向路由（公开访问，无需认证）
 # 注意：这个路由必须在 API 路由之后注册，避免与 API 路由冲突
-# 短链接重定向逻辑已迁移到 app/routes/short_link_redirect.py
-from app.routes.short_link_redirect import router as short_link_redirect_router
+# 短链接重定向逻辑已重构为模块化结构：app/routes/short_link/
+# 保持向后兼容：如果新模块不可用，回退到旧路由
+try:
+    from app.routes.short_link import router as short_link_redirect_router
+    logger.info("使用模块化短链接路由（app/routes/short_link/）")
+except ImportError:
+    # 向后兼容：如果新模块不可用，使用旧路由
+    from app.routes.short_link_redirect import router as short_link_redirect_router
+    logger.warning("使用旧版短链接路由（向后兼容）")
 
 app.include_router(short_link_redirect_router)
 

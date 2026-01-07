@@ -231,13 +231,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
     """
     性能监控中间件
-    记录慢请求和查询性能
+    记录慢请求和查询性能，提供详细的性能指标
     """
     
     def __init__(self, app: ASGIApp):
         super().__init__(app)
         self.app = app
         self.slow_request_threshold = 1.0  # 慢请求阈值（秒）
+        self.very_slow_request_threshold = 3.0  # 非常慢请求阈值（秒）
+        
+        # 性能统计（可选，用于监控）
+        self.request_count = 0
+        self.total_process_time = 0.0
+        self.slow_request_count = 0
+        self.very_slow_request_count = 0
     
     async def dispatch(self, request: Request, call_next):
         from app.core.utils import get_client_ip
@@ -245,26 +252,64 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
         start_time = time.time()
         
         # 处理请求
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception as e:
+            # 即使请求失败，也记录处理时间
+            process_time = time.time() - start_time
+            self._log_performance(request, process_time, failed=True, error=str(e))
+            raise
         
         # 计算处理时间
         process_time = time.time() - start_time
         
-        # 记录慢请求
-        if process_time > self.slow_request_threshold:
-            try:
-                client_ip = get_client_ip(request)
-            except Exception as e:
-                logger.warning(f"获取客户端IP失败: {e}，使用默认IP 'testclient'")
-                client_ip = "testclient"
-            logger.warning(
-                f"慢请求: {request.method} {request.url.path} "
-                f"耗时 {process_time:.2f}s, IP: {client_ip}"
-            )
+        # 更新统计
+        self.request_count += 1
+        self.total_process_time += process_time
         
-        # 注意：X-Process-Time 响应头由 RequestLoggingMiddleware 统一设置，避免重复
+        # 记录慢请求
+        if process_time > self.very_slow_request_threshold:
+            self.very_slow_request_count += 1
+            self._log_performance(request, process_time, level="error")
+        elif process_time > self.slow_request_threshold:
+            self.slow_request_count += 1
+            self._log_performance(request, process_time, level="warning")
+        
+        # 添加性能响应头
+        response.headers["X-Process-Time"] = f"{process_time:.4f}"
+        
+        # 可选：添加性能统计响应头（每100个请求更新一次）
+        if self.request_count % 100 == 0:
+            avg_time = self.total_process_time / self.request_count if self.request_count > 0 else 0
+            response.headers["X-Avg-Process-Time"] = f"{avg_time:.4f}"
+            response.headers["X-Slow-Request-Count"] = str(self.slow_request_count)
         
         return response
+    
+    def _log_performance(self, request: Request, process_time: float, level: str = "warning", failed: bool = False, error: str = None):
+        """记录性能信息"""
+        try:
+            from app.core.utils import get_client_ip
+            client_ip = get_client_ip(request)
+        except Exception:
+            client_ip = "unknown"
+        
+        log_message = (
+            f"{'失败请求' if failed else '慢请求'}: {request.method} {request.url.path} "
+            f"耗时 {process_time:.3f}s, IP: {client_ip}"
+        )
+        
+        if error:
+            log_message += f", 错误: {error}"
+        
+        # 添加查询参数信息（如果有）
+        if request.query_params:
+            log_message += f", 参数: {dict(request.query_params)}"
+        
+        if level == "error":
+            logger.error(log_message)
+        else:
+            logger.warning(log_message)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
