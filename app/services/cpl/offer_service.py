@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, String, and_, or_, delete
 from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.exc import IntegrityError
 
 from app.models.models import (
     Offer, Advertiser, Publisher, Client, User, UserRole,
@@ -376,9 +377,14 @@ class OfferService(BaseService[Offer]):
                     detail="渠道配置不能为空，请至少添加一个渠道"
                 )
             
-            # 验证是否有重复的publisher_id
-            publisher_id_list = [config.get('publisher_id') if isinstance(config, dict) else config.publisher_id for config in publisher_configs]
-            if len(publisher_id_list) != len(set(publisher_id_list)):
+            # 验证是否有重复的publisher_id（先过滤None值，因为None会在后面单独验证）
+            publisher_id_list = [
+                config.get('publisher_id') if isinstance(config, dict) else config.publisher_id 
+                for config in publisher_configs
+            ]
+            # 过滤掉None值，因为None会在后面单独验证
+            valid_publisher_ids = [pid for pid in publisher_id_list if pid is not None]
+            if len(valid_publisher_ids) != len(set(valid_publisher_ids)):
                 raise_api_exception(
                     ErrorCode.INVALID_PARAMETER,
                     detail="渠道配置中存在重复的渠道ID"
@@ -400,6 +406,55 @@ class OfferService(BaseService[Offer]):
                     raise_api_exception(
                         ErrorCode.INVALID_PARAMETER,
                         detail="渠道配置中的publisher_id不能为空，请确保已选择渠道"
+                    )
+                
+                # 验证publisher_id类型（必须是整数）
+                try:
+                    pub_id = int(pub_id)
+                except (ValueError, TypeError):
+                    raise_api_exception(
+                        ErrorCode.INVALID_PARAMETER,
+                        detail=f"渠道配置中的publisher_id必须是整数，当前值: {pub_id} (类型: {type(pub_id).__name__})"
+                    )
+                
+                # 验证publisher_id范围（必须大于0）
+                if pub_id <= 0:
+                    raise_api_exception(
+                        ErrorCode.INVALID_PARAMETER,
+                        detail=f"渠道配置中的publisher_id必须大于0，当前值: {pub_id}"
+                    )
+                
+                # 验证downstream_cap和affiliate_payout不能为负数
+                # 同时验证类型（downstream_cap必须是整数或None，affiliate_payout必须是浮点数或None）
+                if downstream_cap is not None:
+                    try:
+                        downstream_cap = int(downstream_cap)
+                    except (ValueError, TypeError):
+                        raise_api_exception(
+                            ErrorCode.INVALID_PARAMETER,
+                            detail=f"渠道ID {pub_id} 的下游Cap必须是整数，当前值: {downstream_cap} (类型: {type(downstream_cap).__name__})"
+                        )
+                
+                if affiliate_payout is not None:
+                    try:
+                        affiliate_payout = float(affiliate_payout)
+                    except (ValueError, TypeError):
+                        raise_api_exception(
+                            ErrorCode.INVALID_PARAMETER,
+                            detail=f"渠道ID {pub_id} 的下游PO必须是数字，当前值: {affiliate_payout} (类型: {type(affiliate_payout).__name__})"
+                        )
+                
+                # 验证downstream_cap和affiliate_payout不能为负数
+                if downstream_cap is not None and downstream_cap < 0:
+                    raise_api_exception(
+                        ErrorCode.INVALID_PARAMETER,
+                        detail=f"渠道ID {pub_id} 的下游Cap不能为负数"
+                    )
+                
+                if affiliate_payout is not None and affiliate_payout < 0:
+                    raise_api_exception(
+                        ErrorCode.INVALID_PARAMETER,
+                        detail=f"渠道ID {pub_id} 的下游PO不能为负数"
                     )
                 
                 # 验证渠道是否存在
@@ -439,8 +494,24 @@ class OfferService(BaseService[Offer]):
                     self.db.add(assignment)
                     publisher_ids_for_short_link.append(pub_id)
         
-        await self.db.commit()
-        await self.db.refresh(offer)
+        try:
+            await self.db.commit()
+            await self.db.refresh(offer)
+        except IntegrityError as e:
+            await self.db.rollback()
+            error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+            # 检查是否是唯一约束冲突（offer_id + publisher_id）
+            if "uq_offer_publisher" in error_msg or "Duplicate entry" in error_msg:
+                raise_api_exception(
+                    ErrorCode.CONFLICT,
+                    detail="渠道配置中存在重复的Offer-渠道组合，可能是并发操作导致的。请刷新后重试。"
+                )
+            # 其他完整性约束错误
+            logger.error(f"创建Offer时数据库完整性约束违反: {error_msg}", exc_info=True)
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail=f"创建Offer失败: 数据库约束违反"
+            )
         
         # 为分配的渠道创建短链接（使用上游Tracklink作为原始URL）
         short_link_info = None
@@ -586,9 +657,14 @@ class OfferService(BaseService[Offer]):
                     detail="渠道配置不能为空，请至少添加一个渠道"
                 )
             
-            # 验证是否有重复的publisher_id
-            publisher_id_list = [config.get('publisher_id') if isinstance(config, dict) else config.publisher_id for config in publisher_configs]
-            if len(publisher_id_list) != len(set(publisher_id_list)):
+            # 验证是否有重复的publisher_id（先过滤None值，因为None会在后面单独验证）
+            publisher_id_list = [
+                config.get('publisher_id') if isinstance(config, dict) else config.publisher_id 
+                for config in publisher_configs
+            ]
+            # 过滤掉None值，因为None会在后面单独验证
+            valid_publisher_ids = [pid for pid in publisher_id_list if pid is not None]
+            if len(valid_publisher_ids) != len(set(valid_publisher_ids)):
                 raise_api_exception(
                     ErrorCode.INVALID_PARAMETER,
                     detail="渠道配置中存在重复的渠道ID"
@@ -610,6 +686,55 @@ class OfferService(BaseService[Offer]):
                     raise_api_exception(
                         ErrorCode.INVALID_PARAMETER,
                         detail="渠道配置中的publisher_id不能为空，请确保已选择渠道"
+                    )
+                
+                # 验证publisher_id类型（必须是整数）
+                try:
+                    pub_id = int(pub_id)
+                except (ValueError, TypeError):
+                    raise_api_exception(
+                        ErrorCode.INVALID_PARAMETER,
+                        detail=f"渠道配置中的publisher_id必须是整数，当前值: {pub_id} (类型: {type(pub_id).__name__})"
+                    )
+                
+                # 验证publisher_id范围（必须大于0）
+                if pub_id <= 0:
+                    raise_api_exception(
+                        ErrorCode.INVALID_PARAMETER,
+                        detail=f"渠道配置中的publisher_id必须大于0，当前值: {pub_id}"
+                    )
+                
+                # 验证downstream_cap和affiliate_payout不能为负数
+                # 同时验证类型（downstream_cap必须是整数或None，affiliate_payout必须是浮点数或None）
+                if downstream_cap is not None:
+                    try:
+                        downstream_cap = int(downstream_cap)
+                    except (ValueError, TypeError):
+                        raise_api_exception(
+                            ErrorCode.INVALID_PARAMETER,
+                            detail=f"渠道ID {pub_id} 的下游Cap必须是整数，当前值: {downstream_cap} (类型: {type(downstream_cap).__name__})"
+                        )
+                
+                if affiliate_payout is not None:
+                    try:
+                        affiliate_payout = float(affiliate_payout)
+                    except (ValueError, TypeError):
+                        raise_api_exception(
+                            ErrorCode.INVALID_PARAMETER,
+                            detail=f"渠道ID {pub_id} 的下游PO必须是数字，当前值: {affiliate_payout} (类型: {type(affiliate_payout).__name__})"
+                        )
+                
+                # 验证downstream_cap和affiliate_payout不能为负数
+                if downstream_cap is not None and downstream_cap < 0:
+                    raise_api_exception(
+                        ErrorCode.INVALID_PARAMETER,
+                        detail=f"渠道ID {pub_id} 的下游Cap不能为负数"
+                    )
+                
+                if affiliate_payout is not None and affiliate_payout < 0:
+                    raise_api_exception(
+                        ErrorCode.INVALID_PARAMETER,
+                        detail=f"渠道ID {pub_id} 的下游PO不能为负数"
                     )
                 
                 # 验证渠道是否存在
@@ -658,12 +783,28 @@ class OfferService(BaseService[Offer]):
                             offer_id=offer.id,
                             publisher_id=pub_id,
                             is_active=True
-                        )
-                        self.db.add(assignment)
-                        publisher_ids_for_short_link.append(pub_id)
+                    )
+                    self.db.add(assignment)
+                    publisher_ids_for_short_link.append(pub_id)
         
-        await self.db.commit()
-        await self.db.refresh(offer)
+        try:
+            await self.db.commit()
+            await self.db.refresh(offer)
+        except IntegrityError as e:
+            await self.db.rollback()
+            error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+            # 检查是否是唯一约束冲突（offer_id + publisher_id）
+            if "uq_offer_publisher" in error_msg or "Duplicate entry" in error_msg:
+                raise_api_exception(
+                    ErrorCode.CONFLICT,
+                    detail="渠道配置中存在重复的Offer-渠道组合，可能是并发操作导致的。请刷新后重试。"
+                )
+            # 其他完整性约束错误
+            logger.error(f"更新Offer时数据库完整性约束违反: {error_msg}", exc_info=True)
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail=f"更新Offer失败: 数据库约束违反"
+            )
         
         # 如果advertiser_tracklink改变了，删除该Offer的所有旧短链接
         if advertiser_tracklink_changed:
