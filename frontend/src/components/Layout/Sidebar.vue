@@ -56,6 +56,15 @@
       <el-menu-item index="/app/admin/discounts">
         <span>扣量管理</span>
       </el-menu-item>
+      <el-menu-item index="/app/admin/conversion-deductions">
+        <span>扣减配置</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/deduction-stats">
+        <span>扣减统计</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/deduction-logs">
+        <span>扣减日志</span>
+      </el-menu-item>
       <el-menu-item index="/app/admin/advertiser-test">
         <span>上游测试</span>
       </el-menu-item>

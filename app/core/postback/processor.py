@@ -518,7 +518,10 @@ class PostbackProcessor:
                 conversion_id_for_log = conversion.id
             
             # 8.1. 记录扣减日志（无论是否保存转化记录都要记录）
+            # 注意：根据系统设计，所有转化都会记录到扣减日志表，即使未扣减也会记录
+            # 这样可以确保统计的准确性（统计时查询扣减日志表即可获得所有转化数据）
             if deduction_result and deduction_config:
+                # 有配置且应用了扣减逻辑
                 try:
                     from app.core.deduction import log_deduction
                     # 确定配置层级
@@ -541,13 +544,51 @@ class PostbackProcessor:
                         deduction_reason=deduction_reason
                     )
                     await db.commit()
+                    logger.debug(
+                        f"扣减日志记录成功: conversion_id={conversion_id}, "
+                        f"click_id={click_id}, "
+                        f"deduction_type={deduction_result.get('deduction_type')}"
+                    )
                 except Exception as e:
                     # 日志记录失败不影响主流程，但记录错误
                     logger.error(
                         f"记录扣减日志失败: conversion_id={conversion_id}, "
+                        f"click_id={click_id}, "
                         f"error={str(e)}", 
                         exc_info=True
                     )
+            elif (advertiser_id or offer_id or publisher_id):
+                # 即使没有找到配置，也记录一条日志（用于统计，标记为未扣减）
+                # 这样可以确保统计时能获取到所有转化数据
+                try:
+                    from app.core.deduction import log_deduction
+                    # 创建一个空的扣减结果，表示未应用扣减
+                    no_deduction_result = {
+                        'should_deduct_volume': False,
+                        'should_deduct_amount': False,
+                        'original_volume': 1,
+                        'original_amount': original_payout or 0.0,
+                        'final_volume': 1,
+                        'final_amount': original_payout or 0.0,
+                        'deducted_volume': 0,
+                        'deducted_amount': 0.0,
+                        'deduction_type': None
+                    }
+                    await log_deduction(
+                        db=db,
+                        deduction_result=no_deduction_result,
+                        conversion_id=conversion_id_for_log,
+                        click_id=click_id,
+                        advertiser_id=advertiser_id,
+                        offer_id=offer_id,
+                        publisher_id=publisher_id,
+                        config=None,
+                        deduction_reason="未找到扣减配置"
+                    )
+                    await db.commit()
+                except Exception as e:
+                    # 静默失败，不影响主流程
+                    logger.debug(f"记录未扣减日志失败: {str(e)}")
                     # 尝试回滚，但不影响主流程
                     try:
                         await db.rollback()

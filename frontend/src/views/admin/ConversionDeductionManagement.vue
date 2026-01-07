@@ -11,6 +11,35 @@
         </div>
       </template>
 
+      <!-- 功能说明卡片 -->
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 20px;"
+      >
+        <template #title>
+          <div style="line-height: 1.8;">
+            <div style="font-weight: 600; margin-bottom: 8px;">扣减系统说明：</div>
+            <div style="margin-left: 20px;">
+              <div style="margin-bottom: 6px;">
+                <strong style="color: #E6A23C;">扣量（Volume Deduction）</strong>：
+                减少转化数量，被扣减的转化<strong style="color: #F56C6C;">不会保存到数据库</strong>，下游渠道<strong style="color: #F56C6C;">无法看到</strong>这些转化。
+                扣量是"全有或全无"的操作，在24小时统计窗口内动态计算，确保达到目标比例。
+              </div>
+              <div>
+                <strong style="color: #F56C6C;">扣金额（Amount Deduction）</strong>：
+                减少转化金额，转化<strong style="color: #67C23A;">仍然保存到数据库</strong>，但金额会按比例减少，下游可以看到转化但<strong style="color: #F56C6C;">金额已扣减</strong>。
+                扣金额是固定比例操作，直接应用于每个转化。
+              </div>
+              <div style="margin-top: 8px; font-size: 12px; color: #909399;">
+                <strong>配置优先级</strong>：Offer级别 > 广告主级别 > 渠道级别（数字越大优先级越高）
+              </div>
+            </div>
+          </div>
+        </template>
+      </el-alert>
+
       <!-- 搜索筛选区 -->
       <div class="search-bar">
         <el-input
@@ -223,12 +252,27 @@
           />
           <div class="form-item-tip" style="margin-top: 8px;">
             <el-icon><InfoFilled /></el-icon>
-            扣量：减少转化数量，被扣减的转化不会保存到数据库，下游渠道无法看到
+            <div style="line-height: 1.6;">
+              <strong>扣量说明：</strong>
+              <ul style="margin: 4px 0 0 20px; padding: 0;">
+                <li>扣量是"全有或全无"的操作，一个转化要么被扣量（数量变为0），要么不被扣量（数量保持为1）</li>
+                <li>被扣量的转化<strong style="color: #F56C6C;">不会保存到主转化表</strong>，下游渠道<strong style="color: #F56C6C;">无法看到</strong></li>
+                <li>扣量比例是<strong>动态计算</strong>的，系统会在24小时统计窗口内实时统计，确保达到目标比例</li>
+                <li>例如：配置10%扣量，在24小时内100个转化中，系统会确保扣减10个转化</li>
+              </ul>
+            </div>
           </div>
         </el-form-item>
         
         <template v-if="form.enable_volume_deduction">
-          <el-form-item label="扣量比例" prop="volume_deduction_ratio">
+          <el-form-item 
+            label="扣量比例" 
+            prop="volume_deduction_ratio"
+            :rules="[
+              { required: true, message: '请设置扣量比例', trigger: 'blur' },
+              { type: 'number', min: 0.01, max: 1, message: '扣量比例必须在0.01%到100%之间', trigger: 'blur' }
+            ]"
+          >
             <div style="display: flex; align-items: center; width: 100%;">
               <el-slider
                 v-model="volumeRatioPercent"
@@ -250,8 +294,13 @@
               <span style="margin-left: 10px; font-weight: 600; color: #E6A23C;">%</span>
             </div>
             <div class="form-item-tip">
-              <strong>扣量比例说明：</strong>范围 0% - 100%，例如：10% 表示扣减10%的转化数量。
-              被扣减的转化不会保存到数据库，下游渠道无法看到这些转化。
+              <strong>扣量比例说明：</strong>
+              <ul style="margin: 4px 0 0 20px; padding: 0; line-height: 1.6;">
+                <li>范围：0% - 100%</li>
+                <li>示例：10% 表示在24小时统计窗口内，扣减10%的转化数量</li>
+                <li>计算方式：系统统计最近24小时内的转化，动态计算是否扣减当前转化</li>
+                <li>结果：被扣减的转化<strong style="color: #F56C6C;">不会保存到数据库</strong>，下游渠道<strong style="color: #F56C6C;">完全看不到</strong></li>
+              </ul>
             </div>
           </el-form-item>
           
@@ -277,7 +326,12 @@
               </el-option>
             </el-select>
             <div class="form-item-tip">
-              选择扣量时的分配策略，影响哪些转化会被扣减
+              <strong>扣减策略说明：</strong>
+              <ul style="margin: 4px 0 0 20px; padding: 0; line-height: 1.6;">
+                <li><strong>随机（random）</strong>：随机选择转化进行扣减，分布更自然，难以预测。使用概率算法确保在24小时窗口内达到目标比例。</li>
+                <li><strong>按比例（proportional）</strong>：按固定间隔扣量，如每10个扣1个（10%扣量时）。按时间顺序等比例选择转化。</li>
+                <li><strong>轮询（round_robin）</strong>：轮询方式扣量，按固定间隔循环。例如10%扣量时，每10个转化扣1个。</li>
+              </ul>
             </div>
           </el-form-item>
         </template>
@@ -299,12 +353,27 @@
           />
           <div class="form-item-tip" style="margin-top: 8px;">
             <el-icon><InfoFilled /></el-icon>
-            扣金额：减少转化金额，转化仍然保存但金额会按比例减少，下游可以看到转化但金额已扣减
+            <div style="line-height: 1.6;">
+              <strong>扣金额说明：</strong>
+              <ul style="margin: 4px 0 0 20px; padding: 0;">
+                <li>扣金额是<strong>固定比例操作</strong>，直接应用于每个转化</li>
+                <li>转化<strong style="color: #67C23A;">仍然保存到数据库</strong>，下游渠道可以看到转化记录</li>
+                <li>但最终支付给下游的金额会<strong style="color: #F56C6C;">按比例减少</strong></li>
+                <li>例如：配置5%扣金额，转化金额$100，扣减后支付$95给下游</li>
+              </ul>
+            </div>
           </div>
         </el-form-item>
         
         <template v-if="form.enable_amount_deduction">
-          <el-form-item label="扣金额比例" prop="amount_deduction_ratio">
+          <el-form-item 
+            label="扣金额比例" 
+            prop="amount_deduction_ratio"
+            :rules="[
+              { required: true, message: '请设置扣金额比例', trigger: 'blur' },
+              { type: 'number', min: 0.01, max: 1, message: '扣金额比例必须在0.01%到100%之间', trigger: 'blur' }
+            ]"
+          >
             <div style="display: flex; align-items: center; width: 100%;">
               <el-slider
                 v-model="amountRatioPercent"
@@ -326,8 +395,14 @@
               <span style="margin-left: 10px; font-weight: 600; color: #F56C6C;">%</span>
             </div>
             <div class="form-item-tip">
-              <strong>扣金额比例说明：</strong>范围 0% - 100%，例如：5% 表示每个转化金额扣减5%。
-              转化仍然保存到数据库，但最终支付给下游的金额会按比例减少。
+              <strong>扣金额比例说明：</strong>
+              <ul style="margin: 4px 0 0 20px; padding: 0; line-height: 1.6;">
+                <li>范围：0% - 100%</li>
+                <li>示例：5% 表示每个转化金额扣减5%</li>
+                <li>计算方式：<code>最终金额 = 原始金额 × (1 - 扣金额比例)</code></li>
+                <li>示例计算：原始金额$100，扣金额比例5%，最终金额 = $100 × (1 - 0.05) = $95</li>
+                <li>结果：转化<strong style="color: #67C23A;">仍然保存到数据库</strong>，但支付给下游的金额<strong style="color: #F56C6C;">已扣减</strong></li>
+              </ul>
             </div>
           </el-form-item>
         </template>
@@ -341,7 +416,13 @@
             style="width: 100%;"
           />
           <div class="form-item-tip">
-            数字越大优先级越高，相同层级时优先级高的配置生效
+            <strong>优先级说明：</strong>
+            <ul style="margin: 4px 0 0 20px; padding: 0; line-height: 1.6;">
+              <li>范围：0 - 100，数字越大优先级越高</li>
+              <li><strong>配置层级优先级</strong>（固定）：Offer级别 > 广告主级别 > 渠道级别</li>
+              <li><strong>同层级优先级</strong>：相同层级时，优先级数字大的配置生效</li>
+              <li>示例：两个Offer级别配置，优先级分别为10和20，则优先级20的配置生效</li>
+            </ul>
           </div>
         </el-form-item>
         
@@ -433,6 +514,30 @@ const rules = {
   ],
   target_id: [
     { required: true, message: '请选择配置对象', trigger: 'change' }
+  ],
+  volume_deduction_ratio: [
+    { 
+      validator: (rule, value, callback) => {
+        if (form.enable_volume_deduction && (!value || value <= 0)) {
+          callback(new Error('启用扣量时，扣量比例必须大于0'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur'
+    }
+  ],
+  amount_deduction_ratio: [
+    { 
+      validator: (rule, value, callback) => {
+        if (form.enable_amount_deduction && (!value || value <= 0)) {
+          callback(new Error('启用扣金额时，扣金额比例必须大于0'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur'
+    }
   ]
 }
 
@@ -604,7 +709,9 @@ const handleSubmit = async () => {
       dialogVisible.value = false
       fetchData()
     } catch (error) {
-      ElMessage.error((dialogMode.value === 'add' ? '添加' : '更新') + '失败：' + (error.message || '未知错误'))
+      // 显示详细的错误信息
+      const errorMsg = error.response?.data?.detail || error.response?.data?.message || error.message || '未知错误'
+      ElMessage.error((dialogMode.value === 'add' ? '添加' : '更新') + '失败：' + errorMsg)
     } finally {
       submitting.value = false
     }
