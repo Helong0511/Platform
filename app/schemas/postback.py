@@ -73,7 +73,7 @@ class PostbackConversionResponse(BaseModel):
     gid_publisher_id: Optional[int] = Field(None, description="gid字段关联的渠道ID")
     gid_publisher_name: Optional[str] = Field(None, description="gid字段关联的渠道名称")
     created_at: datetime
-    notification_count: Optional[int] = Field(0, description="通知记录数量")
+    notification_count: Optional[int] = Field(0, description="成功发送的通知记录数量（只统计 status='sent' 的记录）")
     
     class Config:
         from_attributes = True

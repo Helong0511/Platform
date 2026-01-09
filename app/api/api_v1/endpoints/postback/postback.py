@@ -141,7 +141,7 @@ async def get_postback_conversions(
         result = await db.execute(query)
         conversions = result.scalars().all()
         
-        # 批量查询通知记录数量
+        # 批量查询通知记录数量（只统计成功发送的通知，status='sent'）
         conversion_ids = [conv.id for conv in conversions]
         notification_counts = {}
         if conversion_ids:
@@ -149,7 +149,10 @@ async def get_postback_conversions(
                 PostbackNotification.conversion_id,
                 func.count(PostbackNotification.id).label('count')
             ).where(
-                PostbackNotification.conversion_id.in_(conversion_ids)
+                and_(
+                    PostbackNotification.conversion_id.in_(conversion_ids),
+                    PostbackNotification.notification_status == 'sent'
+                )
             ).group_by(PostbackNotification.conversion_id)
             
             notification_result = await db.execute(notification_query)
