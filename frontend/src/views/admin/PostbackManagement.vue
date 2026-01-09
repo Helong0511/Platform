@@ -705,7 +705,11 @@ const handleResendNotification = async (row) => {
       resendingNotifications.value[row.id] = false;
     }
   } catch (error) {
-    // 用户取消操作
+    // 用户取消操作或 ElMessageBox 的其他错误，不需要处理
+    if (error !== 'cancel') {
+      // 如果不是取消操作，记录错误但不显示给用户
+      console.debug('补发通知对话框错误:', error);
+    }
   }
 };
 

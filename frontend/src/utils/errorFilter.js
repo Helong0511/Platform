@@ -24,7 +24,13 @@ export const isExtensionError = (message) => {
     lowerMessage.includes('listener indicated') ||
     lowerMessage.includes('response by returning true') ||
     lowerMessage.includes('extensioncontextinvalidated') ||
-    lowerMessage.includes('extension context invalidated');
+    lowerMessage.includes('extension context invalidated') ||
+    // 匹配完整的错误信息
+    (lowerMessage.includes('listener indicated') && 
+     lowerMessage.includes('asynchronous response') && 
+     lowerMessage.includes('message channel closed')) ||
+    // 匹配简化版本
+    lowerMessage.includes('listener indicated an asynchronous response by returning true');
 };
 
 /**
