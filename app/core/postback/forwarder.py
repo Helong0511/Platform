@@ -189,8 +189,53 @@ class PostbackForwarder:
             replaced_url = downstream_url
         
         # 4. 自动通知模式：执行转发（因为 has_postback_url=True，所以 auto_notify=True）
-        # 构建转发数据
-        forward_data = PostbackForwarder._build_forward_data(conversion)
+        # 获取原始点击参数（如果有 click_id）
+        click_params = {}
+        if conversion.click_id:
+            try:
+                # 如果 click_record 已存在且有 url_params，直接使用
+                if click_record and click_record.url_params:
+                    try:
+                        # 解析 JSON 格式的 url_params
+                        click_params_raw = json.loads(click_record.url_params)
+                        # 过滤掉占位符
+                        click_params = PostbackForwarder._filter_placeholders(click_params_raw)
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.warning(
+                            f"解析点击参数失败: conversion_id={conversion.id}, "
+                            f"click_id={conversion.click_id}, error={str(e)}"
+                        )
+                else:
+                    # 如果 click_record 不存在，尝试查询 Click 表获取 url_params
+                    try:
+                        click_result = await db.execute(
+                            select(Click).where(Click.click_id == conversion.click_id)
+                        )
+                        click_for_params = click_result.scalars().first()
+                        if click_for_params and click_for_params.url_params:
+                            try:
+                                # 解析 JSON 格式的 url_params
+                                click_params_raw = json.loads(click_for_params.url_params)
+                                # 过滤掉占位符
+                                click_params = PostbackForwarder._filter_placeholders(click_params_raw)
+                            except (json.JSONDecodeError, TypeError) as e:
+                                logger.warning(
+                                    f"解析点击参数失败: conversion_id={conversion.id}, "
+                                    f"click_id={conversion.click_id}, error={str(e)}"
+                                )
+                    except Exception as e:
+                        logger.debug(
+                            f"查询点击参数失败: conversion_id={conversion.id}, "
+                            f"click_id={conversion.click_id}, error={str(e)}"
+                        )
+            except Exception as e:
+                logger.debug(
+                    f"获取点击参数失败: conversion_id={conversion.id}, "
+                    f"click_id={conversion.click_id}, error={str(e)}"
+                )
+        
+        # 构建转发数据（包含原始点击参数）
+        forward_data = PostbackForwarder._build_forward_data(conversion, click_params)
         
         # 5. 创建转发日志记录
         forward_log = PostbackForwardLog(
@@ -337,8 +382,33 @@ class PostbackForwarder:
             logger.warning(f"产品 {product.id} 的下游转发方式无效: {method}，使用默认 GET")
             method = 'GET'
 
-        # 构建转发数据
-        forward_data = PostbackForwarder._build_forward_data(conversion)
+        # 获取原始点击参数（如果有 click_id）
+        click_params = {}
+        if conversion.click_id:
+            try:
+                click_result = await db.execute(
+                    select(Click).where(Click.click_id == conversion.click_id)
+                )
+                click_record = click_result.scalars().first()
+                if click_record and click_record.url_params:
+                    try:
+                        # 解析 JSON 格式的 url_params
+                        click_params_raw = json.loads(click_record.url_params)
+                        # 过滤掉占位符
+                        click_params = PostbackForwarder._filter_placeholders(click_params_raw)
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.warning(
+                            f"解析点击参数失败: conversion_id={conversion.id}, "
+                            f"click_id={conversion.click_id}, error={str(e)}"
+                        )
+            except Exception as e:
+                logger.debug(
+                    f"获取点击参数失败: conversion_id={conversion.id}, "
+                    f"click_id={conversion.click_id}, error={str(e)}"
+                )
+
+        # 构建转发数据（包含原始点击参数）
+        forward_data = PostbackForwarder._build_forward_data(conversion, click_params)
 
         # 创建转发日志记录
         forward_log = PostbackForwardLog(
@@ -412,12 +482,19 @@ class PostbackForwarder:
                 await db.rollback()
 
     @staticmethod
-    def _build_forward_data(conversion: PostbackConversion) -> Dict[str, Any]:
+    def _build_forward_data(
+        conversion: PostbackConversion,
+        click_params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
         构建转发给下游的数据
         
         将转化记录转换为字典格式，用于转发给下游系统
         注意：payout 字段使用扣后的 payout（PO(扣)），这是给下游的实际金额
+        
+        Args:
+            conversion: 转化记录
+            click_params: 原始点击参数（已过滤占位符），可选
         """
         data = {
             "conversion_id": conversion.conversion_id,
@@ -458,7 +535,61 @@ class PostbackForwarder:
         if conversion.created_at:
             data["timestamp"] = conversion.created_at.isoformat()
 
+        # 合并原始点击参数（如果有）
+        # 注意：如果转化数据中的字段与点击参数冲突，转化数据的字段优先
+        if click_params:
+            for key, value in click_params.items():
+                # 只添加转化数据中不存在的字段，避免覆盖转化数据
+                if key not in data and value is not None:
+                    # 处理列表值（parse_qs 可能返回列表）
+                    if isinstance(value, list):
+                        # 如果列表只有一个元素，取第一个；否则保持列表
+                        data[key] = value[0] if len(value) == 1 else value
+                    else:
+                        data[key] = value
+
         return data
+
+    @staticmethod
+    def _filter_placeholders(params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        过滤掉包含占位符的参数
+        
+        占位符格式：{变量名}，例如 {click_id}, {offer_id}, {channel_id} 等
+        
+        Args:
+            params: 原始参数字典
+            
+        Returns:
+            过滤后的参数字典（不包含占位符）
+        """
+        if not params:
+            return {}
+        
+        # 占位符正则表达式：匹配 {变量名} 格式
+        placeholder_pattern = r'\{[a-zA-Z_][a-zA-Z0-9_]*\}'
+        
+        filtered_params = {}
+        for key, value in params.items():
+            # 处理列表值（parse_qs 可能返回列表）
+            if isinstance(value, list):
+                # 检查列表中是否有值包含占位符
+                filtered_values = []
+                for v in value:
+                    v_str = str(v) if v is not None else ''
+                    # 如果值不包含占位符，则保留
+                    if not re.search(placeholder_pattern, v_str):
+                        filtered_values.append(v)
+                # 如果有过滤后的值，则添加
+                if filtered_values:
+                    filtered_params[key] = filtered_values if len(filtered_values) > 1 else filtered_values[0]
+            else:
+                # 检查单个值是否包含占位符
+                value_str = str(value) if value is not None else ''
+                if not re.search(placeholder_pattern, value_str):
+                    filtered_params[key] = value
+        
+        return filtered_params
 
     @staticmethod
     async def _forward_get(url: str, params: Dict[str, Any]) -> httpx.Response:

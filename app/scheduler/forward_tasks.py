@@ -74,114 +74,96 @@ async def process_forward_queue():
 async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
     """
     处理单个转发任务
+    
+    使用 PostbackForwarder.forward_to_downstream 来处理转发，
+    这样可以自动包含原始点击参数（已过滤占位符）
     """
     try:
-        # 1. 准备数据
-        # 这里的实现复用 PostbackForwarder，但要注意 PostbackForwarder 原本的设计是直接接受 Product/Conversion
-        # 我们需要重新构造对象或让 Forwarder 支持 url/method/data
+        # 1. 重新加载关联对象（Conversion 和 Product）
+        conversion_result = await db.execute(
+            select(PostbackConversion).where(PostbackConversion.id == task.conversion_id)
+        )
+        conversion = conversion_result.scalars().first()
         
-        # 简单起见，我们直接使用 HTTP Client，或者扩展 Forwarder
-        # 这里我们模拟 Forwarder 的行为，因为 Forwarder 内部也记录 Log，我们需要避免重复记录 Log 吗？
-        # 观察 PostbackForwarder 源码 (需要回顾 forwarder.py)
-        # 假设 PostbackForwarder.forward_to_downstream 会记录 PostbackForwardLog
+        product_result = await db.execute(
+            select(Product).where(Product.id == task.product_id)
+        )
+        product = product_result.scalars().first()
         
-        # 重新加载关联对象
-        # 注意：task.conversion 和 task.product 可能未加载，需要显式查询或利用 Lazy Load (asyncio 中 Lazy Load 比较麻烦)
-        # 直接使用 ID 查询
-        
-        # 实际上 PostbackForwarder 只是一个帮助类，我们可以直接调用它
-        # 但我们需要确保 task 成功后从 Queue 删除，失败后更新 Queue
-        
-        # 我们直接使用 httpx 发送请求，并自己管理 Queue 和 Log，这样更可控
-        # 或者修改 PostbackForwarder 让其支持 "仅发送不记录Log" (如果需要)
-        # 现在的 PostbackForwarder.forward_to_downstream 是全流程封装。
-        # 让我们看看 forwarder.py 的内容（之前看过 file list，没看内容）
-        # 假设我们重新实现发送逻辑，为了完全控制 Queue
-        
-        import httpx
-        
-        success = False
-        response_body = ""
-        response_status = 0
-        error_msg = None
-        
-        try:
-            timeout = httpx.Timeout(10.0, connect=5.0)
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                method = task.request_method.upper()
-                if method == 'GET':
-                    # 虽然参数存储在 params 字段，但 url 可能已经包含参数
-                    # 简单起见，假设 downstream_url 是基础 URL，params 是查询参数
-                    # 实际上 processor.py 中我们暂时只存了 url
-                    resp = await client.get(task.downstream_url) # 假设 URL 已经包含了参数
-                else:
-                    # POST
-                    headers = {"Content-Type": "application/json"}
-                    resp = await client.post(task.downstream_url, content=task.request_data, headers=headers)
-                
-                response_status = resp.status_code
-                response_body = resp.text
-                
-                if 200 <= response_status < 300:
-                    success = True
-                else:
-                    error_msg = f"HTTP {response_status}"
-                    
-        except Exception as net_err:
-            error_msg = str(net_err)
-            success = False
-        
-        # 2. 处理结果
-        if success:
-            # 成功：移至 Log 表，从 Queue 删除
-            log_entry = PostbackForwardLog(
-                conversion_id=task.conversion_id,
-                product_id=task.product_id,
-                downstream_url=task.downstream_url,
-                request_method=task.request_method,
-                request_data=task.request_data,
-                request_params=task.request_params,
-                response_status=response_status,
-                response_body=response_body[:1000] if response_body else None, # 截断
-                success=True,
-                retry_count=task.retry_count,
-                created_at=task.created_at, # 保持原始创建时间
-                completed_at=get_app_now_naive()  # 使用北京时间
+        if not conversion or not product:
+            logger.warning(
+                f"转发任务关联对象不存在: queue_id={task.id}, "
+                f"conversion_id={task.conversion_id}, product_id={task.product_id}"
             )
-            db.add(log_entry)
+            # 删除无效任务
             await db.delete(task)
-            logger.info(f"转发任务成功: queue_id={task.id}, conversion_id={task.conversion_id}")
+            await db.commit()
+            return
+        
+        # 2. 使用 PostbackForwarder 处理转发（会自动包含原始点击参数）
+        # 注意：forward_to_downstream 会创建 PostbackForwardLog，我们需要在成功后删除队列任务
+        try:
+            await PostbackForwarder.forward_to_downstream(conversion, product, db)
             
-        else:
-            # 失败：检查重试次数
-            if task.retry_count >= MAX_RETRIES:
-                 # 超过最大重试次数：移至 Log 表 (失败状态)，从 Queue 删除
-                log_entry = PostbackForwardLog(
-                    conversion_id=task.conversion_id,
-                    product_id=task.product_id,
-                    downstream_url=task.downstream_url,
-                    request_method=task.request_method,
-                    request_data=task.request_data,
-                    request_params=task.request_params,
-                    response_status=response_status,
-                    response_body=response_body[:1000] if response_body else None,
-                    success=False,
-                    error_message=error_msg,
-                    retry_count=task.retry_count,
-                    created_at=task.created_at,
-                    completed_at=get_app_now_naive()  # 使用北京时间
-                )
-                db.add(log_entry)
+            # 3. 检查是否成功（通过查询最新的 ForwardLog）
+            log_result = await db.execute(
+                select(PostbackForwardLog)
+                .where(PostbackForwardLog.conversion_id == task.conversion_id)
+                .where(PostbackForwardLog.product_id == task.product_id)
+                .order_by(PostbackForwardLog.created_at.desc())
+                .limit(1)
+            )
+            latest_log = log_result.scalars().first()
+            
+            if latest_log and latest_log.success:
+                # 成功：从队列删除
                 await db.delete(task)
-                logger.warning(f"转发任务最终失败 (超过重试次数): queue_id={task.id}, error={error_msg}")
+                await db.commit()
+                logger.info(f"转发任务成功: queue_id={task.id}, conversion_id={task.conversion_id}")
             else:
-                # 还可以重试：更新 retry_count 和 next_retry_time
+                # 失败：检查重试次数
+                if task.retry_count >= MAX_RETRIES:
+                    # 超过最大重试次数：从队列删除（Log 已由 forward_to_downstream 创建）
+                    await db.delete(task)
+                    await db.commit()
+                    logger.warning(
+                        f"转发任务最终失败 (超过重试次数): queue_id={task.id}, "
+                        f"conversion_id={task.conversion_id}"
+                    )
+                else:
+                    # 还可以重试：更新 retry_count 和 next_retry_time
+                    delay = RETRY_DELAYS[min(task.retry_count, len(RETRY_DELAYS) - 1)]
+                    task.retry_count += 1
+                    task.next_retry_time = get_app_now_naive() + timedelta(seconds=delay)
+                    await db.commit()
+                    logger.info(
+                        f"转发任务失败，安排重试 ({task.retry_count}/{MAX_RETRIES}): "
+                        f"queue_id={task.id}, delay={delay}s"
+                    )
+        except Exception as forward_err:
+            # forward_to_downstream 内部异常
+            logger.error(
+                f"调用 forward_to_downstream 失败: queue_id={task.id}, "
+                f"conversion_id={task.conversion_id}, error={str(forward_err)}",
+                exc_info=True
+            )
+            # 检查重试次数
+            if task.retry_count >= MAX_RETRIES:
+                await db.delete(task)
+                await db.commit()
+                logger.warning(
+                    f"转发任务最终失败 (超过重试次数): queue_id={task.id}, "
+                    f"conversion_id={task.conversion_id}"
+                )
+            else:
                 delay = RETRY_DELAYS[min(task.retry_count, len(RETRY_DELAYS) - 1)]
                 task.retry_count += 1
-                task.next_retry_time = get_app_now_naive() + timedelta(seconds=delay)  # 使用北京时间
-                logger.info(f"转发任务失败，安排重试 ({task.retry_count}/{MAX_RETRIES}): queue_id={task.id}, delay={delay}s")
-        
-        await db.commit()
+                task.next_retry_time = get_app_now_naive() + timedelta(seconds=delay)
+                await db.commit()
+                logger.info(
+                    f"转发任务失败，安排重试 ({task.retry_count}/{MAX_RETRIES}): "
+                    f"queue_id={task.id}, delay={delay}s"
+                )
         
     except Exception as e:
         logger.error(f"处理单条转发任务失败: {e}", exc_info=True)
