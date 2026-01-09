@@ -1849,11 +1849,11 @@ onMounted(() => {
   loadAdvertisers()
   loadPublishers()
   
-  // 检查路由查询参数，如果有offer_id，自动搜索
-  const offerId = route.query.offer_id
-  if (offerId) {
-    // 设置搜索关键词为offer_id
-    searchKeyword.value = String(offerId)
+  // 检查路由查询参数，如果有offer_name，自动搜索
+  const offerName = route.query.offer_name
+  if (offerName) {
+    // 设置搜索关键词为offer_name
+    searchKeyword.value = String(offerName)
     // 执行搜索
     nextTick(() => {
       handleSearch()

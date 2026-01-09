@@ -106,29 +106,29 @@
             <el-table-column prop="offer_id" label="Offer ID" width="100" align="right">
               <template #default="scope">
                 <el-link
-                  v-if="scope.row.offer_id"
+                  v-if="scope.row.offer_id && scope.row.offer_name"
                   type="primary"
                   :underline="false"
-                  @click="handleOfferClick(scope.row.offer_id)"
+                  @click="handleOfferClick(scope.row.offer_name)"
                   style="cursor: pointer;"
                 >
                   {{ scope.row.offer_id }}
                 </el-link>
+                <span v-else-if="scope.row.offer_id">{{ scope.row.offer_id }}</span>
                 <span v-else>-</span>
               </template>
             </el-table-column>
             <el-table-column prop="offer_name" label="Offer Name" min-width="200" show-overflow-tooltip>
               <template #default="scope">
                 <el-link
-                  v-if="scope.row.offer_name && scope.row.offer_id"
+                  v-if="scope.row.offer_name"
                   type="primary"
                   :underline="false"
-                  @click="handleOfferClick(scope.row.offer_id)"
+                  @click="handleOfferClick(scope.row.offer_name)"
                   style="cursor: pointer;"
                 >
                   {{ scope.row.offer_name }}
                 </el-link>
-                <span v-else-if="scope.row.offer_name">{{ scope.row.offer_name }}</span>
                 <span v-else>-</span>
               </template>
             </el-table-column>
@@ -296,11 +296,11 @@ const handleReset = () => {
 }
 
 // 点击Offer跳转到Offer管理页面
-const handleOfferClick = (offerId) => {
-  if (offerId) {
+const handleOfferClick = (offerName) => {
+  if (offerName) {
     router.push({
       name: 'OfferManagement',
-      query: { offer_id: offerId }
+      query: { offer_name: offerName }
     })
   }
 }
