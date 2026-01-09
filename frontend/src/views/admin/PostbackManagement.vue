@@ -686,18 +686,16 @@ const handleResendNotification = async (row) => {
       await resendConversionNotification(row.id);
       ElMessage.success('通知补发成功');
       
-      // 更新该记录的通知状态
-      row.has_notification = true;
+      // 刷新列表数据以获取最新的通知状态（而不是直接修改本地状态）
+      await fetchConversions();
       
       // 刷新通知记录对话框（如果已打开）
       if (notificationRecordsVisible.value && 
-          selectedClientId.value === row.client_id && 
-          selectedProductId.value === row.product_id) {
+          selectedConversionId.value === row.id) {
         // 触发通知记录对话框重新加载
         notificationRecordsVisible.value = false;
         setTimeout(() => {
-          selectedClientId.value = row.client_id || null;
-          selectedProductId.value = row.product_id || null;
+          selectedConversionId.value = row.id;
           notificationRecordsVisible.value = true;
         }, 100);
       }

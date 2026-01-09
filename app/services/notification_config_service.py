@@ -591,12 +591,63 @@ class NotificationConfigService:
                 )
 
         try:
-            # 补发通知
-            await PostbackNotifier.notify_conversion(
+            # 补发通知（同步等待发送完成，而不是异步发送）
+            # 获取客户和产品信息
+            product = None
+            client = None
+            
+            if conversion.product_id:
+                product_result = await self.db.execute(
+                    select(Product).where(Product.id == conversion.product_id)
+                )
+                product = product_result.scalars().first()
+            
+            if product and product.client_id:
+                client_result = await self.db.execute(
+                    select(Client).where(Client.id == product.client_id)
+                )
+                client = client_result.scalars().first()
+            elif conversion.client_id:
+                client_result = await self.db.execute(
+                    select(Client).where(Client.id == conversion.client_id)
+                )
+                client = client_result.scalars().first()
+            
+            # 检查产品是否配置了通知地址
+            if not product or not product.notification_address:
+                raise_api_exception(
+                    ErrorCode.VALIDATION_ERROR,
+                    detail="产品未配置通知地址，无法补发通知"
+                )
+            
+            notification_address = product.notification_address.strip()
+            if not notification_address:
+                raise_api_exception(
+                    ErrorCode.VALIDATION_ERROR,
+                    detail="产品通知地址为空，无法补发通知"
+                )
+            
+            # 获取客户和产品信息（用于通知）
+            client_name, user_full_name = await PostbackNotifier._get_client_info(client, self.db)
+            product_name = PostbackNotifier._get_product_name(product)
+            
+            # 构建通知消息
+            message = PostbackNotifier._build_notification_message(
                 conversion=conversion,
-                db=self.db,
-                product=None,
-                client=None
+                client_name=client_name,
+                product_name=product_name,
+                user_full_name=user_full_name,
+                notification_type='conversion'
+            )
+            
+            # 同步发送通知（等待发送完成）
+            await PostbackNotifier._send_notification_async(
+                message=message,
+                conversion=conversion,
+                client=client,
+                product=product,
+                notification_address=notification_address,
+                db=self.db
             )
 
             logger.info(
