@@ -551,6 +551,43 @@ def run_bot():
                         error_msg = str(get_updates_error)
                         error_type = type(get_updates_error).__name__
                         
+                        # 检查是否是 409 冲突错误（多个 bot 实例同时运行）
+                        is_conflict_error = False
+                        error_code = None
+                        
+                        # 尝试获取错误代码（telebot 的 ApiTelegramException 可能有 error_code 属性）
+                        if hasattr(get_updates_error, 'error_code'):
+                            error_code = get_updates_error.error_code
+                            if error_code == 409:
+                                is_conflict_error = True
+                        elif hasattr(get_updates_error, 'result') and hasattr(get_updates_error.result, 'error_code'):
+                            error_code = get_updates_error.result.error_code
+                            if error_code == 409:
+                                is_conflict_error = True
+                        # 也可以通过错误消息判断
+                        elif '409' in error_msg or 'Conflict' in error_msg or 'terminated by other getUpdates' in error_msg:
+                            is_conflict_error = True
+                            error_code = 409
+                        
+                        if is_conflict_error:
+                            # 409 冲突错误：有多个 bot 实例在运行
+                            logger.error(f"❌ Telegram Bot 冲突错误 (409): 检测到多个 bot 实例同时运行")
+                            logger.error(f"   错误信息: {error_msg[:300]}")
+                            logger.error(f"   💡 解决方案:")
+                            logger.error(f"      1. 检查是否有多个进程/线程在运行 bot")
+                            logger.error(f"      2. 检查是否有其他服务/脚本也在使用同一个 bot token")
+                            logger.error(f"      3. 停止其他 bot 实例后，当前实例将在 30 秒后自动重试")
+                            logger.error(f"      4. 如果问题持续，请检查:")
+                            logger.error(f"         - 是否有多个 worker 进程（Gunicorn/Uvicorn）")
+                            logger.error(f"         - 是否有定时任务也在启动 bot")
+                            logger.error(f"         - 是否有其他服务器也在运行相同的 bot")
+                            
+                            # 等待较长时间后重试（给其他实例时间停止）
+                            retry_delay = 30
+                            logger.info(f"   将在 {retry_delay} 秒后重试...")
+                            time.sleep(retry_delay)
+                            continue
+                        
                         # 判断是否是网络连接错误
                         is_network_error = any(keyword in error_msg.lower() for keyword in [
                             'network is unreachable',
@@ -800,11 +837,37 @@ def run_bot():
     except KeyboardInterrupt:
         logger.info("收到终止信号，正在优雅关闭机器人...")
     except telebot.apihelper.ApiException as api_error:
-        logger.error(f"Telegram API 错误: {api_error}", exc_info=True)
-        logger.error(f"API 错误详情: {type(api_error).__name__}: {str(api_error)}")
+        error_msg = str(api_error)
+        error_code = getattr(api_error, 'error_code', None) or getattr(api_error, 'result', {}).get('error_code', None) if hasattr(api_error, 'result') else None
+        
+        # 检查是否是 409 冲突错误
+        if error_code == 409 or '409' in error_msg or 'Conflict' in error_msg or 'terminated by other getUpdates' in error_msg:
+            logger.error(f"❌ Telegram Bot 冲突错误 (409): 检测到多个 bot 实例同时运行")
+            logger.error(f"   API 错误详情: {type(api_error).__name__}: {error_msg[:300]}")
+            logger.error(f"   💡 解决方案:")
+            logger.error(f"      1. 检查是否有多个进程/线程在运行 bot")
+            logger.error(f"      2. 检查是否有其他服务/脚本也在使用同一个 bot token")
+            logger.error(f"      3. 停止其他 bot 实例后重启当前服务")
+            logger.error(f"      4. 如果问题持续，请检查:")
+            logger.error(f"         - 是否有多个 worker 进程（Gunicorn/Uvicorn）")
+            logger.error(f"         - 是否有定时任务也在启动 bot")
+            logger.error(f"         - 是否有其他服务器也在运行相同的 bot")
+        else:
+            logger.error(f"Telegram API 错误: {api_error}", exc_info=True)
+            logger.error(f"API 错误详情: {type(api_error).__name__}: {error_msg}")
     except Exception as e:
-        logger.error(f"机器人运行时发生错误: {e}", exc_info=True)
-        logger.error(f"错误类型: {type(e).__name__}")
+        error_msg = str(e)
+        # 检查是否是 409 冲突错误（可能被包装在其他异常中）
+        if '409' in error_msg or 'Conflict' in error_msg or 'terminated by other getUpdates' in error_msg:
+            logger.error(f"❌ Telegram Bot 冲突错误 (409): 检测到多个 bot 实例同时运行")
+            logger.error(f"   错误信息: {error_msg[:300]}")
+            logger.error(f"   💡 解决方案:")
+            logger.error(f"      1. 检查是否有多个进程/线程在运行 bot")
+            logger.error(f"      2. 检查是否有其他服务/脚本也在使用同一个 bot token")
+            logger.error(f"      3. 停止其他 bot 实例后重启当前服务")
+        else:
+            logger.error(f"机器人运行时发生错误: {e}", exc_info=True)
+            logger.error(f"错误类型: {type(e).__name__}")
     finally:
         logger.info("机器人已停止运行")
 

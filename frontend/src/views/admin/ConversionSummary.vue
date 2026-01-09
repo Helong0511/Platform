@@ -103,8 +103,35 @@
             stripe
             style="width: 100%;"
           >
-            <el-table-column prop="offer_id" label="Offer ID" width="100" align="right" />
-            <el-table-column prop="offer_name" label="Offer Name" min-width="200" show-overflow-tooltip />
+            <el-table-column prop="offer_id" label="Offer ID" width="100" align="right">
+              <template #default="scope">
+                <el-link
+                  v-if="scope.row.offer_id"
+                  type="primary"
+                  :underline="false"
+                  @click="handleOfferClick(scope.row.offer_id)"
+                  style="cursor: pointer;"
+                >
+                  {{ scope.row.offer_id }}
+                </el-link>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="offer_name" label="Offer Name" min-width="200" show-overflow-tooltip>
+              <template #default="scope">
+                <el-link
+                  v-if="scope.row.offer_name && scope.row.offer_id"
+                  type="primary"
+                  :underline="false"
+                  @click="handleOfferClick(scope.row.offer_id)"
+                  style="cursor: pointer;"
+                >
+                  {{ scope.row.offer_name }}
+                </el-link>
+                <span v-else-if="scope.row.offer_name">{{ scope.row.offer_name }}</span>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
             <el-table-column 
               v-if="isAdmin"
               prop="advertiser_name" 
@@ -163,6 +190,7 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, DataAnalysis, Mouse, Check, TrendCharts, Money } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
 import { getConversionSummary } from '@/api/conversionSummary'
 import { getOffers } from '@/api/offer'
 import { getPublishers } from '@/api/publisher'
@@ -171,6 +199,7 @@ import { useAuthStore } from '@/store'
 
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.isAdmin)
+const router = useRouter()
 
 const loading = ref(false)
 const dateRange = ref([])
@@ -264,6 +293,16 @@ const handleReset = () => {
   filterOffer.value = null
   filterPublisher.value = null
   loadData()
+}
+
+// 点击Offer跳转到Offer管理页面
+const handleOfferClick = (offerId) => {
+  if (offerId) {
+    router.push({
+      name: 'OfferManagement',
+      query: { offer_id: offerId }
+    })
+  }
 }
 
 onMounted(() => {

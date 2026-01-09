@@ -871,6 +871,7 @@
 import { ref, reactive, onMounted, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Refresh, Edit, Delete, Box, View, DocumentCopy, Loading, InfoFilled, User } from '@element-plus/icons-vue'
+import { useRoute } from 'vue-router'
 import { getOffers, createOffer, updateOffer, deleteOffer, getOffer, checkOfferShortLink } from '@/api/offer'
 import { getAdvertisers } from '@/api/advertiser'
 import { getPublishers } from '@/api/publisher'
@@ -883,6 +884,7 @@ import { useAuthStore } from '@/store'
 import { computed } from 'vue'
 
 const authStore = useAuthStore()
+const route = useRoute()
 const isAdmin = computed(() => authStore.isAdmin)
 // 获取客户ID，支持多种方式
 const currentClientId = computed(() => {
@@ -1846,7 +1848,19 @@ const handlePageChange = (page) => {
 onMounted(() => {
   loadAdvertisers()
   loadPublishers()
-  loadData()
+  
+  // 检查路由查询参数，如果有offer_id，自动搜索
+  const offerId = route.query.offer_id
+  if (offerId) {
+    // 设置搜索关键词为offer_id
+    searchKeyword.value = String(offerId)
+    // 执行搜索
+    nextTick(() => {
+      handleSearch()
+    })
+  } else {
+    loadData()
+  }
 })
 </script>
 
