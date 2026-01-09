@@ -596,12 +596,26 @@ class NotificationConfigService:
             product = None
             client = None
             
+            # 获取产品信息
             if conversion.product_id:
                 product_result = await self.db.execute(
                     select(Product).where(Product.id == conversion.product_id)
                 )
                 product = product_result.scalars().first()
+                
+                # 如果 product_id 存在但查询不到产品，说明产品可能已被删除
+                if not product:
+                    logger.error(
+                        f"补发通知失败: conversion_id={conversion_id}, "
+                        f"product_id={conversion.product_id}, "
+                        f"reason=产品不存在（可能已被删除）"
+                    )
+                    raise_api_exception(
+                        ErrorCode.VALIDATION_ERROR,
+                        detail=f"转化记录关联的产品ID {conversion.product_id} 不存在，无法补发通知"
+                    )
             
+            # 获取客户信息
             if product and product.client_id:
                 client_result = await self.db.execute(
                     select(Client).where(Client.id == product.client_id)
@@ -613,16 +627,28 @@ class NotificationConfigService:
                 )
                 client = client_result.scalars().first()
             
-            # 检查产品是否配置了通知地址
-            if not product or not product.notification_address:
+            # 检查产品是否存在
+            if not product:
                 logger.error(
                     f"补发通知失败: conversion_id={conversion_id}, "
-                    f"product_id={conversion.product_id}, "
+                    f"product_id=None, client_id={conversion.client_id}, "
+                    f"reason=转化记录未关联产品"
+                )
+                raise_api_exception(
+                    ErrorCode.VALIDATION_ERROR,
+                    detail="转化记录未关联产品，无法补发通知。请先为转化记录关联产品并配置通知地址"
+                )
+            
+            # 检查产品是否配置了通知地址
+            if not product.notification_address:
+                logger.error(
+                    f"补发通知失败: conversion_id={conversion_id}, "
+                    f"product_id={product.id}, product_name={product.name}, "
                     f"reason=产品未配置通知地址"
                 )
                 raise_api_exception(
                     ErrorCode.VALIDATION_ERROR,
-                    detail="产品未配置通知地址，无法补发通知"
+                    detail=f"产品「{product.name}」未配置通知地址，无法补发通知。请在产品管理中配置通知地址"
                 )
             
             notification_address = product.notification_address.strip()
