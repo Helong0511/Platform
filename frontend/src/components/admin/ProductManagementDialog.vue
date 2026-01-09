@@ -318,6 +318,94 @@
           </div>
         </el-form-item>
         
+        <el-form-item label="成功检查配置" prop="downstream_postback_success_check">
+          <div>
+            <el-input
+              v-model="formData.downstream_postback_success_check"
+              type="textarea"
+              :rows="6"
+              placeholder='JSON 格式配置，例如：{"type": "keyword", "success_keywords": ["OK"], "exact_match": true}'
+              size="large"
+            />
+            <div class="form-hint">
+              <el-link type="primary" @click="showSuccessCheckHelp = !showSuccessCheckHelp" style="font-size: 12px;">
+                <el-icon><InfoFilled /></el-icon>
+                {{ showSuccessCheckHelp ? '隐藏' : '查看' }}配置说明
+              </el-link>
+            </div>
+            <el-collapse-transition>
+              <div v-show="showSuccessCheckHelp" class="success-check-help">
+                <div class="help-title">下游转发成功检查配置说明：</div>
+                <div class="help-content">
+                  <div class="help-section">
+                    <div class="help-section-title">1. HTTP 状态码检查（默认）</div>
+                    <div class="help-example">
+                      <div class="example-label">不填写配置：</div>
+                      <div class="example-code">（留空）</div>
+                      <div class="example-desc">默认 200-299 状态码为成功</div>
+                    </div>
+                    <div class="help-example">
+                      <div class="example-label">只接受 200：</div>
+                      <div class="example-code">{"type": "status_code", "success_status_codes": [200]}</div>
+                    </div>
+                    <div class="help-example">
+                      <div class="example-label">接受多个状态码：</div>
+                      <div class="example-code">{"type": "status_code", "success_status_codes": [200, 201, 202]}</div>
+                    </div>
+                  </div>
+                  <div class="help-section">
+                    <div class="help-section-title">2. 关键词检查</div>
+                    <div class="help-example">
+                      <div class="example-label">精确匹配 "OK"：</div>
+                      <div class="example-code">{"type": "keyword", "success_keywords": ["OK"], "exact_match": true}</div>
+                      <div class="example-desc">响应必须完全等于 "OK"（不区分大小写）</div>
+                    </div>
+                    <div class="help-example">
+                      <div class="example-label">包含 "success"：</div>
+                      <div class="example-code">{"type": "keyword", "success_keywords": ["success"]}</div>
+                      <div class="example-desc">响应包含 "success" 即可（不区分大小写）</div>
+                    </div>
+                    <div class="help-example">
+                      <div class="example-label">多个关键词：</div>
+                      <div class="example-code">{"type": "keyword", "success_keywords": ["OK", "success", "200"]}</div>
+                      <div class="example-desc">包含任意一个关键词即可</div>
+                    </div>
+                    <div class="help-example">
+                      <div class="example-label">检查失败关键词：</div>
+                      <div class="example-code">{"type": "keyword", "success_keywords": ["OK"], "failure_keywords": ["error", "fail"]}</div>
+                      <div class="example-desc">包含失败关键词则失败（优先级更高）</div>
+                    </div>
+                  </div>
+                  <div class="help-section">
+                    <div class="help-section-title">3. JSON 检查</div>
+                    <div class="help-example">
+                      <div class="example-label">检查 status 字段：</div>
+                      <div class="example-code">{"type": "json", "json_path": "status", "json_value": "ok"}</div>
+                      <div class="example-desc">检查 JSON 响应中 status 字段的值是否为 "ok"</div>
+                    </div>
+                    <div class="help-example">
+                      <div class="example-label">检查嵌套字段：</div>
+                      <div class="example-code">{"type": "json", "json_path": "data.status", "json_value": "success"}</div>
+                      <div class="example-desc">检查 data.status 字段的值</div>
+                    </div>
+                    <div class="help-example">
+                      <div class="example-label">只检查字段存在：</div>
+                      <div class="example-code">{"type": "json", "json_path": "status"}</div>
+                      <div class="example-desc">只要 status 字段存在且不为空即可</div>
+                    </div>
+                  </div>
+                  <div class="help-note">
+                    <el-icon><Warning /></el-icon>
+                    <strong>注意：</strong>配置必须是有效的 JSON 格式。如果不填写，默认使用 HTTP 状态码判断（200-299 为成功）。
+                    <br>
+                    详细配置示例请参考：<el-link type="primary" href="/docs/postback_success_check_examples.md" target="_blank">配置示例文档</el-link>
+                  </div>
+                </div>
+              </div>
+            </el-collapse-transition>
+          </div>
+        </el-form-item>
+        
         <el-divider content-position="left">
           <el-icon :size="16"><Bell /></el-icon>
           <span style="margin-left: 8px;">通知配置（可选）</span>
@@ -459,7 +547,7 @@
 <script setup>
 import { ref, watch, reactive, computed, onMounted, nextTick } from 'vue';
 import { ElDialog, ElButton, ElTable, ElTableColumn, ElTag, ElForm, ElFormItem, ElInput, ElInputNumber, ElSwitch, ElIcon, ElMessage, ElMessageBox, ElStatistic, ElSelect, ElOption, ElAutocomplete, ElDatePicker, ElTimeline, ElTimelineItem } from 'element-plus';
-import { Plus, Edit, Delete, Box, Clock, InfoFilled, Check, CircleCheck, CircleClose, Loading, Connection, Link, Bell, Message } from '@element-plus/icons-vue';
+import { Plus, Edit, Delete, Box, Clock, InfoFilled, Check, CircleCheck, CircleClose, Loading, Connection, Link, Bell, Message, Warning } from '@element-plus/icons-vue';
 import { getAvailableProductNames, getProductDetail, getProductAssignments } from '../../api/product';
 import { getClientDetail } from '../../api/client';
 import { logger } from '../../utils/logger';
@@ -597,6 +685,7 @@ const getYesterdayDateString = () => {
 // 产品相关状态
 const productNames = ref([]); // 存储产品对象列表 {id, name, client_id}
 const productNamesLoading = ref(false);
+const showSuccessCheckHelp = ref(false);
 // 保存用户输入的产品名称备份（防止被清空）
 const productNameBackup = ref('');
 // 保存选中的产品对象（如果从下拉列表选择）
@@ -609,6 +698,7 @@ const formData = reactive({
   is_active: true,
   downstream_postback_url: '',
   downstream_postback_method: 'GET',
+  downstream_postback_success_check: '',
   notification_address: ''
 });
 
@@ -845,6 +935,7 @@ const handleAdd = async () => {
     is_active: true,
     downstream_postback_url: '',
     downstream_postback_method: 'GET',
+    downstream_postback_success_check: '',
     notification_address: ''
   });
   
@@ -875,6 +966,7 @@ const handleEdit = async (product) => {
     is_active: product.is_active !== undefined ? product.is_active : true,
     downstream_postback_url: product.downstream_postback_url || '',
     downstream_postback_method: product.downstream_postback_method || 'GET',
+    downstream_postback_success_check: product.downstream_postback_success_check || '',
     notification_address: product.notification_address || ''
   });
   
@@ -1082,6 +1174,7 @@ const handleSave = async () => {
       is_active: formData.is_active,
       downstream_postback_url: formData.downstream_postback_url ? String(formData.downstream_postback_url).trim() : null,
       downstream_postback_method: formData.downstream_postback_method || 'GET',
+      downstream_postback_success_check: formData.downstream_postback_success_check ? String(formData.downstream_postback_success_check).trim() : null,
       notification_address: formData.notification_address ? String(formData.notification_address).trim() : null,
       client_id: props.clientId  // 新的客户ID
     };
@@ -1098,6 +1191,7 @@ const handleSave = async () => {
       delete submitData.is_active;
       delete submitData.downstream_postback_url;
       delete submitData.downstream_postback_method;
+      delete submitData.downstream_postback_success_check;
       delete submitData.notification_address;
       
       // 添加 transfer_date（新客户开始日期）和 old_client_end_date（旧客户结束日期）
@@ -1500,6 +1594,7 @@ const continueSaveAfterDateSelection = async () => {
       is_active: true,
       downstream_postback_url: '',
       downstream_postback_method: 'GET',
+      downstream_postback_success_check: '',
       notification_address: ''
     });
     currentProductId.value = null;
@@ -1913,6 +2008,95 @@ const handleDelete = async (id) => {
 
 .product-form :deep(.el-form-item__content) {
   line-height: 40px;
+}
+
+/* 成功检查配置帮助样式（桌面端） */
+.success-check-help {
+  margin-top: 10px;
+  padding: 12px;
+  background-color: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.help-title {
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 10px;
+}
+
+.help-content {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.help-section {
+  margin-bottom: 15px;
+}
+
+.help-section:last-child {
+  margin-bottom: 0;
+}
+
+.help-section-title {
+  font-weight: 600;
+  color: #409eff;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.help-example {
+  margin-bottom: 10px;
+  padding: 8px;
+  background-color: #ffffff;
+  border-left: 3px solid #409eff;
+  border-radius: 4px;
+}
+
+.example-label {
+  font-weight: 500;
+  color: #606266;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.example-code {
+  background-color: #f0f2f5;
+  padding: 6px 10px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #e6a23c;
+  word-break: break-all;
+  margin: 4px 0;
+}
+
+.example-desc {
+  color: #909399;
+  font-size: 11px;
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.help-note {
+  margin-top: 15px;
+  padding: 10px;
+  background-color: #fef0f0;
+  border: 1px solid #fde2e2;
+  border-radius: 4px;
+  color: #f56c6c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.help-note .el-icon {
+  color: #f56c6c;
+  margin-right: 4px;
+}
+
+.help-note strong {
+  font-weight: 600;
 }
 
 /* 产品名称表单项 */
@@ -2698,6 +2882,88 @@ const handleDelete = async (id) => {
 
   .product-form :deep(.el-date-editor .el-input__inner) {
     font-size: 16px;
+  }
+  
+  /* 成功检查配置帮助样式 */
+  .success-check-help {
+    margin-top: 8px;
+    padding: 8px;
+    background-color: #f5f7fa;
+    border: 1px solid #e4e7ed;
+    border-radius: 4px;
+    font-size: 11px;
+  }
+
+  .help-title {
+    font-weight: 600;
+    color: #303133;
+    margin-bottom: 8px;
+    font-size: 12px;
+  }
+
+  .help-content {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .help-section {
+    margin-bottom: 12px;
+  }
+
+  .help-section-title {
+    font-weight: 600;
+    color: #409eff;
+    margin-bottom: 6px;
+    font-size: 12px;
+  }
+
+  .help-example {
+    margin-bottom: 8px;
+    padding: 6px;
+    background-color: #ffffff;
+    border-left: 3px solid #409eff;
+    border-radius: 4px;
+  }
+
+  .example-label {
+    font-weight: 500;
+    color: #606266;
+    margin-bottom: 3px;
+    font-size: 11px;
+  }
+
+  .example-code {
+    background-color: #f0f2f5;
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    color: #e6a23c;
+    word-break: break-all;
+    margin: 3px 0;
+  }
+
+  .example-desc {
+    color: #909399;
+    font-size: 10px;
+    margin-top: 3px;
+    font-style: italic;
+  }
+
+  .help-note {
+    margin-top: 12px;
+    padding: 8px;
+    background-color: #fef0f0;
+    border: 1px solid #fde2e2;
+    border-radius: 4px;
+    color: #f56c6c;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  .help-note .el-icon {
+    color: #f56c6c;
+    margin-right: 4px;
   }
 
   /* 对话框底部按钮移动端优化 */

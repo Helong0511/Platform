@@ -229,6 +229,90 @@
             <el-option label="POST" value="POST" />
           </el-select>
         </el-form-item>
+        <el-form-item label="成功检查配置" prop="postback_success_check">
+          <el-input
+            v-model="formData.postback_success_check"
+            type="textarea"
+            :rows="6"
+            placeholder='JSON 格式配置，例如：{"type": "keyword", "success_keywords": ["OK"], "exact_match": true}'
+          />
+          <div class="form-hint">
+            <el-link type="primary" @click="showSuccessCheckHelp = !showSuccessCheckHelp" style="font-size: 12px;">
+              <el-icon><InfoFilled /></el-icon>
+              {{ showSuccessCheckHelp ? '隐藏' : '查看' }}配置说明
+            </el-link>
+          </div>
+          <el-collapse-transition>
+            <div v-show="showSuccessCheckHelp" class="success-check-help">
+              <div class="help-title">转发成功检查配置说明：</div>
+              <div class="help-content">
+                <div class="help-section">
+                  <div class="help-section-title">1. HTTP 状态码检查（默认）</div>
+                  <div class="help-example">
+                    <div class="example-label">不填写配置：</div>
+                    <div class="example-code">（留空）</div>
+                    <div class="example-desc">默认 200-299 状态码为成功</div>
+                  </div>
+                  <div class="help-example">
+                    <div class="example-label">只接受 200：</div>
+                    <div class="example-code">{"type": "status_code", "success_status_codes": [200]}</div>
+                  </div>
+                  <div class="help-example">
+                    <div class="example-label">接受多个状态码：</div>
+                    <div class="example-code">{"type": "status_code", "success_status_codes": [200, 201, 202]}</div>
+                  </div>
+                </div>
+                <div class="help-section">
+                  <div class="help-section-title">2. 关键词检查</div>
+                  <div class="help-example">
+                    <div class="example-label">精确匹配 "OK"：</div>
+                    <div class="example-code">{"type": "keyword", "success_keywords": ["OK"], "exact_match": true}</div>
+                    <div class="example-desc">响应必须完全等于 "OK"（不区分大小写）</div>
+                  </div>
+                  <div class="help-example">
+                    <div class="example-label">包含 "success"：</div>
+                    <div class="example-code">{"type": "keyword", "success_keywords": ["success"]}</div>
+                    <div class="example-desc">响应包含 "success" 即可（不区分大小写）</div>
+                  </div>
+                  <div class="help-example">
+                    <div class="example-label">多个关键词：</div>
+                    <div class="example-code">{"type": "keyword", "success_keywords": ["OK", "success", "200"]}</div>
+                    <div class="example-desc">包含任意一个关键词即可</div>
+                  </div>
+                  <div class="help-example">
+                    <div class="example-label">检查失败关键词：</div>
+                    <div class="example-code">{"type": "keyword", "success_keywords": ["OK"], "failure_keywords": ["error", "fail"]}</div>
+                    <div class="example-desc">包含失败关键词则失败（优先级更高）</div>
+                  </div>
+                </div>
+                <div class="help-section">
+                  <div class="help-section-title">3. JSON 检查</div>
+                  <div class="help-example">
+                    <div class="example-label">检查 status 字段：</div>
+                    <div class="example-code">{"type": "json", "json_path": "status", "json_value": "ok"}</div>
+                    <div class="example-desc">检查 JSON 响应中 status 字段的值是否为 "ok"</div>
+                  </div>
+                  <div class="help-example">
+                    <div class="example-label">检查嵌套字段：</div>
+                    <div class="example-code">{"type": "json", "json_path": "data.status", "json_value": "success"}</div>
+                    <div class="example-desc">检查 data.status 字段的值</div>
+                  </div>
+                  <div class="help-example">
+                    <div class="example-label">只检查字段存在：</div>
+                    <div class="example-code">{"type": "json", "json_path": "status"}</div>
+                    <div class="example-desc">只要 status 字段存在且不为空即可</div>
+                  </div>
+                </div>
+                <div class="help-note">
+                  <el-icon><Warning /></el-icon>
+                  <strong>注意：</strong>配置必须是有效的 JSON 格式。如果不填写，默认使用 HTTP 状态码判断（200-299 为成功）。
+                  <br>
+                  详细配置示例请参考：<el-link type="primary" href="/docs/postback_success_check_examples.md" target="_blank">配置示例文档</el-link>
+                </div>
+              </div>
+            </div>
+          </el-collapse-transition>
+        </el-form-item>
         <el-form-item label="关联客户" prop="client_id">
           <el-select
             v-model="formData.client_id"
@@ -276,6 +360,7 @@ const searchKeyword = ref('')
 const filterActive = ref(null)
 const formRef = ref(null)
 const showPlaceholderHelp = ref(false)
+const showSuccessCheckHelp = ref(false)
 
 const pagination = reactive({
   page: 1,
@@ -292,6 +377,7 @@ const formData = reactive({
   price_discount: 0,
   postback_url: '',
   postback_method: 'GET',
+  postback_success_check: '',
   client_id: null,
   is_active: true
 })
@@ -538,6 +624,7 @@ const handleAdd = () => {
     price_discount: 0,
     postback_url: '',
     postback_method: 'GET',
+    postback_success_check: '',
     client_id: null,
     is_active: true
   })
@@ -554,6 +641,7 @@ const handleEdit = (row) => {
     price_discount: row.price_discount || 0,
     postback_url: row.postback_url || '',
     postback_method: row.postback_method || 'GET',
+    postback_success_check: row.postback_success_check || '',
     client_id: row.client_id || null,
     is_active: row.is_active
   })
@@ -864,9 +952,111 @@ onMounted(() => {
   font-size: 12px;
 }
 
+/* 成功检查配置帮助样式 */
+.success-check-help {
+  margin-top: 10px;
+  padding: 12px;
+  background-color: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.help-title {
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 10px;
+}
+
+.help-content {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.help-section {
+  margin-bottom: 15px;
+}
+
+.help-section:last-child {
+  margin-bottom: 0;
+}
+
+.help-section-title {
+  font-weight: 600;
+  color: #409eff;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.help-example {
+  margin-bottom: 10px;
+  padding: 8px;
+  background-color: #ffffff;
+  border-left: 3px solid #409eff;
+  border-radius: 4px;
+}
+
+.example-label {
+  font-weight: 500;
+  color: #606266;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.example-code {
+  background-color: #f0f2f5;
+  padding: 6px 10px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #e6a23c;
+  word-break: break-all;
+  margin: 4px 0;
+}
+
+.example-desc {
+  color: #909399;
+  font-size: 11px;
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.help-note {
+  margin-top: 15px;
+  padding: 10px;
+  background-color: #fef0f0;
+  border: 1px solid #fde2e2;
+  border-radius: 4px;
+  color: #f56c6c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.help-note .el-icon {
+  color: #f56c6c;
+  margin-right: 4px;
+}
+
+.help-note strong {
+  font-weight: 600;
+}
+
 @media (max-width: 767px) {
   .placeholder-list {
     grid-template-columns: 1fr;
+  }
+  
+  .success-check-help {
+    padding: 8px;
+  }
+  
+  .help-content {
+    max-height: 400px;
+  }
+  
+  .example-code {
+    font-size: 10px;
+    padding: 4px 8px;
   }
 }
 </style>

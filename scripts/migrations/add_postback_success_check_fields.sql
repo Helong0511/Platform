@@ -1,0 +1,125 @@
+-- ============================================
+-- 添加 Postback 转发成功检查配置字段
+-- ============================================
+-- 说明：为 Publisher 和 Product 表添加响应内容检查配置字段
+-- 用于支持自定义转发成功判断规则（HTTP 状态码、JSON 字段、关键词等）
+-- 
+-- 创建时间：2026-01-09
+-- ============================================
+
+-- ============================================
+-- 1. 为 publishers 表添加 postback_success_check 字段
+-- ============================================
+-- 用途：配置渠道（Publisher）Postback 转发的成功检查规则
+-- 使用场景：当转化数据转发到渠道的 Postback URL 时，检查响应是否成功
+-- 配置位置：渠道管理页面 -> postback_success_check 字段
+-- 字段位置：在 postback_method 字段之后
+-- 
+-- 说明：
+-- - Publisher 是渠道（下游合作伙伴），配置了 postback_url
+-- - 当有转化发生时，系统会将转化数据转发到渠道的 postback_url
+-- - 此字段用于配置如何判断渠道的响应是否表示成功
+ALTER TABLE `publishers` 
+ADD COLUMN `postback_success_check` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL COMMENT '渠道 Postback 转发成功检查配置（JSON格式，用于检查渠道 Postback URL 的响应内容是否表示成功）' 
+AFTER `postback_method`;
+
+-- ============================================
+-- 2. 为 products 表添加 downstream_postback_success_check 字段
+-- ============================================
+-- 用途：配置产品（Product）下游转发的成功检查规则
+-- 使用场景：当转化数据转发到产品的下游 Postback URL 时，检查响应是否成功
+-- 配置位置：产品管理页面 -> downstream_postback_success_check 字段
+-- 字段位置：在 downstream_postback_method 字段之后
+-- 
+-- 说明：
+-- - Product 是产品，可以配置 downstream_postback_url（下游 Postback URL）
+-- - 当有转化发生时，系统会将转化数据转发到产品的 downstream_postback_url
+-- - 此字段用于配置如何判断下游系统的响应是否表示成功
+-- 
+-- 区别：
+-- - Publisher 的 postback_url：转发给渠道（渠道是下游合作伙伴）
+-- - Product 的 downstream_postback_url：转发给产品的下游系统（可能是另一个平台）
+ALTER TABLE `products` 
+ADD COLUMN `downstream_postback_success_check` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL COMMENT '产品下游 Postback 转发成功检查配置（JSON格式，用于检查产品下游 Postback URL 的响应内容是否表示成功）' 
+AFTER `downstream_postback_method`;
+
+-- ============================================
+-- 验证字段是否添加成功
+-- ============================================
+-- 执行以下 SQL 可以验证字段是否添加成功：
+-- 
+-- -- 方式 1：查看表结构
+-- DESCRIBE `publishers`;
+-- DESCRIBE `products`;
+-- 
+-- -- 方式 2：查看特定字段
+-- SHOW COLUMNS FROM `publishers` LIKE 'postback_success_check';
+-- SHOW COLUMNS FROM `products` LIKE 'downstream_postback_success_check';
+-- 
+-- -- 方式 3：查看字段信息
+-- SELECT 
+--     COLUMN_NAME, 
+--     COLUMN_TYPE, 
+--     IS_NULLABLE, 
+--     COLUMN_COMMENT 
+-- FROM 
+--     INFORMATION_SCHEMA.COLUMNS 
+-- WHERE 
+--     TABLE_SCHEMA = DATABASE() 
+--     AND TABLE_NAME = 'publishers' 
+--     AND COLUMN_NAME = 'postback_success_check';
+-- 
+-- SELECT 
+--     COLUMN_NAME, 
+--     COLUMN_TYPE, 
+--     IS_NULLABLE, 
+--     COLUMN_COMMENT 
+-- FROM 
+--     INFORMATION_SCHEMA.COLUMNS 
+-- WHERE 
+--     TABLE_SCHEMA = DATABASE() 
+--     AND TABLE_NAME = 'products' 
+--     AND COLUMN_NAME = 'downstream_postback_success_check';
+-- ============================================
+
+-- ============================================
+-- 回滚脚本（如果需要删除字段）
+-- ============================================
+-- 如果需要回滚，执行以下 SQL：
+-- 
+-- -- 删除 publishers 表的字段
+-- ALTER TABLE `publishers` DROP COLUMN `postback_success_check`;
+-- 
+-- -- 删除 products 表的字段
+-- ALTER TABLE `products` DROP COLUMN `downstream_postback_success_check`;
+-- ============================================
+
+-- ============================================
+-- 使用说明
+-- ============================================
+-- 1. 执行此脚本前，请先备份数据库
+-- 2. 建议在非生产环境先测试
+-- 3. 执行后验证字段是否添加成功
+-- 4. 字段为可选字段（nullable），不影响现有数据
+-- 
+-- 配置示例：
+-- 
+-- -- 渠道（Publisher）配置示例：
+-- -- 只接受 200 状态码
+-- UPDATE `publishers` SET `postback_success_check` = '{"type": "status_code", "success_status_codes": [200]}' WHERE `id` = 1;
+-- 
+-- -- 关键词检查：精确匹配 "OK"
+-- UPDATE `publishers` SET `postback_success_check` = '{"type": "keyword", "success_keywords": ["OK"], "exact_match": true}' WHERE `id` = 2;
+-- 
+-- -- JSON 检查：检查 status 字段
+-- UPDATE `publishers` SET `postback_success_check` = '{"type": "json", "json_path": "status", "json_value": "ok"}' WHERE `id` = 3;
+-- 
+-- -- 产品（Product）配置示例：
+-- -- 只接受 200 状态码
+-- UPDATE `products` SET `downstream_postback_success_check` = '{"type": "status_code", "success_status_codes": [200]}' WHERE `id` = 1;
+-- 
+-- -- 关键词检查：包含 "success"
+-- UPDATE `products` SET `downstream_postback_success_check` = '{"type": "keyword", "success_keywords": ["success"]}' WHERE `id` = 2;
+-- 
+-- 详细配置说明请参考：docs/postback_success_check_examples.md
+-- ============================================
