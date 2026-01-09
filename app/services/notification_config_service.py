@@ -615,6 +615,11 @@ class NotificationConfigService:
             
             # 检查产品是否配置了通知地址
             if not product or not product.notification_address:
+                logger.error(
+                    f"补发通知失败: conversion_id={conversion_id}, "
+                    f"product_id={conversion.product_id}, "
+                    f"reason=产品未配置通知地址"
+                )
                 raise_api_exception(
                     ErrorCode.VALIDATION_ERROR,
                     detail="产品未配置通知地址，无法补发通知"
@@ -622,6 +627,11 @@ class NotificationConfigService:
             
             notification_address = product.notification_address.strip()
             if not notification_address:
+                logger.error(
+                    f"补发通知失败: conversion_id={conversion_id}, "
+                    f"product_id={conversion.product_id}, "
+                    f"reason=产品通知地址为空"
+                )
                 raise_api_exception(
                     ErrorCode.VALIDATION_ERROR,
                     detail="产品通知地址为空，无法补发通知"
@@ -640,15 +650,29 @@ class NotificationConfigService:
                 notification_type='conversion'
             )
             
-            # 同步发送通知（等待发送完成）
-            await PostbackNotifier._send_notification_async(
+            # 同步发送通知（等待发送完成，失败时抛出异常）
+            success = await PostbackNotifier._send_notification_async(
                 message=message,
                 conversion=conversion,
                 client=client,
                 product=product,
                 notification_address=notification_address,
-                db=self.db
+                db=self.db,
+                raise_on_failure=True  # 补发通知时，失败应该抛出异常
             )
+            
+            if not success:
+                logger.error(
+                    f"补发通知失败: conversion_id={conversion_id}, "
+                    f"product_id={product.id if product else None}, "
+                    f"client_id={client.id if client else None}, "
+                    f"address={notification_address[:50]}, "
+                    f"reason=通知发送失败"
+                )
+                raise_api_exception(
+                    ErrorCode.OPERATION_FAILED,
+                    detail="通知发送失败，请检查通知地址配置"
+                )
 
             logger.info(
                 f"用户 {current_user.id} 补发转化通知: conversion_id={conversion_id}"

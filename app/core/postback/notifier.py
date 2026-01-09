@@ -282,8 +282,9 @@ class PostbackNotifier:
         client: Optional[Client],
         product: Optional[Product],
         notification_address: str,
-        db: AsyncSession
-    ) -> None:
+        db: AsyncSession,
+        raise_on_failure: bool = False
+    ) -> bool:
         """
         异步发送通知（使用产品表中的通知地址）
         
@@ -294,6 +295,10 @@ class PostbackNotifier:
             product: 产品对象
             notification_address: 通知地址（Telegram Chat ID、邮箱、Webhook URL等）
             db: 数据库会话
+            raise_on_failure: 如果为True，通知发送失败时抛出异常（用于补发通知场景）
+        
+        Returns:
+            bool: 通知是否发送成功
         """
         try:
             # 判断通知地址类型并发送
@@ -330,14 +335,22 @@ class PostbackNotifier:
                 logger.info(
                     f"转化通知发送成功: conversion_id={conversion.id}, "
                     f"product_id={product.id if product else None}, "
+                    f"client_id={client.id if client else None}, "
                     f"address={notification_address[:50]}, channel={notification_channel}"
                 )
+                return True
             else:
-                logger.warning(
+                # 通知发送失败，记录详细错误日志
+                logger.error(
                     f"转化通知发送失败: conversion_id={conversion.id}, "
                     f"product_id={product.id if product else None}, "
-                    f"address={notification_address[:50]}, channel={notification_channel}"
+                    f"client_id={client.id if client else None}, "
+                    f"address={notification_address[:50]}, channel={notification_channel}, "
+                    f"status=failed"
                 )
+                if raise_on_failure:
+                    raise Exception(f"通知发送失败: channel={notification_channel}, address={notification_address[:50]}")
+                return False
                 
         except Exception as e:
             # 记录失败的通知
@@ -358,12 +371,19 @@ class PostbackNotifier:
             except Exception as commit_error:
                 logger.error(f"保存通知记录失败: {commit_error}")
             
-            logger.warning(
-                f"发送转化通知失败: conversion_id={conversion.id}, "
+            # 通知发送异常，记录详细错误日志
+            logger.error(
+                f"发送转化通知异常: conversion_id={conversion.id}, "
                 f"product_id={product.id if product else None}, "
-                f"address={notification_address[:50]}, error={str(e)}",
+                f"client_id={client.id if client else None}, "
+                f"address={notification_address[:50]}, "
+                f"channel={notification_channel if 'notification_channel' in locals() else 'unknown'}, "
+                f"error={str(e)}",
                 exc_info=True
             )
+            if raise_on_failure:
+                raise
+            return False
     
     @staticmethod
     def _detect_notification_channel(address: str) -> str:
@@ -421,7 +441,10 @@ class PostbackNotifier:
             elif channel == 'email':
                 # 邮箱地址
                 # TODO: 实现邮件通知
-                logger.warning(f"邮件通知功能尚未实现: address={address}")
+                logger.error(
+                    f"邮件通知功能尚未实现: address={address}, "
+                    f"channel=email, status=not_implemented"
+                )
                 return False
             elif channel == 'webhook':
                 # Webhook URL
@@ -430,15 +453,23 @@ class PostbackNotifier:
                     message=message
                 )
             else:
-                logger.warning(f"不支持的通知渠道: {channel}, address={address}")
+                logger.error(
+                    f"不支持的通知渠道: channel={channel}, address={address[:50]}, "
+                    f"status=unsupported_channel"
+                )
                 return False
                 
         except asyncio.TimeoutError:
-            logger.warning(f"发送通知超时: channel={channel}, address={address[:50]}")
+            logger.error(
+                f"发送通知超时: channel={channel}, address={address[:50]}, "
+                f"timeout=5.0s"
+            )
             return False
         except Exception as e:
-            logger.warning(
-                f"发送通知失败: channel={channel}, address={address[:50]}, error={str(e)}"
+            logger.error(
+                f"发送通知异常: channel={channel}, address={address[:50]}, "
+                f"error={str(e)}",
+                exc_info=True
             )
             return False
     
@@ -480,17 +511,22 @@ class PostbackNotifier:
                     )
                     return True
                 else:
-                    logger.warning(
+                    logger.error(
                         f"Webhook 通知返回非成功状态: url={url[:50]}, "
                         f"status={response.status_code}, response={response.text[:200]}"
                     )
                     return False
                     
         except httpx.TimeoutException:
-            logger.warning(f"Webhook 通知超时: url={url[:50]}")
+            logger.error(
+                f"Webhook 通知超时: url={url[:50]}, timeout=10.0s"
+            )
             return False
         except Exception as e:
-            logger.warning(f"Webhook 通知失败: url={url[:50]}, error={str(e)}")
+            logger.error(
+                f"Webhook 通知异常: url={url[:50]}, error={str(e)}",
+                exc_info=True
+            )
             return False
     
     @staticmethod
