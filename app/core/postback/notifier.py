@@ -309,12 +309,29 @@ class PostbackNotifier:
             
             notification_channel = PostbackNotifier._detect_notification_channel(notification_address)
             
-            # 发送通知
-            success = await PostbackNotifier._send_to_address(
-                address=notification_address,
-                channel=notification_channel,
-                message=message
-            )
+            # 发送通知并捕获可能的错误信息
+            success = False
+            error_msg = None
+            try:
+                success = await PostbackNotifier._send_to_address(
+                    address=notification_address,
+                    channel=notification_channel,
+                    message=message
+                )
+                if not success:
+                    # 根据渠道类型推断失败原因
+                    if notification_channel == 'email':
+                        error_msg = "邮件通知功能尚未实现"
+                    elif notification_channel == 'sms':
+                        error_msg = "短信通知功能尚未实现"
+                    elif notification_channel == 'webhook':
+                        error_msg = f"Webhook 通知失败: url={notification_address[:50]}"
+                    else:
+                        error_msg = f"通知发送失败: channel={notification_channel}, address={notification_address[:50]}"
+            except Exception as send_error:
+                # 发送过程中出现异常
+                error_msg = f"通知发送异常: {str(send_error)[:200]}"
+                success = False
             
             # 记录通知历史
             notification_record = PostbackNotification(
@@ -325,6 +342,8 @@ class PostbackNotifier:
                 notification_channel=notification_channel,
                 notification_status='sent' if success else 'failed',
                 notification_message=message,
+                error_message=error_msg,
+                auto_notify=True,  # 转化通知是自动通知
                 created_at=get_app_now_naive()
             )
             
@@ -364,6 +383,7 @@ class PostbackNotifier:
                     notification_status='failed',
                     notification_message=message,
                     error_message=str(e)[:500],
+                    auto_notify=True,  # 转化通知是自动通知
                     created_at=get_app_now_naive()
                 )
                 db.add(notification_record)

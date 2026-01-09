@@ -458,27 +458,39 @@ class NotificationConfigService:
                     conversion = conversion_result.scalars().first()
 
                     if conversion:
-                        # 构建通知消息
-                        notification_message = f"转化记录通知\n\n"
-                        notification_message += f"转化ID: {conversion.conversion_id}\n"
-                        notification_message += f"平台: {conversion.platform}\n"
-                        if conversion.event_name:
-                            notification_message += f"事件: {conversion.event_name}\n"
-
-                        # 优先显示扣后的 payout（给下游的实际金额）
-                        if conversion.payout is not None:
-                            notification_message += f"金额 (PO): ${conversion.payout:.2f}\n"
-                        elif conversion.original_payout is not None:
-                            notification_message += f"金额 (PO): ${conversion.original_payout:.2f}\n"
-
-                        # 原始金额作为参考（如果与扣后金额不同）
-                        if conversion.original_payout is not None and conversion.payout is not None:
-                            if conversion.original_payout != conversion.payout:
-                                notification_message += f"原始金额 (PO): ${conversion.original_payout:.2f}\n"
-
-                        if conversion.created_at:
-                            time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
-                            notification_message += f"时间: {time_str}\n"
+                        # 获取客户和产品信息（用于构建通知消息）
+                        product = None
+                        client = None
+                        
+                        if conversion.product_id:
+                            product_result = await self.db.execute(
+                                select(Product).where(Product.id == conversion.product_id)
+                            )
+                            product = product_result.scalars().first()
+                        
+                        if product and product.client_id:
+                            client_result = await self.db.execute(
+                                select(Client).where(Client.id == product.client_id)
+                            )
+                            client = client_result.scalars().first()
+                        elif conversion.client_id:
+                            client_result = await self.db.execute(
+                                select(Client).where(Client.id == conversion.client_id)
+                            )
+                            client = client_result.scalars().first()
+                        
+                        # 使用统一的消息构建方法
+                        from app.core.postback.notifier import PostbackNotifier
+                        client_name, user_full_name = await PostbackNotifier._get_client_info(client, self.db)
+                        product_name = PostbackNotifier._get_product_name(product)
+                        
+                        notification_message = PostbackNotifier._build_notification_message(
+                            conversion=conversion,
+                            client_name=client_name,
+                            product_name=product_name,
+                            user_full_name=user_full_name,
+                            notification_type='conversion'
+                        )
 
                         # 创建通知记录
                         new_notification = PostbackNotification(

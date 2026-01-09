@@ -53,22 +53,44 @@
       >
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="conversion_id" label="转化ID" width="100" />
+        <el-table-column prop="notification_type" label="类型" width="100">
+          <template #default="scope">
+            <el-tag :type="getTypeTagType(scope.row.notification_type)" size="small">
+              {{ getTypeLabel(scope.row.notification_type) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="notification_channel" label="渠道" width="100">
           <template #default="scope">
-            <el-tag :type="getChannelTagType(scope.row.notification_channel)">
+            <el-tag :type="getChannelTagType(scope.row.notification_channel)" size="small">
               {{ getChannelLabel(scope.row.notification_channel) }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="notification_status" label="状态" width="100">
           <template #default="scope">
-            <el-tag :type="getStatusTagType(scope.row.notification_status)">
+            <el-tag :type="getStatusTagType(scope.row.notification_status)" size="small">
               {{ getStatusLabel(scope.row.notification_status) }}
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="auto_notify" label="通知方式" width="100">
+          <template #default="scope">
+            <el-tag :type="scope.row.auto_notify ? 'success' : 'info'" size="small">
+              {{ scope.row.auto_notify ? '自动' : '手动' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="notification_message" label="消息内容" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="error_message" label="错误信息" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="error_message" label="错误信息" min-width="150" show-overflow-tooltip v-if="hasErrorMessages" />
+        <el-table-column prop="postback_url" label="Postback URL" min-width="150" show-overflow-tooltip v-if="hasPostbackUrls">
+          <template #default="scope">
+            <el-link v-if="scope.row.postback_url" :href="scope.row.postback_url" target="_blank" type="primary">
+              {{ scope.row.postback_url.length > 50 ? scope.row.postback_url.substring(0, 50) + '...' : scope.row.postback_url }}
+            </el-link>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="180">
           <template #default="scope">
             {{ formatDate(scope.row.created_at) }}
@@ -223,6 +245,36 @@ const getStatusTagType = (status) => {
   };
   return types[status] || 'info';
 };
+
+const getTypeLabel = (type) => {
+  const labels = {
+    conversion: '转化通知',
+    high_value: '高价值通知',
+    error: '错误通知',
+    forward: '转发通知'
+  };
+  return labels[type] || type || '-';
+};
+
+const getTypeTagType = (type) => {
+  const types = {
+    conversion: 'primary',
+    high_value: 'warning',
+    error: 'danger',
+    forward: 'info'
+  };
+  return types[type] || 'info';
+};
+
+// 计算是否显示错误信息列（如果有任何记录有错误信息）
+const hasErrorMessages = computed(() => {
+  return records.value.some(record => record.error_message);
+});
+
+// 计算是否显示 Postback URL 列（如果有任何记录有 postback_url）
+const hasPostbackUrls = computed(() => {
+  return records.value.some(record => record.postback_url);
+});
 
 // 监听对话框显示/隐藏
 watch(visible, (val) => {
