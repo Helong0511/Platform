@@ -13,6 +13,7 @@ class PublisherBase(BaseModel):
     price_discount: float = Field(0.0, ge=0, le=100, description="渠道级别的价格折扣比例（0-100），用于旧价格折扣系统，计算给渠道的最终金额")
     postback_url: Optional[str] = Field(None, description="Postback URL（可选）")
     postback_method: str = Field('GET', description="Postback请求方式：GET/POST")
+    postback_success_check: Optional[str] = Field(None, description="转发成功检查配置（JSON格式，用于检查响应内容是否表示成功）")
     client_id: Optional[int] = Field(None, description="关联的客户ID（可选）")
     is_active: bool = Field(True, description="是否激活")
 
@@ -29,6 +30,7 @@ class PublisherUpdate(BaseModel):
     price_discount: Optional[float] = Field(None, ge=0, le=100, description="价格折扣比例（0-100），用于旧价格折扣系统")
     postback_url: Optional[str] = Field(None, description="Postback URL")
     postback_method: Optional[str] = Field(None, description="Postback请求方式：GET/POST")
+    postback_success_check: Optional[str] = Field(None, description="转发成功检查配置（JSON格式，用于检查响应内容是否表示成功）")
     client_id: Optional[int] = Field(None, description="关联的客户ID（可选）")
     is_active: Optional[bool] = Field(None, description="是否激活")
 

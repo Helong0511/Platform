@@ -6,7 +6,7 @@ import json
 import logging
 import asyncio
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union, Tuple
 from datetime import datetime, timezone
 from urllib.parse import urlencode, urlparse, parse_qs, urlunparse, quote
 
@@ -265,18 +265,45 @@ class PostbackForwarder:
             # 7. 记录响应
             forward_log.response_status = response.status_code
             forward_log.response_body = response.text[:2000]  # 限制响应内容长度
-            forward_log.success = 200 <= response.status_code < 300
             forward_log.completed_at = get_app_now_naive()  # 使用北京时间
+            
+            # 检查响应是否表示成功（支持自定义检查配置）
+            success_check_config = publisher.postback_success_check if publisher else None
+            is_success, check_error = PostbackForwarder._check_response_success(
+                response, success_check_config
+            )
+            forward_log.success = is_success
+            
+            # 如果 HTTP 状态码成功但内容检查失败，记录详细信息
+            http_success = 200 <= response.status_code < 300
+            if http_success and not is_success:
+                error_msg = f"HTTP 状态码 {response.status_code} 表示成功，但响应内容检查失败: {check_error}"
+                forward_log.error_message = error_msg
+                logger.warning(
+                    f"转发响应内容检查失败: conversion_id={conversion.id}, "
+                    f"publisher_id={publisher.id}, status={response.status_code}, "
+                    f"check_error={check_error}"
+                )
+            elif not http_success:
+                forward_log.error_message = f"HTTP {response.status_code}: {response.text[:500]}"
+            elif not is_success and check_error:
+                forward_log.error_message = check_error
             
             # 更新通知记录状态
             notification_record.notification_status = 'sent' if forward_log.success else 'failed'
             if not forward_log.success:
-                notification_record.error_message = f"HTTP {response.status_code}: {response.text[:500]}"
+                if not notification_record.error_message:
+                    notification_record.error_message = forward_log.error_message or f"HTTP {response.status_code}: {response.text[:500]}"
             
             if forward_log.success:
                 logger.info(
                     f"成功转发 postback 到渠道: conversion_id={conversion.id}, "
-                    f"publisher_id={publisher.id}, url={replaced_url[:100]}, status={response.status_code}"
+                    f"publisher_id={publisher.id}, url={replaced_url[:100]}, "
+                    f"status={response.status_code}, "
+                    f"method={method}, "
+                    f"request_params={forward_log.request_params[:200] if forward_log.request_params else 'N/A'}, "
+                    f"request_data={forward_log.request_data[:200] if forward_log.request_data else 'N/A'}, "
+                    f"response_body={response.text[:500]}"
                 )
                 
                 # 发送 Telegram 通知（异步，不阻塞）
@@ -296,10 +323,17 @@ class PostbackForwarder:
                     logger.warning(f"创建 Telegram 通知任务失败: {str(e)}")
             else:
                 logger.warning(
-                    f"渠道 Postback 返回非成功状态: conversion_id={conversion.id}, "
-                    f"publisher_id={publisher.id}, url={replaced_url[:100]}, status={response.status_code}"
+                    f"渠道 Postback 转发失败: conversion_id={conversion.id}, "
+                    f"publisher_id={publisher.id}, url={replaced_url[:100]}, "
+                    f"status={response.status_code}, "
+                    f"method={method}, "
+                    f"request_params={forward_log.request_params[:200] if forward_log.request_params else 'N/A'}, "
+                    f"request_data={forward_log.request_data[:200] if forward_log.request_data else 'N/A'}, "
+                    f"response_body={response.text[:500]}, "
+                    f"error={forward_log.error_message or 'Unknown error'}"
                 )
-                forward_log.error_message = f"HTTP {response.status_code}: {response.text[:500]}"
+                if not forward_log.error_message:
+                    forward_log.error_message = f"HTTP {response.status_code}: {response.text[:500]}"
                 
                 # 转发失败也发送 Telegram 通知
                 try:
@@ -435,20 +469,53 @@ class PostbackForwarder:
             # 记录响应
             forward_log.response_status = response.status_code
             forward_log.response_body = response.text[:2000]  # 限制响应内容长度
-            forward_log.success = 200 <= response.status_code < 300
             forward_log.completed_at = get_app_now_naive()  # 使用北京时间
+            
+            # 检查响应是否表示成功（支持自定义检查配置）
+            success_check_config = product.downstream_postback_success_check if product else None
+            is_success, check_error = PostbackForwarder._check_response_success(
+                response, success_check_config
+            )
+            forward_log.success = is_success
+            
+            # 如果 HTTP 状态码成功但内容检查失败，记录详细信息
+            http_success = 200 <= response.status_code < 300
+            if http_success and not is_success:
+                error_msg = f"HTTP 状态码 {response.status_code} 表示成功，但响应内容检查失败: {check_error}"
+                forward_log.error_message = error_msg
+                logger.warning(
+                    f"下游转发响应内容检查失败: conversion_id={conversion.id}, "
+                    f"product_id={product.id}, status={response.status_code}, "
+                    f"check_error={check_error}"
+                )
+            elif not http_success:
+                forward_log.error_message = f"HTTP {response.status_code}: {response.text[:500]}"
+            elif not is_success and check_error:
+                forward_log.error_message = check_error
 
             if forward_log.success:
                 logger.info(
                     f"成功转发 postback 到下游: conversion_id={conversion.id}, "
-                    f"product_id={product.id}, url={downstream_url}, status={response.status_code}"
+                    f"product_id={product.id}, url={downstream_url}, "
+                    f"status={response.status_code}, "
+                    f"method={method}, "
+                    f"request_params={forward_log.request_params[:200] if forward_log.request_params else 'N/A'}, "
+                    f"request_data={forward_log.request_data[:200] if forward_log.request_data else 'N/A'}, "
+                    f"response_body={response.text[:500]}"
                 )
             else:
                 logger.warning(
-                    f"下游转发返回非成功状态: conversion_id={conversion.id}, "
-                    f"product_id={product.id}, url={downstream_url}, status={response.status_code}"
+                    f"下游转发失败: conversion_id={conversion.id}, "
+                    f"product_id={product.id}, url={downstream_url}, "
+                    f"status={response.status_code}, "
+                    f"method={method}, "
+                    f"request_params={forward_log.request_params[:200] if forward_log.request_params else 'N/A'}, "
+                    f"request_data={forward_log.request_data[:200] if forward_log.request_data else 'N/A'}, "
+                    f"response_body={response.text[:500]}, "
+                    f"error={forward_log.error_message or 'Unknown error'}"
                 )
-                forward_log.error_message = f"HTTP {response.status_code}: {response.text[:500]}"
+                if not forward_log.error_message:
+                    forward_log.error_message = f"HTTP {response.status_code}: {response.text[:500]}"
 
         except httpx.TimeoutException as e:
             forward_log.error_message = f"请求超时: {str(e)}"
@@ -550,6 +617,176 @@ class PostbackForwarder:
 
         return data
 
+    @staticmethod
+    def _check_response_success(
+        response: httpx.Response,
+        success_check_config: Optional[str] = None
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        检查响应是否表示成功
+        
+        支持三种检查方式：
+        1. HTTP 状态码检查：检查 HTTP 响应状态码（默认方式）
+        2. JSON 检查：检查响应 JSON 中的特定字段和值
+        3. 关键词检查：检查响应文本中是否包含成功/失败关键词
+        
+        配置格式（JSON）：
+        {
+            "type": "status_code" | "json" | "keyword",
+            "success_status_codes": [200, 201, 202],  // HTTP 状态码检查：成功状态码列表（默认 [200-299]）
+            "json_path": "status",  // JSON 检查：字段路径（支持点号分隔，如 "data.status"）
+            "json_value": "ok",     // JSON 检查：期望的值（如果字段值等于此值，表示成功）
+            "success_keywords": ["success", "ok", "200"],  // 关键词检查：成功关键词列表
+            "failure_keywords": ["error", "fail", "failed"],  // 关键词检查：失败关键词列表
+            "exact_match": false  // 关键词检查：是否精确匹配（默认false，即包含匹配）。如果为true，响应文本去除首尾空白后必须完全等于关键词才匹配
+        }
+        
+        示例：
+        1. 只使用 HTTP 状态码检查（默认，200-299 为成功）：
+           不填写配置，或填写：{"type": "status_code"}
+           说明：默认 200-299 状态码为成功
+        
+        2. 自定义 HTTP 状态码检查（只接受 200 和 201）：
+           {"type": "status_code", "success_status_codes": [200, 201]}
+           说明：只有状态码为 200 或 201 时才认为成功
+        
+        3. 如果下游只返回 "OK"、"ok" 或 "Ok"（精确匹配，不区分大小写），配置：
+           {"type": "keyword", "success_keywords": ["OK"], "exact_match": true}
+           说明：精确匹配时，响应文本去除首尾空白后必须完全等于关键词（不区分大小写）
+           例如："OK"、"ok"、"  OK  "、"Ok\n" 都会匹配，但 "OK success" 不会匹配
+        
+        4. 如果下游返回包含 "success" 的文本（包含匹配，不区分大小写），配置：
+           {"type": "keyword", "success_keywords": ["success"]}
+           说明：包含匹配时，响应文本中只要包含关键词（不区分大小写）就匹配
+           例如："success"、"SUCCESS"、"Response: success" 都会匹配
+        
+        5. 如果下游返回 "OK" 或包含 "OK" 的文本（包含匹配，不区分大小写），配置：
+           {"type": "keyword", "success_keywords": ["OK"]}
+           说明：默认包含匹配，不区分大小写
+           例如："OK"、"ok"、"Response: OK"、"ok success" 都会匹配
+        
+        Args:
+            response: HTTP 响应对象
+            success_check_config: 成功检查配置（JSON 字符串）
+            
+        Returns:
+            (是否成功, 错误信息)
+        """
+        # 如果没有配置，默认使用 HTTP 状态码判断（200-299 为成功）
+        if not success_check_config or not success_check_config.strip():
+            return (200 <= response.status_code < 300, None)
+        
+        try:
+            config = json.loads(success_check_config)
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(f"解析成功检查配置失败: {str(e)}, 使用默认 HTTP 状态码判断")
+            return (200 <= response.status_code < 300, None)
+        
+        check_type = config.get("type", "status_code")  # 默认使用状态码检查
+        response_text = response.text
+        
+        # HTTP 状态码检查
+        if check_type == "status_code":
+            success_status_codes = config.get("success_status_codes", [])
+            
+            if not success_status_codes:
+                # 如果没有配置，默认使用 200-299 范围
+                return (200 <= response.status_code < 300, None)
+            
+            # 检查状态码是否在成功列表中
+            is_success = response.status_code in success_status_codes
+            if not is_success:
+                return (False, f"HTTP 状态码 {response.status_code} 不在成功状态码列表中: {success_status_codes}")
+            return (True, None)
+        
+        # JSON 检查
+        if check_type == "json":
+            json_path = config.get("json_path")
+            json_value = config.get("json_value")
+            
+            if not json_path:
+                logger.warning("JSON 检查配置缺少 json_path，使用默认 HTTP 状态码判断")
+                return (200 <= response.status_code < 300, None)
+            
+            try:
+                response_json = response.json()
+            except (json.JSONDecodeError, ValueError):
+                # 响应不是 JSON，使用 HTTP 状态码判断
+                logger.debug(f"响应不是 JSON 格式，使用 HTTP 状态码判断: status={response.status_code}")
+                return (200 <= response.status_code < 300, None)
+            
+            # 支持点号分隔的路径（如 "data.status"）
+            path_parts = json_path.split(".")
+            current_value = response_json
+            for part in path_parts:
+                if isinstance(current_value, dict):
+                    current_value = current_value.get(part)
+                else:
+                    logger.debug(f"JSON 路径 {json_path} 无法访问，使用 HTTP 状态码判断")
+                    return (200 <= response.status_code < 300, None)
+            
+            # 如果配置了期望值，检查是否匹配
+            if json_value is not None:
+                is_success = str(current_value) == str(json_value)
+                if not is_success:
+                    return (False, f"JSON 字段 {json_path} 的值 '{current_value}' 不等于期望值 '{json_value}'")
+                return (True, None)
+            else:
+                # 如果没有配置期望值，只要字段存在且不为空/False/None，就认为成功
+                is_success = current_value is not None and current_value != False and current_value != ""
+                if not is_success:
+                    return (False, f"JSON 字段 {json_path} 的值 '{current_value}' 表示失败")
+                return (True, None)
+        
+        # 关键词检查
+        elif check_type == "keyword":
+            success_keywords = config.get("success_keywords", [])
+            failure_keywords = config.get("failure_keywords", [])
+            exact_match = config.get("exact_match", False)  # 是否精确匹配（默认false，即包含匹配）
+            
+            if not success_keywords and not failure_keywords:
+                logger.warning("关键词检查配置缺少关键词列表，使用默认 HTTP 状态码判断")
+                return (200 <= response.status_code < 300, None)
+            
+            # 先检查失败关键词（优先级更高）
+            for keyword in failure_keywords:
+                if exact_match:
+                    # 精确匹配：去除首尾空白后比较，不区分大小写
+                    if response_text.strip().lower() == keyword.strip().lower():
+                        return (False, f"响应精确匹配失败关键词: {keyword}")
+                else:
+                    # 包含匹配：不区分大小写
+                    if keyword.lower() in response_text.lower():
+                        return (False, f"响应中包含失败关键词: {keyword}")
+            
+            # 检查成功关键词
+            if success_keywords:
+                found_success = False
+                matched_keyword = None
+                for keyword in success_keywords:
+                    if exact_match:
+                        # 精确匹配：去除首尾空白后比较，不区分大小写
+                        if response_text.strip().lower() == keyword.strip().lower():
+                            found_success = True
+                            matched_keyword = keyword
+                            break
+                    else:
+                        # 包含匹配：不区分大小写
+                        if keyword.lower() in response_text.lower():
+                            found_success = True
+                            matched_keyword = keyword
+                            break
+                
+                if not found_success:
+                    match_type = "精确匹配" if exact_match else "包含匹配"
+                    return (False, f"响应中未找到任何成功关键词（{match_type}）: {success_keywords}")
+            
+            return (True, None)
+        
+        else:
+            logger.warning(f"未知的检查类型: {check_type}，使用默认 HTTP 状态码判断")
+            return (200 <= response.status_code < 300, None)
+    
     @staticmethod
     def _filter_placeholders(params: Dict[str, Any]) -> Dict[str, Any]:
         """

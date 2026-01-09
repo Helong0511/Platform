@@ -16,6 +16,10 @@ class ProductBase(BaseModel):
         None,
         description="下游 Postback 请求方式：GET 或 POST（默认GET）"
     )
+    downstream_postback_success_check: str | None = Field(
+        None,
+        description="下游转发成功检查配置（JSON格式，用于检查响应内容是否表示成功）"
+    )
     notification_address: str | None = Field(
         None,
         max_length=500,
