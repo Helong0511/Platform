@@ -6,6 +6,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import and_, func, delete
+from fastapi import HTTPException
 
 from app.models.models import (
     Client,
@@ -705,14 +706,28 @@ class NotificationConfigService:
             )
 
             return {"message": "通知已补发", "conversion_id": conversion_id}
+        except HTTPException:
+            # HTTPException 是业务异常，直接重新抛出，不需要额外处理
+            raise
         except Exception as e:
+            # 提取错误信息
+            error_msg = str(e)
+            if hasattr(e, 'detail'):
+                # 如果是 HTTPException，detail 可能是字典
+                if isinstance(e.detail, dict):
+                    error_msg = e.detail.get('detail', e.detail.get('message', str(e)))
+                else:
+                    error_msg = str(e.detail)
+            
             logger.error(
-                f"补发转化通知失败: conversion_id={conversion_id}, error={str(e)}",
+                f"补发转化通知失败: conversion_id={conversion_id}, "
+                f"product_id={conversion.product_id if 'conversion' in locals() else None}, "
+                f"error={error_msg}",
                 exc_info=True
             )
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
-                detail=f"补发通知失败: {str(e)}"
+                detail=f"补发通知失败: {error_msg}"
             )
 
     async def resend_notification_from_forward_log(
