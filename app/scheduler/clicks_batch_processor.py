@@ -7,6 +7,7 @@ from typing import List, Dict, Any
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import insert
+from sqlalchemy.exc import IntegrityError
 from app.core.database import AsyncSessionLocal
 from app.core.clicks_queue import dequeue_clicks, get_queue_length
 from app.core.offer_cache import get_offer_advertiser_id, set_offer_cache
@@ -414,12 +415,64 @@ async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -
                 'all_headers': click.get('all_headers'),
             })
         
-        # 批量插入（使用bulk insert提高性能）
-        stmt = insert(Click).values(insert_data)
-        await db.execute(stmt)
+        # 检查重复的 click_id（避免插入时出现唯一性约束错误）
+        click_ids = [item['click_id'] for item in insert_data if item.get('click_id')]
+        if click_ids:
+            result = await db.execute(
+                select(Click.click_id)
+                .where(Click.click_id.in_(click_ids))
+            )
+            existing_click_ids = {row[0] for row in result.all()}
+            
+            # 过滤掉已存在的记录
+            if existing_click_ids:
+                logger.warning(
+                    f"检测到 {len(existing_click_ids)} 个重复的 click_id，将跳过这些记录: "
+                    f"{list(existing_click_ids)[:10]}..."  # 只显示前10个
+                )
+                insert_data = [
+                    item for item in insert_data 
+                    if item.get('click_id') not in existing_click_ids
+                ]
         
-        logger.debug(f"批量插入 {len(insert_data)} 条点击记录到数据库")
-        return len(insert_data)
+        if not insert_data:
+            logger.debug("所有点击记录已存在，无需插入")
+            return 0
+        
+        # 批量插入（使用bulk insert提高性能）
+        try:
+            stmt = insert(Click).values(insert_data)
+            await db.execute(stmt)
+            
+            logger.debug(f"批量插入 {len(insert_data)} 条点击记录到数据库")
+            return len(insert_data)
+        except IntegrityError as e:
+            # 如果仍然出现唯一性约束错误（可能是并发插入导致的），记录警告
+            error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+            if 'Duplicate entry' in error_msg or 'UNIQUE constraint' in error_msg:
+                logger.warning(
+                    f"批量插入时检测到重复的 click_id（可能是并发插入导致的）: {error_msg}"
+                )
+                # 尝试逐条插入，跳过重复的记录
+                inserted_count = 0
+                for item in insert_data:
+                    try:
+                        stmt = insert(Click).values([item])
+                        await db.execute(stmt)
+                        await db.commit()
+                        inserted_count += 1
+                    except IntegrityError:
+                        # 跳过重复的记录
+                        await db.rollback()
+                        continue
+                    except Exception:
+                        await db.rollback()
+                        raise
+                
+                logger.debug(f"逐条插入完成，成功插入 {inserted_count}/{len(insert_data)} 条记录")
+                return inserted_count
+            else:
+                raise
     except Exception as e:
         logger.error(f"批量插入点击记录失败: error={e}", exc_info=True)
         raise

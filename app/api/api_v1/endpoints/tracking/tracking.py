@@ -31,22 +31,40 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
     """
     异步创建点击记录，带重试机制
     
+    如果检测到重复的 click_id，会自动重新生成并重试。
+    
     Args:
         click_data: 点击记录数据
         max_retries: 最大重试次数
     """
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.future import select
+    from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
+    
     async with AsyncSessionLocal() as session:
         for attempt in range(max_retries):
             try:
+                # 在插入前检查 click_id 是否已存在
+                click_id = click_data.get('click_id')
+                if click_id:
+                    existing_click = await session.execute(
+                        select(Click).where(Click.click_id == click_id)
+                    )
+                    if existing_click.scalars().first():
+                        # click_id 已存在，重新生成
+                        logger.warning(
+                            f"检测到重复的 click_id: {click_id}，将重新生成"
+                        )
+                        click_data['click_id'] = generate_click_id_from_timestamp()
+                        click_id = click_data['click_id']
+                
                 click = Click(**click_data)
                 session.add(click)
                 
                 # 同步创建或更新 ClickStats 记录
-                click_id = click_data.get('click_id')
                 if click_id:
                     try:
                         # 检查是否已存在 ClickStats 记录
-                        from sqlalchemy.future import select
                         existing_stats = await session.execute(
                             select(ClickStats).where(ClickStats.click_id == click_id)
                         )
@@ -69,6 +87,33 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
                 await session.commit()
                 logger.debug(f"点击记录保存成功: click_id={click_data.get('click_id')}")
                 return  # 成功则返回
+            except IntegrityError as e:
+                # 处理唯一性约束错误（重复的 click_id）
+                error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+                if 'Duplicate entry' in error_msg or 'UNIQUE constraint' in error_msg or 'click_id' in error_msg:
+                    # 检测到重复的 click_id，重新生成并重试
+                    old_click_id = click_data.get('click_id')
+                    click_data['click_id'] = generate_click_id_from_timestamp()
+                    logger.warning(
+                        f"检测到重复的 click_id（尝试 {attempt + 1}/{max_retries}）: "
+                        f"旧ID={old_click_id}, 新ID={click_data['click_id']}"
+                    )
+                    await session.rollback()
+                    # 立即重试，不需要等待
+                    continue
+                else:
+                    # 其他完整性约束错误，按正常流程处理
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            f"异步保存点击记录失败（尝试 {attempt + 1}/{max_retries}）: {e}, "
+                            f"click_id={click_data.get('click_id')}"
+                        )
+                        await session.rollback()
+                        # 等待后重试（指数退避）
+                        import asyncio
+                        await asyncio.sleep(2 ** attempt)
+                    else:
+                        raise
             except Exception as e:
                 if attempt < max_retries - 1:
                     logger.warning(
