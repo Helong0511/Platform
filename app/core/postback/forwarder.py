@@ -40,16 +40,22 @@ class PostbackForwarder:
             db: 数据库会话
         """
         # 1. 通过 click_id 查找关联的 Publisher
+        # 注意：postback_conversions.conversion_id = clicks.click_id
+        # 优先使用 conversion_id，如果不存在则使用 click_id 字段（兼容性）
         publisher = None
         click_record = None
         offer = None
         advertiser = None
         
-        if conversion.click_id:
+        # 获取用于查找点击记录的 click_id
+        # 优先使用 conversion_id（因为 conversion_id = clicks.click_id）
+        lookup_click_id = conversion.conversion_id if conversion.conversion_id else conversion.click_id
+        
+        if lookup_click_id:
             # 优先从 ClickStats 获取核心字段，然后查询关联的 Publisher、Offer、Advertiser
             # 如果 Click 表还有数据，也可以从中获取（兼容性）
             click_stats_result = await db.execute(
-                select(ClickStats).where(ClickStats.click_id == conversion.click_id)
+                select(ClickStats).where(ClickStats.click_id == lookup_click_id)
             )
             click_stats = click_stats_result.scalars().first()
             
@@ -75,7 +81,7 @@ class PostbackForwarder:
             
             # 如果 ClickStats 中没有找到 publisher，尝试从 Click 表获取（兼容性，如果数据还未清理）
             # 或者 ClickStats 存在但没有 publisher_id（数据不完整的情况）
-            if (not publisher or not click_stats) and conversion.click_id:
+            if (not publisher or not click_stats) and lookup_click_id:
                 try:
                     click_result = await db.execute(
                         select(Click)
@@ -83,7 +89,7 @@ class PostbackForwarder:
                             joinedload(Click.publisher),
                             joinedload(Click.offer).joinedload(Offer.advertiser)
                         )
-                        .where(Click.click_id == conversion.click_id)
+                        .where(Click.click_id == lookup_click_id)
                     )
                     # 使用joinedload时，为了安全起见使用unique()去重
                     click_record = click_result.unique().scalars().first()
@@ -99,9 +105,10 @@ class PostbackForwarder:
         
         # 2. 如果没有找到 Publisher，创建通知记录后返回
         if not publisher:
+            lookup_click_id = conversion.conversion_id if conversion.conversion_id else conversion.click_id
             logger.debug(
                 f"未找到关联的渠道，跳过转发: conversion_id={conversion.id}, "
-                f"click_id={conversion.click_id}"
+                f"conversion_id={conversion.conversion_id}, click_id={lookup_click_id}"
             )
             # 即使没有找到 Publisher，也创建通知记录（用于后续手动通知）
             try:
@@ -111,7 +118,7 @@ class PostbackForwarder:
                     notification_type='forward',
                     notification_channel='webhook',
                     notification_status='pending',
-                    notification_message=f"未找到关联的渠道，无法转发: click_id={conversion.click_id}",
+                    notification_message=f"未找到关联的渠道，无法转发: conversion_id={conversion.conversion_id}",
                     auto_notify=False,  # 没有 postback_url，只能手动通知
                     postback_url=None,
                     created_at=get_app_now_naive()
@@ -190,8 +197,10 @@ class PostbackForwarder:
         
         # 4. 自动通知模式：执行转发（因为 has_postback_url=True，所以 auto_notify=True）
         # 获取原始点击参数（如果有 click_id）
+        # 注意：使用 conversion_id 来查找，因为 conversion_id = clicks.click_id
         click_params = {}
-        if conversion.click_id:
+        lookup_click_id = conversion.conversion_id if conversion.conversion_id else conversion.click_id
+        if lookup_click_id:
             try:
                 # 如果 click_record 已存在且有 url_params，直接使用
                 if click_record and click_record.url_params:
@@ -203,13 +212,13 @@ class PostbackForwarder:
                     except (json.JSONDecodeError, TypeError) as e:
                         logger.warning(
                             f"解析点击参数失败: conversion_id={conversion.id}, "
-                            f"click_id={conversion.click_id}, error={str(e)}"
+                            f"conversion_id={conversion.conversion_id}, click_id={lookup_click_id}, error={str(e)}"
                         )
                 else:
                     # 如果 click_record 不存在，尝试查询 Click 表获取 url_params
                     try:
                         click_result = await db.execute(
-                            select(Click).where(Click.click_id == conversion.click_id)
+                            select(Click).where(Click.click_id == lookup_click_id)
                         )
                         click_for_params = click_result.scalars().first()
                         if click_for_params and click_for_params.url_params:
@@ -221,17 +230,17 @@ class PostbackForwarder:
                             except (json.JSONDecodeError, TypeError) as e:
                                 logger.warning(
                                     f"解析点击参数失败: conversion_id={conversion.id}, "
-                                    f"click_id={conversion.click_id}, error={str(e)}"
+                                    f"conversion_id={conversion.conversion_id}, click_id={lookup_click_id}, error={str(e)}"
                                 )
                     except Exception as e:
                         logger.debug(
                             f"查询点击参数失败: conversion_id={conversion.id}, "
-                            f"click_id={conversion.click_id}, error={str(e)}"
+                            f"conversion_id={conversion.conversion_id}, click_id={lookup_click_id}, error={str(e)}"
                         )
             except Exception as e:
                 logger.debug(
                     f"获取点击参数失败: conversion_id={conversion.id}, "
-                    f"click_id={conversion.click_id}, error={str(e)}"
+                    f"conversion_id={conversion.conversion_id}, click_id={lookup_click_id}, error={str(e)}"
                 )
         
         # 构建转发数据（包含原始点击参数）

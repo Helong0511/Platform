@@ -642,14 +642,22 @@ class NotificationConfigService:
             
             # 检查产品是否存在
             if not product:
+                # 构建更详细的错误信息
+                error_detail = "转化记录未关联产品，无法补发通知。"
+                if client:
+                    error_detail += f" 该转化记录关联的客户为「{client.name}」（ID: {client.id}），"
+                    error_detail += "请先为转化记录关联产品并配置通知地址。"
+                else:
+                    error_detail += " 请先为转化记录关联产品和客户，并配置通知地址。"
+                
                 logger.error(
                     f"补发通知失败: conversion_id={conversion_id}, "
-                    f"product_id=None, client_id={conversion.client_id}, "
+                    f"product_id=None, client_id={conversion.client_id if conversion else None}, "
                     f"reason=转化记录未关联产品"
                 )
                 raise_api_exception(
                     ErrorCode.VALIDATION_ERROR,
-                    detail="转化记录未关联产品，无法补发通知。请先为转化记录关联产品并配置通知地址"
+                    detail=error_detail
                 )
             
             # 检查产品是否配置了通知地址
