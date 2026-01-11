@@ -413,6 +413,9 @@ async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -
                 # URL参数和请求头
                 'url_params': click.get('url_params'),
                 'all_headers': click.get('all_headers'),
+                # URL记录
+                'original_request_url': click.get('original_request_url'),
+                'final_redirect_url': click.get('final_redirect_url'),
             })
         
         # 检查重复的 click_id（避免插入时出现唯一性约束错误）
