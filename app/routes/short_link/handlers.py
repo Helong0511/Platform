@@ -152,16 +152,6 @@ async def handle_cached_redirect(
     final_channel_id = channel_id
     final_offer_id, advertiser_id = await resolve_offer_id(offer_id, db)
     
-    # 创建点击记录
-    if short_link_id:
-        await create_click_record(
-            click_id, short_link_id, final_offer_id, final_channel_id,
-            advertiser_id, request_info, background_tasks
-        )
-    
-    # 更新点击次数
-    await increment_click_count_async(short_code)
-    
     # 保存原始URL用于检查占位符
     original_url_before_replace = original_url
     
@@ -176,6 +166,21 @@ async def handle_cached_redirect(
         offer_id, channel_id, final_channel_id, request_params,
         request_info, advertiser_id
     )
+    
+    # 获取原始请求URL
+    original_request_url = str(request.url) if request else None
+    
+    # 创建点击记录（传入原始请求URL和最终跳转URL）
+    if short_link_id:
+        await create_click_record(
+            click_id, short_link_id, final_offer_id, final_channel_id,
+            advertiser_id, request_info, background_tasks,
+            original_request_url=original_request_url,
+            final_redirect_url=final_url
+        )
+    
+    # 更新点击次数
+    await increment_click_count_async(short_code)
     
     # 打印最终跳转链接详细信息
     log_redirect_details(
@@ -282,15 +287,6 @@ async def handle_database_redirect(
     final_channel_id = channel_id
     final_offer_id, advertiser_id = await resolve_offer_id(offer_id, db)
     
-    # 创建点击记录
-    await create_click_record(
-        click_id, short_link.id, final_offer_id, final_channel_id,
-        advertiser_id, request_info, background_tasks
-    )
-    
-    # 更新点击次数
-    await increment_click_count_async(short_code)
-    
     # 保存原始URL用于检查占位符
     original_url_before_replace = original_url
     
@@ -305,6 +301,20 @@ async def handle_database_redirect(
         offer_id, channel_id, final_channel_id, request_params,
         request_info, advertiser_id
     )
+    
+    # 获取原始请求URL
+    original_request_url = str(request.url) if request else None
+    
+    # 创建点击记录（传入原始请求URL和最终跳转URL）
+    await create_click_record(
+        click_id, short_link.id, final_offer_id, final_channel_id,
+        advertiser_id, request_info, background_tasks,
+        original_request_url=original_request_url,
+        final_redirect_url=final_url
+    )
+    
+    # 更新点击次数
+    await increment_click_count_async(short_code)
     
     # 打印最终跳转链接详细信息
     log_redirect_details(

@@ -68,7 +68,9 @@ async def create_click_record(
     publisher_id: Optional[int],
     advertiser_id: Optional[int],
     request_info: dict,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    original_request_url: Optional[str] = None,
+    final_redirect_url: Optional[str] = None
 ):
     """
     创建点击记录（异步处理）
@@ -99,7 +101,9 @@ async def create_click_record(
         "device_model": request_info.get('device_model'),
         "url_params": request_info.get('url_params'),
         "all_headers": request_info.get('all_headers'),
-        "device": request_info.get('device_type')
+        "device": request_info.get('device_type'),
+        "original_request_url": original_request_url,
+        "final_redirect_url": final_redirect_url
     }
     
     enqueued = await enqueue_click(click_data)
