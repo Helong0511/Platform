@@ -1325,209 +1325,176 @@ def _build_final_url(
     构建最终的重定向URL
     
     这是短链接重定向流程中的核心函数，负责：
-    1. 检测原始URL中是否已有占位符（避免重复添加参数）
-    2. 处理请求参数中包含占位符的情况（尝试替换或过滤）
-    3. 合并所有参数到最终URL中
+    1. 检查替换占位符后的URL是否包含必须的参数（click_id 和 channel_id）
+    2. 如果缺少必须参数，添加系统生成的 click_id 和 channel_id
+    3. 不再合并其他用户请求参数（只保证必须参数存在）
     
     设计理念：
+    - 按照原始URL替换占位符后，其他参数就没有必要带上了
+    - 但是要保证至少要有 click_id、channel_id 这两个值
     - 如果原始URL中已有占位符（如 {click_id}），则占位符会被替换为实际值
     - 如果原始URL中没有占位符，则添加对应的查询参数（如 click_id=xxx）
-    - 如果请求参数值中包含占位符，尝试替换；如果无法替换，则过滤掉该参数
     
     Args:
         original_url_before_replace: 替换占位符之前的原始URL
                                     用于检测是否已有占位符，避免重复添加参数
                                     例如：http://example.com?aff_click_id={click_id}
         original_url_after_replace: 替换占位符之后的URL
-                                   用于作为基础URL，合并新的查询参数
+                                   用于作为基础URL，检查并添加必须参数
                                    例如：http://example.com?aff_click_id=abc123
         click_id: 系统生成的唯一点击ID（总是有值）
         offer_id: Offer的数据库主键ID（可选，可能为None）
         channel_id: 渠道ID（从URL参数获取，可能为None）
         final_channel_id: 最终使用的渠道ID（可能来自URL参数或短链接记录）
-        request_params: 用户请求时携带的查询参数字典
-                       例如：{"test": "value", "param": "{click_id}"}
+        request_params: 用户请求时携带的查询参数字典（不再使用，仅保留用于兼容）
         request_info: 请求信息字典，包含IP、OS、设备等信息（可选）
         advertiser_id: 广告主的数据库主键ID（可选）
     
     Returns:
-        str: 最终的重定向URL，包含所有合并后的查询参数
+        str: 最终的重定向URL，只包含 click_id 和 channel_id 参数（使用标准参数名）
     
     处理流程：
-    1. 检测原始URL中是否已有占位符（click_id、offer_id、channel_id等）
-    2. 如果原始URL中没有占位符，准备添加对应的查询参数
-    3. 处理请求参数：
-       a. 如果参数值包含占位符，尝试替换
-       b. 如果所有占位符都能替换，保留参数（使用替换后的值）
-       c. 如果有占位符无法识别，过滤掉该参数
-    4. 合并所有参数到替换后的URL中
+    1. 解析替换占位符后的URL，提取现有查询参数
+    2. 检查是否包含 click_id（支持多种参数名：click_id, aff_click_id, clickId 等）
+    3. 检查是否包含 channel_id（支持多种参数名：channel_id, sub_affid, channelId 等）
+    4. 提取必须参数的值（如果已存在）
+    5. 如果缺少 click_id，使用系统生成的 click_id
+    6. 如果缺少 channel_id，使用 final_channel_id
+    7. 构建只包含必须参数的新URL（移除所有其他参数）
     
     示例：
         输入:
-            original_url_before_replace = "http://example.com?aff_click_id={click_id}"
-            original_url_after_replace = "http://example.com?aff_click_id=abc123"
+            original_url_after_replace = "http://example.com?a=3058&o=7361&aff_click_id=abc123&sub_affid=4"
             click_id = "abc123"
-            request_params = {"test": "value", "param": "{click_id}"}
+            final_channel_id = 4
         输出:
-            "http://example.com?aff_click_id=abc123&test=value&param=abc123"
-            # 注意：不会重复添加 click_id，因为原始URL中已有占位符
+            "http://example.com?click_id=abc123&channel_id=4"
+            # 提取必须参数的值，移除其他参数（a=3058, o=7361），使用标准参数名
+        
+        输入:
+            original_url_after_replace = "http://example.com?a=3058&o=7361"
+            click_id = "0123456789AbCdEf"
+            final_channel_id = 4
+        输出:
+            "http://example.com?click_id=0123456789AbCdEf&channel_id=4"
+            # 缺少必须参数，使用系统生成的值，移除其他参数
     """
-    # ==================== 初始化占位符检测正则表达式 ====================
-    # 用于动态检测参数值中的任何 {xxx} 格式占位符
-    # 正则说明：\{[a-zA-Z_][a-zA-Z0-9_]*\}
-    # - \{ : 匹配左花括号（转义）
-    # - [a-zA-Z_] : 第一个字符必须是字母或下划线
-    # - [a-zA-Z0-9_]* : 后续字符可以是字母、数字或下划线
-    # - \} : 匹配右花括号（转义）
-    placeholder_pattern_regex = re.compile(r'\{[a-zA-Z_][a-zA-Z0-9_]*\}')
+    # ==================== 解析替换占位符后的URL ====================
+    parsed = urlparse(original_url_after_replace)
+    existing_params = parse_qs(parsed.query, keep_blank_values=True)
+    # 统一参数名为小写（便于比较）
+    existing_params_lower = {k.lower(): v for k, v in existing_params.items()}
     
-    # ==================== 检测原始URL中的占位符 ====================
-    # 如果原始URL中已有占位符（如 {click_id}），则占位符会被替换为实际值
-    # 此时不需要再添加对应的查询参数，避免重复
-    # 例如：原始URL = "http://example.com?aff_click_id={click_id}"
-    #      替换后 = "http://example.com?aff_click_id=abc123"
-    #      不需要再添加 click_id=abc123
-    placeholder_params_to_check = {
-        'click_id': ['{click_id}', '{clickId}', '{clickid}', '{ClickId}', '{CLICK_ID}', '{aff_click_id}', '{AFF_CLICK_ID}'],
-        'offer_id': ['{offer_id}', '{offerId}', '{offerid}', '{OfferId}', '{OFFER_ID}'],
-        'channel_id': ['{channel_id}', '{channelId}', '{channelid}', '{ChannelId}', '{CHANNEL_ID}', '{sub_affid}', '{SUB_AFFID}'],
-        'publisher_id': ['{publisher_id}', '{publisherId}', '{publisherid}', '{PublisherId}', '{PUBLISHER_ID}'],
-    }
+    # ==================== 定义必须参数的各种形式 ====================
+    # click_id 的各种参数名形式
+    click_id_param_names = [
+        'click_id', 'aff_click_id', 'clickid', 'clickId', 'CLICK_ID', 'AFF_CLICK_ID',
+        'clk_id', 'cid', 'affclickid', 'AFFCLICKID'
+    ]
     
-    # 检测每个参数是否在原始URL中有占位符
-    has_placeholder = {}
-    for param_name, placeholder_variants in placeholder_params_to_check.items():
-        # 检查原始URL中是否包含任何占位符变体
-        has_placeholder[param_name] = any(variant in original_url_before_replace for variant in placeholder_variants)
+    # channel_id 的各种参数名形式
+    channel_id_param_names = [
+        'channel_id', 'sub_affid', 'channelid', 'channelId', 'CHANNEL_ID', 'SUB_AFFID',
+        'subaffid', 'SUBAFFID', 'publisher_id', 'publisherid', 'publisherId', 'PUBLISHER_ID'
+    ]
     
-    # ==================== 准备要合并的参数 ====================
-    # 这个字典将包含所有要添加到最终URL的查询参数
-    request_params_with_click = {}
+    # ==================== 检查是否包含 click_id ====================
+    has_click_id = False
+    for param_name in click_id_param_names:
+        if param_name.lower() in existing_params_lower:
+            has_click_id = True
+            logger.debug(f"[构建最终URL] 检测到 click_id 参数: {param_name}")
+            break
     
-    # ==================== 添加系统参数（如果原始URL中没有占位符） ====================
-    # 如果原始URL中没有占位符，需要添加对应的查询参数
-    # 例如：原始URL = "http://example.com?test=1"
-    #      需要添加 click_id=abc123
-    for param_name, has_placeholder_flag in has_placeholder.items():
-        if not has_placeholder_flag:
-            # 占位符不存在，需要添加查询参数
-            if param_name == 'click_id':
-                # 总是添加 click_id（因为总是有值）
-                request_params_with_click['click_id'] = click_id
-            elif param_name == 'offer_id' and offer_id:
-                # 只有当 offer_id 有值时才添加
-                request_params_with_click['offer_id'] = offer_id
-            elif param_name == 'channel_id' and final_channel_id:
-                # channel_id 和 publisher_id 是同一个概念（都代表渠道ID）
-                # 只有当 channel_id 有值且原始URL中没有 publisher_id 占位符时才添加
-                # （如果原始URL中有 {publisher_id} 占位符，它会被替换为 channel_id 的值，避免重复）
-                if not has_placeholder.get('publisher_id', False):
-                    request_params_with_click['channel_id'] = final_channel_id
-            # 注意：channel_id 和 publisher_id 是同一个概念，只使用 channel_id
-            # 不再自动添加 publisher_id 参数，避免在最终URL中同时出现两个相同含义的参数
+    # ==================== 检查是否包含 channel_id ====================
+    has_channel_id = False
+    for param_name in channel_id_param_names:
+        if param_name.lower() in existing_params_lower:
+            has_channel_id = True
+            logger.debug(f"[构建最终URL] 检测到 channel_id 参数: {param_name}")
+            break
     
-    # ==================== 处理用户请求参数 ====================
-    # 用户请求时可能携带额外的查询参数，需要合并到最终URL中
-    # 但需要处理以下情况：
-    # 1. 如果参数值包含占位符，尝试替换；如果无法替换，过滤掉
-    # 2. 如果参数在原始URL中已有占位符，跳过（避免重复）
-    # 3. 处理 channel_id 和 publisher_id 的互斥关系
+    # ==================== 准备要添加的参数 ====================
+    params_to_add = {}
     
-    # 参数名映射表：用于识别请求参数对应的系统参数
-    # 例如：aff_click_id -> click_id, sub_affid -> channel_id
-    param_name_mapping = {
-        'click_id': ['click_id', 'aff_click_id', 'clickid', 'clickId', 'CLICK_ID', 'AFF_CLICK_ID'],
-        'offer_id': ['offer_id', 'offerid', 'offerId', 'OFFER_ID'],
-        'channel_id': ['channel_id', 'sub_affid', 'channelid', 'channelId', 'CHANNEL_ID', 'SUB_AFFID'],
-        'publisher_id': ['publisher_id', 'publisherid', 'publisherId', 'PUBLISHER_ID'],
-    }
+    # 如果缺少 click_id，添加系统生成的 click_id
+    if not has_click_id:
+        params_to_add['click_id'] = click_id
+        logger.info(f"[构建最终URL] 缺少 click_id，添加系统生成的 click_id: {click_id}")
     
-    # 记录被过滤掉的参数（包含无法识别的占位符的参数）
-    filtered_params = []
+    # 如果缺少 channel_id，添加 channel_id
+    if not has_channel_id and final_channel_id:
+        params_to_add['channel_id'] = final_channel_id
+        logger.info(f"[构建最终URL] 缺少 channel_id，添加 channel_id: {final_channel_id}")
     
-    # 构建用于替换占位符的请求信息字典
-    # 如果 request_info 为空，使用默认空值
-    request_info_for_replace = request_info if request_info else {
-        'ip': '',
-        'os': '',
-        'device_type': '',
-        'country': '',
-        'user_agent': '',
-        'referer': '',
-    }
+    # ==================== 构建最终URL（只包含必须参数） ====================
+    # 提取必须参数的值（如果已存在）
+    final_click_id_value = None
+    final_channel_id_value = None
     
-    # ==================== 遍历用户请求参数 ====================
-    for key, value in request_params.items():
-        key_lower = key.lower()  # 统一转为小写
-        
-        # 步骤1：检查参数值中是否包含占位符
-        # 将参数值转为字符串（处理列表类型）
-        param_value_str = str(value) if not isinstance(value, list) else str(value[0]) if value else ''
-        # 使用正则表达式检测是否包含任何 {xxx} 格式的占位符
-        contains_placeholder = bool(placeholder_pattern_regex.search(param_value_str))
-        
-        if contains_placeholder:
-            # 步骤2：参数值包含占位符，尝试替换
-            # 调用 _replace_param_value_placeholders 尝试替换所有占位符
-            replaced_value, all_replaced = _replace_param_value_placeholders(
-                param_value_str,
-                click_id,
-                offer_id,
-                final_channel_id,
-                advertiser_id if advertiser_id is not None else None,
-                request_info_for_replace
-            )
-            
-            if all_replaced:
-                # 步骤3a：所有占位符都被成功替换
-                # 保留参数，使用替换后的值
-                logger.info(f"[构建最终URL] 参数 {key} 中的占位符已替换: {param_value_str} -> {replaced_value}")
-                request_params_with_click[key_lower] = replaced_value
-            else:
-                # 步骤3b：有占位符无法识别或值为空
-                # 丢弃该参数，避免未替换的占位符出现在最终URL中
-                filtered_params.append(f"{key}={value}")
-                logger.warning(f"[构建最终URL] 跳过参数 {key}={value}，因为参数值中包含无法识别的占位符")
-            continue  # 处理下一个参数
-        
-        # 步骤4：参数值不包含占位符，检查是否需要跳过
-        # 查找该参数对应的系统参数名（通过别名映射）
-        corresponding_param_name = None
-        for param_name, possible_names in param_name_mapping.items():
-            if key_lower in [name.lower() for name in possible_names]:
-                corresponding_param_name = param_name
+    # 获取 click_id 的值（如果已存在）
+    if has_click_id:
+        for param_name in click_id_param_names:
+            param_lower = param_name.lower()
+            if param_lower in existing_params_lower:
+                # 获取参数值（可能是列表）
+                value = existing_params_lower[param_lower]
+                if isinstance(value, list) and value:
+                    final_click_id_value = value[0]
+                elif value:
+                    final_click_id_value = value
                 break
-        
-        # 步骤5：如果该参数在原始URL中使用了占位符，跳过
-        # 因为占位符已经被替换为实际值，不需要再添加查询参数
-        # 例如：原始URL = "http://example.com?aff_click_id={click_id}"
-        #      替换后 = "http://example.com?aff_click_id=abc123"
-        #      如果请求参数中有 click_id=abc123，应该跳过（避免重复）
-        if corresponding_param_name and has_placeholder.get(corresponding_param_name, False):
-            continue
-        
-        # 步骤6：处理 channel_id 和 publisher_id 的互斥关系
-        # channel_id 和 publisher_id 是同一个概念（都代表渠道ID）
-        # 如果原始URL中已有 publisher_id 的占位符，跳过用户请求中的 channel_id 参数（避免重复）
-        if key_lower == 'channel_id' and has_placeholder.get('publisher_id', False):
-            continue
-        # 如果原始URL中已有 channel_id 的占位符，跳过用户请求中的 publisher_id 参数（避免重复）
-        if key_lower == 'publisher_id' and has_placeholder.get('channel_id', False):
-            continue
-        # 注意：如果用户在请求URL中明确提供了 publisher_id，会保留它
-        # 系统不会自动添加 publisher_id（只会在原始URL有占位符时替换）
-        
-        # 步骤7：参数通过所有检查，添加到合并列表
-        request_params_with_click[key_lower] = value
     
-    # ==================== 记录过滤信息 ====================
-    # 如果有被过滤掉的参数，记录日志（便于调试）
-    if filtered_params:
-        logger.info(f"[构建最终URL] 已过滤掉包含占位符的参数: {', '.join(filtered_params)}")
+    # 获取 channel_id 的值（如果已存在）
+    if has_channel_id:
+        for param_name in channel_id_param_names:
+            param_lower = param_name.lower()
+            if param_lower in existing_params_lower:
+                # 获取参数值（可能是列表）
+                value = existing_params_lower[param_lower]
+                if isinstance(value, list) and value:
+                    final_channel_id_value = value[0]
+                elif value:
+                    final_channel_id_value = value
+                break
     
-    # ==================== 合并参数到最终URL ====================
-    # 使用 merge_url_params 函数将准备好的参数合并到替换后的URL中
-    # merge_url_params 会处理参数冲突、占位符检测、参数排序等
-    return merge_url_params(original_url_after_replace, request_params_with_click)
+    # 如果缺少 click_id，使用系统生成的 click_id
+    if not final_click_id_value:
+        final_click_id_value = click_id
+    
+    # 如果缺少 channel_id，使用 final_channel_id
+    if not final_channel_id_value and final_channel_id:
+        final_channel_id_value = final_channel_id
+    
+    # ==================== 构建只包含必须参数的URL ====================
+    # 获取基础URL（不包含查询参数）
+    base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    
+    # 构建只包含必须参数的查询字符串
+    final_params = OrderedDict()
+    
+    # 添加 click_id（使用标准参数名）
+    if final_click_id_value:
+        final_params['click_id'] = str(final_click_id_value)
+    
+    # 添加 channel_id（使用标准参数名）
+    if final_channel_id_value:
+        final_params['channel_id'] = str(final_channel_id_value)
+    
+    # 构建最终URL
+    if final_params:
+        query_string = urlencode(final_params, doseq=False)
+        final_url = f"{base_url}?{query_string}"
+    else:
+        # 如果没有必须参数（理论上不应该发生），返回基础URL
+        final_url = base_url
+        logger.warning(f"[构建最终URL] 警告：没有必须参数，返回基础URL: {final_url}")
+    
+    logger.info(
+        f"[构建最终URL] 最终URL（只包含必须参数）: {final_url}, "
+        f"click_id={final_click_id_value}, channel_id={final_channel_id_value}"
+    )
+    
+    return final_url
 
 
