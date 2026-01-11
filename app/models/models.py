@@ -883,6 +883,10 @@ class Click(Base):
     # URL参数和请求头（JSON格式存储）
     url_params = Column(Text, nullable=True, comment='URL参数（JSON格式）')
     all_headers = Column(Text, nullable=True, comment='所有请求头（JSON格式）')
+    
+    # URL记录
+    original_request_url = Column(Text, nullable=True, comment='原始点击URL（用户访问的短链接URL）')
+    final_redirect_url = Column(Text, nullable=True, comment='最终跳转URL（系统重定向后的URL）')
 
     # 关系
     offer = relationship("Offer", back_populates="clicks")

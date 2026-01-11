@@ -393,6 +393,28 @@
             </el-link>
             <span v-else>-</span>
           </el-descriptions-item>
+          <el-descriptions-item label="原始点击URL" :span="2">
+            <el-link 
+              v-if="currentDetail.original_request_url" 
+              :href="currentDetail.original_request_url" 
+              target="_blank" 
+              type="primary"
+            >
+              {{ currentDetail.original_request_url }}
+            </el-link>
+            <span v-else>-</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="最终跳转URL" :span="2">
+            <el-link 
+              v-if="currentDetail.final_redirect_url" 
+              :href="currentDetail.final_redirect_url" 
+              target="_blank" 
+              type="success"
+            >
+              {{ currentDetail.final_redirect_url }}
+            </el-link>
+            <span v-else>-</span>
+          </el-descriptions-item>
           <el-descriptions-item label="User Agent" :span="2">
             <div class="text-wrap">{{ currentDetail.user_agent || '-' }}</div>
           </el-descriptions-item>

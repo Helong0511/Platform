@@ -929,16 +929,6 @@ async def _handle_cached_redirect(
     final_channel_id = channel_id
     final_offer_id, advertiser_id = await _resolve_offer_id(offer_id, db)
     
-    # 创建点击记录
-    if short_link_id:
-        await _create_click_record(
-            click_id, short_link_id, final_offer_id, final_channel_id,
-            advertiser_id, request_info, background_tasks
-        )
-    
-    # 更新点击次数
-    await increment_click_count_async(short_code)
-    
     # 保存原始URL用于检查占位符
     original_url_before_replace = original_url
     
@@ -951,8 +941,22 @@ async def _handle_cached_redirect(
     final_url = _build_final_url(original_url_before_replace, original_url_after_replace, click_id, offer_id, channel_id,
                                  final_channel_id, request_params, request_info, advertiser_id)
     
+    # 获取原始请求URL
+    original_request_url = str(request.url) if request else None
+    
+    # 创建点击记录（传入原始请求URL和最终跳转URL）
+    if short_link_id:
+        await _create_click_record(
+            click_id, short_link_id, final_offer_id, final_channel_id,
+            advertiser_id, request_info, background_tasks,
+            original_request_url=original_request_url,
+            final_redirect_url=final_url
+        )
+    
+    # 更新点击次数
+    await increment_click_count_async(short_code)
+    
     # 打印最终跳转链接详细信息   helong
-    original_request_url = str(request.url) if request else "N/A"
     logger.warning("=" * 180)
     logger.warning(f"[短链接重定向] 原始点击URL: {original_request_url}")
     logger.warning(f"[短链接重定向] 短链接代码: {short_code}")
@@ -1118,15 +1122,6 @@ async def _handle_database_redirect(
     final_channel_id = channel_id
     final_offer_id, advertiser_id = await _resolve_offer_id(offer_id, db)
     
-    # 创建点击记录
-    await _create_click_record(
-        click_id, short_link.id, final_offer_id, final_channel_id,
-        advertiser_id, request_info, background_tasks
-    )
-    
-    # 更新点击次数
-    await increment_click_count_async(short_code)
-    
     # 保存原始URL用于检查占位符
     original_url_before_replace = original_url
     
@@ -1137,6 +1132,20 @@ async def _handle_database_redirect(
     )
     
     final_url = _build_final_url(original_url_before_replace, original_url_after_replace, click_id, offer_id, channel_id, final_channel_id, request_params, request_info, advertiser_id)
+    
+    # 获取原始请求URL
+    original_request_url = str(request.url) if request else None
+    
+    # 创建点击记录（传入原始请求URL和最终跳转URL）
+    await _create_click_record(
+        click_id, short_link.id, final_offer_id, final_channel_id,
+        advertiser_id, request_info, background_tasks,
+        original_request_url=original_request_url,
+        final_redirect_url=final_url
+    )
+    
+    # 更新点击次数
+    await increment_click_count_async(short_code)
     
     # 打印最终跳转链接详细信息
     logger.warning("=" * 80)
@@ -1217,7 +1226,9 @@ async def _create_click_record(
     publisher_id: Optional[int],
     advertiser_id: Optional[int],
     request_info: dict,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    original_request_url: Optional[str] = None,
+    final_redirect_url: Optional[str] = None
 ):
     """
     创建点击记录（异步处理）
@@ -1284,7 +1295,9 @@ async def _create_click_record(
         "device_model": request_info.get('device_model'),
         "url_params": request_info.get('url_params'),
         "all_headers": request_info.get('all_headers'),
-        "device": request_info.get('device_type')
+        "device": request_info.get('device_type'),
+        "original_request_url": original_request_url,
+        "final_redirect_url": final_redirect_url
     }
     
     enqueued = await enqueue_click(click_data)
