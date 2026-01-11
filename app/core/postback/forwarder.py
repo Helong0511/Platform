@@ -614,6 +614,26 @@ class PostbackForwarder:
                         data[key] = value[0] if len(value) == 1 else value
                     else:
                         data[key] = value
+        
+        # 特别处理：如果click_params中有click_id（渠道提供的），确保添加到转发数据中
+        # 注意：这里的click_id是渠道提供的原始click_id，不是系统生成的click_id
+        if click_params and 'click_id' in click_params:
+            click_id_value = click_params['click_id']
+            if isinstance(click_id_value, list):
+                click_id_value = click_id_value[0] if click_id_value else None
+            if click_id_value:
+                # 如果转化数据中没有click_id字段，或者转化数据中的click_id是系统生成的
+                # 则使用渠道提供的click_id
+                if 'click_id' not in data or data.get('click_id') == conversion.click_id:
+                    data['click_id'] = click_id_value
+        
+        # 特别处理：如果click_params中有sub_channel_id，确保添加到转发数据中
+        if click_params and 'sub_channel_id' in click_params:
+            sub_channel_id_value = click_params['sub_channel_id']
+            if isinstance(sub_channel_id_value, list):
+                sub_channel_id_value = sub_channel_id_value[0] if sub_channel_id_value else None
+            if sub_channel_id_value:
+                data['sub_channel_id'] = sub_channel_id_value
 
         return data
 

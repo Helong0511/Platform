@@ -22,6 +22,7 @@
 - 批量处理：点击记录批量插入数据库
 """
 import asyncio
+import json
 import logging
 import re
 from typing import Optional, Dict, Any
@@ -54,6 +55,52 @@ logger = logging.getLogger(__name__)
 
 # 创建FastAPI路由实例，用于注册短链接相关的API端点
 router = APIRouter()
+
+
+def _extract_and_filter_channel_params(request_params: dict) -> dict:
+    """
+    提取并过滤渠道参数
+    
+    从请求参数中提取除 offer_id 和 channel_id 之外的所有参数，
+    并过滤掉包含占位符的参数。
+    
+    这些参数将保存到 clicks 表的 url_params 字段，用于转化时转发给渠道。
+    
+    Args:
+        request_params: 请求参数字典
+        
+    Returns:
+        过滤后的渠道参数字典，包含除 offer_id 和 channel_id 之外的所有参数
+        （如果参数值不包含占位符）
+    """
+    # 占位符正则表达式：匹配 {变量名} 格式
+    placeholder_pattern = re.compile(r'\{[a-zA-Z_][a-zA-Z0-9_]*\}')
+    
+    # 需要排除的参数（系统参数，不需要保存到 url_params）
+    excluded_params = {'offer_id', 'channel_id', 'publisher_id'}
+    
+    channel_params = {}
+    
+    # 遍历所有请求参数，排除系统参数，并过滤掉包含占位符的参数
+    for key, value in request_params.items():
+        key_lower = key.lower()
+        
+        # 跳过系统参数（offer_id 和 channel_id）
+        if key_lower in excluded_params:
+            continue
+        
+        # 处理列表值
+        if isinstance(value, list):
+            value = value[0] if value else ''
+        
+        # 将值转为字符串进行检查
+        value_str = str(value) if value else ''
+        
+        # 如果值不包含占位符，则保存
+        if value_str and not placeholder_pattern.search(value_str):
+            channel_params[key] = value
+    
+    return channel_params
 
 
 async def _replace_short_link_placeholders(
@@ -842,6 +889,43 @@ async def _handle_cached_redirect(
     if not channel_id:
         channel_id = cached_data.get("channel_id")
     
+    # 验证必须参数：offer_id 和 channel_id 必须存在
+    # 如果缺少必须参数，只记录日志，不保存访问记录，不创建点击记录
+    if not offer_id:
+        original_request_url = str(request.url) if request else "N/A"
+        logger.warning(
+            f"[短链接重定向] 缺少必须参数offer_id，不保存访问记录。"
+            f"短链接代码: {short_code}, 请求URL: {original_request_url}, "
+            f"请求参数: {request_params}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="缺少必须参数：offer_id"
+        )
+    if not channel_id:
+        original_request_url = str(request.url) if request else "N/A"
+        logger.warning(
+            f"[短链接重定向] 缺少必须参数channel_id，不保存访问记录。"
+            f"短链接代码: {short_code}, 请求URL: {original_request_url}, "
+            f"请求参数: {request_params}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="缺少必须参数：channel_id"
+        )
+    
+    # 提取并过滤渠道参数（除offer_id和channel_id外的所有参数）
+    channel_params = _extract_and_filter_channel_params(request_params)
+    
+    # 将渠道参数保存到request_info的url_params中
+    # 注意：这里只保存渠道参数，而不是所有请求参数
+    if channel_params:
+        # 将渠道参数转换为JSON字符串，保存到request_info中
+        channel_params_json = json.dumps(channel_params, ensure_ascii=False)
+        # 更新request_info中的url_params，只保存渠道参数
+        request_info['url_params'] = channel_params_json
+        logger.info(f"[短链接重定向] 保存渠道参数到url_params: {channel_params}")
+    
     final_channel_id = channel_id
     final_offer_id, advertiser_id = await _resolve_offer_id(offer_id, db)
     
@@ -993,6 +1077,43 @@ async def _handle_database_redirect(
         offer_id = short_link.offer_id
     if not channel_id:
         channel_id = short_link.channel_id
+    
+    # 验证必须参数：offer_id 和 channel_id 必须存在
+    # 如果缺少必须参数，只记录日志，不保存访问记录，不创建点击记录
+    if not offer_id:
+        original_request_url = str(request.url) if request else "N/A"
+        logger.warning(
+            f"[短链接重定向] 缺少必须参数offer_id，不保存访问记录。"
+            f"短链接代码: {short_code}, 请求URL: {original_request_url}, "
+            f"请求参数: {request_params}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="缺少必须参数：offer_id"
+        )
+    if not channel_id:
+        original_request_url = str(request.url) if request else "N/A"
+        logger.warning(
+            f"[短链接重定向] 缺少必须参数channel_id，不保存访问记录。"
+            f"短链接代码: {short_code}, 请求URL: {original_request_url}, "
+            f"请求参数: {request_params}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="缺少必须参数：channel_id"
+        )
+    
+    # 提取并过滤渠道参数（除offer_id和channel_id外的所有参数）
+    channel_params = _extract_and_filter_channel_params(request_params)
+    
+    # 将渠道参数保存到request_info的url_params中
+    # 注意：这里只保存渠道参数，而不是所有请求参数
+    if channel_params:
+        # 将渠道参数转换为JSON字符串，保存到request_info中
+        channel_params_json = json.dumps(channel_params, ensure_ascii=False)
+        # 更新request_info中的url_params，只保存渠道参数
+        request_info['url_params'] = channel_params_json
+        logger.info(f"[短链接重定向] 保存渠道参数到url_params: {channel_params}")
     
     final_channel_id = channel_id
     final_offer_id, advertiser_id = await _resolve_offer_id(offer_id, db)
