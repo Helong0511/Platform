@@ -31,7 +31,7 @@ from urllib.parse import urlparse, urlencode, parse_qs, urlunparse, quote
 from collections import OrderedDict
 
 from fastapi import APIRouter, Depends, Query, Request, BackgroundTasks, HTTPException, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -890,28 +890,30 @@ async def _handle_cached_redirect(
         channel_id = cached_data.get("channel_id")
     
     # 验证必须参数：offer_id 和 channel_id 必须存在
-    # 如果缺少必须参数，只记录日志，不保存访问记录，不创建点击记录
+    # 如果缺少必须参数，只记录日志，不保存访问记录，不创建点击记录，不跳转
     if not offer_id:
         original_request_url = str(request.url) if request else "N/A"
         logger.warning(
-            f"[短链接重定向] 缺少必须参数offer_id，不保存访问记录。"
+            f"[短链接重定向] 缺少必须参数offer_id，不保存访问记录，不跳转。"
             f"短链接代码: {short_code}, 请求URL: {original_request_url}, "
             f"请求参数: {request_params}"
         )
-        raise HTTPException(
+        # 只返回错误响应，不保存记录，不跳转
+        return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="缺少必须参数：offer_id"
+            content={"detail": "缺少必须参数：offer_id"}
         )
     if not channel_id:
         original_request_url = str(request.url) if request else "N/A"
         logger.warning(
-            f"[短链接重定向] 缺少必须参数channel_id，不保存访问记录。"
+            f"[短链接重定向] 缺少必须参数channel_id，不保存访问记录，不跳转。"
             f"短链接代码: {short_code}, 请求URL: {original_request_url}, "
             f"请求参数: {request_params}"
         )
-        raise HTTPException(
+        # 只返回错误响应，不保存记录，不跳转
+        return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="缺少必须参数：channel_id"
+            content={"detail": "缺少必须参数：channel_id"}
         )
     
     # 提取并过滤渠道参数（除offer_id和channel_id外的所有参数）
@@ -1083,28 +1085,30 @@ async def _handle_database_redirect(
         channel_id = short_link.channel_id
     
     # 验证必须参数：offer_id 和 channel_id 必须存在
-    # 如果缺少必须参数，只记录日志，不保存访问记录，不创建点击记录
+    # 如果缺少必须参数，只记录日志，不保存访问记录，不创建点击记录，不跳转
     if not offer_id:
         original_request_url = str(request.url) if request else "N/A"
         logger.warning(
-            f"[短链接重定向] 缺少必须参数offer_id，不保存访问记录。"
+            f"[短链接重定向] 缺少必须参数offer_id，不保存访问记录，不跳转。"
             f"短链接代码: {short_code}, 请求URL: {original_request_url}, "
             f"请求参数: {request_params}"
         )
-        raise HTTPException(
+        # 只返回错误响应，不保存记录，不跳转
+        return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="缺少必须参数：offer_id"
+            content={"detail": "缺少必须参数：offer_id"}
         )
     if not channel_id:
         original_request_url = str(request.url) if request else "N/A"
         logger.warning(
-            f"[短链接重定向] 缺少必须参数channel_id，不保存访问记录。"
+            f"[短链接重定向] 缺少必须参数channel_id，不保存访问记录，不跳转。"
             f"短链接代码: {short_code}, 请求URL: {original_request_url}, "
             f"请求参数: {request_params}"
         )
-        raise HTTPException(
+        # 只返回错误响应，不保存记录，不跳转
+        return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="缺少必须参数：channel_id"
+            content={"detail": "缺少必须参数：channel_id"}
         )
     
     # 提取并过滤渠道参数（除offer_id和channel_id外的所有参数）
