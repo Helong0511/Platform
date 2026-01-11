@@ -181,6 +181,9 @@ class ClickService:
                 # URL参数和请求头
                 "url_params": click.url_params,
                 "all_headers": click.all_headers,
+                # URL记录
+                "original_request_url": click.original_request_url,
+                "final_redirect_url": click.final_redirect_url,
             }
             click_list.append(click_data)
 
