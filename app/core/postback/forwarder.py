@@ -8,7 +8,7 @@ import json
 import logging
 import asyncio
 import re
-from typing import Dict, Any, Optional, Union, Tuple
+from typing import Dict, Any, Optional, Union, Tuple, List
 from datetime import datetime, timezone
 from urllib.parse import urlencode, urlparse, parse_qs, urlunparse, quote
 
