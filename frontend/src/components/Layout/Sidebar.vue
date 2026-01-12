@@ -116,6 +116,11 @@
       <span>操作日志</span>
     </el-menu-item>
 
+    <el-menu-item v-if="isAdmin" index="/app/admin/telegram-notification-config">
+      <template #icon><Bell /></template>
+      <span>Telegram 通知配置</span>
+    </el-menu-item>
+
     <el-menu-item index="/app/admin/sessions">
       <template #icon><Lock /></template>
       <span>会话管理</span>
@@ -139,7 +144,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../../store';
 import { ElMenu, ElMenuItem, ElSubMenu, ElIcon } from 'element-plus';
-import { PieChart, Document, UserFilled, Upload, Timer, Link, Connection, Box, DataAnalysis, Lock } from '@element-plus/icons-vue';
+import { PieChart, Document, UserFilled, Upload, Timer, Link, Connection, Box, DataAnalysis, Lock, Bell } from '@element-plus/icons-vue';
 
 const authStore = useAuthStore();
 const route = useRoute();
