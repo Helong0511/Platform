@@ -113,12 +113,13 @@ class PostbackForwarder:
                 f"conversion_id={conversion.conversion_id}, click_id={lookup_click_id}"
             )
             # 检查是否已有通知记录（publisher_id 为 None 的情况）
+            # 使用 with_for_update() 锁定记录，防止并发创建
             existing_notification_result = await db.execute(
                 select(PostbackNotification).where(
                     PostbackNotification.conversion_id == conversion.id,
                     PostbackNotification.publisher_id.is_(None),
                     PostbackNotification.notification_type == 'forward'
-                ).order_by(PostbackNotification.created_at.desc())
+                ).order_by(PostbackNotification.created_at.desc()).with_for_update(skip_locked=True)
             )
             existing_notification = existing_notification_result.scalars().first()
             
@@ -133,19 +134,43 @@ class PostbackForwarder:
                         f"notification_id={existing_notification.id}"
                     )
                 else:
-                    # 创建新通知记录（用于后续手动通知）
-                    notification_record = PostbackNotification(
-                        conversion_id=conversion.id,
-                        publisher_id=None,  # 没有找到 Publisher
-                        notification_type='forward',
-                        notification_channel='webhook',
-                        notification_status='pending',
-                        notification_message=f"未找到关联的渠道，无法转发: conversion_id={conversion.conversion_id}",
-                        auto_notify=False,  # 没有 postback_url，只能手动通知
-                        postback_url=None,
-                        created_at=get_app_now_naive()
+                    # 双重检查：在创建前再次查询，防止并发问题
+                    await db.flush()  # 刷新会话，确保能看到已添加但未提交的记录
+                    double_check_result = await db.execute(
+                        select(PostbackNotification).where(
+                            PostbackNotification.conversion_id == conversion.id,
+                            PostbackNotification.publisher_id.is_(None),
+                            PostbackNotification.notification_type == 'forward'
+                        ).order_by(PostbackNotification.created_at.desc())
                     )
-                    db.add(notification_record)
+                    double_check_notification = double_check_result.scalars().first()
+                    
+                    if double_check_notification:
+                        # 如果第二次查询找到了记录，更新它
+                        double_check_notification.notification_status = 'pending'
+                        double_check_notification.notification_message = f"未找到关联的渠道，无法转发: conversion_id={conversion.conversion_id}"
+                        double_check_notification.error_message = "未找到关联的渠道"
+                        logger.info(
+                            f"双重检查找到现有通知记录并更新（无Publisher）: conversion_id={conversion.id}, "
+                            f"notification_id={double_check_notification.id}"
+                        )
+                    else:
+                        # 创建新通知记录（用于后续手动通知）
+                        notification_record = PostbackNotification(
+                            conversion_id=conversion.id,
+                            publisher_id=None,  # 没有找到 Publisher
+                            notification_type='forward',
+                            notification_channel='webhook',
+                            notification_status='pending',
+                            notification_message=f"未找到关联的渠道，无法转发: conversion_id={conversion.conversion_id}",
+                            auto_notify=False,  # 没有 postback_url，只能手动通知
+                            postback_url=None,
+                            created_at=get_app_now_naive()
+                        )
+                        db.add(notification_record)
+                        logger.debug(
+                            f"创建新通知记录（无Publisher）: conversion_id={conversion.id}"
+                        )
                 await db.commit()
             except Exception as e:
                 logger.error(f"创建/更新转发通知记录失败: {str(e)}", exc_info=True)
@@ -164,12 +189,14 @@ class PostbackForwarder:
         )
         
         # 检查是否已有通知记录（补发通知场景）
+        # 使用 with_for_update() 锁定记录，防止并发创建
+        from sqlalchemy import or_
         existing_notification_result = await db.execute(
             select(PostbackNotification).where(
                 PostbackNotification.conversion_id == conversion.id,
                 PostbackNotification.publisher_id == publisher.id,
                 PostbackNotification.notification_type == 'forward'
-            ).order_by(PostbackNotification.created_at.desc())
+            ).order_by(PostbackNotification.created_at.desc()).with_for_update(skip_locked=True)
         )
         existing_notification = existing_notification_result.scalars().first()
         
@@ -186,19 +213,48 @@ class PostbackForwarder:
                 f"publisher_id={publisher.id}, notification_id={notification_record.id}"
             )
         else:
-            # 创建新通知记录（正常转发场景）
-            notification_record = PostbackNotification(
-                conversion_id=conversion.id,
-                publisher_id=publisher.id,
-                notification_type='forward',
-                notification_channel='webhook',
-                notification_status='pending',  # 初始状态为 pending
-                notification_message=notification_message,
-                auto_notify=has_postback_url,  # 如果有 postback_url，默认自动通知
-                postback_url=publisher.postback_url if has_postback_url else None,
-                created_at=get_app_now_naive()
+            # 双重检查：在创建前再次查询，防止并发问题
+            # 如果第一次查询时记录正在被创建，第二次查询应该能找到
+            await db.flush()  # 刷新会话，确保能看到已添加但未提交的记录
+            double_check_result = await db.execute(
+                select(PostbackNotification).where(
+                    PostbackNotification.conversion_id == conversion.id,
+                    PostbackNotification.publisher_id == publisher.id,
+                    PostbackNotification.notification_type == 'forward'
+                ).order_by(PostbackNotification.created_at.desc())
             )
-            db.add(notification_record)
+            double_check_notification = double_check_result.scalars().first()
+            
+            if double_check_notification:
+                # 如果第二次查询找到了记录，更新它
+                notification_record = double_check_notification
+                notification_record.notification_status = 'pending'
+                notification_record.notification_message = notification_message
+                notification_record.auto_notify = has_postback_url
+                notification_record.postback_url = publisher.postback_url if has_postback_url else None
+                notification_record.error_message = None
+                logger.info(
+                    f"双重检查找到现有通知记录并更新: conversion_id={conversion.id}, "
+                    f"publisher_id={publisher.id}, notification_id={notification_record.id}"
+                )
+            else:
+                # 创建新通知记录（正常转发场景）
+                notification_record = PostbackNotification(
+                    conversion_id=conversion.id,
+                    publisher_id=publisher.id,
+                    notification_type='forward',
+                    notification_channel='webhook',
+                    notification_status='pending',  # 初始状态为 pending
+                    notification_message=notification_message,
+                    auto_notify=has_postback_url,  # 如果有 postback_url，默认自动通知
+                    postback_url=publisher.postback_url if has_postback_url else None,
+                    created_at=get_app_now_naive()
+                )
+                db.add(notification_record)
+                logger.debug(
+                    f"创建新通知记录: conversion_id={conversion.id}, "
+                    f"publisher_id={publisher.id}"
+                )
         
         # 如果没有配置 Postback URL，保存通知记录后返回（不进行转发）
         if not has_postback_url:
