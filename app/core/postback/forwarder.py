@@ -201,17 +201,30 @@ class PostbackForwarder:
         existing_notification = existing_notification_result.scalars().first()
         
         if existing_notification:
+            # 检查转化数据是否有变化
+            has_changes, changes = PostbackForwarder._check_conversion_data_changed(
+                conversion, existing_notification
+            )
+            
             # 更新现有通知记录（补发通知场景）
             notification_record = existing_notification
             notification_record.notification_status = 'pending'  # 重置为pending状态
-            notification_record.notification_message = notification_message
+            notification_record.notification_message = notification_message  # 更新为最新的消息
             notification_record.auto_notify = has_postback_url
             notification_record.postback_url = publisher.postback_url if has_postback_url else None
             notification_record.error_message = None  # 清除之前的错误信息
-            logger.info(
-                f"更新现有通知记录用于补发: conversion_id={conversion.id}, "
-                f"publisher_id={publisher.id}, notification_id={notification_record.id}"
-            )
+            
+            if has_changes:
+                logger.info(
+                    f"更新现有通知记录（数据已变化）: conversion_id={conversion.id}, "
+                    f"publisher_id={publisher.id}, notification_id={notification_record.id}, "
+                    f"变化字段: {', '.join(changes)}"
+                )
+            else:
+                logger.info(
+                    f"更新现有通知记录用于补发: conversion_id={conversion.id}, "
+                    f"publisher_id={publisher.id}, notification_id={notification_record.id}"
+                )
         else:
             # 双重检查：在创建前再次查询，防止并发问题
             # 如果第一次查询时记录正在被创建，第二次查询应该能找到
@@ -228,15 +241,29 @@ class PostbackForwarder:
             if double_check_notification:
                 # 如果第二次查询找到了记录，更新它
                 notification_record = double_check_notification
+                
+                # 检查转化数据是否有变化
+                has_changes, changes = PostbackForwarder._check_conversion_data_changed(
+                    conversion, double_check_notification
+                )
+                
                 notification_record.notification_status = 'pending'
-                notification_record.notification_message = notification_message
+                notification_record.notification_message = notification_message  # 更新为最新的消息
                 notification_record.auto_notify = has_postback_url
                 notification_record.postback_url = publisher.postback_url if has_postback_url else None
                 notification_record.error_message = None
-                logger.info(
-                    f"双重检查找到现有通知记录并更新: conversion_id={conversion.id}, "
-                    f"publisher_id={publisher.id}, notification_id={notification_record.id}"
-                )
+                
+                if has_changes:
+                    logger.info(
+                        f"双重检查找到现有通知记录并更新（数据已变化）: conversion_id={conversion.id}, "
+                        f"publisher_id={publisher.id}, notification_id={notification_record.id}, "
+                        f"变化字段: {', '.join(changes)}"
+                    )
+                else:
+                    logger.info(
+                        f"双重检查找到现有通知记录并更新: conversion_id={conversion.id}, "
+                        f"publisher_id={publisher.id}, notification_id={notification_record.id}"
+                    )
             else:
                 # 创建新通知记录（正常转发场景）
                 notification_record = PostbackNotification(
@@ -684,6 +711,70 @@ class PostbackForwarder:
             return f"\n点击参数: {json.dumps(click_params, ensure_ascii=False)}"
         except Exception:
             return f"\n点击参数: {str(click_params)}"
+    
+    @staticmethod
+    def _check_conversion_data_changed(
+        conversion: PostbackConversion,
+        existing_notification: PostbackNotification
+    ) -> Tuple[bool, List[str]]:
+        """
+        检查转化数据是否有变化
+        
+        从通知消息中提取关键数据，与当前转化记录进行比较
+        
+        Args:
+            conversion: 当前的转化记录
+            existing_notification: 现有的通知记录
+            
+        Returns:
+            Tuple[bool, List[str]]: (是否有变化, 变化的字段列表)
+        """
+        changes = []
+        
+        if not existing_notification.notification_message:
+            # 如果没有通知消息，认为数据已变化（需要更新）
+            return True, ["通知消息为空，需要更新"]
+        
+        msg = existing_notification.notification_message
+        
+        # 检查 payout 和 original_payout（这些是最重要的字段）
+        old_payout_match = re.search(r'扣后金额.*?\$([\d.]+)', msg)
+        old_original_payout_match = re.search(r'原始金额.*?\$([\d.]+)', msg)
+        
+        old_payout = float(old_payout_match.group(1)) if old_payout_match else None
+        old_original_payout = float(old_original_payout_match.group(1)) if old_original_payout_match else None
+        
+        # 比较 payout（允许0.01的误差，避免浮点数精度问题）
+        if conversion.payout is not None:
+            if old_payout is None or abs(conversion.payout - old_payout) > 0.01:
+                changes.append(f"payout: {old_payout} -> {conversion.payout}")
+        
+        if conversion.original_payout is not None:
+            if old_original_payout is None or abs(conversion.original_payout - old_original_payout) > 0.01:
+                changes.append(f"original_payout: {old_original_payout} -> {conversion.original_payout}")
+        
+        # 检查其他关键字段（conversion_id, platform, event_name）
+        conversion_id_match = re.search(r'转化ID:\s*(\S+)', msg)
+        old_conversion_id = conversion_id_match.group(1) if conversion_id_match else None
+        if old_conversion_id and old_conversion_id != conversion.conversion_id:
+            changes.append(f"conversion_id: {old_conversion_id} -> {conversion.conversion_id}")
+        
+        platform_match = re.search(r'平台:\s*(\S+)', msg)
+        old_platform = platform_match.group(1) if platform_match else None
+        if old_platform and old_platform != conversion.platform:
+            changes.append(f"platform: {old_platform} -> {conversion.platform}")
+        
+        event_name_match = re.search(r'事件:\s*(\S+)', msg)
+        old_event_name = event_name_match.group(1) if event_name_match else None
+        if conversion.event_name:
+            if old_event_name != conversion.event_name:
+                changes.append(f"event_name: {old_event_name} -> {conversion.event_name}")
+        elif old_event_name:
+            # 如果之前有事件名称，现在没有了
+            changes.append(f"event_name: {old_event_name} -> None")
+        
+        has_changes = len(changes) > 0
+        return has_changes, changes
     
     @staticmethod
     def _build_forward_data(
