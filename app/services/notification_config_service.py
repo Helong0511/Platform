@@ -722,3 +722,79 @@ class NotificationConfigService:
                 detail=f"补发通知失败: {str(e)}"
             )
 
+    # ==================== 管理员通知配置 ====================
+
+    async def get_admin_notification_config(
+        self
+    ) -> Optional[AdminNotificationConfig]:
+        """
+        获取管理员通知配置
+        
+        Returns:
+            Optional[AdminNotificationConfig]: 通知配置对象，如果不存在则返回None
+        """
+        # 管理员通知配置是单例模式，id 固定为 1
+        result = await self.db.execute(
+            select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+        )
+        return result.scalars().first()
+
+    async def create_or_update_admin_notification_config(
+        self,
+        config_data: Dict[str, Any],
+        current_user: User
+    ) -> AdminNotificationConfig:
+        """
+        创建或更新管理员通知配置
+        
+        Args:
+            config_data: 配置数据
+            current_user: 当前用户（必须是管理员）
+        
+        Returns:
+            AdminNotificationConfig: 通知配置对象
+        """
+        # 检查是否已存在配置
+        result = await self.db.execute(
+            select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+        )
+        existing_config = result.scalars().first()
+
+        if existing_config:
+            # 更新现有配置
+            for key, value in config_data.items():
+                if hasattr(existing_config, key):
+                    setattr(existing_config, key, value)
+
+            try:
+                await self.db.commit()
+                await self.db.refresh(existing_config)
+                logger.info(f"管理员通知配置已更新")
+                return existing_config
+            except Exception as e:
+                await self.db.rollback()
+                logger.error(f"更新管理员通知配置失败: {str(e)}", exc_info=True)
+                raise_api_exception(
+                    ErrorCode.OPERATION_FAILED,
+                    detail=f"更新管理员通知配置失败: {str(e)}"
+                )
+        else:
+            # 创建新配置（id 固定为 1）
+            new_config = AdminNotificationConfig(
+                id=1,  # 固定为 1，单例模式
+                **config_data
+            )
+
+            try:
+                self.db.add(new_config)
+                await self.db.commit()
+                await self.db.refresh(new_config)
+                logger.info(f"管理员通知配置已创建")
+                return new_config
+            except Exception as e:
+                await self.db.rollback()
+                logger.error(f"创建管理员通知配置失败: {str(e)}", exc_info=True)
+                raise_api_exception(
+                    ErrorCode.OPERATION_FAILED,
+                    detail=f"创建管理员通知配置失败: {str(e)}"
+                )
