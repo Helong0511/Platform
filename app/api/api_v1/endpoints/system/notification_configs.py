@@ -238,7 +238,7 @@ async def get_notification_records(
     publisher_id: Optional[int] = Query(None, description="渠道ID过滤"),
     notification_status: Optional[str] = Query(None, description="通知状态过滤（sent, failed, pending）"),
     notification_channel: Optional[str] = Query(None, description="通知渠道过滤（telegram, email, sms, webhook）"),
-    notification_type: Optional[str] = Query(None, description="通知类型过滤（conversion, high_value, error, forward）"),
+    notification_type: Optional[str] = Query(None, description="通知类型过滤（conversion, high_value, error, forward, summary_hourly, summary_daily）"),
     start_date: Optional[str] = Query(None, description="开始日期（YYYY-MM-DD）"),
     end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
     db: AsyncSession = Depends(get_db),

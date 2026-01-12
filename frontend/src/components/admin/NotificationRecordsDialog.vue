@@ -52,7 +52,12 @@
         :max-height="500"
       >
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="conversion_id" label="转化ID" width="100" />
+        <el-table-column prop="conversion_id" label="转化ID" width="100">
+          <template #default="scope">
+            <span v-if="scope.row.conversion_id">{{ scope.row.conversion_id }}</span>
+            <el-tag v-else type="info" size="small">汇总通知</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="notification_type" label="类型" width="100">
           <template #default="scope">
             <el-tag :type="getTypeTagType(scope.row.notification_type)" size="small">
@@ -251,7 +256,9 @@ const getTypeLabel = (type) => {
     conversion: '转化通知',
     high_value: '高价值通知',
     error: '错误通知',
-    forward: '转发通知'
+    forward: '转发通知',
+    summary_hourly: '每小时汇总',
+    summary_daily: '每天汇总'
   };
   return labels[type] || type || '-';
 };
@@ -261,7 +268,9 @@ const getTypeTagType = (type) => {
     conversion: 'primary',
     high_value: 'warning',
     error: 'danger',
-    forward: 'info'
+    forward: 'info',
+    summary_hourly: 'success',
+    summary_daily: 'success'
   };
   return types[type] || 'info';
 };

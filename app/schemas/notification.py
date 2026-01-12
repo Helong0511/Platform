@@ -239,11 +239,11 @@ class TestMessageRequest(BaseModel):
 class PostbackNotificationResponse(BaseModel):
     """通知记录响应"""
     id: int
-    conversion_id: int
+    conversion_id: Optional[int] = None  # 汇总通知时为 None
     client_id: Optional[int] = None
     product_id: Optional[int] = None
     publisher_id: Optional[int] = None
-    notification_type: Optional[str] = None
+    notification_type: Optional[str] = None  # conversion, high_value, error, forward, summary_hourly, summary_daily
     notification_channel: str
     notification_status: str
     notification_message: Optional[str] = None

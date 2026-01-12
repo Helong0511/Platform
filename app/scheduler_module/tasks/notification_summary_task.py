@@ -165,6 +165,10 @@ async def process_hourly_notifications(db: AsyncSession) -> Dict[str, Any]:
                         if user_full_name:
                             msg += f" ({user_full_name})"
                         
+                        # 检查消息长度，如果超过限制则截断（Telegram 最大 4096 字符）
+                        from app.core.telegram_utils import truncate_message
+                        msg = truncate_message(msg)
+                        
                         # 获取 Telegram Chat ID
                         telegram_chat_id = notif_list[0].get('telegram_chat_id')
                         if not telegram_chat_id:
@@ -345,6 +349,10 @@ async def process_daily_notifications(db: AsyncSession) -> Dict[str, Any]:
                         msg += f"客户: {client_name}"
                         if user_full_name:
                             msg += f" ({user_full_name})"
+                        
+                        # 检查消息长度，如果超过限制则截断（Telegram 最大 4096 字符）
+                        from app.core.telegram_utils import truncate_message
+                        msg = truncate_message(msg)
                         
                         # 获取 Telegram Chat ID
                         telegram_chat_id = notif_list[0].get('telegram_chat_id')
