@@ -45,26 +45,22 @@ def merge_url_params(base_url: str, query_params: dict) -> str:
         '{ip}', '{os}', '{device_type}', '{country}', '{advertiser_id}',
     ]
     
-    # 检测基础URL中的占位符
-    placeholder_params = {'click_id', 'offer_id', 'channel_id', 'publisher_id'}
-    skip_params = set()
+    # 定义参数别名映射（用于检测基础URL中是否已存在参数的别名）
+    param_alias_mapping = {
+        'click_id': ['click_id', 'aff_click_id', 'clickid', 'clickId', 'CLICK_ID', 'AFF_CLICK_ID', 'clk_id', 'cid', 'affclickid', 'AFFCLICKID'],
+        'offer_id': ['offer_id', 'offerid', 'offerId', 'OFFER_ID'],
+        'channel_id': ['channel_id', 'sub_affid', 'channelid', 'channelId', 'CHANNEL_ID', 'SUB_AFFID', 'subaffid', 'SUBAFFID'],
+        'publisher_id': ['publisher_id', 'publisherid', 'publisherId', 'PUBLISHER_ID'],
+    }
     
-    for param in placeholder_params:
-        placeholder_variants = [
-            f'{{{param}}}',
-            f'{{{param.lower()}}}',
-            f'{{{param.upper()}}}',
-            f'{{{param.capitalize()}}}',
-        ]
-        camel_case = ''.join(word.capitalize() if i > 0 else word.lower() 
-                           for i, word in enumerate(param.split('_')))
-        placeholder_variants.extend([
-            f'{{{camel_case}}}',
-            f'{{{camel_case.lower()}}}',
-        ])
-        
-        if any(variant in base_url for variant in placeholder_variants):
-            skip_params.add(param)
+    # 检测基础URL中是否已存在参数的别名
+    # 如果基础URL中已经有参数的别名（如 aff_click_id），就不应该添加标准参数名（如 click_id）
+    skip_params = set()
+    for param_name, aliases in param_alias_mapping.items():
+        # 检查基础URL中是否已存在该参数的任何别名
+        if any(alias.lower() in existing_params_lower for alias in aliases):
+            skip_params.add(param_name)
+            logger.debug(f"[合并URL参数] 检测到基础URL中已存在 {param_name} 的别名，跳过添加标准参数名")
     
     # 过滤包含占位符的参数值
     filtered_query_params = {}
@@ -87,7 +83,9 @@ def merge_url_params(base_url: str, query_params: dict) -> str:
     for key, value in query_params.items():
         key_lower = key.lower()
         
+        # 如果该参数在基础URL中已存在别名，跳过
         if key_lower in skip_params:
+            logger.debug(f"[合并URL参数] 跳过参数 {key}，因为基础URL中已存在该参数的别名")
             continue
         
         if key_lower == 'click_id':
@@ -102,14 +100,28 @@ def merge_url_params(base_url: str, query_params: dict) -> str:
     if click_id_value and 'click_id' not in skip_params:
         existing_params_lower['click_id'] = click_id_value
     
-    # 确保 click_id 在最前面
+    # 构建最终URL，保持原始参数顺序
     ordered_params = OrderedDict()
-    if 'click_id' in existing_params_lower and 'click_id' not in skip_params:
-        ordered_params['click_id'] = existing_params_lower['click_id']
     
-    for key, value in existing_params_lower.items():
-        if key != 'click_id':
-            ordered_params[key.lower()] = value
+    # 先添加基础URL中已有的参数（保持原始顺序）
+    for key, value in existing_params.items():
+        key_lower = key.lower()
+        ordered_params[key_lower] = value
+    
+    # 然后添加新的参数（不包括已跳过的参数）
+    for key, value in other_params.items():
+        if key not in ordered_params:
+            ordered_params[key] = value
+    
+    # 如果 click_id 不在 skip_params 中，且需要添加，则添加到最前面
+    if click_id_value and 'click_id' not in skip_params:
+        # 如果 click_id 不在 ordered_params 中，添加到最前面
+        if 'click_id' not in ordered_params:
+            new_ordered_params = OrderedDict()
+            new_ordered_params['click_id'] = click_id_value
+            for key, value in ordered_params.items():
+                new_ordered_params[key] = value
+            ordered_params = new_ordered_params
     
     # 重新构建URL
     new_query = urlencode(ordered_params, doseq=True)
@@ -166,16 +178,9 @@ def build_final_url(
     # 准备要合并的参数
     request_params_with_click = {}
     
-    # 添加系统参数（如果原始URL中没有占位符）
-    for param_name, has_placeholder_flag in has_placeholder.items():
-        if not has_placeholder_flag:
-            if param_name == 'click_id':
-                request_params_with_click['click_id'] = click_id
-            elif param_name == 'offer_id' and offer_id:
-                request_params_with_click['offer_id'] = offer_id
-            elif param_name == 'channel_id' and final_channel_id:
-                if not has_placeholder.get('publisher_id', False):
-                    request_params_with_click['channel_id'] = final_channel_id
+    # 注意：不再自动添加系统参数
+    # 如果原始URL中没有占位符，说明不需要这些参数，不应该添加
+    # 只有在用户请求参数中明确包含这些参数时，才会被添加
     
     # 处理用户请求参数
     param_name_mapping = {
@@ -225,18 +230,21 @@ def build_final_url(
                 corresponding_param_name = param_name
                 break
         
-        # 如果该参数在原始URL中使用了占位符，跳过
-        if corresponding_param_name and has_placeholder.get(corresponding_param_name, False):
+        # 如果该参数是系统参数（click_id, offer_id, channel_id, publisher_id）
+        if corresponding_param_name:
+            # 如果该参数在原始URL中使用了占位符，跳过（因为已经在原始URL中替换了）
+            if has_placeholder.get(corresponding_param_name, False):
+                logger.debug(f"[构建最终URL] 跳过参数 {key}，因为原始URL中已有对应的占位符")
+                continue
+            
+            # 如果该参数在原始URL中没有占位符，也不应该添加（只保留原始URL中的参数）
+            logger.debug(f"[构建最终URL] 跳过系统参数 {key}，因为原始URL中没有对应的占位符")
             continue
         
-        # 处理 channel_id 和 publisher_id 的互斥关系
-        if key_lower == 'channel_id' and has_placeholder.get('publisher_id', False):
-            continue
-        if key_lower == 'publisher_id' and has_placeholder.get('channel_id', False):
-            continue
-        
-        # 参数通过所有检查，添加到合并列表
-        request_params_with_click[key_lower] = value
+        # 对于非系统参数，也不应该添加（只保留原始URL中已有的参数）
+        # 根据用户需求，最终URL应该就是替换占位符后的URL，不添加额外的参数
+        logger.debug(f"[构建最终URL] 跳过参数 {key}，因为原始URL中没有对应的占位符")
+        continue
     
     # 记录过滤信息
     if filtered_params:
