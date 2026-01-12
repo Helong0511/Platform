@@ -682,7 +682,6 @@ class PostbackProcessor:
                 try:
                     from app.services.telegram_notification_service import TelegramNotificationService
                     from app.models.models import AdminNotificationConfig
-                    from sqlalchemy.future import select
                     
                     # 查询管理员通知配置
                     admin_config_result = await db.execute(
