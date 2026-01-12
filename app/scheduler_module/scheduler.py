@@ -98,7 +98,6 @@ async def execute_task_with_lock(
     from app.scheduler_module.process_allocator import should_execute_in_current_process
     from app.core.database import AsyncSessionLocal
     from app.models.models import ScheduledTask
-    from sqlalchemy import select
     
     # 如果跳过进程检查（手动触发），直接执行
     if skip_process_check:
@@ -511,7 +510,6 @@ async def init_scheduled_tasks() -> None:
     from app.scheduler_module.task_result_registry import auto_register_task_results
     from app.core.database import AsyncSessionLocal
     from app.models.models import ScheduledTask
-    from sqlalchemy import select
 
     # 首先注册所有可用的任务函数
     auto_register_tasks()

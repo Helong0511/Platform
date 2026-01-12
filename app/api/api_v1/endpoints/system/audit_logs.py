@@ -231,7 +231,6 @@ async def log_client_error(
         username = None
         try:
             from app.core.security import JWTUtils
-            from sqlalchemy.future import select
 
             # 从请求头中获取token
             auth_header = request.headers.get("Authorization", "")

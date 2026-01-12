@@ -38,7 +38,6 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
         max_retries: 最大重试次数
     """
     from sqlalchemy.exc import IntegrityError
-    from sqlalchemy.future import select
     from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
     
     async with AsyncSessionLocal() as session:

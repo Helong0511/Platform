@@ -255,7 +255,6 @@ class JWTUtils:
                 jti = payload.get("jti")
                 if jti:
                     from app.models.session import TokenBlacklist
-                    from sqlalchemy.future import select
                     result = await db.execute(
                         select(TokenBlacklist).where(
                             TokenBlacklist.token_jti == jti,
