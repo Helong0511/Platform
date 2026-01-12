@@ -252,6 +252,46 @@ if scheduler_log_handler:
         module_logger.setLevel(logging.INFO)  # 允许 INFO 级别输出到 scheduler.log
         module_logger.propagate = True  # WARNING+ 会传播到 root logger（app.log）
 
+# ====== 配置 uvicorn 日志过滤器 ======
+# 过滤掉 EndOfStream 异常，这些是客户端提前关闭连接的正常情况，不应该记录为错误
+class StreamErrorFilter(logging.Filter):
+    """
+    日志过滤器，过滤掉流关闭异常（EndOfStream）
+    这些异常通常表示客户端提前关闭了连接，是正常情况，不应该记录为错误
+    """
+    def filter(self, record: logging.LogRecord) -> bool:
+        # 检查日志消息中是否包含 EndOfStream
+        if hasattr(record, 'msg') and record.msg:
+            msg = str(record.msg)
+            if 'EndOfStream' in msg or 'anyio.EndOfStream' in msg:
+                return False  # 过滤掉
+        # 检查异常信息
+        if hasattr(record, 'exc_info') and record.exc_info:
+            exc_type, exc_value, exc_traceback = record.exc_info
+            if exc_type and exc_value:
+                exc_name = exc_type.__name__
+                exc_module = exc_type.__module__
+                if 'EndOfStream' in exc_name or 'anyio' in exc_module:
+                    return False  # 过滤掉
+        # 检查堆栈跟踪文本（uvicorn 会将异常信息记录在消息中）
+        if hasattr(record, 'getMessage'):
+            try:
+                message = record.getMessage()
+                if 'EndOfStream' in message or 'anyio.EndOfStream' in message:
+                    return False  # 过滤掉
+            except Exception:
+                pass
+        return True  # 允许其他日志通过
+
+# 将过滤器添加到 uvicorn 和 uvicorn.error 日志记录器
+uvicorn_logger = logging.getLogger('uvicorn')
+uvicorn_logger.addFilter(StreamErrorFilter())
+uvicorn_error_logger = logging.getLogger('uvicorn.error')
+uvicorn_error_logger.addFilter(StreamErrorFilter())
+# 同时添加到 gunicorn 的错误日志记录器（如果使用 gunicorn）
+gunicorn_error_logger = logging.getLogger('gunicorn.error')
+gunicorn_error_logger.addFilter(StreamErrorFilter())
+
 # 获取当前模块的日志记录器（用于向后兼容）
 logger = logging.getLogger(__name__)
 
@@ -479,7 +519,11 @@ app = FastAPI(
 # ====== 添加安全中间件 ======
 # 注意：中间件的添加顺序很重要，后添加的中间件会先执行
 
-# 1. HTTPS强制重定向中间件（最外层，生产环境强制HTTPS）
+# 0. 流异常处理中间件（最外层，静默处理客户端提前关闭连接的异常）
+from app.core.middleware import StreamErrorHandlingMiddleware
+app.add_middleware(StreamErrorHandlingMiddleware)
+
+# 1. HTTPS强制重定向中间件（生产环境强制HTTPS）
 if settings.is_production:
     app.add_middleware(HTTPSRedirectMiddleware)
 

@@ -626,3 +626,62 @@ def get_device_type(request: Request) -> str:
 
     # 默认桌面设备
     return 'desktop'
+
+
+class StreamErrorHandlingMiddleware(BaseHTTPMiddleware):
+    """
+    流异常处理中间件
+    在 Starlette 的异常处理中间件之前捕获并静默处理流关闭异常（EndOfStream）
+    这些异常通常表示客户端提前关闭了连接，是正常情况，不应该记录为错误
+    """
+    
+    def __init__(self, app: ASGIApp):
+        super().__init__(app)
+        self.app = app
+    
+    def _is_stream_error(self, exc: Exception) -> bool:
+        """
+        检查异常是否是流关闭相关的异常（客户端提前关闭连接）
+        
+        Args:
+            exc: 异常对象
+        
+        Returns:
+            如果是流异常返回True，否则返回False
+        """
+        error_type = type(exc).__name__
+        error_module = type(exc).__module__
+        return ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+                "anyio" in error_module)
+    
+    async def dispatch(self, request: Request, call_next):
+        """
+        处理请求，捕获流关闭异常并静默处理
+        """
+        try:
+            return await call_next(request)
+        except Exception as exc:
+            # 检查是否是流关闭异常
+            if self._is_stream_error(exc):
+                # 流关闭异常是正常的（客户端提前关闭连接），不需要记录错误
+                # 直接重新抛出，让 ASGI 服务器处理，但不记录为错误
+                logger.debug(f"客户端提前关闭连接: {request.method} {request.url.path}")
+                raise exc
+            
+            # 检查异常链中是否有流异常
+            context_exc = None
+            if hasattr(exc, '__context__') and exc.__context__:
+                if self._is_stream_error(exc.__context__):
+                    context_exc = exc.__context__
+            if not context_exc and hasattr(exc, '__cause__') and exc.__cause__:
+                if self._is_stream_error(exc.__cause__):
+                    context_exc = exc.__cause__
+            
+            if context_exc:
+                # 如果异常链中有流异常，说明连接已断开
+                logger.debug(f"检测到连接断开上下文: {request.method} {request.url.path}")
+                # 直接重新抛出流异常，让 ASGI 服务器处理
+                raise context_exc from None
+            
+            # 其他异常，继续传播
+            raise exc
