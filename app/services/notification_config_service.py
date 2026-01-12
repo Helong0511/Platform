@@ -572,7 +572,10 @@ class NotificationConfigService:
         current_user: User
     ) -> Dict[str, Any]:
         """
-        补发转化通知
+        补发转化通知（补发 Postback 转发给渠道）
+        
+        注意：补发通知是针对 Postback 的，应该补发 Postback 转发（发送给渠道 Publisher），
+        不涉及 product_id 和 product.notification_address
 
         Args:
             conversion_id: 转化记录ID
@@ -581,7 +584,7 @@ class NotificationConfigService:
         Returns:
             Dict: 补发结果
         """
-        from app.core.postback.notifier import PostbackNotifier
+        from app.core.postback.forwarder import PostbackForwarder
 
         # 查询转化记录
         result = await self.db.execute(
@@ -604,122 +607,12 @@ class NotificationConfigService:
                 )
 
         try:
-            # 补发通知（同步等待发送完成，而不是异步发送）
-            # 获取客户和产品信息
-            product = None
-            client = None
-            
-            # 获取产品信息
-            if conversion.product_id:
-                product_result = await self.db.execute(
-                    select(Product).where(Product.id == conversion.product_id)
-                )
-                product = product_result.scalars().first()
-                
-                # 如果 product_id 存在但查询不到产品，说明产品可能已被删除
-                if not product:
-                    logger.error(
-                        f"补发通知失败: conversion_id={conversion_id}, "
-                        f"product_id={conversion.product_id}, "
-                        f"reason=产品不存在（可能已被删除）"
-                    )
-                    raise_api_exception(
-                        ErrorCode.VALIDATION_ERROR,
-                        detail=f"转化记录关联的产品ID {conversion.product_id} 不存在，无法补发通知"
-                    )
-            
-            # 获取客户信息
-            if product and product.client_id:
-                client_result = await self.db.execute(
-                    select(Client).where(Client.id == product.client_id)
-                )
-                client = client_result.scalars().first()
-            elif conversion.client_id:
-                client_result = await self.db.execute(
-                    select(Client).where(Client.id == conversion.client_id)
-                )
-                client = client_result.scalars().first()
-            
-            # 检查产品是否存在
-            if not product:
-                # 构建更详细的错误信息
-                error_detail = "转化记录未关联产品，无法补发通知。"
-                if client:
-                    error_detail += f" 该转化记录关联的客户为「{client.name}」（ID: {client.id}），"
-                    error_detail += "请先为转化记录关联产品并配置通知地址。"
-                else:
-                    error_detail += " 请先为转化记录关联产品和客户，并配置通知地址。"
-                
-                logger.error(
-                    f"补发通知失败: conversion_id={conversion_id}, "
-                    f"product_id=None, client_id={conversion.client_id if conversion else None}, "
-                    f"reason=转化记录未关联产品"
-                )
-                raise_api_exception(
-                    ErrorCode.VALIDATION_ERROR,
-                    detail=error_detail
-                )
-            
-            # 检查产品是否配置了通知地址
-            if not product.notification_address:
-                logger.error(
-                    f"补发通知失败: conversion_id={conversion_id}, "
-                    f"product_id={product.id}, product_name={product.name}, "
-                    f"reason=产品未配置通知地址"
-                )
-                raise_api_exception(
-                    ErrorCode.VALIDATION_ERROR,
-                    detail=f"产品「{product.name}」未配置通知地址，无法补发通知。请在产品管理中配置通知地址"
-                )
-            
-            notification_address = product.notification_address.strip()
-            if not notification_address:
-                logger.error(
-                    f"补发通知失败: conversion_id={conversion_id}, "
-                    f"product_id={conversion.product_id}, "
-                    f"reason=产品通知地址为空"
-                )
-                raise_api_exception(
-                    ErrorCode.VALIDATION_ERROR,
-                    detail="产品通知地址为空，无法补发通知"
-                )
-            
-            # 获取客户和产品信息（用于通知）
-            client_name, user_full_name = await PostbackNotifier._get_client_info(client, self.db)
-            product_name = PostbackNotifier._get_product_name(product)
-            
-            # 构建通知消息
-            message = PostbackNotifier._build_notification_message(
+            # 补发 Postback 转发（发送给渠道 Publisher）
+            # 不涉及 product_id，直接转发给渠道
+            await PostbackForwarder.forward_to_publisher(
                 conversion=conversion,
-                client_name=client_name,
-                product_name=product_name,
-                user_full_name=user_full_name,
-                notification_type='conversion'
+                db=self.db
             )
-            
-            # 同步发送通知（等待发送完成，失败时抛出异常）
-            success = await PostbackNotifier._send_notification_async(
-                message=message,
-                conversion=conversion,
-                client=client,
-                product=product,
-                notification_address=notification_address,
-                db=self.db,
-                raise_on_failure=True  # 补发通知时，失败应该抛出异常
-            )
-            
-            if not success:
-                logger.error(
-                    f"补发通知失败: conversion_id={conversion_id}, "
-                    f"product_id={product.id if product else None}, "
-                    f"client_id={client.id if client else None}, "
-                    f"address={notification_address[:50]}, "
-                    f"reason=通知发送失败"
-                )
-                raise_api_exception(
-                    ErrorCode.OPERATION_FAILED,
-                    detail="通知发送失败，请检查通知地址配置"
-                )
 
             logger.info(
                 f"用户 {current_user.id} 补发转化通知: conversion_id={conversion_id}"
@@ -741,7 +634,6 @@ class NotificationConfigService:
             
             logger.error(
                 f"补发转化通知失败: conversion_id={conversion_id}, "
-                f"product_id={conversion.product_id if 'conversion' in locals() else None}, "
                 f"error={error_msg}",
                 exc_info=True
             )
@@ -756,7 +648,10 @@ class NotificationConfigService:
         current_user: User
     ) -> Dict[str, Any]:
         """
-        基于转发日志补发通知
+        基于转发日志补发通知（补发 Postback 转发给渠道）
+        
+        注意：补发通知是针对 Postback 的，应该补发 Postback 转发（发送给渠道 Publisher），
+        不涉及 product_id 和 product.notification_address
 
         Args:
             forward_log_id: 转发日志ID
@@ -765,7 +660,7 @@ class NotificationConfigService:
         Returns:
             Dict: 补发结果
         """
-        from app.core.postback.notifier import PostbackNotifier
+        from app.core.postback.forwarder import PostbackForwarder
 
         # 检查管理员权限
         if current_user.role != UserRole.ADMIN:
@@ -799,12 +694,11 @@ class NotificationConfigService:
                     detail=f"转化记录ID {forward_log.conversion_id} 不存在"
                 )
 
-            # 补发通知
-            await PostbackNotifier.notify_conversion(
+            # 补发 Postback 转发（发送给渠道 Publisher）
+            # 不涉及 product_id，直接转发给渠道
+            await PostbackForwarder.forward_to_publisher(
                 conversion=conversion,
-                db=self.db,
-                product=None,
-                client=None
+                db=self.db
             )
 
             logger.info(
