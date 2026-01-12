@@ -154,6 +154,20 @@
               </template>
             </el-table-column>
             <el-table-column 
+              v-if="!isAdmin"
+              prop="revenue" 
+              label="收益" 
+              width="150" 
+              align="right"
+            >
+              <template #default="scope">
+                <span v-if="scope.row.revenue !== undefined && scope.row.revenue !== null">
+                  {{ scope.row.revenue.toFixed(2) }}
+                </span>
+                <span v-else>0.00</span>
+              </template>
+            </el-table-column>
+            <el-table-column 
               v-if="isAdmin"
               prop="po" 
               label="PO" 

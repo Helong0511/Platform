@@ -322,6 +322,10 @@ class ConversionService:
             # 计算CR
             cr_val = (stat["conversion_count"] / stat["click_count"] * 100) if stat["click_count"] > 0 else 0
             
+            # 计算收益：收益 = conversion_count * PO(扣减后的)
+            # po_after_discount 已经是所有转化的总PO扣减后，所以收益 = po_after_discount
+            revenue = round(po_after_discount, 2) if stat["conversion_count"] > 0 else 0.0
+            
             stats_list.append({
                 "offer_id": offer_id_val,
                 "offer_name": offer_name,
@@ -333,7 +337,8 @@ class ConversionService:
                 "conversion_count": stat["conversion_count"],
                 "cr": round(cr_val, 2),
                 "po": stat["po"],
-                "po_after_discount": round(po_after_discount, 2)
+                "po_after_discount": round(po_after_discount, 2),
+                "revenue": revenue
             })
         
         # 按点击数量排序
