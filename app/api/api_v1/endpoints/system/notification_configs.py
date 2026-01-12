@@ -302,9 +302,12 @@ async def resend_conversion_notification(
     current_user: User = Depends(get_current_user)
 ):
     """
-    补发转化通知（已重构使用服务层）
+    补发转化通知（补发 Postback 转发给渠道）
     
-    如果转化记录没有通知记录或通知失败，可以手动补发通知
+    注意：补发通知是针对 Postback 的，应该补发 Postback 转发（发送给渠道 Publisher），
+    不涉及 product_id 和 product.notification_address。
+    
+    如果转化记录没有转发记录或转发失败，可以手动补发转发。
     """
     # 使用服务层（业务逻辑在NotificationConfigService中）
     from app.core.dependencies import get_notification_config_service
@@ -327,10 +330,13 @@ async def resend_notification_from_forward_log(
     current_user: User = Depends(get_current_user)
 ):
     """
-    基于转发日志补发通知（已重构使用服务层）
+    基于转发日志补发通知（补发 Postback 转发给渠道）
     
-    根据转发日志中的转化记录，重新发送通知
-    仅管理员可访问
+    注意：补发通知是针对 Postback 的，应该补发 Postback 转发（发送给渠道 Publisher），
+    不涉及 product_id 和 product.notification_address。
+    
+    根据转发日志中的转化记录，重新发送 Postback 转发给渠道。
+    仅管理员可访问。
     """
     # 使用服务层（业务逻辑在NotificationConfigService中）
     from app.core.dependencies import get_notification_config_service
