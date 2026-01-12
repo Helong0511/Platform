@@ -148,6 +148,7 @@ async def get_postback_conversions(
         conversions = result.scalars().all()
         
         # 批量查询通知记录数量（只统计成功发送的通知，status='sent'）
+        # 注意：只统计有 conversion_id 的通知（汇总通知 conversion_id 为 NULL，不统计）
         conversion_ids = [conv.id for conv in conversions]
         notification_counts = {}
         if conversion_ids:
@@ -157,6 +158,7 @@ async def get_postback_conversions(
             ).where(
                 and_(
                     PostbackNotification.conversion_id.in_(conversion_ids),
+                    PostbackNotification.conversion_id.isnot(None),  # 排除汇总通知
                     PostbackNotification.notification_status == 'sent'
                 )
             ).group_by(PostbackNotification.conversion_id)

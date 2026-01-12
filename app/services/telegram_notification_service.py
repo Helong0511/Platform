@@ -323,6 +323,9 @@ class TelegramNotificationService:
         message: str,
         telegram_chat_id: str,
         conversion: Optional[PostbackConversion] = None,
+        client_id: Optional[int] = None,
+        product_id: Optional[int] = None,
+        notification_type: str = 'conversion',
         db: Optional[AsyncSession] = None
     ) -> bool:
         """
@@ -332,6 +335,9 @@ class TelegramNotificationService:
             message: 通知消息
             telegram_chat_id: Telegram Chat ID
             conversion: 转化记录（可选，用于记录通知历史）
+            client_id: 客户ID（可选，用于汇总通知）
+            product_id: 产品ID（可选，用于汇总通知）
+            notification_type: 通知类型（conversion, summary_hourly, summary_daily）
             db: 数据库会话（可选）
         
         Returns:
@@ -340,16 +346,27 @@ class TelegramNotificationService:
         try:
             success = await send_telegram_message(message, chat_id=telegram_chat_id)
             
-            # 记录通知历史（如果有转化记录和数据库会话）
-            if conversion and db:
+            # 记录通知历史（如果有数据库会话）
+            if db:
                 try:
                     from app.models.models import PostbackNotification
+                    # 如果有转化记录，使用转化记录的信息
+                    if conversion:
+                        record_client_id = conversion.client_id
+                        record_product_id = conversion.product_id
+                        record_conversion_id = conversion.id
+                    else:
+                        # 汇总通知，使用传入的 client_id 和 product_id
+                        record_client_id = client_id
+                        record_product_id = product_id
+                        record_conversion_id = None
+                    
                     notification_record = PostbackNotification(
-                        conversion_id=conversion.id,
-                        client_id=conversion.client_id,
-                        product_id=conversion.product_id,
+                        conversion_id=record_conversion_id,
+                        client_id=record_client_id,
+                        product_id=record_product_id,
                         publisher_id=None,
-                        notification_type='conversion',
+                        notification_type=notification_type,
                         notification_channel='telegram',
                         notification_status='sent' if success else 'failed',
                         notification_message=message,

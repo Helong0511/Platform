@@ -684,11 +684,11 @@ class PostbackNotification(Base):
     __tablename__ = "postback_notifications"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='通知记录ID')
-    conversion_id = Column(Integer, ForeignKey("postback_conversions.id", ondelete="CASCADE"), nullable=False, index=True, comment='转化记录ID')
+    conversion_id = Column(Integer, ForeignKey("postback_conversions.id", ondelete="CASCADE"), nullable=True, index=True, comment='转化记录ID（汇总通知时为NULL）')
     client_id = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, index=True, comment='客户ID')
     product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True, index=True, comment='产品ID')
     publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="SET NULL"), nullable=True, index=True, comment='渠道ID（转发通知时使用）')
-    notification_type = Column(String(50), nullable=True, comment='通知类型：conversion, high_value, error, forward')
+    notification_type = Column(String(50), nullable=True, comment='通知类型：conversion, high_value, error, forward, summary_hourly, summary_daily')
     notification_channel = Column(String(50), nullable=False, comment='通知渠道：telegram, email, sms, webhook')
     notification_status = Column(String(20), default='pending', index=True, comment='通知状态：sent, failed, pending')
     notification_message = Column(Text, nullable=True, comment='通知消息内容')
