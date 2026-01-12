@@ -444,6 +444,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, Mouse } from '@element-plus/icons-vue'
 import { getClicks } from '@/api/clicks'
@@ -452,6 +453,7 @@ import { getPublishers } from '@/api/publisher'
 import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
 
+const route = useRoute()
 const loading = ref(false)
 const filterClickId = ref('')
 const filterOffer = ref(null)
@@ -600,6 +602,13 @@ const handlePageChange = (page) => {
 onMounted(() => {
   loadOffers()
   loadPublishers()
+  
+  // 检查URL参数中是否有click_id，如果有则设置过滤条件
+  const clickIdFromUrl = route.query.click_id
+  if (clickIdFromUrl) {
+    filterClickId.value = clickIdFromUrl
+  }
+  
   // 默认查询最近7天（优化性能，减少数据量）
   const endDate = new Date()
   const startDate = new Date()
