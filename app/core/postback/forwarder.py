@@ -32,7 +32,9 @@ class PostbackForwarder:
     @staticmethod
     async def forward_to_publisher(
         conversion: PostbackConversion,
-        db: AsyncSession
+        db: AsyncSession,
+        skip_create_notification: bool = False,
+        existing_notification: Optional[PostbackNotification] = None
     ) -> None:
         """
         将转化数据转发给渠道（Publisher）的 Postback URL
@@ -40,6 +42,12 @@ class PostbackForwarder:
         Args:
             conversion: 转化记录
             db: 数据库会话
+            skip_create_notification: 如果为True，不创建新通知记录（用于补发通知场景）
+            existing_notification: 已存在的通知记录（如果提供，将更新此记录而不是创建新记录）
+        
+        注意：
+        - 正常转发时：会创建新的通知记录和转发日志
+        - 补发通知时：如果已有通知记录，更新现有记录；转发日志每次都会创建（记录每次转发尝试）
         """
         # 1. 通过 click_id 查找关联的 Publisher
         # 注意：postback_conversions.conversion_id = clicks.click_id
@@ -105,34 +113,46 @@ class PostbackForwarder:
                     # Click 表可能不存在或数据已清理，忽略错误
                     logger.debug(f"无法从 Click 表加载数据: {e}")
         
-        # 2. 如果没有找到 Publisher，创建通知记录后返回
+        # 2. 如果没有找到 Publisher，处理通知记录后返回
         if not publisher:
             lookup_click_id = conversion.conversion_id if conversion.conversion_id else conversion.click_id
             logger.debug(
                 f"未找到关联的渠道，跳过转发: conversion_id={conversion.id}, "
                 f"conversion_id={conversion.conversion_id}, click_id={lookup_click_id}"
             )
-            # 即使没有找到 Publisher，也创建通知记录（用于后续手动通知）
-            try:
-                notification_record = PostbackNotification(
-                    conversion_id=conversion.id,
-                    publisher_id=None,  # 没有找到 Publisher
-                    notification_type='forward',
-                    notification_channel='webhook',
-                    notification_status='pending',
-                    notification_message=f"未找到关联的渠道，无法转发: conversion_id={conversion.conversion_id}",
-                    auto_notify=False,  # 没有 postback_url，只能手动通知
-                    postback_url=None,
-                    created_at=get_app_now_naive()
-                )
-                db.add(notification_record)
-                await db.commit()
-            except Exception as e:
-                logger.error(f"创建转发通知记录失败: {str(e)}", exc_info=True)
-                await db.rollback()
+            # 如果补发通知且已有通知记录，更新记录；否则创建新记录
+            if skip_create_notification and existing_notification:
+                # 更新现有通知记录
+                existing_notification.notification_status = 'pending'
+                existing_notification.notification_message = f"未找到关联的渠道，无法转发: conversion_id={conversion.conversion_id}"
+                existing_notification.error_message = "未找到关联的渠道"
+                try:
+                    await db.commit()
+                except Exception as e:
+                    logger.error(f"更新转发通知记录失败: {str(e)}", exc_info=True)
+                    await db.rollback()
+            elif not skip_create_notification:
+                # 创建新通知记录（用于后续手动通知）
+                try:
+                    notification_record = PostbackNotification(
+                        conversion_id=conversion.id,
+                        publisher_id=None,  # 没有找到 Publisher
+                        notification_type='forward',
+                        notification_channel='webhook',
+                        notification_status='pending',
+                        notification_message=f"未找到关联的渠道，无法转发: conversion_id={conversion.conversion_id}",
+                        auto_notify=False,  # 没有 postback_url，只能手动通知
+                        postback_url=None,
+                        created_at=get_app_now_naive()
+                    )
+                    db.add(notification_record)
+                    await db.commit()
+                except Exception as e:
+                    logger.error(f"创建转发通知记录失败: {str(e)}", exc_info=True)
+                    await db.rollback()
             return
         
-        # 2.1. 无论是否有 postback_url，都创建通知记录
+        # 2.1. 无论是否有 postback_url，都创建或更新通知记录
         has_postback_url = bool(publisher.postback_url and publisher.postback_url.strip())
         
         # 构建通知消息
@@ -143,19 +163,33 @@ class PostbackForwarder:
             has_postback_url=has_postback_url
         )
         
-        # 创建通知记录（无论是否有 postback_url）
-        notification_record = PostbackNotification(
-            conversion_id=conversion.id,
-            publisher_id=publisher.id,
-            notification_type='forward',
-            notification_channel='webhook',
-            notification_status='pending',  # 初始状态为 pending
-            notification_message=notification_message,
-            auto_notify=has_postback_url,  # 如果有 postback_url，默认自动通知
-            postback_url=publisher.postback_url if has_postback_url else None,
-            created_at=get_app_now_naive()
-        )
-        db.add(notification_record)
+        # 检查是否已有通知记录（补发通知场景）
+        if skip_create_notification and existing_notification:
+            # 更新现有通知记录
+            notification_record = existing_notification
+            notification_record.notification_status = 'pending'  # 重置为pending状态
+            notification_record.notification_message = notification_message
+            notification_record.auto_notify = has_postback_url
+            notification_record.postback_url = publisher.postback_url if has_postback_url else None
+            notification_record.error_message = None  # 清除之前的错误信息
+            logger.info(
+                f"更新现有通知记录用于补发: conversion_id={conversion.id}, "
+                f"publisher_id={publisher.id}, notification_id={notification_record.id}"
+            )
+        else:
+            # 创建新通知记录（正常转发场景）
+            notification_record = PostbackNotification(
+                conversion_id=conversion.id,
+                publisher_id=publisher.id,
+                notification_type='forward',
+                notification_channel='webhook',
+                notification_status='pending',  # 初始状态为 pending
+                notification_message=notification_message,
+                auto_notify=has_postback_url,  # 如果有 postback_url，默认自动通知
+                postback_url=publisher.postback_url if has_postback_url else None,
+                created_at=get_app_now_naive()
+            )
+            db.add(notification_record)
         
         # 如果没有配置 Postback URL，保存通知记录后返回（不进行转发）
         if not has_postback_url:

@@ -6,6 +6,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import and_, func, delete
+from sqlalchemy.orm import joinedload
 from fastapi import HTTPException
 
 from app.models.models import (
@@ -17,7 +18,10 @@ from app.models.models import (
     ProductNotificationConfig,
     PostbackNotification,
     PostbackConversion,
-    PostbackForwardLog
+    PostbackForwardLog,
+    Publisher,
+    ClickStats,
+    Click
 )
 from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
@@ -609,10 +613,83 @@ class NotificationConfigService:
         try:
             # 补发 Postback 转发（发送给渠道 Publisher）
             # 不涉及 product_id，直接转发给渠道
-            await PostbackForwarder.forward_to_publisher(
-                conversion=conversion,
-                db=self.db
-            )
+            
+            # 1. 先查找关联的 Publisher（用于查询通知记录）
+            publisher = None
+            lookup_click_id = conversion.conversion_id if conversion.conversion_id else conversion.click_id
+            
+            if lookup_click_id:
+                # 优先从 ClickStats 获取 publisher_id
+                click_stats_result = await self.db.execute(
+                    select(ClickStats).where(ClickStats.click_id == lookup_click_id)
+                )
+                click_stats = click_stats_result.scalars().first()
+                
+                if click_stats and click_stats.publisher_id:
+                    publisher_result = await self.db.execute(
+                        select(Publisher).where(Publisher.id == click_stats.publisher_id)
+                    )
+                    publisher = publisher_result.scalars().first()
+                elif lookup_click_id:
+                    # 尝试从 Click 表获取
+                    try:
+                        click_result = await self.db.execute(
+                            select(Click)
+                            .options(joinedload(Click.publisher))
+                            .where(Click.click_id == lookup_click_id)
+                        )
+                        click_record = click_result.unique().scalars().first()
+                        if click_record:
+                            publisher = click_record.publisher
+                    except Exception:
+                        pass
+            
+            # 2. 如果找到了 Publisher，查询是否已有通知记录
+            existing_notification = None
+            if publisher:
+                notification_result = await self.db.execute(
+                    select(PostbackNotification).where(
+                        PostbackNotification.conversion_id == conversion.id,
+                        PostbackNotification.publisher_id == publisher.id,
+                        PostbackNotification.notification_type == 'forward'
+                    ).order_by(PostbackNotification.created_at.desc())
+                )
+                existing_notification = notification_result.scalars().first()
+            
+            # 3. 如果有通知记录，检查数据是否正确
+            if existing_notification:
+                # 检查 Publisher 的 postback_url 是否仍然有效
+                if publisher and publisher.postback_url and publisher.postback_url.strip():
+                    # 数据正确，使用现有通知记录补发
+                    logger.info(
+                        f"找到现有通知记录，更新并补发: conversion_id={conversion_id}, "
+                        f"publisher_id={publisher.id}, notification_id={existing_notification.id}"
+                    )
+                    await PostbackForwarder.forward_to_publisher(
+                        conversion=conversion,
+                        db=self.db,
+                        skip_create_notification=True,
+                        existing_notification=existing_notification
+                    )
+                else:
+                    # Publisher 没有配置 postback_url，无法补发
+                    logger.warning(
+                        f"找到通知记录但渠道未配置 Postback URL: conversion_id={conversion_id}, "
+                        f"publisher_id={publisher.id if publisher else None}"
+                    )
+                    raise_api_exception(
+                        ErrorCode.VALIDATION_ERROR,
+                        detail="渠道未配置 Postback URL，无法补发通知"
+                    )
+            else:
+                # 没有通知记录，正常转发（会创建新记录）
+                logger.info(
+                    f"未找到通知记录，创建新记录并转发: conversion_id={conversion_id}"
+                )
+                await PostbackForwarder.forward_to_publisher(
+                    conversion=conversion,
+                    db=self.db
+                )
 
             logger.info(
                 f"用户 {current_user.id} 补发转化通知: conversion_id={conversion_id}"
@@ -696,10 +773,63 @@ class NotificationConfigService:
 
             # 补发 Postback 转发（发送给渠道 Publisher）
             # 不涉及 product_id，直接转发给渠道
-            await PostbackForwarder.forward_to_publisher(
-                conversion=conversion,
-                db=self.db
-            )
+            
+            # 1. 查找关联的 Publisher（用于查询通知记录）
+            publisher = None
+            if forward_log.publisher_id:
+                publisher_result = await self.db.execute(
+                    select(Publisher).where(Publisher.id == forward_log.publisher_id)
+                )
+                publisher = publisher_result.scalars().first()
+            
+            # 2. 查询是否已有通知记录
+            existing_notification = None
+            if publisher:
+                notification_result = await self.db.execute(
+                    select(PostbackNotification).where(
+                        PostbackNotification.conversion_id == conversion.id,
+                        PostbackNotification.publisher_id == publisher.id,
+                        PostbackNotification.notification_type == 'forward'
+                    ).order_by(PostbackNotification.created_at.desc())
+                )
+                existing_notification = notification_result.scalars().first()
+            
+            # 3. 如果有通知记录，检查数据是否正确并补发
+            if existing_notification:
+                # 检查 Publisher 的 postback_url 是否仍然有效
+                if publisher and publisher.postback_url and publisher.postback_url.strip():
+                    # 数据正确，使用现有通知记录补发
+                    logger.info(
+                        f"找到现有通知记录，更新并补发: forward_log_id={forward_log_id}, "
+                        f"conversion_id={conversion.id}, publisher_id={publisher.id}, "
+                        f"notification_id={existing_notification.id}"
+                    )
+                    await PostbackForwarder.forward_to_publisher(
+                        conversion=conversion,
+                        db=self.db,
+                        skip_create_notification=True,
+                        existing_notification=existing_notification
+                    )
+                else:
+                    # Publisher 没有配置 postback_url，无法补发
+                    logger.warning(
+                        f"找到通知记录但渠道未配置 Postback URL: forward_log_id={forward_log_id}, "
+                        f"publisher_id={publisher.id if publisher else None}"
+                    )
+                    raise_api_exception(
+                        ErrorCode.VALIDATION_ERROR,
+                        detail="渠道未配置 Postback URL，无法补发通知"
+                    )
+            else:
+                # 没有通知记录，正常转发（会创建新记录）
+                logger.info(
+                    f"未找到通知记录，创建新记录并转发: forward_log_id={forward_log_id}, "
+                    f"conversion_id={conversion.id}"
+                )
+                await PostbackForwarder.forward_to_publisher(
+                    conversion=conversion,
+                    db=self.db
+                )
 
             logger.info(
                 f"用户 {current_user.id} 基于转发日志补发通知: forward_log_id={forward_log_id}, "
