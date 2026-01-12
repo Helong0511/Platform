@@ -1,6 +1,8 @@
 """
-Postback 下游转发服务
-负责将接收到的 postback 数据转发给下游系统
+Postback 转发服务
+负责将接收到的 postback 数据转发给渠道（Publisher）
+
+注意：PostBack 数据只转发给渠道（Publisher），不转发给其他系统
 """
 import json
 import logging
@@ -25,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class PostbackForwarder:
-    """Postback 下游转发器"""
+    """Postback 转发器（主要用于转发给渠道）"""
 
     @staticmethod
     async def forward_to_publisher(

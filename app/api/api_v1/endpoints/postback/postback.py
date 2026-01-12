@@ -589,29 +589,21 @@ async def resend_postback_forward(
                 detail=f"转化记录ID {forward_log.conversion_id} 不存在"
             )
         
-        # 根据转发类型重新发送
+        # 根据转发类型重新发送（只支持转发到渠道）
         if forward_log.publisher_id:
             # 转发到渠道
             await PostbackForwarder.forward_to_publisher(conversion, db)
             message = f"已补发转发到渠道（Publisher ID: {forward_log.publisher_id}）"
         elif forward_log.product_id:
-            # 转发到产品下游
-            product_result = await db.execute(
-                select(Product).where(Product.id == forward_log.product_id)
+            # 产品下游转发已废弃，不再支持
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="产品下游转发功能已废弃，PostBack 数据只转发给渠道（Publisher）"
             )
-            product = product_result.scalars().first()
-            if product:
-                await PostbackForwarder.forward_to_downstream(conversion, product, db)
-                message = f"已补发转发到产品下游（Product ID: {forward_log.product_id}）"
-            else:
-                raise_api_exception(
-                    ErrorCode.RESOURCE_NOT_FOUND,
-                    detail=f"产品ID {forward_log.product_id} 不存在"
-                )
         else:
             raise_api_exception(
                 ErrorCode.VALIDATION_ERROR,
-                detail="转发日志缺少 publisher_id 或 product_id，无法确定转发目标"
+                detail="转发日志缺少 publisher_id，无法确定转发目标"
             )
         
         logger.info(

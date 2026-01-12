@@ -10,7 +10,7 @@ Postback统一处理器模块
 - Cap检查：检查转化是否超过Cap限制
 - 扣量计算：根据配置计算扣量后的金额
 - 数据存储：保存转化记录到数据库
-- 下游转发：转发转化数据到下游系统（如果配置）
+- 渠道转发：转发转化数据到渠道（Publisher）的 Postback URL（如果配置）
 - 通知发送：发送转化通知（Telegram、邮件等）
 
 处理流程：
@@ -23,7 +23,7 @@ Postback统一处理器模块
 7. 扣量计算：根据Offer和Publisher的扣量配置计算实际金额
 8. 保存转化记录：将转化数据保存到postback_conversions表
 9. 更新Click统计：更新click_stats表（如果有Click关联）
-10. 下游转发：如果配置了下游Postback URL，加入转发队列
+10. 渠道转发：如果渠道配置了Postback URL，转发转化数据到渠道
 11. 发送通知：如果配置了通知，发送转化通知
 
 支持的平台：
@@ -34,7 +34,7 @@ CPL系统集成：
 - 自动关联Click ID，获取Offer、Publisher、Advertiser信息
 - 支持Cap限制检查（Daily Cap和Total Cap）
 - 支持扣量计算（Offer级别和Publisher级别）
-- 支持下游Postback转发（自动替换占位符）
+- 支持渠道Postback转发（自动替换占位符）
 
 安全特性：
 - 数据验证：确保必填字段存在且格式正确
@@ -52,7 +52,7 @@ CPL系统集成：
 1. 所有postback数据都会保存原始数据（raw_data字段）
 2. 重复检测基于platform + conversion_id + event_name的唯一性
 3. Cap检查失败不会阻止转化记录保存，但会标记状态
-4. 下游转发失败会加入重试队列，自动重试
+4. 渠道转发失败会记录日志，不影响主流程
 5. 通知发送失败不会影响转化处理流程
 """
 import json
@@ -65,7 +65,7 @@ from sqlalchemy.future import select
 from app.core.postback.handlers import get_handler
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
-from app.models.models import PostbackConversion, Product, Click, Offer, PostbackForwardQueue, Advertiser, ClickStats
+from app.models.models import PostbackConversion, Product, Click, Offer, Advertiser, ClickStats
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
@@ -678,11 +678,11 @@ class PostbackProcessor:
                     )
             
             # 10. 异步转发给渠道（如果渠道配置了 Postback URL）
-            # 优先使用渠道的 Postback URL，如果没有则使用产品的下游 URL
-            # 注意：如果转化被扣量了（conversion为None），不转发给下游
+            # 注意：PostBack 数据只转发给渠道（Publisher），不转发给其他系统
+            # 注意：如果转化被扣量了（conversion为None），不转发
             if conversion and conversion.conversion_status in ['Pending', 'Approved']:
                 try:
-                    # 10.1 尝试转发到渠道的 Postback URL
+                    # 转发到渠道的 Postback URL
                     from app.core.postback.forwarder import PostbackForwarder
                     await PostbackForwarder.forward_to_publisher(
                         conversion=conversion,
@@ -694,49 +694,6 @@ class PostbackProcessor:
                         f"转发到渠道 Postback URL 失败: conversion_id={conversion_id}, "
                         f"error={str(e)}"
                     )
-                
-                # 10.2 如果产品配置了下游 URL，也进行转发（兼容旧逻辑）
-                product = None
-                if product_id:
-                    result = await db.execute(
-                        select(Product).where(Product.id == product_id)
-                    )
-                    product = result.scalars().first()
-                
-                if product and product.downstream_postback_url:
-                    # 使用可靠的队列机制
-                    try:
-                         # 插入转发队列
-                        queue_item = PostbackForwardQueue(
-                            conversion_id=conversion.id,
-                            product_id=product.id,
-                            downstream_url=product.downstream_postback_url,
-                            request_method=product.downstream_postback_method or 'GET',
-                            # 这里简简化处理，实际可能需要根据 method 构造 data/params
-                            # 暂时先用 raw_data_json 作为 data，后续由 forwarder 处理
-                            request_data=raw_data_json if product.downstream_postback_method == 'POST' else None,
-                            request_params=None, # 如果是GET，参数组合逻辑在 forwarder 中
-                            created_at=get_app_now_naive(),
-                            next_retry_time=get_app_now_naive()  # 使用北京时间
-                        )
-                        db.add(queue_item)
-                        await db.commit()
-                        
-                        # 触发后台任务处理队列 (Fire & Forget)
-                        # 即使这里触发失败，定时任务也会兜底
-                        from app.scheduler.forward_tasks import trigger_forward_processing
-                        import asyncio
-                        try:
-                             asyncio.create_task(trigger_forward_processing())
-                        except:
-                             pass
-                             
-                    except Exception as e:
-                        # 转发入队失败
-                        logger.error(
-                            f"产品下游转发入队失败: conversion_id={conversion_id}, "
-                            f"error={str(e)}"
-                        )
             
             # 11. 返回成功响应
             return {
