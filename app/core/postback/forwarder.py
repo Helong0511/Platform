@@ -330,24 +330,28 @@ class PostbackForwarder:
             
             # 如果 HTTP 状态码成功但内容检查失败，记录详细信息
             http_success = 200 <= response.status_code < 300
+            # 格式化点击参数用于错误信息
+            click_params_str = PostbackForwarder._format_click_params_for_error(click_params)
+            
             if http_success and not is_success:
-                error_msg = f"HTTP 状态码 {response.status_code} 表示成功，但响应内容检查失败: {check_error}"
+                error_msg = f"HTTP 状态码 {response.status_code} 表示成功，但响应内容检查失败: {check_error}{click_params_str}"
                 forward_log.error_message = error_msg
                 logger.warning(
                     f"转发响应内容检查失败: conversion_id={conversion.id}, "
                     f"publisher_id={publisher.id}, status={response.status_code}, "
-                    f"check_error={check_error}"
+                    f"check_error={check_error}, click_params={click_params}"
                 )
             elif not http_success:
-                forward_log.error_message = f"HTTP {response.status_code}: {response.text[:500]}"
+                forward_log.error_message = f"HTTP {response.status_code}: {response.text[:500]}{click_params_str}"
             elif not is_success and check_error:
-                forward_log.error_message = check_error
+                forward_log.error_message = f"{check_error}{click_params_str}"
             
             # 更新通知记录状态
             notification_record.notification_status = 'sent' if forward_log.success else 'failed'
             if not forward_log.success:
                 if not notification_record.error_message:
-                    notification_record.error_message = forward_log.error_message or f"HTTP {response.status_code}: {response.text[:500]}"
+                    click_params_str = PostbackForwarder._format_click_params_for_error(click_params)
+                    notification_record.error_message = (forward_log.error_message or f"HTTP {response.status_code}: {response.text[:500]}") + click_params_str
             
             if forward_log.success:
                 logger.info(
@@ -384,10 +388,12 @@ class PostbackForwarder:
                     f"request_params={forward_log.request_params[:200] if forward_log.request_params else 'N/A'}, "
                     f"request_data={forward_log.request_data[:200] if forward_log.request_data else 'N/A'}, "
                     f"response_body={response.text[:500]}, "
-                    f"error={forward_log.error_message or 'Unknown error'}"
+                    f"error={forward_log.error_message or 'Unknown error'}, "
+                    f"click_params={click_params}"
                 )
                 if not forward_log.error_message:
-                    forward_log.error_message = f"HTTP {response.status_code}: {response.text[:500]}"
+                    click_params_str = PostbackForwarder._format_click_params_for_error(click_params)
+                    forward_log.error_message = f"HTTP {response.status_code}: {response.text[:500]}{click_params_str}"
                 
                 # 转发失败也发送 Telegram 通知
                 try:
@@ -406,31 +412,34 @@ class PostbackForwarder:
                     logger.warning(f"创建 Telegram 通知任务失败: {str(e)}")
         
         except httpx.TimeoutException as e:
-            forward_log.error_message = f"请求超时: {str(e)}"
+            click_params_str = PostbackForwarder._format_click_params_for_error(click_params)
+            forward_log.error_message = f"请求超时: {str(e)}{click_params_str}"
             forward_log.completed_at = get_app_now_naive()  # 使用北京时间
             # 更新通知记录状态
             notification_record.notification_status = 'failed'
-            notification_record.error_message = f"请求超时: {str(e)}"
+            notification_record.error_message = f"请求超时: {str(e)}{click_params_str}"
             logger.error(
                 f"转发 postback 到渠道超时: conversion_id={conversion.id}, "
                 f"publisher_id={publisher.id}, url={replaced_url[:100]}"
             )
         except httpx.RequestError as e:
-            forward_log.error_message = f"请求错误: {str(e)}"
+            click_params_str = PostbackForwarder._format_click_params_for_error(click_params)
+            forward_log.error_message = f"请求错误: {str(e)}{click_params_str}"
             forward_log.completed_at = get_app_now_naive()  # 使用北京时间
             # 更新通知记录状态
             notification_record.notification_status = 'failed'
-            notification_record.error_message = f"请求错误: {str(e)}"
+            notification_record.error_message = f"请求错误: {str(e)}{click_params_str}"
             logger.error(
                 f"转发 postback 到渠道失败: conversion_id={conversion.id}, "
                 f"publisher_id={publisher.id}, url={replaced_url[:100]}, error={str(e)}"
             )
         except Exception as e:
-            forward_log.error_message = f"未知错误: {str(e)}"
+            click_params_str = PostbackForwarder._format_click_params_for_error(click_params)
+            forward_log.error_message = f"未知错误: {str(e)}{click_params_str}"
             forward_log.completed_at = get_app_now_naive()  # 使用北京时间
             # 更新通知记录状态
             notification_record.notification_status = 'failed'
-            notification_record.error_message = f"未知错误: {str(e)}"
+            notification_record.error_message = f"未知错误: {str(e)}{click_params_str}"
             logger.error(
                 f"转发 postback 到渠道时发生异常: conversion_id={conversion.id}, "
                 f"publisher_id={publisher.id}, url={replaced_url[:100]}, error={str(e)}",
@@ -602,6 +611,24 @@ class PostbackForwarder:
                 logger.error(f"保存转发日志失败: {str(e)}", exc_info=True)
                 await db.rollback()
 
+    @staticmethod
+    def _format_click_params_for_error(click_params: Optional[Dict[str, Any]]) -> str:
+        """
+        格式化点击参数用于错误信息显示
+        
+        Args:
+            click_params: 点击参数字典
+            
+        Returns:
+            str: 格式化后的点击参数字符串，如果没有参数则返回空字符串
+        """
+        if not click_params:
+            return ""
+        try:
+            return f"\n点击参数: {json.dumps(click_params, ensure_ascii=False)}"
+        except Exception:
+            return f"\n点击参数: {str(click_params)}"
+    
     @staticmethod
     def _build_forward_data(
         conversion: PostbackConversion,
