@@ -15,6 +15,7 @@ from app.models.models import (
     UserRole,
     ClientNotificationConfig,
     ProductNotificationConfig,
+    AdminNotificationConfig,
     PostbackNotification,
     PostbackConversion,
     PostbackForwardLog

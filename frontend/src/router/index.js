@@ -93,6 +93,7 @@ const ConversionSummary = createAsyncComponent(() => import(/* webpackChunkName:
 const ConversionLog = createAsyncComponent(() => import(/* webpackChunkName: "conversion-log" */ '../views/admin/ConversionLog.vue'), 'ConversionLog');
 const ClickLog = createAsyncComponent(() => import(/* webpackChunkName: "click-log" */ '../views/admin/ClickLog.vue'), 'ClickLog');
 const SessionManagement = createAsyncComponent(() => import(/* webpackChunkName: "session-management" */ '../views/admin/SessionManagement.vue'), 'SessionManagement');
+const TelegramNotificationConfig = createAsyncComponent(() => import(/* webpackChunkName: "telegram-notification-config" */ '../views/admin/TelegramNotificationConfig.vue'), 'TelegramNotificationConfig');
 const ClientUserManagement = createAsyncComponent(() => import(/* webpackChunkName: "client-user-management" */ '../views/client/ClientUserManagement.vue'), 'ClientUserManagement');
 const ApiDocumentation = createAsyncComponent(() => import(/* webpackChunkName: "api-documentation" */ '../views/ApiDocumentation.vue'), 'ApiDocumentation');
 const MainLayout = createAsyncComponent(() => import(/* webpackChunkName: "layout" */ '../components/Layout/MainLayout.vue'), 'MainLayout');
@@ -278,6 +279,12 @@ const routes = [
         name: 'SessionManagement',
         component: SessionManagement,
         meta: { requiresAuth: true }
+      },
+      {
+        path: 'admin/telegram-notification-config',
+        name: 'TelegramNotificationConfig',
+        component: TelegramNotificationConfig,
+        meta: { requiresAdmin: true }
       },
       {
         path: 'client/user-management',

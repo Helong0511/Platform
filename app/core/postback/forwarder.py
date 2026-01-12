@@ -19,7 +19,7 @@ from sqlalchemy.orm import joinedload
 
 from app.models.models import (
     Product, PostbackConversion, PostbackForwardLog, PostbackNotification,
-    ClickStats, Click, Offer, Publisher, Advertiser
+    ClickStats, Click, Offer, Publisher, Advertiser, AdminNotificationConfig
 )
 from app.core.utils import get_app_now_naive
 
@@ -462,6 +462,46 @@ class PostbackForwarder:
                 except Exception as e:
                     # Telegram 通知失败不影响主流程
                     logger.warning(f"创建 Telegram 通知任务失败: {str(e)}")
+                
+                # 发送管理员转发成功通知（如果配置了）
+                try:
+                    from app.services.telegram_notification_service import TelegramNotificationService
+                    from app.models.models import AdminNotificationConfig
+                    
+                    # 查询管理员通知配置
+                    admin_config_result = await db.execute(
+                        select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+                    )
+                    admin_config = admin_config_result.scalars().first()
+                    
+                    # 检查是否需要发送管理员通知
+                    if admin_config and admin_config.telegram_enabled and admin_config.notify_forward_success:
+                        if admin_config.telegram_chat_id:
+                            # 构建管理员转发成功通知消息
+                            admin_message = TelegramNotificationService.build_admin_forward_success_message(
+                                conversion=conversion,
+                                publisher=publisher,
+                                response_status=response.status_code,
+                                response_body=response.text[:500] if response.text else None,
+                                offer=offer
+                            )
+                            
+                            # 异步发送管理员通知
+                            asyncio.create_task(
+                                TelegramNotificationService.send_admin_notification(
+                                    message=admin_message,
+                                    telegram_chat_id=admin_config.telegram_chat_id,
+                                    conversion=conversion,
+                                    notification_type='forward_success',
+                                    db=db
+                                )
+                            )
+                except Exception as e:
+                    # 管理员通知失败不影响主流程
+                    logger.warning(
+                        f"发送管理员转发成功通知失败: conversion_id={conversion.id}, "
+                        f"error={str(e)}"
+                    )
             else:
                 logger.warning(
                     f"渠道 Postback 转发失败: conversion_id={conversion.id}, "
@@ -478,7 +518,7 @@ class PostbackForwarder:
                     click_params_str = PostbackForwarder._format_click_params_for_error(click_params)
                     forward_log.error_message = f"HTTP {response.status_code}: {response.text[:500]}{click_params_str}"
                 
-                # 转发失败也发送 Telegram 通知
+                # 转发失败也发送 Telegram 通知（使用原有的通知方法）
                 try:
                     asyncio.create_task(
                         PostbackForwarder._send_telegram_notification(
@@ -493,6 +533,46 @@ class PostbackForwarder:
                     )
                 except Exception as e:
                     logger.warning(f"创建 Telegram 通知任务失败: {str(e)}")
+                
+                # 发送管理员转发失败告警（如果配置了）
+                try:
+                    from app.services.telegram_notification_service import TelegramNotificationService
+                    from app.models.models import AdminNotificationConfig
+                    
+                    # 查询管理员通知配置
+                    admin_config_result = await db.execute(
+                        select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+                    )
+                    admin_config = admin_config_result.scalars().first()
+                    
+                    # 检查是否需要发送管理员通知
+                    if admin_config and admin_config.telegram_enabled and admin_config.notify_forward_failure:
+                        if admin_config.telegram_chat_id:
+                            # 构建管理员转发失败告警消息
+                            admin_message = TelegramNotificationService.build_admin_forward_failure_message(
+                                conversion=conversion,
+                                publisher=publisher,
+                                error_message=forward_log.error_message or f"HTTP {response.status_code}: {response.text[:500]}",
+                                click_params=click_params,
+                                offer=offer
+                            )
+                            
+                            # 异步发送管理员通知
+                            asyncio.create_task(
+                                TelegramNotificationService.send_admin_notification(
+                                    message=admin_message,
+                                    telegram_chat_id=admin_config.telegram_chat_id,
+                                    conversion=conversion,
+                                    notification_type='forward_failure',
+                                    db=db
+                                )
+                            )
+                except Exception as e:
+                    # 管理员通知失败不影响主流程
+                    logger.warning(
+                        f"发送管理员转发失败告警失败: conversion_id={conversion.id}, "
+                        f"error={str(e)}"
+                    )
         
         except httpx.TimeoutException as e:
             click_params_str = PostbackForwarder._format_click_params_for_error(click_params)

@@ -656,6 +656,29 @@ class ProductNotificationConfig(Base):
     )
 
 
+# 管理员通知配置模型（单例模式，只有一条记录）
+class AdminNotificationConfig(Base):
+    __tablename__ = "admin_notification_configs"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='配置ID（固定为1）')
+    telegram_enabled = Column(Boolean, default=True, comment='是否启用 Telegram 通知')
+    telegram_chat_id = Column(String(100), nullable=True, comment='管理员 Telegram Chat ID')
+    notify_all_conversions = Column(Boolean, default=True, comment='通知所有转化')
+    notify_forward_failure = Column(Boolean, default=True, comment='通知转发失败')
+    notify_forward_success = Column(Boolean, default=False, comment='通知转发成功（可选）')
+    notify_system_errors = Column(Boolean, default=True, comment='通知系统异常')
+    notify_statistics = Column(Boolean, default=False, comment='定时统计通知')
+    statistics_frequency = Column(String(20), default='hourly', comment='统计频率：hourly, daily')
+    created_at = Column(DateTime, default=get_app_now_naive, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, comment='更新时间')
+
+    __table_args__ = (
+        # 注意：单例模式，应用层确保只有一条记录（id=1）
+        # MySQL 的 CheckConstraint 支持有限，不在数据库层强制
+    )
+
+
 # Postback 通知记录模型
 class PostbackNotification(Base):
     __tablename__ = "postback_notifications"

@@ -57,6 +57,7 @@ CPL系统集成：
 """
 import json
 import logging
+import asyncio
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,7 +66,7 @@ from sqlalchemy.future import select
 from app.core.postback.handlers import get_handler
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
-from app.models.models import PostbackConversion, Product, Click, Offer, Advertiser, ClickStats
+from app.models.models import PostbackConversion, Product, Click, Offer, Advertiser, ClickStats, Client
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
@@ -674,6 +675,88 @@ class PostbackProcessor:
                     # 内部异常已在 notify_conversion 中记录，这里只记录未预期的异常
                     logger.debug(
                         f"通知函数调用异常（内部应已记录）: conversion_id={conversion_id}, "
+                        f"error={str(e)}"
+                    )
+                
+                # 9.1. 发送管理员通知（如果配置了）
+                try:
+                    from app.services.telegram_notification_service import TelegramNotificationService
+                    from app.models.models import AdminNotificationConfig
+                    from sqlalchemy.future import select
+                    
+                    # 查询管理员通知配置
+                    admin_config_result = await db.execute(
+                        select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+                    )
+                    admin_config = admin_config_result.scalars().first()
+                    
+                    # 检查是否需要发送管理员通知
+                    if admin_config and admin_config.telegram_enabled and admin_config.notify_all_conversions:
+                        if admin_config.telegram_chat_id:
+                            # 获取客户和产品信息
+                            client = None
+                            product = None
+                            publisher = None
+                            offer = None
+                            
+                            if conversion.client_id:
+                                client_result = await db.execute(
+                                    select(Client).where(Client.id == conversion.client_id)
+                                )
+                                client = client_result.scalars().first()
+                            
+                            if conversion.product_id:
+                                product_result = await db.execute(
+                                    select(Product).where(Product.id == conversion.product_id)
+                                )
+                                product = product_result.scalars().first()
+                            
+                            # 尝试获取渠道和Offer信息
+                            lookup_click_id = conversion.conversion_id if conversion.conversion_id else conversion.click_id
+                            if lookup_click_id:
+                                from app.models.models import ClickStats, Publisher, Offer
+                                click_stats_result = await db.execute(
+                                    select(ClickStats).where(ClickStats.click_id == lookup_click_id)
+                                )
+                                click_stats = click_stats_result.scalars().first()
+                                if click_stats:
+                                    if click_stats.publisher_id:
+                                        publisher_result = await db.execute(
+                                            select(Publisher).where(Publisher.id == click_stats.publisher_id)
+                                        )
+                                        publisher = publisher_result.scalars().first()
+                                    if click_stats.offer_id:
+                                        offer_result = await db.execute(
+                                            select(Offer).where(Offer.id == click_stats.offer_id)
+                                        )
+                                        offer = offer_result.scalars().first()
+                            
+                            # 构建管理员通知消息
+                            client_name = client.client_name if client else None
+                            product_name = product.product_name if product else None
+                            
+                            admin_message = TelegramNotificationService.build_admin_conversion_message(
+                                conversion=conversion,
+                                client_name=client_name,
+                                product_name=product_name,
+                                publisher=publisher,
+                                offer=offer
+                            )
+                            
+                            # 异步发送管理员通知
+                            asyncio.create_task(
+                                TelegramNotificationService.send_admin_notification(
+                                    message=admin_message,
+                                    telegram_chat_id=admin_config.telegram_chat_id,
+                                    conversion=conversion,
+                                    notification_type='conversion',
+                                    db=db
+                                )
+                            )
+                except Exception as e:
+                    # 管理员通知失败不影响主流程
+                    logger.warning(
+                        f"发送管理员转化通知失败: conversion_id={conversion_id}, "
                         f"error={str(e)}"
                     )
             

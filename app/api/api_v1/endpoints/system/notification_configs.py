@@ -18,8 +18,8 @@ from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import parse_date_to_app_timezone
 from app.models.models import (
     Client, Product, User, UserRole,
-    ClientNotificationConfig, ProductNotificationConfig, PostbackNotification,
-    PostbackConversion
+    ClientNotificationConfig, ProductNotificationConfig, AdminNotificationConfig,
+    PostbackNotification, PostbackConversion
 )
 from app.core.utils import get_app_now_naive
 from app.schemas.notification import (
@@ -29,6 +29,11 @@ from app.schemas.notification import (
     ProductNotificationConfigCreate,
     ProductNotificationConfigUpdate,
     ProductNotificationConfigResponse,
+    AdminNotificationConfigCreate,
+    AdminNotificationConfigUpdate,
+    AdminNotificationConfigResponse,
+    TestConnectionRequest,
+    TestMessageRequest,
     PostbackNotificationResponse,
     PostbackNotificationListResponse
 )
@@ -348,4 +353,154 @@ async def resend_notification_from_forward_log(
     result = await notification_service.resend_notification_from_forward_log(forward_log_id, current_user)
     
     return ResponseBaseSchema.success(data=result)
+
+
+# ==================== 管理员通知配置 ====================
+
+@router.get("/admin/config",
+            response_model=ResponseBaseSchema[AdminNotificationConfigResponse],
+            summary="获取管理员通知配置")
+async def get_admin_notification_config(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    获取管理员通知配置
+    
+    仅管理员可访问
+    如果配置不存在，返回默认配置
+    """
+    from app.core.dependencies import get_notification_config_service
+    from app.services.notification_config_service import NotificationConfigService
+    
+    notification_service: NotificationConfigService = await get_notification_config_service(db)
+    config = await notification_service.get_admin_notification_config()
+    
+    if not config:
+        # 返回默认配置
+        return ResponseBaseSchema.success(data=AdminNotificationConfigResponse(
+            id=0,
+            telegram_enabled=True,
+            telegram_chat_id=None,
+            notify_all_conversions=True,
+            notify_forward_failure=True,
+            notify_forward_success=False,
+            notify_system_errors=True,
+            notify_statistics=False,
+            statistics_frequency="hourly",
+            created_at=None,
+            updated_at=None
+        ))
+    
+    return ResponseBaseSchema.success(data=AdminNotificationConfigResponse.model_validate(config))
+
+
+@router.post("/admin/config",
+             response_model=ResponseBaseSchema[AdminNotificationConfigResponse],
+             summary="创建或更新管理员通知配置")
+async def create_or_update_admin_notification_config(
+    config_data: AdminNotificationConfigUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    创建或更新管理员通知配置
+    
+    仅管理员可访问
+    管理员通知配置是单例模式，只有一条记录（id=1）
+    """
+    from app.core.dependencies import get_notification_config_service
+    from app.services.notification_config_service import NotificationConfigService
+    
+    notification_service: NotificationConfigService = await get_notification_config_service(db)
+    config = await notification_service.create_or_update_admin_notification_config(
+        config_data.model_dump(exclude_unset=True),
+        current_user
+    )
+    
+    return ResponseBaseSchema.success(data=AdminNotificationConfigResponse.model_validate(config))
+
+
+@router.post("/admin/test-connection",
+             response_model=ResponseBaseSchema[dict],
+             summary="测试 Telegram 连接")
+async def test_telegram_connection(
+    request_data: TestConnectionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    测试 Telegram 连接
+    
+    仅管理员可访问
+    发送一条测试消息到指定的 Chat ID
+    """
+    from app.core.auto_bot import send_telegram_message
+    
+    telegram_chat_id = request_data.telegram_chat_id
+    
+    # 发送测试消息
+    test_message = "🔔 Telegram 通知测试\n\n这是一条测试消息，如果您收到此消息，说明 Telegram 连接正常。"
+    
+    try:
+        success = await send_telegram_message(test_message, telegram_chat_id)
+        if success:
+            return ResponseBaseSchema.success(data={
+                "success": True,
+                "message": "连接成功，测试消息已发送"
+            })
+        else:
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail="连接失败，请检查 Chat ID 是否正确"
+            )
+    except Exception as e:
+        logger.error(f"测试 Telegram 连接失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"测试连接失败: {str(e)}"
+        )
+
+
+@router.post("/admin/test-message",
+             response_model=ResponseBaseSchema[dict],
+             summary="发送测试消息")
+async def send_test_message(
+    request_data: TestMessageRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    发送测试消息
+    
+    仅管理员可访问
+    发送指定类型的测试消息到指定的 Chat ID
+    """
+    from app.core.auto_bot import send_telegram_message
+    from app.services.telegram_notification_service import TelegramNotificationService
+    
+    telegram_chat_id = request_data.telegram_chat_id
+    message_type = request_data.message_type
+    
+    try:
+        # 使用 TelegramNotificationService 构建测试消息
+        test_message = TelegramNotificationService.build_test_message(message_type)
+        
+        success = await send_telegram_message(test_message, telegram_chat_id)
+        if success:
+            return ResponseBaseSchema.success(data={
+                "success": True,
+                "message": "测试消息已发送"
+            })
+        else:
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail="发送失败，请检查 Chat ID 是否正确"
+            )
+    except Exception as e:
+        logger.error(f"发送测试消息失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"发送测试消息失败: {str(e)}"
+        )
 

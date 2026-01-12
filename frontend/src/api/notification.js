@@ -138,3 +138,67 @@ export const resendConversionNotification = async (conversionId) => {
   }
 };
 
+// ==================== 管理员通知配置 ====================
+
+/**
+ * 获取管理员通知配置
+ */
+export const getAdminNotificationConfig = async () => {
+  try {
+    const response = await axios.get('/api/v1/notification-configs/admin/config');
+    return normalizeResponse(response, { returnDataOnly: true });
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+/**
+ * 保存管理员通知配置
+ */
+export const saveAdminNotificationConfig = async (configData) => {
+  try {
+    await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
+    const response = await axios.post(
+      '/api/v1/notification-configs/admin/config',
+      configData
+    );
+    return normalizeResponse(response, { returnDataOnly: true });
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+/**
+ * 测试 Telegram 连接
+ */
+export const testTelegramConnection = async (chatId) => {
+  try {
+    await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
+    const response = await axios.post(
+      '/api/v1/notification-configs/admin/test-connection',
+      { telegram_chat_id: chatId }
+    );
+    return normalizeResponse(response, { returnDataOnly: true });
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+/**
+ * 发送测试消息
+ */
+export const sendTestMessage = async (chatId, messageType = 'conversion') => {
+  try {
+    await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
+    const response = await axios.post(
+      '/api/v1/notification-configs/admin/test-message',
+      {
+        telegram_chat_id: chatId,
+        message_type: messageType
+      }
+    );
+    return normalizeResponse(response, { returnDataOnly: true });
+  } catch (error) {
+    handleError(error);
+  }
+};
