@@ -9,7 +9,7 @@ import { normalizePaginatedResponse, normalizeResponse, handleError } from '../u
  * @param {string} [params.platform] - 平台名称筛选
  * @param {number} [params.product_id] - 产品ID筛选
  * @param {number} [params.client_id] - 客户ID筛选
- * @param {string} [params.event_name] - 事件名称筛选
+ * @param {string} [params.conversion_or_click_id] - 转化ID或点击ID筛选
  * @param {string} [params.start_date] - 开始日期（YYYY-MM-DD）
  * @param {string} [params.end_date] - 结束日期（YYYY-MM-DD）
  * @returns {Promise<Object>} 转化记录列表数据

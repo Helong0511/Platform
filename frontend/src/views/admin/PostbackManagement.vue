@@ -31,14 +31,14 @@
             <el-option label="BFT" value="bft"></el-option>
           </el-select>
         </el-form-item>
-        <el-form-item label="事件名称">
+        <el-form-item label="转化ID/点击ID">
           <el-input 
-            v-model="searchForm.event_name" 
-            placeholder="输入事件名称" 
+            v-model="searchForm.conversion_or_click_id" 
+            placeholder="输入转化ID或点击ID" 
             clearable
             @keyup.enter="fetchConversions"
             style="width: 200px;"
-            name="event_name"
+            name="conversion_or_click_id"
           >
             <template #prefix>
               <el-icon :size="16"><Search /></el-icon>
@@ -509,7 +509,7 @@ const pagination = reactive({
 // 搜索表单
 const searchForm = reactive({
   platform: '',
-  event_name: '',
+  conversion_or_click_id: '',
   product_id: null,
   client_id: null,
   start_date: '',
@@ -612,7 +612,7 @@ const fetchStats = async () => {
 // 重置筛选
 const resetFilter = () => {
   searchForm.platform = '';
-  searchForm.event_name = '';
+  searchForm.conversion_or_click_id = '';
   searchForm.product_id = null;
   searchForm.client_id = null;
   searchForm.start_date = '';

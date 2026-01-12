@@ -69,7 +69,7 @@ async def get_postback_conversions(
     platform: Optional[str] = Query(None, description="平台名称"),
     product_id: Optional[int] = Query(None, description="产品ID"),
     client_id: Optional[int] = Query(None, description="客户ID"),
-    event_name: Optional[str] = Query(None, description="事件名称"),
+    conversion_or_click_id: Optional[str] = Query(None, description="转化ID或点击ID"),
     start_date: Optional[str] = Query(None, description="起始日期（YYYY-MM-DD）"),
     end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
     page: int = Query(1, ge=1, description="页码"),
@@ -100,8 +100,14 @@ async def get_postback_conversions(
             conditions.append(PostbackConversion.product_id == product_id)
         if client_id:
             conditions.append(PostbackConversion.client_id == client_id)
-        if event_name:
-            conditions.append(PostbackConversion.event_name == event_name)
+        if conversion_or_click_id:
+            # 使用OR条件查询conversion_id或click_id
+            conditions.append(
+                or_(
+                    PostbackConversion.conversion_id == conversion_or_click_id,
+                    PostbackConversion.click_id == conversion_or_click_id
+                )
+            )
         
         # 日期范围过滤（使用应用时区，与数据库时间一致）
         if start_date:
