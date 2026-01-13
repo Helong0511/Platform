@@ -1161,9 +1161,6 @@ const handleBatchDelete = async () => {
     ElMessage.success(getSuccessMessage('DATA_BATCH_DELETE_SUCCESS', deletedCount));
     selectedRows.value = []; // 清空选择
     await fetchAdData(); // 刷新数据列表
-      const errorMsg = response?.detail || response?.message || '批量删除失败';
-      ElMessage.error(errorMsg);
-    }
   } catch (error) {
     if (error !== 'cancel') {
       const errorMsg = extractErrorMessage(error);
@@ -1217,8 +1214,6 @@ const saveEdit = async () => {
     ElMessage.success(getSuccessMessage('DATA_UPDATE_SUCCESS'));
     editDialogVisible.value = false;
     fetchAdData(); // 刷新数据列表
-      ElMessage.error(errorMsg);
-    }
   } catch (error) {
     const errorMsg = extractErrorMessage(error);
     ElMessage.error(errorMsg);
