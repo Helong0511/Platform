@@ -27,7 +27,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.config import settings
 from app.core.constants import PERCENTAGE_MULTIPLIER
-from app.models.models import Client
 
 # 应用时区配置（从统一配置读取）
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
@@ -412,6 +411,9 @@ async def find_or_create_default_client(
         from app.models.models import Client
         default_client = await find_or_create_default_client(db, current_user.id)
     """
+    # 延迟导入，避免循环导入
+    from app.models.models import Client
+    
     # 步骤1: 先查找数据库中的默认客户
     client_query = select(Client).where(Client.company_name == default_name).limit(1)
     client_result = await db.execute(client_query)
