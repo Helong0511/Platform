@@ -35,7 +35,6 @@ from app.core.utils import (
 )
 from app.core.country_code import find_country_code_by_any_format, resolve_country_name
 from app.core.constants import PERCENTAGE_MULTIPLIER, ECPM_MULTIPLIER
-from app.api.api_v1.endpoints.excel.utils import normalize_date_key
 import logging
 
 logger = logging.getLogger(__name__)
@@ -1441,6 +1440,9 @@ class AdDataService(BaseService[AdData]):
         Returns:
             Tuple[List[Dict], int]: (广告数据列表, 总数)
         """
+        # 延迟导入，避免循环导入
+        from app.api.api_v1.endpoints.excel.utils import normalize_date_key
+        
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(self.db)
 
