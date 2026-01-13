@@ -66,7 +66,7 @@ from sqlalchemy.future import select
 from app.core.postback.handlers import get_handler
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
-from app.models.models import PostbackConversion, Product, Click, Offer, Advertiser, ClickStats, Client
+from app.models.models import PostbackConversion, Product, Click, Offer, Advertiser, ClickStats, Client, Publisher
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
@@ -713,7 +713,7 @@ class PostbackProcessor:
                             # 尝试获取渠道和Offer信息
                             lookup_click_id = conversion.conversion_id if conversion.conversion_id else conversion.click_id
                             if lookup_click_id:
-                                from app.models.models import ClickStats, Publisher, Offer
+                                # 使用已在文件顶部导入的模型（Offer, ClickStats, Publisher）
                                 click_stats_result = await db.execute(
                                     select(ClickStats).where(ClickStats.click_id == lookup_click_id)
                                 )
