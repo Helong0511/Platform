@@ -114,7 +114,23 @@ class ClickService:
             conditions.append(Click.short_link_id == short_link_id)
 
         if ip:
-            conditions.append(Click.ip.like(f"%{ip}%"))
+            # 优化：使用精确匹配或前缀匹配，避免全表扫描
+            # 如果IP包含通配符，使用LIKE；否则使用精确匹配（更快）
+            ip_trimmed = ip.strip()
+            if '%' in ip_trimmed or '_' in ip_trimmed:
+                # 用户明确使用通配符，使用LIKE
+                conditions.append(Click.ip.like(ip_trimmed))
+            elif '.' in ip_trimmed:
+                # IPv4地址，支持精确匹配或前缀匹配（如 192.168.）
+                if ip_trimmed.endswith('.'):
+                    # 前缀匹配，如 "192.168." -> "192.168.%"
+                    conditions.append(Click.ip.like(f"{ip_trimmed}%"))
+                else:
+                    # 精确匹配，性能最好
+                    conditions.append(Click.ip == ip_trimmed)
+            else:
+                # 其他情况，使用精确匹配
+                conditions.append(Click.ip == ip_trimmed)
 
         if country:
             conditions.append(Click.country == country)

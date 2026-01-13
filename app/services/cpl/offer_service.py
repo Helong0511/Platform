@@ -218,15 +218,40 @@ class OfferService(BaseService[Offer]):
         conditions = []
         
         if search:
-            # 搜索：名称、ID或上游Offer ID
-            search_pattern = f"%{search}%"
-            conditions.append(
-                or_(
-                    Offer.offer_name.like(search_pattern),
-                    Offer.id.cast(String).like(search_pattern),
-                    Offer.advertiser_offer_id.like(search_pattern)
-                )
-            )
+            # 优化搜索：优先精确匹配，然后使用全文索引或前缀匹配
+            search_trimmed = search.strip()
+            search_conditions = []
+            
+            # 1. 尝试精确匹配ID（最快，使用主键索引）
+            try:
+                search_id = int(search_trimmed)
+                search_conditions.append(Offer.id == search_id)
+            except ValueError:
+                # 不是数字，继续其他搜索方式
+                pass
+            
+            # 2. 精确匹配上游Offer ID（使用索引，如果字段有索引）
+            if search_trimmed:
+                search_conditions.append(Offer.advertiser_offer_id == search_trimmed)
+            
+            # 3. 使用全文索引搜索名称（如果存在全文索引）
+            # 回退到前缀匹配（可以使用索引）或LIKE查询
+            try:
+                # 尝试使用全文索引
+                from sqlalchemy import text
+                fulltext_condition = text(
+                    "MATCH(offer_name) AGAINST(:search_term IN NATURAL LANGUAGE MODE)"
+                ).bindparams(search_term=search_trimmed)
+                search_conditions.append(fulltext_condition)
+            except Exception:
+                # 全文索引不存在或查询失败，使用前缀匹配（可以使用普通索引）
+                # 前缀匹配比 %keyword% 性能好，可以使用索引
+                search_conditions.append(Offer.offer_name.like(f"{search_trimmed}%"))
+                # 如果前缀匹配没有结果，也可以尝试包含匹配（性能较差，但更灵活）
+                # search_conditions.append(Offer.offer_name.like(f"%{search_trimmed}%"))
+            
+            if search_conditions:
+                conditions.append(or_(*search_conditions))
         
         if advertiser_id:
             conditions.append(Offer.advertiser_id == advertiser_id)

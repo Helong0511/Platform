@@ -23,6 +23,7 @@
                   class="filter-item"
                   @clear="handleSearch"
                   @keyup.enter="handleSearch"
+                  @input="debouncedSearch"
                 >
                   <template #prefix>
                     <el-icon><Search /></el-icon>
@@ -251,6 +252,19 @@ const tableData = ref([])
 const offerList = ref([])
 const publisherList = ref([])
 
+// 防抖定时器
+let searchDebounceTimer = null
+
+// 防抖搜索函数
+const debouncedSearch = (delay = 500) => {
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+  }
+  searchDebounceTimer = setTimeout(() => {
+    handleSearch()
+  }, delay)
+}
+
 // 加载基础数据
 const loadOffers = async () => {
   try {
@@ -315,8 +329,12 @@ const loadData = async () => {
   }
 }
 
-// 日期改变
+// 日期改变（日期选择器不需要防抖，直接搜索）
 const handleDateChange = () => {
+  // 清除防抖定时器，立即搜索
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+  }
   handleSearch()
 }
 

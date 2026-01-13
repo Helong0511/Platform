@@ -123,19 +123,34 @@ class ProductService(BaseService[Product]):
         conditions = []
         
         if name:
-            conditions.append(func.lower(Product.name).like(f"%{name.lower()}%"))
+            # 优化：去掉func.lower()避免索引失效，使用前缀匹配可以使用索引
+            # 如果数据库使用大小写不敏感的排序规则（如utf8mb4_unicode_ci），不需要func.lower()
+            name_trimmed = name.strip()
+            # 优先使用前缀匹配（可以使用索引）
+            conditions.append(Product.name.like(f"{name_trimmed}%"))
+            # 如果前缀匹配没有结果，也可以尝试包含匹配（性能较差，但更灵活）
+            # conditions.append(Product.name.like(f"%{name_trimmed}%"))
         
         if is_active is not None:
             conditions.append(Product.is_active == is_active)
         
         if search:
-            # 优先使用全文搜索，回退到LIKE查询
-            from app.core.fulltext_search import search_with_fulltext
-            # 注意：这里需要先构建基础查询，然后应用全文搜索
-            # 但由于search_with_fulltext是异步的，我们需要在查询执行前处理
-            # 暂时使用LIKE，如果支持全文搜索可以在endpoint层处理
-            search_pattern = f"%{search.lower()}%"
-            conditions.append(func.lower(Product.name).like(search_pattern))
+            # 优化搜索：使用全文索引或前缀匹配
+            search_trimmed = search.strip()
+            
+            # 尝试使用全文索引（如果存在）
+            try:
+                from sqlalchemy import text
+                fulltext_condition = text(
+                    "MATCH(name) AGAINST(:search_term IN NATURAL LANGUAGE MODE)"
+                ).bindparams(search_term=search_trimmed)
+                conditions.append(fulltext_condition)
+            except Exception:
+                # 全文索引不存在或查询失败，使用前缀匹配（可以使用普通索引）
+                # 去掉func.lower()避免索引失效
+                conditions.append(Product.name.like(f"{search_trimmed}%"))
+                # 如果前缀匹配没有结果，也可以尝试包含匹配（性能较差，但更灵活）
+                # conditions.append(Product.name.like(f"%{search_trimmed}%"))
         
         if conditions:
             query = query.where(and_(*conditions))

@@ -925,6 +925,13 @@ class Click(Base):
         Index("idx_short_link_id", "short_link_id"),
         Index("idx_click_time", "click_time"),
         Index("idx_conversion_id", "conversion_id"),
+        # 性能优化索引
+        Index("idx_ip", "ip"),  # IP字段索引，用于IP查询优化
+        Index("idx_country", "country"),  # 国家字段索引
+        # 复合索引：优化常见查询组合（日期范围 + 其他条件）
+        Index("idx_click_time_offer", "click_time", "offer_id"),
+        Index("idx_click_time_publisher", "click_time", "publisher_id"),
+        Index("idx_click_time_offer_publisher", "click_time", "offer_id", "publisher_id"),
     )
 
 
