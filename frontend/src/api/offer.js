@@ -11,7 +11,8 @@ export const {
   getOffer,
   createOffer,
   updateOffer,
-  deleteOffer
+  deleteOffer,
+  checkOfferShortLink
 } = createCrudApi('/api/v1/offers', {
   customMethods: {
     /**
