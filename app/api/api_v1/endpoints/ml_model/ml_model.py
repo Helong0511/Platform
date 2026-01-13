@@ -26,9 +26,6 @@ from app.core.audit_log import log_user_action
 from app.models.models import User, AdData, Product
 from app.schemas.base import ResponseBaseSchema
 from app.api.api_v1.endpoints.excel.utils import validate_excel_file, parse_date_value
-from app.api.api_v1.endpoints.excel.import_handler import (
-    import_ad_data_handler, validate_and_read_excel, process_column_mapping, build_product_maps
-)
 from app.core.constants import MAX_PAGE_SIZE
 from sqlalchemy import and_, or_
 from sqlalchemy.future import select
@@ -1351,7 +1348,10 @@ async def import_training_data(
     conflicts = []
 
     try:
-        # 导入广告数据导入处理函数
+        # 延迟导入，避免循环导入
+        from app.api.api_v1.endpoints.excel.import_handler import (
+            validate_and_read_excel, process_column_mapping, build_product_maps
+        )
 
         # ====== 第一步：检查冲突 ======
         logger.info("开始检查训练数据冲突...")
@@ -1554,6 +1554,9 @@ async def import_training_data(
             size=len(contents)
         )
 
+        # 延迟导入，避免循环导入
+        from app.api.api_v1.endpoints.excel.import_handler import import_ad_data_handler
+        
         # 调用实际的导入处理函数
         import_response = await import_ad_data_handler(
             file=new_file,
