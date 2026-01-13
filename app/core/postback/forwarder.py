@@ -177,8 +177,16 @@ class PostbackForwarder:
                 await db.rollback()
             return
         
-        # 2.1. 无论是否有 postback_url，都创建或更新通知记录
+        # 2.1. 检查是否有 postback_url
         has_postback_url = bool(publisher.postback_url and publisher.postback_url.strip())
+        
+        # 如果没有配置 postback_url，不创建转发通知记录（避免与转化通知重复）
+        if not has_postback_url:
+            logger.debug(
+                f"渠道未配置 Postback URL，跳过创建转发通知记录: conversion_id={conversion.id}, "
+                f"publisher_id={publisher.id}"
+            )
+            return
         
         # 构建通知消息
         notification_message = PostbackForwarder._build_forward_notification_message(
@@ -273,27 +281,22 @@ class PostbackForwarder:
                     notification_channel='webhook',
                     notification_status='pending',  # 初始状态为 pending
                     notification_message=notification_message,
-                    auto_notify=has_postback_url,  # 如果有 postback_url，默认自动通知
-                    postback_url=publisher.postback_url if has_postback_url else None,
+                    auto_notify=True,  # 有 postback_url，自动通知
+                    postback_url=publisher.postback_url,
                     created_at=get_app_now_naive()
                 )
                 db.add(notification_record)
                 logger.debug(
-                    f"创建新通知记录: conversion_id={conversion.id}, "
+                    f"创建新转发通知记录: conversion_id={conversion.id}, "
                     f"publisher_id={publisher.id}"
                 )
         
-        # 如果没有配置 Postback URL，保存通知记录后返回（不进行转发）
-        if not has_postback_url:
-            logger.debug(
-                f"渠道未配置 Postback URL，创建通知记录后跳过转发: conversion_id={conversion.id}, "
-                f"publisher_id={publisher.id}"
-            )
-            try:
-                await db.commit()
-            except Exception as e:
-                logger.error(f"保存转发通知记录失败: {str(e)}", exc_info=True)
-                await db.rollback()
+        # 保存通知记录
+        try:
+            await db.commit()
+        except Exception as e:
+            logger.error(f"保存转发通知记录失败: {str(e)}", exc_info=True)
+            await db.rollback()
             return
         
         downstream_url = publisher.postback_url.strip()
