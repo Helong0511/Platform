@@ -66,12 +66,17 @@ from sqlalchemy.future import select
 from app.core.postback.handlers import get_handler
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
-from app.models.models import PostbackConversion, Product, Click, Offer, Advertiser, ClickStats, Client, Publisher
+from app.models.models import (
+    PostbackConversion, Product, Click, Offer, Advertiser, ClickStats, Client, Publisher,
+    ConversionDeductionLog, AdminNotificationConfig
+)
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.cap import check_cap, increment_cap_count
 from app.core.discount import calculate_discount
+from app.core.deduction import find_deduction_config, apply_deduction, log_deduction
+from app.services.telegram_notification_service import TelegramNotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +230,7 @@ class PostbackProcessor:
             
             # 5.2. 如果主表中没有，检查扣减日志表（因为被扣量的转化不保存到主表）
             if not existing_record and click_id:
-                from app.models.models import ConversionDeductionLog
+                # ConversionDeductionLog 已在文件顶部导入
                 log_check = await db.execute(
                     select(ConversionDeductionLog).where(
                         ConversionDeductionLog.click_id == click_id,
@@ -401,7 +406,7 @@ class PostbackProcessor:
             deduction_config = None
             if advertiser_id or offer_id or publisher_id:
                 try:
-                    from app.core.deduction import find_deduction_config, apply_deduction
+                    # find_deduction_config 和 apply_deduction 已在文件顶部导入
                     
                     # 查找扣减配置
                     deduction_config = await find_deduction_config(
@@ -524,7 +529,7 @@ class PostbackProcessor:
             if deduction_result and deduction_config:
                 # 有配置且应用了扣减逻辑
                 try:
-                    from app.core.deduction import log_deduction
+                    # log_deduction 已在文件顶部导入
                     # 确定配置层级
                     if deduction_config.advertiser_id:
                         level_str = 'advertiser'
@@ -562,7 +567,7 @@ class PostbackProcessor:
                 # 即使没有找到配置，也记录一条日志（用于统计，标记为未扣减）
                 # 这样可以确保统计时能获取到所有转化数据
                 try:
-                    from app.core.deduction import log_deduction
+                    # log_deduction 已在文件顶部导入
                     # 创建一个空的扣减结果，表示未应用扣减
                     no_deduction_result = {
                         'should_deduct_volume': False,
@@ -680,9 +685,7 @@ class PostbackProcessor:
                 
                 # 9.1. 发送管理员通知（如果配置了）
                 try:
-                    from app.services.telegram_notification_service import TelegramNotificationService
-                    from app.models.models import AdminNotificationConfig
-                    
+                    # TelegramNotificationService 和 AdminNotificationConfig 已在文件顶部导入
                     # 查询管理员通知配置
                     admin_config_result = await db.execute(
                         select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
@@ -765,7 +768,7 @@ class PostbackProcessor:
             if conversion and conversion.conversion_status in ['Pending', 'Approved']:
                 try:
                     # 转发到渠道的 Postback URL
-                    from app.core.postback.forwarder import PostbackForwarder
+                    # PostbackForwarder 已在文件顶部导入
                     await PostbackForwarder.forward_to_publisher(
                         conversion=conversion,
                         db=db
