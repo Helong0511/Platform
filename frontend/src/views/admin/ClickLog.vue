@@ -499,11 +499,8 @@ const loadOffers = async () => {
       page_size: 100,
       is_active: true
     })
-    if (response.code === 200) {
-      offerList.value = response.data || []
-    } else {
-      ElMessage.warning('加载Offer列表失败，筛选功能可能受限')
-    }
+    // response已经是标准分页格式，直接使用data字段
+    offerList.value = response.data || []
   } catch (error) {
     logger.error('加载Offer列表失败:', error)
     ElMessage.warning('加载Offer列表失败，筛选功能可能受限')
@@ -513,9 +510,8 @@ const loadOffers = async () => {
 const loadPublishers = async () => {
   try {
     const response = await getPublishers({ page: 1, page_size: 100 })
-    if (response.code === 200) {
-      publisherList.value = response.data || []
-    }
+    // response已经是标准分页格式，直接使用data字段
+    publisherList.value = response.data || []
   } catch (error) {
     logger.error('加载渠道列表失败:', error)
   }
@@ -537,12 +533,9 @@ const loadData = async () => {
       end_date: dateRange.value?.[1] || undefined
     }
     const response = await getClicks(params)
-    if (response.code === 200) {
-      tableData.value = response.data || []
-      pagination.total = response.total || 0
-    } else {
-      ElMessage.error(response.message || '获取数据失败')
-    }
+    // response已经是标准分页格式，直接使用data和total字段
+    tableData.value = response.data || []
+    pagination.total = response.total || 0
   } catch (error) {
     logger.error('获取短链接访问记录失败:', error)
     ElMessage.error('获取数据失败')

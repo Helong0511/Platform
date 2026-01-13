@@ -13,6 +13,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.ad_data_processor import process_api_ad_data
 from app.core.auto_bot import send_telegram_message
 from app.scheduler_module.task_names import SKYMOBI_API_TASK_NAME
+from app.scheduler_module.task_utils import get_admin_user, format_result_summary
 
 # 获取当前模块的日志记录器
 logger = logging.getLogger(__name__)
@@ -129,7 +130,6 @@ async def skymobi_api_task(
                         # 使用上下文管理器确保会话正确关闭
                         async with AsyncSessionLocal() as db:
                             # ========== 获取管理员用户（用于产品查找/创建） ==========
-                            from app.scheduler_module.task_utils import get_admin_user
 
                             admin_user = await get_admin_user(db)
                             if not admin_user:
@@ -200,7 +200,6 @@ async def skymobi_api_task(
                             error_count = result.get("error_count", 0)
 
                             # 使用工具函数格式化结果摘要
-                            from app.scheduler_module.task_utils import format_result_summary
                             result_summary = format_result_summary(
                                 inserted=inserted_count,
                                 updated=updated_count,

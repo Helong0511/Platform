@@ -141,10 +141,6 @@ class JWTUtils:
         # 这样可以确保测试环境和开发环境正常运行
         logger.warning(f"未配置RSA {key_type} 密钥，生成临时测试密钥")
         # 生成2048位RSA密钥对
-        from cryptography.hazmat.primitives.asymmetric import rsa
-        from cryptography.hazmat.primitives import serialization
-        from cryptography.hazmat.backends import default_backend
-        
         private_key = rsa.generate_private_key(
             public_exponent=65537,
             key_size=2048,
@@ -184,7 +180,6 @@ class JWTUtils:
 
         # 构建JWT载荷（包含过期时间、主体和签发时间）
         # 添加iat（issued at）和jti（JWT ID）增强安全性
-        import secrets
         jti = secrets.token_urlsafe(16)  # JWT ID，用于防止重放攻击和会话管理
         to_encode = {
             "exp": expire,  # 过期时间
@@ -254,7 +249,6 @@ class JWTUtils:
             if db:
                 jti = payload.get("jti")
                 if jti:
-                    from app.models.session import TokenBlacklist
                     result = await db.execute(
                         select(TokenBlacklist).where(
                             TokenBlacklist.token_jti == jti,

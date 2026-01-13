@@ -20,10 +20,11 @@ from app.models.models import (
     PostbackConversion,
     PostbackForwardLog
 )
-from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
+from app.core.postback.notifier import PostbackNotifier
+from app.core.postback.forwarder import PostbackForwarder
 import logging
 
 logger = logging.getLogger(__name__)
@@ -481,7 +482,6 @@ class NotificationConfigService:
                             client = client_result.scalars().first()
                         
                         # 使用统一的消息构建方法
-                        from app.core.postback.notifier import PostbackNotifier
                         client_name, user_full_name = await PostbackNotifier._get_client_info(client, self.db)
                         product_name = PostbackNotifier._get_product_name(product)
                         
@@ -585,7 +585,6 @@ class NotificationConfigService:
         Returns:
             Dict: 补发结果
         """
-        from app.core.postback.forwarder import PostbackForwarder
 
         # 查询转化记录
         result = await self.db.execute(
@@ -661,7 +660,6 @@ class NotificationConfigService:
         Returns:
             Dict: 补发结果
         """
-        from app.core.postback.forwarder import PostbackForwarder
 
         # 检查管理员权限
         if current_user.role != UserRole.ADMIN:

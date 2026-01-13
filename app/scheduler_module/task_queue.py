@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from collections import deque
 from enum import IntEnum
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -260,7 +262,6 @@ def get_task_queue() -> TaskQueue:
     """
     global _task_queue
     if _task_queue is None:
-        from app.core.config import settings
         max_concurrent = getattr(settings, 'MAX_CONCURRENT_SCHEDULED_TASKS', 1)
         _task_queue = TaskQueue(max_concurrent_tasks=max_concurrent)
         logger.info(

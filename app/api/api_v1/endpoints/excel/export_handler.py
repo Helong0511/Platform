@@ -20,6 +20,8 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.utils import get_app_now_naive
+from sqlalchemy.orm import selectinload
 from app.models.models import User, Client, Product, AdData, UserRole, ProductAssignment, CountryInfo
 from app.core.query_utils import product_assignment_join_condition, date_range_condition, check_use_assignment_table
 
@@ -44,7 +46,6 @@ async def export_ad_data_handler(
     # 获取客户信息 - 使用selectinload预加载（如果需要）
     if current_user.role != UserRole.ADMIN:
         # 优化：直接查询客户，避免额外查询
-        from sqlalchemy.orm import selectinload
         client_query = select(Client).where(Client.user_id == current_user.id)
         client_result = await db.execute(client_query)
         client = client_result.scalars().first()
@@ -375,7 +376,6 @@ async def export_ad_data_handler(
 
     # 准备响应
     output.seek(0)
-    from app.core.utils import get_app_now_naive
     filename = f"广告数据_{get_app_now_naive().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
     # 对文件名进行URL编码以支持中文字符

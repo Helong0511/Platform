@@ -14,6 +14,8 @@ from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
+from app.core.dependencies import get_advertiser_service
+from app.services.cpl.advertiser_service import AdvertiserService
 from app.models.models import User, UserRole, Advertiser
 from app.schemas.cpl.advertiser import AdvertiserCreate, AdvertiserUpdate, AdvertiserResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -33,9 +35,6 @@ async def create_advertiser(
 ):
     """创建广告主（已重构使用服务层）"""
     # 使用服务层（业务逻辑在AdvertiserService中）
-    from app.core.dependencies import get_advertiser_service
-    from app.services.cpl.advertiser_service import AdvertiserService
-    
     advertiser_service: AdvertiserService = await get_advertiser_service(db)
     
     # 准备广告主数据
@@ -60,9 +59,6 @@ async def get_advertisers(
 ):
     """获取广告主列表（已重构使用服务层）"""
     # 使用服务层（业务逻辑在AdvertiserService中）
-    from app.core.dependencies import get_advertiser_service
-    from app.services.cpl.advertiser_service import AdvertiserService
-    
     advertiser_service: AdvertiserService = await get_advertiser_service(db)
     advertisers, total = await advertiser_service.get_advertisers(
         current_user=current_user,
@@ -91,9 +87,6 @@ async def get_advertiser(
 ):
     """获取广告主详情（已重构使用服务层）"""
     # 使用服务层（业务逻辑在AdvertiserService中）
-    from app.core.dependencies import get_advertiser_service
-    from app.services.cpl.advertiser_service import AdvertiserService
-    
     advertiser_service: AdvertiserService = await get_advertiser_service(db)
     advertiser = await advertiser_service.get_advertiser_by_id(advertiser_id, current_user)
     
@@ -112,9 +105,6 @@ async def update_advertiser(
 ):
     """更新广告主（已重构使用服务层）"""
     # 使用服务层（业务逻辑在AdvertiserService中）
-    from app.core.dependencies import get_advertiser_service
-    from app.services.cpl.advertiser_service import AdvertiserService
-    
     advertiser_service: AdvertiserService = await get_advertiser_service(db)
     
     # 获取更新数据（排除未设置的字段）
@@ -137,9 +127,6 @@ async def delete_advertiser(
 ):
     """删除广告主（已重构使用服务层）"""
     # 使用服务层（业务逻辑在AdvertiserService中）
-    from app.core.dependencies import get_advertiser_service
-    from app.services.cpl.advertiser_service import AdvertiserService
-    
     advertiser_service: AdvertiserService = await get_advertiser_service(db)
     
     # 调用服务层删除广告主（服务层会检查关联数据、记录审计日志）

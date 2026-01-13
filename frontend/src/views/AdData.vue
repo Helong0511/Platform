@@ -504,33 +504,12 @@ const fetchAdData = async () => {
 
         const response = await getAdDataList(params);
       
-      // 检查响应结构
-      if (response.code !== 200) {
-        const errorMsg = response.detail || response.message || '获取数据失败';
-        ElMessage.error(errorMsg);
-        adDataList.value = [];
-        pagination.value.total = 0;
-        return;
-      }
-      
-      // 提取数据
-      const listResponse = response.data || {};
-      
-      // 尝试多种方式访问数据
-      let dataArray = [];
-      if (Array.isArray(listResponse.data)) {
-        dataArray = listResponse.data;
-      } else if (Array.isArray(listResponse)) {
-        dataArray = listResponse;
-      } else if (Array.isArray(response.data)) {
-        dataArray = response.data;
-      }
-      
-      adDataList.value = dataArray;
+      // response已经是标准分页格式，直接使用data和total字段
+      // getAdDataList使用paginated: true，失败时会抛出异常
+      adDataList.value = response.data || [];
       
       // 确保total是数字类型，避免字符串类型导致的计算错误
-      const totalValue = typeof listResponse.total === 'number' ? listResponse.total : 
-                        (typeof response.total === 'number' ? response.total : parseInt(listResponse.total || response.total || 0, 10));
+      const totalValue = typeof response.total === 'number' ? response.total : parseInt(response.total || 0, 10);
       pagination.value.total = totalValue;
       
       // 如果没有数据且没有选择日期范围，尝试获取数据的日期范围并提示用户
@@ -1174,14 +1153,14 @@ const handleBatchDelete = async () => {
     
     loading.value = true;
     const dataIds = selectedRows.value.map(row => row.id);
+    // batchDeleteAdData使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
     const response = await batchDeleteAdData(dataIds);
     
-    if (response && (response.code === 200 || response.data)) {
-      const deletedCount = response.data?.deleted_count || selectedRows.value.length;
-      ElMessage.success(getSuccessMessage('DATA_BATCH_DELETE_SUCCESS', deletedCount));
-      selectedRows.value = []; // 清空选择
-      await fetchAdData(); // 刷新数据列表
-    } else {
+    // 如果执行到这里，说明操作成功（失败会抛出异常）
+    const deletedCount = response?.deleted_count || selectedRows.value.length;
+    ElMessage.success(getSuccessMessage('DATA_BATCH_DELETE_SUCCESS', deletedCount));
+    selectedRows.value = []; // 清空选择
+    await fetchAdData(); // 刷新数据列表
       const errorMsg = response?.detail || response?.message || '批量删除失败';
       ElMessage.error(errorMsg);
     }
@@ -1233,13 +1212,11 @@ const saveEdit = async () => {
     // 调用更新API
     const response = await updateAdData(payload);
     
-    // 检查响应
-    if (response && (response.code === 200 || response.data)) {
-      ElMessage.success(getSuccessMessage('DATA_UPDATE_SUCCESS'));
-      editDialogVisible.value = false;
-      fetchAdData(); // 刷新数据列表
-    } else {
-      const errorMsg = response?.detail || response?.message || '更新失败';
+    // updateAdData使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
+    // 如果执行到这里，说明操作成功（失败会抛出异常）
+    ElMessage.success(getSuccessMessage('DATA_UPDATE_SUCCESS'));
+    editDialogVisible.value = false;
+    fetchAdData(); // 刷新数据列表
       ElMessage.error(errorMsg);
     }
   } catch (error) {

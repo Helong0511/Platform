@@ -1,10 +1,11 @@
 """
 通知配置和通知记录的 Schema
 """
+import re
+import json
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from typing import List, Optional
-import json
 
 
 # ==================== 客户通知配置 ====================
@@ -162,7 +163,6 @@ class AdminNotificationConfigBase(BaseModel):
         if v is None or v == "":
             return v
         # Chat ID 可以是数字或负数（群组ID通常是负数）
-        import re
         if not re.match(r'^-?\d+$', v):
             raise ValueError("Telegram Chat ID 必须是数字（可以是负数）")
         return v
@@ -201,7 +201,6 @@ class TestConnectionRequest(BaseModel):
         if not v or not v.strip():
             raise ValueError("telegram_chat_id 不能为空")
         # Chat ID 可以是数字或负数（群组ID通常是负数）
-        import re
         if not re.match(r'^-?\d+$', v):
             raise ValueError("Telegram Chat ID 必须是数字（可以是负数）")
         return v.strip()
@@ -219,7 +218,6 @@ class TestMessageRequest(BaseModel):
         if not v or not v.strip():
             raise ValueError("telegram_chat_id 不能为空")
         # Chat ID 可以是数字或负数（群组ID通常是负数）
-        import re
         if not re.match(r'^-?\d+$', v):
             raise ValueError("Telegram Chat ID 必须是数字（可以是负数）")
         return v.strip()

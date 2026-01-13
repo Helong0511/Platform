@@ -16,6 +16,8 @@ from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
+from app.core.dependencies import get_click_service
+from app.services.click_service import ClickService
 from app.models.models import User, Click, Offer, Publisher, Advertiser, ShortLink
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 
@@ -51,9 +53,6 @@ async def get_clicks(
     - 最大查询范围限制为90天（防止查询过大数据量）
     """
     # 使用服务层（业务逻辑在ClickService中）
-    from app.core.dependencies import get_click_service
-    from app.services.click_service import ClickService
-    
     click_service: ClickService = await get_click_service(db)
     
     try:

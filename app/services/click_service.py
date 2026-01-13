@@ -10,7 +10,6 @@ from sqlalchemy import func, and_
 from sqlalchemy.orm import joinedload
 
 from app.models.models import Click, Offer, Publisher, Advertiser, ShortLink
-from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive

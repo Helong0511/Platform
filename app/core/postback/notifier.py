@@ -19,6 +19,8 @@ from app.models.models import (
 from app.core.auto_bot import send_telegram_message
 from app.core.utils import get_app_now_naive
 from app.core.redis_client import get_redis_client
+from app.services.telegram_notification_service import TelegramNotificationService
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +142,6 @@ class PostbackNotifier:
             product_name = PostbackNotifier._get_product_name(product)
             
             # 6. 构建通知消息（使用 TelegramNotificationService）
-            from app.services.telegram_notification_service import TelegramNotificationService
             
             if notification_type == 'high_value' and config and config.high_value_threshold:
                 message = TelegramNotificationService.build_client_high_value_message(
@@ -687,7 +688,6 @@ class PostbackNotifier:
             是否发送成功
         """
         try:
-            import httpx
             
             # 构建通知数据
             payload = {

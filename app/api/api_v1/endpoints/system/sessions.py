@@ -17,6 +17,11 @@ from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import get_app_now_naive
+from app.core.dependencies import get_session_service
+from app.services.session_service import SessionService
+from app.core.audit_log import log_user_action
+from jose import jwt
+from sqlalchemy.orm import selectinload
 from app.models.models import User, UserRole
 from app.models.session import UserSession, TokenBlacklist
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -74,9 +79,6 @@ async def get_my_sessions(
     - 返回分页结果
     """
     # 使用服务层（业务逻辑在SessionService中）
-    from app.core.dependencies import get_session_service
-    from app.services.session_service import SessionService
-    
     session_service: SessionService = await get_session_service(db)
     
     # 调用服务层获取当前用户的会话列表（服务层会处理查询、分页）
@@ -111,9 +113,6 @@ async def revoke_my_session(
     - 标记会话为非活跃
     """
     # 使用服务层（业务逻辑在SessionService中）
-    from app.core.dependencies import get_session_service
-    from app.services.session_service import SessionService
-    
     session_service: SessionService = await get_session_service(db)
     
     # 调用服务层撤销会话（服务层会处理验证、黑名单、标记等）
@@ -121,7 +120,6 @@ async def revoke_my_session(
     
     # 记录审计日志
     try:
-        from app.core.audit_log import log_user_action
         await log_user_action(
             db=db,
             action_type="REVOKE_SESSION",
@@ -154,19 +152,14 @@ async def revoke_all_my_sessions(
     - 标记所有其他会话为非活跃
     """
     # 使用服务层（业务逻辑在SessionService中）
-    from app.core.dependencies import get_session_service
-    from app.services.session_service import SessionService
-    
     session_service: SessionService = await get_session_service(db)
     
     # 获取当前token的jti
-    from app.core.config import settings
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     current_jti = None
     
     if token:
         try:
-            from jose import jwt
             payload = jwt.decode(
                 token,
                 settings.SECRET_KEY,
@@ -186,7 +179,6 @@ async def revoke_all_my_sessions(
     
     # 记录审计日志
     try:
-        from app.core.audit_log import log_user_action
         await log_user_action(
             db=db,
             action_type="REVOKE_ALL_SESSIONS",
@@ -218,9 +210,6 @@ async def get_user_sessions(
     获取指定用户的活跃会话列表（仅管理员，已重构使用服务层）
     """
     # 使用服务层（业务逻辑在SessionService中）
-    from app.core.dependencies import get_session_service
-    from app.services.session_service import SessionService
-    
     session_service: SessionService = await get_session_service(db)
     
     # 调用服务层获取指定用户的会话列表（服务层会处理用户验证、查询、分页）
@@ -253,9 +242,6 @@ async def revoke_user_session(
     撤销指定用户的指定会话（仅管理员，已重构使用服务层）
     """
     # 使用服务层（业务逻辑在SessionService中）
-    from app.core.dependencies import get_session_service
-    from app.services.session_service import SessionService
-    
     session_service: SessionService = await get_session_service(db)
     
     # 调用服务层撤销用户会话（服务层会处理验证、黑名单、标记等）
@@ -263,7 +249,6 @@ async def revoke_user_session(
     
     # 记录审计日志
     try:
-        from app.core.audit_log import log_user_action
         await log_user_action(
             db=db,
             action_type="REVOKE_SESSION",
@@ -294,9 +279,6 @@ async def revoke_all_user_sessions(
     撤销指定用户的所有会话（仅管理员，已重构使用服务层）
     """
     # 使用服务层（业务逻辑在SessionService中）
-    from app.core.dependencies import get_session_service
-    from app.services.session_service import SessionService
-    
     session_service: SessionService = await get_session_service(db)
     
     # 调用服务层撤销用户所有会话（服务层会处理用户验证、查询、黑名单、标记等）
@@ -304,7 +286,6 @@ async def revoke_all_user_sessions(
     
     # 记录审计日志
     try:
-        from app.core.audit_log import log_user_action
         await log_user_action(
             db=db,
             action_type="REVOKE_ALL_SESSIONS",
@@ -340,7 +321,6 @@ async def get_blacklist(
     - 返回分页结果
     """
     # 构建查询，关联用户表获取用户名
-    from sqlalchemy.orm import selectinload
     
     query = select(TokenBlacklist, User.username).join(
         User, TokenBlacklist.user_id == User.id, isouter=True

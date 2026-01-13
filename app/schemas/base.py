@@ -2,6 +2,8 @@ from pydantic import BaseModel, ConfigDict
 from datetime import datetime, timezone
 from typing import Generic, TypeVar  # Generic 和 TypeVar 仍需从 typing 导入
 
+from app.core.utils import APP_TIMEZONE
+
 # 定义通用类型变量
 T = TypeVar('T')
 
@@ -17,7 +19,6 @@ def datetime_encoder(v: datetime) -> str:
     if v.tzinfo is None:
         # 如果没有时区信息，假设是应用时区（默认北京时间）
         # 注意：AdData.date等业务日期字段是系统时区的naive datetime，但为了API兼容性，也标记为应用时区
-        from app.core.utils import APP_TIMEZONE
         v = v.replace(tzinfo=APP_TIMEZONE)
     # 使用 isoformat() 生成 ISO 8601 格式，包含时区信息
     return v.isoformat()

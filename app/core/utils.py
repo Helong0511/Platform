@@ -18,14 +18,17 @@
 - PERCENTAGE_MULTIPLIER: 百分比乘数常量（从constants模块导入）
 """
 import math
+import uuid
 import pytz
 from datetime import datetime
 from typing import Any, Optional
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.core.middleware import get_device_type
 from app.core.config import settings
 from app.core.constants import PERCENTAGE_MULTIPLIER
+from app.models.models import Client
 
 # 应用时区配置（从统一配置读取）
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
@@ -34,7 +37,12 @@ APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 def get_client_ip(request: Request) -> str:
     """
     从请求中获取客户端IP地址
-    支持代理情况（X-Forwarded-For头）
+    支持代理情况（X-Forwarded-For、X-Real-IP头）
+    
+    优先级：
+    1. X-Forwarded-For 头（代理服务器）
+    2. X-Real-IP 头（Nginx等反向代理）
+    3. request.client.host（直接连接）
     
     Args:
         request: FastAPI请求对象
@@ -43,13 +51,24 @@ def get_client_ip(request: Request) -> str:
         客户端IP地址字符串，如果无法获取则返回"unknown"
     """
     try:
-        client_ip = request.client.host if request.client else "unknown"
-        if "x-forwarded-for" in request.headers:
-            forwarded_ips = request.headers["x-forwarded-for"].split(",")
-            client_ip = forwarded_ips[0].strip()
-        return client_ip
-    except AttributeError:
-        # 处理request.client为None的情况
+        # 优先从 X-Forwarded-For 获取（代理服务器）
+        forwarded_for = request.headers.get("X-Forwarded-For") or request.headers.get("x-forwarded-for")
+        if forwarded_for:
+            # X-Forwarded-For 可能包含多个IP，取第一个
+            return forwarded_for.split(",")[0].strip()
+        
+        # 从 X-Real-IP 获取（Nginx等反向代理）
+        real_ip = request.headers.get("X-Real-IP") or request.headers.get("x-real-ip")
+        if real_ip:
+            return real_ip.strip()
+        
+        # 最后从客户端直接IP获取
+        if request.client:
+            return request.client.host
+        
+        return "unknown"
+    except (AttributeError, Exception):
+        # 处理request.client为None或其他异常情况
         return "unknown"
 
 
@@ -260,6 +279,62 @@ def get_user_name(user: Optional[Any], default: str = "未知用户") -> str:
     return default
 
 
+async def get_user_name_by_id(
+    db: AsyncSession,
+    user_id: int | None,
+    default_prefix: str = "CLIENT",
+    prefer_full_name: bool = True
+) -> str:
+    """
+    根据用户ID异步获取用户名称（优先使用 full_name，否则使用 username）
+    
+    用于需要从数据库查询用户信息的场景（如日志记录、通知等）
+    
+    Args:
+        db: 数据库会话
+        user_id: 用户ID（可能为 None）
+        default_prefix: 默认名称前缀（默认为 "CLIENT"），如果用户ID为None，返回 f"{default_prefix}_None"
+        prefer_full_name: 是否优先使用 full_name（默认True），如果为False，只查询 username
+    
+    Returns:
+        用户名称字符串
+    
+    Example:
+        username = await get_user_name_by_id(db, client.user_id, "CLIENT")
+        # -> 如果 user_id 为 None，返回 "CLIENT_None"
+        # -> 如果查询到用户，返回 full_name 或 username
+    """
+    if not user_id:
+        return f"{default_prefix}_None"
+    
+    from sqlalchemy.future import select
+    from app.models.models import User
+    
+    try:
+        if prefer_full_name:
+            # 优先查询 full_name
+            result = await db.execute(
+                select(User.full_name).where(User.id == user_id)
+            )
+            full_name = result.scalar_one_or_none()
+            if full_name:
+                return full_name
+        
+        # 如果 prefer_full_name 为 False 或 full_name 为空，查询 username
+        result = await db.execute(
+            select(User.username).where(User.id == user_id)
+        )
+        username = result.scalar_one_or_none()
+        if username:
+            return username
+        
+        # 如果都查询不到，返回默认值
+        return f"{default_prefix}_{user_id}"
+    except Exception:
+        # 查询失败时返回默认值
+        return f"{default_prefix}_{user_id}"
+
+
 def format_error_details(errors: list[Any], row_prefix: str = "第", row_suffix: str = "行") -> list[str]:
     """
     格式化错误详情列表
@@ -313,10 +388,6 @@ async def find_or_create_default_client(
         from app.models.models import Client
         default_client = await find_or_create_default_client(db, current_user.id)
     """
-    from app.models.models import Client
-    from sqlalchemy import select
-    import uuid
-    
     # 步骤1: 先查找数据库中的默认客户
     client_query = select(Client).where(Client.company_name == default_name).limit(1)
     client_result = await db.execute(client_query)

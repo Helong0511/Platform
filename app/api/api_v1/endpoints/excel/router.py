@@ -10,6 +10,8 @@ from datetime import date
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.audit_log import log_user_action
+from app.core.exceptions import raise_api_exception
+from app.core.errors import ErrorCode
 from app.models.models import User
 from app.schemas.base import ResponseBaseSchema
 from app.schemas.excel import ExcelImportResponse
@@ -119,8 +121,6 @@ async def export_ad_data(
     except Exception as e:
         # 如果已经是通过raise_api_exception抛出的异常，会由异常处理器处理
         # 这里捕获其他未预期的异常
-        from app.core.exceptions import raise_api_exception
-        from app.core.errors import ErrorCode
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"导出数据失败：{str(e)}"

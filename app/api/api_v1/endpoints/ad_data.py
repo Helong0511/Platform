@@ -34,8 +34,12 @@ from app.core.query_utils import (
     join_country_info as join_country_info_util,
     apply_date_range_filter
 )
+from app.core.dependencies import get_ad_data_service
+from app.core.utils import (
+    optimize_page_size_for_device, get_product_name, get_client_name, get_user_name,
+    calculate_coverage_rate, calculate_display_rate, calculate_click_rate
+)
 from app.schemas.ad_data import (
-    AdDataListResponse,
     AdDataResponse,
     AdDataSummaryResponse,
     AdDataUpdate,
@@ -43,6 +47,7 @@ from app.schemas.ad_data import (
 from app.schemas.base import PaginatedResponseBaseSchema, ResponseBaseSchema, ListResponseBaseSchema
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.services.ad_data_service import AdDataService
 
 # 创建路由实例
 router = APIRouter()
@@ -62,7 +67,7 @@ def join_country_info(query):
     return join_country_info_util(query, AdData.country_code)
 
 
-@router.get("/", response_model=ResponseBaseSchema[AdDataListResponse], summary="获取广告数据列表")
+@router.get("/", response_model=PaginatedResponseBaseSchema[list[AdDataResponse]], summary="获取广告数据列表")
 async def get_ad_data(
         request: Request,
         db: AsyncSession = Depends(get_db),
@@ -86,14 +91,9 @@ async def get_ad_data(
     - 移动端自动优化分页大小
     """
     # ====== 设备类型优化：自动调整分页大小 ======
-    from app.core.utils import optimize_page_size_for_device
     page_size = optimize_page_size_for_device(request, page_size, default_page_size=10)
 
     # 使用服务层（业务逻辑在AdDataService中）
-    from app.core.dependencies import get_ad_data_service
-    from app.services.ad_data_service import AdDataService
-    from app.schemas.ad_data import AdDataResponse
-    
     ad_data_service: AdDataService = await get_ad_data_service(db)
     
     # 调用服务层获取广告数据列表（服务层会处理查询、过滤、排序、分页等）
@@ -113,12 +113,12 @@ async def get_ad_data(
     # 转换为响应格式
     ad_data_list = [AdDataResponse(**item) for item in ad_data_responses]
 
-    return ResponseBaseSchema.success(data=AdDataListResponse(
+    return PaginatedResponseBaseSchema.success(
         data=ad_data_list,
         total=total,
         page=page,
         page_size=page_size
-    ))
+    )
 
 
 @router.get("/clients-with-data", response_model=ListResponseBaseSchema[list[dict]], summary="获取有数据的客户列表")
@@ -137,9 +137,6 @@ async def get_clients_with_data(
     - 使用缓存提升性能（缓存 5 分钟）
     """
     # 使用服务层（业务逻辑在AdDataService中）
-    from app.core.dependencies import get_ad_data_service
-    from app.services.ad_data_service import AdDataService
-    
     ad_data_service: AdDataService = await get_ad_data_service(db)
     
     try:
@@ -174,9 +171,6 @@ async def get_countries_with_data(
     - 客户只能看到自己数据中的国家
     """
     # 使用服务层（业务逻辑在AdDataService中）
-    from app.core.dependencies import get_ad_data_service
-    from app.services.ad_data_service import AdDataService
-    
     ad_data_service: AdDataService = await get_ad_data_service(db)
     
     try:
@@ -225,9 +219,6 @@ async def get_products_with_data(
     - 使用缓存提升性能（缓存 5 分钟）
     """
     # 使用服务层（业务逻辑在AdDataService中）
-    from app.core.dependencies import get_ad_data_service
-    from app.services.ad_data_service import AdDataService
-    
     ad_data_service: AdDataService = await get_ad_data_service(db)
     
     try:
@@ -246,7 +237,7 @@ async def get_products_with_data(
         )
 
 
-@router.get("/daily-summary", response_model=ResponseBaseSchema[AdDataListResponse], summary="获取每日汇总数据")
+@router.get("/daily-summary", response_model=PaginatedResponseBaseSchema[list[AdDataResponse]], summary="获取每日汇总数据")
 async def get_daily_summary(
         request: Request,
         db: AsyncSession = Depends(get_db),
@@ -268,14 +259,9 @@ async def get_daily_summary(
     - 管理员可查看所有数据，客户只能查看自己的数据
     """
     # ====== 设备类型优化：自动调整分页大小 ======
-    from app.core.utils import optimize_page_size_for_device
     page_size = optimize_page_size_for_device(request, page_size, default_page_size=10)
 
     # 使用服务层（业务逻辑在AdDataService中）
-    from app.core.dependencies import get_ad_data_service
-    from app.services.ad_data_service import AdDataService
-    from app.schemas.ad_data import AdDataResponse
-    
     ad_data_service: AdDataService = await get_ad_data_service(db)
     
     # 调用服务层获取每日汇总数据（服务层会处理查询、分组、排序、分页等）
@@ -294,12 +280,12 @@ async def get_daily_summary(
     # 转换为响应格式
     ad_data_list = [AdDataResponse(**item) for item in ad_data_responses]
 
-    return ResponseBaseSchema.success(data=AdDataListResponse(
+    return PaginatedResponseBaseSchema.success(
         data=ad_data_list,
         total=total,
         page=page,
         page_size=page_size
-    ))
+    )
 
 
 @router.get("/{data_id}", response_model=ResponseBaseSchema[AdDataResponse], summary="获取广告数据详情")
@@ -315,9 +301,6 @@ async def get_ad_data_detail(
     - 返回完整的广告指标，包括计算出的各种比率
     """
     # 使用服务层（业务逻辑在AdDataService中）
-    from app.core.dependencies import get_ad_data_service
-    from app.services.ad_data_service import AdDataService
-    
     ad_data_service: AdDataService = await get_ad_data_service(db)
     
     # 获取广告数据及关联信息（服务层会处理查询、验证和权限检查）
@@ -326,7 +309,6 @@ async def get_ad_data_detail(
     )
 
     # 使用统一的比率计算函数
-    from app.core.utils import calculate_coverage_rate, calculate_display_rate, calculate_click_rate
     
     coverage_rate = calculate_coverage_rate(
         ad_data.match_count,
@@ -406,9 +388,6 @@ async def update_ad_data(
     - 使用PUT方法符合RESTful规范
     """
     # 使用服务层（业务逻辑在AdDataService中）
-    from app.core.dependencies import get_ad_data_service
-    from app.services.ad_data_service import AdDataService
-    
     ad_data_service: AdDataService = await get_ad_data_service(db)
     
     # 获取更新数据
@@ -434,9 +413,6 @@ async def batch_delete_ad_data(
     - 永久删除数据
     """
     # 使用服务层（业务逻辑在AdDataService中）
-    from app.core.dependencies import get_ad_data_service
-    from app.services.ad_data_service import AdDataService
-    
     ad_data_service: AdDataService = await get_ad_data_service(db)
     
     # 调用服务层批量删除广告数据（服务层会处理权限检查和批量删除）
@@ -461,9 +437,6 @@ async def delete_ad_data(
     - 永久删除数据
     """
     # 使用服务层（业务逻辑在AdDataService中）
-    from app.core.dependencies import get_ad_data_service
-    from app.services.ad_data_service import AdDataService
-    
     ad_data_service: AdDataService = await get_ad_data_service(db)
     
     # 调用服务层删除广告数据（服务层会处理权限检查）
@@ -490,9 +463,6 @@ async def get_ad_data_summary(
     - 使用缓存提升性能（缓存 2 分钟）
     """
     # 使用服务层（业务逻辑在AdDataService中）
-    from app.core.dependencies import get_ad_data_service
-    from app.services.ad_data_service import AdDataService
-    
     ad_data_service: AdDataService = await get_ad_data_service(db)
     
     # 调用服务层获取汇总数据（服务层会处理查询、缓存和权限检查）
@@ -520,9 +490,6 @@ async def get_ad_data_date_range(
     - 客户只能查看自己数据的日期范围
     """
     # 使用服务层（业务逻辑在AdDataService中）
-    from app.core.dependencies import get_ad_data_service
-    from app.services.ad_data_service import AdDataService
-    
     ad_data_service: AdDataService = await get_ad_data_service(db)
     
     try:

@@ -6,6 +6,7 @@ Telegram Bot API 端点
 - 测试连接
 """
 import logging
+import threading
 from datetime import datetime
 from typing import Optional
 
@@ -17,8 +18,13 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
-from app.core.security import get_current_user
-from app.models.models import User, UserRole
+from app.core.security import get_current_user, require_admin
+from app.core.utils import get_app_now
+from app.core.auto_bot import (
+    send_telegram_message, bot_initialized, get_bot_status_info, bot, TELEBOT_AVAILABLE
+)
+from app.models.models import User
+from app.schemas.base import ResponseBaseSchema
 
 # 创建路由实例
 router = APIRouter()
@@ -58,35 +64,27 @@ class DiagnosticResponse(BaseModel):
 
 
 # ====== API 端点 ======
-@router.get("/status", response_model=BotStatusResponse, summary="查询 Telegram Bot 状态")
+@router.get("/status", response_model=ResponseBaseSchema[BotStatusResponse], summary="查询 Telegram Bot 状态")
 async def get_bot_status(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """
     查询 Telegram Bot 的当前状态
     
     需要管理员权限
     """
-    # 检查权限（仅管理员）
-    if current_user.role != UserRole.ADMIN:
-        raise_api_exception(
-            error_code=ErrorCode.FORBIDDEN,
-            message="仅管理员可以查询 Telegram Bot 状态",
-            status_code=status.HTTP_403_FORBIDDEN
-        )
 
     # 检查是否启用 Telegram
     telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
     if not telegram_enabled:
-        return BotStatusResponse(
+        return ResponseBaseSchema.success(data=BotStatusResponse(
             initialized=False,
             token_configured=False,
             admin_configured=False,
             message="Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false）"
-        )
+        ))
 
     try:
-        from app.core.auto_bot import bot_initialized, get_bot_status_info
         
         # 获取详细状态信息
         status_info = get_bot_status_info()
@@ -111,12 +109,12 @@ async def get_bot_status(
         if connection_test != "成功" and bot_initialized:
             status_message += f" | 连接测试: {connection_test}"
 
-        return BotStatusResponse(
+        return ResponseBaseSchema.success(data=BotStatusResponse(
             initialized=bot_initialized,
             token_configured=token_configured,
             admin_configured=admin_configured,
             message=status_message
-        )
+        ))
     except Exception as e:
         logger.error(f"查询 Telegram Bot 状态时发生错误: {e}", exc_info=True)
         raise_api_exception(
@@ -125,10 +123,10 @@ async def get_bot_status(
         )
 
 
-@router.post("/send", response_model=SendMessageResponse, summary="发送 Telegram 消息")
+@router.post("/send", response_model=ResponseBaseSchema[SendMessageResponse], summary="发送 Telegram 消息")
 async def send_message(
     request: SendMessageRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -139,13 +137,6 @@ async def send_message(
     - 如果未指定 chat_id，将使用配置中的 TELEGRAM_ADMIN
     - 消息长度限制：1-4096 字符
     """
-    # 检查权限（仅管理员）
-    if current_user.role != UserRole.ADMIN:
-        raise_api_exception(
-            error_code=ErrorCode.FORBIDDEN,
-            message="仅管理员可以发送 Telegram 消息",
-            status_code=status.HTTP_403_FORBIDDEN
-        )
 
     # 检查是否启用 Telegram
     telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
@@ -157,8 +148,6 @@ async def send_message(
         )
 
     try:
-        from app.core.auto_bot import send_telegram_message, bot_initialized
-
         if not bot_initialized:
             raise_api_exception(
                 error_code=ErrorCode.SERVICE_UNAVAILABLE,
@@ -174,10 +163,10 @@ async def send_message(
 
         if success:
             logger.info(f"用户 {current_user.username} 通过 API 发送了 Telegram 消息")
-            return SendMessageResponse(
+            return ResponseBaseSchema.success(data=SendMessageResponse(
                 success=True,
                 message="消息发送成功"
-            )
+            ))
         else:
             raise_api_exception(
                 error_code=ErrorCode.INTERNAL_ERROR,
@@ -195,9 +184,9 @@ async def send_message(
         )
 
 
-@router.post("/test", response_model=SendMessageResponse, summary="测试 Telegram Bot 连接")
+@router.post("/test", response_model=ResponseBaseSchema[SendMessageResponse], summary="测试 Telegram Bot 连接")
 async def test_bot_connection(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """
     测试 Telegram Bot 连接
@@ -206,13 +195,6 @@ async def test_bot_connection(
     
     需要管理员权限
     """
-    # 检查权限（仅管理员）
-    if current_user.role != UserRole.ADMIN:
-        raise_api_exception(
-            error_code=ErrorCode.FORBIDDEN,
-            message="仅管理员可以测试 Telegram Bot 连接",
-            status_code=status.HTTP_403_FORBIDDEN
-        )
 
     # 检查是否启用 Telegram
     telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
@@ -224,8 +206,6 @@ async def test_bot_connection(
         )
 
     try:
-        from app.core.auto_bot import send_telegram_message, bot_initialized
-
         if not bot_initialized:
             raise_api_exception(
                 error_code=ErrorCode.SERVICE_UNAVAILABLE,
@@ -234,17 +214,16 @@ async def test_bot_connection(
             )
 
         # 发送测试消息
-        from app.core.utils import get_app_now
         current_time = get_app_now()
         test_message = f"🧪 Telegram Bot 连接测试\n\n发送时间: {current_time.strftime('%Y-%m-%d %H:%M:%S')}（时区: {settings.TIMEZONE}）\n测试用户: {current_user.username}"
         
         success = await send_telegram_message(message=test_message)
 
         if success:
-            return SendMessageResponse(
+            return ResponseBaseSchema.success(data=SendMessageResponse(
                 success=True,
                 message="测试消息发送成功，请检查 Telegram 是否收到"
-            )
+            ))
         else:
             raise_api_exception(
                 error_code=ErrorCode.INTERNAL_ERROR,
@@ -262,9 +241,9 @@ async def test_bot_connection(
         )
 
 
-@router.get("/diagnostic", response_model=DiagnosticResponse, summary="Telegram Bot 诊断")
+@router.get("/diagnostic", response_model=ResponseBaseSchema[DiagnosticResponse], summary="Telegram Bot 诊断")
 async def diagnostic_bot(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """
     Telegram Bot 诊断工具
@@ -273,57 +252,42 @@ async def diagnostic_bot(
     
     需要管理员权限
     """
-    # 检查权限（仅管理员）
-    if current_user.role != UserRole.ADMIN:
-        raise_api_exception(
-            error_code=ErrorCode.FORBIDDEN,
-            message="仅管理员可以使用诊断工具",
-            status_code=status.HTTP_403_FORBIDDEN
-        )
 
     try:
-        from app.core.auto_bot import (
-            bot_initialized, 
-            get_bot_status_info,
-            bot,
-            TELEBOT_AVAILABLE
-        )
-        import threading
-        
         recommendations = []
         
         # 1. 检查 Bot 初始化
         if not bot_initialized:
             recommendations.append("❌ Bot 未初始化，请检查 TELEGRAM_TOKEN 配置")
-            return DiagnosticResponse(
+            return ResponseBaseSchema.success(data=DiagnosticResponse(
                 bot_initialized=False,
                 bot_thread_alive=False,
                 handlers_count=0,
                 connection_test="Bot 未初始化",
                 recommendations=recommendations
-            )
+            ))
         
         # 2. 检查模块可用性
         if not TELEBOT_AVAILABLE:
             recommendations.append("❌ pyTelegramBotAPI 未安装，请运行: pip install pyTelegramBotAPI")
-            return DiagnosticResponse(
+            return ResponseBaseSchema.success(data=DiagnosticResponse(
                 bot_initialized=False,
                 bot_thread_alive=False,
                 handlers_count=0,
                 connection_test="模块未安装",
                 recommendations=recommendations
-            )
+            ))
         
         # 3. 检查 Bot 对象
         if not bot:
             recommendations.append("❌ Bot 对象不存在")
-            return DiagnosticResponse(
+            return ResponseBaseSchema.success(data=DiagnosticResponse(
                 bot_initialized=False,
                 bot_thread_alive=False,
                 handlers_count=0,
                 connection_test="Bot 对象不存在",
                 recommendations=recommendations
-            )
+            ))
         
         # 4. 检查线程状态
         bot_thread_alive = False
@@ -390,14 +354,14 @@ async def diagnostic_bot(
             recommendations.append("✅ 所有检查通过，如果命令仍无响应，请检查日志中的轮询信息")
             recommendations.append("💡 查看日志中是否有 '收到 X 个更新' 或 '检测到命令' 的信息")
         
-        return DiagnosticResponse(
+        return ResponseBaseSchema.success(data=DiagnosticResponse(
             bot_initialized=bot_initialized,
             bot_thread_alive=bot_thread_alive,
             webhook_url=webhook_url,
             handlers_count=handlers_count,
             connection_test=connection_test,
             recommendations=recommendations
-        )
+        ))
         
     except Exception as e:
         logger.error(f"诊断 Telegram Bot 时发生错误: {e}", exc_info=True)
@@ -407,9 +371,9 @@ async def diagnostic_bot(
         )
 
 
-@router.post("/reset_webhook", response_model=SendMessageResponse, summary="强制删除 Webhook")
+@router.post("/reset_webhook", response_model=ResponseBaseSchema[SendMessageResponse], summary="强制删除 Webhook")
 async def reset_webhook(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """
     强制删除 Webhook 并重置 offset
@@ -418,16 +382,8 @@ async def reset_webhook(
     
     需要管理员权限
     """
-    # 检查权限（仅管理员）
-    if current_user.role != UserRole.ADMIN:
-        raise_api_exception(
-            error_code=ErrorCode.FORBIDDEN,
-            message="仅管理员可以重置 Webhook",
-            status_code=status.HTTP_403_FORBIDDEN
-        )
     
     try:
-        from app.core.auto_bot import bot, bot_initialized, TELEBOT_AVAILABLE
         
         if not bot_initialized or not TELEBOT_AVAILABLE or not bot:
             raise_api_exception(
@@ -443,15 +399,15 @@ async def reset_webhook(
         webhook_info = bot.get_webhook_info()
         
         if webhook_info.url:
-            return SendMessageResponse(
+            return ResponseBaseSchema.success(data=SendMessageResponse(
                 success=False,
                 message=f"Webhook 删除失败，仍然存在: {webhook_info.url}"
-            )
+            ))
         else:
-            return SendMessageResponse(
+            return ResponseBaseSchema.success(data=SendMessageResponse(
                 success=True,
                 message="Webhook 已成功删除。请重启应用以使轮询正常工作，或等待轮询线程自动重新连接"
-            )
+            ))
         
     except Exception as e:
         logger.error(f"删除 Webhook 时发生错误: {e}", exc_info=True)

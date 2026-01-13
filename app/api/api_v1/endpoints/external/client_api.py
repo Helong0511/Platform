@@ -9,7 +9,6 @@
 - 验证请求时间差异（10秒内）
 - 验证MD5签名
 """
-import hashlib
 import logging
 import asyncio
 from calendar import monthrange
@@ -24,7 +23,10 @@ from app.core.database import get_db
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.audit_log import log_user_action
-from app.models.models import AdData, Client, Product, User, ProductAssignment
+from app.core.auto_bot import send_telegram_message
+from app.core.api_auth import verify_signature, verify_client_request
+from app.core.utils import get_user_name_by_id
+from app.models.models import AdData, Client, Product, User, ProductAssignment, CountryInfo
 from sqlalchemy import func, and_, or_, text, literal_column, case
 from app.schemas.base import ResponseBaseSchema
 from app.core.query_utils import date_range_condition, check_use_assignment_table
@@ -102,135 +104,7 @@ class AdDataItemResponse(BaseModel):
         from_attributes = True
 
 
-# ====== 签名验证函数 ======
-def verify_signature(
-    client_id: int, 
-    secret_key: str, 
-    req_time: int, 
-    sign: str,
-    data_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None
-) -> bool:
-    """
-    验证MD5签名
-    
-    签名算法：
-    1. 按字母排序参数：client_id, data_type, end_date, req_time, start_date（只包含非空参数）
-    2. 拼接：client_id=1000&data_type=all&req_time=1745656222&start_date=2024-01-01
-    3. 在末尾追加：&key={SECRET_KEY}
-    4. 最终字符串：client_id=1000&data_type=all&req_time=1745656222&start_date=2024-01-01&key=3716607b-04cb-4f71-91c0-2dae7a87fa63
-    5. MD5加密并转为小写
-    
-    注意：
-    - secret_key不通过请求传递，而是从数据库查询客户的key字段
-    - 只包含非空参数参与签名计算
-    - data_type默认为"all"，如果未提供则使用默认值
-    """
-    # 构建参数字典（只包含非空参数）
-    params = {
-        'client_id': str(client_id),
-        'req_time': str(req_time)
-    }
-    
-    # 添加可选参数（如果提供了的话）
-    if data_type:
-        params['data_type'] = str(data_type)
-    if start_date:
-        params['start_date'] = str(start_date)
-    if end_date:
-        params['end_date'] = str(end_date)
-
-    # 按key排序并拼接
-    sorted_keys = sorted(params.keys())
-    temp_str = '&'.join([f"{key}={params[key]}" for key in sorted_keys])
-
-    # 在末尾追加 &key={SECRET_KEY}
-    temp_str = temp_str + f'&key={secret_key}'
-
-    # MD5加密并转为小写
-    calculated_sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
-
-    # 比较签名（不区分大小写）
-    return calculated_sign.lower() == sign.lower()
-
-
-async def verify_client_request(
-        request: ClientAPIBaseRequest,
-        db: AsyncSession,
-        data_type: str | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None
-) -> Client:
-    """
-    验证客户请求
-    1. 通过client_id查询客户（不暴露secret_key）
-    2. 验证请求时间差异（正负5秒内）
-    3. 使用客户的key验证签名
-    """
-    # 1. 通过client_id查询客户（secret_key不通过请求传递，从数据库获取）
-    result = await db.execute(
-        select(Client).where(
-            Client.id == request.client_id,
-            Client.is_active == True
-        )
-    )
-    client = result.scalars().first()
-
-    if not client:
-        logger.warning(
-            f"客户验证失败: client_id={request.client_id} 不存在或未激活"
-        )
-        raise_api_exception(
-            ErrorCode.CLIENT_NOT_FOUND,
-            detail="客户不存在或未激活"
-        )
-    
-    # 检查API是否启用
-    if not client.api_enabled:
-        logger.warning(
-            f"客户API访问被禁用: client_id={request.client_id}"
-        )
-        raise_api_exception(
-            ErrorCode.CLIENT_API_VALIDATION_FAILED,
-            detail="客户API访问未启用，请联系管理员开启"
-        )
-
-    # 2. 验证请求时间差异（正负5秒内）
-    current_timestamp = int(datetime.now(timezone.utc).timestamp())
-    time_diff = abs(current_timestamp - request.req_time)
-
-    if time_diff > 5:
-        logger.warning(
-            f"请求时间验证失败: client_id={request.client_id}, "
-            f"req_time={request.req_time}, current_time={current_timestamp}, diff={time_diff}秒"
-        )
-        raise_api_exception(
-            ErrorCode.CLIENT_API_VALIDATION_FAILED,
-            detail=f"请求时间差异过大（{time_diff}秒），请确保系统时间正确（允许正负5秒）"
-        )
-
-    # 3. 使用客户的key验证签名（secret_key从数据库获取，不通过请求传递）
-    if not verify_signature(
-            request.client_id,
-            client.key,  # 使用从数据库查询到的key
-            request.req_time,
-            request.sign,
-            data_type,
-            start_date,
-            end_date
-    ):
-        logger.warning(
-            f"签名验证失败: client_id={request.client_id}, "
-            f"sign={request.sign[:8]}... (前8位)"
-        )
-        raise_api_exception(
-            ErrorCode.CLIENT_API_VALIDATION_FAILED,
-            detail="签名验证失败"
-        )
-
-    logger.info(f"客户API请求验证成功: client_id={request.client_id}")
-    return client
+# 签名验证函数已移至 app/core/api_auth.py
 
 
 # ====== API端点 ======
@@ -269,16 +143,9 @@ async def get_client_products(
 
         # 记录API访问日志
         try:
-            # 获取客户关联的用户（如果有）- 使用轻量级查询只获取用户名
+            # 获取客户关联的用户名（如果有）
             user_id = client.user_id
-            username = f"CLIENT_{client.id}"
-            if client.user_id:
-                user_result = await db.execute(
-                    select(User.username).where(User.id == client.user_id)
-                )
-                user_username = user_result.scalar_one_or_none()
-                if user_username:
-                    username = user_username
+            username = await get_user_name_by_id(db, client.user_id, "CLIENT", prefer_full_name=False)
 
             await log_user_action(
                 db=db,
@@ -394,8 +261,6 @@ async def get_client_data(
         
         if data_type == "day":
             # 每日汇总模式：按产品+日期汇总，国家显示"全部区域"
-            from app.models.models import CountryInfo
-            
             # 构建汇总查询
             # 注意：覆盖率、展示率、点击率、eCPM、CPC 不在查询中计算，而是在返回数据时根据汇总后的数值重新计算
             query = select(
@@ -519,7 +384,6 @@ async def get_client_data(
                 ))
         else:
             # 详细数据模式（data_type='all'）：按国家分组，保持原有逻辑
-            from app.models.models import CountryInfo
             query = select(AdData, Product.name, CountryInfo.country_name_zh).join(
                 Product, AdData.product_id == Product.id
             ).outerjoin(
@@ -631,16 +495,9 @@ async def get_client_data(
 
         # 记录API访问日志
         try:
-            # 获取客户关联的用户（如果有）- 使用轻量级查询只获取用户名
+            # 获取客户关联的用户名（如果有）
             user_id = client.user_id
-            username = f"CLIENT_{client.id}"
-            if client.user_id:
-                user_result = await db.execute(
-                    select(User.username).where(User.id == client.user_id)
-                )
-                user_username = user_result.scalar_one_or_none()
-                if user_username:
-                    username = user_username
+            username = await get_user_name_by_id(db, client.user_id, "CLIENT", prefer_full_name=False)
 
             await log_user_action(
                 db=db,
@@ -670,25 +527,9 @@ async def get_client_data(
 
         # 发送 Telegram 通知（仅在成功获取数据时）
         if len(data_list) > 0:
-            from app.core.auto_bot import send_telegram_message
             
-            # 获取用户全名
-            user_full_name = f"CLIENT_{client.id}"
-            if client.user_id:
-                user_result = await db.execute(
-                    select(User.full_name).where(User.id == client.user_id)
-                )
-                user_full_name_result = user_result.scalar_one_or_none()
-                if user_full_name_result:
-                    user_full_name = user_full_name_result
-                # 如果全名为空，尝试使用用户名
-                if not user_full_name or user_full_name == f"CLIENT_{client.id}":
-                    user_result = await db.execute(
-                        select(User.username).where(User.id == client.user_id)
-                    )
-                    user_username = user_result.scalar_one_or_none()
-                    if user_username:
-                        user_full_name = user_username
+            # 获取用户全名（优先使用 full_name，否则使用 username）
+            user_full_name = await get_user_name_by_id(db, client.user_id, "CLIENT", prefer_full_name=True)
             
             # 构建通知消息
             telegram_msg = f"📡 API 数据获取成功\n\n"

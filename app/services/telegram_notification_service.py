@@ -2,12 +2,13 @@
 Telegram 通知服务
 负责构建和发送 Telegram 通知消息（客户和管理员）
 """
+import json
 import logging
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import (
-    PostbackConversion, Client, Product, Publisher, Offer, User
+    PostbackConversion, Client, Product, Publisher, Offer, User, PostbackNotification
 )
 from app.core.auto_bot import send_telegram_message
 from app.core.utils import get_app_now_naive
@@ -208,7 +209,6 @@ class TelegramNotificationService:
         msg += f"{error_display}\n"
         
         if click_params:
-            import json
             try:
                 click_params_str = json.dumps(click_params, ensure_ascii=False)
                 msg += f"\n📋 点击参数\n{click_params_str}\n"
@@ -349,7 +349,6 @@ class TelegramNotificationService:
             # 记录通知历史（如果有数据库会话）
             if db:
                 try:
-                    from app.models.models import PostbackNotification
                     # 如果有转化记录，使用转化记录的信息
                     if conversion:
                         record_client_id = conversion.client_id
@@ -414,7 +413,6 @@ class TelegramNotificationService:
             # 记录通知历史（如果有转化记录和数据库会话）
             if conversion and db:
                 try:
-                    from app.models.models import PostbackNotification
                     notification_record = PostbackNotification(
                         conversion_id=conversion.id,
                         client_id=None,  # 管理员通知不关联客户

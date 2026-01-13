@@ -264,9 +264,8 @@ const formRules = {
 const loadPublishers = async () => {
   try {
     const response = await getPublishers({ page: 1, page_size: 100 })
-    if (response.code === 200) {
-      publisherList.value = response.data || []
-    }
+    // response已经是标准分页格式，直接使用data字段
+    publisherList.value = response.data || []
   } catch (error) {
     logger.error('加载渠道列表失败:', error)
   }
@@ -275,9 +274,8 @@ const loadPublishers = async () => {
 const loadOffers = async () => {
   try {
     const response = await getOffers({ page: 1, page_size: 100 })
-    if (response.code === 200) {
-      offerList.value = response.data || []
-    }
+    // response已经是标准分页格式，直接使用data字段
+    offerList.value = response.data || []
   } catch (error) {
     logger.error('加载Offer列表失败:', error)
   }
@@ -295,12 +293,9 @@ const loadData = async () => {
       status: filterStatus.value || undefined
     }
     const response = await getAffiliateTests(params)
-    if (response.code === 200) {
-      tableData.value = response.data || []
-      pagination.total = response.total || 0
-    } else {
-      ElMessage.error(response.message || '获取数据失败')
-    }
+    // response已经是标准分页格式，直接使用data和total字段
+    tableData.value = response.data || []
+    pagination.total = response.total || 0
   } catch (error) {
     logger.error('获取测试记录列表失败:', error)
     ElMessage.error('获取数据失败')
@@ -361,14 +356,11 @@ const handleSubmit = async () => {
     
     submitting.value = true
     try {
-      const response = await createAffiliateTest(formData)
-      if (response.code === 200) {
-        ElMessage.success('测试记录创建成功，Postback已发送')
-        dialogVisible.value = false
-        loadData()
-      } else {
-        ElMessage.error(response.message || '创建失败')
-      }
+      await createAffiliateTest(formData)
+      // createAffiliateTest使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
+      ElMessage.success('测试记录创建成功，Postback已发送')
+      dialogVisible.value = false
+      loadData()
     } catch (error) {
       logger.error('创建测试记录失败:', error)
       ElMessage.error('创建失败')

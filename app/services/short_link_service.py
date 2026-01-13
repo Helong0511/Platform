@@ -5,7 +5,7 @@
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func, and_, or_, text
 from sqlalchemy.orm import joinedload
 
 from app.models.models import ShortLink, User, UserRole, Offer, Publisher
@@ -135,7 +135,6 @@ class ShortLinkService(BaseService[ShortLink]):
             
             # 3. 使用全文索引搜索title和description（如果存在全文索引）
             try:
-                from sqlalchemy import text
                 # 尝试使用全文索引搜索title
                 fulltext_title = text(
                     "MATCH(title) AGAINST(:search_term IN NATURAL LANGUAGE MODE)"

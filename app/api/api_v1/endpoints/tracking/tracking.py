@@ -3,20 +3,21 @@
 处理点击追踪、Click ID 生成、Tracklink 生成等功能
 """
 import logging
+import asyncio
 from typing import Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, Query, Path, Request
+from fastapi import APIRouter, Depends, Query, Path, Request, BackgroundTasks
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from fastapi.responses import RedirectResponse
-from fastapi import BackgroundTasks
-from app.core.database import AsyncSessionLocal
+from sqlalchemy.exc import IntegrityError
 
-from app.core.database import get_db
+from app.core.database import get_db, AsyncSessionLocal
 from app.core.security import get_current_user
 from app.core.utils import get_app_now_naive
 from app.core.tracking.click_id_generator import generate_click_id_from_timestamp, generate_unique_click_id
 from app.core.tracking.tracklink_generator import generate_downstream_tracklink
+from app.core.device_info import collect_request_info
 from app.models.models import User, Offer, Publisher, Click, ClickStats
 from app.schemas.base import ResponseBaseSchema
 from app.core.exceptions import raise_api_exception
@@ -37,8 +38,6 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
         click_data: 点击记录数据
         max_retries: 最大重试次数
     """
-    from sqlalchemy.exc import IntegrityError
-    from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
     
     async with AsyncSessionLocal() as session:
         for attempt in range(max_retries):
@@ -109,7 +108,6 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
                         )
                         await session.rollback()
                         # 等待后重试（指数退避）
-                        import asyncio
                         await asyncio.sleep(2 ** attempt)
                     else:
                         raise
@@ -121,7 +119,6 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
                     )
                     await session.rollback()
                     # 等待后重试（指数退避）
-                    import asyncio
                     await asyncio.sleep(2 ** attempt)
                 else:
                     # 最后一次尝试失败，记录错误
@@ -179,7 +176,6 @@ async def track_click(
         click_id = generate_click_id_from_timestamp()
         
         # 4. 收集完整的请求信息（包括软件、硬件信息和URL参数）
-        from app.core.device_info import collect_request_info
         request_info = collect_request_info(request) if request else {}
         
         # 5. 创建点击记录

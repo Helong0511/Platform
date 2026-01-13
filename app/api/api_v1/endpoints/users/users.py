@@ -86,6 +86,11 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
 from app.core.constants import MAX_PAGE_SIZE
+from app.core.utils import optimize_page_size_for_device, get_app_now_naive
+from app.core.dependencies import get_user_service
+from app.services.user_service import UserService
+from app.core.infrastructure.cache import get_cache_backend
+from app.core.validation import validate_username, validate_email, validate_password_strength
 from app.models.models import User, UserRole, Client, Publisher
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, PasswordChange
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -115,13 +120,9 @@ async def get_users(
     - 根据设备类型自动优化分页大小
     """
     # ====== 设备类型优化：自动调整分页大小 ======
-    from app.core.utils import optimize_page_size_for_device
     page_size = optimize_page_size_for_device(request, page_size, default_page_size=10)
     
     # 使用服务层（业务逻辑在UserService中）
-    from app.core.dependencies import get_user_service
-    from app.services.user_service import UserService
-    
     user_service: UserService = await get_user_service(db)
     
     # 转换status参数为布尔值（服务层期望布尔值）
@@ -205,14 +206,10 @@ async def get_user_stats(
     """
     try:
         # 使用服务层（业务逻辑在UserService中）
-        from app.core.dependencies import get_user_service
-        from app.services.user_service import UserService
-        
         user_service: UserService = await get_user_service(db)
         
         # 使用缓存（如果服务层方法使用了@cached装饰器，会自动缓存）
         # 这里手动使用缓存，因为服务层方法可能没有装饰器
-        from app.core.infrastructure.cache import get_cache_backend
         cache = await get_cache_backend()
         cache_key = "user_stats"
         
@@ -251,9 +248,6 @@ async def export_users_excel(
     - 返回Excel文件流
     """
     # 使用服务层（业务逻辑在UserService中）
-    from app.core.dependencies import get_user_service
-    from app.services.user_service import UserService
-    
     user_service: UserService = await get_user_service(db)
     
     # 转换status参数为布尔值（服务层期望布尔值）
@@ -277,8 +271,6 @@ async def export_users_excel(
 
     # 如果没有数据，抛出错误提示用户
     if not users:
-        from app.core.exceptions import raise_api_exception
-        from app.core.errors import ErrorCode
         raise_api_exception(
             error_code=ErrorCode.NOT_FOUND,
             message="无数据，不能导出",
@@ -334,7 +326,6 @@ async def export_users_excel(
             worksheet.column_dimensions[column_cells[0].column_letter].width = min(max_length + 2, 50)
 
     output.seek(0)
-    from app.core.utils import get_app_now_naive
     filename = f"用户数据_{get_app_now_naive().strftime('%Y%m%d_%H%M%S')}.xlsx"
     encoded_filename = quote(filename.encode('utf-8'))
 
@@ -361,9 +352,6 @@ async def get_current_user_info(
     - 返回当前用户的完整信息，包括客户信息（如果用户是客户角色）
     """
     # 使用服务层（业务逻辑在UserService中）
-    from app.core.dependencies import get_user_service
-    from app.services.user_service import UserService
-    
     user_service: UserService = await get_user_service(db)
     
     # 获取用户信息（服务层会处理权限检查和客户信息预加载）
@@ -431,9 +419,6 @@ async def change_password(
     - 客户角色需要检查password_change_enabled开关
     """
     # 使用服务层（业务逻辑在UserService中）
-    from app.core.dependencies import get_user_service
-    from app.services.user_service import UserService
-    
     user_service: UserService = await get_user_service(db)
     
     # 调用服务层修改密码（服务层会处理所有验证和权限检查）
@@ -461,9 +446,6 @@ async def get_user(
     - 使用服务层，业务逻辑已优化
     """
     # 使用服务层（业务逻辑在UserService中）
-    from app.core.dependencies import get_user_service
-    from app.services.user_service import UserService
-    
     user_service: UserService = await get_user_service(db)
     user = await user_service.get_user_by_id(user_id, current_user, include_client=True)
     
@@ -523,8 +505,6 @@ async def create_user(
     """
     # ====== 输入验证 ======
     # 验证用户名格式
-    from app.core.validation import validate_username, validate_email, validate_password_strength
-
     is_valid, error_msg = validate_username(user_in.username)
     if not is_valid:
         raise_api_exception(
@@ -550,9 +530,6 @@ async def create_user(
         )
 
     # 使用服务层（业务逻辑在UserService中）
-    from app.core.dependencies import get_user_service
-    from app.services.user_service import UserService
-    
     user_service: UserService = await get_user_service(db)
     
     # 准备用户数据（包含客户信息，如果提供）
@@ -592,7 +569,6 @@ async def create_user(
         }
     
     # 记录创建操作（使用audit_log的log_create函数）
-    from app.core.audit_log import log_create
     await log_create(
         db=db,
         user=current_user,
@@ -627,9 +603,6 @@ async def update_user(
     - 支持密码更新
     """
     # 使用服务层（业务逻辑在UserService中）
-    from app.core.dependencies import get_user_service
-    from app.services.user_service import UserService
-    
     user_service: UserService = await get_user_service(db)
     
     # 获取更新数据（排除未设置的字段）
@@ -639,7 +612,6 @@ async def update_user(
     user = await user_service.update_user(user_id, update_data, current_user)
     
     # 记录更新操作（使用audit_log的log_update函数）
-    from app.core.audit_log import log_update
     # 移除敏感信息
     if "password" in update_data:
         update_data["password"] = "***"
@@ -690,16 +662,12 @@ async def delete_user(
         )
 
     # 使用服务层（业务逻辑在UserService中）
-    from app.core.dependencies import get_user_service
-    from app.services.user_service import UserService
-    
     user_service: UserService = await get_user_service(db)
     
     # 获取用户信息（用于记录删除日志）
     user = await user_service.get_user_by_id(user_id, current_user, include_client=True)
     
     # 记录删除操作（在删除前记录，因为删除后user对象可能无法访问）
-    from app.core.audit_log import log_delete
     await log_delete(
         db=db,
         user=current_user,

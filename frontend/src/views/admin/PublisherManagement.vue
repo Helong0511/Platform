@@ -555,12 +555,12 @@ const loadClients = async () => {
     
     while (hasMore) {
       const response = await getClientList({ page, page_size: 100 })
-      if (response.code === 200) {
-        const clients = response.data || []
-        clientList.value.push(...clients)
-        
-        // 如果返回的数据少于 page_size，说明已经是最后一页
-        if (clients.length < 100) {
+      // response已经是标准分页格式，直接使用data字段
+      const clients = response.data || []
+      clientList.value.push(...clients)
+      
+      // 如果返回的数据少于 page_size，说明已经是最后一页
+      if (clients.length < 100) {
           hasMore = false
         } else {
           page++
@@ -587,12 +587,9 @@ const loadData = async () => {
       is_active: filterActive.value !== null ? filterActive.value : undefined
     }
     const response = await getPublishers(params)
-    if (response.code === 200) {
-      tableData.value = response.data || []
-      pagination.total = response.total || 0
-    } else {
-      ElMessage.error(response.message || '获取数据失败')
-    }
+    // response已经是标准分页格式，直接使用data和total字段
+    tableData.value = response.data || []
+    pagination.total = response.total || 0
   } catch (error) {
     logger.error('获取渠道列表失败:', error)
     ElMessage.error('获取数据失败')
@@ -661,13 +658,10 @@ const handleDelete = async (row) => {
       }
     )
     
-    const response = await deletePublisher(row.id)
-    if (response.code === 200) {
-      ElMessage.success('删除成功')
-      loadData()
-    } else {
-      ElMessage.error(response.message || '删除失败')
-    }
+    await deletePublisher(row.id)
+    // deletePublisher使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
+    ElMessage.success('删除成功')
+    loadData()
   } catch (error) {
     if (error !== 'cancel') {
       logger.error('删除渠道失败:', error)
@@ -692,13 +686,11 @@ const handleSubmit = async () => {
         response = await createPublisher(formData)
       }
       
-      if (response.code === 200) {
-        ElMessage.success(isEdit.value ? '更新成功' : '创建成功')
-        dialogVisible.value = false
-        loadData()
-      } else {
-        ElMessage.error(response.message || '操作失败')
-      }
+      // response已经是标准格式，createPublisher/updatePublisher使用returnDataOnly: true
+      // 所以response直接是数据对象，不需要检查code
+      ElMessage.success(isEdit.value ? '更新成功' : '创建成功')
+      dialogVisible.value = false
+      loadData()
     } catch (error) {
       logger.error('提交失败:', error)
       
@@ -736,16 +728,11 @@ const handleDialogClose = () => {
 // 状态切换
 const handleStatusChange = async (row) => {
   try {
-    const response = await updatePublisher(row.id, {
+    await updatePublisher(row.id, {
       is_active: row.is_active
     })
-    if (response.code === 200) {
-      ElMessage.success('状态更新成功')
-    } else {
-      // 如果更新失败，恢复原状态
-      row.is_active = !row.is_active
-      ElMessage.error(response.message || '状态更新失败')
-    }
+    // updatePublisher使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
+    ElMessage.success('状态更新成功')
   } catch (error) {
     // 如果更新失败，恢复原状态
     row.is_active = !row.is_active

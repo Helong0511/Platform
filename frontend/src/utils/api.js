@@ -146,40 +146,75 @@ export const normalizeResponse = (response, options = {}) => {
 
 /**
  * 处理分页响应
+ * 
+ * 统一处理后端分页响应格式，确保前端获得一致的数据结构
+ * 
+ * 后端标准分页响应格式（PaginatedResponseBaseSchema）：
+ * {
+ *   code: 200,
+ *   message: "success",
+ *   data: [...],        // 数据数组（直接是数组，不是嵌套对象）
+ *   total: 100,         // 总记录数
+ *   page: 1,            // 当前页码
+ *   page_size: 10,      // 每页条数
+ *   total_pages: 10     // 总页数
+ * }
+ * 
+ * 前端统一返回格式：
+ * {
+ *   code: 200,
+ *   message: "success",
+ *   data: [...],        // 数据数组
+ *   total: 100,         // 总记录数
+ *   page: 1,            // 当前页码
+ *   page_size: 10,      // 每页条数
+ *   total_pages: 10     // 总页数
+ * }
+ * 
  * @param {Object} response - axios响应对象
  * @returns {Object} 标准化后的分页数据
  */
 export const normalizePaginatedResponse = (response) => {
   const normalized = normalizeResponse(response, { returnDataOnly: false });
   
-  // 处理嵌套的 data 字段（后端返回的格式是 { code: 200, data: { data: [...], total: ..., page: ..., page_size: ... } }）
-  let paginatedData = normalized.data || {};
+  // 标准格式：后端直接返回 { code: 200, data: [...], total: ..., page: ..., page_size: ... }
+  // 这是PaginatedResponseBaseSchema的标准格式
+  if (normalized.code === 200 && 
+      Array.isArray(normalized.data) &&
+      typeof normalized.total !== 'undefined') {
+    return {
+      code: normalized.code,
+      message: normalized.message || 'success',
+      data: normalized.data,
+      total: normalized.total || 0,
+      page: normalized.page || 1,
+      page_size: normalized.page_size || 10,
+      total_pages: normalized.total_pages || Math.ceil((normalized.total || 0) / (normalized.page_size || 10))
+    };
+  }
   
-  // 如果 data 是一个对象且包含 data 字段，说明是嵌套的分页响应
-  // 检查 paginatedData 是否有 data 属性（数组）和 total 属性（数字）
+  // 兼容嵌套格式：{ code: 200, data: { data: [...], total: ..., page: ..., page_size: ... } }
+  // 这是旧格式或某些自定义ListResponse的格式
+  const paginatedData = normalized.data || {};
   if (paginatedData && 
       typeof paginatedData === 'object' && 
       !Array.isArray(paginatedData) && 
-      paginatedData.data !== undefined && 
       Array.isArray(paginatedData.data) &&
       typeof paginatedData.total !== 'undefined') {
-    // 使用嵌套的 data 对象
-    const result = {
+    return {
       code: normalized.code || 200,
       message: normalized.message || 'success',
-      data: paginatedData, // 返回整个 AdDataListResponse 对象 { data: [...], total: ..., page: ..., page_size: ... }
+      data: paginatedData.data || [],
       total: paginatedData.total || 0,
       page: paginatedData.page || 1,
       page_size: paginatedData.page_size || 10,
       total_pages: paginatedData.total_pages || Math.ceil((paginatedData.total || 0) / (paginatedData.page_size || 10))
     };
-    
-    return result;
   }
   
-  // 如果不是嵌套格式，检查是否 normalized.data 本身就是数组（扁平格式）
+  // 兼容扁平数组格式：{ code: 200, data: [...] }（没有分页信息）
   if (Array.isArray(normalized.data)) {
-    const result = {
+    return {
       code: normalized.code || 200,
       message: normalized.message || 'success',
       data: normalized.data || [],
@@ -188,22 +223,18 @@ export const normalizePaginatedResponse = (response) => {
       page_size: normalized.page_size || 10,
       total_pages: normalized.total_pages || Math.ceil((normalized.total || normalized.data.length || 0) / (normalized.page_size || 10))
     };
-    
-    return result;
   }
   
-  // 其他情况，使用扁平格式（兼容旧格式）
-  const result = {
+  // 默认情况：返回空分页结果
+  return {
     code: normalized.code || 200,
     message: normalized.message || 'success',
-    data: normalized.data || [],
-    total: normalized.total || 0,
-    page: normalized.page || 1,
-    page_size: normalized.page_size || 10,
-    total_pages: normalized.total_pages || Math.ceil((normalized.total || 0) / (normalized.page_size || 10))
+    data: [],
+    total: 0,
+    page: 1,
+    page_size: 10,
+    total_pages: 0
   };
-  
-  return result;
 };
 
 /**
@@ -595,20 +626,28 @@ export const handleFileDownload = (response, defaultFilename = 'download.xlsx', 
  * @param {boolean} options.returnDataOnly - 是否只返回data字段（默认：false）
  * @param {boolean} options.paginated - 是否为分页响应（默认：false）
  * @param {boolean} options.silent - 是否静默处理错误（不显示错误消息，默认：false）
+ * @param {number} options.timeout - 自定义超时时间（毫秒），如果不设置则使用axiosConfig中的默认超时
  * @returns {Promise} 返回处理后的响应数据
  */
 export const request = async (config, options = {}) => {
   const {
     returnDataOnly = false,
     paginated = false,
-    silent = false
+    silent = false,
+    timeout = null
   } = options;
   
   try {
-    const response = await axios(config);
+    // 如果指定了超时时间，添加到config中
+    const requestConfig = { ...config };
+    if (timeout !== null) {
+      requestConfig.timeout = timeout;
+    }
+    
+    const response = await axios(requestConfig);
     
     // 如果是文件下载（blob响应），直接返回原始响应
-    if (config.responseType === 'blob') {
+    if (requestConfig.responseType === 'blob') {
       return response;
     }
     

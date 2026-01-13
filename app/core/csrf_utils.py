@@ -5,6 +5,7 @@ CSRF工具函数
 import logging
 from fastapi import HTTPException, status, Request
 from typing import Optional
+from anyio import EndOfStream
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,6 @@ def safe_raise_csrf_exception(
     try:
         if hasattr(request, '_is_disconnected') and request._is_disconnected:
             logger.debug("客户端已断开连接，跳过CSRF异常抛出")
-            from anyio import EndOfStream
             raise EndOfStream("客户端已断开连接")
     except Exception as e:
         # 如果已经是 EndOfStream，直接重新抛出
@@ -46,7 +46,6 @@ def safe_raise_csrf_exception(
             raise
         # 如果是 RuntimeError 且包含 "Connection disconnected"，转换为 EndOfStream
         if isinstance(e, RuntimeError) and "Connection disconnected" in str(e):
-            from anyio import EndOfStream
             raise EndOfStream("客户端已断开连接")
     
     # 方法2: 检查 scope 中是否有连接断开标记
@@ -54,7 +53,6 @@ def safe_raise_csrf_exception(
         if hasattr(request, 'scope') and isinstance(request.scope, dict):
             if request.scope.get('_disconnected', False):
                 logger.debug("从 scope 检测到连接已断开，跳过CSRF异常抛出")
-                from anyio import EndOfStream
                 raise EndOfStream("客户端已断开连接")
     except Exception as e:
         # 如果已经是 EndOfStream，直接重新抛出

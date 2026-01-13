@@ -15,13 +15,14 @@ from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
-from app.core.utils import parse_date_to_app_timezone
+from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
+from app.core.dependencies import get_notification_config_service
+from app.core.auto_bot import send_telegram_message
 from app.models.models import (
     Client, Product, User, UserRole,
     ClientNotificationConfig, ProductNotificationConfig, AdminNotificationConfig,
     PostbackNotification, PostbackConversion
 )
-from app.core.utils import get_app_now_naive
 from app.schemas.notification import (
     ClientNotificationConfigCreate,
     ClientNotificationConfigUpdate,
@@ -38,6 +39,8 @@ from app.schemas.notification import (
     PostbackNotificationListResponse
 )
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
+from app.services.notification_config_service import NotificationConfigService
+from app.services.telegram_notification_service import TelegramNotificationService
 
 # 创建路由实例
 router = APIRouter()
@@ -56,9 +59,6 @@ async def get_client_notification_config(
 ):
     """获取客户的通知配置（已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层获取客户通知配置（服务层会处理权限检查和验证）
@@ -97,9 +97,6 @@ async def create_or_update_client_notification_config(
 ):
     """创建或更新客户的通知配置（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 准备配置数据
@@ -123,9 +120,6 @@ async def delete_client_notification_config(
 ):
     """删除客户的通知配置（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层删除客户通知配置（服务层会处理验证和删除）
@@ -146,9 +140,6 @@ async def get_product_notification_config(
 ):
     """获取产品的通知配置（已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层获取产品通知配置（服务层会处理权限检查和验证）
@@ -187,9 +178,6 @@ async def create_or_update_product_notification_config(
 ):
     """创建或更新产品的通知配置（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 准备配置数据
@@ -213,9 +201,6 @@ async def delete_product_notification_config(
 ):
     """删除产品的通知配置（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层删除产品通知配置（服务层会处理验证和删除）
@@ -246,9 +231,6 @@ async def get_notification_records(
 ):
     """获取通知记录列表（支持分页和过滤，已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层获取通知记录列表（服务层会处理查询、过滤、分页、自动创建等）
@@ -285,9 +267,6 @@ async def get_notification_record(
 ):
     """获取通知记录详情（已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层获取通知记录详情（服务层会处理权限检查）
@@ -315,9 +294,6 @@ async def resend_conversion_notification(
     如果转化记录没有转发记录或转发失败，可以手动补发转发。
     """
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层补发转化通知（服务层会处理权限检查和补发逻辑）
@@ -344,9 +320,6 @@ async def resend_notification_from_forward_log(
     仅管理员可访问。
     """
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层基于转发日志补发通知（服务层会处理权限检查和补发逻辑）
@@ -370,9 +343,6 @@ async def get_admin_notification_config(
     仅管理员可访问
     如果配置不存在，返回默认配置
     """
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     config = await notification_service.get_admin_notification_config()
     
@@ -409,9 +379,6 @@ async def create_or_update_admin_notification_config(
     仅管理员可访问
     管理员通知配置是单例模式，只有一条记录（id=1）
     """
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     config = await notification_service.create_or_update_admin_notification_config(
         config_data.model_dump(exclude_unset=True),
@@ -435,7 +402,6 @@ async def test_telegram_connection(
     仅管理员可访问
     发送一条测试消息到指定的 Chat ID
     """
-    from app.core.auto_bot import send_telegram_message
     
     telegram_chat_id = request_data.telegram_chat_id
     
@@ -476,9 +442,6 @@ async def send_test_message(
     仅管理员可访问
     发送指定类型的测试消息到指定的 Chat ID
     """
-    from app.core.auto_bot import send_telegram_message
-    from app.services.telegram_notification_service import TelegramNotificationService
-    
     telegram_chat_id = request_data.telegram_chat_id
     message_type = request_data.message_type
     

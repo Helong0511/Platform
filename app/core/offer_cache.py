@@ -7,6 +7,7 @@ import json
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 from app.core.redis_client import get_redis_client
+from app.core.cache_manager import CacheManager
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,6 @@ async def set_offer_cache(offer_id: int, advertiser_id: int, offer_name: Optiona
         # 添加缓存标签（用于精确失效）
         if add_tags:
             try:
-                from app.core.cache_manager import CacheManager
                 tags = [f"offer:{offer_id}"]
                 if advertiser_id:
                     tags.append(f"advertiser:{advertiser_id}")

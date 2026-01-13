@@ -1,35 +1,45 @@
 """
 统一 Postback 服务接口
 支持多平台的 postback 回调处理
+
+功能说明：
+- 接收和处理来自上游平台的 postback 回调
+- 查询和管理转化记录（已融合转化日志功能）
+- 支持多维度筛选：平台、产品、客户、Click ID、Offer、渠道、广告主、转化状态等
+- 提供转化统计、转发日志、诊断工具等功能
+- 支持更新转化状态（Approved/Pending）
+
+注意：
+- 转化日志功能已融合到此模块，原 /api/v1/conversion-logs 接口已废弃
+- 建议使用 /api/v1/postback/conversions 接口进行所有转化记录查询
 """
 import logging
-from typing import Optional, Dict, Any
-from datetime import datetime
+from typing import Optional
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Request, Query, Depends, HTTPException, Path
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, and_, or_
 
 from app.core.database import get_db
-from app.core.postback import PostbackProcessor, register_handler
+from app.core.postback import register_handler, PostbackForwarder
 from app.core.postback.bft_handler import BftPostbackHandler
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import parse_date_to_app_timezone
-from app.models.models import PostbackConversion, Product, Client, PostbackForwardLog, PostbackNotification, Click, Offer, Publisher, Advertiser, User, UserRole
+from app.models.models import (
+    PostbackConversion, Product, Client, PostbackForwardLog, PostbackNotification, 
+    Click, ClickStats, Offer, Publisher, Advertiser, User, ConversionDeductionLog
+)
 from app.schemas.postback import (
-    PostbackRequest,
-    PostbackResponse,
     PostbackConversionResponse,
     PostbackStatsResponse,
-    PostbackQueryParams,
     PostbackForwardLogResponse
 )
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
-from app.core.security import get_current_user
+from app.core.security import require_admin
 
 # 创建路由实例
 router = APIRouter()
@@ -40,56 +50,43 @@ bft_handler = BftPostbackHandler()
 register_handler(bft_handler)
 
 
-def get_client_ip(request: Request) -> Optional[str]:
-    """获取客户端IP地址"""
-    # 优先从 X-Forwarded-For 获取（代理服务器）
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        # X-Forwarded-For 可能包含多个IP，取第一个
-        return forwarded_for.split(",")[0].strip()
-    
-    # 从 X-Real-IP 获取
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip.strip()
-    
-    # 最后从客户端直接IP获取
-    if request.client:
-        return request.client.host
-    
-    return None
-
-
 # ====== 查询接口（必须在动态路径之前定义） ======
 @router.get("/postback/conversions", 
             response_model=PaginatedResponseBaseSchema[list[PostbackConversionResponse]],
-            summary="查询 PostBack 转化记录（管理员）")
+            summary="查询 PostBack 转化记录（管理员，已融合转化日志功能）")
 async def get_postback_conversions(
     request: Request,
     platform: Optional[str] = Query(None, description="平台名称"),
     product_id: Optional[int] = Query(None, description="产品ID"),
     client_id: Optional[int] = Query(None, description="客户ID"),
     conversion_or_click_id: Optional[str] = Query(None, description="转化ID或点击ID"),
+    # 转化日志筛选条件（融合功能）
+    click_id: Optional[str] = Query(None, description="Click ID过滤"),
+    offer_id: Optional[int] = Query(None, description="Offer ID过滤"),
+    publisher_id: Optional[int] = Query(None, description="渠道ID过滤"),
+    advertiser_id: Optional[int] = Query(None, description="广告主ID过滤"),
+    conversion_status: Optional[str] = Query(None, description="转化状态过滤（Approved/Pending）"),
     start_date: Optional[str] = Query(None, description="起始日期（YYYY-MM-DD）"),
     end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="每页数量"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """
     查询 PostBack 转化记录（仅管理员）
+    已融合转化日志功能，支持所有筛选条件
     """
-    # 检查权限（仅管理员）
-    if current_user.role != UserRole.ADMIN:
-        raise_api_exception(
-            ErrorCode.FORBIDDEN,
-            detail="仅管理员可查询 PostBack 转化记录"
-        )
     
     try:
+        # 判断是否需要 JOIN ClickStats 表（用于筛选 offer_id、publisher_id、advertiser_id）
+        need_join_click_stats = offer_id is not None or publisher_id is not None or advertiser_id is not None
+        
         # 构建查询
-        query = select(PostbackConversion)
+        if need_join_click_stats:
+            query = select(PostbackConversion).join(ClickStats, PostbackConversion.click_id == ClickStats.click_id)
+        else:
+            query = select(PostbackConversion)
         
         # 应用过滤条件
         conditions = []
@@ -108,6 +105,18 @@ async def get_postback_conversions(
                     PostbackConversion.click_id == conversion_or_click_id
                 )
             )
+        # 转化日志筛选条件
+        if click_id:
+            conditions.append(PostbackConversion.click_id == click_id)
+        if offer_id:
+            conditions.append(ClickStats.offer_id == offer_id)
+        if publisher_id:
+            conditions.append(ClickStats.publisher_id == publisher_id)
+        if advertiser_id:
+            conditions.append(ClickStats.advertiser_id == advertiser_id)
+        if conversion_status:
+            if hasattr(PostbackConversion, 'conversion_status'):
+                conditions.append(PostbackConversion.conversion_status == conversion_status)
         
         # 日期范围过滤（使用应用时区，与数据库时间一致）
         if start_date:
@@ -134,7 +143,12 @@ async def get_postback_conversions(
             query = query.where(and_(*conditions))
         
         # 计算总数
-        count_query = select(func.count()).select_from(PostbackConversion)
+        if need_join_click_stats:
+            count_query = select(func.count(PostbackConversion.id)).select_from(
+                PostbackConversion.__table__.join(ClickStats.__table__, PostbackConversion.click_id == ClickStats.click_id)
+            )
+        else:
+            count_query = select(func.count(PostbackConversion.id)).select_from(PostbackConversion.__table__)
         if conditions:
             count_query = count_query.where(and_(*conditions))
         total_result = await db.execute(count_query)
@@ -151,7 +165,6 @@ async def get_postback_conversions(
         # 这样可以找到被扣量而未保存到主表的转化记录
         deduction_logs = []
         if conversion_or_click_id and len(conversions) == 0:
-            from app.models.models import ConversionDeductionLog
             deduction_query = select(ConversionDeductionLog).where(
                 ConversionDeductionLog.click_id == conversion_or_click_id
             )
@@ -198,8 +211,9 @@ async def get_postback_conversions(
                 notification_counts[row.conversion_id] = row.count
         
         # 批量查询产品和客户信息
-        product_ids = list(set([conv.product_id for conv in conversions if conv.product_id]))
-        client_ids = list(set([conv.client_id for conv in conversions if conv.client_id]))
+        # 使用集合推导式去重，提高性能
+        product_ids = list({conv.product_id for conv in conversions if conv.product_id})
+        client_ids = list({conv.client_id for conv in conversions if conv.client_id})
         
         products_map = {}
         if product_ids:
@@ -214,8 +228,8 @@ async def get_postback_conversions(
             clients_result = await db.execute(clients_query)
             # 获取所有客户数据（一次性获取，避免重复查询）
             clients_data = list(clients_result.all())
-            # 收集所有需要查询的用户ID
-            user_ids = list(set([row.user_id for row in clients_data if row.user_id]))
+            # 收集所有需要查询的用户ID（使用集合去重）
+            user_ids = list({row.user_id for row in clients_data if row.user_id})
             users_map = {}
             if user_ids:
                 users_query = select(User.id, User.full_name, User.username).where(User.id.in_(user_ids))
@@ -234,35 +248,70 @@ async def get_postback_conversions(
                 clients_map[row.id] = client_name
         
         # 批量查询点击记录信息（通过 conversion_id = clicks.click_id 关联）
-        conversion_ids = list(set([conv.conversion_id for conv in conversions if conv.conversion_id]))
+        # 同时查询 ClickStats 表以获取 CPL 系统关联信息
+        # 使用集合去重，提高性能
+        conversion_ids = list({conv.conversion_id for conv in conversions if conv.conversion_id})
+        click_ids_from_conversions = list({conv.click_id for conv in conversions if conv.click_id})
         clicks_map = {}
+        click_stats_map = {}
         offer_ids = set()
         publisher_ids = set()
         advertiser_ids = set()
         gid_publisher_ids = set()  # 通过 gid 关联的渠道ID
         
+        # 查询 Click 表（如果存在）
         if conversion_ids:
-            clicks_query = select(
-                Click.click_id,
-                Click.offer_id,
-                Click.publisher_id,
-                Click.advertiser_id,
-                Click.click_time
-            ).where(Click.click_id.in_(conversion_ids))
-            clicks_result = await db.execute(clicks_query)
-            for row in clicks_result.all():
-                clicks_map[row.click_id] = {
-                    'offer_id': row.offer_id,
-                    'publisher_id': row.publisher_id,
-                    'advertiser_id': row.advertiser_id,
-                    'click_time': row.click_time
-                }
-                if row.offer_id:
-                    offer_ids.add(row.offer_id)
-                if row.publisher_id:
-                    publisher_ids.add(row.publisher_id)
-                if row.advertiser_id:
-                    advertiser_ids.add(row.advertiser_id)
+            try:
+                clicks_query = select(
+                    Click.click_id,
+                    Click.offer_id,
+                    Click.publisher_id,
+                    Click.advertiser_id,
+                    Click.click_time
+                ).where(Click.click_id.in_(conversion_ids))
+                clicks_result = await db.execute(clicks_query)
+                for row in clicks_result.all():
+                    clicks_map[row.click_id] = {
+                        'offer_id': row.offer_id,
+                        'publisher_id': row.publisher_id,
+                        'advertiser_id': row.advertiser_id,
+                        'click_time': row.click_time
+                    }
+                    if row.offer_id:
+                        offer_ids.add(row.offer_id)
+                    if row.publisher_id:
+                        publisher_ids.add(row.publisher_id)
+                    if row.advertiser_id:
+                        advertiser_ids.add(row.advertiser_id)
+            except Exception as e:
+                logger.debug(f"无法从 Click 表加载数据: {e}")
+        
+        # 查询 ClickStats 表（CPL 系统，优先使用）
+        if click_ids_from_conversions:
+            try:
+                click_stats_query = select(
+                    ClickStats.click_id,
+                    ClickStats.offer_id,
+                    ClickStats.publisher_id,
+                    ClickStats.advertiser_id,
+                    ClickStats.click_time
+                ).where(ClickStats.click_id.in_(click_ids_from_conversions))
+                click_stats_result = await db.execute(click_stats_query)
+                for row in click_stats_result.all():
+                    click_stats_map[row.click_id] = {
+                        'offer_id': row.offer_id,
+                        'publisher_id': row.publisher_id,
+                        'advertiser_id': row.advertiser_id,
+                        'click_time': row.click_time
+                    }
+                    if row.offer_id:
+                        offer_ids.add(row.offer_id)
+                    if row.publisher_id:
+                        publisher_ids.add(row.publisher_id)
+                    if row.advertiser_id:
+                        advertiser_ids.add(row.advertiser_id)
+            except Exception as e:
+                logger.debug(f"无法从 ClickStats 表加载数据: {e}")
         
         # 通过 gid 字段关联渠道（gid 是渠道ID）
         for conv in conversions:
@@ -311,10 +360,20 @@ async def get_postback_conversions(
             if conv.client_id and conv.client_id in clients_map:
                 conv_dict['client_name'] = clients_map[conv.client_id]
             
-            # 通过 conversion_id = clicks.click_id 关联点击记录
-            if conv.conversion_id and conv.conversion_id in clicks_map:
+            # 通过 click_id 关联点击记录（优先使用 ClickStats，其次使用 Click）
+            click_info = None
+            if conv.click_id:
+                # 优先使用 ClickStats
+                if conv.click_id in click_stats_map:
+                    click_info = click_stats_map[conv.click_id]
+                elif conv.click_id in clicks_map:
+                    click_info = clicks_map[conv.click_id]
+            # 如果没有通过 click_id 找到，尝试通过 conversion_id 查找（向后兼容）
+            elif conv.conversion_id and conv.conversion_id in clicks_map:
                 click_info = clicks_map[conv.conversion_id]
-                conv_dict['click_id'] = conv.conversion_id  # conversion_id 就是 click_id
+            
+            if click_info:
+                conv_dict['click_id'] = conv.click_id or conv.conversion_id
                 conv_dict['click_offer_id'] = click_info['offer_id']
                 conv_dict['click_publisher_id'] = click_info['publisher_id']
                 conv_dict['click_advertiser_id'] = click_info['advertiser_id']
@@ -390,17 +449,11 @@ async def get_postback_stats(
     start_date: Optional[str] = Query(None, description="起始日期（YYYY-MM-DD）"),
     end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """
     获取 PostBack 统计信息（仅管理员）
     """
-    # 检查权限（仅管理员）
-    if current_user.role != UserRole.ADMIN:
-        raise_api_exception(
-            ErrorCode.FORBIDDEN,
-            detail="仅管理员可查看 PostBack 统计信息"
-        )
     
     try:
         # 构建查询
@@ -500,19 +553,13 @@ async def get_postback_forward_logs(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="每页数量"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """
     查询 PostBack 下游转发日志
     
     仅管理员可访问
     """
-    # 检查管理员权限
-    if current_user.role != UserRole.ADMIN:
-        raise_api_exception(
-            ErrorCode.FORBIDDEN,
-            detail="仅管理员可访问此接口"
-        )
     
     try:
         # 构建查询条件
@@ -542,7 +589,6 @@ async def get_postback_forward_logs(
             try:
                 end_dt = parse_date_to_app_timezone(end_date, is_end_date=True)
                 # 结束日期已包含整天（23:59:59.999999）
-                from datetime import timedelta
                 end_dt = end_dt + timedelta(days=1)
                 conditions.append(PostbackForwardLog.created_at < end_dt)
             except ValueError:
@@ -599,7 +645,7 @@ async def get_postback_forward_logs(
 async def resend_postback_forward(
     forward_log_id: int = Path(..., ge=1, description="转发日志ID"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """
     补发 PostBack 转发
@@ -607,15 +653,6 @@ async def resend_postback_forward(
     根据转发日志重新发送转发请求，用于处理转发失败的情况
     仅管理员可访问
     """
-    from app.core.postback.forwarder import PostbackForwarder
-    
-    # 检查管理员权限
-    if current_user.role != UserRole.ADMIN:
-        raise_api_exception(
-            ErrorCode.FORBIDDEN,
-            detail="仅管理员可访问此接口"
-        )
-    
     try:
         # 查询转发日志
         result = await db.execute(
@@ -691,7 +728,7 @@ async def resend_postback_forward(
 async def diagnose_postback_record(
     conversion_or_click_id: str = Query(..., description="转化ID或点击ID"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """
     诊断 PostBack 记录问题
@@ -705,12 +742,6 @@ async def diagnose_postback_record(
     
     仅管理员可访问
     """
-    # 检查管理员权限
-    if current_user.role != UserRole.ADMIN:
-        raise_api_exception(
-            ErrorCode.FORBIDDEN,
-            detail="仅管理员可访问此接口"
-        )
     
     try:
         diagnosis_result = {
@@ -746,8 +777,8 @@ async def diagnose_postback_record(
                 }
                 for record in main_records
             ]
-            # 收集所有平台名称
-            platforms = list(set([r.platform for r in main_records]))
+            # 收集所有平台名称（使用集合推导式去重）
+            platforms = list({r.platform for r in main_records})
             if len(platforms) > 1 or (len(platforms) == 1 and platforms[0] != "bft"):
                 diagnosis_result["platform_name_changes"] = platforms
                 diagnosis_result["suggestions"].append(
@@ -760,7 +791,6 @@ async def diagnose_postback_record(
             )
         
         # 2. 检查扣减日志表（conversion_deduction_logs）
-        from app.models.models import ConversionDeductionLog
         deduction_query = select(ConversionDeductionLog).where(
             ConversionDeductionLog.click_id == conversion_or_click_id
         ).order_by(ConversionDeductionLog.created_at.desc())
@@ -858,5 +888,68 @@ async def diagnose_postback_record(
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"诊断失败: {str(e)}"
+        )
+
+
+# ====== 更新转化状态接口（融合转化日志功能） ======
+@router.put("/postback/conversions/{conversion_id}/status",
+            response_model=ResponseBaseSchema[dict],
+            summary="更新转化状态（管理员）")
+async def update_conversion_status(
+    conversion_id: int = Path(..., ge=1, description="转化记录ID"),
+    status: str = Query(..., description="转化状态（Approved/Pending）"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    更新转化状态（仅管理员）
+    融合转化日志功能
+    """
+    try:
+        result = await db.execute(
+            select(PostbackConversion).where(PostbackConversion.id == conversion_id)
+        )
+        conversion = result.scalars().first()
+        
+        if not conversion:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail=f"转化记录ID {conversion_id} 不存在"
+            )
+        
+        # 验证状态值
+        if status not in ['Approved', 'Pending']:
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="转化状态必须是 'Approved' 或 'Pending'"
+            )
+        
+        # 更新转化状态
+        if hasattr(conversion, 'conversion_status'):
+            conversion.conversion_status = status
+            await db.commit()
+            await db.refresh(conversion)
+            
+            logger.info(
+                f"管理员 {current_user.username} 更新转化状态: "
+                f"conversion_id={conversion_id}, status={status}"
+            )
+            
+            return ResponseBaseSchema.success(
+                data={"message": "状态更新成功", "conversion_id": conversion_id, "status": status}
+            )
+        else:
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail="PostbackConversion 模型缺少 conversion_status 字段"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新转化状态失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"更新失败：{str(e)}"
         )
 

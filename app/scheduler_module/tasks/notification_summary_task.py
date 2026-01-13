@@ -13,6 +13,7 @@ from sqlalchemy.future import select
 
 from app.core.redis_client import get_redis_client
 from app.core.postback.notifier import PostbackNotifier
+from app.core.telegram_utils import truncate_message
 from app.services.telegram_notification_service import TelegramNotificationService
 from app.models.models import Client, Product, PostbackConversion
 from app.core.database import AsyncSessionLocal
@@ -166,7 +167,6 @@ async def process_hourly_notifications(db: AsyncSession) -> Dict[str, Any]:
                             msg += f" ({user_full_name})"
                         
                         # 检查消息长度，如果超过限制则截断（Telegram 最大 4096 字符）
-                        from app.core.telegram_utils import truncate_message
                         msg = truncate_message(msg)
                         
                         # 获取 Telegram Chat ID
@@ -351,7 +351,6 @@ async def process_daily_notifications(db: AsyncSession) -> Dict[str, Any]:
                             msg += f" ({user_full_name})"
                         
                         # 检查消息长度，如果超过限制则截断（Telegram 最大 4096 字符）
-                        from app.core.telegram_utils import truncate_message
                         msg = truncate_message(msg)
                         
                         # 获取 Telegram Chat ID

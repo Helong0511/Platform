@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.core.dependencies import get_conversion_service
+from app.services.cpl.conversion_service import ConversionService
 from app.models.models import User
 from app.schemas.base import ResponseBaseSchema
 from app.core.exceptions import raise_api_exception
@@ -46,8 +48,6 @@ async def get_conversion_summary(
     """
     try:
         # 使用服务层（业务逻辑在ConversionService中，已优化批量加载）
-        from app.core.dependencies import get_conversion_service
-        from app.services.cpl.conversion_service import ConversionService
         
         conversion_service: ConversionService = await get_conversion_service(db)
         
@@ -86,9 +86,6 @@ async def get_summary_by_offer(
     """
     try:
         # 使用服务层（业务逻辑在ConversionService中，已优化批量查询）
-        from app.core.dependencies import get_conversion_service
-        from app.services.cpl.conversion_service import ConversionService
-        
         conversion_service: ConversionService = await get_conversion_service(db)
         
         # 调用服务层获取按Offer的统计

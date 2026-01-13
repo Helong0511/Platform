@@ -15,7 +15,7 @@ from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Foreig
     UniqueConstraint, Date
 from sqlalchemy.orm import declarative_base  # SQLAlchemy 2.0+ 推荐方式
 from sqlalchemy.orm import relationship
-from datetime import datetime, timezone
+from datetime import datetime
 import enum
 import uuid
 from passlib.context import CryptContext
@@ -1016,7 +1016,7 @@ class OfferDiscount(Base):
     )
 
 
-# 上游测试记录模型
+# 上游测试记录模型（已废弃，保留模型定义以兼容现有数据库表）
 class AdvertiserTest(Base):
     __tablename__ = "advertiser_tests"
 
@@ -1171,4 +1171,30 @@ class ConversionDeductionLog(Base):
         Index("idx_publisher_id", "publisher_id"),
         Index("idx_created_at", "created_at"),
         Index("idx_deduction_config_id", "deduction_config_id"),
+    )
+
+
+# Postback IP 白名单模型
+class PostbackIpWhitelist(Base):
+    """
+    Postback IP 白名单模型
+    
+    用于存储允许接收 postback 数据的 IP 地址列表
+    只有白名单中的 IP 地址发送的 postback 数据才会被处理并记录
+    非白名单 IP 的数据会被视为测试数据，不进行记录
+    
+    表名: postback_ip_whitelist
+    """
+    __tablename__ = "postback_ip_whitelist"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='白名单ID')
+    ip_address = Column(String(45), nullable=False, unique=True, index=True, comment='IP地址（支持IPv4和IPv6）')
+    description = Column(String(255), nullable=True, comment='IP地址描述/备注')
+    is_active = Column(Boolean, default=True, nullable=False, index=True, comment='是否启用')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive, onupdate=get_app_now_naive, nullable=False, comment='更新时间')
+    
+    __table_args__ = (
+        Index("idx_ip_address", "ip_address"),
+        Index("idx_is_active", "is_active"),
     )

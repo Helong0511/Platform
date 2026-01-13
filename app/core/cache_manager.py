@@ -11,9 +11,10 @@ from app.core.short_link_cache import (
     get_short_link_from_cache,
     set_short_link_to_cache,
     serialize_short_link,
+    invalidate_short_link_cache,
     CACHE_PREFIX as SHORT_LINK_CACHE_PREFIX
 )
-from app.core.offer_cache import set_offer_cache, get_offer_advertiser_id
+from app.core.offer_cache import set_offer_cache, get_offer_advertiser_id, invalidate_offer_cache
 from app.models.models import ShortLink, Offer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -248,7 +249,6 @@ class CacheManager:
         """
         try:
             # 清除短链接缓存
-            from app.core.short_link_cache import invalidate_short_link_cache
             await invalidate_short_link_cache(short_code)
             
             # 清除相关标签的缓存
@@ -272,7 +272,6 @@ class CacheManager:
         """
         try:
             # 清除Offer缓存
-            from app.core.offer_cache import invalidate_offer_cache
             await invalidate_offer_cache(offer_id)
             
             # 清除相关标签的缓存
@@ -294,7 +293,6 @@ class CacheManager:
         Returns:
             缓存的Offer信息，如果不存在则返回None
         """
-        from app.core.offer_cache import get_offer_advertiser_id
         advertiser_id = await get_offer_advertiser_id(offer_id)
         if advertiser_id:
             return {"advertiser_id": advertiser_id}

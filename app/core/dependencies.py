@@ -18,6 +18,28 @@ from app.models.models import User, UserRole
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 
+# 服务类导入（延迟导入以避免循环依赖）
+from app.services.user_service import UserService
+from app.services.product_service import ProductService
+from app.services.cpl.advertiser_service import AdvertiserService
+from app.services.cpl.publisher_service import PublisherService
+from app.services.cpl.offer_service import OfferService
+from app.services.cpl.conversion_service import ConversionService
+from app.services.client_service import ClientService
+from app.services.short_link_service import ShortLinkService
+from app.services.ad_data_service import AdDataService
+from app.services.cpl.cap_service import CapService
+from app.services.cpl.discount_service import DiscountService
+from app.services.cpl.conversion_deduction_service import ConversionDeductionService
+from app.services.product_assignment_service import ProductAssignmentService
+from app.services.notification_config_service import NotificationConfigService
+from app.services.cpl.conversion_log_service import ConversionLogService
+from app.services.click_service import ClickService
+from app.services.audit_log_service import AuditLogService
+from app.services.session_service import SessionService
+from app.services.scheduled_task_service import ScheduledTaskService
+from app.services.dashboard_service import DashboardService
+
 # ====== 组合依赖项 ======
 
 async def get_current_admin_user(
@@ -70,102 +92,82 @@ async def get_db_and_admin(
 # ====== 服务依赖 ======
 async def get_user_service(db: AsyncSession = Depends(get_db)):
     """获取用户服务实例"""
-    from app.services.user_service import UserService
     return UserService(db)
 
 async def get_product_service(db: AsyncSession = Depends(get_db)):
     """获取产品服务实例"""
-    from app.services.product_service import ProductService
     return ProductService(db)
 
 async def get_advertiser_service(db: AsyncSession = Depends(get_db)):
     """获取广告主服务实例"""
-    from app.services.cpl.advertiser_service import AdvertiserService
     return AdvertiserService(db)
 
 async def get_publisher_service(db: AsyncSession = Depends(get_db)):
     """获取渠道服务实例"""
-    from app.services.cpl.publisher_service import PublisherService
     return PublisherService(db)
 
 async def get_offer_service(db: AsyncSession = Depends(get_db)):
     """获取Offer服务实例"""
-    from app.services.cpl.offer_service import OfferService
     return OfferService(db)
 
 async def get_conversion_service(db: AsyncSession = Depends(get_db)):
     """获取转化服务实例"""
-    from app.services.cpl.conversion_service import ConversionService
     return ConversionService(db)
 
 async def get_client_service(db: AsyncSession = Depends(get_db)):
     """获取客户服务实例"""
-    from app.services.client_service import ClientService
     return ClientService(db)
 
 async def get_short_link_service(db: AsyncSession = Depends(get_db)):
     """获取短链接服务实例"""
-    from app.services.short_link_service import ShortLinkService
     return ShortLinkService(db)
 
 async def get_ad_data_service(db: AsyncSession = Depends(get_db)):
     """获取广告数据服务实例"""
-    from app.services.ad_data_service import AdDataService
     return AdDataService(db)
 
 async def get_cap_service(db: AsyncSession = Depends(get_db)):
     """获取Cap服务实例"""
-    from app.services.cpl.cap_service import CapService
     return CapService(db)
 
 async def get_discount_service(db: AsyncSession = Depends(get_db)):
     """获取Discount服务实例"""
-    from app.services.cpl.discount_service import DiscountService
     return DiscountService(db)
 
 async def get_conversion_deduction_service(db: AsyncSession = Depends(get_db)):
     """获取转化扣减服务实例"""
-    from app.services.cpl.conversion_deduction_service import ConversionDeductionService
     return ConversionDeductionService(db)
 
 async def get_product_assignment_service(db: AsyncSession = Depends(get_db)):
     """获取产品分配服务实例"""
-    from app.services.product_assignment_service import ProductAssignmentService
     return ProductAssignmentService(db)
 
 async def get_notification_config_service(db: AsyncSession = Depends(get_db)):
     """获取通知配置服务实例"""
-    from app.services.notification_config_service import NotificationConfigService
     return NotificationConfigService(db)
 
 async def get_conversion_log_service(db: AsyncSession = Depends(get_db)):
     """获取转化日志服务实例"""
-    from app.services.cpl.conversion_log_service import ConversionLogService
     return ConversionLogService(db)
 
 async def get_click_service(db: AsyncSession = Depends(get_db)):
     """获取点击服务实例"""
-    from app.services.click_service import ClickService
     return ClickService(db)
 
 async def get_audit_log_service(db: AsyncSession = Depends(get_db)):
     """获取操作日志服务实例"""
-    from app.services.audit_log_service import AuditLogService
     return AuditLogService(db)
 
 async def get_session_service(db: AsyncSession = Depends(get_db)):
     """获取会话服务实例"""
-    from app.services.session_service import SessionService
     return SessionService(db)
 
 async def get_scheduled_task_service(db: AsyncSession = Depends(get_db)):
     """获取定时任务服务实例"""
-    from app.services.scheduled_task_service import ScheduledTaskService
     return ScheduledTaskService(db)
 
 async def get_dashboard_service(db: AsyncSession = Depends(get_db)):
     """获取仪表盘服务实例"""
-    from app.services.dashboard_service import DashboardService
     return DashboardService(db)
 
 # ====== 类型别名，便于在endpoints中使用 ======

@@ -9,7 +9,6 @@ from sqlalchemy import func, and_
 
 from app.models.models import User
 from app.models.session import UserSession, TokenBlacklist
-from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.utils import get_app_now_naive

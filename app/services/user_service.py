@@ -3,9 +3,10 @@
 封装用户相关的业务逻辑
 """
 from typing import Optional, List, Dict, Any
+import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, and_
 from sqlalchemy.orm import selectinload
 
 from app.models.models import User, Client, UserRole, Publisher
@@ -14,7 +15,7 @@ from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.audit_log import log_user_action, log_activate, log_deactivate
 from app.core.utils import get_app_now_naive
-from sqlalchemy import and_
+from app.core.validation import validate_password_strength
 import logging
 
 logger = logging.getLogger(__name__)
@@ -139,7 +140,6 @@ class UserService(BaseService[User]):
         self.require_admin(current_user)
         
         # 验证用户名唯一性
-        from sqlalchemy import or_
         conditions = [User.username == user_data['username']]
         if user_data.get('email'):
             conditions.append(User.email == user_data['email'])
@@ -187,9 +187,6 @@ class UserService(BaseService[User]):
         
         # 如果提供了客户信息，同时创建客户（在同一事务中）
         if user_data.get('company_name'):
-            from app.models.models import Client
-            import uuid
-            
             # 检查该用户是否已有客户关联
             client_count = await self.db.execute(
                 select(func.count(Client.id)).where(Client.user_id == user.id)
@@ -216,7 +213,6 @@ class UserService(BaseService[User]):
         
         # 如果创建了客户，重新加载用户以包含客户信息
         if user_data.get('company_name'):
-            from sqlalchemy.orm import selectinload
             user_query = select(User).options(selectinload(User.clients)).where(User.id == user.id)
             user_result = await self.db.execute(user_query)
             # selectinload不会产生重复行，但为了安全起见使用unique()
@@ -334,7 +330,6 @@ class UserService(BaseService[User]):
         
         # 如果 is_active 改变，记录激活/禁用日志
         if 'is_active' in user_data and user_data['is_active'] != old_is_active:
-            from app.core.audit_log import log_activate, log_deactivate
             if user.is_active:
                 await log_activate(
                     db=self.db,
@@ -455,7 +450,6 @@ class UserService(BaseService[User]):
                 )
         
         # 验证新密码强度
-        from app.core.validation import validate_password_strength
         is_valid, error_msg = validate_password_strength(new_password)
         if not is_valid:
             raise_api_exception(

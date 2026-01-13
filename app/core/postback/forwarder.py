@@ -15,6 +15,7 @@ from urllib.parse import urlencode, urlparse, parse_qs, urlunparse, quote
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import or_
 from sqlalchemy.orm import joinedload
 
 from app.models.models import (
@@ -22,6 +23,8 @@ from app.models.models import (
     ClickStats, Click, Offer, Publisher, Advertiser, AdminNotificationConfig
 )
 from app.core.utils import get_app_now_naive
+from app.core.auto_bot import send_telegram_message
+from app.services.telegram_notification_service import TelegramNotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +201,6 @@ class PostbackForwarder:
         
         # 检查是否已有通知记录（补发通知场景）
         # 使用 with_for_update() 锁定记录，防止并发创建
-        from sqlalchemy import or_
         existing_notification_result = await db.execute(
             select(PostbackNotification).where(
                 PostbackNotification.conversion_id == conversion.id,
@@ -468,9 +470,6 @@ class PostbackForwarder:
                 
                 # 发送管理员转发成功通知（如果配置了）
                 try:
-                    from app.services.telegram_notification_service import TelegramNotificationService
-                    from app.models.models import AdminNotificationConfig
-                    
                     # 查询管理员通知配置
                     admin_config_result = await db.execute(
                         select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
@@ -539,9 +538,6 @@ class PostbackForwarder:
                 
                 # 发送管理员转发失败告警（如果配置了）
                 try:
-                    from app.services.telegram_notification_service import TelegramNotificationService
-                    from app.models.models import AdminNotificationConfig
-                    
                     # 查询管理员通知配置
                     admin_config_result = await db.execute(
                         select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
@@ -1449,7 +1445,6 @@ class PostbackForwarder:
             error_message: 错误信息（如果失败）
         """
         try:
-            from app.core.auto_bot import send_telegram_message
             
             # 构建通知消息
             if success:

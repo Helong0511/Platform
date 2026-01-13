@@ -46,7 +46,7 @@ from .system import (
 from .external import client_api_router as client_api, telegram_router as telegram
 
 # ==================== Postback模块 ====================
-from .postback import router as postback, bft_router as bft_postback
+from .postback import router as postback, bft_router as bft_postback, ip_whitelist_router as ip_whitelist
 
 # ==================== 追踪模块 ====================
 from .tracking import router as tracking, short_links_router as short_links
@@ -62,12 +62,8 @@ from .cpl import (
     conversion_summary_router as conversion_summary,
     conversion_log_router as conversion_log,
     clicks_router as clicks,
-    advertiser_tests_router as advertiser_tests,
     affiliate_tests_router as affiliate_tests,
 )
-
-# ==================== 其他 ====================
-from . import notify_api
 
 # 导出所有路由（用于统一注册）
 __all__ = [
@@ -114,9 +110,6 @@ __all__ = [
     'conversion_log',
     'clicks',
     # 测试
-    'advertiser_tests',
     'affiliate_tests',
-    # 其他
-    'notify_api',
 ]
 

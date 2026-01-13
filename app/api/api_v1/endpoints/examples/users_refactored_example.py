@@ -20,6 +20,7 @@ from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.infrastructure.cache import cached, CacheInvalidator
+from app.core.utils import optimize_page_size_for_device
 import logging
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,6 @@ async def get_users(
     - 代码更简洁，易于维护
     """
     # 设备类型优化（保留在endpoint中，因为需要Request对象）
-    from app.core.utils import optimize_page_size_for_device
     page_size = optimize_page_size_for_device(request, page_size, default_page_size=10)
     
     # 状态转换

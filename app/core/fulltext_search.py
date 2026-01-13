@@ -2,9 +2,10 @@
 全文搜索工具模块
 提供全文搜索查询构建功能，支持MySQL FULLTEXT索引
 """
+import re
 import logging
 from typing import Optional
-from sqlalchemy import text, func
+from sqlalchemy import text, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -16,7 +17,6 @@ def _validate_field_name(field_name: str) -> bool:
     验证字段名是否安全
     只允许字母、数字、下划线
     """
-    import re
     if not field_name:
         return False
     # 移除反引号后检查
@@ -170,7 +170,6 @@ async def search_with_fulltext(
     )
     
     if like_conditions:
-        from sqlalchemy import or_
         base_query = base_query.where(or_(*like_conditions))
     
     return base_query

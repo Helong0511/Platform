@@ -1,72 +1,55 @@
-import axios from 'axios';
-import { normalizePaginatedResponse, normalizeResponse, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
+/**
+ * TB搜索数据管理 API
+ * 已统一使用 request 函数，保持代码一致性
+ * 包含特殊逻辑：超时控制、文件导入、批量操作等
+ */
+import { request, normalizePaginatedResponse, normalizeResponse, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
+import axios from 'axios'; // 保留用于特殊场景（超时控制、文件上传）
 
 // 获取TB搜索数据列表
 export const getTBSearchDataList = async (params) => {
-  try {
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const timeout = isMobile ? 60000 : 45000;
-    
-    const response = await axios.get('/api/v1/tb-search-data/', { 
-      params,
-      timeout: timeout
-    });
-    return normalizePaginatedResponse(response);
-  } catch (error) {
-    handleError(error);
-  }
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const timeout = isMobile ? 60000 : 45000;
+  
+  return request({
+    url: '/api/v1/tb-search-data/',
+    method: 'get',
+    params
+  }, { paginated: true, timeout });
 };
 
 // 更新TB搜索数据
 export const updateTBSearchData = async (data) => {
-  try {
-    await refreshCsrfTokenBeforeRequest();
-    
-    const { id, ...updateData } = data;
-    const csrfToken = sessionStorage.getItem('csrf_token');
-    const headers = { 'Content-Type': 'application/json' };
-    if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
-    
-    const response = await axios.post(`/api/v1/tb-search-data/${id}`, updateData, { headers });
-    return normalizeResponse(response);
-  } catch (error) {
-    throw error;
-  }
+  await refreshCsrfTokenBeforeRequest();
+  
+  const { id, ...updateData } = data;
+  
+  return request({
+    url: `/api/v1/tb-search-data/${id}`,
+    method: 'post',
+    data: updateData
+  }, { returnDataOnly: true });
 };
 
 // 删除TB搜索数据
 export const deleteTBSearchData = async (dataId) => {
-  try {
-    await refreshCsrfTokenBeforeRequest();
-    
-    const csrfToken = sessionStorage.getItem('csrf_token');
-    const headers = {};
-    if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
-
-    const response = await axios.delete(`/api/v1/tb-search-data/${dataId}`, { headers });
-    return normalizeResponse(response);
-  } catch (error) {
-    throw error;
-  }
+  await refreshCsrfTokenBeforeRequest();
+  
+  return request({
+    url: `/api/v1/tb-search-data/${dataId}`,
+    method: 'delete'
+  }, { returnDataOnly: true });
 };
 
 // 批量删除TB搜索数据
 export const batchDeleteTBSearchData = async (dataIds) => {
-  try {
-    await refreshCsrfTokenBeforeRequest();
-    
-    const csrfToken = sessionStorage.getItem('csrf_token');
-    const headers = { 'Content-Type': 'application/json' };
-    if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
-    
-    const response = await axios.delete('/api/v1/tb-search-data/batch', {
-      data: dataIds,
-      headers
-    });
-    return normalizeResponse(response);
-  } catch (error) {
-    throw error;
-  }
+  await refreshCsrfTokenBeforeRequest();
+  
+  return request({
+    url: '/api/v1/tb-search-data/batch',
+    method: 'delete',
+    data: dataIds
+  }, { returnDataOnly: true });
 };
 
 // 导入TB搜索数据
@@ -95,8 +78,14 @@ export const getClientsWithTBSearchData = async (startDate = null, endDate = nul
     if (startDate) params.start_date = startDate;
     if (endDate) params.end_date = endDate;
     
-    const response = await axios.get('/api/v1/tb-search-data/clients-with-data', { params });
-    return normalizeResponse(response, { returnDataOnly: false });
+    const result = await request({
+      url: '/api/v1/tb-search-data/clients-with-data',
+      method: 'get',
+      params
+    }, { returnDataOnly: false });
+    
+    // 返回标准格式：{ code: 200, data: [...], count: ... }
+    return result;
   } catch (error) {
     handleError(error);
   }
@@ -110,8 +99,14 @@ export const getProductsWithTBSearchData = async (clientId = null, startDate = n
     if (startDate) params.start_date = startDate;
     if (endDate) params.end_date = endDate;
     
-    const response = await axios.get('/api/v1/tb-search-data/products-with-data', { params });
-    return normalizeResponse(response, { returnDataOnly: false });
+    const result = await request({
+      url: '/api/v1/tb-search-data/products-with-data',
+      method: 'get',
+      params
+    }, { returnDataOnly: false });
+    
+    // 返回标准格式：{ code: 200, data: [...], count: ... }
+    return result;
   } catch (error) {
     handleError(error);
   }
@@ -126,8 +121,14 @@ export const getCountriesWithTBSearchData = async (clientId = null, productId = 
     if (startDate) params.start_date = startDate;
     if (endDate) params.end_date = endDate;
     
-    const response = await axios.get('/api/v1/tb-search-data/countries-with-data', { params });
-    return normalizeResponse(response, { returnDataOnly: false });
+    const result = await request({
+      url: '/api/v1/tb-search-data/countries-with-data',
+      method: 'get',
+      params
+    }, { returnDataOnly: false });
+    
+    // 返回标准格式：{ code: 200, data: [...], count: ... }
+    return result;
   } catch (error) {
     handleError(error);
   }

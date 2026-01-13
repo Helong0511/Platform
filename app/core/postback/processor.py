@@ -68,7 +68,7 @@ from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
 from app.models.models import (
     PostbackConversion, Product, Click, Offer, Advertiser, ClickStats, Client, Publisher,
-    ConversionDeductionLog, AdminNotificationConfig
+    ConversionDeductionLog, AdminNotificationConfig, PostbackIpWhitelist
 )
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from app.core.exceptions import raise_api_exception
@@ -106,7 +106,35 @@ class PostbackProcessor:
             - message: 响应消息
             - conversion_id: 转化ID
         """
-        # 1. 获取平台处理器
+        # 1. 验证 IP 白名单（如果提供了 request_ip）
+        if request_ip:
+            # 查询 IP 是否在白名单中
+            ip_check = await db.execute(
+                select(PostbackIpWhitelist).where(
+                    PostbackIpWhitelist.ip_address == request_ip,
+                    PostbackIpWhitelist.is_active == True
+                )
+            )
+            whitelisted_ip = ip_check.scalars().first()
+            
+            if not whitelisted_ip:
+                # IP 不在白名单中，视为测试数据，不记录
+                logger.info(
+                    f"Postback 请求 IP {request_ip} 不在白名单中，视为测试数据，不进行处理: "
+                    f"platform={platform}, conversion_id={raw_data.get('clk_id') or raw_data.get('conversion_id') or 'unknown'}"
+                )
+                # 返回成功响应，但不处理数据
+                return {
+                    "success": True,
+                    "message": "PostBack 接收成功（测试数据，未记录）",
+                    "conversion_id": raw_data.get("clk_id") or raw_data.get("conversion_id") or None,
+                    "platform": platform,
+                    "is_test_data": True
+                }
+            else:
+                logger.debug(f"Postback 请求 IP {request_ip} 在白名单中，继续处理")
+        
+        # 2. 获取平台处理器
         handler = get_handler(platform)
         if not handler:
             logger.warning(f"未找到平台 {platform} 的处理器")
@@ -116,7 +144,7 @@ class PostbackProcessor:
             )
         
         try:
-            # 2. 验证数据
+            # 3. 验证数据
             is_valid, error_msg = await handler.validate(raw_data)
             if not is_valid:
                 logger.warning(f"平台 {platform} postback 数据验证失败: {error_msg}")
@@ -125,7 +153,7 @@ class PostbackProcessor:
                     detail=error_msg or "数据验证失败"
                 )
             
-            # 3. 标准化数据
+            # 4. 标准化数据
             normalized_data = await handler.normalize(raw_data)
             conversion_id = normalized_data.get("conversion_id")
             
@@ -136,7 +164,7 @@ class PostbackProcessor:
                     detail="缺少必填字段: conversion_id"
                 )
             
-            # 4. 验证产品和客户（如果提供）
+            # 5. 验证产品和客户（如果提供）
             product_id = normalized_data.get("product_id")
             client_id = normalized_data.get("client_id")
             is_valid, error_msg = await handler.validate_product_client(
@@ -149,7 +177,7 @@ class PostbackProcessor:
                     detail=error_msg or "产品和客户验证失败"
                 )
             
-            # 4.5. CPL 系统：尝试关联 Click ID 获取广告主信息（在检查重复之前）
+            # 5.5. CPL 系统：尝试关联 Click ID 获取广告主信息（在检查重复之前）
             click_id = None
             click_time = None
             offer_id = None
@@ -214,11 +242,11 @@ class PostbackProcessor:
                                 f"平台名称已更新为: {platform}"
                             )
             
-            # 5. 检查是否已存在（防重复处理）- 使用更新后的平台名称
+            # 6. 检查是否已存在（防重复处理）- 使用更新后的平台名称
             event_name = normalized_data.get("event_name")
             final_platform = advertiser_name if advertiser_name else platform
             
-            # 5.1. 检查主表（PostbackConversion）
+            # 6.1. 检查主表（PostbackConversion）
             existing = await db.execute(
                 select(PostbackConversion).where(
                     PostbackConversion.platform == final_platform,
@@ -228,7 +256,7 @@ class PostbackProcessor:
             )
             existing_record = existing.scalars().first()
             
-            # 5.2. 如果主表中没有，检查扣减日志表（因为被扣量的转化不保存到主表）
+            # 6.2. 如果主表中没有，检查扣减日志表（因为被扣量的转化不保存到主表）
             if not existing_record and click_id:
                 # ConversionDeductionLog 已在文件顶部导入
                 log_check = await db.execute(
@@ -298,14 +326,14 @@ class PostbackProcessor:
                     "platform": final_platform
                 }
             
-            # 6. 保存原始数据（JSON格式）
+            # 7. 保存原始数据（JSON格式）
             raw_data_json = json.dumps(raw_data, ensure_ascii=False)
             
-            # 7. 如果提供了IP，添加到标准化数据中
+            # 8. 如果提供了IP，添加到标准化数据中
             if request_ip and not normalized_data.get("ip"):
                 normalized_data["ip"] = request_ip
             
-            # 7.5. CPL 系统：进行 Cap/扣量检查（广告主信息已在上面获取）
+            # 8.5. CPL 系统：进行 Cap/扣量检查（广告主信息已在上面获取）
             # 从标准化数据中获取 payout，如果不存在则尝试从原始数据中获取（支持多种字段名）
             original_payout = normalized_data.get("payout")
             if original_payout is None:
@@ -401,7 +429,7 @@ class PostbackProcessor:
                             f"final_payout={final_payout}, info={discount_info}"
                         )
             
-            # 7.6. CPL 系统：应用新的扣减逻辑（按比例扣量和扣金额）
+            # 8.6. CPL 系统：应用新的扣减逻辑（按比例扣量和扣金额）
             deduction_result = None
             deduction_config = None
             if advertiser_id or offer_id or publisher_id:
@@ -451,11 +479,11 @@ class PostbackProcessor:
                     deduction_result = None
                     deduction_config = None
             
-            # 8. 创建转化记录（使用广告主名称作为平台名称）
+            # 9. 创建转化记录（使用广告主名称作为平台名称）
             # 如果找到了广告主名称，使用广告主名称；否则使用传入的 platform 参数
             final_platform = advertiser_name if advertiser_name else platform
             
-            # 8.1. 根据 click_id 从 clicks 表获取数据，补充或更新字段
+            # 9.1. 根据 click_id 从 clicks 表获取数据，补充或更新字段
             # 如果 postback 数据中没有某些字段，使用 clicks 表中的数据
             final_os = normalized_data.get("os")
             final_ip = normalized_data.get("ip") or request_ip
@@ -477,7 +505,7 @@ class PostbackProcessor:
                     final_gid = str(click_record.publisher_id)
                     logger.debug(f"从 clicks 表补充 gid (publisher_id): {final_gid}")
             
-            # 8. 判断是否应该保存转化记录（如果扣量了，可能不保存）
+            # 9.2. 判断是否应该保存转化记录（如果扣量了，可能不保存）
             should_save_conversion = True
             if deduction_result and deduction_result.get('should_deduct_volume'):
                 # 如果扣量了，不保存转化记录（隐藏扣减）
@@ -523,7 +551,7 @@ class PostbackProcessor:
                 await db.refresh(conversion)
                 conversion_id_for_log = conversion.id
             
-            # 8.1. 记录扣减日志（无论是否保存转化记录都要记录）
+            # 9.3. 记录扣减日志（无论是否保存转化记录都要记录）
             # 注意：根据系统设计，所有转化都会记录到扣减日志表，即使未扣减也会记录
             # 这样可以确保统计的准确性（统计时查询扣减日志表即可获得所有转化数据）
             if deduction_result and deduction_config:
@@ -601,7 +629,7 @@ class PostbackProcessor:
                     except:
                         pass
             
-            # 8.5. 如果通过了 Cap 检查，增加 Cap 计数
+            # 9.4. 如果通过了 Cap 检查，增加 Cap 计数
             # 只有当转化状态正常(Pending/Approved)时才增加计数
             # 注意：如果转化被扣量了（conversion为None），不执行后续逻辑
             if conversion and offer_id and click_id and conversion.conversion_status in ['Pending', 'Approved']:
@@ -664,7 +692,7 @@ class PostbackProcessor:
                     f"platform={platform}, raw_data_keys={list(raw_data.keys())}"
                 )
             
-            # 9. 异步发送通知（按客户和产品）
+            # 10. 异步发送通知（按客户和产品）
             # 注意：如果转化被扣量了（conversion为None），不发送通知
             # 注意：notify_conversion 内部已处理异常并记录日志，这里不需要重复记录
             if conversion:
@@ -683,7 +711,7 @@ class PostbackProcessor:
                         f"error={str(e)}"
                     )
                 
-                # 9.1. 发送管理员通知（如果配置了）
+                # 10.1. 发送管理员通知（如果配置了）
                 try:
                     # TelegramNotificationService 和 AdminNotificationConfig 已在文件顶部导入
                     # 查询管理员通知配置
@@ -762,7 +790,7 @@ class PostbackProcessor:
                         f"error={str(e)}"
                     )
             
-            # 10. 异步转发给渠道（如果渠道配置了 Postback URL）
+            # 11. 异步转发给渠道（如果渠道配置了 Postback URL）
             # 注意：PostBack 数据只转发给渠道（Publisher），不转发给其他系统
             # 注意：如果转化被扣量了（conversion为None），不转发
             if conversion and conversion.conversion_status in ['Pending', 'Approved']:
@@ -780,7 +808,7 @@ class PostbackProcessor:
                         f"error={str(e)}"
                     )
             
-            # 11. 返回成功响应
+            # 12. 返回成功响应
             return {
                 "success": True,
                 "message": "PostBack 接收成功",

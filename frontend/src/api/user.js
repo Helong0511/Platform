@@ -14,10 +14,15 @@
  * @module api/user
  */
 
-import axios from 'axios';
-import { request, normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken, refreshCsrfTokenBeforeRequest, handleError, handleFileDownload, refreshCsrfToken } from '../utils/api';
+/**
+ * 用户管理API模块
+ * 已统一使用 request 函数，保持代码一致性
+ * 包含特殊逻辑：搜索用户、文件导出、密码修改等
+ */
+import { request, normalizePaginatedResponse, normalizeResponse, extractErrorMessage, ensureCsrfToken, refreshCsrfTokenBeforeRequest, handleError, handleFileDownload, refreshCsrfToken } from '../utils/api';
 import { ElMessage } from 'element-plus';
 import { getSuccessMessage, getWarningMessage } from '../utils/messages';
+import axios from 'axios'; // 保留用于特殊场景（搜索用户、退出登录）
 
 /**
  * 获取用户列表（支持分页和筛选）
@@ -143,15 +148,14 @@ export const getCurrentUserInfo = async () => {
  * @returns {Promise<Object>} 创建的用户数据
  */
 export const createUser = async (userData) => {
-  try {
-    // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    await refreshCsrfTokenBeforeRequest('/api/v1/users/stats');
-    
-    const response = await axios.post('/api/v1/users/', userData);
-    return normalizeResponse(response);
-  } catch (error) {
-    handleError(error);
-  }
+  // 在保存前刷新CSRF令牌，确保使用最新的令牌
+  await refreshCsrfTokenBeforeRequest('/api/v1/users/stats');
+  
+  return request({
+    url: '/api/v1/users/',
+    method: 'post',
+    data: userData
+  }, { returnDataOnly: true });
 };
 
 /**
@@ -161,15 +165,14 @@ export const createUser = async (userData) => {
  * @returns {Promise<Object>} 更新后的用户数据
  */
 export const updateUser = async (id, userData) => {
-  try {
-    // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    await refreshCsrfTokenBeforeRequest('/api/v1/users/stats');
-    
-    const response = await axios.put(`/api/v1/users/${id}`, userData);
-    return normalizeResponse(response);
-  } catch (error) {
-    handleError(error);
-  }
+  // 在保存前刷新CSRF令牌，确保使用最新的令牌
+  await refreshCsrfTokenBeforeRequest('/api/v1/users/stats');
+  
+  return request({
+    url: `/api/v1/users/${id}`,
+    method: 'put',
+    data: userData
+  }, { returnDataOnly: true });
 };
 
 /**
@@ -178,15 +181,14 @@ export const updateUser = async (id, userData) => {
  * @returns {Promise<boolean>} 是否删除成功
  */
 export const deleteUser = async (id) => {
-  try {
-    // 在删除前刷新CSRF令牌，确保使用最新的令牌
-    await refreshCsrfTokenBeforeRequest('/api/v1/users/stats');
-    
-    await axios.delete(`/api/v1/users/${id}`);
-    return true;
-  } catch (error) {
-    handleError(error);
-  }
+  // 在删除前刷新CSRF令牌，确保使用最新的令牌
+  await refreshCsrfTokenBeforeRequest('/api/v1/users/stats');
+  
+  await request({
+    url: `/api/v1/users/${id}`,
+    method: 'delete'
+  });
+  return true;
 };
 
 /**
@@ -196,6 +198,7 @@ export const deleteUser = async (id) => {
  */
 export const exportUsers = async (params = {}) => {
   try {
+    // 文件下载需要使用blob响应类型，直接使用axios
     const response = await axios.get('/api/v1/users/export/excel', {
       params,
       responseType: 'blob'
@@ -237,16 +240,15 @@ export const getUserStats = async () => {
  * @returns {Promise<Object>} 更新结果
  */
 export const changePassword = async (passwordData) => {
-  try {
-    // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    await refreshCsrfToken('/api/v1/users/stats');
-    await ensureCsrfToken();
-    
-    const response = await axios.put('/api/v1/users/me/password', passwordData);
-    return normalizeResponse(response);
-  } catch (error) {
-    handleError(error);
-  }
+  // 在保存前刷新CSRF令牌，确保使用最新的令牌
+  await refreshCsrfToken('/api/v1/users/stats');
+  await ensureCsrfToken();
+  
+  return request({
+    url: '/api/v1/users/me/password',
+    method: 'put',
+    data: passwordData
+  }, { returnDataOnly: true });
 };
 
 /**
