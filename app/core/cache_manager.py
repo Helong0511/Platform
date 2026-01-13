@@ -7,13 +7,6 @@ from typing import Optional, Set, List, Dict, Any
 from datetime import datetime, timedelta
 
 from app.core.redis_client import get_redis_client
-from app.core.short_link_cache import (
-    get_short_link_from_cache,
-    set_short_link_to_cache,
-    serialize_short_link,
-    invalidate_short_link_cache,
-    CACHE_PREFIX as SHORT_LINK_CACHE_PREFIX
-)
 from app.core.offer_cache import set_offer_cache, get_offer_advertiser_id, invalidate_offer_cache
 from app.models.models import ShortLink, Offer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +46,13 @@ class CacheManager:
                 .limit(limit)
             )
             short_links = result.scalars().all()
+            
+            # 延迟导入，避免循环导入
+            from app.core.short_link_cache import (
+                get_short_link_from_cache,
+                set_short_link_to_cache,
+                serialize_short_link
+            )
             
             warmed_count = 0
             for short_link in short_links:
@@ -248,6 +248,9 @@ class CacheManager:
             是否清除成功
         """
         try:
+            # 延迟导入，避免循环导入
+            from app.core.short_link_cache import invalidate_short_link_cache
+            
             # 清除短链接缓存
             await invalidate_short_link_cache(short_code)
             
