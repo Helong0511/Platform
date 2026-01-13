@@ -561,12 +561,9 @@ const loadClients = async () => {
       
       // 如果返回的数据少于 page_size，说明已经是最后一页
       if (clients.length < 100) {
-          hasMore = false
-        } else {
-          page++
-        }
-      } else {
         hasMore = false
+      } else {
+        page++
       }
     }
   } catch (error) {
