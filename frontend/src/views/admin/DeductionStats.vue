@@ -455,9 +455,8 @@ const loadGroupNames = async () => {
           
           const total = offerRes.total || 0
           hasMore = allOffers.length < total && offers.length > 0
+          if (hasMore) {
             page++
-          } else {
-            hasMore = false
           }
         } catch (err) {
           console.error('加载Offer失败：', err)
@@ -486,9 +485,8 @@ const loadGroupNames = async () => {
           
           const total = publisherRes.total || 0
           hasMore = allPublishers.length < total && publishers.length > 0
+          if (hasMore) {
             page++
-          } else {
-            hasMore = false
           }
         } catch (err) {
           console.error('加载渠道失败：', err)
