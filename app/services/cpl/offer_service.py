@@ -19,7 +19,6 @@ from app.core.errors import ErrorCode
 from app.core.audit_log import log_user_action
 from app.core.infrastructure.cache import CacheInvalidator
 from app.core.config import settings
-from app.api.api_v1.endpoints.cpl.offers import sync_short_links_for_offer
 import logging
 
 logger = logging.getLogger(__name__)
@@ -541,7 +540,8 @@ class OfferService(BaseService[Offer]):
         # 为分配的渠道创建短链接（使用上游Tracklink作为原始URL）
         short_link_info = None
         if publisher_ids_for_short_link and offer.advertiser_tracklink:
-            # 导入短链接同步函数
+            # 延迟导入，避免循环导入
+            from app.api.api_v1.endpoints.cpl.offers import sync_short_links_for_offer
             short_link_info = await sync_short_links_for_offer(
                 db=self.db,
                 offer_id=offer.id,
@@ -885,6 +885,8 @@ class OfferService(BaseService[Offer]):
                 current_publisher_ids = [assignment.publisher_id for assignment in existing_assignments]
             
             if current_advertiser_tracklink and current_publisher_ids:
+                # 延迟导入，避免循环导入
+                from app.api.api_v1.endpoints.cpl.offers import sync_short_links_for_offer
                 base_url = settings.TRACKING_BASE_URL
                 short_link_info = await sync_short_links_for_offer(
                     db=self.db,
