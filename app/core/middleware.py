@@ -70,7 +70,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterator, Optional
 from app.core.config import settings
 from app.core.redis_client import get_redis_client
-from app.core.utils import get_client_ip
+from app.core.utils import get_client_ip, get_device_type
 from urllib.parse import unquote
 
 logger = logging.getLogger(__name__)
@@ -598,31 +598,6 @@ def is_mobile_device(request: Request) -> bool:
         'iemobile', 'palm', 'smartphone', 'tablet'
     ]
     return any(keyword in user_agent for keyword in mobile_keywords)
-
-
-def get_device_type(request: Request) -> str:
-    """
-    获取设备类型
-    返回: 'mobile', 'tablet', 'desktop'
-    """
-    user_agent = request.headers.get("User-Agent", "").lower()
-
-    # 平板设备
-    tablet_keywords = ['ipad', 'tablet', 'playbook', 'kindle']
-    if any(keyword in user_agent for keyword in tablet_keywords):
-        return 'tablet'
-
-    # 移动设备
-    mobile_keywords = [
-        'mobile', 'android', 'iphone', 'ipod',
-        'blackberry', 'windows phone', 'opera mini',
-        'iemobile', 'palm', 'smartphone'
-    ]
-    if any(keyword in user_agent for keyword in mobile_keywords):
-        return 'mobile'
-
-    # 默认桌面设备
-    return 'desktop'
 
 
 class StreamErrorHandlingMiddleware(BaseHTTPMiddleware):

@@ -25,13 +25,37 @@ from typing import Any, Optional
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.core.middleware import get_device_type
 from app.core.config import settings
 from app.core.constants import PERCENTAGE_MULTIPLIER
 from app.models.models import Client
 
 # 应用时区配置（从统一配置读取）
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
+
+
+def get_device_type(request: Request) -> str:
+    """
+    获取设备类型
+    返回: 'mobile', 'tablet', 'desktop'
+    """
+    user_agent = request.headers.get("User-Agent", "").lower()
+
+    # 平板设备
+    tablet_keywords = ['ipad', 'tablet', 'playbook', 'kindle']
+    if any(keyword in user_agent for keyword in tablet_keywords):
+        return 'tablet'
+
+    # 移动设备
+    mobile_keywords = [
+        'mobile', 'android', 'iphone', 'ipod',
+        'blackberry', 'windows phone', 'opera mini',
+        'iemobile', 'palm', 'smartphone'
+    ]
+    if any(keyword in user_agent for keyword in mobile_keywords):
+        return 'mobile'
+
+    # 默认桌面设备
+    return 'desktop'
 
 
 def get_client_ip(request: Request) -> str:
