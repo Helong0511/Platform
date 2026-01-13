@@ -359,9 +359,42 @@ async def lifespan(app: FastAPI):
 
         logger.info(f"[Worker PID:{worker_pid}] 数据库表创建完成")
     except Exception as e:
-        logger.error(f"[Worker PID:{worker_pid}] 数据库表创建失败: {e}", exc_info=True)
-        # 不抛出异常，允许应用继续启动（可能是表已存在或其他 worker 已创建）
-        logger.warning(f"[Worker PID:{worker_pid}] 继续启动应用...")
+        # 检查是否是 MySQL 并发 DDL 错误（错误代码 1684）
+        # 这个错误表示表正在被其他进程修改，可以安全忽略
+        is_concurrent_ddl_error = False
+        error_code = None
+        
+        # 尝试从异常中提取错误代码
+        try:
+            if hasattr(e, 'orig'):
+                # SQLAlchemy 包装的异常 (sqlalchemy.exc.OperationalError)
+                orig = e.orig
+                if hasattr(orig, 'args') and len(orig.args) > 0:
+                    error_code = orig.args[0] if isinstance(orig.args[0], int) else None
+            elif hasattr(e, 'args') and len(e.args) > 0:
+                # 直接 pymysql 异常
+                error_code = e.args[0] if isinstance(e.args[0], int) else None
+            
+            # 检查错误代码或错误消息
+            if error_code == 1684 or (str(e) and '1684' in str(e)):
+                is_concurrent_ddl_error = True
+        except Exception:
+            # 如果提取错误代码失败，检查错误消息
+            error_str = str(e)
+            if '1684' in error_str or 'concurrent DDL' in error_str.lower():
+                is_concurrent_ddl_error = True
+        
+        if is_concurrent_ddl_error:
+            # 这是预期的并发行为，降级为信息级别
+            logger.info(
+                f"[Worker PID:{worker_pid}] 检测到并发 DDL 操作（表可能正在被其他 worker 创建），"
+                f"这是正常的多进程环境行为，继续启动..."
+            )
+        else:
+            # 其他错误，记录为错误级别
+            logger.error(f"[Worker PID:{worker_pid}] 数据库表创建失败: {e}", exc_info=True)
+            # 不抛出异常，允许应用继续启动（可能是表已存在或其他 worker 已创建）
+            logger.warning(f"[Worker PID:{worker_pid}] 继续启动应用...")
     
     # 初始化数据库，创建默认管理员账户
     try:
