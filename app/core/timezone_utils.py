@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 import platform
+import time
 from datetime import datetime
 import pytz
 
@@ -57,7 +58,6 @@ def detect_system_timezone() -> str | None:
             return tz_env
         
         # 方法4: 使用 Python 的 time.tzname (可能不准确)
-        import time
         tzname = time.tzname[0] if time.tzname else None
         if tzname:
             # 尝试映射常见时区名称

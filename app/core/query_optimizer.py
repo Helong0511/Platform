@@ -2,13 +2,15 @@
 查询优化工具
 提供查询优化方法，解决N+1查询问题
 """
-from typing import List, Dict, Any, Optional, TypeVar, Type
+from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import joinedload, selectinload, Load
-from sqlalchemy import inspect
+from sqlalchemy.orm import joinedload, selectinload
 
-T = TypeVar('T')
+from app.models.models import (
+    Offer, OfferPublisherAssignment, OfferCap, OfferDiscount, Advertiser,
+    Publisher, Client, User, AdData, Product, CountryInfo
+)
 
 
 class QueryOptimizer:
@@ -35,8 +37,6 @@ class QueryOptimizer:
         Returns:
             优化后的查询对象
         """
-        from app.models.models import Offer, OfferPublisherAssignment
-        
         options = []
         
         if include_advertiser:
@@ -47,10 +47,8 @@ class QueryOptimizer:
                 .joinedload(OfferPublisherAssignment.publisher)
             )
         if include_caps:
-            from app.models.models import OfferCap
             options.append(selectinload(Offer.caps))
         if include_discounts:
-            from app.models.models import OfferDiscount
             options.append(selectinload(Offer.discounts))
         
         if options:
@@ -84,7 +82,6 @@ class QueryOptimizer:
         
         # 批量加载广告主信息
         if load_advertisers:
-            from app.models.models import Offer, Advertiser
             offers_result = await db.execute(
                 select(Offer, Advertiser)
                 .join(Advertiser, Offer.advertiser_id == Advertiser.id)
@@ -97,7 +94,6 @@ class QueryOptimizer:
         
         # 批量加载渠道分配信息
         if load_assignments:
-            from app.models.models import OfferPublisherAssignment, Publisher
             assignments_result = await db.execute(
                 select(OfferPublisherAssignment, Publisher)
                 .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
@@ -134,9 +130,6 @@ class QueryOptimizer:
         """
         if not publisher_ids:
             return {}
-        
-        from app.models.models import Publisher, Client, User
-        from sqlalchemy.orm import selectinload
         
         result = await db.execute(
             select(Publisher)
@@ -177,8 +170,6 @@ class QueryOptimizer:
         Returns:
             优化后的查询对象
         """
-        from app.models.models import AdData, Product, Client, User, CountryInfo
-        
         options = []
         
         if include_product:

@@ -1,68 +1,29 @@
 /**
  * Offer 管理 API
+ * 使用CRUD API生成器，减少重复代码
  */
-import { request } from '@/utils/api'
+import { createCrudApi } from '@/utils/crudApi';
+import { request } from '@/utils/api';
 
-/**
- * 获取Offer列表
- */
-export function getOffers(params) {
-  return request({
-    url: '/api/v1/offers/',
-    method: 'get',
-    params
-  })
-}
-
-/**
- * 获取Offer详情
- */
-export function getOffer(id) {
-  return request({
-    url: `/api/v1/offers/${id}`,
-    method: 'get'
-  })
-}
-
-/**
- * 创建Offer
- */
-export function createOffer(data) {
-  return request({
-    url: '/api/v1/offers/',
-    method: 'post',
-    data
-  })
-}
-
-/**
- * 更新Offer
- */
-export function updateOffer(id, data) {
-  return request({
-    url: `/api/v1/offers/${id}`,
-    method: 'put',
-    data
-  })
-}
-
-/**
- * 删除Offer
- */
-export function deleteOffer(id) {
-  return request({
-    url: `/api/v1/offers/${id}`,
-    method: 'delete'
-  })
-}
-
-/**
- * 检查Offer的短链接是否存在
- */
-export function checkOfferShortLink(id) {
-  return request({
-    url: `/api/v1/offers/${id}/check-short-link`,
-    method: 'get'
-  })
-}
+// 使用CRUD生成器自动生成标准CRUD方法
+export const {
+  getOffers,
+  getOffer,
+  createOffer,
+  updateOffer,
+  deleteOffer,
+  checkOfferShortLink
+} = createCrudApi('/api/v1/offers', {
+  customMethods: {
+    /**
+     * 检查Offer的短链接是否存在
+     */
+    checkOfferShortLink: (id) => {
+      return request({
+        url: `/api/v1/offers/${id}/check-short-link`,
+        method: 'get'
+      }, { returnDataOnly: true });
+    }
+  }
+});
 

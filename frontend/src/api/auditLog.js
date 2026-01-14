@@ -1,5 +1,8 @@
-import axios from 'axios';
-import { normalizePaginatedResponse, normalizeResponse, handleError } from '../utils/api';
+/**
+ * 操作日志 API
+ * 已统一使用 request 函数，保持代码一致性
+ */
+import { request } from '../utils/api';
 
 /**
  * 获取操作日志列表
@@ -17,12 +20,11 @@ import { normalizePaginatedResponse, normalizeResponse, handleError } from '../u
  * @returns {Promise<Object>} 日志列表数据
  */
 export const getAuditLogs = async (params) => {
-  try {
-    const response = await axios.get('/api/v1/audit-logs/', { params });
-    return normalizePaginatedResponse(response);
-  } catch (error) {
-    handleError(error);
-  }
+  return request({
+    url: '/api/v1/audit-logs/',
+    method: 'get',
+    params
+  }, { paginated: true });
 };
 
 /**
@@ -31,12 +33,10 @@ export const getAuditLogs = async (params) => {
  * @returns {Promise<Object>} 日志详情
  */
 export const getAuditLog = async (logId) => {
-  try {
-    const response = await axios.get(`/api/v1/audit-logs/${logId}`);
-    return normalizeResponse(response, { returnDataOnly: true });
-  } catch (error) {
-    handleError(error);
-  }
+  return request({
+    url: `/api/v1/audit-logs/${logId}`,
+    method: 'get'
+  }, { returnDataOnly: true });
 };
 
 /**
@@ -47,11 +47,10 @@ export const getAuditLog = async (logId) => {
  * @returns {Promise<Object>} 统计信息
  */
 export const getAuditLogStats = async (params = {}) => {
-  try {
-    const response = await axios.get('/api/v1/audit-logs/stats/summary', { params });
-    return normalizeResponse(response, { returnDataOnly: true });
-  } catch (error) {
-    handleError(error);
-  }
+  return request({
+    url: '/api/v1/audit-logs/stats/summary',
+    method: 'get',
+    params
+  }, { returnDataOnly: true });
 };
 

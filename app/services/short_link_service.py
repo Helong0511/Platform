@@ -5,7 +5,7 @@
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func, and_, or_, text
 from sqlalchemy.orm import joinedload
 
 from app.models.models import ShortLink, User, UserRole, Offer, Publisher
@@ -122,15 +122,45 @@ class ShortLinkService(BaseService[ShortLink]):
             conditions.append(ShortLink.offer_id == offer_id)
         
         if search:
-            search_pattern = f"%{search}%"
-            conditions.append(
-                or_(
-                    ShortLink.title.like(search_pattern),
-                    ShortLink.original_url.like(search_pattern),
-                    ShortLink.short_code.like(search_pattern),
-                    ShortLink.description.like(search_pattern)
-                )
-            )
+            # 优化搜索：优先精确匹配short_code，然后使用全文索引或前缀匹配
+            search_trimmed = search.strip()
+            search_conditions = []
+            
+            # 1. 精确匹配short_code（最快，使用唯一索引）
+            search_conditions.append(ShortLink.short_code == search_trimmed)
+            
+            # 2. 前缀匹配short_code（可以使用索引）
+            if len(search_trimmed) >= 2:  # 至少2个字符才使用前缀匹配
+                search_conditions.append(ShortLink.short_code.like(f"{search_trimmed}%"))
+            
+            # 3. 使用全文索引搜索title和description（如果存在全文索引）
+            try:
+                # 尝试使用全文索引搜索title
+                fulltext_title = text(
+                    "MATCH(title) AGAINST(:search_term IN NATURAL LANGUAGE MODE)"
+                ).bindparams(search_term=search_trimmed)
+                search_conditions.append(fulltext_title)
+                
+                # 尝试使用全文索引搜索description
+                fulltext_desc = text(
+                    "MATCH(description) AGAINST(:search_term IN NATURAL LANGUAGE MODE)"
+                ).bindparams(search_term=search_trimmed)
+                search_conditions.append(fulltext_desc)
+            except Exception:
+                # 全文索引不存在或查询失败，使用前缀匹配（可以使用普通索引）
+                # title前缀匹配
+                search_conditions.append(ShortLink.title.like(f"{search_trimmed}%"))
+                # description前缀匹配
+                search_conditions.append(ShortLink.description.like(f"{search_trimmed}%"))
+            
+            # 4. original_url的搜索（性能较差，但保留功能）
+            # URL通常很长，LIKE查询性能很差，但为了功能完整性保留
+            # 建议：如果URL搜索不是主要需求，可以考虑注释掉
+            if len(search_trimmed) >= 3:  # URL搜索至少3个字符
+                search_conditions.append(ShortLink.original_url.like(f"%{search_trimmed}%"))
+            
+            if search_conditions:
+                conditions.append(or_(*search_conditions))
         
         if conditions:
             query = query.where(and_(*conditions))

@@ -2,8 +2,12 @@
 任务注册表
 将数据库中的任务名称映射到实际的任务函数
 """
+import re
 from typing import Dict, Callable, Optional, Any
 import logging
+
+from app.scheduler_module.task_config import TASK_CONFIGS
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +110,6 @@ def _validate_module_path(module_path: str) -> bool:
         return False
     
     # 验证路径格式（只允许字母、数字、点、下划线）
-    import re
     if not re.match(r'^[a-zA-Z0-9_.]+$', module_path):
         logger.warning(f"模块路径格式无效: {module_path}（包含非法字符）")
         return False
@@ -154,7 +157,6 @@ def load_function_by_path(function_path: str) -> Optional[Callable[..., Any]]:
             return None
 
         # 验证函数名格式（只允许字母、数字、下划线）
-        import re
         if not re.match(r'^[a-zA-Z0-9_]+$', function_name):
             logger.error(f"函数名格式无效: {function_name}（只允许字母、数字、下划线）")
             return None
@@ -250,8 +252,6 @@ def auto_register_tasks() -> None:
     自动注册所有任务函数
     从 task_config.py 统一配置文件读取所有任务配置并自动注册
     """
-    from app.scheduler_module.task_config import TASK_CONFIGS
-    from app.core.config import settings
     
     registered_count = 0
     failed_count = 0
@@ -272,7 +272,6 @@ def auto_register_tasks() -> None:
                 continue
 
             # 验证函数名格式
-            import re
             if not re.match(r'^[a-zA-Z0-9_]+$', task_function):
                 logger.error(
                     f"任务函数名格式无效: '{task_function}' (任务: '{task_name}') - 只允许字母、数字、下划线"

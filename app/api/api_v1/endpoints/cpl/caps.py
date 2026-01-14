@@ -15,6 +15,8 @@ from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import get_app_now_naive
+from app.core.dependencies import get_cap_service
+from app.services.cpl.cap_service import CapService
 from app.models.models import User, OfferCap, Offer, Advertiser, Publisher
 from app.schemas.cpl.cap import OfferCapCreate, OfferCapUpdate, OfferCapResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -35,9 +37,6 @@ async def create_cap(
 ):
     """创建Cap配置（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在CapService中）
-    from app.core.dependencies import get_cap_service
-    from app.services.cpl.cap_service import CapService
-    
     cap_service: CapService = await get_cap_service(db)
     
     # 准备Cap数据
@@ -71,9 +70,6 @@ async def get_caps(
 ):
     """获取Cap配置列表（所有登录用户可访问，已重构使用服务层）"""
     # 使用服务层（业务逻辑在CapService中）
-    from app.core.dependencies import get_cap_service
-    from app.services.cpl.cap_service import CapService
-    
     cap_service: CapService = await get_cap_service(db)
     
     # 调用服务层获取Cap配置列表（服务层会处理查询、过滤、分页）
@@ -115,9 +111,6 @@ async def get_cap(
 ):
     """获取Cap配置详情（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在CapService中）
-    from app.core.dependencies import get_cap_service
-    from app.services.cpl.cap_service import CapService
-    
     cap_service: CapService = await get_cap_service(db)
     
     # 调用服务层获取Cap配置详情
@@ -150,9 +143,6 @@ async def update_cap(
 ):
     """更新Cap配置（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在CapService中）
-    from app.core.dependencies import get_cap_service
-    from app.services.cpl.cap_service import CapService
-    
     cap_service: CapService = await get_cap_service(db)
     
     # 准备更新数据
@@ -181,9 +171,6 @@ async def delete_cap(
 ):
     """删除Cap配置（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在CapService中）
-    from app.core.dependencies import get_cap_service
-    from app.services.cpl.cap_service import CapService
-    
     cap_service: CapService = await get_cap_service(db)
     
     # 调用服务层删除Cap配置（服务层会处理验证和删除）

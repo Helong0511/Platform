@@ -11,6 +11,5 @@ export function getClicks(params) {
     url: '/api/v1/clicks/',
     method: 'get',
     params
-  })
+  }, { paginated: true })
 }
-

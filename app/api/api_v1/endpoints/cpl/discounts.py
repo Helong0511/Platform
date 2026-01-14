@@ -13,6 +13,8 @@ from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
+from app.core.dependencies import get_discount_service
+from app.services.cpl.discount_service import DiscountService
 from app.models.models import User, OfferDiscount, Offer, Publisher
 from app.schemas.cpl.discount import OfferDiscountCreate, OfferDiscountUpdate, OfferDiscountResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -32,9 +34,6 @@ async def create_discount(
 ):
     """创建扣量配置（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在DiscountService中）
-    from app.core.dependencies import get_discount_service
-    from app.services.cpl.discount_service import DiscountService
-    
     discount_service: DiscountService = await get_discount_service(db)
     
     # 准备扣量配置数据
@@ -66,9 +65,6 @@ async def get_discounts(
 ):
     """获取扣量配置列表（所有登录用户可访问，已重构使用服务层）"""
     # 使用服务层（业务逻辑在DiscountService中）
-    from app.core.dependencies import get_discount_service
-    from app.services.cpl.discount_service import DiscountService
-    
     discount_service: DiscountService = await get_discount_service(db)
     
     # 调用服务层获取扣量配置列表（服务层会处理查询、过滤、分页）
@@ -108,9 +104,6 @@ async def get_discount(
 ):
     """获取扣量配置详情（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在DiscountService中）
-    from app.core.dependencies import get_discount_service
-    from app.services.cpl.discount_service import DiscountService
-    
     discount_service: DiscountService = await get_discount_service(db)
     
     # 调用服务层获取扣量配置详情
@@ -142,9 +135,6 @@ async def update_discount(
 ):
     """更新扣量配置（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在DiscountService中）
-    from app.core.dependencies import get_discount_service
-    from app.services.cpl.discount_service import DiscountService
-    
     discount_service: DiscountService = await get_discount_service(db)
     
     # 准备更新数据
@@ -172,9 +162,6 @@ async def delete_discount(
 ):
     """删除扣量配置（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在DiscountService中）
-    from app.core.dependencies import get_discount_service
-    from app.services.cpl.discount_service import DiscountService
-    
     discount_service: DiscountService = await get_discount_service(db)
     
     # 调用服务层删除扣量配置（服务层会处理验证和删除）

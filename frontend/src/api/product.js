@@ -1,75 +1,69 @@
-import axios from 'axios';
-import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
+/**
+ * 产品管理 API
+ * 已统一使用 request 函数，保持代码一致性
+ * 包含特殊逻辑：产品分配、批量更新、超时处理、CSRF重试等
+ */
+import { request, normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, refreshCsrfTokenBeforeRequest, handleError } from '../utils/api';
 import { ElMessage } from 'element-plus';
+import { logger } from '../utils/logger';
+import axios from 'axios'; // 保留用于特殊场景（超时控制、CSRF重试逻辑）
 
 // 获取产品列表
 export const getProductList = async (params = {}) => {
-  try {
-    const response = await axios.get('/api/v1/products/', { params });
-    return normalizePaginatedResponse(response);
-  } catch (error) {
-    handleError(error);
-  }
+  return request({
+    url: '/api/v1/products/',
+    method: 'get',
+    params
+  }, { paginated: true });
 };
 
 // 获取产品详情
 export const getProductDetail = async (id, options = {}) => {
   const { silent = false } = options; // 添加 silent 选项，控制是否显示错误消息
   try {
-    const response = await axios.get(`/api/v1/products/${id}`, {
-      timeout: 10000 // 设置10秒超时
-    });
-    return normalizeResponse(response, { returnDataOnly: true });
+    // 使用request函数，支持自定义超时时间（10秒）
+    return await request({
+      url: `/api/v1/products/${id}`,
+      method: 'get'
+    }, { returnDataOnly: true, timeout: 10000, silent });
   } catch (error) {
-    // 使用统一的错误处理，但支持silent模式
-    if (silent) {
-      handleError(error, { showMessage: false });
-    } else {
-      handleError(error);
-    }
     throw error;
   }
 };
 
-import { logger } from '../utils/logger';
-
 // 创建产品
 export const createProduct = async (productData) => {
-  try {
-    // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    await refreshCsrfTokenBeforeRequest('/api/v1/products/?page_size=1');
-    
-    const response = await axios.post('/api/v1/products/', productData);
-    return normalizeResponse(response, { returnDataOnly: true });
-  } catch (error) {
-    throw error;
-  }
+  // 在保存前刷新CSRF令牌，确保使用最新的令牌
+  await refreshCsrfTokenBeforeRequest('/api/v1/products/?page_size=1');
+  
+  return request({
+    url: '/api/v1/products/',
+    method: 'post',
+    data: productData
+  }, { returnDataOnly: true });
 };
 
 // 更新产品
 export const updateProduct = async (id, productData) => {
-  try {
-    // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    await refreshCsrfTokenBeforeRequest('/api/v1/products/?page_size=1');
-    
-    const response = await axios.put(`/api/v1/products/${id}`, productData);
-    return normalizeResponse(response, { returnDataOnly: true });
-  } catch (error) {
-    throw error;
-  }
+  // 在保存前刷新CSRF令牌，确保使用最新的令牌
+  await refreshCsrfTokenBeforeRequest('/api/v1/products/?page_size=1');
+  
+  return request({
+    url: `/api/v1/products/${id}`,
+    method: 'put',
+    data: productData
+  }, { returnDataOnly: true });
 };
 
 // 删除产品
 export const deleteProduct = async (id) => {
-  try {
-    // 在删除前刷新CSRF令牌，确保使用最新的令牌
-    await refreshCsrfTokenBeforeRequest('/api/v1/products/?page_size=1');
-    
-    const response = await axios.delete(`/api/v1/products/${id}`);
-    return normalizeResponse(response, { returnDataOnly: true });
-  } catch (error) {
-    throw error;
-  }
+  // 在删除前刷新CSRF令牌，确保使用最新的令牌
+  await refreshCsrfTokenBeforeRequest('/api/v1/products/?page_size=1');
+  
+  return request({
+    url: `/api/v1/products/${id}`,
+    method: 'delete'
+  }, { returnDataOnly: true });
 };
 
 // 获取可用的产品名称列表（用于添加产品时选择）
@@ -78,15 +72,19 @@ export const getAvailableProductNames = async (excludeClientId = null, search = 
     const params = {};
     if (excludeClientId) params.exclude_client_id = excludeClientId;
     if (search) params.search = search;
-    const response = await axios.get('/api/v1/products/available-names', { params });
-    const normalized = normalizeResponse(response, { returnDataOnly: false });
+    
+    const normalized = await request({
+      url: '/api/v1/products/available-names',
+      method: 'get',
+      params
+    }, { returnDataOnly: false });
+    
     // 返回包含data和count的对象，方便前端判断是否有数据
     return {
       data: normalized.data || [],
       count: normalized.count || 0
     };
   } catch (error) {
-    const errorMsg = extractErrorMessage(error);
     // 获取产品名称列表失败，错误已通过ElMessage显示
     return { data: [], count: 0 };
   }
@@ -95,23 +93,16 @@ export const getAvailableProductNames = async (excludeClientId = null, search = 
 // 获取产品的分配历史
 export const getProductAssignments = async (productId) => {
   try {
-    // 增加超时时间，因为第一次查询可能需要建立数据库连接
-    const response = await axios.get(`/api/v1/product-assignments/products/${productId}/assignments`, {
-      timeout: 30000 // 30秒超时
-    });
-    return normalizeResponse(response, { returnDataOnly: true });
+    // 增加超时时间，因为第一次查询可能需要建立数据库连接（30秒超时）
+    return await request({
+      url: `/api/v1/product-assignments/products/${productId}/assignments`,
+      method: 'get'
+    }, { returnDataOnly: true, timeout: 30000 });
   } catch (error) {
-    if (isErrorHandled(error)) {
-      throw error;
-    }
     // 如果是超时错误，提供更友好的提示
     if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-      handleError(error, { customErrorHandler: async () => {
-        const { ElMessage } = await import('element-plus');
-        ElMessage.error('请求超时，请稍后重试。如果问题持续，请联系管理员。');
-      }});
-    } else {
-      handleError(error);
+      const { ElMessage } = await import('element-plus');
+      ElMessage.error('请求超时，请稍后重试。如果问题持续，请联系管理员。');
     }
     throw error;
   }
@@ -119,12 +110,10 @@ export const getProductAssignments = async (productId) => {
 
 // 获取客户的分配历史（管理员）
 export const getClientAssignments = async (clientId) => {
-  try {
-    const response = await axios.get(`/api/v1/product-assignments/clients/${clientId}/assignments`);
-    return normalizeResponse(response, { returnDataOnly: true });
-  } catch (error) {
-    handleError(error);
-  }
+  return request({
+    url: `/api/v1/product-assignments/clients/${clientId}/assignments`,
+    method: 'get'
+  }, { returnDataOnly: true });
 };
 
 // 更新产品分配历史的日期（管理员）

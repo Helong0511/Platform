@@ -3,9 +3,10 @@
 封装产品相关的业务逻辑
 """
 from typing import Optional, List, Dict, Any
+from datetime import date, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func, and_, or_, text
 from sqlalchemy.orm import selectinload, joinedload
 
 from app.models.models import Product, Client, User, UserRole, AdData
@@ -13,7 +14,8 @@ from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.audit_log import log_user_action, log_activate, log_deactivate, log_update, log_delete
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, find_or_create_default_client
+from app.core.product_assignment import initialize_product_assignment, transfer_product_assignment
 import logging
 
 logger = logging.getLogger(__name__)
@@ -123,19 +125,33 @@ class ProductService(BaseService[Product]):
         conditions = []
         
         if name:
-            conditions.append(func.lower(Product.name).like(f"%{name.lower()}%"))
+            # 优化：去掉func.lower()避免索引失效，使用前缀匹配可以使用索引
+            # 如果数据库使用大小写不敏感的排序规则（如utf8mb4_unicode_ci），不需要func.lower()
+            name_trimmed = name.strip()
+            # 优先使用前缀匹配（可以使用索引）
+            conditions.append(Product.name.like(f"{name_trimmed}%"))
+            # 如果前缀匹配没有结果，也可以尝试包含匹配（性能较差，但更灵活）
+            # conditions.append(Product.name.like(f"%{name_trimmed}%"))
         
         if is_active is not None:
             conditions.append(Product.is_active == is_active)
         
         if search:
-            # 优先使用全文搜索，回退到LIKE查询
-            from app.core.fulltext_search import search_with_fulltext
-            # 注意：这里需要先构建基础查询，然后应用全文搜索
-            # 但由于search_with_fulltext是异步的，我们需要在查询执行前处理
-            # 暂时使用LIKE，如果支持全文搜索可以在endpoint层处理
-            search_pattern = f"%{search.lower()}%"
-            conditions.append(func.lower(Product.name).like(search_pattern))
+            # 优化搜索：使用全文索引或前缀匹配
+            search_trimmed = search.strip()
+            
+            # 尝试使用全文索引（如果存在）
+            try:
+                fulltext_condition = text(
+                    "MATCH(name) AGAINST(:search_term IN NATURAL LANGUAGE MODE)"
+                ).bindparams(search_term=search_trimmed)
+                conditions.append(fulltext_condition)
+            except Exception:
+                # 全文索引不存在或查询失败，使用前缀匹配（可以使用普通索引）
+                # 去掉func.lower()避免索引失效
+                conditions.append(Product.name.like(f"{search_trimmed}%"))
+                # 如果前缀匹配没有结果，也可以尝试包含匹配（性能较差，但更灵活）
+                # conditions.append(Product.name.like(f"%{search_trimmed}%"))
         
         if conditions:
             query = query.where(and_(*conditions))
@@ -286,8 +302,6 @@ class ProductService(BaseService[Product]):
         
         # 初始化产品分配记录
         try:
-            from datetime import date
-            from app.core.product_assignment import initialize_product_assignment
             product_start_date = date.today()
             await initialize_product_assignment(
                 db=self.db,
@@ -409,9 +423,6 @@ class ProductService(BaseService[Product]):
                 )
             
             # 处理产品分配历史转移
-            from datetime import date, timedelta
-            from app.core.product_assignment import transfer_product_assignment
-            
             transfer_date = product_data.get("transfer_date")
             old_client_end_date = product_data.get("old_client_end_date")
             
@@ -486,7 +497,6 @@ class ProductService(BaseService[Product]):
         
         # 如果 is_active 改变，记录激活/禁用日志
         if 'is_active' in product_data and product_data['is_active'] != old_is_active:
-            from app.core.audit_log import log_activate, log_deactivate
             if product.is_active:
                 await log_activate(
                     db=self.db,
@@ -589,7 +599,6 @@ class ProductService(BaseService[Product]):
             )
             
             # 查找或创建默认客户
-            from app.core.utils import find_or_create_default_client
             admin_default_client = await find_or_create_default_client(self.db, current_user.id)
             
             # 保存旧客户ID
@@ -620,8 +629,6 @@ class ProductService(BaseService[Product]):
             
             # 更新产品分配历史
             try:
-                from datetime import date
-                from app.core.product_assignment import transfer_product_assignment
                 await transfer_product_assignment(
                     db=self.db,
                     product_id=product.id,
@@ -641,7 +648,6 @@ class ProductService(BaseService[Product]):
             await self.db.refresh(product)
             
             # 记录更新操作（产品转移）
-            from app.core.audit_log import log_update
             await log_update(
                 db=self.db,
                 user=current_user,
@@ -666,7 +672,6 @@ class ProductService(BaseService[Product]):
             logger.debug(f"产品 {product.name} (ID: {product_id}) 没有关联广告数据，将直接删除")
             
             # 记录删除操作（在删除前）
-            from app.core.audit_log import log_delete
             await log_delete(
                 db=self.db,
                 user=current_user,

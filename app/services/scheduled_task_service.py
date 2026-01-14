@@ -3,20 +3,26 @@
 封装定时任务查询和管理的业务逻辑
 """
 from typing import Optional, List, Dict, Any, Tuple
+from urllib.parse import unquote
+import os
+import asyncio
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import and_, func
-import asyncio
-import logging
 
 from app.models.models import ScheduledTask, User
-from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.utils import get_app_now_naive
 from app.core.validation import sanitize_input
 from app.core.constants import MAX_TASK_NAME_LENGTH, QUERY_TIMEOUT
+from app.core.fulltext_search import search_with_fulltext
 from app.scheduler_module.task_registry import get_task_function_info
+from app.scheduler_module import get_scheduler, init_scheduled_tasks
+from app.scheduler_module.task_registry import get_task_function_by_name_or_path
+from app.scheduler_module.scheduler import register_scheduled_task, execute_task_with_lock
+from app.scheduler_module.task_queue import get_task_queue
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +68,6 @@ class ScheduledTaskService:
         if task_name:
             cleaned_task_name = sanitize_input(task_name.strip(), max_length=MAX_TASK_NAME_LENGTH)
             if cleaned_task_name:
-                from app.core.fulltext_search import search_with_fulltext
                 query = await search_with_fulltext(
                     db=self.db,
                     model_class=ScheduledTask,
@@ -86,7 +91,6 @@ class ScheduledTaskService:
         if task_name:
             cleaned_task_name = sanitize_input(task_name.strip(), max_length=MAX_TASK_NAME_LENGTH)
             if cleaned_task_name:
-                from app.core.fulltext_search import search_with_fulltext
                 count_query = await search_with_fulltext(
                     db=self.db,
                     model_class=ScheduledTask,
@@ -145,7 +149,6 @@ class ScheduledTaskService:
             Optional[ScheduledTask]: 任务对象，如果不存在则返回None
         """
         # URL 解码（FastAPI 应该自动解码，但为了安全起见手动处理一次）
-        from urllib.parse import unquote
         task_name = unquote(task_name)
 
         # 清理输入
@@ -179,7 +182,6 @@ class ScheduledTaskService:
             ScheduledTask: 更新后的任务对象
         """
         # URL 解码
-        from urllib.parse import unquote
         task_name = unquote(task_name)
 
         # 清理输入
@@ -219,10 +221,6 @@ class ScheduledTaskService:
 
             # 如果启用状态发生变化，需要重新注册任务或从调度器中移除
             if is_active_changed:
-                from app.scheduler_module import get_scheduler
-                from app.scheduler_module.task_registry import get_task_function_by_name_or_path
-                from app.scheduler_module.scheduler import register_scheduled_task
-
                 sched = get_scheduler()
 
                 # 如果任务被禁用，从调度器中移除
@@ -290,7 +288,6 @@ class ScheduledTaskService:
             Dict: 触发结果
         """
         # URL 解码
-        from urllib.parse import unquote
         task_name = unquote(task_name)
 
         # 清理输入
@@ -320,10 +317,6 @@ class ScheduledTaskService:
             )
 
         # 导入调度器并触发任务
-        from app.scheduler_module import get_scheduler
-        from app.scheduler_module.task_registry import get_task_function_by_name_or_path
-        from app.scheduler_module.scheduler import register_scheduled_task, execute_task_with_lock
-
         sched = get_scheduler()
 
         # 查找任务
@@ -437,7 +430,6 @@ class ScheduledTaskService:
             Dict: 重新加载结果
         """
         # URL 解码
-        from urllib.parse import unquote
         task_name = unquote(task_name)
 
         # 清理输入
@@ -459,10 +451,6 @@ class ScheduledTaskService:
                 ErrorCode.RESOURCE_NOT_FOUND,
                 detail="定时任务不存在"
             )
-
-        from app.scheduler_module import get_scheduler
-        from app.scheduler_module.task_registry import get_task_function_by_name_or_path
-        from app.scheduler_module.scheduler import register_scheduled_task
 
         sched = get_scheduler()
 
@@ -518,7 +506,6 @@ class ScheduledTaskService:
         Returns:
             Dict: 重新加载结果
         """
-        from app.scheduler_module import init_scheduled_tasks
 
         # 重新初始化所有任务（会从数据库重新读取）
         await init_scheduled_tasks()
@@ -534,7 +521,6 @@ class ScheduledTaskService:
         Returns:
             Dict: 队列状态信息
         """
-        from app.scheduler_module.task_queue import get_task_queue
 
         queue = get_task_queue()
         status = await queue.get_queue_status()
@@ -548,8 +534,6 @@ class ScheduledTaskService:
         Returns:
             Dict: 调度器状态信息
         """
-        from app.scheduler_module import get_scheduler
-        import os
 
         sched = get_scheduler()
         worker_pid = os.getpid()
@@ -594,7 +578,6 @@ class ScheduledTaskService:
             Dict: 释放结果
         """
         # URL 解码
-        from urllib.parse import unquote
         task_name = unquote(task_name)
 
         # 清理输入

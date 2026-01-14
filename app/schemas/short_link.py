@@ -1,6 +1,7 @@
 """
 短链接 Schema
 """
+import re
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from typing import Optional
@@ -35,7 +36,6 @@ class ShortLinkBase(BaseModel):
         """验证短链接代码格式"""
         if v:
             # 只允许字母、数字、连字符和下划线
-            import re
             if not re.match(r'^[a-zA-Z0-9_-]+$', v):
                 raise ValueError("短链接代码只能包含字母、数字、连字符和下划线")
             if len(v) < 3:

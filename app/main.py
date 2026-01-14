@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.api_v1 import api_router
 from app.core.config import settings
-from app.core.errors import ErrorCode, create_error_response
+from app.core.errors import ErrorCode, create_error_response, record_http_exception_log
 from app.core.https_middleware import HTTPSRedirectMiddleware
 from app.core.middleware import (
     PerformanceMonitoringMiddleware,
@@ -28,7 +28,25 @@ from app.core.middleware import (
     SecurityHeadersMiddleware,
 )
 from app.core.timezone_utils import check_and_validate_timezone, log_timezone_info
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, get_client_ip
+from app.core.audit_log import log_runtime_error
+from app.core.database import AsyncSessionLocal, engine, init_db
+from app.core.redis_client import get_redis_client, close_redis_client
+from app.core.cache_manager import CacheManager
+from app.core.csrf import CSRFMiddleware
+from app.core.security import JWTUtils
+from app.core.auto_bot import (
+    bot_initialized, send_telegram_message, start_bot,
+    stop_bot, has_bot_lock
+)
+from app.scheduler_module import (
+    init_scheduled_tasks, start_scheduler, shutdown_scheduler
+)
+from app.scheduler_module.task_init import init_scheduled_tasks_in_db
+from app.models.models import Base, User
+from sqlalchemy.future import select
+import traceback
+from anyio import EndOfStream
 # ====== 常量定义 ======
 # 日志配置常量
 LOG_FILE_MAX_BYTES = 5 * 1024 * 1024  # 5MB
@@ -217,7 +235,6 @@ if not root_logger.handlers or not any(isinstance(h, logging.StreamHandler) for 
         root_logger.addHandler(_create_console_handler(formatter, logging.INFO))
 
 # ====== 精简调度器相关日志 ======
-# ====== 精简调度器相关日志 ======
 # 将APScheduler的日志级别设置为WARNING，减少"Running job"等详细日志
 # 这些日志会输出到 scheduler.log（如果配置了），WARNING+ 会同时输出到 app.log
 apscheduler_logger = logging.getLogger('apscheduler')
@@ -342,13 +359,45 @@ async def lifespan(app: FastAPI):
 
         logger.info(f"[Worker PID:{worker_pid}] 数据库表创建完成")
     except Exception as e:
-        logger.error(f"[Worker PID:{worker_pid}] 数据库表创建失败: {e}", exc_info=True)
-        # 不抛出异常，允许应用继续启动（可能是表已存在或其他 worker 已创建）
-        logger.warning(f"[Worker PID:{worker_pid}] 继续启动应用...")
+        # 检查是否是 MySQL 并发 DDL 错误（错误代码 1684）
+        # 这个错误表示表正在被其他进程修改，可以安全忽略
+        is_concurrent_ddl_error = False
+        error_code = None
+        
+        # 尝试从异常中提取错误代码
+        try:
+            if hasattr(e, 'orig'):
+                # SQLAlchemy 包装的异常 (sqlalchemy.exc.OperationalError)
+                orig = e.orig
+                if hasattr(orig, 'args') and len(orig.args) > 0:
+                    error_code = orig.args[0] if isinstance(orig.args[0], int) else None
+            elif hasattr(e, 'args') and len(e.args) > 0:
+                # 直接 pymysql 异常
+                error_code = e.args[0] if isinstance(e.args[0], int) else None
+            
+            # 检查错误代码或错误消息
+            if error_code == 1684 or (str(e) and '1684' in str(e)):
+                is_concurrent_ddl_error = True
+        except Exception:
+            # 如果提取错误代码失败，检查错误消息
+            error_str = str(e)
+            if '1684' in error_str or 'concurrent DDL' in error_str.lower():
+                is_concurrent_ddl_error = True
+        
+        if is_concurrent_ddl_error:
+            # 这是预期的并发行为，降级为信息级别
+            logger.info(
+                f"[Worker PID:{worker_pid}] 检测到并发 DDL 操作（表可能正在被其他 worker 创建），"
+                f"这是正常的多进程环境行为，继续启动..."
+            )
+        else:
+            # 其他错误，记录为错误级别
+            logger.error(f"[Worker PID:{worker_pid}] 数据库表创建失败: {e}", exc_info=True)
+            # 不抛出异常，允许应用继续启动（可能是表已存在或其他 worker 已创建）
+            logger.warning(f"[Worker PID:{worker_pid}] 继续启动应用...")
     
     # 初始化数据库，创建默认管理员账户
     try:
-        from app.core.database import init_db
         await init_db()
         logger.info(f"[Worker PID:{worker_pid}] 数据库初始化完成（包括默认管理员账户）")
     except Exception as e:
@@ -357,7 +406,6 @@ async def lifespan(app: FastAPI):
 
     # 初始化Redis连接（如果配置了）
     try:
-        from app.core.redis_client import get_redis_client
         redis_client = await get_redis_client()
         if redis_client:
             logger.info(f"[Worker PID:{worker_pid}] Redis连接已初始化")
@@ -368,9 +416,6 @@ async def lifespan(app: FastAPI):
 
     # 初始化定时任务（多进程环境：每个 worker 独立初始化调度器）
     try:
-        from app.scheduler_module import init_scheduled_tasks, start_scheduler
-        from app.scheduler_module.task_init import init_scheduled_tasks_in_db
-        
         logger.info(f"[Worker PID:{worker_pid}] 开始初始化定时任务...")
         
         # 首先检查并添加任务到数据库（确保所有配置的任务都在数据库中有记录）
@@ -395,8 +440,6 @@ async def lifespan(app: FastAPI):
         if not telegram_enabled:
             logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过启动")
         else:
-            from app.core.auto_bot import bot_initialized, send_telegram_message, start_bot
-            
             if bot_initialized:
                 logger.info(f"[Worker PID:{worker_pid}] 尝试启动 Telegram 机器人线程...")
                 start_success = start_bot()
@@ -415,9 +458,6 @@ async def lifespan(app: FastAPI):
 
     # 缓存预热（可选，在后台异步执行，不阻塞启动）
     try:
-        from app.core.cache_manager import CacheManager
-        from app.core.database import AsyncSessionLocal
-        
         # 在后台任务中执行缓存预热，不阻塞应用启动
         async def warmup_cache_background():
             try:
@@ -441,7 +481,6 @@ async def lifespan(app: FastAPI):
     logger.info("应用关闭中...")
     try:
         # 关闭定时任务调度器
-        from app.scheduler_module import shutdown_scheduler
         await shutdown_scheduler()
     except asyncio.CancelledError:
         # 应用关闭时任务被取消是正常的，不需要记录错误
@@ -451,7 +490,6 @@ async def lifespan(app: FastAPI):
 
     try:
         # 关闭Redis连接
-        from app.core.redis_client import close_redis_client
         await close_redis_client()
     except asyncio.CancelledError:
         # 应用关闭时任务被取消是正常的，不需要记录错误
@@ -463,7 +501,6 @@ async def lifespan(app: FastAPI):
         # 检查是否启用 Telegram
         telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
         if telegram_enabled:
-            from app.core.auto_bot import stop_bot, send_telegram_message, bot_initialized, has_bot_lock
             # 只有持有锁的进程才发送关闭消息和停止 Bot
             if bot_initialized and has_bot_lock():
                 # 尝试发送关闭消息（可能失败，因为连接可能已断开）
@@ -540,7 +577,6 @@ app.add_middleware(RequestLoggingMiddleware)
 
 # 5. CSRF防护中间件（防止CSRF攻击）
 if settings.ENABLE_CSRF:
-    from app.core.csrf import CSRFMiddleware
     app.add_middleware(CSRFMiddleware)
     logger.info("CSRF防护已启用")
 
@@ -621,7 +657,6 @@ def _raise_stream_error_if_disconnected(request: Request) -> None:
     """
     if _check_connection_disconnected(request):
         logger.debug("客户端已断开连接")
-        from anyio import EndOfStream
         raise EndOfStream("客户端已断开连接")
 
 
@@ -693,7 +728,6 @@ async def _create_http_exception_response(
     
     # 记录严重的 HTTPException (500/503) 到审计日志
     if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
-        from app.core.errors import record_http_exception_log
         await record_http_exception_log(exc, request, "HTTPException")
     
     # 尝试返回响应，但如果连接已断开，捕获异常
@@ -813,7 +847,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     try:
         if _check_connection_disconnected(request):
             logger.debug("检测到连接已断开，跳过HTTPException响应创建")
-            from anyio import EndOfStream
             raise EndOfStream("客户端已断开连接")
     except Exception as stream_exc:
         # 如果检测到连接断开，抛出流异常
@@ -906,7 +939,6 @@ async def global_exception_handler(request: Request, exc: Exception):
         try:
             if _check_connection_disconnected(request):
                 logger.debug("检测到连接已断开，跳过HTTPException处理")
-                from anyio import EndOfStream
                 raise EndOfStream("客户端已断开连接")
         except Exception as stream_exc:
             # 如果检测到连接断开，抛出流异常
@@ -937,11 +969,6 @@ async def global_exception_handler(request: Request, exc: Exception):
 
     # 记录运行错误到审计日志（异步执行，不阻塞错误响应）
     try:
-        from app.core.audit_log import log_runtime_error
-        from app.core.database import AsyncSessionLocal
-        import traceback
-        import asyncio
-
         # 异步记录错误日志，不阻塞错误响应
         async def record_error_log():
             audit_db = None
@@ -952,9 +979,6 @@ async def global_exception_handler(request: Request, exc: Exception):
                 current_user = None
                 username = None
                 try:
-                    from app.core.security import JWTUtils
-                    from app.models.models import User
-                    from sqlalchemy.future import select
 
                     token = request.headers.get("Authorization", "").replace("Bearer ", "")
                     if token:
@@ -1001,7 +1025,6 @@ async def global_exception_handler(request: Request, exc: Exception):
                 
                 # 获取客户端IP
                 try:
-                    from app.core.utils import get_client_ip
                     request_details["client_ip"] = get_client_ip(request)
                 except Exception:
                     pass

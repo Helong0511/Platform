@@ -4,11 +4,10 @@
 """
 from typing import Optional, Callable, Any
 from sqlalchemy import Select, func, Column
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 
-async def build_count_query(
+def build_count_query(
     base_query: Select,
     count_column: Any,
     apply_filters: Optional[Callable[[Select], Select]] = None

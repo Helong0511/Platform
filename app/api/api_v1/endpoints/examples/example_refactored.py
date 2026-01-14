@@ -26,6 +26,8 @@ from app.core.response import (
 from app.core.query_builder import build_query
 from app.models.models import User
 from app.schemas.user import UserResponse, UserCreate, UserUpdate
+
+# 注意：User 已在顶部导入，下面的局部导入是冗余的，但保留在示例中作为说明
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.core.errors import ErrorCode
 
@@ -108,7 +110,7 @@ async def get_admin_stats_example(
     db, admin = db_and_admin
     
     # 使用查询构建器直接查询（简单场景）
-    from app.models.models import User
+    # 注意：User 已在顶部导入
     builder = build_query(
         db=db,
         model=User,
@@ -206,7 +208,7 @@ async def search_users_example(
     1. 简单查询可以直接使用查询构建器
     2. 复杂查询建议在服务层
     """
-    from app.models.models import User
+    # 注意：User 已在顶部导入
     
     builder = build_query(
         db=db,

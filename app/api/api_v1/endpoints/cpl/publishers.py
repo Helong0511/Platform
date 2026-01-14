@@ -14,6 +14,8 @@ from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.validation import validate_postback_url_placeholders
+from app.core.dependencies import get_publisher_service
+from app.services.cpl.publisher_service import PublisherService
 from app.models.models import User, Publisher, Client
 from sqlalchemy.orm import joinedload
 from app.schemas.cpl.publisher import PublisherCreate, PublisherUpdate, PublisherResponse
@@ -34,9 +36,6 @@ async def create_publisher(
 ):
     """创建渠道（已重构使用服务层）"""
     # 使用服务层（业务逻辑在PublisherService中）
-    from app.core.dependencies import get_publisher_service
-    from app.services.cpl.publisher_service import PublisherService
-    
     publisher_service: PublisherService = await get_publisher_service(db)
     
     # 准备渠道数据
@@ -74,9 +73,6 @@ async def get_publishers(
 ):
     """获取渠道列表（已重构使用服务层，批量加载客户信息）"""
     # 使用服务层（业务逻辑在PublisherService中，已优化批量加载）
-    from app.core.dependencies import get_publisher_service
-    from app.services.cpl.publisher_service import PublisherService
-    
     publisher_service: PublisherService = await get_publisher_service(db)
     publishers, total = await publisher_service.get_publishers(
         current_user=current_user,
@@ -116,9 +112,6 @@ async def get_publisher(
 ):
     """获取渠道详情（已重构使用服务层）"""
     # 使用服务层（业务逻辑在PublisherService中）
-    from app.core.dependencies import get_publisher_service
-    from app.services.cpl.publisher_service import PublisherService
-    
     publisher_service: PublisherService = await get_publisher_service(db)
     
     # 获取渠道（包含客户信息）
@@ -149,9 +142,6 @@ async def update_publisher(
 ):
     """更新渠道（已重构使用服务层）"""
     # 使用服务层（业务逻辑在PublisherService中）
-    from app.core.dependencies import get_publisher_service
-    from app.services.cpl.publisher_service import PublisherService
-    
     publisher_service: PublisherService = await get_publisher_service(db)
     
     # 获取更新数据（排除未设置的字段）
@@ -187,9 +177,6 @@ async def delete_publisher(
 ):
     """删除渠道（已重构使用服务层）"""
     # 使用服务层（业务逻辑在PublisherService中）
-    from app.core.dependencies import get_publisher_service
-    from app.services.cpl.publisher_service import PublisherService
-    
     publisher_service: PublisherService = await get_publisher_service(db)
     
     # 调用服务层删除渠道（服务层会检查关联数据、记录审计日志）

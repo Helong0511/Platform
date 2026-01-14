@@ -5,19 +5,20 @@ Offer服务层
 from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, String, and_, or_, delete
+from sqlalchemy import func, String, and_, or_, delete, text
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
 
 from app.models.models import (
     Offer, Advertiser, Publisher, Client, User, UserRole,
-    OfferPublisherAssignment, ShortLink
+    OfferPublisherAssignment, ShortLink, Click
 )
 from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.audit_log import log_user_action
 from app.core.infrastructure.cache import CacheInvalidator
+from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
@@ -218,15 +219,39 @@ class OfferService(BaseService[Offer]):
         conditions = []
         
         if search:
-            # 搜索：名称、ID或上游Offer ID
-            search_pattern = f"%{search}%"
-            conditions.append(
-                or_(
-                    Offer.offer_name.like(search_pattern),
-                    Offer.id.cast(String).like(search_pattern),
-                    Offer.advertiser_offer_id.like(search_pattern)
-                )
-            )
+            # 优化搜索：优先精确匹配，然后使用全文索引或前缀匹配
+            search_trimmed = search.strip()
+            search_conditions = []
+            
+            # 1. 尝试精确匹配ID（最快，使用主键索引）
+            try:
+                search_id = int(search_trimmed)
+                search_conditions.append(Offer.id == search_id)
+            except ValueError:
+                # 不是数字，继续其他搜索方式
+                pass
+            
+            # 2. 精确匹配上游Offer ID（使用索引，如果字段有索引）
+            if search_trimmed:
+                search_conditions.append(Offer.advertiser_offer_id == search_trimmed)
+            
+            # 3. 使用全文索引搜索名称（如果存在全文索引）
+            # 回退到前缀匹配（可以使用索引）或LIKE查询
+            try:
+                # 尝试使用全文索引
+                fulltext_condition = text(
+                    "MATCH(offer_name) AGAINST(:search_term IN NATURAL LANGUAGE MODE)"
+                ).bindparams(search_term=search_trimmed)
+                search_conditions.append(fulltext_condition)
+            except Exception:
+                # 全文索引不存在或查询失败，使用前缀匹配（可以使用普通索引）
+                # 前缀匹配比 %keyword% 性能好，可以使用索引
+                search_conditions.append(Offer.offer_name.like(f"{search_trimmed}%"))
+                # 如果前缀匹配没有结果，也可以尝试包含匹配（性能较差，但更灵活）
+                # search_conditions.append(Offer.offer_name.like(f"%{search_trimmed}%"))
+            
+            if search_conditions:
+                conditions.append(or_(*search_conditions))
         
         if advertiser_id:
             conditions.append(Offer.advertiser_id == advertiser_id)
@@ -332,7 +357,6 @@ class OfferService(BaseService[Offer]):
             )
         
         # 生成下游Tracklink和Postback URL
-        from app.core.config import settings
         base_url = settings.TRACKING_BASE_URL
         
         # 创建Offer（先不设置downstream_tracklink和postback_url，稍后设置）
@@ -516,7 +540,7 @@ class OfferService(BaseService[Offer]):
         # 为分配的渠道创建短链接（使用上游Tracklink作为原始URL）
         short_link_info = None
         if publisher_ids_for_short_link and offer.advertiser_tracklink:
-            # 导入短链接同步函数
+            # 延迟导入，避免循环导入
             from app.api.api_v1.endpoints.cpl.offers import sync_short_links_for_offer
             short_link_info = await sync_short_links_for_offer(
                 db=self.db,
@@ -861,7 +885,7 @@ class OfferService(BaseService[Offer]):
                 current_publisher_ids = [assignment.publisher_id for assignment in existing_assignments]
             
             if current_advertiser_tracklink and current_publisher_ids:
-                from app.core.config import settings
+                # 延迟导入，避免循环导入
                 from app.api.api_v1.endpoints.cpl.offers import sync_short_links_for_offer
                 base_url = settings.TRACKING_BASE_URL
                 short_link_info = await sync_short_links_for_offer(
@@ -883,7 +907,6 @@ class OfferService(BaseService[Offer]):
         current_downstream_tracklink = offer.downstream_tracklink
         current_advertiser_tracklink = offer.advertiser_tracklink
         if current_downstream_tracklink and current_advertiser_tracklink:
-            from app.core.config import settings
             from app.api.api_v1.endpoints.cpl.offers import (
                 check_and_create_downstream_tracklink_short_link,
                 get_short_link_url
@@ -958,7 +981,6 @@ class OfferService(BaseService[Offer]):
         offer = await self.get_offer_by_id(offer_id, current_user, include_advertiser=False)
         
         # 检查是否有关联的点击记录
-        from app.models.models import Click
         click_count = await self.db.execute(
             select(func.count(Click.id)).where(Click.offer_id == offer_id)
         )

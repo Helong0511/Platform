@@ -12,7 +12,6 @@ from app.models.models import (
     PostbackConversion, ClickStats, Offer, Publisher, Advertiser,
     User, UserRole, Client
 )
-from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive

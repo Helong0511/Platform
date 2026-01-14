@@ -2,6 +2,8 @@
 缓存兼容层
 保持与旧cache.py的兼容性，同时使用新的缓存抽象层
 """
+import json
+import hashlib
 from typing import Any
 from app.core.infrastructure.cache import get_cache_backend
 import logging
@@ -21,8 +23,6 @@ async def set_cached(key: str, value: Any, ttl: int = 300):
 
 def generate_cache_key(*args, **kwargs) -> str:
     """兼容旧接口：生成缓存键"""
-    import json
-    import hashlib
     key_str = json.dumps(
         {"args": args, "kwargs": kwargs},
         sort_keys=True,

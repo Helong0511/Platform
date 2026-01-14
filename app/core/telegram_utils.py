@@ -2,6 +2,7 @@
 Telegram 消息工具模块
 提供 Telegram 消息格式化、分割、验证等实用功能
 """
+import json
 import logging
 from typing import List, Optional
 
@@ -133,7 +134,6 @@ def format_telegram_message(
             if value is not None:
                 # 格式化值
                 if isinstance(value, (dict, list)):
-                    import json
                     try:
                         value_str = json.dumps(value, ensure_ascii=False, indent=2)
                     except:
@@ -222,7 +222,6 @@ def format_key_value_pairs(data: dict, max_value_length: int = 150) -> str:
         if value is None:
             value_str = "None"
         elif isinstance(value, (dict, list)):
-            import json
             try:
                 value_str = json.dumps(value, ensure_ascii=False)
             except:

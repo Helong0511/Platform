@@ -1,8 +1,13 @@
-import axios from 'axios';
-import { normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
+/**
+ * ML模型管理 API
+ * 已统一使用 request 函数，保持代码一致性
+ * 包含特殊逻辑：文件上传、FormData处理等
+ */
+import { request, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
 import { ElMessage } from 'element-plus';
 import { getWarningMessage } from '../utils/messages';
 import { logger } from '../utils/logger';
+import axios from 'axios'; // 保留用于特殊场景（文件上传、FormData处理）
 
 /**
  * 验证Excel列名映射
@@ -41,12 +46,10 @@ export const validateExcelData = async (file) => {
  * @returns {Promise<Object>} 状态信息
  */
 export const getModelStatus = async () => {
-  try {
-    const response = await axios.get('/api/v1/ml-model/status');
-    return normalizeResponse(response, { returnDataOnly: true });
-  } catch (error) {
-    handleError(error);
-  }
+  return request({
+    url: '/api/v1/ml-model/status',
+    method: 'get'
+  }, { returnDataOnly: true });
 };
 
 /**
@@ -55,8 +58,10 @@ export const getModelStatus = async () => {
  */
 export const getTimezone = async () => {
   try {
-    const response = await axios.get('/api/v1/ml-model/timezone');
-    const data = normalizeResponse(response, { returnDataOnly: true });
+    const data = await request({
+      url: '/api/v1/ml-model/timezone',
+      method: 'get'
+    }, { returnDataOnly: true });
     return data.timezone || 'Asia/Shanghai'; // 默认值
   } catch (error) {
     // 如果获取失败（可能是 401 未授权或其他错误），返回默认值
@@ -103,30 +108,14 @@ export const parseExcelColumns = async (file) => {
  * @returns {Promise<Object>} 保存结果
  */
 export const saveMapping = async (mapping) => {
-  try {
-    // 确保CSRF令牌存在（如果不存在，会通过GET请求获取）
-    await refreshCsrfTokenBeforeRequest();
+  // 确保CSRF令牌存在（如果不存在，会通过GET请求获取）
+  await refreshCsrfTokenBeforeRequest();
 
-    // 获取CSRF令牌（如果存在）
-    const csrfToken = sessionStorage.getItem('csrf_token');
-
-    // 构建headers，确保包含CSRF令牌
-    const headers = {
-      'Content-Type': 'application/json'
-    };
-
-    // 如果CSRF令牌存在，添加到headers中
-    if (csrfToken) {
-      headers['X-CSRF-Token'] = csrfToken;
-    }
-
-    const response = await axios.post('/api/v1/ml-model/save-mapping', mapping, {
-      headers
-    });
-    return normalizeResponse(response, { returnDataOnly: true });
-  } catch (error) {
-    handleError(error);
-  }
+  return request({
+    url: '/api/v1/ml-model/save-mapping',
+    method: 'post',
+    data: mapping
+  }, { returnDataOnly: true });
 };
 
 /**

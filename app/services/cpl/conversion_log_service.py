@@ -16,7 +16,6 @@ from app.models.models import (
     Advertiser,
     User
 )
-from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.utils import parse_date_to_app_timezone

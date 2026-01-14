@@ -6,6 +6,9 @@
 # @IDE       : PyCharm
 # @Function  :
 import os
+import time
+import asyncio
+import traceback
 import logging  # 日志记录模块
 import re
 import threading
@@ -13,6 +16,7 @@ import sys
 from pathlib import Path
 from app.core.config import settings  # 应用配置
 from app.core.utils import get_app_now  # 应用时区时间获取函数
+from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH
 
 logger = logging.getLogger(__name__)
 
@@ -74,16 +78,6 @@ else:
 def _check_bot_available() -> bool:
     """检查 Bot 是否可用"""
     return bot_initialized and TELEBOT_AVAILABLE and bot is not None
-
-
-def get_chat_id_handler(message):
-    """获取聊天ID处理器（已废弃，使用 /id 命令）"""
-    if not _check_bot_available():
-        logger.error("Bot 未初始化，无法处理消息")
-        return
-
-    chat_id = message.chat.id
-    bot.reply_to(message, f"你的聊天ID是: {chat_id}")
 
 
 # 命令处理器必须在模块级别注册（pyTelegramBotAPI 的要求）
@@ -362,7 +356,6 @@ def run_bot():
                     
                     if attempt < max_retries:
                         logger.info(f"   等待 {retry_delay} 秒后重试...")
-                        import time
                         time.sleep(retry_delay)
                         retry_delay *= 2  # 指数退避
                     else:
@@ -382,7 +375,6 @@ def run_bot():
                         logger.warning("⚠️ Telegram 通知功能暂时不可用，但会在连接恢复后自动启用")
                         
                         # 进入持续重试循环（而不是直接返回）
-                        import time
                         reconnect_delay = 30  # 初始重连延迟30秒
                         max_reconnect_delay = 300  # 最大重连延迟5分钟
                         reconnect_count = 0
@@ -500,7 +492,6 @@ def run_bot():
             logger.info("📡 开始使用手动轮询方式监听 Telegram 消息...")
             logger.info("💡 提示：现在可以向 Bot 发送 /id 命令测试")
             
-            import time
             last_update_id = None
             poll_count = 0
             
@@ -643,7 +634,6 @@ def run_bot():
                     
                     if updates:
                         # 只在开发环境或需要调试时记录详细更新信息
-                        from app.core.config import settings
                         if not settings.is_production:
                             logger.debug(f"✅ 收到 {len(updates)} 个更新")
                             # 记录更新内容（用于调试）
@@ -777,7 +767,6 @@ def run_bot():
                                                         break
                                                     except Exception as handler_error:
                                                         logger.error(f"❌ 调用命令处理器 {handler_func.__name__} 时出错: {handler_error}", exc_info=True)
-                                                        import traceback
                                                         logger.error(f"❌ 错误堆栈: {traceback.format_exc()}")
                                             
                                             if not handler_found:
@@ -792,7 +781,6 @@ def run_bot():
                                 logger.info("✅ bot.process_new_updates() 调用完成")
                             except Exception as process_error:
                                 logger.error(f"❌ process_new_updates 出错: {process_error}", exc_info=True)
-                                import traceback
                                 logger.error(f"❌ 错误堆栈: {traceback.format_exc()}")
                             
                             # 如果 process_new_updates 没有触发处理器，尝试手动调用（备用方案）
@@ -811,7 +799,6 @@ def run_bot():
                             logger.info("✅ 更新处理完成")
                         except Exception as process_error:
                             logger.error(f"❌ 处理更新时出错: {process_error}", exc_info=True)
-                            import traceback
                             logger.error(f"❌ 错误堆栈: {traceback.format_exc()}")
                         # 更新 offset
                         last_update_id = updates[-1].update_id + 1
@@ -1088,7 +1075,6 @@ def start_bot():
         bot_thread.start()
         
         # 等待一小段时间，检查线程是否正常启动
-        import time
         time.sleep(0.5)
         if bot_thread.is_alive():
             logger.info(f"[PID:{current_pid}] Telegram Bot 轮询线程已启动（线程ID: {bot_thread.ident}, 已获取锁）")
@@ -1163,14 +1149,12 @@ async def send_telegram_message(message: str, chat_id: str | None = None):
             return False
 
         # 检查消息长度（Telegram 最大 4096 字符）
-        from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH
         if len(message) > MAX_TELEGRAM_MESSAGE_LENGTH:
             message = truncate_message(message)
 
         # pyTelegramBotAPI 的 send_message 是同步的，需要在线程中执行
         # 使用 asyncio 来避免阻塞异步事件循环
         # 同时设置超时，避免网络问题导致长时间阻塞
-        import asyncio
         loop = asyncio.get_event_loop()
         
         # 使用 asyncio.wait_for 包装，设置 8 秒超时（比外层的 10 秒稍短）

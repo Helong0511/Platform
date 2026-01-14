@@ -8,6 +8,8 @@ import pandas as pd
 from datetime import datetime, timedelta, date
 import logging
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 # 允许的Excel文件MIME类型
@@ -41,8 +43,6 @@ async def validate_excel_file(file: UploadFile) -> bytes:
     异常:
         HTTPException: 如果文件验证失败
     """
-    from app.core.config import settings
-    
     # 验证文件类型
     if file.content_type not in ALLOWED_MIME_TYPES or not allowed_file(file.filename):
         raise HTTPException(

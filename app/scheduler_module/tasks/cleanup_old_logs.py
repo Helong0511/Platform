@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.core.utils import get_app_now_naive
 from app.models.models import UserAuditLog
 from app.scheduler_module.task_names import CLEANUP_LOGS_TASK_NAME
 from app.scheduler_module.task_utils import (
@@ -64,7 +65,6 @@ async def cleanup_old_audit_logs(
     TASK_NAME = CLEANUP_LOGS_TASK_NAME
 
     # 计算清理日期阈值（使用应用时区）
-    from app.core.utils import get_app_now_naive
     cutoff_date = get_app_now_naive() - timedelta(days=days)
     cutoff_date_str = cutoff_date.strftime('%Y-%m-%d %H:%M:%S')
 

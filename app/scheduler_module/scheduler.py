@@ -9,10 +9,11 @@ import warnings
 # 不影响功能，等待库更新修复
 warnings.filterwarnings('ignore', message='.*pkg_resources is deprecated.*', category=UserWarning)
 
+import os
 import asyncio
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Callable, Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -21,12 +22,23 @@ from apscheduler.executors.asyncio import AsyncIOExecutor
 from apscheduler.jobstores.memory import MemoryJobStore
 from sqlalchemy.future import select
 
-from app.scheduler_module.lock import acquire_task_lock, release_task_lock, CURRENT_PID, CURRENT_HOST
+from app.scheduler_module.lock import (
+    acquire_task_lock, release_task_lock, CURRENT_PID, CURRENT_HOST, DEFAULT_TIMEOUT_SECONDS
+)
+from app.scheduler_module.task_queue import submit_task_to_queue, TaskPriority
+from app.scheduler_module.process_allocator import (
+    should_execute_in_current_process, register_task_process_assignment
+)
+from app.scheduler_module.task_registry import (
+    auto_register_tasks,
+    get_task_function_by_name_or_path
+)
+from app.scheduler_module.task_result_registry import get_task_result, auto_register_task_results
 from app.core.config import settings
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
+from app.core.database import AsyncSessionLocal
 from app.models.models import ScheduledTask
 from app.core.audit_log import log_user_action
-from app.core.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +78,6 @@ def get_scheduler() -> AsyncIOScheduler:
                     },
                     timezone=DEFAULT_TIMEZONE  # 使用配置的应用时区
                 )
-                import os
                 worker_pid = os.getpid()
                 logger.info(
                     f"[Worker PID:{worker_pid}] 调度器已初始化（时区: {DEFAULT_TIMEZONE}, 执行器: AsyncIOExecutor）"
@@ -93,16 +104,8 @@ async def execute_task_with_lock(
         *args: 任务函数位置参数
         **kwargs: 任务函数关键字参数
     """
-    # 导入任务队列和进程分配模块（延迟导入，避免循环依赖）
-    from app.scheduler_module.task_queue import submit_task_to_queue, TaskPriority
-    from app.scheduler_module.process_allocator import should_execute_in_current_process
-    from app.core.database import AsyncSessionLocal
-    from app.models.models import ScheduledTask
-    from sqlalchemy import select
-    
     # 如果跳过进程检查（手动触发），直接执行
     if skip_process_check:
-        import os
         worker_pid = os.getpid()
         logger.info(
             f"[Worker PID:{worker_pid}] 手动触发任务 '{task_name}'，跳过进程分配检查，直接执行"
@@ -131,8 +134,6 @@ async def execute_task_with_lock(
         if task_record and task_record.is_running:
             # 检查是否超时（可能是上次执行异常导致锁未释放）
             if task_record.last_run_time:
-                from datetime import timedelta
-                from app.scheduler_module.lock import DEFAULT_TIMEOUT_SECONDS
                 # 确保 last_run_time 是 naive datetime（数据库存储的是北京时间）
                 if task_record.last_run_time.tzinfo is None:
                     # 如果数据库返回的是 naive datetime，假设是北京时间
@@ -146,7 +147,6 @@ async def execute_task_with_lock(
                 
                 if elapsed < DEFAULT_TIMEOUT_SECONDS:
                     # 任务正在运行且未超时，直接跳过（避免重复执行）
-                    import os
                     worker_pid = os.getpid()
                     logger.debug(
                         f"[Worker PID:{worker_pid}] 任务 '{task_name}' 正在运行中"
@@ -173,7 +173,6 @@ async def execute_task_with_lock(
         )
         if not should_execute:
             # 不应该由当前进程执行，跳过
-            import os
             worker_pid = os.getpid()
             logger.debug(
                 f"[Worker PID:{worker_pid}] 任务 '{task_name}' 已分配给其他进程执行，"
@@ -190,7 +189,6 @@ async def execute_task_with_lock(
         await _execute_task_with_lock_internal(task_name, task_func, *args, **kwargs)
     
     # 将任务提交到队列，队列会管理并发执行
-    import os
     worker_pid = os.getpid()
     logger.debug(
         f"[Worker PID:{worker_pid}] 任务 '{task_name}' 已分配给当前进程，"
@@ -244,7 +242,6 @@ async def _execute_task_with_lock_internal(
         except Exception as e:
             logger.warning(f"查询任务信息失败（不影响任务执行）: {e}")
 
-        import os
         worker_pid = os.getpid()
         
         # 只记录一次任务开始执行的日志
@@ -268,7 +265,6 @@ async def _execute_task_with_lock_internal(
             # 尝试从任务函数获取执行结果（如果任务保存了结果信息）
             result_message = None
             try:
-                from app.scheduler_module.task_result_registry import get_task_result
                 result_message = get_task_result(task_name)
             except (ImportError, AttributeError) as e:
                 logger.debug(f"从任务结果注册表获取结果失败: {e}")
@@ -338,7 +334,6 @@ async def _execute_task_with_lock_internal(
             # 尝试从任务函数获取执行结果（即使失败也可能有部分结果信息）
             result_message = None
             try:
-                from app.scheduler_module.task_result_registry import get_task_result
                 result_message = get_task_result(task_name)
             except (ImportError, AttributeError) as e:
                 logger.debug(f"从任务结果注册表获取结果失败: {e}")
@@ -469,7 +464,6 @@ def register_scheduled_task(
         misfire_grace_time=DEFAULT_MISFIRE_GRACE_TIME  # 错过执行时间后60秒内仍可执行
     )
 
-    import os
     worker_pid = os.getpid()
     
     # 计算下次执行时间
@@ -503,15 +497,6 @@ async def init_scheduled_tasks() -> None:
     """
     logger.info("正在初始化定时任务...")
 
-    # 导入必要的模块（避免在循环中重复导入）
-    from app.scheduler_module.task_registry import (
-        auto_register_tasks,
-        get_task_function_by_name_or_path
-    )
-    from app.scheduler_module.task_result_registry import auto_register_task_results
-    from app.core.database import AsyncSessionLocal
-    from app.models.models import ScheduledTask
-    from sqlalchemy import select
 
     # 首先注册所有可用的任务函数
     auto_register_tasks()
@@ -561,7 +546,6 @@ async def init_scheduled_tasks() -> None:
 
             # 注册任务的进程分配
             try:
-                from app.scheduler_module.process_allocator import register_task_process_assignment
                 await register_task_process_assignment(
                     task_record.task_name,
                     task_record.cron_expression,
@@ -605,7 +589,6 @@ async def init_scheduled_tasks() -> None:
             logger.warning(f"关闭数据库会话时出错: {e}")
 
     # 输出初始化结果
-    import os
     worker_pid = os.getpid()
     logger.info(
         f"[Worker PID:{worker_pid}] 定时任务初始化完成: "
@@ -641,7 +624,6 @@ async def start_scheduler() -> None:
     if not sched.running:
         try:
             sched.start()
-            import os
             worker_pid = os.getpid()
             
             # 获取所有已注册的任务
@@ -683,7 +665,6 @@ async def shutdown_scheduler() -> None:
     
     等待所有正在执行的任务完成后再关闭
     """
-    import asyncio
     sched = get_scheduler()
     if sched.running:
         try:

@@ -156,7 +156,7 @@
             {{ formatDate(scope.row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="420" fixed="right">
+        <el-table-column label="操作" width="500" fixed="right">
           <template #default="scope">
             <div class="operation-buttons">
               <el-button 
@@ -187,6 +187,16 @@
                 class="product-button"
               >
                 产品
+              </el-button>
+              <el-button 
+                v-if="scope.row.role === 'client'"
+                size="small" 
+                type="warning" 
+                :icon="Bell"
+                @click="handleNotificationConfig(scope.row)"
+                title="通知配置"
+              >
+                通知
               </el-button>
               <el-button 
                 size="small" 
@@ -469,6 +479,14 @@
       @delete="removeProduct"
       @refresh="handleProductRefresh"
     />
+
+    <!-- 客户通知配置对话框 -->
+    <ClientNotificationConfigDialog
+      v-model="notificationConfigDialogVisible"
+      :client-id="currentClientIdForNotification"
+      :client-name="currentClientNameForNotification"
+      @saved="handleNotificationConfigSaved"
+    />
   </div>
 </template>
 
@@ -492,6 +510,7 @@ import {
 import { updateClient, createClient, updateClientSwitches } from '../../api/client';
 import { useClientProducts } from '../../composables/useClientProducts';
 import ProductManagementDialog from '../../components/admin/ProductManagementDialog.vue';
+import ClientNotificationConfigDialog from '../../components/admin/ClientNotificationConfigDialog.vue';
 import { formatDate as formatDateWithTimezone } from '../../utils/dateFormat';
 import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../../utils/api';
 import { logger } from '../../utils/logger';
@@ -1450,6 +1469,51 @@ const handleManageProducts = async (user) => {
   } else {
     ElMessage.warning('该客户用户还没有关联的客户信息，请先编辑用户并创建客户信息');
   }
+};
+
+// 客户通知配置
+const notificationConfigDialogVisible = ref(false);
+const currentClientIdForNotification = ref(null);
+const currentClientNameForNotification = ref('');
+
+const handleNotificationConfig = async (user) => {
+  if (user.role !== 'client') {
+    return;
+  }
+  
+  // 如果没有客户信息，尝试获取最新的用户详情
+  if (!user.client?.id) {
+    try {
+      const userData = await getUserDetail(user.id);
+      if (userData.client?.id) {
+        // 更新用户数据中的客户信息
+        user.client = userData.client;
+      } else {
+        ElMessage.warning('该客户用户还没有关联的客户信息，请先编辑用户并创建客户信息');
+        return;
+      }
+    } catch (error) {
+      if (!isErrorHandled(error)) {
+        const errorMsg = extractErrorMessage(error);
+        ElMessage.error(errorMsg);
+      }
+      return;
+    }
+  }
+  
+  // 打开通知配置对话框
+  if (user.client?.id) {
+    currentClientIdForNotification.value = user.client.id;
+    currentClientNameForNotification.value = user.full_name || user.username || user.client.company_name || '未知客户';
+    notificationConfigDialogVisible.value = true;
+  } else {
+    ElMessage.warning('该客户用户还没有关联的客户信息，请先编辑用户并创建客户信息');
+  }
+};
+
+const handleNotificationConfigSaved = () => {
+  // 通知配置保存成功后的回调
+  ElMessage.success('通知配置已保存');
 };
 
 // 产品对话框刷新

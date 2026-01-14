@@ -1,8 +1,13 @@
-import axios from 'axios';
-import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
+/**
+ * 定时任务管理 API
+ * 已统一使用 request 函数，保持代码一致性
+ * 包含特殊逻辑：URL编码、任务触发、锁释放等
+ */
+import { request, normalizePaginatedResponse, normalizeResponse, extractErrorMessage, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
 import { ElMessage } from 'element-plus';
 import { getSuccessMessage } from '../utils/messages';
 import { logger } from '../utils/logger';
+import axios from 'axios'; // 保留用于特殊场景（URL编码、任务触发等）
 
 /**
  * 获取定时任务列表
@@ -15,12 +20,11 @@ import { logger } from '../utils/logger';
  * @returns {Promise<Object>} 定时任务列表数据
  */
 export const getScheduledTasks = async (params) => {
-  try {
-    const response = await axios.get('/api/v1/scheduled-tasks/', { params });
-    return normalizePaginatedResponse(response);
-  } catch (error) {
-    handleError(error);
-  }
+  return request({
+    url: '/api/v1/scheduled-tasks/',
+    method: 'get',
+    params
+  }, { paginated: true });
 };
 
 /**
@@ -29,14 +33,13 @@ export const getScheduledTasks = async (params) => {
  * @returns {Promise<Object>} 定时任务详情
  */
 export const getScheduledTask = async (taskName) => {
-  try {
-    // 对任务名称进行 URL 编码，确保中文路径正确传输
-    const encodedTaskName = encodeURIComponent(taskName);
-    const response = await axios.get(`/api/v1/scheduled-tasks/${encodedTaskName}`);
-    return normalizeResponse(response, { returnDataOnly: true });
-  } catch (error) {
-    handleError(error);
-  }
+  // 对任务名称进行 URL 编码，确保中文路径正确传输
+  const encodedTaskName = encodeURIComponent(taskName);
+  
+  return request({
+    url: `/api/v1/scheduled-tasks/${encodedTaskName}`,
+    method: 'get'
+  }, { returnDataOnly: true });
 };
 
 /**
@@ -50,16 +53,17 @@ export const getScheduledTask = async (taskName) => {
  * @returns {Promise<Object>} 创建后的定时任务
  */
 export const createScheduledTask = async (data) => {
-  try {
-    // 在保存前刷新CSRF令牌，确保使用最新的令牌
-    await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
-    
-    const response = await axios.post('/api/v1/scheduled-tasks/', data);
-    ElMessage.success(getSuccessMessage('TASK_CREATE_SUCCESS'));
-    return normalizeResponse(response, { returnDataOnly: true });
-  } catch (error) {
-    handleError(error);
-  }
+  // 在保存前刷新CSRF令牌，确保使用最新的令牌
+  await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
+  
+  const result = await request({
+    url: '/api/v1/scheduled-tasks/',
+    method: 'post',
+    data
+  }, { returnDataOnly: true });
+  
+  ElMessage.success(getSuccessMessage('TASK_CREATE_SUCCESS'));
+  return result;
 };
 
 /**
@@ -80,11 +84,16 @@ export const updateScheduledTask = async (taskName, data) => {
     
     // 对任务名称进行 URL 编码，确保中文路径正确传输
     const encodedTaskName = encodeURIComponent(taskName);
-    const response = await axios.patch(`/api/v1/scheduled-tasks/${encodedTaskName}`, data);
+    const result = await request({
+      url: `/api/v1/scheduled-tasks/${encodedTaskName}`,
+      method: 'patch',
+      data
+    }, { returnDataOnly: true });
+    
     ElMessage.success(getSuccessMessage('TASK_UPDATE_SUCCESS'));
-    return normalizeResponse(response, { returnDataOnly: true });
+    return result;
   } catch (error) {
-    // axios拦截器应该已经处理了CSRF token的重试
+    // request函数已经处理了CSRF token的重试
     // 如果仍然失败，说明token确实有问题
     const errorMsg = extractErrorMessage(error);
     
@@ -101,6 +110,7 @@ export const updateScheduledTask = async (taskName, data) => {
     } else {
       handleError(error);
     }
+    throw error;
   }
 };
 
@@ -111,20 +121,18 @@ export const updateScheduledTask = async (taskName, data) => {
  * @returns {Promise<Object>} 触发结果
  */
 export const triggerScheduledTask = async (taskName, params = {}) => {
-  try {
-    // 在触发前刷新CSRF令牌，确保使用最新的令牌
-    await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
-    
-    const encodedTaskName = encodeURIComponent(taskName);
-    const response = await axios.post(
-      `/api/v1/scheduled-tasks/${encodedTaskName}/trigger`,
-      Object.keys(params).length > 0 ? params : undefined  // 如果有参数才发送body
-    );
-    ElMessage.success(getSuccessMessage('TASK_TRIGGER_SUCCESS'));
-    return normalizeResponse(response, { returnDataOnly: true });
-  } catch (error) {
-    handleError(error);
-  }
+  // 在触发前刷新CSRF令牌，确保使用最新的令牌
+  await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
+  
+  const encodedTaskName = encodeURIComponent(taskName);
+  const result = await request({
+    url: `/api/v1/scheduled-tasks/${encodedTaskName}/trigger`,
+    method: 'post',
+    data: Object.keys(params).length > 0 ? params : undefined  // 如果有参数才发送body
+  }, { returnDataOnly: true });
+  
+  ElMessage.success(getSuccessMessage('TASK_TRIGGER_SUCCESS'));
+  return result;
 };
 
 /**
@@ -133,17 +141,17 @@ export const triggerScheduledTask = async (taskName, params = {}) => {
  * @returns {Promise<Object>} 操作结果
  */
 export const releaseTaskLock = async (taskName) => {
-  try {
-    // 在操作前刷新CSRF令牌，确保使用最新的令牌
-    await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
-    
-    // 对任务名称进行 URL 编码，确保中文路径正确传输
-    const encodedTaskName = encodeURIComponent(taskName);
-    const response = await axios.post(`/api/v1/scheduled-tasks/${encodedTaskName}/release-lock`);
-    ElMessage.success(getSuccessMessage('TASK_LOCK_RELEASED'));
-    return normalizeResponse(response, { returnDataOnly: true });
-  } catch (error) {
-    handleError(error);
-  }
+  // 在操作前刷新CSRF令牌，确保使用最新的令牌
+  await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
+  
+  // 对任务名称进行 URL 编码，确保中文路径正确传输
+  const encodedTaskName = encodeURIComponent(taskName);
+  const result = await request({
+    url: `/api/v1/scheduled-tasks/${encodedTaskName}/release-lock`,
+    method: 'post'
+  }, { returnDataOnly: true });
+  
+  ElMessage.success(getSuccessMessage('TASK_LOCK_RELEASED'));
+  return result;
 };
 

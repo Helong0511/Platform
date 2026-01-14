@@ -20,10 +20,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user, require_admin
 from app.core.database import get_db
-from app.models.models import User
+from app.core.config import settings
+from app.core.utils import get_app_now_naive, build_import_message
+from app.core.audit_log import log_user_action
+from app.models.models import User, AdData, Product
 from app.schemas.base import ResponseBaseSchema
-from app.api.api_v1.endpoints.excel.utils import validate_excel_file
+from app.api.api_v1.endpoints.excel.utils import validate_excel_file, parse_date_value
 from app.core.constants import MAX_PAGE_SIZE
+from sqlalchemy import and_, or_
+from sqlalchemy.future import select
+from starlette.datastructures import UploadFile as StarletteUploadFile
+import traceback
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -1002,7 +1009,6 @@ async def save_user_mapping(
         mapping = merged_mapping
 
         # 保存合并后的映射规则到文件
-        from app.core.utils import get_app_now_naive
         mapping_data = {
             "created_at": get_app_now_naive().isoformat(),  # 使用北京时间
             "created_by": current_user.username,
@@ -1194,7 +1200,6 @@ async def get_timezone_config(
     - 用于前端时间显示
     """
     try:
-        from app.core.config import settings
         return ResponseBaseSchema.success(data={
             "timezone": settings.TIMEZONE
         })
@@ -1343,14 +1348,10 @@ async def import_training_data(
     conflicts = []
 
     try:
-        # 导入广告数据导入处理函数
-        from app.api.api_v1.endpoints.excel.import_handler import import_ad_data_handler
-        from app.api.api_v1.endpoints.excel.import_handler import validate_and_read_excel, process_column_mapping
-        from app.api.api_v1.endpoints.excel.utils import parse_date_value
-        from app.core.audit_log import log_user_action
-        from app.models.models import AdData, Product
-        from sqlalchemy import and_, or_
-        from sqlalchemy.future import select
+        # 延迟导入，避免循环导入
+        from app.api.api_v1.endpoints.excel.import_handler import (
+            validate_and_read_excel, process_column_mapping, build_product_maps
+        )
 
         # ====== 第一步：检查冲突 ======
         logger.info("开始检查训练数据冲突...")
@@ -1362,7 +1363,6 @@ async def import_training_data(
         df, column_mapping_result = await process_column_mapping(df)
 
         # 构建产品映射（用于查找产品ID）
-        from app.api.api_v1.endpoints.excel.import_handler import build_product_maps
         product_map, product_name_map = await build_product_maps(db)
 
         # 收集本次要保存的数据（日期+产品ID）
@@ -1525,7 +1525,6 @@ async def import_training_data(
         # ====== 第二步：执行导入 ======
         # 注意：UploadFile 对象可能不支持多次读取，需要重新创建文件对象
         # 使用之前读取的内容创建新的文件对象
-        from starlette.datastructures import UploadFile as StarletteUploadFile
 
         # 使用 BytesIO 创建新的文件对象
         file_like = BytesIO(contents)
@@ -1555,6 +1554,9 @@ async def import_training_data(
             size=len(contents)
         )
 
+        # 延迟导入，避免循环导入
+        from app.api.api_v1.endpoints.excel.import_handler import import_ad_data_handler
+        
         # 调用实际的导入处理函数
         import_response = await import_ad_data_handler(
             file=new_file,
@@ -1582,7 +1584,6 @@ async def import_training_data(
         )
 
         # 构建返回消息：使用统一的导入消息构建函数
-        from app.core.utils import build_import_message
         message = build_import_message(
             imported_rows=import_response.imported_rows,
             failed_rows=import_response.failed_rows or 0,
@@ -1630,7 +1631,6 @@ async def import_training_data(
     except Exception as e:
         logger.error(f"导入训练数据失败: {str(e)}", exc_info=True)
         # 记录详细的错误信息，包括堆栈跟踪
-        import traceback
         error_trace = traceback.format_exc()
         logger.error(f"错误堆栈跟踪:\n{error_trace}")
         raise HTTPException(

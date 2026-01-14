@@ -78,6 +78,7 @@ const UserManagement = createAsyncComponent(() => import(/* webpackChunkName: "u
 const ScheduledTaskManagement = createAsyncComponent(() => import(/* webpackChunkName: "scheduled-task" */ '../views/admin/ScheduledTaskManagement.vue'), 'ScheduledTaskManagement');
 const AuditLogManagement = createAsyncComponent(() => import(/* webpackChunkName: "audit-log" */ '../views/admin/AuditLogManagement.vue'), 'AuditLogManagement');
 const PostbackManagement = createAsyncComponent(() => import(/* webpackChunkName: "postback-management" */ '../views/admin/PostbackManagement.vue'), 'PostbackManagement');
+const PostbackIpWhitelist = createAsyncComponent(() => import(/* webpackChunkName: "postback-ip-whitelist" */ '../views/admin/PostbackIpWhitelist.vue'), 'PostbackIpWhitelist');
 const ShortLinkManagement = createAsyncComponent(() => import(/* webpackChunkName: "short-link-management" */ '../views/admin/ShortLinkManagement.vue'), 'ShortLinkManagement');
 const AdvertiserManagement = createAsyncComponent(() => import(/* webpackChunkName: "advertiser-management" */ '../views/admin/AdvertiserManagement.vue'), 'AdvertiserManagement');
 const PublisherManagement = createAsyncComponent(() => import(/* webpackChunkName: "publisher-management" */ '../views/admin/PublisherManagement.vue'), 'PublisherManagement');
@@ -87,12 +88,12 @@ const DiscountManagement = createAsyncComponent(() => import(/* webpackChunkName
 const ConversionDeductionManagement = createAsyncComponent(() => import(/* webpackChunkName: "conversion-deduction-management" */ '../views/admin/ConversionDeductionManagement.vue'), 'ConversionDeductionManagement');
 const DeductionStats = createAsyncComponent(() => import(/* webpackChunkName: "deduction-stats" */ '../views/admin/DeductionStats.vue'), 'DeductionStats');
 const DeductionLogs = createAsyncComponent(() => import(/* webpackChunkName: "deduction-logs" */ '../views/admin/DeductionLogs.vue'), 'DeductionLogs');
-const AdvertiserTest = createAsyncComponent(() => import(/* webpackChunkName: "advertiser-test" */ '../views/admin/AdvertiserTest.vue'), 'AdvertiserTest');
 const AffiliateTest = createAsyncComponent(() => import(/* webpackChunkName: "affiliate-test" */ '../views/admin/AffiliateTest.vue'), 'AffiliateTest');
 const ConversionSummary = createAsyncComponent(() => import(/* webpackChunkName: "conversion-summary" */ '../views/admin/ConversionSummary.vue'), 'ConversionSummary');
-const ConversionLog = createAsyncComponent(() => import(/* webpackChunkName: "conversion-log" */ '../views/admin/ConversionLog.vue'), 'ConversionLog');
+// ConversionLog 已废弃，功能已融合到 PostbackManagement
 const ClickLog = createAsyncComponent(() => import(/* webpackChunkName: "click-log" */ '../views/admin/ClickLog.vue'), 'ClickLog');
 const SessionManagement = createAsyncComponent(() => import(/* webpackChunkName: "session-management" */ '../views/admin/SessionManagement.vue'), 'SessionManagement');
+const TelegramNotificationConfig = createAsyncComponent(() => import(/* webpackChunkName: "telegram-notification-config" */ '../views/admin/TelegramNotificationConfig.vue'), 'TelegramNotificationConfig');
 const ClientUserManagement = createAsyncComponent(() => import(/* webpackChunkName: "client-user-management" */ '../views/client/ClientUserManagement.vue'), 'ClientUserManagement');
 const ApiDocumentation = createAsyncComponent(() => import(/* webpackChunkName: "api-documentation" */ '../views/ApiDocumentation.vue'), 'ApiDocumentation');
 const MainLayout = createAsyncComponent(() => import(/* webpackChunkName: "layout" */ '../components/Layout/MainLayout.vue'), 'MainLayout');
@@ -190,6 +191,12 @@ const routes = [
         meta: { requiresAdmin: true }
       },
       {
+        path: 'admin/postback-ip-whitelist',
+        name: 'PostbackIpWhitelist',
+        component: PostbackIpWhitelist,
+        meta: { requiresAdmin: true }
+      },
+      {
         path: 'admin/short-links',
         name: 'ShortLinkManagement',
         component: ShortLinkManagement,
@@ -244,12 +251,6 @@ const routes = [
         meta: { requiresAdmin: true }
       },
       {
-        path: 'admin/advertiser-test',
-        name: 'AdvertiserTest',
-        component: AdvertiserTest,
-        meta: { requiresAdmin: true }
-      },
-      {
         path: 'admin/affiliate-test',
         name: 'AffiliateTest',
         component: AffiliateTest,
@@ -263,8 +264,7 @@ const routes = [
       },
       {
         path: 'admin/conversion-log',
-        name: 'ConversionLog',
-        component: ConversionLog,
+        redirect: '/app/admin/postback',
         meta: { requiresAdmin: true }
       },
       {
@@ -278,6 +278,12 @@ const routes = [
         name: 'SessionManagement',
         component: SessionManagement,
         meta: { requiresAuth: true }
+      },
+      {
+        path: 'admin/telegram-notification-config',
+        name: 'TelegramNotificationConfig',
+        component: TelegramNotificationConfig,
+        meta: { requiresAdmin: true }
       },
       {
         path: 'client/user-management',

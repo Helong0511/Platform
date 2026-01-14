@@ -2,10 +2,14 @@
 查询工具模块
 提供常用的查询优化函数，避免在列上使用函数导致索引失效
 """
+from calendar import monthrange
 from datetime import date, datetime
-from sqlalchemy import Column, and_, or_, text, func, literal_column, case
+from sqlalchemy import Column, and_, or_, text, func, literal_column, case, select
+from sqlalchemy.future import select as future_select
 from typing import Optional
 from sqlalchemy.sql import Select
+
+from app.models.models import ProductAssignment, CountryInfo
 
 
 def date_range_condition(
@@ -134,7 +138,6 @@ def apply_date_range_filter(
             end_date
         )
     """
-    from calendar import monthrange
     
     # 如果指定了日期范围，使用指定的范围
     if start_date or end_date:
@@ -171,8 +174,6 @@ async def check_use_assignment_table(db) -> bool:
         bool: 如果应该使用分配历史表返回 True，否则返回 False
     """
     try:
-        from sqlalchemy import select, func
-        from app.models.models import ProductAssignment
         
         test_query = select(func.count(ProductAssignment.id))
         test_result = await db.execute(test_query)
@@ -200,7 +201,6 @@ def join_country_info(query: Select, country_code_column: Column) -> Select:
     Example:
         query = join_country_info(query, AdData.country_code)
     """
-    from app.models.models import CountryInfo
     
     # 使用列对象的 collate() 方法统一排序规则
     # 这样可以确保 SQLAlchemy 正确处理表别名和列引用

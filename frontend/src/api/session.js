@@ -14,9 +14,11 @@
  * @module api/session
  */
 
-import axios from 'axios';
-import { request, normalizePaginatedResponse, normalizeResponse, extractErrorMessage, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
-import { ElMessage } from 'element-plus';
+/**
+ * 会话管理 API
+ * 已统一使用 request 函数，保持代码一致性
+ */
+import { request, refreshCsrfTokenBeforeRequest } from '../utils/api';
 
 /**
  * 获取当前用户的活跃会话列表
@@ -52,14 +54,11 @@ export const getMySessions = async (params = {}) => {
  * @returns {Promise<Object>} 撤销结果
  */
 export const revokeMySession = async (sessionId) => {
-  try {
-    await refreshCsrfTokenBeforeRequest('/api/v1/sessions/me/sessions');
-    
-    const response = await axios.post(`/api/v1/sessions/me/sessions/${sessionId}/revoke`);
-    return normalizeResponse(response);
-  } catch (error) {
-    handleError(error);
-  }
+  await refreshCsrfTokenBeforeRequest('/api/v1/sessions/me/sessions');
+  return request({
+    url: `/api/v1/sessions/me/sessions/${sessionId}/revoke`,
+    method: 'post'
+  }, { returnDataOnly: true });
 };
 
 /**
@@ -68,14 +67,11 @@ export const revokeMySession = async (sessionId) => {
  * @returns {Promise<Object>} 撤销结果，包含撤销的会话数量
  */
 export const revokeAllMySessions = async () => {
-  try {
-    await refreshCsrfTokenBeforeRequest('/api/v1/sessions/me/sessions');
-    
-    const response = await axios.post('/api/v1/sessions/me/sessions/revoke-all');
-    return normalizeResponse(response);
-  } catch (error) {
-    handleError(error);
-  }
+  await refreshCsrfTokenBeforeRequest('/api/v1/sessions/me/sessions');
+  return request({
+    url: '/api/v1/sessions/me/sessions/revoke-all',
+    method: 'post'
+  }, { returnDataOnly: true });
 };
 
 /**
@@ -104,14 +100,11 @@ export const getUserSessions = async (userId, params = {}) => {
  * @returns {Promise<Object>} 撤销结果
  */
 export const revokeUserSession = async (userId, sessionId) => {
-  try {
-    await refreshCsrfTokenBeforeRequest('/api/v1/sessions/blacklist');
-    
-    const response = await axios.post(`/api/v1/sessions/users/${userId}/sessions/${sessionId}/revoke`);
-    return normalizeResponse(response);
-  } catch (error) {
-    handleError(error);
-  }
+  await refreshCsrfTokenBeforeRequest('/api/v1/sessions/blacklist');
+  return request({
+    url: `/api/v1/sessions/users/${userId}/sessions/${sessionId}/revoke`,
+    method: 'post'
+  }, { returnDataOnly: true });
 };
 
 /**
@@ -121,14 +114,11 @@ export const revokeUserSession = async (userId, sessionId) => {
  * @returns {Promise<Object>} 撤销结果，包含撤销的会话数量
  */
 export const revokeAllUserSessions = async (userId) => {
-  try {
-    await refreshCsrfTokenBeforeRequest('/api/v1/sessions/blacklist');
-    
-    const response = await axios.post(`/api/v1/sessions/users/${userId}/sessions/revoke-all`);
-    return normalizeResponse(response);
-  } catch (error) {
-    handleError(error);
-  }
+  await refreshCsrfTokenBeforeRequest('/api/v1/sessions/blacklist');
+  return request({
+    url: `/api/v1/sessions/users/${userId}/sessions/revoke-all`,
+    method: 'post'
+  }, { returnDataOnly: true });
 };
 
 /**

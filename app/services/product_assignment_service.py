@@ -12,6 +12,7 @@ from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.product_assignment import validate_product_assignments, cleanup_invalid_assignments
+from fastapi import HTTPException
 import logging
 
 logger = logging.getLogger(__name__)
@@ -300,7 +301,6 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
         Returns:
             Dict: 更新后的分配记录数据
         """
-        from fastapi import HTTPException
 
         # 查询分配记录
         query = select(ProductAssignment).where(ProductAssignment.id == assignment_id)
@@ -435,8 +435,6 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
         Returns:
             Dict: 批量更新结果
         """
-        from fastapi import HTTPException
-
         if not updates or len(updates) == 0:
             raise_api_exception(
                 ErrorCode.VALIDATION_ERROR,

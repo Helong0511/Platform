@@ -80,9 +80,17 @@
       >
         <el-input
           v-model="formData.telegram_chat_id"
-          placeholder="输入 Telegram Chat ID"
+          placeholder="输入 Telegram Chat ID（例如：-1001234567890）"
           clearable
         />
+        <div class="form-hint">
+          <el-icon :size="16"><InfoFilled /></el-icon>
+          <span>
+            获取 Chat ID：与 @BotFather 创建的机器人对话，发送 /start，然后发送任意消息，
+            <el-link href="https://t.me/userinfobot" target="_blank" type="primary">点击这里</el-link>
+            获取您的 Chat ID
+          </span>
+        </div>
       </el-form-item>
 
       <el-form-item
@@ -136,7 +144,7 @@
 
 <script setup>
 import { ref, reactive, watch, computed } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElLink } from 'element-plus';
 import { InfoFilled } from '@element-plus/icons-vue';
 import { getClientNotificationConfig, saveClientNotificationConfig } from '../../api/notification';
 import { useDevice } from '../../composables/useDevice';
@@ -203,6 +211,24 @@ watch(() => formData.notify_channels, (newVal) => {
 }, { immediate: true });
 
 const formRules = {
+  telegram_chat_id: [
+    {
+      validator: (rule, value, callback) => {
+        if (selectedChannels.value.includes('telegram') && formData.notification_enabled) {
+          if (!value || !value.trim()) {
+            callback(new Error('选择 Telegram 渠道时必须填写 Chat ID'));
+          } else if (!/^-?\d+$/.test(value.trim())) {
+            callback(new Error('Chat ID 必须是数字（可以是负数）'));
+          } else {
+            callback();
+          }
+        } else {
+          callback();
+        }
+      },
+      trigger: 'blur'
+    }
+  ],
   high_value_threshold: [
     {
       validator: (rule, value, callback) => {

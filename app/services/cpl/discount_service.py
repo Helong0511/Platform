@@ -5,7 +5,7 @@ Discount 管理服务层
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func
+from sqlalchemy import func, delete
 from sqlalchemy.orm import joinedload
 
 from app.models.models import OfferDiscount, Offer, Publisher, User
@@ -247,7 +247,6 @@ class DiscountService(BaseService[OfferDiscount]):
             )
 
         try:
-            from sqlalchemy import delete
             await self.db.execute(delete(OfferDiscount).where(OfferDiscount.id == discount_id))
             await self.db.commit()
 

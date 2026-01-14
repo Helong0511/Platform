@@ -5,7 +5,7 @@ Cap 管理服务层
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func
+from sqlalchemy import func, delete
 from sqlalchemy.orm import joinedload
 
 from app.models.models import OfferCap, Offer, Advertiser, Publisher, User
@@ -283,7 +283,6 @@ class CapService(BaseService[OfferCap]):
             )
 
         try:
-            from sqlalchemy import delete
             await self.db.execute(delete(OfferCap).where(OfferCap.id == cap_id))
             await self.db.commit()
 

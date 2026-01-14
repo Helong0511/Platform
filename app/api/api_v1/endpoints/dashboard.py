@@ -12,6 +12,8 @@ import logging
 from app.core.database import get_db
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.dependencies import get_dashboard_service
+from app.services.dashboard_service import DashboardService
 from app.schemas.ad_data import DashboardStatsResponse, TrendDataResponse
 from app.schemas.base import ResponseBaseSchema
 from app.core.security import get_current_user
@@ -34,9 +36,6 @@ async def get_dashboard_stats(period: str = "week", db: AsyncSession = Depends(g
     logger = logging.getLogger(__name__)
 
     # 使用服务层（业务逻辑在DashboardService中）
-    from app.core.dependencies import get_dashboard_service
-    from app.services.dashboard_service import DashboardService
-    
     dashboard_service: DashboardService = await get_dashboard_service(db)
 
     try:
@@ -67,9 +66,6 @@ async def get_recent_ad_data(
     - 客户只能查看自己的数据
     """
     # 使用服务层（业务逻辑在DashboardService中）
-    from app.core.dependencies import get_dashboard_service
-    from app.services.dashboard_service import DashboardService
-    
     dashboard_service: DashboardService = await get_dashboard_service(db)
     
     try:
@@ -106,9 +102,6 @@ async def get_trend_data(period: str = "week", db: AsyncSession = Depends(get_db
     logger = logging.getLogger(__name__)
 
     # 使用服务层（业务逻辑在DashboardService中）
-    from app.core.dependencies import get_dashboard_service
-    from app.services.dashboard_service import DashboardService
-    
     dashboard_service: DashboardService = await get_dashboard_service(db)
 
     try:

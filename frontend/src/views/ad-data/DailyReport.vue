@@ -357,31 +357,12 @@ const fetchDailyData = async () => {
 
         const response = await getDailySummary(params);
       
-      if (response.code !== 200) {
-        const errorMsg = response.detail || response.message || '获取数据失败';
-        ElMessage.error(errorMsg);
-        dailyDataList.value = [];
-        pagination.value.total = 0;
-        return;
-      }
-      
-      const listResponse = response.data || {};
-      
-      // 尝试多种方式访问数据
-      let dataArray = [];
-      if (Array.isArray(listResponse.data)) {
-        dataArray = listResponse.data;
-      } else if (Array.isArray(listResponse)) {
-        dataArray = listResponse;
-      } else if (Array.isArray(response.data)) {
-        dataArray = response.data;
-      }
-      
-      dailyDataList.value = dataArray;
+      // response已经是标准分页格式，直接使用data和total字段
+      // getDailySummary使用paginated: true，失败时会抛出异常
+      dailyDataList.value = response.data || [];
       
       // 确保total是数字类型，避免字符串类型导致的计算错误
-      const totalValue = typeof listResponse.total === 'number' ? listResponse.total : 
-                        (typeof response.total === 'number' ? response.total : parseInt(listResponse.total || response.total || 0, 10));
+      const totalValue = typeof response.total === 'number' ? response.total : parseInt(response.total || 0, 10);
       pagination.value.total = totalValue;
       
       // 如果没有数据且没有选择日期范围，尝试获取数据的日期范围并提示用户

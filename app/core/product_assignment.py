@@ -2,6 +2,7 @@
 产品分配历史管理工具函数
 用于记录和管理产品在不同时间段的客户归属
 """
+from collections import defaultdict
 from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
@@ -163,7 +164,6 @@ async def transfer_product_assignment(
     Returns:
         tuple[ProductAssignment, bool]: (新分配记录, 是否成功关闭了旧记录)
     """
-    from datetime import timedelta
     
     # 确定旧客户的结束日期和新客户的开始日期
     # 优先级：如果提供了 old_client_end_date，使用它；否则使用 transfer_date 计算
@@ -570,7 +570,6 @@ async def cleanup_invalid_assignments(
     Returns:
         dict: 清理结果，包含删除的记录数量和详细信息
     """
-    from collections import defaultdict
     
     deleted_count = 0
     deleted_records = []

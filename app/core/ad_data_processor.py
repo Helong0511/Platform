@@ -11,10 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 
 from app.models.models import AdData, User
-from app.api.api_v1.endpoints.excel.import_handler import (
-    find_or_create_product,
-    build_product_maps
-)
 from app.core.audit_log import log_user_action
 from app.core.country_code import find_country_code_by_any_format
 from app.core.utils import truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data

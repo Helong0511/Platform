@@ -376,10 +376,9 @@ const fetchStats = async () => {
       params.group_by = filterForm.group_by
     }
     
-    const response = await getDeductionStats(params)
-    if (response.code === 200) {
-      // 后端返回的数据结构：response.data 就是 DeductionStatsResponse
-      const data = response.data || {}
+    // getDeductionStats使用returnDataOnly: true，直接返回数据对象
+    const data = await getDeductionStats(params)
+    if (data) {
       stats.value = {
         original_volume: data.original_volume || 0,
         deducted_volume: data.deducted_volume || 0,
@@ -422,17 +421,13 @@ const loadGroupNames = async () => {
       while (hasMore) {
         try {
           const advertiserRes = await getAdvertisers({ page, page_size: pageSize })
-          if (advertiserRes && advertiserRes.code === 200) {
-            const data = advertiserRes.data || {}
-            const advertisers = data.data || data.items || []
-            allAdvertisers = allAdvertisers.concat(advertisers)
-            
-            const total = data.total || advertiserRes.total || 0
-            hasMore = allAdvertisers.length < total && advertisers.length > 0
-            page++
-          } else {
-            hasMore = false
-          }
+          // advertiserRes已经是标准分页格式，直接使用data和total字段
+          const advertisers = advertiserRes.data || []
+          allAdvertisers = allAdvertisers.concat(advertisers)
+          
+          const total = advertiserRes.total || 0
+          hasMore = allAdvertisers.length < total && advertisers.length > 0
+          page++
         } catch (err) {
           console.error('加载广告主失败：', err)
           hasMore = false
@@ -454,16 +449,14 @@ const loadGroupNames = async () => {
       while (hasMore) {
         try {
           const offerRes = await getOffers({ page, page_size: pageSize })
-          if (offerRes && offerRes.code === 200) {
-            const data = offerRes.data || {}
-            const offers = data.data || data.items || []
-            allOffers = allOffers.concat(offers)
-            
-            const total = data.total || offerRes.total || 0
-            hasMore = allOffers.length < total && offers.length > 0
+          // offerRes已经是标准分页格式，直接使用data和total字段
+          const offers = offerRes.data || []
+          allOffers = allOffers.concat(offers)
+          
+          const total = offerRes.total || 0
+          hasMore = allOffers.length < total && offers.length > 0
+          if (hasMore) {
             page++
-          } else {
-            hasMore = false
           }
         } catch (err) {
           console.error('加载Offer失败：', err)
@@ -486,16 +479,14 @@ const loadGroupNames = async () => {
       while (hasMore) {
         try {
           const publisherRes = await getPublishers({ page, page_size: pageSize })
-          if (publisherRes && publisherRes.code === 200) {
-            const data = publisherRes.data || {}
-            const publishers = data.data || data.items || []
-            allPublishers = allPublishers.concat(publishers)
-            
-            const total = data.total || publisherRes.total || 0
-            hasMore = allPublishers.length < total && publishers.length > 0
+          // publisherRes已经是标准分页格式，直接使用data和total字段
+          const publishers = publisherRes.data || []
+          allPublishers = allPublishers.concat(publishers)
+          
+          const total = publisherRes.total || 0
+          hasMore = allPublishers.length < total && publishers.length > 0
+          if (hasMore) {
             page++
-          } else {
-            hasMore = false
           }
         } catch (err) {
           console.error('加载渠道失败：', err)
@@ -594,17 +585,13 @@ const loadOptions = async () => {
     while (hasMore) {
       try {
         const advertiserRes = await getAdvertisers({ page, page_size: pageSize })
-        if (advertiserRes && advertiserRes.code === 200) {
-          const data = advertiserRes.data || {}
-          const advertisers = data.data || data.items || []
-          allAdvertisers = allAdvertisers.concat(advertisers)
-          
-          const total = data.total || advertiserRes.total || 0
-          hasMore = allAdvertisers.length < total && advertisers.length > 0
-          page++
-        } else {
-          hasMore = false
-        }
+        // advertiserRes已经是标准分页格式，直接使用data和total字段
+        const advertisers = advertiserRes.data || []
+        allAdvertisers = allAdvertisers.concat(advertisers)
+        
+        const total = advertiserRes.total || 0
+        hasMore = allAdvertisers.length < total && advertisers.length > 0
+        page++
       } catch (err) {
         console.error('加载广告主失败：', err)
         hasMore = false
@@ -624,17 +611,13 @@ const loadOptions = async () => {
     while (hasMore) {
       try {
         const offerRes = await getOffers({ page, page_size: pageSize })
-        if (offerRes && offerRes.code === 200) {
-          const data = offerRes.data || {}
-          const offers = data.data || data.items || []
-          allOffers = allOffers.concat(offers)
-          
-          const total = data.total || offerRes.total || 0
-          hasMore = allOffers.length < total && offers.length > 0
-          page++
-        } else {
-          hasMore = false
-        }
+        // offerRes已经是标准分页格式，直接使用data和total字段
+        const offers = offerRes.data || []
+        allOffers = allOffers.concat(offers)
+        
+        const total = offerRes.total || 0
+        hasMore = allOffers.length < total && offers.length > 0
+        page++
       } catch (err) {
         console.error('加载Offer失败：', err)
         hasMore = false
@@ -654,17 +637,13 @@ const loadOptions = async () => {
     while (hasMore) {
       try {
         const publisherRes = await getPublishers({ page, page_size: pageSize })
-        if (publisherRes && publisherRes.code === 200) {
-          const data = publisherRes.data || {}
-          const publishers = data.data || data.items || []
-          allPublishers = allPublishers.concat(publishers)
-          
-          const total = data.total || publisherRes.total || 0
-          hasMore = allPublishers.length < total && publishers.length > 0
-          page++
-        } else {
-          hasMore = false
-        }
+        // publisherRes已经是标准分页格式，直接使用data和total字段
+        const publishers = publisherRes.data || []
+        allPublishers = allPublishers.concat(publishers)
+        
+        const total = publisherRes.total || 0
+        hasMore = allPublishers.length < total && publishers.length > 0
+        page++
       } catch (err) {
         console.error('加载渠道失败：', err)
         hasMore = false

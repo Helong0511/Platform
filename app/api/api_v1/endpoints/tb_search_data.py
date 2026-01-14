@@ -20,11 +20,10 @@ from app.core.config import settings
 from app.core.validation import safe_strip
 from app.models.models import TBSearchData, Client, Product, User, UserRole, CountryInfo, ProductAssignment
 from app.schemas.tb_search_data import (
-    TBSearchDataListResponse,
     TBSearchDataResponse,
     TBSearchDataUpdate,
 )
-from app.schemas.base import ResponseBaseSchema, ListResponseBaseSchema
+from app.schemas.base import ResponseBaseSchema, ListResponseBaseSchema, PaginatedResponseBaseSchema
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.query_utils import (
@@ -33,7 +32,14 @@ from app.core.query_utils import (
     join_country_info as join_country_info_util,
     apply_date_range_filter
 )
-from app.api.api_v1.endpoints.excel.utils import allowed_file, ALLOWED_MIME_TYPES, parse_date_value, normalize_date_key
+from app.core.utils import (
+    find_or_create_default_client, optimize_page_size_for_device,
+    get_product_name, get_client_name, get_user_name, truncate_to_2_decimal
+)
+from app.core.country_code import resolve_country_name, find_country_code_by_any_format
+from app.api.api_v1.endpoints.excel.utils import (
+    allowed_file, ALLOWED_MIME_TYPES, parse_date_value, normalize_date_key, validate_excel_file
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -47,7 +53,7 @@ def join_country_info(query):
     """
     return join_country_info_util(query, TBSearchData.country_code)
 
-@router.get("/", response_model=ResponseBaseSchema[TBSearchDataListResponse], summary="获取TB搜索数据列表")
+@router.get("/", response_model=PaginatedResponseBaseSchema[list[TBSearchDataResponse]], summary="获取TB搜索数据列表")
 async def get_tb_search_data(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -62,7 +68,6 @@ async def get_tb_search_data(
     sort_by: str = Query("date", description="排序字段"),
     sort_order: str = Query("desc", description="排序方向")
 ):
-    from app.core.utils import optimize_page_size_for_device
     page_size = optimize_page_size_for_device(request, page_size, default_page_size=10)
 
     # 检查是否使用产品分配历史表
@@ -241,7 +246,6 @@ async def get_tb_search_data(
         # 这样可以发现数据完整性问题
         
         # 使用统一的国家名称解析函数
-        from app.core.country_code import resolve_country_name
         country_name = resolve_country_name(
             country_info, 
             tb_data.country_code,
@@ -253,7 +257,6 @@ async def get_tb_search_data(
         date_val = normalize_date_key(tb_data.date)
 
         # 使用统一的名称获取函数
-        from app.core.utils import get_product_name, get_client_name, get_user_name
         
         item = TBSearchDataResponse(
             id=tb_data.id,
@@ -278,12 +281,12 @@ async def get_tb_search_data(
         )
         response_list.append(item)
 
-    return ResponseBaseSchema.success(data=TBSearchDataListResponse(
+    return PaginatedResponseBaseSchema.success(
         data=response_list,
         total=total,
         page=page,
         page_size=page_size
-    ))
+    )
 
 @router.post("/import", response_model=ResponseBaseSchema[dict], summary="导入Excel数据")
 async def import_tb_search_data(
@@ -295,7 +298,6 @@ async def import_tb_search_data(
         raise_api_exception(ErrorCode.PERMISSION_DENIED, detail="仅管理员可导入")
 
     # 验证文件并读取内容（使用公共验证函数）
-    from app.api.api_v1.endpoints.excel.utils import validate_excel_file
     contents = await validate_excel_file(file)
     try:
         df = pd.read_excel(BytesIO(contents))
@@ -335,7 +337,6 @@ async def import_tb_search_data(
             if not product:
                 # 产品不存在，自动创建
                 # 1. 查找或创建默认客户：使用统一的辅助函数
-                from app.core.utils import find_or_create_default_client
                 client = await find_or_create_default_client(db, current_user.id)
                 
                 # 2. 创建新产品
@@ -358,7 +359,6 @@ async def import_tb_search_data(
             if len(geo) > 2:
                 # 尝试查找对应的二字代码
                 # 这里简单处理，如果找不到且长度>2则设为ZZ
-                from app.core.country_code import find_country_code_by_any_format
                 found = await find_country_code_by_any_format(db, geo)
                 if found:
                     geo = found
@@ -376,7 +376,6 @@ async def import_tb_search_data(
             existing_res = await db.execute(existing_query)
             existing = existing_res.scalar_one_or_none()
             
-            from app.core.utils import truncate_to_2_decimal
 
             # 解析数值
             redirects = int(row.get("REDIRECTS", 0)) if pd.notna(row.get("REDIRECTS")) else 0
@@ -540,7 +539,6 @@ async def update_tb_search_data(
     date_val = normalize_date_key(tb_data.date)
 
     # 使用统一的名称获取函数
-    from app.core.utils import get_product_name, get_client_name, get_user_name
     
     return ResponseBaseSchema.success(data=TBSearchDataResponse(
         id=tb_data.id,

@@ -11,18 +11,20 @@ from typing import Optional
 import logging
 
 from app.core.database import get_db
-from app.core.security import require_admin, get_current_user
+from app.core.security import require_admin, get_current_user, JWTUtils
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.dependencies import get_audit_log_service
+from app.core.utils import get_client_ip
 from app.models.models import UserAuditLog, User
 from fastapi import Request
 from app.schemas.audit_log import (
     UserAuditLogResponse,
     UserAuditLogQuery,
-    AuditLogListResponse
 )
-from app.schemas.base import ResponseBaseSchema
+from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
+from app.services.audit_log_service import AuditLogService
 
 # 创建路由实例
 router = APIRouter()
@@ -32,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 @router.get(
     "/",
-    response_model=AuditLogListResponse,
+    response_model=PaginatedResponseBaseSchema[list[UserAuditLogResponse]],
     summary="获取用户操作日志列表",
     description="查询用户操作日志，支持多种筛选条件，仅管理员可访问（已重构使用服务层）"
 )
@@ -62,9 +64,6 @@ async def get_audit_logs(
     - 时间范围
     """
     # 使用服务层（业务逻辑在AuditLogService中）
-    from app.core.dependencies import get_audit_log_service
-    from app.services.audit_log_service import AuditLogService
-    
     audit_log_service: AuditLogService = await get_audit_log_service(db)
     
     try:
@@ -87,7 +86,7 @@ async def get_audit_logs(
             UserAuditLogResponse.model_validate(log) for log in logs
         ]
 
-        return AuditLogListResponse.success(
+        return PaginatedResponseBaseSchema.success(
             data=log_responses,
             total=total,
             page=page,
@@ -128,9 +127,6 @@ async def get_audit_log_stats(
     使用缓存提升性能（缓存 5 分钟）
     """
     # 使用服务层（业务逻辑在AuditLogService中）
-    from app.core.dependencies import get_audit_log_service
-    from app.services.audit_log_service import AuditLogService
-    
     audit_log_service: AuditLogService = await get_audit_log_service(db)
     
     try:
@@ -168,9 +164,6 @@ async def get_audit_log(
     获取用户操作日志详情（已重构使用服务层）
     """
     # 使用服务层（业务逻辑在AuditLogService中）
-    from app.core.dependencies import get_audit_log_service
-    from app.services.audit_log_service import AuditLogService
-    
     audit_log_service: AuditLogService = await get_audit_log_service(db)
     
     try:
@@ -219,9 +212,6 @@ async def log_client_error(
     注意：此端点允许未认证用户访问，用于记录前端错误
     """
     # 使用服务层（业务逻辑在AuditLogService中）
-    from app.core.dependencies import get_audit_log_service
-    from app.services.audit_log_service import AuditLogService
-    from app.core.utils import get_client_ip
     
     audit_log_service: AuditLogService = await get_audit_log_service(db)
     
@@ -230,9 +220,6 @@ async def log_client_error(
         current_user = None
         username = None
         try:
-            from app.core.security import JWTUtils
-            from sqlalchemy.future import select
-
             # 从请求头中获取token
             auth_header = request.headers.get("Authorization", "")
             if auth_header.startswith("Bearer "):
