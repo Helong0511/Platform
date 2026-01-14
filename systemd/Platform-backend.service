@@ -1,0 +1,61 @@
+[Unit]
+Description=Platform Backend API Service
+After=network.target mysql.service redis.service
+Requires=mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/data/Platform
+Environment="PATH=/data/Platform/venv/bin"
+Environment="PRODUCTION_ENV=production"
+EnvironmentFile=/data/Platform/.env
+
+# 确保日志目录存在并设置权限
+ExecStartPre=/bin/mkdir -p /data/Platform/logs
+ExecStartPre=/bin/chown -R www-data:www-data /data/Platform/logs
+ExecStartPre=/bin/chmod 755 /data/Platform/logs
+# 确保 Gunicorn 日志文件存在并设置权限
+ExecStartPre=/bin/touch /data/Platform/logs/gunicorn_access.log /data/Platform/logs/gunicorn_error.log /data/Platform/logs/gunicorn.pid
+ExecStartPre=/bin/chown www-data:www-data /data/Platform/logs/gunicorn_access.log /data/Platform/logs/gunicorn_error.log /data/Platform/logs/gunicorn.pid
+ExecStartPre=/bin/chmod 644 /data/Platform/logs/gunicorn_access.log /data/Platform/logs/gunicorn_error.log /data/Platform/logs/gunicorn.pid
+
+# 启动命令
+# 使用 Gunicorn 配置文件（推荐，统一管理所有配置）
+# 配置文件包含：workers、timeout、max_requests、preload 等所有重要参数
+ExecStart=/data/Platform/venv/bin/gunicorn \
+    --config /data/Platform/gunicorn.conf.py \
+    app.main:app
+
+# 注意：
+# 1. 配置文件中的 preload_app 默认关闭（节省内存），如需启用请设置环境变量 PRELOAD_APP=true
+# 2. 配置文件包含完整的优化配置：max_requests、graceful_timeout、worker_connections 等
+# 3. 如需覆盖配置，可通过环境变量：WORKERS、PRELOAD_APP、MEMORY_GB 等
+
+# 重启策略
+Restart=always
+RestartSec=10
+
+# 资源限制
+LimitNOFILE=65535
+LimitNPROC=4096
+
+# 安全配置
+NoNewPrivileges=true
+PrivateTmp=true
+# ProtectSystem 可选值: full, strict, off
+# full: 只读保护 /usr, /boot, /etc（推荐）
+# strict: 严格保护所有系统目录（最安全，但可能影响某些应用）
+ProtectSystem=full
+ProtectHome=true
+# 允许写入的路径（日志目录和应用目录）
+ReadWritePaths=/data/Platform/logs /data/Platform
+
+# 日志配置
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=platform-backend
+
+[Install]
+WantedBy=multi-user.target
