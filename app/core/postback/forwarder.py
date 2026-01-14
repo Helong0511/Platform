@@ -383,7 +383,54 @@ class PostbackForwarder:
             logger.warning(f"渠道 {publisher.id} 的 Postback 请求方式无效: {method}，使用默认 GET")
             method = 'GET'
         
-        # 3. 替换 URL 中的占位符
+        # 3. 获取原始点击参数（用于替换URL占位符）
+        # 注意：使用 conversion_id 来查找，因为 conversion_id = clicks.click_id
+        click_params_for_url = {}
+        lookup_click_id = conversion.conversion_id if conversion.conversion_id else conversion.click_id
+        if lookup_click_id:
+            try:
+                # 如果 click_record 已存在且有 url_params，直接使用
+                if click_record and click_record.url_params:
+                    try:
+                        # 解析 JSON 格式的 url_params
+                        click_params_raw = json.loads(click_record.url_params)
+                        # 不过滤占位符，因为我们需要这些参数来替换URL中的占位符
+                        click_params_for_url = click_params_raw
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.warning(
+                            f"解析点击参数失败（用于URL替换）: conversion_id={conversion.id}, "
+                            f"conversion_id={conversion.conversion_id}, click_id={lookup_click_id}, error={str(e)}"
+                        )
+                else:
+                    # 如果 click_record 不存在，尝试查询 Click 表获取 url_params
+                    try:
+                        click_result = await db.execute(
+                            select(Click).where(Click.click_id == lookup_click_id)
+                        )
+                        click_for_params = click_result.scalars().first()
+                        if click_for_params and click_for_params.url_params:
+                            try:
+                                # 解析 JSON 格式的 url_params
+                                click_params_raw = json.loads(click_for_params.url_params)
+                                # 不过滤占位符，因为我们需要这些参数来替换URL中的占位符
+                                click_params_for_url = click_params_raw
+                            except (json.JSONDecodeError, TypeError) as e:
+                                logger.warning(
+                                    f"解析点击参数失败（用于URL替换）: conversion_id={conversion.id}, "
+                                    f"conversion_id={conversion.conversion_id}, click_id={lookup_click_id}, error={str(e)}"
+                                )
+                    except Exception as e:
+                        logger.debug(
+                            f"查询点击参数失败（用于URL替换）: conversion_id={conversion.id}, "
+                            f"conversion_id={conversion.conversion_id}, click_id={lookup_click_id}, error={str(e)}"
+                        )
+            except Exception as e:
+                logger.debug(
+                    f"获取点击参数失败（用于URL替换）: conversion_id={conversion.id}, "
+                    f"conversion_id={conversion.conversion_id}, click_id={lookup_click_id}, error={str(e)}"
+                )
+        
+        # 4. 替换 URL 中的占位符
         try:
             replaced_url = await PostbackForwarder._replace_url_placeholders(
                 url=downstream_url,
@@ -392,7 +439,8 @@ class PostbackForwarder:
                 offer=offer,
                 publisher=publisher,
                 advertiser=advertiser,
-                db=db
+                db=db,
+                click_params=click_params_for_url
             )
         except Exception as e:
             logger.error(
@@ -1294,7 +1342,8 @@ class PostbackForwarder:
         offer: Optional[Offer],
         publisher: Optional[Publisher],
         advertiser: Optional[Advertiser],
-        db: AsyncSession
+        db: AsyncSession,
+        click_params: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         替换 URL 中的占位符
@@ -1348,7 +1397,27 @@ class PostbackForwarder:
             values['gid'] = conversion.gid if conversion.gid else ''
             values['product_id'] = str(conversion.product_id) if conversion.product_id else ''
             values['client_id'] = str(conversion.client_id) if conversion.client_id else ''
-            values['click_id'] = conversion.click_id if conversion.click_id else ''
+            # click_id 优先使用点击参数中的值（渠道提供的原始click_id）
+            # 这是最重要的，因为渠道的Postback URL需要使用渠道提供的click_id，而不是系统的conversion_id
+            if click_params and 'click_id' in click_params:
+                click_id_value = click_params['click_id']
+                if isinstance(click_id_value, list):
+                    click_id_value = click_id_value[0] if click_id_value else None
+                if click_id_value:
+                    values['click_id'] = str(click_id_value)
+                    logger.debug(
+                        f"使用点击参数中的click_id替换URL占位符: {click_id_value}, "
+                        f"conversion_id={conversion.conversion_id}"
+                    )
+                else:
+                    values['click_id'] = conversion.click_id if conversion.click_id else ''
+            else:
+                values['click_id'] = conversion.click_id if conversion.click_id else ''
+                if click_params:
+                    logger.debug(
+                        f"点击参数中没有click_id，使用conversion.click_id: {values['click_id']}, "
+                        f"click_params keys: {list(click_params.keys())}"
+                    )
             values['click_time'] = conversion.click_time.isoformat() if conversion.click_time else ''
             values['conversion_status'] = conversion.conversion_status if conversion.conversion_status else ''
             values['timestamp'] = conversion.created_at.isoformat() if conversion.created_at else ''
