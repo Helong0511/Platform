@@ -210,7 +210,7 @@ git commit -m "Clear All Files"
 # 3. 放入你的新文件（确保文件已在目录中）
 # 4. 添加并推送
 git add -A
-git commit -m "上传新内容"
+git commit -m "更改渠道扣金额和每日转化上限"
 git push origin main --force
 
 

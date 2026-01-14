@@ -10,7 +10,7 @@ from sqlalchemy.orm import aliased
 
 from app.models.models import (
     PostbackConversion, ClickStats, Offer, Publisher, Advertiser,
-    User, UserRole, Client
+    User, UserRole, Client, PostbackNotification
 )
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
@@ -128,6 +128,7 @@ class ConversionService:
         total_clicks = (await self.db.execute(click_query)).scalar() or 0
         
         # 统计总转化数量（需要通过ClickStats关联来过滤）
+        # 如果是客户用户，只统计已成功通知给渠道的转化（不超过下游Cap的真实转化）
         click_alias_for_count = aliased(ClickStats)
         conversion_query = select(func.count(PostbackConversion.id))
         
@@ -135,6 +136,22 @@ class ConversionService:
             conversion_query = conversion_query.join(
                 click_alias_for_count, PostbackConversion.click_id == click_alias_for_count.click_id
             )
+            # 如果是客户用户，只统计已成功通知给渠道的转化
+            if current_user.role == UserRole.CLIENT:
+                notification_alias_for_count = aliased(PostbackNotification)
+                conversion_query = conversion_query.outerjoin(
+                    notification_alias_for_count,
+                    and_(
+                        notification_alias_for_count.conversion_id == PostbackConversion.id,
+                        notification_alias_for_count.publisher_id == click_alias_for_count.publisher_id,
+                        notification_alias_for_count.notification_type == 'forward',
+                        notification_alias_for_count.notification_status == 'sent'  # 只统计已成功发送的
+                    )
+                )
+                conversion_query = conversion_query.where(
+                    notification_alias_for_count.id.isnot(None)
+                )
+            
             count_conditions = list(conversion_conditions)
             if client_publisher_ids is not None:
                 count_conditions.append(click_alias_for_count.publisher_id.in_(client_publisher_ids))
@@ -144,6 +161,20 @@ class ConversionService:
                 count_conditions.append(click_alias_for_count.publisher_id == publisher_id)
             conversion_query = conversion_query.where(and_(*count_conditions))
         else:
+            # 如果是客户用户，只统计已成功通知给渠道的转化
+            if current_user.role == UserRole.CLIENT:
+                notification_alias_for_count = aliased(PostbackNotification)
+                conversion_query = conversion_query.outerjoin(
+                    notification_alias_for_count,
+                    and_(
+                        notification_alias_for_count.conversion_id == PostbackConversion.id,
+                        notification_alias_for_count.notification_type == 'forward',
+                        notification_alias_for_count.notification_status == 'sent'  # 只统计已成功发送的
+                    )
+                )
+                conversion_query = conversion_query.where(
+                    notification_alias_for_count.id.isnot(None)
+                )
             conversion_query = conversion_query.where(and_(*conversion_conditions))
         
         total_conversions = (await self.db.execute(conversion_query)).scalar() or 0
@@ -152,6 +183,7 @@ class ConversionService:
         cr = (total_conversions / total_clicks * 100) if total_clicks > 0 else 0
         
         # 统计总支付金额（PO）- 使用原始 payout
+        # 如果是客户用户，只统计已成功通知给渠道的转化（不超过下游Cap的真实转化）
         click_alias_for_po = aliased(ClickStats)
         po_query = select(func.sum(PostbackConversion.original_payout))
         
@@ -159,6 +191,22 @@ class ConversionService:
             po_query = po_query.join(
                 click_alias_for_po, PostbackConversion.click_id == click_alias_for_po.click_id
             )
+            # 如果是客户用户，只统计已成功通知给渠道的转化
+            if current_user.role == UserRole.CLIENT:
+                notification_alias_for_po = aliased(PostbackNotification)
+                po_query = po_query.outerjoin(
+                    notification_alias_for_po,
+                    and_(
+                        notification_alias_for_po.conversion_id == PostbackConversion.id,
+                        notification_alias_for_po.publisher_id == click_alias_for_po.publisher_id,
+                        notification_alias_for_po.notification_type == 'forward',
+                        notification_alias_for_po.notification_status == 'sent'  # 只统计已成功发送的
+                    )
+                )
+                po_query = po_query.where(
+                    notification_alias_for_po.id.isnot(None)
+                )
+            
             po_conditions = list(conversion_conditions)
             if client_publisher_ids is not None:
                 po_conditions.append(click_alias_for_po.publisher_id.in_(client_publisher_ids))
@@ -168,6 +216,20 @@ class ConversionService:
                 po_conditions.append(click_alias_for_po.publisher_id == publisher_id)
             po_query = po_query.where(and_(*po_conditions))
         else:
+            # 如果是客户用户，只统计已成功通知给渠道的转化
+            if current_user.role == UserRole.CLIENT:
+                notification_alias_for_po = aliased(PostbackNotification)
+                po_query = po_query.outerjoin(
+                    notification_alias_for_po,
+                    and_(
+                        notification_alias_for_po.conversion_id == PostbackConversion.id,
+                        notification_alias_for_po.notification_type == 'forward',
+                        notification_alias_for_po.notification_status == 'sent'  # 只统计已成功发送的
+                    )
+                )
+                po_query = po_query.where(
+                    notification_alias_for_po.id.isnot(None)
+                )
             po_query = po_query.where(and_(*conversion_conditions))
         
         total_po = float((await self.db.execute(po_query)).scalar() or 0)
@@ -208,6 +270,7 @@ class ConversionService:
                 publisher_ids.add(publisher_id_val)
         
         # 获取所有转化记录，按offer_id和关联的publisher_id分组
+        # 如果是客户用户，只统计已成功通知给渠道的转化（不超过下游Cap的真实转化）
         click_alias = aliased(ClickStats)
         conversion_group_query = select(
             click_alias.offer_id.label("offer_id"),
@@ -217,6 +280,23 @@ class ConversionService:
         ).outerjoin(
             click_alias, PostbackConversion.click_id == click_alias.click_id
         )
+        
+        # 如果是客户用户，只统计已成功通知给渠道的转化
+        if current_user.role == UserRole.CLIENT:
+            notification_alias = aliased(PostbackNotification)
+            conversion_group_query = conversion_group_query.outerjoin(
+                notification_alias,
+                and_(
+                    notification_alias.conversion_id == PostbackConversion.id,
+                    notification_alias.publisher_id == click_alias.publisher_id,
+                    notification_alias.notification_type == 'forward',
+                    notification_alias.notification_status == 'sent'  # 只统计已成功发送的
+                )
+            )
+            # 添加条件：只统计有成功通知记录的转化
+            conversion_group_query = conversion_group_query.where(
+                notification_alias.id.isnot(None)
+            )
         
         # 构建转化查询条件
         conversion_group_conditions = list(conversion_conditions)
@@ -437,6 +517,7 @@ class ConversionService:
         }
         
         # 批量查询转化统计
+        # 如果是客户用户，只统计已成功通知给渠道的转化（不超过下游Cap的真实转化）
         conversion_query = (
             select(
                 ClickStats.offer_id,
@@ -449,6 +530,22 @@ class ConversionService:
             )
             .where(ClickStats.offer_id.in_(offer_ids))
         )
+        
+        # 如果是客户用户，只统计已成功通知给渠道的转化
+        if current_user.role == UserRole.CLIENT:
+            notification_alias_for_list = aliased(PostbackNotification)
+            conversion_query = conversion_query.outerjoin(
+                notification_alias_for_list,
+                and_(
+                    notification_alias_for_list.conversion_id == PostbackConversion.id,
+                    notification_alias_for_list.publisher_id == ClickStats.publisher_id,
+                    notification_alias_for_list.notification_type == 'forward',
+                    notification_alias_for_list.notification_status == 'sent'  # 只统计已成功发送的
+                )
+            )
+            conversion_query = conversion_query.where(
+                notification_alias_for_list.id.isnot(None)
+            )
         
         if start_datetime:
             conversion_query = conversion_query.where(

@@ -20,11 +20,7 @@ from sqlalchemy.orm import joinedload
 
 from app.models.models import (
     Product, PostbackConversion, PostbackForwardLog, PostbackNotification,
-<<<<<<< HEAD
     ClickStats, Click, Offer, Publisher, Advertiser, AdminNotificationConfig, OfferPublisherAssignment
-=======
-    ClickStats, Click, Offer, Publisher, Advertiser, AdminNotificationConfig
->>>>>>> 451fe37690182f08f5b8c5e7c77a028275228449
 )
 from app.core.utils import get_app_now_naive
 from app.core.auto_bot import send_telegram_message
@@ -184,7 +180,6 @@ class PostbackForwarder:
                 await db.rollback()
             return
         
-<<<<<<< HEAD
         # 2.0. 检查下游Cap和下游PO配置
         # 查询OfferPublisherAssignment获取渠道配置
         assignment = None
@@ -260,8 +255,6 @@ class PostbackForwarder:
                     f"使用下游PO金额: conversion_id={conversion.id}, publisher_id={publisher.id}"
                 )
         
-=======
->>>>>>> 451fe37690182f08f5b8c5e7c77a028275228449
         # 2.1. 检查是否有 postback_url
         has_postback_url = bool(publisher.postback_url and publisher.postback_url.strip())
         
