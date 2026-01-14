@@ -22,19 +22,13 @@ export function useClients() {
       loading.value = true;
       const response = await getClientList(params);
 
-      if (response.code === 200 && response.data) {
-        clients.value = response.data || [];
-        return {
-          data: response.data,
-          total: response.total || 0
-        };
-      } else {
-        clients.value = [];
-        if (response.message) {
-          ElMessage.warning(response.message);
-        }
-        return { data: [], total: 0 };
-      }
+      // response已经是标准分页格式，直接使用data和total字段
+      // getClientList使用paginated: true，失败时会抛出异常
+      clients.value = response.data || [];
+      return {
+        data: response.data || [],
+        total: response.total || 0
+      };
     } catch (error) {
       if (!isErrorHandled(error)) {
         const errorMsg = extractErrorMessage(error);
@@ -55,8 +49,9 @@ export function useClients() {
   const fetchClientDetail = async (id) => {
     try {
       loading.value = true;
-      const response = await getClientDetail(id);
-      return response.data?.data || null;
+      // getClientDetail使用returnDataOnly: true，直接返回数据对象（可能来自缓存或API）
+      const data = await getClientDetail(id);
+      return data || null;
     } catch (error) {
       if (!isErrorHandled(error)) {
         const errorMsg = extractErrorMessage(error);
@@ -102,13 +97,10 @@ export function useClients() {
         response = await updateClient(clientId, submitData);
       }
 
-      if (response && response.code === 200) {
-        ElMessage.success(response.message || (clientId ? '客户更新成功' : '客户创建成功'));
-        return true;
-      } else {
-        ElMessage.error(response?.message || (clientId ? '客户更新失败' : '客户创建失败'));
-        return false;
-      }
+      // createClient和updateClient使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
+      // 如果执行到这里，说明操作成功（失败会抛出异常）
+      ElMessage.success(clientId ? '客户更新成功' : '客户创建成功');
+      return true;
     } catch (error) {
       if (!error.message?.includes('取消') && !error.message?.includes('validate')) {
         if (!isErrorHandled(error)) {

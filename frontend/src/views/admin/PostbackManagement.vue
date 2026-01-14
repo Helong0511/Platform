@@ -1,3 +1,14 @@
+<!--
+Postback 转化管理页面
+功能说明：
+- 查询和管理所有转化记录（已融合转化日志功能）
+- 支持多维度筛选：平台、产品、客户、Click ID、Offer、渠道、广告主、转化状态等
+- 提供转化统计、通知记录、状态更新等功能
+- 支持查看转化详情、补发通知、更新转化状态等操作
+
+注意：
+- 转化日志功能已融合到此页面，原转化日志页面已重定向到此页面
+-->
 <template>
   <div class="postback-management-container">
     <!-- 页面头部 -->
@@ -64,6 +75,84 @@
             style="width: 150px;"
             name="client_id"
           />
+        </el-form-item>
+        <!-- 转化日志筛选条件（融合功能） -->
+        <el-form-item label="Click ID">
+          <el-input 
+            v-model="searchForm.click_id" 
+            placeholder="Click ID" 
+            clearable
+            @keyup.enter="fetchConversions"
+            style="width: 200px;"
+            name="click_id"
+          >
+            <template #prefix>
+              <el-icon :size="16"><Search /></el-icon>
+            </template>
+          </el-input>
+        </el-form-item>
+        <el-form-item label="Offer">
+          <el-select 
+            v-model="searchForm.offer_id" 
+            placeholder="请选择Offer" 
+            clearable
+            filterable
+            style="width: 200px;"
+            name="offer_id"
+          >
+            <el-option
+              v-for="offer in offerList"
+              :key="offer.id"
+              :label="offer.offer_name"
+              :value="offer.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="渠道">
+          <el-select 
+            v-model="searchForm.publisher_id" 
+            placeholder="请选择渠道" 
+            clearable
+            filterable
+            style="width: 200px;"
+            name="publisher_id"
+          >
+            <el-option
+              v-for="pub in publisherList"
+              :key="pub.id"
+              :label="pub.publisher_name"
+              :value="pub.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="广告主">
+          <el-select 
+            v-model="searchForm.advertiser_id" 
+            placeholder="请选择广告主" 
+            clearable
+            filterable
+            style="width: 200px;"
+            name="advertiser_id"
+          >
+            <el-option
+              v-for="adv in advertiserList"
+              :key="adv.id"
+              :label="adv.advertiser_name"
+              :value="adv.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="转化状态">
+          <el-select 
+            v-model="searchForm.conversion_status" 
+            placeholder="全部" 
+            clearable
+            style="width: 150px;"
+            name="conversion_status"
+          >
+            <el-option label="Approved" value="Approved" />
+            <el-option label="Pending" value="Pending" />
+          </el-select>
         </el-form-item>
         <el-form-item label="时间范围" class="date-range-item">
           <el-date-picker
@@ -197,6 +286,18 @@
             {{ scope.row.click_time ? formatDateTime(scope.row.click_time) : '-' }}
           </template>
         </el-table-column>
+        <el-table-column prop="conversion_status" label="转化状态" width="120" align="center">
+          <template #default="scope">
+            <el-tag 
+              v-if="scope.row.conversion_status" 
+              :type="scope.row.conversion_status === 'Approved' ? 'success' : 'warning'" 
+              size="small"
+            >
+              {{ scope.row.conversion_status }}
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="event_name" label="事件名称" width="120">
           <template #default="scope">
             <el-tag v-if="scope.row.event_name" type="success" size="small">
@@ -327,6 +428,26 @@
             >
               补发通知
             </el-button>
+            <!-- 更新转化状态（融合转化日志功能） -->
+            <el-dropdown 
+              v-if="scope.row.conversion_status !== undefined"
+              @command="(cmd) => handleStatusChange(scope.row, cmd)" 
+              trigger="click"
+            >
+              <el-button type="primary" link size="small">
+                状态 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="Approved" :disabled="scope.row.conversion_status === 'Approved'">
+                    批准
+                  </el-dropdown-item>
+                  <el-dropdown-item command="Pending" :disabled="scope.row.conversion_status === 'Pending'">
+                    待处理
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -475,19 +596,28 @@
 </template>
 
 <script setup>
+/**
+ * Postback 转化管理页面
+ * 已融合转化日志功能，提供统一的转化记录查询和管理
+ */
 import { ref, reactive, onMounted, computed, watch } from 'vue';
 import { 
   ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, 
   ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage, ElMessageBox,
-  ElDescriptions, ElDescriptionsItem, ElDatePicker, ElInputNumber, ElRow, ElCol, ElLink
+  ElDescriptions, ElDescriptionsItem, ElDatePicker, ElInputNumber, ElRow, ElCol, ElLink,
+  ElDropdown, ElDropdownMenu, ElDropdownItem
 } from 'element-plus';
-import { Search, Refresh, Loading, Bell } from '@element-plus/icons-vue';
-import { getPostbackConversions, getPostbackStats } from '../../api/postback';
+import { Search, Refresh, Loading, Bell, ArrowDown } from '@element-plus/icons-vue';
+import { getPostbackConversions, getPostbackStats, updateConversionStatus } from '../../api/postback';
 import { formatDateTime } from '../../utils/dateFormat';
 import { useDevice } from '../../composables/useDevice';
 import NotificationRecordsDialog from '../../components/admin/NotificationRecordsDialog.vue';
 import { resendConversionNotification, getNotificationRecords } from '../../api/notification';
 import { useAuthStore } from '../../store';
+import { getOffers } from '../../api/offer';
+import { getPublishers } from '../../api/publisher';
+import { getAdvertisers } from '../../api/advertiser';
+import { logger } from '../../utils/logger';
 
 // 设备检测
 const { isMobile } = useDevice();
@@ -506,15 +636,26 @@ const pagination = reactive({
   total: 0
 });
 
-// 搜索表单
+// 搜索表单（融合转化日志筛选条件）
 const searchForm = reactive({
   platform: '',
   conversion_or_click_id: '',
   product_id: null,
   client_id: null,
+  // 转化日志筛选条件
+  click_id: '',
+  offer_id: null,
+  publisher_id: null,
+  advertiser_id: null,
+  conversion_status: null,
   start_date: '',
   end_date: ''
 });
+
+// 基础数据列表（用于下拉选择）
+const offerList = ref([]);
+const publisherList = ref([]);
+const advertiserList = ref([]);
 
 // 日期范围
 const dateRange = ref(null);
@@ -609,12 +750,45 @@ const fetchStats = async () => {
   }
 };
 
+// 加载基础数据
+const loadOffers = async () => {
+  try {
+    const response = await getOffers({ page: 1, page_size: 100, is_active: true });
+    offerList.value = response.data || [];
+  } catch (error) {
+    logger.error('加载Offer列表失败:', error);
+  }
+};
+
+const loadPublishers = async () => {
+  try {
+    const response = await getPublishers({ page: 1, page_size: 100 });
+    publisherList.value = response.data || [];
+  } catch (error) {
+    logger.error('加载渠道列表失败:', error);
+  }
+};
+
+const loadAdvertisers = async () => {
+  try {
+    const response = await getAdvertisers({ page: 1, page_size: 100 });
+    advertiserList.value = response.data || [];
+  } catch (error) {
+    logger.error('加载广告主列表失败:', error);
+  }
+};
+
 // 重置筛选
 const resetFilter = () => {
   searchForm.platform = '';
   searchForm.conversion_or_click_id = '';
   searchForm.product_id = null;
   searchForm.client_id = null;
+  searchForm.click_id = '';
+  searchForm.offer_id = null;
+  searchForm.publisher_id = null;
+  searchForm.advertiser_id = null;
+  searchForm.conversion_status = null;
   searchForm.start_date = '';
   searchForm.end_date = '';
   dateRange.value = null;
@@ -708,7 +882,7 @@ const handleResendNotification = async (row) => {
     // 用户取消操作或 ElMessageBox 的其他错误，不需要处理
     if (error !== 'cancel') {
       // 如果不是取消操作，记录错误但不显示给用户
-      console.debug('补发通知对话框错误:', error);
+      logger.debug('补发通知对话框错误:', error);
     }
   }
 };
@@ -767,8 +941,35 @@ const formatJson = (jsonString) => {
   }
 };
 
+// 更新转化状态（融合转化日志功能）
+const handleStatusChange = async (row, status) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要将转化状态改为 "${status}" 吗？`,
+      '确认操作',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    );
+    
+    await updateConversionStatus(row.id, status);
+    ElMessage.success('状态更新成功');
+    row.conversion_status = status;
+  } catch (error) {
+    if (error !== 'cancel') {
+      logger.error('更新状态失败:', error);
+      ElMessage.error('更新失败');
+    }
+  }
+};
+
 // 初始化
 onMounted(() => {
+  loadOffers();
+  loadPublishers();
+  loadAdvertisers();
   fetchConversions();
   fetchStats();
 });

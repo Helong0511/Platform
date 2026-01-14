@@ -23,7 +23,6 @@ try:
 except (PermissionError, IOError, OSError) as e:
     # 如果无法读取 .env 文件，记录警告但继续运行
     # 这通常发生在 systemd 服务中，因为环境变量可能已经通过 EnvironmentFile 加载
-    import os
     if os.getenv("PRODUCTION_ENV"):
         # 生产环境：如果环境变量已设置，说明 systemd 已加载，可以继续
         logger.warning(f"无法读取 .env 文件（可能已通过 systemd EnvironmentFile 加载）: {e}")

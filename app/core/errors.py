@@ -2,9 +2,19 @@
 统一错误码和错误信息定义
 确保前后端错误处理的一致性
 """
+import asyncio
+import logging
+import traceback
 from enum import IntEnum
 from typing import Optional, Dict, Any
 from fastapi import HTTPException, Request
+from sqlalchemy.future import select
+
+from app.core.audit_log import log_runtime_error
+from app.core.database import AsyncSessionLocal
+from app.core.security import JWTUtils
+from app.core.utils import get_client_ip
+from app.models.models import User
 
 
 class ErrorCode(IntEnum):
@@ -274,14 +284,6 @@ async def record_http_exception_log(
         request: 请求对象
         error_type: 错误类型（用于日志分类）
     """
-    from app.core.audit_log import log_runtime_error
-    from app.core.database import AsyncSessionLocal
-    from app.core.security import JWTUtils
-    from app.models.models import User
-    from sqlalchemy.future import select
-    import asyncio
-    import logging
-    
     logger = logging.getLogger(__name__)
     
     # 只在 500/503 错误时记录日志
@@ -332,14 +334,12 @@ async def record_http_exception_log(
             
             # 获取客户端IP
             try:
-                from app.core.utils import get_client_ip
                 request_details["client_ip"] = get_client_ip(request)
             except Exception:
                 pass
             
             # 记录堆栈信息（如果是服务器错误）
             if exc.status_code >= 500:
-                import traceback
                 try:
                     # 尝试获取异常堆栈
                     if hasattr(exc, '__traceback__') and exc.__traceback__:
@@ -369,8 +369,6 @@ async def record_http_exception_log(
             )
             await audit_db.commit()
         except Exception as log_error:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(f"记录{error_type}日志失败: {log_error}")
         finally:
             if audit_db:
@@ -383,6 +381,4 @@ async def record_http_exception_log(
     try:
         asyncio.create_task(record_error_log())
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
         logger.warning(f"启动{error_type}日志记录任务失败: {e}")

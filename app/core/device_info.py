@@ -6,6 +6,7 @@ import re
 import json
 from typing import Dict, Optional, Any
 from fastapi import Request
+from app.core.utils import get_client_ip
 
 
 def parse_user_agent(user_agent: Optional[str]) -> Dict[str, Optional[str]]:
@@ -245,21 +246,7 @@ def collect_request_info(request: Request) -> Dict[str, Any]:
     # 解析User-Agent
     device_info = parse_user_agent(user_agent)
     
-    # 获取客户端IP
-    def get_client_ip(req: Request) -> Optional[str]:
-        """获取客户端真实IP"""
-        if not req:
-            return None
-        forwarded_for = req.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
-        real_ip = req.headers.get("X-Real-IP")
-        if real_ip:
-            return real_ip
-        if req.client:
-            return req.client.host
-        return None
-    
+    # 获取客户端IP（使用统一的工具函数）
     client_ip = get_client_ip(request)
     
     # 收集所有请求头

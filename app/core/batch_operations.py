@@ -4,10 +4,11 @@
 """
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.mysql import insert
-from sqlalchemy import func, Float
+from sqlalchemy import func, Float, case, update
 from typing import List, Dict, Any
 import logging
 from app.core.utils import get_app_now_naive
+from app.models.models import AdData
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,6 @@ async def batch_upsert_ad_data(
     if not data_list:
         return 0, 0
     
-    from app.models.models import AdData
-    
     inserted_count = 0
     updated_count = 0
     
@@ -59,7 +58,6 @@ async def batch_upsert_ad_data(
             # 如果 (date, product_id) 已存在，则更新；否则插入
             stmt = insert(AdData).values(batch)
             
-            from sqlalchemy import case
             stmt = stmt.on_duplicate_key_update(
                 request_count=stmt.inserted.request_count,
                 match_count=stmt.inserted.match_count,
@@ -134,7 +132,6 @@ async def batch_insert_ad_data(
     if not data_list:
         return 0
     
-    from app.models.models import AdData
     
     inserted_count = 0
     
@@ -183,8 +180,6 @@ async def batch_update_ad_data(
     if not data_list:
         return 0
     
-    from app.models.models import AdData
-    from sqlalchemy import update
     
     updated_count = 0
     

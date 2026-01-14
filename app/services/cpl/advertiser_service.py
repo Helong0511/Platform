@@ -5,9 +5,9 @@
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, String, or_
+from sqlalchemy import func, String, or_, and_
 
-from app.models.models import Advertiser, User, UserRole
+from app.models.models import Advertiser, User, UserRole, Offer
 from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
@@ -89,7 +89,6 @@ class AdvertiserService(BaseService[Advertiser]):
             conditions.append(Advertiser.is_active == is_active)
         
         if conditions:
-            from sqlalchemy import and_
             query = query.where(and_(*conditions))
         
         # 总数查询
@@ -228,7 +227,6 @@ class AdvertiserService(BaseService[Advertiser]):
         advertiser = await self.get_advertiser_by_id(advertiser_id, current_user)
         
         # 检查是否有关联的Offer
-        from app.models.models import Offer
         offer_count = await self.db.execute(
             select(func.count(Offer.id)).where(Offer.advertiser_id == advertiser_id)
         )

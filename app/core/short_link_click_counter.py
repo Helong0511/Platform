@@ -8,6 +8,7 @@ import random
 from typing import Dict, List, Tuple
 from datetime import datetime, timezone
 from app.core.redis_client import get_redis_client
+from app.core.short_link_cache import invalidate_short_link_cache
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import update, text
@@ -442,7 +443,6 @@ async def _batch_update_click_counts_with_retry(
                     # 清除缓存，确保缓存中的点击次数与数据库一致
                     # 注意：这里不清除计数器键（redis_key），因为已经在获取时用Lua脚本删除了
                     try:
-                        from app.core.short_link_cache import invalidate_short_link_cache
                         await invalidate_short_link_cache(short_code)
                     except Exception as e:
                         logger.debug(f"清除短链接缓存失败（可忽略）: short_code={short_code}, error={e}")

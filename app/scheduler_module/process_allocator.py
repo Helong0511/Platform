@@ -13,8 +13,10 @@ from sqlalchemy.future import select
 from sqlalchemy import and_, func
 
 from app.core.database import AsyncSessionLocal
+from app.core.config import settings
 from app.models.models import ScheduledTask
 from app.scheduler_module.lock import CURRENT_PID, CURRENT_HOST
+from app.scheduler_module.task_queue import get_task_queue
 
 logger = logging.getLogger(__name__)
 
@@ -125,8 +127,6 @@ async def get_process_for_task(
         - 如果返回 (True, pid)，表示应该由指定进程执行
         - 如果返回 (False, None)，表示应该跳过（由其他进程执行）
     """
-    from app.scheduler_module.task_queue import get_task_queue
-    from app.core.config import settings
     
     max_concurrent = getattr(settings, 'MAX_CONCURRENT_SCHEDULED_TASKS', 2)
     current_pid = CURRENT_PID

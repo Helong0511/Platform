@@ -3,22 +3,29 @@
 封装广告数据的业务逻辑
 """
 from typing import Optional, List, Dict, Any, Tuple
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from calendar import monthrange
+import re
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func, and_, or_, text, literal_column, case, Float, delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import load_only
 
 from app.models.models import (
     AdData, Product, Client, User, UserRole, ProductAssignment, CountryInfo
 )
 from app.services.base_service import BaseService
-from app.core.exceptions import raise_api_exception
+from app.core.exceptions import raise_api_exception, handle_integrity_error
 from app.core.errors import ErrorCode
+from app.core.security import is_admin
+from app.core.cache import get_cached, set_cached, generate_cache_key
 from app.core.query_utils import (
     product_assignment_join_condition,
     check_use_assignment_table,
-    join_country_info as join_country_info_util
+    join_country_info as join_country_info_util,
+    apply_date_range_filter,
+    date_range_condition
 )
 from app.core.utils import (
     unpack_ad_data_query_result,
@@ -26,6 +33,8 @@ from app.core.utils import (
     calculate_display_rate,
     calculate_click_rate
 )
+from app.core.country_code import find_country_code_by_any_format, resolve_country_name
+from app.core.constants import PERCENTAGE_MULTIPLIER, ECPM_MULTIPLIER
 import logging
 
 logger = logging.getLogger(__name__)
@@ -68,7 +77,6 @@ class AdDataService(BaseService[AdData]):
         Returns:
             Tuple: (ad_data, product, client, user, assignment_or_none, country_info_or_none)
         """
-        from app.core.security import is_admin
 
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(self.db)
@@ -173,7 +181,6 @@ class AdDataService(BaseService[AdData]):
         Returns:
             AdData: 更新后的广告数据对象
         """
-        from app.core.security import is_admin
 
         # 权限检查
         if not is_admin(current_user):
@@ -224,7 +231,6 @@ class AdDataService(BaseService[AdData]):
             country_input = filtered_update_data['country_code']
             if country_input:
                 # 支持多种格式：alpha_2_code、alpha_3_code、numeric_code、country_name_en、country_name_zh、official_name_en、official_name_zh
-                from app.core.country_code import find_country_code_by_any_format
                 found_country_code = await find_country_code_by_any_format(self.db, country_input)
                 if found_country_code:
                     filtered_update_data['country_code'] = found_country_code
@@ -253,7 +259,6 @@ class AdDataService(BaseService[AdData]):
                 date_end = datetime.combine(ad_data.date, datetime.max.time())
             
             # 查询是否存在相同的记录（排除当前记录）
-            from sqlalchemy import or_
             # 国家代码匹配逻辑：如果新国家代码是'ZZ'，匹配'ZZ'或NULL
             if new_country_code == "ZZ":
                 country_condition = or_(
@@ -319,13 +324,11 @@ class AdDataService(BaseService[AdData]):
             error_msg = str(e)
             
             # 检查是否是 IntegrityError（唯一性约束冲突）
-            from sqlalchemy.exc import IntegrityError
             if isinstance(e, IntegrityError):
                 # 提取冲突信息
                 conflict_info = ""
                 if "Duplicate entry" in error_msg:
                     # 从错误信息中提取冲突的键值
-                    import re
                     match = re.search(r"Duplicate entry '([^']+)'", error_msg)
                     if match:
                         conflict_info = f"冲突的键值: {match.group(1)}"
@@ -357,7 +360,6 @@ class AdDataService(BaseService[AdData]):
                     date_value = date_value.date()
                 
                 # 使用统一的 IntegrityError 处理函数
-                from app.core.exceptions import handle_integrity_error
                 handle_integrity_error(
                     error=e,
                     constraint_name="uq_ad_data_date_product_country",
@@ -389,8 +391,6 @@ class AdDataService(BaseService[AdData]):
             data_id: 广告数据ID
             current_user: 当前用户
         """
-        from app.core.security import is_admin
-
         # 权限检查
         if not is_admin(current_user):
             raise_api_exception(
@@ -430,10 +430,6 @@ class AdDataService(BaseService[AdData]):
         Returns:
             List[Dict]: 客户列表
         """
-        from app.core.security import is_admin
-        from app.core.cache import get_cached, set_cached, generate_cache_key
-        from app.core.query_utils import apply_date_range_filter
-
         # 缓存优化
         cache_key = generate_cache_key("clients_with_data", current_user.id, start_date, end_date)
         cached = await get_cached(cache_key)
@@ -528,10 +524,6 @@ class AdDataService(BaseService[AdData]):
         Returns:
             List[Dict]: 国家列表
         """
-        from app.core.security import is_admin
-        from app.core.query_utils import apply_date_range_filter
-        from app.core.country_code import resolve_country_name
-
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(self.db)
 
@@ -638,10 +630,6 @@ class AdDataService(BaseService[AdData]):
         Returns:
             List[Dict]: 产品列表
         """
-        from app.core.security import is_admin
-        from app.core.cache import get_cached, set_cached, generate_cache_key
-        from app.core.query_utils import apply_date_range_filter
-
         # 缓存优化
         cache_key = generate_cache_key("products_with_data", current_user.id, client_id, start_date, end_date)
         cached = await get_cached(cache_key)
@@ -731,9 +719,6 @@ class AdDataService(BaseService[AdData]):
         Returns:
             Dict: 包含 min_date 和 max_date 的字典
         """
-        from app.core.security import is_admin
-        from sqlalchemy import text, literal_column
-
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(self.db)
 
@@ -809,9 +794,6 @@ class AdDataService(BaseService[AdData]):
         Returns:
             int: 实际删除的记录数
         """
-        from app.core.security import is_admin
-        from sqlalchemy import delete
-
         if not data_ids or len(data_ids) == 0:
             raise_api_exception(
                 ErrorCode.AD_DATA_EMPTY_SELECTION,
@@ -927,12 +909,6 @@ class AdDataService(BaseService[AdData]):
         Returns:
             Dict: 汇总统计数据
         """
-        from app.core.security import is_admin
-        from app.core.cache import get_cached, set_cached, generate_cache_key
-        from app.core.query_utils import apply_date_range_filter
-        from datetime import timedelta
-        from sqlalchemy import text
-
         # 缓存优化
         cache_key = generate_cache_key("ad_data_summary", current_user.id, start_date, end_date, client_id, product_id)
         cached = await get_cached(cache_key)
@@ -944,7 +920,6 @@ class AdDataService(BaseService[AdData]):
 
         # 构建主查询：汇总所有指标
         # 使用数据库字段计算平均值，如果字段为空则使用计算值（使用 COALESCE 确保向后兼容）
-        from sqlalchemy import case, Float
         query = select(
             func.sum(AdData.request_count).label("total_requests"),
             func.sum(AdData.match_count).label("total_matches"),
@@ -1150,11 +1125,6 @@ class AdDataService(BaseService[AdData]):
         Returns:
             Tuple[List[Dict], int]: (汇总数据列表, 总数)
         """
-        from app.core.security import is_admin
-        from app.core.query_utils import apply_date_range_filter
-        from app.core.constants import PERCENTAGE_MULTIPLIER, ECPM_MULTIPLIER
-        from sqlalchemy import text, literal_column
-
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(self.db)
 
@@ -1470,18 +1440,9 @@ class AdDataService(BaseService[AdData]):
         Returns:
             Tuple[List[Dict], int]: (广告数据列表, 总数)
         """
-        from app.core.security import is_admin
-        from app.core.query_utils import apply_date_range_filter, date_range_condition
-        from app.core.utils import (
-            unpack_ad_data_query_result,
-            calculate_coverage_rate,
-            calculate_display_rate,
-            calculate_click_rate
-        )
-        from app.core.country_code import resolve_country_name
-        from sqlalchemy.orm import load_only
-        from calendar import monthrange
-
+        # 延迟导入，避免循环导入
+        from app.api.api_v1.endpoints.excel.utils import normalize_date_key
+        
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(self.db)
 
@@ -1702,7 +1663,6 @@ class AdDataService(BaseService[AdData]):
             viewability_rate = ad_data.viewability_rate if ad_data.viewability_rate is not None else 0.0
 
             # 将 DateTime 转换为 date
-            from app.api.api_v1.endpoints.excel.utils import normalize_date_key
             date_value = normalize_date_key(ad_data.date)
 
             # 获取国家名称

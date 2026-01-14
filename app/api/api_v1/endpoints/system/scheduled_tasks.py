@@ -26,6 +26,8 @@ from app.core.validation import validate_cron_expression, sanitize_input
 from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.dependencies import get_scheduled_task_service
+from app.services.scheduled_task_service import ScheduledTaskService
 from app.models.models import User, ScheduledTask
 from app.core.utils import get_app_now_naive
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -94,9 +96,6 @@ async def get_scheduled_tasks(
     - 支持分页和过滤
     """
     # 使用服务层（业务逻辑在ScheduledTaskService中）
-    from app.core.dependencies import get_scheduled_task_service
-    from app.services.scheduled_task_service import ScheduledTaskService
-    
     task_service: ScheduledTaskService = await get_scheduled_task_service(db)
     
     try:
@@ -184,9 +183,6 @@ async def get_scheduled_task(
     - 仅管理员可访问
     """
     # 使用服务层（业务逻辑在ScheduledTaskService中）
-    from app.core.dependencies import get_scheduled_task_service
-    from app.services.scheduled_task_service import ScheduledTaskService
-    
     task_service: ScheduledTaskService = await get_scheduled_task_service(db)
     
     try:
@@ -236,9 +232,6 @@ async def update_scheduled_task(
     - 仅支持启用/禁用定时任务
     """
     # 使用服务层（业务逻辑在ScheduledTaskService中）
-    from app.core.dependencies import get_scheduled_task_service
-    from app.services.scheduled_task_service import ScheduledTaskService
-    
     task_service: ScheduledTaskService = await get_scheduled_task_service(db)
     
     try:
@@ -337,9 +330,6 @@ async def trigger_scheduled_task(
     - 立即执行指定的定时任务
     """
     # 使用服务层（业务逻辑在ScheduledTaskService中）
-    from app.core.dependencies import get_scheduled_task_service
-    from app.services.scheduled_task_service import ScheduledTaskService
-    
     task_service: ScheduledTaskService = await get_scheduled_task_service(db)
     
     try:
@@ -384,9 +374,6 @@ async def reload_scheduled_task(
     - 仅管理员可访问
     """
     # 使用服务层（业务逻辑在ScheduledTaskService中）
-    from app.core.dependencies import get_scheduled_task_service
-    from app.services.scheduled_task_service import ScheduledTaskService
-    
     task_service: ScheduledTaskService = await get_scheduled_task_service(db)
     
     try:
@@ -424,9 +411,6 @@ async def reload_all_scheduled_tasks(
     - 仅管理员可访问
     """
     # 使用服务层（业务逻辑在ScheduledTaskService中）
-    from app.core.dependencies import get_scheduled_task_service
-    from app.services.scheduled_task_service import ScheduledTaskService
-    
     task_service: ScheduledTaskService = await get_scheduled_task_service(db)
     
     try:
@@ -467,9 +451,6 @@ async def get_task_queue_status(
     仅管理员可访问
     """
     # 使用服务层（业务逻辑在ScheduledTaskService中）
-    from app.core.dependencies import get_scheduled_task_service
-    from app.services.scheduled_task_service import ScheduledTaskService
-    
     task_service: ScheduledTaskService = await get_scheduled_task_service(db)
     
     try:
@@ -504,9 +485,6 @@ async def get_scheduler_status(
     - 显示调度器运行状态、已注册任务列表、下次执行时间等
     """
     # 使用服务层（业务逻辑在ScheduledTaskService中）
-    from app.core.dependencies import get_scheduled_task_service
-    from app.services.scheduled_task_service import ScheduledTaskService
-    
     task_service: ScheduledTaskService = await get_scheduled_task_service(db)
     
     try:
@@ -539,9 +517,6 @@ async def release_task_lock(
     - 使用数据库锁确保原子性操作
     """
     # 使用服务层（业务逻辑在ScheduledTaskService中）
-    from app.core.dependencies import get_scheduled_task_service
-    from app.services.scheduled_task_service import ScheduledTaskService
-    
     task_service: ScheduledTaskService = await get_scheduled_task_service(db)
     
     try:

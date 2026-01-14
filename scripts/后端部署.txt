@@ -162,4 +162,73 @@ sudo rm -rf /data/20251114/*
 pop.gmail.com
 smtp.gmail.com
 
+# 回复 20260112 的 程序备份
+sudo rm -rf /data/Platform
+sudo cp -a /data/Platform_20260112 /data/Platform
+<<<<<<< HEAD
 
+sudo systemctl restart Platform-backend.service
+
+sudo nginx -t
+
+sudo systemctl reload nginx
+
+sudo systemctl restart nginx
+
+
+
+将 后端 所有服务 独立成服务 
+
+比如 
+
+
+
+将当前项目 多个后端服务 独立运行 独立更新 互不影响   但是 共用一个MySQL数据库
+自动根据服务器硬件信息  根据各个服务 单独智能分配  运行的 workers 
+公共模块 共用 
+每个项目服务 单独建立文件夹 单独启动
+
+
+前端 也根据服务 优化
+给出详细的实施报表 先不改代码
+给出 小白状况下  超级详细的 Docker 操作说明 本地（Windows 下更改代码）怎么操作，服务器端（Ubuntu22.04.5）怎么部署实施 
+
+
+
+
+# 1. 进入仓库
+cd E:\data\Platform
+
+# 2. 删除所有跟踪的文件
+git rm -r --cached .
+git commit -m "Clear All Files"
+
+# 3. 放入你的新文件（确保文件已在目录中）
+# 4. 添加并推送
+git add -A
+git commit -m "上传新内容"
+git push origin main --force
+
+
+
+
+
+
+
+
+=======
+>>>>>>> 451fe37690182f08f5b8c5e7c77a028275228449
+
+sudo systemctl restart Platform-backend.service
+
+sudo nginx -t
+
+sudo systemctl reload nginx
+
+sudo systemctl restart nginx
+
+
+
+
+
+将当前项目  多个后端服务 独立运行 独立更新 互不影响   但是 共用一个MySQL数据库  怎么设计   根据各个服务 单独分配  运行的 workers 

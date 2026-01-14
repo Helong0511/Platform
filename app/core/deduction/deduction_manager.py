@@ -23,7 +23,8 @@ from app.models.models import (
     ConversionDeductionConfig, 
     ConversionDeductionLog,
 )
-from app.core.cache import get_cached, set_cached, invalidate_cache
+from app.core.cache import get_cached, set_cached, invalidate_cache, CACHE_PREFIX
+from app.core.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -625,8 +626,6 @@ class DeductionManager:
         # 所以实际的缓存键是：query_cache:cpl:conversion_stats:adv:1:hours:24
         # invalidate_cache函数也会添加CACHE_PREFIX并在末尾添加*，所以我们需要直接使用Redis删除
         try:
-            from app.core.redis_client import get_redis_client
-            from app.core.cache import CACHE_PREFIX
             redis = await get_redis_client()
             if not redis:
                 return

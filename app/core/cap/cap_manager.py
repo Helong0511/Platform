@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, and_, or_
 
+from sqlalchemy import update
 from app.models.models import OfferCap, Offer, PostbackConversion
 
 logger = logging.getLogger(__name__)
@@ -314,7 +315,6 @@ async def reset_daily_caps(db: AsyncSession) -> None:
             logger.warning("Redis不可用，跳过清除Redis计数")
         
         # 3. 批量更新数据库
-        from sqlalchemy import update
         stmt = (
             update(OfferCap)
             .where(

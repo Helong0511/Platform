@@ -84,6 +84,10 @@ from app.core.security import get_current_user, require_admin
 from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
 from app.core.validation import sanitize_input
 from app.core.constants import MAX_PAGE_SIZE
+from app.core.utils import optimize_page_size_for_device
+from app.core.fulltext_search import search_with_fulltext
+from app.core.dependencies import get_product_service
+from app.services.product_service import ProductService
 from app.core.product_assignment import (
     transfer_product_assignment,
     initialize_product_assignment,
@@ -163,7 +167,6 @@ async def get_available_product_names(
         if search and search.strip():
             cleaned_search = sanitize_input(search.strip(), max_length=100)
             if cleaned_search:
-                from app.core.fulltext_search import search_with_fulltext
                 products_query = await search_with_fulltext(
                     db=db,
                     model_class=Product,
@@ -224,13 +227,9 @@ async def get_products(
     - 根据设备类型自动优化分页大小
     """
     # ====== 设备类型优化：自动调整分页大小 ======
-    from app.core.utils import optimize_page_size_for_device
     page_size = optimize_page_size_for_device(request, page_size, default_page_size=10)
     
     # 使用服务层（业务逻辑在ProductService中）
-    from app.core.dependencies import get_product_service
-    from app.services.product_service import ProductService
-    
     product_service: ProductService = await get_product_service(db)
     
     # 如果提供了name参数，优先使用全文搜索
@@ -271,9 +270,6 @@ async def get_product(
     - 使用服务层，业务逻辑已优化
     """
     # 使用服务层（业务逻辑在ProductService中）
-    from app.core.dependencies import get_product_service
-    from app.services.product_service import ProductService
-    
     product_service: ProductService = await get_product_service(db)
     product = await product_service.get_product_by_id(product_id, current_user, include_client=True)
 
@@ -295,9 +291,6 @@ async def create_product(
     - 支持处理默认客户（导入数据）的特殊逻辑
     """
     # 使用服务层（业务逻辑在ProductService中）
-    from app.core.dependencies import get_product_service
-    from app.services.product_service import ProductService
-    
     product_service: ProductService = await get_product_service(db)
     
     # 准备产品数据
@@ -307,7 +300,6 @@ async def create_product(
     product = await product_service.create_product(product_data, current_user)
     
     # 记录创建操作（使用audit_log的log_create函数）
-    from app.core.audit_log import log_create
     try:
         await log_create(
             db=db,
@@ -364,9 +356,6 @@ async def update_product(
     - 支持产品分配历史转移
     """
     # 使用服务层（业务逻辑在ProductService中）
-    from app.core.dependencies import get_product_service
-    from app.services.product_service import ProductService
-    
     product_service: ProductService = await get_product_service(db)
     
     # 获取更新数据（排除未设置的字段）
@@ -376,7 +365,6 @@ async def update_product(
     product = await product_service.update_product(product_id, update_data, current_user)
     
     # 记录更新操作（使用audit_log的log_update函数）
-    from app.core.audit_log import log_update
     # 构建详细的变更记录
     log_details = {
         **update_data,
@@ -414,9 +402,6 @@ async def delete_product(
       2. 如果没有关联广告数据 → 直接删除产品
     """
     # 使用服务层（业务逻辑在ProductService中）
-    from app.core.dependencies import get_product_service
-    from app.services.product_service import ProductService
-    
     product_service: ProductService = await get_product_service(db)
     
     # 调用服务层删除产品（服务层会处理智能删除逻辑）
@@ -424,7 +409,6 @@ async def delete_product(
     
     # 如果产品被转移，记录更新操作
     if result.get("transferred"):
-        from app.core.audit_log import log_update
         # 获取产品信息用于记录日志
         product = await product_service.get_product_by_id(product_id, current_user, include_client=False)
         await log_update(

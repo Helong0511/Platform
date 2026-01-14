@@ -2,8 +2,7 @@
 Excel导入处理模块
 处理广告数据的Excel导入逻辑
 """
-from fastapi import UploadFile, HTTPException, status, Query
-from fastapi import Depends
+from fastapi import UploadFile, HTTPException, status, Query, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import or_, and_
@@ -13,7 +12,7 @@ import logging
 import asyncio
 import uuid
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, date
 
 import pandas as pd
 # 延迟导入 openpyxl，避免多进程环境下的导入问题
@@ -29,9 +28,15 @@ from app.api.api_v1.endpoints.excel.utils import (
     allowed_file, ALLOWED_MIME_TYPES, parse_date_value, calculate_rates,
     safe_get_value, is_valid_numeric_value, normalize_date_key
 )
+from app.api.api_v1.endpoints.ml_model.ml_model import ColumnMappingService, REQUIRED_FIELDS
 from app.core.product_assignment import initialize_product_assignment
-from app.core.utils import truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data
-from datetime import date
+from app.core.utils import (
+    truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data,
+    find_or_create_default_client, format_error_details, build_import_message
+)
+from app.core.ad_data_processor import check_and_notify_data_decrease
+from app.core.exceptions import handle_integrity_error
+from app.core.auto_bot import send_telegram_message
 
 logger = logging.getLogger(__name__)
 
@@ -244,8 +249,6 @@ async def process_column_mapping(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[s
     返回:
         (处理后的DataFrame, 映射结果)
     """
-    from app.api.api_v1.endpoints.ml_model.ml_model import ColumnMappingService, REQUIRED_FIELDS
-
     # 步骤1：规范化Excel列名
     excel_columns_normalized = ColumnMappingService.normalize_excel_columns(df.columns)
     df.columns = excel_columns_normalized
@@ -530,7 +533,6 @@ async def find_or_create_product(
             # 获取或创建默认客户：使用统一的辅助函数
             create_client = None
             if not target_client_id:
-                from app.core.utils import find_or_create_default_client
                 create_client = await find_or_create_default_client(db, current_user.id)
                 target_client_id = create_client.id
                 logger.info(
@@ -794,7 +796,6 @@ async def process_row_data(
                     country_code = "ZZ"
             
             # 构建国家代码匹配条件（与API数据处理逻辑一致）
-            from sqlalchemy import or_
             if country_code == "ZZ":
                 # 新数据是'ZZ'，匹配'ZZ'或NULL（向后兼容旧数据）
                 country_condition = or_(
@@ -845,7 +846,6 @@ async def process_row_data(
                     country_code = "ZZ"
             
             # 检查数据是否减少（在更新之前）
-            from app.core.ad_data_processor import check_and_notify_data_decrease
             # 格式化日期字符串（data_date 可能是 date 或 datetime 类型）
             if isinstance(data_date, datetime):
                 date_str = data_date.date().isoformat()
@@ -1114,7 +1114,6 @@ async def import_ad_data_handler(
             await db.flush()  # 刷新到数据库但不提交，触发约束检查
         except IntegrityError as e:
             # 使用统一的 IntegrityError 处理函数
-            from app.core.exceptions import handle_integrity_error
             handle_integrity_error(
                 error=e,
                 constraint_name="uq_ad_data_date_product",
@@ -1127,11 +1126,9 @@ async def import_ad_data_handler(
             )
 
         # 构建响应：使用统一的错误详情格式化函数
-        from app.core.utils import format_error_details
         error_details = format_error_details(result.get("errors", []))
 
         # 使用统一的导入消息构建函数
-        from app.core.utils import build_import_message
         import_message = build_import_message(
             imported_rows=result['success_rows'],
             failed_rows=result.get("failed_rows", 0),
@@ -1163,8 +1160,6 @@ async def import_ad_data_handler(
 
         # 发送 Telegram 通知（仅在成功导入时）
         if result['success_rows'] > 0:
-            from app.core.auto_bot import send_telegram_message
-            
             # 构建通知消息
             telegram_msg = f"📊 Excel 导入成功\n\n"
             telegram_msg += f"用户: {current_user.username}\n"

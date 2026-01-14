@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
@@ -123,7 +124,6 @@ async def create_affiliate_test(
         await db.commit()
         
         # 重新加载关联信息（使用joinedload优化）
-        from sqlalchemy.orm import joinedload
         query = select(AffiliateTest).where(AffiliateTest.id == test.id).options(
             joinedload(AffiliateTest.publisher)
         )
@@ -218,7 +218,6 @@ async def get_affiliate_test(
 ):
     """获取下游测试记录详情（仅管理员）"""
     # 使用joinedload优化关联查询
-    from sqlalchemy.orm import joinedload
     query = select(AffiliateTest).where(AffiliateTest.id == test_id).options(
         joinedload(AffiliateTest.publisher)
     )

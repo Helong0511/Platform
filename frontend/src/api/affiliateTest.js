@@ -11,7 +11,7 @@ export function getAffiliateTests(params) {
     url: '/api/v1/affiliate-tests/',
     method: 'get',
     params
-  })
+  }, { paginated: true })
 }
 
 /**
@@ -21,7 +21,7 @@ export function getAffiliateTest(id) {
   return request({
     url: `/api/v1/affiliate-tests/${id}`,
     method: 'get'
-  })
+  }, { returnDataOnly: true })
 }
 
 /**
@@ -32,6 +32,6 @@ export function createAffiliateTest(data) {
     url: '/api/v1/affiliate-tests/',
     method: 'post',
     data
-  })
+  }, { returnDataOnly: true })
 }
 

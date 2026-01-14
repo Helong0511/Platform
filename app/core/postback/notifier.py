@@ -18,8 +18,14 @@ from app.models.models import (
 )
 from app.core.auto_bot import send_telegram_message
 from app.core.utils import get_app_now_naive
+from app.core.redis_client import get_redis_client
+from app.services.telegram_notification_service import TelegramNotificationService
+import httpx
 
 logger = logging.getLogger(__name__)
+
+# Redis 通知队列配置
+NOTIFICATION_QUEUE_MAX_SIZE = 10000  # 每个客户队列最大长度（防止内存溢出）
 
 
 class PostbackNotifier:
@@ -34,6 +40,11 @@ class PostbackNotifier:
     ) -> None:
         """
         通知转化事件（根据配置决定是否发送）
+        
+        优先级：
+        1. 客户通知配置（ClientNotificationConfig）- 优先使用
+        2. 产品通知配置（ProductNotificationConfig）
+        3. 产品表中的通知地址（Product.notification_address）- 向后兼容
         
         Args:
             conversion: 转化记录
@@ -61,49 +72,217 @@ class PostbackNotifier:
                     )
                     client = result.scalars().first()
             
-            # 2. 检查产品是否配置了通知地址
-            if not product or not product.notification_address:
+            if not client:
                 logger.debug(
-                    f"产品未配置通知地址，跳过通知: conversion_id={conversion.id}, "
-                    f"product_id={conversion.product_id}"
+                    f"无法获取客户信息，跳过通知: conversion_id={conversion.id}, "
+                    f"product_id={conversion.product_id}, client_id={conversion.client_id}"
                 )
                 return
             
-            # 3. 获取通知地址（优先使用产品表中的通知地址）
-            notification_address = product.notification_address.strip()
+            # 2. 获取客户和产品通知配置
+            client_config = None
+            product_config = None
             
-            if not notification_address:
+            if client:
+                result = await db.execute(
+                    select(ClientNotificationConfig).where(
+                        ClientNotificationConfig.client_id == client.id
+                    )
+                )
+                client_config = result.scalars().first()
+            
+            if product:
+                result = await db.execute(
+                    select(ProductNotificationConfig).where(
+                        ProductNotificationConfig.product_id == product.id
+                    )
+                )
+                product_config = result.scalars().first()
+            
+            # 3. 检查是否需要发送通知
+            should_notify, notification_type = PostbackNotifier._should_notify(
+                conversion=conversion,
+                product_config=product_config,
+                client_config=client_config
+            )
+            
+            if not should_notify:
                 logger.debug(
-                    f"产品通知地址为空，跳过通知: conversion_id={conversion.id}, "
-                    f"product_id={conversion.product_id}"
+                    f"根据配置不需要发送通知: conversion_id={conversion.id}, "
+                    f"notification_type={notification_type}"
                 )
                 return
             
-            # 4. 获取客户和产品信息（用于通知）
+            # 4. 获取通知渠道和地址
+            # 优先使用客户配置，如果没有则使用产品配置，最后使用产品表中的通知地址
+            config = client_config if client_config else product_config
+            channels = PostbackNotifier._get_notification_channels(config)
+            
+            # 获取 Telegram Chat ID（优先使用配置中的）
+            telegram_chat_id = None
+            if config:
+                if config.telegram_chat_id:
+                    telegram_chat_id = config.telegram_chat_id.strip()
+            elif product and product.notification_address:
+                # 向后兼容：如果产品表中的通知地址是纯数字，作为 Telegram Chat ID
+                notification_address = product.notification_address.strip()
+                if notification_address and notification_address.replace('-', '').isdigit():
+                    telegram_chat_id = notification_address
+            
+            # 如果没有 Telegram Chat ID，且没有其他渠道，跳过通知
+            if 'telegram' in channels and not telegram_chat_id:
+                logger.debug(
+                    f"未配置 Telegram Chat ID，跳过通知: conversion_id={conversion.id}, "
+                    f"client_id={client.id if client else None}"
+                )
+                return
+            
+            # 5. 获取客户和产品信息（用于通知）
             client_name, user_full_name = await PostbackNotifier._get_client_info(client, db)
             product_name = PostbackNotifier._get_product_name(product)
             
-            # 5. 构建通知消息
-            message = PostbackNotifier._build_notification_message(
-                conversion=conversion,
-                client_name=client_name,
-                product_name=product_name,
-                user_full_name=user_full_name,
-                notification_type='conversion'
-            )
+            # 6. 构建通知消息（使用 TelegramNotificationService）
             
-            # 6. 发送通知（异步，不阻塞主流程）
-            # 使用产品表中的通知地址
-            asyncio.create_task(
-                PostbackNotifier._send_notification_async(
-                    message=message,
+            if notification_type == 'high_value' and config and config.high_value_threshold:
+                message = TelegramNotificationService.build_client_high_value_message(
                     conversion=conversion,
-                    client=client,
-                    product=product,
-                    notification_address=notification_address,
-                    db=db
+                    client_name=client_name,
+                    product_name=product_name,
+                    threshold=config.high_value_threshold,
+                    user_full_name=user_full_name
                 )
-            )
+            else:
+                message = TelegramNotificationService.build_client_conversion_message(
+                    conversion=conversion,
+                    client_name=client_name,
+                    product_name=product_name,
+                    user_full_name=user_full_name
+                )
+            
+            # 7. 根据通知频率决定发送方式
+            notification_frequency = config.notification_frequency if config else 'realtime'
+            
+            if notification_frequency == 'realtime':
+                # 实时通知：立即发送
+                if 'telegram' in channels and telegram_chat_id:
+                    asyncio.create_task(
+                        TelegramNotificationService.send_client_notification(
+                            message=message,
+                            telegram_chat_id=telegram_chat_id,
+                            conversion=conversion,
+                            db=db
+                        )
+                    )
+            else:
+                # 汇总通知（hourly/daily）：将通知放入队列，由定时任务汇总发送
+                # 使用 Redis 队列存储待汇总的通知
+                try:
+                    redis_client = await get_redis_client()
+                    if redis_client:
+                        # 构建通知队列项
+                        notification_item = {
+                            'conversion_id': conversion.id,
+                            'client_id': client.id if client else None,
+                            'product_id': product.id if product else None,
+                            'telegram_chat_id': telegram_chat_id,
+                            'message': message,
+                            'notification_type': notification_type,
+                            'frequency': notification_frequency,
+                            'created_at': conversion.created_at.isoformat() if conversion.created_at else None,
+                            'payout': float(conversion.payout) if conversion.payout else None,
+                            'original_payout': float(conversion.original_payout) if conversion.original_payout else None
+                        }
+                        
+                        # 根据频率选择不同的队列
+                        if notification_frequency == 'hourly':
+                            queue_key = f"notification_queue:hourly:{client.id if client else 'unknown'}"
+                        elif notification_frequency == 'daily':
+                            queue_key = f"notification_queue:daily:{client.id if client else 'unknown'}"
+                        else:
+                            # 意外的频率值，记录警告并降级为实时发送
+                            logger.warning(
+                                f"未知的通知频率: {notification_frequency}，降级为实时发送: "
+                                f"conversion_id={conversion.id}, client_id={client.id if client else None}"
+                            )
+                            if 'telegram' in channels and telegram_chat_id:
+                                asyncio.create_task(
+                                    TelegramNotificationService.send_client_notification(
+                                        message=message,
+                                        telegram_chat_id=telegram_chat_id,
+                                        conversion=conversion,
+                                        db=db
+                                    )
+                                )
+                            return  # 已降级为实时发送，直接返回
+                        
+                        # 检查队列长度，防止内存溢出
+                        queue_length = await redis_client.llen(queue_key)
+                        if queue_length >= NOTIFICATION_QUEUE_MAX_SIZE:
+                            logger.warning(
+                                f"通知队列已满（{queue_length}/{NOTIFICATION_QUEUE_MAX_SIZE}），"
+                                f"通知可能丢失: conversion_id={conversion.id}, queue_key={queue_key}"
+                            )
+                            # 队列已满时，降级为实时发送
+                            if 'telegram' in channels and telegram_chat_id:
+                                asyncio.create_task(
+                                    TelegramNotificationService.send_client_notification(
+                                        message=message,
+                                        telegram_chat_id=telegram_chat_id,
+                                        conversion=conversion,
+                                        db=db
+                                    )
+                                )
+                            return  # 队列已满，已降级为实时发送，直接返回
+                        
+                        # 将通知项添加到 Redis 列表
+                        await redis_client.lpush(
+                            queue_key,
+                            json.dumps(notification_item, ensure_ascii=False)
+                        )
+                        
+                        # 设置过期时间（hourly: 2小时，daily: 2天）
+                        # 注意：每次添加新项时都更新过期时间，确保队列不会过早过期
+                        if notification_frequency == 'hourly':
+                            await redis_client.expire(queue_key, 7200)  # 2小时（足够覆盖1小时汇总周期）
+                        elif notification_frequency == 'daily':
+                            await redis_client.expire(queue_key, 172800)  # 2天（足够覆盖1天汇总周期）
+                        
+                        logger.debug(
+                            f"通知已加入汇总队列: conversion_id={conversion.id}, "
+                            f"frequency={notification_frequency}, queue_key={queue_key}"
+                        )
+                    else:
+                        # Redis 不可用时，降级为实时发送
+                        logger.warning(
+                            f"Redis 不可用，降级为实时发送通知: conversion_id={conversion.id}"
+                        )
+                        if 'telegram' in channels and telegram_chat_id:
+                            asyncio.create_task(
+                                TelegramNotificationService.send_client_notification(
+                                    message=message,
+                                    telegram_chat_id=telegram_chat_id,
+                                    conversion=conversion,
+                                    db=db
+                                )
+                            )
+                except Exception as e:
+                    # Redis 操作失败时，降级为实时发送
+                    logger.warning(
+                        f"将通知加入汇总队列失败，降级为实时发送: conversion_id={conversion.id}, "
+                        f"error={str(e)}"
+                    )
+                    if 'telegram' in channels and telegram_chat_id:
+                        asyncio.create_task(
+                            TelegramNotificationService.send_client_notification(
+                                message=message,
+                                telegram_chat_id=telegram_chat_id,
+                                conversion=conversion,
+                                db=db
+                            )
+                        )
+            
+            # TODO: 支持其他渠道（email, sms, webhook）
+            # 这里可以添加其他渠道的通知发送逻辑
             
         except Exception as e:
             # 通知失败不影响主流程，只记录日志
@@ -131,8 +310,8 @@ class PostbackNotifier:
         Returns:
             (是否需要通知, 通知类型)
         """
-        # 优先使用产品配置，如果没有则使用客户配置
-        config = product_config if product_config else client_config
+        # 优先使用客户配置，如果没有则使用产品配置（与 notify_conversion 中的优先级保持一致）
+        config = client_config if client_config else product_config
         
         # 如果没有配置，默认发送通知（向后兼容）
         if not config:
@@ -509,7 +688,6 @@ class PostbackNotifier:
             是否发送成功
         """
         try:
-            import httpx
             
             # 构建通知数据
             payload = {

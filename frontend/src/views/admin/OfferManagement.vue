@@ -525,11 +525,11 @@
                         v-model="config.affiliate_payout"
                         :min="0"
                         :precision="2"
-                        placeholder="扣价后给渠道的金额"
+                        placeholder="渠道的转化金额"
                         style="width: 100%;"
                       />
                       <div class="field-hint">
-                        该渠道的扣价后支付金额
+                        渠道的转化金额（如果上游通知的金额大于这个金额，就按照【下游PO】的金额通知）
                       </div>
                     </el-form-item>
                   </el-col>
@@ -541,11 +541,11 @@
                       <el-input-number
                         v-model="config.downstream_cap"
                         :min="0"
-                        placeholder="下游转化上限"
+                        placeholder="下游每天转化个数限制"
                         style="width: 100%;"
                       />
                       <div class="field-hint">
-                        该渠道的转化上限
+                        下游每天转化个数的限制，如果渠道超过了这个值就不通知了
                       </div>
                     </el-form-item>
                   </el-col>
@@ -976,9 +976,8 @@ const formRules = {
 const loadAdvertisers = async () => {
   try {
     const response = await getAdvertisers({ page: 1, page_size: 100 })
-    if (response.code === 200) {
-      advertiserList.value = response.data || []
-    }
+    // response已经是标准分页格式，直接使用data字段
+    advertiserList.value = response.data || []
   } catch (error) {
     logger.error('加载广告主列表失败:', error)
   }
@@ -988,9 +987,8 @@ const loadAdvertisers = async () => {
 const loadPublishers = async () => {
   try {
     const response = await getPublishers({ page: 1, page_size: 100 })
-    if (response.code === 200) {
-      publisherList.value = response.data || []
-    }
+    // response已经是标准分页格式，直接使用data字段
+    publisherList.value = response.data || []
   } catch (error) {
     logger.error('加载渠道列表失败:', error)
   }
@@ -1009,12 +1007,9 @@ const loadData = async () => {
       is_active: filterActive.value !== null ? filterActive.value : undefined
     }
     const response = await getOffers(params)
-    if (response.code === 200) {
-      tableData.value = response.data || []
-      pagination.total = response.total || 0
-    } else {
-      ElMessage.error(response.message || '获取数据失败')
-    }
+    // response已经是标准分页格式，直接使用data和total字段
+    tableData.value = response.data || []
+    pagination.total = response.total || 0
   } catch (error) {
     logger.error('获取Offer列表失败:', error)
     ElMessage.error('获取数据失败')
@@ -1153,9 +1148,9 @@ const handleEdit = async (row) => {
   
   // 获取完整的Offer详情（包含渠道配置信息）
   try {
-    const response = await getOffer(row.id)
-    if (response.code === 200 && response.data) {
-      const offerData = response.data
+    // getOffer使用returnDataOnly: true，直接返回数据对象
+    const offerData = await getOffer(row.id)
+    if (offerData) {
       
       // 构建渠道配置
       let publisherConfigs = []
@@ -1256,13 +1251,10 @@ const handleDelete = async (row) => {
       }
     )
     
-    const response = await deleteOffer(row.id)
-    if (response.code === 200) {
-      ElMessage.success('删除成功')
-      loadData()
-    } else {
-      ElMessage.error(response.message || '删除失败')
-    }
+    await deleteOffer(row.id)
+    // deleteOffer使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
+    ElMessage.success('删除成功')
+    loadData()
   } catch (error) {
     if (error !== 'cancel') {
       logger.error('删除Offer失败:', error)
@@ -1320,53 +1312,34 @@ const handleSubmit = async () => {
       delete submitData.publisher_ids
       
       let response
-      let offerData = null
-      
+      let offerData
       if (isEdit.value) {
         // 编辑：先更新Offer
-        response = await updateOffer(formData.id, submitData)
-        if (response.code === 200) {
-          offerData = response.data
-        }
+        // updateOffer使用returnDataOnly: true，直接返回数据对象
+        offerData = await updateOffer(formData.id, submitData)
       } else {
         // 新建：先创建Offer获取id
-        response = await createOffer(submitData)
-        if (response.code === 200) {
-          offerData = response.data
-        }
+        // createOffer使用returnDataOnly: true，直接返回数据对象
+        offerData = await createOffer(submitData)
       }
       
-      if (response.code === 200 && offerData) {
-        // 后端已自动创建短链接，使用后端返回的消息
-        // downstream_tracklink 已经是短链接URL（如果创建成功）
-        if (response.message) {
-          // 显示后端返回的详细消息（包含短链接信息）
-          ElMessage.success(response.message)
-        } else {
-          ElMessage.success(isEdit.value ? '更新成功' : '创建成功')
-        }
-        
-        // 更新表单中的downstream_tracklink（可能是短链接URL）
-        if (offerData.downstream_tracklink) {
-          formData.downstream_tracklink = offerData.downstream_tracklink
-          formData.downstream_tracklink_short = offerData.downstream_tracklink
-        }
-        
-        // 如果是编辑且是管理员，重新检查短链接是否存在（更新UI状态）
-        if (isEdit.value && isAdmin.value && offerData.id) {
-          await checkExistingShortLink(offerData.id)
-        }
-        
-        dialogVisible.value = false
-        loadData()
-      } else {
-        // 检查是否是401/403错误（虽然不太可能，但为了完整性）
-        if (response.code === 401 || response.code === 403) {
-          // 这些错误应该由axios拦截器处理，但为了安全起见，这里也检查
-          return
-        }
-        ElMessage.error(response.message || '操作失败')
+      // 如果执行到这里，说明操作成功（失败会抛出异常）
+      // 后端已自动创建短链接
+      ElMessage.success(isEdit.value ? '更新成功' : '创建成功')
+      
+      // 更新表单中的downstream_tracklink（可能是短链接URL）
+      if (offerData && offerData.downstream_tracklink) {
+        formData.downstream_tracklink = offerData.downstream_tracklink
+        formData.downstream_tracklink_short = offerData.downstream_tracklink
       }
+      
+      // 如果是编辑且是管理员，重新检查短链接是否存在（更新UI状态）
+      if (isEdit.value && isAdmin.value && offerData && offerData.id) {
+        await checkExistingShortLink(offerData.id)
+      }
+      
+      dialogVisible.value = false
+      loadData()
     } catch (error) {
       logger.error('提交失败:', error)
       
@@ -1417,9 +1390,10 @@ const checkExistingShortLink = async (offerId) => {
   }
   
   try {
-    const response = await checkOfferShortLink(offerId)
-    if (response.code === 200 && response.data) {
-      const { exists, short_link } = response.data
+    // checkOfferShortLink使用returnDataOnly: true，直接返回数据对象
+    const result = await checkOfferShortLink(offerId)
+    if (result) {
+      const { exists, short_link } = result
       shortLinkExists.value = exists
       
       if (exists && short_link) {
@@ -1489,9 +1463,9 @@ const handleViewDetails = async (row) => {
   
   try {
     // 加载Offer详情
-    const response = await getOffer(row.id)
-    if (response.code === 200) {
-      currentOffer.value = response.data
+    // getOffer使用returnDataOnly: true，直接返回数据对象
+    currentOffer.value = await getOffer(row.id)
+    if (currentOffer.value) {
       
       // 主短链接已保存在downstream_tracklink中，不需要查找
       // 每个渠道的短链接通过getPublisherShortLink函数动态生成（主短链接 + 参数）
@@ -1563,9 +1537,8 @@ const loadRelatedCaps = async (offerId) => {
       page_size: 100,
       offer_id: offerId
     })
-    if (response.code === 200) {
-      relatedCaps.value = response.data || []
-    }
+    // response已经是标准分页格式，直接使用data字段
+    relatedCaps.value = response.data || []
   } catch (error) {
     logger.error('加载Cap配置失败:', error)
   } finally {
@@ -1582,9 +1555,8 @@ const loadRelatedDiscounts = async (offerId) => {
       page_size: 100,
       offer_id: offerId
     })
-    if (response.code === 200) {
-      relatedDiscounts.value = response.data || []
-    }
+    // response已经是标准分页格式，直接使用data字段
+    relatedDiscounts.value = response.data || []
   } catch (error) {
     logger.error('加载扣量配置失败:', error)
   } finally {

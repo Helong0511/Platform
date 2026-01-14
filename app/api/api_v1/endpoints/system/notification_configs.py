@@ -15,13 +15,14 @@ from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
-from app.core.utils import parse_date_to_app_timezone
+from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
+from app.core.dependencies import get_notification_config_service
+from app.core.auto_bot import send_telegram_message
 from app.models.models import (
     Client, Product, User, UserRole,
-    ClientNotificationConfig, ProductNotificationConfig, PostbackNotification,
-    PostbackConversion
+    ClientNotificationConfig, ProductNotificationConfig, AdminNotificationConfig,
+    PostbackNotification, PostbackConversion
 )
-from app.core.utils import get_app_now_naive
 from app.schemas.notification import (
     ClientNotificationConfigCreate,
     ClientNotificationConfigUpdate,
@@ -29,10 +30,17 @@ from app.schemas.notification import (
     ProductNotificationConfigCreate,
     ProductNotificationConfigUpdate,
     ProductNotificationConfigResponse,
+    AdminNotificationConfigCreate,
+    AdminNotificationConfigUpdate,
+    AdminNotificationConfigResponse,
+    TestConnectionRequest,
+    TestMessageRequest,
     PostbackNotificationResponse,
     PostbackNotificationListResponse
 )
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
+from app.services.notification_config_service import NotificationConfigService
+from app.services.telegram_notification_service import TelegramNotificationService
 
 # 创建路由实例
 router = APIRouter()
@@ -51,9 +59,6 @@ async def get_client_notification_config(
 ):
     """获取客户的通知配置（已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层获取客户通知配置（服务层会处理权限检查和验证）
@@ -92,9 +97,6 @@ async def create_or_update_client_notification_config(
 ):
     """创建或更新客户的通知配置（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 准备配置数据
@@ -118,9 +120,6 @@ async def delete_client_notification_config(
 ):
     """删除客户的通知配置（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层删除客户通知配置（服务层会处理验证和删除）
@@ -141,9 +140,6 @@ async def get_product_notification_config(
 ):
     """获取产品的通知配置（已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层获取产品通知配置（服务层会处理权限检查和验证）
@@ -182,9 +178,6 @@ async def create_or_update_product_notification_config(
 ):
     """创建或更新产品的通知配置（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 准备配置数据
@@ -208,9 +201,6 @@ async def delete_product_notification_config(
 ):
     """删除产品的通知配置（仅管理员，已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层删除产品通知配置（服务层会处理验证和删除）
@@ -233,7 +223,7 @@ async def get_notification_records(
     publisher_id: Optional[int] = Query(None, description="渠道ID过滤"),
     notification_status: Optional[str] = Query(None, description="通知状态过滤（sent, failed, pending）"),
     notification_channel: Optional[str] = Query(None, description="通知渠道过滤（telegram, email, sms, webhook）"),
-    notification_type: Optional[str] = Query(None, description="通知类型过滤（conversion, high_value, error, forward）"),
+    notification_type: Optional[str] = Query(None, description="通知类型过滤（conversion, high_value, error, forward, summary_hourly, summary_daily）"),
     start_date: Optional[str] = Query(None, description="开始日期（YYYY-MM-DD）"),
     end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
     db: AsyncSession = Depends(get_db),
@@ -241,9 +231,6 @@ async def get_notification_records(
 ):
     """获取通知记录列表（支持分页和过滤，已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层获取通知记录列表（服务层会处理查询、过滤、分页、自动创建等）
@@ -280,9 +267,6 @@ async def get_notification_record(
 ):
     """获取通知记录详情（已重构使用服务层）"""
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层获取通知记录详情（服务层会处理权限检查）
@@ -310,9 +294,6 @@ async def resend_conversion_notification(
     如果转化记录没有转发记录或转发失败，可以手动补发转发。
     """
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层补发转化通知（服务层会处理权限检查和补发逻辑）
@@ -339,13 +320,150 @@ async def resend_notification_from_forward_log(
     仅管理员可访问。
     """
     # 使用服务层（业务逻辑在NotificationConfigService中）
-    from app.core.dependencies import get_notification_config_service
-    from app.services.notification_config_service import NotificationConfigService
-    
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
     # 调用服务层基于转发日志补发通知（服务层会处理权限检查和补发逻辑）
     result = await notification_service.resend_notification_from_forward_log(forward_log_id, current_user)
     
     return ResponseBaseSchema.success(data=result)
+
+
+# ==================== 管理员通知配置 ====================
+
+@router.get("/admin/config",
+            response_model=ResponseBaseSchema[AdminNotificationConfigResponse],
+            summary="获取管理员通知配置")
+async def get_admin_notification_config(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    获取管理员通知配置
+    
+    仅管理员可访问
+    如果配置不存在，返回默认配置
+    """
+    notification_service: NotificationConfigService = await get_notification_config_service(db)
+    config = await notification_service.get_admin_notification_config()
+    
+    if not config:
+        # 返回默认配置
+        return ResponseBaseSchema.success(data=AdminNotificationConfigResponse(
+            id=0,
+            telegram_enabled=True,
+            telegram_chat_id=None,
+            notify_all_conversions=True,
+            notify_forward_failure=True,
+            notify_forward_success=False,
+            notify_system_errors=True,
+            notify_statistics=False,
+            statistics_frequency="hourly",
+            created_at=None,
+            updated_at=None
+        ))
+    
+    return ResponseBaseSchema.success(data=AdminNotificationConfigResponse.model_validate(config))
+
+
+@router.post("/admin/config",
+             response_model=ResponseBaseSchema[AdminNotificationConfigResponse],
+             summary="创建或更新管理员通知配置")
+async def create_or_update_admin_notification_config(
+    config_data: AdminNotificationConfigUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    创建或更新管理员通知配置
+    
+    仅管理员可访问
+    管理员通知配置是单例模式，只有一条记录（id=1）
+    """
+    notification_service: NotificationConfigService = await get_notification_config_service(db)
+    config = await notification_service.create_or_update_admin_notification_config(
+        config_data.model_dump(exclude_unset=True),
+        current_user
+    )
+    
+    return ResponseBaseSchema.success(data=AdminNotificationConfigResponse.model_validate(config))
+
+
+@router.post("/admin/test-connection",
+             response_model=ResponseBaseSchema[dict],
+             summary="测试 Telegram 连接")
+async def test_telegram_connection(
+    request_data: TestConnectionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    测试 Telegram 连接
+    
+    仅管理员可访问
+    发送一条测试消息到指定的 Chat ID
+    """
+    
+    telegram_chat_id = request_data.telegram_chat_id
+    
+    # 发送测试消息
+    test_message = "🔔 Telegram 通知测试\n\n这是一条测试消息，如果您收到此消息，说明 Telegram 连接正常。"
+    
+    try:
+        success = await send_telegram_message(test_message, telegram_chat_id)
+        if success:
+            return ResponseBaseSchema.success(data={
+                "success": True,
+                "message": "连接成功，测试消息已发送"
+            })
+        else:
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail="连接失败，请检查 Chat ID 是否正确"
+            )
+    except Exception as e:
+        logger.error(f"测试 Telegram 连接失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"测试连接失败: {str(e)}"
+        )
+
+
+@router.post("/admin/test-message",
+             response_model=ResponseBaseSchema[dict],
+             summary="发送测试消息")
+async def send_test_message(
+    request_data: TestMessageRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    发送测试消息
+    
+    仅管理员可访问
+    发送指定类型的测试消息到指定的 Chat ID
+    """
+    telegram_chat_id = request_data.telegram_chat_id
+    message_type = request_data.message_type
+    
+    try:
+        # 使用 TelegramNotificationService 构建测试消息
+        test_message = TelegramNotificationService.build_test_message(message_type)
+        
+        success = await send_telegram_message(test_message, telegram_chat_id)
+        if success:
+            return ResponseBaseSchema.success(data={
+                "success": True,
+                "message": "测试消息已发送"
+            })
+        else:
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail="发送失败，请检查 Chat ID 是否正确"
+            )
+    except Exception as e:
+        logger.error(f"发送测试消息失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"发送测试消息失败: {str(e)}"
+        )
 

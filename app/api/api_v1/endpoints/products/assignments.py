@@ -11,11 +11,11 @@ from sqlalchemy import update
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
+from app.core.dependencies import get_product_assignment_service
 from app.models.models import ProductAssignment, Product, Client, User, UserRole
 from app.schemas.base import ResponseBaseSchema, ListResponseBaseSchema
 from app.schemas.product_assignment import (
     ProductAssignmentResponse, 
-    ProductAssignmentListResponse, 
     ProductAssignmentDateUpdate,
     BatchAssignmentsDateUpdateRequest,
     BatchAssignmentDateUpdate
@@ -23,6 +23,7 @@ from app.schemas.product_assignment import (
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.product_assignment import validate_product_assignments, cleanup_invalid_assignments
+from app.services.product_assignment_service import ProductAssignmentService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 @router.get(
     "/products/{product_id}/assignments",
-    response_model=ResponseBaseSchema[ProductAssignmentListResponse],
+    response_model=ListResponseBaseSchema[list[ProductAssignmentResponse]],
     summary="获取产品的分配历史"
 )
 async def get_product_assignments(
@@ -45,9 +46,6 @@ async def get_product_assignments(
     - 客户只能查看自己产品的分配历史
     """
     # 使用服务层（业务逻辑在ProductAssignmentService中）
-    from app.core.dependencies import get_product_assignment_service
-    from app.services.product_assignment_service import ProductAssignmentService
-    
     assignment_service: ProductAssignmentService = await get_product_assignment_service(db)
     
     # 调用服务层获取产品分配历史（服务层会处理查询、权限检查）
@@ -56,17 +54,15 @@ async def get_product_assignments(
     # 转换为响应格式
     assignments = [ProductAssignmentResponse(**item) for item in assignments_list]
     
-    return ResponseBaseSchema.success(
-        data=ProductAssignmentListResponse(
-            data=assignments,
-            total=len(assignments)
-        )
+    return ListResponseBaseSchema.success(
+        data=assignments,
+        count=len(assignments)
     )
 
 
 @router.get(
     "/clients/{client_id}/assignments",
-    response_model=ResponseBaseSchema[ProductAssignmentListResponse],
+    response_model=ListResponseBaseSchema[list[ProductAssignmentResponse]],
     summary="获取客户的分配历史（管理员）"
 )
 async def get_client_assignments(
@@ -79,9 +75,6 @@ async def get_client_assignments(
     获取指定客户的所有产品分配历史记录（仅管理员，已重构使用服务层）
     """
     # 使用服务层（业务逻辑在ProductAssignmentService中）
-    from app.core.dependencies import get_product_assignment_service
-    from app.services.product_assignment_service import ProductAssignmentService
-    
     assignment_service: ProductAssignmentService = await get_product_assignment_service(db)
     
     # 调用服务层获取客户分配历史（服务层会处理查询和验证）
@@ -90,11 +83,9 @@ async def get_client_assignments(
     # 转换为响应格式
     assignments = [ProductAssignmentResponse(**item) for item in assignments_list]
     
-    return ResponseBaseSchema.success(
-        data=ProductAssignmentListResponse(
-            data=assignments,
-            total=len(assignments)
-        )
+    return ListResponseBaseSchema.success(
+        data=assignments,
+        count=len(assignments)
     )
 
 
@@ -121,9 +112,6 @@ async def validate_product_assignments_endpoint(
     仅管理员可以访问此端点
     """
     # 使用服务层（业务逻辑在ProductAssignmentService中）
-    from app.core.dependencies import get_product_assignment_service
-    from app.services.product_assignment_service import ProductAssignmentService
-    
     assignment_service: ProductAssignmentService = await get_product_assignment_service(db)
     
     # 调用服务层验证产品分配记录（服务层会处理验证）
@@ -164,9 +152,6 @@ async def cleanup_product_assignments_endpoint(
     仅管理员可以访问此端点
     """
     # 使用服务层（业务逻辑在ProductAssignmentService中）
-    from app.core.dependencies import get_product_assignment_service
-    from app.services.product_assignment_service import ProductAssignmentService
-    
     assignment_service: ProductAssignmentService = await get_product_assignment_service(db)
     
     # 调用服务层清理产品分配记录（服务层会处理清理）
@@ -199,9 +184,6 @@ async def cleanup_all_product_assignments_endpoint(
     仅管理员可以访问此端点
     """
     # 使用服务层（业务逻辑在ProductAssignmentService中）
-    from app.core.dependencies import get_product_assignment_service
-    from app.services.product_assignment_service import ProductAssignmentService
-    
     assignment_service: ProductAssignmentService = await get_product_assignment_service(db)
     
     # 调用服务层清理所有产品分配记录（服务层会处理清理）
@@ -236,9 +218,6 @@ async def update_assignment_dates(
     仅管理员可以访问此端点
     """
     # 使用服务层（业务逻辑在ProductAssignmentService中）
-    from app.core.dependencies import get_product_assignment_service
-    from app.services.product_assignment_service import ProductAssignmentService
-    
     assignment_service: ProductAssignmentService = await get_product_assignment_service(db)
     
     # 准备更新数据
@@ -280,9 +259,6 @@ async def batch_update_assignment_dates(
     仅管理员可以访问此端点
     """
     # 使用服务层（业务逻辑在ProductAssignmentService中）
-    from app.core.dependencies import get_product_assignment_service
-    from app.services.product_assignment_service import ProductAssignmentService
-    
     assignment_service: ProductAssignmentService = await get_product_assignment_service(db)
     
     # 准备批量更新数据

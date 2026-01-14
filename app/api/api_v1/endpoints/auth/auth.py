@@ -36,19 +36,27 @@
 4. 登录失败不会暴露具体原因（用户名不存在或密码错误都返回相同错误）
 """
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import func, and_
+from sqlalchemy.orm import selectinload
+from jose import jwt
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import JWTUtils, get_current_user
-from app.core.utils import get_app_now_naive
+from app.core.utils import get_app_now_naive, get_client_ip, get_device_type, APP_TIMEZONE
+from app.core.audit_log import log_login, log_logout
 from app.models.models import Client, User, UserRole, Publisher
+from app.models.session import UserSession
 from app.schemas.auth import LoginResponse
+from app.schemas.base import ResponseBaseSchema
 
 # 创建路由实例
 router = APIRouter()
@@ -130,8 +138,6 @@ async def login(
         }
     """
     # 注意：请求基本信息已由 RequestLoggingMiddleware 记录，这里只记录登录相关的关键信息
-    from app.core.utils import get_client_ip
-    from app.core.config import settings
     client_ip = get_client_ip(request)
     
     # 只在开发环境记录详细请求头（生产环境可能包含敏感信息）
@@ -141,7 +147,6 @@ async def login(
     # ====== 查询用户 ======
     # 根据用户名查询用户（使用用户名而不是ID，因为登录时只有用户名）
     # 优化：如果是客户角色，同时加载客户信息，减少后续查询
-    from sqlalchemy.orm import selectinload
     
     try:
         result = await db.execute(
@@ -182,7 +187,6 @@ async def login(
             exc_info=True
         )
         # 在开发环境返回更详细的错误信息，生产环境返回通用错误
-        import os
         if os.getenv("PRODUCTION_ENV", "").lower() != "production":
             detail = f"登录失败: {error_type}: {error_msg}"
         else:
@@ -249,7 +253,6 @@ async def login(
     # 解析token获取jti
     token_jti = None
     try:
-        from jose import jwt
         
         # 根据配置的算法选择密钥
         if settings.JWT_ALGORITHM == "RS256":
@@ -278,13 +281,9 @@ async def login(
     
     if token_jti:
         # 记录会话到数据库
-        from app.models.session import UserSession
-        from app.core.utils import get_client_ip, get_device_type
-        
         # expires_at 需要保持UTC时间用于比较，但存储时转换为北京时间
         expires_at_utc = datetime.now(timezone.utc) + access_token_expires
         # 转换为北京时间（naive）存储到数据库
-        from app.core.utils import APP_TIMEZONE
         expires_at = expires_at_utc.astimezone(APP_TIMEZONE).replace(tzinfo=None)
         
         device_type_str = get_device_type(request)
@@ -316,7 +315,6 @@ async def login(
             api_enabled = client.api_enabled
             
             # 检查该客户是否有关联的渠道（只检查激活的渠道）
-            from sqlalchemy import func, and_
             publisher_check = await db.execute(
                 select(func.count(Publisher.id)).where(
                     and_(
@@ -343,12 +341,9 @@ async def login(
     }
 
     # ====== 设置 HttpOnly Cookie (安全增强) ======
-    from fastapi import Response
     # 创建响应对象并设置 Cookie
     # 我们仍然通过 JSON 返回 token 以保持向后兼容，但通过 Cookie 提供更高的安全性
-    response = Response()
     # 转换为 JSONResponse 格式以包含数据
-    from fastapi.responses import JSONResponse
     json_response = JSONResponse(content=response_data)
     
     # 设置 Cookie
@@ -366,7 +361,6 @@ async def login(
 
     # 异步记录登录日志（不阻塞响应）
     try:
-        from app.core.audit_log import log_login
         await log_login(db=db, user=user, request=request, success=True)
     except Exception as e:
         logger.warning(f"记录登录日志失败: {e}")
@@ -374,7 +368,7 @@ async def login(
     return json_response
 
 
-@router.post("/logout", summary="用户退出登录")
+@router.post("/logout", response_model=ResponseBaseSchema[dict], summary="用户退出登录")
 async def logout(
         request: Request,
         db: AsyncSession = Depends(get_db),
@@ -388,18 +382,13 @@ async def logout(
     """
     try:
         # 记录退出登录日志
-        from app.core.audit_log import log_logout
         await log_logout(db=db, user=current_user, request=request)
         # 注意：这里不commit，由get_db的finally块自动commit
 
         logger.info(f"User {current_user.username} logged out successfully")
 
-        return {
-            "message": "退出登录成功"
-        }
+        return ResponseBaseSchema.success(data={"message": "退出登录成功"})
     except Exception as e:
         # 日志记录失败不应该影响退出登录
         logger.warning(f"记录退出登录日志失败: {e}")
-        return {
-            "message": "退出登录成功"
-        }
+        return ResponseBaseSchema.success(data={"message": "退出登录成功"})

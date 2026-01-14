@@ -33,9 +33,6 @@ from app.schemas.cpl.discount import (
     OfferDiscountResponse
 )
 from app.schemas.cpl.test import (
-    AdvertiserTestBase,
-    AdvertiserTestCreate,
-    AdvertiserTestResponse,
     AffiliateTestBase,
     AffiliateTestCreate,
     AffiliateTestResponse
@@ -56,7 +53,6 @@ __all__ = [
     "ClickResponse",
     "OfferCapBase", "OfferCapCreate", "OfferCapUpdate", "OfferCapResponse",
     "OfferDiscountBase", "OfferDiscountCreate", "OfferDiscountUpdate", "OfferDiscountResponse",
-    "AdvertiserTestBase", "AdvertiserTestCreate", "AdvertiserTestResponse",
     "AffiliateTestBase", "AffiliateTestCreate", "AffiliateTestResponse",
     "ConversionDeductionConfigBase", "ConversionDeductionConfigCreate", "ConversionDeductionConfigUpdate", "ConversionDeductionConfigResponse",
     "ConversionDeductionLogResponse", "DeductionStatsResponse",

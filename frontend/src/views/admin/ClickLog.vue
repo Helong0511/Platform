@@ -23,6 +23,7 @@
                   class="filter-item"
                   @clear="handleSearch"
                   @keyup.enter="handleSearch"
+                  @input="debouncedSearch"
                 >
                   <template #prefix>
                     <el-icon><Search /></el-icon>
@@ -60,11 +61,12 @@
                 </el-select>
                 <el-input
                   v-model="filterIp"
-                  placeholder="IP地址"
+                  placeholder="IP地址（支持精确匹配或前缀，如：192.168.）"
                   clearable
                   class="filter-item"
                   @clear="handleSearch"
                   @keyup.enter="handleSearch"
+                  @input="debouncedSearch"
                 />
                 <el-input
                   v-model="filterCountry"
@@ -73,6 +75,7 @@
                   class="filter-item filter-item-small"
                   @clear="handleSearch"
                   @keyup.enter="handleSearch"
+                  @input="debouncedSearch"
                 />
               </div>
               <div class="filter-row">
@@ -443,7 +446,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, Mouse } from '@element-plus/icons-vue'
 import { getClicks } from '@/api/clicks'
@@ -452,6 +456,7 @@ import { getPublishers } from '@/api/publisher'
 import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
 
+const route = useRoute()
 const loading = ref(false)
 const filterClickId = ref('')
 const filterOffer = ref(null)
@@ -473,6 +478,19 @@ const publisherList = ref([])
 const detailDialogVisible = ref(false)
 const currentDetail = ref(null)
 
+// 防抖定时器
+let searchDebounceTimer = null
+
+// 防抖搜索函数
+const debouncedSearch = (delay = 500) => {
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+  }
+  searchDebounceTimer = setTimeout(() => {
+    handleSearch()
+  }, delay)
+}
+
 // 加载基础数据
 const loadOffers = async () => {
   try {
@@ -481,11 +499,8 @@ const loadOffers = async () => {
       page_size: 100,
       is_active: true
     })
-    if (response.code === 200) {
-      offerList.value = response.data || []
-    } else {
-      ElMessage.warning('加载Offer列表失败，筛选功能可能受限')
-    }
+    // response已经是标准分页格式，直接使用data字段
+    offerList.value = response.data || []
   } catch (error) {
     logger.error('加载Offer列表失败:', error)
     ElMessage.warning('加载Offer列表失败，筛选功能可能受限')
@@ -495,9 +510,8 @@ const loadOffers = async () => {
 const loadPublishers = async () => {
   try {
     const response = await getPublishers({ page: 1, page_size: 100 })
-    if (response.code === 200) {
-      publisherList.value = response.data || []
-    }
+    // response已经是标准分页格式，直接使用data字段
+    publisherList.value = response.data || []
   } catch (error) {
     logger.error('加载渠道列表失败:', error)
   }
@@ -519,12 +533,9 @@ const loadData = async () => {
       end_date: dateRange.value?.[1] || undefined
     }
     const response = await getClicks(params)
-    if (response.code === 200) {
-      tableData.value = response.data || []
-      pagination.total = response.total || 0
-    } else {
-      ElMessage.error(response.message || '获取数据失败')
-    }
+    // response已经是标准分页格式，直接使用data和total字段
+    tableData.value = response.data || []
+    pagination.total = response.total || 0
   } catch (error) {
     logger.error('获取短链接访问记录失败:', error)
     ElMessage.error('获取数据失败')
@@ -533,8 +544,12 @@ const loadData = async () => {
   }
 }
 
-// 日期改变
+// 日期改变（日期选择器不需要防抖，直接搜索）
 const handleDateChange = () => {
+  // 清除防抖定时器，立即搜索
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+  }
   handleSearch()
 }
 
@@ -600,6 +615,13 @@ const handlePageChange = (page) => {
 onMounted(() => {
   loadOffers()
   loadPublishers()
+  
+  // 检查URL参数中是否有click_id，如果有则设置过滤条件
+  const clickIdFromUrl = route.query.click_id
+  if (clickIdFromUrl) {
+    filterClickId.value = clickIdFromUrl
+  }
+  
   // 默认查询最近7天（优化性能，减少数据量）
   const endDate = new Date()
   const startDate = new Date()

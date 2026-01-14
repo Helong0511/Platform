@@ -2,8 +2,11 @@
 统一响应格式模块
 提供标准化的API响应格式
 """
+from datetime import datetime
 from typing import Generic, TypeVar, Optional, Any, Dict
 from pydantic import BaseModel, Field
+
+from app.core.utils import APP_TIMEZONE
 
 T = TypeVar('T')
 
@@ -39,9 +42,6 @@ class ResponseBase(BaseModel, Generic[T]):
         Returns:
             ResponseBase实例
         """
-        from datetime import datetime
-        from app.core.utils import APP_TIMEZONE
-        
         return cls(
             success=True,
             code=code,
@@ -70,9 +70,6 @@ class ResponseBase(BaseModel, Generic[T]):
         Returns:
             ResponseBase实例
         """
-        from datetime import datetime
-        from app.core.utils import APP_TIMEZONE
-        
         return cls(
             success=False,
             code=code,

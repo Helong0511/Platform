@@ -237,7 +237,8 @@ const statsList = ref([])
 const loadOffers = async () => {
   try {
     const response = await getOffers({ page: 1, page_size: 100 })
-    if (response.code === 200) {
+    // response已经是标准格式，直接使用data字段
+    if (response && response.data) {
       offerList.value = response.data || []
     }
   } catch (error) {
@@ -248,7 +249,8 @@ const loadOffers = async () => {
 const loadPublishers = async () => {
   try {
     const response = await getPublishers({ page: 1, page_size: 100 })
-    if (response.code === 200) {
+    // response已经是标准格式，直接使用data字段
+    if (response && response.data) {
       publisherList.value = response.data || []
     }
   } catch (error) {
@@ -277,11 +279,10 @@ const loadData = async () => {
       publisher_id: filterPublisher.value || undefined
     }
     const response = await getConversionSummary(params)
-    if (response.code === 200) {
+    // response已经是标准格式，直接使用data字段
+    if (response && response.data) {
       Object.assign(summaryData, response.data)
       statsList.value = response.data.stats_list || []
-    } else {
-      ElMessage.error(response.message || '获取数据失败')
     }
   } catch (error) {
     logger.error('获取统计数据失败:', error)

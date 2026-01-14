@@ -3,6 +3,9 @@
 提供统一的缓存接口，支持多种缓存后端
 """
 import json
+import time
+import re
+import hashlib
 import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Any, Dict
@@ -139,7 +142,6 @@ class MemoryCacheBackend(CacheBackend):
     
     def __init__(self):
         self._cache: Dict[str, tuple[Any, Optional[float]]] = {}
-        import time
         self._time = time.time
     
     async def get(self, key: str) -> Optional[Any]:
@@ -174,7 +176,6 @@ class MemoryCacheBackend(CacheBackend):
     
     async def delete_pattern(self, pattern: str) -> int:
         """按模式删除内存缓存（简单实现）"""
-        import re
         try:
             # 将glob模式转换为正则表达式
             regex = pattern.replace('*', '.*').replace('?', '.')
@@ -247,7 +248,6 @@ def cached(key_pattern: str, ttl: int = 300):
                 cache_key = key_pattern.format(*args, **kwargs)
             except (KeyError, IndexError):
                 # 如果格式化失败，使用函数名和参数
-                import hashlib
                 key_str = f"{func.__name__}:{str(args)}:{str(kwargs)}"
                 cache_key = f"cache:{hashlib.md5(key_str.encode()).hexdigest()}"
             

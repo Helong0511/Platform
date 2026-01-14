@@ -13,6 +13,8 @@ from app.core.security import get_current_user, require_admin
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
+from app.core.dependencies import get_offer_service
+from app.services.cpl.offer_service import OfferService
 from app.models.models import User, UserRole, Offer, Advertiser, Publisher, OfferPublisherAssignment, ShortLink, Client
 from app.schemas.cpl.offer import OfferCreate, OfferUpdate, OfferResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -416,9 +418,6 @@ async def create_offer(
 ):
     """创建Offer（已重构使用服务层）"""
     # 使用服务层（业务逻辑在OfferService中）
-    from app.core.dependencies import get_offer_service
-    from app.services.cpl.offer_service import OfferService
-    
     offer_service: OfferService = await get_offer_service(db)
     
     # 准备Offer数据（包含渠道配置）
@@ -479,9 +478,6 @@ async def get_offers(
 ):
     """获取Offer列表（已重构使用服务层，批量加载关联数据）"""
     # 使用服务层（业务逻辑在OfferService中，已优化批量加载）
-    from app.core.dependencies import get_offer_service
-    from app.services.cpl.offer_service import OfferService
-    
     offer_service: OfferService = await get_offer_service(db)
     offers, total, assignments_map = await offer_service.get_offers(
         current_user=current_user,
@@ -559,7 +555,6 @@ async def check_offer_short_link(
     
     if existing_link:
         # 生成短链接URL
-        from app.core.config import settings
         base_url = settings.TRACKING_BASE_URL
         short_link_url = get_short_link_url(base_url, existing_link.short_code)
         
@@ -590,9 +585,6 @@ async def get_offer(
 ):
     """获取Offer详情（已重构使用服务层，权限检查和数据加载都在服务层）"""
     # 使用服务层（业务逻辑在OfferService中，包含权限检查）
-    from app.core.dependencies import get_offer_service
-    from app.services.cpl.offer_service import OfferService
-    
     offer_service: OfferService = await get_offer_service(db)
     
     # 获取Offer（服务层会处理权限检查和关联数据加载）
@@ -621,9 +613,6 @@ async def update_offer(
 ):
     """更新Offer（已重构使用服务层）"""
     # 使用服务层（业务逻辑在OfferService中）
-    from app.core.dependencies import get_offer_service
-    from app.services.cpl.offer_service import OfferService
-    
     offer_service: OfferService = await get_offer_service(db)
     
     # 准备更新数据（包含渠道配置）
@@ -696,9 +685,6 @@ async def delete_offer(
 ):
     """删除Offer（已重构使用服务层）"""
     # 使用服务层（业务逻辑在OfferService中）
-    from app.core.dependencies import get_offer_service
-    from app.services.cpl.offer_service import OfferService
-    
     offer_service: OfferService = await get_offer_service(db)
     
     # 调用服务层删除Offer（服务层会检查关联数据、记录审计日志）

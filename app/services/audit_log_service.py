@@ -9,9 +9,10 @@ from sqlalchemy.future import select
 from sqlalchemy import func, and_
 
 from app.models.models import UserAuditLog, User
-from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.cache import get_cached, set_cached, generate_cache_key
+from app.core.audit_log import log_user_action
 import logging
 
 logger = logging.getLogger(__name__)
@@ -120,7 +121,6 @@ class AuditLogService:
             Dict: 统计信息
         """
         # ====== 缓存优化 ======
-        from app.core.cache import get_cached, set_cached, generate_cache_key
         cache_key = generate_cache_key("audit_log_stats", start_date, end_date)
         cached = await get_cached(cache_key)
         if cached:
@@ -263,7 +263,6 @@ class AuditLogService:
             current_user: 当前用户（可选）
             username: 用户名（可选）
         """
-        from app.core.audit_log import log_user_action
 
         # 限制错误信息长度
         max_error_length = 1000

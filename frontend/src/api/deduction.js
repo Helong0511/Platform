@@ -20,7 +20,7 @@ export function getDeductionConfigs(params) {
     url: '/api/v1/conversion-deductions',
     method: 'get',
     params
-  })
+  }, { paginated: true })
 }
 
 /**
@@ -32,7 +32,7 @@ export function createDeductionConfig(data) {
     url: '/api/v1/conversion-deductions',
     method: 'post',
     data
-  })
+  }, { returnDataOnly: true })
 }
 
 /**
@@ -45,7 +45,7 @@ export function updateDeductionConfig(id, data) {
     url: `/api/v1/conversion-deductions/${id}`,
     method: 'put',
     data
-  })
+  }, { returnDataOnly: true })
 }
 
 /**
@@ -56,7 +56,7 @@ export function deleteDeductionConfig(id) {
   return request({
     url: `/api/v1/conversion-deductions/${id}`,
     method: 'delete'
-  })
+  }, { returnDataOnly: true })
 }
 
 /**
@@ -68,8 +68,8 @@ export function updateDeductionConfigStatus(id, isActive) {
   return request({
     url: `/api/v1/conversion-deductions/${id}/status`,
     method: 'patch',
-    params: { is_active: isActive }
-  })
+    data: { is_active: isActive }
+  }, { returnDataOnly: true })
 }
 
 /**
@@ -87,7 +87,7 @@ export function getDeductionStats(params) {
     url: '/api/v1/conversion-deductions/stats',
     method: 'get',
     params
-  })
+  }, { returnDataOnly: true })
 }
 
 /**
@@ -108,7 +108,7 @@ export function getDeductionLogs(params) {
     url: '/api/v1/conversion-deductions/logs',
     method: 'get',
     params
-  })
+  }, { paginated: true })
 }
 
 /**
@@ -122,7 +122,7 @@ export function batchUpdateDeductionConfigStatus(data) {
     url: '/api/v1/conversion-deductions/batch/update-status',
     method: 'post',
     data
-  })
+  }, { returnDataOnly: true })
 }
 
 /**
@@ -135,6 +135,6 @@ export function batchDeleteDeductionConfigs(data) {
     url: '/api/v1/conversion-deductions/batch/delete',
     method: 'post',
     data
-  })
+  }, { returnDataOnly: true })
 }
 

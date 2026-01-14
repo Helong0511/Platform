@@ -66,7 +66,9 @@ async def set_short_link_to_cache(short_code: str, short_link_data: Dict[str, An
         # 添加缓存标签（用于精确失效）
         if add_tags:
             try:
+                # 延迟导入，避免循环导入
                 from app.core.cache_manager import CacheManager
+                
                 tags = [f"short_link:{short_code}"]
                 # 如果有offer_id，添加offer标签
                 if short_link_data.get("offer_id"):

@@ -9,7 +9,9 @@ BFT S2S PostBack 接收接口
 """
 import logging
 import json
+import asyncio
 from typing import Optional, Dict, Any
+from datetime import datetime
 
 from fastapi import APIRouter, Request, HTTPException, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +20,10 @@ from app.core.database import get_db
 from app.core.postback import PostbackProcessor
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.utils import get_client_ip
+from app.core.auto_bot import send_telegram_message
+from app.core.telegram_utils import truncate_message
+from app.core.config import settings
 
 # 创建路由实例
 router = APIRouter()
@@ -102,9 +108,6 @@ async def receive_bft_postback(
         
         # 立即发送 Telegram 通知（接收到数据就通知）
         try:
-            from app.core.auto_bot import send_telegram_message
-            import asyncio
-            from datetime import datetime
             
             # 获取客户端IP
             client_ip = None
@@ -160,7 +163,6 @@ async def receive_bft_postback(
                 telegram_msg += "无参数\n"
             
             # 检查消息长度（Telegram 最大 4096 字符）
-            from app.core.telegram_utils import truncate_message
             if len(telegram_msg) > 4096:
                 telegram_msg = truncate_message(telegram_msg)
             
@@ -194,17 +196,7 @@ async def receive_bft_postback(
         )
 
 
-def _get_client_ip(request: Request) -> Optional[str]:
-    """获取客户端IP地址"""
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip.strip()
-    if request.client:
-        return request.client.host
-    return None
+# get_client_ip 函数已从 app.core.utils 导入，不再需要本地定义
 
 
 def _collect_request_info(request: Request) -> Dict[str, Any]:
@@ -291,7 +283,6 @@ async def _process_bft_postback(
         )
         
         # 只在开发环境或需要调试时打印详细请求信息（避免生产环境日志过多）
-        from app.core.config import settings
         if not settings.is_production:
             logger.debug("=" * 80)
             logger.debug(f"BFT PostBack 请求详细信息 - clk_id: {clk_id}, event_name: {event_name}")
@@ -309,7 +300,7 @@ async def _process_bft_postback(
             logger.info(f"BFT PostBack - clk_id: {clk_id}, event_name: {event_name}")
         
         # 获取客户端IP
-        client_ip = _get_client_ip(request) or raw_data.get("ip")
+        client_ip = get_client_ip(request) or raw_data.get("ip")
         
         # 如果 raw_data 中没有 ip，则添加客户端IP
         if client_ip and "ip" not in raw_data:

@@ -47,6 +47,9 @@
 4. Postback URL占位符验证确保只使用系统支持的变量
 """
 import re
+from apscheduler.triggers.cron import CronTrigger
+
+from app.core.config import settings
 # Python 3.10+ 使用内置类型注解
 from html import escape
 import logging
@@ -465,8 +468,6 @@ def validate_cron_expression(cron_expression: str) -> tuple[bool, str | None]:
 
         # 尝试使用 APScheduler 的 CronTrigger 验证
     try:
-        from apscheduler.triggers.cron import CronTrigger
-        from app.core.config import settings
 
         # 尝试创建 CronTrigger 来验证表达式
         # 这会抛出 ValueError 如果表达式无效

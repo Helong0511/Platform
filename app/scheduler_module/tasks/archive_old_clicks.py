@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import text
 
 from app.core.database import AsyncSessionLocal
+from app.core.utils import get_app_now_naive
 from app.scheduler_module.task_utils import (
     log_task_start,
     log_task_result,
@@ -59,7 +60,6 @@ async def archive_old_clicks(days: int = 90) -> dict:
     async with AsyncSessionLocal() as db:
         try:
             # 计算归档日期阈值（使用应用时区）
-            from app.core.utils import get_app_now_naive
             now = get_app_now_naive()
             archive_date = now - timedelta(days=days)
             archive_date_str = archive_date.strftime('%Y-%m-%d %H:%M:%S')

@@ -9,8 +9,13 @@ from typing import Optional, Dict
 from fastapi import Request, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
+from jose import jwt
+from jose.exceptions import JWTError
+from anyio import EndOfStream
 from app.core.config import settings
 from app.core.redis_client import get_redis_client
+from app.core.utils import get_client_ip
+from app.core.csrf_utils import safe_raise_csrf_exception
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +50,6 @@ def extract_user_id_from_token(request: Request) -> Optional[str]:
         
         # 尝试解码JWT token（不验证签名，只提取用户ID）
         # 注意：这里只提取payload，不进行完整验证（因为可能在CSRF中间件之前执行）
-        from jose import jwt
-        from jose.exceptions import JWTError
         
         try:
             # 不验证签名，只解码payload（用于获取用户ID）
@@ -221,7 +224,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 csrf_token = generate_csrf_token()
                 
                 # 获取客户端标识（用于存储CSRF令牌）
-                from app.core.utils import get_client_ip
                 client_ip = get_client_ip(request)
                 
                 # 尝试从JWT token中提取用户ID（如果存在）
@@ -272,7 +274,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         logger.debug(f"执行CSRF检查: {request.method} {path}")
         
         # 获取客户端标识（用于存储CSRF令牌）
-        from app.core.utils import get_client_ip
         client_ip = get_client_ip(request)
         
         # 尝试从JWT token中提取用户ID（如果存在）
@@ -441,7 +442,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     pass
                 
                 # 使用安全的异常抛出机制
-                from app.core.csrf_utils import safe_raise_csrf_exception
                 try:
                     safe_raise_csrf_exception(
                         request,
@@ -456,7 +456,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         "anyio" in error_module or "Connection disconnected" in str(e)):
                         logger.debug("客户端已断开连接，跳过CSRF验证")
                         # 不调用 call_next，因为连接已断开，直接抛出流异常
-                        from anyio import EndOfStream
                         raise EndOfStream("客户端已断开连接")
                     raise
             
@@ -558,7 +557,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     _csrf_tokens[session_id] = new_csrf_token
                 
                 # 使用安全的异常抛出机制，但会在异常响应中包含新的CSRF token
-                from app.core.csrf_utils import safe_raise_csrf_exception
                 try:
                     safe_raise_csrf_exception(
                         request,
@@ -573,7 +571,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         "anyio" in error_module or "Connection disconnected" in str(e)):
                         logger.debug("客户端已断开连接，跳过CSRF验证")
                         # 不调用 call_next，因为连接已断开，直接抛出流异常
-                        from anyio import EndOfStream
                         raise EndOfStream("客户端已断开连接")
                     raise
                 except HTTPException as http_exc:
@@ -667,7 +664,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     if hasattr(request, '_is_disconnected') and request._is_disconnected:
                         logger.debug("客户端已断开连接，跳过CSRF验证")
                         # 连接已断开，直接抛出流异常，不调用 call_next
-                        from anyio import EndOfStream
                         raise EndOfStream("客户端已断开连接")
                 except EndOfStream:
                     # 如果已经是流异常，直接重新抛出
@@ -676,7 +672,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     pass
                 
                 # 使用安全的异常抛出机制
-                from app.core.csrf_utils import safe_raise_csrf_exception
                 try:
                     # 无论是服务器重启还是令牌不同步，都在响应头中返回正确的令牌
                     # 这样前端可以自动更新令牌并重试请求
@@ -721,7 +716,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         "anyio" in error_module or "Connection disconnected" in str(e)):
                         logger.debug("客户端已断开连接，跳过CSRF验证")
                         # 不调用 call_next，因为连接已断开，直接抛出流异常
-                        from anyio import EndOfStream
                         raise EndOfStream("客户端已断开连接")
                     raise
             
@@ -754,7 +748,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 if hasattr(request, '_is_disconnected') and request._is_disconnected:
                     # 客户端已断开连接，不抛出异常，直接重新抛出流异常
                     logger.debug("客户端已断开连接，跳过CSRF异常处理")
-                    from anyio import EndOfStream
                     raise EndOfStream("客户端已断开连接")
             except Exception as e:
                 # 如果已经是 EndOfStream，直接重新抛出
@@ -769,7 +762,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 if hasattr(request, 'scope') and isinstance(request.scope, dict):
                     if request.scope.get('_disconnected', False):
                         logger.debug("从 scope 检测到连接已断开，跳过CSRF异常处理")
-                        from anyio import EndOfStream
                         raise EndOfStream("客户端已断开连接")
             except Exception as e:
                 # 如果已经是 EndOfStream，直接重新抛出

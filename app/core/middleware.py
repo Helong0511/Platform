@@ -70,6 +70,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterator, Optional
 from app.core.config import settings
 from app.core.redis_client import get_redis_client
+from app.core.utils import get_client_ip, get_device_type
+from urllib.parse import unquote
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +115,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # ====== 获取客户端标识 ======
         # 使用IP地址作为限流标识（生产环境可结合用户ID）
         try:
-            from app.core.utils import get_client_ip
             client_ip = get_client_ip(request)
         except Exception as e:
             logger.warning(f"获取客户端IP失败: {e}，使用默认IP 'testclient'")
@@ -247,7 +248,6 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
         self.very_slow_request_count = 0
     
     async def dispatch(self, request: Request, call_next):
-        from app.core.utils import get_client_ip
         
         start_time = time.time()
         
@@ -289,7 +289,6 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
     def _log_performance(self, request: Request, process_time: float, level: str = "warning", failed: bool = False, error: str = None):
         """记录性能信息"""
         try:
-            from app.core.utils import get_client_ip
             client_ip = get_client_ip(request)
         except Exception:
             client_ip = "unknown"
@@ -423,7 +422,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         # ====== 获取请求信息 ======
         try:
-            from app.core.utils import get_client_ip
             client_ip = get_client_ip(request)
         except Exception as e:
             logger.warning(f"获取客户端IP失败: {e}，使用默认IP 'testclient'")
@@ -431,7 +429,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         method = request.method
         # URL 解码路径，使中文可读
-        from urllib.parse import unquote
         path = unquote(request.url.path)
         # 生产环境不记录查询参数（可能包含敏感信息）
         query_params = str(request.query_params) if request.query_params and not settings.is_production else ""
@@ -601,31 +598,6 @@ def is_mobile_device(request: Request) -> bool:
         'iemobile', 'palm', 'smartphone', 'tablet'
     ]
     return any(keyword in user_agent for keyword in mobile_keywords)
-
-
-def get_device_type(request: Request) -> str:
-    """
-    获取设备类型
-    返回: 'mobile', 'tablet', 'desktop'
-    """
-    user_agent = request.headers.get("User-Agent", "").lower()
-
-    # 平板设备
-    tablet_keywords = ['ipad', 'tablet', 'playbook', 'kindle']
-    if any(keyword in user_agent for keyword in tablet_keywords):
-        return 'tablet'
-
-    # 移动设备
-    mobile_keywords = [
-        'mobile', 'android', 'iphone', 'ipod',
-        'blackberry', 'windows phone', 'opera mini',
-        'iemobile', 'palm', 'smartphone'
-    ]
-    if any(keyword in user_agent for keyword in mobile_keywords):
-        return 'mobile'
-
-    # 默认桌面设备
-    return 'desktop'
 
 
 class StreamErrorHandlingMiddleware(BaseHTTPMiddleware):

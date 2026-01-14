@@ -75,6 +75,7 @@ import { ElMessage } from 'element-plus';
 import router from '../router';
 import { initTimezone } from '../utils/dateFormat';
 import { logger } from '../utils/logger';
+import { request } from '../utils/api';
 
 
 
@@ -385,12 +386,13 @@ export const useAuthStore = defineStore('auth', {
 
       this.loading = true;
       try {
-        const response = await axios.get('/api/v1/users/me');
-        // 使用统一的响应处理
-        const normalized = response.data?.code === 200
-          ? response.data.data
-          : (response.data?.data || response.data);
-        this.userInfo = normalized || {};
+        // 使用request工具函数，returnDataOnly: true直接返回数据对象
+        const userData = await request({
+          url: '/api/v1/users/me',
+          method: 'get'
+        }, { returnDataOnly: true });
+        
+        this.userInfo = userData || {};
         sessionStorage.setItem('userInfo', JSON.stringify(this.userInfo));
       } catch (err) {
         // 如果是401错误，说明token无效，清除认证信息

@@ -1,20 +1,19 @@
 """
-转化日志 API（增强版，支持CPL系统）
+转化日志 API（已废弃，功能已融合到 Postback 管理 API）
+保留此 API 以保持向后兼容性，建议使用 /api/v1/postback/conversions 接口
 """
 import logging
 from typing import Optional
-from datetime import datetime, timezone
-from app.core.utils import parse_date_to_app_timezone
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func, and_, or_
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.constants import MAX_PAGE_SIZE
-from app.models.models import User, PostbackConversion, ClickStats, Click, Offer, Publisher, Advertiser
+from app.core.dependencies import get_conversion_log_service
+from app.models.models import User
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
+from app.services.cpl.conversion_log_service import ConversionLogService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -22,7 +21,8 @@ logger = logging.getLogger(__name__)
 
 @router.get("/",
             response_model=PaginatedResponseBaseSchema[list],
-            summary="获取转化日志列表（增强版）",
+            summary="获取转化日志列表（已废弃，请使用 /api/v1/postback/conversions）",
+            deprecated=True,
             dependencies=[Depends(require_admin)])
 async def get_conversion_logs(
     page: int = Query(1, ge=1, description="页码"),
@@ -38,13 +38,13 @@ async def get_conversion_logs(
     current_user: User = Depends(get_current_user)
 ):
     """
-    获取转化日志列表（增强版，支持CPL系统筛选，已重构使用服务层）
+    获取转化日志列表（已废弃）
+    
+    注意：此接口已废弃，功能已融合到 Postback 管理 API 中。
+    请使用 /api/v1/postback/conversions 接口，它支持所有转化日志的筛选条件。
     仅管理员
     """
     # 使用服务层（业务逻辑在ConversionLogService中）
-    from app.core.dependencies import get_conversion_log_service
-    from app.services.cpl.conversion_log_service import ConversionLogService
-    
     conversion_log_service: ConversionLogService = await get_conversion_log_service(db)
     
     try:
@@ -74,7 +74,8 @@ async def get_conversion_logs(
 
 @router.put("/{conversion_id}/status",
             response_model=ResponseBaseSchema[dict],
-            summary="更新转化状态",
+            summary="更新转化状态（已废弃，请使用 /api/v1/postback/conversions/{conversion_id}/status）",
+            deprecated=True,
             dependencies=[Depends(require_admin)])
 async def update_conversion_status(
     conversion_id: int,
@@ -82,11 +83,14 @@ async def update_conversion_status(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """更新转化状态（仅管理员，已重构使用服务层）"""
-    # 使用服务层（业务逻辑在ConversionLogService中）
-    from app.core.dependencies import get_conversion_log_service
-    from app.services.cpl.conversion_log_service import ConversionLogService
+    """
+    更新转化状态（已废弃）
     
+    注意：此接口已废弃，功能已融合到 Postback 管理 API 中。
+    请使用 /api/v1/postback/conversions/{conversion_id}/status 接口。
+    仅管理员
+    """
+    # 使用服务层（业务逻辑在ConversionLogService中）
     conversion_log_service: ConversionLogService = await get_conversion_log_service(db)
     
     try:

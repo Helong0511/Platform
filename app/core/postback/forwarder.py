@@ -15,13 +15,16 @@ from urllib.parse import urlencode, urlparse, parse_qs, urlunparse, quote
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import or_
 from sqlalchemy.orm import joinedload
 
 from app.models.models import (
     Product, PostbackConversion, PostbackForwardLog, PostbackNotification,
-    ClickStats, Click, Offer, Publisher, Advertiser
+    ClickStats, Click, Offer, Publisher, Advertiser, AdminNotificationConfig, OfferPublisherAssignment
 )
 from app.core.utils import get_app_now_naive
+from app.core.auto_bot import send_telegram_message
+from app.services.telegram_notification_service import TelegramNotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -177,8 +180,91 @@ class PostbackForwarder:
                 await db.rollback()
             return
         
-        # 2.1. 无论是否有 postback_url，都创建或更新通知记录
+        # 2.0. 检查下游Cap和下游PO配置
+        # 查询OfferPublisherAssignment获取渠道配置
+        assignment = None
+        if offer and publisher:
+            assignment_result = await db.execute(
+                select(OfferPublisherAssignment).where(
+                    OfferPublisherAssignment.offer_id == offer.id,
+                    OfferPublisherAssignment.publisher_id == publisher.id,
+                    OfferPublisherAssignment.is_active == True
+                )
+            )
+            assignment = assignment_result.scalars().first()
+        
+        # 2.0.1. 检查下游Cap（每天转化个数限制）
+        if assignment and assignment.downstream_cap is not None:
+            # 统计今天该渠道的转化个数
+            from datetime import datetime, timezone, timedelta
+            from sqlalchemy import func, and_
+            now = datetime.now(timezone.utc)
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            # 查询今天该渠道的转化个数（已通知的转化）
+            # 注意：这里统计的是已经通知给渠道的转化，不包括当前这个转化
+            today_conversions_result = await db.execute(
+                select(func.count(PostbackNotification.id)).where(
+                    and_(
+                        PostbackNotification.publisher_id == publisher.id,
+                        PostbackNotification.notification_type == 'forward',
+                        PostbackNotification.created_at >= today_start,
+                        PostbackNotification.notification_status == 'sent'  # 只统计已成功发送的
+                    )
+                )
+            )
+            today_conversions_count = today_conversions_result.scalar() or 0
+            
+            # 如果今天的转化个数已经达到或超过限制，不通知
+            if today_conversions_count >= assignment.downstream_cap:
+                logger.info(
+                    f"渠道 {publisher.id} 已达到下游Cap限制: {assignment.downstream_cap} "
+                    f"(今天已转化: {today_conversions_count}), 跳过通知: conversion_id={conversion.id}"
+                )
+                # 创建通知记录，标记为已跳过
+                notification_record = PostbackNotification(
+                    conversion_id=conversion.id,
+                    publisher_id=publisher.id,
+                    notification_type='forward',
+                    notification_channel='webhook',
+                    notification_status='skipped',
+                    notification_message=f"已达到下游Cap限制: {assignment.downstream_cap} (今天已转化: {today_conversions_count})",
+                    auto_notify=False,
+                    postback_url=None,
+                    error_message=f"下游Cap限制: {today_conversions_count}/{assignment.downstream_cap}",
+                    created_at=get_app_now_naive()
+                )
+                db.add(notification_record)
+                try:
+                    await db.commit()
+                except Exception as e:
+                    logger.error(f"保存跳过通知记录失败: {str(e)}", exc_info=True)
+                    await db.rollback()
+                return
+        
+        # 2.0.2. 检查下游PO（转化金额限制）
+        # 如果上游通知的金额大于下游PO，使用下游PO金额
+        final_payout = None  # 用于传递给_build_forward_data
+        if assignment and assignment.affiliate_payout is not None:
+            upstream_amount = conversion.original_payout if conversion.original_payout is not None else 0.0
+            if upstream_amount > assignment.affiliate_payout:
+                # 使用下游PO金额
+                final_payout = assignment.affiliate_payout
+                logger.info(
+                    f"上游通知金额 {upstream_amount} 大于下游PO {assignment.affiliate_payout}, "
+                    f"使用下游PO金额: conversion_id={conversion.id}, publisher_id={publisher.id}"
+                )
+        
+        # 2.1. 检查是否有 postback_url
         has_postback_url = bool(publisher.postback_url and publisher.postback_url.strip())
+        
+        # 如果没有配置 postback_url，不创建转发通知记录（避免与转化通知重复）
+        if not has_postback_url:
+            logger.debug(
+                f"渠道未配置 Postback URL，跳过创建转发通知记录: conversion_id={conversion.id}, "
+                f"publisher_id={publisher.id}"
+            )
+            return
         
         # 构建通知消息
         notification_message = PostbackForwarder._build_forward_notification_message(
@@ -190,7 +276,6 @@ class PostbackForwarder:
         
         # 检查是否已有通知记录（补发通知场景）
         # 使用 with_for_update() 锁定记录，防止并发创建
-        from sqlalchemy import or_
         existing_notification_result = await db.execute(
             select(PostbackNotification).where(
                 PostbackNotification.conversion_id == conversion.id,
@@ -273,27 +358,22 @@ class PostbackForwarder:
                     notification_channel='webhook',
                     notification_status='pending',  # 初始状态为 pending
                     notification_message=notification_message,
-                    auto_notify=has_postback_url,  # 如果有 postback_url，默认自动通知
-                    postback_url=publisher.postback_url if has_postback_url else None,
+                    auto_notify=True,  # 有 postback_url，自动通知
+                    postback_url=publisher.postback_url,
                     created_at=get_app_now_naive()
                 )
                 db.add(notification_record)
                 logger.debug(
-                    f"创建新通知记录: conversion_id={conversion.id}, "
+                    f"创建新转发通知记录: conversion_id={conversion.id}, "
                     f"publisher_id={publisher.id}"
                 )
         
-        # 如果没有配置 Postback URL，保存通知记录后返回（不进行转发）
-        if not has_postback_url:
-            logger.debug(
-                f"渠道未配置 Postback URL，创建通知记录后跳过转发: conversion_id={conversion.id}, "
-                f"publisher_id={publisher.id}"
-            )
-            try:
-                await db.commit()
-            except Exception as e:
-                logger.error(f"保存转发通知记录失败: {str(e)}", exc_info=True)
-                await db.rollback()
+        # 保存通知记录
+        try:
+            await db.commit()
+        except Exception as e:
+            logger.error(f"保存转发通知记录失败: {str(e)}", exc_info=True)
+            await db.rollback()
             return
         
         downstream_url = publisher.postback_url.strip()
@@ -372,7 +452,8 @@ class PostbackForwarder:
                 )
         
         # 构建转发数据（包含原始点击参数）
-        forward_data = PostbackForwarder._build_forward_data(conversion, click_params)
+        # 如果设置了final_payout（下游PO限制），使用它；否则使用默认逻辑
+        forward_data = PostbackForwarder._build_forward_data(conversion, click_params, override_payout=final_payout)
         
         # 5. 创建转发日志记录
         forward_log = PostbackForwardLog(
@@ -462,6 +543,43 @@ class PostbackForwarder:
                 except Exception as e:
                     # Telegram 通知失败不影响主流程
                     logger.warning(f"创建 Telegram 通知任务失败: {str(e)}")
+                
+                # 发送管理员转发成功通知（如果配置了）
+                try:
+                    # 查询管理员通知配置
+                    admin_config_result = await db.execute(
+                        select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+                    )
+                    admin_config = admin_config_result.scalars().first()
+                    
+                    # 检查是否需要发送管理员通知
+                    if admin_config and admin_config.telegram_enabled and admin_config.notify_forward_success:
+                        if admin_config.telegram_chat_id:
+                            # 构建管理员转发成功通知消息
+                            admin_message = TelegramNotificationService.build_admin_forward_success_message(
+                                conversion=conversion,
+                                publisher=publisher,
+                                response_status=response.status_code,
+                                response_body=response.text[:500] if response.text else None,
+                                offer=offer
+                            )
+                            
+                            # 异步发送管理员通知
+                            asyncio.create_task(
+                                TelegramNotificationService.send_admin_notification(
+                                    message=admin_message,
+                                    telegram_chat_id=admin_config.telegram_chat_id,
+                                    conversion=conversion,
+                                    notification_type='forward_success',
+                                    db=db
+                                )
+                            )
+                except Exception as e:
+                    # 管理员通知失败不影响主流程
+                    logger.warning(
+                        f"发送管理员转发成功通知失败: conversion_id={conversion.id}, "
+                        f"error={str(e)}"
+                    )
             else:
                 logger.warning(
                     f"渠道 Postback 转发失败: conversion_id={conversion.id}, "
@@ -478,7 +596,7 @@ class PostbackForwarder:
                     click_params_str = PostbackForwarder._format_click_params_for_error(click_params)
                     forward_log.error_message = f"HTTP {response.status_code}: {response.text[:500]}{click_params_str}"
                 
-                # 转发失败也发送 Telegram 通知
+                # 转发失败也发送 Telegram 通知（使用原有的通知方法）
                 try:
                     asyncio.create_task(
                         PostbackForwarder._send_telegram_notification(
@@ -493,6 +611,43 @@ class PostbackForwarder:
                     )
                 except Exception as e:
                     logger.warning(f"创建 Telegram 通知任务失败: {str(e)}")
+                
+                # 发送管理员转发失败告警（如果配置了）
+                try:
+                    # 查询管理员通知配置
+                    admin_config_result = await db.execute(
+                        select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+                    )
+                    admin_config = admin_config_result.scalars().first()
+                    
+                    # 检查是否需要发送管理员通知
+                    if admin_config and admin_config.telegram_enabled and admin_config.notify_forward_failure:
+                        if admin_config.telegram_chat_id:
+                            # 构建管理员转发失败告警消息
+                            admin_message = TelegramNotificationService.build_admin_forward_failure_message(
+                                conversion=conversion,
+                                publisher=publisher,
+                                error_message=forward_log.error_message or f"HTTP {response.status_code}: {response.text[:500]}",
+                                click_params=click_params,
+                                offer=offer
+                            )
+                            
+                            # 异步发送管理员通知
+                            asyncio.create_task(
+                                TelegramNotificationService.send_admin_notification(
+                                    message=admin_message,
+                                    telegram_chat_id=admin_config.telegram_chat_id,
+                                    conversion=conversion,
+                                    notification_type='forward_failure',
+                                    db=db
+                                )
+                            )
+                except Exception as e:
+                    # 管理员通知失败不影响主流程
+                    logger.warning(
+                        f"发送管理员转发失败告警失败: conversion_id={conversion.id}, "
+                        f"error={str(e)}"
+                    )
         
         except httpx.TimeoutException as e:
             click_params_str = PostbackForwarder._format_click_params_for_error(click_params)
@@ -779,7 +934,8 @@ class PostbackForwarder:
     @staticmethod
     def _build_forward_data(
         conversion: PostbackConversion,
-        click_params: Optional[Dict[str, Any]] = None
+        click_params: Optional[Dict[str, Any]] = None,
+        override_payout: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         构建转发给下游的数据
@@ -790,6 +946,7 @@ class PostbackForwarder:
         Args:
             conversion: 转化记录
             click_params: 原始点击参数（已过滤占位符），可选
+            override_payout: 覆盖payout值（用于下游PO限制），可选
         """
         data = {
             "conversion_id": conversion.conversion_id,
@@ -802,7 +959,10 @@ class PostbackForwarder:
             data["event_value"] = conversion.event_value
         
         # payout 字段使用扣后的 payout（给下游的实际金额）
-        if conversion.payout is not None:
+        # 如果提供了override_payout，优先使用它（用于下游PO限制）
+        if override_payout is not None:
+            data["payout"] = override_payout
+        elif conversion.payout is not None:
             data["payout"] = conversion.payout
         elif conversion.original_payout is not None:
             # 如果没有扣后的 payout，使用原始的 payout
@@ -1366,7 +1526,6 @@ class PostbackForwarder:
             error_message: 错误信息（如果失败）
         """
         try:
-            from app.core.auto_bot import send_telegram_message
             
             # 构建通知消息
             if success:

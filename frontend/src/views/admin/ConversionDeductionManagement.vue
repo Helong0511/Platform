@@ -593,12 +593,9 @@ const fetchData = async () => {
       ...searchForm
     }
     const response = await getDeductionConfigs(params)
-    if (response.code === 200) {
-      // 处理分页响应格式
-      const data = response.data || {}
-      tableData.value = data.data || data.items || []
-      pagination.total = data.total || response.total || 0
-    }
+    // response已经是标准分页格式，直接使用data和total字段
+    tableData.value = response.data || []
+    pagination.total = response.total || 0
   } catch (error) {
     ElMessage.error('获取配置列表失败：' + (error.message || '未知错误'))
   } finally {
@@ -730,16 +727,16 @@ const handleBatchEnable = async () => {
     
     loading.value = true
     const configIds = selectedConfigs.value.map(item => item.id)
+    // batchUpdateDeductionConfigStatus使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
     const response = await batchUpdateDeductionConfigStatus({
       config_ids: configIds,
       is_active: true
     })
     
-    if (response.code === 200) {
-      ElMessage.success(`成功启用 ${response.data.updated_count} 个配置`)
-      selectedConfigs.value = []
-      fetchData()
-    }
+    // 如果执行到这里，说明操作成功（失败会抛出异常）
+    ElMessage.success(`成功启用 ${response.updated_count || configIds.length} 个配置`)
+    selectedConfigs.value = []
+    fetchData()
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('批量启用失败：' + (error.message || '未知错误'))
@@ -769,16 +766,16 @@ const handleBatchDisable = async () => {
     
     loading.value = true
     const configIds = selectedConfigs.value.map(item => item.id)
+    // batchUpdateDeductionConfigStatus使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
     const response = await batchUpdateDeductionConfigStatus({
       config_ids: configIds,
       is_active: false
     })
     
-    if (response.code === 200) {
-      ElMessage.success(`成功禁用 ${response.data.updated_count} 个配置`)
-      selectedConfigs.value = []
-      fetchData()
-    }
+    // 如果执行到这里，说明操作成功（失败会抛出异常）
+    ElMessage.success(`成功禁用 ${response.updated_count || configIds.length} 个配置`)
+    selectedConfigs.value = []
+    fetchData()
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('批量禁用失败：' + (error.message || '未知错误'))
@@ -808,15 +805,15 @@ const handleBatchDelete = async () => {
     
     loading.value = true
     const configIds = selectedConfigs.value.map(item => item.id)
+    // batchDeleteDeductionConfigs使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
     const response = await batchDeleteDeductionConfigs({
       config_ids: configIds
     })
     
-    if (response.code === 200) {
-      ElMessage.success(`成功删除 ${response.data.deleted_count} 个配置`)
-      selectedConfigs.value = []
-      fetchData()
-    }
+    // 如果执行到这里，说明操作成功（失败会抛出异常）
+    ElMessage.success(`成功删除 ${response.deleted_count || configIds.length} 个配置`)
+    selectedConfigs.value = []
+    fetchData()
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('批量删除失败：' + (error.message || '未知错误'))
@@ -851,18 +848,14 @@ const handleLevelChange = async (level) => {
         response = await getPublishers({ page, page_size: pageSize })
       }
       
-      if (response && response.code === 200) {
-        const data = response.data || {}
-        const items = data.data || data.items || (Array.isArray(data) ? data : [])
-        allItems = allItems.concat(items)
-        
-        // 检查是否还有更多数据
-        const total = data.total || response.total || 0
-        hasMore = allItems.length < total && items.length > 0
-        page++
-      } else {
-        hasMore = false
-      }
+      // response已经是标准分页格式，直接使用data和total字段
+      const items = response.data || []
+      allItems = allItems.concat(items)
+      
+      // 检查是否还有更多数据
+      const total = response.total || 0
+      hasMore = allItems.length < total && items.length > 0
+      page++
     }
     
     // 转换为选项格式

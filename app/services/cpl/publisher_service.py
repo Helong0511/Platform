@@ -5,10 +5,10 @@
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, String, or_
+from sqlalchemy import func, String, or_, and_
 from sqlalchemy.orm import selectinload, joinedload
 
-from app.models.models import Publisher, Client, User, UserRole
+from app.models.models import Publisher, Client, User, UserRole, OfferPublisherAssignment
 from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
@@ -100,7 +100,6 @@ class PublisherService(BaseService[Publisher]):
             conditions.append(Publisher.is_active == is_active)
         
         if conditions:
-            from sqlalchemy import and_
             query = query.where(and_(*conditions))
         
         # 总数查询
@@ -270,7 +269,6 @@ class PublisherService(BaseService[Publisher]):
         publisher = await self.get_publisher_by_id(publisher_id, current_user, include_client=False)
         
         # 检查是否有关联的Offer分配
-        from app.models.models import OfferPublisherAssignment
         assignment_count = await self.db.execute(
             select(func.count(OfferPublisherAssignment.id)).where(
                 OfferPublisherAssignment.publisher_id == publisher_id

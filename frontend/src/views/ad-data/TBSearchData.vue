@@ -194,7 +194,7 @@ import { useAuthStore } from '../../store';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Upload, Delete } from '@element-plus/icons-vue';
 import { getTBSearchDataList, updateTBSearchData, deleteTBSearchData, batchDeleteTBSearchData, importTBSearchData, getClientsWithTBSearchData, getProductsWithTBSearchData, getCountriesWithTBSearchData } from '../../api/tbSearchData';
-import { normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../../utils/api';
+import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../../utils/api';
 
 const authStore = useAuthStore();
 const isAdmin = computed(() => authStore.isAdmin);
@@ -425,20 +425,11 @@ const fetchData = async () => {
 
     const res = await getTBSearchDataList(params);
     
-    // 检查响应结构
-    if (res.code !== 200) {
-      const errorMsg = res.detail || res.message || '获取数据失败';
-      ElMessage.error(errorMsg);
-      tableData.value = [];
-      pagination.value.total = 0;
-      return;
-    }
-    
-    // 提取数据 - 后端返回的数据结构是嵌套的：{ code, message, data: { data: [...], total, page, page_size } }
-    const listResponse = res.data || {};
-    tableData.value = Array.isArray(listResponse.data) ? listResponse.data : [];
+    // res已经是标准分页格式，直接使用data和total字段
+    // getTBSearchDataList使用paginated: true，失败时会抛出异常
+    tableData.value = res.data || [];
     // 确保total是数字类型
-    const totalValue = typeof listResponse.total === 'number' ? listResponse.total : parseInt(listResponse.total || 0, 10);
+    const totalValue = typeof res.total === 'number' ? res.total : parseInt(res.total || 0, 10);
     pagination.value.total = totalValue;
     
     // 如果查询结果为空，且没有选择任何筛选条件，提示用户

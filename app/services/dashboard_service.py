@@ -9,10 +9,11 @@ from datetime import datetime, timedelta
 import logging
 
 from app.models.models import User, AdData, Product, Client, UserRole, ProductAssignment
-from app.services.base_service import BaseService
 from app.core.cache import get_cached, set_cached, generate_cache_key
 from app.core.query_utils import date_range_condition, product_assignment_join_condition, check_use_assignment_table
 from app.core.utils import get_app_now_naive
+from app.core.exceptions import raise_api_exception
+from app.core.errors import ErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +70,6 @@ class DashboardService:
             start_date = last_day_of_last_month.replace(day=1)
             end_date = last_day_of_last_month
         else:
-            from app.core.exceptions import raise_api_exception
-            from app.core.errors import ErrorCode
             raise_api_exception(
                 ErrorCode.INVALID_PARAMETER,
                 detail=f"无效的时间周期参数: {period}，支持: day, week, month, last_month"
@@ -502,8 +501,6 @@ class DashboardService:
             date_format = "%Y-%m-%d"
             date_trunc = func.date_format(AdData.date, "%Y-%m-%d").label('day')
         else:
-            from app.core.exceptions import raise_api_exception
-            from app.core.errors import ErrorCode
             raise_api_exception(
                 ErrorCode.INVALID_PARAMETER,
                 detail="无效的时间周期参数"

@@ -21,6 +21,7 @@ from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.dependencies import get_conversion_deduction_service
+from app.core.utils import get_app_now_naive
 from app.models.models import (
     User, 
     ConversionDeductionConfig, 
@@ -446,7 +447,6 @@ async def export_deduction_configs(
                 worksheet.column_dimensions[column_cells[0].column_letter].width = min(max_length + 2, 50)
         
         output.seek(0)
-        from app.core.utils import get_app_now_naive
         filename = f"扣减配置_{get_app_now_naive().strftime('%Y%m%d_%H%M%S')}.xlsx"
         encoded_filename = quote(filename.encode('utf-8'))
         
@@ -545,7 +545,6 @@ async def export_deduction_stats(
                 worksheet.column_dimensions[column_cells[0].column_letter].width = min(max_length + 2, 50)
         
         output.seek(0)
-        from app.core.utils import get_app_now_naive
         filename = f"扣减统计_{get_app_now_naive().strftime('%Y%m%d_%H%M%S')}.xlsx"
         encoded_filename = quote(filename.encode('utf-8'))
         
@@ -658,7 +657,6 @@ async def export_deduction_logs(
                 worksheet.column_dimensions[column_cells[0].column_letter].width = min(max_length + 2, 50)
         
         output.seek(0)
-        from app.core.utils import get_app_now_naive
         filename = f"扣减日志_{get_app_now_naive().strftime('%Y%m%d_%H%M%S')}.xlsx"
         encoded_filename = quote(filename.encode('utf-8'))
         

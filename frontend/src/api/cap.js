@@ -1,58 +1,15 @@
 /**
  * Cap 管理 API
+ * 使用CRUD API生成器，减少重复代码
  */
-import { request } from '@/utils/api'
+import { createCrudApi } from '@/utils/crudApi';
 
-/**
- * 获取Cap配置列表
- */
-export function getCaps(params) {
-  return request({
-    url: '/api/v1/caps/',
-    method: 'get',
-    params
-  })
-}
-
-/**
- * 获取Cap配置详情
- */
-export function getCap(id) {
-  return request({
-    url: `/api/v1/caps/${id}`,
-    method: 'get'
-  })
-}
-
-/**
- * 创建Cap配置
- */
-export function createCap(data) {
-  return request({
-    url: '/api/v1/caps/',
-    method: 'post',
-    data
-  })
-}
-
-/**
- * 更新Cap配置
- */
-export function updateCap(id, data) {
-  return request({
-    url: `/api/v1/caps/${id}`,
-    method: 'put',
-    data
-  })
-}
-
-/**
- * 删除Cap配置
- */
-export function deleteCap(id) {
-  return request({
-    url: `/api/v1/caps/${id}`,
-    method: 'delete'
-  })
-}
+// 使用CRUD生成器自动生成所有标准CRUD方法
+export const {
+  getCaps,
+  getCap,
+  createCap,
+  updateCap,
+  deleteCap
+} = createCrudApi('/api/v1/caps');
 

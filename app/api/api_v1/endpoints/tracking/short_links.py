@@ -17,11 +17,15 @@ from app.core.security import get_current_user, require_admin
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.dependencies import get_short_link_service
+from app.services.short_link_service import ShortLinkService
 from app.core.short_link.generator import (
     generate_short_code,
     generate_short_code_from_id,
     generate_unique_short_code
 )
+from app.core.short_link_click_counter import sync_click_counts_to_db, CLICK_COUNTER_PREFIX, _click_counters
+from app.core.redis_client import get_redis_client
 from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
 from app.models.models import User, UserRole, ShortLink, Offer, Publisher, Click
 from app.schemas.short_link import (
@@ -46,7 +50,6 @@ async def generate_short_code(
     db: AsyncSession = Depends(get_db)
 ):
     """生成唯一的短链接代码（公开接口，用于前端自动生成）"""
-    from app.core.short_link.generator import generate_short_code, generate_unique_short_code
     
     # 获取所有已存在的代码
     result = await db.execute(select(ShortLink.short_code))
@@ -117,9 +120,6 @@ async def create_short_link(
 ):
     """创建短链接（已重构使用服务层）"""
     # 使用服务层（业务逻辑在ShortLinkService中）
-    from app.core.dependencies import get_short_link_service
-    from app.services.short_link_service import ShortLinkService
-    
     short_link_service: ShortLinkService = await get_short_link_service(db)
     
     # 准备短链接数据
@@ -154,9 +154,6 @@ async def get_short_links(
 ):
     """获取短链接列表（已重构使用服务层）"""
     # 使用服务层（业务逻辑在ShortLinkService中）
-    from app.core.dependencies import get_short_link_service
-    from app.services.short_link_service import ShortLinkService
-    
     short_link_service: ShortLinkService = await get_short_link_service(db)
     
     short_links, total = await short_link_service.get_short_links(
@@ -202,9 +199,6 @@ async def get_short_link_detail(
 ):
     """获取短链接详情（已重构使用服务层）"""
     # 使用服务层（业务逻辑在ShortLinkService中）
-    from app.core.dependencies import get_short_link_service
-    from app.services.short_link_service import ShortLinkService
-    
     short_link_service: ShortLinkService = await get_short_link_service(db)
     
     # 获取短链接（包含关联信息）
@@ -236,9 +230,6 @@ async def update_short_link(
 ):
     """更新短链接（已重构使用服务层）"""
     # 使用服务层（业务逻辑在ShortLinkService中）
-    from app.core.dependencies import get_short_link_service
-    from app.services.short_link_service import ShortLinkService
-    
     short_link_service: ShortLinkService = await get_short_link_service(db)
     
     # 获取更新数据
@@ -265,9 +256,6 @@ async def delete_short_link(
 ):
     """删除短链接（已重构使用服务层）"""
     # 使用服务层（业务逻辑在ShortLinkService中）
-    from app.core.dependencies import get_short_link_service
-    from app.services.short_link_service import ShortLinkService
-    
     short_link_service: ShortLinkService = await get_short_link_service(db)
     
     # 调用服务层删除短链接（服务层会处理权限检查和缓存清理）
@@ -346,7 +334,6 @@ async def sync_short_link_clicks(
     
     注意：此接口需要管理员权限
     """
-    from app.core.short_link_click_counter import sync_click_counts_to_db
     
     try:
         logger.info(f"管理员 {current_user.id} 手动触发短链接点击次数同步")
@@ -382,8 +369,6 @@ async def check_click_count_stats(
     
     注意：此接口需要管理员权限
     """
-    from app.core.short_link_click_counter import CLICK_COUNTER_PREFIX, _click_counters
-    from app.core.redis_client import get_redis_client
     
     stats = {
         "redis_available": False,
@@ -444,9 +429,6 @@ async def get_short_links(
 ):
     """获取短链接列表（已重构使用服务层）"""
     # 使用服务层（业务逻辑在ShortLinkService中）
-    from app.core.dependencies import get_short_link_service
-    from app.services.short_link_service import ShortLinkService
-    
     short_link_service: ShortLinkService = await get_short_link_service(db)
     
     short_links, total = await short_link_service.get_short_links(
@@ -492,9 +474,6 @@ async def get_short_link_detail(
 ):
     """获取短链接详情（已重构使用服务层）"""
     # 使用服务层（业务逻辑在ShortLinkService中）
-    from app.core.dependencies import get_short_link_service
-    from app.services.short_link_service import ShortLinkService
-    
     short_link_service: ShortLinkService = await get_short_link_service(db)
     
     # 获取短链接（包含关联信息）
@@ -526,9 +505,6 @@ async def update_short_link(
 ):
     """更新短链接（已重构使用服务层）"""
     # 使用服务层（业务逻辑在ShortLinkService中）
-    from app.core.dependencies import get_short_link_service
-    from app.services.short_link_service import ShortLinkService
-    
     short_link_service: ShortLinkService = await get_short_link_service(db)
     
     # 获取更新数据
@@ -555,9 +531,6 @@ async def delete_short_link(
 ):
     """删除短链接（已重构使用服务层）"""
     # 使用服务层（业务逻辑在ShortLinkService中）
-    from app.core.dependencies import get_short_link_service
-    from app.services.short_link_service import ShortLinkService
-    
     short_link_service: ShortLinkService = await get_short_link_service(db)
     
     # 调用服务层删除短链接（服务层会处理权限检查和缓存清理）
@@ -636,7 +609,6 @@ async def sync_short_link_clicks(
     
     注意：此接口需要管理员权限
     """
-    from app.core.short_link_click_counter import sync_click_counts_to_db
     
     try:
         logger.info(f"管理员 {current_user.id} 手动触发短链接点击次数同步")
@@ -672,8 +644,6 @@ async def check_click_count_stats(
     
     注意：此接口需要管理员权限
     """
-    from app.core.short_link_click_counter import CLICK_COUNTER_PREFIX, _click_counters
-    from app.core.redis_client import get_redis_client
     
     stats = {
         "redis_available": False,

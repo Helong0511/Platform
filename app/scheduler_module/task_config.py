@@ -205,6 +205,29 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
     #     "result_getter_function": "get_task_result",
     #     # 数据库配置（可选，如果不提供会使用默认值）
     #     "cron_expression": "0 * * * *",  # 默认每小时
+    
+    # ========== 通知汇总任务 ==========
+    "通知汇总任务（每小时）": {
+        "task_name": "通知汇总任务（每小时）",
+        "task_module": "app.scheduler_module.tasks.notification_summary_task",
+        "task_function": "process_hourly_notification_task",
+        "result_getter_module": "app.scheduler_module.tasks.notification_summary_task",
+        "result_getter_function": "get_task_result",
+        # 数据库配置
+        "cron_expression": "0 * * * *",  # 每小时整点执行
+        "description": "每小时执行一次，汇总并发送 hourly 频率的客户通知",
+    },
+    
+    "通知汇总任务（每天）": {
+        "task_name": "通知汇总任务（每天）",
+        "task_module": "app.scheduler_module.tasks.notification_summary_task",
+        "task_function": "process_daily_notification_task",
+        "result_getter_module": "app.scheduler_module.tasks.notification_summary_task",
+        "result_getter_function": "get_task_result",
+        # 数据库配置
+        "cron_expression": "0 0 * * *",  # 每天 00:00 执行
+        "description": "每天执行一次，汇总并发送 daily 频率的客户通知",
+    },
     #     "description": "任务描述",
     # },
 }

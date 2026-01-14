@@ -6,6 +6,8 @@ from typing import Dict, Callable, Optional
 import logging
 import re
 
+from app.scheduler_module.task_config import TASK_CONFIGS
+
 logger = logging.getLogger(__name__)
 
 
@@ -92,7 +94,6 @@ def auto_register_task_results() -> None:
     1. 在任务模块中实现 get_task_result 函数
     2. 在 task_config.py 中添加任务配置即可（无需修改此文件）
     """
-    from app.scheduler_module.task_config import TASK_CONFIGS
     
     registered_count = 0
     failed_count = 0

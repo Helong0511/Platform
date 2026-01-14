@@ -6,6 +6,9 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Any
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+
+from app.models.models import Product, Client
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +77,6 @@ class PostbackHandler(ABC):
             (是否有效, 错误信息)
         """
         if product_id:
-            from app.models.models import Product
-            from sqlalchemy.future import select
-            
             result = await db.execute(
                 select(Product).where(Product.id == product_id, Product.is_active == True)
             )
@@ -85,8 +85,6 @@ class PostbackHandler(ABC):
                 return False, f"产品不存在或未激活: product_id={product_id}"
         
         if client_id:
-            from app.models.models import Client
-            from sqlalchemy.future import select
             
             result = await db.execute(
                 select(Client).where(Client.id == client_id, Client.is_active == True)

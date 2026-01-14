@@ -24,12 +24,15 @@ from app.core.database import get_db
 from app.core.security import get_current_user, require_admin, require_admin_or_self
 from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
 from app.core.constants import MAX_PAGE_SIZE
+from app.core.fulltext_search import search_with_fulltext
+from app.core.utils import get_app_now_naive
 from app.models.models import User, Client, UserRole, Product
 from app.schemas.client import ClientCreate, ClientUpdate, ClientResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 import uuid
+import re
 
 # 创建路由实例
 router = APIRouter()
@@ -61,15 +64,12 @@ async def get_clients(
     - 返回分页结果
     """
     # 构建查询 - 使用selectinload预加载用户信息，避免N+1查询
-    from sqlalchemy.orm import selectinload
-    
     query = select(Client).options(selectinload(Client.user))
     count_query = select(func.count(Client.id))
 
     # 应用过滤条件
     if company_name:
         # 使用全文搜索（优先）或LIKE查询
-        from app.core.fulltext_search import search_with_fulltext
         query = await search_with_fulltext(
             db=db,
             model_class=Client,
@@ -134,8 +134,6 @@ async def get_client(
     - 返回客户完整信息，包括关联的用户信息
     """
     # 构建查询 - 使用JOIN避免N+1查询问题
-    from sqlalchemy.orm import selectinload
-    
     query = select(Client).options(selectinload(Client.user)).where(Client.id == client_id)
 
     # 如果是客户用户，只能查看自己的客户信息
@@ -232,7 +230,6 @@ async def create_client(
                 )
 
             # 创建新用户
-            from app.models.models import User
             user = User(
                 username=client_in.username,
                 email=client_in.email,
@@ -355,7 +352,6 @@ async def update_client(
     if 'key' in update_data and update_data['key']:
         new_key = update_data['key'].strip()
         # 验证UUID格式（简单验证，36个字符，包含连字符）
-        import re
         uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
         if not re.match(uuid_pattern, new_key, re.IGNORECASE):
             raise_api_exception(
@@ -451,7 +447,6 @@ async def update_client_switches(
     - 可以单独更新api_enabled或password_change_enabled，或同时更新两者
     """
     # 获取客户（使用selectinload预加载用户关系，保持与其他端点一致）
-    from sqlalchemy.orm import selectinload
     result = await db.execute(
         select(Client).options(selectinload(Client.user)).where(Client.id == client_id)
     )
@@ -575,14 +570,11 @@ async def export_clients_excel(
     - 返回Excel文件流
     """
     # 构建查询（与get_clients相同的逻辑）
-    from sqlalchemy.orm import selectinload
-    
     query = select(Client).options(selectinload(Client.user))
     
     # 应用过滤条件
     if company_name:
         # 使用全文搜索（优先）或LIKE查询
-        from app.core.fulltext_search import search_with_fulltext
         query = await search_with_fulltext(
             db=db,
             model_class=Client,
@@ -659,7 +651,6 @@ async def export_clients_excel(
             worksheet.column_dimensions[column_cells[0].column_letter].width = min(max_length + 2, 50)
     
     output.seek(0)
-    from app.core.utils import get_app_now_naive
     filename = f"客户数据_{get_app_now_naive().strftime('%Y%m%d_%H%M%S')}.xlsx"
     encoded_filename = quote(filename.encode('utf-8'))
     

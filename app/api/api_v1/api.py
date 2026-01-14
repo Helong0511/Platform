@@ -44,6 +44,7 @@ from app.api.api_v1.endpoints import (
     # Postback模块
     postback,
     bft_postback,
+    ip_whitelist,
     # 追踪模块
     tracking,
     short_links,
@@ -54,7 +55,6 @@ from app.api.api_v1.endpoints import (
     caps,
     discounts,
     conversion_deductions,
-    advertiser_tests,
     affiliate_tests,
     conversion_summary,
     conversion_log,
@@ -107,6 +107,8 @@ api_router.include_router(telegram, prefix="/telegram", tags=["Telegram Bot"])
 api_router.include_router(bft_postback, prefix="", tags=["BFT S2S"])
 # 统一 Postback 服务路由（推荐使用，无前缀）
 api_router.include_router(postback, prefix="", tags=["Postback服务"])
+# Postback IP 白名单管理路由
+api_router.include_router(ip_whitelist, prefix="", tags=["Postback IP白名单"])
 
 # ---------- 追踪模块 ----------
 # 点击追踪路由（必须在其他路由之前，避免路径冲突，无前缀）
@@ -121,8 +123,7 @@ api_router.include_router(offers, prefix="/offers", tags=["Offer管理"])
 api_router.include_router(caps, prefix="/caps", tags=["Cap管理"])
 api_router.include_router(discounts, prefix="/discounts", tags=["扣量管理"])
 api_router.include_router(conversion_deductions, prefix="/conversion-deductions", tags=["转化扣减管理"])
-api_router.include_router(advertiser_tests, prefix="/advertiser-tests", tags=["上游测试"])
 api_router.include_router(affiliate_tests, prefix="/affiliate-tests", tags=["下游测试"])
 api_router.include_router(conversion_summary, prefix="/conversion-summary", tags=["转化统计"])
-api_router.include_router(conversion_log, prefix="/conversion-logs", tags=["转化日志"])
+api_router.include_router(conversion_log, prefix="/conversion-logs", tags=["转化日志（已废弃）"])
 api_router.include_router(clicks, prefix="/clicks", tags=["短链接访问记录"])

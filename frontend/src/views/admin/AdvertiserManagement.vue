@@ -172,12 +172,9 @@ const loadData = async () => {
       is_active: filterActive.value !== null ? filterActive.value : undefined
     }
     const response = await getAdvertisers(params)
-    if (response.code === 200) {
-      tableData.value = response.data || []
-      pagination.total = response.total || 0
-    } else {
-      ElMessage.error(response.message || '获取数据失败')
-    }
+    // response已经是标准分页格式，直接使用data和total字段
+    tableData.value = response.data || []
+    pagination.total = response.total || 0
   } catch (error) {
     logger.error('获取广告主列表失败:', error)
     ElMessage.error('获取数据失败')
@@ -238,13 +235,10 @@ const handleDelete = async (row) => {
       }
     )
     
-    const response = await deleteAdvertiser(row.id)
-    if (response.code === 200) {
-      ElMessage.success('删除成功')
-      loadData()
-    } else {
-      ElMessage.error(response.message || '删除失败')
-    }
+    await deleteAdvertiser(row.id)
+    // deleteAdvertiser使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
+    ElMessage.success('删除成功')
+    loadData()
   } catch (error) {
     if (error !== 'cancel') {
       logger.error('删除广告主失败:', error)
@@ -262,24 +256,22 @@ const handleSubmit = async () => {
     
     submitting.value = true
     try {
-      let response
       if (isEdit.value) {
-        response = await updateAdvertiser(formData.id, formData)
+        // updateAdvertiser使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
+        await updateAdvertiser(formData.id, formData)
       } else {
-        response = await createAdvertiser(formData)
+        // createAdvertiser使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
+        await createAdvertiser(formData)
       }
       
-      if (response.code === 200) {
-        ElMessage.success(isEdit.value ? '更新成功' : '创建成功')
-        dialogVisible.value = false
-        // 创建成功后重置到第一页并刷新列表
-        if (!isEdit.value) {
-          pagination.page = 1
-        }
-        loadData()
-      } else {
-        ElMessage.error(response.message || '操作失败')
+      // 如果执行到这里，说明操作成功（失败会抛出异常）
+      ElMessage.success(isEdit.value ? '更新成功' : '创建成功')
+      dialogVisible.value = false
+      // 创建成功后重置到第一页并刷新列表
+      if (!isEdit.value) {
+        pagination.page = 1
       }
+      loadData()
     } catch (error) {
       logger.error('提交失败:', error)
       

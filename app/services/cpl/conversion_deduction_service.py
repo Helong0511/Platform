@@ -12,7 +12,7 @@ from typing import Optional, List, Dict, Any, Tuple, Literal
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, update, delete
 from sqlalchemy.orm import joinedload
 
 from app.models.models import (
@@ -27,6 +27,7 @@ from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.cache import invalidate_cache
+from app.core.audit_log import log_delete
 import logging
 
 logger = logging.getLogger(__name__)
@@ -609,7 +610,6 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             )
 
         # 批量更新状态
-        from sqlalchemy import update
         stmt = update(ConversionDeductionConfig).where(
             ConversionDeductionConfig.id.in_(config_ids)
         ).values(is_active=is_active)
@@ -685,7 +685,6 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             )
 
         # 记录删除日志
-        from app.core.audit_log import log_delete
         for config in configs:
             await log_delete(
                 db=self.db,
@@ -697,7 +696,6 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             )
 
         # 批量删除配置
-        from sqlalchemy import delete
         stmt = delete(ConversionDeductionConfig).where(
             ConversionDeductionConfig.id.in_(config_ids)
         )

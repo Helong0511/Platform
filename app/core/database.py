@@ -26,10 +26,15 @@
 4. 生产环境建议使用Alembic进行数据库迁移
 """
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.dialects.mysql import aiomysql as sqlalchemy_aiomysql
+from sqlalchemy.future import select
 from app.core.config import settings
 from collections.abc import AsyncGenerator  # Python 3.10+ 推荐使用 collections.abc
 from fastapi import HTTPException
 import logging
+import aiomysql as aiomysql_lib
+
+from app.models.models import Base, User, UserRole
 
 # ====== 日志记录器 ======
 logger = logging.getLogger(__name__)
@@ -58,8 +63,6 @@ logger = logging.getLogger(__name__)
 # 
 logger = logging.getLogger(__name__)
 try:
-    from sqlalchemy.dialects.mysql import aiomysql as sqlalchemy_aiomysql
-    import aiomysql as aiomysql_lib
 
     # 保存原始的 aiomysql.connect 函数
     _original_aiomysql_connect = aiomysql_lib.connect
@@ -158,7 +161,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 # 创建数据库表
 async def create_tables():
-    from app.models.models import Base
     async with engine.begin() as conn:
         # 生产环境建议使用迁移工具如Alembic
         # 这里为了演示简单，直接创建表
@@ -202,8 +204,6 @@ async def init_db():
     """
     async with AsyncSessionLocal() as session:
         # 检查是否需要创建超级用户
-        from app.models.models import User, UserRole
-        from sqlalchemy.future import select
 
         # 查询是否存在管理员用户
         result = await session.execute(select(User).where(User.role == UserRole.ADMIN))
