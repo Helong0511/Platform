@@ -162,4 +162,20 @@ sudo rm -rf /data/20251114/*
 pop.gmail.com
 smtp.gmail.com
 
+# 回复 20260112 的 程序备份
+sudo rm -rf /data/Platform
+sudo cp -a /data/Platform_20260112 /data/Platform
 
+sudo systemctl restart Platform-backend.service
+
+sudo nginx -t
+
+sudo systemctl reload nginx
+
+sudo systemctl restart nginx
+
+
+
+
+
+将当前项目  多个后端服务 独立运行 独立更新 互不影响   但是 共用一个MySQL数据库  怎么设计   根据各个服务 单独分配  运行的 workers 
