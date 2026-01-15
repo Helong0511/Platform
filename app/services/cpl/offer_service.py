@@ -24,6 +24,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _get_sync_short_links_for_offer():
+    from app.api.api_v1.endpoints.cpl.offers import sync_short_links_for_offer
+    return sync_short_links_for_offer
+
+
 class OfferService(BaseService[Offer]):
     """Offer服务"""
     
@@ -541,7 +546,7 @@ class OfferService(BaseService[Offer]):
         short_link_info = None
         if publisher_ids_for_short_link and offer.advertiser_tracklink:
             # 延迟导入，避免循环导入
-            from app.api.api_v1.endpoints.cpl.offers import sync_short_links_for_offer
+            sync_short_links_for_offer = _get_sync_short_links_for_offer()
             short_link_info = await sync_short_links_for_offer(
                 db=self.db,
                 offer_id=offer.id,
@@ -886,7 +891,7 @@ class OfferService(BaseService[Offer]):
             
             if current_advertiser_tracklink and current_publisher_ids:
                 # 延迟导入，避免循环导入
-                from app.api.api_v1.endpoints.cpl.offers import sync_short_links_for_offer
+                sync_short_links_for_offer = _get_sync_short_links_for_offer()
                 base_url = settings.TRACKING_BASE_URL
                 short_link_info = await sync_short_links_for_offer(
                     db=self.db,

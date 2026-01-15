@@ -65,6 +65,20 @@ OPTIONAL_FIELDS = {
 ALL_FIELDS = {**REQUIRED_FIELDS, **OPTIONAL_FIELDS}
 
 
+def _ensure_xlrd(strict: bool, error_message: str) -> bool:
+    try:
+        import xlrd
+        return True
+    except ImportError:
+        logger.error(error_message)
+        if strict:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="系统缺少 xlrd 库，无法读取 .xls 格式文件。请安装 xlrd 库或使用 .xlsx 格式文件。"
+            )
+        return False
+
+
 def _read_excel_file(contents: bytes, filename: Optional[str] = None) -> pd.DataFrame:
     """
     读取Excel文件，支持 .xlsx 和 .xls 格式
@@ -104,14 +118,7 @@ def _read_excel_file(contents: bytes, filename: Optional[str] = None) -> pd.Data
 
     # 检查必要的库是否可用
     if engine == "xlrd":
-        try:
-            import xlrd
-        except ImportError:
-            logger.error("xlrd 库未安装，无法读取 .xls 格式文件")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="系统缺少 xlrd 库，无法读取 .xls 格式文件。请安装 xlrd 库或使用 .xlsx 格式文件。"
-            )
+        _ensure_xlrd(strict=True, error_message="xlrd 库未安装，无法读取 .xls 格式文件")
 
     # 尝试解析Excel文件
     df = None
@@ -131,13 +138,11 @@ def _read_excel_file(contents: bytes, filename: Optional[str] = None) -> pd.Data
         # 如果第一次尝试失败，尝试另一个引擎
         if engine == "openpyxl":
             try:
-                import xlrd
-                logger.info("尝试使用 xlrd 引擎解析文件（可能是 .xls 格式）")
-                df = pd.read_excel(BytesIO(contents), engine="xlrd")
-                engine = "xlrd"
-                tried_engines.append("xlrd")
-            except ImportError:
-                logger.error("xlrd 库未安装，无法尝试 .xls 格式")
+                if _ensure_xlrd(strict=False, error_message="xlrd 库未安装，无法尝试 .xls 格式"):
+                    logger.info("尝试使用 xlrd 引擎解析文件（可能是 .xls 格式）")
+                    df = pd.read_excel(BytesIO(contents), engine="xlrd")
+                    engine = "xlrd"
+                    tried_engines.append("xlrd")
             except Exception as e2:
                 last_error = e2
                 tried_engines.append("xlrd")

@@ -342,8 +342,6 @@ async def lifespan(app: FastAPI):
     # 确保数据库存在并创建表（多进程环境：每个 worker 都会执行，但数据库操作是安全的）
     try:
         from app.db.database import create_database
-        from app.models.models import Base
-        from app.core.database import engine
 
         # 创建数据库（如果不存在）
         await create_database()

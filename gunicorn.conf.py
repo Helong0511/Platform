@@ -182,7 +182,6 @@ def when_ready(server):
 
 def post_fork(server, worker):
     """Worker 进程启动后的回调（每个 worker 进程）"""
-    import os
     worker.log.info(f"Worker {worker.pid} 已启动（父进程: {os.getppid()}）")
 
 def worker_int(worker):

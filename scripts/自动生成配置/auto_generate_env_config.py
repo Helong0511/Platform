@@ -95,6 +95,7 @@ import sys
 import platform
 import stat
 import subprocess
+import urllib.parse
 from pathlib import Path
 from datetime import datetime
 
@@ -618,7 +619,6 @@ def parse_database_url(url: str) -> dict:
             if ":" in auth_part:
                 username, password = auth_part.split(":", 1)
                 # 对密码进行URL解码（如果包含URL编码）
-                import urllib.parse
                 password = urllib.parse.unquote(password)
             else:
                 username, password = auth_part, ""
@@ -689,8 +689,6 @@ def build_database_url(parts: dict) -> str:
         >>> build_database_url(parts)
         'mysql+aiomysql://root:kb7%24rL3d8%21tQ@127.0.0.1:3306/platform'
     """
-    import urllib.parse
-    
     username = parts.get("username", "")
     password = parts.get("password", "")
     host = parts.get("host", "127.0.0.1")

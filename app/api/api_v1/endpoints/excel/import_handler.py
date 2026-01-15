@@ -41,6 +41,23 @@ from app.core.auto_bot import send_telegram_message
 logger = logging.getLogger(__name__)
 
 
+def _ensure_xlrd(strict: bool, error_message: str) -> bool:
+    try:
+        import xlrd
+        logger.debug(
+            f"xlrd 库已安装，版本: {xlrd.__version__ if hasattr(xlrd, '__version__') else 'unknown'}"
+        )
+        return True
+    except ImportError:
+        logger.error(error_message)
+        if strict:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="系统缺少 xlrd 库，无法读取 .xls 格式文件。请安装 xlrd 库或使用 .xlsx 格式文件。"
+            )
+        return False
+
+
 def clean_numeric_value(value: Any) -> float:
     """
     清理并转换数值字段，支持百分比格式（如 '100.00%'）
@@ -140,15 +157,7 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
 
     # 检查必要的库是否可用
     if engine == "xlrd":
-        try:
-            import xlrd
-            logger.debug(f"xlrd 库已安装，版本: {xlrd.__version__ if hasattr(xlrd, '__version__') else 'unknown'}")
-        except ImportError:
-            logger.error("xlrd 库未安装，无法读取 .xls 格式文件")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="系统缺少 xlrd 库，无法读取 .xls 格式文件。请安装 xlrd 库或使用 .xlsx 格式文件。"
-            )
+        _ensure_xlrd(strict=True, error_message="xlrd 库未安装，无法读取 .xls 格式文件")
 
     # 尝试解析Excel文件
     df = None
@@ -170,14 +179,12 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
         if engine == "openpyxl":
             # 尝试 xlrd
             try:
-                import xlrd
-                logger.info("尝试使用 xlrd 引擎解析文件（可能是 .xls 格式）")
-                df = pd.read_excel(BytesIO(contents), engine="xlrd")
-                engine = "xlrd"
-                tried_engines.append("xlrd")
-                logger.info("使用 xlrd 引擎解析成功")
-            except ImportError:
-                logger.error("xlrd 库未安装，无法尝试 .xls 格式")
+                if _ensure_xlrd(strict=False, error_message="xlrd 库未安装，无法尝试 .xls 格式"):
+                    logger.info("尝试使用 xlrd 引擎解析文件（可能是 .xls 格式）")
+                    df = pd.read_excel(BytesIO(contents), engine="xlrd")
+                    engine = "xlrd"
+                    tried_engines.append("xlrd")
+                    logger.info("使用 xlrd 引擎解析成功")
             except Exception as e2:
                 last_error = e2
                 tried_engines.append("xlrd")

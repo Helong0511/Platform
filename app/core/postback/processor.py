@@ -123,6 +123,42 @@ class PostbackProcessor:
                     f"Postback 请求 IP {request_ip} 不在白名单中，视为测试数据，不进行处理: "
                     f"platform={platform}, conversion_id={raw_data.get('clk_id') or raw_data.get('conversion_id') or 'unknown'}"
                 )
+                # 发送管理员提醒（带非白名单提示）
+                try:
+                    admin_config_result = await db.execute(
+                        select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+                    )
+                    admin_config = admin_config_result.scalars().first()
+                    if (
+                        admin_config
+                        and admin_config.telegram_enabled
+                        and admin_config.notify_system_errors
+                        and admin_config.telegram_chat_id
+                    ):
+                        conversion_id_hint = (
+                            raw_data.get("clk_id")
+                            or raw_data.get("conversion_id")
+                            or raw_data.get("click_id")
+                            or "unknown"
+                        )
+                        msg_lines = [
+                            "⚠️ Postback 非白名单IP提示",
+                            "",
+                            f"平台: {platform}",
+                            f"IP: {request_ip}",
+                            f"转化ID/点击ID: {conversion_id_hint}",
+                            "说明: IP 不在白名单中，已按测试数据处理（不入库、不转发）。"
+                        ]
+                        await TelegramNotificationService.send_admin_notification(
+                            message="\n".join(msg_lines),
+                            telegram_chat_id=admin_config.telegram_chat_id,
+                            notification_type='system_error',
+                            db=db
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"发送非白名单IP提示失败: ip={request_ip}, error={str(e)}"
+                    )
                 # 返回成功响应，但不处理数据
                 return {
                     "success": True,
