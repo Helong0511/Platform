@@ -286,6 +286,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue';
+import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox, ElStatistic } from 'element-plus';
 import { Plus, Search, DocumentCopy, InfoFilled, Refresh } from '@element-plus/icons-vue';
 import {
@@ -675,7 +676,15 @@ const handleDialogClose = () => {
 
 // 初始化
 onMounted(() => {
-  loadData();
+  // 检查路由参数中是否有搜索关键词
+  const searchFromQuery = route.query.search;
+  if (searchFromQuery) {
+    filters.search = searchFromQuery;
+    // 自动执行搜索
+    handleSearch();
+  } else {
+    loadData();
+  }
   loadStats();
   loadOffers();
   loadChannels();

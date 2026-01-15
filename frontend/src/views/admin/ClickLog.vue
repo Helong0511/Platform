@@ -159,15 +159,15 @@
           </el-table-column>
           <el-table-column prop="short_code" label="短链接代码" width="120" show-overflow-tooltip>
             <template #default="scope">
-              <el-button 
+              <el-link 
                 v-if="scope.row.short_code" 
                 type="primary" 
-                link 
-                size="small"
-                @click="copyToClipboard(scope.row.short_code)"
+                :underline="false"
+                @click="handleShortCodeClick(scope.row.short_code)"
+                style="cursor: pointer;"
               >
                 {{ scope.row.short_code }}
-              </el-button>
+              </el-link>
               <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
@@ -461,7 +461,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, Mouse } from '@element-plus/icons-vue'
 import { getClicks } from '@/api/clicks'
@@ -471,6 +471,7 @@ import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
 
 const route = useRoute()
+const router = useRouter()
 const loading = ref(false)
 const filterClickId = ref('')
 const filterOffer = ref(null)
@@ -595,6 +596,17 @@ const copyToClipboard = async (text) => {
     logger.error('复制失败:', error)
     ElMessage.error('复制失败')
   }
+}
+
+// 点击短链接代码，跳转到短链接管理页面并搜索
+const handleShortCodeClick = (shortCode) => {
+  if (!shortCode) return
+  router.push({
+    name: 'ShortLinkManagement',
+    query: {
+      search: shortCode
+    }
+  })
 }
 
 // 显示详情
