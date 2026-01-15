@@ -858,10 +858,15 @@ const handleLevelChange = async (level) => {
       page++
     }
     
-    // 转换为选项格式
-    targetOptions.value = allItems.map(item => ({
+    // 转换为选项格式（Offer按ID排序）
+    const sortedItems = level === 'offer'
+      ? allItems.slice().sort((a, b) => a.id - b.id)
+      : allItems
+    targetOptions.value = sortedItems.map(item => ({
       id: item.id,
-      name: item.advertiser_name || item.offer_name || item.publisher_name
+      name: level === 'offer'
+        ? `${item.id} - ${item.offer_name}`
+        : (item.advertiser_name || item.offer_name || item.publisher_name)
     }))
   } catch (error) {
     ElMessage.error('加载配置对象列表失败：' + (error.message || '未知错误'))

@@ -40,7 +40,7 @@
                   <el-option
                     v-for="offer in offerList"
                     :key="offer.id"
-                    :label="offer.offer_name"
+                    :label="`${offer.id} - ${offer.offer_name}`"
                     :value="offer.id"
                   />
                 </el-select>
@@ -500,7 +500,7 @@ const loadOffers = async () => {
       is_active: true
     })
     // response已经是标准分页格式，直接使用data字段
-    offerList.value = response.data || []
+    offerList.value = (response.data || []).slice().sort((a, b) => a.id - b.id)
   } catch (error) {
     logger.error('加载Offer列表失败:', error)
     ElMessage.warning('加载Offer列表失败，筛选功能可能受限')

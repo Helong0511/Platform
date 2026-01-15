@@ -34,7 +34,7 @@
           <el-option
             v-for="offer in offerList"
             :key="offer.id"
-            :label="offer.offer_name"
+            :label="`${offer.id} - ${offer.offer_name}`"
             :value="offer.id"
           />
         </el-select>
@@ -239,7 +239,7 @@ const loadOffers = async () => {
     const response = await getOffers({ page: 1, page_size: 100 })
     // response已经是标准格式，直接使用data字段
     if (response && response.data) {
-      offerList.value = response.data || []
+      offerList.value = (response.data || []).slice().sort((a, b) => a.id - b.id)
     }
   } catch (error) {
     logger.error('加载Offer列表失败:', error)

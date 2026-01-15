@@ -89,7 +89,7 @@
           <el-option
             v-for="item in offerOptions"
             :key="item.id"
-            :label="item.name"
+            :label="`${item.id} - ${item.name}`"
             :value="item.id"
           />
         </el-select>
@@ -624,7 +624,10 @@ const loadOptions = async () => {
       }
     }
     
-    offerOptions.value = allOffers.map(item => ({
+    offerOptions.value = allOffers
+      .slice()
+      .sort((a, b) => a.id - b.id)
+      .map(item => ({
       id: item.id,
       name: item.offer_name
     }))
