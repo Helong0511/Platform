@@ -265,17 +265,36 @@ const checkIpDuplicate = async (ipAddress, excludeId = null) => {
   
   try {
     const trimmedIp = ipAddress.trim();
+    const allItems = [];
+    let page = 1;
+    const pageSize = 100; // 最大允许的 page_size
+    let hasMore = true;
     
-    // 获取所有白名单记录（使用较大的 page_size 以确保获取所有记录）
-    // 由于白名单记录通常不会太多，获取所有记录进行精确匹配
-    const response = await getIpWhitelist({
-      page: 1,
-      page_size: 10000, // 获取足够多的记录以覆盖所有可能的白名单
-    });
+    // 分页获取所有白名单记录
+    while (hasMore) {
+      const response = await getIpWhitelist({
+        page: page,
+        page_size: pageSize,
+      });
+      
+      if (response.data && response.data.length > 0) {
+        allItems.push(...response.data);
+        
+        // 检查是否还有更多记录
+        const total = response.total || 0;
+        if (allItems.length >= total || response.data.length < pageSize) {
+          hasMore = false;
+        } else {
+          page++;
+        }
+      } else {
+        hasMore = false;
+      }
+    }
     
-    if (response.data && response.data.length > 0) {
-      // 检查是否有完全匹配的IP（排除当前编辑的记录）
-      const duplicate = response.data.find(item => {
+    // 检查是否有完全匹配的IP（排除当前编辑的记录）
+    if (allItems.length > 0) {
+      const duplicate = allItems.find(item => {
         if (excludeId && item.id === excludeId) {
           return false; // 排除当前编辑的记录
         }
