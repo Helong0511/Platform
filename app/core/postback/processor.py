@@ -320,6 +320,36 @@ class PostbackProcessor:
                         f"转化已在扣减日志中存在，跳过重复处理: conversion_id={conversion_id}, "
                         f"click_id={click_id}, log_id={existing_log.id}"
                     )
+                    
+                    # 发送 Telegram 通知提示重复
+                    try:
+                        admin_config_result = await db.execute(
+                            select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+                        )
+                        admin_config = admin_config_result.scalars().first()
+                        if admin_config and admin_config.telegram_enabled and admin_config.notify_all_conversions:
+                            if admin_config.telegram_chat_id:
+                                duplicate_message = (
+                                    "⚠️ Postback 重复转化提示\n\n"
+                                    f"转化ID: {conversion_id}\n"
+                                    f"平台: {final_platform}\n"
+                                    f"Click ID: {click_id or 'N/A'}\n\n"
+                                    "说明: 该转化已在扣减日志中存在，可能是重复的 PostBack 请求。\n"
+                                    f"日志ID: {existing_log.id}\n"
+                                    f"创建时间: {existing_log.created_at.strftime('%Y-%m-%d %H:%M:%S') if existing_log.created_at else 'N/A'}\n"
+                                )
+                                asyncio.create_task(
+                                    TelegramNotificationService.send_admin_notification(
+                                        message=duplicate_message,
+                                        telegram_chat_id=admin_config.telegram_chat_id,
+                                        conversion=None,  # 重复转化不关联转化记录
+                                        notification_type='system_error',
+                                        db=db
+                                    )
+                                )
+                    except Exception as e:
+                        logger.warning(f"发送重复转化 Telegram 通知失败: {str(e)}")
+                    
                     return {
                         "success": True,
                         "message": "PostBack 接收成功（已在扣减日志中存在，跳过重复处理）",
@@ -367,6 +397,110 @@ class PostbackProcessor:
                             f"平台 {final_platform} postback 转化已存在，跳过重复处理: "
                             f"conversion_id={conversion_id}, event_name={event_name}"
                         )
+                    
+                    # 发送 Telegram 通知提示重复
+                    try:
+                        admin_config_result = await db.execute(
+                            select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+                        )
+                        admin_config = admin_config_result.scalars().first()
+                        if admin_config and admin_config.telegram_enabled and admin_config.notify_all_conversions:
+                            if admin_config.telegram_chat_id:
+                                # 获取相关信息用于通知
+                                client = None
+                                product = None
+                                publisher = None
+                                offer = None
+                                
+                                if existing_record.client_id:
+                                    client_result = await db.execute(
+                                        select(Client).where(Client.id == existing_record.client_id)
+                                    )
+                                    client = client_result.scalars().first()
+                                
+                                if existing_record.product_id:
+                                    product_result = await db.execute(
+                                        select(Product).where(Product.id == existing_record.product_id)
+                                    )
+                                    product = product_result.scalars().first()
+                                
+                                # 尝试获取渠道和Offer信息
+                                lookup_click_id = existing_record.click_id or click_id
+                                if lookup_click_id:
+                                    click_stats_result = await db.execute(
+                                        select(ClickStats).where(ClickStats.click_id == lookup_click_id)
+                                    )
+                                    click_stats = click_stats_result.scalars().first()
+                                    if click_stats:
+                                        if click_stats.publisher_id:
+                                            publisher_result = await db.execute(
+                                                select(Publisher).where(Publisher.id == click_stats.publisher_id)
+                                            )
+                                            publisher = publisher_result.scalars().first()
+                                        if click_stats.offer_id:
+                                            offer_result = await db.execute(
+                                                select(Offer).where(Offer.id == click_stats.offer_id)
+                                            )
+                                            offer = offer_result.scalars().first()
+                                
+                                # 构建重复转化通知消息
+                                duplicate_message = "⚠️ Postback 重复转化提示\n\n"
+                                duplicate_message += f"转化ID: {conversion_id}\n"
+                                duplicate_message += f"平台: {final_platform}\n"
+                                if event_name:
+                                    duplicate_message += f"事件: {event_name}\n"
+                                
+                                if existing_record.original_payout is not None:
+                                    duplicate_message += f"\n💰 金额信息\n"
+                                    duplicate_message += f"• 原始金额 (PO): ${existing_record.original_payout:.2f}\n"
+                                    if existing_record.payout is not None:
+                                        duplicate_message += f"• 扣后金额 (PO(扣)): ${existing_record.payout:.2f}\n"
+                                
+                                client_name = client.client_name if client else None
+                                product_name = product.product_name if product else None
+                                
+                                if client_name or product_name:
+                                    duplicate_message += "\n👤 客户信息\n"
+                                    if client_name:
+                                        duplicate_message += f"• 客户: {client_name}\n"
+                                    if product_name:
+                                        duplicate_message += f"• 产品: {product_name}\n"
+                                
+                                if publisher:
+                                    duplicate_message += "\n📤 渠道信息\n"
+                                    duplicate_message += f"• 渠道ID: {publisher.id}\n"
+                                    duplicate_message += f"• 渠道名称: {publisher.publisher_name}\n"
+                                
+                                if offer:
+                                    if not publisher:
+                                        duplicate_message += "\n📤 渠道信息\n"
+                                    duplicate_message += f"• Offer ID: {offer.id}\n"
+                                    if offer.offer_name:
+                                        duplicate_message += f"• Offer 名称: {offer.offer_name}\n"
+                                
+                                duplicate_message += "\n⚠️ 说明\n"
+                                duplicate_message += "该转化记录已存在，可能是重复的 PostBack 请求。\n"
+                                if updated:
+                                    duplicate_message += "已根据新的 click_id 更新了部分数据。\n"
+                                else:
+                                    duplicate_message += "未发现需要更新的数据，已跳过处理。\n"
+                                
+                                if existing_record.created_at:
+                                    time_str = existing_record.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                                    duplicate_message += f"\n⏰ 原记录创建时间: {time_str}\n"
+                                
+                                asyncio.create_task(
+                                    TelegramNotificationService.send_admin_notification(
+                                        message=duplicate_message,
+                                        telegram_chat_id=admin_config.telegram_chat_id,
+                                        conversion=existing_record,  # 关联已存在的转化记录
+                                        notification_type='system_error',
+                                        db=db
+                                    )
+                                )
+                    except Exception as e:
+                        logger.warning(f"发送重复转化 Telegram 通知失败: {str(e)}")
+                    
                 return {
                     "success": True,
                     "message": "PostBack 接收成功（已存在，跳过重复处理）",
