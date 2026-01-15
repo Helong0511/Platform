@@ -680,6 +680,7 @@ def calculate_mysql_config(cpu_cores: int, total_memory_gb: float, mysql_version
         
         # Ubuntu 22.04 默认使用 AppArmor，确保 MySQL 有正确权限
         # 不需要在配置文件中设置，但会在输出中提醒
+        pass
     
     # Max Allowed Packet（最大数据包大小，用于大字段）
     config['mysqld.max_allowed_packet'] = "64M"

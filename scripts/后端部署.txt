@@ -165,10 +165,6 @@ smtp.gmail.com
 # 回复 20260112 的 程序备份
 sudo rm -rf /data/Platform
 sudo cp -a /data/Platform_20260112 /data/Platform
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 451fe37690182f08f5b8c5e7c77a028275228449
 
 sudo systemctl restart Platform-backend.service
 
@@ -180,7 +176,6 @@ sudo systemctl restart nginx
 
 
 
-<<<<<<< HEAD
 将 后端 所有服务 独立成服务 
 
 比如 
@@ -220,9 +215,6 @@ git push origin main --force
 
 
 
-=======
->>>>>>> 451fe37690182f08f5b8c5e7c77a028275228449
-
 sudo systemctl restart Platform-backend.service
 
 sudo nginx -t
@@ -231,10 +223,6 @@ sudo systemctl reload nginx
 
 sudo systemctl restart nginx
 
-
-
-=======
->>>>>>> 451fe37690182f08f5b8c5e7c77a028275228449
 
 
 将当前项目  多个后端服务 独立运行 独立更新 互不影响   但是 共用一个MySQL数据库  怎么设计   根据各个服务 单独分配  运行的 workers 

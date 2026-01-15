@@ -63,12 +63,12 @@ async def get_user_example(
 @require_admin  # 使用装饰器，简化权限检查
 @validate_pagination(max_page_size=100)  # 使用装饰器验证分页参数
 async def get_users_example(
+    user_service: UserServiceDep,
+    current_user: CurrentUserDep,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     search: Optional[str] = Query(None),
-    is_active: Optional[bool] = Query(None),
-    user_service: UserServiceDep,
-    current_user: CurrentUserDep
+    is_active: Optional[bool] = Query(None)
 ):
     """
     获取用户列表（重构示例）
@@ -197,9 +197,9 @@ async def delete_user_example(
 
 @router.get("/users/search")
 async def search_users_example(
-    keyword: str = Query(..., min_length=1),
     db: DatabaseDep,
-    current_user: CurrentUserDep
+    current_user: CurrentUserDep,
+    keyword: str = Query(..., min_length=1)
 ):
     """
     搜索用户（重构示例）
