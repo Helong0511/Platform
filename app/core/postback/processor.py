@@ -414,38 +414,61 @@ class PostbackProcessor:
             
             # 如果之前找到了 click_record，进行 Cap 和扣量检查
             if click_id and offer_id is not None:
-                # 0. 检查点击有效期 (Click Validity)
+                # 0. 检查 Offer 激活状态和状态
+                offer_obj = None
                 if offer_id:
                     offer = await db.execute(select(Offer).where(Offer.id == offer_id))
                     offer_obj = offer.scalars().first()
                     if offer_obj:
-                        validity_hours = offer_obj.click_validity_hours or 720  # 默认30天
-                        # 计算小时差
-                        # 数据库中的 click_time 是应用时区的 naive datetime（北京时间）
-                        now_app = get_app_now_naive()
-                        if click_time:
-                            # 如果 click_time 是 naive，假设它是应用时区（北京时间）
-                            if click_time.tzinfo is None:
-                                # 直接使用naive datetime进行比较（都是应用时区）
-                                hours_diff = (now_app - click_time).total_seconds() / 3600
-                            else:
-                                # 如果有时区信息，转换为应用时区的naive datetime
-                                click_time_app = click_time.astimezone(APP_TIMEZONE).replace(tzinfo=None)
-                                hours_diff = (now_app - click_time_app).total_seconds() / 3600
-                        else:
-                            hours_diff = 0  # 如果没有 click_time，跳过有效期检查
-                        
-                        if hours_diff > validity_hours:
+                        # 检查 Offer 是否激活
+                        if not offer_obj.is_active:
                             logger.warning(
-                                f"转化被点击有效期拒绝: conversion_id={conversion_id}, "
-                                f"click_age={hours_diff:.1f}h, limit={validity_hours}h"
+                                f"转化被拒绝：Offer未激活: conversion_id={conversion_id}, "
+                                f"offer_id={offer_id}, offer_name={offer_obj.offer_name}"
                             )
-                            # 标记状态为 ClickExpired，由后续逻辑处理
-                            normalized_data["status_override"] = "ClickExpired"
-                            normalized_data["rejection_reason"] = f"Click expired ({hours_diff:.1f}h > {validity_hours}h)"
+                            # 标记状态为 OfferInactive，由后续逻辑处理
+                            normalized_data["status_override"] = "OfferInactive"
+                            normalized_data["rejection_reason"] = f"Offer未激活: offer_id={offer_id}, offer_name={offer_obj.offer_name}"
+                        
+                        # 检查 Offer 状态（status字段）
+                        elif offer_obj.status != 'Active':
+                            logger.warning(
+                                f"转化被拒绝：Offer状态非Active: conversion_id={conversion_id}, "
+                                f"offer_id={offer_id}, offer_name={offer_obj.offer_name}, status={offer_obj.status}"
+                            )
+                            # 标记状态为 OfferInactive，由后续逻辑处理
+                            normalized_data["status_override"] = "OfferInactive"
+                            normalized_data["rejection_reason"] = f"Offer状态非Active: offer_id={offer_id}, offer_name={offer_obj.offer_name}, status={offer_obj.status}"
+                
+                # 0.1. 检查点击有效期 (Click Validity) - 只在Offer激活且状态为Active时检查
+                if offer_obj and offer_obj.is_active and offer_obj.status == 'Active':
+                    validity_hours = offer_obj.click_validity_hours or 720  # 默认30天
+                    # 计算小时差
+                    # 数据库中的 click_time 是应用时区的 naive datetime（北京时间）
+                    now_app = get_app_now_naive()
+                    if click_time:
+                        # 如果 click_time 是 naive，假设它是应用时区（北京时间）
+                        if click_time.tzinfo is None:
+                            # 直接使用naive datetime进行比较（都是应用时区）
+                            hours_diff = (now_app - click_time).total_seconds() / 3600
+                        else:
+                            # 如果有时区信息，转换为应用时区的naive datetime
+                            click_time_app = click_time.astimezone(APP_TIMEZONE).replace(tzinfo=None)
+                            hours_diff = (now_app - click_time_app).total_seconds() / 3600
+                    else:
+                        hours_diff = 0  # 如果没有 click_time，跳过有效期检查
+                    
+                    if hours_diff > validity_hours:
+                        logger.warning(
+                            f"转化被点击有效期拒绝: conversion_id={conversion_id}, "
+                            f"click_age={hours_diff:.1f}h, limit={validity_hours}h"
+                        )
+                        # 标记状态为 ClickExpired，由后续逻辑处理
+                        normalized_data["status_override"] = "ClickExpired"
+                        normalized_data["rejection_reason"] = f"Click expired ({hours_diff:.1f}h > {validity_hours}h)"
 
-                # 检查 Cap 限制
-                if offer_id:
+                # 检查 Cap 限制 - 只在Offer激活且状态为Active时检查
+                if offer_obj and offer_obj.is_active and offer_obj.status == 'Active' and offer_id:
                     is_allowed, cap_reason = await check_cap(
                         db=db,
                         offer_id=offer_id,
@@ -462,8 +485,8 @@ class PostbackProcessor:
                         # 这里我们仍然保存转化，但标记状态
                         # 也可以选择直接拒绝：raise_api_exception(...)
                 
-                # 计算扣量（旧版扣量逻辑，保留兼容性）
-                if offer_id and publisher_id and final_payout:
+                # 计算扣量（旧版扣量逻辑，保留兼容性）- 只在Offer激活且状态为Active时计算
+                if offer_obj and offer_obj.is_active and offer_obj.status == 'Active' and offer_id and publisher_id and final_payout:
                     final_payout, discount_amount, discount_info = await calculate_discount(
                         db=db,
                         offer_id=offer_id,
@@ -478,9 +501,10 @@ class PostbackProcessor:
                         )
             
             # 8.6. CPL 系统：应用新的扣减逻辑（按比例扣量和扣金额）
+            # 只在Offer激活且状态为Active时应用扣减
             deduction_result = None
             deduction_config = None
-            if advertiser_id or offer_id or publisher_id:
+            if (advertiser_id or offer_id or publisher_id) and (not offer_obj or (offer_obj.is_active and offer_obj.status == 'Active')):
                 try:
                     # find_deduction_config 和 apply_deduction 已在文件顶部导入
                     
