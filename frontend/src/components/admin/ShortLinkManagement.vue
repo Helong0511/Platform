@@ -746,15 +746,31 @@ watch(
 
 // 初始化
 onMounted(async () => {
-  logger.debug('ShortLinkManagement onMounted, route.query:', route.query);
-  // 等待 DOM 完全渲染
-  await nextTick();
-  // 检查路由参数中是否有搜索关键词（优先处理搜索，确保搜索框显示正确）
-  await applySearchFromQuery();
-  // 加载其他数据
+  logger.debug('ShortLinkManagement onMounted, route.query:', route.query, 'route.fullPath:', route.fullPath);
+  // 加载基础数据（先加载，不阻塞搜索）
   loadStats();
   loadOffers();
   loadChannels();
+  
+  // 等待 DOM 完全渲染
+  await nextTick();
+  
+  // 检查路由参数中是否有搜索关键词（优先处理搜索，确保搜索框显示正确）
+  const searchFromQuery = route.query.search;
+  if (searchFromQuery) {
+    logger.debug('Found search param in URL:', searchFromQuery);
+    // 直接设置搜索值
+    filters.search = String(searchFromQuery).trim();
+    pagination.page = 1;
+    // 等待一下确保响应式更新
+    await nextTick();
+    logger.debug('After setting filters.search:', filters.search);
+    // 立即执行搜索
+    await loadData();
+  } else {
+    // 没有搜索参数，正常加载数据
+    await loadData();
+  }
 });
 </script>
 
