@@ -87,7 +87,7 @@ from sqlalchemy.future import select
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.utils import get_app_now_naive
-from app.models.models import User, UserRole
+from app.models.models import User, UserRole, TokenBlacklist
 
 # 获取日志记录器
 logger = logging.getLogger(__name__)
