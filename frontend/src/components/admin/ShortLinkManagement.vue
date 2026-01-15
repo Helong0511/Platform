@@ -324,7 +324,7 @@ const stats = reactive({
 });
 
 const filters = reactive({
-  search: null,
+  search: '',
   is_active: null
 });
 
@@ -403,9 +403,9 @@ const loadData = async () => {
       page: pagination.page,
       page_size: pagination.pageSize
     };
-    // 只添加有值的过滤条件
-    if (filters.search) {
-      params.search = filters.search;
+    // 只添加有值的过滤条件（空字符串不算有效值）
+    if (filters.search && filters.search.trim()) {
+      params.search = filters.search.trim();
     }
     if (filters.is_active !== null && filters.is_active !== undefined) {
       params.is_active = filters.is_active;
@@ -684,29 +684,49 @@ const handleDialogClose = () => {
 const applySearchFromQuery = () => {
   const searchFromQuery = route.query.search;
   if (searchFromQuery) {
-    // 设置搜索关键词
-    filters.search = String(searchFromQuery).trim();
-    // 重置到第一页并执行搜索
-    pagination.page = 1;
-    loadData();
+    // 设置搜索关键词（确保是字符串）
+    const searchValue = String(searchFromQuery).trim();
+    // 只有当值不同时才更新，避免重复触发
+    if (filters.search !== searchValue) {
+      filters.search = searchValue;
+      // 重置到第一页并执行搜索
+      pagination.page = 1;
+      loadData();
+    }
   } else {
     // 如果没有搜索参数，清除搜索框并加载数据
     if (filters.search) {
-      filters.search = null;
+      filters.search = '';
       pagination.page = 1;
       loadData();
-    } else {
+    } else if (pagination.page === 1) {
+      // 如果已经在第一页且没有搜索关键词，只加载数据（避免重复加载）
       loadData();
     }
   }
 };
 
-// 监听路由变化，当路由参数变化时更新搜索
+// 监听路由 query 参数变化
 watch(
   () => route.query.search,
   (newSearch, oldSearch) => {
+    // 当搜索参数变化时，立即应用搜索
     if (newSearch !== oldSearch) {
       applySearchFromQuery();
+    }
+  }
+);
+
+// 监听整个路由路径变化（确保从其他页面跳转过来时也能触发）
+watch(
+  () => route.fullPath,
+  (newPath, oldPath) => {
+    // 只有当路径真正变化且是短链接管理页面时才执行
+    if (newPath !== oldPath && route.name === 'ShortLinkManagement') {
+      // 使用 nextTick 确保路由已经更新
+      setTimeout(() => {
+        applySearchFromQuery();
+      }, 0);
     }
   }
 );
