@@ -509,7 +509,7 @@ class PostbackConversion(Base):
     # CPL 系统字段
     click_id = Column(String(255), nullable=True, index=True, comment='关联的Click ID')
     click_time = Column(DateTime, nullable=True, comment='点击时间')
-    conversion_status = Column(String(20), default='Pending', index=True, comment='转化状态：Approved/Pending')
+    conversion_status = Column(String(20), default='Pending', index=True, comment='转化状态：Pending(待处理-默认)/Approved(已批准)/CapReached(达到上限)/OfferInactive(Offer关闭)/ClickExpired(点击过期)')
 
     # 原始数据（JSON格式，保存完整回调数据）
     raw_data = Column(Text, nullable=True, comment='原始回调数据（JSON格式）')

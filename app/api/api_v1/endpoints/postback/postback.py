@@ -66,7 +66,7 @@ async def get_postback_conversions(
     offer_id: Optional[int] = Query(None, description="Offer ID过滤"),
     publisher_id: Optional[int] = Query(None, description="渠道ID过滤"),
     advertiser_id: Optional[int] = Query(None, description="广告主ID过滤"),
-    conversion_status: Optional[str] = Query(None, description="转化状态过滤（Approved/Pending）"),
+    conversion_status: Optional[str] = Query(None, description="转化状态过滤（Pending/Approved/CapReached/OfferInactive/ClickExpired）"),
     start_date: Optional[str] = Query(None, description="起始日期（YYYY-MM-DD）"),
     end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
     page: int = Query(1, ge=1, description="页码"),
@@ -943,13 +943,17 @@ async def diagnose_postback_record(
             summary="更新转化状态（管理员）")
 async def update_conversion_status(
     conversion_id: int = Path(..., ge=1, description="转化记录ID"),
-    status: str = Query(..., description="转化状态（Approved/Pending）"),
+    status: str = Query(..., description="转化状态（Approved/Pending）。注意：系统自动设置的状态（CapReached/OfferInactive/ClickExpired）不能手动设置"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
     """
     更新转化状态（仅管理员）
     融合转化日志功能
+    
+    注意：
+    - 只能手动设置为 Approved 或 Pending
+    - 系统自动设置的状态（CapReached/OfferInactive/ClickExpired）不能手动修改
     """
     try:
         result = await db.execute(

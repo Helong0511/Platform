@@ -31,7 +31,7 @@ async def get_conversion_logs(
     offer_id: Optional[int] = Query(None, description="Offer ID过滤"),
     publisher_id: Optional[int] = Query(None, description="渠道ID过滤"),
     advertiser_id: Optional[int] = Query(None, description="广告主ID过滤"),
-    conversion_status: Optional[str] = Query(None, description="转化状态过滤（Approved/Pending）"),
+    conversion_status: Optional[str] = Query(None, description="转化状态过滤（Pending/Approved/CapReached/OfferInactive/ClickExpired）"),
     start_date: Optional[str] = Query(None, description="开始日期（YYYY-MM-DD）"),
     end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
     db: AsyncSession = Depends(get_db),
