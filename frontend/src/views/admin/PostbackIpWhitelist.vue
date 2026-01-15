@@ -144,7 +144,6 @@
           <el-input 
             v-model="formData.ip_address" 
             placeholder="请输入IP地址（支持IPv4和IPv6）"
-            :disabled="isEdit"
           />
           <div class="form-tip">例如：43.130.108.206</div>
         </el-form-item>

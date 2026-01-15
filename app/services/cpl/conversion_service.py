@@ -175,10 +175,9 @@ class ConversionService:
             count_conditions.append(offer_alias_for_count.status == 'Active')
             conversion_query = conversion_query.where(and_(*count_conditions))
         
+        # 注意：total_conversions 将在分组统计后从分组结果汇总计算，确保与分组统计一致
+        # 这里先计算一个初始值，后续会被更新
         total_conversions = (await self.db.execute(conversion_query)).scalar() or 0
-        
-        # 计算总转化率
-        cr = (total_conversions / total_clicks * 100) if total_clicks > 0 else 0
         
         # 统计总支付金额（PO）- 使用原始 payout
         # 客户用户：直接通过ClickStats.publisher_id过滤，显示所有属于客户的转化
@@ -301,6 +300,9 @@ class ConversionService:
             )
         
         # 处理转化数据
+        # 同时计算总转化数量和总支付金额（从分组统计结果汇总，确保与分组统计一致）
+        calculated_total_conversions = 0
+        calculated_total_po = 0.0
         for offer_id_val, pub_id_val, conv_count_val, total_po_val in conversion_groups:
             safe_offer_id = offer_id_val if offer_id_val is not None else 0
             safe_pub_id = pub_id_val if pub_id_val is not None else 0
@@ -317,12 +319,25 @@ class ConversionService:
                 }
             
             stats_dict[key]["conversion_count"] += conv_count_val
-            stats_dict[key]["po"] += float(total_po_val) if total_po_val else 0.0
+            po_val = float(total_po_val) if total_po_val else 0.0
+            stats_dict[key]["po"] += po_val
+            # 累加转化数量和支付金额
+            calculated_total_conversions += conv_count_val
+            calculated_total_po += po_val
             
             if safe_offer_id:
                 offer_ids.add(safe_offer_id)
             if safe_pub_id:
                 publisher_ids.add(safe_pub_id)
+        
+        # 使用从分组统计汇总的总转化数量和总支付金额（确保与分组统计一致）
+        # 总转化数量应该等于所有分组转化数量的总和
+        total_conversions = calculated_total_conversions
+        # 总支付金额也应该等于所有分组支付金额的总和
+        total_po = calculated_total_po
+        
+        # 重新计算总转化率（使用更新后的总转化数量）
+        cr = (total_conversions / total_clicks * 100) if total_clicks > 0 else 0
         
         # 批量加载Offer和Advertiser信息（避免N+1查询）
         offers_map = {}

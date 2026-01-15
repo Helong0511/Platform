@@ -62,6 +62,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import func
 
 from app.core.postback.handlers import get_handler
 from app.core.postback.forwarder import PostbackForwarder
@@ -108,16 +109,54 @@ class PostbackProcessor:
         """
         # 1. 验证 IP 白名单（如果提供了 request_ip）
         if request_ip:
-            # 查询 IP 是否在白名单中
-            ip_check = await db.execute(
-                select(PostbackIpWhitelist).where(
-                    PostbackIpWhitelist.ip_address == request_ip,
-                    PostbackIpWhitelist.is_active == True
-                )
-            )
-            whitelisted_ip = ip_check.scalars().first()
+            # 清理IP地址：去除空格、端口号等
+            cleaned_ip = request_ip.strip()
+            # 如果包含端口号（如 43.130.108.206:8080），只取IP部分
+            # 注意：IPv6地址格式为 [::1]:8080，需要特殊处理
+            if ":" in cleaned_ip:
+                # 检查是否是IPv6格式 [::1]:8080
+                if cleaned_ip.startswith("[") and "]" in cleaned_ip:
+                    # IPv6地址带端口号，格式：[2001:db8::1]:8080
+                    ipv6_end = cleaned_ip.index("]")
+                    cleaned_ip = cleaned_ip[1:ipv6_end]  # 提取IPv6地址部分
+                else:
+                    # IPv4地址带端口号，格式：43.130.108.206:8080
+                    parts = cleaned_ip.split(":")
+                    if len(parts) == 2 and parts[1].isdigit():
+                        cleaned_ip = parts[0]
             
+            # 查询所有启用的白名单IP，然后在Python中比较（去除空格后比较）
+            # 这样可以避免数据库函数兼容性问题，并且更灵活
+            all_whitelist_result = await db.execute(
+                select(PostbackIpWhitelist.ip_address, PostbackIpWhitelist.id)
+                .where(PostbackIpWhitelist.is_active == True)
+            )
+            all_whitelist_items = all_whitelist_result.all()
+            
+            # 在Python中比较（去除空格后比较）
+            whitelisted_ip = None
+            for whitelist_item in all_whitelist_items:
+                whitelist_ip = whitelist_item.ip_address.strip() if whitelist_item.ip_address else ""
+                # 比较清理后的IP地址
+                if whitelist_ip == cleaned_ip:
+                    whitelisted_ip = whitelist_item
+                    break
+                # 如果白名单IP也包含端口号，只比较IP部分
+                if ":" in whitelist_ip and not whitelist_ip.startswith("["):
+                    whitelist_ip_parts = whitelist_ip.split(":")
+                    if len(whitelist_ip_parts) == 2 and whitelist_ip_parts[1].isdigit():
+                        if whitelist_ip_parts[0] == cleaned_ip:
+                            whitelisted_ip = whitelist_item
+                            break
+            
+            # 如果仍然没找到，记录调试日志
             if not whitelisted_ip:
+                all_whitelist_ips = [row.ip_address for row in all_whitelist_items]
+                logger.warning(
+                    f"IP白名单验证失败: request_ip={request_ip!r}, cleaned_ip={cleaned_ip!r}, "
+                    f"白名单中的IP列表={all_whitelist_ips}, "
+                    f"platform={platform}, conversion_id={raw_data.get('clk_id') or raw_data.get('conversion_id') or 'unknown'}"
+                )
                 # IP 不在白名单中，视为测试数据，不记录
                 logger.info(
                     f"Postback 请求 IP {request_ip} 不在白名单中，视为测试数据，不进行处理: "
