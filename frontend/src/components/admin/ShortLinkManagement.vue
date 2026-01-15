@@ -285,7 +285,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue';
+import { ref, reactive, onMounted, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox, ElStatistic } from 'element-plus';
 import { Plus, Search, DocumentCopy, InfoFilled, Refresh } from '@element-plus/icons-vue';
@@ -401,9 +401,15 @@ const loadData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: pagination.pageSize,
-      ...filters
+      page_size: pagination.pageSize
     };
+    // 只添加有值的过滤条件
+    if (filters.search) {
+      params.search = filters.search;
+    }
+    if (filters.is_active !== null && filters.is_active !== undefined) {
+      params.is_active = filters.is_active;
+    }
     const result = await getShortLinks(params);
     // 初始化每个链接的加载状态
     links.value = (result.data || []).map(link => ({
@@ -674,17 +680,41 @@ const handleDialogClose = () => {
   }
 };
 
+// 检查并应用路由参数中的搜索关键词
+const applySearchFromQuery = () => {
+  const searchFromQuery = route.query.search;
+  if (searchFromQuery) {
+    // 设置搜索关键词
+    filters.search = String(searchFromQuery).trim();
+    // 重置到第一页并执行搜索
+    pagination.page = 1;
+    loadData();
+  } else {
+    // 如果没有搜索参数，清除搜索框并加载数据
+    if (filters.search) {
+      filters.search = null;
+      pagination.page = 1;
+      loadData();
+    } else {
+      loadData();
+    }
+  }
+};
+
+// 监听路由变化，当路由参数变化时更新搜索
+watch(
+  () => route.query.search,
+  (newSearch, oldSearch) => {
+    if (newSearch !== oldSearch) {
+      applySearchFromQuery();
+    }
+  }
+);
+
 // 初始化
 onMounted(() => {
   // 检查路由参数中是否有搜索关键词
-  const searchFromQuery = route.query.search;
-  if (searchFromQuery) {
-    filters.search = searchFromQuery;
-    // 自动执行搜索
-    handleSearch();
-  } else {
-    loadData();
-  }
+  applySearchFromQuery();
   loadStats();
   loadOffers();
   loadChannels();
