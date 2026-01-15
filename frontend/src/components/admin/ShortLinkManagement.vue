@@ -305,6 +305,7 @@ import { logger } from '../../utils/logger';
 import { formatDate as formatDateWithTimezone } from '../../utils/dateFormat';
 
 const { isMobile } = useDevice();
+const route = useRoute();
 
 const loading = ref(false);
 const saving = ref(false);
