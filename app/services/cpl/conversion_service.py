@@ -162,14 +162,10 @@ class ConversionService:
         if advertiser_id is not None:
             count_conditions_1.append(click_alias_for_count.advertiser_id == advertiser_id)
         
-        conversion_query_1 = select(func.count(PostbackConversion.id)).select_from(
-            PostbackConversion.__table__.join(
-                click_alias_for_count.__table__,
-                PostbackConversion.click_id == click_alias_for_count.click_id
-            ).join(
-                offer_alias_for_count.__table__,
-                click_alias_for_count.offer_id == offer_alias_for_count.id
-            )
+        conversion_query_1 = select(func.count(PostbackConversion.id)).join(
+            click_alias_for_count, PostbackConversion.click_id == click_alias_for_count.click_id
+        ).join(
+            offer_alias_for_count, click_alias_for_count.offer_id == offer_alias_for_count.id
         ).where(and_(*count_conditions_1))
         
         count_1 = (await self.db.execute(conversion_query_1)).scalar() or 0
@@ -210,14 +206,10 @@ class ConversionService:
         if advertiser_id is not None:
             po_conditions_1.append(click_alias_for_po.advertiser_id == advertiser_id)
         
-        po_query_1 = select(func.sum(PostbackConversion.original_payout)).select_from(
-            PostbackConversion.__table__.join(
-                click_alias_for_po.__table__,
-                PostbackConversion.click_id == click_alias_for_po.click_id
-            ).join(
-                offer_alias_for_po.__table__,
-                click_alias_for_po.offer_id == offer_alias_for_po.id
-            )
+        po_query_1 = select(func.sum(PostbackConversion.original_payout)).join(
+            click_alias_for_po, PostbackConversion.click_id == click_alias_for_po.click_id
+        ).join(
+            offer_alias_for_po, click_alias_for_po.offer_id == offer_alias_for_po.id
         ).where(and_(*po_conditions_1))
         
         po_1 = float((await self.db.execute(po_query_1)).scalar() or 0)
@@ -294,14 +286,10 @@ class ConversionService:
             click_alias.publisher_id,
             func.count(PostbackConversion.id).label('conversion_count'),
             func.sum(PostbackConversion.original_payout).label('total_po')
-        ).select_from(
-            PostbackConversion.__table__.join(
-                click_alias.__table__,
-                PostbackConversion.click_id == click_alias.click_id
-            ).join(
-                offer_alias.__table__,
-                click_alias.offer_id == offer_alias.id
-            )
+        ).join(
+            click_alias, PostbackConversion.click_id == click_alias.click_id
+        ).join(
+            offer_alias, click_alias.offer_id == offer_alias.id
         ).where(
             and_(*conversion_group_conditions)
         ).group_by(
