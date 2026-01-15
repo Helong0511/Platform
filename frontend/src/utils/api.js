@@ -401,8 +401,16 @@ export const handleApiError = (error, defaultMessage = '操作失败', options =
     try {
       logger.error(`${logContext}失败:`, error);
     } catch (e) {
-      // 如果logger调用失败，使用console作为后备
-      console.error(`${logContext}失败:`, error);
+      // 如果logger调用失败，静默处理（生产环境不应输出日志）
+      // 只在开发环境记录
+      if (import.meta.env.MODE === 'development' || import.meta.env.DEV) {
+        // 使用try-catch避免循环错误
+        try {
+          console.error('[Logger Error]', e, '原始错误:', error);
+        } catch {
+          // 完全静默，避免任何输出
+        }
+      }
     }
   }
 
@@ -432,8 +440,8 @@ export const handleApiError = (error, defaultMessage = '操作失败', options =
         const errorMsg = extractErrorMessage(error) || defaultMessage;
         ElMessage.error(errorMsg);
       } catch (e) {
-        // 如果ElMessage导入失败，使用console（只记录一次，避免重复）
-        console.error('显示错误消息失败:', e, '原始错误信息:', extractErrorMessage(error) || defaultMessage);
+        // 如果ElMessage导入失败，使用logger记录（生产环境不输出）
+        logger.error('显示错误消息失败:', e, '原始错误信息:', extractErrorMessage(error) || defaultMessage);
       }
     })();
   }

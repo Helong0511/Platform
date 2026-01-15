@@ -177,6 +177,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed, watch } from 'vue';
+import { logger } from '../../utils/logger';
 import { 
   ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, 
   ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage, ElMessageBox,
@@ -308,7 +309,7 @@ const checkIpDuplicate = async (ipAddress, excludeId = null) => {
     return false;
   } catch (error) {
     // 如果检查失败，返回 false，让后端验证处理
-    console.error('检查IP重复失败:', error);
+    logger.error('检查IP重复失败:', error);
     return false;
   }
 };

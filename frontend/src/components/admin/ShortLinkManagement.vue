@@ -141,146 +141,19 @@
     </div>
 
     <!-- 创建/编辑对话框 -->
-    <el-dialog
+    <ShortLinkFormDialog
       v-model="dialogVisible"
-      :title="dialogTitle"
-      :width="isMobile ? '95%' : '600px'"
-      :append-to-body="true"
+      :form-data="formData"
+      :form-rules="formRules"
+      :is-edit="isEdit"
+      :offer-list="offerList"
+      :channel-list="channelList"
+      :generating-code="generatingCode"
+      :saving="saving"
+      @save="handleSave"
+      @generate-code="handleGenerateCode"
       @close="handleDialogClose"
-    >
-      <el-form
-        ref="formRef"
-        :model="formData"
-        :rules="formRules"
-        label-width="120px"
-      >
-        <el-form-item label="原始URL" prop="original_url">
-          <el-input
-            v-model="formData.original_url"
-            type="textarea"
-            :rows="5"
-            placeholder="https://example.com/very/long/url"
-            clearable
-          />
-          <div class="form-hint">
-            <el-icon :size="16"><InfoFilled /></el-icon>
-            <span>必须包含协议（http://或https://）</span>
-          </div>
-        </el-form-item>
-
-        <el-form-item label="自定义代码" prop="short_code">
-          <div style="display: flex; gap: 8px;">
-            <el-input
-              v-model="formData.short_code"
-              placeholder="留空则自动生成（3-20个字符，字母、数字、连字符、下划线）"
-              clearable
-              :disabled="isEdit"
-              style="flex: 1;"
-            />
-            <el-button
-              v-if="!isEdit"
-              @click="handleGenerateCode"
-              :loading="generatingCode"
-              :icon="Refresh"
-            >
-              自动生成
-            </el-button>
-          </div>
-          <div class="form-hint">
-            <el-icon :size="16"><InfoFilled /></el-icon>
-            <span v-if="isEdit">编辑时不可修改代码</span>
-            <span v-else>点击"自动生成"按钮生成唯一代码，或手动输入自定义代码</span>
-          </div>
-        </el-form-item>
-
-        <el-form-item label="标题" prop="title">
-          <el-input
-            v-model="formData.title"
-            placeholder="短链接标题（可选）"
-            clearable
-            maxlength="200"
-            show-word-limit
-          />
-        </el-form-item>
-
-        <el-form-item label="描述" prop="description">
-          <el-input
-            v-model="formData.description"
-            type="textarea"
-            :rows="3"
-            placeholder="短链接描述（可选）"
-            maxlength="500"
-            show-word-limit
-          />
-        </el-form-item>
-
-        <el-form-item label="关联Offer" prop="offer_id">
-          <el-select
-            v-model="formData.offer_id"
-            placeholder="选择关联的Offer（可选）"
-            filterable
-            clearable
-            popper-class="select-dropdown"
-            :teleported="true"
-            style="width: 100%;"
-          >
-            <el-option
-              v-for="offer in offerList"
-              :key="offer.id"
-              :label="`${offer.offer_name} (ID: ${offer.id})`"
-              :value="offer.id"
-            />
-          </el-select>
-          <div class="form-hint">
-            <el-icon :size="16"><InfoFilled /></el-icon>
-            <span>选择关联的Offer，用于标识短链接所属的Offer</span>
-          </div>
-        </el-form-item>
-
-        <el-form-item label="关联渠道" prop="channel_id">
-          <el-select
-            v-model="formData.channel_id"
-            placeholder="选择关联的渠道（可选）"
-            filterable
-            clearable
-            popper-class="select-dropdown"
-            :teleported="true"
-            style="width: 100%;"
-          >
-            <el-option
-              v-for="channel in channelList"
-              :key="channel.id"
-              :label="`${channel.publisher_name} (ID: ${channel.id})`"
-              :value="channel.id"
-            />
-          </el-select>
-          <div class="form-hint">
-            <el-icon :size="16"><InfoFilled /></el-icon>
-            <span>选择关联的渠道，用于标识短链接所属的渠道</span>
-          </div>
-        </el-form-item>
-
-        <el-form-item label="过期时间" prop="expires_at">
-          <el-date-picker
-            v-model="formData.expires_at"
-            type="datetime"
-            placeholder="选择过期时间（可选）"
-            format="YYYY-MM-DD HH:mm:ss"
-            value-format="YYYY-MM-DD HH:mm:ss"
-            style="width: 100%;"
-          />
-        </el-form-item>
-
-        <el-form-item label="状态" prop="is_active">
-          <el-switch v-model="formData.is_active" />
-        </el-form-item>
-      </el-form>
-
-      <template #footer>
-        <el-button @click="handleDialogClose">取消</el-button>
-        <el-button type="primary" @click="handleSave" :loading="saving">保存</el-button>
-      </template>
-    </el-dialog>
+    />
   </div>
 </template>
 
@@ -303,6 +176,7 @@ import { getPublishers } from '../../api/publisher';
 import { useDevice } from '../../composables/useDevice';
 import { logger } from '../../utils/logger';
 import { formatDate as formatDateWithTimezone } from '../../utils/dateFormat';
+import ShortLinkFormDialog from './ShortLinkFormDialog.vue';
 
 const { isMobile } = useDevice();
 const route = useRoute();
@@ -424,6 +298,7 @@ const loadData = async () => {
     logger.debug('loadData completed, links count:', links.value.length, 'total:', pagination.total);
   } catch (error) {
     logger.error('加载短链接列表失败:', error);
+    ElMessage.error('加载数据失败，请重试');
   } finally {
     loading.value = false;
   }
@@ -436,6 +311,7 @@ const loadStats = async () => {
     Object.assign(stats, statsData);
   } catch (error) {
     logger.error('加载统计失败:', error);
+    // 统计信息加载失败不影响主要功能，静默处理
   }
 };
 
@@ -447,6 +323,7 @@ const loadOffers = async () => {
     offerList.value = response.data || [];
   } catch (error) {
     logger.error('加载Offer列表失败:', error);
+    // Offer列表加载失败不影响主要功能，静默处理（下拉框会显示为空）
   }
 };
 
@@ -458,6 +335,7 @@ const loadChannels = async () => {
     channelList.value = response.data || [];
   } catch (error) {
     logger.error('加载渠道列表失败:', error);
+    // 渠道列表加载失败不影响主要功能，静默处理（下拉框会显示为空）
   }
 };
 
@@ -685,36 +563,57 @@ const handleDialogClose = () => {
   }
 };
 
+// 防止重复执行搜索的标志位
+let isApplyingSearch = false;
+
 // 检查并应用路由参数中的搜索关键词
 const applySearchFromQuery = async () => {
-  const searchFromQuery = route.query.search;
-  logger.debug('applySearchFromQuery called, searchFromQuery:', searchFromQuery, 'route.query:', route.query, 'current filters.search:', filters.search);
+  // 防止重复执行
+  if (isApplyingSearch) {
+    logger.debug('applySearchFromQuery already in progress, skipping');
+    return;
+  }
   
-  if (searchFromQuery) {
-    // 设置搜索关键词（确保是字符串）
-    const searchValue = String(searchFromQuery).trim();
-    logger.debug('Setting search value:', searchValue);
+  isApplyingSearch = true;
+  try {
+    const searchFromQuery = route.query.search;
+    logger.debug('applySearchFromQuery called, searchFromQuery:', searchFromQuery, 'route.query:', route.query, 'current filters.search:', filters.search);
     
-    // 直接设置，不比较（确保能正确设置）
-    filters.search = searchValue;
-    // 重置到第一页
-    pagination.page = 1;
-    // 等待 DOM 更新后再执行搜索
-    await nextTick();
-    logger.debug('After nextTick, filters.search:', filters.search, 'will call loadData');
-    // 执行搜索
-    loadData();
-  } else {
-    // 如果没有搜索参数，清除搜索框并加载数据
-    if (filters.search) {
-      filters.search = '';
+    if (searchFromQuery) {
+      // 验证短链接代码格式（只包含字母、数字、连字符和下划线）
+      const searchValue = String(searchFromQuery).trim();
+      const isValidShortCode = /^[a-zA-Z0-9_-]+$/.test(searchValue);
+      
+      if (!isValidShortCode) {
+        logger.warn('Invalid short code format:', searchValue);
+        // 仍然设置搜索值，但记录警告
+      }
+      
+      logger.debug('Setting search value:', searchValue);
+      
+      // 直接设置，不比较（确保能正确设置）
+      filters.search = searchValue;
+      // 重置到第一页
       pagination.page = 1;
+      // 等待 DOM 更新后再执行搜索
       await nextTick();
-      loadData();
-    } else if (pagination.page === 1) {
-      // 如果已经在第一页且没有搜索关键词，只加载数据（避免重复加载）
-      loadData();
+      logger.debug('After nextTick, filters.search:', filters.search, 'will call loadData');
+      // 执行搜索
+      await loadData();
+    } else {
+      // 如果没有搜索参数，清除搜索框并加载数据
+      if (filters.search) {
+        filters.search = '';
+        pagination.page = 1;
+        await nextTick();
+        await loadData();
+      } else if (pagination.page === 1) {
+        // 如果已经在第一页且没有搜索关键词，只加载数据（避免重复加载）
+        await loadData();
+      }
     }
+  } finally {
+    isApplyingSearch = false;
   }
 };
 

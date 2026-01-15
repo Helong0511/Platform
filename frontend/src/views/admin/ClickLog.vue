@@ -12,92 +12,13 @@
 
       <!-- 筛选栏 -->
       <div class="filter-container">
-        <el-collapse v-model="filterCollapse" class="filter-collapse">
-          <el-collapse-item name="filter" :title="filterCollapse.includes('filter') ? '收起筛选条件' : '展开筛选条件'">
-            <div class="filter-bar">
-              <div class="filter-row">
-                <el-input
-                  v-model="filterClickId"
-                  placeholder="Click ID"
-                  clearable
-                  class="filter-item"
-                  @clear="handleSearch"
-                  @keyup.enter="handleSearch"
-                  @input="debouncedSearch"
-                >
-                  <template #prefix>
-                    <el-icon><Search /></el-icon>
-                  </template>
-                </el-input>
-                <el-select
-                  v-model="filterOffer"
-                  placeholder="请选择Offer"
-                  clearable
-                  filterable
-                  class="filter-item"
-                  @change="handleSearch"
-                >
-                  <el-option
-                    v-for="offer in offerList"
-                    :key="offer.id"
-                    :label="`${offer.id} - ${offer.offer_name}`"
-                    :value="offer.id"
-                  />
-                </el-select>
-                <el-select
-                  v-model="filterPublisher"
-                  placeholder="请选择渠道"
-                  clearable
-                  filterable
-                  class="filter-item"
-                  @change="handleSearch"
-                >
-                  <el-option
-                    v-for="pub in publisherList"
-                    :key="pub.id"
-                    :label="pub.publisher_name"
-                    :value="pub.id"
-                  />
-                </el-select>
-                <el-input
-                  v-model="filterIp"
-                  placeholder="IP地址（支持精确匹配或前缀，如：192.168.）"
-                  clearable
-                  class="filter-item"
-                  @clear="handleSearch"
-                  @keyup.enter="handleSearch"
-                  @input="debouncedSearch"
-                />
-                <el-input
-                  v-model="filterCountry"
-                  placeholder="国家"
-                  clearable
-                  class="filter-item filter-item-small"
-                  @clear="handleSearch"
-                  @keyup.enter="handleSearch"
-                  @input="debouncedSearch"
-                />
-              </div>
-              <div class="filter-row">
-                <el-date-picker
-                  v-model="dateRange"
-                  type="daterange"
-                  range-separator="至"
-                  start-placeholder="开始日期"
-                  end-placeholder="结束日期"
-                  format="YYYY-MM-DD"
-                  value-format="YYYY-MM-DD"
-                  class="filter-item filter-item-date"
-                  @change="handleDateChange"
-                />
-                <div class="filter-actions">
-                  <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
-                  <el-button :icon="Refresh" @click="handleReset">重置</el-button>
-                </div>
-              </div>
-            </div>
-          </el-collapse-item>
-        </el-collapse>
+        <ClickLogFilter
+          v-model:filters="filters"
+          :offer-list="offerList"
+          :publisher-list="publisherList"
+          @search="handleSearch"
+          @reset="handleReset"
+        />
       </div>
 
       <!-- 表格 -->
@@ -278,184 +199,10 @@
     </el-card>
 
     <!-- 详情对话框 -->
-    <el-dialog
+    <ClickLogDetailDialog
       v-model="detailDialogVisible"
-      title="点击记录详情"
-      width="80%"
-      :close-on-click-modal="false"
-    >
-      <div v-if="currentDetail" class="detail-content">
-        <el-descriptions :column="2" border>
-          <el-descriptions-item label="Click ID" :span="2">
-            <el-button 
-              type="primary" 
-              link 
-              size="small"
-              @click="copyToClipboard(currentDetail.click_id)"
-            >
-              {{ currentDetail.click_id }}
-            </el-button>
-          </el-descriptions-item>
-          <el-descriptions-item label="访问时间">
-            {{ currentDetail.click_time ? formatDate(currentDetail.click_time) : '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="IP地址">
-            {{ currentDetail.ip || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="国家">
-            <el-tag v-if="currentDetail.country" size="small" type="info">
-              {{ currentDetail.country }}
-            </el-tag>
-            <span v-else>-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="设备类型">
-            <el-tag 
-              v-if="currentDetail.device_type" 
-              :type="currentDetail.device_type === 'mobile' ? 'success' : currentDetail.device_type === 'tablet' ? 'warning' : 'info'"
-              size="small"
-            >
-              {{ currentDetail.device_type === 'mobile' ? '手机' : currentDetail.device_type === 'tablet' ? '平板' : '桌面' }}
-            </el-tag>
-            <span v-else>-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="设备品牌">
-            {{ currentDetail.device_brand || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="设备型号">
-            {{ currentDetail.device_model || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="操作系统">
-            {{ currentDetail.os ? (currentDetail.os + (currentDetail.os_version ? ' ' + currentDetail.os_version : '')) : '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="浏览器">
-            {{ currentDetail.browser ? (currentDetail.browser + (currentDetail.browser_version ? ' ' + currentDetail.browser_version : '')) : '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="接受语言">
-            {{ currentDetail.accept_language || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="接受编码">
-            {{ currentDetail.accept_encoding || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="是否为机器人">
-            <el-tag v-if="currentDetail.is_bot" type="danger" size="small">是</el-tag>
-            <el-tag v-else type="success" size="small">否</el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="Offer ID">
-            <span v-if="currentDetail.offer_id" class="text-primary">
-              {{ currentDetail.offer_id }}
-            </span>
-            <span v-else class="text-muted">-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="Offer名称">
-            {{ currentDetail.offer_name || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="渠道ID">
-            <span v-if="currentDetail.publisher_id" class="text-primary">
-              {{ currentDetail.publisher_id }}
-            </span>
-            <span v-else class="text-muted">-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="渠道名称">
-            {{ currentDetail.publisher_name || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="广告主ID">
-            <span v-if="currentDetail.advertiser_id" class="text-primary">
-              {{ currentDetail.advertiser_id }}
-            </span>
-            <span v-else class="text-muted">-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="广告主名称">
-            {{ currentDetail.advertiser_name || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="短链接ID">
-            <span v-if="currentDetail.short_link_id" class="text-primary">
-              {{ currentDetail.short_link_id }}
-            </span>
-            <span v-else class="text-muted">-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="短链接代码">
-            <el-button 
-              v-if="currentDetail.short_code" 
-              type="primary" 
-              link 
-              size="small"
-              @click="copyToClipboard(currentDetail.short_code)"
-            >
-              {{ currentDetail.short_code }}
-            </el-button>
-            <span v-else class="text-muted">-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="短链接标题">
-            {{ currentDetail.short_link_title || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="短链接URL" :span="2">
-            <el-link 
-              v-if="currentDetail.short_link_url" 
-              :href="currentDetail.short_link_url" 
-              target="_blank" 
-              type="primary"
-            >
-              {{ currentDetail.short_link_url }}
-            </el-link>
-            <span v-else class="text-muted">-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="来源页面" :span="2">
-            <el-link 
-              v-if="currentDetail.referer" 
-              :href="currentDetail.referer" 
-              target="_blank" 
-              type="primary"
-            >
-              {{ currentDetail.referer }}
-            </el-link>
-            <span v-else>-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="原始点击URL" :span="2">
-            <el-link 
-              v-if="currentDetail.original_request_url" 
-              :href="currentDetail.original_request_url" 
-              target="_blank" 
-              type="primary"
-            >
-              {{ currentDetail.original_request_url }}
-            </el-link>
-            <span v-else>-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="最终跳转URL" :span="2">
-            <el-link 
-              v-if="currentDetail.final_redirect_url" 
-              :href="currentDetail.final_redirect_url" 
-              target="_blank" 
-              type="success"
-            >
-              {{ currentDetail.final_redirect_url }}
-            </el-link>
-            <span v-else>-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="User Agent" :span="2">
-            <div class="text-wrap">{{ currentDetail.user_agent || '-' }}</div>
-          </el-descriptions-item>
-          <el-descriptions-item label="URL参数" :span="2" v-if="currentDetail.url_params">
-            <pre class="json-content">{{ formatJSON(currentDetail.url_params) }}</pre>
-          </el-descriptions-item>
-          <el-descriptions-item label="请求头" :span="2" v-if="currentDetail.all_headers">
-            <pre class="json-content">{{ formatJSON(currentDetail.all_headers) }}</pre>
-          </el-descriptions-item>
-          <el-descriptions-item label="转化ID">
-            <el-tag v-if="currentDetail.conversion_id" type="success" size="small">
-              已转化 (ID: {{ currentDetail.conversion_id }})
-            </el-tag>
-            <span v-else>-</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="创建时间">
-            {{ currentDetail.created_at ? formatDate(currentDetail.created_at) : '-' }}
-          </el-descriptions-item>
-        </el-descriptions>
-      </div>
-      <template #footer>
-        <el-button @click="detailDialogVisible = false">关闭</el-button>
-      </template>
-    </el-dialog>
+      :detail="currentDetail"
+    />
   </div>
 </template>
 
@@ -463,23 +210,28 @@
 import { ref, reactive, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Search, Refresh, Mouse } from '@element-plus/icons-vue'
+import { Mouse } from '@element-plus/icons-vue'
 import { getClicks } from '@/api/clicks'
 import { getOffers } from '@/api/offer'
 import { getPublishers } from '@/api/publisher'
 import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
+import ClickLogFilter from '@/components/admin/ClickLogFilter.vue'
+import ClickLogDetailDialog from '@/components/admin/ClickLogDetailDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
-const filterClickId = ref('')
-const filterOffer = ref(null)
-const filterPublisher = ref(null)
-const filterIp = ref('')
-const filterCountry = ref('')
-const dateRange = ref([])
-const filterCollapse = ref(['filter']) // 默认展开筛选条件
+
+// 使用统一的filters对象
+const filters = reactive({
+  clickId: '',
+  offer: null,
+  publisher: null,
+  ip: '',
+  country: '',
+  dateRange: []
+})
 
 const pagination = reactive({
   page: 1,
@@ -539,13 +291,13 @@ const loadData = async () => {
     const params = {
       page: pagination.page,
       page_size: Math.min(pagination.pageSize, 100),
-      click_id: filterClickId.value || undefined,
-      offer_id: filterOffer.value || undefined,
-      publisher_id: filterPublisher.value || undefined,
-      ip: filterIp.value || undefined,
-      country: filterCountry.value || undefined,
-      start_date: dateRange.value?.[0] || undefined,
-      end_date: dateRange.value?.[1] || undefined
+      click_id: filters.clickId || undefined,
+      offer_id: filters.offer || undefined,
+      publisher_id: filters.publisher || undefined,
+      ip: filters.ip || undefined,
+      country: filters.country || undefined,
+      start_date: filters.dateRange?.[0] || undefined,
+      end_date: filters.dateRange?.[1] || undefined
     }
     const response = await getClicks(params)
     // response已经是标准分页格式，直接使用data和total字段
@@ -559,15 +311,6 @@ const loadData = async () => {
   }
 }
 
-// 日期改变（日期选择器不需要防抖，直接搜索）
-const handleDateChange = () => {
-  // 清除防抖定时器，立即搜索
-  if (searchDebounceTimer) {
-    clearTimeout(searchDebounceTimer)
-  }
-  handleSearch()
-}
-
 // 搜索
 const handleSearch = () => {
   pagination.page = 1
@@ -576,12 +319,12 @@ const handleSearch = () => {
 
 // 重置
 const handleReset = () => {
-  filterClickId.value = ''
-  filterOffer.value = null
-  filterPublisher.value = null
-  filterIp.value = ''
-  filterCountry.value = ''
-  dateRange.value = []
+  filters.clickId = ''
+  filters.offer = null
+  filters.publisher = null
+  filters.ip = ''
+  filters.country = ''
+  filters.dateRange = []
   pagination.page = 1
   loadData()
 }
@@ -599,31 +342,25 @@ const copyToClipboard = async (text) => {
 }
 
 // 点击短链接代码，跳转到短链接管理页面并搜索
-const handleShortCodeClick = (shortCode) => {
+const handleShortCodeClick = async (shortCode) => {
   if (!shortCode) return
-  router.push({
-    name: 'ShortLinkManagement',
-    query: {
-      search: shortCode
-    }
-  })
+  try {
+    await router.push({
+      name: 'ShortLinkManagement',
+      query: {
+        search: shortCode
+      }
+    })
+  } catch (error) {
+    logger.error('跳转到短链接管理页面失败:', error)
+    ElMessage.error('跳转失败，请重试')
+  }
 }
 
 // 显示详情
 const showDetail = (row) => {
   currentDetail.value = row
   detailDialogVisible.value = true
-}
-
-// 格式化JSON
-const formatJSON = (jsonString) => {
-  if (!jsonString) return '-'
-  try {
-    const obj = JSON.parse(jsonString)
-    return JSON.stringify(obj, null, 2)
-  } catch (e) {
-    return jsonString
-  }
 }
 
 // 分页

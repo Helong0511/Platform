@@ -31,6 +31,7 @@ class UserInfoResponse(BaseSchema):
 class LoginResponse(BaseSchema):
     """登录响应模型"""
     access_token: str
+    refresh_token: str | None = None  # 刷新令牌（可选，用于令牌刷新机制）
     token_type: str = "bearer"
     user: UserInfoResponse
 
@@ -39,3 +40,8 @@ class LoginRequest(BaseSchema):
     """登录请求模型"""
     username: str = Field(..., min_length=3, max_length=50)
     password: str = Field(..., min_length=6, max_length=100)
+
+
+class RefreshTokenRequest(BaseSchema):
+    """刷新令牌请求模型"""
+    refresh_token: str = Field(..., description="刷新令牌")

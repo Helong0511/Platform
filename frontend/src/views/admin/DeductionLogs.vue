@@ -301,6 +301,7 @@ import { getDeductionLogs } from '@/api/deduction'
 import { getAdvertisers } from '@/api/advertiser'
 import { getOffers } from '@/api/offer'
 import { getPublishers } from '@/api/publisher'
+import { logger } from '@/utils/logger'
 
 const loading = ref(false)
 const tableData = ref([])
@@ -496,7 +497,7 @@ const loadOptions = async () => {
         hasMore = allAdvertisers.length < total && advertisers.length > 0
         page++
       } catch (err) {
-        console.error('加载广告主失败：', err)
+        logger.error('加载广告主失败：', err)
         hasMore = false
       }
     }
@@ -522,7 +523,7 @@ const loadOptions = async () => {
         hasMore = allOffers.length < total && offers.length > 0
         page++
       } catch (err) {
-        console.error('加载Offer失败：', err)
+        logger.error('加载Offer失败：', err)
         hasMore = false
       }
     }
@@ -551,7 +552,7 @@ const loadOptions = async () => {
         hasMore = allPublishers.length < total && publishers.length > 0
         page++
       } catch (err) {
-        console.error('加载渠道失败：', err)
+        logger.error('加载渠道失败：', err)
         hasMore = false
       }
     }
@@ -561,7 +562,7 @@ const loadOptions = async () => {
       name: item.publisher_name
     }))
   } catch (error) {
-    console.error('加载选项数据失败：', error)
+    logger.error('加载选项数据失败：', error)
     ElMessage.error('加载选项数据失败：' + (error.message || '未知错误'))
   }
 }

@@ -143,23 +143,31 @@ class JWTUtils:
         # 这样可以确保测试环境和开发环境正常运行
         logger.warning(f"未配置RSA {key_type} 密钥，生成临时测试密钥")
         # 生成2048位RSA密钥对
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-            backend=default_backend()
-        )
-        
-        if key_type == "private":
-            return private_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
-            ).decode("utf-8")
-        else:
-            return private_key.public_key().public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
-            ).decode("utf-8")
+        try:
+            from cryptography.hazmat.primitives.asymmetric import rsa
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.backends import default_backend
+            
+            private_key = rsa.generate_private_key(
+                public_exponent=65537,
+                key_size=2048,
+                backend=default_backend()
+            )
+            
+            if key_type == "private":
+                return private_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption()
+                ).decode("utf-8")
+            else:
+                return private_key.public_key().public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                ).decode("utf-8")
+        except ImportError:
+            logger.error("cryptography库未安装，无法生成临时RSA密钥")
+            raise ValueError(f"未配置RSA {key_type} 密钥，且无法生成临时密钥（cryptography库未安装）")
     
     @staticmethod
     def create_access_token(subject: str | Any, expires_delta: timedelta | None = None) -> str:
@@ -203,6 +211,51 @@ class JWTUtils:
             encoded_jwt = jwt.encode(to_encode, private_key, algorithm="RS256")
         else:
             # 默认使用HS256算法（对称加密）
+            encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=algorithm)
+        
+        return encoded_jwt
+
+    @staticmethod
+    def create_refresh_token(subject: str | Any, expires_delta: timedelta | None = None) -> str:
+        """
+        生成JWT刷新令牌
+        
+        刷新令牌的过期时间通常比访问令牌长（如7天或30天）
+        
+        参数:
+            subject: 令牌主体（通常是用户ID）
+            expires_delta: 可选的过期时间增量，默认7天
+        
+        返回:
+            JWT刷新令牌字符串
+        """
+        # 刷新令牌默认过期时间为7天
+        if expires_delta:
+            expire = datetime.now(timezone.utc) + expires_delta
+        else:
+            # 默认7天过期
+            expire = datetime.now(timezone.utc) + timedelta(days=7)
+
+        # 构建JWT载荷
+        jti = secrets.token_urlsafe(16)
+        to_encode = {
+            "exp": expire,
+            "iat": datetime.now(timezone.utc),
+            "sub": str(subject),
+            "jti": jti,
+            "type": "refresh"  # 刷新令牌类型
+        }
+        
+        algorithm = settings.JWT_ALGORITHM
+        
+        if algorithm == "RS256":
+            private_key = JWTUtils._load_rsa_key(
+                settings.RSA_PRIVATE_KEY,
+                settings.RSA_PRIVATE_KEY_PATH,
+                "private"
+            )
+            encoded_jwt = jwt.encode(to_encode, private_key, algorithm="RS256")
+        else:
             encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=algorithm)
         
         return encoded_jwt
@@ -358,37 +411,89 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # ====== 查询用户 ======
-    # 从数据库查询用户信息
-    result = await db.execute(select(User).where(User.id == int(user_id)))
-    user = result.scalars().first()
+    # ====== 查询用户（使用权限缓存优化） ======
+    # 尝试使用权限缓存，减少数据库查询
+    try:
+        from app.core.permission_cache import get_user_permissions
+        
+        # 先检查缓存中的权限信息
+        permissions = await get_user_permissions(int(user_id), db)
+        
+        # 如果缓存中有权限信息，先进行基本检查
+        if permissions.get("role") is None:
+            # 缓存中没有用户信息，说明用户不存在
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="用户不存在",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # 检查用户状态（从缓存）
+        if not permissions.get("is_active", True):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="用户已被禁用",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        if permissions.get("login_restricted", False):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="登录已被限制",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # 如果缓存检查通过，仍然需要查询完整的用户对象（因为需要返回User对象）
+        # 但可以优化：如果只需要权限检查，可以直接使用缓存
+        result = await db.execute(select(User).where(User.id == int(user_id)))
+        user = result.scalars().first()
+        
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="用户不存在",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        return user
+        
+    except HTTPException:
+        # 重新抛出HTTP异常
+        raise
+    except Exception as e:
+        # 缓存功能失败，回退到直接查询数据库
+        logger.warning(f"权限缓存检查失败，回退到数据库查询: {e}")
+        
+        # 从数据库查询用户信息
+        result = await db.execute(select(User).where(User.id == int(user_id)))
+        user = result.scalars().first()
 
-    if user is None:
-        # 用户不存在（可能已被删除）
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用户不存在",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        if user is None:
+            # 用户不存在（可能已被删除）
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="用户不存在",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-    # ====== 用户状态检查 ======
-    # 检查用户是否被禁用
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="用户已被禁用",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        # ====== 用户状态检查 ======
+        # 检查用户是否被禁用
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="用户已被禁用",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-    # 检查用户登录是否受限
-    if user.login_restricted:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=user.login_message or "登录已被限制",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        # 检查用户登录是否受限
+        if user.login_restricted:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=user.login_message or "登录已被限制",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-    return user
+        return user
 
 
 # ====== 管理员权限依赖 ======

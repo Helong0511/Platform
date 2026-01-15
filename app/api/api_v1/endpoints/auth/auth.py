@@ -242,11 +242,16 @@ async def login(
                         )
                 # 如果allowed_ips为空或None，则不限制IP（向后兼容）
 
-    # ====== 生成访问令牌 ======
-    # 创建JWT令牌，设置过期时间（从配置中读取）
+    # ====== 生成访问令牌和刷新令牌 ======
+    # 创建JWT访问令牌，设置过期时间（从配置中读取）
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = JWTUtils.create_access_token(
         user.id, expires_delta=access_token_expires
+    )
+    
+    # 生成刷新令牌（7天过期）
+    refresh_token = JWTUtils.create_refresh_token(
+        user.id, expires_delta=timedelta(days=7)
     )
     
     # ====== 记录会话信息 ======
@@ -328,6 +333,7 @@ async def login(
 
     response_data = {
         "access_token": access_token,
+        "refresh_token": refresh_token,  # 刷新令牌
         "token_type": "bearer",
         "user": {
             "id": user.id,

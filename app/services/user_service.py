@@ -218,6 +218,13 @@ class UserService(BaseService[User]):
             # selectinload不会产生重复行，但为了安全起见使用unique()
             user = user_result.unique().scalars().first()
         
+        # 清除权限缓存（新用户创建）
+        try:
+            from app.core.permission_cache import invalidate_user_permission_cache
+            await invalidate_user_permission_cache(user.id)
+        except Exception as e:
+            logger.warning(f"清除权限缓存失败: {e}")
+        
         # 记录审计日志
         await log_user_action(
             db=self.db,
@@ -328,6 +335,13 @@ class UserService(BaseService[User]):
         await self.db.commit()
         await self.db.refresh(user)
         
+        # 清除权限缓存（用户信息已更新）
+        try:
+            from app.core.permission_cache import invalidate_user_permission_cache
+            await invalidate_user_permission_cache(user_id)
+        except Exception as e:
+            logger.warning(f"清除权限缓存失败: {e}")
+        
         # 如果 is_active 改变，记录激活/禁用日志
         if 'is_active' in user_data and user_data['is_active'] != old_is_active:
             if user.is_active:
@@ -402,6 +416,13 @@ class UserService(BaseService[User]):
         # 删除用户
         await self.db.delete(user)
         await self.db.commit()
+        
+        # 清除权限缓存（用户已删除）
+        try:
+            from app.core.permission_cache import invalidate_user_permission_cache
+            await invalidate_user_permission_cache(user_id)
+        except Exception as e:
+            logger.warning(f"清除权限缓存失败: {e}")
         
         logger.info(f"用户已删除: {user.username} (ID: {user_id})")
     

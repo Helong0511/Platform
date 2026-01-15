@@ -227,6 +227,9 @@ class PublisherService(BaseService[Publisher]):
             publisher.postback_url = publisher_data['postback_url']
         if 'postback_method' in publisher_data:
             publisher.postback_method = publisher_data['postback_method']
+        elif publisher.postback_method is None:
+            # 如果 postback_method 为 None，设置为默认值 GET
+            publisher.postback_method = 'GET'
         if 'client_id' in publisher_data:
             publisher.client_id = publisher_data['client_id']
         if 'is_active' in publisher_data:

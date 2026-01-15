@@ -2,6 +2,7 @@
 短链接服务层
 封装短链接相关的业务逻辑
 """
+import re
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -124,39 +125,51 @@ class ShortLinkService(BaseService[ShortLink]):
         if search:
             # 优化搜索：优先精确匹配short_code，然后使用全文索引或前缀匹配
             search_trimmed = search.strip()
+            
+            # 限制搜索关键词长度，防止过长搜索影响性能
+            if len(search_trimmed) > 100:
+                search_trimmed = search_trimmed[:100]
+                logger.warning(f"搜索关键词过长，已截断到100字符: {search}")
+            
+            # 判断搜索关键词是否像短链接代码（只包含字母、数字、连字符和下划线）
+            is_likely_short_code = bool(re.match(r'^[a-zA-Z0-9_-]+$', search_trimmed))
+            
             search_conditions = []
             
-            # 1. 精确匹配short_code（最快，使用唯一索引）
-            search_conditions.append(ShortLink.short_code == search_trimmed)
-            
-            # 2. 前缀匹配short_code（可以使用索引）
-            if len(search_trimmed) >= 2:  # 至少2个字符才使用前缀匹配
-                search_conditions.append(ShortLink.short_code.like(f"{search_trimmed}%"))
-            
-            # 3. 使用全文索引搜索title和description（如果存在全文索引）
-            try:
-                # 尝试使用全文索引搜索title
-                fulltext_title = text(
-                    "MATCH(title) AGAINST(:search_term IN NATURAL LANGUAGE MODE)"
-                ).bindparams(search_term=search_trimmed)
-                search_conditions.append(fulltext_title)
+            if is_likely_short_code:
+                # 如果看起来像短链接代码，优先精确匹配（性能最好）
+                # 1. 精确匹配short_code（最快，使用唯一索引）
+                search_conditions.append(ShortLink.short_code == search_trimmed)
                 
-                # 尝试使用全文索引搜索description
-                fulltext_desc = text(
-                    "MATCH(description) AGAINST(:search_term IN NATURAL LANGUAGE MODE)"
-                ).bindparams(search_term=search_trimmed)
-                search_conditions.append(fulltext_desc)
-            except Exception:
-                # 全文索引不存在或查询失败，使用前缀匹配（可以使用普通索引）
-                # title前缀匹配
-                search_conditions.append(ShortLink.title.like(f"{search_trimmed}%"))
-                # description前缀匹配
-                search_conditions.append(ShortLink.description.like(f"{search_trimmed}%"))
+                # 2. 前缀匹配short_code（可以使用索引）
+                if len(search_trimmed) >= 2:  # 至少2个字符才使用前缀匹配
+                    search_conditions.append(ShortLink.short_code.like(f"{search_trimmed}%"))
+            else:
+                # 如果不是短链接代码格式，只搜索标题、描述和URL
+                # 使用全文索引搜索title和description（如果存在全文索引）
+                try:
+                    # 尝试使用全文索引搜索title
+                    fulltext_title = text(
+                        "MATCH(title) AGAINST(:search_term IN NATURAL LANGUAGE MODE)"
+                    ).bindparams(search_term=search_trimmed)
+                    search_conditions.append(fulltext_title)
+                    
+                    # 尝试使用全文索引搜索description
+                    fulltext_desc = text(
+                        "MATCH(description) AGAINST(:search_term IN NATURAL LANGUAGE MODE)"
+                    ).bindparams(search_term=search_trimmed)
+                    search_conditions.append(fulltext_desc)
+                except Exception:
+                    # 全文索引不存在或查询失败，使用前缀匹配（可以使用普通索引）
+                    # title前缀匹配
+                    search_conditions.append(ShortLink.title.like(f"{search_trimmed}%"))
+                    # description前缀匹配
+                    search_conditions.append(ShortLink.description.like(f"{search_trimmed}%"))
             
-            # 4. original_url的搜索（性能较差，但保留功能）
+            # 3. original_url的搜索（性能较差，但保留功能）
             # URL通常很长，LIKE查询性能很差，但为了功能完整性保留
-            # 建议：如果URL搜索不是主要需求，可以考虑注释掉
-            if len(search_trimmed) >= 3:  # URL搜索至少3个字符
+            # 增加最小长度限制到10个字符，减少全表扫描的影响
+            if len(search_trimmed) >= 4:  # URL搜索至少10个字符（性能优化）
                 search_conditions.append(ShortLink.original_url.like(f"%{search_trimmed}%"))
             
             if search_conditions:

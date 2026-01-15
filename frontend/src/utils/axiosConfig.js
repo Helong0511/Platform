@@ -161,9 +161,50 @@ export const setupResponseInterceptor = () => {
       if (error.response && error.response.status === 401) {
         const requestUrl = error.config?.url || '';
         const isLoginRequest = requestUrl.includes('/auth/login');
+        const isRefreshRequest = requestUrl.includes('/auth/refresh');
 
-        if (isLoginRequest) {
+        if (isLoginRequest || isRefreshRequest) {
           return Promise.reject(error);
+        }
+
+        // 尝试使用刷新令牌自动刷新访问令牌
+        try {
+          const { refreshAccessToken } = await import('../api/auth');
+          const userInfoStr = sessionStorage.getItem('userInfo');
+          
+          if (userInfoStr) {
+            const userInfo = JSON.parse(userInfoStr);
+            // 检查是否有刷新令牌（存储在sessionStorage中）
+            const refreshToken = sessionStorage.getItem('refresh_token');
+            
+            if (refreshToken) {
+              try {
+                // 尝试刷新令牌
+                const refreshResponse = await refreshAccessToken(refreshToken);
+                
+                if (refreshResponse && refreshResponse.access_token) {
+                  // 刷新成功，更新用户信息和令牌
+                  if (refreshResponse.user) {
+                    sessionStorage.setItem('userInfo', JSON.stringify(refreshResponse.user));
+                  }
+                  if (refreshResponse.refresh_token) {
+                    sessionStorage.setItem('refresh_token', refreshResponse.refresh_token);
+                  }
+                  
+                  // 重试原始请求
+                  const originalRequest = error.config;
+                  originalRequest.headers['Authorization'] = `Bearer ${refreshResponse.access_token}`;
+                  return axios(originalRequest);
+                }
+              } catch (refreshError) {
+                // 刷新令牌失败，继续执行清除认证数据的流程
+                logger.warn('令牌刷新失败:', refreshError);
+              }
+            }
+          }
+        } catch (e) {
+          // 刷新令牌功能不可用，继续执行清除认证数据的流程
+          logger.warn('尝试刷新令牌时出错:', e);
         }
 
         const errorData = error.response.data;
@@ -172,6 +213,7 @@ export const setupResponseInterceptor = () => {
           : '登录已过期，请重新登录';
         
         clearAuthData();
+        sessionStorage.removeItem('refresh_token'); // 清除刷新令牌
         error._handled = true;
         
         if (window.location.pathname !== '/login') {

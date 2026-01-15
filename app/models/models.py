@@ -133,7 +133,8 @@ class User(Base):
             hashed = user.get_password_hash("my_password")
         """
         # bcrypt算法限制：密码最大72字节，超过部分会被截断
-        truncated_password = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
+        from app.core.constants import BCRYPT_MAX_PASSWORD_LENGTH
+        truncated_password = password.encode('utf-8')[:BCRYPT_MAX_PASSWORD_LENGTH].decode('utf-8', errors='ignore')
         return pwd_context.hash(truncated_password)
     
     def set_password(self, password: str) -> None:

@@ -311,6 +311,7 @@ import { getAdvertisers } from '@/api/advertiser'
 import { getOffers } from '@/api/offer'
 import { getPublishers } from '@/api/publisher'
 import * as echarts from 'echarts'
+import { logger } from '@/utils/logger'
 
 const loading = ref(false)
 const dateRange = ref([])
@@ -429,7 +430,7 @@ const loadGroupNames = async () => {
           hasMore = allAdvertisers.length < total && advertisers.length > 0
           page++
         } catch (err) {
-          console.error('加载广告主失败：', err)
+          logger.error('加载广告主失败：', err)
           hasMore = false
         }
       }
@@ -459,7 +460,7 @@ const loadGroupNames = async () => {
             page++
           }
         } catch (err) {
-          console.error('加载Offer失败：', err)
+          logger.error('加载Offer失败：', err)
           hasMore = false
         }
       }
@@ -489,7 +490,7 @@ const loadGroupNames = async () => {
             page++
           }
         } catch (err) {
-          console.error('加载渠道失败：', err)
+          logger.error('加载渠道失败：', err)
           hasMore = false
         }
       }
@@ -501,7 +502,7 @@ const loadGroupNames = async () => {
       }))
     }
   } catch (error) {
-    console.error('加载分组名称失败：', error)
+    logger.error('加载分组名称失败：', error)
   }
 }
 
@@ -658,7 +659,7 @@ const loadOptions = async () => {
       name: item.publisher_name
     }))
   } catch (error) {
-    console.error('加载选项数据失败：', error)
+    logger.error('加载选项数据失败：', error)
     ElMessage.error('加载选项数据失败：' + (error.message || '未知错误'))
   }
 }

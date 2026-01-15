@@ -305,10 +305,15 @@
                 v-model="userForm.password" 
                 name="password"
                 type="password" 
-                :placeholder="!currentUserId ? '请输入密码（至少6位）' : '留空则不修改密码'"
+                :placeholder="!currentUserId ? '请输入密码（至少6位，最多72字符）' : '留空则不修改密码'"
                 show-password 
                 clearable
+                maxlength="72"
               ></el-input>
+              <div class="form-hint" style="margin-top: 4px; margin-left: 120px;" v-if="!currentUserId">
+                <el-icon :size="16"><InfoFilled /></el-icon>
+                <span>密码长度限制：6-72个字符（bcrypt算法限制）</span>
+              </div>
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="24" :md="12" :lg="12">
@@ -628,11 +633,14 @@ const formRules = computed(() => {
   if (!currentUserId.value) {
     rules.password = [
       { required: true, message: '请输入密码', trigger: 'blur' },
-      { min: 6, message: '密码长度不能少于 6 个字符', trigger: 'blur' }
+      { min: 6, message: '密码长度不能少于 6 个字符', trigger: 'blur' },
+      { max: 72, message: '密码长度不能超过 72 个字符（bcrypt算法限制）', trigger: 'blur' }
     ];
   } else {
-    // 编辑模式下，确保 password 字段存在但为空数组
-    rules.password = [];
+    // 编辑模式下，如果输入了密码，也需要验证长度
+    rules.password = [
+      { max: 72, message: '密码长度不能超过 72 个字符（bcrypt算法限制）', trigger: 'blur' }
+    ];
   }
   
   // 只有在创建新客户时才需要公司名称验证

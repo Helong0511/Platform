@@ -48,18 +48,16 @@ from sqlalchemy.future import select
 import traceback
 from anyio import EndOfStream
 # ====== 常量定义 ======
-# 日志配置常量
-LOG_FILE_MAX_BYTES = 5 * 1024 * 1024  # 5MB
-LOG_FILE_BACKUP_COUNT = 5
-LOG_DIR_MODE = 0o755
-
-# 错误信息长度限制
-MAX_ERROR_MESSAGE_LENGTH = 1000
-MAX_STACK_TRACE_LENGTH = 2000
-
-# Telegram Bot 启动延迟（秒）
-TELEGRAM_BOT_START_DELAY = 2
-TELEGRAM_SHUTDOWN_MESSAGE_TIMEOUT = 3.0
+# 从常量模块导入，避免魔法数字
+from app.core.constants import (
+    LOG_FILE_MAX_BYTES,
+    LOG_FILE_BACKUP_COUNT,
+    LOG_DIR_MODE,
+    MAX_ERROR_MESSAGE_LENGTH,
+    MAX_STACK_TRACE_LENGTH,
+    TELEGRAM_BOT_START_DELAY,
+    TELEGRAM_SHUTDOWN_MESSAGE_TIMEOUT
+)
 
 # 抑制 APScheduler 的 pkg_resources 弃用警告
 # 这是 APScheduler 库内部使用已弃用的 pkg_resources 导致的警告

@@ -124,6 +124,7 @@ export const getDefaultRoute = (userInfo) => {
 export const clearAuthData = () => {
   try {
     sessionStorage.removeItem('userInfo');
+    sessionStorage.removeItem('refresh_token'); // 清除刷新令牌
     // 注意：HttpOnly cookie 的清除需要由后端在 logout 接口中处理
   } catch (e) {
     logger.warn('清除认证信息时出错:', e);
@@ -232,7 +233,7 @@ export const useAuthStore = defineStore('auth', {
           throw error;
         }
 
-        // 正常响应格式：{access_token, token_type, user}
+        // 正常响应格式：{access_token, token_type, refresh_token, user}
         // 注意：token 已经过 set-cookie 设置到 HttpOnly cookie 中
         const user_info = responseData.user;
 
@@ -241,8 +242,13 @@ export const useAuthStore = defineStore('auth', {
           throw new Error('登录响应数据格式错误：缺少用户信息');
         }
 
-        // 只保存用户信息到sessionStorage (token 存储在 cookie 中)
+        // 保存用户信息到sessionStorage (token 存储在 cookie 中)
         sessionStorage.setItem('userInfo', JSON.stringify(user_info));
+        
+        // 保存刷新令牌（如果提供）
+        if (responseData.refresh_token) {
+          sessionStorage.setItem('refresh_token', responseData.refresh_token);
+        }
 
         // 更新状态
         this.userInfo = user_info;
