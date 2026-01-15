@@ -134,7 +134,15 @@ class PostbackProcessor:
             else:
                 logger.debug(f"Postback 请求 IP {request_ip} 在白名单中，继续处理")
         
-        # 2. 获取平台处理器
+        # 2. 获取平台处理器（平台名可能被自定义参数覆盖，但处理器仍按入参平台选择）
+        platform_override = raw_data.get("platform")
+        if isinstance(platform_override, str):
+            platform_override = platform_override.strip()
+            if not platform_override:
+                platform_override = None
+        else:
+            platform_override = None
+
         handler = get_handler(platform)
         if not handler:
             logger.warning(f"未找到平台 {platform} 的处理器")
@@ -234,17 +242,21 @@ class PostbackProcessor:
                         advertiser_obj = advertiser_result.scalars().first()
                         if advertiser_obj:
                             advertiser_name = advertiser_obj.advertiser_name
-                            # 将平台名称设置为广告主名称
-                            platform = advertiser_name
-                            logger.info(
-                                f"根据 click_id={click_id} 找到广告主: "
-                                f"advertiser_id={advertiser_id}, advertiser_name={advertiser_name}, "
-                                f"平台名称已更新为: {platform}"
-                            )
+                            # 如果未传自定义平台名，则将平台名称设置为广告主名称
+                            if not platform_override:
+                                platform = advertiser_name
+                                logger.info(
+                                    f"根据 click_id={click_id} 找到广告主: "
+                                    f"advertiser_id={advertiser_id}, advertiser_name={advertiser_name}, "
+                                    f"平台名称已更新为: {platform}"
+                                )
             
             # 6. 检查是否已存在（防重复处理）- 使用更新后的平台名称
             event_name = normalized_data.get("event_name")
-            final_platform = advertiser_name if advertiser_name else platform
+            if platform_override:
+                final_platform = platform_override
+            else:
+                final_platform = advertiser_name if advertiser_name else platform
             
             # 6.1. 检查主表（PostbackConversion）
             existing = await db.execute(
@@ -479,9 +491,11 @@ class PostbackProcessor:
                     deduction_result = None
                     deduction_config = None
             
-            # 9. 创建转化记录（使用广告主名称作为平台名称）
-            # 如果找到了广告主名称，使用广告主名称；否则使用传入的 platform 参数
-            final_platform = advertiser_name if advertiser_name else platform
+            # 9. 创建转化记录（优先使用自定义平台名称，其次广告主名称）
+            if platform_override:
+                final_platform = platform_override
+            else:
+                final_platform = advertiser_name if advertiser_name else platform
             
             # 9.1. 根据 click_id 从 clicks 表获取数据，补充或更新字段
             # 如果 postback 数据中没有某些字段，使用 clicks 表中的数据
@@ -671,7 +685,7 @@ class PostbackProcessor:
             # 记录日志（区分是否保存了转化记录）
             if conversion:
                 logger.info(
-                    f"平台 {platform} postback 转化记录已保存: "
+                    f"平台 {final_platform} postback 转化记录已保存: "
                     f"conversion_id={conversion_id}, event_name={event_name}, "
                     f"original_payout={original_payout}, payout={final_payout}, "
                     f"product_id={product_id}, client_id={client_id}, "
@@ -679,7 +693,7 @@ class PostbackProcessor:
                 )
             else:
                 logger.info(
-                    f"平台 {platform} postback 转化被扣量，未保存到主表: "
+                    f"平台 {final_platform} postback 转化被扣量，未保存到主表: "
                     f"conversion_id={conversion_id}, event_name={event_name}, "
                     f"original_payout={original_payout}, "
                     f"click_id={click_id}, offer_id={offer_id}"
@@ -689,7 +703,7 @@ class PostbackProcessor:
             if original_payout is None:
                 logger.warning(
                     f"警告：转化记录缺少原始 payout (PO): conversion_id={conversion_id}, "
-                    f"platform={platform}, raw_data_keys={list(raw_data.keys())}"
+                    f"platform={final_platform}, raw_data_keys={list(raw_data.keys())}"
                 )
             
             # 10. 异步发送通知（按客户和产品）
@@ -813,7 +827,7 @@ class PostbackProcessor:
                 "success": True,
                 "message": "PostBack 接收成功",
                 "conversion_id": conversion_id,
-                "platform": platform
+                "platform": final_platform
             }
             
         except Exception as e:
