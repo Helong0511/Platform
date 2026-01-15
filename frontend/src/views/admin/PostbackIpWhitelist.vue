@@ -218,38 +218,107 @@ const formData = reactive({
   is_active: true
 });
 
+// IP地址格式验证函数
+const validateIpAddress = (value) => {
+  if (!value || !value.trim()) {
+    return '请输入IP地址';
+  }
+  
+  const trimmedValue = value.trim();
+  
+  // IPv4 验证：格式为 x.x.x.x，每个 x 是 0-255 的数字
+  const ipv4Regex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+  if (ipv4Regex.test(trimmedValue)) {
+    const parts = trimmedValue.split('.');
+    // 检查每个段是否在 0-255 范围内
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      // 检查是否以0开头但不是单个0（如 01, 001 等无效）
+      if (part.length > 1 && part.startsWith('0')) {
+        return 'IPv4地址格式错误：不能有前导零（如 01, 001）';
+      }
+      const num = parseInt(part, 10);
+      if (isNaN(num) || num < 0 || num > 255) {
+        return 'IPv4地址的每个段必须在0-255范围内';
+      }
+    }
+    return true; // IPv4 验证通过
+  }
+  
+  // IPv6 验证：支持完整格式和简化格式
+  // 完整格式：2001:0db8:85a3:0000:0000:8a2e:0370:7334
+  // 简化格式：2001:db8:85a3::8a2e:370:7334 或 ::1 或 ::
+  const ipv6Regex = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]+|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$/;
+  
+  if (ipv6Regex.test(trimmedValue)) {
+    return true; // IPv6 验证通过
+  }
+  
+  return '请输入有效的IP地址格式（IPv4：如 192.168.1.1，IPv6：如 2001:db8::1）';
+};
+
+// 检查IP是否重复
+const checkIpDuplicate = async (ipAddress, excludeId = null) => {
+  if (!ipAddress || !ipAddress.trim()) {
+    return false;
+  }
+  
+  try {
+    const trimmedIp = ipAddress.trim();
+    
+    // 获取所有白名单记录（使用较大的 page_size 以确保获取所有记录）
+    // 由于白名单记录通常不会太多，获取所有记录进行精确匹配
+    const response = await getIpWhitelist({
+      page: 1,
+      page_size: 10000, // 获取足够多的记录以覆盖所有可能的白名单
+    });
+    
+    if (response.data && response.data.length > 0) {
+      // 检查是否有完全匹配的IP（排除当前编辑的记录）
+      const duplicate = response.data.find(item => {
+        if (excludeId && item.id === excludeId) {
+          return false; // 排除当前编辑的记录
+        }
+        // 精确匹配（去除空格后比较）
+        return item.ip_address && item.ip_address.trim() === trimmedIp;
+      });
+      
+      return !!duplicate;
+    }
+    
+    return false;
+  } catch (error) {
+    // 如果检查失败，返回 false，让后端验证处理
+    console.error('检查IP重复失败:', error);
+    return false;
+  }
+};
+
 // 表单验证规则
 const formRules = {
   ip_address: [
     { required: true, message: '请输入IP地址', trigger: 'blur' },
     {
-      validator: (rule, value, callback) => {
-        if (!value) {
-          callback(new Error('请输入IP地址'));
+      validator: async (rule, value, callback) => {
+        // 格式验证
+        const formatResult = validateIpAddress(value);
+        if (formatResult !== true) {
+          callback(new Error(formatResult));
           return;
         }
-        // 简单的IP地址格式验证
-        const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
-        const ipv6Regex = /^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^::1$|^::$/;
-        if (!ipv4Regex.test(value) && !ipv6Regex.test(value)) {
-          // 更宽松的验证，允许IPv6的简化格式
-          const ipv6SimpleRegex = /^([0-9a-fA-F]{0,4}:){0,7}[0-9a-fA-F]{0,4}$/;
-          if (!ipv6SimpleRegex.test(value)) {
-            callback(new Error('请输入有效的IP地址（IPv4或IPv6）'));
-            return;
-          }
+        
+        // 检查是否重复（仅在格式正确后检查）
+        const trimmedValue = value.trim();
+        const isDuplicate = await checkIpDuplicate(
+          trimmedValue, 
+          isEdit.value ? currentEditId.value : null
+        );
+        
+        if (isDuplicate) {
+          callback(new Error('该IP地址已存在于白名单中，不能重复添加'));
+          return;
         }
-        // 验证IPv4的每个段是否在0-255范围内
-        if (ipv4Regex.test(value)) {
-          const parts = value.split('.');
-          for (const part of parts) {
-            const num = parseInt(part, 10);
-            if (num < 0 || num > 255) {
-              callback(new Error('IPv4地址的每个段必须在0-255范围内'));
-              return;
-            }
-          }
-        }
+        
         callback();
       },
       trigger: 'blur'
@@ -366,13 +435,33 @@ const handleSubmit = async () => {
   
   try {
     await formRef.value.validate();
+    
+    // 再次检查IP格式和重复（双重验证）
+    const trimmedIp = formData.ip_address.trim();
+    const formatResult = validateIpAddress(trimmedIp);
+    if (formatResult !== true) {
+      ElMessage.error(formatResult);
+      return;
+    }
+    
+    // 再次检查重复
+    const isDuplicate = await checkIpDuplicate(
+      trimmedIp,
+      isEdit.value ? currentEditId.value : null
+    );
+    
+    if (isDuplicate) {
+      ElMessage.error('该IP地址已存在于白名单中，不能重复添加');
+      return;
+    }
+    
     submitting.value = true;
     
     try {
       if (isEdit.value && currentEditId.value) {
         // 编辑模式
         await updateIpWhitelist(currentEditId.value, {
-          ip_address: formData.ip_address,
+          ip_address: trimmedIp,
           description: formData.description,
           is_active: formData.is_active
         });
@@ -380,7 +469,7 @@ const handleSubmit = async () => {
       } else {
         // 创建模式
         await createIpWhitelist({
-          ip_address: formData.ip_address,
+          ip_address: trimmedIp,
           description: formData.description,
           is_active: formData.is_active
         });
@@ -390,12 +479,15 @@ const handleSubmit = async () => {
       dialogVisible.value = false;
       fetchList();
     } catch (error) {
-      ElMessage.error(isEdit.value ? '更新失败，请稍后重试' : '创建失败，请稍后重试');
+      // 处理后端返回的错误信息
+      const errorMessage = error?.response?.data?.detail || error?.message || 
+        (isEdit.value ? '更新失败，请稍后重试' : '创建失败，请稍后重试');
+      ElMessage.error(errorMessage);
     } finally {
       submitting.value = false;
     }
   } catch (error) {
-    // 表单验证失败
+    // 表单验证失败，错误信息已由验证规则显示
   }
 };
 
