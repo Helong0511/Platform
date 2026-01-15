@@ -141,12 +141,20 @@
           </el-table-column>
           <el-table-column prop="publisher_name" label="渠道" width="120" show-overflow-tooltip>
             <template #default="scope">
-              {{ scope.row.publisher_name || '-' }}
+              <span v-if="scope.row.publisher_id && scope.row.publisher_name">
+                {{ `${scope.row.publisher_id} - ${scope.row.publisher_name}` }}
+              </span>
+              <span v-else-if="scope.row.publisher_name">{{ scope.row.publisher_name }}</span>
+              <span v-else>-</span>
             </template>
           </el-table-column>
           <el-table-column prop="advertiser_name" label="广告主" width="120" show-overflow-tooltip>
             <template #default="scope">
-              {{ scope.row.advertiser_name || '-' }}
+              <span v-if="scope.row.advertiser_id && scope.row.advertiser_name">
+                {{ `${scope.row.advertiser_id} - ${scope.row.advertiser_name}` }}
+              </span>
+              <span v-else-if="scope.row.advertiser_name">{{ scope.row.advertiser_name }}</span>
+              <span v-else>-</span>
             </template>
           </el-table-column>
           <el-table-column prop="short_code" label="短链接代码" width="120" show-overflow-tooltip>
