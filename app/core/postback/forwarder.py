@@ -192,7 +192,10 @@ class PostbackForwarder:
             )
             assignment = assignment_result.scalars().first()
         
-        # 2.0.1. 检查下游Cap（每天转化个数限制）
+        # 2.0.1. 检查下游Cap（下游每天转化个数限制）
+        # 【下游Cap】里面的值是下游每天转化个数的限制
+        # 如果渠道转化超过了这个值就不通知渠道了
+        # 客户登录查看时，也只显示真实的（真实不超过【下游Cap】的）转化
         if assignment and assignment.downstream_cap is not None:
             # 统计今天该渠道的转化个数（使用应用时区，避免与数据库时间不一致）
             from sqlalchemy import func, and_
@@ -200,7 +203,8 @@ class PostbackForwarder:
             today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
             
             # 查询今天该渠道的转化个数（已通知的转化）
-            # 注意：这里统计的是已经通知给渠道的转化，不包括当前这个转化
+            # 注意：这里统计的是已经通知给渠道的转化（notification_status == 'sent'），不包括当前这个转化
+            # 只有已成功通知的转化才计入下游Cap限制
             today_conversions_result = await db.execute(
                 select(func.count(PostbackNotification.id)).where(
                     and_(
@@ -213,7 +217,7 @@ class PostbackForwarder:
             )
             today_conversions_count = today_conversions_result.scalar() or 0
             
-            # 如果今天的转化个数已经达到或超过限制，不通知
+            # 如果今天的转化个数已经达到或超过限制，不通知渠道
             if today_conversions_count >= assignment.downstream_cap:
                 logger.info(
                     f"渠道 {publisher.id} 已达到下游Cap限制: {assignment.downstream_cap} "
@@ -240,19 +244,21 @@ class PostbackForwarder:
                     await db.rollback()
                 return
         
-        # 2.0.2. 检查下游PO（转化金额限制）
-        # 如果上游通知的金额大于下游PO，使用下游PO金额
+        # 2.0.2. 检查下游PO（渠道转化金额限制）
+        # 【下游PO】是渠道的转化金额（不是金额的扣减比例）
+        # 如果上游通知的金额大于下游PO，就按照【下游PO】的金额通知渠道
+        # 如果上游通知的金额小于或等于下游PO，使用上游通知的金额
         final_payout = None  # 用于传递给_build_forward_data
         if assignment and assignment.affiliate_payout is not None:
             upstream_amount = conversion.original_payout
             if upstream_amount is None:
                 upstream_amount = conversion.payout
             if upstream_amount is not None and upstream_amount > assignment.affiliate_payout:
-                # 使用下游PO金额
+                # 使用下游PO金额（渠道的转化金额上限）
                 final_payout = assignment.affiliate_payout
                 logger.info(
                     f"上游通知金额 {upstream_amount} 大于下游PO {assignment.affiliate_payout}, "
-                    f"使用下游PO金额: conversion_id={conversion.id}, publisher_id={publisher.id}"
+                    f"使用下游PO金额通知渠道: conversion_id={conversion.id}, publisher_id={publisher.id}"
                 )
         
         # 2.1. 检查是否有 postback_url

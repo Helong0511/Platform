@@ -129,6 +129,7 @@ class ConversionService:
         
         # 统计总转化数量（需要通过ClickStats关联来过滤）
         # 如果是客户用户，只统计已成功通知给渠道的转化（不超过下游Cap的真实转化）
+        # 注意：超过下游Cap的转化不会被通知（状态为skipped），因此通过过滤notification_status == 'sent'可以确保只显示不超过下游Cap的真实转化
         click_alias_for_count = aliased(ClickStats)
         conversion_query = select(func.count(PostbackConversion.id))
         
@@ -136,7 +137,8 @@ class ConversionService:
             conversion_query = conversion_query.join(
                 click_alias_for_count, PostbackConversion.click_id == click_alias_for_count.click_id
             )
-            # 如果是客户用户，只统计已成功通知给渠道的转化
+            # 如果是客户用户，只统计已成功通知给渠道的转化（不超过下游Cap的真实转化）
+            # 通过过滤notification_status == 'sent'来确保只显示不超过下游Cap的真实转化
             if current_user.role == UserRole.CLIENT:
                 notification_alias_for_count = aliased(PostbackNotification)
                 conversion_query = conversion_query.outerjoin(
@@ -161,7 +163,8 @@ class ConversionService:
                 count_conditions.append(click_alias_for_count.publisher_id == publisher_id)
             conversion_query = conversion_query.where(and_(*count_conditions))
         else:
-            # 如果是客户用户，只统计已成功通知给渠道的转化
+            # 如果是客户用户，只统计已成功通知给渠道的转化（不超过下游Cap的真实转化）
+            # 通过过滤notification_status == 'sent'来确保只显示不超过下游Cap的真实转化
             if current_user.role == UserRole.CLIENT:
                 notification_alias_for_count = aliased(PostbackNotification)
                 conversion_query = conversion_query.outerjoin(
@@ -184,6 +187,7 @@ class ConversionService:
         
         # 统计总支付金额（PO）- 使用原始 payout
         # 如果是客户用户，只统计已成功通知给渠道的转化（不超过下游Cap的真实转化）
+        # 注意：超过下游Cap的转化不会被通知（状态为skipped），因此通过过滤notification_status == 'sent'可以确保只显示不超过下游Cap的真实转化
         click_alias_for_po = aliased(ClickStats)
         po_query = select(func.sum(PostbackConversion.original_payout))
         
@@ -191,7 +195,8 @@ class ConversionService:
             po_query = po_query.join(
                 click_alias_for_po, PostbackConversion.click_id == click_alias_for_po.click_id
             )
-            # 如果是客户用户，只统计已成功通知给渠道的转化
+            # 如果是客户用户，只统计已成功通知给渠道的转化（不超过下游Cap的真实转化）
+            # 通过过滤notification_status == 'sent'来确保只显示不超过下游Cap的真实转化
             if current_user.role == UserRole.CLIENT:
                 notification_alias_for_po = aliased(PostbackNotification)
                 po_query = po_query.outerjoin(
@@ -216,7 +221,8 @@ class ConversionService:
                 po_conditions.append(click_alias_for_po.publisher_id == publisher_id)
             po_query = po_query.where(and_(*po_conditions))
         else:
-            # 如果是客户用户，只统计已成功通知给渠道的转化
+            # 如果是客户用户，只统计已成功通知给渠道的转化（不超过下游Cap的真实转化）
+            # 通过过滤notification_status == 'sent'来确保只显示不超过下游Cap的真实转化
             if current_user.role == UserRole.CLIENT:
                 notification_alias_for_po = aliased(PostbackNotification)
                 po_query = po_query.outerjoin(
@@ -271,6 +277,7 @@ class ConversionService:
         
         # 获取所有转化记录，按offer_id和关联的publisher_id分组
         # 如果是客户用户，只统计已成功通知给渠道的转化（不超过下游Cap的真实转化）
+        # 注意：超过下游Cap的转化不会被通知（状态为skipped），因此通过过滤notification_status == 'sent'可以确保只显示不超过下游Cap的真实转化
         click_alias = aliased(ClickStats)
         conversion_group_query = select(
             click_alias.offer_id.label("offer_id"),
@@ -281,7 +288,8 @@ class ConversionService:
             click_alias, PostbackConversion.click_id == click_alias.click_id
         )
         
-        # 如果是客户用户，只统计已成功通知给渠道的转化
+        # 如果是客户用户，只统计已成功通知给渠道的转化（不超过下游Cap的真实转化）
+        # 通过过滤notification_status == 'sent'来确保只显示不超过下游Cap的真实转化
         if current_user.role == UserRole.CLIENT:
             notification_alias = aliased(PostbackNotification)
             conversion_group_query = conversion_group_query.outerjoin(
@@ -518,6 +526,7 @@ class ConversionService:
         
         # 批量查询转化统计
         # 如果是客户用户，只统计已成功通知给渠道的转化（不超过下游Cap的真实转化）
+        # 注意：超过下游Cap的转化不会被通知（状态为skipped），因此通过过滤notification_status == 'sent'可以确保只显示不超过下游Cap的真实转化
         conversion_query = (
             select(
                 ClickStats.offer_id,
@@ -531,7 +540,8 @@ class ConversionService:
             .where(ClickStats.offer_id.in_(offer_ids))
         )
         
-        # 如果是客户用户，只统计已成功通知给渠道的转化
+        # 如果是客户用户，只统计已成功通知给渠道的转化（不超过下游Cap的真实转化）
+        # 通过过滤notification_status == 'sent'来确保只显示不超过下游Cap的真实转化
         if current_user.role == UserRole.CLIENT:
             notification_alias_for_list = aliased(PostbackNotification)
             conversion_query = conversion_query.outerjoin(

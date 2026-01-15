@@ -851,8 +851,8 @@ class OfferPublisherAssignment(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='分配ID')
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False, index=True, comment='Offer ID')
     publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="CASCADE"), nullable=False, index=True, comment='渠道ID')
-    downstream_cap = Column(Integer, nullable=True, comment='该渠道的下游每天转化个数限制，如果渠道超过了这个值就不通知了')
-    affiliate_payout = Column(Float, nullable=True, comment='该渠道的转化金额，如果上游通知的金额大于这个金额，就按照这个金额通知')
+    downstream_cap = Column(Integer, nullable=True, comment='该渠道的下游每天转化个数的限制，如果渠道转化超过了这个值就不通知渠道了。客户登录查看时，也只显示真实的（真实不超过【下游Cap】的）转化')
+    affiliate_payout = Column(Float, nullable=True, comment='该渠道的转化金额（不是金额的扣减比例）。如果上游通知的金额大于这个金额，就按照【下游PO】的金额通知渠道')
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
     updated_at = Column(DateTime, default=get_app_now_naive,

@@ -44,8 +44,8 @@ class OfferBase(BaseModel):
 class PublisherConfig(BaseModel):
     """渠道配置"""
     publisher_id: int = Field(..., description="渠道ID")
-    downstream_cap: Optional[int] = Field(None, ge=0, description="该渠道的下游每天转化个数限制，如果渠道超过了这个值就不通知了")
-    affiliate_payout: Optional[float] = Field(None, ge=0, description="该渠道的转化金额，如果上游通知的金额大于这个金额，就按照这个金额通知")
+    downstream_cap: Optional[int] = Field(None, ge=0, description="该渠道的下游每天转化个数的限制，如果渠道转化超过了这个值就不通知渠道了。客户登录查看时，也只显示真实的（真实不超过【下游Cap】的）转化")
+    affiliate_payout: Optional[float] = Field(None, ge=0, description="该渠道的转化金额（不是金额的扣减比例）。如果上游通知的金额大于这个金额，就按照【下游PO】的金额通知渠道")
 
 
 class OfferCreate(OfferBase):
