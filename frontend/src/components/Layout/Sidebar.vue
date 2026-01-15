@@ -35,6 +35,10 @@
       <template #icon><Connection /></template>
       <span>Postback管理</span>
     </el-menu-item>
+    <el-menu-item v-if="isAdmin" index="/app/admin/postback-ip-whitelist">
+      <template #icon><Lock /></template>
+      <span>Postback IP白名单</span>
+    </el-menu-item>
 
     <el-sub-menu v-if="isAdmin" index="/app/admin/cpl">
       <template #title>
