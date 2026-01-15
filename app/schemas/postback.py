@@ -50,7 +50,7 @@ class PostbackConversionResponse(BaseModel):
     event_name: Optional[str]
     event_value: Optional[float]
     original_payout: Optional[float] = Field(None, description="原始支付金额（PO）")
-    payout: Optional[float] = Field(None, description="扣后支付金额（PO(扣)）")
+    payout: Optional[float] = Field(None, description="扣后支付金额（PO(扣)），考虑下游PO限制后的实际转发金额")
     devad_id: Optional[str]
     os: Optional[str]
     carrier: Optional[str]

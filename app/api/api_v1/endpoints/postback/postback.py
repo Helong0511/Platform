@@ -30,6 +30,7 @@ from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import parse_date_to_app_timezone
 from app.models.models import (
+    OfferPublisherAssignment,
     PostbackConversion, Product, Client, PostbackForwardLog, PostbackNotification, 
     Click, ClickStats, Offer, Publisher, Advertiser, User, ConversionDeductionLog
 )
@@ -348,6 +349,25 @@ async def get_postback_conversions(
             for row in advertisers_result.all():
                 advertisers_map[row.id] = row.advertiser_name
         
+        # 批量查询 Offer-渠道分配配置（用于计算实际转发金额，考虑下游PO限制）
+        assignments_map = {}  # key: (offer_id, publisher_id), value: affiliate_payout
+        if offer_ids and all_publisher_ids:
+            assignments_query = select(
+                OfferPublisherAssignment.offer_id,
+                OfferPublisherAssignment.publisher_id,
+                OfferPublisherAssignment.affiliate_payout
+            ).where(
+                and_(
+                    OfferPublisherAssignment.offer_id.in_(list(offer_ids)),
+                    OfferPublisherAssignment.publisher_id.in_(all_publisher_ids),
+                    OfferPublisherAssignment.is_active == True
+                )
+            )
+            assignments_result = await db.execute(assignments_query)
+            for row in assignments_result.all():
+                key = (row.offer_id, row.publisher_id)
+                assignments_map[key] = row.affiliate_payout
+        
         # 转换为响应格式，并添加关联信息
         conversion_list = []
         for conv in conversions:
@@ -400,6 +420,32 @@ async def get_postback_conversions(
                         conv_dict['gid_publisher_name'] = publishers_map[gid_int]
                 except (ValueError, TypeError):
                     pass
+            
+            # 计算实际转发给渠道的金额（考虑下游PO限制）
+            # 如果配置了下游PO且上游金额大于下游PO，使用下游PO；否则使用 conversion.payout
+            actual_payout = conv_dict.get('payout')  # 默认使用扣后的 payout
+            offer_id = conv_dict.get('click_offer_id')
+            publisher_id = conv_dict.get('click_publisher_id')
+            
+            if offer_id and publisher_id:
+                assignment_key = (offer_id, publisher_id)
+                if assignment_key in assignments_map:
+                    affiliate_payout = assignments_map[assignment_key]
+                    if affiliate_payout is not None:
+                        # 获取上游金额（优先使用 original_payout，其次使用 payout）
+                        upstream_amount = conv_dict.get('original_payout')
+                        if upstream_amount is None:
+                            upstream_amount = conv_dict.get('payout')
+                        
+                        if upstream_amount is not None and upstream_amount > affiliate_payout:
+                            # 上游金额大于下游PO，使用下游PO金额
+                            actual_payout = affiliate_payout
+                        else:
+                            # 上游金额小于或等于下游PO，使用上游金额（即扣后的 payout）
+                            actual_payout = conv_dict.get('payout')
+            
+            # 更新 payout 为实际转发金额
+            conv_dict['payout'] = actual_payout
             
             conversion_list.append(conv_dict)
         
