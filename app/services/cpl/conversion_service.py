@@ -140,15 +140,22 @@ class ConversionService:
         
         # 统计总转化数量（需要通过ClickStats关联来过滤）
         # 客户用户：直接通过ClickStats.publisher_id过滤，显示所有属于客户的转化
+        # 注意：只统计 Offer 激活的转化（不计入未激活 Offer 的转化）
         click_alias_for_count = aliased(ClickStats)
+        offer_alias_for_count = aliased(Offer)
         conversion_query = select(func.count(PostbackConversion.id))
         
         if client_publisher_ids is not None or offer_id is not None or publisher_id is not None:
             conversion_query = conversion_query.join(
                 click_alias_for_count, PostbackConversion.click_id == click_alias_for_count.click_id
+            ).join(
+                offer_alias_for_count, click_alias_for_count.offer_id == offer_alias_for_count.id
             )
             
             count_conditions = list(conversion_conditions)
+            # 只统计 Offer 激活的转化
+            count_conditions.append(offer_alias_for_count.is_active == True)
+            count_conditions.append(offer_alias_for_count.status == 'Active')
             if client_publisher_ids is not None:
                 count_conditions.append(click_alias_for_count.publisher_id.in_(client_publisher_ids))
             if offer_id is not None:
@@ -157,7 +164,16 @@ class ConversionService:
                 count_conditions.append(click_alias_for_count.publisher_id == publisher_id)
             conversion_query = conversion_query.where(and_(*count_conditions))
         else:
-            conversion_query = conversion_query.where(and_(*conversion_conditions))
+            # 即使没有其他过滤条件，也需要关联 Offer 来过滤激活状态
+            conversion_query = conversion_query.join(
+                click_alias_for_count, PostbackConversion.click_id == click_alias_for_count.click_id
+            ).join(
+                offer_alias_for_count, click_alias_for_count.offer_id == offer_alias_for_count.id
+            )
+            count_conditions = list(conversion_conditions)
+            count_conditions.append(offer_alias_for_count.is_active == True)
+            count_conditions.append(offer_alias_for_count.status == 'Active')
+            conversion_query = conversion_query.where(and_(*count_conditions))
         
         total_conversions = (await self.db.execute(conversion_query)).scalar() or 0
         
@@ -166,15 +182,22 @@ class ConversionService:
         
         # 统计总支付金额（PO）- 使用原始 payout
         # 客户用户：直接通过ClickStats.publisher_id过滤，显示所有属于客户的转化
+        # 注意：只统计 Offer 激活的转化（不计入未激活 Offer 的转化）
         click_alias_for_po = aliased(ClickStats)
+        offer_alias_for_po = aliased(Offer)
         po_query = select(func.sum(PostbackConversion.original_payout))
         
         if client_publisher_ids is not None or offer_id is not None or publisher_id is not None:
             po_query = po_query.join(
                 click_alias_for_po, PostbackConversion.click_id == click_alias_for_po.click_id
+            ).join(
+                offer_alias_for_po, click_alias_for_po.offer_id == offer_alias_for_po.id
             )
             
             po_conditions = list(conversion_conditions)
+            # 只统计 Offer 激活的转化
+            po_conditions.append(offer_alias_for_po.is_active == True)
+            po_conditions.append(offer_alias_for_po.status == 'Active')
             if client_publisher_ids is not None:
                 po_conditions.append(click_alias_for_po.publisher_id.in_(client_publisher_ids))
             if offer_id is not None:
@@ -183,7 +206,16 @@ class ConversionService:
                 po_conditions.append(click_alias_for_po.publisher_id == publisher_id)
             po_query = po_query.where(and_(*po_conditions))
         else:
-            po_query = po_query.where(and_(*conversion_conditions))
+            # 即使没有其他过滤条件，也需要关联 Offer 来过滤激活状态
+            po_query = po_query.join(
+                click_alias_for_po, PostbackConversion.click_id == click_alias_for_po.click_id
+            ).join(
+                offer_alias_for_po, click_alias_for_po.offer_id == offer_alias_for_po.id
+            )
+            po_conditions = list(conversion_conditions)
+            po_conditions.append(offer_alias_for_po.is_active == True)
+            po_conditions.append(offer_alias_for_po.status == 'Active')
+            po_query = po_query.where(and_(*po_conditions))
         
         total_po = float((await self.db.execute(po_query)).scalar() or 0)
         
@@ -225,7 +257,9 @@ class ConversionService:
         # 获取所有转化记录，按offer_id和关联的publisher_id分组
         # 客户用户：直接通过ClickStats.publisher_id过滤，显示所有属于客户的转化
         # 注意：使用 join 而不是 outerjoin，因为只有有 ClickStats 的转化才能确定属于哪个渠道
+        # 注意：只统计 Offer 激活的转化（不计入未激活 Offer 的转化）
         click_alias = aliased(ClickStats)
+        offer_alias = aliased(Offer)
         conversion_group_query = select(
             click_alias.offer_id.label("offer_id"),
             click_alias.publisher_id,
@@ -233,10 +267,15 @@ class ConversionService:
             func.sum(PostbackConversion.original_payout).label('total_po')
         ).join(
             click_alias, PostbackConversion.click_id == click_alias.click_id
+        ).join(
+            offer_alias, click_alias.offer_id == offer_alias.id
         )
         
         # 构建转化查询条件
         conversion_group_conditions = list(conversion_conditions)
+        # 只统计 Offer 激活的转化
+        conversion_group_conditions.append(offer_alias.is_active == True)
+        conversion_group_conditions.append(offer_alias.status == 'Active')
         if offer_id is not None:
             conversion_group_conditions.append(click_alias.offer_id == offer_id)
         if publisher_id:
@@ -322,14 +361,20 @@ class ConversionService:
             publisher_name = publisher.publisher_name if publisher else ("未关联渠道" if publisher_id_val else "未关联渠道")
             
             # 计算PO（扣价后）- 需要查询该组合下的所有转化记录
+            # 注意：只统计 Offer 激活的转化（不计入未激活 Offer 的转化）
             po_after_discount = 0.0
             if publisher_id_val and offer_id_val:
+                offer_alias_for_discount = aliased(Offer)
                 conversions_query = select(PostbackConversion).join(
                     click_alias, PostbackConversion.click_id == click_alias.click_id
+                ).join(
+                    offer_alias_for_discount, click_alias.offer_id == offer_alias_for_discount.id
                 ).where(
                     and_(
                         click_alias.offer_id == offer_id_val,
                         click_alias.publisher_id == publisher_id_val,
+                        offer_alias_for_discount.is_active == True,
+                        offer_alias_for_discount.status == 'Active',
                         *conversion_conditions
                     )
                 )
@@ -417,16 +462,45 @@ class ConversionService:
                     select(Publisher.id).where(Publisher.client_id == client_id)
                 )
                 client_publisher_ids = list(publisher_result.scalars().all())
+                if not client_publisher_ids:
+                    return []
             else:
                 return []
         
-        # 获取所有激活的Offer（批量加载）
-        offer_query = select(Offer).where(
-            and_(
-                Offer.is_active == True,
-                Offer.status == 'Active'
+        # 先查询有转化数据的 Offer ID（不管 Offer 是否激活）
+        # 这样确保所有有转化数据的 Offer 都会被统计
+        conversion_offer_query = (
+            select(ClickStats.offer_id)
+            .join(
+                PostbackConversion,
+                PostbackConversion.click_id == ClickStats.click_id
             )
+            .where(ClickStats.offer_id.isnot(None))
         )
+        
+        if start_datetime:
+            conversion_offer_query = conversion_offer_query.where(
+                PostbackConversion.created_at >= start_datetime
+            )
+        if end_datetime:
+            conversion_offer_query = conversion_offer_query.where(
+                PostbackConversion.created_at <= end_datetime
+            )
+        if client_publisher_ids is not None:
+            conversion_offer_query = conversion_offer_query.where(
+                ClickStats.publisher_id.in_(client_publisher_ids)
+            )
+        
+        conversion_offer_query = conversion_offer_query.distinct()
+        conversion_offer_result = await self.db.execute(conversion_offer_query)
+        offer_ids_with_conversions = [row.offer_id for row in conversion_offer_result.all() if row.offer_id]
+        
+        # 如果没有转化数据，返回空列表
+        if not offer_ids_with_conversions:
+            return []
+        
+        # 获取所有有转化数据的 Offer（不管是否激活）
+        offer_query = select(Offer).where(Offer.id.in_(offer_ids_with_conversions))
         offers_result = await self.db.execute(offer_query)
         offers = offers_result.scalars().all()
         
@@ -463,6 +537,8 @@ class ConversionService:
         
         # 批量查询转化统计
         # 客户用户：直接通过ClickStats.publisher_id过滤，显示所有属于客户的转化
+        # 注意：只统计 Offer 激活的转化（不计入未激活 Offer 的转化）
+        offer_alias_for_list = aliased(Offer)
         conversion_query = (
             select(
                 ClickStats.offer_id,
@@ -473,7 +549,17 @@ class ConversionService:
                 PostbackConversion,
                 PostbackConversion.click_id == ClickStats.click_id
             )
-            .where(ClickStats.offer_id.in_(offer_ids))
+            .join(
+                offer_alias_for_list,
+                ClickStats.offer_id == offer_alias_for_list.id
+            )
+            .where(
+                and_(
+                    ClickStats.offer_id.in_(offer_ids),
+                    offer_alias_for_list.is_active == True,
+                    offer_alias_for_list.status == 'Active'
+                )
+            )
         )
         
         if start_datetime:
