@@ -220,7 +220,6 @@ def build_final_url(
                 request_params_with_click[key_lower] = replaced_value
             else:
                 filtered_params.append(f"{key}={value}")
-                logger.warning(f"[构建最终URL] 跳过参数 {key}={value}，因为参数值中包含无法识别的占位符")
             continue
         
         # 查找该参数对应的系统参数名
