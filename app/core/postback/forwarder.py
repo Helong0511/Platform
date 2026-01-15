@@ -9,7 +9,6 @@ import logging
 import asyncio
 import re
 from typing import Dict, Any, Optional, Union, Tuple, List
-from datetime import datetime, timezone
 from urllib.parse import urlencode, urlparse, parse_qs, urlunparse, quote
 
 import httpx
@@ -195,10 +194,9 @@ class PostbackForwarder:
         
         # 2.0.1. 检查下游Cap（每天转化个数限制）
         if assignment and assignment.downstream_cap is not None:
-            # 统计今天该渠道的转化个数
-            from datetime import datetime, timezone, timedelta
+            # 统计今天该渠道的转化个数（使用应用时区，避免与数据库时间不一致）
             from sqlalchemy import func, and_
-            now = datetime.now(timezone.utc)
+            now = get_app_now_naive()
             today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
             
             # 查询今天该渠道的转化个数（已通知的转化）
@@ -246,8 +244,10 @@ class PostbackForwarder:
         # 如果上游通知的金额大于下游PO，使用下游PO金额
         final_payout = None  # 用于传递给_build_forward_data
         if assignment and assignment.affiliate_payout is not None:
-            upstream_amount = conversion.original_payout if conversion.original_payout is not None else 0.0
-            if upstream_amount > assignment.affiliate_payout:
+            upstream_amount = conversion.original_payout
+            if upstream_amount is None:
+                upstream_amount = conversion.payout
+            if upstream_amount is not None and upstream_amount > assignment.affiliate_payout:
                 # 使用下游PO金额
                 final_payout = assignment.affiliate_payout
                 logger.info(
@@ -271,7 +271,8 @@ class PostbackForwarder:
             conversion=conversion,
             publisher=publisher,
             offer=offer,
-            has_postback_url=has_postback_url
+            has_postback_url=has_postback_url,
+            override_payout=final_payout
         )
         
         # 检查是否已有通知记录（补发通知场景）
@@ -288,7 +289,7 @@ class PostbackForwarder:
         if existing_notification:
             # 检查转化数据是否有变化
             has_changes, changes = PostbackForwarder._check_conversion_data_changed(
-                conversion, existing_notification
+                conversion, existing_notification, override_payout=final_payout
             )
             
             # 更新现有通知记录（补发通知场景）
@@ -329,7 +330,7 @@ class PostbackForwarder:
                 
                 # 检查转化数据是否有变化
                 has_changes, changes = PostbackForwarder._check_conversion_data_changed(
-                    conversion, double_check_notification
+                    conversion, double_check_notification, override_payout=final_payout
                 )
                 
                 notification_record.notification_status = 'pending'
@@ -440,7 +441,8 @@ class PostbackForwarder:
                 publisher=publisher,
                 advertiser=advertiser,
                 db=db,
-                click_params=click_params_for_url
+                click_params=click_params_for_url,
+                override_payout=final_payout
             )
         except Exception as e:
             logger.error(
@@ -585,7 +587,8 @@ class PostbackForwarder:
                             offer=offer,
                             replaced_url=replaced_url,
                             response_status=response.status_code,
-                            success=True
+                            success=True,
+                            override_payout=final_payout
                         )
                     )
                 except Exception as e:
@@ -654,7 +657,8 @@ class PostbackForwarder:
                             replaced_url=replaced_url,
                             response_status=response.status_code,
                             success=False,
-                            error_message=forward_log.error_message
+                            error_message=forward_log.error_message,
+                            override_payout=final_payout
                         )
                     )
                 except Exception as e:
@@ -918,7 +922,8 @@ class PostbackForwarder:
     @staticmethod
     def _check_conversion_data_changed(
         conversion: PostbackConversion,
-        existing_notification: PostbackNotification
+        existing_notification: PostbackNotification,
+        override_payout: Optional[float] = None
     ) -> Tuple[bool, List[str]]:
         """
         检查转化数据是否有变化
@@ -948,9 +953,12 @@ class PostbackForwarder:
         old_original_payout = float(old_original_payout_match.group(1)) if old_original_payout_match else None
         
         # 比较 payout（允许0.01的误差，避免浮点数精度问题）
-        if conversion.payout is not None:
-            if old_payout is None or abs(conversion.payout - old_payout) > 0.01:
-                changes.append(f"payout: {old_payout} -> {conversion.payout}")
+        expected_payout = conversion.payout
+        if override_payout is not None:
+            expected_payout = override_payout
+        if expected_payout is not None:
+            if old_payout is None or abs(expected_payout - old_payout) > 0.01:
+                changes.append(f"payout: {old_payout} -> {expected_payout}")
         
         if conversion.original_payout is not None:
             if old_original_payout is None or abs(conversion.original_payout - old_original_payout) > 0.01:
@@ -1343,7 +1351,8 @@ class PostbackForwarder:
         publisher: Optional[Publisher],
         advertiser: Optional[Advertiser],
         db: AsyncSession,
-        click_params: Optional[Dict[str, Any]] = None
+        click_params: Optional[Dict[str, Any]] = None,
+        override_payout: Optional[float] = None
     ) -> str:
         """
         替换 URL 中的占位符
@@ -1381,7 +1390,9 @@ class PostbackForwarder:
             values['event_name'] = conversion.event_name if conversion.event_name else ''
             values['event_value'] = str(conversion.event_value) if conversion.event_value is not None else ''
             # payout 使用扣后的 payout（给下游的实际金额）
-            if conversion.payout is not None:
+            if override_payout is not None:
+                values['payout'] = str(override_payout)
+            elif conversion.payout is not None:
                 values['payout'] = str(conversion.payout)
             elif conversion.original_payout is not None:
                 # 如果没有扣后的 payout，使用原始的 payout
@@ -1517,7 +1528,8 @@ class PostbackForwarder:
         conversion: PostbackConversion,
         publisher: Publisher,
         offer: Optional[Offer],
-        has_postback_url: bool
+        has_postback_url: bool,
+        override_payout: Optional[float] = None
     ) -> str:
         """
         构建转发通知消息
@@ -1540,8 +1552,11 @@ class PostbackForwarder:
         
         if conversion.original_payout is not None:
             msg += f"原始金额 (PO): ${conversion.original_payout:.2f}\n"
-        if conversion.payout is not None:
-            msg += f"扣后金额 (PO(扣)): ${conversion.payout:.2f}\n"
+        effective_payout = conversion.payout
+        if override_payout is not None:
+            effective_payout = override_payout
+        if effective_payout is not None:
+            msg += f"扣后金额 (PO(扣)): ${effective_payout:.2f}\n"
         
         # 渠道信息
         msg += f"\n渠道信息:\n"
@@ -1580,7 +1595,8 @@ class PostbackForwarder:
         replaced_url: str,
         response_status: int,
         success: bool,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        override_payout: Optional[float] = None
     ) -> None:
         """
         发送 Telegram 通知（转发结果）
@@ -1611,8 +1627,11 @@ class PostbackForwarder:
             
             if conversion.original_payout is not None:
                 msg += f"原始金额 (PO): ${conversion.original_payout:.2f}\n"
-            if conversion.payout is not None:
-                msg += f"扣后金额 (PO(扣)): ${conversion.payout:.2f}\n"
+            effective_payout = conversion.payout
+            if override_payout is not None:
+                effective_payout = override_payout
+            if effective_payout is not None:
+                msg += f"扣后金额 (PO(扣)): ${effective_payout:.2f}\n"
             
             # 渠道信息
             msg += f"\n渠道信息:\n"
