@@ -285,7 +285,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, watch } from 'vue';
+import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox, ElStatistic } from 'element-plus';
 import { Plus, Search, DocumentCopy, InfoFilled, Refresh } from '@element-plus/icons-vue';
@@ -406,17 +406,21 @@ const loadData = async () => {
     // 只添加有值的过滤条件（空字符串不算有效值）
     if (filters.search && filters.search.trim()) {
       params.search = filters.search.trim();
+      logger.debug('loadData with search param:', params.search);
     }
     if (filters.is_active !== null && filters.is_active !== undefined) {
       params.is_active = filters.is_active;
     }
+    logger.debug('loadData params:', params);
     const result = await getShortLinks(params);
+    logger.debug('loadData result:', result);
     // 初始化每个链接的加载状态
     links.value = (result.data || []).map(link => ({
       ...link,
       _toggleLoading: false
     }));
     pagination.total = result.total || 0;
+    logger.debug('loadData completed, links count:', links.value.length, 'total:', pagination.total);
   } catch (error) {
     logger.error('加载短链接列表失败:', error);
   } finally {
@@ -681,23 +685,30 @@ const handleDialogClose = () => {
 };
 
 // 检查并应用路由参数中的搜索关键词
-const applySearchFromQuery = () => {
+const applySearchFromQuery = async () => {
   const searchFromQuery = route.query.search;
+  logger.debug('applySearchFromQuery called, searchFromQuery:', searchFromQuery, 'route.query:', route.query, 'current filters.search:', filters.search);
+  
   if (searchFromQuery) {
     // 设置搜索关键词（确保是字符串）
     const searchValue = String(searchFromQuery).trim();
-    // 只有当值不同时才更新，避免重复触发
-    if (filters.search !== searchValue) {
-      filters.search = searchValue;
-      // 重置到第一页并执行搜索
-      pagination.page = 1;
-      loadData();
-    }
+    logger.debug('Setting search value:', searchValue);
+    
+    // 直接设置，不比较（确保能正确设置）
+    filters.search = searchValue;
+    // 重置到第一页
+    pagination.page = 1;
+    // 等待 DOM 更新后再执行搜索
+    await nextTick();
+    logger.debug('After nextTick, filters.search:', filters.search, 'will call loadData');
+    // 执行搜索
+    loadData();
   } else {
     // 如果没有搜索参数，清除搜索框并加载数据
     if (filters.search) {
       filters.search = '';
       pagination.page = 1;
+      await nextTick();
       loadData();
     } else if (pagination.page === 1) {
       // 如果已经在第一页且没有搜索关键词，只加载数据（避免重复加载）
@@ -709,32 +720,38 @@ const applySearchFromQuery = () => {
 // 监听路由 query 参数变化
 watch(
   () => route.query.search,
-  (newSearch, oldSearch) => {
+  async (newSearch, oldSearch) => {
     // 当搜索参数变化时，立即应用搜索
     if (newSearch !== oldSearch) {
-      applySearchFromQuery();
+      await nextTick();
+      await applySearchFromQuery();
     }
-  }
+  },
+  { immediate: false }
 );
 
 // 监听整个路由路径变化（确保从其他页面跳转过来时也能触发）
 watch(
   () => route.fullPath,
-  (newPath, oldPath) => {
+  async (newPath, oldPath) => {
     // 只有当路径真正变化且是短链接管理页面时才执行
     if (newPath !== oldPath && route.name === 'ShortLinkManagement') {
-      // 使用 nextTick 确保路由已经更新
-      setTimeout(() => {
-        applySearchFromQuery();
-      }, 0);
+      // 等待路由完全更新
+      await nextTick();
+      await applySearchFromQuery();
     }
-  }
+  },
+  { immediate: false }
 );
 
 // 初始化
-onMounted(() => {
-  // 检查路由参数中是否有搜索关键词
-  applySearchFromQuery();
+onMounted(async () => {
+  logger.debug('ShortLinkManagement onMounted, route.query:', route.query);
+  // 等待 DOM 完全渲染
+  await nextTick();
+  // 检查路由参数中是否有搜索关键词（优先处理搜索，确保搜索框显示正确）
+  await applySearchFromQuery();
+  // 加载其他数据
   loadStats();
   loadOffers();
   loadChannels();
