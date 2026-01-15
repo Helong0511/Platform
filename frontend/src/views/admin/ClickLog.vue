@@ -130,7 +130,13 @@
           </el-table-column>
           <el-table-column prop="offer_name" label="Offer" min-width="150" show-overflow-tooltip>
             <template #default="scope">
-              <span class="text-primary">{{ scope.row.offer_name || '-' }}</span>
+            <span class="text-primary" v-if="scope.row.offer_id && scope.row.offer_name">
+              {{ `${scope.row.offer_id} - ${scope.row.offer_name}` }}
+            </span>
+            <span class="text-primary" v-else-if="scope.row.offer_name">
+              {{ scope.row.offer_name }}
+            </span>
+            <span v-else>-</span>
             </template>
           </el-table-column>
           <el-table-column prop="publisher_name" label="渠道" width="120" show-overflow-tooltip>
