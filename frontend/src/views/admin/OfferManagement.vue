@@ -204,9 +204,11 @@
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100" align="center">
           <template #default="scope">
-            <el-tag :type="scope.row.status === 'Active' ? 'success' : 'info'">
-              {{ scope.row.status }}
-            </el-tag>
+            <el-switch
+              :model-value="scope.row.status === 'Active'"
+              :loading="scope.row._updatingStatus"
+              @change="(value) => handleToggleStatus(scope.row, value)"
+            />
           </template>
         </el-table-column>
         <el-table-column v-if="isAdmin" prop="is_active" label="激活" width="80" align="center">
@@ -1316,6 +1318,47 @@ const handleToggleActive = async (row, value) => {
   } finally {
     // 清除更新状态标记
     row._updating = false
+  }
+}
+
+// 切换状态
+const handleToggleStatus = async (row, value) => {
+  // 设置更新状态标记
+  row._updatingStatus = true
+  const oldStatus = row.status // 保存原状态
+  
+  try {
+    // 将boolean值转换为状态字符串
+    const newStatus = value ? 'Active' : 'Inactive'
+    // 调用更新API，只更新status字段
+    await updateOffer(row.id, { status: newStatus })
+    ElMessage.success(value ? '状态已设为Active' : '状态已设为Inactive')
+    // 刷新数据以获取最新状态
+    loadData()
+  } catch (error) {
+    // 恢复原值
+    row.status = oldStatus
+    
+    logger.error('更新Offer状态失败:', error)
+    
+    // 检查是否是401未授权错误（token过期）
+    if (error.response && error.response.status === 401) {
+      // 401错误已被axios拦截器处理，直接返回
+      return
+    }
+    
+    // 检查是否是403错误（可能是CSRF token问题）
+    if (error.response && error.response.status === 403 && error._handled) {
+      // 错误已被处理，不显示错误信息
+      return
+    }
+    
+    // 其他错误显示具体错误信息
+    const errorMsg = error.response?.data?.detail || error.response?.data?.message || error.message || '更新失败'
+    ElMessage.error(errorMsg)
+  } finally {
+    // 清除更新状态标记
+    row._updatingStatus = false
   }
 }
 
