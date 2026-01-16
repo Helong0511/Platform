@@ -176,6 +176,18 @@ sudo systemctl restart nginx
 
 
 
+sudo cp -a /data/Platform /data/Platform_20260115
+
+
+
+sudo rsync -av --progress /data/Platform/ /data/Platform_20260115 \
+  --exclude=/data/Platform/frontend/node_modules \
+  --exclude=/data/Platform/frontend/dist \
+  --exclude=/data/Platform/frontend/package-lock.json
+
+
+
+
 将 后端 所有服务 独立成服务 
 
 比如 
@@ -226,3 +238,27 @@ sudo systemctl restart nginx
 
 
 将当前项目  多个后端服务 独立运行 独立更新 互不影响   但是 共用一个MySQL数据库  怎么设计   根据各个服务 单独分配  运行的 workers 
+
+
+
+
+# pip install PyQt5 requests
+
+https://client.btfrx.online/api/v1/bft/postback
+
+{
+    "platform": "he_test",
+    "click_id": "bpwrchC4TreAaEC4tjWJGFWCRwPHR7kWTxynRKpcc",
+    "payout": 3.20
+}
+
+
+https://www.qqpqq.com/back/p_back
+
+{
+    "m": "tp",
+    "c_id": 1285202,
+    "payout": 2.20
+}
+
+curl "https://client.btfrx.online/api/v1/bft/postback?platform=he_test&click_id=bpwwpNRB347XJagN4XFRbCMyEYHg7NRMgXTAPY49r&payout=2.8"
