@@ -623,6 +623,19 @@ async def _batch_update_click_counts_with_retry(
                         all_keys = first_keys + second_keys
                         all_failed = first_failed + second_failed
                         
+                        # 记录批次拆分后的处理结果
+                        if total_synced > 0:
+                            logger.info(
+                                f"批次拆分后处理完成: 总成功={total_synced}, "
+                                f"前半部分成功={first_synced}, 后半部分成功={second_synced}, "
+                                f"失败={len(all_failed)}"
+                            )
+                        if all_failed:
+                            logger.warning(
+                                f"批次拆分后仍有失败: 失败数量={len(all_failed)}, "
+                                f"前半部分失败={len(first_failed)}, 后半部分失败={len(second_failed)}"
+                            )
+                        
                         return total_synced, all_keys, all_failed
                     
                     # 指数退避 + 随机抖动（增加随机范围以减少并发冲突）
