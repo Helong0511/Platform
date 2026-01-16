@@ -696,59 +696,59 @@ async def _batch_update_click_counts_with_retry(
             return 0, [], all_failed
             
     except OperationalError as e:
-            # 检查死锁错误：MySQL错误码1213或错误消息包含"Deadlock"
-            error_code = e.orig.args[0] if hasattr(e.orig, 'args') and e.orig.args else None
-            error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
-            is_deadlock = (
-                error_code == 1213 or  # MySQL死锁错误码
-                "Deadlock" in error_msg or  # 错误消息包含Deadlock
-                "deadlock" in error_msg.lower()  # 错误消息包含deadlock（小写）
+        # 检查死锁错误：MySQL错误码1213或错误消息包含"Deadlock"
+        error_code = e.orig.args[0] if hasattr(e.orig, 'args') and e.orig.args else None
+        error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+        is_deadlock = (
+            error_code == 1213 or  # MySQL死锁错误码
+            "Deadlock" in error_msg or  # 错误消息包含Deadlock
+            "deadlock" in error_msg.lower()  # 错误消息包含deadlock（小写）
+        )
+        
+        # 释放分布式锁（发生错误时也要释放）
+        await _release_item_locks(redis, acquired_locks)
+        
+        if is_deadlock:
+            # 更新死锁统计（使用异步锁保护并发访问）
+            async with _deadlock_stats_lock:
+                _deadlock_stats["total_deadlocks"] += 1
+                _deadlock_stats["last_deadlock_time"] = datetime.now(timezone.utc)
+                batch_size = len(batch)
+                _deadlock_stats["deadlocks_by_batch_size"][batch_size] = \
+                    _deadlock_stats["deadlocks_by_batch_size"].get(batch_size, 0) + 1
+            
+            # 注意：由于使用了细粒度分布式锁和SKIP LOCKED，死锁应该很少发生
+            # 但如果仍然发生，可能是由于其他原因（如外键锁等）
+            # 在这种情况下，记录错误并返回失败，让下次同步时重试
+            short_codes_str = ", ".join([code for code, _, _ in batch])
+            logger.error(
+                f"检测到死锁（已使用细粒度锁和SKIP LOCKED，理论上不应发生）: "
+                f"short_codes=[{short_codes_str}], error={e}",
+                exc_info=True
             )
             
-            # 释放分布式锁（发生错误时也要释放）
-            await _release_item_locks(redis, acquired_locks)
+            # 死锁时MySQL已自动回滚，不需要手动回滚
+            # 尝试恢复Redis计数器，避免数据丢失
+            # 注意：这是一个尽力而为的操作，如果恢复失败，数据可能会丢失
+            if redis:
+                for short_code, count_value, redis_key in locked_batch:
+                    if redis_key:
+                        try:
+                            # 使用原子操作恢复计数器（如果键不存在则设置，如果存在则增加）
+                            # 这样可以避免在恢复过程中有新的点击导致重复计数
+                            await redis.incrby(redis_key, count_value)
+                            # 重新设置过期时间
+                            await redis.expire(redis_key, 48 * 3600)
+                            logger.debug(f"成功恢复Redis计数器: short_code={short_code}, count={count_value}")
+                        except Exception as restore_error:
+                            logger.warning(
+                                f"恢复Redis计数器失败（可能导致数据丢失）: "
+                                f"short_code={short_code}, count={count_value}, error={restore_error}"
+                            )
             
-            if is_deadlock:
-                # 更新死锁统计（使用异步锁保护并发访问）
-                async with _deadlock_stats_lock:
-                    _deadlock_stats["total_deadlocks"] += 1
-                    _deadlock_stats["last_deadlock_time"] = datetime.now(timezone.utc)
-                    batch_size = len(batch)
-                    _deadlock_stats["deadlocks_by_batch_size"][batch_size] = \
-                        _deadlock_stats["deadlocks_by_batch_size"].get(batch_size, 0) + 1
-                
-                # 注意：由于使用了细粒度分布式锁和SKIP LOCKED，死锁应该很少发生
-                # 但如果仍然发生，可能是由于其他原因（如外键锁等）
-                # 在这种情况下，记录错误并返回失败，让下次同步时重试
-                short_codes_str = ", ".join([code for code, _, _ in batch])
-                logger.error(
-                    f"检测到死锁（已使用细粒度锁和SKIP LOCKED，理论上不应发生）: "
-                    f"short_codes=[{short_codes_str}], error={e}",
-                    exc_info=True
-                )
-                
-                # 死锁时MySQL已自动回滚，不需要手动回滚
-                # 尝试恢复Redis计数器，避免数据丢失
-                # 注意：这是一个尽力而为的操作，如果恢复失败，数据可能会丢失
-                if redis:
-                    for short_code, count_value, redis_key in locked_batch:
-                        if redis_key:
-                            try:
-                                # 使用原子操作恢复计数器（如果键不存在则设置，如果存在则增加）
-                                # 这样可以避免在恢复过程中有新的点击导致重复计数
-                                await redis.incrby(redis_key, count_value)
-                                # 重新设置过期时间
-                                await redis.expire(redis_key, 48 * 3600)
-                                logger.debug(f"成功恢复Redis计数器: short_code={short_code}, count={count_value}")
-                            except Exception as restore_error:
-                                logger.warning(
-                                    f"恢复Redis计数器失败（可能导致数据丢失）: "
-                                    f"short_code={short_code}, count={count_value}, error={restore_error}"
-                                )
-                
-                # 返回所有批次项作为失败项，让下次同步时重试
-                return 0, [], batch
-            else:
+            # 返回所有批次项作为失败项，让下次同步时重试
+            return 0, [], batch
+        else:
             # 其他数据库错误，需要回滚
             short_codes_str = ", ".join([code for code, _, _ in batch])
             logger.error(
