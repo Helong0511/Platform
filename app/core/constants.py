@@ -33,6 +33,12 @@ DEFAULT_PAGE_SIZE = 20
 # 最大每页大小
 MAX_PAGE_SIZE = 100
 
+# ====== 计算相关常量 ======
+# 百分比乘数：用于将小数转换为百分比（乘以100）
+PERCENTAGE_MULTIPLIER = 100
+# ECPM乘数：用于将每展示成本转换为每千次展示成本（乘以1000）
+ECPM_MULTIPLIER = 1000
+
 # ====== 文件上传相关常量 ======
 # 最大文件大小（字节）：10MB
 MAX_UPLOAD_SIZE_DEFAULT = 10485760
