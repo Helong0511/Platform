@@ -382,7 +382,7 @@ onMounted(() => {
   // 检查URL参数中是否有click_id，如果有则设置过滤条件
   const clickIdFromUrl = route.query.click_id
   if (clickIdFromUrl) {
-    filterClickId.value = clickIdFromUrl
+    filters.clickId = clickIdFromUrl
   }
   
   // 默认查询最近7天（优化性能，减少数据量）
@@ -395,7 +395,7 @@ onMounted(() => {
     const day = String(date.getDate()).padStart(2, '0')
     return `${year}-${month}-${day}`
   }
-  dateRange.value = [
+  filters.dateRange = [
     formatLocalDate(startDate),
     formatLocalDate(endDate)
   ]
