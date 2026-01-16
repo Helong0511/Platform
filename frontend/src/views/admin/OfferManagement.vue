@@ -211,9 +211,11 @@
         </el-table-column>
         <el-table-column v-if="isAdmin" prop="is_active" label="激活" width="80" align="center">
           <template #default="scope">
-            <el-tag :type="scope.row.is_active ? 'success' : 'danger'">
-              {{ scope.row.is_active ? '是' : '否' }}
-            </el-tag>
+            <el-switch
+              v-model="scope.row.is_active"
+              :loading="scope.row._updating"
+              @change="(value) => handleToggleActive(scope.row, value)"
+            />
           </template>
         </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="180">
@@ -1275,6 +1277,45 @@ const handleDelete = async (row) => {
       const errorMsg = error.response?.data?.detail || error.response?.data?.message || error.message || '删除失败'
       ElMessage.error(errorMsg)
     }
+  }
+}
+
+// 切换激活状态
+const handleToggleActive = async (row, value) => {
+  // 设置更新状态标记
+  row._updating = true
+  const oldValue = !value // 因为switch已经改变了值，所以取反
+  
+  try {
+    // 调用更新API，只更新is_active字段
+    await updateOffer(row.id, { is_active: value })
+    ElMessage.success(value ? '已激活' : '已禁用')
+    // 刷新数据以获取最新状态
+    loadData()
+  } catch (error) {
+    // 恢复原值
+    row.is_active = oldValue
+    
+    logger.error('更新Offer激活状态失败:', error)
+    
+    // 检查是否是401未授权错误（token过期）
+    if (error.response && error.response.status === 401) {
+      // 401错误已被axios拦截器处理，直接返回
+      return
+    }
+    
+    // 检查是否是403错误（可能是CSRF token问题）
+    if (error.response && error.response.status === 403 && error._handled) {
+      // 错误已被处理，不显示错误信息
+      return
+    }
+    
+    // 其他错误显示具体错误信息
+    const errorMsg = error.response?.data?.detail || error.response?.data?.message || error.message || '更新失败'
+    ElMessage.error(errorMsg)
+  } finally {
+    // 清除更新状态标记
+    row._updating = false
   }
 }
 
