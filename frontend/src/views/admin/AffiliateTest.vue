@@ -65,9 +65,9 @@
         stripe
         style="width: 100%; margin-top: 20px;"
       >
-        <el-table-column prop="publisher_name" label="渠道" width="150" />
-        <el-table-column prop="offer_name" label="Offer" min-width="200" />
-        <el-table-column prop="click_id" label="Click ID" min-width="200">
+        <el-table-column prop="publisher_name" label="渠道" width="150" show-overflow-tooltip />
+        <el-table-column prop="offer_name" label="Offer" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="click_id" label="Click ID" min-width="200" show-overflow-tooltip>
           <template #default="scope">
             <el-button type="primary" link @click="copyToClipboard(scope.row.click_id)">
               {{ scope.row.click_id }}
@@ -80,7 +80,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="country" label="国家" width="100" />
+        <el-table-column prop="country" label="国家" width="100" align="center" />
         <el-table-column prop="status" label="状态" width="120" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.status === 'Send Success' ? 'success' : 'danger'">
@@ -93,7 +93,7 @@
             {{ formatDate(scope.row.postback_time) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="100" fixed="right">
           <template #default="scope">
             <el-button type="primary" link :icon="View" @click="handleView(scope.row)">查看</el-button>
           </template>

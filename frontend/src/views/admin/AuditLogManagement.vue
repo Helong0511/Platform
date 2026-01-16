@@ -126,20 +126,20 @@
         stripe
         style="width: 100%"
       >
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="username" label="用户名" width="120">
+        <el-table-column prop="id" label="ID" width="80" align="center" />
+        <el-table-column prop="username" label="用户名" width="120" show-overflow-tooltip>
           <template #default="scope">
             {{ scope.row.username || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="action_type" label="操作类型" width="120">
+        <el-table-column prop="action_type" label="操作类型" width="120" align="center">
           <template #default="scope">
             <el-tag :type="getActionTypeTag(scope.row.action_type)">
               {{ getActionTypeLabel(scope.row.action_type) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="resource_type" label="资源类型" width="120">
+        <el-table-column prop="resource_type" label="资源类型" width="120" show-overflow-tooltip>
           <template #default="scope">
             {{ scope.row.resource_type || '-' }}
           </template>
@@ -149,8 +149,12 @@
             {{ scope.row.resource_name || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="ip_address" label="IP地址" width="130" />
-        <el-table-column prop="request_method" label="请求方法" width="100">
+        <el-table-column prop="ip_address" label="IP地址" width="130" show-overflow-tooltip>
+          <template #default="scope">
+            {{ scope.row.ip_address || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="request_method" label="请求方法" width="100" align="center">
           <template #default="scope">
             <el-tag v-if="scope.row.request_method" size="small">
               {{ scope.row.request_method }}
@@ -159,7 +163,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="request_path" label="请求路径" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="status_code" label="状态码" width="100">
+        <el-table-column prop="status_code" label="状态码" width="100" align="center">
           <template #default="scope">
             <el-tag 
               v-if="scope.row.status_code" 
@@ -171,7 +175,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="success" label="状态" width="80">
+        <el-table-column prop="success" label="状态" width="80" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.success ? 'success' : 'danger'" size="small">
               {{ scope.row.success ? '成功' : '失败' }}

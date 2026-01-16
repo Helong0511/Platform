@@ -58,13 +58,13 @@
             style="width: 100%"
             empty-text="暂无会话数据"
           >
-            <el-table-column prop="id" label="ID" width="80" />
-            <el-table-column prop="ip_address" label="IP地址" width="150">
+            <el-table-column prop="id" label="ID" width="80" align="center" />
+            <el-table-column prop="ip_address" label="IP地址" width="150" show-overflow-tooltip>
               <template #default="scope">
                 {{ scope.row.ip_address || '-' }}
               </template>
             </el-table-column>
-            <el-table-column prop="device_info" label="设备信息" min-width="150">
+            <el-table-column prop="device_info" label="设备信息" min-width="150" show-overflow-tooltip>
               <template #default="scope">
                 {{ scope.row.device_info || '-' }}
               </template>
@@ -74,12 +74,12 @@
                 {{ scope.row.user_agent || '-' }}
               </template>
             </el-table-column>
-            <el-table-column prop="location" label="位置" min-width="150">
+            <el-table-column prop="location" label="位置" min-width="150" show-overflow-tooltip>
               <template #default="scope">
                 {{ scope.row.location || '-' }}
               </template>
             </el-table-column>
-            <el-table-column prop="is_active" label="状态" width="100">
+            <el-table-column prop="is_active" label="状态" width="100" align="center">
               <template #default="scope">
                 <el-tag :type="scope.row.is_active ? 'success' : 'danger'" size="small">
                   {{ scope.row.is_active ? '活跃' : '已撤销' }}
@@ -101,7 +101,7 @@
                 {{ formatDate(scope.row.expires_at) }}
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="150" fixed="right">
+            <el-table-column label="操作" width="100" fixed="right">
               <template #default="scope">
                 <el-button 
                   v-if="scope.row.is_active"
@@ -175,8 +175,8 @@
             style="width: 100%"
             empty-text="暂无黑名单记录"
           >
-            <el-table-column prop="id" label="ID" width="80" />
-            <el-table-column prop="user_id" label="用户ID" width="100" />
+            <el-table-column prop="id" label="ID" width="80" align="center" />
+            <el-table-column prop="user_id" label="用户ID" width="100" align="center" />
             <el-table-column prop="username" label="用户名" min-width="120" show-overflow-tooltip>
               <template #default="scope">
                 {{ scope.row.username || `用户${scope.row.user_id}` }}

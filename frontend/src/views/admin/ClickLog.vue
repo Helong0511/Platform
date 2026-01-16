@@ -30,7 +30,7 @@
           style="width: 100%;"
           :default-sort="{ prop: 'click_time', order: 'descending' }"
         >
-          <el-table-column prop="click_id" label="Click ID" min-width="200" show-overflow-tooltip>
+          <el-table-column prop="click_id" label="Click ID" min-width="180" show-overflow-tooltip>
             <template #default="scope">
               <el-button 
                 v-if="scope.row.click_id" 
@@ -44,12 +44,12 @@
               <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="click_time" label="访问时间" width="180" sortable>
+          <el-table-column prop="click_time" label="访问时间" width="170" sortable>
             <template #default="scope">
               {{ scope.row.click_time ? formatDate(scope.row.click_time) : '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="offer_name" label="Offer" min-width="150" show-overflow-tooltip>
+          <el-table-column prop="offer_name" label="Offer" min-width="180" show-overflow-tooltip>
             <template #default="scope">
             <span class="text-primary" v-if="scope.row.offer_id && scope.row.offer_name">
               {{ `${scope.row.offer_id} - ${scope.row.offer_name}` }}
@@ -60,7 +60,7 @@
             <span v-else>-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="publisher_name" label="渠道" width="120" show-overflow-tooltip>
+          <el-table-column prop="publisher_name" label="渠道" width="140" show-overflow-tooltip>
             <template #default="scope">
               <span v-if="scope.row.publisher_id && scope.row.publisher_name">
                 {{ `${scope.row.publisher_id} - ${scope.row.publisher_name}` }}
@@ -69,7 +69,7 @@
               <span v-else>-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="advertiser_name" label="广告主" width="120" show-overflow-tooltip>
+          <el-table-column prop="advertiser_name" label="广告主" width="140" show-overflow-tooltip>
             <template #default="scope">
               <span v-if="scope.row.advertiser_id && scope.row.advertiser_name">
                 {{ `${scope.row.advertiser_id} - ${scope.row.advertiser_name}` }}
@@ -78,7 +78,7 @@
               <span v-else>-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="short_code" label="短链接代码" width="120" show-overflow-tooltip>
+          <el-table-column prop="short_code" label="短链接代码" width="130" show-overflow-tooltip>
             <template #default="scope">
               <el-link 
                 v-if="scope.row.short_code" 
@@ -92,12 +92,12 @@
               <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="ip" label="IP地址" width="140" show-overflow-tooltip>
+          <el-table-column prop="ip" label="IP地址" width="130" show-overflow-tooltip>
             <template #default="scope">
               {{ scope.row.ip || '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="country" label="国家" width="100" align="center">
+          <el-table-column prop="country" label="国家" width="90" align="center">
             <template #default="scope">
               <el-tag v-if="scope.row.country" size="small" type="info">
                 {{ scope.row.country }}
@@ -117,7 +117,7 @@
               <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="os" label="操作系统" width="140" show-overflow-tooltip>
+          <el-table-column prop="os" label="操作系统" width="130" show-overflow-tooltip>
             <template #default="scope">
               <span v-if="scope.row.os">
                 {{ scope.row.os }}{{ scope.row.os_version ? ' ' + scope.row.os_version : '' }}
@@ -125,7 +125,7 @@
               <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="browser" label="浏览器" width="140" show-overflow-tooltip>
+          <el-table-column prop="browser" label="浏览器" width="130" show-overflow-tooltip>
             <template #default="scope">
               <span v-if="scope.row.browser">
                 {{ scope.row.browser }}{{ scope.row.browser_version ? ' ' + scope.row.browser_version : '' }}
@@ -133,7 +133,7 @@
               <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="device_brand" label="设备品牌" width="120" show-overflow-tooltip>
+          <el-table-column prop="device_brand" label="设备品牌" width="130" show-overflow-tooltip>
             <template #default="scope">
               <span v-if="scope.row.device_brand || scope.row.device_model">
                 {{ scope.row.device_brand || '' }}{{ scope.row.device_brand && scope.row.device_model ? ' ' : '' }}{{ scope.row.device_model || '' }}
@@ -147,7 +147,7 @@
               <el-tag v-else type="success" size="small">否</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="referer" label="来源页面" min-width="200" show-overflow-tooltip>
+          <el-table-column prop="referer" label="来源页面" min-width="220" show-overflow-tooltip>
             <template #default="scope">
               <el-link 
                 v-if="scope.row.referer" 

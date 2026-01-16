@@ -143,9 +143,9 @@
         stripe
         style="width: 100%; margin-top: 20px;"
       >
-        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column prop="id" label="ID" width="80" align="center" />
         
-        <el-table-column prop="conversion_id" label="转化ID" width="120">
+        <el-table-column prop="conversion_id" label="转化ID" width="120" align="center">
           <template #default="scope">
             <span v-if="scope.row.conversion_id">{{ scope.row.conversion_id }}</span>
             <el-tooltip v-else content="该转化被扣量，不会保存到主转化表，下游渠道无法看到" placement="top">
@@ -156,11 +156,11 @@
         
         <el-table-column prop="click_id" label="点击ID" min-width="200" show-overflow-tooltip />
         
-        <el-table-column prop="advertiser_name" label="广告主" min-width="150" />
+        <el-table-column prop="advertiser_name" label="广告主" min-width="150" show-overflow-tooltip />
         
-        <el-table-column prop="offer_name" label="Offer" min-width="150" />
+        <el-table-column prop="offer_name" label="Offer" min-width="150" show-overflow-tooltip />
         
-        <el-table-column prop="publisher_name" label="渠道" min-width="150" />
+        <el-table-column prop="publisher_name" label="渠道" min-width="150" show-overflow-tooltip />
         
         <el-table-column label="扣量信息" align="center" width="220">
           <template #default="scope">

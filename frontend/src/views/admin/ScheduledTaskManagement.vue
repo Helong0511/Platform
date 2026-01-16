@@ -101,7 +101,7 @@
             {{ scope.row.id }}
           </template>
         </el-table-column>
-        <el-table-column prop="task_name" label="任务名称" min-width="200">
+        <el-table-column prop="task_name" label="任务名称" min-width="200" show-overflow-tooltip>
           <template #default="scope">
             <div class="task-name-cell">
               <span class="task-name-text">{{ scope.row.task_name }}</span>
@@ -116,7 +116,7 @@
             {{ scope.row.description || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="cron_expression" label="Cron表达式" width="150">
+        <el-table-column prop="cron_expression" label="Cron表达式" width="150" align="center">
           <template #default="scope">
             <el-tag v-if="scope.row.cron_expression" type="info" size="small">
               {{ scope.row.cron_expression }}
@@ -124,7 +124,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="function_name" label="执行函数" min-width="250">
+        <el-table-column prop="function_name" label="执行函数" min-width="250" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="scope.row.function_name" class="function-info">
               <div class="function-name">

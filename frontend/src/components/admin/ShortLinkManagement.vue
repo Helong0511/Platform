@@ -45,12 +45,12 @@
       style="width: 100%"
     >
       <el-table-column prop="id" label="ID" width="100" align="center" />
-      <el-table-column prop="short_code" label="短链接代码" width="150">
+      <el-table-column prop="short_code" label="短链接代码" width="150" show-overflow-tooltip>
         <template #default="scope">
           <el-tag type="primary">{{ scope.row.short_code }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="short_url" label="短链接" width="350" show-overflow-tooltip>
+      <el-table-column prop="short_url" label="短链接" width="380" show-overflow-tooltip>
         <template #default="scope">
           <el-link :href="scope.row.short_url" target="_blank" type="primary">
             {{ scope.row.short_url }}
@@ -64,15 +64,20 @@
           />
         </template>
       </el-table-column>
-      <el-table-column prop="original_url" label="原始URL" min-width="300" show-overflow-tooltip />
-      <el-table-column prop="title" label="标题" width="150" show-overflow-tooltip />
-      <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip>
+      <el-table-column prop="original_url" label="原始URL" min-width="350" show-overflow-tooltip />
+      <el-table-column prop="title" label="标题" width="180" show-overflow-tooltip>
+        <template #default="scope">
+          <span v-if="scope.row.title">{{ scope.row.title }}</span>
+          <span v-else style="color: #909399;">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="description" label="描述" min-width="250" show-overflow-tooltip>
         <template #default="scope">
           <span v-if="scope.row.description">{{ scope.row.description }}</span>
           <span v-else style="color: #909399;">-</span>
         </template>
       </el-table-column>
-      <el-table-column prop="offer_id" label="关联Offer" width="200" show-overflow-tooltip>
+      <el-table-column prop="offer_id" label="关联Offer" width="180" show-overflow-tooltip>
         <template #default="scope">
           <el-tag v-if="scope.row.offer_id" type="info">
             {{ getOfferName(scope.row.offer_id) || `ID: ${scope.row.offer_id}` }}
@@ -80,7 +85,7 @@
           <span v-else style="color: #909399;">-</span>
         </template>
       </el-table-column>
-      <el-table-column prop="channel_id" label="渠道" width="200" show-overflow-tooltip>
+      <el-table-column prop="channel_id" label="渠道" width="180" show-overflow-tooltip>
         <template #default="scope">
           <el-tag v-if="scope.row.channel_id" type="success">
             {{ scope.row.channel_name || getChannelName(scope.row.channel_id) || `ID: ${scope.row.channel_id}` }}
@@ -105,12 +110,14 @@
           <el-tag v-else type="info" size="small">永不过期</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="is_active" label="激活" width="80" align="center">
+      <el-table-column prop="is_active" label="激活" width="90" align="center">
         <template #default="scope">
           <el-switch
             v-model="scope.row.is_active"
             @change="handleToggleActive(scope.row)"
-            :loading="scope.row._toggleLoading"
+            :active-text="scope.row.is_active ? '激活' : ''"
+            :inactive-text="!scope.row.is_active ? '禁用' : ''"
+            aria-label="切换激活状态"
           />
         </template>
       </el-table-column>

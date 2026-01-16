@@ -124,7 +124,7 @@
         @selection-change="handleSelectionChange"
       >
         <el-table-column type="selection" width="55" />
-        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column prop="id" label="ID" width="80" align="center" />
         
         <el-table-column prop="level" label="层级" width="100" align="center">
           <template #default="scope">
@@ -134,7 +134,7 @@
           </template>
         </el-table-column>
         
-        <el-table-column prop="target_name" label="配置对象" min-width="200" />
+        <el-table-column prop="target_name" label="配置对象" min-width="200" show-overflow-tooltip />
         
         <el-table-column label="扣量配置" width="180" align="center">
           <template #default="scope">
@@ -192,7 +192,7 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="操作" width="180" align="center" fixed="right">
+        <el-table-column label="操作" width="200" align="center" fixed="right">
           <template #default="scope">
             <el-button
               type="primary"

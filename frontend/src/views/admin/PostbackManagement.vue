@@ -233,8 +233,8 @@ Postback 转化管理页面
         stripe
         style="width: 100%"
       >
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="platform" label="平台" width="100">
+        <el-table-column prop="id" label="ID" width="80" align="center" />
+        <el-table-column prop="platform" label="平台" width="100" align="center">
           <template #default="scope">
             <el-tag type="primary" size="small">
               {{ scope.row.platform.toUpperCase() }}
@@ -254,7 +254,7 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="click_offer_name" label="关联Offer" min-width="150">
+        <el-table-column prop="click_offer_name" label="关联Offer" min-width="150" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="scope.row.click_offer_id">
               <div style="font-weight: 500;">{{ scope.row.click_offer_name || `Offer_${scope.row.click_offer_id}` }}</div>
@@ -263,7 +263,7 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="click_publisher_name" label="关联渠道" min-width="150">
+        <el-table-column prop="click_publisher_name" label="关联渠道" min-width="150" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="scope.row.click_publisher_id">
               <div style="font-weight: 500;">{{ scope.row.click_publisher_name || `渠道_${scope.row.click_publisher_id}` }}</div>
@@ -272,7 +272,7 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="click_advertiser_name" label="关联广告主" min-width="150">
+        <el-table-column prop="click_advertiser_name" label="关联广告主" min-width="150" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="scope.row.click_advertiser_id">
               <div style="font-weight: 500;">{{ scope.row.click_advertiser_name || `广告主_${scope.row.click_advertiser_id}` }}</div>
@@ -298,7 +298,7 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="event_name" label="事件名称" width="120">
+        <el-table-column prop="event_name" label="事件名称" width="120" align="center">
           <template #default="scope">
             <el-tag v-if="scope.row.event_name" type="success" size="small">
               {{ scope.row.event_name }}
@@ -332,7 +332,7 @@ Postback 转化管理页面
             {{ scope.row.devad_id || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="os" label="操作系统" width="120">
+        <el-table-column prop="os" label="操作系统" width="120" align="center">
           <template #default="scope">
             <el-tag v-if="scope.row.os" size="small" :type="getOsTagType(scope.row.os)">
               {{ formatOs(scope.row.os) }}
@@ -340,7 +340,7 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="carrier" label="运营商" width="120">
+        <el-table-column prop="carrier" label="运营商" width="120" align="center">
           <template #default="scope">
             <el-tag v-if="scope.row.carrier" size="small" type="info">
               {{ scope.row.carrier }}
@@ -348,7 +348,7 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="gid" label="渠道（gid）" min-width="150">
+        <el-table-column prop="gid" label="渠道（gid）" min-width="150" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="scope.row.gid">
               <div v-if="scope.row.gid_publisher_name" style="font-weight: 500;">
@@ -359,7 +359,7 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="product_id" label="产品" min-width="150">
+        <el-table-column prop="product_id" label="产品" min-width="150" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="scope.row.product_id">
               <div style="font-weight: 500;">{{ scope.row.product_name || `产品_${scope.row.product_id}` }}</div>
@@ -368,7 +368,7 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="client_id" label="客户" min-width="150">
+        <el-table-column prop="client_id" label="客户" min-width="150" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="scope.row.client_id">
               <div style="font-weight: 500;">{{ scope.row.client_name || `客户_${scope.row.client_id}` }}</div>
@@ -400,7 +400,7 @@ Postback 转化管理页面
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="100" fixed="right">
           <template #default="scope">
             <el-button 
               type="primary" 

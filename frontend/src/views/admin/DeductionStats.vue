@@ -242,9 +242,9 @@
           stripe
           style="width: 100%; margin-top: 20px;"
         >
-          <el-table-column prop="advertiser_name" label="广告主" min-width="150" />
-          <el-table-column prop="offer_name" label="Offer" min-width="150" />
-          <el-table-column prop="publisher_name" label="渠道" min-width="150" />
+          <el-table-column prop="advertiser_name" label="广告主" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="offer_name" label="Offer" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="publisher_name" label="渠道" min-width="150" show-overflow-tooltip />
           <el-table-column label="扣量统计" align="center">
             <el-table-column prop="original_volume" label="原始数量" width="100" align="right">
               <template #default="scope">

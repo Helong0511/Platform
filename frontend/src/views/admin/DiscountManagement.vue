@@ -76,20 +76,20 @@
         stripe
         style="width: 100%; margin-top: 20px;"
       >
-        <el-table-column prop="discount_type" label="扣量类型" width="120">
+        <el-table-column prop="discount_type" label="扣量类型" width="120" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.discount_type === 'offer' ? 'warning' : 'primary'">
               {{ scope.row.discount_type }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="offer_name" label="Offer" min-width="200">
+        <el-table-column prop="offer_name" label="Offer" min-width="200" show-overflow-tooltip>
           <template #default="scope">
             <span v-if="scope.row.offer_name">{{ scope.row.offer_name }}</span>
             <span v-else class="text-info">渠道级别</span>
           </template>
         </el-table-column>
-        <el-table-column prop="publisher_name" label="渠道" min-width="150" />
+        <el-table-column prop="publisher_name" label="渠道" min-width="150" show-overflow-tooltip />
         <el-table-column prop="discount_ratio" label="扣量比例" width="120" align="right">
           <template #default="scope">
             <el-tag type="danger">{{ scope.row.discount_ratio }}%</el-tag>

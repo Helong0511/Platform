@@ -89,27 +89,27 @@
         style="width: 100%"
         @sort-change="handleSortChange"
       >
-        <el-table-column prop="id" label="ID" width="80" sortable="custom"></el-table-column>
-        <el-table-column prop="username" label="登录用户名" sortable="custom" min-width="80">
+        <el-table-column prop="id" label="ID" width="80" sortable="custom" align="center"></el-table-column>
+        <el-table-column prop="username" label="登录用户名" sortable="custom" min-width="80" show-overflow-tooltip>
           <template #default="scope">
             <div class="username-cell">
               <span class="username-text">{{ scope.row.username || '-' }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="full_name" label="全名" min-width="100">
+        <el-table-column prop="full_name" label="全名" min-width="100" show-overflow-tooltip>
           <template #default="scope">
             {{ scope.row.full_name || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="role" label="角色" width="100">
+        <el-table-column prop="role" label="角色" width="100" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.role === 'admin' ? 'primary' : 'success'" size="small">
               {{ scope.row.role === 'admin' ? '管理员' : '客户' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="email" label="邮箱" min-width="200">
+        <el-table-column prop="email" label="邮箱" min-width="200" show-overflow-tooltip>
           <template #default="scope">
             {{ scope.row.email || '-' }}
           </template>

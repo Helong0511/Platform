@@ -62,8 +62,8 @@
         stripe
         style="width: 100%"
       >
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="ip_address" label="IP地址" min-width="180">
+        <el-table-column prop="id" label="ID" width="80" align="center" />
+        <el-table-column prop="ip_address" label="IP地址" min-width="180" show-overflow-tooltip>
           <template #default="scope">
             <el-tag type="primary" size="small">
               {{ scope.row.ip_address }}
@@ -96,7 +96,7 @@
             {{ formatDateTime(scope.row.updated_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right">
           <template #default="scope">
             <el-button 
               type="primary" 

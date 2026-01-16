@@ -48,10 +48,10 @@
           stripe
           style="width: 100%; margin-top: 20px;"
         >
-        <el-table-column prop="id" label="广告主ID" width="150" />
-        <el-table-column prop="advertiser_name" label="广告主名称" min-width="200" />
-        <el-table-column prop="email" label="邮箱" min-width="200" />
-        <el-table-column prop="mobile" label="手机号" width="150" />
+        <el-table-column prop="id" label="广告主ID" width="150" align="center" />
+        <el-table-column prop="advertiser_name" label="广告主名称" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="email" label="邮箱" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="mobile" label="手机号" width="150" show-overflow-tooltip />
         <el-table-column prop="is_active" label="状态" width="100" align="center">
           <template #default="scope">
             <el-switch

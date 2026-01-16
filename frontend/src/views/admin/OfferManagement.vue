@@ -77,8 +77,8 @@
         >
         <el-table-column prop="id" label="Offer ID" width="100" align="center" />
         <el-table-column prop="offer_name" label="Offer名称" width="250" show-overflow-tooltip />
-        <el-table-column v-if="isAdmin" prop="advertiser_name" label="广告主" width="150" />
-        <el-table-column v-if="isAdmin" prop="advertiser_offer_id" label="上游Offer ID" width="150" />
+        <el-table-column v-if="isAdmin" prop="advertiser_name" label="广告主" width="150" show-overflow-tooltip />
+        <el-table-column v-if="isAdmin" prop="advertiser_offer_id" label="上游Offer ID" width="150" show-overflow-tooltip />
         <el-table-column v-if="isAdmin" prop="payout" label="上游PO" width="100" align="right">
           <template #default="scope">
             <span v-if="scope.row.payout">{{ scope.row.payout.toFixed(2) }}</span>
@@ -101,7 +101,7 @@
             </template>
           </template>
         </el-table-column>
-        <el-table-column prop="country" label="国家" width="80" />
+        <el-table-column prop="country" label="国家" width="80" align="center" />
         <el-table-column prop="category" label="分类" width="120" show-overflow-tooltip>
           <template #default="scope">
             <span v-if="scope.row.category">{{ scope.row.category }}</span>

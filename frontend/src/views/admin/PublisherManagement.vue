@@ -50,15 +50,19 @@
           stripe
           style="width: 100%; margin-top: 20px;"
         >
-        <el-table-column prop="id" label="渠道ID" width="120" />
-        <el-table-column prop="publisher_name" label="渠道名称" min-width="200" />
+        <el-table-column prop="id" label="渠道ID" width="120" align="center" />
+        <el-table-column prop="publisher_name" label="渠道名称" min-width="200" show-overflow-tooltip />
         <el-table-column prop="client_name" label="关联客户" min-width="150" show-overflow-tooltip>
           <template #default="scope">
             <span>{{ scope.row.client_name || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="email" label="邮箱" min-width="80" />
-        <el-table-column prop="price_discount" label="价格折扣" width="120" align="center">
+        <el-table-column prop="email" label="邮箱" min-width="80" show-overflow-tooltip>
+          <template #default="scope">
+            {{ scope.row.email || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="price_discount" label="价格折扣" width="120" align="right">
           <template #default="scope">
             <el-tag v-if="scope.row.price_discount > 0" type="info">{{ scope.row.price_discount }}%</el-tag>
             <span v-else style="color: #909399;">-</span>

@@ -76,21 +76,21 @@
         stripe
         style="width: 100%; margin-top: 20px;"
       >
-        <el-table-column prop="cap_type" label="Cap类型" width="150">
+        <el-table-column prop="cap_type" label="Cap类型" width="150" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.cap_type === 'advertiser_offer' ? 'warning' : 'primary'">
               {{ scope.row.cap_type }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="offer_name" label="Offer" min-width="200" />
-        <el-table-column prop="advertiser_name" label="广告主" width="150">
+        <el-table-column prop="offer_name" label="Offer" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="advertiser_name" label="广告主" width="150" show-overflow-tooltip>
           <template #default="scope">
             <span v-if="scope.row.advertiser_name">{{ scope.row.advertiser_name }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="publisher_name" label="渠道" width="150">
+        <el-table-column prop="publisher_name" label="渠道" width="150" show-overflow-tooltip>
           <template #default="scope">
             <span v-if="scope.row.publisher_name">{{ scope.row.publisher_name }}</span>
             <span v-else class="text-info">全部渠道</span>
@@ -509,6 +509,34 @@ const handleSubmit = async () => {
       submitting.value = false
     }
   })
+}
+
+// 切换状态
+const handleStatusChange = async (row) => {
+  const originalState = row.is_active
+  try {
+    await updateCap(row.id, { is_active: row.is_active })
+    loadData()
+  } catch (error) {
+    // 恢复原状态
+    row.is_active = originalState
+    
+    logger.error('更新Cap配置状态失败:', error)
+    
+    // 检查是否是401未授权错误（token过期）
+    if (error.response && error.response.status === 401) {
+      return
+    }
+    
+    // 检查是否是403错误（可能是CSRF token问题）
+    if (error.response && error.response.status === 403 && error._handled) {
+      return
+    }
+    
+    // 其他错误显示具体错误信息
+    const errorMsg = error.response?.data?.detail || error.response?.data?.message || error.message || '更新失败'
+    ElMessage.error(errorMsg)
+  }
 }
 
 // 对话框关闭
