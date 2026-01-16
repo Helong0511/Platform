@@ -54,9 +54,13 @@
         <el-table-column prop="mobile" label="手机号" width="150" />
         <el-table-column prop="is_active" label="状态" width="100" align="center">
           <template #default="scope">
-            <el-tag :type="scope.row.is_active ? 'success' : 'danger'">
-              {{ scope.row.is_active ? '激活' : '禁用' }}
-            </el-tag>
+            <el-switch
+              v-model="scope.row.is_active"
+              @change="handleToggleActive(scope.row)"
+              :active-text="scope.row.is_active ? '激活' : ''"
+              :inactive-text="!scope.row.is_active ? '禁用' : ''"
+              aria-label="切换状态"
+            />
           </template>
         </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="180">
@@ -244,6 +248,34 @@ const handleDelete = async (row) => {
       logger.error('删除广告主失败:', error)
       ElMessage.error('删除失败')
     }
+  }
+}
+
+// 切换激活状态
+const handleToggleActive = async (row) => {
+  const originalState = row.is_active
+  try {
+    await updateAdvertiser(row.id, { is_active: row.is_active })
+    loadData()
+  } catch (error) {
+    // 恢复原状态
+    row.is_active = originalState
+    
+    logger.error('更新广告主激活状态失败:', error)
+    
+    // 检查是否是401未授权错误（token过期）
+    if (error.response && error.response.status === 401) {
+      return
+    }
+    
+    // 检查是否是403错误（可能是CSRF token问题）
+    if (error.response && error.response.status === 403 && error._handled) {
+      return
+    }
+    
+    // 其他错误显示具体错误信息
+    const errorMsg = error.response?.data?.detail || error.response?.data?.message || error.message || '更新失败'
+    ElMessage.error(errorMsg)
   }
 }
 
