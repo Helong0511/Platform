@@ -393,8 +393,11 @@ class ShortLinkService(BaseService[ShortLink]):
         await self.db.delete(short_link)
         await self.db.commit()
         
-        # 清除缓存，确保数据一致性
+        # 清除缓存和Redis计数器，确保数据一致性
         await invalidate_short_link_cache(short_code)
+        # 清理Redis中的点击计数器，避免同步失败
+        from app.core.short_link_click_counter import cleanup_click_counter
+        await cleanup_click_counter(short_code)
         
         logger.info(f"短链接删除成功: {link_id}")
 

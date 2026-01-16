@@ -40,6 +40,31 @@ SYNC_LOCK_TIMEOUT = 300  # 锁超时时间（秒），5分钟
 ITEM_LOCK_PREFIX = "short_link:item_lock:"  # 细粒度分布式锁前缀（每个short_code一个锁）
 ITEM_LOCK_TIMEOUT = 10  # 细粒度锁超时时间（秒），10秒足够完成单个更新
 
+
+async def cleanup_click_counter(short_code: str) -> bool:
+    """
+    清理短链接的Redis计数器（当短链接被删除时调用）
+    
+    Args:
+        short_code: 短链接代码
+        
+    Returns:
+        是否清理成功
+    """
+    redis = await get_redis_client()
+    if not redis:
+        return False
+    
+    try:
+        counter_key = f"{CLICK_COUNTER_PREFIX}{short_code}"
+        deleted = await redis.delete(counter_key)
+        if deleted:
+            logger.debug(f"成功清理短链接Redis计数器: short_code={short_code}")
+        return True
+    except Exception as e:
+        logger.warning(f"清理短链接Redis计数器失败: short_code={short_code}, error={e}")
+        return False
+
 # Lua脚本：原子获取并删除计数器值（避免竞态条件）
 # 返回：如果键存在且值>0，返回计数值并删除键；否则返回0
 _GET_AND_DELETE_COUNTER_LUA = """
@@ -194,10 +219,40 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
             synced = 0
             failed_codes = []  # 记录同步失败的短链接代码
             
+            # 第一步：预先验证短链接是否存在，不存在的直接清理（避免无效重试）
+            short_codes_to_check = [code for code, _ in updates]
+            existing_codes = set()
+            try:
+                result = await db.execute(
+                    select(ShortLink.short_code, ShortLink.is_active).where(
+                        ShortLink.short_code.in_(short_codes_to_check)
+                    )
+                )
+                existing_links = result.fetchall()
+                existing_codes = {row[0] for row in existing_links if row[1]}  # 只包含激活的短链接
+            except Exception as e:
+                logger.warning(f"预验证短链接存在性失败（进程内），继续同步: {e}")
+                existing_codes = set(short_codes_to_check)  # 如果验证失败，假设都存在
+            
+            # 分离存在的和不存在的短链接
+            valid_updates = [(code, count) for code, count in updates if code in existing_codes]
+            invalid_codes = [code for code, _ in updates if code not in existing_codes]
+            
+            if invalid_codes:
+                logger.info(f"发现 {len(invalid_codes)} 个不存在或已禁用的短链接（进程内），已清理其计数器")
+                # 清理不存在的短链接的进程内计数器
+                async with _counter_lock:
+                    for code in invalid_codes:
+                        _click_counters.pop(code, None)
+            
+            if not valid_updates:
+                logger.debug("所有短链接都不存在或已禁用（进程内），无需同步")
+                return 0
+            
             # 批量处理，每批5条（与主函数保持一致）
             BATCH_SIZE = 5
-            for batch_idx in range(0, len(updates), BATCH_SIZE):
-                batch = updates[batch_idx:batch_idx + BATCH_SIZE]
+            for batch_idx in range(0, len(valid_updates), BATCH_SIZE):
+                batch = valid_updates[batch_idx:batch_idx + BATCH_SIZE]
                 
                 # 使用原子更新，避免 ORM 方式导致的死锁
                 for short_code, count in batch:
@@ -229,13 +284,45 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                                 _click_counters.pop(code, None)
             
             if failed_codes:
-                # 获取失败的计数详情
-                failed_counts = {code: _click_counters.get(code, 0) for code in failed_codes}
-                logger.warning(
-                    f"有 {len(failed_codes)} 个短链接同步失败（进程内计数器），将在下次同步时重试。"
-                    f"失败的短链接代码: {failed_codes}，"
-                    f"失败的计数详情: {failed_counts}"
-                )
+                # 对失败的更新进行二次验证，不存在的立即清理
+                try:
+                    result = await db.execute(
+                        select(ShortLink.short_code, ShortLink.is_active).where(
+                            ShortLink.short_code.in_(failed_codes)
+                        )
+                    )
+                    existing_failed = {row[0] for row in result.fetchall() if row[1]}  # 只包含激活的
+                    
+                    retry_codes = [code for code in failed_codes if code in existing_failed]
+                    cleaned_codes = [code for code in failed_codes if code not in existing_failed]
+                    
+                    if cleaned_codes:
+                        # 清理不存在的短链接的进程内计数器
+                        async with _counter_lock:
+                            for code in cleaned_codes:
+                                _click_counters.pop(code, None)
+                        logger.info(
+                            f"清理了 {len(cleaned_codes)} 个不存在或已禁用的短链接计数器（进程内）: "
+                            f"codes={cleaned_codes}"
+                        )
+                    
+                    if retry_codes:
+                        failed_counts = {code: _click_counters.get(code, 0) for code in retry_codes}
+                        logger.warning(
+                            f"有 {len(retry_codes)} 个短链接同步失败（进程内计数器），将在下次同步时重试。"
+                            f"失败的短链接代码: {retry_codes}，"
+                            f"失败的计数详情: {failed_counts}"
+                        )
+                    else:
+                        logger.info("所有失败的计数器都已清理（进程内），无需重试")
+                except Exception as e:
+                    # 如果验证失败，记录所有失败项
+                    failed_counts = {code: _click_counters.get(code, 0) for code in failed_codes}
+                    logger.warning(
+                        f"验证失败短链接存在性失败（进程内），所有失败项将重试: {e}。"
+                        f"失败的短链接代码: {failed_codes}，"
+                        f"失败的计数详情: {failed_counts}"
+                    )
             
             return synced
         
@@ -333,14 +420,56 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
         
         logger.info(f"准备批量同步 {len(updates)} 个短链接的点击次数")
         
+        # 第一步：预先验证短链接是否存在，不存在的直接清理（避免无效重试）
+        short_codes_to_check = [code for code, _, _ in updates]
+        existing_codes = set()
+        try:
+            result = await db.execute(
+                select(ShortLink.short_code, ShortLink.is_active).where(
+                    ShortLink.short_code.in_(short_codes_to_check)
+                )
+            )
+            existing_links = result.fetchall()
+            existing_codes = {row[0] for row in existing_links if row[1]}  # 只包含激活的短链接
+        except Exception as e:
+            logger.warning(f"预验证短链接存在性失败，继续同步: {e}")
+            # 如果验证失败，继续同步流程，让后续逻辑处理
+        
+        # 分离存在的和不存在的短链接
+        valid_updates = []
+        invalid_updates = []
+        for update_item in updates:
+            short_code = update_item[0]
+            if short_code in existing_codes:
+                valid_updates.append(update_item)
+            else:
+                invalid_updates.append(update_item)
+                # 立即清理不存在的短链接的Redis计数器（如果Lua脚本还没删除）
+                if redis:
+                    try:
+                        redis_key = update_item[2] if len(update_item) > 2 else f"{CLICK_COUNTER_PREFIX}{short_code}"
+                        await redis.delete(redis_key)
+                        logger.info(f"清理不存在的短链接Redis计数器: short_code={short_code}")
+                    except Exception as e:
+                        logger.warning(f"清理不存在的短链接Redis计数器失败: short_code={short_code}, error={e}")
+        
+        if invalid_updates:
+            logger.info(f"发现 {len(invalid_updates)} 个不存在的短链接，已清理其Redis计数器")
+        
+        if not valid_updates:
+            logger.debug("所有短链接都不存在或已禁用，无需同步")
+            return 0
+        
+        logger.info(f"实际需要同步 {len(valid_updates)} 个有效短链接的点击次数")
+        
         # 使用批量更新（分批处理，减少死锁风险）
         # 减小批量大小，进一步降低死锁风险
         BATCH_SIZE = 5  # 每批处理5条记录（进一步减小批量大小，减少锁竞争）
         synced = 0
         failed_updates = []  # 记录失败的更新
         
-        for batch_idx in range(0, len(updates), BATCH_SIZE):
-            batch = updates[batch_idx:batch_idx + BATCH_SIZE]
+        for batch_idx in range(0, len(valid_updates), BATCH_SIZE):
+            batch = valid_updates[batch_idx:batch_idx + BATCH_SIZE]
             
             try:
                 # 按 short_code 排序，确保更新顺序一致，减少死锁
@@ -382,14 +511,58 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
             logger.info(f"成功同步 {synced} 个短链接的点击次数到数据库")
         
         if failed_updates:
-            # 提取失败的短链接代码列表
+            # 对失败的更新进行二次验证，不存在的立即清理
             failed_codes = [code for code, _, _ in failed_updates]
-            failed_counts = {code: count for code, count, _ in failed_updates}
-            logger.warning(
-                f"有 {len(failed_updates)} 个计数器同步失败，将在下次同步时重试。"
-                f"失败的短链接代码: {failed_codes}，"
-                f"失败的计数详情: {failed_counts}"
-            )
+            retry_updates = []
+            cleaned_updates = []
+            
+            try:
+                # 验证失败的短链接是否存在
+                result = await db.execute(
+                    select(ShortLink.short_code, ShortLink.is_active).where(
+                        ShortLink.short_code.in_(failed_codes)
+                    )
+                )
+                existing_failed = {row[0] for row in result.fetchall() if row[1]}  # 只包含激活的
+                
+                for update_item in failed_updates:
+                    short_code = update_item[0]
+                    if short_code in existing_failed:
+                        # 短链接存在且激活，加入重试列表
+                        retry_updates.append(update_item)
+                    else:
+                        # 短链接不存在或已禁用，清理Redis计数器
+                        cleaned_updates.append(update_item)
+                        if redis:
+                            try:
+                                redis_key = update_item[2] if len(update_item) > 2 else f"{CLICK_COUNTER_PREFIX}{short_code}"
+                                await redis.delete(redis_key)
+                                logger.info(f"清理失败且不存在的短链接Redis计数器: short_code={short_code}")
+                            except Exception as e:
+                                logger.warning(f"清理失败短链接Redis计数器失败: short_code={short_code}, error={e}")
+            except Exception as e:
+                logger.warning(f"验证失败短链接存在性失败，所有失败项将重试: {e}")
+                retry_updates = failed_updates
+            
+            # 记录日志
+            if cleaned_updates:
+                cleaned_codes = [code for code, _, _ in cleaned_updates]
+                cleaned_counts = {code: count for code, count, _ in cleaned_updates}
+                logger.info(
+                    f"清理了 {len(cleaned_updates)} 个不存在或已禁用的短链接计数器: "
+                    f"codes={cleaned_codes}, counts={cleaned_counts}"
+                )
+            
+            if retry_updates:
+                retry_codes = [code for code, _, _ in retry_updates]
+                retry_counts = {code: count for code, count, _ in retry_updates}
+                logger.warning(
+                    f"有 {len(retry_updates)} 个计数器同步失败，将在下次同步时重试。"
+                    f"失败的短链接代码: {retry_codes}，"
+                    f"失败的计数详情: {retry_counts}"
+                )
+            else:
+                logger.info("所有失败的计数器都已清理，无需重试")
         
         return synced
     except Exception as e:
