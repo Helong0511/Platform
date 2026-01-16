@@ -35,8 +35,10 @@ _deadlock_stats_lock = asyncio.Lock()
 
 # Redis键前缀
 CLICK_COUNTER_PREFIX = "short_link:click:"
-SYNC_LOCK_PREFIX = "short_link:sync_lock:"  # 分布式锁前缀
+SYNC_LOCK_PREFIX = "short_link:sync_lock:"  # 分布式锁前缀（全局同步锁）
 SYNC_LOCK_TIMEOUT = 300  # 锁超时时间（秒），5分钟
+ITEM_LOCK_PREFIX = "short_link:item_lock:"  # 细粒度分布式锁前缀（每个short_code一个锁）
+ITEM_LOCK_TIMEOUT = 10  # 细粒度锁超时时间（秒），10秒足够完成单个更新
 
 # Lua脚本：原子获取并删除计数器值（避免竞态条件）
 # 返回：如果键存在且值>0，返回计数值并删除键；否则返回0
@@ -398,6 +400,77 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                 logger.warning(f"释放分布式锁失败: {e}")
 
 
+async def _acquire_item_locks(redis, short_codes: List[str]) -> Tuple[Dict[str, str], List[str]]:
+    """
+    为每个short_code获取细粒度分布式锁
+    
+    Args:
+        redis: Redis客户端
+        short_codes: 短链接代码列表
+        
+    Returns:
+        (成功获取锁的字典 {short_code: lock_value}, 未获取到锁的short_code列表)
+    """
+    if not redis:
+        # Redis不可用时，返回所有代码（降级处理）
+        return {code: "" for code in short_codes}, []
+    
+    acquired_locks = {}
+    failed_codes = []
+    
+    for short_code in short_codes:
+        lock_key = f"{ITEM_LOCK_PREFIX}{short_code}"
+        lock_value = str(uuid.uuid4())
+        
+        try:
+            # 尝试获取锁（NX: 只在键不存在时设置，EX: 设置过期时间）
+            lock_acquired = await redis.set(
+                lock_key,
+                lock_value,
+                nx=True,  # 只在键不存在时设置
+                ex=ITEM_LOCK_TIMEOUT  # 设置过期时间，防止死锁
+            )
+            
+            if lock_acquired:
+                acquired_locks[short_code] = lock_value
+            else:
+                failed_codes.append(short_code)
+                logger.debug(f"无法获取短链接锁，可能正在被其他进程更新: short_code={short_code}")
+        except Exception as e:
+            logger.warning(f"获取短链接锁失败: short_code={short_code}, error={e}")
+            failed_codes.append(short_code)
+    
+    return acquired_locks, failed_codes
+
+
+async def _release_item_locks(redis, locks: Dict[str, str]) -> None:
+    """
+    释放细粒度分布式锁
+    
+    Args:
+        redis: Redis客户端
+        locks: {short_code: lock_value} 字典
+    """
+    if not redis or not locks:
+        return
+    
+    # 使用Lua脚本确保只删除自己设置的锁
+    lua_script = """
+    if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("del", KEYS[1])
+    else
+        return 0
+    end
+    """
+    
+    for short_code, lock_value in locks.items():
+        lock_key = f"{ITEM_LOCK_PREFIX}{short_code}"
+        try:
+            await redis.eval(lua_script, 1, lock_key, lock_value)
+        except Exception as e:
+            logger.debug(f"释放短链接锁失败（可忽略）: short_code={short_code}, error={e}")
+
+
 async def _batch_update_click_counts_with_retry(
     db: AsyncSession,
     batch: List[Tuple[str, int, str]],
@@ -406,9 +479,9 @@ async def _batch_update_click_counts_with_retry(
     _recursion_depth: int = 0  # 内部参数：递归深度，防止无限递归
 ) -> Tuple[int, List[str], List[Tuple[str, int, str]]]:
     """
-    批量更新点击次数（带重试机制，减少死锁）
+    批量更新点击次数（带重试机制，从源头避免死锁）
     
-    使用批量 UPDATE 语句一次性更新多条记录，减少锁持有时间
+    使用细粒度分布式锁 + SELECT FOR UPDATE SKIP LOCKED 从源头避免死锁
     
     Args:
         db: 数据库会话
@@ -424,157 +497,205 @@ async def _batch_update_click_counts_with_retry(
         logger.debug("批次为空，跳过更新")
         return 0, [], []
     
-    for attempt in range(max_retries):
+    # 重要：必须在每次重试时都排序，确保锁顺序一致
+    batch = sorted(batch, key=lambda x: x[0])
+    short_codes = [code for code, _, _ in batch]
+    
+    # 第一步：为每个short_code获取细粒度分布式锁（从源头避免死锁）
+    acquired_locks, failed_codes = await _acquire_item_locks(redis, short_codes)
+    
+    # 过滤出成功获取锁的批次项
+    locked_batch = [item for item in batch if item[0] in acquired_locks]
+    failed_batch = [item for item in batch if item[0] in failed_codes]
+    
+    if not locked_batch:
+        # 所有锁都获取失败，返回失败
+        logger.warning(f"无法获取任何短链接锁，跳过本次更新: short_codes={short_codes}")
+        return 0, [], batch
+    
+    if failed_batch:
+        logger.debug(f"部分短链接锁获取失败，将在下次同步时重试: failed_codes={[code for code, _, _ in failed_batch]}")
+    
+    try:
+        # 设置事务隔离级别为READ COMMITTED，减少锁竞争
         try:
-            # 重要：必须在每次重试时都排序，确保锁顺序一致
-            # InnoDB会根据索引顺序获取锁，short_code有唯一索引，排序后可以确保所有进程以相同顺序锁定
-            batch = sorted(batch, key=lambda x: x[0])
-            short_codes = [code for code, _, _ in batch]
-            
-            # 设置事务隔离级别为READ COMMITTED，减少锁竞争
-            # READ COMMITTED 比 REPEATABLE READ 持有锁的时间更短，减少死锁概率
-            # 注意：必须在事务开始前设置，如果在事务中设置可能无效
-            try:
-                await db.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED"))
-            except Exception as e:
-                # 如果设置失败，记录警告但继续执行
-                logger.debug(f"设置事务隔离级别失败（可忽略）: {e}")
-            
-            # 设置锁等待超时，避免长时间等待
-            try:
-                await db.execute(text("SET SESSION innodb_lock_wait_timeout = 5"))
-            except Exception as e:
-                logger.debug(f"设置锁等待超时失败（可忽略）: {e}")
-            
-            # 构建批量更新SQL（使用 CASE WHEN 实现批量更新）
-            # 这样可以一次性更新多条记录，减少锁竞争和死锁概率
-            case_when_parts = []
-            params = {}
-            where_params = []
-            
-            for idx, (code, count, _) in enumerate(batch):
-                # 防御性验证：确保 short_code 只包含安全字符（虽然使用了参数化查询，但这是额外的安全层）
-                # short_code 应该只包含字母、数字、连字符和下划线
-                if not code or not isinstance(code, str):
-                    logger.warning(f"批次中的 short_code 无效，跳过: code={code}, type={type(code)}")
-                    continue
-                
-                # 验证 count 是有效的整数
-                if not isinstance(count, int) or count <= 0:
-                    logger.warning(f"批次中的 count 无效，跳过: code={code}, count={count}, type={type(count)}")
-                    continue
-                
-                param_code = f"code_{idx}"
-                param_count = f"count_{idx}"
-                param_where = f"where_code_{idx}"
-                
-                case_when_parts.append(f"WHEN :{param_code} THEN click_count + :{param_count}")
-                params[param_code] = code
-                params[param_count] = count
-                params[param_where] = code
-                where_params.append(f":{param_where}")
-            
-            # 如果所有批次项都被过滤掉，跳过本次更新
-            if not case_when_parts or not where_params:
-                logger.warning("批次中的所有项都被过滤掉，跳过更新")
-                await db.rollback()
-                return 0, [], batch
-            
-            case_when_sql = " ".join(case_when_parts)
-            where_placeholders = ", ".join(where_params)
-            
-            # 执行批量更新
-            # 注意：虽然UPDATE语句支持ORDER BY，但InnoDB的锁顺序主要取决于索引顺序
-            # 由于short_code有唯一索引，InnoDB会按照索引顺序获取锁
-            # ORDER BY short_code在这里主要是为了代码可读性，实际锁顺序由索引决定
-            result = await db.execute(
-                text(f"""
-                    UPDATE short_links 
-                    SET click_count = CASE short_code
-                        {case_when_sql}
-                        ELSE click_count
-                    END
-                    WHERE short_code IN ({where_placeholders})
-                    ORDER BY short_code
-                """),
-                params
+            await db.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED"))
+        except Exception as e:
+            logger.debug(f"设置事务隔离级别失败（可忽略）: {e}")
+        
+        # 设置锁等待超时为0，使用SKIP LOCKED避免等待
+        try:
+            await db.execute(text("SET SESSION innodb_lock_wait_timeout = 0"))
+        except Exception as e:
+            logger.debug(f"设置锁等待超时失败（可忽略）: {e}")
+        
+        # 使用SELECT FOR UPDATE SKIP LOCKED先锁定记录，避免死锁
+        # 这样可以确保只更新能够立即锁定的记录，跳过已被其他事务锁定的记录
+        locked_short_codes = [code for code, _, _ in locked_batch]
+        where_placeholders = ", ".join([f":code_{i}" for i in range(len(locked_short_codes))])
+        select_params = {f"code_{i}": code for i, code in enumerate(locked_short_codes)}
+        
+        # 先查询并锁定记录（使用SKIP LOCKED跳过已被锁定的记录）
+        select_result = await db.execute(
+            text(f"""
+                SELECT short_code 
+                FROM short_links 
+                WHERE short_code IN ({where_placeholders})
+                ORDER BY short_code
+                FOR UPDATE SKIP LOCKED
+            """),
+            select_params
+        )
+        
+        # 获取成功锁定的short_code
+        locked_codes_set = {row[0] for row in select_result.fetchall()}
+        
+        # 过滤出成功锁定的批次项
+        successfully_locked_batch = [item for item in locked_batch if item[0] in locked_codes_set]
+        skipped_batch = [item for item in locked_batch if item[0] not in locked_codes_set]
+        
+        if skipped_batch:
+            logger.debug(
+                f"部分记录被其他事务锁定，跳过本次更新: "
+                f"skipped_codes={[code for code, _, _ in skipped_batch]}"
             )
+        
+        if not successfully_locked_batch:
+            # 所有记录都被锁定，回滚并返回
+            await db.rollback()
+            # 释放已获取的分布式锁
+            await _release_item_locks(redis, acquired_locks)
+            return 0, [], batch
+        
+        # 构建批量更新SQL（只更新成功锁定的记录）
+        case_when_parts = []
+        update_params = {}
+        update_where_params = []
+        
+        for idx, (code, count, _) in enumerate(successfully_locked_batch):
+            if not code or not isinstance(code, str):
+                continue
+            if not isinstance(count, int) or count <= 0:
+                continue
             
-            updated_count = result.rowcount
+            param_code = f"update_code_{idx}"
+            param_count = f"update_count_{idx}"
+            param_where = f"update_where_{idx}"
             
-            # 提交事务（在查询之前提交，避免长时间持有锁）
-            await db.commit()
+            case_when_parts.append(f"WHEN :{param_code} THEN click_count + :{param_count}")
+            update_params[param_code] = code
+            update_params[param_count] = count
+            update_params[param_where] = code
+            update_where_params.append(f":{param_where}")
+        
+        if not case_when_parts:
+            await db.rollback()
+            await _release_item_locks(redis, acquired_locks)
+            return 0, [], batch
+        
+        case_when_sql = " ".join(case_when_parts)
+        update_where_placeholders = ", ".join(update_where_params)
+        
+        # 执行批量更新（只更新已锁定的记录）
+        result = await db.execute(
+            text(f"""
+                UPDATE short_links 
+                SET click_count = CASE short_code
+                    {case_when_sql}
+                    ELSE click_count
+                END
+                WHERE short_code IN ({update_where_placeholders})
+                ORDER BY short_code
+            """),
+            update_params
+        )
+        
+        updated_count = result.rowcount
+        
+        # 提交事务（尽快释放数据库锁）
+        await db.commit()
+        
+        # 释放分布式锁（在提交后立即释放）
+        await _release_item_locks(redis, {code: acquired_locks[code] for code, _, _ in successfully_locked_batch})
             
-            if updated_count > 0:
-                # 如果更新成功，说明所有记录都存在（因为WHERE条件匹配）
-                # 直接标记所有更新为成功
-                batch_keys_to_delete = [redis_key for _, _, redis_key in batch if redis_key]
-                
-                # 批量清除缓存，使用并行操作提高性能
-                # 注意：这里不清除计数器键（redis_key），因为已经在获取时用Lua脚本删除了
-                cache_invalidation_tasks = []
-                for short_code, count_value, redis_key in batch:
-                    logger.debug(
-                        f"批量更新短链接点击次数: short_code={short_code}, 增量={count_value}"
-                    )
-                    # 创建缓存失效任务（不等待，并行执行）
-                    cache_invalidation_tasks.append(
-                        invalidate_short_link_cache(short_code)
-                    )
-                
-                # 并行执行所有缓存失效操作，忽略错误（缓存失效失败不影响主流程）
-                if cache_invalidation_tasks:
-                    try:
-                        await asyncio.gather(*cache_invalidation_tasks, return_exceptions=True)
-                    except Exception as e:
-                        logger.debug(f"批量清除短链接缓存时发生错误（可忽略）: {e}")
-                
-                return len(batch_keys_to_delete), batch_keys_to_delete, []
-            else:
-                # 没有记录被更新，可能是所有短链接都不存在
-                # 需要检查哪些短链接不存在，以便清理Redis计数器
-                logger.warning(f"批量更新没有更新任何记录，检查短链接是否存在")
-                
-                # 回滚事务，因为更新失败
-                await db.rollback()
-                
-                # 查询哪些短链接存在（需要新的事务）
-                # 注意：由于已经回滚，SQLAlchemy会在下次查询时自动开始新事务
-                # 使用只读查询，避免锁定记录
-                existing_codes = set()
+        if updated_count > 0:
+            # 如果更新成功，说明所有记录都存在（因为WHERE条件匹配）
+            # 直接标记所有更新为成功
+            batch_keys_to_delete = [redis_key for _, _, redis_key in successfully_locked_batch if redis_key]
+            
+            # 批量清除缓存，使用并行操作提高性能
+            # 注意：这里不清除计数器键（redis_key），因为已经在获取时用Lua脚本删除了
+            cache_invalidation_tasks = []
+            for short_code, count_value, redis_key in successfully_locked_batch:
+                logger.debug(
+                    f"批量更新短链接点击次数: short_code={short_code}, 增量={count_value}"
+                )
+                # 创建缓存失效任务（不等待，并行执行）
+                cache_invalidation_tasks.append(
+                    invalidate_short_link_cache(short_code)
+                )
+            
+            # 并行执行所有缓存失效操作，忽略错误（缓存失效失败不影响主流程）
+            if cache_invalidation_tasks:
                 try:
-                    # 使用新的查询，SQLAlchemy会自动开始新事务
-                    result = await db.execute(
-                        select(ShortLink.short_code).where(ShortLink.short_code.in_(short_codes))
-                    )
-                    existing_codes = {row[0] for row in result.fetchall()}
-                    # 查询后立即提交，释放连接
-                    await db.commit()
-                except Exception as query_error:
-                    # 如果查询失败，记录错误但继续处理
-                    logger.warning(f"查询短链接存在性失败: {query_error}")
-                    try:
-                        await db.rollback()
-                    except:
-                        pass
-                    existing_codes = set()
-                
-                # 删除不存在的短链接的Redis计数器
-                # 注意：由于使用了Lua脚本，redis_key可能已经被删除，但为了安全起见，仍然尝试删除
-                for short_code, count_value, redis_key in batch:
-                    if short_code not in existing_codes:
-                        logger.warning(f"短链接不存在，尝试删除Redis计数器: short_code={short_code}")
-                        if redis_key:  # 只有在redis_key存在时才尝试删除
-                            try:
-                                deleted = await redis.delete(redis_key)
-                                if deleted:
-                                    logger.debug(f"成功删除不存在的短链接的Redis计数器: short_code={short_code}")
-                            except Exception as e:
-                                logger.warning(f"删除Redis计数器失败: key={redis_key}, error={e}")
-                
-                return 0, [], batch
-                
-        except OperationalError as e:
+                    await asyncio.gather(*cache_invalidation_tasks, return_exceptions=True)
+                except Exception as e:
+                    logger.debug(f"批量清除短链接缓存时发生错误（可忽略）: {e}")
+            
+            # 合并失败和跳过的批次项，返回需要重试的项
+            all_failed = failed_batch + skipped_batch
+            
+            return len(successfully_locked_batch), batch_keys_to_delete, all_failed
+        else:
+            # 没有记录被更新，可能是所有短链接都不存在
+            # 需要检查哪些短链接不存在，以便清理Redis计数器
+            logger.warning(f"批量更新没有更新任何记录，检查短链接是否存在")
+            
+            # 回滚事务，因为更新失败
+            await db.rollback()
+            
+            # 释放分布式锁
+            await _release_item_locks(redis, acquired_locks)
+            
+            # 查询哪些短链接存在（需要新的事务）
+            # 注意：由于已经回滚，SQLAlchemy会在下次查询时自动开始新事务
+            # 使用只读查询，避免锁定记录
+            existing_codes = set()
+            try:
+                # 使用新的查询，SQLAlchemy会自动开始新事务
+                result = await db.execute(
+                    select(ShortLink.short_code).where(ShortLink.short_code.in_(locked_short_codes))
+                )
+                existing_codes = {row[0] for row in result.fetchall()}
+                # 查询后立即提交，释放连接
+                await db.commit()
+            except Exception as query_error:
+                # 如果查询失败，记录错误但继续处理
+                logger.warning(f"查询短链接存在性失败: {query_error}")
+                try:
+                    await db.rollback()
+                except:
+                    pass
+                existing_codes = set()
+            
+            # 删除不存在的短链接的Redis计数器
+            # 注意：由于使用了Lua脚本，redis_key可能已经被删除，但为了安全起见，仍然尝试删除
+            for short_code, count_value, redis_key in successfully_locked_batch:
+                if short_code not in existing_codes:
+                    logger.warning(f"短链接不存在，尝试删除Redis计数器: short_code={short_code}")
+                    if redis_key:  # 只有在redis_key存在时才尝试删除
+                        try:
+                            deleted = await redis.delete(redis_key)
+                            if deleted:
+                                logger.debug(f"成功删除不存在的短链接的Redis计数器: short_code={short_code}")
+                        except Exception as e:
+                            logger.warning(f"删除Redis计数器失败: key={redis_key}, error={e}")
+            
+            # 合并所有失败的批次项
+            all_failed = failed_batch + skipped_batch + successfully_locked_batch
+            return 0, [], all_failed
+            
+    except OperationalError as e:
             # 检查死锁错误：MySQL错误码1213或错误消息包含"Deadlock"
             error_code = e.orig.args[0] if hasattr(e.orig, 'args') and e.orig.args else None
             error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
@@ -583,6 +704,9 @@ async def _batch_update_click_counts_with_retry(
                 "Deadlock" in error_msg or  # 错误消息包含Deadlock
                 "deadlock" in error_msg.lower()  # 错误消息包含deadlock（小写）
             )
+            
+            # 释放分布式锁（发生错误时也要释放）
+            await _release_item_locks(redis, acquired_locks)
             
             if is_deadlock:
                 # 更新死锁统计（使用异步锁保护并发访问）
@@ -593,121 +717,27 @@ async def _batch_update_click_counts_with_retry(
                     _deadlock_stats["deadlocks_by_batch_size"][batch_size] = \
                         _deadlock_stats["deadlocks_by_batch_size"].get(batch_size, 0) + 1
                 
-                if attempt < max_retries - 1:
-                    # 如果批次较大且重试次数较多，考虑拆分批次
-                    # 限制递归深度，防止栈溢出
-                    if len(batch) > 2 and attempt >= 2 and _recursion_depth < MAX_RECURSION_DEPTH:
-                        # 将批次拆分成两半，分别处理
-                        mid = len(batch) // 2
-                        first_half = batch[:mid]
-                        second_half = batch[mid:]
-                        
-                        short_codes_str = ", ".join([code for code, _, _ in batch])
-                        logger.warning(
-                            f"批量更新短链接点击次数时检测到死锁: short_codes=[{short_codes_str}], "
-                            f"第 {attempt + 1}/{max_retries} 次重试，将批次拆分为 {len(first_half)} 和 {len(second_half)} 条记录分别处理..."
-                            f"（递归深度: {_recursion_depth + 1}）"
-                        )
-                        
-                        # 先处理前半部分
-                        first_synced, first_keys, first_failed = await _batch_update_click_counts_with_retry(
-                            db, first_half, redis, max_retries - attempt, _recursion_depth + 1
-                        )
-                        # 再处理后半部分
-                        second_synced, second_keys, second_failed = await _batch_update_click_counts_with_retry(
-                            db, second_half, redis, max_retries - attempt, _recursion_depth + 1
-                        )
-                        
-                        # 合并结果
-                        total_synced = first_synced + second_synced
-                        all_keys = first_keys + second_keys
-                        all_failed = first_failed + second_failed
-                        
-                        # 记录批次拆分后的处理结果
-                        if total_synced > 0:
-                            logger.info(
-                                f"批次拆分后处理完成: 总成功={total_synced}, "
-                                f"前半部分成功={first_synced}, 后半部分成功={second_synced}, "
-                                f"失败={len(all_failed)}"
-                            )
-                        if all_failed:
-                            logger.warning(
-                                f"批次拆分后仍有失败: 失败数量={len(all_failed)}, "
-                                f"前半部分失败={len(first_failed)}, 后半部分失败={len(second_failed)}"
-                            )
-                        
-                        return total_synced, all_keys, all_failed
-                    
-                    # 指数退避 + 随机抖动（增加随机范围以减少并发冲突）
-                    delay = DEADLOCK_RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.5)
-                    short_codes_str = ", ".join([code for code, _, _ in batch])
-                    logger.warning(
-                        f"批量更新短链接点击次数时检测到死锁: short_codes=[{short_codes_str}], "
-                        f"第 {attempt + 1}/{max_retries} 次重试，等待 {delay:.2f} 秒后重试..."
-                    )
-                    await asyncio.sleep(delay)
-                    # MySQL在死锁时会自动回滚其中一个事务，但为了安全起见，显式回滚
-                    try:
-                        await db.rollback()
-                    except Exception as rollback_error:
-                        logger.debug(f"死锁重试时回滚失败（可忽略）: {rollback_error}")
-                    # 继续重试
-                    continue
-                else:
-                    short_codes_str = ", ".join([code for code, _, _ in batch])
-                    logger.error(
-                        f"批量更新短链接点击次数失败（死锁，已重试 {max_retries} 次）: "
-                        f"short_codes=[{short_codes_str}], error={e}",
-                        exc_info=True
-                    )
-                    # 记录死锁统计（使用异步锁保护并发访问）
-                    async with _deadlock_stats_lock:
-                        stats_summary = {
-                            "total_deadlocks": _deadlock_stats["total_deadlocks"],
-                            "deadlocks_by_batch_size": dict(_deadlock_stats["deadlocks_by_batch_size"]),
-                            "last_deadlock_time": _deadlock_stats["last_deadlock_time"].isoformat() if _deadlock_stats["last_deadlock_time"] else None,
-                        }
-                    logger.warning(
-                        f"死锁统计: 总死锁次数={stats_summary['total_deadlocks']}, "
-                        f"批次大小分布={stats_summary['deadlocks_by_batch_size']}, "
-                        f"最后死锁时间={stats_summary['last_deadlock_time']}"
-                    )
-                    # 死锁时MySQL已自动回滚，不需要手动回滚
-                    # 尝试恢复Redis计数器，避免数据丢失
-                    # 注意：这是一个尽力而为的操作，如果恢复失败，数据可能会丢失
-                    if redis:
-                        for short_code, count_value, redis_key in batch:
-                            if redis_key:
-                                try:
-                                    # 使用原子操作恢复计数器（如果键不存在则设置，如果存在则增加）
-                                    # 这样可以避免在恢复过程中有新的点击导致重复计数
-                                    await redis.incrby(redis_key, count_value)
-                                    # 重新设置过期时间
-                                    await redis.expire(redis_key, 48 * 3600)
-                                    logger.debug(f"成功恢复Redis计数器: short_code={short_code}, count={count_value}")
-                                except Exception as restore_error:
-                                    logger.warning(
-                                        f"恢复Redis计数器失败（可能导致数据丢失）: "
-                                        f"short_code={short_code}, count={count_value}, error={restore_error}"
-                                    )
-                    return 0, [], batch
-            else:
-                # 其他数据库错误，需要回滚
+                # 注意：由于使用了细粒度分布式锁和SKIP LOCKED，死锁应该很少发生
+                # 但如果仍然发生，可能是由于其他原因（如外键锁等）
+                # 在这种情况下，记录错误并返回失败，让下次同步时重试
                 short_codes_str = ", ".join([code for code, _, _ in batch])
                 logger.error(
-                    f"批量更新短链接点击次数失败: short_codes=[{short_codes_str}], error={e}",
+                    f"检测到死锁（已使用细粒度锁和SKIP LOCKED，理论上不应发生）: "
+                    f"short_codes=[{short_codes_str}], error={e}",
                     exc_info=True
                 )
-                try:
-                    await db.rollback()
-                except:
-                    pass
+                
+                # 死锁时MySQL已自动回滚，不需要手动回滚
                 # 尝试恢复Redis计数器，避免数据丢失
+                # 注意：这是一个尽力而为的操作，如果恢复失败，数据可能会丢失
                 if redis:
-                    for short_code, count_value, redis_key in batch:
+                    for short_code, count_value, redis_key in locked_batch:
                         if redis_key:
                             try:
+                                # 使用原子操作恢复计数器（如果键不存在则设置，如果存在则增加）
+                                # 这样可以避免在恢复过程中有新的点击导致重复计数
                                 await redis.incrby(redis_key, count_value)
+                                # 重新设置过期时间
                                 await redis.expire(redis_key, 48 * 3600)
                                 logger.debug(f"成功恢复Redis计数器: short_code={short_code}, count={count_value}")
                             except Exception as restore_error:
@@ -715,8 +745,11 @@ async def _batch_update_click_counts_with_retry(
                                     f"恢复Redis计数器失败（可能导致数据丢失）: "
                                     f"short_code={short_code}, count={count_value}, error={restore_error}"
                                 )
+                
+                # 返回所有批次项作为失败项，让下次同步时重试
                 return 0, [], batch
-        except Exception as e:
+            else:
+            # 其他数据库错误，需要回滚
             short_codes_str = ", ".join([code for code, _, _ in batch])
             logger.error(
                 f"批量更新短链接点击次数失败: short_codes=[{short_codes_str}], error={e}",
@@ -728,7 +761,7 @@ async def _batch_update_click_counts_with_retry(
                 pass
             # 尝试恢复Redis计数器，避免数据丢失
             if redis:
-                for short_code, count_value, redis_key in batch:
+                for short_code, count_value, redis_key in locked_batch:
                     if redis_key:
                         try:
                             await redis.incrby(redis_key, count_value)
@@ -740,7 +773,36 @@ async def _batch_update_click_counts_with_retry(
                                 f"short_code={short_code}, count={count_value}, error={restore_error}"
                             )
             return 0, [], batch
+    except Exception as e:
+        # 释放分布式锁（发生异常时也要释放）
+        await _release_item_locks(redis, acquired_locks)
+        
+        short_codes_str = ", ".join([code for code, _, _ in batch])
+        logger.error(
+            f"批量更新短链接点击次数失败: short_codes=[{short_codes_str}], error={e}",
+            exc_info=True
+        )
+        try:
+            await db.rollback()
+        except:
+            pass
+        # 尝试恢复Redis计数器，避免数据丢失
+        if redis:
+            for short_code, count_value, redis_key in locked_batch:
+                if redis_key:
+                    try:
+                        await redis.incrby(redis_key, count_value)
+                        await redis.expire(redis_key, 48 * 3600)
+                        logger.debug(f"成功恢复Redis计数器: short_code={short_code}, count={count_value}")
+                    except Exception as restore_error:
+                        logger.warning(
+                            f"恢复Redis计数器失败（可能导致数据丢失）: "
+                            f"short_code={short_code}, count={count_value}, error={restore_error}"
+                        )
+        return 0, [], batch
     
+    # 如果所有重试都失败，返回失败
+    await _release_item_locks(redis, acquired_locks)
     return 0, [], batch
 
 
