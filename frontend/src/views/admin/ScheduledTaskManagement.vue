@@ -611,6 +611,32 @@ const confirmTrigger = async () => {
   }
 };
 
+// 释放任务锁
+const handleReleaseLock = async (task) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要释放任务 "${task.task_name}" 的锁吗？\n\n注意：这是一个紧急操作，只有在任务异常卡死时才应使用。`,
+      '确认释放锁',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    );
+    
+    await releaseTaskLock(task.task_name);
+    ElMessage.success('任务锁已释放');
+    // 刷新任务列表以获取最新状态
+    setTimeout(() => {
+      fetchTasks();
+    }, 1000);
+  } catch (error) {
+    if (error !== 'cancel') {
+      // 错误已在API中处理，这里不需要额外日志
+    }
+  }
+};
+
 // 监听分页变化
 let isInitializing = true;
 

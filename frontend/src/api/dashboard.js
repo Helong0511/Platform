@@ -17,7 +17,14 @@ export const getDashboardStats = async (period = 'week') => {
   }, { returnDataOnly: true });
 };
 
-// 注意：getRecentAdData 和 getTodayMetrics 已移除，因为后端API未实现
+// 注意：getRecentAdData 接口后端已实现，但前端暂未使用（保留接口供未来使用）
+// 如需使用，可添加以下代码：
+// export const getRecentAdData = async () => {
+//   return request({
+//     url: '/api/v1/dashboard/recent-ads',
+//     method: 'get'
+//   }, { returnDataOnly: true });
+// };
 
 /**
  * 获取趋势数据
