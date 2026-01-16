@@ -24,7 +24,12 @@ from app.core.short_link.generator import (
     generate_short_code_from_id,
     generate_unique_short_code
 )
-from app.core.short_link_click_counter import sync_click_counts_to_db, CLICK_COUNTER_PREFIX, _click_counters
+from app.core.short_link_click_counter import (
+    sync_click_counts_to_db, 
+    CLICK_COUNTER_PREFIX, 
+    get_click_counter_stats,
+    get_deadlock_stats
+)
 from app.core.redis_client import get_redis_client
 from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
 from app.models.models import User, UserRole, ShortLink, Offer, Publisher, Click
@@ -370,13 +375,18 @@ async def check_click_count_stats(
     注意：此接口需要管理员权限
     """
     
+    # 获取进程内计数器统计信息（使用安全的函数，而不是直接访问私有变量）
+    memory_stats = await get_click_counter_stats()
+    
     stats = {
         "redis_available": False,
         "redis_counters": 0,
         "redis_counter_details": [],
-        "memory_counters": len(_click_counters),
-        "memory_counter_details": list(_click_counters.items()) if _click_counters else [],
+        "memory_counters": memory_stats["total_counters"],
+        "memory_counter_details": memory_stats.get("counter_details", []),  # 使用函数返回的详细信息
+        "memory_total_clicks": memory_stats["total_clicks"],
         "database_total_clicks": 0,
+        "deadlock_stats": await get_deadlock_stats(),  # 添加死锁统计信息
     }
     
     # 检查Redis状态
@@ -384,21 +394,57 @@ async def check_click_count_stats(
     if redis:
         stats["redis_available"] = True
         try:
-            # 获取所有计数器键
+            # 使用SCAN而不是KEYS，避免在生产环境阻塞
             pattern = f"{CLICK_COUNTER_PREFIX}*"
-            keys = await redis.keys(pattern)
+            keys = []
+            cursor = 0
+            max_iterations = 100  # 限制迭代次数，避免长时间阻塞（最多10000个键）
+            iteration = 0
+            try:
+                while True:
+                    cursor, batch_keys = await redis.scan(cursor, match=pattern, count=100)
+                    keys.extend(batch_keys)
+                    iteration += 1
+                    
+                    # 安全检查：防止无限循环
+                    if iteration >= max_iterations:
+                        logger.warning(
+                            f"Redis SCAN达到最大迭代次数 {max_iterations}，停止扫描。"
+                            f"已收集 {len(keys)} 个键"
+                        )
+                        break
+                    
+                    if cursor == 0:
+                        break
+            except Exception as scan_error:
+                # 如果SCAN失败，降级使用KEYS（仅用于监控端点，影响较小）
+                logger.warning(f"Redis SCAN失败，降级使用KEYS: {scan_error}")
+                keys = await redis.keys(pattern)
+            
             stats["redis_counters"] = len(keys)
             
-            # 获取每个计数器的详细信息
-            for key in keys[:20]:  # 最多显示20个
-                short_code = key.replace(CLICK_COUNTER_PREFIX, "")
-                count = await redis.get(key)
-                count_value = int(count) if count else 0
-                stats["redis_counter_details"].append({
-                    "short_code": short_code,
-                    "count": count_value,
-                    "key": key
-                })
+            # 获取每个计数器的详细信息（最多显示20个）
+            for key in keys[:20]:
+                # 安全地提取 short_code：使用 startswith 检查并移除前缀
+                if not key.startswith(CLICK_COUNTER_PREFIX):
+                    continue
+                
+                short_code = key[len(CLICK_COUNTER_PREFIX):]
+                
+                # 验证 short_code 不为空
+                if not short_code:
+                    continue
+                
+                try:
+                    count = await redis.get(key)
+                    count_value = int(count) if count else 0
+                    stats["redis_counter_details"].append({
+                        "short_code": short_code,
+                        "count": count_value,
+                        "key": key
+                    })
+                except Exception as get_error:
+                    logger.debug(f"获取Redis计数器值失败: key={key}, error={get_error}")
         except Exception as e:
             stats["redis_error"] = str(e)
     
