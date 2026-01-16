@@ -262,3 +262,8 @@ https://www.qqpqq.com/back/p_back
 }
 
 curl "https://client.btfrx.online/api/v1/bft/postback?platform=he_test&click_id=bpwwpNRB347XJagN4XFRbCMyEYHg7NRMgXTAPY49r&payout=2.8"
+
+ChatGPT API-Key ：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
+
+
+元宝 API-Key ：sk-2d5ff190bbe94bf8ad09107229502647

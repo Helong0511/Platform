@@ -372,22 +372,28 @@ async def _batch_update_click_counts_with_retry(
     """
     for attempt in range(max_retries):
         try:
+            # 重要：必须在每次重试时都排序，确保锁顺序一致
+            # InnoDB会根据索引顺序获取锁，short_code有唯一索引，排序后可以确保所有进程以相同顺序锁定
+            batch = sorted(batch, key=lambda x: x[0])
+            short_codes = [code for code, _, _ in batch]
+            
             # 设置事务隔离级别为READ COMMITTED，减少锁竞争
             # READ COMMITTED 比 REPEATABLE READ 持有锁的时间更短，减少死锁概率
+            # 注意：必须在事务开始前设置，如果在事务中设置可能无效
             try:
                 await db.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             except Exception as e:
                 # 如果设置失败，记录警告但继续执行
                 logger.debug(f"设置事务隔离级别失败（可忽略）: {e}")
             
-            # 构建批量更新SQL（使用 CASE WHEN 实现批量更新）
-            # 这样可以一次性更新多条记录，减少锁竞争
-            # 按 short_code 排序，确保所有进程以相同顺序锁定记录，减少死锁
-            short_codes = [code for code, _, _ in batch]
-            count_values = {code: count for code, count, _ in batch}
+            # 设置锁等待超时，避免长时间等待
+            try:
+                await db.execute(text("SET SESSION innodb_lock_wait_timeout = 5"))
+            except Exception as e:
+                logger.debug(f"设置锁等待超时失败（可忽略）: {e}")
             
             # 构建批量更新SQL（使用 CASE WHEN 实现批量更新）
-            # 这样可以一次性更新多条记录，减少锁竞争
+            # 这样可以一次性更新多条记录，减少锁竞争和死锁概率
             case_when_parts = []
             params = {}
             where_params = []
@@ -406,13 +412,10 @@ async def _batch_update_click_counts_with_retry(
             case_when_sql = " ".join(case_when_parts)
             where_placeholders = ", ".join(where_params)
             
-            # 执行批量更新（使用 FOR UPDATE 确保按顺序锁定，但这里不需要，因为已经按 short_code 排序）
-            # 添加超时设置，避免长时间等待
-            try:
-                await db.execute(text("SET SESSION innodb_lock_wait_timeout = 5"))
-            except Exception as e:
-                logger.debug(f"设置锁等待超时失败（可忽略）: {e}")
-            
+            # 执行批量更新
+            # 注意：虽然UPDATE语句支持ORDER BY，但InnoDB的锁顺序主要取决于索引顺序
+            # 由于short_code有唯一索引，InnoDB会按照索引顺序获取锁
+            # ORDER BY short_code在这里主要是为了代码可读性，实际锁顺序由索引决定
             result = await db.execute(
                 text(f"""
                     UPDATE short_links 
@@ -530,8 +533,12 @@ async def _batch_update_click_counts_with_retry(
                         f"第 {attempt + 1}/{max_retries} 次重试，等待 {delay:.2f} 秒后重试..."
                     )
                     await asyncio.sleep(delay)
-                    # MySQL在死锁时会自动回滚其中一个事务，所以这里不需要手动回滚
-                    # 直接重试即可
+                    # MySQL在死锁时会自动回滚其中一个事务，但为了安全起见，显式回滚
+                    try:
+                        await db.rollback()
+                    except Exception as rollback_error:
+                        logger.debug(f"死锁重试时回滚失败（可忽略）: {rollback_error}")
+                    # 继续重试
                     continue
                 else:
                     short_codes_str = ", ".join([code for code, _, _ in batch])
@@ -646,8 +653,12 @@ async def _update_click_count_with_retry(
                         f"第 {attempt + 1}/{max_retries} 次重试，等待 {delay:.2f} 秒后重试..."
                     )
                     await asyncio.sleep(delay)
-                    # MySQL在死锁时会自动回滚其中一个事务，所以这里不需要手动回滚
-                    # 直接重试即可
+                    # MySQL在死锁时会自动回滚其中一个事务，但为了安全起见，显式回滚
+                    try:
+                        await db.rollback()
+                    except Exception as rollback_error:
+                        logger.debug(f"死锁重试时回滚失败（可忽略）: {rollback_error}")
+                    # 继续重试
                     continue
                 else:
                     logger.error(
