@@ -76,7 +76,7 @@
           style="width: 100%; margin-top: 20px;"
         >
         <el-table-column prop="id" label="Offer ID" width="100" align="center" />
-        <el-table-column prop="offer_name" label="Offer名称" width="180" show-overflow-tooltip />
+        <el-table-column prop="offer_name" label="Offer名称" width="250" show-overflow-tooltip />
         <el-table-column v-if="isAdmin" prop="advertiser_name" label="广告主" width="150" />
         <el-table-column v-if="isAdmin" prop="advertiser_offer_id" label="上游Offer ID" width="150" />
         <el-table-column v-if="isAdmin" prop="payout" label="上游PO" width="100" align="right">
@@ -85,7 +85,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="affiliate_payout" :label="isAdmin ? '下游PO' : 'PO'" width="100" align="right">
+        <el-table-column prop="affiliate_payout" :label="isAdmin ? '下游PO' : 'PO'" width="90" align="right">
           <template #default="scope">
             <template v-if="!isAdmin && currentClientId && scope.row.assigned_publishers">
               <!-- 客户登录：显示分配给该客户渠道的PO -->
@@ -101,14 +101,14 @@
             </template>
           </template>
         </el-table-column>
-        <el-table-column prop="country" label="国家" width="100" />
+        <el-table-column prop="country" label="国家" width="80" />
         <el-table-column prop="category" label="分类" width="120" show-overflow-tooltip>
           <template #default="scope">
             <span v-if="scope.row.category">{{ scope.row.category }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="type" label="类型" width="100" show-overflow-tooltip>
+        <el-table-column prop="type" label="类型" width="80" show-overflow-tooltip>
           <template #default="scope">
             <span v-if="scope.row.type">{{ scope.row.type }}</span>
             <span v-else>-</span>
@@ -120,7 +120,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="downstream_cap" :label="isAdmin ? '下游Cap' : 'Cap'" width="100" align="center">
+        <el-table-column prop="downstream_cap" :label="isAdmin ? '下游Cap' : 'Cap'" width="90" align="center">
           <template #default="scope">
             <template v-if="!isAdmin && currentClientId && scope.row.assigned_publishers">
               <!-- 客户登录：显示分配给该客户渠道的Cap -->
@@ -136,7 +136,7 @@
             </template>
           </template>
         </el-table-column>
-        <el-table-column prop="preview_link" label="预览链接" width="200" show-overflow-tooltip>
+        <el-table-column prop="preview_link" label="预览链接" width="120" show-overflow-tooltip>
           <template #default="scope">
             <el-link v-if="scope.row.preview_link" :href="scope.row.preview_link" target="_blank" type="primary" :underline="false">
               预览
@@ -144,7 +144,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column :label="isAdmin ? '下游Tracklink' : 'Tracklink'" width="300" show-overflow-tooltip>
+        <el-table-column :label="isAdmin ? '下游Tracklink' : 'Tracklink'" width="380" show-overflow-tooltip>
           <template #default="scope">
             <template v-if="!isAdmin && currentClientId && scope.row.assigned_publishers">
               <!-- 客户登录：显示该客户渠道的Tracklink -->
@@ -174,20 +174,20 @@
             </template>
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" prop="postback_method" label="Postback方法" width="120" align="center">
+        <el-table-column v-if="isAdmin" prop="postback_method" label="Postback方法" width="100" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.postback_method === 'POST' ? 'success' : 'info'" size="small">
               {{ scope.row.postback_method || 'GET' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" prop="click_validity_hours" label="点击有效期(小时)" width="140" align="center">
+        <el-table-column v-if="isAdmin" prop="click_validity_hours" label="点击有效期(小时)" width="120" align="center">
           <template #default="scope">
             <span v-if="scope.row.click_validity_hours">{{ scope.row.click_validity_hours }}</span>
             <span v-else>720</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" prop="assigned_publishers" label="分配渠道" width="200" show-overflow-tooltip>
+        <el-table-column v-if="isAdmin" prop="assigned_publishers" label="分配渠道" width="250" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="scope.row.assigned_publishers && scope.row.assigned_publishers.length > 0">
               <el-tag
@@ -202,7 +202,7 @@
             <el-tag v-else type="info" size="small">未分配</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100" align="center">
+        <el-table-column prop="status" label="状态" width="110" align="center">
           <template #default="scope">
             <el-switch
               :model-value="scope.row.status === 'Active'"
@@ -213,7 +213,7 @@
             />
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" prop="is_active" label="激活" width="80" align="center">
+        <el-table-column v-if="isAdmin" prop="is_active" label="激活" width="90" align="center">
           <template #default="scope">
             <el-switch
               v-model="scope.row.is_active"
