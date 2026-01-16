@@ -66,6 +66,10 @@ AUDIT_LOG_RETENTION_DAYS_DEFAULT = 90
 # ====== 定时任务相关常量 ======
 # 最大并发定时任务数（同一进程同时执行的任务数量）
 MAX_CONCURRENT_SCHEDULED_TASKS_DEFAULT = 2
+# 任务名称最大长度（字符）
+MAX_TASK_NAME_LENGTH = 100
+# 数据库查询超时时间（秒）
+QUERY_TIMEOUT = 30
 
 # ====== Telegram Bot相关常量 ======
 # Telegram Bot启动延迟（秒）
