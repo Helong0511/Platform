@@ -370,6 +370,11 @@ async def _batch_update_click_counts_with_retry(
     Returns:
         (成功更新的数量, 需要删除的Redis键列表, 失败的更新列表)
     """
+    # 边界检查：如果批次为空，直接返回
+    if not batch or len(batch) == 0:
+        logger.debug("批次为空，跳过更新")
+        return 0, [], []
+    
     for attempt in range(max_retries):
         try:
             # 重要：必须在每次重试时都排序，确保锁顺序一致
@@ -456,11 +461,29 @@ async def _batch_update_click_counts_with_retry(
                 # 需要检查哪些短链接不存在，以便清理Redis计数器
                 logger.warning(f"批量更新没有更新任何记录，检查短链接是否存在")
                 
-                # 查询哪些短链接存在
-                result = await db.execute(
-                    select(ShortLink.short_code).where(ShortLink.short_code.in_(short_codes))
-                )
-                existing_codes = {row[0] for row in result.fetchall()}
+                # 回滚事务，因为更新失败
+                await db.rollback()
+                
+                # 查询哪些短链接存在（需要新的事务）
+                # 注意：由于已经回滚，SQLAlchemy会在下次查询时自动开始新事务
+                # 使用只读查询，避免锁定记录
+                existing_codes = set()
+                try:
+                    # 使用新的查询，SQLAlchemy会自动开始新事务
+                    result = await db.execute(
+                        select(ShortLink.short_code).where(ShortLink.short_code.in_(short_codes))
+                    )
+                    existing_codes = {row[0] for row in result.fetchall()}
+                    # 查询后立即提交，释放连接
+                    await db.commit()
+                except Exception as query_error:
+                    # 如果查询失败，记录错误但继续处理
+                    logger.warning(f"查询短链接存在性失败: {query_error}")
+                    try:
+                        await db.rollback()
+                    except:
+                        pass
+                    existing_codes = set()
                 
                 # 删除不存在的短链接的Redis计数器
                 # 注意：由于使用了Lua脚本，redis_key可能已经被删除，但为了安全起见，仍然尝试删除
@@ -624,13 +647,17 @@ async def _update_click_count_with_retry(
             )
             
             if result.rowcount > 0:
+                # 提交事务，确保更新立即生效
+                # 注意：这里提交是为了避免长时间持有锁，减少死锁概率
+                await db.commit()
                 logger.debug(
                     f"原子更新短链接点击次数: short_code={short_code}, "
                     f"增量={count_value}"
                 )
                 return True
             else:
-                # 短链接不存在
+                # 短链接不存在，回滚事务
+                await db.rollback()
                 logger.warning(f"短链接不存在: short_code={short_code}")
                 return False
                 
