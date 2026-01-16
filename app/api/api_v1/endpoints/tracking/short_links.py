@@ -5,7 +5,7 @@
 import logging
 from typing import Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, Query, Path, Request, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, Query, Path, Request, HTTPException, BackgroundTasks, Body
 from app.core.utils import get_app_now_naive
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -457,3 +457,172 @@ async def check_click_count_stats(
         stats["database_error"] = str(e)
     
     return ResponseBaseSchema.success(data=stats)
+
+
+@router.get("/diagnose/{short_code}",
+            response_model=ResponseBaseSchema,
+            summary="诊断短链接同步状态（管理员）")
+async def diagnose_short_link_sync(
+    short_code: str = Path(..., description="短链接代码"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    诊断短链接的同步状态
+    
+    检查短链接的完整状态，包括：
+    - 短链接是否存在
+    - 是否激活
+    - 是否过期
+    - 数据库中的点击计数
+    - Redis中的计数器值
+    - 进程内计数器值
+    - 同步失败的可能原因
+    
+    注意：此接口需要管理员权限
+    """
+    from app.core.short_link_click_counter import get_click_counter_stats
+    from app.core.constants import APP_TIMEZONE
+    
+    diagnosis = {
+        "short_code": short_code,
+        "exists": False,
+        "is_active": False,
+        "is_expired": False,
+        "database_click_count": None,
+        "redis_counter_value": None,
+        "memory_counter_value": None,
+        "redis_key": f"{CLICK_COUNTER_PREFIX}{short_code}",
+        "issues": [],
+        "recommendations": []
+    }
+    
+    # 1. 检查数据库中的短链接
+    try:
+        result = await db.execute(
+            select(ShortLink).where(ShortLink.short_code == short_code)
+        )
+        short_link = result.scalars().first()
+        
+        if short_link:
+            diagnosis["exists"] = True
+            diagnosis["is_active"] = short_link.is_active
+            diagnosis["database_click_count"] = short_link.click_count or 0
+            
+            # 检查是否过期
+            if short_link.expires_at:
+                expires_at = short_link.expires_at
+                if expires_at.tzinfo is not None:
+                    expires_at = expires_at.astimezone(APP_TIMEZONE).replace(tzinfo=None)
+                now = get_app_now_naive()
+                diagnosis["is_expired"] = expires_at < now
+                if diagnosis["is_expired"]:
+                    diagnosis["issues"].append("短链接已过期")
+                    diagnosis["recommendations"].append("如果短链接已过期但仍在使用，请更新过期时间")
+        else:
+            diagnosis["issues"].append("短链接在数据库中不存在")
+            diagnosis["recommendations"].append("检查短链接代码是否正确，或该短链接已被删除")
+    except Exception as e:
+        diagnosis["issues"].append(f"查询数据库失败: {str(e)}")
+        logger.error(f"诊断短链接时查询数据库失败: {e}", exc_info=True)
+    
+    # 2. 检查Redis中的计数器
+    redis = await get_redis_client()
+    if redis:
+        try:
+            redis_key = f"{CLICK_COUNTER_PREFIX}{short_code}"
+            counter_value = await redis.get(redis_key)
+            if counter_value:
+                diagnosis["redis_counter_value"] = int(counter_value)
+                if diagnosis["redis_counter_value"] > 0:
+                    diagnosis["issues"].append(f"Redis中有待同步的计数器值: {diagnosis['redis_counter_value']}")
+                    diagnosis["recommendations"].append("等待下次自动同步（每5分钟），或手动触发同步")
+        except Exception as e:
+            diagnosis["issues"].append(f"查询Redis计数器失败: {str(e)}")
+            logger.warning(f"诊断短链接时查询Redis失败: {e}")
+    else:
+        diagnosis["issues"].append("Redis不可用")
+        diagnosis["recommendations"].append("检查Redis连接配置")
+    
+    # 3. 检查进程内计数器
+    try:
+        memory_stats = await get_click_counter_stats()
+        for counter_detail in memory_stats.get("counter_details", []):
+            if counter_detail.get("short_code") == short_code:
+                diagnosis["memory_counter_value"] = counter_detail.get("count", 0)
+                if diagnosis["memory_counter_value"] > 0:
+                    diagnosis["issues"].append(f"进程内有待同步的计数器值: {diagnosis['memory_counter_value']}")
+                    diagnosis["recommendations"].append("等待下次自动同步（每5分钟），或手动触发同步")
+                break
+    except Exception as e:
+        logger.warning(f"诊断短链接时查询进程内计数器失败: {e}")
+    
+    # 4. 分析可能的问题
+    if not diagnosis["exists"]:
+        diagnosis["recommendations"].append("如果短链接不存在，Redis中的计数器将在下次同步时自动清理")
+    elif not diagnosis["is_active"]:
+        diagnosis["issues"].append("短链接已禁用")
+        diagnosis["recommendations"].append("如果短链接已禁用但仍在使用，请重新激活")
+    elif diagnosis["is_expired"]:
+        diagnosis["recommendations"].append("如果短链接已过期但仍在使用，请更新过期时间")
+    
+    # 5. 检查是否有待同步的数据
+    has_pending_sync = (
+        (diagnosis["redis_counter_value"] and diagnosis["redis_counter_value"] > 0) or
+        (diagnosis["memory_counter_value"] and diagnosis["memory_counter_value"] > 0)
+    )
+    
+    if has_pending_sync and diagnosis["exists"] and diagnosis["is_active"] and not diagnosis["is_expired"]:
+        diagnosis["recommendations"].append("短链接状态正常，待同步的计数器将在下次自动同步时处理")
+    
+    return ResponseBaseSchema.success(data=diagnosis)
+
+
+@router.post("/diagnose-batch",
+             response_model=ResponseBaseSchema,
+             summary="批量诊断短链接同步状态（管理员）")
+async def diagnose_short_links_batch(
+    short_codes: list[str] = Body(..., description="短链接代码列表"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    批量诊断短链接的同步状态
+    
+    一次检查多个短链接的状态，适用于诊断同步失败的问题
+    
+    注意：此接口需要管理员权限
+    """
+    if not short_codes:
+        raise_api_exception(
+            ErrorCode.INVALID_PARAMETER,
+            detail="请提供至少一个短链接代码"
+        )
+    
+    if len(short_codes) > 50:
+        raise_api_exception(
+            ErrorCode.INVALID_PARAMETER,
+            detail="一次最多只能诊断50个短链接"
+        )
+    
+    results = []
+    for short_code in short_codes:
+        # 调用单个诊断函数（复用逻辑）
+        diagnosis = await diagnose_short_link_sync(short_code, db, current_user)
+        results.append(diagnosis.data)
+    
+    # 统计信息
+    summary = {
+        "total": len(short_codes),
+        "exists": sum(1 for r in results if r.get("exists")),
+        "active": sum(1 for r in results if r.get("is_active")),
+        "expired": sum(1 for r in results if r.get("is_expired")),
+        "has_redis_counter": sum(1 for r in results if r.get("redis_counter_value") and r.get("redis_counter_value", 0) > 0),
+        "has_memory_counter": sum(1 for r in results if r.get("memory_counter_value") and r.get("memory_counter_value", 0) > 0),
+        "has_issues": sum(1 for r in results if r.get("issues")),
+    }
+    
+    return ResponseBaseSchema.success(data={
+        "summary": summary,
+        "details": results
+    })
