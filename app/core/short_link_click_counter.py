@@ -229,7 +229,13 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                                 _click_counters.pop(code, None)
             
             if failed_codes:
-                logger.warning(f"有 {len(failed_codes)} 个短链接同步失败，将在下次同步时重试")
+                # 获取失败的计数详情
+                failed_counts = {code: _click_counters.get(code, 0) for code in failed_codes}
+                logger.warning(
+                    f"有 {len(failed_codes)} 个短链接同步失败（进程内计数器），将在下次同步时重试。"
+                    f"失败的短链接代码: {failed_codes}，"
+                    f"失败的计数详情: {failed_counts}"
+                )
             
             return synced
         
@@ -376,7 +382,14 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
             logger.info(f"成功同步 {synced} 个短链接的点击次数到数据库")
         
         if failed_updates:
-            logger.warning(f"有 {len(failed_updates)} 个计数器同步失败，将在下次同步时重试")
+            # 提取失败的短链接代码列表
+            failed_codes = [code for code, _, _ in failed_updates]
+            failed_counts = {code: count for code, count, _ in failed_updates}
+            logger.warning(
+                f"有 {len(failed_updates)} 个计数器同步失败，将在下次同步时重试。"
+                f"失败的短链接代码: {failed_codes}，"
+                f"失败的计数详情: {failed_counts}"
+            )
         
         return synced
     except Exception as e:
@@ -514,7 +527,13 @@ async def _batch_update_click_counts_with_retry(
         return 0, [], batch
     
     if failed_batch:
-        logger.debug(f"部分短链接锁获取失败，将在下次同步时重试: failed_codes={[code for code, _, _ in failed_batch]}")
+        failed_lock_codes = [code for code, _, _ in failed_batch]
+        failed_lock_counts = {code: count for code, count, _ in failed_batch}
+        logger.debug(
+            f"部分短链接锁获取失败，将在下次同步时重试: "
+            f"failed_codes={failed_lock_codes}, "
+            f"failed_counts={failed_lock_counts}"
+        )
     
     try:
         # 设置事务隔离级别为READ COMMITTED，减少锁竞争
@@ -555,9 +574,12 @@ async def _batch_update_click_counts_with_retry(
         skipped_batch = [item for item in locked_batch if item[0] not in locked_codes_set]
         
         if skipped_batch:
+            skipped_codes = [code for code, _, _ in skipped_batch]
+            skipped_counts = {code: count for code, count, _ in skipped_batch}
             logger.debug(
-                f"部分记录被其他事务锁定，跳过本次更新: "
-                f"skipped_codes={[code for code, _, _ in skipped_batch]}"
+                f"部分记录被其他事务锁定，跳过本次更新，将在下次同步时重试: "
+                f"skipped_codes={skipped_codes}, "
+                f"skipped_counts={skipped_counts}"
             )
         
         if not successfully_locked_batch:
