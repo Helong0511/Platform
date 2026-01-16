@@ -64,12 +64,12 @@
             <span v-else style="color: #909399;">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="postback_url" label="Postback URL" min-width="400" show-overflow-tooltip>
+        <el-table-column prop="postback_url" label="Postback URL" min-width="450" show-overflow-tooltip>
           <template #default="scope">
             <span>{{ scope.row.postback_url || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="postback_method" label="Postback方法" width="150" align="center">
+        <el-table-column prop="postback_method" label="Postback方法" width="120" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.postback_method === 'POST' ? 'success' : 'info'">
               {{ scope.row.postback_method || 'GET' }}
@@ -82,6 +82,9 @@
             <el-switch
               v-model="scope.row.is_active"
               @change="handleStatusChange(scope.row)"
+              :active-text="scope.row.is_active ? '激活' : ''"
+              :inactive-text="!scope.row.is_active ? '禁用' : ''"
+              aria-label="切换状态"
             />
           </template>
         </el-table-column>

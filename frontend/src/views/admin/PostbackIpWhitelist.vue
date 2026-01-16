@@ -77,9 +77,13 @@
         </el-table-column>
         <el-table-column prop="is_active" label="状态" width="100" align="center">
           <template #default="scope">
-            <el-tag :type="scope.row.is_active ? 'success' : 'danger'" size="small">
-              {{ scope.row.is_active ? '启用' : '禁用' }}
-            </el-tag>
+            <el-switch
+              v-model="scope.row.is_active"
+              @change="handleStatusChange(scope.row)"
+              :active-text="scope.row.is_active ? '启用' : ''"
+              :inactive-text="!scope.row.is_active ? '禁用' : ''"
+              aria-label="切换状态"
+            />
           </template>
         </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="180">
@@ -446,6 +450,20 @@ const handleDelete = async (row) => {
     }
   } catch (error) {
     // 用户取消操作
+  }
+};
+
+// 切换状态
+const handleStatusChange = async (row) => {
+  const originalState = row.is_active;
+  try {
+    await updateIpWhitelist(row.id, { is_active: row.is_active });
+    fetchList();
+  } catch (error) {
+    // 恢复原状态
+    row.is_active = originalState;
+    logger.error('更新IP白名单状态失败:', error);
+    ElMessage.error('状态更新失败');
   }
 };
 

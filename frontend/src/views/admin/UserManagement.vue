@@ -114,11 +114,15 @@
             {{ scope.row.email || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="is_active" label="状态" width="100">
+        <el-table-column prop="is_active" label="状态" width="100" align="center">
           <template #default="scope">
-            <el-tag :type="scope.row.is_active ? 'success' : 'danger'" size="small">
-              {{ scope.row.is_active ? '启用' : '禁用' }}
-            </el-tag>
+            <el-switch
+              v-model="scope.row.is_active"
+              @change="handleStatusChange(scope.row)"
+              :active-text="scope.row.is_active ? '启用' : ''"
+              :inactive-text="!scope.row.is_active ? '禁用' : ''"
+              aria-label="切换状态"
+            />
           </template>
         </el-table-column>
         <el-table-column v-if="hasClientUsers" prop="api_enabled" label="API访问" width="120" align="center">
@@ -156,7 +160,7 @@
             {{ formatDate(scope.row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="500" fixed="right">
+        <el-table-column label="操作" width="350" fixed="right">
           <template #default="scope">
             <div class="operation-buttons">
               <el-button 

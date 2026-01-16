@@ -124,9 +124,13 @@
         </el-table-column>
         <el-table-column prop="is_active" label="状态" width="100" align="center">
           <template #default="scope">
-            <el-tag :type="scope.row.is_active ? 'success' : 'danger'">
-              {{ scope.row.is_active ? '激活' : '禁用' }}
-            </el-tag>
+            <el-switch
+              v-model="scope.row.is_active"
+              @change="handleStatusChange(scope.row)"
+              :active-text="scope.row.is_active ? '激活' : ''"
+              :inactive-text="!scope.row.is_active ? '禁用' : ''"
+              aria-label="切换状态"
+            />
           </template>
         </el-table-column>
         <el-table-column label="操作" width="200" fixed="right">

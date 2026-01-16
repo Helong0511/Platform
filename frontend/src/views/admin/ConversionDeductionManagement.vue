@@ -185,6 +185,9 @@
             <el-switch
               v-model="scope.row.is_active"
               @change="handleStatusChange(scope.row)"
+              :active-text="scope.row.is_active ? '启用' : ''"
+              :inactive-text="!scope.row.is_active ? '禁用' : ''"
+              aria-label="切换状态"
             />
           </template>
         </el-table-column>
