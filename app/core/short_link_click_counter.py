@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # 死锁重试配置
 MAX_DEADLOCK_RETRIES = 5  # 增加重试次数
 DEADLOCK_RETRY_BASE_DELAY = 0.3  # 增加基础延迟（秒），减少并发冲突
+MAX_RECURSION_DEPTH = 10  # 批次拆分最大递归深度，防止栈溢出（批次大小5最多递归3次）
 
 # 死锁统计（用于监控）
 _deadlock_stats = {
@@ -594,8 +595,7 @@ async def _batch_update_click_counts_with_retry(
                 
                 if attempt < max_retries - 1:
                     # 如果批次较大且重试次数较多，考虑拆分批次
-                    # 限制递归深度，防止栈溢出（最大递归深度为10，批次大小5最多递归3次）
-                    MAX_RECURSION_DEPTH = 10
+                    # 限制递归深度，防止栈溢出
                     if len(batch) > 2 and attempt >= 2 and _recursion_depth < MAX_RECURSION_DEPTH:
                         # 将批次拆分成两半，分别处理
                         mid = len(batch) // 2
