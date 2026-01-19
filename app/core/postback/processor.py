@@ -259,34 +259,64 @@ class PostbackProcessor:
                                 payout_value = None
                         
                         # 检查是否已经存在相同的待确认记录（防止重复创建）
+                        # 注意：检查所有状态的记录，不仅仅是 pending，避免重复创建
                         final_conversion_id = conversion_id or raw_data.get("clk_id") or raw_data.get("conversion_id") or "unknown"
                         final_event_name = normalized_data.get("event_name")
                         
+                        # 1. 检查待确认表中是否已存在任何状态的记录
                         existing_pending_check = await db.execute(
                             select(PendingPostbackConversion).where(
                                 PendingPostbackConversion.platform == platform,
                                 PendingPostbackConversion.conversion_id == final_conversion_id,
-                                PendingPostbackConversion.event_name == final_event_name,
-                                PendingPostbackConversion.status == 'pending'
+                                PendingPostbackConversion.event_name == final_event_name
                             )
                         )
                         existing_pending = existing_pending_check.scalars().first()
                         
+                        # 2. 同时检查正式转化记录表中是否已存在
+                        existing_formal_check = await db.execute(
+                            select(PostbackConversion).where(
+                                PostbackConversion.platform == platform,
+                                PostbackConversion.conversion_id == final_conversion_id,
+                                PostbackConversion.event_name == final_event_name
+                            )
+                        )
+                        existing_formal = existing_formal_check.scalars().first()
+                        
                         if existing_pending:
-                            # 已经存在相同的待确认记录，不重复创建
+                            # 已经存在相同的待确认记录（任何状态），不重复创建
                             logger.info(
                                 f"待确认记录已存在，跳过重复创建: "
                                 f"platform={platform}, conversion_id={final_conversion_id}, "
-                                f"event_name={final_event_name}, existing_id={existing_pending.id}"
+                                f"event_name={final_event_name}, existing_id={existing_pending.id}, "
+                                f"status={existing_pending.status}"
                             )
                             # 直接返回，不发送新的通知
                             return {
                                 "success": True,
-                                "message": "PostBack 接收成功（待确认记录已存在）",
+                                "message": f"PostBack 接收成功（待确认记录已存在，状态：{existing_pending.status}）",
                                 "conversion_id": final_conversion_id,
                                 "platform": platform,
                                 "is_pending": True,
-                                "existing_pending_id": existing_pending.id
+                                "existing_pending_id": existing_pending.id,
+                                "existing_status": existing_pending.status
+                            }
+                        
+                        if existing_formal:
+                            # 正式转化记录已存在，不应该再创建待确认记录
+                            logger.info(
+                                f"正式转化记录已存在，跳过创建待确认记录: "
+                                f"platform={platform}, conversion_id={final_conversion_id}, "
+                                f"event_name={final_event_name}, formal_id={existing_formal.id}"
+                            )
+                            # 直接返回，不发送新的通知
+                            return {
+                                "success": True,
+                                "message": "PostBack 接收成功（正式转化记录已存在）",
+                                "conversion_id": final_conversion_id,
+                                "platform": platform,
+                                "is_duplicate": True,
+                                "existing_formal_id": existing_formal.id
                             }
                         
                         # 创建待确认记录（使用与检查时相同的 conversion_id）
