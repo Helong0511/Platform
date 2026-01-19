@@ -258,10 +258,41 @@ class PostbackProcessor:
                             except (ValueError, TypeError):
                                 payout_value = None
                         
-                        # 创建待确认记录
+                        # 检查是否已经存在相同的待确认记录（防止重复创建）
+                        final_conversion_id = conversion_id or raw_data.get("clk_id") or raw_data.get("conversion_id") or "unknown"
+                        final_event_name = normalized_data.get("event_name")
+                        
+                        existing_pending_check = await db.execute(
+                            select(PendingPostbackConversion).where(
+                                PendingPostbackConversion.platform == platform,
+                                PendingPostbackConversion.conversion_id == final_conversion_id,
+                                PendingPostbackConversion.event_name == final_event_name,
+                                PendingPostbackConversion.status == 'pending'
+                            )
+                        )
+                        existing_pending = existing_pending_check.scalars().first()
+                        
+                        if existing_pending:
+                            # 已经存在相同的待确认记录，不重复创建
+                            logger.info(
+                                f"待确认记录已存在，跳过重复创建: "
+                                f"platform={platform}, conversion_id={final_conversion_id}, "
+                                f"event_name={final_event_name}, existing_id={existing_pending.id}"
+                            )
+                            # 直接返回，不发送新的通知
+                            return {
+                                "success": True,
+                                "message": "PostBack 接收成功（待确认记录已存在）",
+                                "conversion_id": final_conversion_id,
+                                "platform": platform,
+                                "is_pending": True,
+                                "existing_pending_id": existing_pending.id
+                            }
+                        
+                        # 创建待确认记录（使用与检查时相同的 conversion_id）
                         pending_conversion = PendingPostbackConversion(
                             platform=platform,
-                            conversion_id=conversion_id or raw_data.get("clk_id") or raw_data.get("conversion_id") or "unknown",
+                            conversion_id=final_conversion_id,
                             event_name=normalized_data.get("event_name"),
                             event_value=normalized_data.get("event_value"),
                             original_payout=payout_value,
