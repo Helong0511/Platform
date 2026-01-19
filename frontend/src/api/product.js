@@ -6,6 +6,7 @@
 import { request, normalizePaginatedResponse, normalizeResponse, extractErrorMessage, isErrorHandled, refreshCsrfTokenBeforeRequest, handleError } from '../utils/api';
 import { ElMessage } from 'element-plus';
 import { logger } from '../utils/logger';
+import { getCsrfToken } from '../utils/csrfToken';
 import axios from 'axios'; // 保留用于特殊场景（超时控制、CSRF重试逻辑）
 
 // 获取产品列表
@@ -132,7 +133,7 @@ export const updateAssignmentDates = async (assignmentId, dateUpdate) => {
       }
       
       // 检查CSRF token是否存在
-      const csrfToken = sessionStorage.getItem('csrf_token');
+      const csrfToken = getCsrfToken();
       if (!csrfToken) {
         throw new Error('CSRF令牌缺失，请刷新页面后重试');
       }
@@ -196,7 +197,7 @@ export const batchUpdateAssignmentDates = async (updates) => {
       }
       
       // 检查CSRF token是否存在
-      const csrfToken = sessionStorage.getItem('csrf_token');
+      const csrfToken = getCsrfToken();
       if (!csrfToken) {
         throw new Error('CSRF令牌缺失，请刷新页面后重试');
       }

@@ -7,6 +7,7 @@ import { request, normalizeResponse, extractErrorMessage, isErrorHandled, ensure
 import { ElMessage } from 'element-plus';
 import { getWarningMessage } from '../utils/messages';
 import { logger } from '../utils/logger';
+import { getCsrfToken } from '../utils/csrfToken';
 import axios from 'axios'; // 保留用于特殊场景（文件上传、FormData处理）
 
 /**
@@ -23,7 +24,7 @@ export const validateExcelData = async (file) => {
     formData.append('file', file);
 
     // 获取CSRF令牌（如果存在）
-    const csrfToken = sessionStorage.getItem('csrf_token');
+    const csrfToken = getCsrfToken();
 
     // 构建headers，确保包含CSRF令牌
     // 注意：不要手动设置 Content-Type，让 axios 自动处理 multipart/form-data 的 boundary
@@ -84,7 +85,7 @@ export const parseExcelColumns = async (file) => {
     formData.append('file', file);
 
     // 获取CSRF令牌（如果存在）
-    const csrfToken = sessionStorage.getItem('csrf_token');
+    const csrfToken = getCsrfToken();
 
     // 构建headers，确保包含CSRF令牌
     // 注意：不要手动设置 Content-Type，让 axios 自动处理 multipart/form-data 的 boundary
@@ -133,7 +134,7 @@ export const previewExcelData = async (file, rows = 10) => {
     formData.append('file', file);
 
     // 获取CSRF令牌（如果存在）
-    const csrfToken = sessionStorage.getItem('csrf_token');
+    const csrfToken = getCsrfToken();
 
     // 构建headers，确保包含CSRF令牌
     // 注意：不要手动设置 Content-Type，让 axios 自动处理 multipart/form-data 的 boundary
@@ -177,7 +178,7 @@ export const importTrainingData = async (file) => {
       formData.append('file', file);
 
       // 获取CSRF令牌（如果存在）
-      const csrfToken = sessionStorage.getItem('csrf_token');
+      const csrfToken = getCsrfToken();
 
       if (!csrfToken) {
         throw new Error('CSRF令牌缺失，请刷新页面后重试');

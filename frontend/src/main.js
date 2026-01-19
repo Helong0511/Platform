@@ -25,6 +25,7 @@ import { initTimezone } from './utils/dateFormat';
 import { initAxiosConfig } from './utils/axiosConfig';
 import { initGlobalErrorHandler } from './utils/globalErrorHandler';
 import { initDomFixes } from './utils/domFixes';
+import { initCsrfTokenSync } from './utils/csrfToken';
 
 // 创建Vue应用
 const app = createApp(App);
@@ -36,6 +37,9 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 
 // 初始化 Axios 配置
 initAxiosConfig();
+
+// 初始化 CSRF 令牌跨标签页同步机制
+initCsrfTokenSync();
 
 // 初始化全局错误处理器
 initGlobalErrorHandler();

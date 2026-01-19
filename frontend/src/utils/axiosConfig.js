@@ -93,6 +93,7 @@ const handleCsrfError = async (error) => {
       originalRequest._retry = true;
 
       // 优先使用响应头中的CSRF token（如果存在）
+      // 注意：extractAndSaveCsrfToken已经在响应拦截器中调用，这里再次检查确保获取到最新的令牌
       const csrfTokenFromHeader = getCsrfTokenFromResponse(error);
       
       if (csrfTokenFromHeader) {
@@ -105,7 +106,25 @@ const handleCsrfError = async (error) => {
           originalRequest._retrySuccess = true;
           return retryResponse;
         } catch (retryError) {
+          // 重试失败时，再次尝试从错误响应中提取CSRF令牌
+          extractAndSaveCsrfToken(retryError);
           logger.warning('使用响应头中的CSRF token重试失败:', retryError);
+        }
+      } else {
+        // 如果响应头中没有token，尝试从当前存储中获取（可能已经被响应拦截器更新）
+        const currentToken = getCsrfToken();
+        if (currentToken) {
+          originalRequest.headers = originalRequest.headers || {};
+          originalRequest.headers['X-CSRF-Token'] = currentToken;
+          logger.info('使用当前存储的CSRF token重试请求');
+          try {
+            const retryResponse = await axios(originalRequest);
+            originalRequest._retrySuccess = true;
+            return retryResponse;
+          } catch (retryError) {
+            extractAndSaveCsrfToken(retryError);
+            logger.warning('使用当前存储的CSRF token重试失败:', retryError);
+          }
         }
       }
 
@@ -141,13 +160,19 @@ const handleCsrfError = async (error) => {
 export const setupResponseInterceptor = () => {
   axios.interceptors.response.use(
     (response) => {
-      // 从响应头中获取CSRF令牌并存储
+      // 从响应头中获取CSRF令牌并存储（优先处理，确保总是使用最新的令牌）
       extractAndSaveCsrfToken(response);
       return response;
     },
     async (error) => {
-      // 即使请求失败，也尝试从响应头中获取CSRF令牌
-      extractAndSaveCsrfToken(error);
+      // 即使请求失败，也尝试从响应头中获取CSRF令牌（优先处理）
+      // 这对于CSRF令牌不匹配的情况特别重要，后端会在错误响应头中返回正确的令牌
+      const csrfTokenFromError = extractAndSaveCsrfToken(error);
+      
+      // 如果从错误响应中获取到了新的CSRF令牌，记录日志
+      if (csrfTokenFromError) {
+        logger.debug('从错误响应中提取到新的 CSRF token，已更新');
+      }
 
       // 处理403 CSRF令牌错误
       if (error.response && error.response.status === 403) {

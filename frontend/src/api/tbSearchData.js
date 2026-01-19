@@ -57,7 +57,8 @@ export const importTBSearchData = async (formData) => {
   try {
     await refreshCsrfTokenBeforeRequest();
     
-    const csrfToken = sessionStorage.getItem('csrf_token');
+    const { getCsrfToken } = await import('../utils/csrfToken');
+    const csrfToken = getCsrfToken();
     const headers = {};
     if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
     

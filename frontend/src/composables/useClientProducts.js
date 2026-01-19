@@ -3,6 +3,7 @@ import { ElMessage } from 'element-plus';
 import { getProductList, createProduct, updateProduct, deleteProduct } from '../api/product';
 import { logger } from '../utils/logger';
 import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
+import { getCsrfToken } from '../utils/csrfToken';
 
 /**
  * 客户产品管理 Composable
@@ -110,7 +111,7 @@ export function useClientProducts() {
       }
       
       // 确保CSRF令牌存在：如果没有，先发送一个GET请求获取
-      let csrfToken = sessionStorage.getItem('csrf_token');
+      let csrfToken = getCsrfToken();
       
       if (!csrfToken) {
         try {
@@ -118,7 +119,7 @@ export function useClientProducts() {
           
           if (!csrfTokenExists) {
             // 再次检查，因为响应拦截器可能已经处理了
-            csrfToken = sessionStorage.getItem('csrf_token');
+            csrfToken = getCsrfToken();
             
             if (!csrfToken) {
               logger.error('saveProduct: 无法获取CSRF令牌，操作已取消');
@@ -136,7 +137,7 @@ export function useClientProducts() {
             throw error;
           }
           // 再次检查CSRF令牌（响应拦截器可能已经处理了）
-          csrfToken = sessionStorage.getItem('csrf_token');
+          csrfToken = getCsrfToken();
           if (!csrfToken) {
             logger.error('saveProduct: 无法获取CSRF令牌，操作已取消');
             ElMessage.error('无法获取安全令牌，请刷新页面后重试');
@@ -149,7 +150,7 @@ export function useClientProducts() {
       }
       
       // 最终确认CSRF令牌存在
-      csrfToken = sessionStorage.getItem('csrf_token');
+      csrfToken = getCsrfToken();
       if (!csrfToken) {
         logger.error('saveProduct: CSRF令牌最终检查失败，操作已取消');
         ElMessage.error('安全令牌验证失败，请刷新页面后重试');
@@ -160,7 +161,7 @@ export function useClientProducts() {
       }
       
       // 在发送请求前再次确认CSRF令牌存在
-      csrfToken = sessionStorage.getItem('csrf_token');
+      csrfToken = getCsrfToken();
       if (!csrfToken) {
         logger.error('saveProduct: 发送请求前CSRF令牌检查失败，操作已取消');
         ElMessage.error('安全令牌验证失败，请刷新页面后重试');
@@ -177,7 +178,7 @@ export function useClientProducts() {
       } else {
         logger.debug('saveProduct: 更新产品，id =', id);
         // 再次确认CSRF令牌存在（防止在异步操作期间被清除）
-        const finalCsrfToken = sessionStorage.getItem('csrf_token');
+        const finalCsrfToken = getCsrfToken();
         if (!finalCsrfToken) {
           logger.error('saveProduct: 更新产品前CSRF令牌检查失败，操作已取消');
           ElMessage.error('安全令牌验证失败，请刷新页面后重试');

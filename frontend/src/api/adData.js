@@ -156,7 +156,8 @@ export const importAdData = async (formData) => {
     await refreshCsrfTokenBeforeRequest();
     
     // 获取CSRF令牌（如果存在）
-    const csrfToken = sessionStorage.getItem('csrf_token');
+    const { getCsrfToken } = await import('../utils/csrfToken');
+    const csrfToken = getCsrfToken();
     
     // 构建headers，确保包含CSRF令牌
     // 注意：不要手动设置 Content-Type，让 axios 自动处理 multipart/form-data 的 boundary
