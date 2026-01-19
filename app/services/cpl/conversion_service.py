@@ -281,11 +281,13 @@ class ConversionService:
             conversion_group_conditions.append(click_alias.advertiser_id == advertiser_id)
         
         # 构建分组查询：使用 join 确保只统计有 click_id 关联的记录（用于分组）
+        # 同时查询原始金额和扣减后的金额
         conversion_group_query = select(
             click_alias.offer_id.label("offer_id"),
             click_alias.publisher_id,
             func.count(PostbackConversion.id).label('conversion_count'),
-            func.sum(PostbackConversion.payout).label('total_po')
+            func.sum(PostbackConversion.original_payout).label('total_po_original'),
+            func.sum(PostbackConversion.payout).label('total_po_discounted')
         ).join(
             click_alias, PostbackConversion.click_id == click_alias.click_id
         ).join(
@@ -315,7 +317,7 @@ class ConversionService:
         # 同时计算总转化数量和总支付金额（从分组统计结果汇总，确保与分组统计一致）
         calculated_total_conversions = 0
         calculated_total_po = 0.0
-        for offer_id_val, pub_id_val, conv_count_val, total_po_val in conversion_groups:
+        for offer_id_val, pub_id_val, conv_count_val, total_po_original_val, total_po_discounted_val in conversion_groups:
             safe_offer_id = offer_id_val if offer_id_val is not None else 0
             safe_pub_id = pub_id_val if pub_id_val is not None else 0
             
@@ -331,11 +333,15 @@ class ConversionService:
                 }
             
             stats_dict[key]["conversion_count"] += conv_count_val
-            po_val = float(total_po_val) if total_po_val else 0.0
-            stats_dict[key]["po"] += po_val
-            # 累加转化数量和支付金额
+            # po 字段使用原始金额（管理员可见）
+            po_original_val = float(total_po_original_val) if total_po_original_val else 0.0
+            stats_dict[key]["po"] += po_original_val
+            # po_after_discount 字段使用扣减后的金额（所有用户可见）
+            po_discounted_val = float(total_po_discounted_val) if total_po_discounted_val else 0.0
+            stats_dict[key]["po_after_discount"] += po_discounted_val
+            # 累加转化数量和扣减后的支付金额（用于total_po）
             calculated_total_conversions += conv_count_val
-            calculated_total_po += po_val
+            calculated_total_po += po_discounted_val
             
             if safe_offer_id:
                 offer_ids.add(safe_offer_id)
@@ -387,33 +393,8 @@ class ConversionService:
             advertiser_name = advertiser.advertiser_name if advertiser else None
             publisher_name = publisher.publisher_name if publisher else ("未关联渠道" if publisher_id_val else "未关联渠道")
             
-            # 计算PO（扣价后）- 需要查询该组合下的所有转化记录
-            # 注意：只统计 Offer 激活的转化（不计入未激活 Offer 的转化）
-            po_after_discount = 0.0
-            if publisher_id_val and offer_id_val:
-                offer_alias_for_discount = aliased(Offer)
-                conversions_query = select(PostbackConversion).join(
-                    click_alias, PostbackConversion.click_id == click_alias.click_id
-                ).join(
-                    offer_alias_for_discount, click_alias.offer_id == offer_alias_for_discount.id
-                ).where(
-                    and_(
-                        click_alias.offer_id == offer_id_val,
-                        click_alias.publisher_id == publisher_id_val,
-                        offer_alias_for_discount.is_active == True,
-                        offer_alias_for_discount.status == 'Active',
-                        *conversion_conditions
-                    )
-                )
-                conversions_result = await self.db.execute(conversions_query)
-                conversions = conversions_result.scalars().all()
-                
-                for conversion in conversions:
-                    # 使用扣后的 payout
-                    if conversion.payout:
-                        po_after_discount += conversion.payout
-            else:
-                po_after_discount = stat["po"]
+            # po_after_discount 已经在分组统计时计算好了（使用扣减后的金额）
+            po_after_discount = stat["po_after_discount"]
             
             # 计算CR
             cr_val = (stat["conversion_count"] / stat["click_count"] * 100) if stat["click_count"] > 0 else 0
