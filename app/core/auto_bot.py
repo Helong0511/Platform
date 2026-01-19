@@ -274,33 +274,53 @@ if bot_initialized and TELEBOT_AVAILABLE:
             
             # 处理 Postback 待确认转化的确认/拒绝
             if call.data.startswith("postback_approve_") or call.data.startswith("postback_reject_"):
-                import asyncio
-                from app.core.database import engine
-                from sqlalchemy.ext.asyncio import async_sessionmaker
-                from sqlalchemy.future import select
+                from sqlalchemy import create_engine
+                from sqlalchemy.orm import sessionmaker
+                from sqlalchemy import select as sync_select
                 from app.models.models import PendingPostbackConversion, PostbackConversion
                 from app.core.utils import get_app_now_naive
+                from app.core.config import settings
                 import json
                 
                 # 解析 callback_data
                 action = "approve" if call.data.startswith("postback_approve_") else "reject"
                 pending_id = int(call.data.split("_")[-1])
                 
-                # 异步处理数据库操作
-                async def process_pending_conversion():
+                # 使用同步数据库操作（因为 Telegram bot 回调是同步的）
+                def process_pending_conversion_sync():
                     try:
-                        # 创建数据库会话
-                        async_session = async_sessionmaker(engine, expire_on_commit=False)
+                        # 创建同步数据库引擎（从异步 URI 转换为同步 URI）
+                        # 支持多种格式：mysql+aiomysql:// 或 mysql+asyncmy://
+                        sync_db_url = settings.SQLALCHEMY_DATABASE_URI
+                        if "+aiomysql" in sync_db_url:
+                            sync_db_url = sync_db_url.replace("+aiomysql", "+pymysql")
+                        elif "+asyncmy" in sync_db_url:
+                            sync_db_url = sync_db_url.replace("+asyncmy", "+pymysql")
+                        elif "mysql://" in sync_db_url and "+" not in sync_db_url:
+                            # 如果已经是 mysql:// 格式，直接使用
+                            pass
+                        else:
+                            # 默认使用 pymysql
+                            sync_db_url = sync_db_url.replace("mysql://", "mysql+pymysql://")
+                        sync_engine = create_engine(
+                            sync_db_url,
+                            pool_pre_ping=True,
+                            pool_recycle=settings.DB_POOL_RECYCLE,
+                            pool_size=5,
+                            max_overflow=3,
+                            echo=False
+                        )
+                        SessionLocal = sessionmaker(bind=sync_engine)
                         
-                        async with async_session() as db:
+                        with SessionLocal() as db:
                             # 查询待确认记录
-                            result = await db.execute(
-                                select(PendingPostbackConversion).where(
+                            result = db.execute(
+                                sync_select(PendingPostbackConversion).where(
                                     PendingPostbackConversion.id == pending_id,
                                     PendingPostbackConversion.status == 'pending'
                                 )
                             )
-                            pending = result.scalars().first()
+                            pending = result.scalar_one_or_none()
                             
                             if not pending:
                                 bot.answer_callback_query(
@@ -339,8 +359,8 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                 pending.status = 'approved'
                                 pending.approved_at = get_app_now_naive()
                                 
-                                await db.commit()
-                                await db.refresh(conversion)
+                                db.commit()
+                                db.refresh(conversion)
                                 
                                 # 更新 Telegram 消息
                                 bot.edit_message_text(
@@ -359,7 +379,7 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                 # 拒绝：只更新状态
                                 pending.status = 'rejected'
                                 pending.rejected_at = get_app_now_naive()
-                                await db.commit()
+                                db.commit()
                                 
                                 # 更新 Telegram 消息
                                 bot.edit_message_text(
@@ -376,30 +396,6 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                 
                     except Exception as e:
                         logger.error(f"处理待确认转化记录失败: {str(e)}", exc_info=True)
-                        bot.answer_callback_query(
-                            callback_query_id=call.id,
-                            text="处理失败，请稍后重试"
-                        )
-                
-                # 在事件循环中运行异步函数
-                # 注意：Telegram bot 回调在独立线程中运行，需要创建新的事件循环
-                def run_async_task():
-                    try:
-                        # 创建新的事件循环（因为当前线程可能没有事件循环）
-                        try:
-                            loop = asyncio.get_event_loop()
-                            if loop.is_closed():
-                                loop = asyncio.new_event_loop()
-                                asyncio.set_event_loop(loop)
-                        except RuntimeError:
-                            # 当前线程没有事件循环，创建新的
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-                        
-                        # 运行异步函数
-                        loop.run_until_complete(process_pending_conversion())
-                    except Exception as e:
-                        logger.error(f"执行异步处理失败: {str(e)}", exc_info=True)
                         try:
                             bot.answer_callback_query(
                                 callback_query_id=call.id,
@@ -409,8 +405,7 @@ if bot_initialized and TELEBOT_AVAILABLE:
                             pass
                 
                 # 在独立线程中运行，避免阻塞 Telegram bot
-                # threading 已在文件顶部导入
-                thread = threading.Thread(target=run_async_task, daemon=True)
+                thread = threading.Thread(target=process_pending_conversion_sync, daemon=True)
                 thread.start()
                 return
             
