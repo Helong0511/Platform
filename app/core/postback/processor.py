@@ -65,11 +65,12 @@ from sqlalchemy.future import select
 from sqlalchemy import func
 
 from app.core.postback.handlers import get_handler
+from app.core.auto_bot import send_telegram_message_with_buttons
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
 from app.models.models import (
     PostbackConversion, Product, Click, Offer, Advertiser, ClickStats, Client, Publisher,
-    ConversionDeductionLog, AdminNotificationConfig, PostbackIpWhitelist
+    ConversionDeductionLog, AdminNotificationConfig, PostbackIpWhitelist, PendingPostbackConversion
 )
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from app.core.exceptions import raise_api_exception
@@ -209,54 +210,127 @@ class PostbackProcessor:
                 f"白名单中的IP列表={all_whitelist_ips}, "
                 f"platform={platform}, conversion_id={raw_data.get('clk_id') or raw_data.get('conversion_id') or 'unknown'}"
             )
-            # IP 不在白名单中，视为测试数据，不记录
+            # IP 不在白名单中，保存为待确认状态，发送带确认按钮的 Telegram 通知
             logger.info(
-                f"Postback 请求 IP {request_ip} 不在白名单中，视为测试数据，不进行处理: "
+                f"Postback 请求 IP {request_ip} 不在白名单中，保存为待确认状态: "
                 f"platform={platform}, conversion_id={raw_data.get('clk_id') or raw_data.get('conversion_id') or 'unknown'}"
             )
-            # 发送管理员提醒（带非白名单提示）
+            
+            # 保存原始数据为 JSON（json 已在文件顶部导入）
+            raw_data_json = json.dumps(raw_data, ensure_ascii=False)
+            
+            # 创建待确认转化记录
             try:
-                admin_config_result = await db.execute(
-                    select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
-                )
-                admin_config = admin_config_result.scalars().first()
-                if (
-                    admin_config
-                    and admin_config.telegram_enabled
-                    and admin_config.notify_system_errors
-                    and admin_config.telegram_chat_id
-                ):
-                    conversion_id_hint = (
-                        raw_data.get("clk_id")
-                        or raw_data.get("conversion_id")
-                        or raw_data.get("click_id")
-                        or "unknown"
-                    )
-                    msg_lines = [
-                        "⚠️ Postback 非白名单IP提示",
-                        "",
-                        f"平台: {platform}",
-                        f"IP: {request_ip}",
-                        f"转化ID/点击ID: {conversion_id_hint}",
-                        "说明: IP 不在白名单中，已按测试数据处理（不入库、不转发）。"
-                    ]
-                    await TelegramNotificationService.send_admin_notification(
-                        message="\n".join(msg_lines),
-                        telegram_chat_id=admin_config.telegram_chat_id,
-                        notification_type='system_error',
-                        db=db
-                    )
+                # 先进行数据标准化，获取基本信息（但不保存到正式表）
+                handler = get_handler(platform)
+                if handler:
+                    is_valid, error_msg = await handler.validate(raw_data)
+                    if is_valid:
+                        normalized_data = await handler.normalize(raw_data)
+                        conversion_id = normalized_data.get("conversion_id")
+                        
+                        # 创建待确认记录
+                        pending_conversion = PendingPostbackConversion(
+                            platform=platform,
+                            conversion_id=conversion_id or raw_data.get("clk_id") or raw_data.get("conversion_id") or "unknown",
+                            event_name=normalized_data.get("event_name"),
+                            event_value=normalized_data.get("event_value"),
+                            original_payout=normalized_data.get("payout") or raw_data.get("payout") or raw_data.get("PayOut"),
+                            payout=normalized_data.get("payout") or raw_data.get("payout") or raw_data.get("PayOut"),
+                            devad_id=normalized_data.get("devad_id"),
+                            os=normalized_data.get("os"),
+                            carrier=normalized_data.get("carrier"),
+                            ip=request_ip,
+                            gid=normalized_data.get("gid"),
+                            product_id=normalized_data.get("product_id"),
+                            client_id=normalized_data.get("client_id"),
+                            click_id=raw_data.get("our_click_id") or raw_data.get("click_id") or normalized_data.get("click_id"),
+                            raw_data=raw_data_json,
+                            request_ip=request_ip,
+                            status='pending',
+                            created_at=get_app_now_naive()
+                        )
+                        db.add(pending_conversion)
+                        await db.commit()
+                        await db.refresh(pending_conversion)
+                        
+                        # 发送带确认按钮的 Telegram 通知
+                        try:
+                            admin_config_result = await db.execute(
+                                select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+                            )
+                            admin_config = admin_config_result.scalars().first()
+                            if (
+                                admin_config
+                                and admin_config.telegram_enabled
+                                and admin_config.notify_system_errors
+                                and admin_config.telegram_chat_id
+                            ):
+                                from app.core.auto_bot import send_telegram_message_with_buttons
+                                
+                                conversion_id_hint = (
+                                    raw_data.get("clk_id")
+                                    or raw_data.get("conversion_id")
+                                    or raw_data.get("click_id")
+                                    or "unknown"
+                                )
+                                msg_lines = [
+                                    "⚠️ Postback 非白名单IP - 待确认",
+                                    "",
+                                    f"平台: {platform}",
+                                    f"IP: {request_ip}",
+                                    f"转化ID/点击ID: {conversion_id_hint}",
+                                    "",
+                                    "💰 金额信息",
+                                ]
+                                if pending_conversion.original_payout:
+                                    msg_lines.append(f"• 原始金额 (PO): ${pending_conversion.original_payout:.2f}")
+                                if pending_conversion.payout:
+                                    msg_lines.append(f"• 扣后金额 (PO(扣)): ${pending_conversion.payout:.2f}")
+                                
+                                msg_lines.extend([
+                                    "",
+                                    "说明: IP 不在白名单中，请确认是否保存此转化记录。",
+                                    f"待确认记录ID: {pending_conversion.id}"
+                                ])
+                                
+                                # 创建确认和拒绝按钮
+                                buttons = [
+                                    [
+                                        {"text": "✅ 确认保存", "callback_data": f"postback_approve_{pending_conversion.id}"},
+                                        {"text": "❌ 拒绝", "callback_data": f"postback_reject_{pending_conversion.id}"}
+                                    ]
+                                ]
+                                
+                                success, message_id = await send_telegram_message_with_buttons(
+                                    message="\n".join(msg_lines),
+                                    chat_id=admin_config.telegram_chat_id,
+                                    buttons=buttons
+                                )
+                                
+                                if success and message_id:
+                                    # 更新待确认记录的 Telegram 消息ID
+                                    pending_conversion.telegram_message_id = message_id
+                                    pending_conversion.telegram_chat_id = admin_config.telegram_chat_id
+                                    await db.commit()
+                                    logger.info(f"已发送待确认通知，消息ID: {message_id}, 待确认记录ID: {pending_conversion.id}")
+                        except Exception as e:
+                            logger.warning(
+                                f"发送待确认通知失败: ip={request_ip}, error={str(e)}"
+                            )
+                    else:
+                        logger.warning(f"数据验证失败，无法创建待确认记录: {error_msg}")
             except Exception as e:
-                logger.warning(
-                    f"发送非白名单IP提示失败: ip={request_ip}, error={str(e)}"
-                )
+                logger.error(f"创建待确认转化记录失败: {str(e)}", exc_info=True)
+                await db.rollback()
+            
             # 返回成功响应，但不处理数据（关键：这里直接返回，不会执行后续的保存逻辑）
             return {
                 "success": True,
-                "message": "PostBack 接收成功（测试数据，未记录）",
+                "message": "PostBack 接收成功（待管理员确认）",
                 "conversion_id": raw_data.get("clk_id") or raw_data.get("conversion_id") or None,
                 "platform": platform,
-                "is_test_data": True
+                "is_pending": True
             }
         else:
             logger.debug(f"Postback 请求 IP {request_ip} 在白名单中，继续处理")

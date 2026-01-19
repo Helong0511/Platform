@@ -271,6 +271,133 @@ if bot_initialized and TELEBOT_AVAILABLE:
 
         try:
             logger.info(f"[回调查询处理器] 处理 callback_data: '{call.data}'")
+            
+            # 处理 Postback 待确认转化的确认/拒绝
+            if call.data.startswith("postback_approve_") or call.data.startswith("postback_reject_"):
+                import asyncio
+                from app.core.database import engine
+                from sqlalchemy.ext.asyncio import async_sessionmaker
+                from sqlalchemy.future import select
+                from app.models.models import PendingPostbackConversion, PostbackConversion
+                from app.core.utils import get_app_now_naive
+                import json
+                
+                # 解析 callback_data
+                action = "approve" if call.data.startswith("postback_approve_") else "reject"
+                pending_id = int(call.data.split("_")[-1])
+                
+                # 异步处理数据库操作
+                async def process_pending_conversion():
+                    try:
+                        # 创建数据库会话
+                        async_session = async_sessionmaker(engine, expire_on_commit=False)
+                        
+                        async with async_session() as db:
+                            # 查询待确认记录
+                            result = await db.execute(
+                                select(PendingPostbackConversion).where(
+                                    PendingPostbackConversion.id == pending_id,
+                                    PendingPostbackConversion.status == 'pending'
+                                )
+                            )
+                            pending = result.scalars().first()
+                            
+                            if not pending:
+                                bot.answer_callback_query(
+                                    callback_query_id=call.id,
+                                    text="记录不存在或已被处理"
+                                )
+                                return
+                            
+                            if action == "approve":
+                                # 批准：创建正式转化记录
+                                raw_data = json.loads(pending.raw_data) if pending.raw_data else {}
+                                
+                                conversion = PostbackConversion(
+                                    platform=pending.platform,
+                                    conversion_id=pending.conversion_id,
+                                    event_name=pending.event_name,
+                                    event_value=pending.event_value,
+                                    original_payout=pending.original_payout,
+                                    payout=pending.payout,
+                                    devad_id=pending.devad_id,
+                                    os=pending.os,
+                                    carrier=pending.carrier,
+                                    ip=pending.ip,
+                                    gid=pending.gid,
+                                    product_id=pending.product_id,
+                                    client_id=pending.client_id,
+                                    click_id=pending.click_id,
+                                    click_time=pending.click_time,
+                                    conversion_status='Pending',
+                                    raw_data=pending.raw_data,
+                                    created_at=get_app_now_naive()
+                                )
+                                db.add(conversion)
+                                
+                                # 更新待确认记录状态
+                                pending.status = 'approved'
+                                pending.approved_at = get_app_now_naive()
+                                
+                                await db.commit()
+                                await db.refresh(conversion)
+                                
+                                # 更新 Telegram 消息
+                                bot.edit_message_text(
+                                    chat_id=call.message.chat.id,
+                                    message_id=call.message.message_id,
+                                    text=f"✅ 已批准并保存转化记录\n\n转化ID: {conversion.conversion_id}\n平台: {conversion.platform}\n记录ID: {conversion.id}",
+                                    reply_markup=None
+                                )
+                                bot.answer_callback_query(
+                                    callback_query_id=call.id,
+                                    text="已批准并保存"
+                                )
+                                logger.info(f"管理员批准了待确认转化记录: pending_id={pending_id}, conversion_id={conversion.id}")
+                                
+                            else:  # reject
+                                # 拒绝：只更新状态
+                                pending.status = 'rejected'
+                                pending.rejected_at = get_app_now_naive()
+                                await db.commit()
+                                
+                                # 更新 Telegram 消息
+                                bot.edit_message_text(
+                                    chat_id=call.message.chat.id,
+                                    message_id=call.message.message_id,
+                                    text=f"❌ 已拒绝转化记录\n\n转化ID: {pending.conversion_id}\n平台: {pending.platform}\nIP: {pending.request_ip}",
+                                    reply_markup=None
+                                )
+                                bot.answer_callback_query(
+                                    callback_query_id=call.id,
+                                    text="已拒绝"
+                                )
+                                logger.info(f"管理员拒绝了待确认转化记录: pending_id={pending_id}")
+                                
+                    except Exception as e:
+                        logger.error(f"处理待确认转化记录失败: {str(e)}", exc_info=True)
+                        bot.answer_callback_query(
+                            callback_query_id=call.id,
+                            text="处理失败，请稍后重试"
+                        )
+                
+                # 在事件循环中运行异步函数
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # 如果事件循环正在运行，创建任务
+                        asyncio.create_task(process_pending_conversion())
+                    else:
+                        # 如果事件循环未运行，直接运行
+                        loop.run_until_complete(process_pending_conversion())
+                except Exception as e:
+                    logger.error(f"执行异步处理失败: {str(e)}", exc_info=True)
+                    bot.answer_callback_query(
+                        callback_query_id=call.id,
+                        text="处理失败，请稍后重试"
+                    )
+                return
+            
             if call.data == "View":
                 bot.edit_message_text(
                     chat_id=call.message.chat.id,
@@ -1108,6 +1235,96 @@ def stop_bot():
 
 
 # 命令处理器已在模块级别注册（见第 91-158 行）
+
+
+async def send_telegram_message_with_buttons(
+    message: str,
+    chat_id: str | None = None,
+    buttons: list[list[dict]] | None = None
+) -> tuple[bool, int | None]:
+    """
+    发送带按钮的 Telegram 消息
+    
+    Args:
+        message: 要发送的消息内容
+        chat_id: 目标聊天ID（可选，默认使用配置中的 TELEGRAM_ADMIN）
+        buttons: 按钮列表，格式：[[{"text": "按钮1", "callback_data": "data1"}, {"text": "按钮2", "callback_data": "data2"}], [{"text": "按钮3", "callback_data": "data3"}]]
+                每个内层列表代表一行按钮
+    
+    Returns:
+        tuple[bool, int | None]: (是否发送成功, 消息ID)
+    """
+    # 检查是否启用 Telegram
+    telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+    if not telegram_enabled:
+        logger.debug("Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过发送消息")
+        return False, None
+
+    if not TELEBOT_AVAILABLE:
+        logger.error("pyTelegramBotAPI 未安装，无法发送消息。请运行: pip install pyTelegramBotAPI")
+        return False, None
+
+    if not bot_initialized:
+        logger.error("Telegram机器人未初始化，无法发送消息")
+        return False, None
+
+    if not bot:
+        logger.error("Telegram机器人未初始化，无法发送消息")
+        return False, None
+
+    try:
+        # 如果没有指定 chat_id，使用配置中的 TELEGRAM_ADMIN
+        if chat_id is None:
+            chat_id = getattr(settings, 'TELEGRAM_ADMIN', None) or None
+
+        if not chat_id or not isinstance(chat_id, str) or not chat_id.strip():
+            logger.error("发送Telegram消息失败: 无法获得收信息的用户或群组ID（请设置 TELEGRAM_ADMIN 环境变量）")
+            return False, None
+
+        # 检查消息长度（Telegram 最大 4096 字符）
+        if len(message) > MAX_TELEGRAM_MESSAGE_LENGTH:
+            message = truncate_message(message)
+
+        # 创建内联键盘
+        markup = None
+        if buttons:
+            markup = InlineKeyboardMarkup()
+            for row in buttons:
+                row_buttons = []
+                for btn in row:
+                    row_buttons.append(InlineKeyboardButton(text=btn.get("text", ""), callback_data=btn.get("callback_data", "")))
+                markup.row(*row_buttons)
+
+        # pyTelegramBotAPI 的 send_message 是同步的，需要在线程中执行
+        loop = asyncio.get_event_loop()
+        
+        def _send():
+            try:
+                sent_message = bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                return True, sent_message.message_id if sent_message else None
+            except Exception as e:
+                logger.error(f"发送Telegram消息失败: {e}", exc_info=True)
+                return False, None
+
+        try:
+            success, message_id = await asyncio.wait_for(
+                loop.run_in_executor(None, _send),
+                timeout=8.0
+            )
+            if success:
+                logger.debug(f"Telegram消息发送成功，消息ID: {message_id}")
+            return success, message_id
+        except asyncio.TimeoutError:
+            logger.error("发送Telegram消息超时（超过8秒）")
+            return False, None
+    except Exception as e:
+        logger.error(f"发送Telegram消息时发生错误: {e}", exc_info=True)
+        return False, None
 
 
 async def send_telegram_message(message: str, chat_id: str | None = None):

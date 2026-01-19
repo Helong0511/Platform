@@ -1175,6 +1175,59 @@ class ConversionDeductionLog(Base):
     )
 
 
+# 待确认 Postback 转化记录模型（不在白名单的 IP 发送的转化数据）
+class PendingPostbackConversion(Base):
+    """
+    待确认 Postback 转化记录模型
+    
+    用于存储不在白名单中的 IP 发送的 postback 数据，等待管理员确认是否保存
+    表名: pending_postback_conversions
+    """
+    __tablename__ = "pending_postback_conversions"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='待确认记录ID')
+    platform = Column(String(50), nullable=False, index=True, comment='平台名称')
+    conversion_id = Column(String(255), nullable=False, comment='转化ID')
+    event_name = Column(String(100), nullable=True, comment='事件名称')
+    event_value = Column(Float, nullable=True, comment='事件价值')
+    original_payout = Column(Float, nullable=True, comment='原始支付金额（PO）')
+    payout = Column(Float, nullable=True, comment='扣后支付金额（PO(扣)）')
+    
+    # 设备信息
+    devad_id = Column(String(255), nullable=True, comment='设备广告ID')
+    os = Column(String(20), nullable=True, comment='操作系统')
+    carrier = Column(String(50), nullable=True, comment='用户运营商')
+    ip = Column(String(50), nullable=True, comment='IP地址')
+    gid = Column(String(100), nullable=True, comment='渠道ID')
+    
+    # 关联信息
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True, comment='关联的产品ID')
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, comment='关联的客户ID')
+    click_id = Column(String(255), nullable=True, index=True, comment='关联的Click ID')
+    click_time = Column(DateTime, nullable=True, comment='点击时间')
+    
+    # 原始数据（JSON格式）
+    raw_data = Column(Text, nullable=True, comment='原始回调数据（JSON格式）')
+    
+    # 状态信息
+    request_ip = Column(String(50), nullable=False, index=True, comment='请求IP地址（不在白名单）')
+    status = Column(String(20), default='pending', index=True, comment='状态：pending(待确认)/approved(已批准)/rejected(已拒绝)')
+    telegram_message_id = Column(Integer, nullable=True, comment='Telegram 消息ID（用于更新消息）')
+    telegram_chat_id = Column(String(50), nullable=True, comment='Telegram Chat ID')
+    
+    # 时间戳
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive, onupdate=get_app_now_naive, nullable=False, comment='更新时间')
+    approved_at = Column(DateTime, nullable=True, comment='批准时间')
+    rejected_at = Column(DateTime, nullable=True, comment='拒绝时间')
+    
+    __table_args__ = (
+        Index("idx_status", "status"),
+        Index("idx_request_ip", "request_ip"),
+        Index("idx_created_at", "created_at"),
+    )
+
+
 # Postback IP 白名单模型
 class PostbackIpWhitelist(Base):
     """
