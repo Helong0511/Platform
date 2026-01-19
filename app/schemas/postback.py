@@ -123,3 +123,36 @@ class PostbackForwardLogResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+class PendingPostbackConversionResponse(BaseModel):
+    """待确认 Postback 转化记录响应模型"""
+    id: int
+    platform: str
+    conversion_id: str
+    event_name: Optional[str]
+    event_value: Optional[float]
+    original_payout: Optional[float]
+    payout: Optional[float]
+    devad_id: Optional[str]
+    os: Optional[str]
+    carrier: Optional[str]
+    ip: Optional[str]
+    gid: Optional[str]
+    product_id: Optional[int]
+    client_id: Optional[int]
+    click_id: Optional[str]
+    click_time: Optional[datetime]
+    request_ip: str
+    status: str = Field(..., description="状态：pending(待确认)/approved(已批准)/rejected(已拒绝)")
+    telegram_message_id: Optional[int]
+    telegram_chat_id: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    approved_at: Optional[datetime]
+    rejected_at: Optional[datetime]
+    product_name: Optional[str] = Field(None, description="产品名称")
+    client_name: Optional[str] = Field(None, description="客户名称")
+    
+    class Config:
+        from_attributes = True
+

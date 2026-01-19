@@ -10,7 +10,9 @@ from app.models.models import (
     ShortLink,
     # CPL 系统模型
     Advertiser, Publisher, Offer, OfferPublisherAssignment, Click, ClickStats,
-    OfferCap, OfferDiscount, AffiliateTest
+    OfferCap, OfferDiscount, AffiliateTest,
+    # Postback 相关模型
+    PendingPostbackConversion, PostbackIpWhitelist
 )
 
 # 导入会话模型
@@ -42,6 +44,9 @@ __all__ = [
     "OfferCap",
     "OfferDiscount",
     "AffiliateTest",
+    # Postback 相关模型
+    "PendingPostbackConversion",
+    "PostbackIpWhitelist",
     "UserSession",
     "TokenBlacklist",
 ]

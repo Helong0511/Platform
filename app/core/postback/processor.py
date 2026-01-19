@@ -229,14 +229,43 @@ class PostbackProcessor:
                         normalized_data = await handler.normalize(raw_data)
                         conversion_id = normalized_data.get("conversion_id")
                         
+                        # 尝试关联 Click ID 获取点击时间等信息
+                        click_id_for_pending = raw_data.get("our_click_id") or raw_data.get("click_id") or normalized_data.get("click_id")
+                        click_time_for_pending = None
+                        
+                        if click_id_for_pending:
+                            # 查找 Click 记录
+                            click_result = await db.execute(
+                                select(Click).where(Click.click_id == click_id_for_pending)
+                            )
+                            click_record = click_result.scalars().first()
+                            
+                            if click_record:
+                                click_time_for_pending = click_record.click_time
+                        
+                        # 处理 payout 字段（支持多种格式）
+                        payout_value = (
+                            normalized_data.get("payout") or
+                            raw_data.get("payout") or
+                            raw_data.get("PayOut") or
+                            raw_data.get("pay_out") or
+                            raw_data.get("pay-out")
+                        )
+                        # 如果是字符串，尝试转换为浮点数
+                        if payout_value is not None and isinstance(payout_value, str):
+                            try:
+                                payout_value = float(payout_value)
+                            except (ValueError, TypeError):
+                                payout_value = None
+                        
                         # 创建待确认记录
                         pending_conversion = PendingPostbackConversion(
                             platform=platform,
                             conversion_id=conversion_id or raw_data.get("clk_id") or raw_data.get("conversion_id") or "unknown",
                             event_name=normalized_data.get("event_name"),
                             event_value=normalized_data.get("event_value"),
-                            original_payout=normalized_data.get("payout") or raw_data.get("payout") or raw_data.get("PayOut"),
-                            payout=normalized_data.get("payout") or raw_data.get("payout") or raw_data.get("PayOut"),
+                            original_payout=payout_value,
+                            payout=payout_value,
                             devad_id=normalized_data.get("devad_id"),
                             os=normalized_data.get("os"),
                             carrier=normalized_data.get("carrier"),
@@ -244,7 +273,8 @@ class PostbackProcessor:
                             gid=normalized_data.get("gid"),
                             product_id=normalized_data.get("product_id"),
                             client_id=normalized_data.get("client_id"),
-                            click_id=raw_data.get("our_click_id") or raw_data.get("click_id") or normalized_data.get("click_id"),
+                            click_id=click_id_for_pending,
+                            click_time=click_time_for_pending,
                             raw_data=raw_data_json,
                             request_ip=request_ip,
                             status='pending',
@@ -274,19 +304,62 @@ class PostbackProcessor:
                                     or raw_data.get("click_id")
                                     or "unknown"
                                 )
+                                
+                                # 获取产品和客户信息
+                                product_name = None
+                                client_name = None
+                                if pending_conversion.product_id:
+                                    product_result = await db.execute(
+                                        select(Product).where(Product.id == pending_conversion.product_id)
+                                    )
+                                    product = product_result.scalars().first()
+                                    if product:
+                                        product_name = product.product_name
+                                
+                                if pending_conversion.client_id:
+                                    client_result = await db.execute(
+                                        select(Client).where(Client.id == pending_conversion.client_id)
+                                    )
+                                    client = client_result.scalars().first()
+                                    if client:
+                                        client_name = client.client_name
+                                
                                 msg_lines = [
                                     "⚠️ Postback 非白名单IP - 待确认",
                                     "",
                                     f"平台: {platform}",
                                     f"IP: {request_ip}",
                                     f"转化ID/点击ID: {conversion_id_hint}",
-                                    "",
-                                    "💰 金额信息",
                                 ]
-                                if pending_conversion.original_payout:
-                                    msg_lines.append(f"• 原始金额 (PO): ${pending_conversion.original_payout:.2f}")
-                                if pending_conversion.payout:
-                                    msg_lines.append(f"• 扣后金额 (PO(扣)): ${pending_conversion.payout:.2f}")
+                                
+                                # 添加产品和客户信息
+                                if product_name or client_name:
+                                    msg_lines.append("")
+                                    msg_lines.append("👤 关联信息")
+                                    if client_name:
+                                        msg_lines.append(f"• 客户: {client_name}")
+                                    if product_name:
+                                        msg_lines.append(f"• 产品: {product_name}")
+                                
+                                # 添加金额信息
+                                if pending_conversion.original_payout or pending_conversion.payout:
+                                    msg_lines.append("")
+                                    msg_lines.append("💰 金额信息")
+                                    if pending_conversion.original_payout:
+                                        msg_lines.append(f"• 原始金额 (PO): ${pending_conversion.original_payout:.2f}")
+                                    if pending_conversion.payout:
+                                        msg_lines.append(f"• 扣后金额 (PO(扣)): ${pending_conversion.payout:.2f}")
+                                
+                                # 添加事件信息
+                                if pending_conversion.event_name:
+                                    msg_lines.append("")
+                                    msg_lines.append(f"📌 事件: {pending_conversion.event_name}")
+                                
+                                # 添加点击时间信息
+                                if pending_conversion.click_time:
+                                    click_time_str = pending_conversion.click_time.strftime("%Y-%m-%d %H:%M:%S")
+                                    msg_lines.append("")
+                                    msg_lines.append(f"⏰ 点击时间: {click_time_str}")
                                 
                                 msg_lines.extend([
                                     "",
@@ -320,9 +393,32 @@ class PostbackProcessor:
                             )
                     else:
                         logger.warning(f"数据验证失败，无法创建待确认记录: {error_msg}")
+                        # 即使验证失败，也尝试保存基本信息（用于调试）
+                        try:
+                            pending_conversion = PendingPostbackConversion(
+                                platform=platform,
+                                conversion_id=raw_data.get("clk_id") or raw_data.get("conversion_id") or "unknown",
+                                event_name=raw_data.get("event_name"),
+                                request_ip=request_ip,
+                                status='pending',
+                                raw_data=raw_data_json,
+                                created_at=get_app_now_naive()
+                            )
+                            db.add(pending_conversion)
+                            await db.commit()
+                            await db.refresh(pending_conversion)
+                            logger.info(f"已保存验证失败的待确认记录（用于调试）: id={pending_conversion.id}")
+                        except Exception as save_error:
+                            logger.error(f"保存验证失败的待确认记录也失败: {str(save_error)}")
+                            await db.rollback()
+                else:
+                    logger.warning(f"未找到平台 {platform} 的处理器，无法创建待确认记录")
             except Exception as e:
                 logger.error(f"创建待确认转化记录失败: {str(e)}", exc_info=True)
-                await db.rollback()
+                try:
+                    await db.rollback()
+                except:
+                    pass
             
             # 返回成功响应，但不处理数据（关键：这里直接返回，不会执行后续的保存逻辑）
             return {

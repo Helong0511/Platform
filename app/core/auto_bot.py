@@ -382,20 +382,36 @@ if bot_initialized and TELEBOT_AVAILABLE:
                         )
                 
                 # 在事件循环中运行异步函数
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # 如果事件循环正在运行，创建任务
-                        asyncio.create_task(process_pending_conversion())
-                    else:
-                        # 如果事件循环未运行，直接运行
+                # 注意：Telegram bot 回调在独立线程中运行，需要创建新的事件循环
+                def run_async_task():
+                    try:
+                        # 创建新的事件循环（因为当前线程可能没有事件循环）
+                        try:
+                            loop = asyncio.get_event_loop()
+                            if loop.is_closed():
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                        except RuntimeError:
+                            # 当前线程没有事件循环，创建新的
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                        
+                        # 运行异步函数
                         loop.run_until_complete(process_pending_conversion())
-                except Exception as e:
-                    logger.error(f"执行异步处理失败: {str(e)}", exc_info=True)
-                    bot.answer_callback_query(
-                        callback_query_id=call.id,
-                        text="处理失败，请稍后重试"
-                    )
+                    except Exception as e:
+                        logger.error(f"执行异步处理失败: {str(e)}", exc_info=True)
+                        try:
+                            bot.answer_callback_query(
+                                callback_query_id=call.id,
+                                text="处理失败，请稍后重试"
+                            )
+                        except:
+                            pass
+                
+                # 在独立线程中运行，避免阻塞 Telegram bot
+                # threading 已在文件顶部导入
+                thread = threading.Thread(target=run_async_task, daemon=True)
+                thread.start()
                 return
             
             if call.data == "View":

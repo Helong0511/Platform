@@ -348,7 +348,8 @@ async def lifespan(app: FastAPI):
         # 导入所有模型以确保SQLAlchemy能够发现所有表
         from app.models import (
             User, Client, Product, AdData, ProductAssignment, 
-            ScheduledTask, UserAuditLog, UserSession, TokenBlacklist
+            ScheduledTask, UserAuditLog, UserSession, TokenBlacklist,
+            PostbackConversion, PendingPostbackConversion, PostbackIpWhitelist
         )
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
