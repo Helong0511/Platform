@@ -183,7 +183,7 @@ class ConversionService:
         # 这里先计算一个初始值，后续会被更新
         total_conversions = count_1
         
-        # 统计总支付金额（PO）- 使用原始 payout（支持多种关联方式）
+        # 统计总支付金额（PO）- 使用扣减后的 payout（支持多种关联方式）
         # 客户用户：支持通过ClickStats.publisher_id、gid字段、client_id字段过滤
         # 注意：只统计 Offer 激活的转化（不计入未激活 Offer 的转化）
         click_alias_for_po = aliased(ClickStats)
@@ -206,7 +206,7 @@ class ConversionService:
         if advertiser_id is not None:
             po_conditions_1.append(click_alias_for_po.advertiser_id == advertiser_id)
         
-        po_query_1 = select(func.sum(PostbackConversion.original_payout)).join(
+        po_query_1 = select(func.sum(PostbackConversion.payout)).join(
             click_alias_for_po, PostbackConversion.click_id == click_alias_for_po.click_id
         ).join(
             offer_alias_for_po, click_alias_for_po.offer_id == offer_alias_for_po.id
@@ -285,7 +285,7 @@ class ConversionService:
             click_alias.offer_id.label("offer_id"),
             click_alias.publisher_id,
             func.count(PostbackConversion.id).label('conversion_count'),
-            func.sum(PostbackConversion.original_payout).label('total_po')
+            func.sum(PostbackConversion.payout).label('total_po')
         ).join(
             click_alias, PostbackConversion.click_id == click_alias.click_id
         ).join(
@@ -570,7 +570,7 @@ class ConversionService:
             select(
                 ClickStats.offer_id,
                 func.count(PostbackConversion.id).label('conversion_count'),
-                func.sum(PostbackConversion.original_payout).label('total_po')
+                func.sum(PostbackConversion.payout).label('total_po')
             )
             .join(
                 PostbackConversion,
