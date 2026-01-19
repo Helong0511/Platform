@@ -107,107 +107,159 @@ class PostbackProcessor:
             - message: 响应消息
             - conversion_id: 转化ID
         """
-        # 1. 验证 IP 白名单（如果提供了 request_ip）
-        if request_ip:
-            # 清理IP地址：去除空格、端口号等
-            cleaned_ip = request_ip.strip()
-            # 如果包含端口号（如 43.130.108.206:8080），只取IP部分
-            # 注意：IPv6地址格式为 [::1]:8080，需要特殊处理
-            if ":" in cleaned_ip:
-                # 检查是否是IPv6格式 [::1]:8080
-                if cleaned_ip.startswith("[") and "]" in cleaned_ip:
-                    # IPv6地址带端口号，格式：[2001:db8::1]:8080
-                    ipv6_end = cleaned_ip.index("]")
-                    cleaned_ip = cleaned_ip[1:ipv6_end]  # 提取IPv6地址部分
-                else:
-                    # IPv4地址带端口号，格式：43.130.108.206:8080
-                    parts = cleaned_ip.split(":")
-                    if len(parts) == 2 and parts[1].isdigit():
-                        cleaned_ip = parts[0]
-            
-            # 查询所有启用的白名单IP，然后在Python中比较（去除空格后比较）
-            # 这样可以避免数据库函数兼容性问题，并且更灵活
-            all_whitelist_result = await db.execute(
-                select(PostbackIpWhitelist.ip_address, PostbackIpWhitelist.id)
-                .where(PostbackIpWhitelist.is_active == True)
+        # 1. 验证 IP 白名单（强制检查，确保不在白名单的 IP 不能保存转化记录）
+        # 注意：即使 request_ip 为空或 None，也要进行检查，确保安全性
+        if not request_ip or not request_ip.strip() or request_ip.strip() == "unknown":
+            # IP 为空或无法获取，拒绝处理（安全考虑）
+            logger.warning(
+                f"Postback 请求 IP 为空或无法获取，拒绝处理: "
+                f"platform={platform}, conversion_id={raw_data.get('clk_id') or raw_data.get('conversion_id') or 'unknown'}, "
+                f"request_ip={request_ip!r}"
             )
-            all_whitelist_items = all_whitelist_result.all()
-            
-            # 在Python中比较（去除空格后比较）
-            whitelisted_ip = None
-            for whitelist_item in all_whitelist_items:
-                whitelist_ip = whitelist_item.ip_address.strip() if whitelist_item.ip_address else ""
-                # 比较清理后的IP地址
-                if whitelist_ip == cleaned_ip:
-                    whitelisted_ip = whitelist_item
-                    break
-                # 如果白名单IP也包含端口号，只比较IP部分
-                if ":" in whitelist_ip and not whitelist_ip.startswith("["):
-                    whitelist_ip_parts = whitelist_ip.split(":")
-                    if len(whitelist_ip_parts) == 2 and whitelist_ip_parts[1].isdigit():
-                        if whitelist_ip_parts[0] == cleaned_ip:
-                            whitelisted_ip = whitelist_item
-                            break
-            
-            # 如果仍然没找到，记录调试日志
-            if not whitelisted_ip:
-                all_whitelist_ips = [row.ip_address for row in all_whitelist_items]
+            # 发送管理员提醒
+            try:
+                admin_config_result = await db.execute(
+                    select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+                )
+                admin_config = admin_config_result.scalars().first()
+                if (
+                    admin_config
+                    and admin_config.telegram_enabled
+                    and admin_config.notify_system_errors
+                    and admin_config.telegram_chat_id
+                ):
+                    conversion_id_hint = (
+                        raw_data.get("clk_id")
+                        or raw_data.get("conversion_id")
+                        or raw_data.get("click_id")
+                        or "unknown"
+                    )
+                    msg_lines = [
+                        "⚠️ Postback IP 验证失败",
+                        "",
+                        f"平台: {platform}",
+                        f"IP: {request_ip or '无法获取'}",
+                        f"转化ID/点击ID: {conversion_id_hint}",
+                        "说明: IP 为空或无法获取，已拒绝处理（不入库、不转发）。"
+                    ]
+                    await TelegramNotificationService.send_admin_notification(
+                        message="\n".join(msg_lines),
+                        telegram_chat_id=admin_config.telegram_chat_id,
+                        notification_type='system_error',
+                        db=db
+                    )
+            except Exception as e:
                 logger.warning(
-                    f"IP白名单验证失败: request_ip={request_ip!r}, cleaned_ip={cleaned_ip!r}, "
-                    f"白名单中的IP列表={all_whitelist_ips}, "
-                    f"platform={platform}, conversion_id={raw_data.get('clk_id') or raw_data.get('conversion_id') or 'unknown'}"
+                    f"发送IP验证失败提示失败: ip={request_ip}, error={str(e)}"
                 )
-                # IP 不在白名单中，视为测试数据，不记录
-                logger.info(
-                    f"Postback 请求 IP {request_ip} 不在白名单中，视为测试数据，不进行处理: "
-                    f"platform={platform}, conversion_id={raw_data.get('clk_id') or raw_data.get('conversion_id') or 'unknown'}"
-                )
-                # 发送管理员提醒（带非白名单提示）
-                try:
-                    admin_config_result = await db.execute(
-                        select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
-                    )
-                    admin_config = admin_config_result.scalars().first()
-                    if (
-                        admin_config
-                        and admin_config.telegram_enabled
-                        and admin_config.notify_system_errors
-                        and admin_config.telegram_chat_id
-                    ):
-                        conversion_id_hint = (
-                            raw_data.get("clk_id")
-                            or raw_data.get("conversion_id")
-                            or raw_data.get("click_id")
-                            or "unknown"
-                        )
-                        msg_lines = [
-                            "⚠️ Postback 非白名单IP提示",
-                            "",
-                            f"平台: {platform}",
-                            f"IP: {request_ip}",
-                            f"转化ID/点击ID: {conversion_id_hint}",
-                            "说明: IP 不在白名单中，已按测试数据处理（不入库、不转发）。"
-                        ]
-                        await TelegramNotificationService.send_admin_notification(
-                            message="\n".join(msg_lines),
-                            telegram_chat_id=admin_config.telegram_chat_id,
-                            notification_type='system_error',
-                            db=db
-                        )
-                except Exception as e:
-                    logger.warning(
-                        f"发送非白名单IP提示失败: ip={request_ip}, error={str(e)}"
-                    )
-                # 返回成功响应，但不处理数据
-                return {
-                    "success": True,
-                    "message": "PostBack 接收成功（测试数据，未记录）",
-                    "conversion_id": raw_data.get("clk_id") or raw_data.get("conversion_id") or None,
-                    "platform": platform,
-                    "is_test_data": True
-                }
+            # 返回成功响应，但不处理数据
+            return {
+                "success": True,
+                "message": "PostBack 接收成功（IP验证失败，未记录）",
+                "conversion_id": raw_data.get("clk_id") or raw_data.get("conversion_id") or None,
+                "platform": platform,
+                "is_test_data": True
+            }
+        
+        # 清理IP地址：去除空格、端口号等
+        cleaned_ip = request_ip.strip()
+        # 如果包含端口号（如 43.130.108.206:8080），只取IP部分
+        # 注意：IPv6地址格式为 [::1]:8080，需要特殊处理
+        if ":" in cleaned_ip:
+            # 检查是否是IPv6格式 [::1]:8080
+            if cleaned_ip.startswith("[") and "]" in cleaned_ip:
+                # IPv6地址带端口号，格式：[2001:db8::1]:8080
+                ipv6_end = cleaned_ip.index("]")
+                cleaned_ip = cleaned_ip[1:ipv6_end]  # 提取IPv6地址部分
             else:
-                logger.debug(f"Postback 请求 IP {request_ip} 在白名单中，继续处理")
+                # IPv4地址带端口号，格式：43.130.108.206:8080
+                parts = cleaned_ip.split(":")
+                if len(parts) == 2 and parts[1].isdigit():
+                    cleaned_ip = parts[0]
+        
+        # 查询所有启用的白名单IP，然后在Python中比较（去除空格后比较）
+        # 这样可以避免数据库函数兼容性问题，并且更灵活
+        all_whitelist_result = await db.execute(
+            select(PostbackIpWhitelist.ip_address, PostbackIpWhitelist.id)
+            .where(PostbackIpWhitelist.is_active == True)
+        )
+        all_whitelist_items = all_whitelist_result.all()
+        
+        # 在Python中比较（去除空格后比较）
+        whitelisted_ip = None
+        for whitelist_item in all_whitelist_items:
+            whitelist_ip = whitelist_item.ip_address.strip() if whitelist_item.ip_address else ""
+            # 比较清理后的IP地址
+            if whitelist_ip == cleaned_ip:
+                whitelisted_ip = whitelist_item
+                break
+            # 如果白名单IP也包含端口号，只比较IP部分
+            if ":" in whitelist_ip and not whitelist_ip.startswith("["):
+                whitelist_ip_parts = whitelist_ip.split(":")
+                if len(whitelist_ip_parts) == 2 and whitelist_ip_parts[1].isdigit():
+                    if whitelist_ip_parts[0] == cleaned_ip:
+                        whitelisted_ip = whitelist_item
+                        break
+        
+        # 如果仍然没找到，记录调试日志
+        if not whitelisted_ip:
+            all_whitelist_ips = [row.ip_address for row in all_whitelist_items]
+            logger.warning(
+                f"IP白名单验证失败: request_ip={request_ip!r}, cleaned_ip={cleaned_ip!r}, "
+                f"白名单中的IP列表={all_whitelist_ips}, "
+                f"platform={platform}, conversion_id={raw_data.get('clk_id') or raw_data.get('conversion_id') or 'unknown'}"
+            )
+            # IP 不在白名单中，视为测试数据，不记录
+            logger.info(
+                f"Postback 请求 IP {request_ip} 不在白名单中，视为测试数据，不进行处理: "
+                f"platform={platform}, conversion_id={raw_data.get('clk_id') or raw_data.get('conversion_id') or 'unknown'}"
+            )
+            # 发送管理员提醒（带非白名单提示）
+            try:
+                admin_config_result = await db.execute(
+                    select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+                )
+                admin_config = admin_config_result.scalars().first()
+                if (
+                    admin_config
+                    and admin_config.telegram_enabled
+                    and admin_config.notify_system_errors
+                    and admin_config.telegram_chat_id
+                ):
+                    conversion_id_hint = (
+                        raw_data.get("clk_id")
+                        or raw_data.get("conversion_id")
+                        or raw_data.get("click_id")
+                        or "unknown"
+                    )
+                    msg_lines = [
+                        "⚠️ Postback 非白名单IP提示",
+                        "",
+                        f"平台: {platform}",
+                        f"IP: {request_ip}",
+                        f"转化ID/点击ID: {conversion_id_hint}",
+                        "说明: IP 不在白名单中，已按测试数据处理（不入库、不转发）。"
+                    ]
+                    await TelegramNotificationService.send_admin_notification(
+                        message="\n".join(msg_lines),
+                        telegram_chat_id=admin_config.telegram_chat_id,
+                        notification_type='system_error',
+                        db=db
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"发送非白名单IP提示失败: ip={request_ip}, error={str(e)}"
+                )
+            # 返回成功响应，但不处理数据（关键：这里直接返回，不会执行后续的保存逻辑）
+            return {
+                "success": True,
+                "message": "PostBack 接收成功（测试数据，未记录）",
+                "conversion_id": raw_data.get("clk_id") or raw_data.get("conversion_id") or None,
+                "platform": platform,
+                "is_test_data": True
+            }
+        else:
+            logger.debug(f"Postback 请求 IP {request_ip} 在白名单中，继续处理")
         
         # 2. 获取平台处理器（平台名可能被自定义参数覆盖，但处理器仍按入参平台选择）
         platform_override = raw_data.get("platform")
@@ -761,6 +813,80 @@ class PostbackProcessor:
                     f"转化被扣量，不保存到主表: conversion_id={conversion_id}, "
                     f"click_id={click_id}"
                 )
+            
+            # 9.2.1. 额外的安全检查：再次验证 IP 白名单（防御性编程）
+            # 确保即使前面的逻辑有变化，不在白名单的 IP 也绝对不会保存转化记录
+            if should_save_conversion and request_ip:
+                cleaned_ip_check = request_ip.strip()
+                # 处理端口号
+                if ":" in cleaned_ip_check:
+                    if cleaned_ip_check.startswith("[") and "]" in cleaned_ip_check:
+                        ipv6_end = cleaned_ip_check.index("]")
+                        cleaned_ip_check = cleaned_ip_check[1:ipv6_end]
+                    else:
+                        parts = cleaned_ip_check.split(":")
+                        if len(parts) == 2 and parts[1].isdigit():
+                            cleaned_ip_check = parts[0]
+                
+                # 快速检查：查询白名单
+                whitelist_check_result = await db.execute(
+                    select(PostbackIpWhitelist.ip_address)
+                    .where(PostbackIpWhitelist.is_active == True)
+                )
+                whitelist_check_items = whitelist_check_result.all()
+                
+                is_whitelisted = False
+                for whitelist_item in whitelist_check_items:
+                    whitelist_ip = whitelist_item.ip_address.strip() if whitelist_item.ip_address else ""
+                    if whitelist_ip == cleaned_ip_check:
+                        is_whitelisted = True
+                        break
+                    if ":" in whitelist_ip and not whitelist_ip.startswith("["):
+                        whitelist_ip_parts = whitelist_ip.split(":")
+                        if len(whitelist_ip_parts) == 2 and whitelist_ip_parts[1].isdigit():
+                            if whitelist_ip_parts[0] == cleaned_ip_check:
+                                is_whitelisted = True
+                                break
+                
+                if not is_whitelisted:
+                    # 严重安全警告：IP 不在白名单中，但代码执行到了这里
+                    logger.error(
+                        f"【安全警告】IP 不在白名单中，但代码执行到了保存转化记录的位置！"
+                        f"request_ip={request_ip!r}, cleaned_ip={cleaned_ip_check!r}, "
+                        f"platform={platform}, conversion_id={conversion_id}"
+                    )
+                    # 强制不保存转化记录
+                    should_save_conversion = False
+                    # 发送严重安全警告通知
+                    try:
+                        admin_config_result = await db.execute(
+                            select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+                        )
+                        admin_config = admin_config_result.scalars().first()
+                        if (
+                            admin_config
+                            and admin_config.telegram_enabled
+                            and admin_config.notify_system_errors
+                            and admin_config.telegram_chat_id
+                        ):
+                            msg_lines = [
+                                "🚨 【严重安全警告】Postback 白名单验证异常",
+                                "",
+                                f"平台: {platform}",
+                                f"IP: {request_ip}",
+                                f"转化ID: {conversion_id}",
+                                "",
+                                "说明: IP 不在白名单中，但代码执行到了保存转化记录的位置。",
+                                "已强制阻止保存转化记录，请检查代码逻辑。"
+                            ]
+                            await TelegramNotificationService.send_admin_notification(
+                                message="\n".join(msg_lines),
+                                telegram_chat_id=admin_config.telegram_chat_id,
+                                notification_type='system_error',
+                                db=db
+                            )
+                    except Exception as e:
+                        logger.error(f"发送安全警告通知失败: {str(e)}")
             
             conversion = None
             conversion_id_for_log = None

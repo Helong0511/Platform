@@ -299,11 +299,11 @@ async def _process_bft_postback(
             # 生产环境只记录关键信息
             logger.info(f"BFT PostBack - clk_id: {clk_id}, event_name: {event_name}")
         
-        # 获取客户端IP
-        client_ip = get_client_ip(request) or raw_data.get("ip")
+        # 获取客户端IP（安全：只从请求头获取，不从用户数据中获取，防止安全漏洞）
+        client_ip = get_client_ip(request)
         
-        # 如果 raw_data 中没有 ip，则添加客户端IP
-        if client_ip and "ip" not in raw_data:
+        # 如果 raw_data 中没有 ip，则添加客户端IP（仅用于数据记录，不用于白名单验证）
+        if client_ip and client_ip != "unknown" and "ip" not in raw_data:
             raw_data["ip"] = client_ip
         
         # 参数映射：支持多种参数名变体，映射到标准参数名
