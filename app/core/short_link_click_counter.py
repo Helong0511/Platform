@@ -65,8 +65,20 @@ async def cleanup_click_counter(short_code: str) -> bool:
         logger.warning(f"清理短链接Redis计数器失败: short_code={short_code}, error={e}")
         return False
 
-# Lua脚本：原子获取并删除计数器值（避免竞态条件）
-# 返回：如果键存在且值>0，返回计数值并删除键；否则返回0
+# Lua脚本：原子获取计数器值（不删除，避免数据丢失）
+# 返回：如果键存在且值>0，返回计数值；否则返回0
+# 注意：不再删除键，只有在数据库更新成功后才删除，确保数据不丢失
+_GET_COUNTER_LUA = """
+local val = redis.call('GET', KEYS[1])
+if val and tonumber(val) > 0 then
+    return tonumber(val)
+else
+    return 0
+end
+"""
+
+# Lua脚本：原子获取并删除计数器值（已废弃，保留用于兼容）
+# 注意：此脚本会导致数据丢失风险，已改用_GET_COUNTER_LUA
 _GET_AND_DELETE_COUNTER_LUA = """
 local val = redis.call('GET', KEYS[1])
 if val and tonumber(val) > 0 then
@@ -385,9 +397,9 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                 continue
             
             try:
-                # 使用Lua脚本原子获取并删除计数器值，避免竞态条件
-                # 这样可以确保在获取值和删除之间不会有新的点击进来导致数据丢失
-                count_value = await redis.eval(_GET_AND_DELETE_COUNTER_LUA, 1, key)
+                # 使用Lua脚本原子获取计数器值（不删除，避免数据丢失）
+                # 只有在数据库更新成功后才删除计数器，确保数据不丢失
+                count_value = await redis.eval(_GET_COUNTER_LUA, 1, key)
                 
                 # Lua脚本返回的是数字类型，需要转换为int
                 if isinstance(count_value, (int, float)):
@@ -401,7 +413,7 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                     continue
                 
                 if count_value <= 0:
-                    # 计数器为0或不存在，已由Lua脚本删除，跳过
+                    # 计数器为0或不存在，跳过（不删除，因为可能正在被其他进程使用）
                     continue
                 
                 updates.append((short_code, count_value, key))
@@ -532,12 +544,15 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                         retry_updates.append(update_item)
                     else:
                         # 短链接不存在或已禁用，清理Redis计数器
+                        # 注意：由于短链接不存在，不会有新的点击，可以直接删除
                         cleaned_updates.append(update_item)
                         if redis:
                             try:
                                 redis_key = update_item[2] if len(update_item) > 2 else f"{CLICK_COUNTER_PREFIX}{short_code}"
-                                await redis.delete(redis_key)
-                                logger.info(f"清理失败且不存在的短链接Redis计数器: short_code={short_code}")
+                                # 直接删除计数器（短链接不存在，不会有新点击）
+                                deleted = await redis.delete(redis_key)
+                                if deleted:
+                                    logger.info(f"清理失败且不存在的短链接Redis计数器: short_code={short_code}")
                             except Exception as e:
                                 logger.warning(f"清理失败短链接Redis计数器失败: short_code={short_code}, error={e}")
             except Exception as e:
@@ -815,11 +830,45 @@ async def _batch_update_click_counts_with_retry(
             
         if updated_count > 0:
             # 如果更新成功，说明所有记录都存在（因为WHERE条件匹配）
-            # 直接标记所有更新为成功
+            # 现在可以安全地删除Redis计数器（数据库已成功更新）
             batch_keys_to_delete = [redis_key for _, _, redis_key in successfully_locked_batch if redis_key]
             
+            # 批量删除Redis计数器（使用原子操作，确保只删除对应值的计数器）
+            # 使用Lua脚本原子地检查并删除，避免删除其他进程新增加的计数
+            if redis and batch_keys_to_delete:
+                delete_tasks = []
+                for short_code, count_value, redis_key in successfully_locked_batch:
+                    if redis_key:
+                        # 使用Lua脚本原子地减少计数器值，如果减到0或以下则删除
+                        # 这样可以避免删除其他进程在同步期间新增加的计数
+                        delete_lua = """
+                        local val = redis.call('GET', KEYS[1])
+                        if val and tonumber(val) >= tonumber(ARGV[1]) then
+                            local new_val = tonumber(val) - tonumber(ARGV[1])
+                            if new_val <= 0 then
+                                redis.call('DEL', KEYS[1])
+                                return 1
+                            else
+                                redis.call('SET', KEYS[1], new_val)
+                                return 1
+                            end
+                        else
+                            return 0
+                        end
+                        """
+                        delete_tasks.append(
+                            redis.eval(delete_lua, 1, redis_key, count_value)
+                        )
+                
+                # 并行执行所有删除操作
+                if delete_tasks:
+                    try:
+                        await asyncio.gather(*delete_tasks, return_exceptions=True)
+                        logger.debug(f"成功删除 {len(delete_tasks)} 个Redis计数器")
+                    except Exception as e:
+                        logger.warning(f"批量删除Redis计数器时发生错误（可忽略，下次同步会重试）: {e}")
+            
             # 批量清除缓存，使用并行操作提高性能
-            # 注意：这里不清除计数器键（redis_key），因为已经在获取时用Lua脚本删除了
             cache_invalidation_tasks = []
             for short_code, count_value, redis_key in successfully_locked_batch:
                 logger.debug(
@@ -874,10 +923,10 @@ async def _batch_update_click_counts_with_retry(
                 existing_codes = set()
             
             # 删除不存在的短链接的Redis计数器
-            # 注意：由于使用了Lua脚本，redis_key可能已经被删除，但为了安全起见，仍然尝试删除
+            # 注意：由于短链接不存在，不会有新的点击，可以直接删除
             for short_code, count_value, redis_key in successfully_locked_batch:
                 if short_code not in existing_codes:
-                    logger.warning(f"短链接不存在，尝试删除Redis计数器: short_code={short_code}")
+                    logger.warning(f"短链接不存在，删除Redis计数器: short_code={short_code}")
                     if redis_key:  # 只有在redis_key存在时才尝试删除
                         try:
                             deleted = await redis.delete(redis_key)
@@ -923,23 +972,8 @@ async def _batch_update_click_counts_with_retry(
             )
             
             # 死锁时MySQL已自动回滚，不需要手动回滚
-            # 尝试恢复Redis计数器，避免数据丢失
-            # 注意：这是一个尽力而为的操作，如果恢复失败，数据可能会丢失
-            if redis:
-                for short_code, count_value, redis_key in locked_batch:
-                    if redis_key:
-                        try:
-                            # 使用原子操作恢复计数器（如果键不存在则设置，如果存在则增加）
-                            # 这样可以避免在恢复过程中有新的点击导致重复计数
-                            await redis.incrby(redis_key, count_value)
-                            # 重新设置过期时间
-                            await redis.expire(redis_key, 48 * 3600)
-                            logger.debug(f"成功恢复Redis计数器: short_code={short_code}, count={count_value}")
-                        except Exception as restore_error:
-                            logger.warning(
-                                f"恢复Redis计数器失败（可能导致数据丢失）: "
-                                f"short_code={short_code}, count={count_value}, error={restore_error}"
-                            )
+            # 注意：由于现在不再在获取时删除计数器，计数器仍然存在，无需恢复
+            # 计数器会在下次同步时重试
             
             # 返回所有批次项作为失败项，让下次同步时重试
             return 0, [], batch
@@ -954,19 +988,8 @@ async def _batch_update_click_counts_with_retry(
                 await db.rollback()
             except:
                 pass
-            # 尝试恢复Redis计数器，避免数据丢失
-            if redis:
-                for short_code, count_value, redis_key in locked_batch:
-                    if redis_key:
-                        try:
-                            await redis.incrby(redis_key, count_value)
-                            await redis.expire(redis_key, 48 * 3600)
-                            logger.debug(f"成功恢复Redis计数器: short_code={short_code}, count={count_value}")
-                        except Exception as restore_error:
-                            logger.warning(
-                                f"恢复Redis计数器失败（可能导致数据丢失）: "
-                                f"short_code={short_code}, count={count_value}, error={restore_error}"
-                            )
+            # 注意：由于现在不再在获取时删除计数器，计数器仍然存在，无需恢复
+            # 计数器会在下次同步时重试
             return 0, [], batch
     except Exception as e:
         # 释放分布式锁（发生异常时也要释放）
@@ -981,19 +1004,8 @@ async def _batch_update_click_counts_with_retry(
             await db.rollback()
         except:
             pass
-        # 尝试恢复Redis计数器，避免数据丢失
-        if redis:
-            for short_code, count_value, redis_key in locked_batch:
-                if redis_key:
-                    try:
-                        await redis.incrby(redis_key, count_value)
-                        await redis.expire(redis_key, 48 * 3600)
-                        logger.debug(f"成功恢复Redis计数器: short_code={short_code}, count={count_value}")
-                    except Exception as restore_error:
-                        logger.warning(
-                            f"恢复Redis计数器失败（可能导致数据丢失）: "
-                            f"short_code={short_code}, count={count_value}, error={restore_error}"
-                        )
+        # 注意：由于现在不再在获取时删除计数器，计数器仍然存在，无需恢复
+        # 计数器会在下次同步时重试
         return 0, [], batch
     
     # 如果所有重试都失败，返回失败
