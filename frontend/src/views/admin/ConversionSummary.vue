@@ -177,7 +177,7 @@
               show-overflow-tooltip
             />
             <el-table-column 
-              v-if="isAdmin && columnVisibility.publisher_name"
+              v-if="columnVisibility.publisher_name"
               prop="publisher_name" 
               label="Publisher" 
               min-width="100" 
@@ -209,48 +209,6 @@
               </template>
             </el-table-column>
             <el-table-column 
-              v-if="!isAdmin && columnVisibility.revenue"
-              prop="revenue" 
-              label="收益" 
-              width="150" 
-              align="right"
-            >
-              <template #default="scope">
-                <span v-if="scope.row.revenue !== undefined && scope.row.revenue !== null">
-                  {{ scope.row.revenue.toFixed(2) }}
-                </span>
-                <span v-else>0.00</span>
-              </template>
-            </el-table-column>
-            <el-table-column 
-              v-if="isAdmin && columnVisibility.adv_po"
-              prop="adv_po" 
-              label="Adv PO" 
-              width="120" 
-              align="right"
-            >
-              <template #default="scope">
-                <span v-if="scope.row.adv_po !== undefined && scope.row.adv_po !== null">
-                  {{ scope.row.adv_po.toFixed(2) }}
-                </span>
-                <span v-else>-</span>
-              </template>
-            </el-table-column>
-            <el-table-column 
-              v-if="isAdmin && columnVisibility.pub_po"
-              prop="pub_po" 
-              label="Pub PO" 
-              width="120" 
-              align="right"
-            >
-              <template #default="scope">
-                <span v-if="scope.row.pub_po !== undefined && scope.row.pub_po !== null">
-                  {{ scope.row.pub_po.toFixed(2) }}
-                </span>
-                <span v-else>-</span>
-              </template>
-            </el-table-column>
-            <el-table-column 
               v-if="isAdmin && columnVisibility.po"
               prop="po" 
               label="Revenue" 
@@ -263,7 +221,7 @@
               </template>
             </el-table-column>
             <el-table-column 
-              v-if="isAdmin && columnVisibility.po_after_discount"
+              v-if="columnVisibility.po_after_discount"
               prop="po_after_discount" 
               label="Pub Revenue" 
               width="150" 
@@ -291,7 +249,7 @@
               </template>
             </el-table-column>
             <el-table-column 
-              v-if="isAdmin && columnVisibility.geo"
+              v-if="columnVisibility.geo"
               prop="geo" 
               label="GEO" 
               width="120" 
@@ -318,17 +276,14 @@
         <el-checkbox label="offer_id" :disabled="true">Offer ID（固定显示）</el-checkbox>
         <el-checkbox label="offer_name" :disabled="true">Offer Name（固定显示）</el-checkbox>
         <el-checkbox v-if="isAdmin" label="advertiser_name">Advertiser</el-checkbox>
-        <el-checkbox v-if="isAdmin" label="publisher_name">Publisher</el-checkbox>
+        <el-checkbox label="publisher_name">Publisher</el-checkbox>
         <el-checkbox label="click_count">Click</el-checkbox>
         <el-checkbox label="conversion_count">Conversion</el-checkbox>
         <el-checkbox label="cr">CR</el-checkbox>
-        <el-checkbox v-if="!isAdmin" label="revenue">收益</el-checkbox>
-        <el-checkbox v-if="isAdmin" label="adv_po">Adv PO</el-checkbox>
-        <el-checkbox v-if="isAdmin" label="pub_po">Pub PO</el-checkbox>
         <el-checkbox v-if="isAdmin" label="po">Revenue</el-checkbox>
-        <el-checkbox v-if="isAdmin" label="po_after_discount">Pub Revenue</el-checkbox>
+        <el-checkbox label="po_after_discount">Pub Revenue</el-checkbox>
         <el-checkbox v-if="isAdmin" label="profit">Profit</el-checkbox>
-        <el-checkbox v-if="isAdmin" label="geo">GEO</el-checkbox>
+        <el-checkbox label="geo">GEO</el-checkbox>
       </el-checkbox-group>
       <template #footer>
         <el-button @click="columnSettingVisible = false">取消</el-button>
@@ -386,18 +341,15 @@ const statsList = ref([])
 const getDefaultColumnVisibility = () => ({
   offer_id: true,  // 固定显示
   offer_name: true,  // 固定显示
-  advertiser_name: isAdmin.value,
-  publisher_name: isAdmin.value,
+  advertiser_name: isAdmin.value,  // 仅管理员可见
+  publisher_name: true,  // 所有用户可见
   click_count: true,
   conversion_count: true,
   cr: true,
-  revenue: !isAdmin.value,
-  adv_po: isAdmin.value,
-  pub_po: isAdmin.value,
-  po: isAdmin.value,
-  po_after_discount: isAdmin.value,
-  profit: isAdmin.value,
-  geo: isAdmin.value
+  po: isAdmin.value,  // Revenue，仅管理员可见
+  po_after_discount: true,  // Pub Revenue，所有用户可见
+  profit: isAdmin.value,  // 仅管理员可见
+  geo: true  // 所有用户可见
 })
 
 const columnVisibility = reactive(getDefaultColumnVisibility())
@@ -442,9 +394,6 @@ const saveColumnVisibility = () => {
       click_count: columnVisibility.click_count,
       conversion_count: columnVisibility.conversion_count,
       cr: columnVisibility.cr,
-      revenue: columnVisibility.revenue,
-      adv_po: columnVisibility.adv_po,
-      pub_po: columnVisibility.pub_po,
       po: columnVisibility.po,
       po_after_discount: columnVisibility.po_after_discount,
       profit: columnVisibility.profit,
