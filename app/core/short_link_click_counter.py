@@ -710,8 +710,52 @@ async def _batch_update_click_counts_with_retry(
     failed_batch = [item for item in batch if item[0] in failed_codes]
     
     if not locked_batch:
-        # 所有锁都获取失败，返回失败
-        logger.warning(f"无法获取任何短链接锁，跳过本次更新: short_codes={short_codes}")
+        # 所有锁都获取失败，检查短链接是否存在
+        # 如果不存在，清理计数器；如果存在，保留以便重试
+        try:
+            result = await db.execute(
+                select(ShortLink.short_code, ShortLink.is_active).where(
+                    ShortLink.short_code.in_(short_codes)
+                )
+            )
+            existing_codes = {row[0] for row in result.fetchall() if row[1]}
+            await db.commit()
+            
+            # 清理不存在的短链接计数器
+            for code, count, redis_key in batch:
+                if code not in existing_codes:
+                    if redis and redis_key:
+                        try:
+                            await redis.delete(redis_key)
+                            logger.info(f"清理不存在短链接的Redis计数器（锁获取失败但不存在）: short_code={code}")
+                        except Exception as e:
+                            logger.warning(f"清理Redis计数器失败: short_code={code}, error={e}")
+            
+            # 只保留存在的短链接用于重试
+            batch = [item for item in batch if item[0] in existing_codes]
+            
+            if batch:
+                failed_codes = [code for code, _, _ in batch]
+                failed_counts = {code: count for code, count, _ in batch}
+                logger.warning(
+                    f"无法获取任何短链接锁，将在下次同步时重试: "
+                    f"failed_codes={failed_codes}, failed_counts={failed_counts}"
+                )
+            else:
+                logger.info("所有短链接都不存在，已清理计数器")
+        except Exception as e:
+            logger.warning(f"检查短链接存在性失败（锁获取失败）: {e}")
+            try:
+                await db.rollback()
+            except:
+                pass
+            failed_codes = [code for code, _, _ in batch]
+            failed_counts = {code: count for code, count, _ in batch}
+            logger.warning(
+                f"无法获取任何短链接锁，将在下次同步时重试: "
+                f"failed_codes={failed_codes}, failed_counts={failed_counts}"
+            )
+        
         return 0, [], batch
     
     if failed_batch:
@@ -771,11 +815,53 @@ async def _batch_update_click_counts_with_retry(
             )
         
         if not successfully_locked_batch:
-            # 所有记录都被锁定，回滚并返回
+            # 所有记录都被锁定或被跳过，检查短链接是否存在
+            # 如果不存在，清理计数器；如果存在，保留以便重试
             await db.rollback()
+            
+            # 检查被跳过的短链接是否存在
+            all_skipped_codes = [code for code, _, _ in skipped_batch]
+            if all_skipped_codes:
+                try:
+                    result = await db.execute(
+                        select(ShortLink.short_code, ShortLink.is_active).where(
+                            ShortLink.short_code.in_(all_skipped_codes)
+                        )
+                    )
+                    existing_skipped = {row[0] for row in result.fetchall() if row[1]}
+                    await db.commit()
+                    
+                    # 清理不存在的短链接计数器
+                    for code, count, redis_key in skipped_batch:
+                        if code not in existing_skipped:
+                            if redis and redis_key:
+                                try:
+                                    await redis.delete(redis_key)
+                                    logger.info(f"清理不存在短链接的Redis计数器（记录被锁定但不存在）: short_code={code}")
+                                except Exception as e:
+                                    logger.warning(f"清理Redis计数器失败: short_code={code}, error={e}")
+                    
+                    # 只保留存在的短链接用于重试
+                    skipped_batch = [item for item in skipped_batch if item[0] in existing_skipped]
+                except Exception as e:
+                    logger.warning(f"检查被跳过短链接存在性失败: {e}")
+                    await db.rollback()
+            
             # 释放已获取的分布式锁
             await _release_item_locks(redis, acquired_locks)
-            return 0, [], batch
+            
+            # 合并所有失败的批次项（锁获取失败 + 记录被跳过）
+            all_failed = failed_batch + skipped_batch
+            if all_failed:
+                failed_reason = "记录被其他事务锁定" if skipped_batch else "无法获取分布式锁"
+                failed_codes = [code for code, _, _ in all_failed]
+                failed_counts = {code: count for code, count, _ in all_failed}
+                logger.warning(
+                    f"批量更新失败（{failed_reason}），将在下次同步时重试: "
+                    f"failed_codes={failed_codes}, failed_counts={failed_counts}"
+                )
+            
+            return 0, [], all_failed
         
         # 构建批量更新SQL（只更新成功锁定的记录）
         case_when_parts = []
@@ -891,7 +977,7 @@ async def _batch_update_click_counts_with_retry(
             
             return len(successfully_locked_batch), batch_keys_to_delete, all_failed
         else:
-            # 没有记录被更新，可能是所有短链接都不存在
+            # 没有记录被更新，可能是所有短链接都不存在或已禁用
             # 需要检查哪些短链接不存在，以便清理Redis计数器
             logger.warning(f"批量更新没有更新任何记录，检查短链接是否存在")
             
@@ -901,16 +987,18 @@ async def _batch_update_click_counts_with_retry(
             # 释放分布式锁
             await _release_item_locks(redis, acquired_locks)
             
-            # 查询哪些短链接存在（需要新的事务）
+            # 查询哪些短链接存在且激活（需要新的事务）
             # 注意：由于已经回滚，SQLAlchemy会在下次查询时自动开始新事务
             # 使用只读查询，避免锁定记录
             existing_codes = set()
             try:
                 # 使用新的查询，SQLAlchemy会自动开始新事务
                 result = await db.execute(
-                    select(ShortLink.short_code).where(ShortLink.short_code.in_(locked_short_codes))
+                    select(ShortLink.short_code, ShortLink.is_active).where(
+                        ShortLink.short_code.in_(locked_short_codes)
+                    )
                 )
-                existing_codes = {row[0] for row in result.fetchall()}
+                existing_codes = {row[0] for row in result.fetchall() if row[1]}  # 只包含激活的
                 # 查询后立即提交，释放连接
                 await db.commit()
             except Exception as query_error:
@@ -924,19 +1012,36 @@ async def _batch_update_click_counts_with_retry(
             
             # 删除不存在的短链接的Redis计数器
             # 注意：由于短链接不存在，不会有新的点击，可以直接删除
+            cleaned_codes = []
+            retry_batch = []
             for short_code, count_value, redis_key in successfully_locked_batch:
                 if short_code not in existing_codes:
-                    logger.warning(f"短链接不存在，删除Redis计数器: short_code={short_code}")
+                    cleaned_codes.append(short_code)
+                    logger.warning(f"短链接不存在或已禁用，删除Redis计数器: short_code={short_code}")
                     if redis_key:  # 只有在redis_key存在时才尝试删除
                         try:
                             deleted = await redis.delete(redis_key)
                             if deleted:
-                                logger.debug(f"成功删除不存在的短链接的Redis计数器: short_code={short_code}")
+                                logger.info(f"成功删除不存在的短链接的Redis计数器: short_code={short_code}")
                         except Exception as e:
                             logger.warning(f"删除Redis计数器失败: key={redis_key}, error={e}")
+                else:
+                    # 短链接存在，加入重试列表
+                    retry_batch.append((short_code, count_value, redis_key))
             
-            # 合并所有失败的批次项
-            all_failed = failed_batch + skipped_batch + successfully_locked_batch
+            if cleaned_codes:
+                logger.info(f"清理了 {len(cleaned_codes)} 个不存在或已禁用的短链接计数器: codes={cleaned_codes}")
+            
+            # 合并所有失败的批次项（锁获取失败 + 记录被跳过 + 更新失败但存在的）
+            all_failed = failed_batch + skipped_batch + retry_batch
+            if all_failed:
+                failed_codes = [code for code, _, _ in all_failed]
+                failed_counts = {code: count for code, count, _ in all_failed}
+                logger.warning(
+                    f"批量更新失败（没有记录被更新），将在下次同步时重试: "
+                    f"failed_codes={failed_codes}, failed_counts={failed_counts}"
+                )
+            
             return 0, [], all_failed
             
     except OperationalError as e:
