@@ -214,9 +214,9 @@ import { logger } from '../../utils/logger';
 import { 
   ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, 
   ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage, ElMessageBox,
-  ElSwitch
+  ElSwitch, ElCheckboxGroup, ElCheckbox
 } from 'element-plus';
-import { Search, Refresh, Plus } from '@element-plus/icons-vue';
+import { Search, Refresh, Plus, Setting } from '@element-plus/icons-vue';
 import { getIpWhitelist, createIpWhitelist, updateIpWhitelist, deleteIpWhitelist } from '../../api/postback';
 import { formatDateTime } from '../../utils/dateFormat';
 import { useDevice } from '../../composables/useDevice';
@@ -240,6 +240,67 @@ const searchForm = reactive({
   ip_address: '',
   is_active: null
 });
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  id: true,  // 固定显示
+  ip_address: true,  // 固定显示
+  description: true,
+  is_active: true,
+  created_at: true,
+  updated_at: true
+})
+
+const columnVisibility = reactive(getDefaultColumnVisibility())
+
+// 计算属性：将对象转换为数组，用于 el-checkbox-group
+const columnVisibilityArray = computed({
+  get: () => {
+    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
+  },
+  set: (value) => {
+    // 当 checkbox-group 的值变化时，更新对象
+    Object.keys(columnVisibility).forEach(key => {
+      columnVisibility[key] = value.includes(key)
+    })
+  }
+})
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('postbackIpWhitelist_columnVisibility')
+    if (saved) {
+      const savedVisibility = JSON.parse(saved)
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
+      // 确保固定列始终显示
+      columnVisibility.id = true
+      columnVisibility.ip_address = true
+    }
+  } catch (error) {
+    logger.error('加载列显示设置失败:', error)
+  }
+}
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      description: columnVisibility.description,
+      is_active: columnVisibility.is_active,
+      created_at: columnVisibility.created_at,
+      updated_at: columnVisibility.updated_at
+    }
+    localStorage.setItem('postbackIpWhitelist_columnVisibility', JSON.stringify(toSave))
+    columnSettingVisible.value = false
+    ElMessage.success('列显示设置已保存')
+  } catch (error) {
+    logger.error('保存列显示设置失败:', error)
+    ElMessage.error('保存设置失败')
+  }
+}
 
 // 对话框
 const dialogVisible = ref(false);
