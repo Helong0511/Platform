@@ -61,6 +61,18 @@
 
     <!-- 数据表格 -->
     <el-card class="data-table-card">
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-weight: 600; font-size: 16px;">每日报表数据</span>
+          <el-button 
+            type="text" 
+            :icon="Setting" 
+            @click="columnSettingVisible = true"
+          >
+            列设置
+          </el-button>
+        </div>
+      </template>
       <el-table
         v-loading="loading"
         :data="dailyDataList"
@@ -71,24 +83,24 @@
         :summary-method="getSummaries"
         show-summary
       >
-        <el-table-column prop="date" label="数据日期" sortable="custom"></el-table-column>
-        <el-table-column v-if="isAdmin" prop="user_name" label="所属客户"></el-table-column>
-        <el-table-column prop="product_name" label="产品名称" sortable="custom" sort-by="product" :min-width="150"></el-table-column>
-        <el-table-column prop="country_name_zh" label="国家"></el-table-column>
-        <el-table-column prop="request_count" label="请求数" sortable="custom"></el-table-column>
-        <el-table-column prop="match_count" label="匹配数" sortable="custom"></el-table-column>
-        <el-table-column prop="coverage_rate" label="覆盖率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column prop="display_count" label="展示数" sortable="custom"></el-table-column>
-        <el-table-column prop="display_rate" label="展示率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column prop="click_count" label="点击数" sortable="custom"></el-table-column>
-        <el-table-column prop="click_rate" label="点击率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column prop="viewability_rate" label="可见率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column prop="cpc" label="CPC" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column prop="pageviews" label="PageViews" sortable="custom"></el-table-column>
-        <el-table-column prop="ecpm_after_deduct" :label="isAdmin ? 'eCPM(扣)' : 'eCPM'" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column v-if="isAdmin" prop="ecpm_before_deduct" label="eCPM" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column prop="revenue_after_deduct" :label="isAdmin ? '收益(扣)' : '收益'" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column v-if="isAdmin" prop="revenue_before_deduct" label="收益" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.date" prop="date" label="数据日期" sortable="custom"></el-table-column>
+        <el-table-column v-if="isAdmin && columnVisibility.user_name" prop="user_name" label="所属客户"></el-table-column>
+        <el-table-column v-if="columnVisibility.product_name" prop="product_name" label="产品名称" sortable="custom" sort-by="product" :min-width="150"></el-table-column>
+        <el-table-column v-if="columnVisibility.country_name_zh" prop="country_name_zh" label="国家"></el-table-column>
+        <el-table-column v-if="columnVisibility.request_count" prop="request_count" label="请求数" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.match_count" prop="match_count" label="匹配数" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.coverage_rate" prop="coverage_rate" label="覆盖率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.display_count" prop="display_count" label="展示数" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.display_rate" prop="display_rate" label="展示率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.click_count" prop="click_count" label="点击数" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.click_rate" prop="click_rate" label="点击率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.viewability_rate" prop="viewability_rate" label="可见率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.cpc" prop="cpc" label="CPC" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.pageviews" prop="pageviews" label="PageViews" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.ecpm_after_deduct" prop="ecpm_after_deduct" :label="isAdmin ? 'eCPM(扣)' : 'eCPM'" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="isAdmin && columnVisibility.ecpm_before_deduct" prop="ecpm_before_deduct" label="eCPM" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.revenue_after_deduct" prop="revenue_after_deduct" :label="isAdmin ? '收益(扣)' : '收益'" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="isAdmin && columnVisibility.revenue_before_deduct" prop="revenue_before_deduct" label="收益" :formatter="formatCurrency" sortable="custom"></el-table-column>
       </el-table>
 
       <!-- 分页控件 -->
@@ -109,10 +121,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
+import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../../store';
 import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElIcon, ElMessage } from 'element-plus';
-import { Download, InfoFilled } from '@element-plus/icons-vue';
+import { Download, InfoFilled, Setting } from '@element-plus/icons-vue';
 import { getDailySummary, exportAdData, getClientsWithData, getProductsWithData, getAdDataDateRange } from '../../api/adData';
 import { useRouter } from 'vue-router';
 import { extractErrorMessage, isErrorHandled } from '../../utils/api';
@@ -133,6 +145,7 @@ const dailyDataList = ref([]);
 const filterProducts = ref([{ label: '全部产品', value: '' }]);
 const users = ref([]);
 const loading = ref(false);
+const columnSettingVisible = ref(false);
 const pagination = ref({
   current: 1,
   size: 10,
@@ -667,6 +680,8 @@ const loadPageData = async () => {
 
 // 页面挂载时加载数据
 onMounted(async () => {
+  // 加载列显示设置
+  loadColumnVisibility();
   await nextTick();
   setTimeout(async () => {
     await loadPageData();

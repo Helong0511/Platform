@@ -79,6 +79,18 @@
 
     <!-- 数据表格 -->
     <el-card class="data-table-card">
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-weight: 600; font-size: 16px;">TB搜索数据</span>
+          <el-button 
+            type="text" 
+            :icon="Setting" 
+            @click="columnSettingVisible = true"
+          >
+            列设置
+          </el-button>
+        </div>
+      </template>
       <el-table
         v-loading="loading"
         :data="tableData"
@@ -91,36 +103,36 @@
         show-summary
       >
         <el-table-column type="selection" width="55"></el-table-column>
-        <el-table-column prop="date" label="DATE" sortable="custom" width="120"></el-table-column>
-        <el-table-column v-if="isAdmin" prop="user_name" label="所属客户" sortable="custom"></el-table-column>
-        <el-table-column prop="product_name" label="SUBID" sortable="custom"></el-table-column>
-        <el-table-column prop="country_name_zh" label="GEO" width="120">
+        <el-table-column v-if="columnVisibility.date" prop="date" label="DATE" sortable="custom" width="120"></el-table-column>
+        <el-table-column v-if="isAdmin && columnVisibility.user_name" prop="user_name" label="所属客户" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.product_name" prop="product_name" label="SUBID" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.country_name_zh" prop="country_name_zh" label="GEO" width="120">
           <template #default="{ row }">
             {{ row.country_code }} ({{ row.country_name_zh }})
           </template>
         </el-table-column>
-        <el-table-column prop="redirects" label="REDIRECTS" sortable="custom"></el-table-column>
-        <el-table-column prop="searches" label="SEARCHES" sortable="custom"></el-table-column>
-        <el-table-column prop="monetized" label="MONETIZED" sortable="custom"></el-table-column>
-        <el-table-column prop="clicks" label="CLICKS" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.redirects" prop="redirects" label="REDIRECTS" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.searches" prop="searches" label="SEARCHES" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.monetized" prop="monetized" label="MONETIZED" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.clicks" prop="clicks" label="CLICKS" sortable="custom"></el-table-column>
         
-        <el-table-column prop="revenue" :label="isAdmin ? 'REVENUE(扣)' : 'REVENUE'" sortable="custom">
+        <el-table-column v-if="columnVisibility.revenue" prop="revenue" :label="isAdmin ? 'REVENUE(扣)' : 'REVENUE'" sortable="custom">
           <template #default="{ row }">
             {{ formatCurrency(row.revenue) }}
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" prop="revenue_before_deduct" label="REVENUE" sortable="custom">
+        <el-table-column v-if="isAdmin && columnVisibility.revenue_before_deduct" prop="revenue_before_deduct" label="REVENUE" sortable="custom">
           <template #default="{ row }">
             {{ formatCurrency(row.revenue_before_deduct) }}
           </template>
         </el-table-column>
 
-        <el-table-column prop="rpm" :label="isAdmin ? 'RPM(扣)' : 'RPM'" sortable="custom">
+        <el-table-column v-if="columnVisibility.rpm" prop="rpm" :label="isAdmin ? 'RPM(扣)' : 'RPM'" sortable="custom">
           <template #default="{ row }">
             {{ formatCurrency(row.rpm) }}
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" prop="rpm_before_deduct" label="RPM" sortable="custom">
+        <el-table-column v-if="isAdmin && columnVisibility.rpm_before_deduct" prop="rpm_before_deduct" label="RPM" sortable="custom">
           <template #default="{ row }">
             {{ formatCurrency(row.rpm_before_deduct) }}
           </template>
@@ -185,14 +197,41 @@
         <el-button type="primary" @click="saveEdit">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="400px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibility">
+        <el-checkbox label="date" :disabled="true">DATE（固定显示）</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="user_name">所属客户</el-checkbox>
+        <el-checkbox label="product_name" :disabled="true">SUBID（固定显示）</el-checkbox>
+        <el-checkbox label="country_name_zh">GEO</el-checkbox>
+        <el-checkbox label="redirects">REDIRECTS</el-checkbox>
+        <el-checkbox label="searches">SEARCHES</el-checkbox>
+        <el-checkbox label="monetized">MONETIZED</el-checkbox>
+        <el-checkbox label="clicks">CLICKS</el-checkbox>
+        <el-checkbox label="revenue">REVENUE(扣)</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="revenue_before_deduct">REVENUE</el-checkbox>
+        <el-checkbox label="rpm">RPM(扣)</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="rpm_before_deduct">RPM</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue';
+import { ref, reactive, onMounted, computed, nextTick } from 'vue';
 import { useAuthStore } from '../../store';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Upload, Delete } from '@element-plus/icons-vue';
+import { Upload, Delete, Setting } from '@element-plus/icons-vue';
 import { getTBSearchDataList, updateTBSearchData, deleteTBSearchData, batchDeleteTBSearchData, importTBSearchData, getClientsWithTBSearchData, getProductsWithTBSearchData, getCountriesWithTBSearchData } from '../../api/tbSearchData';
 import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../../utils/api';
 
@@ -202,6 +241,7 @@ const isAdmin = computed(() => authStore.isAdmin);
 const loading = ref(false);
 const importing = ref(false);
 const tableData = ref([]);
+const columnSettingVisible = ref(false);
 const users = ref([]);
 const products = ref([]);
 const countries = ref([]);

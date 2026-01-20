@@ -34,6 +34,14 @@
                 批量删除 ({{ selectedConfigs.length }})
               </el-button>
             </div>
+            <el-button 
+              type="text" 
+              :icon="Setting" 
+              @click="columnSettingVisible = true"
+              style="margin-right: 10px;"
+            >
+              列设置
+            </el-button>
             <el-button type="primary" :icon="Download" @click="handleExport" :disabled="loading">导出配置</el-button>
             <el-button type="primary" :icon="Plus" @click="handleAdd">添加配置</el-button>
           </div>
@@ -124,9 +132,9 @@
         @selection-change="handleSelectionChange"
       >
         <el-table-column type="selection" width="55" />
-        <el-table-column prop="id" label="ID" width="80" align="center" />
+        <el-table-column v-if="columnVisibility.id" prop="id" label="ID" width="80" align="center" />
         
-        <el-table-column prop="level" label="层级" width="100" align="center">
+        <el-table-column v-if="columnVisibility.level" prop="level" label="层级" width="100" align="center">
           <template #default="scope">
             <el-tag :type="getLevelTagType(scope.row.level)">
               {{ getLevelLabel(scope.row.level) }}
@@ -134,9 +142,9 @@
           </template>
         </el-table-column>
         
-        <el-table-column prop="target_name" label="配置对象" min-width="200" show-overflow-tooltip />
+        <el-table-column v-if="columnVisibility.target_name" prop="target_name" label="配置对象" min-width="200" show-overflow-tooltip />
         
-        <el-table-column label="扣量配置" width="180" align="center">
+        <el-table-column v-if="columnVisibility.volume_deduction" label="扣量配置" width="180" align="center">
           <template #default="scope">
             <div v-if="scope.row.enable_volume_deduction" class="deduction-cell volume-deduction">
               <div class="deduction-header">
@@ -159,7 +167,7 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="扣金额配置" width="150" align="center">
+        <el-table-column v-if="columnVisibility.amount_deduction" label="扣金额配置" width="150" align="center">
           <template #default="scope">
             <div v-if="scope.row.enable_amount_deduction" class="deduction-cell amount-deduction">
               <div class="deduction-header">
@@ -178,9 +186,9 @@
           </template>
         </el-table-column>
         
-        <el-table-column prop="priority" label="优先级" width="100" align="center" />
+        <el-table-column v-if="columnVisibility.priority" prop="priority" label="优先级" width="100" align="center" />
         
-        <el-table-column prop="is_active" label="状态" width="100" align="center">
+        <el-table-column v-if="columnVisibility.is_active" prop="is_active" label="状态" width="100" align="center">
           <template #default="scope">
             <el-switch
               v-model="scope.row.is_active"
@@ -235,6 +243,28 @@
         />
       </div>
     </el-card>
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="400px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibility">
+        <el-checkbox label="id" :disabled="true">ID（固定显示）</el-checkbox>
+        <el-checkbox label="level">层级</el-checkbox>
+        <el-checkbox label="target_name" :disabled="true">配置对象（固定显示）</el-checkbox>
+        <el-checkbox label="volume_deduction">扣量配置</el-checkbox>
+        <el-checkbox label="amount_deduction">扣金额配置</el-checkbox>
+        <el-checkbox label="priority">优先级</el-checkbox>
+        <el-checkbox label="is_active">状态</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 添加/编辑配置对话框 -->
     <el-dialog
@@ -503,6 +533,7 @@ import { getPublishers } from '@/api/publisher'
 
 const loading = ref(false)
 const tableData = ref([])
+const columnSettingVisible = ref(false)
 const selectedConfigs = ref([])
 const dialogVisible = ref(false)
 const dialogMode = ref('add')
@@ -522,6 +553,56 @@ const pagination = reactive({
   page_size: 20,
   total: 0
 })
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  id: true,  // 固定显示
+  level: true,
+  target_name: true,  // 固定显示
+  volume_deduction: true,
+  amount_deduction: true,
+  priority: true,
+  is_active: true
+})
+
+const columnVisibility = reactive(getDefaultColumnVisibility())
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('conversionDeductionManagement_columnVisibility')
+    if (saved) {
+      const savedVisibility = JSON.parse(saved)
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
+      // 确保固定列始终显示
+      columnVisibility.id = true
+      columnVisibility.target_name = true
+    }
+  } catch (error) {
+    logger.error('加载列显示设置失败:', error)
+  }
+}
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      level: columnVisibility.level,
+      volume_deduction: columnVisibility.volume_deduction,
+      amount_deduction: columnVisibility.amount_deduction,
+      priority: columnVisibility.priority,
+      is_active: columnVisibility.is_active
+    }
+    localStorage.setItem('conversionDeductionManagement_columnVisibility', JSON.stringify(toSave))
+    columnSettingVisible.value = false
+    ElMessage.success('列显示设置已保存')
+  } catch (error) {
+    logger.error('保存列显示设置失败:', error)
+    ElMessage.error('保存设置失败')
+  }
+}
 
 const form = reactive({
   level: 'advertiser',
@@ -1031,6 +1112,8 @@ watch(dialogVisible, (val) => {
 })
 
 onMounted(() => {
+  // 加载列显示设置
+  loadColumnVisibility()
   fetchData()
 })
 </script>

@@ -7,7 +7,17 @@
             <el-icon class="header-icon"><User /></el-icon>
             <span class="header-title">广告主管理</span>
           </div>
-          <el-button type="primary" :icon="Plus" @click="handleAdd">添加广告主</el-button>
+          <div class="header-right">
+            <el-button 
+              type="text" 
+              :icon="Setting" 
+              @click="columnSettingVisible = true"
+              style="margin-right: 10px;"
+            >
+              列设置
+            </el-button>
+            <el-button type="primary" :icon="Plus" @click="handleAdd">添加广告主</el-button>
+          </div>
         </div>
       </template>
 
@@ -48,17 +58,17 @@
           stripe
           style="width: 100%; margin-top: 20px;"
         >
-        <el-table-column prop="id" label="广告主ID" width="150" align="center" />
-        <el-table-column prop="advertiser_name" label="广告主名称" min-width="120" show-overflow-tooltip />
-        <el-table-column prop="advertiser_params" label="广告主参数" min-width="150" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.id" prop="id" label="广告主ID" width="150" align="center" />
+        <el-table-column v-if="columnVisibility.advertiser_name" prop="advertiser_name" label="广告主名称" min-width="120" show-overflow-tooltip />
+        <el-table-column v-if="columnVisibility.advertiser_params" prop="advertiser_params" label="广告主参数" min-width="150" show-overflow-tooltip>
           <template #default="scope">
             <span v-if="scope.row.advertiser_params">{{ scope.row.advertiser_params }}</span>
             <span v-else style="color: #999;">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="mobile" label="手机号" width="80" show-overflow-tooltip />
-        <el-table-column prop="email" label="邮箱" min-width="100" show-overflow-tooltip />
-        <el-table-column prop="is_active" label="状态" width="120" align="center">
+        <el-table-column v-if="columnVisibility.mobile" prop="mobile" label="手机号" width="80" show-overflow-tooltip />
+        <el-table-column v-if="columnVisibility.email" prop="email" label="邮箱" min-width="100" show-overflow-tooltip />
+        <el-table-column v-if="columnVisibility.is_active" prop="is_active" label="状态" width="120" align="center">
           <template #default="scope">
             <el-switch
               v-model="scope.row.is_active"
@@ -69,7 +79,7 @@
             />
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column v-if="columnVisibility.created_at" prop="created_at" label="创建时间" width="180">
           <template #default="scope">
             {{ formatDate(scope.row.created_at) }}
           </template>
@@ -96,6 +106,28 @@
         />
       </div>
     </el-card>
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="400px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibility">
+        <el-checkbox label="id" :disabled="true">广告主ID（固定显示）</el-checkbox>
+        <el-checkbox label="advertiser_name" :disabled="true">广告主名称（固定显示）</el-checkbox>
+        <el-checkbox label="advertiser_params">广告主参数</el-checkbox>
+        <el-checkbox label="mobile">手机号</el-checkbox>
+        <el-checkbox label="email">邮箱</el-checkbox>
+        <el-checkbox label="is_active">状态</el-checkbox>
+        <el-checkbox label="created_at">创建时间</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 编辑对话框 -->
     <el-dialog
@@ -143,7 +175,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Refresh, Edit, Delete, User } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, Edit, Delete, User, Setting } from '@element-plus/icons-vue'
 import { getAdvertisers, createAdvertiser, updateAdvertiser, deleteAdvertiser } from '@/api/advertiser'
 import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
@@ -163,6 +195,56 @@ const pagination = reactive({
 })
 
 const tableData = ref([])
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  id: true,  // 固定显示
+  advertiser_name: true,  // 固定显示
+  advertiser_params: true,
+  mobile: true,
+  email: true,
+  is_active: true,
+  created_at: true
+})
+
+const columnVisibility = reactive(getDefaultColumnVisibility())
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('advertiserManagement_columnVisibility')
+    if (saved) {
+      const savedVisibility = JSON.parse(saved)
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
+      // 确保固定列始终显示
+      columnVisibility.id = true
+      columnVisibility.advertiser_name = true
+    }
+  } catch (error) {
+    logger.error('加载列显示设置失败:', error)
+  }
+}
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      advertiser_params: columnVisibility.advertiser_params,
+      mobile: columnVisibility.mobile,
+      email: columnVisibility.email,
+      is_active: columnVisibility.is_active,
+      created_at: columnVisibility.created_at
+    }
+    localStorage.setItem('advertiserManagement_columnVisibility', JSON.stringify(toSave))
+    columnSettingVisible.value = false
+    ElMessage.success('列显示设置已保存')
+  } catch (error) {
+    logger.error('保存列显示设置失败:', error)
+    ElMessage.error('保存设置失败')
+  }
+}
 
 const formData = reactive({
   advertiser_name: '',
@@ -384,6 +466,11 @@ onMounted(() => {
 .card-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+}
+
+.header-right {
+  display: flex;
   align-items: center;
 }
 

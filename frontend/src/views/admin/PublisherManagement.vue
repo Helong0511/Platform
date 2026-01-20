@@ -7,7 +7,17 @@
             <el-icon class="header-icon"><Connection /></el-icon>
             <span class="header-title">渠道管理</span>
           </div>
-          <el-button type="primary" :icon="Plus" @click="handleAdd">添加渠道</el-button>
+          <div class="header-right">
+            <el-button 
+              type="text" 
+              :icon="Setting" 
+              @click="columnSettingVisible = true"
+              style="margin-right: 10px;"
+            >
+              列设置
+            </el-button>
+            <el-button type="primary" :icon="Plus" @click="handleAdd">添加渠道</el-button>
+          </div>
         </div>
       </template>
 
@@ -50,38 +60,38 @@
           stripe
           style="width: 100%; margin-top: 20px;"
         >
-        <el-table-column prop="id" label="渠道ID" width="120" align="center" />
-        <el-table-column prop="publisher_name" label="渠道名称" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="client_name" label="关联客户" min-width="150" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.id" prop="id" label="渠道ID" width="120" align="center" />
+        <el-table-column v-if="columnVisibility.publisher_name" prop="publisher_name" label="渠道名称" min-width="200" show-overflow-tooltip />
+        <el-table-column v-if="columnVisibility.client_name" prop="client_name" label="关联客户" min-width="150" show-overflow-tooltip>
           <template #default="scope">
             <span>{{ scope.row.client_name || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="email" label="邮箱" min-width="80" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.email" prop="email" label="邮箱" min-width="80" show-overflow-tooltip>
           <template #default="scope">
             {{ scope.row.email || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="price_discount" label="价格折扣" width="120" align="right">
+        <el-table-column v-if="columnVisibility.price_discount" prop="price_discount" label="价格折扣" width="120" align="right">
           <template #default="scope">
             <el-tag v-if="scope.row.price_discount > 0" type="info">{{ scope.row.price_discount }}%</el-tag>
             <span v-else style="color: #909399;">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="postback_url" label="Postback URL" min-width="450" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.postback_url" prop="postback_url" label="Postback URL" min-width="450" show-overflow-tooltip>
           <template #default="scope">
             <span>{{ scope.row.postback_url || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="postback_method" label="Postback方法" width="120" align="center">
+        <el-table-column v-if="columnVisibility.postback_method" prop="postback_method" label="Postback方法" width="120" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.postback_method === 'POST' ? 'success' : 'info'">
               {{ scope.row.postback_method || 'GET' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="active_advertiser_count" label="活跃广告主数" width="140" align="center" />
-        <el-table-column prop="is_active" label="状态" width="100" align="center">
+        <el-table-column v-if="columnVisibility.active_advertiser_count" prop="active_advertiser_count" label="活跃广告主数" width="140" align="center" />
+        <el-table-column v-if="columnVisibility.is_active" prop="is_active" label="状态" width="100" align="center">
           <template #default="scope">
             <el-switch
               v-model="scope.row.is_active"
@@ -92,7 +102,7 @@
             />
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column v-if="columnVisibility.created_at" prop="created_at" label="创建时间" width="180">
           <template #default="scope">
             {{ formatDate(scope.row.created_at) }}
           </template>
@@ -353,7 +363,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Refresh, Edit, Delete, Connection, InfoFilled, Warning } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, Edit, Delete, Connection, InfoFilled, Warning, Setting } from '@element-plus/icons-vue'
 import { getPublishers, createPublisher, updatePublisher, deletePublisher } from '@/api/publisher'
 import { getClientList } from '@/api/client'
 import { logger } from '@/utils/logger'
@@ -376,6 +386,62 @@ const pagination = reactive({
 })
 
 const tableData = ref([])
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  id: true,  // 固定显示
+  publisher_name: true,  // 固定显示
+  client_name: true,
+  email: true,
+  price_discount: true,
+  postback_url: true,
+  postback_method: true,
+  active_advertiser_count: true,
+  is_active: true,
+  created_at: true
+})
+
+const columnVisibility = reactive(getDefaultColumnVisibility())
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('publisherManagement_columnVisibility')
+    if (saved) {
+      const savedVisibility = JSON.parse(saved)
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
+      // 确保固定列始终显示
+      columnVisibility.id = true
+      columnVisibility.publisher_name = true
+    }
+  } catch (error) {
+    logger.error('加载列显示设置失败:', error)
+  }
+}
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      client_name: columnVisibility.client_name,
+      email: columnVisibility.email,
+      price_discount: columnVisibility.price_discount,
+      postback_url: columnVisibility.postback_url,
+      postback_method: columnVisibility.postback_method,
+      active_advertiser_count: columnVisibility.active_advertiser_count,
+      is_active: columnVisibility.is_active,
+      created_at: columnVisibility.created_at
+    }
+    localStorage.setItem('publisherManagement_columnVisibility', JSON.stringify(toSave))
+    columnSettingVisible.value = false
+    ElMessage.success('列显示设置已保存')
+  } catch (error) {
+    logger.error('保存列显示设置失败:', error)
+    ElMessage.error('保存设置失败')
+  }
+}
 const clientList = ref([])
 
 const formData = reactive({
@@ -775,6 +841,11 @@ onMounted(() => {
 .card-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+}
+
+.header-right {
+  display: flex;
   align-items: center;
 }
 

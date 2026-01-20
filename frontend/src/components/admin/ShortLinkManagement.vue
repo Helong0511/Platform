@@ -19,6 +19,14 @@
     <!-- 操作栏 -->
     <div class="action-bar">
       <el-button type="primary" @click="handleCreate" :icon="Plus">创建短链接</el-button>
+      <el-button 
+        type="text" 
+        :icon="Setting" 
+        @click="columnSettingVisible = true"
+        style="margin-left: 10px;"
+      >
+        列设置
+      </el-button>
       <div class="search-bar">
         <el-input
           v-model="filters.search"
@@ -44,13 +52,13 @@
       stripe
       style="width: 100%"
     >
-      <el-table-column prop="id" label="ID" width="80" align="center" />
-      <el-table-column prop="short_code" label="短链接代码" width="100" show-overflow-tooltip>
+      <el-table-column v-if="columnVisibility.id" prop="id" label="ID" width="80" align="center" />
+      <el-table-column v-if="columnVisibility.short_code" prop="short_code" label="短链接代码" width="100" show-overflow-tooltip>
         <template #default="scope">
           <el-tag type="primary">{{ scope.row.short_code }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="short_url" label="短链接" width="300" show-overflow-tooltip>
+      <el-table-column v-if="columnVisibility.short_url" prop="short_url" label="短链接" width="300" show-overflow-tooltip>
         <template #default="scope">
           <el-link :href="scope.row.short_url" target="_blank" type="primary">
             {{ scope.row.short_url }}
@@ -64,20 +72,20 @@
           />
         </template>
       </el-table-column>
-      <el-table-column prop="original_url" label="原始URL" min-width="350" show-overflow-tooltip />
-      <el-table-column prop="title" label="标题" width="180" show-overflow-tooltip>
+      <el-table-column v-if="columnVisibility.original_url" prop="original_url" label="原始URL" min-width="350" show-overflow-tooltip />
+      <el-table-column v-if="columnVisibility.title" prop="title" label="标题" width="180" show-overflow-tooltip>
         <template #default="scope">
           <span v-if="scope.row.title">{{ scope.row.title }}</span>
           <span v-else style="color: #909399;">-</span>
         </template>
       </el-table-column>
-      <el-table-column prop="description" label="描述" min-width="250" show-overflow-tooltip>
+      <el-table-column v-if="columnVisibility.description" prop="description" label="描述" min-width="250" show-overflow-tooltip>
         <template #default="scope">
           <span v-if="scope.row.description">{{ scope.row.description }}</span>
           <span v-else style="color: #909399;">-</span>
         </template>
       </el-table-column>
-      <el-table-column prop="offer_id" label="关联Offer" width="180" show-overflow-tooltip>
+      <el-table-column v-if="columnVisibility.offer_id" prop="offer_id" label="关联Offer" width="180" show-overflow-tooltip>
         <template #default="scope">
           <el-tag v-if="scope.row.offer_id" type="info">
             {{ getOfferName(scope.row.offer_id) || `ID: ${scope.row.offer_id}` }}
@@ -85,7 +93,7 @@
           <span v-else style="color: #909399;">-</span>
         </template>
       </el-table-column>
-      <el-table-column prop="channel_id" label="渠道" width="80" show-overflow-tooltip>
+      <el-table-column v-if="columnVisibility.channel_id" prop="channel_id" label="渠道" width="80" show-overflow-tooltip>
         <template #default="scope">
           <el-tag v-if="scope.row.channel_id" type="success">
             {{ scope.row.channel_name || getChannelName(scope.row.channel_id) || `ID: ${scope.row.channel_id}` }}
@@ -93,24 +101,24 @@
           <span v-else style="color: #909399;">-</span>
         </template>
       </el-table-column>
-      <el-table-column prop="creator_name" label="创建者" width="120" show-overflow-tooltip>
+      <el-table-column v-if="columnVisibility.creator_name" prop="creator_name" label="创建者" width="120" show-overflow-tooltip>
         <template #default="scope">
           <span v-if="scope.row.creator_name">{{ scope.row.creator_name }}</span>
           <el-tag v-else type="info" size="small">未知</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="click_count" label="点击次数" width="100" align="center">
+      <el-table-column v-if="columnVisibility.click_count" prop="click_count" label="点击次数" width="100" align="center">
         <template #default="scope">
           <el-tag type="success">{{ scope.row.click_count }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="expires_at" label="过期时间" width="180" align="center">
+      <el-table-column v-if="columnVisibility.expires_at" prop="expires_at" label="过期时间" width="180" align="center">
         <template #default="scope">
           <span v-if="scope.row.expires_at">{{ formatDate(scope.row.expires_at) }}</span>
           <el-tag v-else type="info" size="small">永不过期</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="is_active" label="激活" width="90" align="center">
+      <el-table-column v-if="columnVisibility.is_active" prop="is_active" label="激活" width="90" align="center">
         <template #default="scope">
           <el-switch
             v-model="scope.row.is_active"
@@ -121,7 +129,7 @@
           />
         </template>
       </el-table-column>
-      <el-table-column prop="created_at" label="创建时间" width="180">
+      <el-table-column v-if="columnVisibility.created_at" prop="created_at" label="创建时间" width="180">
         <template #default="scope">
           {{ formatDate(scope.row.created_at) }}
         </template>
@@ -168,7 +176,7 @@
 import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox, ElStatistic } from 'element-plus';
-import { Plus, Search, DocumentCopy, InfoFilled, Refresh } from '@element-plus/icons-vue';
+import { Plus, Search, DocumentCopy, InfoFilled, Refresh, Setting } from '@element-plus/icons-vue';
 import {
   createShortLink,
   getShortLinks,
@@ -198,6 +206,7 @@ const currentLinkId = ref(null);
 const links = ref([]);
 const offerList = ref([]);
 const channelList = ref([]);
+const columnSettingVisible = ref(false);
 const stats = reactive({
   total_links: 0,
   total_clicks: 0,
@@ -215,6 +224,68 @@ const pagination = reactive({
   pageSize: 20,
   total: 0
 });
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  id: true,
+  short_code: true,  // 固定显示
+  short_url: true,  // 固定显示
+  original_url: true,
+  title: true,
+  description: true,
+  offer_id: true,
+  channel_id: true,
+  creator_name: true,
+  click_count: true,
+  expires_at: true,
+  is_active: true,
+  created_at: true
+});
+
+const columnVisibility = reactive(getDefaultColumnVisibility());
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('shortLinkManagement_columnVisibility');
+    if (saved) {
+      const savedVisibility = JSON.parse(saved);
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility);
+      // 确保固定列始终显示
+      columnVisibility.short_code = true;
+      columnVisibility.short_url = true;
+    }
+  } catch (error) {
+    logger.error('加载列显示设置失败:', error);
+  }
+};
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      id: columnVisibility.id,
+      original_url: columnVisibility.original_url,
+      title: columnVisibility.title,
+      description: columnVisibility.description,
+      offer_id: columnVisibility.offer_id,
+      channel_id: columnVisibility.channel_id,
+      creator_name: columnVisibility.creator_name,
+      click_count: columnVisibility.click_count,
+      expires_at: columnVisibility.expires_at,
+      is_active: columnVisibility.is_active,
+      created_at: columnVisibility.created_at
+    };
+    localStorage.setItem('shortLinkManagement_columnVisibility', JSON.stringify(toSave));
+    columnSettingVisible.value = false;
+    ElMessage.success('列显示设置已保存');
+  } catch (error) {
+    logger.error('保存列显示设置失败:', error);
+    ElMessage.error('保存设置失败');
+  }
+};
 
 const formRef = ref(null);
 const formData = reactive({
@@ -654,6 +725,8 @@ watch(
 // 初始化
 onMounted(async () => {
   logger.debug('ShortLinkManagement onMounted, route.query:', route.query, 'route.fullPath:', route.fullPath);
+  // 加载列显示设置
+  loadColumnVisibility();
   // 加载基础数据（先加载，不阻塞搜索）
   loadStats();
   loadOffers();

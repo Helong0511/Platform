@@ -79,6 +79,14 @@
       <template #header>
         <div class="table-header">
           <span>用户列表</span>
+          <el-button 
+            type="text" 
+            :icon="Setting" 
+            @click="columnSettingVisible = true"
+            style="float: right;"
+          >
+            列设置
+          </el-button>
         </div>
       </template>
       <el-table
@@ -89,32 +97,32 @@
         style="width: 100%"
         @sort-change="handleSortChange"
       >
-        <el-table-column prop="id" label="ID" width="80" sortable="custom" align="center"></el-table-column>
-        <el-table-column prop="username" label="登录用户名" sortable="custom" min-width="80" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.id" prop="id" label="ID" width="80" sortable="custom" align="center"></el-table-column>
+        <el-table-column v-if="columnVisibility.username" prop="username" label="登录用户名" sortable="custom" min-width="80" show-overflow-tooltip>
           <template #default="scope">
             <div class="username-cell">
               <span class="username-text">{{ scope.row.username || '-' }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="full_name" label="全名" min-width="100" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.full_name" prop="full_name" label="全名" min-width="100" show-overflow-tooltip>
           <template #default="scope">
             {{ scope.row.full_name || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="role" label="角色" width="100" align="center">
+        <el-table-column v-if="columnVisibility.role" prop="role" label="角色" width="100" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.role === 'admin' ? 'primary' : 'success'" size="small">
               {{ scope.row.role === 'admin' ? '管理员' : '客户' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="email" label="邮箱" min-width="200" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.email" prop="email" label="邮箱" min-width="200" show-overflow-tooltip>
           <template #default="scope">
             {{ scope.row.email || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="is_active" label="状态" width="100" align="center">
+        <el-table-column v-if="columnVisibility.is_active" prop="is_active" label="状态" width="100" align="center">
           <template #default="scope">
             <el-switch
               v-model="scope.row.is_active"
@@ -125,7 +133,7 @@
             />
           </template>
         </el-table-column>
-        <el-table-column v-if="hasClientUsers" prop="api_enabled" label="API访问" width="120" align="center">
+        <el-table-column v-if="hasClientUsers && columnVisibility.api_enabled" prop="api_enabled" label="API访问" width="120" align="center">
           <template #default="scope">
             <el-switch
               v-if="scope.row.role === 'client'"
@@ -140,7 +148,7 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="hasClientUsers" prop="password_change_enabled" label="允许修改密码" width="140" align="center">
+        <el-table-column v-if="hasClientUsers && columnVisibility.password_change_enabled" prop="password_change_enabled" label="允许修改密码" width="140" align="center">
           <template #default="scope">
             <el-switch
               v-if="scope.row.role === 'client'"
@@ -155,7 +163,7 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180" sortable="custom">
+        <el-table-column v-if="columnVisibility.created_at" prop="created_at" label="创建时间" width="180" sortable="custom">
           <template #default="scope">
             {{ formatDate(scope.row.created_at) }}
           </template>
@@ -237,6 +245,30 @@
         ></el-pagination>
       </div>
     </el-card>
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="400px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibility">
+        <el-checkbox label="id" :disabled="true">ID（固定显示）</el-checkbox>
+        <el-checkbox label="username" :disabled="true">登录用户名（固定显示）</el-checkbox>
+        <el-checkbox label="full_name">全名</el-checkbox>
+        <el-checkbox label="role">角色</el-checkbox>
+        <el-checkbox label="email">邮箱</el-checkbox>
+        <el-checkbox label="is_active">状态</el-checkbox>
+        <el-checkbox v-if="hasClientUsers" label="api_enabled">API访问</el-checkbox>
+        <el-checkbox v-if="hasClientUsers" label="password_change_enabled">允许修改密码</el-checkbox>
+        <el-checkbox label="created_at">创建时间</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 添加/编辑用户模态框 -->
     <el-dialog 
@@ -508,7 +540,7 @@ import {
   ElDivider, ElSwitch, ElDescriptions, ElDescriptionsItem, ElRow, ElCol
 } from 'element-plus';
 import { 
-  Plus, Search, Refresh, Lock, Unlock, Delete, View, Edit, Box, InfoFilled, Key
+  Plus, Search, Refresh, Lock, Unlock, Delete, View, Edit, Box, InfoFilled, Key, Setting
 } from '@element-plus/icons-vue';
 import { useAuthStore } from '../../store';
 import { useDevice } from '../../composables/useDevice';
@@ -553,6 +585,7 @@ const pagination = ref({
   size: 10,
   total: 0
 });
+const columnSettingVisible = ref(false);
 
 // 筛选表单
 const searchForm = reactive({
@@ -584,6 +617,60 @@ const showClientForm = computed(() => {
   }
   return false;
 });
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  id: true,  // 固定显示
+  username: true,  // 固定显示
+  full_name: true,
+  role: true,
+  email: true,
+  is_active: true,
+  api_enabled: true,
+  password_change_enabled: true,
+  created_at: true
+});
+
+const columnVisibility = reactive(getDefaultColumnVisibility());
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('userManagement_columnVisibility');
+    if (saved) {
+      const savedVisibility = JSON.parse(saved);
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility);
+      // 确保固定列始终显示
+      columnVisibility.id = true;
+      columnVisibility.username = true;
+    }
+  } catch (error) {
+    logger.error('加载列显示设置失败:', error);
+  }
+};
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      full_name: columnVisibility.full_name,
+      role: columnVisibility.role,
+      email: columnVisibility.email,
+      is_active: columnVisibility.is_active,
+      api_enabled: columnVisibility.api_enabled,
+      password_change_enabled: columnVisibility.password_change_enabled,
+      created_at: columnVisibility.created_at
+    };
+    localStorage.setItem('userManagement_columnVisibility', JSON.stringify(toSave));
+    columnSettingVisible.value = false;
+    ElMessage.success('列显示设置已保存');
+  } catch (error) {
+    logger.error('保存列显示设置失败:', error);
+    ElMessage.error('保存设置失败');
+  }
+};
 
 // 对话框状态
 const dialogVisible = ref(false);
@@ -1551,6 +1638,8 @@ const router = useRouter();
 
 // 初始化
 onMounted(async () => {
+  // 加载列显示设置
+  loadColumnVisibility();
   // 路由守卫已经处理了认证检查，这里不需要重复检查
   // 延迟加载数据，让页面先渲染出来
   await nextTick();

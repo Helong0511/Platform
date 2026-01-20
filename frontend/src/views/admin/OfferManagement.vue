@@ -7,7 +7,17 @@
             <el-icon class="header-icon"><Box /></el-icon>
             <span class="header-title">Offer管理</span>
           </div>
-          <el-button v-if="isAdmin" type="primary" :icon="Plus" @click="handleAdd">添加Offer</el-button>
+          <div class="header-right">
+            <el-button 
+              type="text" 
+              :icon="Setting" 
+              @click="columnSettingVisible = true"
+              style="margin-right: 10px;"
+            >
+              列设置
+            </el-button>
+            <el-button v-if="isAdmin" type="primary" :icon="Plus" @click="handleAdd">添加Offer</el-button>
+          </div>
         </div>
       </template>
 
@@ -90,11 +100,11 @@
           stripe
           style="width: 100%; margin-top: 20px;"
         >
-        <el-table-column prop="id" label="Offer ID" width="100" align="center" fixed="left" />
-        <el-table-column prop="offer_name" label="Offer名称" width="250" show-overflow-tooltip fixed="left" />
-        <el-table-column v-if="isAdmin" prop="advertiser_name" label="广告主" width="150" show-overflow-tooltip />
-        <el-table-column v-if="isAdmin" prop="advertiser_offer_id" label="上游Offer ID" width="150" show-overflow-tooltip />
-        <el-table-column v-if="isAdmin" prop="payout" label="上游PO" width="100" align="right">
+        <el-table-column v-if="columnVisibility.id" prop="id" label="Offer ID" width="100" align="center" fixed="left" />
+        <el-table-column v-if="columnVisibility.offer_name" prop="offer_name" label="Offer名称" width="250" show-overflow-tooltip fixed="left" />
+        <el-table-column v-if="isAdmin && columnVisibility.advertiser_name" prop="advertiser_name" label="广告主" width="150" show-overflow-tooltip />
+        <el-table-column v-if="isAdmin && columnVisibility.advertiser_offer_id" prop="advertiser_offer_id" label="上游Offer ID" width="150" show-overflow-tooltip />
+        <el-table-column v-if="isAdmin && columnVisibility.payout" prop="payout" label="上游PO" width="100" align="right">
           <template #default="scope">
             <span v-if="scope.row.payout">{{ scope.row.payout.toFixed(2) }}</span>
             <span v-else>-</span>
@@ -116,14 +126,14 @@
             </template>
           </template>
         </el-table-column>
-        <el-table-column prop="country" label="国家" width="80" align="center" />
-        <el-table-column prop="category" label="分类" width="120" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.country" prop="country" label="国家" width="80" align="center" />
+        <el-table-column v-if="columnVisibility.category" prop="category" label="分类" width="120" show-overflow-tooltip>
           <template #default="scope">
             <span v-if="scope.row.category">{{ scope.row.category }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="type" label="类型" width="80" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.type" prop="type" label="类型" width="80" show-overflow-tooltip>
           <template #default="scope">
             <span v-if="scope.row.type">{{ scope.row.type }}</span>
             <span v-else>-</span>
@@ -135,7 +145,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="downstream_cap" :label="isAdmin ? '下游Cap' : 'Cap'" width="90" align="center">
+        <el-table-column v-if="columnVisibility.downstream_cap" prop="downstream_cap" :label="isAdmin ? '下游Cap' : 'Cap'" width="90" align="center">
           <template #default="scope">
             <template v-if="!isAdmin && currentClientId && scope.row.assigned_publishers">
               <!-- 客户登录：显示分配给该客户渠道的Cap -->
@@ -159,7 +169,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column :label="isAdmin ? '下游Tracklink' : 'Tracklink'" width="380" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.downstream_tracklink" :label="isAdmin ? '下游Tracklink' : 'Tracklink'" width="380" show-overflow-tooltip>
           <template #default="scope">
             <template v-if="!isAdmin && currentClientId && scope.row.assigned_publishers">
               <!-- 客户登录：显示该客户渠道的Tracklink -->
@@ -196,7 +206,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" prop="click_validity_hours" label="点击有效期(小时)" width="120" align="center">
+        <el-table-column v-if="isAdmin && columnVisibility.click_validity_hours" prop="click_validity_hours" label="点击有效期(小时)" width="120" align="center">
           <template #default="scope">
             <span v-if="scope.row.click_validity_hours">{{ scope.row.click_validity_hours }}</span>
             <span v-else>720</span>
@@ -217,7 +227,7 @@
             <el-tag v-else type="info" size="small">未分配</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="110" align="center">
+        <el-table-column v-if="columnVisibility.status" prop="status" label="状态" width="110" align="center">
           <template #default="scope">
             <el-switch
               :model-value="scope.row.status === 'Active'"
@@ -228,7 +238,7 @@
             />
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" prop="is_active" label="激活" width="90" align="center">
+        <el-table-column v-if="isAdmin && columnVisibility.is_active" prop="is_active" label="激活" width="90" align="center">
           <template #default="scope">
             <el-switch
               v-model="scope.row.is_active"
@@ -239,12 +249,12 @@
             />
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column v-if="columnVisibility.created_at" prop="created_at" label="创建时间" width="180">
           <template #default="scope">
             {{ formatDate(scope.row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column prop="updated_at" label="更新时间" width="180">
+        <el-table-column v-if="columnVisibility.updated_at" prop="updated_at" label="更新时间" width="180">
           <template #default="scope">
             {{ formatDate(scope.row.updated_at) }}
           </template>
@@ -887,13 +897,48 @@
         <el-button @click="detailDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="500px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibility">
+        <el-checkbox label="id" :disabled="true">Offer ID（固定显示）</el-checkbox>
+        <el-checkbox label="offer_name" :disabled="true">Offer名称（固定显示）</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="advertiser_name">广告主</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="advertiser_offer_id">上游Offer ID</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="payout">上游PO</el-checkbox>
+        <el-checkbox label="affiliate_payout">{{ isAdmin ? '下游PO' : 'PO' }}</el-checkbox>
+        <el-checkbox label="country">国家</el-checkbox>
+        <el-checkbox label="category">分类</el-checkbox>
+        <el-checkbox label="type">类型</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="upstream_cap">上游Cap</el-checkbox>
+        <el-checkbox label="downstream_cap">{{ isAdmin ? '下游Cap' : 'Cap' }}</el-checkbox>
+        <el-checkbox label="preview_link">预览链接</el-checkbox>
+        <el-checkbox label="downstream_tracklink">{{ isAdmin ? '下游Tracklink' : 'Tracklink' }}</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="postback_method">Postback方法</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="click_validity_hours">点击有效期(小时)</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="assigned_publishers">分配渠道</el-checkbox>
+        <el-checkbox label="status">状态</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="is_active">激活</el-checkbox>
+        <el-checkbox label="created_at">创建时间</el-checkbox>
+        <el-checkbox label="updated_at">更新时间</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Refresh, Edit, Delete, Box, View, DocumentCopy, Loading, InfoFilled, User } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, Edit, Delete, Box, View, DocumentCopy, Loading, InfoFilled, User, Setting } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import { getOffers, createOffer, updateOffer, deleteOffer, getOffer, checkOfferShortLink } from '@/api/offer'
 import { getAdvertisers } from '@/api/advertiser'
@@ -927,6 +972,7 @@ const submitting = ref(false)
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const searchKeyword = ref('')
+const columnSettingVisible = ref(false)
 const filterAdvertiser = ref(null)
 const filterStatus = ref(null)
 const filterActive = ref(null)
@@ -956,6 +1002,82 @@ const pagination = reactive({
 const tableData = ref([])
 const advertiserList = ref([])
 const publisherList = ref([])
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  id: true,  // 固定显示
+  offer_name: true,  // 固定显示
+  advertiser_name: isAdmin.value,
+  advertiser_offer_id: isAdmin.value,
+  payout: isAdmin.value,
+  affiliate_payout: true,
+  country: true,
+  category: true,
+  type: true,
+  upstream_cap: isAdmin.value,
+  downstream_cap: true,
+  preview_link: true,
+  downstream_tracklink: true,
+  postback_method: isAdmin.value,
+  click_validity_hours: isAdmin.value,
+  assigned_publishers: isAdmin.value,
+  status: true,
+  is_active: isAdmin.value,
+  created_at: true,
+  updated_at: true
+})
+
+const columnVisibility = reactive(getDefaultColumnVisibility())
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('offerManagement_columnVisibility')
+    if (saved) {
+      const savedVisibility = JSON.parse(saved)
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
+      // 确保固定列始终显示
+      columnVisibility.id = true
+      columnVisibility.offer_name = true
+    }
+  } catch (error) {
+    logger.error('加载列显示设置失败:', error)
+  }
+}
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      advertiser_name: columnVisibility.advertiser_name,
+      advertiser_offer_id: columnVisibility.advertiser_offer_id,
+      payout: columnVisibility.payout,
+      affiliate_payout: columnVisibility.affiliate_payout,
+      country: columnVisibility.country,
+      category: columnVisibility.category,
+      type: columnVisibility.type,
+      upstream_cap: columnVisibility.upstream_cap,
+      downstream_cap: columnVisibility.downstream_cap,
+      preview_link: columnVisibility.preview_link,
+      downstream_tracklink: columnVisibility.downstream_tracklink,
+      postback_method: columnVisibility.postback_method,
+      click_validity_hours: columnVisibility.click_validity_hours,
+      assigned_publishers: columnVisibility.assigned_publishers,
+      status: columnVisibility.status,
+      is_active: columnVisibility.is_active,
+      created_at: columnVisibility.created_at,
+      updated_at: columnVisibility.updated_at
+    }
+    localStorage.setItem('offerManagement_columnVisibility', JSON.stringify(toSave))
+    columnSettingVisible.value = false
+    ElMessage.success('列显示设置已保存')
+  } catch (error) {
+    logger.error('保存列显示设置失败:', error)
+    ElMessage.error('保存设置失败')
+  }
+}
 
 const formData = reactive({
   offer_name: '',
@@ -1915,6 +2037,8 @@ const handlePageChange = (page) => {
 }
 
 onMounted(async () => {
+  // 加载列显示设置
+  loadColumnVisibility()
   loadAdvertisers()
   loadPublishers()
   
@@ -1988,6 +2112,11 @@ onMounted(async () => {
 .card-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+}
+
+.header-right {
+  display: flex;
   align-items: center;
 }
 

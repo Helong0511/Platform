@@ -224,6 +224,14 @@ Postback 转化管理页面
       <template #header>
         <div class="table-header">
           <span>转化记录列表</span>
+          <el-button 
+            type="text" 
+            :icon="Setting" 
+            @click="columnSettingVisible = true"
+            style="float: right;"
+          >
+            列设置
+          </el-button>
         </div>
       </template>
       <el-table
@@ -607,7 +615,7 @@ import {
   ElDescriptions, ElDescriptionsItem, ElDatePicker, ElInputNumber, ElRow, ElCol, ElLink,
   ElDropdown, ElDropdownMenu, ElDropdownItem
 } from 'element-plus';
-import { Search, Refresh, Loading, Bell, ArrowDown } from '@element-plus/icons-vue';
+import { Search, Refresh, Loading, Bell, ArrowDown, Setting } from '@element-plus/icons-vue';
 import { getPostbackConversions, getPostbackStats, updateConversionStatus } from '../../api/postback';
 import { formatDateTime } from '../../utils/dateFormat';
 import { useDevice } from '../../composables/useDevice';
@@ -630,11 +638,88 @@ const isAdmin = computed(() => authStore.isAdmin);
 const conversions = ref([]);
 const loading = ref(false);
 const stats = ref([]);
+const columnSettingVisible = ref(false);
 const pagination = reactive({
   page: 1,
   pageSize: 20,
   total: 0
 });
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  id: true,  // 固定显示
+  platform: true,
+  conversion_id: true,  // 固定显示
+  click_offer_name: true,
+  click_publisher_name: true,
+  click_advertiser_name: true,
+  click_time: true,
+  conversion_status: true,
+  event_name: true,
+  event_value: true,
+  original_payout: isAdmin.value,
+  payout: true,
+  devad_id: true,
+  os: true,
+  carrier: true,
+  gid: true,
+  product_id: true,
+  client_id: true,
+  created_at: true,
+  has_notification: true
+});
+
+const columnVisibility = reactive(getDefaultColumnVisibility());
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('postbackManagement_columnVisibility');
+    if (saved) {
+      const savedVisibility = JSON.parse(saved);
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility);
+      // 确保固定列始终显示
+      columnVisibility.id = true;
+      columnVisibility.conversion_id = true;
+    }
+  } catch (error) {
+    logger.error('加载列显示设置失败:', error);
+  }
+};
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      platform: columnVisibility.platform,
+      click_offer_name: columnVisibility.click_offer_name,
+      click_publisher_name: columnVisibility.click_publisher_name,
+      click_advertiser_name: columnVisibility.click_advertiser_name,
+      click_time: columnVisibility.click_time,
+      conversion_status: columnVisibility.conversion_status,
+      event_name: columnVisibility.event_name,
+      event_value: columnVisibility.event_value,
+      original_payout: columnVisibility.original_payout,
+      payout: columnVisibility.payout,
+      devad_id: columnVisibility.devad_id,
+      os: columnVisibility.os,
+      carrier: columnVisibility.carrier,
+      gid: columnVisibility.gid,
+      product_id: columnVisibility.product_id,
+      client_id: columnVisibility.client_id,
+      created_at: columnVisibility.created_at,
+      has_notification: columnVisibility.has_notification
+    };
+    localStorage.setItem('postbackManagement_columnVisibility', JSON.stringify(toSave));
+    columnSettingVisible.value = false;
+    ElMessage.success('列显示设置已保存');
+  } catch (error) {
+    logger.error('保存列显示设置失败:', error);
+    ElMessage.error('保存设置失败');
+  }
+};
 
 // 搜索表单（融合转化日志筛选条件）
 const searchForm = reactive({
@@ -967,6 +1052,8 @@ const handleStatusChange = async (row, status) => {
 
 // 初始化
 onMounted(() => {
+  // 加载列显示设置
+  loadColumnVisibility();
   loadOffers();
   loadPublishers();
   loadAdvertisers();
