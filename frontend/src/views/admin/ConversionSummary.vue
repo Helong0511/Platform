@@ -20,7 +20,7 @@
           end-placeholder="结束日期"
           format="YYYY-MM-DD"
           value-format="YYYY-MM-DD"
-          style="width: 300px;"
+          style="width: 250px;"
           @change="handleDateChange"
         />
         <el-select
@@ -36,6 +36,22 @@
             :key="offer.id"
             :label="`${offer.id} - ${offer.offer_name}`"
             :value="offer.id"
+          />
+        </el-select>
+        <el-select
+          v-if="isAdmin"
+          v-model="filterAdvertiser"
+          placeholder="广告主"
+          clearable
+          filterable
+          style="width: 200px; margin-left: 10px;"
+          @change="handleSearch"
+        >
+          <el-option
+            v-for="adv in advertiserList"
+            :key="adv.id"
+            :label="adv.advertiser_name"
+            :value="adv.id"
           />
         </el-select>
         <el-select
@@ -82,7 +98,7 @@
           </el-statistic>
         </el-card>
         <el-card class="stat-card">
-          <el-statistic title="总支付 (PO)" :value="summaryData.total_po || 0" :precision="2">
+          <el-statistic :title="isAdmin ? 'Revenue' : 'Pub Revenue'" :value="summaryData.total_po || 0" :precision="2">
             <template #prefix>
               <el-icon :size="20"><Money /></el-icon>
             </template>
@@ -103,28 +119,19 @@
             stripe
             style="width: 100%;"
           >
-            <el-table-column prop="offer_id" label="Offer ID" width="100" align="right">
+            <el-table-column prop="offer_id" label="Offer ID" width="100" align="right" fixed="left">
               <template #default="scope">
-                <el-link
-                  v-if="scope.row.offer_id && scope.row.offer_name"
-                  type="primary"
-                  :underline="false"
-                  @click="handleOfferClick(scope.row.offer_name)"
-                  style="cursor: pointer;"
-                >
-                  {{ scope.row.offer_id }}
-                </el-link>
-                <span v-else-if="scope.row.offer_id">{{ scope.row.offer_id }}</span>
+                <span v-if="scope.row.offer_id">{{ scope.row.offer_id }}</span>
                 <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column prop="offer_name" label="Offer Name" min-width="200" show-overflow-tooltip>
+            <el-table-column prop="offer_name" label="Offer Name" min-width="200" show-overflow-tooltip fixed="left">
               <template #default="scope">
                 <el-link
                   v-if="scope.row.offer_name"
                   type="primary"
                   :underline="false"
-                  @click="handleOfferClick(scope.row.offer_name)"
+                  @click="handleOfferNameClick(scope.row.offer_name)"
                   style="cursor: pointer;"
                 >
                   {{ scope.row.offer_name }}
@@ -208,6 +215,7 @@ import { useRouter } from 'vue-router'
 import { getConversionSummary } from '@/api/conversionSummary'
 import { getOffers } from '@/api/offer'
 import { getPublishers } from '@/api/publisher'
+import { getAdvertisers } from '@/api/advertiser'
 import { logger } from '@/utils/logger'
 import { useAuthStore } from '@/store'
 
@@ -218,9 +226,11 @@ const router = useRouter()
 const loading = ref(false)
 const dateRange = ref([])
 const filterOffer = ref(null)
+const filterAdvertiser = ref(null)
 const filterPublisher = ref(null)
 
 const offerList = ref([])
+const advertiserList = ref([])
 const publisherList = ref([])
 
 const summaryData = reactive({
@@ -243,6 +253,18 @@ const loadOffers = async () => {
     }
   } catch (error) {
     logger.error('加载Offer列表失败:', error)
+  }
+}
+
+const loadAdvertisers = async () => {
+  try {
+    const response = await getAdvertisers({ page: 1, page_size: 100 })
+    // response已经是标准格式，直接使用data字段
+    if (response && response.data) {
+      advertiserList.value = response.data || []
+    }
+  } catch (error) {
+    logger.error('加载广告主列表失败:', error)
   }
 }
 
@@ -276,6 +298,7 @@ const loadData = async () => {
       start_date: dateRange.value?.[0] || undefined,
       end_date: dateRange.value?.[1] || undefined,
       offer_id: filterOffer.value || undefined,
+      advertiser_id: filterAdvertiser.value || undefined,
       publisher_id: filterPublisher.value || undefined
     }
     const response = await getConversionSummary(params)
@@ -306,22 +329,27 @@ const handleSearch = () => {
 const handleReset = () => {
   setDefaultMonthRange()
   filterOffer.value = null
+  filterAdvertiser.value = null
   filterPublisher.value = null
   loadData()
 }
 
-// 点击Offer跳转到Offer管理页面
-const handleOfferClick = (offerName) => {
+// 点击Offer Name新开窗口
+const handleOfferNameClick = (offerName) => {
   if (offerName) {
-    router.push({
+    const route = router.resolve({
       name: 'OfferManagement',
       query: { offer_name: offerName }
     })
+    window.open(route.href, '_blank')
   }
 }
 
 onMounted(() => {
   loadOffers()
+  if (isAdmin.value) {
+    loadAdvertisers()
+  }
   loadPublishers()
   // 默认查询当月
   setDefaultMonthRange()
