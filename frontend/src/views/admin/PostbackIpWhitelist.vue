@@ -694,10 +694,37 @@ const handleBatchSubmit = async () => {
       const failedCount = response.failed_count || 0;
       const totalCount = response.total_count || 0;
       
-      let message = `批量添加完成：成功 ${successCount} 个`;
-      if (failedCount > 0) {
-        message += `，失败 ${failedCount} 个`;
-        // 显示失败详情
+      // 如果所有IP都失败（全部已存在）
+      if (successCount === 0 && failedCount > 0) {
+        const allDuplicates = response.failed_items && response.failed_items.every(
+          item => item.error && item.error.includes('已存在于白名单中')
+        );
+        
+        if (allDuplicates) {
+          // 所有IP都已存在，使用信息提示而不是警告
+          ElMessage.info({
+            message: `所有 ${totalCount} 个IP地址都已存在于白名单中，无需重复添加`,
+            duration: 5000,
+            showClose: true
+          });
+        } else {
+          // 有其他错误
+          if (response.failed_items && response.failed_items.length > 0) {
+            const failedDetails = response.failed_items.slice(0, 5).map(item => 
+              `${item.ip_address}: ${item.error}`
+            ).join('\n');
+            ElMessage.warning({
+              message: `批量添加失败：所有 ${totalCount} 个IP地址都无法添加\n失败详情：\n${failedDetails}${response.failed_items.length > 5 ? `\n... 还有 ${response.failed_items.length - 5} 个失败项` : ''}`,
+              duration: 8000,
+              showClose: true
+            });
+          } else {
+            ElMessage.warning(`批量添加失败：所有 ${totalCount} 个IP地址都无法添加`);
+          }
+        }
+      } else if (failedCount > 0) {
+        // 部分成功部分失败
+        let message = `批量添加完成：成功 ${successCount} 个，失败 ${failedCount} 个`;
         if (response.failed_items && response.failed_items.length > 0) {
           const failedDetails = response.failed_items.slice(0, 5).map(item => 
             `${item.ip_address}: ${item.error}`
@@ -711,14 +738,17 @@ const handleBatchSubmit = async () => {
           ElMessage.warning(message);
         }
       } else {
-        ElMessage.success(message);
+        // 全部成功
+        ElMessage.success(`批量添加完成：成功添加 ${successCount} 个IP地址`);
       }
       
       batchDialogVisible.value = false;
       fetchList();
     } catch (error) {
-      const errorMessage = error?.response?.data?.detail || error?.message || '批量创建失败，请稍后重试';
-      ElMessage.error(errorMessage);
+      // 如果是批量创建的错误响应，尝试获取详细错误信息
+      const errorDetail = error?.response?.data?.detail || error?.response?.data?.message || error?.message || '批量创建失败，请稍后重试';
+      ElMessage.error(errorDetail);
+      logger.error('批量创建IP白名单失败:', error);
     } finally {
       batchSubmitting.value = false;
     }

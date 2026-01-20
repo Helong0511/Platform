@@ -17,13 +17,139 @@ from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.pagination import paginate_query
-from app.models.models import PostbackIpWhitelist, User
+from app.models.models import PostbackIpWhitelist, User, PendingPostbackConversion, PostbackConversion
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.core.security import require_admin
+from app.core.utils import get_app_now_naive
 
 # 创建路由实例
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+# ====== 辅助函数 ======
+
+async def auto_approve_pending_conversions_by_ip(
+    ip_address: str,
+    db: AsyncSession,
+    current_user: User
+) -> dict:
+    """
+    自动批准来自指定IP的待确认转化记录
+    
+    Args:
+        ip_address: IP地址
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        包含处理结果的字典：{
+            'approved_count': 批准的数量,
+            'skipped_count': 跳过的数量（已存在正式记录）,
+            'failed_count': 失败的数量,
+            'approved_ids': 成功批准的记录ID列表
+        }
+    """
+    result = {
+        'approved_count': 0,
+        'skipped_count': 0,
+        'failed_count': 0,
+        'approved_ids': []
+    }
+    
+    try:
+        # 查找所有来自该IP的待确认记录
+        pending_result = await db.execute(
+            select(PendingPostbackConversion).where(
+                PendingPostbackConversion.request_ip == ip_address.strip(),
+                PendingPostbackConversion.status == 'pending'
+            )
+        )
+        pending_list = pending_result.scalars().all()
+        
+        if not pending_list:
+            return result
+        
+        logger.info(
+            f"找到 {len(pending_list)} 条来自 IP {ip_address} 的待确认记录，开始自动批准"
+        )
+        
+        for pending in pending_list:
+            try:
+                # 检查是否已存在相同的转化记录
+                existing = await db.execute(
+                    select(PostbackConversion).where(
+                        PostbackConversion.platform == pending.platform,
+                        PostbackConversion.conversion_id == pending.conversion_id,
+                        PostbackConversion.event_name == pending.event_name
+                    )
+                )
+                if existing.scalars().first():
+                    # 已存在正式记录，跳过并更新待确认记录状态
+                    pending.status = 'approved'
+                    pending.approved_at = get_app_now_naive()
+                    result['skipped_count'] += 1
+                    logger.debug(
+                        f"待确认记录 {pending.id} 对应的正式记录已存在，跳过创建"
+                    )
+                    continue
+                
+                # 创建正式转化记录
+                conversion = PostbackConversion(
+                    platform=pending.platform,
+                    conversion_id=pending.conversion_id,
+                    event_name=pending.event_name,
+                    event_value=pending.event_value,
+                    original_payout=pending.original_payout,
+                    payout=pending.payout,
+                    devad_id=pending.devad_id,
+                    os=pending.os,
+                    carrier=pending.carrier,
+                    ip=pending.ip,
+                    gid=pending.gid,
+                    product_id=pending.product_id,
+                    client_id=pending.client_id,
+                    click_id=pending.click_id,
+                    click_time=pending.click_time,
+                    conversion_status='Pending',
+                    raw_data=pending.raw_data,
+                    created_at=get_app_now_naive()
+                )
+                db.add(conversion)
+                
+                # 更新待确认记录状态
+                pending.status = 'approved'
+                pending.approved_at = get_app_now_naive()
+                
+                result['approved_count'] += 1
+                result['approved_ids'].append(pending.id)
+                
+            except Exception as e:
+                result['failed_count'] += 1
+                logger.warning(
+                    f"自动批准待确认记录 {pending.id} 失败: {str(e)}",
+                    exc_info=True
+                )
+        
+        # 提交所有更改
+        if result['approved_count'] > 0 or result['skipped_count'] > 0:
+            await db.commit()
+            
+            if result['approved_count'] > 0:
+                logger.info(
+                    f"管理员 {current_user.username} 添加IP {ip_address} 到白名单后，"
+                    f"自动批准了 {result['approved_count']} 条待确认转化记录"
+                )
+        
+    except Exception as e:
+        await db.rollback()
+        logger.error(
+            f"自动批准来自IP {ip_address} 的待确认记录失败: {str(e)}",
+            exc_info=True
+        )
+        result['failed_count'] = len(pending_list) if 'pending_list' in locals() else 0
+    
+    return result
 
 
 # ====== Schema 定义 ======
@@ -226,9 +352,22 @@ async def create_ip_whitelist(
             f"ip_address={data.ip_address}, id={whitelist_item.id}"
         )
         
+        # 自动批准来自该IP的待确认转化记录
+        approval_result = await auto_approve_pending_conversions_by_ip(
+            data.ip_address,
+            db,
+            current_user
+        )
+        
+        message = "IP 白名单创建成功"
+        if approval_result['approved_count'] > 0:
+            message += f"，已自动批准 {approval_result['approved_count']} 条待确认转化记录"
+        if approval_result['skipped_count'] > 0:
+            message += f"，跳过 {approval_result['skipped_count']} 条（已存在正式记录）"
+        
         return ResponseBaseSchema.success(
             data=PostbackIpWhitelistResponse.model_validate(whitelist_item),
-            message="IP 白名单创建成功"
+            message=message
         )
         
     except HTTPException:
@@ -337,7 +476,11 @@ async def batch_create_ip_whitelist(
         existing_result = await db.execute(
             select(PostbackIpWhitelist.ip_address)
         )
-        existing_ips = {row.ip_address.strip() for row in existing_result.all()}
+        # 获取所有已存在的IP地址并转换为集合（去除空格）
+        existing_ips = set()
+        for row in existing_result.scalars().all():
+            if row:
+                existing_ips.add(row.strip())
         
         # 批量创建
         for ip_address in data.ip_addresses:
@@ -365,26 +508,81 @@ async def batch_create_ip_whitelist(
                 created_items.append(whitelist_item)
                 
             except Exception as e:
+                # 处理数据库唯一约束冲突
+                error_msg = str(e)
+                if "unique constraint" in error_msg.lower() or "duplicate" in error_msg.lower():
+                    error_msg = "IP地址已存在于白名单中"
+                    # 添加到已存在集合，避免后续重复检查
+                    existing_ips.add(trimmed_ip)
+                
                 failed_items.append({
                     "ip_address": trimmed_ip,
-                    "error": str(e)
+                    "error": error_msg
                 })
-                logger.warning(f"创建IP白名单失败: {trimmed_ip}, 错误: {str(e)}")
+                logger.warning(f"创建IP白名单失败: {trimmed_ip}, 错误: {error_msg}")
         
         # 提交所有成功的记录
         if created_items:
-            await db.commit()
-            # 刷新所有创建的记录
-            for item in created_items:
-                await db.refresh(item)
+            try:
+                await db.commit()
+                # 刷新所有创建的记录
+                for item in created_items:
+                    await db.refresh(item)
+            except Exception as commit_error:
+                # 如果提交失败，回滚并记录错误
+                await db.rollback()
+                error_msg = str(commit_error)
+                logger.error(f"批量提交IP白名单失败: {error_msg}", exc_info=True)
+                # 将提交失败的记录标记为失败
+                for item in created_items:
+                    failed_items.append({
+                        "ip_address": item.ip_address,
+                        "error": f"提交失败: {error_msg}"
+                    })
+                created_items = []
         
         success_count = len(created_items)
         failed_count = len(failed_items)
         total_count = len(data.ip_addresses)
         
+        # 自动批准来自新添加IP的待确认转化记录
+        total_approved = 0
+        total_skipped = 0
+        approved_ips = []
+        
+        for item in created_items:
+            approval_result = await auto_approve_pending_conversions_by_ip(
+                item.ip_address,
+                db,
+                current_user
+            )
+            if approval_result['approved_count'] > 0:
+                total_approved += approval_result['approved_count']
+                approved_ips.append(item.ip_address)
+            if approval_result['skipped_count'] > 0:
+                total_skipped += approval_result['skipped_count']
+        
+        # 如果所有IP都失败，给出更明确的提示
+        if success_count == 0 and failed_count > 0:
+            all_duplicates = all(
+                "已存在于白名单中" in item.get("error", "") 
+                for item in failed_items
+            )
+            if all_duplicates:
+                message = f"所有 {total_count} 个IP地址都已存在于白名单中，无需重复添加"
+            else:
+                message = f"批量创建失败：所有 {total_count} 个IP地址都无法添加"
+        else:
+            message = f"批量创建完成：成功 {success_count} 个，失败 {failed_count} 个，共 {total_count} 个"
+            if total_approved > 0:
+                message += f"，已自动批准 {total_approved} 条待确认转化记录"
+            if total_skipped > 0:
+                message += f"，跳过 {total_skipped} 条（已存在正式记录）"
+        
         logger.info(
             f"管理员 {current_user.username} 批量创建 IP 白名单: "
-            f"总数={total_count}, 成功={success_count}, 失败={failed_count}"
+            f"总数={total_count}, 成功={success_count}, 失败={failed_count}, "
+            f"自动批准待确认记录={total_approved}条"
         )
         
         return ResponseBaseSchema.success(
@@ -395,7 +593,7 @@ async def batch_create_ip_whitelist(
                 created_items=[PostbackIpWhitelistResponse.model_validate(item) for item in created_items],
                 failed_items=failed_items
             ),
-            message=f"批量创建完成：成功 {success_count} 个，失败 {failed_count} 个，共 {total_count} 个"
+            message=message
         )
         
     except HTTPException:
