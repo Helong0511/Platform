@@ -4,6 +4,7 @@
  * 包含特殊逻辑：超时控制、文件导入导出、批量操作等
  */
 import { request, normalizePaginatedResponse, normalizeResponse, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
+import { getCsrfToken } from '../utils/csrfToken';
 import axios from 'axios'; // 保留用于特殊场景（超时控制、文件上传下载）
 
 // 获取广告数据列表
@@ -156,7 +157,6 @@ export const importAdData = async (formData) => {
     await refreshCsrfTokenBeforeRequest();
     
     // 获取CSRF令牌（如果存在）
-    const { getCsrfToken } = await import('../utils/csrfToken');
     const csrfToken = getCsrfToken();
     
     // 构建headers，确保包含CSRF令牌

@@ -73,6 +73,7 @@
 import logger from './logger';
 import axios from 'axios';
 import { ElMessage } from 'element-plus';
+import { getCsrfToken, extractAndSaveCsrfToken, fetchCsrfTokenFromEndpoints } from './csrfToken';
 
 /**
  * 标准化API响应处理
@@ -461,14 +462,12 @@ export const refreshCsrfToken = async (endpoint = '/api/v1/dashboard/stats') => 
     const response = await axios.get(endpoint);
     
     // 直接从响应头获取CSRF令牌（不依赖响应拦截器）
-    const { extractAndSaveCsrfToken } = await import('./csrfToken');
     extractAndSaveCsrfToken(response);
     
     // 额外等待一小段时间，确保响应拦截器也处理完成
     await new Promise(resolve => setTimeout(resolve, 50));
   } catch (error) {
     // 即使请求失败，响应头中也可能有CSRF令牌
-    const { extractAndSaveCsrfToken } = await import('./csrfToken');
     extractAndSaveCsrfToken(error);
   }
 };
@@ -480,8 +479,6 @@ export const refreshCsrfToken = async (endpoint = '/api/v1/dashboard/stats') => 
  * @returns {Promise<boolean>} 是否成功获取CSRF令牌
  */
 export const ensureCsrfToken = async (getRequestFn = null) => {
-  const { getCsrfToken, extractAndSaveCsrfToken, fetchCsrfTokenFromEndpoints } = await import('./csrfToken');
-  
   // 检查CSRF令牌是否存在
   let csrfToken = getCsrfToken();
   

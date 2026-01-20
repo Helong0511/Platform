@@ -4,6 +4,7 @@
  * 包含特殊逻辑：超时控制、文件导入、批量操作等
  */
 import { request, normalizePaginatedResponse, normalizeResponse, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
+import { getCsrfToken } from '../utils/csrfToken';
 import axios from 'axios'; // 保留用于特殊场景（超时控制、文件上传）
 
 // 获取TB搜索数据列表
@@ -57,7 +58,6 @@ export const importTBSearchData = async (formData) => {
   try {
     await refreshCsrfTokenBeforeRequest();
     
-    const { getCsrfToken } = await import('../utils/csrfToken');
     const csrfToken = getCsrfToken();
     const headers = {};
     if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
