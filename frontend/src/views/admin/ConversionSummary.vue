@@ -24,21 +24,6 @@
           @change="handleDateChange"
         />
         <el-select
-          v-model="filterOffer"
-          placeholder="请选择Offer（可选）"
-          clearable
-          filterable
-          style="width: 200px; margin-left: 10px;"
-          @change="handleSearch"
-        >
-          <el-option
-            v-for="offer in offerList"
-            :key="offer.id"
-            :label="`${offer.id} - ${offer.offer_name}`"
-            :value="offer.id"
-          />
-        </el-select>
-        <el-select
           v-if="isAdmin"
           v-model="filterAdvertiser"
           placeholder="请选择广告主（可选）"
@@ -52,6 +37,21 @@
             :key="adv.id"
             :label="adv.advertiser_name"
             :value="adv.id"
+          />
+        </el-select>
+        <el-select
+          v-model="filterOffer"
+          placeholder="请选择Offer（可选）"
+          clearable
+          filterable
+          style="width: 200px; margin-left: 10px;"
+          @change="handleSearch"
+        >
+          <el-option
+            v-for="offer in offerList"
+            :key="offer.id"
+            :label="`${offer.id} - ${offer.offer_name}`"
+            :value="offer.id"
           />
         </el-select>
         <el-select
