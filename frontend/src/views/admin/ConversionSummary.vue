@@ -126,6 +126,8 @@
             :data="statsList"
             stripe
             style="width: 100%;"
+            show-summary
+            :summary-method="getSummaries"
           >
             <el-table-column 
               v-if="columnVisibility.offer_id" 
@@ -680,6 +682,55 @@ const handleOfferClick = (offerId) => {
   }
 }
 
+// 计算表格汇总
+const getSummaries = (param) => {
+  const { columns, data } = param
+  const sums = []
+  
+  // 计算总点击数和总转化数（用于计算总转化率）
+  const totalClicks = data.reduce((sum, item) => sum + (Number(item.click_count) || 0), 0)
+  const totalConversions = data.reduce((sum, item) => sum + (Number(item.conversion_count) || 0), 0)
+  const totalCr = totalClicks > 0 ? ((totalConversions / totalClicks) * 100).toFixed(2) : '0.00'
+  
+  // 计算总Revenue和总Pub Revenue
+  const totalPo = data.reduce((sum, item) => sum + (Number(item.po) || 0), 0)
+  const totalPoAfterDiscount = data.reduce((sum, item) => sum + (Number(item.po_after_discount) || 0), 0)
+  const totalProfit = totalPo - totalPoAfterDiscount
+  
+  columns.forEach((column, index) => {
+    const prop = column.property
+    
+    if (!prop) {
+      // 第一列或其他没有property的列，显示"汇总"
+      if (index === 0) {
+        sums[index] = '汇总'
+      } else {
+        sums[index] = ''
+      }
+      return
+    }
+    
+    // 根据列属性计算汇总值
+    if (prop === 'click_count') {
+      sums[index] = totalClicks
+    } else if (prop === 'conversion_count') {
+      sums[index] = totalConversions
+    } else if (prop === 'cr') {
+      sums[index] = totalCr + '%'
+    } else if (prop === 'po' && isAdmin.value) {
+      sums[index] = totalPo.toFixed(2)
+    } else if (prop === 'po_after_discount') {
+      sums[index] = totalPoAfterDiscount.toFixed(2)
+    } else if (prop === 'profit' && isAdmin.value) {
+      sums[index] = totalProfit.toFixed(2)
+    } else {
+      sums[index] = ''
+    }
+  })
+  
+  return sums
+}
+
 onMounted(() => {
   // 加载列显示设置
   loadColumnVisibility()
@@ -856,8 +907,23 @@ onMounted(() => {
     font-size: 12px;
   }
 
-  .table-wrapper :deep(.el-table__cell) {
-    padding: 8px 4px;
-  }
+.table-wrapper :deep(.el-table__cell) {
+  padding: 8px 4px;
+}
+
+/* 汇总行样式 */
+.table-wrapper :deep(.el-table__footer-wrapper) {
+  font-weight: 600;
+}
+
+.table-wrapper :deep(.el-table__footer) {
+  background-color: #f5f7fa;
+}
+
+.table-wrapper :deep(.el-table__footer .el-table__cell) {
+  background-color: #f5f7fa;
+  font-weight: 600;
+  color: #303133;
+}
 }
 </style>
