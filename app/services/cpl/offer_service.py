@@ -13,6 +13,7 @@ from app.models.models import (
     Offer, Advertiser, Publisher, Client, User, UserRole,
     OfferPublisherAssignment, ShortLink, Click
 )
+from urllib.parse import urlparse, parse_qs
 from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
@@ -173,6 +174,7 @@ class OfferService(BaseService[Offer]):
         page_size: int = 20,
         search: Optional[str] = None,
         advertiser_id: Optional[int] = None,
+        publisher_id: Optional[int] = None,
         status: Optional[str] = None,
         country: Optional[str] = None,
         is_active: Optional[bool] = None
@@ -186,6 +188,7 @@ class OfferService(BaseService[Offer]):
             page_size: 每页数量
             search: 搜索关键词
             advertiser_id: 广告主ID过滤
+            publisher_id: 渠道ID过滤（只返回分配给该渠道的Offer）
             status: 状态过滤
             country: 国家过滤
             is_active: 激活状态过滤
@@ -196,6 +199,7 @@ class OfferService(BaseService[Offer]):
         query = select(Offer)
         
         # 权限过滤：客户只能查看分配给自己的渠道的Offer
+        has_join = False
         if current_user.role == UserRole.CLIENT:
             # 获取当前用户的client_id
             client_result = await self.db.execute(
@@ -216,6 +220,7 @@ class OfferService(BaseService[Offer]):
                         OfferPublisherAssignment.is_active == True
                     )
                 ).distinct()
+                has_join = True
             else:
                 # 如果客户没有关联的Client记录，返回空列表
                 return [], 0, {}
@@ -260,6 +265,25 @@ class OfferService(BaseService[Offer]):
         
         if advertiser_id:
             conditions.append(Offer.advertiser_id == advertiser_id)
+        
+        # 渠道过滤：只返回分配给指定渠道的Offer
+        if publisher_id:
+            # 需要通过 join OfferPublisherAssignment 来过滤
+            # 如果已经有 join（客户用户的情况），直接添加条件
+            # 否则需要添加 join
+            if not has_join:
+                # 管理员用户，需要添加 join
+                query = query.join(
+                    OfferPublisherAssignment, Offer.id == OfferPublisherAssignment.offer_id
+                ).where(
+                    and_(
+                        OfferPublisherAssignment.publisher_id == publisher_id,
+                        OfferPublisherAssignment.is_active == True
+                    )
+                ).distinct()
+            else:
+                # 客户用户已经有 join，直接添加条件
+                conditions.append(OfferPublisherAssignment.publisher_id == publisher_id)
         
         if status:
             conditions.append(Offer.status == status)
@@ -620,6 +644,67 @@ class OfferService(BaseService[Offer]):
                 )
             offer.advertiser_id = offer_data['advertiser_id']
         
+        # 检查advertiser_tracklink是否改变（在更新字段之前检查，以便获取旧的downstream_tracklink）
+        advertiser_tracklink_changed = False
+        new_advertiser_tracklink = None
+        if 'advertiser_tracklink' in offer_data:
+            new_advertiser_tracklink = offer_data.get('advertiser_tracklink')
+            if new_advertiser_tracklink != old_advertiser_tracklink:
+                advertiser_tracklink_changed = True
+                logger.info(
+                    f"检测到advertiser_tracklink变化: "
+                    f"offer_id={offer_id}, "
+                    f"old={old_advertiser_tracklink}, "
+                    f"new={new_advertiser_tracklink}"
+                )
+                
+                # 如果上游Tracklink改变，且下游Tracklink是短链接，更新短链接的原始URL
+                # 注意：这里使用当前的downstream_tracklink（更新前的值）
+                current_downstream_tracklink = offer.downstream_tracklink
+                if current_downstream_tracklink and new_advertiser_tracklink:
+                    try:
+                        # 从下游Tracklink中提取short_code
+                        # 格式可能是: {base_url}/s/{short_code} 或 {base_url}/s/{short_code}?offer_id=X&channel_id=Y
+                        short_code = self._extract_short_code_from_url(current_downstream_tracklink)
+                        if short_code:
+                            # 查找对应的短链接记录
+                            short_link_result = await self.db.execute(
+                                select(ShortLink).where(
+                                    and_(
+                                        ShortLink.short_code == short_code,
+                                        ShortLink.offer_id == offer_id,
+                                        ShortLink.channel_id.is_(None)  # 主短链接
+                                    )
+                                )
+                            )
+                            short_link = short_link_result.scalars().first()
+                            
+                            if short_link:
+                                # 更新短链接的原始URL（不在这里commit，统一在最后提交）
+                                old_original_url = short_link.original_url
+                                short_link.original_url = new_advertiser_tracklink.strip()
+                                logger.info(
+                                    f"已更新短链接的原始URL: "
+                                    f"offer_id={offer_id}, "
+                                    f"short_code={short_code}, "
+                                    f"old_original_url={old_original_url}, "
+                                    f"new_original_url={new_advertiser_tracklink}"
+                                )
+                            else:
+                                logger.warning(
+                                    f"未找到对应的短链接记录: "
+                                    f"offer_id={offer_id}, "
+                                    f"short_code={short_code}"
+                                )
+                    except Exception as e:
+                        # 如果更新短链接失败，记录错误但不影响Offer更新
+                        logger.error(
+                            f"更新短链接原始URL失败（不影响Offer更新）: "
+                            f"offer_id={offer_id}, "
+                            f"error={str(e)}",
+                            exc_info=True
+                        )
+        
         # 更新其他字段（排除渠道配置）
         update_fields = [
             'offer_name', 'advertiser_offer_id', 'preview_link', 'payout',
@@ -632,19 +717,6 @@ class OfferService(BaseService[Offer]):
         for field in update_fields:
             if field in offer_data:
                 setattr(offer, field, offer_data[field])
-        
-        # 检查advertiser_tracklink是否改变
-        advertiser_tracklink_changed = False
-        if 'advertiser_tracklink' in offer_data:
-            new_advertiser_tracklink = offer_data.get('advertiser_tracklink')
-            if new_advertiser_tracklink != old_advertiser_tracklink:
-                advertiser_tracklink_changed = True
-                logger.info(
-                    f"检测到advertiser_tracklink变化: "
-                    f"offer_id={offer_id}, "
-                    f"old={old_advertiser_tracklink}, "
-                    f"new={new_advertiser_tracklink}"
-                )
         
         # 检查downstream_tracklink是否改变
         downstream_tracklink_changed = False
@@ -1012,4 +1084,46 @@ class OfferService(BaseService[Offer]):
         await self.db.commit()
         
         logger.info(f"Offer已删除: {offer.offer_name} (ID: {offer_id})")
+    
+    def _extract_short_code_from_url(self, url: str) -> Optional[str]:
+        """
+        从URL中提取短链接代码
+        
+        Args:
+            url: 短链接URL，格式可能是:
+                - {base_url}/s/{short_code}
+                - {base_url}/s/{short_code}?offer_id=X&channel_id=Y
+                - /s/{short_code}
+                - /s/{short_code}?offer_id=X&channel_id=Y
+        
+        Returns:
+            短链接代码，如果无法提取则返回None
+        """
+        if not url:
+            return None
+        
+        try:
+            # 解析URL
+            parsed = urlparse(url)
+            path = parsed.path
+            
+            # 检查路径是否包含 /s/
+            if '/s/' in path:
+                # 提取 /s/ 后面的部分
+                parts = path.split('/s/')
+                if len(parts) > 1:
+                    short_code = parts[1].split('/')[0].split('?')[0]
+                    if short_code:
+                        return short_code.strip()
+            
+            # 如果路径直接以 /s/ 开头
+            if path.startswith('/s/'):
+                short_code = path[3:].split('/')[0].split('?')[0]
+                if short_code:
+                    return short_code.strip()
+            
+            return None
+        except Exception as e:
+            logger.warning(f"提取短链接代码失败: url={url}, error={str(e)}")
+            return None
 

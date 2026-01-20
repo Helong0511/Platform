@@ -63,6 +63,21 @@
           <el-option label="激活" :value="true" />
           <el-option label="禁用" :value="false" />
         </el-select>
+        <el-select
+          v-model="filterPublisher"
+          placeholder="分配渠道"
+          clearable
+          filterable
+          style="width: 180px; margin-left: 10px; min-width: 180px;"
+          @change="handlePublisherChange"
+        >
+          <el-option
+            v-for="pub in publisherList"
+            :key="pub.id"
+            :label="pub.publisher_name"
+            :value="pub.id"
+          />
+        </el-select>
         <el-button type="primary" :icon="Search" @click="handleSearch" style="margin-left: 10px;">搜索</el-button>
         <el-button :icon="Refresh" @click="handleReset">重置</el-button>
       </div>
@@ -75,8 +90,8 @@
           stripe
           style="width: 100%; margin-top: 20px;"
         >
-        <el-table-column prop="id" label="Offer ID" width="100" align="center" />
-        <el-table-column prop="offer_name" label="Offer名称" width="250" show-overflow-tooltip />
+        <el-table-column prop="id" label="Offer ID" width="100" align="center" fixed="left" />
+        <el-table-column prop="offer_name" label="Offer名称" width="250" show-overflow-tooltip fixed="left" />
         <el-table-column v-if="isAdmin" prop="advertiser_name" label="广告主" width="150" show-overflow-tooltip />
         <el-table-column v-if="isAdmin" prop="advertiser_offer_id" label="上游Offer ID" width="150" show-overflow-tooltip />
         <el-table-column v-if="isAdmin" prop="payout" label="上游PO" width="100" align="right">
@@ -915,6 +930,7 @@ const searchKeyword = ref('')
 const filterAdvertiser = ref(null)
 const filterStatus = ref(null)
 const filterActive = ref(null)
+const filterPublisher = ref(null)
 const formRef = ref(null)
 
 // 详情对话框相关
@@ -1011,6 +1027,7 @@ const loadData = async () => {
       page_size: Math.min(pagination.pageSize, 100),
       search: searchKeyword.value || undefined,
       advertiser_id: filterAdvertiser.value || undefined,
+      publisher_id: filterPublisher.value || undefined,
       status: filterStatus.value || undefined,
       is_active: filterActive.value !== null ? filterActive.value : undefined
     }
@@ -1065,6 +1082,19 @@ const handleActiveChange = () => {
   handleSearch();
 }
 
+// 渠道选择变化
+const handlePublisherChange = () => {
+  // 修复选中值显示
+  nextTick(() => {
+    setTimeout(() => {
+      if (typeof window.fixSelectDisplay === 'function') {
+        window.fixSelectDisplay();
+      }
+    }, 100);
+  });
+  handleSearch();
+}
+
 // 搜索
 const handleSearch = () => {
   pagination.page = 1
@@ -1077,6 +1107,7 @@ const handleReset = () => {
   filterAdvertiser.value = null
   filterStatus.value = null
   filterActive.value = null
+  filterPublisher.value = null
   pagination.page = 1
   loadData()
   

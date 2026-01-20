@@ -470,6 +470,7 @@ async def get_offers(
     page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
     search: Optional[str] = Query(None, description="搜索关键词（名称、ID）"),
     advertiser_id: Optional[int] = Query(None, description="广告主ID过滤"),
+    publisher_id: Optional[int] = Query(None, description="渠道ID过滤（只返回分配给该渠道的Offer）"),
     status: Optional[str] = Query(None, description="状态过滤"),
     country: Optional[str] = Query(None, description="国家过滤"),
     is_active: Optional[bool] = Query(None, description="是否激活过滤"),
@@ -485,6 +486,7 @@ async def get_offers(
         page_size=page_size,
         search=search,
         advertiser_id=advertiser_id,
+        publisher_id=publisher_id,
         status=status,
         country=country,
         is_active=is_active

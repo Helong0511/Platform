@@ -114,6 +114,14 @@
         <el-form-item label="手机号" prop="mobile">
           <el-input v-model="formData.mobile" placeholder="请输入手机号（可选）" />
         </el-form-item>
+        <el-form-item label="广告主参数" prop="advertiser_params">
+          <el-input 
+            v-model="formData.advertiser_params" 
+            type="textarea" 
+            :rows="3"
+            placeholder="请输入广告主参数（可选）" 
+          />
+        </el-form-item>
         <el-form-item label="状态" prop="is_active">
           <el-switch v-model="formData.is_active" />
         </el-form-item>
@@ -154,6 +162,7 @@ const formData = reactive({
   advertiser_name: '',
   email: '',
   mobile: '',
+  advertiser_params: '',
   is_active: true
 })
 
@@ -208,6 +217,7 @@ const handleAdd = () => {
     advertiser_name: '',
     email: '',
     mobile: '',
+    advertiser_params: '',
     is_active: true
   })
   dialogVisible.value = true
@@ -221,6 +231,7 @@ const handleEdit = (row) => {
     advertiser_name: row.advertiser_name,
     email: row.email || '',
     mobile: row.mobile || '',
+    advertiser_params: row.advertiser_params || '',
     is_active: row.is_active
   })
   dialogVisible.value = true

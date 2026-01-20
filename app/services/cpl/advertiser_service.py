@@ -132,6 +132,7 @@ class AdvertiserService(BaseService[Advertiser]):
             advertiser_name=advertiser_data['advertiser_name'],
             email=advertiser_data.get('email'),
             mobile=advertiser_data.get('mobile'),
+            advertiser_params=advertiser_data.get('advertiser_params'),
             is_active=advertiser_data.get('is_active', True)
         )
         
@@ -184,6 +185,8 @@ class AdvertiserService(BaseService[Advertiser]):
             advertiser.email = advertiser_data['email']
         if 'mobile' in advertiser_data:
             advertiser.mobile = advertiser_data['mobile']
+        if 'advertiser_params' in advertiser_data:
+            advertiser.advertiser_params = advertiser_data['advertiser_params']
         if 'is_active' in advertiser_data:
             advertiser.is_active = advertiser_data['is_active']
         

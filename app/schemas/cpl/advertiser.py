@@ -11,6 +11,7 @@ class AdvertiserBase(BaseModel):
     advertiser_name: str = Field(..., max_length=100, description="广告主名称")
     email: Optional[str] = Field(None, max_length=255, description="邮箱（可选）")
     mobile: Optional[str] = Field(None, max_length=20, description="手机号")
+    advertiser_params: Optional[str] = Field(None, description="广告主参数")
     is_active: bool = Field(True, description="是否激活")
 
 
@@ -24,6 +25,7 @@ class AdvertiserUpdate(BaseModel):
     advertiser_name: Optional[str] = Field(None, max_length=100, description="广告主名称")
     email: Optional[str] = Field(None, max_length=255, description="邮箱")
     mobile: Optional[str] = Field(None, max_length=20, description="手机号")
+    advertiser_params: Optional[str] = Field(None, description="广告主参数")
     is_active: Optional[bool] = Field(None, description="是否激活")
 
 

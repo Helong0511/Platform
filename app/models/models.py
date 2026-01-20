@@ -759,6 +759,7 @@ class Advertiser(Base):
     advertiser_name = Column(String(100), nullable=False, index=True, comment='广告主名称')
     email = Column(String(255), nullable=True, comment='邮箱（可选）')
     mobile = Column(String(20), nullable=True, comment='手机号')
+    advertiser_params = Column(Text, nullable=True, comment='广告主参数')
     is_active = Column(Boolean, default=True, index=True, comment='是否激活')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
     updated_at = Column(DateTime, default=get_app_now_naive,
