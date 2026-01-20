@@ -44,13 +44,13 @@
       stripe
       style="width: 100%"
     >
-      <el-table-column prop="id" label="ID" width="100" align="center" />
+      <el-table-column prop="id" label="ID" width="80" align="center" />
       <el-table-column prop="short_code" label="短链接代码" width="100" show-overflow-tooltip>
         <template #default="scope">
           <el-tag type="primary">{{ scope.row.short_code }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="short_url" label="短链接" width="370" show-overflow-tooltip>
+      <el-table-column prop="short_url" label="短链接" width="350" show-overflow-tooltip>
         <template #default="scope">
           <el-link :href="scope.row.short_url" target="_blank" type="primary">
             {{ scope.row.short_url }}
