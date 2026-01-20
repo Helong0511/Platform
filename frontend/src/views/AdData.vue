@@ -253,6 +253,7 @@
       v-model="columnSettingVisible"
       title="列显示设置"
       width="400px"
+      :append-to-body="true"
       @close="saveColumnVisibility"
     >
       <el-checkbox-group v-model="columnVisibilityArray">
@@ -284,7 +285,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
+import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../store';
 import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElTag, ElIcon, ElLoading, ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Download, Search, Delete, InfoFilled, Setting } from '@element-plus/icons-vue';

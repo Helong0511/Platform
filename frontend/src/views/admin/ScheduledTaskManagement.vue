@@ -86,14 +86,6 @@
       <template #header>
         <div class="table-header">
           <span>任务列表</span>
-          <el-button 
-            type="text" 
-            :icon="Setting" 
-            @click="columnSettingVisible = true"
-            style="float: right;"
-          >
-            列设置
-          </el-button>
         </div>
       </template>
       <el-table
@@ -280,29 +272,6 @@
       </template>
     </el-dialog>
 
-    <!-- 列设置对话框 -->
-    <el-dialog
-      v-model="columnSettingVisible"
-      title="列显示设置"
-      width="400px"
-      @close="saveColumnVisibility"
-    >
-      <el-checkbox-group v-model="columnVisibilityArray">
-        <el-checkbox label="id" :disabled="true">ID（固定显示）</el-checkbox>
-        <el-checkbox label="task_name" :disabled="true">任务名称（固定显示）</el-checkbox>
-        <el-checkbox label="description">描述</el-checkbox>
-        <el-checkbox label="cron_expression">Cron表达式</el-checkbox>
-        <el-checkbox label="function_name">执行函数</el-checkbox>
-        <el-checkbox label="is_active">状态</el-checkbox>
-        <el-checkbox label="last_run_time">上次执行</el-checkbox>
-        <el-checkbox label="run_count">执行统计</el-checkbox>
-        <el-checkbox label="last_error">最后错误</el-checkbox>
-      </el-checkbox-group>
-      <template #footer>
-        <el-button @click="columnSettingVisible = false">取消</el-button>
-        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -310,7 +279,7 @@
 import { ref, reactive, onMounted, onUnmounted, computed, onBeforeUnmount, watch, nextTick } from 'vue';
 import { onBeforeRouteLeave, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Search, Refresh, VideoPlay, Unlock, Document, Folder, Setting } from '@element-plus/icons-vue';
+import { Search, Refresh, VideoPlay, Unlock, Document, Folder } from '@element-plus/icons-vue';
 import {
   getScheduledTasks,
   updateScheduledTask,
@@ -328,7 +297,6 @@ const { isMobile } = useDevice();
 // 响应式数据
 const loading = ref(false);
 const tasks = ref([]);
-const columnSettingVisible = ref(false);
 const searchForm = reactive({
   task_name: '',
   is_active: null,
@@ -735,8 +703,6 @@ const authStore = useAuthStore();
 
 // 初始化
 onMounted(async () => {
-  // 加载列显示设置
-  loadColumnVisibility()
   // 路由守卫已经处理了认证检查，这里不需要重复检查
   // 延迟加载数据，让页面先渲染出来
   await nextTick();

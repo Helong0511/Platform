@@ -304,7 +304,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Plus, Search, Refresh, Edit, Delete, Switch, Setting } from '@element-plus/icons-vue'
 import { getCaps, createCap, updateCap, deleteCap } from '@/api/cap'
 import { getOffers } from '@/api/offer'

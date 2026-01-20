@@ -317,7 +317,7 @@ import { useRouter } from 'vue-router';
 import { 
   ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, 
   ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage, 
-  ElDescriptions, ElDescriptionsItem, ElDatePicker, ElAlert
+  ElDescriptions, ElDescriptionsItem, ElDatePicker, ElAlert, ElCheckboxGroup, ElCheckbox
 } from 'element-plus';
 import { Search, Refresh, Loading, Setting } from '@element-plus/icons-vue';
 import { useAuthStore } from '../../store';

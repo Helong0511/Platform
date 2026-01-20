@@ -937,7 +937,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, nextTick, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Plus, Search, Refresh, Edit, Delete, Box, View, DocumentCopy, Loading, InfoFilled, User, Setting } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import { getOffers, createOffer, updateOffer, deleteOffer, getOffer, checkOfferShortLink } from '@/api/offer'

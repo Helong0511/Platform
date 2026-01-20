@@ -131,6 +131,31 @@
       </div>
     </el-card>
 
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="400px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibilityArray">
+        <el-checkbox label="id" :disabled="true">渠道ID（固定显示）</el-checkbox>
+        <el-checkbox label="publisher_name" :disabled="true">渠道名称（固定显示）</el-checkbox>
+        <el-checkbox label="client_name">关联客户</el-checkbox>
+        <el-checkbox label="email">邮箱</el-checkbox>
+        <el-checkbox label="price_discount">价格折扣</el-checkbox>
+        <el-checkbox label="postback_url">Postback URL</el-checkbox>
+        <el-checkbox label="postback_method">Postback方法</el-checkbox>
+        <el-checkbox label="active_advertiser_count">活跃广告主数</el-checkbox>
+        <el-checkbox label="is_active">状态</el-checkbox>
+        <el-checkbox label="created_at">创建时间</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 编辑对话框 -->
     <el-dialog
       v-model="dialogVisible"
@@ -362,7 +387,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Plus, Search, Refresh, Edit, Delete, Connection, InfoFilled, Warning, Setting } from '@element-plus/icons-vue'
 import { getPublishers, createPublisher, updatePublisher, deletePublisher } from '@/api/publisher'
 import { getClientList } from '@/api/client'
@@ -372,6 +397,7 @@ import { formatDate } from '@/utils/date'
 const loading = ref(false)
 const submitting = ref(false)
 const dialogVisible = ref(false)
+const columnSettingVisible = ref(false)
 const isEdit = ref(false)
 const searchKeyword = ref('')
 const filterActive = ref(null)
@@ -837,6 +863,7 @@ const handlePageChange = (page) => {
 }
 
 onMounted(() => {
+  loadColumnVisibility()
   loadClients()
   loadData()
 })

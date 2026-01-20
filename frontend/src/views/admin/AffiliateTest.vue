@@ -246,7 +246,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Plus, Search, Refresh, View, Download, Setting } from '@element-plus/icons-vue'
 import { getAffiliateTests, createAffiliateTest } from '@/api/affiliateTest'
 import { getPublishers } from '@/api/publisher'

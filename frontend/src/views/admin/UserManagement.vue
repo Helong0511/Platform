@@ -537,7 +537,7 @@ import { useRouter } from 'vue-router';
 import { 
   ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, 
   ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage, ElMessageBox, 
-  ElDivider, ElSwitch, ElDescriptions, ElDescriptionsItem, ElRow, ElCol
+  ElDivider, ElSwitch, ElDescriptions, ElDescriptionsItem, ElRow, ElCol, ElCheckboxGroup, ElCheckbox
 } from 'element-plus';
 import { 
   Plus, Search, Refresh, Lock, Unlock, Delete, View, Edit, Box, InfoFilled, Key, Setting

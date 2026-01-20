@@ -8,14 +8,6 @@
             <span class="header-title">扣减统计</span>
           </div>
           <div class="header-right">
-            <el-button 
-              type="text" 
-              :icon="Setting" 
-              @click="columnSettingVisible = true"
-              style="margin-right: 10px;"
-            >
-              列设置
-            </el-button>
             <el-button type="primary" :icon="Download" @click="handleExport" :disabled="loading">导出统计</el-button>
             <el-button :icon="Refresh" @click="handleRefresh">刷新</el-button>
           </div>
@@ -250,10 +242,10 @@
           stripe
           style="width: 100%; margin-top: 20px;"
         >
-          <el-table-column v-if="columnVisibility.advertiser_name" prop="advertiser_name" label="广告主" min-width="150" show-overflow-tooltip />
-          <el-table-column v-if="columnVisibility.offer_name" prop="offer_name" label="Offer" min-width="150" show-overflow-tooltip />
-          <el-table-column v-if="columnVisibility.publisher_name" prop="publisher_name" label="渠道" min-width="150" show-overflow-tooltip />
-          <el-table-column v-if="columnVisibility.volume_stats" label="扣量统计" align="center">
+          <el-table-column prop="advertiser_name" label="广告主" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="offer_name" label="Offer" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="publisher_name" label="渠道" min-width="150" show-overflow-tooltip />
+          <el-table-column label="扣量统计" align="center">
             <el-table-column prop="original_volume" label="原始数量" width="100" align="right">
               <template #default="scope">
                 <span>{{ scope.row.original_volume || 0 }}</span>
@@ -277,7 +269,7 @@
               </template>
             </el-table-column>
           </el-table-column>
-          <el-table-column v-if="columnVisibility.amount_stats" label="扣金额统计" align="center">
+          <el-table-column label="扣金额统计" align="center">
             <el-table-column prop="original_amount" label="原始金额" width="120" align="right">
               <template #default="scope">
                 {{ formatCurrency(scope.row.original_amount || 0) }}
@@ -307,33 +299,13 @@
       <!-- 无数据提示 -->
       <el-empty v-if="!loading && detailStats.length === 0" description="暂无详细统计数据" />
     </el-card>
-
-    <!-- 列设置对话框 -->
-    <el-dialog
-      v-model="columnSettingVisible"
-      title="列显示设置"
-      width="400px"
-      @close="saveColumnVisibility"
-    >
-      <el-checkbox-group v-model="columnVisibilityArray">
-        <el-checkbox label="advertiser_name">广告主</el-checkbox>
-        <el-checkbox label="offer_name">Offer</el-checkbox>
-        <el-checkbox label="publisher_name">渠道</el-checkbox>
-        <el-checkbox label="volume_stats">扣量统计</el-checkbox>
-        <el-checkbox label="amount_stats">扣金额统计</el-checkbox>
-      </el-checkbox-group>
-      <template #footer>
-        <el-button @click="columnSettingVisible = false">取消</el-button>
-        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, nextTick, watch, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Search, Refresh, DataAnalysis, Download, Setting } from '@element-plus/icons-vue'
+import { Search, Refresh, DataAnalysis, Download } from '@element-plus/icons-vue'
 import { getDeductionStats } from '@/api/deduction'
 import { getAdvertisers } from '@/api/advertiser'
 import { getOffers } from '@/api/offer'
@@ -370,63 +342,6 @@ const filterForm = reactive({
 const advertiserOptions = ref([])
 const offerOptions = ref([])
 const publisherOptions = ref([])
-
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  advertiser_name: true,
-  offer_name: true,
-  publisher_name: true,
-  volume_stats: true,
-  amount_stats: true
-})
-
-const columnVisibility = reactive(getDefaultColumnVisibility())
-
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    // 当 checkbox-group 的值变化时，更新对象
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('deductionStats_columnVisibility')
-    if (saved) {
-      const savedVisibility = JSON.parse(saved)
-      // 合并保存的设置和默认设置
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
-    }
-  } catch (error) {
-    logger.error('加载列显示设置失败:', error)
-  }
-}
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    const toSave = {
-      advertiser_name: columnVisibility.advertiser_name,
-      offer_name: columnVisibility.offer_name,
-      publisher_name: columnVisibility.publisher_name,
-      volume_stats: columnVisibility.volume_stats,
-      amount_stats: columnVisibility.amount_stats
-    }
-    localStorage.setItem('deductionStats_columnVisibility', JSON.stringify(toSave))
-    columnSettingVisible.value = false
-    ElMessage.success('列显示设置已保存')
-  } catch (error) {
-    logger.error('保存列显示设置失败:', error)
-    ElMessage.error('保存设置失败')
-  }
-}
 
 // 格式化货币
 const formatCurrency = (amount) => {

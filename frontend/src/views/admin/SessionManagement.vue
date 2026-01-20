@@ -258,7 +258,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Search, Refresh, Delete, Setting } from '@element-plus/icons-vue';
 import { 
   getMySessions, 

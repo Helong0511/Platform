@@ -328,7 +328,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElTooltip, ElDescriptions, ElDescriptionsItem } from 'element-plus'
+import { ElMessage, ElTooltip, ElDescriptions, ElDescriptionsItem, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Search, Refresh, Document, Download, Setting } from '@element-plus/icons-vue'
 import { getDeductionLogs } from '@/api/deduction'
 import { getAdvertisers } from '@/api/advertiser'

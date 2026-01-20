@@ -282,7 +282,7 @@
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Search, Refresh, DataAnalysis, Mouse, Check, TrendCharts, Money, Setting } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { getConversionSummary } from '@/api/conversionSummary'

@@ -248,7 +248,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Mouse, Setting } from '@element-plus/icons-vue'
 import { getClicks } from '@/api/clicks'
 import { getOffers } from '@/api/offer'

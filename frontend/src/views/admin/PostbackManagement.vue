@@ -648,7 +648,7 @@ import {
   ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, 
   ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage, ElMessageBox,
   ElDescriptions, ElDescriptionsItem, ElDatePicker, ElInputNumber, ElRow, ElCol, ElLink,
-  ElDropdown, ElDropdownMenu, ElDropdownItem
+  ElDropdown, ElDropdownMenu, ElDropdownItem, ElCheckboxGroup, ElCheckbox
 } from 'element-plus';
 import { Search, Refresh, Loading, Bell, ArrowDown, Setting } from '@element-plus/icons-vue';
 import { getPostbackConversions, getPostbackStats, updateConversionStatus } from '../../api/postback';

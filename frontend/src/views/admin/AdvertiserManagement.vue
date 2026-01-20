@@ -174,7 +174,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Plus, Search, Refresh, Edit, Delete, User, Setting } from '@element-plus/icons-vue'
 import { getAdvertisers, createAdvertiser, updateAdvertiser, deleteAdvertiser } from '@/api/advertiser'
 import { logger } from '@/utils/logger'
@@ -183,6 +183,7 @@ import { formatDate } from '@/utils/date'
 const loading = ref(false)
 const submitting = ref(false)
 const dialogVisible = ref(false)
+const columnSettingVisible = ref(false)
 const isEdit = ref(false)
 const searchKeyword = ref('')
 const filterActive = ref(null)
@@ -463,6 +464,7 @@ const handlePageChange = (page) => {
 }
 
 onMounted(() => {
+  loadColumnVisibility()
   loadData()
 })
 </script>
