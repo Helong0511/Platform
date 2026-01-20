@@ -116,3 +116,19 @@ export const deleteIpWhitelist = async (id) => {
     method: 'delete'
   }, { returnDataOnly: true });
 };
+
+/**
+ * 批量创建 IP 白名单
+ * @param {Object} data - 批量创建数据
+ * @param {Array<string>} data.ip_addresses - IP地址列表
+ * @param {string} [data.description] - 描述（应用于所有IP）
+ * @param {boolean} [data.is_active] - 是否启用（应用于所有IP）
+ * @returns {Promise<Object>} 批量创建结果
+ */
+export const batchCreateIpWhitelist = async (data) => {
+  return request({
+    url: '/api/v1/postback/ip-whitelist/batch',
+    method: 'post',
+    data
+  }, { returnDataOnly: true });
+};

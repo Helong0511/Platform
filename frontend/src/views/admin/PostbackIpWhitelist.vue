@@ -9,8 +9,11 @@
         </p>
       </div>
       <div class="header-right">
-        <el-button type="primary" :icon="Plus" @click="handleCreate">
+        <el-button :icon="Plus" @click="handleCreate">
           添加 IP
+        </el-button>
+        <el-button type="primary" :icon="Plus" @click="handleBatchCreate">
+          批量添加
         </el-button>
       </div>
     </div>
@@ -185,6 +188,57 @@
       </template>
     </el-dialog>
 
+    <!-- 批量添加对话框 -->
+    <el-dialog
+      v-model="batchDialogVisible"
+      title="批量添加 IP"
+      :width="isMobile ? '95%' : '700px'"
+      :close-on-click-modal="false"
+      :append-to-body="true"
+    >
+      <el-form
+        ref="batchFormRef"
+        :model="batchFormData"
+        :rules="batchFormRules"
+        label-width="100px"
+      >
+        <el-form-item label="IP地址列表" prop="ip_addresses_text">
+          <el-input 
+            v-model="batchFormData.ip_addresses_text" 
+            type="textarea"
+            :rows="10"
+            placeholder="请输入IP地址，每行一个，或用逗号分隔&#10;例如：&#10;43.130.108.206&#10;192.168.1.1&#10;或者：43.130.108.206, 192.168.1.1, 10.0.0.1"
+          />
+          <div class="form-tip">
+            支持换行或逗号分隔，每行/每个IP地址会自动验证格式。最多支持100个IP地址。
+          </div>
+        </el-form-item>
+        <el-form-item label="描述" prop="description">
+          <el-input 
+            v-model="batchFormData.description" 
+            type="textarea"
+            :rows="3"
+            placeholder="请输入IP地址的描述或备注（可选，将应用于所有IP）"
+            maxlength="255"
+            show-word-limit
+          />
+        </el-form-item>
+        <el-form-item label="状态" prop="is_active">
+          <el-switch 
+            v-model="batchFormData.is_active"
+            active-text="启用"
+            inactive-text="禁用"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="batchDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleBatchSubmit" :loading="batchSubmitting">
+          确定
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- 列设置对话框 -->
     <el-dialog
       v-model="columnSettingVisible"
@@ -217,7 +271,7 @@ import {
   ElSwitch, ElCheckboxGroup, ElCheckbox
 } from 'element-plus';
 import { Search, Refresh, Plus, Setting } from '@element-plus/icons-vue';
-import { getIpWhitelist, createIpWhitelist, updateIpWhitelist, deleteIpWhitelist } from '../../api/postback';
+import { getIpWhitelist, createIpWhitelist, updateIpWhitelist, deleteIpWhitelist, batchCreateIpWhitelist } from '../../api/postback';
 import { formatDateTime } from '../../utils/dateFormat';
 import { useDevice } from '../../composables/useDevice';
 
@@ -228,6 +282,7 @@ const { isMobile } = useDevice();
 const whitelistItems = ref([]);
 const loading = ref(false);
 const submitting = ref(false);
+const batchSubmitting = ref(false);
 const columnSettingVisible = ref(false);
 const pagination = reactive({
   page: 1,
@@ -310,6 +365,15 @@ const currentEditId = ref(null);
 const formRef = ref(null);
 const formData = reactive({
   ip_address: '',
+  description: '',
+  is_active: true
+});
+
+// 批量添加对话框
+const batchDialogVisible = ref(false);
+const batchFormRef = ref(null);
+const batchFormData = reactive({
+  ip_addresses_text: '',
   description: '',
   is_active: true
 });
@@ -409,6 +473,78 @@ const checkIpDuplicate = async (ipAddress, excludeId = null) => {
   }
 };
 
+// 解析IP地址文本（支持换行和逗号分隔）
+const parseIpAddresses = (text) => {
+  if (!text || !text.trim()) {
+    return [];
+  }
+  
+  // 先按换行分割，再按逗号分割
+  const lines = text.split(/\r?\n/);
+  const ipList = [];
+  
+  for (const line of lines) {
+    // 按逗号分割
+    const parts = line.split(',');
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (trimmed) {
+        ipList.push(trimmed);
+      }
+    }
+  }
+  
+  // 去重
+  return [...new Set(ipList)];
+};
+
+// 批量表单验证规则
+const batchFormRules = {
+  ip_addresses_text: [
+    { required: true, message: '请输入IP地址列表', trigger: 'blur' },
+    {
+      validator: (rule, value, callback) => {
+        if (!value || !value.trim()) {
+          callback(new Error('请输入IP地址列表'));
+          return;
+        }
+        
+        const ipList = parseIpAddresses(value);
+        
+        if (ipList.length === 0) {
+          callback(new Error('没有有效的IP地址'));
+          return;
+        }
+        
+        if (ipList.length > 100) {
+          callback(new Error('一次最多只能添加100个IP地址'));
+          return;
+        }
+        
+        // 验证每个IP地址格式
+        const invalidIps = [];
+        for (const ip of ipList) {
+          const formatResult = validateIpAddress(ip);
+          if (formatResult !== true) {
+            invalidIps.push(`${ip} (${formatResult})`);
+          }
+        }
+        
+        if (invalidIps.length > 0) {
+          callback(new Error(`以下IP地址格式无效：\n${invalidIps.slice(0, 5).join('\n')}${invalidIps.length > 5 ? `\n... 还有 ${invalidIps.length - 5} 个` : ''}`));
+          return;
+        }
+        
+        callback();
+      },
+      trigger: 'blur'
+    }
+  ],
+  description: [
+    { max: 255, message: '描述不能超过255个字符', trigger: 'blur' }
+  ]
+};
+
 // 表单验证规则
 const formRules = {
   ip_address: [
@@ -501,6 +637,93 @@ const handleCreate = () => {
   // 清除表单验证
   if (formRef.value) {
     formRef.value.clearValidate();
+  }
+};
+
+// 批量创建
+const handleBatchCreate = () => {
+  batchFormData.ip_addresses_text = '';
+  batchFormData.description = '';
+  batchFormData.is_active = true;
+  batchDialogVisible.value = true;
+  // 清除表单验证
+  if (batchFormRef.value) {
+    batchFormRef.value.clearValidate();
+  }
+};
+
+// 批量提交
+const handleBatchSubmit = async () => {
+  if (!batchFormRef.value) return;
+  
+  try {
+    await batchFormRef.value.validate();
+    
+    // 解析IP地址列表
+    const ipList = parseIpAddresses(batchFormData.ip_addresses_text);
+    
+    if (ipList.length === 0) {
+      ElMessage.error('没有有效的IP地址');
+      return;
+    }
+    
+    // 再次验证格式
+    const invalidIps = [];
+    for (const ip of ipList) {
+      const formatResult = validateIpAddress(ip);
+      if (formatResult !== true) {
+        invalidIps.push(ip);
+      }
+    }
+    
+    if (invalidIps.length > 0) {
+      ElMessage.error(`以下IP地址格式无效：${invalidIps.slice(0, 5).join(', ')}${invalidIps.length > 5 ? ` 等 ${invalidIps.length} 个` : ''}`);
+      return;
+    }
+    
+    batchSubmitting.value = true;
+    
+    try {
+      const response = await batchCreateIpWhitelist({
+        ip_addresses: ipList,
+        description: batchFormData.description || null,
+        is_active: batchFormData.is_active
+      });
+      
+      const successCount = response.success_count || 0;
+      const failedCount = response.failed_count || 0;
+      const totalCount = response.total_count || 0;
+      
+      let message = `批量添加完成：成功 ${successCount} 个`;
+      if (failedCount > 0) {
+        message += `，失败 ${failedCount} 个`;
+        // 显示失败详情
+        if (response.failed_items && response.failed_items.length > 0) {
+          const failedDetails = response.failed_items.slice(0, 5).map(item => 
+            `${item.ip_address}: ${item.error}`
+          ).join('\n');
+          ElMessage.warning({
+            message: message + `\n失败详情：\n${failedDetails}${response.failed_items.length > 5 ? `\n... 还有 ${response.failed_items.length - 5} 个失败项` : ''}`,
+            duration: 8000,
+            showClose: true
+          });
+        } else {
+          ElMessage.warning(message);
+        }
+      } else {
+        ElMessage.success(message);
+      }
+      
+      batchDialogVisible.value = false;
+      fetchList();
+    } catch (error) {
+      const errorMessage = error?.response?.data?.detail || error?.message || '批量创建失败，请稍后重试';
+      ElMessage.error(errorMessage);
+    } finally {
+      batchSubmitting.value = false;
+    }
+  } catch (error) {
+    // 表单验证失败，错误信息已由验证规则显示
   }
 };
 

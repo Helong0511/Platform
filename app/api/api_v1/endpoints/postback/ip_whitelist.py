@@ -75,6 +75,51 @@ class PostbackIpWhitelistResponse(BaseModel):
         from_attributes = True
 
 
+class PostbackIpWhitelistBatchCreate(BaseModel):
+    """批量创建 IP 白名单请求"""
+    ip_addresses: List[str] = Field(..., description="IP地址列表（支持IPv4和IPv6）")
+    description: Optional[str] = Field(None, max_length=255, description="IP地址描述/备注（应用于所有IP）")
+    is_active: bool = Field(True, description="是否启用（应用于所有IP）")
+    
+    @validator('ip_addresses')
+    def validate_ip_addresses(cls, v):
+        """验证 IP 地址列表格式"""
+        if not v or len(v) == 0:
+            raise ValueError("IP地址列表不能为空")
+        if len(v) > 100:
+            raise ValueError("一次最多只能添加100个IP地址")
+        
+        validated_ips = []
+        for ip in v:
+            if not ip or not ip.strip():
+                continue
+            trimmed_ip = ip.strip()
+            try:
+                ipaddress.ip_address(trimmed_ip)
+                validated_ips.append(trimmed_ip)
+            except ValueError:
+                raise ValueError(f"无效的 IP 地址格式: {trimmed_ip}")
+        
+        if len(validated_ips) == 0:
+            raise ValueError("没有有效的IP地址")
+        
+        # 去重
+        unique_ips = list(dict.fromkeys(validated_ips))
+        return unique_ips
+
+
+class PostbackIpWhitelistBatchCreateResponse(BaseModel):
+    """批量创建 IP 白名单响应"""
+    success_count: int = Field(..., description="成功创建的数量")
+    failed_count: int = Field(..., description="创建失败的数量")
+    total_count: int = Field(..., description="总数量")
+    created_items: List[PostbackIpWhitelistResponse] = Field(..., description="成功创建的记录")
+    failed_items: List[dict] = Field(default_factory=list, description="创建失败的记录（包含IP和错误信息）")
+    
+    class Config:
+        from_attributes = True
+
+
 # ====== API 端点 ======
 
 @router.get("/postback/ip-whitelist",
@@ -267,6 +312,100 @@ async def update_ip_whitelist(
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"更新失败：{str(e)}"
+        )
+
+
+@router.post("/postback/ip-whitelist/batch",
+             response_model=ResponseBaseSchema[PostbackIpWhitelistBatchCreateResponse],
+             summary="批量创建 Postback IP 白名单（管理员）")
+async def batch_create_ip_whitelist(
+    request: Request,
+    data: PostbackIpWhitelistBatchCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    批量创建 Postback IP 白名单（仅管理员）
+    支持一次添加多个IP地址，自动跳过已存在的IP
+    """
+    
+    try:
+        created_items = []
+        failed_items = []
+        
+        # 查询所有已存在的IP地址
+        existing_result = await db.execute(
+            select(PostbackIpWhitelist.ip_address)
+        )
+        existing_ips = {row.ip_address.strip() for row in existing_result.all()}
+        
+        # 批量创建
+        for ip_address in data.ip_addresses:
+            trimmed_ip = ip_address.strip()
+            
+            # 检查是否已存在
+            if trimmed_ip in existing_ips:
+                failed_items.append({
+                    "ip_address": trimmed_ip,
+                    "error": "IP地址已存在于白名单中"
+                })
+                continue
+            
+            try:
+                # 创建新记录
+                whitelist_item = PostbackIpWhitelist(
+                    ip_address=trimmed_ip,
+                    description=data.description,
+                    is_active=data.is_active
+                )
+                
+                db.add(whitelist_item)
+                # 添加到已存在集合，避免同一批次重复
+                existing_ips.add(trimmed_ip)
+                created_items.append(whitelist_item)
+                
+            except Exception as e:
+                failed_items.append({
+                    "ip_address": trimmed_ip,
+                    "error": str(e)
+                })
+                logger.warning(f"创建IP白名单失败: {trimmed_ip}, 错误: {str(e)}")
+        
+        # 提交所有成功的记录
+        if created_items:
+            await db.commit()
+            # 刷新所有创建的记录
+            for item in created_items:
+                await db.refresh(item)
+        
+        success_count = len(created_items)
+        failed_count = len(failed_items)
+        total_count = len(data.ip_addresses)
+        
+        logger.info(
+            f"管理员 {current_user.username} 批量创建 IP 白名单: "
+            f"总数={total_count}, 成功={success_count}, 失败={failed_count}"
+        )
+        
+        return ResponseBaseSchema.success(
+            data=PostbackIpWhitelistBatchCreateResponse(
+                success_count=success_count,
+                failed_count=failed_count,
+                total_count=total_count,
+                created_items=[PostbackIpWhitelistResponse.model_validate(item) for item in created_items],
+                failed_items=failed_items
+            ),
+            message=f"批量创建完成：成功 {success_count} 个，失败 {failed_count} 个，共 {total_count} 个"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"批量创建 IP 白名单失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"批量创建失败：{str(e)}"
         )
 
 
