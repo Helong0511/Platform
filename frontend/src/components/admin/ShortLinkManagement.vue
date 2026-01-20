@@ -169,13 +169,41 @@
       @generate-code="handleGenerateCode"
       @close="handleDialogClose"
     />
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="400px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibilityArray">
+        <el-checkbox label="id">ID</el-checkbox>
+        <el-checkbox label="short_code" :disabled="true">短代码（固定显示）</el-checkbox>
+        <el-checkbox label="short_url" :disabled="true">短链接（固定显示）</el-checkbox>
+        <el-checkbox label="original_url">原始URL</el-checkbox>
+        <el-checkbox label="title">标题</el-checkbox>
+        <el-checkbox label="description">描述</el-checkbox>
+        <el-checkbox label="offer_id">Offer</el-checkbox>
+        <el-checkbox label="channel_id">渠道</el-checkbox>
+        <el-checkbox label="creator_name">创建者</el-checkbox>
+        <el-checkbox label="click_count">点击数</el-checkbox>
+        <el-checkbox label="expires_at">过期时间</el-checkbox>
+        <el-checkbox label="is_active">状态</el-checkbox>
+        <el-checkbox label="created_at">创建时间</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
-import { ElMessage, ElMessageBox, ElStatistic } from 'element-plus';
+import { ElMessage, ElMessageBox, ElStatistic, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Plus, Search, DocumentCopy, InfoFilled, Refresh, Setting } from '@element-plus/icons-vue';
 import {
   createShortLink,
@@ -243,6 +271,19 @@ const getDefaultColumnVisibility = () => ({
 });
 
 const columnVisibility = reactive(getDefaultColumnVisibility());
+
+// 计算属性：将对象转换为数组，用于 el-checkbox-group
+const columnVisibilityArray = computed({
+  get: () => {
+    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
+  },
+  set: (value) => {
+    // 当 checkbox-group 的值变化时，更新对象
+    Object.keys(columnVisibility).forEach(key => {
+      columnVisibility[key] = value.includes(key)
+    })
+  }
+})
 
 // 从localStorage加载列显示设置
 const loadColumnVisibility = () => {

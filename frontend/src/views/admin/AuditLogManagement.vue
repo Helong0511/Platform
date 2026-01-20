@@ -117,6 +117,14 @@
       <template #header>
         <div class="table-header">
           <span>日志列表</span>
+          <el-button 
+            type="text" 
+            :icon="Setting" 
+            @click="columnSettingVisible = true"
+            style="float: right;"
+          >
+            列设置
+          </el-button>
         </div>
       </template>
       <el-table
@@ -126,35 +134,35 @@
         stripe
         style="width: 100%"
       >
-        <el-table-column prop="id" label="ID" width="80" align="center" />
-        <el-table-column prop="username" label="用户名" width="120" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.id" prop="id" label="ID" width="80" align="center" />
+        <el-table-column v-if="columnVisibility.username" prop="username" label="用户名" width="120" show-overflow-tooltip>
           <template #default="scope">
             {{ scope.row.username || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="action_type" label="操作类型" width="120" align="center">
+        <el-table-column v-if="columnVisibility.action_type" prop="action_type" label="操作类型" width="120" align="center">
           <template #default="scope">
             <el-tag :type="getActionTypeTag(scope.row.action_type)">
               {{ getActionTypeLabel(scope.row.action_type) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="resource_type" label="资源类型" width="120" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.resource_type" prop="resource_type" label="资源类型" width="120" show-overflow-tooltip>
           <template #default="scope">
             {{ scope.row.resource_type || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="resource_name" label="资源名称" min-width="150" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.resource_name" prop="resource_name" label="资源名称" min-width="150" show-overflow-tooltip>
           <template #default="scope">
             {{ scope.row.resource_name || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="ip_address" label="IP地址" width="130" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.ip_address" prop="ip_address" label="IP地址" width="130" show-overflow-tooltip>
           <template #default="scope">
             {{ scope.row.ip_address || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="request_method" label="请求方法" width="100" align="center">
+        <el-table-column v-if="columnVisibility.request_method" prop="request_method" label="请求方法" width="100" align="center">
           <template #default="scope">
             <el-tag v-if="scope.row.request_method" size="small">
               {{ scope.row.request_method }}
@@ -162,8 +170,8 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="request_path" label="请求路径" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="status_code" label="状态码" width="100" align="center">
+        <el-table-column v-if="columnVisibility.request_path" prop="request_path" label="请求路径" min-width="200" show-overflow-tooltip />
+        <el-table-column v-if="columnVisibility.status_code" prop="status_code" label="状态码" width="100" align="center">
           <template #default="scope">
             <el-tag 
               v-if="scope.row.status_code" 
@@ -175,14 +183,14 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="success" label="状态" width="80" align="center">
+        <el-table-column v-if="columnVisibility.success" prop="success" label="状态" width="80" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.success ? 'success' : 'danger'" size="small">
               {{ scope.row.success ? '成功' : '失败' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="时间" width="180">
+        <el-table-column v-if="columnVisibility.created_at" prop="created_at" label="时间" width="180">
           <template #default="scope">
             {{ formatDateTime(scope.row.created_at) }}
           </template>
@@ -274,6 +282,32 @@
         <el-button type="primary" @click="detailDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="500px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibilityArray">
+        <el-checkbox label="id" :disabled="true">ID（固定显示）</el-checkbox>
+        <el-checkbox label="username">用户名</el-checkbox>
+        <el-checkbox label="action_type">操作类型</el-checkbox>
+        <el-checkbox label="resource_type">资源类型</el-checkbox>
+        <el-checkbox label="resource_name">资源名称</el-checkbox>
+        <el-checkbox label="ip_address">IP地址</el-checkbox>
+        <el-checkbox label="request_method">请求方法</el-checkbox>
+        <el-checkbox label="request_path">请求路径</el-checkbox>
+        <el-checkbox label="status_code">状态码</el-checkbox>
+        <el-checkbox label="success">状态</el-checkbox>
+        <el-checkbox label="created_at" :disabled="true">时间（固定显示）</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -285,11 +319,12 @@ import {
   ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage, 
   ElDescriptions, ElDescriptionsItem, ElDatePicker, ElAlert
 } from 'element-plus';
-import { Search, Refresh, Loading } from '@element-plus/icons-vue';
+import { Search, Refresh, Loading, Setting } from '@element-plus/icons-vue';
 import { useAuthStore } from '../../store';
 import { getAuditLogs, getAuditLog, getAuditLogStats } from '../../api/auditLog';
 import { formatDateTime } from '../../utils/dateFormat';
 import { useDevice } from '../../composables/useDevice';
+import { logger } from '../../utils/logger';
 
 // 设备检测
 const { isMobile } = useDevice();
@@ -298,11 +333,83 @@ const { isMobile } = useDevice();
 const logs = ref([]);
 const loading = ref(false);
 const stats = ref(null);
+const columnSettingVisible = ref(false);
 const pagination = reactive({
   page: 1,
   pageSize: 10,
   total: 0
 });
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  id: true,  // 固定显示
+  username: true,
+  action_type: true,
+  resource_type: true,
+  resource_name: true,
+  ip_address: true,
+  request_method: true,
+  request_path: true,
+  status_code: true,
+  success: true,
+  created_at: true  // 固定显示
+})
+
+const columnVisibility = reactive(getDefaultColumnVisibility())
+
+// 计算属性：将对象转换为数组，用于 el-checkbox-group
+const columnVisibilityArray = computed({
+  get: () => {
+    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
+  },
+  set: (value) => {
+    // 当 checkbox-group 的值变化时，更新对象
+    Object.keys(columnVisibility).forEach(key => {
+      columnVisibility[key] = value.includes(key)
+    })
+  }
+})
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('auditLogManagement_columnVisibility')
+    if (saved) {
+      const savedVisibility = JSON.parse(saved)
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
+      // 确保固定列始终显示
+      columnVisibility.id = true
+      columnVisibility.created_at = true
+    }
+  } catch (error) {
+    logger.error('加载列显示设置失败:', error)
+  }
+}
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      username: columnVisibility.username,
+      action_type: columnVisibility.action_type,
+      resource_type: columnVisibility.resource_type,
+      resource_name: columnVisibility.resource_name,
+      ip_address: columnVisibility.ip_address,
+      request_method: columnVisibility.request_method,
+      request_path: columnVisibility.request_path,
+      status_code: columnVisibility.status_code,
+      success: columnVisibility.success
+    }
+    localStorage.setItem('auditLogManagement_columnVisibility', JSON.stringify(toSave))
+    columnSettingVisible.value = false
+    ElMessage.success('列显示设置已保存')
+  } catch (error) {
+    logger.error('保存列显示设置失败:', error)
+    ElMessage.error('保存设置失败')
+  }
+}
 
 // 筛选表单
 const searchForm = reactive({
@@ -579,6 +686,8 @@ const authStore = useAuthStore();
 
 // 初始化
 onMounted(async () => {
+  // 加载列显示设置
+  loadColumnVisibility()
   // 路由守卫已经处理了认证检查，这里不需要重复检查
   // 延迟加载数据，让页面先渲染出来
   await nextTick();

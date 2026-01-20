@@ -53,6 +53,14 @@
       <template #header>
         <div class="table-header">
           <span>IP 白名单列表</span>
+          <el-button 
+            type="text" 
+            :icon="Setting" 
+            @click="columnSettingVisible = true"
+            style="float: right;"
+          >
+            列设置
+          </el-button>
         </div>
       </template>
       <el-table
@@ -62,20 +70,20 @@
         stripe
         style="width: 100%"
       >
-        <el-table-column prop="id" label="ID" width="80" align="center" />
-        <el-table-column prop="ip_address" label="IP地址" min-width="180" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.id" prop="id" label="ID" width="80" align="center" />
+        <el-table-column v-if="columnVisibility.ip_address" prop="ip_address" label="IP地址" min-width="180" show-overflow-tooltip>
           <template #default="scope">
             <el-tag type="primary" size="small">
               {{ scope.row.ip_address }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.description" prop="description" label="描述" min-width="200" show-overflow-tooltip>
           <template #default="scope">
             {{ scope.row.description || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="is_active" label="状态" width="100" align="center">
+        <el-table-column v-if="columnVisibility.is_active" prop="is_active" label="状态" width="100" align="center">
           <template #default="scope">
             <el-switch
               v-model="scope.row.is_active"
@@ -86,12 +94,12 @@
             />
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column v-if="columnVisibility.created_at" prop="created_at" label="创建时间" width="180">
           <template #default="scope">
             {{ formatDateTime(scope.row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column prop="updated_at" label="更新时间" width="180">
+        <el-table-column v-if="columnVisibility.updated_at" prop="updated_at" label="更新时间" width="180">
           <template #default="scope">
             {{ formatDateTime(scope.row.updated_at) }}
           </template>
@@ -176,6 +184,27 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="400px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibilityArray">
+        <el-checkbox label="id" :disabled="true">ID（固定显示）</el-checkbox>
+        <el-checkbox label="ip_address" :disabled="true">IP地址（固定显示）</el-checkbox>
+        <el-checkbox label="description">描述</el-checkbox>
+        <el-checkbox label="is_active">状态</el-checkbox>
+        <el-checkbox label="created_at">创建时间</el-checkbox>
+        <el-checkbox label="updated_at">更新时间</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -199,6 +228,7 @@ const { isMobile } = useDevice();
 const whitelistItems = ref([]);
 const loading = ref(false);
 const submitting = ref(false);
+const columnSettingVisible = ref(false);
 const pagination = reactive({
   page: 1,
   pageSize: 20,
@@ -531,6 +561,8 @@ const handleSubmit = async () => {
 
 // 初始化
 onMounted(() => {
+  // 加载列显示设置
+  loadColumnVisibility();
   fetchList();
 });
 </script>

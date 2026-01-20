@@ -84,9 +84,19 @@
     <!-- 产品信息卡片 -->
     <el-card class="products-card" shadow="never">
       <template #header>
-        <div class="card-header">
-          <el-icon :size="16"><Box /></el-icon>
-          <span>我的产品信息</span>
+        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <el-icon :size="16"><Box /></el-icon>
+            <span>我的产品信息</span>
+          </div>
+          <el-button 
+            type="text" 
+            :icon="Setting" 
+            @click="columnSettingVisible = true"
+            size="small"
+          >
+            列设置
+          </el-button>
         </div>
       </template>
       <div v-loading="productsLoading" class="products-content">
@@ -97,9 +107,9 @@
           style="width: 100%"
           empty-text="暂无产品信息"
         >
-          <el-table-column prop="id" label="ID" width="80" align="center"></el-table-column>
-          <el-table-column prop="name" label="产品名称" min-width="200"></el-table-column>
-          <el-table-column prop="created_at" label="创建时间" width="180">
+          <el-table-column v-if="columnVisibility.id" prop="id" label="ID" width="80" align="center"></el-table-column>
+          <el-table-column v-if="columnVisibility.name" prop="name" label="产品名称" min-width="200"></el-table-column>
+          <el-table-column v-if="columnVisibility.created_at" prop="created_at" label="创建时间" width="180">
             <template #default="scope">
               {{ formatDate(scope.row.created_at) }}
             </template>
@@ -107,6 +117,24 @@
         </el-table>
       </div>
     </el-card>
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="300px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibilityArray">
+        <el-checkbox label="id">ID</el-checkbox>
+        <el-checkbox label="name" :disabled="true">产品名称（固定显示）</el-checkbox>
+        <el-checkbox label="created_at">创建时间</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -115,9 +143,9 @@ import { ref, reactive, onMounted, computed, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { 
   ElCard, ElForm, ElFormItem, ElInput, ElButton, ElTable, ElTableColumn, 
-  ElTag, ElIcon, ElMessage, ElDescriptions, ElDescriptionsItem
+  ElTag, ElIcon, ElMessage, ElDescriptions, ElDescriptionsItem, ElDialog, ElCheckboxGroup, ElCheckbox
 } from 'element-plus';
-import { Lock, Box, UserFilled } from '@element-plus/icons-vue';
+import { Lock, Box, UserFilled, Setting } from '@element-plus/icons-vue';
 import { useAuthStore } from '../../store';
 import { getProductList } from '../../api/product';
 import { changePassword, getCurrentUserInfo } from '../../api/user';
@@ -176,6 +204,62 @@ const passwordRules = {
 // 产品列表
 const products = ref([]);
 const productsLoading = ref(false);
+const columnSettingVisible = ref(false);
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  id: true,
+  name: true,  // 固定显示
+  created_at: true
+})
+
+const columnVisibility = reactive(getDefaultColumnVisibility())
+
+// 计算属性：将对象转换为数组，用于 el-checkbox-group
+const columnVisibilityArray = computed({
+  get: () => {
+    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
+  },
+  set: (value) => {
+    // 当 checkbox-group 的值变化时，更新对象
+    Object.keys(columnVisibility).forEach(key => {
+      columnVisibility[key] = value.includes(key)
+    })
+  }
+})
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('clientUserManagement_columnVisibility')
+    if (saved) {
+      const savedVisibility = JSON.parse(saved)
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
+      // 确保产品名称始终显示
+      columnVisibility.name = true
+    }
+  } catch (error) {
+    console.error('加载列显示设置失败:', error)
+  }
+}
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      id: columnVisibility.id,
+      created_at: columnVisibility.created_at
+    }
+    localStorage.setItem('clientUserManagement_columnVisibility', JSON.stringify(toSave))
+    columnSettingVisible.value = false
+    ElMessage.success('列显示设置已保存')
+  } catch (error) {
+    console.error('保存列显示设置失败:', error)
+    ElMessage.error('保存设置失败')
+  }
+}
 
 // 格式化百分比
 const formatPercentage = (value) => {
@@ -278,6 +362,8 @@ const fetchProducts = async () => {
 
 // 初始化
 onMounted(async () => {
+  // 加载列显示设置
+  loadColumnVisibility()
   // 路由守卫已经处理了认证检查，这里不需要重复检查
   // 延迟加载数据，让页面先渲染出来
   await nextTick();

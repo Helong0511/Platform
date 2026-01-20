@@ -26,6 +26,7 @@ import { initAxiosConfig } from './utils/axiosConfig';
 import { initGlobalErrorHandler } from './utils/globalErrorHandler';
 import { initDomFixes } from './utils/domFixes';
 import { initCsrfTokenSync } from './utils/csrfToken';
+import { initVersionCheck } from './utils/versionCheck';
 
 // 创建Vue应用
 const app = createApp(App);
@@ -111,5 +112,14 @@ nextTick(() => {
     
     // 初始化 DOM 修复
     initDomFixes();
+    
+    // 初始化版本检查（仅在生产环境或需要时启用）
+    // 开发环境通常不需要，因为 Vite 已经有 HMR
+    // 只在页面打开时检查一次，不进行定期检查
+    if (import.meta.env.PROD) {
+      initVersionCheck({
+        enabled: true,
+      });
+    }
   }, 0);
 });

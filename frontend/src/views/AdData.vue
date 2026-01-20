@@ -86,6 +86,18 @@
 
     <!-- 数据表格 -->
     <el-card class="data-table-card">
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-weight: 600; font-size: 16px;">详细报表数据</span>
+          <el-button 
+            type="text" 
+            :icon="Setting" 
+            @click="columnSettingVisible = true"
+          >
+            列设置
+          </el-button>
+        </div>
+      </template>
       <el-table
         v-loading="loading"
         :data="adDataList"
@@ -98,24 +110,24 @@
         show-summary
       >
         <el-table-column type="selection" width="55"></el-table-column>
-        <el-table-column prop="date" label="数据日期" sortable="custom"></el-table-column>
-        <el-table-column v-if="isAdmin" prop="user_name" label="所属客户"></el-table-column>
-        <el-table-column prop="product_name" label="产品名称" sortable="custom" sort-by="product" :min-width="150"></el-table-column>
-        <el-table-column prop="country_name_zh" label="国家"></el-table-column>
-        <el-table-column prop="request_count" label="请求数" sortable="custom"></el-table-column>
-        <el-table-column prop="match_count" label="匹配数" sortable="custom"></el-table-column>
-        <el-table-column prop="coverage_rate" label="覆盖率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column prop="display_count" label="展示数" sortable="custom"></el-table-column>
-        <el-table-column prop="display_rate" label="展示率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column prop="click_count" label="点击数" sortable="custom"></el-table-column>
-        <el-table-column prop="click_rate" label="点击率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column prop="viewability_rate" label="可见率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column prop="cpc" label="CPC" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column prop="pageviews" label="PageViews" sortable="custom"></el-table-column>
-        <el-table-column prop="ecpm_after_deduct" :label="isAdmin ? 'eCPM(扣)' : 'eCPM'" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column v-if="isAdmin" prop="ecpm_before_deduct" label="eCPM" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column prop="revenue_after_deduct" :label="isAdmin ? '收益(扣)' : '收益'" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column v-if="isAdmin" prop="revenue_before_deduct" label="收益" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.date" prop="date" label="数据日期" sortable="custom"></el-table-column>
+        <el-table-column v-if="isAdmin && columnVisibility.user_name" prop="user_name" label="所属客户"></el-table-column>
+        <el-table-column v-if="columnVisibility.product_name" prop="product_name" label="产品名称" sortable="custom" sort-by="product" :min-width="150"></el-table-column>
+        <el-table-column v-if="columnVisibility.country_name_zh" prop="country_name_zh" label="国家"></el-table-column>
+        <el-table-column v-if="columnVisibility.request_count" prop="request_count" label="请求数" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.match_count" prop="match_count" label="匹配数" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.coverage_rate" prop="coverage_rate" label="覆盖率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.display_count" prop="display_count" label="展示数" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.display_rate" prop="display_rate" label="展示率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.click_count" prop="click_count" label="点击数" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.click_rate" prop="click_rate" label="点击率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.viewability_rate" prop="viewability_rate" label="可见率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.cpc" prop="cpc" label="CPC" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.pageviews" prop="pageviews" label="PageViews" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.ecpm_after_deduct" prop="ecpm_after_deduct" :label="isAdmin ? 'eCPM(扣)' : 'eCPM'" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="isAdmin && columnVisibility.ecpm_before_deduct" prop="ecpm_before_deduct" label="eCPM" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.revenue_after_deduct" prop="revenue_after_deduct" :label="isAdmin ? '收益(扣)' : '收益'" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="isAdmin && columnVisibility.revenue_before_deduct" prop="revenue_before_deduct" label="收益" :formatter="formatCurrency" sortable="custom"></el-table-column>
         <el-table-column v-if="isAdmin" label="操作" width="180">
           <template #default="scope">
             <el-button size="small" type="primary" @click="handleEdit(scope.row)">修改</el-button>
@@ -235,14 +247,47 @@
         </div>
       </template>
     </el-dialog>
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="400px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibilityArray">
+        <el-checkbox label="date" :disabled="true">数据日期（固定显示）</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="user_name">所属客户</el-checkbox>
+        <el-checkbox label="product_name" :disabled="true">产品名称（固定显示）</el-checkbox>
+        <el-checkbox label="country_name_zh">国家</el-checkbox>
+        <el-checkbox label="request_count">请求数</el-checkbox>
+        <el-checkbox label="match_count">匹配数</el-checkbox>
+        <el-checkbox label="coverage_rate">覆盖率</el-checkbox>
+        <el-checkbox label="display_count">展示数</el-checkbox>
+        <el-checkbox label="display_rate">展示率</el-checkbox>
+        <el-checkbox label="click_count">点击数</el-checkbox>
+        <el-checkbox label="click_rate">点击率</el-checkbox>
+        <el-checkbox label="viewability_rate">可见率</el-checkbox>
+        <el-checkbox label="cpc">CPC</el-checkbox>
+        <el-checkbox label="pageviews">PageViews</el-checkbox>
+        <el-checkbox label="ecpm_after_deduct">eCPM(扣)</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="ecpm_before_deduct">eCPM</el-checkbox>
+        <el-checkbox label="revenue_after_deduct">收益(扣)</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="revenue_before_deduct">收益</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../store';
-import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElTag, ElIcon, ElLoading, ElMessage, ElMessageBox } from 'element-plus';
-import { Download, Search, Delete, InfoFilled } from '@element-plus/icons-vue';
+import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElTag, ElIcon, ElLoading, ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
+import { Download, Search, Delete, InfoFilled, Setting } from '@element-plus/icons-vue';
 import { getAdDataList, exportAdData, getProductsForSelect, getClientsWithData, getProductsWithData, getCountriesWithData, updateAdData, getProductById, deleteAdData, batchDeleteAdData, getAdDataDateRange } from '../api/adData';
 import { useRouter, useRoute } from 'vue-router';
 import { getSuccessMessage, getWarningMessage } from '../utils/messages';
@@ -267,6 +312,7 @@ const filterProducts = ref([{ label: '全部产品', value: '' }]); // 筛选表
 const filterCountries = ref([{ code: '', name_zh: '全部区域' }]); // 筛选表单使用的国家列表
 const users = ref([]);
 const loading = ref(false);
+const columnSettingVisible = ref(false);
 const pagination = ref({
   current: 1,
   size: 10,
@@ -286,6 +332,91 @@ const searchForm = ref({
   productId: '',
   countryCode: '' // 国家代码筛选
 });
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  date: true,  // 固定显示
+  user_name: isAdmin.value,
+  product_name: true,  // 固定显示
+  country_name_zh: true,
+  request_count: true,
+  match_count: true,
+  coverage_rate: true,
+  display_count: true,
+  display_rate: true,
+  click_count: true,
+  click_rate: true,
+  viewability_rate: true,
+  cpc: true,
+  pageviews: true,
+  ecpm_after_deduct: true,
+  ecpm_before_deduct: isAdmin.value,
+  revenue_after_deduct: true,
+  revenue_before_deduct: isAdmin.value
+});
+
+const columnVisibility = reactive(getDefaultColumnVisibility());
+
+// 计算属性：将对象转换为数组，用于 el-checkbox-group
+const columnVisibilityArray = computed({
+  get: () => {
+    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
+  },
+  set: (value) => {
+    // 当 checkbox-group 的值变化时，更新对象
+    Object.keys(columnVisibility).forEach(key => {
+      columnVisibility[key] = value.includes(key)
+    })
+  }
+})
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('adData_columnVisibility');
+    if (saved) {
+      const savedVisibility = JSON.parse(saved);
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility);
+      // 确保固定列始终显示
+      columnVisibility.date = true;
+      columnVisibility.product_name = true;
+    }
+  } catch (error) {
+    console.error('加载列显示设置失败:', error);
+  }
+};
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      user_name: columnVisibility.user_name,
+      country_name_zh: columnVisibility.country_name_zh,
+      request_count: columnVisibility.request_count,
+      match_count: columnVisibility.match_count,
+      coverage_rate: columnVisibility.coverage_rate,
+      display_count: columnVisibility.display_count,
+      display_rate: columnVisibility.display_rate,
+      click_count: columnVisibility.click_count,
+      click_rate: columnVisibility.click_rate,
+      viewability_rate: columnVisibility.viewability_rate,
+      cpc: columnVisibility.cpc,
+      pageviews: columnVisibility.pageviews,
+      ecpm_after_deduct: columnVisibility.ecpm_after_deduct,
+      ecpm_before_deduct: columnVisibility.ecpm_before_deduct,
+      revenue_after_deduct: columnVisibility.revenue_after_deduct,
+      revenue_before_deduct: columnVisibility.revenue_before_deduct
+    };
+    localStorage.setItem('adData_columnVisibility', JSON.stringify(toSave));
+    columnSettingVisible.value = false;
+    ElMessage.success('列显示设置已保存');
+  } catch (error) {
+    console.error('保存列显示设置失败:', error);
+    ElMessage.error('保存设置失败');
+  }
+};
 
 // 格式化百分比
 // 注意：后端返回的比率已经是百分比形式（如85.5表示85.5%），所以不需要再乘以100
@@ -1421,6 +1552,9 @@ onMounted(async () => {
   // 路由守卫已经处理了认证检查，这里不需要重复检查
   // 延迟加载数据，让页面先渲染出来
   await nextTick();
+  
+  // 加载列显示设置
+  loadColumnVisibility();
   
   mountedTimeoutId = setTimeout(async () => {
     await loadPageData();

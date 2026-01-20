@@ -251,7 +251,7 @@
       width="400px"
       @close="saveColumnVisibility"
     >
-      <el-checkbox-group v-model="columnVisibility">
+      <el-checkbox-group v-model="columnVisibilityArray">
         <el-checkbox label="id" :disabled="true">ID（固定显示）</el-checkbox>
         <el-checkbox label="level">层级</el-checkbox>
         <el-checkbox label="target_name" :disabled="true">配置对象（固定显示）</el-checkbox>
@@ -566,6 +566,19 @@ const getDefaultColumnVisibility = () => ({
 })
 
 const columnVisibility = reactive(getDefaultColumnVisibility())
+
+// 计算属性：将对象转换为数组，用于 el-checkbox-group
+const columnVisibilityArray = computed({
+  get: () => {
+    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
+  },
+  set: (value) => {
+    // 当 checkbox-group 的值变化时，更新对象
+    Object.keys(columnVisibility).forEach(key => {
+      columnVisibility[key] = value.includes(key)
+    })
+  }
+})
 
 // 从localStorage加载列显示设置
 const loadColumnVisibility = () => {

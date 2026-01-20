@@ -117,13 +117,46 @@
         ></el-pagination>
       </div>
     </el-card>
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="400px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibilityArray">
+        <el-checkbox label="date" :disabled="true">数据日期（固定显示）</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="user_name">所属客户</el-checkbox>
+        <el-checkbox label="product_name" :disabled="true">产品名称（固定显示）</el-checkbox>
+        <el-checkbox label="country_name_zh">国家</el-checkbox>
+        <el-checkbox label="request_count">请求数</el-checkbox>
+        <el-checkbox label="match_count">匹配数</el-checkbox>
+        <el-checkbox label="coverage_rate">覆盖率</el-checkbox>
+        <el-checkbox label="display_count">展示数</el-checkbox>
+        <el-checkbox label="display_rate">展示率</el-checkbox>
+        <el-checkbox label="click_count">点击数</el-checkbox>
+        <el-checkbox label="click_rate">点击率</el-checkbox>
+        <el-checkbox label="viewability_rate">可见率</el-checkbox>
+        <el-checkbox label="cpc">CPC</el-checkbox>
+        <el-checkbox label="pageviews">PageViews</el-checkbox>
+        <el-checkbox label="ecpm_after_deduct">eCPM(扣)</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="ecpm_before_deduct">eCPM</el-checkbox>
+        <el-checkbox label="revenue_after_deduct">收益(扣)</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="revenue_before_deduct">收益</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../../store';
-import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElIcon, ElMessage } from 'element-plus';
+import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElIcon, ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Download, InfoFilled, Setting } from '@element-plus/icons-vue';
 import { getDailySummary, exportAdData, getClientsWithData, getProductsWithData, getAdDataDateRange } from '../../api/adData';
 import { useRouter } from 'vue-router';
@@ -164,6 +197,91 @@ const searchForm = ref({
   dateRange: [],
   productId: ''
 });
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  date: true,  // 固定显示
+  user_name: isAdmin.value,
+  product_name: true,  // 固定显示
+  country_name_zh: true,
+  request_count: true,
+  match_count: true,
+  coverage_rate: true,
+  display_count: true,
+  display_rate: true,
+  click_count: true,
+  click_rate: true,
+  viewability_rate: true,
+  cpc: true,
+  pageviews: true,
+  ecpm_after_deduct: true,
+  ecpm_before_deduct: isAdmin.value,
+  revenue_after_deduct: true,
+  revenue_before_deduct: isAdmin.value
+});
+
+const columnVisibility = reactive(getDefaultColumnVisibility());
+
+// 计算属性：将对象转换为数组，用于 el-checkbox-group
+const columnVisibilityArray = computed({
+  get: () => {
+    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
+  },
+  set: (value) => {
+    // 当 checkbox-group 的值变化时，更新对象
+    Object.keys(columnVisibility).forEach(key => {
+      columnVisibility[key] = value.includes(key)
+    })
+  }
+})
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('dailyReport_columnVisibility');
+    if (saved) {
+      const savedVisibility = JSON.parse(saved);
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility);
+      // 确保固定列始终显示
+      columnVisibility.date = true;
+      columnVisibility.product_name = true;
+    }
+  } catch (error) {
+    console.error('加载列显示设置失败:', error);
+  }
+};
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      user_name: columnVisibility.user_name,
+      country_name_zh: columnVisibility.country_name_zh,
+      request_count: columnVisibility.request_count,
+      match_count: columnVisibility.match_count,
+      coverage_rate: columnVisibility.coverage_rate,
+      display_count: columnVisibility.display_count,
+      display_rate: columnVisibility.display_rate,
+      click_count: columnVisibility.click_count,
+      click_rate: columnVisibility.click_rate,
+      viewability_rate: columnVisibility.viewability_rate,
+      cpc: columnVisibility.cpc,
+      pageviews: columnVisibility.pageviews,
+      ecpm_after_deduct: columnVisibility.ecpm_after_deduct,
+      ecpm_before_deduct: columnVisibility.ecpm_before_deduct,
+      revenue_after_deduct: columnVisibility.revenue_after_deduct,
+      revenue_before_deduct: columnVisibility.revenue_before_deduct
+    };
+    localStorage.setItem('dailyReport_columnVisibility', JSON.stringify(toSave));
+    columnSettingVisible.value = false;
+    ElMessage.success('列显示设置已保存');
+  } catch (error) {
+    console.error('保存列显示设置失败:', error);
+    ElMessage.error('保存设置失败');
+  }
+};
 
 // 格式化百分比
 const formatPercentage = (row, column, value) => {

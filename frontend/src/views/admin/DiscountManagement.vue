@@ -70,32 +70,42 @@
       </div>
 
       <!-- 表格 -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px; margin-bottom: 10px;">
+        <span style="font-weight: 600;">扣量配置列表</span>
+        <el-button 
+          type="text" 
+          :icon="Setting" 
+          @click="columnSettingVisible = true"
+        >
+          列设置
+        </el-button>
+      </div>
       <el-table
         v-loading="loading"
         :data="tableData"
         stripe
-        style="width: 100%; margin-top: 20px;"
+        style="width: 100%;"
       >
-        <el-table-column prop="discount_type" label="扣量类型" width="120" align="center">
+        <el-table-column v-if="columnVisibility.discount_type" prop="discount_type" label="扣量类型" width="120" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.discount_type === 'offer' ? 'warning' : 'primary'">
               {{ scope.row.discount_type }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="offer_name" label="Offer" min-width="200" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.offer_name" prop="offer_name" label="Offer" min-width="200" show-overflow-tooltip>
           <template #default="scope">
             <span v-if="scope.row.offer_name">{{ scope.row.offer_name }}</span>
             <span v-else class="text-info">渠道级别</span>
           </template>
         </el-table-column>
-        <el-table-column prop="publisher_name" label="渠道" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="discount_ratio" label="扣量比例" width="120" align="right">
+        <el-table-column v-if="columnVisibility.publisher_name" prop="publisher_name" label="渠道" min-width="150" show-overflow-tooltip />
+        <el-table-column v-if="columnVisibility.discount_ratio" prop="discount_ratio" label="扣量比例" width="120" align="right">
           <template #default="scope">
             <el-tag type="danger">{{ scope.row.discount_ratio }}%</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="is_active" label="状态" width="100" align="center">
+        <el-table-column v-if="columnVisibility.is_active" prop="is_active" label="状态" width="100" align="center">
           <template #default="scope">
             <el-switch
               v-model="scope.row.is_active"
@@ -106,7 +116,7 @@
             />
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180">
+        <el-table-column v-if="columnVisibility.created_at" prop="created_at" label="创建时间" width="180">
           <template #default="scope">
             {{ formatDate(scope.row.created_at) }}
           </template>
@@ -215,13 +225,34 @@
         <el-button type="primary" :loading="submitting" @click="handleSubmit">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="400px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibilityArray">
+        <el-checkbox label="discount_type">扣量类型</el-checkbox>
+        <el-checkbox label="offer_name">Offer</el-checkbox>
+        <el-checkbox label="publisher_name">渠道</el-checkbox>
+        <el-checkbox label="discount_ratio">扣量比例</el-checkbox>
+        <el-checkbox label="is_active">状态</el-checkbox>
+        <el-checkbox label="created_at">创建时间</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Refresh, Edit, Delete, Discount } from '@element-plus/icons-vue'
+import { ref, reactive, computed, onMounted } from 'vue'
+import { ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
+import { Plus, Search, Refresh, Edit, Delete, Discount, Setting } from '@element-plus/icons-vue'
 import { getDiscounts, createDiscount, updateDiscount, deleteDiscount } from '@/api/discount'
 import { getOffers } from '@/api/offer'
 import { getPublishers } from '@/api/publisher'
@@ -247,6 +278,66 @@ const pagination = reactive({
 const tableData = ref([])
 const offerList = ref([])
 const publisherList = ref([])
+const columnSettingVisible = ref(false)
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  discount_type: true,
+  offer_name: true,
+  publisher_name: true,
+  discount_ratio: true,
+  is_active: true,
+  created_at: true
+})
+
+const columnVisibility = reactive(getDefaultColumnVisibility())
+
+// 计算属性：将对象转换为数组，用于 el-checkbox-group
+const columnVisibilityArray = computed({
+  get: () => {
+    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
+  },
+  set: (value) => {
+    // 当 checkbox-group 的值变化时，更新对象
+    Object.keys(columnVisibility).forEach(key => {
+      columnVisibility[key] = value.includes(key)
+    })
+  }
+})
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('discountManagement_columnVisibility')
+    if (saved) {
+      const savedVisibility = JSON.parse(saved)
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
+    }
+  } catch (error) {
+    console.error('加载列显示设置失败:', error)
+  }
+}
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    const toSave = {
+      discount_type: columnVisibility.discount_type,
+      offer_name: columnVisibility.offer_name,
+      publisher_name: columnVisibility.publisher_name,
+      discount_ratio: columnVisibility.discount_ratio,
+      is_active: columnVisibility.is_active,
+      created_at: columnVisibility.created_at
+    }
+    localStorage.setItem('discountManagement_columnVisibility', JSON.stringify(toSave))
+    columnSettingVisible.value = false
+    ElMessage.success('列显示设置已保存')
+  } catch (error) {
+    console.error('保存列显示设置失败:', error)
+    ElMessage.error('保存设置失败')
+  }
+}
 
 const formData = reactive({
   discount_type: 'offer',
@@ -494,6 +585,7 @@ const handlePageChange = (page) => {
 }
 
 onMounted(() => {
+  loadColumnVisibility()
   loadOffers()
   loadPublishers()
   loadData()

@@ -48,6 +48,14 @@
           <template #header>
             <div class="table-header">
               <span>会话列表</span>
+              <el-button 
+                type="text" 
+                :icon="Setting" 
+                @click="columnSettingVisible = true"
+                style="float: right;"
+              >
+                列设置
+              </el-button>
             </div>
           </template>
           <el-table
@@ -221,13 +229,37 @@
         </el-card>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="400px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibilityArray">
+        <el-checkbox label="id" :disabled="true">ID（固定显示）</el-checkbox>
+        <el-checkbox label="ip_address">IP地址</el-checkbox>
+        <el-checkbox label="device_info">设备信息</el-checkbox>
+        <el-checkbox label="user_agent">用户代理</el-checkbox>
+        <el-checkbox label="location">位置</el-checkbox>
+        <el-checkbox label="is_active">状态</el-checkbox>
+        <el-checkbox label="created_at" :disabled="true">登录时间（固定显示）</el-checkbox>
+        <el-checkbox label="last_activity">最后活动</el-checkbox>
+        <el-checkbox label="expires_at">过期时间</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Search, Refresh, Delete } from '@element-plus/icons-vue';
+import { Search, Refresh, Delete, Setting } from '@element-plus/icons-vue';
 import { 
   getMySessions, 
   revokeMySession, 
@@ -236,6 +268,7 @@ import {
 } from '@/api/session';
 import { useAuthStore } from '@/store';
 import { formatDate } from '@/utils/date';
+import { logger } from '@/utils/logger';
 
 // 认证store
 const authStore = useAuthStore();
@@ -244,6 +277,73 @@ const isAdmin = computed(() => authStore.isAdmin);
 // 标签页
 const activeTab = ref('sessions');
 
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  id: true,  // 固定显示
+  ip_address: true,
+  device_info: true,
+  user_agent: true,
+  location: true,
+  is_active: true,
+  created_at: true,  // 固定显示
+  last_activity: true,
+  expires_at: true
+})
+
+const columnVisibility = reactive(getDefaultColumnVisibility())
+
+// 计算属性：将对象转换为数组，用于 el-checkbox-group
+const columnVisibilityArray = computed({
+  get: () => {
+    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
+  },
+  set: (value) => {
+    // 当 checkbox-group 的值变化时，更新对象
+    Object.keys(columnVisibility).forEach(key => {
+      columnVisibility[key] = value.includes(key)
+    })
+  }
+})
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('sessionManagement_columnVisibility')
+    if (saved) {
+      const savedVisibility = JSON.parse(saved)
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
+      // 确保固定列始终显示
+      columnVisibility.id = true
+      columnVisibility.created_at = true
+    }
+  } catch (error) {
+    logger.error('加载列显示设置失败:', error)
+  }
+}
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      ip_address: columnVisibility.ip_address,
+      device_info: columnVisibility.device_info,
+      user_agent: columnVisibility.user_agent,
+      location: columnVisibility.location,
+      is_active: columnVisibility.is_active,
+      last_activity: columnVisibility.last_activity,
+      expires_at: columnVisibility.expires_at
+    }
+    localStorage.setItem('sessionManagement_columnVisibility', JSON.stringify(toSave))
+    columnSettingVisible.value = false
+    ElMessage.success('列显示设置已保存')
+  } catch (error) {
+    logger.error('保存列显示设置失败:', error)
+    ElMessage.error('保存设置失败')
+  }
+}
+
 // 会话相关
 const loading = ref(false);
 const revokingAll = ref(false);
@@ -251,6 +351,7 @@ const sessions = ref([]);
 const sessionsPage = ref(1);
 const sessionsPageSize = ref(10);
 const sessionsTotal = ref(0);
+const columnSettingVisible = ref(false);
 
 // 黑名单相关
 const blacklistLoading = ref(false);
@@ -400,6 +501,8 @@ const handleBlacklistSizeChange = (size) => {
 
 // 初始化
 onMounted(() => {
+  // 加载列显示设置
+  loadColumnVisibility()
   fetchSessions();
 });
 </script>

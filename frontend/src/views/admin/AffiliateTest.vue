@@ -7,7 +7,17 @@
             <el-icon class="header-icon"><Download /></el-icon>
             <span class="header-title">下游测试</span>
           </div>
-          <el-button type="primary" :icon="Plus" @click="handleAdd">创建测试</el-button>
+          <div class="header-right">
+            <el-button 
+              type="text" 
+              :icon="Setting" 
+              @click="columnSettingVisible = true"
+              style="margin-right: 10px;"
+            >
+              列设置
+            </el-button>
+            <el-button type="primary" :icon="Plus" @click="handleAdd">创建测试</el-button>
+          </div>
         </div>
       </template>
 
@@ -65,30 +75,30 @@
         stripe
         style="width: 100%; margin-top: 20px;"
       >
-        <el-table-column prop="publisher_name" label="渠道" width="150" show-overflow-tooltip />
-        <el-table-column prop="offer_name" label="Offer" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="click_id" label="Click ID" min-width="200" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.publisher_name" prop="publisher_name" label="渠道" width="150" show-overflow-tooltip />
+        <el-table-column v-if="columnVisibility.offer_name" prop="offer_name" label="Offer" min-width="200" show-overflow-tooltip />
+        <el-table-column v-if="columnVisibility.click_id" prop="click_id" label="Click ID" min-width="200" show-overflow-tooltip>
           <template #default="scope">
             <el-button type="primary" link @click="copyToClipboard(scope.row.click_id)">
               {{ scope.row.click_id }}
             </el-button>
           </template>
         </el-table-column>
-        <el-table-column prop="price" label="价格" width="100" align="right">
+        <el-table-column v-if="columnVisibility.price" prop="price" label="价格" width="100" align="right">
           <template #default="scope">
             <span v-if="scope.row.price">{{ scope.row.price.toFixed(2) }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="country" label="国家" width="100" align="center" />
-        <el-table-column prop="status" label="状态" width="120" align="center">
+        <el-table-column v-if="columnVisibility.country" prop="country" label="国家" width="100" align="center" />
+        <el-table-column v-if="columnVisibility.status" prop="status" label="状态" width="120" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.status === 'Send Success' ? 'success' : 'danger'">
               {{ scope.row.status }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="postback_time" label="发送时间" width="180">
+        <el-table-column v-if="columnVisibility.postback_time" prop="postback_time" label="发送时间" width="180">
           <template #default="scope">
             {{ formatDate(scope.row.postback_time) }}
           </template>
@@ -209,13 +219,35 @@
         </el-descriptions-item>
       </el-descriptions>
     </el-dialog>
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="400px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibilityArray">
+        <el-checkbox label="publisher_name">渠道</el-checkbox>
+        <el-checkbox label="offer_name" :disabled="true">Offer（固定显示）</el-checkbox>
+        <el-checkbox label="click_id" :disabled="true">Click ID（固定显示）</el-checkbox>
+        <el-checkbox label="price">价格</el-checkbox>
+        <el-checkbox label="country">国家</el-checkbox>
+        <el-checkbox label="status">状态</el-checkbox>
+        <el-checkbox label="postback_time">发送时间</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus, Search, Refresh, View, Download } from '@element-plus/icons-vue'
+import { Plus, Search, Refresh, View, Download, Setting } from '@element-plus/icons-vue'
 import { getAffiliateTests, createAffiliateTest } from '@/api/affiliateTest'
 import { getPublishers } from '@/api/publisher'
 import { getOffers } from '@/api/offer'
@@ -241,6 +273,70 @@ const tableData = ref([])
 const publisherList = ref([])
 const offerList = ref([])
 const currentTest = ref(null)
+const columnSettingVisible = ref(false)
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  publisher_name: true,
+  offer_name: true,  // 固定显示
+  click_id: true,  // 固定显示
+  price: true,
+  country: true,
+  status: true,
+  postback_time: true
+})
+
+const columnVisibility = reactive(getDefaultColumnVisibility())
+
+// 计算属性：将对象转换为数组，用于 el-checkbox-group
+const columnVisibilityArray = computed({
+  get: () => {
+    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
+  },
+  set: (value) => {
+    // 当 checkbox-group 的值变化时，更新对象
+    Object.keys(columnVisibility).forEach(key => {
+      columnVisibility[key] = value.includes(key)
+    })
+  }
+})
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('affiliateTest_columnVisibility')
+    if (saved) {
+      const savedVisibility = JSON.parse(saved)
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
+      // 确保固定列始终显示
+      columnVisibility.offer_name = true
+      columnVisibility.click_id = true
+    }
+  } catch (error) {
+    console.error('加载列显示设置失败:', error)
+  }
+}
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      publisher_name: columnVisibility.publisher_name,
+      price: columnVisibility.price,
+      country: columnVisibility.country,
+      status: columnVisibility.status,
+      postback_time: columnVisibility.postback_time
+    }
+    localStorage.setItem('affiliateTest_columnVisibility', JSON.stringify(toSave))
+    columnSettingVisible.value = false
+    ElMessage.success('列显示设置已保存')
+  } catch (error) {
+    console.error('保存列显示设置失败:', error)
+    ElMessage.error('保存设置失败')
+  }
+}
 
 const formData = reactive({
   publisher_id: null,
@@ -388,6 +484,8 @@ const handlePageChange = (page) => {
 }
 
 onMounted(() => {
+  // 加载列显示设置
+  loadColumnVisibility()
   loadPublishers()
   loadOffers()
   loadData()

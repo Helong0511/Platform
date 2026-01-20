@@ -205,7 +205,7 @@
       width="400px"
       @close="saveColumnVisibility"
     >
-      <el-checkbox-group v-model="columnVisibility">
+      <el-checkbox-group v-model="columnVisibilityArray">
         <el-checkbox label="date" :disabled="true">DATE（固定显示）</el-checkbox>
         <el-checkbox v-if="isAdmin" label="user_name">所属客户</el-checkbox>
         <el-checkbox label="product_name" :disabled="true">SUBID（固定显示）</el-checkbox>
@@ -230,7 +230,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed, nextTick } from 'vue';
 import { useAuthStore } from '../../store';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Upload, Delete, Setting } from '@element-plus/icons-vue';
 import { getTBSearchDataList, updateTBSearchData, deleteTBSearchData, batchDeleteTBSearchData, importTBSearchData, getClientsWithTBSearchData, getProductsWithTBSearchData, getCountriesWithTBSearchData } from '../../api/tbSearchData';
 import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../../utils/api';
@@ -260,6 +260,79 @@ const searchForm = ref({
   countryCode: ''
 });
 
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  date: true,  // 固定显示
+  user_name: isAdmin.value,
+  product_name: true,  // 固定显示
+  country_name_zh: true,
+  redirects: true,
+  searches: true,
+  monetized: true,
+  clicks: true,
+  revenue: true,
+  revenue_before_deduct: isAdmin.value,
+  rpm: true,
+  rpm_before_deduct: isAdmin.value
+});
+
+const columnVisibility = reactive(getDefaultColumnVisibility());
+
+// 计算属性：将对象转换为数组，用于 el-checkbox-group
+const columnVisibilityArray = computed({
+  get: () => {
+    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
+  },
+  set: (value) => {
+    // 当 checkbox-group 的值变化时，更新对象
+    Object.keys(columnVisibility).forEach(key => {
+      columnVisibility[key] = value.includes(key)
+    })
+  }
+})
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('tbSearchData_columnVisibility');
+    if (saved) {
+      const savedVisibility = JSON.parse(saved);
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility);
+      // 确保固定列始终显示
+      columnVisibility.date = true;
+      columnVisibility.product_name = true;
+    }
+  } catch (error) {
+    console.error('加载列显示设置失败:', error);
+  }
+};
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      user_name: columnVisibility.user_name,
+      country_name_zh: columnVisibility.country_name_zh,
+      redirects: columnVisibility.redirects,
+      searches: columnVisibility.searches,
+      monetized: columnVisibility.monetized,
+      clicks: columnVisibility.clicks,
+      revenue: columnVisibility.revenue,
+      revenue_before_deduct: columnVisibility.revenue_before_deduct,
+      rpm: columnVisibility.rpm,
+      rpm_before_deduct: columnVisibility.rpm_before_deduct
+    };
+    localStorage.setItem('tbSearchData_columnVisibility', JSON.stringify(toSave));
+    columnSettingVisible.value = false;
+    ElMessage.success('列显示设置已保存');
+  } catch (error) {
+    console.error('保存列显示设置失败:', error);
+    ElMessage.error('保存设置失败');
+  }
+};
+
 const sortInfo = ref({
   prop: 'date',
   order: 'descending'
@@ -269,6 +342,8 @@ const editDialogVisible = ref(false);
 const editForm = ref({});
 
 onMounted(async () => {
+  // 加载列显示设置
+  loadColumnVisibility();
   await loadFilterOptions();
   fetchData();
 });

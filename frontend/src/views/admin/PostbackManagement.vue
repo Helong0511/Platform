@@ -600,6 +600,41 @@ Postback 转化管理页面
       :publisher-id="selectedPublisherId"
       @update:modelValue="handleNotificationDialogClose"
     />
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="500px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibilityArray">
+        <el-checkbox label="id" :disabled="true">ID（固定显示）</el-checkbox>
+        <el-checkbox label="platform">平台</el-checkbox>
+        <el-checkbox label="conversion_id" :disabled="true">转化ID/点击ID（固定显示）</el-checkbox>
+        <el-checkbox label="click_offer_name">关联Offer</el-checkbox>
+        <el-checkbox label="click_publisher_name">关联渠道</el-checkbox>
+        <el-checkbox label="click_advertiser_name">关联广告主</el-checkbox>
+        <el-checkbox label="click_time">点击时间</el-checkbox>
+        <el-checkbox label="conversion_status">转化状态</el-checkbox>
+        <el-checkbox label="event_name">事件名称</el-checkbox>
+        <el-checkbox label="event_value">事件价值</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="original_payout">PayOut</el-checkbox>
+        <el-checkbox label="payout">PayOut(扣)</el-checkbox>
+        <el-checkbox label="devad_id">设备ID</el-checkbox>
+        <el-checkbox label="os">操作系统</el-checkbox>
+        <el-checkbox label="carrier">运营商</el-checkbox>
+        <el-checkbox label="gid">渠道（gid）</el-checkbox>
+        <el-checkbox label="product_id">产品</el-checkbox>
+        <el-checkbox label="client_id">客户</el-checkbox>
+        <el-checkbox label="created_at">创建时间</el-checkbox>
+        <el-checkbox label="has_notification">通知状态</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -670,6 +705,19 @@ const getDefaultColumnVisibility = () => ({
 });
 
 const columnVisibility = reactive(getDefaultColumnVisibility());
+
+// 计算属性：将对象转换为数组，用于 el-checkbox-group
+const columnVisibilityArray = computed({
+  get: () => {
+    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
+  },
+  set: (value) => {
+    // 当 checkbox-group 的值变化时，更新对象
+    Object.keys(columnVisibility).forEach(key => {
+      columnVisibility[key] = value.includes(key)
+    })
+  }
+})
 
 // 从localStorage加载列显示设置
 const loadColumnVisibility = () => {

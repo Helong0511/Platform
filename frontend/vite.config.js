@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
+import { versionPlugin } from './vite-plugin-version.js'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -90,7 +91,10 @@ export default defineConfig({
     emptyOutDir: true,
   },
 
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    versionPlugin(), // 版本文件生成插件
+  ],
 
   // 优化配置
   optimizeDeps: {

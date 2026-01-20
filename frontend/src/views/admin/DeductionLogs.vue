@@ -8,6 +8,14 @@
             <span class="header-title">扣减日志</span>
           </div>
           <div class="header-right">
+            <el-button 
+              type="text" 
+              :icon="Setting" 
+              @click="columnSettingVisible = true"
+              style="margin-right: 10px;"
+            >
+              列设置
+            </el-button>
             <el-button type="primary" :icon="Download" @click="handleExport" :disabled="loading">导出日志</el-button>
           </div>
         </div>
@@ -290,13 +298,38 @@
         />
       </div>
     </el-card>
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="400px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibilityArray">
+        <el-checkbox label="id" :disabled="true">ID（固定显示）</el-checkbox>
+        <el-checkbox label="conversion_id">转化ID</el-checkbox>
+        <el-checkbox label="click_id" :disabled="true">点击ID（固定显示）</el-checkbox>
+        <el-checkbox label="advertiser_name">广告主</el-checkbox>
+        <el-checkbox label="offer_name">Offer</el-checkbox>
+        <el-checkbox label="publisher_name">渠道</el-checkbox>
+        <el-checkbox label="volume_deduction">扣量信息</el-checkbox>
+        <el-checkbox label="amount_deduction">扣金额信息</el-checkbox>
+        <el-checkbox label="deduction_strategy">扣减策略</el-checkbox>
+        <el-checkbox label="created_at">创建时间</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElTooltip, ElDescriptions, ElDescriptionsItem } from 'element-plus'
-import { Search, Refresh, Document, Download } from '@element-plus/icons-vue'
+import { Search, Refresh, Document, Download, Setting } from '@element-plus/icons-vue'
 import { getDeductionLogs } from '@/api/deduction'
 import { getAdvertisers } from '@/api/advertiser'
 import { getOffers } from '@/api/offer'
@@ -308,6 +341,7 @@ const tableData = ref([])
 const dateRange = ref([])
 const detailDialogVisible = ref(false)
 const currentLog = ref(null)
+const columnSettingVisible = ref(false)
 
 const searchForm = reactive({
   start_time: null,
@@ -328,6 +362,75 @@ const pagination = reactive({
 const advertiserOptions = ref([])
 const offerOptions = ref([])
 const publisherOptions = ref([])
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  id: true,  // 固定显示
+  conversion_id: true,
+  click_id: true,  // 固定显示
+  advertiser_name: true,
+  offer_name: true,
+  publisher_name: true,
+  volume_deduction: true,
+  amount_deduction: true,
+  deduction_strategy: true,
+  created_at: true
+})
+
+const columnVisibility = reactive(getDefaultColumnVisibility())
+
+// 计算属性：将对象转换为数组，用于 el-checkbox-group
+const columnVisibilityArray = computed({
+  get: () => {
+    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
+  },
+  set: (value) => {
+    // 当 checkbox-group 的值变化时，更新对象
+    Object.keys(columnVisibility).forEach(key => {
+      columnVisibility[key] = value.includes(key)
+    })
+  }
+})
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('deductionLogs_columnVisibility')
+    if (saved) {
+      const savedVisibility = JSON.parse(saved)
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
+      // 确保固定列始终显示
+      columnVisibility.id = true
+      columnVisibility.click_id = true
+    }
+  } catch (error) {
+    logger.error('加载列显示设置失败:', error)
+  }
+}
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      conversion_id: columnVisibility.conversion_id,
+      advertiser_name: columnVisibility.advertiser_name,
+      offer_name: columnVisibility.offer_name,
+      publisher_name: columnVisibility.publisher_name,
+      volume_deduction: columnVisibility.volume_deduction,
+      amount_deduction: columnVisibility.amount_deduction,
+      deduction_strategy: columnVisibility.deduction_strategy,
+      created_at: columnVisibility.created_at
+    }
+    localStorage.setItem('deductionLogs_columnVisibility', JSON.stringify(toSave))
+    columnSettingVisible.value = false
+    ElMessage.success('列显示设置已保存')
+  } catch (error) {
+    logger.error('保存列显示设置失败:', error)
+    ElMessage.error('保存设置失败')
+  }
+}
 
 // 格式化货币
 const formatCurrency = (amount) => {
@@ -568,6 +671,8 @@ const loadOptions = async () => {
 }
 
 onMounted(() => {
+  // 加载列显示设置
+  loadColumnVisibility()
   // 设置默认时间范围（最近7天）
   const end = new Date()
   const start = new Date()

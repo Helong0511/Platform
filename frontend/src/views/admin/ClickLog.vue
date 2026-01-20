@@ -7,6 +7,15 @@
             <el-icon class="header-icon"><Mouse /></el-icon>
             <span class="header-title">短链接访问记录</span>
           </div>
+          <div class="header-right">
+            <el-button 
+              type="text" 
+              :icon="Setting" 
+              @click="columnSettingVisible = true"
+            >
+              列设置
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -161,7 +170,7 @@
               <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="conversion_id" label="转化ID" width="100" align="center">
+          <el-table-column v-if="columnVisibility.conversion_id" prop="conversion_id" label="转化ID" width="100" align="center">
             <template #default="scope">
               <el-tag v-if="scope.row.conversion_id" type="success" size="small">
                 已转化
@@ -203,14 +212,44 @@
       v-model="detailDialogVisible"
       :detail="currentDetail"
     />
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="500px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibilityArray">
+        <el-checkbox label="click_id" :disabled="true">Click ID（固定显示）</el-checkbox>
+        <el-checkbox label="click_time" :disabled="true">访问时间（固定显示）</el-checkbox>
+        <el-checkbox label="offer_name">Offer</el-checkbox>
+        <el-checkbox label="publisher_name">渠道</el-checkbox>
+        <el-checkbox label="advertiser_name">广告主</el-checkbox>
+        <el-checkbox label="short_code">短链接代码</el-checkbox>
+        <el-checkbox label="ip">IP地址</el-checkbox>
+        <el-checkbox label="country">国家</el-checkbox>
+        <el-checkbox label="device_type">设备类型</el-checkbox>
+        <el-checkbox label="os">操作系统</el-checkbox>
+        <el-checkbox label="browser">浏览器</el-checkbox>
+        <el-checkbox label="device_brand">设备品牌</el-checkbox>
+        <el-checkbox label="is_bot">机器人</el-checkbox>
+        <el-checkbox label="referer">来源页面</el-checkbox>
+        <el-checkbox label="conversion_id">转化ID</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Mouse } from '@element-plus/icons-vue'
+import { Mouse, Setting } from '@element-plus/icons-vue'
 import { getClicks } from '@/api/clicks'
 import { getOffers } from '@/api/offer'
 import { getPublishers } from '@/api/publisher'
@@ -244,6 +283,86 @@ const offerList = ref([])
 const publisherList = ref([])
 const detailDialogVisible = ref(false)
 const currentDetail = ref(null)
+const columnSettingVisible = ref(false)
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  click_id: true,  // 固定显示
+  click_time: true,  // 固定显示
+  offer_name: true,
+  publisher_name: true,
+  advertiser_name: true,
+  short_code: true,
+  ip: true,
+  country: true,
+  device_type: true,
+  os: true,
+  browser: true,
+  device_brand: true,
+  is_bot: true,
+  referer: true,
+  conversion_id: true
+})
+
+const columnVisibility = reactive(getDefaultColumnVisibility())
+
+// 计算属性：将对象转换为数组，用于 el-checkbox-group
+const columnVisibilityArray = computed({
+  get: () => {
+    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
+  },
+  set: (value) => {
+    // 当 checkbox-group 的值变化时，更新对象
+    Object.keys(columnVisibility).forEach(key => {
+      columnVisibility[key] = value.includes(key)
+    })
+  }
+})
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('clickLog_columnVisibility')
+    if (saved) {
+      const savedVisibility = JSON.parse(saved)
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
+      // 确保固定列始终显示
+      columnVisibility.click_id = true
+      columnVisibility.click_time = true
+    }
+  } catch (error) {
+    logger.error('加载列显示设置失败:', error)
+  }
+}
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      offer_name: columnVisibility.offer_name,
+      publisher_name: columnVisibility.publisher_name,
+      advertiser_name: columnVisibility.advertiser_name,
+      short_code: columnVisibility.short_code,
+      ip: columnVisibility.ip,
+      country: columnVisibility.country,
+      device_type: columnVisibility.device_type,
+      os: columnVisibility.os,
+      browser: columnVisibility.browser,
+      device_brand: columnVisibility.device_brand,
+      is_bot: columnVisibility.is_bot,
+      referer: columnVisibility.referer,
+      conversion_id: columnVisibility.conversion_id
+    }
+    localStorage.setItem('clickLog_columnVisibility', JSON.stringify(toSave))
+    columnSettingVisible.value = false
+    ElMessage.success('列显示设置已保存')
+  } catch (error) {
+    logger.error('保存列显示设置失败:', error)
+    ElMessage.error('保存设置失败')
+  }
+}
 
 // 防抖定时器
 let searchDebounceTimer = null
@@ -376,6 +495,8 @@ const handlePageChange = (page) => {
 }
 
 onMounted(() => {
+  // 加载列显示设置
+  loadColumnVisibility()
   loadOffers()
   loadPublishers()
   
