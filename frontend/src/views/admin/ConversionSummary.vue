@@ -121,7 +121,15 @@
           >
             <el-table-column prop="offer_id" label="Offer ID" width="100" align="right" fixed="left">
               <template #default="scope">
-                <span v-if="scope.row.offer_id">{{ scope.row.offer_id }}</span>
+                <el-link
+                  v-if="scope.row.offer_id"
+                  type="primary"
+                  :underline="false"
+                  @click="handleOfferClick(scope.row.offer_id)"
+                  style="cursor: pointer;"
+                >
+                  {{ scope.row.offer_id }}
+                </el-link>
                 <span v-else>-</span>
               </template>
             </el-table-column>
@@ -131,7 +139,7 @@
                   v-if="scope.row.offer_name"
                   type="primary"
                   :underline="false"
-                  @click="handleOfferNameClick(scope.row.offer_name)"
+                  @click="handleOfferClick(scope.row.offer_id)"
                   style="cursor: pointer;"
                 >
                   {{ scope.row.offer_name }}
@@ -334,12 +342,12 @@ const handleReset = () => {
   loadData()
 }
 
-// 点击Offer Name新开窗口
-const handleOfferNameClick = (offerName) => {
-  if (offerName) {
+// 点击Offer ID或Offer Name跳转到Offer管理详情
+const handleOfferClick = (offerId) => {
+  if (offerId) {
     const route = router.resolve({
       name: 'OfferManagement',
-      query: { offer_name: offerName }
+      query: { offer_id: offerId }
     })
     window.open(route.href, '_blank')
   }

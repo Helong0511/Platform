@@ -1883,14 +1883,57 @@ const handlePageChange = (page) => {
   loadData()
 }
 
-onMounted(() => {
+onMounted(async () => {
   loadAdvertisers()
   loadPublishers()
   
-  // 检查路由查询参数，如果有offer_name，自动搜索
+  // 检查路由查询参数
+  const offerId = route.query.offer_id
   const offerName = route.query.offer_name
-  if (offerName) {
-    // 设置搜索关键词为offer_name
+  
+  if (offerId) {
+    // 如果有offer_id，直接打开详情对话框
+    try {
+      // 先加载数据列表
+      await loadData()
+      // 在表格数据中查找对应的offer
+      let offer = tableData.value.find(item => item.id === Number(offerId))
+      if (!offer) {
+        // 如果第一页没找到，尝试搜索
+        searchKeyword.value = String(offerId)
+        await handleSearch()
+        await nextTick()
+        offer = tableData.value.find(item => item.id === Number(offerId))
+      }
+      
+      if (offer) {
+        // 找到对应的offer，打开详情对话框
+        await handleViewDetails(offer)
+      } else {
+        // 如果还是没找到，尝试直接通过ID获取（可能不在当前筛选条件下）
+        try {
+          const offerData = await getOffer(Number(offerId))
+          if (offerData) {
+            // 创建一个临时对象用于显示详情
+            const tempOffer = { id: Number(offerId), ...offerData }
+            await handleViewDetails(tempOffer)
+          } else {
+            ElMessage.warning('未找到对应的Offer')
+            loadData()
+          }
+        } catch (error) {
+          logger.error('通过ID获取Offer失败:', error)
+          ElMessage.warning('未找到对应的Offer')
+          loadData()
+        }
+      }
+    } catch (error) {
+      logger.error('打开Offer详情失败:', error)
+      ElMessage.error('打开详情失败')
+      loadData()
+    }
+  } else if (offerName) {
+    // 如果有offer_name，自动搜索
     searchKeyword.value = String(offerName)
     // 执行搜索
     nextTick(() => {
