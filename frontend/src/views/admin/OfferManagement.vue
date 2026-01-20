@@ -463,22 +463,6 @@
           </div>
         </el-form-item>
 
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="Postback URL" prop="postback_url">
-              <el-input v-model="formData.postback_url" placeholder="Postback URL（可选）" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="Postback方法" prop="postback_method">
-              <el-select v-model="formData.postback_method" style="width: 100%;">
-                <el-option label="GET" value="GET" />
-                <el-option label="POST" value="POST" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-
         <el-divider content-position="left">
           <el-icon :size="16" style="vertical-align: middle; margin-right: 4px;"><User /></el-icon>
           <span style="font-weight: 600; font-size: 15px;">渠道配置</span>
