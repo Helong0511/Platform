@@ -23,6 +23,10 @@ MAX_DEADLOCK_RETRIES = 5  # 增加重试次数
 DEADLOCK_RETRY_BASE_DELAY = 0.3  # 增加基础延迟（秒），减少并发冲突
 MAX_RECURSION_DEPTH = 10  # 批次拆分最大递归深度，防止栈溢出（批次大小5最多递归3次）
 
+# 记录锁定重试配置
+LOCK_RETRY_MAX_ATTEMPTS = 2  # 记录被锁定时最大重试次数
+LOCK_RETRY_DELAY = 0.05  # 记录被锁定时重试延迟（秒），50毫秒
+
 # 死锁统计（用于监控）
 _deadlock_stats = {
     "total_deadlocks": 0,
@@ -782,37 +786,82 @@ async def _batch_update_click_counts_with_retry(
         
         # 使用SELECT FOR UPDATE SKIP LOCKED先锁定记录，避免死锁
         # 这样可以确保只更新能够立即锁定的记录，跳过已被其他事务锁定的记录
+        # 增加重试机制：如果记录被锁定，等待一小段时间后重试，而不是立即跳过
         locked_short_codes = [code for code, _, _ in locked_batch]
         where_placeholders = ", ".join([f":code_{i}" for i in range(len(locked_short_codes))])
         select_params = {f"code_{i}": code for i, code in enumerate(locked_short_codes)}
         
-        # 先查询并锁定记录（使用SKIP LOCKED跳过已被锁定的记录）
-        select_result = await db.execute(
-            text(f"""
-                SELECT short_code 
-                FROM short_links 
-                WHERE short_code IN ({where_placeholders})
-                ORDER BY short_code
-                FOR UPDATE SKIP LOCKED
-            """),
-            select_params
-        )
+        # 尝试锁定记录，带重试机制
+        # 如果记录被短暂锁定，等待一小段时间后重试，而不是立即跳过
+        successfully_locked_batch = []
+        skipped_batch = []
+        remaining_batch = locked_batch.copy()
         
-        # 获取成功锁定的short_code
-        locked_codes_set = {row[0] for row in select_result.fetchall()}
-        
-        # 过滤出成功锁定的批次项
-        successfully_locked_batch = [item for item in locked_batch if item[0] in locked_codes_set]
-        skipped_batch = [item for item in locked_batch if item[0] not in locked_codes_set]
-        
-        if skipped_batch:
-            skipped_codes = [code for code, _, _ in skipped_batch]
-            skipped_counts = {code: count for code, count, _ in skipped_batch}
-            logger.debug(
-                f"部分记录被其他事务锁定，跳过本次更新，将在下次同步时重试: "
-                f"skipped_codes={skipped_codes}, "
-                f"skipped_counts={skipped_counts}"
+        for lock_attempt in range(LOCK_RETRY_MAX_ATTEMPTS + 1):
+            if not remaining_batch:
+                break
+            
+            # 先查询并锁定记录（使用SKIP LOCKED跳过已被锁定的记录）
+            current_codes = [code for code, _, _ in remaining_batch]
+            current_placeholders = ", ".join([f":code_{i}" for i in range(len(current_codes))])
+            current_params = {f"code_{i}": code for i, code in enumerate(current_codes)}
+            
+            select_result = await db.execute(
+                text(f"""
+                    SELECT short_code 
+                    FROM short_links 
+                    WHERE short_code IN ({current_placeholders})
+                    ORDER BY short_code
+                    FOR UPDATE SKIP LOCKED
+                """),
+                current_params
             )
+            
+            # 获取成功锁定的short_code
+            locked_codes_set = {row[0] for row in select_result.fetchall()}
+            
+            # 分离成功锁定和仍被锁定的记录
+            current_success = [item for item in remaining_batch if item[0] in locked_codes_set]
+            current_skipped = [item for item in remaining_batch if item[0] not in locked_codes_set]
+            
+            # 将成功的记录加入成功列表
+            successfully_locked_batch.extend(current_success)
+            remaining_batch = current_skipped
+            
+            # 如果还有被锁定的记录，且不是最后一次尝试，则等待后重试
+            if remaining_batch and lock_attempt < LOCK_RETRY_MAX_ATTEMPTS:
+                skipped_codes = [code for code, _, _ in remaining_batch]
+                logger.debug(
+                    f"部分记录被其他事务锁定（第 {lock_attempt + 1} 次尝试），"
+                    f"等待 {LOCK_RETRY_DELAY * 1000:.0f} 毫秒后重试: "
+                    f"skipped_codes={skipped_codes}"
+                )
+                # 回滚当前事务，释放锁（即使有成功的记录也回滚，确保一致性）
+                await db.rollback()
+                # 等待一小段时间，让其他事务完成
+                await asyncio.sleep(LOCK_RETRY_DELAY)
+                # 重新设置事务隔离级别和锁等待超时（SQLAlchemy会在下次查询时自动开始新事务）
+                try:
+                    await db.execute(text("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED"))
+                except Exception as e:
+                    logger.debug(f"设置事务隔离级别失败（可忽略）: {e}")
+                try:
+                    await db.execute(text("SET SESSION innodb_lock_wait_timeout = 0"))
+                except Exception as e:
+                    logger.debug(f"设置锁等待超时失败（可忽略）: {e}")
+                # 重置成功列表，因为已经回滚，需要重新锁定
+                successfully_locked_batch = []
+            elif remaining_batch:
+                # 最后一次尝试后仍有被锁定的记录，记录为跳过
+                skipped_batch = remaining_batch
+                skipped_codes = [code for code, _, _ in skipped_batch]
+                skipped_counts = {code: count for code, count, _ in skipped_batch}
+                logger.debug(
+                    f"部分记录被其他事务锁定（已重试 {LOCK_RETRY_MAX_ATTEMPTS} 次），"
+                    f"跳过本次更新，将在下次同步时重试: "
+                    f"skipped_codes={skipped_codes}, "
+                    f"skipped_counts={skipped_counts}"
+                )
         
         if not successfully_locked_batch:
             # 所有记录都被锁定或被跳过，检查短链接是否存在
