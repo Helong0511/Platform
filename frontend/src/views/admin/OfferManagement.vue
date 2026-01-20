@@ -1527,6 +1527,12 @@ const handleSubmit = async () => {
       // 移除publisher_ids（使用publisher_configs）
       delete submitData.publisher_ids
       
+      // 移除postback_url和postback_method（系统自动管理，不需要用户输入）
+      // postback_url：系统自动生成，用于接收上游postback
+      // postback_method：实际转发时使用Publisher的postback_method，不是Offer的
+      delete submitData.postback_url
+      delete submitData.postback_method
+      
       let response
       let offerData
       if (isEdit.value) {
