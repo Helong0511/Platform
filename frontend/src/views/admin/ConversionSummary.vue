@@ -223,9 +223,37 @@
               </template>
             </el-table-column>
             <el-table-column 
+              v-if="isAdmin && columnVisibility.adv_po"
+              prop="adv_po" 
+              label="Adv PO" 
+              width="120" 
+              align="right"
+            >
+              <template #default="scope">
+                <span v-if="scope.row.adv_po !== undefined && scope.row.adv_po !== null">
+                  {{ scope.row.adv_po.toFixed(2) }}
+                </span>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column 
+              v-if="isAdmin && columnVisibility.pub_po"
+              prop="pub_po" 
+              label="Pub PO" 
+              width="120" 
+              align="right"
+            >
+              <template #default="scope">
+                <span v-if="scope.row.pub_po !== undefined && scope.row.pub_po !== null">
+                  {{ scope.row.pub_po.toFixed(2) }}
+                </span>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column 
               v-if="isAdmin && columnVisibility.po"
               prop="po" 
-              label="PO" 
+              label="Revenue" 
               width="150" 
               align="right"
             >
@@ -237,7 +265,7 @@
             <el-table-column 
               v-if="isAdmin && columnVisibility.po_after_discount"
               prop="po_after_discount" 
-              label="PO(扣)" 
+              label="Pub Revenue" 
               width="150" 
               align="right"
             >
@@ -246,6 +274,32 @@
                   {{ scope.row.po_after_discount.toFixed(2) }}
                 </span>
                 <span v-else>0.00</span>
+              </template>
+            </el-table-column>
+            <el-table-column 
+              v-if="isAdmin && columnVisibility.profit"
+              prop="profit" 
+              label="Profit" 
+              width="150" 
+              align="right"
+            >
+              <template #default="scope">
+                <span v-if="scope.row.po !== undefined && scope.row.po !== null && scope.row.po_after_discount !== undefined && scope.row.po_after_discount !== null">
+                  {{ (scope.row.po - scope.row.po_after_discount).toFixed(2) }}
+                </span>
+                <span v-else>0.00</span>
+              </template>
+            </el-table-column>
+            <el-table-column 
+              v-if="isAdmin && columnVisibility.geo"
+              prop="geo" 
+              label="GEO" 
+              width="120" 
+              align="center"
+            >
+              <template #default="scope">
+                <span v-if="scope.row.geo">{{ scope.row.geo }}</span>
+                <span v-else>-</span>
               </template>
             </el-table-column>
           </el-table>
@@ -269,8 +323,12 @@
         <el-checkbox label="conversion_count">Conversion</el-checkbox>
         <el-checkbox label="cr">CR</el-checkbox>
         <el-checkbox v-if="!isAdmin" label="revenue">收益</el-checkbox>
-        <el-checkbox v-if="isAdmin" label="po">PO</el-checkbox>
-        <el-checkbox v-if="isAdmin" label="po_after_discount">PO(扣)</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="adv_po">Adv PO</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="pub_po">Pub PO</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="po">Revenue</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="po_after_discount">Pub Revenue</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="profit">Profit</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="geo">GEO</el-checkbox>
       </el-checkbox-group>
       <template #footer>
         <el-button @click="columnSettingVisible = false">取消</el-button>
@@ -334,8 +392,12 @@ const getDefaultColumnVisibility = () => ({
   conversion_count: true,
   cr: true,
   revenue: !isAdmin.value,
+  adv_po: isAdmin.value,
+  pub_po: isAdmin.value,
   po: isAdmin.value,
-  po_after_discount: isAdmin.value
+  po_after_discount: isAdmin.value,
+  profit: isAdmin.value,
+  geo: isAdmin.value
 })
 
 const columnVisibility = reactive(getDefaultColumnVisibility())
@@ -381,8 +443,12 @@ const saveColumnVisibility = () => {
       conversion_count: columnVisibility.conversion_count,
       cr: columnVisibility.cr,
       revenue: columnVisibility.revenue,
+      adv_po: columnVisibility.adv_po,
+      pub_po: columnVisibility.pub_po,
       po: columnVisibility.po,
-      po_after_discount: columnVisibility.po_after_discount
+      po_after_discount: columnVisibility.po_after_discount,
+      profit: columnVisibility.profit,
+      geo: columnVisibility.geo
     }
     localStorage.setItem('conversionSummary_columnVisibility', JSON.stringify(toSave))
     columnSettingVisible.value = false

@@ -10,7 +10,7 @@ from sqlalchemy.orm import aliased
 
 from app.models.models import (
     PostbackConversion, ClickStats, Offer, Publisher, Advertiser,
-    User, UserRole, Client, PostbackNotification
+    User, UserRole, Client, PostbackNotification, OfferPublisherAssignment
 )
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
@@ -379,6 +379,22 @@ class ConversionService:
             for publisher in publishers_result.scalars().all():
                 publishers_map[publisher.id] = publisher
         
+        # 批量加载OfferPublisherAssignment信息（用于获取Pub PO）
+        offer_publisher_assignments_map = {}
+        if offer_ids and publisher_ids:
+            # 使用 in_ 条件批量查询所有相关的分配记录
+            assignments_result = await self.db.execute(
+                select(OfferPublisherAssignment).where(
+                    and_(
+                        OfferPublisherAssignment.offer_id.in_(offer_ids),
+                        OfferPublisherAssignment.publisher_id.in_(publisher_ids)
+                    )
+                )
+            )
+            for assignment in assignments_result.scalars().all():
+                key = (assignment.offer_id, assignment.publisher_id)
+                offer_publisher_assignments_map[key] = assignment
+        
         # 计算PO（扣价后）和构建响应数据
         stats_list = []
         for key, stat in stats_dict.items():
@@ -403,6 +419,21 @@ class ConversionService:
             # po_after_discount 已经是所有转化的总PO扣减后，所以收益 = po_after_discount
             revenue = round(po_after_discount, 2) if stat["conversion_count"] > 0 else 0.0
             
+            # 获取Adv PO（上游给的单价，即Offer.payout）
+            adv_po = float(offer.payout) if offer and offer.payout is not None else None
+            
+            # 获取Pub PO（给下游的单价，优先从OfferPublisherAssignment获取，如果没有则使用Offer.affiliate_payout）
+            pub_po = None
+            assignment_key = (offer_id_val, publisher_id_val)
+            assignment = offer_publisher_assignments_map.get(assignment_key)
+            if assignment and assignment.affiliate_payout is not None:
+                pub_po = float(assignment.affiliate_payout)
+            elif offer and offer.affiliate_payout is not None:
+                pub_po = float(offer.affiliate_payout)
+            
+            # 获取GEO（国家，从Offer.country获取）
+            geo = offer.country if offer and offer.country else None
+            
             stats_list.append({
                 "offer_id": offer_id_val,
                 "offer_name": offer_name,
@@ -415,7 +446,10 @@ class ConversionService:
                 "cr": round(cr_val, 2),
                 "po": stat["po"],
                 "po_after_discount": round(po_after_discount, 2),
-                "revenue": revenue
+                "revenue": revenue,
+                "adv_po": adv_po,
+                "pub_po": pub_po,
+                "geo": geo
             })
         
         # 按点击数量排序
