@@ -20,7 +20,7 @@
           end-placeholder="结束日期"
           format="YYYY-MM-DD"
           value-format="YYYY-MM-DD"
-          style="width: 250px;"
+          class="filter-date-picker"
           @change="handleDateChange"
         />
         <el-select
@@ -29,7 +29,7 @@
           placeholder="请选择广告主（可选）"
           clearable
           filterable
-          style="width: 200px; margin-left: 10px;"
+          class="filter-select"
           @change="handleAdvertiserChange"
         >
           <el-option
@@ -44,7 +44,7 @@
           placeholder="请选择Offer（可选）"
           clearable
           filterable
-          style="width: 200px; margin-left: 10px;"
+          class="filter-select"
           @change="handleOfferChange"
         >
           <el-option
@@ -60,7 +60,7 @@
           placeholder="请选择渠道（可选）"
           clearable
           filterable
-          style="width: 200px; margin-left: 10px;"
+          class="filter-select"
           @change="handlePublisherChange"
         >
           <el-option
@@ -70,8 +70,8 @@
             :value="pub.id"
           />
         </el-select>
-        <el-button type="primary" :icon="Search" @click="handleSearch" style="margin-left: 10px;">查询</el-button>
-        <el-button :icon="Refresh" @click="handleReset">重置</el-button>
+        <el-button type="primary" :icon="Search" @click="handleSearch" class="filter-button">查询</el-button>
+        <el-button :icon="Refresh" @click="handleReset" class="filter-button">重置</el-button>
       </div>
 
       <!-- 统计卡片 -->
@@ -714,6 +714,21 @@ onMounted(() => {
   gap: 10px;
 }
 
+/* 日期选择器宽度 */
+.filter-date-picker {
+  width: 200px !important;
+}
+
+/* 筛选下拉框统一宽度 */
+.filter-select {
+  width: 180px !important;
+}
+
+/* 按钮样式 */
+.filter-button {
+  margin-left: 0 !important;
+}
+
 /* 确保输入框和下拉框文字不被遮盖 */
 .filter-bar :deep(.el-input__wrapper) {
   padding-right: 30px; /* 为清除按钮留出空间 */
@@ -744,11 +759,11 @@ onMounted(() => {
 }
 
 /* 日期选择器特殊处理 */
-.filter-bar :deep(.el-date-editor .el-input__wrapper) {
+.filter-date-picker :deep(.el-input__wrapper) {
   padding-right: 30px;
 }
 
-.filter-bar :deep(.el-date-editor .el-input__inner) {
+.filter-date-picker :deep(.el-input__inner) {
   padding-right: 8px;
 }
 
