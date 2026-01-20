@@ -235,23 +235,24 @@ export const useAuthStore = defineStore('auth', {
 
         // 正常响应格式：{access_token, token_type, refresh_token, user}
         // 注意：token 已经过 set-cookie 设置到 HttpOnly cookie 中
-        const user_info = responseData.user;
+        // API响应数据使用snake_case，这是正确的
+        const userInfoFromApi = responseData.user;
 
         // 验证响应数据完整性
-        if (!user_info) {
+        if (!userInfoFromApi) {
           throw new Error('登录响应数据格式错误：缺少用户信息');
         }
 
         // 保存用户信息到sessionStorage (token 存储在 cookie 中)
-        sessionStorage.setItem('userInfo', JSON.stringify(user_info));
+        sessionStorage.setItem('userInfo', JSON.stringify(userInfoFromApi));
         
         // 保存刷新令牌（如果提供）
         if (responseData.refresh_token) {
           sessionStorage.setItem('refresh_token', responseData.refresh_token);
         }
 
-        // 更新状态
-        this.userInfo = user_info;
+        // 更新状态（使用camelCase）
+        this.userInfo = userInfoFromApi;
         this.isAuthenticated = true;
 
         ElMessage.success('登录成功');
@@ -263,7 +264,7 @@ export const useAuthStore = defineStore('auth', {
 
         // 根据用户角色和菜单显示情况跳转到合适的页面
         // 注意：路由守卫会检查token，所以这里直接跳转即可
-        const defaultRoute = getDefaultRoute(user_info);
+        const defaultRoute = getDefaultRoute(userInfoFromApi);
         router.push(defaultRoute).catch(err => {
           // 忽略重复导航的错误（Vue Router 的特性）
           if (err.name !== 'NavigationDuplicated') {
