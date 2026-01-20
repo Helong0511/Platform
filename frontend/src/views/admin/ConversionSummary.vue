@@ -25,7 +25,7 @@
         />
         <el-select
           v-model="filterOffer"
-          placeholder="Offer"
+          placeholder="请选择Offer（可选）"
           clearable
           filterable
           style="width: 200px; margin-left: 10px;"
@@ -41,7 +41,7 @@
         <el-select
           v-if="isAdmin"
           v-model="filterAdvertiser"
-          placeholder="广告主"
+          placeholder="请选择广告主（可选）"
           clearable
           filterable
           style="width: 200px; margin-left: 10px;"
@@ -57,7 +57,7 @@
         <el-select
           v-if="isAdmin"
           v-model="filterPublisher"
-          placeholder="渠道"
+          placeholder="请选择渠道（可选）"
           clearable
           filterable
           style="width: 200px; margin-left: 10px;"
@@ -133,7 +133,7 @@
                 <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column prop="offer_name" label="Offer Name" min-width="200" show-overflow-tooltip fixed="left">
+            <el-table-column prop="offer_name" label="Offer Name" min-width="250" show-overflow-tooltip fixed="left">
               <template #default="scope">
                 <el-link
                   v-if="scope.row.offer_name"
@@ -151,14 +151,14 @@
               v-if="isAdmin"
               prop="advertiser_name" 
               label="Advertiser" 
-              min-width="150"
+              min-width="100"
               show-overflow-tooltip
             />
             <el-table-column 
               v-if="isAdmin"
               prop="publisher_name" 
               label="Publisher" 
-              min-width="150" 
+              min-width="100" 
               show-overflow-tooltip 
             />
             <el-table-column prop="click_count" label="Click" width="120" align="right" />
