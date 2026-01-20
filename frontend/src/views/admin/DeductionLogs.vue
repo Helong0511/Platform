@@ -289,7 +289,7 @@
       <div class="pagination-wrapper">
         <el-pagination
           v-model:current-page="pagination.page"
-          v-model:page-size="pagination.page_size"
+          v-model:page-size="pagination.pageSize"
           :total="pagination.total"
           :page-sizes="[10, 20, 50, 100]"
           layout="total, sizes, prev, pager, next, jumper"
@@ -355,7 +355,7 @@ const searchForm = reactive({
 
 const pagination = reactive({
   page: 1,
-  page_size: 20,
+  pageSize: 20,
   total: 0
 })
 
@@ -464,7 +464,7 @@ const fetchData = async () => {
   try {
     const params = {
       page: pagination.page,
-      page_size: pagination.page_size,
+      page_size: Math.min(pagination.pageSize, 100),
       advertiser_id: searchForm.advertiser_id,
       offer_id: searchForm.offer_id,
       publisher_id: searchForm.publisher_id,
@@ -537,7 +537,7 @@ const handlePageChange = (page) => {
 
 const handleSizeChange = (size) => {
   // 确保page_size不超过后端最大限制
-  pagination.page_size = Math.min(size, 100)
+  pagination.pageSize = Math.min(size, 100)
   pagination.page = 1
   fetchData()
 }

@@ -99,9 +99,8 @@ const reloadPage = (showMessage = true) => {
 };
 
 /**
- * 初始化版本检查
+ * 初始化版本检查（仅在页面打开时检查一次）
  * @param {Object} options 配置选项
- * @param {number} options.interval 检查间隔（毫秒），默认 60 秒
  * @param {boolean} options.enabled 是否启用版本检查，默认 true
  * @param {boolean} options.showMessage 检测到更新时是否显示提示消息，默认 true
  */
@@ -112,11 +111,9 @@ export const initVersionCheck = async (options = {}) => {
   }
 
   const { 
-    interval = 60 * 1000, 
     enabled = true,
     showMessage = true,
   } = options;
-  checkInterval = interval;
   isInitialized = true;
 
   if (!enabled) {
@@ -124,36 +121,23 @@ export const initVersionCheck = async (options = {}) => {
     return;
   }
 
-  // 监听页面可见性变化
-  const handleVisibilityChange = () => {
-    isPageVisible = !document.hidden;
-    logger.debug('页面可见性变化:', isPageVisible ? '可见' : '隐藏');
-  };
-  document.addEventListener('visibilitychange', handleVisibilityChange);
-
   // 加载初始版本号
   currentVersion = await loadCurrentVersion();
   if (currentVersion) {
     logger.debug('版本检查已初始化，当前版本:', currentVersion);
   } else {
     logger.warn('无法加载初始版本号，版本检查可能无法正常工作');
+    return;
   }
 
-  // 设置定期检查
-  checkTimer = setInterval(async () => {
-    const hasUpdate = await checkForUpdate();
-    if (hasUpdate) {
-      // 停止检查，准备刷新
-      if (checkTimer) {
-        clearInterval(checkTimer);
-        checkTimer = null;
-      }
-      // 刷新页面
-      reloadPage(showMessage);
-    }
-  }, checkInterval);
-
-  logger.info(`版本检查已启动，检查间隔: ${checkInterval / 1000} 秒`);
+  // 立即检查一次是否有新版本
+  const hasUpdate = await checkForUpdate();
+  if (hasUpdate) {
+    // 刷新页面
+    reloadPage(showMessage);
+  } else {
+    logger.info('版本检查完成，当前已是最新版本');
+  }
 };
 
 /**

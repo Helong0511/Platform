@@ -199,13 +199,6 @@
             </template>
           </template>
         </el-table-column>
-        <el-table-column v-if="isAdmin" prop="postback_method" label="Postback方法" width="100" align="center">
-          <template #default="scope">
-            <el-tag :type="scope.row.postback_method === 'POST' ? 'success' : 'info'" size="small">
-              {{ scope.row.postback_method || 'GET' }}
-            </el-tag>
-          </template>
-        </el-table-column>
         <el-table-column v-if="isAdmin && columnVisibility.click_validity_hours" prop="click_validity_hours" label="点击有效期(小时)" width="120" align="center">
           <template #default="scope">
             <span v-if="scope.row.click_validity_hours">{{ scope.row.click_validity_hours }}</span>
@@ -686,11 +679,6 @@
                 </template>
               </el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="点击有效期(小时)">{{ currentOffer?.click_validity_hours || 720 }}</el-descriptions-item>
-              <el-descriptions-item v-if="isAdmin" label="Postback方法">
-                <el-tag :type="currentOffer?.postback_method === 'POST' ? 'success' : 'info'" size="small">
-                  {{ currentOffer?.postback_method || 'GET' }}
-                </el-tag>
-              </el-descriptions-item>
               <el-descriptions-item label="预览链接" :span="2">
                 <el-link v-if="currentOffer?.preview_link" :href="currentOffer.preview_link" target="_blank" type="primary">
                   {{ currentOffer.preview_link }}
@@ -734,12 +722,6 @@
                   </span>
                   <span v-else>-</span>
                 </template>
-              </el-descriptions-item>
-              <el-descriptions-item v-if="isAdmin" label="Postback URL" :span="2">
-                <span v-if="currentOffer?.postback_url" style="word-break: break-all;">
-                  {{ currentOffer.postback_url }}
-                </span>
-                <span v-else>-</span>
               </el-descriptions-item>
               <el-descriptions-item label="创建时间">{{ formatDate(currentOffer?.created_at) }}</el-descriptions-item>
               <el-descriptions-item label="更新时间">{{ formatDate(currentOffer?.updated_at) }}</el-descriptions-item>
@@ -903,7 +885,6 @@
         <el-checkbox label="downstream_cap">{{ isAdmin ? '下游Cap' : 'Cap' }}</el-checkbox>
         <el-checkbox label="preview_link">预览链接</el-checkbox>
         <el-checkbox label="downstream_tracklink">{{ isAdmin ? '下游Tracklink' : 'Tracklink' }}</el-checkbox>
-        <el-checkbox v-if="isAdmin" label="postback_method">Postback方法</el-checkbox>
         <el-checkbox v-if="isAdmin" label="click_validity_hours">点击有效期(小时)</el-checkbox>
         <el-checkbox v-if="isAdmin" label="assigned_publishers">分配渠道</el-checkbox>
         <el-checkbox label="status">状态</el-checkbox>
@@ -1002,7 +983,6 @@ const getDefaultColumnVisibility = () => ({
   downstream_cap: true,
   preview_link: true,
   downstream_tracklink: true,
-  postback_method: isAdmin.value,
   click_validity_hours: isAdmin.value,
   assigned_publishers: isAdmin.value,
   status: true,
@@ -1059,7 +1039,6 @@ const saveColumnVisibility = () => {
       downstream_cap: columnVisibility.downstream_cap,
       preview_link: columnVisibility.preview_link,
       downstream_tracklink: columnVisibility.downstream_tracklink,
-      postback_method: columnVisibility.postback_method,
       click_validity_hours: columnVisibility.click_validity_hours,
       assigned_publishers: columnVisibility.assigned_publishers,
       status: columnVisibility.status,
