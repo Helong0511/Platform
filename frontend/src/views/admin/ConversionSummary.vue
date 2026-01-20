@@ -30,7 +30,7 @@
           clearable
           filterable
           style="width: 200px; margin-left: 10px;"
-          @change="handleSearch"
+          @change="handleAdvertiserChange"
         >
           <el-option
             v-for="adv in advertiserList"
@@ -45,7 +45,7 @@
           clearable
           filterable
           style="width: 200px; margin-left: 10px;"
-          @change="handleSearch"
+          @change="handleOfferChange"
         >
           <el-option
             v-for="offer in offerList"
@@ -61,7 +61,7 @@
           clearable
           filterable
           style="width: 200px; margin-left: 10px;"
-          @change="handleSearch"
+          @change="handlePublisherChange"
         >
           <el-option
             v-for="pub in publisherList"
@@ -307,6 +307,13 @@ const offerList = ref([])
 const advertiserList = ref([])
 const publisherList = ref([])
 
+// 存储所有可用的选项（从统计数据中提取）
+const allAdvertisersFromStats = ref([])
+const allOffersFromStats = ref([])
+const allPublishersFromStats = ref([])
+// 存储每个Offer对应的渠道ID集合（用于级联筛选）
+const offerPublisherMap = ref(new Map())
+
 const summaryData = reactive({
   total_clicks: 0,
   total_conversions: 0,
@@ -433,8 +440,125 @@ const setDefaultMonthRange = () => {
   ]
 }
 
+// 从统计数据中提取可用的选项
+const extractOptionsFromStats = (statsList) => {
+  // 提取广告主列表（去重）
+  const advertiserMap = new Map()
+  const offerMap = new Map()
+  const publisherMap = new Map()
+  const offerPubMap = new Map() // 存储每个Offer对应的渠道ID集合
+  
+  statsList.forEach(stat => {
+    // 提取广告主
+    if (stat.advertiser_id && stat.advertiser_name) {
+      if (!advertiserMap.has(stat.advertiser_id)) {
+        advertiserMap.set(stat.advertiser_id, {
+          id: stat.advertiser_id,
+          advertiser_name: stat.advertiser_name
+        })
+      }
+    }
+    
+    // 提取Offer
+    if (stat.offer_id && stat.offer_name) {
+      if (!offerMap.has(stat.offer_id)) {
+        offerMap.set(stat.offer_id, {
+          id: stat.offer_id,
+          offer_name: stat.offer_name,
+          advertiser_id: stat.advertiser_id
+        })
+      }
+      // 记录该Offer对应的渠道
+      if (stat.publisher_id) {
+        if (!offerPubMap.has(stat.offer_id)) {
+          offerPubMap.set(stat.offer_id, new Set())
+        }
+        offerPubMap.get(stat.offer_id).add(stat.publisher_id)
+      }
+    }
+    
+    // 提取渠道
+    if (stat.publisher_id && stat.publisher_name) {
+      if (!publisherMap.has(stat.publisher_id)) {
+        publisherMap.set(stat.publisher_id, {
+          id: stat.publisher_id,
+          publisher_name: stat.publisher_name
+        })
+      }
+    }
+  })
+  
+  allAdvertisersFromStats.value = Array.from(advertiserMap.values())
+  allOffersFromStats.value = Array.from(offerMap.values())
+  allPublishersFromStats.value = Array.from(publisherMap.values())
+  offerPublisherMap.value = offerPubMap
+  
+  // 更新筛选列表（根据当前筛选条件过滤）
+  updateFilterLists()
+}
+
+// 根据当前筛选条件更新筛选列表
+const updateFilterLists = () => {
+  // 如果选择了日期范围，使用从统计数据中提取的列表
+  if (dateRange.value && dateRange.value.length === 2) {
+    // 更新广告主列表
+    if (isAdmin.value) {
+      advertiserList.value = allAdvertisersFromStats.value
+        .slice()
+        .sort((a, b) => a.id - b.id)
+      
+      // 如果当前选择的广告主不在新列表中，清空选择
+      if (filterAdvertiser.value && !advertiserList.value.find(a => a.id === filterAdvertiser.value)) {
+        filterAdvertiser.value = null
+      }
+    }
+    
+    // 更新Offer列表（如果选择了广告主，只显示该广告主的Offer）
+    let filteredOffers = allOffersFromStats.value
+    if (filterAdvertiser.value) {
+      filteredOffers = filteredOffers.filter(offer => offer.advertiser_id === filterAdvertiser.value)
+    }
+    offerList.value = filteredOffers
+      .slice()
+      .sort((a, b) => a.id - b.id)
+    
+    // 如果当前选择的Offer不在新列表中，清空选择
+    if (filterOffer.value && !offerList.value.find(o => o.id === filterOffer.value)) {
+      filterOffer.value = null
+    }
+    
+    // 更新渠道列表（如果选择了Offer，只显示该Offer的渠道）
+    let filteredPublishers = allPublishersFromStats.value
+    if (filterOffer.value) {
+      // 从offerPublisherMap中获取该Offer对应的渠道ID集合
+      const publisherIds = offerPublisherMap.value.get(filterOffer.value)
+      if (publisherIds && publisherIds.size > 0) {
+        filteredPublishers = allPublishersFromStats.value.filter(pub => publisherIds.has(pub.id))
+      } else {
+        // 如果没有找到对应的渠道，显示空列表
+        filteredPublishers = []
+      }
+    }
+    publisherList.value = filteredPublishers
+      .slice()
+      .sort((a, b) => a.id - b.id)
+    
+    // 如果当前选择的渠道不在新列表中，清空选择
+    if (filterPublisher.value && !publisherList.value.find(p => p.id === filterPublisher.value)) {
+      filterPublisher.value = null
+    }
+  } else {
+    // 如果没有选择日期范围，加载全部列表（保持原有逻辑）
+    if (isAdmin.value) {
+      loadAdvertisers()
+    }
+    loadOffers()
+    loadPublishers()
+  }
+}
+
 // 加载统计数据
-const loadData = async () => {
+const loadData = async (shouldExtractOptions = false) => {
   loading.value = true
   try {
     const params = {
@@ -444,6 +568,20 @@ const loadData = async () => {
       advertiser_id: filterAdvertiser.value || undefined,
       publisher_id: filterPublisher.value || undefined
     }
+    
+    // 如果选择了日期范围且需要提取选项，先获取完整数据（不带筛选条件）
+    if (shouldExtractOptions && dateRange.value && dateRange.value.length === 2) {
+      const fullParams = {
+        start_date: dateRange.value[0],
+        end_date: dateRange.value[1]
+      }
+      const fullResponse = await getConversionSummary(fullParams)
+      if (fullResponse && fullResponse.data && fullResponse.data.stats_list) {
+        extractOptionsFromStats(fullResponse.data.stats_list)
+      }
+    }
+    
+    // 获取带筛选条件的数据
     const response = await getConversionSummary(params)
     // response已经是标准格式，直接使用data字段
     if (response && response.data) {
@@ -460,12 +598,50 @@ const loadData = async () => {
 
 // 日期改变
 const handleDateChange = () => {
-  loadData()
+  // 日期改变时，清空下级筛选
+  filterAdvertiser.value = null
+  filterOffer.value = null
+  filterPublisher.value = null
+  // 如果选择了日期范围，需要提取选项；否则加载全部列表
+  if (dateRange.value && dateRange.value.length === 2) {
+    loadData(true)
+  } else {
+    // 如果没有选择日期范围，加载全部列表
+    updateFilterLists()
+    loadData(false)
+  }
+}
+
+// 广告主改变
+const handleAdvertiserChange = () => {
+  // 清空下级筛选
+  filterOffer.value = null
+  filterPublisher.value = null
+  // 更新Offer和渠道列表
+  updateFilterLists()
+  // 重新加载数据（不需要重新提取选项，因为日期范围没变）
+  loadData(false)
+}
+
+// Offer改变
+const handleOfferChange = () => {
+  // 清空下级筛选
+  filterPublisher.value = null
+  // 更新渠道列表
+  updateFilterLists()
+  // 重新加载数据（不需要重新提取选项，因为日期范围没变）
+  loadData(false)
+}
+
+// 渠道改变
+const handlePublisherChange = () => {
+  // 重新加载数据（不需要重新提取选项，因为日期范围没变）
+  loadData(false)
 }
 
 // 搜索
 const handleSearch = () => {
-  loadData()
+  loadData(false)
 }
 
 // 重置
@@ -474,7 +650,8 @@ const handleReset = () => {
   filterOffer.value = null
   filterAdvertiser.value = null
   filterPublisher.value = null
-  loadData()
+  // 重置时需要提取选项
+  loadData(true)
 }
 
 // 点击Offer ID或Offer Name跳转到Offer管理详情
@@ -489,16 +666,12 @@ const handleOfferClick = (offerId) => {
 }
 
 onMounted(() => {
-  loadOffers()
-  if (isAdmin.value) {
-    loadAdvertisers()
-  }
-  loadPublishers()
   // 加载列显示设置
   loadColumnVisibility()
   // 默认查询当月
   setDefaultMonthRange()
-  loadData()
+  // 初始加载时需要提取选项
+  loadData(true)
 })
 </script>
 
