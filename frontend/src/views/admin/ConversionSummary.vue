@@ -111,6 +111,14 @@
         <template #header>
           <div class="table-header">
             <span>转化总览</span>
+            <el-button 
+              type="text" 
+              :icon="Setting" 
+              @click="columnSettingVisible = true"
+              style="float: right;"
+            >
+              列设置
+            </el-button>
           </div>
         </template>
         <div class="table-wrapper">
@@ -119,7 +127,14 @@
             stripe
             style="width: 100%;"
           >
-            <el-table-column prop="offer_id" label="Offer ID" width="100" align="right" fixed="left">
+            <el-table-column 
+              v-if="columnVisibility.offer_id" 
+              prop="offer_id" 
+              label="Offer ID" 
+              width="100" 
+              align="right" 
+              fixed="left"
+            >
               <template #default="scope">
                 <el-link
                   v-if="scope.row.offer_id"
@@ -133,7 +148,14 @@
                 <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column prop="offer_name" label="Offer Name" min-width="250" show-overflow-tooltip fixed="left">
+            <el-table-column 
+              v-if="columnVisibility.offer_name" 
+              prop="offer_name" 
+              label="Offer Name" 
+              min-width="250" 
+              show-overflow-tooltip 
+              fixed="left"
+            >
               <template #default="scope">
                 <el-link
                   v-if="scope.row.offer_name"
@@ -148,28 +170,46 @@
               </template>
             </el-table-column>
             <el-table-column 
-              v-if="isAdmin"
+              v-if="isAdmin && columnVisibility.advertiser_name"
               prop="advertiser_name" 
               label="Advertiser" 
               min-width="100"
               show-overflow-tooltip
             />
             <el-table-column 
-              v-if="isAdmin"
+              v-if="isAdmin && columnVisibility.publisher_name"
               prop="publisher_name" 
               label="Publisher" 
               min-width="100" 
               show-overflow-tooltip 
             />
-            <el-table-column prop="click_count" label="Click" width="120" align="right" />
-            <el-table-column prop="conversion_count" label="Conversion" width="120" align="right" />
-            <el-table-column prop="cr" label="CR" width="120" align="right">
+            <el-table-column 
+              v-if="columnVisibility.click_count" 
+              prop="click_count" 
+              label="Click" 
+              width="120" 
+              align="right" 
+            />
+            <el-table-column 
+              v-if="columnVisibility.conversion_count" 
+              prop="conversion_count" 
+              label="Conversion" 
+              width="120" 
+              align="right" 
+            />
+            <el-table-column 
+              v-if="columnVisibility.cr" 
+              prop="cr" 
+              label="CR" 
+              width="120" 
+              align="right"
+            >
               <template #default="scope">
                 {{ scope.row.cr }}%
               </template>
             </el-table-column>
             <el-table-column 
-              v-if="!isAdmin"
+              v-if="!isAdmin && columnVisibility.revenue"
               prop="revenue" 
               label="收益" 
               width="150" 
@@ -183,7 +223,7 @@
               </template>
             </el-table-column>
             <el-table-column 
-              v-if="isAdmin"
+              v-if="isAdmin && columnVisibility.po"
               prop="po" 
               label="PO" 
               width="150" 
@@ -195,7 +235,7 @@
               </template>
             </el-table-column>
             <el-table-column 
-              v-if="isAdmin"
+              v-if="isAdmin && columnVisibility.po_after_discount"
               prop="po_after_discount" 
               label="PO(扣)" 
               width="150" 
@@ -212,13 +252,38 @@
         </div>
       </el-card>
     </el-card>
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="400px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibility">
+        <el-checkbox label="offer_id" :disabled="true">Offer ID（固定显示）</el-checkbox>
+        <el-checkbox label="offer_name" :disabled="true">Offer Name（固定显示）</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="advertiser_name">Advertiser</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="publisher_name">Publisher</el-checkbox>
+        <el-checkbox label="click_count">Click</el-checkbox>
+        <el-checkbox label="conversion_count">Conversion</el-checkbox>
+        <el-checkbox label="cr">CR</el-checkbox>
+        <el-checkbox v-if="!isAdmin" label="revenue">收益</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="po">PO</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="po_after_discount">PO(扣)</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Search, Refresh, DataAnalysis, Mouse, Check, TrendCharts, Money } from '@element-plus/icons-vue'
+import { Search, Refresh, DataAnalysis, Mouse, Check, TrendCharts, Money, Setting } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { getConversionSummary } from '@/api/conversionSummary'
 import { getOffers } from '@/api/offer'
@@ -236,6 +301,7 @@ const dateRange = ref([])
 const filterOffer = ref(null)
 const filterAdvertiser = ref(null)
 const filterPublisher = ref(null)
+const columnSettingVisible = ref(false)
 
 const offerList = ref([])
 const advertiserList = ref([])
@@ -250,6 +316,62 @@ const summaryData = reactive({
 })
 
 const statsList = ref([])
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  offer_id: true,  // 固定显示
+  offer_name: true,  // 固定显示
+  advertiser_name: isAdmin.value,
+  publisher_name: isAdmin.value,
+  click_count: true,
+  conversion_count: true,
+  cr: true,
+  revenue: !isAdmin.value,
+  po: isAdmin.value,
+  po_after_discount: isAdmin.value
+})
+
+const columnVisibility = reactive(getDefaultColumnVisibility())
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('conversionSummary_columnVisibility')
+    if (saved) {
+      const savedVisibility = JSON.parse(saved)
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
+      // 确保固定列始终显示
+      columnVisibility.offer_id = true
+      columnVisibility.offer_name = true
+    }
+  } catch (error) {
+    logger.error('加载列显示设置失败:', error)
+  }
+}
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      advertiser_name: columnVisibility.advertiser_name,
+      publisher_name: columnVisibility.publisher_name,
+      click_count: columnVisibility.click_count,
+      conversion_count: columnVisibility.conversion_count,
+      cr: columnVisibility.cr,
+      revenue: columnVisibility.revenue,
+      po: columnVisibility.po,
+      po_after_discount: columnVisibility.po_after_discount
+    }
+    localStorage.setItem('conversionSummary_columnVisibility', JSON.stringify(toSave))
+    columnSettingVisible.value = false
+    ElMessage.success('列显示设置已保存')
+  } catch (error) {
+    logger.error('保存列显示设置失败:', error)
+    ElMessage.error('保存设置失败')
+  }
+}
 
 // 加载基础数据
 const loadOffers = async () => {
@@ -359,6 +481,8 @@ onMounted(() => {
     loadAdvertisers()
   }
   loadPublishers()
+  // 加载列显示设置
+  loadColumnVisibility()
   // 默认查询当月
   setDefaultMonthRange()
   loadData()
@@ -481,6 +605,9 @@ onMounted(() => {
 .table-header {
   font-weight: 600;
   font-size: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 /* 移动端优化 */
@@ -518,4 +645,3 @@ onMounted(() => {
   }
 }
 </style>
-
