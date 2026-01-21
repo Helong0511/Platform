@@ -94,6 +94,8 @@ class ConversionService:
                         "total_conversions": 0,
                         "cr": 0,
                         "total_po": 0.0,
+                        "total_po_after_discount": 0.0,
+                        "total_profit": 0.0,
                         "stats_list": [],
                         "start_date": start_date or (start_datetime.strftime("%Y-%m-%d")),
                         "end_date": end_date or (end_datetime.strftime("%Y-%m-%d"))
@@ -105,6 +107,8 @@ class ConversionService:
                     "total_conversions": 0,
                     "cr": 0,
                     "total_po": 0.0,
+                    "total_po_after_discount": 0.0,
+                    "total_profit": 0.0,
                     "stats_list": [],
                     "start_date": start_date or (start_datetime.strftime("%Y-%m-%d")),
                     "end_date": end_date or (end_datetime.strftime("%Y-%m-%d"))
@@ -220,6 +224,8 @@ class ConversionService:
         
         # 合并统计结果（当前主要使用方式1，确保所有统计的转化都有有效的 click_id 和 offer_id）
         total_po = po_1
+        # 扣价后的总支付金额
+        total_po_after_discount = po_1
         
         # 按Offer和Publisher分组统计点击
         click_group_query = select(
@@ -317,6 +323,7 @@ class ConversionService:
         # 同时计算总转化数量和总支付金额（从分组统计结果汇总，确保与分组统计一致）
         calculated_total_conversions = 0
         calculated_total_po = 0.0
+        calculated_total_po_after_discount = 0.0
         for offer_id_val, pub_id_val, conv_count_val, total_po_original_val, total_po_discounted_val in conversion_groups:
             safe_offer_id = offer_id_val if offer_id_val is not None else 0
             safe_pub_id = pub_id_val if pub_id_val is not None else 0
@@ -339,9 +346,10 @@ class ConversionService:
             # po_after_discount 字段使用扣减后的金额（所有用户可见）
             po_discounted_val = float(total_po_discounted_val) if total_po_discounted_val else 0.0
             stats_dict[key]["po_after_discount"] += po_discounted_val
-            # 累加转化数量和扣减后的支付金额（用于total_po）
+            # 累加转化数量和支付金额（从分组统计结果汇总，确保与分组统计一致）
             calculated_total_conversions += conv_count_val
-            calculated_total_po += po_discounted_val
+            calculated_total_po += po_original_val
+            calculated_total_po_after_discount += po_discounted_val
             
             if safe_offer_id:
                 offer_ids.add(safe_offer_id)
@@ -351,8 +359,12 @@ class ConversionService:
         # 使用从分组统计汇总的总转化数量和总支付金额（确保与分组统计一致）
         # 总转化数量应该等于所有分组转化数量的总和
         total_conversions = calculated_total_conversions
-        # 总支付金额也应该等于所有分组支付金额的总和
+        # 总支付金额：使用原始金额（管理员可见）
         total_po = calculated_total_po
+        # 扣价后的总支付金额（所有用户可见）
+        total_po_after_discount = calculated_total_po_after_discount
+        # 计算总利润：总支付金额 - 扣价后的总支付金额
+        total_profit = total_po - total_po_after_discount
         
         # 重新计算总转化率（使用更新后的总转化数量）
         cr = (total_conversions / total_clicks * 100) if total_clicks > 0 else 0
@@ -460,6 +472,8 @@ class ConversionService:
             "total_conversions": total_conversions,
             "cr": round(cr, 2),
             "total_po": total_po,
+            "total_po_after_discount": total_po_after_discount,
+            "total_profit": total_profit,
             "stats_list": stats_list,
             "start_date": start_date or (start_datetime.strftime("%Y-%m-%d")),
             "end_date": end_date or (end_datetime.strftime("%Y-%m-%d"))
