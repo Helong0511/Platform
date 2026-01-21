@@ -728,6 +728,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                         except HTTPException as exc:
                             # 在异常中附加新token，让异常处理器在响应头返回
                             exc._csrf_token = token_to_return
+                            logger.debug(f"已在HTTPException中附加CSRF令牌（服务器重启场景），将在响应头返回: {token_to_return[:10] if token_to_return else 'None'}...")
                             raise exc
                     else:
                         # 令牌不同步：返回存储的正确令牌

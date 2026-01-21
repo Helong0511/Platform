@@ -39,7 +39,7 @@ export const setupRequestInterceptor = () => {
           logger.error(`[CSRF] CSRF令牌缺失: ${method} ${config.url} - 请求将被拒绝`);
         }
       }
-      
+
       // 设置合理的超时时间（根据不同的请求类型和设备类型调整）
       if (!config.timeout) {
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -92,60 +92,87 @@ const handleCsrfError = async (error) => {
     if (!originalRequest._retry) {
       originalRequest._retry = true;
 
-      // 优先使用响应头中的CSRF token（如果存在）
+      // 1. 优先使用响应头中的CSRF token（如果存在）
       // 注意：extractAndSaveCsrfToken已经在响应拦截器中调用，这里再次检查确保获取到最新的令牌
       const csrfTokenFromHeader = getCsrfTokenFromResponse(error);
-      
+
       if (csrfTokenFromHeader) {
         saveCsrfToken(csrfTokenFromHeader);
         originalRequest.headers = originalRequest.headers || {};
         originalRequest.headers['X-CSRF-Token'] = csrfTokenFromHeader;
-        logger.info('从响应头获取到新的CSRF token，自动重试请求');
+        logger.info('从响应头获取到新的CSRF token，自动重试请求:', csrfTokenFromHeader.substring(0, 10) + '...');
         try {
           const retryResponse = await axios(originalRequest);
           originalRequest._retrySuccess = true;
+          logger.info('使用响应头中的CSRF token重试成功');
           return retryResponse;
         } catch (retryError) {
           // 重试失败时，再次尝试从错误响应中提取CSRF令牌
           extractAndSaveCsrfToken(retryError);
-          logger.warning('使用响应头中的CSRF token重试失败:', retryError);
-        }
-      } else {
-        // 如果响应头中没有token，尝试从当前存储中获取（可能已经被响应拦截器更新）
-        const currentToken = getCsrfToken();
-        if (currentToken) {
-          originalRequest.headers = originalRequest.headers || {};
-          originalRequest.headers['X-CSRF-Token'] = currentToken;
-          logger.info('使用当前存储的CSRF token重试请求');
-          try {
-            const retryResponse = await axios(originalRequest);
-            originalRequest._retrySuccess = true;
-            return retryResponse;
-          } catch (retryError) {
-            extractAndSaveCsrfToken(retryError);
-            logger.warning('使用当前存储的CSRF token重试失败:', retryError);
-          }
+          logger.warning('使用响应头中的CSRF token重试失败，将尝试其他方式');
         }
       }
 
-      // 如果响应头中没有token，尝试通过GET请求获取新的CSRF token
-      try {
-        const newCsrfToken = await fetchCsrfTokenFromEndpoints();
-        if (newCsrfToken) {
-          originalRequest.headers = originalRequest.headers || {};
-          originalRequest.headers['X-CSRF-Token'] = newCsrfToken;
-          logger.info('通过GET请求获取到新的CSRF token，自动重试请求');
+      // 2. 如果响应头中没有token，尝试从当前存储中获取（可能已经被响应拦截器更新）
+      const currentToken = getCsrfToken();
+      if (currentToken) {
+        originalRequest.headers = originalRequest.headers || {};
+        originalRequest.headers['X-CSRF-Token'] = currentToken;
+        logger.info('使用当前存储的CSRF token重试请求:', currentToken.substring(0, 10) + '...');
+        try {
           const retryResponse = await axios(originalRequest);
           originalRequest._retrySuccess = true;
+          logger.info('使用当前存储的CSRF token重试成功');
+          return retryResponse;
+        } catch (retryError) {
+          extractAndSaveCsrfToken(retryError);
+          logger.warning('使用当前存储的CSRF token重试失败，将尝试获取新令牌');
+        }
+      }
+
+      // 3. 如果响应头中没有token，尝试通过GET请求获取新的CSRF token
+      try {
+        logger.info('尝试通过GET请求获取新的CSRF token');
+        const newCsrfToken = await fetchCsrfTokenFromEndpoints();
+        if (newCsrfToken) {
+          saveCsrfToken(newCsrfToken);
+          originalRequest.headers = originalRequest.headers || {};
+          originalRequest.headers['X-CSRF-Token'] = newCsrfToken;
+          logger.info('通过GET请求获取到新的CSRF token，自动重试请求:', newCsrfToken.substring(0, 10) + '...');
+          const retryResponse = await axios(originalRequest);
+          originalRequest._retrySuccess = true;
+          logger.info('使用新获取的CSRF token重试成功');
+          return retryResponse;
+        } else {
+          logger.warning('无法获取新的CSRF token，尝试使用默认端点');
+        }
+      } catch (e) {
+        logger.warning('自动获取CSRF token失败，将显示错误信息:', e.message);
+      }
+
+      // 4. 最后尝试使用一个简单的GET请求获取CSRF token
+      try {
+        logger.info('尝试使用简单GET请求获取CSRF token');
+        const response = await axios.get('/api/v1/dashboard/stats');
+        const simpleCsrfToken = getCsrfTokenFromResponse(response);
+        if (simpleCsrfToken) {
+          saveCsrfToken(simpleCsrfToken);
+          originalRequest.headers = originalRequest.headers || {};
+          originalRequest.headers['X-CSRF-Token'] = simpleCsrfToken;
+          logger.info('通过简单GET请求获取到新的CSRF token，自动重试请求:', simpleCsrfToken.substring(0, 10) + '...');
+          const retryResponse = await axios(originalRequest);
+          originalRequest._retrySuccess = true;
+          logger.info('使用简单GET请求获取的CSRF token重试成功');
           return retryResponse;
         }
       } catch (e) {
-        logger.warning('自动获取CSRF token失败，将显示错误信息');
+        logger.warning('简单GET请求获取CSRF token失败:', e.message);
       }
     }
 
     // 如果自动重试失败，显示友好的错误信息
     if (!originalRequest._retrySuccess) {
+      logger.error('CSRF token错误自动重试失败，建议用户刷新页面');
       ElMessage.warning('CSRF令牌已过期，请刷新页面后重试');
     }
 
@@ -161,23 +188,27 @@ export const setupResponseInterceptor = () => {
   axios.interceptors.response.use(
     (response) => {
       // 从响应头中获取CSRF令牌并存储（优先处理，确保总是使用最新的令牌）
-      extractAndSaveCsrfToken(response);
+      const csrfToken = extractAndSaveCsrfToken(response);
+      if (csrfToken) {
+        logger.debug('从响应头中提取并保存CSRF令牌:', csrfToken.substring(0, 10) + '...');
+      }
       return response;
     },
     async (error) => {
       // 即使请求失败，也尝试从响应头中获取CSRF令牌（优先处理）
       // 这对于CSRF令牌不匹配的情况特别重要，后端会在错误响应头中返回正确的令牌
       const csrfTokenFromError = extractAndSaveCsrfToken(error);
-      
+
       // 如果从错误响应中获取到了新的CSRF令牌，记录日志
       if (csrfTokenFromError) {
-        logger.debug('从错误响应中提取到新的 CSRF token，已更新');
+        logger.debug('从错误响应中提取到新的 CSRF token，已更新:', csrfTokenFromError.substring(0, 10) + '...');
       }
 
       // 处理403 CSRF令牌错误
       if (error.response && error.response.status === 403) {
         const retryResponse = await handleCsrfError(error);
         if (retryResponse) {
+          logger.info('CSRF令牌错误已处理并成功重试请求');
           return retryResponse;
         }
       }
@@ -196,17 +227,17 @@ export const setupResponseInterceptor = () => {
         try {
           const { refreshAccessToken } = await import('../api/auth');
           const userInfoStr = sessionStorage.getItem('userInfo');
-          
+
           if (userInfoStr) {
             const userInfo = JSON.parse(userInfoStr);
             // 检查是否有刷新令牌（存储在sessionStorage中）
             const refreshToken = sessionStorage.getItem('refresh_token');
-            
+
             if (refreshToken) {
               try {
                 // 尝试刷新令牌
                 const refreshResponse = await refreshAccessToken(refreshToken);
-                
+
                 if (refreshResponse && refreshResponse.access_token) {
                   // 刷新成功，更新用户信息和令牌
                   if (refreshResponse.user) {
@@ -215,7 +246,7 @@ export const setupResponseInterceptor = () => {
                   if (refreshResponse.refresh_token) {
                     sessionStorage.setItem('refresh_token', refreshResponse.refresh_token);
                   }
-                  
+
                   // 重试原始请求
                   const originalRequest = error.config;
                   originalRequest.headers['Authorization'] = `Bearer ${refreshResponse.access_token}`;
@@ -236,11 +267,11 @@ export const setupResponseInterceptor = () => {
         const errorDetail = (errorData && typeof errorData === 'object' && !(errorData instanceof Blob))
           ? (errorData.detail || errorData.message || '登录已过期，请重新登录')
           : '登录已过期，请重新登录';
-        
+
         clearAuthData();
         sessionStorage.removeItem('refresh_token'); // 清除刷新令牌
         error._handled = true;
-        
+
         if (window.location.pathname !== '/login') {
           const friendlyMessage = errorDetail === 'Not authenticated' || errorDetail.includes('Not authenticated')
             ? '登录已过期，请重新登录'
