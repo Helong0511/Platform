@@ -265,13 +265,25 @@ export const useAuthStore = defineStore('auth', {
         // 根据用户角色和菜单显示情况跳转到合适的页面
         // 注意：路由守卫会检查token，所以这里直接跳转即可
         const defaultRoute = getDefaultRoute(userInfoFromApi);
-        router.push(defaultRoute).catch(err => {
-          // 忽略重复导航的错误（Vue Router 的特性）
-          if (err.name !== 'NavigationDuplicated') {
-            // 生产环境可以记录到错误监控服务
-            // 路由跳转失败已由路由系统处理
-          }
-        });
+        // 确保跳转路径正确
+        if (defaultRoute) {
+          router.push(defaultRoute).catch(err => {
+            // 忽略重复导航的错误（Vue Router 的特性）
+            if (err.name !== 'NavigationDuplicated') {
+              // 生产环境可以记录到错误监控服务
+              console.error('路由跳转失败:', err);
+              // 尝试使用 window.location.href 作为备用方案
+              window.location.href = defaultRoute;
+            }
+          });
+        } else {
+          // 如果没有默认路由，跳转到仪表盘
+          router.push('/app/dashboard').catch(err => {
+            if (err.name !== 'NavigationDuplicated') {
+              window.location.href = '/app/dashboard';
+            }
+          });
+        }
         return true;
       } catch (err) {
         // 处理错误信息

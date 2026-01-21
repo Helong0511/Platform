@@ -25,7 +25,7 @@
 
 import { createRouter, createWebHistory } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { useAuthStore, validateAuthData, clearAuthData } from '../store';
+import { useAuthStore, validateAuthData, clearAuthData, getDefaultRoute } from '../store';
 import { logger } from '../utils/logger';
 
 /**
