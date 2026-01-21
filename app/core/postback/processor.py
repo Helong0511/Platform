@@ -1369,12 +1369,13 @@ class PostbackProcessor:
                             client_name = client.client_name if client else None
                             product_name = product.product_name if product else None
                             
-                            admin_message = TelegramNotificationService.build_admin_conversion_message(
+                            admin_message = await TelegramNotificationService.build_admin_conversion_message(
                                 conversion=conversion,
                                 client_name=client_name,
                                 product_name=product_name,
                                 publisher=publisher,
-                                offer=offer
+                                offer=offer,
+                                db=db
                             )
                             
                             # 异步发送管理员通知

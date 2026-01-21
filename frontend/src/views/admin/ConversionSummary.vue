@@ -84,7 +84,7 @@
           </el-statistic>
         </el-card>
         <el-card class="stat-card">
-          <el-statistic title="总转化" :value="summaryData.total_conversions || 0">
+          <el-statistic :title="isAdmin ? '总转化' : '转化数'" :value="getDisplayConversion(summaryData.total_conversions, summaryData.conversion_cap)">
             <template #prefix>
               <el-icon :size="20"><Check /></el-icon>
             </template>
@@ -97,8 +97,22 @@
             </template>
           </el-statistic>
         </el-card>
+        <el-card v-if="isAdmin" class="stat-card">
+          <el-statistic title="Revenue" :value="summaryData.total_po || 0" :precision="2">
+            <template #prefix>
+              <el-icon :size="20"><Money /></el-icon>
+            </template>
+          </el-statistic>
+        </el-card>
         <el-card class="stat-card">
-          <el-statistic :title="isAdmin ? 'Revenue' : 'Pub Revenue'" :value="summaryData.total_po || 0" :precision="2">
+          <el-statistic title="Pub Revenue" :value="summaryData.total_po_after_discount || 0" :precision="2">
+            <template #prefix>
+              <el-icon :size="20"><Money /></el-icon>
+            </template>
+          </el-statistic>
+        </el-card>
+        <el-card v-if="isAdmin" class="stat-card">
+          <el-statistic title="Profit" :value="summaryData.total_profit || 0" :precision="2">
             <template #prefix>
               <el-icon :size="20"><Money /></el-icon>
             </template>
@@ -334,6 +348,9 @@ const summaryData = reactive({
   total_conversions: 0,
   cr: 0,
   total_po: 0,
+  total_po_after_discount: 0,
+  total_profit: 0,
+  conversion_cap: 0, // 客户转化上限
   stats_list: []
 })
 
@@ -603,6 +620,10 @@ const loadData = async (shouldExtractOptions = false) => {
     // response已经是标准格式，直接使用data字段
     if (response && response.data) {
       Object.assign(summaryData, response.data)
+      // 计算总利润（如果API没有返回）
+      if (summaryData.total_profit === 0 && summaryData.total_po > 0 && summaryData.total_po_after_discount > 0) {
+        summaryData.total_profit = summaryData.total_po - summaryData.total_po_after_discount
+      }
       statsList.value = response.data.stats_list || []
     }
   } catch (error) {
@@ -680,6 +701,14 @@ const handleOfferClick = (offerId) => {
     })
     window.open(route.href, '_blank')
   }
+}
+
+// 获取显示的转化数（客户显示的不能超出转化上限）
+const getDisplayConversion = (conversions, cap) => {
+  if (!isAdmin.value && cap > 0) {
+    return Math.min(conversions, cap)
+  }
+  return conversions
 }
 
 // 计算表格汇总
@@ -835,13 +864,19 @@ onMounted(() => {
 
 .stats-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 20px;
   margin-bottom: 20px;
 }
 
 .stat-card {
   text-align: center;
+}
+
+.conversion-cap {
+  font-size: 14px;
+  color: #606266;
+  margin-left: 4px;
 }
 
 .table-card {

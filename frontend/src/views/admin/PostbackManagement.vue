@@ -271,7 +271,7 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="columnVisibility.click_publisher_name" prop="click_publisher_name" label="关联渠道" min-width="150" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.click_publisher_name" prop="click_publisher_name" label="关联渠道" min-width="100" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="scope.row.click_publisher_id">
               <div style="font-weight: 500;">{{ scope.row.click_publisher_name || `渠道_${scope.row.click_publisher_id}` }}</div>
@@ -280,7 +280,7 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="columnVisibility.click_advertiser_name" prop="click_advertiser_name" label="关联广告主" min-width="150" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.click_advertiser_name" prop="click_advertiser_name" label="关联广告主" min-width="120" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="scope.row.click_advertiser_id">
               <div style="font-weight: 500;">{{ scope.row.click_advertiser_name || `广告主_${scope.row.click_advertiser_id}` }}</div>
@@ -289,7 +289,7 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="columnVisibility.click_time" prop="click_time" label="点击时间" width="180">
+        <el-table-column v-if="columnVisibility.click_time" prop="click_time" label="点击时间" width="150">
           <template #default="scope">
             {{ scope.row.click_time ? formatDateTime(scope.row.click_time) : '-' }}
           </template>
@@ -356,7 +356,7 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="columnVisibility.gid" prop="gid" label="渠道（gid）" min-width="150" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.gid" prop="gid" label="渠道(GID)" min-width="100" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="scope.row.gid">
               <div v-if="scope.row.gid_publisher_name" style="font-weight: 500;">
@@ -367,7 +367,7 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="columnVisibility.product_id" prop="product_id" label="产品" min-width="150" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.product_id" prop="product_id" label="产品" min-width="100" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="scope.row.product_id">
               <div style="font-weight: 500;">{{ scope.row.product_name || `产品_${scope.row.product_id}` }}</div>
@@ -376,7 +376,7 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="columnVisibility.client_id" prop="client_id" label="客户" min-width="150" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.client_id" prop="client_id" label="客户" min-width="100" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="scope.row.client_id">
               <div style="font-weight: 500;">{{ scope.row.client_name || `客户_${scope.row.client_id}` }}</div>

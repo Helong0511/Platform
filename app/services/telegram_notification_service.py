@@ -114,12 +114,13 @@ class TelegramNotificationService:
         return msg
     
     @staticmethod
-    def build_admin_conversion_message(
+    async def build_admin_conversion_message(
         conversion: PostbackConversion,
         client_name: Optional[str] = None,
         product_name: Optional[str] = None,
         publisher: Optional[Publisher] = None,
-        offer: Optional[Offer] = None
+        offer: Optional[Offer] = None,
+        db: Optional[AsyncSession] = None
     ) -> str:
         """
         构建管理员转化通知消息
@@ -130,6 +131,7 @@ class TelegramNotificationService:
             product_name: 产品名称（可选）
             publisher: 渠道对象（可选）
             offer: Offer 对象（可选）
+            db: 数据库会话（可选，用于查询当天总转化数）
         
         Returns:
             str: 通知消息
@@ -165,6 +167,34 @@ class TelegramNotificationService:
             msg += f"• Offer ID: {offer.id}\n"
             if offer.offer_name:
                 msg += f"• Offer 名称: {offer.offer_name}\n"
+        
+        # 添加当天总转化个数统计
+        if db:
+            try:
+                # 计算当天总转化数
+                today = conversion.created_at.date() if conversion.created_at else get_app_now_naive().date()
+                from sqlalchemy import func, and_
+                from datetime import datetime, time
+                
+                # 构建当天的开始和结束时间
+                start_of_day = datetime.combine(today, time.min)
+                end_of_day = datetime.combine(today, time.max)
+                
+                # 查询当天的转化记录数
+                result = await db.execute(
+                    select(func.count(PostbackConversion.id)).where(
+                        and_(
+                            PostbackConversion.created_at >= start_of_day,
+                            PostbackConversion.created_at <= end_of_day
+                        )
+                    )
+                )
+                daily_total = result.scalar() or 0
+                
+                msg += f"\n📊 统计信息\n"
+                msg += f"• 当天总转化个数: {daily_total}\n"
+            except Exception as e:
+                logger.warning(f"获取当天总转化数失败: {str(e)}")
         
         if conversion.created_at:
             time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
