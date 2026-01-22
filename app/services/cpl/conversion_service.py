@@ -471,9 +471,9 @@ class ConversionService:
             "total_clicks": total_clicks,
             "total_conversions": total_conversions,
             "cr": round(cr, 2),
-            "total_po": total_po,
-            "total_po_after_discount": total_po_after_discount,
-            "total_profit": total_profit,
+            "total_po": round(total_po, 2),
+            "total_po_after_discount": round(total_po_after_discount, 2),
+            "total_profit": round(total_profit, 2),
             "stats_list": stats_list,
             "start_date": start_date or (start_datetime.strftime("%Y-%m-%d")),
             "end_date": end_date or (end_datetime.strftime("%Y-%m-%d"))
