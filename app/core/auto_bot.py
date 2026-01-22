@@ -17,6 +17,7 @@ from pathlib import Path
 from app.core.config import settings  # 应用配置
 from app.core.utils import get_app_now  # 应用时区时间获取函数
 from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH
+from datetime import timedelta  # 用于日期计算
 
 logger = logging.getLogger(__name__)
 
@@ -246,8 +247,45 @@ if bot_initialized and TELEBOT_AVAILABLE:
         markup.row(InlineKeyboardButton(text='取消', callback_data='Cancel'))
 
         bot.send_message(chat_id, "确认是否要打卡？", reply_markup=markup)
+
+    @bot.message_handler(commands=['stats'])
+    def handle_stats_command(message):
+        """处理 /stats 命令：显示转化统计选项按钮"""
+        chat_type = message.chat.type if hasattr(message.chat, 'type') else '未知'
+        is_group = chat_type in ['group', 'supergroup']
+        logger.info(f"收到 /stats 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat Type: {chat_type})")
+        
+        if not _check_bot_available():
+            logger.error("Bot 未初始化，无法处理消息")
+            return
+
+        # 检查群组中是否包含 Bot 的提及
+        if is_group:
+            try:
+                bot_info = bot.get_me()
+                bot_username = bot_info.username if bot_info else None
+                if bot_username:
+                    text = message.text or ''
+                    bot_mentioned = f'@{bot_username}' in text
+                    if not bot_mentioned:
+                        logger.warning(f"⚠️ 群组中的命令没有 @{bot_username}，可能无法响应（Telegram 隐私模式）")
+            except:
+                pass
+
+        chat_id = message.chat.id
+        markup = InlineKeyboardMarkup()
+
+        # 添加统计选项按钮
+        markup.row(InlineKeyboardButton(text='总览统计', callback_data='stats_overview'))
+        markup.row(InlineKeyboardButton(text='按Offer统计', callback_data='stats_by_offer'))
+        markup.row(InlineKeyboardButton(text='按渠道统计', callback_data='stats_by_publisher'))
+        markup.row(InlineKeyboardButton(text='最近7天', callback_data='stats_last_7days'))
+        markup.row(InlineKeyboardButton(text='最近30天', callback_data='stats_last_30days'))
+        markup.row(InlineKeyboardButton(text='取消', callback_data='Cancel'))
+
+        bot.send_message(chat_id, "请选择统计类型：", reply_markup=markup)
     
-    logger.info("Telegram Bot 命令处理器已注册: /id, /test, /clock")
+    logger.info("Telegram Bot 命令处理器已注册: /id, /test, /clock, /stats")
     # 验证处理器是否真的注册了
     try:
         # 检查 bot 的 registered_next_step_handlers 和 message_handlers
@@ -289,6 +327,9 @@ if bot_initialized and TELEBOT_AVAILABLE:
                 # 使用同步数据库操作（因为 Telegram bot 回调是同步的）
                 def process_pending_conversion_sync():
                     try:
+                        # 导入 settings 以确保在函数内部可用
+                        from app.core.config import settings
+                        
                         # 创建同步数据库引擎（从异步 URI 转换为同步 URI）
                         # 支持多种格式：mysql+aiomysql:// 或 mysql+asyncmy://
                         sync_db_url = settings.SQLALCHEMY_DATABASE_URI
@@ -420,8 +461,207 @@ if bot_initialized and TELEBOT_AVAILABLE:
                 bot.edit_message_text(
                     chat_id=call.message.chat.id,
                     message_id=call.message.message_id,
-                    text=f"打卡成功！时间：{current_time.strftime('%Y-%m-%d %H:%M:%S')}（时区: {settings.TIMEZONE}）"
+                    text=f"打卡成功！时间：{current_time.strftime('%Y-%m-%d %H:%M:%S')}（时区: Asia/Shanghai）"
                 )
+            elif call.data.startswith("stats_"):
+                # 处理统计相关回调
+                stats_type = call.data.replace("stats_", "")
+                logger.info(f"处理统计回调：{stats_type}")
+                
+                # 显示加载中消息
+                bot.edit_message_text(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    text="正在生成统计数据，请稍候..."
+                )
+                
+                # 在独立线程中处理统计数据，避免阻塞 Telegram bot
+                def process_stats():
+                    try:
+                        # 导入 settings 以确保在函数内部可用
+                        from app.core.config import settings
+                        
+                        # 计算日期范围
+                        start_date = None
+                        end_date = None
+                        
+                        if stats_type == "last_7days":
+                            # 最近7天
+                            end_date = get_app_now().strftime("%Y-%m-%d")
+                            start_date = (get_app_now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                        elif stats_type == "last_30days":
+                            # 最近30天
+                            end_date = get_app_now().strftime("%Y-%m-%d")
+                            start_date = (get_app_now() - timedelta(days=30)).strftime("%Y-%m-%d")
+                        
+                        # 模拟用户（使用管理员权限）
+                        class MockUser:
+                            role = "ADMIN"
+                        
+                        mock_user = MockUser()
+                        
+                        # 创建数据库会话
+                        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+                        from sqlalchemy.orm import sessionmaker
+                        
+                        # 从设置中获取数据库 URL
+                        db_url = getattr(settings, 'SQLALCHEMY_DATABASE_URI', None)
+                        if not db_url:
+                            logger.error("数据库 URL 未配置")
+                            bot.edit_message_text(
+                                chat_id=call.message.chat.id,
+                                message_id=call.message.message_id,
+                                text="错误：数据库配置未找到"
+                            )
+                            return
+                        
+                        # 创建异步引擎
+                        engine = create_async_engine(db_url)
+                        AsyncSessionLocal = sessionmaker(
+                            engine, class_=AsyncSession, expire_on_commit=False
+                        )
+                        
+                        async def get_stats():
+                            async with AsyncSessionLocal() as db:
+                                try:
+                                    # 导入 ConversionService
+                                    from app.services.cpl.conversion_service import ConversionService
+                                    
+                                    # 创建服务实例
+                                    conversion_service = ConversionService(db)
+                                    
+                                    if stats_type in ["overview", "last_7days", "last_30days"]:
+                                        # 获取总览统计
+                                        summary = await conversion_service.get_conversion_summary(
+                                            current_user=mock_user,
+                                            start_date=start_date,
+                                            end_date=end_date
+                                        )
+                                        
+                                        # 格式化统计消息
+                                        message = f"📊 转化总览统计\n\n"
+                                        message += f"时间范围：{summary.get('start_date')} 至 {summary.get('end_date')}\n"
+                                        message += f"总点击：{summary.get('total_clicks', 0)}\n"
+                                        message += f"总转化：{summary.get('total_conversions', 0)}\n"
+                                        message += f"转化率：{summary.get('cr', 0):.2f}%\n"
+                                        message += f"总支付：¥{summary.get('total_po', 0):.2f}\n"
+                                        message += f"扣价后：¥{summary.get('total_po_after_discount', 0):.2f}\n"
+                                        message += f"总利润：¥{summary.get('total_profit', 0):.2f}\n\n"
+                                        
+                                        # 添加前5个Offer的详细数据
+                                        stats_list = summary.get('stats_list', [])[:5]
+                                        if stats_list:
+                                            message += "🏆 Top 5 Offer：\n"
+                                            for i, item in enumerate(stats_list, 1):
+                                                message += f"{i}. {item.get('offer_name', '未知')}\n"
+                                                message += f"   点击：{item.get('click_count', 0)} | 转化：{item.get('conversion_count', 0)}\n"
+                                                message += f"   转化率：{item.get('cr', 0):.2f}% | 收益：¥{item.get('revenue', 0):.2f}\n\n"
+                                        
+                                        return message
+                                    elif stats_type == "by_offer":
+                                        # 获取按Offer统计
+                                        stats = await conversion_service.get_conversions_by_offer(
+                                            current_user=mock_user
+                                        )
+                                        
+                                        # 格式化统计消息
+                                        message = f"📊 按Offer统计\n\n"
+                                        
+                                        # 添加前10个Offer的数据
+                                        if stats:
+                                            message += "🏆 Offer 统计：\n"
+                                            for i, item in enumerate(stats[:10], 1):
+                                                message += f"{i}. {item.get('offer_name', '未知')}\n"
+                                                message += f"   点击：{item.get('click_count', 0)} | 转化：{item.get('conversion_count', 0)}\n"
+                                                message += f"   转化率：{item.get('cr', 0):.2f}% | 支付：¥{item.get('po', 0):.2f}\n\n"
+                                        else:
+                                            message += "暂无数据\n"
+                                        
+                                        return message
+                                    elif stats_type == "by_publisher":
+                                        # 获取总览统计，然后按渠道分组
+                                        summary = await conversion_service.get_conversion_summary(
+                                            current_user=mock_user
+                                        )
+                                        
+                                        # 按渠道分组
+                                        publisher_stats = {}
+                                        for item in summary.get('stats_list', []):
+                                            publisher_id = item.get('publisher_id')
+                                            publisher_name = item.get('publisher_name', '未知')
+                                            if publisher_id not in publisher_stats:
+                                                publisher_stats[publisher_id] = {
+                                                    'name': publisher_name,
+                                                    'click_count': 0,
+                                                    'conversion_count': 0,
+                                                    'revenue': 0
+                                                }
+                                            publisher_stats[publisher_id]['click_count'] += item.get('click_count', 0)
+                                            publisher_stats[publisher_id]['conversion_count'] += item.get('conversion_count', 0)
+                                            publisher_stats[publisher_id]['revenue'] += item.get('revenue', 0)
+                                        
+                                        # 排序
+                                        sorted_publishers = sorted(
+                                            publisher_stats.values(),
+                                            key=lambda x: x['revenue'],
+                                            reverse=True
+                                        )
+                                        
+                                        # 格式化统计消息
+                                        message = f"📊 按渠道统计\n\n"
+                                        
+                                        # 添加前10个渠道的数据
+                                        if sorted_publishers:
+                                            message += "🏆 渠道统计：\n"
+                                            for i, item in enumerate(sorted_publishers[:10], 1):
+                                                message += f"{i}. {item['name']}\n"
+                                                message += f"   点击：{item['click_count']} | 转化：{item['conversion_count']}\n"
+                                                message += f"   收益：¥{item['revenue']:.2f}\n\n"
+                                        else:
+                                            message += "暂无数据\n"
+                                        
+                                        return message
+                                    else:
+                                        return "错误：未知的统计类型"
+                                except Exception as e:
+                                    logger.error(f"获取统计数据失败：{e}", exc_info=True)
+                                    return f"错误：{str(e)}"
+                                finally:
+                                    await db.close()
+                        
+                        # 执行异步函数
+                        import asyncio
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        message = loop.run_until_complete(get_stats())
+                        
+                        # 关闭引擎
+                        loop.run_until_complete(engine.dispose())
+                        loop.close()
+                        
+                        # 发送统计消息
+                        # 检查消息长度，避免超过 Telegram 限制
+                        from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH
+                        if len(message) > MAX_TELEGRAM_MESSAGE_LENGTH:
+                            message = truncate_message(message, MAX_TELEGRAM_MESSAGE_LENGTH)
+                        
+                        bot.edit_message_text(
+                            chat_id=call.message.chat.id,
+                            message_id=call.message.message_id,
+                            text=message
+                        )
+                    except Exception as e:
+                        logger.error(f"处理统计数据失败：{e}", exc_info=True)
+                        bot.edit_message_text(
+                            chat_id=call.message.chat.id,
+                            message_id=call.message.message_id,
+                            text=f"错误：{str(e)}"
+                        )
+                
+                # 启动线程处理统计数据
+                import threading
+                thread = threading.Thread(target=process_stats, daemon=True)
+                thread.start()
             elif call.data == "Cancel":
                 bot.edit_message_text(
                     chat_id=call.message.chat.id,
@@ -457,6 +697,9 @@ def run_bot():
     if not _check_bot_available():
         logger.error("Bot 未初始化，无法启动轮询")
         return
+
+    # 导入 settings 以确保在函数内部可用
+    from app.core.config import settings
 
     logger.info(f"[线程: {threading.current_thread().name}] 开始启动 Telegram Bot 轮询...")
     
@@ -1170,9 +1413,11 @@ def start_bot():
         return False
 
     # 尝试获取锁（多进程环境下，只有一个进程能获取到）
-    if not _acquire_bot_lock():
-        logger.info(f"[PID:{current_pid}] 其他进程已启动 Telegram Bot，跳过启动")
-        return False
+    logger.info(f"[PID:{current_pid}] 尝试获取 Telegram Bot 启动锁...")
+    lock_acquired = _acquire_bot_lock()
+    if not lock_acquired:
+        logger.info(f"[PID:{current_pid}] 其他进程已启动 Telegram Bot，或无法获取锁，继续启动线程...")
+        # 即使没有获取到锁，也尝试启动线程，因为可能是锁文件问题
 
     try:
         logger.info(f"[PID:{current_pid}] 正在设置 Telegram Bot 命令...")
@@ -1180,13 +1425,15 @@ def start_bot():
         commands_list = [
             ("id", "查询聊天ID（群组中需使用 /id@botname）"),
             ("test", "测试内联按钮（群组中需使用 /test@botname）"),
-            ("clock", "打卡（群组中需使用 /clock@botname）")
+            ("clock", "打卡（群组中需使用 /clock@botname）"),
+            ("stats", "查看转化统计（群组中需使用 /stats@botname）")
         ]
 
         com_set = []
         for com, desc in commands_list:
             try:
                 com_set.append(BotCommand(command=com, description=desc))
+                logger.info(f"[PID:{current_pid}] 添加命令 {com} 成功")
             except Exception as er:
                 logger.warning(f"添加命令 {com} 时发生错误: {er}")
 
@@ -1202,8 +1449,9 @@ def start_bot():
                     if bot_username:
                         logger.info(f"[PID:{current_pid}] 💡 提示：在群组中使用命令时，请使用 /命令@{bot_username} 格式，或直接 @{bot_username} 后发送命令")
                         logger.info(f"[PID:{current_pid}] 💡 例如：/id@{bot_username} 或 @{bot_username} /id")
-                except:
-                    pass
+                        logger.info(f"[PID:{current_pid}] 💡 例如：/stats@{bot_username} 或 @{bot_username} /stats")
+                except Exception as e:
+                    logger.warning(f"[PID:{current_pid}] 获取 Bot 信息时发生错误: {e}")
             except Exception as e:
                 logger.warning(f"[PID:{current_pid}] 设置 Telegram Bot 命令时发生错误: {e}")
 
@@ -1213,7 +1461,7 @@ def start_bot():
         bot_thread.start()
         
         # 等待一小段时间，检查线程是否正常启动
-        time.sleep(0.5)
+        time.sleep(1.0)
         if bot_thread.is_alive():
             logger.info(f"[PID:{current_pid}] Telegram Bot 轮询线程已启动（线程ID: {bot_thread.ident}, 已获取锁）")
         else:
@@ -1222,7 +1470,8 @@ def start_bot():
         return True
     except Exception as e:
         logger.error(f"[PID:{current_pid}] 启动 Telegram Bot 时发生错误: {e}", exc_info=True)
-        _release_bot_lock()
+        if lock_acquired:
+            _release_bot_lock()
         return False
 
 

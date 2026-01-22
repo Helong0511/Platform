@@ -325,7 +325,7 @@ async def diagnostic_bot(
                         if commands:
                             command_handlers.extend(commands)
                     
-                    expected_commands = ['id', 'test', 'clock']
+                    expected_commands = ['id', 'test', 'clock', 'stats']
                     missing_commands = [cmd for cmd in expected_commands if cmd not in command_handlers]
                     if missing_commands:
                         recommendations.append(f"⚠️ 缺少命令处理器: {missing_commands}")
