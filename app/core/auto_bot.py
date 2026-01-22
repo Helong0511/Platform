@@ -39,6 +39,16 @@ bot_initialized = False  # 添加初始化状态标志
 _bot_lock_file = None  # Bot 锁文件句柄
 _bot_lock_acquired = False  # 是否已获取锁（用于多进程环境）
 
+# 延迟导入 settings，确保它已经完全初始化
+from app.core.config import settings  # 应用配置
+
+# 初始化变量
+bot = None
+bot_initialized = False  # 添加初始化状态标志
+_bot_lock_file = None  # Bot 锁文件句柄
+_bot_lock_acquired = False  # 是否已获取锁（用于多进程环境）
+TELEBOT_AVAILABLE = False
+
 # 尝试导入 telebot 模块
 try:
     import telebot  # pip3 install --upgrade pyTelegramBotAPI
@@ -52,36 +62,40 @@ except ImportError as import_err:
     logger.warning(f"pyTelegramBotAPI 模块未安装，Telegram Bot 功能将不可用。请运行: pip install pyTelegramBotAPI")
     logger.warning(f"导入错误详情: {import_err}")
 
-# 延迟导入 settings，确保它已经完全初始化
-from app.core.config import settings  # 应用配置
-
-# 初始化 Telegram Bot（仅在模块可用且启用时）
-telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
-logger.info(f"Telegram Bot 功能启用状态: {telegram_enabled}")
-if not telegram_enabled:
-    logger.info("Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false）")
-    bot_initialized = False
-elif TELEBOT_AVAILABLE:
-    try:
-        logger.info("正在加载 Telegram token...")
-        token = getattr(settings, 'TELEGRAM_TOKEN', None) or None
-        logger.info(f"Telegram token 加载结果: {token[:4]}****" if token else "None")
-        if token and isinstance(token, str) and token.strip():
-            # 初始化 Telegram Bot
-            bot = telebot.TeleBot(token=token)
-            bot_initialized = True
-            logger.info(f"Telegram Bot 初始化成功，token: {token[:4]}****")
-        else:
-            logger.warning("Telegram token 未设置或为空，Telegram Bot 功能将不可用")
-            bot_initialized = False
-    except Exception as err:
+def initialize_bot():
+    """初始化 Telegram Bot（在 settings 对象完全初始化后调用）"""
+    global bot, bot_initialized, TELEBOT_AVAILABLE
+    
+    # 初始化 Telegram Bot（仅在模块可用且启用时）
+    telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+    logger.info(f"Telegram Bot 功能启用状态: {telegram_enabled}")
+    if not telegram_enabled:
+        logger.info("Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false）")
         bot_initialized = False
-        logger.error(f"初始化 Telegram Bot 失败: {err}", exc_info=True)
-else:
-    logger.info("Telegram Bot 功能已禁用（pyTelegramBotAPI 未安装）")
-    bot_initialized = False
+    elif TELEBOT_AVAILABLE:
+        try:
+            logger.info("正在加载 Telegram token...")
+            token = getattr(settings, 'TELEGRAM_TOKEN', None) or None
+            logger.info(f"Telegram token 加载结果: {token[:4]}****" if token else "None")
+            if token and isinstance(token, str) and token.strip():
+                # 初始化 Telegram Bot
+                bot = telebot.TeleBot(token=token)
+                bot_initialized = True
+                logger.info(f"Telegram Bot 初始化成功，token: {token[:4]}****")
+            else:
+                logger.warning("Telegram token 未设置或为空，Telegram Bot 功能将不可用")
+                bot_initialized = False
+        except Exception as err:
+            bot_initialized = False
+            logger.error(f"初始化 Telegram Bot 失败: {err}", exc_info=True)
+    else:
+        logger.info("Telegram Bot 功能已禁用（pyTelegramBotAPI 未安装）")
+        bot_initialized = False
 
-logger.info(f"Bot 初始化状态: bot_initialized={bot_initialized}, TELEBOT_AVAILABLE={TELEBOT_AVAILABLE}, bot={bot}")
+    logger.info(f"Bot 初始化状态: bot_initialized={bot_initialized}, TELEBOT_AVAILABLE={TELEBOT_AVAILABLE}, bot={bot}")
+
+# 初始化 Bot
+initialize_bot()
 
 
 def _check_bot_available() -> bool:
