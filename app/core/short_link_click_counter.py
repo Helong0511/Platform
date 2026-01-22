@@ -381,10 +381,7 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                         f"失败的计数详情: {failed_counts}"
                     )
             
-            # 同步完成后持久化进程内计数器
-    await persist_counters()
-    
-    return synced
+            return synced
         
         # Redis可用时，从Redis同步
         # 使用SCAN而不是KEYS，避免在生产环境阻塞
