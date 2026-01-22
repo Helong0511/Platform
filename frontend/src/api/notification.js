@@ -119,6 +119,18 @@ export const resendConversionNotification = async (conversionId) => {
   }, { returnDataOnly: true });
 };
 
+/**
+ * 批量补发转化通知
+ */
+export const batchResendConversionNotification = async (conversionIds) => {
+  await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
+  return request({
+    url: '/api/v1/notification-configs/conversions/batch-resend-notification',
+    method: 'post',
+    data: { conversion_ids: conversionIds }
+  }, { returnDataOnly: true });
+};
+
 // ==================== 管理员通知配置 ====================
 
 /**

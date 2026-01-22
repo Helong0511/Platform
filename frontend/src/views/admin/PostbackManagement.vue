@@ -234,13 +234,36 @@ Postback 转化管理页面
           </el-button>
         </div>
       </template>
+      <div v-if="selectedConversions.length > 0" class="batch-operations" style="margin-bottom: 10px;">
+        <el-button 
+          type="warning" 
+          size="small"
+          :loading="batchResending"
+          @click="handleBatchResendNotification"
+        >
+          <i class="el-icon-refresh"></i> 批量补发通知 ({{ selectedConversions.length }})
+        </el-button>
+        <el-button 
+          type="default" 
+          size="small"
+          @click="selectedConversions = []"
+        >
+          取消选择
+        </el-button>
+      </div>
+      
       <el-table
         v-loading="loading"
         :data="conversions"
         border
         stripe
         style="width: 100%"
+        @selection-change="handleSelectionChange"
       >
+        <el-table-column
+          type="selection"
+          width="55"
+        />
         <el-table-column v-if="columnVisibility.id" prop="id" label="ID" width="80" align="center" />
         <el-table-column v-if="columnVisibility.platform" prop="platform" label="平台" width="100" align="center">
           <template #default="scope">
@@ -655,7 +678,7 @@ import { getPostbackConversions, getPostbackStats, updateConversionStatus } from
 import { formatDateTime } from '../../utils/dateFormat';
 import { useDevice } from '../../composables/useDevice';
 import NotificationRecordsDialog from '../../components/admin/NotificationRecordsDialog.vue';
-import { resendConversionNotification, getNotificationRecords } from '../../api/notification';
+import { resendConversionNotification, getNotificationRecords, batchResendConversionNotification } from '../../api/notification';
 import { useAuthStore } from '../../store';
 import { getOffers } from '../../api/offer';
 import { getPublishers } from '../../api/publisher';
@@ -679,6 +702,11 @@ const pagination = reactive({
   pageSize: 20,
   total: 0
 });
+
+// 批量操作相关
+const selectedConversions = ref([]);
+const batchResending = ref(false);
+const resendingNotifications = ref({});
 
 // 列显示状态（默认全部显示）
 const getDefaultColumnVisibility = () => ({
@@ -803,9 +831,6 @@ const selectedConversionId = ref(null);
 const selectedClientId = ref(null);
 const selectedProductId = ref(null);
 const selectedPublisherId = ref(null);
-
-// 补发通知状态
-const resendingNotifications = ref({});
 
 // 监听日期范围变化
 watch(dateRange, (newVal) => {
@@ -1016,6 +1041,69 @@ const handleResendNotification = async (row) => {
     if (error !== 'cancel') {
       // 如果不是取消操作，记录错误但不显示给用户
       logger.debug('补发通知对话框错误:', error);
+    }
+  }
+};
+
+// 处理表格选择变化
+const handleSelectionChange = (selection) => {
+  selectedConversions.value = selection;
+};
+
+// 批量补发通知
+const handleBatchResendNotification = async () => {
+  if (selectedConversions.value.length === 0) {
+    ElMessage.warning('请先选择要补发的转化记录');
+    return;
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要批量补发 ${selectedConversions.value.length} 条转化记录的通知吗？`,
+      '批量补发通知',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    );
+    
+    batchResending.value = true;
+    try {
+      const conversionIds = selectedConversions.value.map(item => item.id);
+      const result = await batchResendConversionNotification(conversionIds);
+      
+      ElMessage.success(result.message);
+      
+      // 刷新列表数据以获取最新的通知状态
+      await fetchConversions();
+      
+      // 清空选择
+      selectedConversions.value = [];
+      
+      // 如果有失败的记录，显示详细信息
+      if (result.failed_count > 0) {
+        await ElMessageBox.alert(
+          `失败详情：\n${result.failed_items.map(item => 
+            `转化ID ${item.conversion_id}：${item.error}`
+          ).join('\n')}`,
+          '批量补发结果',
+          {
+            confirmButtonText: '确定',
+            type: 'info'
+          }
+        );
+      }
+    } catch (error) {
+      ElMessage.error('批量补发通知失败，请稍后重试');
+    } finally {
+      batchResending.value = false;
+    }
+  } catch (error) {
+    // 用户取消操作或 ElMessageBox 的其他错误，不需要处理
+    if (error !== 'cancel') {
+      // 如果不是取消操作，记录错误但不显示给用户
+      logger.debug('批量补发通知对话框错误:', error);
     }
   }
 };

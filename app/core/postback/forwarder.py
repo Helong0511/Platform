@@ -24,12 +24,119 @@ from app.models.models import (
 from app.core.utils import get_app_now_naive
 from app.core.auto_bot import send_telegram_message
 from app.services.telegram_notification_service import TelegramNotificationService
+from app.core.cache import get_cached, set_cached, generate_cache_key
 
 logger = logging.getLogger(__name__)
 
 
 class PostbackForwarder:
     """Postback 转发器（主要用于转发给渠道）"""
+
+    @staticmethod
+    async def get_cached_publisher(publisher_id: int, db: AsyncSession) -> Optional[Publisher]:
+        """
+        获取缓存的渠道信息
+        
+        Args:
+            publisher_id: 渠道ID
+            db: 数据库会话
+            
+        Returns:
+            Publisher: 渠道对象
+        """
+        cache_key = generate_cache_key("publisher", publisher_id)
+        
+        # 尝试从缓存获取
+        cached_data = await get_cached(cache_key)
+        if cached_data:
+            # 重建Publisher对象（简单实现，实际项目中可能需要更复杂的对象重建）
+            try:
+                # 先从数据库获取对象，然后更新属性
+                result = await db.execute(
+                    select(Publisher).where(Publisher.id == publisher_id)
+                )
+                publisher = result.scalars().first()
+                if publisher:
+                    # 更新属性（如果缓存中有更完整的数据）
+                    for key, value in cached_data.items():
+                        if hasattr(publisher, key):
+                            setattr(publisher, key, value)
+                    return publisher
+            except Exception as e:
+                logger.debug(f"从缓存重建Publisher对象失败: {str(e)}")
+        
+        # 缓存不存在，从数据库查询
+        result = await db.execute(
+            select(Publisher).where(Publisher.id == publisher_id)
+        )
+        publisher = result.scalars().first()
+        
+        if publisher:
+            # 缓存渠道信息（5分钟）
+            try:
+                # 提取需要缓存的字段
+                publisher_data = {
+                    "id": publisher.id,
+                    "publisher_name": publisher.publisher_name,
+                    "postback_url": publisher.postback_url,
+                    "postback_method": publisher.postback_method,
+                    "postback_success_check": publisher.postback_success_check
+                }
+                await set_cached(cache_key, publisher_data, ttl=300)
+            except Exception as e:
+                logger.debug(f"缓存Publisher信息失败: {str(e)}")
+        
+        return publisher
+
+    @staticmethod
+    async def get_cached_offer(offer_id: int, db: AsyncSession) -> Optional[Offer]:
+        """
+        获取缓存的Offer信息
+        
+        Args:
+            offer_id: Offer ID
+            db: 数据库会话
+            
+        Returns:
+            Offer: Offer对象
+        """
+        cache_key = generate_cache_key("offer", offer_id)
+        
+        # 尝试从缓存获取
+        cached_data = await get_cached(cache_key)
+        if cached_data:
+            try:
+                result = await db.execute(
+                    select(Offer).where(Offer.id == offer_id)
+                )
+                offer = result.scalars().first()
+                if offer:
+                    for key, value in cached_data.items():
+                        if hasattr(offer, key):
+                            setattr(offer, key, value)
+                    return offer
+            except Exception as e:
+                logger.debug(f"从缓存重建Offer对象失败: {str(e)}")
+        
+        # 缓存不存在，从数据库查询
+        result = await db.execute(
+            select(Offer).where(Offer.id == offer_id)
+        )
+        offer = result.scalars().first()
+        
+        if offer:
+            # 缓存Offer信息（5分钟）
+            try:
+                offer_data = {
+                    "id": offer.id,
+                    "offer_name": offer.offer_name,
+                    "advertiser_id": offer.advertiser_id
+                }
+                await set_cached(cache_key, offer_data, ttl=300)
+            except Exception as e:
+                logger.debug(f"缓存Offer信息失败: {str(e)}")
+        
+        return offer
 
     @staticmethod
     async def forward_to_publisher(
@@ -64,24 +171,26 @@ class PostbackForwarder:
             click_stats = click_stats_result.scalars().first()
             
             if click_stats:
-                # 从 ClickStats 获取 publisher_id，然后查询 Publisher
+                # 从 ClickStats 获取 publisher_id，然后查询 Publisher（使用缓存）
                 if click_stats.publisher_id:
-                    publisher_result = await db.execute(
-                        select(Publisher).where(Publisher.id == click_stats.publisher_id)
+                    # 使用缓存方法获取渠道信息
+                    publisher = await PostbackForwarder.get_cached_publisher(
+                        click_stats.publisher_id, db
                     )
-                    publisher = publisher_result.scalars().first()
                 
-                # 从 ClickStats 获取 offer_id，然后查询 Offer 和 Advertiser
+                # 从 ClickStats 获取 offer_id，然后查询 Offer 和 Advertiser（使用缓存）
                 if click_stats.offer_id:
-                    offer_result = await db.execute(
-                        select(Offer)
-                        .options(joinedload(Offer.advertiser))
-                        .where(Offer.id == click_stats.offer_id)
+                    # 使用缓存方法获取Offer信息
+                    offer = await PostbackForwarder.get_cached_offer(
+                        click_stats.offer_id, db
                     )
-                    # 使用joinedload时，为了安全起见使用unique()去重
-                    offer = offer_result.unique().scalars().first()
                     if offer:
-                        advertiser = offer.advertiser
+                        # 从Offer获取Advertiser
+                        if offer.advertiser_id:
+                            advertiser_result = await db.execute(
+                                select(Advertiser).where(Advertiser.id == offer.advertiser_id)
+                            )
+                            advertiser = advertiser_result.scalars().first()
             
             # 如果 ClickStats 中没有找到 publisher，尝试从 Click 表获取（兼容性，如果数据还未清理）
             # 或者 ClickStats 存在但没有 publisher_id（数据不完整的情况）

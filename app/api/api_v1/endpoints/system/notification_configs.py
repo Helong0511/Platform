@@ -328,6 +328,41 @@ async def resend_notification_from_forward_log(
     return ResponseBaseSchema.success(data=result)
 
 
+@router.post("/conversions/batch-resend-notification",
+             response_model=ResponseBaseSchema[dict],
+             summary="批量补发转化通知")
+async def batch_resend_conversion_notification(
+    request_data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    批量补发转化通知（批量补发 Postback 转发给渠道）
+    
+    支持同时补发多条转化记录的通知，最多支持50条记录。
+    
+    请求体示例：
+    {
+      "conversion_ids": [1, 2, 3]
+    }
+    """
+    conversion_ids = request_data.get("conversion_ids", [])
+    
+    if not isinstance(conversion_ids, list):
+        raise_api_exception(
+            ErrorCode.VALIDATION_ERROR,
+            detail="conversion_ids 必须是数组格式"
+        )
+    
+    # 使用服务层（业务逻辑在NotificationConfigService中）
+    notification_service: NotificationConfigService = await get_notification_config_service(db)
+    
+    # 调用服务层批量补发转化通知（服务层会处理权限检查和补发逻辑）
+    result = await notification_service.batch_resend_conversion_notification(conversion_ids, current_user)
+    
+    return ResponseBaseSchema.success(data=result)
+
+
 # ==================== 管理员通知配置 ====================
 
 @router.get("/admin/config",

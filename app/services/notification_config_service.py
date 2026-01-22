@@ -720,6 +720,100 @@ class NotificationConfigService:
                 detail=f"补发通知失败: {str(e)}"
             )
 
+    async def batch_resend_conversion_notification(
+        self,
+        conversion_ids: List[int],
+        current_user: User
+    ) -> Dict[str, Any]:
+        """
+        批量补发转化通知（批量补发 Postback 转发给渠道）
+        
+        Args:
+            conversion_ids: 转化记录ID列表
+            current_user: 当前用户
+
+        Returns:
+            Dict: 批量补发结果
+        """
+        if not conversion_ids:
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="转化记录ID列表不能为空"
+            )
+
+        if len(conversion_ids) > 50:
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="批量操作最多支持50条记录"
+            )
+
+        success_count = 0
+        failed_count = 0
+        failed_items = []
+
+        for conversion_id in conversion_ids:
+            try:
+                # 查询转化记录
+                result = await self.db.execute(
+                    select(PostbackConversion).where(PostbackConversion.id == conversion_id)
+                )
+                conversion = result.scalars().first()
+
+                if not conversion:
+                    failed_items.append({
+                        "conversion_id": conversion_id,
+                        "error": f"转化记录ID {conversion_id} 不存在"
+                    })
+                    failed_count += 1
+                    continue
+
+                # 权限检查：管理员可以补发所有通知，客户只能补发自己客户的通知
+                if current_user.role != UserRole.ADMIN:
+                    if not current_user.client_id or conversion.client_id != current_user.client_id:
+                        failed_items.append({
+                            "conversion_id": conversion_id,
+                            "error": "无权补发该转化记录的通知"
+                        })
+                        failed_count += 1
+                        continue
+
+                # 补发 Postback 转发（发送给渠道 Publisher）
+                await PostbackForwarder.forward_to_publisher(
+                    conversion=conversion,
+                    db=self.db
+                )
+
+                logger.info(
+                    f"用户 {current_user.id} 批量补发转化通知: conversion_id={conversion_id}"
+                )
+
+                success_count += 1
+            except Exception as e:
+                # 提取错误信息
+                error_msg = str(e)
+                if hasattr(e, 'detail'):
+                    if isinstance(e.detail, dict):
+                        error_msg = e.detail.get('detail', e.detail.get('message', str(e)))
+                    else:
+                        error_msg = str(e.detail)
+                
+                failed_items.append({
+                    "conversion_id": conversion_id,
+                    "error": error_msg
+                })
+                failed_count += 1
+                logger.error(
+                    f"批量补发转化通知失败: conversion_id={conversion_id}, error={error_msg}",
+                    exc_info=True
+                )
+
+        return {
+            "message": f"批量补发完成，成功 {success_count} 条，失败 {failed_count} 条",
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "failed_items": failed_items
+        }
+
     # ==================== 管理员通知配置 ====================
 
     async def get_admin_notification_config(
