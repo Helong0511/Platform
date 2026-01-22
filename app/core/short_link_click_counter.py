@@ -114,11 +114,12 @@ _last_update_time: Dict[str, float] = {}
 _counter_lock = asyncio.Lock()
 
 # 持久化配置
-COUNTER_PERSIST_FILE = Path(__file__).parent.parent.parent / "data" / "click_counters.json"
+import tempfile
+# 使用临时目录存储持久化数据，避免权限问题
+COUNTER_PERSIST_FILE = Path(tempfile.gettempdir()) / "click_counters.json"
 COUNTER_PERSIST_INTERVAL = 300  # 每5分钟持久化一次
 
-# 确保持久化目录存在
-COUNTER_PERSIST_FILE.parent.mkdir(parents=True, exist_ok=True)
+# 不需要创建目录，因为临时目录已存在
 
 # 加载持久化的计数器数据
 def load_persisted_counters():
