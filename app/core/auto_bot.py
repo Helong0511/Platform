@@ -892,8 +892,45 @@ def run_bot():
                     last_update_id = None
                     logger.info("✅ 没有待处理的更新，将从最新消息开始接收")
             except Exception as reset_error:
-                logger.warning(f"⚠️ 重置 offset 时出错（可忽略）: {reset_error}")
-                last_update_id = None
+                # 检查是否是 409 冲突错误
+                is_conflict_error = False
+                error_code = None
+                
+                # 尝试获取错误代码
+                if hasattr(reset_error, 'error_code'):
+                    error_code = reset_error.error_code
+                    if error_code == 409:
+                        is_conflict_error = True
+                elif hasattr(reset_error, 'result') and hasattr(reset_error.result, 'error_code'):
+                    error_code = reset_error.result.error_code
+                    if error_code == 409:
+                        is_conflict_error = True
+                # 也可以通过错误消息判断
+                elif '409' in str(reset_error) or 'Conflict' in str(reset_error) or 'terminated by other getUpdates' in str(reset_error):
+                    is_conflict_error = True
+                    error_code = 409
+                
+                if is_conflict_error:
+                    # 409 冲突错误：有多个 bot 实例在运行
+                    logger.warning(f"⚠️ 重置 offset 时发生冲突错误 (409): 检测到多个 bot 实例同时运行")
+                    logger.warning(f"   错误信息: {str(reset_error)[:300]}")
+                    logger.warning(f"   将在 10 秒后重试...")
+                    time.sleep(10)
+                    # 重试一次
+                    try:
+                        test_updates = bot.get_updates(timeout=1)
+                        if test_updates:
+                            last_update_id = test_updates[-1].update_id + 1
+                            logger.info(f"✅ 重试后重置 offset 到: {last_update_id}")
+                        else:
+                            last_update_id = None
+                            logger.info("✅ 重试后没有待处理的更新")
+                    except Exception as retry_error:
+                        logger.warning(f"⚠️ 重试重置 offset 时再次出错（可忽略）: {retry_error}")
+                        last_update_id = None
+                else:
+                    logger.warning(f"⚠️ 重置 offset 时出错（可忽略）: {reset_error}")
+                    last_update_id = None
             
             # 网络错误重试计数和退避时间
             network_error_count = 0
@@ -954,11 +991,13 @@ def run_bot():
                             logger.error(f"         - 是否有定时任务也在启动 bot")
                             logger.error(f"         - 是否有其他服务器也在运行相同的 bot")
                             
-                            # 等待较长时间后重试（给其他实例时间停止）
-                            retry_delay = 30
-                            logger.info(f"   将在 {retry_delay} 秒后重试...")
-                            time.sleep(retry_delay)
-                            continue
+                            # 释放锁并停止当前实例，因为另一个实例已经在运行
+                            logger.error(f"   当前实例将释放锁并停止，让已运行的实例继续工作...")
+                            _release_bot_lock()
+                            
+                            # 等待一段时间后退出轮询
+                            time.sleep(5)
+                            return
                         
                         # 判断是否是网络连接错误
                         is_network_error = any(keyword in error_msg.lower() for keyword in [
@@ -1369,6 +1408,10 @@ def _release_bot_lock():
                 except Exception:
                     pass
             
+            # 重置锁状态
+            _bot_lock_file = None
+            _bot_lock_acquired = False
+            
             logger.info(f"[PID:{current_pid}] 已释放 Telegram Bot 启动锁")
         except Exception as e:
             logger.warning(f"[PID:{current_pid}] 释放 Telegram Bot 启动锁时发生错误: {e}")
@@ -1384,9 +1427,12 @@ def _release_bot_lock():
                     lock_file_path.unlink()
                 except Exception:
                     pass
-        finally:
+            # 重置锁状态
             _bot_lock_file = None
             _bot_lock_acquired = False
+    else:
+        # 没有获取锁，直接返回
+        pass
 
 
 def start_bot():
@@ -1416,8 +1462,8 @@ def start_bot():
     logger.info(f"[PID:{current_pid}] 尝试获取 Telegram Bot 启动锁...")
     lock_acquired = _acquire_bot_lock()
     if not lock_acquired:
-        logger.info(f"[PID:{current_pid}] 其他进程已启动 Telegram Bot，或无法获取锁，继续启动线程...")
-        # 即使没有获取到锁，也尝试启动线程，因为可能是锁文件问题
+        logger.info(f"[PID:{current_pid}] 其他进程已启动 Telegram Bot，或无法获取锁，跳过启动...")
+        return False
 
     try:
         logger.info(f"[PID:{current_pid}] 正在设置 Telegram Bot 命令...")
