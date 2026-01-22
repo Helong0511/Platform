@@ -434,9 +434,17 @@ async def lifespan(app: FastAPI):
     try:
         # 检查是否启用 Telegram
         telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+        logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 功能启用状态: {telegram_enabled}")
         if not telegram_enabled:
             logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过启动")
         else:
+            # 动态导入 bot_initialized 变量，确保它是最新的
+            logger.info(f"[Worker PID:{worker_pid}] 尝试导入 auto_bot 模块...")
+            from app.core.auto_bot import bot_initialized, TELEBOT_AVAILABLE, bot
+            logger.info(f"[Worker PID:{worker_pid}] auto_bot 模块导入成功")
+            logger.info(f"[Worker PID:{worker_pid}] bot_initialized: {bot_initialized}")
+            logger.info(f"[Worker PID:{worker_pid}] TELEBOT_AVAILABLE: {TELEBOT_AVAILABLE}")
+            logger.info(f"[Worker PID:{worker_pid}] bot: {bot}")
             if bot_initialized:
                 logger.info(f"[Worker PID:{worker_pid}] 尝试启动 Telegram 机器人线程...")
                 start_success = start_bot()
