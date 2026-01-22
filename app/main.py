@@ -36,7 +36,7 @@ from app.core.cache_manager import CacheManager
 from app.core.csrf import CSRFMiddleware
 from app.core.security import JWTUtils
 from app.core.auto_bot import (
-    bot_initialized, send_telegram_message, start_bot,
+    send_telegram_message, start_bot,
     stop_bot, has_bot_lock
 )
 from app.scheduler_module import (

@@ -25,6 +25,11 @@ class ConversionService:
     """转化服务"""
     
     def __init__(self, db: AsyncSession):
+        """
+        初始化转化服务
+        Args:
+            db: 异步数据库会话
+        """
         self.db = db
     
     async def get_conversion_summary(
@@ -55,17 +60,18 @@ class ConversionService:
         start_datetime = None
         end_datetime = None
         
-        if start_date:
+        if start_date:  # 开始日期
+            # 将开始日期解析为应用时区的datetime对象
             start_datetime = parse_date_to_app_timezone(start_date, is_end_date=False)
-        if end_date:
+        if end_date:  # 结束日期
             # 结束日期需要包含当天的所有时间，所以+1天并使用00:00:00作为上界（不包含）
             end_datetime = parse_date_to_app_timezone(end_date, is_end_date=False) + timedelta(days=1)
         
         # 如果没有指定日期，默认查询最近30天
-        if not start_datetime:
+        if not start_datetime:  # 开始日期默认30天前
             start_datetime = get_app_now_naive() - timedelta(days=30)
             start_datetime = start_datetime.replace(hour=0, minute=0, second=0, microsecond=0)
-        if not end_datetime:
+        if not end_datetime:  # 结束日期默认当前时间
             end_datetime = get_app_now_naive()
             end_datetime = end_datetime.replace(hour=23, minute=59, second=59, microsecond=999999)
         
@@ -73,11 +79,13 @@ class ConversionService:
         client_publisher_ids = None
         client_id = None
         if current_user.role == UserRole.CLIENT:
+            # 查询客户关联的Client记录
             client_result = await self.db.execute(
                 select(Client.id).where(Client.user_id == current_user.id).limit(1)
             )
             client_id = client_result.scalar_one_or_none()
             if client_id:
+                # 查询客户关联的所有活跃渠道
                 publisher_result = await self.db.execute(
                     select(Publisher.id).where(
                         and_(
@@ -216,6 +224,7 @@ class ConversionService:
             offer_alias_for_po, click_alias_for_po.offer_id == offer_alias_for_po.id
         ).where(and_(*po_conditions_1))
         
+        # 执行查询并获取结果，确保结果为浮点数
         po_1 = float((await self.db.execute(po_query_1)).scalar() or 0)
         
         # 方式2和方式3：通过 gid 或 client_id（备用方式，当前暂不统计，因为无法获取 offer_id）
@@ -325,10 +334,12 @@ class ConversionService:
         calculated_total_po = 0.0
         calculated_total_po_after_discount = 0.0
         for offer_id_val, pub_id_val, conv_count_val, total_po_original_val, total_po_discounted_val in conversion_groups:
+            # 确保offer_id和publisher_id不为None
             safe_offer_id = offer_id_val if offer_id_val is not None else 0
             safe_pub_id = pub_id_val if pub_id_val is not None else 0
             
             key = (safe_offer_id, safe_pub_id)
+            # 如果统计字典中不存在该键，初始化一个新的统计项
             if key not in stats_dict:
                 stats_dict[key] = {
                     "offer_id": safe_offer_id,
@@ -339,6 +350,7 @@ class ConversionService:
                     "po_after_discount": 0.0
                 }
             
+            # 更新转化数量
             stats_dict[key]["conversion_count"] += conv_count_val
             # po 字段使用原始金额（管理员可见）
             po_original_val = float(total_po_original_val) if total_po_original_val else 0.0
@@ -351,6 +363,7 @@ class ConversionService:
             calculated_total_po += po_original_val
             calculated_total_po_after_discount += po_discounted_val
             
+            # 更新offer_ids和publisher_ids集合
             if safe_offer_id:
                 offer_ids.add(safe_offer_id)
             if safe_pub_id:
@@ -417,6 +430,7 @@ class ConversionService:
             advertiser = advertisers_map.get(offer_id_val) if offer_id_val else None
             publisher = publishers_map.get(publisher_id_val) if publisher_id_val else None
             
+            # 获取offer名称、广告主名称和渠道名称
             offer_name = offer.offer_name if offer else ("未关联Offer" if offer_id_val else "未关联Offer")
             advertiser_name = advertiser.advertiser_name if advertiser else None
             publisher_name = publisher.publisher_name if publisher else ("未关联渠道" if publisher_id_val else "未关联渠道")
@@ -424,7 +438,7 @@ class ConversionService:
             # po_after_discount 已经在分组统计时计算好了（使用扣减后的金额）
             po_after_discount = stat["po_after_discount"]
             
-            # 计算CR
+            # 计算CR（转化率）
             cr_val = (stat["conversion_count"] / stat["click_count"] * 100) if stat["click_count"] > 0 else 0
             
             # 计算收益：收益 = conversion_count * PO(扣减后的)
@@ -446,6 +460,7 @@ class ConversionService:
             # 获取GEO（国家，从Offer.country获取）
             geo = offer.country if offer and offer.country else None
             
+            # 构建统计项并添加到列表
             stats_list.append({
                 "offer_id": offer_id_val,
                 "offer_name": offer_name,
@@ -467,6 +482,7 @@ class ConversionService:
         # 按点击数量排序
         stats_list.sort(key=lambda x: x['click_count'], reverse=True)
         
+        # 返回最终的统计结果
         return {
             "total_clicks": total_clicks,
             "total_conversions": total_conversions,
@@ -509,11 +525,13 @@ class ConversionService:
         # 权限过滤
         client_publisher_ids = None
         if current_user.role == UserRole.CLIENT:
+            # 查询客户关联的Client记录
             client_result = await self.db.execute(
                 select(Client.id).where(Client.user_id == current_user.id).limit(1)
             )
             client_id = client_result.scalar_one_or_none()
             if client_id:
+                # 查询客户关联的所有渠道
                 publisher_result = await self.db.execute(
                     select(Publisher.id).where(Publisher.client_id == client_id)
                 )
@@ -547,8 +565,10 @@ class ConversionService:
                 ClickStats.publisher_id.in_(client_publisher_ids)
             )
         
+        # 去重查询
         conversion_offer_query = conversion_offer_query.distinct()
         conversion_offer_result = await self.db.execute(conversion_offer_query)
+        # 提取有效的offer_id
         offer_ids_with_conversions = [row.offer_id for row in conversion_offer_result.all() if row.offer_id]
         
         # 如果没有转化数据，返回空列表
@@ -563,6 +583,7 @@ class ConversionService:
         if not offers:
             return []
         
+        # 提取所有offer的id
         offer_ids = [offer.id for offer in offers]
         
         # 批量查询点击统计（优化：一次查询获取所有数据）
@@ -584,8 +605,10 @@ class ConversionService:
                 ClickStats.publisher_id.in_(client_publisher_ids)
             )
         
+        # 按offer_id分组
         click_stats_query = click_stats_query.group_by(ClickStats.offer_id)
         click_stats_result = await self.db.execute(click_stats_query)
+        # 构建点击统计映射
         click_stats_map = {
             row.offer_id: row.click_count
             for row in click_stats_result.all()
@@ -631,8 +654,10 @@ class ConversionService:
                 ClickStats.publisher_id.in_(client_publisher_ids)
             )
         
+        # 按offer_id分组
         conversion_query = conversion_query.group_by(ClickStats.offer_id)
         conversion_result = await self.db.execute(conversion_query)
+        # 构建转化统计映射
         conversion_map = {
             row.offer_id: {
                 'count': row.conversion_count or 0,
@@ -644,7 +669,9 @@ class ConversionService:
         # 构建响应数据
         stats_list = []
         for offer in offers:
+            # 获取点击数量
             click_count = click_stats_map.get(offer.id, 0)
+            # 获取转化数据
             conversion_data = conversion_map.get(offer.id, {'count': 0, 'po': 0.0})
             conversion_count = conversion_data['count']
             po = conversion_data['po']
@@ -652,6 +679,7 @@ class ConversionService:
             # 计算转化率
             cr = (conversion_count / click_count * 100) if click_count > 0 else 0.0
             
+            # 构建统计项
             stats_list.append({
                 "offer_id": offer.id,
                 "offer_name": offer.offer_name,
@@ -664,5 +692,6 @@ class ConversionService:
         # 按点击数量排序
         stats_list.sort(key=lambda x: x['click_count'], reverse=True)
         
+        # 返回最终的统计结果
         return stats_list
 

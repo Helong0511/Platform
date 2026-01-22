@@ -1594,10 +1594,8 @@ class AdDataService(BaseService[AdData]):
 
             date_condition = date_range_condition(AdData.date, date_range_start, date_range_end)
             if date_condition is not None:
-                if isinstance(date_condition, and_):
-                    filter_conditions.extend(date_condition.clauses)
-                else:
-                    filter_conditions.append(date_condition)
+                # 直接添加条件，不再检查类型
+                filter_conditions.append(date_condition)
 
             # 优化：计数查询不需要JOIN User表
             count_query = select(func.count(AdData.id))

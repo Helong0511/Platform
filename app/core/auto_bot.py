@@ -14,7 +14,6 @@ import re
 import threading
 import sys
 from pathlib import Path
-from app.core.config import settings  # 应用配置
 from app.core.utils import get_app_now  # 应用时区时间获取函数
 from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH
 from datetime import timedelta  # 用于日期计算
@@ -47,13 +46,18 @@ try:
     from telebot.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 
     TELEBOT_AVAILABLE = True
+    logger.info("pyTelegramBotAPI 模块导入成功")
 except ImportError as import_err:
     TELEBOT_AVAILABLE = False
     logger.warning(f"pyTelegramBotAPI 模块未安装，Telegram Bot 功能将不可用。请运行: pip install pyTelegramBotAPI")
     logger.warning(f"导入错误详情: {import_err}")
 
+# 延迟导入 settings，确保它已经完全初始化
+from app.core.config import settings  # 应用配置
+
 # 初始化 Telegram Bot（仅在模块可用且启用时）
 telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+logger.info(f"Telegram Bot 功能启用状态: {telegram_enabled}")
 if not telegram_enabled:
     logger.info("Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false）")
     bot_initialized = False
@@ -61,6 +65,7 @@ elif TELEBOT_AVAILABLE:
     try:
         logger.info("正在加载 Telegram token...")
         token = getattr(settings, 'TELEGRAM_TOKEN', None) or None
+        logger.info(f"Telegram token 加载结果: {token[:4]}****" if token else "None")
         if token and isinstance(token, str) and token.strip():
             # 初始化 Telegram Bot
             bot = telebot.TeleBot(token=token)
@@ -74,6 +79,9 @@ elif TELEBOT_AVAILABLE:
         logger.error(f"初始化 Telegram Bot 失败: {err}", exc_info=True)
 else:
     logger.info("Telegram Bot 功能已禁用（pyTelegramBotAPI 未安装）")
+    bot_initialized = False
+
+logger.info(f"Bot 初始化状态: bot_initialized={bot_initialized}, TELEBOT_AVAILABLE={TELEBOT_AVAILABLE}, bot={bot}")
 
 
 def _check_bot_available() -> bool:
@@ -980,7 +988,9 @@ def run_bot():
                         
                         if is_conflict_error:
                             # 409 冲突错误：有多个 bot 实例在运行
+                            current_pid = os.getpid()
                             logger.error(f"❌ Telegram Bot 冲突错误 (409): 检测到多个 bot 实例同时运行")
+                            logger.error(f"   当前进程: {current_pid}")
                             logger.error(f"   错误信息: {error_msg[:300]}")
                             logger.error(f"   💡 解决方案:")
                             logger.error(f"      1. 检查是否有多个进程/线程在运行 bot")
@@ -1279,6 +1289,32 @@ def run_bot():
         logger.info("机器人已停止运行")
 
 
+def _is_process_running(pid: int) -> bool:
+    """
+    跨平台检查进程是否存在
+    
+    Args:
+        pid: 进程ID
+        
+    Returns:
+        bool: 进程是否存在
+    """
+    try:
+        if os.name == 'nt':  # Windows
+            # Windows 不支持 os.kill() 信号机制，使用 tasklist 命令
+            import subprocess
+            output = subprocess.check_output(['tasklist', '/NH', '/FI', f'PID eq {pid}'], 
+                                           universal_newlines=True, 
+                                           stderr=subprocess.STDOUT)
+            return f" {pid} " in output
+        else:  # Unix/Linux
+            # Unix/Linux 使用 os.kill() 发送信号 0
+            os.kill(pid, 0)
+            return True
+    except (OSError, subprocess.CalledProcessError):
+        return False
+
+
 def _acquire_bot_lock():
     """
     尝试获取 Bot 启动锁（文件锁）
@@ -1299,6 +1335,48 @@ def _acquire_bot_lock():
         # 创建锁文件路径（在项目根目录的 logs 目录下）
         lock_file_path = Path(__file__).parent.parent.parent / "logs" / "telegram_bot.lock"
         lock_file_path.parent.mkdir(parents=True, exist_ok=True)
+        logger.info(f"[PID:{current_pid}] 锁文件路径: {lock_file_path}")
+
+        # 检查锁文件是否存在，无论使用哪种锁机制
+        if lock_file_path.exists():
+            try:
+                with open(lock_file_path, 'r') as f:
+                    pid_line = f.readline()
+                    timestamp_line = f.readline()
+                    if pid_line.startswith("PID: "):
+                            old_pid = int(pid_line.split(": ")[1].strip())
+                            # 检查进程是否还在运行
+                            try:
+                                # 使用跨平台进程检查函数
+                                process_running = _is_process_running(old_pid)
+                                if process_running:
+                                    # 检查锁是否过期（10分钟）
+                                    if timestamp_line.startswith("Timestamp: "):
+                                        try:
+                                            old_timestamp = float(timestamp_line.split(": ")[1].strip())
+                                            current_time = time.time()
+                                            if current_time - old_timestamp > 600:  # 10分钟过期
+                                                logger.info(f"[PID:{current_pid}] 锁文件已过期（超过10分钟），可以获取锁")
+                                            else:
+                                                # 进程还在运行且锁未过期
+                                                logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（进程 {old_pid} 正在运行，锁未过期）")
+                                                return False
+                                        except (ValueError, IndexError):
+                                            # 时间戳格式错误，视为过期
+                                            logger.info(f"[PID:{current_pid}] 锁文件时间戳格式错误，视为过期")
+                                    else:
+                                        # 没有时间戳，视为过期
+                                        logger.info(f"[PID:{current_pid}] 锁文件没有时间戳，视为过期")
+                                else:
+                                    # 进程不存在，可以获取锁
+                                    logger.info(f"[PID:{current_pid}] 持有锁的进程 {old_pid} 不存在，可以获取锁")
+                            except Exception as e:
+                                # 任何检查进程时的错误，视为进程不存在
+                                logger.warning(f"[PID:{current_pid}] 检查进程 {old_pid} 时发生错误: {e}，视为进程不存在")
+                                pass
+            except Exception as e:
+                logger.warning(f"[PID:{current_pid}] 检查锁文件时发生错误: {e}")
+                pass
 
         if HAS_FCNTL:
             # Unix/Linux: 使用 fcntl（文本模式）
@@ -1306,10 +1384,12 @@ def _acquire_bot_lock():
             try:
                 fcntl.flock(_bot_lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 _bot_lock_acquired = True
-                # 写入当前进程信息
+                # 写入当前进程信息和时间戳
+                timestamp = time.time()
                 _bot_lock_file.write(f"PID: {current_pid}\n")
+                _bot_lock_file.write(f"Timestamp: {timestamp}\n")
                 _bot_lock_file.flush()
-                logger.info(f"[PID:{current_pid}] 成功获取 Telegram Bot 启动锁")
+                logger.info(f"[PID:{current_pid}] 成功获取 Telegram Bot 启动锁（fcntl）")
                 return True
             except (IOError, OSError) as e:
                 # 无法获取锁（其他进程已持有）
@@ -1323,10 +1403,12 @@ def _acquire_bot_lock():
                 # 锁定文件的第一个字节
                 msvcrt.locking(_bot_lock_file.fileno(), msvcrt.LK_NBLCK, 1)
                 _bot_lock_acquired = True
-                # 写入当前进程信息（需要转换为字节）
+                # 写入当前进程信息和时间戳（需要转换为字节）
+                timestamp = time.time()
                 _bot_lock_file.write(f"PID: {current_pid}\n".encode('utf-8'))
+                _bot_lock_file.write(f"Timestamp: {timestamp}\n".encode('utf-8'))
                 _bot_lock_file.flush()
-                logger.info(f"[PID:{current_pid}] 成功获取 Telegram Bot 启动锁")
+                logger.info(f"[PID:{current_pid}] 成功获取 Telegram Bot 启动锁（msvcrt）")
                 return True
             except IOError as e:
                 # 无法获取锁（其他进程已持有）
@@ -1340,27 +1422,51 @@ def _acquire_bot_lock():
                 try:
                     with open(lock_file_path, 'r') as f:
                         pid_line = f.readline()
+                        timestamp_line = f.readline()
                         if pid_line.startswith("PID: "):
-                            old_pid = int(pid_line.split(": ")[1].strip())
-                            # 检查进程是否还在运行
-                            try:
-                                os.kill(old_pid, 0)  # 发送信号 0 检查进程是否存在
-                                # 进程还在运行
-                                logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（进程 {old_pid} 正在运行）")
-                                return False
-                            except (OSError, ProcessLookupError):
-                                # 进程不存在，可以获取锁
-                                pass
-                except Exception:
+                                old_pid = int(pid_line.split(": ")[1].strip())
+                                # 检查进程是否还在运行
+                                try:
+                                    # 使用跨平台进程检查函数
+                                    process_running = _is_process_running(old_pid)
+                                    if process_running:
+                                        # 检查锁是否过期（10分钟）
+                                        if timestamp_line.startswith("Timestamp: "):
+                                            try:
+                                                old_timestamp = float(timestamp_line.split(": ")[1].strip())
+                                                current_time = time.time()
+                                                if current_time - old_timestamp > 600:  # 10分钟过期
+                                                    logger.info(f"[PID:{current_pid}] 锁文件已过期（超过10分钟），可以获取锁")
+                                                else:
+                                                    # 进程还在运行且锁未过期
+                                                    logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（进程 {old_pid} 正在运行，锁未过期）")
+                                                    return False
+                                            except (ValueError, IndexError):
+                                                # 时间戳格式错误，视为过期
+                                                logger.info(f"[PID:{current_pid}] 锁文件时间戳格式错误，视为过期")
+                                        else:
+                                            # 没有时间戳，视为过期
+                                            logger.info(f"[PID:{current_pid}] 锁文件没有时间戳，视为过期")
+                                    else:
+                                        # 进程不存在，可以获取锁
+                                        logger.info(f"[PID:{current_pid}] 持有锁的进程 {old_pid} 不存在，可以获取锁")
+                                except Exception as e:
+                                    # 任何检查进程时的错误，视为进程不存在
+                                    logger.warning(f"[PID:{current_pid}] 检查进程 {old_pid} 时发生错误: {e}，视为进程不存在")
+                                    pass
+                except Exception as e:
+                    logger.warning(f"[PID:{current_pid}] 检查锁文件时发生错误: {e}")
                     pass
             
             # 可以获取锁
             _bot_lock_file = open(lock_file_path, 'w')
             _bot_lock_acquired = True
-            # 写入当前进程信息
+            # 写入当前进程信息和时间戳
+            timestamp = time.time()
             _bot_lock_file.write(f"PID: {current_pid}\n")
+            _bot_lock_file.write(f"Timestamp: {timestamp}\n")
             _bot_lock_file.flush()
-            logger.info(f"[PID:{current_pid}] 成功获取 Telegram Bot 启动锁")
+            logger.info(f"[PID:{current_pid}] 成功获取 Telegram Bot 启动锁（文件存在性检查）")
             return True
     except Exception as e:
         logger.warning(f"[PID:{current_pid}] 获取 Telegram Bot 启动锁时发生错误: {e}")
@@ -1390,24 +1496,29 @@ def _release_bot_lock():
         try:
             # 获取锁文件路径
             lock_file_path = Path(__file__).parent.parent.parent / "logs" / "telegram_bot.lock"
+            logger.info(f"[PID:{current_pid}] 释放锁文件: {lock_file_path}")
             
             # 跨平台释放锁
             if HAS_FCNTL:
                 # Unix/Linux: 使用 fcntl
                 fcntl.flock(_bot_lock_file.fileno(), fcntl.LOCK_UN)
+                logger.info(f"[PID:{current_pid}] 已释放 fcntl 锁")
             elif HAS_MSVCRT:
                 # Windows: 使用 msvcrt
                 msvcrt.locking(_bot_lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                logger.info(f"[PID:{current_pid}] 已释放 msvcrt 锁")
             # 如果没有文件锁支持，直接关闭文件即可
             
             _bot_lock_file.close()
+            logger.info(f"[PID:{current_pid}] 已关闭锁文件")
             
             # 删除锁文件（如果存在）
             if lock_file_path and lock_file_path.exists():
                 try:
                     lock_file_path.unlink()
-                except Exception:
-                    pass
+                    logger.info(f"[PID:{current_pid}] 已删除锁文件")
+                except Exception as e:
+                    logger.warning(f"[PID:{current_pid}] 删除锁文件时发生错误: {e}")
             
             # 重置锁状态
             _bot_lock_file = None
@@ -1420,20 +1531,22 @@ def _release_bot_lock():
             try:
                 if _bot_lock_file:
                     _bot_lock_file.close()
-            except Exception:
-                pass
+                    logger.info(f"[PID:{current_pid}] 已关闭锁文件（异常后）")
+            except Exception as close_error:
+                logger.warning(f"[PID:{current_pid}] 关闭锁文件时发生错误: {close_error}")
             # 尝试删除锁文件
             if lock_file_path and lock_file_path.exists():
                 try:
                     lock_file_path.unlink()
-                except Exception:
-                    pass
+                    logger.info(f"[PID:{current_pid}] 已删除锁文件（异常后）")
+                except Exception as unlink_error:
+                    logger.warning(f"[PID:{current_pid}] 删除锁文件时发生错误: {unlink_error}")
             # 重置锁状态
             _bot_lock_file = None
             _bot_lock_acquired = False
     else:
-        # 没有获取锁，直接返回
-        pass
+        current_pid = os.getpid()
+        logger.info(f"[PID:{current_pid}] 没有持有锁，无需释放")
 
 
 def start_bot():
@@ -1530,8 +1643,10 @@ def has_bot_lock():
 def stop_bot():
     """停止 Telegram Bot 轮询（仅在持有锁的进程中停止）"""
     # 只有持有锁的进程才需要停止 Bot
+    current_pid = os.getpid()
+    logger.info(f"[PID:{current_pid}] 尝试停止 Telegram Bot...")
+    
     if _bot_lock_acquired and TELEBOT_AVAILABLE and bot_initialized and bot:
-        current_pid = os.getpid()
         try:
             bot.stop_polling()
             logger.info(f"[PID:{current_pid}] Telegram Bot 轮询已停止")
@@ -1539,6 +1654,24 @@ def stop_bot():
             logger.error(f"停止 Telegram Bot 时发生错误: {e}", exc_info=True)
         finally:
             _release_bot_lock()
+    else:
+        # 即使没有持有锁，也检查是否有锁文件需要清理
+        # 这是为了处理异常情况下锁文件没有被正确删除的情况
+        lock_file_path = Path(__file__).parent.parent.parent / "logs" / "telegram_bot.lock"
+        if lock_file_path.exists():
+            try:
+                with open(lock_file_path, 'r') as f:
+                    pid_line = f.readline()
+                    if pid_line.startswith("PID: "):
+                        old_pid = int(pid_line.split(": ")[1].strip())
+                        # 检查锁文件中的进程是否还在运行
+                        if not _is_process_running(old_pid):
+                            # 如果进程不存在，删除锁文件
+                            lock_file_path.unlink()
+                            logger.info(f"[PID:{current_pid}] 发现孤立的锁文件，已删除（进程 {old_pid} 不存在）")
+            except Exception as e:
+                logger.warning(f"[PID:{current_pid}] 检查孤立锁文件时发生错误: {e}")
+        logger.info(f"[PID:{current_pid}] 无需停止 Bot（未持有锁或 Bot 未初始化）")
 
 
 # 命令处理器已在模块级别注册（见第 91-158 行）
