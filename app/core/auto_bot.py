@@ -247,7 +247,170 @@ if bot_initialized and TELEBOT_AVAILABLE:
 
         bot.send_message(chat_id, "确认是否要打卡？", reply_markup=markup)
     
-    logger.info("Telegram Bot 命令处理器已注册: /id, /test, /clock")
+    @bot.message_handler(commands=['stats', 'conversion'])
+    def handle_stats_command(message):
+        """处理 /stats 或 /conversion 命令：显示转化统计信息"""
+        chat_type = message.chat.type if hasattr(message.chat, 'type') else '未知'
+        is_group = chat_type in ['group', 'supergroup']
+        logger.info(f"收到 /stats 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat Type: {chat_type})")
+        
+        if not _check_bot_available():
+            logger.error("Bot 未初始化，无法处理消息")
+            return
+
+        # 检查群组中是否包含 Bot 的提及
+        if is_group:
+            try:
+                bot_info = bot.get_me()
+                bot_username = bot_info.username if bot_info else None
+                if bot_username:
+                    text = message.text or ''
+                    bot_mentioned = f'@{bot_username}' in text
+                    if not bot_mentioned:
+                        logger.warning(f"⚠️ 群组中的命令没有 @{bot_username}，可能无法响应（Telegram 隐私模式）")
+            except:
+                pass
+
+        chat_id = message.chat.id
+        
+        # 发送处理中消息
+        processing_message = bot.send_message(chat_id, "正在统计转化数据，请稍候...")
+        
+        # 在独立线程中处理统计，避免阻塞 Telegram bot
+        def process_stats():
+            try:
+                from sqlalchemy import create_engine
+                from sqlalchemy.orm import sessionmaker
+                from sqlalchemy import func, and_, select as sync_select
+                from app.models.models import PostbackConversion, ClickStats
+                from app.core.utils import get_app_now_naive
+                from app.core.config import settings
+                from datetime import datetime, time, timedelta
+                
+                # 创建同步数据库引擎
+                sync_db_url = settings.SQLALCHEMY_DATABASE_URI
+                if "+aiomysql" in sync_db_url:
+                    sync_db_url = sync_db_url.replace("+aiomysql", "+pymysql")
+                elif "+asyncmy" in sync_db_url:
+                    sync_db_url = sync_db_url.replace("+asyncmy", "+pymysql")
+                
+                sync_engine = create_engine(
+                    sync_db_url,
+                    pool_pre_ping=True,
+                    pool_recycle=settings.DB_POOL_RECYCLE,
+                    pool_size=5,
+                    max_overflow=3,
+                    echo=False
+                )
+                SessionLocal = sessionmaker(bind=sync_engine)
+                
+                with SessionLocal() as db:
+                    # 计算当天的开始和结束时间
+                    today = get_app_now_naive().date()
+                    start_of_day = datetime.combine(today, time.min)
+                    end_of_day = datetime.combine(today, time.max)
+                    
+                    # 计算昨天的开始和结束时间
+                    yesterday = today - timedelta(days=1)
+                    start_of_yesterday = datetime.combine(yesterday, time.min)
+                    end_of_yesterday = datetime.combine(yesterday, time.max)
+                    
+                    # 查询当天总转化数
+                    today_result = db.execute(
+                        sync_select(func.count(PostbackConversion.id)).where(
+                            and_(
+                                PostbackConversion.created_at >= start_of_day,
+                                PostbackConversion.created_at <= end_of_day
+                            )
+                        )
+                    )
+                    today_total = today_result.scalar() or 0
+                    
+                    # 查询昨天总转化数
+                    yesterday_result = db.execute(
+                        sync_select(func.count(PostbackConversion.id)).where(
+                            and_(
+                                PostbackConversion.created_at >= start_of_yesterday,
+                                PostbackConversion.created_at <= end_of_yesterday
+                            )
+                        )
+                    )
+                    yesterday_total = yesterday_result.scalar() or 0
+                    
+                    # 查询最近7天总转化数
+                    seven_days_ago = today - timedelta(days=6)
+                    start_of_seven_days = datetime.combine(seven_days_ago, time.min)
+                    
+                    seven_days_result = db.execute(
+                        sync_select(func.count(PostbackConversion.id)).where(
+                            and_(
+                                PostbackConversion.created_at >= start_of_seven_days,
+                                PostbackConversion.created_at <= end_of_day
+                            )
+                        )
+                    )
+                    seven_days_total = seven_days_result.scalar() or 0
+                    
+                    # 查询当天各渠道转化数（前10个）
+                    click_stats_alias = db.query(ClickStats).subquery()
+                    channel_result = db.execute(
+                        sync_select(
+                            ClickStats.publisher_id,
+                            func.count(PostbackConversion.id).label('conversion_count')
+                        ).join(
+                            PostbackConversion, PostbackConversion.click_id == ClickStats.click_id
+                        ).where(
+                            and_(
+                                PostbackConversion.created_at >= start_of_day,
+                                PostbackConversion.created_at <= end_of_day,
+                                ClickStats.publisher_id.isnot(None)
+                            )
+                        ).group_by(
+                            ClickStats.publisher_id
+                        ).order_by(
+                            func.count(PostbackConversion.id).desc()
+                        ).limit(10)
+                    )
+                    channel_stats = channel_result.all()
+                    
+                    # 构建统计消息
+                    stats_message = "📊 转化统计信息\n\n"
+                    stats_message += f"📅 今日统计 ({today.strftime('%Y-%m-%d')})\n"
+                    stats_message += f"• 当天总转化个数: {today_total}\n"
+                    stats_message += f"• 昨日总转化个数: {yesterday_total}\n"
+                    stats_message += f"• 近7天总转化个数: {seven_days_total}\n"
+                    
+                    if channel_stats:
+                        stats_message += "\n📤 今日渠道转化TOP10\n"
+                        for i, (publisher_id, count) in enumerate(channel_stats, 1):
+                            stats_message += f"{i}. 渠道ID: {publisher_id} - 转化数: {count}\n"
+                    else:
+                        stats_message += "\n📤 今日渠道转化\n"
+                        stats_message += "• 暂无渠道转化数据\n"
+                    
+                    # 更新消息
+                    bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=processing_message.message_id,
+                        text=stats_message
+                    )
+                    
+            except Exception as e:
+                logger.error(f"处理转化统计时发生错误: {e}", exc_info=True)
+                try:
+                    bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=processing_message.message_id,
+                        text="统计失败，请稍后重试\n\n错误信息: " + str(e)[:100]
+                    )
+                except:
+                    pass
+        
+        # 启动线程处理统计
+        thread = threading.Thread(target=process_stats, daemon=True)
+        thread.start()
+    
+    logger.info("Telegram Bot 命令处理器已注册: /id, /test, /clock, /stats, /conversion")
     # 验证处理器是否真的注册了
     try:
         # 检查 bot 的 registered_next_step_handlers 和 message_handlers

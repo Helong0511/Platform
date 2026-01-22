@@ -173,7 +173,7 @@ class TelegramNotificationService:
             try:
                 # 计算当天总转化数
                 today = conversion.created_at.date() if conversion.created_at else get_app_now_naive().date()
-                from sqlalchemy import func, and_
+                from sqlalchemy import func, and_, select
                 from datetime import datetime, time
                 
                 # 构建当天的开始和结束时间
@@ -193,8 +193,32 @@ class TelegramNotificationService:
                 
                 msg += f"\n📊 统计信息\n"
                 msg += f"• 当天总转化个数: {daily_total}\n"
+                
+                # 查询当天当前渠道的转化记录数
+                if publisher:
+                    # 构建查询条件：当天 + 关联到该渠道的转化
+                    # 注意：这里通过 click_id 关联到 ClickStats，再通过 ClickStats.publisher_id 关联到渠道
+                    from app.models.models import ClickStats
+                    click_stats_alias = aliased(ClickStats)
+                    
+                    # 查询当天该渠道的转化数
+                    channel_result = await db.execute(
+                        select(func.count(PostbackConversion.id)).join(
+                            click_stats_alias, PostbackConversion.click_id == click_stats_alias.click_id
+                        ).where(
+                            and_(
+                                PostbackConversion.created_at >= start_of_day,
+                                PostbackConversion.created_at <= end_of_day,
+                                click_stats_alias.publisher_id == publisher.id
+                            )
+                        )
+                    )
+                    daily_channel_total = channel_result.scalar() or 0
+                    
+                    msg += f"• 当天当前渠道转化个数: {daily_channel_total}\n"
+                    
             except Exception as e:
-                logger.warning(f"获取当天总转化数失败: {str(e)}")
+                logger.warning(f"获取当天转化数失败: {str(e)}")
         
         if conversion.created_at:
             time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
