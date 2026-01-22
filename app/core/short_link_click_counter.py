@@ -15,6 +15,9 @@ from sqlalchemy import update, text
 from sqlalchemy.exc import OperationalError
 from app.models.models import ShortLink
 import uuid
+import json
+import os
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +112,44 @@ _last_update_time: Dict[str, float] = {}
 
 # 进程内计数器的异步锁（保护并发访问）
 _counter_lock = asyncio.Lock()
+
+# 持久化配置
+COUNTER_PERSIST_FILE = Path(__file__).parent.parent.parent / "data" / "click_counters.json"
+COUNTER_PERSIST_INTERVAL = 300  # 每5分钟持久化一次
+
+# 确保持久化目录存在
+COUNTER_PERSIST_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+# 加载持久化的计数器数据
+def load_persisted_counters():
+    """加载持久化的计数器数据"""
+    global _click_counters
+    try:
+        if COUNTER_PERSIST_FILE.exists():
+            with open(COUNTER_PERSIST_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    _click_counters.update(data)
+                    logger.info(f"✅ 加载持久化的计数器数据: {len(data)} 个计数器")
+    except Exception as e:
+        logger.warning(f"⚠️ 加载持久化计数器数据失败: {e}")
+
+# 持久化计数器数据
+async def persist_counters():
+    """持久化计数器数据"""
+    global _click_counters
+    try:
+        async with _counter_lock:
+            data = _click_counters.copy()
+        if data:
+            with open(COUNTER_PERSIST_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            logger.info(f"✅ 持久化计数器数据: {len(data)} 个计数器")
+    except Exception as e:
+        logger.warning(f"⚠️ 持久化计数器数据失败: {e}")
+
+# 初始化时加载持久化数据
+load_persisted_counters()
 
 
 async def increment_click_count_async(short_code: str) -> None:
@@ -340,14 +381,17 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                         f"失败的计数详情: {failed_counts}"
                     )
             
-            return synced
+            # 同步完成后持久化进程内计数器
+    await persist_counters()
+    
+    return synced
         
         # Redis可用时，从Redis同步
         # 使用SCAN而不是KEYS，避免在生产环境阻塞
         pattern = f"{CLICK_COUNTER_PREFIX}*"
         keys = []
         cursor = 0
-        max_iterations = 10000  # 最大迭代次数，防止无限循环（10000 * 100 = 100万条键）
+        max_iterations = 100000  # 最大迭代次数，防止无限循环（100000 * 100 = 1000万条键）
         iteration = 0
         try:
             while True:
@@ -582,6 +626,9 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                 )
             else:
                 logger.info("所有失败的计数器都已清理，无需重试")
+        
+        # 同步完成后持久化进程内计数器
+        await persist_counters()
         
         return synced
     except Exception as e:
