@@ -37,7 +37,7 @@ from app.core.csrf import CSRFMiddleware
 from app.core.security import JWTUtils
 from app.core.auto_bot import (
     send_telegram_message, start_bot,
-    stop_bot, has_bot_lock
+    stop_bot, has_bot_lock, bot_initialized
 )
 from app.scheduler_module import (
     init_scheduled_tasks, start_scheduler, shutdown_scheduler
@@ -438,13 +438,7 @@ async def lifespan(app: FastAPI):
         if not telegram_enabled:
             logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过启动")
         else:
-            # 动态导入 bot_initialized 变量，确保它是最新的
-            logger.info(f"[Worker PID:{worker_pid}] 尝试导入 auto_bot 模块...")
-            from app.core.auto_bot import bot_initialized, TELEBOT_AVAILABLE, bot
-            logger.info(f"[Worker PID:{worker_pid}] auto_bot 模块导入成功")
-            logger.info(f"[Worker PID:{worker_pid}] bot_initialized: {bot_initialized}")
-            logger.info(f"[Worker PID:{worker_pid}] TELEBOT_AVAILABLE: {TELEBOT_AVAILABLE}")
-            logger.info(f"[Worker PID:{worker_pid}] bot: {bot}")
+            # 使用已导入的 bot_initialized 变量
             if bot_initialized:
                 logger.info(f"[Worker PID:{worker_pid}] 尝试启动 Telegram 机器人线程...")
                 start_success = start_bot()
