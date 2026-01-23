@@ -301,6 +301,7 @@ if bot_initialized and TELEBOT_AVAILABLE:
         markup.row(InlineKeyboardButton(text='总览统计', callback_data='stats_overview'))
         markup.row(InlineKeyboardButton(text='按Offer统计', callback_data='stats_by_offer'))
         markup.row(InlineKeyboardButton(text='按渠道统计', callback_data='stats_by_publisher'))
+        markup.row(InlineKeyboardButton(text='今日统计', callback_data='stats_today'))
         markup.row(InlineKeyboardButton(text='最近7天', callback_data='stats_last_7days'))
         markup.row(InlineKeyboardButton(text='最近30天', callback_data='stats_last_30days'))
         markup.row(InlineKeyboardButton(text='取消', callback_data='Cancel'))
@@ -507,7 +508,11 @@ if bot_initialized and TELEBOT_AVAILABLE:
                         start_date = None
                         end_date = None
                         
-                        if stats_type == "last_7days":
+                        if stats_type == "today":
+                            # 今日统计
+                            end_date = get_app_now().strftime("%Y-%m-%d")
+                            start_date = end_date
+                        elif stats_type == "last_7days":
                             # 最近7天
                             end_date = get_app_now().strftime("%Y-%m-%d")
                             start_date = (get_app_now() - timedelta(days=7)).strftime("%Y-%m-%d")
@@ -552,7 +557,7 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                     # 创建服务实例
                                     conversion_service = ConversionService(db)
                                     
-                                    if stats_type in ["overview", "last_7days", "last_30days"]:
+                                    if stats_type in ["overview", "today", "last_7days", "last_30days"]:
                                         # 获取总览统计
                                         summary = await conversion_service.get_conversion_summary(
                                             current_user=mock_user,
