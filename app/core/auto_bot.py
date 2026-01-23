@@ -575,13 +575,13 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                         message += f"扣价后：¥{summary.get('total_po_after_discount', 0):.2f}\n"
                                         message += f"总利润：¥{summary.get('total_profit', 0):.2f}\n\n"
                                         
-                                        # 添加前5个Offer的详细数据
-                                        stats_list = summary.get('stats_list', [])[:5]
+                                        # 添加所有Offer的详细数据
+                                        stats_list = summary.get('stats_list', [])
                                         if stats_list:
-                                            message += "🏆 Top 5 Offer：\n"
+                                            message += f"🏆 所有 Offer 统计（共 {len(stats_list)} 个）：\n"
                                             for i, item in enumerate(stats_list, 1):
-                                                message += f"{i}. {item.get('offer_name', '未知')} (ID: {item.get('offer_id', 'N/A')})\n"
-                                                message += f"   广告主：{item.get('advertiser_name', '未知')}\n"
+                                                message += f"{i}. 广告主：{item.get('advertiser_name', '未知')} (ID: {item.get('advertiser_id', 'N/A')})\n"
+                                                message += f"   Offer：{item.get('offer_name', '未知')} (ID: {item.get('offer_id', 'N/A')})\n"
                                                 message += f"   渠道：{item.get('publisher_name', '未知')} (ID: {item.get('publisher_id', 'N/A')})\n"
                                                 message += f"   点击：{item.get('click_count', 0)} | 转化：{item.get('conversion_count', 0)}\n"
                                                 message += f"   转化率：{item.get('cr', 0):.2f}% | 收益：¥{item.get('revenue', 0):.2f}\n\n"
@@ -596,12 +596,12 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                         # 格式化统计消息
                                         message = f"📊 按Offer统计\n\n"
                                         
-                                        # 添加前10个Offer的数据
+                                        # 添加所有Offer的数据
                                         if stats:
-                                            message += "🏆 Offer 统计：\n"
-                                            for i, item in enumerate(stats[:10], 1):
-                                                message += f"{i}. {item.get('offer_name', '未知')} (ID: {item.get('offer_id', 'N/A')})\n"
-                                                message += f"   广告主：{item.get('advertiser_name', '未知')}\n"
+                                            message += f"🏆 Offer 统计（共 {len(stats)} 个）：\n"
+                                            for i, item in enumerate(stats, 1):
+                                                message += f"{i}. 广告主：{item.get('advertiser_name', '未知')} (ID: {item.get('advertiser_id', 'N/A')})\n"
+                                                message += f"   Offer：{item.get('offer_name', '未知')} (ID: {item.get('offer_id', 'N/A')})\n"
                                                 message += f"   点击：{item.get('click_count', 0)} | 转化：{item.get('conversion_count', 0)}\n"
                                                 message += f"   转化率：{item.get('cr', 0):.2f}% | 支付：¥{item.get('po', 0):.2f}\n\n"
                                         else:
@@ -640,10 +640,10 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                         # 格式化统计消息
                                         message = f"📊 按渠道统计\n\n"
                                         
-                                        # 添加前10个渠道的数据
+                                        # 添加所有渠道的数据
                                         if sorted_publishers:
-                                            message += "🏆 渠道统计：\n"
-                                            for i, item in enumerate(sorted_publishers[:10], 1):
+                                            message += f"🏆 渠道统计（共 {len(sorted_publishers)} 个）：\n"
+                                            for i, item in enumerate(sorted_publishers, 1):
                                                 message += f"{i}. {item['name']} (ID: {list(publisher_stats.keys())[i-1]})\n"
                                                 message += f"   点击：{item['click_count']} | 转化：{item['conversion_count']}\n"
                                                 message += f"   收益：¥{item['revenue']:.2f}\n\n"
@@ -673,13 +673,47 @@ if bot_initialized and TELEBOT_AVAILABLE:
                         # 检查消息长度，避免超过 Telegram 限制
                         from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH
                         if len(message) > MAX_TELEGRAM_MESSAGE_LENGTH:
-                            message = truncate_message(message, MAX_TELEGRAM_MESSAGE_LENGTH)
-                        
-                        bot.edit_message_text(
-                            chat_id=call.message.chat.id,
-                            message_id=call.message.message_id,
-                            text=message
-                        )
+                            # 如果消息太长，分段发送
+                            messages = []
+                            current_message = ""
+                            lines = message.split('\n')
+                            
+                            for line in lines:
+                                # 检查添加当前行后是否会超过限制
+                                if len(current_message) + len(line) + 1 <= MAX_TELEGRAM_MESSAGE_LENGTH:
+                                    current_message += line + '\n'
+                                else:
+                                    # 当前消息已满，添加到列表并开始新消息
+                                    if current_message:
+                                        messages.append(current_message)
+                                    current_message = line + '\n'
+                            
+                            # 添加最后一条消息
+                            if current_message:
+                                messages.append(current_message)
+                            
+                            # 发送所有消息
+                            for i, msg in enumerate(messages, 1):
+                                if i == 1:
+                                    # 第一条消息替换原有消息
+                                    bot.edit_message_text(
+                                        chat_id=call.message.chat.id,
+                                        message_id=call.message.message_id,
+                                        text=msg
+                                    )
+                                else:
+                                    # 后续消息作为新消息发送
+                                    bot.send_message(
+                                        chat_id=call.message.chat.id,
+                                        text=f"📊 统计数据（续 {i}/{len(messages)}）\n\n{msg}"
+                                    )
+                        else:
+                            # 消息长度正常，直接发送
+                            bot.edit_message_text(
+                                chat_id=call.message.chat.id,
+                                message_id=call.message.message_id,
+                                text=message
+                            )
                     except Exception as e:
                         logger.error(f"处理统计数据失败：{e}", exc_info=True)
                         bot.edit_message_text(
