@@ -580,7 +580,9 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                         if stats_list:
                                             message += "🏆 Top 5 Offer：\n"
                                             for i, item in enumerate(stats_list, 1):
-                                                message += f"{i}. {item.get('offer_name', '未知')}\n"
+                                                message += f"{i}. {item.get('offer_name', '未知')} (ID: {item.get('offer_id', 'N/A')})\n"
+                                                message += f"   广告主：{item.get('advertiser_name', '未知')}\n"
+                                                message += f"   渠道：{item.get('publisher_name', '未知')} (ID: {item.get('publisher_id', 'N/A')})\n"
                                                 message += f"   点击：{item.get('click_count', 0)} | 转化：{item.get('conversion_count', 0)}\n"
                                                 message += f"   转化率：{item.get('cr', 0):.2f}% | 收益：¥{item.get('revenue', 0):.2f}\n\n"
                                         
@@ -598,7 +600,8 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                         if stats:
                                             message += "🏆 Offer 统计：\n"
                                             for i, item in enumerate(stats[:10], 1):
-                                                message += f"{i}. {item.get('offer_name', '未知')}\n"
+                                                message += f"{i}. {item.get('offer_name', '未知')} (ID: {item.get('offer_id', 'N/A')})\n"
+                                                message += f"   广告主：{item.get('advertiser_name', '未知')}\n"
                                                 message += f"   点击：{item.get('click_count', 0)} | 转化：{item.get('conversion_count', 0)}\n"
                                                 message += f"   转化率：{item.get('cr', 0):.2f}% | 支付：¥{item.get('po', 0):.2f}\n\n"
                                         else:
@@ -641,7 +644,7 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                         if sorted_publishers:
                                             message += "🏆 渠道统计：\n"
                                             for i, item in enumerate(sorted_publishers[:10], 1):
-                                                message += f"{i}. {item['name']}\n"
+                                                message += f"{i}. {item['name']} (ID: {list(publisher_stats.keys())[i-1]})\n"
                                                 message += f"   点击：{item['click_count']} | 转化：{item['conversion_count']}\n"
                                                 message += f"   收益：¥{item['revenue']:.2f}\n\n"
                                         else:
