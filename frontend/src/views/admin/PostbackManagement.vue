@@ -186,8 +186,8 @@ Postback 转化管理页面
           <span>平台统计</span>
         </div>
       </template>
-      <el-row :gutter="20">
-        <el-col :xs="24" :sm="12" :md="8" :lg="6" v-for="stat in stats" :key="stat.platform">
+      <el-row :gutter="16">
+        <el-col :xs="24" :sm="12" :md="8" :lg="6" :xl="4" v-for="stat in stats" :key="stat.platform">
           <div class="stat-card">
             <div class="stat-card-header">
               <span class="platform-name">{{ stat.platform.toUpperCase() }}</span>
@@ -1277,26 +1277,27 @@ onMounted(() => {
 .stat-card {
   background: var(--bg-light);
   border-radius: var(--radius-md);
-  padding: var(--spacing-md);
-  margin-bottom: var(--spacing-md);
+  padding: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .stat-card-header {
-  margin-bottom: var(--spacing-sm);
+  margin-bottom: var(--spacing-xs);
   padding-bottom: var(--spacing-xs);
   border-bottom: 1px solid var(--border-color);
 }
 
 .platform-name {
   font-weight: var(--font-weight-bold);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-base);
   color: var(--primary-color);
 }
 
 .stat-card-body {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-xs);
+  gap: 8px;
 }
 
 .stat-row {
@@ -1313,11 +1314,12 @@ onMounted(() => {
 .stat-row .stat-value {
   font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
+  font-size: var(--font-size-sm);
 }
 
 .stat-row .stat-value.highlight {
   color: var(--success-color);
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-base);
 }
 
 .data-table-card {
