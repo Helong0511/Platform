@@ -508,7 +508,16 @@ const handleReset = () => {
 }
 
 // 添加
-const handleAdd = () => {
+const handleAdd = async () => {
+  // 先获取最新的CSRF令牌（通过GET请求）
+  try {
+    const { getCaps } = await import('../api/cap');
+    await getCaps({ page: 1, page_size: 1 });
+  } catch (error) {
+    // 即使请求失败，也可能从响应头中获取到CSRF令牌
+    console.debug('获取CSRF令牌失败，但可能已从响应头获取:', error);
+  }
+
   isEdit.value = false
   Object.assign(formData, {
     cap_type: 'offer',

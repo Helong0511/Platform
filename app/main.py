@@ -605,7 +605,8 @@ if settings.BACKEND_CORS_ORIGINS:
             "X-RateLimit-Remaining",
             "X-Process-Time",
             "X-Content-Type-Options",
-            "X-Frame-Options"
+            "X-Frame-Options",
+            "X-CSRF-Token"  # 暴露CSRF令牌响应头
         ],  # 暴露的响应头
         max_age=3600,  # 预检请求缓存时间（1小时）
     )

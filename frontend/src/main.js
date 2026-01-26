@@ -25,7 +25,7 @@ import { initTimezone } from './utils/dateFormat';
 import { initAxiosConfig } from './utils/axiosConfig';
 import { initGlobalErrorHandler } from './utils/globalErrorHandler';
 import { initDomFixes } from './utils/domFixes';
-import { initCsrfTokenSync } from './utils/csrfToken';
+import { initCsrfTokenSync, initPageVisibilityRefresh } from './utils/csrfToken';
 import { initVersionCheck } from './utils/versionCheck';
 
 // 创建Vue应用
@@ -41,6 +41,9 @@ initAxiosConfig();
 
 // 初始化 CSRF 令牌跨标签页同步机制
 initCsrfTokenSync();
+
+// 初始化页面可见性变化时的CSRF令牌刷新机制
+initPageVisibilityRefresh();
 
 // 初始化全局错误处理器
 initGlobalErrorHandler();
@@ -77,7 +80,7 @@ const initializeTimezone = () => {
   if (window.location.pathname === '/login' || window.location.pathname === '/') {
     return;
   }
-  
+
   // 使用 authStore 检查是否已登录
   const authStore = useAuthStore();
   if (authStore.isAuthenticated) {
@@ -109,10 +112,10 @@ nextTick(() => {
 
     initializeAuth();
     initializeTimezone();
-    
+
     // 初始化 DOM 修复
     initDomFixes();
-    
+
     // 初始化版本检查（仅在生产环境或需要时启用）
     // 开发环境通常不需要，因为 Vite 已经有 HMR
     // 只在页面打开时检查一次，不进行定期检查
