@@ -73,6 +73,8 @@ export const extractAndSaveCsrfToken = (response) => {
       // 同时保存到 localStorage 和 sessionStorage
       localStorage.setItem('csrf_token', csrfToken);
       sessionStorage.setItem('csrf_token', csrfToken);
+      // 更新令牌时间戳
+      localStorage.setItem('csrf_token_updated_at', Date.now().toString());
       // 如果不是从storage事件触发的更新，记录日志
       if (!isUpdatingFromStorage) {
         logger.debug('已从响应头提取并保存 CSRF token');
@@ -137,6 +139,66 @@ export const getCsrfTokenFromResponse = (responseOrError) => {
   }
 
   return null;
+};
+
+/**
+ * 检查CSRF令牌是否需要刷新
+ * 如果令牌不存在或已过期，返回true
+ * @returns {boolean} 是否需要刷新令牌
+ */
+export const shouldRefreshCsrfToken = () => {
+  const token = getCsrfToken();
+
+  // 如果没有令牌，需要刷新
+  if (!token) {
+    logger.debug('CSRF令牌不存在，需要刷新');
+    return true;
+  }
+
+  // 检查令牌的最后更新时间（存储在localStorage中）
+  const lastUpdateTime = localStorage.getItem('csrf_token_updated_at');
+  if (!lastUpdateTime) {
+    logger.debug('CSRF令牌没有更新时间，需要刷新');
+    return true;
+  }
+
+  // 计算令牌已存在的时间（毫秒）
+  const now = Date.now();
+  const tokenAge = now - parseInt(lastUpdateTime);
+
+  // 如果令牌已存在超过50分钟（接近1小时过期时间），建议刷新
+  const TOKEN_REFRESH_THRESHOLD = 50 * 60 * 1000; // 50分钟
+  if (tokenAge > TOKEN_REFRESH_THRESHOLD) {
+    logger.debug(`CSRF令牌已存在 ${Math.floor(tokenAge / 60000)} 分钟，建议刷新`);
+    return true;
+  }
+
+  return false;
+};
+
+/**
+ * 初始化页面加载时的CSRF令牌检查
+ * 如果令牌需要刷新，自动刷新令牌
+ */
+export const initPageLoadCsrfCheck = () => {
+  // 检查是否需要刷新令牌
+  if (shouldRefreshCsrfToken()) {
+    logger.info('页面加载时检测到CSRF令牌需要刷新，正在获取新令牌...');
+
+    // 异步获取新令牌（不阻塞页面加载）
+    fetchCsrfTokenFromEndpoints().then((newToken) => {
+      if (newToken) {
+        logger.info('页面加载时成功刷新了CSRF令牌');
+        // 更新令牌时间戳
+        localStorage.setItem('csrf_token_updated_at', Date.now().toString());
+      }
+    }).catch((error) => {
+      logger.debug('页面加载时刷新CSRF令牌失败:', error);
+      // 失败不影响页面加载，静默处理
+    });
+  } else {
+    logger.debug('页面加载时CSRF令牌有效，无需刷新');
+  }
 };
 
 /**

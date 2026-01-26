@@ -25,7 +25,7 @@ import { initTimezone } from './utils/dateFormat';
 import { initAxiosConfig } from './utils/axiosConfig';
 import { initGlobalErrorHandler } from './utils/globalErrorHandler';
 import { initDomFixes } from './utils/domFixes';
-import { initCsrfTokenSync, initPageVisibilityRefresh } from './utils/csrfToken';
+import { initCsrfTokenSync, initPageVisibilityRefresh, initPageLoadCsrfCheck } from './utils/csrfToken';
 import { initVersionCheck } from './utils/versionCheck';
 
 // 创建Vue应用
@@ -41,6 +41,9 @@ initAxiosConfig();
 
 // 初始化 CSRF 令牌跨标签页同步机制
 initCsrfTokenSync();
+
+// 初始化页面加载时的CSRF令牌检查（在页面可见性刷新之前）
+initPageLoadCsrfCheck();
 
 // 初始化页面可见性变化时的CSRF令牌刷新机制
 initPageVisibilityRefresh();

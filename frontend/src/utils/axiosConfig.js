@@ -172,8 +172,33 @@ const handleCsrfError = async (error) => {
 
     // 如果自动重试失败，显示友好的错误信息
     if (!originalRequest._retrySuccess) {
-      logger.error('CSRF token错误自动重试失败，建议用户刷新页面');
-      ElMessage.warning('CSRF令牌已过期，请刷新页面后重试');
+      logger.error('CSRF token错误自动重试失败，强制刷新页面');
+
+      // 检查是否是GET请求（GET请求通常不涉及表单数据）
+      const isGetRequest = originalRequest.method?.toUpperCase() === 'GET';
+
+      if (isGetRequest) {
+        // GET请求失败，直接刷新页面
+        ElMessage.warning('CSRF令牌已过期，正在刷新页面...');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+      } else {
+        // POST/PUT/DELETE请求失败，提供刷新按钮（避免丢失表单数据）
+        ElMessageBox.confirm(
+          'CSRF令牌已过期，请刷新页面后重试。注意：刷新页面将丢失当前未保存的数据。',
+          '提示',
+          {
+            confirmButtonText: '刷新页面',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }
+        ).then(() => {
+          window.location.reload();
+        }).catch(() => {
+          // 用户取消，不刷新
+        });
+      }
     }
 
     return Promise.reject(error);

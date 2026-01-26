@@ -24,7 +24,7 @@ const loadCurrentVersion = async () => {
       params: { _t: Date.now() },
       timeout: 5000,
     });
-    
+
     if (response.data && response.data.version) {
       return response.data.version;
     }
@@ -47,7 +47,7 @@ const checkForUpdate = async () => {
   isChecking = true;
   try {
     const latestVersion = await loadCurrentVersion();
-    
+
     if (!latestVersion) {
       return false;
     }
@@ -88,9 +88,9 @@ const reloadPage = (showMessage = true) => {
       duration: 2000,
     });
   }
-  
+
   logger.info('正在刷新页面以加载新版本...');
-  
+
   // 延迟刷新，让用户看到提示
   setTimeout(() => {
     // 使用 location.reload() 强制刷新，清除缓存
@@ -110,7 +110,7 @@ export const initVersionCheck = async (options = {}) => {
     return;
   }
 
-  const { 
+  const {
     enabled = true,
     showMessage = true,
   } = options;
@@ -137,6 +137,32 @@ export const initVersionCheck = async (options = {}) => {
     reloadPage(showMessage);
   } else {
     logger.info('版本检查完成，当前已是最新版本');
+
+    // 只在登录页面时检查版本
+    if (enabled) {
+      // 监听路由变化，只在登录页面时检查
+      const checkVersionOnLogin = () => {
+        const currentPath = window.location.pathname;
+        const isLoginPage = currentPath === '/login' || currentPath === '/';
+
+        if (isLoginPage) {
+          logger.debug('检测到登录页面，检查版本更新...');
+          checkForUpdate().then((hasUpdate) => {
+            if (hasUpdate) {
+              reloadPage(showMessage);
+            }
+          });
+        }
+      };
+
+      // 初始检查
+      checkVersionOnLogin();
+
+      // 监听路由变化
+      window.addEventListener('popstate', checkVersionOnLogin);
+
+      logger.info('版本检查已启用，仅在登录页面时检查');
+    }
   }
 };
 
