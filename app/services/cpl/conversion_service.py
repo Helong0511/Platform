@@ -355,13 +355,32 @@ class ConversionService:
             # po 字段使用原始金额（管理员可见）
             po_original_val = float(total_po_original_val) if total_po_original_val else 0.0
             stats_dict[key]["po"] += po_original_val
-            # po_after_discount 字段使用扣减后的金额（所有用户可见）
+            
+            # 计算考虑下游PO限制后的实际收益（与Postback管理的PayOut(扣)逻辑一致）
+            # 扣量后的金额
             po_discounted_val = float(total_po_discounted_val) if total_po_discounted_val else 0.0
-            stats_dict[key]["po_after_discount"] += po_discounted_val
+            
+            # 检查是否有下游PO配置
+            assignment_key = (safe_offer_id, safe_pub_id)
+            actual_revenue = po_discounted_val  # 默认使用扣量后的金额
+            
+            if assignment_key in offer_publisher_assignments_map:
+                assignment = offer_publisher_assignments_map[assignment_key]
+                if assignment and assignment.affiliate_payout is not None:
+                    # 上游金额（使用original_payout）
+                    upstream_amount = po_original_val
+                    # 如果上游金额大于下游PO，使用下游PO金额
+                    if upstream_amount > assignment.affiliate_payout:
+                        # 实际收益应该是 min(上游金额, 下游PO)
+                        # 由于我们统计的是总金额，需要按比例计算
+                        # 简化处理：使用扣量后的金额，但不超过下游PO * 转化数量
+                        actual_revenue = min(po_discounted_val, assignment.affiliate_payout * conv_count_val)
+            
+            stats_dict[key]["po_after_discount"] += actual_revenue
             # 累加转化数量和支付金额（从分组统计结果汇总，确保与分组统计一致）
             calculated_total_conversions += conv_count_val
             calculated_total_po += po_original_val
-            calculated_total_po_after_discount += po_discounted_val
+            calculated_total_po_after_discount += actual_revenue
             
             # 更新offer_ids和publisher_ids集合
             if safe_offer_id:
