@@ -511,7 +511,6 @@ const handleReset = () => {
 const handleAdd = async () => {
   // 先获取最新的CSRF令牌（通过GET请求）
   try {
-    const { getCaps } = await import('../api/cap');
     await getCaps({ page: 1, page_size: 1 });
   } catch (error) {
     // 即使请求失败，也可能从响应头中获取到CSRF令牌
