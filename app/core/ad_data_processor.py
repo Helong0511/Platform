@@ -189,6 +189,9 @@ async def process_api_ad_data(
             mapped_field = field_name
         return item.get(mapped_field, default)
 
+    # 导入build_product_maps函数
+    from app.api.api_v1.endpoints.excel.import_handler import build_product_maps
+
     # ========== 构建产品映射（与Excel导入逻辑一致） ==========
     product_map, product_name_map = await build_product_maps(db)
     logger.debug(f"已构建产品映射: {len(product_map)} 个产品")
