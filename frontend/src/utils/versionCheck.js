@@ -3,7 +3,6 @@
  * 用于检测前端是否有新版本，如果有则自动刷新页面
  */
 import axios from 'axios';
-import { logger } from './logger';
 import { ElMessage } from 'element-plus';
 
 // 当前版本号（从版本文件加载）
@@ -12,6 +11,16 @@ let currentVersion = null;
 let isInitialized = false;
 // 是否正在检查
 let isChecking = false;
+
+/**
+ * 打印日志（使用console.log，确保在开发环境也能看到）
+ */
+const log = {
+  debug: (...args) => console.log('[版本检查-DEBUG]', ...args),
+  info: (...args) => console.log('[版本检查-INFO]', ...args),
+  warn: (...args) => console.warn('[版本检查-WARN]', ...args),
+  error: (...args) => console.error('[版本检查-ERROR]', ...args),
+};
 
 /**
  * 加载当前版本号
@@ -30,7 +39,7 @@ const loadCurrentVersion = async () => {
     }
     return null;
   } catch (error) {
-    logger.warn('加载版本号失败:', error.message);
+    log.warn('加载版本号失败:', error.message);
     return null;
   }
 };
@@ -55,13 +64,13 @@ const checkForUpdate = async () => {
     // 如果还没有当前版本，设置为最新版本
     if (!currentVersion) {
       currentVersion = latestVersion;
-      logger.debug('初始化版本号:', currentVersion);
+      log.debug('初始化版本号:', currentVersion);
       return false;
     }
 
     // 如果版本号不同，说明有新版本
     if (latestVersion !== currentVersion) {
-      logger.info('检测到新版本，准备刷新页面', {
+      log.info('检测到新版本，准备刷新页面', {
         current: currentVersion,
         latest: latestVersion,
       });
@@ -70,7 +79,7 @@ const checkForUpdate = async () => {
 
     return false;
   } catch (error) {
-    logger.warn('检查版本更新失败:', error.message);
+    log.warn('检查版本更新失败:', error.message);
     return false;
   } finally {
     isChecking = false;
@@ -89,7 +98,7 @@ const reloadPage = (showMessage = true) => {
     });
   }
 
-  logger.info('正在刷新页面以加载新版本...');
+  log.info('正在刷新页面以加载新版本...');
 
   // 延迟刷新，让用户看到提示
   setTimeout(() => {
@@ -106,7 +115,7 @@ const reloadPage = (showMessage = true) => {
  */
 export const initVersionCheck = async (options = {}) => {
   if (isInitialized) {
-    logger.warn('版本检查已经初始化，跳过重复初始化');
+    log.warn('版本检查已经初始化，跳过重复初始化');
     return;
   }
 
@@ -117,16 +126,16 @@ export const initVersionCheck = async (options = {}) => {
   isInitialized = true;
 
   if (!enabled) {
-    logger.debug('版本检查已禁用');
+    log.debug('版本检查已禁用');
     return;
   }
 
   // 加载初始版本号
   currentVersion = await loadCurrentVersion();
   if (currentVersion) {
-    logger.debug('版本检查已初始化，当前版本:', currentVersion);
+    log.debug('版本检查已初始化，当前版本:', currentVersion);
   } else {
-    logger.warn('无法加载初始版本号，版本检查可能无法正常工作');
+    log.warn('无法加载初始版本号，版本检查可能无法正常工作');
     return;
   }
 
@@ -136,7 +145,7 @@ export const initVersionCheck = async (options = {}) => {
     // 刷新页面
     reloadPage(showMessage);
   } else {
-    logger.info('版本检查完成，当前已是最新版本');
+    log.info('版本检查完成，当前已是最新版本');
 
     // 只在登录页面时检查版本
     if (enabled) {
@@ -146,7 +155,7 @@ export const initVersionCheck = async (options = {}) => {
         const isLoginPage = currentPath === '/login' || currentPath === '/';
 
         if (isLoginPage) {
-          logger.debug('检测到登录页面，检查版本更新...');
+          log.debug('检测到登录页面，检查版本更新...');
           checkForUpdate().then((hasUpdate) => {
             if (hasUpdate) {
               reloadPage(showMessage);
@@ -161,7 +170,7 @@ export const initVersionCheck = async (options = {}) => {
       // 监听路由变化
       window.addEventListener('popstate', checkVersionOnLogin);
 
-      logger.info('版本检查已启用，仅在登录页面时检查');
+      log.info('版本检查已启用，仅在登录页面时检查');
     }
   }
 };
@@ -171,7 +180,7 @@ export const initVersionCheck = async (options = {}) => {
  */
 export const stopVersionCheck = () => {
   isInitialized = false;
-  logger.info('版本检查已停止');
+  log.info('版本检查已停止');
 };
 
 /**
