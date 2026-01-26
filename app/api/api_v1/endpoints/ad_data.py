@@ -288,6 +288,35 @@ async def get_daily_summary(
     )
 
 
+@router.get("/date-range", response_model=ResponseBaseSchema[dict], summary="获取数据的日期范围")
+async def get_ad_data_date_range(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    client_id: int | None = Query(None, description="客户ID过滤"),
+):
+    """
+    获取广告数据的日期范围（最早日期和最新日期，已重构使用服务层）
+    用于前端自动选择有数据的日期范围
+    - 管理员可查看所有数据的日期范围
+    - 客户只能查看自己数据的日期范围
+    """
+    # 使用服务层（业务逻辑在AdDataService中）
+    ad_data_service: AdDataService = await get_ad_data_service(db)
+    
+    try:
+        date_range = await ad_data_service.get_date_range(
+            current_user=current_user,
+            client_id=client_id
+        )
+        return ResponseBaseSchema.success(data=date_range)
+    except Exception as e:
+        logger.error(f"获取日期范围失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取日期范围失败: {str(e)}"
+        )
+
+
 @router.get("/{data_id}", response_model=ResponseBaseSchema[AdDataResponse], summary="获取广告数据详情")
 async def get_ad_data_detail(
         data_id: int = Path(..., ge=1, description="广告数据ID"),
@@ -475,32 +504,3 @@ async def get_ad_data_summary(
     )
 
     return ResponseBaseSchema.success(data=AdDataSummaryResponse(**response_data))
-
-
-@router.get("/date-range", response_model=ResponseBaseSchema[dict], summary="获取数据的日期范围")
-async def get_ad_data_date_range(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    client_id: int | None = Query(None, description="客户ID过滤"),
-):
-    """
-    获取广告数据的日期范围（最早日期和最新日期，已重构使用服务层）
-    用于前端自动选择有数据的日期范围
-    - 管理员可查看所有数据的日期范围
-    - 客户只能查看自己数据的日期范围
-    """
-    # 使用服务层（业务逻辑在AdDataService中）
-    ad_data_service: AdDataService = await get_ad_data_service(db)
-    
-    try:
-        date_range = await ad_data_service.get_date_range(
-            current_user=current_user,
-            client_id=client_id
-        )
-        return ResponseBaseSchema.success(data=date_range)
-    except Exception as e:
-        logger.error(f"获取日期范围失败: {str(e)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"获取日期范围失败: {str(e)}"
-        )
