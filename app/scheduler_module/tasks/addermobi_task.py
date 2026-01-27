@@ -147,7 +147,7 @@ async def addermobi_api_task(
             
             if 0 <= app_now.hour <= 2:
                 start_date_str = yesterday_str
-                end_date_str = yesterday_str
+                end_date_str = today_str
             else:
                 start_date_str = today_str
                 end_date_str = today_str

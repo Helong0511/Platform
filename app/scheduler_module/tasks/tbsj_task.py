@@ -143,7 +143,7 @@ async def tbsj_api_task(
             
             if 0 <= app_now.hour <= 2:
                 tbsj_start = yesterday_str
-                tbsj_end = yesterday_str
+                tbsj_end = today_str
             else:
                 tbsj_start = today_str
                 tbsj_end = today_str

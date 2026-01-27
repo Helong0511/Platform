@@ -123,7 +123,7 @@ async def tqt_api_task(
             
             if 0 <= app_now.hour <= 2:
                 tqt_start_date = yesterday_str
-                tqt_end_date = yesterday_str
+                tqt_end_date = today_str
             else:
                 tqt_start_date = today_str
                 tqt_end_date = today_str
