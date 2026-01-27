@@ -121,7 +121,7 @@ async def tqt_api_task(
             yesterday_str = app_yesterday.strftime("%Y-%m-%d")
             today_str = app_now.strftime("%Y-%m-%d")
             
-            if 0 <= app_now.hour <= 8:
+            if 0 <= app_now.hour <= 2:
                 tqt_start_date = yesterday_str
                 tqt_end_date = yesterday_str
             else:
@@ -133,7 +133,7 @@ async def tqt_api_task(
             "startDate": tqt_start_date,
             "endDate": tqt_end_date,
             "page": 1,
-            "pageSize": 1000,
+            "pageSize": 500,
             "type": "country"
         }
 

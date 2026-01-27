@@ -76,7 +76,7 @@ async def skymobi_api_task(
             yesterday_str = app_yesterday.strftime("%Y-%m-%d")
             today_str = app_now.strftime("%Y-%m-%d")
             
-            if 0 <= app_now.hour <= 8:
+            if 0 <= app_now.hour <= 2:
                 date_str = yesterday_str
             else:
                 date_str = today_str
