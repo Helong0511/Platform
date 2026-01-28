@@ -77,6 +77,7 @@ export const setupRequestInterceptor = () => {
 
 /**
  * 处理 CSRF token 错误并自动重试
+ * 改进：添加防抖机制，避免多个标签页同时刷新令牌
  */
 const handleCsrfError = async (error) => {
   const errorData = error.response?.data;
@@ -131,6 +132,7 @@ const handleCsrfError = async (error) => {
       }
 
       // 3. 如果响应头中没有token，尝试通过GET请求获取新的CSRF token
+      // 注意：fetchCsrfTokenFromEndpoints内部已经有防抖机制，这里不需要额外处理
       try {
         logger.info('尝试通过GET请求获取新的CSRF token');
         const newCsrfToken = await fetchCsrfTokenFromEndpoints();

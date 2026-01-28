@@ -12,6 +12,11 @@ import { logger } from './logger';
 
 // 跨标签页同步的标记，避免循环触发
 let isUpdatingFromStorage = false;
+// 防抖标记，避免多个标签页同时刷新令牌
+let isRefreshingToken = false;
+// 令牌刷新锁（使用localStorage实现跨标签页锁）
+const TOKEN_REFRESH_LOCK_KEY = 'csrf_token_refresh_lock';
+const TOKEN_REFRESH_LOCK_TIMEOUT = 5000; // 5秒锁超时
 
 /**
  * 初始化跨标签页的CSRF令牌同步机制
@@ -204,18 +209,25 @@ export const initPageLoadCsrfCheck = () => {
 /**
  * 初始化页面可见性变化时的CSRF令牌刷新机制
  * 当用户切换回标签页时，自动刷新CSRF令牌
+ * 改进：减少刷新频率，避免多个标签页同时刷新
  */
 export const initPageVisibilityRefresh = () => {
   let lastRefreshTime = 0;
-  const REFRESH_INTERVAL = 5 * 60 * 1000; // 5分钟
+  const REFRESH_INTERVAL = 10 * 60 * 1000; // 10分钟（从5分钟增加到10分钟）
 
   document.addEventListener('visibilitychange', async () => {
     // 只有当页面变为可见时才刷新令牌
     if (document.visibilityState === 'visible') {
       const now = Date.now();
-      // 距离上次刷新超过5分钟才刷新，避免频繁请求
+      // 距离上次刷新超过10分钟才刷新，避免频繁请求
       if (now - lastRefreshTime > REFRESH_INTERVAL) {
         try {
+          // 检查令牌是否需要刷新（避免不必要的请求）
+          if (!shouldRefreshCsrfToken()) {
+            logger.debug('页面变为可见，但CSRF令牌仍然有效，无需刷新');
+            return;
+          }
+
           logger.debug('页面变为可见，尝试刷新CSRF令牌');
           const newToken = await fetchCsrfTokenFromEndpoints();
           if (newToken) {
@@ -235,43 +247,107 @@ export const initPageVisibilityRefresh = () => {
 
 /**
  * 尝试从多个端点获取 CSRF token
+ * 改进：添加令牌刷新锁，避免多个标签页同时刷新
  * @param {Array<string>} endpoints - 要尝试的端点列表（可选，默认使用常用端点）
  * @returns {Promise<string|null>} CSRF token，如果获取失败则返回 null
  */
 export const fetchCsrfTokenFromEndpoints = async (endpoints = null) => {
-  const defaultEndpoints = [
-    '/api/v1/users/stats',
-    '/api/v1/dashboard/stats',
-    '/api/v1/products/?page_size=1',
-    '/api/v1/short-links/?page_size=1',
-    '/api/v1/clients/?page_size=1'
-  ];
-
-  const endpointsToTry = endpoints || defaultEndpoints;
-
-  for (const endpoint of endpointsToTry) {
-    try {
-      const response = await axios.get(endpoint);
-      const csrfToken = extractAndSaveCsrfToken(response);
-      if (csrfToken) {
-        logger.info(`通过 GET 请求获取到新的 CSRF token: ${endpoint}`);
-        return csrfToken;
-      }
-    } catch (error) {
-      // 即使请求失败，响应头中也可能有 CSRF token
-      const csrfToken = extractAndSaveCsrfToken(error);
-      if (csrfToken) {
-        logger.info(`从错误响应中获取到 CSRF token: ${endpoint}`);
-        return csrfToken;
-      }
-      // 如果错误是 401，可能是认证问题，不应该继续
-      if (error.response?.status === 401) {
-        throw error;
-      }
-      continue;
-    }
+  // 检查是否正在刷新令牌（防抖）
+  if (isRefreshingToken) {
+    logger.debug('CSRF令牌正在刷新中，跳过重复请求');
+    return getCsrfToken();
   }
 
-  return null;
+  // 尝试获取刷新锁
+  const lockAcquired = acquireTokenRefreshLock();
+  if (!lockAcquired) {
+    logger.debug('其他标签页正在刷新CSRF令牌，等待刷新完成');
+    // 等待一小段时间，然后检查是否有新令牌
+    await new Promise(resolve => setTimeout(resolve, 200));
+    return getCsrfToken();
+  }
+
+  isRefreshingToken = true;
+
+  try {
+    const defaultEndpoints = [
+      '/api/v1/users/stats',
+      '/api/v1/dashboard/stats',
+      '/api/v1/products/?page_size=1',
+      '/api/v1/short-links/?page_size=1',
+      '/api/v1/clients/?page_size=1'
+    ];
+
+    const endpointsToTry = endpoints || defaultEndpoints;
+
+    for (const endpoint of endpointsToTry) {
+      try {
+        const response = await axios.get(endpoint);
+        const csrfToken = extractAndSaveCsrfToken(response);
+        if (csrfToken) {
+          logger.info(`通过 GET 请求获取到新的 CSRF token: ${endpoint}`);
+          return csrfToken;
+        }
+      } catch (error) {
+        // 即使请求失败，响应头中也可能有 CSRF token
+        const csrfToken = extractAndSaveCsrfToken(error);
+        if (csrfToken) {
+          logger.info(`从错误响应中获取到 CSRF token: ${endpoint}`);
+          return csrfToken;
+        }
+        // 如果错误是 401，可能是认证问题，不应该继续
+        if (error.response?.status === 401) {
+          throw error;
+        }
+        continue;
+      }
+    }
+
+    return null;
+  } finally {
+    isRefreshingToken = false;
+    releaseTokenRefreshLock();
+  }
 };
+
+/**
+ * 尝试获取令牌刷新锁
+ * @returns {boolean} 是否成功获取锁
+ */
+function acquireTokenRefreshLock() {
+  try {
+    const lockValue = Date.now().toString();
+    const existingLock = localStorage.getItem(TOKEN_REFRESH_LOCK_KEY);
+
+    // 检查锁是否已过期
+    if (existingLock) {
+      const lockTime = parseInt(existingLock);
+      if (Date.now() - lockTime > TOKEN_REFRESH_LOCK_TIMEOUT) {
+        // 锁已过期，可以获取
+        localStorage.setItem(TOKEN_REFRESH_LOCK_KEY, lockValue);
+        return true;
+      }
+      // 锁仍然有效，无法获取
+      return false;
+    }
+
+    // 没有锁，可以获取
+    localStorage.setItem(TOKEN_REFRESH_LOCK_KEY, lockValue);
+    return true;
+  } catch (error) {
+    logger.debug('获取令牌刷新锁失败:', error);
+    return false;
+  }
+}
+
+/**
+ * 释放令牌刷新锁
+ */
+function releaseTokenRefreshLock() {
+  try {
+    localStorage.removeItem(TOKEN_REFRESH_LOCK_KEY);
+  } catch (error) {
+    logger.debug('释放令牌刷新锁失败:', error);
+  }
+}
 

@@ -5,6 +5,7 @@ CSRF防护模块
 import secrets
 import logging
 import hashlib
+import time
 from typing import Optional, Dict, Any
 from fastapi import Request, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -30,6 +31,10 @@ _REDIS_CLIENT_CACHE_TTL = 300
 _MEMORY_TOKEN_STORE_MAX_SIZE = 10000
 # 内存令牌清理阈值（当达到最大大小的80%时触发清理）
 _MEMORY_TOKEN_CLEANUP_THRESHOLD = int(_MEMORY_TOKEN_STORE_MAX_SIZE * 0.8)
+# 令牌刷新的最小间隔（秒），防止频繁刷新
+_MIN_TOKEN_REFRESH_INTERVAL = 300  # 5分钟
+# 令牌刷新阈值（剩余时间小于此值时才刷新），减少刷新频率
+_TOKEN_REFRESH_THRESHOLD = 0.1  # 10%（原来是20%）
 
 
 def extract_user_id_from_token(request: Request) -> Optional[str]:
@@ -503,13 +508,28 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         should_refresh = False
         redis_client = await self._get_redis_client()
         csrf_key = f"csrf_token:{session_id}"
+        last_refresh_key = f"csrf_token_last_refresh:{session_id}"
         
         if redis_client:
             try:
+                # 获取令牌的剩余时间
                 ttl = await redis_client.ttl(csrf_key)
-                if ttl > 0 and ttl < (settings.CSRF_TOKEN_EXPIRE_SECONDS * 0.2):
-                    should_refresh = True
-                    logger.debug(f"CSRF令牌即将过期（剩余{ttl}秒），刷新令牌: {request.method} {request.url.path}")
+                
+                # 检查最后刷新时间，防止频繁刷新
+                last_refresh = await redis_client.get(last_refresh_key)
+                last_refresh_time = int(last_refresh) if last_refresh else 0
+                current_time = int(time.time())
+                time_since_last_refresh = current_time - last_refresh_time
+                
+                # 只有在以下情况下才刷新令牌：
+                # 1. 令牌剩余时间小于阈值（10%）
+                # 2. 距离上次刷新超过最小间隔（5分钟）
+                if ttl > 0 and ttl < (settings.CSRF_TOKEN_EXPIRE_SECONDS * _TOKEN_REFRESH_THRESHOLD):
+                    if time_since_last_refresh >= _MIN_TOKEN_REFRESH_INTERVAL:
+                        should_refresh = True
+                        logger.debug(f"CSRF令牌即将过期（剩余{ttl}秒），距离上次刷新{time_since_last_refresh}秒，刷新令牌: {request.method} {request.url.path}")
+                    else:
+                        logger.debug(f"CSRF令牌即将过期（剩余{ttl}秒），但距离上次刷新仅{time_since_last_refresh}秒，跳过刷新: {request.method} {request.url.path}")
             except Exception:
                 pass
         
@@ -517,6 +537,18 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             # 刷新令牌
             new_csrf_token = generate_csrf_token()
             await self._store_csrf_token(session_id, new_csrf_token, request)
+            
+            # 记录刷新时间
+            if redis_client:
+                try:
+                    await redis_client.setex(
+                        last_refresh_key,
+                        settings.CSRF_TOKEN_EXPIRE_SECONDS,
+                        str(int(time.time()))
+                    )
+                except Exception:
+                    pass
+            
             await self._add_csrf_token_to_response(response, new_csrf_token, request)
         else:
             # 返回当前令牌

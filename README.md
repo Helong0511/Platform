@@ -125,7 +125,7 @@ sudo systemctl reload nginx
 
 # 11. 获取SSL证书
 sudo apt install certbot python3-certbot-nginx -y
-sudo certbot --nginx -d your-domain.com
+sudo certbot --nginx -d btfrx.online
 ```
 
 ### 自动化配置脚本
@@ -1741,7 +1741,7 @@ PRODUCTION_ENV=production
 SECRET_KEY=your-production-secret-key
 DATABASE_URL=mysql+aiomysql://platform:password@127.0.0.1:3306/platform
 REDIS_HOST=127.0.0.1
-BACKEND_CORS_ORIGINS=https://your-domain.com
+BACKEND_CORS_ORIGINS=https://btfrx.online
 FIRST_SUPERUSER=admin
 FIRST_SUPERUSER_PASSWORD=your-secure-password
 ```
@@ -1785,17 +1785,17 @@ Nginx配置示例：
 ```nginx
 server {
     listen 80;
-    server_name your-domain.com;
+    server_name btfrx.online;
     return 301 https://$server_name$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name your-domain.com;
+    server_name btfrx.online;
 
     # SSL证书配置
-    ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/btfrx.online/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/btfrx.online/privkey.pem;
 
     # 前端静态文件
     location / {
@@ -1836,7 +1836,7 @@ sudo systemctl reload nginx
 
 # 获取SSL证书
 sudo apt install certbot python3-certbot-nginx -y
-sudo certbot --nginx -d your-domain.com
+sudo certbot --nginx -d btfrx.online
 ```
 
 #### 7. 配置防火墙
@@ -3531,17 +3531,17 @@ async def sanitize_input(request: Request, call_next):
 # nginx配置
 server {
     listen 80;
-    server_name your-domain.com;
+    server_name btfrx.online;
     return 301 https://$server_name$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name your-domain.com;
+    server_name btfrx.online;
     
     # SSL证书
-    ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/btfrx.online/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/btfrx.online/privkey.pem;
     
     # SSL安全配置
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -4030,7 +4030,7 @@ REDIS_DB=0
 REDIS_MAX_CONNECTIONS=10
 
 # CORS配置
-BACKEND_CORS_ORIGINS=https://your-domain.com
+BACKEND_CORS_ORIGINS=https://btfrx.online
 
 # 管理员配置
 FIRST_SUPERUSER=admin
