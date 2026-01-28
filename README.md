@@ -39,6 +39,153 @@
 
 ---
 
+## 快速开始
+
+### 5分钟快速启动
+
+#### Windows开发环境
+```bash
+# 1. 克隆项目
+git clone <repository-url>
+cd Platform
+
+# 2. 创建虚拟环境
+py -m venv venv
+venv\Scripts\activate
+
+# 3. 安装后端依赖
+pip install -r requirements.txt
+
+# 4. 生成环境配置（自动检测系统）
+python scripts/自动生成配置/auto_generate_env_config.py --no-interactive
+
+# 5. 启动后端服务
+py -m uvicorn app.main:app --reload --port 8960
+
+# 6. 新开终端，安装前端依赖
+cd frontend
+npm install
+
+# 7. 启动前端服务
+npm run dev
+
+# 8. 访问应用
+# 前端：http://localhost:3310
+# 后端API：http://localhost:8960/api/v1/docs
+# 默认账号：admin / admin123
+```
+
+#### Ubuntu生产环境
+```bash
+# 1. 克隆项目
+cd /data
+git clone <repository-url> Platform
+cd Platform
+
+# 2. 创建虚拟环境
+python3 -m venv venv
+source venv/bin/activate
+
+# 3. 安装后端依赖
+pip install -r requirements.txt
+
+# 4. 生成环境配置（生产模式）
+sudo python3 scripts/自动生成配置/auto_generate_env_config.py --env production --no-interactive
+
+# 5. 配置数据库
+sudo mysql -u root -p
+# 在MySQL中执行：
+# CREATE DATABASE platform CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+# CREATE USER 'platform'@'localhost' IDENTIFIED BY 'your_password';
+# GRANT ALL PRIVILEGES ON platform.* TO 'platform'@'localhost';
+# FLUSH PRIVILEGES;
+
+# 6. 导入初始数据
+mysql -u platform -p platform < scripts/data/platform20260112.sql
+
+# 7. 生成RSA密钥
+python scripts/生成RSA密钥/generate_rsa_keys.py --output-dir keys
+
+# 8. 配置systemd服务
+sudo cp systemd/Platform-backend.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable Platform-backend
+sudo systemctl start Platform-backend
+
+# 9. 构建前端
+cd frontend
+npm install
+npm run build
+
+# 10. 配置Nginx
+sudo cp nginx/btfrx.online/nginx.conf /etc/nginx/sites-available/platform
+sudo ln -s /etc/nginx/sites-available/platform /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+
+# 11. 获取SSL证书
+sudo apt install certbot python3-certbot-nginx -y
+sudo certbot --nginx -d your-domain.com
+```
+
+### 自动化配置脚本
+
+项目提供了智能的环境配置生成脚本，可以自动检测系统并生成合适的配置。
+
+#### 使用方法
+
+```bash
+# 方式1：自动检测系统（推荐）
+python scripts/自动生成配置/auto_generate_env_config.py
+
+# 方式2：强制指定环境
+python scripts/自动生成配置/auto_generate_env_config.py --env production
+
+# 方式3：非交互模式（适合自动化）
+python scripts/自动生成配置/auto_generate_env_config.py --no-interactive
+
+# 方式4：指定输出文件
+python scripts/自动生成配置/auto_generate_env_config.py --output .env.prod
+```
+
+#### 配置特点
+
+**生产环境（production）**
+- JWT算法：RS256（非对称加密）
+- 访问令牌过期：240分钟
+- CSRF防护：启用
+- 日志级别：INFO
+- Telegram通知：启用
+- API限流：100次/分钟
+- 数据库连接池：15个连接
+
+**开发环境（development）**
+- JWT算法：HS256（对称加密）
+- 访问令牌过期：120分钟
+- CSRF防护：禁用
+- 日志级别：DEBUG
+- Telegram通知：禁用
+- API限流：1000次/分钟
+- 数据库连接池：5个连接
+
+#### Ubuntu权限自动设置
+
+脚本会自动处理文件权限：
+
+```bash
+# 如果以root权限运行，自动设置：
+# - 所有者：www-data:www-data
+# - 权限：640（所有者可读写，组可读）
+
+# 如果不是root权限，提示手动执行：
+sudo chown www-data:www-data .env
+sudo chmod 640 .env
+```
+
+详细说明请参考：[自动配置生成脚本使用说明](scripts/自动生成配置/README_自动配置生成.md)
+
+---
+
 ## 技术栈
 
 ### 后端技术栈
@@ -235,21 +382,21 @@ app/
 │   ├── base_repository.py # 基础仓储
 │   ├── offer_repository.py # Offer仓储
 │   └── __init__.py
-├── routes/                 # 路由
-│   ├── short_link/        # 短链接路由
-│   │   ├── handlers.py
-│   │   ├── router.py
-│   │   ├── url_builder.py
-│   │   ├── utils.py
-│   │   └── placeholder.py
-│   ├── short_link_redirect.py
+├── routes/                 # 路由层 - 处理HTTP请求和响应
+│   ├── short_link/        # 短链接路由模块 - 短链接系统的核心组件
+│   │   ├── handlers.py    # 短链接重定向请求处理模块 - 处理缓存命中和数据库查询两种场景的重定向逻辑
+│   │   ├── router.py      # 短链接重定向路由模块 - 定义短链接重定向的API端点（/s/{short_code}）
+│   │   ├── url_builder.py # URL构建服务 - 处理URL参数合并和最终URL构建逻辑
+│   │   ├── utils.py       # 短链接重定向工具函数 - 提供Offer ID解析和点击记录创建功能
+│   │   └── placeholder.py # 占位符替换服务 - 处理短链接URL中的占位符替换逻辑（支持{click_id}、{offer_id}等）
+│   ├── short_link_redirect.py # 短链接重定向路由（完整版）- 包含完整的短链接重定向逻辑和占位符替换
 │   └── __init__.py
-├── scheduler/              # 调度器（旧版）
-│   ├── clicks_batch_processor.py
-│   ├── cpl_tasks.py
-│   ├── forward_tasks.py
-│   └── short_link_tasks.py
-└── main.py                # 应用入口
+├── scheduler/              # 调度器（旧版）- 定时任务模块
+│   ├── clicks_batch_processor.py # 点击记录批量处理任务 - 从Redis队列批量取出点击记录，批量插入到数据库（高并发优化）
+│   ├── cpl_tasks.py        # CPL系统定时任务 - 每日Cap重置任务（每天00:00 UTC执行）
+│   ├── forward_tasks.py    # Postback下游转发任务 - 处理PostbackForwardQueue中的任务，包含重试机制（最大重试5次）
+│   └── short_link_tasks.py # 短链接相关定时任务 - 同步短链接点击次数到数据库（每5分钟）和批量处理点击记录队列（每10秒）
+└── main.py                # 应用入口 - FastAPI应用启动入口
 ```
 
 ### 前端目录结构
@@ -2230,6 +2377,1564 @@ sudo nano /data/Platform/.env
 
 # 重启服务
 sudo systemctl restart Platform-backend
+```
+
+---
+
+## Docker部署指南
+
+### Docker Compose部署（推荐）
+
+#### 1. 创建Docker配置文件
+
+创建 `docker-compose.yml`：
+
+```yaml
+version: '3.8'
+
+services:
+  # MySQL数据库
+  mysql:
+    image: mysql:8.0
+    container_name: platform-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: platform
+      MYSQL_USER: platform
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts/data:/docker-entrypoint-initdb.d
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    networks:
+      - platform-network
+
+  # Redis缓存
+  redis:
+    image: redis:7-alpine
+    container_name: platform-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - platform-network
+
+  # 后端API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: platform-backend
+    restart: always
+    ports:
+      - "8960:8960"
+    environment:
+      - PRODUCTION_ENV=production
+      - DATABASE_URL=mysql+aiomysql://platform:${MYSQL_PASSWORD}@mysql:3306/platform
+      - REDIS_HOST=redis
+      - SECRET_KEY=${SECRET_KEY}
+    volumes:
+      - ./logs:/app/logs
+      - ./keys:/app/keys
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - platform-network
+
+  # 前端
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: platform-frontend
+    restart: always
+    ports:
+      - "3310:80"
+    depends_on:
+      - backend
+    networks:
+      - platform-network
+
+  # Nginx反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: platform-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - platform-network
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  platform-network:
+    driver: bridge
+```
+
+#### 2. 创建后端Dockerfile
+
+创建 `Dockerfile.backend`：
+
+```dockerfile
+FROM python:3.10-slim
+
+# 设置工作目录
+WORKDIR /app
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y \
+    gcc \
+    default-libmysqlclient-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制依赖文件
+COPY requirements.txt .
+
+# 安装Python依赖
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 复制应用代码
+COPY app/ ./app/
+COPY models/ ./models/
+COPY scripts/ ./scripts/
+
+# 创建日志目录
+RUN mkdir -p /app/logs
+
+# 暴露端口
+EXPOSE 8960
+
+# 启动命令
+CMD ["gunicorn", "--config", "gunicorn.conf.py", "app.main:app"]
+```
+
+#### 3. 创建前端Dockerfile
+
+创建 `frontend/Dockerfile`：
+
+```dockerfile
+# 构建阶段
+FROM node:18-alpine as build
+
+WORKDIR /app
+
+# 复制依赖文件
+COPY package*.json ./
+
+# 安装依赖
+RUN npm install
+
+# 复制源代码
+COPY . .
+
+# 构建应用
+RUN npm run build
+
+# 生产阶段
+FROM nginx:alpine
+
+# 复制构建产物
+COPY --from=build /app/dist /usr/share/nginx/html
+
+# 复制Nginx配置
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# 暴露端口
+EXPOSE 80
+
+# 启动Nginx
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+#### 4. 创建环境变量文件
+
+创建 `.env.docker`：
+
+```env
+# MySQL配置
+MYSQL_ROOT_PASSWORD=your_root_password
+MYSQL_PASSWORD=your_mysql_password
+
+# 应用配置
+SECRET_KEY=your-secret-key-here
+```
+
+#### 5. 启动服务
+
+```bash
+# 构建并启动所有服务
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f
+
+# 停止服务
+docker-compose down
+
+# 重启服务
+docker-compose restart
+```
+
+### Windows本地开发Docker
+
+#### 1. 使用Docker Desktop
+
+```bash
+# 启动Docker Desktop
+
+# 克隆项目
+cd E:\data\Platform
+
+# 创建开发环境配置
+python scripts/自动生成配置/auto_generate_env_config.py --env development --no-interactive
+
+# 启动开发服务
+docker-compose -f docker-compose.dev.yml up -d
+```
+
+#### 2. 开发环境docker-compose.dev.yml
+
+```yaml
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: platform-mysql-dev
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: platform
+      MYSQL_USER: platform
+      MYSQL_PASSWORD: platform
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_dev_data:/var/lib/mysql
+      - ./scripts/data:/docker-entrypoint-initdb.d
+
+  redis:
+    image: redis:7-alpine
+    container_name: platform-redis-dev
+    ports:
+      - "6379:6379"
+
+volumes:
+  mysql_dev_data:
+```
+
+### Ubuntu生产环境Docker
+
+#### 1. 部署步骤
+
+```bash
+# 1. 安装Docker和Docker Compose
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+
+sudo usermod -aG docker $USER
+
+# 安装Docker Compose
+sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+
+# 2. 克隆项目
+cd /data
+git clone <repository-url> Platform
+cd Platform
+
+# 3. 生成环境配置
+sudo python3 scripts/自动生成配置/auto_generate_env_config.py --env production --no-interactive
+
+# 4. 生成RSA密钥
+python scripts/生成RSA密钥/generate_rsa_keys.py --output-dir keys
+
+# 5. 创建生产环境配置
+cp .env.docker .env.production
+nano .env.production
+
+# 6. 启动服务
+docker-compose -f docker-compose.prod.yml up -d
+
+# 7. 查看服务状态
+docker-compose ps
+
+# 8. 查看日志
+docker-compose logs -f backend
+```
+
+#### 2. 生产环境docker-compose.prod.yml
+
+```yaml
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: platform-mysql-prod
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: platform
+      MYSQL_USER: platform
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_prod_data:/var/lib/mysql
+      - ./backups:/backups
+    networks:
+      - platform-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: platform-redis-prod
+    restart: always
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_prod_data:/data
+    networks:
+      - platform-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: platform-backend-prod
+    restart: always
+    ports:
+      - "127.0.0.1:8960:8960"
+    env_file:
+      - .env.production
+    volumes:
+      - ./logs:/app/logs
+      - ./keys:/app/keys
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - platform-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: platform-frontend-prod
+    restart: always
+    ports:
+      - "127.0.0.1:3310:80"
+    depends_on:
+      - backend
+    networks:
+      - platform-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: platform-nginx-prod
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d
+      - ./ssl:/etc/nginx/ssl
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - platform-network
+
+volumes:
+  mysql_prod_data:
+  redis_prod_data:
+
+networks:
+  platform-network:
+    driver: bridge
+```
+
+### Docker常用命令
+
+```bash
+# 查看运行中的容器
+docker ps
+
+# 查看所有容器
+docker ps -a
+
+# 查看容器日志
+docker logs -f platform-backend-prod
+
+# 进入容器
+docker exec -it platform-backend-prod /bin/bash
+
+# 停止容器
+docker stop platform-backend-prod
+
+# 启动容器
+docker start platform-backend-prod
+
+# 重启容器
+docker restart platform-backend-prod
+
+# 删除容器
+docker rm platform-backend-prod
+
+# 查看镜像
+docker images
+
+# 删除镜像
+docker rmi <image-id>
+
+# 清理未使用的资源
+docker system prune -a
+
+# 查看容器资源使用
+docker stats
+```
+
+---
+
+## 微服务架构设计
+
+### 架构概述
+
+将单体应用拆分为多个独立的服务，每个服务负责特定的业务功能，通过API网关统一对外提供服务。
+
+### 服务拆分方案
+
+#### 1. 核心服务
+
+```
+platform-core/          # 核心服务（用户、认证、权限）
+├── app/
+│   ├── api/
+│   │   └── endpoints/
+│   │       ├── auth/
+│   │       └── users/
+│   ├── services/
+│   │   ├── user_service.py
+│   │   └── auth_service.py
+│   └── models/
+│       └── user.py
+├── Dockerfile
+└── requirements-core.txt
+
+platform-cpl/           # CPL服务（广告主、渠道、Offer、Cap）
+├── app/
+│   ├── api/
+│   │   └── endpoints/
+│   │       ├── advertisers/
+│   │       ├── publishers/
+│   │       ├── offers/
+│   │       └── caps/
+│   ├── services/
+│   │   ├── advertiser_service.py
+│   │   ├── publisher_service.py
+│   │   ├── offer_service.py
+│   │   └── cap_service.py
+│   └── models/
+│       ├── advertiser.py
+│       ├── publisher.py
+│       └── offer.py
+├── Dockerfile
+└── requirements-cpl.txt
+
+platform-tracking/      # 追踪服务（点击、短链接）
+├── app/
+│   ├── api/
+│   │   └── endpoints/
+│   │       ├── tracking/
+│   │       └── short_links/
+│   ├── services/
+│   │   ├── tracking_service.py
+│   │   └── short_link_service.py
+│   └── models/
+│       ├── click.py
+│       └── short_link.py
+├── Dockerfile
+└── requirements-tracking.txt
+
+platform-postback/      # Postback服务（转化回调）
+├── app/
+│   ├── api/
+│   │   └── endpoints/
+│   │       └── postback/
+│   ├── services/
+│   │   └── postback_service.py
+│   └── models/
+│       └── conversion.py
+├── Dockerfile
+└── requirements-postback.txt
+
+platform-analytics/     # 数据分析服务（报表、统计）
+├── app/
+│   ├── api/
+│   │   └── endpoints/
+│   │       ├── dashboard/
+│   │       └── reports/
+│   ├── services/
+│   │   ├── dashboard_service.py
+│   │   └── report_service.py
+│   └── models/
+│       └── analytics.py
+├── Dockerfile
+└── requirements-analytics.txt
+
+platform-notification/  # 通知服务（Telegram、邮件）
+├── app/
+│   ├── api/
+│   │   └── endpoints/
+│   │       └── notification/
+│   ├── services/
+│   │   ├── telegram_service.py
+│   │   └── email_service.py
+│   └── models/
+│       └── notification.py
+├── Dockerfile
+└── requirements-notification.txt
+```
+
+#### 2. 共享模块
+
+```
+platform-shared/        # 共享模块
+├── core/
+│   ├── config.py
+│   ├── database.py
+│   ├── redis_client.py
+│   ├── security.py
+│   └── utils.py
+├── models/
+│   └── base.py
+├── schemas/
+│   └── base.py
+└── requirements-shared.txt
+```
+
+#### 3. API网关
+
+```
+platform-gateway/       # API网关
+├── app/
+│   ├── main.py
+│   ├── routes/
+│   │   ├── core.py
+│   │   ├── cpl.py
+│   │   ├── tracking.py
+│   │   ├── postback.py
+│   │   ├── analytics.py
+│   │   └── notification.py
+│   └── middleware/
+│       ├── auth.py
+│       ├── rate_limit.py
+│       └── logging.py
+├── Dockerfile
+└── requirements-gateway.txt
+```
+
+### Docker Compose配置
+
+```yaml
+version: '3.8'
+
+services:
+  # API网关
+  gateway:
+    build:
+      context: ./platform-gateway
+      dockerfile: Dockerfile
+    container_name: platform-gateway
+    restart: always
+    ports:
+      - "8960:8960"
+    environment:
+      - CORE_SERVICE_URL=http://core:8961
+      - CPL_SERVICE_URL=http://cpl:8962
+      - TRACKING_SERVICE_URL=http://tracking:8963
+      - POSTBACK_SERVICE_URL=http://postback:8964
+      - ANALYTICS_SERVICE_URL=http://analytics:8965
+      - NOTIFICATION_SERVICE_URL=http://notification:8966
+    networks:
+      - platform-network
+
+  # 核心服务
+  core:
+    build:
+      context: ./platform-core
+      dockerfile: Dockerfile
+    container_name: platform-core
+    restart: always
+    ports:
+      - "8961:8960"
+    environment:
+      - DATABASE_URL=mysql+aiomysql://platform:password@mysql:3306/platform
+      - REDIS_HOST=redis
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - platform-network
+
+  # CPL服务
+  cpl:
+    build:
+      context: ./platform-cpl
+      dockerfile: Dockerfile
+    container_name: platform-cpl
+    restart: always
+    ports:
+      - "8962:8960"
+    environment:
+      - DATABASE_URL=mysql+aiomysql://platform:password@mysql:3306/platform
+      - REDIS_HOST=redis
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - platform-network
+
+  # 追踪服务
+  tracking:
+    build:
+      context: ./platform-tracking
+      dockerfile: Dockerfile
+    container_name: platform-tracking
+    restart: always
+    ports:
+      - "8963:8960"
+    environment:
+      - DATABASE_URL=mysql+aiomysql://platform:password@mysql:3306/platform
+      - REDIS_HOST=redis
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - platform-network
+
+  # Postback服务
+  postback:
+    build:
+      context: ./platform-postback
+      dockerfile: Dockerfile
+    container_name: platform-postback
+    restart: always
+    ports:
+      - "8964:8960"
+    environment:
+      - DATABASE_URL=mysql+aiomysql://platform:password@mysql:3306/platform
+      - REDIS_HOST=redis
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - platform-network
+
+  # 数据分析服务
+  analytics:
+    build:
+      context: ./platform-analytics
+      dockerfile: Dockerfile
+    container_name: platform-analytics
+    restart: always
+    ports:
+      - "8965:8960"
+    environment:
+      - DATABASE_URL=mysql+aiomysql://platform:password@mysql:3306/platform
+      - REDIS_HOST=redis
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - platform-network
+
+  # 通知服务
+  notification:
+    build:
+      context: ./platform-notification
+      dockerfile: Dockerfile
+    container_name: platform-notification
+    restart: always
+    ports:
+      - "8966:8960"
+    environment:
+      - DATABASE_URL=mysql+aiomysql://platform:password@mysql:3306/platform
+      - REDIS_HOST=redis
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - platform-network
+
+  # MySQL数据库
+  mysql:
+    image: mysql:8.0
+    container_name: platform-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: platform
+      MYSQL_USER: platform
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - platform-network
+
+  # Redis缓存
+  redis:
+    image: redis:7-alpine
+    container_name: platform-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - platform-network
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  platform-network:
+    driver: bridge
+```
+
+### Worker数量智能分配
+
+根据服务器硬件信息自动分配每个服务的Worker数量：
+
+```python
+# scripts/auto_allocate_workers.py
+import psutil
+import os
+
+def get_system_info():
+    """获取系统信息"""
+    cpu_count = psutil.cpu_count()
+    memory_gb = psutil.virtual_memory().total / (1024**3)
+    return cpu_count, memory_gb
+
+def allocate_workers(service_name, cpu_count, memory_gb):
+    """
+    根据服务类型和系统资源分配Worker数量
+    
+    Args:
+        service_name: 服务名称
+        cpu_count: CPU核心数
+        memory_gb: 内存大小（GB）
+        
+    Returns:
+        Worker数量
+    """
+    # 服务权重（根据服务重要性）
+    service_weights = {
+        'core': 1.0,           # 核心服务：高权重
+        'cpl': 0.8,            # CPL服务：中高权重
+        'tracking': 1.2,       # 追踪服务：最高权重（高并发）
+        'postback': 1.0,       # Postback服务：高权重
+        'analytics': 0.6,      # 分析服务：中权重
+        'notification': 0.4    # 通知服务：低权重
+    }
+    
+    # 基础Worker数量
+    base_workers = max(2, (cpu_count * 2) + 1)
+    
+    # 根据内存调整
+    if memory_gb < 4:
+        memory_factor = 0.5
+    elif memory_gb < 8:
+        memory_factor = 0.8
+    else:
+        memory_factor = 1.0
+    
+    # 计算服务Worker数量
+    weight = service_weights.get(service_name, 0.5)
+    workers = int(base_workers * weight * memory_factor)
+    
+    # 确保至少1个Worker
+    return max(1, workers)
+
+def generate_gunicorn_config():
+    """生成Gunicorn配置"""
+    cpu_count, memory_gb = get_system_info()
+    
+    services = ['core', 'cpl', 'tracking', 'postback', 'analytics', 'notification']
+    
+    config = {}
+    for service in services:
+        workers = allocate_workers(service, cpu_count, memory_gb)
+        config[service] = {
+            'workers': workers,
+            'worker_class': 'uvicorn.workers.UvicornWorker',
+            'worker_connections': 1000,
+            'max_requests': 1000,
+            'timeout': 60,
+            'keepalive': 10
+        }
+    
+    return config
+
+if __name__ == '__main__':
+    config = generate_gunicorn_config()
+    print("Worker配置：")
+    for service, cfg in config.items():
+        print(f"{service}: {cfg['workers']} workers")
+```
+
+### 微服务部署步骤
+
+#### 1. Windows本地开发
+
+```bash
+# 1. 克隆项目
+git clone <repository-url>
+cd Platform
+
+# 2. 创建共享模块
+mkdir platform-shared
+# 复制共享代码到platform-shared
+
+# 3. 拆分服务
+# 按照服务拆分方案，将代码拆分到对应目录
+
+# 4. 生成Worker配置
+python scripts/auto_allocate_workers.py
+
+# 5. 启动开发环境
+docker-compose -f docker-compose.dev.yml up -d
+```
+
+#### 2. Ubuntu生产环境
+
+```bash
+# 1. 克隆项目
+cd /data
+git clone <repository-url> Platform
+cd Platform
+
+# 2. 生成环境配置
+sudo python3 scripts/自动生成配置/auto_generate_env_config.py --env production --no-interactive
+
+# 3. 生成Worker配置
+python3 scripts/auto_allocate_workers.py > docker-compose.workers.yml
+
+# 4. 启动所有服务
+docker-compose -f docker-compose.prod.yml up -d
+
+# 5. 查看服务状态
+docker-compose ps
+
+# 6. 查看日志
+docker-compose logs -f gateway
+```
+
+### 微服务优势
+
+1. **独立部署**：每个服务可以独立部署和更新，互不影响
+2. **横向扩展**：根据负载情况，独立扩展需要的服务
+3. **技术栈灵活**：不同服务可以使用不同的技术栈
+4. **故障隔离**：单个服务故障不会影响整个系统
+5. **团队协作**：不同团队可以独立开发和维护不同的服务
+
+### 微服务挑战
+
+1. **复杂性增加**：服务间通信、数据一致性、分布式事务
+2. **运维成本**：需要监控、日志聚合、链路追踪等基础设施
+3. **网络延迟**：服务间调用增加网络开销
+4. **数据管理**：需要处理分布式数据存储和同步
+
+---
+
+## 性能优化
+
+### 数据库优化
+
+#### 1. 索引优化
+
+```sql
+-- 分析慢查询
+SHOW VARIABLES LIKE 'slow_query_log';
+SHOW VARIABLES LIKE 'long_query_time';
+
+-- 启用慢查询日志
+SET GLOBAL slow_query_log = 'ON';
+SET GLOBAL long_query_time = 2;
+
+-- 查看慢查询
+sudo tail -f /var/log/mysql/slow.log
+
+-- 使用EXPLAIN分析查询
+EXPLAIN SELECT * FROM postback_conversions 
+WHERE offer_id = 1 AND conversion_time >= '2025-01-01';
+
+-- 添加复合索引
+CREATE INDEX idx_offer_conversion_time ON postback_conversions(offer_id, conversion_time);
+CREATE INDEX idx_publisher_status ON postback_conversions(publisher_id, status);
+```
+
+#### 2. 查询优化
+
+```python
+# 使用批量查询代替循环查询
+# 不推荐
+for conversion_id in conversion_ids:
+    conversion = await db.get_conversion(conversion_id)
+
+# 推荐
+conversions = await db.get_conversions(conversion_ids)
+
+# 使用JOIN代替多次查询
+# 不推荐
+offer = await db.get_offer(offer_id)
+publisher = await db.get_publisher(publisher_id)
+
+# 推荐
+result = await db.execute(
+    select(Offer, Publisher)
+    .join(Publisher, Offer.publisher_id == Publisher.id)
+    .where(Offer.id == offer_id)
+)
+```
+
+#### 3. 连接池优化
+
+```python
+# gunicorn.conf.py
+import multiprocessing
+
+cpu_count = multiprocessing.cpu_count()
+
+# 根据CPU核心数调整连接池大小
+DB_POOL_SIZE = min(20, cpu_count * 5)
+DB_MAX_OVERFLOW = min(10, cpu_count * 2)
+DB_POOL_RECYCLE = 3600  # 1小时回收连接
+```
+
+### 缓存优化
+
+#### 1. Redis缓存策略
+
+```python
+# app/core/cache_manager.py
+from functools import wraps
+import json
+import hashlib
+from app.core.redis_client import get_redis_client
+
+def cache_result(ttl=3600, key_prefix=None):
+    """
+    缓存装饰器
+    
+    Args:
+        ttl: 缓存过期时间（秒）
+        key_prefix: 缓存键前缀
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # 生成缓存键
+            cache_key = f"{key_prefix or func.__name__}:{hashlib.md5(str(args + tuple(kwargs.items())).hexdigest()}"
+            
+            # 尝试从缓存获取
+            redis = await get_redis_client()
+            cached = await redis.get(cache_key)
+            if cached:
+                return json.loads(cached)
+            
+            # 执行函数
+            result = await func(*args, **kwargs)
+            
+            # 缓存结果
+            await redis.setex(cache_key, ttl, json.dumps(result))
+            
+            return result
+        return wrapper
+    return decorator
+
+# 使用示例
+@cache_result(ttl=1800, key_prefix="offers")
+async def get_offers(db: AsyncSession, offer_id: int):
+    """获取Offer（缓存30分钟）"""
+    result = await db.execute(select(Offer).where(Offer.id == offer_id))
+    return result.scalars().first()
+```
+
+#### 2. 缓存预热
+
+```python
+# app/scheduler_module/tasks/cache_warmup.py
+async def warmup_cache():
+    """缓存预热任务"""
+    redis = await get_redis_client()
+    
+    # 预热热门Offer
+    popular_offers = await get_popular_offers()
+    for offer in popular_offers:
+        cache_key = f"offer:{offer.id}"
+        await redis.setex(cache_key, 3600, json.dumps(offer.dict()))
+    
+    # 预热活跃渠道
+    active_publishers = await get_active_publishers()
+    for publisher in active_publishers:
+        cache_key = f"publisher:{publisher.id}"
+        await redis.setex(cache_key, 3600, json.dumps(publisher.dict()))
+```
+
+### 应用层优化
+
+#### 1. 异步处理
+
+```python
+# 使用异步IO提高并发性能
+import asyncio
+from aiohttp import ClientSession
+
+async def fetch_multiple_urls(urls):
+    """并发获取多个URL"""
+    async with ClientSession() as session:
+        tasks = [session.get(url) for url in urls]
+        responses = await asyncio.gather(*tasks)
+        return responses
+```
+
+#### 2. 批量操作
+
+```python
+# 批量插入
+async def bulk_create_conversions(db: AsyncSession, conversions: list):
+    """批量创建转化"""
+    db.add_all(conversions)
+    await db.commit()
+    return len(conversions)
+
+# 批量更新
+async def bulk_update_caps(db: AsyncSession, updates: list):
+    """批量更新Cap"""
+    for cap_id, data in updates:
+        await db.execute(
+            update(OfferCap)
+            .where(OfferCap.id == cap_id)
+            .values(**data)
+        )
+    await db.commit()
+```
+
+#### 3. 分页优化
+
+```python
+# 使用游标分页代替偏移分页
+async def get_conversions_cursor(
+    db: AsyncSession,
+    last_id: int = None,
+    limit: int = 100
+):
+    """游标分页获取转化"""
+    query = select(PostbackConversion).order_by(PostbackConversion.id)
+    
+    if last_id:
+        query = query.where(PostbackConversion.id > last_id)
+    
+    query = query.limit(limit)
+    
+    result = await db.execute(query)
+    return result.scalars().all()
+```
+
+---
+
+## 安全加固
+
+### 应用安全
+
+#### 1. 输入验证
+
+```python
+from pydantic import BaseModel, validator, Field
+from typing import Optional
+
+class ConversionCreate(BaseModel):
+    """转化创建模式"""
+    click_id: str = Field(..., min_length=1, max_length=100)
+    payout: float = Field(..., gt=0, le=1000)
+    offer_id: int = Field(..., gt=0)
+    
+    @validator('click_id')
+    def validate_click_id(cls, v):
+        """验证click_id格式"""
+        if not v.isalnum():
+            raise ValueError('click_id只能包含字母和数字')
+        return v
+```
+
+#### 2. SQL注入防护
+
+```python
+# 使用参数化查询，避免SQL注入
+# 不推荐
+query = f"SELECT * FROM users WHERE username = '{username}'"
+
+# 推荐
+result = await db.execute(
+    select(User).where(User.username == username)
+)
+```
+
+#### 3. XSS防护
+
+```python
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import html
+
+async def sanitize_input(request: Request, call_next):
+    """输入清理中间件"""
+    # 清理请求体
+    if request.method in ['POST', 'PUT', 'PATCH']:
+        body = await request.body()
+        # 清理HTML标签
+        sanitized = html.escape(body.decode())
+        request._body = sanitized.encode()
+    
+    response = await call_next(request)
+    return response
+```
+
+### 网络安全
+
+#### 1. HTTPS强制
+
+```nginx
+# nginx配置
+server {
+    listen 80;
+    server_name your-domain.com;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name your-domain.com;
+    
+    # SSL证书
+    ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+    
+    # SSL安全配置
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    
+    # HSTS
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+}
+```
+
+#### 2. 防火墙配置
+
+```bash
+# UFW防火墙配置
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+
+# 允许SSH
+sudo ufw allow 22/tcp
+
+# 允许HTTP/HTTPS
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+
+# 限制MySQL访问（仅本地）
+sudo ufw allow from 127.0.0.1 to any port 3306
+
+# 限制Redis访问（仅本地）
+sudo ufw allow from 127.0.0.1 to any port 6379
+
+# 启用防火墙
+sudo ufw enable
+
+# 查看状态
+sudo ufw status
+```
+
+#### 3. 限流配置
+
+```python
+# app/core/middleware.py
+from fastapi import Request, HTTPException
+from app.core.redis_client import get_redis_client
+import time
+
+async def rate_limit_middleware(request: Request, call_next):
+    """限流中间件"""
+    client_ip = request.client.host
+    redis = await get_redis_client()
+    
+    # 获取客户端请求计数
+    key = f"rate_limit:{client_ip}"
+    count = await redis.incr(key)
+    
+    # 首次请求，设置过期时间
+    if count == 1:
+        await redis.expire(key, 60)
+    
+    # 超过限制
+    if count > 100:  # 每分钟100次
+        raise HTTPException(status_code=429, detail="请求过于频繁")
+    
+    response = await call_next(request)
+    return response
+```
+
+### 数据安全
+
+#### 1. 密码加密
+
+```python
+from passlib.context import CryptContext
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str) -> str:
+    """哈希密码"""
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """验证密码"""
+    return pwd_context.verify(plain_password, hashed_password)
+```
+
+#### 2. 敏感数据加密
+
+```python
+from cryptography.fernet import Fernet
+import os
+
+# 生成加密密钥
+key = Fernet.generate_key()
+cipher_suite = Fernet(key)
+
+def encrypt_data(data: str) -> bytes:
+    """加密数据"""
+    return cipher_suite.encrypt(data.encode())
+
+def decrypt_data(encrypted_data: bytes) -> str:
+    """解密数据"""
+    return cipher_suite.decrypt(encrypted_data).decode()
+```
+
+#### 3. 审计日志
+
+```python
+# app/core/audit_log.py
+async def log_sensitive_action(
+    db: AsyncSession,
+    user_id: int,
+    action: str,
+    resource: str,
+    details: dict
+):
+    """记录敏感操作"""
+    audit_log = AuditLog(
+        user_id=user_id,
+        action=action,
+        resource=resource,
+        details=details,
+        ip_address=request.client.host,
+        user_agent=request.headers.get("user-agent")
+    )
+    db.add(audit_log)
+    await db.commit()
+```
+
+---
+
+## 监控和故障排查
+
+### 系统监控
+
+#### 1. 应用监控
+
+```python
+# app/core/metrics.py
+from prometheus_client import Counter, Histogram, Gauge
+import time
+
+# 定义指标
+request_count = Counter('http_requests_total', 'Total HTTP requests', ['method', 'endpoint'])
+request_duration = Histogram('http_request_duration_seconds', 'HTTP request duration')
+active_connections = Gauge('active_connections', 'Active database connections')
+
+async def monitor_request(request: Request, call_next):
+    """请求监控中间件"""
+    start_time = time.time()
+    
+    # 记录请求
+    response = await call_next(request)
+    
+    # 记录指标
+    request_count.labels(
+        method=request.method,
+        endpoint=request.url.path
+    ).inc()
+    
+    duration = time.time() - start_time
+    request_duration.observe(duration)
+    
+    return response
+```
+
+#### 2. 数据库监控
+
+```python
+# app/core/database.py
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+import logging
+
+logger = logging.getLogger(__name__)
+
+@event.listens_for(Engine, "connect")
+def receive_connect(dbapi_connection, connection_record):
+    """数据库连接监控"""
+    logger.info(f"New database connection: {connection_record.connection}")
+
+@event.listens_for(Engine, "checkout")
+def receive_checkout(dbapi_connection, connection_record, connection_proxy):
+    """数据库连接池监控"""
+    logger.info(f"Connection checked out: {connection_proxy.info}")
+
+@event.listens_for(Engine, "checkin")
+def receive_checkin(dbapi_connection, connection_record):
+    """数据库连接归还监控"""
+    logger.info(f"Connection checked in: {connection_record.connection}")
+```
+
+#### 3. Redis监控
+
+```python
+# app/core/redis_monitor.py
+from app.core.redis_client import get_redis_client
+
+async def check_redis_health():
+    """检查Redis健康状态"""
+    redis = await get_redis_client()
+    
+    try:
+        # 测试连接
+        await redis.ping()
+        
+        # 获取信息
+        info = await redis.info()
+        
+        return {
+            'status': 'healthy',
+            'connected_clients': info.get('connected_clients'),
+            'used_memory': info.get('used_memory_human'),
+            'total_commands': info.get('total_commands_processed')
+        }
+    except Exception as e:
+        return {
+            'status': 'unhealthy',
+            'error': str(e)
+        }
+```
+
+### 日志管理
+
+#### 1. 结构化日志
+
+```python
+# app/core/logging_config.py
+import logging
+import json
+from datetime import datetime
+
+class JSONFormatter(logging.Formatter):
+    """JSON格式化器"""
+    
+    def format(self, record):
+        log_data = {
+            'timestamp': datetime.utcnow().isoformat(),
+            'level': record.levelname,
+            'logger': record.name,
+            'message': record.getMessage(),
+            'module': record.module,
+            'function': record.funcName,
+            'line': record.lineno
+        }
+        
+        if record.exc_info:
+            log_data['exception'] = self.formatException(record.exc_info)
+        
+        return json.dumps(log_data)
+
+# 配置日志
+logger = logging.getLogger(__name__)
+handler = logging.StreamHandler()
+handler.setFormatter(JSONFormatter())
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+```
+
+#### 2. 日志聚合
+
+```bash
+# 使用ELK Stack聚合日志
+# docker-compose.yml
+services:
+  elasticsearch:
+    image: elasticsearch:8.0.0
+    environment:
+      - discovery.type=single-node
+    ports:
+      - "9200:9200"
+  
+  logstash:
+    image: logstash:8.0.0
+    volumes:
+      - ./logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+    depends_on:
+      - elasticsearch
+  
+  kibana:
+    image: kibana:8.0.0
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+```
+
+### 故障排查
+
+#### 1. 常见问题诊断
+
+```bash
+# 检查服务状态
+sudo systemctl status Platform-backend
+
+# 检查端口占用
+sudo netstat -tlnp | grep 8960
+
+# 检查磁盘空间
+df -h
+
+# 检查内存使用
+free -h
+
+# 检查CPU使用
+top -bn1 | head -20
+
+# 检查进程
+ps aux | grep gunicorn
+
+# 检查网络连接
+sudo netstat -an | grep ESTABLISHED | wc -l
+```
+
+#### 2. 日志分析
+
+```bash
+# 查看错误日志
+grep ERROR /data/Platform/logs/app.log
+
+# 统计错误类型
+grep ERROR /data/Platform/logs/app.log | awk '{print $NF}' | sort | uniq -c | sort -rn
+
+# 查看慢请求
+grep "duration" /data/Platform/logs/app.log | awk -F'duration=' '{print $2}' | awk '{if($1>1) print}'
+
+# 查看API调用统计
+grep "POST\|GET\|PUT\|DELETE" /data/Platform/logs/app.log | awk '{print $4}' | sort | uniq -c | sort -rn
+```
+
+#### 3. 性能分析
+
+```python
+# app/core/profiler.py
+import cProfile
+import pstats
+from io import StringIO
+
+def profile_function(func):
+    """性能分析装饰器"""
+    def wrapper(*args, **kwargs):
+        pr = cProfile.Profile()
+        pr.enable()
+        
+        result = func(*args, **kwargs)
+        
+        pr.disable()
+        
+        # 输出分析结果
+        s = StringIO()
+        ps = pstats.Stats(pr, stream=s).sort_stats('cumulative')
+        ps.print_stats(10)
+        
+        print(s.getvalue())
+        
+        return result
+    return wrapper
+```
+
+### 告警配置
+
+```python
+# app/core/alerts.py
+import smtplib
+from email.mime.text import MIMEText
+
+async def send_alert(subject: str, message: str):
+    """发送告警邮件"""
+    msg = MIMEText(message)
+    msg['Subject'] = subject
+    msg['From'] = 'alerts@platform.com'
+    msg['To'] = 'admin@platform.com'
+    
+    with smtplib.SMTP('smtp.gmail.com', 587) as server:
+        server.starttls()
+        server.login('alerts@platform.com', 'password')
+        server.send_message(msg)
+
+async def check_system_health():
+    """检查系统健康状态"""
+    # 检查数据库
+    db_health = await check_database_health()
+    if db_health['status'] != 'healthy':
+        await send_alert('数据库告警', f"数据库状态异常: {db_health}")
+    
+    # 检查Redis
+    redis_health = await check_redis_health()
+    if redis_health['status'] != 'healthy':
+        await send_alert('Redis告警', f"Redis状态异常: {redis_health}")
+    
+    # 检查磁盘空间
+    disk_usage = check_disk_usage()
+    if disk_usage['percent'] > 90:
+        await send_alert('磁盘空间告警', f"磁盘使用率: {disk_usage['percent']}%")
 ```
 
 ---
