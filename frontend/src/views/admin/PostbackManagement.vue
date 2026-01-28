@@ -190,7 +190,7 @@ Postback 转化管理页面
         <el-col :xs="24" :sm="12" :md="8" :lg="6" :xl="4" v-for="stat in stats" :key="stat.platform">
           <div class="stat-card">
             <div class="stat-card-header">
-              <span class="platform-name">{{ stat.platform.toUpperCase() }}</span>
+              <span class="platform-name">{{ stat.platform }}</span>
             </div>
             <div class="stat-card-body">
               <div class="stat-row">
@@ -268,7 +268,7 @@ Postback 转化管理页面
         <el-table-column v-if="columnVisibility.platform" prop="platform" label="平台" width="100" align="center">
           <template #default="scope">
             <el-tag type="primary" size="small">
-              {{ scope.row.platform.toUpperCase() }}
+              {{ scope.row.platform }}
             </el-tag>
           </template>
         </el-table-column>
@@ -508,7 +508,7 @@ Postback 转化管理页面
         <el-descriptions :column="isMobile ? 1 : 2" border>
           <el-descriptions-item label="记录ID">{{ currentConversion.id }}</el-descriptions-item>
           <el-descriptions-item label="平台">
-            <el-tag type="primary">{{ currentConversion.platform.toUpperCase() }}</el-tag>
+            <el-tag type="primary">{{ currentConversion.platform }}</el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="转化ID">{{ currentConversion.conversion_id }}</el-descriptions-item>
           <el-descriptions-item label="事件名称">
