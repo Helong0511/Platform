@@ -4,8 +4,6 @@
  */
 import axios from 'axios';
 import { ElMessage } from 'element-plus';
-import { watch } from 'vue';
-import { useRoute } from 'vue-router';
 
 // 当前版本号（从版本文件加载）
 let currentVersion = null;
@@ -372,12 +370,10 @@ export const initVersionCheck = async (options = {}) => {
 
   // 只在登录页面时检查版本
   if (enabled) {
-    const route = useRoute();
-
-    // 使用 Vue Router 的 watch 监听路由变化
-    // 这样可以捕获所有路由变化，包括编程式导航
-    routeWatcher = watch(() => route.path, (newPath) => {
-      const isLoginPage = newPath === '/login' || newPath === '/';
+    // 使用 window.location.pathname 检测路由，避免 useRoute() 在非 Vue 组件上下文中返回 undefined
+    const checkRoute = () => {
+      const currentPath = window.location.pathname;
+      const isLoginPage = currentPath === '/login' || currentPath === '/';
 
       if (isLoginPage) {
         log.debug('检测到登录页面，检查版本更新...');
@@ -387,7 +383,24 @@ export const initVersionCheck = async (options = {}) => {
           }
         });
       }
-    }, { immediate: true });
+    };
+
+    // 初始检查
+    checkRoute();
+
+    // 监听路由变化（使用 popstate 事件）
+    // 注意：这种方式只能捕获浏览器的前进/后退操作
+    // 编程式导航（router.push、router.replace）需要通过其他方式处理
+    const handleRouteChange = () => {
+      checkRoute();
+    };
+
+    window.addEventListener('popstate', handleRouteChange);
+
+    // 保存清理函数
+    routeWatcher = () => {
+      window.removeEventListener('popstate', handleRouteChange);
+    };
 
     log.info('版本检查已启用，仅在登录页面时检查');
   }
