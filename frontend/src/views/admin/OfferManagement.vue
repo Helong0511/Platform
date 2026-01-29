@@ -913,6 +913,7 @@ import { getDiscounts } from '@/api/discount'
 import { createShortLink, getShortLinks } from '@/api/shortLink'
 import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
+import { ensureCsrfToken } from '@/utils/api'
 import { useAuthStore } from '@/store'
 import { computed } from 'vue'
 
@@ -1253,13 +1254,25 @@ const getPublisherName = (publisherId) => {
 
 // 添加
 const handleAdd = async () => {
-  // 先获取最新的CSRF令牌（通过GET请求）
+  // 确保CSRF令牌存在（改进：使用ensureCsrfToken函数）
   try {
-    // 调用一个简单的GET请求来获取CSRF令牌
-    await getOffers({ page: 1, page_size: 1 })
+    // 使用ensureCsrfToken确保CSRF令牌存在
+    const hasToken = await ensureCsrfToken(async () => {
+      return await getOffers({ page: 1, page_size: 1 })
+    })
+    
+    if (!hasToken) {
+      ElMessage.warning('无法获取CSRF令牌，请刷新页面后重试')
+      return
+    }
   } catch (error) {
-    // 即使请求失败，也可能从响应头中获取到CSRF令牌
-    logger.debug('获取CSRF令牌失败，但可能已从响应头获取:', error)
+    // 如果是401错误，说明认证失败，不需要显示错误信息（axios拦截器会处理）
+    if (error.response?.status === 401) {
+      return
+    }
+    logger.error('获取CSRF令牌失败:', error)
+    ElMessage.warning('CSRF令牌获取失败，请刷新页面后重试')
+    return
   }
 
   isEdit.value = false
@@ -1506,6 +1519,28 @@ const handleSubmit = async () => {
     
     submitting.value = true
     try {
+      // 在提交前确保CSRF令牌是最新的（改进：避免CSRF令牌过期）
+      try {
+        const hasToken = await ensureCsrfToken(async () => {
+          return await getOffers({ page: 1, page_size: 1 })
+        })
+        
+        if (!hasToken) {
+          ElMessage.warning('CSRF令牌已过期，请刷新页面后重试')
+          return
+        }
+      } catch (csrfError) {
+        // 如果是401错误，说明认证失败，不需要显示错误信息（axios拦截器会处理）
+        if (csrfError.response?.status === 401) {
+          submitting.value = false
+          return
+        }
+        logger.error('确保CSRF令牌失败:', csrfError)
+        ElMessage.warning('CSRF令牌验证失败，请刷新页面后重试')
+        submitting.value = false
+        return
+      }
+      
       // 构建提交数据
       const submitData = { ...formData }
       
