@@ -285,6 +285,15 @@ Postback 转化管理页面
             <span v-else>-</span>
           </template>
         </el-table-column>
+        <el-table-column v-if="columnVisibility.click_advertiser_name" prop="click_advertiser_name" label="关联广告主" min-width="120" show-overflow-tooltip>
+          <template #default="scope">
+            <div v-if="scope.row.click_advertiser_id">
+              <div style="font-weight: 500;">{{ scope.row.click_advertiser_name || `广告主_${scope.row.click_advertiser_id}` }}</div>
+              <div style="font-size: 12px; color: #909399;">ID: {{ scope.row.click_advertiser_id }}</div>
+            </div>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column v-if="columnVisibility.click_offer_name" prop="click_offer_name" label="关联Offer" min-width="150" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="scope.row.click_offer_id">
@@ -299,15 +308,6 @@ Postback 转化管理页面
             <div v-if="scope.row.click_publisher_id">
               <div style="font-weight: 500;">{{ scope.row.click_publisher_name || `渠道_${scope.row.click_publisher_id}` }}</div>
               <div style="font-size: 12px; color: #909399;">ID: {{ scope.row.click_publisher_id }}</div>
-            </div>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
-        <el-table-column v-if="columnVisibility.click_advertiser_name" prop="click_advertiser_name" label="关联广告主" min-width="120" show-overflow-tooltip>
-          <template #default="scope">
-            <div v-if="scope.row.click_advertiser_id">
-              <div style="font-weight: 500;">{{ scope.row.click_advertiser_name || `广告主_${scope.row.click_advertiser_id}` }}</div>
-              <div style="font-size: 12px; color: #909399;">ID: {{ scope.row.click_advertiser_id }}</div>
             </div>
             <span v-else>-</span>
           </template>
