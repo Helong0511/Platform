@@ -17,6 +17,7 @@ scikit-learn==1.3.2
 
 # 数据库驱动
 aiomysql==0.2.0
+pymysql==1.1.0  # 同步数据库驱动（用于 Telegram Bot 回调处理）
 
 # 开发工具
 hypercorn==0.14.4
