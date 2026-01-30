@@ -6,9 +6,11 @@ import json
 import logging
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
+from sqlalchemy import and_, func, select
 
 from app.models.models import (
-    PostbackConversion, Client, Product, Publisher, Offer, User, PostbackNotification
+    PostbackConversion, Client, Product, Publisher, Offer, User, PostbackNotification, ClickStats
 )
 from app.core.auto_bot import send_telegram_message
 from app.core.utils import get_app_now_naive
@@ -198,7 +200,6 @@ class TelegramNotificationService:
                 if publisher:
                     # 构建查询条件：当天 + 关联到该渠道的转化
                     # 注意：这里通过 click_id 关联到 ClickStats，再通过 ClickStats.publisher_id 关联到渠道
-                    from app.models.models import ClickStats
                     click_stats_alias = aliased(ClickStats)
                     
                     # 查询当天该渠道的转化数
