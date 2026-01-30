@@ -151,8 +151,8 @@ def should_skip_csrf_check(request: Request) -> bool:
         return True
     
     # 登录接口使用JWT，不需要CSRF
-    # 精确匹配 /api/v1/auth/login 和 /api/v1/auth/logout
-    if path == "/api/v1/auth/login" or path == "/api/v1/auth/logout":
+    # 精确匹配 /api/v1/auth/login、/api/v1/auth/logout 和 /api/v1/auth/refresh
+    if path == "/api/v1/auth/login" or path == "/api/v1/auth/logout" or path == "/api/v1/auth/refresh":
         logger.debug(f"跳过CSRF检查（登录接口）: {method} {path}")
         return True
     
@@ -572,7 +572,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             logger.info(f"跳过CSRF检查（短链接重定向）: {method} {path}")
             return await call_next(request)
         
-        if path == "/api/v1/auth/login" or path == "/api/v1/auth/logout":
+        if path == "/api/v1/auth/login" or path == "/api/v1/auth/logout" or path == "/api/v1/auth/refresh":
             logger.info(f"跳过CSRF检查（登录接口）: {method} {path}")
             return await call_next(request)
         
