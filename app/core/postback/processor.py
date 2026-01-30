@@ -291,7 +291,37 @@ class PostbackProcessor:
                                 f"event_name={final_event_name}, existing_id={existing_pending.id}, "
                                 f"status={existing_pending.status}"
                             )
-                            # 直接返回，不发送新的通知
+                            
+                            # 发送 Telegram 通知提示重复
+                            try:
+                                admin_config_result = await db.execute(
+                                    select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+                                )
+                                admin_config = admin_config_result.scalars().first()
+                                if admin_config and admin_config.telegram_enabled and admin_config.notify_all_conversions:
+                                    if admin_config.telegram_chat_id:
+                                        duplicate_message = (
+                                            "⚠️ Postback 重复转化提示（待确认）\n\n"
+                                            f"转化ID: {final_conversion_id}\n"
+                                            f"平台: {platform}\n"
+                                            f"事件: {final_event_name or 'N/A'}\n\n"
+                                            "说明: 该转化已在待确认记录中存在，可能是重复的 PostBack 请求。\n"
+                                            f"待确认记录ID: {existing_pending.id}\n"
+                                            f"状态: {existing_pending.status}\n"
+                                            f"创建时间: {existing_pending.created_at.strftime('%Y-%m-%d %H:%M:%S') if existing_pending.created_at else 'N/A'}\n"
+                                        )
+                                        asyncio.create_task(
+                                            TelegramNotificationService.send_admin_notification(
+                                                message=duplicate_message,
+                                                telegram_chat_id=admin_config.telegram_chat_id,
+                                                conversion=None,
+                                                notification_type='system_error',
+                                                db=db
+                                            )
+                                        )
+                            except Exception as e:
+                                logger.warning(f"发送重复待确认转化 Telegram 通知失败: {str(e)}")
+                            
                             return {
                                 "success": True,
                                 "message": f"PostBack 接收成功（待确认记录已存在，状态：{existing_pending.status}）",
@@ -309,7 +339,36 @@ class PostbackProcessor:
                                 f"platform={platform}, conversion_id={final_conversion_id}, "
                                 f"event_name={final_event_name}, formal_id={existing_formal.id}"
                             )
-                            # 直接返回，不发送新的通知
+                            
+                            # 发送 Telegram 通知提示重复
+                            try:
+                                admin_config_result = await db.execute(
+                                    select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+                                )
+                                admin_config = admin_config_result.scalars().first()
+                                if admin_config and admin_config.telegram_enabled and admin_config.notify_all_conversions:
+                                    if admin_config.telegram_chat_id:
+                                        duplicate_message = (
+                                            "⚠️ Postback 重复转化提示（正式记录）\n\n"
+                                            f"转化ID: {final_conversion_id}\n"
+                                            f"平台: {platform}\n"
+                                            f"事件: {final_event_name or 'N/A'}\n\n"
+                                            "说明: 该转化已在正式记录中存在，不应再创建待确认记录。\n"
+                                            f"正式记录ID: {existing_formal.id}\n"
+                                            f"创建时间: {existing_formal.created_at.strftime('%Y-%m-%d %H:%M:%S') if existing_formal.created_at else 'N/A'}\n"
+                                        )
+                                        asyncio.create_task(
+                                            TelegramNotificationService.send_admin_notification(
+                                                message=duplicate_message,
+                                                telegram_chat_id=admin_config.telegram_chat_id,
+                                                conversion=existing_formal,
+                                                notification_type='system_error',
+                                                db=db
+                                            )
+                                        )
+                            except Exception as e:
+                                logger.warning(f"发送重复正式转化 Telegram 通知失败: {str(e)}")
+                            
                             return {
                                 "success": True,
                                 "message": "PostBack 接收成功（正式转化记录已存在）",
