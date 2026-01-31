@@ -723,6 +723,7 @@ if bot_initialized and TELEBOT_AVAILABLE:
                         )
                 
                 # 启动线程处理统计数据
+                import threading
                 thread = threading.Thread(target=process_stats, daemon=True)
                 thread.start()
             elif call.data == "Cancel":
