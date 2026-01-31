@@ -468,9 +468,18 @@ const setDefaultMonthRange = () => {
   const today = new Date()
   const start = new Date(today.getFullYear(), today.getMonth(), 1)
   const end = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+  
+  // 格式化日期为 YYYY-MM-DD（使用本地时间，避免时区问题）
+  const formatDate = (date) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+  
   dateRange.value = [
-    start.toISOString().split('T')[0],
-    end.toISOString().split('T')[0]
+    formatDate(start),
+    formatDate(end)
   ]
 }
 
