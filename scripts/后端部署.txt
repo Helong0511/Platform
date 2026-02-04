@@ -95,6 +95,14 @@ tail -f /data/Platform/logs/access.log
 tail -f /data/Platform/logs/app.log
 
 
+DROP DATABASE IF EXISTS `platform`;
+CREATE DATABASE IF NOT EXISTS `platform` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE `platform`;
+
+
+TRUNCATE TABLE `user_audit_logs`;
+
+
 sudo chmod -R 777 /data/Platform/update_frontend.sh
 sudo /data/Platform/update_frontend.sh
 
@@ -121,7 +129,7 @@ sudo ufw allow 443/tcp
 # 将MySQL导出SQL
 
 # 结构和数据一起
-mysqldump -u root -p'kb7$rL3d8!tQ' platform > /data/Platform/platform.sql
+mysqldump -u root -p'kb7$rL3d8!tQ' platform > /data/Platform/platform260204.sql
 
 
 
@@ -157,7 +165,9 @@ sudo rsync -av --exclude-from='/data/exclude-list.txt' /data/Platform/ /data/202
 
 
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8960
-uvicorn app.main:app --reload --host 0.0.0.0 --port 9099
+
+
+uvicorn app:app --reload --host 0.0.0.0 --port 9099
 
 # 删除 /data/20251114 目录下的所有文件
 sudo rm -rf /data/20251114/*
