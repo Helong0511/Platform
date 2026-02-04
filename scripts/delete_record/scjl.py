@@ -11,9 +11,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================= 低配服务器参数 =================
-BATCH_SIZE = 1000        # 每批删除行数（越小越稳）
-SLEEP_SECONDS = 0.3     # 每批间隔时间（秒）
-MAX_EXEC_MS = 2000      # 单条 SQL 最大执行时间（ms）
+BATCH_SIZE = 500        # 每批删除行数（越小越稳）
+SLEEP_SECONDS = 0.5     # 每批间隔时间（秒）
+MAX_EXEC_MS = 1500      # 单条 SQL 最大执行时间（ms）
 
 
 class LowSpecSafeDeleter:
