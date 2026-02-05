@@ -253,18 +253,30 @@ const fetchAssignments = async () => {
   try {
     const result = await getProductAssignments(props.productId);
     // 确保数据结构正确
-    // API返回格式：{ code: 200, data: { data: [...], total: ... } }
-    // 或者：{ code: 200, data: [...] }
+    // 由于 getProductAssignments 使用了 returnDataOnly: true，所以 result 直接是响应数据
+    // 可能的格式：
+    // 1. 直接是数组：[...]
+    // 2. 是对象但包含 data 字段：{ data: [...], total: ... }
+    // 3. 是对象但不包含 data 字段：{ ... }（单个对象）
     let assignmentsData = [];
-    if (result && result.data) {
+    
+    // 情况1：直接是数组
+    if (Array.isArray(result)) {
+      assignmentsData = result;
+    }
+    // 情况2：是对象但包含 data 字段
+    else if (result && result.data) {
       if (Array.isArray(result.data)) {
         assignmentsData = result.data;
       } else if (result.data.data && Array.isArray(result.data.data)) {
         assignmentsData = result.data.data;
-      } else if (result.data && Array.isArray(result.data)) {
-        assignmentsData = result.data;
       }
     }
+    // 情况3：是单个对象，包装成数组
+    else if (result && typeof result === 'object') {
+      assignmentsData = [result];
+    }
+    
     assignments.value = assignmentsData;
     // 保存原始数据备份（深拷贝）
     originalAssignments.value = JSON.parse(JSON.stringify(assignmentsData));
