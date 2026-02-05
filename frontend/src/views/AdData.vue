@@ -1635,15 +1635,27 @@ const loadClientProducts = async (clientId) => {
   
   loadingProducts.value = true;
   try {
-    const result = await getProductsWithData(clientId);
-    let products = result.data || [];
-    
-    // 如果有选中的产品ID，只显示该产品
+    // 如果有选中的产品ID，使用 getProductById 获取完整的产品信息
     if (selectedProductId.value) {
-      products = products.filter(product => String(product.id) === selectedProductId.value);
+      try {
+        const productDetail = await getProductById(selectedProductId.value);
+        if (productDetail) {
+          selectedClientProducts.value = [productDetail];
+        } else {
+          selectedClientProducts.value = [];
+        }
+      } catch (error) {
+        // 如果获取产品详情失败，使用 getProductsWithData 作为备选
+        const result = await getProductsWithData(clientId);
+        let products = result.data || [];
+        products = products.filter(product => String(product.id) === selectedProductId.value);
+        selectedClientProducts.value = products;
+      }
+    } else {
+      // 如果没有选中的产品ID，使用 getProductsWithData 获取所有产品
+      const result = await getProductsWithData(clientId);
+      selectedClientProducts.value = result.data || [];
     }
-    
-    selectedClientProducts.value = products;
   } catch (error) {
     if (!isErrorHandled(error)) {
       ElMessage.error(extractErrorMessage(error));

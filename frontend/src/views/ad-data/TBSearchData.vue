@@ -250,6 +250,7 @@ import { useAuthStore } from '../../store';
 import { ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Upload, Delete, Setting, Right } from '@element-plus/icons-vue';
 import { getTBSearchDataList, updateTBSearchData, deleteTBSearchData, batchDeleteTBSearchData, importTBSearchData, getClientsWithTBSearchData, getProductsWithTBSearchData, getCountriesWithTBSearchData } from '../../api/tbSearchData';
+import { getProductById } from '../../api/adData';
 import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../../utils/api';
 import ProductManagementDialog from '../../components/admin/ProductManagementDialog.vue';
 
@@ -397,15 +398,27 @@ const loadClientProducts = async (clientId) => {
   
   loadingProducts.value = true;
   try {
-    const result = await getProductsWithTBSearchData(clientId);
-    let products = result.data || [];
-    
-    // 如果有选中的产品ID，只显示该产品
+    // 如果有选中的产品ID，使用 getProductById 获取完整的产品信息
     if (selectedProductId.value) {
-      products = products.filter(product => String(product.id) === selectedProductId.value);
+      try {
+        const productDetail = await getProductById(selectedProductId.value);
+        if (productDetail) {
+          selectedClientProducts.value = [productDetail];
+        } else {
+          selectedClientProducts.value = [];
+        }
+      } catch (error) {
+        // 如果获取产品详情失败，使用 getProductsWithTBSearchData 作为备选
+        const result = await getProductsWithTBSearchData(clientId);
+        let products = result.data || [];
+        products = products.filter(product => String(product.id) === selectedProductId.value);
+        selectedClientProducts.value = products;
+      }
+    } else {
+      // 如果没有选中的产品ID，使用 getProductsWithTBSearchData 获取所有产品
+      const result = await getProductsWithTBSearchData(clientId);
+      selectedClientProducts.value = result.data || [];
     }
-    
-    selectedClientProducts.value = products;
   } catch (error) {
     if (!isErrorHandled(error)) {
       ElMessage.error(extractErrorMessage(error));
