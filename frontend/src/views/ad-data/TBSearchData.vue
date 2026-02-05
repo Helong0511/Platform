@@ -235,12 +235,10 @@
     <!-- 产品管理对话框 -->
     <ProductManagementDialog
       v-model="productManagementDialogVisible"
-      :selected-product-id="selectedProductId"
-      :selected-product-name="selectedProductName"
-      :selected-client-id="selectedClientId"
-      :selected-user-id="selectedUserId"
-      :selected-user-full-name="selectedUserFullName"
-      :show-product-list="false"
+      :client-id="selectedClientId"
+      :client-name="selectedClientName"
+      :products="selectedClientProducts"
+      :loading="loadingProducts"
       @refresh="handleProductManagementRefresh"
     />
   </div>
@@ -363,29 +361,52 @@ const editForm = ref({});
 
 // 产品管理相关状态
 const productManagementDialogVisible = ref(false);
-const selectedProductId = ref('');
-const selectedProductName = ref('');
 const selectedClientId = ref('');
-const selectedUserId = ref('');
-const selectedUserFullName = ref('');
+const selectedClientName = ref('');
+const selectedClientProducts = ref([]);
+const loadingProducts = ref(false);
 
 // 处理产品点击事件
 const handleProductClick = (row) => {
   // 确保 row 对象存在
   if (!row) return;
   
-  selectedProductId.value = String(row.product_id || '');
-  selectedProductName.value = row.product_name || '';
-  selectedClientId.value = String(row.client_id || row.user_id || '');
-  selectedUserId.value = String(row.user_id || row.client_id || '');
-  selectedUserFullName.value = row.user_name || row.full_name || '';
+  // 设置选中的客户信息
+  selectedClientId.value = row.client_id || row.user_id || authStore.userInfo?.id;
+  selectedClientName.value = row.user_name || row.full_name || authStore.userInfo?.full_name || '未知客户';
+  
+  // 加载该客户的产品列表
+  loadClientProducts(selectedClientId.value);
+  
+  // 显示产品管理对话框
   productManagementDialogVisible.value = true;
+};
+
+// 加载客户产品列表
+const loadClientProducts = async (clientId) => {
+  if (!clientId) {
+    selectedClientProducts.value = [];
+    return;
+  }
+  
+  loadingProducts.value = true;
+  try {
+    const result = await getProductsWithTBSearchData(clientId);
+    selectedClientProducts.value = result.data || [];
+  } catch (error) {
+    if (!isErrorHandled(error)) {
+      ElMessage.error(extractErrorMessage(error));
+    }
+    selectedClientProducts.value = [];
+  } finally {
+    loadingProducts.value = false;
+  }
 };
 
 // 产品管理对话框刷新后的回调
 const handleProductManagementRefresh = () => {
   // 产品管理可能修改了产品信息，这里可以选择刷新当前页面数据
-  // 例如：fetchData();
+  fetchData();
 };
 
 onMounted(async () => {
