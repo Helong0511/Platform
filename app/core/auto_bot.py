@@ -347,6 +347,11 @@ if bot_initialized and TELEBOT_AVAILABLE:
                 action = "approve" if call.data.startswith("postback_approve_") else "reject"
                 pending_id = int(call.data.split("_")[-1])
                 
+                # 保存需要的call属性到局部变量，避免线程安全问题
+                callback_query_id = call.id
+                chat_id = call.message.chat.id
+                message_id = call.message.message_id
+                
                 # 使用同步数据库操作（因为 Telegram bot 回调是同步的）
                 def process_pending_conversion_sync():
                     try:
@@ -388,7 +393,7 @@ if bot_initialized and TELEBOT_AVAILABLE:
                             
                             if not pending:
                                 bot.answer_callback_query(
-                                    callback_query_id=call.id,
+                                    callback_query_id=callback_query_id,
                                     text="记录不存在或已被处理"
                                 )
                                 return
@@ -428,13 +433,13 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                 
                                 # 更新 Telegram 消息
                                 bot.edit_message_text(
-                                    chat_id=call.message.chat.id,
-                                    message_id=call.message.message_id,
+                                    chat_id=chat_id,
+                                    message_id=message_id,
                                     text=f"✅ 已批准并保存转化记录\n\n转化ID: {conversion.conversion_id}\n平台: {conversion.platform}\n记录ID: {conversion.id}",
                                     reply_markup=None
                                 )
                                 bot.answer_callback_query(
-                                    callback_query_id=call.id,
+                                    callback_query_id=callback_query_id,
                                     text="已批准并保存"
                                 )
                                 logger.info(f"管理员批准了待确认转化记录: pending_id={pending_id}, conversion_id={conversion.id}")
@@ -447,13 +452,13 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                 
                                 # 更新 Telegram 消息
                                 bot.edit_message_text(
-                                    chat_id=call.message.chat.id,
-                                    message_id=call.message.message_id,
+                                    chat_id=chat_id,
+                                    message_id=message_id,
                                     text=f"❌ 已拒绝转化记录\n\n转化ID: {pending.conversion_id}\n平台: {pending.platform}\nIP: {pending.request_ip}",
                                     reply_markup=None
                                 )
                                 bot.answer_callback_query(
-                                    callback_query_id=call.id,
+                                    callback_query_id=callback_query_id,
                                     text="已拒绝"
                                 )
                                 logger.info(f"管理员拒绝了待确认转化记录: pending_id={pending_id}")
@@ -462,7 +467,7 @@ if bot_initialized and TELEBOT_AVAILABLE:
                         logger.error(f"处理待确认转化记录失败: {str(e)}", exc_info=True)
                         try:
                             bot.answer_callback_query(
-                                callback_query_id=call.id,
+                                callback_query_id=callback_query_id,
                                 text="处理失败，请稍后重试"
                             )
                         except:
