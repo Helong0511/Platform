@@ -105,7 +105,14 @@
         <el-table-column type="selection" width="55"></el-table-column>
         <el-table-column v-if="columnVisibility.date" prop="date" label="DATE" sortable="custom" width="120"></el-table-column>
         <el-table-column v-if="isAdmin && columnVisibility.user_name" prop="user_name" label="所属客户" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.product_name" prop="product_name" label="SUBID" sortable="custom"></el-table-column>
+        <el-table-column v-if="columnVisibility.product_name" prop="product_name" label="SUBID" sortable="custom">
+          <template #default="{ row }">
+            <div class="product-name-cell" @click="handleProductClick(row)">
+              <span>{{ row.product_name }}</span>
+              <el-icon class="arrow-icon"><Right /></el-icon>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column v-if="columnVisibility.country_name_zh" prop="country_name_zh" label="GEO" width="120">
           <template #default="{ row }">
             {{ row.country_code }} ({{ row.country_name_zh }})
@@ -224,6 +231,18 @@
         <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 产品管理对话框 -->
+    <ProductManagementDialog
+      v-model="productManagementDialogVisible"
+      :selected-product-id="selectedProductId"
+      :selected-product-name="selectedProductName"
+      :selected-client-id="selectedClientId"
+      :selected-user-id="selectedUserId"
+      :selected-user-full-name="selectedUserFullName"
+      :show-product-list="false"
+      @refresh="handleProductManagementRefresh"
+    />
   </div>
 </template>
 
@@ -231,9 +250,10 @@
 import { ref, reactive, onMounted, computed, nextTick } from 'vue';
 import { useAuthStore } from '../../store';
 import { ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
-import { Upload, Delete, Setting } from '@element-plus/icons-vue';
+import { Upload, Delete, Setting, Right } from '@element-plus/icons-vue';
 import { getTBSearchDataList, updateTBSearchData, deleteTBSearchData, batchDeleteTBSearchData, importTBSearchData, getClientsWithTBSearchData, getProductsWithTBSearchData, getCountriesWithTBSearchData } from '../../api/tbSearchData';
 import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../../utils/api';
+import ProductManagementDialog from '../../components/admin/ProductManagementDialog.vue';
 
 const authStore = useAuthStore();
 const isAdmin = computed(() => authStore.isAdmin);
@@ -340,6 +360,33 @@ const sortInfo = ref({
 
 const editDialogVisible = ref(false);
 const editForm = ref({});
+
+// 产品管理相关状态
+const productManagementDialogVisible = ref(false);
+const selectedProductId = ref('');
+const selectedProductName = ref('');
+const selectedClientId = ref('');
+const selectedUserId = ref('');
+const selectedUserFullName = ref('');
+
+// 处理产品点击事件
+const handleProductClick = (row) => {
+  // 确保 row 对象存在
+  if (!row) return;
+  
+  selectedProductId.value = String(row.product_id || '');
+  selectedProductName.value = row.product_name || '';
+  selectedClientId.value = String(row.client_id || row.user_id || '');
+  selectedUserId.value = String(row.user_id || row.client_id || '');
+  selectedUserFullName.value = row.user_name || row.full_name || '';
+  productManagementDialogVisible.value = true;
+};
+
+// 产品管理对话框刷新后的回调
+const handleProductManagementRefresh = () => {
+  // 产品管理可能修改了产品信息，这里可以选择刷新当前页面数据
+  // 例如：fetchData();
+};
 
 onMounted(async () => {
   // 加载列显示设置
@@ -839,5 +886,29 @@ const saveEdit = async () => {
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
+}
+
+/* 产品名称单元格样式 */
+.product-name-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 4px 0;
+  color: #409EFF;
+  transition: color 0.3s;
+}
+
+.product-name-cell:hover {
+  color: #66b1ff;
+}
+
+.product-name-cell:hover .arrow-icon {
+  transform: translateX(4px);
+}
+
+.arrow-icon {
+  font-size: 12px;
+  transition: transform 0.3s;
 }
 </style>

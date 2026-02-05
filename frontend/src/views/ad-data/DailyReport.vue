@@ -85,7 +85,14 @@
       >
         <el-table-column v-if="columnVisibility.date" prop="date" label="数据日期" sortable="custom"></el-table-column>
         <el-table-column v-if="isAdmin && columnVisibility.user_name" prop="user_name" label="所属客户"></el-table-column>
-        <el-table-column v-if="columnVisibility.product_name" prop="product_name" label="产品名称" sortable="custom" sort-by="product" :min-width="150"></el-table-column>
+        <el-table-column v-if="columnVisibility.product_name" prop="product_name" label="产品名称" sortable="custom" sort-by="product" :min-width="150">
+          <template #default="{ row }">
+            <div class="product-name-cell" @click="handleProductClick(row)">
+              <span class="product-name">{{ row.product_name }}</span>
+              <el-icon class="product-icon"><Right /></el-icon>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column v-if="columnVisibility.country_name_zh" prop="country_name_zh" label="国家"></el-table-column>
         <el-table-column v-if="columnVisibility.request_count" prop="request_count" label="请求数" sortable="custom"></el-table-column>
         <el-table-column v-if="columnVisibility.match_count" prop="match_count" label="匹配数" sortable="custom"></el-table-column>
@@ -150,6 +157,16 @@
         <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 产品管理对话框 -->
+    <ProductManagementDialog
+      v-model="productManagementVisible"
+      :client-id="selectedClientId"
+      :client-name="selectedClientName"
+      :products="selectedClientProducts"
+      :loading="loadingProducts"
+      @refresh="handleProductManagementRefresh"
+    />
   </div>
 </template>
 
@@ -157,11 +174,12 @@
 import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../../store';
 import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElIcon, ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
-import { Download, InfoFilled, Setting } from '@element-plus/icons-vue';
+import { Download, InfoFilled, Setting, Right } from '@element-plus/icons-vue';
 import { getDailySummary, exportAdData, getClientsWithData, getProductsWithData, getAdDataDateRange } from '../../api/adData';
 import { useRouter } from 'vue-router';
 import { extractErrorMessage, isErrorHandled } from '../../utils/api';
 import { useDevice } from '../../composables/useDevice';
+import ProductManagementDialog from '../../components/admin/ProductManagementDialog.vue';
 
 // 路由实例
 const router = useRouter();
@@ -184,6 +202,13 @@ const pagination = ref({
   size: 10,
   total: 0
 });
+
+// 产品管理相关状态
+const productManagementVisible = ref(false);
+const selectedClientId = ref(null);
+const selectedClientName = ref('');
+const selectedClientProducts = ref([]);
+const loadingProducts = ref(false);
 
 // 排序状态
 const sortInfo = ref({
@@ -818,6 +843,21 @@ onUnmounted(() => {
   currentRequestPromise = null;
   currentRequestParams = null;
 });
+
+// 处理产品点击事件
+const handleProductClick = (row) => {
+  // 设置选中的客户信息
+  selectedClientId.value = row.client_id || authStore.userInfo?.id;
+  selectedClientName.value = row.user_name || authStore.userInfo?.full_name || '未知客户';
+  // 显示产品管理对话框
+  productManagementVisible.value = true;
+};
+
+// 处理产品管理刷新事件
+const handleProductManagementRefresh = () => {
+  // 产品管理对话框关闭时刷新数据
+  fetchDailyData();
+};
 </script>
 
 <style scoped>
@@ -1117,6 +1157,36 @@ onUnmounted(() => {
     min-height: var(--touch-target-size);
     font-size: var(--font-size-sm);
   }
+}
+/* 产品名称单元格样式 */
+.product-name-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  cursor: pointer;
+  padding: var(--spacing-xs) 0;
+  transition: all 0.2s ease;
+}
+
+.product-name-cell:hover {
+  color: var(--primary-color);
+}
+
+.product-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-icon {
+  font-size: var(--font-size-sm);
+  opacity: 0.6;
+  transition: opacity 0.2s ease;
+}
+
+.product-name-cell:hover .product-icon {
+  opacity: 1;
 }
 </style>
 
