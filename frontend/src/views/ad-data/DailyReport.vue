@@ -209,6 +209,8 @@ const selectedClientId = ref(null);
 const selectedClientName = ref('');
 const selectedClientProducts = ref([]);
 const loadingProducts = ref(false);
+const selectedProductId = ref('');
+const selectedProductName = ref('');
 
 // 排序状态
 const sortInfo = ref({
@@ -850,6 +852,10 @@ const handleProductClick = (row) => {
   selectedClientId.value = row.client_id || authStore.userInfo?.id;
   selectedClientName.value = row.user_name || authStore.userInfo?.full_name || '未知客户';
   
+  // 设置选中的产品信息
+  selectedProductId.value = String(row.product_id || '');
+  selectedProductName.value = row.product_name || '';
+  
   // 加载该客户的产品列表
   loadClientProducts(selectedClientId.value);
   
@@ -867,7 +873,14 @@ const loadClientProducts = async (clientId) => {
   loadingProducts.value = true;
   try {
     const result = await getProductsWithData(clientId);
-    selectedClientProducts.value = result.data || [];
+    let products = result.data || [];
+    
+    // 如果有选中的产品ID，只显示该产品
+    if (selectedProductId.value) {
+      products = products.filter(product => String(product.id) === selectedProductId.value);
+    }
+    
+    selectedClientProducts.value = products;
   } catch (error) {
     if (!isErrorHandled(error)) {
       ElMessage.error(extractErrorMessage(error));
