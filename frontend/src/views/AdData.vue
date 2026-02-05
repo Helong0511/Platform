@@ -1612,8 +1612,33 @@ const handleProductClick = (row) => {
   // 设置选中的客户信息
   selectedClientId.value = row.client_id || authStore.userInfo?.id;
   selectedClientName.value = row.user_name || authStore.userInfo?.full_name || '未知客户';
+  
+  // 加载该客户的产品列表
+  loadClientProducts(selectedClientId.value);
+  
   // 显示产品管理对话框
   productManagementVisible.value = true;
+};
+
+// 加载客户产品列表
+const loadClientProducts = async (clientId) => {
+  if (!clientId) {
+    selectedClientProducts.value = [];
+    return;
+  }
+  
+  loadingProducts.value = true;
+  try {
+    const result = await getProductsWithData(clientId);
+    selectedClientProducts.value = result.data || [];
+  } catch (error) {
+    if (!isErrorHandled(error)) {
+      ElMessage.error(extractErrorMessage(error));
+    }
+    selectedClientProducts.value = [];
+  } finally {
+    loadingProducts.value = false;
+  }
 };
 
 // 处理产品管理刷新事件
