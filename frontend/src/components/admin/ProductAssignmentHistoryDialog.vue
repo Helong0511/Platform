@@ -214,6 +214,17 @@ watch(() => props.modelValue, (newVal) => {
   }
 });
 
+// 监听 productId 变化，确保在产品ID更新时重新获取历史记录
+watch(() => props.productId, (newVal) => {
+  if (visible.value && newVal) {
+    // 使用 void 确保 Promise 被正确处理，避免未捕获的 Promise 错误
+    void fetchAssignments().catch(error => {
+      // 错误已在 fetchAssignments 内部处理，这里只是确保 Promise 被捕获
+      logger.debug('加载分配历史时出错:', error);
+    });
+  }
+});
+
 watch(visible, (newVal) => {
   emit('update:modelValue', newVal);
 });

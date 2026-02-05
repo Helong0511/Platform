@@ -1621,8 +1621,13 @@ const continueSaveAfterDateSelection = async () => {
 };
 
 const handleViewHistory = (product) => {
-  selectedProductForHistory.value = product;
-  assignmentHistoryVisible.value = true;
+  // 确保 product 对象存在且有 id 属性
+  if (product && product.id) {
+    selectedProductForHistory.value = product;
+    assignmentHistoryVisible.value = true;
+  } else {
+    ElMessage.warning('无法查看历史记录：产品信息不完整');
+  }
 };
 
 const handleDelete = async (id) => {
