@@ -203,25 +203,39 @@ const editForms = ref({}); // 编辑表单数据
 const pendingChanges = ref(new Map()); // 暂存的修改 { assignmentId: { start_date, end_date, original } }
 const batchSaving = ref(false); // 批量保存中
 
+// 监听对话框显示状态变化
 watch(() => props.modelValue, (newVal) => {
   visible.value = newVal;
-  if (newVal && props.productId) {
-    // 使用 void 确保 Promise 被正确处理，避免未捕获的 Promise 错误
-    void fetchAssignments().catch(error => {
-      // 错误已在 fetchAssignments 内部处理，这里只是确保 Promise 被捕获
-      logger.debug('加载分配历史时出错:', error);
-    });
+  // 当对话框显示时，无论 productId 是否变化，都尝试获取历史记录
+  if (newVal) {
+    // 短暂延迟，确保 productId 已经更新
+    setTimeout(() => {
+      if (props.productId) {
+        // 使用 void 确保 Promise 被正确处理，避免未捕获的 Promise 错误
+        void fetchAssignments().catch(error => {
+          // 错误已在 fetchAssignments 内部处理，这里只是确保 Promise 被捕获
+          logger.debug('加载分配历史时出错:', error);
+        });
+      } else {
+        ElMessage.warning('无法加载历史记录：产品信息不完整');
+        assignments.value = [];
+      }
+    }, 100);
   }
 });
 
 // 监听 productId 变化，确保在产品ID更新时重新获取历史记录
 watch(() => props.productId, (newVal) => {
-  if (visible.value && newVal) {
+  // 无论对话框是否显示，只要 productId 变化，就更新数据
+  if (newVal) {
     // 使用 void 确保 Promise 被正确处理，避免未捕获的 Promise 错误
     void fetchAssignments().catch(error => {
       // 错误已在 fetchAssignments 内部处理，这里只是确保 Promise 被捕获
       logger.debug('加载分配历史时出错:', error);
     });
+  } else {
+    // 如果 productId 变为 null 或 undefined，清空数据
+    assignments.value = [];
   }
 });
 
