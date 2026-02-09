@@ -324,6 +324,12 @@ async def sync_short_links_for_offer(
     同步Offer的主短链接
     只为Offer创建一个主短链接（channel_id为NULL），每个渠道使用主短链接 + 参数
     
+    逻辑：
+    1. 如果短链接存在，检查原始URL是否与当前上游Tracklink一致
+    2. 不一致：更新原始URL，保持短码不变
+    3. 一致：不做任何操作
+    4. 如果短链接不存在：创建新短链接
+    
     Args:
         db: 数据库会话
         offer_id: Offer ID
@@ -336,13 +342,13 @@ async def sync_short_links_for_offer(
     Returns:
         包含短链接信息的字典：{
             'created': bool  # 是否新创建
-            'duplicate': bool  # 是否重复
+            'updated': bool  # 是否更新
             'final_short_link_url': str  # 主短链接URL
         }
     """
     result = {
         'created': False,
-        'duplicate': False,
+        'updated': False,
         'final_short_link_url': None
     }
     
@@ -352,27 +358,40 @@ async def sync_short_links_for_offer(
             logger.warning(f"Offer {offer_id} 没有配置上游Tracklink，跳过短链接创建")
             return result
         
-        # 删除该Offer的所有旧短链接（包括channel_id为NULL的主短链接和channel_id不为NULL的旧短链接）
-        await db.execute(
-            delete(ShortLink).where(ShortLink.offer_id == offer_id)
-        )
-        logger.info(f"删除Offer的所有旧短链接: offer_id={offer_id}")
+        # 验证上游Tracklink URL格式
+        original_url = advertiser_tracklink.strip()
+        if not original_url.startswith(('http://', 'https://')):
+            logger.error(f"Offer {offer_id} 的上游Tracklink格式无效（必须以http://或https://开头）: {advertiser_tracklink}")
+            return result
         
-        # 创建主短链接（channel_id为NULL）
-        short_link, is_duplicate = await create_short_link_for_offer(
-            db=db,
-            offer_id=offer_id,
-            offer_name=offer_name,
-            base_url=base_url,
-            current_user_id=current_user_id,
-            advertiser_tracklink=advertiser_tracklink
+        # 检查是否已存在该Offer的主短链接（channel_id为NULL）
+        existing_result = await db.execute(
+            select(ShortLink).where(
+                and_(
+                    ShortLink.offer_id == offer_id,
+                    ShortLink.channel_id.is_(None)  # 主短链接的channel_id为NULL
+                )
+            )
         )
+        existing_link = existing_result.scalars().first()
         
-        if short_link:
-            short_link_url = get_short_link_url(base_url, short_link.short_code)
-            result['final_short_link_url'] = short_link_url
-            result['created'] = not is_duplicate
-            result['duplicate'] = is_duplicate
+        if existing_link:
+            # 短链接存在，检查原始URL是否与当前上游Tracklink一致
+            if existing_link.original_url == original_url:
+                # 原始URL一致，不做任何操作
+                logger.info(f"短链接已存在且原始URL一致，保持不变: offer_id={offer_id}, short_code={existing_link.short_code}")
+                short_link_url = get_short_link_url(base_url, existing_link.short_code)
+                result['final_short_link_url'] = short_link_url
+            else:
+                # 原始URL不一致，更新原始URL
+                logger.info(f"短链接已存在但原始URL不一致，更新原始URL: offer_id={offer_id}, short_code={existing_link.short_code}")
+                existing_link.original_url = original_url
+                existing_link.title = f"{offer_name} - 主短链接"
+                existing_link.description = f"Offer: {offer_name} 的主短链接"
+                await db.flush()
+                short_link_url = get_short_link_url(base_url, existing_link.short_code)
+                result['final_short_link_url'] = short_link_url
+                result['updated'] = True
             
             # 更新Offer的downstream_tracklink为主短链接URL
             offer_result = await db.execute(
@@ -380,31 +399,53 @@ async def sync_short_links_for_offer(
             )
             offer = offer_result.scalars().first()
             
-            if offer:
+            if offer and offer.downstream_tracklink != short_link_url:
                 offer.downstream_tracklink = short_link_url
                 logger.info(f"更新Offer的downstream_tracklink: offer_id={offer_id}, tracklink={short_link_url}")
         else:
-            # 如果创建失败，清空downstream_tracklink
-            offer_result = await db.execute(
-                select(Offer).where(Offer.id == offer_id)
+            # 短链接不存在，创建新的主短链接
+            logger.info(f"短链接不存在，创建新短链接: offer_id={offer_id}")
+            
+            # 创建新的主短链接（channel_id为NULL）
+            short_link, is_duplicate = await create_short_link_for_offer(
+                db=db,
+                offer_id=offer_id,
+                offer_name=offer_name,
+                base_url=base_url,
+                current_user_id=current_user_id,
+                advertiser_tracklink=advertiser_tracklink
             )
-            offer = offer_result.scalars().first()
             
-            if offer:
-                offer.downstream_tracklink = None
-                logger.warning(f"清空Offer的downstream_tracklink: offer_id={offer_id}（创建短链接失败）")
+            if short_link:
+                short_link_url = get_short_link_url(base_url, short_link.short_code)
+                result['final_short_link_url'] = short_link_url
+                result['created'] = True
+                
+                # 更新Offer的downstream_tracklink为主短链接URL
+                offer_result = await db.execute(
+                    select(Offer).where(Offer.id == offer_id)
+                )
+                offer = offer_result.scalars().first()
+                
+                if offer:
+                    offer.downstream_tracklink = short_link_url
+                    logger.info(f"更新Offer的downstream_tracklink: offer_id={offer_id}, tracklink={short_link_url}")
+            else:
+                # 如果创建失败，清空downstream_tracklink
+                offer_result = await db.execute(
+                    select(Offer).where(Offer.id == offer_id)
+                )
+                offer = offer_result.scalars().first()
+                
+                if offer:
+                    offer.downstream_tracklink = None
+                    logger.warning(f"清空Offer的downstream_tracklink: offer_id={offer_id}（创建短链接失败）")
         
         return result
         
     except Exception as e:
         logger.error(f"同步Offer短链接失败: offer_id={offer_id}, error={str(e)}", exc_info=True)
         return result
-            
-    except Exception as e:
-        logger.error(f"同步Offer短链接失败: offer_id={offer_id}, error={str(e)}", exc_info=True)
-        # 不抛出异常，避免影响Offer的创建/更新
-    
-    return result
 
 
 @router.post("/",

@@ -907,27 +907,8 @@ class OfferService(BaseService[Offer]):
                 detail=f"更新Offer失败: 数据库约束违反"
             )
         
-        # 如果advertiser_tracklink改变了，删除该Offer的所有旧短链接
-        if advertiser_tracklink_changed:
-            old_short_links_result = await self.db.execute(
-                select(ShortLink).where(ShortLink.offer_id == offer_id)
-            )
-            old_short_links = old_short_links_result.scalars().all()
-            
-            if old_short_links:
-                deleted_count = 0
-                for old_link in old_short_links:
-                    await self.db.execute(
-                        delete(ShortLink).where(ShortLink.id == old_link.id)
-                    )
-                    deleted_count += 1
-                logger.info(
-                    f"删除旧的短链接（advertiser_tracklink已改变）: "
-                    f"offer_id={offer_id}, "
-                    f"deleted_count={deleted_count}, "
-                    f"old_advertiser_tracklink={old_advertiser_tracklink}"
-                )
-                await self.db.commit()
+        # 移除旧的删除逻辑，改为在sync_short_links_for_offer中处理
+        # 这样可以保持短码不变，只更新原始URL
         
         # 如果渠道分配有变化或advertiser_tracklink改变，同步短链接
         short_link_info = None
