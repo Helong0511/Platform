@@ -800,8 +800,12 @@ const exportToExcel = () => {
   // 创建CSV内容
   const csvContent = csvData.join('\n')
   
+  // 添加BOM字符以确保Excel正确识别UTF-8编码
+  const bom = '\ufeff'
+  const csvWithBom = bom + csvContent
+  
   // 创建Blob对象
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const blob = new Blob([csvWithBom], { type: 'text/csv;charset=utf-8;' })
   
   // 创建下载链接
   const link = document.createElement('a')
