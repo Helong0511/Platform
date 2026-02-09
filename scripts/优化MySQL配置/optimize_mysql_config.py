@@ -688,9 +688,6 @@ def calculate_mysql_config(cpu_cores: int, total_memory_gb: float, mysql_version
     # Net Buffer Length（网络缓冲区大小）
     config['mysqld.net_buffer_length'] = "16384"
     
-    # Max Packet Length（最大数据包长度）
-    config['mysqld.max_packet_length'] = "67108864"  # 64MB
-    
     return config
 
 

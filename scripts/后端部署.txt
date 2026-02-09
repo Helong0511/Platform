@@ -3,6 +3,31 @@ sudo vim /etc/systemd/system/Platform-backend.service
 cp -f /data/Platform/systemd/Platform-backend.service /etc/systemd/system/
 
 
+###########  安装NodeJs v16.20.2 和 Npm 8.19.4  ###########
+
+# 如果有旧版本 
+sudo apt remove -y nodejs libnode72
+sudo apt autoremove -y
+sudo apt clean
+
+sudo dpkg --configure -a
+
+sudo apt update
+sudo apt install -y curl apt-transport-https
+curl -fsSL https://deb.nodesource.com/setup_16.x | sudo -E bash -
+
+# 这个是比较稳定 
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+node -v
+#v16.20.2
+npm -v
+#8.19.4
+
+
+sudo apt autoremove
 
 
 # 2. 设置日志目录权限
@@ -103,6 +128,10 @@ USE `platform`;
 TRUNCATE TABLE `user_audit_logs`;
 
 
+sudo chmod -R 777 /data/Ad-SDK/deploy.sh
+sudo /data/Ad-SDK/deploy.sh
+
+
 sudo chmod -R 777 /data/Platform/update_frontend.sh
 sudo /data/Platform/update_frontend.sh
 
@@ -123,6 +152,10 @@ sudo ufw allow 22/tcp
 sudo ufw allow 80/tcp
 sudo ufw allow 3306/tcp
 sudo ufw allow 443/tcp
+
+
+
+sudo python3 /data/optimize_mysql_config.py --apply
 
 
 
@@ -284,3 +317,34 @@ ChatGPT API-Key ：sk-proj-nNgMFVpr62WHRbifnCw5ic-Rq7giuX18LoIvncG542Y8PCkPYrEh0
 
 
 元宝 API-Key ：sk-2d5ff190bbe94bf8ad09107229502647
+
+
+
+
+/etc/docker/daemon.json
+
+{
+  "registry-mirrors": [
+    "https://mirror.ccs.tencentyun.com",
+    "https://docker.mirrors.ustc.edu.cn",
+    "https://hub-mirror.c.163.com",
+    "https://mirror.baidubce.com",
+    "https://registry.docker-cn.com"
+  ],
+  "dns": [
+    "8.8.8.8",
+    "1.1.1.1",
+    "223.5.5.5"
+  ],
+  "ipv6": false,
+  "max-concurrent-downloads": 3,
+  "max-concurrent-uploads": 3,
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "100m",
+    "max-file": "3"
+  },
+  "exec-opts": [
+    "native.cgroupdriver=systemd"
+  ]
+}

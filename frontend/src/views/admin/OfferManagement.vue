@@ -74,6 +74,7 @@
           <el-option label="禁用" :value="false" />
         </el-select>
         <el-select
+          v-if="isAdmin"
           v-model="filterPublisher"
           placeholder="分配渠道"
           clearable
