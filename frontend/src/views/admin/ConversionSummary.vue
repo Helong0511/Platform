@@ -125,14 +125,22 @@
         <template #header>
           <div class="table-header">
             <span>转化总览</span>
-            <el-button 
-              type="text" 
-              :icon="Setting" 
-              @click="columnSettingVisible = true"
-              style="float: right;"
-            >
-              列设置
-            </el-button>
+            <div style="float: right; display: flex; gap: 10px;">
+              <el-button 
+                type="text" 
+                :icon="Download" 
+                @click="exportToExcel"
+              >
+                导出Excel
+              </el-button>
+              <el-button 
+                type="text" 
+                :icon="Setting" 
+                @click="columnSettingVisible = true"
+              >
+                列设置
+              </el-button>
+            </div>
           </div>
         </template>
         <div class="table-wrapper">
@@ -265,6 +273,30 @@
               </template>
             </el-table-column>
             <el-table-column 
+              v-if="isAdmin && columnVisibility.adv_po"
+              prop="adv_po" 
+              label="上游单价" 
+              width="120" 
+              align="right"
+            >
+              <template #default="scope">
+                <span v-if="scope.row.adv_po !== undefined && scope.row.adv_po !== null">{{ scope.row.adv_po.toFixed(2) }}</span>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column 
+              v-if="columnVisibility.pub_po"
+              prop="pub_po" 
+              label="下游单价" 
+              width="120" 
+              align="right"
+            >
+              <template #default="scope">
+                <span v-if="scope.row.pub_po !== undefined && scope.row.pub_po !== null">{{ scope.row.pub_po.toFixed(2) }}</span>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column 
               v-if="columnVisibility.geo"
               prop="geo" 
               label="GEO" 
@@ -299,6 +331,8 @@
         <el-checkbox v-if="isAdmin" label="po">Revenue</el-checkbox>
         <el-checkbox label="po_after_discount">Pub Revenue</el-checkbox>
         <el-checkbox v-if="isAdmin" label="profit">Profit</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="adv_po">上游单价</el-checkbox>
+        <el-checkbox label="pub_po">下游单价</el-checkbox>
         <el-checkbox label="geo">GEO</el-checkbox>
       </el-checkbox-group>
       <template #footer>
@@ -312,7 +346,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
-import { Search, Refresh, DataAnalysis, Mouse, Check, TrendCharts, Money, Setting } from '@element-plus/icons-vue'
+import { Search, Refresh, DataAnalysis, Mouse, Check, TrendCharts, Money, Setting, Download } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { getConversionSummary } from '@/api/conversionSummary'
 import { getOffers } from '@/api/offer'
@@ -368,6 +402,8 @@ const getDefaultColumnVisibility = () => ({
   po: isAdmin.value,  // Revenue，仅管理员可见
   po_after_discount: true,  // Pub Revenue，所有用户可见
   profit: isAdmin.value,  // 仅管理员可见
+  adv_po: isAdmin.value,  // 上游单价，仅管理员可见
+  pub_po: true,  // 下游单价，所有用户可见
   geo: true  // 所有用户可见
 })
 
@@ -416,6 +452,8 @@ const saveColumnVisibility = () => {
       po: columnVisibility.po,
       po_after_discount: columnVisibility.po_after_discount,
       profit: columnVisibility.profit,
+      adv_po: columnVisibility.adv_po,
+      pub_po: columnVisibility.pub_po,
       geo: columnVisibility.geo
     }
     localStorage.setItem('conversionSummary_columnVisibility', JSON.stringify(toSave))
@@ -710,6 +748,79 @@ const handleOfferClick = (offerId) => {
     })
     window.open(route.href, '_blank')
   }
+}
+
+// 导出Excel
+const exportToExcel = () => {
+  if (!statsList.value || statsList.value.length === 0) {
+    ElMessage.warning('没有数据可导出')
+    return
+  }
+  
+  // 定义CSV表头
+  const headers = [
+    'Offer ID',
+    'Offer Name',
+    'Advertiser',
+    'Publisher',
+    'Click',
+    'Conversion',
+    'CR',
+    'Revenue',
+    'Pub Revenue',
+    'Profit',
+    '上游单价',
+    '下游单价',
+    'GEO'
+  ]
+  
+  // 准备CSV数据
+  const csvData = [headers.join(',')]
+  
+  // 添加数据行
+  statsList.value.forEach(row => {
+    const rowData = [
+      row.offer_id || '',
+      `"${row.offer_name || ''}"`,
+      `"${row.advertiser_name || ''}"`,
+      `"${row.publisher_name || ''}"`,
+      row.click_count || 0,
+      row.conversion_count || 0,
+      `${row.cr || 0}%`,
+      isAdmin.value ? (row.po || 0).toFixed(2) : '',
+      (row.po_after_discount || 0).toFixed(2),
+      isAdmin.value ? (row.po ? (row.po - (row.po_after_discount || 0)).toFixed(2) : '0.00') : '',
+      isAdmin.value ? (row.adv_po || 0).toFixed(2) : '',
+      (row.pub_po || 0).toFixed(2),
+      row.geo || ''
+    ]
+    csvData.push(rowData.join(','))
+  })
+  
+  // 创建CSV内容
+  const csvContent = csvData.join('\n')
+  
+  // 创建Blob对象
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  
+  // 创建下载链接
+  const link = document.createElement('a')
+  const url = URL.createObjectURL(blob)
+  
+  // 设置下载属性
+  link.setAttribute('href', url)
+  link.setAttribute('download', `转化总览_${new Date().toISOString().slice(0, 10)}.csv`)
+  link.style.visibility = 'hidden'
+  
+  // 添加到DOM并触发下载
+  document.body.appendChild(link)
+  link.click()
+  
+  // 清理
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+  
+  ElMessage.success('导出成功')
 }
 
 // 获取显示的转化数（客户显示的不能超出转化上限）

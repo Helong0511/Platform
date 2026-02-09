@@ -131,6 +131,7 @@ async def get_deduction_configs(
     level: Optional[str] = Query(None, description="配置层级过滤"),
     is_active: Optional[bool] = Query(None, description="状态过滤"),
     keyword: Optional[str] = Query(None, description="搜索关键词（配置对象名称）"),
+    advertiser_id: Optional[int] = Query(None, description="广告主ID过滤"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -144,7 +145,8 @@ async def get_deduction_configs(
             page_size=page_size,
             level=level,
             is_active=is_active,
-            keyword=keyword
+            keyword=keyword,
+            advertiser_id=advertiser_id
         )
         
         # 转换为响应格式
@@ -371,6 +373,7 @@ async def export_deduction_configs(
     level: Optional[str] = Query(None, description="配置层级过滤"),
     is_active: Optional[bool] = Query(None, description="状态过滤"),
     keyword: Optional[str] = Query(None, description="搜索关键词"),
+    advertiser_id: Optional[int] = Query(None, description="广告主ID过滤"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -384,7 +387,8 @@ async def export_deduction_configs(
             page_size=10000,  # 使用大值获取所有数据
             level=level,
             is_active=is_active,
-            keyword=keyword
+            keyword=keyword,
+            advertiser_id=advertiser_id
         )
         
         # 如果没有数据，抛出错误提示用户

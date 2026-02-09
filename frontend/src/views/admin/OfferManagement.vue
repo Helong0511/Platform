@@ -2204,10 +2204,29 @@ onMounted(async () => {
   width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  position: relative;
 }
 
 .table-wrapper :deep(.el-table) {
   min-width: 2000px;
+  width: 100%;
+}
+
+/* 确保固定列在滚动时正确显示 */
+.table-wrapper :deep(.el-table__fixed-left) {
+  left: 0 !important;
+  z-index: 4 !important;
+}
+
+.table-wrapper :deep(.el-table__fixed-right) {
+  right: 0 !important;
+  z-index: 4 !important;
+}
+
+/* 解决固定列与内容列重叠的问题 */
+.table-wrapper :deep(.el-table__fixed) {
+  height: auto !important;
+  bottom: 0 !important;
 }
 
 .pagination-container {

@@ -294,7 +294,8 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
         page_size: int = 20,
         level: Optional[str] = None,
         is_active: Optional[bool] = None,
-        keyword: Optional[str] = None
+        keyword: Optional[str] = None,
+        advertiser_id: Optional[int] = None
     ) -> Tuple[List[ConversionDeductionConfig], int]:
         """
         获取扣减配置列表
@@ -305,6 +306,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             level: 配置层级过滤
             is_active: 状态过滤
             keyword: 搜索关键词
+            advertiser_id: 广告主ID过滤
 
         Returns:
             Tuple[List[ConversionDeductionConfig], int]: (扣减配置列表, 总数)
@@ -324,6 +326,20 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
 
         if is_active is not None:
             conditions.append(ConversionDeductionConfig.is_active == is_active)
+
+        if advertiser_id:
+            # 对于广告主级别的配置，直接筛选advertiser_id
+            # 对于Offer级别的配置，需要通过join来筛选
+            # 这里简化处理，只筛选广告主级别的配置和相关的Offer配置
+            advertiser_conditions = []
+            # 广告主级别的配置
+            advertiser_conditions.append(ConversionDeductionConfig.advertiser_id == advertiser_id)
+            # Offer级别的配置（需要通过子查询或join）
+            # 这里使用子查询来获取属于该广告主的Offer ID
+            offer_subquery = select(Offer.id).where(Offer.advertiser_id == advertiser_id).subquery()
+            advertiser_conditions.append(ConversionDeductionConfig.offer_id.in_(offer_subquery))
+            # 使用or_连接这两个条件
+            conditions.append(or_(*advertiser_conditions))
 
         if conditions:
             query = query.where(and_(*conditions))

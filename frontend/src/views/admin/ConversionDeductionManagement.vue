@@ -117,6 +117,23 @@
           <el-option label="禁用" :value="false" />
         </el-select>
         
+        <el-select
+          v-model="searchForm.advertiser_id"
+          placeholder="选择广告主"
+          clearable
+          filterable
+          style="width: 180px; margin-left: 10px;"
+          @change="handleSearch"
+        >
+          <el-option label="全部" :value="null" />
+          <el-option
+            v-for="adv in advertiserList"
+            :key="adv.id"
+            :label="adv.advertiser_name"
+            :value="adv.id"
+          />
+        </el-select>
+        
         <el-button type="primary" :icon="Search" @click="handleSearch" style="margin-left: 10px;">
           搜索
         </el-button>
@@ -143,6 +160,8 @@
         </el-table-column>
         
         <el-table-column v-if="columnVisibility.target_name" prop="target_name" label="配置对象" min-width="200" show-overflow-tooltip />
+        
+        <el-table-column v-if="columnVisibility.advertiser_name" prop="advertiser_name" label="广告主" min-width="180" show-overflow-tooltip />
         
         <el-table-column v-if="columnVisibility.volume_deduction" label="扣量配置" width="180" align="center">
           <template #default="scope">
@@ -255,6 +274,7 @@
         <el-checkbox label="id" :disabled="true">ID（固定显示）</el-checkbox>
         <el-checkbox label="level">层级</el-checkbox>
         <el-checkbox label="target_name" :disabled="true">配置对象（固定显示）</el-checkbox>
+        <el-checkbox label="advertiser_name">广告主</el-checkbox>
         <el-checkbox label="volume_deduction">扣量配置</el-checkbox>
         <el-checkbox label="amount_deduction">扣金额配置</el-checkbox>
         <el-checkbox label="priority">优先级</el-checkbox>
@@ -541,10 +561,12 @@ const currentConfig = ref(null)
 const submitting = ref(false)
 const targetLoading = ref(false)
 const targetOptions = ref([])
+const advertiserList = ref([])
 
 const searchForm = reactive({
   keyword: '',
   level: null,
+  advertiser_id: null,
   is_active: null
 })
 
@@ -559,6 +581,7 @@ const getDefaultColumnVisibility = () => ({
   id: true,  // 固定显示
   level: true,
   target_name: true,  // 固定显示
+  advertiser_name: true,
   volume_deduction: true,
   amount_deduction: true,
   priority: true,
@@ -603,6 +626,7 @@ const saveColumnVisibility = () => {
     // 只保存可调整的列，不保存固定列
     const toSave = {
       level: columnVisibility.level,
+      advertiser_name: columnVisibility.advertiser_name,
       volume_deduction: columnVisibility.volume_deduction,
       amount_deduction: columnVisibility.amount_deduction,
       priority: columnVisibility.priority,
@@ -680,6 +704,30 @@ const rules = {
   ]
 }
 
+// 加载广告主列表
+const loadAdvertisers = async () => {
+  try {
+    let allAdvertisers = []
+    let page = 1
+    const pageSize = 100
+    let hasMore = true
+    
+    while (hasMore) {
+      const response = await getAdvertisers({ page, page_size: pageSize })
+      const items = response.data || []
+      allAdvertisers = allAdvertisers.concat(items)
+      
+      const total = response.total || 0
+      hasMore = allAdvertisers.length < total && items.length > 0
+      page++
+    }
+    
+    advertiserList.value = allAdvertisers
+  } catch (error) {
+    ElMessage.error('加载广告主列表失败：' + (error.message || '未知错误'))
+  }
+}
+
 // 获取配置列表
 const fetchData = async () => {
   loading.value = true
@@ -711,6 +759,7 @@ const handleReset = () => {
   searchForm.keyword = ''
   searchForm.level = null
   searchForm.is_active = null
+  searchForm.advertiser_id = null
   handleSearch()
 }
 
@@ -1080,6 +1129,9 @@ const handleExport = async () => {
     if (searchForm.is_active !== null && searchForm.is_active !== undefined) {
       params.append('is_active', searchForm.is_active.toString())
     }
+    if (searchForm.advertiser_id) {
+      params.append('advertiser_id', searchForm.advertiser_id.toString())
+    }
     
     // 使用window.open下载文件
     const url = `/api/v1/conversion-deductions/export?${params.toString()}`
@@ -1135,6 +1187,7 @@ watch(dialogVisible, (val) => {
 onMounted(() => {
   // 加载列显示设置
   loadColumnVisibility()
+  loadAdvertisers()
   fetchData()
 })
 </script>
