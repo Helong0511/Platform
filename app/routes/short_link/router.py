@@ -168,5 +168,8 @@ async def open_master_html_with_redirect(
     
     # 返回修改后的HTML内容
     from fastapi.responses import HTMLResponse
-    return HTMLResponse(content=modified_html)
+    response = HTMLResponse(content=modified_html)
+    # 直接设置CSP头，允许内联脚本
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+    return response
 
