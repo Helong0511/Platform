@@ -1,0 +1,841 @@
+<template>
+  <div class="short-link-management">
+    <!-- 统计卡片 -->
+    <div class="stats-cards">
+      <el-card class="stat-card">
+        <el-statistic title="总链接数" :value="stats.total_links" />
+      </el-card>
+      <el-card class="stat-card">
+        <el-statistic title="总点击次数" :value="stats.total_clicks" />
+      </el-card>
+      <el-card class="stat-card">
+        <el-statistic title="活跃链接" :value="stats.active_links" />
+      </el-card>
+      <el-card class="stat-card">
+        <el-statistic title="过期链接" :value="stats.expired_links" />
+      </el-card>
+    </div>
+
+    <!-- 操作栏 -->
+    <div class="action-bar">
+      <el-button type="primary" @click="handleCreate" :icon="Plus">创建短链接</el-button>
+      <el-button 
+        type="text" 
+        :icon="Setting" 
+        @click="columnSettingVisible = true"
+        style="margin-left: 10px;"
+      >
+        列设置
+      </el-button>
+      <div class="search-bar">
+        <el-input
+          v-model="filters.search"
+          placeholder="搜索链接（标题、URL、代码）"
+          clearable
+          style="width: 300px;"
+          @clear="handleSearch"
+          @keyup.enter="handleSearch"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+        <el-button @click="handleSearch" :icon="Search">搜索</el-button>
+      </div>
+    </div>
+
+    <!-- 表格 -->
+    <el-table
+      v-loading="loading"
+      :data="links"
+      border
+      stripe
+      style="width: 100%"
+    >
+      <el-table-column v-if="columnVisibility.id" prop="id" label="ID" width="80" align="center" />
+      <el-table-column v-if="columnVisibility.short_code" prop="short_code" label="短链接代码" width="100" show-overflow-tooltip>
+        <template #default="scope">
+          <el-tag type="primary">{{ scope.row.short_code }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="columnVisibility.short_url" prop="short_url" label="短链接" width="300" show-overflow-tooltip>
+        <template #default="scope">
+          <el-link :href="scope.row.short_url" target="_blank" type="primary">
+            {{ scope.row.short_url }}
+          </el-link>
+          <el-button
+            text
+            type="primary"
+            :icon="DocumentCopy"
+            @click="copyToClipboard(scope.row.short_url)"
+            style="margin-left: 8px;"
+          />
+        </template>
+      </el-table-column>
+      <el-table-column v-if="columnVisibility.original_url" prop="original_url" label="原始URL" min-width="350" show-overflow-tooltip />
+      <el-table-column v-if="columnVisibility.title" prop="title" label="标题" width="180" show-overflow-tooltip>
+        <template #default="scope">
+          <span v-if="scope.row.title">{{ scope.row.title }}</span>
+          <span v-else style="color: #909399;">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="columnVisibility.description" prop="description" label="描述" min-width="250" show-overflow-tooltip>
+        <template #default="scope">
+          <span v-if="scope.row.description">{{ scope.row.description }}</span>
+          <span v-else style="color: #909399;">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="columnVisibility.offer_id" prop="offer_id" label="关联Offer" width="180" show-overflow-tooltip>
+        <template #default="scope">
+          <el-tag v-if="scope.row.offer_id" type="info">
+            {{ getOfferName(scope.row.offer_id) || `ID: ${scope.row.offer_id}` }}
+          </el-tag>
+          <span v-else style="color: #909399;">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="columnVisibility.channel_id" prop="channel_id" label="渠道" width="80" show-overflow-tooltip>
+        <template #default="scope">
+          <el-tag v-if="scope.row.channel_id" type="success">
+            {{ scope.row.channel_name || getChannelName(scope.row.channel_id) || `ID: ${scope.row.channel_id}` }}
+          </el-tag>
+          <span v-else style="color: #909399;">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="columnVisibility.creator_name" prop="creator_name" label="创建者" width="120" show-overflow-tooltip>
+        <template #default="scope">
+          <span v-if="scope.row.creator_name">{{ scope.row.creator_name }}</span>
+          <el-tag v-else type="info" size="small">未知</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="columnVisibility.click_count" prop="click_count" label="点击次数" width="100" align="center">
+        <template #default="scope">
+          <el-tag type="success">{{ scope.row.click_count }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="columnVisibility.expires_at" prop="expires_at" label="过期时间" width="180" align="center">
+        <template #default="scope">
+          <span v-if="scope.row.expires_at">{{ formatDate(scope.row.expires_at) }}</span>
+          <el-tag v-else type="info" size="small">永不过期</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="columnVisibility.is_active" prop="is_active" label="激活" width="90" align="center">
+        <template #default="scope">
+          <el-switch
+            v-model="scope.row.is_active"
+            @change="handleToggleActive(scope.row)"
+            :active-text="scope.row.is_active ? '激活' : ''"
+            :inactive-text="!scope.row.is_active ? '禁用' : ''"
+            aria-label="切换激活状态"
+          />
+        </template>
+      </el-table-column>
+      <el-table-column v-if="columnVisibility.created_at" prop="created_at" label="创建时间" width="180">
+        <template #default="scope">
+          {{ formatDate(scope.row.created_at) }}
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="200" fixed="right">
+        <template #default="scope">
+          <el-button type="primary" size="small" @click="handleEdit(scope.row)">编辑</el-button>
+          <el-button type="danger" size="small" @click="handleDelete(scope.row.id)">删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <!-- 分页 -->
+    <div class="pagination">
+      <el-pagination
+        v-model:current-page="pagination.page"
+        v-model:page-size="pagination.pageSize"
+        :total="pagination.total"
+        :page-sizes="[10, 20, 50, 100]"
+        layout="total, sizes, prev, pager, next, jumper"
+        @size-change="handleSizeChange"
+        @current-change="handlePageChange"
+      />
+    </div>
+
+    <!-- 创建/编辑对话框 -->
+    <ShortLinkFormDialog
+      v-model="dialogVisible"
+      :form-data="formData"
+      :form-rules="formRules"
+      :is-edit="isEdit"
+      :offer-list="offerList"
+      :channel-list="channelList"
+      :generating-code="generatingCode"
+      :saving="saving"
+      @save="handleSave"
+      @generate-code="handleGenerateCode"
+      @close="handleDialogClose"
+    />
+
+    <!-- 列设置对话框 -->
+    <el-dialog
+      v-model="columnSettingVisible"
+      title="列显示设置"
+      width="400px"
+      @close="saveColumnVisibility"
+    >
+      <el-checkbox-group v-model="columnVisibilityArray">
+        <el-checkbox label="id">ID</el-checkbox>
+        <el-checkbox label="short_code" :disabled="true">短代码（固定显示）</el-checkbox>
+        <el-checkbox label="short_url" :disabled="true">短链接（固定显示）</el-checkbox>
+        <el-checkbox label="original_url">原始URL</el-checkbox>
+        <el-checkbox label="title">标题</el-checkbox>
+        <el-checkbox label="description">描述</el-checkbox>
+        <el-checkbox label="offer_id">Offer</el-checkbox>
+        <el-checkbox label="channel_id">渠道</el-checkbox>
+        <el-checkbox label="creator_name">创建者</el-checkbox>
+        <el-checkbox label="click_count">点击数</el-checkbox>
+        <el-checkbox label="expires_at">过期时间</el-checkbox>
+        <el-checkbox label="is_active">状态</el-checkbox>
+        <el-checkbox label="created_at">创建时间</el-checkbox>
+      </el-checkbox-group>
+      <template #footer>
+        <el-button @click="columnSettingVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveColumnVisibility">确定</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue';
+import { useRoute } from 'vue-router';
+import { ElMessage, ElMessageBox, ElStatistic, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
+import { Plus, Search, DocumentCopy, InfoFilled, Refresh, Setting } from '@element-plus/icons-vue';
+import {
+  createShortLink,
+  getShortLinks,
+  updateShortLink,
+  deleteShortLink,
+  getShortLinkStats,
+  generateShortCode,
+  checkShortCode
+} from '../../api/shortLink';
+import { getOffers } from '../../api/offer';
+import { getPublishers } from '../../api/publisher';
+import { useDevice } from '../../composables/useDevice';
+import { logger } from '../../utils/logger';
+import { formatDate as formatDateWithTimezone } from '../../utils/dateFormat';
+import ShortLinkFormDialog from './ShortLinkFormDialog.vue';
+
+const { isMobile } = useDevice();
+const route = useRoute();
+
+const loading = ref(false);
+const saving = ref(false);
+const generatingCode = ref(false);
+const dialogVisible = ref(false);
+const isEdit = ref(false);
+const currentLinkId = ref(null);
+
+const links = ref([]);
+const offerList = ref([]);
+const channelList = ref([]);
+const columnSettingVisible = ref(false);
+const stats = reactive({
+  total_links: 0,
+  total_clicks: 0,
+  active_links: 0,
+  expired_links: 0
+});
+
+const filters = reactive({
+  search: '',
+  is_active: null
+});
+
+const pagination = reactive({
+  page: 1,
+  pageSize: 20,
+  total: 0
+});
+
+// 列显示状态（默认全部显示）
+const getDefaultColumnVisibility = () => ({
+  id: true,
+  short_code: true,  // 固定显示
+  short_url: true,  // 固定显示
+  original_url: true,
+  title: true,
+  description: true,
+  offer_id: true,
+  channel_id: true,
+  creator_name: true,
+  click_count: true,
+  expires_at: true,
+  is_active: true,
+  created_at: true
+});
+
+const columnVisibility = reactive(getDefaultColumnVisibility());
+
+// 计算属性：将对象转换为数组，用于 el-checkbox-group
+const columnVisibilityArray = computed({
+  get: () => {
+    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
+  },
+  set: (value) => {
+    // 当 checkbox-group 的值变化时，更新对象
+    Object.keys(columnVisibility).forEach(key => {
+      columnVisibility[key] = value.includes(key)
+    })
+  }
+})
+
+// 从localStorage加载列显示设置
+const loadColumnVisibility = () => {
+  try {
+    const saved = localStorage.getItem('shortLinkManagement_columnVisibility');
+    if (saved) {
+      const savedVisibility = JSON.parse(saved);
+      // 合并保存的设置和默认设置
+      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility);
+      // 确保固定列始终显示
+      columnVisibility.short_code = true;
+      columnVisibility.short_url = true;
+    }
+  } catch (error) {
+    logger.error('加载列显示设置失败:', error);
+  }
+};
+
+// 保存列显示设置到localStorage
+const saveColumnVisibility = () => {
+  try {
+    // 只保存可调整的列，不保存固定列
+    const toSave = {
+      id: columnVisibility.id,
+      original_url: columnVisibility.original_url,
+      title: columnVisibility.title,
+      description: columnVisibility.description,
+      offer_id: columnVisibility.offer_id,
+      channel_id: columnVisibility.channel_id,
+      creator_name: columnVisibility.creator_name,
+      click_count: columnVisibility.click_count,
+      expires_at: columnVisibility.expires_at,
+      is_active: columnVisibility.is_active,
+      created_at: columnVisibility.created_at
+    };
+    localStorage.setItem('shortLinkManagement_columnVisibility', JSON.stringify(toSave));
+    columnSettingVisible.value = false;
+    ElMessage.success('列显示设置已保存');
+  } catch (error) {
+    logger.error('保存列显示设置失败:', error);
+    ElMessage.error('保存设置失败');
+  }
+};
+
+const formRef = ref(null);
+const formData = reactive({
+  original_url: '',
+  short_code: '',
+  title: '',
+  description: '',
+  offer_id: null,
+  channel_id: null,
+  expires_at: null,
+  is_active: true
+});
+
+const dialogTitle = computed(() => {
+  return isEdit.value ? '编辑短链接' : '创建短链接';
+});
+
+const formRules = {
+  original_url: [
+    { required: true, message: '请输入原始URL', trigger: 'blur' },
+    {
+      validator: (rule, value, callback) => {
+        if (!value) {
+          callback();
+          return;
+        }
+        try {
+          const url = new URL(value);
+          if (!url.protocol || !url.hostname) {
+            callback(new Error('URL格式无效，必须包含协议和域名'));
+          } else {
+            callback();
+          }
+        } catch (e) {
+          callback(new Error('URL格式无效'));
+        }
+      },
+      trigger: 'blur'
+    }
+  ],
+  short_code: [
+    {
+      validator: (rule, value, callback) => {
+        if (!value) {
+          callback();
+          return;
+        }
+        if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
+          callback(new Error('短链接代码只能包含字母、数字、连字符和下划线'));
+        } else if (value.length < 3) {
+          callback(new Error('短链接代码至少需要3个字符'));
+        } else if (value.length > 20) {
+          callback(new Error('短链接代码最多20个字符'));
+        } else {
+          callback();
+        }
+      },
+      trigger: 'blur'
+    }
+  ]
+};
+
+// 加载数据
+const loadData = async () => {
+  loading.value = true;
+  try {
+    const params = {
+      page: pagination.page,
+      page_size: pagination.pageSize
+    };
+    // 只添加有值的过滤条件（空字符串不算有效值）
+    if (filters.search && filters.search.trim()) {
+      params.search = filters.search.trim();
+      logger.debug('loadData with search param:', params.search);
+    }
+    if (filters.is_active !== null && filters.is_active !== undefined) {
+      params.is_active = filters.is_active;
+    }
+    logger.debug('loadData params:', params);
+    const result = await getShortLinks(params);
+    logger.debug('loadData result:', result);
+    // 初始化每个链接的加载状态
+    links.value = (result.data || []).map(link => ({
+      ...link,
+      _toggleLoading: false
+    }));
+    pagination.total = result.total || 0;
+    logger.debug('loadData completed, links count:', links.value.length, 'total:', pagination.total);
+  } catch (error) {
+    logger.error('加载短链接列表失败:', error);
+    ElMessage.error('加载数据失败，请重试');
+  } finally {
+    loading.value = false;
+  }
+};
+
+// 加载统计
+const loadStats = async () => {
+  try {
+    const statsData = await getShortLinkStats();
+    Object.assign(stats, statsData);
+  } catch (error) {
+    logger.error('加载统计失败:', error);
+    // 统计信息加载失败不影响主要功能，静默处理
+  }
+};
+
+// 加载Offer列表
+const loadOffers = async () => {
+  try {
+    const response = await getOffers({ page: 1, page_size: 100 });
+    // response已经是标准分页格式，直接使用data字段
+    offerList.value = response.data || [];
+  } catch (error) {
+    logger.error('加载Offer列表失败:', error);
+    // Offer列表加载失败不影响主要功能，静默处理（下拉框会显示为空）
+  }
+};
+
+// 加载渠道列表
+const loadChannels = async () => {
+  try {
+    const response = await getPublishers({ page: 1, page_size: 100 });
+    // response已经是标准分页格式，直接使用data字段
+    channelList.value = response.data || [];
+  } catch (error) {
+    logger.error('加载渠道列表失败:', error);
+    // 渠道列表加载失败不影响主要功能，静默处理（下拉框会显示为空）
+  }
+};
+
+// 获取Offer名称
+const getOfferName = (offerId) => {
+  if (!offerId) return null;
+  const offer = offerList.value.find(o => o.id === offerId);
+  return offer ? offer.offer_name : null;
+};
+
+// 获取渠道名称
+const getChannelName = (channelId) => {
+  if (!channelId) return null;
+  const channel = channelList.value.find(c => c.id === channelId);
+  return channel ? channel.publisher_name : null;
+};
+
+// 创建
+const handleCreate = () => {
+  isEdit.value = false;
+  currentLinkId.value = null;
+  Object.assign(formData, {
+    original_url: '',
+    short_code: '',
+    title: '',
+    description: '',
+    offer_id: null,
+    channel_id: null,
+    expires_at: null,
+    is_active: true
+  });
+  dialogVisible.value = true;
+};
+
+// 编辑
+const handleEdit = async (link) => {
+  isEdit.value = true;
+  currentLinkId.value = link.id;
+  Object.assign(formData, {
+    original_url: link.original_url,
+    short_code: link.short_code,
+    title: link.title || '',
+    description: link.description || '',
+    offer_id: link.offer_id || null,
+    channel_id: link.channel_id || null,
+    expires_at: link.expires_at || null,
+    is_active: link.is_active
+  });
+  dialogVisible.value = true;
+};
+
+// 保存
+const handleSave = async () => {
+  if (!formRef.value) return;
+  
+  try {
+    await formRef.value.validate();
+    saving.value = true;
+    
+    const submitData = { ...formData };
+    if (!submitData.short_code) {
+      delete submitData.short_code; // 空字符串时删除，让后端自动生成
+    }
+    
+    if (isEdit.value) {
+      await updateShortLink(currentLinkId.value, submitData);
+      ElMessage.success('短链接更新成功');
+    } else {
+      await createShortLink(submitData);
+      ElMessage.success('短链接创建成功');
+    }
+    
+    dialogVisible.value = false;
+    await loadData();
+    await loadStats();
+  } catch (error) {
+    logger.error('保存短链接失败:', error);
+  } finally {
+    saving.value = false;
+  }
+};
+
+// 删除
+const handleDelete = async (linkId) => {
+  try {
+    await ElMessageBox.confirm('确定要删除这个短链接吗？', '确认删除', {
+      type: 'warning'
+    });
+    
+    await deleteShortLink(linkId);
+    ElMessage.success('短链接已删除');
+    await loadData();
+    await loadStats();
+  } catch (error) {
+    if (error !== 'cancel') {
+      logger.error('删除短链接失败:', error);
+    }
+  }
+};
+
+// 切换激活状态
+const handleToggleActive = async (link) => {
+  // 防止重复点击
+  if (link._toggleLoading) {
+    return;
+  }
+  
+  // 保存原始值（因为 switch 已经切换了，所以取反得到原值）
+  const originalValue = !link.is_active;
+  const newValue = link.is_active;
+  
+  // 设置加载状态
+  link._toggleLoading = true;
+  
+  try {
+    // 只更新 is_active 字段
+    await updateShortLink(link.id, { is_active: newValue });
+    ElMessage.success(newValue ? '短链接已激活' : '短链接已禁用');
+    // 更新统计
+    await loadStats();
+  } catch (error) {
+    // 如果失败，恢复原值
+    link.is_active = originalValue;
+    // 错误消息已经在 updateShortLink 中显示了，这里不需要再显示
+    logger.error('切换激活状态失败:', error);
+  } finally {
+    link._toggleLoading = false;
+  }
+};
+
+// 搜索
+const handleSearch = () => {
+  pagination.page = 1;
+  loadData();
+};
+
+// 分页
+const handleSizeChange = (size) => {
+  pagination.pageSize = size;
+  pagination.page = 1;  // 分页大小变化时重置到第一页
+  loadData();
+};
+
+const handlePageChange = (page) => {
+  pagination.page = page;
+  loadData();
+};
+
+// 复制到剪贴板
+const copyToClipboard = async (text) => {
+  try {
+    await navigator.clipboard.writeText(text);
+    ElMessage.success('已复制到剪贴板');
+  } catch (error) {
+    // 忽略浏览器扩展相关的错误（这些错误不影响复制功能）
+    const errorMessage = error?.message || String(error || '').toLowerCase();
+    const isExtensionError = typeof errorMessage === 'string' && (
+      errorMessage.includes('message channel closed') ||
+      errorMessage.includes('asynchronous response') ||
+      errorMessage.includes('listener indicated') ||
+      errorMessage.includes('channel closed')
+    );
+    
+    // 如果是扩展错误，尝试使用备用方法复制
+    if (isExtensionError) {
+      try {
+        // 使用传统的 execCommand 方法作为备用
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        
+        if (successful) {
+          ElMessage.success('已复制到剪贴板');
+          return;
+        }
+      } catch (fallbackError) {
+        // 备用方法也失败，静默处理
+      }
+      // 扩展错误不影响功能，静默处理
+      return;
+    }
+    
+    // 其他错误才显示错误消息
+    ElMessage.error('复制失败');
+  }
+};
+
+// 格式化日期
+const formatDate = (dateString) => {
+  return formatDateWithTimezone(dateString);
+};
+
+// 自动生成代码
+const handleGenerateCode = async () => {
+  if (isEdit.value) {
+    return; // 编辑模式下不允许生成
+  }
+  
+  generatingCode.value = true;
+  try {
+    const result = await generateShortCode();
+    if (result && result.short_code) {
+      formData.short_code = result.short_code;
+      ElMessage.success('代码已生成');
+    }
+  } catch (error) {
+    logger.error('生成代码失败:', error);
+  } finally {
+    generatingCode.value = false;
+  }
+};
+
+// 关闭对话框
+const handleDialogClose = () => {
+  dialogVisible.value = false;
+  if (formRef.value) {
+    formRef.value.clearValidate();
+  }
+};
+
+// 防止重复执行搜索的标志位
+let isApplyingSearch = false;
+
+// 检查并应用路由参数中的搜索关键词
+const applySearchFromQuery = async () => {
+  // 防止重复执行
+  if (isApplyingSearch) {
+    logger.debug('applySearchFromQuery already in progress, skipping');
+    return;
+  }
+  
+  isApplyingSearch = true;
+  try {
+    const searchFromQuery = route.query.search;
+    logger.debug('applySearchFromQuery called, searchFromQuery:', searchFromQuery, 'route.query:', route.query, 'current filters.search:', filters.search);
+    
+    if (searchFromQuery) {
+      // 验证短链接代码格式（只包含字母、数字、连字符和下划线）
+      const searchValue = String(searchFromQuery).trim();
+      const isValidShortCode = /^[a-zA-Z0-9_-]+$/.test(searchValue);
+      
+      if (!isValidShortCode) {
+        logger.warn('Invalid short code format:', searchValue);
+        // 仍然设置搜索值，但记录警告
+      }
+      
+      logger.debug('Setting search value:', searchValue);
+      
+      // 直接设置，不比较（确保能正确设置）
+      filters.search = searchValue;
+      // 重置到第一页
+      pagination.page = 1;
+      // 等待 DOM 更新后再执行搜索
+      await nextTick();
+      logger.debug('After nextTick, filters.search:', filters.search, 'will call loadData');
+      // 执行搜索
+      await loadData();
+    } else {
+      // 如果没有搜索参数，清除搜索框并加载数据
+      if (filters.search) {
+        filters.search = '';
+        pagination.page = 1;
+        await nextTick();
+        await loadData();
+      } else if (pagination.page === 1) {
+        // 如果已经在第一页且没有搜索关键词，只加载数据（避免重复加载）
+        await loadData();
+      }
+    }
+  } finally {
+    isApplyingSearch = false;
+  }
+};
+
+// 监听路由 query 参数变化
+watch(
+  () => route.query.search,
+  async (newSearch, oldSearch) => {
+    // 当搜索参数变化时，立即应用搜索
+    if (newSearch !== oldSearch) {
+      await nextTick();
+      await applySearchFromQuery();
+    }
+  },
+  { immediate: false }
+);
+
+// 监听整个路由路径变化（确保从其他页面跳转过来时也能触发）
+watch(
+  () => route.fullPath,
+  async (newPath, oldPath) => {
+    // 只有当路径真正变化且是短链接管理页面时才执行
+    if (newPath !== oldPath && route.name === 'ShortLinkManagement') {
+      // 等待路由完全更新
+      await nextTick();
+      await applySearchFromQuery();
+    }
+  },
+  { immediate: false }
+);
+
+// 初始化
+onMounted(async () => {
+  logger.debug('ShortLinkManagement onMounted, route.query:', route.query, 'route.fullPath:', route.fullPath);
+  // 加载列显示设置
+  loadColumnVisibility();
+  // 加载基础数据（先加载，不阻塞搜索）
+  loadStats();
+  loadOffers();
+  loadChannels();
+  
+  // 等待 DOM 完全渲染
+  await nextTick();
+  
+  // 检查路由参数中是否有搜索关键词（优先处理搜索，确保搜索框显示正确）
+  const searchFromQuery = route.query.search;
+  if (searchFromQuery) {
+    logger.debug('Found search param in URL:', searchFromQuery);
+    // 直接设置搜索值
+    filters.search = String(searchFromQuery).trim();
+    pagination.page = 1;
+    // 等待一下确保响应式更新
+    await nextTick();
+    logger.debug('After setting filters.search:', filters.search);
+    // 立即执行搜索
+    await loadData();
+  } else {
+    // 没有搜索参数，正常加载数据
+    await loadData();
+  }
+});
+</script>
+
+<style scoped>
+.short-link-management {
+  padding: 20px;
+}
+
+.stats-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  text-align: center;
+}
+
+.action-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.search-bar {
+  display: flex;
+  gap: 10px;
+}
+
+.pagination {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.form-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #909399;
+}
+</style>
+
