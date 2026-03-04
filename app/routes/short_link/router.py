@@ -4,9 +4,10 @@
 """
 import logging
 from typing import Optional
+import os
 
 from fastapi import APIRouter, Depends, Query, Request, BackgroundTasks, HTTPException, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -79,4 +80,91 @@ async def redirect_short_link_public(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"短链接重定向失败: {str(e)}"
         )
+
+
+@router.get("/change",
+            summary="打开固定的master.html页面",
+            tags=["短链接服务"])
+async def open_master_html():
+    """
+    打开固定的master.html页面
+    """
+    # 优先使用服务器路径，本地开发时会自动回退到本地路径
+    master_html_path = "/data/Platform/scripts/master.html"
+    
+    # 如果服务器路径不存在，尝试本地路径（用于开发环境）
+    if not os.path.exists(master_html_path):
+        master_html_path = "E:\Platform\scripts\master.html"
+    
+    if not os.path.exists(master_html_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="master.html文件不存在"
+        )
+    
+    return FileResponse(path=master_html_path)
+
+
+@router.get("/change/{short_code}",
+            summary="打开master.html并跳转到指定URL",
+            tags=["短链接服务"])
+async def open_master_html_with_redirect(
+    short_code: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    先打开E:\Platform\scripts\master.html，然后根据短码跳转到指定的original_url
+    """
+    # 尝试从缓存获取短链接信息
+    cached_data = await get_short_link_from_cache(short_code)
+    
+    original_url = None
+    
+    if cached_data:
+        original_url = cached_data.get("original_url")
+    else:
+        # 从数据库查询
+        from app.models.models import ShortLink
+        from sqlalchemy.future import select
+        
+        result = await db.execute(
+            select(ShortLink).where(ShortLink.short_code == short_code)
+        )
+        short_link = result.scalars().first()
+        
+        if short_link:
+            original_url = short_link.original_url
+    
+    if not original_url:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="短链接不存在或未配置原始URL"
+        )
+    
+    # 优先使用服务器路径，本地开发时会自动回退到本地路径
+    master_html_path = "/data/Platform/scripts/master.html"
+    
+    # 如果服务器路径不存在，尝试本地路径（用于开发环境）
+    if not os.path.exists(master_html_path):
+        master_html_path = "E:\Platform\scripts\master.html"
+    
+    if not os.path.exists(master_html_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="master.html文件不存在"
+        )
+    
+    with open(master_html_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+    
+    # 修改JavaScript代码，添加自动跳转到original_url的逻辑
+    # 找到script标签，在合适的位置添加跳转逻辑
+    modified_html = html_content.replace(
+        "<script>",
+        f"<script>\n    // 自动跳转到目标URL\n    window.addEventListener('DOMContentLoaded', function() {{\n        window.location.href = '{original_url}';\n    }});"
+    )
+    
+    # 返回修改后的HTML内容
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=modified_html)
 
