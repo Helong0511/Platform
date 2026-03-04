@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Limited-Time Free Spin – Win Big Now!</title>
+
+    <style>
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: radial-gradient(circle, #1a002f, #000);
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+
+        /* ===== 自适应转盘容器 ===== */
+        .wrapper {
+            position: relative;
+            width: min(92vw, 800px);
+            height: min(92vw, 800px);
+            border-radius: 50%;
+            background: radial-gradient(circle, #aa0000, #400000);
+            box-shadow:
+                inset 0 0 40px rgba(255, 255, 255, 0.4),
+                0 20px 60px rgba(0, 0, 0, 0.9),
+                0 0 0 12px gold,
+                0 0 50px gold;
+        }
+
+        /* ===== 跑马灯 ===== */
+        .lights {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        .bulb {
+            position: absolute;
+            width: 2.2%;
+            height: 2.2%;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, #fff, #ffcc00 40%, #cc0000 70%);
+            box-shadow:
+                inset 0 2px 5px rgba(255, 255, 255, 0.9),
+                inset 0 -3px 6px rgba(0, 0, 0, 0.7),
+                0 0 6px rgba(0, 0, 0, 0.6);
+            transition: all 0.08s linear;
+        }
+
+        .bulb.active {
+            background: radial-gradient(circle at 30% 30%, #fff, #fff176 40%, #ff9800 70%);
+            box-shadow:
+                0 0 10px #fff176,
+                0 0 25px gold,
+                0 0 40px orange;
+        }
+
+        canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+        }
+
+        /* ===== 指针 ===== */
+        .pointer {
+            position: absolute;
+            top: -6%;
+            left: 50%;
+            transform: translateX(-50%);
+            border-left: 4% solid transparent;
+            border-right: 4% solid transparent;
+            border-bottom: 9% solid gold;
+            z-index: 20;
+        }
+
+        /* ===== 中间按钮 ===== */
+        .center-btn {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20%;
+            height: 20%;
+            border-radius: 50%;
+            background: radial-gradient(circle, #ff4d4d, #7a0000);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2vw;
+            max-font-size: 40px;
+            font-weight: bold;
+            color: white;
+            cursor: pointer;
+            box-shadow:
+                inset 0 10px 20px rgba(255, 255, 255, 0.6),
+                inset 0 -10px 20px rgba(0, 0, 0, 0.8),
+                0 15px 40px rgba(0, 0, 0, 0.9);
+            z-index: 10;
+        }
+
+        /* ===== 中奖弹窗 ===== */
+        .modal {
+            position: fixed;
+            inset: 0;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 999;
+        }
+
+        .modal-content {
+            width: 90%;
+            max-width: 500px;
+            background: linear-gradient(45deg, #ff0080, #ff8c00, #40e0d0, #ff0080);
+            background-size: 400% 400%;
+            animation: rainbow 4s infinite linear;
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            color: white;
+            font-size: clamp(18px, 4vw, 28px);
+            box-shadow: 0 0 50px gold;
+        }
+
+        @keyframes rainbow {
+            0% {
+                background-position: 0% 50%
+            }
+
+            100% {
+                background-position: 100% 50%
+            }
+        }
+
+        .claim-btn {
+            margin-top: 25px;
+            padding: 12px 35px;
+            font-size: 18px;
+            border: none;
+            border-radius: 30px;
+            background: white;
+            color: #ff0080;
+            cursor: pointer;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="wrapper">
+        <div class="pointer"></div>
+        <canvas id="wheel"></canvas>
+        <div class="lights" id="lights"></div>
+        <div class="center-btn" id="spinBtn">SPIN</div>
+    </div>
+
+    <div class="modal" id="modal">
+        <div class="modal-content">
+            <div id="resultText"></div>
+            <button class="claim-btn" id="claimBtn">Claim Now</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("wheel");
+        const ctx = canvas.getContext("2d");
+        const wrapper = document.querySelector(".wrapper");
+
+        const prizes = [
+            "Better Luck Next Time",
+            "iPhone 17 Pro Max",
+            "Walmart-50",
+            "Walmart-200",
+            "Walmart-500",
+            "Amazon-100",
+            "Amazon-300",
+            "Amazon-800"
+        ];
+
+        let prizeIndex = 1; // 必中 iPhone
+
+        function resizeCanvas() {
+            const size = wrapper.clientWidth;
+            canvas.width = size;
+            canvas.height = size;
+            drawWheel();
+            createLights();
+        }
+        window.addEventListener("resize", resizeCanvas);
+
+        function drawWheel() {
+            const center = canvas.width / 2;
+            const radius = center * 0.88;
+            const arc = Math.PI * 2 / prizes.length;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            for (let i = 0; i < prizes.length; i++) {
+                const angle = i * arc;
+                ctx.beginPath();
+                ctx.fillStyle = i % 2 === 0 ? "#ffd54f" : "#fda085";
+                ctx.moveTo(center, center);
+                ctx.arc(center, center, radius, angle, angle + arc);
+                ctx.fill();
+
+                ctx.save();
+                ctx.translate(center, center);
+                ctx.rotate(angle + arc / 2);
+                ctx.fillStyle = "#000";
+                ctx.font = (center * 0.06) + "px Arial";
+                ctx.textAlign = "right";
+                ctx.fillText(prizes[i], radius - 20, 10);
+                ctx.restore();
+            }
+        }
+
+        /* ===== 跑马灯 ===== */
+        const lightsContainer = document.getElementById("lights");
+        let bulbs = [];
+        function createLights() {
+            lightsContainer.innerHTML = "";
+            bulbs = [];
+            const size = wrapper.clientWidth;
+            const radius = size * 0.47;
+            const bulbCount = 70;
+
+            for (let i = 0; i < bulbCount; i++) {
+                const bulb = document.createElement("div");
+                bulb.className = "bulb";
+                const angle = (i / bulbCount) * Math.PI * 2;
+                const x = size / 2 + radius * Math.cos(angle);
+                const y = size / 2 + radius * Math.sin(angle);
+                bulb.style.left = x + "px";
+                bulb.style.top = y + "px";
+                lightsContainer.appendChild(bulb);
+                bulbs.push(bulb);
+            }
+        }
+        let index = 0;
+        setInterval(() => {
+            bulbs.forEach(b => b.classList.remove("active"));
+            for (let i = 0; i < 6; i++) {
+                bulbs[(index + i) % bulbs.length]?.classList.add("active");
+            }
+            index++;
+        }, 60);
+
+        resizeCanvas();
+
+        /* ===== 旋转 ===== */
+        document.getElementById("spinBtn").onclick = function () {
+            const finalAngle =
+                360 * 8 +
+                (360 - (prizeIndex * 360 / prizes.length) - 360 / prizes.length / 2);
+
+            canvas.style.transition = "transform 6s cubic-bezier(.17,.67,.12,.99)";
+            canvas.style.transform = `rotate(${finalAngle}deg)`;
+
+            setTimeout(() => {
+                document.getElementById("resultText").innerHTML =
+                    "🎉 CONGRATULATIONS!<br><br>You won:<br><b>" + prizes[prizeIndex] + "</b>";
+                document.getElementById("modal").style.display = "flex";
+            }, 6000);
+        };
+
+        document.getElementById("claimBtn").onclick = function () {
+            window.location.href = "https://www.example.com";
+        };
+    </script>
+
+</body>
+
+</html>
