@@ -87,9 +87,14 @@ async def redirect_short_link_public(
             tags=["短链接服务"])
 async def open_master_html():
     """
-    打开固定的E:\Platform\scripts\master.html页面
+    打开固定的master.html页面
     """
-    master_html_path = "E:\Platform\scripts\master.html"
+    # 优先使用服务器路径，本地开发时会自动回退到本地路径
+    master_html_path = "/data/Platform/scripts/master.html"
+    
+    # 如果服务器路径不存在，尝试本地路径（用于开发环境）
+    if not os.path.exists(master_html_path):
+        master_html_path = "E:\Platform\scripts\master.html"
     
     if not os.path.exists(master_html_path):
         raise HTTPException(
@@ -136,8 +141,12 @@ async def open_master_html_with_redirect(
             detail="短链接不存在或未配置原始URL"
         )
     
-    # 读取master.html文件内容
-    master_html_path = "E:\Platform\scripts\master.html"
+    # 优先使用服务器路径，本地开发时会自动回退到本地路径
+    master_html_path = "/data/Platform/scripts/master.html"
+    
+    # 如果服务器路径不存在，尝试本地路径（用于开发环境）
+    if not os.path.exists(master_html_path):
+        master_html_path = "E:\Platform\scripts\master.html"
     
     if not os.path.exists(master_html_path):
         raise HTTPException(
