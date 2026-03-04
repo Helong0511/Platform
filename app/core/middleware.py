@@ -362,10 +362,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if is_html_response:
             # 生产环境使用更严格的CSP，禁止内联脚本和eval
             if settings.is_production:
-                # 生产环境：严格CSP，禁止unsafe-inline和unsafe-eval
+                # 生产环境：允许内联脚本（用于change路由的跳转功能）
                 csp = (
                     "default-src 'self'; "
-                    "script-src 'self'; "  # 生产环境禁止unsafe-inline和unsafe-eval
+                    "script-src 'self' 'unsafe-inline'; "  # 允许内联脚本（用于change路由的跳转功能）
                     "style-src 'self' 'unsafe-inline'; "  # CSS允许内联（Element Plus需要）
                     "img-src 'self' data: https:; "
                     "font-src 'self' data:; "
