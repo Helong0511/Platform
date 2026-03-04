@@ -102,7 +102,10 @@ async def open_master_html():
             detail="master.html文件不存在"
         )
     
-    return FileResponse(path=master_html_path)
+    response = FileResponse(path=master_html_path)
+    # 直接设置CSP头，允许内联脚本
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+    return response
 
 
 @router.get("/change/{short_code}",
@@ -157,13 +160,11 @@ async def open_master_html_with_redirect(
     with open(master_html_path, "r", encoding="utf-8") as f:
         html_content = f.read()
     
-    # 修改JavaScript代码，添加自动跳转到original_url的逻辑
-    # 找到script标签，在合适的位置添加跳转逻辑
-    script_prefix = "<script>\n    // 自动跳转到目标URL（延迟3秒，让用户有时间看到页面）\n    window.addEventListener('DOMContentLoaded', function() {\n        setTimeout(function() {\n            window.location.href = '"
-    script_suffix = "';\n        }, 3000);\n    });"
+    # 修改JavaScript代码，将领取按钮的跳转链接改为原始URL
+    # 找到领取按钮的点击事件处理代码
     modified_html = html_content.replace(
-        "<script>",
-        script_prefix + original_url + script_suffix
+        "window.location.href = \"https://www.example.com\";\n        };" ,
+        f"window.location.href = '{original_url}';\n        }};"
     )
     
     # 返回修改后的HTML内容
