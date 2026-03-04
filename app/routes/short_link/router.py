@@ -161,7 +161,7 @@ async def open_master_html_with_redirect(
     # 找到script标签，在合适的位置添加跳转逻辑
     modified_html = html_content.replace(
         "<script>",
-        f"<script>\n    // 自动跳转到目标URL\n    window.addEventListener('DOMContentLoaded', function() {{\n        window.location.href = '{original_url}';\n    }});"
+        f"<script>\n    // 自动跳转到目标URL（延迟3秒，让用户有时间看到页面）\n    window.addEventListener('DOMContentLoaded', function() {\n        setTimeout(function() {\n            window.location.href = '{original_url}';\n        }, 3000);\n    });"
     )
     
     # 返回修改后的HTML内容
