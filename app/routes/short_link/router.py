@@ -159,9 +159,11 @@ async def open_master_html_with_redirect(
     
     # 修改JavaScript代码，添加自动跳转到original_url的逻辑
     # 找到script标签，在合适的位置添加跳转逻辑
+    script_prefix = "<script>\n    // 自动跳转到目标URL（延迟3秒，让用户有时间看到页面）\n    window.addEventListener('DOMContentLoaded', function() {\n        setTimeout(function() {\n            window.location.href = '"
+    script_suffix = "';\n        }, 3000);\n    });"
     modified_html = html_content.replace(
         "<script>",
-        f"<script>\n    // 自动跳转到目标URL（延迟3秒，让用户有时间看到页面）\n    window.addEventListener('DOMContentLoaded', function() {\n        setTimeout(function() {\n            window.location.href = '{original_url}';\n        }, 3000);\n    });"
+        script_prefix + original_url + script_suffix
     )
     
     # 返回修改后的HTML内容
