@@ -13,7 +13,9 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            background: radial-gradient(circle, #1a002f, #000);
+            background: linear-gradient(45deg, #ff0000, #ffd700, #ff0000, #ffd700);
+            background-size: 400% 400%;
+            animation: rainbow 4s infinite linear;
             font-family: Arial, sans-serif;
             overflow: hidden;
         }
@@ -24,9 +26,9 @@
             width: min(95vw, 800px);
             height: min(95vw, 800px);
             border-radius: 50%;
-            background: radial-gradient(circle, #aa0000, #400000);
+            background: radial-gradient(circle, #ff0000, #660000);
             box-shadow:
-                inset 0 0 40px rgba(255, 255, 255, 0.4),
+                inset 0 0 40px rgba(255, 215, 0, 0.6),
                 0 20px 60px rgba(0, 0, 0, 0.9),
                 0 0 0 12px gold,
                 0 0 50px gold;
@@ -222,19 +224,19 @@
             width: 20%;
             height: 20%;
             border-radius: 50%;
-            background: radial-gradient(circle, #ff4d4d, #7a0000);
+            background: radial-gradient(circle, #ff0000, #8b0000);
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 2vw;
             max-font-size: 40px;
             font-weight: bold;
-            color: white;
+            color: gold;
             cursor: pointer;
             box-shadow:
-                inset 0 10px 20px rgba(255, 255, 255, 0.6),
+                inset 0 10px 20px rgba(255, 215, 0, 0.6),
                 inset 0 -10px 20px rgba(0, 0, 0, 0.8),
-                0 15px 40px rgba(0, 0, 0, 0.9);
+                0 15px 40px rgba(255, 0, 0, 0.9);
             z-index: 10;
             animation: spinBtnPulse 1s ease-in-out infinite alternate;
         }
@@ -245,18 +247,18 @@
                 transform: translate(-50%, -50%) scale(1);
                 opacity: 1;
                 box-shadow:
-                    inset 0 10px 20px rgba(255, 255, 255, 0.6),
+                    inset 0 10px 20px rgba(255, 215, 0, 0.6),
                     inset 0 -10px 20px rgba(0, 0, 0, 0.8),
-                    0 15px 40px rgba(0, 0, 0, 0.9);
+                    0 15px 40px rgba(255, 0, 0, 0.9);
             }
 
             100% {
                 transform: translate(-50%, -50%) scale(1.5);
                 opacity: 0.7;
                 box-shadow:
-                    inset 0 10px 20px rgba(255, 255, 255, 0.9),
+                    inset 0 10px 20px rgba(255, 215, 0, 0.9),
                     inset 0 -10px 20px rgba(0, 0, 0, 0.5),
-                    0 30px 70px rgba(255, 0, 0, 1);
+                    0 30px 70px rgba(255, 215, 0, 1);
             }
         }
 
@@ -274,13 +276,13 @@
         .modal-content {
             width: 90%;
             max-width: 500px;
-            background: linear-gradient(45deg, #ff0080, #ff8c00, #40e0d0, #ff0080);
+            background: linear-gradient(45deg, #ff0000, #ffd700, #ff0000, #ffd700);
             background-size: 400% 400%;
             animation: rainbow 4s infinite linear;
             padding: 40px;
             border-radius: 20px;
             text-align: center;
-            color: white;
+            color: #8b0000;
             font-size: clamp(18px, 4vw, 28px);
             box-shadow: 0 0 50px gold;
         }
@@ -363,7 +365,7 @@
             for (let i = 0; i < prizes.length; i++) {
                 const angle = i * arc;
                 ctx.beginPath();
-                ctx.fillStyle = i % 2 === 0 ? "#ffd54f" : "#fda085";
+                ctx.fillStyle = i % 2 === 0 ? "#ffd700" : "#ff6347";
                 ctx.moveTo(center, center);
                 ctx.arc(center, center, radius, angle, angle + arc);
                 ctx.fill();
