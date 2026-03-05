@@ -419,26 +419,29 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             raise EndOfStream("客户端已断开连接")
         
         # 创建HTTPException
-        http_exc = HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=message
-        )
+        # 直接在创建时设置headers，确保它不是None
+        headers = {}
         
-        # 确保headers属性存在且是字典
-        if not hasattr(http_exc, "headers"):
-            http_exc.headers = {}
-        
-        # 如果提供了令牌，将其添加到异常的headers中
-        # 这样FastAPI会将这些headers添加到响应中
+        # 如果提供了令牌，将其添加到headers中
         if token_to_return:
-            http_exc.headers["X-CSRF-Token"] = token_to_return
+            headers["X-CSRF-Token"] = token_to_return
             
             # 同时设置Cookie（双重提交模式）
             # 注意：HTTPException的headers会被FastAPI自动添加到响应中
             # 但Cookie需要特殊处理，这里通过headers传递信息给异常处理器
-            http_exc.headers["Set-Cookie"] = f"csrf_token={token_to_return}; HttpOnly; SameSite=Strict; Max-Age={settings.CSRF_TOKEN_EXPIRE_SECONDS}; Path=/"
+            headers["Set-Cookie"] = f"csrf_token={token_to_return}; HttpOnly; SameSite=Strict; Max-Age={settings.CSRF_TOKEN_EXPIRE_SECONDS}; Path=/"
             
             logger.debug(f"在CSRF错误响应中添加新令牌: {token_to_return[:10]}...")
+        
+        http_exc = HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=message,
+            headers=headers if headers else None
+        )
+        
+        # 确保headers属性存在且是字典（防御性编程）
+        if not hasattr(http_exc, "headers") or http_exc.headers is None:
+            http_exc.headers = headers
         
         raise http_exc
     
@@ -539,7 +542,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             logger.warning(f"CSRF令牌缺失: {request.method} {request.url.path}, session_id: {session_id}")
             # 记录审计日志
             try:
-                from app.core.database import get_db
                 async for db in get_db():
                     await log_user_action(
                         db=db,
