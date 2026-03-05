@@ -3,6 +3,7 @@
 封装短链接相关的业务逻辑
 """
 import re
+import uuid
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -273,11 +274,13 @@ class ShortLinkService(BaseService[ShortLink]):
             
             # 创建短链接
             logger.debug("创建短链接对象")
+            # 为每个请求生成唯一的临时代码，避免并发冲突
+            temp_code = f"temp_{uuid.uuid4().hex[:8]}" if not short_code else short_code
             short_link = ShortLink(
                 original_url=link_data['original_url'],
                 title=link_data.get('title'),
                 description=link_data.get('description'),
-                short_code=short_code or "temp",  # 临时代码，稍后更新
+                short_code=temp_code,  # 唯一的临时代码，稍后更新
                 created_by=current_user.id,
                 offer_id=link_data.get('offer_id'),
                 channel_id=link_data.get('channel_id'),
@@ -286,7 +289,7 @@ class ShortLinkService(BaseService[ShortLink]):
                 click_count=0
             )
             
-            logger.debug("添加短链接到数据库")
+            logger.debug(f"添加短链接到数据库，临时代码: {temp_code}")
             self.db.add(short_link)
             logger.debug("执行flush以获取ID")
             await self.db.flush()  # 先flush以获取ID
@@ -295,9 +298,9 @@ class ShortLinkService(BaseService[ShortLink]):
             # 如果没有提供自定义代码，生成唯一代码
             if not link_data.get('short_code'):
                 logger.debug("生成唯一短链接代码")
-                # 获取所有已存在的代码
+                # 获取所有已存在的代码，排除临时代码
                 result = await self.db.execute(select(ShortLink.short_code))
-                existing_codes = {row[0] for row in result.all() if row[0] != "temp"}
+                existing_codes = {row[0] for row in result.all() if not row[0].startswith('temp_')}
                 logger.debug(f"已存在的代码数量: {len(existing_codes)}")
                 
                 # 尝试从ID生成
@@ -325,8 +328,8 @@ class ShortLinkService(BaseService[ShortLink]):
             return short_link
         except Exception as e:
             logger.error(f"创建短链接失败: {str(e)}", exc_info=True)
-        # 重新抛出异常
-        raise
+            # 重新抛出异常
+            raise
     
     async def update_short_link(
         self,
