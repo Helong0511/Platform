@@ -313,14 +313,20 @@
                 ctx.fillStyle = "#000";
                 ctx.font = (center * 0.05) + "px Arial";
                 ctx.textAlign = "right";
-                ctx.fillText(prizes[i], radius - 60, 10);
+
+                // 计算文字宽度，动态调整图标位置
+                const textWidth = ctx.measureText(prizes[i]).width;
+                const textX = radius - 30; // 减少间距
+
+                ctx.fillText(prizes[i], textX, 10);
 
                 // 根据奖项类型绘制不同图标
                 ctx.font = (center * 0.1) + "px Arial";
+                const iconX = textX + 5; // 图标紧跟在文字后面
                 if (prizes[i] === "iPhone 17 Pro Max") {
-                    ctx.fillText("📱", radius - 10, 12);
+                    ctx.fillText("📱", iconX, 12);
                 } else {
-                    ctx.fillText("🎁", radius - 10, 12);
+                    ctx.fillText("🎁", iconX, 12);
                 }
 
                 ctx.restore();
@@ -381,10 +387,20 @@
                 360 * 8 +
                 (360 - (prizeIndex * 360 / prizes.length) - 360 / prizes.length / 2);
 
+            // 应用旋转动画
             canvas.style.transition = "transform 6s cubic-bezier(.17,.67,.12,.99)";
             canvas.style.transform = `rotate(${finalAngle}deg)`;
 
+            // 旋转结束后，重绘转盘以保持文字正立
             setTimeout(() => {
+                // 重置transform
+                canvas.style.transition = "none";
+                canvas.style.transform = "";
+
+                // 重绘转盘
+                drawWheel();
+
+                // 显示中奖信息
                 document.getElementById("resultText").innerHTML =
                     "🎉 CONGRATULATIONS!<br><br>You won:<br><b>" + prizes[prizeIndex] + "</b>";
                 document.getElementById("modal").style.display = "flex";
