@@ -53,8 +53,20 @@ def test_create_short_link(token, cookies, csrf_token):
         print('Headers:', dict(response.headers))
         print('Cookies sent:', dict(cookies))
         print('Cookies received:', dict(response.cookies))
+        
+        # 尝试解析响应为JSON，获取更详细的错误信息
+        try:
+            response_json = response.json()
+            if 'detail' in response_json:
+                print('Error detail:', response_json['detail'])
+            if 'message' in response_json:
+                print('Error message:', response_json['message'])
+        except json.JSONDecodeError:
+            pass
     except Exception as e:
         print('Error:', str(e))
+        import traceback
+        traceback.print_exc()
 
 # 测试登录API
 def test_login():

@@ -218,8 +218,17 @@ class ShortLinkService(BaseService[ShortLink]):
             ShortLink: 创建的短链接对象
         """
         logger.info(f"开始创建短链接，数据: {link_data}")
+        logger.info(f"当前用户: {current_user.id} ({current_user.username})")
         
         try:
+            # 验证必需字段
+            if not link_data.get('original_url'):
+                logger.error("缺少必需字段: original_url")
+                raise_api_exception(
+                    ErrorCode.INVALID_PARAMETER,
+                    detail="缺少必需字段: original_url"
+                )
+            
             # 如果提供了自定义短链接代码，检查是否已存在
             if link_data.get('short_code'):
                 logger.debug(f"检查自定义短链接代码: {link_data['short_code']}")
@@ -321,8 +330,9 @@ class ShortLinkService(BaseService[ShortLink]):
             # 回滚事务
             try:
                 await self.db.rollback()
-            except Exception:
-                pass
+                logger.debug("事务已回滚")
+            except Exception as rollback_error:
+                logger.error(f"回滚事务失败: {str(rollback_error)}")
             # 重新抛出异常
             raise
     
