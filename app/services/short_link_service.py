@@ -336,12 +336,18 @@ class ShortLinkService(BaseService[ShortLink]):
                     detail="短链接代码已存在，请使用其他代码"
                 )
             logger.error(f"创建短链接失败: {str(e)}", exc_info=True)
-            # 重新抛出异常
-            raise
+            # 抛出标准化的服务器错误异常
+            raise_api_exception(
+                ErrorCode.INTERNAL_ERROR,
+                detail="创建短链接时发生数据库错误，请稍后重试"
+            )
         except Exception as e:
             logger.error(f"创建短链接失败: {str(e)}", exc_info=True)
-            # 重新抛出异常
-            raise
+            # 抛出标准化的服务器错误异常
+            raise_api_exception(
+                ErrorCode.INTERNAL_ERROR,
+                detail="创建短链接时发生错误，请稍后重试"
+            )
     
     async def update_short_link(
         self,
