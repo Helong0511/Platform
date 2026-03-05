@@ -68,21 +68,26 @@ def extract_user_id_from_token(request: Request) -> Optional[str]:
         try:
             # 不验证签名，只解码payload（用于获取用户ID）
             # 注意：某些版本的python-jose需要密钥参数，即使verify_signature=False
+            # 使用None作为密钥，避免空字符串可能导致的问题
             payload = jwt.decode(
                 token,
-                "",  # 空字符串作为密钥（因为不验证签名）
+                None,  # 使用None作为密钥
                 options={"verify_signature": False, "verify_exp": False}
             )
             user_id = payload.get("sub")
             if user_id:
-                return str(user_id)
-        except JWTError:
+                user_id_str = str(user_id)
+                logger.debug(f"成功提取用户ID: {user_id_str}")
+                return user_id_str
+        except JWTError as e:
             # token格式错误，无法提取用户ID
+            logger.debug(f"JWT解码失败: {e}")
             pass
     except Exception as e:
         # 提取失败不影响CSRF功能，静默处理
         logger.debug(f"提取用户ID失败: {e}")
     
+    logger.debug("无法提取用户ID，返回None")
     return None
 
 
