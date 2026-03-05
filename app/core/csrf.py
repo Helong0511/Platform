@@ -19,7 +19,7 @@ from app.core.redis_client import get_redis_client
 from app.core.utils import get_client_ip
 from app.core.csrf_utils import safe_raise_csrf_exception
 from app.core.audit_log import log_user_action
-from app.db.database import get_db
+from app.core.database import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -539,7 +539,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             logger.warning(f"CSRF令牌缺失: {request.method} {request.url.path}, session_id: {session_id}")
             # 记录审计日志
             try:
-                from app.db.database import get_db
+                from app.core.database import get_db
                 async for db in get_db():
                     await log_user_action(
                         db=db,
