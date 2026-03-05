@@ -613,6 +613,10 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 "anyio" in error_module):
                 logger.debug(f"请求流异常: {method} {path}")
                 raise
+            # 检查是否是HTTPException，如果是则直接抛出，不记录为错误
+            from fastapi.exceptions import HTTPException
+            if isinstance(e, HTTPException):
+                raise
             # 其他异常，记录日志并重新抛出
             logger.error(f"CSRF验证过程中发生未预期的错误: {method} {path}，错误: {str(e)}", exc_info=True)
             raise
