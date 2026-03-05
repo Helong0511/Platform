@@ -84,6 +84,16 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
         await _redis_client.ping()
         logger.info(f"Redis连接成功: {redis_host}:{redis_port}/{redis_db}")
         
+        # 测试设置和获取操作
+        test_key = "test:redis:connection"
+        test_value = "ok"
+        await _redis_client.setex(test_key, 60, test_value)
+        retrieved_value = await _redis_client.get(test_key)
+        if retrieved_value == test_value:
+            logger.info("Redis读写操作测试成功")
+        else:
+            logger.warning("Redis读写操作测试失败")
+        
         return _redis_client
     except Exception as e:
         error_msg = str(e)
