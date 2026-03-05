@@ -336,14 +336,19 @@
                 const screenWidth = window.innerWidth;
                 let textSize, iconSize, textPosition, iconPosition;
 
-                if (screenWidth < 480) { // 小屏手机
-                    textSize = center * 0.035;
-                    iconSize = center * 0.05;
+                if (screenWidth < 320) { // 超小屏手机
+                    textSize = center * 0.03;
+                    iconSize = center * 0.04;
+                    textPosition = radius - 40; // 文字位置
+                    iconPosition = radius - 5; // 图标靠近边缘
+                } else if (screenWidth < 480) { // 小屏手机
+                    textSize = center * 0.032;
+                    iconSize = center * 0.045;
                     textPosition = radius - 45; // 文字位置
                     iconPosition = radius - 5; // 图标靠近边缘
                 } else if (screenWidth < 768) { // 大屏手机
-                    textSize = center * 0.04;
-                    iconSize = center * 0.06;
+                    textSize = center * 0.038;
+                    iconSize = center * 0.055;
                     textPosition = radius - 50; // 文字位置
                     iconPosition = radius - 5; // 图标靠近边缘
                 } else { // 电脑端
@@ -365,14 +370,26 @@
                     displayText = displayText.substring(0, 15) + '...';
                 }
 
+                // 计算文字宽度，确保图标位置准确
+                const textWidth = ctx.measureText(displayText).width;
+
+                // 绘制文字
                 ctx.fillText(displayText, textPosition, 10);
 
                 // 根据奖项类型绘制不同图标，确保图标靠近跑马灯且不遮挡文字
                 ctx.font = iconSize + "px Arial";
+
+                // 为 iPhone 17 Pro Max 调整图标位置，确保不遮挡文字
+                let finalIconPosition = iconPosition;
+                if (prizes[i] === "iPhone 17 Pro Max" && screenWidth < 768) {
+                    // 在手机端，为长文本留出更多空间
+                    finalIconPosition = textPosition + textWidth + 10;
+                }
+
                 if (prizes[i] === "iPhone 17 Pro Max") {
-                    ctx.fillText("📱", iconPosition, 12);
+                    ctx.fillText("📱", finalIconPosition, 12);
                 } else {
-                    ctx.fillText("🎁", iconPosition, 12);
+                    ctx.fillText("🎁", finalIconPosition, 12);
                 }
 
                 ctx.restore();
