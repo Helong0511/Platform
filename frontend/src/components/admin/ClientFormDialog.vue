@@ -512,8 +512,6 @@ const generateUUID = () => {
 };
 
 const handleSave = async () => {
-  if (!formRef.value) return;
-  
   // 添加模式：验证用户信息
   if (!props.isEdit) {
     // 创建新用户模式：验证用户信息是否完整

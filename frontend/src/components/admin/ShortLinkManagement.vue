@@ -508,10 +508,7 @@ const handleEdit = async (link) => {
 
 // 保存
 const handleSave = async () => {
-  if (!formRef.value) return;
-  
   try {
-    await formRef.value.validate();
     saving.value = true;
     
     const submitData = { ...formData };
