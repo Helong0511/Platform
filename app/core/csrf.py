@@ -469,6 +469,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             logger.warning(f"CSRF令牌不存在: {request.method} {request.url.path}, session_id: {session_id}")
             new_csrf_token = generate_csrf_token()
             await self._store_csrf_token(session_id, new_csrf_token, request)
+            logger.info(f"CSRF令牌不存在，生成新令牌: {new_csrf_token[:10]}...")
             await self._handle_csrf_validation_error(request, "CSRF令牌无效或已过期，请刷新页面后重试", new_csrf_token)
         
         # 使用安全的字符串比较（防止时序攻击）
