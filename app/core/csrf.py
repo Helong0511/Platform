@@ -436,7 +436,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         http_exc = HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=message,
-            headers=headers if headers else None
+            headers=headers
         )
         
         # 确保headers属性存在且是字典（防御性编程）
