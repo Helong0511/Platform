@@ -35,6 +35,8 @@ _MEMORY_TOKEN_STORE_MAX_SIZE = 10000
 _MEMORY_TOKEN_CLEANUP_THRESHOLD = int(_MEMORY_TOKEN_STORE_MAX_SIZE * 0.8)
 # 令牌刷新的最小间隔（秒），防止频繁刷新
 _MIN_TOKEN_REFRESH_INTERVAL = 300  # 5分钟
+# 令牌刷新阈值，当令牌剩余时间小于此阈值时刷新（比例）
+_TOKEN_REFRESH_THRESHOLD = 0.1  # 10%
 def validate_referer(request: Request) -> bool:
     """
     验证请求的Referer头，防止跨域CSRF攻击
