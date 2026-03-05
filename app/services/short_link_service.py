@@ -320,11 +320,11 @@ class ShortLinkService(BaseService[ShortLink]):
             
             logger.debug("刷新短链接对象")
             await self.db.refresh(short_link)
-        
-        logger.info(f"短链接创建成功: {short_link.short_code} -> {short_link.original_url}")
-        return short_link
-    except Exception as e:
-        logger.error(f"创建短链接失败: {str(e)}", exc_info=True)
+            
+            logger.info(f"短链接创建成功: {short_link.short_code} -> {short_link.original_url}")
+            return short_link
+        except Exception as e:
+            logger.error(f"创建短链接失败: {str(e)}", exc_info=True)
         # 重新抛出异常
         raise
     
