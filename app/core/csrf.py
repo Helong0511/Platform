@@ -353,12 +353,21 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         if not await self._check_connection_status(request):
             raise EndOfStream("客户端已断开连接")
         
-        # 直接抛出HTTPException，不尝试在异常对象上添加属性
-        # 这样可以避免可能的属性设置错误
-        raise HTTPException(
+        # 创建HTTPException
+        http_exc = HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=message
         )
+        
+        # 如果提供了令牌，将其添加到异常的headers中
+        # 这样FastAPI会将这些headers添加到响应中
+        if token_to_return:
+            if not hasattr(http_exc, "headers"):
+                http_exc.headers = {}
+            http_exc.headers["X-CSRF-Token"] = token_to_return
+            logger.debug(f"在CSRF错误响应中添加新令牌: {token_to_return[:10]}...")
+        
+        raise http_exc
     
     async def _check_connection_status(self, request: Request) -> bool:
         """
