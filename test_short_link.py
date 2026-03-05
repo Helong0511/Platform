@@ -90,6 +90,9 @@ def test_create_short_link(token, cookies, csrf_token):
     # 添加CSRF令牌到请求头
     if csrf_token:
         headers['X-CSRF-Token'] = csrf_token
+    # 确保cookies中包含csrf_token
+    if csrf_token:
+        cookies['csrf_token'] = csrf_token
     data = {
         'original_url': 'https://example.com',
         'title': '测试短链接',

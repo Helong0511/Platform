@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, and_, or_, text
 from sqlalchemy.orm import joinedload
+from sqlalchemy import exc
 
 from app.models.models import ShortLink, User, UserRole, Offer, Publisher
 from app.services.base_service import BaseService
