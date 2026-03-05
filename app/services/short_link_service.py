@@ -319,7 +319,7 @@ class ShortLinkService(BaseService[ShortLink]):
                     logger.debug(f"使用随机生成的代码: {unique_code}")
             
             logger.debug("刷新短链接对象")
-        await self.db.refresh(short_link)
+            await self.db.refresh(short_link)
         
         logger.info(f"短链接创建成功: {short_link.short_code} -> {short_link.original_url}")
         return short_link
