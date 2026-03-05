@@ -7,13 +7,14 @@ import logging
 import traceback
 from enum import IntEnum
 from typing import Optional, Dict, Any
+from datetime import datetime
 from fastapi import HTTPException, Request
 from sqlalchemy.future import select
 
 from app.core.audit_log import log_runtime_error
 from app.core.database import AsyncSessionLocal
 from app.core.security import JWTUtils
-from app.core.utils import get_client_ip
+from app.core.utils import get_client_ip, get_app_now_naive
 from app.models.models import User
 
 
@@ -230,11 +231,54 @@ def get_error_message(error_code: int, custom_message: Optional[str] = None) -> 
     return error_code_map.get(error_code, ErrorMessage.INTERNAL_ERROR)
 
 
+# 错误解决方案建议映射
+ERROR_SOLUTIONS = {
+    ErrorCode.BAD_REQUEST: "请检查请求参数是否正确",
+    ErrorCode.UNAUTHORIZED: "请先登录或重新登录获取访问凭证",
+    ErrorCode.FORBIDDEN: "请联系管理员获取相应权限",
+    ErrorCode.NOT_FOUND: "请确认资源ID或路径是否正确",
+    ErrorCode.CONFLICT: "请检查资源是否已存在或数据是否冲突",
+    ErrorCode.VALIDATION_ERROR: "请检查输入数据格式是否符合要求",
+    ErrorCode.TOO_MANY_REQUESTS: "请稍后再试，避免频繁请求",
+    ErrorCode.INTERNAL_ERROR: "请稍后重试，如果问题持续存在请联系技术支持",
+    ErrorCode.SERVICE_UNAVAILABLE: "服务暂时不可用，请稍后重试",
+    ErrorCode.INVALID_CREDENTIALS: "请检查用户名和密码是否正确",
+    ErrorCode.TOKEN_EXPIRED: "请重新登录获取新的访问令牌",
+    ErrorCode.TOKEN_INVALID: "请重新登录获取有效的访问令牌",
+    ErrorCode.USER_DISABLED: "您的账户已被禁用，请联系管理员",
+    ErrorCode.USER_NOT_FOUND: "请确认用户ID是否正确",
+    ErrorCode.USER_ALREADY_EXISTS: "请使用其他用户名",
+    ErrorCode.USERNAME_TAKEN: "请选择其他用户名",
+    ErrorCode.EMAIL_TAKEN: "请使用其他邮箱地址",
+    ErrorCode.CLIENT_NOT_FOUND: "请确认客户ID是否正确",
+    ErrorCode.CLIENT_ALREADY_EXISTS: "该客户已存在",
+    ErrorCode.PRODUCT_NOT_FOUND: "请确认产品ID是否正确",
+    ErrorCode.PRODUCT_ALREADY_EXISTS: "该产品已存在",
+    ErrorCode.OPERATION_FAILED: "请检查操作数据并重试",
+    ErrorCode.RESOURCE_NOT_FOUND: "请确认资源是否存在",
+    ErrorCode.RESOURCE_ALREADY_EXISTS: "请使用其他标识",
+    ErrorCode.ACCESS_DENIED: "请联系管理员获取访问权限",
+    ErrorCode.INVALID_PARAMETER: "请检查参数是否正确",
+}
+
+def get_error_solution(error_code: int) -> Optional[str]:
+    """
+    获取错误的解决方案建议
+    
+    Args:
+        error_code: 错误码
+    
+    Returns:
+        解决方案建议字符串或None
+    """
+    return ERROR_SOLUTIONS.get(error_code)
+
 def create_error_response(
         error_code: int,
         message: Optional[str] = None,
         detail: Optional[str] = None,
-        data: Optional[Any] = None
+        data: Optional[Any] = None,
+        path: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     创建标准错误响应
@@ -244,23 +288,45 @@ def create_error_response(
         message: 错误信息（如果为 None，会根据 error_code 自动获取）
         detail: 详细错误信息（可选）
         data: 附加数据（可选）
+        path: 请求路径（可选）
     
     Returns:
         标准错误响应字典
     """
     error_message = get_error_message(error_code, message)
-
+    solution = get_error_solution(error_code)
+    
+    # 获取当前时间戳
+    timestamp = get_app_now_naive().isoformat()
+    
+    # 构建响应状态
+    status = "error"
+    if error_code == ErrorCode.SUCCESS:
+        status = "success"
+    
     response = {
         "code": error_code,
+        "status": status,
         "message": error_message,
+        "timestamp": timestamp,
     }
-
+    
+    # 添加请求路径（如果提供）
+    if path:
+        response["path"] = path
+    
+    # 添加详细错误信息
     if detail:
         response["detail"] = detail
-
+    
+    # 添加解决方案建议
+    if solution:
+        response["solution"] = solution
+    
+    # 添加附加数据
     if data is not None:
         response["data"] = data
-
+    
     return response
 
 

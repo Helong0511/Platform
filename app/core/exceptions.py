@@ -16,7 +16,8 @@ def raise_api_exception(
         message: Optional[str] = None,
         detail: Optional[str] = None,
         status_code: Optional[int] = None,
-        data: Optional[Any] = None
+        data: Optional[Any] = None,
+        path: Optional[str] = None
 ) -> None:
     """
     抛出标准化的 API 异常
@@ -29,8 +30,9 @@ def raise_api_exception(
         error_code: 错误码（使用 ErrorCode 枚举）
         message: 错误信息（如果为 None，会根据 error_code 自动获取）
         detail: 详细错误信息（可选）
-        status_code: HTTP 状态码（如果为 None，会根据 error_code 自动映射。业务错误默认200，服务器错误500）
+        status_code: HTTP 状态码（如果为 None，会根据 error_code 自动映射。业务错误默认200，服务器错误500
         data: 附加数据（可选）
+        path: 请求路径（可选）
     
     Raises:
         HTTPException: 标准化的 HTTP 异常
@@ -52,7 +54,8 @@ def raise_api_exception(
         error_code=error_code,
         message=error_message,
         detail=detail,
-        data=data
+        data=data,
+        path=path
     )
 
     # 抛出 HTTPException，FastAPI 会自动处理并返回标准格式

@@ -807,7 +807,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         error_code=ErrorCode.VALIDATION_ERROR,
         message="请求参数验证失败",
         detail=error_detail,
-        data={"errors": serializable_errors}
+        data={"errors": serializable_errors},
+        path=request.url.path
     )
     # 业务错误返回200状态码，通过响应体中的code字段表示错误
     return JSONResponse(
@@ -884,7 +885,8 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     error_response = create_error_response(
         error_code=error_code,
         message=detail,
-        detail=detail
+        detail=detail,
+        path=request.url.path
     )
 
     # 业务错误返回200，只有真正的服务器错误才返回500
@@ -1066,7 +1068,8 @@ async def global_exception_handler(request: Request, exc: Exception):
     error_response = create_error_response(
         error_code=ErrorCode.INTERNAL_ERROR,
         message=error_detail,
-        detail=error_detail
+        detail=error_detail,
+        path=request.url.path
     )
 
     # 这是真正的程序代码错误，返回500状态码

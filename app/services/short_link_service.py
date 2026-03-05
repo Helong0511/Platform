@@ -325,6 +325,10 @@ class ShortLinkService(BaseService[ShortLink]):
             logger.debug("刷新短链接对象")
             await self.db.refresh(short_link)
             
+            # 提交事务，确保数据保存到数据库
+            logger.debug("提交事务")
+            await self.db.commit()
+            
             logger.info(f"短链接创建成功: {short_link.short_code} -> {short_link.original_url}")
             return short_link
         except exc.IntegrityError as e:
