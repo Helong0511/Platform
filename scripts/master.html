@@ -174,6 +174,45 @@
             z-index: 20;
         }
 
+        /* ===== 免费抽文字 ===== */
+        .free-spin-text {
+            position: absolute;
+            top: -30%;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 10vw;
+            font-weight: bold;
+            color: gold;
+            text-shadow:
+                0 0 10px gold,
+                0 0 20px gold,
+                0 0 30px gold,
+                0 0 40px gold;
+            z-index: 25;
+            animation: freeSpinPulse 2s ease-in-out infinite alternate;
+        }
+
+        /* 免费抽文字动画 */
+        @keyframes freeSpinPulse {
+            0% {
+                transform: translateX(-50%) scale(1);
+                opacity: 1;
+            }
+
+            100% {
+                transform: translateX(-50%) scale(1.2);
+                opacity: 0.8;
+            }
+        }
+
+        /* 电脑端优化 */
+        @media (min-width: 768px) {
+            .free-spin-text {
+                font-size: 60px;
+                top: -20%;
+            }
+        }
+
         /* ===== 中间按钮 ===== */
         .center-btn {
             position: absolute;
@@ -212,12 +251,12 @@
             }
 
             100% {
-                transform: translate(-50%, -50%) scale(1.3);
+                transform: translate(-50%, -50%) scale(1.5);
                 opacity: 0.7;
                 box-shadow:
                     inset 0 10px 20px rgba(255, 255, 255, 0.9),
                     inset 0 -10px 20px rgba(0, 0, 0, 0.5),
-                    0 25px 60px rgba(255, 0, 0, 1);
+                    0 30px 70px rgba(255, 0, 0, 1);
             }
         }
 
@@ -273,6 +312,7 @@
 <body>
 
     <div class="wrapper">
+        <div class="free-spin-text">Free Spin</div>
         <div class="pointer"></div>
         <canvas id="wheel"></canvas>
         <div class="lights" id="lights"></div>
@@ -334,62 +374,52 @@
 
                 // 根据屏幕尺寸调整文字和图标大小
                 const screenWidth = window.innerWidth;
-                let textSize, iconSize, textPosition, iconPosition;
+                let textSize, iconSize, textX, iconX;
 
                 if (screenWidth < 320) { // 超小屏手机
-                    textSize = center * 0.03;
-                    iconSize = center * 0.04;
-                    textPosition = radius - 40; // 文字位置
-                    iconPosition = radius - 5; // 图标靠近边缘
+                    textSize = center * 0.055;
+                    iconSize = center * 0.065;
+                    textX = radius - 25; // 文字位置（靠近图标）
+                    iconX = radius - 5; // 图标靠近边缘
                 } else if (screenWidth < 480) { // 小屏手机
-                    textSize = center * 0.032;
-                    iconSize = center * 0.045;
-                    textPosition = radius - 45; // 文字位置
-                    iconPosition = radius - 5; // 图标靠近边缘
+                    textSize = center * 0.06;
+                    iconSize = center * 0.07;
+                    textX = radius - 28; // 文字位置（靠近图标）
+                    iconX = radius - 5; // 图标靠近边缘
                 } else if (screenWidth < 768) { // 大屏手机
-                    textSize = center * 0.038;
-                    iconSize = center * 0.055;
-                    textPosition = radius - 50; // 文字位置
-                    iconPosition = radius - 5; // 图标靠近边缘
+                    textSize = center * 0.065;
+                    iconSize = center * 0.08;
+                    textX = radius - 30; // 文字位置（靠近图标）
+                    iconX = radius - 5; // 图标靠近边缘
                 } else { // 电脑端
                     textSize = center * 0.05;
                     iconSize = center * 0.08;
-                    textPosition = radius - 60; // 文字位置
-                    iconPosition = radius - 10; // 图标靠近边缘
+                    textX = radius - 50; // 文字位置
+                    iconX = radius - 0; // 图标靠近边缘
                 }
 
                 // 绘制奖项文字
                 ctx.fillStyle = "#000";
                 ctx.font = textSize + "px Arial";
-                ctx.textAlign = "right";
+                ctx.textAlign = "right"; // 改回右对齐，更好地与图标对齐
 
                 // 确保完整显示 iPhone 17 Pro Max
                 let displayText = prizes[i];
                 // 对于 iPhone 17 Pro Max 不进行截断
-                if (displayText !== "iPhone 17 Pro Max" && displayText.length > 15) {
-                    displayText = displayText.substring(0, 15) + '...';
+                if (displayText !== "iPhone 17 Pro Max" && displayText.length > 12) {
+                    displayText = displayText.substring(0, 12) + '...';
                 }
 
-                // 计算文字宽度，确保图标位置准确
-                const textWidth = ctx.measureText(displayText).width;
-
                 // 绘制文字
-                ctx.fillText(displayText, textPosition, 10);
+                ctx.fillText(displayText, textX, 10);
 
                 // 根据奖项类型绘制不同图标，确保图标靠近跑马灯且不遮挡文字
                 ctx.font = iconSize + "px Arial";
 
-                // 为 iPhone 17 Pro Max 调整图标位置，确保不遮挡文字
-                let finalIconPosition = iconPosition;
-                if (prizes[i] === "iPhone 17 Pro Max" && screenWidth < 768) {
-                    // 在手机端，为长文本留出更多空间
-                    finalIconPosition = textPosition + textWidth + 10;
-                }
-
                 if (prizes[i] === "iPhone 17 Pro Max") {
-                    ctx.fillText("📱", finalIconPosition, 12);
+                    ctx.fillText("📱", iconX, 12);
                 } else {
-                    ctx.fillText("🎁", finalIconPosition, 12);
+                    ctx.fillText("🎁", iconX, 12);
                 }
 
                 ctx.restore();
