@@ -21,8 +21,8 @@
         /* ===== 自适应转盘容器 ===== */
         .wrapper {
             position: relative;
-            width: min(92vw, 800px);
-            height: min(92vw, 800px);
+            width: min(95vw, 800px);
+            height: min(95vw, 800px);
             border-radius: 50%;
             background: radial-gradient(circle, #aa0000, #400000);
             box-shadow:
@@ -30,6 +30,29 @@
                 0 20px 60px rgba(0, 0, 0, 0.9),
                 0 0 0 12px gold,
                 0 0 50px gold;
+        }
+
+        /* 手机端优化 */
+        @media (max-width: 768px) {
+            .wrapper {
+                width: min(98vw, 800px);
+                height: min(98vw, 800px);
+            }
+
+            .center-btn {
+                font-size: 3vw;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .wrapper {
+                width: 98vw;
+                height: 98vw;
+            }
+
+            .center-btn {
+                font-size: 4vw;
+            }
         }
 
         /* ===== 跑马灯 ===== */
@@ -269,7 +292,7 @@
         const wrapper = document.querySelector(".wrapper");
 
         const prizes = [
-            "Better Luck Next Time",
+            "Try Again",
             "iPhone 17 Pro Max",
             "Walmart-50",
             "Walmart-200",
@@ -309,24 +332,47 @@
                 ctx.translate(center, center);
                 ctx.rotate(angle + arc / 2);
 
+                // 根据屏幕尺寸调整文字和图标大小
+                const screenWidth = window.innerWidth;
+                let textSize, iconSize, textPosition, iconPosition;
+
+                if (screenWidth < 480) { // 小屏手机
+                    textSize = center * 0.035;
+                    iconSize = center * 0.05;
+                    textPosition = radius - 45; // 文字位置
+                    iconPosition = radius - 5; // 图标靠近边缘
+                } else if (screenWidth < 768) { // 大屏手机
+                    textSize = center * 0.04;
+                    iconSize = center * 0.06;
+                    textPosition = radius - 50; // 文字位置
+                    iconPosition = radius - 5; // 图标靠近边缘
+                } else { // 电脑端
+                    textSize = center * 0.05;
+                    iconSize = center * 0.08;
+                    textPosition = radius - 60; // 文字位置
+                    iconPosition = radius - 10; // 图标靠近边缘
+                }
+
                 // 绘制奖项文字
                 ctx.fillStyle = "#000";
-                ctx.font = (center * 0.05) + "px Arial";
+                ctx.font = textSize + "px Arial";
                 ctx.textAlign = "right";
 
-                // 计算文字宽度，动态调整图标位置
-                const textWidth = ctx.measureText(prizes[i]).width;
-                const textX = radius - 30; // 减少间距
+                // 确保完整显示 iPhone 17 Pro Max
+                let displayText = prizes[i];
+                // 对于 iPhone 17 Pro Max 不进行截断
+                if (displayText !== "iPhone 17 Pro Max" && displayText.length > 15) {
+                    displayText = displayText.substring(0, 15) + '...';
+                }
 
-                ctx.fillText(prizes[i], textX, 10);
+                ctx.fillText(displayText, textPosition, 10);
 
-                // 根据奖项类型绘制不同图标
-                ctx.font = (center * 0.1) + "px Arial";
-                const iconX = textX + 5; // 图标紧跟在文字后面
+                // 根据奖项类型绘制不同图标，确保图标靠近跑马灯且不遮挡文字
+                ctx.font = iconSize + "px Arial";
                 if (prizes[i] === "iPhone 17 Pro Max") {
-                    ctx.fillText("📱", iconX, 12);
+                    ctx.fillText("📱", iconPosition, 12);
                 } else {
-                    ctx.fillText("🎁", iconX, 12);
+                    ctx.fillText("🎁", iconPosition, 12);
                 }
 
                 ctx.restore();
