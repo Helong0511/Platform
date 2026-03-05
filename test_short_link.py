@@ -1,8 +1,14 @@
 import requests
 import json
+import traceback
 
 # 固定的User-Agent，确保会话ID一致
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+
+# 启用详细日志
+import logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # 获取CSRF令牌
 def get_csrf_token(cookies, token):

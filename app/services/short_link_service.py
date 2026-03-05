@@ -318,23 +318,15 @@ class ShortLinkService(BaseService[ShortLink]):
                     short_link.short_code = unique_code
                     logger.debug(f"使用随机生成的代码: {unique_code}")
             
-            logger.debug("提交事务")
-            await self.db.commit()
             logger.debug("刷新短链接对象")
-            await self.db.refresh(short_link)
-            
-            logger.info(f"短链接创建成功: {short_link.short_code} -> {short_link.original_url}")
-            return short_link
-        except Exception as e:
-            logger.error(f"创建短链接失败: {str(e)}", exc_info=True)
-            # 回滚事务
-            try:
-                await self.db.rollback()
-                logger.debug("事务已回滚")
-            except Exception as rollback_error:
-                logger.error(f"回滚事务失败: {str(rollback_error)}")
-            # 重新抛出异常
-            raise
+        await self.db.refresh(short_link)
+        
+        logger.info(f"短链接创建成功: {short_link.short_code} -> {short_link.original_url}")
+        return short_link
+    except Exception as e:
+        logger.error(f"创建短链接失败: {str(e)}", exc_info=True)
+        # 重新抛出异常
+        raise
     
     async def update_short_link(
         self,

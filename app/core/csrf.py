@@ -18,6 +18,8 @@ from app.core.config import settings
 from app.core.redis_client import get_redis_client
 from app.core.utils import get_client_ip
 from app.core.csrf_utils import safe_raise_csrf_exception
+from app.core.audit_log import log_user_action
+from app.db.database import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +35,47 @@ _MEMORY_TOKEN_STORE_MAX_SIZE = 10000
 _MEMORY_TOKEN_CLEANUP_THRESHOLD = int(_MEMORY_TOKEN_STORE_MAX_SIZE * 0.8)
 # 令牌刷新的最小间隔（秒），防止频繁刷新
 _MIN_TOKEN_REFRESH_INTERVAL = 300  # 5分钟
-# 令牌刷新阈值（剩余时间小于此值时才刷新），减少刷新频率
-_TOKEN_REFRESH_THRESHOLD = 0.1  # 10%（原来是20%）
+def validate_referer(request: Request) -> bool:
+    """
+    验证请求的Referer头，防止跨域CSRF攻击
+    
+    参数:
+        request: FastAPI请求对象
+    
+    返回:
+        如果Referer有效返回True，否则返回False
+    """
+    referer = request.headers.get("Referer")
+    if not referer:
+        # 没有Referer头，记录警告但不直接拒绝（兼容性考虑）
+        logger.debug("CSRF检查：缺少Referer头")
+        return True
+    
+    try:
+        from urllib.parse import urlparse
+        parsed_referer = urlparse(referer)
+        referer_domain = parsed_referer.netloc.lower()
+        
+        # 获取允许的域名列表
+        allowed_origins = getattr(settings, 'BACKEND_CORS_ORIGINS', [])
+        if not allowed_origins:
+            # 如果没有配置CORS域名，默认允许当前域名
+            host = request.headers.get("Host", "").split(":")[0].lower()
+            allowed_domains = [host] if host else []
+        else:
+            allowed_domains = [str(origin).lower().replace("https://", "").replace("http://", "") for origin in allowed_origins]
+        
+        # 检查Referer域名是否在允许列表中
+        for allowed_domain in allowed_domains:
+            if referer_domain == allowed_domain or referer_domain.endswith("." + allowed_domain):
+                return True
+        
+        logger.warning(f"CSRF检查：Referer域名 {referer_domain} 不在允许列表中")
+        return False
+        
+    except Exception as e:
+        logger.warning(f"CSRF检查：Referer验证失败: {e}")
+        return False
 
 
 def extract_user_id_from_token(request: Request) -> Optional[str]:
@@ -107,21 +148,27 @@ def generate_csrf_token() -> str:
 def get_csrf_token_from_request(request: Request) -> Optional[str]:
     """
     从请求中获取CSRF令牌
-    支持从以下位置获取：
+    支持双重提交Cookie模式和传统头模式：
     1. 请求头：X-CSRF-Token
-    2. 表单数据：csrf_token
-    3. 查询参数：csrf_token（仅用于GET请求）
+    2. Cookie：csrf_token（双重提交模式）
+    3. 表单数据：csrf_token（POST/PUT/PATCH/DELETE）
+    4. 查询参数：csrf_token（仅用于GET请求）
     """
-    # 1. 从请求头获取
+    # 1. 从请求头获取（传统模式）
     token = request.headers.get("X-CSRF-Token")
     if token:
         return token
     
-    # 2. 从表单数据获取（POST/PUT/PATCH/DELETE）
-    # 注意：FastAPI的request.form()是异步的，需要在中间件中特殊处理
-    # 这里主要从请求头获取，表单数据在端点中处理
+    # 2. 从Cookie获取（双重提交模式）
+    token = request.cookies.get("csrf_token")
+    if token:
+        return token
     
-    # 3. 从查询参数获取（仅用于GET请求）
+    # 3. 从表单数据获取（POST/PUT/PATCH/DELETE）
+    # 注意：FastAPI的request.form()是异步的，需要在中间件中特殊处理
+    # 这里主要从请求头和Cookie获取，表单数据在端点中处理
+    
+    # 4. 从查询参数获取（仅用于GET请求）
     if request.method == "GET":
         token = request.query_params.get("csrf_token")
         if token:
@@ -329,11 +376,28 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     async def _add_csrf_token_to_response(self, response: Response, csrf_token: str, request: Request) -> None:
         """
         向响应添加CSRF令牌
-        处理连接关闭等异常情况
+        使用双重提交Cookie模式：同时设置HttpOnly Cookie和响应头
+        
+        参数:
+            response: 响应对象
+            csrf_token: CSRF令牌
+            request: 请求对象
         """
         try:
+            # 设置HttpOnly Cookie（双重提交模式）
+            response.set_cookie(
+                key="csrf_token",
+                value=csrf_token,
+                httponly=True,  # 防止JavaScript访问
+                secure=getattr(settings, 'is_production', False),  # 生产环境启用HTTPS
+                samesite="strict",  # 严格SameSite，防止CSRF
+                max_age=settings.CSRF_TOKEN_EXPIRE_SECONDS,
+                path="/"  # 全局路径
+            )
+            
+            # 设置响应头（向后兼容）
             response.headers["X-CSRF-Token"] = csrf_token
-            logger.debug(f"已添加CSRF令牌到响应头: {request.method} {request.url.path}")
+            logger.debug(f"已添加CSRF令牌到Cookie和响应头: {request.method} {request.url.path}")
         except (ConnectionError, OSError, RuntimeError) as e:
             # 如果连接已关闭，无法修改响应头，记录日志但不抛出异常
             error_type_name = type(e).__name__
@@ -348,6 +412,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         """
         处理CSRF验证错误
         检查连接状态，使用安全的异常抛出机制
+        支持双重提交Cookie模式
         """
         # 检查连接状态
         if not await self._check_connection_status(request):
@@ -365,6 +430,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             if not hasattr(http_exc, "headers"):
                 http_exc.headers = {}
             http_exc.headers["X-CSRF-Token"] = token_to_return
+            
+            # 同时设置Cookie（双重提交模式）
+            # 注意：HTTPException的headers会被FastAPI自动添加到响应中
+            # 但Cookie需要特殊处理，这里通过headers传递信息给异常处理器
+            http_exc.headers["Set-Cookie"] = f"csrf_token={token_to_return}; HttpOnly; SameSite=Strict; Max-Age={settings.CSRF_TOKEN_EXPIRE_SECONDS}; Path=/"
+            
             logger.debug(f"在CSRF错误响应中添加新令牌: {token_to_return[:10]}...")
         
         raise http_exc
@@ -448,17 +519,44 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     async def _handle_non_get_request(self, request: Request, call_next, session_id: str) -> Response:
         """
         处理非GET请求
-        验证CSRF令牌
+        验证CSRF令牌和Referer
         """
         # 检查连接状态
         if not await self._check_connection_status(request):
             raise EndOfStream("客户端已断开连接")
+        
+        # 验证Referer（额外的安全层）
+        if not validate_referer(request):
+            logger.warning(f"CSRF检查失败：Referer验证失败: {request.method} {request.url.path}")
+            await self._handle_csrf_validation_error(request, "请求来源验证失败")
         
         # 获取请求中的CSRF令牌
         csrf_token = get_csrf_token_from_request(request)
         
         if not csrf_token:
             logger.warning(f"CSRF令牌缺失: {request.method} {request.url.path}, session_id: {session_id}")
+            # 记录审计日志
+            try:
+                from app.db.database import get_db
+                async for db in get_db():
+                    await log_user_action(
+                        db=db,
+                        action_type="CSRF_VIOLATION",
+                        user_id=extract_user_id_from_token(request),
+                        request=request,
+                        ip_address=get_client_ip(request),
+                        success=False,
+                        error_message="CSRF令牌缺失",
+                        details={
+                            "violation_type": "missing_token",
+                            "session_id": session_id,
+                            "path": request.url.path,
+                            "method": request.method
+                        }
+                    )
+                    break
+            except Exception as e:
+                logger.error(f"记录CSRF审计日志失败: {e}")
             await self._handle_csrf_validation_error(request, "CSRF令牌缺失，请刷新页面后重试")
         
         # 获取存储的CSRF令牌
@@ -470,6 +568,27 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             new_csrf_token = generate_csrf_token()
             await self._store_csrf_token(session_id, new_csrf_token, request)
             logger.info(f"CSRF令牌不存在，生成新令牌: {new_csrf_token[:10]}...")
+            # 记录审计日志
+            try:
+                async for db in get_db():
+                    await log_user_action(
+                        db=db,
+                        action_type="CSRF_VIOLATION",
+                        user_id=extract_user_id_from_token(request),
+                        request=request,
+                        ip_address=get_client_ip(request),
+                        success=False,
+                        error_message="CSRF令牌不存在",
+                        details={
+                            "violation_type": "token_not_found",
+                            "session_id": session_id,
+                            "path": request.url.path,
+                            "method": request.method
+                        }
+                    )
+                    break
+            except Exception as e:
+                logger.error(f"记录CSRF审计日志失败: {e}")
             await self._handle_csrf_validation_error(request, "CSRF令牌无效或已过期，请刷新页面后重试", new_csrf_token)
         
         # 使用安全的字符串比较（防止时序攻击）
@@ -492,6 +611,31 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 f"  期望的令牌: {stored_token[:10]}...\n"
                 f"  实际的令牌: {csrf_token[:10]}..."
             )
+            
+            # 记录审计日志
+            try:
+                async for db in get_db():
+                    await log_user_action(
+                        db=db,
+                        action_type="CSRF_VIOLATION",
+                        user_id=user_id,
+                        request=request,
+                        ip_address=client_ip,
+                        success=False,
+                        error_message="CSRF令牌不匹配",
+                        details={
+                            "violation_type": "token_mismatch",
+                            "session_id": session_id,
+                            "path": request.url.path,
+                            "method": request.method,
+                            "user_agent": user_agent,
+                            "expected_token_prefix": stored_token[:10],
+                            "received_token_prefix": csrf_token[:10]
+                        }
+                    )
+                    break
+            except Exception as e:
+                logger.error(f"记录CSRF审计日志失败: {e}")
             
             # 检查是否是服务器重启后的情况
             memory_token = _csrf_tokens.get(session_id)
