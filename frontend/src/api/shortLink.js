@@ -10,7 +10,8 @@ import { refreshCsrfTokenBeforeRequest } from '../utils/api';
  */
 export const createShortLink = async (linkData) => {
   // 在保存前刷新CSRF令牌，确保使用最新的令牌
-  await refreshCsrfTokenBeforeRequest('/api/v1/short-links/?page_size=1');
+  // 注意：使用不需要管理员权限的端点来刷新CSRF令牌
+  await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
   
   return request({
     url: '/api/v1/short-links/',
@@ -45,7 +46,8 @@ export const getShortLinkDetail = async (linkId) => {
  */
 export const updateShortLink = async (linkId, linkData) => {
   // 在保存前刷新CSRF令牌，确保使用最新的令牌
-  await refreshCsrfTokenBeforeRequest('/api/v1/short-links/?page_size=1');
+  // 注意：使用不需要管理员权限的端点来刷新CSRF令牌
+  await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
   
   return request({
     url: `/api/v1/short-links/${linkId}`,
@@ -59,7 +61,8 @@ export const updateShortLink = async (linkId, linkData) => {
  */
 export const deleteShortLink = async (linkId) => {
   // 在删除前刷新CSRF令牌，确保使用最新的令牌
-  await refreshCsrfTokenBeforeRequest('/api/v1/short-links/?page_size=1');
+  // 注意：使用不需要管理员权限的端点来刷新CSRF令牌
+  await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
   
   return request({
     url: `/api/v1/short-links/${linkId}`,

@@ -532,6 +532,9 @@ const handleSave = async () => {
     await loadStats();
   } catch (error) {
     logger.error('保存短链接失败:', error);
+    // 显示错误信息给用户
+    const errorMessage = error.response?.data?.detail || error.response?.data?.message || error.message || '保存失败，请稍后重试';
+    ElMessage.error(errorMessage);
   } finally {
     saving.value = false;
   }

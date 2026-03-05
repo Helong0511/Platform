@@ -424,11 +424,13 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             detail=message
         )
         
+        # 确保headers属性存在且是字典
+        if not hasattr(http_exc, "headers"):
+            http_exc.headers = {}
+        
         # 如果提供了令牌，将其添加到异常的headers中
         # 这样FastAPI会将这些headers添加到响应中
         if token_to_return:
-            if not hasattr(http_exc, "headers"):
-                http_exc.headers = {}
             http_exc.headers["X-CSRF-Token"] = token_to_return
             
             # 同时设置Cookie（双重提交模式）
