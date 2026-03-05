@@ -500,9 +500,11 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 # 服务器重启，生成新令牌
                 new_csrf_token = generate_csrf_token()
                 await self._store_csrf_token(session_id, new_csrf_token, request)
+                logger.info(f"服务器重启导致CSRF令牌不匹配，生成新令牌: {new_csrf_token[:10]}...")
                 await self._handle_csrf_validation_error(request, "CSRF令牌验证失败（可能是服务器重启导致），请刷新页面后重试", new_csrf_token)
             else:
                 # 令牌不同步，返回存储的正确令牌
+                logger.info(f"CSRF令牌不匹配，返回正确的存储令牌: {stored_token[:10]}...")
                 await self._handle_csrf_validation_error(request, "CSRF令牌验证失败，请刷新页面后重试", stored_token)
         
         # 验证通过，处理请求
