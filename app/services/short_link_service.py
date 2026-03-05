@@ -217,87 +217,114 @@ class ShortLinkService(BaseService[ShortLink]):
         Returns:
             ShortLink: 创建的短链接对象
         """
-        # 如果提供了自定义短链接代码，检查是否已存在
-        if link_data.get('short_code'):
-            existing_result = await self.db.execute(
-                select(ShortLink).where(ShortLink.short_code == link_data['short_code'])
-            )
-            existing = existing_result.scalar_one_or_none()
-            if existing:
-                raise_api_exception(
-                    ErrorCode.RESOURCE_ALREADY_EXISTS,
-                    detail=f"短链接代码 '{link_data['short_code']}' 已存在，请使用其他代码"
+        logger.info(f"开始创建短链接，数据: {link_data}")
+        
+        try:
+            # 如果提供了自定义短链接代码，检查是否已存在
+            if link_data.get('short_code'):
+                logger.debug(f"检查自定义短链接代码: {link_data['short_code']}")
+                existing_result = await self.db.execute(
+                    select(ShortLink).where(ShortLink.short_code == link_data['short_code'])
                 )
-            short_code = link_data['short_code']
-        else:
-            short_code = None
-        
-        # 验证 Offer 是否存在（如果提供了 offer_id）
-        if link_data.get('offer_id'):
-            offer_result = await self.db.execute(
-                select(Offer).where(Offer.id == link_data['offer_id'])
-            )
-            offer = offer_result.scalar_one_or_none()
-            if not offer:
-                raise_api_exception(
-                    ErrorCode.RESOURCE_NOT_FOUND,
-                    detail=f"Offer ID {link_data['offer_id']} 不存在"
-                )
-        
-        # 验证渠道是否存在（如果提供了 channel_id）
-        if link_data.get('channel_id'):
-            channel_result = await self.db.execute(
-                select(Publisher).where(Publisher.id == link_data['channel_id'])
-            )
-            channel = channel_result.scalar_one_or_none()
-            if not channel:
-                raise_api_exception(
-                    ErrorCode.RESOURCE_NOT_FOUND,
-                    detail=f"渠道ID {link_data['channel_id']} 不存在"
-                )
-        
-        # 创建短链接
-        short_link = ShortLink(
-            original_url=link_data['original_url'],
-            title=link_data.get('title'),
-            description=link_data.get('description'),
-            short_code=short_code or "temp",  # 临时代码，稍后更新
-            created_by=current_user.id,
-            offer_id=link_data.get('offer_id'),
-            channel_id=link_data.get('channel_id'),
-            is_active=link_data.get('is_active', True),
-            expires_at=link_data.get('expires_at'),
-            click_count=0
-        )
-        
-        self.db.add(short_link)
-        await self.db.flush()  # 先flush以获取ID
-        
-        # 如果没有提供自定义代码，生成唯一代码
-        if not link_data.get('short_code'):
-            # 获取所有已存在的代码
-            result = await self.db.execute(select(ShortLink.short_code))
-            existing_codes = {row[0] for row in result.all() if row[0] != "temp"}
-            
-            # 尝试从ID生成
-            code_from_id = generate_short_code_from_id(short_link.id, min_length=4)
-            if code_from_id not in existing_codes:
-                short_link.short_code = code_from_id
-            else:
-                # 如果ID生成的代码已存在，使用随机生成
-                unique_code = generate_unique_short_code(existing_codes, length=6)
-                if not unique_code:
+                existing = existing_result.scalar_one_or_none()
+                if existing:
                     raise_api_exception(
-                        ErrorCode.OPERATION_FAILED,
-                        detail="生成短链接代码失败，请稍后重试"
+                        ErrorCode.RESOURCE_ALREADY_EXISTS,
+                        detail=f"短链接代码 '{link_data['short_code']}' 已存在，请使用其他代码"
                     )
-                short_link.short_code = unique_code
-        
-        await self.db.commit()
-        await self.db.refresh(short_link)
-        
-        logger.info(f"短链接创建成功: {short_link.short_code} -> {short_link.original_url}")
-        return short_link
+                short_code = link_data['short_code']
+            else:
+                short_code = None
+            
+            # 验证 Offer 是否存在（如果提供了 offer_id）
+            if link_data.get('offer_id'):
+                logger.debug(f"验证Offer是否存在: {link_data['offer_id']}")
+                offer_result = await self.db.execute(
+                    select(Offer).where(Offer.id == link_data['offer_id'])
+                )
+                offer = offer_result.scalar_one_or_none()
+                if not offer:
+                    raise_api_exception(
+                        ErrorCode.RESOURCE_NOT_FOUND,
+                        detail=f"Offer ID {link_data['offer_id']} 不存在"
+                    )
+            
+            # 验证渠道是否存在（如果提供了 channel_id）
+            if link_data.get('channel_id'):
+                logger.debug(f"验证渠道是否存在: {link_data['channel_id']}")
+                channel_result = await self.db.execute(
+                    select(Publisher).where(Publisher.id == link_data['channel_id'])
+                )
+                channel = channel_result.scalar_one_or_none()
+                if not channel:
+                    raise_api_exception(
+                        ErrorCode.RESOURCE_NOT_FOUND,
+                        detail=f"渠道ID {link_data['channel_id']} 不存在"
+                    )
+            
+            # 创建短链接
+            logger.debug("创建短链接对象")
+            short_link = ShortLink(
+                original_url=link_data['original_url'],
+                title=link_data.get('title'),
+                description=link_data.get('description'),
+                short_code=short_code or "temp",  # 临时代码，稍后更新
+                created_by=current_user.id,
+                offer_id=link_data.get('offer_id'),
+                channel_id=link_data.get('channel_id'),
+                is_active=link_data.get('is_active', True),
+                expires_at=link_data.get('expires_at'),
+                click_count=0
+            )
+            
+            logger.debug("添加短链接到数据库")
+            self.db.add(short_link)
+            logger.debug("执行flush以获取ID")
+            await self.db.flush()  # 先flush以获取ID
+            logger.debug(f"获取到短链接ID: {short_link.id}")
+            
+            # 如果没有提供自定义代码，生成唯一代码
+            if not link_data.get('short_code'):
+                logger.debug("生成唯一短链接代码")
+                # 获取所有已存在的代码
+                result = await self.db.execute(select(ShortLink.short_code))
+                existing_codes = {row[0] for row in result.all() if row[0] != "temp"}
+                logger.debug(f"已存在的代码数量: {len(existing_codes)}")
+                
+                # 尝试从ID生成
+                code_from_id = generate_short_code_from_id(short_link.id, min_length=4)
+                logger.debug(f"从ID生成的代码: {code_from_id}")
+                if code_from_id not in existing_codes:
+                    short_link.short_code = code_from_id
+                    logger.debug(f"使用从ID生成的代码: {code_from_id}")
+                else:
+                    # 如果ID生成的代码已存在，使用随机生成
+                    unique_code = generate_unique_short_code(existing_codes, length=6)
+                    logger.debug(f"随机生成的代码: {unique_code}")
+                    if not unique_code:
+                        raise_api_exception(
+                            ErrorCode.OPERATION_FAILED,
+                            detail="生成短链接代码失败，请稍后重试"
+                        )
+                    short_link.short_code = unique_code
+                    logger.debug(f"使用随机生成的代码: {unique_code}")
+            
+            logger.debug("提交事务")
+            await self.db.commit()
+            logger.debug("刷新短链接对象")
+            await self.db.refresh(short_link)
+            
+            logger.info(f"短链接创建成功: {short_link.short_code} -> {short_link.original_url}")
+            return short_link
+        except Exception as e:
+            logger.error(f"创建短链接失败: {str(e)}", exc_info=True)
+            # 回滚事务
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
+            # 重新抛出异常
+            raise
     
     async def update_short_link(
         self,
