@@ -243,10 +243,15 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         user_agent = request.headers.get("User-Agent", "")[:100]  # 限制长度
         user_agent_hash = hashlib.sha256(user_agent.encode('utf-8')).hexdigest()[:16]  # 使用SHA256前16位
         
+        # 确保user_id为字符串类型
         if user_id:
-            return f"{user_id}:{client_ip}:{user_agent_hash}"
+            session_id = f"{user_id}:{client_ip}:{user_agent_hash}"
         else:
-            return f"{client_ip}:{user_agent_hash}"
+            session_id = f"{client_ip}:{user_agent_hash}"
+        
+        # 记录会话ID生成信息
+        logger.debug(f"生成会话ID: {session_id}, IP: {client_ip}, User-Agent: {user_agent[:50]}...")
+        return session_id
     
     async def _retrieve_csrf_token(self, session_id: str, request: Request) -> Optional[str]:
         """
@@ -343,27 +348,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         if not await self._check_connection_status(request):
             raise EndOfStream("客户端已断开连接")
         
-        # 使用安全的异常抛出机制
-        try:
-            safe_raise_csrf_exception(
-                request,
-                message,
-                status.HTTP_403_FORBIDDEN
-            )
-        except HTTPException as http_exc:
-            # 在异常响应中添加CSRF令牌（通过响应头）
-            if token_to_return:
-                http_exc._csrf_token = token_to_return
-            raise http_exc
-        except Exception as e:
-            # 如果连接已断开，直接重新抛出流异常
-            error_type = type(e).__name__
-            error_module = type(e).__module__
-            if ("EndOfStream" in error_type or "WouldBlock" in error_type or 
-                "anyio" in error_module or "Connection disconnected" in str(e)):
-                logger.debug("客户端已断开连接，跳过CSRF验证错误处理")
-                raise EndOfStream("客户端已断开连接")
-            raise
+        # 直接抛出HTTPException，不尝试在异常对象上添加属性
+        # 这样可以避免可能的属性设置错误
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=message
+        )
     
     async def _check_connection_status(self, request: Request) -> bool:
         """
