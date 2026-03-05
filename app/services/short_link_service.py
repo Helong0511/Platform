@@ -326,6 +326,17 @@ class ShortLinkService(BaseService[ShortLink]):
             
             logger.info(f"短链接创建成功: {short_link.short_code} -> {short_link.original_url}")
             return short_link
+        except exc.IntegrityError as e:
+            # 处理重复短码的错误
+            if "Duplicate entry" in str(e) and "short_code" in str(e):
+                logger.error(f"短链接代码重复: {str(e)}")
+                raise_api_exception(
+                    ErrorCode.RESOURCE_ALREADY_EXISTS,
+                    detail="短链接代码已存在，请使用其他代码"
+                )
+            logger.error(f"创建短链接失败: {str(e)}", exc_info=True)
+            # 重新抛出异常
+            raise
         except Exception as e:
             logger.error(f"创建短链接失败: {str(e)}", exc_info=True)
             # 重新抛出异常

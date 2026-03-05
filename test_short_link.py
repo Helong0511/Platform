@@ -1,6 +1,8 @@
 import requests
 import json
 import traceback
+import random
+import string
 
 # 固定的User-Agent，确保会话ID一致
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -9,6 +11,48 @@ USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 import logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+# 生成随机短码
+def generate_random_short_code(length=6):
+    """生成随机短码"""
+    chars = string.ascii_letters + string.digits
+    return ''.join(random.choice(chars) for _ in range(length))
+
+# 检查短码是否可用
+def check_short_code_availability(token, cookies, csrf_token, short_code):
+    """检查短码是否可用"""
+    url = f'https://client.btfrx.online/api/v1/short-links/check-code/{short_code}'
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'User-Agent': USER_AGENT
+    }
+    # 添加CSRF令牌到请求头
+    if csrf_token:
+        headers['X-CSRF-Token'] = csrf_token
+    
+    try:
+        response = requests.get(url, headers=headers, cookies=cookies)
+        print(f'Check short code status code: {response.status_code}')
+        print(f'Check short code response: {response.text}')
+        # 解析响应
+        response_json = response.json()
+        # 检查短码是否不存在（可用）
+        return not response_json.get('data', {}).get('exists', False)
+    except Exception as e:
+        print('Check short code error:', str(e))
+        return False
+
+# 获取不重复短码
+def get_available_short_code(token, cookies, csrf_token):
+    """获取不重复的短码"""
+    max_attempts = 10
+    for _ in range(max_attempts):
+        short_code = generate_random_short_code()
+        if check_short_code_availability(token, cookies, csrf_token, short_code):
+            print(f'Found available short code: {short_code}')
+            return short_code
+    print('Failed to find available short code after multiple attempts')
+    return None
 
 # 获取CSRF令牌
 def get_csrf_token(cookies, token):
@@ -31,6 +75,12 @@ def get_csrf_token(cookies, token):
 
 # 测试短链接创建API
 def test_create_short_link(token, cookies, csrf_token):
+    # 获取不重复短码
+    short_code = get_available_short_code(token, cookies, csrf_token)
+    if not short_code:
+        print('Failed to get available short code, using random code')
+        short_code = generate_random_short_code()
+    
     url = 'https://client.btfrx.online/api/v1/short-links/'
     headers = {
         'Content-Type': 'application/json',
@@ -42,7 +92,8 @@ def test_create_short_link(token, cookies, csrf_token):
         headers['X-CSRF-Token'] = csrf_token
     data = {
         'original_url': 'https://example.com',
-        'title': '测试短链接'
+        'title': '测试短链接',
+        'short_code': short_code
     }
     
     try:
