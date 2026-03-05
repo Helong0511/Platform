@@ -526,6 +526,9 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         处理非GET请求
         验证CSRF令牌和Referer
         """
+        # 直接从app.core.database导入get_db
+        from app.core.database import get_db
+        
         # 检查连接状态
         if not await self._check_connection_status(request):
             raise EndOfStream("客户端已断开连接")
