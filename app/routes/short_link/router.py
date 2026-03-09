@@ -113,71 +113,67 @@ async def open_master_html():
             tags=["短链接服务"])
 async def open_master_html_with_redirect(
     short_code: str,
-    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
     先打开E:\Platform\scripts\master.html，然后根据短码跳转到指定的original_url
     """
-    # 检查是否已经有original_url参数
-    original_url_param = request.query_params.get("original_url")
+    # 尝试从缓存获取短链接信息
+    cached_data = await get_short_link_from_cache(short_code)
     
-    if original_url_param:
-        # 如果已经有original_url参数，直接返回HTML内容
-        # 优先使用服务器路径，本地开发时会自动回退到本地路径
-        master_html_path = "/data/Platform/scripts/master.html"
-        
-        # 如果服务器路径不存在，尝试本地路径（用于开发环境）
-        if not os.path.exists(master_html_path):
-            master_html_path = "E:\Platform\scripts\master.html"
-        
-        if not os.path.exists(master_html_path):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="master.html文件不存在"
-            )
-        
-        with open(master_html_path, "r", encoding="utf-8") as f:
-            html_content = f.read()
-        
-        # 返回HTML内容
-        from fastapi.responses import HTMLResponse
-        response = HTMLResponse(content=html_content)
-        # 直接设置CSP头，允许内联脚本
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
-        return response
+    original_url = None
+    
+    if cached_data:
+        original_url = cached_data.get("original_url")
     else:
-        # 尝试从缓存获取短链接信息
-        cached_data = await get_short_link_from_cache(short_code)
+        # 从数据库查询
+        from app.models.models import ShortLink
+        from sqlalchemy.future import select
         
-        original_url = None
+        result = await db.execute(
+            select(ShortLink).where(ShortLink.short_code == short_code)
+        )
+        short_link = result.scalars().first()
         
-        if cached_data:
-            original_url = cached_data.get("original_url")
-        else:
-            # 从数据库查询
-            from app.models.models import ShortLink
-            from sqlalchemy.future import select
-            
-            result = await db.execute(
-                select(ShortLink).where(ShortLink.short_code == short_code)
-            )
-            short_link = result.scalars().first()
-            
-            if short_link:
-                original_url = short_link.original_url
-        
-        if not original_url:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="短链接不存在或未配置原始URL"
-            )
-        
-        # 构建带有原始URL参数的重定向URL
-        from urllib.parse import quote
-        encoded_url = quote(original_url, safe='')
-        
-        # 重定向到带有原始URL参数的当前路径
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse(url=f"/change/{short_code}?original_url={encoded_url}")
+        if short_link:
+            original_url = short_link.original_url
+    
+    if not original_url:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="短链接不存在或未配置原始URL"
+        )
+    
+    # 优先使用服务器路径，本地开发时会自动回退到本地路径
+    master_html_path = "/data/Platform/scripts/master.html"
+    
+    # 如果服务器路径不存在，尝试本地路径（用于开发环境）
+    if not os.path.exists(master_html_path):
+        master_html_path = "E:\Platform\scripts\master.html"
+    
+    if not os.path.exists(master_html_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="master.html文件不存在"
+        )
+    
+    with open(master_html_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+    
+    # 将original_url直接注入到HTML中，替换getOriginalUrl函数的返回值
+    # 这样就不需要通过URL参数传递，用户就不会看到参数了
+    import re
+    # 替换getOriginalUrl函数，使其直接返回原始URL
+    html_content = re.sub(
+        r'function getOriginalUrl\(\) \{[\s\S]*?return urlParams\.get\(\'original_url\'\) \|\| "https://www\.baidu\.com";[\s\S]*?\}',
+        f'function getOriginalUrl() {{ return "{original_url}"; }}',
+        html_content
+    )
+    
+    # 返回HTML内容
+    from fastapi.responses import HTMLResponse
+    response = HTMLResponse(content=html_content)
+    # 直接设置CSP头，允许内联脚本
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+    return response
 
