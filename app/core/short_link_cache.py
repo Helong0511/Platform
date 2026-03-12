@@ -109,6 +109,21 @@ async def invalidate_short_link_cache(short_code: str) -> bool:
     return False
 
 
+async def update_short_link_cache(short_code: str, short_link_data: Dict[str, Any], ttl: int = CACHE_TTL) -> bool:
+    """
+    更新短链接缓存数据
+    
+    Args:
+        short_code: 短链接代码
+        short_link_data: 短链接数据字典
+        ttl: 缓存过期时间（秒）
+        
+    Returns:
+        是否更新成功
+    """
+    return await set_short_link_to_cache(short_code, short_link_data, ttl, add_tags=False)
+
+
 def serialize_short_link(short_link) -> Dict[str, Any]:
     """
     序列化短链接对象为字典
