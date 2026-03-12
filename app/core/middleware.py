@@ -360,33 +360,33 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         is_html_response = "text/html" in content_type or request.url.path.endswith(".html")
         
         if is_html_response:
-            # 生产环境使用更严格的CSP，禁止内联脚本和eval
-            if settings.is_production:
-                # 生产环境：允许内联脚本（用于change路由的跳转功能）
-                csp = (
-                    "default-src 'self'; "
-                    "script-src 'self' 'unsafe-inline'; "  # 允许内联脚本（用于change路由的跳转功能）
-                    "style-src 'self' 'unsafe-inline'; "  # CSS允许内联（Element Plus需要）
-                    "img-src 'self' data: https:; "
-                    "font-src 'self' data:; "
-                    "connect-src 'self'; "
-                    "frame-ancestors 'none'; "  # 禁止被iframe嵌入
-                    "base-uri 'self'; "  # 限制base标签
-                    "form-action 'self'; "  # 限制表单提交目标
-                    "upgrade-insecure-requests;"  # 自动升级HTTP到HTTPS
-                )
-            else:
-                # 开发环境：允许unsafe-inline和unsafe-eval（用于开发调试）
-                csp = (
-                    "default-src 'self'; "
-                    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-                    "style-src 'self' 'unsafe-inline'; "
-                    "img-src 'self' data: https:; "
-                    "font-src 'self' data:; "
-                    "connect-src 'self'; "
-                    "frame-ancestors 'none';"
-                )
-            response.headers["Content-Security-Policy"] = csp
+                # 生产环境使用更严格的CSP，禁止内联脚本和eval
+                if settings.is_production:
+                    # 生产环境：允许内联脚本（用于change路由的跳转功能）
+                    csp = (
+                        "default-src 'self'; "
+                        "script-src 'self' 'unsafe-inline'; "  # 允许内联脚本（用于change路由的跳转功能）
+                        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "  # 允许Font Awesome CDN
+                        "img-src 'self' data: https:; "
+                        "font-src 'self' data: https://cdnjs.cloudflare.com; "  # 允许Font Awesome CDN
+                        "connect-src 'self'; "
+                        "frame-ancestors 'none'; "  # 禁止被iframe嵌入
+                        "base-uri 'self'; "  # 限制base标签
+                        "form-action 'self'; "  # 限制表单提交目标
+                        "upgrade-insecure-requests;"  # 自动升级HTTP到HTTPS
+                    )
+                else:
+                    # 开发环境：允许unsafe-inline和unsafe-eval（用于开发调试）
+                    csp = (
+                        "default-src 'self'; "
+                        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "  # 允许Font Awesome CDN
+                        "img-src 'self' data: https:; "
+                        "font-src 'self' data: https://cdnjs.cloudflare.com; "  # 允许Font Awesome CDN
+                        "connect-src 'self'; "
+                        "frame-ancestors 'none';"
+                    )
+                response.headers["Content-Security-Policy"] = csp
 
         # Strict-Transport-Security (HSTS): 强制HTTPS，防止中间人攻击
         # 生产环境启用，max-age=1年，包含子域名
