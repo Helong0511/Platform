@@ -110,7 +110,7 @@ async def open_master_html(request: Request):
     return response
 
 
-@router.get("/change/{short_code},
+@router.get("/change/{short_code}",
             summary="打开master.html并跳转到指定URL",
             tags=["短链接服务"])
 async def open_master_html_with_redirect(
@@ -167,7 +167,8 @@ async def open_master_html_with_redirect(
                     from sqlalchemy.future import select
                     
                     # 创建新的数据库会话
-                    db_session = await anext(get_db())
+                    from app.core.database import async_session
+                    db_session = async_session()
                     
                     # 乐观锁更新，避免并发冲突
                     result = await db_session.execute(
@@ -320,7 +321,8 @@ async def handle_report(
                         from sqlalchemy.future import select
                         
                         # 创建新的数据库会话
-                        db_session = await anext(get_db())
+                        from app.core.database import async_session
+                        db_session = async_session()
                         
                         # 乐观锁更新，避免并发冲突
                         result = await db_session.execute(
