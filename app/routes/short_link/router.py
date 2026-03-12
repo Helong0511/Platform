@@ -313,6 +313,23 @@ async def handle_report(
         
         logger.warning(f"[短链接点击] 收到上报请求: id={id}, event={event}, time={time}, client_ip={client_ip}, user_agent={user_agent}, referer={referer}")
         
+        # 检查是否重复上报
+        session_id = request.cookies.get('session_id') if request else None
+        if session_id:
+            from app.core.redis_client import get_redis_client
+            redis = await get_redis_client()
+            if redis:
+                click_key = f"click_count:{id}:{session_id}"
+                try:
+                    has_clicked = await redis.exists(click_key)
+                    if has_clicked:
+                        logger.warning(f"[短链接点击] 重复上报，跳过统计: id={id}, session_id={session_id}")
+                        return {"status": "success", "message": "Report received (duplicate)"}
+                    # 设置过期时间为24小时
+                    await redis.setex(click_key, 86400, '1')
+                except Exception as e:
+                    logger.debug(f"Redis检查点击次数失败: {e}")
+        
         # 尝试从缓存获取短链接信息
         cached_data = await get_short_link_from_cache(id)
         

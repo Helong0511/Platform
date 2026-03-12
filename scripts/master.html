@@ -372,6 +372,16 @@
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Redirecting...';
             btn.disabled = true;
 
+            // 检查是否已经上报过点击
+            if (sessionStorage.getItem('click_reported')) {
+                // 已经上报过，直接跳转
+                setTimeout(() => {
+                    const originalUrl = getOriginalUrl();
+                    window.location.href = originalUrl;
+                }, 1000);
+                return;
+            }
+
             // 数据上报
             try {
                 // 从当前URL中提取短码
@@ -381,7 +391,7 @@
                 const shortCode = filteredParts[filteredParts.length - 1] || '';
                 // 使用协议无关的绝对路径，确保总是发送到根路径的 /report 路由
                 const reportUrl = window.location.protocol + "//" + window.location.host + "/report?id=" + shortCode + "&event=survey_click&time=" + Date.now();
-
+                
                 // 发送上报请求
                 await fetch(reportUrl, {
                     method: "GET",
@@ -389,6 +399,9 @@
                         "Content-Type": "application/json"
                     }
                 });
+
+                // 标记已上报
+                sessionStorage.setItem('click_reported', 'true');
 
                 // 上报成功后，延迟1秒再跳转，让用户看到加载状态
                 setTimeout(() => {
