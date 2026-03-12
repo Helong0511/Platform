@@ -39,7 +39,8 @@ from app.core.database import get_db
 from app.core.short_link_cache import (
     get_short_link_from_cache,
     set_short_link_to_cache,
-    serialize_short_link
+    serialize_short_link,
+    update_short_link_cache
 )
 from app.core.short_link_click_counter import increment_click_count_async
 from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
@@ -55,6 +56,73 @@ logger = logging.getLogger(__name__)
 
 # 创建FastAPI路由实例，用于注册短链接相关的API端点
 router = APIRouter()
+
+
+@router.get("/report",
+            summary="处理短链接点击上报",
+            tags=["短链接服务"])
+async def handle_report(
+    id: str = Query(..., description="短链接代码"),
+    event: str = Query(..., description="事件类型"),
+    time: int = Query(..., description="时间戳"),
+    request: Request = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    处理短链接点击上报，更新点击次数
+    
+    前端通过 fetch("/report?id=509220&event=survey_click&time=1234567890") 调用
+    """
+    try:
+        # 获取客户端IP和请求头信息
+        client_ip = "未知"
+        user_agent = "未知"
+        referer = "未知"
+        if request:
+            client_ip = request.client.host if request.client else "未知"
+            user_agent = request.headers.get("user-agent", "未知")
+            referer = request.headers.get("referer", "未知")
+        
+        logger.warning(f"[短链接点击] 收到上报请求: id={id}, event={event}, time={time}, client_ip={client_ip}, user_agent={user_agent}, referer={referer}")
+        
+        # 尝试从缓存获取短链接信息
+        cached_data = await get_short_link_from_cache(id)
+        
+        if cached_data:
+            logger.warning(f"[短链接点击] 从缓存获取数据: short_code={id}, 原始click_count={cached_data.get('click_count', 0)}")
+            # 更新点击次数（缓存）
+            from app.core.short_link_cache import update_short_link_cache
+            cached_data["click_count"] = (cached_data.get("click_count", 0)) + 1
+            logger.warning(f"[短链接点击] 更新缓存: short_code={id}, 新click_count={cached_data['click_count']}")
+            update_result = await update_short_link_cache(id, cached_data)
+            logger.warning(f"[短链接点击] 缓存更新结果: {update_result}")
+        else:
+            # 从数据库查询
+            from app.models.models import ShortLink
+            from sqlalchemy.future import select
+            
+            logger.warning(f"[短链接点击] 缓存未命中，从数据库查询: short_code={id}")
+            result = await db.execute(
+                select(ShortLink).where(ShortLink.short_code == id)
+            )
+            short_link = result.scalars().first()
+            
+            if short_link:
+                logger.warning(f"[短链接点击] 数据库查询结果: short_code={id}, id={short_link.id}, 原始click_count={short_link.click_count or 0}")
+                # 更新点击次数（数据库）
+                short_link.click_count = (short_link.click_count or 0) + 1
+                logger.warning(f"[短链接点击] 更新数据库: short_code={id}, 新click_count={short_link.click_count}")
+                await db.commit()
+                logger.warning(f"[短链接点击] 数据库提交成功")
+            else:
+                logger.warning(f"[短链接点击] 短链接不存在: short_code={id}")
+        
+        # 返回成功响应
+        logger.warning(f"[短链接点击] 处理完成: id={id}, client_ip={client_ip}")
+        return {"status": "success", "message": "Report received", "client_ip": client_ip}
+    except Exception as e:
+        logger.error(f"[短链接上报] 处理异常: error={str(e)}", exc_info=True)
+        return {"status": "error", "message": "Failed to process report"}
 
 
 def _extract_and_filter_channel_params(request_params: dict) -> dict:

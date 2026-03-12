@@ -396,13 +396,28 @@
                         "Content-Type": "application/json"
                     }
                 });
-                const responseData = await response.json();
-                console.log("[上报] 上报成功", {
-                    status: response.status,
-                    statusText: response.statusText,
-                    data: responseData,
-                    responseTime: new Date().toISOString()
-                });
+
+                // 打印响应状态和响应文本
+                console.log("[上报] 响应状态:", response.status);
+                console.log("[上报] 响应头:", response.headers);
+
+                // 尝试获取响应文本
+                const responseText = await response.text();
+                console.log("[上报] 响应文本:", responseText);
+
+                // 尝试解析 JSON
+                try {
+                    const responseData = JSON.parse(responseText);
+                    console.log("[上报] 上报成功", {
+                        status: response.status,
+                        statusText: response.statusText,
+                        data: responseData,
+                        responseTime: new Date().toISOString()
+                    });
+                } catch (parseError) {
+                    console.error("[上报] JSON 解析失败:", parseError);
+                    console.error("[上报] 响应文本:", responseText);
+                }
 
                 // 上报成功后，延迟1秒再跳转，让用户看到加载状态
                 setTimeout(() => {

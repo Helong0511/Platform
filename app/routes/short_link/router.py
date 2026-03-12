@@ -256,11 +256,14 @@ async def handle_report(
     前端通过 fetch("/report?id=509220&event=survey_click&time=1234567890") 调用
     """
     try:
-        # 获取客户端IP
-        client_ip = request.client.host if request.client else "未知"
-        # 获取请求头信息
-        user_agent = request.headers.get("user-agent", "未知")
-        referer = request.headers.get("referer", "未知")
+        # 获取客户端IP和请求头信息
+        client_ip = "未知"
+        user_agent = "未知"
+        referer = "未知"
+        if request:
+            client_ip = request.client.host if request.client else "未知"
+            user_agent = request.headers.get("user-agent", "未知")
+            referer = request.headers.get("referer", "未知")
         
         logger.warning(f"[短链接点击] 收到上报请求: id={id}, event={event}, time={time}, client_ip={client_ip}, user_agent={user_agent}, referer={referer}")
         
