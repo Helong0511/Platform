@@ -126,14 +126,18 @@ async def open_master_html_with_redirect(
     if cached_data:
         original_url = cached_data.get("original_url")
         # 更新展示次数（缓存）
+        logger.info(f"[短链接展示] 从缓存获取数据: short_code={short_code}, 原始show_count={cached_data.get('show_count', 0)}")
         from app.core.short_link_cache import update_short_link_cache
         cached_data["show_count"] = (cached_data.get("show_count", 0)) + 1
-        await update_short_link_cache(short_code, cached_data)
+        logger.info(f"[短链接展示] 更新缓存: short_code={short_code}, 新show_count={cached_data['show_count']}")
+        update_result = await update_short_link_cache(short_code, cached_data)
+        logger.info(f"[短链接展示] 缓存更新结果: {update_result}")
     else:
         # 从数据库查询
         from app.models.models import ShortLink
         from sqlalchemy.future import select
         
+        logger.info(f"[短链接展示] 缓存未命中，从数据库查询: short_code={short_code}")
         result = await db.execute(
             select(ShortLink).where(ShortLink.short_code == short_code)
         )
@@ -141,9 +145,14 @@ async def open_master_html_with_redirect(
         
         if short_link:
             original_url = short_link.original_url
+            logger.info(f"[短链接展示] 数据库查询结果: short_code={short_code}, id={short_link.id}, 原始show_count={short_link.show_count or 0}")
             # 更新展示次数（数据库）
             short_link.show_count = (short_link.show_count or 0) + 1
+            logger.info(f"[短链接展示] 更新数据库: short_code={short_code}, 新show_count={short_link.show_count}")
             await db.commit()
+            logger.info(f"[短链接展示] 数据库提交成功")
+        else:
+            logger.warning(f"[短链接展示] 短链接不存在: short_code={short_code}")
     
     if not original_url:
         raise HTTPException(
@@ -200,30 +209,41 @@ async def handle_report(
     前端通过 fetch("/report?id=509220&event=survey_click&time=1234567890") 调用
     """
     try:
+        logger.info(f"[短链接点击] 收到上报请求: id={id}, event={event}, time={time}")
         # 尝试从缓存获取短链接信息
         cached_data = await get_short_link_from_cache(id)
         
         if cached_data:
+            logger.info(f"[短链接点击] 从缓存获取数据: short_code={id}, 原始click_count={cached_data.get('click_count', 0)}")
             # 更新点击次数（缓存）
             from app.core.short_link_cache import update_short_link_cache
             cached_data["click_count"] = (cached_data.get("click_count", 0)) + 1
-            await update_short_link_cache(id, cached_data)
+            logger.info(f"[短链接点击] 更新缓存: short_code={id}, 新click_count={cached_data['click_count']}")
+            update_result = await update_short_link_cache(id, cached_data)
+            logger.info(f"[短链接点击] 缓存更新结果: {update_result}")
         else:
             # 从数据库查询
             from app.models.models import ShortLink
             from sqlalchemy.future import select
             
+            logger.info(f"[短链接点击] 缓存未命中，从数据库查询: short_code={id}")
             result = await db.execute(
                 select(ShortLink).where(ShortLink.short_code == id)
             )
             short_link = result.scalars().first()
             
             if short_link:
+                logger.info(f"[短链接点击] 数据库查询结果: short_code={id}, id={short_link.id}, 原始click_count={short_link.click_count or 0}")
                 # 更新点击次数（数据库）
                 short_link.click_count = (short_link.click_count or 0) + 1
+                logger.info(f"[短链接点击] 更新数据库: short_code={id}, 新click_count={short_link.click_count}")
                 await db.commit()
+                logger.info(f"[短链接点击] 数据库提交成功")
+            else:
+                logger.warning(f"[短链接点击] 短链接不存在: short_code={id}")
         
         # 返回成功响应
+        logger.info(f"[短链接点击] 处理完成: id={id}")
         return {"status": "success", "message": "Report received"}
     except Exception as e:
         logger.error(f"[短链接上报] 处理异常: error={str(e)}", exc_info=True)
