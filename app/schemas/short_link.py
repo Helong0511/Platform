@@ -75,6 +75,7 @@ class ShortLinkResponse(ShortLinkBase):
     """短链接响应"""
     id: int
     click_count: int
+    show_count: int
     created_by: Optional[int] = None
     creator_name: Optional[str] = None  # 创建者用户名
     offer_id: Optional[int] = None

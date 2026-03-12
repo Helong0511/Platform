@@ -112,6 +112,11 @@
           <el-tag type="success">{{ scope.row.click_count }}</el-tag>
         </template>
       </el-table-column>
+      <el-table-column v-if="columnVisibility.show_count" prop="show_count" label="展示次数" width="100" align="center">
+        <template #default="scope">
+          <el-tag type="info">{{ scope.row.show_count }}</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column v-if="columnVisibility.expires_at" prop="expires_at" label="过期时间" width="180" align="center">
         <template #default="scope">
           <span v-if="scope.row.expires_at">{{ formatDate(scope.row.expires_at) }}</span>
@@ -188,6 +193,7 @@
         <el-checkbox label="channel_id">渠道</el-checkbox>
         <el-checkbox label="creator_name">创建者</el-checkbox>
         <el-checkbox label="click_count">点击数</el-checkbox>
+        <el-checkbox label="show_count">展示次数</el-checkbox>
         <el-checkbox label="expires_at">过期时间</el-checkbox>
         <el-checkbox label="is_active">状态</el-checkbox>
         <el-checkbox label="created_at">创建时间</el-checkbox>
@@ -265,6 +271,7 @@ const getDefaultColumnVisibility = () => ({
   channel_id: true,
   creator_name: true,
   click_count: true,
+  show_count: true,
   expires_at: true,
   is_active: true,
   created_at: true
@@ -315,6 +322,7 @@ const saveColumnVisibility = () => {
       channel_id: columnVisibility.channel_id,
       creator_name: columnVisibility.creator_name,
       click_count: columnVisibility.click_count,
+      show_count: columnVisibility.show_count,
       expires_at: columnVisibility.expires_at,
       is_active: columnVisibility.is_active,
       created_at: columnVisibility.created_at
