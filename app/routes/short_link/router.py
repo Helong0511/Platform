@@ -145,7 +145,7 @@ async def open_master_html_with_redirect(
             has_shown = await redis.exists(show_key)
             if not has_shown:
                 # 设置过期时间为24小时
-                await redis.setex(show_key, 86400, '1')
+                await redis.setex(show_key, 21600, '1')
         except Exception as e:
             logger.debug(f"Redis检查展示次数失败: {e}")
     
@@ -269,6 +269,19 @@ async def open_master_html_with_redirect(
     response = HTMLResponse(content=html_content)
     # 直接设置CSP头，允许内联脚本和Font Awesome CDN
     response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: https:; font-src 'self' data: https://cdnjs.cloudflare.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+    
+    # 设置session_id到cookie，确保相同浏览器会话使用相同的标识
+    response.set_cookie(
+        key="session_id",
+        value=session_id,
+        max_age=86400,  # 24小时
+        path="/",
+        domain="client.btfrx.online",
+        secure=True,
+        httponly=True,
+        samesite="lax"
+    )
+    
     return response
 
 

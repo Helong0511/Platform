@@ -355,6 +355,16 @@ if bot_initialized and TELEBOT_AVAILABLE:
                 thread_action = action
                 thread_pending_id = pending_id
                 
+                # 立即确认收到回调，避免Telegram客户端显示"按钮没有反应"
+                try:
+                    bot.answer_callback_query(
+                        callback_query_id=callback_query_id,
+                        text="正在处理，请稍候...",
+                        show_alert=False
+                    )
+                except Exception as e:
+                    logger.warning(f"确认回调时出错: {e}")
+                
                 # 使用同步数据库操作（因为 Telegram bot 回调是同步的）
                 def process_pending_conversion_sync():
                     try:
@@ -395,10 +405,14 @@ if bot_initialized and TELEBOT_AVAILABLE:
                             pending = result.scalar_one_or_none()
                             
                             if not pending:
-                                bot.answer_callback_query(
-                                    callback_query_id=callback_query_id,
-                                    text="记录不存在或已被处理"
-                                )
+                                # 再次发送回调确认，告知用户结果
+                                try:
+                                    bot.answer_callback_query(
+                                        callback_query_id=callback_query_id,
+                                        text="记录不存在或已被处理"
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"发送回调确认时出错: {e}")
                                 return
                             
                             if thread_action == "approve":
@@ -435,16 +449,25 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                 db.refresh(conversion)
                                 
                                 # 更新 Telegram 消息
-                                bot.edit_message_text(
-                                    chat_id=chat_id,
-                                    message_id=message_id,
-                                    text=f"✅ 已批准并保存转化记录\n\n转化ID: {conversion.conversion_id}\n平台: {conversion.platform}\n记录ID: {conversion.id}",
-                                    reply_markup=None
-                                )
-                                bot.answer_callback_query(
-                                    callback_query_id=callback_query_id,
-                                    text="已批准并保存"
-                                )
+                                try:
+                                    bot.edit_message_text(
+                                        chat_id=chat_id,
+                                        message_id=message_id,
+                                        text=f"✅ 已批准并保存转化记录\n\n转化ID: {conversion.conversion_id}\n平台: {conversion.platform}\n记录ID: {conversion.id}",
+                                        reply_markup=None
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"更新消息时出错: {e}")
+                                
+                                # 再次发送回调确认，告知用户结果
+                                try:
+                                    bot.answer_callback_query(
+                                        callback_query_id=callback_query_id,
+                                        text="已批准并保存"
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"发送回调确认时出错: {e}")
+                                
                                 logger.info(f"管理员批准了待确认转化记录: pending_id={thread_pending_id}, conversion_id={conversion.id}")
                                 
                             else:  # reject
@@ -454,16 +477,25 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                 db.commit()
                                 
                                 # 更新 Telegram 消息
-                                bot.edit_message_text(
-                                    chat_id=chat_id,
-                                    message_id=message_id,
-                                    text=f"❌ 已拒绝转化记录\n\n转化ID: {pending.conversion_id}\n平台: {pending.platform}\nIP: {pending.request_ip}",
-                                    reply_markup=None
-                                )
-                                bot.answer_callback_query(
-                                    callback_query_id=callback_query_id,
-                                    text="已拒绝"
-                                )
+                                try:
+                                    bot.edit_message_text(
+                                        chat_id=chat_id,
+                                        message_id=message_id,
+                                        text=f"❌ 已拒绝转化记录\n\n转化ID: {pending.conversion_id}\n平台: {pending.platform}\nIP: {pending.request_ip}",
+                                        reply_markup=None
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"更新消息时出错: {e}")
+                                
+                                # 再次发送回调确认，告知用户结果
+                                try:
+                                    bot.answer_callback_query(
+                                        callback_query_id=callback_query_id,
+                                        text="已拒绝"
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"发送回调确认时出错: {e}")
+                                
                                 logger.info(f"管理员拒绝了待确认转化记录: pending_id={thread_pending_id}")
                                 
                     except Exception as e:
@@ -473,8 +505,8 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                 callback_query_id=callback_query_id,
                                 text="处理失败，请稍后重试"
                             )
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.warning(f"发送回调确认时出错: {e}")
                 
                 # 在独立线程中运行，避免阻塞 Telegram bot
                 thread = threading.Thread(target=process_pending_conversion_sync, daemon=True)
@@ -1069,8 +1101,9 @@ def run_bot():
                             logger.error(f"   当前实例将释放锁并停止，让已运行的实例继续工作...")
                             _release_bot_lock()
                             
-                            # 等待一段时间后退出轮询
-                            time.sleep(5)
+                            # 等待更长时间后退出轮询，给其他实例足够的时间来获取锁
+                            logger.info(f"   当前实例将在 10 秒后退出...")
+                            time.sleep(10)
                             return
                         
                         # 判断是否是网络连接错误
@@ -1446,6 +1479,7 @@ def _acquire_bot_lock():
             # Unix/Linux: 使用 fcntl（文本模式）
             _bot_lock_file = open(lock_file_path, 'w')
             try:
+                # 尝试获取非阻塞排他锁
                 fcntl.flock(_bot_lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 _bot_lock_acquired = True
                 # 写入当前进程信息和时间戳
@@ -1481,57 +1515,30 @@ def _acquire_bot_lock():
                 return False
         else:
             # 没有文件锁支持，使用简单的文件存在性检查（不完美但可用）
-            if lock_file_path.exists():
-                # 检查锁文件中的 PID 是否还在运行
+            # 尝试使用文件重命名操作作为原子操作来获取锁
+            lock_file_tmp = lock_file_path.with_suffix('.lock.tmp')
+            try:
+                # 创建临时文件
+                with open(lock_file_tmp, 'w') as f:
+                    timestamp = time.time()
+                    f.write(f"PID: {current_pid}\n")
+                    f.write(f"Timestamp: {timestamp}\n")
+                
+                # 尝试原子重命名操作
+                lock_file_tmp.rename(lock_file_path)
+                _bot_lock_file = open(lock_file_path, 'r+')
+                _bot_lock_acquired = True
+                logger.info(f"[PID:{current_pid}] 成功获取 Telegram Bot 启动锁（原子重命名）")
+                return True
+            except (IOError, OSError) as e:
+                # 重命名失败，说明其他进程已持有锁
                 try:
-                    with open(lock_file_path, 'r') as f:
-                        pid_line = f.readline()
-                        timestamp_line = f.readline()
-                        if pid_line.startswith("PID: "):
-                                old_pid = int(pid_line.split(": ")[1].strip())
-                                # 检查进程是否还在运行
-                                try:
-                                    # 使用跨平台进程检查函数
-                                    process_running = _is_process_running(old_pid)
-                                    if process_running:
-                                        # 检查锁是否过期（10分钟）
-                                        if timestamp_line.startswith("Timestamp: "):
-                                            try:
-                                                old_timestamp = float(timestamp_line.split(": ")[1].strip())
-                                                current_time = time.time()
-                                                if current_time - old_timestamp > 600:  # 10分钟过期
-                                                    logger.info(f"[PID:{current_pid}] 锁文件已过期（超过10分钟），可以获取锁")
-                                                else:
-                                                    # 进程还在运行且锁未过期
-                                                    logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（进程 {old_pid} 正在运行，锁未过期）")
-                                                    return False
-                                            except (ValueError, IndexError):
-                                                # 时间戳格式错误，视为过期
-                                                logger.info(f"[PID:{current_pid}] 锁文件时间戳格式错误，视为过期")
-                                        else:
-                                            # 没有时间戳，视为过期
-                                            logger.info(f"[PID:{current_pid}] 锁文件没有时间戳，视为过期")
-                                    else:
-                                        # 进程不存在，可以获取锁
-                                        logger.info(f"[PID:{current_pid}] 持有锁的进程 {old_pid} 不存在，可以获取锁")
-                                except Exception as e:
-                                    # 任何检查进程时的错误，视为进程不存在
-                                    logger.warning(f"[PID:{current_pid}] 检查进程 {old_pid} 时发生错误: {e}，视为进程不存在")
-                                    pass
-                except Exception as e:
-                    logger.warning(f"[PID:{current_pid}] 检查锁文件时发生错误: {e}")
+                    if lock_file_tmp.exists():
+                        lock_file_tmp.unlink()
+                except:
                     pass
-            
-            # 可以获取锁
-            _bot_lock_file = open(lock_file_path, 'w')
-            _bot_lock_acquired = True
-            # 写入当前进程信息和时间戳
-            timestamp = time.time()
-            _bot_lock_file.write(f"PID: {current_pid}\n")
-            _bot_lock_file.write(f"Timestamp: {timestamp}\n")
-            _bot_lock_file.flush()
-            logger.info(f"[PID:{current_pid}] 成功获取 Telegram Bot 启动锁（文件存在性检查）")
-            return True
+                logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（其他进程可能已启动）: {e}")
+                return False
     except Exception as e:
         logger.warning(f"[PID:{current_pid}] 获取 Telegram Bot 启动锁时发生错误: {e}")
         _close_lock_file()
@@ -1635,6 +1642,12 @@ def start_bot():
     if not bot:
         logger.error(f"[PID:{current_pid}] Bot 对象不存在，无法启动")
         return False
+
+    # 多进程环境下，增加随机延迟避免锁竞争
+    import random
+    delay = random.uniform(0.1, 1.0)  # 0.1-1.0秒的随机延迟
+    logger.info(f"[PID:{current_pid}] 等待 {delay:.2f} 秒后尝试获取锁，避免竞争...")
+    time.sleep(delay)
 
     # 尝试获取锁（多进程环境下，只有一个进程能获取到）
     logger.info(f"[PID:{current_pid}] 尝试获取 Telegram Bot 启动锁...")
