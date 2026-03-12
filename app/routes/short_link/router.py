@@ -110,12 +110,13 @@ async def open_master_html(request: Request):
     return response
 
 
-@router.get("/change/{short_code}",
+@router.get("/change/{short_code},
             summary="打开master.html并跳转到指定URL",
             tags=["短链接服务"])
 async def open_master_html_with_redirect(
     short_code: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -157,6 +158,36 @@ async def open_master_html_with_redirect(
             logger.warning(f"[短链接展示] 更新缓存: short_code={short_code}, 新show_count={cached_data['show_count']}")
             update_result = await update_short_link_cache(short_code, cached_data)
             logger.warning(f"[短链接展示] 缓存更新结果: {update_result}")
+            
+            # 后台任务更新数据库，确保数据一致性
+            async def update_show_count_db():
+                try:
+                    from app.core.database import get_db
+                    from app.models.models import ShortLink
+                    from sqlalchemy.future import select
+                    
+                    # 创建新的数据库会话
+                    db_session = await anext(get_db())
+                    
+                    # 乐观锁更新，避免并发冲突
+                    result = await db_session.execute(
+                        select(ShortLink).where(ShortLink.short_code == short_code)
+                    )
+                    short_link = result.scalars().first()
+                    
+                    if short_link:
+                        # 仅当数据库中的值小于缓存中的值时才更新
+                        if (short_link.show_count or 0) < cached_data["show_count"]:
+                            short_link.show_count = cached_data["show_count"]
+                            await db_session.commit()
+                            logger.warning(f"[短链接展示] 后台任务更新数据库: short_code={short_code}, 新show_count={short_link.show_count}")
+                except Exception as e:
+                    logger.error(f"[短链接展示] 后台任务更新数据库失败: {e}")
+                finally:
+                    if 'db_session' in locals():
+                        await db_session.close()
+            
+            background_tasks.add_task(update_show_count_db)
         else:
             # 从数据库查询
             from app.models.models import ShortLink
@@ -248,6 +279,7 @@ async def handle_report(
     event: str = Query(..., description="事件类型"),
     time: int = Query(..., description="时间戳"),
     request: Request = None,
+    background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -278,6 +310,37 @@ async def handle_report(
             logger.warning(f"[短链接点击] 更新缓存: short_code={id}, 新click_count={cached_data['click_count']}")
             update_result = await update_short_link_cache(id, cached_data)
             logger.warning(f"[短链接点击] 缓存更新结果: {update_result}")
+            
+            # 后台任务更新数据库，确保数据一致性
+            if background_tasks:
+                async def update_click_count_db():
+                    try:
+                        from app.core.database import get_db
+                        from app.models.models import ShortLink
+                        from sqlalchemy.future import select
+                        
+                        # 创建新的数据库会话
+                        db_session = await anext(get_db())
+                        
+                        # 乐观锁更新，避免并发冲突
+                        result = await db_session.execute(
+                            select(ShortLink).where(ShortLink.short_code == id)
+                        )
+                        short_link = result.scalars().first()
+                        
+                        if short_link:
+                            # 仅当数据库中的值小于缓存中的值时才更新
+                            if (short_link.click_count or 0) < cached_data["click_count"]:
+                                short_link.click_count = cached_data["click_count"]
+                                await db_session.commit()
+                                logger.warning(f"[短链接点击] 后台任务更新数据库: short_code={id}, 新click_count={short_link.click_count}")
+                    except Exception as e:
+                        logger.error(f"[短链接点击] 后台任务更新数据库失败: {e}")
+                    finally:
+                        if 'db_session' in locals():
+                            await db_session.close()
+                
+                background_tasks.add_task(update_click_count_db)
         else:
             # 从数据库查询
             from app.models.models import ShortLink
