@@ -113,6 +113,7 @@ async def open_master_html(request: Request):
             tags=["短链接服务"])
 async def open_master_html_with_redirect(
     short_code: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
