@@ -390,6 +390,16 @@
             window.location.href = originalUrl;
         });
 
+        // 页面加载时增加展示次数，每个会话只增加一次
+        if (!sessionStorage.getItem('show_reported')) {
+            // 从当前URL中提取短码
+            const urlParts = window.location.pathname.split('/');
+            const shortCode = urlParts[urlParts.length - 1];
+            // 这里不需要上报，因为展示次数已经在后端路由中处理
+            // 只是标记已经处理过，避免重复计数
+            sessionStorage.setItem('show_reported', 'true');
+        }
+
         // 添加一些简单的动画效果
         document.addEventListener('DOMContentLoaded', function () {
             const steps = document.querySelectorAll('.step');

@@ -85,7 +85,7 @@ async def redirect_short_link_public(
 @router.get("/change",
             summary="打开固定的master.html页面",
             tags=["短链接服务"])
-async def open_master_html():
+async def open_master_html(request: Request):
     """
     打开固定的master.html页面
     """
@@ -103,8 +103,8 @@ async def open_master_html():
         )
     
     response = FileResponse(path=master_html_path)
-    # 直接设置CSP头，允许内联脚本
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+    # 直接设置CSP头，允许内联脚本和Font Awesome CDN
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: https:; font-src 'self' data: https://cdnjs.cloudflare.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
     return response
 
 
@@ -123,36 +123,77 @@ async def open_master_html_with_redirect(
     
     original_url = None
     
-    if cached_data:
-        original_url = cached_data.get("original_url")
-        # 更新展示次数（缓存）
-        logger.warning(f"[短链接展示] 从缓存获取数据: short_code={short_code}, 原始show_count={cached_data.get('show_count', 0)}")
-        from app.core.short_link_cache import update_short_link_cache
-        cached_data["show_count"] = (cached_data.get("show_count", 0)) + 1
-        logger.warning(f"[短链接展示] 更新缓存: short_code={short_code}, 新show_count={cached_data['show_count']}")
-        update_result = await update_short_link_cache(short_code, cached_data)
-        logger.warning(f"[短链接展示] 缓存更新结果: {update_result}")
-    else:
-        # 从数据库查询
-        from app.models.models import ShortLink
-        from sqlalchemy.future import select
-        
-        logger.warning(f"[短链接展示] 缓存未命中，从数据库查询: short_code={short_code}")
-        result = await db.execute(
-            select(ShortLink).where(ShortLink.short_code == short_code)
-        )
-        short_link = result.scalars().first()
-        
-        if short_link:
-            original_url = short_link.original_url
-            logger.warning(f"[短链接展示] 数据库查询结果: short_code={short_code}, id={short_link.id}, 原始show_count={short_link.show_count or 0}")
-            # 更新展示次数（数据库）
-            short_link.show_count = (short_link.show_count or 0) + 1
-            logger.warning(f"[短链接展示] 更新数据库: short_code={short_code}, 新show_count={short_link.show_count}")
-            await db.commit()
-            logger.warning(f"[短链接展示] 数据库提交成功")
+    # 检查是否是重复请求（通过会话标识）
+    session_id = request.cookies.get('session_id')
+    if not session_id:
+        # 如果没有会话ID，生成一个
+        import uuid
+        session_id = str(uuid.uuid4())
+    
+    # 检查是否已经统计过展示次数
+    from app.core.redis_client import get_redis_client
+    redis = await get_redis_client()
+    show_key = f"show_count:{short_code}:{session_id}"
+    
+    has_shown = False
+    if redis:
+        try:
+            has_shown = await redis.exists(show_key)
+            if not has_shown:
+                # 设置过期时间为24小时
+                await redis.setex(show_key, 86400, '1')
+        except Exception as e:
+            logger.debug(f"Redis检查展示次数失败: {e}")
+    
+    if not has_shown:
+        if cached_data:
+            original_url = cached_data.get("original_url")
+            logger.warning(f"[短链接展示] 从缓存获取数据: short_code={short_code}, 原始show_count={cached_data.get('show_count', 0)}")
+            from app.core.short_link_cache import update_short_link_cache
+            cached_data["show_count"] = (cached_data.get("show_count", 0)) + 1
+            logger.warning(f"[短链接展示] 更新缓存: short_code={short_code}, 新show_count={cached_data['show_count']}")
+            update_result = await update_short_link_cache(short_code, cached_data)
+            logger.warning(f"[短链接展示] 缓存更新结果: {update_result}")
         else:
-            logger.warning(f"[短链接展示] 短链接不存在: short_code={short_code}")
+            # 从数据库查询
+            from app.models.models import ShortLink
+            from sqlalchemy.future import select
+            
+            logger.warning(f"[短链接展示] 缓存未命中，从数据库查询: short_code={short_code}")
+            result = await db.execute(
+                select(ShortLink).where(ShortLink.short_code == short_code)
+            )
+            short_link = result.scalars().first()
+            
+            if short_link:
+                original_url = short_link.original_url
+                logger.warning(f"[短链接展示] 数据库查询结果: short_code={short_code}, id={short_link.id}, 原始show_count={short_link.show_count or 0}")
+                # 更新展示次数（数据库）
+                short_link.show_count = (short_link.show_count or 0) + 1
+                logger.warning(f"[短链接展示] 更新数据库: short_code={short_code}, 新show_count={short_link.show_count}")
+                await db.commit()
+                logger.warning(f"[短链接展示] 数据库提交成功")
+            else:
+                logger.warning(f"[短链接展示] 短链接不存在: short_code={short_code}")
+    else:
+        # 已经统计过展示次数，直接获取原始URL
+        if cached_data:
+            original_url = cached_data.get("original_url")
+        else:
+            # 从数据库查询
+            from app.models.models import ShortLink
+            from sqlalchemy.future import select
+            
+            result = await db.execute(
+                select(ShortLink).where(ShortLink.short_code == short_code)
+            )
+            short_link = result.scalars().first()
+            
+            if short_link:
+                original_url = short_link.original_url
+            else:
+                original_url = None
+        logger.warning(f"[短链接展示] 重复访问，跳过统计: short_code={short_code}")
     
     if not original_url:
         raise HTTPException(
@@ -189,8 +230,8 @@ async def open_master_html_with_redirect(
     # 返回HTML内容
     from fastapi.responses import HTMLResponse
     response = HTMLResponse(content=html_content)
-    # 直接设置CSP头，允许内联脚本
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+    # 直接设置CSP头，允许内联脚本和Font Awesome CDN
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: https:; font-src 'self' data: https://cdnjs.cloudflare.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
     return response
 
 
