@@ -332,6 +332,7 @@ if bot_initialized and TELEBOT_AVAILABLE:
 
         try:
             logger.info(f"[回调查询处理器] 处理 callback_data: '{call.data}'")
+            import threading
             
             # 处理 Postback 待确认转化的确认/拒绝
             if call.data.startswith("postback_approve_") or call.data.startswith("postback_reject_"):
