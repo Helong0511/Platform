@@ -400,16 +400,24 @@
                     data: responseData,
                     responseTime: new Date().toISOString()
                 });
+                
+                // 上报成功后，延迟1秒再跳转，让用户看到加载状态
+                setTimeout(() => {
+                    const originalUrl = getOriginalUrl();
+                    window.location.href = originalUrl;
+                }, 1000);
             } catch (err) {
                 console.error("[上报] 上报失败:", {
                     error: err.message,
                     timestamp: new Date().toISOString()
                 });
+                
+                // 上报失败也跳转，确保用户体验不被中断
+                setTimeout(() => {
+                    const originalUrl = getOriginalUrl();
+                    window.location.href = originalUrl;
+                }, 1000);
             }
-
-            // 使用获取到的原始URL进行跳转
-            const originalUrl = getOriginalUrl();
-            window.location.href = originalUrl;
         });
 
         // 页面加载时增加展示次数，每个会话只增加一次
