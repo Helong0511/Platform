@@ -372,17 +372,18 @@
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Redirecting...';
             btn.disabled = true;
 
-            // 暂时屏蔽数据上报
-            /*
+            // 数据上报
             try {
-                const reportUrl = "/report?id=509220&event=survey_click&time=" + Date.now();
+                // 从当前URL中提取短码
+                const urlParts = window.location.pathname.split('/');
+                const shortCode = urlParts[urlParts.length - 1];
+                const reportUrl = "/report?id=" + shortCode + "&event=survey_click&time=" + Date.now();
                 await fetch(reportUrl, {
                     method: "GET",
                 });
             } catch (err) {
                 console.error("report error:", err);
             }
-            */
 
             // 使用获取到的原始URL进行跳转
             const originalUrl = getOriginalUrl();

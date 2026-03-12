@@ -728,6 +728,7 @@ class ShortLink(Base):
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的Offer ID')
     channel_id = Column(Integer, ForeignKey("publishers.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的渠道ID（Publisher ID）')
     click_count = Column(Integer, default=0, comment='点击次数')
+    show_count = Column(Integer, default=0, comment='展示次数')
     is_active = Column(Boolean, default=True, comment='是否激活')
     expires_at = Column(DateTime, nullable=True, comment='过期时间（可选）')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')

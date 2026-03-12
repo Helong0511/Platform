@@ -125,6 +125,10 @@ async def open_master_html_with_redirect(
     
     if cached_data:
         original_url = cached_data.get("original_url")
+        # 更新展示次数（缓存）
+        from app.core.short_link_cache import update_short_link_cache
+        cached_data["show_count"] = (cached_data.get("show_count", 0)) + 1
+        await update_short_link_cache(short_code, cached_data)
     else:
         # 从数据库查询
         from app.models.models import ShortLink
@@ -137,6 +141,9 @@ async def open_master_html_with_redirect(
         
         if short_link:
             original_url = short_link.original_url
+            # 更新展示次数（数据库）
+            short_link.show_count = (short_link.show_count or 0) + 1
+            await db.commit()
     
     if not original_url:
         raise HTTPException(
@@ -176,4 +183,49 @@ async def open_master_html_with_redirect(
     # 直接设置CSP头，允许内联脚本
     response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
     return response
+
+
+@router.get("/report",
+            summary="处理短链接点击上报",
+            tags=["短链接服务"])
+async def handle_report(
+    id: str = Query(..., description="短链接代码"),
+    event: str = Query(..., description="事件类型"),
+    time: int = Query(..., description="时间戳"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    处理短链接点击上报，更新点击次数
+    
+    前端通过 fetch("/report?id=509220&event=survey_click&time=1234567890") 调用
+    """
+    try:
+        # 尝试从缓存获取短链接信息
+        cached_data = await get_short_link_from_cache(id)
+        
+        if cached_data:
+            # 更新点击次数（缓存）
+            from app.core.short_link_cache import update_short_link_cache
+            cached_data["click_count"] = (cached_data.get("click_count", 0)) + 1
+            await update_short_link_cache(id, cached_data)
+        else:
+            # 从数据库查询
+            from app.models.models import ShortLink
+            from sqlalchemy.future import select
+            
+            result = await db.execute(
+                select(ShortLink).where(ShortLink.short_code == id)
+            )
+            short_link = result.scalars().first()
+            
+            if short_link:
+                # 更新点击次数（数据库）
+                short_link.click_count = (short_link.click_count or 0) + 1
+                await db.commit()
+        
+        # 返回成功响应
+        return {"status": "success", "message": "Report received"}
+    except Exception as e:
+        logger.error(f"[短链接上报] 处理异常: error={str(e)}", exc_info=True)
+        return {"status": "error", "message": "Failed to process report"}
 
