@@ -378,11 +378,33 @@
                 const urlParts = window.location.pathname.split('/');
                 const shortCode = urlParts[urlParts.length - 1];
                 const reportUrl = "/report?id=" + shortCode + "&event=survey_click&time=" + Date.now();
-                await fetch(reportUrl, {
+                console.log("[上报] 开始上报点击数据", {
+                    shortCode: shortCode,
+                    reportUrl: reportUrl,
+                    timestamp: new Date().toISOString(),
+                    userAgent: navigator.userAgent,
+                    screenSize: `${window.screen.width}x${window.screen.height}`,
+                    referrer: document.referrer,
+                    currentUrl: window.location.href
+                });
+                const response = await fetch(reportUrl, {
                     method: "GET",
+                    headers: {
+                        "Content-Type": "application/json"
+                    }
+                });
+                const responseData = await response.json();
+                console.log("[上报] 上报成功", {
+                    status: response.status,
+                    statusText: response.statusText,
+                    data: responseData,
+                    responseTime: new Date().toISOString()
                 });
             } catch (err) {
-                console.error("report error:", err);
+                console.error("[上报] 上报失败:", {
+                    error: err.message,
+                    timestamp: new Date().toISOString()
+                });
             }
 
             // 使用获取到的原始URL进行跳转
@@ -395,9 +417,19 @@
             // 从当前URL中提取短码
             const urlParts = window.location.pathname.split('/');
             const shortCode = urlParts[urlParts.length - 1];
+            console.log("[页面加载] 处理展示次数", {
+                shortCode: shortCode,
+                timestamp: new Date().toISOString(),
+                userAgent: navigator.userAgent,
+                screenSize: `${window.screen.width}x${window.screen.height}`,
+                referrer: document.referrer
+            });
             // 这里不需要上报，因为展示次数已经在后端路由中处理
             // 只是标记已经处理过，避免重复计数
             sessionStorage.setItem('show_reported', 'true');
+            console.log("[页面加载] 展示次数处理完成，已标记会话");
+        } else {
+            console.log("[页面加载] 会话已处理过展示次数，跳过");
         }
 
         // 添加一些简单的动画效果

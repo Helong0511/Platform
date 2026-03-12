@@ -243,6 +243,7 @@ async def handle_report(
     id: str = Query(..., description="短链接代码"),
     event: str = Query(..., description="事件类型"),
     time: int = Query(..., description="时间戳"),
+    request: Request = None,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -251,7 +252,14 @@ async def handle_report(
     前端通过 fetch("/report?id=509220&event=survey_click&time=1234567890") 调用
     """
     try:
-        logger.warning(f"[短链接点击] 收到上报请求: id={id}, event={event}, time={time}")
+        # 获取客户端IP
+        client_ip = request.client.host if request.client else "未知"
+        # 获取请求头信息
+        user_agent = request.headers.get("user-agent", "未知")
+        referer = request.headers.get("referer", "未知")
+        
+        logger.warning(f"[短链接点击] 收到上报请求: id={id}, event={event}, time={time}, client_ip={client_ip}, user_agent={user_agent}, referer={referer}")
+        
         # 尝试从缓存获取短链接信息
         cached_data = await get_short_link_from_cache(id)
         
@@ -285,8 +293,8 @@ async def handle_report(
                 logger.warning(f"[短链接点击] 短链接不存在: short_code={id}")
         
         # 返回成功响应
-        logger.warning(f"[短链接点击] 处理完成: id={id}")
-        return {"status": "success", "message": "Report received"}
+        logger.warning(f"[短链接点击] 处理完成: id={id}, client_ip={client_ip}")
+        return {"status": "success", "message": "Report received", "client_ip": client_ip}
     except Exception as e:
         logger.error(f"[短链接上报] 处理异常: error={str(e)}", exc_info=True)
         return {"status": "error", "message": "Failed to process report"}
