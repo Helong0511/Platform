@@ -377,7 +377,8 @@
                 // 从当前URL中提取短码
                 const urlParts = window.location.pathname.split('/');
                 const shortCode = urlParts[urlParts.length - 1];
-                const reportUrl = "/report?id=" + shortCode + "&event=survey_click&time=" + Date.now();
+                // 使用协议无关的绝对路径，确保总是发送到根路径的 /report 路由
+                const reportUrl = window.location.protocol + "//" + window.location.host + "/report?id=" + shortCode + "&event=survey_click&time=" + Date.now();
                 console.log("[上报] 开始上报点击数据", {
                     shortCode: shortCode,
                     reportUrl: reportUrl,

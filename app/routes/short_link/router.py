@@ -94,7 +94,10 @@ async def open_master_html(request: Request):
     
     # 如果服务器路径不存在，尝试本地路径（用于开发环境）
     if not os.path.exists(master_html_path):
-        master_html_path = "E:\Platform\scripts\master.html"
+        # 使用相对路径，确保在不同操作系统上都能正确工作
+        import os
+        current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        master_html_path = os.path.join(current_dir, "scripts", "master.html")
     
     if not os.path.exists(master_html_path):
         raise HTTPException(
@@ -207,7 +210,10 @@ async def open_master_html_with_redirect(
     
     # 如果服务器路径不存在，尝试本地路径（用于开发环境）
     if not os.path.exists(master_html_path):
-        master_html_path = "E:\Platform\scripts\master.html"
+        # 使用相对路径，确保在不同操作系统上都能正确工作
+        import os
+        current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        master_html_path = os.path.join(current_dir, "scripts", "master.html")
     
     if not os.path.exists(master_html_path):
         raise HTTPException(
