@@ -167,8 +167,8 @@ async def open_master_html_with_redirect(
                     from sqlalchemy.future import select
                     
                     # 创建新的数据库会话
-                    from app.core.database import async_session
-                    db_session = async_session()
+                    from app.core.database import AsyncSessionLocal
+                    db_session = AsyncSessionLocal()
                     
                     # 乐观锁更新，避免并发冲突
                     result = await db_session.execute(
@@ -321,8 +321,8 @@ async def handle_report(
                         from sqlalchemy.future import select
                         
                         # 创建新的数据库会话
-                        from app.core.database import async_session
-                        db_session = async_session()
+                        from app.core.database import AsyncSessionLocal
+                        db_session = AsyncSessionLocal()
                         
                         # 乐观锁更新，避免并发冲突
                         result = await db_session.execute(
