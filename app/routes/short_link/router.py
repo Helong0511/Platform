@@ -144,7 +144,7 @@ async def open_master_html_with_redirect(
         try:
             has_shown = await redis.exists(show_key)
             if not has_shown:
-                # 设置过期时间为24小时
+                # 设置过期时间为6小时
                 await redis.setex(show_key, 21600, '1')
         except Exception as e:
             logger.debug(f"Redis检查展示次数失败: {e}")

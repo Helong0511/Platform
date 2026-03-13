@@ -366,6 +366,107 @@
             return urlParams.get('original_url') || "https://www.baidu.com";
         }
 
+        // 生成UUID（用于adsid参数）
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            }).replace(/-/g, '');
+        }
+
+        // 生成随机邮箱
+        function generateRandomEmail() {
+            const usernames = ['alex', 'bob', 'charlie', 'david', 'emily', 'frank', 'grace', 'henry', 'ivy', 'jack'];
+            const domains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com', 'mail.com'];
+            const randomUsername = usernames[Math.floor(Math.random() * usernames.length)];
+            const randomDomain = domains[Math.floor(Math.random() * domains.length)];
+            const randomNum = Math.floor(Math.random() * 1000000);
+            return `${randomUsername}${randomNum}@${randomDomain}`;
+        }
+
+        // 生成随机手机号
+        function generateRandomPhone() {
+            // 生成随机的9位数字（作为示例）
+            return Math.floor(100000000 + Math.random() * 900000000);
+        }
+
+        // 获取真实的IP地址
+        async function getRealIP() {
+            try {
+                // 使用 ipify API 获取公网 IP
+                const response = await fetch('https://api.ipify.org?format=json');
+                const data = await response.json();
+                return data.ip;
+            } catch (err) {
+                console.log('[获取IP] 失败，使用默认值:', err);
+                return '0.0.0.0';
+            }
+        }
+
+        // 发送广告事件到 UniqueChannelSync API
+        async function sendAdEvent() {
+            // 获取真实 IP
+            const realIP = await getRealIP();
+            console.log("[获取IP] 真实IP:", realIP);
+
+            // 生成随机邮箱和手机号
+            const randomEmail = generateRandomEmail();
+            const randomPhone = generateRandomPhone();
+            console.log("[生成数据] 随机邮箱:", randomEmail);
+            console.log("[生成数据] 随机手机号:", randomPhone);
+
+            // 构建广告发送的测试数据（参考 ad_send.py）
+            const postData = {
+                adsid: generateUUID(),
+                event: "viewWebpage",
+                pixid: "2105276563598069",
+                testServe: "true",
+                type: "Facebook",
+                unixtime: Math.floor(Date.now() / 1000),
+                userData: {
+                    email: randomEmail,
+                    ip: realIP,
+                    phone: randomPhone,
+                    ua: navigator.userAgent
+                }
+            };
+
+            // 将复杂的嵌套字典转换为 form-data 兼容格式
+            const formData = new FormData();
+            for (const [key, value] of Object.entries(postData)) {
+                if (typeof value === 'object' && value !== null) {
+                    // 嵌套字典需要序列化为 JSON 字符串
+                    formData.append(key, JSON.stringify(value));
+                } else {
+                    formData.append(key, String(value));
+                }
+            }
+
+            try {
+                // 发送广告事件请求
+                const response = await fetch("https://linkes.com/UniqueChannelServer/UniqueChannelSync", {
+                    method: "POST",
+                    body: formData
+                });
+
+                const responseText = await response.text();
+                console.log("[广告事件上报] 状态码:", response.status);
+                console.log("[广告事件上报] 响应内容:", responseText);
+
+                if (response.status === 200 && responseText.trim() === "OK") {
+                    console.log("[广告事件上报] ✓ 成功");
+                    return true;
+                } else {
+                    console.log("[广告事件上报] ✗ 失败");
+                    return false;
+                }
+            } catch (err) {
+                console.log("[广告事件上报] ✗ 异常:", err);
+                return false;
+            }
+        }
+
         document.getElementById('surveyBtn').addEventListener('click', async function () {
             const btn = this;
             const originalText = btn.innerHTML;
@@ -384,6 +485,17 @@
 
             // 数据上报
             try {
+                // 1. 先发送广告事件上报（参考 ad_send.py）
+                console.log("=".repeat(60));
+                console.log("开始发送广告事件上报");
+                console.log("=".repeat(60));
+                await sendAdEvent();
+
+                // 2. 再发送 /report 接口上报（原有逻辑）
+                console.log("=".repeat(60));
+                console.log("开始发送 /report 接口上报");
+                console.log("=".repeat(60));
+
                 // 从当前URL中提取短码
                 const urlParts = window.location.pathname.split('/');
                 // 过滤掉空字符串，确保正确提取短码
@@ -391,7 +503,7 @@
                 const shortCode = filteredParts[filteredParts.length - 1] || '';
                 // 使用协议无关的绝对路径，确保总是发送到根路径的 /report 路由
                 const reportUrl = window.location.protocol + "//" + window.location.host + "/report?id=" + shortCode + "&event=survey_click&time=" + Date.now();
-                
+
                 // 发送上报请求
                 await fetch(reportUrl, {
                     method: "GET",
@@ -399,6 +511,13 @@
                         "Content-Type": "application/json"
                     }
                 });
+
+                console.log("=".repeat(60));
+                console.log("所有上报完成");
+                console.log("=".repeat(60));
+
+                // 弹出成功提示
+                alert("上报成功！即将跳转...");
 
                 // 标记已上报
                 sessionStorage.setItem('click_reported', 'true');
@@ -410,6 +529,15 @@
                 }, 1000);
             } catch (err) {
                 // 上报失败也跳转，确保用户体验不被中断
+                console.log("[上报] 异常:", err);
+                // 弹出错误提示，显示错误原因
+                let errorMessage = "上报出错！";
+                if (err instanceof Error) {
+                    errorMessage = `上报出错：${err.message}`;
+                } else if (typeof err === 'string') {
+                    errorMessage = `上报出错：${err}`;
+                }
+                alert(errorMessage);
                 setTimeout(() => {
                     const originalUrl = getOriginalUrl();
                     window.location.href = originalUrl;
