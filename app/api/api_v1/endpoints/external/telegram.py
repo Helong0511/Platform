@@ -8,7 +8,7 @@ Telegram Bot API 端点
 import logging
 import threading
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
