@@ -412,7 +412,169 @@ async def reset_webhook(
     except Exception as e:
         logger.error(f"删除 Webhook 时发生错误: {e}", exc_info=True)
         raise_api_exception(
+                error_code=ErrorCode.INTERNAL_ERROR,
+                message=f"删除 Webhook 失败: {str(e)}"
+            )
+
+
+# ====== 新的实用 API 端点 ======
+
+class SendAlertRequest(BaseModel):
+    """发送告警请求模型"""
+    alert_type: str = Field(..., description="告警类型", min_length=1, max_length=100)
+    description: str = Field(..., description="告警描述", min_length=1, max_length=1000)
+    module: Optional[str] = Field(None, description="模块名称", max_length=100)
+    function: Optional[str] = Field(None, description="函数名称", max_length=100)
+    line: Optional[int] = Field(None, description="行号")
+    telegram_chat_id: Optional[str] = Field(None, description="目标聊天ID（可选，默认使用配置中的 TELEGRAM_ADMIN")
+
+
+@router.post("/send_alert", response_model=ResponseBaseSchema[SendMessageResponse], summary="发送系统告警")
+async def send_alert(
+    request: SendAlertRequest,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    发送系统告警通知到 Telegram
+    
+    需要管理员权限
+    """
+    # 检查是否启用 Telegram
+    telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+    if not telegram_enabled:
+        raise_api_exception(
+            error_code=ErrorCode.SERVICE_UNAVAILABLE,
+            message="Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false）",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
+    try:
+        if not bot_initialized:
+            raise_api_exception(
+                error_code=ErrorCode.SERVICE_UNAVAILABLE,
+                message="Telegram Bot 未初始化，请检查 TELEGRAM_TOKEN 配置",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        # 构建位置信息
+        location = {}
+        if request.module:
+            location['module'] = request.module
+        if request.function:
+            location['function'] = request.function
+        if request.line:
+            location['line'] = str(request.line)
+
+        # 发送告警
+        from app.services.telegram_notification_service import TelegramNotificationService
+        success = await TelegramNotificationService.send_system_alert(
+            alert_type=request.alert_type,
+            description=request.description,
+            location=location if location else None,
+            telegram_chat_id=request.telegram_chat_id,
+            db=db
+        )
+
+        if success:
+            logger.info(f"用户 {current_user.username} 通过 API 发送了系统告警")
+            return ResponseBaseSchema.success(data=SendMessageResponse(
+                success=True,
+                message="系统告警发送成功"
+            ))
+        else:
+            raise_api_exception(
+                error_code=ErrorCode.INTERNAL_ERROR,
+                message="系统告警发送失败"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"发送系统告警时发生错误: {e}", exc_info=True)
+        raise_api_exception(
             error_code=ErrorCode.INTERNAL_ERROR,
-            message=f"删除 Webhook 失败: {str(e)}"
+            message=f"发送系统告警失败: {str(e)}"
+        )
+
+
+class SendBatchRequest(BaseModel):
+    """发送批量通知请求模型"""
+    conversions: List[int] = Field(..., description="转化记录ID列表")
+    telegram_chat_id: Optional[str] = Field(None, description="目标聊天ID（可选，默认使用配置中的 TELEGRAM_ADMIN")
+
+
+@router.post("/send_batch", response_model=ResponseBaseSchema[SendMessageResponse], summary="发送批量转化通知")
+async def send_batch_notifications(
+    request: SendBatchRequest,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    发送批量转化通知到 Telegram
+    
+    需要管理员权限
+    """
+    # 检查是否启用 Telegram
+    telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+    if not telegram_enabled:
+        raise_api_exception(
+            error_code=ErrorCode.SERVICE_UNAVAILABLE,
+            message="Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false）",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
+    try:
+        if not bot_initialized:
+            raise_api_exception(
+                error_code=ErrorCode.SERVICE_UNAVAILABLE,
+                message="Telegram Bot 未初始化，请检查 TELEGRAM_TOKEN 配置",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        # 查询转化记录
+        from app.models.models import PostbackConversion
+        from sqlalchemy import select
+
+        result = await db.execute(
+            select(PostbackConversion).where(
+                PostbackConversion.id.in_(request.conversions)
+            )
+        )
+        conversions = result.scalars().all()
+
+        if not conversions:
+            return ResponseBaseSchema.success(data=SendMessageResponse(
+                success=False,
+                message="未找到指定的转化记录"
+            ))
+
+        # 发送批量通知
+        from app.services.telegram_notification_service import TelegramNotificationService
+        success = await TelegramNotificationService.send_batch_conversion_notifications(
+            conversions=conversions,
+            telegram_chat_id=request.telegram_chat_id,
+            db=db
+        )
+
+        if success:
+            logger.info(f"用户 {current_user.username} 通过 API 发送了批量转化通知")
+            return ResponseBaseSchema.success(data=SendMessageResponse(
+                success=True,
+                message=f"批量转化通知发送成功，共 {len(conversions)} 条"
+            ))
+        else:
+            raise_api_exception(
+                error_code=ErrorCode.INTERNAL_ERROR,
+                message="批量转化通知发送失败"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"发送批量转化通知时发生错误: {e}", exc_info=True)
+        raise_api_exception(
+            error_code=ErrorCode.INTERNAL_ERROR,
+            message=f"发送批量转化通知失败: {str(e)}"
         )
 

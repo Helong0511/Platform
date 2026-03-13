@@ -4,7 +4,7 @@ Telegram 通知服务
 """
 import json
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy import and_, func, select
@@ -12,8 +12,17 @@ from sqlalchemy import and_, func, select
 from app.models.models import (
     PostbackConversion, Client, Product, Publisher, Offer, User, PostbackNotification, ClickStats
 )
-from app.core.auto_bot import send_telegram_message
+from app.core.auto_bot import send_telegram_message, send_telegram_message_with_buttons
 from app.core.utils import get_app_now_naive
+from app.core.telegram_utils import (
+    format_telegram_message,
+    build_conversion_message,
+    build_summary_message,
+    build_alert_message,
+    split_long_message,
+    validate_chat_id,
+    MESSAGE_TYPES
+)
 
 logger = logging.getLogger(__name__)
 
@@ -493,3 +502,331 @@ class TelegramNotificationService:
         except Exception as e:
             logger.error(f"发送管理员通知失败: {str(e)}", exc_info=True)
             return False
+    
+    @staticmethod
+    async def send_system_alert(
+        alert_type: str,
+        description: str,
+        location: Optional[Dict[str, str]] = None,
+        error: Optional[Exception] = None,
+        telegram_chat_id: Optional[str] = None,
+        db: Optional[AsyncSession] = None
+    ) -> bool:
+        """
+        发送系统告警通知
+        
+        Args:
+            alert_type: 告警类型
+            description: 告警描述
+            location: 位置信息（模块、函数、行号等）
+            error: 异常对象（可选）
+            telegram_chat_id: Telegram Chat ID（可选）
+            db: 数据库会话（可选，用于记录通知历史）
+        
+        Returns:
+            bool: 是否发送成功
+        """
+        try:
+            message = build_alert_message(
+                alert_type=alert_type,
+                description=description,
+                location=location,
+                error=error
+            )
+            
+            success = await send_telegram_message(message, chat_id=telegram_chat_id)
+            
+            if db:
+                try:
+                    notification_record = PostbackNotification(
+                        conversion_id=None,
+                        client_id=None,
+                        product_id=None,
+                        publisher_id=None,
+                        notification_type='system_alert',
+                        notification_channel='telegram',
+                        notification_status='sent' if success else 'failed',
+                        notification_message=message,
+                        error_message=None if success else "发送失败",
+                        auto_notify=True,
+                        postback_url=None,
+                        created_at=get_app_now_naive()
+                    )
+                    db.add(notification_record)
+                    await db.commit()
+                except Exception as e:
+                    logger.warning(f"记录系统告警通知历史失败: {str(e)}")
+                    if db:
+                        await db.rollback()
+            
+            logger.warning(f"系统告警已发送: alert_type={alert_type}, description={description}")
+            return success
+        except Exception as e:
+            logger.error(f"发送系统告警通知失败: {str(e)}", exc_info=True)
+            return False
+    
+    @staticmethod
+    async def send_summary_notification(
+        summary_data: Dict[str, Any],
+        period: str = 'today',
+        telegram_chat_id: Optional[str] = None,
+        db: Optional[AsyncSession] = None,
+        client_id: Optional[int] = None,
+        product_id: Optional[int] = None
+    ) -> bool:
+        """
+        发送汇总统计通知
+        
+        Args:
+            summary_data: 汇总数据字典
+            period: 统计周期（today, hourly, daily, weekly, monthly）
+            telegram_chat_id: Telegram Chat ID（可选）
+            db: 数据库会话（可选，用于记录通知历史）
+            client_id: 客户ID（可选，用于记录通知历史）
+            product_id: 产品ID（可选，用于记录通知历史）
+        
+        Returns:
+            bool: 是否发送成功
+        """
+        try:
+            message = build_summary_message(
+                summary_data=summary_data,
+                period=period
+            )
+            
+            success = await send_telegram_message(message, chat_id=telegram_chat_id)
+            
+            if db:
+                try:
+                    notification_record = PostbackNotification(
+                        conversion_id=None,
+                        client_id=client_id,
+                        product_id=product_id,
+                        publisher_id=None,
+                        notification_type=f'summary_{period}',
+                        notification_channel='telegram',
+                        notification_status='sent' if success else 'failed',
+                        notification_message=message,
+                        error_message=None if success else "发送失败",
+                        auto_notify=True,
+                        postback_url=None,
+                        created_at=get_app_now_naive()
+                    )
+                    db.add(notification_record)
+                    await db.commit()
+                except Exception as e:
+                    logger.warning(f"记录汇总统计通知历史失败: {str(e)}")
+                    if db:
+                        await db.rollback()
+            
+            logger.info(f"汇总统计通知已发送: period={period}")
+            return success
+        except Exception as e:
+            logger.error(f"发送汇总统计通知失败: {str(e)}", exc_info=True)
+            return False
+    
+    @staticmethod
+    async def send_batch_conversion_notifications(
+        conversions: List[PostbackConversion],
+        telegram_chat_id: str,
+        db: Optional[AsyncSession] = None,
+        client_id: Optional[int] = None,
+        product_id: Optional[int] = None
+    ) -> bool:
+        """
+        批量发送转化通知（用于汇总通知场景）
+        
+        Args:
+            conversions: 转化记录列表
+            telegram_chat_id: Telegram Chat ID
+            db: 数据库会话（可选）
+            client_id: 客户ID（可选）
+            product_id: 产品ID（可选）
+        
+        Returns:
+            bool: 是否发送成功
+        """
+        if not conversions:
+            return True
+        
+        try:
+            # 构建批量通知消息
+            total_count = len(conversions)
+            total_payout = sum(c.payout or 0 for c in conversions)
+            total_original_payout = sum(c.original_payout or 0 for c in conversions)
+            
+            title = f"📊 批量转化通知 ({total_count} 条)"
+            fields = {
+                "总转化数": total_count,
+                "总扣后收益": f"${total_payout:.2f}",
+                "总原始收益": f"${total_original_payout:.2f}"
+            }
+            
+            # 添加最近的几条转化详情
+            recent_conversions = conversions[-5:]  # 只显示最近5条
+            for i, conv in enumerate(recent_conversions, 1):
+                fields[f"转化 {i}"] = f"ID: {conv.conversion_id}, 平台: {conv.platform}, 收益: ${conv.payout:.2f}"
+            
+            if total_count > 5:
+                fields["提示"] = f"只显示最近5条，共 {total_count} 条转化"
+            
+            message = format_telegram_message(
+                title=title,
+                fields=fields,
+                message_type='conversion'
+            )
+            
+            # 分割长消息
+            messages = split_long_message(message)
+            
+            all_success = True
+            for msg in messages:
+                success = await send_telegram_message(msg, chat_id=telegram_chat_id)
+                if not success:
+                    all_success = False
+            
+            # 记录通知历史（只记录一次，使用第一条转化作为代表）
+            if db and conversions:
+                try:
+                    notification_record = PostbackNotification(
+                        conversion_id=conversions[0].id,
+                        client_id=client_id,
+                        product_id=product_id,
+                        publisher_id=None,
+                        notification_type='batch_conversion',
+                        notification_channel='telegram',
+                        notification_status='sent' if all_success else 'failed',
+                        notification_message=message,
+                        error_message=None if all_success else "部分或全部消息发送失败",
+                        auto_notify=True,
+                        postback_url=None,
+                        created_at=get_app_now_naive()
+                    )
+                    db.add(notification_record)
+                    await db.commit()
+                except Exception as e:
+                    logger.warning(f"记录批量转化通知历史失败: {str(e)}")
+                    if db:
+                        await db.rollback()
+            
+            logger.info(f"批量转化通知已发送: count={total_count}, success={all_success}")
+            return all_success
+        except Exception as e:
+            logger.error(f"发送批量转化通知失败: {str(e)}", exc_info=True)
+            return False
+    
+    @staticmethod
+    async def send_notification_with_buttons(
+        message: str,
+        buttons: List[List[Dict[str, str]]],
+        telegram_chat_id: Optional[str] = None,
+        db: Optional[AsyncSession] = None,
+        conversion: Optional[PostbackConversion] = None,
+        notification_type: str = 'interactive'
+    ) -> tuple[bool, Optional[int]]:
+        """
+        发送带按钮的交互式通知
+        
+        Args:
+            message: 通知消息
+            buttons: 按钮列表，格式：[[{"text": "按钮1", "callback_data": "data1"}, ...], ...]
+            telegram_chat_id: Telegram Chat ID（可选）
+            db: 数据库会话（可选，用于记录通知历史）
+            conversion: 转化记录（可选，用于记录通知历史）
+            notification_type: 通知类型
+        
+        Returns:
+            tuple[bool, Optional[int]]: (是否发送成功, 消息ID)
+        """
+        try:
+            success, message_id = await send_telegram_message_with_buttons(
+                message=message,
+                chat_id=telegram_chat_id,
+                buttons=buttons
+            )
+            
+            if db:
+                try:
+                    notification_record = PostbackNotification(
+                        conversion_id=conversion.id if conversion else None,
+                        client_id=conversion.client_id if conversion else None,
+                        product_id=conversion.product_id if conversion else None,
+                        publisher_id=None,
+                        notification_type=notification_type,
+                        notification_channel='telegram',
+                        notification_status='sent' if success else 'failed',
+                        notification_message=message,
+                        error_message=None if success else "发送失败",
+                        auto_notify=True,
+                        postback_url=None,
+                        created_at=get_app_now_naive()
+                    )
+                    db.add(notification_record)
+                    await db.commit()
+                except Exception as e:
+                    logger.warning(f"记录交互式通知历史失败: {str(e)}")
+                    if db:
+                        await db.rollback()
+            
+            logger.info(f"交互式通知已发送: success={success}, message_id={message_id}")
+            return success, message_id
+        except Exception as e:
+            logger.error(f"发送交互式通知失败: {str(e)}", exc_info=True)
+            return False, None
+    
+    @staticmethod
+    def build_pending_conversion_message(
+        pending_conversion: Any,
+        client_name: Optional[str] = None,
+        product_name: Optional[str] = None
+    ) -> tuple[str, List[List[Dict[str, str]]]]:
+        """
+        构建待确认转化通知消息（带确认/拒绝按钮）
+        
+        Args:
+            pending_conversion: 待确认转化对象
+            client_name: 客户名称（可选）
+            product_name: 产品名称（可选）
+        
+        Returns:
+            tuple[str, List[List[Dict[str, str]]]]: (消息文本, 按钮列表)
+        """
+        title = "⚠️ 待确认转化通知"
+        fields = {
+            "转化ID": pending_conversion.conversion_id,
+            "平台": pending_conversion.platform,
+            "请求IP": pending_conversion.request_ip,
+        }
+        
+        if hasattr(pending_conversion, 'payout') and pending_conversion.payout:
+            fields["收益"] = f"${pending_conversion.payout:.2f}"
+        
+        if hasattr(pending_conversion, 'original_payout') and pending_conversion.original_payout:
+            fields["原始收益"] = f"${pending_conversion.original_payout:.2f}"
+        
+        if client_name:
+            fields["客户"] = client_name
+        
+        if product_name:
+            fields["产品"] = product_name
+        
+        if hasattr(pending_conversion, 'created_at') and pending_conversion.created_at:
+            footer = f"⏰ 请求时间: {pending_conversion.created_at.strftime('%Y-%m-%d %H:%M:%S')}"
+        else:
+            footer = None
+        
+        message = format_telegram_message(
+            title=title,
+            fields=fields,
+            footer=footer,
+            message_type='warning'
+        )
+        
+        buttons = [
+            [
+                {"text": "✅ 批准", "callback_data": f"postback_approve_{pending_conversion.id}"},
+                {"text": "❌ 拒绝", "callback_data": f"postback_reject_{pending_conversion.id}"}
+            ]
+        ]
+        
+        return message, buttons

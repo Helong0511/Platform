@@ -308,7 +308,183 @@ if bot_initialized and TELEBOT_AVAILABLE:
 
         bot.send_message(chat_id, "请选择统计类型：", reply_markup=markup)
     
-    logger.info("Telegram Bot 命令处理器已注册: /id, /test, /clock, /stats")
+    @bot.message_handler(commands=['help'])
+    def handle_help_command(message):
+        """处理 /help 命令：显示帮助信息"""
+        chat_type = message.chat.type if hasattr(message.chat, 'type') else '未知'
+        is_group = chat_type in ['group', 'supergroup']
+        logger.info(f"收到 /help 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'} (Chat Type: {chat_type})")
+        
+        if not _check_bot_available():
+            logger.error("Bot 未初始化，无法处理消息")
+            return
+
+        # 检查群组中是否包含 Bot 的提及
+        if is_group:
+            try:
+                bot_info = bot.get_me()
+                bot_username = bot_info.username if bot_info else None
+                if bot_username:
+                    text = message.text or ''
+                    bot_mentioned = f'@{bot_username}' in text
+                    if not bot_mentioned:
+                        logger.warning(f"⚠️ 群组中的命令没有 @{bot_username}，可能无法响应（Telegram 隐私模式）")
+            except:
+                pass
+
+        help_text = """🤖 广告数据管理系统 - Telegram Bot 帮助
+
+📋 可用命令：
+
+/id - 获取当前聊天ID
+/test - 测试内联按钮功能
+/clock - 打卡功能
+/stats - 查看转化统计
+/help - 显示帮助信息
+/ping - 测试Bot是否在线
+/status - 查看系统状态
+/clear - 清空当前聊天记录（仅管理员）
+
+💡 群组使用提示：
+- 在群组中使用命令时，请使用 /命令@botname 格式
+- 例如：/help@your_bot_name
+
+📊 统计功能：
+- /stats 命令提供多种统计视图
+- 支持总览、按Offer、按渠道等多种统计方式
+
+🔔 通知功能：
+- 系统会自动发送转化通知
+- 支持高价值转化提醒
+- 可配置通知频率和阈值
+
+如需更多帮助，请联系系统管理员。"""
+        
+        bot.send_message(message.chat.id, help_text)
+    
+    @bot.message_handler(commands=['ping'])
+    def handle_ping_command(message):
+        """处理 /ping 命令：测试 Bot 是否在线"""
+        chat_type = message.chat.type if hasattr(message.chat, 'type') else '未知'
+        is_group = chat_type in ['group', 'supergroup']
+        logger.info(f"收到 /ping 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'}")
+        
+        if not _check_bot_available():
+            return
+
+        # 检查群组中是否包含 Bot 的提及
+        if is_group:
+            try:
+                bot_info = bot.get_me()
+                bot_username = bot_info.username if bot_info else None
+                if bot_username:
+                    text = message.text or ''
+                    bot_mentioned = f'@{bot_username}' in text
+                    if not bot_mentioned:
+                        logger.warning(f"⚠️ 群组中的命令没有 @{bot_username}，可能无法响应")
+            except:
+                pass
+
+        current_time = get_app_now()
+        response = f"🏓 Pong!\n\nBot 在线\n响应时间: {current_time.strftime('%Y-%m-%d %H:%M:%S')}\n时区: {settings.TIMEZONE}"
+        bot.send_message(message.chat.id, response)
+    
+    @bot.message_handler(commands=['status'])
+    def handle_status_command(message):
+        """处理 /status 命令：查看系统状态"""
+        chat_type = message.chat.type if hasattr(message.chat, 'type') else '未知'
+        is_group = chat_type in ['group', 'supergroup']
+        logger.info(f"收到 /status 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'}")
+        
+        if not _check_bot_available():
+            return
+
+        # 检查群组中是否包含 Bot 的提及
+        if is_group:
+            try:
+                bot_info = bot.get_me()
+                bot_username = bot_info.username if bot_info else None
+                if bot_username:
+                    text = message.text or ''
+                    bot_mentioned = f'@{bot_username}' in text
+                    if not bot_mentioned:
+                        logger.warning(f"⚠️ 群组中的命令没有 @{bot_username}，可能无法响应")
+            except:
+                pass
+
+        # 获取状态信息
+        status_info = get_bot_status_info()
+        current_time = get_app_now()
+        
+        # 构建状态消息
+        status_msg = "📊 系统状态报告\n\n"
+        status_msg += f"当前时间: {current_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        status_msg += f"时区: {settings.TIMEZONE}\n\n"
+        
+        status_msg += "🤖 Bot 状态:\n"
+        status_msg += f"  • 已启用: {'✅' if status_info.get('telegram_enabled', False) else '❌'}\n"
+        status_msg += f"  • 已初始化: {'✅' if status_info.get('bot_initialized', False) else '❌'}\n"
+        status_msg += f"  • Token 已配置: {'✅' if status_info.get('token_configured', False) else '❌'}\n"
+        status_msg += f"  • 管理员已配置: {'✅' if status_info.get('admin_configured', False) else '❌'}\n"
+        status_msg += f"  • 线程状态: {'✅ 运行中' if status_info.get('bot_thread_alive', False) else '❌ 未运行'}\n"
+        status_msg += f"  • 持有锁: {'✅' if status_info.get('has_lock', False) else '❌'}\n"
+        
+        if status_info.get('bot_username'):
+            status_msg += f"\n👤 Bot 信息:\n"
+            status_msg += f"  • 用户名: @{status_info.get('bot_username')}\n"
+            status_msg += f"  • ID: {status_info.get('bot_id')}\n"
+        
+        status_msg += f"\n🔗 连接测试: {status_info.get('connection_test', '未测试')}"
+        
+        bot.send_message(message.chat.id, status_msg)
+    
+    @bot.message_handler(commands=['clear'])
+    def handle_clear_command(message):
+        """处理 /clear 命令：清空聊天记录（仅管理员）"""
+        chat_type = message.chat.type if hasattr(message.chat, 'type') else '未知'
+        is_group = chat_type in ['group', 'supergroup']
+        logger.info(f"收到 /clear 命令，来自用户: {message.from_user.username or message.from_user.first_name or '未知'}")
+        
+        if not _check_bot_available():
+            return
+
+        # 检查群组中是否包含 Bot 的提及
+        if is_group:
+            try:
+                bot_info = bot.get_me()
+                bot_username = bot_info.username if bot_info else None
+                if bot_username:
+                    text = message.text or ''
+                    bot_mentioned = f'@{bot_username}' in text
+                    if not bot_mentioned:
+                        logger.warning(f"⚠️ 群组中的命令没有 @{bot_username}，可能无法响应")
+            except:
+                pass
+
+        # 检查是否是管理员
+        is_admin = False
+        try:
+            # 检查用户是否是群组管理员
+            if is_group:
+                chat_member = bot.get_chat_member(message.chat.id, message.from_user.id)
+                is_admin = chat_member.status in ['administrator', 'creator']
+            else:
+                # 私聊中，检查是否是配置的管理员
+                admin_chat_id = getattr(settings, 'TELEGRAM_ADMIN', None)
+                if admin_chat_id and str(message.chat.id) == str(admin_chat_id):
+                    is_admin = True
+        except Exception as e:
+            logger.warning(f"检查管理员权限时出错: {e}")
+            is_admin = False
+        
+        if not is_admin:
+            bot.reply_to(message, "⚠️ 只有管理员可以使用此命令")
+            return
+        
+        # 发送确认消息
+        bot.reply_to(message, "🧹 聊天记录清理功能需要手动删除消息。\n\n提示：\n- 可以使用 Telegram 的批量删除功能\n- 在群组中，管理员可以删除消息")
+    
+    logger.info("Telegram Bot 命令处理器已注册: /id, /test, /clock, /stats, /help, /ping, /status, /clear")
     # 验证处理器是否真的注册了
     try:
         # 检查 bot 的 registered_next_step_handlers 和 message_handlers
@@ -332,7 +508,6 @@ if bot_initialized and TELEBOT_AVAILABLE:
 
         try:
             logger.info(f"[回调查询处理器] 处理 callback_data: '{call.data}'")
-            import threading
             
             # 处理 Postback 待确认转化的确认/拒绝
             if call.data.startswith("postback_approve_") or call.data.startswith("postback_reject_"):
@@ -341,7 +516,6 @@ if bot_initialized and TELEBOT_AVAILABLE:
                 from sqlalchemy import select as sync_select
                 from app.models.models import PendingPostbackConversion, PostbackConversion
                 from app.core.utils import get_app_now_naive
-                from app.core.config import settings
                 import json
                 
                 # 解析 callback_data
@@ -369,9 +543,6 @@ if bot_initialized and TELEBOT_AVAILABLE:
                 # 使用同步数据库操作（因为 Telegram bot 回调是同步的）
                 def process_pending_conversion_sync():
                     try:
-                        # 导入 settings 以确保在函数内部可用
-                        from app.core.config import settings
-                        
                         # 创建同步数据库引擎（从异步 URI 转换为同步 URI）
                         # 支持多种格式：mysql+aiomysql:// 或 mysql+asyncmy://
                         sync_db_url = settings.SQLALCHEMY_DATABASE_URI
@@ -570,7 +741,6 @@ if bot_initialized and TELEBOT_AVAILABLE:
                         
                         # 创建数据库会话
                         from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-                        from sqlalchemy.orm import sessionmaker
                         
                         # 从设置中获取数据库 URL
                         db_url = getattr(settings, 'SQLALCHEMY_DATABASE_URI', None)
@@ -701,7 +871,6 @@ if bot_initialized and TELEBOT_AVAILABLE:
                                     await db.close()
                         
                         # 执行异步函数
-                        import asyncio
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
                         message = loop.run_until_complete(get_stats())
@@ -764,7 +933,6 @@ if bot_initialized and TELEBOT_AVAILABLE:
                         )
                 
                 # 启动线程处理统计数据
-                import threading
                 thread = threading.Thread(target=process_stats, daemon=True)
                 thread.start()
             elif call.data == "Cancel":
@@ -802,9 +970,6 @@ def run_bot():
     if not _check_bot_available():
         logger.error("Bot 未初始化，无法启动轮询")
         return
-
-    # 导入 settings 以确保在函数内部可用
-    from app.core.config import settings
 
     logger.info(f"[线程: {threading.current_thread().name}] 开始启动 Telegram Bot 轮询...")
     
@@ -1711,7 +1876,11 @@ def start_bot():
             ("id", "查询聊天ID（群组中需使用 /id@botname）"),
             ("test", "测试内联按钮（群组中需使用 /test@botname）"),
             ("clock", "打卡（群组中需使用 /clock@botname）"),
-            ("stats", "查看转化统计（群组中需使用 /stats@botname）")
+            ("stats", "查看转化统计（群组中需使用 /stats@botname）"),
+            ("help", "显示帮助信息"),
+            ("ping", "测试Bot是否在线"),
+            ("status", "查看系统状态"),
+            ("clear", "清空聊天记录（仅管理员）")
         ]
 
         com_set = []
