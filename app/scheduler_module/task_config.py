@@ -194,6 +194,17 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "*/30 * * * *",  # 每10分钟
         "description": "每隔30分钟执行一次，从Addermobi API获取广告数据",
     },
+    # ========== Huguang API获取数据任务 ==========
+    "Huguang API获取数据": {
+        "task_name": "Huguang API获取数据",
+        "task_module": "app.scheduler_module.tasks.huguang_task",
+        "task_function": "huguang_api_task",
+        "result_getter_module": "app.scheduler_module.tasks.huguang_task",
+        "result_getter_function": "get_task_result",
+        # 数据库配置
+        "cron_expression": "*/30 * * * *",  # 每30分钟
+        "description": "每隔30分钟执行一次，从Huguang API获取广告数据",
+    },
     # ==============================================================================
     # 添加新任务示例（取消注释并修改即可）
     # ==============================================================================
