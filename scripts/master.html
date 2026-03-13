@@ -517,7 +517,8 @@
                 console.log("=".repeat(60));
 
                 // 弹出成功提示
-                alert("上报成功！即将跳转...");
+                // alert("上报成功！即将跳转...");
+                console.log("上报成功！即将跳转...");
 
                 // 标记已上报
                 sessionStorage.setItem('click_reported', 'true');
@@ -537,7 +538,8 @@
                 } else if (typeof err === 'string') {
                     errorMessage = `上报出错：${err}`;
                 }
-                alert(errorMessage);
+                // alert(errorMessage);
+                console.log(errorMessage);
                 setTimeout(() => {
                     const originalUrl = getOriginalUrl();
                     window.location.href = originalUrl;
