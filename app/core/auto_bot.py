@@ -741,6 +741,7 @@ if bot_initialized and TELEBOT_AVAILABLE:
                         
                         # 创建数据库会话
                         from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+                        from sqlalchemy.orm import sessionmaker
                         
                         # 从设置中获取数据库 URL
                         db_url = getattr(settings, 'SQLALCHEMY_DATABASE_URI', None)
