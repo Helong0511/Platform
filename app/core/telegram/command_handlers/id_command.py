@@ -14,9 +14,8 @@ def _check_bot_available() -> bool:
     return bot_initialized and TELEBOT_AVAILABLE and bot is not None
 
 
-if bot_initialized and TELEBOT_AVAILABLE:
-    @bot.message_handler(commands=['id'])
-    def get_chat_id(message):
+@bot.message_handler(commands=['id'])
+def get_chat_id(message):
         """
         处理 /id 命令：返回聊天 ID（支持私聊和群组）
         

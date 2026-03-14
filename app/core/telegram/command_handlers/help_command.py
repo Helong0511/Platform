@@ -14,9 +14,8 @@ def _check_bot_available() -> bool:
     return bot_initialized and TELEBOT_AVAILABLE and bot is not None
 
 
-if bot_initialized and TELEBOT_AVAILABLE:
-    @bot.message_handler(commands=['help'])
-    def cmd_help(message):
+@bot.message_handler(commands=['help'])
+def cmd_help(message):
         """
         处理 /help 命令：显示帮助信息
         

@@ -14,9 +14,8 @@ def _check_bot_available() -> bool:
     return bot_initialized and TELEBOT_AVAILABLE and bot is not None
 
 
-if bot_initialized and TELEBOT_AVAILABLE:
-    @bot.message_handler(commands=['start'])
-    def cmd_start(message):
+@bot.message_handler(commands=['start'])
+def cmd_start(message):
         """
         处理 /start 命令：发送欢迎消息
         
