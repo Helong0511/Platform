@@ -39,6 +39,7 @@ try:
         bot,
         bot_initialized,
         TELEBOT_AVAILABLE,
+        get_bot_status_info,
         
         # 消息发送
         send_telegram_message,
@@ -111,6 +112,15 @@ except ImportError as e:
     def start_bot_thread():
         logger.error("线程启动功能不可用")
         return False
+    
+    def get_bot_status_info():
+        logger.error("Bot 状态查询功能不可用")
+        return {
+            "token_configured": False,
+            "admin_configured": False,
+            "bot_thread_alive": False,
+            "connection_test": "未测试"
+        }
 
 # 导出所有公开接口
 __all__ = [
@@ -121,6 +131,7 @@ __all__ = [
     'bot',
     'bot_initialized',
     'TELEBOT_AVAILABLE',
+    'get_bot_status_info',
     
     # 消息发送
     'send_telegram_message',

@@ -10,7 +10,7 @@ Telegram Bot 模块
 """
 
 from app.core.telegram.bot_initializer import initialize_bot, get_bot, is_bot_available
-from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
+from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE, get_bot_status_info
 from app.core.telegram.message_sender import (
     send_telegram_message,
     send_telegram_message_with_buttons,
@@ -32,6 +32,7 @@ __all__ = [
     'bot',
     'bot_initialized',
     'TELEBOT_AVAILABLE',
+    'get_bot_status_info',
     
     # 消息发送
     'send_telegram_message',
