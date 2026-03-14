@@ -21,6 +21,7 @@ from app.core.postback.checks.discount_checker import DiscountChecker
 from app.core.postback.savers.conversion_saver import ConversionSaver
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
+from app.core.postback.handlers import register_handler, get_handler, list_platforms
 
 __all__ = [
     # 主处理器
@@ -45,4 +46,9 @@ __all__ = [
     # 转发和通知
     'PostbackForwarder',
     'PostbackNotifier',
+    
+    # 处理器注册
+    'register_handler',
+    'get_handler',
+    'list_platforms',
 ]
