@@ -312,7 +312,7 @@ onBeforeUnmount(() => {
 .login-form :deep(.el-input__wrapper) {
   height: 48px;
   border-radius: var(--radius-lg);
-  padding: 0 12px 0 36px; /* 左边距加大，为图标留出空间 */
+  padding-left: 12px !important;
 }
 
 .login-form :deep(.el-input) {
@@ -320,34 +320,45 @@ onBeforeUnmount(() => {
 }
 
 .login-form :deep(.el-input__prefix) {
-  left: 8px;
+  left: 0 !important;
   display: flex;
   align-items: center;
   justify-content: center;
+  height: 100%;
 }
 
 .login-form :deep(.el-input__prefix-inner) {
   display: flex;
   align-items: center;
+  justify-content: center;
+  height: 100%;
 }
 
 .login-form :deep(.el-input__prefix-inner > .el-icon) {
   font-size: 16px !important;
   width: 16px !important;
   height: 16px !important;
-}
-
-.login-form :deep(.el-input__suffix) {
-  right: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
+  margin-right: 8px;
+}
+
+.login-form :deep(.el-input__suffix) {
+  right: 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
 }
 
 .login-form :deep(.el-input__suffix-inner > .el-icon) {
   font-size: 16px !important;
   width: 16px !important;
   height: 16px !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .login-form :deep(.el-input:focus-within) {

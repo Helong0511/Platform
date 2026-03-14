@@ -9,6 +9,9 @@
 /* 导入通用样式 */
 @import './styles/common.css';
 
+/* 导入移动端样式 */
+@import './styles/mobile.css';
+
 /* ====== 全局重置 ====== */
 #app {
   width: 100%;

@@ -114,6 +114,16 @@ def start_polling():
             logger.warning(f"[PID:{current_pid}] 验证时发生错误，但继续启动：{e}")
     
     try:
+        # 显式导入命令处理器（确保消息处理器被注册）
+        if bot_initialized and TELEBOT_AVAILABLE:
+            try:
+                from app.core.telegram.command_handlers.id_command import get_chat_id
+                from app.core.telegram.command_handlers.start_command import cmd_start
+                from app.core.telegram.command_handlers.help_command import cmd_help
+                logger.info("命令处理器已成功导入并注册")
+            except Exception as import_err:
+                logger.warning(f"导入命令处理器时出错：{import_err}")
+        
         # 设置 Bot 命令
         set_bot_commands()
         
