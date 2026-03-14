@@ -1,0 +1,157 @@
+"""
+Telegram 消息发送模块
+
+提供消息发送功能，包括普通消息、带按钮消息和管理员通知
+"""
+import logging
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+
+from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
+from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH
+
+logger = logging.getLogger(__name__)
+
+
+def _check_bot_available() -> bool:
+    """检查 Bot 是否可用"""
+    return bot_initialized and TELEBOT_AVAILABLE and bot is not None
+
+
+def send_telegram_message(
+    chat_id: str,
+    message: str,
+    parse_mode: str = 'HTML',
+    reply_to_message_id: Optional[int] = None
+) -> bool:
+    """
+    发送 Telegram 消息
+    
+    Args:
+        chat_id: 聊天 ID
+        message: 消息内容
+        parse_mode: 解析模式（HTML/Markdown）
+        reply_to_message_id: 回复的消息 ID（可选）
+    
+    Returns:
+        bool: 是否发送成功
+    """
+    if not _check_bot_available():
+        logger.warning("Bot 未初始化，无法发送消息")
+        return False
+    
+    try:
+        # 截断过长的消息
+        if len(message) > MAX_TELEGRAM_MESSAGE_LENGTH:
+            truncated_msg = truncate_message(message, MAX_TELEGRAM_MESSAGE_LENGTH)
+            logger.info(f"消息过长，已截断：{len(message)} -> {len(truncated_msg)} 字符")
+            message = truncated_msg
+        
+        bot.send_message(
+            chat_id=chat_id,
+            text=message,
+            parse_mode=parse_mode,
+            reply_to_message_id=reply_to_message_id
+        )
+        logger.info(f"已发送 Telegram 消息到：{chat_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"发送 Telegram 消息失败：{e}", exc_info=True)
+        return False
+
+
+def send_telegram_message_with_buttons(
+    chat_id: str,
+    message: str,
+    buttons: List[List[Dict[str, Any]]],
+    parse_mode: str = 'HTML'
+) -> bool:
+    """
+    发送带内联按钮的 Telegram 消息
+    
+    Args:
+        chat_id: 聊天 ID
+        message: 消息内容
+        buttons: 按钮列表 [[{text, callback_data}], ...]
+        parse_mode: 解析模式（HTML/Markdown）
+    
+    Returns:
+        bool: 是否发送成功
+    """
+    if not _check_bot_available():
+        logger.warning("Bot 未初始化，无法发送消息")
+        return False
+    
+    try:
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        
+        # 构建内联键盘
+        keyboard = []
+        for row in buttons:
+            button_row = []
+            for btn in row:
+                button = InlineKeyboardButton(
+                    text=btn.get('text', ''),
+                    callback_data=btn.get('callback_data', '')
+                )
+                button_row.append(button)
+            keyboard.append(button_row)
+        
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(*[btn for row in keyboard for btn in row])
+        
+        # 截断过长的消息
+        if len(message) > MAX_TELEGRAM_MESSAGE_LENGTH:
+            truncated_msg = truncate_message(message, MAX_TELEGRAM_MESSAGE_LENGTH)
+            message = truncated_msg
+        
+        bot.send_message(
+            chat_id=chat_id,
+            text=message,
+            parse_mode=parse_mode,
+            reply_markup=markup
+        )
+        logger.info(f"已发送带按钮的 Telegram 消息到：{chat_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"发送带按钮的 Telegram 消息失败：{e}", exc_info=True)
+        return False
+
+
+async def send_admin_notification(
+    message: str,
+    telegram_chat_id: str,
+    notification_type: str = 'system',
+    db: Optional[Any] = None
+) -> bool:
+    """
+    发送管理员通知
+    
+    Args:
+        message: 通知内容
+        telegram_chat_id: 管理员 Chat ID
+        notification_type: 通知类型（system/conversion/forward_failure 等）
+        db: 数据库会话（可选）
+    
+    Returns:
+        bool: 是否发送成功
+    """
+    if not telegram_chat_id:
+        logger.warning("Telegram Chat ID 未设置，无法发送管理员通知")
+        return False
+    
+    # 添加通知类型前缀
+    type_prefixes = {
+        'system': '⚠️ ',
+        'conversion': '💰 ',
+        'forward_failure': '❌ ',
+        'forward_success': '✅ ',
+        'statistics': '📊 '
+    }
+    
+    prefix = type_prefixes.get(notification_type, '🔔 ')
+    full_message = f"{prefix}{message}"
+    
+    return send_telegram_message(telegram_chat_id, full_message)

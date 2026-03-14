@@ -1,0 +1,106 @@
+"""
+成功检查器
+
+检查 Postback 转发是否成功
+"""
+import json
+import logging
+from typing import Dict, Any, Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
+
+class SuccessChecker:
+    """成功检查器"""
+    
+    # 默认成功检查配置
+    DEFAULT_SUCCESS_CHECK = {
+        'type': 'status_code',
+        'expected': 200
+    }
+    
+    @staticmethod
+    def check(
+        status_code: int,
+        response_content: str,
+        success_check_config: Optional[str] = None
+    ) -> Tuple[bool, str]:
+        """
+        检查转发是否成功
+        
+        Args:
+            status_code: HTTP 状态码
+            response_content: 响应内容
+            success_check_config: 成功检查配置（JSON 字符串）
+        
+        Returns:
+            tuple: (是否成功，消息)
+        """
+        # 解析配置
+        config = SuccessChecker._parse_config(success_check_config)
+        
+        check_type = config.get('type', 'status_code')
+        
+        if check_type == 'status_code':
+            expected = config.get('expected', 200)
+            success = status_code == expected
+            message = f"状态码检查：{status_code} {'==' if success else '!='} {expected}"
+            
+        elif check_type == 'content':
+            expected_content = config.get('content', '')
+            success = expected_content in response_content
+            message = f"内容检查：{'找到' if success else '未找到'} '{expected_content}'"
+            
+        elif check_type == 'json':
+            success, message = SuccessChecker._check_json(
+                response_content,
+                config.get('path', ''),
+                config.get('expected', '')
+            )
+            
+        else:
+            # 默认只检查状态码
+            success = 200 <= status_code < 300
+            message = f"默认检查：状态码 {status_code} 在 2xx 范围内"
+        
+        logger.info(f"成功检查结果：{message}, success={success}")
+        return success, message
+    
+    @staticmethod
+    def _parse_config(config_str: Optional[str]) -> Dict[str, Any]:
+        """解析成功检查配置"""
+        if not config_str:
+            return SuccessChecker.DEFAULT_SUCCESS_CHECK
+        
+        try:
+            return json.loads(config_str)
+        except json.JSONDecodeError as e:
+            logger.warning(f"成功检查配置解析失败：{e}，使用默认配置")
+            return SuccessChecker.DEFAULT_SUCCESS_CHECK
+    
+    @staticmethod
+    def _check_json(
+        content: str,
+        json_path: str,
+        expected: Any
+    ) -> Tuple[bool, str]:
+        """检查 JSON 响应"""
+        try:
+            data = json.loads(content)
+            
+            # 简单路径解析（支持 dot notation）
+            value = data
+            for key in json_path.split('.'):
+                if isinstance(value, dict):
+                    value = value.get(key)
+                else:
+                    return False, f"JSON 路径解析失败：{json_path}"
+            
+            success = str(value) == str(expected)
+            message = f"JSON 检查：{json_path}={value} {'==' if success else '!='} {expected}"
+            return success, message
+            
+        except json.JSONDecodeError as e:
+            return False, f"JSON 解析失败：{e}"
+        except Exception as e:
+            return False, f"JSON 检查异常：{e}"
