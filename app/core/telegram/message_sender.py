@@ -22,7 +22,7 @@ def _check_bot_available() -> bool:
 def send_telegram_message(
     chat_id_or_message: str,
     message: Optional[str] = None,
-    parse_mode: str = 'HTML',
+    parse_mode: Optional[str] = None,
     reply_to_message_id: Optional[int] = None
 ) -> bool:
     """
@@ -65,10 +65,10 @@ def send_telegram_message(
             logger.info(f"消息过长，已截断：{len(actual_message)} -> {len(truncated_msg)} 字符")
             actual_message = truncated_msg
         
+        # 发送消息，不使用 parse_mode 以避免 HTML 解析错误
         bot.send_message(
             chat_id=actual_chat_id,
             text=actual_message,
-            parse_mode=parse_mode,
             reply_to_message_id=reply_to_message_id
         )
         logger.info(f"已发送 Telegram 消息到：{actual_chat_id}")
@@ -82,7 +82,7 @@ def send_telegram_message(
 async def send_telegram_message_async(
     chat_id_or_message: str,
     message: Optional[str] = None,
-    parse_mode: str = 'HTML',
+    parse_mode: Optional[str] = None,
     reply_to_message_id: Optional[int] = None
 ) -> bool:
     """
@@ -116,7 +116,7 @@ def send_telegram_message_with_buttons(
     chat_id: str,
     message: str,
     buttons: List[List[Dict[str, Any]]],
-    parse_mode: str = 'HTML'
+    parse_mode: Optional[str] = None
 ) -> tuple[bool, Optional[int]]:
     """
     发送带内联按钮的 Telegram 消息
@@ -160,7 +160,6 @@ def send_telegram_message_with_buttons(
         sent_message = bot.send_message(
             chat_id=chat_id,
             text=message,
-            parse_mode=parse_mode,
             reply_markup=markup
         )
         logger.info(f"已发送带按钮的 Telegram 消息到：{chat_id}")
