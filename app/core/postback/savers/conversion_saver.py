@@ -130,6 +130,43 @@ class ConversionSaver:
             return True
             
         except Exception as e:
-            logger.error(f"更新 Click 统计失败：{e}", exc_info=True)
-            await db.rollback()
-            return False
+            # 检查是否是唯一索引冲突
+            error_msg = str(e)
+            if "Duplicate entry" in error_msg and "click_stats.ix_click_stats_click_id" in error_msg:
+                # 唯一索引冲突，这是预期的容错情况
+                click_id = click_association.get('click_id', 'unknown')
+                logger.warning(
+                    f"Click 统计已存在（唯一索引冲突）：click_id={click_id}, "
+                    f"conversion_id={conversion_id}"
+                )
+                
+                # 发送 Telegram 通知
+                try:
+                    from app.core.config import settings
+                    from app.core.auto_bot import send_telegram_message
+                    import asyncio
+                    
+                    telegram_msg = f"⚠️ Click 统计重复警告\n\n"
+                    telegram_msg += f"点击 ID: {click_id}\n"
+                    telegram_msg += f"转化 ID: {conversion_id}\n"
+                    telegram_msg += f"错误信息: 唯一索引冲突，记录已存在\n"
+                    telegram_msg += f"时间: {get_app_now_naive().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    
+                    # 异步发送通知
+                    asyncio.create_task(
+                        asyncio.wait_for(
+                            send_telegram_message(settings.TELEGRAM_ADMIN, telegram_msg),
+                            timeout=5.0
+                        )
+                    )
+                    logger.info(f"已发送 Click 统计重复警告通知: click_id={click_id}")
+                except Exception as notify_err:
+                    logger.warning(f"发送 Click 统计重复警告通知失败: {notify_err}")
+                
+                await db.rollback()
+                return True  # 虽然有冲突，但这是预期情况，返回成功
+            else:
+                # 其他错误
+                logger.error(f"更新 Click 统计失败：{e}", exc_info=True)
+                await db.rollback()
+                return False
