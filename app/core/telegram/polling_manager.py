@@ -109,7 +109,6 @@ def start_polling():
         try:
             from app.core.telegram.message_sender import send_telegram_message
             from app.core.constants import TELEGRAM_BOT_START_DELAY
-            import time
             time.sleep(TELEGRAM_BOT_START_DELAY)
             send_telegram_message("✅ Telegram 机器人已启动")
             logger.info(f"[PID:{current_pid}] 已发送 Telegram 机器人启动消息")
