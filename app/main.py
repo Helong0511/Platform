@@ -448,7 +448,8 @@ async def lifespan(app: FastAPI):
             # 使用已导入的 bot_initialized 变量
             if bot_initialized:
                 logger.info(f"[Worker PID:{worker_pid}] 尝试启动 Telegram 机器人线程...")
-                start_success = start_bot()
+                # 使用 start_bot_thread() 在独立线程中启动，避免阻塞应用
+                start_success = start_bot_thread()
                 if start_success:
                     # 延迟发送启动消息，确保 Bot 已完全启动
                     await asyncio.sleep(TELEGRAM_BOT_START_DELAY)

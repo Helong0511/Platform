@@ -6,18 +6,11 @@ Postback 审批回调处理器
 import json
 import logging
 import threading
-from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
-from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
 from app.core.config import settings
 from app.core.utils import get_app_now_naive
-
-
-def _check_bot_available() -> bool:
-    """检查 Bot 是否可用"""
-    return bot_initialized and TELEBOT_AVAILABLE and bot is not None
 
 
 def _create_sync_db_engine():
@@ -62,6 +55,7 @@ def process_pending_conversion(pending_id: int, action: str, callback_query_id: 
         chat_id: 聊天 ID
         message_id: 消息 ID
     """
+    from app.core.telegram.bot_state import bot
     from sqlalchemy import select as sync_select
     from app.models.models import PendingPostbackConversion, PostbackConversion
     
@@ -182,6 +176,7 @@ def process_pending_conversion(pending_id: int, action: str, callback_query_id: 
     except Exception as e:
         logger.error(f"处理待确认转化记录失败：{str(e)}", exc_info=True)
         try:
+            from app.core.telegram.bot_state import bot
             bot.answer_callback_query(
                 callback_query_id=callback_query_id,
                 text="处理失败，请稍后重试"
@@ -190,51 +185,55 @@ def process_pending_conversion(pending_id: int, action: str, callback_query_id: 
             logger.warning(f"发送回调确认时出错：{e}")
 
 
-if bot_initialized and TELEBOT_AVAILABLE:
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("postback_approve_") or call.data.startswith("postback_reject_"))
-    def handle_postback_approval(call):
-        """
-        处理 Postback 待确认转化的确认/拒绝回调
+def handle_postback_approval(call):
+    """
+    处理 Postback 待确认转化的确认/拒绝回调
+    
+    Args:
+        call: Telegram 回调查询对象
+    """
+    from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
+    
+    def _check_bot_available() -> bool:
+        """检查 Bot 是否可用"""
+        return bot_initialized and TELEBOT_AVAILABLE and bot is not None
+    
+    logger.info(
+        f"[回调查询处理器] ✅✅✅ 收到回调查询：callback_data='{call.data}', "
+        f"from_user={call.from_user.username or call.from_user.first_name or '未知'}"
+    )
+    
+    if not _check_bot_available():
+        logger.error("[回调查询处理器] Bot 未初始化，无法处理回调查询")
+        return
+    
+    try:
+        # 解析 callback_data
+        action = "approve" if call.data.startswith("postback_approve_") else "reject"
+        pending_id = int(call.data.split("_")[-1])
         
-        Args:
-            call: Telegram 回调查询对象
-        """
-        logger.info(
-            f"[回调查询处理器] ✅✅✅ 收到回调查询：callback_data='{call.data}', "
-            f"from_user={call.from_user.username or call.from_user.first_name or '未知'}"
-        )
+        # 保存需要的变量
+        callback_query_id = call.id
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
         
-        if not _check_bot_available():
-            logger.error("[回调查询处理器] Bot 未初始化，无法处理回调查询")
-            return
-        
+        # 立即确认收到回调
         try:
-            # 解析 callback_data
-            action = "approve" if call.data.startswith("postback_approve_") else "reject"
-            pending_id = int(call.data.split("_")[-1])
-            
-            # 保存需要的变量
-            callback_query_id = call.id
-            chat_id = call.message.chat.id
-            message_id = call.message.message_id
-            
-            # 立即确认收到回调
-            try:
-                bot.answer_callback_query(
-                    callback_query_id=callback_query_id,
-                    text="正在处理，请稍候...",
-                    show_alert=False
-                )
-            except Exception as e:
-                logger.warning(f"确认回调时出错：{e}")
-            
-            # 在独立线程中运行，避免阻塞 Telegram bot
-            thread = threading.Thread(
-                target=process_pending_conversion,
-                args=(pending_id, action, callback_query_id, chat_id, message_id),
-                daemon=True
+            bot.answer_callback_query(
+                callback_query_id=callback_query_id,
+                text="正在处理，请稍候...",
+                show_alert=False
             )
-            thread.start()
-            
         except Exception as e:
-            logger.error(f"处理回调失败：{str(e)}", exc_info=True)
+            logger.warning(f"确认回调时出错：{e}")
+        
+        # 在独立线程中运行，避免阻塞 Telegram bot
+        thread = threading.Thread(
+            target=process_pending_conversion,
+            args=(pending_id, action, callback_query_id, chat_id, message_id),
+            daemon=True
+        )
+        thread.start()
+        
+    except Exception as e:
+        logger.error(f"处理回调失败：{str(e)}", exc_info=True)
