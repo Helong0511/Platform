@@ -143,7 +143,7 @@ class ConversionSaver:
                 # 发送 Telegram 通知
                 try:
                     from app.core.config import settings
-                    from app.core.auto_bot import send_telegram_message
+                    from app.core.telegram import send_telegram_message_async
                     import asyncio
                     
                     telegram_msg = f"⚠️ Click 统计重复警告\n\n"
@@ -154,9 +154,9 @@ class ConversionSaver:
                     
                     # 异步发送通知
                     asyncio.create_task(
-                        asyncio.wait_for(
-                            send_telegram_message(settings.TELEGRAM_ADMIN, telegram_msg),
-                            timeout=5.0
+                        send_telegram_message_async(
+                            settings.TELEGRAM_ADMIN, 
+                            telegram_msg
                         )
                     )
                     logger.info(f"已发送 Click 统计重复警告通知: click_id={click_id}")

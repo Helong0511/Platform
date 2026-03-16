@@ -166,19 +166,15 @@ async def receive_bft_postback(
             if len(telegram_msg) > 4096:
                 telegram_msg = truncate_message(telegram_msg)
             
-            # 异步发送通知，不阻塞主流程
-            # 使用 asyncio.create_task 创建任务，不等待完成（fire and forget）
-            # 但使用 asyncio.wait_for 确保有超时保护
+            # 直接发送通知，不阻塞主流程
             from app.core.config import settings
+            from app.core.telegram import send_telegram_message_async
             import asyncio
             
-            async def send_telegram_async():
-                send_telegram_message(settings.TELEGRAM_ADMIN, telegram_msg)
-            
             asyncio.create_task(
-                asyncio.wait_for(
-                    send_telegram_async(),
-                    timeout=10.0
+                send_telegram_message_async(
+                    settings.TELEGRAM_ADMIN, 
+                    telegram_msg
                 )
             )
         except asyncio.TimeoutError:

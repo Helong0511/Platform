@@ -39,21 +39,52 @@ class PostbackForwarder:
     @staticmethod
     async def forward_to_publisher(
         conversion: PostbackConversion,
-        click_association: Dict[str, Any],
-        db: AsyncSession
+        db: AsyncSession,
+        click_association: Optional[Dict[str, Any]] = None
     ) -> None:
         """
         将转化数据转发给渠道（Publisher）的 Postback URL
         
         Args:
             conversion: 转化记录
-            click_association: Click 关联信息
             db: 数据库会话
+            click_association: Click 关联信息（可选）
         """
         logger.info(f"开始转发 Postback 到渠道：conversion_id={conversion.id}")
         
         # ========== 第 1 步：获取渠道信息 ==========
-        publisher_id = click_association.get('publisher_id')
+        publisher_id = None
+        click_association_data = {}
+        
+        if click_association:
+            publisher_id = click_association.get('publisher_id')
+            click_association_data = {
+                'click_id': click_association.get('click_id'),
+                'offer_id': click_association.get('offer_id'),
+                'publisher_id': click_association.get('publisher_id'),
+                'advertiser_id': click_association.get('advertiser_id'),
+                'short_link_id': click_association.get('short_link_id'),
+                'url_params': click_association.get('url_params', {}),
+            }
+        else:
+            # If no click_association, try to get publisher_id from conversion or ClickAssociator
+            if conversion.click_id:
+                from app.core.postback.transformers.click_associator import ClickAssociator
+                click_association = await ClickAssociator.associate(
+                    conversion.click_id,
+                    db
+                )
+                if click_association:
+                    publisher_id = click_association.get('publisher_id')
+                    click_association_data = {
+                        'click_id': click_association.get('click_id'),
+                        'offer_id': click_association.get('offer_id'),
+                        'publisher_id': click_association.get('publisher_id'),
+                        'advertiser_id': click_association.get('advertiser_id'),
+                        'short_link_id': click_association.get('short_link_id'),
+                        'url_params': click_association.get('url_params', {}),
+                    }
+        
         if not publisher_id:
             logger.debug("没有 Publisher ID，跳过转发")
             return
@@ -75,15 +106,6 @@ class PostbackForwarder:
             'event_name': conversion.event_name,
             'event_value': conversion.event_value,
             'ip': conversion.ip,
-        }
-        
-        click_association_data = {
-            'click_id': click_association.get('click_id'),
-            'offer_id': click_association.get('offer_id'),
-            'publisher_id': click_association.get('publisher_id'),
-            'advertiser_id': click_association.get('advertiser_id'),
-            'short_link_id': click_association.get('short_link_id'),
-            'url_params': click_association.get('url_params', {}),
         }
         
         # ========== 第 3 步：构建 URL ==========
@@ -121,7 +143,7 @@ class PostbackForwarder:
         forward_log = PostbackForwardLog(
             conversion_id=conversion.id,
             product_id=conversion.product_id,
-            publisher_id=click_association.get('publisher_id'),
+            publisher_id=publisher_id,
             downstream_url=final_url,
             request_method=method,
             request_params=json.dumps(params, ensure_ascii=False) if params else None,
@@ -138,7 +160,7 @@ class PostbackForwarder:
         
         logger.info(
             f"Postback 转发完成：conversion_id={conversion.id}, "
-            f"publisher_id={click_association.get('publisher_id')}, success={final_success}"
+            f"publisher_id={publisher_id}, success={final_success}"
         )
         
         # ========== 第 7 步：发送通知（失败时） ==========

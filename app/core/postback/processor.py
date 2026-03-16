@@ -149,7 +149,7 @@ class PostbackProcessor:
             
             # ========== 第 9 步：渠道转发 ==========
             if click_association and click_association.get('publisher'):
-                await PostbackForwarder.forward_to_publisher(conversion, click_association, db)
+                await PostbackForwarder.forward_to_publisher(conversion, db, click_association)
             
             # ========== 第 10 步：通知发送 ==========
             await PostbackNotifier.notify_conversion(conversion, db)
