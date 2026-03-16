@@ -27,9 +27,61 @@ except ImportError:
         logger.warning("无法导入文件锁模块（fcntl/msvcrt），文件锁功能将不可用")
 
 
+# 常量定义
+DEFAULT_LOCK_FILE_NAME = "telegram_bot.lock"
+LOCK_EXPIRE_SECONDS = 3600  # 锁文件过期时间：1小时
+
+
 # 全局锁状态
 _bot_lock_file = None
 _bot_lock_acquired = False
+
+
+def get_default_lock_path() -> Path:
+    """获取默认的锁文件路径"""
+    return Path(__file__).parent.parent.parent / "logs" / DEFAULT_LOCK_FILE_NAME
+
+
+def _is_lock_expired(lock_file_path: Path) -> bool:
+    """检查锁文件是否已过期"""
+    try:
+        if not lock_file_path.exists():
+            return False
+        
+        # 读取锁文件中的时间戳
+        with open(lock_file_path, 'r') as f:
+            content = f.read()
+        
+        # 解析时间戳
+        timestamp = None
+        for line in content.split('\n'):
+            if line.startswith('Timestamp:'):
+                try:
+                    timestamp = float(line.split(':')[1].strip())
+                    break
+                except (IndexError, ValueError):
+                    continue
+        
+        if timestamp is None:
+            # 无法读取时间戳，检查文件修改时间
+            file_mtime = lock_file_path.stat().st_mtime
+            return (time.time() - file_mtime) > LOCK_EXPIRE_SECONDS
+        
+        return (time.time() - timestamp) > LOCK_EXPIRE_SECONDS
+        
+    except Exception as e:
+        logger.warning(f"检查锁文件过期状态时出错：{e}")
+        return False
+
+
+def _cleanup_expired_lock(lock_file_path: Path):
+    """清理过期的锁文件"""
+    try:
+        if lock_file_path.exists():
+            lock_file_path.unlink()
+            logger.info(f"已清理过期的锁文件：{lock_file_path}")
+    except Exception as e:
+        logger.warning(f"清理过期锁文件失败：{e}")
 
 
 def _close_lock_file():
@@ -60,11 +112,16 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 3
     current_pid = os.getpid()
     
     if lock_file_path is None:
-        lock_file_path = Path(__file__).parent.parent.parent / "logs" / "telegram_bot.lock"
+        lock_file_path = get_default_lock_path()
     
     try:
         # 确保日志目录存在
         lock_file_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 检查是否有过期的锁文件需要清理
+        if lock_file_path.exists() and _is_lock_expired(lock_file_path):
+            logger.info(f"[PID:{current_pid}] 检测到过期的锁文件，正在清理...")
+            _cleanup_expired_lock(lock_file_path)
         
         retry_delay = 0.1  # 初始重试延迟
         for attempt in range(1, max_retries + 1):
@@ -173,7 +230,7 @@ def release_bot_lock():
         
         try:
             # 获取锁文件路径
-            lock_file_path = Path(__file__).parent.parent.parent / "logs" / "telegram_bot.lock"
+            lock_file_path = get_default_lock_path()
             logger.info(f"[PID:{current_pid}] 释放锁文件：{lock_file_path}")
             
             # 跨平台释放锁

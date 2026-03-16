@@ -35,16 +35,11 @@ from app.core.redis_client import get_redis_client, close_redis_client
 from app.core.cache_manager import CacheManager
 from app.core.csrf import CSRFMiddleware
 from app.core.security import JWTUtils
-# 从旧模块导入（向后兼容）
-from app.core.auto_bot import (
-    send_telegram_message,
-    bot_initialized
-)
-# 从新模块导入 Bot 相关函数
+# 从新模块导入 Bot 相关函数（统一使用新模块）
+from app.core.telegram import send_telegram_message
+from app.core.telegram.bot_state import bot_initialized
 from app.core.telegram.polling_manager import start_polling as start_bot, start_bot_thread
 from app.core.telegram.file_lock import is_lock_held as has_bot_lock
-
-# 兼容性：stop_bot 映射到 release_bot_lock
 from app.core.telegram.file_lock import release_bot_lock as stop_bot
 from app.scheduler_module import (
     init_scheduled_tasks, start_scheduler, shutdown_scheduler

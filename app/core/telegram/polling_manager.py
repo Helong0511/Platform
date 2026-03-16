@@ -16,6 +16,9 @@ from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
 from app.core.telegram.file_lock import acquire_bot_lock, release_bot_lock
 from app.core.config import settings
 
+# 标记处理器是否已注册
+_handlers_registered = False
+
 
 def _check_bot_available() -> bool:
     """检查 Bot 是否可用"""
@@ -32,14 +35,9 @@ def set_bot_commands():
         from telebot.types import BotCommand
         
         commands_list = [
-            ("id", "查询聊天 ID（群组中需使用 /id@botname）"),
-            ("test", "测试内联按钮（群组中需使用 /test@botname）"),
-            ("clock", "打卡（群组中需使用 /clock@botname）"),
-            ("stats", "查看转化统计（群组中需使用 /stats@botname）"),
+            ("start", "启动 Bot"),
             ("help", "显示帮助信息"),
-            ("ping", "测试 Bot 是否在线"),
-            ("status", "查看系统状态"),
-            ("clear", "清空聊天记录（仅管理员）")
+            ("id", "查询聊天 ID（群组中需使用 /id@botname）")
         ]
         
         com_set = []
@@ -58,9 +56,53 @@ def set_bot_commands():
         logger.error(f"设置 Bot 命令失败：{e}", exc_info=True)
 
 
+def register_handlers():
+    """注册消息处理器和回调处理器（仅注册一次）"""
+    global _handlers_registered
+    
+    if _handlers_registered:
+        logger.info("处理器已注册，跳过重复注册")
+        return
+    
+    if not _check_bot_available():
+        logger.warning("Bot 未初始化，无法注册处理器")
+        return
+    
+    try:
+        from app.core.telegram.command_handlers.id_command import get_chat_id
+        from app.core.telegram.command_handlers.start_command import cmd_start
+        from app.core.telegram.command_handlers.help_command import cmd_help
+        from app.core.telegram.callback_handlers.menu_callbacks import handle_menu_callbacks
+        from app.core.telegram.callback_handlers.postback_approval import handle_postback_approval
+        
+        def debug_all_messages(message):
+            logger.info(f"[DEBUG] 收到消息：text={message.text}, chat_id={message.chat.id}, from_user={message.from_user.id}")
+        
+        logger.info("正在注册 /start 命令处理器...")
+        bot.message_handler(commands=['start'])(cmd_start)
+        logger.info("正在注册 /help 命令处理器...")
+        bot.message_handler(commands=['help'])(cmd_help)
+        logger.info("正在注册 /id 命令处理器...")
+        bot.message_handler(commands=['id'])(get_chat_id)
+        
+        logger.info("正在注册回调处理器...")
+        bot.callback_query_handler(func=lambda call: call.data in ["View", "clock"])(handle_menu_callbacks)
+        bot.callback_query_handler(func=lambda call: call.data.startswith("postback_approve_") or call.data.startswith("postback_reject_"))(handle_postback_approval)
+        
+        logger.info("正在注册通用调试消息处理器...")
+        bot.message_handler(func=lambda message: True)(debug_all_messages)
+        
+        _handlers_registered = True
+        logger.info("消息处理器和回调处理器已成功注册")
+        
+    except Exception as import_err:
+        logger.error(f"注册处理器时出错：{import_err}", exc_info=True)
+
+
 def start_polling():
     """
     启动 Telegram Bot 轮询（仅在获取到锁的进程中启动）
+    支持自动重连机制
     
     Returns:
         bool: 是否成功启动
@@ -123,80 +165,77 @@ def start_polling():
         else:
             logger.warning(f"[PID:{current_pid}] 验证时发生错误，但继续启动：{e}")
     
+    # 注册处理器（仅一次）
+    register_handlers()
+    
+    # 设置 Bot 命令
+    set_bot_commands()
+    
+    # 检查消息处理器
+    handlers_count = len(bot.message_handlers) if hasattr(bot, 'message_handlers') else 0
+    logger.info(f"开始轮询前，Bot 消息处理器数量：{handlers_count}")
+    
+    if handlers_count == 0:
+        logger.warning("警告：没有注册任何消息处理器！命令可能无法工作")
+    
+    # 检查并删除可能存在的 webhook
     try:
-        # 显式注册消息处理器和回调处理器（确保被正确注册）
-        if bot_initialized and TELEBOT_AVAILABLE:
-            try:
-                # 直接注册消息处理器函数
-                from app.core.telegram.command_handlers.id_command import get_chat_id
-                from app.core.telegram.command_handlers.start_command import cmd_start
-                from app.core.telegram.command_handlers.help_command import cmd_help
-                from app.core.telegram.callback_handlers.menu_callbacks import handle_menu_callbacks
-                from app.core.telegram.callback_handlers.postback_approval import handle_postback_approval
-                
-                # 调试函数：记录所有收到的消息（放在最后注册，避免拦截命令）
-                def debug_all_messages(message):
-                    logger.info(f"[DEBUG] 收到消息：text={message.text}, chat_id={message.chat.id}, from_user={message.from_user.id}")
-                
-                # 手动注册消息处理器（先注册特定命令）
-                logger.info("正在注册 /start 命令处理器...")
-                bot.message_handler(commands=['start'])(cmd_start)
-                logger.info("正在注册 /help 命令处理器...")
-                bot.message_handler(commands=['help'])(cmd_help)
-                logger.info("正在注册 /id 命令处理器...")
-                bot.message_handler(commands=['id'])(get_chat_id)
-                
-                # 手动注册回调处理器
-                logger.info("正在注册回调处理器...")
-                bot.callback_query_handler(func=lambda call: call.data in ["View", "clock"])(handle_menu_callbacks)
-                bot.callback_query_handler(func=lambda call: call.data.startswith("postback_approve_") or call.data.startswith("postback_reject_"))(handle_postback_approval)
-                
-                # 最后注册通用调试处理器
-                logger.info("正在注册通用调试消息处理器...")
-                bot.message_handler(func=lambda message: True)(debug_all_messages)
-                
-                logger.info("消息处理器和回调处理器已成功注册")
-            except Exception as import_err:
-                logger.error(f"注册处理器时出错：{import_err}", exc_info=True)
-        
-        # 设置 Bot 命令
-        set_bot_commands()
-        
-        # 检查消息处理器
-        handlers_count = len(bot.message_handlers) if hasattr(bot, 'message_handlers') else 0
-        logger.info(f"开始轮询前，Bot 消息处理器数量：{handlers_count}")
-        
-        if handlers_count == 0:
-            logger.warning("警告：没有注册任何消息处理器！命令可能无法工作")
-        
-        # 检查并删除可能存在的 webhook
-        try:
-            logger.info("检查并删除可能存在的 webhook...")
-            bot.delete_webhook()
-            logger.info("Webhook 已删除（如果存在）")
-        except Exception as e:
-            logger.warning(f"删除 webhook 时出错：{e}")
-        
-        # 启动轮询
-        logger.info("开始 Telegram Bot 长轮询...")
-        logger.info("按 Ctrl+C 停止轮询")
-        
-        # 使用非阻塞方式启动轮询
-        bot.polling(
-            none_stop=True,
-            interval=0,
-            timeout=60,
-            allowed_updates=['message', 'callback_query']
-        )
-        
-    except KeyboardInterrupt:
-        logger.info("收到中断信号，正在停止轮询...")
+        logger.info("检查并删除可能存在的 webhook...")
+        bot.delete_webhook()
+        logger.info("Webhook 已删除（如果存在）")
     except Exception as e:
-        logger.error(f"轮询过程中发生错误：{e}", exc_info=True)
-    finally:
-        # 释放锁
-        release_bot_lock()
-        logger.info("Telegram Bot 已停止")
+        logger.warning(f"删除 webhook 时出错：{e}")
+    
+    # 带自动重连的轮询循环
+    retry_count = 0
+    max_retries = 10
+    base_retry_delay = 1
+    
+    while True:
+        try:
+            if retry_count > 0:
+                logger.info(f"[PID:{current_pid}] 开始第 {retry_count + 1} 次重连尝试...")
+            
+            logger.info("开始 Telegram Bot 长轮询...")
+            logger.info("按 Ctrl+C 停止轮询")
+            
+            # 启动轮询
+            bot.polling(
+                none_stop=True,
+                interval=0,
+                timeout=60,
+                allowed_updates=['message', 'callback_query']
+            )
+            
+            # 如果正常退出（非异常），重置重试计数
+            retry_count = 0
+            
+        except KeyboardInterrupt:
+            logger.info("收到中断信号，正在停止轮询...")
+            break
+        except Exception as e:
+            logger.error(f"轮询过程中发生错误：{e}", exc_info=True)
+            
+            # 检查是否需要重连
+            retry_count += 1
+            if retry_count > max_retries:
+                logger.error(f"已达到最大重试次数 ({max_retries})，停止重连")
+                break
+            
+            # 指数退避重连延迟
+            retry_delay = min(base_retry_delay * (2 ** (retry_count - 1)), 60)
+            logger.info(f"{retry_delay} 秒后尝试重连（{retry_count}/{max_retries}）...")
+            time.sleep(retry_delay)
+            
+            # 重连前停止 polling
+            try:
+                bot.stop_polling()
+            except:
+                pass
+    
+    # 释放锁
+    release_bot_lock()
+    logger.info("Telegram Bot 已停止")
     
     return True
 
