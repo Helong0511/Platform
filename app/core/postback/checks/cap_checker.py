@@ -40,20 +40,19 @@ class CapChecker:
         
         try:
             # 检查 Cap 限制
-            cap_result = await check_cap(
+            cap_result, cap_message = await check_cap(
+                db=db,
                 offer_id=offer_id,
                 publisher_id=publisher_id,
-                advertiser_id=advertiser_id,
-                db=db
+                advertiser_id=advertiser_id
             )
             
-            if cap_result.get('exceeded'):
-                limit_type = cap_result.get('limit_type', 'unknown')
+            if not cap_result:
                 logger.warning(
                     f"Cap 限制已超出：offer_id={offer_id}, "
-                    f"publisher_id={publisher_id}, limit_type={limit_type}"
+                    f"publisher_id={publisher_id}, message={cap_message}"
                 )
-                return False, f"cap_exceeded_{limit_type}"
+                return False, "cap_exceeded"
             
             logger.debug(
                 f"Cap 检查通过：offer_id={offer_id}, publisher_id={publisher_id}"

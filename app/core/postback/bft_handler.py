@@ -90,6 +90,7 @@ class BftPostbackHandler(PostbackHandler):
         )
         
         normalized = {
+            "platform": self.platform_name,
             "conversion_id": str(conversion_id).strip() if conversion_id else None,
             "event_name": str(event_name).strip() if event_name else "default",
             "event_value": self._to_float(data.get("event_value")),
