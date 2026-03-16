@@ -363,7 +363,29 @@
         // 从URL参数中获取原始URL
         function getOriginalUrl() {
             const urlParams = new URLSearchParams(window.location.search);
-            return urlParams.get('original_url') || "https://www.baidu.com";
+            let originalUrl = urlParams.get('original_url') || "https://www.baidu.com";
+
+            // 如果有 fbclid 参数，添加到 originalUrl 后面
+            const fbclid = getFbclid();
+            if (fbclid) {
+                try {
+                    const url = new URL(originalUrl);
+                    url.searchParams.set('fbclid', fbclid);
+                    originalUrl = url.toString();
+                    console.log('[URL] 已添加 fbclid 参数:', originalUrl);
+                } catch (err) {
+                    console.log('[URL] 添加 fbclid 参数失败:', err);
+                    // 如果 URL 解析失败，尝试简单拼接
+                    if (originalUrl.includes('?')) {
+                        originalUrl += '&fbclid=' + encodeURIComponent(fbclid);
+                    } else {
+                        originalUrl += '?fbclid=' + encodeURIComponent(fbclid);
+                    }
+                    console.log('[URL] 简单拼接 fbclid 参数:', originalUrl);
+                }
+            }
+
+            return originalUrl;
         }
 
         // 从URL参数中获取fbclid
@@ -566,7 +588,7 @@
                 setTimeout(() => {
                     const originalUrl = getOriginalUrl();
                     window.location.href = originalUrl;
-                }, 1000);
+                }, 5000);
             } catch (err) {
                 // 上报失败也跳转，确保用户体验不被中断
                 console.log("[上报] 异常:", err);
