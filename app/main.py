@@ -454,7 +454,7 @@ async def lifespan(app: FastAPI):
                     # 延迟发送启动消息，确保 Bot 已完全启动
                     await asyncio.sleep(TELEGRAM_BOT_START_DELAY)
                     # send_telegram_message 内部已有完整的容错处理
-                    await send_telegram_message("✅ Telegram 机器人已启动")
+                    send_telegram_message("✅ Telegram 机器人已启动")
                 else:
                     logger.info(f"[Worker PID:{worker_pid}] Telegram 机器人未启动（其他进程可能已启动或未获取到锁）")
             else:
@@ -512,10 +512,7 @@ async def lifespan(app: FastAPI):
             if bot_initialized and has_bot_lock():
                 # 尝试发送关闭消息（可能失败，因为连接可能已断开）
                 try:
-                    await asyncio.wait_for(
-                        send_telegram_message(f"🧩 服务 [{settings.SERVER_NAME}] 已关闭"),
-                        timeout=TELEGRAM_SHUTDOWN_MESSAGE_TIMEOUT
-                    )
+                    send_telegram_message(f"🧩 服务 [{settings.SERVER_NAME}] 已关闭")
                 except asyncio.CancelledError:
                     # 应用关闭时任务被取消是正常的
                     logger.debug("发送关闭消息时任务被取消（正常关闭流程）")

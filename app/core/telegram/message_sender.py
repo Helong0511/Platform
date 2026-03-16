@@ -9,6 +9,7 @@ from datetime import datetime
 
 from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
 from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,17 +20,21 @@ def _check_bot_available() -> bool:
 
 
 def send_telegram_message(
-    chat_id: str,
-    message: str,
+    chat_id_or_message: str,
+    message: Optional[str] = None,
     parse_mode: str = 'HTML',
     reply_to_message_id: Optional[int] = None
 ) -> bool:
     """
-    发送 Telegram 消息
+    发送 Telegram 消息（向后兼容版本）
+    
+    兼容两种调用方式：
+    1. 新方式：send_telegram_message(chat_id, message)
+    2. 旧方式：send_telegram_message(message)  - 自动使用 TELEGRAM_ADMIN
     
     Args:
-        chat_id: 聊天 ID
-        message: 消息内容
+        chat_id_or_message: 聊天 ID（新方式）或消息内容（旧方式）
+        message: 消息内容（新方式时必需）
         parse_mode: 解析模式（HTML/Markdown）
         reply_to_message_id: 回复的消息 ID（可选）
     
@@ -40,25 +45,71 @@ def send_telegram_message(
         logger.warning("Bot 未初始化，无法发送消息")
         return False
     
+    # 向后兼容：判断是旧方式还是新方式
+    if message is None:
+        # 旧方式：只有一个参数，即消息内容
+        actual_message = chat_id_or_message
+        actual_chat_id = getattr(settings, 'TELEGRAM_ADMIN', None)
+        if not actual_chat_id:
+            logger.warning("TELEGRAM_ADMIN 未设置，无法发送消息")
+            return False
+    else:
+        # 新方式：两个参数
+        actual_chat_id = chat_id_or_message
+        actual_message = message
+    
     try:
         # 截断过长的消息
-        if len(message) > MAX_TELEGRAM_MESSAGE_LENGTH:
-            truncated_msg = truncate_message(message, MAX_TELEGRAM_MESSAGE_LENGTH)
-            logger.info(f"消息过长，已截断：{len(message)} -> {len(truncated_msg)} 字符")
-            message = truncated_msg
+        if len(actual_message) > MAX_TELEGRAM_MESSAGE_LENGTH:
+            truncated_msg = truncate_message(actual_message, MAX_TELEGRAM_MESSAGE_LENGTH)
+            logger.info(f"消息过长，已截断：{len(actual_message)} -> {len(truncated_msg)} 字符")
+            actual_message = truncated_msg
         
         bot.send_message(
-            chat_id=chat_id,
-            text=message,
+            chat_id=actual_chat_id,
+            text=actual_message,
             parse_mode=parse_mode,
             reply_to_message_id=reply_to_message_id
         )
-        logger.info(f"已发送 Telegram 消息到：{chat_id}")
+        logger.info(f"已发送 Telegram 消息到：{actual_chat_id}")
         return True
         
     except Exception as e:
         logger.error(f"发送 Telegram 消息失败：{e}", exc_info=True)
         return False
+
+
+async def send_telegram_message_async(
+    chat_id_or_message: str,
+    message: Optional[str] = None,
+    parse_mode: str = 'HTML',
+    reply_to_message_id: Optional[int] = None
+) -> bool:
+    """
+    异步发送 Telegram 消息（向后兼容版本）
+    
+    与 send_telegram_message 相同，但在事件循环中运行，支持 await
+    
+    Args:
+        chat_id_or_message: 聊天 ID（新方式）或消息内容（旧方式）
+        message: 消息内容（新方式时必需）
+        parse_mode: 解析模式（HTML/Markdown）
+        reply_to_message_id: 回复的消息 ID（可选）
+    
+    Returns:
+        bool: 是否发送成功
+    """
+    import asyncio
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: send_telegram_message(
+            chat_id_or_message,
+            message,
+            parse_mode,
+            reply_to_message_id
+        )
+    )
 
 
 def send_telegram_message_with_buttons(
