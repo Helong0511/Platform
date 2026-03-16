@@ -120,8 +120,9 @@ async def check_and_notify_data_decrease(
 
             # 发送通知（异步，不阻塞）
             try:
+                from app.core.config import settings
                 await asyncio.wait_for(
-                    send_telegram_message(telegram_msg),
+                    send_telegram_message(settings.TELEGRAM_ADMIN, telegram_msg),
                     timeout=5.0
                 )
                 logger.warning(
@@ -464,8 +465,9 @@ async def process_api_ad_data(
                             
                             # 发送通知（异步，不阻塞）
                             try:
+                                from app.core.config import settings
                                 await asyncio.wait_for(
-                                    send_telegram_message(telegram_msg),
+                                    send_telegram_message(settings.TELEGRAM_ADMIN, telegram_msg),
                                     timeout=5.0
                                 )
                                 logger.info(f"无法识别国家代码警告已发送: 日期={item_date_str}, 产品={item_product_name}, 国家代码输入=[{item_country_input}]")

@@ -132,7 +132,7 @@ class PostbackForwarder:
         
         logger.info(
             f"Postback 转发完成：conversion_id={conversion.id}, "
-            f"publisher_id={conversion.publisher_id}, success={final_success}"
+            f"publisher_id={click_association.get('publisher_id')}, success={final_success}"
         )
         
         # ========== 第 7 步：发送通知（失败时） ==========
