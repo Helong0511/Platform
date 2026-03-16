@@ -10,6 +10,10 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue';
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs';
 import 'element-plus/dist/index.css';
 import './style.css';
+import { initAxiosConfig } from './utils/axiosConfig';
+
+// 初始化 Axios 配置（必须在创建 Vue 应用之前）
+initAxiosConfig();
 
 // 创建 Vue 实例
 const app = createApp(App);
