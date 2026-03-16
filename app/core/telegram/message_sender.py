@@ -117,7 +117,7 @@ def send_telegram_message_with_buttons(
     message: str,
     buttons: List[List[Dict[str, Any]]],
     parse_mode: str = 'HTML'
-) -> bool:
+) -> tuple[bool, Optional[int]]:
     """
     发送带内联按钮的 Telegram 消息
     
@@ -128,11 +128,11 @@ def send_telegram_message_with_buttons(
         parse_mode: 解析模式（HTML/Markdown）
     
     Returns:
-        bool: 是否发送成功
+        tuple[bool, Optional[int]]: (是否发送成功, 消息ID)
     """
     if not _check_bot_available():
         logger.warning("Bot 未初始化，无法发送消息")
-        return False
+        return False, None
     
     try:
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -157,18 +157,18 @@ def send_telegram_message_with_buttons(
             truncated_msg = truncate_message(message, MAX_TELEGRAM_MESSAGE_LENGTH)
             message = truncated_msg
         
-        bot.send_message(
+        sent_message = bot.send_message(
             chat_id=chat_id,
             text=message,
             parse_mode=parse_mode,
             reply_markup=markup
         )
         logger.info(f"已发送带按钮的 Telegram 消息到：{chat_id}")
-        return True
+        return True, sent_message.message_id
         
     except Exception as e:
         logger.error(f"发送带按钮的 Telegram 消息失败：{e}", exc_info=True)
-        return False
+        return False, None
 
 
 async def send_admin_notification(

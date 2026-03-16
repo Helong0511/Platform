@@ -408,7 +408,7 @@ class TelegramNotificationService:
             bool: 是否发送成功
         """
         try:
-            success = await send_telegram_message(message, chat_id=telegram_chat_id)
+            success = send_telegram_message(message, chat_id=telegram_chat_id)
             
             # 记录通知历史（如果有数据库会话）
             if db:
@@ -472,7 +472,7 @@ class TelegramNotificationService:
             bool: 是否发送成功
         """
         try:
-            success = await send_telegram_message(message, chat_id=telegram_chat_id)
+            success = send_telegram_message(message, chat_id=telegram_chat_id)
             
             # 记录通知历史（如果有转化记录和数据库会话）
             if conversion and db:
@@ -534,7 +534,7 @@ class TelegramNotificationService:
                 error=error
             )
             
-            success = await send_telegram_message(message, chat_id=telegram_chat_id)
+            success = send_telegram_message(message, chat_id=telegram_chat_id)
             
             if db:
                 try:
@@ -594,7 +594,7 @@ class TelegramNotificationService:
                 period=period
             )
             
-            success = await send_telegram_message(message, chat_id=telegram_chat_id)
+            success = send_telegram_message(message, chat_id=telegram_chat_id)
             
             if db:
                 try:
@@ -739,7 +739,7 @@ class TelegramNotificationService:
             tuple[bool, Optional[int]]: (是否发送成功, 消息ID)
         """
         try:
-            success, message_id = await send_telegram_message_with_buttons(
+            success, message_id = send_telegram_message_with_buttons(
                 message=message,
                 chat_id=telegram_chat_id,
                 buttons=buttons

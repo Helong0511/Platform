@@ -156,7 +156,7 @@ async def send_message(
             )
 
         # 发送消息
-        success = await send_telegram_message(
+        success = send_telegram_message(
             message=request.message,
             chat_id=request.chat_id
         )
@@ -217,7 +217,7 @@ async def test_bot_connection(
         current_time = get_app_now()
         test_message = f"🧪 Telegram Bot 连接测试\n\n发送时间: {current_time.strftime('%Y-%m-%d %H:%M:%S')}（时区: {settings.TIMEZONE}）\n测试用户: {current_user.username}"
         
-        success = await send_telegram_message(message=test_message)
+        success = send_telegram_message(message=test_message)
 
         if success:
             return ResponseBaseSchema.success(data=SendMessageResponse(

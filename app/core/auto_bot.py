@@ -93,7 +93,7 @@ except ImportError as e:
     
     def send_telegram_message_with_buttons(*args, **kwargs):
         logger.error("消息发送功能不可用")
-        return False
+        return False, None
     
     def send_admin_notification(*args, **kwargs):
         logger.error("通知发送功能不可用")
