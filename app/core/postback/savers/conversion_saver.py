@@ -53,11 +53,6 @@ class ConversionSaver:
             gid=normalized_data['gid'],
             product_id=normalized_data['product_id'] or (click_association.get('product_id') if click_association else None),
             client_id=normalized_data['client_id'] or (click_association.get('client_id') if click_association else None),
-            offer_id=click_association['offer_id'] if click_association else None,
-            publisher_id=click_association['publisher_id'] if click_association else None,
-            advertiser_id=click_association['advertiser_id'] if click_association else None,
-            click_id=normalized_data['click_id'] or (click_association['click_id'] if click_association else None),
-            click_time=click_association['click_time'] if click_association else None,
             conversion_status=conversion_status,
             raw_data=normalized_data['raw_data'],
             created_at=get_app_now_naive()
