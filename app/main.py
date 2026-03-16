@@ -450,12 +450,7 @@ async def lifespan(app: FastAPI):
                 logger.info(f"[Worker PID:{worker_pid}] 尝试启动 Telegram 机器人线程...")
                 # 使用 start_bot_thread() 在独立线程中启动，避免阻塞应用
                 start_success = start_bot_thread()
-                if start_success:
-                    # 延迟发送启动消息，确保 Bot 已完全启动
-                    await asyncio.sleep(TELEGRAM_BOT_START_DELAY)
-                    # send_telegram_message 内部已有完整的容错处理
-                    send_telegram_message("✅ Telegram 机器人已启动")
-                else:
+                if not start_success:
                     logger.info(f"[Worker PID:{worker_pid}] Telegram 机器人未启动（其他进程可能已启动或未获取到锁）")
             else:
                 logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 未配置（TELEGRAM_TOKEN 未设置），跳过启动")

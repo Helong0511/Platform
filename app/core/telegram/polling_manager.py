@@ -104,6 +104,18 @@ def start_polling():
         logger.info(f"[PID:{current_pid}] 验证是否已有其他 Bot 实例在运行...")
         bot_info = bot.get_me()
         logger.info(f"[PID:{current_pid}] 验证成功，Bot 可以正常运行：@{bot_info.username}")
+        
+        # 发送启动消息（只有真正获取到锁的进程才发送）
+        try:
+            from app.core.telegram.message_sender import send_telegram_message
+            from app.core.config import settings
+            from app.core.constants import TELEGRAM_BOT_START_DELAY
+            import time
+            time.sleep(TELEGRAM_BOT_START_DELAY)
+            send_telegram_message("✅ Telegram 机器人已启动")
+            logger.info(f"[PID:{current_pid}] 已发送 Telegram 机器人启动消息")
+        except Exception as msg_err:
+            logger.warning(f"[PID:{current_pid}] 发送启动消息失败：{msg_err}")
     except Exception as e:
         error_msg = str(e)
         if '409' in error_msg or 'Conflict' in error_msg or 'terminated by other getUpdates' in error_msg:
@@ -124,14 +136,26 @@ def start_polling():
                 from app.core.telegram.callback_handlers.menu_callbacks import handle_menu_callbacks
                 from app.core.telegram.callback_handlers.postback_approval import handle_postback_approval
                 
-                # 手动注册消息处理器
-                bot.message_handler(commands=['id'])(get_chat_id)
+                # 调试函数：记录所有收到的消息（放在最后注册，避免拦截命令）
+                def debug_all_messages(message):
+                    logger.info(f"[DEBUG] 收到消息：text={message.text}, chat_id={message.chat.id}, from_user={message.from_user.id}")
+                
+                # 手动注册消息处理器（先注册特定命令）
+                logger.info("正在注册 /start 命令处理器...")
                 bot.message_handler(commands=['start'])(cmd_start)
+                logger.info("正在注册 /help 命令处理器...")
                 bot.message_handler(commands=['help'])(cmd_help)
+                logger.info("正在注册 /id 命令处理器...")
+                bot.message_handler(commands=['id'])(get_chat_id)
                 
                 # 手动注册回调处理器
+                logger.info("正在注册回调处理器...")
                 bot.callback_query_handler(func=lambda call: call.data in ["View", "clock"])(handle_menu_callbacks)
                 bot.callback_query_handler(func=lambda call: call.data.startswith("postback_approve_") or call.data.startswith("postback_reject_"))(handle_postback_approval)
+                
+                # 最后注册通用调试处理器
+                logger.info("正在注册通用调试消息处理器...")
+                bot.message_handler(func=lambda message: True)(debug_all_messages)
                 
                 logger.info("消息处理器和回调处理器已成功注册")
             except Exception as import_err:
@@ -184,7 +208,7 @@ def start_bot_thread():
     在独立线程中启动 Bot 轮询
     
     Returns:
-        bool: 是否成功启动
+        bool: 线程是否成功启动（不代表一定获取到锁）
     """
     import threading
     
