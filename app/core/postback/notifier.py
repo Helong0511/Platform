@@ -16,7 +16,7 @@ from app.models.models import (
     PostbackConversion, Client, Product, User,
     ClientNotificationConfig, ProductNotificationConfig, PostbackNotification
 )
-from app.core.auto_bot import send_telegram_message
+from app.core.telegram import send_telegram_message_async
 from app.core.utils import get_app_now_naive
 from app.core.redis_client import get_redis_client
 from app.services.telegram_notification_service import TelegramNotificationService
@@ -629,7 +629,7 @@ class PostbackNotifier:
             if channel == 'telegram':
                 # Telegram Chat ID
                 await asyncio.wait_for(
-                    send_telegram_message(message, chat_id=address),
+                    send_telegram_message_async(address, message),
                     timeout=5.0
                 )
                 logger.debug(
@@ -750,10 +750,19 @@ class PostbackNotifier:
                 # 如果提供了 recipient（Chat ID），发送到指定 Chat
                 # 如果没有提供，使用默认配置（向后兼容）
                 chat_id = recipient if recipient else None
-                await asyncio.wait_for(
-                    send_telegram_message(message, chat_id=chat_id),
-                    timeout=5.0
-                )
+                if chat_id:
+                    await asyncio.wait_for(
+                        send_telegram_message_async(chat_id, message),
+                        timeout=5.0
+                    )
+                else:
+                    # 如果没有提供 chat_id，使用默认管理员
+                    from app.core.config import settings
+                    from app.core.telegram import send_telegram_message
+                    await asyncio.wait_for(
+                        send_telegram_message(message),
+                        timeout=5.0
+                    )
                 logger.debug(
                     f"Telegram 通知已发送: chat_id={chat_id or 'default'}, "
                     f"message_length={len(message)}"

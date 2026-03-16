@@ -408,7 +408,7 @@ class TelegramNotificationService:
             bool: 是否发送成功
         """
         try:
-            success = send_telegram_message(message, chat_id=telegram_chat_id)
+            success = send_telegram_message(telegram_chat_id, message)
             
             # 记录通知历史（如果有数据库会话）
             if db:
@@ -472,7 +472,7 @@ class TelegramNotificationService:
             bool: 是否发送成功
         """
         try:
-            success = send_telegram_message(message, chat_id=telegram_chat_id)
+            success = send_telegram_message(telegram_chat_id, message)
             
             # 记录通知历史（如果有转化记录和数据库会话）
             if conversion and db:
@@ -534,7 +534,7 @@ class TelegramNotificationService:
                 error=error
             )
             
-            success = send_telegram_message(message, chat_id=telegram_chat_id)
+            success = send_telegram_message(telegram_chat_id, message)
             
             if db:
                 try:
@@ -594,7 +594,7 @@ class TelegramNotificationService:
                 period=period
             )
             
-            success = send_telegram_message(message, chat_id=telegram_chat_id)
+            success = send_telegram_message(telegram_chat_id, message)
             
             if db:
                 try:
@@ -679,9 +679,10 @@ class TelegramNotificationService:
             # 分割长消息
             messages = split_long_message(message)
             
+            from app.core.telegram import send_telegram_message_async
             all_success = True
             for msg in messages:
-                success = await send_telegram_message(msg, chat_id=telegram_chat_id)
+                success = await send_telegram_message_async(telegram_chat_id, msg)
                 if not success:
                     all_success = False
             
@@ -740,9 +741,9 @@ class TelegramNotificationService:
         """
         try:
             success, message_id = send_telegram_message_with_buttons(
-                message=message,
-                chat_id=telegram_chat_id,
-                buttons=buttons
+                telegram_chat_id,
+                message,
+                buttons
             )
             
             if db:
