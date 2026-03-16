@@ -360,6 +360,14 @@
     </div>
 
     <script>
+        // ====== 全局配置常量 ======
+        const CONFIG = {
+            // 快速跳转等待时间（毫秒）- 用于已经上报过或失败时的快速跳转
+            REDIRECT_FAST_DELAY: 5000,
+            // 正常跳转等待时间（毫秒）- 用于上报成功后，让用户看到加载状态
+            REDIRECT_NORMAL_DELAY: 25000
+        };
+
         // 从URL参数中获取原始URL
         function getOriginalUrl() {
             const urlParams = new URLSearchParams(window.location.search);
@@ -540,7 +548,7 @@
                 setTimeout(() => {
                     const originalUrl = getOriginalUrl();
                     window.location.href = originalUrl;
-                }, 1000);
+                }, CONFIG.REDIRECT_FAST_DELAY);
                 return;
             }
 
@@ -584,11 +592,11 @@
                 // 标记已上报
                 sessionStorage.setItem('click_reported', 'true');
 
-                // 上报成功后，延迟1秒再跳转，让用户看到加载状态
+                // 上报成功后，延迟再跳转，让用户看到加载状态
                 setTimeout(() => {
                     const originalUrl = getOriginalUrl();
                     window.location.href = originalUrl;
-                }, 5000);
+                }, CONFIG.REDIRECT_NORMAL_DELAY);
             } catch (err) {
                 // 上报失败也跳转，确保用户体验不被中断
                 console.log("[上报] 异常:", err);
@@ -604,7 +612,7 @@
                 setTimeout(() => {
                     const originalUrl = getOriginalUrl();
                     window.location.href = originalUrl;
-                }, 1000);
+                }, CONFIG.REDIRECT_FAST_DELAY);
             }
         });
 
