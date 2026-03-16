@@ -169,9 +169,10 @@ async def receive_bft_postback(
             # 异步发送通知，不阻塞主流程
             # 使用 asyncio.create_task 创建任务，不等待完成（fire and forget）
             # 但使用 asyncio.wait_for 确保有超时保护
+            from app.core.config import settings
             asyncio.create_task(
                 asyncio.wait_for(
-                    send_telegram_message(telegram_msg),
+                    send_telegram_message(settings.TELEGRAM_ADMIN, telegram_msg),
                     timeout=10.0
                 )
             )

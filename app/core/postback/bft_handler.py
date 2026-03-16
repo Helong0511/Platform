@@ -91,7 +91,7 @@ class BftPostbackHandler(PostbackHandler):
         
         normalized = {
             "conversion_id": str(conversion_id).strip() if conversion_id else None,
-            "event_name": str(event_name).strip() if event_name else None,
+            "event_name": str(event_name).strip() if event_name else "default",
             "event_value": self._to_float(data.get("event_value")),
             "payout": self._to_float(payout),
             "devad_id": self._to_str(data.get("devad_id")),
@@ -101,6 +101,8 @@ class BftPostbackHandler(PostbackHandler):
             "gid": self._to_str(data.get("gid")),
             "product_id": self._to_int(data.get("product_id")),
             "client_id": self._to_int(data.get("client_id")),
+            "click_id": str(conversion_id).strip() if conversion_id else None,
+            "raw_data": data
         }
         
         return normalized

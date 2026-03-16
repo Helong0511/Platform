@@ -56,17 +56,36 @@ class PostbackProcessor:
             return PostbackProcessor._handle_ip_failure(platform, raw_data, db)
         
         # ========== 第 2 步：数据验证 ==========
-        data_valid, errors = DataValidator.validate(raw_data, platform)
-        if not data_valid:
-            logger.warning(f"数据验证失败：platform={platform}, errors={errors}")
-            return {
-                "success": True,
-                "message": "数据验证失败",
-                "errors": errors
-            }
+        # 优先使用平台特定处理器
+        from app.core.postback.handlers import get_handler
+        handler = get_handler(platform)
         
-        # ========== 第 3 步：数据标准化 ==========
-        normalized_data = DataNormalizer.normalize(raw_data, platform)
+        if handler:
+            # 使用平台特定处理器验证
+            data_valid, error_msg = await handler.validate(raw_data)
+            if not data_valid:
+                logger.warning(f"数据验证失败：platform={platform}, error={error_msg}")
+                return {
+                    "success": True,
+                    "message": "数据验证失败",
+                    "errors": [error_msg] if error_msg else []
+                }
+            
+            # ========== 第 3 步：数据标准化 ==========
+            normalized_data = await handler.normalize(raw_data)
+        else:
+            # 回退到通用验证和标准化
+            data_valid, errors = DataValidator.validate(raw_data, platform)
+            if not data_valid:
+                logger.warning(f"数据验证失败：platform={platform}, errors={errors}")
+                return {
+                    "success": True,
+                    "message": "数据验证失败",
+                    "errors": errors
+                }
+            
+            # ========== 第 3 步：数据标准化 ==========
+            normalized_data = DataNormalizer.normalize(raw_data, platform)
         
         # ========== 第 4 步：Click ID 关联 ==========
         click_association = await ClickAssociator.associate(
