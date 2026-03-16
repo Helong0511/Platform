@@ -100,7 +100,6 @@ class ConversionSaver:
                 publisher_id=click_association['publisher_id'],
                 advertiser_id=click_association['advertiser_id'],
                 click_time=click_association['click_time'],
-                conversion_id=conversion_id,
                 created_at=get_app_now_naive()
             )
             

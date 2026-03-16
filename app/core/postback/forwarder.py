@@ -38,6 +38,7 @@ class PostbackForwarder:
     @staticmethod
     async def forward_to_publisher(
         conversion: PostbackConversion,
+        click_association: Dict[str, Any],
         db: AsyncSession
     ) -> None:
         """
@@ -45,23 +46,25 @@ class PostbackForwarder:
         
         Args:
             conversion: 转化记录
+            click_association: Click 关联信息
             db: 数据库会话
         """
         logger.info(f"开始转发 Postback 到渠道：conversion_id={conversion.id}")
         
         # ========== 第 1 步：获取渠道信息 ==========
-        if not conversion.publisher_id:
+        publisher_id = click_association.get('publisher_id')
+        if not publisher_id:
             logger.debug("没有 Publisher ID，跳过转发")
             return
         
-        publisher = await CacheManager.get_cached_publisher(conversion.publisher_id, db)
+        publisher = await CacheManager.get_cached_publisher(publisher_id, db)
         
         if not publisher or not publisher.postback_url:
-            logger.warning(f"渠道无 Postback URL：publisher_id={conversion.publisher_id}")
+            logger.warning(f"渠道无 Postback URL：publisher_id={publisher_id}")
             return
         
         if not publisher.is_active:
-            logger.warning(f"渠道未激活：publisher_id={conversion.publisher_id}")
+            logger.warning(f"渠道未激活：publisher_id={publisher_id}")
             return
         
         # ========== 第 2 步：准备数据 ==========
@@ -73,25 +76,25 @@ class PostbackForwarder:
             'ip': conversion.ip,
         }
         
-        click_association = {
-            'click_id': conversion.click_id,
-            'offer_id': conversion.offer_id,
-            'publisher_id': conversion.publisher_id,
-            'advertiser_id': conversion.advertiser_id,
+        click_association_data = {
+            'click_id': click_association.get('click_id'),
+            'offer_id': click_association.get('offer_id'),
+            'publisher_id': click_association.get('publisher_id'),
+            'advertiser_id': click_association.get('advertiser_id'),
         }
         
         # ========== 第 3 步：构建 URL ==========
         base_url = publisher.postback_url
         
         # 先替换占位符
-        url_data = {**conversion_data, **click_association}
+        url_data = {**conversion_data, **click_association_data}
         resolved_url = PlaceholderResolver.resolve(base_url, url_data)
         
         # 再添加查询参数
         final_url, params = UrlBuilder.build_postback_url(
             resolved_url,
             conversion_data,
-            click_association
+            click_association_data
         )
         
         # ========== 第 4 步：发送 HTTP 请求 ==========
@@ -114,7 +117,7 @@ class PostbackForwarder:
         # ========== 第 6 步：记录转发日志 ==========
         forward_log = PostbackForwardLog(
             conversion_id=conversion.id,
-            publisher_id=conversion.publisher_id,
+            publisher_id=click_association.get('publisher_id'),
             request_url=final_url,
             request_method=method,
             response_status_code=status_code,
