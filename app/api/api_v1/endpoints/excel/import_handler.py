@@ -37,7 +37,8 @@ from app.core.utils import (
 )
 from app.core.ad_data_processor import check_and_notify_data_decrease
 from app.core.exceptions import handle_integrity_error
-from app.core.auto_bot import send_telegram_message
+from app.services.telegram_notification_service import TelegramNotificationService
+from app.models.models import User, Client, Product, AdData, AdminNotificationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -1189,17 +1190,32 @@ async def import_ad_data_handler(
             if result.get('failed_rows', 0) > 0:
                 telegram_msg += f"\n❌ 失败: {result['failed_rows']} 条"
             
-            # 使用 await 发送消息，设置超时避免阻塞太久
-            # send_telegram_message 内部已有完整的容错处理
+            # 获取管理员配置并发送通知
             try:
-                await asyncio.wait_for(
-                    send_telegram_message(telegram_msg),
-                    timeout=5.0
+                admin_config_result = await db.execute(
+                    select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
                 )
-                logger.info(f"Telegram 通知发送成功，用户: {current_user.username}, 文件: {file.filename}, 成功: {result['success_rows']} 条")
+                admin_config = admin_config_result.scalars().first()
+                
+                if (
+                    admin_config
+                    and admin_config.telegram_enabled
+                    and admin_config.telegram_chat_id
+                ):
+                    await asyncio.wait_for(
+                        TelegramNotificationService.send_admin_notification(
+                            message=telegram_msg,
+                            telegram_chat_id=admin_config.telegram_chat_id,
+                            notification_type='statistics',
+                            db=db
+                        ),
+                        timeout=5.0
+                    )
+                    logger.info(f"Telegram 通知发送成功，用户: {current_user.username}, 文件: {file.filename}, 成功: {result['success_rows']} 条")
             except asyncio.TimeoutError:
                 logger.warning(f"发送 Telegram 通知超时，用户: {current_user.username}, 文件: {file.filename}")
-            # 其他异常已在 send_telegram_message 内部处理，这里不需要捕获
+            except Exception as e:
+                logger.warning(f"发送 Telegram 通知失败: {str(e)}")
 
         return import_response
 
