@@ -73,6 +73,9 @@ class UrlBuilder:
         """
         params = {}
         
+        # 获取 url_params
+        url_params = click_association.get('url_params', {}) if click_association else {}
+        
         # 转化相关参数
         if conversion_data.get('conversion_id'):
             params['conversion_id'] = str(conversion_data['conversion_id'])
@@ -83,15 +86,36 @@ class UrlBuilder:
         if conversion_data.get('event_name'):
             params['event_name'] = str(conversion_data['event_name'])
         
-        # Click 相关参数
+        # Click 相关参数 - 优先从 url_params 中获取
         if click_association:
-            if click_association.get('click_id'):
+            # click_id
+            if url_params.get('click_id'):
+                params['click_id'] = str(url_params['click_id'])
+            elif click_association.get('click_id'):
                 params['click_id'] = str(click_association['click_id'])
             
-            if click_association.get('offer_id'):
+            # offer_id
+            if url_params.get('offer_id'):
+                params['offer_id'] = str(url_params['offer_id'])
+            elif click_association.get('offer_id'):
                 params['offer_id'] = str(click_association['offer_id'])
             
-            if click_association.get('publisher_id'):
+            # publisher_id
+            if url_params.get('publisher_id'):
+                params['publisher_id'] = str(url_params['publisher_id'])
+            elif click_association.get('publisher_id'):
                 params['publisher_id'] = str(click_association['publisher_id'])
+            
+            # advertiser_id
+            if url_params.get('advertiser_id'):
+                params['advertiser_id'] = str(url_params['advertiser_id'])
+            elif click_association.get('advertiser_id'):
+                params['advertiser_id'] = str(click_association['advertiser_id'])
+            
+            # short_link_id
+            if url_params.get('short_link_id'):
+                params['short_link_id'] = str(url_params['short_link_id'])
+            elif click_association.get('short_link_id'):
+                params['short_link_id'] = str(click_association['short_link_id'])
         
         return params

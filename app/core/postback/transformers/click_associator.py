@@ -4,6 +4,7 @@ Click ID 关联器
 通过 Click ID 关联 Click 记录，获取 Offer、Publisher 等信息
 """
 import logging
+import json
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -55,19 +56,31 @@ class ClickAssociator:
             logger.debug(f"未找到 Click 记录：click_id={click_id}")
             return None
         
+        # 解析 url_params
+        url_params = {}
+        if click.url_params:
+            try:
+                url_params = json.loads(click.url_params)
+                logger.debug(f"成功解析 url_params: {url_params}")
+            except json.JSONDecodeError:
+                logger.warning(f"解析 url_params 失败: {click.url_params}")
+        
         # 提取关联信息
         association = {
             'click_id': click.click_id,
             'offer_id': click.offer_id,
             'publisher_id': click.publisher_id,
             'advertiser_id': click.advertiser_id,
+            'short_link_id': click.short_link_id,
             'click_time': click.click_time,
             'ip': click.ip,
             'country': click.country,
             'device': click.device,
+            'os': click.os,
             'offer': click.offer,
             'publisher': click.publisher,
             'advertiser': click.advertiser,
+            'url_params': url_params,
         }
         
         logger.info(

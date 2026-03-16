@@ -26,6 +26,7 @@ class PlaceholderResolver:
         '{country}': 'country',
         '{os}': 'os',
         '{device}': 'device',
+        '{short_link_id}': 'short_link_id',
     }
     
     @staticmethod
@@ -43,7 +44,16 @@ class PlaceholderResolver:
         resolved_url = url
         
         for placeholder, field_name in PlaceholderResolver.PLACEHOLDER_PATTERNS.items():
-            value = data.get(field_name)
+            # 优先从 url_params 中获取值
+            url_params = data.get('url_params', {})
+            value = None
+            
+            if url_params and field_name in url_params:
+                value = url_params[field_name]
+                logger.debug(f"从 url_params 中获取 {field_name} = {value}")
+            else:
+                value = data.get(field_name)
+            
             if value is not None:
                 # 替换占位符
                 resolved_url = resolved_url.replace(placeholder, str(value))

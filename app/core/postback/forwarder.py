@@ -81,6 +81,8 @@ class PostbackForwarder:
             'offer_id': click_association.get('offer_id'),
             'publisher_id': click_association.get('publisher_id'),
             'advertiser_id': click_association.get('advertiser_id'),
+            'short_link_id': click_association.get('short_link_id'),
+            'url_params': click_association.get('url_params', {}),
         }
         
         # ========== 第 3 步：构建 URL ==========

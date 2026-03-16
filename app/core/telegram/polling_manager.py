@@ -108,7 +108,6 @@ def start_polling():
         # 发送启动消息（只有真正获取到锁的进程才发送）
         try:
             from app.core.telegram.message_sender import send_telegram_message
-            from app.core.config import settings
             from app.core.constants import TELEGRAM_BOT_START_DELAY
             import time
             time.sleep(TELEGRAM_BOT_START_DELAY)
