@@ -9,7 +9,7 @@ from sqlalchemy import func, and_, or_, case, cast, Integer
 from sqlalchemy.orm import aliased
 
 from app.models.models import (
-    PostbackConversion, ClickStats, Offer, Publisher, Advertiser,
+    PostbackConversion, Click, Offer, Publisher, Advertiser,
     User, UserRole, Client, PostbackNotification, OfferPublisherAssignment
 )
 from app.core.exceptions import raise_api_exception
@@ -124,8 +124,8 @@ class ConversionService:
         
         # 构建点击查询条件
         click_conditions = [
-            ClickStats.click_time >= start_datetime,
-            ClickStats.click_time < end_datetime
+            Click.click_time >= start_datetime,
+            Click.click_time < end_datetime
         ]
         
         # 构建转化查询条件
@@ -136,28 +136,28 @@ class ConversionService:
         
         # 如果是客户用户，添加渠道过滤条件
         if client_publisher_ids is not None:
-            click_conditions.append(ClickStats.publisher_id.in_(client_publisher_ids))
+            click_conditions.append(Click.publisher_id.in_(client_publisher_ids))
         
         if offer_id:
-            click_conditions.append(ClickStats.offer_id == offer_id)
+            click_conditions.append(Click.offer_id == offer_id)
         
         if publisher_id:
-            click_conditions.append(ClickStats.publisher_id == publisher_id)
+            click_conditions.append(Click.publisher_id == publisher_id)
         
         if advertiser_id:
-            click_conditions.append(ClickStats.advertiser_id == advertiser_id)
+            click_conditions.append(Click.advertiser_id == advertiser_id)
         
         # 统计总点击数量
-        click_query = select(func.count(ClickStats.id)).where(and_(*click_conditions))
+        click_query = select(func.count(Click.id)).where(and_(*click_conditions))
         total_clicks = (await self.db.execute(click_query)).scalar() or 0
         
         # 统计总转化数量（支持多种关联方式：click_id、gid、client_id）
-        # 客户用户：支持通过ClickStats.publisher_id、gid字段、client_id字段过滤
+        # 客户用户：支持通过Click.publisher_id、gid字段、client_id字段过滤
         # 注意：只统计 Offer 激活的转化（不计入未激活 Offer 的转化）
-        click_alias_for_count = aliased(ClickStats)
+        click_alias_for_count = aliased(Click)
         offer_alias_for_count = aliased(Offer)
         
-        # 方式1：通过 click_id 关联 ClickStats（主要方式）
+        # 方式1：通过 click_id 关联 Click（主要方式）
         count_conditions_1 = list(conversion_conditions)
         count_conditions_1.append(PostbackConversion.click_id.isnot(None))
         count_conditions_1.append(PostbackConversion.click_id == click_alias_for_count.click_id)
@@ -183,7 +183,7 @@ class ConversionService:
         count_1 = (await self.db.execute(conversion_query_1)).scalar() or 0
         
         # 方式2：通过 gid 字段匹配 publisher_id（备用方式，仅客户登录时使用）
-        # 统计 click_id 存在但无法关联到 ClickStats，但 gid 匹配的记录
+        # 统计 click_id 存在但无法关联到 Click，但 gid 匹配的记录
         # 注意：这些记录无法获取 offer_id，所以不统计（保持与主要方式一致，只统计有 offer_id 的记录）
         # 如果需要统计这些记录，需要在后续版本中扩展支持
         
@@ -196,12 +196,12 @@ class ConversionService:
         total_conversions = count_1
         
         # 统计总支付金额（PO）- 使用扣减后的 payout（支持多种关联方式）
-        # 客户用户：支持通过ClickStats.publisher_id、gid字段、client_id字段过滤
+        # 客户用户：支持通过Click.publisher_id、gid字段、client_id字段过滤
         # 注意：只统计 Offer 激活的转化（不计入未激活 Offer 的转化）
-        click_alias_for_po = aliased(ClickStats)
+        click_alias_for_po = aliased(Click)
         offer_alias_for_po = aliased(Offer)
         
-        # 方式1：通过 click_id 关联 ClickStats（主要方式）
+        # 方式1：通过 click_id 关联 Click（主要方式）
         po_conditions_1 = list(conversion_conditions)
         po_conditions_1.append(PostbackConversion.click_id.isnot(None))
         po_conditions_1.append(PostbackConversion.click_id == click_alias_for_po.click_id)
@@ -238,10 +238,10 @@ class ConversionService:
         
         # 按Offer和Publisher分组统计点击
         click_group_query = select(
-            ClickStats.offer_id,
-            ClickStats.publisher_id,
-            func.count(ClickStats.id).label('click_count')
-        ).where(and_(*click_conditions)).group_by(ClickStats.offer_id, ClickStats.publisher_id)
+            Click.offer_id,
+            Click.publisher_id,
+            func.count(Click.id).label('click_count')
+        ).where(and_(*click_conditions)).group_by(Click.offer_id, Click.publisher_id)
         
         click_group_result = await self.db.execute(click_group_query)
         click_groups = click_group_result.all()
@@ -272,10 +272,10 @@ class ConversionService:
                 publisher_ids.add(publisher_id_val)
         
         # 获取所有转化记录，按offer_id和关联的publisher_id分组
-        # 客户用户：支持通过ClickStats.publisher_id过滤
-        # 注意：使用 join 确保只统计有 ClickStats 关联的转化（用于分组）
+        # 客户用户：支持通过Click.publisher_id过滤
+        # 注意：使用 join 确保只统计有 Click 关联的转化（用于分组）
         # 注意：只统计 Offer 激活的转化（不计入未激活 Offer 的转化）
-        click_alias = aliased(ClickStats)
+        click_alias = aliased(Click)
         offer_alias = aliased(Offer)
         
         # 构建分组查询条件
@@ -588,12 +588,12 @@ class ConversionService:
         # 先查询有转化数据的 Offer ID（不管 Offer 是否激活）
         # 这样确保所有有转化数据的 Offer 都会被统计
         conversion_offer_query = (
-            select(ClickStats.offer_id)
+            select(Click.offer_id)
             .join(
                 PostbackConversion,
-                PostbackConversion.click_id == ClickStats.click_id
+                PostbackConversion.click_id == Click.click_id
             )
-            .where(ClickStats.offer_id.isnot(None))
+            .where(Click.offer_id.isnot(None))
         )
         
         if start_datetime:
@@ -606,7 +606,7 @@ class ConversionService:
             )
         if client_publisher_ids is not None:
             conversion_offer_query = conversion_offer_query.where(
-                ClickStats.publisher_id.in_(client_publisher_ids)
+                Click.publisher_id.in_(client_publisher_ids)
             )
         
         # 去重查询
@@ -632,25 +632,25 @@ class ConversionService:
         
         # 批量查询点击统计（优化：一次查询获取所有数据）
         click_stats_query = select(
-            ClickStats.offer_id,
-            func.count(ClickStats.click_id).label('click_count')
-        ).where(ClickStats.offer_id.in_(offer_ids))
+            Click.offer_id,
+            func.count(Click.click_id).label('click_count')
+        ).where(Click.offer_id.in_(offer_ids))
         
         if start_datetime:
             click_stats_query = click_stats_query.where(
-                ClickStats.click_time >= start_datetime
+                Click.click_time >= start_datetime
             )
         if end_datetime:
             click_stats_query = click_stats_query.where(
-                ClickStats.click_time <= end_datetime
+                Click.click_time <= end_datetime
             )
         if client_publisher_ids is not None:
             click_stats_query = click_stats_query.where(
-                ClickStats.publisher_id.in_(client_publisher_ids)
+                Click.publisher_id.in_(client_publisher_ids)
             )
         
         # 按offer_id分组
-        click_stats_query = click_stats_query.group_by(ClickStats.offer_id)
+        click_stats_query = click_stats_query.group_by(Click.offer_id)
         click_stats_result = await self.db.execute(click_stats_query)
         # 构建点击统计映射
         click_stats_map = {
@@ -659,26 +659,26 @@ class ConversionService:
         }
         
         # 批量查询转化统计
-        # 客户用户：直接通过ClickStats.publisher_id过滤，显示所有属于客户的转化
+        # 客户用户：直接通过Click.publisher_id过滤，显示所有属于客户的转化
         # 注意：只统计 Offer 激活的转化（不计入未激活 Offer 的转化）
         offer_alias_for_list = aliased(Offer)
         conversion_query = (
             select(
-                ClickStats.offer_id,
+                Click.offer_id,
                 func.count(PostbackConversion.id).label('conversion_count'),
                 func.sum(PostbackConversion.payout).label('total_po')
             )
             .join(
                 PostbackConversion,
-                PostbackConversion.click_id == ClickStats.click_id
+                PostbackConversion.click_id == Click.click_id
             )
             .join(
                 offer_alias_for_list,
-                ClickStats.offer_id == offer_alias_for_list.id
+                Click.offer_id == offer_alias_for_list.id
             )
             .where(
                 and_(
-                    ClickStats.offer_id.in_(offer_ids),
+                    Click.offer_id.in_(offer_ids),
                     offer_alias_for_list.is_active == True,
                     offer_alias_for_list.status == 'Active'
                 )
@@ -695,11 +695,11 @@ class ConversionService:
             )
         if client_publisher_ids is not None:
             conversion_query = conversion_query.where(
-                ClickStats.publisher_id.in_(client_publisher_ids)
+                Click.publisher_id.in_(client_publisher_ids)
             )
         
         # 按offer_id分组
-        conversion_query = conversion_query.group_by(ClickStats.offer_id)
+        conversion_query = conversion_query.group_by(Click.offer_id)
         conversion_result = await self.db.execute(conversion_query)
         # 构建转化统计映射
         conversion_map = {

@@ -9,7 +9,6 @@ from sqlalchemy import func, and_
 
 from app.models.models import (
     PostbackConversion,
-    ClickStats,
     Click,
     Offer,
     Publisher,
@@ -68,12 +67,12 @@ class ConversionLogService:
             end_datetime = parse_date_to_app_timezone(end_date, is_end_date=True)
 
         # 构建查询条件
-        # 如果需要通过 ClickStats 表筛选 offer_id、publisher_id 或 advertiser_id，需要 JOIN
+        # 如果需要通过 Click 表筛选 offer_id、publisher_id 或 advertiser_id，需要 JOIN
         need_join_click_stats = offer_id is not None or publisher_id is not None or advertiser_id is not None
 
         if need_join_click_stats:
-            # 需要 JOIN ClickStats 表来筛选 offer_id、publisher_id 或 advertiser_id
-            query = select(PostbackConversion).join(ClickStats, PostbackConversion.click_id == ClickStats.click_id)
+            # 需要 JOIN Click 表来筛选 offer_id、publisher_id 或 advertiser_id
+            query = select(PostbackConversion).join(Click, PostbackConversion.click_id == Click.click_id)
         else:
             query = select(PostbackConversion)
 
@@ -84,17 +83,17 @@ class ConversionLogService:
             conditions.append(PostbackConversion.click_id == click_id)
 
         if offer_id:
-            # 通过 ClickStats 表筛选 offer_id（PostbackConversion 没有直接的 offer_id 字段）
-            # 关联路径：PostbackConversion.click_id → ClickStats.click_id → ClickStats.offer_id
-            conditions.append(ClickStats.offer_id == offer_id)
+            # 通过 Click 表筛选 offer_id（PostbackConversion 没有直接的 offer_id 字段）
+            # 关联路径：PostbackConversion.click_id → Click.click_id → Click.offer_id
+            conditions.append(Click.offer_id == offer_id)
 
         if publisher_id:
-            # 通过 ClickStats 表筛选 publisher_id
-            conditions.append(ClickStats.publisher_id == publisher_id)
+            # 通过 Click 表筛选 publisher_id
+            conditions.append(Click.publisher_id == publisher_id)
 
         if advertiser_id:
-            # 通过 ClickStats 表筛选 advertiser_id
-            conditions.append(ClickStats.advertiser_id == advertiser_id)
+            # 通过 Click 表筛选 advertiser_id
+            conditions.append(Click.advertiser_id == advertiser_id)
 
         if conversion_status:
             # 通过 conversion_status 字段查询
@@ -113,7 +112,7 @@ class ConversionLogService:
         total_query = select(func.count(PostbackConversion.id))
         if need_join_click_stats:
             total_query = total_query.select_from(
-                PostbackConversion.__table__.join(ClickStats.__table__, PostbackConversion.click_id == ClickStats.click_id)
+                PostbackConversion.__table__.join(Click.__table__, PostbackConversion.click_id == Click.click_id)
             )
         else:
             total_query = total_query.select_from(PostbackConversion.__table__)
@@ -131,43 +130,23 @@ class ConversionLogService:
         result = await self.db.execute(query)
         conversions = result.scalars().all()
 
-        # 批量加载ClickStats记录（优化N+1查询，优先使用ClickStats）
+        # 批量加载Click记录（优化N+1查询）
         click_ids = [conv.click_id for conv in conversions if hasattr(conv, 'click_id') and conv.click_id]
-        click_stats_map = {}
-        clicks_map = {}  # 用于存储Click表的详细信息（如果存在）
+        clicks_map = {}
 
         if click_ids:
-            # 优先从 ClickStats 获取核心字段
-            click_stats_result = await self.db.execute(
-                select(ClickStats).where(ClickStats.click_id.in_(click_ids))
+            # 从 Click 表获取详细信息
+            clicks_result = await self.db.execute(
+                select(Click).where(Click.click_id.in_(click_ids))
             )
-            click_stats = click_stats_result.scalars().all()
-            click_stats_map = {stats.click_id: stats for stats in click_stats}
-
-            # 尝试从 Click 表获取详细信息（如果表还存在且数据未清理）
-            try:
-                clicks_result = await self.db.execute(
-                    select(Click).where(Click.click_id.in_(click_ids))
-                )
-                clicks = clicks_result.scalars().all()
-                clicks_map = {click.click_id: click for click in clicks}
-            except Exception as e:
-                # Click 表可能不存在或数据已清理，忽略错误
-                logger.debug(f"无法从 Click 表加载详细信息: {e}")
+            clicks = clicks_result.scalars().all()
+            clicks_map = {click.click_id: click for click in clicks}
 
         # 批量加载关联的Offer、Publisher、Advertiser（进一步优化）
         offer_ids = set()
         publisher_ids = set()
         advertiser_ids = set()
-        # 优先从 ClickStats 获取
-        for stats in click_stats_map.values():
-            if stats.offer_id:
-                offer_ids.add(stats.offer_id)
-            if stats.publisher_id:
-                publisher_ids.add(stats.publisher_id)
-            if stats.advertiser_id:
-                advertiser_ids.add(stats.advertiser_id)
-        # 如果 Click 表还有数据，也从中获取（作为补充）
+        # 从 Click 表获取
         for click in clicks_map.values():
             if click.offer_id:
                 offer_ids.add(click.offer_id)
@@ -203,12 +182,9 @@ class ConversionLogService:
         # 构建返回数据
         log_list = []
         for conv in conversions:
-            # 优先从 ClickStats 获取核心字段，从 Click 获取详细信息（如果存在）
-            click_stats_record = None
             click_record = None
             if hasattr(conv, 'click_id') and conv.click_id:
-                click_stats_record = click_stats_map.get(conv.click_id)
-                click_record = clicks_map.get(conv.click_id)  # 可能为 None（如果 Click 表数据已清理）
+                click_record = clicks_map.get(conv.click_id)
 
             # 从批量加载的map中获取关联信息
             offer_name = None
@@ -216,13 +192,11 @@ class ConversionLogService:
             advertiser_name = None
             click_time = None
 
-            # 优先使用 ClickStats，如果 Click 表还有数据，也使用其详细信息
-            stats_record = click_stats_record or click_record
-            if stats_record:
-                click_time = stats_record.click_time
-                offer_id_val = stats_record.offer_id
-                publisher_id_val = stats_record.publisher_id
-                advertiser_id_val = stats_record.advertiser_id
+            if click_record:
+                click_time = click_record.click_time
+                offer_id_val = click_record.offer_id
+                publisher_id_val = click_record.publisher_id
+                advertiser_id_val = click_record.advertiser_id
 
                 if offer_id_val:
                     offer = offers_map.get(offer_id_val)
@@ -239,30 +213,26 @@ class ConversionLogService:
                     if advertiser:
                         advertiser_name = advertiser.advertiser_name
 
-            # 从 Click 表获取详细信息（如果存在）
-            ip = None
+            # 从 Click 表获取详细信息或使用 PostbackConversion 中的值
+            ip = conv.ip
             device = None
             country = None
             if click_record:
-                ip = click_record.ip
+                ip = click_record.ip or ip
                 device = click_record.device
                 country = click_record.country
 
-            # 如果没有从 Click 表获取到，使用 PostbackConversion 中的值
-            if not ip:
-                ip = conv.ip
-
             log_data = {
                 "id": conv.id,
-                "click_id": getattr(conv, 'click_id', None) or (stats_record.click_id if stats_record else None),
+                "click_id": getattr(conv, 'click_id', None),
                 "click_time": click_time.isoformat() if click_time else None,
                 "conversion_time": conv.created_at.isoformat() if conv.created_at else None,
                 "conversion_status": getattr(conv, 'conversion_status', 'Pending'),
-                "offer_id": stats_record.offer_id if stats_record else None,
+                "offer_id": click_record.offer_id if click_record else None,
                 "offer_name": offer_name,
-                "publisher_id": stats_record.publisher_id if stats_record else None,
+                "publisher_id": click_record.publisher_id if click_record else None,
                 "publisher_name": publisher_name,
-                "advertiser_id": stats_record.advertiser_id if stats_record else None,
+                "advertiser_id": click_record.advertiser_id if click_record else None,
                 "advertiser_name": advertiser_name,
                 "ip": ip,
                 "device": device,

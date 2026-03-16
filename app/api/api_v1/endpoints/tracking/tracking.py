@@ -18,7 +18,7 @@ from app.core.utils import get_app_now_naive
 from app.core.tracking.click_id_generator import generate_click_id_from_timestamp, generate_unique_click_id
 from app.core.tracking.tracklink_generator import generate_downstream_tracklink
 from app.core.device_info import collect_request_info
-from app.models.models import User, Offer, Publisher, Click, ClickStats
+from app.models.models import User, Offer, Publisher, Click
 from app.schemas.base import ResponseBaseSchema
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
@@ -58,29 +58,6 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
                 
                 click = Click(**click_data)
                 session.add(click)
-                
-                # 同步创建或更新 ClickStats 记录
-                if click_id:
-                    try:
-                        # 检查是否已存在 ClickStats 记录
-                        existing_stats = await session.execute(
-                            select(ClickStats).where(ClickStats.click_id == click_id)
-                        )
-                        if not existing_stats.scalars().first():
-                            # 只有不存在时才创建，避免重复
-                            click_stats = ClickStats(
-                                click_id=click_id,
-                                offer_id=click_data.get('offer_id'),
-                                publisher_id=click_data.get('publisher_id'),
-                                advertiser_id=click_data.get('advertiser_id'),
-                                click_time=click_data.get('click_time'),
-                                created_at=get_app_now_naive()
-                            )
-                            session.add(click_stats)
-                            logger.debug(f"已创建点击统计记录: click_id={click_id}")
-                    except Exception as e:
-                        # ClickStats 写入失败不影响主流程，但记录警告
-                        logger.warning(f"创建点击统计记录失败: click_id={click_id}, error={str(e)}")
                 
                 await session.commit()
                 logger.debug(f"点击记录保存成功: click_id={click_data.get('click_id')}")

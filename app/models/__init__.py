@@ -9,7 +9,7 @@ from app.models.models import (
     ClientNotificationConfig, ProductNotificationConfig, PostbackNotification,
     ShortLink,
     # CPL 系统模型
-    Advertiser, Publisher, Offer, OfferPublisherAssignment, Click, ClickStats,
+    Advertiser, Publisher, Offer, OfferPublisherAssignment, Click,
     OfferCap, OfferDiscount, AffiliateTest,
     # Postback 相关模型
     PendingPostbackConversion, PostbackIpWhitelist
@@ -40,7 +40,6 @@ __all__ = [
     "Offer",
     "OfferPublisherAssignment",
     "Click",
-    "ClickStats",
     "OfferCap",
     "OfferDiscount",
     "AffiliateTest",

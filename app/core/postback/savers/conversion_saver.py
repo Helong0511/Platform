@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import PostbackConversion, ClickStats
+from app.models.models import PostbackConversion, Click
 from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ class ConversionSaver:
         db: AsyncSession
     ) -> bool:
         """
-        更新 Click 统计
+        更新 Click 表的 conversion_id
         
         Args:
             click_association: Click 关联信息
@@ -93,80 +93,35 @@ class ConversionSaver:
             return False
         
         try:
-            # 检查是否已存在 ClickStats 记录
+            # 查询并更新 Click 记录
             from sqlalchemy import select
             click_id = click_association['click_id']
-            result = await db.execute(
-                select(ClickStats).where(ClickStats.click_id == click_id)
-            )
-            existing_stats = result.scalars().first()
             
-            if existing_stats:
-                # 已存在记录，跳过
-                logger.info(
-                    f"Click 统计已存在，跳过：click_id={click_id}, "
+            # 查询 Click 记录
+            result = await db.execute(
+                select(Click).where(Click.click_id == click_id)
+            )
+            click = result.scalars().first()
+            
+            if not click:
+                logger.warning(
+                    f"未找到 Click 记录，无法更新 conversion_id：click_id={click_id}, "
                     f"conversion_id={conversion_id}"
                 )
-                return True
+                return False
             
-            # 创建新的 ClickStats 记录
-            click_stats = ClickStats(
-                click_id=click_id,
-                offer_id=click_association['offer_id'],
-                publisher_id=click_association['publisher_id'],
-                advertiser_id=click_association['advertiser_id'],
-                click_time=click_association['click_time'],
-                created_at=get_app_now_naive()
-            )
-            
-            db.add(click_stats)
+            # 更新 conversion_id
+            click.conversion_id = conversion_id
             await db.flush()
             
             logger.info(
-                f"Click 统计已更新：click_id={click_id}, "
+                f"Click 表 conversion_id 已更新：click_id={click_id}, "
                 f"conversion_id={conversion_id}"
             )
             
             return True
             
         except Exception as e:
-            # 检查是否是唯一索引冲突
-            error_msg = str(e)
-            if "Duplicate entry" in error_msg and "click_stats.ix_click_stats_click_id" in error_msg:
-                # 唯一索引冲突，这是预期的容错情况
-                click_id = click_association.get('click_id', 'unknown')
-                logger.warning(
-                    f"Click 统计已存在（唯一索引冲突）：click_id={click_id}, "
-                    f"conversion_id={conversion_id}"
-                )
-                
-                # 发送 Telegram 通知
-                try:
-                    from app.core.config import settings
-                    from app.core.telegram import send_telegram_message_async
-                    import asyncio
-                    
-                    telegram_msg = f"⚠️ Click 统计重复警告\n\n"
-                    telegram_msg += f"点击 ID: {click_id}\n"
-                    telegram_msg += f"转化 ID: {conversion_id}\n"
-                    telegram_msg += f"错误信息: 唯一索引冲突，记录已存在\n"
-                    telegram_msg += f"时间: {get_app_now_naive().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                    
-                    # 异步发送通知
-                    asyncio.create_task(
-                        send_telegram_message_async(
-                            settings.TELEGRAM_ADMIN, 
-                            telegram_msg
-                        )
-                    )
-                    logger.info(f"已发送 Click 统计重复警告通知: click_id={click_id}")
-                except Exception as notify_err:
-                    logger.warning(f"发送 Click 统计重复警告通知失败: {notify_err}")
-                
-                await db.rollback()
-                return True  # 虽然有冲突，但这是预期情况，返回成功
-            else:
-                # 其他错误
-                logger.error(f"更新 Click 统计失败：{e}", exc_info=True)
-                await db.rollback()
-                return False
+            logger.error(f"更新 Click 表 conversion_id 失败：{e}", exc_info=True)
+            await db.rollback()
+            return False

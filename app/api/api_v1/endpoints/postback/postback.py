@@ -32,7 +32,7 @@ from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from app.models.models import (
     OfferPublisherAssignment,
     PostbackConversion, Product, Client, PostbackForwardLog, PostbackNotification, 
-    Click, ClickStats, Offer, Publisher, Advertiser, User, ConversionDeductionLog,
+    Click, Offer, Publisher, Advertiser, User, ConversionDeductionLog,
     PendingPostbackConversion
 )
 from app.schemas.postback import (
@@ -82,12 +82,12 @@ async def get_postback_conversions(
     """
     
     try:
-        # 判断是否需要 JOIN ClickStats 表（用于筛选 offer_id、publisher_id、advertiser_id）
-        need_join_click_stats = offer_id is not None or publisher_id is not None or advertiser_id is not None
+        # 判断是否需要 JOIN Click 表（用于筛选 offer_id、publisher_id、advertiser_id）
+        need_join_click = offer_id is not None or publisher_id is not None or advertiser_id is not None
         
         # 构建查询
-        if need_join_click_stats:
-            query = select(PostbackConversion).join(ClickStats, PostbackConversion.click_id == ClickStats.click_id)
+        if need_join_click:
+            query = select(PostbackConversion).join(Click, PostbackConversion.click_id == Click.click_id)
         else:
             query = select(PostbackConversion)
         
@@ -112,11 +112,11 @@ async def get_postback_conversions(
         if click_id:
             conditions.append(PostbackConversion.click_id == click_id)
         if offer_id:
-            conditions.append(ClickStats.offer_id == offer_id)
+            conditions.append(Click.offer_id == offer_id)
         if publisher_id:
-            conditions.append(ClickStats.publisher_id == publisher_id)
+            conditions.append(Click.publisher_id == publisher_id)
         if advertiser_id:
-            conditions.append(ClickStats.advertiser_id == advertiser_id)
+            conditions.append(Click.advertiser_id == advertiser_id)
         if conversion_status:
             if hasattr(PostbackConversion, 'conversion_status'):
                 conditions.append(PostbackConversion.conversion_status == conversion_status)
@@ -146,9 +146,9 @@ async def get_postback_conversions(
             query = query.where(and_(*conditions))
         
         # 计算总数
-        if need_join_click_stats:
+        if need_join_click:
             count_query = select(func.count(PostbackConversion.id)).select_from(
-                PostbackConversion.__table__.join(ClickStats.__table__, PostbackConversion.click_id == ClickStats.click_id)
+                PostbackConversion.__table__.join(Click.__table__, PostbackConversion.click_id == Click.click_id)
             )
         else:
             count_query = select(func.count(PostbackConversion.id)).select_from(PostbackConversion.__table__)
@@ -250,20 +250,19 @@ async def get_postback_conversions(
                     client_name = f"客户_{row.id}"
                 clients_map[row.id] = client_name
         
-        # 批量查询点击记录信息（通过 conversion_id = clicks.click_id 关联）
-        # 同时查询 ClickStats 表以获取 CPL 系统关联信息
+        # 批量查询点击记录信息（通过 click_id 关联）
         # 使用集合去重，提高性能
         conversion_ids = list({conv.conversion_id for conv in conversions if conv.conversion_id})
         click_ids_from_conversions = list({conv.click_id for conv in conversions if conv.click_id})
+        all_click_ids = list(set(conversion_ids + click_ids_from_conversions))
         clicks_map = {}
-        click_stats_map = {}
         offer_ids = set()
         publisher_ids = set()
         advertiser_ids = set()
         gid_publisher_ids = set()  # 通过 gid 关联的渠道ID
         
-        # 查询 Click 表（如果存在）
-        if conversion_ids:
+        # 查询 Click 表
+        if all_click_ids:
             try:
                 clicks_query = select(
                     Click.click_id,
@@ -271,7 +270,7 @@ async def get_postback_conversions(
                     Click.publisher_id,
                     Click.advertiser_id,
                     Click.click_time
-                ).where(Click.click_id.in_(conversion_ids))
+                ).where(Click.click_id.in_(all_click_ids))
                 clicks_result = await db.execute(clicks_query)
                 for row in clicks_result.all():
                     clicks_map[row.click_id] = {
@@ -288,33 +287,6 @@ async def get_postback_conversions(
                         advertiser_ids.add(row.advertiser_id)
             except Exception as e:
                 logger.debug(f"无法从 Click 表加载数据: {e}")
-        
-        # 查询 ClickStats 表（CPL 系统，优先使用）
-        if click_ids_from_conversions:
-            try:
-                click_stats_query = select(
-                    ClickStats.click_id,
-                    ClickStats.offer_id,
-                    ClickStats.publisher_id,
-                    ClickStats.advertiser_id,
-                    ClickStats.click_time
-                ).where(ClickStats.click_id.in_(click_ids_from_conversions))
-                click_stats_result = await db.execute(click_stats_query)
-                for row in click_stats_result.all():
-                    click_stats_map[row.click_id] = {
-                        'offer_id': row.offer_id,
-                        'publisher_id': row.publisher_id,
-                        'advertiser_id': row.advertiser_id,
-                        'click_time': row.click_time
-                    }
-                    if row.offer_id:
-                        offer_ids.add(row.offer_id)
-                    if row.publisher_id:
-                        publisher_ids.add(row.publisher_id)
-                    if row.advertiser_id:
-                        advertiser_ids.add(row.advertiser_id)
-            except Exception as e:
-                logger.debug(f"无法从 ClickStats 表加载数据: {e}")
         
         # 通过 gid 字段关联渠道（gid 是渠道ID）
         for conv in conversions:
@@ -382,13 +354,10 @@ async def get_postback_conversions(
             if conv.client_id and conv.client_id in clients_map:
                 conv_dict['client_name'] = clients_map[conv.client_id]
             
-            # 通过 click_id 关联点击记录（优先使用 ClickStats，其次使用 Click）
+            # 通过 click_id 关联点击记录
             click_info = None
             if conv.click_id:
-                # 优先使用 ClickStats
-                if conv.click_id in click_stats_map:
-                    click_info = click_stats_map[conv.click_id]
-                elif conv.click_id in clicks_map:
+                if conv.click_id in clicks_map:
                     click_info = clicks_map[conv.click_id]
             # 如果没有通过 click_id 找到，尝试通过 conversion_id 查找（向后兼容）
             elif conv.conversion_id and conv.conversion_id in clicks_map:

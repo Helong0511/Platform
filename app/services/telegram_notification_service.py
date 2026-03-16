@@ -10,7 +10,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy import and_, func, select
 
 from app.models.models import (
-    PostbackConversion, Client, Product, Publisher, Offer, User, PostbackNotification, ClickStats
+    PostbackConversion, Client, Product, Publisher, Offer, User, PostbackNotification, Click
 )
 from app.core.auto_bot import send_telegram_message, send_telegram_message_with_buttons
 from app.core.utils import get_app_now_naive
@@ -208,18 +208,18 @@ class TelegramNotificationService:
                 # 查询当天当前渠道的转化记录数
                 if publisher:
                     # 构建查询条件：当天 + 关联到该渠道的转化
-                    # 注意：这里通过 click_id 关联到 ClickStats，再通过 ClickStats.publisher_id 关联到渠道
-                    click_stats_alias = aliased(ClickStats)
+                    # 注意：这里通过 click_id 关联到 Click，再通过 Click.publisher_id 关联到渠道
+                    click_alias = aliased(Click)
                     
                     # 查询当天该渠道的转化数
                     channel_result = await db.execute(
                         select(func.count(PostbackConversion.id)).join(
-                            click_stats_alias, PostbackConversion.click_id == click_stats_alias.click_id
+                            click_alias, PostbackConversion.click_id == click_alias.click_id
                         ).where(
                             and_(
                                 PostbackConversion.created_at >= start_of_day,
                                 PostbackConversion.created_at <= end_of_day,
-                                click_stats_alias.publisher_id == publisher.id
+                                click_alias.publisher_id == publisher.id
                             )
                         )
                     )
