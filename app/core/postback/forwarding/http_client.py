@@ -43,7 +43,8 @@ class HttpClient:
                 timeout=httpx.Timeout(
                     HttpClient.DEFAULT_TIMEOUT,
                     connect=HttpClient.CONNECT_TIMEOUT
-                )
+                ),
+                follow_redirects=True
             ) as client:
                 
                 if method.upper() == 'GET':
@@ -59,7 +60,7 @@ class HttpClient:
                     logger.warning(f"不支持的 HTTP 方法：{method}，使用 GET")
                     response = await client.get(url, params=params, headers=headers)
                 
-                success = response.status_code == 200
+                success = 200 <= response.status_code < 400
                 content = response.text
                 
                 logger.info(

@@ -15,8 +15,9 @@ class SuccessChecker:
     
     # 默认成功检查配置
     DEFAULT_SUCCESS_CHECK = {
-        'type': 'status_code',
-        'expected': 200
+        'type': 'status_range',
+        'min': 200,
+        'max': 399
     }
     
     @staticmethod
@@ -39,12 +40,18 @@ class SuccessChecker:
         # 解析配置
         config = SuccessChecker._parse_config(success_check_config)
         
-        check_type = config.get('type', 'status_code')
+        check_type = config.get('type', 'status_range')
         
         if check_type == 'status_code':
             expected = config.get('expected', 200)
             success = status_code == expected
             message = f"状态码检查：{status_code} {'==' if success else '!='} {expected}"
+            
+        elif check_type == 'status_range':
+            min_status = config.get('min', 200)
+            max_status = config.get('max', 399)
+            success = min_status <= status_code <= max_status
+            message = f"状态码范围检查：{status_code} {'在' if success else '不在'} [{min_status}, {max_status}] 范围内"
             
         elif check_type == 'content':
             expected_content = config.get('content', '')
@@ -59,9 +66,9 @@ class SuccessChecker:
             )
             
         else:
-            # 默认只检查状态码
-            success = 200 <= status_code < 300
-            message = f"默认检查：状态码 {status_code} 在 2xx 范围内"
+            # 默认检查状态码范围
+            success = 200 <= status_code <= 399
+            message = f"默认检查：状态码 {status_code} 在 [200, 399] 范围内"
         
         logger.info(f"成功检查结果：{message}, success={success}")
         return success, message
