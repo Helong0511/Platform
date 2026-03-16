@@ -392,11 +392,18 @@
 
         // 生成UUID（用于adsid参数）
         function generateUUID() {
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-                const r = Math.random() * 16 | 0;
-                const v = c === 'x' ? r : (r & 0x3 | 0x8);
-                return v.toString(16);
-            }).replace(/-/g, '');
+            try {
+                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                    const r = Math.random() * 16 | 0;
+                    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                }).replace(/-/g, '');
+            } catch (err) {
+                console.log('[UUID] 生成失败，使用备用ID:', err);
+                const timestamp = Date.now().toString(36);
+                const random = Math.random().toString(36).substring(2, 15);
+                return timestamp + random;
+            }
         }
 
         // 生成随机邮箱
@@ -442,8 +449,16 @@
 
             // 构建广告发送的测试数据（参考 ad_send.py）
             const fbclid = getFbclid();
+            let adsid;
+            if (fbclid) {
+                adsid = fbclid;
+                console.log('[adsid] 使用fbclid:', adsid);
+            } else {
+                adsid = generateUUID();
+                console.log('[adsid] fbclid不存在，使用UUID:', adsid);
+            }
             const postData = {
-                adsid: fbclid || generateUUID(),
+                adsid: adsid,
                 event: "viewWebpage",
                 pixid: "2105276563598069",
                 testServe: "true",
