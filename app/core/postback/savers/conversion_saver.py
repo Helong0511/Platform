@@ -93,9 +93,25 @@ class ConversionSaver:
             return False
         
         try:
-            # 更新 ClickStats 表
+            # 检查是否已存在 ClickStats 记录
+            from sqlalchemy import select
+            click_id = click_association['click_id']
+            result = await db.execute(
+                select(ClickStats).where(ClickStats.click_id == click_id)
+            )
+            existing_stats = result.scalars().first()
+            
+            if existing_stats:
+                # 已存在记录，跳过
+                logger.info(
+                    f"Click 统计已存在，跳过：click_id={click_id}, "
+                    f"conversion_id={conversion_id}"
+                )
+                return True
+            
+            # 创建新的 ClickStats 记录
             click_stats = ClickStats(
-                click_id=click_association['click_id'],
+                click_id=click_id,
                 offer_id=click_association['offer_id'],
                 publisher_id=click_association['publisher_id'],
                 advertiser_id=click_association['advertiser_id'],
@@ -107,7 +123,7 @@ class ConversionSaver:
             await db.commit()
             
             logger.info(
-                f"Click 统计已更新：click_id={click_association['click_id']}, "
+                f"Click 统计已更新：click_id={click_id}, "
                 f"conversion_id={conversion_id}"
             )
             
