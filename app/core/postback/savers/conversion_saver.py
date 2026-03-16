@@ -39,6 +39,9 @@ class ConversionSaver:
             PostbackConversion: 保存的转化记录
         """
         # 创建转化记录
+        import json
+        raw_data_json = json.dumps(normalized_data['raw_data']) if normalized_data.get('raw_data') else None
+        
         conversion = PostbackConversion(
             platform=normalized_data['platform'],
             conversion_id=normalized_data['conversion_id'],
@@ -49,12 +52,12 @@ class ConversionSaver:
             devad_id=normalized_data['devad_id'],
             os=normalized_data['os'],
             carrier=normalized_data['carrier'],
-            ip=normalized_data['ip'] or (click_association['ip'] if click_association else None),
+            ip=normalized_data['ip'] or (click_association.get('ip') if click_association else None),
             gid=normalized_data['gid'],
             product_id=normalized_data['product_id'] or (click_association.get('product_id') if click_association else None),
             client_id=normalized_data['client_id'] or (click_association.get('client_id') if click_association else None),
             conversion_status=conversion_status,
-            raw_data=normalized_data['raw_data'],
+            raw_data=raw_data_json,
             created_at=get_app_now_naive()
         )
         

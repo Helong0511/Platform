@@ -53,7 +53,7 @@ class PostbackProcessor:
         # ========== 第 1 步：IP 验证 ==========
         ip_valid, cleaned_ip = await IpValidator.validate(request_ip, db)
         if not ip_valid:
-            return PostbackProcessor._handle_ip_failure(platform, raw_data, db)
+            return await PostbackProcessor._handle_ip_failure(platform, raw_data, db)
         
         # ========== 第 2 步：数据验证 ==========
         # 优先使用平台特定处理器
