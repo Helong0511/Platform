@@ -93,6 +93,7 @@ class SuccessChecker:
     ) -> Tuple[bool, str]:
         """检查 JSON 响应"""
         try:
+            # 尝试解析 JSON
             data = json.loads(content)
             
             # 简单路径解析（支持 dot notation）
@@ -108,6 +109,9 @@ class SuccessChecker:
             return success, message
             
         except json.JSONDecodeError as e:
-            return False, f"JSON 解析失败：{e}"
+            # 如果响应不是 JSON，但内容与预期值匹配，也视为成功
+            if str(content).strip() == str(expected):
+                return True, f"非 JSON 响应但内容匹配：'{content}' == '{expected}'"
+            return False, f"JSON 解析失败：{e}，响应内容：{content[:50]}"
         except Exception as e:
             return False, f"JSON 检查异常：{e}"
