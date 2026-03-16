@@ -93,46 +93,29 @@ const handleCsrfError = async (error) => {
     if (!originalRequest._retry) {
       originalRequest._retry = true;
 
-      // 1. 优先使用响应头中的CSRF token（如果存在）
-      // 注意：extractAndSaveCsrfToken已经在响应拦截器中调用，这里再次检查确保获取到最新的令牌
-      const csrfTokenFromHeader = getCsrfTokenFromResponse(error);
-
-      if (csrfTokenFromHeader) {
-        saveCsrfToken(csrfTokenFromHeader);
+      // 1. 首先从错误响应中提取CSRF令牌（后端会在错误响应中返回正确的令牌）
+      const csrfTokenFromError = getCsrfTokenFromResponse(error);
+      if (csrfTokenFromError) {
+        saveCsrfToken(csrfTokenFromError);
         originalRequest.headers = originalRequest.headers || {};
-        originalRequest.headers['X-CSRF-Token'] = csrfTokenFromHeader;
-        logger.info('从响应头获取到新的CSRF token，自动重试请求:', csrfTokenFromHeader.substring(0, 10) + '...');
+        originalRequest.headers['X-CSRF-Token'] = csrfTokenFromError;
+        logger.info('从错误响应中获取到新的CSRF token，自动重试请求:', csrfTokenFromError.substring(0, 10) + '...');
         try {
           const retryResponse = await axios(originalRequest);
           originalRequest._retrySuccess = true;
-          logger.info('使用响应头中的CSRF token重试成功');
+          logger.info('使用错误响应中的CSRF token重试成功');
           return retryResponse;
         } catch (retryError) {
-          // 重试失败时，再次尝试从错误响应中提取CSRF令牌
-          extractAndSaveCsrfToken(retryError);
-          logger.warning('使用响应头中的CSRF token重试失败，将尝试其他方式');
+          logger.warning('使用错误响应中的CSRF token重试失败，将尝试其他方式');
         }
       }
 
-      // 2. 如果响应头中没有token，尝试从当前存储中获取（可能已经被响应拦截器更新）
-      const currentToken = getCsrfToken();
-      if (currentToken) {
-        originalRequest.headers = originalRequest.headers || {};
-        originalRequest.headers['X-CSRF-Token'] = currentToken;
-        logger.info('使用当前存储的CSRF token重试请求:', currentToken.substring(0, 10) + '...');
-        try {
-          const retryResponse = await axios(originalRequest);
-          originalRequest._retrySuccess = true;
-          logger.info('使用当前存储的CSRF token重试成功');
-          return retryResponse;
-        } catch (retryError) {
-          extractAndSaveCsrfToken(retryError);
-          logger.warning('使用当前存储的CSRF token重试失败，将尝试获取新令牌');
-        }
-      }
+      // 2. 如果错误响应中没有令牌，清除旧的token并尝试获取新的令牌
+      sessionStorage.removeItem('csrf_token');
+      localStorage.removeItem('csrf_token');
+      logger.info('已清除旧的CSRF令牌');
 
-      // 3. 如果响应头中没有token，尝试通过GET请求获取新的CSRF token
-      // 注意：fetchCsrfTokenFromEndpoints内部已经有防抖机制，这里不需要额外处理
+      // 3. 尝试通过GET请求获取新的CSRF token
       try {
         logger.info('尝试通过GET请求获取新的CSRF token');
         const newCsrfToken = await fetchCsrfTokenFromEndpoints();
@@ -141,10 +124,25 @@ const handleCsrfError = async (error) => {
           originalRequest.headers = originalRequest.headers || {};
           originalRequest.headers['X-CSRF-Token'] = newCsrfToken;
           logger.info('通过GET请求获取到新的CSRF token，自动重试请求:', newCsrfToken.substring(0, 10) + '...');
-          const retryResponse = await axios(originalRequest);
-          originalRequest._retrySuccess = true;
-          logger.info('使用新获取的CSRF token重试成功');
-          return retryResponse;
+          try {
+            const retryResponse = await axios(originalRequest);
+            originalRequest._retrySuccess = true;
+            logger.info('使用新获取的CSRF token重试成功');
+            return retryResponse;
+          } catch (retryError) {
+            logger.warning('使用新获取的CSRF token重试失败，将再次尝试获取令牌');
+            // 再次尝试获取令牌
+            const newCsrfToken2 = await fetchCsrfTokenFromEndpoints();
+            if (newCsrfToken2) {
+              saveCsrfToken(newCsrfToken2);
+              originalRequest.headers['X-CSRF-Token'] = newCsrfToken2;
+              logger.info('再次获取到新的CSRF token，再次重试请求:', newCsrfToken2.substring(0, 10) + '...');
+              const retryResponse2 = await axios(originalRequest);
+              originalRequest._retrySuccess = true;
+              logger.info('再次重试成功');
+              return retryResponse2;
+            }
+          }
         } else {
           logger.warning('无法获取新的CSRF token，尝试使用默认端点');
         }
