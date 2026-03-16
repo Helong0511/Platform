@@ -120,7 +120,7 @@ class ConversionSaver:
             )
             
             db.add(click_stats)
-            await db.commit()
+            await db.flush()
             
             logger.info(
                 f"Click 统计已更新：click_id={click_id}, "

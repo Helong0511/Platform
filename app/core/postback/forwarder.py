@@ -12,6 +12,7 @@ Postback 转发器（重构版）
 6. 发送通知（失败时）
 """
 import logging
+import json
 from typing import Dict, Any, Optional
 from datetime import datetime
 
@@ -119,18 +120,21 @@ class PostbackForwarder:
         # ========== 第 6 步：记录转发日志 ==========
         forward_log = PostbackForwardLog(
             conversion_id=conversion.id,
+            product_id=conversion.product_id,
             publisher_id=click_association.get('publisher_id'),
-            request_url=final_url,
+            downstream_url=final_url,
             request_method=method,
-            response_status_code=status_code,
-            response_content=response_content[:1000] if response_content else None,  # 限制长度
-            is_success=final_success,
-            check_message=check_message,
-            created_at=get_app_now_naive()
+            request_params=json.dumps(params, ensure_ascii=False) if params else None,
+            response_status=status_code,
+            response_body=response_content[:1000] if response_content else None,  # 限制长度
+            success=final_success,
+            error_message=check_message if not final_success else None,
+            created_at=get_app_now_naive(),
+            completed_at=get_app_now_naive()
         )
         
         db.add(forward_log)
-        await db.commit()
+        await db.flush()
         
         logger.info(
             f"Postback 转发完成：conversion_id={conversion.id}, "

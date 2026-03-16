@@ -527,7 +527,7 @@ class PostbackNotifier:
             )
             
             db.add(notification_record)
-            await db.commit()
+            await db.flush()
             
             if success:
                 logger.info(

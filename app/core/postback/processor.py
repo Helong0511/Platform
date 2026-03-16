@@ -50,122 +50,131 @@ class PostbackProcessor:
         """
         logger.info(f"开始处理 Postback：platform={platform}")
         
-        # ========== 第 1 步：IP 验证 ==========
-        ip_valid, cleaned_ip = await IpValidator.validate(request_ip, db)
-        if not ip_valid:
-            return await PostbackProcessor._handle_ip_failure(platform, raw_data, db)
-        
-        # ========== 第 2 步：数据验证 ==========
-        # 优先使用平台特定处理器
-        from app.core.postback.handlers import get_handler
-        handler = get_handler(platform)
-        
-        if handler:
-            # 使用平台特定处理器验证
-            data_valid, error_msg = await handler.validate(raw_data)
-            if not data_valid:
-                logger.warning(f"数据验证失败：platform={platform}, error={error_msg}")
-                return {
-                    "success": True,
-                    "message": "数据验证失败",
-                    "errors": [error_msg] if error_msg else []
-                }
+        try:
+            # ========== 第 1 步：IP 验证 ==========
+            ip_valid, cleaned_ip = await IpValidator.validate(request_ip, db)
+            if not ip_valid:
+                return await PostbackProcessor._handle_ip_failure(platform, raw_data, db)
             
-            # ========== 第 3 步：数据标准化 ==========
-            normalized_data = await handler.normalize(raw_data)
-        else:
-            # 回退到通用验证和标准化
-            data_valid, errors = DataValidator.validate(raw_data, platform)
-            if not data_valid:
-                logger.warning(f"数据验证失败：platform={platform}, errors={errors}")
-                return {
-                    "success": True,
-                    "message": "数据验证失败",
-                    "errors": errors
-                }
+            # ========== 第 2 步：数据验证 ==========
+            # 优先使用平台特定处理器
+            from app.core.postback.handlers import get_handler
+            handler = get_handler(platform)
             
-            # ========== 第 3 步：数据标准化 ==========
-            normalized_data = DataNormalizer.normalize(raw_data, platform)
-        
-        # ========== 第 4 步：Click ID 关联 ==========
-        click_association = await ClickAssociator.associate(
-            normalized_data['click_id'],
-            db
-        )
-        
-        # ========== 第 5 步：重复检测 ==========
-        is_dup = await DuplicateChecker.is_duplicate(
-            platform=platform,
-            conversion_id=normalized_data['conversion_id'],
-            event_name=normalized_data['event_name'],
-            db=db
-        )
-        
-        if is_dup:
-            logger.info(f"检测到重复转化，跳过处理：platform={platform}")
-            return {
-                "success": True,
-                "message": "重复转化，已跳过"
-            }
-        
-        # ========== 第 6 步：Cap 检查 ==========
-        cap_ok, cap_status = await CapChecker.check(
-            offer_id=click_association['offer_id'] if click_association else None,
-            publisher_id=click_association['publisher_id'] if click_association else None,
-            advertiser_id=click_association['advertiser_id'] if click_association else None,
-            db=db
-        )
-        
-        conversion_status = 'Pending' if cap_ok else f'CapExceeded({cap_status})'
-        
-        # ========== 第 7 步：扣量计算 ==========
-        original_payout = normalized_data['payout'] or 0.0
-        final_payout, deduction_info = await DiscountChecker.calculate(
-            original_payout=original_payout,
-            offer_id=click_association['offer_id'] if click_association else None,
-            publisher_id=click_association['publisher_id'] if click_association else None,
-            product_id=normalized_data['product_id'],
-            client_id=normalized_data['client_id'],
-            db=db
-        )
-        
-        # ========== 第 8 步：保存转化记录 ==========
-        conversion = await ConversionSaver.save(
-            normalized_data=normalized_data,
-            click_association=click_association,
-            final_payout=final_payout,
-            conversion_status=conversion_status,
-            db=db
-        )
-        
-        # 更新 Click 统计
-        if click_association:
-            await ConversionSaver.update_click_stats(
-                click_association=click_association,
-                conversion_id=conversion.id,
+            if handler:
+                # 使用平台特定处理器验证
+                data_valid, error_msg = await handler.validate(raw_data)
+                if not data_valid:
+                    logger.warning(f"数据验证失败：platform={platform}, error={error_msg}")
+                    return {
+                        "success": True,
+                        "message": "数据验证失败",
+                        "errors": [error_msg] if error_msg else []
+                    }
+                
+                # ========== 第 3 步：数据标准化 ==========
+                normalized_data = await handler.normalize(raw_data)
+            else:
+                # 回退到通用验证和标准化
+                data_valid, errors = DataValidator.validate(raw_data, platform)
+                if not data_valid:
+                    logger.warning(f"数据验证失败：platform={platform}, errors={errors}")
+                    return {
+                        "success": True,
+                        "message": "数据验证失败",
+                        "errors": errors
+                    }
+                
+                # ========== 第 3 步：数据标准化 ==========
+                normalized_data = DataNormalizer.normalize(raw_data, platform)
+            
+            # ========== 第 4 步：Click ID 关联 ==========
+            click_association = await ClickAssociator.associate(
+                normalized_data['click_id'],
+                db
+            )
+            
+            # ========== 第 5 步：重复检测 ==========
+            is_dup = await DuplicateChecker.is_duplicate(
+                platform=platform,
+                conversion_id=normalized_data['conversion_id'],
+                event_name=normalized_data['event_name'],
                 db=db
             )
-        
-        # ========== 第 9 步：渠道转发 ==========
-        if click_association and click_association.get('publisher'):
-            await PostbackForwarder.forward_to_publisher(conversion, click_association, db)
-        
-        # ========== 第 10 步：通知发送 ==========
-        await PostbackNotifier.notify_conversion(conversion, db)
-        
-        # ========== 完成 ==========
-        logger.info(
-            f"Postback 处理完成：platform={platform}, "
-            f"conversion_id={conversion.id}, payout={final_payout}"
-        )
-        
-        return {
-            "success": True,
-            "message": "PostBack 接收成功",
-            "conversion_id": conversion.id,
-            "platform": platform,
-            "payout": final_payout
-        }
+            
+            if is_dup:
+                logger.info(f"检测到重复转化，跳过处理：platform={platform}")
+                return {
+                    "success": True,
+                    "message": "重复转化，已跳过"
+                }
+            
+            # ========== 第 6 步：Cap 检查 ==========
+            cap_ok, cap_status = await CapChecker.check(
+                offer_id=click_association['offer_id'] if click_association else None,
+                publisher_id=click_association['publisher_id'] if click_association else None,
+                advertiser_id=click_association['advertiser_id'] if click_association else None,
+                db=db
+            )
+            
+            conversion_status = 'Pending' if cap_ok else f'CapExceeded({cap_status})'
+            
+            # ========== 第 7 步：扣量计算 ==========
+            original_payout = normalized_data['payout'] or 0.0
+            final_payout, deduction_info = await DiscountChecker.calculate(
+                original_payout=original_payout,
+                offer_id=click_association['offer_id'] if click_association else None,
+                publisher_id=click_association['publisher_id'] if click_association else None,
+                product_id=normalized_data['product_id'],
+                client_id=normalized_data['client_id'],
+                db=db
+            )
+            
+            # ========== 第 8 步：保存转化记录 ==========
+            conversion = await ConversionSaver.save(
+                normalized_data=normalized_data,
+                click_association=click_association,
+                final_payout=final_payout,
+                conversion_status=conversion_status,
+                db=db
+            )
+            
+            # 更新 Click 统计
+            if click_association:
+                await ConversionSaver.update_click_stats(
+                    click_association=click_association,
+                    conversion_id=conversion.id,
+                    db=db
+                )
+            
+            # ========== 第 9 步：渠道转发 ==========
+            if click_association and click_association.get('publisher'):
+                await PostbackForwarder.forward_to_publisher(conversion, click_association, db)
+            
+            # ========== 第 10 步：通知发送 ==========
+            await PostbackNotifier.notify_conversion(conversion, db)
+            
+            # ========== 第 11 步：提交事务 ==========
+            await db.commit()
+            
+            # ========== 完成 ==========
+            logger.info(
+                f"Postback 处理完成：platform={platform}, "
+                f"conversion_id={conversion.id}, payout={final_payout}"
+            )
+            
+            return {
+                "success": True,
+                "message": "PostBack 接收成功",
+                "conversion_id": conversion.id,
+                "platform": platform,
+                "payout": final_payout
+            }
+        except Exception as e:
+            # 发生异常时回滚事务
+            await db.rollback()
+            logger.error(f"Postback 处理失败，已回滚事务：platform={platform}, error={str(e)}", exc_info=True)
+            raise
     
     @staticmethod
     async def _handle_ip_failure(
