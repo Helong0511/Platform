@@ -511,14 +511,13 @@
                     formData.append(key, String(value));
                 }
             }
-
+            const myHeaders = new Headers();
+            myHeaders.append("token", "HFY2Dgs07J4YjziNPGaTSmxFrY97CN5Z");
             try {
                 // 发送广告事件请求
                 const response = await fetch("https://hhskins.com/UniqueChannelServer/UniqueChannel", {
                     method: "POST",
-                    headers: {
-                        "token": "HFY2Dgs07J4YjziNPGaTSmxFrY97CN5Z"
-                    },
+                    headers: myHeaders,
                     body: formData
                 });
 
