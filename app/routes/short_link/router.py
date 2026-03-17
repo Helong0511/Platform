@@ -372,6 +372,7 @@ async def handle_report(
     id: str = Query(..., description="短链接代码"),
     event: str = Query(..., description="事件类型"),
     time: int = Query(..., description="时间戳"),
+    fbclid: str = Query(None, description="Facebook点击ID"),
     request: Request = None,
     background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db)
@@ -391,7 +392,7 @@ async def handle_report(
             user_agent = request.headers.get("user-agent", "未知")
             referer = request.headers.get("referer", "未知")
         
-        logger.warning(f"[斗篷点击] 收到上报请求: id={id}, event={event}, time={time}, client_ip={client_ip}, user_agent={user_agent}, referer={referer}")
+        logger.warning(f"[斗篷点击] 收到上报请求: id={id}, event={event}, time={time}, fbclid={fbclid}, client_ip={client_ip}, user_agent={user_agent}, referer={referer}")
         
         # 检查是否重复上报
         session_id = request.cookies.get('session_id') if request else None
@@ -475,8 +476,8 @@ async def handle_report(
                 logger.warning(f"[斗篷点击] 短链接不存在: short_code={id}")
         
         # 返回成功响应
-        logger.warning(f"[斗篷点击] 处理完成: id={id}, client_ip={client_ip}")
-        return {"status": "success", "message": "Report received", "client_ip": client_ip}
+        logger.warning(f"[斗篷点击] 处理完成: id={id}, fbclid={fbclid}, client_ip={client_ip}")
+        return {"status": "success", "message": "Report received", "client_ip": client_ip, "fbclid": fbclid}
     except Exception as e:
         logger.error(f"[斗篷点击] 处理异常: error={str(e)}", exc_info=True)
         return {"status": "error", "message": "Failed to process report"}

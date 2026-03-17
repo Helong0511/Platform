@@ -564,8 +564,13 @@
                 // 过滤掉空字符串，确保正确提取短码
                 const filteredParts = urlParts.filter(part => part !== '');
                 const shortCode = filteredParts[filteredParts.length - 1] || '';
-                // 使用协议无关的绝对路径，确保总是发送到根路径的 /report 路由
-                const reportUrl = window.location.protocol + "//" + window.location.host + "/report?id=" + shortCode + "&event=survey_click&time=" + Date.now();
+                // 获取 fbclid 参数
+                const fbclid = getFbclid();
+                // 构建 reportUrl，添加 fbclid 参数
+                let reportUrl = window.location.protocol + "//" + window.location.host + "/report?id=" + shortCode + "&event=survey_click&time=" + Date.now();
+                if (fbclid) {
+                    reportUrl += "&fbclid=" + adsid;
+                }
 
                 // 发送上报请求
                 await fetch(reportUrl, {
