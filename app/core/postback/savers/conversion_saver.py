@@ -73,7 +73,7 @@ class ConversionSaver:
         return conversion
     
     @staticmethod
-    async def update_click_stats(
+    async def update_click_conversion(
         click_association: Optional[Dict[str, Any]],
         conversion_id: int,
         db: AsyncSession

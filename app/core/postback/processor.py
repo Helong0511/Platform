@@ -141,7 +141,7 @@ class PostbackProcessor:
             
             # 更新 Click 统计
             if click_association:
-                await ConversionSaver.update_click_stats(
+                await ConversionSaver.update_click_conversion(
                     click_association=click_association,
                     conversion_id=conversion.id,
                     db=db

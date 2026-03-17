@@ -68,9 +68,9 @@ class ConversionLogService:
 
         # 构建查询条件
         # 如果需要通过 Click 表筛选 offer_id、publisher_id 或 advertiser_id，需要 JOIN
-        need_join_click_stats = offer_id is not None or publisher_id is not None or advertiser_id is not None
+        need_join_click = offer_id is not None or publisher_id is not None or advertiser_id is not None
 
-        if need_join_click_stats:
+        if need_join_click:
             # 需要 JOIN Click 表来筛选 offer_id、publisher_id 或 advertiser_id
             query = select(PostbackConversion).join(Click, PostbackConversion.click_id == Click.click_id)
         else:
@@ -110,7 +110,7 @@ class ConversionLogService:
 
         # 总数（使用相同的查询条件）
         total_query = select(func.count(PostbackConversion.id))
-        if need_join_click_stats:
+        if need_join_click:
             total_query = total_query.select_from(
                 PostbackConversion.__table__.join(Click.__table__, PostbackConversion.click_id == Click.click_id)
             )

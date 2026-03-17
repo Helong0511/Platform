@@ -631,31 +631,31 @@ class ConversionService:
         offer_ids = [offer.id for offer in offers]
         
         # 批量查询点击统计（优化：一次查询获取所有数据）
-        click_stats_query = select(
+        click_query = select(
             Click.offer_id,
             func.count(Click.click_id).label('click_count')
         ).where(Click.offer_id.in_(offer_ids))
         
         if start_datetime:
-            click_stats_query = click_stats_query.where(
+            click_query = click_query.where(
                 Click.click_time >= start_datetime
             )
         if end_datetime:
-            click_stats_query = click_stats_query.where(
+            click_query = click_query.where(
                 Click.click_time <= end_datetime
             )
         if client_publisher_ids is not None:
-            click_stats_query = click_stats_query.where(
+            click_query = click_query.where(
                 Click.publisher_id.in_(client_publisher_ids)
             )
         
         # 按offer_id分组
-        click_stats_query = click_stats_query.group_by(Click.offer_id)
-        click_stats_result = await self.db.execute(click_stats_query)
+        click_query = click_query.group_by(Click.offer_id)
+        click_result = await self.db.execute(click_query)
         # 构建点击统计映射
-        click_stats_map = {
+        click_map = {
             row.offer_id: row.click_count
-            for row in click_stats_result.all()
+            for row in click_result.all()
         }
         
         # 批量查询转化统计
@@ -714,7 +714,7 @@ class ConversionService:
         stats_list = []
         for offer in offers:
             # 获取点击数量
-            click_count = click_stats_map.get(offer.id, 0)
+            click_count = click_map.get(offer.id, 0)
             # 获取转化数据
             conversion_data = conversion_map.get(offer.id, {'count': 0, 'po': 0.0})
             conversion_count = conversion_data['count']
