@@ -11,6 +11,7 @@ from .conversions.deductions import router as conversion_deductions_router
 from .conversions.summary import router as conversion_summary_router
 from .conversions.log import router as conversion_log_router
 from .conversions.clicks import router as clicks_router
+from .affiliate_debug import affiliate_tests_router
 
 __all__ = [
     'advertisers_router',
@@ -22,5 +23,6 @@ __all__ = [
     'conversion_summary_router',
     'conversion_log_router',
     'clicks_router',
+    'affiliate_tests_router',
 ]
 

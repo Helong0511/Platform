@@ -63,6 +63,7 @@ from app.api_v1.cpl import (
     conversion_summary_router as conversion_summary,
     conversion_log_router as conversion_log,
     clicks_router as clicks,
+    affiliate_tests_router as affiliate_tests,
 )
 
 # ==================== 路由注册 ====================
@@ -130,6 +131,7 @@ api_router.include_router(conversion_deductions, prefix="/conversion-deductions"
 api_router.include_router(conversion_summary, prefix="/conversion-summary", tags=["转化统计"])
 api_router.include_router(conversion_log, prefix="/conversion-logs", tags=["转化日志（已废弃）"])
 api_router.include_router(clicks, prefix="/clicks", tags=["短链接访问记录"])
+api_router.include_router(affiliate_tests, prefix="/affiliate-tests", tags=["下游测试"])
 
 # 导出所有路由（用于统一注册）
 __all__ = [
@@ -177,5 +179,6 @@ __all__ = [
     'conversion_summary',
     'conversion_log',
     'clicks',
+    'affiliate_tests',
 ]
 
