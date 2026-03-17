@@ -35,7 +35,14 @@ def initialize_bot():
     Returns:
         tuple: (bot_instance, initialized, available)
     """
-    from app.core.telegram.bot_state import set_bot_state
+    from app.core.telegram.bot_state import set_bot_state, _bot_instance_created
+    from app.core.telegram.file_lock import acquire_bot_lock, release_bot_lock
+    
+    # 检查 Bot 实例是否已经创建
+    if _bot_instance_created:
+        logger.info("Bot 实例已经创建，跳过初始化...")
+        from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
+        return bot, bot_initialized, TELEBOT_AVAILABLE
     
     # 初始化 Telegram Bot（仅在模块可用且启用时）
     telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
@@ -48,20 +55,35 @@ def initialize_bot():
     
     elif TELEBOT_AVAILABLE:
         try:
-            logger.info("正在加载 Telegram token...")
-            token = getattr(settings, 'TELEGRAM_TOKEN', None) or None
-            logger.info(f"Telegram token 加载结果：{token[:4]}****" if token else "None")
+            # 尝试获取锁，只有获取到锁的进程才能初始化 Bot
+            logger.info("尝试获取 Bot 初始化锁...")
+            lock_acquired = acquire_bot_lock()
             
-            if token and isinstance(token, str) and token.strip():
-                # 初始化 Telegram Bot
-                bot_instance = telebot.TeleBot(token=token)
-                set_bot_state(bot_instance, True, TELEBOT_AVAILABLE)
-                logger.info(f"Telegram Bot 初始化成功，token: {token[:4]}****")
-                return bot_instance, True, TELEBOT_AVAILABLE
-            else:
-                logger.warning("Telegram token 未设置或为空，Telegram Bot 功能将不可用")
+            if not lock_acquired:
+                logger.info("其他进程已初始化 Bot，跳过初始化...")
                 set_bot_state(None, False, TELEBOT_AVAILABLE)
                 return None, False, TELEBOT_AVAILABLE
+            
+            try:
+                logger.info("正在加载 Telegram token...")
+                token = getattr(settings, 'TELEGRAM_TOKEN', None) or None
+                logger.info(f"Telegram token 加载结果：{token[:4]}****" if token else "None")
+                
+                if token and isinstance(token, str) and token.strip():
+                    # 初始化 Telegram Bot
+                    bot_instance = telebot.TeleBot(token=token)
+                    set_bot_state(bot_instance, True, TELEBOT_AVAILABLE)
+                    logger.info(f"Telegram Bot 初始化成功，token: {token[:4]}****")
+                    return bot_instance, True, TELEBOT_AVAILABLE
+                else:
+                    logger.warning("Telegram token 未设置或为空，Telegram Bot 功能将不可用")
+                    set_bot_state(None, False, TELEBOT_AVAILABLE)
+                    return None, False, TELEBOT_AVAILABLE
+                    
+            finally:
+                # 释放锁
+                release_bot_lock()
+                logger.info("Bot 初始化锁已释放")
                 
         except Exception as err:
             logger.error(f"初始化 Telegram Bot 失败：{err}", exc_info=True)

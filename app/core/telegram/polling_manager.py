@@ -19,6 +19,9 @@ from app.core.config import settings
 # 标记处理器是否已注册
 _handlers_registered = False
 
+# 标记 Bot 是否已经启动
+_bot_started = False
+
 
 def _check_bot_available() -> bool:
     """检查 Bot 是否可用"""
@@ -107,7 +110,15 @@ def start_polling():
     Returns:
         bool: 是否成功启动
     """
+    global _bot_started
+    
     current_pid = os.getpid()
+    
+    # 检查是否已经启动了 Bot
+    if _bot_started:
+        logger.info(f"[PID:{current_pid}] Telegram Bot 已经启动，跳过重复启动...")
+        return False
+    
     logger.info(f"[PID:{current_pid}] 开始启动 Telegram Bot...")
     
     # 检查是否启用 Telegram
@@ -140,6 +151,10 @@ def start_polling():
     if not lock_acquired:
         logger.info(f"[PID:{current_pid}] 其他进程已启动 Telegram Bot，或无法获取锁，跳过启动...")
         return False
+    
+    # 标记 Bot 已经启动
+    _bot_started = True
+    logger.info(f"[PID:{current_pid}] 成功获取锁，标记 Bot 为已启动状态")
     
     # 验证是否已有其他 Bot 实例在运行
     try:
@@ -234,6 +249,8 @@ def start_polling():
                 # 因为这意味着其他实例正在运行，当前实例应该退出
                 # 锁应该被释放，以便其他进程可以尝试获取
                 release_bot_lock()
+                # 标记 Bot 为未启动状态，避免重复尝试
+                _bot_started = False
                 logger.info(f"[PID:{current_pid}] 检测到冲突，释放锁并停止轮询")
                 return False
             
@@ -263,6 +280,9 @@ def start_polling():
     except Exception as e:
         logger.warning(f"释放锁时发生错误：{e}")
     
+    # 重置启动状态
+    _bot_started = False
+    
     return True
 
 
@@ -279,6 +299,12 @@ def start_bot_thread():
     if not _check_bot_available():
         logger.error("Bot 未初始化，无法启动轮询线程")
         return False
+    
+    # 检查是否已经有 TelegramBot 线程在运行
+    for thread in threading.enumerate():
+        if thread.name == "TelegramBot":
+            logger.info("Telegram Bot 轮询线程已经在运行，跳过重复启动...")
+            return False
     
     # 定义线程运行函数
     def run_polling():

@@ -23,6 +23,9 @@ TELEBOT_AVAILABLE = False
 _bot_lock_file = None
 _bot_lock_acquired = False
 
+# 标记 Bot 实例是否已经创建（用于多进程环境）
+_bot_instance_created = False
+
 
 def get_bot_state():
     """
@@ -49,10 +52,16 @@ def set_bot_state(new_bot, initialized: bool, available: bool):
         initialized: 是否已初始化
         available: 模块是否可用
     """
-    global bot, bot_initialized, TELEBOT_AVAILABLE
+    global bot, bot_initialized, TELEBOT_AVAILABLE, _bot_instance_created
     bot = new_bot
     bot_initialized = initialized
     TELEBOT_AVAILABLE = available
+    
+    # 如果设置了 Bot 实例，标记为已创建
+    if new_bot:
+        _bot_instance_created = True
+        logger.info("Bot 实例已创建，标记为已创建状态")
+    
     logger.info(f"Bot 状态已更新：initialized={initialized}, available={available}")
 
 

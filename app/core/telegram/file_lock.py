@@ -178,6 +178,15 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 5
                     logger.info(f"[PID:{current_pid}] 检测到锁文件已存在，其他进程可能已启动 Bot")
                     return False
         
+        # 额外的安全检查：尝试删除可能存在的锁文件
+        # 这是为了防止锁文件被永久占用
+        try:
+            if lock_file_path.exists():
+                logger.warning(f"[PID:{current_pid}] 锁文件仍然存在，尝试强制清理...")
+                _cleanup_expired_lock(lock_file_path)
+        except Exception as e:
+            logger.warning(f"[PID:{current_pid}] 强制清理锁文件失败：{e}")
+        
         retry_delay = 0.2  # 初始重试延迟
         for attempt in range(1, max_retries + 1):
             try:
