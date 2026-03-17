@@ -322,6 +322,11 @@ async def open_master_html_with_redirect(
             f'function getOriginalUrl() {{ return "{original_url}"; }}',
             html_content
         )
+        # 验证替换是否成功
+        if 'function getOriginalUrl() { return "' + original_url + '"; }' in html_content:
+            logger.warning(f"[斗篷服务] 原始URL注入成功")
+        else:
+            logger.error(f"[斗篷服务] 原始URL注入失败，检查正则表达式")
         
         # 返回HTML内容
         from fastapi.responses import HTMLResponse
