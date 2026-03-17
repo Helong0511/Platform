@@ -316,8 +316,9 @@ async def open_master_html_with_redirect(
         import re
         # 替换getOriginalUrl函数，使其直接返回原始URL
         logger.warning(f"[斗篷服务] 注入原始URL到HTML: {original_url}")
+        # 使用更简单的正则表达式，匹配整个函数定义
         html_content = re.sub(
-            r'function getOriginalUrl\(\) \{[\s\S]*?return urlParams\.get\(\'original_url\'\) \|\| "https://www\.baidu\.com";[\s\S]*?\}',
+            r'function getOriginalUrl\(\) \{[\s\S]*?\}',
             f'function getOriginalUrl() {{ return "{original_url}"; }}',
             html_content
         )
