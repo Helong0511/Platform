@@ -282,40 +282,65 @@ class ConversionService:
         
         # 构建分组查询条件
         conversion_group_conditions = list(conversion_conditions)
-        conversion_group_conditions.append(PostbackConversion.click_id.isnot(None))
-        conversion_group_conditions.append(PostbackConversion.click_id == click_alias.click_id)
-        conversion_group_conditions.append(click_alias.offer_id == offer_alias.id)
-        conversion_group_conditions.append(offer_alias.is_active == True)
-        conversion_group_conditions.append(offer_alias.status == 'Active')
+        # 不强制要求click_id不为空，允许统计没有click_id的转化记录
+        # conversion_group_conditions.append(PostbackConversion.click_id.isnot(None))
+        # 使用左连接，允许没有click_id的转化记录
+        # conversion_group_conditions.append(PostbackConversion.click_id == click_alias.click_id)
+        # conversion_group_conditions.append(click_alias.offer_id == offer_alias.id)
+        # 不强制要求Offer为激活状态，允许统计所有状态的Offer
+        # conversion_group_conditions.append(offer_alias.is_active == True)
+        # conversion_group_conditions.append(offer_alias.status == 'Active')
         # 包含所有状态的转化，包括CapReached
         # conversion_group_conditions.append(PostbackConversion.conversion_status == 'Approved')
         
+        # 只有当click_alias不为NULL时才添加这些条件
         if offer_id is not None:
-            conversion_group_conditions.append(click_alias.offer_id == offer_id)
+            conversion_group_conditions.append(
+                or_(
+                    click_alias.offer_id == offer_id,
+                    click_alias.offer_id.is_(None)
+                )
+            )
         if publisher_id:
-            conversion_group_conditions.append(click_alias.publisher_id == publisher_id)
+            conversion_group_conditions.append(
+                or_(
+                    click_alias.publisher_id == publisher_id,
+                    click_alias.publisher_id.is_(None)
+                )
+            )
         if client_publisher_ids is not None:
-            conversion_group_conditions.append(click_alias.publisher_id.in_(client_publisher_ids))
+            conversion_group_conditions.append(
+                or_(
+                    click_alias.publisher_id.in_(client_publisher_ids),
+                    click_alias.publisher_id.is_(None)
+                )
+            )
         if advertiser_id is not None:
-            conversion_group_conditions.append(click_alias.advertiser_id == advertiser_id)
+            conversion_group_conditions.append(
+                or_(
+                    click_alias.advertiser_id == advertiser_id,
+                    click_alias.advertiser_id.is_(None)
+                )
+            )
         
-        # 构建分组查询：使用 join 确保只统计有 click_id 关联的记录（用于分组）
+        # 构建分组查询：使用左连接，允许没有click_id的转化记录
         # 同时查询原始金额和扣减后的金额
+        # 对于没有click_id的记录，使用固定值0作为分组键
         conversion_group_query = select(
-            click_alias.offer_id.label("offer_id"),
-            click_alias.publisher_id,
+            func.coalesce(click_alias.offer_id, 0).label("offer_id"),
+            func.coalesce(click_alias.publisher_id, 0).label("publisher_id"),
             func.count(PostbackConversion.id).label('conversion_count'),
             func.sum(PostbackConversion.original_payout).label('total_po_original'),
             func.sum(PostbackConversion.payout).label('total_po_discounted')
-        ).join(
+        ).outerjoin(
             click_alias, PostbackConversion.click_id == click_alias.click_id
-        ).join(
+        ).outerjoin(
             offer_alias, click_alias.offer_id == offer_alias.id
         ).where(
             and_(*conversion_group_conditions)
         ).group_by(
-            click_alias.offer_id,
-            click_alias.publisher_id
+            func.coalesce(click_alias.offer_id, 0),
+            func.coalesce(click_alias.publisher_id, 0)
         )
         
         # 注意：对于通过 gid 或 client_id 匹配但没有 click_id 的记录，无法确定 offer_id 和 publisher_id
