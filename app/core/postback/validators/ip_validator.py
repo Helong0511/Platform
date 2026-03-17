@@ -31,10 +31,12 @@ class IpValidator:
         Returns:
             tuple: (是否通过验证，清理后的 IP 地址)
         """
-        # 检查 IP 是否为空
+        # 检查 IP 是否为空或 unknown
         if not request_ip or not request_ip.strip() or request_ip.strip() == "unknown":
+            # IP 为空或无法获取时，仍然允许处理 Postback
+            # 但会记录警告日志
             logger.warning(f"Postback 请求 IP 为空或无法获取：request_ip={request_ip!r}")
-            return False, None
+            return True, None
         
         # 清理 IP 地址
         cleaned_ip = IpValidator._clean_ip(request_ip)
