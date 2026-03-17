@@ -99,6 +99,30 @@ class SuccessChecker:
             # 尝试解析 JSON
             data = json.loads(content)
             
+            # 检查数据类型
+            if not isinstance(data, dict):
+                # 如果不是字典类型，检查是否为成功指示符
+                stripped_content = str(content).strip().lower()
+                simple_success_indicators = ['1', '10', 'ok', 'success', 'true', 'yes']
+                
+                # 检查是否为成功指示符
+                if stripped_content in simple_success_indicators:
+                    return True, f"JSON 响应但为简单成功指示符：'{content}'"
+                
+                # 检查是否为数字
+                if stripped_content.isdigit():
+                    return True, f"JSON 响应但为数字成功指示符：'{content}'"
+                
+                # 检查是否与预期值匹配
+                if str(data) == str(expected):
+                    return True, f"JSON 响应与预期值匹配：'{data}' == '{expected}'"
+                
+                # 如果有 json_path，说明期望是字典类型
+                if json_path:
+                    return False, f"JSON 路径解析失败：{json_path}（响应不是字典类型）"
+                else:
+                    return True, f"JSON 响应但不是字典类型：'{content}'"
+            
             # 简单路径解析（支持 dot notation）
             value = data
             for key in json_path.split('.'):
