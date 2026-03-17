@@ -112,6 +112,16 @@ class SuccessChecker:
             # 如果响应不是 JSON，但内容与预期值匹配，也视为成功
             if str(content).strip() == str(expected):
                 return True, f"非 JSON 响应但内容匹配：'{content}' == '{expected}'"
+            # 如果响应是简单的成功指示符，也视为成功
+            simple_success_indicators = ['1', '10', 'ok', 'success', 'true', 'yes', 'success']
+            if str(content).strip().lower() in simple_success_indicators:
+                return True, f"非 JSON 响应但为成功指示符：'{content}'"
+            # 如果没有预期值，且响应是简单字符串，也视为成功
+            if not expected:
+                return True, f"非 JSON 响应但状态码为 200：'{content}'"
+            # 对于数字类型的响应，如 "1" 或 "10"，也视为成功
+            if str(content).strip().isdigit():
+                return True, f"非 JSON 响应但为数字成功指示符：'{content}'"
             return False, f"JSON 解析失败：{e}，响应内容：{content[:50]}"
         except Exception as e:
             return False, f"JSON 检查异常：{e}"
