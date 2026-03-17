@@ -59,10 +59,13 @@ class SuccessChecker:
             message = f"内容检查：{'找到' if success else '未找到'} '{expected_content}'"
             
         elif check_type == 'json':
+            # 支持多种配置键名
+            json_path = config.get('path', config.get('json_path', ''))
+            expected = config.get('expected', config.get('json_value', ''))
             success, message = SuccessChecker._check_json(
                 response_content,
-                config.get('path', ''),
-                config.get('expected', '')
+                json_path,
+                expected
             )
             
         else:
@@ -70,7 +73,7 @@ class SuccessChecker:
             success = 200 <= status_code <= 399
             message = f"默认检查：状态码 {status_code} 在 [200, 399] 范围内"
         
-        logger.info(f"成功检查结果：{message}, success={success}")
+        logger.warning(f"成功检查结果：{message}, success={success}")
         return success, message
     
     @staticmethod
@@ -109,19 +112,27 @@ class SuccessChecker:
             return success, message
             
         except json.JSONDecodeError as e:
+            # 详细日志：JSON 解析失败
+            logger.info(f"JSON 解析失败，响应内容：{content[:50]}")
+            
             # 如果响应不是 JSON，但内容与预期值匹配，也视为成功
             if str(content).strip() == str(expected):
                 return True, f"非 JSON 响应但内容匹配：'{content}' == '{expected}'"
+            
             # 如果响应是简单的成功指示符，也视为成功
-            simple_success_indicators = ['1', '10', 'ok', 'success', 'true', 'yes', 'success']
-            if str(content).strip().lower() in simple_success_indicators:
+            simple_success_indicators = ['1', '10', 'ok', 'success', 'true', 'yes']
+            stripped_content = str(content).strip().lower()
+            if stripped_content in simple_success_indicators:
                 return True, f"非 JSON 响应但为成功指示符：'{content}'"
+            
+            # 对于数字类型的响应，如 "1" 或 "10"，也视为成功
+            if stripped_content.isdigit():
+                return True, f"非 JSON 响应但为数字成功指示符：'{content}'"
+            
             # 如果没有预期值，且响应是简单字符串，也视为成功
             if not expected:
                 return True, f"非 JSON 响应但状态码为 200：'{content}'"
-            # 对于数字类型的响应，如 "1" 或 "10"，也视为成功
-            if str(content).strip().isdigit():
-                return True, f"非 JSON 响应但为数字成功指示符：'{content}'"
+            
             return False, f"JSON 解析失败：{e}，响应内容：{content[:50]}"
         except Exception as e:
             return False, f"JSON 检查异常：{e}"
