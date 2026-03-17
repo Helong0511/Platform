@@ -152,12 +152,12 @@ async def open_master_html_with_redirect(
     if not has_shown:
         if cached_data:
             original_url = cached_data.get("original_url")
-            logger.warning(f"[短链接展示] 从缓存获取数据: short_code={short_code}, 原始show_count={cached_data.get('show_count', 0)}")
+            logger.warning(f"[斗篷展示] 从缓存获取数据: short_code={short_code}, 原始show_count={cached_data.get('show_count', 0)}")
             from app.core.short_link_cache import update_short_link_cache
             cached_data["show_count"] = (cached_data.get("show_count", 0)) + 1
-            logger.warning(f"[短链接展示] 更新缓存: short_code={short_code}, 新show_count={cached_data['show_count']}")
+            logger.warning(f"[斗篷展示] 更新缓存: short_code={short_code}, 新show_count={cached_data['show_count']}")
             update_result = await update_short_link_cache(short_code, cached_data)
-            logger.warning(f"[短链接展示] 缓存更新结果: {update_result}")
+            logger.warning(f"[斗篷展示] 缓存更新结果: {update_result}")
             
             # 后台任务更新数据库，确保数据一致性
             async def update_show_count_db():
@@ -181,9 +181,9 @@ async def open_master_html_with_redirect(
                         if (short_link.show_count or 0) < cached_data["show_count"]:
                             short_link.show_count = cached_data["show_count"]
                             await db_session.commit()
-                            logger.warning(f"[短链接展示] 后台任务更新数据库: short_code={short_code}, 新show_count={short_link.show_count}")
+                            logger.warning(f"[斗篷展示] 后台任务更新数据库: short_code={short_code}, 新show_count={short_link.show_count}")
                 except Exception as e:
-                    logger.error(f"[短链接展示] 后台任务更新数据库失败: {e}")
+                    logger.error(f"[斗篷展示] 后台任务更新数据库失败: {e}")
                 finally:
                     if 'db_session' in locals():
                         await db_session.close()
@@ -194,7 +194,7 @@ async def open_master_html_with_redirect(
             from app.models.models import ShortLink
             from sqlalchemy.future import select
             
-            logger.warning(f"[短链接展示] 缓存未命中，从数据库查询: short_code={short_code}")
+            logger.warning(f"[斗篷展示] 缓存未命中，从数据库查询: short_code={short_code}")
             result = await db.execute(
                 select(ShortLink).where(ShortLink.short_code == short_code)
             )
@@ -202,14 +202,14 @@ async def open_master_html_with_redirect(
             
             if short_link:
                 original_url = short_link.original_url
-                logger.warning(f"[短链接展示] 数据库查询结果: short_code={short_code}, id={short_link.id}, 原始show_count={short_link.show_count or 0}")
+                logger.warning(f"[斗篷展示] 数据库查询结果: short_code={short_code}, id={short_link.id}, 原始show_count={short_link.show_count or 0}")
                 # 更新展示次数（数据库）
                 short_link.show_count = (short_link.show_count or 0) + 1
-                logger.warning(f"[短链接展示] 更新数据库: short_code={short_code}, 新show_count={short_link.show_count}")
+                logger.warning(f"[斗篷展示] 更新数据库: short_code={short_code}, 新show_count={short_link.show_count}")
                 await db.commit()
-                logger.warning(f"[短链接展示] 数据库提交成功")
+                logger.warning(f"[斗篷展示] 数据库提交成功")
             else:
-                logger.warning(f"[短链接展示] 短链接不存在: short_code={short_code}")
+                logger.warning(f"[斗篷展示] 短链接不存在: short_code={short_code}")
     else:
         # 已经统计过展示次数，直接获取原始URL
         if cached_data:
@@ -228,12 +228,12 @@ async def open_master_html_with_redirect(
                 original_url = short_link.original_url
             else:
                 original_url = None
-        logger.warning(f"[短链接展示] 重复访问，跳过统计: short_code={short_code}")
+        logger.warning(f"[斗篷展示] 重复访问，跳过统计: short_code={short_code}")
     
     if not original_url:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="短链接不存在或未配置原始URL"
+            detail="斗篷不存在或未配置原始URL"
         )
     
     # 优先使用服务器路径，本地开发时会自动回退到本地路径
@@ -274,7 +274,7 @@ async def open_master_html_with_redirect(
     response.set_cookie(
         key="session_id",
         value=session_id,
-        max_age=86400,  # 24小时
+        max_age=21600,  # 6小时
         path="/",
         domain="client.btfrx.online",
         secure=True,
@@ -311,7 +311,7 @@ async def handle_report(
             user_agent = request.headers.get("user-agent", "未知")
             referer = request.headers.get("referer", "未知")
         
-        logger.warning(f"[短链接点击] 收到上报请求: id={id}, event={event}, time={time}, client_ip={client_ip}, user_agent={user_agent}, referer={referer}")
+        logger.warning(f"[斗篷点击] 收到上报请求: id={id}, event={event}, time={time}, client_ip={client_ip}, user_agent={user_agent}, referer={referer}")
         
         # 检查是否重复上报
         session_id = request.cookies.get('session_id') if request else None
@@ -323,7 +323,7 @@ async def handle_report(
                 try:
                     has_clicked = await redis.exists(click_key)
                     if has_clicked:
-                        logger.warning(f"[短链接点击] 重复上报，跳过统计: id={id}, session_id={session_id}")
+                        logger.warning(f"[斗篷点击] 重复上报，跳过统计: id={id}, session_id={session_id}")
                         return {"status": "success", "message": "Report received (duplicate)"}
                     # 设置过期时间为24小时
                     await redis.setex(click_key, 86400, '1')
@@ -334,13 +334,13 @@ async def handle_report(
         cached_data = await get_short_link_from_cache(id)
         
         if cached_data:
-            logger.warning(f"[短链接点击] 从缓存获取数据: short_code={id}, 原始click_count={cached_data.get('click_count', 0)}")
+            logger.warning(f"[斗篷点击] 从缓存获取数据: short_code={id}, 原始click_count={cached_data.get('click_count', 0)}")
             # 更新点击次数（缓存）
             from app.core.short_link_cache import update_short_link_cache
             cached_data["click_count"] = (cached_data.get("click_count", 0)) + 1
-            logger.warning(f"[短链接点击] 更新缓存: short_code={id}, 新click_count={cached_data['click_count']}")
+            logger.warning(f"[斗篷点击] 更新缓存: short_code={id}, 新click_count={cached_data['click_count']}")
             update_result = await update_short_link_cache(id, cached_data)
-            logger.warning(f"[短链接点击] 缓存更新结果: {update_result}")
+            logger.warning(f"[斗篷点击] 缓存更新结果: {update_result}")
             
             # 后台任务更新数据库，确保数据一致性
             if background_tasks:
@@ -365,9 +365,9 @@ async def handle_report(
                             if (short_link.click_count or 0) < cached_data["click_count"]:
                                 short_link.click_count = cached_data["click_count"]
                                 await db_session.commit()
-                                logger.warning(f"[短链接点击] 后台任务更新数据库: short_code={id}, 新click_count={short_link.click_count}")
+                                logger.warning(f"[斗篷点击] 后台任务更新数据库: short_code={id}, 新click_count={short_link.click_count}")
                     except Exception as e:
-                        logger.error(f"[短链接点击] 后台任务更新数据库失败: {e}")
+                        logger.error(f"[斗篷点击] 后台任务更新数据库失败: {e}")
                     finally:
                         if 'db_session' in locals():
                             await db_session.close()
@@ -378,26 +378,26 @@ async def handle_report(
             from app.models.models import ShortLink
             from sqlalchemy.future import select
             
-            logger.warning(f"[短链接点击] 缓存未命中，从数据库查询: short_code={id}")
+            logger.warning(f"[斗篷点击] 缓存未命中，从数据库查询: short_code={id}")
             result = await db.execute(
                 select(ShortLink).where(ShortLink.short_code == id)
             )
             short_link = result.scalars().first()
             
             if short_link:
-                logger.warning(f"[短链接点击] 数据库查询结果: short_code={id}, id={short_link.id}, 原始click_count={short_link.click_count or 0}")
+                logger.warning(f"[斗篷点击] 数据库查询结果: short_code={id}, id={short_link.id}, 原始click_count={short_link.click_count or 0}")
                 # 更新点击次数（数据库）
                 short_link.click_count = (short_link.click_count or 0) + 1
-                logger.warning(f"[短链接点击] 更新数据库: short_code={id}, 新click_count={short_link.click_count}")
+                logger.warning(f"[斗篷点击] 更新数据库: short_code={id}, 新click_count={short_link.click_count}")
                 await db.commit()
-                logger.warning(f"[短链接点击] 数据库提交成功")
+                logger.warning(f"[斗篷点击] 数据库提交成功")
             else:
-                logger.warning(f"[短链接点击] 短链接不存在: short_code={id}")
+                logger.warning(f"[斗篷点击] 短链接不存在: short_code={id}")
         
         # 返回成功响应
-        logger.warning(f"[短链接点击] 处理完成: id={id}, client_ip={client_ip}")
+        logger.warning(f"[斗篷点击] 处理完成: id={id}, client_ip={client_ip}")
         return {"status": "success", "message": "Report received", "client_ip": client_ip}
     except Exception as e:
-        logger.error(f"[短链接上报] 处理异常: error={str(e)}", exc_info=True)
+        logger.error(f"[斗篷点击] 处理异常: error={str(e)}", exc_info=True)
         return {"status": "error", "message": "Failed to process report"}
 
