@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 REM 设置目标目录
-set "targetDir=E:\Platform"
+set "targetDir=E:\Platform_Back_20260314"
 
 REM 检查目录是否存在
 if not exist "%targetDir%" (
