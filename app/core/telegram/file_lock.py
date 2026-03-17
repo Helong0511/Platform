@@ -96,7 +96,7 @@ def _close_lock_file():
             _bot_lock_file = None
 
 
-def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 3) -> bool:
+def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 5) -> bool:
     """
     获取 Bot 启动锁（多进程环境）
     
@@ -123,9 +123,20 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 3
             logger.info(f"[PID:{current_pid}] 检测到过期的锁文件，正在清理...")
             _cleanup_expired_lock(lock_file_path)
         
-        retry_delay = 0.1  # 初始重试延迟
+        # 先检查是否已有锁文件存在
+        if lock_file_path.exists():
+            logger.info(f"[PID:{current_pid}] 检测到锁文件已存在，其他进程可能已启动 Bot")
+            return False
+        
+        retry_delay = 0.2  # 初始重试延迟
         for attempt in range(1, max_retries + 1):
             try:
+                # 尝试创建锁文件（使用独占模式）
+                # 先检查文件是否存在，避免竞争条件
+                if lock_file_path.exists():
+                    logger.info(f"[PID:{current_pid}] 锁文件已存在（尝试 {attempt}/{max_retries}），其他进程已启动")
+                    return False
+                
                 # 尝试打开锁文件（如果不存在则创建）
                 _bot_lock_file = open(lock_file_path, 'w')
                 
@@ -137,7 +148,9 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 3
                         # 写入进程信息
                         _bot_lock_file.write(f"PID: {current_pid}\n")
                         _bot_lock_file.write(f"Timestamp: {time.time()}\n")
+                        _bot_lock_file.write(f"Hostname: {os.uname().nodename if hasattr(os, 'uname') else 'unknown'}\n")
                         _bot_lock_file.flush()
+                        os.fsync(_bot_lock_file.fileno())  # 确保写入磁盘
                         _bot_lock_acquired = True
                         logger.info(f"[PID:{current_pid}] 成功获取 Telegram Bot 启动锁（fcntl，尝试 {attempt}/{max_retries}）")
                         return True
@@ -159,6 +172,7 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 3
                         # 写入进程信息
                         _bot_lock_file.write(f"PID: {current_pid}\n")
                         _bot_lock_file.write(f"Timestamp: {time.time()}\n")
+                        _bot_lock_file.write(f"Hostname: {os.environ.get('COMPUTERNAME', 'unknown')}\n")
                         _bot_lock_file.flush()
                         _bot_lock_acquired = True
                         logger.info(f"[PID:{current_pid}] 成功获取 Telegram Bot 启动锁（msvcrt，尝试 {attempt}/{max_retries}）")
@@ -177,10 +191,18 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 3
                     # 没有文件锁支持，使用简单的文件存在性检查
                     lock_file_tmp = lock_file_path.with_suffix('.lock.tmp')
                     try:
+                        # 再次检查目标文件是否存在
+                        if lock_file_path.exists():
+                            logger.info(f"[PID:{current_pid}] 锁文件已存在（尝试 {attempt}/{max_retries}），其他进程已启动")
+                            if lock_file_tmp.exists():
+                                lock_file_tmp.unlink()
+                            return False
+                        
                         # 创建临时文件
                         with open(lock_file_tmp, 'w') as f:
                             f.write(f"PID: {current_pid}\n")
                             f.write(f"Timestamp: {time.time()}\n")
+                            f.write(f"Hostname: {os.uname().nodename if hasattr(os, 'uname') else 'unknown'}\n")
                         
                         # 尝试原子重命名操作
                         lock_file_tmp.rename(lock_file_path)
@@ -236,15 +258,25 @@ def release_bot_lock():
             # 跨平台释放锁
             if HAS_FCNTL:
                 # Unix/Linux: 使用 fcntl
-                fcntl.flock(_bot_lock_file.fileno(), fcntl.LOCK_UN)
-                logger.info(f"[PID:{current_pid}] 已释放 fcntl 锁")
+                try:
+                    fcntl.flock(_bot_lock_file.fileno(), fcntl.LOCK_UN)
+                    logger.info(f"[PID:{current_pid}] 已释放 fcntl 锁")
+                except Exception as lock_error:
+                    logger.warning(f"[PID:{current_pid}] 释放 fcntl 锁时发生错误：{lock_error}")
             elif HAS_MSVCRT:
                 # Windows: 使用 msvcrt
-                msvcrt.locking(_bot_lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-                logger.info(f"[PID:{current_pid}] 已释放 msvcrt 锁")
+                try:
+                    msvcrt.locking(_bot_lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                    logger.info(f"[PID:{current_pid}] 已释放 msvcrt 锁")
+                except Exception as lock_error:
+                    logger.warning(f"[PID:{current_pid}] 释放 msvcrt 锁时发生错误：{lock_error}")
             
-            _bot_lock_file.close()
-            logger.info(f"[PID:{current_pid}] 已关闭锁文件")
+            # 关闭锁文件
+            try:
+                _bot_lock_file.close()
+                logger.info(f"[PID:{current_pid}] 已关闭锁文件")
+            except Exception as close_error:
+                logger.warning(f"[PID:{current_pid}] 关闭锁文件时发生错误：{close_error}")
             
             # 删除锁文件（如果存在）
             if lock_file_path and lock_file_path.exists():
@@ -253,6 +285,14 @@ def release_bot_lock():
                     logger.info(f"[PID:{current_pid}] 已删除锁文件")
                 except Exception as e:
                     logger.warning(f"[PID:{current_pid}] 删除锁文件时发生错误：{e}")
+                    # 尝试强制删除
+                    try:
+                        import stat
+                        os.chmod(lock_file_path, stat.S_IWRITE)
+                        lock_file_path.unlink()
+                        logger.info(f"[PID:{current_pid}] 已强制删除锁文件")
+                    except Exception as force_error:
+                        logger.warning(f"[PID:{current_pid}] 强制删除锁文件时发生错误：{force_error}")
             
             # 重置锁状态
             _bot_lock_file = None
@@ -274,6 +314,13 @@ def release_bot_lock():
                     lock_file_path.unlink()
                 except Exception as unlink_error:
                     logger.warning(f"[PID:{current_pid}] 删除锁文件时发生错误：{unlink_error}")
+                    # 尝试强制删除
+                    try:
+                        import stat
+                        os.chmod(lock_file_path, stat.S_IWRITE)
+                        lock_file_path.unlink()
+                    except Exception as force_error:
+                        logger.warning(f"[PID:{current_pid}] 强制删除锁文件时发生错误：{force_error}")
             # 重置锁状态
             _bot_lock_file = None
             _bot_lock_acquired = False

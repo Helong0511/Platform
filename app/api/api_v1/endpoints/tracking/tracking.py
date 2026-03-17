@@ -110,7 +110,7 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
 @router.get("/track/click/{offer_id}", summary="点击追踪", tags=["点击追踪"])
 async def track_click(
     offer_id: int = Path(..., ge=1, description="Offer ID"),
-    publisher_id: Optional[int] = Query(None, description="渠道ID"),
+    publisher_id: int = Query(..., ge=1, description="渠道ID"),
     background_tasks: BackgroundTasks = None,  # 注入 BackgroundTasks
     request: Request = None,
     db: AsyncSession = Depends(get_db)
@@ -138,13 +138,17 @@ async def track_click(
                 detail="Offer 已下线"
             )
         
-        # 2. 查询 Publisher（如果提供了 publisher_id）
-        publisher = None
-        if publisher_id:
-            pub_result = await db.execute(
-                select(Publisher).where(Publisher.id == publisher_id)
+        # 2. 查询 Publisher
+        pub_result = await db.execute(
+            select(Publisher).where(Publisher.id == publisher_id)
+        )
+        publisher = pub_result.scalars().first()
+        
+        if not publisher:
+            raise_api_exception(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                detail=f"渠道ID {publisher_id} 不存在"
             )
-            publisher = pub_result.scalars().first()
         
         # 3. 生成 Click ID
         # 先检查是否有重复的 Click ID
@@ -159,7 +163,7 @@ async def track_click(
         click_data = {
             "click_id": click_id,
             "offer_id": offer.id,
-            "publisher_id": publisher.id if publisher else None,
+            "publisher_id": publisher.id,
             "advertiser_id": offer.advertiser_id,
             "click_time": get_app_now_naive(),  # 使用北京时间
             "ip": request_info.get('ip'),

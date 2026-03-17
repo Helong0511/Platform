@@ -196,6 +196,19 @@ def start_polling():
             if retry_count > 0:
                 logger.info(f"[PID:{current_pid}] 开始第 {retry_count + 1} 次重连尝试...")
             
+            # 每次重连前再次检查是否有其他实例在运行
+            try:
+                bot_info = bot.get_me()
+                logger.info(f"[PID:{current_pid}] 验证成功，Bot 可以正常运行：@{bot_info.username}")
+            except Exception as e:
+                error_msg = str(e)
+                if '409' in error_msg or 'Conflict' in error_msg or 'terminated by other getUpdates' in error_msg:
+                    logger.error(f"[PID:{current_pid}] 验证失败：检测到其他 Bot 实例正在运行，停止轮询")
+                    release_bot_lock()
+                    return False
+                else:
+                    logger.warning(f"[PID:{current_pid}] 验证时发生错误，但继续启动：{e}")
+            
             logger.info("开始 Telegram Bot 长轮询...")
             logger.info("按 Ctrl+C 停止轮询")
             
@@ -214,6 +227,12 @@ def start_polling():
             logger.info("收到中断信号，正在停止轮询...")
             break
         except Exception as e:
+            error_msg = str(e)
+            if '409' in error_msg or 'Conflict' in error_msg or 'terminated by other getUpdates' in error_msg:
+                logger.error(f"[PID:{current_pid}] 轮询过程中检测到其他 Bot 实例：{e}")
+                release_bot_lock()
+                return False
+            
             logger.error(f"轮询过程中发生错误：{e}", exc_info=True)
             
             # 检查是否需要重连

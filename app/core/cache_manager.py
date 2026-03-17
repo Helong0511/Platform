@@ -39,37 +39,58 @@ class CacheManager:
         """
         try:
             # 查询活跃的短链接（最近有点击的或最近创建的）
+            # 只查询必要的字段，避免依赖可能不存在的字段
             result = await db.execute(
-                select(ShortLink)
+                select(ShortLink.id, ShortLink.short_code, ShortLink.original_url, 
+                       ShortLink.title, ShortLink.description, ShortLink.created_by, 
+                       ShortLink.offer_id, ShortLink.channel_id, ShortLink.click_count, 
+                       ShortLink.is_active, ShortLink.expires_at, 
+                       ShortLink.created_at, ShortLink.updated_at)
                 .where(ShortLink.is_active == True)
                 .order_by(ShortLink.click_count.desc(), ShortLink.id.desc())
                 .limit(limit)
             )
-            short_links = result.scalars().all()
             
             # 延迟导入，避免循环导入
             from app.core.short_link_cache import (
                 get_short_link_from_cache,
-                set_short_link_to_cache,
-                serialize_short_link
+                set_short_link_to_cache
             )
             
             warmed_count = 0
-            for short_link in short_links:
+            for row in result:
                 try:
+                    # 构建短链接对象
+                    short_link_data = {
+                        'id': row.id,
+                        'short_code': row.short_code,
+                        'original_url': row.original_url,
+                        'title': row.title,
+                        'description': row.description,
+                        'created_by': row.created_by,
+                        'offer_id': row.offer_id,
+                        'channel_id': row.channel_id,
+                        'click_count': row.click_count,
+                        'show_count': 0,  # 默认值，避免依赖数据库字段
+                        'is_active': row.is_active,
+                        'expires_at': row.expires_at,
+                        'created_at': row.created_at,
+                        'updated_at': row.updated_at
+                    }
+                    
                     # 检查是否已在缓存中
-                    cached = await get_short_link_from_cache(short_link.short_code)
+                    cached = await get_short_link_from_cache(row.short_code)
                     if not cached:
                         # 不在缓存中，写入缓存
                         await set_short_link_to_cache(
-                            short_link.short_code,
-                            serialize_short_link(short_link)
+                            row.short_code,
+                            short_link_data
                         )
                         warmed_count += 1
                 except Exception as e:
-                    logger.warning(f"预热短链接失败: short_code={short_link.short_code}, error={e}")
+                    logger.warning(f"预热短链接失败: short_code={row.short_code if hasattr(row, 'short_code') else 'unknown'}, error={e}")
             
-            logger.info(f"短链接缓存预热完成: 共预热 {warmed_count}/{len(short_links)} 个短链接")
+            logger.info(f"短链接缓存预热完成: 共预热 {warmed_count} 个短链接")
             return warmed_count
         except Exception as e:
             logger.error(f"短链接缓存预热失败: {e}", exc_info=True)

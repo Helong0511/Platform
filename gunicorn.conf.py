@@ -47,8 +47,8 @@ if cpu_count == 2:
 
 worker_class = "uvicorn.workers.UvicornWorker"  # 使用 Uvicorn Worker
 worker_connections = 1000  # 每个 worker 的最大连接数（Uvicorn默认1000，适合高并发）
-max_requests = 1000  # 每个 worker 处理的最大请求数（提高以支持高并发，定期重启防止内存泄漏）
-max_requests_jitter = 50  # 随机抖动，避免所有 worker 同时重启
+max_requests = 5000  # 每个 worker 处理的最大请求数（提高以支持高并发，定期重启防止内存泄漏）
+max_requests_jitter = 250  # 随机抖动，避免所有 worker 同时重启
 
 # ====== 超时配置 ======
 # Ubuntu 22.04.5 生产环境优化（高并发场景）

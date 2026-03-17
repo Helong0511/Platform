@@ -141,7 +141,7 @@ def serialize_short_link(short_link) -> Dict[str, Any]:
         "is_active": short_link.is_active,
         "expires_at": short_link.expires_at.isoformat() if short_link.expires_at else None,
         "click_count": short_link.click_count,
-        "show_count": short_link.show_count,
+        "show_count": getattr(short_link, 'show_count', 0),  # 安全获取show_count，不存在则返回0
         "offer_id": short_link.offer_id,
         "channel_id": short_link.channel_id,
     }

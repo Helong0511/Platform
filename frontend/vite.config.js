@@ -40,7 +40,7 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8960',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
         // 连接超时设置（增加到60秒，应该大于前端请求的timeout）
