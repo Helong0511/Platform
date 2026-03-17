@@ -255,13 +255,16 @@ class ConversionService:
         
         # 处理点击数据
         for offer_id_val, publisher_id_val, click_count_val in click_groups:
-            if not offer_id_val or not publisher_id_val:
+            # 只处理有offer_id的记录，publisher_id可以为None
+            if not offer_id_val:
                 continue
             
-            key = (offer_id_val, publisher_id_val)
+            # 为publisher_id为None的记录使用0作为分组键
+            safe_publisher_id = publisher_id_val if publisher_id_val is not None else 0
+            key = (offer_id_val, safe_publisher_id)
             stats_dict[key] = {
                 "offer_id": offer_id_val,
-                "publisher_id": publisher_id_val,
+                "publisher_id": safe_publisher_id,
                 "click_count": click_count_val,
                 "conversion_count": 0,
                 "po": 0.0,
@@ -270,8 +273,8 @@ class ConversionService:
             
             if offer_id_val:
                 offer_ids.add(offer_id_val)
-            if publisher_id_val:
-                publisher_ids.add(publisher_id_val)
+            if safe_publisher_id:
+                publisher_ids.add(safe_publisher_id)
         
         # 获取所有转化记录，按offer_id和关联的publisher_id分组
         # 客户用户：支持通过Click.publisher_id过滤
