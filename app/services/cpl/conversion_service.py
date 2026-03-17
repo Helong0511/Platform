@@ -131,7 +131,9 @@ class ConversionService:
         # 构建转化查询条件
         conversion_conditions = [
             PostbackConversion.created_at >= start_datetime,
-            PostbackConversion.created_at < end_datetime
+            PostbackConversion.created_at < end_datetime,
+            # 包含所有状态的转化，包括CapReached
+            # PostbackConversion.conversion_status == 'Approved'
         ]
         
         # 如果是客户用户，添加渠道过滤条件
@@ -285,6 +287,8 @@ class ConversionService:
         conversion_group_conditions.append(click_alias.offer_id == offer_alias.id)
         conversion_group_conditions.append(offer_alias.is_active == True)
         conversion_group_conditions.append(offer_alias.status == 'Active')
+        # 包含所有状态的转化，包括CapReached
+        # conversion_group_conditions.append(PostbackConversion.conversion_status == 'Approved')
         
         if offer_id is not None:
             conversion_group_conditions.append(click_alias.offer_id == offer_id)
@@ -526,6 +530,25 @@ class ConversionService:
         # 按点击数量排序
         stats_list.sort(key=lambda x: x['click_count'], reverse=True)
         
+        # 计算客户的转化上限（conversion_cap）
+        conversion_cap = 0
+        if current_user.role == UserRole.CLIENT and client_id:
+            # 查询客户关联的所有渠道的下游CAP限制
+            client_cap_result = await self.db.execute(
+                select(func.sum(OfferPublisherAssignment.downstream_cap))
+                .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
+                .where(
+                    and_(
+                        Publisher.client_id == client_id,
+                        Publisher.is_active == True,
+                        OfferPublisherAssignment.is_active == True,
+                        OfferPublisherAssignment.downstream_cap.isnot(None)
+                    )
+                )
+            )
+            client_cap = client_cap_result.scalar()
+            conversion_cap = client_cap or 0
+        
         # 返回最终的统计结果
         return {
             "total_clicks": total_clicks,
@@ -534,6 +557,7 @@ class ConversionService:
             "total_po": round(total_po, 2),
             "total_po_after_discount": round(total_po_after_discount, 2),
             "total_profit": round(total_profit, 2),
+            "conversion_cap": conversion_cap,
             "stats_list": stats_list,
             "start_date": start_date or (start_datetime.strftime("%Y-%m-%d")),
             "end_date": end_date or (end_datetime.strftime("%Y-%m-%d"))
