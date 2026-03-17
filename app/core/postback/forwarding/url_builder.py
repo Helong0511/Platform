@@ -91,8 +91,10 @@ class UrlBuilder:
             # click_id
             if url_params.get('click_id'):
                 params['click_id'] = str(url_params['click_id'])
+                params['clickid'] = str(url_params['click_id'])  # 同时添加无下划线版本
             elif click_association.get('click_id'):
                 params['click_id'] = str(click_association['click_id'])
+                params['clickid'] = str(click_association['click_id'])  # 同时添加无下划线版本
             
             # offer_id
             if url_params.get('offer_id'):

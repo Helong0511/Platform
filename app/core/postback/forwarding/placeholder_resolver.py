@@ -16,6 +16,7 @@ class PlaceholderResolver:
     # 常见占位符模式
     PLACEHOLDER_PATTERNS = {
         '{click_id}': 'click_id',
+        '{clickid}': 'click_id',  # 支持无下划线版本
         '{conversion_id}': 'conversion_id',
         '{payout}': 'payout',
         '{event_name}': 'event_name',

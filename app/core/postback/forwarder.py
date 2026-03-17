@@ -124,9 +124,45 @@ class PostbackForwarder:
         
         # ========== 第 4 步：发送 HTTP 请求 ==========
         method = publisher.postback_method or 'GET'
+        
+        # 准备请求参数
+        request_params = None
+        json_data = None
+        
+        if method.upper() == 'POST':
+            # 对于 POST 请求，构建 JSON 数据
+            json_data = {}
+            
+            # 从 conversion_data 中提取数据
+            if conversion_data.get('payout'):
+                json_data['payout'] = conversion_data['payout']
+            if conversion_data.get('conversion_id'):
+                json_data['conversion_id'] = conversion_data['conversion_id']
+            if conversion_data.get('event_name'):
+                json_data['event_name'] = conversion_data['event_name']
+            
+            # 从 click_association 中提取数据，优先使用 url_params
+            url_params = click_association_data.get('url_params', {})
+            if url_params.get('click_id'):
+                json_data['clickid'] = url_params['click_id']
+                json_data['click_id'] = url_params['click_id']
+            elif click_association_data.get('click_id'):
+                json_data['clickid'] = click_association_data['click_id']
+                json_data['click_id'] = click_association_data['click_id']
+            
+            if url_params.get('offer_id'):
+                json_data['offer_id'] = url_params['offer_id']
+            elif click_association_data.get('offer_id'):
+                json_data['offer_id'] = click_association_data['offer_id']
+        else:
+            # 对于 GET 请求，参数已经在 URL 中
+            request_params = params
+        
         success, status_code, response_content = await HttpClient.send_request(
             url=final_url,
-            method=method
+            method=method,
+            params=request_params,
+            json_data=json_data
         )
         
         # ========== 第 5 步：检查转发结果 ==========
