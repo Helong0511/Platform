@@ -45,6 +45,7 @@ class ConversionSaver:
         conversion = PostbackConversion(
             platform=normalized_data['platform'],
             conversion_id=normalized_data['conversion_id'],
+            click_id=normalized_data.get('click_id') or (click_association.get('click_id') if click_association else None),
             event_name=normalized_data['event_name'],
             event_value=normalized_data['event_value'],
             original_payout=normalized_data['payout'],
