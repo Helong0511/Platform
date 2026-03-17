@@ -408,7 +408,8 @@ class TelegramNotificationService:
             bool: 是否发送成功
         """
         try:
-            success = send_telegram_message(telegram_chat_id, message)
+            from app.core.telegram.message_sender import send_telegram_message_async
+            success = await send_telegram_message_async(telegram_chat_id, message)
             
             # 记录通知历史（如果有数据库会话）
             if db:
@@ -472,7 +473,8 @@ class TelegramNotificationService:
             bool: 是否发送成功
         """
         try:
-            success = send_telegram_message(telegram_chat_id, message)
+            from app.core.telegram.message_sender import send_telegram_message_async
+            success = await send_telegram_message_async(telegram_chat_id, message)
             
             # 记录通知历史（如果有转化记录和数据库会话）
             if conversion and db:
@@ -534,7 +536,8 @@ class TelegramNotificationService:
                 error=error
             )
             
-            success = send_telegram_message(telegram_chat_id, message)
+            from app.core.telegram.message_sender import send_telegram_message_async
+            success = await send_telegram_message_async(telegram_chat_id, message)
             
             if db:
                 try:
@@ -594,7 +597,8 @@ class TelegramNotificationService:
                 period=period
             )
             
-            success = send_telegram_message(telegram_chat_id, message)
+            from app.core.telegram.message_sender import send_telegram_message_async
+            success = await send_telegram_message_async(telegram_chat_id, message)
             
             if db:
                 try:
@@ -740,10 +744,15 @@ class TelegramNotificationService:
             tuple[bool, Optional[int]]: (是否发送成功, 消息ID)
         """
         try:
-            success, message_id = send_telegram_message_with_buttons(
-                telegram_chat_id,
-                message,
-                buttons
+            import asyncio
+            loop = asyncio.get_event_loop()
+            success, message_id = await loop.run_in_executor(
+                None,
+                lambda: send_telegram_message_with_buttons(
+                    telegram_chat_id,
+                    message,
+                    buttons
+                )
             )
             
             if db:
