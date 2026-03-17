@@ -666,7 +666,7 @@ class AdminNotificationConfig(Base):
     telegram_chat_id = Column(String(100), nullable=True, comment='管理员 Telegram Chat ID')
     notify_all_conversions = Column(Boolean, default=True, comment='通知所有转化')
     notify_forward_failure = Column(Boolean, default=True, comment='通知转发失败')
-    notify_forward_success = Column(Boolean, default=False, comment='通知转发成功（可选）')
+    notify_forward_success = Column(Boolean, default=True, comment='通知转发成功')
     notify_system_errors = Column(Boolean, default=True, comment='通知系统异常')
     notify_statistics = Column(Boolean, default=False, comment='定时统计通知')
     statistics_frequency = Column(String(20), default='hourly', comment='统计频率：hourly, daily')

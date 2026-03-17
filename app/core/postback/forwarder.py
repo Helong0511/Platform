@@ -282,7 +282,7 @@ class PostbackForwarder:
             f"publisher_id={publisher_id}, success={final_success}"
         )
         
-        # ========== 第 7 步：发送通知（失败时） ==========
+        # ========== 第 7 步：发送通知（失败和成功时） ==========
         if not final_success:
             # 发送转发失败通知
             await PostbackForwarder._send_failure_notification(
@@ -291,6 +291,15 @@ class PostbackForwarder:
                 status_code=status_code,
                 response_content=response_content,
                 check_message=check_message,
+                db=db
+            )
+        else:
+            # 发送转发成功通知（如果启用）
+            await PostbackForwarder._send_success_notification(
+                conversion=conversion,
+                publisher=publisher,
+                status_code=status_code,
+                response_content=response_content,
                 db=db
             )
     
@@ -342,6 +351,53 @@ class PostbackForwarder:
         except Exception as e:
             # 记录发送通知失败的错误
             logger.warning(f"发送转发失败通知失败：{e}")
+    
+    @staticmethod
+    async def _send_success_notification(
+        conversion: PostbackConversion,
+        publisher: Publisher,
+        status_code: int,
+        response_content: str,
+        db: AsyncSession
+    ):
+        """发送转发成功通知"""
+        try:
+            # 查询管理员通知配置
+            admin_config_result = await db.execute(
+                select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
+            )
+            admin_config = admin_config_result.scalars().first()
+            
+            # 检查是否启用了 Telegram 通知且配置了聊天 ID，并且启用了转发成功通知
+            if (
+                admin_config
+                and admin_config.telegram_enabled
+                and admin_config.notify_forward_success
+                and admin_config.telegram_chat_id
+            ):
+                # 构建通知消息
+                msg_lines = [
+                    "✅ Postback 转发成功",
+                    "",
+                    f"平台：{conversion.platform}",
+                    f"转化 ID: {conversion.conversion_id}",
+                    f"渠道：{publisher.publisher_name}",
+                    f"状态码：{status_code}",
+                    "",
+                    f"响应：{response_content[:200] if response_content else '无'}"
+                ]
+                
+                # 发送 Telegram 通知
+                await TelegramNotificationService.send_admin_notification(
+                    message="\n".join(msg_lines),
+                    telegram_chat_id=admin_config.telegram_chat_id,
+                    notification_type='forward_success',
+                    db=db
+                )
+                
+        except Exception as e:
+            # 记录发送通知失败的错误
+            logger.warning(f"发送转发成功通知失败：{e}")
 
 
 # 向后兼容：导入 select
