@@ -35,13 +35,28 @@ def initialize_bot():
     Returns:
         tuple: (bot_instance, initialized, available)
     """
-    from app.core.telegram.bot_state import set_bot_state, _bot_instance_created, TELEBOT_AVAILABLE
+    # 动态检查模块可用性
+    try:
+        import telebot
+        from telebot import types
+        from telebot.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
+        dynamic_telebot_available = True
+        logger.info("pyTelegramBotAPI 模块导入成功（动态检查）")
+    except ImportError as import_err:
+        dynamic_telebot_available = False
+        logger.warning(
+            f"pyTelegramBotAPI 模块未安装，Telegram Bot 功能将不可用。"
+            f"请运行：pip install pyTelegramBotAPI"
+        )
+        logger.warning(f"导入错误详情：{import_err}")
+    
+    from app.core.telegram.bot_state import set_bot_state, _bot_instance_created
     from app.core.telegram.file_lock import acquire_bot_lock, release_bot_lock
     
     # 检查 Bot 实例是否已经创建
     if _bot_instance_created:
         logger.info("Bot 实例已经创建，跳过初始化...")
-        from app.core.telegram.bot_state import bot, bot_initialized
+        from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
         return bot, bot_initialized, TELEBOT_AVAILABLE
     
     # 初始化 Telegram Bot（仅在模块可用且启用时）
@@ -50,10 +65,10 @@ def initialize_bot():
     
     if not telegram_enabled:
         logger.info("Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false）")
-        set_bot_state(None, False, TELEBOT_AVAILABLE)
-        return None, False, TELEBOT_AVAILABLE
+        set_bot_state(None, False, dynamic_telebot_available)
+        return None, False, dynamic_telebot_available
     
-    elif TELEBOT_AVAILABLE:
+    elif dynamic_telebot_available:
         try:
             # 尝试获取锁，只有获取到锁的进程才能初始化 Bot
             logger.info("尝试获取 Bot 初始化锁...")
@@ -61,8 +76,8 @@ def initialize_bot():
             
             if not lock_acquired:
                 logger.info("其他进程已初始化 Bot，跳过初始化...")
-                set_bot_state(None, False, TELEBOT_AVAILABLE)
-                return None, False, TELEBOT_AVAILABLE
+                set_bot_state(None, False, dynamic_telebot_available)
+                return None, False, dynamic_telebot_available
             
             try:
                 logger.info("正在加载 Telegram token...")
@@ -72,13 +87,13 @@ def initialize_bot():
                 if token and isinstance(token, str) and token.strip():
                     # 初始化 Telegram Bot
                     bot_instance = telebot.TeleBot(token=token)
-                    set_bot_state(bot_instance, True, TELEBOT_AVAILABLE)
+                    set_bot_state(bot_instance, True, dynamic_telebot_available)
                     logger.info(f"Telegram Bot 初始化成功，token: {token[:4]}****")
-                    return bot_instance, True, TELEBOT_AVAILABLE
+                    return bot_instance, True, dynamic_telebot_available
                 else:
                     logger.warning("Telegram token 未设置或为空，Telegram Bot 功能将不可用")
-                    set_bot_state(None, False, TELEBOT_AVAILABLE)
-                    return None, False, TELEBOT_AVAILABLE
+                    set_bot_state(None, False, dynamic_telebot_available)
+                    return None, False, dynamic_telebot_available
                     
             finally:
                 # 释放锁
@@ -87,8 +102,8 @@ def initialize_bot():
                 
         except Exception as err:
             logger.error(f"初始化 Telegram Bot 失败：{err}", exc_info=True)
-            set_bot_state(None, False, TELEBOT_AVAILABLE)
-            return None, False, TELEBOT_AVAILABLE
+            set_bot_state(None, False, dynamic_telebot_available)
+            return None, False, dynamic_telebot_available
     
     else:
         logger.info("Telegram Bot 功能已禁用（pyTelegramBotAPI 未安装）")
