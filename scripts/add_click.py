@@ -20,5 +20,5 @@ need = [
 ]
 
 for get_url in need:
-    response = requests.get(get_url)
-    print(response.json())
+    response = requests.get(get_url, timeout=10)
+    print(response.text)
