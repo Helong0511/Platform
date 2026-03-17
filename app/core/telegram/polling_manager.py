@@ -202,76 +202,98 @@ def start_polling():
         logger.warning(f"删除 webhook 时出错：{e}")
     
     # 带自动重连的轮询循环
-    retry_count = 0
-    max_retries = 10
-    base_retry_delay = 1
-    
-    while True:
-        try:
-            if retry_count > 0:
-                logger.info(f"[PID:{current_pid}] 开始第 {retry_count + 1} 次重连尝试...")
-            
-            # 每次重连前再次检查是否有其他实例在运行
+        retry_count = 0
+        max_retries = 10
+        base_retry_delay = 1
+        
+        while True:
             try:
-                bot_info = bot.get_me()
-                logger.info(f"[PID:{current_pid}] 验证成功，Bot 可以正常运行：@{bot_info.username}")
+                if retry_count > 0:
+                    logger.info(f"[PID:{current_pid}] 开始第 {retry_count + 1} 次重连尝试...")
+                
+                # 每次重连前再次检查是否有其他实例在运行
+                try:
+                    # 先尝试获取me信息，这会检测是否有其他实例在运行
+                    bot_info = bot.get_me()
+                    logger.info(f"[PID:{current_pid}] 验证成功，Bot 可以正常运行：@{bot_info.username}")
+                    
+                    # 额外的409错误预防：在启动轮询前删除可能存在的webhook
+                    try:
+                        bot.delete_webhook()
+                        logger.info("再次确认删除 webhook，避免409冲突")
+                    except Exception as e:
+                        logger.warning(f"删除 webhook 时出错：{e}")
+                        
+                except Exception as e:
+                    error_msg = str(e)
+                    if '409' in error_msg or 'Conflict' in error_msg or 'terminated by other getUpdates' in error_msg:
+                        logger.error(f"[PID:{current_pid}] 验证失败：检测到其他 Bot 实例正在运行，停止轮询")
+                        release_bot_lock()
+                        _bot_started = False
+                        return False
+                    else:
+                        logger.warning(f"[PID:{current_pid}] 验证时发生错误，但继续启动：{e}")
+                
+                logger.info("开始 Telegram Bot 长轮询...")
+                logger.info("按 Ctrl+C 停止轮询")
+                
+                # 启动轮询，添加参数以避免409错误
+                # 使用 non_stop=True 确保轮询持续运行
+                bot.polling(
+                    none_stop=True,
+                    interval=0,
+                    timeout=60,
+                    allowed_updates=['message', 'callback_query'],
+                    reset_webhook=True,  # 重置webhook，避免冲突
+                    long_polling_timeout=60  # 长轮询超时时间
+                )
+                logger.info("轮询已启动并在后台运行")
+                
+                # 如果正常退出（非异常），重置重试计数
+                retry_count = 0
+                
+            except KeyboardInterrupt:
+                logger.info("收到中断信号，正在停止轮询...")
+                break
             except Exception as e:
                 error_msg = str(e)
                 if '409' in error_msg or 'Conflict' in error_msg or 'terminated by other getUpdates' in error_msg:
-                    logger.error(f"[PID:{current_pid}] 验证失败：检测到其他 Bot 实例正在运行，停止轮询")
+                    logger.error(f"[PID:{current_pid}] 轮询过程中检测到其他 Bot 实例：{e}")
+                    # 当检测到409错误时，释放锁
                     release_bot_lock()
+                    # 标记 Bot 为未启动状态，避免重复尝试
+                    _bot_started = False
+                    # 额外的清理：删除锁文件
+                    try:
+                        from app.core.telegram.file_lock import get_default_lock_path
+                        lock_path = get_default_lock_path()
+                        if lock_path.exists():
+                            lock_path.unlink()
+                            logger.info(f"[PID:{current_pid}] 已删除锁文件，避免锁文件残留")
+                    except Exception as cleanup_error:
+                        logger.warning(f"[PID:{current_pid}] 清理锁文件时出错：{cleanup_error}")
+                    logger.info(f"[PID:{current_pid}] 检测到冲突，释放锁并停止轮询")
                     return False
-                else:
-                    logger.warning(f"[PID:{current_pid}] 验证时发生错误，但继续启动：{e}")
-            
-            logger.info("开始 Telegram Bot 长轮询...")
-            logger.info("按 Ctrl+C 停止轮询")
-            
-            # 启动轮询
-            bot.polling(
-                none_stop=True,
-                interval=0,
-                timeout=60,
-                allowed_updates=['message', 'callback_query']
-            )
-            
-            # 如果正常退出（非异常），重置重试计数
-            retry_count = 0
-            
-        except KeyboardInterrupt:
-            logger.info("收到中断信号，正在停止轮询...")
-            break
-        except Exception as e:
-            error_msg = str(e)
-            if '409' in error_msg or 'Conflict' in error_msg or 'terminated by other getUpdates' in error_msg:
-                logger.error(f"[PID:{current_pid}] 轮询过程中检测到其他 Bot 实例：{e}")
-                # 当检测到409错误时，释放锁
-                # 因为这意味着其他实例正在运行，当前实例应该退出
-                # 锁应该被释放，以便其他进程可以尝试获取
-                release_bot_lock()
-                # 标记 Bot 为未启动状态，避免重复尝试
-                _bot_started = False
-                logger.info(f"[PID:{current_pid}] 检测到冲突，释放锁并停止轮询")
-                return False
-            
-            logger.error(f"轮询过程中发生错误：{e}", exc_info=True)
-            
-            # 检查是否需要重连
-            retry_count += 1
-            if retry_count > max_retries:
-                logger.error(f"已达到最大重试次数 ({max_retries})，停止重连")
-                break
-            
-            # 指数退避重连延迟
-            retry_delay = min(base_retry_delay * (2 ** (retry_count - 1)), 60)
-            logger.info(f"{retry_delay} 秒后尝试重连（{retry_count}/{max_retries}）...")
-            time.sleep(retry_delay)
-            
-            # 重连前停止 polling
-            try:
-                bot.stop_polling()
-            except:
-                pass
+                
+                logger.error(f"轮询过程中发生错误：{e}", exc_info=True)
+                
+                # 检查是否需要重连
+                retry_count += 1
+                if retry_count > max_retries:
+                    logger.error(f"已达到最大重试次数 ({max_retries})，停止重连")
+                    break
+                
+                # 指数退避重连延迟
+                retry_delay = min(base_retry_delay * (2 ** (retry_count - 1)), 60)
+                logger.info(f"{retry_delay} 秒后尝试重连（{retry_count}/{max_retries}）...")
+                time.sleep(retry_delay)
+                
+                # 重连前停止 polling
+                try:
+                    bot.stop_polling()
+                    logger.info("已停止轮询，准备重连")
+                except Exception as stop_error:
+                    logger.warning(f"停止轮询时出错：{stop_error}")
     
     # 释放锁
     try:
