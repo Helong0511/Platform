@@ -230,7 +230,10 @@ def start_polling():
             error_msg = str(e)
             if '409' in error_msg or 'Conflict' in error_msg or 'terminated by other getUpdates' in error_msg:
                 logger.error(f"[PID:{current_pid}] 轮询过程中检测到其他 Bot 实例：{e}")
-                release_bot_lock()
+                # 当检测到409错误时，不释放锁
+                # 因为这意味着其他实例正在运行，当前实例应该退出
+                # 锁会在正常退出时由持有锁的进程释放
+                logger.info(f"[PID:{current_pid}] 检测到冲突，停止轮询并退出")
                 return False
             
             logger.error(f"轮询过程中发生错误：{e}", exc_info=True)
@@ -253,8 +256,11 @@ def start_polling():
                 pass
     
     # 释放锁
-    release_bot_lock()
-    logger.info("Telegram Bot 已停止")
+    try:
+        release_bot_lock()
+        logger.info("Telegram Bot 已停止并释放锁")
+    except Exception as e:
+        logger.warning(f"释放锁时发生错误：{e}")
     
     return True
 

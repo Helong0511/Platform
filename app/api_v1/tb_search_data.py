@@ -37,7 +37,7 @@ from app.core.utils import (
     get_product_name, get_client_name, get_user_name, truncate_to_2_decimal
 )
 from app.core.country_code import resolve_country_name, find_country_code_by_any_format
-from app.api.api_v1.endpoints.excel.utils import (
+from app.api_v1.excel.utils import (
     allowed_file, ALLOWED_MIME_TYPES, parse_date_value, normalize_date_key, validate_excel_file
 )
 

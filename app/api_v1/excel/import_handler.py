@@ -25,11 +25,11 @@ from app.models.models import User, Client, Product, AdData
 from app.core.country_code import find_country_code_by_any_format
 from app.schemas.base import ResponseBaseSchema
 from app.schemas.excel import ExcelImportResponse
-from app.api.api_v1.endpoints.excel.utils import (
+from app.api_v1.excel.utils import (
     allowed_file, ALLOWED_MIME_TYPES, parse_date_value, calculate_rates,
     safe_get_value, is_valid_numeric_value, normalize_date_key
 )
-from app.api.api_v1.endpoints.ml_model.ml_model import ColumnMappingService, REQUIRED_FIELDS
+from app.api_v1.ml_model.ml_model import ColumnMappingService, REQUIRED_FIELDS
 from app.core.product_assignment import initialize_product_assignment
 from app.core.utils import (
     truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data,

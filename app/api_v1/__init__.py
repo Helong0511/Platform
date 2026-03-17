@@ -1,64 +1,69 @@
 """
-API路由聚合模块
-统一管理所有API端点的路由注册
-
-优化说明：
-- 按业务模块分组组织路由注册
-- 使用清晰的注释标识每个模块
-- 保持路由注册的逻辑顺序
+API端点模块统一导出
+按业务模块组织，提供清晰的导入路径
 """
 from fastapi import APIRouter
 
-# 创建主API路由器
+# 创建统一的路由聚合器
 api_router = APIRouter()
+main_router = api_router  # 保持向后兼容
 
-# ==================== 导入所有端点模块 ====================
-# 注意：导入顺序不影响功能，但建议按功能模块分组
-from app.api.api_v1.endpoints import (
-    # 认证模块
-    auth,
-    # 用户管理模块
-    users,
-    # 客户管理模块
-    clients,
-    # 产品管理模块
-    products,
-    product_assignments,
-    # 广告数据模块
-    ad_data,
-    tb_search_data,
-    # 仪表盘模块
-    dashboard,
-    # Excel处理模块
-    excel,
-    # ML模型模块
-    ml_model,
-    # 系统管理模块
-    scheduled_tasks,
-    audit_logs,
-    sessions,
-    notification_configs,
-    # 外部接口模块
-    client_api,
-    telegram,
-    # Postback模块
-    postback,
-    bft_postback,
-    ip_whitelist,
-    # 追踪模块
-    tracking,
-    short_links,
-    # CPL系统模块
-    advertisers,
-    publishers,
-    offers,
-    caps,
-    discounts,
-    conversion_deductions,
-    affiliate_tests,
-    conversion_summary,
-    conversion_log,
-    clicks,
+# ==================== 认证模块 ====================
+from app.api_v1 import auth
+
+# ==================== 用户管理模块 ====================
+from app.api_v1 import users
+
+# ==================== 客户管理模块 ====================
+from app.api_v1 import clients
+
+# ==================== 产品管理模块 ====================
+from app.api_v1 import products
+# product_assignments 现在在 products 模块中
+from app.api_v1.products import assignments_router as product_assignments
+
+# ==================== 广告数据模块 ====================
+from app.api_v1 import ad_data
+from app.api_v1 import tb_search_data
+
+# ==================== 仪表盘模块 ====================
+from app.api_v1 import dashboard
+
+# ==================== Excel处理模块 ====================
+from app.api_v1 import excel
+
+# ==================== ML模型模块 ====================
+from app.api_v1 import ml_model
+
+# ==================== 系统管理模块 ====================
+from app.api_v1.system import (
+    scheduled_tasks_router as scheduled_tasks,
+    audit_logs_router as audit_logs,
+    sessions_router as sessions,
+    notification_configs_router as notification_configs,
+)
+
+# ==================== 外部接口模块 ====================
+from app.api_v1.external import client_api_router as client_api, telegram_router as telegram
+
+# ==================== Postback模块 ====================
+from app.api_v1.postback import router as postback, bft_router as bft_postback, ip_whitelist_router as ip_whitelist
+
+# ==================== 追踪模块 ====================
+from app.api_v1.tracking import router as tracking, short_links_router as short_links
+
+# ==================== CPL系统模块 ====================
+from app.api_v1.cpl import (
+    advertisers_router as advertisers,
+    publishers_router as publishers,
+    offers_router as offers,
+    caps_router as caps,
+    discounts_router as discounts,
+    conversion_deductions_router as conversion_deductions,
+    conversion_summary_router as conversion_summary,
+    conversion_log_router as conversion_log,
+    clicks_router as clicks,
+    affiliate_tests_router as affiliate_tests,
 )
 
 # ==================== 路由注册 ====================
@@ -127,3 +132,54 @@ api_router.include_router(affiliate_tests, prefix="/affiliate-tests", tags=["下
 api_router.include_router(conversion_summary, prefix="/conversion-summary", tags=["转化统计"])
 api_router.include_router(conversion_log, prefix="/conversion-logs", tags=["转化日志（已废弃）"])
 api_router.include_router(clicks, prefix="/clicks", tags=["短链接访问记录"])
+
+# 导出所有路由（用于统一注册）
+__all__ = [
+    # 路由聚合器
+    'api_router',
+    # 认证
+    'auth',
+    # 用户管理
+    'users',
+    # 客户管理
+    'clients',
+    # 产品管理
+    'products',
+    'product_assignments',
+    # 广告数据
+    'ad_data',
+    'tb_search_data',
+    # 仪表盘
+    'dashboard',
+    # Excel处理
+    'excel',
+    # ML模型
+    'ml_model',
+    # 系统管理
+    'scheduled_tasks',
+    'audit_logs',
+    'sessions',
+    'notification_configs',
+    # 外部接口
+    'client_api',
+    'telegram',
+    # Postback
+    'postback',
+    'bft_postback',
+    # 追踪
+    'tracking',
+    'short_links',
+    # CPL系统
+    'advertisers',
+    'publishers',
+    'offers',
+    'caps',
+    'discounts',
+    'conversion_deductions',
+    'conversion_summary',
+    'conversion_log',
+    'clicks',
+    # 测试
+    'affiliate_tests',
+]
+

@@ -17,7 +17,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.api_v1 import api_router
+from app.api_v1 import api_router
 from app.core.config import settings
 from app.core.errors import ErrorCode, create_error_response, record_http_exception_log
 from app.core.https_middleware import HTTPSRedirectMiddleware

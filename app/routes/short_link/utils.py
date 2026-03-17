@@ -11,7 +11,7 @@ from app.models.models import Offer
 from app.core.offer_cache import set_offer_cache
 from app.core.clicks_queue import enqueue_click
 from app.core.utils import get_app_now_naive
-from app.api.api_v1.endpoints.tracking.tracking import create_click_background
+from app.api_v1.tracking.tracking import create_click_background
 
 logger = logging.getLogger(__name__)
 

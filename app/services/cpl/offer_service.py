@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_sync_short_links_for_offer():
-    from app.api.api_v1.endpoints.cpl.offers import sync_short_links_for_offer
+    from app.api_v1.cpl.offers import sync_short_links_for_offer
     return sync_short_links_for_offer
 
 
@@ -965,7 +965,7 @@ class OfferService(BaseService[Offer]):
         current_downstream_tracklink = offer.downstream_tracklink
         current_advertiser_tracklink = offer.advertiser_tracklink
         if current_downstream_tracklink and current_advertiser_tracklink:
-            from app.api.api_v1.endpoints.cpl.offers import (
+            from app.api_v1.cpl.offers import (
                 check_and_create_downstream_tracklink_short_link,
                 get_short_link_url
             )

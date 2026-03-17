@@ -48,7 +48,7 @@ from app.core.device_info import collect_request_info
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from app.core.clicks_queue import enqueue_click
 from app.core.offer_cache import set_offer_cache
-from app.api.api_v1.endpoints.tracking.tracking import create_click_background
+from app.api_v1.tracking.tracking import create_click_background
 from app.models.models import ShortLink, Offer, Publisher, Advertiser
 
 # 日志记录器

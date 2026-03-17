@@ -74,6 +74,49 @@ def _is_lock_expired(lock_file_path: Path) -> bool:
         return False
 
 
+def _get_lock_pid(lock_file_path: Path) -> Optional[int]:
+    """获取锁文件中记录的PID"""
+    try:
+        if not lock_file_path.exists():
+            return None
+        
+        with open(lock_file_path, 'r') as f:
+            content = f.read()
+        
+        for line in content.split('\n'):
+            if line.startswith('PID:'):
+                try:
+                    pid = int(line.split(':')[1].strip())
+                    return pid
+                except (IndexError, ValueError):
+                    continue
+        
+        return None
+    except Exception as e:
+        logger.warning(f"读取锁文件PID时出错：{e}")
+        return None
+
+
+def _is_process_running(pid: int) -> bool:
+    """检查进程是否正在运行"""
+    try:
+        # 不同平台的进程检查
+        if os.name == 'posix':  # Unix/Linux
+            os.kill(pid, 0)
+            return True
+        elif os.name == 'nt':  # Windows
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(1, 0, pid)
+            if handle == 0:
+                return False
+            kernel32.CloseHandle(handle)
+            return True
+        return False
+    except (OSError, ValueError):
+        return False
+
+
 def _cleanup_expired_lock(lock_file_path: Path):
     """清理过期的锁文件"""
     try:
@@ -119,14 +162,21 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 5
         lock_file_path.parent.mkdir(parents=True, exist_ok=True)
         
         # 检查是否有过期的锁文件需要清理
-        if lock_file_path.exists() and _is_lock_expired(lock_file_path):
-            logger.info(f"[PID:{current_pid}] 检测到过期的锁文件，正在清理...")
-            _cleanup_expired_lock(lock_file_path)
-        
-        # 先检查是否已有锁文件存在
         if lock_file_path.exists():
-            logger.info(f"[PID:{current_pid}] 检测到锁文件已存在，其他进程可能已启动 Bot")
-            return False
+            # 检查锁文件是否过期
+            if _is_lock_expired(lock_file_path):
+                logger.info(f"[PID:{current_pid}] 检测到过期的锁文件，正在清理...")
+                _cleanup_expired_lock(lock_file_path)
+            else:
+                # 检查锁文件对应的进程是否正在运行
+                lock_pid = _get_lock_pid(lock_file_path)
+                if lock_pid and not _is_process_running(lock_pid):
+                    logger.info(f"[PID:{current_pid}] 检测到锁文件对应的进程（PID:{lock_pid}）已停止，正在清理锁文件...")
+                    _cleanup_expired_lock(lock_file_path)
+                else:
+                    # 锁文件存在且进程正在运行
+                    logger.info(f"[PID:{current_pid}] 检测到锁文件已存在，其他进程可能已启动 Bot")
+                    return False
         
         retry_delay = 0.2  # 初始重试延迟
         for attempt in range(1, max_retries + 1):
@@ -134,8 +184,14 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 5
                 # 尝试创建锁文件（使用独占模式）
                 # 先检查文件是否存在，避免竞争条件
                 if lock_file_path.exists():
-                    logger.info(f"[PID:{current_pid}] 锁文件已存在（尝试 {attempt}/{max_retries}），其他进程已启动")
-                    return False
+                    # 再次检查进程状态
+                    lock_pid = _get_lock_pid(lock_file_path)
+                    if lock_pid and not _is_process_running(lock_pid):
+                        logger.info(f"[PID:{current_pid}] 检测到锁文件对应的进程（PID:{lock_pid}）已停止，正在清理锁文件...")
+                        _cleanup_expired_lock(lock_file_path)
+                    else:
+                        logger.info(f"[PID:{current_pid}] 锁文件已存在（尝试 {attempt}/{max_retries}），其他进程已启动")
+                        return False
                 
                 # 尝试打开锁文件（如果不存在则创建）
                 _bot_lock_file = open(lock_file_path, 'w')
@@ -193,10 +249,16 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 5
                     try:
                         # 再次检查目标文件是否存在
                         if lock_file_path.exists():
-                            logger.info(f"[PID:{current_pid}] 锁文件已存在（尝试 {attempt}/{max_retries}），其他进程已启动")
-                            if lock_file_tmp.exists():
-                                lock_file_tmp.unlink()
-                            return False
+                            # 检查进程状态
+                            lock_pid = _get_lock_pid(lock_file_path)
+                            if lock_pid and not _is_process_running(lock_pid):
+                                logger.info(f"[PID:{current_pid}] 检测到锁文件对应的进程（PID:{lock_pid}）已停止，正在清理锁文件...")
+                                _cleanup_expired_lock(lock_file_path)
+                            else:
+                                logger.info(f"[PID:{current_pid}] 锁文件已存在（尝试 {attempt}/{max_retries}），其他进程已启动")
+                                if lock_file_tmp.exists():
+                                    lock_file_tmp.unlink()
+                                return False
                         
                         # 创建临时文件
                         with open(lock_file_tmp, 'w') as f:
