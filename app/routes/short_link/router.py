@@ -316,17 +316,23 @@ async def open_master_html_with_redirect(
         import re
         # 替换getOriginalUrl函数，使其直接返回原始URL
         logger.warning(f"[斗篷服务] 注入原始URL到HTML: {original_url}")
-        # 使用更简单的正则表达式，匹配整个函数定义
-        html_content = re.sub(
-            r'function getOriginalUrl\(\) \{[\s\S]*?\}',
-            f'function getOriginalUrl() {{ return "{original_url}"; }}',
-            html_content
-        )
+        # 对原始URL进行转义，避免语法错误
+        escaped_original_url = original_url.replace('\\', '\\\\').replace('"', '\\"')
+        # 使用更精确的正则表达式，匹配完整的函数定义
+        pattern = r'function getOriginalUrl\(\) \{[\s\S]*?return originalUrl;[\s\S]*?\}'
+        replacement = f'function getOriginalUrl() {{ return "{escaped_original_url}"; }}'
+        html_content = re.sub(pattern, replacement, html_content)
         # 验证替换是否成功
-        if 'function getOriginalUrl() { return "' + original_url + '"; }' in html_content:
+        if replacement in html_content:
             logger.warning(f"[斗篷服务] 原始URL注入成功")
         else:
             logger.error(f"[斗篷服务] 原始URL注入失败，检查正则表达式")
+            # 尝试使用更简单的匹配方式
+            pattern2 = r'function getOriginalUrl\(\)'
+            if pattern2 in html_content:
+                logger.error(f"[斗篷服务] 找到getOriginalUrl函数定义，但替换失败")
+            else:
+                logger.error(f"[斗篷服务] 未找到getOriginalUrl函数定义")
         
         # 返回HTML内容
         from fastapi.responses import HTMLResponse
