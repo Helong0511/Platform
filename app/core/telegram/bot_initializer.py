@@ -35,13 +35,13 @@ def initialize_bot():
     Returns:
         tuple: (bot_instance, initialized, available)
     """
-    from app.core.telegram.bot_state import set_bot_state, _bot_instance_created
+    from app.core.telegram.bot_state import set_bot_state, _bot_instance_created, TELEBOT_AVAILABLE
     from app.core.telegram.file_lock import acquire_bot_lock, release_bot_lock
     
     # 检查 Bot 实例是否已经创建
     if _bot_instance_created:
         logger.info("Bot 实例已经创建，跳过初始化...")
-        from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
+        from app.core.telegram.bot_state import bot, bot_initialized
         return bot, bot_initialized, TELEBOT_AVAILABLE
     
     # 初始化 Telegram Bot（仅在模块可用且启用时）
