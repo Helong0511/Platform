@@ -48,20 +48,30 @@ class PostbackProcessor:
         Returns:
             处理结果字典
         """
-        logger.info(f"开始处理 Postback：platform={platform}")
+        # 详细日志：开始处理 Postback
+        logger.info(f"=== PostBack 接收处理开始 ===")
+        logger.info(f"平台: {platform}")
+        logger.info(f"请求 IP: {request_ip}")
+        logger.info(f"原始数据: {raw_data}")
         
         try:
             # ========== 第 1 步：IP 验证 ==========
+            logger.info("=== 第 1 步：IP 验证 ===")
             ip_valid, cleaned_ip = await IpValidator.validate(request_ip, db)
+            logger.info(f"IP 验证结果: {ip_valid}, 清理后 IP: {cleaned_ip}")
+            
             if not ip_valid:
+                logger.warning("IP 验证失败，处理失败流程")
                 return await PostbackProcessor._handle_ip_failure(platform, raw_data, db)
             
             # ========== 第 2 步：数据验证 ==========
+            logger.info("=== 第 2 步：数据验证 ===")
             # 优先使用平台特定处理器
             from app.core.postback.handlers import get_handler
             handler = get_handler(platform)
             
             if handler:
+                logger.info(f"使用平台特定处理器: {handler.__class__.__name__}")
                 # 使用平台特定处理器验证
                 data_valid, error_msg = await handler.validate(raw_data)
                 if not data_valid:
@@ -73,8 +83,10 @@ class PostbackProcessor:
                     }
                 
                 # ========== 第 3 步：数据标准化 ==========
+                logger.info("=== 第 3 步：数据标准化 ===")
                 normalized_data = await handler.normalize(raw_data)
             else:
+                logger.info("使用通用验证和标准化")
                 # 回退到通用验证和标准化
                 data_valid, errors = DataValidator.validate(raw_data, platform)
                 if not data_valid:
@@ -86,19 +98,33 @@ class PostbackProcessor:
                     }
                 
                 # ========== 第 3 步：数据标准化 ==========
+                logger.info("=== 第 3 步：数据标准化 ===")
                 normalized_data = DataNormalizer.normalize(raw_data, platform)
             
+            logger.info(f"标准化后数据: {normalized_data}")
+            
             # ========== 第 4 步：Click ID 关联 ==========
+            logger.info("=== 第 4 步：Click ID 关联 ===")
+            click_id = normalized_data.get('click_id')
+            logger.info(f"关联 Click ID: {click_id}")
+            
             click_association = await ClickAssociator.associate(
-                normalized_data['click_id'],
+                click_id,
                 db
             )
             
+            logger.info(f"Click 关联结果: {click_association}")
+            
             # ========== 第 5 步：重复检测 ==========
+            logger.info("=== 第 5 步：重复检测 ===")
+            conversion_id = normalized_data.get('conversion_id')
+            event_name = normalized_data.get('event_name')
+            logger.info(f"检测重复：conversion_id={conversion_id}, event_name={event_name}")
+            
             is_dup = await DuplicateChecker.is_duplicate(
                 platform=platform,
-                conversion_id=normalized_data['conversion_id'],
-                event_name=normalized_data['event_name'],
+                conversion_id=conversion_id,
+                event_name=event_name,
                 db=db
             )
             
@@ -110,27 +136,40 @@ class PostbackProcessor:
                 }
             
             # ========== 第 6 步：Cap 检查 ==========
+            logger.info("=== 第 6 步：Cap 检查 ===")
+            offer_id = click_association.get('offer_id') if click_association else None
+            publisher_id = click_association.get('publisher_id') if click_association else None
+            advertiser_id = click_association.get('advertiser_id') if click_association else None
+            logger.info(f"Cap 检查参数：offer_id={offer_id}, publisher_id={publisher_id}, advertiser_id={advertiser_id}")
+            
             cap_ok, cap_status = await CapChecker.check(
-                offer_id=click_association['offer_id'] if click_association else None,
-                publisher_id=click_association['publisher_id'] if click_association else None,
-                advertiser_id=click_association['advertiser_id'] if click_association else None,
+                offer_id=offer_id,
+                publisher_id=publisher_id,
+                advertiser_id=advertiser_id,
                 db=db
             )
             
             conversion_status = 'Pending' if cap_ok else f'CapExceeded({cap_status})'
+            logger.info(f"Cap 检查结果：{cap_ok}, 状态：{conversion_status}")
             
             # ========== 第 7 步：扣量计算 ==========
+            logger.info("=== 第 7 步：扣量计算 ===")
             original_payout = normalized_data['payout'] or 0.0
+            logger.info(f"原始 payout: {original_payout}")
+            
             final_payout, deduction_info = await DiscountChecker.calculate(
                 original_payout=original_payout,
-                offer_id=click_association['offer_id'] if click_association else None,
-                publisher_id=click_association['publisher_id'] if click_association else None,
+                offer_id=offer_id,
+                publisher_id=publisher_id,
                 product_id=normalized_data['product_id'],
                 client_id=normalized_data['client_id'],
                 db=db
             )
             
+            logger.info(f"扣量计算结果：final_payout={final_payout}, 扣量信息：{deduction_info}")
+            
             # ========== 第 8 步：保存转化记录 ==========
+            logger.info("=== 第 8 步：保存转化记录 ===")
             conversion = await ConversionSaver.save(
                 normalized_data=normalized_data,
                 click_association=click_association,
@@ -139,25 +178,39 @@ class PostbackProcessor:
                 db=db
             )
             
+            logger.info(f"转化记录保存成功：ID={conversion.id}, conversion_id={conversion.conversion_id}")
+            
             # 更新 Click 统计
             if click_association:
+                logger.info("=== 更新 Click 统计 ===")
                 await ConversionSaver.update_click_conversion(
                     click_association=click_association,
                     conversion_id=conversion.id,
                     db=db
                 )
+                logger.info("Click 统计更新成功")
             
             # ========== 第 9 步：渠道转发 ==========
+            logger.info("=== 第 9 步：渠道转发 ===")
             if click_association and click_association.get('publisher'):
+                logger.info(f"开始转发到渠道：publisher_id={click_association.get('publisher_id')}")
                 await PostbackForwarder.forward_to_publisher(conversion, db, click_association)
+                logger.info("渠道转发完成")
+            else:
+                logger.info("无渠道信息，跳过转发")
             
             # ========== 第 10 步：通知发送 ==========
+            logger.info("=== 第 10 步：通知发送 ===")
             await PostbackNotifier.notify_conversion(conversion, db)
+            logger.info("通知发送完成")
             
             # ========== 第 11 步：提交事务 ==========
+            logger.info("=== 第 11 步：提交事务 ===")
             await db.commit()
+            logger.info("事务提交成功")
             
             # ========== 完成 ==========
+            logger.info("=== PostBack 处理完成 ===")
             logger.info(
                 f"Postback 处理完成：platform={platform}, "
                 f"conversion_id={conversion.id}, payout={final_payout}"

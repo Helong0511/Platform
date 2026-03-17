@@ -14,9 +14,15 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
-def _check_bot_available() -> bool:
-    """检查 Bot 是否可用"""
-    return bot_initialized and TELEBOT_AVAILABLE and bot is not None
+def _check_bot_available() -> tuple[bool, str]:
+    """检查 Bot 是否可用，并返回详细状态信息"""
+    if not TELEBOT_AVAILABLE:
+        return False, "pyTelegramBotAPI 模块未安装"
+    if not bot_initialized:
+        return False, "Bot 未初始化"
+    if bot is None:
+        return False, "Bot 实例为 None"
+    return True, "Bot 可用"
 
 
 def send_telegram_message(
@@ -41,8 +47,9 @@ def send_telegram_message(
     Returns:
         bool: 是否发送成功
     """
-    if not _check_bot_available():
-        logger.warning("Bot 未初始化，无法发送消息")
+    bot_available, status_msg = _check_bot_available()
+    if not bot_available:
+        logger.warning(f"Bot 不可用，无法发送消息: {status_msg}")
         return False
     
     # 向后兼容：判断是旧方式还是新方式
@@ -130,8 +137,9 @@ def send_telegram_message_with_buttons(
     Returns:
         tuple[bool, Optional[int]]: (是否发送成功, 消息ID)
     """
-    if not _check_bot_available():
-        logger.warning("Bot 未初始化，无法发送消息")
+    bot_available, status_msg = _check_bot_available()
+    if not bot_available:
+        logger.warning(f"Bot 不可用，无法发送消息: {status_msg}")
         return False, None
     
     try:
