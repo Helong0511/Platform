@@ -120,6 +120,10 @@ async def open_master_html(request: Request):
         response = FileResponse(path=master_html_path)
         # 直接设置CSP头，允许内联脚本和Font Awesome CDN
         response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: https:; font-src 'self' data: https://cdnjs.cloudflare.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+        # 添加缓存控制头，防止浏览器缓存
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
         logger.warning(f"[斗篷服务] /change 请求处理完成: 返回master.html")
         return response
     except HTTPException:
@@ -344,6 +348,10 @@ async def open_master_html_with_redirect(
         response = HTMLResponse(content=html_content)
         # 直接设置CSP头，允许内联脚本和Font Awesome CDN
         response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: https:; font-src 'self' data: https://cdnjs.cloudflare.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+        # 添加缓存控制头，防止浏览器缓存
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
         
         # 设置session_id到cookie，确保相同浏览器会话使用相同的标识
         logger.warning(f"[斗篷服务] 设置会话cookie: session_id={session_id}")
