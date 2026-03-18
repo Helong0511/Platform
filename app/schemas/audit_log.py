@@ -2,9 +2,11 @@
 用户操作日志Schema
 用于API请求和响应的数据验证
 """
-from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional
+
+from pydantic import BaseModel, Field
+
 from app.schemas.base import BaseSchema, ResponseBaseSchema, PaginatedResponseBaseSchema
 
 

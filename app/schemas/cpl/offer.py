@@ -1,10 +1,11 @@
 """
 Offer Schema
 """
-from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List
 from datetime import datetime
+from typing import Optional, List
 from urllib.parse import urlparse
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class OfferBase(BaseModel):
@@ -44,14 +45,17 @@ class OfferBase(BaseModel):
 class PublisherConfig(BaseModel):
     """渠道配置"""
     publisher_id: int = Field(..., description="渠道ID")
-    downstream_cap: Optional[int] = Field(None, ge=0, description="该渠道的下游每天转化个数的限制，如果渠道转化超过了这个值就不通知渠道了。客户登录查看时，也只显示真实的（真实不超过【下游Cap】的）转化")
-    affiliate_payout: Optional[float] = Field(None, ge=0, description="该渠道的转化金额（不是金额的扣减比例）。如果上游通知的金额大于这个金额，就按照【下游PO】的金额通知渠道")
+    downstream_cap: Optional[int] = Field(None, ge=0,
+                                          description="该渠道的下游每天转化个数的限制，如果渠道转化超过了这个值就不通知渠道了。客户登录查看时，也只显示真实的（真实不超过【下游Cap】的）转化")
+    affiliate_payout: Optional[float] = Field(None, ge=0,
+                                              description="该渠道的转化金额（不是金额的扣减比例）。如果上游通知的金额大于这个金额，就按照【下游PO】的金额通知渠道")
 
 
 class OfferCreate(OfferBase):
     """创建Offer"""
     publisher_ids: Optional[list[int]] = Field(None, description="分配的渠道ID列表（已废弃，使用publisher_configs）")
-    publisher_configs: Optional[List[PublisherConfig]] = Field(None, description="渠道配置列表，每个渠道对应一个下游Cap和下游PO")
+    publisher_configs: Optional[List[PublisherConfig]] = Field(None,
+                                                               description="渠道配置列表，每个渠道对应一个下游Cap和下游PO")
 
 
 class OfferUpdate(BaseModel):
@@ -74,7 +78,8 @@ class OfferUpdate(BaseModel):
     click_validity_hours: Optional[int] = Field(None, ge=1, le=8760, description="点击有效期（小时）")
     is_active: Optional[bool] = Field(None, description="是否激活")
     publisher_ids: Optional[list[int]] = Field(None, description="分配的渠道ID列表（已废弃，使用publisher_configs）")
-    publisher_configs: Optional[List[PublisherConfig]] = Field(None, description="渠道配置列表，每个渠道对应一个下游Cap和下游PO")
+    publisher_configs: Optional[List[PublisherConfig]] = Field(None,
+                                                               description="渠道配置列表，每个渠道对应一个下游Cap和下游PO")
 
 
 class OfferResponse(OfferBase):
@@ -90,4 +95,3 @@ class OfferResponse(OfferBase):
 
     class Config:
         from_attributes = True
-

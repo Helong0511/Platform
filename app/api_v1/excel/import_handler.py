@@ -2,42 +2,39 @@
 Excel导入处理模块
 处理广告数据的Excel导入逻辑
 """
-from fastapi import UploadFile, HTTPException, status, Query, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import or_, and_
-from sqlalchemy.exc import IntegrityError
-from typing import Any
-import logging
 import asyncio
-import uuid
-from io import BytesIO
+import logging
 from datetime import datetime, date
+from io import BytesIO
+from typing import Any
 
 import pandas as pd
-# 延迟导入 openpyxl，避免多进程环境下的导入问题
+from fastapi import UploadFile, HTTPException, status
+from sqlalchemy import or_, and_
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
-from app.core.database import get_db
-from app.core.security import require_admin
-from app.core.config import settings
-from app.core.constants import ECPM_MULTIPLIER
-from app.models.models import User, Client, Product, AdData, AdminNotificationConfig
-from app.core.country_code import find_country_code_by_any_format
-from app.schemas.base import ResponseBaseSchema
-from app.schemas.excel import ExcelImportResponse
 from app.api_v1.excel.utils import (
     allowed_file, ALLOWED_MIME_TYPES, parse_date_value, calculate_rates,
     safe_get_value, is_valid_numeric_value, normalize_date_key
 )
 from app.api_v1.ml_model.ml_model import ColumnMappingService, REQUIRED_FIELDS
+from app.core.ad_data_processor import check_and_notify_data_decrease
+from app.core.config import settings
+from app.core.constants import ECPM_MULTIPLIER
+from app.core.country_code import find_country_code_by_any_format
+from app.core.exceptions import handle_integrity_error
 from app.core.product_assignment import initialize_product_assignment
 from app.core.utils import (
     truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data,
     find_or_create_default_client, format_error_details, build_import_message
 )
-from app.core.ad_data_processor import check_and_notify_data_decrease
-from app.core.exceptions import handle_integrity_error
+from app.models.models import User, Client, Product, AdData, AdminNotificationConfig
+from app.schemas.excel import ExcelImportResponse
 from app.services.telegram_notification_service import TelegramNotificationService
+
+# 延迟导入 openpyxl，避免多进程环境下的导入问题
 
 logger = logging.getLogger(__name__)
 
@@ -74,17 +71,17 @@ def clean_numeric_value(value: Any) -> float:
     """
     if value is None:
         raise ValueError("值不能为None")
-    
+
     # 转换为字符串并去除首尾空格
     str_value = str(value).strip()
-    
+
     if not str_value:
         raise ValueError("值不能为空")
-    
+
     # 去除百分号（如果存在）
     if str_value.endswith('%'):
         str_value = str_value[:-1].strip()
-    
+
     # 转换为浮点数
     try:
         return float(str_value)
@@ -319,7 +316,8 @@ async def process_column_mapping(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[s
         "display_count", "click_count", "revenue_before_deduct"
     ]
     # 可选字段（如果不存在会自动计算）
-    optional_columns = ["coverage_rate", "display_rate", "click_rate", "viewability_rate", "ecpm_before_deduct", "cpc", "pageviews"]
+    optional_columns = ["coverage_rate", "display_rate", "click_rate", "viewability_rate", "ecpm_before_deduct", "cpc",
+                        "pageviews"]
     missing_columns = [col for col in required_columns if col not in df.columns]
 
     # 规则2：字段映射不完整，报错不导入（完全基于训练数据，不能识别就不导入）
@@ -696,7 +694,7 @@ async def process_row_data(
             display_count = int(row["display_count"])
             click_count = int(row["click_count"])
             revenue_before = clean_numeric_value(row["revenue_before_deduct"])
-            
+
             # 优先使用Excel表中的映射关系数据，如果不存在或为空/NaN，才按照计算公式计算
             # 覆盖率（匹配率）= 匹配数/请求数 * 100
             coverage_rate_val = row.get("coverage_rate")
@@ -704,49 +702,49 @@ async def process_row_data(
                 coverage_rate = clean_numeric_value(coverage_rate_val)
             else:
                 coverage_rate = (match_count / request_count * 100) if request_count > 0 else 0.0
-            
+
             # 展示率 = 展示数/匹配数 * 100
             display_rate_val = row.get("display_rate")
             if display_rate_val is not None and pd.notna(display_rate_val) and str(display_rate_val).strip() != "":
                 display_rate = clean_numeric_value(display_rate_val)
             else:
                 display_rate = (display_count / match_count * 100) if match_count > 0 else 0.0
-            
+
             # 点击率 = 点击数/展示数 * 100
             click_rate_val = row.get("click_rate")
             if click_rate_val is not None and pd.notna(click_rate_val) and str(click_rate_val).strip() != "":
                 click_rate = clean_numeric_value(click_rate_val)
             else:
                 click_rate = (click_count / display_count * 100) if display_count > 0 else 0.0
-            
+
             # 可见率（可选字段，如果Excel中有则使用，否则使用默认值0.0）
             viewability_rate_val = safe_get_value(row, "viewability_rate")
             if is_valid_numeric_value(viewability_rate_val):
                 viewability_rate = clean_numeric_value(viewability_rate_val)
             else:
                 viewability_rate = 0.0
-            
+
             # eCPM = 收益/展示数 * 1000
             ecpm_before_val = safe_get_value(row, "ecpm_before_deduct")
             if is_valid_numeric_value(ecpm_before_val):
                 ecpm_before = clean_numeric_value(ecpm_before_val)
             else:
                 ecpm_before = (revenue_before / display_count * ECPM_MULTIPLIER) if display_count > 0 else 0.0
-            
+
             # CPC（可选字段，如果Excel中有则使用，否则使用默认值0.0）
             cpc_val = safe_get_value(row, "cpc")
             if is_valid_numeric_value(cpc_val):
                 cpc = clean_numeric_value(cpc_val)
             else:
                 cpc = 0.0
-            
+
             # PageViews（可选字段，如果Excel中有则使用，否则使用默认值0）
             pageviews_val = safe_get_value(row, "pageviews")
             if is_valid_numeric_value(pageviews_val):
                 pageviews = int(pageviews_val)
             else:
                 pageviews = 0
-                
+
         except (ValueError, TypeError) as e:
             raise ValueError(f"数值字段格式错误: {str(e)}")
 
@@ -783,13 +781,13 @@ async def process_row_data(
             # 支持的格式：alpha_2_code（二字母）、alpha_3_code（三字母）、numeric_code（数字）、country_name_en（英文名称）、country_name_zh（中文名称）、official_name_en（官方英文名称）、official_name_zh（官方中文名称）
             country_code = "ZZ"  # 默认值：全部区域
             country_input = None
-            
+
             # 尝试从 "country_code" 或 "国家代码" 列获取
             if "country_code" in row.index and pd.notna(row.get("country_code")):
                 country_input = str(row["country_code"]).strip()
             elif "国家代码" in row.index and pd.notna(row.get("国家代码")):
                 country_input = str(row["国家代码"]).strip()
-            
+
             if country_input:
                 # 尝试根据多种格式查找国家代码
                 found_country_code = await find_country_code_by_any_format(db, country_input)
@@ -802,7 +800,7 @@ async def process_row_data(
                         f"日期={row.get('date', '未知')}, 产品={row.get('product_name', '未知')}, 使用默认值 'ZZ'"
                     )
                     country_code = "ZZ"
-            
+
             # 构建国家代码匹配条件（与API数据处理逻辑一致）
             if country_code == "ZZ":
                 # 新数据是'ZZ'，匹配'ZZ'或NULL（向后兼容旧数据）
@@ -813,7 +811,7 @@ async def process_row_data(
             else:
                 # 新数据是具体国家代码，精确匹配
                 country_condition = AdData.country_code == country_code
-            
+
             existing_query = select(AdData).where(
                 AdData.date >= date_start,
                 AdData.date <= date_end,
@@ -833,13 +831,13 @@ async def process_row_data(
             # 支持的格式：alpha_2_code（二字母）、alpha_3_code（三字母）、numeric_code（数字）、country_name_en（英文名称）、country_name_zh（中文名称）、official_name_en（官方英文名称）、official_name_zh（官方中文名称）
             country_code = "ZZ"  # 默认值：全部区域
             country_input = None
-            
+
             # 尝试从 "country_code" 或 "国家代码" 列获取
             if "country_code" in row.index and pd.notna(row.get("country_code")):
                 country_input = str(row["country_code"]).strip()
             elif "国家代码" in row.index and pd.notna(row.get("国家代码")):
                 country_input = str(row["国家代码"]).strip()
-            
+
             if country_input:
                 # 尝试根据多种格式查找国家代码
                 found_country_code = await find_country_code_by_any_format(db, country_input)
@@ -852,7 +850,7 @@ async def process_row_data(
                         f"日期={row.get('date', '未知')}, 产品={row.get('product_name', '未知')}, 使用默认值 'ZZ'"
                     )
                     country_code = "ZZ"
-            
+
             # 检查数据是否减少（在更新之前）
             # 格式化日期字符串（data_date 可能是 date 或 datetime 类型）
             if isinstance(data_date, datetime):
@@ -861,7 +859,7 @@ async def process_row_data(
                 date_str = data_date.isoformat()
             else:
                 date_str = str(data_date)
-            
+
             await check_and_notify_data_decrease(
                 existing_data=existing_data,
                 new_request_count=request_count,
@@ -875,7 +873,7 @@ async def process_row_data(
                 country_code=country_code,
                 source=f"Excel导入（用户: {current_user.username}）"
             )
-            
+
             existing_data.country_code = country_code  # 更新国家代码
             existing_data.request_count = request_count
             existing_data.match_count = match_count
@@ -904,18 +902,18 @@ async def process_row_data(
             # Excel导入的日期默认是系统时区，不需要进行时区转换
             # 确保与数据库中的DateTime类型一致
             ad_data_date = normalize_date_for_ad_data(data_date)
-            
+
             # 获取国家代码（如果Excel中有，支持多种格式）
             # 支持的格式：alpha_2_code（二字母）、alpha_3_code（三字母）、numeric_code（数字）、country_name_en（英文名称）、country_name_zh（中文名称）、official_name_en（官方英文名称）、official_name_zh（官方中文名称）
             country_code = "ZZ"  # 默认值：全部区域
             country_input = None
-            
+
             # 尝试从 "country_code" 或 "国家代码" 列获取
             if "country_code" in row.index and pd.notna(row.get("country_code")):
                 country_input = str(row["country_code"]).strip()
             elif "国家代码" in row.index and pd.notna(row.get("国家代码")):
                 country_input = str(row["国家代码"]).strip()
-            
+
             if country_input:
                 # 尝试根据多种格式查找国家代码
                 found_country_code = await find_country_code_by_any_format(db, country_input)
@@ -928,7 +926,7 @@ async def process_row_data(
                         f"日期={row.get('date', '未知')}, 产品={row.get('product_name', '未知')}, 使用默认值 'ZZ'"
                     )
                     country_code = "ZZ"
-            
+
             ad_data = AdData(
                 date=ad_data_date,
                 product_id=product_info["product_id"],
@@ -1115,7 +1113,7 @@ async def import_ad_data_handler(
             f"Ad data import completed. Success: {result['success_rows']}, "
             f"Failed: {result['failed_rows']}"
         )
-        
+
         # 提前刷新以触发可能的 IntegrityError（在 get_db 自动提交之前）
         # 这样可以在提交前捕获错误并给出更友好的错误消息
         try:
@@ -1174,7 +1172,7 @@ async def import_ad_data_handler(
             telegram_msg += f"文件: {file.filename}\n"
             telegram_msg += f"总计: {result['total_rows']} 行\n"
             telegram_msg += f"✅ 成功: {result['success_rows']} 条"
-            
+
             if result.get('new_rows', 0) > 0:
                 telegram_msg += f"（新增 {result['new_rows']} 条"
             if result.get('updated_rows', 0) > 0:
@@ -1185,21 +1183,21 @@ async def import_ad_data_handler(
             else:
                 if result.get('new_rows', 0) > 0:
                     telegram_msg += "）"
-            
+
             if result.get('failed_rows', 0) > 0:
                 telegram_msg += f"\n❌ 失败: {result['failed_rows']} 条"
-            
+
             # 获取管理员配置并发送通知
             try:
                 admin_config_result = await db.execute(
                     select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
                 )
                 admin_config = admin_config_result.scalars().first()
-                
+
                 if (
-                    admin_config
-                    and admin_config.telegram_enabled
-                    and admin_config.telegram_chat_id
+                        admin_config
+                        and admin_config.telegram_enabled
+                        and admin_config.telegram_chat_id
                 ):
                     await asyncio.wait_for(
                         TelegramNotificationService.send_admin_notification(
@@ -1210,7 +1208,8 @@ async def import_ad_data_handler(
                         ),
                         timeout=5.0
                     )
-                    logger.info(f"Telegram 通知发送成功，用户: {current_user.username}, 文件: {file.filename}, 成功: {result['success_rows']} 条")
+                    logger.info(
+                        f"Telegram 通知发送成功，用户: {current_user.username}, 文件: {file.filename}, 成功: {result['success_rows']} 条")
             except asyncio.TimeoutError:
                 logger.warning(f"发送 Telegram 通知超时，用户: {current_user.username}, 文件: {file.filename}")
             except Exception as e:

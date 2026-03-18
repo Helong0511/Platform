@@ -42,7 +42,7 @@
     }
 }
 """
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 # 任务配置类型定义
 TaskConfig = Dict[str, Any]
@@ -74,7 +74,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "0 1 1 * *",  # 每月1号凌晨1点
         "description": "归档6个月前的数据",
     },
-    
+
     # ========== 清理旧日志任务 ==========
     "清理旧日志": {
         "task_name": "清理旧日志",
@@ -88,7 +88,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "0 2 1 * *",  # 每月1号凌晨2点
         "description": "清理90天前的用户操作日志，减少日志表数据量",
     },
-    
+
     # ========== 清理过期会话和黑名单任务 ==========
     "清理过期会话和黑名单": {
         "task_name": "清理过期会话和黑名单",
@@ -100,7 +100,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "0 2 * * *",  # 每天凌晨2点
         "description": "清理过期超过30天的会话记录和黑名单记录，标记超过7天未活动的会话为非活跃",
     },
-    
+
     # ========== CPL 系统定时任务 ==========
     "每日Cap重置": {
         "task_name": "每日Cap重置",
@@ -112,7 +112,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "0 0 * * *",  # 每天 00:00 UTC
         "description": "重置所有Cap配置的每日计数，每天执行一次",
     },
-    
+
     # ========== 短链接服务定时任务 ==========
     "短链接点击次数同步": {
         "task_name": "短链接点击次数同步",
@@ -124,7 +124,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "*/1 * * * *",  # 每1分钟执行一次
         "description": "将Redis中的短链接点击次数批量同步到数据库，每1分钟执行一次",
     },
-    
+
     "点击记录队列批量处理": {
         "task_name": "点击记录队列批量处理",
         "task_module": "app.scheduler.short_link_tasks",
@@ -135,7 +135,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "* * * * *",  # 每分钟执行一次（高并发优化，实际处理时会循环处理直到队列为空）
         "description": "从Redis队列批量取出点击记录并插入到数据库，每分钟执行一次，每次处理最多1000条（高并发优化）",
     },
-    
+
     "点击记录归档": {
         "task_name": "点击记录归档",
         "task_module": "app.scheduler_module.tasks.archive_old_clicks",
@@ -146,7 +146,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "0 3 1 * *",  # 每月1号凌晨3点执行
         "description": "归档90天前的点击记录到归档表，减少主表数据量，提升查询性能",
     },
-    
+
     # ========== TQT API获取数据任务 ==========
     "TQT API获取数据": {
         "task_name": "TQT API获取数据",
@@ -158,7 +158,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "*/30 * * * *",  # 每10分钟
         "description": "每隔30分钟执行一次，从TQT API获取广告数据并导入到数据库",
     },
-    
+
     # ========== Skymobi API获取数据任务 ==========
     "Skymobi API获取数据": {
         "task_name": "Skymobi API获取数据",
@@ -170,7 +170,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "*/30 * * * *",  # 每10分钟
         "description": "每隔10分钟执行一次，从Skymobi API获取广告数据",
     },
-    
+
     # ========== yangyangdeyi API获取数据任务 ==========
     "yangyangdeyi API获取数据": {
         "task_name": "yangyangdeyi API获取数据",
@@ -182,7 +182,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "*/30 * * * *",  # 每10分钟
         "description": "每隔30分钟执行一次，从yangyangdeyi API获取广告数据",
     },
-    
+
     # ========== Addermobi API获取数据任务 ==========
     "Addermobi API获取数据": {
         "task_name": "Addermobi API获取数据",
@@ -216,7 +216,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
     #     "result_getter_function": "get_task_result",
     #     # 数据库配置（可选，如果不提供会使用默认值）
     #     "cron_expression": "0 * * * *",  # 默认每小时
-    
+
     # ========== 通知汇总任务 ==========
     "通知汇总任务（每小时）": {
         "task_name": "通知汇总任务（每小时）",
@@ -228,7 +228,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "0 * * * *",  # 每小时整点执行
         "description": "每小时执行一次，汇总并发送 hourly 频率的客户通知",
     },
-    
+
     "通知汇总任务（每天）": {
         "task_name": "通知汇总任务（每天）",
         "task_module": "app.scheduler_module.tasks.notification_summary_task",
@@ -242,4 +242,3 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
     #     "description": "任务描述",
     # },
 }
-

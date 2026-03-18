@@ -2,28 +2,26 @@
 Excel导出处理模块
 处理广告数据的Excel导出逻辑
 """
-from fastapi import Depends, HTTPException, status, Query
-from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func, and_, or_, text
-from sqlalchemy.sql import literal_column
-from datetime import date, datetime
+import logging
 from calendar import monthrange
+from datetime import date, datetime
 from io import BytesIO
 from urllib.parse import quote
-import logging
 
 import pandas as pd
+from fastapi import Depends
+from fastapi.responses import StreamingResponse
+from sqlalchemy import func, and_, or_, text
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
 from app.core.database import get_db
-from app.core.security import get_current_user
-from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
+from app.core.query_utils import check_use_assignment_table
+from app.core.security import get_current_user
 from app.core.utils import get_app_now_naive
-from sqlalchemy.orm import selectinload
 from app.models.models import User, Client, Product, AdData, UserRole, ProductAssignment, CountryInfo
-from app.core.query_utils import product_assignment_join_condition, date_range_condition, check_use_assignment_table
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +59,7 @@ async def export_ad_data_handler(
         # 额外检查：客户是否有任何广告数据（在应用筛选条件之前先检查是否有数据）
         # 先检查是否使用产品分配历史表
         use_assignment_table_for_count = await check_use_assignment_table(db)
-        
+
         data_count_query = select(func.count(AdData.id)).join(
             Product, AdData.product_id == Product.id
         )
@@ -91,10 +89,10 @@ async def export_ad_data_handler(
             # 旧的查询方式
             if target_client_id is not None:
                 data_count_query = data_count_query.where(Product.client_id == target_client_id)
-        
+
         # 应用产品状态过滤（只统计激活状态的产品）
         data_count_query = data_count_query.where(Product.is_active == True)
-        
+
         # 应用日期范围过滤（如果指定了日期范围）
         if start_date:
             start_datetime = datetime.combine(start_date, datetime.min.time())
@@ -102,7 +100,7 @@ async def export_ad_data_handler(
         if end_date:
             end_datetime = datetime.combine(end_date, datetime.max.time())
             data_count_query = data_count_query.where(AdData.date <= end_datetime)
-        
+
         data_count_result = await db.execute(data_count_query)
         total_data_count = data_count_result.scalar() or 0
 
@@ -119,11 +117,11 @@ async def export_ad_data_handler(
 
     # 检查是否使用产品分配历史表
     use_assignment_table = await check_use_assignment_table(db)
-    
+
     # 构建查询（同时查询国家信息）
     query = select(AdData, CountryInfo)
     query = query.join(Product, AdData.product_id == Product.id)
-    
+
     if use_assignment_table:
         # 使用产品分配历史表：根据日期范围匹配正确的客户归属（优化：避免在 AdData.date 上使用 func.date()）
         # 注意：导出时需要考虑日期范围，确保只导出该客户在该时间段内的数据
@@ -155,18 +153,18 @@ async def export_ad_data_handler(
         else:
             # 如果没有指定客户ID，JOIN Client表以便后续可能的权限过滤
             query = query.join(Client, Product.client_id == Client.id)
-    
+
     # 左关联国家信息（在所有其他JOIN之后）
     # 修复排序规则冲突：使用 COLLATE 统一排序规则
     query = query.outerjoin(
         CountryInfo,
-        AdData.country_code.collate('utf8mb4_unicode_ci') == 
+        AdData.country_code.collate('utf8mb4_unicode_ci') ==
         CountryInfo.alpha_2_code.collate('utf8mb4_unicode_ci')
     )
 
     # 应用产品状态过滤（只显示激活状态的产品，与 ad_data.py 保持一致）
     query = query.where(Product.is_active == True)
-    
+
     # 应用日期过滤（直接使用条件，避免函数可能的问题）
     if start_date:
         start_datetime = datetime.combine(start_date, datetime.min.time())
@@ -182,7 +180,7 @@ async def export_ad_data_handler(
         # 当前月的最后一天
         _, last_day = monthrange(today.year, today.month)
         month_end = date(today.year, today.month, last_day)
-        
+
         month_start_datetime = datetime.combine(month_start, datetime.min.time())
         month_end_datetime = datetime.combine(month_end, datetime.max.time())
         query = query.where(AdData.date >= month_start_datetime)

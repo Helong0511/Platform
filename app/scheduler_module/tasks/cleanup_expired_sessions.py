@@ -3,8 +3,9 @@
 建议每天凌晨2点执行
 """
 import logging
-from datetime import datetime, timezone, timedelta
-from sqlalchemy import select, delete, update
+from datetime import timedelta
+
+from sqlalchemy import delete, update
 
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive

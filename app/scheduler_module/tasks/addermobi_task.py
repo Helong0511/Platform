@@ -6,13 +6,14 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta
-import pytz
-import httpx
 
-from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+import httpx
+import pytz
+
 from app.core.ad_data_processor import process_api_ad_data
 from app.core.auto_bot import send_telegram_message
+from app.core.config import settings
+from app.core.database import AsyncSessionLocal
 from app.scheduler_module.task_names import ADDERMOBI_API_TASK_NAME
 from app.scheduler_module.task_utils import get_admin_user, format_result_summary
 
@@ -40,8 +41,8 @@ APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
 
 async def addermobi_api_task(
-    start_date: str | None = None,
-    end_date: str | None = None
+        start_date: str | None = None,
+        end_date: str | None = None
 ) -> None:
     """
     Addermobi定时任务主函数
@@ -144,14 +145,14 @@ async def addermobi_api_task(
             app_yesterday = app_now - timedelta(days=1)
             yesterday_str = app_yesterday.strftime("%Y-%m-%d")
             today_str = app_now.strftime("%Y-%m-%d")
-            
+
             if 0 <= app_now.hour <= 2:
                 start_date_str = yesterday_str
                 end_date_str = today_str
             else:
                 start_date_str = today_str
                 end_date_str = today_str
-        
+
         # Addermobi API使用两个条件：大于等于起始日期，小于等于结束日期
         p1 = [
             {"name": "Revenue_time", "value": start_date_str, "displayType": "thanorequal"},

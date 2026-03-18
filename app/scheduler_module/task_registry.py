@@ -2,12 +2,12 @@
 任务注册表
 将数据库中的任务名称映射到实际的任务函数
 """
+import logging
 import re
 from typing import Dict, Callable, Optional, Any
-import logging
 
-from app.scheduler_module.task_config import TASK_CONFIGS
 from app.core.config import settings
+from app.scheduler_module.task_config import TASK_CONFIGS
 
 logger = logging.getLogger(__name__)
 
@@ -103,22 +103,22 @@ def _validate_module_path(module_path: str) -> bool:
     """
     if not module_path:
         return False
-    
+
     # 只允许导入 app. 开头的模块（应用内部模块）
     if not module_path.startswith('app.'):
         logger.warning(f"拒绝导入非应用模块: {module_path}（只允许导入 app. 开头的模块）")
         return False
-    
+
     # 验证路径格式（只允许字母、数字、点、下划线）
     if not re.match(r'^[a-zA-Z0-9_.]+$', module_path):
         logger.warning(f"模块路径格式无效: {module_path}（包含非法字符）")
         return False
-    
+
     # 禁止相对导入（..）
     if '..' in module_path:
         logger.warning(f"拒绝相对导入: {module_path}")
         return False
-    
+
     return True
 
 
@@ -141,7 +141,7 @@ def load_function_by_path(function_path: str) -> Optional[Callable[..., Any]]:
     if not function_path:
         logger.error("函数路径为空")
         return None
-        
+
     try:
         # 分割模块路径和函数名
         parts = function_path.rsplit('.', 1)
@@ -252,17 +252,17 @@ def auto_register_tasks() -> None:
     自动注册所有任务函数
     从 task_config.py 统一配置文件读取所有任务配置并自动注册
     """
-    
+
     registered_count = 0
     failed_count = 0
-    
+
     for config_key, config in TASK_CONFIGS.items():
         try:
             task_name = config["task_name"]
             task_module = config["task_module"]
             task_function = config["task_function"]
             wrapper = config.get("wrapper", False)
-            
+
             # ====== 安全验证：验证模块路径 ======
             if not _validate_module_path(task_module):
                 logger.error(
@@ -289,7 +289,7 @@ def auto_register_tasks() -> None:
                 )
                 failed_count += 1
                 continue
-                
+
             if not hasattr(module, task_function):
                 # 列出模块中可用的属性，帮助调试
                 available_attrs = [attr for attr in dir(module) if not attr.startswith('_')]
@@ -299,7 +299,7 @@ def auto_register_tasks() -> None:
                 )
                 failed_count += 1
                 continue
-                
+
             task_func = getattr(module, task_function)
             if not callable(task_func):
                 logger.error(
@@ -307,25 +307,27 @@ def auto_register_tasks() -> None:
                 )
                 failed_count += 1
                 continue
-            
+
             # 特殊处理：清理旧日志任务需要包装函数
             if wrapper and task_name == "清理旧日志":
                 # 创建包装函数，使用配置中的参数（使用默认参数避免闭包问题）
-                async def cleanup_old_logs_wrapper(func=task_func, days=settings.AUDIT_LOG_RETENTION_DAYS, archive=settings.AUDIT_LOG_ARCHIVE):
+                async def cleanup_old_logs_wrapper(func=task_func, days=settings.AUDIT_LOG_RETENTION_DAYS,
+                                                   archive=settings.AUDIT_LOG_ARCHIVE):
                     """清理旧日志任务的包装函数，使用配置中的参数"""
                     return await func(days=days, archive=archive)
+
                 register_task_function(task_name, cleanup_old_logs_wrapper)
             else:
                 register_task_function(task_name, task_func)
-            
+
             registered_count += 1
             logger.debug(f"已注册任务: {task_name}")
-            
+
         except KeyError as e:
             logger.error(f"任务配置 '{config_key}' 缺少必要字段: {e}")
             failed_count += 1
         except Exception as e:
             logger.error(f"注册任务 '{config_key}' 失败: {e}", exc_info=True)
             failed_count += 1
-    
+
     logger.info(f"任务注册完成: 成功 {registered_count} 个, 失败 {failed_count} 个")

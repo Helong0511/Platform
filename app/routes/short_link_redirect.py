@@ -25,30 +25,29 @@ import asyncio
 import json
 import logging
 import re
-from typing import Optional, Dict, Any
-from datetime import datetime
-from urllib.parse import urlparse, urlencode, parse_qs, urlunparse, quote
 from collections import OrderedDict
+from datetime import datetime
+from typing import Optional
+from urllib.parse import urlparse, urlencode, parse_qs, urlunparse, quote
 
 from fastapi import APIRouter, Depends, Query, Request, BackgroundTasks, HTTPException, status
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.api_v1.tracking.tracking import create_click_background
+from app.core.clicks_queue import enqueue_click
 from app.core.database import get_db
+from app.core.device_info import collect_request_info
+from app.core.offer_cache import set_offer_cache
 from app.core.short_link_cache import (
     get_short_link_from_cache,
     set_short_link_to_cache,
-    serialize_short_link,
-    update_short_link_cache
+    serialize_short_link
 )
 from app.core.short_link_click_counter import increment_click_count_async
 from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
-from app.core.device_info import collect_request_info
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
-from app.core.clicks_queue import enqueue_click
-from app.core.offer_cache import set_offer_cache
-from app.api_v1.tracking.tracking import create_click_background
 from app.models.models import ShortLink, Offer, Publisher, Advertiser
 
 # 日志记录器
@@ -62,11 +61,11 @@ router = APIRouter()
             summary="处理短链接点击上报",
             tags=["短链接服务"])
 async def handle_report(
-    id: str = Query(..., description="短链接代码"),
-    event: str = Query(..., description="事件类型"),
-    time: int = Query(..., description="时间戳"),
-    request: Request = None,
-    db: AsyncSession = Depends(get_db)
+        id: str = Query(..., description="短链接代码"),
+        event: str = Query(..., description="事件类型"),
+        time: int = Query(..., description="时间戳"),
+        request: Request = None,
+        db: AsyncSession = Depends(get_db)
 ):
     """
     处理短链接点击上报，更新点击次数
@@ -82,14 +81,16 @@ async def handle_report(
             client_ip = request.client.host if request.client else "未知"
             user_agent = request.headers.get("user-agent", "未知")
             referer = request.headers.get("referer", "未知")
-        
-        logger.warning(f"[短链接点击] 收到上报请求: id={id}, event={event}, time={time}, client_ip={client_ip}, user_agent={user_agent}, referer={referer}")
-        
+
+        logger.warning(
+            f"[短链接点击] 收到上报请求: id={id}, event={event}, time={time}, client_ip={client_ip}, user_agent={user_agent}, referer={referer}")
+
         # 尝试从缓存获取短链接信息
         cached_data = await get_short_link_from_cache(id)
-        
+
         if cached_data:
-            logger.warning(f"[短链接点击] 从缓存获取数据: short_code={id}, 原始click_count={cached_data.get('click_count', 0)}")
+            logger.warning(
+                f"[短链接点击] 从缓存获取数据: short_code={id}, 原始click_count={cached_data.get('click_count', 0)}")
             # 更新点击次数（缓存）
             from app.core.short_link_cache import update_short_link_cache
             cached_data["click_count"] = (cached_data.get("click_count", 0)) + 1
@@ -100,15 +101,16 @@ async def handle_report(
             # 从数据库查询
             from app.models.models import ShortLink
             from sqlalchemy.future import select
-            
+
             logger.warning(f"[短链接点击] 缓存未命中，从数据库查询: short_code={id}")
             result = await db.execute(
                 select(ShortLink).where(ShortLink.short_code == id)
             )
             short_link = result.scalars().first()
-            
+
             if short_link:
-                logger.warning(f"[短链接点击] 数据库查询结果: short_code={id}, id={short_link.id}, 原始click_count={short_link.click_count or 0}")
+                logger.warning(
+                    f"[短链接点击] 数据库查询结果: short_code={id}, id={short_link.id}, 原始click_count={short_link.click_count or 0}")
                 # 更新点击次数（数据库）
                 short_link.click_count = (short_link.click_count or 0) + 1
                 logger.warning(f"[短链接点击] 更新数据库: short_code={id}, 新click_count={short_link.click_count}")
@@ -116,7 +118,7 @@ async def handle_report(
                 logger.warning(f"[短链接点击] 数据库提交成功")
             else:
                 logger.warning(f"[短链接点击] 短链接不存在: short_code={id}")
-        
+
         # 返回成功响应
         logger.warning(f"[短链接点击] 处理完成: id={id}, client_ip={client_ip}")
         return {"status": "success", "message": "Report received", "client_ip": client_ip}
@@ -143,42 +145,42 @@ def _extract_and_filter_channel_params(request_params: dict) -> dict:
     """
     # 占位符正则表达式：匹配 {变量名} 格式
     placeholder_pattern = re.compile(r'\{[a-zA-Z_][a-zA-Z0-9_]*\}')
-    
+
     # 需要排除的参数（系统参数，不需要保存到 url_params）
     excluded_params = {'offer_id', 'channel_id', 'publisher_id'}
-    
+
     channel_params = {}
-    
+
     # 遍历所有请求参数，排除系统参数，并过滤掉包含占位符的参数
     for key, value in request_params.items():
         key_lower = key.lower()
-        
+
         # 跳过系统参数（offer_id 和 channel_id）
         if key_lower in excluded_params:
             continue
-        
+
         # 处理列表值
         if isinstance(value, list):
             value = value[0] if value else ''
-        
+
         # 将值转为字符串进行检查
         value_str = str(value) if value else ''
-        
+
         # 如果值不包含占位符，则保存
         if value_str and not placeholder_pattern.search(value_str):
             channel_params[key] = value
-    
+
     return channel_params
 
 
 async def _replace_short_link_placeholders(
-    original_url: str,
-    click_id: str,
-    offer_id: Optional[int],
-    publisher_id: Optional[int],
-    advertiser_id: Optional[int],
-    request_info: dict,
-    db: AsyncSession
+        original_url: str,
+        click_id: str,
+        offer_id: Optional[int],
+        publisher_id: Optional[int],
+        advertiser_id: Optional[int],
+        request_info: dict,
+        db: AsyncSession
 ) -> str:
     """
     替换短链接原始URL中的占位符
@@ -240,11 +242,11 @@ async def _replace_short_link_placeholders(
     # - \} : 匹配右花括号（转义）
     pattern = r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}'
     placeholders = re.findall(pattern, original_url)
-    
+
     # 如果没有找到占位符，直接返回原始URL
     if not placeholders:
         return original_url
-    
+
     # ==================== 构建基础占位符值字典 ====================
     # 这些值直接从函数参数和request_info中获取，不需要查询数据库
     values = {
@@ -256,17 +258,18 @@ async def _replace_short_link_placeholders(
         'user_agent': request_info.get('user_agent', ''),  # 浏览器User-Agent字符串
         'referer': request_info.get('referer', ''),  # 来源页面URL
     }
-    
+
     # ==================== 并行查询数据库（优化性能） ====================
     # 使用 asyncio.gather 并行查询 Offer、Publisher、Advertiser
     # 这样可以减少总查询时间，特别是在需要查询多个实体时
-    
+
     # 准备查询任务
     query_tasks = []
-    
+
     # Offer 查询任务
     if offer_id:
         values['offer_id'] = str(offer_id)
+
         async def query_offer():
             try:
                 offer_result = await db.execute(
@@ -276,17 +279,19 @@ async def _replace_short_link_placeholders(
             except Exception as e:
                 logger.warning(f"查询Offer信息失败: offer_id={offer_id}, error={e}")
                 return None
+
         query_tasks.append(('offer', query_offer()))
     else:
         values['offer_id'] = ''
         values['offer_name'] = ''
         values['advertiser_offer_id'] = ''
-    
+
     # Publisher 查询任务
     if publisher_id is not None:
         publisher_id_str = str(publisher_id)
         values['publisher_id'] = publisher_id_str
         values['channel_id'] = publisher_id_str
+
         async def query_publisher():
             try:
                 publisher_result = await db.execute(
@@ -296,16 +301,18 @@ async def _replace_short_link_placeholders(
             except Exception as e:
                 logger.warning(f"查询Publisher信息失败: publisher_id={publisher_id}, error={e}")
                 return None
+
         query_tasks.append(('publisher', query_publisher()))
     else:
         values['publisher_id'] = ''
         values['channel_id'] = ''
         values['publisher_name'] = ''
         values['publisher_email'] = ''
-    
+
     # Advertiser 查询任务
     if advertiser_id:
         values['advertiser_id'] = str(advertiser_id)
+
         async def query_advertiser():
             try:
                 advertiser_result = await db.execute(
@@ -315,31 +322,33 @@ async def _replace_short_link_placeholders(
             except Exception as e:
                 logger.warning(f"查询Advertiser信息失败: advertiser_id={advertiser_id}, error={e}")
                 return None
+
         query_tasks.append(('advertiser', query_advertiser()))
     else:
         values['advertiser_id'] = ''
         values['advertiser_name'] = ''
         values['advertiser_email'] = ''
-    
+
     # 并行执行所有查询
     if query_tasks:
         results = await asyncio.gather(*[task[1] for task in query_tasks], return_exceptions=True)
-        
+
         # 处理查询结果
         for i, (entity_type, _) in enumerate(query_tasks):
             result = results[i]
-            
+
             # 如果查询失败（异常），跳过
             if isinstance(result, Exception) or result is None:
                 continue
-            
+
             if entity_type == 'offer':
                 offer = result
                 if offer:
                     values['offer_name'] = offer.offer_name or ''
                     values['advertiser_offer_id'] = offer.advertiser_offer_id or ''
                     values['offer_payout'] = str(offer.payout) if offer.payout is not None else ''
-                    values['affiliate_payout'] = str(offer.affiliate_payout) if offer.affiliate_payout is not None else ''
+                    values['affiliate_payout'] = str(
+                        offer.affiliate_payout) if offer.affiliate_payout is not None else ''
                     values['offer_country'] = offer.country or ''
                     values['offer_category'] = offer.category or ''
                     values['offer_type'] = offer.type or ''
@@ -354,7 +363,7 @@ async def _replace_short_link_placeholders(
                 if advertiser:
                     values['advertiser_name'] = advertiser.advertiser_name or ''
                     values['advertiser_email'] = advertiser.email or ''
-    
+
     # ==================== 占位符别名映射表 ====================
     # 支持多种命名格式的占位符，统一映射到标准键名
     # 例如：{clickId}、{clickid}、{aff_click_id} 都映射到 'click_id'
@@ -366,42 +375,44 @@ async def _replace_short_link_placeholders(
         'cid': 'click_id',  # 更短缩写
         'aff_click_id': 'click_id',  # 带前缀
         'affclickid': 'click_id',  # 带前缀全小写
-        
+
         # publisher_id 的别名
         'publisherId': 'publisher_id',
         'publisherid': 'publisher_id',
-        
+
         # channel_id 的别名（注意：channel_id 最终会映射到 publisher_id）
         'channelId': 'channel_id',
         'channelid': 'channel_id',
         'sub_affid': 'channel_id',  # 常见的渠道ID参数名
         'subaffid': 'channel_id',
-        
+
         # offer_id 的别名
         'offerId': 'offer_id',
         'offerid': 'offer_id',
     }
-    
+
     # ==================== 开始替换占位符 ====================
     result_url = original_url  # 复制原始URL，避免修改原始字符串
     logger.debug(f"[占位符替换] 开始替换占位符，原始URL: {original_url}")
     logger.debug(f"[占位符替换] 找到的占位符: {placeholders}")
-    logger.debug(f"[占位符替换] 可用值: click_id={click_id}, offer_id={offer_id}, publisher_id={publisher_id}, advertiser_id={advertiser_id}")
-    
+    logger.debug(
+        f"[占位符替换] 可用值: click_id={click_id}, offer_id={offer_id}, publisher_id={publisher_id}, advertiser_id={advertiser_id}")
+
     # 记录未替换的占位符（这些占位符的值为空，需要移除包含它们的URL参数）
     unreplaced_placeholders = []
-    
+
     # 遍历每个找到的占位符，进行替换
     for placeholder in placeholders:
         # 步骤1：标准化占位符键名（转为小写，便于匹配）
         normalized_key = placeholder.lower()
         original_normalized_key = normalized_key  # 保存原始值用于日志
-        
+
         # 步骤2：检查别名映射表
         # 如果占位符在别名映射表中，使用映射后的标准键名
         if normalized_key in alias_map:
             normalized_key = alias_map[normalized_key]
-            logger.debug(f"[占位符替换] 占位符 {{{placeholder}}} 通过别名映射: {original_normalized_key} -> {normalized_key}")
+            logger.debug(
+                f"[占位符替换] 占位符 {{{placeholder}}} 通过别名映射: {original_normalized_key} -> {normalized_key}")
         else:
             # 如果不在别名映射表中，尝试将驼峰命名转换为下划线命名
             # 例如：{clickId} -> click_id, {offerId} -> offer_id
@@ -410,39 +421,41 @@ async def _replace_short_link_placeholders(
             # - (?=[A-Z]) : 正向前瞻断言，匹配大写字母前的位置
             normalized_key = re.sub(r'(?<!^)(?=[A-Z])', '_', placeholder).lower()
             if normalized_key != original_normalized_key:
-                logger.debug(f"[占位符替换] 占位符 {{{placeholder}}} 标准化: {original_normalized_key} -> {normalized_key}")
-        
+                logger.debug(
+                    f"[占位符替换] 占位符 {{{placeholder}}} 标准化: {original_normalized_key} -> {normalized_key}")
+
         # 步骤3：特殊映射规则
         # channel_id 和 sub_affid 都映射到 publisher_id（因为它们指向同一个值）
         if normalized_key == 'channel_id' or normalized_key == 'sub_affid':
             logger.debug(f"[占位符替换] 占位符 {{{placeholder}}} 映射到 publisher_id")
             normalized_key = 'publisher_id'
-        
+
         # 步骤4：从值字典中获取对应的值
         value = values.get(normalized_key, '')
-        
+
         # 步骤5：处理值为空的情况
         if not value:
             # 如果值为空，说明占位符无法替换（可能是未提供对应参数，或占位符无法识别）
             # 记录到未替换列表，稍后会移除包含该占位符的整个URL参数
-            logger.warning(f"[占位符替换] 占位符 {{{placeholder}}} (映射到 {normalized_key}) 的值为空，将移除包含该占位符的参数")
+            logger.warning(
+                f"[占位符替换] 占位符 {{{placeholder}}} (映射到 {normalized_key}) 的值为空，将移除包含该占位符的参数")
             unreplaced_placeholders.append(placeholder)
             continue  # 跳过替换，继续处理下一个占位符
-        
+
         # 步骤6：替换占位符为实际值
         # 使用URL编码确保特殊字符正确传输（例如空格、中文字符等）
         # quote() 函数会将特殊字符编码为 %XX 格式
         encoded_value = quote(str(value), safe='')
         result_url = result_url.replace(f'{{{placeholder}}}', encoded_value)
         logger.debug(f"[占位符替换] 占位符 {{{placeholder}}} -> {value} (编码后: {encoded_value})")
-    
+
     # ==================== 移除包含未替换占位符的URL参数 ====================
     # 如果某些占位符无法替换（值为空），需要移除包含这些占位符的整个URL参数
     # 例如：如果 {channel_id} 无法替换，则移除 sub_affid={channel_id} 这个参数
     if unreplaced_placeholders:
         # 解析URL，提取查询参数
         parsed = urlparse(result_url)
-        
+
         if parsed.query:
             # 解析查询字符串为字典格式
             # parse_qs() 返回字典，值为列表（因为URL参数可能有多个值）
@@ -450,7 +463,7 @@ async def _replace_short_link_placeholders(
             query_params = parse_qs(parsed.query, keep_blank_values=True)
             # 将所有参数名转为小写（统一处理）
             query_params_lower = {k.lower(): v for k, v in query_params.items()}
-            
+
             # 检查每个参数值，如果包含未替换的占位符，标记为需要移除
             params_to_remove = []
             for param_name, param_values in query_params_lower.items():
@@ -462,15 +475,16 @@ async def _replace_short_link_placeholders(
                         # 检查原始占位符（URL编码后的占位符也会被检测到，因为占位符本身不会被编码）
                         if placeholder_pattern in param_value:
                             params_to_remove.append(param_name)
-                            logger.info(f"[占位符替换] 移除参数 {param_name}={param_value}，因为包含未替换的占位符 {{{unreplaced_placeholder}}}")
+                            logger.info(
+                                f"[占位符替换] 移除参数 {param_name}={param_value}，因为包含未替换的占位符 {{{unreplaced_placeholder}}}")
                             break  # 找到就跳出内层循环
                     if param_name in params_to_remove:
                         break  # 如果参数已标记为移除，跳出值循环
-            
+
             # 从参数字典中移除标记的参数
             for param_name in params_to_remove:
                 query_params_lower.pop(param_name, None)
-            
+
             # 重新构建查询字符串
             if query_params_lower:
                 # 如果还有参数，重新编码为查询字符串
@@ -479,9 +493,9 @@ async def _replace_short_link_placeholders(
             else:
                 # 如果所有参数都被移除了，移除整个查询字符串部分
                 result_url = urlunparse(parsed._replace(query=''))
-    
+
     logger.debug(f"[占位符替换] 替换后的URL: {result_url}")
-    
+
     # ==================== 统一URL参数名为小写 ====================
     # 为了保持一致性，将所有URL参数名转为小写
     # 例如：?OfferId=123 -> ?offerid=123
@@ -495,17 +509,17 @@ async def _replace_short_link_placeholders(
         new_query = urlencode(query_params_lower, doseq=True)
         # 重新构建URL
         result_url = urlunparse(parsed._replace(query=new_query))
-    
+
     return result_url
 
 
 def _replace_param_value_placeholders(
-    param_value: str,
-    click_id: str,
-    offer_id: Optional[int],
-    channel_id: Optional[int],
-    advertiser_id: Optional[int],
-    request_info: dict
+        param_value: str,
+        click_id: str,
+        offer_id: Optional[int],
+        channel_id: Optional[int],
+        advertiser_id: Optional[int],
+        request_info: dict
 ) -> tuple[str, bool]:
     """
     替换URL参数值中的占位符
@@ -550,11 +564,11 @@ def _replace_param_value_placeholders(
     # 使用正则表达式查找参数值中的所有占位符
     pattern = r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}'
     placeholders = re.findall(pattern, param_value)
-    
+
     # 如果没有占位符，直接返回原值
     if not placeholders:
         return param_value, True
-    
+
     # ==================== 构建占位符值字典 ====================
     # 注意：这里不查询数据库，只使用传入的参数值
     # 与 _replace_short_link_placeholders 保持一致，但简化了逻辑
@@ -567,13 +581,13 @@ def _replace_param_value_placeholders(
         'user_agent': request_info.get('user_agent', ''),  # User-Agent
         'referer': request_info.get('referer', ''),  # 来源页面
     }
-    
+
     # Offer字段
     if offer_id:
         values['offer_id'] = str(offer_id)
     else:
         values['offer_id'] = ''  # 空值，占位符将无法替换
-    
+
     # Publisher/Channel字段（注意：channel_id 和 publisher_id 指向同一个值）
     if channel_id is not None:
         publisher_id_str = str(channel_id)
@@ -582,13 +596,13 @@ def _replace_param_value_placeholders(
     else:
         values['publisher_id'] = ''
         values['channel_id'] = ''
-    
+
     # Advertiser字段
     if advertiser_id:
         values['advertiser_id'] = str(advertiser_id)
     else:
         values['advertiser_id'] = ''
-    
+
     # ==================== 占位符别名映射表 ====================
     # 与 _replace_short_link_placeholders 中的别名映射保持一致
     alias_map = {
@@ -607,42 +621,42 @@ def _replace_param_value_placeholders(
         'offerId': 'offer_id',
         'offerid': 'offer_id',
     }
-    
+
     # ==================== 开始替换占位符 ====================
     result_value = param_value  # 复制原值
     all_replaced = True  # 标记是否所有占位符都被成功替换
-    
+
     for placeholder in placeholders:
         # 标准化占位符键名
         normalized_key = placeholder.lower()
         original_normalized_key = normalized_key
-        
+
         # 检查别名映射
         if normalized_key in alias_map:
             normalized_key = alias_map[normalized_key]
         else:
             # 驼峰命名转下划线命名
             normalized_key = re.sub(r'(?<!^)(?=[A-Z])', '_', placeholder).lower()
-        
+
         # 特殊映射：channel_id 和 sub_affid 都映射到 publisher_id
         if normalized_key == 'channel_id' or normalized_key == 'sub_affid':
             normalized_key = 'publisher_id'
-        
+
         # 获取对应的值
         value = values.get(normalized_key, '')
-        
+
         if not value:
             # 占位符无法识别或值为空
             # 标记为未完全替换，但继续处理其他占位符
             all_replaced = False
             logger.debug(f"[参数值占位符替换] 占位符 {{{placeholder}}} (映射到 {normalized_key}) 无法替换，值为空")
             continue  # 跳过这个占位符，不替换
-        
+
         # 替换占位符为实际值（URL编码）
         encoded_value = quote(str(value), safe='')
         result_value = result_value.replace(f'{{{placeholder}}}', encoded_value)
         logger.debug(f"[参数值占位符替换] 占位符 {{{placeholder}}} -> {value}")
-    
+
     # 返回替换后的值和是否完全替换的标志
     return result_value, all_replaced
 
@@ -686,14 +700,14 @@ def merge_url_params(base_url: str, query_params: dict) -> str:
     # 如果没有要合并的参数，直接返回基础URL
     if not query_params:
         return base_url
-    
+
     # ==================== 解析基础URL ====================
     parsed = urlparse(base_url)
     # 解析现有查询参数（keep_blank_values=True 保留空值参数）
     existing_params = parse_qs(parsed.query, keep_blank_values=True)
     # 统一参数名为小写（便于比较和合并）
     existing_params_lower = {k.lower(): v for k, v in existing_params.items()}
-    
+
     # ==================== 定义占位符模式列表 ====================
     # 用于检测参数值中是否包含占位符（未替换的占位符应该被过滤掉）
     all_placeholder_patterns = [
@@ -705,13 +719,13 @@ def merge_url_params(base_url: str, query_params: dict) -> str:
         '{publisher_id}', '{publisherId}', '{publisherid}', '{PublisherId}', '{PUBLISHER_ID}',
         '{ip}', '{os}', '{device_type}', '{country}', '{advertiser_id}',
     ]
-    
+
     # ==================== 检测基础URL中的占位符 ====================
     # 如果基础URL中已有占位符（如 {click_id}），则不需要再添加对应的查询参数
     # 这样可以避免重复添加参数
     placeholder_params = {'click_id', 'offer_id', 'channel_id', 'publisher_id'}
     skip_params = set()  # 需要跳过的参数集合
-    
+
     for param in placeholder_params:
         # 生成占位符的各种变体（不同大小写、命名风格）
         placeholder_variants = [
@@ -721,17 +735,17 @@ def merge_url_params(base_url: str, query_params: dict) -> str:
             f'{{{param.capitalize()}}}',  # {Click_id}
         ]
         # 生成驼峰命名变体（如 clickId）
-        camel_case = ''.join(word.capitalize() if i > 0 else word.lower() 
-                           for i, word in enumerate(param.split('_')))
+        camel_case = ''.join(word.capitalize() if i > 0 else word.lower()
+                             for i, word in enumerate(param.split('_')))
         placeholder_variants.extend([
             f'{{{camel_case}}}',  # {clickId}
             f'{{{camel_case.lower()}}}',  # {clickid}
         ])
-        
+
         # 检查基础URL中是否包含这些占位符变体
         if any(variant in base_url for variant in placeholder_variants):
             skip_params.add(param)  # 如果找到，标记为跳过
-    
+
     # ==================== 过滤包含占位符的参数值 ====================
     # 如果新参数的参数值中包含占位符（未替换），应该被过滤掉
     # 例如：test={unknown_placeholder} 应该被移除
@@ -741,55 +755,55 @@ def merge_url_params(base_url: str, query_params: dict) -> str:
         param_value_str = str(value) if not isinstance(value, list) else str(value[0]) if value else ''
         # 检查参数值中是否包含任何占位符模式
         contains_placeholder = any(pattern in param_value_str for pattern in all_placeholder_patterns)
-        
+
         if contains_placeholder:
             logger.debug(f"[合并URL参数] 跳过参数 {key}={value}，因为参数值中包含占位符")
             continue  # 跳过包含占位符的参数
-        
+
         filtered_query_params[key] = value
-    
+
     # 使用过滤后的参数（不包含占位符的参数）
     query_params = filtered_query_params
-    
+
     # ==================== 分离 click_id 和其他参数 ====================
     # 为了确保 click_id 在最前面，需要单独处理
     click_id_value = None
     other_params = {}
-    
+
     for key, value in query_params.items():
         key_lower = key.lower()
-        
+
         # 如果参数已在占位符中使用，跳过（不重复添加）
         if key_lower in skip_params:
             continue
-        
+
         # 分离 click_id 和其他参数
         if key_lower == 'click_id':
             # 统一转为列表格式（parse_qs 返回的是列表）
             click_id_value = [str(v) for v in value] if isinstance(value, list) else [str(value)]
         else:
             other_params[key_lower] = [str(v) for v in value] if isinstance(value, list) else [str(value)]
-    
+
     # ==================== 合并参数 ====================
     # 将新参数合并到现有参数中（新参数覆盖旧参数）
     for key, value in other_params.items():
         existing_params_lower[key] = value
-    
+
     # 添加 click_id（如果不在跳过列表中）
     if click_id_value and 'click_id' not in skip_params:
         existing_params_lower['click_id'] = click_id_value
-    
+
     # ==================== 确保 click_id 在最前面 ====================
     # 使用 OrderedDict 保持参数顺序，确保 click_id 在第一位（便于追踪和调试）
     ordered_params = OrderedDict()
     if 'click_id' in existing_params_lower and 'click_id' not in skip_params:
         ordered_params['click_id'] = existing_params_lower['click_id']
-    
+
     # 添加其他参数（click_id 除外）
     for key, value in existing_params_lower.items():
         if key != 'click_id':
             ordered_params[key.lower()] = value
-    
+
     # ==================== 重新构建URL ====================
     # 将参数字典编码为查询字符串
     new_query = urlencode(ordered_params, doseq=True)
@@ -802,12 +816,12 @@ def merge_url_params(base_url: str, query_params: dict) -> str:
             tags=["短链接服务"],
             description="✅ 推荐使用的短链接重定向路由，带缓存优化，性能更好")
 async def redirect_short_link_public(
-    short_code: str,
-    offer_id: Optional[int] = Query(None, description="Offer ID（从URL参数获取）"),
-    channel_id: Optional[int] = Query(None, description="渠道ID（从URL参数获取）"),
-    request: Request = None,
-    background_tasks: BackgroundTasks = None,
-    db: AsyncSession = Depends(get_db)
+        short_code: str,
+        offer_id: Optional[int] = Query(None, description="Offer ID（从URL参数获取）"),
+        channel_id: Optional[int] = Query(None, description="渠道ID（从URL参数获取）"),
+        request: Request = None,
+        background_tasks: BackgroundTasks = None,
+        db: AsyncSession = Depends(get_db)
 ):
     """
     短链接重定向（公开接口，无需认证）
@@ -831,10 +845,10 @@ async def redirect_short_link_public(
             f"[短链接重定向] 收到请求: short_code={short_code}"
             f"\n完整URL={request_url}\n查询参数={request_params}"
         )
-        
+
         # 尝试从缓存获取
         cached_data = await get_short_link_from_cache(short_code)
-        
+
         if cached_data:
             return await _handle_cached_redirect(
                 short_code, cached_data, offer_id, channel_id,
@@ -845,7 +859,7 @@ async def redirect_short_link_public(
                 short_code, offer_id, channel_id,
                 request, background_tasks, db, request_params
             )
-            
+
     except HTTPException:
         raise
     except Exception as e:
@@ -860,14 +874,14 @@ async def redirect_short_link_public(
 
 
 async def _handle_cached_redirect(
-    short_code: str,
-    cached_data: dict,
-    offer_id: Optional[int],
-    channel_id: Optional[int],
-    request: Request,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession,
-    request_params: dict
+        short_code: str,
+        cached_data: dict,
+        offer_id: Optional[int],
+        channel_id: Optional[int],
+        request: Request,
+        background_tasks: BackgroundTasks,
+        db: AsyncSession,
+        request_params: dict
 ) -> RedirectResponse:
     """
     处理缓存命中的短链接重定向
@@ -909,13 +923,13 @@ async def _handle_cached_redirect(
     original_url = cached_data["original_url"]
     is_active = cached_data["is_active"]
     expires_at_str = cached_data.get("expires_at")
-    
+
     if not is_active:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="短链接已禁用"
         )
-    
+
     # 检查过期
     if expires_at_str:
         try:
@@ -924,20 +938,20 @@ async def _handle_cached_redirect(
                 expires_at = expires_at.astimezone(APP_TIMEZONE).replace(tzinfo=None)
         except (ValueError, AttributeError):
             expires_at = None
-        
+
         now = get_app_now_naive()
         if expires_at and expires_at < now:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="短链接已过期"
             )
-    
+
     if not original_url or not original_url.startswith(('http://', 'https://')):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="短链接配置错误：原始URL格式无效"
         )
-    
+
     click_id = generate_click_id_from_timestamp()
     short_link_id = cached_data.get("id")
     if not short_link_id:
@@ -948,15 +962,15 @@ async def _handle_cached_redirect(
             short_link_id = result.scalar()
         except Exception:
             short_link_id = None
-    
+
     request_info = collect_request_info(request) if request else {}
-    
+
     # 如果没有从URL参数传入，从短链接记录中获取offer_id和channel_id
     if not offer_id:
         offer_id = cached_data.get("offer_id")
     if not channel_id:
         channel_id = cached_data.get("channel_id")
-    
+
     # 验证必须参数：offer_id 和 channel_id 必须存在
     # 如果缺少必须参数，只记录日志，不保存访问记录，不创建点击记录，不跳转
     if not offer_id:
@@ -983,10 +997,10 @@ async def _handle_cached_redirect(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": "缺少必须参数：channel_id"}
         )
-    
+
     # 提取并过滤渠道参数（除offer_id和channel_id外的所有参数）
     channel_params = _extract_and_filter_channel_params(request_params)
-    
+
     # 将渠道参数保存到request_info的url_params中
     # 注意：这里只保存渠道参数，而不是所有请求参数
     if channel_params:
@@ -995,25 +1009,26 @@ async def _handle_cached_redirect(
         # 更新request_info中的url_params，只保存渠道参数
         request_info['url_params'] = channel_params_json
         logger.info(f"[短链接重定向] 保存渠道参数到url_params: {channel_params}")
-    
+
     final_channel_id = channel_id
     final_offer_id, advertiser_id = await _resolve_offer_id(offer_id, db)
-    
+
     # 保存原始URL用于检查占位符
     original_url_before_replace = original_url
-    
+
     # 替换占位符并合并参数
     original_url_after_replace = await _replace_short_link_placeholders(
         original_url, click_id, final_offer_id, final_channel_id,
         advertiser_id, request_info, db
     )
-    
-    final_url = _build_final_url(original_url_before_replace, original_url_after_replace, click_id, offer_id, channel_id,
+
+    final_url = _build_final_url(original_url_before_replace, original_url_after_replace, click_id, offer_id,
+                                 channel_id,
                                  final_channel_id, request_params, request_info, advertiser_id)
-    
+
     # 获取原始请求URL
     original_request_url = str(request.url) if request else None
-    
+
     # 创建点击记录（传入原始请求URL和最终跳转URL）
     if short_link_id:
         await _create_click_record(
@@ -1022,10 +1037,10 @@ async def _handle_cached_redirect(
             original_request_url=original_request_url,
             final_redirect_url=final_url
         )
-    
+
     # 更新点击次数
     await increment_click_count_async(short_code)
-    
+
     # 打印最终跳转链接详细信息   helong
     logger.warning("=" * 180)
     logger.warning(f"[短链接重定向] 原始点击URL: {original_request_url}")
@@ -1039,18 +1054,18 @@ async def _handle_cached_redirect(
     logger.warning(f"[短链接重定向] 替换占位符后: {original_url_after_replace}")
     logger.warning(f"[短链接重定向] 最终跳转URL: {final_url}")
     logger.warning("=" * 180)
-    
+
     return RedirectResponse(url=final_url, status_code=302)
 
 
 async def _handle_database_redirect(
-    short_code: str,
-    offer_id: Optional[int],
-    channel_id: Optional[int],
-    request: Request,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession,
-    request_params: dict
+        short_code: str,
+        offer_id: Optional[int],
+        channel_id: Optional[int],
+        request: Request,
+        background_tasks: BackgroundTasks,
+        db: AsyncSession,
+        request_params: dict
 ) -> RedirectResponse:
     """
     处理数据库查询的短链接重定向
@@ -1097,19 +1112,19 @@ async def _handle_database_redirect(
         select(ShortLink).where(ShortLink.short_code == short_code)
     )
     short_link = result.scalars().first()
-    
+
     if not short_link:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"短链接不存在: {short_code}"
         )
-    
+
     if not short_link.is_active:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="短链接已禁用"
         )
-    
+
     # 检查过期
     if short_link.expires_at:
         expires_at = short_link.expires_at
@@ -1121,14 +1136,14 @@ async def _handle_database_redirect(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="短链接已过期"
             )
-    
+
     original_url = short_link.original_url
     if not original_url:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="短链接配置错误：原始URL为空"
         )
-    
+
     original_url = original_url.strip()
     if not original_url.startswith(('http://', 'https://')):
         if original_url and not original_url.startswith('/'):
@@ -1139,19 +1154,19 @@ async def _handle_database_redirect(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"短链接配置错误：原始URL格式无效"
             )
-    
+
     # 写入缓存
     await set_short_link_to_cache(short_code, serialize_short_link(short_link))
-    
+
     click_id = generate_click_id_from_timestamp()
     request_info = collect_request_info(request) if request else {}
-    
+
     # 如果没有从URL参数传入，从短链接记录中获取offer_id和channel_id
     if not offer_id:
         offer_id = short_link.offer_id
     if not channel_id:
         channel_id = short_link.channel_id
-    
+
     # 验证必须参数：offer_id 和 channel_id 必须存在
     # 如果缺少必须参数，只记录日志，不保存访问记录，不创建点击记录，不跳转
     if not offer_id:
@@ -1178,10 +1193,10 @@ async def _handle_database_redirect(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": "缺少必须参数：channel_id"}
         )
-    
+
     # 提取并过滤渠道参数（除offer_id和channel_id外的所有参数）
     channel_params = _extract_and_filter_channel_params(request_params)
-    
+
     # 将渠道参数保存到request_info的url_params中
     # 注意：这里只保存渠道参数，而不是所有请求参数
     if channel_params:
@@ -1190,24 +1205,25 @@ async def _handle_database_redirect(
         # 更新request_info中的url_params，只保存渠道参数
         request_info['url_params'] = channel_params_json
         logger.info(f"[短链接重定向] 保存渠道参数到url_params: {channel_params}")
-    
+
     final_channel_id = channel_id
     final_offer_id, advertiser_id = await _resolve_offer_id(offer_id, db)
-    
+
     # 保存原始URL用于检查占位符
     original_url_before_replace = original_url
-    
+
     # 替换占位符并合并参数
     original_url_after_replace = await _replace_short_link_placeholders(
         original_url, click_id, final_offer_id, final_channel_id,
         advertiser_id, request_info, db
     )
-    
-    final_url = _build_final_url(original_url_before_replace, original_url_after_replace, click_id, offer_id, channel_id, final_channel_id, request_params, request_info, advertiser_id)
-    
+
+    final_url = _build_final_url(original_url_before_replace, original_url_after_replace, click_id, offer_id,
+                                 channel_id, final_channel_id, request_params, request_info, advertiser_id)
+
     # 获取原始请求URL
     original_request_url = str(request.url) if request else None
-    
+
     # 创建点击记录（传入原始请求URL和最终跳转URL）
     await _create_click_record(
         click_id, short_link.id, final_offer_id, final_channel_id,
@@ -1215,10 +1231,10 @@ async def _handle_database_redirect(
         original_request_url=original_request_url,
         final_redirect_url=final_url
     )
-    
+
     # 更新点击次数
     await increment_click_count_async(short_code)
-    
+
     # 打印最终跳转链接详细信息
     logger.warning("=" * 80)
     logger.warning(f"[短链接重定向] 短链接代码: {short_code}")
@@ -1231,7 +1247,7 @@ async def _handle_database_redirect(
     logger.warning(f"[短链接重定向] 广告主ID: {advertiser_id}")
     logger.warning(f"[短链接重定向] 点击携带的参数: {request_params}")
     logger.warning("=" * 80)
-    
+
     return RedirectResponse(url=final_url, status_code=302)
 
 
@@ -1267,40 +1283,40 @@ async def _resolve_offer_id(offer_id: Optional[int], db: AsyncSession) -> tuple[
     """
     if not offer_id:
         return None, None
-    
+
     try:
         # 先尝试作为主键ID查询
         offer_result = await db.execute(
             select(Offer).where(Offer.id == offer_id)
         )
         offer = offer_result.scalars().first()
-        
+
         # 如果找不到，尝试作为上游Offer ID查询
         if not offer:
             offer_result = await db.execute(
                 select(Offer).where(Offer.advertiser_offer_id == str(offer_id))
             )
             offer = offer_result.scalars().first()
-        
+
         if offer:
             await set_offer_cache(offer.id, offer.advertiser_id, offer.offer_name)
             return offer.id, offer.advertiser_id
     except Exception as e:
         logger.warning(f"查询Offer失败: offer_id={offer_id}, error={e}")
-    
+
     return None, None
 
 
 async def _create_click_record(
-    click_id: str,
-    short_link_id: int,
-    offer_id: Optional[int],
-    publisher_id: Optional[int],
-    advertiser_id: Optional[int],
-    request_info: dict,
-    background_tasks: BackgroundTasks,
-    original_request_url: Optional[str] = None,
-    final_redirect_url: Optional[str] = None
+        click_id: str,
+        short_link_id: int,
+        offer_id: Optional[int],
+        publisher_id: Optional[int],
+        advertiser_id: Optional[int],
+        request_info: dict,
+        background_tasks: BackgroundTasks,
+        original_request_url: Optional[str] = None,
+        final_redirect_url: Optional[str] = None
 ):
     """
     创建点击记录（异步处理）
@@ -1371,7 +1387,7 @@ async def _create_click_record(
         "original_request_url": original_request_url,
         "final_redirect_url": final_redirect_url
     }
-    
+
     enqueued = await enqueue_click(click_data)
     if not enqueued:
         click_data['click_time'] = get_app_now_naive()
@@ -1379,15 +1395,15 @@ async def _create_click_record(
 
 
 def _build_final_url(
-    original_url_before_replace: str,
-    original_url_after_replace: str,
-    click_id: str,
-    offer_id: Optional[int],
-    channel_id: Optional[int],
-    final_channel_id: Optional[int],
-    request_params: dict,
-    request_info: Optional[dict] = None,
-    advertiser_id: Optional[int] = None
+        original_url_before_replace: str,
+        original_url_after_replace: str,
+        click_id: str,
+        offer_id: Optional[int],
+        channel_id: Optional[int],
+        final_channel_id: Optional[int],
+        request_params: dict,
+        request_info: Optional[dict] = None,
+        advertiser_id: Optional[int] = None
 ) -> str:
     """
     构建最终的重定向URL
@@ -1452,20 +1468,20 @@ def _build_final_url(
     existing_params = parse_qs(parsed.query, keep_blank_values=True)
     # 统一参数名为小写（便于比较）
     existing_params_lower = {k.lower(): v for k, v in existing_params.items()}
-    
+
     # ==================== 定义必须参数的各种形式 ====================
     # click_id 的各种参数名形式
     click_id_param_names = [
         'click_id', 'aff_click_id', 'clickid', 'clickId', 'CLICK_ID', 'AFF_CLICK_ID',
         'clk_id', 'cid', 'affclickid', 'AFFCLICKID'
     ]
-    
+
     # channel_id 的各种参数名形式
     channel_id_param_names = [
         'channel_id', 'sub_affid', 'channelid', 'channelId', 'CHANNEL_ID', 'SUB_AFFID',
         'subaffid', 'SUBAFFID', 'publisher_id', 'publisherid', 'publisherId', 'PUBLISHER_ID'
     ]
-    
+
     # ==================== 检查是否包含 click_id ====================
     has_click_id = False
     for param_name in click_id_param_names:
@@ -1473,7 +1489,7 @@ def _build_final_url(
             has_click_id = True
             logger.debug(f"[构建最终URL] 检测到 click_id 参数: {param_name}")
             break
-    
+
     # ==================== 检查是否包含 channel_id ====================
     has_channel_id = False
     for param_name in channel_id_param_names:
@@ -1481,25 +1497,25 @@ def _build_final_url(
             has_channel_id = True
             logger.debug(f"[构建最终URL] 检测到 channel_id 参数: {param_name}")
             break
-    
+
     # ==================== 准备要添加的参数 ====================
     params_to_add = {}
-    
+
     # 如果缺少 click_id，添加系统生成的 click_id
     if not has_click_id:
         params_to_add['click_id'] = click_id
         logger.info(f"[构建最终URL] 缺少 click_id，添加系统生成的 click_id: {click_id}")
-    
+
     # 如果缺少 channel_id，添加 channel_id
     if not has_channel_id and final_channel_id:
         params_to_add['channel_id'] = final_channel_id
         logger.info(f"[构建最终URL] 缺少 channel_id，添加 channel_id: {final_channel_id}")
-    
+
     # ==================== 构建最终URL（只包含必须参数） ====================
     # 提取必须参数的值（如果已存在）
     final_click_id_value = None
     final_channel_id_value = None
-    
+
     # 获取 click_id 的值（如果已存在）
     if has_click_id:
         for param_name in click_id_param_names:
@@ -1512,7 +1528,7 @@ def _build_final_url(
                 elif value:
                     final_click_id_value = value
                 break
-    
+
     # 获取 channel_id 的值（如果已存在）
     if has_channel_id:
         for param_name in channel_id_param_names:
@@ -1525,30 +1541,30 @@ def _build_final_url(
                 elif value:
                     final_channel_id_value = value
                 break
-    
+
     # 如果缺少 click_id，使用系统生成的 click_id
     if not final_click_id_value:
         final_click_id_value = click_id
-    
+
     # 如果缺少 channel_id，使用 final_channel_id
     if not final_channel_id_value and final_channel_id:
         final_channel_id_value = final_channel_id
-    
+
     # ==================== 构建只包含必须参数的URL ====================
     # 获取基础URL（不包含查询参数）
     base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-    
+
     # 构建只包含必须参数的查询字符串
     final_params = OrderedDict()
-    
+
     # 添加 click_id（使用标准参数名）
     if final_click_id_value:
         final_params['click_id'] = str(final_click_id_value)
-    
+
     # 添加 channel_id（使用标准参数名）
     if final_channel_id_value:
         final_params['channel_id'] = str(final_channel_id_value)
-    
+
     # 构建最终URL
     if final_params:
         query_string = urlencode(final_params, doseq=False)
@@ -1557,12 +1573,10 @@ def _build_final_url(
         # 如果没有必须参数（理论上不应该发生），返回基础URL
         final_url = base_url
         logger.warning(f"[构建最终URL] 警告：没有必须参数，返回基础URL: {final_url}")
-    
+
     logger.info(
         f"[构建最终URL] 最终URL（只包含必须参数）: {final_url}, "
         f"click_id={final_click_id_value}, channel_id={final_channel_id_value}"
     )
-    
+
     return final_url
-
-

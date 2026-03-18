@@ -9,11 +9,11 @@
 """
 
 from app.services.ad_data.ad_data_service import AdDataService
-from app.services.ad_data.queries.list_query import ListQueryBuilder
-from app.services.ad_data.queries.detail_query import DetailQueryBuilder
-from app.services.ad_data.queries.stats_query import StatsQueryBuilder
 from app.services.ad_data.calculators.rate_calculator import RateCalculator
 from app.services.ad_data.calculators.revenue_calculator import RevenueCalculator
+from app.services.ad_data.queries.detail_query import DetailQueryBuilder
+from app.services.ad_data.queries.list_query import ListQueryBuilder
+from app.services.ad_data.queries.stats_query import StatsQueryBuilder
 from app.services.ad_data.validators import AdDataValidator
 
 __all__ = [

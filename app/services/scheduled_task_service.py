@@ -2,27 +2,27 @@
 定时任务管理服务层
 封装定时任务查询和管理的业务逻辑
 """
-from typing import Optional, List, Dict, Any, Tuple
-from urllib.parse import unquote
-import os
 import asyncio
 import logging
+import os
+from typing import Optional, List, Dict, Any, Tuple
+from urllib.parse import unquote
+
+from sqlalchemy import and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import and_, func
 
-from app.models.models import ScheduledTask, User
-from app.core.exceptions import raise_api_exception
+from app.core.constants import MAX_TASK_NAME_LENGTH, QUERY_TIMEOUT
 from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
+from app.core.fulltext_search import search_with_fulltext
 from app.core.utils import get_app_now_naive
 from app.core.validation import sanitize_input
-from app.core.constants import MAX_TASK_NAME_LENGTH, QUERY_TIMEOUT
-from app.core.fulltext_search import search_with_fulltext
-from app.scheduler_module.task_registry import get_task_function_info
+from app.models.models import ScheduledTask, User
 from app.scheduler_module import get_scheduler, init_scheduled_tasks
-from app.scheduler_module.task_registry import get_task_function_by_name_or_path
 from app.scheduler_module.scheduler import register_scheduled_task, execute_task_with_lock
 from app.scheduler_module.task_queue import get_task_queue
+from app.scheduler_module.task_registry import get_task_function_by_name_or_path
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +34,12 @@ class ScheduledTaskService:
         self.db = db
 
     async def get_scheduled_tasks(
-        self,
-        page: int = 1,
-        page_size: int = 10,
-        is_active: Optional[bool] = None,
-        is_running: Optional[bool] = None,
-        task_name: Optional[str] = None
+            self,
+            page: int = 1,
+            page_size: int = 10,
+            is_active: Optional[bool] = None,
+            is_running: Optional[bool] = None,
+            task_name: Optional[str] = None
     ) -> Tuple[List[ScheduledTask], int]:
         """
         获取定时任务列表
@@ -165,10 +165,10 @@ class ScheduledTaskService:
         return result.scalar_one_or_none()
 
     async def update_scheduled_task_status(
-        self,
-        task_name: str,
-        is_active: bool,
-        current_user: User
+            self,
+            task_name: str,
+            is_active: bool,
+            current_user: User
     ) -> ScheduledTask:
         """
         更新定时任务状态
@@ -271,10 +271,10 @@ class ScheduledTaskService:
             )
 
     async def trigger_scheduled_task(
-        self,
-        task_name: str,
-        params: Optional[Dict[str, Any]],
-        current_user: User
+            self,
+            task_name: str,
+            params: Optional[Dict[str, Any]],
+            current_user: User
     ) -> Dict[str, Any]:
         """
         手动触发定时任务
@@ -415,9 +415,9 @@ class ScheduledTaskService:
         return {"message": "任务已触发，正在后台执行"}
 
     async def reload_scheduled_task(
-        self,
-        task_name: str,
-        current_user: User
+            self,
+            task_name: str,
+            current_user: User
     ) -> Dict[str, Any]:
         """
         重新加载任务配置
@@ -563,9 +563,9 @@ class ScheduledTaskService:
         }
 
     async def release_task_lock(
-        self,
-        task_name: str,
-        current_user: User
+            self,
+            task_name: str,
+            current_user: User
     ) -> Dict[str, Any]:
         """
         释放任务锁（紧急操作）
@@ -624,4 +624,3 @@ class ScheduledTaskService:
                 ErrorCode.OPERATION_FAILED,
                 detail=f"释放任务锁失败: {str(e)}"
             )
-

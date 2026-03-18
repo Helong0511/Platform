@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
 from datetime import date, datetime
 from typing import Optional
+
+from pydantic import BaseModel, Field
 
 
 class ProductAssignmentBase(BaseModel):
@@ -58,4 +59,3 @@ class ProductAssignmentListResponse(BaseModel):
     """产品分配历史列表响应"""
     data: list[ProductAssignmentResponse]
     total: int
-

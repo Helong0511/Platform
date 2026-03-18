@@ -3,17 +3,19 @@
 从Redis队列批量取出点击记录，批量插入到数据库
 """
 import logging
-from typing import List, Dict, Any
 from datetime import datetime, timezone
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import List, Dict, Any
+
 from sqlalchemy import insert
 from sqlalchemy.exc import IntegrityError
-from app.core.database import AsyncSessionLocal
-from app.core.clicks_queue import dequeue_clicks, get_queue_length
-from app.core.offer_cache import get_offer_advertiser_id, set_offer_cache
-from app.models.models import Click, Offer, ShortLink
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+
+from app.core.clicks_queue import dequeue_clicks, get_queue_length
+from app.core.database import AsyncSessionLocal
+from app.core.offer_cache import get_offer_advertiser_id, set_offer_cache
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
+from app.models.models import Click, Offer, ShortLink
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +43,12 @@ async def process_clicks_queue() -> Dict[str, int]:
         'failed': 0,
         'queue_remaining': 0
     }
-    
+
     try:
         # 循环处理，直到队列为空或达到最大批次数（防止长时间占用）
         max_batches = 10  # 最多处理10批（10,000条记录）
         batch_count = 0
-        
+
         while batch_count < max_batches:
             # 获取队列长度
             queue_length = await get_queue_length()
@@ -56,17 +58,17 @@ async def process_clicks_queue() -> Dict[str, int]:
                 else:
                     logger.debug(f"点击队列已处理完毕，共处理 {batch_count} 批")
                 break
-            
+
             logger.debug(f"开始批量处理点击记录队列（第 {batch_count + 1} 批），队列长度: {queue_length}")
-            
+
             # 批量从队列取出点击记录
             clicks = await dequeue_clicks(count=min(BATCH_SIZE, queue_length))
             if not clicks:
                 break
-            
+
             batch_count += 1
             result['processed'] += len(clicks)
-            
+
             # 批量插入到数据库
             async with AsyncSessionLocal() as db:
                 try:
@@ -76,7 +78,7 @@ async def process_clicks_queue() -> Dict[str, int]:
                         logger.warning(f"第 {batch_count} 批：所有点击记录的offer_id都无效，跳过插入")
                         result['failed'] += len(clicks)
                         continue
-                    
+
                     # 记录被过滤的记录数
                     filtered_count = len(clicks) - len(valid_clicks)
                     if filtered_count > 0:
@@ -85,18 +87,18 @@ async def process_clicks_queue() -> Dict[str, int]:
                             f"第 {batch_count} 批：过滤了 {filtered_count} 条无效记录，"
                             f"剩余 {len(valid_clicks)} 条有效记录"
                         )
-                    
+
                     # 2. 补充advertiser_id（如果缺失）
                     await _enrich_clicks_with_advertiser_id(db, valid_clicks)
-                    
+
                     # 3. 验证并清理short_link_id（如果不存在则设置为NULL）
                     await _validate_short_link_ids(db, valid_clicks)
-                    
+
                     # 4. 批量插入 Click 记录
                     inserted_count = await _batch_insert_clicks(db, valid_clicks)
                     result['inserted'] += inserted_count
                     result['failed'] += len(valid_clicks) - inserted_count
-                    
+
                     await db.commit()
                     logger.debug(
                         f"批量插入点击记录成功（第 {batch_count} 批）: "
@@ -112,15 +114,15 @@ async def process_clicks_queue() -> Dict[str, int]:
                     )
                     # 使用 valid_clicks 的长度（如果存在），否则使用 clicks
                     result['failed'] += len(valid_clicks) if 'valid_clicks' in locals() else len(clicks)
-        
+
         # 获取剩余队列长度
         result['queue_remaining'] = await get_queue_length()
-        
+
         # 注意：处理结果日志由调用方（short_link_tasks.py）统一输出，避免重复
-        
+
     except Exception as e:
         logger.error(f"处理点击队列异常: error={e}", exc_info=True)
-    
+
     return result
 
 
@@ -138,17 +140,17 @@ async def _enrich_clicks_with_advertiser_id(db: AsyncSession, clicks: List[Dict[
     for click in clicks:
         if click.get('offer_id') and not click.get('advertiser_id'):
             offer_ids_to_query.add(click['offer_id'])
-    
+
     if not offer_ids_to_query:
         return
-    
+
     # 从缓存获取advertiser_id
     offer_advertiser_map = {}
     for offer_id in offer_ids_to_query:
         cached_advertiser_id = await get_offer_advertiser_id(offer_id)
         if cached_advertiser_id:
             offer_advertiser_map[offer_id] = cached_advertiser_id
-    
+
     # 查询缓存中没有的Offer
     offer_ids_to_db = offer_ids_to_query - set(offer_advertiser_map.keys())
     if offer_ids_to_db:
@@ -164,7 +166,7 @@ async def _enrich_clicks_with_advertiser_id(db: AsyncSession, clicks: List[Dict[
                 await set_offer_cache(offer_id, advertiser_id, offer_name)
         except Exception as e:
             logger.warning(f"批量查询Offer失败: error={e}")
-    
+
     # 补充advertiser_id到点击记录
     for click in clicks:
         offer_id = click.get('offer_id')
@@ -195,12 +197,12 @@ async def _validate_offer_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) ->
         offer_id = click.get('offer_id')
         if offer_id is not None:
             offer_ids_to_validate.add(offer_id)
-    
+
     # 如果没有需要验证的offer_id，直接返回所有记录（允许offer_id为None）
     if not offer_ids_to_validate:
         logger.debug(f"所有点击记录的offer_id都为None，允许保存（数据库允许NULL）")
         return clicks
-    
+
     try:
         # 1. 先尝试作为主键ID查询（Offer.id）
         result = await db.execute(
@@ -208,12 +210,12 @@ async def _validate_offer_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) ->
             .where(Offer.id.in_(offer_ids_to_validate))
         )
         valid_offer_ids = {row[0] for row in result.all()}
-        
+
         # 2. 对于未找到的offer_id，尝试作为上游Offer ID查询（Offer.advertiser_offer_id）
         # 注意：advertiser_offer_id 是字符串类型，需要转换
         unmatched_offer_ids = offer_ids_to_validate - valid_offer_ids
         upstream_offer_id_map = {}  # 上游Offer ID -> 数据库主键ID的映射
-        
+
         if unmatched_offer_ids:
             # 将数字转换为字符串，因为advertiser_offer_id是String类型
             upstream_offer_id_strs = [str(oid) for oid in unmatched_offer_ids]
@@ -230,22 +232,22 @@ async def _validate_offer_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) ->
                 except (ValueError, TypeError):
                     # 如果转换失败，跳过
                     pass
-        
+
         # 3. 更新点击记录中的offer_id
         # 如果offer_id是上游Offer ID，转换为数据库主键ID
         cleaned_count = 0
         converted_count = 0
         invalid_offer_ids = set()
-        
+
         for click in clicks:
             offer_id = click.get('offer_id')
             if offer_id is None:
                 continue
-            
+
             # 如果已经是有效的主键ID，保持不变
             if offer_id in valid_offer_ids:
                 continue
-            
+
             # 如果是上游Offer ID，转换为数据库主键ID
             if offer_id in upstream_offer_id_map:
                 db_offer_id = upstream_offer_id_map[offer_id]
@@ -264,7 +266,7 @@ async def _validate_offer_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) ->
                 click['offer_id'] = None
                 cleaned_count += 1
                 invalid_offer_ids.add(offer_id)
-        
+
         if cleaned_count > 0 or converted_count > 0:
             logger.info(
                 f"验证offer_id完成: 有效主键ID数={len(valid_offer_ids)}, "
@@ -272,7 +274,7 @@ async def _validate_offer_ids(db: AsyncSession, clicks: List[Dict[str, Any]]) ->
                 f"无效offer_id数={len(invalid_offer_ids)}, "
                 f"已清理记录数={cleaned_count}（设置为None）。所有记录将被保存。"
             )
-        
+
         # 返回所有记录（无效的offer_id已被设置为None，上游Offer ID已转换为主键ID）
         return clicks
     except Exception as e:
@@ -299,10 +301,10 @@ async def _validate_short_link_ids(db: AsyncSession, clicks: List[Dict[str, Any]
         short_link_id = click.get('short_link_id')
         if short_link_id is not None:
             short_link_ids_to_validate.add(short_link_id)
-    
+
     if not short_link_ids_to_validate:
         return
-    
+
     try:
         # 批量查询存在的short_link_id
         result = await db.execute(
@@ -310,7 +312,7 @@ async def _validate_short_link_ids(db: AsyncSession, clicks: List[Dict[str, Any]
             .where(ShortLink.id.in_(short_link_ids_to_validate))
         )
         valid_short_link_ids = {row[0] for row in result.all()}
-        
+
         # 将不存在的short_link_id设置为NULL
         for click in clicks:
             short_link_id = click.get('short_link_id')
@@ -341,12 +343,12 @@ async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -
     """
     if not clicks:
         return 0
-    
+
     try:
         # 准备批量插入数据
         insert_data = []
         now = get_app_now_naive()  # 使用北京时间
-        
+
         for click in clicks:
             # 处理click_time（可能是ISO格式字符串或datetime对象）
             click_time = click.get('click_time')
@@ -363,7 +365,8 @@ async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -
                             # 先转换为UTC
                             click_time = click_time.astimezone(timezone.utc)
                         # 从UTC转换为北京时间（naive）
-                        click_time = click_time.replace(tzinfo=timezone.utc).astimezone(APP_TIMEZONE).replace(tzinfo=None)
+                        click_time = click_time.replace(tzinfo=timezone.utc).astimezone(APP_TIMEZONE).replace(
+                            tzinfo=None)
                     # 如果已经是naive，假设是北京时间（新数据都是北京时间）
                 except (ValueError, AttributeError):
                     click_time = now
@@ -379,7 +382,7 @@ async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -
                 # 如果已经是naive，假设是北京时间（新数据都是北京时间）
             else:
                 click_time = now
-            
+
             insert_data.append({
                 'click_id': click.get('click_id'),
                 'offer_id': click.get('offer_id'),
@@ -413,7 +416,7 @@ async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -
                 'original_request_url': click.get('original_request_url'),
                 'final_redirect_url': click.get('final_redirect_url'),
             })
-        
+
         # 检查重复的 click_id（避免插入时出现唯一性约束错误）
         click_ids = [item['click_id'] for item in insert_data if item.get('click_id')]
         if click_ids:
@@ -422,7 +425,7 @@ async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -
                 .where(Click.click_id.in_(click_ids))
             )
             existing_click_ids = {row[0] for row in result.all()}
-            
+
             # 过滤掉已存在的记录
             if existing_click_ids:
                 logger.warning(
@@ -430,19 +433,19 @@ async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -
                     f"{list(existing_click_ids)[:10]}..."  # 只显示前10个
                 )
                 insert_data = [
-                    item for item in insert_data 
+                    item for item in insert_data
                     if item.get('click_id') not in existing_click_ids
                 ]
-        
+
         if not insert_data:
             logger.debug("所有点击记录已存在，无需插入")
             return 0
-        
+
         # 批量插入（使用bulk insert提高性能）
         try:
             stmt = insert(Click).values(insert_data)
             await db.execute(stmt)
-            
+
             logger.debug(f"批量插入 {len(insert_data)} 条点击记录到数据库")
             return len(insert_data)
         except IntegrityError as e:
@@ -467,7 +470,7 @@ async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -
                     except Exception:
                         await db.rollback()
                         raise
-                
+
                 logger.debug(f"逐条插入完成，成功插入 {inserted_count}/{len(insert_data)} 条记录")
                 return inserted_count
             else:
@@ -475,7 +478,3 @@ async def _batch_insert_clicks(db: AsyncSession, clicks: List[Dict[str, Any]]) -
     except Exception as e:
         logger.error(f"批量插入点击记录失败: error={e}", exc_info=True)
         raise
-
-
-
-

@@ -5,23 +5,20 @@
 注意：这是示例文件，展示重构后的代码结构
 实际重构时，应该直接修改 users.py
 """
-from fastapi import APIRouter, Depends, Query, Path, Request
-from sqlalchemy.ext.asyncio import AsyncSession
+import logging
 from typing import Optional
 
-from app.core.database import get_db
-from app.core.security import get_current_user, require_admin
-from app.core.dependencies import get_user_service, CurrentUserDep, DatabaseDep
-from app.services.user_service import UserService
-from app.models.models import User
-from app.schemas.user import UserResponse, UserCreate, UserUpdate, PasswordChange
-from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
-from app.core.exceptions import raise_api_exception
-from app.core.errors import ErrorCode
+from fastapi import APIRouter, Depends, Query, Path, Request
+
 from app.core.constants import MAX_PAGE_SIZE
-from app.core.infrastructure.cache import cached, CacheInvalidator
+from app.core.dependencies import get_user_service
+from app.core.infrastructure.cache import CacheInvalidator
+from app.core.security import get_current_user, require_admin
 from app.core.utils import optimize_page_size_for_device
-import logging
+from app.models.models import User
+from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
+from app.schemas.user import UserResponse, UserCreate
+from app.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -30,14 +27,14 @@ router = APIRouter()
 # ==================== 示例1：获取用户列表（使用服务层） ====================
 @router.get("/", response_model=PaginatedResponseBaseSchema[list[UserResponse]], summary="获取用户列表")
 async def get_users(
-    request: Request,
-    page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
-    username: Optional[str] = Query(None, description="用户名过滤"),
-    role: Optional[str] = Query(None, description="角色过滤"),
-    status: Optional[str] = Query(None, description="状态过滤: active/inactive"),
-    user_service: UserService = Depends(get_user_service),
-    current_user: User = Depends(require_admin)
+        request: Request,
+        page: int = Query(1, ge=1, description="页码"),
+        page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
+        username: Optional[str] = Query(None, description="用户名过滤"),
+        role: Optional[str] = Query(None, description="角色过滤"),
+        status: Optional[str] = Query(None, description="状态过滤: active/inactive"),
+        user_service: UserService = Depends(get_user_service),
+        current_user: User = Depends(require_admin)
 ):
     """
     获取用户列表（重构后版本）
@@ -49,7 +46,7 @@ async def get_users(
     """
     # 设备类型优化（保留在endpoint中，因为需要Request对象）
     page_size = optimize_page_size_for_device(request, page_size, default_page_size=10)
-    
+
     # 状态转换
     is_active = None
     if status:
@@ -57,7 +54,7 @@ async def get_users(
             is_active = True
         elif status.lower() == 'inactive':
             is_active = False
-    
+
     # 调用服务层（业务逻辑在服务层）
     users, total = await user_service.get_users(
         current_user=current_user,
@@ -67,7 +64,7 @@ async def get_users(
         role=role,
         is_active=is_active
     )
-    
+
     # 转换为响应模型（处理客户信息）
     user_responses = []
     for user in users:
@@ -83,9 +80,10 @@ async def get_users(
                 'address': client.address,
                 'is_active': client.is_active,
                 'api_enabled': bool(client.api_enabled) if client.api_enabled is not None else False,
-                'password_change_enabled': bool(client.password_change_enabled) if client.password_change_enabled is not None else False
+                'password_change_enabled': bool(
+                    client.password_change_enabled) if client.password_change_enabled is not None else False
             }
-        
+
         user_dict = {
             'id': user.id,
             'username': user.username,
@@ -100,7 +98,7 @@ async def get_users(
             'client': client_data
         }
         user_responses.append(UserResponse.model_validate(user_dict))
-    
+
     return PaginatedResponseBaseSchema.success(
         data=user_responses,
         total=total,
@@ -112,9 +110,9 @@ async def get_users(
 # ==================== 示例2：获取用户详情（使用服务层） ====================
 @router.get("/{user_id}", response_model=ResponseBaseSchema[UserResponse], summary="获取用户详情")
 async def get_user(
-    user_id: int = Path(..., ge=1, description="用户ID"),
-    user_service: UserService = Depends(get_user_service),
-    current_user: User = Depends(get_current_user)
+        user_id: int = Path(..., ge=1, description="用户ID"),
+        user_service: UserService = Depends(get_user_service),
+        current_user: User = Depends(get_current_user)
 ):
     """
     获取用户详情（重构后版本）
@@ -125,7 +123,7 @@ async def get_user(
     """
     # 调用服务层（包含权限检查和查询逻辑）
     user = await user_service.get_user_by_id(user_id, current_user, include_client=True)
-    
+
     # 转换为响应模型
     return ResponseBaseSchema.success(data=UserResponse.model_validate(user))
 
@@ -133,9 +131,9 @@ async def get_user(
 # ==================== 示例3：创建用户（使用服务层） ====================
 @router.post("/", response_model=ResponseBaseSchema[UserResponse], summary="创建用户")
 async def create_user(
-    user_in: UserCreate,
-    user_service: UserService = Depends(get_user_service),
-    current_user: User = Depends(require_admin)
+        user_in: UserCreate,
+        user_service: UserService = Depends(get_user_service),
+        current_user: User = Depends(require_admin)
 ):
     """
     创建用户（重构后版本）
@@ -149,18 +147,18 @@ async def create_user(
         user_data=user_in.model_dump(),
         current_user=current_user
     )
-    
+
     # 失效相关缓存
     await CacheInvalidator.invalidate_user_cache(user.id)
-    
+
     return ResponseBaseSchema.success(data=UserResponse.model_validate(user))
 
 
 # ==================== 示例4：获取用户统计（使用服务层+缓存） ====================
 @router.get("/stats", response_model=ResponseBaseSchema[dict], summary="获取用户统计信息")
 async def get_user_stats(
-    user_service: UserService = Depends(get_user_service),
-    current_user: User = Depends(require_admin)
+        user_service: UserService = Depends(get_user_service),
+        current_user: User = Depends(require_admin)
 ):
     """
     获取用户统计信息（重构后版本）
@@ -171,6 +169,5 @@ async def get_user_stats(
     """
     # 调用服务层（如果服务层方法使用了@cached装饰器，会自动缓存）
     stats = await user_service.get_user_stats()
-    
-    return ResponseBaseSchema.success(data=stats)
 
+    return ResponseBaseSchema.success(data=stats)

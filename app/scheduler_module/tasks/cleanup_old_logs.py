@@ -3,11 +3,11 @@
 定期清理或归档旧的用户操作日志，减少日志表数据量，提升查询性能
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
+
 from sqlalchemy import text, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
 from app.models.models import UserAuditLog
@@ -16,7 +16,6 @@ from app.scheduler_module.task_utils import (
     log_task_start,
     log_task_result,
     log_task_error,
-    format_result_summary,
 )
 
 logger = logging.getLogger(__name__)

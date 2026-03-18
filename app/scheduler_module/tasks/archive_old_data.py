@@ -4,7 +4,8 @@
 """
 import logging
 from calendar import monthrange
-from datetime import datetime, timedelta
+from datetime import datetime
+
 from sqlalchemy import text
 
 from app.core.database import AsyncSessionLocal
@@ -88,7 +89,7 @@ async def archive_old_ad_data(months: int = 6) -> dict:
             if not table_exists:
                 # 创建归档表
                 logger.info("归档表不存在，正在创建...")
-                
+
                 # 创建归档表，结构与主表完全一致
                 # 注意：country_code 字段类型与主表保持一致（varchar(2)）
                 # 使用不同的外键约束名称和索引名称，避免与主表冲突
@@ -138,7 +139,7 @@ async def archive_old_ad_data(months: int = 6) -> dict:
                     """)
                     constraints_result = await db.execute(check_constraints_sql)
                     conflicting_constraints = [row[0] for row in constraints_result.all()]
-                    
+
                     if conflicting_constraints:
                         logger.warning(f"发现冲突的外键约束: {conflicting_constraints}，尝试修复...")
                         # 删除冲突的约束
@@ -149,7 +150,7 @@ async def archive_old_ad_data(months: int = 6) -> dict:
                                 logger.info(f"已删除冲突的外键约束: {constraint_name}")
                             except Exception as e:
                                 logger.warning(f"删除约束失败: {constraint_name}, {e}")
-                        
+
                         # 重新添加正确命名的约束
                         if 'fk_ad_data_product' in conflicting_constraints:
                             add_fk_product_sql = text("""
@@ -160,7 +161,7 @@ async def archive_old_ad_data(months: int = 6) -> dict:
                             """)
                             await db.execute(add_fk_product_sql)
                             logger.info("已添加正确命名的外键约束: fk_ad_data_archive_product")
-                        
+
                         if 'fk_ad_data_country_code' in conflicting_constraints:
                             add_fk_country_sql = text("""
                                 ALTER TABLE `ad_data_archive` 
@@ -170,7 +171,7 @@ async def archive_old_ad_data(months: int = 6) -> dict:
                             """)
                             await db.execute(add_fk_country_sql)
                             logger.info("已添加正确命名的外键约束: fk_ad_data_archive_country_code")
-                        
+
                         await db.commit()
                         logger.info("约束修复完成")
                 except Exception as e:

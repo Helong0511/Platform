@@ -2,18 +2,19 @@
 仪表盘统计服务层
 封装仪表盘统计和趋势分析的业务逻辑
 """
-from typing import Dict, Any, List, Optional, Tuple
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, case, Float, and_
-from datetime import datetime, timedelta
 import logging
+from datetime import timedelta
+from typing import Dict, Any
 
-from app.models.models import User, AdData, Product, Client, UserRole, ProductAssignment
+from sqlalchemy import select, func, case, Float, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.cache import get_cached, set_cached, generate_cache_key
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
 from app.core.query_utils import date_range_condition, product_assignment_join_condition, check_use_assignment_table
 from app.core.utils import get_app_now_naive
-from app.core.exceptions import raise_api_exception
-from app.core.errors import ErrorCode
+from app.models.models import User, AdData, Product, Client, UserRole, ProductAssignment
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +26,9 @@ class DashboardService:
         self.db = db
 
     async def get_dashboard_stats(
-        self,
-        period: str,
-        current_user: User
+            self,
+            period: str,
+            current_user: User
     ) -> Dict[str, Any]:
         """
         获取仪表盘统计数据
@@ -297,7 +298,7 @@ class DashboardService:
              "trend": trend_ecpm_deducted, "precision": 2},
             {"id": "revenue_deducted", "label": "收益(减扣后)",
              "value": round(float(result.total_revenue_deducted), 2) if (
-                         result and result.total_revenue_deducted) else 0.0, "trend": trend_revenue_deducted,
+                     result and result.total_revenue_deducted) else 0.0, "trend": trend_revenue_deducted,
              "precision": 2}
         ]
 
@@ -308,7 +309,7 @@ class DashboardService:
              "trend": trend_ecpm_undeducted, "precision": 2},
             {"id": "revenue_undeducted", "label": "收益(未减扣的)",
              "value": round(float(result.total_revenue_undeducted), 2) if (
-                         result and result.total_revenue_undeducted) else 0.0, "trend": trend_revenue_undeducted,
+                     result and result.total_revenue_undeducted) else 0.0, "trend": trend_revenue_undeducted,
              "precision": 2}
         ]
 
@@ -321,7 +322,7 @@ class DashboardService:
 
         # 计算ROI
         total_revenue = round(float(result.total_revenue_deducted or 0), 2) if (
-                    result and result.total_revenue_deducted) else 0.0
+                result and result.total_revenue_deducted) else 0.0
         total_requests = float(result.total_requests or 0) if result else 0.0
         roi = round((total_revenue / total_requests * 1000) if total_requests > 0 else 0.0, 2)
 
@@ -340,9 +341,9 @@ class DashboardService:
         return response_data
 
     async def get_recent_ad_data(
-        self,
-        current_user: User,
-        days: int = 7
+            self,
+            current_user: User,
+            days: int = 7
     ) -> Dict[str, Any]:
         """
         获取最近的广告数据
@@ -451,9 +452,9 @@ class DashboardService:
             }
 
     async def get_trend_data(
-        self,
-        period: str,
-        current_user: User
+            self,
+            period: str,
+            current_user: User
     ) -> Dict[str, Any]:
         """
         获取趋势数据
@@ -582,4 +583,3 @@ class DashboardService:
         await set_cached(cache_key, response_data, ttl=60)
 
         return response_data
-

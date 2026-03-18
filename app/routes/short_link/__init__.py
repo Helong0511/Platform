@@ -12,4 +12,3 @@
 from app.routes.short_link.router import router
 
 __all__ = ["router"]
-

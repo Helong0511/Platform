@@ -3,19 +3,19 @@
 独立的多进程锁模块
 使用数据库行锁确保多进程环境下任务只执行一次
 """
+import logging
 import os
 import socket
-import logging
-from datetime import datetime
 from typing import Optional
-import pytz
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
 
-from app.core.database import AsyncSessionLocal
-from app.models.models import ScheduledTask
+import pytz
+from sqlalchemy import select, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
+from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
+from app.models.models import ScheduledTask
 
 logger = logging.getLogger(__name__)
 

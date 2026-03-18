@@ -2,8 +2,9 @@
 Postback 相关的 Schema 定义
 用于统一处理各平台的 postback 回调数据
 """
-from typing import Optional, Dict, Any
 from datetime import datetime
+from typing import Optional, Dict
+
 from pydantic import BaseModel, Field
 
 
@@ -15,18 +16,18 @@ class PostbackRequest(BaseModel):
     event_name: Optional[str] = Field(None, description="事件名称")
     event_value: Optional[float] = Field(None, description="事件价值")
     payout: Optional[float] = Field(None, description="支付金额")
-    
+
     # 设备信息
     devad_id: Optional[str] = Field(None, description="设备广告ID")
     os: Optional[str] = Field(None, description="操作系统")
     carrier: Optional[str] = Field(None, description="运营商")
     ip: Optional[str] = Field(None, description="IP地址")
     gid: Optional[str] = Field(None, description="渠道ID")
-    
+
     # 关联信息
     product_id: Optional[int] = Field(None, description="产品ID")
     client_id: Optional[int] = Field(None, description="客户ID")
-    
+
     # 允许其他字段（用于存储平台特定的字段）
     class Config:
         extra = "allow"
@@ -74,7 +75,7 @@ class PostbackConversionResponse(BaseModel):
     gid_publisher_name: Optional[str] = Field(None, description="gid字段关联的渠道名称")
     created_at: datetime
     notification_count: Optional[int] = Field(0, description="成功发送的通知记录数量（只统计 status='sent' 的记录）")
-    
+
     class Config:
         from_attributes = True
 
@@ -119,7 +120,7 @@ class PostbackForwardLogResponse(BaseModel):
     retry_count: int
     created_at: datetime
     completed_at: Optional[datetime]
-    
+
     class Config:
         from_attributes = True
 
@@ -152,7 +153,6 @@ class PendingPostbackConversionResponse(BaseModel):
     rejected_at: Optional[datetime]
     product_name: Optional[str] = Field(None, description="产品名称")
     client_name: Optional[str] = Field(None, description="客户名称")
-    
+
     class Config:
         from_attributes = True
-

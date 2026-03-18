@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field, EmailStr
 from typing import Optional
+
+from pydantic import BaseModel, Field, EmailStr
 
 
 class ClientBase(BaseModel):
@@ -9,7 +10,8 @@ class ClientBase(BaseModel):
     address: str | None = None
     allowed_ips: str | None = Field(None, description="IP白名单，多个IP用逗号分隔，为空则不限制。127.0.0.1始终允许")
     is_active: bool | None = True
-    api_enabled: bool | None = Field(False, description="是否允许API访问（开启后允许客户通过API查询产品和广告数据，并显示API对接菜单）")
+    api_enabled: bool | None = Field(False,
+                                     description="是否允许API访问（开启后允许客户通过API查询产品和广告数据，并显示API对接菜单）")
     password_change_enabled: bool | None = Field(True, description="是否允许客户修改密码（开启后客户可以修改自己的密码）")
     user_id: int | None = None
 

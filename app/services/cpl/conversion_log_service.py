@@ -2,11 +2,16 @@
 转化日志服务层
 封装转化日志查询和更新的业务逻辑
 """
+import logging
 from typing import Optional, List, Dict, Any, Tuple
+
+from sqlalchemy import func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, and_
 
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
+from app.core.utils import parse_date_to_app_timezone
 from app.models.models import (
     PostbackConversion,
     Click,
@@ -15,10 +20,6 @@ from app.models.models import (
     Advertiser,
     User
 )
-from app.core.exceptions import raise_api_exception
-from app.core.errors import ErrorCode
-from app.core.utils import parse_date_to_app_timezone
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -30,16 +31,16 @@ class ConversionLogService:
         self.db = db
 
     async def get_conversion_logs(
-        self,
-        page: int = 1,
-        page_size: int = 20,
-        click_id: Optional[str] = None,
-        offer_id: Optional[int] = None,
-        publisher_id: Optional[int] = None,
-        advertiser_id: Optional[int] = None,
-        conversion_status: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+            self,
+            page: int = 1,
+            page_size: int = 20,
+            click_id: Optional[str] = None,
+            offer_id: Optional[int] = None,
+            publisher_id: Optional[int] = None,
+            advertiser_id: Optional[int] = None,
+            conversion_status: Optional[str] = None,
+            start_date: Optional[str] = None,
+            end_date: Optional[str] = None
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
         获取转化日志列表
@@ -248,10 +249,10 @@ class ConversionLogService:
         return log_list, total
 
     async def update_conversion_status(
-        self,
-        conversion_id: int,
-        status: str,
-        current_user: User
+            self,
+            conversion_id: int,
+            status: str,
+            current_user: User
     ) -> None:
         """
         更新转化状态
@@ -280,4 +281,3 @@ class ConversionLogService:
             logger.info(f"转化状态已更新: conversion_id={conversion_id}, status={status}")
         else:
             logger.warning(f"PostbackConversion 模型缺少 conversion_status 字段")
-

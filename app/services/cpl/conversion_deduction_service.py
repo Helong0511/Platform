@@ -45,11 +45,11 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
 
     def __init__(self, db: AsyncSession):
         super().__init__(db, ConversionDeductionConfig)
-    
+
     async def _validate_target_exists(
-        self,
-        level: ConfigLevel,
-        target_id: int
+            self,
+            level: ConfigLevel,
+            target_id: int
     ) -> None:
         """
         验证配置目标是否存在
@@ -93,11 +93,11 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 ErrorCode.INVALID_PARAMETER,
                 detail=f"无效的配置层级: {level}"
             )
-    
+
     async def _check_existing_config(
-        self,
-        level: ConfigLevel,
-        target_id: int
+            self,
+            level: ConfigLevel,
+            target_id: int
     ) -> None:
         """
         检查是否已存在激活的配置
@@ -110,30 +110,30 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             APIException: 如果已存在激活的配置
         """
         conditions = [ConversionDeductionConfig.is_active == True]
-        
+
         if level == 'advertiser':
             conditions.append(ConversionDeductionConfig.advertiser_id == target_id)
         elif level == 'offer':
             conditions.append(ConversionDeductionConfig.offer_id == target_id)
         elif level == 'publisher':
             conditions.append(ConversionDeductionConfig.publisher_id == target_id)
-        
+
         result = await self.db.execute(
             select(ConversionDeductionConfig).where(and_(*conditions))
         )
-        
+
         if result.scalars().first():
             level_name = {'advertiser': '广告主', 'offer': 'Offer', 'publisher': '渠道'}[level]
             raise_api_exception(
                 ErrorCode.RESOURCE_ALREADY_EXISTS,
                 detail=f"{level_name}ID {target_id} 已存在激活的扣减配置"
             )
-    
+
     def _build_config_fields(
-        self,
-        level: ConfigLevel,
-        target_id: int,
-        config_data: Dict[str, Any]
+            self,
+            level: ConfigLevel,
+            target_id: int,
+            config_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         构建配置字段
@@ -155,7 +155,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             'priority': config_data.get('priority', 0),
             'is_active': config_data.get('is_active', True)
         }
-        
+
         # 根据层级设置对应的ID字段
         if level == 'advertiser':
             fields['advertiser_id'] = target_id
@@ -169,13 +169,13 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             fields['advertiser_id'] = None
             fields['offer_id'] = None
             fields['publisher_id'] = target_id
-        
+
         return fields
-    
+
     async def _invalidate_config_cache(
-        self,
-        level: Optional[ConfigLevel] = None,
-        target_id: Optional[int] = None
+            self,
+            level: Optional[ConfigLevel] = None,
+            target_id: Optional[int] = None
     ) -> None:
         """
         清除配置缓存
@@ -193,9 +193,9 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             await invalidate_cache("cpl:deduction_config:*")
 
     async def create_deduction_config(
-        self,
-        config_data: Dict[str, Any],
-        current_user: User
+            self,
+            config_data: Dict[str, Any],
+            current_user: User
     ) -> ConversionDeductionConfig:
         """
         创建扣减配置
@@ -225,13 +225,13 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
 
         # 验证目标是否存在
         await self._validate_target_exists(level, target_id)
-        
+
         # 检查是否已存在激活的配置
         await self._check_existing_config(level, target_id)
 
         # 构建配置字段
         fields = self._build_config_fields(level, target_id, config_data)
-        
+
         # 创建配置
         config = ConversionDeductionConfig(**fields)
 
@@ -257,10 +257,10 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 ErrorCode.OPERATION_FAILED,
                 detail=f"创建扣减配置失败: {str(e)}"
             )
-    
+
     async def _load_config_with_relations(
-        self,
-        config_id: int
+            self,
+            config_id: int
     ) -> ConversionDeductionConfig:
         """
         加载配置及其关联信息
@@ -289,13 +289,13 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
         return config
 
     async def get_deduction_configs(
-        self,
-        page: int = 1,
-        page_size: int = 20,
-        level: Optional[str] = None,
-        is_active: Optional[bool] = None,
-        keyword: Optional[str] = None,
-        advertiser_id: Optional[int] = None
+            self,
+            page: int = 1,
+            page_size: int = 20,
+            level: Optional[str] = None,
+            is_active: Optional[bool] = None,
+            keyword: Optional[str] = None,
+            advertiser_id: Optional[int] = None
     ) -> Tuple[List[ConversionDeductionConfig], int]:
         """
         获取扣减配置列表
@@ -410,10 +410,10 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
         return result.unique().scalars().first()
 
     async def update_deduction_config(
-        self,
-        config_id: int,
-        update_data: Dict[str, Any],
-        current_user: User
+            self,
+            config_id: int,
+            update_data: Dict[str, Any],
+            current_user: User
     ) -> ConversionDeductionConfig:
         """
         更新扣减配置
@@ -477,10 +477,10 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             )
 
     async def update_deduction_config_status(
-        self,
-        config_id: int,
-        is_active: bool,
-        current_user: User
+            self,
+            config_id: int,
+            is_active: bool,
+            current_user: User
     ) -> ConversionDeductionConfig:
         """
         更新扣减配置状态
@@ -536,9 +536,9 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             )
 
     async def delete_deduction_config(
-        self,
-        config_id: int,
-        current_user: User
+            self,
+            config_id: int,
+            current_user: User
     ) -> None:
         """
         删除扣减配置
@@ -587,10 +587,10 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             )
 
     async def batch_update_status(
-        self,
-        config_ids: List[int],
-        is_active: bool,
-        current_user: User
+            self,
+            config_ids: List[int],
+            is_active: bool,
+            current_user: User
     ) -> int:
         """
         批量更新扣减配置状态
@@ -629,7 +629,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
         stmt = update(ConversionDeductionConfig).where(
             ConversionDeductionConfig.id.in_(config_ids)
         ).values(is_active=is_active)
-        
+
         try:
             await self.db.execute(stmt)
             await self.db.commit()
@@ -647,11 +647,12 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 elif config.publisher_id:
                     level = 'publisher'
                     target_id = config.publisher_id
-                
+
                 if level and target_id:
                     await self._invalidate_config_cache(level, target_id)
 
-            logger.info(f"批量更新扣减配置状态成功: config_ids={config_ids}, is_active={is_active}, count={len(configs)}")
+            logger.info(
+                f"批量更新扣减配置状态成功: config_ids={config_ids}, is_active={is_active}, count={len(configs)}")
             return len(configs)
         except Exception as e:
             await self.db.rollback()
@@ -664,9 +665,9 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             )
 
     async def batch_delete(
-        self,
-        config_ids: List[int],
-        current_user: User
+            self,
+            config_ids: List[int],
+            current_user: User
     ) -> int:
         """
         批量删除扣减配置
@@ -715,7 +716,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
         stmt = delete(ConversionDeductionConfig).where(
             ConversionDeductionConfig.id.in_(config_ids)
         )
-        
+
         try:
             await self.db.execute(stmt)
             await self.db.commit()
@@ -733,7 +734,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 elif config.publisher_id:
                     level = 'publisher'
                     target_id = config.publisher_id
-                
+
                 if level and target_id:
                     await self._invalidate_config_cache(level, target_id)
 
@@ -750,13 +751,13 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             )
 
     async def get_deduction_stats(
-        self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        group_by: Optional[str] = None,
-        advertiser_id: Optional[int] = None,
-        offer_id: Optional[int] = None,
-        publisher_id: Optional[int] = None
+            self,
+            start_date: Optional[str] = None,
+            end_date: Optional[str] = None,
+            group_by: Optional[str] = None,
+            advertiser_id: Optional[int] = None,
+            offer_id: Optional[int] = None,
+            publisher_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         获取扣减统计
@@ -831,7 +832,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 group_fields = [ConversionDeductionLog.offer_id]
             elif group_by == 'publisher':
                 group_fields = [ConversionDeductionLog.publisher_id]
-            
+
             if group_fields:
                 # 加载关联信息用于显示名称
                 group_query = select(
@@ -843,7 +844,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                     func.sum(ConversionDeductionLog.deducted_amount).label('deducted_amount'),
                     func.sum(ConversionDeductionLog.final_amount).label('final_amount')
                 ).where(and_(*conditions)).group_by(*group_fields)
-                
+
                 group_result = await self.db.execute(group_query)
                 for row in group_result:
                     item_data = {
@@ -853,10 +854,12 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                         'original_amount': float(row.original_amount or 0),
                         'deducted_amount': float(row.deducted_amount or 0),
                         'final_amount': float(row.final_amount or 0),
-                        'volume_deduction_ratio': (row.deducted_volume or 0) / (row.original_volume or 1) if row.original_volume else 0.0,
-                        'amount_deduction_ratio': (row.deducted_amount or 0) / (row.original_amount or 1) if row.original_amount else 0.0
+                        'volume_deduction_ratio': (row.deducted_volume or 0) / (
+                                    row.original_volume or 1) if row.original_volume else 0.0,
+                        'amount_deduction_ratio': (row.deducted_amount or 0) / (
+                                    row.original_amount or 1) if row.original_amount else 0.0
                     }
-                    
+
                     # 添加名称字段
                     if group_by == 'advertiser' and row.advertiser_id:
                         # 需要查询广告主名称（简化处理，可以优化为JOIN）
@@ -865,7 +868,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                         item_data['offer_id'] = row.offer_id
                     elif group_by == 'publisher' and row.publisher_id:
                         item_data['publisher_id'] = row.publisher_id
-                    
+
                     items.append(item_data)
 
         return {
@@ -881,16 +884,16 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
         }
 
     async def get_deduction_logs(
-        self,
-        page: int = 1,
-        page_size: int = 20,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        advertiser_id: Optional[int] = None,
-        offer_id: Optional[int] = None,
-        publisher_id: Optional[int] = None,
-        conversion_id: Optional[int] = None,
-        click_id: Optional[str] = None
+            self,
+            page: int = 1,
+            page_size: int = 20,
+            start_date: Optional[str] = None,
+            end_date: Optional[str] = None,
+            advertiser_id: Optional[int] = None,
+            offer_id: Optional[int] = None,
+            publisher_id: Optional[int] = None,
+            conversion_id: Optional[int] = None,
+            click_id: Optional[str] = None
     ) -> Tuple[List[ConversionDeductionLog], int]:
         """
         获取扣减日志
@@ -954,4 +957,3 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
         logs = result.unique().scalars().all()
 
         return logs, total
-

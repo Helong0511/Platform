@@ -8,8 +8,8 @@
 - 使用查询构建器优化查询
 """
 from typing import Optional
-from fastapi import APIRouter, Query, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
+
+from fastapi import APIRouter, Query
 
 from app.core.decorators import require_admin, validate_pagination
 from app.core.dependencies import (
@@ -18,18 +18,15 @@ from app.core.dependencies import (
     DatabaseDep,
     DbAndAdminDep
 )
+from app.core.query_builder import build_query
 from app.core.response import (
     create_success_response,
-    create_paginated_response,
-    create_error_response
+    create_paginated_response
 )
-from app.core.query_builder import build_query
 from app.models.models import User
-from app.schemas.user import UserResponse, UserCreate, UserUpdate
-
 # 注意：User 已在顶部导入，下面的局部导入是冗余的，但保留在示例中作为说明
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
-from app.core.errors import ErrorCode
+from app.schemas.user import UserResponse, UserCreate, UserUpdate
 
 router = APIRouter()
 
@@ -38,9 +35,9 @@ router = APIRouter()
 
 @router.get("/users/{user_id}", response_model=ResponseBaseSchema[UserResponse])
 async def get_user_example(
-    user_id: int,
-    user_service: UserServiceDep,
-    current_user: CurrentUserDep
+        user_id: int,
+        user_service: UserServiceDep,
+        current_user: CurrentUserDep
 ):
     """
     获取用户详情（重构示例）
@@ -63,12 +60,12 @@ async def get_user_example(
 @require_admin  # 使用装饰器，简化权限检查
 @validate_pagination(max_page_size=100)  # 使用装饰器验证分页参数
 async def get_users_example(
-    user_service: UserServiceDep,
-    current_user: CurrentUserDep,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    search: Optional[str] = Query(None),
-    is_active: Optional[bool] = Query(None)
+        user_service: UserServiceDep,
+        current_user: CurrentUserDep,
+        page: int = Query(1, ge=1),
+        page_size: int = Query(20, ge=1, le=100),
+        search: Optional[str] = Query(None),
+        is_active: Optional[bool] = Query(None)
 ):
     """
     获取用户列表（重构示例）
@@ -85,7 +82,7 @@ async def get_users_example(
         is_active=is_active,
         current_user=current_user
     )
-    
+
     return create_paginated_response(
         items=[UserResponse.model_validate(u) for u in users],
         total=total,
@@ -98,7 +95,7 @@ async def get_users_example(
 
 @router.get("/admin/stats")
 async def get_admin_stats_example(
-    db_and_admin: DbAndAdminDep
+        db_and_admin: DbAndAdminDep
 ):
     """
     获取管理员统计（重构示例）
@@ -108,7 +105,7 @@ async def get_admin_stats_example(
     2. 简化参数列表
     """
     db, admin = db_and_admin
-    
+
     # 使用查询构建器直接查询（简单场景）
     # 注意：User 已在顶部导入
     builder = build_query(
@@ -117,7 +114,7 @@ async def get_admin_stats_example(
         filters={"is_active": True}
     )
     active_count = await builder.count()
-    
+
     return create_success_response(
         data={"active_users": active_count},
         message="统计查询成功"
@@ -129,9 +126,9 @@ async def get_admin_stats_example(
 @router.post("/users", response_model=ResponseBaseSchema[UserResponse])
 @require_admin
 async def create_user_example(
-    user_data: UserCreate,
-    user_service: UserServiceDep,
-    current_user: CurrentUserDep
+        user_data: UserCreate,
+        user_service: UserServiceDep,
+        current_user: CurrentUserDep
 ):
     """
     创建用户（重构示例）
@@ -152,10 +149,10 @@ async def create_user_example(
 
 @router.put("/users/{user_id}", response_model=ResponseBaseSchema[UserResponse])
 async def update_user_example(
-    user_id: int,
-    user_data: UserUpdate,
-    user_service: UserServiceDep,
-    current_user: CurrentUserDep
+        user_id: int,
+        user_data: UserUpdate,
+        user_service: UserServiceDep,
+        current_user: CurrentUserDep
 ):
     """
     更新用户（重构示例）
@@ -177,9 +174,9 @@ async def update_user_example(
 @router.delete("/users/{user_id}")
 @require_admin
 async def delete_user_example(
-    user_id: int,
-    user_service: UserServiceDep,
-    current_user: CurrentUserDep
+        user_id: int,
+        user_service: UserServiceDep,
+        current_user: CurrentUserDep
 ):
     """
     删除用户（重构示例）
@@ -197,9 +194,9 @@ async def delete_user_example(
 
 @router.get("/users/search")
 async def search_users_example(
-    db: DatabaseDep,
-    current_user: CurrentUserDep,
-    keyword: str = Query(..., min_length=1)
+        db: DatabaseDep,
+        current_user: CurrentUserDep,
+        keyword: str = Query(..., min_length=1)
 ):
     """
     搜索用户（重构示例）
@@ -209,7 +206,7 @@ async def search_users_example(
     2. 复杂查询建议在服务层
     """
     # 注意：User 已在顶部导入
-    
+
     builder = build_query(
         db=db,
         model=User,
@@ -219,9 +216,9 @@ async def search_users_example(
         page=1,
         page_size=20
     )
-    
+
     users, total = await builder.paginated(1, 20)
-    
+
     return create_paginated_response(
         items=[UserResponse.model_validate(u) for u in users],
         total=total,
@@ -275,4 +272,3 @@ async def get_user_new(
 3. 业务逻辑可复用
 4. 易于测试
 """
-

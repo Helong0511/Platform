@@ -4,7 +4,6 @@
 计算广告收益（eCPM、Revenue 等）
 """
 import logging
-from typing import Optional
 
 from app.core.constants import ECPM_MULTIPLIER
 
@@ -13,11 +12,11 @@ logger = logging.getLogger(__name__)
 
 class RevenueCalculator:
     """收益计算器"""
-    
+
     @staticmethod
     def calculate_ecpm(
-        revenue: float,
-        impressions: int
+            revenue: float,
+            impressions: int
     ) -> float:
         """
         计算 eCPM（每千次展示收益）
@@ -31,14 +30,14 @@ class RevenueCalculator:
         """
         if impressions <= 0:
             return 0.0
-        
+
         ecpm = (revenue / impressions) * ECPM_MULTIPLIER
         return round(ecpm, 2)
-    
+
     @staticmethod
     def calculate_revenue(
-        ecpm: float,
-        impressions: int
+            ecpm: float,
+            impressions: int
     ) -> float:
         """
         计算收益
@@ -52,14 +51,14 @@ class RevenueCalculator:
         """
         if impressions <= 0:
             return 0.0
-        
+
         revenue = (ecpm / ECPM_MULTIPLIER) * impressions
         return round(revenue, 2)
-    
+
     @staticmethod
     def calculate_deducted_amount(
-        original_amount: float,
-        deduct_ratio: float
+            original_amount: float,
+            deduct_ratio: float
     ) -> float:
         """
         计算减扣后的金额
@@ -74,14 +73,14 @@ class RevenueCalculator:
         if deduct_ratio < 0 or deduct_ratio > 1:
             logger.warning(f"减扣比例超出范围：{deduct_ratio}，使用 0")
             deduct_ratio = 0
-        
+
         deducted = original_amount * (1 - deduct_ratio)
         return round(deducted, 2)
-    
+
     @staticmethod
     def calculate_deduct_ratio(
-        original_amount: float,
-        deducted_amount: float
+            original_amount: float,
+            deducted_amount: float
     ) -> float:
         """
         计算减扣比例
@@ -95,6 +94,6 @@ class RevenueCalculator:
         """
         if original_amount <= 0:
             return 0.0
-        
+
         ratio = (original_amount - deducted_amount) / original_amount
         return round(ratio, 4)

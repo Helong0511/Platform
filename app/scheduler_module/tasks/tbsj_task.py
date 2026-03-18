@@ -5,13 +5,14 @@ yangyangdeyi定时任务模块
 import asyncio
 import logging
 from datetime import datetime, timedelta
-import pytz
-import httpx
 
-from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+import httpx
+import pytz
+
 from app.core.ad_data_processor import process_api_ad_data
 from app.core.auto_bot import send_telegram_message
+from app.core.config import settings
+from app.core.database import AsyncSessionLocal
 from app.scheduler_module.task_names import TBSJ_API_TASK_NAME
 from app.scheduler_module.task_utils import get_admin_user, format_result_summary
 
@@ -39,8 +40,8 @@ APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
 
 async def tbsj_api_task(
-    start_date: str | None = None,
-    end_date: str | None = None
+        start_date: str | None = None,
+        end_date: str | None = None
 ) -> None:
     """
     yangyangdeyi定时任务主函数
@@ -140,14 +141,14 @@ async def tbsj_api_task(
             app_yesterday = app_now - timedelta(days=1)
             yesterday_str = app_yesterday.strftime("%Y-%m-%d")
             today_str = app_now.strftime("%Y-%m-%d")
-            
+
             if 0 <= app_now.hour <= 2:
                 tbsj_start = yesterday_str
                 tbsj_end = today_str
             else:
                 tbsj_start = today_str
                 tbsj_end = today_str
-        
+
         tbsj_params = {
             "page": 1,
             "limit": 1000,

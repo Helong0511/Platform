@@ -1,5 +1,6 @@
-from datetime import date, datetime
-from pydantic import BaseModel, field_serializer
+from datetime import date
+
+from pydantic import BaseModel
 
 
 # Python 3.10+ 使用内置类型注解

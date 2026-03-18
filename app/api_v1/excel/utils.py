@@ -2,11 +2,12 @@
 Excel处理工具函数
 提供文件验证、数据处理等工具函数
 """
-from fastapi import HTTPException, status, UploadFile
-from typing import Any
-import pandas as pd
-from datetime import datetime, timedelta, date
 import logging
+from datetime import datetime, timedelta, date
+from typing import Any
+
+import pandas as pd
+from fastapi import HTTPException, status, UploadFile
 
 from app.core.config import settings
 
@@ -49,23 +50,23 @@ async def validate_excel_file(file: UploadFile) -> bytes:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="不支持的文件类型。请上传Excel文件(.xlsx或.xls)"
         )
-    
+
     # 读取文件内容
     contents = await file.read()
-    
+
     # 检查文件大小
     if len(contents) > settings.MAX_UPLOAD_SIZE:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"文件大小超过限制（最大 {settings.MAX_UPLOAD_SIZE / 1024 / 1024:.1f}MB）"
         )
-    
+
     if not contents:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="上传的文件为空"
         )
-    
+
     return contents
 
 
@@ -144,10 +145,10 @@ def parse_date_value(date_value: Any) -> datetime.date:
 
 
 def safe_get_value(
-    row: pd.Series,
-    key: str,
-    default: Any = None,
-    allow_empty_string: bool = False
+        row: pd.Series,
+        key: str,
+        default: Any = None,
+        allow_empty_string: bool = False
 ) -> Any:
     """
     安全地从 pandas Series 获取值，处理 None、NaN 和空字符串
@@ -167,22 +168,22 @@ def safe_get_value(
     """
     if key not in row:
         return default
-    
+
     value = row.get(key)
-    
+
     # 检查是否为 None
     if value is None:
         return default
-    
+
     # 检查是否为 NaN（pandas 的 NaN）
     if pd.isna(value):
         return default
-    
+
     # 转换为字符串并检查是否为空
     str_value = str(value).strip()
     if not allow_empty_string and str_value == "":
         return default
-    
+
     return value
 
 
@@ -202,14 +203,14 @@ def is_valid_numeric_value(value: Any) -> bool:
     """
     if value is None:
         return False
-    
+
     if pd.isna(value):
         return False
-    
+
     str_value = str(value).strip()
     if str_value == "":
         return False
-    
+
     return True
 
 
@@ -271,7 +272,8 @@ def calculate_rates(df: pd.DataFrame) -> pd.DataFrame:
             # 避免除零错误
             df['coverage_rate'] = 0.0
             mask = df['request_count'] > 0
-            df.loc[mask, 'coverage_rate'] = (df.loc[mask, 'match_count'] / df.loc[mask, 'request_count'] * 100).fillna(0)
+            df.loc[mask, 'coverage_rate'] = (df.loc[mask, 'match_count'] / df.loc[mask, 'request_count'] * 100).fillna(
+                0)
     else:
         # 字段存在，但值为NaN的行才计算
         mask = df['coverage_rate'].isna()
@@ -319,13 +321,15 @@ def calculate_rates(df: pd.DataFrame) -> pd.DataFrame:
         if 'revenue_before_deduct' in df.columns and 'display_count' in df.columns:
             df['ecpm_before_deduct'] = 0.0
             mask = df['display_count'] > 0
-            df.loc[mask, 'ecpm_before_deduct'] = (df.loc[mask, 'revenue_before_deduct'] / df.loc[mask, 'display_count'] * 1000).fillna(0)
+            df.loc[mask, 'ecpm_before_deduct'] = (
+                        df.loc[mask, 'revenue_before_deduct'] / df.loc[mask, 'display_count'] * 1000).fillna(0)
     else:
         mask = df['ecpm_before_deduct'].isna()
         if mask.any() and 'revenue_before_deduct' in df.columns and 'display_count' in df.columns:
             valid_mask = mask & (df['display_count'] > 0)
             if valid_mask.any():
-                calculated = (df.loc[valid_mask, 'revenue_before_deduct'] / df.loc[valid_mask, 'display_count'] * 1000).fillna(0)
+                calculated = (df.loc[valid_mask, 'revenue_before_deduct'] / df.loc[
+                    valid_mask, 'display_count'] * 1000).fillna(0)
                 df.loc[valid_mask, 'ecpm_before_deduct'] = calculated
             df.loc[mask & (df['display_count'] == 0), 'ecpm_before_deduct'] = 0
 

@@ -8,14 +8,15 @@
 - 数据验证
 - 不直接操作数据库（通过仓储层）
 """
+import logging
 from typing import Generic, TypeVar, Optional, List, Dict, Any, Tuple
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import User, UserRole
-from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
+from app.models.models import User, UserRole
 from app.repositories.base_repository import BaseRepository
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class BaseService(Generic[T]):
     - 数据访问通过仓储层
     - 权限检查在服务层完成
     """
-    
+
     def __init__(self, db: AsyncSession, model: type[T], repository: Optional[BaseRepository[T]] = None):
         """
         初始化服务
@@ -44,16 +45,16 @@ class BaseService(Generic[T]):
         self.db = db
         self.model = model
         self._repository = repository or BaseRepository(db, model)
-    
+
     @property
     def repository(self) -> BaseRepository[T]:
         """获取仓储实例"""
         return self._repository
-    
+
     async def get_by_id(
-        self,
-        id: int,
-        load_relations: Optional[List[str]] = None
+            self,
+            id: int,
+            load_relations: Optional[List[str]] = None
     ) -> Optional[T]:
         """
         根据ID获取实体（通过仓储层）
@@ -66,15 +67,15 @@ class BaseService(Generic[T]):
             实体对象或None
         """
         return await self.repository.get_by_id(id, load_relations=load_relations)
-    
+
     async def get_all(
-        self,
-        skip: int = 0,
-        limit: int = 100,
-        filters: Optional[Dict[str, Any]] = None,
-        order_by: Optional[str] = None,
-        desc_order: bool = True,
-        load_relations: Optional[List[str]] = None
+            self,
+            skip: int = 0,
+            limit: int = 100,
+            filters: Optional[Dict[str, Any]] = None,
+            order_by: Optional[str] = None,
+            desc_order: bool = True,
+            load_relations: Optional[List[str]] = None
     ) -> List[T]:
         """
         获取所有实体（通过仓储层）
@@ -98,7 +99,7 @@ class BaseService(Generic[T]):
             desc_order=desc_order,
             load_relations=load_relations
         )
-    
+
     async def count(self, filters: Optional[Dict[str, Any]] = None) -> int:
         """
         统计实体数量（通过仓储层）
@@ -110,17 +111,17 @@ class BaseService(Generic[T]):
             记录总数
         """
         return await self.repository.count(filters=filters)
-    
+
     async def paginated(
-        self,
-        page: int = 1,
-        page_size: int = 20,
-        filters: Optional[Dict[str, Any]] = None,
-        search_fields: Optional[List[str]] = None,
-        search_keyword: Optional[str] = None,
-        order_by: Optional[str] = None,
-        desc_order: bool = True,
-        load_relations: Optional[List[str]] = None
+            self,
+            page: int = 1,
+            page_size: int = 20,
+            filters: Optional[Dict[str, Any]] = None,
+            search_fields: Optional[List[str]] = None,
+            search_keyword: Optional[str] = None,
+            order_by: Optional[str] = None,
+            desc_order: bool = True,
+            load_relations: Optional[List[str]] = None
     ) -> Tuple[List[T], int]:
         """
         分页查询（通过仓储层）
@@ -148,7 +149,7 @@ class BaseService(Generic[T]):
             desc_order=desc_order,
             load_relations=load_relations
         )
-    
+
     def check_permission(self, user: User, resource_user_id: Optional[int] = None) -> bool:
         """
         检查用户权限
@@ -164,12 +165,12 @@ class BaseService(Generic[T]):
         """
         if user.role == UserRole.ADMIN:
             return True
-        
+
         if resource_user_id is not None:
             return user.id == resource_user_id
-        
+
         return False
-    
+
     def require_admin(self, user: User) -> None:
         """
         要求管理员权限，否则抛出异常
@@ -185,11 +186,11 @@ class BaseService(Generic[T]):
                 ErrorCode.FORBIDDEN,
                 detail="此操作需要管理员权限"
             )
-    
+
     def require_owner_or_admin(
-        self,
-        user: User,
-        resource_user_id: Optional[int]
+            self,
+            user: User,
+            resource_user_id: Optional[int]
     ) -> None:
         """
         要求资源所有者或管理员权限
@@ -206,4 +207,3 @@ class BaseService(Generic[T]):
                 ErrorCode.FORBIDDEN,
                 detail="无权访问该资源"
             )
-

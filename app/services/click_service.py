@@ -2,18 +2,19 @@
 短链接访问记录服务层
 封装点击记录查询的业务逻辑
 """
-from typing import Optional, List, Dict, Any, Tuple
+import logging
 from datetime import timedelta
+from typing import Optional, List, Dict, Any, Tuple
+
+from sqlalchemy import func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, and_
 from sqlalchemy.orm import joinedload
 
-from app.models.models import Click, Offer, Publisher, Advertiser, ShortLink
-from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
-import logging
+from app.models.models import Click
 
 logger = logging.getLogger(__name__)
 
@@ -25,18 +26,18 @@ class ClickService:
         self.db = db
 
     async def get_clicks(
-        self,
-        page: int = 1,
-        page_size: int = 20,
-        click_id: Optional[str] = None,
-        offer_id: Optional[int] = None,
-        publisher_id: Optional[int] = None,
-        advertiser_id: Optional[int] = None,
-        short_link_id: Optional[int] = None,
-        ip: Optional[str] = None,
-        country: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+            self,
+            page: int = 1,
+            page_size: int = 20,
+            click_id: Optional[str] = None,
+            offer_id: Optional[int] = None,
+            publisher_id: Optional[int] = None,
+            advertiser_id: Optional[int] = None,
+            short_link_id: Optional[int] = None,
+            ip: Optional[str] = None,
+            country: Optional[str] = None,
+            start_date: Optional[str] = None,
+            end_date: Optional[str] = None
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
         获取短链接访问记录列表
@@ -203,4 +204,3 @@ class ClickService:
             click_list.append(click_data)
 
         return click_list, total
-

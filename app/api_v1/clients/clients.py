@@ -7,32 +7,33 @@
 - 更新客户信息
 - 删除客户（检查关联数据）
 """
-from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, Path
-from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func, update
-from sqlalchemy.orm import selectinload
 # Python 3.10+ 使用内置类型注解
 import logging
-from pydantic import BaseModel
+import re
+import uuid
 from io import BytesIO
 from urllib.parse import quote
-import pandas as pd
 
-from app.core.database import get_db
-from app.core.security import get_current_user, require_admin, require_admin_or_self
+import pandas as pd
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, Path
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from sqlalchemy import func, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
+
 from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
 from app.core.constants import MAX_PAGE_SIZE
+from app.core.database import get_db
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
 from app.core.fulltext_search import search_with_fulltext
+from app.core.security import require_admin, require_admin_or_self
 from app.core.utils import get_app_now_naive
 from app.models.models import User, Client, UserRole, Product
-from app.schemas.client import ClientCreate, ClientUpdate, ClientResponse
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
-from app.core.exceptions import raise_api_exception
-from app.core.errors import ErrorCode
-import uuid
-import re
+from app.schemas.client import ClientCreate, ClientUpdate, ClientResponse
 
 # 创建路由实例
 router = APIRouter()
@@ -212,7 +213,7 @@ async def create_client(
                 )
             )
             existing_users = result.scalars().all()
-            
+
             # 检查用户名是否已存在
             username_exists = any(user.username == client_in.username for user in existing_users)
             if username_exists:
@@ -461,7 +462,7 @@ async def update_client_switches(
     # 更新开关状态
     update_details = {}
     update_values = {}
-    
+
     if switch_data.api_enabled is not None:
         # 处理 None 值，确保 old_value 是布尔值
         old_value = bool(client.api_enabled) if client.api_enabled is not None else False
@@ -490,9 +491,9 @@ async def update_client_switches(
         # 使用 SQLAlchemy 的 update 语句直接更新数据库，确保数据被保存
         stmt = update(Client).where(Client.id == client_id).values(**update_values)
         await db.execute(stmt)
-        
+
         # 注意：不需要手动提交事务，get_db 依赖会自动处理
-        
+
         # 重新查询以获取最新数据（使用selectinload预加载用户关系，保持与其他端点一致）
         result = await db.execute(
             select(Client).options(selectinload(Client.user)).where(Client.id == client_id)
@@ -504,17 +505,17 @@ async def update_client_switches(
                 ErrorCode.CLIENT_NOT_FOUND,
                 detail=f"更新后无法找到客户ID {client_id}，请刷新页面重试"
             )
-        
+
         # 刷新对象以获取最新数据（在自动提交之前）
         await db.flush()
         await db.refresh(client)
-        
+
         # 确保布尔字段不是 None（数据库约束应该保证，但为了安全起见）
         if client.api_enabled is None:
             client.api_enabled = False
         if client.password_change_enabled is None:
             client.password_change_enabled = False
-            
+
     except Exception as e:
         # 注意：不需要手动回滚事务，get_db 依赖会自动处理
         # 如果是我们自己的异常，直接抛出
@@ -552,7 +553,7 @@ async def update_client_switches(
             ErrorCode.OPERATION_FAILED,
             detail=f"验证客户数据失败：{str(validation_error)}。请刷新页面重试"
         )
-    
+
     return ResponseBaseSchema.success(data=client_data)
 
 
@@ -571,7 +572,7 @@ async def export_clients_excel(
     """
     # 构建查询（与get_clients相同的逻辑）
     query = select(Client).options(selectinload(Client.user))
-    
+
     # 应用过滤条件
     if company_name:
         # 使用全文搜索（优先）或LIKE查询
@@ -583,16 +584,16 @@ async def export_clients_excel(
             base_query=query,
             use_fulltext=True
         )
-    
+
     if is_active is not None:
         query = query.where(Client.is_active == is_active)
-    
+
     # 获取所有客户数据
     query = query.order_by(Client.id.desc())
     result = await db.execute(query)
     # selectinload不会产生重复行，但为了安全起见使用unique()
     clients = result.unique().scalars().all()
-    
+
     # 如果没有数据，抛出错误提示用户
     if not clients:
         raise_api_exception(
@@ -600,7 +601,7 @@ async def export_clients_excel(
             message="无数据，不能导出",
             detail="当前筛选条件下没有可导出的客户数据，请调整筛选条件后重试"
         )
-    
+
     # 准备导出数据
     data = []
     for client in clients:
@@ -619,7 +620,7 @@ async def export_clients_excel(
             "创建时间": client.created_at.strftime("%Y-%m-%d %H:%M:%S") if client.created_at else "",
             "更新时间": client.updated_at.strftime("%Y-%m-%d %H:%M:%S") if client.updated_at else "",
         }
-        
+
         # 添加用户信息
         if user:
             row.update({
@@ -635,27 +636,27 @@ async def export_clients_excel(
                 "邮箱": "",
                 "全名": "",
             })
-        
+
         data.append(row)
-    
+
     # 创建Excel文件
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df = pd.DataFrame(data)
         df.to_excel(writer, index=False, sheet_name="客户数据")
-        
+
         # 设置列宽自适应
         worksheet = writer.sheets["客户数据"]
         for column_cells in worksheet.columns:
             max_length = max(len(str(cell.value)) for cell in column_cells) if column_cells else 0
             worksheet.column_dimensions[column_cells[0].column_letter].width = min(max_length + 2, 50)
-    
+
     output.seek(0)
     filename = f"客户数据_{get_app_now_naive().strftime('%Y%m%d_%H%M%S')}.xlsx"
     encoded_filename = quote(filename.encode('utf-8'))
-    
+
     logger.info(f"Client data exported by {current_user.username}, total: {len(data)} clients")
-    
+
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

@@ -1,6 +1,7 @@
-from pydantic import BaseModel, ConfigDict
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Generic, TypeVar  # Generic 和 TypeVar 仍需从 typing 导入
+
+from pydantic import BaseModel, ConfigDict
 
 from app.core.utils import APP_TIMEZONE
 

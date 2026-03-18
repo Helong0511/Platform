@@ -3,7 +3,8 @@
 定期归档旧点击记录到归档表，减少主表数据量，提升查询性能
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
+
 from sqlalchemy import text
 
 from app.core.database import AsyncSessionLocal
@@ -215,4 +216,3 @@ async def archive_old_clicks(days: int = 90) -> dict:
             log_task_error(TASK_NAME, error_msg, exc_info=True)
             set_task_result(TASK_NAME, f"执行失败: {error_msg}")
             raise
-

@@ -39,21 +39,21 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+from fastapi.security import OAuth2PasswordRequestForm
+from jose import jwt
+from sqlalchemy import func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, and_
 from sqlalchemy.orm import selectinload
-from jose import jwt
 
+from app.core.audit_log import log_login, log_logout
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import JWTUtils, get_current_user
 from app.core.utils import get_app_now_naive, get_client_ip, get_device_type, APP_TIMEZONE
-from app.core.audit_log import log_login, log_logout
-from app.models.models import Client, User, UserRole, Publisher
+from app.models.models import User, UserRole, Publisher
 from app.models.session import UserSession
 from app.schemas.auth import LoginResponse
 from app.schemas.base import ResponseBaseSchema
@@ -139,7 +139,7 @@ async def login(
     """
     # 注意：请求基本信息已由 RequestLoggingMiddleware 记录，这里只记录登录相关的关键信息
     client_ip = get_client_ip(request)
-    
+
     # 只在开发环境记录详细请求头（生产环境可能包含敏感信息）
     if not settings.is_production:
         logger.debug(f"登录请求 - 方法: {request.method}, 路径: {request.url.path}, IP: {client_ip}")
@@ -147,7 +147,7 @@ async def login(
     # ====== 查询用户 ======
     # 根据用户名查询用户（使用用户名而不是ID，因为登录时只有用户名）
     # 优化：如果是客户角色，同时加载客户信息，减少后续查询
-    
+
     try:
         result = await db.execute(
             select(User)
@@ -165,7 +165,7 @@ async def login(
                 detail="用户名或密码不正确",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
+
         if not user.verify_password(form_data.password):
             logger.warning(f"用户登录失败: 密码错误, 用户名={form_data.username}, IP={client_ip}")
             raise HTTPException(
@@ -248,17 +248,17 @@ async def login(
     access_token = JWTUtils.create_access_token(
         user.id, expires_delta=access_token_expires
     )
-    
+
     # 生成刷新令牌（7天过期）
     refresh_token = JWTUtils.create_refresh_token(
         user.id, expires_delta=timedelta(days=7)
     )
-    
+
     # ====== 记录会话信息 ======
     # 解析token获取jti
     token_jti = None
     try:
-        
+
         # 根据配置的算法选择密钥
         if settings.JWT_ALGORITHM == "RS256":
             # 使用RS256算法（非对称加密），需要公钥验证
@@ -272,7 +272,7 @@ async def login(
         else:
             # 使用HS256算法（对称加密），使用相同的密钥
             key = settings.SECRET_KEY
-        
+
         payload = jwt.decode(
             access_token,
             key,
@@ -283,17 +283,17 @@ async def login(
     except Exception as e:
         # 会话记录失败不应该影响登录
         logger.warning(f"记录会话信息失败: {e}")
-    
+
     if token_jti:
         # 记录会话到数据库
         # expires_at 需要保持UTC时间用于比较，但存储时转换为北京时间
         expires_at_utc = datetime.now(timezone.utc) + access_token_expires
         # 转换为北京时间（naive）存储到数据库
         expires_at = expires_at_utc.astimezone(APP_TIMEZONE).replace(tzinfo=None)
-        
+
         device_type_str = get_device_type(request)
         user_agent = request.headers.get("User-Agent", "")[:500]
-        
+
         session = UserSession(
             user_id=user.id,
             token_jti=token_jti,
@@ -318,7 +318,7 @@ async def login(
         client = user.clients[0]
         if client:
             api_enabled = client.api_enabled
-            
+
             # 检查该客户是否有关联的渠道（只检查激活的渠道）
             publisher_check = await db.execute(
                 select(func.count(Publisher.id)).where(
@@ -351,7 +351,7 @@ async def login(
     # 我们仍然通过 JSON 返回 token 以保持向后兼容，但通过 Cookie 提供更高的安全性
     # 转换为 JSONResponse 格式以包含数据
     json_response = JSONResponse(content=response_data)
-    
+
     # 设置 Cookie
     # httponly=True 防止 XSS 攻击读取 token
     # secure=True 仅允许通过 HTTPS 发送

@@ -4,20 +4,19 @@
 """
 import logging
 from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.core.database import get_db
-from app.core.config import settings
-from app.core.security import JWTUtils
-from app.core.exceptions import raise_api_exception
-from app.core.errors import ErrorCode
-from app.schemas.auth import LoginResponse, UserInfoResponse, RefreshTokenRequest
-from app.models.models import User, UserRole, Publisher
-from sqlalchemy.future import select
 from sqlalchemy import func, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
+
+from app.core.config import settings
+from app.core.database import get_db
+from app.core.security import JWTUtils
+from app.models.models import User, UserRole, Publisher
+from app.schemas.auth import LoginResponse, RefreshTokenRequest
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -25,9 +24,9 @@ logger = logging.getLogger(__name__)
 
 @router.post("/refresh", response_model=LoginResponse, summary="刷新访问令牌")
 async def refresh_token(
-    request: Request,
-    token_data: RefreshTokenRequest,
-    db: AsyncSession = Depends(get_db)
+        request: Request,
+        token_data: RefreshTokenRequest,
+        db: AsyncSession = Depends(get_db)
 ):
     """
     使用刷新令牌获取新的访问令牌
@@ -64,10 +63,10 @@ async def refresh_token(
     try:
         # 从请求体中获取刷新令牌
         refresh_token = token_data.refresh_token
-        
+
         # 验证刷新令牌
         payload = await JWTUtils.verify_token(refresh_token, db=db)
-        
+
         # 检查令牌类型
         token_type = payload.get("type")
         if token_type != "refresh":
@@ -76,7 +75,7 @@ async def refresh_token(
                 detail="无效的刷新令牌",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
+
         # 获取用户ID
         user_id = payload.get("sub")
         if not user_id:
@@ -85,7 +84,7 @@ async def refresh_token(
                 detail="无法从令牌中获取用户ID",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
+
         # 查询用户（如果是客户角色，同时加载客户信息）
         result = await db.execute(
             select(User)
@@ -93,27 +92,27 @@ async def refresh_token(
             .where(User.id == int(user_id))
         )
         user = result.scalars().first()
-        
+
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="用户不存在",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
+
         # 检查用户状态
         if not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="用户已被禁用",
             )
-        
+
         if user.login_restricted:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=user.login_message or "登录已被限制",
             )
-        
+
         # 生成新的访问令牌和刷新令牌
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         new_access_token = JWTUtils.create_access_token(
@@ -122,7 +121,7 @@ async def refresh_token(
         new_refresh_token = JWTUtils.create_refresh_token(
             user.id, expires_delta=timedelta(days=7)
         )
-        
+
         # 获取客户相关信息（如果是客户角色）
         api_enabled = False
         has_publisher = False
@@ -140,7 +139,7 @@ async def refresh_token(
                 )
                 publisher_count = publisher_check.scalar() or 0
                 has_publisher = publisher_count > 0
-        
+
         # 构建响应
         response_data = {
             "access_token": new_access_token,
@@ -156,7 +155,7 @@ async def refresh_token(
                 "has_publisher": has_publisher
             }
         }
-        
+
         # 设置 HttpOnly Cookie
         json_response = JSONResponse(content=response_data)
         json_response.set_cookie(
@@ -167,10 +166,10 @@ async def refresh_token(
             samesite="lax",
             max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         )
-        
+
         logger.info(f"用户 {user.username} 刷新令牌成功")
         return json_response
-        
+
     except HTTPException:
         raise
     except Exception as e:
