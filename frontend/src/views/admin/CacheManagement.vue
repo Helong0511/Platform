@@ -5,7 +5,9 @@
         <div class="card-header">
           <h1 class="page-title">缓存管理</h1>
           <el-button type="primary" @click="refreshCacheList" :loading="loading">
-            <el-icon><Refresh /></el-icon>
+            <el-icon>
+              <Refresh />
+            </el-icon>
             刷新缓存列表
           </el-button>
         </div>
@@ -13,15 +15,8 @@
 
       <div class="cache-content">
         <!-- 树状结构展示 -->
-        <el-tree
-          v-loading="loading"
-          :data="treeData"
-          :props="treeProps"
-          node-key="key"
-          default-expand-all
-          @node-click="handleNodeClick"
-          class="cache-tree"
-        >
+        <el-tree v-loading="loading" :data="treeData" :props="treeProps" node-key="key" default-expand-all
+          @node-click="handleNodeClick" class="cache-tree">
           <template #default="{ node, data }">
             <div class="tree-node-content">
               <div class="node-header">
@@ -35,26 +30,13 @@
                   <span class="node-hits">访问: {{ data.hits }}</span>
                 </div>
                 <div class="node-actions">
-                  <el-button
-                    size="small"
-                    type="primary"
-                    @click.stop="viewCache(data)"
-                    :disabled="!data.canView"
-                  >
+                  <el-button size="small" type="primary" @click.stop="viewCache(data)" :disabled="!data.canView">
                     查看
                   </el-button>
-                  <el-button
-                    size="small"
-                    type="warning"
-                    @click.stop="refreshCache(data)"
-                  >
+                  <el-button size="small" type="warning" @click.stop="refreshCache(data)">
                     刷新
                   </el-button>
-                  <el-button
-                    size="small"
-                    type="danger"
-                    @click.stop="clearCache(data)"
-                  >
+                  <el-button size="small" type="danger" @click.stop="clearCache(data)">
                     清除
                   </el-button>
                 </div>
@@ -64,19 +46,16 @@
         </el-tree>
 
         <div class="cache-actions">
-          <el-button
-            type="danger"
-            @click="clearAllCache"
-            :loading="clearingAll"
-          >
-            <el-icon><Delete /></el-icon>
+          <el-button type="danger" @click="clearAllCache" :loading="clearingAll">
+            <el-icon>
+              <Delete />
+            </el-icon>
             清除所有缓存
           </el-button>
-          <el-button
-            type="info"
-            @click="exportCacheStats"
-          >
-            <el-icon><Download /></el-icon>
+          <el-button type="info" @click="exportCacheStats">
+            <el-icon>
+              <Download />
+            </el-icon>
             导出缓存统计
           </el-button>
         </div>
@@ -84,11 +63,7 @@
     </el-card>
 
     <!-- 缓存详情对话框 -->
-    <el-dialog
-      v-model="cacheDetailVisible"
-      title="缓存详情"
-      width="80%"
-    >
+    <el-dialog v-model="cacheDetailVisible" title="缓存详情" width="80%">
       <div class="cache-detail">
         <el-descriptions :column="1" border>
           <el-descriptions-item label="缓存键">{{ currentCache.key }}</el-descriptions-item>
@@ -817,16 +792,16 @@ const treeProps = {
 const treeData = computed(() => {
   const tree = [];
   const map = new Map();
-  
+
   // 为每个缓存项创建节点
   cacheList.value.forEach(item => {
     const parts = item.key.split(':');
     let currentLevel = tree;
     let currentPath = '';
-    
+
     parts.forEach((part, index) => {
       currentPath = currentPath ? `${currentPath}:${part}` : part;
-      
+
       let node = map.get(currentPath);
       if (!node) {
         node = {
@@ -845,11 +820,11 @@ const treeData = computed(() => {
         map.set(currentPath, node);
         currentLevel.push(node);
       }
-      
+
       currentLevel = node.children;
     });
   });
-  
+
   return tree;
 });
 
@@ -1043,12 +1018,12 @@ onMounted(() => {
 
 .el-tree-node__content {
   width: 100%;
-  min-height: 140px;
+  min-height: 200px;
   padding: 0 !important;
 }
 
 /* 调整树节点的缩进，确保内容有足够空间 */
-.el-tree-node.is-expanded > .el-tree-node__children {
+.el-tree-node.is-expanded>.el-tree-node__children {
   padding-left: 20px;
 }
 
@@ -1062,7 +1037,7 @@ onMounted(() => {
   padding: 16px;
   gap: 12px;
   width: 100%;
-  min-height: 140px;
+  min-height: 180px;
   box-sizing: border-box;
 }
 
@@ -1165,7 +1140,7 @@ onMounted(() => {
 }
 
 /* 确保元数据区域有足够的空间 */
-.node-meta > * {
+.node-meta>* {
   margin-bottom: 5px;
 }
 
