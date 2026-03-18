@@ -1028,8 +1028,9 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   padding: var(--spacing-sm);
-  gap: var(--spacing-xs);
+  gap: var(--spacing-sm);
   width: 100%;
+  min-height: 60px;
 }
 
 .node-header {
@@ -1039,6 +1040,7 @@ onMounted(() => {
   gap: var(--spacing-xs);
   width: 100%;
   margin-bottom: var(--spacing-xs);
+  min-height: 24px;
 }
 
 .node-key {
@@ -1048,6 +1050,7 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
+  min-width: 120px;
 }
 
 .node-comment {
@@ -1057,7 +1060,7 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
-  min-width: 0;
+  min-width: 100px;
 }
 
 .node-meta {
@@ -1069,22 +1072,46 @@ onMounted(() => {
   border-top: 1px solid var(--border-color);
   flex-wrap: wrap;
   width: 100%;
+  min-height: 32px;
+  align-content: center;
 }
 
 .node-size {
   font-size: var(--font-size-sm);
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .node-hits {
   font-size: var(--font-size-sm);
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .node-actions {
   margin-left: auto;
   display: flex;
   gap: var(--spacing-xs);
+  flex-shrink: 0;
+}
+
+/* 确保树节点有足够的宽度 */
+.el-tree-node {
+  min-width: 100%;
+}
+
+.el-tree-node__content {
+  width: 100%;
+  min-height: 40px;
+}
+
+/* 调整树节点的缩进，确保内容有足够空间 */
+.el-tree-node.is-expanded > .el-tree-node__children {
+  padding-left: 20px;
+}
+
+.el-tree-node__children {
+  padding-left: 20px;
 }
 
 .cache-actions {
