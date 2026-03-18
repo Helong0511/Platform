@@ -1022,6 +1022,7 @@ onMounted(() => {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   overflow: hidden;
+  min-width: 800px;
 }
 
 .tree-node-content {
@@ -1030,7 +1031,8 @@ onMounted(() => {
   padding: var(--spacing-sm);
   gap: var(--spacing-sm);
   width: 100%;
-  min-height: 60px;
+  min-height: 80px;
+  box-sizing: border-box;
 }
 
 .node-header {
@@ -1050,7 +1052,7 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
-  min-width: 120px;
+  min-width: 150px;
 }
 
 .node-comment {
@@ -1060,7 +1062,7 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
-  min-width: 100px;
+  min-width: 120px;
 }
 
 .node-meta {
@@ -1072,20 +1074,23 @@ onMounted(() => {
   border-top: 1px solid var(--border-color);
   flex-wrap: wrap;
   width: 100%;
-  min-height: 32px;
+  min-height: 40px;
   align-content: center;
+  box-sizing: border-box;
 }
 
 .node-size {
   font-size: var(--font-size-sm);
   color: var(--text-muted);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .node-hits {
   font-size: var(--font-size-sm);
   color: var(--text-muted);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .node-actions {
@@ -1093,16 +1098,24 @@ onMounted(() => {
   display: flex;
   gap: var(--spacing-xs);
   flex-shrink: 0;
+  min-width: 180px;
+  justify-content: flex-end;
 }
 
 /* 确保树节点有足够的宽度 */
+.el-tree {
+  width: 100%;
+  min-width: 800px;
+}
+
 .el-tree-node {
   min-width: 100%;
 }
 
 .el-tree-node__content {
   width: 100%;
-  min-height: 40px;
+  min-height: 80px;
+  padding: 0 !important;
 }
 
 /* 调整树节点的缩进，确保内容有足够空间 */
@@ -1112,6 +1125,18 @@ onMounted(() => {
 
 .el-tree-node__children {
   padding-left: 20px;
+}
+
+/* 调整操作按钮大小 */
+.node-actions .el-button {
+  font-size: 12px;
+  padding: 4px 8px;
+  min-width: 50px;
+}
+
+/* 确保标签不会被压缩 */
+.node-meta .el-tag {
+  flex-shrink: 0;
 }
 
 .cache-actions {
