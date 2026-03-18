@@ -4,6 +4,7 @@ Telegram 消息发送模块
 提供消息发送功能，包括普通消息、带按钮消息和管理员通知
 """
 import logging
+import time
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -12,6 +13,11 @@ from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGT
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# 消息发送配置
+MAX_RETRIES = 3  # 最大重试次数
+BASE_RETRY_DELAY = 2  # 基础重试延迟（秒）
+TIMEOUT_SECONDS = 15  # 超时时间（秒）
 
 
 def _check_bot_available() -> tuple[bool, str]:
@@ -65,25 +71,45 @@ def send_telegram_message(
         actual_chat_id = chat_id_or_message
         actual_message = message
     
-    try:
-        # 截断过长的消息
-        if len(actual_message) > MAX_TELEGRAM_MESSAGE_LENGTH:
-            truncated_msg = truncate_message(actual_message, MAX_TELEGRAM_MESSAGE_LENGTH)
-            logger.info(f"消息过长，已截断：{len(actual_message)} -> {len(truncated_msg)} 字符")
-            actual_message = truncated_msg
-        
-        # 发送消息，不使用 parse_mode 以避免 HTML 解析错误
-        bot.send_message(
-            chat_id=actual_chat_id,
-            text=actual_message,
-            reply_to_message_id=reply_to_message_id
-        )
-        logger.info(f"已发送 Telegram 消息到：{actual_chat_id}")
-        return True
-        
-    except Exception as e:
-        logger.error(f"发送 Telegram 消息失败：{e}", exc_info=True)
-        return False
+    # 截断过长的消息
+    if len(actual_message) > MAX_TELEGRAM_MESSAGE_LENGTH:
+        truncated_msg = truncate_message(actual_message, MAX_TELEGRAM_MESSAGE_LENGTH)
+        logger.info(f"消息过长，已截断：{len(actual_message)} -> {len(truncated_msg)} 字符")
+        actual_message = truncated_msg
+    
+    # 重试机制
+    for attempt in range(MAX_RETRIES):
+        try:
+            # 发送消息，不使用 parse_mode 以避免 HTML 解析错误
+            # 设置超时参数
+            bot.send_message(
+                chat_id=actual_chat_id,
+                text=actual_message,
+                reply_to_message_id=reply_to_message_id,
+                timeout=TIMEOUT_SECONDS
+            )
+            logger.info(f"已发送 Telegram 消息到：{actual_chat_id}（尝试 {attempt + 1}/{MAX_RETRIES}）")
+            return True
+            
+        except Exception as e:
+            error_msg = str(e)
+            is_timeout = 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower()
+            is_network_error = 'connection' in error_msg.lower() or 'network' in error_msg.lower()
+            
+            if is_timeout or is_network_error:
+                # 网络相关错误，进行重试
+                if attempt < MAX_RETRIES - 1:
+                    retry_delay = BASE_RETRY_DELAY * (2 ** attempt)
+                    logger.warning(f"发送 Telegram 消息超时/网络错误，{retry_delay}秒后重试（{attempt + 1}/{MAX_RETRIES}）：{e}")
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    logger.error(f"发送 Telegram 消息失败，已达到最大重试次数：{e}", exc_info=True)
+                    return False
+            else:
+                # 其他错误，直接返回失败
+                logger.error(f"发送 Telegram 消息失败：{e}", exc_info=True)
+                return False
 
 
 async def send_telegram_message_async(
@@ -165,16 +191,40 @@ def send_telegram_message_with_buttons(
             truncated_msg = truncate_message(message, MAX_TELEGRAM_MESSAGE_LENGTH)
             message = truncated_msg
         
-        sent_message = bot.send_message(
-            chat_id=chat_id,
-            text=message,
-            reply_markup=markup
-        )
-        logger.info(f"已发送带按钮的 Telegram 消息到：{chat_id}")
-        return True, sent_message.message_id
+        # 重试机制
+        for attempt in range(MAX_RETRIES):
+            try:
+                sent_message = bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    reply_markup=markup,
+                    timeout=TIMEOUT_SECONDS
+                )
+                logger.info(f"已发送带按钮的 Telegram 消息到：{chat_id}（尝试 {attempt + 1}/{MAX_RETRIES}）")
+                return True, sent_message.message_id
+                
+            except Exception as e:
+                error_msg = str(e)
+                is_timeout = 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower()
+                is_network_error = 'connection' in error_msg.lower() or 'network' in error_msg.lower()
+                
+                if is_timeout or is_network_error:
+                    # 网络相关错误，进行重试
+                    if attempt < MAX_RETRIES - 1:
+                        retry_delay = BASE_RETRY_DELAY * (2 ** attempt)
+                        logger.warning(f"发送带按钮的 Telegram 消息超时/网络错误，{retry_delay}秒后重试（{attempt + 1}/{MAX_RETRIES}）：{e}")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        logger.error(f"发送带按钮的 Telegram 消息失败，已达到最大重试次数：{e}", exc_info=True)
+                        return False, None
+                else:
+                    # 其他错误，直接返回失败
+                    logger.error(f"发送带按钮的 Telegram 消息失败：{e}", exc_info=True)
+                    return False, None
         
     except Exception as e:
-        logger.error(f"发送带按钮的 Telegram 消息失败：{e}", exc_info=True)
+        logger.error(f"构建带按钮的 Telegram 消息失败：{e}", exc_info=True)
         return False, None
 
 
