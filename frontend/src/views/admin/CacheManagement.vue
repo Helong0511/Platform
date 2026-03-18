@@ -123,6 +123,7 @@ import { Refresh, Delete, Download } from '@element-plus/icons-vue';
 
 // 模拟缓存数据
 const cacheList = ref([
+  // API缓存
   {
     key: 'api:offers:all',
     size: 10240,
@@ -177,6 +178,180 @@ const cacheList = ref([
     updatedAt: new Date().toLocaleString(),
     content: '{"discounts": [{"id": 1, "offerId": 1, "value": 10}]}',
     canView: true
+  },
+  {
+    key: 'api:products:all',
+    size: 6144,
+    expireTime: Date.now() + 3600000,
+    type: 'API',
+    hits: 95,
+    createdAt: new Date().toLocaleString(),
+    updatedAt: new Date().toLocaleString(),
+    content: '{"products": [{"id": 1, "name": "Test Product", "status": "active"}]}',
+    canView: true
+  },
+  {
+    key: 'api:users:list',
+    size: 4608,
+    expireTime: Date.now() + 1800000,
+    type: 'API',
+    hits: 67,
+    createdAt: new Date().toLocaleString(),
+    updatedAt: new Date().toLocaleString(),
+    content: '{"users": [{"id": 1, "username": "admin", "role": "admin"}]}',
+    canView: true
+  },
+  // 短链接缓存
+  {
+    key: 'shortlink:all',
+    size: 8192,
+    expireTime: Date.now() + 3600000,
+    type: 'ShortLink',
+    hits: 200,
+    createdAt: new Date().toLocaleString(),
+    updatedAt: new Date().toLocaleString(),
+    content: '{"shortlinks": [{"id": 1, "code": "abc123", "target_url": "https://example.com", "clicks": 150}]}',
+    canView: true
+  },
+  {
+    key: 'shortlink:stats:abc123',
+    size: 1024,
+    expireTime: Date.now() + 1800000,
+    type: 'ShortLink',
+    hits: 150,
+    createdAt: new Date().toLocaleString(),
+    updatedAt: new Date().toLocaleString(),
+    content: '{"clicks": 150, "last_click": "2026-03-18 10:00:00"}',
+    canView: true
+  },
+  // 斗篷缓存
+  {
+    key: 'cloak:all',
+    size: 12288,
+    expireTime: Date.now() + 3600000,
+    type: 'Cloak',
+    hits: 180,
+    createdAt: new Date().toLocaleString(),
+    updatedAt: new Date().toLocaleString(),
+    content: '{"cloaks": [{"id": 1, "name": "Test Cloak", "status": "active"}]}',
+    canView: true
+  },
+  {
+    key: 'cloak:stats:1',
+    size: 1536,
+    expireTime: Date.now() + 1800000,
+    type: 'Cloak',
+    hits: 120,
+    createdAt: new Date().toLocaleString(),
+    updatedAt: new Date().toLocaleString(),
+    content: '{"views": 120, "conversions": 15}',
+    canView: true
+  },
+  // 系统缓存
+  {
+    key: 'system:config',
+    size: 2048,
+    expireTime: null,
+    type: 'System',
+    hits: 500,
+    createdAt: new Date().toLocaleString(),
+    updatedAt: new Date().toLocaleString(),
+    content: '{"system": {"version": "1.0.0", "maintenance": false}}',
+    canView: true
+  },
+  {
+    key: 'system:stats',
+    size: 3072,
+    expireTime: Date.now() + 300000,
+    type: 'System',
+    hits: 250,
+    createdAt: new Date().toLocaleString(),
+    updatedAt: new Date().toLocaleString(),
+    content: '{"stats": {"active_users": 15, "requests_per_minute": 45}}',
+    canView: true
+  },
+  // 用户缓存
+  {
+    key: 'user:1:session',
+    size: 1536,
+    expireTime: Date.now() + 1800000,
+    type: 'User',
+    hits: 120,
+    createdAt: new Date().toLocaleString(),
+    updatedAt: new Date().toLocaleString(),
+    content: '{"user_id": 1, "last_activity": "2026-03-18 09:00:00"}',
+    canView: true
+  },
+  {
+    key: 'user:preferences',
+    size: 1024,
+    expireTime: null,
+    type: 'User',
+    hits: 85,
+    createdAt: new Date().toLocaleString(),
+    updatedAt: new Date().toLocaleString(),
+    content: '{"theme": "dark", "language": "zh-CN"}',
+    canView: true
+  },
+  // 产品缓存
+  {
+    key: 'product:all',
+    size: 7168,
+    expireTime: Date.now() + 3600000,
+    type: 'Product',
+    hits: 130,
+    createdAt: new Date().toLocaleString(),
+    updatedAt: new Date().toLocaleString(),
+    content: '{"products": [{"id": 1, "name": "Test Product", "price": 99.99}]}',
+    canView: true
+  },
+  // 会话缓存
+  {
+    key: 'session:all',
+    size: 5120,
+    expireTime: Date.now() + 1800000,
+    type: 'Session',
+    hits: 90,
+    createdAt: new Date().toLocaleString(),
+    updatedAt: new Date().toLocaleString(),
+    content: '{"sessions": [{"id": 1, "user_id": 1, "status": "active"}]}',
+    canView: true
+  },
+  // 审计日志缓存
+  {
+    key: 'audit:logs:recent',
+    size: 9216,
+    expireTime: Date.now() + 3600000,
+    type: 'AuditLog',
+    hits: 45,
+    createdAt: new Date().toLocaleString(),
+    updatedAt: new Date().toLocaleString(),
+    content: '{"logs": [{"id": 1, "user_id": 1, "action": "login", "timestamp": "2026-03-18 08:00:00"}]}',
+    canView: true
+  },
+  // 任务缓存
+  {
+    key: 'task:scheduled',
+    size: 4096,
+    expireTime: Date.now() + 3600000,
+    type: 'Task',
+    hits: 60,
+    createdAt: new Date().toLocaleString(),
+    updatedAt: new Date().toLocaleString(),
+    content: '{"tasks": [{"id": 1, "name": "Cleanup", "status": "scheduled"}]}',
+    canView: true
+  },
+  // 其他缓存
+  {
+    key: 'other:temp:data',
+    size: 2048,
+    expireTime: Date.now() + 600000,
+    type: 'Other',
+    hits: 30,
+    createdAt: new Date().toLocaleString(),
+    updatedAt: new Date().toLocaleString(),
+    content: '{"temp": "some temporary data"}',
+    canView: true
   }
 ]);
 
@@ -212,7 +387,13 @@ const getTypeColor = (type) => {
     'API': 'primary',
     'System': 'success',
     'User': 'warning',
-    'Other': 'info'
+    'Other': 'info',
+    'ShortLink': 'success',
+    'Cloak': 'warning',
+    'Product': 'info',
+    'Session': 'primary',
+    'AuditLog': 'danger',
+    'Task': 'warning'
   };
   return colorMap[type] || 'info';
 };
