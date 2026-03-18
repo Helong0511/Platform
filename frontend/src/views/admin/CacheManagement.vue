@@ -12,125 +12,66 @@
       </template>
 
       <div class="cache-content">
-        <!-- 选项卡切换 -->
-        <el-tabs v-model="activeTab" class="cache-tabs">
-          <el-tab-pane label="所有缓存" name="all">
-            <!-- 表格展示所有缓存 -->
-            <el-table
-              v-loading="loading"
-              :data="flatCacheList"
-              style="width: 100%"
-              border
-              stripe
-            >
-              <el-table-column prop="key" label="缓存键" min-width="300">
-                <template #default="scope">
-                  <div class="cache-key-cell">
-                    <span class="cache-key">{{ scope.row.key }}</span>
-                    <span v-if="scope.row.comment" class="cache-comment">({{ scope.row.comment }})</span>
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column prop="type" label="类型" width="120">
-                <template #default="scope">
-                  <el-tag :type="getTypeColor(scope.row.type)">{{ scope.row.type }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="size" label="大小" width="100">
-                <template #default="scope">
-                  {{ formatSize(scope.row.size) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="hits" label="访问次数" width="100">
-                <template #default="scope">
-                  {{ scope.row.hits }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="expireTime" label="过期时间" width="150">
-                <template #default="scope">
-                  {{ formatExpireTime(scope.row.expireTime) }}
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="200" fixed="right">
-                <template #default="scope">
-                  <el-button
-                    size="small"
-                    type="primary"
-                    @click="viewCache(scope.row)"
-                    :disabled="!scope.row.canView"
-                  >
-                    查看
-                  </el-button>
-                  <el-button
-                    size="small"
-                    type="warning"
-                    @click="refreshCache(scope.row)"
-                  >
-                    刷新
-                  </el-button>
-                  <el-button
-                    size="small"
-                    type="danger"
-                    @click="clearCache(scope.row)"
-                  >
-                    清除
-                  </el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-tab-pane>
-          
-          <el-tab-pane label="树状视图" name="tree">
-            <!-- 树状结构展示 -->
-            <el-tree
-              v-loading="loading"
-              :data="treeData"
-              :props="treeProps"
-              node-key="key"
-              default-expand-all
-              @node-click="handleNodeClick"
-              class="cache-tree"
-            >
-              <template #default="{ node, data }">
-                <div class="tree-node">
-                  <div class="tree-node-main">
-                    <span class="tree-node-key">{{ data.key }}</span>
-                    <span v-if="data.comment" class="tree-node-comment">({{ data.comment }})</span>
-                  </div>
-                  <div v-if="data.size" class="tree-node-meta">
-                    <el-tag size="small" :type="getTypeColor(data.type)">{{ data.type }}</el-tag>
-                    <span class="tree-node-size">{{ formatSize(data.size) }}</span>
-                    <span class="tree-node-hits">访问: {{ data.hits }}</span>
-                  </div>
-                  <div v-if="data.size" class="tree-node-actions">
-                    <el-button
-                      size="small"
-                      type="primary"
-                      @click.stop="viewCache(data)"
-                      :disabled="!data.canView"
-                    >
-                      查看
-                    </el-button>
-                    <el-button
-                      size="small"
-                      type="warning"
-                      @click.stop="refreshCache(data)"
-                    >
-                      刷新
-                    </el-button>
-                    <el-button
-                      size="small"
-                      type="danger"
-                      @click.stop="clearCache(data)"
-                    >
-                      清除
-                    </el-button>
-                  </div>
+        <!-- 卡片视图展示所有缓存 -->
+        <div class="cache-cards">
+          <div 
+            v-for="(cache, index) in flatCacheList" 
+            :key="cache.key" 
+            class="cache-card"
+          >
+            <div class="cache-card-header">
+              <div class="cache-card-title">
+                <span class="cache-key">{{ cache.key }}</span>
+                <span v-if="cache.comment" class="cache-comment">({{ cache.comment }})</span>
+              </div>
+              <el-tag :type="getTypeColor(cache.type)">{{ cache.type }}</el-tag>
+            </div>
+            <div class="cache-card-body">
+              <div class="cache-card-meta">
+                <div class="cache-meta-item">
+                  <span class="meta-label">大小:</span>
+                  <span class="meta-value">{{ formatSize(cache.size) }}</span>
                 </div>
-              </template>
-            </el-tree>
-          </el-tab-pane>
-        </el-tabs>
+                <div class="cache-meta-item">
+                  <span class="meta-label">访问:</span>
+                  <span class="meta-value">{{ cache.hits }}</span>
+                </div>
+                <div class="cache-meta-item">
+                  <span class="meta-label">过期:</span>
+                  <span class="meta-value">{{ formatExpireTime(cache.expireTime) }}</span>
+                </div>
+                <div class="cache-meta-item">
+                  <span class="meta-label">创建:</span>
+                  <span class="meta-value">{{ cache.createdAt }}</span>
+                </div>
+              </div>
+            </div>
+            <div class="cache-card-footer">
+              <el-button
+                size="small"
+                type="primary"
+                @click="viewCache(cache)"
+                :disabled="!cache.canView"
+              >
+                查看
+              </el-button>
+              <el-button
+                size="small"
+                type="warning"
+                @click="refreshCache(cache)"
+              >
+                刷新
+              </el-button>
+              <el-button
+                size="small"
+                type="danger"
+                @click="clearCache(cache)"
+              >
+                清除
+              </el-button>
+            </div>
+          </div>
+        </div>
 
         <div class="cache-actions">
           <el-button
@@ -1098,25 +1039,47 @@ onMounted(() => {
   overflow-x: auto;
 }
 
-/* 选项卡样式 */
-.cache-tabs {
+/* 卡片视图样式 */
+.cache-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  gap: 20px;
   margin-bottom: 20px;
 }
 
-/* 表格样式 */
-.el-table {
-  margin-bottom: 20px;
+.cache-card {
+  background-color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  padding: 16px;
+  transition: all 0.3s ease;
 }
 
-.cache-key-cell {
+.cache-card:hover {
+  box-shadow: 0 4px 16px 0 rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.cache-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.cache-card-title {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  flex: 1;
+  margin-right: 12px;
 }
 
 .cache-key {
-  font-weight: 500;
+  font-weight: 600;
   font-size: 14px;
   white-space: nowrap;
   overflow: hidden;
@@ -1132,108 +1095,48 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
-  min-width: 150px;
+  min-width: 100px;
 }
 
-/* 树状视图样式 */
-.cache-tree {
-  margin-bottom: 20px;
-  border: 1px solid #ebeef5;
-  border-radius: 4px;
-  overflow: hidden;
-  min-width: 800px;
-  width: 100%;
+.cache-card-body {
+  margin-bottom: 16px;
 }
 
-.el-tree {
-  width: 100%;
-  min-width: 800px;
-  overflow-x: auto;
-}
-
-.el-tree-node {
-  min-width: 100%;
-}
-
-.el-tree-node__content {
-  width: 100%;
-  min-height: 80px;
-  padding: 12px !important;
-}
-
-/* 调整树节点的缩进，确保内容有足够空间 */
-.el-tree-node.is-expanded > .el-tree-node__children {
-  padding-left: 20px;
-}
-
-.el-tree-node__children {
-  padding-left: 20px;
-}
-
-.tree-node {
-  display: flex;
-  flex-direction: column;
+.cache-card-meta {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
-  width: 100%;
 }
 
-.tree-node-main {
+.cache-meta-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.tree-node-key {
+.meta-label {
+  font-size: 12px;
+  color: #909399;
+  white-space: nowrap;
+}
+
+.meta-value {
+  font-size: 13px;
+  color: #303133;
   font-weight: 500;
-  font-size: 14px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 1;
-  min-width: 200px;
 }
 
-.tree-node-comment {
-  color: #909399;
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
-  min-width: 150px;
-}
-
-.tree-node-meta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding-top: 8px;
-  border-top: 1px solid #ebeef5;
-}
-
-.tree-node-size {
-  font-size: 12px;
-  color: #909399;
-  white-space: nowrap;
-}
-
-.tree-node-hits {
-  font-size: 12px;
-  color: #909399;
-  white-space: nowrap;
-}
-
-.tree-node-actions {
+.cache-card-footer {
   display: flex;
   gap: 8px;
-  margin-top: 8px;
+  justify-content: flex-end;
 }
 
 /* 调整操作按钮大小 */
-.tree-node-actions .el-button,
-.el-table .el-button {
+.cache-card-footer .el-button {
   font-size: 12px;
   padding: 4px 8px;
   min-width: 50px;
@@ -1242,13 +1145,31 @@ onMounted(() => {
 }
 
 /* 确保标签不会被压缩 */
-.tree-node-meta .el-tag,
-.el-table .el-tag {
+.cache-card-header .el-tag {
   flex-shrink: 0;
   font-size: 12px;
   padding: 0 8px;
   height: 20px;
   line-height: 18px;
+}
+
+/* 响应式设计 */
+@media (max-width: 767px) {
+  .cache-cards {
+    grid-template-columns: 1fr;
+  }
+  
+  .cache-card-meta {
+    grid-template-columns: 1fr;
+  }
+  
+  .cache-card-footer {
+    flex-direction: column;
+  }
+  
+  .cache-card-footer .el-button {
+    width: 100%;
+  }
 }
 
 .cache-actions {
