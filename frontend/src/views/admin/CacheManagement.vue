@@ -29,9 +29,11 @@
                 <span v-if="data.comment" class="node-comment">({{ data.comment }})</span>
               </div>
               <div v-if="data.size" class="node-meta">
-                <el-tag size="small" :type="getTypeColor(data.type)">{{ data.type }}</el-tag>
-                <span class="node-size">{{ formatSize(data.size) }}</span>
-                <span class="node-hits">访问: {{ data.hits }}</span>
+                <div class="node-meta-info">
+                  <el-tag size="small" :type="getTypeColor(data.type)">{{ data.type }}</el-tag>
+                  <span class="node-size">{{ formatSize(data.size) }}</span>
+                  <span class="node-hits">访问: {{ data.hits }}</span>
+                </div>
                 <div class="node-actions">
                   <el-button
                     size="small"
@@ -1096,16 +1098,25 @@ onMounted(() => {
 
 .node-meta {
   display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
+  align-items: flex-start;
+  justify-content: space-between;
   margin-top: var(--spacing-xs);
   padding-top: var(--spacing-xs);
   border-top: 1px solid var(--border-color);
   flex-wrap: wrap;
   width: 100%;
   min-height: 45px;
-  align-content: center;
   box-sizing: border-box;
+  gap: var(--spacing-sm);
+}
+
+.node-meta-info {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 300px;
 }
 
 .node-size {
@@ -1125,13 +1136,13 @@ onMounted(() => {
 }
 
 .node-actions {
-  margin-left: auto;
   display: flex;
   gap: var(--spacing-xs);
   flex-shrink: 0;
   min-width: 180px;
   justify-content: flex-end;
-  align-self: flex-end;
+  align-self: flex-start;
+  margin-top: 2px;
 }
 
 /* 调整操作按钮大小 */
