@@ -317,16 +317,15 @@ async def open_master_html_with_redirect(
         with open(master_html_path, "r", encoding="utf-8") as f:
             html_content = f.read()
         
-        # 将original_url直接注入到HTML中，替换getOriginalUrl函数的返回值
-        # 这样就不需要通过URL参数传递，用户就不会看到参数了
+        # 将original_url直接注入到HTML中，同时保留处理fbclid参数的逻辑
         import re
-        # 替换getOriginalUrl函数，使其直接返回原始URL
+        # 替换getOriginalUrl函数，使其返回原始URL并处理fbclid参数
         logger.warning(f"[斗篷服务] 注入原始URL到HTML: {original_url}")
         # 对原始URL进行转义，避免语法错误
         escaped_original_url = original_url.replace('\\', '\\\\').replace('"', '\\"')
         # 使用更精确的正则表达式，匹配完整的函数定义
         pattern = r'function getOriginalUrl\(\) \{[\s\S]*?return originalUrl;[\s\S]*?\}'
-        replacement = f'function getOriginalUrl() {{ return "{escaped_original_url}"; }}'
+        replacement = f'function getOriginalUrl() {{ let originalUrl = "{escaped_original_url}"; const fbclid = getFbclid(); if (fbclid) {{ try {{ const url = new URL(originalUrl); url.searchParams.set("fbclid", fbclid); originalUrl = url.toString(); console.log("[URL] 已添加 fbclid 参数:", originalUrl); }} catch (err) {{ console.log("[URL] 添加 fbclid 参数失败:", err); if (originalUrl.includes("?")) {{ originalUrl += "&fbclid=" + encodeURIComponent(fbclid); }} else {{ originalUrl += "?fbclid=" + encodeURIComponent(fbclid); }} console.log("[URL] 简单拼接 fbclid 参数:", originalUrl); }} }} return originalUrl; }}'
         html_content = re.sub(pattern, replacement, html_content)
         # 验证替换是否成功
         if replacement in html_content:

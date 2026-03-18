@@ -569,7 +569,7 @@
                 // 构建 reportUrl，添加 fbclid 参数
                 let reportUrl = window.location.protocol + "//" + window.location.host + "/report?id=" + shortCode + "&event=survey_click&time=" + Date.now();
                 if (fbclid) {
-                    reportUrl += "&fbclid=" + adsid;
+                    reportUrl += "&fbclid=" + fbclid;
                 }
 
                 // 发送上报请求

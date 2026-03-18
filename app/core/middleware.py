@@ -100,12 +100,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.app = app
 
     async def dispatch(self, request: Request, call_next):
-        # ====== 排除短链接路由（不限流） ======
-        # 短链接访问需要高并发支持，不能限流
+        # ====== 排除短链接路由和上报路由（不限流） ======
+        # 短链接访问和点击上报需要高并发支持，不能限流
         path = request.url.path
         is_short_link = (
             path.startswith("/s/") or  # /s/{short_code} 路由
-            path.startswith("/api/v1/short-links/")  # /api/v1/short-links/{short_code} 路由
+            path.startswith("/api/v1/short-links/") or  # /api/v1/short-links/{short_code} 路由
+            path.startswith("/report")  # /report 路由（点击上报）
         )
         
         if is_short_link:
