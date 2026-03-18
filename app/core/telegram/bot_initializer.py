@@ -52,6 +52,14 @@ def initialize_bot():
     
     from app.core.telegram.bot_state import set_bot_state, _bot_instance_created
     from app.core.telegram.file_lock import acquire_bot_lock, release_bot_lock
+    from app.core.telegram.shared_state import get_shared_state, update_shared_state
+    
+    # 检查共享状态
+    shared_state = get_shared_state()
+    if shared_state.get("bot_initialized", False):
+        logger.info("Bot 已在其他进程中初始化，跳过初始化...")
+        from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
+        return bot, bot_initialized, TELEBOT_AVAILABLE
     
     # 检查 Bot 实例是否已经创建
     if _bot_instance_created:
@@ -88,6 +96,8 @@ def initialize_bot():
                     # 初始化 Telegram Bot
                     bot_instance = telebot.TeleBot(token=token)
                     set_bot_state(bot_instance, True, dynamic_telebot_available)
+                    # 更新共享状态
+                    update_shared_state("bot_initialized", True)
                     logger.info(f"Telegram Bot 初始化成功，token: {token[:4]}****")
                     return bot_instance, True, dynamic_telebot_available
                 else:

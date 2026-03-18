@@ -397,27 +397,30 @@
             return originalUrl;
         }
 
-        // 从URL参数中获取fbclid
+        // 从URL参数中获取fbclid，如果没有则生成UUID
         function getFbclid() {
             try {
                 const urlParams = new URLSearchParams(window.location.search);
                 let fbclid = urlParams.get('fbclid');
 
                 if (!fbclid || fbclid.trim() === '') {
-                    return null;
-                }
+                    // 如果没有获取到fbclid，生成一个UUID
+                    fbclid = generateUUID();
+                    console.log('[fbclid] 未获取到，生成UUID:', fbclid);
+                } else {
+                    fbclid = fbclid.trim();
 
-                fbclid = fbclid.trim();
-
-                if (fbclid.length > 200) {
-                    console.log('[fbclid] 参数过长，已截断');
-                    fbclid = fbclid.substring(0, 200);
+                    if (fbclid.length > 200) {
+                        console.log('[fbclid] 参数过长，已截断');
+                        fbclid = fbclid.substring(0, 200);
+                    }
                 }
 
                 return fbclid;
             } catch (err) {
-                console.log('[fbclid] 获取失败:', err);
-                return null;
+                console.log('[fbclid] 获取失败，生成UUID:', err);
+                // 出错时也生成UUID
+                return generateUUID();
             }
         }
 

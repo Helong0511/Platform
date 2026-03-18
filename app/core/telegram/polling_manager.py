@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
 from app.core.telegram.file_lock import acquire_bot_lock, release_bot_lock
+from app.core.telegram.shared_state import get_shared_state, update_shared_state, is_bot_running
 from app.core.config import settings
 
 # 标记处理器是否已注册
@@ -119,6 +120,11 @@ def start_polling():
         logger.info(f"[PID:{current_pid}] Telegram Bot 已经启动，跳过重复启动...")
         return False
     
+    # 检查共享状态
+    if is_bot_running():
+        logger.info(f"[PID:{current_pid}] Telegram Bot 已在其他进程中运行，跳过启动...")
+        return False
+    
     logger.info(f"[PID:{current_pid}] 开始启动 Telegram Bot...")
     
     # 检查是否启用 Telegram
@@ -140,7 +146,7 @@ def start_polling():
         return False
     
     # 多进程环境下，增加随机延迟避免锁竞争
-    delay = random.uniform(0.1, 1.0)
+    delay = random.uniform(0.1, 2.0)
     logger.info(f"[PID:{current_pid}] 等待 {delay:.2f} 秒后尝试获取锁，避免竞争...")
     time.sleep(delay)
     
@@ -152,15 +158,27 @@ def start_polling():
         logger.info(f"[PID:{current_pid}] 其他进程已启动 Telegram Bot，或无法获取锁，跳过启动...")
         return False
     
+    # 再次检查共享状态，防止竞态条件
+    if is_bot_running():
+        logger.info(f"[PID:{current_pid}] Telegram Bot 已在其他进程中运行，跳过启动...")
+        release_bot_lock()
+        return False
+    
     # 标记 Bot 已经启动
     _bot_started = True
     logger.info(f"[PID:{current_pid}] 成功获取锁，标记 Bot 为已启动状态")
+    
+    # 更新共享状态
+    update_shared_state("bot_running", True)
+    update_shared_state("current_pid", current_pid)
+    update_shared_state("last_start_time", time.time())
     
     # 验证是否已有其他 Bot 实例在运行
     try:
         logger.info(f"[PID:{current_pid}] 验证是否已有其他 Bot 实例在运行...")
         bot_info = bot.get_me()
         logger.info(f"[PID:{current_pid}] 验证成功，Bot 可以正常运行：@{bot_info.username}")
+        update_shared_state("bot_username", bot_info.username)
         
         # 发送启动消息（只有真正获取到锁的进程才发送）
         try:
@@ -176,6 +194,7 @@ def start_polling():
         if '409' in error_msg or 'Conflict' in error_msg or 'terminated by other getUpdates' in error_msg:
             logger.error(f"[PID:{current_pid}] 验证失败：检测到其他 Bot 实例正在运行")
             release_bot_lock()
+            update_shared_state("bot_running", False)
             return False
         else:
             logger.warning(f"[PID:{current_pid}] 验证时发生错误，但继续启动：{e}")
@@ -263,6 +282,8 @@ def start_polling():
                     release_bot_lock()
                     # 标记 Bot 为未启动状态，避免重复尝试
                     _bot_started = False
+                    # 更新共享状态
+                    update_shared_state("bot_running", False)
                     # 额外的清理：删除锁文件
                     try:
                         from app.core.telegram.file_lock import get_default_lock_path
@@ -304,6 +325,8 @@ def start_polling():
     
     # 重置启动状态
     _bot_started = False
+    # 更新共享状态
+    update_shared_state("bot_running", False)
     
     return True
 

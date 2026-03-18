@@ -139,7 +139,7 @@ def _close_lock_file():
             _bot_lock_file = None
 
 
-def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 5) -> bool:
+def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 15) -> bool:
     """
     获取 Bot 启动锁（多进程环境）
     
@@ -187,7 +187,7 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 5
         except Exception as e:
             logger.warning(f"[PID:{current_pid}] 强制清理锁文件失败：{e}")
         
-        retry_delay = 0.2  # 初始重试延迟
+        retry_delay = 0.5  # 初始重试延迟
         for attempt in range(1, max_retries + 1):
             try:
                 # 尝试创建锁文件（使用独占模式）
@@ -225,7 +225,7 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 5
                         if attempt < max_retries:
                             logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（其他进程已启动），{retry_delay}秒后重试...")
                             time.sleep(retry_delay)
-                            retry_delay *= 2  # 指数退避
+                            retry_delay *= 1.5  # 指数退避
                         else:
                             logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（其他进程已启动）")
                         continue
@@ -248,7 +248,7 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 5
                         if attempt < max_retries:
                             logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（其他进程已启动），{retry_delay}秒后重试...")
                             time.sleep(retry_delay)
-                            retry_delay *= 2
+                            retry_delay *= 1.5
                         else:
                             logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（其他进程已启动）")
                         continue
@@ -291,7 +291,7 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 5
                         if attempt < max_retries:
                             logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（其他进程可能已启动），{retry_delay}秒后重试...")
                             time.sleep(retry_delay)
-                            retry_delay *= 2
+                            retry_delay *= 1.5
                         else:
                             logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（其他进程可能已启动）: {e}")
                         continue
@@ -301,7 +301,7 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 5
                 _close_lock_file()
                 if attempt < max_retries:
                     time.sleep(retry_delay)
-                    retry_delay *= 2
+                    retry_delay *= 1.5
                 else:
                     return False
                     

@@ -83,59 +83,6 @@ async def redirect_short_link_public(
         )
 
 
-@router.get("/change",
-            summary="打开固定的master.html页面",
-            tags=["斗篷服务"])
-async def open_master_html(request: Request):
-    """
-    打开固定的master.html页面
-    """
-    try:
-        # 记录请求信息
-        client_ip = request.client.host if request.client else "未知"
-        user_agent = request.headers.get("user-agent", "未知")
-        referer = request.headers.get("referer", "未知")
-        logger.warning(f"[斗篷服务] 收到 /change 请求: client_ip={client_ip}, user_agent={user_agent}, referer={referer}")
-        
-        # 优先使用服务器路径，本地开发时会自动回退到本地路径
-        master_html_path = "/data/Platform/scripts/master.html"
-        logger.warning(f"[斗篷服务] 尝试使用服务器路径: {master_html_path}")
-        
-        # 如果服务器路径不存在，尝试本地路径（用于开发环境）
-        if not os.path.exists(master_html_path):
-            logger.warning(f"[斗篷服务] 服务器路径不存在，尝试本地路径")
-            # 使用相对路径，确保在不同操作系统上都能正确工作
-            current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            master_html_path = os.path.join(current_dir, "scripts", "master.html")
-            logger.warning(f"[斗篷服务] 本地路径: {master_html_path}")
-        
-        if not os.path.exists(master_html_path):
-            logger.error(f"[斗篷服务] master.html文件不存在: {master_html_path}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="master.html文件不存在"
-            )
-        
-        logger.warning(f"[斗篷服务] 找到master.html文件: {master_html_path}")
-        response = FileResponse(path=master_html_path)
-        # 直接设置CSP头，允许内联脚本和Font Awesome CDN
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: https:; font-src 'self' data: https://cdnjs.cloudflare.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
-        # 添加缓存控制头，防止浏览器缓存
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
-        logger.warning(f"[斗篷服务] /change 请求处理完成: 返回master.html")
-        return response
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[斗篷服务] /change 请求处理异常: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"处理失败: {str(e)}"
-        )
-
-
 @router.get("/change/{short_code}",
             summary="打开master.html并跳转到指定URL",
             tags=["斗篷服务"])
@@ -153,7 +100,7 @@ async def open_master_html_with_redirect(
         client_ip = request.client.host if request.client else "未知"
         user_agent = request.headers.get("user-agent", "未知")
         referer = request.headers.get("referer", "未知")
-        logger.warning(f"[斗篷服务] 收到 /change/{short_code} 请求: client_ip={client_ip}, user_agent={user_agent}, referer={referer}")
+        logger.warning(f"[斗篷服务] 收到 /change/{short_code} 请求: \nclient_ip={client_ip},\nuser_agent={user_agent},\nreferer={referer}")
         
         # 尝试从缓存获取短链接信息
         logger.warning(f"[斗篷服务] 尝试从缓存获取短链接信息: short_code={short_code}")
@@ -405,7 +352,13 @@ async def handle_report(
             user_agent = request.headers.get("user-agent", "未知")
             referer = request.headers.get("referer", "未知")
         
-        logger.warning(f"[斗篷点击] 收到上报请求: id={id}, event={event}, time={time}, fbclid={fbclid}, client_ip={client_ip}, user_agent={user_agent}, referer={referer}")
+        # 如果没有获取到fbclid，生成一个UUID
+        if not fbclid:
+            import uuid
+            fbclid = str(uuid.uuid4())
+            logger.warning(f"[斗篷点击] 生成UUID作为fbclid: {fbclid}")
+        
+        logger.warning(f"report [斗篷点击] 收到上报请求:\nid={id},\nevent={event},\ntime={time},\nfbclid={fbclid},\nclient_ip={client_ip},\nuser_agent={user_agent},\nreferer={referer}")
         
         # 检查是否重复上报
         session_id = request.cookies.get('session_id') if request else None
@@ -418,7 +371,7 @@ async def handle_report(
                     has_clicked = await redis.exists(click_key)
                     if has_clicked:
                         logger.warning(f"[斗篷点击] 重复上报，跳过统计: id={id}, session_id={session_id}")
-                        return {"status": "success", "message": "Report received (duplicate)"}
+                        return {"status": "success", "message": "Report received (duplicate)", "client_ip": client_ip, "fbclid": fbclid}
                     # 设置过期时间为24小时
                     await redis.setex(click_key, 86400, '1')
                 except Exception as e:

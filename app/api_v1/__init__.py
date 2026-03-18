@@ -42,6 +42,7 @@ from app.api_v1.system import (
     sessions_router as sessions,
     notification_configs_router as notification_configs,
 )
+from app.api_v1.system.telegram_status import router as telegram_status
 
 # ==================== 外部接口模块 ====================
 from app.api_v1.external import client_api_router as client_api, telegram_router as telegram
@@ -100,6 +101,7 @@ api_router.include_router(scheduled_tasks, prefix="/scheduled-tasks", tags=["定
 api_router.include_router(audit_logs, prefix="/audit-logs", tags=["操作日志"])
 api_router.include_router(sessions, prefix="/sessions", tags=["会话管理"])
 api_router.include_router(notification_configs, prefix="/notification-configs", tags=["通知配置管理"])
+api_router.include_router(telegram_status, prefix="/telegram", tags=["Telegram状态管理"])
 
 # ---------- 外部接口模块 ----------
 # 客户API路由（通过API密钥访问，无前缀）
@@ -160,6 +162,7 @@ __all__ = [
     'audit_logs',
     'sessions',
     'notification_configs',
+    'telegram_status',
     # 外部接口
     'client_api',
     'telegram',
