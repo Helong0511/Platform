@@ -24,8 +24,10 @@
         >
           <template #default="{ node, data }">
             <div class="tree-node-content">
-              <span class="node-key">{{ data.key }}</span>
-              <span v-if="data.comment" class="node-comment">({{ data.comment }})</span>
+              <div class="node-header">
+                <span class="node-key">{{ data.key }}</span>
+                <span v-if="data.comment" class="node-comment">({{ data.comment }})</span>
+              </div>
               <div v-if="data.size" class="node-meta">
                 <el-tag size="small" :type="getTypeColor(data.type)">{{ data.type }}</el-tag>
                 <span class="node-size">{{ formatSize(data.size) }}</span>
@@ -1027,17 +1029,35 @@ onMounted(() => {
   flex-direction: column;
   padding: var(--spacing-sm);
   gap: var(--spacing-xs);
+  width: 100%;
+}
+
+.node-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+  width: 100%;
+  margin-bottom: var(--spacing-xs);
 }
 
 .node-key {
   font-weight: var(--font-weight-medium);
   font-size: var(--font-size-base);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
 }
 
 .node-comment {
   color: var(--text-muted);
   font-size: var(--font-size-sm);
-  margin-left: var(--spacing-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
 }
 
 .node-meta {
@@ -1048,6 +1068,7 @@ onMounted(() => {
   padding-top: var(--spacing-xs);
   border-top: 1px solid var(--border-color);
   flex-wrap: wrap;
+  width: 100%;
 }
 
 .node-size {
