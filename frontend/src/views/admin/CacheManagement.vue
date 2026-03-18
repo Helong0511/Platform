@@ -1043,7 +1043,7 @@ onMounted(() => {
 
 .el-tree-node__content {
   width: 100%;
-  min-height: 100px;
+  min-height: 140px;
   padding: 0 !important;
 }
 
@@ -1059,10 +1059,10 @@ onMounted(() => {
 .tree-node-content {
   display: flex;
   flex-direction: column;
-  padding: 12px;
-  gap: 8px;
+  padding: 16px;
+  gap: 12px;
   width: 100%;
-  min-height: 120px;
+  min-height: 140px;
   box-sizing: border-box;
 }
 
