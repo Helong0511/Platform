@@ -1059,10 +1059,10 @@ onMounted(() => {
 .tree-node-content {
   display: flex;
   flex-direction: column;
-  padding: var(--spacing-sm);
-  gap: var(--spacing-sm);
+  padding: 12px;
+  gap: 8px;
   width: 100%;
-  min-height: 100px;
+  min-height: 120px;
   box-sizing: border-box;
 }
 
@@ -1070,74 +1070,74 @@ onMounted(() => {
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
-  gap: var(--spacing-xs);
+  gap: 8px;
   width: 100%;
-  margin-bottom: var(--spacing-xs);
-  min-height: 30px;
+  margin-bottom: 4px;
+  min-height: 36px;
 }
 
 .node-key {
-  font-weight: var(--font-weight-medium);
-  font-size: var(--font-size-base);
+  font-weight: 500;
+  font-size: 14px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
-  min-width: 250px;
+  min-width: 200px;
 }
 
 .node-comment {
-  color: var(--text-muted);
-  font-size: var(--font-size-sm);
+  color: #909399;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
-  min-width: 180px;
+  min-width: 150px;
 }
 
 .node-meta {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  margin-top: var(--spacing-xs);
-  padding-top: var(--spacing-xs);
-  border-top: 1px solid var(--border-color);
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid #ebeef5;
   flex-wrap: wrap;
   width: 100%;
-  min-height: 45px;
+  min-height: 50px;
   box-sizing: border-box;
-  gap: var(--spacing-sm);
+  gap: 8px;
 }
 
 .node-meta-info {
   display: flex;
   align-items: center;
-  gap: var(--spacing-md);
+  gap: 12px;
   flex-wrap: wrap;
   flex: 1;
-  min-width: 300px;
+  min-width: 250px;
 }
 
 .node-size {
-  font-size: var(--font-size-sm);
-  color: var(--text-muted);
+  font-size: 12px;
+  color: #909399;
   white-space: nowrap;
   flex-shrink: 0;
-  min-width: 90px;
+  min-width: 80px;
 }
 
 .node-hits {
-  font-size: var(--font-size-sm);
-  color: var(--text-muted);
+  font-size: 12px;
+  color: #909399;
   white-space: nowrap;
   flex-shrink: 0;
-  min-width: 90px;
+  min-width: 80px;
 }
 
 .node-actions {
   display: flex;
-  gap: var(--spacing-xs);
+  gap: 6px;
   flex-shrink: 0;
   min-width: 180px;
   justify-content: flex-end;
