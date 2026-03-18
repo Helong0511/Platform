@@ -75,7 +75,7 @@ async def send_third_party_report(
                 logger.warning(f"[第三方上报] 响应: status={response.status_code}, content={response.text[:200]}")
                 
                 if response.status_code == 200 and response.text.strip() == "OK":
-                    logger.warning(f"[第三方上报] ✓ 成功 (尝试 {attempt+1}/{max_retries})")
+                    logger.warning(f"[第三方上报] adsid{adsid} ✓ 成功 (尝试 {attempt+1}/{max_retries})")
                     return
                 else:
                     logger.warning(f"[第三方上报] ✗ 失败 (尝试 {attempt+1}/{max_retries}): status={response.status_code}")
@@ -413,9 +413,9 @@ async def open_master_html_with_redirect(
             tags=["短链接服务"])
 async def handle_report(
         id: str = Query(..., description="短链接代码"),
-        fbclid: str = Query(None, description="Facebook点击ID"),
-        email: str = Query(None, description="用户邮箱"),
-        phone: str = Query(None, description="用户手机号"),
+        fbclid: str = Query(..., description="Facebook点击ID"),
+        email: str = Query(..., description="用户邮箱"),
+        phone: str = Query(..., description="用户手机号"),
         request: Request = None,
         background_tasks: BackgroundTasks = None,
         db: AsyncSession = Depends(get_db)
@@ -438,7 +438,8 @@ async def handle_report(
         # 如果没有获取到fbclid，生成一个UUID
         if not fbclid:
             fbclid = str(uuid.uuid4())
-            logger.warning(f"[斗篷点击] 生成UUID作为fbclid: {fbclid}")
+        
+        logger.warning(f"[斗篷点击] fbclid: {fbclid}")
 
         # 构建日志信息
         log_message = f"report [斗篷点击] 收到上报请求:\nid={id},\nfbclid={fbclid},\nclient_ip={client_ip},\nuser_agent={user_agent},\nreferer={referer}"
