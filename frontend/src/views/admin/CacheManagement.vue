@@ -1015,6 +1015,8 @@ onMounted(() => {
 
 .cache-content {
   margin-top: var(--spacing-lg);
+  width: 100%;
+  overflow-x: auto;
 }
 
 .cache-tree {
@@ -1022,93 +1024,14 @@ onMounted(() => {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   overflow: hidden;
-  min-width: 900px;
+  min-width: 1000px;
   width: 100%;
-}
-
-.tree-node-content {
-  display: flex;
-  flex-direction: column;
-  padding: var(--spacing-sm);
-  gap: var(--spacing-sm);
-  width: 100%;
-  min-height: 90px;
-  box-sizing: border-box;
-}
-
-.node-header {
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: var(--spacing-xs);
-  width: 100%;
-  margin-bottom: var(--spacing-xs);
-  min-height: 24px;
-}
-
-.node-key {
-  font-weight: var(--font-weight-medium);
-  font-size: var(--font-size-base);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
-  min-width: 200px;
-}
-
-.node-comment {
-  color: var(--text-muted);
-  font-size: var(--font-size-sm);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
-  min-width: 150px;
-}
-
-.node-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
-  margin-top: var(--spacing-xs);
-  padding-top: var(--spacing-xs);
-  border-top: 1px solid var(--border-color);
-  flex-wrap: nowrap;
-  width: 100%;
-  min-height: 40px;
-  align-content: center;
-  box-sizing: border-box;
-}
-
-.node-size {
-  font-size: var(--font-size-sm);
-  color: var(--text-muted);
-  white-space: nowrap;
-  flex-shrink: 0;
-  min-width: 80px;
-}
-
-.node-hits {
-  font-size: var(--font-size-sm);
-  color: var(--text-muted);
-  white-space: nowrap;
-  flex-shrink: 0;
-  min-width: 80px;
-}
-
-.node-actions {
-  margin-left: auto;
-  display: flex;
-  gap: var(--spacing-xs);
-  flex-shrink: 0;
-  min-width: 180px;
-  justify-content: flex-end;
 }
 
 /* 确保树节点有足够的宽度 */
 .el-tree {
   width: 100%;
-  min-width: 900px;
+  min-width: 1000px;
   overflow-x: auto;
 }
 
@@ -1118,7 +1041,7 @@ onMounted(() => {
 
 .el-tree-node__content {
   width: 100%;
-  min-height: 90px;
+  min-height: 100px;
   padding: 0 !important;
 }
 
@@ -1129,6 +1052,86 @@ onMounted(() => {
 
 .el-tree-node__children {
   padding-left: 20px;
+}
+
+.tree-node-content {
+  display: flex;
+  flex-direction: column;
+  padding: var(--spacing-sm);
+  gap: var(--spacing-sm);
+  width: 100%;
+  min-height: 100px;
+  box-sizing: border-box;
+}
+
+.node-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--spacing-xs);
+  width: 100%;
+  margin-bottom: var(--spacing-xs);
+  min-height: 30px;
+}
+
+.node-key {
+  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-base);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 250px;
+}
+
+.node-comment {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 180px;
+}
+
+.node-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-xs);
+  padding-top: var(--spacing-xs);
+  border-top: 1px solid var(--border-color);
+  flex-wrap: wrap;
+  width: 100%;
+  min-height: 45px;
+  align-content: center;
+  box-sizing: border-box;
+}
+
+.node-size {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 90px;
+}
+
+.node-hits {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 90px;
+}
+
+.node-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--spacing-xs);
+  flex-shrink: 0;
+  min-width: 180px;
+  justify-content: flex-end;
+  align-self: flex-end;
 }
 
 /* 调整操作按钮大小 */
@@ -1147,13 +1150,12 @@ onMounted(() => {
   padding: 0 8px;
   height: 20px;
   line-height: 18px;
+  margin-right: 5px;
 }
 
-/* 确保缓存内容区域有足够的宽度 */
-.cache-content {
-  margin-top: var(--spacing-lg);
-  width: 100%;
-  overflow-x: auto;
+/* 确保元数据区域有足够的空间 */
+.node-meta > * {
+  margin-bottom: 5px;
 }
 
 .cache-actions {
