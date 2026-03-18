@@ -8,6 +8,7 @@ Telegram Bot API 端点
 import logging
 import threading
 from typing import Optional, List
+from sqlalchemy import select
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -22,8 +23,9 @@ from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.security import require_admin
 from app.core.utils import get_app_now
-from app.models.models import User
+from app.models.models import User, PostbackConversion
 from app.schemas.base import ResponseBaseSchema
+from app.services.telegram_notification_service import TelegramNotificationService
 
 # 创建路由实例
 router = APIRouter()
@@ -466,7 +468,6 @@ async def send_alert(
             location['line'] = str(request.line)
 
         # 发送告警
-        from app.services.telegram_notification_service import TelegramNotificationService
         success = await TelegramNotificationService.send_system_alert(
             alert_type=request.alert_type,
             description=request.description,
@@ -532,9 +533,6 @@ async def send_batch_notifications(
             )
 
         # 查询转化记录
-        from app.models.models import PostbackConversion
-        from sqlalchemy import select
-
         result = await db.execute(
             select(PostbackConversion).where(
                 PostbackConversion.id.in_(request.conversions)
@@ -549,7 +547,6 @@ async def send_batch_notifications(
             ))
 
         # 发送批量通知
-        from app.services.telegram_notification_service import TelegramNotificationService
         success = await TelegramNotificationService.send_batch_conversion_notifications(
             conversions=conversions,
             telegram_chat_id=request.telegram_chat_id,

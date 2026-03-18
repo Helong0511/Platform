@@ -43,11 +43,14 @@ from app.core.offer_cache import set_offer_cache
 from app.core.short_link_cache import (
     get_short_link_from_cache,
     set_short_link_to_cache,
-    serialize_short_link
+    serialize_short_link,
+    update_short_link_cache
 )
 from app.core.short_link_click_counter import increment_click_count_async
 from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
+from app.models.models import ShortLink
+from sqlalchemy.future import select
 from app.models.models import ShortLink, Offer, Publisher, Advertiser
 
 # 日志记录器
@@ -92,16 +95,12 @@ async def handle_report(
             logger.warning(
                 f"[短链接点击] 从缓存获取数据: short_code={id}, 原始click_count={cached_data.get('click_count', 0)}")
             # 更新点击次数（缓存）
-            from app.core.short_link_cache import update_short_link_cache
             cached_data["click_count"] = (cached_data.get("click_count", 0)) + 1
             logger.warning(f"[短链接点击] 更新缓存: short_code={id}, 新click_count={cached_data['click_count']}")
             update_result = await update_short_link_cache(id, cached_data)
             logger.warning(f"[短链接点击] 缓存更新结果: {update_result}")
         else:
             # 从数据库查询
-            from app.models.models import ShortLink
-            from sqlalchemy.future import select
-
             logger.warning(f"[短链接点击] 缓存未命中，从数据库查询: short_code={id}")
             result = await db.execute(
                 select(ShortLink).where(ShortLink.short_code == id)

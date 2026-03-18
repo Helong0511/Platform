@@ -124,7 +124,6 @@ async def open_master_html_with_redirect(
         session_id = request.cookies.get('session_id')
         if not session_id:
             # 如果没有会话ID，生成一个
-            import uuid
             session_id = str(uuid.uuid4())
             logger.warning(f"[斗篷服务] 生成新会话ID: {session_id}")
         else:
@@ -270,7 +269,6 @@ async def open_master_html_with_redirect(
             html_content = f.read()
 
         # 将original_url直接注入到HTML中，同时保留处理fbclid参数的逻辑
-        import re
         # 替换getOriginalUrl函数，使其返回原始URL并处理fbclid参数
         logger.warning(f"[斗篷服务] 注入原始URL到HTML: {original_url}")
         # 对原始URL进行转义，避免语法错误
@@ -292,7 +290,6 @@ async def open_master_html_with_redirect(
                 logger.error(f"[斗篷服务] 未找到getOriginalUrl函数定义")
 
         # 返回HTML内容
-        from fastapi.responses import HTMLResponse
         response = HTMLResponse(content=html_content)
         # 直接设置CSP头，允许内联脚本和Font Awesome CDN
         response.headers[
@@ -356,7 +353,6 @@ async def handle_report(
 
         # 如果没有获取到fbclid，生成一个UUID
         if not fbclid:
-            import uuid
             fbclid = str(uuid.uuid4())
             logger.warning(f"[斗篷点击] 生成UUID作为fbclid: {fbclid}")
 

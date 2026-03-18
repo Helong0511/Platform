@@ -20,6 +20,7 @@ from app.core.short_link.generator import (
     generate_unique_short_code
 )
 from app.core.short_link_cache import invalidate_short_link_cache
+from app.core.short_link_click_counter import cleanup_click_counter
 import logging
 
 logger = logging.getLogger(__name__)
@@ -450,7 +451,6 @@ class ShortLinkService(BaseService[ShortLink]):
         # 清除缓存和Redis计数器，确保数据一致性
         await invalidate_short_link_cache(short_code)
         # 清理Redis中的点击计数器，避免同步失败
-        from app.core.short_link_click_counter import cleanup_click_counter
         await cleanup_click_counter(short_code)
 
         logger.info(f"短链接删除成功: {link_id}")

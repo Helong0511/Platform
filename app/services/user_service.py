@@ -16,6 +16,7 @@ from app.core.errors import ErrorCode
 from app.core.audit_log import log_user_action, log_activate, log_deactivate
 from app.core.utils import get_app_now_naive
 from app.core.validation import validate_password_strength
+from app.core.permission_cache import invalidate_user_permission_cache
 import logging
 
 logger = logging.getLogger(__name__)
@@ -221,7 +222,6 @@ class UserService(BaseService[User]):
 
         # 清除权限缓存（新用户创建）
         try:
-            from app.core.permission_cache import invalidate_user_permission_cache
             await invalidate_user_permission_cache(user.id)
         except Exception as e:
             logger.warning(f"清除权限缓存失败: {e}")
@@ -338,7 +338,6 @@ class UserService(BaseService[User]):
 
         # 清除权限缓存（用户信息已更新）
         try:
-            from app.core.permission_cache import invalidate_user_permission_cache
             await invalidate_user_permission_cache(user_id)
         except Exception as e:
             logger.warning(f"清除权限缓存失败: {e}")
@@ -420,7 +419,6 @@ class UserService(BaseService[User]):
 
         # 清除权限缓存（用户已删除）
         try:
-            from app.core.permission_cache import invalidate_user_permission_cache
             await invalidate_user_permission_cache(user_id)
         except Exception as e:
             logger.warning(f"清除权限缓存失败: {e}")
