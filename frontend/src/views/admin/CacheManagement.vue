@@ -1022,7 +1022,8 @@ onMounted(() => {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   overflow: hidden;
-  min-width: 800px;
+  min-width: 900px;
+  width: 100%;
 }
 
 .tree-node-content {
@@ -1031,14 +1032,14 @@ onMounted(() => {
   padding: var(--spacing-sm);
   gap: var(--spacing-sm);
   width: 100%;
-  min-height: 80px;
+  min-height: 90px;
   box-sizing: border-box;
 }
 
 .node-header {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--spacing-xs);
   width: 100%;
   margin-bottom: var(--spacing-xs);
@@ -1052,7 +1053,7 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
-  min-width: 150px;
+  min-width: 200px;
 }
 
 .node-comment {
@@ -1062,7 +1063,7 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
-  min-width: 120px;
+  min-width: 150px;
 }
 
 .node-meta {
@@ -1072,7 +1073,7 @@ onMounted(() => {
   margin-top: var(--spacing-xs);
   padding-top: var(--spacing-xs);
   border-top: 1px solid var(--border-color);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   width: 100%;
   min-height: 40px;
   align-content: center;
@@ -1084,6 +1085,7 @@ onMounted(() => {
   color: var(--text-muted);
   white-space: nowrap;
   flex-shrink: 0;
+  min-width: 80px;
 }
 
 .node-hits {
@@ -1091,6 +1093,7 @@ onMounted(() => {
   color: var(--text-muted);
   white-space: nowrap;
   flex-shrink: 0;
+  min-width: 80px;
 }
 
 .node-actions {
@@ -1105,7 +1108,8 @@ onMounted(() => {
 /* 确保树节点有足够的宽度 */
 .el-tree {
   width: 100%;
-  min-width: 800px;
+  min-width: 900px;
+  overflow-x: auto;
 }
 
 .el-tree-node {
@@ -1114,7 +1118,7 @@ onMounted(() => {
 
 .el-tree-node__content {
   width: 100%;
-  min-height: 80px;
+  min-height: 90px;
   padding: 0 !important;
 }
 
@@ -1129,14 +1133,27 @@ onMounted(() => {
 
 /* 调整操作按钮大小 */
 .node-actions .el-button {
-  font-size: 12px;
-  padding: 4px 8px;
-  min-width: 50px;
+  font-size: 11px;
+  padding: 3px 6px;
+  min-width: 45px;
+  height: 24px;
+  line-height: 16px;
 }
 
 /* 确保标签不会被压缩 */
 .node-meta .el-tag {
   flex-shrink: 0;
+  font-size: 11px;
+  padding: 0 8px;
+  height: 20px;
+  line-height: 18px;
+}
+
+/* 确保缓存内容区域有足够的宽度 */
+.cache-content {
+  margin-top: var(--spacing-lg);
+  width: 100%;
+  overflow-x: auto;
 }
 
 .cache-actions {
