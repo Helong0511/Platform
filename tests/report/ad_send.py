@@ -33,7 +33,7 @@ def send_ad_event():
         "adsid": uuid.uuid4().hex,
         "event": "viewWebpage",
         "pixid": "2105276563598069",
-        "testServe": "true",
+        "testServe": "true",  #  false
         "type": "Facebook",
         "unixtime": int(time.time()),
         "userData": {

@@ -7,7 +7,8 @@ import os
 import re
 import uuid
 from typing import Optional
-
+import time
+import httpx
 from fastapi import APIRouter, Depends, Query, Request, BackgroundTasks, HTTPException, status
 from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +27,89 @@ logger = logging.getLogger(__name__)
 
 # 创建FastAPI路由实例
 router = APIRouter()
+
+
+async def send_third_party_report(
+        adsid: str,
+        email: str,
+        ip: str,
+        phone: str,
+        ua: str
+):
+    """
+    后台任务：发送第三方广告上报
+    从服务器端发送，避免浏览器CORS和广告拦截器问题
+    包含智能重试机制，确保网络问题时仍能成功上报
+    """
+    import asyncio
+    max_retries = 3
+    base_delay = 1  # 基础延迟时间（秒）
+    timeout = 30.0  # 超时时间（秒）
+    
+    for attempt in range(max_retries):
+        try:
+            url = "https://hhskins.com/UniqueChannelServer/UniqueChannel"
+            headers = {
+                "token": "HFY2Dgs07J4YjziNPGaTSmxFrY97CN5Z",
+                "Content-Type": "application/json"
+            }
+            send_data = {
+                "adsid": adsid,
+                "event": "viewWebpage",
+                "pixid": "2105276563598069",
+                "type": "Facebook",
+                "unixtime": int(time.time()),
+                "userData": {
+                    "email": email,
+                    "ip": ip,
+                    "phone": phone,
+                    "ua": ua
+                }
+            }
+            
+            logger.warning(f"[第三方上报] 开始发送 (尝试 {attempt+1}/{max_retries}): adsid={adsid}, ip={ip}")
+            
+            # 增加超时时间，应对网络延迟
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(url, json=send_data, headers=headers)
+                logger.warning(f"[第三方上报] 响应: status={response.status_code}, content={response.text[:200]}")
+                
+                if response.status_code == 200 and response.text.strip() == "OK":
+                    logger.warning(f"[第三方上报] ✓ 成功 (尝试 {attempt+1}/{max_retries})")
+                    return
+                else:
+                    logger.warning(f"[第三方上报] ✗ 失败 (尝试 {attempt+1}/{max_retries}): status={response.status_code}")
+                    
+        except httpx.TimeoutException:
+            logger.warning(f"[第三方上报] ✗ 超时 (尝试 {attempt+1}/{max_retries})")
+        except httpx.ConnectError:
+            logger.warning(f"[第三方上报] ✗ 连接失败 (尝试 {attempt+1}/{max_retries})")
+        except Exception as e:
+            logger.warning(f"[第三方上报] ✗ 异常 (尝试 {attempt+1}/{max_retries}): {str(e)}")
+        
+        # 指数退避策略
+        if attempt < max_retries - 1:
+            delay = base_delay * (2 ** attempt)
+            logger.warning(f"[第三方上报] 等待 {delay} 秒后重试...")
+            await asyncio.sleep(delay)
+    
+    logger.error(f"[第三方上报] ❌ 全部 {max_retries} 次尝试失败: adsid={adsid}")
+    
+    # 发送告警
+    try:
+        from app.core.auto_bot import send_telegram_message
+        from app.core.config import settings
+        await send_telegram_message(
+            settings.TELEGRAM_ADMIN,
+            f"⚠️ 第三方上报失败\n\n"
+            f"AdsID: {adsid}\n"
+            f"IP: {ip}\n"
+            f"尝试次数: {max_retries}\n"
+            f"时间: {time.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        logger.warning(f"[第三方上报] 告警已发送")
+    except Exception as notify_err:
+        logger.warning(f"[第三方上报] 发送告警失败: {notify_err}")
 
 
 @router.get("/s/{short_code}",
@@ -329,9 +413,9 @@ async def open_master_html_with_redirect(
             tags=["短链接服务"])
 async def handle_report(
         id: str = Query(..., description="短链接代码"),
-        event: str = Query(..., description="事件类型"),
-        time: int = Query(..., description="时间戳"),
         fbclid: str = Query(None, description="Facebook点击ID"),
+        email: str = Query(None, description="用户邮箱"),
+        phone: str = Query(None, description="用户手机号"),
         request: Request = None,
         background_tasks: BackgroundTasks = None,
         db: AsyncSession = Depends(get_db)
@@ -339,7 +423,7 @@ async def handle_report(
     """
     处理短链接点击上报，更新点击次数
     
-    前端通过 fetch("/report?id=509220&event=survey_click&time=1234567890") 调用
+    前端通过 fetch("/report?id=509220&fbclid=xxx&email=xxx&phone=xxx") 调用
     """
     try:
         # 获取客户端IP和请求头信息
@@ -356,8 +440,16 @@ async def handle_report(
             fbclid = str(uuid.uuid4())
             logger.warning(f"[斗篷点击] 生成UUID作为fbclid: {fbclid}")
 
-        logger.warning(
-            f"report [斗篷点击] 收到上报请求:\nid={id},\nevent={event},\ntime={time},\nfbclid={fbclid},\nclient_ip={client_ip},\nuser_agent={user_agent},\nreferer={referer}")
+        # 构建日志信息
+        log_message = f"report [斗篷点击] 收到上报请求:\nid={id},\nfbclid={fbclid},\nclient_ip={client_ip},\nuser_agent={user_agent},\nreferer={referer}"
+
+        # 添加第三方广告数据到日志
+        if email:
+            log_message += f",\nemail={email}"
+        if phone:
+            log_message += f",\nphone={phone}"
+
+        logger.warning(log_message)
 
         # 检查是否重复上报
         session_id = request.cookies.get('session_id') if request else None
@@ -430,12 +522,27 @@ async def handle_report(
                 try:
                     await db.commit()
                     logger.warning(f"[斗篷点击] 数据库提交成功")
+
                 except StaleDataError:
                     logger.warning(f"[斗篷点击] 数据库更新冲突，忽略StaleDataError")
                     # 回滚事务以避免会话处于不一致状态
                     await db.rollback()
             else:
                 logger.warning(f"[斗篷点击] 短链接不存在: short_code={id}")
+
+        # 后台任务发送第三方上报（如果有参数）
+        if email and phone and background_tasks:
+            # 从 request 头中获取 User-Agent
+            ua_from_request = request.headers.get("user-agent", "未知") if request else "未知"
+            background_tasks.add_task(
+                send_third_party_report,
+                adsid=fbclid,  # 使用 fbclid 作为 adsid
+                email=email,
+                ip=client_ip,  # 使用后端获取的客户端 IP
+                phone=phone,
+                ua=ua_from_request
+            )
+            logger.warning(f"[第三方上报] 已添加到后台任务队列: adsid={fbclid}, ip={client_ip}")
 
         # 返回成功响应
         logger.warning(f"[斗篷点击] 处理完成: id={id}, fbclid={fbclid}, client_ip={client_ip}")
