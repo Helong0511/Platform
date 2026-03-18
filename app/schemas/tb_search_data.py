@@ -1,5 +1,7 @@
 from datetime import date, datetime
+
 from pydantic import BaseModel
+
 
 class TBSearchDataBase(BaseModel):
     date: date
@@ -16,6 +18,7 @@ class TBSearchDataBase(BaseModel):
     revenue_before_deduct: float | None = 0.0
     rpm_before_deduct: float | None = 0.0
 
+
 class TBSearchDataInDBBase(TBSearchDataBase):
     id: int
     created_at: datetime
@@ -24,16 +27,19 @@ class TBSearchDataInDBBase(TBSearchDataBase):
     class Config:
         from_attributes = True
 
+
 class TBSearchDataResponse(TBSearchDataInDBBase):
     client_id: int | None = None
     client_name: str | None = None
     user_name: str | None = None
+
 
 class TBSearchDataListResponse(BaseModel):
     data: list[TBSearchDataResponse]
     total: int
     page: int
     page_size: int
+
 
 class TBSearchDataUpdate(BaseModel):
     product_id: int | None = None
@@ -46,4 +52,3 @@ class TBSearchDataUpdate(BaseModel):
     rpm: float | None = None
     revenue_before_deduct: float | None = None
     rpm_before_deduct: float | None = None
-

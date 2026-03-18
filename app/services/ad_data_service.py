@@ -63,9 +63,9 @@ class AdDataService(BaseService[AdData]):
             )
 
     async def get_ad_data_by_id(
-        self,
-        data_id: int,
-        current_user: User
+            self,
+            data_id: int,
+            current_user: User
     ) -> Tuple[AdData, Product, Client, User, Optional[ProductAssignment], Optional[CountryInfo]]:
         """
         根据ID获取广告数据详情（包含关联信息）
@@ -165,10 +165,10 @@ class AdDataService(BaseService[AdData]):
         return ad_data, product, client, user, assignment, country_info
 
     async def update_ad_data(
-        self,
-        data_id: int,
-        update_data: Dict[str, Any],
-        current_user: User
+            self,
+            data_id: int,
+            update_data: Dict[str, Any],
+            current_user: User
     ) -> AdData:
         """
         更新广告数据（包含完整的业务逻辑：验证、唯一性检查、比率计算、错误处理）
@@ -249,7 +249,7 @@ class AdDataService(BaseService[AdData]):
             # 确定更新后的值
             new_product_id = filtered_update_data.get('product_id', ad_data.product_id)
             new_country_code = filtered_update_data.get('country_code', ad_data.country_code)
-            
+
             # 构建日期范围查询（AdData.date 是 DateTime 类型）
             if isinstance(ad_data.date, datetime):
                 date_start = ad_data.date.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -257,7 +257,7 @@ class AdDataService(BaseService[AdData]):
             else:
                 date_start = datetime.combine(ad_data.date, datetime.min.time())
                 date_end = datetime.combine(ad_data.date, datetime.max.time())
-            
+
             # 查询是否存在相同的记录（排除当前记录）
             # 国家代码匹配逻辑：如果新国家代码是'ZZ'，匹配'ZZ'或NULL
             if new_country_code == "ZZ":
@@ -267,7 +267,7 @@ class AdDataService(BaseService[AdData]):
                 )
             else:
                 country_condition = AdData.country_code == new_country_code
-            
+
             existing_query = select(AdData).where(
                 AdData.id != ad_data.id,  # 排除当前记录
                 AdData.date >= date_start,
@@ -277,7 +277,7 @@ class AdDataService(BaseService[AdData]):
             )
             existing_result = await self.db.execute(existing_query)
             existing_data = existing_result.scalars().first()
-            
+
             if existing_data:
                 # 存在冲突记录，获取详细信息
                 existing_country_name = "全部区域"
@@ -288,18 +288,18 @@ class AdDataService(BaseService[AdData]):
                     country_info = country_info_result.scalar_one_or_none()
                     if country_info:
                         existing_country_name = country_info.country_name_zh
-                
+
                 product_result = await self.db.execute(select(Product).where(Product.id == new_product_id))
                 product = product_result.scalar_one_or_none()
                 product_name = product.name if product else f"产品ID {new_product_id}"
-                
+
                 # 获取日期值用于错误提示
                 date_value = ad_data.date
                 if isinstance(date_value, datetime):
                     date_value = date_value.date()
                 elif hasattr(date_value, 'date'):
                     date_value = date_value.date()
-                
+
                 raise_api_exception(
                     ErrorCode.OPERATION_FAILED,
                     detail=f"更新失败：已存在相同的记录（日期={date_value}，产品={product_name}，国家={existing_country_name}）。请先删除或修改冲突的记录（ID: {existing_data.id}）"
@@ -309,7 +309,7 @@ class AdDataService(BaseService[AdData]):
         for key, value in filtered_update_data.items():
             if key in allowed_fields and hasattr(ad_data, key):
                 setattr(ad_data, key, value)
-        
+
         # 如果基础数据字段有变化，重新计算比率字段
         if any(key in filtered_update_data for key in ['request_count', 'match_count', 'display_count', 'click_count']):
             ad_data.calculate_rates()
@@ -322,7 +322,7 @@ class AdDataService(BaseService[AdData]):
             await self.db.refresh(ad_data)
         except Exception as e:
             error_msg = str(e)
-            
+
             # 检查是否是 IntegrityError（唯一性约束冲突）
             if isinstance(e, IntegrityError):
                 # 提取冲突信息
@@ -332,16 +332,16 @@ class AdDataService(BaseService[AdData]):
                     match = re.search(r"Duplicate entry '([^']+)'", error_msg)
                     if match:
                         conflict_info = f"冲突的键值: {match.group(1)}"
-                
+
                 # 获取更新后的值用于错误提示
                 new_product_id = filtered_update_data.get('product_id', ad_data.product_id)
                 new_country_code = filtered_update_data.get('country_code', ad_data.country_code)
-                
+
                 # 获取产品名称
                 product_result = await self.db.execute(select(Product).where(Product.id == new_product_id))
                 product = product_result.scalar_one_or_none()
                 product_name = product.name if product else f"产品ID {new_product_id}"
-                
+
                 # 获取国家名称
                 country_name = "全部区域"
                 if new_country_code and new_country_code != "ZZ":
@@ -351,14 +351,14 @@ class AdDataService(BaseService[AdData]):
                     country_info = country_info_result.scalar_one_or_none()
                     if country_info:
                         country_name = country_info.country_name_zh
-                
+
                 # 获取日期
                 date_value = ad_data.date
                 if isinstance(date_value, datetime):
                     date_value = date_value.date()
                 elif hasattr(date_value, 'date'):
                     date_value = date_value.date()
-                
+
                 # 使用统一的 IntegrityError 处理函数
                 handle_integrity_error(
                     error=e,
@@ -369,7 +369,7 @@ class AdDataService(BaseService[AdData]):
                     ),
                     log_context="Update ad data"
                 )
-            
+
             logger.error(f"更新广告数据失败: {error_msg}", exc_info=True)
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
@@ -380,9 +380,9 @@ class AdDataService(BaseService[AdData]):
         return ad_data
 
     async def delete_ad_data(
-        self,
-        data_id: int,
-        current_user: User
+            self,
+            data_id: int,
+            current_user: User
     ) -> None:
         """
         删除广告数据
@@ -414,10 +414,10 @@ class AdDataService(BaseService[AdData]):
         logger.info(f"广告数据已删除: ID={data_id}")
 
     async def get_clients_with_data(
-        self,
-        current_user: User,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None
+            self,
+            current_user: User,
+            start_date: Optional[date] = None,
+            end_date: Optional[date] = None
     ) -> List[Dict[str, Any]]:
         """
         获取有广告数据的客户列表（用于下拉选择）
@@ -504,12 +504,12 @@ class AdDataService(BaseService[AdData]):
         return clients_list
 
     async def get_countries_with_data(
-        self,
-        current_user: User,
-        client_id: Optional[int] = None,
-        product_id: Optional[int] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None
+            self,
+            current_user: User,
+            client_id: Optional[int] = None,
+            product_id: Optional[int] = None,
+            start_date: Optional[date] = None,
+            end_date: Optional[date] = None
     ) -> List[Dict[str, Any]]:
         """
         获取有广告数据的国家列表（用于下拉选择）
@@ -612,11 +612,11 @@ class AdDataService(BaseService[AdData]):
         return countries_list
 
     async def get_products_with_data(
-        self,
-        current_user: User,
-        client_id: Optional[int] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None
+            self,
+            current_user: User,
+            client_id: Optional[int] = None,
+            start_date: Optional[date] = None,
+            end_date: Optional[date] = None
     ) -> List[Dict[str, Any]]:
         """
         获取有广告数据的产品列表（用于下拉选择）
@@ -705,9 +705,9 @@ class AdDataService(BaseService[AdData]):
         return products_list
 
     async def get_date_range(
-        self,
-        current_user: User,
-        client_id: Optional[int] = None
+            self,
+            current_user: User,
+            client_id: Optional[int] = None
     ) -> Dict[str, Optional[str]]:
         """
         获取广告数据的日期范围（最早日期和最新日期）
@@ -780,9 +780,9 @@ class AdDataService(BaseService[AdData]):
             }
 
     async def batch_delete_ad_data(
-        self,
-        data_ids: List[int],
-        current_user: User
+            self,
+            data_ids: List[int],
+            current_user: User
     ) -> int:
         """
         批量删除广告数据
@@ -889,12 +889,12 @@ class AdDataService(BaseService[AdData]):
         return deleted_count
 
     async def get_ad_data_summary(
-        self,
-        current_user: User,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-        client_id: Optional[int] = None,
-        product_id: Optional[int] = None
+            self,
+            current_user: User,
+            start_date: Optional[date] = None,
+            end_date: Optional[date] = None,
+            client_id: Optional[int] = None,
+            product_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         获取广告数据汇总统计
@@ -1097,16 +1097,16 @@ class AdDataService(BaseService[AdData]):
         return response_data
 
     async def get_daily_summary(
-        self,
-        current_user: User,
-        page: int = 1,
-        page_size: int = 10,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-        client_id: Optional[int] = None,
-        product_id: Optional[str] = None,
-        sort_by: str = "date",
-        sort_order: str = "desc"
+            self,
+            current_user: User,
+            page: int = 1,
+            page_size: int = 10,
+            start_date: Optional[date] = None,
+            end_date: Optional[date] = None,
+            client_id: Optional[int] = None,
+            product_id: Optional[str] = None,
+            sort_by: str = "date",
+            sort_order: str = "desc"
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
         获取每日汇总数据（按产品+日期汇总）
@@ -1325,7 +1325,8 @@ class AdDataService(BaseService[AdData]):
         # 转换为响应格式
         ad_data_responses = []
         for row in all_summary_data:
-            date_obj = row.date if isinstance(row.date, date) else row.date.date() if hasattr(row.date, 'date') else row.date
+            date_obj = row.date if isinstance(row.date, date) else row.date.date() if hasattr(row.date,
+                                                                                              'date') else row.date
             date_str = date_obj.isoformat() if hasattr(date_obj, 'isoformat') else str(date_obj)
 
             # 获取汇总后的数值
@@ -1410,17 +1411,17 @@ class AdDataService(BaseService[AdData]):
         return ad_data_responses, total
 
     async def get_ad_data(
-        self,
-        current_user: User,
-        page: int = 1,
-        page_size: int = 10,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-        client_id: Optional[int] = None,
-        product_id: Optional[str] = None,
-        country_code: Optional[str] = None,
-        sort_by: str = "date",
-        sort_order: str = "desc"
+            self,
+            current_user: User,
+            page: int = 1,
+            page_size: int = 10,
+            start_date: Optional[date] = None,
+            end_date: Optional[date] = None,
+            client_id: Optional[int] = None,
+            product_id: Optional[str] = None,
+            country_code: Optional[str] = None,
+            sort_by: str = "date",
+            sort_order: str = "desc"
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
         获取广告数据列表（支持分页、过滤和排序）
@@ -1442,7 +1443,7 @@ class AdDataService(BaseService[AdData]):
         """
         # 延迟导入，避免循环导入
         from app.api_v1.excel.utils import normalize_date_key
-        
+
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(self.db)
 
@@ -1700,4 +1701,3 @@ class AdDataService(BaseService[AdData]):
             ad_data_responses.append(response_data)
 
         return ad_data_responses, total
-

@@ -3,6 +3,12 @@
 独立的任务调度模块，包含调度器、锁机制、任务注册等功能
 """
 
+from .lock import (
+    acquire_task_lock,
+    release_task_lock,
+    CURRENT_PID,
+    CURRENT_HOST,
+)
 from .scheduler import (
     get_scheduler,
     init_scheduled_tasks,
@@ -11,14 +17,6 @@ from .scheduler import (
     register_scheduled_task,
     execute_task_with_lock,
 )
-
-from .lock import (
-    acquire_task_lock,
-    release_task_lock,
-    CURRENT_PID,
-    CURRENT_HOST,
-)
-
 from .task_registry import (
     register_task_function,
     get_task_function,
@@ -28,4 +26,3 @@ from .task_registry import (
     get_all_registered_tasks,
     auto_register_tasks,
 )
-

@@ -1,9 +1,10 @@
 """
 广告主 Schema
 """
-from pydantic import BaseModel, Field, field_validator
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel, Field
 
 
 class AdvertiserBase(BaseModel):
@@ -37,4 +38,3 @@ class AdvertiserResponse(AdvertiserBase):
 
     class Config:
         from_attributes = True
-

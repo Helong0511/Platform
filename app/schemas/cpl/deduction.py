@@ -6,9 +6,10 @@
 - 改进文档字符串
 - 添加示例值
 """
-from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import Optional, Literal
 from datetime import datetime
+from typing import Optional, Literal
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ConversionDeductionConfigBase(BaseModel):
@@ -76,7 +77,7 @@ class ConversionDeductionConfigBase(BaseModel):
         description="是否激活（只有激活的配置才会被使用）",
         examples=[True]
     )
-    
+
     @field_validator('volume_deduction_ratio', 'amount_deduction_ratio')
     @classmethod
     def validate_ratio(cls, v: float) -> float:
@@ -96,21 +97,21 @@ class ConversionDeductionConfigCreate(ConversionDeductionConfigBase):
     - 如果启用扣量，volume_deduction_ratio必须大于0
     - 如果启用扣金额，amount_deduction_ratio必须大于0
     """
-    
+
     @model_validator(mode='after')
     def validate_at_least_one_enabled(self):
         """验证至少启用一种扣减方式"""
         if not self.enable_volume_deduction and not self.enable_amount_deduction:
             raise ValueError('请至少启用一种扣减方式（扣量或扣金额）')
-        
+
         # 验证如果启用扣量，比例必须大于0
         if self.enable_volume_deduction and self.volume_deduction_ratio <= 0:
             raise ValueError('启用扣量时，扣量比例必须大于0')
-        
+
         # 验证如果启用扣金额，比例必须大于0
         if self.enable_amount_deduction and self.amount_deduction_ratio <= 0:
             raise ValueError('启用扣金额时，扣金额比例必须大于0')
-        
+
         return self
 
 
@@ -196,4 +197,3 @@ class BatchUpdateStatusRequest(BaseModel):
 class BatchDeleteRequest(BaseModel):
     """批量删除请求"""
     config_ids: list[int] = Field(..., min_length=1, description="配置ID列表")
-

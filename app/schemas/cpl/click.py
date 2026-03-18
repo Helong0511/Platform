@@ -1,9 +1,10 @@
 """
 点击记录 Schema
 """
-from pydantic import BaseModel, Field
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel
 
 
 class ClickResponse(BaseModel):
@@ -26,4 +27,3 @@ class ClickResponse(BaseModel):
 
     class Config:
         from_attributes = True
-

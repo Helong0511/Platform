@@ -2,12 +2,19 @@
 通知配置管理服务层
 封装客户和产品通知配置的业务逻辑
 """
+import logging
 from typing import Optional, List, Dict, Any, Tuple
+
+from fastapi import HTTPException
+from sqlalchemy import and_, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import and_, func, delete
-from fastapi import HTTPException
 
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
+from app.core.postback.forwarder import PostbackForwarder
+from app.core.postback.notifier import PostbackNotifier
+from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from app.models.models import (
     Client,
     Product,
@@ -20,12 +27,6 @@ from app.models.models import (
     PostbackConversion,
     PostbackForwardLog
 )
-from app.core.exceptions import raise_api_exception
-from app.core.errors import ErrorCode
-from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
-from app.core.postback.notifier import PostbackNotifier
-from app.core.postback.forwarder import PostbackForwarder
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +40,9 @@ class NotificationConfigService:
     # ==================== 客户通知配置 ====================
 
     async def get_client_notification_config(
-        self,
-        client_id: int,
-        current_user: User
+            self,
+            client_id: int,
+            current_user: User
     ) -> Optional[ClientNotificationConfig]:
         """
         获取客户的通知配置
@@ -77,10 +78,10 @@ class NotificationConfigService:
         return result.scalars().first()
 
     async def create_or_update_client_notification_config(
-        self,
-        client_id: int,
-        config_data: Dict[str, Any],
-        current_user: User
+            self,
+            client_id: int,
+            config_data: Dict[str, Any],
+            current_user: User
     ) -> ClientNotificationConfig:
         """
         创建或更新客户的通知配置
@@ -148,9 +149,9 @@ class NotificationConfigService:
                 )
 
     async def delete_client_notification_config(
-        self,
-        client_id: int,
-        current_user: User
+            self,
+            client_id: int,
+            current_user: User
     ) -> None:
         """
         删除客户的通知配置
@@ -185,9 +186,9 @@ class NotificationConfigService:
     # ==================== 产品通知配置 ====================
 
     async def get_product_notification_config(
-        self,
-        product_id: int,
-        current_user: User
+            self,
+            product_id: int,
+            current_user: User
     ) -> Optional[ProductNotificationConfig]:
         """
         获取产品的通知配置
@@ -223,10 +224,10 @@ class NotificationConfigService:
         return result.scalars().first()
 
     async def create_or_update_product_notification_config(
-        self,
-        product_id: int,
-        config_data: Dict[str, Any],
-        current_user: User
+            self,
+            product_id: int,
+            config_data: Dict[str, Any],
+            current_user: User
     ) -> ProductNotificationConfig:
         """
         创建或更新产品的通知配置
@@ -294,9 +295,9 @@ class NotificationConfigService:
                 )
 
     async def delete_product_notification_config(
-        self,
-        product_id: int,
-        current_user: User
+            self,
+            product_id: int,
+            current_user: User
     ) -> None:
         """
         删除产品的通知配置
@@ -331,19 +332,19 @@ class NotificationConfigService:
     # ==================== 通知记录查询 ====================
 
     async def get_notification_records(
-        self,
-        page: int = 1,
-        page_size: int = 20,
-        conversion_id: Optional[int] = None,
-        client_id: Optional[int] = None,
-        product_id: Optional[int] = None,
-        publisher_id: Optional[int] = None,
-        notification_status: Optional[str] = None,
-        notification_channel: Optional[str] = None,
-        notification_type: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        current_user: User = None
+            self,
+            page: int = 1,
+            page_size: int = 20,
+            conversion_id: Optional[int] = None,
+            client_id: Optional[int] = None,
+            product_id: Optional[int] = None,
+            publisher_id: Optional[int] = None,
+            notification_status: Optional[str] = None,
+            notification_channel: Optional[str] = None,
+            notification_type: Optional[str] = None,
+            start_date: Optional[str] = None,
+            end_date: Optional[str] = None,
+            current_user: User = None
     ) -> Tuple[List[PostbackNotification], int]:
         """
         获取通知记录列表
@@ -463,13 +464,13 @@ class NotificationConfigService:
                         # 获取客户和产品信息（用于构建通知消息）
                         product = None
                         client = None
-                        
+
                         if conversion.product_id:
                             product_result = await self.db.execute(
                                 select(Product).where(Product.id == conversion.product_id)
                             )
                             product = product_result.scalars().first()
-                        
+
                         if product and product.client_id:
                             client_result = await self.db.execute(
                                 select(Client).where(Client.id == product.client_id)
@@ -480,11 +481,11 @@ class NotificationConfigService:
                                 select(Client).where(Client.id == conversion.client_id)
                             )
                             client = client_result.scalars().first()
-                        
+
                         # 使用统一的消息构建方法
                         client_name, user_full_name = await PostbackNotifier._get_client_info(client, self.db)
                         product_name = PostbackNotifier._get_product_name(product)
-                        
+
                         notification_message = PostbackNotifier._build_notification_message(
                             conversion=conversion,
                             client_name=client_name,
@@ -530,9 +531,9 @@ class NotificationConfigService:
         return notifications, total
 
     async def get_notification_record_by_id(
-        self,
-        notification_id: int,
-        current_user: User
+            self,
+            notification_id: int,
+            current_user: User
     ) -> PostbackNotification:
         """
         获取通知记录详情
@@ -568,9 +569,9 @@ class NotificationConfigService:
     # ==================== 补发通知 ====================
 
     async def resend_conversion_notification(
-        self,
-        conversion_id: int,
-        current_user: User
+            self,
+            conversion_id: int,
+            current_user: User
     ) -> Dict[str, Any]:
         """
         补发转化通知（补发 Postback 转发给渠道）
@@ -631,7 +632,7 @@ class NotificationConfigService:
                     error_msg = e.detail.get('detail', e.detail.get('message', str(e)))
                 else:
                     error_msg = str(e.detail)
-            
+
             logger.error(
                 f"补发转化通知失败: conversion_id={conversion_id}, "
                 f"error={error_msg}",
@@ -643,9 +644,9 @@ class NotificationConfigService:
             )
 
     async def resend_notification_from_forward_log(
-        self,
-        forward_log_id: int,
-        current_user: User
+            self,
+            forward_log_id: int,
+            current_user: User
     ) -> Dict[str, Any]:
         """
         基于转发日志补发通知（补发 Postback 转发给渠道）
@@ -721,9 +722,9 @@ class NotificationConfigService:
             )
 
     async def batch_resend_conversion_notification(
-        self,
-        conversion_ids: List[int],
-        current_user: User
+            self,
+            conversion_ids: List[int],
+            current_user: User
     ) -> Dict[str, Any]:
         """
         批量补发转化通知（批量补发 Postback 转发给渠道）
@@ -796,7 +797,7 @@ class NotificationConfigService:
                         error_msg = e.detail.get('detail', e.detail.get('message', str(e)))
                     else:
                         error_msg = str(e.detail)
-                
+
                 failed_items.append({
                     "conversion_id": conversion_id,
                     "error": error_msg
@@ -817,7 +818,7 @@ class NotificationConfigService:
     # ==================== 管理员通知配置 ====================
 
     async def get_admin_notification_config(
-        self
+            self
     ) -> Optional[AdminNotificationConfig]:
         """
         获取管理员通知配置
@@ -832,9 +833,9 @@ class NotificationConfigService:
         return result.scalars().first()
 
     async def create_or_update_admin_notification_config(
-        self,
-        config_data: Dict[str, Any],
-        current_user: User
+            self,
+            config_data: Dict[str, Any],
+            current_user: User
     ) -> AdminNotificationConfig:
         """
         创建或更新管理员通知配置

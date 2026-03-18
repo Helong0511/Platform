@@ -5,32 +5,32 @@
 - 智能列名映射（基于用户映射规则和标准映射表）
 - 确保包含所有11个必要字段
 """
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Body, Request
-from typing import Optional
-import logging
-from datetime import datetime
-from io import BytesIO
 import json
+import logging
 import os
 import re
+import traceback
+from datetime import datetime
 from difflib import SequenceMatcher
+from io import BytesIO
+from typing import Optional
 
 import pandas as pd
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.core.security import get_current_user, require_admin
-from app.core.database import get_db
-from app.core.config import settings
-from app.core.utils import get_app_now_naive, build_import_message
-from app.core.audit_log import log_user_action
-from app.models.models import User, AdData, Product
-from app.schemas.base import ResponseBaseSchema
-from app.api_v1.excel.utils import validate_excel_file, parse_date_value
-from app.core.constants import MAX_PAGE_SIZE
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Body, Request
 from sqlalchemy import and_, or_
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from starlette.datastructures import UploadFile as StarletteUploadFile
-import traceback
+
+from app.api_v1.excel.utils import validate_excel_file, parse_date_value
+from app.core.audit_log import log_user_action
+from app.core.config import settings
+from app.core.constants import MAX_PAGE_SIZE
+from app.core.database import get_db
+from app.core.security import get_current_user, require_admin
+from app.core.utils import get_app_now_naive, build_import_message
+from app.models.models import User, AdData, Product
+from app.schemas.base import ResponseBaseSchema
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -1561,7 +1561,7 @@ async def import_training_data(
 
         # 延迟导入，避免循环导入
         from app.api_v1.excel.import_handler import import_ad_data_handler
-        
+
         # 调用实际的导入处理函数
         import_response = await import_ad_data_handler(
             file=new_file,

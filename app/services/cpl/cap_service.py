@@ -2,18 +2,19 @@
 Cap 管理服务层
 封装Cap配置的业务逻辑
 """
+import logging
 from typing import Optional, List, Dict, Any
+
+from sqlalchemy import func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, delete
 from sqlalchemy.orm import joinedload
 
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
+from app.core.utils import get_app_now_naive
 from app.models.models import OfferCap, Offer, Advertiser, Publisher, User
 from app.services.base_service import BaseService
-from app.core.exceptions import raise_api_exception
-from app.core.errors import ErrorCode
-from app.core.utils import get_app_now_naive
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +26,9 @@ class CapService(BaseService[OfferCap]):
         super().__init__(db, OfferCap)
 
     async def create_cap(
-        self,
-        cap_data: Dict[str, Any],
-        current_user: User
+            self,
+            cap_data: Dict[str, Any],
+            current_user: User
     ) -> OfferCap:
         """
         创建Cap配置
@@ -118,14 +119,14 @@ class CapService(BaseService[OfferCap]):
             )
 
     async def get_caps(
-        self,
-        page: int = 1,
-        page_size: int = 20,
-        cap_type: Optional[str] = None,
-        offer_id: Optional[int] = None,
-        advertiser_id: Optional[int] = None,
-        publisher_id: Optional[int] = None,
-        is_active: Optional[bool] = None
+            self,
+            page: int = 1,
+            page_size: int = 20,
+            cap_type: Optional[str] = None,
+            offer_id: Optional[int] = None,
+            advertiser_id: Optional[int] = None,
+            publisher_id: Optional[int] = None,
+            is_active: Optional[bool] = None
     ) -> tuple[List[OfferCap], int]:
         """
         获取Cap配置列表
@@ -200,10 +201,10 @@ class CapService(BaseService[OfferCap]):
         return result.unique().scalars().first()
 
     async def update_cap(
-        self,
-        cap_id: int,
-        update_data: Dict[str, Any],
-        current_user: User
+            self,
+            cap_id: int,
+            update_data: Dict[str, Any],
+            current_user: User
     ) -> OfferCap:
         """
         更新Cap配置
@@ -260,9 +261,9 @@ class CapService(BaseService[OfferCap]):
             )
 
     async def delete_cap(
-        self,
-        cap_id: int,
-        current_user: User
+            self,
+            cap_id: int,
+            current_user: User
     ) -> None:
         """
         删除Cap配置
@@ -294,4 +295,3 @@ class CapService(BaseService[OfferCap]):
                 ErrorCode.OPERATION_FAILED,
                 detail=f"删除Cap配置失败: {str(e)}"
             )
-

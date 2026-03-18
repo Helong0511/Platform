@@ -4,18 +4,17 @@
 计算广告数据的各种比率（覆盖率、展示率、点击率等）
 """
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 class RateCalculator:
     """比率计算器"""
-    
+
     @staticmethod
     def calculate_coverage_rate(
-        match_count: int,
-        request_count: int
+            match_count: int,
+            request_count: int
     ) -> float:
         """
         计算覆盖率
@@ -29,14 +28,14 @@ class RateCalculator:
         """
         if request_count <= 0:
             return 0.0
-        
+
         rate = (match_count / request_count) * 100
         return round(rate, 2)
-    
+
     @staticmethod
     def calculate_display_rate(
-        display_count: int,
-        match_count: int
+            display_count: int,
+            match_count: int
     ) -> float:
         """
         计算展示率
@@ -50,14 +49,14 @@ class RateCalculator:
         """
         if match_count <= 0:
             return 0.0
-        
+
         rate = (display_count / match_count) * 100
         return round(rate, 2)
-    
+
     @staticmethod
     def calculate_click_rate(
-        click_count: int,
-        display_count: int
+            click_count: int,
+            display_count: int
     ) -> float:
         """
         计算点击率
@@ -71,14 +70,14 @@ class RateCalculator:
         """
         if display_count <= 0:
             return 0.0
-        
+
         rate = (click_count / display_count) * 100
         return round(rate, 2)
-    
+
     @staticmethod
     def calculate_viewability_rate(
-        viewable_count: int,
-        display_count: int
+            viewable_count: int,
+            display_count: int
     ) -> float:
         """
         计算可见率
@@ -92,16 +91,16 @@ class RateCalculator:
         """
         if display_count <= 0:
             return 0.0
-        
+
         rate = (viewable_count / display_count) * 100
         return round(rate, 2)
-    
+
     @staticmethod
     def calculate_all_rates(
-        request_count: int,
-        match_count: int,
-        display_count: int,
-        click_count: int
+            request_count: int,
+            match_count: int,
+            display_count: int,
+            click_count: int
     ) -> dict:
         """
         计算所有比率

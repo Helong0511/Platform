@@ -1,9 +1,10 @@
 """
 Cap配置 Schema
 """
-from pydantic import BaseModel, Field
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel, Field
 
 
 class OfferCapBase(BaseModel):
@@ -48,4 +49,3 @@ class OfferCapResponse(OfferCapBase):
 
     class Config:
         from_attributes = True
-

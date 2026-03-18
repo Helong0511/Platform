@@ -2,17 +2,18 @@
 用户会话管理服务层
 封装会话查询和撤销的业务逻辑
 """
-from typing import Optional, List, Dict, Any, Tuple
+import logging
+from typing import Optional, List, Tuple
+
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, and_
 
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
+from app.core.utils import get_app_now_naive
 from app.models.models import User
 from app.models.session import UserSession, TokenBlacklist
-from app.core.exceptions import raise_api_exception
-from app.core.errors import ErrorCode
-from app.core.utils import get_app_now_naive
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,10 @@ class SessionService:
         self.db = db
 
     async def get_my_sessions(
-        self,
-        user_id: int,
-        page: int = 1,
-        page_size: int = 10
+            self,
+            user_id: int,
+            page: int = 1,
+            page_size: int = 10
     ) -> Tuple[List[UserSession], int]:
         """
         获取当前用户的活跃会话列表
@@ -66,10 +67,10 @@ class SessionService:
         return sessions, total
 
     async def revoke_my_session(
-        self,
-        session_id: int,
-        user_id: int,
-        current_user: User
+            self,
+            session_id: int,
+            user_id: int,
+            current_user: User
     ) -> None:
         """
         撤销当前用户的指定会话
@@ -118,10 +119,10 @@ class SessionService:
             )
 
     async def revoke_all_my_sessions(
-        self,
-        user_id: int,
-        current_jti: Optional[str],
-        current_user: User
+            self,
+            user_id: int,
+            current_jti: Optional[str],
+            current_user: User
     ) -> int:
         """
         撤销当前用户的所有其他会话（保留当前会话）
@@ -175,10 +176,10 @@ class SessionService:
         return revoked_count
 
     async def get_user_sessions(
-        self,
-        user_id: int,
-        page: int = 1,
-        page_size: int = 10
+            self,
+            user_id: int,
+            page: int = 1,
+            page_size: int = 10
     ) -> Tuple[List[UserSession], int]:
         """
         获取指定用户的活跃会话列表（仅管理员）
@@ -226,10 +227,10 @@ class SessionService:
         return sessions, total
 
     async def revoke_user_session(
-        self,
-        user_id: int,
-        session_id: int,
-        current_user: User
+            self,
+            user_id: int,
+            session_id: int,
+            current_user: User
     ) -> None:
         """
         撤销指定用户的指定会话（仅管理员）
@@ -278,9 +279,9 @@ class SessionService:
             )
 
     async def revoke_all_user_sessions(
-        self,
-        user_id: int,
-        current_user: User
+            self,
+            user_id: int,
+            current_user: User
     ) -> Tuple[int, str]:
         """
         撤销指定用户的所有会话（仅管理员）
@@ -339,4 +340,3 @@ class SessionService:
             )
 
         return revoked_count, user.username
-
