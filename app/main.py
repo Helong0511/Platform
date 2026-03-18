@@ -472,6 +472,21 @@ async def lifespan(app: FastAPI):
 
     logger.info("应用启动完成")
 
+    # 发送启动通知
+    try:
+        # 检查是否启用 Telegram
+        telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+        if telegram_enabled and bot_initialized:
+            # 只有持有锁的进程才发送启动消息
+            if has_bot_lock():
+                try:
+                    send_telegram_message(f"🚀 服务 [{settings.SERVER_NAME}] 已启动")
+                    logger.info(f"[Worker PID:{worker_pid}] 已发送启动通知")
+                except Exception as e:
+                    logger.warning(f"发送启动通知失败: {e}")
+    except Exception as e:
+        logger.warning(f"启动通知处理失败: {e}")
+
     # ====== 应用运行期间 ======
     yield
 
