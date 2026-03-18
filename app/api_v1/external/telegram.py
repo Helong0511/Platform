@@ -7,22 +7,21 @@ Telegram Bot API 端点
 """
 import logging
 import threading
-from datetime import datetime
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auto_bot import (
+    send_telegram_message, bot_initialized, get_bot_status_info, bot, TELEBOT_AVAILABLE
+)
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
-from app.core.security import get_current_user, require_admin
+from app.core.security import require_admin
 from app.core.utils import get_app_now
-from app.core.auto_bot import (
-    send_telegram_message, bot_initialized, get_bot_status_info, bot, TELEBOT_AVAILABLE
-)
 from app.models.models import User
 from app.schemas.base import ResponseBaseSchema
 
@@ -66,7 +65,7 @@ class DiagnosticResponse(BaseModel):
 # ====== API 端点 ======
 @router.get("/status", response_model=ResponseBaseSchema[BotStatusResponse], summary="查询 Telegram Bot 状态")
 async def get_bot_status(
-    current_user: User = Depends(require_admin)
+        current_user: User = Depends(require_admin)
 ):
     """
     查询 Telegram Bot 的当前状态
@@ -85,15 +84,15 @@ async def get_bot_status(
         ))
 
     try:
-        
+
         # 获取详细状态信息
         status_info = get_bot_status_info()
-        
+
         token_configured = status_info.get("token_configured", False)
         admin_configured = status_info.get("admin_configured", False)
         bot_thread_alive = status_info.get("bot_thread_alive", False)
         connection_test = status_info.get("connection_test", "未测试")
-        
+
         # 构建状态消息
         if bot_initialized and token_configured:
             if bot_thread_alive:
@@ -104,7 +103,7 @@ async def get_bot_status(
             status_message = "Token 已配置，但 Bot 未初始化"
         else:
             status_message = "Token 未配置，请设置 TELEGRAM_TOKEN 环境变量"
-        
+
         # 添加连接测试信息
         if connection_test != "成功" and bot_initialized:
             status_message += f" | 连接测试: {connection_test}"
@@ -125,9 +124,9 @@ async def get_bot_status(
 
 @router.post("/send", response_model=ResponseBaseSchema[SendMessageResponse], summary="发送 Telegram 消息")
 async def send_message(
-    request: SendMessageRequest,
-    current_user: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db)
+        request: SendMessageRequest,
+        current_user: User = Depends(require_admin),
+        db: AsyncSession = Depends(get_db)
 ):
     """
     发送 Telegram 消息
@@ -186,7 +185,7 @@ async def send_message(
 
 @router.post("/test", response_model=ResponseBaseSchema[SendMessageResponse], summary="测试 Telegram Bot 连接")
 async def test_bot_connection(
-    current_user: User = Depends(require_admin)
+        current_user: User = Depends(require_admin)
 ):
     """
     测试 Telegram Bot 连接
@@ -216,7 +215,7 @@ async def test_bot_connection(
         # 发送测试消息
         current_time = get_app_now()
         test_message = f"🧪 Telegram Bot 连接测试\n\n发送时间: {current_time.strftime('%Y-%m-%d %H:%M:%S')}（时区: {settings.TIMEZONE}）\n测试用户: {current_user.username}"
-        
+
         success = send_telegram_message(test_message)
 
         if success:
@@ -243,7 +242,7 @@ async def test_bot_connection(
 
 @router.get("/diagnostic", response_model=ResponseBaseSchema[DiagnosticResponse], summary="Telegram Bot 诊断")
 async def diagnostic_bot(
-    current_user: User = Depends(require_admin)
+        current_user: User = Depends(require_admin)
 ):
     """
     Telegram Bot 诊断工具
@@ -255,7 +254,7 @@ async def diagnostic_bot(
 
     try:
         recommendations = []
-        
+
         # 1. 检查 Bot 初始化
         if not bot_initialized:
             recommendations.append("❌ Bot 未初始化，请检查 TELEGRAM_TOKEN 配置")
@@ -266,7 +265,7 @@ async def diagnostic_bot(
                 connection_test="Bot 未初始化",
                 recommendations=recommendations
             ))
-        
+
         # 2. 检查模块可用性
         if not TELEBOT_AVAILABLE:
             recommendations.append("❌ pyTelegramBotAPI 未安装，请运行: pip install pyTelegramBotAPI")
@@ -277,7 +276,7 @@ async def diagnostic_bot(
                 connection_test="模块未安装",
                 recommendations=recommendations
             ))
-        
+
         # 3. 检查 Bot 对象
         if not bot:
             recommendations.append("❌ Bot 对象不存在")
@@ -288,17 +287,17 @@ async def diagnostic_bot(
                 connection_test="Bot 对象不存在",
                 recommendations=recommendations
             ))
-        
+
         # 4. 检查线程状态
         bot_thread_alive = False
         for thread in threading.enumerate():
             if thread.name == "TelegramBot":
                 bot_thread_alive = thread.is_alive()
                 break
-        
+
         if not bot_thread_alive:
             recommendations.append("⚠️ 轮询线程未运行，请重启应用或检查日志")
-        
+
         # 5. 检查 Webhook
         webhook_url = None
         try:
@@ -308,7 +307,7 @@ async def diagnostic_bot(
                 recommendations.append(f"⚠️ 检测到 Webhook: {webhook_url}，这将阻止 polling 工作！请删除 webhook")
         except Exception as e:
             logger.warning(f"检查 webhook 时出错: {e}")
-        
+
         # 6. 检查消息处理器
         handlers_count = 0
         try:
@@ -324,7 +323,7 @@ async def diagnostic_bot(
                         commands = filters.get('commands', [])
                         if commands:
                             command_handlers.extend(commands)
-                    
+
                     expected_commands = ['id', 'test', 'clock', 'stats']
                     missing_commands = [cmd for cmd in expected_commands if cmd not in command_handlers]
                     if missing_commands:
@@ -333,7 +332,7 @@ async def diagnostic_bot(
                         recommendations.append(f"✅ 所有命令处理器已注册: {command_handlers}")
         except Exception as e:
             logger.warning(f"检查消息处理器时出错: {e}")
-        
+
         # 7. 测试连接
         connection_test = "未测试"
         try:
@@ -342,18 +341,18 @@ async def diagnostic_bot(
         except Exception as e:
             connection_test = f"失败: {str(e)}"
             recommendations.append(f"❌ Bot 连接测试失败: {str(e)}")
-        
+
         # 8. 给出修复建议
         if not bot_thread_alive:
             recommendations.append("💡 如果轮询线程未运行，命令将无法响应。请检查应用日志或重启应用")
-        
+
         if webhook_url:
             recommendations.append("💡 删除 webhook 后，轮询才能正常工作。可以使用 /api/v1/telegram/reset_webhook 删除")
-        
+
         if handlers_count > 0 and bot_thread_alive and not webhook_url:
             recommendations.append("✅ 所有检查通过，如果命令仍无响应，请检查日志中的轮询信息")
             recommendations.append("💡 查看日志中是否有 '收到 X 个更新' 或 '检测到命令' 的信息")
-        
+
         return ResponseBaseSchema.success(data=DiagnosticResponse(
             bot_initialized=bot_initialized,
             bot_thread_alive=bot_thread_alive,
@@ -362,7 +361,7 @@ async def diagnostic_bot(
             connection_test=connection_test,
             recommendations=recommendations
         ))
-        
+
     except Exception as e:
         logger.error(f"诊断 Telegram Bot 时发生错误: {e}", exc_info=True)
         raise_api_exception(
@@ -373,7 +372,7 @@ async def diagnostic_bot(
 
 @router.post("/reset_webhook", response_model=ResponseBaseSchema[SendMessageResponse], summary="强制删除 Webhook")
 async def reset_webhook(
-    current_user: User = Depends(require_admin)
+        current_user: User = Depends(require_admin)
 ):
     """
     强制删除 Webhook 并重置 offset
@@ -382,22 +381,22 @@ async def reset_webhook(
     
     需要管理员权限
     """
-    
+
     try:
-        
+
         if not bot_initialized or not TELEBOT_AVAILABLE or not bot:
             raise_api_exception(
                 error_code=ErrorCode.SERVICE_UNAVAILABLE,
                 message="Bot 未初始化",
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE
             )
-        
+
         # 删除 webhook
         result = bot.delete_webhook(drop_pending_updates=True)
-        
+
         # 检查确认
         webhook_info = bot.get_webhook_info()
-        
+
         if webhook_info.url:
             return ResponseBaseSchema.success(data=SendMessageResponse(
                 success=False,
@@ -408,13 +407,13 @@ async def reset_webhook(
                 success=True,
                 message="Webhook 已成功删除。请重启应用以使轮询正常工作，或等待轮询线程自动重新连接"
             ))
-        
+
     except Exception as e:
         logger.error(f"删除 Webhook 时发生错误: {e}", exc_info=True)
         raise_api_exception(
-                error_code=ErrorCode.INTERNAL_ERROR,
-                message=f"删除 Webhook 失败: {str(e)}"
-            )
+            error_code=ErrorCode.INTERNAL_ERROR,
+            message=f"删除 Webhook 失败: {str(e)}"
+        )
 
 
 # ====== 新的实用 API 端点 ======
@@ -431,9 +430,9 @@ class SendAlertRequest(BaseModel):
 
 @router.post("/send_alert", response_model=ResponseBaseSchema[SendMessageResponse], summary="发送系统告警")
 async def send_alert(
-    request: SendAlertRequest,
-    current_user: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db)
+        request: SendAlertRequest,
+        current_user: User = Depends(require_admin),
+        db: AsyncSession = Depends(get_db)
 ):
     """
     发送系统告警通知到 Telegram
@@ -506,9 +505,9 @@ class SendBatchRequest(BaseModel):
 
 @router.post("/send_batch", response_model=ResponseBaseSchema[SendMessageResponse], summary="发送批量转化通知")
 async def send_batch_notifications(
-    request: SendBatchRequest,
-    current_user: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db)
+        request: SendBatchRequest,
+        current_user: User = Depends(require_admin),
+        db: AsyncSession = Depends(get_db)
 ):
     """
     发送批量转化通知到 Telegram
@@ -577,4 +576,3 @@ async def send_batch_notifications(
             error_code=ErrorCode.INTERNAL_ERROR,
             message=f"发送批量转化通知失败: {str(e)}"
         )
-

@@ -1,11 +1,12 @@
 """
 通知配置和通知记录的 Schema
 """
-import re
 import json
-from pydantic import BaseModel, Field, field_validator
+import re
 from datetime import datetime
 from typing import List, Optional
+
+from pydantic import BaseModel, Field, field_validator
 
 
 # ==================== 客户通知配置 ====================
@@ -260,4 +261,3 @@ class PostbackNotificationListResponse(BaseModel):
     total: int
     page: int
     page_size: int
-

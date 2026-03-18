@@ -4,6 +4,7 @@
 所有配置都在 task_config.py 中统一管理
 """
 import logging
+
 from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal
@@ -23,25 +24,25 @@ async def init_scheduled_tasks_in_db() -> None:
     注意：在多进程环境下，多个进程可能同时执行此函数，因此需要处理并发插入冲突
     """
     logger.info("开始检查并初始化定时任务到数据库...")
-    
+
     async with AsyncSessionLocal() as db:
         try:
             added_count = 0
             existing_count = 0
             updated_count = 0
-            
+
             for config_key, config in TASK_CONFIGS.items():
                 task_name = config["task_name"]
                 task_module = config["task_module"]
                 task_function = config["task_function"]
-                
+
                 # 构建函数路径
                 function_path = f"{task_module}.{task_function}"
-                
+
                 # 从配置中获取 cron_expression 和 description（如果配置了）
                 cron_expression = config.get("cron_expression", "0 * * * *")  # 默认每小时
                 description = config.get("description", f"自动创建的任务: {task_name}")
-                
+
                 # 检查任务是否已存在（使用行锁防止并发问题）
                 result = await db.execute(
                     select(ScheduledTask)
@@ -49,7 +50,7 @@ async def init_scheduled_tasks_in_db() -> None:
                     .with_for_update(skip_locked=True)  # 跳过被其他事务锁定的记录
                 )
                 existing_task = result.scalar_one_or_none()
-                
+
                 if existing_task:
                     # 任务已存在，更新配置（如果不同）
                     updated = False
@@ -62,14 +63,14 @@ async def init_scheduled_tasks_in_db() -> None:
                     if existing_task.description != description:
                         existing_task.description = description
                         updated = True
-                    
+
                     if updated:
                         updated_count += 1
                         logger.info(f"更新任务 '{task_name}' 的配置")
                     else:
                         existing_count += 1
                         logger.debug(f"任务 '{task_name}' 已存在，跳过")
-                    
+
                     # 立即提交这个任务的更新（避免长时间锁定）
                     try:
                         await db.commit()
@@ -90,7 +91,7 @@ async def init_scheduled_tasks_in_db() -> None:
                             success_count=0,
                             error_count=0,
                         )
-                        
+
                         db.add(new_task)
                         # 立即提交（避免批量提交时的并发冲突）
                         await db.commit()
@@ -123,7 +124,7 @@ async def init_scheduled_tasks_in_db() -> None:
                                 if existing_task.description != description:
                                     existing_task.description = description
                                     updated = True
-                                
+
                                 if updated:
                                     await db.commit()
                                     updated_count += 1
@@ -142,7 +143,7 @@ async def init_scheduled_tasks_in_db() -> None:
                                 f"添加任务 '{task_name}' 失败: {e}",
                                 exc_info=True
                             )
-            
+
             logger.info(
                 f"定时任务数据库初始化完成: "
                 f"新增 {added_count} 个任务, "
@@ -150,7 +151,7 @@ async def init_scheduled_tasks_in_db() -> None:
                 f"已存在 {existing_count} 个任务, "
                 f"总计 {len(TASK_CONFIGS)} 个任务"
             )
-            
+
         except Exception as e:
             await db.rollback()
             logger.error(f"初始化定时任务到数据库失败: {e}", exc_info=True)
@@ -166,4 +167,3 @@ async def sync_task_configs_to_db() -> None:
     这个函数可以在应用启动时调用，或者在管理界面中手动触发
     """
     await init_scheduled_tasks_in_db()
-

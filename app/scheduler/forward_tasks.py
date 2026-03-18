@@ -3,17 +3,15 @@ Postback 下游转发任务
 负责处理 PostbackForwardQueue 中的任务，包含重试机制
 """
 import logging
-import asyncio
-from datetime import datetime, timezone, timedelta
-from typing import List
-from sqlalchemy.future import select
+from datetime import timedelta
+
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, func
+from sqlalchemy.future import select
 
 from app.core.database import AsyncSessionLocal
+from app.core.postback.forwarder import PostbackForwarder
 from app.core.utils import get_app_now_naive
 from app.models.models import PostbackForwardQueue, PostbackForwardLog, PostbackConversion, Product
-from app.core.postback.forwarder import PostbackForwarder
 
 logger = logging.getLogger(__name__)
 
@@ -48,25 +46,25 @@ async def process_forward_queue():
             query = select(PostbackForwardQueue).where(
                 PostbackForwardQueue.next_retry_time <= now
             ).order_by(PostbackForwardQueue.next_retry_time).limit(BATCH_SIZE)
-            
+
             result = await db.execute(query)
             tasks = result.scalars().all()
-            
+
             if not tasks:
                 return
 
             logger.info(f"开始处理转发队列，任务数: {len(tasks)}")
-            
+
             # 2. 并行处理
             # 注意：为了避免 Session 冲突，每个任务最好由 Consumer 单独处理或小心管理 Session
             # 这里的简单实现：串行或小批量并行
-            
+
             for task in tasks:
                 await process_single_task(db, task)
-            
+
             # 如果还有更多任务，可以递归调用或依赖下一次调度
             # 这里简单处理，一次只处理一页
-            
+
     except Exception as e:
         logger.error(f"转发队列处理任务异常: {e}", exc_info=True)
 
@@ -84,12 +82,12 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
             select(PostbackConversion).where(PostbackConversion.id == task.conversion_id)
         )
         conversion = conversion_result.scalars().first()
-        
+
         product_result = await db.execute(
             select(Product).where(Product.id == task.product_id)
         )
         product = product_result.scalars().first()
-        
+
         if not conversion or not product:
             logger.warning(
                 f"转发任务关联对象不存在: queue_id={task.id}, "
@@ -99,12 +97,12 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
             await db.delete(task)
             await db.commit()
             return
-        
+
         # 2. 使用 PostbackForwarder 处理转发（会自动包含原始点击参数）
         # 注意：forward_to_downstream 会创建 PostbackForwardLog，我们需要在成功后删除队列任务
         try:
             await PostbackForwarder.forward_to_downstream(conversion, product, db)
-            
+
             # 3. 检查是否成功（通过查询最新的 ForwardLog）
             log_result = await db.execute(
                 select(PostbackForwardLog)
@@ -114,7 +112,7 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
                 .limit(1)
             )
             latest_log = log_result.scalars().first()
-            
+
             if latest_log and latest_log.success:
                 # 成功：从队列删除
                 await db.delete(task)
@@ -164,7 +162,7 @@ async def process_single_task(db: AsyncSession, task: PostbackForwardQueue):
                     f"转发任务失败，安排重试 ({task.retry_count}/{MAX_RETRIES}): "
                     f"queue_id={task.id}, delay={delay}s"
                 )
-        
+
     except Exception as e:
         logger.error(f"处理单条转发任务失败: {e}", exc_info=True)
         await db.rollback()

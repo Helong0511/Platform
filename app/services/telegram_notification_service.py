@@ -33,16 +33,16 @@ logger = logging.getLogger(__name__)
 
 class TelegramNotificationService:
     """Telegram 通知服务"""
-    
+
     def __init__(self, db: Optional[AsyncSession] = None):
         self.db = db
-    
+
     @staticmethod
     def build_client_conversion_message(
-        conversion: PostbackConversion,
-        client_name: str,
-        product_name: str,
-        user_full_name: Optional[str] = None
+            conversion: PostbackConversion,
+            client_name: str,
+            product_name: str,
+            user_full_name: Optional[str] = None
     ) -> str:
         """
         构建客户转化通知消息
@@ -60,34 +60,34 @@ class TelegramNotificationService:
         msg += f"产品: {product_name}\n"
         msg += f"平台: {conversion.platform}\n"
         msg += f"转化ID: {conversion.conversion_id}\n"
-        
+
         if conversion.event_name:
             msg += f"事件: {conversion.event_name}\n"
-        
+
         msg += "\n💰 金额信息\n"
         if conversion.original_payout is not None:
             msg += f"• 原始收益 (PO): ${conversion.original_payout:.2f}\n"
         if conversion.payout is not None:
             msg += f"• 扣后收益 (PO(扣)): ${conversion.payout:.2f}\n"
-        
+
         if conversion.created_at:
             time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
             msg += f"\n⏰ 时间: {time_str}\n"
-        
+
         msg += "\n---\n"
         msg += f"客户: {client_name}"
         if user_full_name:
             msg += f" ({user_full_name})"
-        
+
         return msg
-    
+
     @staticmethod
     def build_client_high_value_message(
-        conversion: PostbackConversion,
-        client_name: str,
-        product_name: str,
-        threshold: float,
-        user_full_name: Optional[str] = None
+            conversion: PostbackConversion,
+            client_name: str,
+            product_name: str,
+            threshold: float,
+            user_full_name: Optional[str] = None
     ) -> str:
         """
         构建客户高价值转化通知消息
@@ -106,36 +106,36 @@ class TelegramNotificationService:
         msg += f"产品: {product_name}\n"
         msg += f"平台: {conversion.platform}\n"
         msg += f"转化ID: {conversion.conversion_id}\n"
-        
+
         if conversion.event_name:
             msg += f"事件: {conversion.event_name}\n"
-        
+
         msg += "\n💰 金额信息\n"
         if conversion.original_payout is not None:
             msg += f"• 原始收益 (PO): ${conversion.original_payout:.2f}\n"
         if conversion.payout is not None:
             msg += f"• 扣后收益 (PO(扣)): ${conversion.payout:.2f}\n"
         msg += f"• 阈值: ${threshold:.2f} ✅\n"
-        
+
         if conversion.created_at:
             time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
             msg += f"\n⏰ 时间: {time_str}\n"
-        
+
         msg += "\n---\n"
         msg += f"客户: {client_name}"
         if user_full_name:
             msg += f" ({user_full_name})"
-        
+
         return msg
-    
+
     @staticmethod
     async def build_admin_conversion_message(
-        conversion: PostbackConversion,
-        client_name: Optional[str] = None,
-        product_name: Optional[str] = None,
-        publisher: Optional[Publisher] = None,
-        offer: Optional[Offer] = None,
-        db: Optional[AsyncSession] = None
+            conversion: PostbackConversion,
+            client_name: Optional[str] = None,
+            product_name: Optional[str] = None,
+            publisher: Optional[Publisher] = None,
+            offer: Optional[Offer] = None,
+            db: Optional[AsyncSession] = None
     ) -> str:
         """
         构建管理员转化通知消息
@@ -154,46 +154,45 @@ class TelegramNotificationService:
         msg = "📊 Postback 转化通知（管理员）\n\n"
         msg += f"转化ID: {conversion.conversion_id}\n"
         msg += f"平台: {conversion.platform}\n"
-        
+
         if conversion.event_name:
             msg += f"事件: {conversion.event_name}\n"
-        
+
         msg += "\n💰 金额信息\n"
         if conversion.original_payout is not None:
             msg += f"• 原始金额 (PO): ${conversion.original_payout:.2f}\n"
         if conversion.payout is not None:
             msg += f"• 扣后金额 (PO(扣)): ${conversion.payout:.2f}\n"
-        
+
         if client_name or product_name:
             msg += "\n👤 客户信息\n"
             if client_name:
                 msg += f"• 客户: {client_name}\n"
             if product_name:
                 msg += f"• 产品: {product_name}\n"
-        
+
         if publisher:
             msg += "\n📤 渠道信息\n"
             msg += f"• 渠道ID: {publisher.id}\n"
             msg += f"• 渠道名称: {publisher.publisher_name}\n"
-        
+
         if offer:
             if not publisher:  # 如果还没有显示渠道信息，先显示
                 msg += "\n📤 渠道信息\n"
             msg += f"• Offer ID: {offer.id}\n"
             if offer.offer_name:
                 msg += f"• Offer 名称: {offer.offer_name}\n"
-        
+
         # 添加当天总转化个数统计
         if db:
             try:
                 # 计算当天总转化数
                 today = conversion.created_at.date() if conversion.created_at else get_app_now_naive().date()
 
-                
                 # 构建当天的开始和结束时间
                 start_of_day = datetime.combine(today, time.min)
                 end_of_day = datetime.combine(today, time.max)
-                
+
                 # 查询当天的转化记录数
                 result = await db.execute(
                     select(func.count(PostbackConversion.id)).where(
@@ -204,16 +203,16 @@ class TelegramNotificationService:
                     )
                 )
                 daily_total = result.scalar() or 0
-                
+
                 msg += f"\n📊 统计信息\n"
                 msg += f"• 当天总转化个数: {daily_total}\n"
-                
+
                 # 查询当天当前渠道的转化记录数
                 if publisher:
                     # 构建查询条件：当天 + 关联到该渠道的转化
                     # 注意：这里通过 click_id 关联到 Click，再通过 Click.publisher_id 关联到渠道
                     click_alias = aliased(Click)
-                    
+
                     # 查询当天该渠道的转化数
                     channel_result = await db.execute(
                         select(func.count(PostbackConversion.id)).join(
@@ -227,25 +226,25 @@ class TelegramNotificationService:
                         )
                     )
                     daily_channel_total = channel_result.scalar() or 0
-                    
+
                     msg += f"• 当天当前渠道转化个数: {daily_channel_total}\n"
-                    
+
             except Exception as e:
                 logger.warning(f"获取当天转化数失败: {str(e)}")
-        
+
         if conversion.created_at:
             time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
             msg += f"\n⏰ 时间: {time_str}\n"
-        
+
         return msg
-    
+
     @staticmethod
     def build_admin_forward_failure_message(
-        conversion: PostbackConversion,
-        publisher: Publisher,
-        error_message: str,
-        click_params: Optional[Dict[str, Any]] = None,
-        offer: Optional[Offer] = None
+            conversion: PostbackConversion,
+            publisher: Publisher,
+            error_message: str,
+            click_params: Optional[Dict[str, Any]] = None,
+            offer: Optional[Offer] = None
     ) -> str:
         """
         构建管理员转发失败告警消息
@@ -263,38 +262,39 @@ class TelegramNotificationService:
         msg = "❌ Postback 转发失败告警\n\n"
         msg += f"转化ID: {conversion.conversion_id}\n"
         msg += f"平台: {conversion.platform}\n"
-        
+
         msg += "\n📤 渠道信息\n"
         msg += f"• 渠道ID: {publisher.id}\n"
         msg += f"• 渠道名称: {publisher.publisher_name}\n"
         if publisher.postback_url:
-            url_display = publisher.postback_url[:100] + "..." if len(publisher.postback_url) > 100 else publisher.postback_url
+            url_display = publisher.postback_url[:100] + "..." if len(
+                publisher.postback_url) > 100 else publisher.postback_url
             msg += f"• Postback URL: {url_display}\n"
-        
+
         msg += "\n❌ 错误信息\n"
         error_display = error_message[:300] + "..." if len(error_message) > 300 else error_message
         msg += f"{error_display}\n"
-        
+
         if click_params:
             try:
                 click_params_str = json.dumps(click_params, ensure_ascii=False)
                 msg += f"\n📋 点击参数\n{click_params_str}\n"
             except Exception:
                 msg += f"\n📋 点击参数\n{str(click_params)}\n"
-        
+
         if conversion.created_at:
             time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
             msg += f"\n⏰ 时间: {time_str}\n"
-        
+
         return msg
-    
+
     @staticmethod
     def build_admin_forward_success_message(
-        conversion: PostbackConversion,
-        publisher: Publisher,
-        response_status: int,
-        response_body: Optional[str] = None,
-        offer: Optional[Offer] = None
+            conversion: PostbackConversion,
+            publisher: Publisher,
+            response_status: int,
+            response_body: Optional[str] = None,
+            offer: Optional[Offer] = None
     ) -> str:
         """
         构建管理员转发成功通知消息
@@ -312,26 +312,27 @@ class TelegramNotificationService:
         msg = "✅ Postback 转发成功\n\n"
         msg += f"转化ID: {conversion.conversion_id}\n"
         msg += f"平台: {conversion.platform}\n"
-        
+
         msg += "\n📤 渠道信息\n"
         msg += f"• 渠道ID: {publisher.id}\n"
         msg += f"• 渠道名称: {publisher.publisher_name}\n"
         if publisher.postback_url:
-            url_display = publisher.postback_url[:100] + "..." if len(publisher.postback_url) > 100 else publisher.postback_url
+            url_display = publisher.postback_url[:100] + "..." if len(
+                publisher.postback_url) > 100 else publisher.postback_url
             msg += f"• Postback URL: {url_display}\n"
-        
+
         msg += "\n✅ 响应信息\n"
         msg += f"• 状态码: {response_status}\n"
         if response_body:
             body_display = response_body[:200] + "..." if len(response_body) > 200 else response_body
             msg += f"• 响应: {body_display}\n"
-        
+
         if conversion.created_at:
             time_str = conversion.created_at.strftime("%Y-%m-%d %H:%M:%S")
             msg += f"\n⏰ 时间: {time_str}\n"
-        
+
         return msg
-    
+
     @staticmethod
     def build_test_message(message_type: str = 'conversion') -> str:
         """
@@ -382,18 +383,18 @@ class TelegramNotificationService:
             msg += "⏰ 时间: 2026-01-12 15:00:00\n"
         else:
             msg = "🔔 Telegram 通知测试\n\n这是一条测试消息。"
-        
+
         return msg
-    
+
     @staticmethod
     async def send_client_notification(
-        message: str,
-        telegram_chat_id: str,
-        conversion: Optional[PostbackConversion] = None,
-        client_id: Optional[int] = None,
-        product_id: Optional[int] = None,
-        notification_type: str = 'conversion',
-        db: Optional[AsyncSession] = None
+            message: str,
+            telegram_chat_id: str,
+            conversion: Optional[PostbackConversion] = None,
+            client_id: Optional[int] = None,
+            product_id: Optional[int] = None,
+            notification_type: str = 'conversion',
+            db: Optional[AsyncSession] = None
     ) -> bool:
         """
         发送客户通知
@@ -413,7 +414,7 @@ class TelegramNotificationService:
         try:
 
             success = await send_telegram_message_async(telegram_chat_id, message)
-            
+
             # 记录通知历史（如果有数据库会话）
             if db:
                 try:
@@ -427,7 +428,7 @@ class TelegramNotificationService:
                         record_client_id = client_id
                         record_product_id = product_id
                         record_conversion_id = None
-                    
+
                     notification_record = PostbackNotification(
                         conversion_id=record_conversion_id,
                         client_id=record_client_id,
@@ -448,19 +449,19 @@ class TelegramNotificationService:
                     logger.warning(f"记录客户通知历史失败: {str(e)}")
                     if db:
                         await db.rollback()
-            
+
             return success
         except Exception as e:
             logger.error(f"发送客户通知失败: {str(e)}", exc_info=True)
             return False
-    
+
     @staticmethod
     async def send_admin_notification(
-        message: str,
-        telegram_chat_id: Optional[str] = None,
-        conversion: Optional[PostbackConversion] = None,
-        notification_type: str = 'conversion',
-        db: Optional[AsyncSession] = None
+            message: str,
+            telegram_chat_id: Optional[str] = None,
+            conversion: Optional[PostbackConversion] = None,
+            notification_type: str = 'conversion',
+            db: Optional[AsyncSession] = None
     ) -> bool:
         """
         发送管理员通知
@@ -478,7 +479,7 @@ class TelegramNotificationService:
         try:
 
             success = await send_telegram_message_async(telegram_chat_id, message)
-            
+
             # 记录通知历史（如果有转化记录和数据库会话）
             if conversion and db:
                 try:
@@ -502,20 +503,20 @@ class TelegramNotificationService:
                     logger.warning(f"记录管理员通知历史失败: {str(e)}")
                     if db:
                         await db.rollback()
-            
+
             return success
         except Exception as e:
             logger.error(f"发送管理员通知失败: {str(e)}", exc_info=True)
             return False
-    
+
     @staticmethod
     async def send_system_alert(
-        alert_type: str,
-        description: str,
-        location: Optional[Dict[str, str]] = None,
-        error: Optional[Exception] = None,
-        telegram_chat_id: Optional[str] = None,
-        db: Optional[AsyncSession] = None
+            alert_type: str,
+            description: str,
+            location: Optional[Dict[str, str]] = None,
+            error: Optional[Exception] = None,
+            telegram_chat_id: Optional[str] = None,
+            db: Optional[AsyncSession] = None
     ) -> bool:
         """
         发送系统告警通知
@@ -538,10 +539,9 @@ class TelegramNotificationService:
                 location=location,
                 error=error
             )
-            
 
             success = await send_telegram_message_async(telegram_chat_id, message)
-            
+
             if db:
                 try:
                     notification_record = PostbackNotification(
@@ -564,21 +564,21 @@ class TelegramNotificationService:
                     logger.warning(f"记录系统告警通知历史失败: {str(e)}")
                     if db:
                         await db.rollback()
-            
+
             logger.warning(f"系统告警已发送: alert_type={alert_type}, description={description}")
             return success
         except Exception as e:
             logger.error(f"发送系统告警通知失败: {str(e)}", exc_info=True)
             return False
-    
+
     @staticmethod
     async def send_summary_notification(
-        summary_data: Dict[str, Any],
-        period: str = 'today',
-        telegram_chat_id: Optional[str] = None,
-        db: Optional[AsyncSession] = None,
-        client_id: Optional[int] = None,
-        product_id: Optional[int] = None
+            summary_data: Dict[str, Any],
+            period: str = 'today',
+            telegram_chat_id: Optional[str] = None,
+            db: Optional[AsyncSession] = None,
+            client_id: Optional[int] = None,
+            product_id: Optional[int] = None
     ) -> bool:
         """
         发送汇总统计通知
@@ -599,10 +599,9 @@ class TelegramNotificationService:
                 summary_data=summary_data,
                 period=period
             )
-            
 
             success = await send_telegram_message_async(telegram_chat_id, message)
-            
+
             if db:
                 try:
                     notification_record = PostbackNotification(
@@ -625,20 +624,20 @@ class TelegramNotificationService:
                     logger.warning(f"记录汇总统计通知历史失败: {str(e)}")
                     if db:
                         await db.rollback()
-            
+
             logger.info(f"汇总统计通知已发送: period={period}")
             return success
         except Exception as e:
             logger.error(f"发送汇总统计通知失败: {str(e)}", exc_info=True)
             return False
-    
+
     @staticmethod
     async def send_batch_conversion_notifications(
-        conversions: List[PostbackConversion],
-        telegram_chat_id: str,
-        db: Optional[AsyncSession] = None,
-        client_id: Optional[int] = None,
-        product_id: Optional[int] = None
+            conversions: List[PostbackConversion],
+            telegram_chat_id: str,
+            db: Optional[AsyncSession] = None,
+            client_id: Optional[int] = None,
+            product_id: Optional[int] = None
     ) -> bool:
         """
         批量发送转化通知（用于汇总通知场景）
@@ -655,43 +654,43 @@ class TelegramNotificationService:
         """
         if not conversions:
             return True
-        
+
         try:
             # 构建批量通知消息
             total_count = len(conversions)
             total_payout = sum(c.payout or 0 for c in conversions)
             total_original_payout = sum(c.original_payout or 0 for c in conversions)
-            
+
             title = f"📊 批量转化通知 ({total_count} 条)"
             fields = {
                 "总转化数": total_count,
                 "总扣后收益": f"${total_payout:.2f}",
                 "总原始收益": f"${total_original_payout:.2f}"
             }
-            
+
             # 添加最近的几条转化详情
             recent_conversions = conversions[-5:]  # 只显示最近5条
             for i, conv in enumerate(recent_conversions, 1):
                 fields[f"转化 {i}"] = f"ID: {conv.conversion_id}, 平台: {conv.platform}, 收益: ${conv.payout:.2f}"
-            
+
             if total_count > 5:
                 fields["提示"] = f"只显示最近5条，共 {total_count} 条转化"
-            
+
             message = format_telegram_message(
                 title=title,
                 fields=fields,
                 message_type='conversion'
             )
-            
+
             # 分割长消息
             messages = split_long_message(message)
-            
+
             all_success = True
             for msg in messages:
                 success = await send_telegram_message_async_from_telegram(telegram_chat_id, msg)
                 if not success:
                     all_success = False
-            
+
             # 记录通知历史（只记录一次，使用第一条转化作为代表）
             if db and conversions:
                 try:
@@ -715,21 +714,21 @@ class TelegramNotificationService:
                     logger.warning(f"记录批量转化通知历史失败: {str(e)}")
                     if db:
                         await db.rollback()
-            
+
             logger.info(f"批量转化通知已发送: count={total_count}, success={all_success}")
             return all_success
         except Exception as e:
             logger.error(f"发送批量转化通知失败: {str(e)}", exc_info=True)
             return False
-    
+
     @staticmethod
     async def send_notification_with_buttons(
-        message: str,
-        buttons: List[List[Dict[str, str]]],
-        telegram_chat_id: Optional[str] = None,
-        db: Optional[AsyncSession] = None,
-        conversion: Optional[PostbackConversion] = None,
-        notification_type: str = 'interactive'
+            message: str,
+            buttons: List[List[Dict[str, str]]],
+            telegram_chat_id: Optional[str] = None,
+            db: Optional[AsyncSession] = None,
+            conversion: Optional[PostbackConversion] = None,
+            notification_type: str = 'interactive'
     ) -> tuple[bool, Optional[int]]:
         """
         发送带按钮的交互式通知
@@ -755,7 +754,7 @@ class TelegramNotificationService:
                     buttons
                 )
             )
-            
+
             if db:
                 try:
                     notification_record = PostbackNotification(
@@ -778,18 +777,18 @@ class TelegramNotificationService:
                     logger.warning(f"记录交互式通知历史失败: {str(e)}")
                     if db:
                         await db.rollback()
-            
+
             logger.info(f"交互式通知已发送: success={success}, message_id={message_id}")
             return success, message_id
         except Exception as e:
             logger.error(f"发送交互式通知失败: {str(e)}", exc_info=True)
             return False, None
-    
+
     @staticmethod
     def build_pending_conversion_message(
-        pending_conversion: Any,
-        client_name: Optional[str] = None,
-        product_name: Optional[str] = None
+            pending_conversion: Any,
+            client_name: Optional[str] = None,
+            product_name: Optional[str] = None
     ) -> tuple[str, List[List[Dict[str, str]]]]:
         """
         构建待确认转化通知消息（带确认/拒绝按钮）
@@ -808,36 +807,36 @@ class TelegramNotificationService:
             "平台": pending_conversion.platform,
             "请求IP": pending_conversion.request_ip,
         }
-        
+
         if hasattr(pending_conversion, 'payout') and pending_conversion.payout:
             fields["收益"] = f"${pending_conversion.payout:.2f}"
-        
+
         if hasattr(pending_conversion, 'original_payout') and pending_conversion.original_payout:
             fields["原始收益"] = f"${pending_conversion.original_payout:.2f}"
-        
+
         if client_name:
             fields["客户"] = client_name
-        
+
         if product_name:
             fields["产品"] = product_name
-        
+
         if hasattr(pending_conversion, 'created_at') and pending_conversion.created_at:
             footer = f"⏰ 请求时间: {pending_conversion.created_at.strftime('%Y-%m-%d %H:%M:%S')}"
         else:
             footer = None
-        
+
         message = format_telegram_message(
             title=title,
             fields=fields,
             footer=footer,
             message_type='warning'
         )
-        
+
         buttons = [
             [
                 {"text": "✅ 批准", "callback_data": f"postback_approve_{pending_conversion.id}"},
                 {"text": "❌ 拒绝", "callback_data": f"postback_reject_{pending_conversion.id}"}
             ]
         ]
-        
+
         return message, buttons

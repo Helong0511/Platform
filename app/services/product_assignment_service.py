@@ -2,18 +2,19 @@
 产品分配历史管理服务层
 封装产品分配历史的业务逻辑
 """
-from typing import Optional, List, Dict, Any, Tuple
+import logging
+from typing import List, Dict, Any
+
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
+from app.core.product_assignment import validate_product_assignments, cleanup_invalid_assignments
 from app.models.models import ProductAssignment, Product, Client, User, UserRole
 from app.services.base_service import BaseService
-from app.core.exceptions import raise_api_exception
-from app.core.errors import ErrorCode
-from app.core.product_assignment import validate_product_assignments, cleanup_invalid_assignments
-from fastapi import HTTPException
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +26,9 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
         super().__init__(db, ProductAssignment)
 
     async def get_product_assignments(
-        self,
-        product_id: int,
-        current_user: User
+            self,
+            product_id: int,
+            current_user: User
     ) -> List[Dict[str, Any]]:
         """
         获取指定产品的分配历史记录
@@ -118,9 +119,9 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
         return assignments_list
 
     async def get_client_assignments(
-        self,
-        client_id: int,
-        current_user: User
+            self,
+            client_id: int,
+            current_user: User
     ) -> List[Dict[str, Any]]:
         """
         获取指定客户的所有产品分配历史记录（仅管理员）
@@ -179,9 +180,9 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
         return assignments_list
 
     async def validate_product_assignments(
-        self,
-        product_id: int,
-        current_user: User
+            self,
+            product_id: int,
+            current_user: User
     ) -> Dict[str, Any]:
         """
         验证产品分配记录的逻辑完整性（仅管理员）
@@ -220,9 +221,9 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
         }
 
     async def cleanup_product_assignments(
-        self,
-        product_id: int,
-        current_user: User
+            self,
+            product_id: int,
+            current_user: User
     ) -> Dict[str, Any]:
         """
         清理产品分配记录中的无效数据（仅管理员）
@@ -260,8 +261,8 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
         }
 
     async def cleanup_all_product_assignments(
-        self,
-        current_user: User
+            self,
+            current_user: User
     ) -> Dict[str, Any]:
         """
         清理所有产品的分配记录中的无效数据（仅管理员）
@@ -285,10 +286,10 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
         }
 
     async def update_assignment_dates(
-        self,
-        assignment_id: int,
-        date_update: Dict[str, Any],
-        current_user: User
+            self,
+            assignment_id: int,
+            date_update: Dict[str, Any],
+            current_user: User
     ) -> Dict[str, Any]:
         """
         更新产品分配历史的日期（仅管理员）
@@ -421,9 +422,9 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
             )
 
     async def batch_update_assignment_dates(
-        self,
-        updates: List[Dict[str, Any]],
-        current_user: User
+            self,
+            updates: List[Dict[str, Any]],
+            current_user: User
     ) -> Dict[str, Any]:
         """
         批量更新产品分配历史的日期（仅管理员）
@@ -561,4 +562,3 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
                 ErrorCode.INTERNAL_ERROR,
                 detail=f"批量更新分配记录日期时出错: {str(e)}"
             )
-

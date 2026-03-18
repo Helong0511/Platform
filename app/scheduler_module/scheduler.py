@@ -13,7 +13,6 @@ import os
 import asyncio
 import logging
 import threading
-from datetime import datetime, timezone, timedelta
 from typing import Optional, Callable, Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -112,16 +111,17 @@ async def execute_task_with_lock(
         )
         # 直接执行，不检查进程分配
         priority = TaskPriority.NORMAL
+
         async def wrapped_task():
             await _execute_task_with_lock_internal(task_name, task_func, *args, **kwargs)
-        
+
         await submit_task_to_queue(
             task_name=task_name,
             task_func=wrapped_task,
             priority=priority
         )
         return
-    
+
     # 查询任务的cron表达式和运行状态
     db = AsyncSessionLocal()
     try:
@@ -129,7 +129,7 @@ async def execute_task_with_lock(
             select(ScheduledTask).where(ScheduledTask.task_name == task_name)
         )
         task_record = result.scalar_one_or_none()
-        
+
         # 先检查任务是否正在运行（避免不必要的进程分配检查）
         if task_record and task_record.is_running:
             # 检查是否超时（可能是上次执行异常导致锁未释放）
@@ -141,10 +141,10 @@ async def execute_task_with_lock(
                 else:
                     # 如果带时区信息，转换为北京时间（naive）
                     last_run_app = task_record.last_run_time.astimezone(APP_TIMEZONE).replace(tzinfo=None)
-                
+
                 now_app = get_app_now_naive()  # 使用北京时间比较
                 elapsed = (now_app - last_run_app).total_seconds()
-                
+
                 if elapsed < DEFAULT_TIMEOUT_SECONDS:
                     # 任务正在运行且未超时，直接跳过（避免重复执行）
                     worker_pid = os.getpid()
@@ -154,7 +154,7 @@ async def execute_task_with_lock(
                         f"运行时间: {elapsed:.1f}秒），跳过本次执行"
                     )
                     return
-        
+
         if not task_record or not task_record.cron_expression:
             # 如果没有找到任务记录或没有cron表达式，直接执行
             cron_expression = None
@@ -165,7 +165,7 @@ async def execute_task_with_lock(
         cron_expression = None
     finally:
         await db.close()
-    
+
     # 如果有cron表达式，检查是否应该由当前进程执行
     if cron_expression:
         should_execute = await should_execute_in_current_process(
@@ -179,22 +179,22 @@ async def execute_task_with_lock(
                 f"当前进程跳过（这是正常的，多进程环境下任务会分配到不同进程）"
             )
             return
-    
+
     # 根据任务名称确定优先级（可以根据实际需求调整）
     # 默认使用 NORMAL 优先级
     priority = TaskPriority.NORMAL
-    
+
     # 创建包装函数，将实际执行逻辑包装为异步函数
     async def wrapped_task():
         await _execute_task_with_lock_internal(task_name, task_func, *args, **kwargs)
-    
+
     # 将任务提交到队列，队列会管理并发执行
     worker_pid = os.getpid()
     logger.debug(
         f"[Worker PID:{worker_pid}] 任务 '{task_name}' 已分配给当前进程，"
         f"提交到任务队列（优先级: {priority.name}）"
     )
-    
+
     await submit_task_to_queue(
         task_name=task_name,
         task_func=wrapped_task,
@@ -243,7 +243,7 @@ async def _execute_task_with_lock_internal(
             logger.warning(f"查询任务信息失败（不影响任务执行）: {e}")
 
         worker_pid = os.getpid()
-        
+
         # 只记录一次任务开始执行的日志
         logger.debug(
             f"[Worker PID:{worker_pid}] 任务 '{task_name}' 开始执行 "
@@ -339,7 +339,7 @@ async def _execute_task_with_lock_internal(
                 logger.debug(f"从任务结果注册表获取结果失败: {e}")
             except Exception as e:
                 logger.debug(f"获取任务执行结果失败: {e}")
-            
+
             # 如果仍然没有结果，使用错误信息
             if not result_message:
                 result_message = error_msg
@@ -465,7 +465,7 @@ def register_scheduled_task(
     )
 
     worker_pid = os.getpid()
-    
+
     # 计算下次执行时间
     next_run_time = None
     try:
@@ -477,9 +477,9 @@ def register_scheduled_task(
                 break
     except Exception:
         pass
-    
+
     next_run_str = next_run_time.strftime('%Y-%m-%d %H:%M:%S') if next_run_time else "未计划"
-    
+
     logger.info(
         f"[Worker PID:{worker_pid}] 定时任务已注册: '{task_name}' "
         f"({schedule_info}) - {description or '无描述'}, "
@@ -496,7 +496,6 @@ async def init_scheduled_tasks() -> None:
         Exception: 如果数据库连接失败，会记录错误但不抛出异常
     """
     logger.info("正在初始化定时任务...")
-
 
     # 首先注册所有可用的任务函数
     auto_register_tasks()
@@ -553,7 +552,7 @@ async def init_scheduled_tasks() -> None:
                 )
             except Exception as e:
                 logger.warning(f"注册任务进程分配失败: {e}")
-            
+
             # 注册任务
             try:
                 register_scheduled_task(
@@ -595,7 +594,7 @@ async def init_scheduled_tasks() -> None:
         f"成功注册 {registered_count} 个任务, "
         f"跳过 {skipped_count} 个任务"
     )
-    
+
     # 如果注册了任务，输出详细信息
     if registered_count > 0:
         logger.info(f"[Worker PID:{worker_pid}] 已注册的任务将在调度器启动后开始执行")
@@ -625,16 +624,16 @@ async def start_scheduler() -> None:
         try:
             sched.start()
             worker_pid = os.getpid()
-            
+
             # 获取所有已注册的任务
             jobs = sched.get_jobs()
             job_count = len(jobs)
-            
+
             logger.info(
                 f"[Worker PID:{worker_pid}] 定时任务调度器已启动，"
                 f"当前已注册 {job_count} 个任务"
             )
-            
+
             # 详细输出每个任务的调度信息
             if jobs:
                 logger.info(f"[Worker PID:{worker_pid}] 已注册的任务列表:")

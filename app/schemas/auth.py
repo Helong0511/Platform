@@ -1,6 +1,6 @@
 from pydantic import Field
+
 # Python 3.10+ 使用内置类型注解
-from datetime import datetime
 from app.schemas.base import BaseSchema
 
 

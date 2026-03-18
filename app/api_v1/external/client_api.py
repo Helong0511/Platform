@@ -9,27 +9,27 @@
 - 验证请求时间差异（10秒内）
 - 验证MD5签名
 """
-import logging
 import asyncio
+import logging
 from calendar import monthrange
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import func, and_, text, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.database import get_db
-from app.core.exceptions import raise_api_exception
-from app.core.errors import ErrorCode
+from app.core.api_auth import verify_client_request
 from app.core.audit_log import log_user_action
 from app.core.auto_bot import send_telegram_message
-from app.core.api_auth import verify_signature, verify_client_request
-from app.core.utils import get_user_name_by_id
-from app.models.models import AdData, Client, Product, User, ProductAssignment, CountryInfo
-from sqlalchemy import func, and_, or_, text, literal_column, case
-from app.schemas.base import ResponseBaseSchema
+from app.core.database import get_db
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
 from app.core.query_utils import date_range_condition, check_use_assignment_table
+from app.core.utils import get_user_name_by_id
+from app.models.models import AdData, Product, ProductAssignment, CountryInfo
+from app.schemas.base import ResponseBaseSchema
 
 # 创建路由实例
 router = APIRouter()
@@ -52,7 +52,8 @@ class ClientProductsRequest(ClientAPIBaseRequest):
 
 class ClientDataRequest(ClientAPIBaseRequest):
     """查询广告数据请求模型"""
-    data_type: str = Field(default="all", description="数据类型：'all' 表示详细数据（按国家），'day' 表示每日汇总（按产品+日期），默认为 'all'")
+    data_type: str = Field(default="all",
+                           description="数据类型：'all' 表示详细数据（按国家），'day' 表示每日汇总（按产品+日期），默认为 'all'")
     start_date: str | None = Field(default=None, description="起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天")
     end_date: str | None = Field(default=None, description="终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天")
 
@@ -209,7 +210,7 @@ async def get_client_data(
     try:
         # 验证请求（传递额外的参数用于签名验证）
         client = await verify_client_request(
-            api_request, 
+            api_request,
             db,
             data_type=api_request.data_type,
             start_date=api_request.start_date,
@@ -221,7 +222,7 @@ async def get_client_data(
         default_month_start = date(today.year, today.month, 1)
         _, last_day = monthrange(today.year, today.month)
         default_month_end = date(today.year, today.month, last_day)
-        
+
         if api_request.start_date:
             try:
                 start_date_obj = datetime.strptime(api_request.start_date, "%Y-%m-%d").date()
@@ -233,7 +234,7 @@ async def get_client_data(
         else:
             # 未提供起始日期，使用当前月第一天
             start_date_obj = default_month_start
-        
+
         if api_request.end_date:
             try:
                 end_date_obj = datetime.strptime(api_request.end_date, "%Y-%m-%d").date()
@@ -245,7 +246,7 @@ async def get_client_data(
         else:
             # 未提供终止日期，使用当前月最后一天
             end_date_obj = default_month_end
-        
+
         # 验证日期范围
         if start_date_obj > end_date_obj:
             raise_api_exception(
@@ -255,10 +256,10 @@ async def get_client_data(
 
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(db)
-        
+
         # 根据 data_type 决定查询逻辑（data_type 默认为 'all'）
         data_type = api_request.data_type or "all"
-        
+
         if data_type == "day":
             # 每日汇总模式：按产品+日期汇总，国家显示"全部区域"
             # 构建汇总查询
@@ -277,10 +278,10 @@ async def get_client_data(
             ).join(
                 Product, AdData.product_id == Product.id
             )
-            
+
             # 只显示激活状态的产品
             query = query.where(Product.is_active == True)
-            
+
             if use_assignment_table:
                 # 使用产品分配历史表
                 end_date_with_default = func.coalesce(
@@ -299,12 +300,12 @@ async def get_client_data(
             else:
                 # 旧的查询方式
                 query = query.where(Product.client_id == client.id)
-            
+
             # 应用日期范围过滤
             date_condition = date_range_condition(AdData.date, start_date_obj, end_date_obj)
             if date_condition is not None:
                 query = query.where(date_condition)
-            
+
             # 按产品ID和日期分组
             query = query.group_by(
                 func.date(AdData.date),
@@ -314,16 +315,16 @@ async def get_client_data(
                 func.date(AdData.date).asc(),
                 Product.id.asc()
             )
-            
+
             result = await db.execute(query)
             summary_data = result.all()
-            
+
             # 转换为响应格式
             data_list = []
             for row in summary_data:
                 date_obj = row.date if isinstance(row.date, date) else row.date.date()
                 date_str = date_obj.isoformat()
-                
+
                 # 获取汇总后的数值
                 total_request_count = int(row.request_count or 0)
                 total_match_count = int(row.match_count or 0)
@@ -332,38 +333,38 @@ async def get_client_data(
                 total_viewability_rate = float(row.viewability_rate or 0.0)
                 total_pageviews = int(row.pageviews or 0)
                 total_revenue = float(row.revenue or 0.0)
-                
+
                 # 根据汇总后的数值重新计算比率
                 # 覆盖率 = 匹配数 / 请求数 * 100
                 coverage_rate = round(
                     (total_match_count / total_request_count * 100) if total_request_count > 0 else 0.0,
                     2
                 )
-                
+
                 # 展示率 = 展示数 / 匹配数 * 100
                 display_rate = round(
                     (total_display_count / total_match_count * 100) if total_match_count > 0 else 0.0,
                     2
                 )
-                
+
                 # 点击率 = 点击数 / 展示数 * 100
                 click_rate = round(
                     (total_click_count / total_display_count * 100) if total_display_count > 0 else 0.0,
                     2
                 )
-                
+
                 # CPC = 收益（扣后）/ 点击数（客户端登录使用扣后收益）
                 cpc = round(
                     (total_revenue / total_click_count) if total_click_count > 0 else 0.0,
                     2
                 )
-                
+
                 # eCPM = 收益 / 展示数 * 1000
                 ecpm = round(
                     (total_revenue / total_display_count * 1000) if total_display_count > 0 else 0.0,
                     2
                 )
-                
+
                 data_list.append(AdDataItemResponse(
                     date=date_str,
                     product_name=row.product_name or "",
@@ -388,13 +389,13 @@ async def get_client_data(
                 Product, AdData.product_id == Product.id
             ).outerjoin(
                 CountryInfo,
-                AdData.country_code.collate('utf8mb4_unicode_ci') == 
+                AdData.country_code.collate('utf8mb4_unicode_ci') ==
                 CountryInfo.alpha_2_code.collate('utf8mb4_unicode_ci')
             )
-            
+
             # 只显示激活状态的产品
             query = query.where(Product.is_active == True)
-            
+
             if use_assignment_table:
                 # 使用产品分配历史表
                 end_date_with_default = func.coalesce(
@@ -413,7 +414,7 @@ async def get_client_data(
             else:
                 # 旧的查询方式
                 query = query.where(Product.client_id == client.id)
-            
+
             # 应用日期范围过滤
             date_condition = date_range_condition(AdData.date, start_date_obj, end_date_obj)
             if date_condition is not None:
@@ -458,7 +459,7 @@ async def get_client_data(
 
                 # 处理国家代码和国家名称
                 country_code_str = ad_data.country_code or ""
-                
+
                 if country_name_zh:
                     final_country_name = country_name_zh
                 elif ad_data.country_code == "AA":
@@ -527,19 +528,19 @@ async def get_client_data(
 
         # 发送 Telegram 通知（仅在成功获取数据时）
         if len(data_list) > 0:
-            
+
             # 获取用户全名（优先使用 full_name，否则使用 username）
             user_full_name = await get_user_name_by_id(db, client.user_id, "CLIENT", prefer_full_name=True)
-            
+
             # 构建通知消息
             telegram_msg = f"📡 API 数据获取成功\n\n"
             telegram_msg += f"客户: {user_full_name}\n"
             telegram_msg += f"数据类型: {data_type}\n"
             telegram_msg += f"✅ 成功获取: {len(data_list)} 条数据"
-            
+
             if start_date_obj and end_date_obj:
                 telegram_msg += f"\n日期范围: {start_date_obj.strftime('%Y-%m-%d')} 至 {end_date_obj.strftime('%Y-%m-%d')}"
-            
+
             # 使用 await 发送消息，设置超时避免阻塞太久
             # send_telegram_message 内部已有完整的容错处理
             try:

@@ -1,9 +1,10 @@
 """
 扣量配置 Schema
 """
-from pydantic import BaseModel, Field
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel, Field
 
 
 class OfferDiscountBase(BaseModel):
@@ -40,4 +41,3 @@ class OfferDiscountResponse(OfferDiscountBase):
 
     class Config:
         from_attributes = True
-

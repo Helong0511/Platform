@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field
 from datetime import datetime, date
+
+from pydantic import BaseModel, Field
 
 
 class ProductBase(BaseModel):
@@ -26,7 +27,7 @@ class ProductBase(BaseModel):
         description="通知地址（Telegram Chat ID、邮箱地址、Webhook URL等，用于接收转化通知）"
     )
     transfer_date: date | None = Field(
-        None, 
+        None,
         description="产品转移日期（新客户开始拥有该产品的日期，可选，仅在更改client_id时生效）。如果不指定，默认使用当前日期。用于补录历史转移记录。"
     )
     old_client_end_date: date | None = Field(

@@ -6,18 +6,18 @@
 import logging
 from typing import Optional, Tuple
 
+from sqlalchemy import and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import and_
 from sqlalchemy.orm import load_only
 
-from app.models.models import AdData, Product, Client, User, ProductAssignment, CountryInfo
 from app.core.query_utils import (
     product_assignment_join_condition,
     check_use_assignment_table,
     join_country_info as join_country_info_util
 )
 from app.core.utils import unpack_ad_data_query_result
+from app.models.models import AdData, Product, Client, User, ProductAssignment, CountryInfo
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +29,14 @@ def join_country_info_for_ad_data(query):
 
 class DetailQueryBuilder:
     """详情查询构建器"""
-    
+
     def __init__(self, db: AsyncSession):
         self.db = db
-    
+
     async def build_detail_query(
-        self,
-        data_id: int,
-        current_user
+            self,
+            data_id: int,
+            current_user
     ) -> Optional[Tuple[AdData, Product, Client, User]]:
         """
         构建详情查询
@@ -48,10 +48,10 @@ class DetailQueryBuilder:
         Returns:
             tuple: (ad_data, product, client, user) 或 None
         """
-        
+
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(self.db)
-        
+
         if use_assignment_table:
             # 使用产品分配历史表
             query = select(AdData, Product, Client, User, ProductAssignment, CountryInfo)
@@ -81,18 +81,18 @@ class DetailQueryBuilder:
             ))
             query = query.join(Product, AdData.product_id == Product.id)
             query = query.join(Client, Product.client_id == Client.id)
-        
+
         query = query.join(User, Client.user_id == User.id)
         query = join_country_info_for_ad_data(query)
         query = query.where(AdData.id == data_id)
         query = query.where(Product.is_active == True)
-        
+
         result = await self.db.execute(query)
         data = result.unique().first()
-        
+
         if not data:
             return None
-        
+
         # 解包数据
         try:
             ad_data, product, client, user, assignment, country_info = unpack_ad_data_query_result(

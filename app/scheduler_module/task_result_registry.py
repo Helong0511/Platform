@@ -2,9 +2,9 @@
 任务结果注册表
 用于统一管理所有定时任务的执行结果获取函数
 """
-from typing import Dict, Callable, Optional
 import logging
 import re
+from typing import Dict, Callable, Optional
 
 from app.scheduler_module.task_config import TASK_CONFIGS
 
@@ -25,31 +25,32 @@ def _validate_module_path(module_path: str) -> bool:
     """
     if not module_path:
         return False
-    
+
     # 只允许导入 app. 开头的模块（应用内部模块）
     if not module_path.startswith('app.'):
         logger.warning(f"拒绝导入非应用模块: {module_path}（只允许导入 app. 开头的模块）")
         return False
-    
+
     # 验证路径格式（只允许字母、数字、点、下划线）
     if not re.match(r'^[a-zA-Z0-9_.]+$', module_path):
         logger.warning(f"模块路径格式无效: {module_path}（包含非法字符）")
         return False
-    
+
     # 禁止相对导入（..）
     if '..' in module_path:
         logger.warning(f"拒绝相对导入: {module_path}")
         return False
-    
+
     return True
+
 
 # 任务结果获取函数注册表：任务名称 -> 结果获取函数
 TASK_RESULT_REGISTRY: Dict[str, Callable[[str], Optional[str]]] = {}
 
 
 def register_task_result_getter(
-    task_name: str,
-    get_result_func: Callable[[str], Optional[str]]
+        task_name: str,
+        get_result_func: Callable[[str], Optional[str]]
 ) -> None:
     """
     注册任务结果获取函数
@@ -60,7 +61,7 @@ def register_task_result_getter(
     """
     if task_name in TASK_RESULT_REGISTRY:
         logger.warning(f"任务 '{task_name}' 的结果获取函数已注册，将覆盖原有函数")
-    
+
     TASK_RESULT_REGISTRY[task_name] = get_result_func
     logger.debug(f"任务结果获取函数已注册: '{task_name}'")
 
@@ -94,16 +95,16 @@ def auto_register_task_results() -> None:
     1. 在任务模块中实现 get_task_result 函数
     2. 在 task_config.py 中添加任务配置即可（无需修改此文件）
     """
-    
+
     registered_count = 0
     failed_count = 0
-    
+
     for config_key, config in TASK_CONFIGS.items():
         try:
             task_name = config["task_name"]
             result_getter_module = config["result_getter_module"]
             result_getter_function = config["result_getter_function"]
-            
+
             # ====== 安全验证：验证模块路径 ======
             if not _validate_module_path(result_getter_module):
                 logger.error(
@@ -123,12 +124,12 @@ def auto_register_task_results() -> None:
             # 动态导入结果获取函数（已通过安全验证）
             module = __import__(result_getter_module, fromlist=[result_getter_function])
             get_result_func = getattr(module, result_getter_function)
-            
+
             # 注册结果获取函数
             register_task_result_getter(task_name, get_result_func)
             registered_count += 1
             logger.debug(f"已注册任务结果获取函数: {task_name}")
-            
+
         except KeyError as e:
             logger.error(f"任务配置 '{config_key}' 缺少必要字段: {e}")
             failed_count += 1
@@ -141,6 +142,5 @@ def auto_register_task_results() -> None:
         except Exception as e:
             logger.error(f"注册任务结果获取函数 '{config_key}' 失败: {e}", exc_info=True)
             failed_count += 1
-    
-    logger.info(f"任务结果获取函数注册完成: 成功 {registered_count} 个, 失败 {failed_count} 个")
 
+    logger.info(f"任务结果获取函数注册完成: 成功 {registered_count} 个, 失败 {failed_count} 个")

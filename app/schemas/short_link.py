@@ -2,10 +2,11 @@
 短链接 Schema
 """
 import re
-from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class ShortLinkBase(BaseModel):
@@ -103,4 +104,3 @@ class ShortLinkStatsResponse(BaseModel):
     total_clicks: int
     active_links: int
     expired_links: int
-

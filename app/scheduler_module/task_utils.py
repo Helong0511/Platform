@@ -4,10 +4,11 @@
 """
 import logging
 from datetime import datetime
-import pytz
 from typing import Optional
-from sqlalchemy.ext.asyncio import AsyncSession
+
+import pytz
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.models import User, UserRole
@@ -39,7 +40,7 @@ def log_task_start(task_name: str, additional_info: Optional[str] = None) -> Non
     """
     current_time_str = get_current_time_str()
     timezone_info = f"（时区: {settings.TIMEZONE}）"
-    
+
     if additional_info:
         # 只记录一次，使用info级别（定时任务调度器会记录执行结果）
         logger.info(f"{task_name} 开始执行 - {current_time_str}{timezone_info} - {additional_info}")
@@ -77,13 +78,13 @@ def log_task_error(task_name: str, error_msg: str, exc_info: bool = True) -> Non
 
 
 def format_result_summary(
-    inserted: int = 0,
-    updated: int = 0,
-    skipped: int = 0,
-    error: int = 0,
-    success: int = 0,
-    processed: int = 0,
-    **kwargs
+        inserted: int = 0,
+        updated: int = 0,
+        skipped: int = 0,
+        error: int = 0,
+        success: int = 0,
+        processed: int = 0,
+        **kwargs
 ) -> str:
     """
     格式化任务执行结果摘要
@@ -108,7 +109,7 @@ def format_result_summary(
         '成功处理 100 条, 共处理 120 条'
     """
     parts = []
-    
+
     if inserted > 0:
         parts.append(f"成功插入 {inserted} 条")
     if updated > 0:
@@ -121,15 +122,15 @@ def format_result_summary(
         parts.append(f"成功处理 {success} 条")
     if processed > 0:
         parts.append(f"共处理 {processed} 条")
-    
+
     # 添加自定义统计项
     for key, value in kwargs.items():
         if value > 0:
             parts.append(f"{key} {value} 条")
-    
+
     if not parts:
         return "无数据"
-    
+
     return ", ".join(parts)
 
 
@@ -152,12 +153,11 @@ async def get_admin_user(db: AsyncSession) -> Optional[User]:
     ).limit(1)
     admin_user_result = await db.execute(admin_user_query)
     admin_user = admin_user_result.scalar_one_or_none()
-    
+
     # 如果没有找到 username 为 'data' 的管理员，查找任意一个管理员
     if not admin_user:
         admin_user_query = select(User).where(User.role == UserRole.ADMIN).limit(1)
         admin_user_result = await db.execute(admin_user_query)
         admin_user = admin_user_result.scalar_one_or_none()
-    
-    return admin_user
 
+    return admin_user

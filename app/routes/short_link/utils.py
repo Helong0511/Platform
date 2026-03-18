@@ -3,15 +3,16 @@
 """
 import logging
 from typing import Optional
+
+from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from fastapi import BackgroundTasks
 
-from app.models.models import Offer
-from app.core.offer_cache import set_offer_cache
-from app.core.clicks_queue import enqueue_click
-from app.core.utils import get_app_now_naive
 from app.api_v1.tracking.tracking import create_click_background
+from app.core.clicks_queue import enqueue_click
+from app.core.offer_cache import set_offer_cache
+from app.core.utils import get_app_now_naive
+from app.models.models import Offer
 
 logger = logging.getLogger(__name__)
 
@@ -37,40 +38,40 @@ async def resolve_offer_id(offer_id: Optional[int], db: AsyncSession) -> tuple[O
     """
     if not offer_id:
         return None, None
-    
+
     try:
         # 先尝试作为主键ID查询
         offer_result = await db.execute(
             select(Offer).where(Offer.id == offer_id)
         )
         offer = offer_result.scalars().first()
-        
+
         # 如果找不到，尝试作为上游Offer ID查询
         if not offer:
             offer_result = await db.execute(
                 select(Offer).where(Offer.advertiser_offer_id == str(offer_id))
             )
             offer = offer_result.scalars().first()
-        
+
         if offer:
             await set_offer_cache(offer.id, offer.advertiser_id, offer.offer_name)
             return offer.id, offer.advertiser_id
     except Exception as e:
         logger.warning(f"查询Offer失败: offer_id={offer_id}, error={e}")
-    
+
     return None, None
 
 
 async def create_click_record(
-    click_id: str,
-    short_link_id: int,
-    offer_id: Optional[int],
-    publisher_id: Optional[int],
-    advertiser_id: Optional[int],
-    request_info: dict,
-    background_tasks: BackgroundTasks,
-    original_request_url: Optional[str] = None,
-    final_redirect_url: Optional[str] = None
+        click_id: str,
+        short_link_id: int,
+        offer_id: Optional[int],
+        publisher_id: Optional[int],
+        advertiser_id: Optional[int],
+        request_info: dict,
+        background_tasks: BackgroundTasks,
+        original_request_url: Optional[str] = None,
+        final_redirect_url: Optional[str] = None
 ):
     """
     创建点击记录（异步处理）
@@ -105,9 +106,8 @@ async def create_click_record(
         "original_request_url": original_request_url,
         "final_redirect_url": final_redirect_url
     }
-    
+
     enqueued = await enqueue_click(click_data)
     if not enqueued:
         click_data['click_time'] = get_app_now_naive()
         background_tasks.add_task(create_click_background, click_data)
-

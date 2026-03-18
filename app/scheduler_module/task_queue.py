@@ -10,10 +10,10 @@
 """
 import asyncio
 import logging
-from typing import Optional, Callable, Any, Dict
-from datetime import datetime, timezone
 from collections import deque
+from datetime import datetime, timezone
 from enum import IntEnum
+from typing import Optional, Callable, Any, Dict
 
 from app.core.config import settings
 
@@ -37,7 +37,7 @@ class TaskQueue:
     - 支持任务优先级
     - 任务排队等待执行
     """
-    
+
     def __init__(self, max_concurrent_tasks: int = 1):
         """
         初始化任务队列
@@ -50,14 +50,14 @@ class TaskQueue:
         self.queue: deque = deque()  # 任务队列（按优先级排序）
         self.lock = asyncio.Lock()  # 队列操作锁
         self.running_tasks: Dict[str, asyncio.Task] = {}  # 正在执行的任务字典
-        
+
     async def submit(
-        self,
-        task_name: str,
-        task_func: Callable[..., Any],
-        priority: TaskPriority = TaskPriority.NORMAL,
-        *args: Any,
-        **kwargs: Any
+            self,
+            task_name: str,
+            task_func: Callable[..., Any],
+            priority: TaskPriority = TaskPriority.NORMAL,
+            *args: Any,
+            **kwargs: Any
     ) -> None:
         """
         提交任务到队列
@@ -98,13 +98,13 @@ class TaskQueue:
                     f"任务 '{task_name}' 已加入队列等待执行 "
                     f"（队列长度: {len(self.queue)}, 当前运行: {self.current_running}/{self.max_concurrent_tasks}）"
                 )
-    
+
     async def _execute_task(
-        self,
-        task_name: str,
-        task_func: Callable[..., Any],
-        *args: Any,
-        **kwargs: Any
+            self,
+            task_name: str,
+            task_func: Callable[..., Any],
+            *args: Any,
+            **kwargs: Any
     ) -> None:
         """
         执行任务（内部方法）
@@ -136,10 +136,10 @@ class TaskQueue:
                 self.current_running -= 1
                 if task_name in self.running_tasks:
                     del self.running_tasks[task_name]
-                
+
                 # 尝试执行队列中的下一个任务
                 await self._process_queue()
-    
+
     async def _process_queue(self) -> None:
         """
         处理队列中的任务（内部方法）
@@ -147,28 +147,28 @@ class TaskQueue:
         """
         if not self.queue:
             return
-        
+
         if self.current_running >= self.max_concurrent_tasks:
             return
-        
+
         # 按优先级排序队列（优先级数字越小，优先级越高）
         sorted_queue = sorted(
             self.queue,
             key=lambda x: (x['priority'], x['submitted_at'])
         )
-        
+
         # 取出优先级最高的任务
         task_item = sorted_queue[0]
         self.queue.remove(task_item)
-        
+
         task_name = task_item['task_name']
         task_func = task_item['task_func']
         args = task_item['args']
         kwargs = task_item['kwargs']
-        
+
         # 更新运行计数
         self.current_running += 1
-        
+
         # 计算等待时间
         wait_time = (datetime.now(timezone.utc) - task_item['submitted_at']).total_seconds()
         logger.info(
@@ -176,13 +176,13 @@ class TaskQueue:
             f"（等待时间: {wait_time:.2f}秒, 当前运行: {self.current_running}/{self.max_concurrent_tasks}，"
             f"剩余队列: {len(self.queue)}）"
         )
-        
+
         # 创建并执行任务
         task = asyncio.create_task(
             self._execute_task(task_name, task_func, *args, **kwargs)
         )
         self.running_tasks[task_name] = task
-    
+
     async def wait_for_completion(self, timeout: Optional[float] = None) -> None:
         """
         等待所有任务完成
@@ -197,7 +197,7 @@ class TaskQueue:
             )
         else:
             await self._wait_all_tasks()
-    
+
     async def _wait_all_tasks(self) -> None:
         """等待所有任务完成（内部方法）"""
         while True:
@@ -205,11 +205,11 @@ class TaskQueue:
                 if self.current_running == 0 and len(self.queue) == 0:
                     break
             await asyncio.sleep(0.1)
-        
+
         # 等待所有运行中的任务完成
         if self.running_tasks:
             await asyncio.gather(*self.running_tasks.values(), return_exceptions=True)
-    
+
     async def get_queue_status(self) -> Dict[str, Any]:
         """
         获取队列状态（异步方法）
@@ -230,15 +230,17 @@ class TaskQueue:
                 wait_time = (now - item['submitted_at']).total_seconds()
                 queue_details.append({
                     'task_name': item['task_name'],
-                    'priority': item['priority'].name if isinstance(item['priority'], TaskPriority) else str(item['priority']),
-                    'priority_value': item['priority'].value if isinstance(item['priority'], TaskPriority) else item['priority'],
+                    'priority': item['priority'].name if isinstance(item['priority'], TaskPriority) else str(
+                        item['priority']),
+                    'priority_value': item['priority'].value if isinstance(item['priority'], TaskPriority) else item[
+                        'priority'],
                     'wait_time_seconds': round(wait_time, 2),
                     'submitted_at': item['submitted_at'].isoformat()
                 })
-            
+
             # 按优先级和提交时间排序
             queue_details.sort(key=lambda x: (x['priority_value'], x['submitted_at']))
-            
+
             return {
                 'current_running': self.current_running,
                 'max_concurrent': self.max_concurrent_tasks,
@@ -271,11 +273,11 @@ def get_task_queue() -> TaskQueue:
 
 
 async def submit_task_to_queue(
-    task_name: str,
-    task_func: Callable[..., Any],
-    priority: TaskPriority = TaskPriority.NORMAL,
-    *args: Any,
-    **kwargs: Any
+        task_name: str,
+        task_func: Callable[..., Any],
+        priority: TaskPriority = TaskPriority.NORMAL,
+        *args: Any,
+        **kwargs: Any
 ) -> None:
     """
     提交任务到队列（便捷函数）
@@ -289,4 +291,3 @@ async def submit_task_to_queue(
     """
     queue = get_task_queue()
     await queue.submit(task_name, task_func, priority, *args, **kwargs)
-

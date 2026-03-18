@@ -5,13 +5,14 @@ Skymobi定时任务模块
 import asyncio
 import logging
 from datetime import datetime, timedelta
-import pytz
-import httpx
 
-from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+import httpx
+import pytz
+
 from app.core.ad_data_processor import process_api_ad_data
 from app.core.auto_bot import send_telegram_message
+from app.core.config import settings
+from app.core.database import AsyncSessionLocal
 from app.scheduler_module.task_names import SKYMOBI_API_TASK_NAME
 from app.scheduler_module.task_utils import get_admin_user, format_result_summary
 
@@ -43,8 +44,8 @@ api_key = '67b7c7fac2154bb8f59546d9b23058c9'
 
 
 async def skymobi_api_task(
-    start_date: str | None = None,
-    end_date: str | None = None
+        start_date: str | None = None,
+        end_date: str | None = None
 ) -> None:
     """
     Skymobi API定时任务主函数
@@ -75,12 +76,12 @@ async def skymobi_api_task(
             app_yesterday = app_now - timedelta(days=1)
             yesterday_str = app_yesterday.strftime("%Y-%m-%d")
             today_str = app_now.strftime("%Y-%m-%d")
-            
+
             if 0 <= app_now.hour <= 2:
                 date_str = yesterday_str
             else:
                 date_str = today_str
-        
+
         Skymobi_url = f'https://crm.skymobi.online/api/adxh5?apikey={api_key}&date={date_str}&uid={api_id}&page=1&limit=1000'
 
         # 使用异步HTTP客户端调用Skymobi API

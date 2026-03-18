@@ -2,17 +2,18 @@
 Discount 管理服务层
 封装扣量配置的业务逻辑
 """
+import logging
 from typing import Optional, List, Dict, Any
+
+from sqlalchemy import func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, delete
 from sqlalchemy.orm import joinedload
 
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
 from app.models.models import OfferDiscount, Offer, Publisher, User
 from app.services.base_service import BaseService
-from app.core.exceptions import raise_api_exception
-from app.core.errors import ErrorCode
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +25,9 @@ class DiscountService(BaseService[OfferDiscount]):
         super().__init__(db, OfferDiscount)
 
     async def create_discount(
-        self,
-        discount_data: Dict[str, Any],
-        current_user: User
+            self,
+            discount_data: Dict[str, Any],
+            current_user: User
     ) -> OfferDiscount:
         """
         创建扣量配置
@@ -94,13 +95,13 @@ class DiscountService(BaseService[OfferDiscount]):
             )
 
     async def get_discounts(
-        self,
-        page: int = 1,
-        page_size: int = 20,
-        discount_type: Optional[str] = None,
-        offer_id: Optional[int] = None,
-        publisher_id: Optional[int] = None,
-        is_active: Optional[bool] = None
+            self,
+            page: int = 1,
+            page_size: int = 20,
+            discount_type: Optional[str] = None,
+            offer_id: Optional[int] = None,
+            publisher_id: Optional[int] = None,
+            is_active: Optional[bool] = None
     ) -> tuple[List[OfferDiscount], int]:
         """
         获取扣量配置列表
@@ -169,10 +170,10 @@ class DiscountService(BaseService[OfferDiscount]):
         return result.unique().scalars().first()
 
     async def update_discount(
-        self,
-        discount_id: int,
-        update_data: Dict[str, Any],
-        current_user: User
+            self,
+            discount_id: int,
+            update_data: Dict[str, Any],
+            current_user: User
     ) -> OfferDiscount:
         """
         更新扣量配置
@@ -224,9 +225,9 @@ class DiscountService(BaseService[OfferDiscount]):
             )
 
     async def delete_discount(
-        self,
-        discount_id: int,
-        current_user: User
+            self,
+            discount_id: int,
+            current_user: User
     ) -> None:
         """
         删除扣量配置
@@ -258,4 +259,3 @@ class DiscountService(BaseService[OfferDiscount]):
                 ErrorCode.OPERATION_FAILED,
                 detail=f"删除扣量配置失败: {str(e)}"
             )
-

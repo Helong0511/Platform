@@ -4,29 +4,29 @@
 构建广告数据统计查询
 """
 import logging
-from typing import Optional, Dict, Any
-from datetime import date, datetime
+from datetime import date
+from typing import Dict, Any
 
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, and_, case
 
-from app.models.models import AdData, Product, Client
+from app.models.models import AdData, Product
 
 logger = logging.getLogger(__name__)
 
 
 class StatsQueryBuilder:
     """统计查询构建器"""
-    
+
     def __init__(self, db: AsyncSession):
         self.db = db
-    
+
     async def get_daily_stats(
-        self,
-        product_id: int,
-        date_from: date,
-        date_to: date
+            self,
+            product_id: int,
+            date_from: date,
+            date_to: date
     ) -> Dict[str, Any]:
         """
         获取每日统计
@@ -54,10 +54,10 @@ class StatsQueryBuilder:
             .where(AdData.date <= date_to)
             .group_by(AdData.date)
         )
-        
+
         result = await self.db.execute(query)
         rows = result.all()
-        
+
         return {
             'daily_stats': [
                 {
@@ -71,12 +71,12 @@ class StatsQueryBuilder:
                 for row in rows
             ]
         }
-    
+
     async def get_summary_stats(
-        self,
-        product_id: int,
-        date_from: date,
-        date_to: date
+            self,
+            product_id: int,
+            date_from: date,
+            date_to: date
     ) -> Dict[str, Any]:
         """
         获取汇总统计
@@ -102,18 +102,18 @@ class StatsQueryBuilder:
             .where(AdData.date >= date_from)
             .where(AdData.date <= date_to)
         )
-        
+
         result = await self.db.execute(query)
         row = result.first()
-        
+
         if not row:
             return {}
-        
+
         # 计算比率
         coverage_rate = (row.total_matches / row.total_requests * 100) if row.total_requests > 0 else 0
         display_rate = (row.total_displays / row.total_matches * 100) if row.total_matches > 0 else 0
         click_rate = (row.total_clicks / row.total_displays * 100) if row.total_displays > 0 else 0
-        
+
         return {
             'total_requests': row.total_requests,
             'total_matches': row.total_matches,

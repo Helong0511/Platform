@@ -8,17 +8,33 @@ import logging
 import os
 import sys
 import tempfile
+import traceback
 import warnings
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 
+from anyio import EndOfStream
 from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.future import select
 
 from app.api_v1 import api_router
+from app.core.audit_log import log_runtime_error
+from app.core.cache_manager import CacheManager
 from app.core.config import settings
+# ====== 常量定义 ======
+# 从常量模块导入，避免魔法数字
+from app.core.constants import (
+    LOG_FILE_MAX_BYTES,
+    LOG_FILE_BACKUP_COUNT,
+    LOG_DIR_MODE,
+    MAX_ERROR_MESSAGE_LENGTH,
+    MAX_STACK_TRACE_LENGTH
+)
+from app.core.csrf import CSRFMiddleware
+from app.core.database import AsyncSessionLocal, engine, init_db
 from app.core.errors import ErrorCode, create_error_response, record_http_exception_log
 from app.core.https_middleware import HTTPSRedirectMiddleware
 from app.core.middleware import (
@@ -27,39 +43,21 @@ from app.core.middleware import (
     RequestLoggingMiddleware,
     SecurityHeadersMiddleware,
 )
-from app.core.timezone_utils import check_and_validate_timezone, log_timezone_info
-from app.core.utils import get_app_now_naive, get_client_ip
-from app.core.audit_log import log_runtime_error
-from app.core.database import AsyncSessionLocal, engine, init_db
 from app.core.redis_client import get_redis_client, close_redis_client
-from app.core.cache_manager import CacheManager
-from app.core.csrf import CSRFMiddleware
 from app.core.security import JWTUtils
 # 从新模块导入 Bot 相关函数（统一使用新模块）
 from app.core.telegram import send_telegram_message
 from app.core.telegram.bot_state import bot_initialized
-from app.core.telegram.polling_manager import start_polling as start_bot, start_bot_thread
 from app.core.telegram.file_lock import is_lock_held as has_bot_lock
 from app.core.telegram.file_lock import release_bot_lock as stop_bot
+from app.core.telegram.polling_manager import start_bot_thread
+from app.core.timezone_utils import check_and_validate_timezone, log_timezone_info
+from app.core.utils import get_client_ip
+from app.models.models import Base, User
 from app.scheduler_module import (
     init_scheduled_tasks, start_scheduler, shutdown_scheduler
 )
 from app.scheduler_module.task_init import init_scheduled_tasks_in_db
-from app.models.models import Base, User
-from sqlalchemy.future import select
-import traceback
-from anyio import EndOfStream
-# ====== 常量定义 ======
-# 从常量模块导入，避免魔法数字
-from app.core.constants import (
-    LOG_FILE_MAX_BYTES,
-    LOG_FILE_BACKUP_COUNT,
-    LOG_DIR_MODE,
-    MAX_ERROR_MESSAGE_LENGTH,
-    MAX_STACK_TRACE_LENGTH,
-    TELEGRAM_BOT_START_DELAY,
-    TELEGRAM_SHUTDOWN_MESSAGE_TIMEOUT
-)
 
 # 抑制 APScheduler 的 pkg_resources 弃用警告
 # 这是 APScheduler 库内部使用已弃用的 pkg_resources 导致的警告
@@ -139,14 +137,14 @@ try:
     )
     scheduler_log_handler.setFormatter(formatter)
     scheduler_log_handler.setLevel(logging.INFO)  # 记录 INFO 及以上级别
-    
+
     # 只添加到调度器相关的 logger
     # 注意：propagate=True，这样 WARNING 及以上级别会同时输出到 app.log
     scheduler_logger = logging.getLogger('app.scheduler')
     scheduler_logger.addHandler(scheduler_log_handler)
     scheduler_logger.setLevel(logging.INFO)
     scheduler_logger.propagate = True  # 允许传播，WARNING+ 会输出到 app.log
-    
+
     # 调度器模块的 logger
     scheduler_module_logger = logging.getLogger('app.scheduler_module')
     scheduler_module_logger.addHandler(scheduler_log_handler)
@@ -260,14 +258,15 @@ if scheduler_log_handler:
 # WARNING 及以上级别会同时输出到 app.log（因为 propagate=True）
 if scheduler_log_handler:
     # process_allocator, task_queue, lock 的详细日志输出到 scheduler.log
-    for module_name in ['app.scheduler_module.process_allocator', 
-                       'app.scheduler_module.task_queue', 
-                       'app.scheduler_module.lock',
-                       'app.scheduler_module.scheduler']:
+    for module_name in ['app.scheduler_module.process_allocator',
+                        'app.scheduler_module.task_queue',
+                        'app.scheduler_module.lock',
+                        'app.scheduler_module.scheduler']:
         module_logger = logging.getLogger(module_name)
         module_logger.addHandler(scheduler_log_handler)
         module_logger.setLevel(logging.INFO)  # 允许 INFO 级别输出到 scheduler.log
         module_logger.propagate = True  # WARNING+ 会传播到 root logger（app.log）
+
 
 # ====== 配置 uvicorn 日志过滤器 ======
 # 过滤掉 EndOfStream 异常，这些是客户端提前关闭连接的正常情况，不应该记录为错误
@@ -276,6 +275,7 @@ class StreamErrorFilter(logging.Filter):
     日志过滤器，过滤掉流关闭异常（EndOfStream）
     这些异常通常表示客户端提前关闭了连接，是正常情况，不应该记录为错误
     """
+
     def filter(self, record: logging.LogRecord) -> bool:
         # 检查日志消息中是否包含 EndOfStream
         if hasattr(record, 'msg') and record.msg:
@@ -299,6 +299,7 @@ class StreamErrorFilter(logging.Filter):
             except Exception:
                 pass
         return True  # 允许其他日志通过
+
 
 # 将过滤器添加到 uvicorn 和 uvicorn.error 日志记录器
 uvicorn_logger = logging.getLogger('uvicorn')
@@ -325,7 +326,7 @@ async def lifespan(app: FastAPI):
     # ====== 启动时执行 ======
     worker_pid = os.getpid()
     logger.info(f"[Worker PID:{worker_pid}] 应用启动中...")
-    
+
     # 检查并验证时区配置（启动时首先检查）
     try:
         timezone_consistent = check_and_validate_timezone()
@@ -349,7 +350,7 @@ async def lifespan(app: FastAPI):
         # 创建所有表（如果不存在，使用 IF NOT EXISTS 语义）
         # 导入所有模型以确保SQLAlchemy能够发现所有表
         from app.models import (
-            User, Client, Product, AdData, ProductAssignment, 
+            User, Client, Product, AdData, ProductAssignment,
             ScheduledTask, UserAuditLog, UserSession, TokenBlacklist,
             PostbackConversion, PendingPostbackConversion, PostbackIpWhitelist
         )
@@ -362,7 +363,7 @@ async def lifespan(app: FastAPI):
         # 这个错误表示表正在被其他进程修改，可以安全忽略
         is_concurrent_ddl_error = False
         error_code = None
-        
+
         # 尝试从异常中提取错误代码
         try:
             if hasattr(e, 'orig'):
@@ -373,7 +374,7 @@ async def lifespan(app: FastAPI):
             elif hasattr(e, 'args') and len(e.args) > 0:
                 # 直接 pymysql 异常
                 error_code = e.args[0] if isinstance(e.args[0], int) else None
-            
+
             # 检查错误代码或错误消息
             if error_code == 1684 or (str(e) and '1684' in str(e)):
                 is_concurrent_ddl_error = True
@@ -382,7 +383,7 @@ async def lifespan(app: FastAPI):
             error_str = str(e)
             if '1684' in error_str or 'concurrent DDL' in error_str.lower():
                 is_concurrent_ddl_error = True
-        
+
         if is_concurrent_ddl_error:
             # 这是预期的并发行为，降级为信息级别
             logger.info(
@@ -394,7 +395,7 @@ async def lifespan(app: FastAPI):
             logger.error(f"[Worker PID:{worker_pid}] 数据库表创建失败: {e}", exc_info=True)
             # 不抛出异常，允许应用继续启动（可能是表已存在或其他 worker 已创建）
             logger.warning(f"[Worker PID:{worker_pid}] 继续启动应用...")
-    
+
     # 初始化数据库，创建默认管理员账户
     try:
         await init_db()
@@ -416,13 +417,13 @@ async def lifespan(app: FastAPI):
     # 初始化定时任务（多进程环境：每个 worker 独立初始化调度器）
     try:
         logger.info(f"[Worker PID:{worker_pid}] 开始初始化定时任务...")
-        
+
         # 首先检查并添加任务到数据库（确保所有配置的任务都在数据库中有记录）
         try:
             await init_scheduled_tasks_in_db()
         except Exception as db_init_error:
             logger.warning(f"[Worker PID:{worker_pid}] 初始化任务到数据库失败: {db_init_error}，继续启动...")
-        
+
         # 然后初始化调度器
         await init_scheduled_tasks()
         logger.info(f"[Worker PID:{worker_pid}] 定时任务初始化完成，正在启动调度器...")
@@ -462,7 +463,7 @@ async def lifespan(app: FastAPI):
                     await CacheManager.warmup_all(db)
             except Exception as e:
                 logger.warning(f"缓存预热失败: {e}，不影响应用启动")
-        
+
         # 延迟执行缓存预热，确保数据库和Redis都已初始化
         asyncio.create_task(warmup_cache_background())
         logger.info(f"[Worker PID:{worker_pid}] 缓存预热任务已启动（后台执行）")
@@ -552,6 +553,7 @@ app = FastAPI(
 
 # 0. 流异常处理中间件（最外层，静默处理客户端提前关闭连接的异常）
 from app.core.middleware import StreamErrorHandlingMiddleware
+
 app.add_middleware(StreamErrorHandlingMiddleware)
 
 # 1. HTTPS强制重定向中间件（生产环境强制HTTPS）
@@ -623,7 +625,7 @@ def _is_stream_error(exc: Exception) -> bool:
     """
     error_type = type(exc).__name__
     error_module = type(exc).__module__
-    return ("EndOfStream" in error_type or "WouldBlock" in error_type or 
+    return ("EndOfStream" in error_type or "WouldBlock" in error_type or
             "anyio" in error_module)
 
 
@@ -695,10 +697,10 @@ def _add_csrf_token_to_response(response: JSONResponse, exc: HTTPException) -> N
 
 
 async def _create_http_exception_response(
-    request: Request,
-    exc: HTTPException,
-    content: dict | str,
-    response_status_code: int
+        request: Request,
+        exc: HTTPException,
+        content: dict | str,
+        response_status_code: int
 ) -> JSONResponse:
     """
     创建HTTPException响应，处理连接检查和CSRF token
@@ -720,25 +722,25 @@ async def _create_http_exception_response(
         _raise_stream_error_if_disconnected(request)
     except Exception:
         pass
-    
+
     # 记录严重的 HTTPException (500/503) 到审计日志
     if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
         await record_http_exception_log(exc, request, "HTTPException")
-    
+
     # 尝试返回响应，但如果连接已断开，捕获异常
     try:
         # 再次检查连接状态（在返回响应前）
         _raise_stream_error_if_disconnected(request)
-        
+
         # 创建响应
         response = JSONResponse(
             status_code=response_status_code,
             content=content,
         )
-        
+
         # 添加CSRF token（如果存在）
         _add_csrf_token_to_response(response, exc)
-        
+
         return response
     except Exception as e:
         # 如果是流异常，直接重新抛出
@@ -837,7 +839,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             # 直接重新抛出流异常，让 ASGI 服务器处理
             # 使用 from None 避免创建新的异常链，防止被 global_exception_handler 捕获
             raise context_exc from None
-    
+
     # 检查连接是否已断开（使用非阻塞方式）
     # 注意：这里不能尝试读取流，只能检查标记
     try:
@@ -850,7 +852,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             logger.debug("检测到连接已断开，跳过HTTPException响应创建")
             raise stream_exc
         # 其他异常，忽略（继续处理HTTPException）
-    
+
     # 如果 detail 已经是标准格式（字典，包含 code 字段），说明是通过 raise_api_exception 抛出的
     # 此时应该使用 exc.status_code（已经在 raise_api_exception 中正确设置）
     if isinstance(exc.detail, dict) and "code" in exc.detail:
@@ -912,7 +914,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         if _is_stream_error(exc):
             # 直接重新抛出，让 ASGI 服务器处理
             raise exc
-        
+
         # 尝试检查连接状态（通过检查异常上下文）
         # 如果异常上下文是流异常，说明连接已断开，直接重新抛出流异常
         # 注意：如果流异常是从 http_exception_handler 传播过来的，应该直接让它继续传播
@@ -924,13 +926,13 @@ async def global_exception_handler(request: Request, exc: Exception):
         if not context_exc and hasattr(exc, '__cause__') and exc.__cause__:
             if _is_stream_error(exc.__cause__):
                 context_exc = exc.__cause__
-        
+
         if context_exc:
             logger.debug("检测到连接断开上下文，跳过HTTPException处理")
             # 直接重新抛出流异常，让 ASGI 服务器处理
             # 使用 from None 避免创建新的异常链，防止被再次捕获
             raise context_exc from None
-        
+
         # 检查连接是否已断开（使用非阻塞方式）
         # 注意：这里不能尝试读取流，只能检查标记
         try:
@@ -943,7 +945,7 @@ async def global_exception_handler(request: Request, exc: Exception):
                 logger.debug("检测到连接已断开，跳过HTTPException处理")
                 raise stream_exc
             # 其他异常，忽略（继续处理HTTPException）
-        
+
         # 如果连接仍然有效，重新抛出 HTTPException 让专门的处理器处理
         # HTTPException 应该由 http_exception_handler 处理，不应该到达这里
         # 如果到达这里，可能是异常处理顺序问题，直接重新抛出让上层处理
@@ -1019,13 +1021,13 @@ async def global_exception_handler(request: Request, exc: Exception):
                     "client_ip": None,
                     "user_agent": request.headers.get("User-Agent", None)
                 }
-                
+
                 # 获取客户端IP
                 try:
                     request_details["client_ip"] = get_client_ip(request)
                 except Exception:
                     pass
-                
+
                 await log_runtime_error(
                     db=audit_db,
                     error_type=error_type,
@@ -1094,10 +1096,12 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 # 保持向后兼容：如果新模块不可用，回退到旧路由
 try:
     from app.routes.short_link import router as short_link_redirect_router
+
     logger.info("使用模块化短链接路由（app/routes/short_link/）")
 except ImportError:
     # 向后兼容：如果新模块不可用，使用旧路由
     from app.routes.short_link_redirect import router as short_link_redirect_router
+
     logger.warning("使用旧版短链接路由（向后兼容）")
 
 app.include_router(short_link_redirect_router)

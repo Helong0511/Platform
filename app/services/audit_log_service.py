@@ -2,18 +2,17 @@
 用户操作日志服务层
 封装操作日志查询和统计的业务逻辑
 """
-from typing import Optional, List, Dict, Any, Tuple
+import logging
 from datetime import datetime
+from typing import Optional, List, Dict, Any, Tuple
+
+from sqlalchemy import func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, and_
 
-from app.models.models import UserAuditLog, User
-from app.core.exceptions import raise_api_exception
-from app.core.errors import ErrorCode
-from app.core.cache import get_cached, set_cached, generate_cache_key
 from app.core.audit_log import log_user_action
-import logging
+from app.core.cache import get_cached, set_cached, generate_cache_key
+from app.models.models import UserAuditLog, User
 
 logger = logging.getLogger(__name__)
 
@@ -25,17 +24,17 @@ class AuditLogService:
         self.db = db
 
     async def get_audit_logs(
-        self,
-        page: int = 1,
-        page_size: int = 10,
-        user_id: Optional[int] = None,
-        username: Optional[str] = None,
-        action_type: Optional[str] = None,
-        resource_type: Optional[str] = None,
-        ip_address: Optional[str] = None,
-        success: Optional[bool] = None,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+            self,
+            page: int = 1,
+            page_size: int = 10,
+            user_id: Optional[int] = None,
+            username: Optional[str] = None,
+            action_type: Optional[str] = None,
+            resource_type: Optional[str] = None,
+            ip_address: Optional[str] = None,
+            success: Optional[bool] = None,
+            start_date: Optional[datetime] = None,
+            end_date: Optional[datetime] = None
     ) -> Tuple[List[UserAuditLog], int]:
         """
         获取用户操作日志列表
@@ -106,9 +105,9 @@ class AuditLogService:
         return logs, total
 
     async def get_audit_log_stats(
-        self,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+            self,
+            start_date: Optional[datetime] = None,
+            end_date: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """
         获取日志统计摘要
@@ -240,15 +239,15 @@ class AuditLogService:
         return result.scalar_one_or_none()
 
     async def log_client_error(
-        self,
-        error_type: str,
-        error_message: str,
-        error_stack: Optional[str] = None,
-        error_url: Optional[str] = None,
-        user_agent: Optional[str] = None,
-        ip_address: Optional[str] = None,
-        current_user: Optional[User] = None,
-        username: Optional[str] = None
+            self,
+            error_type: str,
+            error_message: str,
+            error_stack: Optional[str] = None,
+            error_url: Optional[str] = None,
+            user_agent: Optional[str] = None,
+            ip_address: Optional[str] = None,
+            current_user: Optional[User] = None,
+            username: Optional[str] = None
     ) -> None:
         """
         记录客户端运行错误
@@ -298,4 +297,3 @@ class AuditLogService:
             # 记录错误日志失败不应该影响前端，静默处理
             logger.warning(f"记录客户端错误日志失败: {e}")
             await self.db.rollback()
-
