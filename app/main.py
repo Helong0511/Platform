@@ -441,15 +441,23 @@ async def lifespan(app: FastAPI):
         if not telegram_enabled:
             logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过启动")
         else:
-            # 使用已导入的 bot_initialized 变量
-            if bot_initialized:
+            # 显式初始化Bot，确保bot_initialized状态正确
+            from app.core.telegram.bot_initializer import initialize_bot
+            logger.info(f"[Worker PID:{worker_pid}] 开始初始化 Telegram Bot...")
+            bot_instance, initialized, available = initialize_bot()
+            logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 初始化结果: initialized={initialized}, available={available}")
+            
+            # 重新导入bot_initialized变量，确保获取最新状态
+            from app.core.telegram.bot_state import bot_initialized
+            
+            if initialized and bot_initialized:
                 logger.info(f"[Worker PID:{worker_pid}] 尝试启动 Telegram 机器人线程...")
                 # 使用 start_bot_thread() 在独立线程中启动，避免阻塞应用
                 start_success = start_bot_thread()
                 if not start_success:
                     logger.info(f"[Worker PID:{worker_pid}] Telegram 机器人未启动（其他进程可能已启动或未获取到锁）")
             else:
-                logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 未配置（TELEGRAM_TOKEN 未设置），跳过启动")
+                logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 未配置或初始化失败，跳过启动")
     except Exception as e:
         logger.error(f"[Worker PID:{worker_pid}] 启动 Telegram 机器人初始化失败: {e}", exc_info=True)
         logger.warning(f"[Worker PID:{worker_pid}] 应用将继续启动，但Telegram 机器人可能不可用")
@@ -476,16 +484,27 @@ async def lifespan(app: FastAPI):
     try:
         # 检查是否启用 Telegram
         telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+        logger.info(f"[Worker PID:{worker_pid}] 准备发送启动通知，telegram_enabled={telegram_enabled}, bot_initialized={bot_initialized}")
         if telegram_enabled and bot_initialized:
             # 只有持有锁的进程才发送启动消息
-            if has_bot_lock():
+            lock_held = has_bot_lock()
+            logger.info(f"[Worker PID:{worker_pid}] 检查锁状态: {lock_held}")
+            if lock_held:
                 try:
-                    send_telegram_message(f"🚀 服务 [{settings.SERVER_NAME}] 已启动")
-                    logger.info(f"[Worker PID:{worker_pid}] 已发送启动通知")
+                    logger.info(f"[Worker PID:{worker_pid}] 开始发送启动通知...")
+                    success = send_telegram_message(f"🚀 服务 [{settings.SERVER_NAME}] 已启动")
+                    if success:
+                        logger.info(f"[Worker PID:{worker_pid}] 已发送启动通知")
+                    else:
+                        logger.warning(f"[Worker PID:{worker_pid}] 发送启动通知失败")
                 except Exception as e:
-                    logger.warning(f"发送启动通知失败: {e}")
+                    logger.warning(f"发送启动通知失败: {e}", exc_info=True)
+            else:
+                logger.info(f"[Worker PID:{worker_pid}] 未持有Bot锁，跳过发送启动通知")
+        else:
+            logger.info(f"[Worker PID:{worker_pid}] Telegram未启用或Bot未初始化，跳过发送启动通知")
     except Exception as e:
-        logger.warning(f"启动通知处理失败: {e}")
+        logger.warning(f"启动通知处理失败: {e}", exc_info=True)
 
     # ====== 应用运行期间 ======
     yield
