@@ -119,6 +119,11 @@
       <span>Telegram 通知配置</span>
     </el-menu-item>
 
+    <el-menu-item v-if="isAdmin" index="/app/admin/cache">
+      <template #icon><DataAnalysis /></template>
+      <span>缓存管理</span>
+    </el-menu-item>
+
     <el-menu-item index="/app/admin/sessions">
       <template #icon><Lock /></template>
       <span>会话管理</span>
