@@ -52,8 +52,8 @@ async def redirect_short_link_public(
         request_url = str(request.url)
         request_params = {k.lower(): v for k, v in request.query_params.items()}
         logger.warning(
-            f"[短链接重定向] 收到请求: short_code={short_code}, "
-            f"完整URL={request_url}, 查询参数={request_params}"
+            f"[短链接重定向] 收到请求: short_code={short_code}"
+            f"\n完整URL={request_url}\n查询参数={request_params}"
         )
         
         # 尝试从缓存获取
