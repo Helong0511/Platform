@@ -37,9 +37,7 @@ def initialize_bot():
     """
     # 动态检查模块可用性
     try:
-        import telebot
-        from telebot import types
-        from telebot.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
+        # 使用模块级导入
         dynamic_telebot_available = True
         logger.info("pyTelegramBotAPI 模块导入成功（动态检查）")
     except ImportError as import_err:

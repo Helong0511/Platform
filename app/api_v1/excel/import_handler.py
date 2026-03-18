@@ -21,7 +21,7 @@ from app.core.database import get_db
 from app.core.security import require_admin
 from app.core.config import settings
 from app.core.constants import ECPM_MULTIPLIER
-from app.models.models import User, Client, Product, AdData
+from app.models.models import User, Client, Product, AdData, AdminNotificationConfig
 from app.core.country_code import find_country_code_by_any_format
 from app.schemas.base import ResponseBaseSchema
 from app.schemas.excel import ExcelImportResponse
@@ -38,7 +38,6 @@ from app.core.utils import (
 from app.core.ad_data_processor import check_and_notify_data_decrease
 from app.core.exceptions import handle_integrity_error
 from app.services.telegram_notification_service import TelegramNotificationService
-from app.models.models import User, Client, Product, AdData, AdminNotificationConfig
 
 logger = logging.getLogger(__name__)
 

@@ -4,6 +4,8 @@ Telegram 通知服务
 """
 import json
 import logging
+import asyncio
+from datetime import datetime, time
 from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -13,6 +15,8 @@ from app.models.models import (
     PostbackConversion, Client, Product, Publisher, Offer, User, PostbackNotification, Click
 )
 from app.core.auto_bot import send_telegram_message, send_telegram_message_with_buttons
+from app.core.telegram.message_sender import send_telegram_message_async
+from app.core.telegram import send_telegram_message_async as send_telegram_message_async_from_telegram
 from app.core.utils import get_app_now_naive
 from app.core.telegram_utils import (
     format_telegram_message,
@@ -184,8 +188,7 @@ class TelegramNotificationService:
             try:
                 # 计算当天总转化数
                 today = conversion.created_at.date() if conversion.created_at else get_app_now_naive().date()
-                from sqlalchemy import func, and_, select
-                from datetime import datetime, time
+
                 
                 # 构建当天的开始和结束时间
                 start_of_day = datetime.combine(today, time.min)
@@ -408,7 +411,7 @@ class TelegramNotificationService:
             bool: 是否发送成功
         """
         try:
-            from app.core.telegram.message_sender import send_telegram_message_async
+
             success = await send_telegram_message_async(telegram_chat_id, message)
             
             # 记录通知历史（如果有数据库会话）
@@ -473,7 +476,7 @@ class TelegramNotificationService:
             bool: 是否发送成功
         """
         try:
-            from app.core.telegram.message_sender import send_telegram_message_async
+
             success = await send_telegram_message_async(telegram_chat_id, message)
             
             # 记录通知历史（如果有转化记录和数据库会话）
@@ -536,7 +539,7 @@ class TelegramNotificationService:
                 error=error
             )
             
-            from app.core.telegram.message_sender import send_telegram_message_async
+
             success = await send_telegram_message_async(telegram_chat_id, message)
             
             if db:
@@ -597,7 +600,7 @@ class TelegramNotificationService:
                 period=period
             )
             
-            from app.core.telegram.message_sender import send_telegram_message_async
+
             success = await send_telegram_message_async(telegram_chat_id, message)
             
             if db:
@@ -683,10 +686,9 @@ class TelegramNotificationService:
             # 分割长消息
             messages = split_long_message(message)
             
-            from app.core.telegram import send_telegram_message_async
             all_success = True
             for msg in messages:
-                success = await send_telegram_message_async(telegram_chat_id, msg)
+                success = await send_telegram_message_async_from_telegram(telegram_chat_id, msg)
                 if not success:
                     all_success = False
             
@@ -744,7 +746,6 @@ class TelegramNotificationService:
             tuple[bool, Optional[int]]: (是否发送成功, 消息ID)
         """
         try:
-            import asyncio
             loop = asyncio.get_event_loop()
             success, message_id = await loop.run_in_executor(
                 None,

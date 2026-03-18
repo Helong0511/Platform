@@ -14,6 +14,7 @@
 - 建议使用 /api/v1/postback/conversions 接口进行所有转化记录查询
 """
 import logging
+import json
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 
@@ -1135,7 +1136,6 @@ async def approve_pending_conversion(
             )
         
         # 创建正式转化记录
-        import json
         conversion = PostbackConversion(
             platform=pending.platform,
             conversion_id=pending.conversion_id,

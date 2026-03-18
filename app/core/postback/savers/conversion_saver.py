@@ -4,9 +4,11 @@
 负责保存转化记录到数据库
 """
 import logging
+import json
 from typing import Dict, Any, Optional
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.models.models import PostbackConversion, Click
 from app.core.utils import get_app_now_naive
@@ -39,7 +41,6 @@ class ConversionSaver:
             PostbackConversion: 保存的转化记录
         """
         # 创建转化记录
-        import json
         raw_data_json = json.dumps(normalized_data['raw_data']) if normalized_data.get('raw_data') else None
         
         conversion = PostbackConversion(
@@ -95,7 +96,6 @@ class ConversionSaver:
         
         try:
             # 查询并更新 Click 记录
-            from sqlalchemy import select
             click_id = click_association['click_id']
             
             # 查询 Click 记录

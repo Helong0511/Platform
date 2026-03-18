@@ -3,6 +3,7 @@
 提供用户权限信息的缓存功能，减少数据库查询
 """
 import logging
+import json
 from typing import Optional, Dict, Any
 from datetime import timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,7 +45,6 @@ async def get_user_permissions(user_id: int, db: AsyncSession) -> Dict[str, Any]
     # 尝试从缓存获取
     if redis:
         try:
-            import json
             cached_data = await redis.get(cache_key)
             if cached_data:
                 permissions = json.loads(cached_data)
@@ -89,7 +89,6 @@ async def get_user_permissions(user_id: int, db: AsyncSession) -> Dict[str, Any]
     # 写入缓存
     if redis:
         try:
-            import json
             await redis.setex(
                 cache_key,
                 PERMISSION_CACHE_TTL,

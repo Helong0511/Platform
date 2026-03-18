@@ -24,6 +24,7 @@ from app.core.utils import get_client_ip
 from app.core.auto_bot import send_telegram_message
 from app.core.telegram_utils import truncate_message
 from app.core.config import settings
+from app.core.telegram import send_telegram_message_async
 
 # 创建路由实例
 router = APIRouter()
@@ -167,10 +168,6 @@ async def receive_bft_postback(
                 telegram_msg = truncate_message(telegram_msg)
             
             # 直接发送通知，不阻塞主流程
-            from app.core.config import settings
-            from app.core.telegram import send_telegram_message_async
-            import asyncio
-            
             asyncio.create_task(
                 send_telegram_message_async(
                     settings.TELEGRAM_ADMIN, 
