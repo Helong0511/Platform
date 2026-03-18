@@ -9,6 +9,7 @@ import os
 from fastapi import APIRouter, Depends, Query, Request, BackgroundTasks, HTTPException, status
 from fastapi.responses import RedirectResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.core.database import get_db
 from app.core.short_link_cache import get_short_link_from_cache
@@ -253,8 +254,13 @@ async def open_master_html_with_redirect(
                     # 更新展示次数（数据库）
                     short_link.show_count = (short_link.show_count or 0) + 1
                     logger.warning(f"[斗篷服务] 更新数据库: short_code={short_code}, 新show_count={short_link.show_count}")
-                    await db.commit()
-                    logger.warning(f"[斗篷服务] 数据库提交成功")
+                    try:
+                        await db.commit()
+                        logger.warning(f"[斗篷服务] 数据库提交成功")
+                    except StaleDataError:
+                        logger.warning(f"[斗篷服务] 数据库更新冲突，忽略StaleDataError")
+                        # 回滚事务以避免会话处于不一致状态
+                        await db.rollback()
                 else:
                     logger.warning(f"[斗篷服务] 短链接不存在: short_code={short_code}")
         else:
@@ -470,8 +476,13 @@ async def handle_report(
                 # 更新点击次数（数据库）
                 short_link.click_count = (short_link.click_count or 0) + 1
                 logger.warning(f"[斗篷点击] 更新数据库: short_code={id}, 新click_count={short_link.click_count}")
-                await db.commit()
-                logger.warning(f"[斗篷点击] 数据库提交成功")
+                try:
+                    await db.commit()
+                    logger.warning(f"[斗篷点击] 数据库提交成功")
+                except StaleDataError:
+                    logger.warning(f"[斗篷点击] 数据库更新冲突，忽略StaleDataError")
+                    # 回滚事务以避免会话处于不一致状态
+                    await db.rollback()
             else:
                 logger.warning(f"[斗篷点击] 短链接不存在: short_code={id}")
         
