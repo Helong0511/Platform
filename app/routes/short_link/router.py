@@ -45,7 +45,7 @@ async def send_third_party_report(
     max_retries = 3
     base_delay = 1  # 基础延迟时间（秒）
     timeout = 30.0  # 超时时间（秒）
-    
+
     for attempt in range(max_retries):
         try:
             url = "https://hhskins.com/UniqueChannelServer/UniqueChannel"
@@ -66,35 +66,36 @@ async def send_third_party_report(
                     "ua": ua
                 }
             }
-            
-            logger.warning(f"[第三方上报] 开始发送 (尝试 {attempt+1}/{max_retries}): adsid={adsid}, ip={ip}")
-            
+
+            logger.warning(f"[第三方上报] 开始发送 (尝试 {attempt + 1}/{max_retries}): adsid={adsid}, ip={ip}")
+
             # 增加超时时间，应对网络延迟
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, json=send_data, headers=headers)
                 logger.warning(f"[第三方上报] 响应: status={response.status_code}, content={response.text[:200]}")
-                
+
                 if response.status_code == 200 and response.text.strip() == "OK":
-                    logger.warning(f"[第三方上报] adsid{adsid} ✓ 成功 (尝试 {attempt+1}/{max_retries})")
+                    logger.warning(f"[第三方上报] adsid{adsid} ✓ 成功 (尝试 {attempt + 1}/{max_retries})")
                     return
                 else:
-                    logger.warning(f"[第三方上报] ✗ 失败 (尝试 {attempt+1}/{max_retries}): status={response.status_code}")
-                    
+                    logger.warning(
+                        f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{max_retries}): status={response.status_code}")
+
         except httpx.TimeoutException:
-            logger.warning(f"[第三方上报] ✗ 超时 (尝试 {attempt+1}/{max_retries})")
+            logger.warning(f"[第三方上报] ✗ 超时 (尝试 {attempt + 1}/{max_retries})")
         except httpx.ConnectError:
-            logger.warning(f"[第三方上报] ✗ 连接失败 (尝试 {attempt+1}/{max_retries})")
+            logger.warning(f"[第三方上报] ✗ 连接失败 (尝试 {attempt + 1}/{max_retries})")
         except Exception as e:
-            logger.warning(f"[第三方上报] ✗ 异常 (尝试 {attempt+1}/{max_retries}): {str(e)}")
-        
+            logger.warning(f"[第三方上报] ✗ 异常 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+
         # 指数退避策略
         if attempt < max_retries - 1:
             delay = base_delay * (2 ** attempt)
             logger.warning(f"[第三方上报] 等待 {delay} 秒后重试...")
             await asyncio.sleep(delay)
-    
+
     logger.error(f"[第三方上报] ❌ 全部 {max_retries} 次尝试失败: adsid={adsid}")
-    
+
     # 发送告警
     try:
         from app.core.auto_bot import send_telegram_message
@@ -438,7 +439,7 @@ async def handle_report(
         # 如果没有获取到fbclid，生成一个UUID
         if not fbclid:
             fbclid = str(uuid.uuid4())
-        
+
         logger.warning(f"[斗篷点击] fbclid: {fbclid}")
 
         # 构建日志信息
