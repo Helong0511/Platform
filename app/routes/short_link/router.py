@@ -19,7 +19,8 @@ from app.core.database import get_db, AsyncSessionLocal
 from app.core.short_link_cache import get_short_link_from_cache, update_short_link_cache
 from app.core.redis_client import get_redis_client
 from app.models.models import ShortLink
-
+from app.core.auto_bot import send_telegram_message
+from app.core.config import settings
 # 引入短链接处理函数
 from app.routes.short_link.handlers import handle_cached_redirect, handle_database_redirect
 
@@ -45,6 +46,7 @@ async def send_third_party_report(
     max_retries = 3
     base_delay = 1  # 基础延迟时间（秒）
     timeout = 30.0  # 超时时间（秒）
+    failure_reasons = []  # 收集失败原因
 
     for attempt in range(max_retries):
         try:
@@ -78,14 +80,22 @@ async def send_third_party_report(
                     logger.warning(f"[第三方上报] adsid{adsid} ✓ 成功 (尝试 {attempt + 1}/{max_retries})")
                     return
                 else:
+                    error_msg = f"状态码: {response.status_code}, 响应: {response.text[:100]}"
+                    failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
                     logger.warning(
-                        f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{max_retries}): status={response.status_code}")
+                        f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{max_retries}): {error_msg}")
 
         except httpx.TimeoutException:
+            error_msg = "请求超时"
+            failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
             logger.warning(f"[第三方上报] ✗ 超时 (尝试 {attempt + 1}/{max_retries})")
         except httpx.ConnectError:
+            error_msg = "连接失败"
+            failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
             logger.warning(f"[第三方上报] ✗ 连接失败 (尝试 {attempt + 1}/{max_retries})")
         except Exception as e:
+            error_msg = f"异常: {str(e)}"
+            failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
             logger.warning(f"[第三方上报] ✗ 异常 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
 
         # 指数退避策略
@@ -94,18 +104,19 @@ async def send_third_party_report(
             logger.warning(f"[第三方上报] 等待 {delay} 秒后重试...")
             await asyncio.sleep(delay)
 
-    logger.error(f"[第三方上报] ❌ 全部 {max_retries} 次尝试失败: adsid={adsid}")
+    # 构建失败原因字符串
+    failure_reasons_str = "\n" + "\n".join(failure_reasons) if failure_reasons else "\n无详细信息"
+    logger.error(f"[第三方上报] ❌ 全部 {max_retries} 次尝试失败: adsid={adsid}, 失败原因:{failure_reasons_str}")
 
     # 发送告警
     try:
-        from app.core.auto_bot import send_telegram_message
-        from app.core.config import settings
         await send_telegram_message(
             settings.TELEGRAM_ADMIN,
             f"⚠️ 第三方上报失败\n\n"
             f"AdsID: {adsid}\n"
             f"IP: {ip}\n"
             f"尝试次数: {max_retries}\n"
+            f"失败原因:{failure_reasons_str}\n"
             f"时间: {time.strftime('%Y-%m-%d %H:%M:%S')}"
         )
         logger.warning(f"[第三方上报] 告警已发送")
