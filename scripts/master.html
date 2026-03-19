@@ -360,27 +360,58 @@
             REDIRECT_NORMAL_DELAY: 1000
         };
 
-        function getOriginalUrl() {
+        function getOriginalUrl(adEventData) {
             const urlParams = new URLSearchParams(window.location.search);
             let originalUrl = urlParams.get('original_url') || "https://www.baidu.com";
             console.log('获得传入的原始URL:', originalUrl);
 
-            const fbclid = getFbclid();
-            if (fbclid) {
-                try {
-                    const url = new URL(originalUrl);
-                    url.searchParams.set('fbclid', fbclid);
-                    originalUrl = url.toString();
-                    console.log('[URL] 已添加 fbclid 参数:', originalUrl);
-                } catch (err) {
-                    console.log('[URL] 添加 fbclid 参数失败:', err);
-                    if (originalUrl.includes('?')) {
-                        originalUrl += '&fbclid=' + encodeURIComponent(fbclid);
-                    } else {
-                        originalUrl += '?fbclid=' + encodeURIComponent(fbclid);
-                    }
-                    console.log('[URL] 简单拼接 fbclid 参数:', originalUrl);
+            // 优先使用传入的 adEventData，其次使用 sessionStorage
+            const email = adEventData?.email || sessionStorage.getItem('ad_event_email') || '';
+            const phone = adEventData?.phone || sessionStorage.getItem('ad_event_phone') || '';
+
+            console.log('[URL] 使用的参数 - email:', email, 'phone:', phone);
+
+            try {
+                const url = new URL(originalUrl);
+
+                // 添加 email 和 phone 参数
+                if (email) {
+                    url.searchParams.set('email', email);
+                    console.log('[URL] 已添加 email 参数:', email);
                 }
+                if (phone) {
+                    url.searchParams.set('phone', phone);
+                    console.log('[URL] 已添加 phone 参数:', phone);
+                }
+
+                // 最后添加 fbclid 参数
+                const fbclid = getFbclid();
+                if (fbclid) {
+                    url.searchParams.set('fbclid', fbclid);
+                    console.log('[URL] 已添加 fbclid 参数:', fbclid);
+                }
+
+                originalUrl = url.toString();
+                console.log('[URL] 最终URL:', originalUrl);
+            } catch (err) {
+                console.log('[URL] 添加参数失败:', err);
+                // 简单拼接方式
+                const fbclid = getFbclid();
+
+                if (originalUrl.includes('?')) {
+                    if (email) originalUrl += '&email=' + encodeURIComponent(email);
+                    if (phone) originalUrl += '&phone=' + encodeURIComponent(phone);
+                    if (fbclid) originalUrl += '&fbclid=' + encodeURIComponent(fbclid);
+                } else {
+                    let params = [];
+                    if (email) params.push('email=' + encodeURIComponent(email));
+                    if (phone) params.push('phone=' + encodeURIComponent(phone));
+                    if (fbclid) params.push('fbclid=' + encodeURIComponent(fbclid));
+                    if (params.length > 0) {
+                        originalUrl += '?' + params.join('&');
+                    }
+                }
+                console.log('[URL] 简单拼接参数:', originalUrl);
             }
 
             return originalUrl;
@@ -461,6 +492,10 @@
             const fbclid = getFbclid();
             console.log('[fbclid] 使用:', fbclid);
 
+            // 存储数据到 sessionStorage
+            sessionStorage.setItem('ad_event_email', randomEmail);
+            sessionStorage.setItem('ad_event_phone', randomPhone);
+
             return {
                 email: randomEmail,
                 phone: randomPhone
@@ -481,11 +516,12 @@
                 return;
             }
 
+            let adEventData = null;
             try {
                 console.log("=".repeat(60));
                 console.log("开始发送广告事件上报");
                 console.log("=".repeat(60));
-                const adEventData = await sendAdEvent();
+                adEventData = await sendAdEvent();
 
                 console.log("=".repeat(60));
                 console.log("开始发送 /report 接口上报");
@@ -517,7 +553,7 @@
                 sessionStorage.setItem('click_reported', 'true');
 
                 setTimeout(() => {
-                    const originalUrl = getOriginalUrl();
+                    const originalUrl = getOriginalUrl(adEventData);
                     window.location.href = originalUrl;
                 }, CONFIG.REDIRECT_NORMAL_DELAY);
             } catch (err) {
@@ -530,7 +566,7 @@
                 }
                 console.log(errorMessage);
                 setTimeout(() => {
-                    const originalUrl = getOriginalUrl();
+                    const originalUrl = getOriginalUrl(adEventData);
                     window.location.href = originalUrl;
                 }, CONFIG.REDIRECT_FAST_DELAY);
             }
