@@ -21,6 +21,7 @@ from app.core.redis_client import get_redis_client
 from app.models.models import ShortLink
 from app.core.auto_bot import send_telegram_message
 from app.core.config import settings
+from app.core.third_party_report import send_third_party_report
 # 引入短链接处理函数
 from app.routes.short_link.handlers import handle_cached_redirect, handle_database_redirect
 
