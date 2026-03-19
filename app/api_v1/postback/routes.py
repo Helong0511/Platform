@@ -1,0 +1,199 @@
+"""Postback 路由定义"""
+from fastapi import APIRouter, Request, Query, Depends, Path, Response
+from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.core.security import require_admin
+from app.models.models import User
+
+from .handlers import (
+    conversion_handler,
+    stats_handler,
+    forward_log_handler,
+    diagnostic_handler,
+    pending_handler,
+    duplicate_handler,
+    receive_handler
+)
+
+# 创建路由实例
+router = APIRouter()
+
+# ====== 查询接口（必须在动态路径之前定义） ======
+@router.get("/postback/conversions",
+            summary="查询 PostBack 转化记录（管理员，已融合转化日志功能）")
+async def get_postback_conversions(
+        request: Request,
+        platform: Optional[str] = Query(None, description="平台名称"),
+        product_id: Optional[int] = Query(None, description="产品ID"),
+        client_id: Optional[int] = Query(None, description="客户ID"),
+        conversion_or_click_id: Optional[str] = Query(None, description="转化ID或点击ID"),
+        # 转化日志筛选条件（融合功能）
+        click_id: Optional[str] = Query(None, description="Click ID过滤"),
+        offer_id: Optional[int] = Query(None, description="Offer ID过滤"),
+        publisher_id: Optional[int] = Query(None, description="渠道ID过滤"),
+        advertiser_id: Optional[int] = Query(None, description="广告主ID过滤"),
+        conversion_status: Optional[str] = Query(None,
+                                                 description="转化状态过滤（Pending/Approved/CapReached/OfferInactive/ClickExpired）"),
+        start_date: Optional[str] = Query(None, description="起始日期（YYYY-MM-DD）"),
+        end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
+        page: int = Query(1, ge=1, description="页码"),
+        page_size: int = Query(20, ge=1, le=1000, description="每页数量"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    return await conversion_handler.get_postback_conversions(
+        request, platform, product_id, client_id, conversion_or_click_id,
+        click_id, offer_id, publisher_id, advertiser_id, conversion_status,
+        start_date, end_date, page, page_size, db, current_user
+    )
+
+
+@router.get("/postback/stats",
+            summary="PostBack 统计信息（管理员）")
+async def get_postback_stats(
+        request: Request,
+        platform: Optional[str] = Query(None, description="平台名称"),
+        start_date: Optional[str] = Query(None, description="起始日期（YYYY-MM-DD）"),
+        end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    return await stats_handler.get_postback_stats(
+        request, platform, start_date, end_date, db, current_user
+    )
+
+
+# ====== 转发日志查询接口（必须在动态路径之前定义） ======
+@router.get("/postback/forward-logs",
+            summary="查询 PostBack 下游转发日志（管理员）")
+async def get_postback_forward_logs(
+        request: Request,
+        conversion_id: Optional[int] = Query(None, description="转化记录ID"),
+        product_id: Optional[int] = Query(None, description="产品ID"),
+        publisher_id: Optional[int] = Query(None, description="渠道ID"),
+        success: Optional[bool] = Query(None, description="是否成功"),
+        start_date: Optional[str] = Query(None, description="起始日期（YYYY-MM-DD）"),
+        end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
+        page: int = Query(1, ge=1, description="页码"),
+        page_size: int = Query(20, ge=1, le=1000, description="每页数量"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    return await forward_log_handler.get_postback_forward_logs(
+        request, conversion_id, product_id, publisher_id, success,
+        start_date, end_date, page, page_size, db, current_user
+    )
+
+
+# ====== 补发转发接口 ======
+@router.post("/postback/forward-logs/{forward_log_id}/resend",
+             summary="补发 PostBack 转发（管理员）")
+async def resend_postback_forward(
+        forward_log_id: int = Path(..., ge=1, description="转发日志ID"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    return await forward_log_handler.resend_postback_forward(
+        forward_log_id, db, current_user
+    )
+
+
+# ====== 诊断工具接口 ======
+@router.get("/postback/diagnose",
+            summary="诊断 PostBack 记录问题（管理员）")
+async def diagnose_postback_record(
+        conversion_or_click_id: str = Query(..., description="转化ID或点击ID"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    return await diagnostic_handler.diagnose_postback_record(
+        conversion_or_click_id, db, current_user
+    )
+
+
+# ====== 更新转化状态接口（融合转化日志功能） ======
+@router.put("/postback/conversions/{conversion_id}/status",
+            summary="更新转化状态（管理员）")
+async def update_conversion_status(
+        conversion_id: int = Path(..., ge=1, description="转化记录ID"),
+        status: str = Query(..., description="转化状态（Approved/Pending）"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    return await conversion_handler.update_conversion_status(
+        conversion_id, status, db, current_user
+    )
+
+
+# ====== 待确认转化记录管理接口 ======
+@router.get("/postback/pending-conversions",
+            summary="查询待确认 Postback 转化记录（管理员）")
+async def get_pending_postback_conversions(
+        platform: Optional[str] = Query(None, description="平台名称"),
+        request_ip: Optional[str] = Query(None, description="请求IP地址"),
+        status: Optional[str] = Query(None, description="状态：pending/approved/rejected"),
+        start_date: Optional[str] = Query(None, description="起始日期（YYYY-MM-DD）"),
+        end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
+        page: int = Query(1, ge=1, description="页码"),
+        page_size: int = Query(20, ge=1, le=1000, description="每页数量"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    return await pending_handler.get_pending_postback_conversions(
+        platform, request_ip, status, start_date, end_date, page, page_size, db, current_user
+    )
+
+
+@router.post("/postback/pending-conversions/{pending_id}/approve",
+             summary="批准待确认转化记录（管理员）")
+async def approve_pending_conversion(
+        pending_id: int = Path(..., ge=1, description="待确认记录ID"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    return await pending_handler.approve_pending_conversion(
+        pending_id, db, current_user
+    )
+
+
+@router.post("/postback/pending-conversions/{pending_id}/reject",
+             summary="拒绝待确认转化记录（管理员）")
+async def reject_pending_conversion(
+        pending_id: int = Path(..., ge=1, description="待确认记录ID"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    return await pending_handler.reject_pending_conversion(
+        pending_id, db, current_user
+    )
+
+
+@router.get("/postback/check-duplicates",
+            summary="检查重复的转化记录（管理员）")
+async def check_duplicate_conversions(
+        platform: Optional[str] = Query(None, description="平台名称（可选）"),
+        conversion_id: Optional[str] = Query(None, description="转化ID（可选）"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin)
+):
+    return await duplicate_handler.check_duplicate_conversions(
+        platform, conversion_id, db, current_user
+    )
+
+
+# ====== 动态平台 PostBack 接收接口 ======
+@router.api_route(
+    "/postback/{platform}",
+    methods=["GET", "POST"],
+    summary="接收任意平台的 PostBack 回调（支持 GET 和 POST，接收任意参数）"
+)
+async def receive_postback(
+        request: Request,
+        platform: str,
+        db: AsyncSession = Depends(get_db)
+):
+    return await receive_handler.receive_postback(
+        request, platform, db
+    )
