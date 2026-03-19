@@ -32,7 +32,7 @@ async def send_third_party_report(
     """
     max_retries = 3
     base_delay = 1  # 基础延迟时间（秒）
-    timeout = 30.0  # 超时时间（秒）
+    timeout = 5  # 超时时间（秒）
     failure_reasons = []  # 收集失败原因
 
     # 验证 viewWebpage 事件的必需参数
