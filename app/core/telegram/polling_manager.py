@@ -263,7 +263,6 @@ def start_polling():
                 interval=0,
                 timeout=60,
                 allowed_updates=['message', 'callback_query'],
-                reset_webhook=True,  # 重置webhook，避免冲突
                 long_polling_timeout=60  # 长轮询超时时间
             )
             logger.info("轮询已启动并在后台运行")
