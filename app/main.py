@@ -153,7 +153,29 @@ try:
 except (OSError, PermissionError) as e:
     root_logger.warning(f"无法创建 scheduler.log 文件: {e}")
 
-# 3. debug.log: 记录 DEBUG 级别日志（仅开发环境）
+# 3. telegram.log: 记录 Telegram Bot 相关的详细日志（INFO级别）
+telegram_log_handler = None
+telegram_log_path = os.path.join(log_dir, 'telegram.log')
+try:
+    telegram_log_handler = RotatingFileHandler(
+        telegram_log_path,
+        maxBytes=LOG_FILE_MAX_BYTES,
+        backupCount=LOG_FILE_BACKUP_COUNT,
+        encoding='utf-8'
+    )
+    telegram_log_handler.setFormatter(formatter)
+    telegram_log_handler.setLevel(logging.INFO)  # 记录 INFO 及以上级别
+
+    # 只添加到 Telegram 相关的 logger
+    # 注意：propagate=True，这样 WARNING 及以上级别会同时输出到 app.log
+    telegram_logger = logging.getLogger('app.core.telegram')
+    telegram_logger.addHandler(telegram_log_handler)
+    telegram_logger.setLevel(logging.INFO)
+    telegram_logger.propagate = True  # 允许传播，WARNING+ 会输出到 app.log
+except (OSError, PermissionError) as e:
+    root_logger.warning(f"无法创建 telegram.log 文件: {e}")
+
+# 4. debug.log: 记录 DEBUG 级别日志（仅开发环境）
 debug_log_handler = None
 if not settings.is_production:
     debug_log_path = os.path.join(log_dir, 'debug.log')

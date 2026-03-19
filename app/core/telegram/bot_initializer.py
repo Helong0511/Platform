@@ -57,10 +57,24 @@ def initialize_bot():
     
     # 检查共享状态
     shared_state = get_shared_state()
-    if shared_state.get("bot_initialized", False):
-        logger.info("Bot 已在其他进程中初始化，跳过初始化...")
-        from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
-        return bot, bot_initialized, TELEBOT_AVAILABLE
+    bot_initialized_in_state = shared_state.get("bot_initialized", False)
+    current_pid_in_state = shared_state.get("current_pid")
+    
+    # 验证共享状态中的进程是否真的在运行
+    if bot_initialized_in_state and current_pid_in_state:
+        try:
+            import os
+            os.kill(current_pid_in_state, 0)
+            # 进程在运行，跳过初始化
+            logger.info(f"Bot 已在其他进程（PID:{current_pid_in_state}）中初始化，跳过初始化...")
+            from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
+            return bot, bot_initialized, TELEBOT_AVAILABLE
+        except OSError:
+            # 进程不在运行，清理过时的状态
+            logger.info(f"共享状态中的进程（PID:{current_pid_in_state}）未运行，清理过时状态...")
+            from app.core.telegram.shared_state import set_shared_state
+            set_shared_state({"bot_initialized": False, "bot_running": False, "last_start_time": None, "current_pid": None, "bot_username": None})
+            # 继续初始化
     
     # 检查 Bot 实例是否已经创建
     if _bot_instance_created:
