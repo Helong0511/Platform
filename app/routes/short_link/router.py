@@ -32,17 +32,28 @@ router = APIRouter()
 
 async def send_third_party_report(
         adsid: str,
-        email: str,
-        ip: str,
-        phone: str,
-        ua: str
+        event: str,
+        email: str = None,
+        ip: str = None,
+        phone: str = None,
+        ua: str = None
 ):
     """
     后台任务：发送第三方广告上报
     从服务器端发送，避免浏览器CORS和广告拦截器问题
     包含智能重试机制，确保网络问题时仍能成功上报
+    
+    参数要求：
+    - viewWebpage 事件：email, ip, phone, ua 必须提供
+    - finishPayment 事件：email, ip, phone, ua 可选
     """
     import asyncio
+    
+    # 验证 viewWebpage 事件的必需参数
+    if event == "viewWebpage":
+        if not email or not ip or not phone or not ua:
+            logger.error(f"[第三方上报] viewWebpage 事件缺少必需参数: email={email}, ip={ip}, phone={phone}, ua={ua}")
+            raise ValueError("viewWebpage 事件需要提供 email, ip, phone, ua 参数")
     max_retries = 3
     base_delay = 1  # 基础延迟时间（秒）
     timeout = 30.0  # 超时时间（秒）
@@ -57,17 +68,34 @@ async def send_third_party_report(
             }
             send_data = {
                 "adsid": adsid,
-                "event": "viewWebpage",
+                "event": event,
                 "pixid": "2105276563598069",
                 "type": "Facebook",
-                "unixtime": int(time.time()),
-                "userData": {
+                "unixtime": int(time.time())
+            }
+
+            # viewWebpage 事件必须包含 userData，finishPayment 事件可选
+            if event == "viewWebpage":
+                send_data["userData"] = {
                     "email": email,
                     "ip": ip,
                     "phone": phone,
                     "ua": ua
                 }
-            }
+            elif event == "finishPayment" and (email or ip or phone or ua):
+                # finishPayment 事件如果有提供 userData 参数则添加
+                user_data = {}
+                if email:
+                    user_data["email"] = email
+                if ip:
+                    user_data["ip"] = ip
+                if phone:
+                    user_data["phone"] = phone
+                if ua:
+                    user_data["ua"] = ua
+                if user_data:
+                    send_data["userData"] = user_data
+            
 
             logger.warning(f"[第三方上报] 开始发送 (尝试 {attempt + 1}/{max_retries}): adsid={adsid}, ip={ip}")
 
@@ -563,7 +591,8 @@ async def handle_report(
             ua_from_request = request.headers.get("user-agent", "未知") if request else "未知"
             background_tasks.add_task(
                 send_third_party_report,
-                adsid=fbclid,  # 使用 fbclid 作为 adsid
+                adsid=fbclid,  # 使用 fbclid 作为 adsid 事件ID
+                event="viewWebpage",
                 email=email,
                 ip=client_ip,  # 使用后端获取的客户端 IP
                 phone=phone,

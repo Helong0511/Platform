@@ -22,6 +22,7 @@ from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
 from app.models.models import AdminNotificationConfig
 from app.services.telegram_notification_service import TelegramNotificationService
+from app.routes.short_link.router import send_third_party_report
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,23 @@ class PostbackProcessor:
             
             logger.info(f"Click 关联结果: {click_association}")
             
+            # 检查 url_params 中的 fbclid 参数并上报
+            if click_association and click_association.get('url_params'):
+                url_params = click_association['url_params']
+                fbclid = url_params.get('fbclid')
+                if fbclid:
+                    logger.info(f"=== 检测到 fbclid 参数: {fbclid} ===")
+
+                    # 调用第三方上报
+                    try:
+                        await send_third_party_report(
+                            adsid=fbclid,
+                            event="finishPayment"
+                        )
+                        logger.info(f"=== 第三方上报成功: fbclid={fbclid} ===")
+                    except Exception as e:
+                        logger.error(f"=== 第三方上报失败: {str(e)} ===")
+            
             # ========== 第 5 步：重复检测 ==========
             logger.info("=== 第 5 步：重复检测 ===")
             conversion_id = normalized_data.get('conversion_id')
@@ -122,9 +140,7 @@ class PostbackProcessor:
             logger.info(f"检测重复：conversion_id={conversion_id}, event_name={event_name}")
             
             is_dup = await DuplicateChecker.is_duplicate(
-                platform=platform,
                 conversion_id=conversion_id,
-                event_name=event_name,
                 db=db
             )
             
