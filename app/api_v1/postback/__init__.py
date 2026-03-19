@@ -7,7 +7,10 @@ from .ip_whitelist import router as ip_whitelist_router
 # 创建主路由
 router = APIRouter()
 
-# 注册子路由
+# 先注册固定路由（避免被动态路由覆盖）
+router.include_router(ip_whitelist_router, prefix="", tags=["postback"])
+
+# 再注册包含动态路由的路由器
 router.include_router(postback_router, prefix="", tags=["postback"])
 
 # 导出其他路由
