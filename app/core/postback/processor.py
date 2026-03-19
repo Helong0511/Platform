@@ -22,7 +22,7 @@ from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
 from app.models.models import AdminNotificationConfig
 from app.services.telegram_notification_service import TelegramNotificationService
-from app.routes.short_link.router import send_third_party_report
+from app.core.third_party_report import send_third_party_report
 
 logger = logging.getLogger(__name__)
 
