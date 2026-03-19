@@ -75,6 +75,12 @@ def initialize_bot():
             from app.core.telegram.shared_state import set_shared_state
             set_shared_state({"bot_initialized": False, "bot_running": False, "last_start_time": None, "current_pid": None, "bot_username": None})
             # 继续初始化
+    elif bot_initialized_in_state and not current_pid_in_state:
+        # 状态文件显示已初始化但无进程ID，清理状态
+        logger.info("共享状态显示已初始化但无进程ID，清理过时状态...")
+        from app.core.telegram.shared_state import set_shared_state
+        set_shared_state({"bot_initialized": False, "bot_running": False, "last_start_time": None, "current_pid": None, "bot_username": None})
+        # 继续初始化
     
     # 检查 Bot 实例是否已经创建
     if _bot_instance_created:
