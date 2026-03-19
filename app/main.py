@@ -175,7 +175,29 @@ try:
 except (OSError, PermissionError) as e:
     root_logger.warning(f"无法创建 telegram.log 文件: {e}")
 
-# 4. debug.log: 记录 DEBUG 级别日志（仅开发环境）
+# 4. postback.log: 记录 PostBack 处理相关的详细日志（INFO级别）
+postback_log_handler = None
+postback_log_path = os.path.join(log_dir, 'postback.log')
+try:
+    postback_log_handler = RotatingFileHandler(
+        postback_log_path,
+        maxBytes=LOG_FILE_MAX_BYTES,
+        backupCount=LOG_FILE_BACKUP_COUNT,
+        encoding='utf-8'
+    )
+    postback_log_handler.setFormatter(formatter)
+    postback_log_handler.setLevel(logging.INFO)  # 记录 INFO 及以上级别
+
+    # 只添加到 PostBack 相关的 logger
+    # 注意：propagate=True，这样 WARNING 及以上级别会同时输出到 app.log
+    postback_logger = logging.getLogger('app.core.postback')
+    postback_logger.addHandler(postback_log_handler)
+    postback_logger.setLevel(logging.INFO)
+    postback_logger.propagate = True  # 允许传播，WARNING+ 会输出到 app.log
+except (OSError, PermissionError) as e:
+    root_logger.warning(f"无法创建 postback.log 文件: {e}")
+
+# 5. debug.log: 记录 DEBUG 级别日志（仅开发环境）
 debug_log_handler = None
 if not settings.is_production:
     debug_log_path = os.path.join(log_dir, 'debug.log')
@@ -197,7 +219,7 @@ file_handler = app_log_handler
 
 # 记录日志文件创建信息
 if app_log_handler:
-    root_logger.warning(f"日志文件已创建: app.log (WARNING+), scheduler.log (INFO+), debug.log (DEBUG+, 仅开发环境)")
+    root_logger.warning(f"日志文件已创建: app.log (WARNING+), scheduler.log (INFO+), telegram.log (INFO+), postback.log (INFO+), debug.log (DEBUG+, 仅开发环境)")
 
 
 # 重定向 stdout 和 stderr 到日志文件（捕获 print() 输出）
