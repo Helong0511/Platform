@@ -76,9 +76,23 @@ async def send_third_party_report(
                 response = await client.post(url, json=send_data, headers=headers)
                 logger.warning(f"[第三方上报] 响应: status={response.status_code}, content={response.text[:200]}")
 
-                if response.status_code == 200 and response.text.strip() == "OK":
-                    logger.warning(f"[第三方上报] adsid{adsid} ✓ 成功 (尝试 {attempt + 1}/{max_retries})")
-                    return
+                if response.status_code == 200:
+                    try:
+                        response_json = response.json()
+                        if response_json.get("message") == "success":
+                            log_id = response_json.get("logId", "")
+                            logger.warning(f"[第三方上报] adsid{adsid} ✓ 成功 (尝试 {attempt + 1}/{max_retries}), logId={log_id}")
+                            return
+                        else:
+                            error_msg = f"message: {response_json.get('message', 'unknown')}, logId: {response_json.get('logId', '')}"
+                            failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
+                            logger.warning(
+                                f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{max_retries}): {error_msg}")
+                    except Exception as parse_err:
+                        error_msg = f"JSON解析失败: {str(parse_err)}, 原始响应: {response.text[:100]}"
+                        failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
+                        logger.warning(
+                            f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{max_retries}): {error_msg}")
                 else:
                     error_msg = f"状态码: {response.status_code}, 响应: {response.text[:100]}"
                     failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
