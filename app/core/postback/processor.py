@@ -119,7 +119,12 @@ class PostbackProcessor:
             # 检查 url_params 中的 fbclid 参数并上报
             if click_association and click_association.get('url_params'):
                 url_params = click_association['url_params']
+                ip = click_association.get('ipip')
+                ua = click_association.get('user_agent')
                 fbclid = url_params.get('fbclid')
+                email = url_params.get('email')
+                phone = url_params.get('phone')
+
                 if fbclid:
                     logger.info(f"=== 检测到 fbclid 参数: {fbclid} ===")
 
@@ -127,7 +132,11 @@ class PostbackProcessor:
                     try:
                         await send_third_party_report(
                             adsid=fbclid,
-                            event="finishPayment"
+                            event="finishPayment",
+                            email=email,
+                            ip=ip,
+                            phone=phone,
+                            ua=ua
                         )
                         logger.info(f"=== 第三方上报成功: fbclid={fbclid} ===")
                     except Exception as e:

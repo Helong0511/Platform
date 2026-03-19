@@ -16,10 +16,10 @@ logger = logging.getLogger(__name__)
 async def send_third_party_report(
         adsid: str,
         event: str,
-        email: str = None,
-        ip: str = None,
-        phone: str = None,
-        ua: str = None
+        email: str,
+        ip: str,
+        phone: str,
+        ua: str
 ):
     """
     后台任务：发送第三方广告上报
@@ -53,30 +53,14 @@ async def send_third_party_report(
                 "event": event,
                 "pixid": "2105276563598069",
                 "type": "Facebook",
-                "unixtime": int(time.time())
-            }
-
-            # viewWebpage 事件必须包含 userData，finishPayment 事件可选
-            if event == "viewWebpage":
-                send_data["userData"] = {
+                "unixtime": int(time.time()),
+                "userData": {
                     "email": email,
                     "ip": ip,
                     "phone": phone,
                     "ua": ua
                 }
-            elif event == "finishPayment" and (email or ip or phone or ua):
-                # finishPayment 事件如果有提供 userData 参数则添加
-                user_data = {}
-                if email:
-                    user_data["email"] = email
-                if ip:
-                    user_data["ip"] = ip
-                if phone:
-                    user_data["phone"] = phone
-                if ua:
-                    user_data["ua"] = ua
-                if user_data:
-                    send_data["userData"] = user_data
+            }
 
             logger.warning(f"[第三方上报] 开始发送 (尝试 {attempt + 1}/{max_retries}): adsid={adsid}, ip={ip}")
 
