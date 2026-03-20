@@ -104,34 +104,30 @@
       <span>用户管理</span>
     </el-menu-item>
 
-    <el-menu-item v-if="isAdmin" index="/app/admin/scheduled-tasks">
-      <template #icon><Timer /></template>
-      <span>定时任务</span>
-    </el-menu-item>
-
-    <el-menu-item v-if="isAdmin" index="/app/admin/audit-logs">
-      <template #icon><Document /></template>
-      <span>操作日志</span>
-    </el-menu-item>
-    <el-menu-item v-if="isAdmin" index="/app/admin/third-party-reports">
-      <template #icon><DataLine /></template>
-      <span>第三方上报日志</span>
-    </el-menu-item>
-
-    <el-menu-item v-if="isAdmin" index="/app/admin/telegram-notification-config">
-      <template #icon><Bell /></template>
-      <span>Telegram 通知配置</span>
-    </el-menu-item>
-
-    <el-menu-item v-if="isAdmin" index="/app/admin/cache">
-      <template #icon><DataAnalysis /></template>
-      <span>缓存管理</span>
-    </el-menu-item>
-
-    <el-menu-item index="/app/admin/sessions">
-      <template #icon><Lock /></template>
-      <span>会话管理</span>
-    </el-menu-item>
+    <el-sub-menu v-if="isAdmin" index="/app/admin/system-services">
+      <template #title>
+        <el-icon><Setting /></el-icon>
+        <span>系统服务</span>
+      </template>
+      <el-menu-item index="/app/admin/scheduled-tasks">
+        <span>定时任务</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/audit-logs">
+        <span>操作日志</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/third-party-reports">
+        <span>第三方上报日志</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/telegram-notification-config">
+        <span>Telegram 通知配置</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/cache">
+        <span>缓存管理</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/sessions">
+        <span>会话管理</span>
+      </el-menu-item>
+    </el-sub-menu>
     
     <el-menu-item v-if="!isAdmin" index="/app/client/user-management">
       <template #icon><UserFilled /></template>
@@ -151,7 +147,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../../store';
 import { ElMenu, ElMenuItem, ElSubMenu, ElIcon } from 'element-plus';
-import { PieChart, Document, UserFilled, Upload, Timer, Link, Connection, Box, DataAnalysis, Lock, Bell, DataLine } from '@element-plus/icons-vue';
+import { PieChart, Document, UserFilled, Upload, Timer, Link, Connection, Box, DataAnalysis, Lock, Bell, DataLine, Setting } from '@element-plus/icons-vue';
 
 const authStore = useAuthStore();
 const route = useRoute();
