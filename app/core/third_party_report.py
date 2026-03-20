@@ -6,11 +6,23 @@ import logging
 import time
 import asyncio
 import httpx
+import hashlib
 
 from app.core.auto_bot import send_telegram_message
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def sha256_hash(value: str) -> str:
+    """
+    对字符串进行 SHA256 哈希处理
+    Facebook 要求：先规范化（去除前后空格，转小写），然后 SHA256 哈希
+    """
+    if not value:
+        return ""
+    normalized_value = value.strip().lower()
+    return hashlib.sha256(normalized_value.encode('utf-8')).hexdigest()
 
 
 async def send_third_party_report(
@@ -55,14 +67,16 @@ async def send_third_party_report(
                 "type": "Facebook",
                 "unixtime": int(time.time()),
                 "userData": {
-                    "email": email,
-                    "ip": ip,
-                    "phone": phone,
+                    "email": sha256_hash(email),
+                    "ip": sha256_hash(ip),
+                    "phone": sha256_hash(phone),
                     "ua": ua
                 }
             }
 
             logger.warning(f"[第三方上报] 开始发送 (尝试 {attempt + 1}/{max_retries}): adsid={adsid}, ip={ip}")
+            logger.warning(f"[第三方上报] 参数详情 - 原始: email={email}, phone={phone}, ip={ip}, ua={ua}")
+            logger.warning(f"[第三方上报] 参数详情 - 哈希后: email_hash={sha256_hash(email)}, phone_hash={sha256_hash(phone)}, ip_hash={sha256_hash(ip)}")
 
             # 增加超时时间，应对网络延迟
             async with httpx.AsyncClient(timeout=timeout) as client:
