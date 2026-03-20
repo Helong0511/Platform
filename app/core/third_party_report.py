@@ -48,10 +48,10 @@ async def send_third_party_report(
     failure_reasons = []  # 收集失败原因
 
     # 验证 viewWebpage 事件的必需参数
-    if event == "viewWebpage":
+    if event == "viewWebpage" or event == "finishPayment":
         if not email or not ip or not phone or not ua:
-            logger.error(f"[第三方上报] viewWebpage 事件缺少必需参数: email={email}, ip={ip}, phone={phone}, ua={ua}")
-            raise ValueError("viewWebpage 事件需要提供 email, ip, phone, ua 参数")
+            logger.error(f"[第三方上报] viewWebpage 或 finishPayment 事件缺少必需参数: email={email}, ip={ip}, phone={phone}, ua={ua}")
+            raise ValueError("viewWebpage 或 finishPayment 事件需要提供 email, ip, phone, ua 参数")
 
     for attempt in range(max_retries):
         try:
@@ -62,7 +62,7 @@ async def send_third_party_report(
             }
             send_data = {
                 "adsid": adsid,
-                "event": event,
+                "event": event,  # 事件类型  viewWebpage, finishPayment
                 "pixid": "2105276563598069",
                 "type": "Facebook",
                 "unixtime": int(time.time()),
