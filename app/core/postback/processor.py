@@ -136,7 +136,8 @@ class PostbackProcessor:
                             email=email,
                             ip=ip,
                             phone=phone,
-                            ua=ua
+                            ua=ua,
+                            source="postback"
                         )
                         logger.info(f"=== 第三方上报成功: fbclid={fbclid} ===")
                     except Exception as e:

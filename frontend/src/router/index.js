@@ -95,6 +95,7 @@ const ClickLog = createAsyncComponent(() => import(/* webpackChunkName: "click-l
 const SessionManagement = createAsyncComponent(() => import(/* webpackChunkName: "session-management" */ '../views/admin/SessionManagement.vue'), 'SessionManagement');
 const TelegramNotificationConfig = createAsyncComponent(() => import(/* webpackChunkName: "telegram-notification-config" */ '../views/admin/TelegramNotificationConfig.vue'), 'TelegramNotificationConfig');
 const CacheManagement = createAsyncComponent(() => import(/* webpackChunkName: "cache-management" */ '../views/admin/CacheManagement.vue'), 'CacheManagement');
+const ThirdPartyReportManagement = createAsyncComponent(() => import(/* webpackChunkName: "third-party-report" */ '../views/admin/ThirdPartyReportManagement.vue'), 'ThirdPartyReportManagement');
 const ClientUserManagement = createAsyncComponent(() => import(/* webpackChunkName: "client-user-management" */ '../views/client/ClientUserManagement.vue'), 'ClientUserManagement');
 const ApiDocumentation = createAsyncComponent(() => import(/* webpackChunkName: "api-documentation" */ '../views/ApiDocumentation.vue'), 'ApiDocumentation');
 const MainLayout = createAsyncComponent(() => import(/* webpackChunkName: "layout" */ '../components/Layout/MainLayout.vue'), 'MainLayout');
@@ -183,6 +184,12 @@ const routes = [
         path: 'admin/audit-logs',
         name: 'AuditLogManagement',
         component: AuditLogManagement,
+        meta: { requiresAdmin: true }
+      },
+      {
+        path: 'admin/third-party-reports',
+        name: 'ThirdPartyReportManagement',
+        component: ThirdPartyReportManagement,
         meta: { requiresAdmin: true }
       },
       {

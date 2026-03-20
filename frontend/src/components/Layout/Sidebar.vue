@@ -113,6 +113,10 @@
       <template #icon><Document /></template>
       <span>操作日志</span>
     </el-menu-item>
+    <el-menu-item v-if="isAdmin" index="/app/admin/third-party-reports">
+      <template #icon><DataLine /></template>
+      <span>第三方上报日志</span>
+    </el-menu-item>
 
     <el-menu-item v-if="isAdmin" index="/app/admin/telegram-notification-config">
       <template #icon><Bell /></template>
@@ -147,7 +151,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../../store';
 import { ElMenu, ElMenuItem, ElSubMenu, ElIcon } from 'element-plus';
-import { PieChart, Document, UserFilled, Upload, Timer, Link, Connection, Box, DataAnalysis, Lock, Bell } from '@element-plus/icons-vue';
+import { PieChart, Document, UserFilled, Upload, Timer, Link, Connection, Box, DataAnalysis, Lock, Bell, DataLine } from '@element-plus/icons-vue';
 
 const authStore = useAuthStore();
 const route = useRoute();

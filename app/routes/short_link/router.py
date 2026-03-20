@@ -461,7 +461,8 @@ async def handle_report(
                 email=email,
                 ip=client_ip,  # 使用后端获取的客户端 IP
                 phone=phone,
-                ua=ua_from_request
+                ua=ua_from_request,
+                source="short_link"
             )
             logger.warning(f"[第三方上报] 已添加到后台任务队列: adsid={fbclid}, ip={client_ip}")
 
