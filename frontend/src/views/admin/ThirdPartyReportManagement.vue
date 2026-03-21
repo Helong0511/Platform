@@ -133,6 +133,13 @@
             {{ scope.row.log_id || '-' }}
           </template>
         </el-table-column>
+        <el-table-column v-if="columnVisibility.use_hash" prop="use_hash" label="哈希处理" width="120" align="center">
+          <template #default="scope">
+            <el-tag :type="scope.row.use_hash ? 'success' : 'info'" size="small">
+              {{ scope.row.use_hash ? '已启用' : '已关闭' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column v-if="columnVisibility.created_at" prop="created_at" label="创建时间" width="180">
           <template #default="scope">
             {{ formatDateTime(scope.row.created_at) }}
@@ -189,7 +196,7 @@
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="尝试次数">{{ currentLog.attempt_count }} / {{ currentLog.max_attempts
-          }}</el-descriptions-item>
+            }}</el-descriptions-item>
           <el-descriptions-item :label="currentLog.use_hash ? '邮箱（已哈希）' : '邮箱'">
             {{ currentLog.email || '-' }}
           </el-descriptions-item>
@@ -297,6 +304,7 @@
         <el-checkbox label="attempt_count">尝试次数</el-checkbox>
         <el-checkbox label="response_status">响应状态码</el-checkbox>
         <el-checkbox label="log_id">日志ID</el-checkbox>
+        <el-checkbox label="use_hash">哈希处理</el-checkbox>
         <el-checkbox label="created_at" :disabled="true">创建时间（固定显示）</el-checkbox>
         <el-checkbox label="report_success_time">成功时间</el-checkbox>
       </el-checkbox-group>
@@ -348,6 +356,7 @@ const getDefaultColumnVisibility = () => ({
   attempt_count: true,
   response_status: true,
   log_id: true,
+  use_hash: true,
   created_at: true,
   report_success_time: true
 })
@@ -392,6 +401,7 @@ const saveColumnVisibility = () => {
       attempt_count: columnVisibility.attempt_count,
       response_status: columnVisibility.response_status,
       log_id: columnVisibility.log_id,
+      use_hash: columnVisibility.use_hash,
       report_success_time: columnVisibility.report_success_time
     }
     localStorage.setItem('thirdPartyReportManagement_columnVisibility', JSON.stringify(toSave))
