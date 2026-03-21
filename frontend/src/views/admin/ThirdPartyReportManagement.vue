@@ -135,9 +135,15 @@
         </el-table-column>
         <el-table-column v-if="columnVisibility.use_hash" prop="use_hash" label="哈希处理" width="120" align="center">
           <template #default="scope">
-            <el-tag :type="scope.row.use_hash ? 'success' : 'danger'">
+            <el-button 
+              size="small" 
+              :type="scope.row.use_hash ? 'success' : 'danger'"
+              @click="handleHashToggle(scope.row)"
+              :loading="scope.row._hashLoading"
+              :disabled="scope.row._hashLoading || loading"
+            >
               {{ scope.row.use_hash ? '启用' : '禁用' }}
-            </el-tag>
+            </el-button>
           </template>
         </el-table-column>
         <el-table-column v-if="columnVisibility.created_at" prop="created_at" label="创建时间" width="180">
@@ -692,6 +698,32 @@ const handleRetry = async (log) => {
     if (error !== 'cancel') {
       ElMessage.error('重新上报失败');
     }
+  }
+};
+
+// 切换哈希处理状态
+const handleHashToggle = async (log) => {
+  try {
+    // 保存旧值
+    const oldValue = log.use_hash;
+    // 立即更新UI
+    log.use_hash = !oldValue;
+    // 设置加载状态
+    log._hashLoading = true;
+    
+    // 调用API更新状态
+    await updateThirdPartyReport(log.id, { use_hash: log.use_hash });
+    
+    ElMessage.success(`哈希处理已${log.use_hash ? '启用' : '禁用'}`);
+    // 刷新日志列表
+    fetchLogs();
+  } catch (error) {
+    // 恢复原值
+    log.use_hash = !log.use_hash;
+    ElMessage.error('切换哈希处理状态失败');
+  } finally {
+    // 清除加载状态
+    log._hashLoading = false;
   }
 };
 
