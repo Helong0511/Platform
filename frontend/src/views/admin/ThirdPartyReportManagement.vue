@@ -151,6 +151,14 @@
             {{ scope.row.report_success_time ? formatDateTime(scope.row.report_success_time) : '-' }}
           </template>
         </el-table-column>
+        <el-table-column v-if="columnVisibility.report_params" prop="report_params" label="完整上报参数" min-width="200" show-overflow-tooltip>
+          <template #default="scope">
+            <span v-if="scope.row.report_params" class="report-params-preview">
+              {{ (scope.row.report_params.length > 50) ? scope.row.report_params.substring(0, 50) + '...' : scope.row.report_params }}
+            </span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="220" fixed="right">
           <template #default="scope">
             <el-button type="primary" link size="small" @click="handleViewDetail(scope.row)">
@@ -232,6 +240,9 @@
           <el-descriptions-item label="用户代理" :span="2">
             {{ currentLog.ua || '-' }}
           </el-descriptions-item>
+          <el-descriptions-item label="完整上报参数" :span="2" v-if="currentLog.report_params">
+            <pre class="json-content">{{ formatJson(currentLog.report_params) }}</pre>
+          </el-descriptions-item>
           <el-descriptions-item label="响应内容" :span="2" v-if="currentLog.response_body">
             <pre class="json-content">{{ formatJson(currentLog.response_body) }}</pre>
           </el-descriptions-item>
@@ -280,6 +291,9 @@
         <el-form-item label="用户代理">
           <el-input v-model="editForm.ua" type="textarea" :rows="3" placeholder="请输入用户代理" />
         </el-form-item>
+        <el-form-item label="完整上报参数">
+          <el-input v-model="editForm.report_params" type="textarea" :rows="4" placeholder="请输入完整上报参数（JSON格式）" />
+        </el-form-item>
         <el-form-item label="哈希处理">
           <el-switch v-model="editForm.use_hash" />
           <span style="margin-left: 10px; color: var(--text-secondary);">
@@ -305,6 +319,7 @@
         <el-checkbox label="response_status">响应状态码</el-checkbox>
         <el-checkbox label="log_id">日志ID</el-checkbox>
         <el-checkbox label="use_hash">哈希处理</el-checkbox>
+        <el-checkbox label="report_params">完整上报参数</el-checkbox>
         <el-checkbox label="created_at" :disabled="true">创建时间（固定显示）</el-checkbox>
         <el-checkbox label="report_success_time">成功时间</el-checkbox>
       </el-checkbox-group>
@@ -358,7 +373,8 @@ const getDefaultColumnVisibility = () => ({
   log_id: true,
   use_hash: true,
   created_at: true,
-  report_success_time: true
+  report_success_time: true,
+  report_params: false
 })
 
 const columnVisibility = reactive(getDefaultColumnVisibility())
@@ -402,6 +418,7 @@ const saveColumnVisibility = () => {
       response_status: columnVisibility.response_status,
       log_id: columnVisibility.log_id,
       use_hash: columnVisibility.use_hash,
+      report_params: columnVisibility.report_params,
       report_success_time: columnVisibility.report_success_time
     }
     localStorage.setItem('thirdPartyReportManagement_columnVisibility', JSON.stringify(toSave))
@@ -462,6 +479,7 @@ const editForm = reactive({
   ip: '',
   phone: '',
   ua: '',
+  report_params: '',
   use_hash: true
 });
 
@@ -628,6 +646,7 @@ const handleEdit = (log) => {
   editForm.ip = log.ip || '';
   editForm.phone = log.phone || '';
   editForm.ua = log.ua || '';
+  editForm.report_params = log.report_params || '';
   editForm.use_hash = log.use_hash !== false;
   editDialogVisible.value = true;
 };
@@ -642,6 +661,7 @@ const handleSaveEdit = async () => {
     if (editForm.ip) params.ip = editForm.ip;
     if (editForm.phone) params.phone = editForm.phone;
     if (editForm.ua) params.ua = editForm.ua;
+    if (editForm.report_params) params.report_params = editForm.report_params;
     params.use_hash = editForm.use_hash;
 
     await updateThirdPartyReport(editLogId.value, params);

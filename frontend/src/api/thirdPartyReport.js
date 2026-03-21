@@ -62,6 +62,8 @@ export const getThirdPartyReportStats = async (params = {}) => {
  * @param {string} [params.ip] - IP地址
  * @param {string} [params.phone] - 手机号
  * @param {string} [params.ua] - 用户代理
+ * @param {string} [params.report_params] - 完整上报参数（JSON格式）
+ * @param {boolean} [params.use_hash] - 是否对email、ip、phone进行哈希处理
  * @returns {Promise<Object>} 更新结果
  */
 export const updateThirdPartyReport = async (logId, params) => {

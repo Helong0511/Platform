@@ -42,7 +42,8 @@ async def create_report_log(
         phone: str,
         ua: str,
         max_attempts: int = 3,
-        use_hash: bool = True
+        use_hash: bool = True,
+        report_params: Optional[str] = None
 ) -> int:
     """
     创建第三方上报日志记录
@@ -58,6 +59,7 @@ async def create_report_log(
                 phone=phone,
                 ua=ua,
                 use_hash=use_hash,
+                report_params=report_params,
                 status="pending",
                 attempt_count=0,
                 max_attempts=max_attempts,
@@ -82,7 +84,8 @@ async def update_report_log(
         error_message: Optional[str] = None,
         report_start_time: Optional[datetime] = None,
         report_success_time: Optional[datetime] = None,
-        completed_at: Optional[datetime] = None
+        completed_at: Optional[datetime] = None,
+        report_params: Optional[str] = None
 ):
     """
     更新第三方上报日志记录
@@ -113,6 +116,8 @@ async def update_report_log(
                     log_entry.report_success_time = report_success_time
                 if completed_at is not None:
                     log_entry.completed_at = completed_at
+                if report_params is not None:
+                    log_entry.report_params = report_params
                 await db.commit()
     except Exception as e:
         logger.warning(f"[第三方上报] 更新日志记录失败: {e}")
@@ -216,14 +221,16 @@ async def send_third_party_report(
                 "userData": user_data
             }
 
+            # 存储完整上报参数
+            report_params_json = json.dumps(send_data, ensure_ascii=False)
+            await update_report_log(report_log_id, report_params=report_params_json, attempt_count=attempt + 1)
+
             logger.warning(f"[第三方上报] 开始发送 (尝试 {attempt + 1}/{max_retries}): adsid={adsid}, ip={ip}, use_hash={use_hash}")
             logger.warning(f"[第三方上报] 参数详情 - 原始: email={email}, phone={phone}, ip={ip}, ua={ua}")
             if use_hash:
                 logger.warning(f"[第三方上报] 参数详情 - 哈希后: email_hash={sha256_hash(email)}, phone_hash={sha256_hash(phone)}, ip_hash={sha256_hash(ip)}")
             else:
                 logger.warning(f"[第三方上报] 参数详情 - 不哈希: email={email}, phone={phone}, ip={ip}")
-
-            await update_report_log(report_log_id, attempt_count=attempt + 1)
 
             # 增加超时时间，应对网络延迟
             async with httpx.AsyncClient(timeout=timeout) as client:
