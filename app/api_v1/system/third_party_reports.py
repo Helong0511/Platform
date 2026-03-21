@@ -40,6 +40,7 @@ class UpdateReportLogParams(BaseModel):
     ip: Optional[str] = Field(None, max_length=50, description="IP地址")
     phone: Optional[str] = Field(None, max_length=50, description="手机号")
     ua: Optional[str] = Field(None, description="用户代理")
+    use_hash: Optional[bool] = Field(None, description="是否对email、ip、phone进行哈希处理")
 
 
 @router.get(
@@ -283,7 +284,8 @@ async def update_third_party_report(
             email=params.email,
             ip=params.ip,
             phone=params.phone,
-            ua=params.ua
+            ua=params.ua,
+            use_hash=params.use_hash
         )
         
         if not success:

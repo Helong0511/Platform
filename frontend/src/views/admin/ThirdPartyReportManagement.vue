@@ -190,14 +190,19 @@
           </el-descriptions-item>
           <el-descriptions-item label="尝试次数">{{ currentLog.attempt_count }} / {{ currentLog.max_attempts
           }}</el-descriptions-item>
-          <el-descriptions-item label="邮箱（已哈希）">
+          <el-descriptions-item :label="currentLog.use_hash ? '邮箱（已哈希）' : '邮箱'">
             {{ currentLog.email || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="IP地址（已哈希）">
+          <el-descriptions-item :label="currentLog.use_hash ? 'IP地址（已哈希）' : 'IP地址'">
             {{ currentLog.ip || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="手机号（已哈希）">
+          <el-descriptions-item :label="currentLog.use_hash ? '手机号（已哈希）' : '手机号'">
             {{ currentLog.phone || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="哈希处理">
+            <el-tag :type="currentLog.use_hash ? 'success' : 'info'">
+              {{ currentLog.use_hash ? '已启用' : '已关闭' }}
+            </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="响应状态码">
             <el-tag v-if="currentLog.response_status" :type="getResponseStatusTag(currentLog.response_status)"
@@ -256,17 +261,23 @@
             <el-option label="ViewContent" value="ViewContent" />
           </el-select>
         </el-form-item>
-        <el-form-item label="邮箱（已哈希）">
-          <el-input v-model="editForm.email" placeholder="请输入邮箱（已哈希）" />
+        <el-form-item label="邮箱">
+          <el-input v-model="editForm.email" placeholder="请输入邮箱" />
         </el-form-item>
-        <el-form-item label="IP地址（已哈希）">
-          <el-input v-model="editForm.ip" placeholder="请输入IP地址（已哈希）" />
+        <el-form-item label="IP地址">
+          <el-input v-model="editForm.ip" placeholder="请输入IP地址" />
         </el-form-item>
-        <el-form-item label="手机号（已哈希）">
-          <el-input v-model="editForm.phone" placeholder="请输入手机号（已哈希）" />
+        <el-form-item label="手机号">
+          <el-input v-model="editForm.phone" placeholder="请输入手机号" />
         </el-form-item>
         <el-form-item label="用户代理">
           <el-input v-model="editForm.ua" type="textarea" :rows="3" placeholder="请输入用户代理" />
+        </el-form-item>
+        <el-form-item label="哈希处理">
+          <el-switch v-model="editForm.use_hash" />
+          <span style="margin-left: 10px; color: var(--text-secondary);">
+            开启后会对 email、ip、phone 进行 SHA256 哈希处理
+          </span>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -303,7 +314,8 @@ import { useRouter } from 'vue-router';
 import {
   ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem,
   ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage, ElMessageBox,
-  ElDescriptions, ElDescriptionsItem, ElDatePicker, ElAlert, ElCheckboxGroup, ElCheckbox
+  ElDescriptions, ElDescriptionsItem, ElDatePicker, ElAlert, ElCheckboxGroup, ElCheckbox,
+  ElSwitch
 } from 'element-plus';
 import { Search, Refresh, Loading, Setting } from '@element-plus/icons-vue';
 import { useAuthStore } from '../../store';
@@ -439,7 +451,8 @@ const editForm = reactive({
   email: '',
   ip: '',
   phone: '',
-  ua: ''
+  ua: '',
+  use_hash: true
 });
 
 // 获取来源标签类型
@@ -605,6 +618,7 @@ const handleEdit = (log) => {
   editForm.ip = log.ip || '';
   editForm.phone = log.phone || '';
   editForm.ua = log.ua || '';
+  editForm.use_hash = log.use_hash !== false;
   editDialogVisible.value = true;
 };
 
@@ -618,6 +632,7 @@ const handleSaveEdit = async () => {
     if (editForm.ip) params.ip = editForm.ip;
     if (editForm.phone) params.phone = editForm.phone;
     if (editForm.ua) params.ua = editForm.ua;
+    params.use_hash = editForm.use_hash;
 
     await updateThirdPartyReport(editLogId.value, params);
     ElMessage.success('更新成功');

@@ -1253,10 +1253,12 @@ class ThirdPartyReportLog(Base):
     # 上报参数
     adsid = Column(String(500), nullable=False, index=True, comment='广告事件ID')
     event = Column(String(50), nullable=False, index=True, comment='事件类型：viewWebpage, finishPayment')
+    use_hash = Column(Boolean, default=True, nullable=False, comment='是否对email、ip、phone进行哈希处理：True=哈希，False=不哈希')
     email = Column(String(255), nullable=True, comment='邮箱（原始值）')
     ip = Column(String(50), nullable=True, comment='IP地址（原始值）')
     phone = Column(String(50), nullable=True, comment='手机号（原始值）')
     ua = Column(Text, nullable=True, comment='用户代理')
+
     
     # 上报状态
     status = Column(String(20), nullable=False, index=True, comment='上报状态：pending, success, failed')

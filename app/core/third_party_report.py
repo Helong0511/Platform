@@ -7,6 +7,7 @@ import time
 import asyncio
 import httpx
 import hashlib
+import json
 from typing import Optional
 from datetime import datetime
 
@@ -40,7 +41,8 @@ async def create_report_log(
         ip: str,
         phone: str,
         ua: str,
-        max_attempts: int = 3
+        max_attempts: int = 3,
+        use_hash: bool = True
 ) -> int:
     """
     创建第三方上报日志记录
@@ -55,6 +57,7 @@ async def create_report_log(
                 ip=ip,
                 phone=phone,
                 ua=ua,
+                use_hash=use_hash,
                 status="pending",
                 attempt_count=0,
                 max_attempts=max_attempts,
@@ -122,7 +125,9 @@ async def send_third_party_report(
         ip: str,
         phone: str,
         ua: str,
-        source: str = "unknown"
+        source: str = "unknown",
+        use_hash: bool = True,
+        report_log_id: Optional[int] = None
 ):
     """
     后台任务：发送第三方广告上报
@@ -132,23 +137,40 @@ async def send_third_party_report(
     参数要求：
     - viewWebpage 事件：email, ip, phone, ua 必须提供
     - finishPayment 事件：email, ip, phone, ua 可选
+    - report_log_id：可选，指定使用现有的日志记录进行上报
     """
     max_retries = 3
     base_delay = 1  # 基础延迟时间（秒）
     timeout = 5  # 超时时间（秒）
     failure_reasons = []  # 收集失败原因
 
-    # 创建日志记录
-    report_log_id = await create_report_log(
-        source=source,
-        adsid=adsid,
-        event=event,
-        email=email,
-        ip=ip,
-        phone=phone,
-        ua=ua,
-        max_attempts=max_retries
-    )
+    # 如果没有提供 report_log_id，则创建新的日志记录
+    if not report_log_id:
+        report_log_id = await create_report_log(
+            source=source,
+            adsid=adsid,
+            event=event,
+            email=email,
+            ip=ip,
+            phone=phone,
+            ua=ua,
+            max_attempts=max_retries,
+            use_hash=use_hash
+        )
+    else:
+        # 如果提供了 report_log_id，重置日志状态
+        await update_report_log(
+            report_log_id,
+            status="pending",
+            attempt_count=0,
+            response_status=None,
+            response_body=None,
+            log_id_from_response=None,
+            error_message=None,
+            report_start_time=None,
+            report_success_time=None,
+            completed_at=None
+        )
 
     # 验证 viewWebpage 事件的必需参数
     if event == "viewWebpage" or event == "finishPayment":
@@ -173,23 +195,33 @@ async def send_third_party_report(
                 "token": "HFY2Dgs07J4YjziNPGaTSmxFrY97CN5Z",
                 "Content-Type": "application/json"
             }
+            user_data = {
+                "ua": ua
+            }
+            if use_hash:
+                user_data["email"] = sha256_hash(email)
+                user_data["ip"] = sha256_hash(ip)
+                user_data["phone"] = sha256_hash(phone)
+            else:
+                user_data["email"] = email
+                user_data["ip"] = ip
+                user_data["phone"] = phone
+
             send_data = {
                 "adsid": adsid,
                 "event": event,  # 事件类型  viewWebpage, finishPayment
                 "pixid": "2105276563598069",
                 "type": "Facebook",
                 "unixtime": int(time.time()),
-                "userData": {
-                    "email": sha256_hash(email),
-                    "ip": sha256_hash(ip),
-                    "phone": sha256_hash(phone),
-                    "ua": ua
-                }
+                "userData": json.dumps(user_data)
             }
 
-            logger.warning(f"[第三方上报] 开始发送 (尝试 {attempt + 1}/{max_retries}): adsid={adsid}, ip={ip}")
+            logger.warning(f"[第三方上报] 开始发送 (尝试 {attempt + 1}/{max_retries}): adsid={adsid}, ip={ip}, use_hash={use_hash}")
             logger.warning(f"[第三方上报] 参数详情 - 原始: email={email}, phone={phone}, ip={ip}, ua={ua}")
-            logger.warning(f"[第三方上报] 参数详情 - 哈希后: email_hash={sha256_hash(email)}, phone_hash={sha256_hash(phone)}, ip_hash={sha256_hash(ip)}")
+            if use_hash:
+                logger.warning(f"[第三方上报] 参数详情 - 哈希后: email_hash={sha256_hash(email)}, phone_hash={sha256_hash(phone)}, ip_hash={sha256_hash(ip)}")
+            else:
+                logger.warning(f"[第三方上报] 参数详情 - 不哈希: email={email}, phone={phone}, ip={ip}")
 
             await update_report_log(report_log_id, attempt_count=attempt + 1)
 
@@ -333,10 +365,10 @@ async def retry_report_log(log_id: int):
                     ip=log_entry.ip,
                     phone=log_entry.phone,
                     ua=log_entry.ua,
-                    source=log_entry.source
+                    source=log_entry.source,
+                    use_hash=log_entry.use_hash,
+                    report_log_id=log_id
                 )
-            
-            # 创建任务
             asyncio.create_task(background_send())
             
             logger.warning(f"[第三方上报] 已触发重新上报: id={log_id}")
@@ -354,7 +386,8 @@ async def update_report_log_params(
         email: Optional[str] = None,
         ip: Optional[str] = None,
         phone: Optional[str] = None,
-        ua: Optional[str] = None
+        ua: Optional[str] = None,
+        use_hash: Optional[bool] = None
 ):
     """
     更新日志记录的参数
@@ -382,6 +415,8 @@ async def update_report_log_params(
                 log_entry.phone = phone
             if ua is not None:
                 log_entry.ua = ua
+            if use_hash is not None:
+                log_entry.use_hash = use_hash
             
             await db.commit()
             logger.warning(f"[第三方上报] 已更新日志参数: id={log_id}")
