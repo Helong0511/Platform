@@ -33,13 +33,14 @@ logger = logging.getLogger(__name__)
 
 
 class UpdateReportLogParams(BaseModel):
-    """更新上报日志参数的请求模型"""
+    """更新第三方上报日志参数模型"""
     adsid: Optional[str] = Field(None, max_length=500, description="广告ID")
     event: Optional[str] = Field(None, max_length=50, description="事件类型")
     email: Optional[str] = Field(None, max_length=255, description="邮箱")
     ip: Optional[str] = Field(None, max_length=50, description="IP地址")
     phone: Optional[str] = Field(None, max_length=50, description="手机号")
     ua: Optional[str] = Field(None, description="用户代理")
+    report_params: Optional[str] = Field(None, description="完整上报参数（JSON格式）")
     use_hash: Optional[bool] = Field(None, description="是否对email、ip、phone进行哈希处理")
 
 
@@ -285,6 +286,7 @@ async def update_third_party_report(
             ip=params.ip,
             phone=params.phone,
             ua=params.ua,
+            report_params=params.report_params,
             use_hash=params.use_hash
         )
         

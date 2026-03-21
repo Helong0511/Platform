@@ -19,6 +19,7 @@ class ThirdPartyReportLogBase(BaseSchema):
     ip: Optional[str] = Field(None, max_length=50, description="IP地址")
     phone: Optional[str] = Field(None, max_length=50, description="手机号")
     ua: Optional[str] = Field(None, description="用户代理")
+    report_params: Optional[str] = Field(None, description="完整上报参数（JSON格式）")
     use_hash: bool = Field(True, description="是否对email、ip、phone进行哈希处理")
     status: str = Field(..., max_length=20, description="状态")
     attempt_count: int = Field(0, description="尝试次数")

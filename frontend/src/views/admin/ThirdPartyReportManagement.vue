@@ -135,8 +135,8 @@
         </el-table-column>
         <el-table-column v-if="columnVisibility.use_hash" prop="use_hash" label="哈希处理" width="120" align="center">
           <template #default="scope">
-            <el-tag :type="scope.row.use_hash ? 'success' : 'info'" size="small">
-              {{ scope.row.use_hash ? '已启用' : '已关闭' }}
+            <el-tag :type="scope.row.use_hash ? 'success' : 'danger'">
+              {{ scope.row.use_hash ? '启用' : '禁用' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -215,8 +215,8 @@
             {{ currentLog.phone || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="哈希处理">
-            <el-tag :type="currentLog.use_hash ? 'success' : 'info'">
-              {{ currentLog.use_hash ? '已启用' : '已关闭' }}
+            <el-tag :type="currentLog.use_hash ? 'success' : 'danger'">
+              {{ currentLog.use_hash ? '启用' : '禁用' }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="响应状态码">

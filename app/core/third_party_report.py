@@ -394,6 +394,7 @@ async def update_report_log_params(
         ip: Optional[str] = None,
         phone: Optional[str] = None,
         ua: Optional[str] = None,
+        report_params: Optional[str] = None,
         use_hash: Optional[bool] = None
 ):
     """
@@ -422,6 +423,8 @@ async def update_report_log_params(
                 log_entry.phone = phone
             if ua is not None:
                 log_entry.ua = ua
+            if report_params is not None:
+                log_entry.report_params = report_params
             if use_hash is not None:
                 log_entry.use_hash = use_hash
             
