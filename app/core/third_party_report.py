@@ -13,7 +13,7 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auto_bot import send_telegram_message
+from app.core.telegram.message_sender import send_telegram_message_async as send_telegram_message
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
@@ -213,7 +213,7 @@ async def send_third_party_report(
                 "pixid": "2105276563598069",
                 "type": "Facebook",
                 "unixtime": int(time.time()),
-                "userData": json.dumps(user_data)
+                "userData": user_data
             }
 
             logger.warning(f"[第三方上报] 开始发送 (尝试 {attempt + 1}/{max_retries}): adsid={adsid}, ip={ip}, use_hash={use_hash}")
