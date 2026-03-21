@@ -23,6 +23,7 @@ class BftPostbackHandler(PostbackHandler):
         
         BFT 必填参数：
         - clk_id 或 click_id 或 cid: BFT click ID（必填）
+        - payout 或相关参数: 支付金额（必填）
         
         可选参数：
         - event_name: Event ID（事件ID，可选）
@@ -39,9 +40,30 @@ class BftPostbackHandler(PostbackHandler):
             data.get("conversionId")
         )
         
-        # 只验证 clk_id 是必填的，event_name 是可选的
+        # 支持多种参数名：payout, PayOut, pay_out, pay-out 等
+        payout = (
+            data.get("payout") or
+            data.get("PayOut") or
+            data.get("pay_out") or
+            data.get("pay-out") or
+            data.get("Pay_Out") or
+            data.get("Payout") or
+            data.get("PAYOUT")
+        )
+        
+        # 验证 clk_id 是必填的
         if not clk_id or not str(clk_id).strip():
             return False, "clk_id 或 click_id 或 cid 参数不能为空"
+        
+        # 验证 payout 是必填的
+        if not payout:
+            return False, "payout 参数不能为空"
+        
+        # 验证 payout 格式
+        try:
+            float(payout)
+        except (ValueError, TypeError):
+            return False, f"payout 格式错误：{payout}（应为数字）"
         
         return True, None
     

@@ -12,9 +12,6 @@ logger = logging.getLogger(__name__)
 class DataValidator:
     """数据验证器"""
     
-    # 必填字段列表
-    REQUIRED_FIELDS = ['conversion_id', 'event_name']
-    
     @staticmethod
     def validate(
         raw_data: Dict[str, Any],
@@ -32,20 +29,26 @@ class DataValidator:
         """
         errors = []
         
-        # 检查必填字段
-        for field in DataValidator.REQUIRED_FIELDS:
-            if field not in raw_data or not raw_data[field]:
-                errors.append(f"缺少必填字段：{field}")
+        # 检查是否有 click_id 或 conversion_id（两者等价）
+        click_id = raw_data.get('click_id') or raw_data.get('conversion_id')
+        if not click_id or not str(click_id).strip():
+            errors.append("缺少必填字段：click_id 或 conversion_id")
         
-        # 检查 conversion_id 格式
-        conversion_id = raw_data.get('conversion_id', '')
-        if conversion_id and len(str(conversion_id)) > 100:
-            errors.append(f"conversion_id 过长：{len(str(conversion_id))} 字符（最大 100）")
+        # 检查 click_id/conversion_id 格式
+        if click_id and len(str(click_id)) > 200:
+            errors.append(f"click_id/conversion_id 过长：{len(str(click_id))} 字符（最大 100）")
         
-        # 检查 event_name 格式
-        event_name = raw_data.get('event_name', '')
-        if event_name and len(str(event_name)) > 50:
-            errors.append(f"event_name 过长：{len(str(event_name))} 字符（最大 50）")
+        # 检查 payout 是必填的
+        payout = raw_data.get('payout')
+        if not payout:
+            errors.append("缺少必填字段：payout")
+        
+        # 检查 payout 格式
+        if payout:
+            try:
+                float(payout)
+            except (ValueError, TypeError):
+                errors.append(f"payout 格式错误：{payout}（应为数字）")
         
         # 检查 event_value（如果有）
         event_value = raw_data.get('event_value')
@@ -54,14 +57,6 @@ class DataValidator:
                 float(event_value)
             except (ValueError, TypeError):
                 errors.append(f"event_value 格式错误：{event_value}（应为数字）")
-        
-        # 检查 payout（如果有）
-        payout = raw_data.get('payout')
-        if payout is not None:
-            try:
-                float(payout)
-            except (ValueError, TypeError):
-                errors.append(f"payout 格式错误：{payout}（应为数字）")
         
         # 记录验证结果
         if errors:

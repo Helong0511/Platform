@@ -23,6 +23,12 @@ from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
 from app.core.postback.handlers import register_handler, get_handler, list_platforms
 
+# 注册 postback 处理器
+from app.core.postback.handlers_registry import register_postback_handlers
+
+# 注册所有处理器
+register_postback_handlers()
+
 __all__ = [
     # 主处理器
     'PostbackProcessor',
