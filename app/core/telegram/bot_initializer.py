@@ -64,7 +64,6 @@ def initialize_bot():
     # 验证共享状态中的进程是否真的在运行
     if bot_initialized_in_state and current_pid_in_state:
         try:
-            import os
             os.kill(current_pid_in_state, 0)
             # 进程在运行，跳过初始化
             logger.info(f"Bot 已在其他进程（PID:{current_pid_in_state}）中初始化，跳过初始化...")
