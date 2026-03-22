@@ -55,6 +55,8 @@
             <el-option label="Lead" value="Lead"></el-option>
             <el-option label="CompleteRegistration" value="CompleteRegistration"></el-option>
             <el-option label="ViewContent" value="ViewContent"></el-option>
+            <el-option label="viewWebpage" value="viewWebpage"></el-option>
+            <el-option label="finishPayment" value="finishPayment"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
@@ -108,6 +110,8 @@
             <el-tag size="small">{{ scope.row.event }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column v-if="columnVisibility.conversion_id" prop="conversion_id" label="转化ID" min-width="180"
+          show-overflow-tooltip />
         <el-table-column v-if="columnVisibility.status" prop="status" label="状态" width="90" align="center">
           <template #default="scope">
             <el-tag :type="getStatusTag(scope.row.status)" size="small">
@@ -135,13 +139,9 @@
         </el-table-column>
         <el-table-column v-if="columnVisibility.use_hash" prop="use_hash" label="哈希处理" width="120" align="center">
           <template #default="scope">
-            <el-button 
-              size="small" 
-              :type="scope.row.use_hash ? 'success' : 'danger'"
-              @click="handleHashToggle(scope.row)"
-              :loading="scope.row._hashLoading"
-              :disabled="scope.row._hashLoading || loading"
-            >
+            <el-button size="small" :type="scope.row.use_hash ? 'success' : 'danger'"
+              @click="handleHashToggle(scope.row)" :loading="scope.row._hashLoading"
+              :disabled="scope.row._hashLoading || loading">
               {{ scope.row.use_hash ? '启用' : '禁用' }}
             </el-button>
           </template>
@@ -157,10 +157,12 @@
             {{ scope.row.report_success_time ? formatDateTime(scope.row.report_success_time) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column v-if="columnVisibility.report_params" prop="report_params" label="完整上报参数" min-width="200" show-overflow-tooltip>
+        <el-table-column v-if="columnVisibility.report_params" prop="report_params" label="完整上报参数" min-width="200"
+          show-overflow-tooltip>
           <template #default="scope">
             <span v-if="scope.row.report_params" class="report-params-preview">
-              {{ (scope.row.report_params.length > 50) ? scope.row.report_params.substring(0, 50) + '...' : scope.row.report_params }}
+              {{ (scope.row.report_params.length > 50) ? scope.row.report_params.substring(0, 50) + '...' :
+                scope.row.report_params }}
             </span>
             <span v-else>-</span>
           </template>
@@ -204,13 +206,14 @@
           <el-descriptions-item label="事件类型">
             <el-tag size="small">{{ currentLog.event }}</el-tag>
           </el-descriptions-item>
+          <el-descriptions-item label="转化ID">{{ currentLog.conversion_id || '-' }}</el-descriptions-item>
           <el-descriptions-item label="状态">
             <el-tag :type="getStatusTag(currentLog.status)">
               {{ getStatusLabel(currentLog.status) }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="尝试次数">{{ currentLog.attempt_count }} / {{ currentLog.max_attempts
-            }}</el-descriptions-item>
+          }}</el-descriptions-item>
           <el-descriptions-item :label="currentLog.use_hash ? '邮箱（已哈希）' : '邮箱'">
             {{ currentLog.email || '-' }}
           </el-descriptions-item>
@@ -283,7 +286,12 @@
             <el-option label="Lead" value="Lead" />
             <el-option label="CompleteRegistration" value="CompleteRegistration" />
             <el-option label="ViewContent" value="ViewContent" />
+            <el-option label="viewWebpage" value="viewWebpage" />
+            <el-option label="finishPayment" value="finishPayment" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="转化ID">
+          <el-input v-model="editForm.conversion_id" placeholder="请输入转化ID" />
         </el-form-item>
         <el-form-item label="邮箱">
           <el-input v-model="editForm.email" placeholder="请输入邮箱" />
@@ -320,6 +328,7 @@
         <el-checkbox label="source">来源</el-checkbox>
         <el-checkbox label="adsid">广告ID</el-checkbox>
         <el-checkbox label="event">事件类型</el-checkbox>
+        <el-checkbox label="conversion_id">转化ID</el-checkbox>
         <el-checkbox label="status">状态</el-checkbox>
         <el-checkbox label="attempt_count">尝试次数</el-checkbox>
         <el-checkbox label="response_status">响应状态码</el-checkbox>
@@ -373,6 +382,7 @@ const getDefaultColumnVisibility = () => ({
   source: true,
   adsid: true,
   event: true,
+  conversion_id: true,
   status: true,
   attempt_count: true,
   response_status: true,
@@ -419,6 +429,7 @@ const saveColumnVisibility = () => {
       source: columnVisibility.source,
       adsid: columnVisibility.adsid,
       event: columnVisibility.event,
+      conversion_id: columnVisibility.conversion_id,
       status: columnVisibility.status,
       attempt_count: columnVisibility.attempt_count,
       response_status: columnVisibility.response_status,
@@ -481,6 +492,7 @@ const editLogId = ref(null);
 const editForm = reactive({
   adsid: '',
   event: '',
+  conversion_id: '',
   email: '',
   ip: '',
   phone: '',
@@ -648,6 +660,7 @@ const handleEdit = (log) => {
   editLogId.value = log.id;
   editForm.adsid = log.adsid || '';
   editForm.event = log.event || '';
+  editForm.conversion_id = log.conversion_id || '';
   editForm.email = log.email || '';
   editForm.ip = log.ip || '';
   editForm.phone = log.phone || '';
@@ -663,6 +676,7 @@ const handleSaveEdit = async () => {
     const params = {};
     if (editForm.adsid) params.adsid = editForm.adsid;
     if (editForm.event) params.event = editForm.event;
+    if (editForm.conversion_id) params.conversion_id = editForm.conversion_id;
     if (editForm.email) params.email = editForm.email;
     if (editForm.ip) params.ip = editForm.ip;
     if (editForm.phone) params.phone = editForm.phone;
@@ -710,10 +724,10 @@ const handleHashToggle = async (log) => {
     log.use_hash = !oldValue;
     // 设置加载状态
     log._hashLoading = true;
-    
+
     // 调用API更新状态
     await updateThirdPartyReport(log.id, { use_hash: log.use_hash });
-    
+
     ElMessage.success(`哈希处理已${log.use_hash ? '启用' : '禁用'}`);
     // 刷新日志列表
     fetchLogs();

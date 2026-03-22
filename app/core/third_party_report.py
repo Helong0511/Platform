@@ -43,7 +43,8 @@ async def create_report_log(
         ua: str,
         max_attempts: int = 3,
         use_hash: bool = True,
-        report_params: Optional[str] = None
+        report_params: Optional[str] = None,
+        conversion_id: Optional[str] = None
 ) -> int:
     """
     创建第三方上报日志记录
@@ -54,6 +55,7 @@ async def create_report_log(
                 source=source,
                 adsid=adsid,
                 event=event,
+                conversion_id=conversion_id,
                 email=email,
                 ip=ip,
                 phone=phone,
@@ -132,7 +134,8 @@ async def send_third_party_report(
         ua: str,
         source: str = "unknown",
         use_hash: bool = True,
-        report_log_id: Optional[int] = None
+        report_log_id: Optional[int] = None,
+        conversion_id: Optional[str] = None
 ):
     """
     后台任务：发送第三方广告上报
@@ -141,7 +144,7 @@ async def send_third_party_report(
 
     参数要求：
     - viewWebpage 事件：email, ip, phone, ua 必须提供
-    - finishPayment 事件：email, ip, phone, ua 可选
+    - finishPayment 事件：email, ip, phone, ua 必须提供
     - report_log_id：可选，指定使用现有的日志记录进行上报
     """
     max_retries = 3
@@ -149,19 +152,46 @@ async def send_third_party_report(
     timeout = 5  # 超时时间（秒）
     failure_reasons = []  # 收集失败原因
 
-    # 如果没有提供 report_log_id，则创建新的日志记录
+    # 如果没有提供 report_log_id，则尝试通过 adsid 查找现有日志
     if not report_log_id:
-        report_log_id = await create_report_log(
-            source=source,
-            adsid=adsid,
-            event=event,
-            email=email,
-            ip=ip,
-            phone=phone,
-            ua=ua,
-            max_attempts=max_retries,
-            use_hash=use_hash
-        )
+        # 尝试查找具有相同 adsid 的现有日志
+        async with AsyncSessionLocal() as db:
+            from sqlalchemy import select
+            result = await db.execute(
+                select(ThirdPartyReportLog)
+                .where(ThirdPartyReportLog.adsid == adsid)
+                .order_by(ThirdPartyReportLog.id.desc())
+            )
+            existing_log = result.scalars().first()
+            if existing_log:
+                report_log_id = existing_log.id
+                # 重置现有日志状态
+                await update_report_log(
+                    report_log_id,
+                    status="pending",
+                    attempt_count=0,
+                    response_status=None,
+                    response_body=None,
+                    log_id_from_response=None,
+                    error_message=None,
+                    report_start_time=None,
+                    report_success_time=None,
+                    completed_at=None
+                )
+            else:
+                # 没有找到现有日志，创建新的日志记录
+                report_log_id = await create_report_log(
+                    source=source,
+                    adsid=adsid,
+                    event=event,
+                    email=email,
+                    ip=ip,
+                    phone=phone,
+                    ua=ua,
+                    max_attempts=max_retries,
+                    use_hash=use_hash,
+                    conversion_id=conversion_id
+                )
     else:
         # 如果提供了 report_log_id，重置日志状态
         await update_report_log(
@@ -390,6 +420,7 @@ async def update_report_log_params(
         log_id: int,
         adsid: Optional[str] = None,
         event: Optional[str] = None,
+        conversion_id: Optional[str] = None,
         email: Optional[str] = None,
         ip: Optional[str] = None,
         phone: Optional[str] = None,
@@ -415,6 +446,8 @@ async def update_report_log_params(
                 log_entry.adsid = adsid
             if event is not None:
                 log_entry.event = event
+            if conversion_id is not None:
+                log_entry.conversion_id = conversion_id
             if email is not None:
                 log_entry.email = email
             if ip is not None:
