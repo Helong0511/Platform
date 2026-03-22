@@ -22,8 +22,18 @@ TIMEOUT_SECONDS = 15  # 超时时间（秒）
 
 def _check_bot_available() -> tuple[bool, str]:
     """检查 Bot 是否可用，并返回详细状态信息"""
+    # 重新导入模块以获取最新状态
+    from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
+    
     if not TELEBOT_AVAILABLE:
-        return False, "pyTelegramBotAPI 模块未安装"
+        # 动态检查模块是否安装
+        try:
+            import telebot
+            # 更新全局状态
+            from app.core.telegram.bot_state import set_bot_state
+            set_bot_state(bot, bot_initialized, True)
+        except ImportError:
+            return False, "pyTelegramBotAPI 模块未安装"
     if not bot_initialized:
         return False, "Bot 未初始化"
     if bot is None:
