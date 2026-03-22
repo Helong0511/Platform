@@ -18,45 +18,44 @@ class DuplicateChecker:
     
     @staticmethod
     async def is_duplicate(
-        platform: str,
         conversion_id: str,
-        event_name: str,
+        click_id: Optional[str],
         db: AsyncSession
     ) -> bool:
         """
         检查转化是否已处理过
         
         Args:
-            platform: 平台名称
             conversion_id: 转化 ID
-            event_name: 事件名称
+            click_id: 点击 ID
             db: 数据库会话
         
         Returns:
             bool: 是否重复
         """
-        # 基于 platform + conversion_id + event_name 的唯一性检查
-        result = await db.execute(
-            select(PostbackConversion.id)
-            .where(
-                PostbackConversion.platform == platform,
-                PostbackConversion.conversion_id == conversion_id,
-                PostbackConversion.event_name == event_name
+        # 检查conversion_id是否已存在
+        if conversion_id:
+            result = await db.execute(
+                select(PostbackConversion.id)
+                .where(PostbackConversion.conversion_id == conversion_id)
+                .limit(1)
             )
-            .limit(1)
-        )
+            existing = result.scalar_one_or_none()
+            if existing:
+                logger.info(f"检测到重复转化：conversion_id={conversion_id}")
+                return True
         
-        existing = result.scalar_one_or_none()
-        
-        if existing:
-            logger.info(
-                f"检测到重复转化：platform={platform}, "
-                f"conversion_id={conversion_id}, event_name={event_name}"
+        # 检查click_id是否已存在
+        if click_id:
+            result = await db.execute(
+                select(PostbackConversion.id)
+                .where(PostbackConversion.click_id == click_id)
+                .limit(1)
             )
-            return True
+            existing = result.scalar_one_or_none()
+            if existing:
+                logger.info(f"检测到重复转化：click_id={click_id}")
+                return True
         
-        logger.debug(
-            f"转化未重复：platform={platform}, "
-            f"conversion_id={conversion_id}, event_name={event_name}"
-        )
+        logger.debug(f"转化未重复：conversion_id={conversion_id}, click_id={click_id}")
         return False

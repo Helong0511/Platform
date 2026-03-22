@@ -4,6 +4,7 @@ Telegram Bot 初始化模块
 负责初始化和配置 Telegram Bot 实例
 """
 import logging
+import os
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -117,8 +118,15 @@ def initialize_bot():
                     # 初始化 Telegram Bot
                     bot_instance = telebot.TeleBot(token=token)
                     set_bot_state(bot_instance, True, dynamic_telebot_available)
-                    # 更新共享状态
-                    update_shared_state("bot_initialized", True)
+                    # 更新共享状态（原子操作，避免竞态条件）
+                    from app.core.telegram.shared_state import set_shared_state
+                    set_shared_state({
+                        "bot_initialized": True,
+                        "current_pid": os.getpid(),
+                        "bot_running": False,
+                        "last_start_time": None,
+                        "bot_username": None
+                    })
                     logger.info(f"Telegram Bot 初始化成功，token: {token[:4]}****")
                     return bot_instance, True, dynamic_telebot_available
                 else:
@@ -164,6 +172,5 @@ def is_bot_available() -> bool:
     return bot_initialized and TELEBOT_AVAILABLE and bot is not None
 
 
-# 自动初始化 Bot
-# 注意：这会在模块导入时执行，确保 settings 已完全初始化
-bot_instance, initialized, available = initialize_bot()
+# 初始化 Bot 的函数将在 main.py 中显式调用
+# 避免模块导入时执行，防止多进程同时初始化

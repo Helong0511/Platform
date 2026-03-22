@@ -27,9 +27,12 @@ class DataNormalizer:
         Returns:
             dict: 标准化后的数据
         """
+        # 获取转化ID（优先使用conversion_id，其次使用click_id，最后使用clk_id）
+        conversion_id = raw_data.get('conversion_id') or raw_data.get('click_id') or raw_data.get('clk_id')
+        
         normalized = {
             'platform': platform,
-            'conversion_id': str(raw_data.get('conversion_id') or raw_data.get('clk_id') or ''),
+            'conversion_id': str(conversion_id or ''),
             'event_name': str(raw_data.get('event_name') or 'default'),
             'event_value': DataNormalizer._parse_float(raw_data.get('event_value')),
             'payout': DataNormalizer._parse_float(raw_data.get('payout') or raw_data.get('amount')),

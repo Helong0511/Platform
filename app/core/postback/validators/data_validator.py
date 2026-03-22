@@ -50,14 +50,6 @@ class DataValidator:
             except (ValueError, TypeError):
                 errors.append(f"payout 格式错误：{payout}（应为数字）")
         
-        # 检查 event_value（如果有）
-        event_value = raw_data.get('event_value')
-        if event_value is not None:
-            try:
-                float(event_value)
-            except (ValueError, TypeError):
-                errors.append(f"event_value 格式错误：{event_value}（应为数字）")
-        
         # 记录验证结果
         if errors:
             logger.warning(

@@ -151,6 +151,7 @@ class PostbackProcessor:
             
             is_dup = await DuplicateChecker.is_duplicate(
                 conversion_id=conversion_id,
+                click_id=normalized_data.get('click_id'),
                 db=db
             )
             

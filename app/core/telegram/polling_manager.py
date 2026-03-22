@@ -168,17 +168,26 @@ def start_polling():
     _bot_started = True
     logger.info(f"[PID:{current_pid}] 成功获取锁，标记 Bot 为已启动状态")
     
-    # 更新共享状态
-    update_shared_state("bot_running", True)
-    update_shared_state("current_pid", current_pid)
-    update_shared_state("last_start_time", time.time())
+    # 更新共享状态（原子操作，避免竞态条件）
+    from app.core.telegram.shared_state import set_shared_state
+    set_shared_state({
+        "bot_initialized": True,
+        "bot_running": True,
+        "current_pid": current_pid,
+        "last_start_time": time.time(),
+        "bot_username": None
+    })
     
     # 验证是否已有其他 Bot 实例在运行
     try:
         logger.info(f"[PID:{current_pid}] 验证是否已有其他 Bot 实例在运行...")
         bot_info = bot.get_me()
         logger.info(f"[PID:{current_pid}] 验证成功，Bot 可以正常运行：@{bot_info.username}")
-        update_shared_state("bot_username", bot_info.username)
+        # 更新共享状态（原子操作，避免竞态条件）
+        from app.core.telegram.shared_state import set_shared_state
+        current_state = get_shared_state()
+        current_state["bot_username"] = bot_info.username
+        set_shared_state(current_state)
         
         # 发送启动消息（只有真正获取到锁的进程才发送）
         try:
@@ -194,7 +203,15 @@ def start_polling():
         if '409' in error_msg or 'Conflict' in error_msg or 'terminated by other getUpdates' in error_msg:
             logger.error(f"[PID:{current_pid}] 验证失败：检测到其他 Bot 实例正在运行")
             release_bot_lock()
-            update_shared_state("bot_running", False)
+            # 更新共享状态（原子操作，避免竞态条件）
+            from app.core.telegram.shared_state import set_shared_state
+            set_shared_state({
+                "bot_initialized": True,
+                "bot_running": False,
+                "current_pid": None,
+                "last_start_time": None,
+                "bot_username": None
+            })
             return False
         else:
             logger.warning(f"[PID:{current_pid}] 验证时发生错误，但继续启动：{e}")
@@ -281,8 +298,15 @@ def start_polling():
                 release_bot_lock()
                 # 标记 Bot 为未启动状态，避免重复尝试
                 _bot_started = False
-                # 更新共享状态
-                update_shared_state("bot_running", False)
+                # 更新共享状态（原子操作，避免竞态条件）
+                from app.core.telegram.shared_state import set_shared_state
+                set_shared_state({
+                    "bot_initialized": True,
+                    "bot_running": False,
+                    "current_pid": None,
+                    "last_start_time": None,
+                    "bot_username": None
+                })
                 # 额外的清理：删除锁文件
                 try:
                     from app.core.telegram.file_lock import get_default_lock_path
@@ -339,8 +363,15 @@ def start_polling():
     
     # 重置启动状态
     _bot_started = False
-    # 更新共享状态
-    update_shared_state("bot_running", False)
+    # 更新共享状态（原子操作，避免竞态条件）
+    from app.core.telegram.shared_state import set_shared_state
+    set_shared_state({
+        "bot_initialized": True,
+        "bot_running": False,
+        "current_pid": None,
+        "last_start_time": None,
+        "bot_username": None
+    })
     
     return True
 
