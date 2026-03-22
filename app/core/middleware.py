@@ -294,16 +294,24 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
         except Exception:
             client_ip = "unknown"
         
+        try:
+            device_type = get_device_type(request)
+        except Exception:
+            device_type = "unknown"
+        
+        user_agent = request.headers.get("User-Agent", "未知")
+        path = unquote(request.url.path)
+        
         log_message = (
-            f"{'失败请求' if failed else '慢请求'}: {request.method} {request.url.path} "
-            f"耗时 {process_time:.3f}s, IP: {client_ip}"
+            f"{'失败请求' if failed else '慢请求'}: {request.method} {path} "
+            f"耗时 {process_time:.3f}s, IP: {client_ip}, 设备: {device_type}, UA: {user_agent}"
         )
         
         if error:
             log_message += f", 错误: {error}"
         
         # 添加查询参数信息（如果有）
-        if request.query_params:
+        if request.query_params and not settings.is_production:
             log_message += f", 参数: {dict(request.query_params)}"
         
         if level == "error":
@@ -416,6 +424,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp):
         super().__init__(app)
         self.app = app
+        # 获取访问日志记录器
+        self.access_logger = logging.getLogger('access')
 
     async def dispatch(self, request: Request, call_next):
         # ====== 记录请求开始时间 ======
@@ -433,17 +443,24 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         path = unquote(request.url.path)
         # 生产环境不记录查询参数（可能包含敏感信息）
         query_params = str(request.query_params) if request.query_params and not settings.is_production else ""
+        # 获取用户代理
+        user_agent = request.headers.get("User-Agent", "未知")
+        # 获取设备类型
+        try:
+            device_type = get_device_type(request)
+        except Exception:
+            device_type = "未知"
 
         # ====== 记录请求日志（生产环境简化） ======
         if settings.is_production:
             # 生产环境：只记录关键信息，不记录敏感数据
-            logger.info(
-                f"请求开始: {method} {path} | IP: {client_ip}"
+            self.access_logger.info(
+                f"请求开始: {method} {path} | IP: {client_ip} | 设备: {device_type} | UA: {user_agent}"
             )
         else:
             # 开发环境：记录详细信息
-            logger.info(
-                f"请求开始: {method} {path} | IP: {client_ip} | 查询参数: {query_params}"
+            self.access_logger.info(
+                f"请求开始: {method} {path} | IP: {client_ip} | 设备: {device_type} | UA: {user_agent} | 查询参数: {query_params}"
             )
 
         # ====== 处理请求 ======
@@ -453,11 +470,11 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             process_time = time.time() - start_time
 
             # ====== 记录响应日志 ======
-            logger.info(
+            self.access_logger.info(
                 f"请求完成: {method} {path} | "
                 f"状态码: {response.status_code} | "
                 f"处理时间: {process_time:.3f}秒 | "
-                f"IP: {client_ip}"
+                f"IP: {client_ip} | 设备: {device_type}"
             )
 
             # ====== 添加处理时间响应头 ======
@@ -470,11 +487,11 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             # 避免重复记录完整的堆栈跟踪
             process_time = time.time() - start_time
             # 只记录简要信息，详细错误由全局异常处理器记录
-            logger.warning(
+            self.access_logger.warning(
                 f"请求异常: {method} {path} | "
                 f"错误类型: {type(e).__name__} | "
                 f"处理时间: {process_time:.3f}秒 | "
-                f"IP: {client_ip}"
+                f"IP: {client_ip} | 设备: {device_type}"
             )
             raise
 

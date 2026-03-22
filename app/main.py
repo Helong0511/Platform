@@ -103,9 +103,14 @@ root_logger = logging.getLogger()
 log_level = settings.LOG_LEVEL if hasattr(settings, 'LOG_LEVEL') else ("WARNING" if settings.is_production else "INFO")
 root_logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
 
-# 多进程环境优化：在日志中包含进程ID，便于区分不同 worker
+# 多进程环境优化：在日志中包含进程ID、线程ID、模块名等详细信息
 formatter = logging.Formatter(
-    '%(asctime)s - [PID:%(process)d] - %(name)s - %(levelname)s - %(message)s'
+    '%(asctime)s - [PID:%(process)d] - [TID:%(thread)d] - %(name)s - %(levelname)s - %(message)s'
+)
+
+# 详细格式化器，包含更多上下文信息
+detailed_formatter = logging.Formatter(
+    '%(asctime)s - [PID:%(process)d] - [TID:%(thread)d] - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
 )
 
 # ====== 创建分类日志文件 ======
@@ -119,7 +124,7 @@ try:
         backupCount=LOG_FILE_BACKUP_COUNT,
         encoding='utf-8'
     )
-    app_log_handler.setFormatter(formatter)
+    app_log_handler.setFormatter(detailed_formatter)
     app_log_handler.setLevel(logging.WARNING)  # 只记录 WARNING 及以上级别
     root_logger.addHandler(app_log_handler)
 except (OSError, PermissionError) as e:
@@ -135,20 +140,20 @@ try:
         backupCount=LOG_FILE_BACKUP_COUNT,
         encoding='utf-8'
     )
-    scheduler_log_handler.setFormatter(formatter)
-    scheduler_log_handler.setLevel(logging.INFO)  # 记录 INFO 及以上级别
+    scheduler_log_handler.setFormatter(detailed_formatter)
+    scheduler_log_handler.setLevel(logging.DEBUG)  # 记录 DEBUG 及以上级别，更详细
 
     # 只添加到调度器相关的 logger
     # 注意：propagate=True，这样 WARNING 及以上级别会同时输出到 app.log
     scheduler_logger = logging.getLogger('app.scheduler')
     scheduler_logger.addHandler(scheduler_log_handler)
-    scheduler_logger.setLevel(logging.INFO)
+    scheduler_logger.setLevel(logging.DEBUG)
     scheduler_logger.propagate = True  # 允许传播，WARNING+ 会输出到 app.log
 
     # 调度器模块的 logger
     scheduler_module_logger = logging.getLogger('app.scheduler_module')
     scheduler_module_logger.addHandler(scheduler_log_handler)
-    scheduler_module_logger.setLevel(logging.INFO)
+    scheduler_module_logger.setLevel(logging.DEBUG)
     scheduler_module_logger.propagate = True  # 允许传播，WARNING+ 会输出到 app.log
 except (OSError, PermissionError) as e:
     root_logger.warning(f"无法创建 scheduler.log 文件: {e}")
@@ -163,14 +168,14 @@ try:
         backupCount=LOG_FILE_BACKUP_COUNT,
         encoding='utf-8'
     )
-    telegram_log_handler.setFormatter(formatter)
-    telegram_log_handler.setLevel(logging.INFO)  # 记录 INFO 及以上级别
+    telegram_log_handler.setFormatter(detailed_formatter)
+    telegram_log_handler.setLevel(logging.DEBUG)  # 记录 DEBUG 及以上级别，更详细
 
     # 只添加到 Telegram 相关的 logger
     # 注意：propagate=True，这样 WARNING 及以上级别会同时输出到 app.log
     telegram_logger = logging.getLogger('app.core.telegram')
     telegram_logger.addHandler(telegram_log_handler)
-    telegram_logger.setLevel(logging.INFO)
+    telegram_logger.setLevel(logging.DEBUG)
     telegram_logger.propagate = True  # 允许传播，WARNING+ 会输出到 app.log
 except (OSError, PermissionError) as e:
     root_logger.warning(f"无法创建 telegram.log 文件: {e}")
@@ -185,14 +190,14 @@ try:
         backupCount=LOG_FILE_BACKUP_COUNT,
         encoding='utf-8'
     )
-    postback_log_handler.setFormatter(formatter)
-    postback_log_handler.setLevel(logging.INFO)  # 记录 INFO 及以上级别
+    postback_log_handler.setFormatter(detailed_formatter)
+    postback_log_handler.setLevel(logging.DEBUG)  # 记录 DEBUG 及以上级别，更详细
 
     # 只添加到 PostBack 相关的 logger
     # 注意：propagate=True，这样 WARNING 及以上级别会同时输出到 app.log
     postback_logger = logging.getLogger('app.core.postback')
     postback_logger.addHandler(postback_log_handler)
-    postback_logger.setLevel(logging.INFO)
+    postback_logger.setLevel(logging.DEBUG)
     postback_logger.propagate = True  # 允许传播，WARNING+ 会输出到 app.log
 except (OSError, PermissionError) as e:
     root_logger.warning(f"无法创建 postback.log 文件: {e}")
@@ -208,18 +213,46 @@ if not settings.is_production:
             backupCount=LOG_FILE_BACKUP_COUNT,
             encoding='utf-8'
         )
-        debug_log_handler.setFormatter(formatter)
+        debug_log_handler.setFormatter(detailed_formatter)
         debug_log_handler.setLevel(logging.DEBUG)
         root_logger.addHandler(debug_log_handler)
     except (OSError, PermissionError) as e:
         root_logger.warning(f"无法创建 debug.log 文件: {e}")
+
+# 6. access.log: 记录所有HTTP请求的详细日志
+access_log_handler = None
+access_log_path = os.path.join(log_dir, 'access.log')
+try:
+    access_log_handler = RotatingFileHandler(
+        access_log_path,
+        maxBytes=LOG_FILE_MAX_BYTES,
+        backupCount=LOG_FILE_BACKUP_COUNT,
+        encoding='utf-8'
+    )
+    access_log_handler.setFormatter(detailed_formatter)
+    access_log_handler.setLevel(logging.INFO)
+    # 创建专门的访问日志记录器
+    access_logger = logging.getLogger('access')
+    access_logger.addHandler(access_log_handler)
+    access_logger.setLevel(logging.INFO)
+    access_logger.propagate = False  # 不传播，避免重复记录
+except (OSError, PermissionError) as e:
+    root_logger.warning(f"无法创建 access.log 文件: {e}")
 
 # 向后兼容：file_handler 指向 app_log_handler（用于 stdout/stderr 重定向）
 file_handler = app_log_handler
 
 # 记录日志文件创建信息
 if app_log_handler:
-    root_logger.warning(f"日志文件已创建: app.log (WARNING+), scheduler.log (INFO+), telegram.log (INFO+), postback.log (INFO+), debug.log (DEBUG+, 仅开发环境)")
+    log_files_info = [
+        "app.log (WARNING+)",
+        "scheduler.log (DEBUG+)",
+        "telegram.log (DEBUG+)",
+        "postback.log (DEBUG+)",
+        "access.log (INFO+)",
+        "debug.log (DEBUG+, 仅开发环境)"
+    ]
+    root_logger.warning(f"日志文件已创建: {', '.join(log_files_info)}")
 
 
 # 重定向 stdout 和 stderr 到日志文件（捕获 print() 输出）
@@ -1039,8 +1072,13 @@ async def global_exception_handler(request: Request, exc: Exception):
     # 注意：RequestLoggingMiddleware 已经记录了简要异常信息，这里记录完整堆栈跟踪
     error_message = str(exc)
     error_type = type(exc).__name__
+    try:
+        client_ip = get_client_ip(request)
+    except Exception:
+        client_ip = "unknown"
+    
     logger.error(
-        f"未处理的异常: {request.method} {request.url.path} | 错误类型: {error_type} | 错误: {error_message}",
+        f"未处理的异常: {request.method} {request.url.path} | 错误类型: {error_type} | 错误: {error_message} | IP: {client_ip}",
         exc_info=True
     )
 
