@@ -195,7 +195,7 @@ class PostbackProcessor:
             logger.info(f"扣量计算结果：final_payout={final_payout}, 扣量信息：{deduction_info}")
             
             # ========== 第 8 步：保存转化记录 ==========
-            logger.info("=== 第 8 步：保存转化记录 ===")
+            logger.info("=== 第 8 步：保存转化记录 ====")
             conversion = await ConversionSaver.save(
                 normalized_data=normalized_data,
                 click_association=click_association,
@@ -208,7 +208,7 @@ class PostbackProcessor:
             
             # 更新 Click 统计
             if click_association:
-                logger.info("=== 更新 Click 统计 ===")
+                logger.info("=== 更新 Click 统计 ====")
                 await ConversionSaver.update_click_conversion(
                     click_association=click_association,
                     conversion_id=conversion.id,
@@ -216,24 +216,30 @@ class PostbackProcessor:
                 )
                 logger.info("Click 统计更新成功")
             
-            # ========== 第 9 步：渠道转发 ==========
-            logger.info("=== 第 9 步：渠道转发 ===")
-            if click_association and click_association.get('publisher'):
-                logger.info(f"开始转发到渠道：publisher_id={click_association.get('publisher_id')}")
-                await PostbackForwarder.forward_to_publisher(conversion, db, click_association)
-                logger.info("渠道转发完成")
-            else:
-                logger.info("无渠道信息，跳过转发")
-            
-            # ========== 第 10 步：通知发送 ==========
-            logger.info("=== 第 10 步：通知发送 ===")
-            await PostbackNotifier.notify_conversion(conversion, db)
-            logger.info("通知发送完成")
-            
             # ========== 第 11 步：提交事务 ==========
-            logger.info("=== 第 11 步：提交事务 ===")
+            logger.info("=== 第 11 步：提交事务 ====")
             await db.commit()
             logger.info("事务提交成功")
+            
+            # ========== 第 9 步：渠道转发 ==========
+            logger.info("=== 第 9 步：渠道转发 ====")
+            try:
+                if click_association and click_association.get('publisher'):
+                    logger.info(f"开始转发到渠道：publisher_id={click_association.get('publisher_id')}")
+                    await PostbackForwarder.forward_to_publisher(conversion, db, click_association)
+                    logger.info("渠道转发完成")
+                else:
+                    logger.info("无渠道信息，跳过转发")
+            except Exception as e:
+                logger.warning(f"渠道转发失败：{e}", exc_info=True)
+            
+            # ========== 第 10 步：通知发送 ==========
+            logger.info("=== 第 10 步：通知发送 ====")
+            try:
+                await PostbackNotifier.notify_conversion(conversion, db)
+                logger.info("通知发送完成")
+            except Exception as e:
+                logger.warning(f"通知发送失败：{e}", exc_info=True)
             
             # ========== 完成 ==========
             logger.info("=== PostBack 处理完成 ===")
