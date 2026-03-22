@@ -26,6 +26,8 @@ _bot_started = False
 
 def _check_bot_available() -> bool:
     """检查 Bot 是否可用"""
+    # 重新导入模块以获取最新状态
+    from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
     return bot_initialized and TELEBOT_AVAILABLE and bot is not None
 
 
@@ -34,6 +36,9 @@ def set_bot_commands():
     if not _check_bot_available():
         logger.warning("Bot 未初始化，无法设置命令")
         return
+    
+    # 重新导入模块以获取最新状态
+    from app.core.telegram.bot_state import bot
     
     try:
         from telebot.types import BotCommand
@@ -71,6 +76,9 @@ def register_handlers():
     if not _check_bot_available():
         logger.warning("Bot 未初始化，无法注册处理器")
         return
+    
+    # 重新导入模块以获取最新状态
+    from app.core.telegram.bot_state import bot
     
     try:
         from app.core.telegram.command_handlers.id_command import get_chat_id
@@ -132,6 +140,9 @@ def start_polling():
     if not telegram_enabled:
         logger.info(f"[PID:{current_pid}] Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过启动")
         return False
+    
+    # 重新导入模块以获取最新状态
+    from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
     
     if not TELEBOT_AVAILABLE:
         logger.error(f"[PID:{current_pid}] pyTelegramBotAPI 未安装，无法启动 Bot")
