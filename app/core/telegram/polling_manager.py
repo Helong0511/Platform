@@ -295,7 +295,22 @@ def start_polling():
                 logger.info(f"[PID:{current_pid}] 检测到冲突，释放锁并停止轮询")
                 return False
             
-            logger.error(f"轮询过程中发生错误：{e}", exc_info=True)
+            # 检查是否为网络相关错误（如 502 Bad Gateway）
+            is_network_error = (
+                '502' in error_msg or 
+                'Bad Gateway' in error_msg or 
+                'timeout' in error_msg.lower() or 
+                'timed out' in error_msg.lower() or 
+                'connection' in error_msg.lower() or 
+                'network' in error_msg.lower() or
+                'urllib3' in error_msg or
+                'requests' in error_msg
+            )
+            
+            if is_network_error:
+                logger.warning(f"轮询过程中发生网络错误（可能是临时的）：{e}")
+            else:
+                logger.error(f"轮询过程中发生错误：{e}", exc_info=True)
             
             # 检查是否需要重连
             retry_count += 1
