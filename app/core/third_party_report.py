@@ -160,25 +160,68 @@ async def send_third_party_report(
     参数要求：
     - viewWebpage 事件：email, ip, phone, ua 必须提供
     - finishPayment 事件：email, ip, phone, ua 必须提供
-    - report_log_id：可选，指定使用现有的日志记录进行上报
     """
     max_retries = 3
     base_delay = 1  # 基础延迟时间（秒）
     timeout = 5  # 超时时间（秒）
     failure_reasons = []  # 收集失败原因
 
-    # 验证 viewWebpage 事件的必需参数
+    # 验证参数
     if event == "viewWebpage" or event == "finishPayment":
         if not email or not ip or not phone or not ua:
             error_msg = f"viewWebpage 或 finishPayment 事件缺少必需参数: email={email}, ip={ip}, phone={phone}, ua={ua}"
             logger.error(f"[第三方上报] {error_msg}")
-            await update_report_log(
-                report_log_id,
-                status="failed",
-                error_message=error_msg,
-                completed_at=get_app_now_naive()
-            )
             raise ValueError("viewWebpage 或 finishPayment 事件需要提供 email, ip, phone, ua 参数")
+
+    # finishPayment 事件必须提供 conversion_id
+    if event == "finishPayment" and not conversion_id:
+        error_msg = "finishPayment 事件必须提供 conversion_id 参数"
+        logger.error(f"[第三方上报] {error_msg}")
+        raise ValueError("finishPayment 事件必须提供 conversion_id 参数")
+
+    # 创建上报日志记录，传递conversion_id
+    report_log_id = await create_report_log(
+        source=source,
+        adsid=adsid,
+        event=event,
+        email=email,
+        ip=ip,
+        phone=phone,
+        ua=ua,
+        max_attempts=max_retries,
+        use_hash=use_hash,
+        conversion_id=conversion_id
+    )
+
+    if not report_log_id:
+        error_msg = "创建上报日志记录失败"
+        logger.error(f"[第三方上报] {error_msg}")
+        raise ValueError(error_msg)
+
+    # 如果是 finishPayment 事件，更新对应的 viewWebpage 事件的 conversion_id
+    if event == "finishPayment" and conversion_id:
+        try:
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import select
+                # 查找相同 adsid 的 viewWebpage 事件
+                result = await db.execute(
+                    select(ThirdPartyReportLog)
+                    .where(ThirdPartyReportLog.source == source)
+                    .where(ThirdPartyReportLog.adsid == adsid)
+                    .where(ThirdPartyReportLog.event == "viewWebpage")
+                    .where(ThirdPartyReportLog.conversion_id.is_(None))  # 只更新未设置 conversion_id 的记录
+                )
+                view_webpage_log = result.scalars().first()
+                
+                if view_webpage_log:
+                    # 更新 viewWebpage 事件的 conversion_id
+                    view_webpage_log.conversion_id = conversion_id
+                    await db.commit()
+                    logger.info(f"[第三方上报] 已更新 viewWebpage 事件的 conversion_id: adsid={adsid}, conversion_id={conversion_id}")
+                else:
+                    logger.info(f"[第三方上报] 未找到对应的 viewWebpage 事件: adsid={adsid}")
+        except Exception as e:
+            logger.warning(f"[第三方上报] 更新 viewWebpage 事件的 conversion_id 失败: {e}")
 
     report_start_time = get_app_now_naive()
     await update_report_log(report_log_id, report_start_time=report_start_time)
@@ -365,7 +408,7 @@ async def retry_report_log(log_id: int):
                     ua=log_entry.ua,
                     source=log_entry.source,
                     use_hash=log_entry.use_hash,
-                    report_log_id=log_id
+                    conversion_id=log_entry.conversion_id
                 )
             asyncio.create_task(background_send())
             
