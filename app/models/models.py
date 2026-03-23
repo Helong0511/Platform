@@ -1286,4 +1286,5 @@ class ThirdPartyReportLog(Base):
         Index("idx_third_party_status", "status"),
         Index("idx_third_party_created_at", "created_at"),
         Index("idx_third_party_status_created", "status", "created_at"),
+        UniqueConstraint('source', 'adsid', name='unique_source_adsid'),
     )

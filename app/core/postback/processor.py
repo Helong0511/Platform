@@ -119,7 +119,8 @@ class PostbackProcessor:
             # 检查 url_params 中的 fbclid 参数并上报
             if click_association and click_association.get('url_params'):
                 url_params = click_association['url_params']
-                ip = click_association.get('ipip')
+                click_id = click_association.get('click_id')
+                ip = click_association.get('ip')
                 ua = click_association.get('user_agent')
                 fbclid = url_params.get('fbclid')
                 email = url_params.get('email')
@@ -132,6 +133,7 @@ class PostbackProcessor:
                     try:
                         await send_third_party_report(
                             adsid=fbclid,
+                            conversion_id=click_id,
                             event="finishPayment",
                             email=email,
                             ip=ip,

@@ -36,6 +36,7 @@ def sha256_hash(value: str) -> str:
 async def create_report_log(
         source: str,
         adsid: str,
+        
         event: str,
         email: str,
         ip: str,
@@ -48,9 +49,24 @@ async def create_report_log(
 ) -> int:
     """
     创建第三方上报日志记录
+    如果遇到唯一约束冲突，返回已存在记录的ID
     """
     try:
         async with AsyncSessionLocal() as db:
+            # 先检查是否已存在记录
+            from sqlalchemy import select
+            result = await db.execute(
+                select(ThirdPartyReportLog)
+                .where(ThirdPartyReportLog.source == source)
+                .where(ThirdPartyReportLog.adsid == adsid)
+            )
+            existing_log = result.scalars().first()
+            
+            if existing_log:
+                logger.warning(f"[第三方上报] 已存在记录: source={source}, adsid={adsid}, id={existing_log.id}")
+                return existing_log.id
+            
+            # 创建新记录
             log_entry = ThirdPartyReportLog(
                 source=source,
                 adsid=adsid,
@@ -134,7 +150,6 @@ async def send_third_party_report(
         ua: str,
         source: str = "unknown",
         use_hash: bool = True,
-        report_log_id: Optional[int] = None,
         conversion_id: Optional[str] = None
 ):
     """
@@ -151,61 +166,6 @@ async def send_third_party_report(
     base_delay = 1  # 基础延迟时间（秒）
     timeout = 5  # 超时时间（秒）
     failure_reasons = []  # 收集失败原因
-
-    # 如果没有提供 report_log_id，则尝试通过 adsid 查找现有日志
-    if not report_log_id:
-        # 尝试查找具有相同 adsid 的现有日志
-        async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
-            result = await db.execute(
-                select(ThirdPartyReportLog)
-                .where(ThirdPartyReportLog.adsid == adsid)
-                .order_by(ThirdPartyReportLog.id.desc())
-            )
-            existing_log = result.scalars().first()
-            if existing_log:
-                report_log_id = existing_log.id
-                # 重置现有日志状态
-                await update_report_log(
-                    report_log_id,
-                    status="pending",
-                    attempt_count=0,
-                    response_status=None,
-                    response_body=None,
-                    log_id_from_response=None,
-                    error_message=None,
-                    report_start_time=None,
-                    report_success_time=None,
-                    completed_at=None
-                )
-            else:
-                # 没有找到现有日志，创建新的日志记录
-                report_log_id = await create_report_log(
-                    source=source,
-                    adsid=adsid,
-                    event=event,
-                    email=email,
-                    ip=ip,
-                    phone=phone,
-                    ua=ua,
-                    max_attempts=max_retries,
-                    use_hash=use_hash,
-                    conversion_id=conversion_id
-                )
-    else:
-        # 如果提供了 report_log_id，重置日志状态
-        await update_report_log(
-            report_log_id,
-            status="pending",
-            attempt_count=0,
-            response_status=None,
-            response_body=None,
-            log_id_from_response=None,
-            error_message=None,
-            report_start_time=None,
-            report_success_time=None,
-            completed_at=None
-        )
 
     # 验证 viewWebpage 事件的必需参数
     if event == "viewWebpage" or event == "finishPayment":
@@ -274,6 +234,7 @@ async def send_third_party_report(
                             log_id = response_json.get("logId", "")
                             report_success_time = get_app_now_naive()
                             logger.warning(f"[第三方上报] adsid{adsid} ✓ 成功 (尝试 {attempt + 1}/{max_retries}), logId={log_id}")
+                            
                             await update_report_log(
                                 report_log_id,
                                 status="success",

@@ -11,7 +11,7 @@
  Target Server Version : 80044 (8.0.44-0ubuntu0.22.04.2)
  File Encoding         : 65001
 
- Date: 11/03/2026 10:28:32
+ Date: 23/03/2026 10:06:34
 */
 
 SET NAMES utf8mb4;
@@ -50,7 +50,7 @@ CREATE TABLE `ad_data`  (
   INDEX `idx_ad_data_date_product`(`date` ASC, `product_id` ASC) USING BTREE,
   INDEX `idx_ad_data_country_code`(`country_code` ASC) USING BTREE,
   CONSTRAINT `fk_ad_data_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 1   CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '广告数据表' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '广告数据表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for ad_data_archive
@@ -182,32 +182,6 @@ CREATE TABLE `affiliate_tests`  (
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
--- Table structure for click_stats
--- ----------------------------
-DROP TABLE IF EXISTS `click_stats`;
-CREATE TABLE `click_stats`  (
-  `id` int NOT NULL AUTO_INCREMENT COMMENT '统计记录ID',
-  `click_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '点击ID（系统生成，唯一标识）',
-  `offer_id` int NULL DEFAULT NULL COMMENT '关联的Offer ID',
-  `publisher_id` int NULL DEFAULT NULL COMMENT '关联的渠道ID',
-  `advertiser_id` int NULL DEFAULT NULL COMMENT '关联的广告主ID',
-  `click_time` datetime NOT NULL COMMENT '点击时间',
-  `created_at` datetime NOT NULL COMMENT '创建时间',
-  PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE INDEX `ix_click_stats_click_id`(`click_id` ASC) USING BTREE,
-  INDEX `ix_click_stats_advertiser_id`(`advertiser_id` ASC) USING BTREE,
-  INDEX `idx_click_stats_offer_publisher`(`offer_id` ASC, `publisher_id` ASC) USING BTREE,
-  INDEX `ix_click_stats_publisher_id`(`publisher_id` ASC) USING BTREE,
-  INDEX `idx_click_stats_time_offer_publisher`(`click_time` ASC, `offer_id` ASC, `publisher_id` ASC) USING BTREE,
-  INDEX `ix_click_stats_click_time`(`click_time` ASC) USING BTREE,
-  INDEX `ix_click_stats_id`(`id` ASC) USING BTREE,
-  INDEX `ix_click_stats_offer_id`(`offer_id` ASC) USING BTREE,
-  CONSTRAINT `click_stats_ibfk_1` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
-  CONSTRAINT `click_stats_ibfk_2` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
-  CONSTRAINT `click_stats_ibfk_3` FOREIGN KEY (`advertiser_id`) REFERENCES `advertisers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic;
-
--- ----------------------------
 -- Table structure for clicks
 -- ----------------------------
 DROP TABLE IF EXISTS `clicks`;
@@ -308,7 +282,7 @@ CREATE TABLE `clicks_archive`  (
   INDEX `idx_click_time`(`click_time` ASC) USING BTREE,
   INDEX `idx_conversion_id`(`conversion_id` ASC) USING BTREE,
   INDEX `idx_clicks_time_offer_publisher`(`click_time` ASC, `offer_id` ASC, `publisher_id` ASC) USING BTREE
-) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '点击记录归档表' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '点击记录归档表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for client_notification_configs
@@ -981,6 +955,44 @@ CREATE TABLE `tb_search_data`  (
   CONSTRAINT `tb_search_data_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `tb_search_data_ibfk_2` FOREIGN KEY (`country_code`) REFERENCES `countries` (`alpha_2_code`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = 'TB收索数据' ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Table structure for third_party_report_logs
+-- ----------------------------
+DROP TABLE IF EXISTS `third_party_report_logs`;
+CREATE TABLE `third_party_report_logs`  (
+  `id` int NOT NULL AUTO_INCREMENT COMMENT '日志ID',
+  `source` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '上报来源：short_link/斗篷点击, postback/转化回调',
+  `adsid` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '广告事件ID',
+  `event` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '事件类型：viewWebpage, finishPayment',
+  `use_hash` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否对email、ip、phone进行哈希处理：True=哈希，False=不哈希',
+  `email` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '邮箱（原始值）',
+  `ip` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT 'IP地址（原始值）',
+  `phone` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '手机号（原始值）',
+  `ua` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL COMMENT '用户代理',
+  `report_params` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL COMMENT '完整上报参数（JSON格式）',
+  `status` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '上报状态：pending, success, failed',
+  `attempt_count` int NULL DEFAULT 0 COMMENT '尝试次数',
+  `max_attempts` int NULL DEFAULT 3 COMMENT '最大尝试次数',
+  `response_status` int NULL DEFAULT NULL COMMENT '响应状态码',
+  `response_body` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL COMMENT '响应内容',
+  `log_id` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '第三方返回的logId',
+  `error_message` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL COMMENT '错误信息（如果失败）',
+  `created_at` datetime NOT NULL COMMENT '创建时间',
+  `report_start_time` datetime NULL DEFAULT NULL COMMENT '上报开始时间',
+  `report_success_time` datetime NULL DEFAULT NULL COMMENT '上报成功时间',
+  `completed_at` datetime NULL DEFAULT NULL COMMENT '完成时间',
+  `conversion_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '转化ID',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_third_party_source`(`source` ASC) USING BTREE,
+  INDEX `idx_third_party_adsid`(`adsid` ASC) USING BTREE,
+  INDEX `idx_third_party_event`(`event` ASC) USING BTREE,
+  INDEX `idx_third_party_status`(`status` ASC) USING BTREE,
+  INDEX `idx_third_party_created_at`(`created_at` ASC) USING BTREE,
+  INDEX `idx_third_party_status_created`(`status` ASC, `created_at` ASC) USING BTREE,
+  INDEX `idx_conversion_id`(`conversion_id` ASC) USING BTREE,
+  UNIQUE INDEX `unique_source_adsid`(`source` ASC, `adsid` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '第三方上报日志表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for token_blacklist
