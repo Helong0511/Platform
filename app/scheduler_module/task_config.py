@@ -104,9 +104,9 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
     # ========== CPL 系统定时任务 ==========
     "每日Cap重置": {
         "task_name": "每日Cap重置",
-        "task_module": "app.scheduler.cpl_tasks",
+        "task_module": "app.scheduler_module.tasks.cpl_tasks",
         "task_function": "reset_daily_caps_task",
-        "result_getter_module": "app.scheduler.cpl_tasks",
+        "result_getter_module": "app.scheduler_module.tasks.cpl_tasks",
         "result_getter_function": "get_task_result",
         # 数据库配置
         "cron_expression": "0 0 * * *",  # 每天 00:00 UTC
@@ -116,9 +116,9 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
     # ========== 短链接服务定时任务 ==========
     "短链接点击次数同步": {
         "task_name": "短链接点击次数同步",
-        "task_module": "app.scheduler.short_link_tasks",
+        "task_module": "app.scheduler_module.tasks.short_link_tasks",
         "task_function": "sync_short_link_clicks_task",
-        "result_getter_module": "app.scheduler.short_link_tasks",
+        "result_getter_module": "app.scheduler_module.tasks.short_link_tasks",
         "result_getter_function": "get_task_result",
         # 数据库配置
         "cron_expression": "*/1 * * * *",  # 每1分钟执行一次
@@ -127,9 +127,9 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
 
     "点击记录队列批量处理": {
         "task_name": "点击记录队列批量处理",
-        "task_module": "app.scheduler.short_link_tasks",
+        "task_module": "app.scheduler_module.tasks.short_link_tasks",
         "task_function": "process_clicks_queue_task",
-        "result_getter_module": "app.scheduler.short_link_tasks",
+        "result_getter_module": "app.scheduler_module.tasks.short_link_tasks",
         "result_getter_function": "get_task_result",
         # 数据库配置
         "cron_expression": "* * * * *",  # 每分钟执行一次（高并发优化，实际处理时会循环处理直到队列为空）
