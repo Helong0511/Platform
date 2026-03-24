@@ -272,7 +272,12 @@ class AdData(Base):
     __table_args__ = (
         Index("idx_ad_data_date", "date"),  # 优化日期范围查询
         Index("idx_ad_data_product", "product_id"),  # 优化产品查询
-        Index("idx_ad_data_date_product", "date", "product_id"),  # 复合索引，优化常见查询
+        Index("idx_ad_data_country", "country_code"),  # 优化国家代码查询
+        # 复合索引：优化常见查询组合
+        Index("idx_ad_data_date_product", "date", "product_id"),  # 日期 + 产品
+        Index("idx_ad_data_date_country", "date", "country_code"),  # 日期 + 国家
+        Index("idx_ad_data_product_country", "product_id", "country_code"),  # 产品 + 国家
+        Index("idx_ad_data_date_product_country", "date", "product_id", "country_code"),  # 日期 + 产品 + 国家
         # 唯一性约束：确保同一日期、产品和国家代码只能有一条记录
         UniqueConstraint("date", "product_id", "country_code", name="uq_ad_data_date_product_country"),
     )
@@ -334,7 +339,12 @@ class TBSearchData(Base):
     __table_args__ = (
         Index("idx_tb_search_data_date", "date"),
         Index("idx_tb_search_data_product", "product_id"),
-        Index("idx_tb_search_data_date_product", "date", "product_id"),
+        Index("idx_tb_search_data_country", "country_code"),
+        # 复合索引：优化常见查询组合
+        Index("idx_tb_search_data_date_product", "date", "product_id"),  # 日期 + 产品
+        Index("idx_tb_search_data_date_country", "date", "country_code"),  # 日期 + 国家
+        Index("idx_tb_search_data_product_country", "product_id", "country_code"),  # 产品 + 国家
+        Index("idx_tb_search_data_date_product_country", "date", "product_id", "country_code"),  # 日期 + 产品 + 国家
         # 唯一性约束
         UniqueConstraint("date", "product_id", "country_code", name="uq_tb_search_data_date_product_country"),
     )
@@ -360,8 +370,13 @@ class ProductAssignment(Base):
     __table_args__ = (
         Index("idx_product_assignments_product", "product_id"),
         Index("idx_product_assignments_client", "client_id"),
-        Index("idx_product_assignments_date", "product_id", "start_date", "end_date"),
-        Index("idx_product_assignments_active", "product_id", "end_date"),
+        Index("idx_product_assignments_start_date", "start_date"),
+        Index("idx_product_assignments_end_date", "end_date"),
+        # 复合索引：优化常见查询组合
+        Index("idx_product_assignments_product_date", "product_id", "start_date", "end_date"),  # 产品 + 开始日期 + 结束日期
+        Index("idx_product_assignments_client_date", "client_id", "start_date", "end_date"),  # 客户 + 开始日期 + 结束日期
+        Index("idx_product_assignments_product_end_date", "product_id", "end_date"),  # 产品 + 结束日期（用于查询当前有效的分配）
+        Index("idx_product_assignments_client_product", "client_id", "product_id"),  # 客户 + 产品
     )
 
 
@@ -537,6 +552,10 @@ class PostbackConversion(Base):
         Index("idx_postback_platform_event", "platform", "event_name"),
         Index("idx_postback_click_id", "click_id"),
         Index("idx_postback_conversion_status", "conversion_status"),
+        # 复合索引：优化常见查询组合
+        Index("idx_postback_created_at_click_id", "created_at", "click_id"),  # 日期 + click_id
+        Index("idx_postback_created_at_platform", "created_at", "platform"),  # 日期 + 平台
+        Index("idx_postback_created_at_status", "created_at", "conversion_status"),  # 日期 + 状态
         # 唯一性约束：同一平台的同一转化ID只能有一条记录（防止重复处理）
         UniqueConstraint("platform", "conversion_id", "event_name", name="uq_postback_platform_conversion_event"),
     )
@@ -931,10 +950,13 @@ class Click(Base):
         # 性能优化索引
         Index("idx_ip", "ip"),  # IP字段索引，用于IP查询优化
         Index("idx_country", "country"),  # 国家字段索引
-        # 复合索引：优化常见查询组合（日期范围 + 其他条件）
-        Index("idx_click_time_offer", "click_time", "offer_id"),
-        Index("idx_click_time_publisher", "click_time", "publisher_id"),
-        Index("idx_click_time_offer_publisher", "click_time", "offer_id", "publisher_id"),
+        # 复合索引：优化常见查询组合
+        Index("idx_click_time_offer", "click_time", "offer_id"),  # 时间 + 产品
+        Index("idx_click_time_publisher", "click_time", "publisher_id"),  # 时间 + 渠道
+        Index("idx_click_time_offer_publisher", "click_time", "offer_id", "publisher_id"),  # 时间 + 产品 + 渠道
+        Index("idx_click_time_advertiser", "click_time", "advertiser_id"),  # 时间 + 广告主
+        Index("idx_offer_publisher", "offer_id", "publisher_id"),  # 产品 + 渠道
+        Index("idx_publisher_click_time", "publisher_id", "click_time"),  # 渠道 + 时间（优化按渠道的时间范围查询）
     )
 
 # Cap配置模型
