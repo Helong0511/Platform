@@ -222,7 +222,7 @@ class Settings(BaseSettings):
     # 注意：默认值包含明文密码，仅用于开发环境
     # 使用 Field 的 alias 来映射环境变量名
     SQLALCHEMY_DATABASE_URI: str = Field(
-        default="mysql+aiomysql://remote:'kb7$rL3d8!tQ'@127.0.0.1:3306/platform?charset=utf8mb4&collation=utf8mb4_0900_ai_ci",
+        default="mysql+aiomysql://remote:kb7$rL3d8!tQ@127.0.0.1:3306/platform?charset=utf8mb4&collation=utf8mb4_0900_ai_ci",
         alias="DATABASE_URL"
     )
 
@@ -245,7 +245,7 @@ class Settings(BaseSettings):
                 if is_prod:
                     logger.error("生产环境必须设置 DATABASE_URL 或 SQLALCHEMY_DATABASE_URI 环境变量")
                     raise ValueError("生产环境必须设置 DATABASE_URL 或 SQLALCHEMY_DATABASE_URI 环境变量")
-                v = "mysql+aiomysql://remote:'kb7$rL3d8!tQ'@127.0.0.1:3306/platform?charset=utf8mb4&collation=utf8mb4_0900_ai_ci"
+                v = "mysql+aiomysql://remote:kb7$rL3d8!tQ@127.0.0.1:3306/platform?charset=utf8mb4&collation=utf8mb4_0900_ai_ci"
         
         # 生产环境验证：如果使用默认值（未明确设置环境变量），且包含默认密码，报错
         if is_prod:
@@ -253,14 +253,14 @@ class Settings(BaseSettings):
             # 如果用户明确设置了 DATABASE_URL，即使包含这些字符，也允许（可能是用户自己的密码）
             if not explicit_database_url:
                 # 使用默认值，检查是否包含默认密码
-                if "'kb7$rL3d8!tQ'" in v or "admin123" in v:
+                if "kb7$rL3d8!tQ" in v or "admin123" in v:
                     logger.error("生产环境数据库密码不能使用默认值，请设置 DATABASE_URL 环境变量")
                     raise ValueError("生产环境数据库密码不能使用默认值，请设置 DATABASE_URL 环境变量")
                 logger.warning("生产环境建议通过 DATABASE_URL 环境变量设置数据库连接")
             else:
                 # 用户明确设置了 DATABASE_URL，允许使用（即使包含默认密码字符，可能是用户自己的配置）
                 # 只给出警告，不报错
-                if "'kb7$rL3d8!tQ'" in v or "admin123" in v:
+                if "kb7$rL3d8!tQ" in v or "admin123" in v:
                     logger.warning("检测到数据库连接可能包含默认密码，生产环境建议使用强密码")
 
         return v
