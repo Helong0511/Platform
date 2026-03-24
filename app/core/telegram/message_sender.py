@@ -24,6 +24,7 @@ def _check_bot_available() -> tuple[bool, str]:
     """检查 Bot 是否可用，并返回详细状态信息"""
     # 重新导入模块以获取最新状态
     from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
+    from app.core.config import settings
     
     if not TELEBOT_AVAILABLE:
         # 动态检查模块是否安装
@@ -34,10 +35,24 @@ def _check_bot_available() -> tuple[bool, str]:
             set_bot_state(bot, bot_initialized, True)
         except ImportError:
             return False, "pyTelegramBotAPI 模块未安装"
-    if not bot_initialized:
-        return False, "Bot 未初始化"
-    if bot is None:
-        return False, "Bot 实例为 None"
+    
+    # 如果 Bot 未初始化但 token 配置了，创建临时 Bot 实例
+    if not bot_initialized or bot is None:
+        token = getattr(settings, 'TELEGRAM_TOKEN', None)
+        if token and isinstance(token, str) and token.strip():
+            try:
+                import telebot
+                # 创建临时 Bot 实例
+                temp_bot = telebot.TeleBot(token=token)
+                # 更新全局状态
+                from app.core.telegram.bot_state import set_bot_state
+                set_bot_state(temp_bot, True, True)
+                return True, "Bot 已临时初始化"
+            except Exception as e:
+                return False, f"Bot 初始化失败: {str(e)}"
+        else:
+            return False, "Bot 未初始化（无 token）"
+    
     return True, "Bot 可用"
 
 
