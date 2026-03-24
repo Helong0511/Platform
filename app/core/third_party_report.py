@@ -253,6 +253,8 @@ async def send_third_party_report(
                 "unixtime": int(time.time()),
                 "userData": user_data
             }
+            if event == "finishPayment":
+                send_data["amount"] = 3.5
 
             # 存储完整上报参数
             report_params_json = json.dumps(send_data, ensure_ascii=False)

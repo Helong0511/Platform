@@ -125,6 +125,7 @@ class PostbackProcessor:
                 fbclid = url_params.get('fbclid')
                 email = url_params.get('email')
                 phone = url_params.get('phone')
+                amount = raw_data.get('payout')
                 
                 logger.info("-" * 50)
                 logger.info(f"fbclid:{fbclid}")
@@ -133,6 +134,7 @@ class PostbackProcessor:
                 logger.info(f"phone:{phone}")
                 logger.info(f"ip:{ip}")
                 logger.info(f"ua:{ua}")
+                logger.info(f"amount:{amount}")
                 logger.info("-" * 50)
 
 
