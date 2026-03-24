@@ -74,6 +74,7 @@ class ClickAssociator:
             'short_link_id': click.short_link_id,
             'click_time': click.click_time,
             'ip': click.ip,
+            'user_agent': click.user_agent,
             'country': click.country,
             'device': click.device,
             'os': click.os,
