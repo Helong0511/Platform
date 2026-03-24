@@ -357,7 +357,7 @@ import {
 } from 'element-plus';
 import { Search, Refresh, Loading, Setting } from '@element-plus/icons-vue';
 import { useAuthStore } from '../../store';
-import { getThirdPartyReports, getThirdPartyReport, getThirdPartyReportStats, updateThirdPartyReport, retryThirdPartyReport } from '../../api/thirdPartyReport';
+import { getThirdPartyReports, getThirdPartyReport, getThirdPartyReportStats, updateThirdPartyReport, retryThirdPartyReport } from '../../api/third-party-report';
 import { formatDateTime } from '../../utils/dateFormat';
 import { useDevice } from '../../composables/useDevice';
 import { logger } from '../../utils/logger';

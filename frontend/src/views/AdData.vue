@@ -306,7 +306,7 @@ import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from
 import { useAuthStore } from '../store';
 import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElTag, ElIcon, ElLoading, ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Download, Search, Delete, InfoFilled, Setting, Right } from '@element-plus/icons-vue';
-import { getAdDataList, exportAdData, getProductsForSelect, getClientsWithData, getProductsWithData, getCountriesWithData, updateAdData, getProductById, deleteAdData, batchDeleteAdData, getAdDataDateRange } from '../api/adData';
+import { getAdDataList, exportAdData, getProductsForSelect, getClientsWithData, getProductsWithData, getCountriesWithData, updateAdData, getProductById, deleteAdData, batchDeleteAdData, getAdDataDateRange } from '../api/ad-data';
 import { useRouter, useRoute } from 'vue-router';
 import { getSuccessMessage, getWarningMessage } from '../utils/messages';
 import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';

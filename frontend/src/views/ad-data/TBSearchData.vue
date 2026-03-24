@@ -249,8 +249,8 @@ import { ref, reactive, onMounted, computed, nextTick } from 'vue';
 import { useAuthStore } from '../../store';
 import { ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Upload, Delete, Setting, Right } from '@element-plus/icons-vue';
-import { getTBSearchDataList, updateTBSearchData, deleteTBSearchData, batchDeleteTBSearchData, importTBSearchData, getClientsWithTBSearchData, getProductsWithTBSearchData, getCountriesWithTBSearchData } from '../../api/tbSearchData';
-import { getProductById } from '../../api/adData';
+import { getTBSearchDataList, updateTBSearchData, deleteTBSearchData, batchDeleteTBSearchData, importTBSearchData, getClientsWithTBSearchData, getProductsWithTBSearchData, getCountriesWithTBSearchData } from '../../api/tb-search-data';
+import { getProductById } from '../../api/ad-data';
 import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../../utils/api';
 import ProductManagementDialog from '../../components/admin/ProductManagementDialog.vue';
 

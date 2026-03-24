@@ -175,7 +175,7 @@ import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from
 import { useAuthStore } from '../../store';
 import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElIcon, ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Download, InfoFilled, Setting, Right } from '@element-plus/icons-vue';
-import { getDailySummary, exportAdData, getClientsWithData, getProductsWithData, getAdDataDateRange, getProductById } from '../../api/adData';
+import { getDailySummary, exportAdData, getClientsWithData, getProductsWithData, getAdDataDateRange, getProductById } from '../../api/ad-data';
 import { useRouter } from 'vue-router';
 import { extractErrorMessage, isErrorHandled } from '../../utils/api';
 import { useDevice } from '../../composables/useDevice';

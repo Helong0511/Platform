@@ -120,8 +120,8 @@ async def login(
     
     Example:
         # 使用curl测试
-        curl -X POST "http://localhost:8000/api/v1/auth/login" \\
-             -H "Content-Type: application/x-www-form-urlencoded" \\
+        curl -X POST "http://localhost:8000/api/v1/auth/login" \
+             -H "Content-Type: application/x-www-form-urlencoded" \
              -d "username=admin&password=admin123"
         
         # 响应示例
@@ -262,7 +262,6 @@ async def login(
         # 根据配置的算法选择密钥
         if settings.JWT_ALGORITHM == "RS256":
             # 使用RS256算法（非对称加密），需要公钥验证
-            # 注意：JWTUtils 已在文件顶部导入，不需要重复导入
             public_key = JWTUtils._load_rsa_key(
                 settings.RSA_PUBLIC_KEY,
                 settings.RSA_PUBLIC_KEY_PATH,

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from app.core.database import AsyncSessionLocal
 from app.core.short_link_click_counter import sync_click_counts_to_db
-from app.scheduler.clicks_batch_processor import process_clicks_queue
+from app.scheduler_module.tasks.clicks_batch_processor import process_clicks_queue
 
 logger = logging.getLogger(__name__)
 

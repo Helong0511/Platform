@@ -1,5 +1,5 @@
 import { ElMessage } from 'element-plus';
-import { getTimezone } from '../api/mlModel';
+import { getTimezone } from '../api/ml-model';
 
 // 时区缓存（避免重复请求）
 let cachedTimezone = 'Asia/Shanghai'; // 默认值

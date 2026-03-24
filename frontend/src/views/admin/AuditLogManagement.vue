@@ -321,7 +321,7 @@ import {
 } from 'element-plus';
 import { Search, Refresh, Loading, Setting } from '@element-plus/icons-vue';
 import { useAuthStore } from '../../store';
-import { getAuditLogs, getAuditLog, getAuditLogStats } from '../../api/auditLog';
+import { getAuditLogs, getAuditLog, getAuditLogStats } from '../../api/audit-log';
 import { formatDateTime } from '../../utils/dateFormat';
 import { useDevice } from '../../composables/useDevice';
 import { logger } from '../../utils/logger';

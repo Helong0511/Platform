@@ -219,7 +219,7 @@ import {
   getShortLinkStats,
   generateShortCode,
   checkShortCode
-} from '../../api/shortLink';
+} from '../../api/short-link';
 import { getOffers } from '../../api/offer';
 import { getPublishers } from '../../api/publisher';
 import { useDevice } from '../../composables/useDevice';

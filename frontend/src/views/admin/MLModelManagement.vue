@@ -285,7 +285,7 @@ import {
   Upload, Search, Refresh, Delete,
   CircleCheck, CircleClose, Document, Box, Warning, View, Check
 } from '@element-plus/icons-vue';
-import { validateExcelData, getModelStatus, parseExcelColumns, saveMapping, previewExcelData, importTrainingData } from '../../api/mlModel';
+import { validateExcelData, getModelStatus, parseExcelColumns, saveMapping, previewExcelData, importTrainingData } from '../../api/ml-model';
 import { formatDateTime as formatDateTimeWithTimezone } from '../../utils/dateFormat';
 import { extractErrorMessage, isErrorHandled } from '../../utils/api';
 import { logger } from '../../utils/logger';

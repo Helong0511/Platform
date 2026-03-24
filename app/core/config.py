@@ -42,12 +42,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",  # 忽略未定义的字段（如 MYSQL_DATABASE, MYSQL_USER 等，这些用于构建 DATABASE_URL）
-        # 对于复杂类型（如 list），pydantic-settings 会尝试 JSON 解析
-        # 但我们的 validator 会处理逗号分隔的字符串，所以这里允许 JSON 解析
-        # 如果 JSON 解析失败，validator 会处理
     )
-
-    API_V1_STR: str = "/api/v1"
 
     # ====== 环境配置 ======
     # 生产环境标志（生产环境必须设置为 "production" 或 "prod"）
@@ -73,7 +68,6 @@ class Settings(BaseSettings):
         
         使用验证后的PRODUCTION_ENV值，确保环境一致性
         """
-        # 使用self.PRODUCTION_ENV而不是直接从环境变量获取，确保一致性
         return self.PRODUCTION_ENV in ["production", "prod"]
 
     @property
@@ -83,6 +77,11 @@ class Settings(BaseSettings):
         每次访问时重新检查环境变量，确保获取最新值
         """
         return not self.is_production
+
+    # ====== 服务器配置 ======
+    API_V1_STR: str = "/api/v1"
+    SERVER_NAME: str = "广告数据管理系统"
+    SERVER_DESCRIPTION: str = "高性能广告数据管理平台"
 
     # ====== 安全配置 ======
     # SECRET_KEY用于JWT签名和加密
@@ -153,10 +152,6 @@ class Settings(BaseSettings):
     RSA_PRIVATE_KEY: str = os.getenv("RSA_PRIVATE_KEY", "")
     # RSA公钥内容（优先使用环境变量）
     RSA_PUBLIC_KEY: str = os.getenv("RSA_PUBLIC_KEY", "")
-
-    # ====== 服务器信息 ======
-    SERVER_NAME: str = "广告数据管理系统"
-    SERVER_DESCRIPTION: str = "高性能广告数据管理平台"
 
     # ====== CORS配置 ======
     # 允许的跨域来源（生产环境必须通过环境变量设置）
@@ -282,6 +277,15 @@ class Settings(BaseSettings):
     # 短链接和CPL服务大量使用Redis，需要更多连接
     REDIS_MAX_CONNECTIONS: int = int(os.getenv("REDIS_MAX_CONNECTIONS", "20"))  # 增加连接数以支持高并发
 
+    # Redis主机地址（生产环境建议配置，用于限流和CSRF令牌存储）
+    REDIS_HOST: str | None = os.getenv("REDIS_HOST", None)
+    # Redis端口
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    # Redis数据库编号
+    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    # Redis密码（如果设置了密码）
+    REDIS_PASSWORD: str | None = os.getenv("REDIS_PASSWORD", None)
+
     # ====== CPL系统配置 ======
     # 追踪服务基础URL（用于生成下游Tracklink和Postback URL）
     TRACKING_BASE_URL: str = Field(
@@ -332,16 +336,6 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE: int = int(os.getenv("MAX_UPLOAD_SIZE", "10485760"))
     # 允许的文件类型
     ALLOWED_UPLOAD_EXTENSIONS: list[str] = ["xlsx", "xls", "csv"]
-
-    # ====== Redis配置 ======
-    # Redis主机地址（生产环境建议配置，用于限流和CSRF令牌存储）
-    REDIS_HOST: str | None = os.getenv("REDIS_HOST", None)
-    # Redis端口
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
-    # Redis数据库编号
-    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
-    # Redis密码（如果设置了密码）
-    REDIS_PASSWORD: str | None = os.getenv("REDIS_PASSWORD", None)
 
     # ====== CSRF配置 ======
     # 是否启用CSRF防护（默认启用）

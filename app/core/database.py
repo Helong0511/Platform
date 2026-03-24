@@ -61,12 +61,9 @@ logger = logging.getLogger(__name__)
 # - read_timeout: 读取超时
 # - write_timeout: 写入超时
 # 
-logger = logging.getLogger(__name__)
 try:
-
     # 保存原始的 aiomysql.connect 函数
     _original_aiomysql_connect = aiomysql_lib.connect
-
 
     # 创建修复后的 connect 函数
     async def _patched_aiomysql_connect(*args, **kwargs):
@@ -83,7 +80,6 @@ try:
             filtered_kwargs['connect_timeout'] = 10
         # 调用原始的 connect 函数
         return await _original_aiomysql_connect(*args, **filtered_kwargs)
-
 
     # 应用猴子补丁到 aiomysql 模块
     aiomysql_lib.connect = _patched_aiomysql_connect
@@ -161,9 +157,13 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 # 创建数据库表
 async def create_tables():
+    """
+    创建数据库表
+    
+    注意：生产环境建议使用迁移工具如Alembic
+    这里为了演示简单，直接创建表
+    """
     async with engine.begin() as conn:
-        # 生产环境建议使用迁移工具如Alembic
-        # 这里为了演示简单，直接创建表
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables created successfully")
 
@@ -191,21 +191,9 @@ async def init_db():
     执行时机：
     - 应用启动时自动执行（在lifespan启动阶段）
     - 只在没有管理员用户时创建，避免重复创建
-    
-    Returns:
-        None
-    
-    Raises:
-        Exception: 数据库操作失败时抛出异常
-    
-    Example:
-        # 在应用启动时自动调用，无需手动调用
-        await init_db()
     """
     async with AsyncSessionLocal() as session:
         # 检查是否需要创建超级用户
-
-        # 查询是否存在管理员用户
         result = await session.execute(select(User).where(User.role == UserRole.ADMIN))
         admin = result.scalars().first()
 

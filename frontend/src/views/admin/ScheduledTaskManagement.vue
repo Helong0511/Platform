@@ -285,7 +285,7 @@ import {
   updateScheduledTask,
   triggerScheduledTask,
   releaseTaskLock
-} from '../../api/scheduledTask';
+} from '../../api/scheduled-task';
 import { formatDateTime } from '../../utils/dateFormat';
 import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../../utils/api';
 import { useDevice } from '../../composables/useDevice';

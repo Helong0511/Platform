@@ -248,7 +248,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Plus, Search, Refresh, View, Download, Setting } from '@element-plus/icons-vue'
-import { getAffiliateTests, createAffiliateTest } from '@/api/affiliateTest'
+import { getAffiliateTests, createAffiliateTest } from '@/api/affiliate-test'
 import { getPublishers } from '@/api/publisher'
 import { getOffers } from '@/api/offer'
 import { logger } from '@/utils/logger'
