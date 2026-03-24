@@ -538,7 +538,10 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         # 验证Referer（额外的安全层）
         if not validate_referer(request):
             logger.warning(f"CSRF检查失败：Referer验证失败: {request.method} {request.url.path}")
-            await self._handle_csrf_validation_error(request, "请求来源验证失败")
+            # 生成新令牌并返回错误
+            new_csrf_token = generate_csrf_token()
+            await self._store_csrf_token(session_id, new_csrf_token, request)
+            await self._handle_csrf_validation_error(request, "请求来源验证失败", new_csrf_token)
         
         # 获取请求中的CSRF令牌
         csrf_token = get_csrf_token_from_request(request)
@@ -566,17 +569,21 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     break
             except Exception as e:
                 logger.error(f"记录CSRF审计日志失败: {e}")
-            await self._handle_csrf_validation_error(request, "CSRF令牌缺失，请刷新页面后重试")
+            # 生成新令牌并返回错误
+            new_csrf_token = generate_csrf_token()
+            await self._store_csrf_token(session_id, new_csrf_token, request)
+            await self._handle_csrf_validation_error(request, "CSRF令牌缺失，请刷新页面后重试", new_csrf_token)
         
         # 获取存储的CSRF令牌
         stored_token = await self._retrieve_csrf_token(session_id, request)
         
+        # 确保总是有一个有效的令牌
         if not stored_token:
-            # 令牌不存在，生成新令牌并返回错误
+            # 令牌不存在，生成新令牌
             logger.warning(f"CSRF令牌不存在: {request.method} {request.url.path}, session_id: {session_id}")
-            new_csrf_token = generate_csrf_token()
-            await self._store_csrf_token(session_id, new_csrf_token, request)
-            logger.info(f"CSRF令牌不存在，生成新令牌: {new_csrf_token[:10]}...")
+            stored_token = generate_csrf_token()
+            await self._store_csrf_token(session_id, stored_token, request)
+            logger.info(f"CSRF令牌不存在，生成新令牌: {stored_token[:10]}...")
             # 记录审计日志
             try:
                 async for db in get_db():
@@ -598,7 +605,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     break
             except Exception as e:
                 logger.error(f"记录CSRF审计日志失败: {e}")
-            await self._handle_csrf_validation_error(request, "CSRF令牌无效或已过期，请刷新页面后重试", new_csrf_token)
+            await self._handle_csrf_validation_error(request, "CSRF令牌无效或已过期，请刷新页面后重试", stored_token)
         
         # 使用安全的字符串比较（防止时序攻击）
         if not secrets.compare_digest(csrf_token, stored_token):
@@ -646,20 +653,9 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             except Exception as e:
                 logger.error(f"记录CSRF审计日志失败: {e}")
             
-            # 检查是否是服务器重启后的情况
-            memory_token = _csrf_tokens.get(session_id)
-            is_server_restart = (memory_token is None) and (stored_token is not None)
-            
-            if is_server_restart:
-                # 服务器重启，生成新令牌
-                new_csrf_token = generate_csrf_token()
-                await self._store_csrf_token(session_id, new_csrf_token, request)
-                logger.info(f"服务器重启导致CSRF令牌不匹配，生成新令牌: {new_csrf_token[:10]}...")
-                await self._handle_csrf_validation_error(request, "CSRF令牌验证失败（可能是服务器重启导致），请刷新页面后重试", new_csrf_token)
-            else:
-                # 令牌不同步，返回存储的正确令牌
-                logger.info(f"CSRF令牌不匹配，返回正确的存储令牌: {stored_token[:10]}...")
-                await self._handle_csrf_validation_error(request, "CSRF令牌验证失败，请刷新页面后重试", stored_token)
+            # 无论什么原因导致的令牌不匹配，都返回存储的正确令牌
+            logger.info(f"CSRF令牌不匹配，返回正确的存储令牌: {stored_token[:10]}...")
+            await self._handle_csrf_validation_error(request, "CSRF令牌验证失败，请刷新页面后重试", stored_token)
         
         # 验证通过，处理请求
         response = await call_next(request)

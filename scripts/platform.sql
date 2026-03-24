@@ -11,7 +11,7 @@
  Target Server Version : 80044 (8.0.44-0ubuntu0.22.04.2)
  File Encoding         : 65001
 
- Date: 23/03/2026 10:06:34
+ Date: 24/03/2026 11:36:28
 */
 
 SET NAMES utf8mb4;
@@ -722,7 +722,7 @@ CREATE TABLE `postback_ip_whitelist`  (
   INDEX `ix_postback_ip_whitelist_is_active`(`is_active` ASC) USING BTREE,
   INDEX `idx_is_active`(`is_active` ASC) USING BTREE,
   INDEX `idx_ip_address`(`ip_address` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 17 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for postback_notifications
@@ -984,14 +984,14 @@ CREATE TABLE `third_party_report_logs`  (
   `completed_at` datetime NULL DEFAULT NULL COMMENT '完成时间',
   `conversion_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '转化ID',
   PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `unique_source_adsid`(`source` ASC, `adsid` ASC) USING BTREE,
   INDEX `idx_third_party_source`(`source` ASC) USING BTREE,
   INDEX `idx_third_party_adsid`(`adsid` ASC) USING BTREE,
   INDEX `idx_third_party_event`(`event` ASC) USING BTREE,
   INDEX `idx_third_party_status`(`status` ASC) USING BTREE,
   INDEX `idx_third_party_created_at`(`created_at` ASC) USING BTREE,
   INDEX `idx_third_party_status_created`(`status` ASC, `created_at` ASC) USING BTREE,
-  INDEX `idx_conversion_id`(`conversion_id` ASC) USING BTREE,
-  UNIQUE INDEX `unique_source_adsid`(`source` ASC, `adsid` ASC) USING BTREE
+  INDEX `idx_conversion_id`(`conversion_id` ASC) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '第三方上报日志表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
