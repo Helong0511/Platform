@@ -125,6 +125,16 @@ class PostbackProcessor:
                 fbclid = url_params.get('fbclid')
                 email = url_params.get('email')
                 phone = url_params.get('phone')
+                
+                logger.info("-" * 50)
+                logger.info(f"fbclid:{fbclid}")
+                logger.info(f"click_id:{click_id}")
+                logger.info(f"email:{email}")
+                logger.info(f"phone:{phone}")
+                logger.info(f"ip:{ip}")
+                logger.info(f"ua:{ua}")
+                logger.info("-" * 50)
+
 
                 if fbclid:
                     logger.info(f"=== 检测到 fbclid 参数: {fbclid} ===")
