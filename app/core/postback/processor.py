@@ -151,7 +151,9 @@ class PostbackProcessor:
                             ip=ip,
                             phone=phone,
                             ua=ua,
-                            source="postback"
+                            source="postback",
+                            currency="USD",
+                            amount=amount
                         )
                         logger.info(f"=== 第三方上报成功: fbclid={fbclid} ===")
                     except Exception as e:

@@ -150,7 +150,9 @@ async def send_third_party_report(
         ua: str,
         source: str = "unknown",
         use_hash: bool = True,
-        conversion_id: Optional[str] = None
+        conversion_id: Optional[str] = None,
+        currency: Optional[str] = None,
+        amount: Optional[float] = None
 ):
     """
     后台任务：发送第三方广告上报
@@ -253,8 +255,13 @@ async def send_third_party_report(
                 "unixtime": int(time.time()),
                 "userData": user_data
             }
+
             if event == "finishPayment":
-                send_data["amount"] = 3.5
+                pay_data = {
+                    "currency": currency,
+                    "amount": amount
+                }
+                send_data["payData"] = pay_data
 
             # 存储完整上报参数
             report_params_json = json.dumps(send_data, ensure_ascii=False)
@@ -342,7 +349,116 @@ async def send_third_party_report(
 
     # 构建失败原因字符串
     failure_reasons_str = "\n" + "\n".join(failure_reasons) if failure_reasons else "\n无详细信息"
-    logger.error(f"[第三方上报] ❌ 全部 {max_retries} 次尝试失败: adsid={adsid}, 失败原因:{failure_reasons_str}")
+    
+    # 如果使用哈希失败，尝试一次不使用哈希
+    if use_hash:
+        logger.warning(f"[第三方上报] 所有哈希尝试失败，尝试一次不使用哈希...")
+        try:
+            url = "https://hhskins.com/UniqueChannelServer/UniqueChannel"
+            headers = {
+                "token": "HFY2Dgs07J4YjziNPGaTSmxFrY97CN5Z",
+                "Content-Type": "application/json"
+            }
+            user_data = {
+                "ua": ua,
+                "email": email,
+                "ip": ip,
+                "phone": phone
+            }
+
+            send_data = {
+                "adsid": adsid,
+                "event": event,  # 事件类型  viewWebpage, finishPayment
+                "pixid": "2105276563598069",
+                "type": "Facebook",
+                "unixtime": int(time.time()),
+                "userData": user_data
+            }
+
+            if event == "finishPayment":
+                pay_data = {
+                    "currency": currency,
+                    "amount": amount
+                }
+                send_data["payData"] = pay_data
+
+            # 存储完整上报参数
+            report_params_json = json.dumps(send_data, ensure_ascii=False)
+            await update_report_log(report_log_id, report_params=report_params_json, attempt_count=max_retries + 1)
+
+            logger.warning(f"[第三方上报] 开始发送 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希): adsid={adsid}, ip={ip}, use_hash=False")
+            logger.warning(f"[第三方上报] 参数详情 - 不哈希: email={email}, phone={phone}, ip={ip}, ua={ua}")
+
+            # 增加超时时间，应对网络延迟
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(url, json=send_data, headers=headers)
+                logger.warning(f"[第三方上报] 响应: status={response.status_code}, content={response.text[:200]}")
+
+                if response.status_code == 200:
+                    try:
+                        response_json = response.json()
+                        if response_json.get("message") == "success":
+                            log_id = response_json.get("logId", "")
+                            report_success_time = get_app_now_naive()
+                            logger.warning(f"[第三方上报] adsid{adsid} ✓ 成功 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希), logId={log_id}")
+                            
+                            await update_report_log(
+                                report_log_id,
+                                status="success",
+                                response_status=response.status_code,
+                                response_body=response.text[:2000],
+                                log_id_from_response=log_id,
+                                report_success_time=report_success_time,
+                                completed_at=report_success_time
+                            )
+                            return
+                        else:
+                            error_msg = f"message: {response_json.get('message', 'unknown')}, logId: {response_json.get('logId', '')}"
+                            failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
+                            logger.warning(
+                                f"[第三方上报] ✗ 失败 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希): {error_msg}")
+                            await update_report_log(
+                                report_log_id,
+                                response_status=response.status_code,
+                                response_body=response.text[:2000]
+                            )
+                    except Exception as parse_err:
+                        error_msg = f"JSON解析失败: {str(parse_err)}, 原始响应: {response.text[:100]}"
+                        failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
+                        logger.warning(
+                            f"[第三方上报] ✗ 失败 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希): {error_msg}")
+                        await update_report_log(
+                            report_log_id,
+                            response_status=response.status_code,
+                            response_body=response.text[:2000]
+                        )
+                else:
+                    error_msg = f"状态码: {response.status_code}, 响应: {response.text[:100]}"
+                    failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
+                    logger.warning(
+                        f"[第三方上报] ✗ 失败 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希): {error_msg}")
+                    await update_report_log(
+                        report_log_id,
+                        response_status=response.status_code,
+                        response_body=response.text[:2000]
+                    )
+
+        except httpx.TimeoutException:
+            error_msg = "请求超时"
+            failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
+            logger.warning(f"[第三方上报] ✗ 超时 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希)")
+        except httpx.ConnectError:
+            error_msg = "连接失败"
+            failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
+            logger.warning(f"[第三方上报] ✗ 连接失败 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希)")
+        except Exception as e:
+            error_msg = f"异常: {str(e)}"
+            failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
+            logger.warning(f"[第三方上报] ✗ 异常 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希): {str(e)}")
+
+    # 更新失败原因字符串
+    failure_reasons_str = "\n" + "\n".join(failure_reasons) if failure_reasons else "\n无详细信息"
+    logger.error(f"[第三方上报] ❌ 全部 {len(failure_reasons)} 次尝试失败: adsid={adsid}, 失败原因:{failure_reasons_str}")
 
     # 更新日志记录为失败状态
     await update_report_log(
