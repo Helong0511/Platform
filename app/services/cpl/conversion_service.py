@@ -299,51 +299,42 @@ class ConversionService:
         # 只有当click_alias不为NULL时才添加这些条件
         if offer_id is not None:
             conversion_group_conditions.append(
-                or_(
-                    click_alias.offer_id == offer_id,
-                    click_alias.offer_id.is_(None)
-                )
+                click_alias.offer_id == offer_id
             )
         if publisher_id:
             conversion_group_conditions.append(
-                or_(
-                    click_alias.publisher_id == publisher_id,
-                    click_alias.publisher_id.is_(None)
-                )
+                click_alias.publisher_id == publisher_id
             )
         if client_publisher_ids is not None:
             conversion_group_conditions.append(
-                or_(
-                    click_alias.publisher_id.in_(client_publisher_ids),
-                    click_alias.publisher_id.is_(None)
-                )
+                click_alias.publisher_id.in_(client_publisher_ids)
             )
         if advertiser_id is not None:
             conversion_group_conditions.append(
-                or_(
-                    click_alias.advertiser_id == advertiser_id,
-                    click_alias.advertiser_id.is_(None)
-                )
+                click_alias.advertiser_id == advertiser_id
             )
 
-        # 构建分组查询：使用左连接，允许没有click_id的转化记录
-        # 同时查询原始金额和扣减后的金额
-        # 对于没有click_id的记录，使用固定值0作为分组键
+        # 构建分组查询：使用内连接，只统计有Click记录的转化
+        # 确保只统计有Click记录且publisher_id在客户关联渠道列表中的转化
         conversion_group_query = select(
-            func.coalesce(click_alias.offer_id, 0).label("offer_id"),
-            func.coalesce(click_alias.publisher_id, 0).label("publisher_id"),
+            click_alias.offer_id.label("offer_id"),
+            click_alias.publisher_id.label("publisher_id"),
             func.count(PostbackConversion.id).label('conversion_count'),
             func.sum(PostbackConversion.original_payout).label('total_po_original'),
             func.sum(PostbackConversion.payout).label('total_po_discounted')
-        ).outerjoin(
+        ).join(
             click_alias, PostbackConversion.click_id == click_alias.click_id
-        ).outerjoin(
+        ).join(
             offer_alias, click_alias.offer_id == offer_alias.id
         ).where(
-            and_(*conversion_group_conditions)
+            and_(
+                *conversion_group_conditions,
+                click_alias.offer_id.isnot(None),
+                click_alias.publisher_id.isnot(None)
+            )
         ).group_by(
-            func.coalesce(click_alias.offer_id, 0),
-            func.coalesce(click_alias.publisher_id, 0)
+            click_alias.offer_id,
+            click_alias.publisher_id
         )
 
         # 注意：对于通过 gid 或 client_id 匹配但没有 click_id 的记录，无法确定 offer_id 和 publisher_id
@@ -368,16 +359,13 @@ class ConversionService:
         conversion_data_list = []  # 暂存转化数据，用于第二遍处理
 
         for offer_id_val, pub_id_val, conv_count_val, total_po_original_val, total_po_discounted_val in conversion_groups:
-            # 确保offer_id和publisher_id不为None
-            safe_offer_id = offer_id_val if offer_id_val is not None else 0
-            safe_pub_id = pub_id_val if pub_id_val is not None else 0
-
-            key = (safe_offer_id, safe_pub_id)
+            # 由于使用内连接，offer_id和publisher_id不会为None
+            key = (offer_id_val, pub_id_val)
             # 如果统计字典中不存在该键，初始化一个新的统计项
             if key not in stats_dict:
                 stats_dict[key] = {
-                    "offer_id": safe_offer_id,
-                    "publisher_id": safe_pub_id,
+                    "offer_id": offer_id_val,
+                    "publisher_id": pub_id_val,
                     "click_count": 0,
                     "conversion_count": 0,
                     "po": 0.0,
@@ -397,8 +385,8 @@ class ConversionService:
                 "conv_count_val": conv_count_val,
                 "po_original_val": po_original_val,
                 "po_discounted_val": po_discounted_val,
-                "safe_offer_id": safe_offer_id,
-                "safe_pub_id": safe_pub_id
+                "safe_offer_id": offer_id_val,
+                "safe_pub_id": pub_id_val
             })
 
             # 累加转化数量和支付金额（从分组统计结果汇总，确保与分组统计一致）
@@ -407,10 +395,8 @@ class ConversionService:
             calculated_total_po_after_discount += po_discounted_val
 
             # 更新offer_ids和publisher_ids集合
-            if safe_offer_id:
-                offer_ids.add(safe_offer_id)
-            if safe_pub_id:
-                publisher_ids.add(safe_pub_id)
+            offer_ids.add(offer_id_val)
+            publisher_ids.add(pub_id_val)
 
         # 使用从分组统计汇总的总转化数量和总支付金额（确保与分组统计一致）
         # 总转化数量应该等于所有分组转化数量的总和
