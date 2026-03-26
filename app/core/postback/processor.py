@@ -146,7 +146,7 @@ class PostbackProcessor:
                         await send_third_party_report(
                             adsid=fbclid,
                             conversion_id=click_id,
-                            event="finishPayment",
+                            event="Purchase",
                             email=email,
                             ip=ip,
                             phone=phone,

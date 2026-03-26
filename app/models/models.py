@@ -1274,7 +1274,7 @@ class ThirdPartyReportLog(Base):
     
     # 上报参数
     adsid = Column(String(500), nullable=False, index=True, comment='广告事件ID')
-    event = Column(String(50), nullable=False, index=True, comment='事件类型：viewWebpage, finishPayment')
+    event = Column(String(50), nullable=False, index=True, comment='事件类型：ViewContent, Purchase')
     conversion_id = Column(String(255), nullable=True, index=True, comment='转化ID')
     use_hash = Column(Boolean, default=True, nullable=False, comment='是否对email、ip、phone进行哈希处理：True=哈希，False=不哈希')
     email = Column(String(255), nullable=True, comment='邮箱（原始值）')

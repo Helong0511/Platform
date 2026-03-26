@@ -964,7 +964,7 @@ CREATE TABLE `third_party_report_logs`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '日志ID',
   `source` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '上报来源：short_link/斗篷点击, postback/转化回调',
   `adsid` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '广告事件ID',
-  `event` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '事件类型：viewWebpage, finishPayment',
+  `event` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '事件类型：ViewContent, Purchase',
   `use_hash` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否对email、ip、phone进行哈希处理：True=哈希，False=不哈希',
   `email` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '邮箱（原始值）',
   `ip` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT 'IP地址（原始值）',

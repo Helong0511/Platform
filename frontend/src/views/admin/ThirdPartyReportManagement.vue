@@ -51,12 +51,8 @@
           <el-select v-model="searchForm.event" placeholder="全部" clearable style="width: 150px;" name="event"
             popper-class="select-dropdown" :teleported="true">
             <el-option label="全部" value=""></el-option>
-            <el-option label="Purchase" value="Purchase"></el-option>
-            <el-option label="Lead" value="Lead"></el-option>
-            <el-option label="CompleteRegistration" value="CompleteRegistration"></el-option>
             <el-option label="ViewContent" value="ViewContent"></el-option>
-            <el-option label="viewWebpage" value="viewWebpage"></el-option>
-            <el-option label="finishPayment" value="finishPayment"></el-option>
+            <el-option label="Purchase" value="Purchase"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
@@ -294,12 +290,8 @@
         </el-form-item>
         <el-form-item label="事件类型">
           <el-select v-model="editForm.event" placeholder="请选择事件类型" style="width: 100%;">
-            <el-option label="Purchase" value="Purchase" />
-            <el-option label="Lead" value="Lead" />
-            <el-option label="CompleteRegistration" value="CompleteRegistration" />
             <el-option label="ViewContent" value="ViewContent" />
-            <el-option label="viewWebpage" value="viewWebpage" />
-            <el-option label="finishPayment" value="finishPayment" />
+            <el-option label="Purchase" value="Purchase" />
           </el-select>
         </el-form-item>
         <el-form-item label="转化ID">

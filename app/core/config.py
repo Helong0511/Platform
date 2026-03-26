@@ -430,6 +430,14 @@ class Settings(BaseSettings):
                 logger.warning(f"TELEGRAM_ADMIN 格式可能不正确: {v}（应为数字字符串）")
         return v
 
+    # ====== Facebook 像素配置 ======
+    # Facebook Pixel ID
+    FACEBOOK_PIXEL_ID: str = os.getenv("FACEBOOK_PIXEL_ID", "2105276563598069")
+    # Facebook Access Token
+    FACEBOOK_ACCESS_TOKEN: str = os.getenv("FACEBOOK_ACCESS_TOKEN", "EAAUIMcFRZAnsBQ3UZAS7ZBLrcf0EsRhrpluOZBEVZA52TweqrD8ZA6fNMUByWCfMwyR86w6tq5uZBGE2K6C72GPCZCCP7Cx4oPZAaFo3NMZBcqTj9iGatWfNQjZBRClwoiJrX5Kv6ZBKSPCrmkNY1bGuUY6A5SlxLUWBq6mHNxCCCoLbLecNDZCj2YBmpr829jSKxuon5fwZDZD")
+    # Facebook API 版本
+    FACEBOOK_API_VERSION: str = os.getenv("FACEBOOK_API_VERSION", "v18.0")
+
 
 # 创建配置实例
 settings = Settings()

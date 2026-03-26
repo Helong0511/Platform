@@ -457,7 +457,7 @@ async def handle_report(
             background_tasks.add_task(
                 send_third_party_report,
                 adsid=fbclid,  # 使用 fbclid 作为 adsid 事件ID
-                event="viewWebpage",
+                event="ViewContent",
                 email=email,
                 ip=client_ip,  # 使用后端获取的客户端 IP
                 phone=phone,

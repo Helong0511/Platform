@@ -78,13 +78,13 @@ def send_telegram_message(
     Returns:
         bool: 是否发送成功
     """
-    # 重新导入模块以获取最新状态
-    from app.core.telegram.bot_state import bot
-    
     bot_available, status_msg = _check_bot_available()
     if not bot_available:
         logger.warning(f"Bot 不可用，无法发送消息: {status_msg}")
         return False
+    
+    # 重新导入模块以获取最新状态
+    from app.core.telegram.bot_state import bot
     
     # 向后兼容：判断是旧方式还是新方式
     if message is None:
@@ -191,13 +191,13 @@ def send_telegram_message_with_buttons(
     Returns:
         tuple[bool, Optional[int]]: (是否发送成功, 消息ID)
     """
-    # 重新导入模块以获取最新状态
-    from app.core.telegram.bot_state import bot
-    
     bot_available, status_msg = _check_bot_available()
     if not bot_available:
         logger.warning(f"Bot 不可用，无法发送消息: {status_msg}")
         return False, None
+    
+    # 重新导入模块以获取最新状态
+    from app.core.telegram.bot_state import bot
     
     try:
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton

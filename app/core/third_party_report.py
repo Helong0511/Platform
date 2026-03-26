@@ -164,8 +164,8 @@ async def send_third_party_report(
     包含智能重试机制，确保网络问题时仍能成功上报
 
     参数要求：
-    - viewWebpage 事件：email, ip, phone, ua 必须提供
-    - finishPayment 事件：email, ip, phone, ua 必须提供
+    - ViewContent 事件：email, ip, phone, ua 必须提供
+    - Purchase 事件：email, ip, phone, ua 必须提供
     """
     max_retries = 3
     base_delay = 1  # 基础延迟时间（秒）
@@ -173,23 +173,23 @@ async def send_third_party_report(
     failure_reasons = []  # 收集失败原因
 
     # 验证参数
-    if event == "viewWebpage" or event == "finishPayment":
+    if event == "ViewContent" or event == "Purchase":
         if not email or not ip or not phone or not ua:
-            error_msg = f"viewWebpage 或 finishPayment 事件缺少必需参数: email={email}, ip={ip}, phone={phone}, ua={ua}"
+            error_msg = f"ViewContent 或 Purchase 事件缺少必需参数: email={email}, ip={ip}, phone={phone}, ua={ua}"
             logger.error(f"[第三方上报] {error_msg}")
-            raise ValueError("viewWebpage 或 finishPayment 事件需要提供 email, ip, phone, ua 参数")
+            raise ValueError("ViewContent 或 Purchase 事件需要提供 email, ip, phone, ua 参数")
 
-    # finishPayment 事件必须提供 conversion_id
-    if event == "finishPayment" and not conversion_id:
-        error_msg = "finishPayment 事件必须提供 conversion_id 参数"
+    # Purchase 事件必须提供 conversion_id
+    if event == "Purchase" and not conversion_id:
+        error_msg = "Purchase 事件必须提供 conversion_id 参数"
         logger.error(f"[第三方上报] {error_msg}")
-        raise ValueError("finishPayment 事件必须提供 conversion_id 参数")
+        raise ValueError("Purchase 事件必须提供 conversion_id 参数")
 
-    # finishPayment 事件必须提供 amount
-    if event == "finishPayment" and amount is None:
-        error_msg = "finishPayment 事件必须提供 amount 参数"
+    # Purchase 事件必须提供 amount
+    if event == "Purchase" and amount is None:
+        error_msg = "Purchase 事件必须提供 amount 参数"
         logger.error(f"[第三方上报] {error_msg}")
-        raise ValueError("finishPayment 事件必须提供 amount 参数")
+        raise ValueError("Purchase 事件必须提供 amount 参数")
 
     # 创建上报日志记录，传递conversion_id
     report_log_id = await create_report_log(
@@ -212,68 +212,77 @@ async def send_third_party_report(
         logger.error(f"[第三方上报] {error_msg}")
         raise ValueError(error_msg)
 
-    # 如果是 finishPayment 事件，更新对应的 viewWebpage 事件的 conversion_id
-    if event == "finishPayment" and conversion_id:
+    # 如果是 Purchase 事件，更新对应的 ViewContent 事件的 conversion_id
+    if event == "Purchase" and conversion_id:
         try:
             async with AsyncSessionLocal() as db:
                 from sqlalchemy import select
-                # 查找相同 adsid 的 viewWebpage 事件
+                # 查找相同 adsid 的 ViewContent 事件
                 result = await db.execute(
                     select(ThirdPartyReportLog)
                     .where(ThirdPartyReportLog.source == source)
                     .where(ThirdPartyReportLog.adsid == adsid)
-                    .where(ThirdPartyReportLog.event == "viewWebpage")
+                    .where(ThirdPartyReportLog.event == "ViewContent")
                     .where(ThirdPartyReportLog.conversion_id.is_(None))  # 只更新未设置 conversion_id 的记录
                 )
-                view_webpage_log = result.scalars().first()
+                view_content_log = result.scalars().first()
                 
-                if view_webpage_log:
-                    # 更新 viewWebpage 事件的 conversion_id
-                    view_webpage_log.conversion_id = conversion_id
+                if view_content_log:
+                    # 更新 ViewContent 事件的 conversion_id
+                    view_content_log.conversion_id = conversion_id
                     await db.commit()
-                    logger.info(f"[第三方上报] 已更新 viewWebpage 事件的 conversion_id: adsid={adsid}, conversion_id={conversion_id}")
+                    logger.info(f"[第三方上报] 已更新 ViewContent 事件的 conversion_id: adsid={adsid}, conversion_id={conversion_id}")
                 else:
-                    logger.info(f"[第三方上报] 未找到对应的 viewWebpage 事件: adsid={adsid}")
+                    logger.info(f"[第三方上报] 未找到对应的 ViewContent 事件: adsid={adsid}")
         except Exception as e:
-            logger.warning(f"[第三方上报] 更新 viewWebpage 事件的 conversion_id 失败: {e}")
+            logger.warning(f"[第三方上报] 更新 ViewContent 事件的 conversion_id 失败: {e}")
 
     report_start_time = get_app_now_naive()
     await update_report_log(report_log_id, report_start_time=report_start_time)
 
     for attempt in range(max_retries):
         try:
-            url = "https://hhskins.com/UniqueChannelServer/UniqueChannel"
-            headers = {
-                "token": "HFY2Dgs07J4YjziNPGaTSmxFrY97CN5Z",
-                "Content-Type": "application/json"
+            # 使用Facebook Graph API
+            url = f"https://graph.facebook.com/{settings.FACEBOOK_API_VERSION}/{settings.FACEBOOK_PIXEL_ID}/events"
+            params = {
+                "access_token": settings.FACEBOOK_ACCESS_TOKEN
             }
-            user_data = {
-                "ua": ua
-            }
+            
+            # 构建用户数据
+            user_data = {}
             if use_hash:
-                user_data["email"] = sha256_hash(email)
-                user_data["ip"] = sha256_hash(ip)
-                user_data["phone"] = sha256_hash(phone)
+                user_data["em"] = sha256_hash(email)
+                user_data["ph"] = sha256_hash(phone)
             else:
-                user_data["email"] = email
-                user_data["ip"] = ip
-                user_data["phone"] = phone
+                user_data["em"] = email
+                user_data["ph"] = phone
+            user_data["client_ip_address"] = ip
+            user_data["client_user_agent"] = ua
 
-            send_data = {
-                "adsid": adsid,
-                "event": event,  # 事件类型  viewWebpage, finishPayment
-                "pixid": "2105276563598069",
-                "type": "Facebook",
-                "unixtime": int(time.time()),
-                "userData": user_data
+            # 直接使用事件类型
+            fb_event_name = event
+
+            # 构建事件数据
+            event_data = {
+                "event_name": fb_event_name,
+                "event_time": int(time.time()),
+                "action_source": "website",
+                "event_id": adsid,
+                "user_data": user_data
             }
 
-            if event == "finishPayment":
-                pay_data = {
+            # 购物事件必须添加 custom_data
+            if fb_event_name == "Purchase" and amount:
+                event_data["custom_data"] = {
                     "currency": currency,
-                    "amount": amount
+                    "value": float(amount)
                 }
-                send_data["payData"] = pay_data
+
+            # 构建请求数据
+            send_data = {
+                "data": [event_data],
+                "test": False
+            }
 
             # 存储完整上报参数
             report_params_json = json.dumps(send_data, ensure_ascii=False)
@@ -282,22 +291,22 @@ async def send_third_party_report(
             logger.warning(f"[第三方上报] 开始发送 (尝试 {attempt + 1}/{max_retries}): adsid={adsid}, ip={ip}, use_hash={use_hash}")
             logger.warning(f"[第三方上报] 参数详情 - 原始: email={email}, phone={phone}, ip={ip}, ua={ua}")
             if use_hash:
-                logger.warning(f"[第三方上报] 参数详情 - 哈希后: email_hash={sha256_hash(email)}, phone_hash={sha256_hash(phone)}, ip_hash={sha256_hash(ip)}")
+                logger.warning(f"[第三方上报] 参数详情 - 哈希后: email_hash={sha256_hash(email)}, phone_hash={sha256_hash(phone)}")
             else:
                 logger.warning(f"[第三方上报] 参数详情 - 不哈希: email={email}, phone={phone}, ip={ip}")
 
             # 增加超时时间，应对网络延迟
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(url, json=send_data, headers=headers)
+                response = await client.post(url, json=send_data, params=params)
                 logger.warning(f"[第三方上报] 响应: status={response.status_code}, content={response.text[:200]}")
 
                 if response.status_code == 200:
                     try:
                         response_json = response.json()
-                        if response_json.get("message") == "success":
-                            log_id = response_json.get("logId", "")
+                        if response_json.get("events_received"):
+                            log_id = response_json.get("fbtrace_id", "")
                             report_success_time = get_app_now_naive()
-                            logger.warning(f"[第三方上报] adsid{adsid} ✓ 成功 (尝试 {attempt + 1}/{max_retries}), logId={log_id}")
+                            logger.warning(f"[第三方上报] adsid{adsid} ✓ 成功 (尝试 {attempt + 1}/{max_retries}), fbtrace_id={log_id}")
                             
                             await update_report_log(
                                 report_log_id,
@@ -310,7 +319,7 @@ async def send_third_party_report(
                             )
                             return
                         else:
-                            error_msg = f"message: {response_json.get('message', 'unknown')}, logId: {response_json.get('logId', '')}"
+                            error_msg = f"message: {response_json.get('messages', 'unknown')}, fbtrace_id: {response_json.get('fbtrace_id', '')}"
                             failure_reasons.append(f"尝试 {attempt + 1}: {error_msg}")
                             logger.warning(
                                 f"[第三方上报] ✗ 失败 (尝试 {attempt + 1}/{max_retries}): {error_msg}")
@@ -366,33 +375,44 @@ async def send_third_party_report(
     if use_hash:
         logger.warning(f"[第三方上报] 所有哈希尝试失败，尝试一次不使用哈希...")
         try:
-            url = "https://hhskins.com/UniqueChannelServer/UniqueChannel"
-            headers = {
-                "token": "HFY2Dgs07J4YjziNPGaTSmxFrY97CN5Z",
-                "Content-Type": "application/json"
+            # 使用Facebook Graph API
+            url = f"https://graph.facebook.com/{settings.FACEBOOK_API_VERSION}/{settings.FACEBOOK_PIXEL_ID}/events"
+            params = {
+                "access_token": settings.FACEBOOK_ACCESS_TOKEN
             }
+            
+            # 构建用户数据（不使用哈希）
             user_data = {
-                "ua": ua,
-                "email": email,
-                "ip": ip,
-                "phone": phone
+                "em": email,
+                "ph": phone,
+                "client_ip_address": ip,
+                "client_user_agent": ua
             }
 
-            send_data = {
-                "adsid": adsid,
-                "event": event,  # 事件类型  viewWebpage, finishPayment
-                "pixid": "2105276563598069",
-                "type": "Facebook",
-                "unixtime": int(time.time()),
-                "userData": user_data
+            # 直接使用事件类型
+            fb_event_name = event
+
+            # 构建事件数据
+            event_data = {
+                "event_name": fb_event_name,
+                "event_time": int(time.time()),
+                "action_source": "website",
+                "event_id": adsid,
+                "user_data": user_data
             }
 
-            if event == "finishPayment":
-                pay_data = {
+            # 购物事件必须添加 custom_data
+            if fb_event_name == "Purchase" and amount:
+                event_data["custom_data"] = {
                     "currency": currency,
-                    "amount": amount
+                    "value": float(amount)
                 }
-                send_data["payData"] = pay_data
+
+            # 构建请求数据
+            send_data = {
+                "data": [event_data],
+                "test": False
+            }
 
             # 存储完整上报参数
             report_params_json = json.dumps(send_data, ensure_ascii=False)
@@ -403,16 +423,16 @@ async def send_third_party_report(
 
             # 增加超时时间，应对网络延迟
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(url, json=send_data, headers=headers)
+                response = await client.post(url, json=send_data, params=params)
                 logger.warning(f"[第三方上报] 响应: status={response.status_code}, content={response.text[:200]}")
 
                 if response.status_code == 200:
                     try:
                         response_json = response.json()
-                        if response_json.get("message") == "success":
-                            log_id = response_json.get("logId", "")
+                        if response_json.get("events_received"):
+                            log_id = response_json.get("fbtrace_id", "")
                             report_success_time = get_app_now_naive()
-                            logger.warning(f"[第三方上报] adsid{adsid} ✓ 成功 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希), logId={log_id}")
+                            logger.warning(f"[第三方上报] adsid{adsid} ✓ 成功 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希), fbtrace_id={log_id}")
                             
                             await update_report_log(
                                 report_log_id,
@@ -425,7 +445,7 @@ async def send_third_party_report(
                             )
                             return
                         else:
-                            error_msg = f"message: {response_json.get('message', 'unknown')}, logId: {response_json.get('logId', '')}"
+                            error_msg = f"message: {response_json.get('messages', 'unknown')}, fbtrace_id: {response_json.get('fbtrace_id', '')}"
                             failure_reasons.append(f"尝试 {max_retries + 1} (不使用哈希): {error_msg}")
                             logger.warning(
                                 f"[第三方上报] ✗ 失败 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希): {error_msg}")
@@ -538,9 +558,16 @@ async def retry_report_log(log_id: int):
                     if log_entry.report_params:
                         try:
                             report_params = json.loads(log_entry.report_params)
+                            # 处理旧的 payData 格式
                             if "payData" in report_params:
                                 currency = report_params["payData"].get("currency", "USD")
                                 amount = report_params["payData"].get("amount", 0.0)
+                            # 处理新的 Facebook API custom_data 格式
+                            elif "data" in report_params and len(report_params["data"]) > 0:
+                                event_data = report_params["data"][0]
+                                if "custom_data" in event_data:
+                                    currency = event_data["custom_data"].get("currency", "USD")
+                                    amount = event_data["custom_data"].get("value", 0.0)
                         except:
                             pass
                 
