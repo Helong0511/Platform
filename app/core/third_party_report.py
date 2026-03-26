@@ -317,6 +317,22 @@ async def send_third_party_report(
                                 report_success_time=report_success_time,
                                 completed_at=report_success_time
                             )
+                            
+                            # 当Purchase事件上报成功时，发送Telegram通知
+                            if fb_event_name == "Purchase":
+                                notification_message = f"💰 Purchase事件上报成功！\n"
+                                notification_message += f"广告事件ID: {adsid}\n"
+                                if amount:
+                                    notification_message += f"金额: {amount} {currency if currency else ''}\n"
+                                notification_message += f"时间: {report_success_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                                notification_message += f"跟踪ID: {log_id}"
+                                
+                                # 发送Telegram通知
+                                if TELEGRAM_ADMIN:
+                                    await send_telegram_message_async(TELEGRAM_ADMIN, notification_message)
+                                else:
+                                    logger.warning("TELEGRAM_ADMIN未配置，无法发送Purchase事件通知")
+                            
                             return
                         else:
                             error_msg = f"message: {response_json.get('messages', 'unknown')}, fbtrace_id: {response_json.get('fbtrace_id', '')}"
