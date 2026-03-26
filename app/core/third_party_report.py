@@ -45,7 +45,9 @@ async def create_report_log(
         max_attempts: int = 3,
         use_hash: bool = True,
         report_params: Optional[str] = None,
-        conversion_id: Optional[str] = None
+        conversion_id: Optional[str] = None,
+        currency: Optional[str] = None,
+        amount: Optional[float] = None
 ) -> int:
     """
     创建第三方上报日志记录
@@ -76,6 +78,8 @@ async def create_report_log(
                 ip=ip,
                 phone=phone,
                 ua=ua,
+                currency=currency,
+                amount=amount,
                 use_hash=use_hash,
                 report_params=report_params,
                 status="pending",
@@ -198,7 +202,9 @@ async def send_third_party_report(
         ua=ua,
         max_attempts=max_retries,
         use_hash=use_hash,
-        conversion_id=conversion_id
+        conversion_id=conversion_id,
+        currency=currency,
+        amount=amount
     )
 
     if not report_log_id:
@@ -523,17 +529,20 @@ async def retry_report_log(log_id: int):
             
             # 创建一个后台任务来发送上报
             async def background_send():
-                # 从report_params中提取currency和amount（如果存在）
-                currency = "USD"
-                amount = 0.0
-                if log_entry.report_params:
-                    try:
-                        report_params = json.loads(log_entry.report_params)
-                        if "payData" in report_params:
-                            currency = report_params["payData"].get("currency", "USD")
-                            amount = report_params["payData"].get("amount", 0.0)
-                    except:
-                        pass
+                # 优先使用log_entry中的currency和amount字段
+                currency = log_entry.currency or "USD"
+                amount = log_entry.amount or 0.0
+                
+                # 如果log_entry中没有，从report_params中提取（向后兼容）
+                if not currency or amount is None:
+                    if log_entry.report_params:
+                        try:
+                            report_params = json.loads(log_entry.report_params)
+                            if "payData" in report_params:
+                                currency = report_params["payData"].get("currency", "USD")
+                                amount = report_params["payData"].get("amount", 0.0)
+                        except:
+                            pass
                 
                 await send_third_party_report(
                     adsid=log_entry.adsid,
@@ -567,6 +576,8 @@ async def update_report_log_params(
         ip: Optional[str] = None,
         phone: Optional[str] = None,
         ua: Optional[str] = None,
+        currency: Optional[str] = None,
+        amount: Optional[float] = None,
         report_params: Optional[str] = None,
         use_hash: Optional[bool] = None
 ):
@@ -598,6 +609,10 @@ async def update_report_log_params(
                 log_entry.phone = phone
             if ua is not None:
                 log_entry.ua = ua
+            if currency is not None:
+                log_entry.currency = currency
+            if amount is not None:
+                log_entry.amount = amount
             if report_params is not None:
                 log_entry.report_params = report_params
             if use_hash is not None:

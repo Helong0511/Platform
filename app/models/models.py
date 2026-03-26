@@ -1281,6 +1281,8 @@ class ThirdPartyReportLog(Base):
     ip = Column(String(50), nullable=True, comment='IP地址（原始值）')
     phone = Column(String(50), nullable=True, comment='手机号（原始值）')
     ua = Column(Text, nullable=True, comment='用户代理')
+    currency = Column(String(10), nullable=True, comment='货币类型')
+    amount = Column(Float, nullable=True, comment='支付金额')
     report_params = Column(Text, nullable=True, comment='完整上报参数（JSON格式）')
 
     
