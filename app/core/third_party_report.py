@@ -155,7 +155,7 @@ async def send_third_party_report(
         source: str = "unknown",
         use_hash: bool = True,
         conversion_id: Optional[str] = None,
-        currency: Optional[str] = "USD",
+        currency: Optional[str] = None,
         amount: Optional[float] = None
 ):
     """
