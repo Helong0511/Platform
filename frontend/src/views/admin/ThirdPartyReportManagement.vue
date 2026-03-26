@@ -112,6 +112,16 @@
         </el-table-column>
         <el-table-column v-if="columnVisibility.conversion_id" prop="conversion_id" label="转化ID" min-width="180"
           show-overflow-tooltip />
+        <el-table-column v-if="columnVisibility.currency" prop="currency" label="货币类型" width="100" align="center">
+          <template #default="scope">
+            {{ scope.row.currency || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column v-if="columnVisibility.amount" prop="amount" label="支付金额" width="120" align="center">
+          <template #default="scope">
+            {{ scope.row.amount || '-' }}
+          </template>
+        </el-table-column>
         <el-table-column v-if="columnVisibility.status" prop="status" label="状态" width="90" align="center">
           <template #default="scope">
             <el-tag :type="getStatusTag(scope.row.status)" size="small">
@@ -207,6 +217,8 @@
             <el-tag size="small">{{ currentLog.event }}</el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="转化ID">{{ currentLog.conversion_id || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="货币类型">{{ currentLog.currency || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="支付金额">{{ currentLog.amount || '-' }}</el-descriptions-item>
           <el-descriptions-item label="状态">
             <el-tag :type="getStatusTag(currentLog.status)">
               {{ getStatusLabel(currentLog.status) }}
@@ -293,6 +305,12 @@
         <el-form-item label="转化ID">
           <el-input v-model="editForm.conversion_id" placeholder="请输入转化ID" />
         </el-form-item>
+        <el-form-item label="货币类型">
+          <el-input v-model="editForm.currency" placeholder="请输入货币类型（如USD）" />
+        </el-form-item>
+        <el-form-item label="支付金额">
+          <el-input v-model.number="editForm.amount" type="number" placeholder="请输入支付金额" />
+        </el-form-item>
         <el-form-item label="邮箱">
           <el-input v-model="editForm.email" placeholder="请输入邮箱" />
         </el-form-item>
@@ -329,6 +347,8 @@
         <el-checkbox label="adsid">广告ID</el-checkbox>
         <el-checkbox label="event">事件类型</el-checkbox>
         <el-checkbox label="conversion_id">转化ID</el-checkbox>
+        <el-checkbox label="currency">货币类型</el-checkbox>
+        <el-checkbox label="amount">支付金额</el-checkbox>
         <el-checkbox label="status">状态</el-checkbox>
         <el-checkbox label="attempt_count">尝试次数</el-checkbox>
         <el-checkbox label="response_status">响应状态码</el-checkbox>
@@ -383,6 +403,8 @@ const getDefaultColumnVisibility = () => ({
   adsid: true,
   event: true,
   conversion_id: true,
+  currency: true,
+  amount: true,
   status: true,
   attempt_count: true,
   response_status: true,
@@ -430,6 +452,8 @@ const saveColumnVisibility = () => {
       adsid: columnVisibility.adsid,
       event: columnVisibility.event,
       conversion_id: columnVisibility.conversion_id,
+      currency: columnVisibility.currency,
+      amount: columnVisibility.amount,
       status: columnVisibility.status,
       attempt_count: columnVisibility.attempt_count,
       response_status: columnVisibility.response_status,
@@ -493,6 +517,8 @@ const editForm = reactive({
   adsid: '',
   event: '',
   conversion_id: '',
+  currency: '',
+  amount: '',
   email: '',
   ip: '',
   phone: '',
@@ -661,6 +687,8 @@ const handleEdit = (log) => {
   editForm.adsid = log.adsid || '';
   editForm.event = log.event || '';
   editForm.conversion_id = log.conversion_id || '';
+  editForm.currency = log.currency || '';
+  editForm.amount = log.amount || '';
   editForm.email = log.email || '';
   editForm.ip = log.ip || '';
   editForm.phone = log.phone || '';
@@ -677,6 +705,8 @@ const handleSaveEdit = async () => {
     if (editForm.adsid) params.adsid = editForm.adsid;
     if (editForm.event) params.event = editForm.event;
     if (editForm.conversion_id) params.conversion_id = editForm.conversion_id;
+    if (editForm.currency) params.currency = editForm.currency;
+    if (editForm.amount !== '' && editForm.amount !== null && editForm.amount !== undefined) params.amount = editForm.amount;
     if (editForm.email) params.email = editForm.email;
     if (editForm.ip) params.ip = editForm.ip;
     if (editForm.phone) params.phone = editForm.phone;
@@ -948,10 +978,16 @@ onMounted(async () => {
   max-height: calc(100vh - 200px);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  position: relative;
+}
+
+.report-detail-dialog :deep(.el-dialog) {
+  overflow: visible !important;
 }
 
 .report-detail-content {
   width: 100%;
+  overflow: visible;
 }
 
 .report-detail-content :deep(.el-descriptions) {

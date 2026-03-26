@@ -37,6 +37,8 @@ class UpdateReportLogParams(BaseModel):
     adsid: Optional[str] = Field(None, max_length=500, description="广告ID")
     event: Optional[str] = Field(None, max_length=50, description="事件类型")
     conversion_id: Optional[str] = Field(None, max_length=255, description="转化ID")
+    currency: Optional[str] = Field(None, max_length=10, description="货币类型")
+    amount: Optional[float] = Field(None, description="支付金额")
     email: Optional[str] = Field(None, max_length=255, description="邮箱")
     ip: Optional[str] = Field(None, max_length=50, description="IP地址")
     phone: Optional[str] = Field(None, max_length=50, description="手机号")
@@ -284,6 +286,8 @@ async def update_third_party_report(
             adsid=params.adsid,
             event=params.event,
             conversion_id=params.conversion_id,
+            currency=params.currency,
+            amount=params.amount,
             email=params.email,
             ip=params.ip,
             phone=params.phone,

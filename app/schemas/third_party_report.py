@@ -16,6 +16,8 @@ class ThirdPartyReportLogBase(BaseSchema):
     adsid: str = Field(..., max_length=500, description="广告ID")
     event: str = Field(..., max_length=50, description="事件类型")
     conversion_id: Optional[str] = Field(None, max_length=255, description="转化ID")
+    currency: Optional[str] = Field(None, max_length=10, description="货币类型")
+    amount: Optional[float] = Field(None, description="支付金额")
     email: Optional[str] = Field(None, max_length=255, description="邮箱")
     ip: Optional[str] = Field(None, max_length=50, description="IP地址")
     phone: Optional[str] = Field(None, max_length=50, description="手机号")
