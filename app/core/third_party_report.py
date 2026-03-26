@@ -151,7 +151,7 @@ async def send_third_party_report(
         source: str = "unknown",
         use_hash: bool = True,
         conversion_id: Optional[str] = None,
-        currency: Optional[str] = None,
+        currency: Optional[str] = "USD",
         amount: Optional[float] = None
 ):
     """
@@ -180,6 +180,12 @@ async def send_third_party_report(
         error_msg = "finishPayment 事件必须提供 conversion_id 参数"
         logger.error(f"[第三方上报] {error_msg}")
         raise ValueError("finishPayment 事件必须提供 conversion_id 参数")
+
+    # finishPayment 事件必须提供 amount
+    if event == "finishPayment" and amount is None:
+        error_msg = "finishPayment 事件必须提供 amount 参数"
+        logger.error(f"[第三方上报] {error_msg}")
+        raise ValueError("finishPayment 事件必须提供 amount 参数")
 
     # 创建上报日志记录，传递conversion_id
     report_log_id = await create_report_log(
@@ -517,6 +523,18 @@ async def retry_report_log(log_id: int):
             
             # 创建一个后台任务来发送上报
             async def background_send():
+                # 从report_params中提取currency和amount（如果存在）
+                currency = "USD"
+                amount = 0.0
+                if log_entry.report_params:
+                    try:
+                        report_params = json.loads(log_entry.report_params)
+                        if "payData" in report_params:
+                            currency = report_params["payData"].get("currency", "USD")
+                            amount = report_params["payData"].get("amount", 0.0)
+                    except:
+                        pass
+                
                 await send_third_party_report(
                     adsid=log_entry.adsid,
                     event=log_entry.event,
@@ -526,7 +544,9 @@ async def retry_report_log(log_id: int):
                     ua=log_entry.ua,
                     source=log_entry.source,
                     use_hash=log_entry.use_hash,
-                    conversion_id=log_entry.conversion_id
+                    conversion_id=log_entry.conversion_id,
+                    currency=currency,
+                    amount=amount
                 )
             asyncio.create_task(background_send())
             
