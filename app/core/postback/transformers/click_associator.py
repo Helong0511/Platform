@@ -38,22 +38,42 @@ class ClickAssociator:
             logger.debug("Click ID 为空，无法关联")
             return None
         
-        # 查询 Click 记录（带关联的 Offer、Publisher、Advertiser）
-        result = await db.execute(
-            select(Click)
-            .options(
-                joinedload(Click.offer),
-                joinedload(Click.publisher),
-                joinedload(Click.advertiser)
-            )
-            .where(Click.click_id == str(click_id))
-            .limit(1)
-        )
+        logger.info(f"开始关联 Click ID: {click_id}")
         
-        click = result.scalars().first()
+        # 尝试多次查询，处理批量处理延迟问题
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            # 查询 Click 记录（带关联的 Offer、Publisher、Advertiser）
+            try:
+                result = await db.execute(
+                    select(Click)
+                    .options(
+                        joinedload(Click.offer),
+                        joinedload(Click.publisher),
+                        joinedload(Click.advertiser)
+                    )
+                    .where(Click.click_id == str(click_id))
+                    .limit(1)
+                )
+                
+                click = result.scalars().first()
+                
+                if click:
+                    logger.info(f"第 {attempt + 1} 次尝试：找到 Click 记录：id={click.id}, click_id={click.click_id}")
+                    break
+                else:
+                    logger.warning(f"第 {attempt + 1} 次尝试：未找到 Click 记录：click_id={click_id}")
+                    if attempt < max_attempts - 1:
+                        import asyncio
+                        await asyncio.sleep(0.5)  # 等待0.5秒后重试
+            except Exception as e:
+                logger.error(f"第 {attempt + 1} 次尝试查询 Click 记录失败：{e}")
+                if attempt < max_attempts - 1:
+                    import asyncio
+                    await asyncio.sleep(0.5)  # 等待0.5秒后重试
         
         if not click:
-            logger.debug(f"未找到 Click 记录：click_id={click_id}")
+            logger.error(f"多次尝试后仍未找到 Click 记录：click_id={click_id}")
             return None
         
         # 解析 url_params
