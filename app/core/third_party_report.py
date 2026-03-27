@@ -328,8 +328,8 @@ async def send_third_party_report(
                                 notification_message += f"跟踪ID: {log_id}"
                                 
                                 # 发送Telegram通知
-                                if TELEGRAM_ADMIN:
-                                    await send_telegram_message_async(TELEGRAM_ADMIN, notification_message)
+                                if settings.TELEGRAM_ADMIN:
+                                    await send_telegram_message(settings.TELEGRAM_ADMIN, notification_message)
                                 else:
                                     logger.warning("TELEGRAM_ADMIN未配置，无法发送Purchase事件通知")
                             
