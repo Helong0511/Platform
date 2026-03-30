@@ -54,18 +54,17 @@ async def create_report_log(
     """
     try:
         async with AsyncSessionLocal() as db:
-            # 先检查是否已存在记录（同时考虑 source、adsid 和 event）
+            # 先检查是否已存在记录（只考虑 source 和 adsid，与数据库唯一约束保持一致）
             from sqlalchemy import select
             result = await db.execute(
                 select(ThirdPartyReportLog)
                 .where(ThirdPartyReportLog.source == source)
                 .where(ThirdPartyReportLog.adsid == adsid)
-                .where(ThirdPartyReportLog.event == event)
             )
             existing_log = result.scalars().first()
             
             if existing_log:
-                logger.warning(f"[第三方上报] 已存在记录: source={source}, adsid={adsid}, event={event}, id={existing_log.id}")
+                logger.warning(f"[第三方上报] 已存在记录: source={source}, adsid={adsid}, id={existing_log.id}")
                 return existing_log.id
             
             # 创建新记录
