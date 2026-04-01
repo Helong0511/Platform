@@ -563,6 +563,12 @@ class ConversionService:
             )
             client_cap = client_cap_result.scalar()
             conversion_cap = client_cap or 0
+            
+            # 对于客户用户，应用转化上限：总转化数不能超过Cap
+            if conversion_cap > 0:
+                total_conversions = min(total_conversions, conversion_cap)
+                # 重新计算转化率
+                cr = (total_conversions / total_clicks * 100) if total_clicks > 0 else 0
 
         # 返回最终的统计结果
         return {

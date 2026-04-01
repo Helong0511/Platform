@@ -220,7 +220,11 @@
               label="Conversion" 
               width="120" 
               align="right" 
-            />
+            >
+              <template #default="scope">
+                {{ getDisplayConversion(scope.row.conversion_count, summaryData.conversion_cap) }}
+              </template>
+            </el-table-column>
             <el-table-column 
               v-if="columnVisibility.cr" 
               prop="cr" 
@@ -840,15 +844,17 @@ const getSummaries = (param) => {
   const { columns, data } = param
   const sums = []
   
-  // 计算总点击数和总转化数（用于计算总转化率）
+  // 计算总点击数（用于计算总转化率）
   const totalClicks = data.reduce((sum, item) => sum + (Number(item.click_count) || 0), 0)
-  const totalConversions = data.reduce((sum, item) => sum + (Number(item.conversion_count) || 0), 0)
+  
+  // 使用服务端返回的总转化数（已应用Cap限制）
+  const totalConversions = summaryData.total_conversions || 0
   const totalCr = totalClicks > 0 ? ((totalConversions / totalClicks) * 100).toFixed(2) : '0.00'
   
-  // 计算总Revenue和总Pub Revenue
-  const totalPo = data.reduce((sum, item) => sum + (Number(item.po) || 0), 0)
-  const totalPoAfterDiscount = data.reduce((sum, item) => sum + (Number(item.po_after_discount) || 0), 0)
-  const totalProfit = totalPo - totalPoAfterDiscount
+  // 使用服务端返回的总金额（已应用Cap限制）
+  const totalPo = summaryData.total_po || 0
+  const totalPoAfterDiscount = summaryData.total_po_after_discount || 0
+  const totalProfit = summaryData.total_profit || 0
   
   columns.forEach((column, index) => {
     const prop = column.property
