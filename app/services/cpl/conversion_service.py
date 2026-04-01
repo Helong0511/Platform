@@ -501,36 +501,42 @@ class ConversionService:
             client_cap = client_cap_result.scalar()
             conversion_cap = client_cap or 0
             
-            # 对于客户用户，应用转化上限：总转化数不能超过Cap
+            # 对于客户用户，应用转化上限：每个(offer_id, publisher_id)组合的转化数不能超过其downstream_cap
             if conversion_cap > 0:
-                # 计算原始总转化数
-                original_total_conversions = calculated_total_conversions
-                # 应用Cap限制
-                total_conversions = min(original_total_conversions, conversion_cap)
+                # 重新计算总转化数和总收益
+                total_conversions = 0
+                total_po_after_discount = 0.0
+                
+                # 对每个(offer_id, publisher_id)组合应用downstream_cap限制
+                for key, stat in stats_dict.items():
+                    offer_id_val, publisher_id_val = key
+                    # 查找该(offer_id, publisher_id)组合的downstream_cap
+                    assignment_key = (offer_id_val, publisher_id_val)
+                    assignment = offer_publisher_assignments_map.get(assignment_key)
+                    
+                    if assignment and assignment.downstream_cap is not None:
+                        # 应用downstream_cap限制
+                        max_conversions = assignment.downstream_cap
+                        if stat["conversion_count"] > max_conversions:
+                            # 计算调整比例
+                            adjustment_ratio = max_conversions / stat["conversion_count"]
+                            # 调整转化数
+                            stat["conversion_count"] = max_conversions
+                            # 按相同比例调整收益
+                            stat["po_after_discount"] *= adjustment_ratio
+                            # 重新计算CR
+                            if stat["click_count"] > 0:
+                                cr_val = (stat["conversion_count"] / stat["click_count"] * 100)
+                                stat["cr"] = round(cr_val, 2)
+                    
+                    # 累加总转化数和总收益
+                    total_conversions += stat["conversion_count"]
+                    total_po_after_discount += stat["po_after_discount"]
+                
+                # 重新计算总利润
+                total_profit = total_po - total_po_after_discount
                 # 重新计算转化率
                 cr = (total_conversions / total_clicks * 100) if total_clicks > 0 else 0
-                
-                # 如果总转化数被Cap限制，需要按比例调整每个Offer的转化数和收益
-                if total_conversions < original_total_conversions:
-                    # 计算调整比例
-                    adjustment_ratio = total_conversions / original_total_conversions
-                    # 调整每个Offer的转化数和收益
-                    for key, stat in stats_dict.items():
-                        # 按比例调整转化数，向下取整
-                        adjusted_conversion_count = int(stat["conversion_count"] * adjustment_ratio)
-                        # 确保至少为0
-                        stat["conversion_count"] = max(0, adjusted_conversion_count)
-                        # 按相同比例调整收益
-                        adjusted_po_after_discount = stat["po_after_discount"] * adjustment_ratio
-                        stat["po_after_discount"] = adjusted_po_after_discount
-                        # 重新计算CR
-                        if stat["click_count"] > 0:
-                            cr_val = (stat["conversion_count"] / stat["click_count"] * 100)
-                            stat["cr"] = round(cr_val, 2)
-                    # 重新计算总收益
-                    total_po_after_discount = sum(stat["po_after_discount"] for stat in stats_dict.values())
-                    # 重新计算总利润
-                    total_profit = total_po - total_po_after_discount
 
         # 计算PO（扣价后）和构建响应数据
         stats_list = []
