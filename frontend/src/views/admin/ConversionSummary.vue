@@ -222,7 +222,7 @@
               align="right" 
             >
               <template #default="scope">
-                {{ getDisplayConversion(scope.row.conversion_count, summaryData.conversion_cap) }}
+                {{ scope.row.conversion_count }}
               </template>
             </el-table-column>
             <el-table-column 
