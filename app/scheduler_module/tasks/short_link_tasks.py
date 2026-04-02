@@ -9,7 +9,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.short_link_click_counter import sync_click_counts_to_db
 from app.scheduler_module.tasks.clicks_batch_processor import process_clicks_queue
 from app.models.models import ShortLink
-from sqlalchemy import update
+from sqlalchemy import update, select, and_, exists
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,6 @@ async def open_closed_short_links_task():
         async with AsyncSessionLocal() as db:
             # 更新所有被关闭的短链接为激活状态，前提是关联的 Offer 处于激活状态
             from app.models.models import Offer
-            from sqlalchemy import and_, exists
             
             # 构建子查询，获取激活状态的 Offer ID
             active_offer_subquery = exists(
