@@ -529,24 +529,31 @@ class ConversionService:
                                 cr_val = (stat["conversion_count"] / stat["click_count"] * 100)
                                 stat["cr"] = round(cr_val, 2)
                             
-                            # 如果达到downstream_cap上限，关闭该渠道的offer关联的短链接
-                            logger.info(f"达到downstream_cap上限，关闭渠道 {publisher_id_val} 的Offer {offer_id_val} 关联的短链接")
-                            try:
-                                from app.models.models import ShortLink
-                                from sqlalchemy import update
-                                
-                                # 关闭与该offer和渠道关联的短链接
-                                update_stmt = update(ShortLink).where(
-                                    ShortLink.offer_id == offer_id_val,
-                                    ShortLink.channel_id == publisher_id_val,
-                                    ShortLink.is_active == True
-                                ).values(is_active=False)
-                                
-                                result = await self.db.execute(update_stmt)
-                                await self.db.commit()
-                                logger.info(f"成功关闭 {result.rowcount} 个短链接")
-                            except Exception as e:
-                                logger.error(f"关闭短链接失败: {str(e)}")
+                            # 检查Offer是否处于激活状态
+                            offer = offers_map.get(offer_id_val)
+                            if offer and offer.is_active and offer.status == 'Active':
+                                # 如果达到downstream_cap上限，关闭该渠道的offer关联的短链接
+                                logger.info(f"达到downstream_cap上限，关闭渠道 {publisher_id_val} 的Offer {offer_id_val} 关联的短链接")
+                                try:
+                                    from app.models.models import ShortLink
+                                    from sqlalchemy import update
+                                    
+                                    # 关闭与该offer和渠道关联的短链接
+                                    update_stmt = update(ShortLink).where(
+                                        ShortLink.offer_id == offer_id_val,
+                                        ShortLink.channel_id == publisher_id_val,
+                                        ShortLink.is_active == True
+                                    ).values(is_active=False)
+                                    
+                                    result = await self.db.execute(update_stmt)
+                                    # 注意：这里不执行commit，因为事务管理应该由调用方处理
+                                    # 只执行flush操作，确保更改被发送到数据库
+                                    await self.db.flush()
+                                    logger.info(f"成功关闭 {result.rowcount} 个短链接")
+                                except Exception as e:
+                                    logger.error(f"关闭短链接失败: {str(e)}")
+                            else:
+                                logger.debug(f"Offer {offer_id_val} 不是激活状态，跳过关闭短链接操作")
                     
                     # 累加总转化数和总收益
                     total_conversions += stat["conversion_count"]

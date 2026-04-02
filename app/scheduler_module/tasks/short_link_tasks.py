@@ -69,15 +69,35 @@ async def open_closed_short_links_task():
     """
     每日自动打开被关闭的短链接
     每天执行一次，将前一天因达到转化上限而关闭的短链接重新激活
+    前提是关联的 Offer 处于激活状态
     """
     try:
         logger.info("开始执行每日打开短链接任务...")
 
         # 创建数据库会话
         async with AsyncSessionLocal() as db:
-            # 更新所有被关闭的短链接为激活状态
+            # 更新所有被关闭的短链接为激活状态，前提是关联的 Offer 处于激活状态
+            from app.models.models import Offer
+            from sqlalchemy import and_, exists
+            
+            # 构建子查询，获取激活状态的 Offer ID
+            active_offer_subquery = exists(
+                select(Offer.id)
+                .where(
+                    and_(
+                        Offer.id == ShortLink.offer_id,
+                        Offer.is_active == True,
+                        Offer.status == 'Active'
+                    )
+                )
+            )
+            
+            # 更新被关闭且关联的 Offer 是激活状态的短链接
             update_stmt = update(ShortLink).where(
-                ShortLink.is_active == False
+                and_(
+                    ShortLink.is_active == False,
+                    active_offer_subquery
+                )
             ).values(is_active=True)
 
             result = await db.execute(update_stmt)
