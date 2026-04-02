@@ -179,7 +179,7 @@ class PostbackProcessor:
                 }
             
             # ========== 第 6 步：Cap 检查 ==========
-            logger.info("=== 第 6 步：Cap 检查 ===")
+            logger.info("=== 第 6 步：Cap 检查 ====")
             offer_id = click_association.get('offer_id') if click_association else None
             publisher_id = click_association.get('publisher_id') if click_association else None
             advertiser_id = click_association.get('advertiser_id') if click_association else None
@@ -194,6 +194,26 @@ class PostbackProcessor:
             
             conversion_status = 'Pending' if cap_ok else f'CapExceeded({cap_status})'
             logger.info(f"Cap 检查结果：{cap_ok}, 状态：{conversion_status}")
+            
+            # 如果Cap检查失败，关闭该渠道的offer关联的短链接
+            if not cap_ok and offer_id and publisher_id:
+                logger.info(f"Cap检查失败，关闭渠道 {publisher_id} 的Offer {offer_id} 关联的短链接")
+                try:
+                    from app.models.models import ShortLink
+                    from sqlalchemy import update
+                    
+                    # 关闭与该offer和渠道关联的短链接
+                    update_stmt = update(ShortLink).where(
+                        ShortLink.offer_id == offer_id,
+                        ShortLink.channel_id == publisher_id,
+                        ShortLink.is_active == True
+                    ).values(is_active=False)
+                    
+                    result = await db.execute(update_stmt)
+                    await db.commit()
+                    logger.info(f"成功关闭 {result.rowcount} 个短链接")
+                except Exception as e:
+                    logger.error(f"关闭短链接失败: {str(e)}")
             
             # ========== 第 7 步：扣量计算 ==========
             logger.info("=== 第 7 步：扣量计算 ===")

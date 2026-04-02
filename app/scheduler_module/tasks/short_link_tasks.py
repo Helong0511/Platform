@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from app.core.database import AsyncSessionLocal
 from app.core.short_link_click_counter import sync_click_counts_to_db
 from app.scheduler_module.tasks.clicks_batch_processor import process_clicks_queue
+from app.models.models import ShortLink
+from sqlalchemy import update
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,36 @@ async def process_clicks_queue_task():
     except Exception as e:
         # 错误日志会输出到 app.log（WARNING 级别）
         logger.error(f"❌ 点击记录队列批量处理任务执行失败: {e}", exc_info=True)
+        raise
+
+
+async def open_closed_short_links_task():
+    """
+    每日自动打开被关闭的短链接
+    每天执行一次，将前一天因达到转化上限而关闭的短链接重新激活
+    """
+    try:
+        logger.info("开始执行每日打开短链接任务...")
+
+        # 创建数据库会话
+        async with AsyncSessionLocal() as db:
+            # 更新所有被关闭的短链接为激活状态
+            update_stmt = update(ShortLink).where(
+                ShortLink.is_active == False
+            ).values(is_active=True)
+
+            result = await db.execute(update_stmt)
+            await db.commit()
+
+            if result.rowcount > 0:
+                logger.info(f"✅ 成功打开 {result.rowcount} 个被关闭的短链接")
+            else:
+                logger.debug("ℹ️ 没有需要打开的短链接")
+
+        logger.debug("每日打开短链接任务执行成功")
+    except Exception as e:
+        # 错误日志会输出到 app.log（WARNING 级别）
+        logger.error(f"❌ 每日打开短链接任务执行失败: {e}", exc_info=True)
         raise
 
 

@@ -147,6 +147,17 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "归档90天前的点击记录到归档表，减少主表数据量，提升查询性能",
     },
 
+    "每日打开短链接": {
+        "task_name": "每日打开短链接",
+        "task_module": "app.scheduler_module.tasks.short_link_tasks",
+        "task_function": "open_closed_short_links_task",
+        "result_getter_module": "app.scheduler_module.tasks.short_link_tasks",
+        "result_getter_function": "get_task_result",
+        # 数据库配置
+        "cron_expression": "0 0 * * *",  # 每天 00:00 UTC
+        "description": "每天执行一次，将前一天因达到转化上限而关闭的短链接重新激活",
+    },
+
     # ========== TQT API获取数据任务 ==========
     "TQT API获取数据": {
         "task_name": "TQT API获取数据",
