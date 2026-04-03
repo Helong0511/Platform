@@ -444,7 +444,7 @@ async def test_telegram_connection(
     test_message = "🔔 Telegram 通知测试\n\n这是一条测试消息，如果您收到此消息，说明 Telegram 连接正常。"
     
     try:
-        success = await send_telegram_message_async(test_message, telegram_chat_id)
+        success = await send_telegram_message_async(telegram_chat_id, test_message)
         if success:
             return ResponseBaseSchema.success(data={
                 "success": True,
@@ -484,7 +484,7 @@ async def send_test_message(
         # 使用 TelegramNotificationService 构建测试消息
         test_message = TelegramNotificationService.build_test_message(message_type)
         
-        success = await send_telegram_message_async(test_message, telegram_chat_id)
+        success = await send_telegram_message_async(telegram_chat_id, test_message)
         if success:
             return ResponseBaseSchema.success(data={
                 "success": True,
