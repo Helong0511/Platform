@@ -212,7 +212,7 @@ const handleLogin = async () => {
   }
 };
 
-// 全局错误处理器，捕获并忽略 ElOnlyChild 错误
+// 组件级错误处理器，主要处理组件特定的错误
 const handleGlobalError = (event) => {
   // 忽略 Element Plus 的 ElOnlyChild 错误
   const errorMessage = event?.message || event?.error?.message || '';

@@ -308,7 +308,7 @@ const loadDashboardData = async () => {
 // 标记是否已经初始化
 let isInitialized = false;
 
-// 全局错误处理器，捕获并忽略常见无害错误
+// 组件级错误处理器，主要处理组件特定的错误
 const handleGlobalError = (event) => {
   const errorMessage = event?.message || event?.error?.message || '';
   
@@ -316,22 +316,6 @@ const handleGlobalError = (event) => {
   if (typeof errorMessage === 'string' && errorMessage.includes('ElOnlyChild')) {
     event.preventDefault();
     event.stopPropagation();
-    return true;
-  }
-  
-  // 忽略浏览器扩展相关的错误（通常由广告拦截器、开发者工具扩展等引起）
-  // 包括 Edge 浏览器扩展可能引起的错误
-  const errorString = typeof errorMessage === 'string' ? errorMessage.toLowerCase() : '';
-  if (typeof errorMessage === 'string' && (
-    errorString.includes('message channel closed') ||
-    errorString.includes('asynchronous response') ||
-    errorString.includes('listener indicated an asynchronous response') ||
-    errorString.includes('message channel') ||
-    errorString.includes('channel closed')
-  )) {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation(); // 阻止其他监听器处理
     return true;
   }
   
@@ -343,20 +327,6 @@ const handleUnhandledRejection = (event) => {
   
   // 忽略 Element Plus 的 ElOnlyChild 错误
   if (typeof errorMessage === 'string' && errorMessage.includes('ElOnlyChild')) {
-    event.preventDefault();
-    return true;
-  }
-  
-  // 忽略浏览器扩展相关的错误（通常由广告拦截器、开发者工具扩展等引起）
-  // 包括 Edge 浏览器扩展可能引起的错误
-  const errorString = typeof errorMessage === 'string' ? errorMessage.toLowerCase() : '';
-  if (typeof errorMessage === 'string' && (
-    errorString.includes('message channel closed') ||
-    errorString.includes('asynchronous response') ||
-    errorString.includes('listener indicated an asynchronous response') ||
-    errorString.includes('message channel') ||
-    errorString.includes('channel closed')
-  )) {
     event.preventDefault();
     return true;
   }

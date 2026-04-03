@@ -17,7 +17,7 @@ from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from app.core.dependencies import get_notification_config_service
-from app.core.auto_bot import send_telegram_message
+from app.core.telegram import send_telegram_message_async
 from app.models.models import (
     Client, Product, User, UserRole,
     ClientNotificationConfig, ProductNotificationConfig, AdminNotificationConfig,
@@ -444,7 +444,7 @@ async def test_telegram_connection(
     test_message = "🔔 Telegram 通知测试\n\n这是一条测试消息，如果您收到此消息，说明 Telegram 连接正常。"
     
     try:
-        success = await send_telegram_message(test_message, telegram_chat_id)
+        success = await send_telegram_message_async(test_message, telegram_chat_id)
         if success:
             return ResponseBaseSchema.success(data={
                 "success": True,
@@ -484,7 +484,7 @@ async def send_test_message(
         # 使用 TelegramNotificationService 构建测试消息
         test_message = TelegramNotificationService.build_test_message(message_type)
         
-        success = await send_telegram_message(test_message, telegram_chat_id)
+        success = await send_telegram_message_async(test_message, telegram_chat_id)
         if success:
             return ResponseBaseSchema.success(data={
                 "success": True,
