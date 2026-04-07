@@ -17,7 +17,7 @@ from anyio import EndOfStream
 from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from sqlalchemy.future import select
 
 from app.api_v1 import api_router
@@ -1200,6 +1200,28 @@ async def root():
         "message": f"{settings.SERVER_NAME} is running",
         "version": "1.0.0"
     }
+
+# 处理 favicon.ico 请求
+@app.get("/favicon.ico")
+async def favicon():
+    # 优先使用服务器路径，本地开发时会自动回退到本地路径
+    favicon_path = "/data/Platform/scripts/favicon.ico"
+    
+    # 如果服务器路径不存在，尝试本地路径（用于开发环境）
+    if not os.path.exists(favicon_path):
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        favicon_path = os.path.join(current_dir, "..", "scripts", "favicon.ico")
+    
+    if os.path.exists(favicon_path):
+        return FileResponse(
+            favicon_path,
+            media_type="image/x-icon",
+            headers={
+                "Cache-Control": "public, max-age=31536000, immutable"
+            }
+        )
+    else:
+        raise HTTPException(status_code=404, detail="Favicon not found")
 
 
 # ====== 注册路由 ======
