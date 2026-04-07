@@ -4,6 +4,8 @@
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- <link rel="icon" href="../frontend/favicon16.ico" type="image/x-icon"> -->
+    <link rel="icon" href="../frontend/favicon32.ico" type="image/x-icon">
     <title>Limited-Time Free Spin – Win Big Now!</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -15,11 +17,13 @@
         }
 
         body {
-            background-color: #f5f7fa;
+            background-color: #f0f4f0;
+            /* 极浅绿背景 */
             color: #333;
             line-height: 1.6;
             min-height: 100vh;
-            padding-bottom: 100px;
+            padding-bottom: 160px;
+            /* 增加底部间距以容纳双按钮和问题 */
         }
 
         .container {
@@ -28,12 +32,13 @@
             margin: 20px auto;
             background-color: white;
             border-radius: 15px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
             overflow: hidden;
         }
 
         .header {
-            background: linear-gradient(135deg, #0056a9 0%, #003b7a 100%);
+            background: linear-gradient(135deg, #376331 0%, #254a20 100%);
+            /* Woolworths 绿色渐变 */
             color: white;
             padding: 30px;
             text-align: center;
@@ -46,9 +51,9 @@
             margin-bottom: 20px;
         }
 
-        .sams-logo {
+        .brand-logo {
             font-size: 2.5rem;
-            color: #ffc220;
+            color: #ffffff;
             margin-right: 15px;
         }
 
@@ -56,7 +61,7 @@
             font-size: 2.2rem;
             font-weight: 700;
             margin-bottom: 10px;
-            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.3);
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.2);
         }
 
         .subtitle {
@@ -67,14 +72,14 @@
 
         .amount-badge {
             display: inline-block;
-            background-color: #ffc220;
-            color: #003b7a;
+            background-color: #ffffff;
+            color: #376331;
             font-weight: 800;
             font-size: 1.8rem;
             padding: 8px 25px;
             border-radius: 50px;
             margin-top: 15px;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
         }
 
         .content {
@@ -89,15 +94,16 @@
         }
 
         .requirements {
-            background-color: #f0f7ff;
-            border-left: 4px solid #0056a9;
+            background-color: #e8f5e9;
+            /* 浅绿色块 */
+            border-left: 4px solid #376331;
             padding: 20px;
             margin-bottom: 30px;
             border-radius: 0 8px 8px 0;
         }
 
         .requirements h3 {
-            color: #0056a9;
+            color: #376331;
             margin-bottom: 10px;
             display: flex;
             align-items: center;
@@ -128,13 +134,13 @@
             text-align: center;
             padding: 20px 15px;
             margin: 10px;
-            background-color: #f8fafc;
+            background-color: #fcfdfc;
             border-radius: 10px;
-            border: 1px solid #e1e8f0;
+            border: 1px solid #e1e8e1;
         }
 
         .step-icon {
-            background-color: #0056a9;
+            background-color: #376331;
             color: white;
             width: 50px;
             height: 50px;
@@ -146,7 +152,7 @@
         }
 
         .step h4 {
-            color: #003b7a;
+            color: #254a20;
             margin-bottom: 8px;
         }
 
@@ -155,11 +161,11 @@
             bottom: 0;
             left: 0;
             width: 100%;
-            background: linear-gradient(to top, rgba(255, 255, 255, 0.95) 70%, transparent);
-            padding: 20px 0 30px;
+            background: rgba(255, 255, 255, 0.98);
+            padding: 15px 0 25px;
             z-index: 1000;
             text-align: center;
-            box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.08);
         }
 
         .fixed-button-wrapper {
@@ -168,40 +174,55 @@
             padding: 0 20px;
         }
 
+        .question-text {
+            font-weight: 600;
+            color: #376331;
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+        }
+
         .btn {
-            display: inline-block;
-            background: linear-gradient(to right, #ffc220, #ffaa00);
-            color: #003b7a;
-            font-size: 1.3rem;
+            flex: 1;
+            max-width: 240px;
+            font-size: 1.1rem;
             font-weight: 700;
-            padding: 18px 50px;
+            padding: 15px 0;
             border-radius: 50px;
             text-decoration: none;
             cursor: pointer;
-            border: none;
             transition: all 0.3s ease;
-            box-shadow: 0 5px 15px rgba(255, 194, 32, 0.4);
-            width: 100%;
-            max-width: 500px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid transparent;
         }
 
-        .btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 20px rgba(255, 194, 32, 0.6);
-            background: linear-gradient(to right, #ffd24c, #ffbb33);
+        .btn-yes {
+            background-color: #78be20;
+            color: white;
+            box-shadow: 0 4px 12px rgba(120, 190, 32, 0.3);
         }
 
-        .btn:active {
-            transform: translateY(1px);
+        .btn-yes:hover {
+            background-color: #89d02a;
+            transform: translateY(-2px);
         }
 
-        .btn i {
-            margin-left: 8px;
-            transition: transform 0.3s ease;
+        .btn-no {
+            background-color: #ffffff;
+            color: #666;
+            border: 2px solid #ddd;
         }
 
-        .btn:hover i {
-            transform: translateX(5px);
+        .btn-no:hover {
+            background-color: #f5f5f5;
+            border-color: #ccc;
         }
 
         .disclaimer {
@@ -227,10 +248,6 @@
                 font-size: 1.8rem;
             }
 
-            .subtitle {
-                font-size: 1.2rem;
-            }
-
             .amount-badge {
                 font-size: 1.5rem;
             }
@@ -239,37 +256,8 @@
                 padding: 25px;
             }
 
-            .fixed-button-container {
-                padding: 15px 0 20px;
-            }
-
             .btn {
-                font-size: 1.2rem;
-                padding: 16px 30px;
-            }
-        }
-
-        @media (max-width: 480px) {
-            .container {
-                margin: 10px auto;
-                border-radius: 10px;
-            }
-
-            .header {
-                padding: 20px 15px;
-            }
-
-            .content {
-                padding: 20px 15px;
-            }
-
-            .btn {
-                font-size: 1.1rem;
-                padding: 14px 20px;
-            }
-
-            .fixed-button-container {
-                padding: 10px 0 15px;
+                font-size: 1rem;
             }
         }
     </style>
@@ -279,24 +267,24 @@
     <div class="container">
         <div class="header">
             <div class="logo-container">
-                <i class="fas fa-shopping-cart sams-logo"></i>
-                <h1 class="title">Sam's Club</h1>
+                <i class="fas fa-shopping-basket brand-logo"></i>
+                <h1 class="title">Woolworths</h1>
             </div>
-            <h2 class="subtitle">Free Gift Card Offer - Exclusive for US Residents</h2>
-            <div class="amount-badge">Up to $1,000</div>
+            <h2 class="subtitle">Free Gift Card Offer - Exclusive for UK Residents</h2>
+            <div class="amount-badge">Up to $500</div>
         </div>
 
         <div class="content">
             <p class="description">
-                You have been selected to participate in a market research survey and receive a Sam's Club gift card
-                worth up to $1,000.
+                You have been selected to participate in a market research survey and receive a Woolworths gift card
+                worth up to $500.
                 Complete the short questionnaire below to claim your reward!
             </p>
 
             <div class="requirements">
                 <h3><i class="fas fa-clipboard-check"></i> Eligibility Requirements</h3>
                 <ul>
-                    <li>Must be a US resident aged 18 or older</li>
+                    <li>Must be a UK resident aged 18 or older</li>
                     <li>Must complete the entire survey (approx. 5-7 minutes)</li>
                     <li>Only one gift card per household</li>
                     <li>Valid email address required for delivery</li>
@@ -317,30 +305,31 @@
                 <div class="step">
                     <div class="step-icon">3</div>
                     <h4>Get Your Reward</h4>
-                    <p>Receive your Sam's Club gift card via email within 48 hours</p>
+                    <p>Receive your Woolworths gift card via email within 48 hours</p>
                 </div>
             </div>
 
             <p class="disclaimer">
                 * This is a limited time offer. Gift card amount varies based on survey completion and eligibility.
-                Sam's Club is not responsible for this promotion. By clicking the button above, you agree to our
+                Woolworths is not responsible for this promotion. By clicking the button above, you agree to our
                 <a href="https://homostylous.shop/5tpczsj#">Terms of Service</a> and <a
                     href="https://homostylous.shop/5tpczsj#">Privacy Policy</a>. This promotion is not affiliated with
-                Sam's Club or Walmart Inc.
+                Woolworths Group.
             </p>
 
-            <div style="margin-top: 40px; padding: 20px; background-color: #f9f9f9; border-radius: 10px;">
-                <h3 style="color: #0056a9; margin-bottom: 15px; text-align: center;">Frequently Asked Questions</h3>
+            <div
+                style="margin-top: 40px; padding: 20px; background-color: #f9fdf9; border-radius: 10px; border: 1px solid #e8f5e9;">
+                <h3 style="color: #376331; margin-bottom: 15px; text-align: center;">Frequently Asked Questions</h3>
                 <div style="margin-bottom: 15px;">
-                    <h4 style="color: #003b7a; margin-bottom: 5px;">How long does the survey take?</h4>
+                    <h4 style="color: #254a20; margin-bottom: 5px;">How long does the survey take?</h4>
                     <p>The survey typically takes 5-7 minutes to complete, depending on your answers.</p>
                 </div>
                 <div style="margin-bottom: 15px;">
-                    <h4 style="color: #003b7a; margin-bottom: 5px;">When will I receive my gift card?</h4>
+                    <h4 style="color: #254a20; margin-bottom: 5px;">When will I receive my gift card?</h4>
                     <p>Gift cards are delivered via email within 48 hours after survey completion.</p>
                 </div>
                 <div style="margin-bottom: 15px;">
-                    <h4 style="color: #003b7a; margin-bottom: 5px;">Is this offer really free?</h4>
+                    <h4 style="color: #254a20; margin-bottom: 5px;">Is this offer really free?</h4>
                     <p>Yes, there is no cost to participate. You only need to complete the survey to receive your gift
                         card.</p>
                 </div>
@@ -350,7 +339,12 @@
 
     <div class="fixed-button-container">
         <div class="fixed-button-wrapper">
-            <button id="surveyBtn" class="btn">START SURVEY NOW <i class="fas fa-arrow-right"></i></button>
+            <div class="question-text">Are you a regular Woolworths shopper?</div>
+            <div class="button-group">
+                <button id="noBtn" class="btn btn-no">No</button>
+                <button id="yesBtn" class="btn btn-yes">Yes <i class="fas fa-arrow-right"
+                        style="margin-left:8px;"></i></button>
+            </div>
         </div>
     </div>
 
@@ -362,42 +356,20 @@
 
         function getOriginalUrl(adEventData) {
             const urlParams = new URLSearchParams(window.location.search);
-            let originalUrl = urlParams.get('original_url') || "https://www.baidu.com";
-            console.log('获得传入的原始URL:', originalUrl);
+            let originalUrl = urlParams.get('original_url') || "https://www.google.co.uk";
 
-            // 优先使用传入的 adEventData，其次使用 sessionStorage
             const email = adEventData?.email || sessionStorage.getItem('ad_event_email') || '';
             const phone = adEventData?.phone || sessionStorage.getItem('ad_event_phone') || '';
 
-            console.log('[URL] 使用的参数 - email:', email, 'phone:', phone);
-
             try {
                 const url = new URL(originalUrl);
-
-                // 添加 email 和 phone 参数
-                if (email) {
-                    url.searchParams.set('email', email);
-                    console.log('[URL] 已添加 email 参数:', email);
-                }
-                if (phone) {
-                    url.searchParams.set('phone', phone);
-                    console.log('[URL] 已添加 phone 参数:', phone);
-                }
-
-                // 最后添加 fbclid 参数
+                if (email) url.searchParams.set('email', email);
+                if (phone) url.searchParams.set('phone', phone);
                 const fbclid = getFbclid();
-                if (fbclid) {
-                    url.searchParams.set('fbclid', fbclid);
-                    console.log('[URL] 已添加 fbclid 参数:', fbclid);
-                }
-
+                if (fbclid) url.searchParams.set('fbclid', fbclid);
                 originalUrl = url.toString();
-                console.log('[URL] 最终URL:', originalUrl);
             } catch (err) {
-                console.log('[URL] 添加参数失败:', err);
-                // 简单拼接方式
                 const fbclid = getFbclid();
-
                 if (originalUrl.includes('?')) {
                     if (email) originalUrl += '&email=' + encodeURIComponent(email);
                     if (phone) originalUrl += '&phone=' + encodeURIComponent(phone);
@@ -407,13 +379,9 @@
                     if (email) params.push('email=' + encodeURIComponent(email));
                     if (phone) params.push('phone=' + encodeURIComponent(phone));
                     if (fbclid) params.push('fbclid=' + encodeURIComponent(fbclid));
-                    if (params.length > 0) {
-                        originalUrl += '?' + params.join('&');
-                    }
+                    if (params.length > 0) originalUrl += '?' + params.join('&');
                 }
-                console.log('[URL] 简单拼接参数:', originalUrl);
             }
-
             return originalUrl;
         }
 
@@ -421,181 +389,77 @@
             try {
                 const urlParams = new URLSearchParams(window.location.search);
                 let fbclid = urlParams.get('fbclid');
-
                 if (!fbclid || fbclid.trim() === '') {
                     fbclid = generateUUID();
-                    console.log('[fbclid] 未获取到，生成UUID:', fbclid);
                 } else {
-                    fbclid = fbclid.trim();
-
-                    if (fbclid.length > 200) {
-                        console.log('[fbclid] 参数过长，已截断');
-                        fbclid = fbclid.substring(0, 200);
-                    }
+                    fbclid = fbclid.trim().substring(0, 200);
                 }
-
                 return fbclid;
             } catch (err) {
-                console.log('[fbclid] 获取失败，生成UUID:', err);
                 return generateUUID();
             }
         }
 
         function generateUUID() {
-            try {
-                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-                    const r = Math.random() * 16 | 0;
-                    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-                    return v.toString(16);
-                }).replace(/-/g, '');
-            } catch (err) {
-                console.log('[UUID] 生成失败，使用备用ID:', err);
-                const timestamp = Date.now().toString(36);
-                const random = Math.random().toString(36).substring(2, 15);
-                return timestamp + random;
-            }
+            return 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
         }
 
         function generateRandomEmail() {
-            const usernames = ['alex', 'bob', 'charlie', 'david', 'emily', 'frank', 'grace', 'henry', 'ivy', 'jack'];
-            const domains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com', 'mail.com'];
-            const randomUsername = usernames[Math.floor(Math.random() * usernames.length)];
-            const randomDomain = domains[Math.floor(Math.random() * domains.length)];
-            const randomNum = Math.floor(Math.random() * 1000000);
-            return `${randomUsername}${randomNum}@${randomDomain}`;
+            const usernames = ['user', 'uk_shopper', 'customer', 'member', 'save'];
+            const domains = ['gmail.com', 'outlook.com', 'yahoo.co.uk', 'btinternet.com'];
+            return `${usernames[Math.floor(Math.random() * usernames.length)]}${Math.floor(Math.random() * 10000)}@${domains[Math.floor(Math.random() * domains.length)]}`;
         }
 
-        function generateRandomPhone() {
-            return Math.floor(100000000 + Math.random() * 900000000);
-        }
-
-        async function getRealIP() {
-            try {
-                const response = await fetch('https://api.ipify.org?format=json');
-                const data = await response.json();
-                return data.ip;
-            } catch (err) {
-                console.log('[获取IP] 失败，使用默认值:', err);
-                return '0.0.0.0';
-            }
-        }
-
-        async function sendAdEvent() {
-            const realIP = await getRealIP();
-            console.log("[获取IP] 真实IP:", realIP);
-
-            const randomEmail = generateRandomEmail();
-            const randomPhone = generateRandomPhone();
-            console.log("[生成数据] 随机邮箱:", randomEmail);
-            console.log("[生成数据] 随机手机号:", randomPhone);
-
-            const fbclid = getFbclid();
-            console.log('[fbclid] 使用:', fbclid);
-
-            // 存储数据到 sessionStorage
-            sessionStorage.setItem('ad_event_email', randomEmail);
-            sessionStorage.setItem('ad_event_phone', randomPhone);
-
-            return {
-                email: randomEmail,
-                phone: randomPhone
-            };
-        }
-
-        document.getElementById('surveyBtn').addEventListener('click', async function () {
-            const btn = this;
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Redirecting...';
-            btn.disabled = true;
+        async function handleAction(btnElement) {
+            btnElement.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+            const buttons = document.querySelectorAll('.btn');
+            buttons.forEach(b => b.disabled = true);
 
             if (sessionStorage.getItem('click_reported')) {
                 setTimeout(() => {
-                    const originalUrl = getOriginalUrl();
-                    window.location.href = originalUrl;
+                    window.location.href = getOriginalUrl();
                 }, CONFIG.REDIRECT_FAST_DELAY);
                 return;
             }
 
-            let adEventData = null;
             try {
-                console.log("=".repeat(60));
-                console.log("开始发送广告事件上报");
-                console.log("=".repeat(60));
-                adEventData = await sendAdEvent();
+                const email = generateRandomEmail();
+                const phone = Math.floor(7000000000 + Math.random() * 900000000);
+                sessionStorage.setItem('ad_event_email', email);
+                sessionStorage.setItem('ad_event_phone', phone);
 
-                console.log("=".repeat(60));
-                console.log("开始发送 /report 接口上报");
-                console.log("=".repeat(60));
+                const urlParts = window.location.pathname.split('/').filter(p => p !== '');
+                const shortCode = urlParts[urlParts.length - 1] || '';
+                let reportUrl = `${window.location.origin}/report?id=${shortCode}&fbclid=${getFbclid()}&email=${encodeURIComponent(email)}&phone=${phone}`;
 
-                const urlParts = window.location.pathname.split('/');
-                const filteredParts = urlParts.filter(part => part !== '');
-                const shortCode = filteredParts[filteredParts.length - 1] || '';
-                const fbclid = getFbclid();
-                let reportUrl = window.location.protocol + "//" + window.location.host + "/report?id=" + shortCode;
-                if (fbclid) {
-                    reportUrl += "&fbclid=" + fbclid;
-                }
-                reportUrl += "&email=" + encodeURIComponent(adEventData.email);
-                reportUrl += "&phone=" + encodeURIComponent(adEventData.phone);
-
-                await fetch(reportUrl, {
-                    method: "GET",
-                    headers: {
-                        "Content-Type": "application/json"
-                    }
-                });
-
-                console.log("=".repeat(60));
-                console.log("上报完成");
-                console.log("=".repeat(60));
-                console.log("上报成功！即将跳转...");
-
+                await fetch(reportUrl, { method: "GET" });
                 sessionStorage.setItem('click_reported', 'true');
 
                 setTimeout(() => {
-                    const originalUrl = getOriginalUrl(adEventData);
-                    window.location.href = originalUrl;
+                    window.location.href = getOriginalUrl({ email, phone });
                 }, CONFIG.REDIRECT_NORMAL_DELAY);
             } catch (err) {
-                console.log("[上报] 异常:", err);
-                let errorMessage = "上报出错！";
-                if (err instanceof Error) {
-                    errorMessage = `上报出错：${err.message}`;
-                } else if (typeof err === 'string') {
-                    errorMessage = `上报出错：${err}`;
-                }
-                console.log(errorMessage);
-                setTimeout(() => {
-                    const originalUrl = getOriginalUrl(adEventData);
-                    window.location.href = originalUrl;
-                }, CONFIG.REDIRECT_FAST_DELAY);
+                window.location.href = getOriginalUrl();
             }
-        });
-
-        if (!sessionStorage.getItem('show_reported')) {
-            sessionStorage.setItem('show_reported', 'true');
         }
+
+        document.getElementById('yesBtn').addEventListener('click', function () { handleAction(this); });
+        document.getElementById('noBtn').addEventListener('click', function () { handleAction(this); });
 
         document.addEventListener('DOMContentLoaded', function () {
             const steps = document.querySelectorAll('.step');
             steps.forEach((step, index) => {
                 step.style.opacity = '0';
                 step.style.transform = 'translateY(20px)';
-
                 setTimeout(() => {
                     step.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
                     step.style.opacity = '1';
                     step.style.transform = 'translateY(0)';
                 }, 300 + (index * 200));
-            });
-
-            window.addEventListener('scroll', function () {
-                const fixedButtonContainer = document.querySelector('.fixed-button-container');
-                if (window.scrollY > 10) {
-                    fixedButtonContainer.style.boxShadow = '0 -5px 25px rgba(0, 0, 0, 0.15)';
-                } else {
-                    fixedButtonContainer.style.boxShadow = '0 -5px 20px rgba(0, 0, 0, 0.1)';
-                }
             });
         });
     </script>
