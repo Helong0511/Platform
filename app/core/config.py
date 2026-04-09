@@ -422,12 +422,18 @@ class Settings(BaseSettings):
     @field_validator("TELEGRAM_ADMIN")
     @classmethod
     def validate_telegram_admin(cls, v: str | None) -> str | None:
-        """验证 Telegram Admin Chat ID"""
+        """验证 Telegram Admin Chat ID
+        支持单个 ID 或多个 ID（逗号分隔）
+        """
         if v is not None and isinstance(v, str):
             v = v.strip()
-            # 验证格式：应该是数字字符串（可能带负号）
-            if v and not v.replace("-", "").isdigit():
-                logger.warning(f"TELEGRAM_ADMIN 格式可能不正确: {v}（应为数字字符串）")
+            if v:
+                # 支持逗号分隔的多个 ID
+                ids = [id.strip() for id in v.split(",")]
+                for id in ids:
+                    # 验证格式：应该是数字字符串（可能带负号）
+                    if not id.replace("-", "").isdigit():
+                        logger.warning(f"TELEGRAM_ADMIN 格式可能不正确: {id}（应为数字字符串）")
         return v
 
     # ====== Facebook 像素配置 ======

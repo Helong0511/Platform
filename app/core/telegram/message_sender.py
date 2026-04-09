@@ -67,7 +67,7 @@ def send_telegram_message(
     
     兼容两种调用方式：
     1. 新方式：send_telegram_message(chat_id, message)
-    2. 旧方式：send_telegram_message(message)  - 自动使用 TELEGRAM_ADMIN
+    2. 旧方式：send_telegram_message(message)  - 自动使用 TELEGRAM_ADMIN（支持多个 ID，逗号分隔）
     
     Args:
         chat_id_or_message: 聊天 ID（新方式）或消息内容（旧方式）
@@ -76,7 +76,7 @@ def send_telegram_message(
         reply_to_message_id: 回复的消息 ID（可选）
     
     Returns:
-        bool: 是否发送成功
+        bool: 是否发送成功（向所有目标发送成功才返回 True）
     """
     bot_available, status_msg = _check_bot_available()
     if not bot_available:
@@ -105,39 +105,55 @@ def send_telegram_message(
         logger.info(f"消息过长，已截断：{len(actual_message)} -> {len(truncated_msg)} 字符")
         actual_message = truncated_msg
     
-    # 重试机制
-    for attempt in range(MAX_RETRIES):
-        try:
-            # 发送消息，不使用 parse_mode 以避免 HTML 解析错误
-            # 设置超时参数
-            bot.send_message(
-                chat_id=actual_chat_id,
-                text=actual_message,
-                reply_to_message_id=reply_to_message_id,
-                timeout=TIMEOUT_SECONDS
-            )
-            logger.info(f"已发送 Telegram 消息到：{actual_chat_id}（尝试 {attempt + 1}/{MAX_RETRIES}）")
-            return True
+    # 支持逗号分隔的多个 Chat ID
+    chat_ids = [id.strip() for id in str(actual_chat_id).split(",")]
+    all_success = True
+    
+    for chat_id in chat_ids:
+        if not chat_id:
+            continue
             
-        except Exception as e:
-            error_msg = str(e)
-            is_timeout = 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower()
-            is_network_error = 'connection' in error_msg.lower() or 'network' in error_msg.lower()
-            
-            if is_timeout or is_network_error:
-                # 网络相关错误，进行重试
-                if attempt < MAX_RETRIES - 1:
-                    retry_delay = BASE_RETRY_DELAY * (2 ** attempt)
-                    logger.warning(f"发送 Telegram 消息超时/网络错误，{retry_delay}秒后重试（{attempt + 1}/{MAX_RETRIES}）：{e}")
-                    time.sleep(retry_delay)
-                    continue
+        # 重试机制
+        success = False
+        for attempt in range(MAX_RETRIES):
+            try:
+                # 发送消息，不使用 parse_mode 以避免 HTML 解析错误
+                # 设置超时参数
+                bot.send_message(
+                    chat_id=chat_id,
+                    text=actual_message,
+                    reply_to_message_id=reply_to_message_id,
+                    timeout=TIMEOUT_SECONDS
+                )
+                logger.info(f"已发送 Telegram 消息到：{chat_id}（尝试 {attempt + 1}/{MAX_RETRIES}）")
+                success = True
+                break
+                
+            except Exception as e:
+                error_msg = str(e)
+                is_timeout = 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower()
+                is_network_error = 'connection' in error_msg.lower() or 'network' in error_msg.lower()
+                
+                if is_timeout or is_network_error:
+                    # 网络相关错误，进行重试
+                    if attempt < MAX_RETRIES - 1:
+                        retry_delay = BASE_RETRY_DELAY * (2 ** attempt)
+                        logger.warning(f"发送 Telegram 消息到 {chat_id} 超时/网络错误，{retry_delay}秒后重试（{attempt + 1}/{MAX_RETRIES}）：{e}")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        logger.error(f"发送 Telegram 消息到 {chat_id} 失败，已达到最大重试次数：{e}", exc_info=True)
+                        all_success = False
                 else:
-                    logger.error(f"发送 Telegram 消息失败，已达到最大重试次数：{e}", exc_info=True)
-                    return False
-            else:
-                # 其他错误，直接返回失败
-                logger.error(f"发送 Telegram 消息失败：{e}", exc_info=True)
-                return False
+                    # 其他错误，直接返回失败
+                    logger.error(f"发送 Telegram 消息到 {chat_id} 失败：{e}", exc_info=True)
+                    all_success = False
+                    break
+        
+        if not success:
+            all_success = False
+    
+    return all_success
 
 
 async def send_telegram_message_async(
