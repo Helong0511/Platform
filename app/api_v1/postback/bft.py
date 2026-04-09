@@ -124,7 +124,8 @@ async def receive_bft_postback(
 
             # 构建通知消息
             method = request.method
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            from app.core.utils import get_app_now_naive
+            current_time = get_app_now_naive().strftime("%Y-%m-%d %H:%M:%S")
 
             telegram_msg = f"🔔 BFT PostBack 收到数据\n\n"
             telegram_msg += f"⏰ 时间: {current_time}\n"

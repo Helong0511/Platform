@@ -454,17 +454,17 @@ async def handle_report(
         if email and phone and background_tasks:
             # 从 request 头中获取 User-Agent
             ua_from_request = request.headers.get("user-agent", "未知") if request else "未知"
-            background_tasks.add_task(
-                send_third_party_report,
-                adsid=fbclid,  # 使用 fbclid 作为 adsid 事件ID
-                event="ViewContent",
-                email=email,
-                ip=client_ip,  # 使用后端获取的客户端 IP
-                phone=phone,
-                ua=ua_from_request,
-                source="short_link"
-            )
-            logger.warning(f"[第三方上报] 已添加到后台任务队列: adsid={fbclid}, ip={client_ip}")
+            # background_tasks.add_task(
+            #     send_third_party_report,
+            #     adsid=fbclid,  # 使用 fbclid 作为 adsid 事件ID
+            #     event="ViewContent",
+            #     email=email,
+            #     ip=client_ip,  # 使用后端获取的客户端 IP
+            #     phone=phone,
+            #     ua=ua_from_request,
+            #     source="short_link"
+            # )
+            # logger.warning(f"[第三方上报] 已添加到后台任务队列: adsid={fbclid}, ip={client_ip}")
 
         # 返回成功响应
         logger.warning(f"[斗篷点击] 处理完成: id={id}, fbclid={fbclid}, client_ip={client_ip}")
