@@ -442,7 +442,7 @@ class Settings(BaseSettings):
     # Facebook Access Token
     FACEBOOK_ACCESS_TOKEN: str = os.getenv("FACEBOOK_ACCESS_TOKEN", "EAAUIMcFRZAnsBRHOaK1QiLoGB7UVYKBmXadOIfdtIXNlZCMZBbV8XZBeELobgrUmaX03gt8zataZBdXXh64lZA9ZCJZBVL3Wyts0WPbaAWAuI2AQbziBMJfLdNrjWvZCVoAlrhtfd6Nl3erx2PVzE9eA89tZC02io5ETgvGnM2ZCsXF2djT2TbcW3ao6dKkpHOlgrG9OgZDZD")
     # Facebook API 版本
-    FACEBOOK_API_VERSION: str = os.getenv("FACEBOOK_API_VERSION", "v18.0")
+    FACEBOOK_API_VERSION: str = os.getenv("FACEBOOK_API_VERSION", "v21.0")
 
 
 # 创建配置实例
