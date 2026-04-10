@@ -155,7 +155,8 @@ async def send_third_party_report(
         use_hash: bool = True,
         conversion_id: Optional[str] = None,
         currency: Optional[str] = None,
-        amount: Optional[float] = None
+        amount: Optional[float] = None,
+        click_time: Optional[datetime] = None
 ):
     """
     后台任务：发送第三方广告上报
@@ -165,6 +166,12 @@ async def send_third_party_report(
     参数要求：
     - ViewContent 事件：email, ip, phone, ua 必须提供
     - Purchase 事件：email, ip, phone, ua 必须提供
+    
+    可选参数：
+    - click_time: 点击时间（datetime对象），如果提供，将使用该时间作为event_time
+    - conversion_id: 转化ID（Purchase事件必需）
+    - currency: 货币类型（默认为USD）
+    - amount: 金额（Purchase事件必需）
     """
     max_retries = 3
     base_delay = 1  # 基础延迟时间（秒）
@@ -262,9 +269,14 @@ async def send_third_party_report(
             fb_event_name = event
 
             # 构建事件数据
+            # 使用click_time作为event_time（如果提供），否则使用当前时间戳
+            if click_time:
+                event_time = int(click_time.timestamp())
+            else:
+                event_time = int(time.time())
             event_data = {
                 "event_name": fb_event_name,
-                "event_time": int(time.time()),
+                "event_time": event_time,
                 "action_source": "website",
                 "event_id": adsid,
                 "user_data": user_data
@@ -408,9 +420,14 @@ async def send_third_party_report(
             fb_event_name = event
 
             # 构建事件数据
+            # 使用click_time作为event_time（如果提供），否则使用当前时间戳
+            if click_time:
+                event_time = int(click_time.timestamp())
+            else:
+                event_time = int(time.time())
             event_data = {
                 "event_name": fb_event_name,
-                "event_time": int(time.time()),
+                "event_time": event_time,
                 "action_source": "website",
                 "event_id": adsid,
                 "user_data": user_data

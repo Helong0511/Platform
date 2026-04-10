@@ -143,6 +143,8 @@ class PostbackProcessor:
 
                     # 调用第三方上报
                     try:
+                        # 获取点击时间
+                        click_time = click_association.get('click_time')
                         await send_third_party_report(
                             adsid=fbclid,
                             conversion_id=click_id,
@@ -153,7 +155,8 @@ class PostbackProcessor:
                             ua=ua,
                             source="postback",
                             currency="USD",
-                            amount=amount
+                            amount=amount,
+                            click_time=click_time
                         )
                         logger.info(f"=== 第三方上报成功: fbclid={fbclid} ===")
                     except Exception as e:
