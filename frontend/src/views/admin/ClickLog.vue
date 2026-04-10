@@ -4,15 +4,13 @@
       <template #header>
         <div class="card-header">
           <div class="header-left">
-            <el-icon class="header-icon"><Mouse /></el-icon>
+            <el-icon class="header-icon">
+              <Mouse />
+            </el-icon>
             <span class="header-title">短链接访问记录</span>
           </div>
           <div class="header-right">
-            <el-button 
-              type="text" 
-              :icon="Setting" 
-              @click="columnSettingVisible = true"
-            >
+            <el-button type="text" :icon="Setting" @click="columnSettingVisible = true">
               列设置
             </el-button>
           </div>
@@ -21,33 +19,18 @@
 
       <!-- 筛选栏 -->
       <div class="filter-container">
-        <ClickLogFilter
-          v-model:filters="filters"
-          :offer-list="offerList"
-          :publisher-list="publisherList"
-          @search="handleSearch"
-          @reset="handleReset"
-        />
+        <ClickLogFilter v-model:filters="filters" :offer-list="offerList" :publisher-list="publisherList"
+          @search="handleSearch" @reset="handleReset" />
       </div>
 
       <!-- 表格 -->
       <div class="table-wrapper">
-        <el-table
-          v-loading="loading"
-          :data="tableData"
-          stripe
-          style="width: 100%;"
-          :default-sort="{ prop: 'click_time', order: 'descending' }"
-        >
+        <el-table v-loading="loading" :data="tableData" stripe style="width: 100%;"
+          :default-sort="{ prop: 'click_time', order: 'descending' }">
           <el-table-column prop="click_id" label="Click ID" min-width="180" show-overflow-tooltip>
             <template #default="scope">
-              <el-button 
-                v-if="scope.row.click_id" 
-                type="primary" 
-                link 
-                size="small"
-                @click="copyToClipboard(scope.row.click_id)"
-              >
+              <el-button v-if="scope.row.click_id" type="primary" link size="small"
+                @click="copyToClipboard(scope.row.click_id)">
                 {{ scope.row.click_id }}
               </el-button>
               <span v-else class="text-muted">-</span>
@@ -60,13 +43,13 @@
           </el-table-column>
           <el-table-column prop="offer_name" label="Offer" min-width="180" show-overflow-tooltip>
             <template #default="scope">
-            <span class="text-primary" v-if="scope.row.offer_id && scope.row.offer_name">
-              {{ `${scope.row.offer_id} - ${scope.row.offer_name}` }}
-            </span>
-            <span class="text-primary" v-else-if="scope.row.offer_name">
-              {{ scope.row.offer_name }}
-            </span>
-            <span v-else>-</span>
+              <span class="text-primary" v-if="scope.row.offer_id && scope.row.offer_name">
+                {{ `${scope.row.offer_id} - ${scope.row.offer_name}` }}
+              </span>
+              <span class="text-primary" v-else-if="scope.row.offer_name">
+                {{ scope.row.offer_name }}
+              </span>
+              <span v-else>-</span>
             </template>
           </el-table-column>
           <el-table-column prop="publisher_name" label="渠道" width="140" show-overflow-tooltip>
@@ -89,13 +72,8 @@
           </el-table-column>
           <el-table-column prop="short_code" label="短链接代码" width="130" show-overflow-tooltip>
             <template #default="scope">
-              <el-link 
-                v-if="scope.row.short_code" 
-                type="primary" 
-                :underline="false"
-                @click="handleShortCodeClick(scope.row.short_code)"
-                style="cursor: pointer;"
-              >
+              <el-link v-if="scope.row.short_code" type="primary" :underline="false"
+                @click="handleShortCodeClick(scope.row.short_code)" style="cursor: pointer;">
                 {{ scope.row.short_code }}
               </el-link>
               <span v-else class="text-muted">-</span>
@@ -116,11 +94,9 @@
           </el-table-column>
           <el-table-column prop="device_type" label="设备类型" width="100" align="center">
             <template #default="scope">
-              <el-tag 
-                v-if="scope.row.device_type" 
+              <el-tag v-if="scope.row.device_type"
                 :type="scope.row.device_type === 'mobile' ? 'success' : scope.row.device_type === 'tablet' ? 'warning' : 'info'"
-                size="small"
-              >
+                size="small">
                 {{ scope.row.device_type === 'mobile' ? '手机' : scope.row.device_type === 'tablet' ? '平板' : '桌面' }}
               </el-tag>
               <span v-else class="text-muted">-</span>
@@ -145,7 +121,8 @@
           <el-table-column prop="device_brand" label="设备品牌" width="130" show-overflow-tooltip>
             <template #default="scope">
               <span v-if="scope.row.device_brand || scope.row.device_model">
-                {{ scope.row.device_brand || '' }}{{ scope.row.device_brand && scope.row.device_model ? ' ' : '' }}{{ scope.row.device_model || '' }}
+                {{ scope.row.device_brand || '' }}{{ scope.row.device_brand && scope.row.device_model ? ' ' : '' }}{{
+                  scope.row.device_model || '' }}
               </span>
               <span v-else class="text-muted">-</span>
             </template>
@@ -158,19 +135,15 @@
           </el-table-column>
           <el-table-column prop="referer" label="来源页面" min-width="220" show-overflow-tooltip>
             <template #default="scope">
-              <el-link 
-                v-if="scope.row.referer" 
-                :href="scope.row.referer" 
-                target="_blank" 
-                type="primary"
-                :underline="false"
-              >
+              <el-link v-if="scope.row.referer" :href="scope.row.referer" target="_blank" type="primary"
+                :underline="false">
                 {{ scope.row.referer.length > 50 ? scope.row.referer.substring(0, 50) + '...' : scope.row.referer }}
               </el-link>
               <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column v-if="columnVisibility.conversion_id" prop="conversion_id" label="转化ID" width="100" align="center">
+          <el-table-column v-if="columnVisibility.conversion_id" prop="conversion_id" label="转化ID" width="100"
+            align="center">
             <template #default="scope">
               <el-tag v-if="scope.row.conversion_id" type="success" size="small">
                 已转化
@@ -180,12 +153,7 @@
           </el-table-column>
           <el-table-column label="操作" width="100" align="center" fixed="right">
             <template #default="scope">
-              <el-button 
-                type="primary" 
-                link 
-                size="small"
-                @click="showDetail(scope.row)"
-              >
+              <el-button type="primary" link size="small" @click="showDetail(scope.row)">
                 详情
               </el-button>
             </template>
@@ -195,31 +163,17 @@
 
       <!-- 分页 -->
       <div class="pagination-container">
-        <el-pagination
-          v-model:current-page="pagination.page"
-          v-model:page-size="pagination.pageSize"
-          :total="pagination.total"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next, jumper"
-          @size-change="handleSizeChange"
-          @current-change="handlePageChange"
-        />
+        <el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.pageSize"
+          :total="pagination.total" :page-sizes="[10, 20, 50, 100]" layout="total, sizes, prev, pager, next, jumper"
+          @size-change="handleSizeChange" @current-change="handlePageChange" />
       </div>
     </el-card>
 
     <!-- 详情对话框 -->
-    <ClickLogDetailDialog
-      v-model="detailDialogVisible"
-      :detail="currentDetail"
-    />
+    <ClickLogDetailDialog v-model="detailDialogVisible" :detail="currentDetail" />
 
     <!-- 列设置对话框 -->
-    <el-dialog
-      v-model="columnSettingVisible"
-      title="列显示设置"
-      width="500px"
-      @close="saveColumnVisibility"
-    >
+    <el-dialog v-model="columnSettingVisible" title="列显示设置" width="500px" @close="saveColumnVisibility">
       <el-checkbox-group v-model="columnVisibilityArray">
         <el-checkbox label="click_id" :disabled="true">Click ID（固定显示）</el-checkbox>
         <el-checkbox label="click_time" :disabled="true">访问时间（固定显示）</el-checkbox>
@@ -381,8 +335,8 @@ const debouncedSearch = (delay = 500) => {
 // 加载基础数据
 const loadOffers = async () => {
   try {
-    const response = await getOffers({ 
-      page: 1, 
+    const response = await getOffers({
+      page: 1,
       page_size: 100,
       is_active: true
     })
@@ -424,7 +378,7 @@ const loadData = async () => {
     // response已经是标准分页格式，直接使用data和total字段
     tableData.value = response.data || []
     pagination.total = response.total || 0
-    
+
     // 如果有conversion_id参数，并且只找到一条记录，自动显示详情
     const conversionIdFromUrl = route.query.conversion_id
     if (conversionIdFromUrl && tableData.value.length === 1) {
@@ -509,35 +463,38 @@ onMounted(() => {
   loadColumnVisibility()
   loadOffers()
   loadPublishers()
-  
+
   // 检查URL参数中是否有click_id或conversion_id，如果有则设置过滤条件
   const clickIdFromUrl = route.query.click_id
   const conversionIdFromUrl = route.query.conversion_id
-  
+
   if (clickIdFromUrl) {
     filters.clickId = clickIdFromUrl
   }
-  
+
   if (conversionIdFromUrl) {
     filters.conversionId = conversionIdFromUrl
   }
-  
+
   // 加载数据（如果有参数，会自动搜索）
-  
-  // 默认查询最近30天（确保包含更多记录）
-  const endDate = new Date()
-  const startDate = new Date()
-  startDate.setDate(startDate.getDate() - 30)
-  const formatLocalDate = (date) => {
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, '0')
-    const day = String(date.getDate()).padStart(2, '0')
-    return `${year}-${month}-${day}`
+
+  // 如果没有URL参数，设置默认查询最近30天
+  if (!clickIdFromUrl && !conversionIdFromUrl) {
+    // 默认查询最近30天（确保包含更多记录）
+    const endDate = new Date()
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - 7)
+    const formatLocalDate = (date) => {
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+    filters.dateRange = [
+      formatLocalDate(startDate),
+      formatLocalDate(endDate)
+    ]
   }
-  filters.dateRange = [
-    formatLocalDate(startDate),
-    formatLocalDate(endDate)
-  ]
   loadData()
 })
 </script>
@@ -651,4 +608,3 @@ onMounted(() => {
   white-space: pre-wrap;
 }
 </style>
-
