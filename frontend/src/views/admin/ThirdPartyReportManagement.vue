@@ -775,19 +775,18 @@ const handleHashToggle = async (log) => {
 const router = useRouter();
 const authStore = useAuthStore();
 
-// 点击转化ID，跳转到短链接访问记录页面并搜索
+// 点击转化ID，在新窗口打开短链接访问记录页面并搜索
 const handleConversionIdClick = async (conversionId) => {
   if (!conversionId) return
   try {
-    await router.push({
-      name: 'ClickLog',
-      query: {
-        conversion_id: conversionId
-      }
-    })
+    // 构建URL
+    const url = new URL(window.location.origin + '/app/admin/click-log')
+    url.searchParams.append('conversion_id', conversionId)
+    // 在新窗口中打开
+    window.open(url.toString(), '_blank')
   } catch (error) {
-    logger.error('跳转到短链接访问记录页面失败:', error)
-    ElMessage.error('跳转失败，请重试')
+    logger.error('打开短链接访问记录页面失败:', error)
+    ElMessage.error('打开失败，请重试')
   }
 };
 

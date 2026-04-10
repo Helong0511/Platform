@@ -424,6 +424,12 @@ const loadData = async () => {
     // response已经是标准分页格式，直接使用data和total字段
     tableData.value = response.data || []
     pagination.total = response.total || 0
+    
+    // 如果有conversion_id参数，并且只找到一条记录，自动显示详情
+    if (conversionIdFromUrl && tableData.value.length === 1) {
+      currentDetail.value = tableData.value[0]
+      detailDialogVisible.value = true
+    }
   } catch (error) {
     logger.error('获取短链接访问记录失败:', error)
     ElMessage.error('获取数据失败')
