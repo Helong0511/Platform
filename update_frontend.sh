@@ -1,6 +1,9 @@
 
 clear
 cd /data/Platform
+
+find /data/Platform -type d -name "__pycache__" -exec rm -rf {} +
+
 git pull
 
 # 设置脚本执行权限（更安全的权限设置）
