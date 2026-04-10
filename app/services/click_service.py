@@ -65,11 +65,13 @@ class ClickService:
         end_datetime = None
 
         # 如果没有提供日期范围，默认查询最近7天
+        # 但如果提供了conversion_id或click_id，不设置默认日期范围，查询所有时间
         if not start_date and not end_date:
-            now = get_app_now_naive()
-            end_datetime = now
-            start_datetime = now - timedelta(days=7)
-            logger.debug(f"未提供日期范围，默认查询最近7天: {start_datetime} 至 {end_datetime}")
+            if not click_id and not conversion_id:
+                now = get_app_now_naive()
+                end_datetime = now
+                start_datetime = now - timedelta(days=7)
+                logger.debug(f"未提供日期范围，默认查询最近7天: {start_datetime} 至 {end_datetime}")
         else:
             if start_date:
                 start_datetime = parse_date_to_app_timezone(start_date, is_end_date=False)

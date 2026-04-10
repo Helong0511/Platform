@@ -378,10 +378,9 @@ const loadData = async () => {
     // response已经是标准分页格式，直接使用data和total字段
     tableData.value = response.data || []
     pagination.total = response.total || 0
-
+    
     // 如果有conversion_id参数，并且只找到一条记录，自动显示详情
-    const conversionIdFromUrl = route.query.conversion_id
-    if (conversionIdFromUrl && tableData.value.length === 1) {
+    if (filters.conversionId && tableData.value.length === 1) {
       currentDetail.value = tableData.value[0]
       detailDialogVisible.value = true
     }
