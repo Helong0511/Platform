@@ -107,7 +107,15 @@
           </template>
         </el-table-column>
         <el-table-column v-if="columnVisibility.conversion_id" prop="conversion_id" label="转化ID" min-width="180"
-          show-overflow-tooltip />
+          show-overflow-tooltip>
+          <template #default="scope">
+            <el-button v-if="scope.row.conversion_id" type="primary" link size="small"
+              @click="handleConversionIdClick(scope.row.conversion_id)">
+              {{ scope.row.conversion_id }}
+            </el-button>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column v-if="columnVisibility.currency" prop="currency" label="货币类型" width="100" align="center">
           <template #default="scope">
             {{ scope.row.currency || '-' }}
@@ -766,6 +774,22 @@ const handleHashToggle = async (log) => {
 // 路由实例
 const router = useRouter();
 const authStore = useAuthStore();
+
+// 点击转化ID，跳转到短链接访问记录页面并搜索
+const handleConversionIdClick = async (conversionId) => {
+  if (!conversionId) return
+  try {
+    await router.push({
+      name: 'ClickLog',
+      query: {
+        click_id: conversionId
+      }
+    })
+  } catch (error) {
+    logger.error('跳转到短链接访问记录页面失败:', error)
+    ElMessage.error('跳转失败，请重试')
+  }
+};
 
 // 初始化
 onMounted(async () => {
