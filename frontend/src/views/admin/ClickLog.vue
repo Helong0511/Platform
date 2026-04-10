@@ -524,10 +524,10 @@ onMounted(() => {
   
   // 加载数据（如果有参数，会自动搜索）
   
-  // 默认查询最近7天（优化性能，减少数据量）
+  // 默认查询最近30天（确保包含更多记录）
   const endDate = new Date()
   const startDate = new Date()
-  startDate.setDate(startDate.getDate() - 7)
+  startDate.setDate(startDate.getDate() - 30)
   const formatLocalDate = (date) => {
     const year = date.getFullYear()
     const month = String(date.getMonth() + 1).padStart(2, '0')
