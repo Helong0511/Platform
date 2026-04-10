@@ -291,8 +291,7 @@ async def send_third_party_report(
 
             # 构建请求数据
             send_data = {
-                "data": [event_data],
-                "test": False
+                "data": [event_data]
             }
 
             # 存储完整上报参数
