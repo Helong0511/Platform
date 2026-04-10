@@ -30,6 +30,7 @@ class ClickService:
             page: int = 1,
             page_size: int = 20,
             click_id: Optional[str] = None,
+            conversion_id: Optional[str] = None,
             offer_id: Optional[int] = None,
             publisher_id: Optional[int] = None,
             advertiser_id: Optional[int] = None,
@@ -46,6 +47,7 @@ class ClickService:
             page: 页码
             page_size: 每页数量
             click_id: Click ID过滤
+            conversion_id: 转化ID过滤
             offer_id: Offer ID过滤
             publisher_id: 渠道ID过滤
             advertiser_id: 广告主ID过滤
@@ -100,6 +102,9 @@ class ClickService:
 
         if click_id:
             conditions.append(Click.click_id == click_id)
+
+        if conversion_id:
+            conditions.append(Click.conversion_id == conversion_id)
 
         if offer_id:
             conditions.append(Click.offer_id == offer_id)

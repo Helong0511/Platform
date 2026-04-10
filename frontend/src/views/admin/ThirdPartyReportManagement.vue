@@ -782,7 +782,7 @@ const handleConversionIdClick = async (conversionId) => {
     await router.push({
       name: 'ClickLog',
       query: {
-        click_id: conversionId
+        conversion_id: conversionId
       }
     })
   } catch (error) {

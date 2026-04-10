@@ -265,6 +265,7 @@ const loading = ref(false)
 // 使用统一的filters对象
 const filters = reactive({
   clickId: '',
+  conversionId: '',
   offer: null,
   publisher: null,
   ip: '',
@@ -411,6 +412,7 @@ const loadData = async () => {
       page: pagination.page,
       page_size: Math.min(pagination.pageSize, 100),
       click_id: filters.clickId || undefined,
+      conversion_id: filters.conversionId || undefined,
       offer_id: filters.offer || undefined,
       publisher_id: filters.publisher || undefined,
       ip: filters.ip || undefined,
@@ -439,6 +441,7 @@ const handleSearch = () => {
 // 重置
 const handleReset = () => {
   filters.clickId = ''
+  filters.conversionId = ''
   filters.offer = null
   filters.publisher = null
   filters.ip = ''
@@ -500,11 +503,19 @@ onMounted(() => {
   loadOffers()
   loadPublishers()
   
-  // 检查URL参数中是否有click_id，如果有则设置过滤条件
+  // 检查URL参数中是否有click_id或conversion_id，如果有则设置过滤条件
   const clickIdFromUrl = route.query.click_id
+  const conversionIdFromUrl = route.query.conversion_id
+  
   if (clickIdFromUrl) {
     filters.clickId = clickIdFromUrl
   }
+  
+  if (conversionIdFromUrl) {
+    filters.conversionId = conversionIdFromUrl
+  }
+  
+  // 加载数据（如果有参数，会自动搜索）
   
   // 默认查询最近7天（优化性能，减少数据量）
   const endDate = new Date()
