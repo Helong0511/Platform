@@ -265,6 +265,9 @@ async def send_third_party_report(
             user_data["client_ip_address"] = ip
             user_data["client_user_agent"] = ua
 
+            if adsid:
+                user_data["fbc"] = f"fb.1.{int(time.time())}.{adsid}"
+
             # 直接使用事件类型
             fb_event_name = event
 
@@ -278,7 +281,7 @@ async def send_third_party_report(
                 "event_name": fb_event_name,
                 "event_time": event_time,
                 "action_source": "website",
-                "event_id": adsid,
+                "event_id": str(uuid.uuid4()),  # 生成唯一事件ID 原始值 adsid
                 "user_data": user_data
             }
 
