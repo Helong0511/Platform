@@ -426,6 +426,7 @@ const loadData = async () => {
     pagination.total = response.total || 0
     
     // 如果有conversion_id参数，并且只找到一条记录，自动显示详情
+    const conversionIdFromUrl = route.query.conversion_id
     if (conversionIdFromUrl && tableData.value.length === 1) {
       currentDetail.value = tableData.value[0]
       detailDialogVisible.value = true
