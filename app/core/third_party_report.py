@@ -8,6 +8,7 @@ import asyncio
 import httpx
 import hashlib
 import json
+import uuid
 from typing import Optional
 from datetime import datetime
 
@@ -417,6 +418,8 @@ async def send_third_party_report(
                 "client_ip_address": ip,
                 "client_user_agent": ua
             }
+            if adsid:
+                user_data["fbc"] = f"fb.1.{int(time.time())}.{adsid}"
 
             # 直接使用事件类型
             fb_event_name = event
@@ -431,7 +434,7 @@ async def send_third_party_report(
                 "event_name": fb_event_name,
                 "event_time": event_time,
                 "action_source": "website",
-                "event_id": adsid,
+                "event_id": str(uuid.uuid4()),
                 "user_data": user_data
             }
 
