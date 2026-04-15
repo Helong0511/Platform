@@ -127,6 +127,10 @@ class PostbackProcessor:
                 phone = url_params.get('phone')
                 amount = raw_data.get('payout')
                 
+                # 如果 amount 为空，使用默认值 0.01（避免 send_third_party_report 验证失败）
+                if amount is None or amount < 0:
+                    logger.warning(f"[PostBack 处理] payout 参数为空或为负数，payout：{amount}")
+                
                 logger.info("-" * 50)
                 logger.info(f"fbclid:{fbclid}")
                 logger.info(f"click_id:{click_id}")
@@ -139,7 +143,57 @@ class PostbackProcessor:
 
 
                 if fbclid:
-                    logger.info(f"=== 检测到 fbclid 参数: {fbclid} ===")
+                    logger.info(f"=== 检测到 fbclid 参数：{fbclid} ===")
+                    
+                    # 从 url_params 提取 dp 参数
+                    url_params = click_association.get('url_params', {})
+                    dp = url_params.get('dp') if url_params else None
+                    
+                    # 获取像素配置（优先级：数据库 > FACEBOOK_PIXEL_CONFIG[dp] > 全局配置）
+                    from app.core.config import settings
+                    facebook_pixel_id = settings.FACEBOOK_PIXEL_ID
+                    facebook_access_token = settings.FACEBOOK_ACCESS_TOKEN
+                    facebook_api_version = settings.FACEBOOK_API_VERSION
+                    config_source = "全局配置"
+                    
+                    # 优先级 1: 数据库配置（从 ShortLink 表）
+                    short_link_id = click_association.get('short_link_id')
+                    if short_link_id:
+                        try:
+                            from app.models.models import ShortLink
+                            from sqlalchemy import select
+                            result = await db.execute(select(ShortLink).where(ShortLink.id == short_link_id))
+                            short_link = result.scalars().first()
+                            
+                            if short_link and short_link.facebook_pixel_id and short_link.facebook_access_token:
+                                facebook_pixel_id = short_link.facebook_pixel_id
+                                facebook_access_token = short_link.facebook_access_token
+                                facebook_api_version = short_link.facebook_api_version or "v21.0"
+                                config_source = f"数据库配置 (short_link_id={short_link_id})"
+                                logger.info(f"=== 使用数据库中的像素配置 ===")
+                        except Exception as e:
+                            logger.warning(f"=== 查询数据库像素配置失败：{str(e)} ===")
+                    
+                    # 优先级 2: FACEBOOK_PIXEL_CONFIG[dp]（如果数据库未配置）
+                    if config_source == "全局配置" and dp:
+                        logger.info(f"=== 检测到 dp 参数：{dp} ===")
+                        # 尝试从 FACEBOOK_PIXEL_CONFIG 获取 dp 对应的配置
+                        cloak_config = settings.FACEBOOK_PIXEL_CONFIG.get(dp)
+                        if cloak_config:
+                            facebook_pixel_id = cloak_config.get("pixel_id", settings.FACEBOOK_PIXEL_ID)
+                            facebook_access_token = cloak_config.get("access_token", settings.FACEBOOK_ACCESS_TOKEN)
+                            facebook_api_version = cloak_config.get("api_version", settings.FACEBOOK_API_VERSION)
+                            config_source = f"FACEBOOK_PIXEL_CONFIG[{dp}]"
+                            logger.info(f"=== 使用 dp={dp} 的像素配置：{facebook_pixel_id[:10]}... ===")
+                        else:
+                            logger.warning(f"=== 未找到 dp={dp} 的像素配置，使用全局配置 ===")
+                    elif config_source == "全局配置":
+                        logger.info("=== 未检测到 dp 参数，使用全局像素配置 ===")
+                    
+                    # 记录最终使用的配置来源
+                    logger.info(f"=== 像素配置来源：{config_source} ===")
+                    logger.info(f"=== Pixel ID: {facebook_pixel_id[:10] if facebook_pixel_id else 'None'}... ===")
+                    logger.info(f"=== API Version: {facebook_api_version} ===")
 
                     # 调用第三方上报
                     try:
@@ -156,11 +210,14 @@ class PostbackProcessor:
                             source="postback",
                             currency="USD",
                             amount=amount,
-                            click_time=click_time
+                            click_time=click_time,
+                            facebook_pixel_id=facebook_pixel_id,
+                            facebook_access_token=facebook_access_token,
+                            facebook_api_version=facebook_api_version
                         )
-                        logger.info(f"=== 第三方上报成功: fbclid={fbclid} ===")
+                        logger.info(f"=== 第三方上报成功：fbclid={fbclid} ===")
                     except Exception as e:
-                        logger.error(f"=== 第三方上报失败: {str(e)} ===")
+                        logger.error(f"=== 第三方上报失败：{str(e)} ===")
             
             # ========== 第 5 步：重复检测 ==========
             logger.info("=== 第 5 步：重复检测 ===")

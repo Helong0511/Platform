@@ -340,8 +340,8 @@ class Settings(BaseSettings):
     # ====== CSRF配置 ======
     # 是否启用CSRF防护（默认启用）
     ENABLE_CSRF: bool = os.getenv("ENABLE_CSRF", "true").lower() in ["true", "1", "yes"]
-    # CSRF令牌过期时间（秒）
-    CSRF_TOKEN_EXPIRE_SECONDS: int = int(os.getenv("CSRF_TOKEN_EXPIRE_SECONDS", "3600"))
+    # CSRF 令牌过期时间（秒）：8 小时 = 28800 秒
+    CSRF_TOKEN_EXPIRE_SECONDS: int = int(os.getenv("CSRF_TOKEN_EXPIRE_SECONDS", "28800"))
 
     # ====== 定时任务配置 ======
     # 最大并发定时任务数（同一进程同时执行的任务数量）
@@ -437,13 +437,21 @@ class Settings(BaseSettings):
         return v
 
     # ====== Facebook 像素配置 ======
-    # Facebook Pixel ID
-    FACEBOOK_PIXEL_ID: str = os.getenv("FACEBOOK_PIXEL_ID", "1273446968230624")
-    # Facebook Access Token
-    FACEBOOK_ACCESS_TOKEN: str = os.getenv("FACEBOOK_ACCESS_TOKEN", "EAAUIMcFRZAnsBRHOaK1QiLoGB7UVYKBmXadOIfdtIXNlZCMZBbV8XZBeELobgrUmaX03gt8zataZBdXXh64lZA9ZCJZBVL3Wyts0WPbaAWAuI2AQbziBMJfLdNrjWvZCVoAlrhtfd6Nl3erx2PVzE9eA89tZC02io5ETgvGnM2ZCsXF2djT2TbcW3ao6dKkpHOlgrG9OgZDZD")
-    # Facebook API 版本
-    FACEBOOK_API_VERSION: str = os.getenv("FACEBOOK_API_VERSION", "v21.0")
-
+    # 使用字典结构管理多个像素配置，类似 LP_CONFIG
+    # 格式：{斗篷名称/short_code: {"pixel_id": str, "access_token": str, "api_version": str}}
+    # 示例：
+    FACEBOOK_PIXEL_CONFIG = {
+        "master": {
+            "pixel_id": "1273446968230624",
+            "access_token": "EAAUIMcFRZAnsBRHOaK1QiLoGB7UVYKBmXadOIfdtIXNlZCMZBbV8XZBeELobgrUmaX03gt8zataZBdXXh64lZA9ZCJZBVL3Wyts0WPbaAWAuI2AQbziBMJfLdNrjWvZCVoAlrhtfd6Nl3erx2PVzE9eA89tZC02io5ETgvGnM2ZCsXF2djT2TbcW3ao6dKkpHOlgrG9OgZDZD",
+            "api_version": "v21.0"
+        },
+        "ljs": {
+            "pixel_id": "34826699006978780",
+            "access_token": "EAAcMW7Vvha4BRM5OCSTNzWkcLZB2LZB5X8U4aUZCZAksLZAy6EqQRF0WgnY6mM5QbtVC0LHXvob48W0taw2ZCWHrB9fORIPFZByiVJ30T8IqK5jNzFxDRULHOJ2sa9er0AmuuZBxyldEQuZC1ninZCG06AUokiFgjmaiZBoUy6vJ6qiINdCwdW5ejeExR7DU7kwcQZDZD",
+            "api_version": "v21.0"
+        }
+    }
 
 # 创建配置实例
 settings = Settings()

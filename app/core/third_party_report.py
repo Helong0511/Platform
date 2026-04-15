@@ -152,27 +152,35 @@ async def send_third_party_report(
         ip: str,
         phone: str,
         ua: str,
+        facebook_pixel_id: str,  # 必须参数
+        facebook_access_token: str,  # 必须参数
         source: str = "unknown",
         use_hash: bool = True,
         conversion_id: Optional[str] = None,
         currency: Optional[str] = None,
         amount: Optional[float] = None,
-        click_time: Optional[datetime] = None
+        click_time: Optional[datetime] = None,
+        facebook_api_version: Optional[str] = "v21.0"  # 可选参数，默认 v21.0
 ):
     """
     后台任务：发送第三方广告上报
-    从服务器端发送，避免浏览器CORS和广告拦截器问题
+    从服务器端发送，避免浏览器 CORS 和广告拦截器问题
     包含智能重试机制，确保网络问题时仍能成功上报
 
     参数要求：
     - ViewContent 事件：email, ip, phone, ua 必须提供
     - Purchase 事件：email, ip, phone, ua 必须提供
     
+    必须参数：
+    - facebook_pixel_id: Facebook Pixel ID（必须）
+    - facebook_access_token: Facebook Access Token（必须）
+    
     可选参数：
-    - click_time: 点击时间（datetime对象），如果提供，将使用该时间作为event_time
-    - conversion_id: 转化ID（Purchase事件必需）
-    - currency: 货币类型（默认为USD）
-    - amount: 金额（Purchase事件必需）
+    - click_time: 点击时间（datetime 对象），如果提供，将使用该时间作为 event_time
+    - conversion_id: 转化 ID（Purchase 事件必需）
+    - currency: 货币类型（默认为 USD）
+    - amount: 金额（Purchase 事件必需）
+    - facebook_api_version: Facebook API 版本（可选，默认 v21.0）
     """
     max_retries = 3
     base_delay = 1  # 基础延迟时间（秒）
@@ -247,12 +255,19 @@ async def send_third_party_report(
     report_start_time = get_app_now_naive()
     await update_report_log(report_log_id, report_start_time=report_start_time)
 
+    # 确定使用哪个 Facebook 像素配置（优先级：参数 > 全局配置）
+    pixel_id = facebook_pixel_id or settings.FACEBOOK_PIXEL_ID
+    access_token = facebook_access_token or settings.FACEBOOK_ACCESS_TOKEN
+    api_version = facebook_api_version or settings.FACEBOOK_API_VERSION
+    
+    logger.warning(f"[第三方上报] 使用像素配置 - Pixel ID: {pixel_id}, API 版本：{api_version}")
+    
     for attempt in range(max_retries):
         try:
-            # 使用Facebook Graph API
-            url = f"https://graph.facebook.com/{settings.FACEBOOK_API_VERSION}/{settings.FACEBOOK_PIXEL_ID}/events"
+            # 使用 Facebook Graph API
+            url = f"https://graph.facebook.com/{api_version}/{pixel_id}/events"
             params = {
-                "access_token": settings.FACEBOOK_ACCESS_TOKEN
+                "access_token": access_token
             }
             
             # 构建用户数据
@@ -405,10 +420,10 @@ async def send_third_party_report(
     if use_hash:
         logger.warning(f"[第三方上报] 所有哈希尝试失败，尝试一次不使用哈希...")
         try:
-            # 使用Facebook Graph API
-            url = f"https://graph.facebook.com/{settings.FACEBOOK_API_VERSION}/{settings.FACEBOOK_PIXEL_ID}/events"
+            # 使用 Facebook Graph API（使用自定义或全局配置）
+            url = f"https://graph.facebook.com/{api_version}/{pixel_id}/events"
             params = {
-                "access_token": settings.FACEBOOK_ACCESS_TOKEN
+                "access_token": access_token
             }
             
             # 构建用户数据（不使用哈希）

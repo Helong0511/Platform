@@ -290,21 +290,44 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     async def _generate_session_id(self, request: Request) -> str:
         """
         生成会话标识
-        使用 IP:hash(User-Agent) 或 user_id:IP:hash(User-Agent)
+        使用 IP:hash(User-Agent 核心部分) 或 user_id:IP:hash(User-Agent 核心部分)
+        改进：使用 User-Agent 的核心部分（浏览器类型 + 版本 + 操作系统），避免完整 UA 的哈希值不一致
         """
         client_ip = get_client_ip(request)
         user_id = extract_user_id_from_token(request)
-        user_agent = request.headers.get("User-Agent", "")[:100]  # 限制长度
-        user_agent_hash = hashlib.sha256(user_agent.encode('utf-8')).hexdigest()[:16]  # 使用SHA256前16位
         
-        # 确保user_id为字符串类型
+        # 获取完整的 User-Agent
+        full_user_agent = request.headers.get("User-Agent", "")
+        
+        # 提取 User-Agent 的核心部分（浏览器标识 + 操作系统）
+        # 这样即使 UA 的次要部分变化（如 Chrome 小版本更新），session_id 也能保持稳定
+        import re
+        
+        # 提取浏览器类型和主版本（例如：Chrome/146, Firefox/124, Safari/605.1.15）
+        browser_match = re.search(r'(Chrome/[\d.]+|Firefox/[\d.]+|Safari/[\d.]+|Edge/[\d.]+|MSIE\s[\d.]+)', full_user_agent)
+        browser_part = browser_match.group(0) if browser_match else ""
+        
+        # 提取操作系统（例如：Windows NT 10.0, Mac OS X 10_15_7, Android 16）
+        os_match = re.search(r'(Windows NT [\d.]+|Mac OS X [\d_]+|Android [\d.]+|iPhone OS [\d_]+|Linux [\w\d_]+)', full_user_agent)
+        os_part = os_match.group(0) if os_match else ""
+        
+        # 组合核心部分
+        ua_core = f"{browser_part}|{os_part}"
+        
+        # 使用 SHA256 哈希核心部分，取前 16 位
+        user_agent_hash = hashlib.sha256(ua_core.encode('utf-8')).hexdigest()[:16]
+        
+        # 确保 user_id 为字符串类型
         if user_id:
             session_id = f"{user_id}:{client_ip}:{user_agent_hash}"
         else:
             session_id = f"{client_ip}:{user_agent_hash}"
         
-        # 记录会话ID生成信息
-        logger.debug(f"生成会话ID: {session_id}, IP: {client_ip}, User-Agent: {user_agent[:50]}...")
+        # 记录会话 ID 生成信息（包含调试信息）
+        logger.debug(
+            f"生成会话 ID: {session_id}, IP: {client_ip}, "
+            f"UA 核心：{ua_core}, 完整 UA: {full_user_agent[:80]}..."
+        )
         return session_id
     
     async def _retrieve_csrf_token(self, session_id: str, request: Request) -> Optional[str]:

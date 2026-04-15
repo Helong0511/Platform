@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Bridge Page - 测试桥页</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            text-align: center;
+        }
+        
+        h1 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 2.5rem;
+        }
+        
+        .description {
+            color: #666;
+            line-height: 1.8;
+            margin-bottom: 30px;
+            font-size: 1.1rem;
+        }
+        
+        .features {
+            text-align: left;
+            margin-bottom: 30px;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        
+        .features li {
+            margin-bottom: 10px;
+            color: #333;
+        }
+        
+        .button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 40px;
+            border: none;
+            border-radius: 50px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+        
+        .badge {
+            background: #ffd700;
+            color: #333;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="badge">测试桥页</div>
+        <h1>🎉 Welcome to Test Bridge Page</h1>
+        <p class="description">
+            这是一个测试桥页，用于验证 dp 参数动态加载功能。<br>
+            当您访问 <code>/change/{short_code}?dp=test</code> 时，将会加载此页面。
+        </p>
+        
+        <ul class="features">
+            <li>✅ 支持动态加载不同的桥页文件</li>
+            <li>✅ 安全验证防止路径遍历攻击</li>
+            <li>✅ 自动回退到默认 master.html</li>
+            <li>✅ 支持 Facebook 像素上报</li>
+        </ul>
+        
+        <button class="button" onclick="handleAction()">
+            继续 <i class="fas fa-arrow-right"></i>
+        </button>
+    </div>
+    
+    <script>
+        function getOriginalUrl() {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get('original_url') || 'https://www.example.com';
+        }
+        
+        function getFbclid() {
+            try {
+                const urlParams = new URLSearchParams(window.location.search);
+                return urlParams.get('fbclid') || 'test_fbclid_' + Date.now();
+            } catch (err) {
+                return 'test_fbclid_' + Date.now();
+            }
+        }
+        
+        async function handleAction() {
+            const email = 'test@example.com';
+            const phone = '1234567890';
+            
+            try {
+                const urlParts = window.location.pathname.split('/').filter(p => p !== '');
+                const shortCode = urlParts[urlParts.length - 1] || '';
+                const reportUrl = `${window.location.origin}/report?id=${shortCode}&fbclid=${getFbclid()}&email=${encodeURIComponent(email)}&phone=${phone}`;
+                
+                await fetch(reportUrl, { method: "GET" });
+                window.location.href = getOriginalUrl();
+            } catch (err) {
+                window.location.href = getOriginalUrl();
+            }
+        }
+    </script>
+</body>
+</html>

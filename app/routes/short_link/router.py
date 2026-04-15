@@ -22,6 +22,7 @@ from app.models.models import ShortLink
 from app.core.auto_bot import send_telegram_message
 from app.core.config import settings
 from app.core.third_party_report import send_third_party_report
+from app.services.cloak_pixel_mapping import get_cloak_pixel_config
 # 引入短链接处理函数
 from app.routes.short_link.handlers import handle_cached_redirect, handle_database_redirect
 
@@ -94,16 +95,23 @@ async def redirect_short_link_public(
 
 
 @router.get("/change/{short_code}",
-            summary="打开master.html并跳转到指定URL",
+            summary="打开桥页并跳转到指定 URL（支持 dp 参数动态加载不同桥页）",
             tags=["斗篷服务"])
 async def open_master_html_with_redirect(
         short_code: str,
         request: Request,
         background_tasks: BackgroundTasks,
-        db: AsyncSession = Depends(get_db)
+        db: AsyncSession = Depends(get_db),
+        dp: Optional[str] = Query(None, description="桥页标识参数，用于动态加载不同的桥页文件")
 ):
     """
-    先打开E:\Platform\scripts\master.html，然后根据短码跳转到指定的original_url
+    根据 dp 参数动态加载不同的桥页文件，然后根据短码跳转到指定的 original_url
+    
+    功能说明：
+    - 当访问 /change/{short_code}?dp=master 时，加载 master.html
+    - 当访问 /change/{short_code}?dp=other 时，加载 other.html
+    - 当 dp 参数不存在或无效时，默认加载第一个可用的 HTML 文件
+    - 支持安全验证，防止路径遍历攻击
     """
     try:
         # 记录请求信息
@@ -242,33 +250,73 @@ async def open_master_html_with_redirect(
                     logger.warning(f"[斗篷服务] 短链接不存在: short_code={short_code}")
 
         if not original_url:
-            logger.error(f"[斗篷服务] 未找到原始URL: short_code={short_code}")
+            logger.error(f"[斗篷服务] 未找到原始 URL: short_code={short_code}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="斗篷不存在或未配置原始URL"
+                detail="斗篷不存在或未配置原始 URL"
             )
 
-        # 优先使用服务器路径，本地开发时会自动回退到本地路径
-        master_html_path = "/data/Platform/scripts/master.html"
-        logger.warning(f"[斗篷服务] 尝试使用服务器路径: {master_html_path}")
-
-        # 如果服务器路径不存在，尝试本地路径（用于开发环境）
-        if not os.path.exists(master_html_path):
-            logger.warning(f"[斗篷服务] 服务器路径不存在，尝试本地路径")
-            # 使用相对路径，确保在不同操作系统上都能正确工作
-            current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            master_html_path = os.path.join(current_dir, "scripts", "master.html")
-            logger.warning(f"[斗篷服务] 本地路径: {master_html_path}")
-
-        if not os.path.exists(master_html_path):
-            logger.error(f"[斗篷服务] master.html文件不存在: {master_html_path}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="master.html文件不存在"
-            )
-
-        logger.warning(f"[斗篷服务] 找到master.html文件: {master_html_path}")
-        with open(master_html_path, "r", encoding="utf-8") as f:
+        # ========== 桥页动态加载逻辑 ==========
+        # 1. 安全验证：防止路径遍历攻击
+        # 2. 根据 dp 参数确定要加载的 HTML 文件
+        # 3. 如果文件不存在，使用默认文件
+        
+        # 安全验证：只允许字母、数字、连字符和下划线
+        if dp and not re.match(r'^[a-zA-Z0-9_-]+$', dp):
+            logger.warning(f"[斗篷服务] dp 参数包含非法字符：{dp}，使用默认桥页")
+            dp = None
+        
+        # 确定桥页文件名
+        if dp:
+            bridge_page_name = f"{dp}.html"
+        else:
+            # 默认使用 master.html
+            bridge_page_name = "master.html"
+        
+        logger.warning(f"[斗篷服务] 请求的桥页：{bridge_page_name}")
+        
+        # 构建文件路径
+        # 优先使用服务器路径
+        scripts_dir_server = "/data/Platform/scripts"
+        bridge_page_path_server = os.path.join(scripts_dir_server, bridge_page_name)
+        
+        # 本地开发路径
+        current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        scripts_dir_local = os.path.join(current_dir, "scripts")
+        bridge_page_path_local = os.path.join(scripts_dir_local, bridge_page_name)
+        
+        # 选择文件路径
+        bridge_page_path = None
+        if os.path.exists(bridge_page_path_server):
+            bridge_page_path = bridge_page_path_server
+            logger.warning(f"[斗篷服务] 使用服务器路径：{bridge_page_path}")
+        elif os.path.exists(bridge_page_path_local):
+            bridge_page_path = bridge_page_path_local
+            logger.warning(f"[斗篷服务] 使用本地路径：{bridge_page_path}")
+        else:
+            # 如果指定的文件不存在，尝试使用默认的 master.html
+            if bridge_page_name != "master.html":
+                logger.warning(f"[斗篷服务] 桥页文件不存在：{bridge_page_name}，尝试使用 master.html")
+                master_html_path_server = os.path.join(scripts_dir_server, "master.html")
+                master_html_path_local = os.path.join(scripts_dir_local, "master.html")
+                
+                if os.path.exists(master_html_path_server):
+                    bridge_page_path = master_html_path_server
+                    logger.warning(f"[斗篷服务] 使用默认服务器路径：{bridge_page_path}")
+                elif os.path.exists(master_html_path_local):
+                    bridge_page_path = master_html_path_local
+                    logger.warning(f"[斗篷服务] 使用默认本地路径：{bridge_page_path}")
+            
+            if not bridge_page_path:
+                logger.error(f"[斗篷服务] 桥页文件不存在：{bridge_page_name}，且 master.html 也不存在")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="桥页文件不存在"
+                )
+        
+        # 读取 HTML 文件内容
+        logger.warning(f"[斗篷服务] 读取桥页文件：{bridge_page_path}")
+        with open(bridge_page_path, "r", encoding="utf-8") as f:
             html_content = f.read()
 
         # 将original_url直接注入到HTML中，同时保留处理fbclid参数的逻辑
@@ -303,11 +351,11 @@ async def open_master_html_with_redirect(
         response.headers["Expires"] = "0"
 
         # 设置session_id到cookie，确保相同浏览器会话使用相同的标识
-        logger.warning(f"[斗篷服务] 设置会话cookie: session_id={session_id}")
+        logger.warning(f"[斗篷服务] 设置会话 cookie: session_id={session_id}")
         response.set_cookie(
             key="session_id",
             value=session_id,
-            max_age=21600,  # 6小时
+            max_age=21600,  # 6 小时
             path="/",
             domain="client.btfrx.online",
             secure=True,
@@ -315,7 +363,7 @@ async def open_master_html_with_redirect(
             samesite="lax"
         )
 
-        logger.warning(f"[斗篷服务] /change/{short_code} 请求处理完成: 返回master.html，原始URL={original_url}")
+        logger.warning(f"[斗篷服务] /change/{short_code} 请求处理完成：返回{bridge_page_name}，原始 URL={original_url}")
         return response
     except HTTPException:
         raise
@@ -328,21 +376,33 @@ async def open_master_html_with_redirect(
 
 
 @router.get("/report",
-            summary="处理短链接点击上报",
+            summary="处理短链接点击上报（支持 dp 参数和 Facebook 像素上报）",
             tags=["短链接服务"])
 async def handle_report(
         id: str = Query(..., description="短链接代码"),
-        fbclid: str = Query(..., description="Facebook点击ID"),
+        fbclid: str = Query(..., description="Facebook 点击 ID"),
         email: str = Query(..., description="用户邮箱"),
         phone: str = Query(..., description="用户手机号"),
+        dp: Optional[str] = Query(None, description="桥页标识参数，用于识别不同的桥页"),
         request: Request = None,
         background_tasks: BackgroundTasks = None,
         db: AsyncSession = Depends(get_db)
 ):
     """
-    处理短链接点击上报，更新点击次数
+    处理短链接点击上报，更新点击次数并发送 Facebook 像素事件
     
-    前端通过 fetch("/report?id=509220&fbclid=xxx&email=xxx&phone=xxx") 调用
+    功能说明：
+    - 前端通过 fetch("/report?id=509220&fbclid=xxx&email=xxx&phone=xxx&dp=master") 调用
+    - 支持 dp 参数识别不同的桥页
+    - 自动发送 Facebook ViewContent 事件到第三方上报
+    - 使用全局 Facebook 像素配置（从 settings 中读取）
+    
+    参数说明：
+    - id: 短链接代码
+    - fbclid: Facebook 点击 ID
+    - email: 用户邮箱（用于 Facebook 像素上报）
+    - phone: 用户手机号（用于 Facebook 像素上报）
+    - dp: 桥页标识（可选，用于区分不同的桥页）
     """
     try:
         # 获取客户端IP和请求头信息
@@ -354,7 +414,16 @@ async def handle_report(
             user_agent = request.headers.get("user-agent", "未知")
             referer = request.headers.get("referer", "未知")
 
-        # 如果没有获取到fbclid，生成一个UUID
+        # 验证必需参数
+        if not email or not email.strip():
+            logger.error(f"[斗篷点击] email 参数为空：email={email}")
+            return {"status": "error", "message": "email 参数不能为空", "client_ip": client_ip}
+        
+        if not phone or not phone.strip():
+            logger.error(f"[斗篷点击] phone 参数为空：phone={phone}")
+            return {"status": "error", "message": "phone 参数不能为空", "client_ip": client_ip}
+
+        # 如果没有获取到 fbclid，生成一个 UUID
         if not fbclid:
             fbclid = str(uuid.uuid4())
 
@@ -400,33 +469,75 @@ async def handle_report(
             update_result = await update_short_link_cache(id, cached_data)
             logger.warning(f"[斗篷点击] 缓存更新结果: {update_result}")
 
-            # 后台任务更新数据库，确保数据一致性
+            # 后台任务创建 Click 记录并更新数据库
             if background_tasks:
-                async def update_click_count_db():
+                async def create_click_and_update_db():
                     try:
                         # 创建新的数据库会话
                         db_session = AsyncSessionLocal()
-
-                        # 乐观锁更新，避免并发冲突
+                        
+                        # 构建 url_params（JSON 格式），存储 fbclid, dp, email, phone
+                        url_params_dict = {}
+                        if fbclid:
+                            url_params_dict["fbclid"] = fbclid
+                        if dp:
+                            url_params_dict["dp"] = dp
+                        if email:
+                            url_params_dict["email"] = email
+                        if phone:
+                            url_params_dict["phone"] = phone
+                        
+                        url_params_json = json.dumps(url_params_dict) if url_params_dict else None
+                        
+                        # 创建 Click 记录
+                        from app.models.models import Click
+                        from app.core.utils import get_app_now_naive
+                        
+                        click = Click(
+                            click_id=str(uuid.uuid4()),
+                            short_link_id=None,  # 稍后查询
+                            click_time=get_app_now_naive(),
+                            ip=client_ip,
+                            user_agent=ua_from_request,
+                            referer=referer,
+                            url_params=url_params_json,  # 存储 fbclid 和 dp
+                            original_request_url=str(request.url) if request else None,
+                            is_bot=False
+                        )
+                        
+                        # 查询短链接
                         result = await db_session.execute(
                             select(ShortLink).where(ShortLink.short_code == id)
                         )
                         short_link = result.scalars().first()
-
+                        
                         if short_link:
-                            # 仅当数据库中的值小于缓存中的值时才更新
-                            if (short_link.click_count or 0) < cached_data["click_count"]:
-                                short_link.click_count = cached_data["click_count"]
-                                await db_session.commit()
-                                logger.warning(
-                                    f"[斗篷点击] 后台任务更新数据库: short_code={id}, 新click_count={short_link.click_count}")
+                            click.short_link_id = short_link.id
+                            click.offer_id = short_link.offer_id
+                            click.publisher_id = short_link.channel_id
+                            
+                            # 更新点击次数
+                            short_link.click_count = (short_link.click_count or 0) + 1
+                            
+                            # 添加到数据库
+                            db_session.add(click)
+                            await db_session.commit()
+                            
+                            logger.warning(
+                                f"[斗篷点击] Click 记录创建成功："
+                                f"click_id={click.click_id}, short_code={id}, "
+                                f"url_params={url_params_json}"
+                            )
+                        else:
+                            logger.warning(f"[斗篷点击] 短链接不存在，无法创建 Click 记录：short_code={id}")
+                            await db_session.rollback()
                     except Exception as e:
-                        logger.error(f"[斗篷点击] 后台任务更新数据库失败: {e}")
+                        logger.error(f"[斗篷点击] 创建 Click 记录失败：{e}", exc_info=True)
                     finally:
                         if 'db_session' in locals():
                             await db_session.close()
-
-                background_tasks.add_task(update_click_count_db)
+                
+                background_tasks.add_task(create_click_and_update_db)
         else:
             # 从数据库查询
             logger.warning(f"[斗篷点击] 缓存未命中，从数据库查询: short_code={id}")
@@ -450,21 +561,78 @@ async def handle_report(
             else:
                 logger.warning(f"[斗篷点击] 短链接不存在: short_code={id}")
 
-        # 后台任务发送第三方上报（如果有参数）
+        # 后台任务发送第三方 Facebook 像素上报（如果有参数）
         if email and phone and background_tasks:
             # 从 request 头中获取 User-Agent
             ua_from_request = request.headers.get("user-agent", "未知") if request else "未知"
-            # background_tasks.add_task(
-            #     send_third_party_report,
-            #     adsid=fbclid,  # 使用 fbclid 作为 adsid 事件ID
-            #     event="ViewContent",
-            #     email=email,
-            #     ip=client_ip,  # 使用后端获取的客户端 IP
-            #     phone=phone,
-            #     ua=ua_from_request,
-            #     source="short_link"
-            # )
-            # logger.warning(f"[第三方上报] 已添加到后台任务队列: adsid={fbclid}, ip={client_ip}")
+            
+            # 构建上报参数
+            report_kwargs = {
+                "adsid": fbclid,  # 使用 fbclid 作为 adsid 事件 ID
+                "event": "ViewContent",
+                "email": email,
+                "ip": client_ip,  # 使用后端获取的客户端 IP
+                "phone": phone,
+                "ua": ua_from_request,
+                "source": "short_link"
+            }
+            
+            # 如果提供了 dp 参数，添加到 source 中以便区分
+            if dp:
+                report_kwargs["source"] = f"short_link_dp_{dp}"
+                logger.warning(f"[第三方上报] 检测到 dp 参数：{dp}，已更新 source 标识")
+            
+            # 使用新的映射服务获取像素配置（使用 dp 参数匹配）
+            dp_param = dp if dp else "master"  # 默认使用 master
+            logger.info(f"[第三方上报] 使用 dp 参数获取像素配置：dp={dp_param}, short_code={id}")
+            
+            # 初始化 pixel_config 为 None
+            pixel_config = None
+            
+            try:
+                # 从缓存或数据库获取像素配置
+                pixel_config = await get_cloak_pixel_config(db, dp=dp_param, short_code=id, use_cache=True)
+                
+                if pixel_config:
+                    # 使用斗篷的自定义像素配置
+                    report_kwargs["facebook_pixel_id"] = pixel_config["facebook_pixel_id"]
+                    report_kwargs["facebook_access_token"] = pixel_config["facebook_access_token"]
+                    report_kwargs["facebook_api_version"] = pixel_config["facebook_api_version"]
+                    
+                    logger.info(
+                        f"[第三方上报] 使用斗篷自定义像素配置："
+                        f"dp={dp_param}, short_code={id}, "
+                        f"pixel_id={pixel_config['facebook_pixel_id'][:10] if pixel_config['facebook_pixel_id'] else '全局配置'}..."
+                    )
+                else:
+                    # 未找到斗篷配置，使用全局配置
+                    logger.info(
+                        f"[第三方上报] 未找到斗篷像素配置，将使用全局配置："
+                        f"dp={dp_param}, short_code={id}"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"[第三方上报] 获取像素配置失败：dp={dp_param}, short_code={id}, error={str(e)}",
+                    exc_info=True
+                )
+            
+            # 如果 pixel_config 为 None，使用全局配置
+            if not pixel_config:
+                report_kwargs["facebook_pixel_id"] = settings.FACEBOOK_PIXEL_ID
+                report_kwargs["facebook_access_token"] = settings.FACEBOOK_ACCESS_TOKEN
+                report_kwargs["facebook_api_version"] = settings.FACEBOOK_API_VERSION
+                logger.info(
+                    f"[第三方上报] 使用全局配置："
+                    f"pixel_id={settings.FACEBOOK_PIXEL_ID[:10]}..."
+                )
+            
+            # 添加到后台任务队列
+            background_tasks.add_task(send_third_party_report, **report_kwargs)
+            logger.warning(
+                f"[第三方上报] 已添加到后台任务队列："
+                f"adsid={fbclid}, ip={client_ip}, source={report_kwargs['source']}, "
+                f"pixel_config={'自定义' if pixel_config else '全局'}"
+            )
 
         # 返回成功响应
         logger.warning(f"[斗篷点击] 处理完成: id={id}, fbclid={fbclid}, client_ip={client_ip}")
