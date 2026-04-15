@@ -654,7 +654,7 @@ async def serve_bridge_static(
     服务桥页的静态资源文件
     
     功能说明：
-    - 当 HTML 中引用 /bridge/109.png 时，返回 /data/Platform/scripts/109.png
+    - 当 HTML 中引用 /bridge/109.png 时，返回 /data/Platform/scripts/bridge/109.png
     - 支持图片、CSS、JS 等静态资源
     - 自动检测文件类型并设置正确的 Content-Type
     """
@@ -667,8 +667,12 @@ async def serve_bridge_static(
         )
     
     # 构建文件路径
-    scripts_dir_server = "/data/Platform/scripts"
-    scripts_dir_local = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "scripts")
+    # 服务器路径：/data/Platform/scripts/bridge/filename
+    scripts_dir_server = "/data/Platform/scripts/bridge"
+    
+    # 本地开发路径
+    current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    scripts_dir_local = os.path.join(current_dir, "scripts", "bridge")
     
     file_path_server = os.path.join(scripts_dir_server, filename)
     file_path_local = os.path.join(scripts_dir_local, filename)
