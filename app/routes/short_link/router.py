@@ -636,8 +636,76 @@ async def handle_report(
             )
 
         # 返回成功响应
-        logger.warning(f"[斗篷点击] 处理完成: id={id}, fbclid={fbclid}, client_ip={client_ip}")
+        logger.warning(f"[斗篷点击] 处理完成：id={id}, fbclid={fbclid}, client_ip={client_ip}")
         return {"status": "success", "message": "Report received", "client_ip": client_ip, "fbclid": fbclid}
     except Exception as e:
-        logger.error(f"[斗篷点击] 处理异常: error={str(e)}", exc_info=True)
+        logger.error(f"[斗篷点击] 处理异常：error={str(e)}", exc_info=True)
         return {"status": "error", "message": "Failed to process report"}
+
+
+@router.get("/bridge/{filename}",
+            summary="服务桥页静态资源（图片、CSS、JS 等）",
+            tags=["短链接服务"])
+async def serve_bridge_static(
+        filename: str,
+        request: Request = None
+):
+    """
+    服务桥页的静态资源文件
+    
+    功能说明：
+    - 当 HTML 中引用 /bridge/109.png 时，返回 /data/Platform/scripts/109.png
+    - 支持图片、CSS、JS 等静态资源
+    - 自动检测文件类型并设置正确的 Content-Type
+    """
+    # 安全验证：只允许字母、数字、连字符、下划线和点
+    if not re.match(r'^[a-zA-Z0-9_.-]+$', filename):
+        logger.warning(f"[桥页静态资源] 文件名包含非法字符：{filename}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="文件不存在"
+        )
+    
+    # 构建文件路径
+    scripts_dir_server = "/data/Platform/scripts"
+    scripts_dir_local = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "scripts")
+    
+    file_path_server = os.path.join(scripts_dir_server, filename)
+    file_path_local = os.path.join(scripts_dir_local, filename)
+    
+    # 选择文件路径
+    file_path = None
+    if os.path.exists(file_path_server) and os.path.isfile(file_path_server):
+        file_path = file_path_server
+        logger.debug(f"[桥页静态资源] 使用服务器路径：{file_path}")
+    elif os.path.exists(file_path_local) and os.path.isfile(file_path_local):
+        file_path = file_path_local
+        logger.debug(f"[桥页静态资源] 使用本地路径：{file_path}")
+    else:
+        logger.warning(f"[桥页静态资源] 文件不存在：{filename}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="文件不存在"
+        )
+    
+    # 根据文件扩展名设置 Content-Type
+    content_type_map = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml',
+        '.webp': 'image/webp',
+        '.css': 'text/css',
+        '.js': 'application/javascript',
+        '.json': 'application/json',
+        '.html': 'text/html',
+    }
+    
+    _, ext = os.path.splitext(filename)
+    content_type = content_type_map.get(ext.lower(), 'application/octet-stream')
+    
+    logger.debug(f"[桥页静态资源] 返回文件：{file_path}, Content-Type: {content_type}")
+    
+    # 返回文件响应
+    return FileResponse(file_path, media_type=content_type)
