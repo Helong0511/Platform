@@ -11,7 +11,7 @@ from typing import Optional
 import time
 import httpx
 from fastapi import APIRouter, Depends, Query, Request, BackgroundTasks, HTTPException, status
-from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm.exc import StaleDataError
@@ -711,5 +711,11 @@ async def serve_bridge_static(
     
     logger.debug(f"[桥页静态资源] 返回文件：{file_path}, Content-Type: {content_type}")
     
-    # 返回文件响应
-    return FileResponse(file_path, media_type=content_type)
+    # 返回文件响应，并设置 CSP 头
+    response = FileResponse(file_path, media_type=content_type)
+    response.headers[
+        "Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: https: blob:; font-src 'self' data: https://cdnjs.cloudflare.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests"
+    response.headers["Cache-Control"] = "public, max-age=604800, immutable"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    
+    return response
