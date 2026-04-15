@@ -750,6 +750,11 @@ class ShortLink(Base):
     show_count = Column(Integer, default=0, comment='展示次数')
     is_active = Column(Boolean, default=True, comment='是否激活')
     expires_at = Column(DateTime, nullable=True, comment='过期时间（可选）')
+    
+    # Facebook 像素配置字段
+    facebook_pixel_id = Column(String(50), nullable=True, comment='Facebook 像素 ID')
+    facebook_access_token = Column(String(500), nullable=True, comment='Facebook 访问令牌')
+    facebook_api_version = Column(String(20), nullable=True, comment='Facebook API 版本')
 
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='创建时间')
     updated_at = Column(DateTime, default=get_app_now_naive,

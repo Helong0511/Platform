@@ -438,6 +438,11 @@ class Settings(BaseSettings):
         return v
 
     # ====== Facebook 像素配置 ======
+    # 全局默认 Facebook 像素配置（作为兜底配置）
+    FACEBOOK_PIXEL_ID: str = os.getenv("FACEBOOK_PIXEL_ID", "1273446968230624")
+    FACEBOOK_ACCESS_TOKEN: str = os.getenv("FACEBOOK_ACCESS_TOKEN", "EAAUIMcFRZAnsBRHOaK1QiLoGB7UVYKBmXadOIfdtIXNlZCMZBbV8XZBeELobgrUmaX03gt8zataZBdXXh64lZA9ZCJZBVL3Wyts0WPbaAWAuI2AQbziBMJfLdNrjWvZCVoAlrhtfd6Nl3erx2PVzE9eA89tZC02io5ETgvGnM2ZCsXF2djT2TbcW3ao6dKkpHOlgrG9OgZDZD")
+    FACEBOOK_API_VERSION: str = os.getenv("FACEBOOK_API_VERSION", "v21.0")
+
     # 使用字典结构管理多个像素配置，类似 LP_CONFIG
     # 格式：{斗篷名称/short_code: {"pixel_id": str, "access_token": str, "api_version": str}}
     # 示例：
@@ -447,7 +452,7 @@ class Settings(BaseSettings):
             "access_token": "EAAUIMcFRZAnsBRHOaK1QiLoGB7UVYKBmXadOIfdtIXNlZCMZBbV8XZBeELobgrUmaX03gt8zataZBdXXh64lZA9ZCJZBVL3Wyts0WPbaAWAuI2AQbziBMJfLdNrjWvZCVoAlrhtfd6Nl3erx2PVzE9eA89tZC02io5ETgvGnM2ZCsXF2djT2TbcW3ao6dKkpHOlgrG9OgZDZD",
             "api_version": "v21.0"
         },
-        "ljs": {
+        "109": {
             "pixel_id": "34826699006978780",
             "access_token": "EAAcMW7Vvha4BRM5OCSTNzWkcLZB2LZB5X8U4aUZCZAksLZAy6EqQRF0WgnY6mM5QbtVC0LHXvob48W0taw2ZCWHrB9fORIPFZByiVJ30T8IqK5jNzFxDRULHOJ2sa9er0AmuuZBxyldEQuZC1ninZCG06AUokiFgjmaiZBoUy6vJ6qiINdCwdW5ejeExR7DU7kwcQZDZD",
             "api_version": "v21.0"
