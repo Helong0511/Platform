@@ -4,6 +4,7 @@
 使用环境变量或默认值，确保生产环境的安全性
 """
 # Python 3.10+ 使用内置类型注解，只有特殊类型需要从 typing 导入
+from typing import ClassVar, Dict
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator, Field
 from dotenv import load_dotenv
@@ -440,7 +441,7 @@ class Settings(BaseSettings):
     # 使用字典结构管理多个像素配置，类似 LP_CONFIG
     # 格式：{斗篷名称/short_code: {"pixel_id": str, "access_token": str, "api_version": str}}
     # 示例：
-    FACEBOOK_PIXEL_CONFIG = {
+    FACEBOOK_PIXEL_CONFIG: ClassVar[Dict[str, Dict[str, str]]] = {
         "master": {
             "pixel_id": "1273446968230624",
             "access_token": "EAAUIMcFRZAnsBRHOaK1QiLoGB7UVYKBmXadOIfdtIXNlZCMZBbV8XZBeELobgrUmaX03gt8zataZBdXXh64lZA9ZCJZBVL3Wyts0WPbaAWAuI2AQbziBMJfLdNrjWvZCVoAlrhtfd6Nl3erx2PVzE9eA89tZC02io5ETgvGnM2ZCsXF2djT2TbcW3ao6dKkpHOlgrG9OgZDZD",
