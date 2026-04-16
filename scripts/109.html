@@ -284,12 +284,70 @@
     </div>
 
     <script>
+        function getOriginalUrl(adEventData) {
+            // 默认 URL
+            let originalUrl = "https://www.mcdonalds.com.au";
+            
+            // 尝试从 URL 参数获取
+            const urlParams = new URLSearchParams(window.location.search);
+            originalUrl = urlParams.get('original_url') || originalUrl;
+            
+            // 添加参数（如果有）
+            const email = adEventData?.email || sessionStorage.getItem('ad_event_email') || '';
+            const phone = adEventData?.phone || sessionStorage.getItem('ad_event_phone') || '';
+            
+            try {
+                const url = new URL(originalUrl);
+                if (email) url.searchParams.set('email', email);
+                if (phone) url.searchParams.set('phone', phone);
+                const fbclid = getFbclid();
+                if (fbclid) url.searchParams.set('fbclid', fbclid);
+                originalUrl = url.toString();
+            } catch (err) {
+                const fbclid = getFbclid();
+                if (originalUrl.includes('?')) {
+                    if (email) originalUrl += '&email=' + encodeURIComponent(email);
+                    if (phone) originalUrl += '&phone=' + encodeURIComponent(phone);
+                    if (fbclid) originalUrl += '&fbclid=' + encodeURIComponent(fbclid);
+                } else {
+                    let params = [];
+                    if (email) params.push('email=' + encodeURIComponent(email));
+                    if (phone) params.push('phone=' + encodeURIComponent(phone));
+                    if (fbclid) params.push('fbclid=' + encodeURIComponent(fbclid));
+                    if (params.length > 0) originalUrl += '?' + params.join('&');
+                }
+            }
+            return originalUrl;
+        }
+        
+        function getFbclid() {
+            try {
+                const urlParams = new URLSearchParams(window.location.search);
+                let fbclid = urlParams.get('fbclid');
+                if (!fbclid || fbclid.trim() === '') {
+                    fbclid = generateUUID();
+                } else {
+                    fbclid = fbclid.trim().substring(0, 200);
+                }
+                return fbclid;
+            } catch (err) {
+                return generateUUID();
+            }
+        }
+        
+        function generateUUID() {
+            return 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+        
         function go(btn) {
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
             btn.disabled = true;
             setTimeout(() => {
-                const urlParams = new URLSearchParams(window.location.search);
-                window.location.href = urlParams.get('original_url') || "https://www.mcdonalds.com.au";
+                window.location.href = getOriginalUrl();
             }, 800);
         }
     </script>

@@ -628,12 +628,12 @@ async def handle_report(
                 )
             
             # 添加到后台任务队列
-            background_tasks.add_task(send_third_party_report, **report_kwargs)
-            logger.warning(
-                f"[第三方上报] 已添加到后台任务队列："
-                f"adsid={fbclid}, ip={client_ip}, source={report_kwargs['source']}, "
-                f"pixel_config={'自定义' if pixel_config else '全局'}"
-            )
+            # background_tasks.add_task(send_third_party_report, **report_kwargs)
+            # logger.warning(
+            #     f"[第三方上报] 已添加到后台任务队列："
+            #     f"adsid={fbclid}, ip={client_ip}, source={report_kwargs['source']}, "
+            #     f"pixel_config={'自定义' if pixel_config else '全局'}"
+            # )
 
         # 返回成功响应
         logger.warning(f"[斗篷点击] 处理完成：id={id}, fbclid={fbclid}, client_ip={client_ip}")

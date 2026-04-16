@@ -40,8 +40,10 @@ class ClickAssociator:
         
         logger.info(f"开始关联 Click ID: {click_id}")
         
-        # 尝试多次查询，处理批量处理延迟问题
-        max_attempts = 3
+        # 使用指数退避策略重试查询，处理批量处理延迟问题
+        max_attempts = 5
+        base_delay = 0.3  # 基础延迟 300ms
+        
         for attempt in range(max_attempts):
             # 查询 Click 记录（带关联的 Offer、Publisher、Advertiser）
             try:
@@ -65,12 +67,18 @@ class ClickAssociator:
                     logger.warning(f"第 {attempt + 1} 次尝试：未找到 Click 记录：click_id={click_id}")
                     if attempt < max_attempts - 1:
                         import asyncio
-                        await asyncio.sleep(0.5)  # 等待0.5秒后重试
+                        # 指数退避：delay = base_delay * (2 ^ attempt)
+                        delay = base_delay * (2 ** attempt)
+                        logger.debug(f"等待 {delay:.2f} 秒后重试...")
+                        await asyncio.sleep(delay)
             except Exception as e:
                 logger.error(f"第 {attempt + 1} 次尝试查询 Click 记录失败：{e}")
                 if attempt < max_attempts - 1:
                     import asyncio
-                    await asyncio.sleep(0.5)  # 等待0.5秒后重试
+                    # 指数退避：delay = base_delay * (2 ^ attempt)
+                    delay = base_delay * (2 ** attempt)
+                    logger.debug(f"等待 {delay:.2f} 秒后重试...")
+                    await asyncio.sleep(delay)
         
         if not click:
             logger.error(f"多次尝试后仍未找到 Click 记录：click_id={click_id}")

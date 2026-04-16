@@ -125,21 +125,26 @@ class PostbackProcessor:
                 fbclid = url_params.get('fbclid')
                 email = url_params.get('email')
                 phone = url_params.get('phone')
-                amount = raw_data.get('payout')
                 
-                # 如果 amount 为空，使用默认值 0.01（避免 send_third_party_report 验证失败）
-                # 确保 amount 是数值类型后再比较
-                if amount is None:
+                # 获取 payout 参数并确保转换为数值类型
+                amount_raw = raw_data.get('payout')
+                
+                # 将 amount 转换为浮点数，确保类型正确
+                if amount_raw is None:
                     logger.warning(f"[PostBack 处理] payout 参数为空")
-                    amount = 0.0  # 设置默认值
+                    amount = 0.0
                 else:
-                    # 如果是字符串，转换为浮点数
                     try:
-                        amount = float(amount)
+                        # 先转换为字符串，去除空格，再转换为浮点数
+                        amount_str = str(amount_raw).strip()
+                        amount = float(amount_str)
+                        
+                        # 检查是否为负数
                         if amount < 0:
                             logger.warning(f"[PostBack 处理] payout 参数为负数：{amount}")
-                    except (ValueError, TypeError) as e:
-                        logger.warning(f"[PostBack 处理] payout 参数转换失败：{amount}, 错误：{e}")
+                            amount = 0.0
+                    except (ValueError, TypeError, AttributeError) as e:
+                        logger.warning(f"[PostBack 处理] payout 参数转换失败：{amount_raw}, 错误：{e}")
                         amount = 0.0
                 
                 logger.info("-" * 50)
