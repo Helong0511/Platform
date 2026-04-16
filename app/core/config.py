@@ -439,8 +439,8 @@ class Settings(BaseSettings):
 
     # ====== Facebook 像素配置 ======
     # 全局默认 Facebook 像素配置（作为兜底配置）
-    FACEBOOK_PIXEL_ID: str = os.getenv("FACEBOOK_PIXEL_ID", "1483729203107246")
-    FACEBOOK_ACCESS_TOKEN: str = os.getenv("FACEBOOK_ACCESS_TOKEN", "EAAcMW7Vvha4BRGUAZBYDMY9bS0VsenzFP2MeR9ylIVjXPPJKGA6FkydDhMPWPefhZC6lmY5ZB13HaB0K8WdHY8aT7z7UFgrfxM8bz3f4XYZApxDPaatAJuTBme3AZC1tLXH8Ns5TV6AtnNcI3bRVRZCoFEaWZAyAVjpReNKHEo8ro7vBwA07XHtQgCBnJNLHr6bNwZDZD")
+    FACEBOOK_PIXEL_ID: str = os.getenv("FACEBOOK_PIXEL_ID", "821249023838458")
+    FACEBOOK_ACCESS_TOKEN: str = os.getenv("FACEBOOK_ACCESS_TOKEN", "EAANRkCcUcFYBRF5KkuqnxwpZCI9dDUmzSliWwNlitMZCs9HvNQmNO0X1UP2T7beiBX7RBAIZBmFh6nnwGZBSSXraL25D8jdqw6YEdQpXfG1lmo4z1qmCIvf2A0daef4agGxilEG49uex8CjXrZArZAGJMLTlZBEG8NvGHDA9GlVZAtr0ZBtSGZCcWDp0rToptsn39MIgZDZD")
     FACEBOOK_API_VERSION: str = os.getenv("FACEBOOK_API_VERSION", "v21.0")
 
     # 使用字典结构管理多个像素配置，类似 LP_CONFIG
@@ -448,8 +448,8 @@ class Settings(BaseSettings):
     # 示例：
     FACEBOOK_PIXEL_CONFIG: ClassVar[Dict[str, Dict[str, str]]] = {
         "master": {
-            "pixel_id": "1483729203107246",
-            "access_token": "EAAcMW7Vvha4BRGUAZBYDMY9bS0VsenzFP2MeR9ylIVjXPPJKGA6FkydDhMPWPefhZC6lmY5ZB13HaB0K8WdHY8aT7z7UFgrfxM8bz3f4XYZApxDPaatAJuTBme3AZC1tLXH8Ns5TV6AtnNcI3bRVRZCoFEaWZAyAVjpReNKHEo8ro7vBwA07XHtQgCBnJNLHr6bNwZDZD",
+            "pixel_id": "821249023838458",
+            "access_token": "EAANRkCcUcFYBRF5KkuqnxwpZCI9dDUmzSliWwNlitMZCs9HvNQmNO0X1UP2T7beiBX7RBAIZBmFh6nnwGZBSSXraL25D8jdqw6YEdQpXfG1lmo4z1qmCIvf2A0daef4agGxilEG49uex8CjXrZArZAGJMLTlZBEG8NvGHDA9GlVZAtr0ZBtSGZCcWDp0rToptsn39MIgZDZD",
             "api_version": "v21.0"
         },
         "109": {
