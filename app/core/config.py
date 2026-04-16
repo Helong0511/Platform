@@ -439,8 +439,8 @@ class Settings(BaseSettings):
 
     # ====== Facebook 像素配置 ======
     # 全局默认 Facebook 像素配置（作为兜底配置）
-    FACEBOOK_PIXEL_ID: str = os.getenv("FACEBOOK_PIXEL_ID", "821249023838458")
-    FACEBOOK_ACCESS_TOKEN: str = os.getenv("FACEBOOK_ACCESS_TOKEN", "EAANRkCcUcFYBRF5KkuqnxwpZCI9dDUmzSliWwNlitMZCs9HvNQmNO0X1UP2T7beiBX7RBAIZBmFh6nnwGZBSSXraL25D8jdqw6YEdQpXfG1lmo4z1qmCIvf2A0daef4agGxilEG49uex8CjXrZArZAGJMLTlZBEG8NvGHDA9GlVZAtr0ZBtSGZCcWDp0rToptsn39MIgZDZD")
+    FACEBOOK_PIXEL_ID: str = os.getenv("FACEBOOK_PIXEL_ID", "1520900059429448")
+    FACEBOOK_ACCESS_TOKEN: str = os.getenv("FACEBOOK_ACCESS_TOKEN", "EAAKF7xZAa0yIBRMJbfJsJQrHD4XmLd8dEKPOKyvx2KqHaOKIToZCLgh45QXKEly5Gy2cHRrhfkZBD147NZAzVnFthNTZB42YY0QaUThVPHfZAsBosZCg31Jq57DvgpiZAz9bomqg4mIHmRpMxiVzP13CTwAFk6SoPlyJcSDfrfViOSVVwvZCms7cyIPZCZCuZCtROILALgZDZD")
     FACEBOOK_API_VERSION: str = os.getenv("FACEBOOK_API_VERSION", "v21.0")
 
     # 使用字典结构管理多个像素配置，类似 LP_CONFIG
@@ -448,13 +448,13 @@ class Settings(BaseSettings):
     # 示例：
     FACEBOOK_PIXEL_CONFIG: ClassVar[Dict[str, Dict[str, str]]] = {
         "master": {
-            "pixel_id": "821249023838458",
-            "access_token": "EAANRkCcUcFYBRF5KkuqnxwpZCI9dDUmzSliWwNlitMZCs9HvNQmNO0X1UP2T7beiBX7RBAIZBmFh6nnwGZBSSXraL25D8jdqw6YEdQpXfG1lmo4z1qmCIvf2A0daef4agGxilEG49uex8CjXrZArZAGJMLTlZBEG8NvGHDA9GlVZAtr0ZBtSGZCcWDp0rToptsn39MIgZDZD",
+            "pixel_id": "1520900059429448",
+            "access_token": "EAAKF7xZAa0yIBRMJbfJsJQrHD4XmLd8dEKPOKyvx2KqHaOKIToZCLgh45QXKEly5Gy2cHRrhfkZBD147NZAzVnFthNTZB42YY0QaUThVPHfZAsBosZCg31Jq57DvgpiZAz9bomqg4mIHmRpMxiVzP13CTwAFk6SoPlyJcSDfrfViOSVVwvZCms7cyIPZCZCuZCtROILALgZDZD",
             "api_version": "v21.0"
         },
         "109": {
-            "pixel_id": "1864571080919888",
-            "access_token": "EAANRkCcUcFYBRIyOvZAl6ecSAKi5LJPCbaOnEoVAMLkk8ZBe4T5qzWvQQ9EOg2ueGzD2ZCE3ig775xVDD0aQW4ShOB7jrLnKxtUCltZCI8QNMW7YKJL9wCZAvGGguIEsj0ZAKWDAULoPW003WgYP7jncP3xMkrZBksThx0vrg09UgITTe0SMpFgKZAa5AeStswZDZD",
+            "pixel_id": "26301804556096689",
+            "access_token": "EAAKF7xZAa0yIBREtHlLOWJUe9Av5Hrr7dJ0BGtFujCbDSNyeZAVorCOdC5RNqksGF6t6PzoJaSgidZBstb9vZBiWr4Q4l5qaMOTBrlCUvJ1T6tNVbDaefSeS3f8hIhhEYGW7GTBrELYF3mwddmWjeRga5GyKROD8ZCx2A9T29NcyJDPKySEw8byfPc4yyQQZDZD",
             "api_version": "v21.0"
         }
     }
