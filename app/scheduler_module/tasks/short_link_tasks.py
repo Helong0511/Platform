@@ -4,6 +4,7 @@
 """
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 from app.core.database import AsyncSessionLocal
 from app.core.short_link_click_counter import sync_click_counts_to_db
@@ -114,12 +115,23 @@ async def open_closed_short_links_task():
         raise
 
 
-def get_task_result() -> dict:
+def get_task_result(task_name: str) -> Optional[str]:
     """
     获取任务执行结果
+    
+    Args:
+        task_name: 任务名称
+        
+    Returns:
+        任务执行结果字符串，如果不存在返回 None
     """
-    return {
-        "task_name": "sync_short_link_clicks",
-        "description": "同步短链接点击次数到数据库",
-        "last_run": datetime.now(timezone.utc).isoformat(),
-    }
+    try:
+        result = {
+            "task_name": "sync_short_link_clicks",
+            "description": "同步短链接点击次数到数据库",
+            "last_run": datetime.now(timezone.utc).isoformat(),
+        }
+        return str(result)
+    except Exception as e:
+        logger.error(f"获取任务 '{task_name}' 执行结果失败：{e}")
+        return None

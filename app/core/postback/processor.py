@@ -128,8 +128,19 @@ class PostbackProcessor:
                 amount = raw_data.get('payout')
                 
                 # 如果 amount 为空，使用默认值 0.01（避免 send_third_party_report 验证失败）
-                if amount is None or amount < 0:
-                    logger.warning(f"[PostBack 处理] payout 参数为空或为负数，payout：{amount}")
+                # 确保 amount 是数值类型后再比较
+                if amount is None:
+                    logger.warning(f"[PostBack 处理] payout 参数为空")
+                    amount = 0.0  # 设置默认值
+                else:
+                    # 如果是字符串，转换为浮点数
+                    try:
+                        amount = float(amount)
+                        if amount < 0:
+                            logger.warning(f"[PostBack 处理] payout 参数为负数：{amount}")
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"[PostBack 处理] payout 参数转换失败：{amount}, 错误：{e}")
+                        amount = 0.0
                 
                 logger.info("-" * 50)
                 logger.info(f"fbclid:{fbclid}")
