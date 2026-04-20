@@ -448,8 +448,8 @@ class Settings(BaseSettings):
     # 示例：
     FACEBOOK_PIXEL_CONFIG: ClassVar[Dict[str, Dict[str, str]]] = {
         "master": {
-            "pixel_id": "1721296579035392",
-            "access_token": "EAAWnvd8KEAcBRIIiZCwlZB2hLgA0LCUfWSnJstoyzliZANQMSBotlZBK7qFGiotCsawR7LNU8ZCyVlJSVhuM4ZBJjaHRu8jV7KwJv9TUZAdU9GuK30rPtACVd8mLOywrszA20LN6F8SajNq7zfxZAgcZCJb0bsqkRrMinm0obnpStZBTabkj3EOv2s6ZCKjwHlFuSZC3agZDZD",
+            "pixel_id": "4312491655675041",
+            "access_token": "EAAa9L8faLmcBRTqxnBnZAKnxmDpRdYW8kWwZCHuEjIfAkX8dhbzpzNMUuAbSfBdtHxPZAcAzWx1qSAZBbxO12cgPqRlPRqTevwWWXeQDcNqTOEvAjDiFZCuAFTGJVrcJZAhr4DCjZAYlh8xXOoRCaOr0dIBXMqdzwnPciqPtMa9Ey87aOeyJlNLBrHZA7P8s3AnxVgZDZD",
             "api_version": "v21.0"
         },
         "109": {
