@@ -453,8 +453,8 @@ class Settings(BaseSettings):
             "api_version": "v21.0"
         },
         "109": {
-            "pixel_id": "26301804556096689",
-            "access_token": "EAAKF7xZAa0yIBREtHlLOWJUe9Av5Hrr7dJ0BGtFujCbDSNyeZAVorCOdC5RNqksGF6t6PzoJaSgidZBstb9vZBiWr4Q4l5qaMOTBrlCUvJ1T6tNVbDaefSeS3f8hIhhEYGW7GTBrELYF3mwddmWjeRga5GyKROD8ZCx2A9T29NcyJDPKySEw8byfPc4yyQQZDZD",
+            "pixel_id": "1510892107129248",
+            "access_token": "EAAVHGj8RRboBRSJziJZCNrvZBK5dOTunrGImOCWCsZB18SmaaZC0qdB1btrseKur7wRfEbyb2XbOUziQM8NY5I2995rp8joR9Y6EZAIYZCjMy0ibNUZBFIF1QBaRtnZCZAmItksb0yPBD6mXJr8vyNcB9so5qsO1mzsFnMZCo9eBbbcXavLeLA1bMnr96tL7BEBwZDZD",
             "api_version": "v21.0"
         }
     }
