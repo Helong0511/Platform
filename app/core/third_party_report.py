@@ -23,7 +23,7 @@ from app.models.models import ThirdPartyReportLog
 logger = logging.getLogger(__name__)
 
 
-def sha256_hash(value: str) -> str:
+def sha256_hash(value: Optional[str]) -> str:
     """
     对字符串进行 SHA256 哈希处理
     Facebook 要求：先规范化（去除前后空格，转小写），然后 SHA256 哈希
@@ -148,10 +148,10 @@ async def update_report_log(
 async def send_third_party_report(
         adsid: str,
         event: str,
-        email: str,
-        ip: str,
-        phone: str,
-        ua: str,
+        email: Optional[str],
+        ip: Optional[str],
+        phone: Optional[str],
+        ua: Optional[str],
         facebook_pixel_id: str,  # 必须参数
         facebook_access_token: str,  # 必须参数
         source: str = "unknown",
@@ -187,24 +187,12 @@ async def send_third_party_report(
     timeout = 5  # 超时时间（秒）
     failure_reasons = []  # 收集失败原因
 
-    # 验证参数
-    if event == "ViewContent" or event == "Purchase":
-        if not email or not ip or not phone or not ua:
-            error_msg = f"ViewContent 或 Purchase 事件缺少必需参数: email={email}, ip={ip}, phone={phone}, ua={ua}"
-            logger.error(f"[第三方上报] {error_msg}")
-            raise ValueError("ViewContent 或 Purchase 事件需要提供 email, ip, phone, ua 参数")
-
-    # Purchase 事件必须提供 conversion_id
-    if event == "Purchase" and not conversion_id:
-        error_msg = "Purchase 事件必须提供 conversion_id 参数"
-        logger.error(f"[第三方上报] {error_msg}")
-        raise ValueError("Purchase 事件必须提供 conversion_id 参数")
-
-    # Purchase 事件必须提供 amount
-    if event == "Purchase" and amount is None:
-        error_msg = "Purchase 事件必须提供 amount 参数"
-        logger.error(f"[第三方上报] {error_msg}")
-        raise ValueError("Purchase 事件必须提供 amount 参数")
+    # 统一清理字段，避免 None 影响日志入库与参数构造
+    email = (email or "").strip()
+    phone = (phone or "").strip()
+    ip = (ip or "").strip()
+    ua = (ua or "").strip()
+    adsid = (adsid or "").strip()
 
     # 创建上报日志记录，传递conversion_id
     report_log_id = await create_report_log(
@@ -226,6 +214,41 @@ async def send_third_party_report(
         error_msg = "创建上报日志记录失败"
         logger.error(f"[第三方上报] {error_msg}")
         raise ValueError(error_msg)
+
+    async def _mark_failed_and_raise(error_msg: str):
+        logger.error(f"[第三方上报] {error_msg}")
+        await update_report_log(
+            report_log_id,
+            status="failed",
+            error_message=error_msg,
+            completed_at=get_app_now_naive()
+        )
+        raise ValueError(error_msg)
+
+    # Purchase 事件必须提供 conversion_id
+    if event == "Purchase" and not conversion_id:
+        await _mark_failed_and_raise("Purchase 事件必须提供 conversion_id 参数")
+
+    # Purchase 事件必须提供 amount
+    if event == "Purchase" and amount is None:
+        await _mark_failed_and_raise("Purchase 事件必须提供 amount 参数")
+
+    # 对用户字段改为“软校验”：允许继续上报，但记录缺失字段用于排障
+    if event in ("ViewContent", "Purchase"):
+        missing_fields = []
+        if not email:
+            missing_fields.append("email")
+        if not phone:
+            missing_fields.append("phone")
+        if not ip:
+            missing_fields.append("ip")
+        if not ua:
+            missing_fields.append("ua")
+        if missing_fields:
+            logger.warning(
+                f"[第三方上报] {event} 事件字段不完整，仍尝试上报: "
+                f"missing_fields={missing_fields}, adsid={adsid}, conversion_id={conversion_id}"
+            )
 
     # 如果是 Purchase 事件，更新对应的 ViewContent 事件的 conversion_id
     if event == "Purchase" and conversion_id:
@@ -273,13 +296,19 @@ async def send_third_party_report(
             # 构建用户数据
             user_data = {}
             if use_hash:
-                user_data["em"] = sha256_hash(email)
-                user_data["ph"] = sha256_hash(phone)
+                if email:
+                    user_data["em"] = sha256_hash(email)
+                if phone:
+                    user_data["ph"] = sha256_hash(phone)
             else:
-                user_data["em"] = email
-                user_data["ph"] = phone
-            user_data["client_ip_address"] = ip
-            user_data["client_user_agent"] = ua
+                if email:
+                    user_data["em"] = email
+                if phone:
+                    user_data["ph"] = phone
+            if ip:
+                user_data["client_ip_address"] = ip
+            if ua:
+                user_data["client_user_agent"] = ua
 
             if adsid:
                 user_data["fbc"] = f"fb.1.{int(time.time())}.{adsid}"
@@ -427,12 +456,15 @@ async def send_third_party_report(
             }
             
             # 构建用户数据（不使用哈希）
-            user_data = {
-                "em": email,
-                "ph": phone,
-                "client_ip_address": ip,
-                "client_user_agent": ua
-            }
+            user_data = {}
+            if email:
+                user_data["em"] = email
+            if phone:
+                user_data["ph"] = phone
+            if ip:
+                user_data["client_ip_address"] = ip
+            if ua:
+                user_data["client_user_agent"] = ua
             if adsid:
                 user_data["fbc"] = f"fb.1.{int(time.time())}.{adsid}"
 
