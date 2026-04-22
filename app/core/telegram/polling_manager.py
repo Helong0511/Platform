@@ -13,7 +13,12 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 from app.core.telegram.file_lock import acquire_bot_lock, release_bot_lock
-from app.core.telegram.shared_state import get_shared_state, update_shared_state, is_bot_running
+from app.core.telegram.shared_state import (
+    get_shared_state,
+    set_shared_state,
+    update_shared_state,
+    is_bot_running
+)
 from app.core.config import settings
 
 # 标记处理器是否已注册
