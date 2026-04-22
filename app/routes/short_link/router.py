@@ -10,6 +10,7 @@ import json
 from typing import Optional
 import time
 import httpx
+from urllib.parse import urlparse, parse_qs
 from fastapi import APIRouter, Depends, Query, Request, BackgroundTasks, HTTPException, status
 from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -415,6 +416,32 @@ async def handle_report(
             user_agent = request.headers.get("user-agent", "未知")
             referer = request.headers.get("referer", "未知")
 
+        # 统一解析 dp 参数，避免前端漏传时丢失像素映射线索
+        resolved_dp = dp.strip() if dp and dp.strip() else None
+        if not resolved_dp and request:
+            query_dp = (
+                request.query_params.get("dp")
+                or request.query_params.get("DP")
+                or request.query_params.get("Dp")
+            )
+            if query_dp and query_dp.strip():
+                resolved_dp = query_dp.strip()
+
+        # 前端 /report 可能未显式带 dp，尝试从 referer 的 /change 链接中回填
+        if not resolved_dp and referer and referer != "未知":
+            try:
+                referer_dp = parse_qs(urlparse(referer).query).get("dp", [])
+                if referer_dp and referer_dp[0].strip():
+                    resolved_dp = referer_dp[0].strip()
+                    logger.info(f"[斗篷点击] 从 Referer 回填 dp 参数：dp={resolved_dp}")
+            except Exception as e:
+                logger.warning(f"[斗篷点击] 从 Referer 解析 dp 失败：{e}")
+
+        # 安全校验 dp，避免注入或异常字符污染配置查找
+        if resolved_dp and not re.match(r'^[a-zA-Z0-9_-]+$', resolved_dp):
+            logger.warning(f"[斗篷点击] dp 参数格式非法，忽略：dp={resolved_dp}")
+            resolved_dp = None
+
         # 验证必需参数
         if not email or not email.strip():
             logger.error(f"[斗篷点击] email 参数为空：email={email}")
@@ -481,8 +508,8 @@ async def handle_report(
                         url_params_dict = {}
                         if fbclid:
                             url_params_dict["fbclid"] = fbclid
-                        if dp:
-                            url_params_dict["dp"] = dp
+                        if resolved_dp:
+                            url_params_dict["dp"] = resolved_dp
                         if email:
                             url_params_dict["email"] = email
                         if phone:
@@ -579,12 +606,12 @@ async def handle_report(
             }
             
             # 如果提供了 dp 参数，添加到 source 中以便区分
-            if dp:
-                report_kwargs["source"] = f"short_link_dp_{dp}"
-                logger.warning(f"[第三方上报] 检测到 dp 参数：{dp}，已更新 source 标识")
+            if resolved_dp:
+                report_kwargs["source"] = f"short_link_dp_{resolved_dp}"
+                logger.warning(f"[第三方上报] 检测到 dp 参数：{resolved_dp}，已更新 source 标识")
             
             # 使用新的映射服务获取像素配置（使用 dp 参数匹配）
-            dp_param = dp if dp else "master"  # 默认使用 master
+            dp_param = resolved_dp if resolved_dp else "master"  # 默认使用 master
             logger.info(f"[第三方上报] 使用 dp 参数获取像素配置：dp={dp_param}, short_code={id}")
             
             # 初始化 pixel_config 为 None

@@ -117,8 +117,8 @@ class PostbackProcessor:
             logger.info(f"Click 关联结果: {click_association}")
             
             # 检查 url_params 中的 fbclid 参数并上报
-            if click_association and click_association.get('url_params'):
-                url_params = click_association['url_params']
+            if click_association:
+                url_params = click_association.get('url_params') or {}
                 click_id = click_association.get('click_id')
                 ip = click_association.get('ip')
                 ua = click_association.get('user_agent')
@@ -157,13 +157,19 @@ class PostbackProcessor:
                 logger.info(f"amount:{amount}")
                 logger.info("-" * 50)
 
-
                 if fbclid:
                     logger.info(f"=== 检测到 fbclid 参数：{fbclid} ===")
                     
                     # 从 url_params 提取 dp 参数
                     url_params = click_association.get('url_params', {})
                     dp = url_params.get('dp') if url_params else None
+
+                    # 兜底：部分链路未透传 dp 时，回退使用 offer_id 匹配像素配置
+                    if not dp:
+                        offer_id_for_dp = click_association.get('offer_id') or url_params.get('offer_id')
+                        if offer_id_for_dp is not None:
+                            dp = str(offer_id_for_dp)
+                            logger.info(f"=== 未检测到 dp，回退使用 offer_id 作为配置键：dp={dp} ===")
                     
                     # 获取像素配置（优先级：数据库 > FACEBOOK_PIXEL_CONFIG[dp] > 全局配置）
                     from app.core.config import settings
@@ -234,6 +240,11 @@ class PostbackProcessor:
                         logger.info(f"=== 第三方上报成功：fbclid={fbclid} ===")
                     except Exception as e:
                         logger.error(f"=== 第三方上报失败：{str(e)} ===")
+                else:
+                    logger.warning(
+                        f"=== 未检测到 fbclid，跳过第三方上报：click_id={click_id}, "
+                        f"url_params_keys={list(url_params.keys()) if isinstance(url_params, dict) else 'invalid'} ==="
+                    )
             
             # ========== 第 5 步：重复检测 ==========
             logger.info("=== 第 5 步：重复检测 ===")
