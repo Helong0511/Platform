@@ -33,7 +33,6 @@ from urllib.parse import urlparse, urlencode, parse_qs, urlunparse, quote
 from fastapi import APIRouter, Depends, Query, Request, BackgroundTasks, HTTPException, status
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from app.api_v1.tracking.tracking import create_click_background
 from app.core.clicks_queue import enqueue_click
@@ -49,7 +48,6 @@ from app.core.short_link_cache import (
 from app.core.short_link_click_counter import increment_click_count_async
 from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
-from app.models.models import ShortLink
 from sqlalchemy.future import select
 from app.models.models import ShortLink, Offer, Publisher, Advertiser
 

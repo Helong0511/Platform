@@ -12,6 +12,7 @@ import uuid
 from typing import Optional
 from datetime import datetime
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.telegram.message_sender import send_telegram_message_async as send_telegram_message
@@ -56,7 +57,6 @@ async def create_report_log(
     try:
         async with AsyncSessionLocal() as db:
             # 先检查是否已存在记录（只考虑 source 和 adsid，与数据库唯一约束保持一致）
-            from sqlalchemy import select
             result = await db.execute(
                 select(ThirdPartyReportLog)
                 .where(ThirdPartyReportLog.source == source)
@@ -116,7 +116,6 @@ async def update_report_log(
         return
     try:
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
             result = await db.execute(select(ThirdPartyReportLog).where(ThirdPartyReportLog.id == log_id))
             log_entry = result.scalars().first()
             if log_entry:
@@ -254,7 +253,6 @@ async def send_third_party_report(
     if event == "Purchase" and conversion_id:
         try:
             async with AsyncSessionLocal() as db:
-                from sqlalchemy import select
                 # 查找相同 adsid 的 ViewContent 事件
                 result = await db.execute(
                     select(ThirdPartyReportLog)
@@ -612,7 +610,6 @@ async def retry_report_log(log_id: int):
     """
     try:
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
             result = await db.execute(select(ThirdPartyReportLog).where(ThirdPartyReportLog.id == log_id))
             log_entry = result.scalars().first()
             
@@ -635,7 +632,6 @@ async def retry_report_log(log_id: int):
             
             # 在后台任务中重新发送上报
             from fastapi import BackgroundTasks
-            import asyncio
             
             # 创建一个后台任务来发送上报
             async def background_send():
@@ -703,7 +699,6 @@ async def update_report_log_params(
     """
     try:
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
             result = await db.execute(select(ThirdPartyReportLog).where(ThirdPartyReportLog.id == log_id))
             log_entry = result.scalars().first()
             

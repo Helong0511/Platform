@@ -4,7 +4,7 @@ Tracklink 生成器
 """
 import logging
 from typing import Optional, Dict, Any
-from urllib.parse import urlencode, urlparse, urlunparse, parse_qs, urlencode as urlencode_func
+from urllib.parse import urlencode, urlparse, urlunparse, parse_qs
 
 logger = logging.getLogger(__name__)
 

@@ -408,7 +408,7 @@ async def find_or_create_default_client(
         客户对象（Client）
     
     Example:
-        from app.models.models import Client
+        >>> from app.models.models import Client
         default_client = await find_or_create_default_client(db, current_user.id)
     """
     # 延迟导入，避免循环导入
