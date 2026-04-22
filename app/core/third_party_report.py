@@ -292,7 +292,22 @@ async def send_third_party_report(
             params = {
                 "access_token": access_token
             }
-            
+
+            # 直接使用事件类型
+            fb_event_name = event
+
+            # 构建事件数据
+            # 使用click_time作为event_time（如果提供），否则使用当前时间戳
+            if click_time:
+                event_time = int(click_time.timestamp())
+            else:
+                event_time = int(time.time())
+
+            # fbc 中段时间必须与 fbclid 产生时的点击时间一致（秒级 Unix 时间戳）。
+            # 若误用「发送请求时的 time.time()」而 event_time 仍为点击时间，会出现
+            # event_time < fbc 内嵌时间，Meta 侧常表现为无法归因或报表中不可见。
+            fbc_ts = int(click_time.timestamp()) if click_time else event_time
+
             # 构建用户数据
             user_data = {}
             if use_hash:
@@ -311,17 +326,7 @@ async def send_third_party_report(
                 user_data["client_user_agent"] = ua
 
             if adsid:
-                user_data["fbc"] = f"fb.1.{int(time.time())}.{adsid}"
-
-            # 直接使用事件类型
-            fb_event_name = event
-
-            # 构建事件数据
-            # 使用click_time作为event_time（如果提供），否则使用当前时间戳
-            if click_time:
-                event_time = int(click_time.timestamp())
-            else:
-                event_time = int(time.time())
+                user_data["fbc"] = f"fb.1.{fbc_ts}.{adsid}"
             event_data = {
                 "event_name": fb_event_name,
                 "event_time": event_time,
@@ -465,8 +470,6 @@ async def send_third_party_report(
                 user_data["client_ip_address"] = ip
             if ua:
                 user_data["client_user_agent"] = ua
-            if adsid:
-                user_data["fbc"] = f"fb.1.{int(time.time())}.{adsid}"
 
             # 直接使用事件类型
             fb_event_name = event
@@ -477,6 +480,9 @@ async def send_third_party_report(
                 event_time = int(click_time.timestamp())
             else:
                 event_time = int(time.time())
+            fbc_ts = int(click_time.timestamp()) if click_time else event_time
+            if adsid:
+                user_data["fbc"] = f"fb.1.{fbc_ts}.{adsid}"
             event_data = {
                 "event_name": fb_event_name,
                 "event_time": event_time,
