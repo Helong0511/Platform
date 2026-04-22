@@ -173,6 +173,8 @@ class PostbackProcessor:
                     
                     # 获取像素配置（优先级：数据库 > FACEBOOK_PIXEL_CONFIG[dp] > 全局配置）
                     from app.core.config import settings
+                    from app.models.models import ShortLink
+                    from sqlalchemy import update
                     facebook_pixel_id = settings.FACEBOOK_PIXEL_ID
                     facebook_access_token = settings.FACEBOOK_ACCESS_TOKEN
                     facebook_api_version = settings.FACEBOOK_API_VERSION
@@ -182,8 +184,6 @@ class PostbackProcessor:
                     short_link_id = click_association.get('short_link_id')
                     if short_link_id:
                         try:
-                            from app.models.models import ShortLink
-                            from sqlalchemy import select
                             result = await db.execute(select(ShortLink).where(ShortLink.id == short_link_id))
                             short_link = result.scalars().first()
                             
@@ -286,9 +286,6 @@ class PostbackProcessor:
             if not cap_ok and offer_id and publisher_id:
                 logger.info(f"Cap检查失败，关闭渠道 {publisher_id} 的Offer {offer_id} 关联的短链接")
                 try:
-                    from app.models.models import ShortLink
-                    from sqlalchemy import update
-                    
                     # 关闭与该offer和渠道关联的短链接
                     update_stmt = update(ShortLink).where(
                         ShortLink.offer_id == offer_id,

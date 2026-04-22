@@ -158,7 +158,7 @@ class TelegramBotDiagnostics:
         
         # 动态检查模块可用性
         try:
-            import telebot
+            importlib.import_module("telebot")
             telebot_available = True
         except ImportError:
             telebot_available = False

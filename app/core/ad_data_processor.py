@@ -120,7 +120,6 @@ async def check_and_notify_data_decrease(
 
             # 发送通知（异步，不阻塞）
             try:
-                from app.core.config import settings
                 await asyncio.wait_for(
                     send_telegram_message(settings.TELEGRAM_ADMIN, telegram_msg),
                     timeout=5.0
@@ -465,7 +464,6 @@ async def process_api_ad_data(
                             
                             # 发送通知（异步，不阻塞）
                             try:
-                                from app.core.config import settings
                                 await asyncio.wait_for(
                                     send_telegram_message(settings.TELEGRAM_ADMIN, telegram_msg),
                                     timeout=5.0

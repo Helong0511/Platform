@@ -27,7 +27,6 @@ from app.core.config import settings
 from app.core.constants import MAX_PAGE_SIZE, ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
 from app.models.models import AdData, Client, Product, User, UserRole, ProductAssignment, CountryInfo
 from sqlalchemy import and_, or_
-from datetime import date as date_type
 from app.core.query_utils import (
     product_assignment_join_condition, 
     check_use_assignment_table, 

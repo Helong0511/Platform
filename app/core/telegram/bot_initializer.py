@@ -16,8 +16,6 @@ from app.core.config import settings
 TELEBOT_AVAILABLE = False
 try:
     import telebot  # pip3 install --upgrade pyTelegramBotAPI
-    from telebot import types
-    from telebot.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
     TELEBOT_AVAILABLE = True
     logger.info("pyTelegramBotAPI 模块导入成功")
 except ImportError as import_err:
@@ -40,8 +38,6 @@ def initialize_bot():
     try:
         # 使用模块级导入
         import telebot
-        from telebot import types
-        from telebot.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
         dynamic_telebot_available = True
         logger.info("pyTelegramBotAPI 模块导入成功（动态检查）")
     except ImportError as import_err:
@@ -54,7 +50,7 @@ def initialize_bot():
     
     from app.core.telegram.bot_state import set_bot_state, _bot_instance_created
     from app.core.telegram.file_lock import acquire_bot_lock, release_bot_lock
-    from app.core.telegram.shared_state import get_shared_state, update_shared_state
+    from app.core.telegram.shared_state import get_shared_state, set_shared_state, update_shared_state
     
     # 检查共享状态
     shared_state = get_shared_state()
@@ -72,13 +68,11 @@ def initialize_bot():
         except OSError:
             # 进程不在运行，清理过时的状态
             logger.info(f"共享状态中的进程（PID:{current_pid_in_state}）未运行，清理过时状态...")
-            from app.core.telegram.shared_state import set_shared_state
             set_shared_state({"bot_initialized": False, "bot_running": False, "last_start_time": None, "current_pid": None, "bot_username": None})
             # 继续初始化
     elif bot_initialized_in_state and not current_pid_in_state:
         # 状态文件显示已初始化但无进程ID，清理状态
         logger.info("共享状态显示已初始化但无进程ID，清理过时状态...")
-        from app.core.telegram.shared_state import set_shared_state
         set_shared_state({"bot_initialized": False, "bot_running": False, "last_start_time": None, "current_pid": None, "bot_username": None})
         # 继续初始化
     
@@ -118,7 +112,6 @@ def initialize_bot():
                     bot_instance = telebot.TeleBot(token=token)
                     set_bot_state(bot_instance, True, dynamic_telebot_available)
                     # 更新共享状态（原子操作，避免竞态条件）
-                    from app.core.telegram.shared_state import set_shared_state
                     set_shared_state({
                         "bot_initialized": True,
                         "current_pid": os.getpid(),

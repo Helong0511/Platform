@@ -25,7 +25,6 @@ from app.schemas.third_party_report import (
 )
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from pydantic import BaseModel, Field
-from typing import Optional
 from app.core.third_party_report import retry_report_log, update_report_log_params
 
 # 创建路由实例

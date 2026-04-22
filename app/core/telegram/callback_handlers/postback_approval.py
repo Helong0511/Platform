@@ -176,7 +176,6 @@ def process_pending_conversion(pending_id: int, action: str, callback_query_id: 
     except Exception as e:
         logger.error(f"处理待确认转化记录失败：{str(e)}", exc_info=True)
         try:
-            from app.core.telegram.bot_state import bot
             bot.answer_callback_query(
                 callback_query_id=callback_query_id,
                 text="处理失败，请稍后重试"

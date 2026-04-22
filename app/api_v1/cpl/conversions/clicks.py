@@ -12,7 +12,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_click_service
 from app.core.security import get_current_user, require_admin
 from app.models.models import User
-from app.schemas.base import PaginatedResponseBaseSchema, BaseResponseSchema
+from app.schemas.base import PaginatedResponseBaseSchema, ResponseBaseSchema
 from app.services.click_service import ClickService
 
 router = APIRouter()
@@ -79,7 +79,7 @@ async def get_clicks(
 
 
 @router.get("/{click_record_id}",
-            response_model=BaseResponseSchema[dict],
+            response_model=ResponseBaseSchema[dict],
             summary="获取短链接访问记录详情",
             dependencies=[Depends(require_admin)])
 async def get_click_detail(
@@ -92,7 +92,7 @@ async def get_click_detail(
 
     try:
         click_detail = await click_service.get_click_detail(click_record_id)
-        return BaseResponseSchema.success(data=click_detail)
+        return ResponseBaseSchema.success(data=click_detail)
     except Exception as e:
         logger.error(f"获取短链接访问记录详情失败: id={click_record_id}, error={str(e)}", exc_info=True)
         raise

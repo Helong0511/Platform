@@ -3,6 +3,7 @@ Click ID 关联器
 
 通过 Click ID 关联 Click 记录，获取 Offer、Publisher 等信息
 """
+import asyncio
 import logging
 import json
 from typing import Optional, Dict, Any
@@ -66,7 +67,6 @@ class ClickAssociator:
                 else:
                     logger.warning(f"第 {attempt + 1} 次尝试：未找到 Click 记录：click_id={click_id}")
                     if attempt < max_attempts - 1:
-                        import asyncio
                         # 指数退避：delay = base_delay * (2 ^ attempt)
                         delay = base_delay * (2 ** attempt)
                         logger.debug(f"等待 {delay:.2f} 秒后重试...")
@@ -74,7 +74,6 @@ class ClickAssociator:
             except Exception as e:
                 logger.error(f"第 {attempt + 1} 次尝试查询 Click 记录失败：{e}")
                 if attempt < max_attempts - 1:
-                    import asyncio
                     # 指数退避：delay = base_delay * (2 ^ attempt)
                     delay = base_delay * (2 ** attempt)
                     logger.debug(f"等待 {delay:.2f} 秒后重试...")

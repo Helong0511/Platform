@@ -4,6 +4,7 @@ Telegram Bot 文件锁管理
 提供跨平台的文件锁功能，确保多进程环境下只有一个进程启动 Bot
 """
 import os
+import stat
 import time
 import logging
 from pathlib import Path
@@ -358,7 +359,6 @@ def release_bot_lock():
                     logger.warning(f"[PID:{current_pid}] 删除锁文件时发生错误：{e}")
                     # 尝试强制删除
                     try:
-                        import stat
                         os.chmod(lock_file_path, stat.S_IWRITE)
                         lock_file_path.unlink()
                         logger.info(f"[PID:{current_pid}] 已强制删除锁文件")
@@ -387,7 +387,6 @@ def release_bot_lock():
                     logger.warning(f"[PID:{current_pid}] 删除锁文件时发生错误：{unlink_error}")
                     # 尝试强制删除
                     try:
-                        import stat
                         os.chmod(lock_file_path, stat.S_IWRITE)
                         lock_file_path.unlink()
                     except Exception as force_error:
