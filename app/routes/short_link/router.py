@@ -326,9 +326,46 @@ async def open_master_html_with_redirect(
         logger.warning(f"[斗篷服务] 注入原始URL到HTML: {original_url}")
         # 对原始URL进行转义，避免语法错误
         escaped_original_url = original_url.replace('\\', '\\\\').replace('"', '\\"')
+        escaped_dp = (dp or "").replace('\\', '\\\\').replace('"', '\\"')
         # 使用更精确的正则表达式，匹配完整的函数定义（支持带参数的版本）
         pattern = r'function getOriginalUrl\([^)]*\) \{[\s\S]*?return originalUrl;[\s\S]*?\}'
-        replacement = f'function getOriginalUrl(adEventData) {{ let originalUrl = "{escaped_original_url}"; const email = adEventData?.email || sessionStorage.getItem("ad_event_email") || ""; const phone = adEventData?.phone || sessionStorage.getItem("ad_event_phone") || ""; console.log("[URL] 使用的参数 - email:", email, "phone:", phone); try {{ const url = new URL(originalUrl); if (email) {{ url.searchParams.set("email", email); console.log("[URL] 已添加 email 参数:", email); }} if (phone) {{ url.searchParams.set("phone", phone); console.log("[URL] 已添加 phone 参数:", phone); }} const fbclid = getFbclid(); if (fbclid) {{ url.searchParams.set("fbclid", fbclid); console.log("[URL] 已添加 fbclid 参数:", fbclid); }} originalUrl = url.toString(); console.log("[URL] 最终URL:", originalUrl); }} catch (err) {{ console.log("[URL] 添加参数失败:", err); const fbclid = getFbclid(); if (originalUrl.includes("?")) {{ if (email) originalUrl += "&email=" + encodeURIComponent(email); if (phone) originalUrl += "&phone=" + encodeURIComponent(phone); if (fbclid) originalUrl += "&fbclid=" + encodeURIComponent(fbclid); }} else {{ let params = []; if (email) params.push("email=" + encodeURIComponent(email)); if (phone) params.push("phone=" + encodeURIComponent(phone)); if (fbclid) params.push("fbclid=" + encodeURIComponent(fbclid)); if (params.length > 0) {{ originalUrl += "?" + params.join("&"); }} }} console.log("[URL] 简单拼接参数:", originalUrl); }} return originalUrl; }}'
+        replacement = (
+            f'function getOriginalUrl(adEventData) {{ '
+            f'let originalUrl = "{escaped_original_url}"; '
+            f'const dpParam = "{escaped_dp}"; '
+            f'const email = adEventData?.email || sessionStorage.getItem("ad_event_email") || ""; '
+            f'const phone = adEventData?.phone || sessionStorage.getItem("ad_event_phone") || ""; '
+            f'console.log("[URL] 使用的参数 - email:", email, "phone:", phone, "dp:", dpParam); '
+            f'try {{ '
+            f'const url = new URL(originalUrl); '
+            f'if (email) {{ url.searchParams.set("email", email); console.log("[URL] 已添加 email 参数:", email); }} '
+            f'if (phone) {{ url.searchParams.set("phone", phone); console.log("[URL] 已添加 phone 参数:", phone); }} '
+            f'const fbclid = getFbclid(); '
+            f'if (fbclid) {{ url.searchParams.set("fbclid", fbclid); console.log("[URL] 已添加 fbclid 参数:", fbclid); }} '
+            f'if (dpParam) {{ url.searchParams.set("dp", dpParam); console.log("[URL] 已添加 dp 参数:", dpParam); }} '
+            f'originalUrl = url.toString(); '
+            f'console.log("[URL] 最终URL:", originalUrl); '
+            f'}} catch (err) {{ '
+            f'console.log("[URL] 添加参数失败:", err); '
+            f'const fbclid = getFbclid(); '
+            f'if (originalUrl.includes("?")) {{ '
+            f'if (email) originalUrl += "&email=" + encodeURIComponent(email); '
+            f'if (phone) originalUrl += "&phone=" + encodeURIComponent(phone); '
+            f'if (fbclid) originalUrl += "&fbclid=" + encodeURIComponent(fbclid); '
+            f'if (dpParam) originalUrl += "&dp=" + encodeURIComponent(dpParam); '
+            f'}} else {{ '
+            f'let params = []; '
+            f'if (email) params.push("email=" + encodeURIComponent(email)); '
+            f'if (phone) params.push("phone=" + encodeURIComponent(phone)); '
+            f'if (fbclid) params.push("fbclid=" + encodeURIComponent(fbclid)); '
+            f'if (dpParam) params.push("dp=" + encodeURIComponent(dpParam)); '
+            f'if (params.length > 0) {{ originalUrl += "?" + params.join("&"); }} '
+            f'}} '
+            f'console.log("[URL] 简单拼接参数:", originalUrl); '
+            f'}} '
+            f'return originalUrl; '
+            f'}}'
+        )
         html_content = re.sub(pattern, replacement, html_content)
         # 验证替换是否成功
         if replacement in html_content:
