@@ -22,7 +22,10 @@ export const getThirdPartyReports = async (params) => {
     url: '/api/v1/third-party-reports/',
     method: 'get',
     params
-  }, { paginated: true });
+  }, {
+    paginated: true,
+    timeout: 45000
+  });
 };
 
 /**

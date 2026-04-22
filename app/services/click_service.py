@@ -4,17 +4,18 @@
 """
 import logging
 from datetime import timedelta
+from time import perf_counter
 from typing import Optional, List, Dict, Any, Tuple
 
 from sqlalchemy import func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, load_only
 
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
-from app.models.models import Click
+from app.models.models import Click, Offer, Publisher, Advertiser, ShortLink
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,52 @@ class ClickService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    @staticmethod
+    def _serialize_click(click: Click, include_heavy_fields: bool = False) -> Dict[str, Any]:
+        """序列化点击记录，列表场景默认不返回大字段以提升性能。"""
+        click_data = {
+            "id": click.id,
+            "click_id": click.click_id,
+            "click_time": click.click_time.isoformat() if click.click_time else None,
+            "ip": click.ip,
+            "device": click.device,
+            "country": click.country,
+            "referer": click.referer,
+            "conversion_id": click.conversion_id,
+            "created_at": click.created_at.isoformat() if click.created_at else None,
+            "offer_id": click.offer_id,
+            "offer_name": click.offer.offer_name if click.offer else None,
+            "publisher_id": click.publisher_id,
+            "publisher_name": click.publisher.publisher_name if click.publisher else None,
+            "advertiser_id": click.advertiser_id,
+            "advertiser_name": click.advertiser.advertiser_name if click.advertiser else None,
+            "short_link_id": click.short_link_id,
+            "short_code": click.short_link.short_code if click.short_link else None,
+            "os": click.os,
+            "os_version": click.os_version,
+            "browser": click.browser,
+            "browser_version": click.browser_version,
+            "accept_language": click.accept_language,
+            "accept_encoding": click.accept_encoding,
+            "is_bot": click.is_bot,
+            "device_type": click.device_type,
+            "device_brand": click.device_brand,
+            "device_model": click.device_model,
+        }
+
+        if include_heavy_fields:
+            click_data.update({
+                "user_agent": click.user_agent,
+                "short_link_title": click.short_link.title if click.short_link else None,
+                "short_link_url": click.short_link.original_url if click.short_link else None,
+                "url_params": click.url_params,
+                "all_headers": click.all_headers,
+                "original_request_url": click.original_request_url,
+                "final_redirect_url": click.final_redirect_url,
+            })
+
+        return click_data
 
     async def get_clicks(
             self,
@@ -60,6 +107,8 @@ class ClickService:
         Returns:
             Tuple[List[Dict], int]: (点击记录列表, 总数)
         """
+        started_at = perf_counter()
+
         # 解析日期（使用应用时区，与数据库时间一致）
         start_datetime = None
         end_datetime = None
@@ -94,10 +143,35 @@ class ClickService:
 
         # 构建查询 - 使用 joinedload 预加载关联数据，避免 N+1 查询
         query = select(Click).options(
-            joinedload(Click.offer),
-            joinedload(Click.publisher),
-            joinedload(Click.advertiser),
-            joinedload(Click.short_link)
+            load_only(
+                Click.id,
+                Click.click_id,
+                Click.click_time,
+                Click.ip,
+                Click.device,
+                Click.country,
+                Click.referer,
+                Click.conversion_id,
+                Click.created_at,
+                Click.offer_id,
+                Click.publisher_id,
+                Click.advertiser_id,
+                Click.short_link_id,
+                Click.os,
+                Click.os_version,
+                Click.browser,
+                Click.browser_version,
+                Click.accept_language,
+                Click.accept_encoding,
+                Click.is_bot,
+                Click.device_type,
+                Click.device_brand,
+                Click.device_model,
+            ),
+            joinedload(Click.offer).load_only(Offer.id, Offer.offer_name),
+            joinedload(Click.publisher).load_only(Publisher.id, Publisher.publisher_name),
+            joinedload(Click.advertiser).load_only(Advertiser.id, Advertiser.advertiser_name),
+            joinedload(Click.short_link).load_only(ShortLink.id, ShortLink.short_code)
         )
 
         conditions = []
@@ -155,59 +229,68 @@ class ClickService:
         if conditions:
             count_query = count_query.where(and_(*conditions))
 
+        count_started_at = perf_counter()
         total_result = await self.db.execute(count_query)
         total = total_result.scalar() or 0
+        count_elapsed_ms = int((perf_counter() - count_started_at) * 1000)
 
         # 分页和排序
         query = query.order_by(Click.click_time.desc())
         query = query.offset((page - 1) * page_size).limit(page_size)
 
+        list_started_at = perf_counter()
         result = await self.db.execute(query)
         clicks = result.unique().scalars().all()
+        list_elapsed_ms = int((perf_counter() - list_started_at) * 1000)
 
-        # 构建返回数据
-        click_list = []
-        for click in clicks:
-            click_data = {
-                "id": click.id,
-                "click_id": click.click_id,
-                "click_time": click.click_time.isoformat() if click.click_time else None,
-                "ip": click.ip,
-                "device": click.device,
-                "country": click.country,
-                "user_agent": click.user_agent,
-                "referer": click.referer,
-                "conversion_id": click.conversion_id,
-                "created_at": click.created_at.isoformat() if click.created_at else None,
-                "offer_id": click.offer_id,
-                "offer_name": click.offer.offer_name if click.offer else None,
-                "publisher_id": click.publisher_id,
-                "publisher_name": click.publisher.publisher_name if click.publisher else None,
-                "advertiser_id": click.advertiser_id,
-                "advertiser_name": click.advertiser.advertiser_name if click.advertiser else None,
-                "short_link_id": click.short_link_id,
-                "short_code": click.short_link.short_code if click.short_link else None,
-                "short_link_title": click.short_link.title if click.short_link else None,
-                "short_link_url": click.short_link.original_url if click.short_link else None,
-                # 软件信息
-                "os": click.os,
-                "os_version": click.os_version,
-                "browser": click.browser,
-                "browser_version": click.browser_version,
-                "accept_language": click.accept_language,
-                "accept_encoding": click.accept_encoding,
-                "is_bot": click.is_bot,
-                # 硬件信息
-                "device_type": click.device_type,
-                "device_brand": click.device_brand,
-                "device_model": click.device_model,
-                # URL参数和请求头
-                "url_params": click.url_params,
-                "all_headers": click.all_headers,
-                # URL记录
-                "original_request_url": click.original_request_url,
-                "final_redirect_url": click.final_redirect_url,
-            }
-            click_list.append(click_data)
+        serialize_started_at = perf_counter()
+        click_list = [self._serialize_click(click, include_heavy_fields=False) for click in clicks]
+        serialize_elapsed_ms = int((perf_counter() - serialize_started_at) * 1000)
+
+        total_elapsed_ms = int((perf_counter() - started_at) * 1000)
+        log_msg = (
+            "短链接访问记录列表耗时: total=%sms, count=%sms, query=%sms, serialize=%sms, "
+            "rows=%s, total_count=%s, page=%s, page_size=%s"
+        )
+        log_args = (
+            total_elapsed_ms,
+            count_elapsed_ms,
+            list_elapsed_ms,
+            serialize_elapsed_ms,
+            len(click_list),
+            total,
+            page,
+            page_size,
+        )
+        if total_elapsed_ms >= 1500:
+            logger.warning(log_msg, *log_args)
+        else:
+            logger.info(log_msg, *log_args)
 
         return click_list, total
+
+    async def get_click_detail(self, click_record_id: int) -> Dict[str, Any]:
+        """获取单条点击记录详情（包含大字段）。"""
+        query = (
+            select(Click)
+            .options(
+                joinedload(Click.offer).load_only(Offer.id, Offer.offer_name),
+                joinedload(Click.publisher).load_only(Publisher.id, Publisher.publisher_name),
+                joinedload(Click.advertiser).load_only(Advertiser.id, Advertiser.advertiser_name),
+                joinedload(Click.short_link).load_only(
+                    ShortLink.id,
+                    ShortLink.short_code,
+                    ShortLink.title,
+                    ShortLink.original_url,
+                ),
+            )
+            .where(Click.id == click_record_id)
+        )
+
+        result = await self.db.execute(query)
+        click = result.unique().scalar_one_or_none()
+
+        if not click:
+            raise_api_exception(ErrorCode.NOT_FOUND, detail="点击记录不存在")
+
+        return self._serialize_click(click, include_heavy_fields=True)

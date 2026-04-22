@@ -171,12 +171,11 @@
             {{ scope.row.report_success_time ? formatDateTime(scope.row.report_success_time) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column v-if="columnVisibility.report_params" prop="report_params" label="完整上报参数" min-width="200"
+        <el-table-column v-if="columnVisibility.report_params" prop="report_params_preview" label="完整上报参数" min-width="200"
           show-overflow-tooltip>
           <template #default="scope">
-            <span v-if="scope.row.report_params" class="report-params-preview">
-              {{ (scope.row.report_params.length > 50) ? scope.row.report_params.substring(0, 50) + '...' :
-                scope.row.report_params }}
+            <span v-if="scope.row.report_params_preview" class="report-params-preview">
+              {{ scope.row.report_params_preview }}
             </span>
             <span v-else>-</span>
           </template>
@@ -682,20 +681,25 @@ const handleViewDetail = async (log) => {
 };
 
 // 编辑日志
-const handleEdit = (log) => {
-  editLogId.value = log.id;
-  editForm.adsid = log.adsid || '';
-  editForm.event = log.event || '';
-  editForm.conversion_id = log.conversion_id || '';
-  editForm.currency = log.currency || '';
-  editForm.amount = log.amount || '';
-  editForm.email = log.email || '';
-  editForm.ip = log.ip || '';
-  editForm.phone = log.phone || '';
-  editForm.ua = log.ua || '';
-  editForm.report_params = log.report_params || '';
-  editForm.use_hash = log.use_hash !== false;
-  editDialogVisible.value = true;
+const handleEdit = async (log) => {
+  try {
+    const detail = await getThirdPartyReport(log.id);
+    editLogId.value = detail.id;
+    editForm.adsid = detail.adsid || '';
+    editForm.event = detail.event || '';
+    editForm.conversion_id = detail.conversion_id || '';
+    editForm.currency = detail.currency || '';
+    editForm.amount = detail.amount || '';
+    editForm.email = detail.email || '';
+    editForm.ip = detail.ip || '';
+    editForm.phone = detail.phone || '';
+    editForm.ua = detail.ua || '';
+    editForm.report_params = detail.report_params || '';
+    editForm.use_hash = detail.use_hash !== false;
+    editDialogVisible.value = true;
+  } catch (error) {
+    ElMessage.error('加载日志详情失败，请重试');
+  }
 };
 
 // 保存编辑

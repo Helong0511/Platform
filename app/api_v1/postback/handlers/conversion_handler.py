@@ -1,6 +1,7 @@
 """转化记录处理模块"""
 import logging
 from datetime import timedelta
+from time import perf_counter
 from typing import Optional, Dict, Any
 
 from fastapi import Request, HTTPException
@@ -49,6 +50,7 @@ class ConversionHandler:
         查询 PostBack 转化记录（仅管理员）
         已融合转化日志功能，支持所有筛选条件
         """
+        started_at = perf_counter()
         try:
             # 判断是否需要 JOIN Click 表（用于筛选 offer_id、publisher_id、advertiser_id）
             need_join_click = offer_id is not None or publisher_id is not None or advertiser_id is not None
@@ -122,15 +124,19 @@ class ConversionHandler:
                 count_query = select(func.count(PostbackConversion.id)).select_from(PostbackConversion.__table__)
             if conditions:
                 count_query = count_query.where(and_(*conditions))
+            count_started_at = perf_counter()
             total_result = await db.execute(count_query)
             total = total_result.scalar() or 0
+            count_elapsed_ms = int((perf_counter() - count_started_at) * 1000)
 
             # 分页查询
             query = query.order_by(PostbackConversion.created_at.desc())
             query = query.offset((page - 1) * page_size).limit(page_size)
 
+            list_started_at = perf_counter()
             result = await db.execute(query)
             conversions = result.scalars().all()
+            list_elapsed_ms = int((perf_counter() - list_started_at) * 1000)
 
             # 如果使用 conversion_or_click_id 查询且主表没有结果，尝试查询扣减日志表
             # 这样可以找到被扣量而未保存到主表的转化记录
@@ -313,6 +319,7 @@ class ConversionHandler:
                     assignments_map[key] = row.affiliate_payout
 
             # 转换为响应格式，并添加关联信息
+            enrich_started_at = perf_counter()
             conversion_list = []
             for conv in conversions:
                 conv_dict = PostbackConversionResponse.model_validate(conv).model_dump()
@@ -389,6 +396,8 @@ class ConversionHandler:
                 conv_dict['payout'] = actual_payout
 
                 conversion_list.append(conv_dict)
+            enrich_elapsed_ms = int((perf_counter() - enrich_started_at) * 1000)
+            total_elapsed_ms = int((perf_counter() - started_at) * 1000)
 
             # 如果有扣减日志记录，添加到响应中（作为提示信息）
             message = f"成功获取 {len(conversion_list)} 条记录，共 {total} 条"
@@ -407,6 +416,15 @@ class ConversionHandler:
                 f"管理员 {current_user.username} 查询 PostBack 转化记录: "
                 f"platform={platform}, total={total}, page={page}, page_size={page_size}, "
                 f"deduction_logs_found={len(deduction_logs) if deduction_logs else 0}"
+            )
+            logger.info(
+                "Postback转化列表耗时: total=%sms, count=%sms, query=%sms, enrich=%sms, rows=%s, total_count=%s",
+                total_elapsed_ms,
+                count_elapsed_ms,
+                list_elapsed_ms,
+                enrich_elapsed_ms,
+                len(conversion_list),
+                total,
             )
 
             return PaginatedResponseBaseSchema.success(

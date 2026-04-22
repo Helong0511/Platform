@@ -204,7 +204,7 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Mouse, Setting } from '@element-plus/icons-vue'
-import { getClicks } from '@/api/clicks'
+import { getClicks, getClickDetail } from '@/api/clicks'
 import { getOffers } from '@/api/offer'
 import { getPublishers } from '@/api/publisher'
 import { logger } from '@/utils/logger'
@@ -381,8 +381,7 @@ const loadData = async () => {
     
     // 如果有conversion_id参数，并且只找到一条记录，自动显示详情
     if (filters.conversionId && tableData.value.length === 1) {
-      currentDetail.value = tableData.value[0]
-      detailDialogVisible.value = true
+      await showDetail(tableData.value[0])
     }
   } catch (error) {
     logger.error('获取短链接访问记录失败:', error)
@@ -440,9 +439,23 @@ const handleShortCodeClick = async (shortCode) => {
 }
 
 // 显示详情
-const showDetail = (row) => {
-  currentDetail.value = row
-  detailDialogVisible.value = true
+const showDetail = async (row) => {
+  if (!row?.id) {
+    ElMessage.error('记录ID缺失，无法查看详情')
+    return
+  }
+
+  try {
+    const detailData = await getClickDetail(row.id)
+    currentDetail.value = detailData || row
+    detailDialogVisible.value = true
+  } catch (error) {
+    logger.error('获取点击记录详情失败:', error)
+    // 详情接口失败时兜底显示列表已有字段，避免交互中断
+    currentDetail.value = row
+    detailDialogVisible.value = true
+    ElMessage.warning('详情加载较慢，已显示基础信息')
+  }
 }
 
 // 分页

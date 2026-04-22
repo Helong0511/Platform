@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, and_
 from datetime import datetime
+from time import perf_counter
 from typing import Optional
 import logging
 
@@ -21,6 +22,7 @@ from app.models.models import UserAuditLog, User
 from fastapi import Request
 from app.schemas.audit_log import (
     UserAuditLogResponse,
+    UserAuditLogListResponse,
     UserAuditLogQuery,
 )
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -34,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 @router.get(
     "/",
-    response_model=PaginatedResponseBaseSchema[list[UserAuditLogResponse]],
+    response_model=PaginatedResponseBaseSchema[list[UserAuditLogListResponse]],
     summary="获取用户操作日志列表",
     description="查询用户操作日志，支持多种筛选条件，仅管理员可访问（已重构使用服务层）"
 )
@@ -65,9 +67,11 @@ async def get_audit_logs(
     """
     # 使用服务层（业务逻辑在AuditLogService中）
     audit_log_service: AuditLogService = await get_audit_log_service(db)
+    started_at = perf_counter()
     
     try:
         # 调用服务层获取操作日志列表（服务层会处理查询、过滤、分页）
+        service_started_at = perf_counter()
         logs, total = await audit_log_service.get_audit_logs(
             page=page,
             page_size=page_size,
@@ -80,11 +84,24 @@ async def get_audit_logs(
             start_date=start_date,
             end_date=end_date
         )
+        service_elapsed_ms = int((perf_counter() - service_started_at) * 1000)
 
         # 转换为响应模型
-        log_responses = [
-            UserAuditLogResponse.model_validate(log) for log in logs
-        ]
+        serialize_started_at = perf_counter()
+        log_responses = [UserAuditLogListResponse.model_validate(log) for log in logs]
+        serialize_elapsed_ms = int((perf_counter() - serialize_started_at) * 1000)
+        total_elapsed_ms = int((perf_counter() - started_at) * 1000)
+
+        logger.info(
+            "操作日志列表耗时: total=%sms, service=%sms, serialize=%sms, rows=%s, total_count=%s, page=%s, page_size=%s",
+            total_elapsed_ms,
+            service_elapsed_ms,
+            serialize_elapsed_ms,
+            len(log_responses),
+            total,
+            page,
+            page_size,
+        )
 
         return PaginatedResponseBaseSchema.success(
             data=log_responses,

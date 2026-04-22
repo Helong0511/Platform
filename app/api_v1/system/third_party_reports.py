@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, and_
 from datetime import datetime
+from time import perf_counter
 from typing import Optional
 import logging
 
@@ -18,6 +19,7 @@ from app.core.errors import ErrorCode
 from app.models.models import ThirdPartyReportLog, User
 from app.schemas.third_party_report import (
     ThirdPartyReportLogResponse,
+    ThirdPartyReportLogListResponse,
     ThirdPartyReportLogResponseList,
     ThirdPartyReportLogResponseSingle,
 )
@@ -49,7 +51,7 @@ class UpdateReportLogParams(BaseModel):
 
 @router.get(
     "/",
-    response_model=PaginatedResponseBaseSchema[list[ThirdPartyReportLogResponse]],
+    response_model=PaginatedResponseBaseSchema[list[ThirdPartyReportLogListResponse]],
     summary="获取第三方上报日志列表",
     description="查询第三方上报日志，支持多种筛选条件，仅管理员可访问"
 )
@@ -75,6 +77,7 @@ async def get_third_party_reports(
     - 状态（pending, success, failed）
     - 时间范围
     """
+    started_at = perf_counter()
     try:
         # 构建查询
         query = select(ThirdPartyReportLog)
@@ -107,17 +110,42 @@ async def get_third_party_reports(
         query = query.offset(offset).limit(page_size)
 
         # 执行查询
+        list_started_at = perf_counter()
         result = await db.execute(query)
         logs = result.scalars().all()
+        list_elapsed_ms = int((perf_counter() - list_started_at) * 1000)
 
         # 获取总数
+        count_started_at = perf_counter()
         count_result = await db.execute(count_query)
         total = count_result.scalar_one()
+        count_elapsed_ms = int((perf_counter() - count_started_at) * 1000)
 
         # 转换为响应模型
-        log_responses = [
-            ThirdPartyReportLogResponse.model_validate(log) for log in logs
-        ]
+        serialize_started_at = perf_counter()
+        log_responses = []
+        for log in logs:
+            item = ThirdPartyReportLogListResponse.model_validate(log).model_dump()
+            if log.report_params:
+                preview = log.report_params[:120]
+                item["report_params_preview"] = f"{preview}..." if len(log.report_params) > 120 else preview
+            else:
+                item["report_params_preview"] = None
+            log_responses.append(item)
+        serialize_elapsed_ms = int((perf_counter() - serialize_started_at) * 1000)
+        total_elapsed_ms = int((perf_counter() - started_at) * 1000)
+
+        logger.info(
+            "第三方上报日志列表耗时: total=%sms, query=%sms, count=%sms, serialize=%sms, rows=%s, total_count=%s, page=%s, page_size=%s",
+            total_elapsed_ms,
+            list_elapsed_ms,
+            count_elapsed_ms,
+            serialize_elapsed_ms,
+            len(log_responses),
+            total,
+            page,
+            page_size,
+        )
 
         return PaginatedResponseBaseSchema.success(
             data=log_responses,

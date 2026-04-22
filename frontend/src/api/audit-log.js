@@ -24,7 +24,10 @@ export const getAuditLogs = async (params) => {
     url: '/api/v1/audit-logs/',
     method: 'get',
     params
-  }, { paginated: true });
+  }, {
+    paginated: true,
+    timeout: 45000
+  });
 };
 
 /**

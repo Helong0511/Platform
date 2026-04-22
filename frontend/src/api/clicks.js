@@ -11,5 +11,18 @@ export function getClicks(params) {
     url: '/api/v1/clicks/',
     method: 'get',
     params
-  }, { paginated: true })
+  }, {
+    paginated: true,
+    timeout: 45000
+  })
+}
+
+/**
+ * 获取短链接访问记录详情
+ */
+export function getClickDetail(clickRecordId) {
+  return request({
+    url: `/api/v1/clicks/${clickRecordId}`,
+    method: 'get'
+  }, { returnDataOnly: true })
 }

@@ -39,6 +39,27 @@ class UserAuditLogResponse(UserAuditLogBase):
     }
 
 
+class UserAuditLogListResponse(BaseSchema):
+    """用户操作日志列表响应模型（轻量字段，优化列表加载性能）"""
+    id: int
+    user_id: Optional[int] = Field(None, description="用户ID")
+    username: Optional[str] = Field(None, max_length=50, description="用户名")
+    action_type: str = Field(..., max_length=50, description="操作类型")
+    resource_type: Optional[str] = Field(None, max_length=50, description="资源类型")
+    resource_id: Optional[int] = Field(None, description="资源ID")
+    resource_name: Optional[str] = Field(None, max_length=255, description="资源名称")
+    ip_address: Optional[str] = Field(None, max_length=50, description="IP地址")
+    request_method: Optional[str] = Field(None, max_length=10, description="HTTP请求方法")
+    request_path: Optional[str] = Field(None, max_length=500, description="请求路径")
+    status_code: Optional[int] = Field(None, description="HTTP状态码")
+    success: bool = Field(True, description="操作是否成功")
+    created_at: datetime
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
 class UserAuditLogQuery(BaseModel):
     """用户操作日志查询参数"""
     page: int = Field(1, ge=1, description="页码")
@@ -55,4 +76,4 @@ class UserAuditLogQuery(BaseModel):
 
 # 响应类型别名
 AuditLogResponse = ResponseBaseSchema[UserAuditLogResponse]
-AuditLogListResponse = PaginatedResponseBaseSchema[list[UserAuditLogResponse]]
+AuditLogListResponse = PaginatedResponseBaseSchema[list[UserAuditLogListResponse]]
