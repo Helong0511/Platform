@@ -454,7 +454,7 @@ class Settings(BaseSettings):
         },
         "109": {
             "pixel_id": "1510892107129248",
-            "access_token": "EAAVHGj8RRboBRSJziJZCNrvZBK5dOTunrGImOCWCsZB18SmaaZC0qdB1btrseKur7wRfEbyb2XbOUziQM8NY5I2995rp8joR9Y6EZAIYZCjMy0ibNUZBFIF1QBaRtnZCZAmItksb0yPBD6mXJr8vyNcB9so5qsO1mzsFnMZCo9eBbbcXavLeLA1bMnr96tL7BEBwZDZD",
+            "access_token": "EAAVHGj8RRboBRWTZCXOQaxIxMm8TJbcj2ZAOFKgWpaKhYmVZAZBZBV9aVZCJT1U5zZBQLB1Qir8S6k4gpHh1z8Y18MrMCbvZBIcIzYbZBOaxdGQTyRKZAWVZAV0KgRoRKS9qXTfj4ZBgQzRzS5xzj1XS8jZC1q7ZCVYHaQ4QKjST8kH8XS2JjgaTzhI6cwOmyHGB9OrgZDZD",
             "api_version": "v21.0"
         }
     }
