@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 # 延迟导入，确保 settings 已完全初始化
 from app.core.config import settings
+from app.core.telegram import bot_state
 
 # 尝试导入 telebot 模块
 TELEBOT_AVAILABLE = False
@@ -63,8 +64,7 @@ def initialize_bot():
             os.kill(current_pid_in_state, 0)
             # 进程在运行，跳过初始化
             logger.info(f"Bot 已在其他进程（PID:{current_pid_in_state}）中初始化，跳过初始化...")
-            from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
-            return bot, bot_initialized, TELEBOT_AVAILABLE
+            return bot_state.bot, bot_state.bot_initialized, bot_state.TELEBOT_AVAILABLE
         except OSError:
             # 进程不在运行，清理过时的状态
             logger.info(f"共享状态中的进程（PID:{current_pid_in_state}）未运行，清理过时状态...")
@@ -79,8 +79,7 @@ def initialize_bot():
     # 检查 Bot 实例是否已经创建
     if _bot_instance_created:
         logger.info("Bot 实例已经创建，跳过初始化...")
-        from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
-        return bot, bot_initialized, TELEBOT_AVAILABLE
+        return bot_state.bot, bot_state.bot_initialized, bot_state.TELEBOT_AVAILABLE
     
     # 初始化 Telegram Bot（仅在模块可用且启用时）
     telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
@@ -160,8 +159,7 @@ def is_bot_available() -> bool:
     Returns:
         bool: Bot 是否可用
     """
-    from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
-    return bot_initialized and TELEBOT_AVAILABLE and bot is not None
+    return bot_state.bot_initialized and bot_state.TELEBOT_AVAILABLE and bot_state.bot is not None
 
 
 # 初始化 Bot 的函数将在 main.py 中显式调用

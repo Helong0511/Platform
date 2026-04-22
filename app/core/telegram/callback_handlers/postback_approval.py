@@ -191,7 +191,10 @@ def handle_postback_approval(call):
     Args:
         call: Telegram 回调查询对象
     """
-    from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
+    from app.core.telegram import bot_state
+    bot = bot_state.bot
+    bot_initialized = bot_state.bot_initialized
+    TELEBOT_AVAILABLE = bot_state.TELEBOT_AVAILABLE
     
     def _check_bot_available() -> bool:
         """检查 Bot 是否可用"""

@@ -9,7 +9,6 @@ import time
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
-from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
 from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH
 from app.core.config import settings
 
@@ -55,6 +54,12 @@ def _check_bot_available() -> tuple[bool, str]:
     return True, "Bot 可用"
 
 
+def _get_bot_instance():
+    """获取 Bot 实例（最新状态）。"""
+    from app.core.telegram import bot_state
+    return bot_state.bot
+
+
 def send_telegram_message(
     chat_id_or_message: str,
     message: Optional[str] = None,
@@ -83,7 +88,7 @@ def send_telegram_message(
         return False
     
     # 重新导入模块以获取最新状态
-    from app.core.telegram.bot_state import bot
+    bot = _get_bot_instance()
     
     # 向后兼容：判断是旧方式还是新方式
     if message is None:
@@ -212,7 +217,7 @@ def send_telegram_message_with_buttons(
         return False, None
     
     # 重新导入模块以获取最新状态
-    from app.core.telegram.bot_state import bot
+    bot = _get_bot_instance()
     
     try:
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton

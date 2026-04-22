@@ -12,7 +12,6 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
 from app.core.telegram.file_lock import acquire_bot_lock, release_bot_lock
 from app.core.telegram.shared_state import get_shared_state, update_shared_state, is_bot_running
 from app.core.config import settings
@@ -26,9 +25,19 @@ _bot_started = False
 
 def _check_bot_available() -> bool:
     """检查 Bot 是否可用"""
-    # 重新导入模块以获取最新状态
-    from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
-    return bot_initialized and TELEBOT_AVAILABLE and bot is not None
+    bot_state = _get_bot_state()
+    return bot_state.bot_initialized and bot_state.TELEBOT_AVAILABLE and bot_state.bot is not None
+
+
+def _get_bot_state():
+    """获取 bot_state 模块（最新状态）。"""
+    from app.core.telegram import bot_state
+    return bot_state
+
+
+def _get_bot_instance():
+    """获取当前 Bot 实例（最新状态）。"""
+    return _get_bot_state().bot
 
 
 def set_bot_commands():
@@ -37,8 +46,7 @@ def set_bot_commands():
         logger.warning("Bot 未初始化，无法设置命令")
         return
     
-    # 重新导入模块以获取最新状态
-    from app.core.telegram.bot_state import bot
+    bot = _get_bot_instance()
     
     try:
         from telebot.types import BotCommand
@@ -77,8 +85,7 @@ def register_handlers():
         logger.warning("Bot 未初始化，无法注册处理器")
         return
     
-    # 重新导入模块以获取最新状态
-    from app.core.telegram.bot_state import bot
+    bot = _get_bot_instance()
     
     try:
         from app.core.telegram.command_handlers.id_command import get_chat_id
@@ -180,7 +187,6 @@ def start_polling():
     logger.info(f"[PID:{current_pid}] 成功获取锁，标记 Bot 为已启动状态")
     
     # 更新共享状态（原子操作，避免竞态条件）
-    from app.core.telegram.shared_state import set_shared_state
     set_shared_state({
         "bot_initialized": True,
         "bot_running": True,
@@ -195,7 +201,6 @@ def start_polling():
         bot_info = bot.get_me()
         logger.info(f"[PID:{current_pid}] 验证成功，Bot 可以正常运行：@{bot_info.username}")
         # 更新共享状态（原子操作，避免竞态条件）
-        from app.core.telegram.shared_state import set_shared_state
         current_state = get_shared_state()
         current_state["bot_username"] = bot_info.username
         set_shared_state(current_state)
@@ -215,7 +220,6 @@ def start_polling():
             logger.error(f"[PID:{current_pid}] 验证失败：检测到其他 Bot 实例正在运行")
             release_bot_lock()
             # 更新共享状态（原子操作，避免竞态条件）
-            from app.core.telegram.shared_state import set_shared_state
             set_shared_state({
                 "bot_initialized": True,
                 "bot_running": False,
@@ -310,7 +314,6 @@ def start_polling():
                 # 标记 Bot 为未启动状态，避免重复尝试
                 _bot_started = False
                 # 更新共享状态（原子操作，避免竞态条件）
-                from app.core.telegram.shared_state import set_shared_state
                 set_shared_state({
                     "bot_initialized": True,
                     "bot_running": False,
@@ -375,7 +378,6 @@ def start_polling():
     # 重置启动状态
     _bot_started = False
     # 更新共享状态（原子操作，避免竞态条件）
-    from app.core.telegram.shared_state import set_shared_state
     set_shared_state({
         "bot_initialized": True,
         "bot_running": False,

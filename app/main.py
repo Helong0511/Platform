@@ -525,7 +525,8 @@ async def lifespan(app: FastAPI):
             logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 初始化结果: initialized={initialized}, available={available}")
             
             # 重新导入bot_initialized变量，确保获取最新状态
-            from app.core.telegram.bot_state import bot_initialized
+            from app.core.telegram import bot_state
+            bot_initialized = bot_state.bot_initialized
             
             if initialized and bot_initialized:
                 logger.info(f"[Worker PID:{worker_pid}] 尝试启动 Telegram 机器人线程...")
