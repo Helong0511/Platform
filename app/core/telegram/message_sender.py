@@ -4,6 +4,7 @@ Telegram 消息发送模块
 提供消息发送功能，包括普通消息、带按钮消息和管理员通知
 """
 import logging
+import importlib
 import time
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -24,14 +25,13 @@ def _check_bot_available() -> tuple[bool, str]:
     """检查 Bot 是否可用，并返回详细状态信息"""
     # 重新导入模块以获取最新状态
     from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
-    from app.core.config import settings
+    from app.core.telegram.bot_state import set_bot_state
     
     if not TELEBOT_AVAILABLE:
         # 动态检查模块是否安装
         try:
             import telebot
             # 更新全局状态
-            from app.core.telegram.bot_state import set_bot_state
             set_bot_state(bot, bot_initialized, True)
         except ImportError:
             return False, "pyTelegramBotAPI 模块未安装"
@@ -41,11 +41,10 @@ def _check_bot_available() -> tuple[bool, str]:
         token = getattr(settings, 'TELEGRAM_TOKEN', None)
         if token and isinstance(token, str) and token.strip():
             try:
-                import telebot
+                telebot_module = importlib.import_module("telebot")
                 # 创建临时 Bot 实例
-                temp_bot = telebot.TeleBot(token=token)
+                temp_bot = telebot_module.TeleBot(token=token)
                 # 更新全局状态
-                from app.core.telegram.bot_state import set_bot_state
                 set_bot_state(temp_bot, True, True)
                 return True, "Bot 已临时初始化"
             except Exception as e:
