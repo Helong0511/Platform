@@ -70,7 +70,7 @@ Offer 统计组件
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick, watch } from 'vue';
+import { ref, reactive, onMounted, nextTick, watch, onBeforeUnmount } from 'vue';
 import * as echarts from 'echarts';
 import { getOfferStats } from '@/api/offer';
 
@@ -233,7 +233,6 @@ onMounted(() => {
 });
 
 // 清理
-import { onBeforeUnmount } from 'vue';
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize);
   if (chartInstance) {

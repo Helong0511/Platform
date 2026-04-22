@@ -2,8 +2,7 @@
  * 短链接管理 API
  * 已统一使用 request 函数，保持代码一致性
  */
-import { request } from '../utils/api';
-import { refreshCsrfTokenBeforeRequest } from '../utils/api';
+import { request, refreshCsrfTokenBeforeRequest } from '../utils/api';
 
 /**
  * 创建短链接
