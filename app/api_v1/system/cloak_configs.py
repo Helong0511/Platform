@@ -2,11 +2,12 @@
 斗篷配置管理 API
 """
 import logging
+import socket
 import time
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Request
 from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,11 +38,32 @@ def _mask_token(token: str) -> str:
     return f"{token[:6]}******{token[-4:]}"
 
 
-def _build_facebook_payload(test_data: TestCloakReportRequest) -> dict:
+def _resolve_real_client_ip(request: Request) -> str:
+    x_forwarded_for = request.headers.get("x-forwarded-for", "")
+    if x_forwarded_for:
+        # x-forwarded-for 可能是逗号分隔，取第一个来源地址
+        return x_forwarded_for.split(",")[0].strip()
+    x_real_ip = request.headers.get("x-real-ip", "")
+    if x_real_ip:
+        return x_real_ip.strip()
+    if request.client and request.client.host:
+        return request.client.host
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except Exception:
+        return "127.0.0.1"
+
+
+def _resolve_real_user_agent(request: Request) -> str:
+    user_agent = request.headers.get("user-agent", "").strip()
+    return user_agent or f"server/{socket.gethostname()}"
+
+
+def _build_facebook_payload(test_data: TestCloakReportRequest, client_ip: str, client_user_agent: str) -> dict:
     current_ts = int(time.time())
     user_data = {
-        "client_ip_address": test_data.ip,
-        "client_user_agent": test_data.ua,
+        "client_ip_address": client_ip,
+        "client_user_agent": client_user_agent,
         "fbc": f"fb.1.{current_ts}.{test_data.adsid}",
     }
     if test_data.use_hash:
@@ -213,6 +235,7 @@ async def delete_cloak_config(
 async def test_cloak_report(
     config_id: int = Path(..., ge=1, description="配置ID"),
     test_data: TestCloakReportRequest = ...,
+    request: Request = ...,
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(require_admin),
 ):
@@ -221,7 +244,9 @@ async def test_cloak_report(
     if not config:
         raise_api_exception(ErrorCode.RESOURCE_NOT_FOUND, detail="斗篷配置不存在")
 
-    payload = _build_facebook_payload(test_data)
+    client_ip = _resolve_real_client_ip(request)
+    client_user_agent = _resolve_real_user_agent(request)
+    payload = _build_facebook_payload(test_data, client_ip, client_user_agent)
     primary_result = await _send_test_report(config.pixel_id, config.access_token, payload)
 
     backup_result = None
