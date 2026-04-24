@@ -699,6 +699,27 @@ class AdminNotificationConfig(Base):
     )
 
 
+# 斗篷像素配置模型
+class CloakConfig(Base):
+    __tablename__ = "cloak_configs"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='配置ID')
+    cloak_name = Column(String(100), nullable=False, unique=True, index=True, comment='斗篷名称（如 master）')
+    pixel_id = Column(String(50), nullable=False, comment='主像素ID')
+    access_token = Column(String(500), nullable=False, comment='主像素Token')
+    backup_pixel_id = Column(String(50), nullable=True, comment='备份像素ID')
+    backup_access_token = Column(String(500), nullable=True, comment='备份像素Token')
+    is_enabled = Column(Boolean, default=True, nullable=False, index=True, comment='是否启用')
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
+    updated_at = Column(DateTime, default=get_app_now_naive,
+                        onupdate=get_app_now_naive, nullable=False, comment='更新时间')
+
+    __table_args__ = (
+        Index("idx_cloak_name", "cloak_name"),
+        Index("idx_cloak_enabled", "is_enabled"),
+    )
+
+
 # Postback 通知记录模型
 class PostbackNotification(Base):
     __tablename__ = "postback_notifications"

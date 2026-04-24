@@ -12,7 +12,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import ShortLink
+from app.models.models import ShortLink, CloakConfig
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -103,8 +103,11 @@ class CloakPixelMappingService:
                 logger.warning(f"[斗篷像素映射] 斗篷已停用：short_code={short_code}")
                 return None
             
-            # 构建像素配置（使用 dp 参数匹配 FACEBOOK_PIXEL_CONFIG）
-            pixel_config = self._build_pixel_config(short_link, dp)
+            # 查询斗篷配置表（系统服务维护）
+            cloak_config = await self._get_enabled_cloak_config(db, dp)
+
+            # 构建像素配置（使用 dp 参数匹配）
+            pixel_config = self._build_pixel_config(short_link, dp, cloak_config)
             
             # 验证配置有效性
             if not self._validate_pixel_config(pixel_config, dp):
@@ -130,18 +133,33 @@ class CloakPixelMappingService:
             )
             return None
     
-    def _build_pixel_config(self, short_link: ShortLink, dp: str) -> Dict[str, Any]:
+    async def _get_enabled_cloak_config(self, db: AsyncSession, dp: str) -> Optional[CloakConfig]:
+        """查询已启用的斗篷配置"""
+        result = await db.execute(
+            select(CloakConfig).where(
+                CloakConfig.cloak_name == dp,
+                CloakConfig.is_enabled.is_(True),
+            )
+        )
+        return result.scalars().first()
+
+    def _build_pixel_config(
+        self,
+        short_link: ShortLink,
+        dp: str,
+        cloak_config: Optional[CloakConfig] = None
+    ) -> Dict[str, Any]:
         """
         从 ShortLink 对象构建像素配置
         
         优先级：
         1. 短链接自定义配置（数据库字段）
-        2. 配置字典中的 dp 配置（FACEBOOK_PIXEL_CONFIG[dp]）
+        2. 系统服务中的斗篷配置（cloak_configs）
         3. 全局配置（config.py）
         
         参数：
         - short_link: ShortLink 对象
-        - dp: HTML 名称（如 master, test 等），用于匹配 FACEBOOK_PIXEL_CONFIG
+        - dp: HTML 名称（如 master, test 等），用于匹配 cloak_configs.cloak_name
         """
         # 优先级 1: 短链接自定义配置
         if short_link.facebook_pixel_id and short_link.facebook_access_token:
@@ -159,14 +177,15 @@ class CloakPixelMappingService:
                 "channel_id": short_link.channel_id
             }
         
-        # 优先级 2: 配置字典中的 dp 配置
-        cloak_config = settings.FACEBOOK_PIXEL_CONFIG.get(dp)
-        if cloak_config:
-            logger.info(f"[斗篷像素映射] 使用配置字典中的配置：dp={dp}")
+        # 优先级 2: 系统服务中的斗篷配置
+        if cloak_config and cloak_config.pixel_id and cloak_config.access_token:
+            logger.info(f"[斗篷像素映射] 使用数据库斗篷配置：dp={dp}")
             return {
-                "facebook_pixel_id": cloak_config.get("pixel_id", settings.FACEBOOK_PIXEL_ID),
-                "facebook_access_token": cloak_config.get("access_token", settings.FACEBOOK_ACCESS_TOKEN),
-                "facebook_api_version": cloak_config.get("api_version", settings.FACEBOOK_API_VERSION),
+                "facebook_pixel_id": cloak_config.pixel_id,
+                "facebook_access_token": cloak_config.access_token,
+                "facebook_api_version": settings.FACEBOOK_API_VERSION,
+                "backup_facebook_pixel_id": cloak_config.backup_pixel_id,
+                "backup_facebook_access_token": cloak_config.backup_access_token,
                 "dp_name": dp,
                 "short_code": short_link.short_code,
                 "original_url": short_link.original_url,
@@ -175,7 +194,7 @@ class CloakPixelMappingService:
                 "offer_id": short_link.offer_id,
                 "channel_id": short_link.channel_id
             }
-        
+
         # 优先级 3: 全局配置
         logger.info(f"[斗篷像素映射] 使用全局配置：dp={dp}")
         return {

@@ -7,7 +7,7 @@ from app.models.models import (
     Base, User, Client, Product, AdData, ProductAssignment, ScheduledTask, 
     UserAuditLog, PostbackConversion, PostbackForwardLog,
     ClientNotificationConfig, ProductNotificationConfig, PostbackNotification,
-    ShortLink,
+    ShortLink, CloakConfig,
     # CPL 系统模型
     Advertiser, Publisher, Offer, OfferPublisherAssignment, Click,
     OfferCap, OfferDiscount, AffiliateTest,
@@ -34,6 +34,7 @@ __all__ = [
     "ProductNotificationConfig",
     "PostbackNotification",
     "ShortLink",
+    "CloakConfig",
     # CPL 系统模型
     "Advertiser",
     "Publisher",

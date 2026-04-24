@@ -124,6 +124,9 @@
       <el-menu-item index="/app/admin/cache">
         <span>缓存管理</span>
       </el-menu-item>
+      <el-menu-item index="/app/admin/cloak-management">
+        <span>斗篷管理</span>
+      </el-menu-item>
       <el-menu-item index="/app/admin/sessions">
         <span>会话管理</span>
       </el-menu-item>

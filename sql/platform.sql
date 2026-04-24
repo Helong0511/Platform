@@ -11,7 +11,7 @@
  Target Server Version : 80044 (8.0.44-0ubuntu0.22.04.2)
  File Encoding         : 65001
 
- Date: 24/03/2026 16:01:19
+ Date: 23/04/2026 10:03:21
 */
 
 SET NAMES utf8mb4;
@@ -146,7 +146,7 @@ CREATE TABLE `advertisers`  (
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_advertiser_name`(`advertiser_name` ASC) USING BTREE,
   INDEX `idx_is_active`(`is_active` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 17 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '广告主表（上游）' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '广告主表（上游）' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for affiliate_tests
@@ -240,7 +240,7 @@ CREATE TABLE `clicks`  (
   CONSTRAINT `clicks_ibfk_2` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `clicks_ibfk_3` FOREIGN KEY (`advertiser_id`) REFERENCES `advertisers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `clicks_ibfk_short_link` FOREIGN KEY (`short_link_id`) REFERENCES `short_links` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 1820264 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '点击记录表' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '点击记录表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for clicks_archive
@@ -308,7 +308,7 @@ CREATE TABLE `client_notification_configs`  (
   INDEX `idx_client_notification_config_client`(`client_id` ASC) USING BTREE,
   INDEX `ix_client_notification_configs_id`(`id` ASC) USING BTREE,
   CONSTRAINT `client_notification_configs_ibfk_1` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 3 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for clients
@@ -337,7 +337,7 @@ CREATE TABLE `clients`  (
   INDEX `idx_clients_key`(`key` ASC) USING BTREE,
   FULLTEXT INDEX `ft_clients_search`(`company_name`, `contact_person`) WITH PARSER `ngram`,
   CONSTRAINT `fk_clients_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 1023 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '客户表' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '客户表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for conversion_deduction_configs
@@ -403,7 +403,7 @@ CREATE TABLE `conversion_deduction_logs`  (
   CONSTRAINT `conversion_deduction_logs_ibfk_2` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `conversion_deduction_logs_ibfk_3` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `conversion_deduction_logs_ibfk_4` FOREIGN KEY (`deduction_config_id`) REFERENCES `conversion_deduction_configs` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 1881 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '转化扣减执行记录表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '转化扣减执行记录表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for countries
@@ -429,7 +429,7 @@ CREATE TABLE `countries`  (
   INDEX `idx_country_name_en`(`country_name_en` ASC) USING BTREE,
   INDEX `idx_continent`(`continent` ASC) USING BTREE,
   INDEX `idx_subregion`(`subregion` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 252 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = 'ISO 3166-1国家代码表' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = 'ISO 3166-1国家代码表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for offer_caps
@@ -491,7 +491,7 @@ CREATE TABLE `offer_discounts`  (
   INDEX `ix_offer_discounts_id`(`id` ASC) USING BTREE,
   CONSTRAINT `offer_discounts_ibfk_1` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `offer_discounts_ibfk_2` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 4 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for offer_publisher_assignments
@@ -513,7 +513,7 @@ CREATE TABLE `offer_publisher_assignments`  (
   INDEX `idx_is_active`(`is_active` ASC) USING BTREE,
   CONSTRAINT `offer_publisher_assignments_ibfk_1` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `offer_publisher_assignments_ibfk_2` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 281 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = 'Offer-渠道分配表' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = 'Offer-渠道分配表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for offers
@@ -548,7 +548,7 @@ CREATE TABLE `offers`  (
   INDEX `idx_country`(`country` ASC) USING BTREE,
   FULLTEXT INDEX `ft_offer_name`(`offer_name`),
   CONSTRAINT `offers_ibfk_1` FOREIGN KEY (`advertiser_id`) REFERENCES `advertisers` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 85 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = 'Offer表（单子表）' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = 'Offer表（单子表）' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for pending_postback_conversions
@@ -594,7 +594,7 @@ CREATE TABLE `pending_postback_conversions`  (
   INDEX `ix_pending_postback_conversions_created_at`(`created_at` ASC) USING BTREE,
   CONSTRAINT `pending_postback_conversions_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `pending_postback_conversions_ibfk_2` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 21 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for postback_conversions
@@ -639,7 +639,7 @@ CREATE TABLE `postback_conversions`  (
   INDEX `idx_deduction_type`(`deduction_type` ASC) USING BTREE,
   CONSTRAINT `postback_conversions_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `postback_conversions_ibfk_2` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 2482 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = 'Postback转化事件表，统一存储所有平台的postback回调数据' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = 'Postback转化事件表，统一存储所有平台的postback回调数据' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for postback_forward_logs
@@ -676,7 +676,7 @@ CREATE TABLE `postback_forward_logs`  (
   CONSTRAINT `postback_forward_logs_ibfk_1` FOREIGN KEY (`conversion_id`) REFERENCES `postback_conversions` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `postback_forward_logs_ibfk_2` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `postback_forward_logs_ibfk_3` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 74 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for postback_forward_queue
@@ -722,7 +722,7 @@ CREATE TABLE `postback_ip_whitelist`  (
   INDEX `ix_postback_ip_whitelist_is_active`(`is_active` ASC) USING BTREE,
   INDEX `idx_is_active`(`is_active` ASC) USING BTREE,
   INDEX `idx_ip_address`(`ip_address` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 17 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for postback_notifications
@@ -762,7 +762,7 @@ CREATE TABLE `postback_notifications`  (
   CONSTRAINT `postback_notifications_ibfk_2` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `postback_notifications_ibfk_3` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `postback_notifications_ibfk_4` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 2505 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for product_assignments
@@ -783,7 +783,7 @@ CREATE TABLE `product_assignments`  (
   INDEX `idx_product_assignments_active`(`product_id` ASC, `end_date` ASC) USING BTREE,
   CONSTRAINT `fk_product_assignments_client` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `fk_product_assignments_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 154 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '产品分配历史表' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '产品分配历史表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for product_notification_configs
@@ -835,7 +835,7 @@ CREATE TABLE `products`  (
   FULLTEXT INDEX `ft_products_name`(`name`) WITH PARSER `ngram`,
   FULLTEXT INDEX `ft_name`(`name`),
   CONSTRAINT `fk_products_client` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 154 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '产品表' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '产品表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for publishers
@@ -859,7 +859,7 @@ CREATE TABLE `publishers`  (
   INDEX `idx_is_active`(`is_active` ASC) USING BTREE,
   INDEX `idx_client_id`(`client_id` ASC) USING BTREE,
   CONSTRAINT `fk_publishers_client_id` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
-) ENGINE = InnoDB AUTO_INCREMENT = 11 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '渠道表（下游）' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '渠道表（下游）' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for scheduled_tasks
@@ -888,7 +888,7 @@ CREATE TABLE `scheduled_tasks`  (
   INDEX `idx_scheduled_task_is_running`(`is_running` ASC) USING BTREE,
   INDEX `idx_scheduled_task_is_active`(`is_active` ASC) USING BTREE,
   FULLTEXT INDEX `ft_tasks_search`(`task_name`, `description`) WITH PARSER `ngram`
-) ENGINE = InnoDB AUTO_INCREMENT = 2209 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '定时任务执行记录表' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '定时任务执行记录表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for short_links
@@ -907,6 +907,9 @@ CREATE TABLE `short_links`  (
   `click_count` int NOT NULL DEFAULT 0 COMMENT '点击次数',
   `is_active` tinyint(1) NULL DEFAULT 1 COMMENT '是否激活',
   `expires_at` datetime NULL DEFAULT NULL COMMENT '过期时间（可选）',
+  `facebook_pixel_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT 'Facebook 像素 ID',
+  `facebook_access_token` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT 'Facebook 访问令牌',
+  `facebook_api_version` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT 'Facebook API 版本',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
@@ -924,7 +927,7 @@ CREATE TABLE `short_links`  (
   CONSTRAINT `short_links_ibfk_1` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `short_links_ibfk_channel` FOREIGN KEY (`channel_id`) REFERENCES `publishers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `short_links_ibfk_offer` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 124 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '短链接表' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '短链接表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for tb_search_data
@@ -952,9 +955,8 @@ CREATE TABLE `tb_search_data`  (
   INDEX `idx_tb_search_data_product`(`product_id` ASC) USING BTREE,
   INDEX `idx_tb_search_data_date`(`date` ASC) USING BTREE,
   INDEX `ix_tb_search_data_id`(`id` ASC) USING BTREE,
-  CONSTRAINT `tb_search_data_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `tb_search_data_ibfk_2` FOREIGN KEY (`country_code`) REFERENCES `countries` (`alpha_2_code`) ON DELETE SET NULL ON UPDATE CASCADE
-) ENGINE = InnoDB AUTO_INCREMENT = 584 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = 'TB收索数据' ROW_FORMAT = DYNAMIC;
+  CONSTRAINT `tb_search_data_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = 'TB收索数据' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for third_party_report_logs
@@ -983,6 +985,8 @@ CREATE TABLE `third_party_report_logs`  (
   `report_success_time` datetime NULL DEFAULT NULL COMMENT '上报成功时间',
   `completed_at` datetime NULL DEFAULT NULL COMMENT '完成时间',
   `conversion_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '转化ID',
+  `currency` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '货币类型',
+  `amount` float NULL DEFAULT NULL COMMENT '支付金额',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `unique_source_adsid`(`source` ASC, `adsid` ASC) USING BTREE,
   INDEX `idx_third_party_source`(`source` ASC) USING BTREE,
@@ -991,8 +995,29 @@ CREATE TABLE `third_party_report_logs`  (
   INDEX `idx_third_party_status`(`status` ASC) USING BTREE,
   INDEX `idx_third_party_created_at`(`created_at` ASC) USING BTREE,
   INDEX `idx_third_party_status_created`(`status` ASC, `created_at` ASC) USING BTREE,
-  INDEX `idx_conversion_id`(`conversion_id` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 48 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '第三方上报日志表' ROW_FORMAT = Dynamic;
+  INDEX `idx_conversion_id`(`conversion_id` ASC) USING BTREE,
+  INDEX `idx_event`(`event` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '第三方上报日志表' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for cloak_configs
+-- ----------------------------
+DROP TABLE IF EXISTS `cloak_configs`;
+CREATE TABLE `cloak_configs`  (
+  `id` int NOT NULL AUTO_INCREMENT COMMENT '配置ID',
+  `cloak_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '斗篷名称（如 master）',
+  `pixel_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '主像素ID',
+  `access_token` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '主像素Token',
+  `backup_pixel_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '备份像素ID',
+  `backup_access_token` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '备份像素Token',
+  `is_enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
+  `created_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
+  `updated_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uq_cloak_name`(`cloak_name` ASC) USING BTREE,
+  INDEX `idx_cloak_name`(`cloak_name` ASC) USING BTREE,
+  INDEX `idx_cloak_enabled`(`is_enabled` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '斗篷配置表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for token_blacklist
@@ -1049,7 +1074,7 @@ CREATE TABLE `user_audit_logs`  (
   INDEX `idx_audit_log_user_action`(`user_id` ASC, `action_type` ASC) USING BTREE,
   INDEX `idx_audit_log_resource`(`resource_type` ASC, `resource_id` ASC) USING BTREE,
   CONSTRAINT `fk_user_audit_logs_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 604 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '用户操作日志表（审计日志）' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '用户操作日志表（审计日志）' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for user_sessions
@@ -1076,7 +1101,7 @@ CREATE TABLE `user_sessions`  (
   INDEX `idx_ip_address`(`ip_address` ASC) USING BTREE,
   INDEX `idx_is_active`(`is_active` ASC) USING BTREE,
   INDEX `idx_last_activity`(`last_activity` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1368 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '用户会话表' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '用户会话表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for users
@@ -1100,6 +1125,110 @@ CREATE TABLE `users`  (
   INDEX `idx_username`(`username` ASC) USING BTREE,
   INDEX `idx_email`(`email` ASC) USING BTREE,
   FULLTEXT INDEX `ft_users_search`(`username`, `full_name`, `email`) WITH PARSER `ngram`
-) ENGINE = InnoDB AUTO_INCREMENT = 26 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '用户表' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '用户表' ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Procedure structure for purge_clicks_safe
+-- ----------------------------
+DROP PROCEDURE IF EXISTS `purge_clicks_safe`;
+delimiter ;;
+CREATE PROCEDURE `purge_clicks_safe`(IN p_delete_before_date DATETIME,
+    IN p_batch_size INT,
+    IN p_sleep_seconds DECIMAL(8,3),
+    IN p_max_batches INT,
+    IN p_dry_run BOOLEAN)
+BEGIN
+    DECLARE v_batch INT DEFAULT 0;
+    DECLARE v_selected INT DEFAULT 0;
+    DECLARE v_deleted INT DEFAULT 0;
+    DECLARE v_total_deleted BIGINT DEFAULT 0;
+    DECLARE v_remaining BIGINT DEFAULT 0;
+
+    -- 降低长时间锁等待风险（按需调整）
+    SET SESSION innodb_lock_wait_timeout = 5;
+
+    CREATE TEMPORARY TABLE IF NOT EXISTS tmp_delete_ids (
+        id BIGINT PRIMARY KEY
+    ) ENGINE=InnoDB;
+
+    purge_loop: LOOP
+        SET v_batch = v_batch + 1;
+
+        IF v_batch > p_max_batches THEN
+            SELECT 'STOP_MAX_BATCHES' AS status, p_max_batches AS max_batches, v_total_deleted AS total_deleted;
+            LEAVE purge_loop;
+        END IF;
+
+        TRUNCATE TABLE tmp_delete_ids;
+
+        INSERT INTO tmp_delete_ids (id)
+        SELECT c.id
+        FROM clicks c
+        WHERE c.created_at < p_delete_before_date
+          AND c.click_id IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM postback_conversions pc
+              WHERE pc.conversion_id = c.click_id
+          )
+        ORDER BY c.id
+        LIMIT p_batch_size;
+
+        SET v_selected = ROW_COUNT();
+
+        IF v_selected = 0 THEN
+            LEAVE purge_loop;
+        END IF;
+
+        IF p_dry_run THEN
+            SELECT
+                'DRY_RUN' AS status,
+                v_batch   AS batch_no,
+                v_selected AS candidate_rows;
+        ELSE
+            START TRANSACTION;
+                DELETE c
+                FROM clicks c
+                INNER JOIN tmp_delete_ids t ON t.id = c.id;
+                SET v_deleted = ROW_COUNT();
+            COMMIT;
+
+            SET v_total_deleted = v_total_deleted + v_deleted;
+
+            SELECT
+                'DELETED' AS status,
+                v_batch AS batch_no,
+                v_selected AS selected_rows,
+                v_deleted AS deleted_rows,
+                v_total_deleted AS total_deleted;
+        END IF;
+
+        IF p_sleep_seconds > 0 THEN
+            DO SLEEP(p_sleep_seconds);
+        END IF;
+    END LOOP;
+
+    SELECT COUNT(*) INTO v_remaining
+    FROM clicks c
+    WHERE c.created_at < p_delete_before_date
+      AND c.click_id IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1
+          FROM postback_conversions pc
+          WHERE pc.conversion_id = c.click_id
+      );
+
+    SELECT
+        p_delete_before_date AS delete_before_date,
+        p_batch_size AS batch_size,
+        p_dry_run AS dry_run,
+        v_batch AS batches_ran,
+        v_total_deleted AS total_deleted,
+        v_remaining AS remaining_count;
+
+    DROP TEMPORARY TABLE IF EXISTS tmp_delete_ids;
+END
+;;
+delimiter ;
 
 SET FOREIGN_KEY_CHECKS = 1;

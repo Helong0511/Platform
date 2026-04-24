@@ -443,21 +443,9 @@ class Settings(BaseSettings):
     FACEBOOK_ACCESS_TOKEN: str = os.getenv("FACEBOOK_ACCESS_TOKEN", "EAAifTOaIZCfQBRUvZBp4OmlIpYfCX4kSOITYbBXpMEvR9hGVABb40DnmZAuOGfXCghiOmtbU9IOzVfNX4UixokNPAzRIoAJ5Wd0dXdxZBZCGoYzycyIQTx68xNOpkYc37320gqQB2SzocbiT60YEZARK9DVHLFYV83XTU6uZBHbSwnhpZCmQ4YSGTF1H7DdlFLn8iQZDZD")
     FACEBOOK_API_VERSION: str = os.getenv("FACEBOOK_API_VERSION", "v21.0")
 
-    # 使用字典结构管理多个像素配置，类似 LP_CONFIG
-    # 格式：{斗篷名称/short_code: {"pixel_id": str, "access_token": str, "api_version": str}}
-    # 示例：
-    FACEBOOK_PIXEL_CONFIG: ClassVar[Dict[str, Dict[str, str]]] = {
-        "master": {
-            "pixel_id": "1124622134062236",
-            "access_token": "EAAifTOaIZCfQBRUvZBp4OmlIpYfCX4kSOITYbBXpMEvR9hGVABb40DnmZAuOGfXCghiOmtbU9IOzVfNX4UixokNPAzRIoAJ5Wd0dXdxZBZCGoYzycyIQTx68xNOpkYc37320gqQB2SzocbiT60YEZARK9DVHLFYV83XTU6uZBHbSwnhpZCmQ4YSGTF1H7DdlFLn8iQZDZD",
-            "api_version": "v21.0"
-        },
-        "109": {
-            "pixel_id": "1510892107129248",
-            "access_token": "EAAVHGj8RRboBRWTZCXOQaxIxMm8TJbcj2ZAOFKgWpaKhYmVZAZBZBV9aVZCJT1U5zZBQLB1Qir8S6k4gpHh1z8Y18MrMCbvZBIcIzYbZBOaxdGQTyRKZAWVZAV0KgRoRKS9qXTfj4ZBgQzRzS5xzj1XS8jZC1q7ZCVYHaQ4QKjST8kH8XS2JjgaTzhI6cwOmyHGB9OrgZDZD",
-            "api_version": "v21.0"
-        }
-    }
+    # 已废弃：斗篷配置已迁移至数据库表 cloak_configs（系统服务 -> 斗篷管理）
+    # 该字段仅保留兼容，业务逻辑不再依赖此映射。
+    FACEBOOK_PIXEL_CONFIG: ClassVar[Dict[str, Dict[str, str]]] = {}
 
 # 创建配置实例
 settings = Settings()

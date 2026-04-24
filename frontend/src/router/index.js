@@ -96,6 +96,7 @@ const SessionManagement = createAsyncComponent(() => import(/* webpackChunkName:
 const TelegramNotificationConfig = createAsyncComponent(() => import(/* webpackChunkName: "telegram-notification-config" */ '../views/admin/TelegramNotificationConfig.vue'), 'TelegramNotificationConfig');
 const CacheManagement = createAsyncComponent(() => import(/* webpackChunkName: "cache-management" */ '../views/admin/CacheManagement.vue'), 'CacheManagement');
 const ThirdPartyReportManagement = createAsyncComponent(() => import(/* webpackChunkName: "third-party-report" */ '../views/admin/ThirdPartyReportManagement.vue'), 'ThirdPartyReportManagement');
+const CloakManagement = createAsyncComponent(() => import(/* webpackChunkName: "cloak-management" */ '../views/admin/CloakManagement.vue'), 'CloakManagement');
 const ClientUserManagement = createAsyncComponent(() => import(/* webpackChunkName: "client-user-management" */ '../views/client/ClientUserManagement.vue'), 'ClientUserManagement');
 const ApiDocumentation = createAsyncComponent(() => import(/* webpackChunkName: "api-documentation" */ '../views/ApiDocumentation.vue'), 'ApiDocumentation');
 const MainLayout = createAsyncComponent(() => import(/* webpackChunkName: "layout" */ '../components/Layout/MainLayout.vue'), 'MainLayout');
@@ -297,6 +298,12 @@ const routes = [
         path: 'admin/cache',
         name: 'CacheManagement',
         component: CacheManagement,
+        meta: { requiresAdmin: true }
+      },
+      {
+        path: 'admin/cloak-management',
+        name: 'CloakManagement',
+        component: CloakManagement,
         meta: { requiresAdmin: true }
       },
       {

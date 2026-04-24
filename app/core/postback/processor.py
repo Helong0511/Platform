@@ -164,21 +164,16 @@ class PostbackProcessor:
                     url_params = click_association.get('url_params', {})
                     dp = url_params.get('dp') if url_params else None
 
-                    # 兜底：部分链路未透传 dp 时，回退使用 offer_id 匹配像素配置
-                    if not dp:
-                        offer_id_for_dp = click_association.get('offer_id') or url_params.get('offer_id')
-                        if offer_id_for_dp is not None:
-                            dp = str(offer_id_for_dp)
-                            logger.info(f"=== 未检测到 dp，回退使用 offer_id 作为配置键：dp={dp} ===")
-                    
-                    # 获取像素配置（优先级：数据库 > FACEBOOK_PIXEL_CONFIG[dp] > 全局配置）
+                    # 获取像素配置（优先级：数据库 > 斗篷配置表 > 全局配置）
                     from app.core.config import settings
                     from app.models.models import ShortLink
                     from sqlalchemy import update
+                    from app.services.cloak_pixel_mapping import get_cloak_pixel_config
                     facebook_pixel_id = settings.FACEBOOK_PIXEL_ID
                     facebook_access_token = settings.FACEBOOK_ACCESS_TOKEN
                     facebook_api_version = settings.FACEBOOK_API_VERSION
                     config_source = "全局配置"
+                    short_link = None
                     
                     # 优先级 1: 数据库配置（从 ShortLink 表）
                     short_link_id = click_association.get('short_link_id')
@@ -196,19 +191,29 @@ class PostbackProcessor:
                         except Exception as e:
                             logger.warning(f"=== 查询数据库像素配置失败：{str(e)} ===")
                     
-                    # 优先级 2: FACEBOOK_PIXEL_CONFIG[dp]（如果数据库未配置）
+                    # 优先级 2: 斗篷配置表（如果短链接未配置）
                     if config_source == "全局配置" and dp:
                         logger.info(f"=== 检测到 dp 参数：{dp} ===")
-                        # 尝试从 FACEBOOK_PIXEL_CONFIG 获取 dp 对应的配置
-                        cloak_config = settings.FACEBOOK_PIXEL_CONFIG.get(dp)
-                        if cloak_config:
-                            facebook_pixel_id = cloak_config.get("pixel_id", settings.FACEBOOK_PIXEL_ID)
-                            facebook_access_token = cloak_config.get("access_token", settings.FACEBOOK_ACCESS_TOKEN)
-                            facebook_api_version = cloak_config.get("api_version", settings.FACEBOOK_API_VERSION)
-                            config_source = f"FACEBOOK_PIXEL_CONFIG[{dp}]"
-                            logger.info(f"=== 使用 dp={dp} 的像素配置：{facebook_pixel_id[:10]}... ===")
+                        if short_link and short_link.short_code:
+                            try:
+                                cloak_pixel_config = await get_cloak_pixel_config(
+                                    db=db,
+                                    dp=dp,
+                                    short_code=short_link.short_code,
+                                    use_cache=True
+                                )
+                                if cloak_pixel_config:
+                                    facebook_pixel_id = cloak_pixel_config.get("facebook_pixel_id", settings.FACEBOOK_PIXEL_ID)
+                                    facebook_access_token = cloak_pixel_config.get("facebook_access_token", settings.FACEBOOK_ACCESS_TOKEN)
+                                    facebook_api_version = cloak_pixel_config.get("facebook_api_version", settings.FACEBOOK_API_VERSION)
+                                    config_source = f"斗篷配置表[{dp}]"
+                                    logger.info(f"=== 使用斗篷配置表 dp={dp} 的像素配置：{facebook_pixel_id[:10]}... ===")
+                                else:
+                                    logger.warning(f"=== 未找到 dp={dp} 的斗篷配置，使用全局配置 ===")
+                            except Exception as e:
+                                logger.warning(f"=== 查询斗篷配置表失败：{str(e)}，使用全局配置 ===")
                         else:
-                            logger.warning(f"=== 未找到 dp={dp} 的像素配置，使用全局配置 ===")
+                            logger.warning("=== 检测到 dp 但缺少 short_code，无法查询斗篷配置表，使用全局配置 ===")
                     elif config_source == "全局配置":
                         logger.info("=== 未检测到 dp 参数，使用全局像素配置 ===")
                     

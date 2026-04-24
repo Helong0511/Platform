@@ -7,6 +7,7 @@ from .audit_logs import router as audit_logs_router
 from .sessions import router as sessions_router
 from .notification_configs import router as notification_configs_router
 from .third_party_reports import router as third_party_reports_router
+from .cloak_configs import router as cloak_configs_router
 
 __all__ = [
     'scheduled_tasks_router',
@@ -14,5 +15,6 @@ __all__ = [
     'sessions_router',
     'notification_configs_router',
     'third_party_reports_router',
+    'cloak_configs_router',
 ]
 
