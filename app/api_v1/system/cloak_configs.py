@@ -2,6 +2,7 @@
 斗篷配置管理 API
 """
 import logging
+import time
 from typing import Optional
 
 import httpx
@@ -37,10 +38,11 @@ def _mask_token(token: str) -> str:
 
 
 def _build_facebook_payload(test_data: TestCloakReportRequest) -> dict:
+    current_ts = int(time.time())
     user_data = {
         "client_ip_address": test_data.ip,
         "client_user_agent": test_data.ua,
-        "fbc": f"fb.1.1700000000.{test_data.adsid}",
+        "fbc": f"fb.1.{current_ts}.{test_data.adsid}",
     }
     if test_data.use_hash:
         from app.core.third_party_report import sha256_hash
@@ -54,7 +56,7 @@ def _build_facebook_payload(test_data: TestCloakReportRequest) -> dict:
         "data": [
             {
                 "event_name": test_data.event,
-                "event_time": 1700000000,
+                "event_time": current_ts,
                 "action_source": "website",
                 "event_id": "cloak-test-event-id",
                 "user_data": user_data,
