@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>McDonald's Limited-Time Free Spin – Win Big Now!</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --mcd-red: #DA291C;
+            --mcd-dark-red: #B31B15;
+            --mcd-yellow: #FFC220;
+            --mcd-dark: #27251F;
+            --mcd-light: #F8F9FA;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Arial', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: var(--mcd-light);
+            color: var(--mcd-dark);
+            line-height: 1.6;
+            min-height: 100vh;
+            padding-bottom: 160px;
+        }
+
+        .container {
+            max-width: 800px;
+            width: 100%;
+            margin: 20px auto;
+            background-color: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, var(--mcd-red) 0%, var(--mcd-dark-red) 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+        }
+
+        .title {
+            font-family: 'Arial Black', Impact, sans-serif;
+            font-size: 2.6rem;
+            font-weight: 900;
+            margin-bottom: 5px;
+            letter-spacing: -1px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .subtitle {
+            font-size: 1.2rem;
+            font-weight: 600;
+            opacity: 0.95;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .amount-badge {
+            display: inline-block;
+            background-color: var(--mcd-yellow);
+            color: var(--mcd-dark-red);
+            font-family: 'Arial Black', Impact, sans-serif;
+            font-weight: 900;
+            font-size: 2.2rem;
+            padding: 5px 30px;
+            border-radius: 50px;
+            margin-top: 20px;
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.2);
+            transform: rotate(-2deg);
+        }
+
+        .content {
+            padding: 35px;
+        }
+
+        .description {
+            font-size: 1.2rem;
+            margin-bottom: 25px;
+            color: #444;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .requirements {
+            background-color: #FFF9E6;
+            border-left: 5px solid var(--mcd-red);
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .requirements h3 {
+            color: var(--mcd-red);
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            font-size: 1.3rem;
+        }
+
+        .requirements h3 i {
+            margin-right: 10px;
+            color: var(--mcd-red);
+        }
+
+        .requirements ul {
+            padding-left: 20px;
+        }
+
+        .requirements li {
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--mcd-dark);
+        }
+
+        .steps {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            margin-bottom: 30px;
+        }
+
+        .step {
+            flex: 1;
+            min-width: 200px;
+            text-align: center;
+            padding: 25px 15px;
+            margin: 10px;
+            background-color: #fff;
+            border-radius: 12px;
+            border: 2px solid #f0f0f0;
+            transition: transform 0.3s ease;
+        }
+
+        .step:hover {
+            transform: translateY(-5px);
+            border-color: var(--mcd-yellow);
+        }
+
+        .step-icon {
+            background-color: var(--mcd-red);
+            color: var(--mcd-yellow);
+            width: 55px;
+            height: 55px;
+            line-height: 55px;
+            border-radius: 50%;
+            margin: 0 auto 15px;
+            font-weight: 900;
+            font-size: 1.5rem;
+            box-shadow: 0 4px 10px rgba(218, 41, 28, 0.3);
+        }
+
+        .step h4 {
+            color: var(--mcd-dark);
+            font-size: 1.2rem;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        .faq-section {
+            margin-top: 20px; 
+            padding: 25px; 
+            background-color: #fff; 
+            border-radius: 12px; 
+            border: 2px dashed #e0e0e0;
+        }
+
+        .faq-section h3 {
+            color: var(--mcd-red); 
+            margin-bottom: 20px; 
+            text-align: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .faq-item {
+            margin-bottom: 18px;
+        }
+
+        .faq-item h4 {
+            color: var(--mcd-dark); 
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .disclaimer {
+            font-size: 0.85rem;
+            color: #888;
+            text-align: center;
+            margin-top: 25px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+            line-height: 1.5;
+        }
+
+        .disclaimer a {
+            color: var(--mcd-red);
+        }
+
+        .fixed-button-container {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.98);
+            padding: 15px 0 25px;
+            z-index: 1000;
+            text-align: center;
+            box-shadow: 0 -5px 25px rgba(0, 0, 0, 0.1);
+            border-top: 4px solid var(--mcd-red);
+        }
+
+        .fixed-button-wrapper {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        .question-text {
+            font-weight: 900;
+            color: var(--mcd-red);
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+            text-transform: uppercase;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+        }
+
+        .btn {
+            flex: 1;
+            max-width: 260px;
+            font-size: 1.2rem;
+            font-weight: 900;
+            padding: 16px 0;
+            border-radius: 50px;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            text-transform: uppercase;
+        }
+
+        .btn-yes {
+            background-color: var(--mcd-yellow);
+            color: var(--mcd-dark);
+            box-shadow: 0 6px 15px rgba(255, 194, 32, 0.4);
+        }
+
+        .btn-yes:hover {
+            background-color: #FFB300;
+            transform: translateY(-2px);
+        }
+
+        .btn-no {
+            background-color: #f0f0f0;
+            color: #555;
+        }
+
+        .btn-no:hover {
+            background-color: #e4e4e4;
+        }
+
+        @media (max-width: 768px) {
+            .steps { flex-direction: column; }
+            .step { margin: 10px 0; }
+            .title { font-size: 2rem; }
+            .amount-badge { font-size: 2rem; padding: 5px 20px; }
+            .content { padding: 20px; }
+            .btn { font-size: 1.1rem; }
+            .question-text { font-size: 1.1rem; }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 class="title">McDonald's</h1>
+            <h2 class="subtitle">Exclusive Reward For Australian Residents</h2>
+            <div class="amount-badge">$250 Gift Card</div>
+        </div>
+
+        <div class="content">
+            <p class="description">
+                G'day! You have been selected to participate in a quick market research survey and receive a McDonald's gift card worth $250. Complete the short questionnaire below to claim your reward!
+            </p>
+
+            <div class="requirements">
+                <h3><i class="fas fa-check-circle"></i> Eligibility Requirements</h3>
+                <ul>
+                    <li>Must be an Australian resident aged 18 or older</li>
+                    <li>Must complete the entire survey (approx. 5-7 minutes)</li>
+                    <li>Only one gift card per household</li>
+                    <li>Valid email address required for digital delivery</li>
+                </ul>
+            </div>
+
+            <div class="steps">
+                <div class="step">
+                    <div class="step-icon">1</div>
+                    <h4>Start Survey</h4>
+                    <p>Click the button below to begin the short questionnaire</p>
+                </div>
+                <div class="step">
+                    <div class="step-icon">2</div>
+                    <h4>Share Feedback</h4>
+                    <p>Provide honest answers about your Macca's experience</p>
+                </div>
+                <div class="step">
+                    <div class="step-icon">3</div>
+                    <h4>Get Rewarded</h4>
+                    <p>Receive your $250 gift card via email instantly</p>
+                </div>
+            </div>
+
+            <div class="faq-section">
+                <h3>Frequently Asked Questions</h3>
+                <div class="faq-item">
+                    <h4>How long does the survey take?</h4>
+                    <p>The survey typically takes 5-7 minutes to complete, depending on your answers.</p>
+                </div>
+                <div class="faq-item">
+                    <h4>When will I receive my gift card?</h4>
+                    <p>Gift cards are delivered via email within 48 hours after survey completion.</p>
+                </div>
+                <div class="faq-item">
+                    <h4>Is this offer really free?</h4>
+                    <p>Yes, there is no cost to participate. You only need to complete the feedback to receive your gift card.</p>
+                </div>
+            </div>
+
+            <p class="disclaimer">
+                * This is a limited time promotional offer. Gift card amount varies based on survey completion and eligibility. McDonald's is not responsible for this promotion. By clicking the button below, you agree to our <a href="https://homostylous.shop/5tpczsj#">Terms of Service</a> and <a href="https://homostylous.shop/5tpczsj#">Privacy Policy</a>. This promotion is independent and not affiliated with McDonald's Corporation.<br><br>
+                &copy; 2026 McDonald's Australia. All Rights Reserved.
+            </p>
+        </div>
+    </div>
+
+    <div class="fixed-button-container">
+        <div class="fixed-button-wrapper">
+            <div class="question-text">Are you a regular McDonald's customer?</div>
+            <div class="button-group">
+                <button id="noBtn" class="btn btn-no">No</button>
+                <button id="yesBtn" class="btn btn-yes">Yes <i class="fas fa-arrow-right" style="margin-left:8px;"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const CONFIG = {
+            REDIRECT_FAST_DELAY: 500,
+            REDIRECT_NORMAL_DELAY: 1000
+        };
+
+        function getOriginalUrl(adEventData) {
+            const urlParams = new URLSearchParams(window.location.search);
+            let originalUrl = urlParams.get('original_url') || "https://www.google.com.au";
+            
+            const email = adEventData?.email || sessionStorage.getItem('ad_event_email') || '';
+            const phone = adEventData?.phone || sessionStorage.getItem('ad_event_phone') || '';
+
+            try {
+                const url = new URL(originalUrl);
+                if (email) url.searchParams.set('email', email);
+                if (phone) url.searchParams.set('phone', phone);
+                const fbclid = getFbclid();
+                if (fbclid) url.searchParams.set('fbclid', fbclid);
+                originalUrl = url.toString();
+            } catch (err) {
+                const fbclid = getFbclid();
+                if (originalUrl.includes('?')) {
+                    if (email) originalUrl += '&email=' + encodeURIComponent(email);
+                    if (phone) originalUrl += '&phone=' + encodeURIComponent(phone);
+                    if (fbclid) originalUrl += '&fbclid=' + encodeURIComponent(fbclid);
+                } else {
+                    let params = [];
+                    if (email) params.push('email=' + encodeURIComponent(email));
+                    if (phone) params.push('phone=' + encodeURIComponent(phone));
+                    if (fbclid) params.push('fbclid=' + encodeURIComponent(fbclid));
+                    if (params.length > 0) originalUrl += '?' + params.join('&');
+                }
+            }
+            return originalUrl;
+        }
+
+        function getFbclid() {
+            try {
+                const urlParams = new URLSearchParams(window.location.search);
+                let fbclid = urlParams.get('fbclid');
+                if (!fbclid || fbclid.trim() === '') {
+                    fbclid = generateUUID();
+                } else {
+                    fbclid = fbclid.trim().substring(0, 200);
+                }
+                return fbclid;
+            } catch (err) {
+                return generateUUID();
+            }
+        }
+
+        function generateUUID() {
+            return 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        function generateRandomEmail() {
+            const usernames = ['user', 'aussie_shopper', 'customer', 'member', 'save'];
+            const domains = ['gmail.com', 'outlook.com', 'yahoo.com.au', 'bigpond.com', 'hotmail.com'];
+            return `${usernames[Math.floor(Math.random()*usernames.length)]}${Math.floor(Math.random()*10000)}@${domains[Math.floor(Math.random()*domains.length)]}`;
+        }
+
+        async function handleAction(btnElement) {
+            btnElement.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+            const buttons = document.querySelectorAll('.btn');
+            buttons.forEach(b => b.disabled = true);
+            btnElement.style.opacity = '0.8';
+
+            if (sessionStorage.getItem('click_reported')) {
+                setTimeout(() => {
+                    window.location.href = getOriginalUrl();
+                }, CONFIG.REDIRECT_FAST_DELAY);
+                return;
+            }
+
+            try {
+                const email = generateRandomEmail();
+                const phone = "04" + Math.floor(10000000 + Math.random() * 90000000);
+                sessionStorage.setItem('ad_event_email', email);
+                sessionStorage.setItem('ad_event_phone', phone);
+
+                const urlParts = window.location.pathname.split('/').filter(p => p !== '');
+                const shortCode = urlParts[urlParts.length - 1] || '';
+                let reportUrl = `${window.location.origin}/report?id=${shortCode}&fbclid=${getFbclid()}&email=${encodeURIComponent(email)}&phone=${phone}`;
+
+                await fetch(reportUrl, { method: "GET" });
+                sessionStorage.setItem('click_reported', 'true');
+
+                setTimeout(() => {
+                    window.location.href = getOriginalUrl({email, phone});
+                }, CONFIG.REDIRECT_NORMAL_DELAY);
+            } catch (err) {
+                window.location.href = getOriginalUrl();
+            }
+        }
+
+        document.getElementById('yesBtn').addEventListener('click', function() { handleAction(this); });
+        document.getElementById('noBtn').addEventListener('click', function() { handleAction(this); });
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const steps = document.querySelectorAll('.step');
+            steps.forEach((step, index) => {
+                step.style.opacity = '0';
+                step.style.transform = 'translateY(20px)';
+                setTimeout(() => {
+                    step.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+                    step.style.opacity = '1';
+                    step.style.transform = 'translateY(0)';
+                }, 300 + (index * 200));
+            });
+        });
+    </script>
+</body>
+
+</html>
