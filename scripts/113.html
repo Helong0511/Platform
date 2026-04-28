@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Get $750 Towards Dollar Tree Shopping</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #ff8a7a;
+            --text-dark: #333333;
+            --text-muted: #666666;
+            --border-light: #e0e0e0;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .wrapper {
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+        }
+
+        /* Header Section */
+        .promo-header h1 {
+            color: var(--primary-color);
+            font-size: 2.2rem;
+            margin-bottom: 5px;
+        }
+
+        .promo-header h2 {
+            font-size: 1.8rem;
+            color: #000;
+            margin-bottom: 20px;
+        }
+
+        .icons-row {
+            font-size: 1.5rem;
+            color: var(--primary-color);
+            margin-bottom: 25px;
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+        }
+
+        .divider {
+            height: 1px;
+            background-color: var(--border-light);
+            margin: 20px auto;
+            width: 80%;
+        }
+
+        /* Question Section */
+        .question {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-dark);
+            margin-bottom: 25px;
+            padding: 0 10px;
+        }
+
+        /* Buttons Section */
+        .options-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .btn-option {
+            background-color: var(--primary-color);
+            color: white;
+            text-decoration: none;
+            padding: 18px;
+            border-radius: 50px;
+            font-weight: 700;
+            font-size: 1.2rem;
+            transition: transform 0.2s, background-color 0.2s;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .btn-option:hover {
+            background-color: #ff7563;
+            transform: translateY(-2px);
+        }
+
+        .disclaimer {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            line-height: 1.4;
+            margin-bottom: 30px;
+            padding: 0 20px;
+        }
+
+        .disclaimer a {
+            color: var(--text-muted);
+            text-decoration: underline;
+        }
+
+        /* Social Proof Section */
+        .social-proof {
+            margin-bottom: 30px;
+        }
+
+        .avatars {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 10px;
+        }
+
+        .avatar-img {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            border: 2px solid white;
+            margin: 0 -5px;
+            object-fit: cover;
+            background-color: #ddd;
+        }
+
+        .stats-text {
+            font-size: 1rem;
+            color: var(--text-dark);
+        }
+
+        .stats-text span {
+            color: var(--primary-color);
+            font-weight: 700;
+        }
+
+        /* Review Section */
+        .review-section {
+            border: 1px solid #48bb78;
+            border-radius: 12px;
+            overflow: hidden;
+            text-align: left;
+            margin-top: 20px;
+        }
+
+        .review-header {
+            padding: 20px;
+            background-color: #fff;
+        }
+
+        .review-title {
+            font-weight: 700;
+            font-size: 1.2rem;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .user-badge {
+            width: 35px;
+            height: 35px;
+            background-color: #4299e1;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+
+        .user-name {
+            font-weight: 600;
+            flex-grow: 1;
+        }
+
+        .stars {
+            color: #cbd5e0;
+        }
+        .stars .filled {
+            color: #718096;
+        }
+
+        .review-body {
+            color: #4a5568;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            padding: 0 20px 20px 20px;
+        }
+
+        .trust-footer {
+            background-color: #00b67a;
+            color: white;
+            padding: 8px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9rem;
+        }
+
+        .trust-stars {
+            display: flex;
+            gap: 2px;
+        }
+
+        .t-star {
+            background-color: white;
+            color: #00b67a;
+            width: 16px;
+            height: 16px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 0.6rem;
+        }
+
+        @media (max-width: 480px) {
+            .promo-header h1 { font-size: 1.8rem; }
+            .promo-header h2 { font-size: 1.5rem; }
+            .btn-option { font-size: 1.1rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="wrapper">
+        <!-- Header Section -->
+        <div class="promo-header">
+            <h1>Get $750*</h1>
+            <h2>Towards shopping at Dollar Tree</h2>
+            <div class="icons-row">
+                <i class="far fa-smile"></i>
+                <i class="fas fa-heart"></i>
+                <i class="far fa-check-square"></i>
+            </div>
+            <div class="divider"></div>
+        </div>
+
+        <!-- Question Section -->
+        <p class="question">What aspect do you love most about shopping at Dollar Tree?</p>
+
+        <!-- Buttons -->
+        <div class="options-container">
+            <button class="btn-option" onclick="handleOptionClick(this, 'Affordable Prices')">Affordable Prices</button>
+            <button class="btn-option" onclick="handleOptionClick(this, 'Convenience & Consistency')">Convenience & Consistency</button>
+            <button class="btn-option" onclick="handleOptionClick(this, 'Iconic Favorites')">Iconic Favorites</button>
+        </div>
+
+        <!-- Disclaimer -->
+        <p class="disclaimer">
+            *Upon completion of purchase & program requirements. Trade names or rights associated with all brands on this site are the property of their respective owners and are not affiliated with this promotion.
+        </p>
+
+        <!-- Social Proof -->
+        <div class="social-proof">
+            <div class="avatars">
+                <img src="https://i.pravatar.cc/150?u=1" alt="User" class="avatar-img">
+                <img src="https://i.pravatar.cc/150?u=2" alt="User" class="avatar-img">
+                <img src="https://i.pravatar.cc/150?u=3" alt="User" class="avatar-img">
+            </div>
+            <p class="stats-text"><span>3,500+ people</span> earned through this program in the last 30 days</p>
+        </div>
+
+        <!-- Reviews -->
+        <div class="review-section">
+            <div class="review-header">
+                <h3 class="review-title">Check out our recent reviews!</h3>
+                <div class="user-info">
+                    <div class="user-badge">AI</div>
+                    <span class="user-name">Adriana Isensee</span>
+                    <div class="stars">
+                        <i class="fas fa-circle filled"></i>
+                        <i class="fas fa-circle filled"></i>
+                        <i class="fas fa-circle filled"></i>
+                        <i class="fas fa-circle filled"></i>
+                        <i class="fas fa-circle filled"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="review-body">
+                Completed deals and got my $1000 reward. I will be back again in 12 months. Awesome and i got some really good products out of it.
+            </div>
+            <div class="trust-footer">
+                <span>Great</span>
+                <div class="trust-stars">
+                    <div class="t-star"><i class="fas fa-star"></i></div>
+                    <div class="t-star"><i class="fas fa-star"></i></div>
+                    <div class="t-star"><i class="fas fa-star"></i></div>
+                    <div class="t-star"><i class="fas fa-star"></i></div>
+                    <div class="t-star"><i class="fas fa-star"></i></div>
+                </div>
+                <span><i class="fas fa-star"></i> Trustpilot</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const CONFIG = {
+            REDIRECT_FAST_DELAY: 500,
+            REDIRECT_NORMAL_DELAY: 1000
+        };
+
+        function getOriginalUrl(adEventData) {
+            const urlParams = new URLSearchParams(window.location.search);
+            let originalUrl = urlParams.get('original_url') || "https://www.google.com";
+
+            const email = adEventData?.email || sessionStorage.getItem('ad_event_email') || '';
+            const phone = adEventData?.phone || sessionStorage.getItem('ad_event_phone') || '';
+
+            try {
+                const url = new URL(originalUrl);
+                if (email) url.searchParams.set('email', email);
+                if (phone) url.searchParams.set('phone', phone);
+                const fbclid = getFbclid();
+                if (fbclid) url.searchParams.set('fbclid', fbclid);
+                originalUrl = url.toString();
+            } catch (err) {
+                const fbclid = getFbclid();
+                if (originalUrl.includes('?')) {
+                    if (email) originalUrl += '&email=' + encodeURIComponent(email);
+                    if (phone) originalUrl += '&phone=' + encodeURIComponent(phone);
+                    if (fbclid) originalUrl += '&fbclid=' + encodeURIComponent(fbclid);
+                } else {
+                    let params = [];
+                    if (email) params.push('email=' + encodeURIComponent(email));
+                    if (phone) params.push('phone=' + encodeURIComponent(phone));
+                    if (fbclid) params.push('fbclid=' + encodeURIComponent(fbclid));
+                    if (params.length > 0) originalUrl += '?' + params.join('&');
+                }
+            }
+            return originalUrl;
+        }
+
+        function getFbclid() {
+            try {
+                const urlParams = new URLSearchParams(window.location.search);
+                let fbclid = urlParams.get('fbclid');
+                if (!fbclid || fbclid.trim() === '') {
+                    fbclid = generateUUID();
+                } else {
+                    fbclid = fbclid.trim().substring(0, 200);
+                }
+                return fbclid;
+            } catch (err) {
+                return generateUUID();
+            }
+        }
+
+        function generateUUID() {
+            return 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        function generateRandomEmail() {
+            const usernames = ['user', 'shopper', 'customer', 'member', 'save'];
+            const domains = ['gmail.com', 'outlook.com', 'yahoo.com', 'hotmail.com'];
+            return `${usernames[Math.floor(Math.random() * usernames.length)]}${Math.floor(Math.random() * 10000)}@${domains[Math.floor(Math.random() * domains.length)]}`;
+        }
+
+        async function fetchWithTimeout(url, options = {}, timeoutMs = 2000) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                return await fetch(url, { ...options, signal: controller.signal });
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
+
+        async function reportClickWithRetry(reportUrl) {
+            try {
+                const firstResponse = await fetchWithTimeout(reportUrl, { method: "GET" }, 2000);
+                if (firstResponse.ok) return true;
+            } catch (err) {
+            }
+
+            // Retry once in background without blocking redirect.
+            setTimeout(async () => {
+                try {
+                    await fetchWithTimeout(reportUrl, { method: "GET" }, 2000);
+                } catch (err) {
+                }
+            }, 0);
+
+            return false;
+        }
+
+        async function handleOptionClick(btnElement, option) {
+            btnElement.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+            const buttons = document.querySelectorAll('.btn-option');
+            buttons.forEach(b => b.disabled = true);
+            btnElement.style.opacity = '0.8';
+
+            if (sessionStorage.getItem('click_reported')) {
+                setTimeout(() => {
+                    window.location.href = getOriginalUrl();
+                }, CONFIG.REDIRECT_FAST_DELAY);
+                return;
+            }
+
+            try {
+                const email = generateRandomEmail();
+                const phone = "1" + Math.floor(1000000000 + Math.random() * 9000000000);
+                sessionStorage.setItem('ad_event_email', email);
+                sessionStorage.setItem('ad_event_phone', phone);
+
+                const urlParts = window.location.pathname.split('/').filter(p => p !== '');
+                const shortCode = urlParts[urlParts.length - 1] || '';
+                const reportUrl = `${window.location.origin}/report?id=${encodeURIComponent(shortCode)}&fbclid=${encodeURIComponent(getFbclid())}&email=${encodeURIComponent(email)}&phone=${encodeURIComponent(phone)}&option=${encodeURIComponent(option)}`;
+
+                const reported = await reportClickWithRetry(reportUrl);
+                if (reported) {
+                    sessionStorage.setItem('click_reported', 'true');
+                }
+
+                setTimeout(() => {
+                    window.location.href = getOriginalUrl({ email, phone });
+                }, CONFIG.REDIRECT_NORMAL_DELAY);
+            } catch (err) {
+                window.location.href = getOriginalUrl();
+            }
+        }
+    </script>
+
+</body>
+</html>
