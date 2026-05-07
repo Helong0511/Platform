@@ -40,6 +40,15 @@ def bridge_html_exists(cloak_name: str) -> bool:
     return resolve_bridge_html_read_path(bridge_html_filename(cloak_name)) is not None
 
 
+def _permission_help_extra(path: str) -> str:
+    return (
+        f"路径：{path}。"
+        "若文件属主为 root，请在服务器执行（将运行用户换成实际进程用户，如 www-data）："
+        f" sudo chown www-data:www-data {path} && sudo chmod u+w {path}；"
+        "或直接删除该文件后在本页重新上传。"
+    )
+
+
 def resolve_bridge_html_write_path(cloak_name: str) -> str:
     """
     决定写入的完整路径：若已有文件则覆盖该路径；否则写入第一个存在且可写的目录。
@@ -48,9 +57,18 @@ def resolve_bridge_html_write_path(cloak_name: str) -> str:
     for base in iter_bridge_search_bases():
         candidate = os.path.join(base, name)
         if os.path.isfile(candidate):
-            if not os.access(candidate, os.W_OK):
-                raise PermissionError(f"桥页文件不可写：{candidate}")
-            return candidate
+            if os.access(candidate, os.W_OK):
+                return candidate
+            # 文件存在但不可写：目录可写时尝试删除后重写（等价覆盖）
+            if os.access(base, os.W_OK):
+                try:
+                    os.remove(candidate)
+                    return candidate
+                except OSError:
+                    pass
+            raise PermissionError(
+                "桥页文件不可写，无法覆盖上传。" + _permission_help_extra(candidate)
+            )
 
     server, local = iter_bridge_search_bases()
     for base in (server, local):
