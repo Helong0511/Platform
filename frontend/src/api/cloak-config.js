@@ -45,3 +45,22 @@ export const testCloakReport = async (id, data) => {
     data
   }, { returnDataOnly: true, timeout: 30000 });
 };
+
+/**
+ * 上传斗篷桥页 HTML（保存为 scripts/{cloak_name}.html）
+ * @param {number} id 斗篷配置 ID
+ * @param {File} file HTML 文件
+ */
+export const uploadCloakBridgeHtml = async (id, file) => {
+  await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
+  const formData = new FormData();
+  formData.append('file', file);
+  return request(
+    {
+      url: `/api/v1/cloak-configs/${id}/bridge-html`,
+      method: 'post',
+      data: formData
+    },
+    { returnDataOnly: true, timeout: 60000 }
+  );
+};

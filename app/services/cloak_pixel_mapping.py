@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import ShortLink, CloakConfig
 from app.core.config import settings
+from app.core.cloak_scripts_paths import bridge_html_exists
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,10 @@ class CloakPixelMappingService:
             return None
     
     async def _get_enabled_cloak_config(self, db: AsyncSession, dp: str) -> Optional[CloakConfig]:
-        """查询已启用的斗篷配置"""
+        """查询已启用的斗篷配置；无对应 {dp}.html 桥页文件则视为不可用，不参与像素映射。"""
+        if not bridge_html_exists(dp):
+            logger.info(f"[斗篷像素映射] 未检测到桥页 HTML，斗篷不可用：dp={dp}")
+            return None
         result = await db.execute(
             select(CloakConfig).where(
                 CloakConfig.cloak_name == dp,
@@ -304,6 +308,17 @@ class CloakPixelMappingService:
             self._cache.clear()
             self._cache_timestamps.clear()
             logger.info("[斗篷像素映射] 所有缓存已清除")
+
+    def invalidate_cache_for_dp(self, dp: str) -> None:
+        """清除所有 short_code:dp 形式的条目（桥页上传/删除或斗篷更名后应调用）。"""
+        if not dp or not re.match(r"^[a-zA-Z0-9_-]+$", dp):
+            return
+        suffix = f":{dp}"
+        keys = [k for k in list(self._cache.keys()) if k.endswith(suffix)]
+        for cache_key in keys:
+            self.invalidate_cache(cache_key)
+        if keys:
+            logger.info(f"[斗篷像素映射] 已按 dp 清除缓存：dp={dp}, keys={len(keys)}")
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """
@@ -340,6 +355,11 @@ async def get_cloak_pixel_config(
     return await cloak_pixel_service.get_pixel_config_by_dp_param(
         db, dp, short_code, use_cache
     )
+
+
+def invalidate_cloak_cache_for_dp(dp: str) -> None:
+    """按斗篷名称（dp）失效像素配置缓存。"""
+    cloak_pixel_service.invalidate_cache_for_dp(dp)
 
 
 def invalidate_cloak_cache(short_code: Optional[str] = None, dp: Optional[str] = None) -> None:

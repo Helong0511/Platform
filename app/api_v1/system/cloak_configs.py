@@ -7,12 +7,18 @@ import time
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Depends, File, Path, Query, Request, UploadFile
 from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import MAX_PAGE_SIZE
+from app.core.cloak_scripts_paths import (
+    MAX_BRIDGE_HTML_BYTES,
+    bridge_html_exists,
+    resolve_bridge_html_write_path,
+    validate_bridge_html_bytes,
+)
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
@@ -25,9 +31,24 @@ from app.schemas.cloak import (
     CloakConfigUpdate,
     TestCloakReportRequest,
 )
+from app.services.cloak_pixel_mapping import invalidate_cloak_cache_for_dp
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _bridge_usability_fields(cloak_name: str) -> dict:
+    """磁盘上是否存在 {cloak_name}.html（与 /change 读取路径一致）。"""
+    present = bridge_html_exists(cloak_name)
+    return {"bridge_html_present": present, "is_usable": present}
+
+
+def _ensure_enabled_requires_bridge_html(cloak_name: str, is_enabled: bool) -> None:
+    if is_enabled and not bridge_html_exists(cloak_name):
+        raise_api_exception(
+            ErrorCode.VALIDATION_ERROR,
+            detail=f"启用斗篷前须先上传对应桥页 HTML（{cloak_name}.html）。无桥页文件时该斗篷不可用。",
+        )
 
 
 def _mask_token(token: str) -> str:
@@ -143,8 +164,13 @@ async def list_cloak_configs(
     total_result = await db.execute(count_query)
     total = total_result.scalar_one() or 0
 
+    rows = []
+    for item in items:
+        row = CloakConfigResponse.model_validate(item)
+        rows.append(row.model_copy(update=_bridge_usability_fields(item.cloak_name)))
+
     return PaginatedResponseBaseSchema.success(
-        data=[CloakConfigResponse.model_validate(item) for item in items],
+        data=rows,
         total=total,
         page=page,
         page_size=page_size,
@@ -168,11 +194,14 @@ async def create_cloak_config(
     if exists_result.scalars().first():
         raise_api_exception(ErrorCode.VALIDATION_ERROR, detail=f"斗篷名称已存在：{data.cloak_name}")
 
+    _ensure_enabled_requires_bridge_html(data.cloak_name, data.is_enabled)
+
     config = CloakConfig(**data.model_dump())
     db.add(config)
     await db.commit()
     await db.refresh(config)
-    return ResponseBaseSchema.success(data=CloakConfigResponse.model_validate(config), message="创建斗篷配置成功")
+    resp = CloakConfigResponse.model_validate(config).model_copy(update=_bridge_usability_fields(config.cloak_name))
+    return ResponseBaseSchema.success(data=resp, message="创建斗篷配置成功")
 
 
 @router.put(
@@ -191,6 +220,7 @@ async def update_cloak_config(
     if not config:
         raise_api_exception(ErrorCode.RESOURCE_NOT_FOUND, detail="斗篷配置不存在")
 
+    old_cloak_name = config.cloak_name
     update_data = data.model_dump(exclude_unset=True)
     if "cloak_name" in update_data and update_data["cloak_name"] != config.cloak_name:
         duplicate_result = await db.execute(
@@ -202,9 +232,74 @@ async def update_cloak_config(
     for key, value in update_data.items():
         setattr(config, key, value)
 
+    _ensure_enabled_requires_bridge_html(config.cloak_name, config.is_enabled)
+
     await db.commit()
     await db.refresh(config)
-    return ResponseBaseSchema.success(data=CloakConfigResponse.model_validate(config), message="更新斗篷配置成功")
+    invalidate_cloak_cache_for_dp(old_cloak_name)
+    if config.cloak_name != old_cloak_name:
+        invalidate_cloak_cache_for_dp(config.cloak_name)
+
+    resp = CloakConfigResponse.model_validate(config).model_copy(update=_bridge_usability_fields(config.cloak_name))
+    return ResponseBaseSchema.success(data=resp, message="更新斗篷配置成功")
+
+
+@router.post(
+    "/{config_id}/bridge-html",
+    response_model=ResponseBaseSchema[dict],
+    summary="上传斗篷桥页 HTML",
+)
+async def upload_cloak_bridge_html(
+    config_id: int = Path(..., ge=1, description="配置ID"),
+    file: UploadFile = File(..., description="桥页 HTML 文件（UTF-8）"),
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(require_admin),
+):
+    result = await db.execute(select(CloakConfig).where(CloakConfig.id == config_id))
+    config = result.scalars().first()
+    if not config:
+        raise_api_exception(ErrorCode.RESOURCE_NOT_FOUND, detail="斗篷配置不存在")
+
+    raw = await file.read(MAX_BRIDGE_HTML_BYTES + 1)
+    if len(raw) > MAX_BRIDGE_HTML_BYTES:
+        raise_api_exception(
+            ErrorCode.VALIDATION_ERROR,
+            detail=f"HTML 文件过大，最大允许 {MAX_BRIDGE_HTML_BYTES // (1024 * 1024)}MB",
+        )
+
+    filename = (file.filename or "").strip().lower()
+    if filename and not filename.endswith(".html"):
+        raise_api_exception(ErrorCode.VALIDATION_ERROR, detail="请上传 .html 文件")
+
+    try:
+        text = validate_bridge_html_bytes(raw)
+    except ValueError as exc:
+        raise_api_exception(ErrorCode.VALIDATION_ERROR, detail=str(exc))
+
+    try:
+        target_path = resolve_bridge_html_write_path(config.cloak_name)
+    except (FileNotFoundError, PermissionError) as exc:
+        raise_api_exception(ErrorCode.VALIDATION_ERROR, detail=str(exc))
+
+    try:
+        with open(target_path, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+    except OSError as exc:
+        logger.exception("写入桥页 HTML 失败: %s", target_path)
+        raise_api_exception(ErrorCode.VALIDATION_ERROR, detail=f"写入文件失败：{exc}")
+
+    logger.warning("[斗篷管理] 已上传桥页 HTML：cloak_name=%s path=%s", config.cloak_name, target_path)
+    invalidate_cloak_cache_for_dp(config.cloak_name)
+
+    saved_filename = f"{config.cloak_name}.html"
+    return ResponseBaseSchema.success(
+        data={
+            "cloak_name": config.cloak_name,
+            "saved_as": saved_filename,
+            "bytes_written": len(text.encode("utf-8")),
+        },
+        message="桥页 HTML 上传成功",
+    )
 
 
 @router.delete(
@@ -222,8 +317,10 @@ async def delete_cloak_config(
     if not config:
         raise_api_exception(ErrorCode.RESOURCE_NOT_FOUND, detail="斗篷配置不存在")
 
+    deleted_cloak_name = config.cloak_name
     await db.delete(config)
     await db.commit()
+    invalidate_cloak_cache_for_dp(deleted_cloak_name)
     return ResponseBaseSchema.success(data={"id": config_id}, message="删除斗篷配置成功")
 
 

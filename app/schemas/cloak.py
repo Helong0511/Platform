@@ -114,6 +114,14 @@ class CloakConfigResponse(CloakConfigBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    bridge_html_present: bool = Field(
+        False,
+        description="是否已在磁盘部署桥页 HTML（任一路径存在 {cloak_name}.html）",
+    )
+    is_usable: bool = Field(
+        False,
+        description="斗篷是否可用：已检测到对应桥页 HTML 则为可用，否则不可用（无法启用对外使用）",
+    )
 
     class Config:
         from_attributes = True

@@ -2,7 +2,10 @@
   <div class="cloak-management">
     <div class="page-header">
       <h2>斗篷管理</h2>
-      <p>管理斗篷名称、像素与 Token，并支持测试上报</p>
+      <p>
+        管理斗篷名称、像素与 Token；系统会检测磁盘是否存在对应 <code>{斗篷名}.html</code>，
+        <strong>有则标识「可用」</strong>，无则<strong>不可用</strong>（不可开启，像素映射亦不生效）。可先保存配置再上传 HTML。
+      </p>
     </div>
 
     <el-card shadow="never" class="toolbar-card">
@@ -26,6 +29,18 @@
     <el-card shadow="never">
       <el-table v-loading="loading" :data="tableData" border stripe>
         <el-table-column prop="cloak_name" label="斗篷名称" min-width="130" />
+        <el-table-column label="可用性" width="128" align="center">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="!rowIsUsable(row)"
+              :content="`未检测到「${row.cloak_name}.html」，请先上传桥页文件`"
+              placement="top"
+            >
+              <el-tag type="danger" size="small">不可用</el-tag>
+            </el-tooltip>
+            <el-tag v-else type="success" size="small">可用</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="pixel_id" label="像素ID" min-width="150" />
         <el-table-column label="Token" min-width="160">
           <template #default="{ row }">
@@ -42,12 +57,17 @@
         </el-table-column>
         <el-table-column label="开关" width="110" align="center">
           <template #default="{ row }">
-            <el-switch :model-value="row.is_enabled" @change="(val) => handleToggle(row, val)" />
+            <el-switch
+              :model-value="row.is_enabled"
+              :disabled="!rowIsUsable(row) && !row.is_enabled"
+              @change="(val) => handleToggle(row, val)"
+            />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="380" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link @click="handleEdit(row)">编辑</el-button>
+            <el-button type="warning" link @click="handleOpenUpload(row)">上传HTML</el-button>
             <el-button type="success" link @click="handleTestReport(row)">测试上报</el-button>
             <el-button type="danger" link @click="handleDelete(row)">删除</el-button>
           </template>
@@ -93,12 +113,53 @@
           />
         </el-form-item>
         <el-form-item label="开关" prop="is_enabled">
-          <el-switch v-model="formData.is_enabled" />
+          <div>
+            <el-switch v-model="formData.is_enabled" />
+            <div class="switch-hint">
+              仅当已存在桥页文件 <code>{{ formData.cloak_name || '斗篷名称' }}.html</code> 时可开启；新建请先<strong>关闭开关</strong>保存，再上传 HTML 后开启。
+            </div>
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="uploadDialogVisible"
+      title="上传桥页 HTML"
+      width="520px"
+      :close-on-click-modal="false"
+      destroy-on-close
+      @closed="handleUploadDialogClosed"
+    >
+      <el-alert type="info" :closable="false" style="margin-bottom: 12px;">
+        将保存为磁盘文件 <strong>{{ uploadTargetRow?.cloak_name || '-' }}.html</strong>（与短链
+        <code>?dp=斗篷名称</code> 对应）。若已存在则会覆盖。
+      </el-alert>
+      <p style="margin: 0 0 8px; color: #909399; font-size: 13px;">
+        要求 UTF-8 编码，内容需包含 <code>&lt;!DOCTYPE html&gt;</code> 或 <code>&lt;html</code>，单文件不超过 2MB。
+      </p>
+      <el-upload
+        :key="uploadDialogKey"
+        drag
+        :limit="1"
+        accept=".html,text/html"
+        :auto-upload="false"
+        :on-change="handleHtmlFileChange"
+        :on-exceed="handleHtmlExceed"
+      >
+        <el-icon class="el-icon--upload"><Upload /></el-icon>
+        <div class="el-upload__text">拖拽文件到此处，或 <em>点击选择</em></div>
+        <template #tip>
+          <div class="el-upload__tip">仅 .html；上传成功后列表「可用性」将变为可用</div>
+        </template>
+      </el-upload>
+      <template #footer>
+        <el-button @click="uploadDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="uploading" @click="submitBridgeHtml">上传</el-button>
       </template>
     </el-dialog>
 
@@ -151,13 +212,14 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Plus, Refresh, Search } from '@element-plus/icons-vue';
+import { Plus, Refresh, Search, Upload } from '@element-plus/icons-vue';
 import {
   createCloakConfig,
   deleteCloakConfig,
   getCloakConfigs,
   testCloakReport,
-  updateCloakConfig
+  updateCloakConfig,
+  uploadCloakBridgeHtml
 } from '../../api/cloak-config';
 
 const loading = ref(false);
@@ -166,6 +228,11 @@ const tableData = ref([]);
 const formRef = ref(null);
 const editDialogVisible = ref(false);
 const testDialogVisible = ref(false);
+const uploadDialogVisible = ref(false);
+const uploadDialogKey = ref(0);
+const uploadTargetRow = ref(null);
+const uploadSelectedFile = ref(null);
+const uploading = ref(false);
 const editingId = ref(null);
 const currentTestingRow = ref(null);
 const testResult = ref(null);
@@ -198,6 +265,10 @@ const rules = computed(() => ({
   access_token: [{ required: true, message: '请输入Token', trigger: 'blur' }],
   backup_pixel_id: [{ pattern: /^\d*$/, message: '备份像素ID必须为数字', trigger: 'blur' }]
 }));
+
+/** 后端 is_usable 与 bridge_html_present 均为是否存在 HTML；兼容旧接口字段 */
+const rowIsUsable = (row) =>
+  row && (row.is_usable === true || row.bridge_html_present === true);
 
 const maskToken = (token) => {
   if (!token) return '-';
@@ -240,7 +311,7 @@ const resetFormData = () => {
   formData.access_token = '';
   formData.backup_pixel_id = '';
   formData.backup_access_token = '';
-  formData.is_enabled = true;
+  formData.is_enabled = false;
 };
 
 const handleSearch = () => {
@@ -316,14 +387,62 @@ const handleDelete = async (row) => {
 };
 
 const handleToggle = async (row, value) => {
+  if (value && !rowIsUsable(row)) {
+    ElMessage.warning('请先上传对应桥页 HTML，检测到文件后方可开启斗篷');
+    return;
+  }
   const oldValue = row.is_enabled;
   row.is_enabled = value;
   try {
     await updateCloakConfig(row.id, { is_enabled: value });
     ElMessage.success(`已${value ? '开启' : '关闭'}斗篷配置`);
+    fetchConfigs();
   } catch (error) {
     row.is_enabled = oldValue;
     ElMessage.error(error?.message || '更新开关失败');
+  }
+};
+
+const handleOpenUpload = (row) => {
+  uploadTargetRow.value = row;
+  uploadSelectedFile.value = null;
+  uploadDialogKey.value += 1;
+  uploadDialogVisible.value = true;
+};
+
+const handleHtmlFileChange = (uploadFile) => {
+  uploadSelectedFile.value = uploadFile?.raw || null;
+};
+
+const handleHtmlExceed = (files) => {
+  const raw = files?.[0];
+  uploadSelectedFile.value = raw || null;
+};
+
+const handleUploadDialogClosed = () => {
+  uploadTargetRow.value = null;
+  uploadSelectedFile.value = null;
+};
+
+const submitBridgeHtml = async () => {
+  if (!uploadTargetRow.value?.id) {
+    ElMessage.warning('无效的斗篷配置');
+    return;
+  }
+  if (!uploadSelectedFile.value) {
+    ElMessage.warning('请选择 HTML 文件');
+    return;
+  }
+  uploading.value = true;
+  try {
+    await uploadCloakBridgeHtml(uploadTargetRow.value.id, uploadSelectedFile.value);
+    ElMessage.success('桥页 HTML 上传成功');
+    uploadDialogVisible.value = false;
+    fetchConfigs();
+  } catch (error) {
+    ElMessage.error(error?.message || '上传失败');
+  } finally {
+    uploading.value = false;
   }
 };
 
@@ -383,6 +502,17 @@ onMounted(() => {
 .pagination {
   margin-top: 16px;
   text-align: right;
+}
+
+.switch-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+}
+
+.switch-hint code {
+  font-size: 12px;
 }
 
 .json-pre {

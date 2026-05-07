@@ -25,6 +25,7 @@ from app.core.auto_bot import send_telegram_message
 from app.core.config import settings
 from app.core.third_party_report import send_third_party_report
 from app.services.cloak_pixel_mapping import get_cloak_pixel_config
+from app.core.cloak_scripts_paths import resolve_bridge_html_read_path
 # 引入短链接处理函数
 from app.routes.short_link.handlers import handle_cached_redirect, handle_database_redirect
 
@@ -276,39 +277,16 @@ async def open_master_html_with_redirect(
             bridge_page_name = "master.html"
         
         logger.warning(f"[斗篷服务] 请求的桥页：{bridge_page_name}")
-        
-        # 构建文件路径
-        # 优先使用服务器路径
-        scripts_dir_server = "/data/Platform/scripts"
-        bridge_page_path_server = os.path.join(scripts_dir_server, bridge_page_name)
-        
-        # 本地开发路径
-        current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        scripts_dir_local = os.path.join(current_dir, "scripts")
-        bridge_page_path_local = os.path.join(scripts_dir_local, bridge_page_name)
-        
-        # 选择文件路径
-        bridge_page_path = None
-        if os.path.exists(bridge_page_path_server):
-            bridge_page_path = bridge_page_path_server
-            logger.warning(f"[斗篷服务] 使用服务器路径：{bridge_page_path}")
-        elif os.path.exists(bridge_page_path_local):
-            bridge_page_path = bridge_page_path_local
-            logger.warning(f"[斗篷服务] 使用本地路径：{bridge_page_path}")
+
+        bridge_page_path = resolve_bridge_html_read_path(bridge_page_name)
+        if bridge_page_path:
+            logger.warning(f"[斗篷服务] 使用桥页路径：{bridge_page_path}")
         else:
-            # 如果指定的文件不存在，尝试使用默认的 master.html
             if bridge_page_name != "master.html":
                 logger.warning(f"[斗篷服务] 桥页文件不存在：{bridge_page_name}，尝试使用 master.html")
-                master_html_path_server = os.path.join(scripts_dir_server, "master.html")
-                master_html_path_local = os.path.join(scripts_dir_local, "master.html")
-                
-                if os.path.exists(master_html_path_server):
-                    bridge_page_path = master_html_path_server
-                    logger.warning(f"[斗篷服务] 使用默认服务器路径：{bridge_page_path}")
-                elif os.path.exists(master_html_path_local):
-                    bridge_page_path = master_html_path_local
-                    logger.warning(f"[斗篷服务] 使用默认本地路径：{bridge_page_path}")
-            
+                bridge_page_path = resolve_bridge_html_read_path("master.html")
+                if bridge_page_path:
+                    logger.warning(f"[斗篷服务] 使用默认桥页路径：{bridge_page_path}")
             if not bridge_page_path:
                 logger.error(f"[斗篷服务] 桥页文件不存在：{bridge_page_name}，且 master.html 也不存在")
                 raise HTTPException(
