@@ -6,8 +6,13 @@
 from __future__ import annotations
 
 import os
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
+
+# 桥页模板内存缓存（路径规范化 -> (mtime, 内容)），mtime 变化自动失效；减轻 /change 每次读盘
+_MAX_BRIDGE_TEMPLATE_CACHE_ENTRIES = 128
+_bridge_template_cache: OrderedDict[str, tuple[float, str]] = OrderedDict()
 
 SCRIPTS_DIR_SERVER = "/data/Platform/scripts"
 
@@ -38,6 +43,44 @@ def resolve_bridge_html_read_path(bridge_page_name: str) -> Optional[str]:
 def bridge_html_exists(cloak_name: str) -> bool:
     """任一候选路径存在同名文件即视为已部署桥页。"""
     return resolve_bridge_html_read_path(bridge_html_filename(cloak_name)) is not None
+
+
+def read_bridge_html_template_cached(absolute_path: str) -> str:
+    """
+    读取桥页 HTML 模板（带内存缓存，按 mtime 失效）。
+    用于 /change：同一文件高并发下避免重复磁盘 IO。
+    """
+    norm = os.path.normpath(os.path.abspath(absolute_path))
+    try:
+        st = os.stat(norm)
+        mtime = st.st_mtime
+    except OSError:
+        raise
+
+    cached = _bridge_template_cache.get(norm)
+    if cached is not None and cached[0] == mtime:
+        _bridge_template_cache.move_to_end(norm)
+        return cached[1]
+
+    with open(norm, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    _bridge_template_cache[norm] = (mtime, content)
+    _bridge_template_cache.move_to_end(norm)
+    while len(_bridge_template_cache) > _MAX_BRIDGE_TEMPLATE_CACHE_ENTRIES:
+        _bridge_template_cache.popitem(last=False)
+
+    return content
+
+
+def invalidate_bridge_template_cache(path: Optional[str] = None) -> None:
+    """上传或替换桥页后可调用；不传 path 则清空全部模板缓存。"""
+    global _bridge_template_cache
+    if path is None:
+        _bridge_template_cache = OrderedDict()
+        return
+    norm = os.path.normpath(os.path.abspath(path))
+    _bridge_template_cache.pop(norm, None)
 
 
 def _permission_help_extra(path: str) -> str:

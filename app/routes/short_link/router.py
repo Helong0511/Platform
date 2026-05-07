@@ -25,7 +25,7 @@ from app.core.auto_bot import send_telegram_message
 from app.core.config import settings
 from app.core.third_party_report import send_third_party_report
 from app.services.cloak_pixel_mapping import get_cloak_pixel_config
-from app.core.cloak_scripts_paths import resolve_bridge_html_read_path
+from app.core.cloak_scripts_paths import read_bridge_html_template_cached, resolve_bridge_html_read_path
 # 引入短链接处理函数
 from app.routes.short_link.handlers import handle_cached_redirect, handle_database_redirect
 
@@ -121,16 +121,21 @@ async def open_master_html_with_redirect(
         client_ip = request.client.host if request.client else "未知"
         user_agent = request.headers.get("user-agent", "未知")
         referer = request.headers.get("referer", "未知")
-        logger.warning(
-            f"[斗篷服务] 收到 /change/{short_code} 请求: \nclient_ip={client_ip},\nuser_agent={user_agent},\nreferer={referer}")
+        logger.debug(
+            "[斗篷服务] 收到 /change/%s 请求: client_ip=%s, ua=%s, referer=%s",
+            short_code,
+            client_ip,
+            user_agent,
+            referer,
+        )
 
         # 尝试从缓存获取短链接信息
-        logger.warning(f"[斗篷服务] 尝试从缓存获取短链接信息: short_code={short_code}")
+        logger.debug(f"[斗篷服务] 尝试从缓存获取短链接信息: short_code={short_code}")
         cached_data = await get_short_link_from_cache(short_code)
         if cached_data:
-            logger.warning(f"[斗篷服务] 缓存命中: short_code={short_code}")
+            logger.debug(f"[斗篷服务] 缓存命中: short_code={short_code}")
         else:
-            logger.warning(f"[斗篷服务] 缓存未命中: short_code={short_code}")
+            logger.debug(f"[斗篷服务] 缓存未命中: short_code={short_code}")
 
         original_url = None
 
@@ -139,41 +144,50 @@ async def open_master_html_with_redirect(
         if not session_id:
             # 如果没有会话ID，生成一个
             session_id = str(uuid.uuid4())
-            logger.warning(f"[斗篷服务] 生成新会话ID: {session_id}")
+            logger.debug(f"[斗篷服务] 生成新会话ID: {session_id}")
         else:
-            logger.warning(f"[斗篷服务] 使用现有会话ID: {session_id}")
+            logger.debug(f"[斗篷服务] 使用现有会话ID: {session_id}")
 
         # 检查是否已经统计过展示次数
         redis = await get_redis_client()
         show_key = f"show_count:{short_code}:{session_id}"
-        logger.warning(f"[斗篷服务] 检查展示次数: key={show_key}")
+        logger.debug(f"[斗篷服务] 检查展示次数: key={show_key}")
 
-        has_shown = False  # 是否已经统计过展示次数
-        if redis:  # 如果Redis客户端可用
+        # SET key NX：一次往返完成「是否已展示」判断与标记（首次访问返回 True，已存在键返回 None）
+        has_shown = False
+        if redis:
             try:
-                has_shown = await redis.exists(show_key)  # 检查是否存在展示次数记录
-                logger.warning(f"[斗篷服务] Redis检查结果: has_shown={has_shown}")
-                if not has_shown:  # 如果没有展示记录
-                    # 设置过期时间为6小时
-                    await redis.setex(show_key, 21600, '1')  # 标记为已展示
-                    logger.warning(f"[斗篷服务] 设置展示标记: key={show_key}, 过期时间=6小时")
+                first_show = await redis.set(show_key, "1", ex=21600, nx=True)
+                # 各 redis 驱动返回值略有差异，统一按「有返回值且真」视为首次写入成功
+                has_shown = not bool(first_show)
+                logger.debug(
+                    "[斗篷服务] Redis 展示标记: key=%s 首次访问=%s",
+                    show_key,
+                    not has_shown,
+                )
             except Exception as e:
                 logger.error(f"[斗篷服务] Redis检查展示次数失败: {e}")
         else:  # 如果Redis客户端不可用
-            logger.warning(f"[斗篷服务] Redis客户端不可用")
+            logger.debug(f"[斗篷服务] Redis客户端不可用")
 
         if not has_shown:
-            logger.warning(f"[斗篷服务] 首次访问，开始统计展示次数: short_code={short_code}")
+            logger.debug(f"[斗篷服务] 首次访问，开始统计展示次数: short_code={short_code}")
             if cached_data:  # 如果缓存中存在数据
                 original_url = cached_data.get("original_url")  # 获取原始URL
-                logger.warning(
-                    f"[斗篷服务] 从缓存获取数据: short_code={short_code}, 原始show_count={cached_data.get('show_count', 0)}")
+                logger.debug(
+                    "[斗篷服务] 从缓存获取数据: short_code=%s, 原始show_count=%s",
+                    short_code,
+                    cached_data.get("show_count", 0),
+                )
 
                 cached_data["show_count"] = (cached_data.get("show_count", 0)) + 1
-                logger.warning(
-                    f"[斗篷服务] 更新缓存: short_code={short_code}, 新show_count={cached_data['show_count']}")
+                logger.debug(
+                    "[斗篷服务] 更新缓存: short_code=%s, 新show_count=%s",
+                    short_code,
+                    cached_data["show_count"],
+                )
                 update_result = await update_short_link_cache(short_code, cached_data)
-                logger.warning(f"[斗篷服务] 缓存更新结果: {update_result}")
+                logger.debug(f"[斗篷服务] 缓存更新结果: {update_result}")
 
                 # 后台任务更新数据库，确保数据一致性
                 async def update_show_count_db():
@@ -192,12 +206,15 @@ async def open_master_html_with_redirect(
                             if (short_link.show_count or 0) < cached_data["show_count"]:
                                 short_link.show_count = cached_data["show_count"]
                                 await db_session.commit()
-                                logger.warning(
-                                    f"[斗篷服务] 后台任务更新数据库: short_code={short_code}, 新show_count={short_link.show_count}")
+                                logger.debug(
+                                    "[斗篷服务] 后台任务更新数据库: short_code=%s, 新show_count=%s",
+                                    short_code,
+                                    short_link.show_count,
+                                )
                             else:
-                                logger.warning(f"[斗篷服务] 数据库值已最新，无需更新: short_code={short_code}")
+                                logger.debug(f"[斗篷服务] 数据库值已最新，无需更新: short_code={short_code}")
                         else:
-                            logger.warning(f"[斗篷服务] 后台任务: 短链接不存在: short_code={short_code}")
+                            logger.debug(f"[斗篷服务] 后台任务: 短链接不存在: short_code={short_code}")
                     except Exception as e:
                         logger.error(f"[斗篷服务] 后台任务更新数据库失败: {e}", exc_info=True)
                     finally:
@@ -205,10 +222,10 @@ async def open_master_html_with_redirect(
                             await db_session.close()
 
                 background_tasks.add_task(update_show_count_db)
-                logger.warning(f"[斗篷服务] 添加后台任务: 更新数据库展示次数")
+                logger.debug(f"[斗篷服务] 添加后台任务: 更新数据库展示次数")
             else:
                 # 从数据库查询
-                logger.warning(f"[斗篷服务] 缓存未命中，从数据库查询: short_code={short_code}")
+                logger.debug(f"[斗篷服务] 缓存未命中，从数据库查询: short_code={short_code}")
                 result = await db.execute(
                     select(ShortLink).where(ShortLink.short_code == short_code)
                 )
@@ -216,30 +233,37 @@ async def open_master_html_with_redirect(
 
                 if short_link:
                     original_url = short_link.original_url
-                    logger.warning(
-                        f"[斗篷服务] 数据库查询结果: short_code={short_code}, id={short_link.id}, 原始show_count={short_link.show_count or 0}")
+                    logger.debug(
+                        "[斗篷服务] 数据库查询结果: short_code=%s, id=%s, 原始show_count=%s",
+                        short_code,
+                        short_link.id,
+                        short_link.show_count or 0,
+                    )
                     # 更新展示次数（数据库）
                     short_link.show_count = (short_link.show_count or 0) + 1
-                    logger.warning(
-                        f"[斗篷服务] 更新数据库: short_code={short_code}, 新show_count={short_link.show_count}")
+                    logger.debug(
+                        "[斗篷服务] 更新数据库: short_code=%s, 新show_count=%s",
+                        short_code,
+                        short_link.show_count,
+                    )
                     try:
                         await db.commit()
-                        logger.warning(f"[斗篷服务] 数据库提交成功")
+                        logger.debug(f"[斗篷服务] 数据库提交成功")
                     except StaleDataError:
-                        logger.warning(f"[斗篷服务] 数据库更新冲突，忽略StaleDataError")
+                        logger.debug(f"[斗篷服务] 数据库更新冲突，忽略StaleDataError")
                         # 回滚事务以避免会话处于不一致状态
                         await db.rollback()
                 else:
-                    logger.warning(f"[斗篷服务] 短链接不存在: short_code={short_code}")
+                    logger.debug(f"[斗篷服务] 短链接不存在: short_code={short_code}")
         else:
             # 已经统计过展示次数，直接获取原始URL
-            logger.warning(f"[斗篷服务] 重复访问，跳过统计: short_code={short_code}")
+            logger.debug(f"[斗篷服务] 重复访问，跳过统计: short_code={short_code}")
             if cached_data:
                 original_url = cached_data.get("original_url")
-                logger.warning(f"[斗篷服务] 从缓存获取原始URL: {original_url}")
+                logger.debug(f"[斗篷服务] 从缓存获取原始URL: {original_url}")
             else:
                 # 从数据库查询
-                logger.warning(f"[斗篷服务] 缓存未命中，从数据库查询原始URL: short_code={short_code}")
+                logger.debug(f"[斗篷服务] 缓存未命中，从数据库查询原始URL: short_code={short_code}")
                 result = await db.execute(
                     select(ShortLink).where(ShortLink.short_code == short_code)
                 )
@@ -247,10 +271,10 @@ async def open_master_html_with_redirect(
 
                 if short_link:
                     original_url = short_link.original_url
-                    logger.warning(f"[斗篷服务] 从数据库获取原始URL: {original_url}")
+                    logger.debug(f"[斗篷服务] 从数据库获取原始URL: {original_url}")
                 else:
                     original_url = None
-                    logger.warning(f"[斗篷服务] 短链接不存在: short_code={short_code}")
+                    logger.debug(f"[斗篷服务] 短链接不存在: short_code={short_code}")
 
         if not original_url:
             logger.error(f"[斗篷服务] 未找到原始 URL: short_code={short_code}")
@@ -266,7 +290,7 @@ async def open_master_html_with_redirect(
         
         # 安全验证：只允许字母、数字、连字符和下划线
         if dp and not re.match(r'^[a-zA-Z0-9_-]+$', dp):
-            logger.warning(f"[斗篷服务] dp 参数包含非法字符：{dp}，使用默认桥页")
+            logger.debug(f"[斗篷服务] dp 参数包含非法字符：{dp}，使用默认桥页")
             dp = None
         
         # 确定桥页文件名
@@ -276,17 +300,17 @@ async def open_master_html_with_redirect(
             # 默认使用 master.html
             bridge_page_name = "master.html"
         
-        logger.warning(f"[斗篷服务] 请求的桥页：{bridge_page_name}")
+        logger.debug(f"[斗篷服务] 请求的桥页：{bridge_page_name}")
 
         bridge_page_path = resolve_bridge_html_read_path(bridge_page_name)
         if bridge_page_path:
-            logger.warning(f"[斗篷服务] 使用桥页路径：{bridge_page_path}")
+            logger.debug(f"[斗篷服务] 使用桥页路径：{bridge_page_path}")
         else:
             if bridge_page_name != "master.html":
-                logger.warning(f"[斗篷服务] 桥页文件不存在：{bridge_page_name}，尝试使用 master.html")
+                logger.debug(f"[斗篷服务] 桥页文件不存在：{bridge_page_name}，尝试使用 master.html")
                 bridge_page_path = resolve_bridge_html_read_path("master.html")
                 if bridge_page_path:
-                    logger.warning(f"[斗篷服务] 使用默认桥页路径：{bridge_page_path}")
+                    logger.debug(f"[斗篷服务] 使用默认桥页路径：{bridge_page_path}")
             if not bridge_page_path:
                 logger.error(f"[斗篷服务] 桥页文件不存在：{bridge_page_name}，且 master.html 也不存在")
                 raise HTTPException(
@@ -294,14 +318,12 @@ async def open_master_html_with_redirect(
                     detail="桥页文件不存在"
                 )
         
-        # 读取 HTML 文件内容
-        logger.warning(f"[斗篷服务] 读取桥页文件：{bridge_page_path}")
-        with open(bridge_page_path, "r", encoding="utf-8") as f:
-            html_content = f.read()
+        logger.debug("[斗篷服务] 读取桥页文件（模板缓存）：%s", bridge_page_path)
+        html_content = read_bridge_html_template_cached(bridge_page_path)
 
         # 将original_url直接注入到HTML中，同时保留处理fbclid参数的逻辑
         # 替换getOriginalUrl函数，使其返回原始URL并处理fbclid参数
-        logger.warning(f"[斗篷服务] 注入原始URL到HTML: {original_url}")
+        logger.debug(f"[斗篷服务] 注入原始URL到HTML: {original_url}")
         # 对原始URL进行转义，避免语法错误
         escaped_original_url = original_url.replace('\\', '\\\\').replace('"', '\\"')
         escaped_dp = (dp or "").replace('\\', '\\\\').replace('"', '\\"')
@@ -347,7 +369,7 @@ async def open_master_html_with_redirect(
         html_content = re.sub(pattern, replacement, html_content)
         # 验证替换是否成功
         if replacement in html_content:
-            logger.warning(f"[斗篷服务] 原始URL注入成功")
+            logger.debug(f"[斗篷服务] 原始URL注入成功")
         else:
             logger.error(f"[斗篷服务] 原始URL注入失败，检查正则表达式")
             # 尝试使用更简单的匹配方式
@@ -368,7 +390,7 @@ async def open_master_html_with_redirect(
         response.headers["Expires"] = "0"
 
         # 设置session_id到cookie，确保相同浏览器会话使用相同的标识
-        logger.warning(f"[斗篷服务] 设置会话 cookie: session_id={session_id}")
+        logger.debug(f"[斗篷服务] 设置会话 cookie: session_id={session_id}")
         response.set_cookie(
             key="session_id",
             value=session_id,
@@ -380,7 +402,7 @@ async def open_master_html_with_redirect(
             samesite="lax"
         )
 
-        logger.warning(f"[斗篷服务] /change/{short_code} 请求处理完成：返回{bridge_page_name}，原始 URL={original_url}")
+        logger.debug(f"[斗篷服务] /change/{short_code} 请求处理完成：返回{bridge_page_name}，原始 URL={original_url}")
         return response
     except HTTPException:
         raise
@@ -490,13 +512,15 @@ async def handle_report(
             if redis:
                 click_key = f"click_count:{id}:{session_id}"
                 try:
-                    has_clicked = await redis.exists(click_key)
-                    if has_clicked:
-                        logger.warning(f"[斗篷点击] 重复上报，跳过统计: id={id}, session_id={session_id}")
+                    first_click = await redis.set(click_key, "1", ex=86400, nx=True)
+                    if not bool(first_click):
+                        logger.debug(
+                            "[斗篷点击] 重复上报，跳过统计: id=%s, session_id=%s",
+                            id,
+                            session_id,
+                        )
                         return {"status": "success", "message": "Report received (duplicate)", "client_ip": client_ip,
                                 "fbclid": fbclid}
-                    # 设置过期时间为24小时
-                    await redis.setex(click_key, 86400, '1')
                 except Exception as e:
                     logger.warning(f"Redis检查点击次数失败: {e}")
 

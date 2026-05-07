@@ -16,6 +16,7 @@ from app.core.constants import MAX_PAGE_SIZE
 from app.core.cloak_scripts_paths import (
     MAX_BRIDGE_HTML_BYTES,
     bridge_html_exists,
+    invalidate_bridge_template_cache,
     resolve_bridge_html_write_path,
     validate_bridge_html_bytes,
 )
@@ -289,6 +290,7 @@ async def upload_cloak_bridge_html(
         raise_api_exception(ErrorCode.VALIDATION_ERROR, detail=f"写入文件失败：{exc}")
 
     logger.warning("[斗篷管理] 已上传桥页 HTML：cloak_name=%s path=%s", config.cloak_name, target_path)
+    invalidate_bridge_template_cache(target_path)
     invalidate_cloak_cache_for_dp(config.cloak_name)
 
     saved_filename = f"{config.cloak_name}.html"
