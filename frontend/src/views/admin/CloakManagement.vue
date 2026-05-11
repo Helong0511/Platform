@@ -47,6 +47,15 @@
             <span>{{ maskToken(row.access_token) }}</span>
           </template>
         </el-table-column>
+        <el-table-column prop="report_event" label="上报事件" width="130" />
+        <el-table-column label="金额/货币" width="120" align="right">
+          <template #default="{ row }">
+            <span v-if="row.report_event === 'Purchase'">
+              {{ row.report_value != null ? row.report_value : '-' }} {{ row.report_currency || 'USD' }}
+            </span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="backup_pixel_id" label="备份像素ID" min-width="150">
           <template #default="{ row }">{{ row.backup_pixel_id || '-' }}</template>
         </el-table-column>
@@ -112,6 +121,30 @@
             placeholder="可不填，不填则不上报备份"
           />
         </el-form-item>
+        <el-form-item label="上报事件" prop="report_event">
+          <el-select v-model="formData.report_event" placeholder="选择事件" style="width: 100%">
+            <el-option
+              v-for="opt in CLOAK_REPORT_EVENTS"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+          <div class="switch-hint">斗篷桥页点击上报与「测试上报」均使用此处配置；购物（Purchase）须填写金额与货币。</div>
+        </el-form-item>
+        <el-form-item v-if="formData.report_event === 'Purchase'" label="金额" prop="report_value">
+          <el-input-number
+            v-model="formData.report_value"
+            :min="0.01"
+            :precision="2"
+            :step="0.01"
+            style="width: 100%"
+            controls-position="right"
+          />
+        </el-form-item>
+        <el-form-item v-if="formData.report_event === 'Purchase'" label="货币" prop="report_currency">
+          <el-input v-model="formData.report_currency" maxlength="10" placeholder="如 USD" />
+        </el-form-item>
         <el-form-item label="开关" prop="is_enabled">
           <div>
             <el-switch v-model="formData.is_enabled" />
@@ -170,7 +203,12 @@
       :close-on-click-modal="false"
     >
       <el-alert type="info" :closable="false" style="margin-bottom: 12px;">
-        当前斗篷：{{ currentTestingRow?.cloak_name || '-' }}
+        当前斗篷：{{ currentTestingRow?.cloak_name || '-' }}；上报事件：{{
+          currentTestingRow?.report_event || 'ViewContent'
+        }}
+        <template v-if="currentTestingRow?.report_event === 'Purchase'">
+          ；金额：{{ currentTestingRow?.report_value }} {{ currentTestingRow?.report_currency || 'USD' }}
+        </template>
       </el-alert>
       <el-descriptions title="主上报结果" :column="1" border>
         <el-descriptions-item label="请求地址">{{ testResult?.primary?.request_url || '-' }}</el-descriptions-item>
@@ -222,6 +260,18 @@ import {
   uploadCloakBridgeHtml
 } from '../../api/cloak-config';
 
+/** 须与后端 app/schemas/cloak.py ALLOWED_CLOAK_REPORT_EVENTS 一致 */
+const CLOAK_REPORT_EVENTS = [
+  { label: 'ViewContent', value: 'ViewContent' },
+  { label: 'Purchase（购物）', value: 'Purchase' },
+  { label: 'Lead', value: 'Lead' },
+  { label: 'CompleteRegistration', value: 'CompleteRegistration' },
+  { label: 'InitiateCheckout', value: 'InitiateCheckout' },
+  { label: 'AddToCart', value: 'AddToCart' },
+  { label: 'Subscribe', value: 'Subscribe' },
+  { label: 'Contact', value: 'Contact' }
+];
+
 const loading = ref(false);
 const saving = ref(false);
 const tableData = ref([]);
@@ -253,6 +303,9 @@ const formData = reactive({
   access_token: '',
   backup_pixel_id: '',
   backup_access_token: '',
+  report_event: 'ViewContent',
+  report_value: null,
+  report_currency: 'USD',
   is_enabled: true
 });
 
@@ -263,7 +316,24 @@ const rules = computed(() => ({
     { pattern: /^\d+$/, message: '像素ID必须为数字', trigger: 'blur' }
   ],
   access_token: [{ required: true, message: '请输入Token', trigger: 'blur' }],
-  backup_pixel_id: [{ pattern: /^\d*$/, message: '备份像素ID必须为数字', trigger: 'blur' }]
+  backup_pixel_id: [{ pattern: /^\d*$/, message: '备份像素ID必须为数字', trigger: 'blur' }],
+  report_value: [
+    {
+      validator: (_rule, value, callback) => {
+        if (formData.report_event !== 'Purchase') {
+          callback();
+          return;
+        }
+        const n = Number(value);
+        if (value === null || value === undefined || Number.isNaN(n) || n <= 0) {
+          callback(new Error('购物事件须填写大于 0 的金额'));
+        } else {
+          callback();
+        }
+      },
+      trigger: 'change'
+    }
+  ]
 }));
 
 /** 后端 is_usable 与 bridge_html_present 均为是否存在 HTML；兼容旧接口字段 */
@@ -311,6 +381,9 @@ const resetFormData = () => {
   formData.access_token = '';
   formData.backup_pixel_id = '';
   formData.backup_access_token = '';
+  formData.report_event = 'ViewContent';
+  formData.report_value = null;
+  formData.report_currency = 'USD';
   formData.is_enabled = false;
 };
 
@@ -338,6 +411,9 @@ const handleEdit = (row) => {
   formData.access_token = row.access_token;
   formData.backup_pixel_id = row.backup_pixel_id || '';
   formData.backup_access_token = row.backup_access_token || '';
+  formData.report_event = row.report_event || 'ViewContent';
+  formData.report_value = row.report_value != null ? Number(row.report_value) : null;
+  formData.report_currency = row.report_currency || 'USD';
   formData.is_enabled = row.is_enabled;
   editDialogVisible.value = true;
 };
@@ -348,6 +424,9 @@ const buildPayload = () => ({
   access_token: formData.access_token,
   backup_pixel_id: formData.backup_pixel_id || null,
   backup_access_token: formData.backup_access_token || null,
+  report_event: formData.report_event || 'ViewContent',
+  report_value: formData.report_event === 'Purchase' ? Number(formData.report_value) : null,
+  report_currency: formData.report_event === 'Purchase' ? (formData.report_currency || 'USD').trim() : null,
   is_enabled: formData.is_enabled
 });
 
@@ -448,9 +527,12 @@ const submitBridgeHtml = async () => {
 
 const handleTestReport = async (row) => {
   try {
+    if (row.report_event === 'Purchase' && (row.report_value == null || Number(row.report_value) <= 0)) {
+      ElMessage.warning('当前斗篷为购物事件，请先在编辑中保存有效金额后再测上报');
+      return;
+    }
     currentTestingRow.value = row;
     const result = await testCloakReport(row.id, {
-      event: 'ViewContent',
       adsid: `test-${Date.now()}`,
       email: 'test@example.com',
       phone: '13800138000',

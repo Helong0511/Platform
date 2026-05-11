@@ -632,74 +632,91 @@ async def handle_report(
         if email and phone and background_tasks:
             # 从 request 头中获取 User-Agent
             ua_from_request = request.headers.get("user-agent", "未知") if request else "未知"
-            
-            # 构建上报参数
-            report_kwargs = {
-                "adsid": fbclid,  # 使用 fbclid 作为 adsid 事件 ID
-                "event": "ViewContent",
-                "email": email,
-                "ip": client_ip,  # 使用后端获取的客户端 IP
-                "phone": phone,
-                "ua": ua_from_request,
-                "source": "short_link"
-            }
-            
+
+            report_event = "ViewContent"
+            report_value = None
+            report_currency = "USD"
+
             # 如果提供了 dp 参数，添加到 source 中以便区分
+            source = "short_link"
             if resolved_dp:
-                report_kwargs["source"] = f"short_link_dp_{resolved_dp}"
+                source = f"short_link_dp_{resolved_dp}"
                 logger.warning(f"[第三方上报] 检测到 dp 参数：{resolved_dp}，已更新 source 标识")
-            
+
             # 使用新的映射服务获取像素配置（使用 dp 参数匹配）
             dp_param = resolved_dp if resolved_dp else "master"  # 默认使用 master
             logger.info(f"[第三方上报] 使用 dp 参数获取像素配置：dp={dp_param}, short_code={id}")
-            
-            # 初始化 pixel_config 为 None
+
             pixel_config = None
-            
+            report_kwargs_fb: dict = {}
             try:
-                # 从缓存或数据库获取像素配置
                 pixel_config = await get_cloak_pixel_config(db, dp=dp_param, short_code=id, use_cache=True)
-                
                 if pixel_config:
-                    # 使用斗篷的自定义像素配置
-                    report_kwargs["facebook_pixel_id"] = pixel_config["facebook_pixel_id"]
-                    report_kwargs["facebook_access_token"] = pixel_config["facebook_access_token"]
-                    report_kwargs["facebook_api_version"] = pixel_config["facebook_api_version"]
-                    
+                    report_kwargs_fb = {
+                        "facebook_pixel_id": pixel_config["facebook_pixel_id"],
+                        "facebook_access_token": pixel_config["facebook_access_token"],
+                        "facebook_api_version": pixel_config["facebook_api_version"],
+                    }
+                    cloak_evt = pixel_config.get("cloak_report_event") or "ViewContent"
+                    report_event = cloak_evt
+                    rv = pixel_config.get("cloak_report_value")
+                    if rv is not None:
+                        try:
+                            report_value = float(rv)
+                        except (TypeError, ValueError):
+                            report_value = None
+                    report_currency = (pixel_config.get("cloak_report_currency") or "USD").strip().upper() or "USD"
                     logger.info(
-                        f"[第三方上报] 使用斗篷自定义像素配置："
-                        f"dp={dp_param}, short_code={id}, "
-                        f"pixel_id={pixel_config['facebook_pixel_id'][:10] if pixel_config['facebook_pixel_id'] else '全局配置'}..."
+                        f"[第三方上报] 使用斗篷像素配置：dp={dp_param}, short_code={id}, "
+                        f"pixel_id={pixel_config['facebook_pixel_id'][:10] if pixel_config['facebook_pixel_id'] else ''}..., "
+                        f"report_event={report_event}"
                     )
                 else:
-                    # 未找到斗篷配置，使用全局配置
                     logger.info(
-                        f"[第三方上报] 未找到斗篷像素配置，将使用全局配置："
-                        f"dp={dp_param}, short_code={id}"
+                        f"[第三方上报] 未找到斗篷像素配置，将使用全局配置：dp={dp_param}, short_code={id}"
                     )
             except Exception as e:
                 logger.error(
                     f"[第三方上报] 获取像素配置失败：dp={dp_param}, short_code={id}, error={str(e)}",
-                    exc_info=True
+                    exc_info=True,
                 )
-            
-            # 如果 pixel_config 为 None，使用全局配置
+
             if not pixel_config:
-                report_kwargs["facebook_pixel_id"] = settings.FACEBOOK_PIXEL_ID
-                report_kwargs["facebook_access_token"] = settings.FACEBOOK_ACCESS_TOKEN
-                report_kwargs["facebook_api_version"] = settings.FACEBOOK_API_VERSION
-                logger.info(
-                    f"[第三方上报] 使用全局配置："
-                    f"pixel_id={settings.FACEBOOK_PIXEL_ID[:10]}..."
+                report_kwargs_fb = {
+                    "facebook_pixel_id": settings.FACEBOOK_PIXEL_ID,
+                    "facebook_access_token": settings.FACEBOOK_ACCESS_TOKEN,
+                    "facebook_api_version": settings.FACEBOOK_API_VERSION,
+                }
+                logger.info(f"[第三方上报] 使用全局配置：pixel_id={settings.FACEBOOK_PIXEL_ID[:10]}...")
+
+            report_kwargs = {
+                "adsid": fbclid,
+                "event": report_event,
+                "email": email,
+                "ip": client_ip,
+                "phone": phone,
+                "ua": ua_from_request,
+                "source": source,
+                **report_kwargs_fb,
+            }
+            if report_event == "Purchase":
+                report_kwargs["currency"] = report_currency
+                report_kwargs["amount"] = report_value
+                report_kwargs["conversion_id"] = f"cloak_{id}_{fbclid}"[:200]
+
+            if report_event == "Purchase" and (report_value is None or report_value <= 0):
+                logger.error(
+                    "[第三方上报] 斗篷配置为 Purchase 但未配置有效金额，跳过 Facebook 上报："
+                    "short_code=%s dp=%s",
+                    id,
+                    dp_param,
                 )
-            
-            # 添加到后台任务队列
-            # background_tasks.add_task(send_third_party_report, **report_kwargs)
-            # logger.warning(
-            #     f"[第三方上报] 已添加到后台任务队列："
-            #     f"adsid={fbclid}, ip={client_ip}, source={report_kwargs['source']}, "
-            #     f"pixel_config={'自定义' if pixel_config else '全局'}"
-            # )
+            else:
+                background_tasks.add_task(send_third_party_report, **report_kwargs)
+                logger.warning(
+                    f"[第三方上报] 已添加到后台任务队列：adsid={fbclid}, ip={client_ip}, "
+                    f"source={source}, event={report_event}, pixel_config={'自定义' if pixel_config else '全局'}"
+                )
 
         # 返回成功响应
         logger.warning(f"[斗篷点击] 处理完成：id={id}, fbclid={fbclid}, client_ip={client_ip}")

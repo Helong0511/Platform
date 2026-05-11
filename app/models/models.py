@@ -709,6 +709,19 @@ class CloakConfig(Base):
     access_token = Column(String(500), nullable=False, comment='主像素Token')
     backup_pixel_id = Column(String(50), nullable=True, comment='备份像素ID')
     backup_access_token = Column(String(500), nullable=True, comment='备份像素Token')
+    report_event = Column(
+        String(64),
+        nullable=False,
+        default='ViewContent',
+        comment='斗篷点击与测上报的 CAPI event_name（如 ViewContent、Purchase）',
+    )
+    report_value = Column(Float, nullable=True, comment='购物类事件金额（Purchase 等需配合 report_currency）')
+    report_currency = Column(
+        String(10),
+        nullable=True,
+        default='USD',
+        comment='购物类事件货币代码（如 USD）',
+    )
     is_enabled = Column(Boolean, default=True, nullable=False, index=True, comment='是否启用')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
     updated_at = Column(DateTime, default=get_app_now_naive,

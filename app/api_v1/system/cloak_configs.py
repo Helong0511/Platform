@@ -20,6 +20,7 @@ from app.core.cloak_scripts_paths import (
     resolve_bridge_html_write_path,
     validate_bridge_html_bytes,
 )
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
@@ -81,7 +82,15 @@ def _resolve_real_user_agent(request: Request) -> str:
     return user_agent or f"server/{socket.gethostname()}"
 
 
-def _build_facebook_payload(test_data: TestCloakReportRequest, client_ip: str, client_user_agent: str) -> dict:
+def _build_facebook_payload(
+    test_data: TestCloakReportRequest,
+    client_ip: str,
+    client_user_agent: str,
+    *,
+    report_event: str,
+    report_value: Optional[float],
+    report_currency: Optional[str],
+) -> dict:
     current_ts = int(time.time())
     user_data = {
         "client_ip_address": client_ip,
@@ -96,25 +105,27 @@ def _build_facebook_payload(test_data: TestCloakReportRequest, client_ip: str, c
         user_data["em"] = test_data.email
         user_data["ph"] = test_data.phone
 
-    return {
-        "data": [
-            {
-                "event_name": test_data.event,
-                "event_time": current_ts,
-                "action_source": "website",
-                "event_id": "cloak-test-event-id",
-                "user_data": user_data,
-            }
-        ]
+    event_obj: dict = {
+        "event_name": report_event,
+        "event_time": current_ts,
+        "action_source": "website",
+        "event_id": "cloak-test-event-id",
+        "user_data": user_data,
     }
+    if report_event == "Purchase" and report_value is not None:
+        cur = (report_currency or "USD").strip().upper() or "USD"
+        event_obj["custom_data"] = {"currency": cur, "value": float(report_value)}
+
+    return {"data": [event_obj]}
 
 
 async def _send_test_report(
     pixel_id: str,
     access_token: str,
     payload: dict,
-    api_version: str = "v21.0",
+    api_version: Optional[str] = None,
 ) -> dict:
+    api_version = (api_version or settings.FACEBOOK_API_VERSION or "v23.0").strip()
     request_url = f"https://graph.facebook.com/{api_version}/{pixel_id}/events"
     request_query = {"access_token": access_token}
     masked_request_query = {"access_token": _mask_token(access_token)}
@@ -233,6 +244,14 @@ async def update_cloak_config(
     for key, value in update_data.items():
         setattr(config, key, value)
 
+    if config.report_event == "Purchase" and (
+        config.report_value is None or float(config.report_value) <= 0
+    ):
+        raise_api_exception(
+            ErrorCode.VALIDATION_ERROR,
+            detail="上报事件为 Purchase 时必须配置大于 0 的金额（report_value）",
+        )
+
     _ensure_enabled_requires_bridge_html(config.cloak_name, config.is_enabled)
 
     await db.commit()
@@ -343,9 +362,24 @@ async def test_cloak_report(
     if not config:
         raise_api_exception(ErrorCode.RESOURCE_NOT_FOUND, detail="斗篷配置不存在")
 
+    if config.report_event == "Purchase" and (
+        config.report_value is None or float(config.report_value) <= 0
+    ):
+        raise_api_exception(
+            ErrorCode.VALIDATION_ERROR,
+            detail="上报事件为 Purchase 时须先在斗篷配置中保存大于 0 的金额，再执行测上报",
+        )
+
     client_ip = _resolve_real_client_ip(request)
     client_user_agent = _resolve_real_user_agent(request)
-    payload = _build_facebook_payload(test_data, client_ip, client_user_agent)
+    payload = _build_facebook_payload(
+        test_data,
+        client_ip,
+        client_user_agent,
+        report_event=config.report_event,
+        report_value=config.report_value,
+        report_currency=config.report_currency,
+    )
     primary_result = await _send_test_report(config.pixel_id, config.access_token, payload)
 
     backup_result = None

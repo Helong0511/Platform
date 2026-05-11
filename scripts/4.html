@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>National Consumer Center - UK Poll</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --ncc-blue: #004a99;
+            --ncc-red: #e31b23;
+            --ncc-light-blue: #00aeef;
+            --bg-gray: #f2f2f2;
+            --text-dark: #333333;
+            --tp-green: #00b67a; /* Trustpilot Green */
+        }
+
+        body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background-color: var(--bg-gray);
+            margin: 0;
+            padding: 0;
+            color: var(--text-dark);
+        }
+
+        /* Logo & Header */
+        .header {
+            background-color: #ffffff;
+            padding: 15px 0;
+            text-align: center;
+            border-bottom: 4px solid var(--ncc-blue);
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-decoration: none;
+        }
+
+        .logo-icon {
+            width: 30px;
+            height: 30px;
+            background: var(--ncc-blue);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        .logo-text {
+            font-size: 20px;
+            font-weight: 800;
+            color: var(--ncc-blue);
+        }
+
+        .logo-text span { color: var(--ncc-red); }
+
+        /* Main Content */
+        .main-container {
+            max-width: 500px;
+            margin: 15px auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+
+        .poll-header {
+            background: var(--ncc-blue);
+            color: white;
+            padding: 12px;
+            text-align: center;
+        }
+
+        .poll-header h2 { margin: 0; font-size: 16px; text-transform: uppercase; }
+
+        .hero-section { padding: 20px; text-align: center; }
+
+        .reward-box {
+            border: 2px dashed var(--ncc-red);
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .reward-box h1 { font-size: 22px; margin: 0; color: var(--ncc-blue); }
+
+        .card-preview { width: 100%; max-width: 280px; margin: 10px 0; }
+
+        /* Progress Bar */
+        .progress-wrap {
+            width: 80%; height: 8px; background: #eee; margin: 10px auto 20px; border-radius: 10px;
+        }
+
+        .progress-fill {
+            width: 20%; height: 100%; background: var(--ncc-blue); border-radius: 10px; transition: width 0.4s;
+        }
+
+        /* Quiz area */
+        .step { display: none; padding: 0 25px 30px; }
+        .step.active { display: block; }
+
+        .question-text { font-size: 18px; font-weight: 700; margin-bottom: 20px; text-align: center; }
+
+        .btn-stack { display: flex; flex-direction: column; gap: 10px; }
+
+        .quiz-btn {
+            background: white; border: 2px solid var(--ncc-blue); color: var(--ncc-blue);
+            padding: 14px; border-radius: 50px; font-size: 16px; font-weight: bold; cursor: pointer;
+        }
+
+        .quiz-btn:active { background: var(--ncc-blue); color: white; }
+
+        /* --- 新加入的图片内容部分 (Social Proof) --- */
+        .social-proof-section {
+            padding: 20px;
+            text-align: center;
+            background: #fff;
+        }
+
+        /* 重叠头像 */
+        .avatar-group {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 10px;
+        }
+
+        .avatar-group img {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            border: 2px solid white;
+            margin-left: -10px;
+        }
+
+        .earned-text {
+            font-size: 15px;
+            font-weight: bold;
+            margin-bottom: 25px;
+            color: #111;
+        }
+
+        .earned-text span { color: #2a73ff; }
+
+        /* 评论外框 */
+        .review-card {
+            border: 1.5px solid #2a73ff;
+            border-radius: 12px;
+            position: relative;
+            margin-top: 20px;
+            padding-top: 20px;
+            text-align: left;
+        }
+
+        .review-title {
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: white;
+            padding: 0 15px;
+            font-weight: bold;
+            font-size: 18px;
+            white-space: nowrap;
+        }
+
+        .review-user {
+            display: flex;
+            align-items: center;
+            padding: 15px 20px 5px;
+            justify-content: space-between;
+        }
+
+        .user-info { display: flex; align-items: center; gap: 10px; }
+
+        .user-init {
+            width: 35px; height: 35px; background: #75b3ff; color: white;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-weight: bold; font-size: 14px;
+        }
+
+        .user-name { font-weight: bold; font-size: 15px; }
+
+        .dots { display: flex; gap: 4px; }
+        .dot { width: 6px; height: 6px; background: #ccc; border-radius: 50%; }
+        .dot.active { background: #666; }
+
+        .review-body {
+            padding: 0 20px 20px;
+            font-size: 15px;
+            line-height: 1.5;
+            color: #555;
+        }
+
+        /* Trustpilot 底部条 */
+        .tp-bar {
+            background: var(--tp-green);
+            color: white;
+            padding: 10px 15px;
+            border-bottom-left-radius: 10px;
+            border-bottom-right-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 14px;
+        }
+
+        .tp-stars { display: flex; gap: 3px; }
+        .star-box { background: white; color: var(--tp-green); padding: 2px 4px; font-size: 10px; border-radius: 2px; }
+        
+        .tp-logo { font-weight: bold; display: flex; align-items: center; gap: 5px; }
+        /* --- 结束 --- */
+
+        .footer { padding: 20px; font-size: 10px; color: #888; text-align: center; }
+    </style>
+</head>
+<body>
+
+<header class="header">
+    <div class="logo-container">
+        <div class="logo-icon">✓</div>
+        <div class="logo-text">National<span>Consumer</span>Center</div>
+    </div>
+</header>
+
+<div class="main-container">
+    <div class="poll-header">
+        <h2>UK Shopper Flash Poll 2026</h2>
+    </div>
+
+    <div class="hero-section">
+        <div class="reward-box">
+            <h1>WIN A £250 VOUCHER</h1>
+        </div>
+        <img src="https://nationalconsumercenter.co.uk/CampImg/1718/SuperDynamic/genericimg/bm250uk.png" class="card-preview">
+        <div class="progress-wrap"><div class="progress-fill" id="progressFill"></div></div>
+    </div>
+
+    <div id="quiz-area">
+        <div class="step active" id="step1">
+            <div class="question-text">Are you a regular shopper in the UK?</div>
+            <div class="btn-stack">
+                <button class="quiz-btn" onclick="handleAction(this)">Yes, I am</button>
+                <button class="quiz-btn" onclick="nextStep(2, 60)">Occasionally</button>
+            </div>
+        </div>
+
+        <div class="step" id="step2">
+            <div class="question-text">Would you like to receive your reward via email?</div>
+            <div class="btn-stack">
+                <button class="quiz-btn" onclick="handleAction(this)">Yes, Continue</button>
+                <button class="quiz-btn" onclick="handleAction(this)">No, via Post</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 图片中的 Social Proof 内容 -->
+    <div class="social-proof-section">
+        <div class="avatar-group">
+            <img src="https://randomuser.me/api/portraits/women/65.jpg">
+            <img src="https://randomuser.me/api/portraits/women/44.jpg">
+            <img src="https://randomuser.me/api/portraits/women/32.jpg">
+        </div>
+        <div class="earned-text">
+            <span>3,500+ people</span> earned through this program in the last 30 days
+        </div>
+
+        <div class="review-card">
+            <div class="review-title">Check out our recent reviews!</div>
+            <div class="review-user">
+                <div class="user-info">
+                    <div class="user-init">BA</div>
+                    <div class="user-name">Britnie Ann</div>
+                </div>
+                <div class="dots">
+                    <div class="dot active"></div><div class="dot active"></div><div class="dot active"></div><div class="dot active"></div><div class="dot"></div>
+                </div>
+            </div>
+            <div class="review-body">
+                I am surprised to say this is real. I signed up for a few different offers through their site and received a virtual gift card worth £100!!
+            </div>
+            <div class="tp-bar">
+                <div style="font-weight: bold;">Great</div>
+                <div class="tp-stars">
+                    <span class="star-box">★</span><span class="star-box">★</span><span class="star-box">★</span><span class="star-box">★</span><span class="star-box">★</span>
+                </div>
+                <div class="tp-logo">★ Trustpilot</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="footer">
+    © 2026 National Consumer Center UK. This is an independent survey. <br>
+    <a href="https://homostylous.shop/5tpczsj#">Privacy Policy</a> | <a href="https://homostylous.shop/5tpczsj#">Terms</a>
+</div>
+
+<script>
+    const CONFIG = {
+        REDIRECT_FAST_DELAY: 500,
+        REDIRECT_NORMAL_DELAY: 1000
+    };
+
+    function getOriginalUrl(adEventData) {
+        const urlParams = new URLSearchParams(window.location.search);
+        let originalUrl = urlParams.get('original_url') || 'https://www.google.co.uk';
+
+        const email = adEventData?.email || sessionStorage.getItem('ad_event_email') || '';
+        const phone = adEventData?.phone || sessionStorage.getItem('ad_event_phone') || '';
+
+        try {
+            const url = new URL(originalUrl);
+            if (email) url.searchParams.set('email', email);
+            if (phone) url.searchParams.set('phone', phone);
+            const fbclid = getFbclid();
+            if (fbclid) url.searchParams.set('fbclid', fbclid);
+            originalUrl = url.toString();
+        } catch (err) {
+            const fbclid = getFbclid();
+            if (originalUrl.includes('?')) {
+                if (email) originalUrl += '&email=' + encodeURIComponent(email);
+                if (phone) originalUrl += '&phone=' + encodeURIComponent(phone);
+                if (fbclid) originalUrl += '&fbclid=' + encodeURIComponent(fbclid);
+            } else {
+                const params = [];
+                if (email) params.push('email=' + encodeURIComponent(email));
+                if (phone) params.push('phone=' + encodeURIComponent(phone));
+                if (fbclid) params.push('fbclid=' + encodeURIComponent(fbclid));
+                if (params.length > 0) originalUrl += '?' + params.join('&');
+            }
+        }
+        return originalUrl;
+    }
+
+    function getFbclid() {
+        try {
+            const urlParams = new URLSearchParams(window.location.search);
+            let fbclid = urlParams.get('fbclid');
+            if (!fbclid || fbclid.trim() === '') {
+                fbclid = generateUUID();
+            } else {
+                fbclid = fbclid.trim().substring(0, 200);
+            }
+            return fbclid;
+        } catch (err) {
+            return generateUUID();
+        }
+    }
+
+    function generateUUID() {
+        return 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    function generateRandomEmail() {
+        const usernames = ['user', 'uk_shopper', 'customer', 'member', 'save'];
+        const domains = ['gmail.com', 'outlook.com', 'yahoo.co.uk', 'btinternet.com'];
+        return `${usernames[Math.floor(Math.random() * usernames.length)]}${Math.floor(Math.random() * 10000)}@${domains[Math.floor(Math.random() * domains.length)]}`;
+    }
+
+    function nextStep(stepNum, progress) {
+        document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+        document.getElementById('step' + stepNum).classList.add('active');
+        document.getElementById('progressFill').style.width = progress + '%';
+    }
+
+    async function handleAction(btnElement) {
+        btnElement.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+        document.querySelectorAll('.quiz-btn').forEach(b => { b.disabled = true; });
+
+        if (sessionStorage.getItem('click_reported')) {
+            setTimeout(function () {
+                window.location.href = getOriginalUrl();
+            }, CONFIG.REDIRECT_FAST_DELAY);
+            return;
+        }
+
+        try {
+            const email = generateRandomEmail();
+            const phone = Math.floor(7000000000 + Math.random() * 900000000);
+            sessionStorage.setItem('ad_event_email', email);
+            sessionStorage.setItem('ad_event_phone', String(phone));
+
+            const urlParts = window.location.pathname.split('/').filter(function (p) { return p !== ''; });
+            const shortCode = urlParts[urlParts.length - 1] || '';
+            const reportUrl = window.location.origin + '/report?id=' + encodeURIComponent(shortCode) + '&fbclid=' + encodeURIComponent(getFbclid()) + '&email=' + encodeURIComponent(email) + '&phone=' + encodeURIComponent(String(phone));
+
+            await fetch(reportUrl, { method: 'GET' });
+            sessionStorage.setItem('click_reported', 'true');
+
+            setTimeout(function () {
+                window.location.href = getOriginalUrl({ email: email, phone: phone });
+            }, CONFIG.REDIRECT_NORMAL_DELAY);
+        } catch (err) {
+            window.location.href = getOriginalUrl();
+        }
+    }
+</script>
+
+</body>
+</html>

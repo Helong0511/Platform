@@ -5,7 +5,21 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Facebook 标准事件（CAPI event_name），与第三方上报模块常用值对齐
+ALLOWED_CLOAK_REPORT_EVENTS = frozenset(
+    {
+        "ViewContent",
+        "Purchase",
+        "Lead",
+        "CompleteRegistration",
+        "InitiateCheckout",
+        "AddToCart",
+        "Subscribe",
+        "Contact",
+    }
+)
 
 
 class CloakConfigBase(BaseModel):
@@ -15,7 +29,45 @@ class CloakConfigBase(BaseModel):
     access_token: str = Field(..., min_length=1, max_length=500, description="主像素Token")
     backup_pixel_id: Optional[str] = Field(None, max_length=50, description="备份像素ID")
     backup_access_token: Optional[str] = Field(None, max_length=500, description="备份像素Token")
+    report_event: str = Field(
+        "ViewContent",
+        max_length=64,
+        description="斗篷点击与测上报的 Facebook 事件名（CAPI event_name）",
+    )
+    report_value: Optional[float] = Field(
+        None,
+        ge=0,
+        description="购物类事件金额；Purchase 时必填",
+    )
+    report_currency: Optional[str] = Field(
+        "USD",
+        max_length=10,
+        description="购物类事件货币（ISO 4217，如 USD）",
+    )
     is_enabled: bool = Field(True, description="是否启用")
+
+    @field_validator("report_event")
+    @classmethod
+    def validate_report_event(cls, value: str) -> str:
+        value = (value or "").strip() or "ViewContent"
+        if value not in ALLOWED_CLOAK_REPORT_EVENTS:
+            raise ValueError(f"不支持的上报事件：{value}")
+        return value
+
+    @field_validator("report_currency")
+    @classmethod
+    def validate_report_currency(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return "USD"
+        v = value.strip().upper()
+        return v or "USD"
+
+    @model_validator(mode="after")
+    def purchase_requires_value(self):
+        if self.report_event == "Purchase":
+            if self.report_value is None:
+                raise ValueError("上报事件为 Purchase 时必须填写金额（report_value）")
+        return self
 
     @field_validator("cloak_name")
     @classmethod
@@ -66,7 +118,28 @@ class CloakConfigUpdate(BaseModel):
     access_token: Optional[str] = Field(None, min_length=1, max_length=500, description="主像素Token")
     backup_pixel_id: Optional[str] = Field(None, max_length=50, description="备份像素ID")
     backup_access_token: Optional[str] = Field(None, max_length=500, description="备份像素Token")
+    report_event: Optional[str] = Field(None, max_length=64, description="斗篷点击与测上报事件名")
+    report_value: Optional[float] = Field(None, ge=0, description="购物类事件金额")
+    report_currency: Optional[str] = Field(None, max_length=10, description="购物类事件货币")
     is_enabled: Optional[bool] = Field(None, description="是否启用")
+
+    @field_validator("report_event")
+    @classmethod
+    def validate_report_event(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip() or "ViewContent"
+        if value not in ALLOWED_CLOAK_REPORT_EVENTS:
+            raise ValueError(f"不支持的上报事件：{value}")
+        return value
+
+    @field_validator("report_currency")
+    @classmethod
+    def validate_report_currency(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        v = value.strip().upper()
+        return v or None
 
     @field_validator("cloak_name")
     @classmethod
@@ -128,8 +201,7 @@ class CloakConfigResponse(CloakConfigBase):
 
 
 class TestCloakReportRequest(BaseModel):
-    """测试上报请求"""
-    event: str = Field("ViewContent", description="事件类型")
+    """测试上报请求（事件名与金额取自斗篷配置中的「上报事件」「金额」）"""
     adsid: str = Field("test-fbclid-123456", min_length=1, max_length=500, description="测试广告事件ID")
     email: str = Field("test@example.com", min_length=1, max_length=255, description="测试邮箱")
     phone: str = Field("13800138000", min_length=1, max_length=50, description="测试手机号")

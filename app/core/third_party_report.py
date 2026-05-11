@@ -159,7 +159,7 @@ async def send_third_party_report(
         currency: Optional[str] = None,
         amount: Optional[float] = None,
         click_time: Optional[datetime] = None,
-        facebook_api_version: Optional[str] = "v21.0"  # 可选参数，默认 v21.0
+        facebook_api_version: Optional[str] = "v23.0"  # 可选参数，默认与全局 FACEBOOK_API_VERSION 对齐
 ):
     """
     后台任务：发送第三方广告上报
@@ -333,11 +333,11 @@ async def send_third_party_report(
                 "user_data": user_data
             }
 
-            # 购物事件必须添加 custom_data
-            if fb_event_name == "Purchase" and amount:
+            # 购物事件必须添加 custom_data（Meta 要求 value + currency）
+            if fb_event_name == "Purchase" and amount is not None:
                 event_data["custom_data"] = {
-                    "currency": currency,
-                    "value": float(amount)
+                    "currency": (currency or "USD"),
+                    "value": float(amount),
                 }
 
             # 构建请求数据
@@ -489,11 +489,11 @@ async def send_third_party_report(
                 "user_data": user_data
             }
 
-            # 购物事件必须添加 custom_data
-            if fb_event_name == "Purchase" and amount:
+            # 购物事件必须添加 custom_data（Meta 要求 value + currency）
+            if fb_event_name == "Purchase" and amount is not None:
                 event_data["custom_data"] = {
-                    "currency": currency,
-                    "value": float(amount)
+                    "currency": (currency or "USD"),
+                    "value": float(amount),
                 }
 
             # 构建请求数据

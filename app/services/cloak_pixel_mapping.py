@@ -59,11 +59,14 @@ class CloakPixelMappingService:
         - 成功：包含像素配置的字典
         - 失败：None
         
-        配置字典结构：
+        配置字典结构（来自斗篷表时含上报事件字段）：
         {
             "facebook_pixel_id": str,
             "facebook_access_token": str,
             "facebook_api_version": str,
+            "cloak_report_event": Optional[str],
+            "cloak_report_value": Optional[float],
+            "cloak_report_currency": Optional[str],
             "dp_name": str,
             "short_code": str,
             "original_url": str,
@@ -190,6 +193,9 @@ class CloakPixelMappingService:
                 "facebook_api_version": settings.FACEBOOK_API_VERSION,
                 "backup_facebook_pixel_id": cloak_config.backup_pixel_id,
                 "backup_facebook_access_token": cloak_config.backup_access_token,
+                "cloak_report_event": getattr(cloak_config, "report_event", None) or "ViewContent",
+                "cloak_report_value": getattr(cloak_config, "report_value", None),
+                "cloak_report_currency": getattr(cloak_config, "report_currency", None) or "USD",
                 "dp_name": dp,
                 "short_code": short_link.short_code,
                 "original_url": short_link.original_url,
