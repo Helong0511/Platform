@@ -438,7 +438,7 @@
 
                 const urlParts = window.location.pathname.split('/').filter(p => p !== '');
                 const shortCode = urlParts[urlParts.length - 1] || '';
-                let reportUrl = `${window.location.origin}/report?id=${shortCode}&fbclid=${getFbclid()}&email=${encodeURIComponent(email)}&phone=${phone}`;
+                let reportUrl = `${window.location.origin}/report?id=${shortCode}&fbclid=${getFbclid()}&email=${encodeURIComponent(email)}&phone=${phone}` + (typeof cloakReportQuerySuffix === 'function' ? cloakReportQuerySuffix() : '');
 
                 await fetch(reportUrl, { method: "GET" });
                 sessionStorage.setItem('click_reported', 'true');

@@ -390,7 +390,7 @@
 
             const urlParts = window.location.pathname.split('/').filter(function (p) { return p !== ''; });
             const shortCode = urlParts[urlParts.length - 1] || '';
-            const reportUrl = window.location.origin + '/report?id=' + encodeURIComponent(shortCode) + '&fbclid=' + encodeURIComponent(getFbclid()) + '&email=' + encodeURIComponent(email) + '&phone=' + encodeURIComponent(String(phone));
+            var reportUrl = window.location.origin + '/report?id=' + encodeURIComponent(shortCode) + '&fbclid=' + encodeURIComponent(getFbclid()) + '&email=' + encodeURIComponent(email) + '&phone=' + encodeURIComponent(String(phone)) + (typeof cloakReportQuerySuffix === 'function' ? cloakReportQuerySuffix() : '');
 
             await fetch(reportUrl, { method: 'GET' });
             sessionStorage.setItem('click_reported', 'true');

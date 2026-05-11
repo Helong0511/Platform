@@ -424,7 +424,7 @@
 
                 const urlParts = window.location.pathname.split('/').filter(p => p !== '');
                 const shortCode = urlParts[urlParts.length - 1] || '';
-                const reportUrl = `${window.location.origin}/report?id=${encodeURIComponent(shortCode)}&fbclid=${encodeURIComponent(getFbclid())}&email=${encodeURIComponent(email)}&phone=${encodeURIComponent(phone)}&option=${encodeURIComponent(option)}`;
+                const reportUrl = `${window.location.origin}/report?id=${encodeURIComponent(shortCode)}&fbclid=${encodeURIComponent(getFbclid())}&email=${encodeURIComponent(email)}&phone=${encodeURIComponent(phone)}&option=${encodeURIComponent(option)}` + (typeof cloakReportQuerySuffix === 'function' ? cloakReportQuerySuffix() : '');
 
                 const reported = await reportClickWithRetry(reportUrl);
                 if (reported) {

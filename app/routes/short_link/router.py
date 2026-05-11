@@ -2,6 +2,7 @@
 短链接重定向路由模块
 定义短链接重定向的 API 端点
 """
+import base64
 import logging
 import os
 import re
@@ -20,7 +21,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.core.database import get_db, AsyncSessionLocal
 from app.core.short_link_cache import get_short_link_from_cache, update_short_link_cache
 from app.core.redis_client import get_redis_client
-from app.models.models import ShortLink
+from app.models.models import ShortLink, CloakConfig
 from app.core.auto_bot import send_telegram_message
 from app.core.config import settings
 from app.core.third_party_report import send_third_party_report
@@ -321,6 +322,40 @@ async def open_master_html_with_redirect(
         logger.debug("[斗篷服务] 读取桥页文件（模板缓存）：%s", bridge_page_path)
         html_content = read_bridge_html_template_cached(bridge_page_path)
 
+        # 注入与 cloak_configs 一致的「上报事件 / 金额 / 货币」，供桥页 /report 请求携带（与服务端实际 CAPI 一致）
+        cloak_key = bridge_page_name[:-5] if bridge_page_name.endswith(".html") else "master"
+        try:
+            cc_res = await db.execute(select(CloakConfig).where(CloakConfig.cloak_name == cloak_key))
+            cloak_cfg_row = cc_res.scalars().first()
+        except Exception as exc:
+            logger.warning("[斗篷服务] 读取斗篷上报元数据失败 cloak_key=%s: %s", cloak_key, exc)
+            cloak_cfg_row = None
+        if cloak_cfg_row:
+            cloak_meta = {
+                "report_event": (cloak_cfg_row.report_event or "ViewContent").strip() or "ViewContent",
+                "report_value": cloak_cfg_row.report_value,
+                "report_currency": (cloak_cfg_row.report_currency or "USD").strip() or "USD",
+            }
+        else:
+            cloak_meta = {"report_event": "ViewContent", "report_value": None, "report_currency": "USD"}
+        meta_b64 = base64.b64encode(json.dumps(cloak_meta, separators=(",", ":")).encode("utf-8")).decode("ascii")
+        cloak_meta_snippet = (
+            f'<script type="text/plain" id="cloak-report-meta-b64">{meta_b64}</script>'
+            "<script>(function(){try{var t=document.getElementById('cloak-report-meta-b64');"
+            "window.__CLOAK_META__=JSON.parse(atob(t.textContent.trim()));}catch(e){"
+            "window.__CLOAK_META__={report_event:'ViewContent',report_value:null,report_currency:'USD'};}"
+            "window.cloakReportQuerySuffix=function(){var m=window.__CLOAK_META__||{},q='';"
+            "if(m.report_event)q+='&report_event='+encodeURIComponent(m.report_event);"
+            "if(m.report_event==='Purchase'&&m.report_value!=null&&m.report_value!==''){"
+            "q+='&report_value='+encodeURIComponent(String(m.report_value));"
+            "q+='&report_currency='+encodeURIComponent(m.report_currency||'USD');}"
+            "return q;};})();</script>"
+        )
+        if "<head>" in html_content:
+            html_content = html_content.replace("<head>", "<head>\n" + cloak_meta_snippet + "\n", 1)
+        else:
+            html_content = cloak_meta_snippet + "\n" + html_content
+
         # 将original_url直接注入到HTML中，同时保留处理fbclid参数的逻辑
         # 替换getOriginalUrl函数，使其返回原始URL并处理fbclid参数
         logger.debug(f"[斗篷服务] 注入原始URL到HTML: {original_url}")
@@ -433,8 +468,7 @@ async def handle_report(
     功能说明：
     - 前端通过 fetch("/report?id=509220&fbclid=xxx&email=xxx&phone=xxx&dp=master") 调用
     - 支持 dp 参数识别不同的桥页
-    - 自动发送 Facebook ViewContent 事件到第三方上报
-    - 使用全局 Facebook 像素配置（从 settings 中读取）
+    - 事件名与金额以「斗篷管理」保存的配置为准（来自 cloak_configs）；桥页可由 /change 注入的 cloakReportQuerySuffix() 在 URL 中带 report_* 参数以便核对，与服务端不一致时仍以服务端为准
     
     参数说明：
     - id: 短链接代码
@@ -442,6 +476,7 @@ async def handle_report(
     - email: 用户邮箱（用于 Facebook 像素上报）
     - phone: 用户手机号（用于 Facebook 像素上报）
     - dp: 桥页标识（可选，用于区分不同的桥页）
+    - report_event / report_value / report_currency: 可选，须与斗篷配置一致（由桥页自动附加）
     """
     try:
         # 获取客户端IP和请求头信息
@@ -688,6 +723,38 @@ async def handle_report(
                     "facebook_api_version": settings.FACEBOOK_API_VERSION,
                 }
                 logger.info(f"[第三方上报] 使用全局配置：pixel_id={settings.FACEBOOK_PIXEL_ID[:10]}...")
+
+            # 桥页 URL 中的 report_* 应与下方服务端解析结果一致（不一致仅告警，仍以配置为准）
+            if request is not None:
+                q_evt = request.query_params.get("report_event")
+                q_val = request.query_params.get("report_value")
+                q_cur = request.query_params.get("report_currency")
+                if q_evt and q_evt != report_event:
+                    logger.warning(
+                        "[斗篷点击] URL 中 report_event=%s 与当前生效事件 %s 不一致，已以服务端配置为准",
+                        q_evt,
+                        report_event,
+                    )
+                if report_event == "Purchase" and report_value is not None and q_val is not None:
+                    try:
+                        if abs(float(q_val) - float(report_value)) > 1e-6:
+                            logger.warning(
+                                "[斗篷点击] URL 中 report_value=%s 与配置金额 %s 不一致，已以服务端配置为准",
+                                q_val,
+                                report_value,
+                            )
+                    except (TypeError, ValueError):
+                        logger.warning("[斗篷点击] URL 中 report_value 无法解析: %s", q_val)
+                if (
+                    q_cur
+                    and report_event == "Purchase"
+                    and q_cur.strip().upper() != (report_currency or "").strip().upper()
+                ):
+                    logger.warning(
+                        "[斗篷点击] URL 中 report_currency=%s 与配置 %s 不一致，已以服务端配置为准",
+                        q_cur,
+                        report_currency,
+                    )
 
             report_kwargs = {
                 "adsid": fbclid,
