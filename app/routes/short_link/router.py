@@ -33,7 +33,7 @@ from app.core.cloak_scripts_paths import read_bridge_html_template_cached, resol
 from app.routes.short_link.handlers import handle_cached_redirect, handle_database_redirect
 from app.routes.short_link.placeholder import replace_short_link_placeholders
 from app.routes.short_link.url_builder import build_final_url
-from app.routes.short_link.utils import resolve_offer_id
+from app.routes.short_link.utils import resolve_offer_id, resolve_default_publisher_for_offer
 from app.routes.short_link_redirect import _create_click_record
 
 logger = logging.getLogger(__name__)
@@ -144,6 +144,7 @@ async def open_master_html_with_redirect(
     功能说明：
     - 当访问 /change/{short_code}?dp=master 时，加载 master.html
     - 当访问 /change/{short_code}?dp=other 时，加载 other.html
+    - 当 dp 为纯数字（如 145）时，与平台 Offer 主键对齐，用于占位符替换、渠道回退及 /report 点击归因
     - 当 dp 参数不存在或无效时，默认加载第一个可用的 HTML 文件
     - 支持安全验证，防止路径遍历攻击
     """
@@ -355,10 +356,31 @@ async def open_master_html_with_redirect(
             except Exception as exc:
                 logger.warning("[斗篷服务] 读取短链 offer/channel 用于占位符: %s", exc)
 
+        # 纯数字 dp（如 145）= 平台 Offer 主键：覆盖短链上的 offer_id，保证与斗篷页一致
+        if dp is not None:
+            dp_s = str(dp).strip()
+            if dp_s.isdigit():
+                try:
+                    offer_id_q = int(dp_s)
+                except (TypeError, ValueError):
+                    pass
+
         click_id_cloak = generate_click_id_from_timestamp()
         request_info_cloak = collect_request_info(request) if request else {}
         final_channel_id_cloak = channel_id_q
         final_offer_id_cloak, advertiser_id_cloak = await resolve_offer_id(offer_id_q, db)
+        # 短链未填 channel_id 时，从该产品已绑定的启用渠道中回退（使用解析后的 Offer 主键）
+        if final_channel_id_cloak is None and final_offer_id_cloak is not None:
+            fallback_pub = await resolve_default_publisher_for_offer(final_offer_id_cloak, db)
+            if fallback_pub is not None:
+                final_channel_id_cloak = fallback_pub
+                channel_id_q = fallback_pub
+                logger.info(
+                    "[斗篷服务] 短链未配置渠道，已按产品绑定回退: short_code=%s offer_id=%s publisher_id=%s",
+                    short_code,
+                    final_offer_id_cloak,
+                    fallback_pub,
+                )
         original_url_before_replace = original_url
         original_url_after_replace = await replace_short_link_placeholders(
             original_url_before_replace,
@@ -812,8 +834,20 @@ async def handle_report(
 
                             if short_link:
                                 click.short_link_id = short_link.id
-                                click.offer_id = short_link.offer_id
-                                click.publisher_id = short_link.channel_id
+                                # 纯数字 dp 与平台 Offer 主键对齐（如 dp=145 → offer 145），避免斗篷页未写短链 offer 时点击无单子、无渠道
+                                offer_for_click = short_link.offer_id
+                                if resolved_dp and str(resolved_dp).strip().isdigit():
+                                    try:
+                                        offer_for_click = int(str(resolved_dp).strip())
+                                    except (TypeError, ValueError):
+                                        pass
+                                click.offer_id = offer_for_click
+                                pub_for_click = short_link.channel_id
+                                if pub_for_click is None and offer_for_click is not None:
+                                    pub_for_click = await resolve_default_publisher_for_offer(
+                                        offer_for_click, db_session
+                                    )
+                                click.publisher_id = pub_for_click
                                 short_link.click_count = (short_link.click_count or 0) + 1
                                 db_session.add(click)
                                 await db_session.commit()

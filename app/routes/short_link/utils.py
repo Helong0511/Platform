@@ -12,7 +12,7 @@ from app.api_v1.tracking.tracking import create_click_background
 from app.core.clicks_queue import enqueue_click
 from app.core.offer_cache import set_offer_cache
 from app.core.utils import get_app_now_naive
-from app.models.models import Offer
+from app.models.models import Offer, OfferPublisherAssignment
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,35 @@ async def resolve_offer_id(offer_id: Optional[int], db: AsyncSession) -> tuple[O
         logger.warning(f"查询Offer失败: offer_id={offer_id}, error={e}")
 
     return None, None
+
+
+async def resolve_default_publisher_for_offer(offer_id: int, db: AsyncSession) -> Optional[int]:
+    """
+    当短链未关联 channel_id 时，按产品（Offer）下启用的渠道分配回退一个 publisher_id。
+
+    规则：取该 offer 下 is_active=True 的分配记录中 id 最小的一条（稳定、可预期）。
+    若无任何启用分配则返回 None。
+    """
+    if not offer_id:
+        return None
+    try:
+        row = await db.execute(
+            select(OfferPublisherAssignment.publisher_id)
+            .where(
+                OfferPublisherAssignment.offer_id == offer_id,
+                OfferPublisherAssignment.is_active.is_(True),
+            )
+            .order_by(OfferPublisherAssignment.id.asc())
+            .limit(1)
+        )
+        return row.scalar_one_or_none()
+    except Exception as e:
+        logger.warning(
+            "按 Offer 回退渠道失败: offer_id=%s, error=%s",
+            offer_id,
+            e,
+        )
+        return None
 
 
 async def create_click_record(

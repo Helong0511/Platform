@@ -22,7 +22,11 @@ from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from app.models.models import ShortLink
 from app.routes.short_link.placeholder import replace_short_link_placeholders
 from app.routes.short_link.url_builder import build_final_url
-from app.routes.short_link.utils import resolve_offer_id, create_click_record
+from app.routes.short_link.utils import (
+    resolve_offer_id,
+    resolve_default_publisher_for_offer,
+    create_click_record,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +154,10 @@ async def handle_cached_redirect(
 
     final_channel_id = channel_id
     final_offer_id, advertiser_id = await resolve_offer_id(offer_id, db)
+    if final_channel_id is None and final_offer_id is not None:
+        fb = await resolve_default_publisher_for_offer(final_offer_id, db)
+        if fb is not None:
+            final_channel_id = fb
 
     # 保存原始URL用于检查占位符
     original_url_before_replace = original_url
@@ -285,6 +293,10 @@ async def handle_database_redirect(
 
     final_channel_id = channel_id
     final_offer_id, advertiser_id = await resolve_offer_id(offer_id, db)
+    if final_channel_id is None and final_offer_id is not None:
+        fb = await resolve_default_publisher_for_offer(final_offer_id, db)
+        if fb is not None:
+            final_channel_id = fb
 
     # 保存原始URL用于检查占位符
     original_url_before_replace = original_url
