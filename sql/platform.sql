@@ -1013,6 +1013,15 @@ CREATE TABLE `cloak_configs`  (
   `report_event` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'ViewContent' COMMENT '斗篷点击与测上报的CAPI event_name',
   `report_value` double NULL DEFAULT NULL COMMENT '购物类事件金额',
   `report_currency` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT 'USD' COMMENT '购物类事件货币',
+  `click_report_enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '桥页按钮跳转是否做 Facebook 上报',
+  `load_report_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '桥页加载完成是否做 Facebook 上报',
+  `load_report_event` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'PageView' COMMENT '加载完成 CAPI event_name',
+  `load_report_value` double NULL DEFAULT NULL COMMENT '加载上报为 Purchase 时的金额',
+  `load_report_currency` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT 'USD' COMMENT '加载上报为 Purchase 时的货币',
+  `postback_report_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT 'postback 转化是否按斗篷配置做 Facebook 上报（0=保持原逻辑按 payout 发 Purchase）',
+  `postback_report_event` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'Purchase' COMMENT 'postback 转化 CAPI event_name',
+  `postback_report_value` double NULL DEFAULT NULL COMMENT 'postback 为 Purchase 时固定金额；NULL 则用 postback 的 payout',
+  `postback_report_currency` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT 'USD' COMMENT 'postback Purchase 货币',
   `is_enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
   `created_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
   `updated_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
@@ -1020,7 +1029,7 @@ CREATE TABLE `cloak_configs`  (
   UNIQUE INDEX `uq_cloak_name`(`cloak_name` ASC) USING BTREE,
   INDEX `idx_cloak_name`(`cloak_name` ASC) USING BTREE,
   INDEX `idx_cloak_enabled`(`is_enabled` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '斗篷配置表' ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '斗篷配置表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for token_blacklist

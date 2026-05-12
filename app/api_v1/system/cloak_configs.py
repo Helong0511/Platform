@@ -249,8 +249,22 @@ async def update_cloak_config(
     ):
         raise_api_exception(
             ErrorCode.VALIDATION_ERROR,
-            detail="上报事件为 Purchase 时必须配置大于 0 的金额（report_value）",
+            detail="点击上报事件为 Purchase 时必须配置大于 0 的金额（report_value）",
         )
+
+    if config.load_report_enabled and config.load_report_event == "Purchase":
+        if config.load_report_value is None or float(config.load_report_value) <= 0:
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="启用加载上报且事件为 Purchase 时必须配置大于 0 的金额（load_report_value）",
+            )
+
+    if config.postback_report_enabled and config.postback_report_event == "Purchase":
+        if config.postback_report_value is not None and float(config.postback_report_value) <= 0:
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="postback Purchase 固定金额须大于 0，或留空以使用 postback 的 payout",
+            )
 
     _ensure_enabled_requires_bridge_html(config.cloak_name, config.is_enabled)
 

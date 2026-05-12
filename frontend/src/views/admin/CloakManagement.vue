@@ -47,7 +47,22 @@
             <span>{{ maskToken(row.access_token) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="report_event" label="上报事件" width="130" />
+        <el-table-column label="上报事件" min-width="220">
+          <template #default="{ row }">
+            <span>{{ reportEventCellLabel(row.report_event) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="分阶段" width="168" align="center">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.load_report_enabled ? 'success' : 'info'">载</el-tag>
+            <el-tag size="small" :type="row.click_report_enabled !== false ? 'success' : 'info'" style="margin-left: 4px"
+              >点</el-tag
+            >
+            <el-tag size="small" :type="row.postback_report_enabled ? 'success' : 'info'" style="margin-left: 4px"
+              >转</el-tag
+            >
+          </template>
+        </el-table-column>
         <el-table-column label="金额/货币" width="120" align="right">
           <template #default="{ row }">
             <span v-if="row.report_event === 'Purchase'">
@@ -97,10 +112,10 @@
     <el-dialog
       v-model="editDialogVisible"
       :title="editingId ? '编辑斗篷配置' : '新增斗篷配置'"
-      width="760px"
+      width="900px"
       :close-on-click-modal="false"
     >
-      <el-form ref="formRef" :model="formData" :rules="rules" label-width="120px">
+      <el-form ref="formRef" :model="formData" :rules="rules" label-width="150px">
         <el-form-item label="斗篷名称" prop="cloak_name">
           <el-input v-model="formData.cloak_name" placeholder="例如 master（对应 master.html）" />
         </el-form-item>
@@ -121,8 +136,52 @@
             placeholder="可不填，不填则不上报备份"
           />
         </el-form-item>
-        <el-form-item label="上报事件" prop="report_event">
-          <el-select v-model="formData.report_event" placeholder="选择事件" style="width: 100%">
+
+        <el-divider content-position="left">1. 加载完成上报</el-divider>
+        <el-form-item label="启用加载上报" prop="load_report_enabled">
+          <el-switch v-model="formData.load_report_enabled" />
+          <div class="switch-hint">开启后由服务端在桥页 HTML 中注入脚本，在 <code>DOMContentLoaded</code> 后请求 <code>/report?phase=load</code> 发 Facebook。</div>
+        </el-form-item>
+        <el-form-item label="加载上报事件" prop="load_report_event">
+          <el-select
+            v-model="formData.load_report_event"
+            placeholder="选择或输入事件名"
+            style="width: 100%"
+            filterable
+            allow-create
+            default-first-option
+          >
+            <el-option v-for="opt in CLOAK_REPORT_EVENTS" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="formData.load_report_event === 'Purchase'" label="加载金额" prop="load_report_value">
+          <el-input-number
+            v-model="formData.load_report_value"
+            :min="0.01"
+            :precision="2"
+            :step="0.01"
+            style="width: 100%"
+            controls-position="right"
+          />
+        </el-form-item>
+        <el-form-item v-if="formData.load_report_event === 'Purchase'" label="加载货币" prop="load_report_currency">
+          <el-input v-model="formData.load_report_currency" maxlength="10" placeholder="如 USD" />
+        </el-form-item>
+
+        <el-divider content-position="left">2. 点击跳转上报</el-divider>
+        <el-form-item label="启用点击上报" prop="click_report_enabled">
+          <el-switch v-model="formData.click_report_enabled" />
+          <div class="switch-hint">关闭后仍统计点击与写入访问参数，但不向 Facebook 发送 CAPI。</div>
+        </el-form-item>
+        <el-form-item label="点击上报事件" prop="report_event">
+          <el-select
+            v-model="formData.report_event"
+            placeholder="选择标准事件，或输入自定义（如 Click）"
+            style="width: 100%"
+            filterable
+            allow-create
+            default-first-option
+          >
             <el-option
               v-for="opt in CLOAK_REPORT_EVENTS"
               :key="opt.value"
@@ -130,9 +189,11 @@
               :value="opt.value"
             />
           </el-select>
-          <div class="switch-hint">斗篷桥页点击上报与「测试上报」均使用此处配置；购物（Purchase）须填写金额与货币。</div>
+          <div class="switch-hint">
+            与 Meta CAPI 的 event_name 一致；购物（Purchase）须填金额与货币。
+          </div>
         </el-form-item>
-        <el-form-item v-if="formData.report_event === 'Purchase'" label="金额" prop="report_value">
+        <el-form-item v-if="formData.report_event === 'Purchase'" label="点击金额" prop="report_value">
           <el-input-number
             v-model="formData.report_value"
             :min="0.01"
@@ -142,9 +203,48 @@
             controls-position="right"
           />
         </el-form-item>
-        <el-form-item v-if="formData.report_event === 'Purchase'" label="货币" prop="report_currency">
+        <el-form-item v-if="formData.report_event === 'Purchase'" label="点击货币" prop="report_currency">
           <el-input v-model="formData.report_currency" maxlength="10" placeholder="如 USD" />
         </el-form-item>
+
+        <el-divider content-position="left">3. Postback 转化上报</el-divider>
+        <el-form-item label="按斗篷配置转化上报" prop="postback_report_enabled">
+          <el-switch v-model="formData.postback_report_enabled" />
+          <div class="switch-hint">
+            关闭时维持系统原逻辑：postback 成功且点击记录含 <code>fbclid</code> 时，按 <strong>payout</strong> 发
+            <code>Purchase</code>。开启后：若点击 <code>url_params</code> 含 <code>dp=本斗篷名</code>（如
+            <code>dp=145</code>），则按下方事件与金额（Purchase 金额可留空以使用 payout）发 CAPI。
+          </div>
+        </el-form-item>
+        <el-form-item label="转化上报事件" prop="postback_report_event">
+          <el-select
+            v-model="formData.postback_report_event"
+            placeholder="选择或输入事件名"
+            style="width: 100%"
+            filterable
+            allow-create
+            default-first-option
+          >
+            <el-option v-for="opt in CLOAK_REPORT_EVENTS" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="formData.postback_report_event === 'Purchase'" label="转化固定金额" prop="postback_report_value">
+          <el-input-number
+            v-model="formData.postback_report_value"
+            :min="0.01"
+            :precision="2"
+            :step="0.01"
+            style="width: 100%"
+            controls-position="right"
+            clearable
+          />
+          <div class="switch-hint">留空则使用 postback 中的 payout 作为 Purchase 金额。</div>
+        </el-form-item>
+        <el-form-item v-if="formData.postback_report_event === 'Purchase'" label="转化货币" prop="postback_report_currency">
+          <el-input v-model="formData.postback_report_currency" maxlength="10" placeholder="如 USD" />
+        </el-form-item>
+
+        <el-divider content-position="left">其它</el-divider>
         <el-form-item label="开关" prop="is_enabled">
           <div>
             <el-switch v-model="formData.is_enabled" />
@@ -260,17 +360,56 @@ import {
   uploadCloakBridgeHtml
 } from '../../api/cloak-config';
 
-/** 须与后端 app/schemas/cloak.py ALLOWED_CLOAK_REPORT_EVENTS 一致 */
+/**
+ * Meta 官方标准事件 + 中文说明；须与后端 app/schemas/cloak.py 中 FACEBOOK_STANDARD_EVENT_NAMES 一致。
+ * 另支持自定义 event_name（如 Click）：见 validateReportEventName 与后端 validate_cloak_report_event_name。
+ */
 const CLOAK_REPORT_EVENTS = [
-  { label: 'ViewContent', value: 'ViewContent' },
-  { label: 'Purchase（购物）', value: 'Purchase' },
-  { label: 'Lead', value: 'Lead' },
-  { label: 'CompleteRegistration', value: 'CompleteRegistration' },
-  { label: 'InitiateCheckout', value: 'InitiateCheckout' },
-  { label: 'AddToCart', value: 'AddToCart' },
-  { label: 'Subscribe', value: 'Subscribe' },
-  { label: 'Contact', value: 'Contact' }
+  { value: 'PageView', label: 'PageView（页面浏览）' },
+  { value: 'ViewContent', label: 'ViewContent（查看内容）' },
+  { value: 'Search', label: 'Search（搜索）' },
+  { value: 'AddToCart', label: 'AddToCart（加入购物车）' },
+  { value: 'AddToWishlist', label: 'AddToWishlist（加入心愿单）' },
+  { value: 'AddPaymentInfo', label: 'AddPaymentInfo（填写支付信息）' },
+  { value: 'InitiateCheckout', label: 'InitiateCheckout（发起结账）' },
+  { value: 'Purchase', label: 'Purchase（购买）' },
+  { value: 'Lead', label: 'Lead（潜在客户）' },
+  { value: 'CompleteRegistration', label: 'CompleteRegistration（完成注册）' },
+  { value: 'Contact', label: 'Contact（发起联系）' },
+  { value: 'Subscribe', label: 'Subscribe（订阅）' },
+  { value: 'StartTrial', label: 'StartTrial（开始试用）' },
+  { value: 'SubmitApplication', label: 'SubmitApplication（提交申请）' },
+  { value: 'Schedule', label: 'Schedule（预约）' },
+  { value: 'FindLocation', label: 'FindLocation（查找位置）' },
+  { value: 'Donate', label: 'Donate（捐赠）' },
+  { value: 'CustomizeProduct', label: 'CustomizeProduct（定制商品）' }
 ];
+
+const FACEBOOK_STANDARD_EVENT_SET = new Set(CLOAK_REPORT_EVENTS.map((o) => o.value));
+
+/** 与后端 _CLOAK_REPORT_EVENT_CUSTOM_RE 一致：自定义事件（如 Click） */
+const CLOAK_CUSTOM_REPORT_EVENT_RE = /^[A-Za-z][A-Za-z0-9_]{1,62}$/;
+
+function validateReportEventName(_rule, value, callback) {
+  const v = (value || '').trim();
+  if (!v) {
+    callback(new Error('请选择或输入上报事件'));
+    return;
+  }
+  if (FACEBOOK_STANDARD_EVENT_SET.has(v) || CLOAK_CUSTOM_REPORT_EVENT_RE.test(v)) {
+    callback();
+    return;
+  }
+  callback(new Error('须为 Meta 标准事件名，或字母开头的自定义名（仅字母、数字、下划线，2～64 字符）'));
+}
+
+function reportEventCellLabel(code) {
+  const raw = (code || '').trim();
+  if (!raw) return '-';
+  const hit = CLOAK_REPORT_EVENTS.find((o) => o.value === raw);
+  if (hit) return hit.label;
+  return `${raw}（自定义）`;
+}
 
 const loading = ref(false);
 const saving = ref(false);
@@ -303,14 +442,26 @@ const formData = reactive({
   access_token: '',
   backup_pixel_id: '',
   backup_access_token: '',
+  load_report_enabled: false,
+  load_report_event: 'PageView',
+  load_report_value: null,
+  load_report_currency: 'USD',
+  click_report_enabled: true,
   report_event: 'ViewContent',
   report_value: null,
   report_currency: 'USD',
+  postback_report_enabled: false,
+  postback_report_event: 'Purchase',
+  postback_report_value: null,
+  postback_report_currency: 'USD',
   is_enabled: true
 });
 
 const rules = computed(() => ({
   cloak_name: [{ required: true, message: '请输入斗篷名称', trigger: 'blur' }],
+  report_event: [{ validator: validateReportEventName, trigger: 'change' }],
+  load_report_event: [{ validator: validateReportEventName, trigger: 'change' }],
+  postback_report_event: [{ validator: validateReportEventName, trigger: 'change' }],
   pixel_id: [
     { required: true, message: '请输入像素ID', trigger: 'blur' },
     { pattern: /^\d+$/, message: '像素ID必须为数字', trigger: 'blur' }
@@ -327,6 +478,44 @@ const rules = computed(() => ({
         const n = Number(value);
         if (value === null || value === undefined || Number.isNaN(n) || n <= 0) {
           callback(new Error('购物事件须填写大于 0 的金额'));
+        } else {
+          callback();
+        }
+      },
+      trigger: 'change'
+    }
+  ],
+  load_report_value: [
+    {
+      validator: (_rule, value, callback) => {
+        if (!formData.load_report_enabled || formData.load_report_event !== 'Purchase') {
+          callback();
+          return;
+        }
+        const n = Number(value);
+        if (value === null || value === undefined || Number.isNaN(n) || n <= 0) {
+          callback(new Error('加载上报为 Purchase 时须填写大于 0 的金额'));
+        } else {
+          callback();
+        }
+      },
+      trigger: 'change'
+    }
+  ],
+  postback_report_value: [
+    {
+      validator: (_rule, value, callback) => {
+        if (!formData.postback_report_enabled || formData.postback_report_event !== 'Purchase') {
+          callback();
+          return;
+        }
+        if (value === null || value === undefined || value === '') {
+          callback();
+          return;
+        }
+        const n = Number(value);
+        if (Number.isNaN(n) || n <= 0) {
+          callback(new Error('若填写转化固定金额须大于 0'));
         } else {
           callback();
         }
@@ -381,9 +570,18 @@ const resetFormData = () => {
   formData.access_token = '';
   formData.backup_pixel_id = '';
   formData.backup_access_token = '';
+  formData.load_report_enabled = false;
+  formData.load_report_event = 'PageView';
+  formData.load_report_value = null;
+  formData.load_report_currency = 'USD';
+  formData.click_report_enabled = true;
   formData.report_event = 'ViewContent';
   formData.report_value = null;
   formData.report_currency = 'USD';
+  formData.postback_report_enabled = false;
+  formData.postback_report_event = 'Purchase';
+  formData.postback_report_value = null;
+  formData.postback_report_currency = 'USD';
   formData.is_enabled = false;
 };
 
@@ -411,9 +609,19 @@ const handleEdit = (row) => {
   formData.access_token = row.access_token;
   formData.backup_pixel_id = row.backup_pixel_id || '';
   formData.backup_access_token = row.backup_access_token || '';
+  formData.load_report_enabled = !!row.load_report_enabled;
+  formData.load_report_event = row.load_report_event || 'PageView';
+  formData.load_report_value = row.load_report_value != null ? Number(row.load_report_value) : null;
+  formData.load_report_currency = row.load_report_currency || 'USD';
+  formData.click_report_enabled = row.click_report_enabled !== false;
   formData.report_event = row.report_event || 'ViewContent';
   formData.report_value = row.report_value != null ? Number(row.report_value) : null;
   formData.report_currency = row.report_currency || 'USD';
+  formData.postback_report_enabled = !!row.postback_report_enabled;
+  formData.postback_report_event = row.postback_report_event || 'Purchase';
+  formData.postback_report_value =
+    row.postback_report_value != null ? Number(row.postback_report_value) : null;
+  formData.postback_report_currency = row.postback_report_currency || 'USD';
   formData.is_enabled = row.is_enabled;
   editDialogVisible.value = true;
 };
@@ -424,9 +632,33 @@ const buildPayload = () => ({
   access_token: formData.access_token,
   backup_pixel_id: formData.backup_pixel_id || null,
   backup_access_token: formData.backup_access_token || null,
+  load_report_enabled: !!formData.load_report_enabled,
+  load_report_event: formData.load_report_event || 'PageView',
+  load_report_value:
+    formData.load_report_enabled && formData.load_report_event === 'Purchase'
+      ? Number(formData.load_report_value)
+      : null,
+  load_report_currency:
+    formData.load_report_enabled && formData.load_report_event === 'Purchase'
+      ? (formData.load_report_currency || 'USD').trim()
+      : null,
+  click_report_enabled: formData.click_report_enabled !== false,
   report_event: formData.report_event || 'ViewContent',
   report_value: formData.report_event === 'Purchase' ? Number(formData.report_value) : null,
   report_currency: formData.report_event === 'Purchase' ? (formData.report_currency || 'USD').trim() : null,
+  postback_report_enabled: !!formData.postback_report_enabled,
+  postback_report_event: formData.postback_report_event || 'Purchase',
+  postback_report_value:
+    formData.postback_report_enabled &&
+    formData.postback_report_event === 'Purchase' &&
+    formData.postback_report_value != null &&
+    formData.postback_report_value !== ''
+      ? Number(formData.postback_report_value)
+      : null,
+  postback_report_currency:
+    formData.postback_report_enabled && formData.postback_report_event === 'Purchase'
+      ? (formData.postback_report_currency || 'USD').trim()
+      : null,
   is_enabled: formData.is_enabled
 });
 

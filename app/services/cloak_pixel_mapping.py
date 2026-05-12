@@ -19,6 +19,37 @@ from app.core.cloak_scripts_paths import bridge_html_exists
 logger = logging.getLogger(__name__)
 
 
+def _cloak_phase_report_dict(cloak_config: Optional[CloakConfig]) -> Dict[str, Any]:
+    """从 cloak_configs 行提取加载/点击/postback 三阶段上报开关与事件（供 /report 与 CAPI 使用）。"""
+    if not cloak_config:
+        return {
+            "cloak_click_report_enabled": True,
+            "cloak_load_report_enabled": False,
+            "cloak_load_report_event": "PageView",
+            "cloak_load_report_value": None,
+            "cloak_load_report_currency": "USD",
+            "cloak_postback_report_enabled": False,
+            "cloak_postback_report_event": "Purchase",
+            "cloak_postback_report_value": None,
+            "cloak_postback_report_currency": "USD",
+        }
+    return {
+        "cloak_click_report_enabled": bool(getattr(cloak_config, "click_report_enabled", True)),
+        "cloak_load_report_enabled": bool(getattr(cloak_config, "load_report_enabled", False)),
+        "cloak_load_report_event": (getattr(cloak_config, "load_report_event", None) or "PageView").strip()
+        or "PageView",
+        "cloak_load_report_value": getattr(cloak_config, "load_report_value", None),
+        "cloak_load_report_currency": (getattr(cloak_config, "load_report_currency", None) or "USD").strip()
+        or "USD",
+        "cloak_postback_report_enabled": bool(getattr(cloak_config, "postback_report_enabled", False)),
+        "cloak_postback_report_event": (getattr(cloak_config, "postback_report_event", None) or "Purchase").strip()
+        or "Purchase",
+        "cloak_postback_report_value": getattr(cloak_config, "postback_report_value", None),
+        "cloak_postback_report_currency": (getattr(cloak_config, "postback_report_currency", None) or "USD").strip()
+        or "USD",
+    }
+
+
 class CloakPixelMappingService:
     """
     斗篷像素配置映射服务
@@ -171,7 +202,7 @@ class CloakPixelMappingService:
         # 优先级 1: 短链接自定义配置
         if short_link.facebook_pixel_id and short_link.facebook_access_token:
             logger.info(f"[斗篷像素映射] 使用短链接自定义配置：dp={dp}")
-            return {
+            pixel_config = {
                 "facebook_pixel_id": short_link.facebook_pixel_id,
                 "facebook_access_token": short_link.facebook_access_token,
                 "facebook_api_version": short_link.facebook_api_version or settings.FACEBOOK_API_VERSION,
@@ -181,13 +212,19 @@ class CloakPixelMappingService:
                 "is_active": short_link.is_active,
                 "title": short_link.title,
                 "offer_id": short_link.offer_id,
-                "channel_id": short_link.channel_id
+                "channel_id": short_link.channel_id,
             }
+            if cloak_config:
+                pixel_config["cloak_report_event"] = getattr(cloak_config, "report_event", None) or "ViewContent"
+                pixel_config["cloak_report_value"] = getattr(cloak_config, "report_value", None)
+                pixel_config["cloak_report_currency"] = getattr(cloak_config, "report_currency", None) or "USD"
+            pixel_config.update(_cloak_phase_report_dict(cloak_config))
+            return pixel_config
         
         # 优先级 2: 系统服务中的斗篷配置
         if cloak_config and cloak_config.pixel_id and cloak_config.access_token:
             logger.info(f"[斗篷像素映射] 使用数据库斗篷配置：dp={dp}")
-            return {
+            pixel_config = {
                 "facebook_pixel_id": cloak_config.pixel_id,
                 "facebook_access_token": cloak_config.access_token,
                 "facebook_api_version": settings.FACEBOOK_API_VERSION,
@@ -202,12 +239,14 @@ class CloakPixelMappingService:
                 "is_active": short_link.is_active,
                 "title": short_link.title,
                 "offer_id": short_link.offer_id,
-                "channel_id": short_link.channel_id
+                "channel_id": short_link.channel_id,
             }
+            pixel_config.update(_cloak_phase_report_dict(cloak_config))
+            return pixel_config
 
         # 优先级 3: 全局配置
         logger.info(f"[斗篷像素映射] 使用全局配置：dp={dp}")
-        return {
+        pixel_config = {
             "facebook_pixel_id": settings.FACEBOOK_PIXEL_ID,
             "facebook_access_token": settings.FACEBOOK_ACCESS_TOKEN,
             "facebook_api_version": settings.FACEBOOK_API_VERSION,
@@ -217,8 +256,10 @@ class CloakPixelMappingService:
             "is_active": short_link.is_active,
             "title": short_link.title,
             "offer_id": short_link.offer_id,
-            "channel_id": short_link.channel_id
+            "channel_id": short_link.channel_id,
         }
+        pixel_config.update(_cloak_phase_report_dict(cloak_config))
+        return pixel_config
     
     def _validate_pixel_config(
         self, 

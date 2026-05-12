@@ -19,8 +19,10 @@ from sqlalchemy.future import select
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.core.database import get_db, AsyncSessionLocal
+from app.core.device_info import collect_request_info
 from app.core.short_link_cache import get_short_link_from_cache, update_short_link_cache
 from app.core.redis_client import get_redis_client
+from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
 from app.models.models import ShortLink, CloakConfig
 from app.core.auto_bot import send_telegram_message
 from app.core.config import settings
@@ -29,11 +31,39 @@ from app.services.cloak_pixel_mapping import get_cloak_pixel_config
 from app.core.cloak_scripts_paths import read_bridge_html_template_cached, resolve_bridge_html_read_path
 # 引入短链接处理函数
 from app.routes.short_link.handlers import handle_cached_redirect, handle_database_redirect
+from app.routes.short_link.placeholder import replace_short_link_placeholders
+from app.routes.short_link.url_builder import build_final_url
+from app.routes.short_link.utils import resolve_offer_id
+from app.routes.short_link_redirect import _create_click_record
 
 logger = logging.getLogger(__name__)
 
 # 创建FastAPI路由实例
 router = APIRouter()
+
+# 桥页注入：在 DOMContentLoaded 时请求 /report?phase=load（与 cloak_configs.load_report_enabled 配合）
+_CLOAK_LOAD_REPORT_INJECT = (
+    "<script>(function(){document.addEventListener('DOMContentLoaded',function(){try{"
+    "var M=window.__CLOAK_META__||{};if(!M.load_report_enabled)return;"
+    "if(sessionStorage.getItem('cloak_load_fb_done'))return;"
+    "var segs=location.pathname.split('/').filter(function(x){return x;});"
+    "var shortId=segs[segs.length-1]||'';if(!shortId)return;"
+    "var email=sessionStorage.getItem('ad_event_email');var phone=sessionStorage.getItem('ad_event_phone');"
+    "if(!email){var u=['user','uk_shopper','customer','member','save'];"
+    "var d=['gmail.com','outlook.com','yahoo.co.uk','btinternet.com'];"
+    "email=u[Math.floor(Math.random()*u.length)]+Math.floor(Math.random()*10000)+'@'+d[Math.floor(Math.random()*d.length)];"
+    "sessionStorage.setItem('ad_event_email',email);}"
+    "if(!phone){phone=String(Math.floor(7e9+Math.random()*9e9));sessionStorage.setItem('ad_event_phone',phone);}"
+    "var fbc=(function(){try{var p=new URLSearchParams(location.search);var f=p.get('fbclid');"
+    "if(f&&String(f).trim())return String(f).trim().substring(0,200);}catch(e1){}"
+    "return 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0,v=c==='x'?r:(r&0x3|0x8);return v.toString(16);});})();"
+    "var dpv=(M.dp||'');var qs='id='+encodeURIComponent(shortId)+'&phase=load&fbclid='+encodeURIComponent(fbc)+"
+    "'&email='+encodeURIComponent(email)+'&phone='+encodeURIComponent(phone);"
+    "if(dpv)qs+='&dp='+encodeURIComponent(dpv);"
+    "if(typeof cloakReportQuerySuffix==='function'){qs+=cloakReportQuerySuffix();}"
+    "fetch(location.origin+'/report?'+qs,{method:'GET'}).then(function(r){if(r&&r.ok)sessionStorage.setItem('cloak_load_fb_done','1');}).catch(function(){});"
+    "}catch(e){}});})();</script>"
+)
 
 
 @router.get("/s/{short_code}",
@@ -284,6 +314,79 @@ async def open_master_html_with_redirect(
                 detail="斗篷不存在或未配置原始 URL"
             )
 
+        # 与 /s/{short_code} 一致：替换 {click_id}、{channel_id} 等占位符，并合并本次请求的查询参数
+        request_params = {k.lower(): v for k, v in request.query_params.items()}
+        offer_id_q: Optional[int] = None
+        channel_id_q: Optional[int] = None
+        for key, raw in (
+            ("offer_id", request.query_params.get("offer_id")),
+            ("channel_id", request.query_params.get("channel_id")),
+        ):
+            if raw is None or (isinstance(raw, str) and raw.strip() == ""):
+                continue
+            try:
+                val = int(raw) if not isinstance(raw, list) else int(raw[0])
+                if key == "offer_id":
+                    offer_id_q = val
+                else:
+                    channel_id_q = val
+            except (TypeError, ValueError):
+                pass
+        meta = cached_data if cached_data else {}
+        if offer_id_q is None and meta.get("offer_id") is not None:
+            try:
+                offer_id_q = int(meta["offer_id"])
+            except (TypeError, ValueError):
+                pass
+        if channel_id_q is None and meta.get("channel_id") is not None:
+            try:
+                channel_id_q = int(meta["channel_id"])
+            except (TypeError, ValueError):
+                pass
+        if offer_id_q is None or channel_id_q is None:
+            try:
+                sl_res = await db.execute(select(ShortLink).where(ShortLink.short_code == short_code))
+                sl_for_meta = sl_res.scalars().first()
+                if sl_for_meta:
+                    if offer_id_q is None and sl_for_meta.offer_id is not None:
+                        offer_id_q = int(sl_for_meta.offer_id)
+                    if channel_id_q is None and sl_for_meta.channel_id is not None:
+                        channel_id_q = int(sl_for_meta.channel_id)
+            except Exception as exc:
+                logger.warning("[斗篷服务] 读取短链 offer/channel 用于占位符: %s", exc)
+
+        click_id_cloak = generate_click_id_from_timestamp()
+        request_info_cloak = collect_request_info(request) if request else {}
+        final_channel_id_cloak = channel_id_q
+        final_offer_id_cloak, advertiser_id_cloak = await resolve_offer_id(offer_id_q, db)
+        original_url_before_replace = original_url
+        original_url_after_replace = await replace_short_link_placeholders(
+            original_url_before_replace,
+            click_id_cloak,
+            final_offer_id_cloak,
+            final_channel_id_cloak,
+            advertiser_id_cloak,
+            request_info_cloak,
+            db,
+        )
+        original_url = build_final_url(
+            original_url_before_replace,
+            original_url_after_replace,
+            click_id_cloak,
+            offer_id_q,
+            channel_id_q,
+            final_channel_id_cloak,
+            request_params,
+            request_info_cloak,
+            advertiser_id_cloak,
+        )
+        logger.debug(
+            "[斗篷服务] 斗篷跳转基址（占位符已处理）: short_code=%s click_id=%s url=%s",
+            short_code,
+            click_id_cloak,
+            original_url[:200] + ("..." if len(original_url) > 200 else ""),
+        )
+
         # ========== 桥页动态加载逻辑 ==========
         # 1. 安全验证：防止路径遍历攻击
         # 2. 根据 dp 参数确定要加载的 HTML 文件
@@ -324,6 +427,48 @@ async def open_master_html_with_redirect(
 
         # 注入与 cloak_configs 一致的「上报事件 / 金额 / 货币」，供桥页 /report 请求携带（与服务端实际 CAPI 一致）
         cloak_key = bridge_page_name[:-5] if bridge_page_name.endswith(".html") else "master"
+
+        # 写入短链接访问记录（clicks 表）：与 /s/ 重定向相同走 Redis 队列 / 后台任务，便于「短链接访问记录」统一查询
+        if background_tasks:
+            try:
+                sl_pk = (cached_data or {}).get("id")
+                if not sl_pk:
+                    sid_row = await db.execute(select(ShortLink.id).where(ShortLink.short_code == short_code))
+                    sl_pk = sid_row.scalar()
+                if sl_pk:
+                    request_info_visit = dict(request_info_cloak)
+                    try:
+                        up_m: dict = {}
+                        if request_info_visit.get("url_params"):
+                            up_m = json.loads(request_info_visit["url_params"])
+                    except Exception:
+                        up_m = {}
+                    up_m["cloak_visit"] = True
+                    up_m["cloak_dp_effective"] = cloak_key
+                    q_dp = request.query_params.get("dp") if request else None
+                    if q_dp:
+                        up_m["cloak_dp_query"] = str(q_dp).strip()[:200]
+                    request_info_visit["url_params"] = json.dumps(up_m, ensure_ascii=False)
+                    await _create_click_record(
+                        click_id_cloak,
+                        int(sl_pk),
+                        final_offer_id_cloak,
+                        final_channel_id_cloak,
+                        advertiser_id_cloak,
+                        request_info_visit,
+                        background_tasks,
+                        original_request_url=str(request.url) if request else None,
+                        final_redirect_url=original_url,
+                    )
+                    logger.info(
+                        "[斗篷服务] 已排队短链接访问记录（桥页）short_code=%s click_id=%s cloak_dp_effective=%s",
+                        short_code,
+                        click_id_cloak,
+                        cloak_key,
+                    )
+            except Exception as exc:
+                logger.warning("[斗篷服务] 排队桥页访问记录失败: %s", exc, exc_info=True)
+
         try:
             cc_res = await db.execute(select(CloakConfig).where(CloakConfig.cloak_name == cloak_key))
             cloak_cfg_row = cc_res.scalars().first()
@@ -335,15 +480,35 @@ async def open_master_html_with_redirect(
                 "report_event": (cloak_cfg_row.report_event or "ViewContent").strip() or "ViewContent",
                 "report_value": cloak_cfg_row.report_value,
                 "report_currency": (cloak_cfg_row.report_currency or "USD").strip() or "USD",
+                "dp": cloak_key,
+                "click_report_enabled": bool(getattr(cloak_cfg_row, "click_report_enabled", True)),
+                "load_report_enabled": bool(getattr(cloak_cfg_row, "load_report_enabled", False)),
+                "load_report_event": (getattr(cloak_cfg_row, "load_report_event", None) or "PageView").strip()
+                or "PageView",
+                "load_report_value": getattr(cloak_cfg_row, "load_report_value", None),
+                "load_report_currency": (getattr(cloak_cfg_row, "load_report_currency", None) or "USD").strip()
+                or "USD",
             }
         else:
-            cloak_meta = {"report_event": "ViewContent", "report_value": None, "report_currency": "USD"}
+            cloak_meta = {
+                "report_event": "ViewContent",
+                "report_value": None,
+                "report_currency": "USD",
+                "dp": cloak_key,
+                "click_report_enabled": True,
+                "load_report_enabled": False,
+                "load_report_event": "PageView",
+                "load_report_value": None,
+                "load_report_currency": "USD",
+            }
         meta_b64 = base64.b64encode(json.dumps(cloak_meta, separators=(",", ":")).encode("utf-8")).decode("ascii")
         cloak_meta_snippet = (
             f'<script type="text/plain" id="cloak-report-meta-b64">{meta_b64}</script>'
             "<script>(function(){try{var t=document.getElementById('cloak-report-meta-b64');"
             "window.__CLOAK_META__=JSON.parse(atob(t.textContent.trim()));}catch(e){"
-            "window.__CLOAK_META__={report_event:'ViewContent',report_value:null,report_currency:'USD'};}"
+            "window.__CLOAK_META__={report_event:'ViewContent',report_value:null,report_currency:'USD',"
+            "dp:'',click_report_enabled:true,load_report_enabled:false,load_report_event:'PageView',"
+            "load_report_value:null,load_report_currency:'USD'};}"
             "window.cloakReportQuerySuffix=function(){var m=window.__CLOAK_META__||{},q='';"
             "if(m.report_event)q+='&report_event='+encodeURIComponent(m.report_event);"
             "if(m.report_event==='Purchase'&&m.report_value!=null&&m.report_value!==''){"
@@ -414,6 +579,17 @@ async def open_master_html_with_redirect(
             else:
                 logger.error(f"[斗篷服务] 未找到getOriginalUrl函数定义")
 
+        if re.search(r"</body\s*>", html_content, flags=re.IGNORECASE):
+            html_content = re.sub(
+                r"</body\s*>",
+                _CLOAK_LOAD_REPORT_INJECT + "</body>",
+                html_content,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+        else:
+            html_content = html_content + "\n" + _CLOAK_LOAD_REPORT_INJECT
+
         # 返回HTML内容
         response = HTMLResponse(content=html_content)
         # 直接设置CSP头，允许内联脚本和Font Awesome CDN
@@ -458,6 +634,10 @@ async def handle_report(
         email: str = Query(..., description="用户邮箱"),
         phone: str = Query(..., description="用户手机号"),
         dp: Optional[str] = Query(None, description="桥页标识参数，用于识别不同的桥页"),
+        phase: str = Query(
+            "click",
+            description="上报阶段：click=按钮点击（默认）, load=页面加载完成",
+        ),
         request: Request = None,
         background_tasks: BackgroundTasks = None,
         db: AsyncSession = Depends(get_db)
@@ -514,6 +694,9 @@ async def handle_report(
             logger.warning(f"[斗篷点击] dp 参数格式非法，忽略：dp={resolved_dp}")
             resolved_dp = None
 
+        report_phase_raw = (phase or "click").strip().lower()
+        report_phase = report_phase_raw if report_phase_raw in ("load", "click") else "click"
+
         # 验证必需参数
         if not email or not email.strip():
             logger.error(f"[斗篷点击] email 参数为空：email={email}")
@@ -540,147 +723,140 @@ async def handle_report(
 
         logger.warning(log_message)
 
-        # 检查是否重复上报
-        session_id = request.cookies.get('session_id') if request else None
-        if session_id:
+        ua_from_request = request.headers.get("user-agent", "未知") if request else "未知"
+
+        # 检查是否重复上报（加载与点击分 key，避免互相占用）
+        session_id = request.cookies.get("session_id") if request else None
+        dedupe_key = None
+        if report_phase == "load":
+            dedupe_id = session_id or fbclid or "anon"
+            dedupe_key = f"cloak_load_fb:{id}:{dedupe_id}"
+        elif session_id:
+            dedupe_key = f"click_count:{id}:{session_id}"
+
+        if dedupe_key:
             redis = await get_redis_client()
             if redis:
-                click_key = f"click_count:{id}:{session_id}"
                 try:
-                    first_click = await redis.set(click_key, "1", ex=86400, nx=True)
-                    if not bool(first_click):
+                    first_hit = await redis.set(dedupe_key, "1", ex=86400, nx=True)
+                    if not bool(first_hit):
                         logger.debug(
-                            "[斗篷点击] 重复上报，跳过统计: id=%s, session_id=%s",
+                            "[斗篷上报] 重复请求跳过：phase=%s id=%s key=%s",
+                            report_phase,
                             id,
-                            session_id,
+                            dedupe_key,
                         )
-                        return {"status": "success", "message": "Report received (duplicate)", "client_ip": client_ip,
-                                "fbclid": fbclid}
+                        dup_msg = (
+                            "load report duplicate skip"
+                            if report_phase == "load"
+                            else "Report received (duplicate)"
+                        )
+                        return {
+                            "status": "success",
+                            "message": dup_msg,
+                            "client_ip": client_ip,
+                            "fbclid": fbclid,
+                            "phase": report_phase,
+                        }
                 except Exception as e:
-                    logger.warning(f"Redis检查点击次数失败: {e}")
+                    logger.warning(f"Redis检查上报去重失败: {e}")
 
-        # 尝试从缓存获取短链接信息
-        cached_data = await get_short_link_from_cache(id)
+        # 仅按钮点击阶段更新点击统计与 Click 记录
+        if report_phase == "click":
+            cached_data = await get_short_link_from_cache(id)
 
-        if cached_data:
-            logger.warning(
-                f"[斗篷点击] 从缓存获取数据: short_code={id}, 原始click_count={cached_data.get('click_count', 0)}")
-            # 更新点击次数（缓存）
-            cached_data["click_count"] = (cached_data.get("click_count", 0)) + 1
-            logger.warning(f"[斗篷点击] 更新缓存: short_code={id}, 新click_count={cached_data['click_count']}")
-            update_result = await update_short_link_cache(id, cached_data)
-            logger.warning(f"[斗篷点击] 缓存更新结果: {update_result}")
-
-            # 后台任务创建 Click 记录并更新数据库
-            if background_tasks:
-                async def create_click_and_update_db():
-                    try:
-                        # 创建新的数据库会话
-                        db_session = AsyncSessionLocal()
-                        
-                        # 构建 url_params（JSON 格式），存储 fbclid, dp, email, phone
-                        url_params_dict = {}
-                        if fbclid:
-                            url_params_dict["fbclid"] = fbclid
-                        if resolved_dp:
-                            url_params_dict["dp"] = resolved_dp
-                        if email:
-                            url_params_dict["email"] = email
-                        if phone:
-                            url_params_dict["phone"] = phone
-                        
-                        url_params_json = json.dumps(url_params_dict) if url_params_dict else None
-                        
-                        # 创建 Click 记录
-                        from app.models.models import Click
-                        from app.core.utils import get_app_now_naive
-                        
-                        click = Click(
-                            click_id=str(uuid.uuid4()),
-                            short_link_id=None,  # 稍后查询
-                            click_time=get_app_now_naive(),
-                            ip=client_ip,
-                            user_agent=ua_from_request,
-                            referer=referer,
-                            url_params=url_params_json,  # 存储 fbclid 和 dp
-                            original_request_url=str(request.url) if request else None,
-                            is_bot=False
-                        )
-                        
-                        # 查询短链接
-                        result = await db_session.execute(
-                            select(ShortLink).where(ShortLink.short_code == id)
-                        )
-                        short_link = result.scalars().first()
-                        
-                        if short_link:
-                            click.short_link_id = short_link.id
-                            click.offer_id = short_link.offer_id
-                            click.publisher_id = short_link.channel_id
-                            
-                            # 更新点击次数
-                            short_link.click_count = (short_link.click_count or 0) + 1
-                            
-                            # 添加到数据库
-                            db_session.add(click)
-                            await db_session.commit()
-                            
-                            logger.warning(
-                                f"[斗篷点击] Click 记录创建成功："
-                                f"click_id={click.click_id}, short_code={id}, "
-                                f"url_params={url_params_json}"
-                            )
-                        else:
-                            logger.warning(f"[斗篷点击] 短链接不存在，无法创建 Click 记录：short_code={id}")
-                            await db_session.rollback()
-                    except Exception as e:
-                        logger.error(f"[斗篷点击] 创建 Click 记录失败：{e}", exc_info=True)
-                    finally:
-                        if 'db_session' in locals():
-                            await db_session.close()
-                
-                background_tasks.add_task(create_click_and_update_db)
-        else:
-            # 从数据库查询
-            logger.warning(f"[斗篷点击] 缓存未命中，从数据库查询: short_code={id}")
-            result = await db.execute(select(ShortLink).where(ShortLink.short_code == id))
-            short_link = result.scalars().first()
-
-            if short_link:
+            if cached_data:
                 logger.warning(
-                    f"[斗篷点击] 数据库查询结果: short_code={id}, id={short_link.id}, 原始click_count={short_link.click_count or 0}")
-                # 更新点击次数（数据库）
-                short_link.click_count = (short_link.click_count or 0) + 1
-                logger.warning(f"[斗篷点击] 更新数据库: short_code={id}, 新click_count={short_link.click_count}")
-                try:
-                    await db.commit()
-                    logger.warning(f"[斗篷点击] 数据库提交成功")
+                    f"[斗篷点击] 从缓存获取数据: short_code={id}, 原始click_count={cached_data.get('click_count', 0)}")
+                cached_data["click_count"] = (cached_data.get("click_count", 0)) + 1
+                logger.warning(f"[斗篷点击] 更新缓存: short_code={id}, 新click_count={cached_data['click_count']}")
+                update_result = await update_short_link_cache(id, cached_data)
+                logger.warning(f"[斗篷点击] 缓存更新结果: {update_result}")
 
-                except StaleDataError:
-                    logger.warning(f"[斗篷点击] 数据库更新冲突，忽略StaleDataError")
-                    # 回滚事务以避免会话处于不一致状态
-                    await db.rollback()
+                if background_tasks:
+                    async def create_click_and_update_db():
+                        try:
+                            db_session = AsyncSessionLocal()
+
+                            url_params_dict = {}
+                            if fbclid:
+                                url_params_dict["fbclid"] = fbclid
+                            if resolved_dp:
+                                url_params_dict["dp"] = resolved_dp
+                            if email:
+                                url_params_dict["email"] = email
+                            if phone:
+                                url_params_dict["phone"] = phone
+
+                            url_params_json = json.dumps(url_params_dict) if url_params_dict else None
+
+                            from app.models.models import Click
+                            from app.core.utils import get_app_now_naive
+
+                            click = Click(
+                                click_id=str(uuid.uuid4()),
+                                short_link_id=None,
+                                click_time=get_app_now_naive(),
+                                ip=client_ip,
+                                user_agent=ua_from_request,
+                                referer=referer,
+                                url_params=url_params_json,
+                                original_request_url=str(request.url) if request else None,
+                                is_bot=False
+                            )
+
+                            result = await db_session.execute(
+                                select(ShortLink).where(ShortLink.short_code == id)
+                            )
+                            short_link = result.scalars().first()
+
+                            if short_link:
+                                click.short_link_id = short_link.id
+                                click.offer_id = short_link.offer_id
+                                click.publisher_id = short_link.channel_id
+                                short_link.click_count = (short_link.click_count or 0) + 1
+                                db_session.add(click)
+                                await db_session.commit()
+
+                                logger.warning(
+                                    f"[斗篷点击] Click 记录创建成功："
+                                    f"click_id={click.click_id}, short_code={id}, "
+                                    f"url_params={url_params_json}"
+                                )
+                            else:
+                                logger.warning(f"[斗篷点击] 短链接不存在，无法创建 Click 记录：short_code={id}")
+                                await db_session.rollback()
+                        except Exception as e:
+                            logger.error(f"[斗篷点击] 创建 Click 记录失败：{e}", exc_info=True)
+                        finally:
+                            if 'db_session' in locals():
+                                await db_session.close()
+
+                    background_tasks.add_task(create_click_and_update_db)
             else:
-                logger.warning(f"[斗篷点击] 短链接不存在: short_code={id}")
+                logger.warning(f"[斗篷点击] 缓存未命中，从数据库查询: short_code={id}")
+                result = await db.execute(select(ShortLink).where(ShortLink.short_code == id))
+                short_link = result.scalars().first()
 
-        # 后台任务发送第三方 Facebook 像素上报（如果有参数）
+                if short_link:
+                    logger.warning(
+                        f"[斗篷点击] 数据库查询结果: short_code={id}, id={short_link.id}, 原始click_count={short_link.click_count or 0}")
+                    short_link.click_count = (short_link.click_count or 0) + 1
+                    logger.warning(f"[斗篷点击] 更新数据库: short_code={id}, 新click_count={short_link.click_count}")
+                    try:
+                        await db.commit()
+                        logger.warning(f"[斗篷点击] 数据库提交成功")
+
+                    except StaleDataError:
+                        logger.warning(f"[斗篷点击] 数据库更新冲突，忽略StaleDataError")
+                        await db.rollback()
+                else:
+                    logger.warning(f"[斗篷点击] 短链接不存在: short_code={id}")
+
+        # Facebook CAPI：分 load / click
         if email and phone and background_tasks:
-            # 从 request 头中获取 User-Agent
-            ua_from_request = request.headers.get("user-agent", "未知") if request else "未知"
-
-            report_event = "ViewContent"
-            report_value = None
-            report_currency = "USD"
-
-            # 如果提供了 dp 参数，添加到 source 中以便区分
-            source = "short_link"
-            if resolved_dp:
-                source = f"short_link_dp_{resolved_dp}"
-                logger.warning(f"[第三方上报] 检测到 dp 参数：{resolved_dp}，已更新 source 标识")
-
-            # 使用新的映射服务获取像素配置（使用 dp 参数匹配）
-            dp_param = resolved_dp if resolved_dp else "master"  # 默认使用 master
-            logger.info(f"[第三方上报] 使用 dp 参数获取像素配置：dp={dp_param}, short_code={id}")
+            dp_param = resolved_dp if resolved_dp else "master"
+            logger.info(f"[第三方上报] phase={report_phase} dp={dp_param}, short_code={id}")
 
             pixel_config = None
             report_kwargs_fb: dict = {}
@@ -692,40 +868,80 @@ async def handle_report(
                         "facebook_access_token": pixel_config["facebook_access_token"],
                         "facebook_api_version": pixel_config["facebook_api_version"],
                     }
-                    cloak_evt = pixel_config.get("cloak_report_event") or "ViewContent"
-                    report_event = cloak_evt
-                    rv = pixel_config.get("cloak_report_value")
-                    if rv is not None:
-                        try:
-                            report_value = float(rv)
-                        except (TypeError, ValueError):
-                            report_value = None
-                    report_currency = (pixel_config.get("cloak_report_currency") or "USD").strip().upper() or "USD"
-                    logger.info(
-                        f"[第三方上报] 使用斗篷像素配置：dp={dp_param}, short_code={id}, "
-                        f"pixel_id={pixel_config['facebook_pixel_id'][:10] if pixel_config['facebook_pixel_id'] else ''}..., "
-                        f"report_event={report_event}"
-                    )
                 else:
-                    logger.info(
-                        f"[第三方上报] 未找到斗篷像素配置，将使用全局配置：dp={dp_param}, short_code={id}"
-                    )
+                    report_kwargs_fb = {
+                        "facebook_pixel_id": settings.FACEBOOK_PIXEL_ID,
+                        "facebook_access_token": settings.FACEBOOK_ACCESS_TOKEN,
+                        "facebook_api_version": settings.FACEBOOK_API_VERSION,
+                    }
+                    logger.info(f"[第三方上报] 未找到斗篷像素配置，将使用全局配置：dp={dp_param}, short_code={id}")
             except Exception as e:
                 logger.error(
                     f"[第三方上报] 获取像素配置失败：dp={dp_param}, short_code={id}, error={str(e)}",
                     exc_info=True,
                 )
-
-            if not pixel_config:
                 report_kwargs_fb = {
                     "facebook_pixel_id": settings.FACEBOOK_PIXEL_ID,
                     "facebook_access_token": settings.FACEBOOK_ACCESS_TOKEN,
                     "facebook_api_version": settings.FACEBOOK_API_VERSION,
                 }
-                logger.info(f"[第三方上报] 使用全局配置：pixel_id={settings.FACEBOOK_PIXEL_ID[:10]}...")
 
-            # 桥页 URL 中的 report_* 应与下方服务端解析结果一致（不一致仅告警，仍以配置为准）
-            if request is not None:
+            send_fb = False
+            report_event = "ViewContent"
+            report_value = None
+            report_currency = "USD"
+            source = "short_link"
+            conv_seg = "click"
+
+            if report_phase == "load":
+                load_on = bool(pixel_config and pixel_config.get("cloak_load_report_enabled"))
+                if not load_on:
+                    logger.info("[斗篷加载上报] 未启用或无可选配置，跳过 CAPI")
+                else:
+                    send_fb = True
+                    report_event = (pixel_config.get("cloak_load_report_event") or "PageView").strip() or "PageView"
+                    rv = pixel_config.get("cloak_load_report_value")
+                    if rv is not None:
+                        try:
+                            report_value = float(rv)
+                        except (TypeError, ValueError):
+                            report_value = None
+                    report_currency = (
+                        (pixel_config.get("cloak_load_report_currency") or "USD").strip().upper() or "USD"
+                    )
+                    source = f"short_link_load_dp_{dp_param}"
+                    conv_seg = "load"
+                    logger.info(
+                        f"[第三方上报] 加载阶段：event={report_event}, pixel_id="
+                        f"{pixel_config['facebook_pixel_id'][:10] if pixel_config.get('facebook_pixel_id') else ''}..."
+                    )
+            else:
+                click_on = bool(not pixel_config or pixel_config.get("cloak_click_report_enabled", True))
+                if not click_on:
+                    logger.info("[斗篷点击上报] 已关闭，跳过 CAPI")
+                else:
+                    send_fb = True
+                    if resolved_dp:
+                        source = f"short_link_dp_{resolved_dp}"
+                        logger.warning(f"[第三方上报] 检测到 dp 参数：{resolved_dp}，已更新 source 标识")
+                    if pixel_config:
+                        cloak_evt = pixel_config.get("cloak_report_event") or "ViewContent"
+                        report_event = cloak_evt
+                        rv = pixel_config.get("cloak_report_value")
+                        if rv is not None:
+                            try:
+                                report_value = float(rv)
+                            except (TypeError, ValueError):
+                                report_value = None
+                        report_currency = (
+                            (pixel_config.get("cloak_report_currency") or "USD").strip().upper() or "USD"
+                        )
+                        logger.info(
+                            f"[第三方上报] 点击阶段：event={report_event}, "
+                            f"pixel_id={pixel_config['facebook_pixel_id'][:10] if pixel_config.get('facebook_pixel_id') else ''}..."
+                        )
+
+            if send_fb and request is not None and report_phase == "click":
                 q_evt = request.query_params.get("report_event")
                 q_val = request.query_params.get("report_value")
                 q_cur = request.query_params.get("report_currency")
@@ -756,38 +972,46 @@ async def handle_report(
                         report_currency,
                     )
 
-            report_kwargs = {
-                "adsid": fbclid,
-                "event": report_event,
-                "email": email,
-                "ip": client_ip,
-                "phone": phone,
-                "ua": ua_from_request,
-                "source": source,
-                **report_kwargs_fb,
-            }
-            if report_event == "Purchase":
-                report_kwargs["currency"] = report_currency
-                report_kwargs["amount"] = report_value
-                report_kwargs["conversion_id"] = f"cloak_{id}_{fbclid}"[:200]
+            if send_fb:
+                report_kwargs = {
+                    "adsid": fbclid,
+                    "event": report_event,
+                    "email": email,
+                    "ip": client_ip,
+                    "phone": phone,
+                    "ua": ua_from_request,
+                    "source": source,
+                    **report_kwargs_fb,
+                }
+                if report_event == "Purchase":
+                    report_kwargs["currency"] = report_currency
+                    report_kwargs["amount"] = report_value
+                    report_kwargs["conversion_id"] = f"cloak_{conv_seg}_{id}_{fbclid}"[:200]
 
-            if report_event == "Purchase" and (report_value is None or report_value <= 0):
-                logger.error(
-                    "[第三方上报] 斗篷配置为 Purchase 但未配置有效金额，跳过 Facebook 上报："
-                    "short_code=%s dp=%s",
-                    id,
-                    dp_param,
-                )
-            else:
-                background_tasks.add_task(send_third_party_report, **report_kwargs)
-                logger.warning(
-                    f"[第三方上报] 已添加到后台任务队列：adsid={fbclid}, ip={client_ip}, "
-                    f"source={source}, event={report_event}, pixel_config={'自定义' if pixel_config else '全局'}"
-                )
+                if report_event == "Purchase" and (report_value is None or report_value <= 0):
+                    logger.error(
+                        "[第三方上报] 事件为 Purchase 但未配置有效金额，跳过 Facebook 上报："
+                        "short_code=%s dp=%s phase=%s",
+                        id,
+                        dp_param,
+                        report_phase,
+                    )
+                else:
+                    background_tasks.add_task(send_third_party_report, **report_kwargs)
+                    logger.warning(
+                        f"[第三方上报] 已添加到后台任务队列：phase={report_phase}, adsid={fbclid}, ip={client_ip}, "
+                        f"source={source}, event={report_event}, pixel_config={'自定义' if pixel_config else '全局'}"
+                    )
 
         # 返回成功响应
-        logger.warning(f"[斗篷点击] 处理完成：id={id}, fbclid={fbclid}, client_ip={client_ip}")
-        return {"status": "success", "message": "Report received", "client_ip": client_ip, "fbclid": fbclid}
+        logger.warning(f"[斗篷上报] 处理完成：phase={report_phase}, id={id}, fbclid={fbclid}, client_ip={client_ip}")
+        return {
+            "status": "success",
+            "message": "Report received",
+            "client_ip": client_ip,
+            "fbclid": fbclid,
+            "phase": report_phase,
+        }
     except Exception as e:
         logger.error(f"[斗篷点击] 处理异常：error={str(e)}", exc_info=True)
         return {"status": "error", "message": "Failed to process report"}

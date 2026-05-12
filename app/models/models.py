@@ -713,7 +713,11 @@ class CloakConfig(Base):
         String(64),
         nullable=False,
         default='ViewContent',
-        comment='斗篷点击与测上报的 CAPI event_name（如 ViewContent、Purchase）',
+        comment=(
+            '桥页按钮点击时服务端 CAPI 的 event_name：'
+            'Meta 官方标准事件（如 ViewContent、Purchase、Lead）或自定义名（如 Click）；'
+            '含义与可选值见 app/schemas/cloak.py 中 FACEBOOK_STANDARD_EVENT_NAMES / 自定义命名规则'
+        ),
     )
     report_value = Column(Float, nullable=True, comment='购物类事件金额（Purchase 等需配合 report_currency）')
     report_currency = Column(
@@ -721,6 +725,54 @@ class CloakConfig(Base):
         nullable=True,
         default='USD',
         comment='购物类事件货币代码（如 USD）',
+    )
+    click_report_enabled = Column(
+        Boolean,
+        default=True,
+        nullable=False,
+        comment='桥页按钮跳转是否向 Facebook 上报（对应 report_event）',
+    )
+    load_report_enabled = Column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment='桥页加载完成是否向 Facebook 上报',
+    )
+    load_report_event = Column(
+        String(64),
+        nullable=False,
+        default='PageView',
+        comment='加载完成时 CAPI event_name',
+    )
+    load_report_value = Column(Float, nullable=True, comment='加载上报为 Purchase 时的金额')
+    load_report_currency = Column(
+        String(10),
+        nullable=True,
+        default='USD',
+        comment='加载上报为 Purchase 时的货币',
+    )
+    postback_report_enabled = Column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment='postback 转化是否按本行配置上报；False 时仍按原逻辑发 Purchase+payout',
+    )
+    postback_report_event = Column(
+        String(64),
+        nullable=False,
+        default='Purchase',
+        comment='postback 转化时 CAPI event_name（需点击记录 url_params 含 dp=斗篷名）',
+    )
+    postback_report_value = Column(
+        Float,
+        nullable=True,
+        comment='postback 为 Purchase 时固定金额；NULL 则用 postback 的 payout',
+    )
+    postback_report_currency = Column(
+        String(10),
+        nullable=True,
+        default='USD',
+        comment='postback Purchase 货币',
     )
     is_enabled = Column(Boolean, default=True, nullable=False, index=True, comment='是否启用')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')

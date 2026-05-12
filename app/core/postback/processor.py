@@ -8,6 +8,7 @@ Postback 统一处理器模块（重构版）
 import logging
 from typing import Dict, Any, Optional
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.postback.validators.ip_validator import IpValidator
@@ -20,7 +21,7 @@ from app.core.postback.checks.discount_checker import DiscountChecker
 from app.core.postback.savers.conversion_saver import ConversionSaver
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
-from app.models.models import AdminNotificationConfig
+from app.models.models import AdminNotificationConfig, CloakConfig, ShortLink
 from app.services.telegram_notification_service import TelegramNotificationService
 from app.core.third_party_report import send_third_party_report
 
@@ -164,10 +165,18 @@ class PostbackProcessor:
                     url_params = click_association.get('url_params', {})
                     dp = url_params.get('dp') if url_params else None
 
+                    cloak_cfg_pb = None
+                    if dp:
+                        try:
+                            cr_pb = await db.execute(
+                                select(CloakConfig).where(CloakConfig.cloak_name == str(dp).strip())
+                            )
+                            cloak_cfg_pb = cr_pb.scalars().first()
+                        except Exception as exc:
+                            logger.warning("=== 查询斗篷 postback 配置失败：%s ===", exc)
+
                     # 获取像素配置（优先级：数据库 > 斗篷配置表 > 全局配置）
                     from app.core.config import settings
-                    from app.models.models import ShortLink
-                    from sqlalchemy import update
                     from app.services.cloak_pixel_mapping import get_cloak_pixel_config
                     facebook_pixel_id = settings.FACEBOOK_PIXEL_ID
                     facebook_access_token = settings.FACEBOOK_ACCESS_TOKEN
@@ -222,27 +231,58 @@ class PostbackProcessor:
                     logger.info(f"=== Pixel ID: {facebook_pixel_id[:10] if facebook_pixel_id else 'None'}... ===")
                     logger.info(f"=== API Version: {facebook_api_version} ===")
 
-                    # 调用第三方上报
+                    # 调用第三方上报（postback_report_enabled 时按斗篷配置事件与金额，否则维持原 Purchase+payout）
                     try:
-                        # 获取点击时间
                         click_time = click_association.get('click_time')
-                        await send_third_party_report(
-                            adsid=fbclid,
-                            conversion_id=click_id,
-                            event="Purchase",
-                            email=email,
-                            ip=ip,
-                            phone=phone,
-                            ua=ua,
-                            source="postback",
-                            currency="USD",
-                            amount=amount,
-                            click_time=click_time,
-                            facebook_pixel_id=facebook_pixel_id,
-                            facebook_access_token=facebook_access_token,
-                            facebook_api_version=facebook_api_version
+                        use_cfg_pb = bool(
+                            cloak_cfg_pb and getattr(cloak_cfg_pb, "postback_report_enabled", False)
                         )
-                        logger.info(f"=== 第三方上报成功：fbclid={fbclid} ===")
+                        if use_cfg_pb:
+                            fb_event = (cloak_cfg_pb.postback_report_event or "Purchase").strip() or "Purchase"
+                            cur_send = (cloak_cfg_pb.postback_report_currency or "USD").strip().upper() or "USD"
+                            fixed_val = getattr(cloak_cfg_pb, "postback_report_value", None)
+                            try:
+                                fixed_val = float(fixed_val) if fixed_val is not None else None
+                            except (TypeError, ValueError):
+                                fixed_val = None
+                            if fb_event == "Purchase":
+                                amt_send = (
+                                    fixed_val if (fixed_val is not None and fixed_val > 0) else amount
+                                )
+                            else:
+                                amt_send = None
+                                cur_send = None
+                        else:
+                            fb_event = "Purchase"
+                            cur_send = "USD"
+                            amt_send = amount
+
+                        if fb_event == "Purchase" and (amt_send is None or amt_send <= 0):
+                            logger.warning(
+                                "=== Purchase 金额无效，跳过第三方上报：use_cfg_pb=%s amt=%s ===",
+                                use_cfg_pb,
+                                amt_send,
+                            )
+                        else:
+                            report_kw: Dict[str, Any] = {
+                                "adsid": fbclid,
+                                "conversion_id": str(click_id)[:200],
+                                "event": fb_event,
+                                "email": email,
+                                "ip": ip,
+                                "phone": phone,
+                                "ua": ua,
+                                "source": "postback",
+                                "click_time": click_time,
+                                "facebook_pixel_id": facebook_pixel_id,
+                                "facebook_access_token": facebook_access_token,
+                                "facebook_api_version": facebook_api_version,
+                            }
+                            if fb_event == "Purchase":
+                                report_kw["currency"] = cur_send or "USD"
+                                report_kw["amount"] = float(amt_send)
+                            await send_third_party_report(**report_kw)
+                            logger.info(f"=== 第三方上报成功：fbclid={fbclid} event={fb_event} ===")
                     except Exception as e:
                         logger.error(f"=== 第三方上报失败：{str(e)} ===")
                 else:
@@ -449,6 +489,3 @@ class PostbackProcessor:
             "is_test_data": True
         }
 
-
-# 向后兼容：导入时自动定义 select
-from sqlalchemy import select
