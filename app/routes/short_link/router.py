@@ -33,7 +33,12 @@ from app.core.cloak_scripts_paths import read_bridge_html_template_cached, resol
 from app.routes.short_link.handlers import handle_cached_redirect, handle_database_redirect
 from app.routes.short_link.placeholder import replace_short_link_placeholders
 from app.routes.short_link.url_builder import build_final_url
-from app.routes.short_link.utils import resolve_offer_id, resolve_default_publisher_for_offer
+from app.routes.short_link.utils import (
+    resolve_offer_id,
+    resolve_default_publisher_for_offer,
+    offer_id_from_numeric_dp,
+    resolve_cloak_click_offer_and_publisher,
+)
 from app.routes.short_link_redirect import _create_click_record
 
 logger = logging.getLogger(__name__)
@@ -357,13 +362,9 @@ async def open_master_html_with_redirect(
                 logger.warning("[斗篷服务] 读取短链 offer/channel 用于占位符: %s", exc)
 
         # 纯数字 dp（如 145）= 平台 Offer 主键：覆盖短链上的 offer_id，保证与斗篷页一致
-        if dp is not None:
-            dp_s = str(dp).strip()
-            if dp_s.isdigit():
-                try:
-                    offer_id_q = int(dp_s)
-                except (TypeError, ValueError):
-                    pass
+        dp_as_offer = offer_id_from_numeric_dp(dp)
+        if dp_as_offer is not None:
+            offer_id_q = dp_as_offer
 
         click_id_cloak = generate_click_id_from_timestamp()
         request_info_cloak = collect_request_info(request) if request else {}
@@ -834,19 +835,15 @@ async def handle_report(
 
                             if short_link:
                                 click.short_link_id = short_link.id
-                                # 纯数字 dp 与平台 Offer 主键对齐（如 dp=145 → offer 145），避免斗篷页未写短链 offer 时点击无单子、无渠道
-                                offer_for_click = short_link.offer_id
-                                if resolved_dp and str(resolved_dp).strip().isdigit():
-                                    try:
-                                        offer_for_click = int(str(resolved_dp).strip())
-                                    except (TypeError, ValueError):
-                                        pass
-                                click.offer_id = offer_for_click
-                                pub_for_click = short_link.channel_id
-                                if pub_for_click is None and offer_for_click is not None:
-                                    pub_for_click = await resolve_default_publisher_for_offer(
-                                        offer_for_click, db_session
+                                offer_for_click, pub_for_click = (
+                                    await resolve_cloak_click_offer_and_publisher(
+                                        short_link.offer_id,
+                                        short_link.channel_id,
+                                        resolved_dp,
+                                        db_session,
                                     )
+                                )
+                                click.offer_id = offer_for_click
                                 click.publisher_id = pub_for_click
                                 short_link.click_count = (short_link.click_count or 0) + 1
                                 db_session.add(click)
@@ -880,10 +877,71 @@ async def handle_report(
                     try:
                         await db.commit()
                         logger.warning(f"[斗篷点击] 数据库提交成功")
-
                     except StaleDataError:
                         logger.warning(f"[斗篷点击] 数据库更新冲突，忽略StaleDataError")
                         await db.rollback()
+                    else:
+                        # 仅在 click_count 提交成功后补写 Click，避免与主事务回滚不一致
+                        if background_tasks:
+                            async def insert_cloak_click_after_cache_miss():
+                                try:
+                                    from app.models.models import Click
+                                    from app.core.utils import get_app_now_naive
+
+                                    db_session = AsyncSessionLocal()
+                                    try:
+                                        res_sl = await db_session.execute(
+                                            select(ShortLink).where(ShortLink.short_code == id)
+                                        )
+                                        sl = res_sl.scalars().first()
+                                        if not sl:
+                                            return
+                                        offer_c, pub_c = await resolve_cloak_click_offer_and_publisher(
+                                            sl.offer_id, sl.channel_id, resolved_dp, db_session
+                                        )
+                                        url_params_dict = {}
+                                        if fbclid:
+                                            url_params_dict["fbclid"] = fbclid
+                                        if resolved_dp:
+                                            url_params_dict["dp"] = resolved_dp
+                                        if email:
+                                            url_params_dict["email"] = email
+                                        if phone:
+                                            url_params_dict["phone"] = phone
+                                        url_params_json = (
+                                            json.dumps(url_params_dict) if url_params_dict else None
+                                        )
+                                        click = Click(
+                                            click_id=str(uuid.uuid4()),
+                                            short_link_id=sl.id,
+                                            offer_id=offer_c,
+                                            publisher_id=pub_c,
+                                            click_time=get_app_now_naive(),
+                                            ip=client_ip,
+                                            user_agent=ua_from_request,
+                                            referer=referer,
+                                            url_params=url_params_json,
+                                            original_request_url=str(request.url) if request else None,
+                                            is_bot=False,
+                                        )
+                                        db_session.add(click)
+                                        await db_session.commit()
+                                        logger.info(
+                                            "[斗篷点击] 缓存未命中路径已写入 Click: short_code=%s click_id=%s",
+                                            id,
+                                            click.click_id,
+                                        )
+                                    finally:
+                                        await db_session.close()
+                                except Exception as exc:
+                                    logger.error(
+                                        "[斗篷点击] 缓存未命中路径写入 Click 失败: short_code=%s, %s",
+                                        id,
+                                        exc,
+                                        exc_info=True,
+                                    )
+
+                            background_tasks.add_task(insert_cloak_click_after_cache_miss)
                 else:
                     logger.warning(f"[斗篷点击] 短链接不存在: short_code={id}")
 

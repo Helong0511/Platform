@@ -62,6 +62,41 @@ async def resolve_offer_id(offer_id: Optional[int], db: AsyncSession) -> tuple[O
     return None, None
 
 
+def offer_id_from_numeric_dp(dp: Optional[str]) -> Optional[int]:
+    """
+    纯数字 dp（如 145）与平台 Offer 主键对齐；非数字或空返回 None。
+    用于 /change 占位符与 /report 点击归因，与桥页文件名 145.html 约定一致。
+    """
+    if dp is None:
+        return None
+    s = str(dp).strip()
+    if not s.isdigit():
+        return None
+    try:
+        return int(s)
+    except (TypeError, ValueError):
+        return None
+
+
+async def resolve_cloak_click_offer_and_publisher(
+    short_link_offer_id: Optional[int],
+    short_link_channel_id: Optional[int],
+    resolved_dp: Optional[str],
+    db: AsyncSession,
+) -> tuple[Optional[int], Optional[int]]:
+    """
+    斗篷 /report 写入 clicks 时的 offer_id、publisher_id。
+    数字 dp 覆盖短链 offer；渠道为空时按产品绑定回退。
+    """
+    offer_for = offer_id_from_numeric_dp(resolved_dp)
+    if offer_for is None:
+        offer_for = short_link_offer_id
+    pub_for = short_link_channel_id
+    if pub_for is None and offer_for is not None:
+        pub_for = await resolve_default_publisher_for_offer(offer_for, db)
+    return offer_for, pub_for
+
+
 async def resolve_default_publisher_for_offer(offer_id: int, db: AsyncSession) -> Optional[int]:
     """
     当短链未关联 channel_id 时，按产品（Offer）下启用的渠道分配回退一个 publisher_id。
