@@ -59,8 +59,11 @@ async def tbsj_api_task(
 
     # API凭证（建议从环境变量或配置文件读取，避免硬编码）
     # TODO: 将凭证移到配置文件或环境变量
-    username = 'BOFIT'
-    password = '5e2296fa9fd1434bf8a60c03cf745ce9'
+    # username = 'BOFIT'
+    # password = '5e2296fa9fd1434bf8a60c03cf745ce9'
+    
+    username = 'BOFIT1'
+    password = 'f8034e342a8e6070aadaee559c3c95eb'
 
     # 验证凭证是否配置
     if not username or not password:
