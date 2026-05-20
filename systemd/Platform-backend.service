@@ -9,11 +9,11 @@ User=www-data
 Group=www-data
 WorkingDirectory=/data/Platform
 Environment="PATH=/data/Platform/venv/bin"
-Environment="PRODUCTION_ENV=production"
-# 使用独立 Platform-scheduler.service 时，API 进程不跑定时任务（与 .env 中 ENABLE_SCHEDULER=false 一致）
-Environment="ENABLE_SCHEDULER=false"
-Environment="GUNICORN_ROLE=api"
 EnvironmentFile=/data/Platform/.env
+# 以下变量写在 EnvironmentFile 之后，确保覆盖 .env
+Environment="PRODUCTION_ENV=production"
+Environment="GUNICORN_ROLE=api"
+Environment="ENABLE_SCHEDULER=false"
 
 # 确保日志目录存在并设置权限
 ExecStartPre=/bin/mkdir -p /data/Platform/logs

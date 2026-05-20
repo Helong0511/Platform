@@ -9,12 +9,13 @@ User=www-data
 Group=www-data
 WorkingDirectory=/data/Platform
 Environment="PATH=/data/Platform/venv/bin"
+EnvironmentFile=/data/Platform/.env
+# 以下变量必须写在 EnvironmentFile 之后，覆盖 .env 中的 ENABLE_SCHEDULER=false
 Environment="PRODUCTION_ENV=production"
 Environment="GUNICORN_ROLE=scheduler"
 Environment="ENABLE_SCHEDULER=true"
 Environment="SCHEDULER_WORKER=1"
 Environment="WORKERS=1"
-EnvironmentFile=/data/Platform/.env
 
 ExecStartPre=/bin/mkdir -p /data/Platform/logs
 ExecStartPre=/bin/chown -R www-data:www-data /data/Platform/logs
