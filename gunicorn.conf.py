@@ -14,9 +14,16 @@ logger = logging.getLogger(__name__)
 # 导入配置（用于判断是否为生产环境）
 from app.core.config import settings
 
+# api = Platform-backend（HTTP）；scheduler = Platform-scheduler（仅定时任务，独立 pid/日志）
+GUNICORN_ROLE = os.getenv("GUNICORN_ROLE", "api").strip().lower()
+
 # ====== 服务器配置 ======
 # 绑定地址和端口
-bind = "127.0.0.1:8960"  # 后端端口，只监听本地，通过 Nginx 反向代理
+bind = (
+    os.getenv("SCHEDULER_BIND", "127.0.0.1:8961")
+    if GUNICORN_ROLE == "scheduler"
+    else "127.0.0.1:8960"
+)  # API:8960；调度:8961（仅本机，勿经 Nginx 暴露）
 
 # Worker 配置
 # 根据 CPU 核心数自动计算 worker 数量
@@ -40,10 +47,12 @@ else:
         max_workers = max(2, memory_gb // 2)  # 确保至少2个worker
         workers = min(workers, max_workers)
 
-# 2核CPU + 4GB内存，固定为 3 个 worker
-# 高并发优化：对于短链接和CPL服务，3个worker可以处理约3000并发连接
-if cpu_count == 2:
+# 2核CPU + 4GB内存，固定为 3 个 worker（仅 API 服务；勿覆盖 WORKERS 环境变量）
+if cpu_count == 2 and GUNICORN_ROLE != "scheduler" and not os.getenv("WORKERS"):
     workers = 3
+
+if GUNICORN_ROLE == "scheduler":
+    workers = 1
 
 worker_class = "uvicorn.workers.UvicornWorker"  # 使用 Uvicorn Worker
 worker_connections = 1000  # 每个 worker 的最大连接数（Uvicorn默认1000，适合高并发）
@@ -71,9 +80,13 @@ try:
 except (OSError, PermissionError) as e:
     logger.warning(f"无法创建日志目录 {log_dir}: {e}")
 
-# 日志文件路径
-accesslog = os.path.join(log_dir, "gunicorn_access.log")
-errorlog = os.path.join(log_dir, "gunicorn_error.log")
+# 日志文件路径（调度进程与 API 进程分离，避免争用同一文件）
+if GUNICORN_ROLE == "scheduler":
+    accesslog = os.path.join(log_dir, "gunicorn_scheduler_access.log")
+    errorlog = os.path.join(log_dir, "gunicorn_scheduler_error.log")
+else:
+    accesslog = os.path.join(log_dir, "gunicorn_access.log")
+    errorlog = os.path.join(log_dir, "gunicorn_error.log")
 
 # 尝试创建日志文件并设置权限（如果可能）
 for log_file in [accesslog, errorlog]:
@@ -97,13 +110,16 @@ access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"
 
 # ====== 进程配置 ======
 # 进程名称
-proc_name = "platform_backend"
+proc_name = "platform_scheduler" if GUNICORN_ROLE == "scheduler" else "platform_backend"
 
 # 守护进程模式（通过 systemd 管理，不需要守护进程）
 daemon = False
 
-# PID 文件
-pidfile = os.path.join(log_dir, "gunicorn.pid")
+# PID 文件（两个 Gunicorn 实例不可共用同一 pidfile）
+pidfile = os.path.join(
+    log_dir,
+    "gunicorn_scheduler.pid" if GUNICORN_ROLE == "scheduler" else "gunicorn.pid",
+)
 # 尝试创建 PID 文件目录并设置权限（如果可能）
 try:
     if not os.path.exists(pidfile):
@@ -169,8 +185,9 @@ raw_env = [
 # 多进程环境优化：每个 hook 都会在每个 worker 中执行
 def on_starting(server):
     """服务器启动时的回调（主进程）"""
-    server.log.info("Platform Backend 正在启动...")
-    server.log.info(f"Worker 数量: {workers}, Worker 类: {worker_class}")
+    name = "Platform Scheduler" if GUNICORN_ROLE == "scheduler" else "Platform Backend"
+    server.log.info(f"{name} 正在启动...")
+    server.log.info(f"Worker 数量: {workers}, Worker 类: {worker_class}, role={GUNICORN_ROLE}")
 
 def on_reload(server):
     """重新加载时的回调（主进程）"""
@@ -183,11 +200,15 @@ def when_ready(server):
 
 def post_fork(server, worker):
     """Worker 进程启动后的回调（每个 worker 进程）"""
-    # 仅首个 worker 运行定时任务，避免多份 APScheduler 争抢 DB/Redis
-    os.environ["SCHEDULER_WORKER"] = "1" if worker.age == 0 else "0"
+    if GUNICORN_ROLE == "scheduler":
+        # 独立调度服务仅 1 个 worker，始终跑定时任务
+        os.environ["SCHEDULER_WORKER"] = "1"
+    else:
+        # API 服务：仅首个 worker 运行定时任务（若未设置 ENABLE_SCHEDULER=false）
+        os.environ["SCHEDULER_WORKER"] = "1" if worker.age == 0 else "0"
     worker.log.info(
         f"Worker {worker.pid} 已启动（父进程: {os.getppid()}，"
-        f"SCHEDULER_WORKER={os.environ['SCHEDULER_WORKER']}）"
+        f"role={GUNICORN_ROLE}，SCHEDULER_WORKER={os.environ['SCHEDULER_WORKER']}）"
     )
 
 def worker_int(worker):

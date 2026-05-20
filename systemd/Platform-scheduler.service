@@ -1,6 +1,6 @@
 [Unit]
 Description=Platform Backend Scheduler (single worker, scheduled tasks only)
-After=network.target mysql.service redis.service platform-backend.service
+After=network.target mysql.service redis.service Platform-backend.service
 Wants=mysql.service redis.service
 
 [Service]
@@ -10,6 +10,7 @@ Group=www-data
 WorkingDirectory=/data/Platform
 Environment="PATH=/data/Platform/venv/bin"
 Environment="PRODUCTION_ENV=production"
+Environment="GUNICORN_ROLE=scheduler"
 Environment="ENABLE_SCHEDULER=true"
 Environment="SCHEDULER_WORKER=1"
 Environment="WORKERS=1"
@@ -17,12 +18,13 @@ EnvironmentFile=/data/Platform/.env
 
 ExecStartPre=/bin/mkdir -p /data/Platform/logs
 ExecStartPre=/bin/chown -R www-data:www-data /data/Platform/logs
+ExecStartPre=/bin/touch /data/Platform/logs/gunicorn_scheduler.pid /data/Platform/logs/gunicorn_scheduler_access.log /data/Platform/logs/gunicorn_scheduler_error.log
+ExecStartPre=/bin/chown www-data:www-data /data/Platform/logs/gunicorn_scheduler.pid /data/Platform/logs/gunicorn_scheduler_access.log /data/Platform/logs/gunicorn_scheduler_error.log
+ExecStartPre=/bin/chmod 644 /data/Platform/logs/gunicorn_scheduler.pid /data/Platform/logs/gunicorn_scheduler_access.log /data/Platform/logs/gunicorn_scheduler_error.log
 
-# 独立调度进程：单 worker，不对外提供高并发 HTTP（仍监听 8960 仅本机，可与主服务错开端口）
+# 使用独立 pid/日志（gunicorn.conf.py 根据 GUNICORN_ROLE=scheduler 切换）
 ExecStart=/data/Platform/venv/bin/gunicorn \
     --config /data/Platform/gunicorn.conf.py \
-    --bind 127.0.0.1:8961 \
-    --workers 1 \
     app.main:app
 
 Restart=always
