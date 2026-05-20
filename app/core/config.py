@@ -84,11 +84,14 @@ class Settings(BaseSettings):
         是否在当前进程启动 APScheduler 定时任务。
 
         优先级：
-        1. ENABLE_SCHEDULER=true/false 强制开关
-        2. SCHEDULER_WORKER=1/0（Gunicorn post_fork 为首个 worker 设置）
-        3. WORKERS>1 且未指定时默认关闭（避免多 worker 重复跑任务）
-        4. 单进程开发环境默认开启
+        1. GUNICORN_ROLE=scheduler → 独立调度进程始终启用（不受 .env 中 ENABLE_SCHEDULER=false 影响）
+        2. GUNICORN_ROLE=api → 遵循 ENABLE_SCHEDULER（API 多 worker 默认关闭）
+        3. SCHEDULER_WORKER=1/0（Gunicorn post_fork 为首个 API worker 设置）
         """
+        role = os.getenv("GUNICORN_ROLE", "api").strip().lower()
+        if role == "scheduler":
+            return True
+
         explicit = os.getenv("ENABLE_SCHEDULER", "").strip().lower()
         if explicit in ("false", "0", "no"):
             return False
