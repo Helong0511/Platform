@@ -290,7 +290,10 @@ class Settings(BaseSettings):
                 # 用户明确设置了 DATABASE_URL，允许使用（即使包含默认密码字符，可能是用户自己的配置）
                 # 只给出警告，不报错
                 if "kb7$rL3d8!tQ" in v or "admin123" in v:
-                    logger.warning("检测到数据库连接可能包含默认密码，生产环境建议使用强密码")
+                    if not os.getenv("UNIT_TEST"):
+                        logger.warning(
+                            "检测到数据库连接可能包含默认密码，生产环境建议使用强密码"
+                        )
 
         return v
 
@@ -425,6 +428,49 @@ class Settings(BaseSettings):
     # 是否启用 Telegram Bot 功能（默认启用）
     # 设置为 false/0/no 可禁用 Telegram 功能
     TELEGRAM_ENABLE: bool = os.getenv("TELEGRAM_ENABLE", "true").lower() in ["true", "1", "yes"]
+
+    # ====== 追踪令牌（click_id 内嵌参数，默认关闭以保持现网行为） ======
+    USE_TRACKING_TOKEN: bool = os.getenv("USE_TRACKING_TOKEN", "false").lower() in [
+        "true", "1", "yes"
+    ]
+    AD_TRACKING_MASTER_KEY_HEX: str = os.getenv("AD_TRACKING_MASTER_KEY_HEX", "")
+    # None 表示不校验令牌年龄；生产可按业务设置，例如 7776000（90 天）
+    TRACKING_TOKEN_MAX_AGE_SECONDS: int | None = (
+        int(os.getenv("TRACKING_TOKEN_MAX_AGE_SECONDS"))
+        if os.getenv("TRACKING_TOKEN_MAX_AGE_SECONDS", "").strip()
+        else None
+    )
+    # 令牌外层最大字符数：与 click_id varchar(255) 对齐；短链场景代码内固定 60
+    TRACKING_TOKEN_MAX_OUTER_CHARS: int = int(
+        os.getenv("TRACKING_TOKEN_MAX_OUTER_CHARS", "255")
+    )
+    # 显式 true 时即使 USE_TRACKING_TOKEN=true 也写入 clicks 表（队列批量落库）
+    PERSIST_CLICKS_TO_DB: bool | None = (
+        True
+        if os.getenv("PERSIST_CLICKS_TO_DB", "").strip().lower() in ("true", "1", "yes")
+        else False
+        if os.getenv("PERSIST_CLICKS_TO_DB", "").strip().lower() in ("false", "0", "no")
+        else None
+    )
+
+    # ====== 上游广告数据 API 凭证（仅 .env，代码内无默认值） ======
+    TQT_APP_KEY: str = os.getenv("TQT_APP_KEY", "")
+    TQT_API_SECRET: str = os.getenv("TQT_API_SECRET", "")
+    SKYMOBI_API_ID: str = os.getenv("SKYMOBI_API_ID", "")
+    SKYMOBI_API_KEY: str = os.getenv("SKYMOBI_API_KEY", "")
+    HUGUANG_API_KEY: str = os.getenv("HUGUANG_API_KEY", "")
+    HUGUANG_API_DOMAIN: str = os.getenv("HUGUANG_API_DOMAIN", "")
+    HUGUANG_API_USERNAME: str = os.getenv("HUGUANG_API_USERNAME", "")
+    TBSJ_API_USERNAME: str = os.getenv("TBSJ_API_USERNAME", "")
+    TBSJ_API_PASSWORD: str = os.getenv("TBSJ_API_PASSWORD", "")
+    ADDERMOBI_API_USERNAME: str = os.getenv("ADDERMOBI_API_USERNAME", "")
+    ADDERMOBI_API_PASSWORD: str = os.getenv("ADDERMOBI_API_PASSWORD", "")
+
+    # ====== 敏感路径防护（防扫描 / 探测） ======
+    ENABLE_SENSITIVE_PATH_GUARD: bool = os.getenv(
+        "ENABLE_SENSITIVE_PATH_GUARD", "true"
+    ).lower() in ["true", "1", "yes"]
+    SENSITIVE_PATH_BLOCK_EXTRA: str = os.getenv("SENSITIVE_PATH_BLOCK_EXTRA", "")
     
     # Telegram Bot Token（从 BotFather 获取）
     # 生产环境必须通过环境变量设置
@@ -502,6 +548,16 @@ if settings.is_production:
     cors_origins_str = str(settings.BACKEND_CORS_ORIGINS)
     if "localhost" in cors_origins_str or "127.0.0.1" in cors_origins_str:
         logger.warning("CORS配置包含localhost，生产环境建议移除")
+
+    if settings.USE_TRACKING_TOKEN and not settings.AD_TRACKING_MASTER_KEY_HEX:
+        logger.warning(
+            "USE_TRACKING_TOKEN=true 但未设置 AD_TRACKING_MASTER_KEY_HEX，"
+            "将使用开发默认密钥，生产环境必须配置独立密钥"
+        )
+    if not settings.HUGUANG_API_KEY.strip():
+        logger.warning("生产环境未配置 HUGUANG_API_KEY，Huguang 定时任务将跳过")
+    if not settings.TQT_APP_KEY.strip():
+        logger.warning("生产环境未配置 TQT_APP_KEY，TQT 定时任务将跳过")
 else:
     # 开发环境：不显示警告，仅在需要时提示
     # SECRET_KEY 验证已在 validate_secret_key 中处理，这里不需要额外提示

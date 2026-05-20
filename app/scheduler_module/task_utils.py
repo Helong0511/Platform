@@ -3,8 +3,8 @@
 提供通用的任务执行辅助功能，减少重复代码
 """
 import logging
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timedelta
+from typing import Optional, Tuple
 
 import pytz
 from sqlalchemy import select
@@ -161,3 +161,32 @@ async def get_admin_user(db: AsyncSession) -> Optional[User]:
         admin_user = admin_user_result.scalar_one_or_none()
 
     return admin_user
+
+
+def resolve_upstream_date_range(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    *,
+    early_morning_dual_day: bool = False,
+) -> Tuple[str, str]:
+    """
+    解析上游 API 拉数日期范围。
+
+    early_morning_dual_day: 0–2 点拉「昨日+今日」，否则仅今日（Huguang 等逻辑）。
+    """
+    if start_date:
+        if end_date:
+            return start_date, end_date
+        return start_date, start_date
+
+    app_now = datetime.now(APP_TIMEZONE)
+    today_str = app_now.strftime("%Y-%m-%d")
+    if early_morning_dual_day and 0 <= app_now.hour <= 2:
+        yesterday_str = (app_now - timedelta(days=1)).strftime("%Y-%m-%d")
+        return yesterday_str, today_str
+    return today_str, today_str
+
+
+def upstream_credential_missing(*values: Optional[str]) -> bool:
+    """任一上游凭证为空则视为未配置。"""
+    return any(v is None or not str(v).strip() for v in values)

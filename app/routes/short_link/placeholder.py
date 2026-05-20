@@ -11,34 +11,14 @@ from urllib.parse import urlparse, urlencode, parse_qs, urlunparse, quote
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.url.placeholder import (
+    PLACEHOLDER_ALIAS_MAP,
+    find_named_placeholders,
+    normalize_placeholder_name,
+)
 from app.models.models import Offer, Publisher, Advertiser
 
 logger = logging.getLogger(__name__)
-
-# 占位符别名映射表
-PLACEHOLDER_ALIAS_MAP = {
-    # click_id 的别名
-    'clickid': 'click_id',
-    'clickId': 'click_id',
-    'clk_id': 'click_id',
-    'cid': 'click_id',
-    'aff_click_id': 'click_id',
-    'affclickid': 'click_id',
-
-    # publisher_id 的别名
-    'publisherId': 'publisher_id',
-    'publisherid': 'publisher_id',
-
-    # channel_id 的别名
-    'channelId': 'channel_id',
-    'channelid': 'channel_id',
-    'sub_affid': 'channel_id',
-    'subaffid': 'channel_id',
-
-    # offer_id 的别名
-    'offerId': 'offer_id',
-    'offerid': 'offer_id',
-}
 
 
 async def replace_short_link_placeholders(
@@ -68,9 +48,7 @@ async def replace_short_link_placeholders(
     Returns:
         替换后的URL字符串，所有占位符已被替换为实际值
     """
-    # 使用正则表达式查找所有占位符
-    pattern = r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}'
-    placeholders = re.findall(pattern, original_url)
+    placeholders = find_named_placeholders(original_url)
 
     # 如果没有找到占位符，直接返回原始URL
     if not placeholders:
@@ -192,16 +170,7 @@ async def replace_short_link_placeholders(
     unreplaced_placeholders = []
 
     for placeholder in placeholders:
-        # 标准化占位符键名
-        normalized_key = placeholder.lower()
-        original_normalized_key = normalized_key
-
-        # 检查别名映射表
-        if normalized_key in PLACEHOLDER_ALIAS_MAP:
-            normalized_key = PLACEHOLDER_ALIAS_MAP[normalized_key]
-        else:
-            # 驼峰命名转下划线命名
-            normalized_key = re.sub(r'(?<!^)(?=[A-Z])', '_', placeholder).lower()
+        normalized_key = normalize_placeholder_name(placeholder)
 
         # 特殊映射：channel_id 和 sub_affid 都映射到 publisher_id
         if normalized_key == 'channel_id' or normalized_key == 'sub_affid':
@@ -281,8 +250,7 @@ def replace_param_value_placeholders(
     Returns:
         tuple[str, bool]: 替换后的参数值字符串和是否所有占位符都被成功替换
     """
-    pattern = r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}'
-    placeholders = re.findall(pattern, param_value)
+    placeholders = find_named_placeholders(param_value)
 
     if not placeholders:
         return param_value, True
@@ -321,18 +289,10 @@ def replace_param_value_placeholders(
     all_replaced = True
 
     for placeholder in placeholders:
-        normalized_key = placeholder.lower()
-        original_normalized_key = normalized_key
-
-        if normalized_key in PLACEHOLDER_ALIAS_MAP:
-            normalized_key = PLACEHOLDER_ALIAS_MAP[normalized_key]
-        else:
-            normalized_key = re.sub(r'(?<!^)(?=[A-Z])', '_', placeholder).lower()
-
-        if normalized_key == 'channel_id' or normalized_key == 'sub_affid':
-            normalized_key = 'publisher_id'
-
-        value = values.get(normalized_key, '')
+        normalized_key = normalize_placeholder_name(placeholder)
+        if normalized_key in ("channel_id", "sub_affid"):
+            normalized_key = "publisher_id"
+        value = values.get(normalized_key, "")
 
         if not value:
             all_replaced = False

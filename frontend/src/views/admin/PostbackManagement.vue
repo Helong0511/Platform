@@ -666,7 +666,7 @@ Postback 转化管理页面
  * Postback 转化管理页面
  * 已融合转化日志功能，提供统一的转化记录查询和管理
  */
-import { ref, reactive, onMounted, computed, watch } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { 
   ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, 
   ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage, ElMessageBox,
@@ -674,152 +674,51 @@ import {
   ElDropdown, ElDropdownMenu, ElDropdownItem, ElCheckboxGroup, ElCheckbox
 } from 'element-plus';
 import { Search, Refresh, Loading, Bell, ArrowDown, Setting } from '@element-plus/icons-vue';
-import { getPostbackConversions, getPostbackStats, updateConversionStatus } from '../../api/postback';
+import { updateConversionStatus } from '../../api/postback';
 import { formatDateTime } from '../../utils/dateFormat';
+import { formatCurrency, formatOs, getOsTagType, formatJson } from '../../utils/postbackFormat';
 import { useDevice } from '../../composables/useDevice';
+import { usePostbackConversions } from '../../composables/usePostbackConversions';
+import { usePostbackColumnVisibility } from '../../composables/usePostbackColumnVisibility';
 import NotificationRecordsDialog from '../../components/admin/NotificationRecordsDialog.vue';
-import { resendConversionNotification, getNotificationRecords, batchResendConversionNotification } from '../../api/notification';
+import { resendConversionNotification, batchResendConversionNotification } from '../../api/notification';
 import { useAuthStore } from '../../store';
-import { getOffers } from '../../api/offer';
-import { getPublishers } from '../../api/publisher';
-import { getAdvertisers } from '../../api/advertiser';
 import { logger } from '../../utils/logger';
 
-// 设备检测
 const { isMobile } = useDevice();
-
-// 用户角色
 const authStore = useAuthStore();
 const isAdmin = computed(() => authStore.isAdmin);
 
-// 状态管理
-const conversions = ref([]);
-const loading = ref(false);
-const stats = ref([]);
-const columnSettingVisible = ref(false);
-const pagination = reactive({
-  page: 1,
-  pageSize: 20,
-  total: 0
-});
+const {
+  conversions,
+  loading,
+  stats,
+  pagination,
+  searchForm,
+  offerList,
+  publisherList,
+  advertiserList,
+  dateRange,
+  fetchConversions,
+  fetchStats,
+  resetFilter,
+  loadAll,
+  initFilters,
+} = usePostbackConversions();
 
-// 批量操作相关
+const {
+  columnSettingVisible,
+  columnVisibility,
+  columnVisibilityArray,
+  loadColumnVisibility,
+  saveColumnVisibility,
+} = usePostbackColumnVisibility(isAdmin);
+
+initFilters();
+
 const selectedConversions = ref([]);
 const batchResending = ref(false);
 const resendingNotifications = ref({});
-
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  id: true,  // 固定显示
-  platform: true,
-  conversion_id: true,  // 固定显示
-  click_offer_name: true,
-  click_publisher_name: true,
-  click_advertiser_name: true,
-  click_time: true,
-  conversion_status: true,
-  event_name: true,
-  event_value: true,
-  original_payout: isAdmin.value,
-  payout: true,
-  devad_id: true,
-  os: true,
-  carrier: true,
-  gid: true,
-  product_id: true,
-  client_id: true,
-  created_at: true,
-  has_notification: true
-});
-
-const columnVisibility = reactive(getDefaultColumnVisibility());
-
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    // 当 checkbox-group 的值变化时，更新对象
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('postbackManagement_columnVisibility');
-    if (saved) {
-      const savedVisibility = JSON.parse(saved);
-      // 合并保存的设置和默认设置
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility);
-      // 确保固定列始终显示
-      columnVisibility.id = true;
-      columnVisibility.conversion_id = true;
-    }
-  } catch (error) {
-    logger.error('加载列显示设置失败:', error);
-  }
-};
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    // 只保存可调整的列，不保存固定列
-    const toSave = {
-      platform: columnVisibility.platform,
-      click_offer_name: columnVisibility.click_offer_name,
-      click_publisher_name: columnVisibility.click_publisher_name,
-      click_advertiser_name: columnVisibility.click_advertiser_name,
-      click_time: columnVisibility.click_time,
-      conversion_status: columnVisibility.conversion_status,
-      event_name: columnVisibility.event_name,
-      event_value: columnVisibility.event_value,
-      original_payout: columnVisibility.original_payout,
-      payout: columnVisibility.payout,
-      devad_id: columnVisibility.devad_id,
-      os: columnVisibility.os,
-      carrier: columnVisibility.carrier,
-      gid: columnVisibility.gid,
-      product_id: columnVisibility.product_id,
-      client_id: columnVisibility.client_id,
-      created_at: columnVisibility.created_at,
-      has_notification: columnVisibility.has_notification
-    };
-    localStorage.setItem('postbackManagement_columnVisibility', JSON.stringify(toSave));
-    columnSettingVisible.value = false;
-    ElMessage.success('列显示设置已保存');
-  } catch (error) {
-    logger.error('保存列显示设置失败:', error);
-    ElMessage.error('保存设置失败');
-  }
-};
-
-// 搜索表单（融合转化日志筛选条件）
-const searchForm = reactive({
-  platform: '',
-  conversion_or_click_id: '',
-  product_id: null,
-  client_id: null,
-  // 转化日志筛选条件
-  click_id: '',
-  offer_id: null,
-  publisher_id: null,
-  advertiser_id: null,
-  conversion_status: null,
-  start_date: '',
-  end_date: ''
-});
-
-// 基础数据列表（用于下拉选择）
-const offerList = ref([]);
-const publisherList = ref([]);
-const advertiserList = ref([]);
-
-// 日期范围
-const dateRange = ref(null);
 
 // 详情对话框
 const detailDialogVisible = ref(false);
@@ -831,129 +730,6 @@ const selectedConversionId = ref(null);
 const selectedClientId = ref(null);
 const selectedProductId = ref(null);
 const selectedPublisherId = ref(null);
-
-// 监听日期范围变化
-watch(dateRange, (newVal) => {
-  if (newVal && newVal.length === 2) {
-    searchForm.start_date = newVal[0];
-    searchForm.end_date = newVal[1];
-  } else {
-    searchForm.start_date = '';
-    searchForm.end_date = '';
-  }
-});
-
-// 监听分页变化
-watch(() => pagination.page, () => {
-  fetchConversions();
-});
-
-watch(() => pagination.pageSize, () => {
-  pagination.page = 1;
-  fetchConversions();
-});
-
-// 获取转化记录
-const fetchConversions = async () => {
-  loading.value = true;
-  try {
-    const params = {
-      page: pagination.page,
-      page_size: pagination.pageSize,
-      ...searchForm
-    };
-    
-    // 移除空值
-    Object.keys(params).forEach(key => {
-      if (params[key] === '' || params[key] === null || params[key] === undefined) {
-        delete params[key];
-      }
-    });
-
-    const response = await getPostbackConversions(params);
-    const conversionList = response.data || [];
-    
-    // 根据通知数量判断是否有通知记录
-    conversionList.forEach(conversion => {
-      conversion.has_notification = (conversion.notification_count || 0) > 0;
-    });
-    
-    conversions.value = conversionList;
-    pagination.total = response.total || 0;
-  } catch (error) {
-    // 错误已通过 isErrorHandled 处理
-  } finally {
-    loading.value = false;
-  }
-};
-
-// 获取统计信息
-const fetchStats = async () => {
-  try {
-    const params = {};
-    if (searchForm.platform) {
-      params.platform = searchForm.platform;
-    }
-    if (searchForm.start_date) {
-      params.start_date = searchForm.start_date;
-    }
-    if (searchForm.end_date) {
-      params.end_date = searchForm.end_date;
-    }
-
-    const response = await getPostbackStats(params);
-    stats.value = response || [];
-  } catch (error) {
-    // 错误已通过 isErrorHandled 处理
-  }
-};
-
-// 加载基础数据
-const loadOffers = async () => {
-  try {
-    const response = await getOffers({ page: 1, page_size: 100, is_active: true });
-    offerList.value = (response.data || []).slice().sort((a, b) => a.id - b.id);
-  } catch (error) {
-    logger.error('加载Offer列表失败:', error);
-  }
-};
-
-const loadPublishers = async () => {
-  try {
-    const response = await getPublishers({ page: 1, page_size: 100 });
-    publisherList.value = response.data || [];
-  } catch (error) {
-    logger.error('加载渠道列表失败:', error);
-  }
-};
-
-const loadAdvertisers = async () => {
-  try {
-    const response = await getAdvertisers({ page: 1, page_size: 100 });
-    advertiserList.value = response.data || [];
-  } catch (error) {
-    logger.error('加载广告主列表失败:', error);
-  }
-};
-
-// 重置筛选
-const resetFilter = () => {
-  searchForm.platform = '';
-  searchForm.conversion_or_click_id = '';
-  searchForm.product_id = null;
-  searchForm.client_id = null;
-  searchForm.click_id = '';
-  searchForm.offer_id = null;
-  searchForm.publisher_id = null;
-  searchForm.advertiser_id = null;
-  searchForm.conversion_status = null;
-  searchForm.start_date = '';
-  searchForm.end_date = '';
-  dateRange.value = null;
-  pagination.page = 1;
-  fetchConversions();
-  fetchStats();
-};
 
 // 查看详情
 const handleViewDetail = (row) => {
@@ -1108,60 +884,6 @@ const handleBatchResendNotification = async () => {
   }
 };
 
-// 格式化货币
-const formatCurrency = (value) => {
-  if (!value && value !== 0) return '-';
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(value);
-};
-
-// 格式化操作系统显示
-const formatOs = (os) => {
-  if (!os) return '-';
-  const osMap = {
-    'IOS': 'iOS',
-    'ios': 'iOS',
-    'Android': 'Android',
-    'android': 'Android',
-    'iPhone': 'iOS',
-    'iPad': 'iOS',
-    'Windows': 'Windows',
-    'Mac': 'macOS',
-    'Linux': 'Linux'
-  };
-  return osMap[os] || os;
-};
-
-// 获取操作系统标签类型
-const getOsTagType = (os) => {
-  if (!os) return 'info';
-  const osLower = os.toLowerCase();
-  if (osLower.includes('ios') || osLower.includes('iphone') || osLower.includes('ipad')) {
-    return 'primary';
-  } else if (osLower.includes('android')) {
-    return 'success';
-  } else if (osLower.includes('windows')) {
-    return 'warning';
-  } else if (osLower.includes('mac')) {
-    return '';
-  }
-  return 'info';
-};
-
-// 格式化JSON
-const formatJson = (jsonString) => {
-  try {
-    const obj = typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
-    return JSON.stringify(obj, null, 2);
-  } catch (e) {
-    return jsonString;
-  }
-};
-
 // 更新转化状态（融合转化日志功能）
 const handleStatusChange = async (row, status) => {
   try {
@@ -1186,15 +908,9 @@ const handleStatusChange = async (row, status) => {
   }
 };
 
-// 初始化
 onMounted(() => {
-  // 加载列显示设置
   loadColumnVisibility();
-  loadOffers();
-  loadPublishers();
-  loadAdvertisers();
-  fetchConversions();
-  fetchStats();
+  loadAll();
 });
 </script>
 

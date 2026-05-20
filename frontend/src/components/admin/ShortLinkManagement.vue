@@ -207,599 +207,65 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue';
-import { useRoute } from 'vue-router';
-import { ElMessage, ElMessageBox, ElStatistic, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
-import { Plus, Search, DocumentCopy, InfoFilled, Refresh, Setting } from '@element-plus/icons-vue';
-import {
-  createShortLink,
-  getShortLinks,
-  updateShortLink,
-  deleteShortLink,
-  getShortLinkStats,
-  generateShortCode,
-  checkShortCode
-} from '../../api/short-link';
-import { getOffers } from '../../api/offer';
-import { getPublishers } from '../../api/publisher';
-import { useDevice } from '../../composables/useDevice';
-import { logger } from '../../utils/logger';
+import { onMounted } from 'vue';
+import { ElStatistic, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
+import { Plus, Search, DocumentCopy, Setting } from '@element-plus/icons-vue';
+import { useShortLinkColumnVisibility } from '../../composables/useShortLinkColumnVisibility';
+import { useShortLinkList } from '../../composables/useShortLinkList';
+import { useShortLinkForm } from '../../composables/useShortLinkForm';
+import { copyToClipboard } from '../../utils/clipboard';
 import { formatDate as formatDateWithTimezone } from '../../utils/dateFormat';
 import ShortLinkFormDialog from './ShortLinkFormDialog.vue';
 
-const { isMobile } = useDevice();
-const route = useRoute();
+const {
+  columnSettingVisible,
+  columnVisibility,
+  columnVisibilityArray,
+  loadColumnVisibility,
+  saveColumnVisibility,
+} = useShortLinkColumnVisibility();
 
-const loading = ref(false);
-const saving = ref(false);
-const generatingCode = ref(false);
-const dialogVisible = ref(false);
-const isEdit = ref(false);
-const currentLinkId = ref(null);
+const {
+  loading,
+  links,
+  offerList,
+  channelList,
+  stats,
+  filters,
+  pagination,
+  refreshListAndStats,
+  getOfferName,
+  getChannelName,
+  handleSearch,
+  handleSizeChange,
+  handlePageChange,
+  handleToggleActive,
+  bindRouteSearchWatch,
+  initPage,
+} = useShortLinkList();
 
-const links = ref([]);
-const offerList = ref([]);
-const channelList = ref([]);
-const columnSettingVisible = ref(false);
-const stats = reactive({
-  total_links: 0,
-  total_clicks: 0,
-  active_links: 0,
-  expired_links: 0
-});
+const {
+  saving,
+  generatingCode,
+  dialogVisible,
+  isEdit,
+  formData,
+  formRules,
+  handleCreate,
+  handleEdit,
+  handleSave,
+  handleDelete,
+  handleGenerateCode,
+  handleDialogClose,
+} = useShortLinkForm({ refreshListAndStats });
 
-const filters = reactive({
-  search: '',
-  is_active: null
-});
+const formatDate = formatDateWithTimezone;
 
-const pagination = reactive({
-  page: 1,
-  pageSize: 20,
-  total: 0
-});
+bindRouteSearchWatch();
 
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  id: true,
-  short_code: true,  // 固定显示
-  short_url: true,  // 固定显示
-  original_url: true,
-  title: true,
-  description: true,
-  offer_id: true,
-  channel_id: true,
-  creator_name: true,
-  click_count: true,
-  show_count: true,
-  expires_at: true,
-  is_active: true,
-  created_at: true
-});
-
-const columnVisibility = reactive(getDefaultColumnVisibility());
-
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    // 当 checkbox-group 的值变化时，更新对象
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('shortLinkManagement_columnVisibility');
-    if (saved) {
-      const savedVisibility = JSON.parse(saved);
-      // 合并保存的设置和默认设置
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility);
-      // 确保固定列始终显示
-      columnVisibility.short_code = true;
-      columnVisibility.short_url = true;
-    }
-  } catch (error) {
-    logger.error('加载列显示设置失败:', error);
-  }
-};
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    // 只保存可调整的列，不保存固定列
-    const toSave = {
-      id: columnVisibility.id,
-      original_url: columnVisibility.original_url,
-      title: columnVisibility.title,
-      description: columnVisibility.description,
-      offer_id: columnVisibility.offer_id,
-      channel_id: columnVisibility.channel_id,
-      creator_name: columnVisibility.creator_name,
-      click_count: columnVisibility.click_count,
-      show_count: columnVisibility.show_count,
-      expires_at: columnVisibility.expires_at,
-      is_active: columnVisibility.is_active,
-      created_at: columnVisibility.created_at
-    };
-    localStorage.setItem('shortLinkManagement_columnVisibility', JSON.stringify(toSave));
-    columnSettingVisible.value = false;
-    ElMessage.success('列显示设置已保存');
-  } catch (error) {
-    logger.error('保存列显示设置失败:', error);
-    ElMessage.error('保存设置失败');
-  }
-};
-
-const formRef = ref(null);
-const formData = reactive({
-  original_url: '',
-  short_code: '',
-  title: '',
-  description: '',
-  offer_id: null,
-  channel_id: null,
-  expires_at: null,
-  is_active: true
-});
-
-const dialogTitle = computed(() => {
-  return isEdit.value ? '编辑短链接' : '创建短链接';
-});
-
-const formRules = {
-  original_url: [
-    { required: true, message: '请输入原始URL', trigger: 'blur' },
-    {
-      validator: (rule, value, callback) => {
-        if (!value) {
-          callback();
-          return;
-        }
-        try {
-          const url = new URL(value);
-          if (!url.protocol || !url.hostname) {
-            callback(new Error('URL格式无效，必须包含协议和域名'));
-          } else {
-            callback();
-          }
-        } catch (e) {
-          callback(new Error('URL格式无效'));
-        }
-      },
-      trigger: 'blur'
-    }
-  ],
-  short_code: [
-    {
-      validator: (rule, value, callback) => {
-        if (!value) {
-          callback();
-          return;
-        }
-        if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
-          callback(new Error('短链接代码只能包含字母、数字、连字符和下划线'));
-        } else if (value.length < 3) {
-          callback(new Error('短链接代码至少需要3个字符'));
-        } else if (value.length > 20) {
-          callback(new Error('短链接代码最多20个字符'));
-        } else {
-          callback();
-        }
-      },
-      trigger: 'blur'
-    }
-  ]
-};
-
-// 加载数据
-const loadData = async () => {
-  loading.value = true;
-  try {
-    const params = {
-      page: pagination.page,
-      page_size: pagination.pageSize
-    };
-    // 只添加有值的过滤条件（空字符串不算有效值）
-    if (filters.search && filters.search.trim()) {
-      params.search = filters.search.trim();
-      logger.debug('loadData with search param:', params.search);
-    }
-    if (filters.is_active !== null && filters.is_active !== undefined) {
-      params.is_active = filters.is_active;
-    }
-    logger.debug('loadData params:', params);
-    const result = await getShortLinks(params);
-    logger.debug('loadData result:', result);
-    // 初始化每个链接的加载状态
-    links.value = (result.data || []).map(link => ({
-      ...link,
-      _toggleLoading: false
-    }));
-    pagination.total = result.total || 0;
-    logger.debug('loadData completed, links count:', links.value.length, 'total:', pagination.total);
-  } catch (error) {
-    logger.error('加载短链接列表失败:', error);
-    ElMessage.error('加载数据失败，请重试');
-  } finally {
-    loading.value = false;
-  }
-};
-
-// 加载统计
-const loadStats = async () => {
-  try {
-    const statsData = await getShortLinkStats();
-    Object.assign(stats, statsData);
-  } catch (error) {
-    logger.error('加载统计失败:', error);
-    // 统计信息加载失败不影响主要功能，静默处理
-  }
-};
-
-// 加载Offer列表
-const loadOffers = async () => {
-  try {
-    const response = await getOffers({ page: 1, page_size: 100 });
-    // response已经是标准分页格式，直接使用data字段
-    offerList.value = response.data || [];
-  } catch (error) {
-    logger.error('加载Offer列表失败:', error);
-    // Offer列表加载失败不影响主要功能，静默处理（下拉框会显示为空）
-  }
-};
-
-// 加载渠道列表
-const loadChannels = async () => {
-  try {
-    const response = await getPublishers({ page: 1, page_size: 100 });
-    // response已经是标准分页格式，直接使用data字段
-    channelList.value = response.data || [];
-  } catch (error) {
-    logger.error('加载渠道列表失败:', error);
-    // 渠道列表加载失败不影响主要功能，静默处理（下拉框会显示为空）
-  }
-};
-
-// 获取Offer名称
-const getOfferName = (offerId) => {
-  if (!offerId) return null;
-  const offer = offerList.value.find(o => o.id === offerId);
-  return offer ? offer.offer_name : null;
-};
-
-// 获取渠道名称
-const getChannelName = (channelId) => {
-  if (!channelId) return null;
-  const channel = channelList.value.find(c => c.id === channelId);
-  return channel ? channel.publisher_name : null;
-};
-
-// 创建
-const handleCreate = () => {
-  isEdit.value = false;
-  currentLinkId.value = null;
-  Object.assign(formData, {
-    original_url: '',
-    short_code: '',
-    title: '',
-    description: '',
-    offer_id: null,
-    channel_id: null,
-    expires_at: null,
-    is_active: true
-  });
-  dialogVisible.value = true;
-};
-
-// 编辑
-const handleEdit = async (link) => {
-  isEdit.value = true;
-  currentLinkId.value = link.id;
-  Object.assign(formData, {
-    original_url: link.original_url,
-    short_code: link.short_code,
-    title: link.title || '',
-    description: link.description || '',
-    offer_id: link.offer_id || null,
-    channel_id: link.channel_id || null,
-    expires_at: link.expires_at || null,
-    is_active: link.is_active
-  });
-  dialogVisible.value = true;
-};
-
-// 保存
-const handleSave = async () => {
-  try {
-    saving.value = true;
-    
-    const submitData = { ...formData };
-    if (!submitData.short_code) {
-      delete submitData.short_code; // 空字符串时删除，让后端自动生成
-    }
-    
-    if (isEdit.value) {
-      await updateShortLink(currentLinkId.value, submitData);
-      ElMessage.success('短链接更新成功');
-    } else {
-      await createShortLink(submitData);
-      ElMessage.success('短链接创建成功');
-    }
-    
-    dialogVisible.value = false;
-    await loadData();
-    await loadStats();
-  } catch (error) {
-    logger.error('保存短链接失败:', error);
-    // 显示错误信息给用户
-    const errorMessage = error.response?.data?.detail || error.response?.data?.message || error.message || '保存失败，请稍后重试';
-    ElMessage.error(errorMessage);
-  } finally {
-    saving.value = false;
-  }
-};
-
-// 删除
-const handleDelete = async (linkId) => {
-  try {
-    await ElMessageBox.confirm('确定要删除这个短链接吗？', '确认删除', {
-      type: 'warning'
-    });
-    
-    await deleteShortLink(linkId);
-    ElMessage.success('短链接已删除');
-    await loadData();
-    await loadStats();
-  } catch (error) {
-    if (error !== 'cancel') {
-      logger.error('删除短链接失败:', error);
-    }
-  }
-};
-
-// 切换激活状态
-const handleToggleActive = async (link) => {
-  // 防止重复点击
-  if (link._toggleLoading) {
-    return;
-  }
-  
-  // 保存原始值（因为 switch 已经切换了，所以取反得到原值）
-  const originalValue = !link.is_active;
-  const newValue = link.is_active;
-  
-  // 设置加载状态
-  link._toggleLoading = true;
-  
-  try {
-    // 只更新 is_active 字段
-    await updateShortLink(link.id, { is_active: newValue });
-    ElMessage.success(newValue ? '短链接已激活' : '短链接已禁用');
-    // 更新统计
-    await loadStats();
-  } catch (error) {
-    // 如果失败，恢复原值
-    link.is_active = originalValue;
-    // 错误消息已经在 updateShortLink 中显示了，这里不需要再显示
-    logger.error('切换激活状态失败:', error);
-  } finally {
-    link._toggleLoading = false;
-  }
-};
-
-// 搜索
-const handleSearch = () => {
-  pagination.page = 1;
-  loadData();
-};
-
-// 分页
-const handleSizeChange = (size) => {
-  pagination.pageSize = size;
-  pagination.page = 1;  // 分页大小变化时重置到第一页
-  loadData();
-};
-
-const handlePageChange = (page) => {
-  pagination.page = page;
-  loadData();
-};
-
-// 复制到剪贴板
-const copyToClipboard = async (text) => {
-  try {
-    await navigator.clipboard.writeText(text);
-    ElMessage.success('已复制到剪贴板');
-  } catch (error) {
-    // 忽略浏览器扩展相关的错误（这些错误不影响复制功能）
-    const errorMessage = error?.message || String(error || '').toLowerCase();
-    const isExtensionError = typeof errorMessage === 'string' && (
-      errorMessage.includes('message channel closed') ||
-      errorMessage.includes('asynchronous response') ||
-      errorMessage.includes('listener indicated') ||
-      errorMessage.includes('channel closed')
-    );
-    
-    // 如果是扩展错误，尝试使用备用方法复制
-    if (isExtensionError) {
-      try {
-        // 使用传统的 execCommand 方法作为备用
-        const textArea = document.createElement('textarea');
-        textArea.value = text;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-999999px';
-        textArea.style.top = '-999999px';
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        const successful = document.execCommand('copy');
-        document.body.removeChild(textArea);
-        
-        if (successful) {
-          ElMessage.success('已复制到剪贴板');
-          return;
-        }
-      } catch (fallbackError) {
-        // 备用方法也失败，静默处理
-      }
-      // 扩展错误不影响功能，静默处理
-      return;
-    }
-    
-    // 其他错误才显示错误消息
-    ElMessage.error('复制失败');
-  }
-};
-
-// 格式化日期
-const formatDate = (dateString) => {
-  return formatDateWithTimezone(dateString);
-};
-
-// 自动生成代码
-const handleGenerateCode = async () => {
-  if (isEdit.value) {
-    return; // 编辑模式下不允许生成
-  }
-  
-  generatingCode.value = true;
-  try {
-    const result = await generateShortCode();
-    if (result && result.short_code) {
-      formData.short_code = result.short_code;
-      ElMessage.success('代码已生成');
-    }
-  } catch (error) {
-    logger.error('生成代码失败:', error);
-  } finally {
-    generatingCode.value = false;
-  }
-};
-
-// 关闭对话框
-const handleDialogClose = () => {
-  dialogVisible.value = false;
-  if (formRef.value) {
-    formRef.value.clearValidate();
-  }
-};
-
-// 防止重复执行搜索的标志位
-let isApplyingSearch = false;
-
-// 检查并应用路由参数中的搜索关键词
-const applySearchFromQuery = async () => {
-  // 防止重复执行
-  if (isApplyingSearch) {
-    logger.debug('applySearchFromQuery already in progress, skipping');
-    return;
-  }
-  
-  isApplyingSearch = true;
-  try {
-    const searchFromQuery = route.query.search;
-    logger.debug('applySearchFromQuery called, searchFromQuery:', searchFromQuery, 'route.query:', route.query, 'current filters.search:', filters.search);
-    
-    if (searchFromQuery) {
-      // 验证短链接代码格式（只包含字母、数字、连字符和下划线）
-      const searchValue = String(searchFromQuery).trim();
-      const isValidShortCode = /^[a-zA-Z0-9_-]+$/.test(searchValue);
-      
-      if (!isValidShortCode) {
-        logger.warn('Invalid short code format:', searchValue);
-        // 仍然设置搜索值，但记录警告
-      }
-      
-      logger.debug('Setting search value:', searchValue);
-      
-      // 直接设置，不比较（确保能正确设置）
-      filters.search = searchValue;
-      // 重置到第一页
-      pagination.page = 1;
-      // 等待 DOM 更新后再执行搜索
-      await nextTick();
-      logger.debug('After nextTick, filters.search:', filters.search, 'will call loadData');
-      // 执行搜索
-      await loadData();
-    } else {
-      // 如果没有搜索参数，清除搜索框并加载数据
-      if (filters.search) {
-        filters.search = '';
-        pagination.page = 1;
-        await nextTick();
-        await loadData();
-      } else if (pagination.page === 1) {
-        // 如果已经在第一页且没有搜索关键词，只加载数据（避免重复加载）
-        await loadData();
-      }
-    }
-  } finally {
-    isApplyingSearch = false;
-  }
-};
-
-// 监听路由 query 参数变化
-watch(
-  () => route.query.search,
-  async (newSearch, oldSearch) => {
-    // 当搜索参数变化时，立即应用搜索
-    if (newSearch !== oldSearch) {
-      await nextTick();
-      await applySearchFromQuery();
-    }
-  },
-  { immediate: false }
-);
-
-// 监听整个路由路径变化（确保从其他页面跳转过来时也能触发）
-watch(
-  () => route.fullPath,
-  async (newPath, oldPath) => {
-    // 只有当路径真正变化且是短链接管理页面时才执行
-    if (newPath !== oldPath && route.name === 'ShortLinkManagement') {
-      // 等待路由完全更新
-      await nextTick();
-      await applySearchFromQuery();
-    }
-  },
-  { immediate: false }
-);
-
-// 初始化
 onMounted(async () => {
-  logger.debug('ShortLinkManagement onMounted, route.query:', route.query, 'route.fullPath:', route.fullPath);
-  // 加载列显示设置
   loadColumnVisibility();
-  // 加载基础数据（先加载，不阻塞搜索）
-  loadStats();
-  loadOffers();
-  loadChannels();
-  
-  // 等待 DOM 完全渲染
-  await nextTick();
-  
-  // 检查路由参数中是否有搜索关键词（优先处理搜索，确保搜索框显示正确）
-  const searchFromQuery = route.query.search;
-  if (searchFromQuery) {
-    logger.debug('Found search param in URL:', searchFromQuery);
-    // 直接设置搜索值
-    filters.search = String(searchFromQuery).trim();
-    pagination.page = 1;
-    // 等待一下确保响应式更新
-    await nextTick();
-    logger.debug('After setting filters.search:', filters.search);
-    // 立即执行搜索
-    await loadData();
-  } else {
-    // 没有搜索参数，正常加载数据
-    await loadData();
-  }
+  await initPage();
 });
 </script>
 

@@ -12,6 +12,7 @@ chmod +x /data/Platform/update_frontend.sh
 cd /data/Platform/frontend
 
 sudo systemctl stop Platform-backend.service
+sudo systemctl stop Platform-scheduler.service
 sudo systemctl stop mysql
 
 sudo rm -rf /data/Platform/logs/*
@@ -24,3 +25,4 @@ npm run build
 
 sudo systemctl start mysql
 sudo systemctl restart Platform-backend.service
+sudo systemctl restart Platform-scheduler.service

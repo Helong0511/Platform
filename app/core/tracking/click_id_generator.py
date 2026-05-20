@@ -129,3 +129,29 @@ def generate_click_id_from_timestamp() -> str:
     
     return base_id + random_suffix
 
+
+def generate_click_id_unified(
+    *,
+    offer_id: Optional[int] = None,
+    publisher_id: Optional[int] = None,
+    advertiser_id: Optional[int] = None,
+    short_link_id: Optional[int] = None,
+    url_params: Optional[dict] = None,
+    extra: Optional[dict] = None,
+) -> str:
+    """
+    统一生成入口（延迟导入，避免循环依赖）。
+
+    USE_TRACKING_TOKEN=false 时与 ``generate_click_id_from_timestamp`` 行为一致。
+    """
+    from app.core.tracking.click_token import generate_click_id_unified as _gen
+
+    return _gen(
+        offer_id=offer_id,
+        publisher_id=publisher_id,
+        advertiser_id=advertiser_id,
+        short_link_id=short_link_id,
+        url_params=url_params,
+        extra=extra,
+    )
+

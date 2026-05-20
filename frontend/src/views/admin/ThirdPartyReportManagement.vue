@@ -366,7 +366,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue';
+import { ref, onMounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem,
@@ -376,134 +376,49 @@ import {
 } from 'element-plus';
 import { Search, Refresh, Loading, Setting } from '@element-plus/icons-vue';
 import { useAuthStore } from '../../store';
-import { getThirdPartyReports, getThirdPartyReport, getThirdPartyReportStats, updateThirdPartyReport, retryThirdPartyReport } from '../../api/third-party-report';
+import { getThirdPartyReport, updateThirdPartyReport, retryThirdPartyReport } from '../../api/third-party-report';
 import { formatDateTime } from '../../utils/dateFormat';
 import { useDevice } from '../../composables/useDevice';
+import { useThirdPartyReportColumnVisibility } from '../../composables/useThirdPartyReportColumnVisibility';
+import { useThirdPartyReports } from '../../composables/useThirdPartyReports';
+import {
+  formatReportJson,
+  getCurrentMonthRange,
+  getResponseStatusTag,
+  getSourceLabel,
+  getSourceTag,
+  getStatusLabel,
+  getStatusTag,
+} from '../../utils/thirdPartyReportFormat';
 import { logger } from '../../utils/logger';
 
-// 设备检测
+const router = useRouter();
+const authStore = useAuthStore();
+
 const { isMobile } = useDevice();
 
-// 状态管理
-const logs = ref([]);
-const loading = ref(false);
-const stats = ref(null);
-const columnSettingVisible = ref(false);
-const pagination = reactive({
-  page: 1,
-  pageSize: 10,
-  total: 0
-});
+const {
+  columnSettingVisible,
+  columnVisibility,
+  columnVisibilityArray,
+  loadColumnVisibility,
+  saveColumnVisibility,
+} = useThirdPartyReportColumnVisibility();
 
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  id: true,
-  source: true,
-  adsid: true,
-  event: true,
-  conversion_id: true,
-  currency: true,
-  amount: true,
-  status: true,
-  attempt_count: true,
-  response_status: true,
-  log_id: true,
-  use_hash: true,
-  created_at: true,
-  report_success_time: true,
-  report_params: false
-})
+const isInitializing = ref(true);
+const {
+  logs,
+  loading,
+  stats,
+  pagination,
+  searchForm,
+  dateRange,
+  fetchLogs,
+  resetFilter,
+  bindPaginationWatch,
+} = useThirdPartyReports(authStore, router);
 
-const columnVisibility = reactive(getDefaultColumnVisibility())
-
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('thirdPartyReportManagement_columnVisibility')
-    if (saved) {
-      const savedVisibility = JSON.parse(saved)
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
-      columnVisibility.id = true
-      columnVisibility.created_at = true
-    }
-  } catch (error) {
-    logger.error('加载列显示设置失败:', error)
-  }
-}
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    const toSave = {
-      source: columnVisibility.source,
-      adsid: columnVisibility.adsid,
-      event: columnVisibility.event,
-      conversion_id: columnVisibility.conversion_id,
-      currency: columnVisibility.currency,
-      amount: columnVisibility.amount,
-      status: columnVisibility.status,
-      attempt_count: columnVisibility.attempt_count,
-      response_status: columnVisibility.response_status,
-      log_id: columnVisibility.log_id,
-      use_hash: columnVisibility.use_hash,
-      report_params: columnVisibility.report_params,
-      report_success_time: columnVisibility.report_success_time
-    }
-    localStorage.setItem('thirdPartyReportManagement_columnVisibility', JSON.stringify(toSave))
-    columnSettingVisible.value = false
-    ElMessage.success('列显示设置已保存')
-  } catch (error) {
-    logger.error('保存列显示设置失败:', error)
-    ElMessage.error('保存设置失败')
-  }
-}
-
-// 筛选表单
-const searchForm = reactive({
-  source: '',
-  adsid: '',
-  event: '',
-  status: ''
-});
-
-// 时间范围 - 默认显示本月数据
-const getCurrentMonthRange = () => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-
-  const startDate = new Date(year, month, 1, 0, 0, 0);
-  const lastDay = new Date(year, month + 1, 0, 23, 59, 59);
-
-  const formatDateTime = (date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    const h = String(date.getHours()).padStart(2, '0');
-    const min = String(date.getMinutes()).padStart(2, '0');
-    const s = String(date.getSeconds()).padStart(2, '0');
-    return `${y}-${m}-${d}T${h}:${min}:${s}`;
-  };
-
-  return [
-    formatDateTime(startDate),
-    formatDateTime(lastDay)
-  ];
-};
-
-const dateRange = ref(getCurrentMonthRange());
+bindPaginationWatch(isInitializing);
 
 // 详情对话框
 const detailDialogVisible = ref(false);
@@ -526,149 +441,7 @@ const editForm = reactive({
   use_hash: true
 });
 
-// 获取来源标签类型
-const getSourceTag = (source) => {
-  const tagMap = {
-    'short_link': 'primary',
-    'postback': 'success',
-    'unknown': 'info'
-  };
-  return tagMap[source] || '';
-};
-
-// 获取来源显示标签
-const getSourceLabel = (source) => {
-  const labelMap = {
-    'short_link': '短链接',
-    'postback': 'Postback',
-    'unknown': '其他'
-  };
-  return labelMap[source] || source;
-};
-
-// 获取状态标签类型
-const getStatusTag = (status) => {
-  const tagMap = {
-    'success': 'success',
-    'failed': 'danger',
-    'pending': 'warning'
-  };
-  return tagMap[status] || '';
-};
-
-// 获取状态显示标签
-const getStatusLabel = (status) => {
-  const labelMap = {
-    'success': '成功',
-    'failed': '失败',
-    'pending': '处理中'
-  };
-  return labelMap[status] || status;
-};
-
-// 获取响应状态码标签类型
-const getResponseStatusTag = (statusCode) => {
-  if (statusCode >= 200 && statusCode < 300) return 'success';
-  if (statusCode >= 300 && statusCode < 400) return 'info';
-  if (statusCode >= 400 && statusCode < 500) return 'warning';
-  if (statusCode >= 500) return 'danger';
-  return '';
-};
-
-// 格式化JSON
-const formatJson = (jsonString) => {
-  try {
-    let obj = typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
-    return JSON.stringify(obj, null, 2);
-  } catch {
-    return String(jsonString);
-  }
-};
-
-// 获取日志列表
-const fetchLogs = async () => {
-  try {
-    loading.value = true;
-
-    if (!authStore.isAuthenticated) {
-      ElMessage.warning('登录已过期，请重新登录');
-      router.push('/login').catch(() => {
-        window.location.href = '/login';
-      });
-      return;
-    }
-
-    const params = {
-      page: pagination.page,
-      page_size: pagination.pageSize,
-      ...(searchForm.source && { source: searchForm.source }),
-      ...(searchForm.adsid && { adsid: searchForm.adsid }),
-      ...(searchForm.event && { event: searchForm.event }),
-      ...(searchForm.status && { status: searchForm.status }),
-      ...(dateRange.value && dateRange.value.length === 2 && {
-        start_date: dateRange.value[0],
-        end_date: dateRange.value[1]
-      })
-    };
-
-    const response = await getThirdPartyReports(params);
-    logs.value = response.data || [];
-    pagination.total = response.total || 0;
-
-    await fetchStats();
-  } catch (error) {
-  } finally {
-    loading.value = false;
-  }
-};
-
-// 获取统计信息
-const fetchStats = async () => {
-  try {
-    const params = {};
-    if (dateRange.value && dateRange.value.length === 2) {
-      params.start_date = dateRange.value[0];
-      params.end_date = dateRange.value[1];
-    }
-    const data = await getThirdPartyReportStats(params);
-    stats.value = data;
-  } catch (error) {
-  }
-};
-
-// 重置筛选条件
-const resetFilter = () => {
-  searchForm.source = '';
-  searchForm.adsid = '';
-  searchForm.event = '';
-  searchForm.status = '';
-  dateRange.value = getCurrentMonthRange();
-  pagination.page = 1;
-  fetchLogs();
-};
-
-// 监听分页变化
-let isInitializing = true;
-
-watch(
-  () => [pagination.page, pagination.pageSize],
-  ([newPage, newSize], [oldPage, oldSize]) => {
-    if (isInitializing) {
-      return;
-    }
-
-    if (newPage !== oldPage && newSize === oldSize) {
-      fetchLogs();
-    } else if (newSize !== oldSize) {
-      if (pagination.page !== 1) {
-        pagination.page = 1;
-      } else {
-        fetchLogs();
-      }
-    }
-  },
-  { flush: 'post' }
-);
+const formatJson = formatReportJson;
 
 // 查看详情
 const handleViewDetail = async (log) => {
@@ -775,10 +548,6 @@ const handleHashToggle = async (log) => {
   }
 };
 
-// 路由实例
-const router = useRouter();
-const authStore = useAuthStore();
-
 // 点击转化ID，在新窗口打开短链接访问记录页面并搜索
 const handleConversionIdClick = async (conversionId) => {
   if (!conversionId) return
@@ -820,7 +589,7 @@ onMounted(async () => {
       }
     } finally {
       await nextTick();
-      isInitializing = false;
+      isInitializing.value = false;
     }
   }, 0);
 });

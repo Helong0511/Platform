@@ -303,376 +303,59 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
+import { onMounted } from 'vue'
+import { ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Plus, Search, Refresh, Edit, Delete, Switch, Setting } from '@element-plus/icons-vue'
-import { getCaps, createCap, updateCap, deleteCap } from '@/api/cap'
-import { getOffers } from '@/api/offer'
-import { getAdvertisers } from '@/api/advertiser'
-import { getPublishers } from '@/api/publisher'
-import { logger } from '@/utils/logger'
+import { useCapColumnVisibility } from '@/composables/useCapColumnVisibility'
+import { useCapList } from '@/composables/useCapList'
+import { useCapForm } from '@/composables/useCapForm'
 
-const loading = ref(false)
-const submitting = ref(false)
-const dialogVisible = ref(false)
-const isEdit = ref(false)
-const filterCapType = ref(null)
-const filterOffer = ref(null)
-const filterPublisher = ref(null)
-const filterActive = ref(null)
-const formRef = ref(null)
+const {
+  columnSettingVisible,
+  columnVisibility,
+  columnVisibilityArray,
+  loadColumnVisibility,
+  saveColumnVisibility,
+} = useCapColumnVisibility()
 
-const pagination = reactive({
-  page: 1,
-  pageSize: 20,
-  total: 0
-})
+const {
+  loading,
+  filterCapType,
+  filterOffer,
+  filterPublisher,
+  filterActive,
+  pagination,
+  tableData,
+  offerList,
+  advertiserList,
+  publisherList,
+  loadData,
+  handleSearch,
+  handleReset,
+  handleStatusChange,
+  handleSizeChange,
+  handlePageChange,
+  initPage,
+} = useCapList()
 
-const tableData = ref([])
-const offerList = ref([])
-const advertiserList = ref([])
-const publisherList = ref([])
-const columnSettingVisible = ref(false)
-
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  cap_type: true,
-  offer_name: true,  // 固定显示
-  advertiser_name: true,
-  publisher_name: true,
-  daily_cap: true,
-  current_daily_count: true,
-  total_cap: true,
-  current_total_count: true,
-  is_active: true
-})
-
-const columnVisibility = reactive(getDefaultColumnVisibility())
-
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    // 当 checkbox-group 的值变化时，更新对象
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('capManagement_columnVisibility')
-    if (saved) {
-      const savedVisibility = JSON.parse(saved)
-      // 合并保存的设置和默认设置
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
-      // 确保固定列始终显示
-      columnVisibility.offer_name = true
-    }
-  } catch (error) {
-    console.error('加载列显示设置失败:', error)
-  }
-}
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    // 只保存可调整的列，不保存固定列
-    const toSave = {
-      cap_type: columnVisibility.cap_type,
-      advertiser_name: columnVisibility.advertiser_name,
-      publisher_name: columnVisibility.publisher_name,
-      daily_cap: columnVisibility.daily_cap,
-      current_daily_count: columnVisibility.current_daily_count,
-      total_cap: columnVisibility.total_cap,
-      current_total_count: columnVisibility.current_total_count,
-      is_active: columnVisibility.is_active
-    }
-    localStorage.setItem('capManagement_columnVisibility', JSON.stringify(toSave))
-    columnSettingVisible.value = false
-    ElMessage.success('列显示设置已保存')
-  } catch (error) {
-    console.error('保存列显示设置失败:', error)
-    ElMessage.error('保存设置失败')
-  }
-}
-
-const formData = reactive({
-  cap_type: 'offer',
-  advertiser_id: null,
-  offer_id: null,
-  publisher_id: null,
-  daily_cap: null,
-  total_cap: null,
-  is_active: true
-})
-
-const formRules = {
-  cap_type: [
-    { required: true, message: '请选择Cap类型', trigger: 'change' }
-  ],
-  offer_id: [
-    { required: true, message: '请选择Offer', trigger: 'change' }
-  ],
-  advertiser_id: [
-    { required: true, message: '请选择广告主', trigger: 'change', validator: (rule, value, callback) => {
-      if (formData.cap_type === 'advertiser_offer' && !value) {
-        callback(new Error('advertiser_offer类型必须选择广告主'))
-      } else {
-        callback()
-      }
-    }}
-  ]
-}
-
-// 加载基础数据
-const loadOffers = async () => {
-  try {
-    const response = await getOffers({ page: 1, page_size: 100 })
-    // response已经是标准分页格式，直接使用data字段
-    offerList.value = (response.data || []).slice().sort((a, b) => a.id - b.id)
-  } catch (error) {
-    logger.error('加载Offer列表失败:', error)
-  }
-}
-
-const loadAdvertisers = async () => {
-  try {
-    const response = await getAdvertisers({ page: 1, page_size: 100 })
-    // response已经是标准分页格式，直接使用data字段
-    advertiserList.value = response.data || []
-  } catch (error) {
-    logger.error('加载广告主列表失败:', error)
-  }
-}
-
-const loadPublishers = async () => {
-  try {
-    const response = await getPublishers({ page: 1, page_size: 100 })
-    // response已经是标准分页格式，直接使用data字段
-    publisherList.value = response.data || []
-  } catch (error) {
-    logger.error('加载渠道列表失败:', error)
-  }
-}
-
-// 加载数据
-const loadData = async () => {
-  loading.value = true
-  try {
-    const params = {
-      page: pagination.page,
-      page_size: Math.min(pagination.pageSize, 100),
-      cap_type: filterCapType.value || undefined,
-      offer_id: filterOffer.value || undefined,
-      publisher_id: filterPublisher.value || undefined,
-      is_active: filterActive.value !== null ? filterActive.value : undefined
-    }
-    const response = await getCaps(params)
-    // response已经是标准分页格式，直接使用data和total字段
-    tableData.value = response.data || []
-    pagination.total = response.total || 0
-  } catch (error) {
-    logger.error('获取Cap配置列表失败:', error)
-    ElMessage.error('获取数据失败')
-  } finally {
-    loading.value = false
-  }
-}
-
-// Cap类型改变
-const handleCapTypeChange = () => {
-  if (formData.cap_type !== 'advertiser_offer') {
-    formData.advertiser_id = null
-  }
-}
-
-// 搜索
-const handleSearch = () => {
-  pagination.page = 1
-  loadData()
-}
-
-// 重置
-const handleReset = () => {
-  filterCapType.value = null
-  filterOffer.value = null
-  filterPublisher.value = null
-  filterActive.value = null
-  pagination.page = 1
-  loadData()
-}
-
-// 添加
-const handleAdd = async () => {
-  // 先获取最新的CSRF令牌（通过GET请求）
-  try {
-    await getCaps({ page: 1, page_size: 1 });
-  } catch (error) {
-    // 即使请求失败，也可能从响应头中获取到CSRF令牌
-    console.debug('获取CSRF令牌失败，但可能已从响应头获取:', error);
-  }
-
-  isEdit.value = false
-  Object.assign(formData, {
-    cap_type: 'offer',
-    advertiser_id: null,
-    offer_id: null,
-    publisher_id: null,
-    daily_cap: null,
-    total_cap: null,
-    is_active: true
-  })
-  dialogVisible.value = true
-}
-
-// 编辑
-const handleEdit = (row) => {
-  isEdit.value = true
-  Object.assign(formData, {
-    id: row.id,
-    cap_type: row.cap_type,
-    advertiser_id: row.advertiser_id,
-    offer_id: row.offer_id,
-    publisher_id: row.publisher_id,
-    daily_cap: row.daily_cap,
-    total_cap: row.total_cap,
-    is_active: row.is_active
-  })
-  dialogVisible.value = true
-}
-
-// 删除
-const handleDelete = async (row) => {
-  try {
-    await ElMessageBox.confirm(
-      `确定要删除此Cap配置吗？`,
-      '确认删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-    
-    await deleteCap(row.id)
-    // deleteCap使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
-    ElMessage.success('删除成功')
-    loadData()
-  } catch (error) {
-    if (error !== 'cancel') {
-      logger.error('删除Cap配置失败:', error)
-      ElMessage.error('删除失败')
-    }
-  }
-}
-
-// 提交
-const handleSubmit = async () => {
-  if (!formRef.value) return
-  
-  await formRef.value.validate(async (valid) => {
-    if (!valid) return
-    
-    submitting.value = true
-    try {
-      if (isEdit.value) {
-        // updateCap使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
-        await updateCap(formData.id, formData)
-      } else {
-        // createCap使用returnDataOnly: true，成功时直接返回数据，失败时抛出异常
-        await createCap(formData)
-      }
-      
-      // 如果执行到这里，说明操作成功（失败会抛出异常）
-      ElMessage.success(isEdit.value ? '更新成功' : '创建成功')
-      dialogVisible.value = false
-      loadData()
-    } catch (error) {
-      logger.error('提交失败:', error)
-      
-      // 检查是否是401未授权错误（token过期）
-      // 如果是401错误，axios拦截器已经处理了（清除认证信息并跳转到登录页）
-      // 这里不需要重复显示错误信息，避免干扰用户体验
-      if (error.response && error.response.status === 401) {
-        // 401错误已被axios拦截器处理，直接返回，不显示"操作失败"
-        return
-      }
-      
-      // 检查是否是403错误（可能是CSRF token问题）
-      // 403错误也可能已被axios拦截器处理（自动重试）
-      if (error.response && error.response.status === 403) {
-        // 如果错误已被处理（标记了_handled），不显示错误信息
-        if (error._handled) {
-          return
-        }
-      }
-      
-      // 其他错误显示具体错误信息
-      const errorMsg = error.response?.data?.detail || error.response?.data?.message || error.message || '操作失败'
-      ElMessage.error(errorMsg)
-    } finally {
-      submitting.value = false
-    }
-  })
-}
-
-// 切换状态
-const handleStatusChange = async (row) => {
-  const originalState = row.is_active
-  try {
-    await updateCap(row.id, { is_active: row.is_active })
-    loadData()
-  } catch (error) {
-    // 恢复原状态
-    row.is_active = originalState
-    
-    logger.error('更新Cap配置状态失败:', error)
-    
-    // 检查是否是401未授权错误（token过期）
-    if (error.response && error.response.status === 401) {
-      return
-    }
-    
-    // 检查是否是403错误（可能是CSRF token问题）
-    if (error.response && error.response.status === 403 && error._handled) {
-      return
-    }
-    
-    // 其他错误显示具体错误信息
-    const errorMsg = error.response?.data?.detail || error.response?.data?.message || error.message || '更新失败'
-    ElMessage.error(errorMsg)
-  }
-}
-
-// 对话框关闭
-const handleDialogClose = () => {
-  formRef.value?.resetFields()
-}
-
-// 分页
-const handleSizeChange = (size) => {
-  pagination.pageSize = size;
-  pagination.page = 1;  // 分页大小变化时重置到第一页
-  loadData()
-}
-
-const handlePageChange = (page) => {
-  pagination.page = page;
-  loadData()
-}
+const {
+  submitting,
+  dialogVisible,
+  isEdit,
+  formRef,
+  formData,
+  formRules,
+  handleCapTypeChange,
+  handleAdd,
+  handleEdit,
+  handleDelete,
+  handleSubmit,
+  handleDialogClose,
+} = useCapForm({ loadData })
 
 onMounted(() => {
-  // 加载列显示设置
   loadColumnVisibility()
-  loadOffers()
-  loadAdvertisers()
-  loadPublishers()
-  loadData()
+  initPage()
 })
 </script>
 

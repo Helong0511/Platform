@@ -17,7 +17,7 @@ from app.core.short_link_cache import (
     serialize_short_link
 )
 from app.core.short_link_click_counter import increment_click_count_async
-from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
+from app.core.tracking.click_id_generator import generate_click_id_unified
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from app.models.models import ShortLink
 from app.routes.short_link.placeholder import replace_short_link_placeholders
@@ -133,7 +133,6 @@ async def handle_cached_redirect(
             detail="短链接配置错误：原始URL格式无效"
         )
 
-    click_id = generate_click_id_from_timestamp()
     short_link_id = cached_data.get("id")
     if not short_link_id:
         try:
@@ -158,6 +157,15 @@ async def handle_cached_redirect(
         fb = await resolve_default_publisher_for_offer(final_offer_id, db)
         if fb is not None:
             final_channel_id = fb
+
+    click_id = generate_click_id_unified(
+        offer_id=final_offer_id,
+        publisher_id=final_channel_id,
+        advertiser_id=advertiser_id,
+        short_link_id=short_link_id,
+        url_params=request_info.get("url_params") if isinstance(request_info.get("url_params"), dict) else None,
+        for_short_link=True,
+    )
 
     # 保存原始URL用于检查占位符
     original_url_before_replace = original_url
@@ -282,7 +290,6 @@ async def handle_database_redirect(
     # 写入缓存
     await set_short_link_to_cache(short_code, serialize_short_link(short_link))
 
-    click_id = generate_click_id_from_timestamp()
     request_info = collect_request_info(request) if request else {}
 
     # 如果没有从URL参数传入，从短链接记录中获取offer_id和channel_id
@@ -297,6 +304,15 @@ async def handle_database_redirect(
         fb = await resolve_default_publisher_for_offer(final_offer_id, db)
         if fb is not None:
             final_channel_id = fb
+
+    click_id = generate_click_id_unified(
+        offer_id=final_offer_id,
+        publisher_id=final_channel_id,
+        advertiser_id=advertiser_id,
+        short_link_id=short_link.id,
+        url_params=request_info.get("url_params") if isinstance(request_info.get("url_params"), dict) else None,
+        for_short_link=True,
+    )
 
     # 保存原始URL用于检查占位符
     original_url_before_replace = original_url

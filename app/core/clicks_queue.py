@@ -28,6 +28,11 @@ async def enqueue_click(click_data: Dict[str, Any]) -> bool:
     Returns:
         是否成功加入队列
     """
+    from app.core.tracking.click_persist import should_persist_clicks_to_db
+
+    if not should_persist_clicks_to_db():
+        return True
+
     redis = await get_redis_client()
     if not redis:
         logger.warning("Redis不可用，无法使用队列缓冲，点击记录可能丢失")
@@ -115,4 +120,22 @@ async def get_queue_length() -> int:
     except Exception as e:
         logger.error(f"获取队列长度失败: error={e}")
         return 0
+
+
+async def drain_clicks_queue(max_batches: int = 100) -> int:
+    """
+    清空 Redis 点击队列（令牌模式不落库时用于丢弃历史积压）。
+
+    Returns:
+        丢弃的记录条数
+    """
+    drained = 0
+    for _ in range(max_batches):
+        clicks = await dequeue_clicks(BATCH_SIZE)
+        if not clicks:
+            break
+        drained += len(clicks)
+    if drained:
+        logger.info("已清空 clicks 队列积压 %s 条（不落库模式）", drained)
+    return drained
 

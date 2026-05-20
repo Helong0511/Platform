@@ -1,81 +1,26 @@
 """
-占位符解析器
+占位符解析器（Postback 转发）
 
-替换 Postback URL 中的占位符
+实现委托 ``app.core.url.placeholder``，保持 ``PlaceholderResolver`` 类名兼容。
 """
-import logging
-import re
-from typing import Dict, Any, Optional
+from typing import Any, Dict
 
-logger = logging.getLogger(__name__)
+from app.core.url.placeholder import (
+    PLACEHOLDER_BRACE_MAP,
+    extract_brace_placeholders,
+    resolve_brace_placeholders,
+)
 
 
 class PlaceholderResolver:
     """占位符解析器"""
-    
-    # 常见占位符模式
-    PLACEHOLDER_PATTERNS = {
-        '{click_id}': 'click_id',
-        '{clickid}': 'click_id',  # 支持无下划线版本
-        '{conversion_id}': 'conversion_id',
-        '{payout}': 'payout',
-        '{event_name}': 'event_name',
-        '{offer_id}': 'offer_id',
-        '{publisher_id}': 'publisher_id',
-        '{advertiser_id}': 'advertiser_id',
-        '{ip}': 'ip',
-        '{country}': 'country',
-        '{os}': 'os',
-        '{device}': 'device',
-        '{short_link_id}': 'short_link_id',
-    }
-    
+
+    PLACEHOLDER_PATTERNS = PLACEHOLDER_BRACE_MAP
+
     @staticmethod
     def resolve(url: str, data: Dict[str, Any]) -> str:
-        """
-        替换 URL 中的占位符
-        
-        Args:
-            url: 包含占位符的 URL
-            data: 数据字典
-        
-        Returns:
-            str: 替换后的 URL
-        """
-        resolved_url = url
-        
-        for placeholder, field_name in PlaceholderResolver.PLACEHOLDER_PATTERNS.items():
-            # 优先从 url_params 中获取值
-            url_params = data.get('url_params', {})
-            value = None
-            
-            if url_params and field_name in url_params:
-                value = url_params[field_name]
-                logger.debug(f"从 url_params 中获取 {field_name} = {value}")
-            else:
-                value = data.get(field_name)
-            
-            if value is not None:
-                # 替换占位符
-                resolved_url = resolved_url.replace(placeholder, str(value))
-                logger.debug(f"替换占位符 {placeholder} -> {value}")
-        
-        # 处理未解析的占位符（删除或保留）
-        unresolved = re.findall(r'\{[^}]+\}', resolved_url)
-        if unresolved:
-            logger.warning(f"未解析的占位符：{unresolved}")
-        
-        return resolved_url
-    
+        return resolve_brace_placeholders(url, data)
+
     @staticmethod
     def extract_placeholders(url: str) -> list:
-        """
-        提取 URL 中的所有占位符
-        
-        Args:
-            url: URL 字符串
-        
-        Returns:
-            list: 占位符列表
-        """
-        return re.findall(r'\{[^}]+\}', url)
+        return extract_brace_placeholders(url)

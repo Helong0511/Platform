@@ -42,6 +42,7 @@ from app.core.middleware import (
     RateLimitMiddleware,
     RequestLoggingMiddleware,
     SecurityHeadersMiddleware,
+    SensitivePathGuardMiddleware,
 )
 from app.core.redis_client import get_redis_client, close_redis_client
 from app.core.security import JWTUtils
@@ -417,6 +418,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"时区检查时出错: {e}，继续启动...")
 
+    try:
+        from app.core.tracking.click_persist import log_click_persist_mode_at_startup
+
+        log_click_persist_mode_at_startup()
+    except Exception as e:
+        logger.debug("点击落库策略日志跳过: %s", e)
+
     # 确保数据库存在并创建表（多进程环境：每个 worker 都会执行，但数据库操作是安全的）
     try:
         from app.db.database import create_database
@@ -673,6 +681,10 @@ app = FastAPI(
 from app.core.middleware import StreamErrorHandlingMiddleware
 
 app.add_middleware(StreamErrorHandlingMiddleware)
+
+# 0.5 敏感路径防护（防 .env / wp-admin 等扫描；生产环境屏蔽文档路径探测）
+if settings.ENABLE_SENSITIVE_PATH_GUARD:
+    app.add_middleware(SensitivePathGuardMiddleware)
 
 # 1. HTTPS强制重定向中间件（生产环境强制HTTPS）
 if settings.is_production:

@@ -31,7 +31,6 @@ from app.core.short_link_click_counter import (
     get_deadlock_stats
 )
 from app.core.redis_client import get_redis_client
-from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
 from app.models.models import User, UserRole, ShortLink, Offer, Publisher, Click
 from app.schemas.short_link import (
     ShortLinkCreate,

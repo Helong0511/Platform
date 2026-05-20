@@ -1,6 +1,5 @@
 <!--
-用户管理主页面（重构版）
-协调子组件：列表、表单
+【未接入路由】实验性拆分页，生产入口为 views/admin/UserManagement.vue（router: UserManagement）。
 -->
 <template>
   <div class="user-management">

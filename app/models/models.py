@@ -521,7 +521,10 @@ class PostbackConversion(Base):
     # 关联信息
     product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True, comment='关联的产品ID')
     client_id = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, comment='关联的客户ID')
-    
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"), nullable=True, index=True, comment='Offer ID（转化时快照）')
+    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="SET NULL"), nullable=True, index=True, comment='渠道 ID（转化时快照）')
+    advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="SET NULL"), nullable=True, index=True, comment='广告主 ID（转化时快照）')
+
     # CPL 系统字段
     click_id = Column(String(255), nullable=True, index=True, comment='关联的Click ID')
     click_time = Column(DateTime, nullable=True, comment='点击时间')

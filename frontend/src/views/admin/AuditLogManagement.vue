@@ -312,416 +312,81 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue';
+import { onMounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
-import { 
-  ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, 
-  ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage, 
-  ElDescriptions, ElDescriptionsItem, ElDatePicker, ElAlert, ElCheckboxGroup, ElCheckbox
+import {
+  ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem,
+  ElInput, ElSelect, ElOption, ElTag, ElDialog, ElIcon, ElMessage,
+  ElDescriptions, ElDescriptionsItem, ElDatePicker, ElAlert, ElCheckboxGroup, ElCheckbox,
 } from 'element-plus';
 import { Search, Refresh, Loading, Setting } from '@element-plus/icons-vue';
 import { useAuthStore } from '../../store';
-import { getAuditLogs, getAuditLog, getAuditLogStats } from '../../api/audit-log';
 import { formatDateTime } from '../../utils/dateFormat';
 import { useDevice } from '../../composables/useDevice';
-import { logger } from '../../utils/logger';
+import { useAuditLogs } from '../../composables/useAuditLogs';
+import { useAuditLogColumnVisibility } from '../../composables/useAuditLogColumnVisibility';
+import {
+  formatAuditJson,
+  getActionTypeLabel,
+  getActionTypeTag,
+  getStatusCodeTag,
+} from '../../utils/auditLogFormat';
 
-// 设备检测
 const { isMobile } = useDevice();
-
-// 状态管理
-const logs = ref([]);
-const loading = ref(false);
-const stats = ref(null);
-const columnSettingVisible = ref(false);
-const pagination = reactive({
-  page: 1,
-  pageSize: 10,
-  total: 0
-});
-
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  id: true,  // 固定显示
-  username: true,
-  action_type: true,
-  resource_type: true,
-  resource_name: true,
-  ip_address: true,
-  request_method: true,
-  request_path: true,
-  status_code: true,
-  success: true,
-  created_at: true  // 固定显示
-})
-
-const columnVisibility = reactive(getDefaultColumnVisibility())
-
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    // 当 checkbox-group 的值变化时，更新对象
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('auditLogManagement_columnVisibility')
-    if (saved) {
-      const savedVisibility = JSON.parse(saved)
-      // 合并保存的设置和默认设置
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
-      // 确保固定列始终显示
-      columnVisibility.id = true
-      columnVisibility.created_at = true
-    }
-  } catch (error) {
-    logger.error('加载列显示设置失败:', error)
-  }
-}
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    // 只保存可调整的列，不保存固定列
-    const toSave = {
-      username: columnVisibility.username,
-      action_type: columnVisibility.action_type,
-      resource_type: columnVisibility.resource_type,
-      resource_name: columnVisibility.resource_name,
-      ip_address: columnVisibility.ip_address,
-      request_method: columnVisibility.request_method,
-      request_path: columnVisibility.request_path,
-      status_code: columnVisibility.status_code,
-      success: columnVisibility.success
-    }
-    localStorage.setItem('auditLogManagement_columnVisibility', JSON.stringify(toSave))
-    columnSettingVisible.value = false
-    ElMessage.success('列显示设置已保存')
-  } catch (error) {
-    logger.error('保存列显示设置失败:', error)
-    ElMessage.error('保存设置失败')
-  }
-}
-
-// 筛选表单
-const searchForm = reactive({
-  username: '',
-  action_type: '',
-  resource_type: '',
-  ip_address: '',
-  success: null
-});
-
-// 时间范围 - 默认显示本月数据
-const getCurrentMonthRange = () => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  
-  // 本月第一天 00:00:00
-  const startDate = new Date(year, month, 1, 0, 0, 0);
-  // 本月最后一天 23:59:59
-  const lastDay = new Date(year, month + 1, 0, 23, 59, 59);
-  
-  // 格式化为 YYYY-MM-DDTHH:mm:ss 格式（Element Plus 日期选择器期望的格式）
-  const formatDateTime = (date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    const h = String(date.getHours()).padStart(2, '0');
-    const min = String(date.getMinutes()).padStart(2, '0');
-    const s = String(date.getSeconds()).padStart(2, '0');
-    return `${y}-${m}-${d}T${h}:${min}:${s}`;
-  };
-  
-  return [
-    formatDateTime(startDate),
-    formatDateTime(lastDay)
-  ];
-};
-
-const dateRange = ref(getCurrentMonthRange());
-
-// 详情对话框
-const detailDialogVisible = ref(false);
-const currentLog = ref(null);
-
-// 获取操作类型标签类型
-const getActionTypeTag = (actionType) => {
-  const tagMap = {
-    'LOGIN': 'success',
-    'LOGOUT': 'info',
-    'CREATE': 'success',
-    'UPDATE': 'warning',
-    'DELETE': 'danger',
-    'IMPORT': 'success',
-    'EXPORT': 'info',
-    'ACTIVATE': 'success',
-    'DEACTIVATE': 'warning',
-    'TASK_RUN': 'primary',
-    'API_ACCESS': '',
-    'RUNTIME_ERROR': 'danger'
-  };
-  return tagMap[actionType] || '';
-};
-
-// 获取操作类型显示标签
-const getActionTypeLabel = (actionType) => {
-  const labelMap = {
-    'LOGIN': '登录',
-    'LOGOUT': '登出',
-    'CREATE': '增加',
-    'UPDATE': '修改',
-    'DELETE': '删除',
-    'IMPORT': '导入',
-    'EXPORT': '导出',
-    'ACTIVATE': '激活',
-    'DEACTIVATE': '禁用',
-    'TASK_RUN': '定时任务运行',
-    'API_ACCESS': 'API访问',
-    'RUNTIME_ERROR': '程序运行错误'
-  };
-  return labelMap[actionType] || actionType;
-};
-
-// 获取状态码标签类型
-const getStatusCodeTag = (statusCode) => {
-  if (statusCode >= 200 && statusCode < 300) return 'success';
-  if (statusCode >= 300 && statusCode < 400) return 'info';
-  if (statusCode >= 400 && statusCode < 500) return 'warning';
-  if (statusCode >= 500) return 'danger';
-  return '';
-};
-
-// 格式化JSON
-const formatJson = (jsonString) => {
-  try {
-    // 首先尝试解析为JSON
-    let obj = typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
-    
-    // 递归格式化对象，美化日期显示
-    const formatValue = (value) => {
-      if (value === null || value === undefined) {
-        return value;
-      }
-      if (typeof value === 'string') {
-        // 检查是否是日期格式字符串（YYYY-MM-DD 或 ISO 格式）
-        const dateMatch = value.match(/^(\d{4}-\d{2}-\d{2})(T\d{2}:\d{2}:\d{2})?/);
-        if (dateMatch) {
-          return dateMatch[1]; // 只返回日期部分
-        }
-        // 检查是否是 Python datetime.date 格式：datetime.date(2025, 9, 30)
-        const pythonDateMatch = value.match(/datetime\.date\((\d{4}),\s*(\d{1,2}),\s*(\d{1,2})\)/);
-        if (pythonDateMatch) {
-          const year = pythonDateMatch[1];
-          const month = String(pythonDateMatch[2]).padStart(2, '0');
-          const day = String(pythonDateMatch[3]).padStart(2, '0');
-          return `${year}-${month}-${day}`;
-        }
-      }
-      if (Array.isArray(value)) {
-        return value.map(formatValue);
-      }
-      if (typeof value === 'object') {
-        const formatted = {};
-        for (const [key, val] of Object.entries(value)) {
-          formatted[key] = formatValue(val);
-        }
-        return formatted;
-      }
-      return value;
-    };
-    
-    const formattedObj = formatValue(obj);
-    return JSON.stringify(formattedObj, null, 2);
-  } catch {
-    // 如果JSON解析失败，可能是Python字典字符串格式
-    // 尝试提取并格式化其中的日期
-    if (typeof jsonString === 'string') {
-      // 替换 Python datetime.date 格式为 ISO 日期格式
-      let formatted = jsonString.replace(
-        /datetime\.date\((\d{4}),\s*(\d{1,2}),\s*(\d{1,2})\)/g,
-        (match, year, month, day) => {
-          const monthStr = String(month).padStart(2, '0');
-          const dayStr = String(day).padStart(2, '0');
-          return `"${year}-${monthStr}-${dayStr}"`;
-        }
-      );
-      
-      // 尝试将单引号替换为双引号（Python字典格式）
-      formatted = formatted.replace(/'/g, '"');
-      
-      // 尝试再次解析为JSON
-      try {
-        const obj = JSON.parse(formatted);
-        return JSON.stringify(obj, null, 2);
-      } catch {
-        // 如果还是失败，返回原始字符串（但已替换日期格式）
-        return formatted;
-      }
-    }
-    return String(jsonString);
-  }
-};
-
-// 获取日志列表
-const fetchLogs = async () => {
-  try {
-    loading.value = true;
-    
-    // 检查认证状态
-    if (!authStore.isAuthenticated) {
-      ElMessage.warning('登录已过期，请重新登录');
-      router.push('/login').catch(() => {
-        window.location.href = '/login';
-      });
-      return;
-    }
-    
-    const params = {
-      page: pagination.page,
-      page_size: pagination.pageSize,
-      ...(searchForm.username && { username: searchForm.username }),
-      ...(searchForm.action_type && { action_type: searchForm.action_type }),
-      ...(searchForm.resource_type && { resource_type: searchForm.resource_type }),
-      ...(searchForm.ip_address && { ip_address: searchForm.ip_address }),
-      ...(searchForm.success !== null && searchForm.success !== '' && { success: searchForm.success }),
-      ...(dateRange.value && dateRange.value.length === 2 && {
-        start_date: dateRange.value[0],
-        end_date: dateRange.value[1]
-      })
-    };
-
-    const response = await getAuditLogs(params);
-    logs.value = response.data || [];
-    pagination.total = response.total || 0;
-    
-    // 同时更新统计信息（使用相同的日期范围）
-    await fetchStats();
-  } catch (error) {
-    // 错误已在API中处理
-  } finally {
-    loading.value = false;
-  }
-};
-
-// 获取统计信息
-const fetchStats = async () => {
-  try {
-    // 使用当前选择的日期范围（默认本月）
-    const params = {};
-    if (dateRange.value && dateRange.value.length === 2) {
-      params.start_date = dateRange.value[0];
-      params.end_date = dateRange.value[1];
-    }
-    const data = await getAuditLogStats(params);
-    stats.value = data;
-  } catch (error) {
-    // 静默失败
-  }
-};
-
-// 重置筛选条件
-const resetFilter = () => {
-  searchForm.username = '';
-  searchForm.action_type = '';
-  searchForm.resource_type = '';
-  searchForm.ip_address = '';
-  searchForm.success = null;
-  dateRange.value = getCurrentMonthRange();  // 重置为本月
-  pagination.page = 1;
-  fetchLogs();
-};
-
-// 监听分页变化
-let isInitializing = true;
-
-watch(
-  () => [pagination.page, pagination.pageSize],
-  ([newPage, newSize], [oldPage, oldSize]) => {
-    // 跳过初始化时的触发
-    if (isInitializing) {
-      return;
-    }
-    
-    // 如果只是页码变化，直接刷新
-    if (newPage !== oldPage && newSize === oldSize) {
-      fetchLogs();
-    }
-    // 如果每页条数变化，重置到第一页并刷新
-    else if (newSize !== oldSize) {
-      if (pagination.page !== 1) {
-        pagination.page = 1;
-      } else {
-        // 如果已经在第一页，直接刷新
-        fetchLogs();
-      }
-    }
-  },
-  { flush: 'post' }
-);
-
-// 查看详情
-const handleViewDetail = async (log) => {
-  try {
-    const data = await getAuditLog(log.id);
-    currentLog.value = data;
-    detailDialogVisible.value = true;
-  } catch (error) {
-    // 错误已在API中处理
-  }
-};
-
-// 路由实例
 const router = useRouter();
 const authStore = useAuthStore();
 
-// 初始化
+const {
+  columnSettingVisible,
+  columnVisibility,
+  columnVisibilityArray,
+  loadColumnVisibility,
+  saveColumnVisibility,
+} = useAuditLogColumnVisibility();
+
+const {
+  logs,
+  loading,
+  stats,
+  pagination,
+  searchForm,
+  dateRange,
+  detailDialogVisible,
+  currentLog,
+  fetchLogs,
+  resetFilter,
+  handleViewDetail,
+  bindPaginationWatch,
+  finishInitializing,
+} = useAuditLogs(authStore, router);
+
+const formatJson = formatAuditJson;
+
+bindPaginationWatch();
+
 onMounted(async () => {
-  // 加载列显示设置
-  loadColumnVisibility()
-  // 路由守卫已经处理了认证检查，这里不需要重复检查
-  // 延迟加载数据，让页面先渲染出来
+  loadColumnVisibility();
   await nextTick();
-  
   setTimeout(async () => {
     try {
-      // 设置超时保护（20秒）
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => {
           reject(new Error('页面加载超时，请检查网络连接或刷新页面'));
         }, 20000);
       });
-      
-      // fetchLogs 内部会调用 fetchStats，所以只需要调用 fetchLogs
-      await Promise.race([
-        fetchLogs(),
-        timeoutPromise
-      ]);
+      await Promise.race([fetchLogs(), timeoutPromise]);
     } catch (error) {
-      // 超时或其他错误
-      if (error.message && error.message.includes('超时')) {
+      if (error.message?.includes('超时')) {
         ElMessage.error(error.message);
         loading.value = false;
       } else if (error.response?.status === 401) {
-        // 401错误已在拦截器中处理
         loading.value = false;
       } else {
-        // 其他错误已在API中处理
         loading.value = false;
       }
     } finally {
-      // 初始化完成后，允许 watch 触发
       await nextTick();
-      isInitializing = false;
+      finishInitializing();
     }
   }, 0);
 });

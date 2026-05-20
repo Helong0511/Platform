@@ -1,8 +1,7 @@
 """
-广告数据服务（重构版）
+广告数据服务拆分草稿（未完成，勿接入 API）。
 
-协调各子模块完成广告数据管理：
-1. 查询构建 → 2. 数据验证 → 3. 比率计算 → 4. 收益计算 → 5. 数据保存
+生产请使用 ``app.services.ad_data.service.AdDataService``。
 """
 import logging
 from typing import Optional, List, Dict, Any, Tuple
@@ -21,8 +20,8 @@ from app.services.base_service import BaseService
 logger = logging.getLogger(__name__)
 
 
-class AdDataService(BaseService[AdData]):
-    """广告数据服务"""
+class AdDataServiceStub(BaseService[AdData]):
+    """广告数据服务（草稿，未覆盖 get_ad_data / daily_summary 等）"""
 
     def __init__(self, db: AsyncSession):
         super().__init__(db, AdData)

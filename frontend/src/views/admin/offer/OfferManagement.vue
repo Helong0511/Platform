@@ -1,6 +1,5 @@
 <!--
-Offer 管理主页面（重构版）
-协调各子组件：列表、表单、统计、筛选
+【未接入路由】实验性拆分页，生产入口为 views/admin/OfferManagement.vue（router: OfferManagement）。
 -->
 <template>
   <div class="offer-management">

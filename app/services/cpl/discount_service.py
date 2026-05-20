@@ -13,6 +13,7 @@ from sqlalchemy.orm import joinedload
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.models.models import OfferDiscount, Offer, Publisher, User
+from app.schemas.cpl.discount import OfferDiscountResponse
 from app.services.base_service import BaseService
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,20 @@ class DiscountService(BaseService[OfferDiscount]):
 
     def __init__(self, db: AsyncSession):
         super().__init__(db, OfferDiscount)
+
+    @staticmethod
+    def to_discount_response(discount: OfferDiscount) -> OfferDiscountResponse:
+        discount_data = OfferDiscountResponse.model_validate(discount)
+        discount_data.publisher_name = (
+            discount.publisher.publisher_name if discount.publisher else None
+        )
+        discount_data.offer_name = discount.offer.offer_name if discount.offer else None
+        return discount_data
+
+    def to_discount_response_list(
+            self, discounts: List[OfferDiscount]
+    ) -> List[OfferDiscountResponse]:
+        return [self.to_discount_response(d) for d in discounts]
 
     async def create_discount(
             self,

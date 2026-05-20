@@ -40,13 +40,44 @@ class ConversionSaver:
         Returns:
             PostbackConversion: 保存的转化记录
         """
-        # 创建转化记录
-        raw_data_json = json.dumps(normalized_data['raw_data']) if normalized_data.get('raw_data') else None
+        # 归因快照写入 raw_data._attribution（无 DB 列迁移时的轻量方案）
+        raw_in = normalized_data.get('raw_data')
+        snapshot = None
+        if click_association:
+            snapshot = {
+                k: click_association[k]
+                for k in ('offer_id', 'publisher_id', 'advertiser_id', 'click_id')
+                if click_association.get(k) is not None
+            } or None
+
+        if isinstance(raw_in, dict):
+            raw_payload = dict(raw_in)
+            if snapshot:
+                raw_payload['_attribution'] = snapshot
+            raw_data_json = json.dumps(raw_payload)
+        elif raw_in is not None:
+            raw_data_json = json.dumps(raw_in)
+        elif snapshot:
+            raw_data_json = json.dumps({'_attribution': snapshot})
+        else:
+            raw_data_json = None
         
+        click_time = None
+        if click_association:
+            click_time = click_association.get('click_time')
+
+        snap_offer = click_association.get('offer_id') if click_association else None
+        snap_pub = click_association.get('publisher_id') if click_association else None
+        snap_adv = click_association.get('advertiser_id') if click_association else None
+
         conversion = PostbackConversion(
             platform=normalized_data['platform'],
             conversion_id=normalized_data['conversion_id'],
             click_id=normalized_data.get('click_id') or (click_association.get('click_id') if click_association else None),
+            click_time=click_time,
+            offer_id=snap_offer,
+            publisher_id=snap_pub,
+            advertiser_id=snap_adv,
             event_name=normalized_data['event_name'],
             event_value=normalized_data['event_value'],
             original_payout=normalized_data['payout'],

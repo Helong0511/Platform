@@ -84,7 +84,7 @@
           </el-statistic>
         </el-card>
         <el-card class="stat-card">
-          <el-statistic :title="isAdmin ? '总转化' : '转化数'" :value="getDisplayConversion(summaryData.total_conversions, summaryData.conversion_cap)">
+          <el-statistic :title="isAdmin ? '总转化' : '转化数'" :value="displayConversion(summaryData.total_conversions, summaryData.conversion_cap)">
             <template #prefix>
               <el-icon :size="20"><Check /></el-icon>
             </template>
@@ -348,555 +348,51 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
-import { ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
+import { onMounted, computed } from 'vue'
+import { ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Search, Refresh, DataAnalysis, Mouse, Check, TrendCharts, Money, Setting, Download } from '@element-plus/icons-vue'
-import { useRouter } from 'vue-router'
-import { getConversionSummary } from '@/api/conversion-summary'
-import { getOffers } from '@/api/offer'
-import { getPublishers } from '@/api/publisher'
-import { getAdvertisers } from '@/api/advertiser'
-import { logger } from '@/utils/logger'
 import { useAuthStore } from '@/store'
+import { useConversionSummary } from '@/composables/useConversionSummary'
+import { useConversionSummaryColumnVisibility } from '@/composables/useConversionSummaryColumnVisibility'
 
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.isAdmin)
-const router = useRouter()
 
-const loading = ref(false)
-const dateRange = ref([])
-const filterOffer = ref(null)
-const filterAdvertiser = ref(null)
-const filterPublisher = ref(null)
-const columnSettingVisible = ref(false)
+const {
+  loading,
+  dateRange,
+  filterOffer,
+  filterAdvertiser,
+  filterPublisher,
+  offerList,
+  advertiserList,
+  publisherList,
+  summaryData,
+  statsList,
+  handleDateChange,
+  handleAdvertiserChange,
+  handleOfferChange,
+  handlePublisherChange,
+  handleSearch,
+  handleReset,
+  handleOfferClick,
+  exportToExcel,
+  getSummaries,
+  displayConversion,
+  initPage,
+} = useConversionSummary(isAdmin)
 
-const offerList = ref([])
-const advertiserList = ref([])
-const publisherList = ref([])
-
-// 存储所有可用的选项（从统计数据中提取）
-const allAdvertisersFromStats = ref([])
-const allOffersFromStats = ref([])
-const allPublishersFromStats = ref([])
-// 存储每个Offer对应的渠道ID集合（用于级联筛选）
-const offerPublisherMap = ref(new Map())
-
-const summaryData = reactive({
-  total_clicks: 0,
-  total_conversions: 0,
-  cr: 0,
-  total_po: 0,
-  total_po_after_discount: 0,
-  total_profit: 0,
-  conversion_cap: 0, // 客户转化上限
-  stats_list: []
-})
-
-const statsList = ref([])
-
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  offer_id: true,  // 固定显示
-  offer_name: true,  // 固定显示
-  advertiser_name: isAdmin.value,  // 仅管理员可见
-  publisher_name: true,  // 所有用户可见
-  click_count: true,
-  conversion_count: true,
-  cr: true,
-  po: isAdmin.value,  // Revenue，仅管理员可见
-  po_after_discount: true,  // Pub Revenue，所有用户可见
-  profit: isAdmin.value,  // 仅管理员可见
-  adv_po: isAdmin.value,  // 上游单价，仅管理员可见
-  pub_po: true,  // 下游单价，所有用户可见
-  geo: true  // 所有用户可见
-})
-
-const columnVisibility = reactive(getDefaultColumnVisibility())
-
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    // 当 checkbox-group 的值变化时，更新对象
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('conversionSummary_columnVisibility')
-    if (saved) {
-      const savedVisibility = JSON.parse(saved)
-      // 合并保存的设置和默认设置
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
-      // 确保固定列始终显示
-      columnVisibility.offer_id = true
-      columnVisibility.offer_name = true
-    }
-  } catch (error) {
-    logger.error('加载列显示设置失败:', error)
-  }
-}
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    // 只保存可调整的列，不保存固定列
-    const toSave = {
-      advertiser_name: columnVisibility.advertiser_name,
-      publisher_name: columnVisibility.publisher_name,
-      click_count: columnVisibility.click_count,
-      conversion_count: columnVisibility.conversion_count,
-      cr: columnVisibility.cr,
-      po: columnVisibility.po,
-      po_after_discount: columnVisibility.po_after_discount,
-      profit: columnVisibility.profit,
-      adv_po: columnVisibility.adv_po,
-      pub_po: columnVisibility.pub_po,
-      geo: columnVisibility.geo
-    }
-    localStorage.setItem('conversionSummary_columnVisibility', JSON.stringify(toSave))
-    columnSettingVisible.value = false
-    ElMessage.success('列显示设置已保存')
-  } catch (error) {
-    logger.error('保存列显示设置失败:', error)
-    ElMessage.error('保存设置失败')
-  }
-}
-
-// 加载基础数据
-const loadOffers = async () => {
-  try {
-    const response = await getOffers({ page: 1, page_size: 100 })
-    // response已经是标准格式，直接使用data字段
-    if (response && response.data) {
-      offerList.value = (response.data || []).slice().sort((a, b) => a.id - b.id)
-    }
-  } catch (error) {
-    logger.error('加载Offer列表失败:', error)
-  }
-}
-
-const loadAdvertisers = async () => {
-  try {
-    const response = await getAdvertisers({ page: 1, page_size: 100 })
-    // response已经是标准格式，直接使用data字段
-    if (response && response.data) {
-      advertiserList.value = response.data || []
-    }
-  } catch (error) {
-    logger.error('加载广告主列表失败:', error)
-  }
-}
-
-const loadPublishers = async () => {
-  try {
-    const response = await getPublishers({ page: 1, page_size: 100 })
-    // response已经是标准格式，直接使用data字段
-    if (response && response.data) {
-      publisherList.value = response.data || []
-    }
-  } catch (error) {
-    logger.error('加载渠道列表失败:', error)
-  }
-}
-
-const setDefaultMonthRange = () => {
-  const today = new Date()
-  const start = new Date(today.getFullYear(), today.getMonth(), 1)
-  const end = new Date(today.getFullYear(), today.getMonth() + 1, 0)
-  
-  // 格式化日期为 YYYY-MM-DD（使用本地时间，避免时区问题）
-  const formatDate = (date) => {
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, '0')
-    const day = String(date.getDate()).padStart(2, '0')
-    return `${year}-${month}-${day}`
-  }
-  
-  dateRange.value = [
-    formatDate(start),
-    formatDate(end)
-  ]
-}
-
-// 从统计数据中提取可用的选项
-const extractOptionsFromStats = (statsList) => {
-  // 提取广告主列表（去重）
-  const advertiserMap = new Map()
-  const offerMap = new Map()
-  const publisherMap = new Map()
-  const offerPubMap = new Map() // 存储每个Offer对应的渠道ID集合
-  
-  statsList.forEach(stat => {
-    // 提取广告主
-    if (stat.advertiser_id && stat.advertiser_name) {
-      if (!advertiserMap.has(stat.advertiser_id)) {
-        advertiserMap.set(stat.advertiser_id, {
-          id: stat.advertiser_id,
-          advertiser_name: stat.advertiser_name
-        })
-      }
-    }
-    
-    // 提取Offer
-    if (stat.offer_id && stat.offer_name) {
-      if (!offerMap.has(stat.offer_id)) {
-        offerMap.set(stat.offer_id, {
-          id: stat.offer_id,
-          offer_name: stat.offer_name,
-          advertiser_id: stat.advertiser_id
-        })
-      }
-      // 记录该Offer对应的渠道
-      if (stat.publisher_id) {
-        if (!offerPubMap.has(stat.offer_id)) {
-          offerPubMap.set(stat.offer_id, new Set())
-        }
-        offerPubMap.get(stat.offer_id).add(stat.publisher_id)
-      }
-    }
-    
-    // 提取渠道
-    if (stat.publisher_id && stat.publisher_name) {
-      if (!publisherMap.has(stat.publisher_id)) {
-        publisherMap.set(stat.publisher_id, {
-          id: stat.publisher_id,
-          publisher_name: stat.publisher_name
-        })
-      }
-    }
-  })
-  
-  allAdvertisersFromStats.value = Array.from(advertiserMap.values())
-  allOffersFromStats.value = Array.from(offerMap.values())
-  allPublishersFromStats.value = Array.from(publisherMap.values())
-  offerPublisherMap.value = offerPubMap
-  
-  // 更新筛选列表（根据当前筛选条件过滤）
-  updateFilterLists()
-}
-
-// 根据当前筛选条件更新筛选列表
-const updateFilterLists = () => {
-  // 如果选择了日期范围，使用从统计数据中提取的列表
-  if (dateRange.value && dateRange.value.length === 2) {
-    // 更新广告主列表
-    if (isAdmin.value) {
-      advertiserList.value = allAdvertisersFromStats.value
-        .slice()
-        .sort((a, b) => a.id - b.id)
-      
-      // 如果当前选择的广告主不在新列表中，清空选择
-      if (filterAdvertiser.value && !advertiserList.value.find(a => a.id === filterAdvertiser.value)) {
-        filterAdvertiser.value = null
-      }
-    }
-    
-    // 更新Offer列表（如果选择了广告主，只显示该广告主的Offer）
-    let filteredOffers = allOffersFromStats.value
-    if (filterAdvertiser.value) {
-      filteredOffers = filteredOffers.filter(offer => offer.advertiser_id === filterAdvertiser.value)
-    }
-    offerList.value = filteredOffers
-      .slice()
-      .sort((a, b) => a.id - b.id)
-    
-    // 如果当前选择的Offer不在新列表中，清空选择
-    if (filterOffer.value && !offerList.value.find(o => o.id === filterOffer.value)) {
-      filterOffer.value = null
-    }
-    
-    // 更新渠道列表（如果选择了Offer，只显示该Offer的渠道）
-    let filteredPublishers = allPublishersFromStats.value
-    if (filterOffer.value) {
-      // 从offerPublisherMap中获取该Offer对应的渠道ID集合
-      const publisherIds = offerPublisherMap.value.get(filterOffer.value)
-      if (publisherIds && publisherIds.size > 0) {
-        filteredPublishers = allPublishersFromStats.value.filter(pub => publisherIds.has(pub.id))
-      } else {
-        // 如果没有找到对应的渠道，显示空列表
-        filteredPublishers = []
-      }
-    }
-    publisherList.value = filteredPublishers
-      .slice()
-      .sort((a, b) => a.id - b.id)
-    
-    // 如果当前选择的渠道不在新列表中，清空选择
-    if (filterPublisher.value && !publisherList.value.find(p => p.id === filterPublisher.value)) {
-      filterPublisher.value = null
-    }
-  } else {
-    // 如果没有选择日期范围，加载全部列表（保持原有逻辑）
-    if (isAdmin.value) {
-      loadAdvertisers()
-    }
-    loadOffers()
-    loadPublishers()
-  }
-}
-
-// 加载统计数据
-const loadData = async (shouldExtractOptions = false) => {
-  loading.value = true
-  try {
-    const params = {
-      start_date: dateRange.value?.[0] || undefined,
-      end_date: dateRange.value?.[1] || undefined,
-      offer_id: filterOffer.value || undefined,
-      advertiser_id: filterAdvertiser.value || undefined,
-      publisher_id: filterPublisher.value || undefined
-    }
-    
-    // 如果选择了日期范围且需要提取选项，先获取完整数据（不带筛选条件）
-    if (shouldExtractOptions && dateRange.value && dateRange.value.length === 2) {
-      const fullParams = {
-        start_date: dateRange.value[0],
-        end_date: dateRange.value[1]
-      }
-      const fullResponse = await getConversionSummary(fullParams)
-      if (fullResponse && fullResponse.data && fullResponse.data.stats_list) {
-        extractOptionsFromStats(fullResponse.data.stats_list)
-      }
-    }
-    
-    // 获取带筛选条件的数据
-    const response = await getConversionSummary(params)
-    // response已经是标准格式，直接使用data字段
-    if (response && response.data) {
-      Object.assign(summaryData, response.data)
-      // 计算总利润（如果API没有返回）
-      if (summaryData.total_profit === 0 && summaryData.total_po > 0 && summaryData.total_po_after_discount > 0) {
-        summaryData.total_profit = summaryData.total_po - summaryData.total_po_after_discount
-      }
-      statsList.value = response.data.stats_list || []
-    }
-  } catch (error) {
-    logger.error('获取统计数据失败:', error)
-    ElMessage.error('获取数据失败')
-  } finally {
-    loading.value = false
-  }
-}
-
-// 日期改变
-const handleDateChange = () => {
-  // 日期改变时，清空下级筛选
-  filterAdvertiser.value = null
-  filterOffer.value = null
-  filterPublisher.value = null
-  // 如果选择了日期范围，需要提取选项；否则加载全部列表
-  if (dateRange.value && dateRange.value.length === 2) {
-    loadData(true)
-  } else {
-    // 如果没有选择日期范围，加载全部列表
-    updateFilterLists()
-    loadData(false)
-  }
-}
-
-// 广告主改变
-const handleAdvertiserChange = () => {
-  // 清空下级筛选
-  filterOffer.value = null
-  filterPublisher.value = null
-  // 更新Offer和渠道列表
-  updateFilterLists()
-  // 重新加载数据（不需要重新提取选项，因为日期范围没变）
-  loadData(false)
-}
-
-// Offer改变
-const handleOfferChange = () => {
-  // 清空下级筛选
-  filterPublisher.value = null
-  // 更新渠道列表
-  updateFilterLists()
-  // 重新加载数据（不需要重新提取选项，因为日期范围没变）
-  loadData(false)
-}
-
-// 渠道改变
-const handlePublisherChange = () => {
-  // 重新加载数据（不需要重新提取选项，因为日期范围没变）
-  loadData(false)
-}
-
-// 搜索
-const handleSearch = () => {
-  loadData(false)
-}
-
-// 重置
-const handleReset = () => {
-  setDefaultMonthRange()
-  filterOffer.value = null
-  filterAdvertiser.value = null
-  filterPublisher.value = null
-  // 重置时需要提取选项
-  loadData(true)
-}
-
-// 点击Offer ID或Offer Name跳转到Offer管理详情
-const handleOfferClick = (offerId) => {
-  if (offerId) {
-    const route = router.resolve({
-      name: 'OfferManagement',
-      query: { offer_id: offerId }
-    })
-    window.open(route.href, '_blank')
-  }
-}
-
-// 导出Excel
-const exportToExcel = () => {
-  if (!statsList.value || statsList.value.length === 0) {
-    ElMessage.warning('没有数据可导出')
-    return
-  }
-  
-  // 定义CSV表头
-  const headers = [
-    'Offer ID',
-    'Offer Name',
-    'Advertiser',
-    'Publisher',
-    'Click',
-    'Conversion',
-    'CR',
-    'Revenue',
-    'Pub Revenue',
-    'Profit',
-    '上游单价',
-    '下游单价',
-    'GEO'
-  ]
-  
-  // 准备CSV数据
-  const csvData = [headers.join(',')]
-  
-  // 添加数据行
-  statsList.value.forEach(row => {
-    const rowData = [
-      row.offer_id || '',
-      `"${row.offer_name || ''}"`,
-      `"${row.advertiser_name || ''}"`,
-      `"${row.publisher_name || ''}"`,
-      row.click_count || 0,
-      row.conversion_count || 0,
-      `${row.cr || 0}%`,
-      isAdmin.value ? (row.po || 0).toFixed(2) : '',
-      (row.po_after_discount || 0).toFixed(2),
-      isAdmin.value ? (row.po ? (row.po - (row.po_after_discount || 0)).toFixed(2) : '0.00') : '',
-      isAdmin.value ? (row.adv_po || 0).toFixed(2) : '',
-      (row.pub_po || 0).toFixed(2),
-      row.geo || ''
-    ]
-    csvData.push(rowData.join(','))
-  })
-  
-  // 创建CSV内容
-  const csvContent = csvData.join('\n')
-  
-  // 添加BOM字符以确保Excel正确识别UTF-8编码
-  const bom = '\ufeff'
-  const csvWithBom = bom + csvContent
-  
-  // 创建Blob对象
-  const blob = new Blob([csvWithBom], { type: 'text/csv;charset=utf-8;' })
-  
-  // 创建下载链接
-  const link = document.createElement('a')
-  const url = URL.createObjectURL(blob)
-  
-  // 设置下载属性
-  link.setAttribute('href', url)
-  link.setAttribute('download', `转化总览_${new Date().toISOString().slice(0, 10)}.csv`)
-  link.style.visibility = 'hidden'
-  
-  // 添加到DOM并触发下载
-  document.body.appendChild(link)
-  link.click()
-  
-  // 清理
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
-  
-  ElMessage.success('导出成功')
-}
-
-// 获取显示的转化数（客户显示的不能超出转化上限）
-const getDisplayConversion = (conversions, cap) => {
-  if (!isAdmin.value && cap > 0) {
-    return Math.min(conversions, cap)
-  }
-  return conversions
-}
-
-// 计算表格汇总
-const getSummaries = (param) => {
-  const { columns, data } = param
-  const sums = []
-  
-  // 计算总点击数（用于计算总转化率）
-  const totalClicks = data.reduce((sum, item) => sum + (Number(item.click_count) || 0), 0)
-  
-  // 使用服务端返回的总转化数（已应用Cap限制）
-  const totalConversions = summaryData.total_conversions || 0
-  const totalCr = totalClicks > 0 ? ((totalConversions / totalClicks) * 100).toFixed(2) : '0.00'
-  
-  // 使用服务端返回的总金额（已应用Cap限制）
-  const totalPo = summaryData.total_po || 0
-  const totalPoAfterDiscount = summaryData.total_po_after_discount || 0
-  const totalProfit = summaryData.total_profit || 0
-  
-  columns.forEach((column, index) => {
-    const prop = column.property
-    
-    if (!prop) {
-      // 第一列或其他没有property的列，显示"汇总"
-      if (index === 0) {
-        sums[index] = '汇总'
-      } else {
-        sums[index] = ''
-      }
-      return
-    }
-    
-    // 根据列属性计算汇总值
-    if (prop === 'click_count') {
-      sums[index] = totalClicks
-    } else if (prop === 'conversion_count') {
-      sums[index] = totalConversions
-    } else if (prop === 'cr') {
-      sums[index] = totalCr + '%'
-    } else if (prop === 'po' && isAdmin.value) {
-      sums[index] = totalPo.toFixed(2)
-    } else if (prop === 'po_after_discount') {
-      sums[index] = totalPoAfterDiscount.toFixed(2)
-    } else if (prop === 'profit' && isAdmin.value) {
-      sums[index] = totalProfit.toFixed(2)
-    } else {
-      sums[index] = ''
-    }
-  })
-  
-  return sums
-}
+const {
+  columnSettingVisible,
+  columnVisibility,
+  columnVisibilityArray,
+  loadColumnVisibility,
+  saveColumnVisibility,
+} = useConversionSummaryColumnVisibility(isAdmin)
 
 onMounted(() => {
-  // 加载列显示设置
   loadColumnVisibility()
-  // 默认查询当月
-  setDefaultMonthRange()
-  // 初始加载时需要提取选项
-  loadData(true)
+  initPage()
 })
 </script>
 

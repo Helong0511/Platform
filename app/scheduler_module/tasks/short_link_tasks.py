@@ -10,9 +10,14 @@ from app.core.database import AsyncSessionLocal
 from app.core.short_link_click_counter import sync_click_counts_to_db
 from app.scheduler_module.tasks.clicks_batch_processor import process_clicks_queue
 from app.models.models import ShortLink
+from app.scheduler_module.task_result_store import get_task_result, set_task_result
 from sqlalchemy import update, select, and_, exists
 
 logger = logging.getLogger(__name__)
+
+TASK_SYNC_CLICKS = "短链接点击次数同步"
+TASK_PROCESS_QUEUE = "点击记录队列批量处理"
+TASK_OPEN_LINKS = "每日打开短链接"
 
 
 async def sync_short_link_clicks_task():
@@ -20,20 +25,16 @@ async def sync_short_link_clicks_task():
     同步短链接点击次数到数据库
     每5分钟执行一次（cron 见 task_config），将 Redis 中的点击次数批量更新到数据库
     """
+    synced_count = 0
     try:
-        # 详细日志输出到 scheduler.log，不输出到 app.log
         logger.info("开始执行短链接点击次数同步任务...")
-
-        # 创建数据库会话
         async with AsyncSessionLocal() as db:
-            # 同步所有点击次数
             synced_count = await sync_click_counts_to_db(db)
-
             if synced_count > 0:
                 logger.info(f"✅ 短链接点击次数同步成功: 更新了 {synced_count} 条记录")
             else:
                 logger.debug("ℹ️ 短链接点击次数同步: 没有需要更新的记录（Redis中可能没有待同步的计数器）")
-
+        set_task_result(TASK_SYNC_CLICKS, f"执行成功: 同步 {synced_count} 条")
         logger.debug("短链接点击次数同步任务执行成功")
     except Exception as e:
         # 错误日志会输出到 app.log（WARNING 级别）
@@ -46,8 +47,8 @@ async def process_clicks_queue_task():
     批量处理点击记录队列（高并发优化）
     每10秒执行一次，从Redis队列批量取出点击记录并插入到数据库
     """
+    result = {"processed": 0, "inserted": 0}
     try:
-        # 批量处理队列
         result = await process_clicks_queue()
 
         if result['processed'] > 0:
@@ -59,9 +60,11 @@ async def process_clicks_queue_task():
                 f"失败={result['failed']}, "
                 f"队列剩余={result['queue_remaining']}"
             )
-        # 队列为空时不输出日志
+        set_task_result(
+            TASK_PROCESS_QUEUE,
+            f"执行成功: 处理={result.get('processed', 0)}, 插入={result.get('inserted', 0)}",
+        )
     except Exception as e:
-        # 错误日志会输出到 app.log（WARNING 级别）
         logger.error(f"❌ 点击记录队列批量处理任务执行失败: {e}", exc_info=True)
         raise
 
@@ -72,10 +75,9 @@ async def open_closed_short_links_task():
     每天执行一次，将前一天因达到转化上限而关闭的短链接重新激活
     前提是关联的 Offer 处于激活状态
     """
+    opened = 0
     try:
         logger.info("开始执行每日打开短链接任务...")
-
-        # 创建数据库会话
         async with AsyncSessionLocal() as db:
             # 更新所有被关闭的短链接为激活状态，前提是关联的 Offer 处于激活状态
             from app.models.models import Offer
@@ -102,36 +104,14 @@ async def open_closed_short_links_task():
 
             result = await db.execute(update_stmt)
             await db.commit()
-
-            if result.rowcount > 0:
-                logger.info(f"✅ 成功打开 {result.rowcount} 个被关闭的短链接")
+            opened = result.rowcount or 0
+            if opened > 0:
+                logger.info(f"✅ 成功打开 {opened} 个被关闭的短链接")
             else:
                 logger.debug("ℹ️ 没有需要打开的短链接")
 
+        set_task_result(TASK_OPEN_LINKS, f"执行成功: 打开 {opened} 个短链接")
         logger.debug("每日打开短链接任务执行成功")
     except Exception as e:
-        # 错误日志会输出到 app.log（WARNING 级别）
         logger.error(f"❌ 每日打开短链接任务执行失败: {e}", exc_info=True)
         raise
-
-
-def get_task_result(task_name: str) -> Optional[str]:
-    """
-    获取任务执行结果
-    
-    Args:
-        task_name: 任务名称
-        
-    Returns:
-        任务执行结果字符串，如果不存在返回 None
-    """
-    try:
-        result = {
-            "task_name": "sync_short_link_clicks",
-            "description": "同步短链接点击次数到数据库",
-            "last_run": datetime.now(timezone.utc).isoformat(),
-        }
-        return str(result)
-    except Exception as e:
-        logger.error(f"获取任务 '{task_name}' 执行结果失败：{e}")
-        return None

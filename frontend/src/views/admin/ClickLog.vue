@@ -200,314 +200,49 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
+import { onMounted } from 'vue'
+import { ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Mouse, Setting } from '@element-plus/icons-vue'
-import { getClicks, getClickDetail } from '@/api/clicks'
-import { getOffers } from '@/api/offer'
-import { getPublishers } from '@/api/publisher'
-import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
+import { copyToClipboard } from '@/utils/clipboard'
 import ClickLogFilter from '@/components/admin/ClickLogFilter.vue'
 import ClickLogDetailDialog from '@/components/admin/ClickLogDetailDialog.vue'
+import { useClickLogList } from '@/composables/useClickLogList'
+import { useClickLogColumnVisibility } from '@/composables/useClickLogColumnVisibility'
 
-const route = useRoute()
-const router = useRouter()
-const loading = ref(false)
+const {
+  loading,
+  filters,
+  pagination,
+  tableData,
+  offerList,
+  publisherList,
+  detailDialogVisible,
+  currentDetail,
+  loadOffers,
+  loadPublishers,
+  handleSearch,
+  handleReset,
+  handleShortCodeClick,
+  showDetail,
+  handleSizeChange,
+  handlePageChange,
+  initPage,
+} = useClickLogList()
 
-// 使用统一的filters对象
-const filters = reactive({
-  clickId: '',
-  conversionId: '',
-  offer: null,
-  publisher: null,
-  ip: '',
-  country: '',
-  dateRange: []
-})
-
-const pagination = reactive({
-  page: 1,
-  pageSize: 20,
-  total: 0
-})
-
-const tableData = ref([])
-const offerList = ref([])
-const publisherList = ref([])
-const detailDialogVisible = ref(false)
-const currentDetail = ref(null)
-const columnSettingVisible = ref(false)
-
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  click_id: true,  // 固定显示
-  click_time: true,  // 固定显示
-  offer_name: true,
-  publisher_name: true,
-  advertiser_name: true,
-  short_code: true,
-  ip: true,
-  country: true,
-  device_type: true,
-  os: true,
-  browser: true,
-  device_brand: true,
-  is_bot: true,
-  referer: true,
-  conversion_id: true
-})
-
-const columnVisibility = reactive(getDefaultColumnVisibility())
-
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    // 当 checkbox-group 的值变化时，更新对象
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('clickLog_columnVisibility')
-    if (saved) {
-      const savedVisibility = JSON.parse(saved)
-      // 合并保存的设置和默认设置
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
-      // 确保固定列始终显示
-      columnVisibility.click_id = true
-      columnVisibility.click_time = true
-    }
-  } catch (error) {
-    logger.error('加载列显示设置失败:', error)
-  }
-}
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    // 只保存可调整的列，不保存固定列
-    const toSave = {
-      offer_name: columnVisibility.offer_name,
-      publisher_name: columnVisibility.publisher_name,
-      advertiser_name: columnVisibility.advertiser_name,
-      short_code: columnVisibility.short_code,
-      ip: columnVisibility.ip,
-      country: columnVisibility.country,
-      device_type: columnVisibility.device_type,
-      os: columnVisibility.os,
-      browser: columnVisibility.browser,
-      device_brand: columnVisibility.device_brand,
-      is_bot: columnVisibility.is_bot,
-      referer: columnVisibility.referer,
-      conversion_id: columnVisibility.conversion_id
-    }
-    localStorage.setItem('clickLog_columnVisibility', JSON.stringify(toSave))
-    columnSettingVisible.value = false
-    ElMessage.success('列显示设置已保存')
-  } catch (error) {
-    logger.error('保存列显示设置失败:', error)
-    ElMessage.error('保存设置失败')
-  }
-}
-
-// 防抖定时器
-let searchDebounceTimer = null
-
-// 防抖搜索函数
-const debouncedSearch = (delay = 500) => {
-  if (searchDebounceTimer) {
-    clearTimeout(searchDebounceTimer)
-  }
-  searchDebounceTimer = setTimeout(() => {
-    handleSearch()
-  }, delay)
-}
-
-// 加载基础数据
-const loadOffers = async () => {
-  try {
-    const response = await getOffers({
-      page: 1,
-      page_size: 100,
-      is_active: true
-    })
-    // response已经是标准分页格式，直接使用data字段
-    offerList.value = (response.data || []).slice().sort((a, b) => a.id - b.id)
-  } catch (error) {
-    logger.error('加载Offer列表失败:', error)
-    ElMessage.warning('加载Offer列表失败，筛选功能可能受限')
-  }
-}
-
-const loadPublishers = async () => {
-  try {
-    const response = await getPublishers({ page: 1, page_size: 100 })
-    // response已经是标准分页格式，直接使用data字段
-    publisherList.value = response.data || []
-  } catch (error) {
-    logger.error('加载渠道列表失败:', error)
-  }
-}
-
-// 加载数据
-const loadData = async () => {
-  loading.value = true
-  try {
-    const params = {
-      page: pagination.page,
-      page_size: Math.min(pagination.pageSize, 100),
-      click_id: filters.clickId || undefined,
-      conversion_id: filters.conversionId || undefined,
-      offer_id: filters.offer || undefined,
-      publisher_id: filters.publisher || undefined,
-      ip: filters.ip || undefined,
-      country: filters.country || undefined,
-      start_date: filters.dateRange?.[0] || undefined,
-      end_date: filters.dateRange?.[1] || undefined
-    }
-    const response = await getClicks(params)
-    // response已经是标准分页格式，直接使用data和total字段
-    tableData.value = response.data || []
-    pagination.total = response.total || 0
-    
-    // 如果有conversion_id参数，并且只找到一条记录，自动显示详情
-    if (filters.conversionId && tableData.value.length === 1) {
-      await showDetail(tableData.value[0])
-    }
-  } catch (error) {
-    logger.error('获取短链接访问记录失败:', error)
-    ElMessage.error('获取数据失败')
-  } finally {
-    loading.value = false
-  }
-}
-
-// 搜索
-const handleSearch = () => {
-  pagination.page = 1
-  loadData()
-}
-
-// 重置
-const handleReset = () => {
-  filters.clickId = ''
-  filters.conversionId = ''
-  filters.offer = null
-  filters.publisher = null
-  filters.ip = ''
-  filters.country = ''
-  filters.dateRange = []
-  pagination.page = 1
-  loadData()
-}
-
-// 复制到剪贴板
-const copyToClipboard = async (text) => {
-  if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('已复制到剪贴板')
-  } catch (error) {
-    logger.error('复制失败:', error)
-    ElMessage.error('复制失败')
-  }
-}
-
-// 点击短链接代码，跳转到短链接管理页面并搜索
-const handleShortCodeClick = async (shortCode) => {
-  if (!shortCode) return
-  try {
-    await router.push({
-      name: 'ShortLinkManagement',
-      query: {
-        search: shortCode
-      }
-    })
-  } catch (error) {
-    logger.error('跳转到短链接管理页面失败:', error)
-    ElMessage.error('跳转失败，请重试')
-  }
-}
-
-// 显示详情
-const showDetail = async (row) => {
-  if (!row?.id) {
-    ElMessage.error('记录ID缺失，无法查看详情')
-    return
-  }
-
-  try {
-    const detailData = await getClickDetail(row.id)
-    currentDetail.value = detailData || row
-    detailDialogVisible.value = true
-  } catch (error) {
-    logger.error('获取点击记录详情失败:', error)
-    // 详情接口失败时兜底显示列表已有字段，避免交互中断
-    currentDetail.value = row
-    detailDialogVisible.value = true
-    ElMessage.warning('详情加载较慢，已显示基础信息')
-  }
-}
-
-// 分页
-const handleSizeChange = (size) => {
-  pagination.pageSize = size;
-  pagination.page = 1;  // 分页大小变化时重置到第一页
-  loadData()
-}
-
-const handlePageChange = (page) => {
-  pagination.page = page;
-  loadData()
-}
+const {
+  columnSettingVisible,
+  columnVisibility,
+  columnVisibilityArray,
+  loadColumnVisibility,
+  saveColumnVisibility,
+} = useClickLogColumnVisibility()
 
 onMounted(() => {
-  // 加载列显示设置
   loadColumnVisibility()
   loadOffers()
   loadPublishers()
-
-  // 检查URL参数中是否有click_id或conversion_id，如果有则设置过滤条件
-  const clickIdFromUrl = route.query.click_id
-  const conversionIdFromUrl = route.query.conversion_id
-
-  if (clickIdFromUrl) {
-    filters.clickId = clickIdFromUrl
-  }
-
-  if (conversionIdFromUrl) {
-    filters.conversionId = conversionIdFromUrl
-  }
-
-  // 加载数据（如果有参数，会自动搜索）
-
-  // 如果没有URL参数，设置默认查询最近30天
-  if (!clickIdFromUrl && !conversionIdFromUrl) {
-    // 默认查询最近30天（确保包含更多记录）
-    const endDate = new Date()
-    const startDate = new Date()
-    startDate.setDate(startDate.getDate() - 7)
-    const formatLocalDate = (date) => {
-      const year = date.getFullYear()
-      const month = String(date.getMonth() + 1).padStart(2, '0')
-      const day = String(date.getDate()).padStart(2, '0')
-      return `${year}-${month}-${day}`
-    }
-    filters.dateRange = [
-      formatLocalDate(startDate),
-      formatLocalDate(endDate)
-    ]
-  }
-  loadData()
+  initPage()
 })
 </script>
 

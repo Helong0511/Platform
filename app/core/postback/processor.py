@@ -13,12 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.postback.validators.ip_validator import IpValidator
 from app.core.postback.validators.data_validator import DataValidator
-from app.core.postback.validators.duplicate_checker import DuplicateChecker
 from app.core.postback.transformers.normalizer import DataNormalizer
-from app.core.postback.transformers.click_associator import ClickAssociator
-from app.core.postback.checks.cap_checker import CapChecker
-from app.core.postback.checks.discount_checker import DiscountChecker
-from app.core.postback.savers.conversion_saver import ConversionSaver
+from app.core.postback.pipeline import (
+    PostbackPipelineContext,
+    step_apply_discount,
+    step_associate_click,
+    step_check_cap,
+    step_check_duplicate,
+    step_save_conversion,
+)
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
 from app.models.models import AdminNotificationConfig, CloakConfig, ShortLink
@@ -110,11 +113,16 @@ class PostbackProcessor:
             click_id = normalized_data.get('click_id')
             logger.info(f"关联 Click ID: {click_id}")
             
-            click_association = await ClickAssociator.associate(
-                click_id,
-                db
+            pipe_ctx = PostbackPipelineContext(
+                platform=platform,
+                raw_data=raw_data,
+                db=db,
+                request_ip=request_ip,
+                normalized_data=normalized_data,
             )
-            
+            click_association = await step_associate_click(pipe_ctx)
+            click_association = pipe_ctx.click_association
+
             logger.info(f"Click 关联结果: {click_association}")
             
             # 检查 url_params 中的 fbclid 参数并上报
@@ -297,12 +305,9 @@ class PostbackProcessor:
             event_name = normalized_data.get('event_name')
             logger.info(f"检测重复：conversion_id={conversion_id}, event_name={event_name}")
             
-            is_dup = await DuplicateChecker.is_duplicate(
-                conversion_id=conversion_id,
-                click_id=normalized_data.get('click_id'),
-                db=db
-            )
-            
+            pipe_ctx.normalized_data = normalized_data
+            is_dup = await step_check_duplicate(pipe_ctx)
+
             if is_dup:
                 logger.info(f"检测到重复转化，跳过处理：platform={platform}")
                 return {
@@ -310,77 +315,23 @@ class PostbackProcessor:
                     "message": "重复转化，已跳过"
                 }
             
-            # ========== 第 6 步：Cap 检查 ==========
+            # ========== 第 6–8 步：Cap / 扣量 / 保存（pipeline） ==========
             logger.info("=== 第 6 步：Cap 检查 ====")
-            offer_id = click_association.get('offer_id') if click_association else None
-            publisher_id = click_association.get('publisher_id') if click_association else None
-            advertiser_id = click_association.get('advertiser_id') if click_association else None
-            logger.info(f"Cap 检查参数：offer_id={offer_id}, publisher_id={publisher_id}, advertiser_id={advertiser_id}")
-            
-            cap_ok, cap_status = await CapChecker.check(
-                offer_id=offer_id,
-                publisher_id=publisher_id,
-                advertiser_id=advertiser_id,
-                db=db
-            )
-            
-            conversion_status = 'Pending' if cap_ok else f'CapExceeded({cap_status})'
+            pipe_ctx.click_association = click_association
+            cap_ok, cap_status = await step_check_cap(pipe_ctx)
+            conversion_status = pipe_ctx.conversion_status
             logger.info(f"Cap 检查结果：{cap_ok}, 状态：{conversion_status}")
-            
-            # 如果Cap检查失败，关闭该渠道的offer关联的短链接
-            if not cap_ok and offer_id and publisher_id:
-                logger.info(f"Cap检查失败，关闭渠道 {publisher_id} 的Offer {offer_id} 关联的短链接")
-                try:
-                    # 关闭与该offer和渠道关联的短链接
-                    update_stmt = update(ShortLink).where(
-                        ShortLink.offer_id == offer_id,
-                        ShortLink.channel_id == publisher_id,
-                        ShortLink.is_active == True
-                    ).values(is_active=False)
-                    
-                    result = await db.execute(update_stmt)
-                    await db.commit()
-                    logger.info(f"成功关闭 {result.rowcount} 个短链接")
-                except Exception as e:
-                    logger.error(f"关闭短链接失败: {str(e)}")
-            
-            # ========== 第 7 步：扣量计算 ==========
+
             logger.info("=== 第 7 步：扣量计算 ===")
-            original_payout = normalized_data['payout'] or 0.0
-            logger.info(f"原始 payout: {original_payout}")
-            
-            final_payout, deduction_info = await DiscountChecker.calculate(
-                original_payout=original_payout,
-                offer_id=offer_id,
-                publisher_id=publisher_id,
-                product_id=normalized_data['product_id'],
-                client_id=normalized_data['client_id'],
-                db=db
-            )
-            
+            final_payout, deduction_info = await step_apply_discount(pipe_ctx)
             logger.info(f"扣量计算结果：final_payout={final_payout}, 扣量信息：{deduction_info}")
-            
-            # ========== 第 8 步：保存转化记录 ==========
+
             logger.info("=== 第 8 步：保存转化记录 ====")
-            conversion = await ConversionSaver.save(
-                normalized_data=normalized_data,
-                click_association=click_association,
-                final_payout=final_payout,
-                conversion_status=conversion_status,
-                db=db
+            conversion = await step_save_conversion(pipe_ctx)
+            logger.info(
+                f"转化记录保存成功：ID={conversion.id}, "
+                f"conversion_id={conversion.conversion_id}"
             )
-            
-            logger.info(f"转化记录保存成功：ID={conversion.id}, conversion_id={conversion.conversion_id}")
-            
-            # 更新 Click 统计
-            if click_association:
-                logger.info("=== 更新 Click 统计 ====")
-                await ConversionSaver.update_click_conversion(
-                    click_association=click_association,
-                    conversion_id=conversion.id,
-                    db=db
-                )
-                logger.info("Click 统计更新成功")
             
             # ========== 第 11 步：提交事务 ==========
             logger.info("=== 第 11 步：提交事务 ====")
@@ -390,7 +341,7 @@ class PostbackProcessor:
             # ========== 第 9 步：渠道转发 ==========
             logger.info("=== 第 9 步：渠道转发 ====")
             try:
-                if click_association and click_association.get('publisher'):
+                if click_association and click_association.get('publisher_id'):
                     logger.info(f"开始转发到渠道：publisher_id={click_association.get('publisher_id')}")
                     await PostbackForwarder.forward_to_publisher(conversion, db, click_association)
                     logger.info("渠道转发完成")

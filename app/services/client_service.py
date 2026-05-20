@@ -3,13 +3,16 @@
 封装客户相关的业务逻辑
 """
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Tuple
 
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
+from app.core.fulltext_search import search_with_fulltext
 from app.models.models import Client, User, UserRole
 from app.services.base_service import BaseService
 
@@ -21,6 +24,44 @@ class ClientService(BaseService[Client]):
 
     def __init__(self, db: AsyncSession):
         super().__init__(db, Client)
+
+    async def list_clients(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 10,
+        company_name: Optional[str] = None,
+        is_active: Optional[bool] = None,
+    ) -> Tuple[List[Client], int]:
+        """分页客户列表（管理员）。"""
+        query = select(Client).options(selectinload(Client.user))
+        count_query = select(func.count(Client.id))
+
+        if company_name:
+            query = await search_with_fulltext(
+                db=self.db,
+                model_class=Client,
+                search_fields=["company_name", "contact_person"],
+                search_term=company_name,
+                base_query=query,
+                use_fulltext=True,
+            )
+            count_query = await search_with_fulltext(
+                db=self.db,
+                model_class=Client,
+                search_fields=["company_name", "contact_person"],
+                search_term=company_name,
+                base_query=count_query,
+                use_fulltext=True,
+            )
+        if is_active is not None:
+            query = query.where(Client.is_active == is_active)
+            count_query = count_query.where(Client.is_active == is_active)
+
+        total = (await self.db.execute(count_query)).scalar() or 0
+        query = query.order_by(Client.id.desc()).offset((page - 1) * page_size).limit(page_size)
+        result = await self.db.execute(query)
+        return list(result.scalars().all()), int(total)
 
     async def get_client_by_id(
             self,

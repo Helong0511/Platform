@@ -14,6 +14,7 @@ from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.utils import get_app_now_naive
 from app.models.models import OfferCap, Offer, Advertiser, Publisher, User
+from app.schemas.cpl.cap import OfferCapResponse
 from app.services.base_service import BaseService
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,41 @@ class CapService(BaseService[OfferCap]):
 
     def __init__(self, db: AsyncSession):
         super().__init__(db, OfferCap)
+
+    @staticmethod
+    def to_cap_response(cap: OfferCap) -> OfferCapResponse:
+        cap_data = OfferCapResponse.model_validate(cap)
+        cap_data.offer_name = cap.offer.offer_name if cap.offer else None
+        cap_data.advertiser_name = (
+            cap.advertiser.advertiser_name if cap.advertiser else None
+        )
+        cap_data.publisher_name = (
+            cap.publisher.publisher_name if cap.publisher else None
+        )
+        return cap_data
+
+    def to_cap_response_list(self, caps: List[OfferCap]) -> List[OfferCapResponse]:
+        return [self.to_cap_response(cap) for cap in caps]
+
+    async def check_cap_consistency(
+            self,
+            offer_id: Optional[int] = None,
+            fix: bool = False,
+    ) -> tuple[list, str]:
+        from app.core.cap.consistency_checker import check_cap_consistency
+
+        inconsistencies = await check_cap_consistency(
+            db=self.db,
+            offer_id=offer_id,
+            fix_inconsistencies=fix,
+        )
+        if inconsistencies:
+            message = f"发现 {len(inconsistencies)} 个不一致的记录"
+            if fix:
+                message += "，已自动修复"
+        else:
+            message = "所有Cap计数一致"
+        return inconsistencies, message
 
     async def create_cap(
             self,

@@ -2,6 +2,7 @@
 点击追踪 API 端点
 处理点击追踪、Click ID 生成、Tracklink 生成等功能
 """
+import json
 import logging
 import asyncio
 from typing import Optional
@@ -15,7 +16,11 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db, AsyncSessionLocal
 from app.core.security import get_current_user
 from app.core.utils import get_app_now_naive
-from app.core.tracking.click_id_generator import generate_click_id_from_timestamp, generate_unique_click_id
+from app.core.tracking.click_id_generator import (
+    generate_click_id_from_timestamp,
+    generate_click_id_unified,
+    generate_unique_click_id,
+)
 from app.core.tracking.tracklink_generator import generate_downstream_tracklink
 from app.core.device_info import collect_request_info
 from app.models.models import User, Offer, Publisher, Click
@@ -53,7 +58,12 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
                         logger.warning(
                             f"检测到重复的 click_id: {click_id}，将重新生成"
                         )
-                        click_data['click_id'] = generate_click_id_from_timestamp()
+                        click_data['click_id'] = generate_click_id_unified(
+                            offer_id=click_data.get('offer_id'),
+                            publisher_id=click_data.get('publisher_id'),
+                            advertiser_id=click_data.get('advertiser_id'),
+                            short_link_id=click_data.get('short_link_id'),
+                        )
                         click_id = click_data['click_id']
                 
                 click = Click(**click_data)
@@ -68,7 +78,12 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
                 if 'Duplicate entry' in error_msg or 'UNIQUE constraint' in error_msg or 'click_id' in error_msg:
                     # 检测到重复的 click_id，重新生成并重试
                     old_click_id = click_data.get('click_id')
-                    click_data['click_id'] = generate_click_id_from_timestamp()
+                    click_data['click_id'] = generate_click_id_unified(
+                        offer_id=click_data.get('offer_id'),
+                        publisher_id=click_data.get('publisher_id'),
+                        advertiser_id=click_data.get('advertiser_id'),
+                        short_link_id=click_data.get('short_link_id'),
+                    )
                     logger.warning(
                         f"检测到重复的 click_id（尝试 {attempt + 1}/{max_retries}）: "
                         f"旧ID={old_click_id}, 新ID={click_data['click_id']}"
@@ -154,10 +169,23 @@ async def track_click(
         # 先检查是否有重复的 Click ID
         existing_click_ids = set()
         # 这里可以优化：只检查最近生成的 Click ID，而不是全部
-        click_id = generate_click_id_from_timestamp()
-        
         # 4. 收集完整的请求信息（包括软件、硬件信息和URL参数）
         request_info = collect_request_info(request) if request else {}
+
+        url_params_raw = request_info.get('url_params')
+        if isinstance(url_params_raw, str):
+            try:
+                url_params_raw = json.loads(url_params_raw)
+            except Exception:
+                url_params_raw = None
+        url_params_dict = url_params_raw if isinstance(url_params_raw, dict) else None
+
+        click_id = generate_click_id_unified(
+            offer_id=offer.id,
+            publisher_id=publisher.id,
+            advertiser_id=offer.advertiser_id,
+            url_params=url_params_dict,
+        )
         
         # 5. 创建点击记录
         click_data = {
@@ -189,9 +217,9 @@ async def track_click(
             "device": request_info.get('device_type')  # 使用device_type作为device字段的值
         }
         
-        # 使用后台任务异步写入
-        # 注意：使用 BackgroundTasks 不会阻塞响应
-        background_tasks.add_task(create_click_background, click_data)
+        from app.core.tracking.click_persist import persist_click_record
+
+        await persist_click_record(click_data, background_tasks)
         
         # 原同步代码注释掉
         # click = Click(...)

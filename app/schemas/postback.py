@@ -59,6 +59,9 @@ class PostbackConversionResponse(BaseModel):
     gid: Optional[str]
     product_id: Optional[int]
     client_id: Optional[int]
+    offer_id: Optional[int] = Field(None, description="Offer ID（转化快照）")
+    publisher_id: Optional[int] = Field(None, description="渠道 ID（转化快照）")
+    advertiser_id: Optional[int] = Field(None, description="广告主 ID（转化快照）")
     product_name: Optional[str] = Field(None, description="产品名称")
     client_name: Optional[str] = Field(None, description="客户名称")
     # 点击记录关联信息（通过 conversion_id = clicks.click_id 关联）

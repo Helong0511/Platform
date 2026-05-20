@@ -393,94 +393,35 @@ import { getPublishers, createPublisher, updatePublisher, deletePublisher } from
 import { getClientList } from '@/api/client'
 import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
+import { usePublisherColumnVisibility } from '@/composables/usePublisherColumnVisibility'
+import { usePublisherList } from '@/composables/usePublisherList'
 
-const loading = ref(false)
+const {
+  loading,
+  searchKeyword,
+  filterActive,
+  pagination,
+  tableData,
+  loadData,
+  handleSearch,
+  handleReset,
+} = usePublisherList()
+
+const {
+  columnSettingVisible,
+  columnVisibility,
+  columnVisibilityArray,
+  loadColumnVisibility,
+  saveColumnVisibility,
+} = usePublisherColumnVisibility()
+
 const submitting = ref(false)
 const dialogVisible = ref(false)
-const columnSettingVisible = ref(false)
 const isEdit = ref(false)
-const searchKeyword = ref('')
-const filterActive = ref(null)
 const formRef = ref(null)
 const showPlaceholderHelp = ref(false)
 const showSuccessCheckHelp = ref(false)
 
-const pagination = reactive({
-  page: 1,
-  pageSize: 20,
-  total: 0
-})
-
-const tableData = ref([])
-
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  id: true,  // 固定显示
-  publisher_name: true,  // 固定显示
-  client_name: true,
-  email: true,
-  price_discount: true,
-  postback_url: true,
-  postback_method: true,
-  active_advertiser_count: true,
-  is_active: true,
-  created_at: true
-})
-
-const columnVisibility = reactive(getDefaultColumnVisibility())
-
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    // 当 checkbox-group 的值变化时，更新对象
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('publisherManagement_columnVisibility')
-    if (saved) {
-      const savedVisibility = JSON.parse(saved)
-      // 合并保存的设置和默认设置
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
-      // 确保固定列始终显示
-      columnVisibility.id = true
-      columnVisibility.publisher_name = true
-    }
-  } catch (error) {
-    logger.error('加载列显示设置失败:', error)
-  }
-}
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    // 只保存可调整的列，不保存固定列
-    const toSave = {
-      client_name: columnVisibility.client_name,
-      email: columnVisibility.email,
-      price_discount: columnVisibility.price_discount,
-      postback_url: columnVisibility.postback_url,
-      postback_method: columnVisibility.postback_method,
-      active_advertiser_count: columnVisibility.active_advertiser_count,
-      is_active: columnVisibility.is_active,
-      created_at: columnVisibility.created_at
-    }
-    localStorage.setItem('publisherManagement_columnVisibility', JSON.stringify(toSave))
-    columnSettingVisible.value = false
-    ElMessage.success('列显示设置已保存')
-  } catch (error) {
-    logger.error('保存列显示设置失败:', error)
-    ElMessage.error('保存设置失败')
-  }
-}
 const clientList = ref([])
 
 const formData = reactive({
@@ -681,44 +622,6 @@ const loadClients = async () => {
   } catch (error) {
     logger.error('获取客户列表失败:', error)
   }
-}
-
-// 加载数据
-const loadData = async () => {
-  loading.value = true
-  try {
-    // 限制 page_size 最大值为 100
-    const pageSize = Math.min(pagination.pageSize, 100)
-    const params = {
-      page: pagination.page,
-      page_size: pageSize,
-      search: searchKeyword.value || undefined,
-      is_active: filterActive.value !== null ? filterActive.value : undefined
-    }
-    const response = await getPublishers(params)
-    // response已经是标准分页格式，直接使用data和total字段
-    tableData.value = response.data || []
-    pagination.total = response.total || 0
-  } catch (error) {
-    logger.error('获取渠道列表失败:', error)
-    ElMessage.error('获取数据失败')
-  } finally {
-    loading.value = false
-  }
-}
-
-// 搜索
-const handleSearch = () => {
-  pagination.page = 1
-  loadData()
-}
-
-// 重置
-const handleReset = () => {
-  searchKeyword.value = ''
-  filterActive.value = null
-  pagination.page = 1
-  loadData()
 }
 
 // 添加

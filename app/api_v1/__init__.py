@@ -64,7 +64,7 @@ from app.api_v1.cpl import (
     discounts_router as discounts,
     conversion_deductions_router as conversion_deductions,
     conversion_summary_router as conversion_summary,
-    conversion_log_router as conversion_log,
+    conversion_log_router as conversion_log,  # 已废弃，不再注册到 api_router
     clicks_router as clicks,
     affiliate_tests_router as affiliate_tests,
 )
@@ -135,7 +135,7 @@ api_router.include_router(caps, prefix="/caps", tags=["Cap管理"])
 api_router.include_router(discounts, prefix="/discounts", tags=["扣量管理"])
 api_router.include_router(conversion_deductions, prefix="/conversion-deductions", tags=["转化扣减管理"])
 api_router.include_router(conversion_summary, prefix="/conversion-summary", tags=["转化统计"])
-api_router.include_router(conversion_log, prefix="/conversion-logs", tags=["转化日志（已废弃）"])
+# conversion_log 已废弃，请使用 /postback/conversions；模块保留于 cpl/conversions/log.py 供兼容
 api_router.include_router(clicks, prefix="/clicks", tags=["短链接访问记录"])
 api_router.include_router(affiliate_tests, prefix="/affiliate-tests", tags=["下游测试"])
 

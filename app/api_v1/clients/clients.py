@@ -26,6 +26,7 @@ from sqlalchemy.orm import selectinload
 from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.database import get_db
+from app.core.dependencies import get_client_service
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.fulltext_search import search_with_fulltext
@@ -51,7 +52,7 @@ class ClientSwitchUpdate(BaseModel):
 @router.get("/", response_model=PaginatedResponseBaseSchema[list[ClientResponse]], summary="获取客户列表")
 async def get_clients(
         request: Request,
-        db: AsyncSession = Depends(get_db),
+        client_service=Depends(get_client_service),
         current_user: User = Depends(require_admin),
         page: int = Query(1, ge=1, description="页码"),
         page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
@@ -64,61 +65,25 @@ async def get_clients(
     - 支持按公司名称和激活状态过滤
     - 返回分页结果
     """
-    # 构建查询 - 使用selectinload预加载用户信息，避免N+1查询
-    query = select(Client).options(selectinload(Client.user))
-    count_query = select(func.count(Client.id))
+    clients, total = await client_service.list_clients(
+        page=page,
+        page_size=page_size,
+        company_name=company_name,
+        is_active=is_active,
+    )
 
-    # 应用过滤条件
-    if company_name:
-        # 使用全文搜索（优先）或LIKE查询
-        query = await search_with_fulltext(
-            db=db,
-            model_class=Client,
-            search_fields=["company_name", "contact_person"],
-            search_term=company_name,
-            base_query=query,
-            use_fulltext=True
-        )
-        count_query = await search_with_fulltext(
-            db=db,
-            model_class=Client,
-            search_fields=["company_name", "contact_person"],
-            search_term=company_name,
-            base_query=count_query,
-            use_fulltext=True
-        )
-
-    if is_active is not None:
-        query = query.where(Client.is_active == is_active)
-        count_query = count_query.where(Client.is_active == is_active)
-
-    # 获取总数
-    total_result = await db.execute(count_query)
-    total = total_result.scalar()
-
-    # 应用分页和排序
-    query = query.order_by(Client.id.desc())
-    query = query.offset((page - 1) * page_size).limit(page_size)
-
-    # 执行查询
-    result = await db.execute(query)
-    # selectinload不会产生重复行，但为了安全起见使用unique()
-    clients = result.unique().scalars().all()
-
-    # 转换为响应格式（用户信息已通过selectinload预加载）
     client_responses = []
     for client in clients:
         client_dict = ClientResponse.model_validate(client).model_dump()
-        # 添加用户全名
         if client.user:
-            client_dict['user_full_name'] = client.user.full_name
+            client_dict["user_full_name"] = client.user.full_name
         client_responses.append(ClientResponse.model_validate(client_dict))
 
     return PaginatedResponseBaseSchema.success(
         data=client_responses,
         total=total,
         page=page,
-        page_size=page_size
+        page_size=page_size,
     )
 
 

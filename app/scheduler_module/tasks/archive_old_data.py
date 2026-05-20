@@ -11,6 +11,7 @@ from sqlalchemy import text
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
 from app.scheduler_module.task_names import ARCHIVE_DATA_TASK_NAME
+from app.scheduler_module.task_result_store import get_task_result, set_task_result
 from app.scheduler_module.task_utils import (
     log_task_start,
     log_task_result,
@@ -19,19 +20,6 @@ from app.scheduler_module.task_utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-# 任务执行结果存储（用于保存到last_error字段）
-_task_results: dict[str, str] = {}
-
-
-def get_task_result(task_name: str) -> str | None:
-    """获取任务执行结果"""
-    return _task_results.get(task_name)
-
-
-def set_task_result(task_name: str, result: str) -> None:
-    """设置任务执行结果"""
-    _task_results[task_name] = result
 
 
 async def archive_old_ad_data(months: int = 6) -> dict:

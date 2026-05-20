@@ -11,7 +11,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.clicks_queue import dequeue_clicks, get_queue_length
+from app.core.clicks_queue import dequeue_clicks, drain_clicks_queue, get_queue_length
+from app.core.tracking.click_persist import should_persist_clicks_to_db
 from app.core.database import AsyncSessionLocal
 from app.core.offer_cache import get_offer_advertiser_id, set_offer_cache
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
@@ -41,8 +42,23 @@ async def process_clicks_queue() -> Dict[str, int]:
         'processed': 0,
         'inserted': 0,
         'failed': 0,
-        'queue_remaining': 0
+        'queue_remaining': 0,
+        'skipped': False,
+        'drained': 0,
     }
+
+    if not should_persist_clicks_to_db():
+        drained = await drain_clicks_queue()
+        result['skipped'] = True
+        result['drained'] = drained
+        result['queue_remaining'] = await get_queue_length()
+        if drained:
+            logger.debug(
+                "点击不落库模式：已丢弃队列积压 %s 条，剩余 %s",
+                drained,
+                result['queue_remaining'],
+            )
+        return result
 
     try:
         # 循环处理，直到队列为空或达到最大批次数（防止长时间占用）

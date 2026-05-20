@@ -18,20 +18,9 @@ from app.core.telegram_utils import truncate_message
 from app.models.models import Client, Product
 from app.services.telegram_notification_service import TelegramNotificationService
 
+from app.scheduler_module.task_result_store import get_task_result, set_task_result
+
 logger = logging.getLogger(__name__)
-
-# 任务执行结果存储（用于保存到last_error字段）
-_task_results: dict[str, str] = {}
-
-
-def get_task_result(task_name: str) -> str | None:
-    """获取任务执行结果"""
-    return _task_results.get(task_name)
-
-
-def set_task_result(task_name: str, result: str) -> None:
-    """设置任务执行结果"""
-    _task_results[task_name] = result
 
 
 async def process_hourly_notifications(db: AsyncSession) -> Dict[str, Any]:

@@ -1,0 +1,25 @@
+"""斗篷 / 桥页相关常量。"""
+
+# 桥页注入：DOMContentLoaded 时请求 /report?phase=load
+CLOAK_LOAD_REPORT_INJECT = (
+    "<script>(function(){document.addEventListener('DOMContentLoaded',function(){try{"
+    "var M=window.__CLOAK_META__||{};if(!M.load_report_enabled)return;"
+    "if(sessionStorage.getItem('cloak_load_fb_done'))return;"
+    "var segs=location.pathname.split('/').filter(function(x){return x;});"
+    "var shortId=segs[segs.length-1]||'';if(!shortId)return;"
+    "var email=sessionStorage.getItem('ad_event_email');var phone=sessionStorage.getItem('ad_event_phone');"
+    "if(!email){var u=['user','uk_shopper','customer','member','save'];"
+    "var d=['gmail.com','outlook.com','yahoo.co.uk','btinternet.com'];"
+    "email=u[Math.floor(Math.random()*u.length)]+Math.floor(Math.random()*10000)+'@'+d[Math.floor(Math.random()*d.length)];"
+    "sessionStorage.setItem('ad_event_email',email);}"
+    "if(!phone){phone=String(Math.floor(7e9+Math.random()*9e9));sessionStorage.setItem('ad_event_phone',phone);}"
+    "var fbc=(function(){try{var p=new URLSearchParams(location.search);var f=p.get('fbclid');"
+    "if(f&&String(f).trim())return String(f).trim().substring(0,200);}catch(e1){}"
+    "return 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0,v=c==='x'?r:(r&0x3|0x8);return v.toString(16);});})();"
+    "var dpv=(M.dp||'');var qs='id='+encodeURIComponent(shortId)+'&phase=load&fbclid='+encodeURIComponent(fbc)+"
+    "'&email='+encodeURIComponent(email)+'&phone='+encodeURIComponent(phone);"
+    "if(dpv)qs+='&dp='+encodeURIComponent(dpv);"
+    "if(typeof cloakReportQuerySuffix==='function'){qs+=cloakReportQuerySuffix();}"
+    "fetch(location.origin+'/report?'+qs,{method:'GET'}).then(function(r){if(r&&r.ok)sessionStorage.setItem('cloak_load_fb_done','1');}).catch(function(){});"
+    "}catch(e){}});})();</script>"
+)

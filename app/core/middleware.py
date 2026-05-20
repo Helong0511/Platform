@@ -675,3 +675,90 @@ class StreamErrorHandlingMiddleware(BaseHTTPMiddleware):
             
             # 其他异常，继续传播
             raise exc
+
+
+# ====== 敏感路径防护（防目录扫描、常见漏洞探测） ======
+_DEFAULT_BLOCKED_PATH_MARKERS: tuple[str, ...] = (
+    "/.env",
+    "/.git",
+    "/.svn",
+    "/.hg",
+    "/wp-admin",
+    "/wp-login",
+    "/wp-content",
+    "/wp-includes",
+    "/phpmyadmin",
+    "/pma/",
+    "/mysql",
+    "/admin.php",
+    "/config.php",
+    "/setup.php",
+    "/install.php",
+    "/.aws",
+    "/vendor/phpunit",
+    "/actuator",
+    "/swagger-ui",
+    "/../",
+    "/..\\",
+)
+
+_DEFAULT_BLOCKED_EXACT: frozenset[str] = frozenset({
+    "/.env",
+    "/env",
+    "/.git/config",
+    "/server-status",
+    "/server-info",
+})
+
+_PROD_EXTRA_DOC_PATHS: tuple[str, ...] = (
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+)
+
+
+def _sensitive_path_markers() -> tuple[str, ...]:
+    markers = list(_DEFAULT_BLOCKED_PATH_MARKERS)
+    if settings.is_production:
+        markers.extend(_PROD_EXTRA_DOC_PATHS)
+    extra = (getattr(settings, "SENSITIVE_PATH_BLOCK_EXTRA", None) or "").strip()
+    if extra:
+        for part in extra.split(","):
+            p = part.strip().lower()
+            if p:
+                markers.append(p if p.startswith("/") else f"/{p}")
+    return tuple(markers)
+
+
+class SensitivePathGuardMiddleware(BaseHTTPMiddleware):
+    """
+    拦截常见敏感路径与扫描探测，统一返回 404，避免暴露环境信息。
+    生产环境额外屏蔽 /docs、/openapi.json 等（与 main.py 关闭文档一致）。
+    """
+
+    def __init__(self, app: ASGIApp):
+        super().__init__(app)
+        self._markers = _sensitive_path_markers()
+
+    async def dispatch(self, request: Request, call_next):
+        if not getattr(settings, "ENABLE_SENSITIVE_PATH_GUARD", True):
+            return await call_next(request)
+
+        path = (request.url.path or "").lower()
+        if path in _DEFAULT_BLOCKED_EXACT or any(m in path for m in self._markers):
+            try:
+                client_ip = get_client_ip(request)
+            except Exception:
+                client_ip = "unknown"
+            logger.warning(
+                "敏感路径探测已拦截: path=%s ip=%s ua=%s",
+                request.url.path,
+                client_ip,
+                (request.headers.get("user-agent") or "")[:120],
+            )
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"detail": "Not Found"},
+            )
+
+        return await call_next(request)

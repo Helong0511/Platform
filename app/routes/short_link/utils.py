@@ -8,8 +8,6 @@ from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.api_v1.tracking.tracking import create_click_background
-from app.core.clicks_queue import enqueue_click
 from app.core.offer_cache import set_offer_cache
 from app.core.utils import get_app_now_naive
 from app.models.models import Offer, OfferPublisherAssignment
@@ -171,7 +169,6 @@ async def create_click_record(
         "final_redirect_url": final_redirect_url
     }
 
-    enqueued = await enqueue_click(click_data)
-    if not enqueued:
-        click_data['click_time'] = get_app_now_naive()
-        background_tasks.add_task(create_click_background, click_data)
+    from app.core.tracking.click_persist import persist_click_record
+
+    await persist_click_record(click_data, background_tasks)
