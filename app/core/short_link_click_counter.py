@@ -44,6 +44,8 @@ _deadlock_stats_lock = asyncio.Lock()
 CLICK_COUNTER_PREFIX = "short_link:click:"
 SYNC_LOCK_PREFIX = "short_link:sync_lock:"  # 分布式锁前缀（全局同步锁）
 SYNC_LOCK_TIMEOUT = 300  # 锁超时时间（秒），5分钟
+# 每轮同步最多处理的 Redis 计数器数量，避免单次任务超过 Gunicorn worker 超时
+MAX_KEYS_PER_SYNC = int(os.getenv("SHORT_LINK_SYNC_MAX_KEYS", "500"))
 ITEM_LOCK_PREFIX = "short_link:item_lock:"  # 细粒度分布式锁前缀（每个short_code一个锁）
 ITEM_LOCK_TIMEOUT = 10  # 细粒度锁超时时间（秒），10秒足够完成单个更新
 
@@ -396,6 +398,14 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                 cursor, batch_keys = await redis.scan(cursor, match=pattern, count=100)
                 keys.extend(batch_keys)
                 iteration += 1
+
+                if len(keys) >= MAX_KEYS_PER_SYNC:
+                    keys = keys[:MAX_KEYS_PER_SYNC]
+                    logger.info(
+                        f"本轮同步已达上限 {MAX_KEYS_PER_SYNC} 个计数器，"
+                        f"剩余键将在下轮继续处理"
+                    )
+                    break
                 
                 # 安全检查：防止无限循环
                 if iteration >= max_iterations:

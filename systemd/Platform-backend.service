@@ -10,6 +10,9 @@ Group=www-data
 WorkingDirectory=/data/Platform
 Environment="PATH=/data/Platform/venv/bin"
 Environment="PRODUCTION_ENV=production"
+# 定时任务由 Gunicorn 首个 worker 承担（post_fork 设置 SCHEDULER_WORKER=1）。
+# 若启用独立的 Platform-scheduler.service，请取消下一行注释，避免重复跑任务：
+# Environment="ENABLE_SCHEDULER=false"
 EnvironmentFile=/data/Platform/.env
 
 # 确保日志目录存在并设置权限

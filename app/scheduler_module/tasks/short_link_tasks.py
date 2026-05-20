@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 async def sync_short_link_clicks_task():
     """
     同步短链接点击次数到数据库
-    每5分钟执行一次，将Redis中的点击次数批量更新到数据库
+    每5分钟执行一次（cron 见 task_config），将 Redis 中的点击次数批量更新到数据库
     """
     try:
         # 详细日志输出到 scheduler.log，不输出到 app.log

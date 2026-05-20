@@ -39,8 +39,11 @@ _bot_lock_acquired = False
 
 
 def get_default_lock_path() -> Path:
-    """获取默认的锁文件路径"""
-    return Path(__file__).parent.parent.parent / "logs" / DEFAULT_LOCK_FILE_NAME
+    """获取默认的锁文件路径（项目根目录 logs/，与 app.log 一致）"""
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
+    log_dir = project_root / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir / DEFAULT_LOCK_FILE_NAME
 
 
 def _is_lock_expired(lock_file_path: Path) -> bool:

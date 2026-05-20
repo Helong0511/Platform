@@ -79,6 +79,36 @@ class Settings(BaseSettings):
         """
         return not self.is_production
 
+    def should_run_scheduler(self) -> bool:
+        """
+        是否在当前进程启动 APScheduler 定时任务。
+
+        优先级：
+        1. ENABLE_SCHEDULER=true/false 强制开关
+        2. SCHEDULER_WORKER=1/0（Gunicorn post_fork 为首个 worker 设置）
+        3. WORKERS>1 且未指定时默认关闭（避免多 worker 重复跑任务）
+        4. 单进程开发环境默认开启
+        """
+        explicit = os.getenv("ENABLE_SCHEDULER", "").strip().lower()
+        if explicit in ("false", "0", "no"):
+            return False
+        if explicit in ("true", "1", "yes"):
+            return True
+
+        scheduler_worker = os.getenv("SCHEDULER_WORKER", "").strip()
+        if scheduler_worker == "1":
+            return True
+        if scheduler_worker == "0":
+            return False
+
+        try:
+            workers = int(os.getenv("WORKERS", "0") or "0")
+        except ValueError:
+            workers = 0
+        if workers > 1:
+            return False
+        return True
+
     # ====== 服务器配置 ======
     API_V1_STR: str = "/api/v1"
     SERVER_NAME: str = "广告数据管理系统"

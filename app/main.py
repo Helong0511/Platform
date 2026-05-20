@@ -11,7 +11,7 @@ import tempfile
 import traceback
 import warnings
 from contextlib import asynccontextmanager
-from logging.handlers import RotatingFileHandler
+from app.core.log_handlers import SafeRotatingFileHandler
 
 from anyio import EndOfStream
 from fastapi import FastAPI, Request, status, HTTPException
@@ -118,7 +118,7 @@ detailed_formatter = logging.Formatter(
 app_log_handler = None
 app_log_path = os.path.join(log_dir, 'app.log')
 try:
-    app_log_handler = RotatingFileHandler(
+    app_log_handler = SafeRotatingFileHandler(
         app_log_path,
         maxBytes=LOG_FILE_MAX_BYTES,
         backupCount=LOG_FILE_BACKUP_COUNT,
@@ -134,7 +134,7 @@ except (OSError, PermissionError) as e:
 scheduler_log_handler = None
 scheduler_log_path = os.path.join(log_dir, 'scheduler.log')
 try:
-    scheduler_log_handler = RotatingFileHandler(
+    scheduler_log_handler = SafeRotatingFileHandler(
         scheduler_log_path,
         maxBytes=LOG_FILE_MAX_BYTES,
         backupCount=LOG_FILE_BACKUP_COUNT,
@@ -162,7 +162,7 @@ except (OSError, PermissionError) as e:
 telegram_log_handler = None
 telegram_log_path = os.path.join(log_dir, 'telegram.log')
 try:
-    telegram_log_handler = RotatingFileHandler(
+    telegram_log_handler = SafeRotatingFileHandler(
         telegram_log_path,
         maxBytes=LOG_FILE_MAX_BYTES,
         backupCount=LOG_FILE_BACKUP_COUNT,
@@ -184,7 +184,7 @@ except (OSError, PermissionError) as e:
 postback_log_handler = None
 postback_log_path = os.path.join(log_dir, 'postback.log')
 try:
-    postback_log_handler = RotatingFileHandler(
+    postback_log_handler = SafeRotatingFileHandler(
         postback_log_path,
         maxBytes=LOG_FILE_MAX_BYTES,
         backupCount=LOG_FILE_BACKUP_COUNT,
@@ -207,7 +207,7 @@ debug_log_handler = None
 if not settings.is_production:
     debug_log_path = os.path.join(log_dir, 'debug.log')
     try:
-        debug_log_handler = RotatingFileHandler(
+        debug_log_handler = SafeRotatingFileHandler(
             debug_log_path,
             maxBytes=LOG_FILE_MAX_BYTES,
             backupCount=LOG_FILE_BACKUP_COUNT,
@@ -223,7 +223,7 @@ if not settings.is_production:
 access_log_handler = None
 access_log_path = os.path.join(log_dir, 'access.log')
 try:
-    access_log_handler = RotatingFileHandler(
+    access_log_handler = SafeRotatingFileHandler(
         access_log_path,
         maxBytes=LOG_FILE_MAX_BYTES,
         backupCount=LOG_FILE_BACKUP_COUNT,
@@ -491,24 +491,30 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[Worker PID:{worker_pid}] Redis初始化失败: {e}，将使用内存存储")
 
-    # 初始化定时任务（多进程环境：每个 worker 独立初始化调度器）
-    try:
-        logger.info(f"[Worker PID:{worker_pid}] 开始初始化定时任务...")
-
-        # 首先检查并添加任务到数据库（确保所有配置的任务都在数据库中有记录）
+    # 定时任务：仅调度 worker 启动（Gunicorn 多 worker 时由 SCHEDULER_WORKER=1 标识）
+    if settings.should_run_scheduler():
         try:
-            await init_scheduled_tasks_in_db()
-        except Exception as db_init_error:
-            logger.warning(f"[Worker PID:{worker_pid}] 初始化任务到数据库失败: {db_init_error}，继续启动...")
+            logger.info(f"[Worker PID:{worker_pid}] 开始初始化定时任务...")
 
-        # 然后初始化调度器
-        await init_scheduled_tasks()
-        logger.info(f"[Worker PID:{worker_pid}] 定时任务初始化完成，正在启动调度器...")
-        await start_scheduler()
-        logger.info(f"[Worker PID:{worker_pid}] 定时任务调度器已启动")
-    except Exception as e:
-        logger.error(f"[Worker PID:{worker_pid}] 定时任务初始化失败: {e}", exc_info=True)
-        logger.warning(f"[Worker PID:{worker_pid}] 应用将继续启动，但定时任务功能可能不可用")
+            try:
+                await init_scheduled_tasks_in_db()
+            except Exception as db_init_error:
+                logger.warning(
+                    f"[Worker PID:{worker_pid}] 初始化任务到数据库失败: {db_init_error}，继续启动..."
+                )
+
+            await init_scheduled_tasks()
+            logger.info(f"[Worker PID:{worker_pid}] 定时任务初始化完成，正在启动调度器...")
+            await start_scheduler()
+            logger.info(f"[Worker PID:{worker_pid}] 定时任务调度器已启动")
+        except Exception as e:
+            logger.error(f"[Worker PID:{worker_pid}] 定时任务初始化失败: {e}", exc_info=True)
+            logger.warning(f"[Worker PID:{worker_pid}] 应用将继续启动，但定时任务功能可能不可用")
+    else:
+        logger.info(
+            f"[Worker PID:{worker_pid}] 跳过定时任务调度器"
+            f"（ENABLE_SCHEDULER/SCHEDULER_WORKER 未启用本 worker）"
+        )
 
     # 初始化Telegram Bot（使用文件锁确保只有一个进程启动）
     try:
@@ -590,8 +596,8 @@ async def lifespan(app: FastAPI):
     # ====== 关闭时执行 ======
     logger.info("应用关闭中...")
     try:
-        # 关闭定时任务调度器
-        await shutdown_scheduler()
+        if settings.should_run_scheduler():
+            await shutdown_scheduler()
     except asyncio.CancelledError:
         # 应用关闭时任务被取消是正常的，不需要记录错误
         logger.debug("定时任务调度器关闭时任务被取消（正常关闭流程）")

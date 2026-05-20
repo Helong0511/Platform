@@ -121,8 +121,8 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "result_getter_module": "app.scheduler_module.tasks.short_link_tasks",
         "result_getter_function": "get_task_result",
         # 数据库配置
-        "cron_expression": "*/1 * * * *",  # 每1分钟执行一次
-        "description": "将Redis中的短链接点击次数批量同步到数据库，每1分钟执行一次",
+        "cron_expression": "*/5 * * * *",  # 每5分钟执行一次
+        "description": "将Redis中的短链接点击次数批量同步到数据库，每5分钟执行一次",
     },
 
     "点击记录队列批量处理": {

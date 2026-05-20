@@ -1,0 +1,37 @@
+[Unit]
+Description=Platform Backend Scheduler (single worker, scheduled tasks only)
+After=network.target mysql.service redis.service platform-backend.service
+Wants=mysql.service redis.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/data/Platform
+Environment="PATH=/data/Platform/venv/bin"
+Environment="PRODUCTION_ENV=production"
+Environment="ENABLE_SCHEDULER=true"
+Environment="SCHEDULER_WORKER=1"
+Environment="WORKERS=1"
+EnvironmentFile=/data/Platform/.env
+
+ExecStartPre=/bin/mkdir -p /data/Platform/logs
+ExecStartPre=/bin/chown -R www-data:www-data /data/Platform/logs
+
+# 独立调度进程：单 worker，不对外提供高并发 HTTP（仍监听 8960 仅本机，可与主服务错开端口）
+ExecStart=/data/Platform/venv/bin/gunicorn \
+    --config /data/Platform/gunicorn.conf.py \
+    --bind 127.0.0.1:8961 \
+    --workers 1 \
+    app.main:app
+
+Restart=always
+RestartSec=10
+LimitNOFILE=65535
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=platform-scheduler
+
+[Install]
+WantedBy=multi-user.target

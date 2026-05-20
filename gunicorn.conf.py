@@ -154,6 +154,7 @@ limit_request_field_size = 8190
 # 确保加载环境变量
 raw_env = [
     f"PRODUCTION_ENV={os.getenv('PRODUCTION_ENV', 'production')}",
+    f"WORKERS={workers}",
 ]
 
 # ====== 访问日志配置 ======
@@ -182,7 +183,12 @@ def when_ready(server):
 
 def post_fork(server, worker):
     """Worker 进程启动后的回调（每个 worker 进程）"""
-    worker.log.info(f"Worker {worker.pid} 已启动（父进程: {os.getppid()}）")
+    # 仅首个 worker 运行定时任务，避免多份 APScheduler 争抢 DB/Redis
+    os.environ["SCHEDULER_WORKER"] = "1" if worker.age == 0 else "0"
+    worker.log.info(
+        f"Worker {worker.pid} 已启动（父进程: {os.getppid()}，"
+        f"SCHEDULER_WORKER={os.environ['SCHEDULER_WORKER']}）"
+    )
 
 def worker_int(worker):
     """Worker 中断时的回调（每个 worker 进程）"""

@@ -23,9 +23,13 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT_SECONDS = 300  # 默认超时时间（秒）
 MAX_ERROR_MESSAGE_LENGTH = 1000  # 错误信息最大长度
 
-# 获取当前进程ID和主机名（在模块加载时计算，避免重复调用）
-CURRENT_PID = os.getpid()
+# 主机名在模块加载时计算即可；进程 ID 必须在运行时获取（Gunicorn preload/fork 后不能缓存）
 CURRENT_HOST = socket.gethostname()
+
+
+def get_current_pid() -> int:
+    """获取当前进程 ID（勿使用模块级缓存，fork 后会变成 master PID）"""
+    return os.getpid()
 
 # 时区配置（从统一配置读取）
 UTC_TZ = pytz.UTC
@@ -126,7 +130,7 @@ async def acquire_task_lock(
         # 原子性更新：在持有行锁的情况下更新任务状态
         # 确保只有当前进程能成功更新，其他进程会因为行锁而等待或失败
         task_record.is_running = True
-        task_record.last_run_pid = CURRENT_PID
+        task_record.last_run_pid = get_current_pid()
         task_record.last_run_host = CURRENT_HOST
         # 存储北京时间到数据库（数据库统一使用北京时间）
         task_record.last_run_time = get_app_now_naive()
@@ -136,7 +140,7 @@ async def acquire_task_lock(
         # 提交事务，释放行锁
         await db.commit()
         logger.debug(
-            f"任务 {task_name} 成功获取锁（进程ID: {CURRENT_PID}, 主机: {CURRENT_HOST}）"
+            f"任务 {task_name} 成功获取锁（进程ID: {get_current_pid()}, 主机: {CURRENT_HOST}）"
         )
         return True, db
 
@@ -219,7 +223,7 @@ async def acquire_task_lock(
 
                 # 更新任务状态
                 task_record.is_running = True
-                task_record.last_run_pid = CURRENT_PID
+                task_record.last_run_pid = get_current_pid()
                 task_record.last_run_host = CURRENT_HOST
                 task_record.last_run_time = get_app_now_naive()  # 使用北京时间
                 task_record.run_count += 1
@@ -227,7 +231,7 @@ async def acquire_task_lock(
 
                 await db.commit()
                 logger.debug(
-                    f"任务 {task_name} 成功获取锁（进程ID: {CURRENT_PID}, 主机: {CURRENT_HOST}）"
+                    f"任务 {task_name} 成功获取锁（进程ID: {get_current_pid()}, 主机: {CURRENT_HOST}）"
                 )
                 return True, db
             except Exception as retry_e:
@@ -274,10 +278,11 @@ async def release_task_lock(
         if task_record:
             # 严格验证锁的所有权（确保是当前进程持有的锁）
             # 如果锁不属于当前进程，记录警告但不释放锁（防止误释放其他进程的锁）
-            if task_record.last_run_pid != CURRENT_PID or task_record.last_run_host != CURRENT_HOST:
+            current_pid = get_current_pid()
+            if task_record.last_run_pid != current_pid or task_record.last_run_host != CURRENT_HOST:
                 logger.warning(
                     f"任务 {task_name} 锁的所有权不匹配，拒绝释放锁。"
-                    f"当前进程: {CURRENT_PID}@{CURRENT_HOST}, "
+                    f"当前进程: {current_pid}@{CURRENT_HOST}, "
                     f"锁持有者: {task_record.last_run_pid}@{task_record.last_run_host}"
                 )
                 await db.rollback()
@@ -308,7 +313,7 @@ async def release_task_lock(
             await db.commit()
             logger.debug(
                 f"任务 {task_name} 锁已释放，执行{'成功' if success else '失败'} "
-                f"（进程ID: {CURRENT_PID}, 主机: {CURRENT_HOST}）"
+                f"（进程ID: {get_current_pid()}, 主机: {CURRENT_HOST}）"
             )
         else:
             logger.warning(f"任务记录不存在: {task_name}")

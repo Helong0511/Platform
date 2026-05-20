@@ -16,7 +16,7 @@ from sqlalchemy.future import select
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.models import ScheduledTask
-from app.scheduler_module.lock import CURRENT_PID, CURRENT_HOST
+from app.scheduler_module.lock import get_current_pid, CURRENT_HOST
 from app.scheduler_module.task_queue import get_task_queue
 
 logger = logging.getLogger(__name__)
@@ -131,7 +131,7 @@ async def get_process_for_task(
     """
 
     max_concurrent = getattr(settings, 'MAX_CONCURRENT_SCHEDULED_TASKS', 2)
-    current_pid = CURRENT_PID
+    current_pid = get_current_pid()
 
     # 从数据库查询相同cron表达式的任务，确定应该由哪个进程执行
     if db is None:
@@ -430,13 +430,13 @@ async def should_execute_in_current_process(
         return False
 
     # 如果分配的是当前进程，检查是否真的应该执行
-    if assigned_pid == CURRENT_PID:
+    if assigned_pid == get_current_pid():
         return True
 
     # 分配给了其他进程，当前进程应该跳过
     logger.debug(
         f"任务 '{task_name}' 已分配给进程 {assigned_pid}，"
-        f"当前进程 {CURRENT_PID} 跳过执行"
+        f"当前进程 {get_current_pid()} 跳过执行"
     )
     return False
 
@@ -455,24 +455,25 @@ async def register_task_process_assignment(
         db: 数据库会话（可选）
     """
     cron_hash = get_cron_hash(cron_expression)
+    pid = get_current_pid()
 
     # 将任务添加到当前进程的任务列表
-    if CURRENT_PID not in _process_task_assignments:
-        _process_task_assignments[CURRENT_PID] = []
+    if pid not in _process_task_assignments:
+        _process_task_assignments[pid] = []
 
-    if task_name not in _process_task_assignments[CURRENT_PID]:
-        _process_task_assignments[CURRENT_PID].append(task_name)
+    if task_name not in _process_task_assignments[pid]:
+        _process_task_assignments[pid].append(task_name)
 
     # 将当前进程添加到该cron表达式的进程组
     if cron_hash not in _cron_process_groups:
         _cron_process_groups[cron_hash] = []
 
-    if CURRENT_PID not in _cron_process_groups[cron_hash]:
-        _cron_process_groups[cron_hash].append(CURRENT_PID)
+    if pid not in _cron_process_groups[cron_hash]:
+        _cron_process_groups[cron_hash].append(pid)
 
     logger.debug(
         f"任务 '{task_name}' (Cron: {cron_expression}) "
-        f"已注册到进程 {CURRENT_PID}"
+        f"已注册到进程 {pid}"
     )
 
 

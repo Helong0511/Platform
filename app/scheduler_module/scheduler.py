@@ -22,7 +22,11 @@ from apscheduler.jobstores.memory import MemoryJobStore
 from sqlalchemy.future import select
 
 from app.scheduler_module.lock import (
-    acquire_task_lock, release_task_lock, CURRENT_PID, CURRENT_HOST, DEFAULT_TIMEOUT_SECONDS
+    acquire_task_lock,
+    release_task_lock,
+    get_current_pid,
+    CURRENT_HOST,
+    DEFAULT_TIMEOUT_SECONDS,
 )
 from app.scheduler_module.task_queue import submit_task_to_queue, TaskPriority
 from app.scheduler_module.process_allocator import (
@@ -247,7 +251,7 @@ async def _execute_task_with_lock_internal(
         # 只记录一次任务开始执行的日志
         logger.debug(
             f"[Worker PID:{worker_pid}] 任务 '{task_name}' 开始执行 "
-            f"（进程ID: {CURRENT_PID}, 主机: {CURRENT_HOST}）"
+            f"（进程ID: {get_current_pid()}, 主机: {CURRENT_HOST}）"
         )
 
         # 执行任务
@@ -290,11 +294,11 @@ async def _execute_task_with_lock_internal(
                     resource_type="SCHEDULED_TASK",
                     resource_id=task_id,
                     resource_name=task_name,
-                    ip_address=f"{CURRENT_HOST}:{CURRENT_PID}",
+                    ip_address=f"{CURRENT_HOST}:{get_current_pid()}",
                     success=True,
                     details={
                         "task_name": task_name,
-                        "pid": CURRENT_PID,
+                        "pid": get_current_pid(),
                         "host": CURRENT_HOST,
                         "execution_duration_seconds": round(execution_duration, 2),
                         "start_time": start_time.isoformat(),
@@ -369,12 +373,12 @@ async def _execute_task_with_lock_internal(
                     resource_type="SCHEDULED_TASK",
                     resource_id=task_id,
                     resource_name=task_name,
-                    ip_address=f"{CURRENT_HOST}:{CURRENT_PID}",
+                    ip_address=f"{CURRENT_HOST}:{get_current_pid()}",
                     success=False,
                     error_message=error_msg,
                     details={
                         "task_name": task_name,
-                        "pid": CURRENT_PID,
+                        "pid": get_current_pid(),
                         "host": CURRENT_HOST,
                         "execution_duration_seconds": round(execution_duration, 2),
                         "start_time": start_time.isoformat(),

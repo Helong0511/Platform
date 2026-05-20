@@ -6,9 +6,10 @@
 from .lock import (
     acquire_task_lock,
     release_task_lock,
-    CURRENT_PID,
+    get_current_pid,
     CURRENT_HOST,
 )
+
 from .scheduler import (
     get_scheduler,
     init_scheduled_tasks,
