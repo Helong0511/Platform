@@ -2,6 +2,7 @@ import { ref, reactive, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getThirdPartyReports, getThirdPartyReportStats } from '../api/third-party-report';
 import { getCurrentMonthRange } from '../utils/thirdPartyReportFormat';
+import { logger } from '../utils/logger';
 
 /**
  * 第三方上报日志列表、统计与分页。
@@ -31,8 +32,8 @@ export function useThirdPartyReports(authStore, router) {
         params.end_date = dateRange.value[1];
       }
       stats.value = await getThirdPartyReportStats(params);
-    } catch {
-      // 静默失败
+    } catch (error) {
+      logger.error('获取第三方上报统计失败:', error);
     }
   };
 
@@ -62,8 +63,8 @@ export function useThirdPartyReports(authStore, router) {
       logs.value = response.data || [];
       pagination.total = response.total || 0;
       await fetchStats();
-    } catch {
-      // 全局拦截器处理
+    } catch (error) {
+      logger.error('获取第三方上报日志失败:', error);
     } finally {
       loading.value = false;
     }

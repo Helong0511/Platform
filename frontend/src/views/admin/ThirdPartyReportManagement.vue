@@ -195,6 +195,11 @@
           </template>
         </el-table-column>
       </el-table>
+      <el-empty
+        v-if="!loading && logs.length === 0"
+        description="暂无上报日志，可调整筛选条件或扩大时间范围后重试"
+        style="margin: 24px 0;"
+      />
 
       <!-- 分页 -->
       <div class="pagination-container">
@@ -366,7 +371,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue';
+import { ref, reactive, onMounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem,
