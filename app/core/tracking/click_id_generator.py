@@ -138,11 +138,13 @@ def generate_click_id_unified(
     short_link_id: Optional[int] = None,
     url_params: Optional[dict] = None,
     extra: Optional[dict] = None,
+    for_short_link: bool = False,
 ) -> str:
     """
     统一生成入口（延迟导入，避免循环依赖）。
 
     USE_TRACKING_TOKEN=false 时与 ``generate_click_id_from_timestamp`` 行为一致。
+    短链场景请设 ``for_short_link=True``（外层 click_id 长度 ≤60）。
     """
     from app.core.tracking.click_token import generate_click_id_unified as _gen
 
@@ -153,5 +155,6 @@ def generate_click_id_unified(
         short_link_id=short_link_id,
         url_params=url_params,
         extra=extra,
+        for_short_link=for_short_link,
     )
 
