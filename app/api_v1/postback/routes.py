@@ -61,7 +61,11 @@ async def get_postback_stats(
         current_user: User = Depends(require_admin)
 ):
     return await stats_handler.get_postback_stats(
-        request, platform, start_date, end_date, db, current_user
+        platform=platform,
+        start_date=start_date,
+        end_date=end_date,
+        db=db,
+        current_user=current_user,
     )
 
 
