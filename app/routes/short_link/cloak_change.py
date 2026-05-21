@@ -21,6 +21,7 @@ from app.routes.short_link.cloak_bridge_html import (
 from app.routes.short_link.cloak_show_count import (
     resolve_cloak_change_original_url,
     resolve_session_id,
+    should_persist_cloak_visit_click,
 )
 from app.routes.short_link.placeholder import replace_short_link_placeholders
 from app.routes.short_link.url_builder import build_final_url
@@ -77,7 +78,7 @@ def register_cloak_change_routes(router: APIRouter) -> None:
                 logger.debug(f"[斗篷服务] 缓存未命中: short_code={short_code}")
 
             session_id = resolve_session_id(request)
-            original_url = await resolve_cloak_change_original_url(
+            original_url, is_first_visit = await resolve_cloak_change_original_url(
                 short_code,
                 session_id,
                 cached_data,
@@ -182,14 +183,16 @@ def register_cloak_change_routes(router: APIRouter) -> None:
             html_content, bridge_page_name, cloak_key = resolve_bridge_html(dp)
             logger.debug("[斗篷服务] 请求的桥页：%s", bridge_page_name)
 
-            # 写入短链接访问记录（clicks 表）：与 /s/ 重定向相同走 Redis 队列 / 后台任务，便于「短链接访问记录」统一查询
-            if background_tasks:
+            # 写入短链接访问记录（clicks 表）：仅本会话首次访问 + IP 短窗口去重，避免一次打开产生多条记录
+            if background_tasks and is_first_visit:
                 try:
                     sl_pk = (cached_data or {}).get("id")
                     if not sl_pk:
                         sid_row = await db.execute(select(ShortLink.id).where(ShortLink.short_code == short_code))
                         sl_pk = sid_row.scalar()
-                    if sl_pk:
+                    if sl_pk and await should_persist_cloak_visit_click(
+                        short_code, session_id, client_ip
+                    ):
                         request_info_visit = dict(request_info_cloak)
                         try:
                             up_m: dict = {}

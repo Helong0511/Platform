@@ -1,7 +1,7 @@
 """斗篷 /change 桥页展示次数统计与 original_url 解析。"""
 import logging
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from fastapi import BackgroundTasks, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,8 @@ from app.models.models import ShortLink
 logger = logging.getLogger(__name__)
 
 SHOW_COUNT_TTL_SECONDS = 21600
+# 同 IP 在 Cookie 未生效前的并发 /change 请求去重窗口（秒）
+CLOAK_VISIT_CLICK_IP_DEDUPE_SECONDS = 30
 
 
 def resolve_session_id(request: Request) -> str:
@@ -48,6 +50,44 @@ async def session_already_shown(short_code: str, session_id: str) -> bool:
     except Exception as exc:
         logger.error("[斗篷服务] Redis检查展示次数失败: %s", exc)
         return False
+
+
+async def should_persist_cloak_visit_click(
+        short_code: str,
+        session_id: str,
+        client_ip: str,
+) -> bool:
+    """
+    是否应为本次 /change 访问写入 clicks 表。
+
+    - 同 session 仅写一次（与 show_count 会话维度一致）
+    - 同 IP 在短窗口内仅写一次，避免 Cookie 未落盘时的并发双请求
+    """
+    redis = await get_redis_client()
+    if not redis:
+        return True
+    ip_key = f"cloak_visit_click_ip:{short_code}:{client_ip}"
+    session_key = f"cloak_visit_click:{short_code}:{session_id}"
+    try:
+        if await redis.get(ip_key):
+            logger.debug(
+                "[斗篷服务] 跳过桥页点击落库（同 IP 短窗口去重）: short_code=%s ip=%s",
+                short_code,
+                client_ip,
+            )
+            return False
+        if not await redis.set(session_key, "1", ex=SHOW_COUNT_TTL_SECONDS, nx=True):
+            logger.debug(
+                "[斗篷服务] 跳过桥页点击落库（同会话已记录）: short_code=%s session=%s",
+                short_code,
+                session_id,
+            )
+            return False
+        await redis.set(ip_key, "1", ex=CLOAK_VISIT_CLICK_IP_DEDUPE_SECONDS)
+        return True
+    except Exception as exc:
+        logger.warning("[斗篷服务] 桥页点击去重检查失败，允许落库: %s", exc)
+        return True
 
 
 async def _fetch_original_url_from_db(
@@ -174,14 +214,18 @@ async def resolve_cloak_change_original_url(
         cached_data: Optional[Dict[str, Any]],
         db: AsyncSession,
         background_tasks: BackgroundTasks,
-) -> str:
+) -> Tuple[str, bool]:
     """
     按会话统计展示次数并返回斗篷原始跳转 URL。
+
+    Returns:
+        (original_url, is_first_visit) — is_first_visit 为 True 表示本会话首次展示
 
     Raises:
         HTTPException: 404 当短链不存在或未配置 original_url
     """
     has_shown = await session_already_shown(short_code, session_id)
+    is_first_visit = not has_shown
     if not has_shown:
         original_url = await _record_first_show_and_get_url(
             short_code, cached_data, db, background_tasks
@@ -203,4 +247,4 @@ async def resolve_cloak_change_original_url(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="斗篷不存在或未配置原始 URL",
         )
-    return original_url
+    return original_url, is_first_visit
