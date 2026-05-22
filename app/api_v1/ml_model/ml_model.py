@@ -58,7 +58,8 @@ REQUIRED_FIELDS = {
 # 可选字段（如果Excel中有这些字段，会被识别和导入，但不影响mapping_complete判断）
 OPTIONAL_FIELDS = {
     "cpc": "CPC",
-    "pageviews": "PageViews"
+    "pageviews": "PageViews",
+    "ad_unit": "广告单元",
 }
 
 # 所有字段（包含必需字段和可选字段）

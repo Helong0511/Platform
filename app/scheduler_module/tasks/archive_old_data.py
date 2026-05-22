@@ -88,6 +88,7 @@ async def archive_old_ad_data(months: int = 6) -> dict:
                                             `date`                  datetime NOT NULL COMMENT '数据日期',
                                             `country_code`          varchar(2) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL COMMENT '国家代码（ISO 3166-1 二字母代码）',
                                             `product_id`            int      NOT NULL COMMENT '产品ID',
+                                            `ad_unit`               varchar(100) NOT NULL DEFAULT '' COMMENT '广告单元',
                                             `request_count`         int      NOT NULL DEFAULT 0 COMMENT '请求数',
                                             `match_count`           int      NOT NULL DEFAULT 0 COMMENT '匹配数',
                                             `display_count`         int      NOT NULL DEFAULT 0 COMMENT '展示数',
@@ -99,7 +100,7 @@ async def archive_old_ad_data(months: int = 6) -> dict:
                                             `created_at`            datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
                                             `updated_at`            datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
                                             PRIMARY KEY (`id`) USING BTREE,
-                                            UNIQUE INDEX `uq_ad_data_archive_date_product_country`(`date` ASC, `product_id` ASC, `country_code` ASC) USING BTREE,
+                                            UNIQUE INDEX `uq_ad_data_archive_date_product_country_unit`(`date` ASC, `product_id` ASC, `country_code` ASC, `ad_unit` ASC) USING BTREE,
                                             INDEX                   `idx_ad_data_archive_date`(`date` ASC) USING BTREE,
                                             INDEX                   `idx_ad_data_archive_product`(`product_id` ASC) USING BTREE,
                                             INDEX                   `idx_ad_data_archive_date_product`(`date` ASC, `product_id` ASC) USING BTREE,
@@ -196,13 +197,14 @@ async def archive_old_ad_data(months: int = 6) -> dict:
             archive_sql = text("""
                                INSERT
                                IGNORE INTO `ad_data_archive` 
-                (`id`, `date`, `country_code`, `product_id`, `request_count`, `match_count`, 
+                (`id`, `date`, `country_code`, `product_id`, `ad_unit`, `request_count`, `match_count`, 
                  `display_count`, `click_count`, `ecpm_before_deduct`, `ecpm_after_deduct`, 
                  `revenue_before_deduct`, `revenue_after_deduct`, `created_at`, `updated_at`)
                                SELECT `id`,
                                       `date`,
                                       `country_code`,
                                       `product_id`,
+                                      `ad_unit`,
                                       `request_count`,
                                       `match_count`,
                                       `display_count`,

@@ -86,6 +86,7 @@ class AdDataItemResponse(BaseModel):
     """
     date: str = Field(..., description="数据日期（ISO格式：YYYY-MM-DD）")
     product_name: str = Field(..., description="产品名称")
+    ad_unit: str = Field(default="", description="广告单元（可为空）")
     country_code: str = Field(..., description="国家二字代码（ISO 3166-1 alpha-2）")
     country_name_zh: str = Field(default="", description="国家中文名称")
     request_count: int = Field(..., description="请求数（整数）")
@@ -268,6 +269,7 @@ async def get_client_data(
                 func.date(AdData.date).label("date"),
                 Product.id.label("product_id"),
                 Product.name.label("product_name"),
+                AdData.ad_unit.label("ad_unit"),
                 func.sum(AdData.request_count).label("request_count"),
                 func.sum(AdData.match_count).label("match_count"),
                 func.sum(AdData.display_count).label("display_count"),
@@ -306,11 +308,12 @@ async def get_client_data(
             if date_condition is not None:
                 query = query.where(date_condition)
 
-            # 按产品ID和日期分组
+            # 按产品ID、日期、广告单元分组
             query = query.group_by(
                 func.date(AdData.date),
                 Product.id,
-                Product.name
+                Product.name,
+                AdData.ad_unit,
             ).order_by(
                 func.date(AdData.date).asc(),
                 Product.id.asc()
@@ -368,6 +371,7 @@ async def get_client_data(
                 data_list.append(AdDataItemResponse(
                     date=date_str,
                     product_name=row.product_name or "",
+                    ad_unit=row.ad_unit or "",
                     country_code="ZZ",  # 每日汇总模式使用"ZZ"表示全部区域
                     country_name_zh="全部区域",  # 每日汇总模式统一显示"全部区域"
                     request_count=total_request_count,
@@ -473,6 +477,7 @@ async def get_client_data(
                 data_list.append(AdDataItemResponse(
                     date=date_str,
                     product_name=product_name or "",
+                    ad_unit=ad_data.ad_unit or "",
                     country_code=country_code_str,  # 返回二字国家代码
                     country_name_zh=final_country_name,
                     request_count=int(ad_data.request_count),

@@ -309,6 +309,7 @@ const requiredFields = {
 const previewFieldOrder = [
   "date",
   "product_name",
+  "ad_unit",
   "request_count",
   "match_count",
   "coverage_rate",

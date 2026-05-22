@@ -258,6 +258,14 @@ def get_product_name(product: Optional[Any], product_id: Optional[int] = None, d
         return default
 
 
+def normalize_ad_unit(value: Any = None) -> str:
+    """将广告单元规范为空字符串或去首尾空格后的文本（空值统一为 ''）。"""
+    if value is None:
+        return ''
+    text = str(value).strip()
+    return text
+
+
 def get_client_name(client: Optional[Any], default: str = "未知客户") -> str:
     """
     获取客户名称，处理 None 情况

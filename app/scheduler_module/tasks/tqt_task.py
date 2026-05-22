@@ -143,6 +143,7 @@ async def tqt_api_task(
             data=data,
             field_mapping={
                 "date": "date",
+                "ad_unit": "ad_unit",
                 "product_name": "url",
                 "country_code": "country_code",
                 "request_count": "requests",

@@ -19,6 +19,7 @@ APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
 SKYMOBI_FIELD_MAPPING = {
     "date": "dt",
+    "ad_unit": "ad_unit",
     "product_name": "link",
     "country_code": "country",
     "request_count": "req",

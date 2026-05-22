@@ -251,6 +251,7 @@ class AdData(Base):
     country_code = Column(String(2), ForeignKey("countries.alpha_2_code", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, comment='国家代码（ISO 3166-1 二字母代码）')
 
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, comment='产品ID')
+    ad_unit = Column(String(100), nullable=False, default='', server_default='', comment='广告单元')
     request_count = Column(Integer, default=0, comment='请求数')
     match_count = Column(Integer, default=0, comment='匹配数')
     coverage_rate = Column(Float, default=0.0, comment='覆盖率（%）')
@@ -278,8 +279,8 @@ class AdData(Base):
         Index("idx_ad_data_date_country", "date", "country_code"),  # 日期 + 国家
         Index("idx_ad_data_product_country", "product_id", "country_code"),  # 产品 + 国家
         Index("idx_ad_data_date_product_country", "date", "product_id", "country_code"),  # 日期 + 产品 + 国家
-        # 唯一性约束：确保同一日期、产品和国家代码只能有一条记录
-        UniqueConstraint("date", "product_id", "country_code", name="uq_ad_data_date_product_country"),
+        # 唯一性约束：同一日期、产品、国家、广告单元只能有一条记录（空广告单元为 ''）
+        UniqueConstraint("date", "product_id", "country_code", "ad_unit", name="uq_ad_data_date_product_country_unit"),
     )
 
     # 辅助方法：计算并更新比率字段（用于数据插入/更新时自动计算）

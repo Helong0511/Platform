@@ -117,6 +117,7 @@ async def tbsj_api_task(
             data=data,
             field_mapping={
                 "date": "date",
+                "ad_unit": "ad_unit",
                 "product_name": "product",
                 "country_code": "country_code",
                 "request_count": "ad_requests",

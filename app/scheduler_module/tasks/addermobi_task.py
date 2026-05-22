@@ -134,6 +134,7 @@ async def addermobi_api_task(
             data=ad_data,
             field_mapping={
                 "date": "Revenue_time",
+                "ad_unit": "ad_unit",
                 "product_name": "link",
                 "country_code": "Country_Code",
                 "request_count": "AdRequests",

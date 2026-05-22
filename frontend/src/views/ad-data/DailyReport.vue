@@ -93,6 +93,7 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column v-if="columnVisibility.ad_unit" prop="ad_unit" label="广告单元" :min-width="120" show-overflow-tooltip></el-table-column>
         <el-table-column v-if="columnVisibility.country_name_zh" prop="country_name_zh" label="国家"></el-table-column>
         <el-table-column v-if="columnVisibility.request_count" prop="request_count" label="请求数" sortable="custom"></el-table-column>
         <el-table-column v-if="columnVisibility.match_count" prop="match_count" label="匹配数" sortable="custom"></el-table-column>
@@ -136,6 +137,7 @@
         <el-checkbox label="date" :disabled="true">数据日期（固定显示）</el-checkbox>
         <el-checkbox v-if="isAdmin" label="user_name">所属客户</el-checkbox>
         <el-checkbox label="product_name" :disabled="true">产品名称（固定显示）</el-checkbox>
+        <el-checkbox label="ad_unit">广告单元</el-checkbox>
         <el-checkbox label="country_name_zh">国家</el-checkbox>
         <el-checkbox label="request_count">请求数</el-checkbox>
         <el-checkbox label="match_count">匹配数</el-checkbox>
@@ -230,6 +232,7 @@ const getDefaultColumnVisibility = () => ({
   date: true,  // 固定显示
   user_name: isAdmin.value,
   product_name: true,  // 固定显示
+  ad_unit: true,
   country_name_zh: true,
   request_count: true,
   match_count: true,
@@ -285,6 +288,7 @@ const saveColumnVisibility = () => {
     // 只保存可调整的列，不保存固定列
     const toSave = {
       user_name: columnVisibility.user_name,
+      ad_unit: columnVisibility.ad_unit,
       country_name_zh: columnVisibility.country_name_zh,
       request_count: columnVisibility.request_count,
       match_count: columnVisibility.match_count,

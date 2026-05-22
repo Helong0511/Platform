@@ -28,7 +28,8 @@ from app.core.exceptions import handle_integrity_error
 from app.core.product_assignment import initialize_product_assignment
 from app.core.utils import (
     truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data,
-    find_or_create_default_client, format_error_details, build_import_message
+    find_or_create_default_client, format_error_details, build_import_message,
+    normalize_ad_unit,
 )
 from app.models.models import User, Client, Product, AdData, AdminNotificationConfig
 from app.schemas.excel import ExcelImportResponse
@@ -687,6 +688,39 @@ async def process_row_data(
             ecpm_deduct_ratio = product_info["ecpm_deduct_ratio"]
             revenue_deduct_ratio = product_info["revenue_deduct_ratio"]
 
+        # 广告单元（可选）
+        ad_unit = ''
+        if "ad_unit" in row.index and pd.notna(row.get("ad_unit")):
+            ad_unit = normalize_ad_unit(row["ad_unit"])
+        elif "广告单元" in row.index and pd.notna(row.get("广告单元")):
+            ad_unit = normalize_ad_unit(row["广告单元"])
+
+        # 国家代码（可选，默认全部区域）
+        country_code = "ZZ"
+        country_input = None
+        if "country_code" in row.index and pd.notna(row.get("country_code")):
+            country_input = str(row["country_code"]).strip()
+        elif "国家代码" in row.index and pd.notna(row.get("国家代码")):
+            country_input = str(row["国家代码"]).strip()
+        if country_input:
+            found_country_code = await find_country_code_by_any_format(db, country_input)
+            if found_country_code:
+                country_code = found_country_code
+            else:
+                logger.warning(
+                    f"无法识别国家代码格式: {country_input}, "
+                    f"日期={row.get('date', '未知')}, 产品={product_name}, 使用默认值 'ZZ'"
+                )
+                country_code = "ZZ"
+
+        if country_code == "ZZ":
+            country_condition = or_(
+                AdData.country_code == "ZZ",
+                AdData.country_code.is_(None)
+            )
+        else:
+            country_condition = AdData.country_code == country_code
+
         # 解析数值字段
         try:
             request_count = int(row["request_count"])
@@ -770,53 +804,18 @@ async def process_row_data(
             # 使用预查询的结果（优化性能）
             # 确保日期格式一致（使用date对象，不包含时间）
             date_key = normalize_date_key(data_date)
-            key = (date_key, product_info["product_id"])
+            key = (date_key, product_info["product_id"], country_code, ad_unit)
             existing_data = existing_records.get(key)
         else:
             # 如果没有预查询结果，则单独查询（向后兼容）
-            # 注意：AdData.date是DateTime类型，需要使用日期范围查询
             date_start, date_end = get_date_range(data_date)
-
-            # 获取国家代码（如果Excel中有，支持多种格式）
-            # 支持的格式：alpha_2_code（二字母）、alpha_3_code（三字母）、numeric_code（数字）、country_name_en（英文名称）、country_name_zh（中文名称）、official_name_en（官方英文名称）、official_name_zh（官方中文名称）
-            country_code = "ZZ"  # 默认值：全部区域
-            country_input = None
-
-            # 尝试从 "country_code" 或 "国家代码" 列获取
-            if "country_code" in row.index and pd.notna(row.get("country_code")):
-                country_input = str(row["country_code"]).strip()
-            elif "国家代码" in row.index and pd.notna(row.get("国家代码")):
-                country_input = str(row["国家代码"]).strip()
-
-            if country_input:
-                # 尝试根据多种格式查找国家代码
-                found_country_code = await find_country_code_by_any_format(db, country_input)
-                if found_country_code:
-                    country_code = found_country_code
-                else:
-                    # 如果找不到，记录警告并使用默认值
-                    logger.warning(
-                        f"无法识别国家代码格式: {country_input}, "
-                        f"日期={row.get('date', '未知')}, 产品={row.get('product_name', '未知')}, 使用默认值 'ZZ'"
-                    )
-                    country_code = "ZZ"
-
-            # 构建国家代码匹配条件（与API数据处理逻辑一致）
-            if country_code == "ZZ":
-                # 新数据是'ZZ'，匹配'ZZ'或NULL（向后兼容旧数据）
-                country_condition = or_(
-                    AdData.country_code == "ZZ",
-                    AdData.country_code.is_(None)
-                )
-            else:
-                # 新数据是具体国家代码，精确匹配
-                country_condition = AdData.country_code == country_code
 
             existing_query = select(AdData).where(
                 AdData.date >= date_start,
                 AdData.date <= date_end,
                 AdData.product_id == product_info["product_id"],
-                country_condition  # 国家代码匹配条件
+                AdData.ad_unit == ad_unit,
+                country_condition
             )
             existing_result = await db.execute(existing_query)
             existing_data = existing_result.scalars().first()
@@ -827,30 +826,6 @@ async def process_row_data(
                 f"⚠️ 数据库中存在重复记录: 日期={data_date}, "
                 f"产品ID={product_info['product_id']}，将更新现有记录"
             )
-            # 获取国家代码（如果Excel中有，支持多种格式）
-            # 支持的格式：alpha_2_code（二字母）、alpha_3_code（三字母）、numeric_code（数字）、country_name_en（英文名称）、country_name_zh（中文名称）、official_name_en（官方英文名称）、official_name_zh（官方中文名称）
-            country_code = "ZZ"  # 默认值：全部区域
-            country_input = None
-
-            # 尝试从 "country_code" 或 "国家代码" 列获取
-            if "country_code" in row.index and pd.notna(row.get("country_code")):
-                country_input = str(row["country_code"]).strip()
-            elif "国家代码" in row.index and pd.notna(row.get("国家代码")):
-                country_input = str(row["国家代码"]).strip()
-
-            if country_input:
-                # 尝试根据多种格式查找国家代码
-                found_country_code = await find_country_code_by_any_format(db, country_input)
-                if found_country_code:
-                    country_code = found_country_code
-                else:
-                    # 如果找不到，记录警告并使用默认值
-                    logger.warning(
-                        f"无法识别国家代码格式: {country_input}, "
-                        f"日期={row.get('date', '未知')}, 产品={row.get('product_name', '未知')}, 使用默认值 'ZZ'"
-                    )
-                    country_code = "ZZ"
-
             # 检查数据是否减少（在更新之前）
             # 格式化日期字符串（data_date 可能是 date 或 datetime 类型）
             if isinstance(data_date, datetime):
@@ -874,7 +849,8 @@ async def process_row_data(
                 source=f"Excel导入（用户: {current_user.username}）"
             )
 
-            existing_data.country_code = country_code  # 更新国家代码
+            existing_data.country_code = country_code
+            existing_data.ad_unit = ad_unit
             existing_data.request_count = request_count
             existing_data.match_count = match_count
             existing_data.display_count = display_count
@@ -903,34 +879,11 @@ async def process_row_data(
             # 确保与数据库中的DateTime类型一致
             ad_data_date = normalize_date_for_ad_data(data_date)
 
-            # 获取国家代码（如果Excel中有，支持多种格式）
-            # 支持的格式：alpha_2_code（二字母）、alpha_3_code（三字母）、numeric_code（数字）、country_name_en（英文名称）、country_name_zh（中文名称）、official_name_en（官方英文名称）、official_name_zh（官方中文名称）
-            country_code = "ZZ"  # 默认值：全部区域
-            country_input = None
-
-            # 尝试从 "country_code" 或 "国家代码" 列获取
-            if "country_code" in row.index and pd.notna(row.get("country_code")):
-                country_input = str(row["country_code"]).strip()
-            elif "国家代码" in row.index and pd.notna(row.get("国家代码")):
-                country_input = str(row["国家代码"]).strip()
-
-            if country_input:
-                # 尝试根据多种格式查找国家代码
-                found_country_code = await find_country_code_by_any_format(db, country_input)
-                if found_country_code:
-                    country_code = found_country_code
-                else:
-                    # 如果找不到，记录警告并使用默认值
-                    logger.warning(
-                        f"无法识别国家代码格式: {country_input}, "
-                        f"日期={row.get('date', '未知')}, 产品={row.get('product_name', '未知')}, 使用默认值 'ZZ'"
-                    )
-                    country_code = "ZZ"
-
             ad_data = AdData(
                 date=ad_data_date,
                 product_id=product_info["product_id"],
-                country_code=country_code,  # 国家代码
+                ad_unit=ad_unit,
+                country_code=country_code,
                 request_count=request_count,
                 match_count=match_count,
                 display_count=display_count,
@@ -960,7 +913,7 @@ async def process_row_data(
             if existing_records is not None:
                 # 确保日期格式一致（使用date对象，不包含时间）
                 date_key = normalize_date_key(data_date)
-                key = (date_key, product_info["product_id"])
+                key = (date_key, product_info["product_id"], country_code, ad_unit)
                 existing_records[key] = ad_data
 
         result["success_rows"] += 1
@@ -1081,7 +1034,8 @@ async def import_ad_data_handler(
                 for record in existing_result.scalars().all():
                     # 使用日期（不包含时间）和产品ID作为key
                     record_date = record.date.date() if hasattr(record.date, 'date') else record.date
-                    key = (record_date, record.product_id)
+                    record_country = record.country_code or "ZZ"
+                    key = (record_date, record.product_id, record_country, record.ad_unit or '')
                     existing_records[key] = record
                 logger.debug(f"批量查询到 {len(existing_records)} 条已存在的记录")
 
@@ -1122,7 +1076,7 @@ async def import_ad_data_handler(
             # 使用统一的 IntegrityError 处理函数
             handle_integrity_error(
                 error=e,
-                constraint_name="uq_ad_data_date_product",
+                constraint_name="uq_ad_data_date_product_country_unit",
                 custom_message=(
                     "导入失败：检测到重复数据。"
                     "可能是并发导入导致的，或者数据库中已存在相同日期和产品的记录。"

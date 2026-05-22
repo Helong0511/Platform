@@ -13,7 +13,7 @@ from sqlalchemy import select, or_
 from app.models.models import AdData, User
 from app.core.audit_log import log_user_action
 from app.core.country_code import find_country_code_by_any_format
-from app.core.utils import truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data
+from app.core.utils import truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data, normalize_ad_unit
 from app.core.auto_bot import send_telegram_message
 from app.core.config import settings
 
@@ -256,6 +256,7 @@ async def process_api_ad_data(
                 continue
 
             item_product_name = item_product_name.strip()
+            item_ad_unit = normalize_ad_unit(get_field(item, "ad_unit", ""))
 
             # 解析数值字段
             try:
@@ -333,14 +334,15 @@ async def process_api_ad_data(
 
             # 根据是否能识别国家代码，分组数据
             if item_country_code:
-                # 能识别国家代码（正常情况），按 (date_str, product_name, country_code) 分组累加
-                key = (item_date_str, item_product_name, item_country_code)
+                # 能识别国家代码（正常情况），按 (date_str, product_name, country_code, ad_unit) 分组累加
+                key = (item_date_str, item_product_name, item_country_code, item_ad_unit)
                 if key not in recognized_data:
                     recognized_data[key] = {
                         "date_str": item_date_str,
                         "date": item_date,
                         "product_name": item_product_name,
                         "country_code": item_country_code,
+                        "ad_unit": item_ad_unit,
                         "request_count": 0,
                         "match_count": 0,
                         "display_count": 0,
@@ -388,13 +390,14 @@ async def process_api_ad_data(
                     item_data["viewability_rate"] = item_viewability_rate
                 recognized_data[key]["items"].append(item_data)
             else:
-                # 无法识别国家代码，按 (date_str, product_name) 分组累加
-                key = (item_date_str, item_product_name)
+                # 无法识别国家代码，按 (date_str, product_name, ad_unit) 分组累加
+                key = (item_date_str, item_product_name, item_ad_unit)
                 if key not in unrecognized_data:
                     unrecognized_data[key] = {
                         "date_str": item_date_str,
                         "date": item_date,
                         "product_name": item_product_name,
+                        "ad_unit": item_ad_unit,
                         "request_count": 0,
                         "match_count": 0,
                         "display_count": 0,
@@ -499,6 +502,7 @@ async def process_api_ad_data(
                 date_str = grouped_data["date_str"]
                 product_name = grouped_data["product_name"]
                 country_code = grouped_data["country_code"]
+                ad_unit = grouped_data.get("ad_unit", "")
                 item_date = grouped_data["date"]
 
                 # 查找或创建产品
@@ -604,14 +608,15 @@ async def process_api_ad_data(
                 ecpm_after_deduct = truncate_to_2_decimal(final_ecpm * (1 - ecpm_deduct_ratio))
                 revenue_after_deduct = truncate_to_2_decimal(total_revenue * (1 - revenue_deduct_ratio))
 
-                # 检查数据是否重复（按日期、产品、国家）
+                # 检查数据是否重复（按日期、产品、国家、广告单元）
                 date_start, date_end = get_date_range(item_date)
 
                 existing_query = select(AdData).where(
                     AdData.date >= date_start,
                     AdData.date <= date_end,
                     AdData.product_id == product_id,
-                    AdData.country_code == country_code
+                    AdData.country_code == country_code,
+                    AdData.ad_unit == ad_unit
                 )
                 existing_result = await db.execute(existing_query)
                 existing_data = existing_result.scalars().first()
@@ -745,6 +750,7 @@ async def process_api_ad_data(
                     new_ad_data = AdData(
                         date=ad_data_date,
                         product_id=product_id,
+                        ad_unit=ad_unit,
                         country_code=country_code,
                         request_count=grouped_data["request_count"],
                         match_count=grouped_data["match_count"],
@@ -820,7 +826,7 @@ async def process_api_ad_data(
     for key, grouped_data in unrecognized_data.items():
         async with db.begin_nested():
             try:
-                date_str, product_name = key
+                date_str, product_name, ad_unit = key
                 country_code = "AA"  # 使用'AA'（未知区域）作为无法识别国家代码的数据的国家代码
 
                 # 查找或创建产品
@@ -928,7 +934,7 @@ async def process_api_ad_data(
                 ecpm_after_deduct = truncate_to_2_decimal(final_ecpm * (1 - ecpm_deduct_ratio))
                 revenue_after_deduct = truncate_to_2_decimal(total_revenue * (1 - revenue_deduct_ratio))
 
-                # 检查数据是否重复（按日期、产品、国家代码'AA'）
+                # 检查数据是否重复（按日期、产品、国家代码'AA'、广告单元）
                 item_date = grouped_data["date"]
                 date_start, date_end = get_date_range(item_date)
 
@@ -936,7 +942,8 @@ async def process_api_ad_data(
                     AdData.date >= date_start,
                     AdData.date <= date_end,
                     AdData.product_id == product_id,
-                    AdData.country_code == country_code
+                    AdData.country_code == country_code,
+                    AdData.ad_unit == ad_unit
                 )
                 existing_result = await db.execute(existing_query)
                 existing_data = existing_result.scalars().first()
@@ -1064,6 +1071,7 @@ async def process_api_ad_data(
                     new_ad_data = AdData(
                         date=ad_data_date,
                         product_id=product_id,
+                        ad_unit=ad_unit,
                         country_code=country_code,
                         request_count=grouped_data["request_count"],
                         match_count=grouped_data["match_count"],

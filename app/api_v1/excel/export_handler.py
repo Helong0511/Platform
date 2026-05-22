@@ -321,6 +321,7 @@ async def export_ad_data_handler(
                     "数据日期": date_value,
                     "所属用户": product_to_user_map.get(item.product_id, "未知用户"),
                     "产品名称": product_map.get(item.product_id, "未知产品"),
+                    "广告单元": item.ad_unit or "",
                     "国家代码": country_code,
                     "国家": country_name,
                     "请求数": item.request_count,
@@ -342,6 +343,7 @@ async def export_ad_data_handler(
                 row_data = {
                     "数据日期": date_value,
                     "产品名称": product_map.get(item.product_id, "未知产品"),
+                    "广告单元": item.ad_unit or "",
                     "国家代码": country_code,
                     "国家": country_name,
                     "请求数": item.request_count,

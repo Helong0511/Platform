@@ -33,6 +33,7 @@ class AdDataBase(BaseModel):
 
     product_id: int | None = None
     product_name: str | None = None  # 添加产品名称字段
+    ad_unit: str | None = None  # 广告单元（可为空）
     country_code: str | None = None  # 国家代码（ISO 3166-1 二字母代码）
     country_name_zh: str | None = None  # 国家中文名称
     request_count: int | None = None
@@ -83,6 +84,7 @@ class AdDataSummaryResponse(BaseModel):
 class AdDataUpdate(BaseModel):
     """更新广告数据的Schema"""
     product_id: int | None = None
+    ad_unit: str | None = None  # 广告单元（可为空，空字符串表示无）
     country_code: str | None = None  # 国家代码（支持多种格式：alpha_2_code、alpha_3_code、numeric_code、country_name_en、country_name_zh、official_name_en、official_name_zh）
     request_count: int | None = None
     match_count: int | None = None

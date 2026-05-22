@@ -31,7 +31,8 @@ from app.core.utils import (
     unpack_ad_data_query_result,
     calculate_coverage_rate,
     calculate_display_rate,
-    calculate_click_rate
+    calculate_click_rate,
+    normalize_ad_unit,
 )
 from app.core.country_code import find_country_code_by_any_format, resolve_country_name
 from app.core.constants import PERCENTAGE_MULTIPLIER, ECPM_MULTIPLIER
@@ -202,7 +203,7 @@ class AdDataService(BaseService[AdData]):
 
         # 定义允许更新的字段白名单
         allowed_fields = {
-            'product_id', 'country_code', 'request_count', 'match_count', 'display_count',
+            'product_id', 'ad_unit', 'country_code', 'request_count', 'match_count', 'display_count',
             'click_count', 'viewability_rate', 'ecpm_after_deduct', 'ecpm_before_deduct',
             'revenue_after_deduct', 'revenue_before_deduct'
         }
@@ -212,6 +213,9 @@ class AdDataService(BaseService[AdData]):
             k: v for k, v in update_data.items()
             if k in allowed_fields
         }
+
+        if 'ad_unit' in filtered_update_data:
+            filtered_update_data['ad_unit'] = normalize_ad_unit(filtered_update_data['ad_unit'])
 
         # 如果更新product_id，验证产品是否存在
         if 'product_id' in filtered_update_data:
@@ -249,6 +253,7 @@ class AdDataService(BaseService[AdData]):
             # 确定更新后的值
             new_product_id = filtered_update_data.get('product_id', ad_data.product_id)
             new_country_code = filtered_update_data.get('country_code', ad_data.country_code)
+            new_ad_unit = filtered_update_data.get('ad_unit', ad_data.ad_unit or '')
 
             # 构建日期范围查询（AdData.date 是 DateTime 类型）
             if isinstance(ad_data.date, datetime):
@@ -273,6 +278,7 @@ class AdDataService(BaseService[AdData]):
                 AdData.date >= date_start,
                 AdData.date <= date_end,
                 AdData.product_id == new_product_id,
+                AdData.ad_unit == new_ad_unit,
                 country_condition
             )
             existing_result = await self.db.execute(existing_query)
@@ -302,7 +308,7 @@ class AdDataService(BaseService[AdData]):
 
                 raise_api_exception(
                     ErrorCode.OPERATION_FAILED,
-                    detail=f"更新失败：已存在相同的记录（日期={date_value}，产品={product_name}，国家={existing_country_name}）。请先删除或修改冲突的记录（ID: {existing_data.id}）"
+                    detail=f"更新失败：已存在相同的记录（日期={date_value}，产品={product_name}，国家={existing_country_name}，广告单元={existing_data.ad_unit or '（空）'}）。请先删除或修改冲突的记录（ID: {existing_data.id}）"
                 )
 
         # 更新字段
@@ -336,6 +342,7 @@ class AdDataService(BaseService[AdData]):
                 # 获取更新后的值用于错误提示
                 new_product_id = filtered_update_data.get('product_id', ad_data.product_id)
                 new_country_code = filtered_update_data.get('country_code', ad_data.country_code)
+                new_ad_unit = filtered_update_data.get('ad_unit', ad_data.ad_unit or '')
 
                 # 获取产品名称
                 product_result = await self.db.execute(select(Product).where(Product.id == new_product_id))
@@ -362,10 +369,10 @@ class AdDataService(BaseService[AdData]):
                 # 使用统一的 IntegrityError 处理函数
                 handle_integrity_error(
                     error=e,
-                    constraint_name="uq_ad_data_date_product_country",
+                    constraint_name="uq_ad_data_date_product_country_unit",
                     custom_message=(
-                        f"更新失败：已存在相同的记录（日期={date_value}，产品={product_name}，国家={country_name}）。"
-                        f"同一日期、产品和国家的组合必须唯一，请先删除或修改冲突的记录。{conflict_info}"
+                        f"更新失败：已存在相同的记录（日期={date_value}，产品={product_name}，国家={country_name}，广告单元={new_ad_unit or '（空）'}）。"
+                        f"同一日期、产品、国家和广告单元的组合必须唯一，请先删除或修改冲突的记录。{conflict_info}"
                     ),
                     log_context="Update ad data"
                 )
@@ -1133,6 +1140,7 @@ class AdDataService(BaseService[AdData]):
             func.date(AdData.date).label("date"),
             Product.id.label("product_id"),
             Product.name.label("product_name"),
+            AdData.ad_unit.label("ad_unit"),
             Client.id.label("client_id"),
             Client.company_name.label("client_name"),
             User.full_name.label("user_full_name"),
@@ -1195,11 +1203,12 @@ class AdDataService(BaseService[AdData]):
             default_to_current_month=True
         )
 
-        # 分组
+        # 分组：有广告单元时按单元拆分；空广告单元合并为一行
         query = query.group_by(
             func.date(AdData.date),
             Product.id,
             Product.name,
+            AdData.ad_unit,
             Client.id,
             Client.company_name,
             User.full_name,
@@ -1210,6 +1219,7 @@ class AdDataService(BaseService[AdData]):
         valid_sort_fields = {
             "date": func.date(AdData.date),
             "product": Product.name,
+            "ad_unit": AdData.ad_unit,
             "product_id": Product.id,
             "request_count": func.sum(AdData.request_count),
             "match_count": func.sum(AdData.match_count),
@@ -1255,7 +1265,8 @@ class AdDataService(BaseService[AdData]):
                 # 使用子查询优化计数
                 subquery = select(
                     func.date(AdData.date).label("date"),
-                    Product.id.label("product_id")
+                    Product.id.label("product_id"),
+                    AdData.ad_unit.label("ad_unit"),
                 ).select_from(AdData)
                 subquery = subquery.join(Product, AdData.product_id == Product.id)
                 subquery = subquery.where(Product.is_active == True)
@@ -1301,7 +1312,8 @@ class AdDataService(BaseService[AdData]):
 
                 subquery = subquery.group_by(
                     func.date(AdData.date),
-                    Product.id
+                    Product.id,
+                    AdData.ad_unit,
                 )
 
                 count_query = select(func.count()).select_from(subquery.alias("distinct_groups"))
@@ -1370,6 +1382,7 @@ class AdDataService(BaseService[AdData]):
                 "date": date_str,
                 "product_id": row.product_id,
                 "product_name": row.product_name or "",
+                "ad_unit": row.ad_unit or "",
                 "country_code": "ZZ",  # 全部区域
                 "country_name_zh": "全部区域",
                 "request_count": total_request_count,
@@ -1672,6 +1685,7 @@ class AdDataService(BaseService[AdData]):
                 "date": date_value,
                 "product_id": product.id,
                 "product_name": product.name,
+                "ad_unit": ad_data.ad_unit or "",
                 "country_code": ad_data.country_code,
                 "country_name_zh": country_name_zh,
                 "request_count": ad_data.request_count,

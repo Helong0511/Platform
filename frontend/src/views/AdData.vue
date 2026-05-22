@@ -120,6 +120,7 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column v-if="columnVisibility.ad_unit" prop="ad_unit" label="广告单元" :min-width="120" show-overflow-tooltip></el-table-column>
         <el-table-column v-if="columnVisibility.country_name_zh" prop="country_name_zh" label="国家"></el-table-column>
         <el-table-column v-if="columnVisibility.request_count" prop="request_count" label="请求数" sortable="custom"></el-table-column>
         <el-table-column v-if="columnVisibility.match_count" prop="match_count" label="匹配数" sortable="custom"></el-table-column>
@@ -195,6 +196,15 @@
             <el-option v-for="product in products" :key="product.value" :label="product.label" :value="product.value"></el-option>
           </el-select>
         </el-form-item>
+        <el-form-item label="广告单元" prop="ad_unit">
+          <el-input
+            v-model="editForm.ad_unit"
+            name="ad_unit"
+            placeholder="可选，留空表示无广告单元"
+            clearable
+            style="width: 100%;"
+          ></el-input>
+        </el-form-item>
         <el-form-item label="国家" prop="country_code">
           <el-input 
             v-model="editForm.country_code" 
@@ -267,6 +277,7 @@
         <el-checkbox label="date" :disabled="true">数据日期（固定显示）</el-checkbox>
         <el-checkbox v-if="isAdmin" label="user_name">所属客户</el-checkbox>
         <el-checkbox label="product_name" :disabled="true">产品名称（固定显示）</el-checkbox>
+        <el-checkbox label="ad_unit">广告单元</el-checkbox>
         <el-checkbox label="country_name_zh">国家</el-checkbox>
         <el-checkbox label="request_count">请求数</el-checkbox>
         <el-checkbox label="match_count">匹配数</el-checkbox>
@@ -366,6 +377,7 @@ const getDefaultColumnVisibility = () => ({
   date: true,  // 固定显示
   user_name: isAdmin.value,
   product_name: true,  // 固定显示
+  ad_unit: true,
   country_name_zh: true,
   request_count: true,
   match_count: true,
@@ -421,6 +433,7 @@ const saveColumnVisibility = () => {
     // 只保存可调整的列，不保存固定列
     const toSave = {
       user_name: columnVisibility.user_name,
+      ad_unit: columnVisibility.ad_unit,
       country_name_zh: columnVisibility.country_name_zh,
       request_count: columnVisibility.request_count,
       match_count: columnVisibility.match_count,
@@ -1124,6 +1137,7 @@ const editForm = ref({
   date: '',
   client_id: '',
   product_id: '',
+  ad_unit: '',
   country_code: '',
   request_count: 0,
   match_count: 0,
@@ -1219,6 +1233,7 @@ const handleEdit = async (row) => {
     date: row.date,
     client_id: row.client_id,
     product_id: currentProductId, // 确保使用原始产品ID
+    ad_unit: row.ad_unit || '',
     country_code: row.country_code || 'ZZ', // 国家代码，默认为 'ZZ'（全部区域）
     request_count: row.request_count,
     match_count: row.match_count,
@@ -1345,6 +1360,7 @@ const saveEdit = async () => {
     const payload = {
       id: editForm.value.id,
       product_id: editForm.value.product_id,
+      ad_unit: editForm.value.ad_unit || '',
       country_code: editForm.value.country_code || 'ZZ', // 国家代码，如果为空则使用默认值 'ZZ'
       request_count: editForm.value.request_count,
       match_count: editForm.value.match_count,

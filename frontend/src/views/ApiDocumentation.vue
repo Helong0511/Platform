@@ -800,6 +800,7 @@ const adDataRequestParams = [
 const adDataResponseFields = [
   { field: 'date', type: 'string', description: '数据日期（ISO格式：YYYY-MM-DD）' },
   { field: 'product_name', type: 'string', description: '产品名称（确保不为null）' },
+  { field: 'ad_unit', type: 'string', description: '广告单元（可为空字符串）' },
   { field: 'country_code', type: 'string', description: '国家二字代码（ISO 3166-1 alpha-2），详细模式返回实际国家代码（如"US"、"CN"），汇总模式返回"ZZ"表示全部区域' },
   { field: 'country_name_zh', type: 'string', description: '国家中文名称，详细模式返回实际国家名称（如"美国"、"中国"），汇总模式返回"全部区域"' },
   { field: 'request_count', type: 'int', description: '请求数（整数）' },

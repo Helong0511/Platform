@@ -23,6 +23,7 @@ APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
 HUGUANG_FIELD_MAPPING = {
     "date": "date",
+    "ad_unit": "ad_unit",
     "product_name": "url",
     "country_code": "country",
     "request_count": "request",
