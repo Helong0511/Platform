@@ -10,7 +10,7 @@ import pytz
 
 from app.core.config import settings
 from app.scheduler_module.task_names import ADDERMOBI_API_TASK_NAME
-from app.scheduler_module.task_result_store import set_task_result
+from app.scheduler_module.task_result_store import get_task_result, set_task_result
 from app.scheduler_module.upstream_fetch import fetch_addermobi_rows
 from app.scheduler_module.upstream_http import post_json
 from app.scheduler_module.upstream_import import (

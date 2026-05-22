@@ -9,7 +9,7 @@ import pytz
 
 from app.core.config import settings
 from app.scheduler_module.task_names import HUGUANG_API_TASK_NAME
-from app.scheduler_module.task_result_store import set_task_result
+from app.scheduler_module.task_result_store import get_task_result, set_task_result
 from app.scheduler_module.task_utils import (
     resolve_upstream_date_range,
     upstream_credential_missing,
