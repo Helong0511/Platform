@@ -53,7 +53,7 @@ class ClientProductsRequest(ClientAPIBaseRequest):
 class ClientDataRequest(ClientAPIBaseRequest):
     """查询广告数据请求模型"""
     data_type: str = Field(default="all",
-                           description="数据类型：'all' 表示详细数据（按国家），'day' 表示每日汇总（按产品+日期），默认为 'all'")
+                           description="数据类型：'all' 表示详细数据（按国家+广告单元），'day' 表示每日汇总（按产品+日期+广告单元），默认为 'all'")
     start_date: str | None = Field(default=None, description="起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天")
     end_date: str | None = Field(default=None, description="终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天")
 
@@ -199,14 +199,14 @@ async def get_client_data(
     参数说明：
     - client_id: 客户ID（必填）
     - req_time: 请求时间戳（必填）
-    - data_type: 数据类型，'all' 表示详细数据（按国家），'day' 表示每日汇总（按产品+日期），默认为 'all'
+    - data_type: 数据类型，'all' 表示详细数据（按国家+广告单元），'day' 表示每日汇总（按产品+日期+广告单元），默认为 'all'
     - start_date: 起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天
     - end_date: 终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天
     - sign: MD5签名（必填），包含所有非空参数
     
     返回说明：
-    - data_type='all': 返回详细数据，按国家分组
-    - data_type='day': 返回每日汇总数据，按产品+日期汇总，国家显示"全部区域"
+    - data_type='all': 返回详细数据，按国家+广告单元分组；响应含 ad_unit 字段（无则为空字符串）
+    - data_type='day': 返回每日汇总，按产品+日期+广告单元汇总；有 ad_unit 时拆分多行；国家显示"全部区域"
     """
     try:
         # 验证请求（传递额外的参数用于签名验证）
@@ -262,7 +262,7 @@ async def get_client_data(
         data_type = api_request.data_type or "all"
 
         if data_type == "day":
-            # 每日汇总模式：按产品+日期汇总，国家显示"全部区域"
+            # 每日汇总模式：按产品+日期+广告单元汇总，国家显示"全部区域"
             # 构建汇总查询
             # 注意：覆盖率、展示率、点击率、eCPM、CPC 不在查询中计算，而是在返回数据时根据汇总后的数值重新计算
             query = select(

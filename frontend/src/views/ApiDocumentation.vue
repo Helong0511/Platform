@@ -311,7 +311,7 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
             </div>
           </template>
 
-          <p>获取客户的广告数据。支持两种数据模式：详细数据（按国家分组）和每日汇总（按产品+日期汇总）。</p>
+          <p>获取客户的广告数据。支持两种数据模式：详细数据（按国家分组）和每日汇总（按产品+日期+广告单元汇总）。每条记录均包含 <code>ad_unit</code> 字段，无广告单元时为空字符串 <code>""</code>。</p>
 
           <h4>请求参数</h4>
           <el-table :data="adDataRequestParams" border style="width: 100%">
@@ -355,6 +355,7 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
     {
       "date": "2024-01-15",
       "product_name": "产品A",
+      "ad_unit": "banner_us",
       "country_code": "US",
       "country_name_zh": "美国",
       "request_count": 10000,
@@ -370,6 +371,7 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
     {
       "date": "2024-01-15",
       "product_name": "产品A",
+      "ad_unit": "",
       "country_code": "CN",
       "country_name_zh": "中国",
       "request_count": 12000,
@@ -393,6 +395,7 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
     {
       "date": "2024-01-15",
       "product_name": "产品A",
+      "ad_unit": "",
       "country_code": "ZZ",
       "country_name_zh": "全部区域",
       "request_count": 50000,
@@ -406,8 +409,25 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
       "revenue": 1968.75
     },
     {
+      "date": "2024-01-15",
+      "product_name": "产品A",
+      "ad_unit": "slot_01",
+      "country_code": "ZZ",
+      "country_name_zh": "全部区域",
+      "request_count": 12000,
+      "match_count": 9600,
+      "coverage_rate": 80.0,
+      "display_count": 9000,
+      "display_rate": 93.75,
+      "click_count": 600,
+      "click_rate": 6.67,
+      "ecpm": 5.30,
+      "revenue": 477.0
+    },
+    {
       "date": "2024-01-16",
       "product_name": "产品A",
+      "ad_unit": "",
       "country_code": "ZZ",
       "country_name_zh": "全部区域",
       "request_count": 60000,
@@ -443,8 +463,14 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
             </ul>
             <p><strong>数据模式说明</strong>：</p>
             <ul>
-              <li><strong>data_type='all'（详细数据）</strong>：按国家分组，每个国家每天一条记录，返回实际的国家代码和国家名称</li>
-              <li><strong>data_type='day'（每日汇总）</strong>：按产品+日期汇总，每天每个产品一条记录，国家代码统一为"ZZ"（全部区域）</li>
+              <li><strong>data_type='all'（详细数据）</strong>：按「日期 + 产品 + 国家 + 广告单元」分组；同一产品、同一天、同一国家下，不同 <code>ad_unit</code> 为多条记录；返回实际国家代码和国家名称</li>
+              <li><strong>data_type='day'（每日汇总）</strong>：按「日期 + 产品 + 广告单元」汇总（跨国家合并）；<code>ad_unit</code> 为空时合并为一条；有值时每个广告单元单独一条；国家代码统一为 <code>"ZZ"</code>（全部区域）</li>
+            </ul>
+            <p><strong>广告单元（ad_unit）说明</strong>：</p>
+            <ul>
+              <li>类型为字符串，始终返回，不会为 <code>null</code></li>
+              <li>无广告单元或为空时返回 <code>""</code>（空字符串）</li>
+              <li>字段顺序在 JSON 中位于 <code>product_name</code> 之后、<code>country_code</code> 之前</li>
             </ul>
             <p><strong>国家代码说明</strong>：</p>
             <ul>
@@ -564,7 +590,7 @@ def get_products():
 def get_ad_data(data_type, start_date=None, end_date=None):
     """获取广告数据
     Args:
-        data_type: 必填，数据类型，'all' 表示详细数据（按国家），'day' 表示每日汇总（按产品+日期）
+        data_type: 必填，数据类型，'all' 表示详细数据（按国家+广告单元），'day' 表示每日汇总（按产品+日期+广告单元）
         start_date: 可选，起始日期（格式：YYYY-MM-DD），不提供则使用当前月第一天
         end_date: 可选，终止日期（格式：YYYY-MM-DD），不提供则使用当前月最后一天
     """
@@ -600,11 +626,11 @@ if __name__ == '__main__':
     products_result = get_products()
     print("产品列表:", json.dumps(products_result, indent=2, ensure_ascii=False))
     
-    # 获取详细广告数据（按国家分组）
+    # 获取详细广告数据（按国家+广告单元）
     ad_data_result = get_ad_data(data_type='all', start_date='2024-01-01', end_date='2024-01-31')
     print("详细广告数据:", json.dumps(ad_data_result, indent=2, ensure_ascii=False))
     
-    # 获取每日汇总数据（按产品+日期汇总）
+    # 获取每日汇总数据（按产品+日期+广告单元汇总）
     daily_summary_result = get_ad_data(data_type='day', start_date='2024-01-01', end_date='2024-01-31')
     print("每日汇总数据:", json.dumps(daily_summary_result, indent=2, ensure_ascii=False))</code></pre>
           </el-tab-pane>
@@ -711,7 +737,7 @@ public class ClientAPI {
     
     /**
      * 获取广告数据
-     * @param dataType 必填，数据类型，'all' 表示详细数据（按国家），'day' 表示每日汇总（按产品+日期）
+     * @param dataType 必填，数据类型，'all' 表示详细数据（按国家+广告单元），'day' 表示每日汇总（按产品+日期+广告单元）
      * @param startDate 可选，起始日期（格式：YYYY-MM-DD），不提供则使用当前月第一天
      * @param endDate 可选，终止日期（格式：YYYY-MM-DD），不提供则使用当前月最后一天
      */
@@ -790,7 +816,7 @@ const productRequestParams = [
 const adDataRequestParams = [
   { name: 'client_id', type: 'int', required: '是', description: '客户ID' },
   { name: 'req_time', type: 'int', required: '是', description: '请求时间戳（10位秒级，Unix时间戳）' },
-  { name: 'data_type', type: 'string', required: '是', description: '数据类型：\'all\' 表示详细数据（按国家），\'day\' 表示每日汇总（按产品+日期）' },
+  { name: 'data_type', type: 'string', required: '是', description: '数据类型：\'all\' 表示详细数据（按国家+广告单元），\'day\' 表示每日汇总（按产品+日期+广告单元，无单元时合并）' },
   { name: 'start_date', type: 'string', required: '否', description: '起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天' },
   { name: 'end_date', type: 'string', required: '否', description: '终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天' },
   { name: 'sign', type: 'string', required: '是', description: 'MD5签名（小写），包含所有非空参数' }
