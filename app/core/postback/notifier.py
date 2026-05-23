@@ -757,10 +757,8 @@ class PostbackNotifier:
                     )
                 else:
                     # 如果没有提供 chat_id，使用默认管理员
-                    from app.core.config import settings
-                    from app.core.telegram import send_telegram_message
                     await asyncio.wait_for(
-                        send_telegram_message(message),
+                        send_telegram_message_async(message),
                         timeout=5.0
                     )
                 logger.debug(

@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ad_data_processor import process_api_ad_data
-from app.core.auto_bot import send_telegram_message
+from app.core.telegram import send_telegram_message_async
 from app.core.database import AsyncSessionLocal
 from app.scheduler_module.task_result_store import set_task_result
 from app.scheduler_module.task_utils import format_result_summary, get_admin_user
@@ -61,7 +61,7 @@ async def finalize_upstream_import(
         if error_count > 0:
             telegram_msg += f"\n❌ 错误: {error_count} 条"
         try:
-            await asyncio.wait_for(send_telegram_message(telegram_msg), timeout=5.0)
+            await asyncio.wait_for(send_telegram_message_async(telegram_msg), timeout=5.0)
         except asyncio.TimeoutError:
             logger.warning(f"发送 Telegram 通知超时: {task_name}")
 

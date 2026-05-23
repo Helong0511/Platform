@@ -14,7 +14,7 @@ from app.models.models import AdData, User
 from app.core.audit_log import log_user_action
 from app.core.country_code import find_country_code_by_any_format
 from app.core.utils import truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data, normalize_ad_unit
-from app.core.auto_bot import send_telegram_message
+from app.core.telegram import send_telegram_message_async
 from app.core.config import settings
 
 # 获取当前模块的日志记录器
@@ -121,7 +121,7 @@ async def check_and_notify_data_decrease(
             # 发送通知（异步，不阻塞）
             try:
                 await asyncio.wait_for(
-                    send_telegram_message(settings.TELEGRAM_ADMIN, telegram_msg),
+                    send_telegram_message_async(settings.TELEGRAM_ADMIN, telegram_msg),
                     timeout=5.0
                 )
                 logger.warning(
@@ -468,7 +468,7 @@ async def process_api_ad_data(
                             # 发送通知（异步，不阻塞）
                             try:
                                 await asyncio.wait_for(
-                                    send_telegram_message(settings.TELEGRAM_ADMIN, telegram_msg),
+                                    send_telegram_message_async(settings.TELEGRAM_ADMIN, telegram_msg),
                                     timeout=5.0
                                 )
                                 logger.info(f"无法识别国家代码警告已发送: 日期={item_date_str}, 产品={item_product_name}, 国家代码输入=[{item_country_input}]")

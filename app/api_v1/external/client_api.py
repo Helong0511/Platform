@@ -22,7 +22,7 @@ from sqlalchemy.future import select
 
 from app.core.api_auth import verify_client_request
 from app.core.audit_log import log_user_action
-from app.core.auto_bot import send_telegram_message
+from app.core.telegram import send_telegram_message_async
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
@@ -550,7 +550,7 @@ async def get_client_data(
             # send_telegram_message 内部已有完整的容错处理
             try:
                 await asyncio.wait_for(
-                    send_telegram_message(telegram_msg),
+                    send_telegram_message_async(telegram_msg),
                     timeout=5.0
                 )
                 logger.info(f"Telegram 通知发送成功，客户: {user_full_name}, 数据条数: {len(data_list)}")
