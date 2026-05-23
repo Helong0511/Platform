@@ -87,7 +87,7 @@ async def verify_client_request(
     data_type: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
-    time_tolerance: int = 5
+    time_tolerance: int = 20
 ) -> Client:
     """
     验证客户请求
