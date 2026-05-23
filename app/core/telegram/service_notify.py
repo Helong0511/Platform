@@ -1,0 +1,81 @@
+"""
+按 Gunicorn 角色（Platform-backend / Platform-scheduler）发送服务启停 Telegram 通知。
+与 Bot 轮询锁无关，使用 HTTP 发消息即可。
+"""
+import logging
+import os
+
+from app.core.config import settings
+from app.core.telegram.message_sender import send_telegram_message
+
+logger = logging.getLogger(__name__)
+
+
+def get_gunicorn_role() -> str:
+    return os.getenv("GUNICORN_ROLE", "api").strip().lower()
+
+
+def get_service_display_name() -> str:
+    """systemd 服务对应的展示名称。"""
+    if get_gunicorn_role() == "scheduler":
+        return "Platform Scheduler（定时任务）"
+    return "Platform Backend（API）"
+
+
+def get_service_port_hint() -> str:
+    if get_gunicorn_role() == "scheduler":
+        return "8961"
+    return "8960"
+
+
+def should_run_telegram_polling() -> bool:
+    """仅 API 进程启动 Bot 长轮询；调度进程只发启停通知，避免双实例抢锁。"""
+    return get_gunicorn_role() != "scheduler"
+
+
+def should_send_service_lifecycle_notify() -> bool:
+    """
+    每个 Gunicorn 实例只由一个 worker 发送启停通知，避免重复刷屏。
+    - scheduler：仅 1 个 worker，始终发送
+    - api：由 post_fork 标记的 SCHEDULER_WORKER=1 的 worker 发送（首个 worker）
+    """
+    if get_gunicorn_role() == "scheduler":
+        return True
+    return os.getenv("SCHEDULER_WORKER", "").strip() == "1"
+
+
+def build_service_started_message() -> str:
+    label = get_service_display_name()
+    port = get_service_port_hint()
+    return (
+        f"🚀 【{label}】已启动\n"
+        f"系统：{settings.SERVER_NAME}\n"
+        f"监听：127.0.0.1:{port}"
+    )
+
+
+def build_service_stopped_message() -> str:
+    label = get_service_display_name()
+    return f"🧩 【{label}】已关闭\n系统：{settings.SERVER_NAME}"
+
+
+def notify_service_started() -> bool:
+    if not getattr(settings, "TELEGRAM_ENABLE", True):
+        logger.info("TELEGRAM_ENABLE=false，跳过服务启动通知")
+        return False
+    if not should_send_service_lifecycle_notify():
+        logger.debug("本 worker 不负责发送服务启动通知，已跳过")
+        return False
+    message = build_service_started_message()
+    logger.info("发送服务启动通知：%s", get_service_display_name())
+    return send_telegram_message(message)
+
+
+def notify_service_stopped() -> bool:
+    if not getattr(settings, "TELEGRAM_ENABLE", True):
+        return False
+    if not should_send_service_lifecycle_notify():
+        return False
+    message = build_service_stopped_message()
+    logger.info("发送服务关闭通知：%s", get_service_display_name())
+    return send_telegram_message(message)

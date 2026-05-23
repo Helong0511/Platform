@@ -47,11 +47,15 @@ from app.core.middleware import (
 from app.core.redis_client import get_redis_client, close_redis_client
 from app.core.security import JWTUtils
 # 从新模块导入 Bot 相关函数（统一使用新模块）
-from app.core.telegram import send_telegram_message
-from app.core.telegram.bot_state import bot_initialized
 from app.core.telegram.file_lock import is_lock_held as has_bot_lock
 from app.core.telegram.file_lock import release_bot_lock as stop_bot
 from app.core.telegram.polling_manager import start_bot_thread
+from app.core.telegram.service_notify import (
+    notify_service_started,
+    notify_service_stopped,
+    should_run_telegram_polling,
+)
+from app.core.telegram.shared_state import cleanup_stale_shared_state
 from app.core.timezone_utils import check_and_validate_timezone, log_timezone_info
 from app.core.utils import get_client_ip
 from app.models.models import Base, User
@@ -524,35 +528,42 @@ async def lifespan(app: FastAPI):
             f"（ENABLE_SCHEDULER/SCHEDULER_WORKER 未启用本 worker）"
         )
 
-    # 初始化Telegram Bot（使用文件锁确保只有一个进程启动）
+    # Telegram：调度进程只发启停通知；API 进程才启动 Bot 轮询（单实例文件锁）
     try:
-        # 检查是否启用 Telegram
+        cleanup_stale_shared_state()
         telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
-        logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 功能启用状态: {telegram_enabled}")
+        logger.info(
+            f"[Worker PID:{worker_pid}] Telegram 启用={telegram_enabled}, "
+            f"轮询={should_run_telegram_polling()}"
+        )
         if not telegram_enabled:
-            logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false），跳过启动")
-        else:
-            # 显式初始化Bot，确保bot_initialized状态正确
+            logger.info(f"[Worker PID:{worker_pid}] Telegram 已禁用，跳过")
+        elif should_run_telegram_polling():
             from app.core.telegram.bot_initializer import initialize_bot
-            logger.info(f"[Worker PID:{worker_pid}] 开始初始化 Telegram Bot...")
-            bot_instance, initialized, available = initialize_bot()
-            logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 初始化结果: initialized={initialized}, available={available}")
-            
-            # 重新导入bot_initialized变量，确保获取最新状态
             from app.core.telegram import bot_state
+
+            logger.info(f"[Worker PID:{worker_pid}] 初始化 Telegram Bot（API 进程）...")
+            bot_instance, initialized, available = initialize_bot()
+            logger.info(
+                f"[Worker PID:{worker_pid}] Bot 初始化: initialized={initialized}, available={available}"
+            )
             bot_initialized = bot_state.bot_initialized
-            
+
             if initialized and bot_initialized:
-                logger.info(f"[Worker PID:{worker_pid}] 尝试启动 Telegram 机器人线程...")
-                # 使用 start_bot_thread() 在独立线程中启动，避免阻塞应用
                 start_success = start_bot_thread()
                 if not start_success:
-                    logger.info(f"[Worker PID:{worker_pid}] Telegram 机器人未启动（其他进程可能已启动或未获取到锁）")
+                    logger.info(
+                        f"[Worker PID:{worker_pid}] Bot 轮询未启动（其他进程已占用或未取得锁）"
+                    )
             else:
-                logger.info(f"[Worker PID:{worker_pid}] Telegram Bot 未配置或初始化失败，跳过启动")
+                logger.info(f"[Worker PID:{worker_pid}] Bot 未配置或初始化失败，跳过轮询")
+        else:
+            logger.info(
+                f"[Worker PID:{worker_pid}] 调度进程不启动 Bot 轮询，仅发送服务启停通知"
+            )
     except Exception as e:
-        logger.error(f"[Worker PID:{worker_pid}] 启动 Telegram 机器人初始化失败: {e}", exc_info=True)
-        logger.warning(f"[Worker PID:{worker_pid}] 应用将继续启动，但Telegram 机器人可能不可用")
+        logger.error(f"[Worker PID:{worker_pid}] Telegram 初始化失败: {e}", exc_info=True)
+        logger.warning(f"[Worker PID:{worker_pid}] 应用将继续启动，Telegram 可能不可用")
 
     # 缓存预热（可选，在后台异步执行，不阻塞启动）
     try:
@@ -572,31 +583,14 @@ async def lifespan(app: FastAPI):
 
     logger.info("应用启动完成")
 
-    # 发送启动通知
+    # 按 systemd 服务角色发送启动通知（与 Bot 锁无关）
     try:
-        # 检查是否启用 Telegram
-        telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
-        logger.info(f"[Worker PID:{worker_pid}] 准备发送启动通知，telegram_enabled={telegram_enabled}, bot_initialized={bot_initialized}")
-        if telegram_enabled and bot_initialized:
-            # 只有持有锁的进程才发送启动消息
-            lock_held = has_bot_lock()
-            logger.info(f"[Worker PID:{worker_pid}] 检查锁状态: {lock_held}")
-            if lock_held:
-                try:
-                    logger.info(f"[Worker PID:{worker_pid}] 开始发送启动通知...")
-                    success = send_telegram_message(f"🚀 服务 [{settings.SERVER_NAME}] 已启动")
-                    if success:
-                        logger.info(f"[Worker PID:{worker_pid}] 已发送启动通知")
-                    else:
-                        logger.warning(f"[Worker PID:{worker_pid}] 发送启动通知失败")
-                except Exception as e:
-                    logger.warning(f"发送启动通知失败: {e}", exc_info=True)
-            else:
-                logger.info(f"[Worker PID:{worker_pid}] 未持有Bot锁，跳过发送启动通知")
+        if notify_service_started():
+            logger.info(f"[Worker PID:{worker_pid}] 已发送服务启动 Telegram 通知")
         else:
-            logger.info(f"[Worker PID:{worker_pid}] Telegram未启用或Bot未初始化，跳过发送启动通知")
+            logger.debug(f"[Worker PID:{worker_pid}] 未发送服务启动通知（非通知 worker 或已禁用）")
     except Exception as e:
-        logger.warning(f"启动通知处理失败: {e}", exc_info=True)
+        logger.warning(f"发送服务启动通知失败: {e}", exc_info=True)
 
     # ====== 应用运行期间 ======
     yield
@@ -622,26 +616,26 @@ async def lifespan(app: FastAPI):
         logger.warning(f"关闭Redis连接时出现错误: {e}")
 
     try:
-        # 检查是否启用 Telegram
         telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
         if telegram_enabled:
-            # 只有持有锁的进程才发送关闭消息和停止 Bot
-            if bot_initialized and has_bot_lock():
-                # 尝试发送关闭消息（可能失败，因为连接可能已断开）
+            try:
+                notify_service_stopped()
+            except asyncio.CancelledError:
+                logger.debug("发送服务关闭通知时任务被取消（正常关闭流程）")
+            except asyncio.TimeoutError:
+                logger.debug("发送服务关闭通知超时（可能连接已断开）")
+            from app.core.telegram import bot_state as _bot_state_mod
+            if (
+                should_run_telegram_polling()
+                and _bot_state_mod.bot_initialized
+                and has_bot_lock()
+            ):
                 try:
-                    send_telegram_message(f"🧩 服务 [{settings.SERVER_NAME}] 已关闭")
-                except asyncio.CancelledError:
-                    # 应用关闭时任务被取消是正常的
-                    logger.debug("发送关闭消息时任务被取消（正常关闭流程）")
-                except asyncio.TimeoutError:
-                    logger.debug(f"发送关闭消息超时（可能连接已断开）")
-                # 其他异常已在 send_telegram_message 内部处理，这里不需要捕获
-                finally:
-                    stop_bot()  # stop_bot 内部会检查是否持有锁并释放
-            else:
-                # 其他进程不需要执行任何操作
-                if bot_initialized:
-                    logger.debug(f"[PID:{os.getpid()}] 未持有 Bot 锁，跳过关闭操作")
+                    stop_bot()
+                except Exception as stop_err:
+                    logger.warning(f"释放 Telegram Bot 锁时出错: {stop_err}")
+            elif should_run_telegram_polling() and _bot_state_mod.bot_initialized:
+                logger.debug(f"[PID:{os.getpid()}] 未持有 Bot 锁，跳过 stop_bot")
     except asyncio.CancelledError:
         # 应用关闭时任务被取消是正常的，不需要记录错误
         logger.debug("关闭 Telegram 机器人时任务被取消（正常关闭流程）")

@@ -215,7 +215,10 @@ def start_polling():
             from app.core.telegram.message_sender import send_telegram_message
             from app.core.constants import TELEGRAM_BOT_START_DELAY
             time.sleep(TELEGRAM_BOT_START_DELAY)
-            send_telegram_message("✅ Telegram 机器人已启动")
+            from app.core.telegram.service_notify import get_service_display_name
+            send_telegram_message(
+                f"✅ Telegram 机器人轮询已启动（{get_service_display_name()}）"
+            )
             logger.info(f"[PID:{current_pid}] 已发送 Telegram 机器人启动消息")
         except Exception as msg_err:
             logger.warning(f"[PID:{current_pid}] 发送启动消息失败：{msg_err}")
