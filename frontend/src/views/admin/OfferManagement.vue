@@ -729,6 +729,13 @@
             </el-descriptions>
           </el-tab-pane>
 
+          <el-tab-pane label="数据统计" name="stats">
+            <OfferStatsPanel
+              v-if="currentOffer?.id"
+              :offer-id="currentOffer.id"
+            />
+          </el-tab-pane>
+
           <!-- 渠道分配（仅管理员可见） -->
           <el-tab-pane v-if="isAdmin" label="渠道分配" name="publishers">
             <div v-if="currentOffer?.assigned_publishers && currentOffer.assigned_publishers.length > 0">
@@ -915,6 +922,7 @@ import { useOfferColumnVisibility } from '@/composables/useOfferColumnVisibility
 import { useOfferList } from '@/composables/useOfferList'
 import { useOfferForm } from '@/composables/useOfferForm'
 import { useOfferDetail } from '@/composables/useOfferDetail'
+import OfferStatsPanel from '@/components/admin/OfferStatsPanel.vue'
 
 const authStore = useAuthStore()
 const route = useRoute()

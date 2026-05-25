@@ -1,0 +1,29 @@
+CREATE DATABASE IF NOT EXISTS `ad_tracking`;
+USE `ad_tracking`;
+
+CREATE TABLE `lp_conversion_log` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `trace_id` VARCHAR(128) DEFAULT NULL COMMENT '前端生成的唯一ID',
+  `source_platform` VARCHAR(50) DEFAULT 'unknown',
+  `click_id` TEXT DEFAULT NULL COMMENT '存储 gclid/fbclid 等',
+  
+  -- 投放核心参数
+  `utm_source` VARCHAR(100) DEFAULT NULL,
+  `utm_medium` VARCHAR(100) DEFAULT NULL,
+  `utm_campaign` VARCHAR(100) DEFAULT NULL,
+  
+  -- 容错与环境
+  `device_type` VARCHAR(20) DEFAULT 'other',
+  `ip_address` VARCHAR(45) DEFAULT NULL,
+  `user_agent` TEXT DEFAULT NULL,
+  `is_clicked` TINYINT(1) DEFAULT 0,
+  
+  -- 原始数据备份（终极容错）
+  `raw_data` JSON DEFAULT NULL COMMENT '记录完整的原始请求包',
+  
+  `created_at` TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3),
+  `clicked_at` TIMESTAMP(3) NULL DEFAULT NULL,
+  
+  INDEX `idx_trace` (`trace_id`),
+  INDEX `idx_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

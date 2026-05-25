@@ -45,3 +45,7 @@ pyTelegramBotAPI==4.14.0
 
 # 系统工具
 psutil>=5.9.0  # 进程和系统监控（用于进程存在性检查）
+
+# 测试（开发/CI）
+pytest>=7.4.0
+pytest-asyncio>=0.21.0

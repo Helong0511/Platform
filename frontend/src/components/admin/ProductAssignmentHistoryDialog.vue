@@ -151,6 +151,7 @@ import { ref, watch, computed, nextTick } from 'vue';
 import { ElMessage, ElMessageBox, ElAlert } from 'element-plus';
 import { OfficeBuilding, Edit } from '@element-plus/icons-vue';
 import { getProductAssignments, updateAssignmentDates, batchUpdateAssignmentDates } from '../../api/product';
+import { refreshCsrfTokenBeforeRequest } from '../../utils/api';
 import { logger } from '../../utils/logger';
 
 // 格式化客户全名（优先显示用户全名，如果没有则显示公司名称、联系人、电话）
@@ -741,16 +742,11 @@ const handleBatchSave = async () => {
   try {
     // 在批量保存前，先获取最新的CSRF令牌（确保令牌是最新的）
     try {
-      const axios = (await import('axios')).default;
-      await axios.get(`/api/v1/product-assignments/products/${props.productId}/assignments`, {
-        timeout: 5000,
-        validateStatus: () => true // 接受任何状态码，因为我们只是为了获取CSRF token
-      });
-      // 等待响应拦截器处理完响应头
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await refreshCsrfTokenBeforeRequest(
+        `/api/v1/product-assignments/products/${props.productId}/assignments`
+      );
     } catch (tokenError) {
-      logger.warn('批量保存前获取CSRF token时出错:', tokenError);
-      // 继续执行，因为axios拦截器可能会自动处理
+      logger.warn('批量保存前刷新 CSRF token 时出错:', tokenError);
     }
     
     const changes = Array.from(pendingChanges.value.entries());

@@ -19,10 +19,10 @@
  * 已统一使用 request 函数，保持代码一致性
  * 包含特殊逻辑：搜索用户、文件导出、密码修改等
  */
-import { request, normalizePaginatedResponse, normalizeResponse, extractErrorMessage, ensureCsrfToken, refreshCsrfTokenBeforeRequest, handleError, handleFileDownload, refreshCsrfToken } from '../utils/api';
+import { request, extractErrorMessage, ensureCsrfToken, refreshCsrfTokenBeforeRequest, handleError, refreshCsrfToken, requestBlobDownload } from '../utils/api';
+import { logout as authLogout } from './auth';
 import { ElMessage } from 'element-plus';
 import { getSuccessMessage, getWarningMessage } from '../utils/messages';
-import axios from 'axios'; // 保留用于特殊场景（搜索用户、退出登录）
 
 /**
  * 获取用户列表（支持分页和筛选）
@@ -81,24 +81,26 @@ export const searchUser = async (searchTerm) => {
     // 如果是纯数字，可能是ID，先尝试通过ID查找
     if (/^\d+$/.test(term)) {
       try {
-        const response = await axios.get(`/api/v1/users/${term}`);
-        const result = normalizeResponse(response, { returnDataOnly: true });
+        const result = await request(
+          { url: `/api/v1/users/${term}`, method: 'get' },
+          { returnDataOnly: true, silent: true }
+        );
         if (result && result.id) {
           return result;
         }
-      } catch (error) {
+      } catch {
         // ID查找失败，继续用用户名查找
       }
     }
 
-    // 通过用户名查找
-    const response = await axios.get('/api/v1/users/', { 
-      params: { 
-        username: term,
-        page_size: 10 
-      } 
-    });
-    const usersData = normalizePaginatedResponse(response);
+    const usersData = await request(
+      {
+        url: '/api/v1/users/',
+        method: 'get',
+        params: { username: term, page_size: 10 }
+      },
+      { paginated: true, silent: true }
+    );
     
     if (usersData.data && usersData.data.length > 0) {
       // 精确匹配用户名
@@ -198,26 +200,19 @@ export const deleteUser = async (id) => {
  */
 export const exportUsers = async (params = {}) => {
   try {
-    // 文件下载需要使用blob响应类型，直接使用axios
-    const response = await axios.get('/api/v1/users/export/excel', {
-      params,
-      responseType: 'blob'
-    });
-    
-    // 处理文件下载
-    handleFileDownload(response, '用户数据.xlsx', () => {
-      ElMessage.success(getSuccessMessage('USER_EXPORT_SUCCESS'));
-    });
+    return await requestBlobDownload(
+      { url: '/api/v1/users/export/excel', method: 'get', params },
+      {
+        defaultFilename: '用户数据.xlsx',
+        onSuccess: () => ElMessage.success(getSuccessMessage('USER_EXPORT_SUCCESS'))
+      }
+    );
   } catch (error) {
-    // 提取错误消息，优先使用 detail，然后是 message
     const errorMsg = extractErrorMessage(error) || '导出失败';
-    
-    // 如果是"无数据，不能导出"的错误，直接显示该消息
     if (errorMsg.includes('无数据') || errorMsg.includes('不能导出')) {
       ElMessage.warning(getWarningMessage('NO_DATA_TO_EXPORT'));
-    } else {
-      handleError(error);
     }
+    throw error;
   }
 };
 
@@ -255,13 +250,5 @@ export const changePassword = async (passwordData) => {
  * 退出登录
  * @returns {Promise<void>}
  */
-export const logout = async () => {
-  try {
-    await axios.post('/api/v1/auth/logout');
-    // 退出登录成功，不显示消息（由store处理）
-  } catch (error) {
-    // 即使API调用失败，也要清除本地状态
-    // 不显示错误消息，避免影响用户体验
-    // 错误可能是token已过期，这是正常的
-  }
-};
+/** @deprecated 请使用 auth.js 的 logout */
+export const logout = authLogout;

@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -252,10 +252,8 @@ def register_cloak_change_routes(router: APIRouter) -> None:
             raise
         except Exception as e:
             logger.error(f"[斗篷服务] /change/{short_code} 请求处理异常: {str(e)}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"处理失败: {str(e)}"
-            )
+            from app.routes.short_link.errors import raise_short_link_bad_config
+            raise_short_link_bad_config(f"处理失败: {str(e)}")
 
 
 

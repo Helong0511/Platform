@@ -5,15 +5,16 @@
 import logging
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy import func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
-from app.core.config import settings
+from app.core.auth_response import build_token_json_response, raise_auth_error
 from app.core.database import get_db
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
 from app.core.security import JWTUtils
 from app.models.models import User, UserRole, Publisher
 from app.schemas.auth import LoginResponse, RefreshTokenRequest
@@ -70,19 +71,18 @@ async def refresh_token(
         # 检查令牌类型
         token_type = payload.get("type")
         if token_type != "refresh":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="无效的刷新令牌",
-                headers={"WWW-Authenticate": "Bearer"},
+            raise_auth_error(
+                ErrorCode.TOKEN_INVALID,
+                "无效的刷新令牌",
+                http_status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        # 获取用户ID
         user_id = payload.get("sub")
         if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="无法从令牌中获取用户ID",
-                headers={"WWW-Authenticate": "Bearer"},
+            raise_auth_error(
+                ErrorCode.TOKEN_INVALID,
+                "无法从令牌中获取用户ID",
+                http_status=status.HTTP_401_UNAUTHORIZED,
             )
 
         # 查询用户（如果是客户角色，同时加载客户信息）
@@ -94,23 +94,24 @@ async def refresh_token(
         user = result.scalars().first()
 
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="用户不存在",
-                headers={"WWW-Authenticate": "Bearer"},
+            raise_auth_error(
+                ErrorCode.USER_NOT_FOUND,
+                "用户不存在",
+                http_status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        # 检查用户状态
         if not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="用户已被禁用",
+            raise_auth_error(
+                ErrorCode.USER_DISABLED,
+                "用户已被禁用",
+                http_status=status.HTTP_403_FORBIDDEN,
             )
 
         if user.login_restricted:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=user.login_message or "登录已被限制",
+            raise_auth_error(
+                ErrorCode.FORBIDDEN,
+                user.login_message or "登录已被限制",
+                http_status=status.HTTP_403_FORBIDDEN,
             )
 
         # 生成新的访问令牌和刷新令牌
@@ -140,42 +141,28 @@ async def refresh_token(
                 publisher_count = publisher_check.scalar() or 0
                 has_publisher = publisher_count > 0
 
-        # 构建响应
-        response_data = {
-            "access_token": new_access_token,
-            "refresh_token": new_refresh_token,
-            "token_type": "bearer",
-            "user": {
-                "id": user.id,
-                "username": user.username,
-                "full_name": user.full_name,
-                "email": user.email,
-                "role": user.role.value,
-                "api_enabled": api_enabled,
-                "has_publisher": has_publisher
-            }
+        user_payload = {
+            "id": user.id,
+            "username": user.username,
+            "full_name": user.full_name,
+            "email": user.email,
+            "role": user.role.value,
+            "api_enabled": api_enabled,
+            "has_publisher": has_publisher,
         }
 
-        # 设置 HttpOnly Cookie
-        json_response = JSONResponse(content=response_data)
-        json_response.set_cookie(
-            key="access_token",
-            value=new_access_token,
-            httponly=True,
-            secure=settings.is_production,
-            samesite="lax",
-            max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        logger.info(f"用户 {user.username} 刷新令牌成功")
+        return build_token_json_response(
+            access_token=new_access_token,
+            refresh_token=new_refresh_token,
+            user=user_payload,
+            message="令牌刷新成功",
         )
 
-        logger.info(f"用户 {user.username} 刷新令牌成功")
-        return json_response
-
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"刷新令牌失败: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="刷新令牌失败，请重新登录",
-            headers={"WWW-Authenticate": "Bearer"},
+        raise_auth_error(
+            ErrorCode.TOKEN_INVALID,
+            "刷新令牌失败，请重新登录",
+            http_status=status.HTTP_401_UNAUTHORIZED,
         )

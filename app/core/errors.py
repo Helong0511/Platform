@@ -13,7 +13,6 @@ from sqlalchemy.future import select
 
 from app.core.audit_log import log_runtime_error
 from app.core.database import AsyncSessionLocal
-from app.core.security import JWTUtils
 from app.core.utils import get_client_ip, get_app_now_naive
 from app.models.models import User
 
@@ -367,6 +366,8 @@ async def record_http_exception_log(
             try:
                 token = request.headers.get("Authorization", "").replace("Bearer ", "")
                 if token:
+                    from app.core.security import JWTUtils
+
                     payload = await JWTUtils.verify_token(token)
                     if payload and "sub" in payload:
                         user_id = payload.get("sub")

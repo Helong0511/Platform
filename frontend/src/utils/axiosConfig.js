@@ -3,7 +3,7 @@
  * 配置请求/响应拦截器、CSRF处理、超时设置等
  */
 import axios from 'axios';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { logger } from './logger';
 import { clearAuthData } from '../store';
 import router from '../router';
@@ -263,18 +263,23 @@ export const setupResponseInterceptor = () => {
                 // 尝试刷新令牌
                 const refreshResponse = await refreshAccessToken(refreshToken);
 
-                if (refreshResponse && refreshResponse.access_token) {
-                  // 刷新成功，更新用户信息和令牌
-                  if (refreshResponse.user) {
-                    sessionStorage.setItem('userInfo', JSON.stringify(refreshResponse.user));
+                const tokenPayload = refreshResponse?.data?.access_token
+                  ? refreshResponse.data
+                  : refreshResponse;
+                if (tokenPayload && tokenPayload.access_token) {
+                  if (tokenPayload.user) {
+                    sessionStorage.setItem('userInfo', JSON.stringify(tokenPayload.user));
                   }
-                  if (refreshResponse.refresh_token) {
-                    sessionStorage.setItem('refresh_token', refreshResponse.refresh_token);
+                  if (tokenPayload.refresh_token) {
+                    sessionStorage.setItem('refresh_token', tokenPayload.refresh_token);
                   }
 
-                  // 重试原始请求
+                  // 重试原始请求（认证主要靠 HttpOnly Cookie；若有 access_token 则附带 Header）
                   const originalRequest = error.config;
-                  originalRequest.headers['Authorization'] = `Bearer ${refreshResponse.access_token}`;
+                  originalRequest.headers = originalRequest.headers || {};
+                  if (tokenPayload.access_token) {
+                    originalRequest.headers['Authorization'] = `Bearer ${tokenPayload.access_token}`;
+                  }
                   return axios(originalRequest);
                 }
               } catch (refreshError) {

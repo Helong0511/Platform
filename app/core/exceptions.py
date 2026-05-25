@@ -137,7 +137,6 @@ def handle_integrity_error(
     )
     
     if is_unique_constraint:
-        # 唯一性约束违反
         if custom_message:
             detail = custom_message
         else:
@@ -146,19 +145,10 @@ def handle_integrity_error(
                 "可能是并发操作导致的，或者数据库中已存在相同的记录。"
                 "请检查数据后重试。"
             )
-        
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=detail
-        )
+        raise_api_exception(ErrorCode.CONFLICT, detail=detail)
     else:
-        # 其他完整性约束错误（如外键约束违反）
         if custom_message:
             detail = custom_message
         else:
             detail = f"数据保存失败：{error_msg}"
-        
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=detail
-        )
+        raise_api_exception(ErrorCode.INTERNAL_ERROR, detail=detail)

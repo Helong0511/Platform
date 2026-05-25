@@ -3,9 +3,9 @@
  * 已统一使用 request 函数，保持代码一致性
  * 包含特殊逻辑：超时控制、文件导入导出、批量操作等
  */
-import { request, normalizePaginatedResponse, normalizeResponse, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
+import { request, normalizePaginatedResponse, normalizeResponse, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest, requestBlobDownload, extractErrorMessage, requestUpload } from '../utils/api';
 import { getCsrfToken } from '../utils/csrfToken';
-import axios from 'axios'; // 保留用于特殊场景（超时控制、文件上传下载）
+import axios from 'axios'; // 保留用于特殊场景（超时控制）
 
 // 获取广告数据列表
 export const getAdDataList = async (params) => {
@@ -40,147 +40,30 @@ export const getDailySummary = async (params) => {
 // 导出广告数据
 export const exportAdData = async (params) => {
   try {
-    const response = await axios.get('/api/v1/excel/export/ad-data', {
-      params,
-      responseType: 'blob' // 默认使用blob，因为成功时返回Excel文件
-    });
-
-    // 检查响应类型和大小
-    const contentType = response.headers['content-type'] || '';
-    const blobSize = response.data.size || 0;
-    
-    // 如果响应是JSON格式，说明是错误响应（业务错误返回HTTP 200，但响应体是JSON）
-    if (contentType.includes('application/json')) {
-      // 解析JSON错误响应
-      const text = await response.data.text();
-      const errorData = JSON.parse(text);
-      if (errorData.code !== undefined && errorData.code !== 200) {
-        const errorMsg = errorData.detail || errorData.message || '导出失败';
-        const error = new Error(errorMsg);
-        error.code = errorData.code;
-        error.response = {
-          data: errorData,
-          status: 200,
-          statusText: 'OK'
-        };
-        throw error;
-      }
-    }
-
-    // 检查blob大小，如果很小（小于5KB）可能是错误JSON（错误响应可能被当作blob）
-    // Excel文件通常至少几KB，而JSON错误响应通常只有几百字节
-    // 注意：需要克隆blob，因为读取后不能再次使用
-    if (blobSize > 0 && blobSize < 5000) {
-      try {
-        // 克隆blob以便读取后仍可使用
-        const blobClone = response.data.slice(0);
-        const text = await blobClone.text();
-        // 尝试解析为JSON
-        const errorData = JSON.parse(text);
-        if (errorData.code !== undefined && errorData.code !== 200) {
-          const errorMsg = errorData.detail || errorData.message || '导出失败';
-          const error = new Error(errorMsg);
-          error.code = errorData.code;
-          error.response = {
-            data: errorData,
-            status: 200,
-            statusText: 'OK'
-          };
-          throw error;
-        }
-      } catch (parseError) {
-        // 解析失败，可能是正常的Excel文件（虽然很小），继续使用原始blob
-      }
-    }
-
-    // 创建下载链接
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = url;
-
-    // 从响应头获取文件名
-    const contentDisposition = response.headers['content-disposition'];
-    let fileName = '广告数据导出.xlsx';
-    if (contentDisposition) {
-      // 支持 UTF-8 编码的文件名
-      const utf8Match = contentDisposition.match(/filename\*=UTF-8''(.+)/);
-      if (utf8Match && utf8Match[1]) {
-        fileName = decodeURIComponent(utf8Match[1]);
-      } else {
-        const match = contentDisposition.match(/filename=(.*)/);
-        if (match && match[1]) {
-          fileName = decodeURIComponent(match[1]);
-        }
-      }
-    }
-
-    link.setAttribute('download', fileName);
-    document.body.appendChild(link);
-    link.click();
-
-    // 清理
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
-
-    // 不在这里显示成功消息，由调用方处理
-    return true;
+    return await requestBlobDownload(
+      { url: '/api/v1/excel/export/ad-data', method: 'get', params },
+      { defaultFilename: '广告数据导出.xlsx' }
+    );
   } catch (error) {
-    // 如果是blob响应但实际是错误，尝试解析
-    if (error.response && error.response.data instanceof Blob) {
-      try {
-        const text = await error.response.data.text();
-        const errorData = JSON.parse(text);
-        if (errorData.code !== undefined && errorData.code !== 200) {
-          const errorMsg = errorData.detail || errorData.message || '导出失败';
-          const customError = new Error(errorMsg);
-          customError.code = errorData.code;
-          customError.response = {
-            data: errorData,
-            status: 200,
-            statusText: 'OK'
-          };
-          throw customError;
-        }
-      } catch (parseError) {
-        // 解析失败，使用原始错误
-      }
+    const errorMsg = extractErrorMessage(error) || '导出失败';
+    if (errorMsg.includes('无数据') || errorMsg.includes('不能导出') || errorMsg.includes('没有可导出')) {
+      throw error;
     }
-    
     handleError(error);
   }
 };
 
 // 导入广告数据
 export const importAdData = async (formData) => {
-  try {
-    // 确保CSRF令牌存在
-    await refreshCsrfTokenBeforeRequest();
-    
-    // 获取CSRF令牌（如果存在）
-    const csrfToken = getCsrfToken();
-    
-    // 构建headers，确保包含CSRF令牌
-    // 注意：不要手动设置 Content-Type，让 axios 自动处理 multipart/form-data 的 boundary
-    const headers = {};
-    if (csrfToken) {
-      headers['X-CSRF-Token'] = csrfToken;
-    }
-    
-    const response = await axios.post('/api/v1/excel/import/ad-data', formData, {
-      headers: Object.keys(headers).length > 0 ? headers : undefined,
-      timeout: 60000  // 导入可能需要较长时间，设置60秒超时
-    });
-    
-    // 响应结构: { code: 200, message: "success", data: ExcelImportResponse }
-    // ExcelImportResponse 包含: { message, status, imported_rows, failed_rows, error_details }
-    const normalized = normalizeResponse(response, { returnDataOnly: false });
-    
-    // 返回 data 字段中的 ExcelImportResponse 对象
-    return normalized?.data || normalized;
-  } catch (error) {
-    // 不在API层显示错误消息，由调用方处理
-    throw error;
-  }
+  const result = await requestUpload(
+    {
+      url: '/api/v1/excel/import/ad-data',
+      method: 'post',
+      data: formData
+    },
+    { returnDataOnly: false, timeout: 60000 }
+  );
+  return result?.data ?? result;
 };
 
 // 更新广告数据

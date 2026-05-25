@@ -9,7 +9,7 @@ from io import BytesIO
 from typing import Any
 
 import pandas as pd
-from fastapi import UploadFile, HTTPException, status
+from fastapi import UploadFile
 from sqlalchemy import or_, and_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,10 +21,12 @@ from app.api_v1.excel.utils import (
 )
 from app.api_v1.ml_model.ml_model import ColumnMappingService, REQUIRED_FIELDS
 from app.core.ad_data_processor import check_and_notify_data_decrease
+from app.core.excel_io import read_excel_from_bytes, read_excel_with_fallback
 from app.core.config import settings
 from app.core.constants import ECPM_MULTIPLIER
 from app.core.country_code import find_country_code_by_any_format
-from app.core.exceptions import handle_integrity_error
+from app.core.errors import ErrorCode
+from app.core.exceptions import handle_integrity_error, raise_api_exception
 from app.core.product_assignment import initialize_product_assignment
 from app.core.utils import (
     truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data,
@@ -50,8 +52,8 @@ def _ensure_xlrd(strict: bool, error_message: str) -> bool:
     except ImportError:
         logger.error(error_message)
         if strict:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            raise_api_exception(
+                ErrorCode.IMPORT_FILE_INVALID,
                 detail="系统缺少 xlrd 库，无法读取 .xls 格式文件。请安装 xlrd 库或使用 .xlsx 格式文件。"
             )
         return False
@@ -99,9 +101,9 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
     """
     # 验证文件类型
     if file.content_type not in ALLOWED_MIME_TYPES or not allowed_file(file.filename):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支持的文件类型。请上传Excel文件(.xlsx或.xls)"
+        raise_api_exception(
+            ErrorCode.IMPORT_FILE_INVALID,
+            detail="不支持的文件类型。请上传Excel文件(.xlsx或.xls)"
         )
 
     # 读取文件内容
@@ -110,14 +112,14 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
 
     # 检查文件大小
     if len(contents) > max_size:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        raise_api_exception(
+            ErrorCode.BAD_REQUEST,
             detail=f"文件大小超过限制（最大 {max_size / 1024 / 1024:.1f}MB）"
         )
 
     if not contents:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise_api_exception(
+            ErrorCode.IMPORT_FILE_INVALID,
             detail="上传的文件为空"
         )
 
@@ -166,40 +168,16 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
     # 首先尝试指定的引擎
     try:
         logger.debug(f"尝试使用 {engine} 引擎解析文件")
-        df = pd.read_excel(BytesIO(contents), engine=engine)
+        df, engine = await read_excel_with_fallback(
+            contents,
+            engine,
+            filename_lower=filename_lower,
+        )
         tried_engines.append(engine)
     except Exception as e:
         last_error = e
-        error_msg = str(e)
         tried_engines.append(engine)
-        logger.warning(f"使用 {engine} 引擎解析失败: {error_msg}")
-
-        # 如果第一次尝试失败，尝试另一个引擎
-        if engine == "openpyxl":
-            # 尝试 xlrd
-            try:
-                if _ensure_xlrd(strict=False, error_message="xlrd 库未安装，无法尝试 .xls 格式"):
-                    logger.info("尝试使用 xlrd 引擎解析文件（可能是 .xls 格式）")
-                    df = pd.read_excel(BytesIO(contents), engine="xlrd")
-                    engine = "xlrd"
-                    tried_engines.append("xlrd")
-                    logger.info("使用 xlrd 引擎解析成功")
-            except Exception as e2:
-                last_error = e2
-                tried_engines.append("xlrd")
-                logger.error(f"使用 xlrd 引擎也失败: {str(e2)}")
-        elif engine == "xlrd":
-            # 尝试 openpyxl
-            try:
-                logger.info("尝试使用 openpyxl 引擎解析文件（可能是 .xlsx 格式）")
-                df = pd.read_excel(BytesIO(contents), engine="openpyxl")
-                engine = "openpyxl"
-                tried_engines.append("openpyxl")
-                logger.info("使用 openpyxl 引擎解析成功")
-            except Exception as e2:
-                last_error = e2
-                tried_engines.append("openpyxl")
-                logger.error(f"使用 openpyxl 引擎也失败: {str(e2)}")
+        logger.warning(f"使用 {engine} 引擎解析失败: {str(e)}")
 
     # 如果所有尝试都失败，抛出友好的错误信息
     if df is None or df.empty:
@@ -240,10 +218,7 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
 
         logger.error(f"Excel文件解析失败: {detail}。文件名: {file.filename}, 大小: {len(contents)}字节")
 
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=detail
-        )
+        raise_api_exception(ErrorCode.IMPORT_DATA_VALIDATION_FAILED, detail=detail)
 
     return df, contents
 
@@ -326,10 +301,7 @@ async def process_column_mapping(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[s
         # 检查是否有错误信息（如：没有训练数据）
         error_msg = column_mapping_result.get("error")
         if error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=error_msg
-            )
+            raise_api_exception(ErrorCode.IMPORT_DATA_VALIDATION_FAILED, detail=error_msg)
 
         if missing_columns:
             missing_cn = [REQUIRED_FIELDS.get(col, col) for col in missing_columns]
@@ -365,14 +337,14 @@ async def process_column_mapping(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[s
             if column_mapping_result.get('mapping'):
                 error_detail += f"\n映射详情: {column_mapping_result.get('mapping', {})}"
 
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+            raise_api_exception(
+                ErrorCode.IMPORT_COLUMN_MAPPING_INCOMPLETE,
                 detail=error_detail
             )
         else:
             missing_mapped = column_mapping_result.get("missing_columns", [])
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+            raise_api_exception(
+                ErrorCode.IMPORT_COLUMN_MAPPING_INCOMPLETE,
                 detail=(
                     f"字段映射不完整，无法导入数据。缺少映射的字段: {', '.join(missing_mapped)}。"
                     f"\n\n系统完全基于训练数据进行智能识别，无法识别的列将不导入。"
@@ -383,8 +355,8 @@ async def process_column_mapping(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[s
     # 字段映射完整时，继续验证
     if missing_columns:
         missing_cn = [REQUIRED_FIELDS.get(col, col) for col in missing_columns]
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise_api_exception(
+            ErrorCode.IMPORT_COLUMN_MAPPING_INCOMPLETE,
             detail=f"Excel文件缺少必要的列: {', '.join(missing_cn)}。映射结果: {column_mapping_result}"
         )
 
@@ -1171,12 +1143,10 @@ async def import_ad_data_handler(
 
         return import_response
 
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Ad data import failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
             detail=f"导入广告数据失败: {str(e)}"
         )
     finally:

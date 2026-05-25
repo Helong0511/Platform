@@ -3,7 +3,7 @@ import logging
 import uuid
 from typing import Any, Dict, Optional, Tuple
 
-from fastapi import BackgroundTasks, HTTPException, Request, status
+from fastapi import BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm.exc import StaleDataError
@@ -12,6 +12,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.redis_client import get_redis_client
 from app.core.short_link_cache import update_short_link_cache
 from app.models.models import ShortLink
+from app.routes.short_link.errors import raise_short_link_not_found
 
 logger = logging.getLogger(__name__)
 
@@ -243,8 +244,5 @@ async def resolve_cloak_change_original_url(
 
     if not original_url:
         logger.error("[斗篷服务] 未找到原始 URL: short_code=%s", short_code)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="斗篷不存在或未配置原始 URL",
-        )
+        raise_short_link_not_found("斗篷不存在或未配置原始 URL")
     return original_url, is_first_visit

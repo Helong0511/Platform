@@ -145,10 +145,7 @@ class Settings(BaseSettings):
                     f"SECRET_KEY未设置，已自动生成随机密钥（64字符）"
                 )
                 logger.info(
-                    f"当前SECRET_KEY: {generated_key[:20]}...{generated_key[-10:]}"
-                )
-                logger.info(
-                    "提示：开发环境可以使用随机密钥，生产环境建议设置固定的SECRET_KEY"
+                    "提示：开发环境已自动生成 SECRET_KEY，生产环境请设置固定的 SECRET_KEY 环境变量"
                 )
                 return generated_key
 
@@ -274,7 +271,13 @@ class Settings(BaseSettings):
                 if is_prod:
                     logger.error("生产环境必须设置 DATABASE_URL 或 SQLALCHEMY_DATABASE_URI 环境变量")
                     raise ValueError("生产环境必须设置 DATABASE_URL 或 SQLALCHEMY_DATABASE_URI 环境变量")
-                v = "mysql+aiomysql://remote:kb7$rL3d8!tQ@127.0.0.1:3306/platform?charset=utf8mb4&collation=utf8mb4_0900_ai_ci"
+                logger.error(
+                    "未设置 DATABASE_URL：请在 .env 中配置，例如 "
+                    "mysql+aiomysql://user:pass@127.0.0.1:3306/platform?charset=utf8mb4"
+                )
+                raise ValueError(
+                    "必须设置 DATABASE_URL 或 SQLALCHEMY_DATABASE_URI 环境变量"
+                )
         
         # 生产环境验证：如果使用默认值（未明确设置环境变量），且包含默认密码，报错
         if is_prod:
@@ -334,7 +337,7 @@ class Settings(BaseSettings):
     # 首次启动时创建的管理员账户
     # 生产环境必须通过环境变量设置，且密码应足够复杂
     FIRST_SUPERUSER: str = os.getenv("FIRST_SUPERUSER", "admin")
-    FIRST_SUPERUSER_PASSWORD: str = os.getenv("FIRST_SUPERUSER_PASSWORD", "admin123")
+    FIRST_SUPERUSER_PASSWORD: str = os.getenv("FIRST_SUPERUSER_PASSWORD", "")
 
     @field_validator("FIRST_SUPERUSER_PASSWORD")
     @classmethod
@@ -346,19 +349,24 @@ class Settings(BaseSettings):
         production_env = os.getenv("PRODUCTION_ENV", "development").lower()
         is_prod = production_env in ["production", "prod"]
 
-        if is_prod:
-            # 生产环境强制要求
-            if not os.getenv("FIRST_SUPERUSER_PASSWORD"):
+        if not v or not str(v).strip():
+            if is_prod:
                 logger.error("生产环境必须设置 FIRST_SUPERUSER_PASSWORD 环境变量")
                 raise ValueError("生产环境必须设置 FIRST_SUPERUSER_PASSWORD 环境变量")
+            v = secrets.token_urlsafe(16)
+            logger.warning(
+                "未设置 FIRST_SUPERUSER_PASSWORD，开发环境已自动生成随机密码"
+            )
+            return v
+
+        if is_prod:
             if v == "admin123" or len(v) < 12:
                 logger.error("生产环境管理员密码必须至少12个字符，且不能使用默认密码")
                 raise ValueError("生产环境管理员密码必须至少12个字符，且不能使用默认密码")
-        else:
-            # 开发环境：允许使用简单密码，不显示警告
-            # 仅在密码长度过短时提示
-            if len(v) < 6:
-                logger.warning("管理员密码长度不足6个字符，建议使用更复杂的密码")
+        elif v == "admin123":
+            logger.warning("检测到弱默认管理员密码 admin123，请在 .env 中修改")
+        elif len(v) < 8:
+            logger.warning("管理员密码长度不足8个字符，建议使用更复杂的密码")
 
         return v
 
@@ -440,7 +448,7 @@ class Settings(BaseSettings):
         if os.getenv("TRACKING_TOKEN_MAX_AGE_SECONDS", "").strip()
         else None
     )
-    # 令牌外层最大字符数：与 click_id varchar(255) 对齐；短链场景代码内固定 60
+    # 令牌外层最大字符数：与 click_id varchar(255) 对齐（全场景统一，默认 255）
     TRACKING_TOKEN_MAX_OUTER_CHARS: int = int(
         os.getenv("TRACKING_TOKEN_MAX_OUTER_CHARS", "255")
     )
@@ -518,8 +526,8 @@ class Settings(BaseSettings):
 
     # ====== Facebook 像素配置 ======
     # 全局默认 Facebook 像素配置（作为兜底配置）
-    FACEBOOK_PIXEL_ID: str = os.getenv("FACEBOOK_PIXEL_ID", "1124622134062236")
-    FACEBOOK_ACCESS_TOKEN: str = os.getenv("FACEBOOK_ACCESS_TOKEN", "EAAifTOaIZCfQBRUvZBp4OmlIpYfCX4kSOITYbBXpMEvR9hGVABb40DnmZAuOGfXCghiOmtbU9IOzVfNX4UixokNPAzRIoAJ5Wd0dXdxZBZCGoYzycyIQTx68xNOpkYc37320gqQB2SzocbiT60YEZARK9DVHLFYV83XTU6uZBHbSwnhpZCmQ4YSGTF1H7DdlFLn8iQZDZD")
+    FACEBOOK_PIXEL_ID: str = os.getenv("FACEBOOK_PIXEL_ID", "")
+    FACEBOOK_ACCESS_TOKEN: str = os.getenv("FACEBOOK_ACCESS_TOKEN", "")
     FACEBOOK_API_VERSION: str = os.getenv("FACEBOOK_API_VERSION", "v23.0")
 
     # 已废弃：斗篷配置已迁移至数据库表 cloak_configs（系统服务 -> 斗篷管理）
@@ -528,6 +536,13 @@ class Settings(BaseSettings):
 
 # 创建配置实例
 settings = Settings()
+
+# 将 settings 中的追踪密钥同步到 os.environ，供 AdTrackingCodec 与旧代码路径一致读取
+if settings.AD_TRACKING_MASTER_KEY_HEX.strip():
+    os.environ.setdefault(
+        "AD_TRACKING_MASTER_KEY_HEX",
+        settings.AD_TRACKING_MASTER_KEY_HEX.strip(),
+    )
 
 # 验证关键配置
 if settings.is_production:
@@ -549,11 +564,18 @@ if settings.is_production:
     if "localhost" in cors_origins_str or "127.0.0.1" in cors_origins_str:
         logger.warning("CORS配置包含localhost，生产环境建议移除")
 
-    if settings.USE_TRACKING_TOKEN and not settings.AD_TRACKING_MASTER_KEY_HEX:
-        logger.warning(
-            "USE_TRACKING_TOKEN=true 但未设置 AD_TRACKING_MASTER_KEY_HEX，"
-            "将使用开发默认密钥，生产环境必须配置独立密钥"
-        )
+    if settings.USE_TRACKING_TOKEN:
+        from app.core.tracking.ad_tracking_codec import AdTrackingCodec
+
+        key_hex = settings.AD_TRACKING_MASTER_KEY_HEX.strip()
+        if not key_hex:
+            logger.error(
+                "生产环境 USE_TRACKING_TOKEN=true 必须设置 AD_TRACKING_MASTER_KEY_HEX"
+            )
+        elif key_hex == AdTrackingCodec._DEFAULT_KEY_HEX:
+            logger.error(
+                "生产环境不得使用 AdTrackingCodec 内置开发默认密钥，请配置独立密钥"
+            )
     if not settings.HUGUANG_API_KEY.strip():
         logger.warning("生产环境未配置 HUGUANG_API_KEY，Huguang 定时任务将跳过")
     if not settings.TQT_APP_KEY.strip():

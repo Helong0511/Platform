@@ -752,13 +752,17 @@ class NotificationConfigService:
         failed_count = 0
         failed_items = []
 
+        # 批量加载转化记录，避免逐条查询
+        load_result = await self.db.execute(
+            select(PostbackConversion).where(PostbackConversion.id.in_(conversion_ids))
+        )
+        conversions_by_id = {
+            c.id: c for c in load_result.scalars().all()
+        }
+
         for conversion_id in conversion_ids:
             try:
-                # 查询转化记录
-                result = await self.db.execute(
-                    select(PostbackConversion).where(PostbackConversion.id == conversion_id)
-                )
-                conversion = result.scalars().first()
+                conversion = conversions_by_id.get(conversion_id)
 
                 if not conversion:
                     failed_items.append({

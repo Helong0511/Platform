@@ -40,7 +40,6 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import jwt
 from sqlalchemy import func, and_
@@ -49,7 +48,9 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
 from app.core.audit_log import log_login, log_logout
+from app.core.auth_response import build_token_json_response, raise_auth_error
 from app.core.config import settings
+from app.core.errors import ErrorCode
 from app.core.database import get_db
 from app.core.security import JWTUtils, get_current_user
 from app.core.utils import get_app_now_naive, get_client_ip, get_device_type, APP_TIMEZONE
@@ -160,21 +161,20 @@ async def login(
         # 检查用户是否存在以及密码是否正确（使用安全的密码验证方法）
         if not user:
             logger.warning(f"用户登录失败: 用户不存在, 用户名={form_data.username}, IP={client_ip}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="用户名或密码不正确",
-                headers={"WWW-Authenticate": "Bearer"},
+            raise_auth_error(
+                ErrorCode.INVALID_CREDENTIALS,
+                "用户名或密码不正确",
+                http_status=status.HTTP_401_UNAUTHORIZED,
             )
 
         if not user.verify_password(form_data.password):
             logger.warning(f"用户登录失败: 密码错误, 用户名={form_data.username}, IP={client_ip}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="用户名或密码不正确",
-                headers={"WWW-Authenticate": "Bearer"},
+            raise_auth_error(
+                ErrorCode.INVALID_CREDENTIALS,
+                "用户名或密码不正确",
+                http_status=status.HTTP_401_UNAUTHORIZED,
             )
     except HTTPException:
-        # 重新抛出HTTP异常
         raise
     except Exception as e:
         # 捕获其他异常，记录日志并返回401错误
@@ -191,27 +191,26 @@ async def login(
             detail = f"登录失败: {error_type}: {error_msg}"
         else:
             detail = "登录失败，请稍后重试"
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=detail,
-            headers={"WWW-Authenticate": "Bearer"},
+        raise_auth_error(
+            ErrorCode.INVALID_CREDENTIALS,
+            detail,
+            http_status=status.HTTP_401_UNAUTHORIZED,
         )
 
-    # ====== 用户状态检查 ======
-    # 检查用户是否被禁用
     if not user.is_active:
         logger.warning(f"用户登录失败: 用户已被禁用, 用户名={form_data.username}, IP={client_ip}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="用户已被禁用",
+        raise_auth_error(
+            ErrorCode.USER_DISABLED,
+            "用户已被禁用",
+            http_status=status.HTTP_403_FORBIDDEN,
         )
 
-    # 检查用户登录是否受限（用于临时限制用户登录）
     if user.login_restricted:
         logger.warning(f"用户登录失败: 登录受限, 用户名={form_data.username}, IP={client_ip}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=user.login_message or "登录已被限制",
+        raise_auth_error(
+            ErrorCode.FORBIDDEN,
+            user.login_message or "登录已被限制",
+            http_status=status.HTTP_403_FORBIDDEN,
         )
 
     # ====== 客户IP白名单检查 ======
@@ -236,9 +235,10 @@ async def login(
                             f"用户名={form_data.username}, IP={client_ip}, "
                             f"白名单={allowed_ips}"
                         )
-                        raise HTTPException(
-                            status_code=status.HTTP_403_FORBIDDEN,
-                            detail=f"IP地址 {client_ip} 不在允许列表中，请联系管理员",
+                        raise_auth_error(
+                            ErrorCode.FORBIDDEN,
+                            f"IP地址 {client_ip} 不在允许列表中，请联系管理员",
+                            http_status=status.HTTP_403_FORBIDDEN,
                         )
                 # 如果allowed_ips为空或None，则不限制IP（向后兼容）
 
@@ -330,47 +330,27 @@ async def login(
             publisher_count = publisher_check.scalar() or 0
             has_publisher = publisher_count > 0
 
-    response_data = {
-        "access_token": access_token,
-        "refresh_token": refresh_token,  # 刷新令牌
-        "token_type": "bearer",
-        "user": {
-            "id": user.id,
-            "username": user.username,
-            "full_name": user.full_name,
-            "email": user.email,
-            "role": user.role.value,
-            "api_enabled": api_enabled,  # 客户API访问开关状态
-            "has_publisher": has_publisher  # 是否有关联的渠道（用于前端菜单显示）
-        }
+    user_payload = {
+        "id": user.id,
+        "username": user.username,
+        "full_name": user.full_name,
+        "email": user.email,
+        "role": user.role.value,
+        "api_enabled": api_enabled,
+        "has_publisher": has_publisher,
     }
 
-    # ====== 设置 HttpOnly Cookie (安全增强) ======
-    # 创建响应对象并设置 Cookie
-    # 我们仍然通过 JSON 返回 token 以保持向后兼容，但通过 Cookie 提供更高的安全性
-    # 转换为 JSONResponse 格式以包含数据
-    json_response = JSONResponse(content=response_data)
-
-    # 设置 Cookie
-    # httponly=True 防止 XSS 攻击读取 token
-    # secure=True 仅允许通过 HTTPS 发送
-    # samesite="Lax" 提供基本的 CSRF 防御
-    json_response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        secure=settings.is_production,  # 生产环境必须为 True
-        samesite="lax",
-        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    )
-
-    # 异步记录登录日志（不阻塞响应）
     try:
         await log_login(db=db, user=user, request=request, success=True)
     except Exception as e:
         logger.warning(f"记录登录日志失败: {e}")
 
-    return json_response
+    return build_token_json_response(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=user_payload,
+        message="登录成功",
+    )
 
 
 @router.post("/logout", response_model=ResponseBaseSchema[dict], summary="用户退出登录")

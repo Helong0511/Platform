@@ -3,13 +3,16 @@
 
 生产兼容策略：
 - ``USE_TRACKING_TOKEN=false``（默认）：生成仍走旧版随机 click_id，与现网一致。
-- 解析：始终先尝试令牌解析；失败则回退 ``clicks`` 表查询（旧 click_id 不受影响）。
+- 解析：粗筛 + verify 通过后 parse；失败则回退 ``clicks`` 表查询（旧 click_id 不受影响）。
+- 生成：总长 ≤255；有用户 query 时**尽量**把 ``url_params`` 写入令牌（多档裁剪 + 多种编码），
+  仅当全部带 ``up`` 的组合都塞不下时才去掉 ``up``。
 """
 from __future__ import annotations
 
 import logging
+import struct
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
 from app.core.tracking.ad_tracking_codec import (
@@ -17,7 +20,10 @@ from app.core.tracking.ad_tracking_codec import (
     REASON_OK,
     TOKEN_OUTER_ALPHABET,
 )
-from app.core.tracking.click_id_generator import generate_click_id_from_timestamp
+from app.core.tracking.click_id_generator import (
+    CLICK_ID_CHARS,
+    generate_click_id_from_timestamp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +35,40 @@ _KEY_PUBLISHER = "pub"
 _KEY_ADVERTISER = "aid"
 _KEY_SHORT_LINK = "slid"
 _KEY_URL_PARAMS = "up"
+# 短链场景：仅 ID 数组 [offer, publisher, advertiser, short_link?]，显著小于对象 JSON
+_KEY_ID_LIST = "i"
 
-# 与 models / sql 中 click_id varchar(255) 一致
+# 与 models / sql 中 click_id varchar(255) 一致（全场景统一上限）
 CLICK_ID_MAX_LENGTH = 255
 
-# 短链接 URL 场景历史约束
-CLICK_ID_SHORT_LINK_MAX_OUTER = 60
+# 向后兼容别名（历史短链 60 字符限制已取消，统一 255）
+CLICK_ID_SHORT_LINK_MAX_OUTER = CLICK_ID_MAX_LENGTH
+
+# url_params 写入令牌：先尽量完整嵌入，再逐级裁剪（仅实在塞不下才去掉 up）
+_MAX_URL_PARAM_KEYS = 40
+_MAX_URL_PARAM_VALUE_LEN = 160
+
+# 裁剪到极限时仍尽量保留的常见追踪参数（按优先级）
+_TRACKING_QUERY_KEYS: tuple[str, ...] = (
+    "fbclid",
+    "gclid",
+    "clickid",
+    "click_id",
+    "aff_click_id",
+    "sub_affid",
+    "channel_id",
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_content",
+    "utm_term",
+    "cid",
+    "clk_id",
+)
+
+# 旧版 click_id 字符集 ⊂ 令牌外层字母表；下列字符仅令牌可能出现
+_LEGACY_ALPHABET = set(CLICK_ID_CHARS)
+_TOKEN_ONLY_CHARS = set(TOKEN_OUTER_ALPHABET) - _LEGACY_ALPHABET
 
 
 def click_id_max_length() -> int:
@@ -42,11 +76,10 @@ def click_id_max_length() -> int:
 
 
 def tracking_token_max_outer_chars(*, for_short_link: bool = False) -> int:
-    """紧凑令牌外层字符上限：短链 60，其余默认 255（可配置）。"""
-    if for_short_link:
-        return CLICK_ID_SHORT_LINK_MAX_OUTER
+    """令牌外层字符上限，与 click_id 列一致，默认 255（``for_short_link`` 不再单独限 60）。"""
+    _ = for_short_link  # 保留参数以兼容调用方
     cap = int(getattr(settings, "TRACKING_TOKEN_MAX_OUTER_CHARS", CLICK_ID_MAX_LENGTH))
-    return min(max(cap, CLICK_ID_SHORT_LINK_MAX_OUTER), CLICK_ID_MAX_LENGTH)
+    return min(max(cap, 12), CLICK_ID_MAX_LENGTH)
 
 
 def ensure_click_id_db_length(click_id: str) -> str:
@@ -67,12 +100,22 @@ def use_tracking_token() -> bool:
 
 
 def _looks_like_tracking_token(click_id: str) -> bool:
-    """粗筛：仅含 58 进制字母表字符才尝试解析，避免对旧随机串做无用解密。"""
+    """
+    粗筛：避免对典型旧版 ~40 位时间戳 ID 做无用 verify/parse。
+
+    旧版字符集是 58 字母表的真子集；含「仅令牌」字符则必尝试解析。
+    """
     s = (click_id or "").strip()
     if not s or len(s) < 12:
         return False
-    alphabet = set(TOKEN_OUTER_ALPHABET)
-    return all(c in alphabet for c in s)
+    if not all(c in TOKEN_OUTER_ALPHABET for c in s):
+        return False
+    if any(c in _TOKEN_ONLY_CHARS for c in s):
+        return True
+    # 纯旧版字母表且长度在典型旧 ID 区间 → 视为 legacy，直接走 DB
+    if 36 <= len(s) <= 52 and all(c in _LEGACY_ALPHABET for c in s):
+        return False
+    return len(s) <= CLICK_ID_MAX_LENGTH
 
 
 def _ms_to_naive_beijing(ts_ms: int) -> datetime:
@@ -92,6 +135,292 @@ def _pick_int(data: Dict[str, Any], *keys: str) -> Optional[int]:
     return None
 
 
+def _ids_from_userinfo(ui: Dict[str, Any]) -> tuple[
+    Optional[int], Optional[int], Optional[int], Optional[int]
+]:
+    """从 userinfo 解析 offer / publisher / advertiser / short_link。"""
+    if _KEY_ID_LIST in ui:
+        raw = ui[_KEY_ID_LIST]
+        if isinstance(raw, list):
+            vals: List[Optional[int]] = []
+            for x in raw:
+                try:
+                    vals.append(int(x) if x is not None else None)
+                except (TypeError, ValueError):
+                    vals.append(None)
+            while len(vals) < 4:
+                vals.append(None)
+            return vals[0], vals[1], vals[2], vals[3]
+
+    return (
+        _pick_int(ui, _KEY_OFFER, "offer_id", "oid"),
+        _pick_int(ui, _KEY_PUBLISHER, "publisher_id", "pub", "pid"),
+        _pick_int(ui, _KEY_ADVERTISER, "advertiser_id", "aid"),
+        _pick_int(ui, _KEY_SHORT_LINK, "short_link_id", "slid"),
+    )
+
+
+def build_minimal_id_list_params(
+    *,
+    offer_id: Optional[int] = None,
+    publisher_id: Optional[int] = None,
+    advertiser_id: Optional[int] = None,
+    short_link_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """短链紧凑载荷：``{"i":[oid,pub,aid,slid?]}``，仅去掉尾部 None。"""
+    slots: List[Optional[int]] = [
+        int(offer_id) if offer_id is not None else None,
+        int(publisher_id) if publisher_id is not None else None,
+        int(advertiser_id) if advertiser_id is not None else None,
+        int(short_link_id) if short_link_id is not None else None,
+    ]
+    while len(slots) > 1 and slots[-1] is None:
+        slots.pop()
+    if not any(s is not None for s in slots):
+        return {}
+    return {_KEY_ID_LIST: slots}
+
+
+def _coerce_url_params(
+    url_params: Dict[str, Any],
+    *,
+    max_keys: int,
+    max_value_len: int,
+    key_priority: Optional[tuple[str, ...]] = None,
+) -> Dict[str, Any]:
+    """将 url_params 规范为可 JSON 序列化的扁平 dict（可控键数与值长）。"""
+    items: List[tuple[str, Any]] = []
+    seen: set[str] = set()
+
+    def _add(key: str, val: Any) -> None:
+        if val is None or key in seen or len(items) >= max_keys:
+            return
+        if isinstance(val, (dict, list)):
+            try:
+                import json as _json
+
+                sval = _json.dumps(val, ensure_ascii=False, separators=(",", ":"))
+            except Exception:
+                sval = str(val)
+        else:
+            sval = str(val)
+        if max_value_len > 0 and len(sval) > max_value_len:
+            sval = sval[:max_value_len]
+        if not sval and sval != "0":
+            return
+        seen.add(key)
+        items.append((key, sval))
+
+    # 每一档都先写入追踪键，再写其余参数（尽量带上 fbclid/utm 等）
+    priority = key_priority if key_priority is not None else _TRACKING_QUERY_KEYS
+    lower_map = {str(k).lower(): (str(k), v) for k, v in url_params.items()}
+    for pk in priority:
+        hit = lower_map.get(pk.lower())
+        if hit:
+            _add(hit[0][:64], hit[1])
+
+    for k, v in url_params.items():
+        _add(str(k)[:64], v)
+
+    return dict(items)
+
+
+def _url_params_slim_ladder(
+    url_params: Optional[Dict[str, Any]],
+) -> List[Optional[Dict[str, Any]]]:
+    """
+    生成多档 url_params，从「尽量完整」到「仅保留关键追踪键」。
+    仅在所有档位均无法生成 ≤255 令牌时，上层才会尝试去掉 up。
+    """
+    if not url_params or not isinstance(url_params, dict):
+        return [None]
+
+    ladder: List[Optional[Dict[str, Any]]] = []
+    seen: set[str] = set()
+
+    def _push(d: Dict[str, Any]) -> None:
+        if not d:
+            return
+        sig = tuple(sorted((k, str(v)) for k, v in d.items()))
+        if sig in seen:
+            return
+        seen.add(sig)
+        ladder.append(d)
+
+    # 档位 0：尽量原样保留（追踪键优先，其次其余键；仅截断超长值）
+    raw: Dict[str, Any] = {}
+    raw_seen: set[str] = set()
+
+    def _raw_put(key: str, val: Any) -> None:
+        if key in raw_seen or len(raw) >= 40 or val is None:
+            return
+        if isinstance(val, (str, int, float, bool)):
+            stored: Any = (
+                val if not isinstance(val, str) else (val if len(val) <= 512 else val[:512])
+            )
+        else:
+            try:
+                import json as _json
+
+                stored = _json.dumps(val, ensure_ascii=False, separators=(",", ":"))[:512]
+            except Exception:
+                stored = str(val)[:512]
+        raw_seen.add(key)
+        raw[key] = stored
+
+    lower_map = {str(k).lower(): (str(k), v) for k, v in url_params.items()}
+    for pk in _TRACKING_QUERY_KEYS:
+        hit = lower_map.get(pk.lower())
+        if hit:
+            _raw_put(hit[0][:64], hit[1])
+    for k, v in url_params.items():
+        _raw_put(str(k)[:64], v)
+    _push(raw)
+
+    # 档位 1：较大限额（尽量多带）
+    _push(_coerce_url_params(url_params, max_keys=80, max_value_len=512))
+    _push(
+        _coerce_url_params(
+            url_params,
+            max_keys=_MAX_URL_PARAM_KEYS,
+            max_value_len=_MAX_URL_PARAM_VALUE_LEN,
+        )
+    )
+    # 档位 2–4：逐步收紧
+    for max_k, max_v in ((32, 120), (24, 80), (16, 48), (12, 32), (8, 24)):
+        _push(_coerce_url_params(url_params, max_keys=max_k, max_value_len=max_v))
+    # 档位 5：仅常见追踪键
+    _push(
+        _coerce_url_params(
+            url_params,
+            max_keys=len(_TRACKING_QUERY_KEYS),
+            max_value_len=64,
+            key_priority=_TRACKING_QUERY_KEYS,
+        )
+    )
+    _push(
+        _coerce_url_params(
+            url_params,
+            max_keys=len(_TRACKING_QUERY_KEYS),
+            max_value_len=24,
+            key_priority=_TRACKING_QUERY_KEYS,
+        )
+    )
+    return ladder if ladder else [None]
+
+
+def _attach_url_params(
+    base: Dict[str, Any],
+    url_params: Dict[str, Any],
+) -> Dict[str, Any]:
+    merged = dict(base)
+    merged[_KEY_URL_PARAMS] = url_params
+    return merged
+
+
+def _params_fingerprint(p: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not p:
+        return None
+    try:
+        import json as _json
+
+        return _json.dumps(p, sort_keys=True, separators=(",", ":"), default=str)
+    except Exception:
+        return str(p)
+
+
+def _build_generation_attempts(
+    *,
+    offer_id: Optional[int],
+    publisher_id: Optional[int],
+    advertiser_id: Optional[int],
+    short_link_id: Optional[int],
+    url_params: Optional[Dict[str, Any]],
+    extra: Optional[Dict[str, Any]],
+) -> List[Optional[Dict[str, Any]]]:
+    """
+    生成尝试序列：在 255 限制内**尽量保留 url_params**（多档裁剪 × 多种载荷），
+    仅当全部带 up 的尝试均失败后才尝试无 up。
+    """
+    attempts: List[Optional[Dict[str, Any]]] = []
+    seen_fp: set[str] = set()
+
+    def _add(p: Optional[Dict[str, Any]]) -> None:
+        if p is None:
+            return
+        fp = _params_fingerprint(p)
+        if fp is None or fp in seen_fp:
+            return
+        seen_fp.add(fp)
+        attempts.append(p)
+
+    id_list_base = build_minimal_id_list_params(
+        offer_id=offer_id,
+        publisher_id=publisher_id,
+        advertiser_id=advertiser_id,
+        short_link_id=short_link_id,
+    )
+
+    up_ladder = _url_params_slim_ladder(url_params)
+    has_up = url_params and isinstance(url_params, dict) and bool(url_params)
+
+    if has_up:
+        for up in up_ladder:
+            if not up:
+                continue
+            # 紧凑 ID + up（体积最小，尽量塞下更多 query）
+            if id_list_base:
+                _add(_attach_url_params(id_list_base, up))
+            # 标准对象 + up（兼容旧解析键名）
+            _add(
+                build_tracking_user_params(
+                    offer_id=offer_id,
+                    publisher_id=publisher_id,
+                    advertiser_id=advertiser_id,
+                    short_link_id=short_link_id,
+                    url_params=up,
+                    extra=extra,
+                    minimal=False,
+                )
+            )
+
+    # 最后手段：去掉 up（仅在上面的带 up 尝试全部失败后才会走到这里）
+    if id_list_base:
+        _add(id_list_base)
+    _add(
+        build_tracking_user_params(
+            offer_id=offer_id,
+            publisher_id=publisher_id,
+            advertiser_id=advertiser_id,
+            short_link_id=short_link_id,
+            url_params=None,
+            extra=extra,
+            minimal=False,
+        )
+    )
+
+    if not attempts:
+        attempts.append(None)
+    return attempts
+
+
+def _formats_for_attempt(
+    params: Optional[Dict[str, Any]],
+    base_fmt: str,
+) -> List[str]:
+    """含 url_params 时多试 full（zlib），尽量把 query 塞进 255。"""
+    if not params or _KEY_URL_PARAMS not in params:
+        if base_fmt == "compact":
+            return ["compact", "auto"]
+        return [base_fmt] if base_fmt != "auto" else ["auto", "compact"]
+
+    if base_fmt == "full":
+        return ["full", "auto", "compact"]
+    if base_fmt == "compact":
+        return ["compact", "full", "auto"]
+    return ["auto", "full", "compact"]
+
+
 def build_tracking_user_params(
     *,
     offer_id: Optional[int] = None,
@@ -100,8 +429,17 @@ def build_tracking_user_params(
     short_link_id: Optional[int] = None,
     url_params: Optional[Dict[str, Any]] = None,
     extra: Optional[Dict[str, Any]] = None,
+    minimal: bool = False,
 ) -> Dict[str, Any]:
-    """组装写入令牌 userinfo 的紧凑字段。"""
+    """组装写入令牌 userinfo 的字段。``minimal=True`` 时仅用 ID 数组（短链）。"""
+    if minimal:
+        return build_minimal_id_list_params(
+            offer_id=offer_id,
+            publisher_id=publisher_id,
+            advertiser_id=advertiser_id,
+            short_link_id=short_link_id,
+        )
+
     params: Dict[str, Any] = {}
     if offer_id is not None:
         params[_KEY_OFFER] = int(offer_id)
@@ -135,33 +473,34 @@ def generate_tracking_click_id(
     """
     生成带业务参数的追踪令牌。
 
-    默认 ``auto``：在 max_outer_chars 内优先 compact，否则 full（总长 ≤255）。
-    短链请设 ``for_short_link=True``（外层 ≤60）；普通追踪用 255。
-    失败时回退旧版 ``generate_click_id_from_timestamp``，避免点击链路中断。
+    外层长度上限统一为 ``CLICK_ID_MAX_LENGTH``(255)。有 ``url_params`` 时多档裁剪、
+    多种编码反复尝试以**尽量**保留 up；仅当全部失败后才去掉 up，再失败则回退旧 click_id。
     """
+    _ = for_short_link  # 兼容参数，不再单独限制 60 字符
     outer_cap = (
-        max_outer_chars
+        min(int(max_outer_chars), CLICK_ID_MAX_LENGTH)
         if max_outer_chars is not None
-        else tracking_token_max_outer_chars(for_short_link=for_short_link)
+        else tracking_token_max_outer_chars()
     )
 
     def _try_generate(params: Optional[Dict[str, Any]], fmt: str) -> str:
-        try:
-            return AdTrackingCodec.generate(
-                params,
-                format=fmt,  # type: ignore[arg-type]
-                max_outer_chars=outer_cap,
-            )
-        except ValueError:
-            if fmt != "full":
+        last: Optional[Exception] = None
+        for use_fmt in _formats_for_attempt(params, fmt):
+            try:
                 return AdTrackingCodec.generate(
                     params,
-                    format="full",
+                    format=use_fmt,  # type: ignore[arg-type]
                     max_outer_chars=outer_cap,
+                    allow_full=True,
                 )
-            raise
+            except (ValueError, RuntimeError) as e:
+                last = e
+        if last:
+            raise last
+        raise ValueError("无法生成追踪令牌")
 
-    user_params = build_tracking_user_params(
+    fmt = token_format if token_format in ("compact", "full", "auto") else "auto"
+    all_attempts = _build_generation_attempts(
         offer_id=offer_id,
         publisher_id=publisher_id,
         advertiser_id=advertiser_id,
@@ -169,26 +508,73 @@ def generate_tracking_click_id(
         url_params=url_params,
         extra=extra,
     )
-    fmt = token_format if token_format in ("compact", "full", "auto") else "auto"
+    # 阶段一：仅带 up；阶段二：无 up（仅当阶段一全部失败才执行）
+    with_up_attempts = [
+        a for a in all_attempts if a and _KEY_URL_PARAMS in a
+    ]
+    without_up_attempts = [
+        a for a in all_attempts if not a or _KEY_URL_PARAMS not in a
+    ]
+
+    last_error: Optional[Exception] = None
+    had_url_params_input = bool(url_params and isinstance(url_params, dict))
+
+    def _attempt_once(attempt_params: Optional[Dict[str, Any]]) -> Optional[str]:
+        nonlocal last_error
+        try:
+            token = _try_generate(attempt_params, fmt)
+            if len(token) > CLICK_ID_MAX_LENGTH:
+                last_error = ValueError(
+                    f"令牌长度 {len(token)} 超过上限 {CLICK_ID_MAX_LENGTH}"
+                )
+                return None
+            return ensure_click_id_db_length(token)
+        except (ValueError, RuntimeError, struct.error) as e:
+            last_error = e
+            return None
+        except Exception as e:
+            last_error = e
+            return None
+
     try:
-        token = _try_generate(user_params or None, fmt)
-        if len(token) > CLICK_ID_MAX_LENGTH and user_params and _KEY_URL_PARAMS in user_params:
-            slim = {k: v for k, v in user_params.items() if k != _KEY_URL_PARAMS}
-            logger.warning(
-                "click_id 超过 %s，去掉 url_params 后重试",
-                CLICK_ID_MAX_LENGTH,
+        for attempt_params in with_up_attempts:
+            token = _attempt_once(attempt_params)
+            if not token:
+                continue
+            up_map = (attempt_params or {}).get(_KEY_URL_PARAMS) or {}
+            logger.debug(
+                "追踪令牌已生成（含 url_params）offer=%s pub=%s len=%s up_keys=%s",
+                offer_id,
+                publisher_id,
+                len(token),
+                len(up_map),
             )
-            token = _try_generate(slim or None, fmt)
-        token = ensure_click_id_db_length(token)
-        logger.debug(
-            "追踪令牌已生成 offer=%s pub=%s aid=%s len=%s cap=%s",
-            offer_id,
-            publisher_id,
-            advertiser_id,
-            len(token),
-            outer_cap,
-        )
-        return token
+            return token
+
+        for attempt_params in without_up_attempts:
+            token = _attempt_once(attempt_params)
+            if not token:
+                continue
+            if had_url_params_input:
+                logger.warning(
+                    "click_id 已生成但未嵌入 url_params（255 内所有带 up 尝试均失败）"
+                    " offer=%s pub=%s len=%s",
+                    offer_id,
+                    publisher_id,
+                    len(token),
+                )
+            else:
+                logger.debug(
+                    "追踪令牌已生成 offer=%s pub=%s len=%s",
+                    offer_id,
+                    publisher_id,
+                    len(token),
+                )
+            return token
+
+        if last_error:
+            raise last_error
+        raise ValueError("无法生成追踪令牌")
     except Exception as e:
         logger.warning(
             "追踪令牌生成失败，回退旧 click_id: %s (offer=%s pub=%s)",
@@ -240,17 +626,14 @@ def association_from_parsed(parsed: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     ts_ms = sysinfo.get("timestamp_ms")
     click_time = _ms_to_naive_beijing(int(ts_ms)) if ts_ms is not None else None
 
-    offer_id = _pick_int(ui, _KEY_OFFER, "offer_id", "oid")
-    publisher_id = _pick_int(ui, _KEY_PUBLISHER, "publisher_id", "pub", "pid")
-    advertiser_id = _pick_int(ui, _KEY_ADVERTISER, "advertiser_id", "aid")
-    short_link_id = _pick_int(ui, _KEY_SHORT_LINK, "short_link_id", "slid")
+    offer_id, publisher_id, advertiser_id, short_link_id = _ids_from_userinfo(ui)
 
     url_params = ui.get(_KEY_URL_PARAMS) or ui.get("url_params")
     if url_params is not None and not isinstance(url_params, dict):
         url_params = None
 
     return {
-        "click_id": None,  # 由调用方填入
+        "click_id": None,
         "offer_id": offer_id,
         "publisher_id": publisher_id,
         "advertiser_id": advertiser_id,
@@ -272,7 +655,7 @@ def association_from_parsed(parsed: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 def resolve_click_from_token(click_id: str) -> Optional[Dict[str, Any]]:
     """
     仅从令牌解析归因（不访问数据库）。
-    旧版随机 click_id 通常解析失败，由上层回退 DB。
+    旧版随机 click_id 由粗筛跳过或 verify 失败后由上层回退 DB。
     """
     if len(click_id) > CLICK_ID_MAX_LENGTH:
         logger.warning("click_id 超过数据库上限 %s，无法解析", CLICK_ID_MAX_LENGTH)
@@ -281,15 +664,15 @@ def resolve_click_from_token(click_id: str) -> Optional[Dict[str, Any]]:
         return None
 
     max_age = getattr(settings, "TRACKING_TOKEN_MAX_AGE_SECONDS", None)
-    if max_age is not None and max_age > 0:
-        verified = AdTrackingCodec.verify(click_id, max_age_seconds=float(max_age))
-        if not verified.get("valid"):
-            logger.info(
-                "click_id 令牌校验未通过: %s reason=%s",
-                click_id[:24],
-                verified.get("reason"),
-            )
-            return None
+    max_age_arg = float(max_age) if max_age is not None and max_age > 0 else None
+    verified = AdTrackingCodec.verify(click_id, max_age_seconds=max_age_arg)
+    if not verified.get("valid"):
+        logger.debug(
+            "click_id 未通过令牌校验: %s reason=%s",
+            click_id[:24],
+            verified.get("reason"),
+        )
+        return None
 
     parsed = AdTrackingCodec.parse(click_id)
     assoc = association_from_parsed(parsed)
@@ -317,4 +700,28 @@ def resolve_click_from_token(click_id: str) -> Optional[Dict[str, Any]]:
     )
     return assoc
 
+
+def regenerate_click_id_from_click_data(click_data: Dict[str, Any]) -> str:
+    """碰撞重试时按原点击上下文重新生成 click_id。"""
+    url_params: Optional[Dict[str, Any]] = None
+    raw_up = click_data.get("url_params")
+    if isinstance(raw_up, dict):
+        url_params = raw_up
+    elif isinstance(raw_up, str) and raw_up.strip():
+        try:
+            import json as _json
+
+            parsed = _json.loads(raw_up)
+            if isinstance(parsed, dict):
+                url_params = parsed
+        except Exception:
+            pass
+
+    return generate_click_id_unified(
+        offer_id=click_data.get("offer_id"),
+        publisher_id=click_data.get("publisher_id"),
+        advertiser_id=click_data.get("advertiser_id"),
+        short_link_id=click_data.get("short_link_id"),
+        url_params=url_params,
+    )
 

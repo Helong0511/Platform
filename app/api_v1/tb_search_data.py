@@ -300,7 +300,8 @@ async def import_tb_search_data(
     # 验证文件并读取内容（使用公共验证函数）
     contents = await validate_excel_file(file)
     try:
-        df = pd.read_excel(BytesIO(contents))
+        from app.core.excel_io import read_excel_from_bytes
+        df = await read_excel_from_bytes(contents)
     except Exception as e:
         raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"读取Excel失败: {str(e)}")
 

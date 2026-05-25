@@ -3,9 +3,7 @@
  * 已统一使用 request 函数，保持代码一致性
  * 包含特殊逻辑：超时控制、文件导入、批量操作等
  */
-import { request, normalizePaginatedResponse, normalizeResponse, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest } from '../utils/api';
-import { getCsrfToken } from '../utils/csrfToken';
-import axios from 'axios'; // 保留用于特殊场景（超时控制、文件上传）
+import { request, normalizePaginatedResponse, normalizeResponse, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest, requestUpload } from '../utils/api';
 
 // 获取TB搜索数据列表
 export const getTBSearchDataList = async (params) => {
@@ -55,21 +53,14 @@ export const batchDeleteTBSearchData = async (dataIds) => {
 
 // 导入TB搜索数据
 export const importTBSearchData = async (formData) => {
-  try {
-    await refreshCsrfTokenBeforeRequest();
-    
-    const csrfToken = getCsrfToken();
-    const headers = {};
-    if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
-    
-    const response = await axios.post('/api/v1/tb-search-data/import', formData, {
-      headers: Object.keys(headers).length > 0 ? headers : undefined,
-      timeout: 60000
-    });
-    return normalizeResponse(response);
-  } catch (error) {
-    throw error;
-  }
+  return requestUpload(
+    {
+      url: '/api/v1/tb-search-data/import',
+      method: 'post',
+      data: formData
+    },
+    { returnDataOnly: false, timeout: 60000 }
+  );
 };
 
 // 获取有TB搜索数据的客户列表

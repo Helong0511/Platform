@@ -144,7 +144,7 @@ def generate_click_id_unified(
     统一生成入口（延迟导入，避免循环依赖）。
 
     USE_TRACKING_TOKEN=false 时与 ``generate_click_id_from_timestamp`` 行为一致。
-    短链场景请设 ``for_short_link=True``（外层 click_id 长度 ≤60）。
+    ``for_short_link`` 保留兼容；click_id 外层长度统一 ≤255，并尽量嵌入 url_params。
     """
     from app.core.tracking.click_token import generate_click_id_unified as _gen
 

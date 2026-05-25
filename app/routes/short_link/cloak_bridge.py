@@ -3,8 +3,10 @@ import logging
 import os
 import re
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse
+
+from app.routes.short_link.errors import raise_short_link_not_found
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +20,7 @@ def register_bridge_routes(router: APIRouter) -> None:
     async def serve_bridge_static(filename: str, request: Request = None):
         if not re.match(r"^[a-zA-Z0-9_.-]+$", filename):
             logger.warning("[桥页静态资源] 文件名包含非法字符：%s", filename)
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="文件不存在",
-            )
+            raise_short_link_not_found("文件不存在")
 
         scripts_dir_server = "/data/Platform/scripts/bridge"
         current_dir = os.path.dirname(
@@ -39,10 +38,7 @@ def register_bridge_routes(router: APIRouter) -> None:
             file_path = file_path_local
         else:
             logger.warning("[桥页静态资源] 文件不存在：%s", filename)
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="文件不存在",
-            )
+            raise_short_link_not_found("文件不存在")
 
         content_type_map = {
             ".png": "image/png",

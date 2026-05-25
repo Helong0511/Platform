@@ -7,9 +7,11 @@ from datetime import datetime, timedelta, date
 from typing import Any
 
 import pandas as pd
-from fastapi import HTTPException, status, UploadFile
+from fastapi import UploadFile
 
 from app.core.config import settings
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
 
 logger = logging.getLogger(__name__)
 
@@ -42,28 +44,25 @@ async def validate_excel_file(file: UploadFile) -> bytes:
         文件内容（bytes）
     
     异常:
-        HTTPException: 如果文件验证失败
+        通过 raise_api_exception 返回标准错误体
     """
-    # 验证文件类型
     if file.content_type not in ALLOWED_MIME_TYPES or not allowed_file(file.filename):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise_api_exception(
+            ErrorCode.IMPORT_FILE_INVALID,
             detail="不支持的文件类型。请上传Excel文件(.xlsx或.xls)"
         )
 
-    # 读取文件内容
     contents = await file.read()
 
-    # 检查文件大小
     if len(contents) > settings.MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        raise_api_exception(
+            ErrorCode.BAD_REQUEST,
             detail=f"文件大小超过限制（最大 {settings.MAX_UPLOAD_SIZE / 1024 / 1024:.1f}MB）"
         )
 
     if not contents:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+        raise_api_exception(
+            ErrorCode.IMPORT_FILE_INVALID,
             detail="上传的文件为空"
         )
 

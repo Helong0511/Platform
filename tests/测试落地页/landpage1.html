@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mori Tale Ad</title>
+
+    <style>
+        /* 基础样式 - 黑色背景，居中布局 */
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            font-family: Arial, sans-serif;
+        }
+
+        /* 容器设置 - 最大宽度600px，适合移动设备 */
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            position: relative; /* 允许按钮悬浮在图片上 */
+        }
+
+        /* 广告图片 - 全宽响应式 */
+        .ad-image {
+            width: 100%;
+            display: block;
+        }
+
+        /* 悬浮按钮（覆盖原图按钮位置） */
+        .floating-btn {
+            position: absolute;
+
+            /* 关键定位：覆盖图中的按钮 */
+            bottom: 15px;               /* 控制按钮距离图片底部高度 */
+            left: 50%;
+            transform: translateX(-50%);
+
+            /* 按钮尺寸（接近图中按钮大小） */
+            width: 78%;                 /* 按钮宽度 */
+            padding: 18px 0;            /* 按钮厚度 */
+
+            background: #d4a253;        /* 金色背景 */
+            color: #fff;                /* 白色文字 */
+            font-size: 22px;            /* 字体大小 */
+            font-weight: 900;           /* 粗体 */
+            border-radius: 18px;        /* 圆角 */
+            text-align: center;         /* 居中文字 */
+            text-decoration: none;      /* 去除下划线 */
+            cursor: pointer;           /* 手型光标 */
+            user-select: none;         /* 禁止文字选择 */
+
+            transition: all 0.15s ease; /* 平滑过渡效果 */
+        }
+
+        /* 点击动画效果 */
+        .floating-btn:active {
+            transform: translateX(-50%) scale(0.92);
+            filter: brightness(1.22);
+        }
+
+        /* 点击动画类 */
+        .floating-btn.click-animate {
+            animation: clickPop 0.25s ease;
+        }
+
+        /* 关键帧动画定义 */
+        @keyframes clickPop {
+            0%   { transform: translateX(-50%) scale(1); }
+            40%  { transform: translateX(-50%) scale(0.9); }
+            80%  { transform: translateX(-50%) scale(1.05); }
+            100% { transform: translateX(-50%) scale(1); }
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+    <!-- 广告主图 - 展示游戏画面或宣传图 -->
+    <img src="mori1.jpg" class="ad-image" alt="Mori Tale游戏宣传图">
+
+    <!-- 行动号召按钮 - 触发下载的主要交互元素 -->
+    <a id="ctaBtn" class="floating-btn">Segera Dapatkan!</a>
+</div>
+
+<script>
+    // ============================================
+    // 第一部分：广告流量来源识别
+    // ============================================
+    
+    /**
+     * 功能1：解析URL中的查询参数
+     * 从当前页面URL中提取所有查询参数，如?gclid=abc&utm_source=google
+     * @returns {Object} 包含所有参数的键值对对象
+     */
+    function parseQueryParams() {
+        const params = {};
+        const queryString = window.location.search.substring(1);
+        
+        if (!queryString) {
+            console.log('🔍 URL中没有查询参数');
+            return params;
+        }
+        
+        const pairs = queryString.split('&');
+        for (let pair of pairs) {
+            const [key, value] = pair.split('=');
+            if (key) {
+                const decodedKey = decodeURIComponent(key);
+                const decodedValue = decodeURIComponent(value || '');
+                params[decodedKey] = decodedValue;
+            }
+        }
+        
+        console.log('🔍 解析到的URL参数:', params);
+        return params;
+    }
+    
+    /**
+     * 功能2：检测广告流量来源
+     * 根据URL参数判断流量来自哪个广告平台
+     * 优先级：平台特定ID > UTM参数 > 未知
+     * @param {Object} params - URL参数对象
+     * @returns {Object} 包含来源信息的对象
+     */
+    function detectTrafficSource(params) {
+        const result = {
+            source: 'unknown',           // 来源标识
+            sourceDetail: '无广告平台标识参数',  // 来源详细说明
+            clickId: null,               // 平台点击ID
+            platform: 'unknown',         // 平台名称
+            campaignData: {}              // 广告活动数据
+        };
+        
+        // 1. 检查Google广告标识符（最高优先级）
+        if (params.gclid) {
+            result.source = 'google_ads';
+            result.sourceDetail = '来自Google Ads广告';
+            result.clickId = params.gclid;
+            result.platform = 'google';
+            console.log('✅ 检测到Google广告流量，gclid:', params.gclid.substring(0, 20) + '...');
+        }
+        // 2. 检查Facebook广告标识符
+        else if (params.fbclid) {
+            result.source = 'facebook_ads';
+            result.sourceDetail = '来自Facebook/Instagram广告';
+            result.clickId = params.fbclid;
+            result.platform = 'facebook';
+            console.log('✅ 检测到Facebook广告流量，fbclid:', params.fbclid.substring(0, 20) + '...');
+        }
+        // 3. 检查TikTok广告标识符
+        else if (params.ttclid) {
+            result.source = 'tiktok_ads';
+            result.sourceDetail = '来自TikTok广告';
+            result.clickId = params.ttclid;
+            result.platform = 'tiktok';
+            console.log('✅ 检测到TikTok广告流量，ttclid:', params.ttclid.substring(0, 20) + '...');
+        }
+        // 4. 检查Microsoft Advertising标识符
+        else if (params.msclkid) {
+            result.source = 'microsoft_ads';
+            result.sourceDetail = '来自Microsoft Advertising广告';
+            result.clickId = params.msclkid;
+            result.platform = 'microsoft';
+            console.log('✅ 检测到Microsoft广告流量，msclkid:', params.msclkid.substring(0, 20) + '...');
+        }
+        // 5. 如果无平台特有ID，检查UTM参数
+        else if (params.utm_source) {
+            const utmSource = params.utm_source.toLowerCase();
+            result.source = utmSource;
+            result.platform = utmSource;
+            result.sourceDetail = `来自${utmSource}广告（UTM标识）`;
+            console.log('📊 通过UTM参数检测到流量来源:', utmSource);
+        }
+        // 6. 检查其他常见广告平台参数
+        else if (params.gad_source) {
+            result.source = 'google_ads_gad';
+            result.sourceDetail = '来自Google Ads（gad_source标识）';
+            result.platform = 'google';
+        }
+        else if (params._gl) {
+            result.source = 'google_analytics';
+            result.sourceDetail = '来自Google Analytics链接';
+            result.platform = 'google';
+        }
+        
+        // 收集所有UTM参数用于分析
+        const utmKeys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
+        utmKeys.forEach(key => {
+            if (params[key]) {
+                result.campaignData[key] = params[key];
+            }
+        });
+        
+        // 收集其他可能有用的参数
+        if (params.gbraid) result.campaignData.gbraid = params.gbraid;
+        if (params.wbraid) result.campaignData.wbraid = params.wbraid;
+        if (params.ad_id) result.campaignData.ad_id = params.ad_id;
+        if (params.adset_id) result.campaignData.adset_id = params.adset_id;
+        if (params.campaign_id) result.campaignData.campaign_id = params.campaign_id;
+        
+        return result;
+    }
+    
+    /**
+     * 功能3：上报流量数据到服务器
+     * 将检测到的流量来源信息发送到后端进行记录
+     * @param {Object} trafficData - 流量数据对象
+     */
+    function reportTrafficSource(trafficData) {
+        const reportData = {
+            timestamp: new Date().toISOString(),
+            page_url: window.location.href,
+            referrer: document.referrer || 'direct',
+            user_agent: navigator.userAgent,
+            ...trafficData
+        };
+        
+        // 发送到服务器端点（请根据实际情况修改端点URL）
+        fetch('/api/track-traffic', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(reportData)
+        })
+        .then(response => response.json())
+        .then(data => console.log('📤 流量数据上报成功:', data))
+        .catch(error => console.error('❌ 流量数据上报失败:', error));
+    }
+    
+    // ============================================
+    // 第二部分：设备类型检测与智能跳转
+    // ============================================
+    
+    /**
+     * 功能4：检测用户设备类型
+     * 通过User-Agent判断设备类型
+     * @returns {string} 设备类型：'ios', 'android', 'other'
+     */
+    function detectDeviceType() {
+        const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+        
+        // iOS设备检测
+        if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
+            return 'ios';
+        }
+        
+        // Android设备检测
+        if (/android/i.test(userAgent)) {
+            return 'android';
+        }
+        
+        // Windows Phone设备检测
+        if (/windows phone/i.test(userAgent)) {
+            return 'windows_phone';
+        }
+        
+        // 其他设备
+        return 'other';
+    }
+    
+    /**
+     * 功能5：获取设备对应的下载链接
+     * 根据不同设备类型返回对应的应用商店链接
+     * 注意：您需要替换YOUR_APP_STORE_ID为实际的App Store ID
+     * @param {string} deviceType - 设备类型
+     * @returns {string} 对应的应用商店链接
+     */
+    function getDownloadLink(deviceType) {
+        // 应用商店链接配置
+        const downloadLinks = {
+            'ios': 'https://apps.apple.com/app/idYOUR_APP_STORE_ID',  // 请替换YOUR_APP_STORE_ID
+            'android': 'https://play.google.com/store/apps/details?id=com.rxgame.qhworld',
+            'windows_phone': 'https://www.microsoft.com/store/apps',  // Windows Phone商店
+            'other': 'https://play.google.com/store/apps/details?id=com.rxgame.qhworld'  // 默认Google Play
+        };
+        
+        return downloadLinks[deviceType] || downloadLinks.other;
+    }
+    
+    /**
+     * 功能6：触发转化追踪像素
+     * 向服务器发送像素请求，记录转化事件
+     * @param {Object} sourceInfo - 流量来源信息
+     * @param {string} deviceType - 设备类型
+     */
+    function fireConversionPixel(sourceInfo, deviceType) {
+        // 构造像素URL
+        const pixelUrl = new URL('/pixel-fire', window.location.origin);
+        
+        // 添加基本参数
+        pixelUrl.searchParams.append('event', 'conversion');
+        pixelUrl.searchParams.append('timestamp', Date.now());
+        pixelUrl.searchParams.append('source', sourceInfo.source);
+        pixelUrl.searchParams.append('platform', sourceInfo.platform);
+        pixelUrl.searchParams.append('device', deviceType);
+        
+        // 添加点击ID（如果存在）
+        if (sourceInfo.clickId) {
+            pixelUrl.searchParams.append('click_id', sourceInfo.clickId);
+        }
+        
+        // 添加UTM参数
+        Object.entries(sourceInfo.campaignData).forEach(([key, value]) => {
+            pixelUrl.searchParams.append(key, value);
+        });
+        
+        // 发送像素请求
+        fetch(pixelUrl.toString(), {
+            method: 'GET',
+            mode: 'no-cors',  // 使用no-cros模式避免CORS问题
+            cache: 'no-cache'
+        })
+        .then(() => console.log('📊 转化像素触发成功'))
+        .catch(err => console.error('像素触发错误:', err));
+    }
+    
+    // ============================================
+    // 第三部分：主程序执行流程
+    // ============================================
+    
+    // 全局变量，存储检测结果
+    window.trafficInfo = null;
+    window.deviceType = null;
+    
+    // 页面加载完成后执行
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('🚀 页面加载完成，开始初始化...');
+        
+        // 步骤1：解析URL参数
+        const urlParams = parseQueryParams();
+        
+        // 步骤2：检测广告流量来源
+        const trafficSource = detectTrafficSource(urlParams);
+        window.trafficInfo = trafficSource;  // 存储到全局变量
+        
+        // 步骤3：检测设备类型
+        const deviceType = detectDeviceType();
+        window.deviceType = deviceType;  // 存储到全局变量
+        
+        // 步骤4：在控制台显示检测结果
+        console.group('📈 广告流量与设备检测报告');
+        console.log('🔍 流量来源:', trafficSource.sourceDetail);
+        console.log('📱 设备类型:', deviceType);
+        console.log('🌐 用户代理:', navigator.userAgent);
+        console.log('📍 当前URL:', window.location.href);
+        
+        if (trafficSource.clickId) {
+            console.log('🆔 点击标识符:', trafficSource.clickId);
+        }
+        
+        if (Object.keys(trafficSource.campaignData).length > 0) {
+            console.log('🎯 广告活动数据:', trafficSource.campaignData);
+        }
+        console.groupEnd();
+        
+        // 步骤5：上报流量数据到服务器（可选，根据需求启用）
+        // reportTrafficSource(trafficSource);
+        
+        // 步骤6：根据设备类型优化显示（可选）
+        optimizeDisplayForDevice(deviceType);
+    });
+    
+    /**
+     * 功能7：根据设备类型优化显示
+     * 可以针对不同设备调整页面显示
+     * @param {string} deviceType - 设备类型
+     */
+    function optimizeDisplayForDevice(deviceType) {
+        const btn = document.getElementById('ctaBtn');
+        
+        if (deviceType === 'ios') {
+            // iOS设备优化
+            console.log('📱 检测到iOS设备，已应用优化');
+            // 可以在这里添加iOS特定的样式或内容调整
+        } else if (deviceType === 'android') {
+            // Android设备优化
+            console.log('🤖 检测到Android设备，已应用优化');
+        } else {
+            console.log('💻 检测到其他设备类型');
+        }
+    }
+    
+    // ============================================
+    // 第四部分：按钮点击事件处理
+    // ============================================
+    
+    const btn = document.getElementById('ctaBtn');
+    
+    btn.addEventListener('click', function(event) {
+        // 防止默认行为（如果有的话）
+        event.preventDefault();
+        
+        // 添加点击动画效果
+        btn.classList.add('click-animate');
+        
+        // 获取检测结果
+        const trafficInfo = window.trafficInfo || { source: 'unknown', sourceDetail: '未知来源' };
+        const deviceType = window.deviceType || detectDeviceType();
+        
+        console.log('🖱️ 按钮被点击，准备跳转...');
+        console.log('📊 点击详情:', {
+            流量来源: trafficInfo.sourceDetail,
+            设备类型: deviceType,
+            点击时间: new Date().toISOString()
+        });
+        
+        // 步骤1：触发转化追踪像素
+        fireConversionPixel(trafficInfo, deviceType);
+        
+        // 步骤2：发送额外的追踪数据到服务器
+        fetch('/api/track-click', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                timestamp: new Date().toISOString(),
+                source: trafficInfo.source,
+                platform: trafficInfo.platform,
+                device: deviceType,
+                click_id: trafficInfo.clickId,
+                campaign_data: trafficInfo.campaignData,
+                page_url: window.location.href
+            })
+        })
+        .then(response => response.json())
+        .then(data => console.log('✅ 点击数据上报成功:', data))
+        .catch(error => console.error('❌ 点击数据上报失败:', error));
+        
+        // 步骤3：获取对应的下载链接
+        const downloadLink = getDownloadLink(deviceType);
+        console.log('🔗 跳转链接:', downloadLink);
+        
+        // 步骤4：延迟跳转，确保追踪数据发送完成
+        setTimeout(() => {
+            // 移除动画类
+            btn.classList.remove('click-animate');
+            
+            // 执行跳转
+            window.location.href = downloadLink;
+        }, 300);  // 300ms延迟，确保追踪请求发出
+    });
+    
+    // ============================================
+    // 第五部分：附加功能 - 页面卸载处理
+    // ============================================
+    
+    // 监听页面卸载事件，确保数据发送
+    window.addEventListener('beforeunload', function() {
+        const trafficInfo = window.trafficInfo;
+        if (trafficInfo && trafficInfo.source !== 'unknown') {
+            // 尝试发送同步请求记录页面离开
+            navigator.sendBeacon && navigator.sendBeacon(
+                '/api/track-page-leave',
+                JSON.stringify({
+                    timestamp: new Date().toISOString(),
+                    source: trafficInfo.source,
+                    time_spent: Date.now() - performance.timing.navigationStart
+                })
+            );
+        }
+    });
+    
+    // ============================================
+    // 第六部分：调试工具（开发时使用）
+    // ============================================
+    
+    // 在开发环境中添加调试按钮
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        document.addEventListener('DOMContentLoaded', function() {
+            // 创建调试面板
+            const debugPanel = document.createElement('div');
+            debugPanel.style.cssText = `
+                position: fixed;
+                top: 10px;
+                right: 10px;
+                background: rgba(0,0,0,0.8);
+                color: white;
+                padding: 10px;
+                border-radius: 5px;
+                font-size: 12px;
+                z-index: 9999;
+                max-width: 300px;
+            `;
+            
+            debugPanel.innerHTML = `
+                <div style="margin-bottom: 5px;"><strong>调试信息</strong></div>
+                <div>来源: <span id="debug-source">${window.trafficInfo?.source || 'unknown'}</span></div>
+                <div>设备: <span id="debug-device">${window.deviceType || 'unknown'}</span></div>
+                <button onclick="simulateClick()" style="margin-top:5px; padding:2px 5px;">模拟点击</button>
+            `;
+            
+            document.body.appendChild(debugPanel);
+        });
+        
+        // 模拟点击函数
+        window.simulateClick = function() {
+            document.getElementById('ctaBtn').click();
+        };
+    }
+    
+    // 页面加载完成日志
+    console.log('✅ 广告落地页初始化完成');
+    console.log('👉 点击按钮可以触发智能跳转和追踪');
+</script>
+
+</body>
+</html>

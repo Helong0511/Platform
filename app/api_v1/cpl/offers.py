@@ -5,7 +5,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, Path
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -20,7 +20,12 @@ from app.core.short_link.generator import (
     generate_short_code_from_id,
     generate_unique_short_code
 )
-from app.models.models import User, Offer, ShortLink
+from app.models.models import User, Offer, ShortLink, Click, PostbackConversion
+from app.services.cpl.offer_stats import (
+    offer_stats_period_start,
+    offer_stats_previous_range,
+    pct_trend,
+)
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.schemas.cpl.offer import OfferCreate, OfferUpdate, OfferResponse
 from app.services.cpl.offer_service import OfferService
@@ -624,6 +629,111 @@ async def check_offer_short_link(
         })
 
     return ResponseBaseSchema.success(data={"exists": False, "short_link": None})
+
+
+@router.get(
+    "/{offer_id}/stats",
+    response_model=ResponseBaseSchema[dict],
+    summary="获取 Offer 统计",
+)
+async def get_offer_stats(
+        offer_id: int = Path(..., ge=1, description="Offer ID"),
+        period: str = Query("week", pattern="^(day|week|month)$", description="统计周期"),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    """点击、转化、收入汇总及按日趋势（供管理端 Offer 统计卡片使用）。"""
+    offer_service: OfferService = await get_offer_service(db)
+    await offer_service.get_offer_by_id(offer_id, current_user, include_advertiser=False, include_assignments=False)
+
+    start = offer_stats_period_start(period)
+    prev_start, prev_end = offer_stats_previous_range(period, start)
+
+    async def _count_clicks(s, e=None):
+        q = select(func.count(Click.id)).where(
+            Click.offer_id == offer_id,
+            Click.click_time >= s,
+        )
+        if e is not None:
+            q = q.where(Click.click_time < e)
+        return int((await db.execute(q)).scalar() or 0)
+
+    async def _count_conversions(s, e=None):
+        q = select(func.count(PostbackConversion.id)).where(
+            PostbackConversion.offer_id == offer_id,
+            PostbackConversion.created_at >= s,
+        )
+        if e is not None:
+            q = q.where(PostbackConversion.created_at < e)
+        return int((await db.execute(q)).scalar() or 0)
+
+    async def _sum_revenue(s, e=None):
+        q = select(func.coalesce(func.sum(PostbackConversion.payout), 0)).where(
+            PostbackConversion.offer_id == offer_id,
+            PostbackConversion.created_at >= s,
+        )
+        if e is not None:
+            q = q.where(PostbackConversion.created_at < e)
+        return float((await db.execute(q)).scalar() or 0)
+
+    clicks = await _count_clicks(start)
+    conversions = await _count_conversions(start)
+    revenue = await _sum_revenue(start)
+    conversion_rate = (conversions / clicks) if clicks else 0.0
+
+    prev_clicks = await _count_clicks(prev_start, prev_end)
+    prev_conversions = await _count_conversions(prev_start, prev_end)
+    prev_revenue = await _sum_revenue(prev_start, prev_end)
+    prev_rate = (prev_conversions / prev_clicks) if prev_clicks else 0.0
+
+    click_day = func.date(Click.click_time).label("d")
+    conv_day = func.date(PostbackConversion.created_at).label("d")
+
+    click_rows = (
+        await db.execute(
+            select(click_day, func.count(Click.id))
+            .where(Click.offer_id == offer_id, Click.click_time >= start)
+            .group_by(click_day)
+            .order_by(click_day)
+        )
+    ).all()
+    conv_rows = (
+        await db.execute(
+            select(conv_day, func.count(PostbackConversion.id), func.coalesce(func.sum(PostbackConversion.payout), 0))
+            .where(PostbackConversion.offer_id == offer_id, PostbackConversion.created_at >= start)
+            .group_by(conv_day)
+            .order_by(conv_day)
+        )
+    ).all()
+
+    by_date: dict[str, dict] = {}
+    for d, cnt in click_rows:
+        key = d.isoformat() if hasattr(d, "isoformat") else str(d)
+        by_date.setdefault(key, {"date": key, "clicks": 0, "conversions": 0, "revenue": 0.0})
+        by_date[key]["clicks"] = int(cnt or 0)
+    for d, cnt, rev in conv_rows:
+        key = d.isoformat() if hasattr(d, "isoformat") else str(d)
+        by_date.setdefault(key, {"date": key, "clicks": 0, "conversions": 0, "revenue": 0.0})
+        by_date[key]["conversions"] = int(cnt or 0)
+        by_date[key]["revenue"] = float(rev or 0)
+
+    chart_data = [by_date[k] for k in sorted(by_date.keys())]
+
+    return ResponseBaseSchema.success(
+        data={
+            "clicks": clicks,
+            "conversions": conversions,
+            "conversion_rate": round(conversion_rate, 6),
+            "revenue": round(revenue, 4),
+            "trends": {
+                "clicks": pct_trend(clicks, prev_clicks),
+                "conversions": pct_trend(conversions, prev_conversions),
+                "conversion_rate": pct_trend(conversion_rate, prev_rate),
+                "revenue": pct_trend(revenue, prev_revenue),
+            },
+            "chart_data": chart_data,
+        }
+    )
 
 
 @router.get("/{offer_id}",

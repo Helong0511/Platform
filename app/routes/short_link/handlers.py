@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import Request, BackgroundTasks, HTTPException, status
+from fastapi import Request, BackgroundTasks
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -22,6 +22,7 @@ from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from app.models.models import ShortLink
 from app.routes.short_link.placeholder import replace_short_link_placeholders
 from app.routes.short_link.url_builder import build_final_url
+from app.routes.short_link.errors import raise_short_link_bad_config, raise_short_link_not_found
 from app.routes.short_link.utils import (
     resolve_offer_id,
     resolve_default_publisher_for_offer,
@@ -106,10 +107,7 @@ async def handle_cached_redirect(
     expires_at_str = cached_data.get("expires_at")
 
     if not is_active:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="短链接已禁用"
-        )
+        raise_short_link_not_found("短链接已禁用")
 
     # 检查过期
     if expires_at_str:
@@ -122,16 +120,10 @@ async def handle_cached_redirect(
 
         now = get_app_now_naive()
         if expires_at and expires_at < now:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="短链接已过期"
-            )
+            raise_short_link_not_found("短链接已过期")
 
     if not original_url or not original_url.startswith(('http://', 'https://')):
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="短链接配置错误：原始URL格式无效"
-        )
+        raise_short_link_bad_config("短链接配置错误：原始URL格式无效")
 
     short_link_id = cached_data.get("id")
     if not short_link_id:
@@ -246,16 +238,10 @@ async def handle_database_redirect(
     short_link = result.scalars().first()
 
     if not short_link:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"短链接不存在: {short_code}"
-        )
+        raise_short_link_not_found(f"短链接不存在: {short_code}")
 
     if not short_link.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="短链接已禁用"
-        )
+        raise_short_link_not_found("短链接已禁用")
 
     # 检查过期
     if short_link.expires_at:
@@ -264,17 +250,11 @@ async def handle_database_redirect(
             expires_at = expires_at.astimezone(APP_TIMEZONE).replace(tzinfo=None)
         now = get_app_now_naive()
         if expires_at < now:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="短链接已过期"
-            )
+            raise_short_link_not_found("短链接已过期")
 
     original_url = short_link.original_url
     if not original_url:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="短链接配置错误：原始URL为空"
-        )
+        raise_short_link_bad_config("短链接配置错误：原始URL为空")
 
     original_url = original_url.strip()
     if not original_url.startswith(('http://', 'https://')):
@@ -282,10 +262,7 @@ async def handle_database_redirect(
             original_url = f"https://{original_url}"
             logger.warning(f"短链接 {short_code} 的原始URL缺少协议，已自动添加https://")
         else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"短链接配置错误：原始URL格式无效"
-            )
+            raise_short_link_bad_config("短链接配置错误：原始URL格式无效")
 
     # 写入缓存
     await set_short_link_to_cache(short_code, serialize_short_link(short_link))

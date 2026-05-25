@@ -37,7 +37,7 @@
 <script setup>
 import { ref, reactive, computed, watch } from 'vue';
 import { ElMessage } from 'element-plus';
-import { createUser, updateUser, getUserById } from '@/api/user';
+import { createUser, updateUser, getUserDetail } from '@/api/user';
 
 const props = defineProps({ modelValue: Boolean, userId: { type: Number, default: null } });
 const emit = defineEmits(['update:modelValue', 'success']);
@@ -58,8 +58,7 @@ const rules = {
 const loadUser = async () => {
   if (!props.userId) return;
   try {
-    const response = await getUserById(props.userId);
-    const data = response.data.data;
+    const data = await getUserDetail(props.userId);
     Object.assign(formData, { username: data.username, full_name: data.full_name, email: data.email, role: data.role, is_active: data.is_active });
   } catch (error) { ElMessage.error('加载用户详情失败'); }
 };

@@ -4,7 +4,7 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -12,6 +12,7 @@ from app.core.short_link_cache import get_short_link_from_cache
 from app.routes.short_link.cloak_bridge import register_bridge_routes
 from app.routes.short_link.cloak_change import register_cloak_change_routes
 from app.routes.short_link.cloak_report import register_cloak_report_routes
+from app.routes.short_link.errors import raise_short_link_bad_config
 from app.routes.short_link.handlers import handle_cached_redirect, handle_database_redirect
 
 logger = logging.getLogger(__name__)
@@ -72,10 +73,7 @@ async def redirect_short_link_public(
             e,
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"短链接重定向失败: {str(e)}",
-        )
+        raise_short_link_bad_config(f"短链接重定向失败: {str(e)}")
 
 
 register_cloak_change_routes(router)

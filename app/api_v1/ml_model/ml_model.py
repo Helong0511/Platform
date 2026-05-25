@@ -5,6 +5,7 @@
 - 智能列名映射（基于用户映射规则和标准映射表）
 - 确保包含所有11个必要字段
 """
+import asyncio
 import json
 import logging
 import os
@@ -16,7 +17,7 @@ from io import BytesIO
 from typing import Optional
 
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Body, Request
+from fastapi import APIRouter, Depends, UploadFile, File, Query, Body, Request
 from sqlalchemy import and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -25,6 +26,8 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 from app.api_v1.excel.utils import validate_excel_file, parse_date_value
 from app.core.audit_log import log_user_action
 from app.core.config import settings
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
@@ -73,11 +76,13 @@ def _ensure_xlrd(strict: bool, error_message: str) -> bool:
     except ImportError:
         logger.error(error_message)
         if strict:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="系统缺少 xlrd 库，无法读取 .xls 格式文件。请安装 xlrd 库或使用 .xlsx 格式文件。"
-            )
+            raise_api_exception(ErrorCode.OPERATION_FAILED, detail="系统缺少 xlrd 库，无法读取 .xls 格式文件。请安装 xlrd 库或使用 .xlsx 格式文件。")
         return False
+
+
+async def _read_excel_file_async(contents: bytes, filename: Optional[str] = None) -> pd.DataFrame:
+    """在线程池中读取 Excel，避免阻塞事件循环"""
+    return await asyncio.to_thread(_read_excel_file, contents, filename)
 
 
 def _read_excel_file(contents: bytes, filename: Optional[str] = None) -> pd.DataFrame:
@@ -198,10 +203,7 @@ def _read_excel_file(contents: bytes, filename: Optional[str] = None) -> pd.Data
 
         logger.error(f"Excel文件解析失败: {detail}。文件名: {filename}, 大小: {len(contents)}字节")
 
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=detail
-        )
+        raise_api_exception(ErrorCode.BAD_REQUEST, detail=detail)
 
     return df
 
@@ -828,7 +830,7 @@ async def parse_excel_columns(
         contents = await validate_excel_file(file)
 
         # 解析Excel（支持 .xlsx 和 .xls 格式）
-        df = _read_excel_file(contents, file.filename)
+        df = await _read_excel_file_async(contents, file.filename)
 
         # 规范化Excel列名（确保编码正确）
         excel_columns = ColumnMappingService.normalize_excel_columns(df.columns)
@@ -856,10 +858,7 @@ async def parse_excel_columns(
         raise
     except Exception as e:
         logger.error(f"解析Excel列名失败: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"解析Excel列名失败: {str(e)}"
-        )
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"解析Excel列名失败: {str(e)}")
 
 
 @router.post("/save-mapping", response_model=ResponseBaseSchema[dict], summary="保存用户映射规则")
@@ -873,10 +872,7 @@ async def save_user_mapping(
     try:
         # 验证映射规则
         if not mapping or not isinstance(mapping, dict):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="映射规则格式错误：必须是字典格式 {excel_column: db_field}"
-            )
+            raise_api_exception(ErrorCode.IMPORT_COLUMN_MAPPING_INCOMPLETE, detail="映射规则格式错误：必须是字典格式 {excel_column: db_field}")
 
         required_fields = list(REQUIRED_FIELDS.keys())
 
@@ -884,10 +880,7 @@ async def save_user_mapping(
         # 检查是否有空的Excel列名或字段名
         empty_excel_cols = [col for col in mapping.keys() if not col or not col.strip()]
         if empty_excel_cols:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"映射规则包含空的Excel列名: {empty_excel_cols}"
-            )
+            raise_api_exception(ErrorCode.IMPORT_COLUMN_MAPPING_INCOMPLETE, detail=f"映射规则包含空的Excel列名: {empty_excel_cols}")
 
         # ====== 检查2：检查重复的Excel列名（去除空格后） ======
         excel_cols_normalized = {}
@@ -900,10 +893,7 @@ async def save_user_mapping(
                 excel_cols_normalized[normalized] = excel_col
 
         if duplicate_excel_cols:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"发现重复的Excel列名（去除空格后相同）: {', '.join(duplicate_excel_cols)}。每个Excel列只能映射到一个字段。"
-            )
+            raise_api_exception(ErrorCode.IMPORT_COLUMN_MAPPING_INCOMPLETE, detail=f"发现重复的Excel列名（去除空格后相同）: {', '.join(duplicate_excel_cols)}。每个Excel列只能映射到一个字段。")
 
         # ====== 检查3：检查多个Excel列映射到同一个数据库字段 ======
         mapped_fields = list(mapping.values())
@@ -923,11 +913,8 @@ async def save_user_mapping(
                 )
 
         if duplicate_field_mappings:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"发现重复映射：一个数据库字段被多个Excel列映射。\n" + "\n".join(
-                    duplicate_field_mappings) + "\n每个数据库字段只能被一个Excel列映射。"
-            )
+            raise_api_exception(ErrorCode.IMPORT_COLUMN_MAPPING_INCOMPLETE, detail=f"发现重复映射：一个数据库字段被多个Excel列映射。\n" + "\n".join(
+                    duplicate_field_mappings) + "\n每个数据库字段只能被一个Excel列映射。")
 
         # ====== 检查4：检查是否缺少必需字段 ======
         mapped_fields_set = set(mapped_fields)
@@ -941,26 +928,17 @@ async def save_user_mapping(
                 f"已映射字段: {list(mapped_fields_set)}, "
                 f"映射规则: {mapping}"
             )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"缺少必需字段映射: {', '.join(missing_names)}。请确保所有11个必需字段都已选择对应的Excel列。"
-            )
+            raise_api_exception(ErrorCode.IMPORT_COLUMN_MAPPING_INCOMPLETE, detail=f"缺少必需字段映射: {', '.join(missing_names)}。请确保所有11个必需字段都已选择对应的Excel列。")
 
         # ====== 检查5：验证映射值是否都是有效的字段名（包括必需字段和可选字段） ======
         all_valid_fields = list(ALL_FIELDS.keys())
         invalid_fields = [field for field in mapped_fields_set if field not in all_valid_fields]
         if invalid_fields:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"无效的字段名: {', '.join(invalid_fields)}。必须是以下字段之一: {', '.join(all_valid_fields)}"
-            )
+            raise_api_exception(ErrorCode.IMPORT_COLUMN_MAPPING_INCOMPLETE, detail=f"无效的字段名: {', '.join(invalid_fields)}。必须是以下字段之一: {', '.join(all_valid_fields)}")
 
         # ====== 检查6：验证映射数量是否正确 ======
         if len(mapping) != len(required_fields):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"映射数量不正确：期望 {len(required_fields)} 个映射，实际 {len(mapping)} 个。可能存在重复或缺失的映射。"
-            )
+            raise_api_exception(ErrorCode.IMPORT_COLUMN_MAPPING_INCOMPLETE, detail=f"映射数量不正确：期望 {len(required_fields)} 个映射，实际 {len(mapping)} 个。可能存在重复或缺失的映射。")
 
         # ====== 检查7：规范化Excel列名（去除前后空格） ======
         # 创建规范化的映射规则（去除Excel列名的前后空格）
@@ -974,10 +952,7 @@ async def save_user_mapping(
                     f"规范化后出现重复的Excel列名: {normalized_excel_col}, "
                     f"原始列名: {excel_col}, 已存在映射: {normalized_mapping[normalized_excel_col]}"
                 )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"规范化后出现重复的Excel列名: {normalized_excel_col}"
-                )
+                raise_api_exception(ErrorCode.IMPORT_COLUMN_MAPPING_INCOMPLETE, detail=f"规范化后出现重复的Excel列名: {normalized_excel_col}")
             normalized_mapping[normalized_excel_col] = db_field
 
         # 使用规范化的映射规则
@@ -1059,12 +1034,9 @@ async def save_user_mapping(
                 if os.path.exists(temp_file):
                     try:
                         os.remove(temp_file)
-                    except:
+                    except OSError:
                         pass
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"保存映射规则文件失败: {str(e)}"
-                )
+                raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"保存映射规则文件失败: {str(e)}")
 
             logger.info(
                 f"用户 {current_user.username} 保存了列名映射规则: "
@@ -1078,7 +1050,7 @@ async def save_user_mapping(
             if os.path.exists(temp_file):
                 try:
                     os.remove(temp_file)
-                except:
+                except OSError:
                     pass
             raise
 
@@ -1095,10 +1067,7 @@ async def save_user_mapping(
         raise
     except Exception as e:
         logger.error(f"保存映射规则失败: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"保存映射规则失败: {str(e)}"
-        )
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"保存映射规则失败: {str(e)}")
 
 
 @router.post("/validate", response_model=ResponseBaseSchema[dict], summary="验证Excel列名映射")
@@ -1117,7 +1086,7 @@ async def validate_excel_columns(
         contents = await validate_excel_file(file)
 
         # 解析Excel（支持 .xlsx 和 .xls 格式）
-        df = _read_excel_file(contents, file.filename)
+        df = await _read_excel_file_async(contents, file.filename)
 
         # 规范化Excel列名（确保编码正确）
         excel_columns_normalized = ColumnMappingService.normalize_excel_columns(df.columns)
@@ -1151,10 +1120,7 @@ async def validate_excel_columns(
         raise
     except Exception as e:
         logger.error(f"验证Excel列名失败: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"验证Excel列名失败: {str(e)}"
-        )
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"验证Excel列名失败: {str(e)}")
 
 
 @router.get("/status", response_model=ResponseBaseSchema[dict], summary="获取映射规则状态")
@@ -1191,10 +1157,7 @@ async def get_mapping_status(
 
     except Exception as e:
         logger.error(f"获取映射规则状态失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取映射规则状态失败: {str(e)}"
-        )
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"获取映射规则状态失败: {str(e)}")
 
 
 @router.get("/timezone", response_model=ResponseBaseSchema[dict], summary="获取应用时区配置")
@@ -1211,10 +1174,7 @@ async def get_timezone_config(
         })
     except Exception as e:
         logger.error(f"获取时区配置失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取时区配置失败: {str(e)}"
-        )
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"获取时区配置失败: {str(e)}")
 
 
 @router.post("/preview", response_model=ResponseBaseSchema[dict], summary="预览Excel数据")
@@ -1233,7 +1193,7 @@ async def preview_excel_data(
         contents = await validate_excel_file(file)
 
         # 解析Excel（支持 .xlsx 和 .xls 格式）
-        df = _read_excel_file(contents, file.filename)
+        df = await _read_excel_file_async(contents, file.filename)
 
         # 规范化Excel列名
         excel_columns_normalized = ColumnMappingService.normalize_excel_columns(df.columns)
@@ -1326,10 +1286,7 @@ async def preview_excel_data(
         raise
     except Exception as e:
         logger.error(f"预览Excel数据失败: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"预览Excel数据失败: {str(e)}"
-        )
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"预览Excel数据失败: {str(e)}")
 
 
 @router.post("/import", response_model=ResponseBaseSchema[dict], summary="导入训练数据")
@@ -1639,7 +1596,4 @@ async def import_training_data(
         # 记录详细的错误信息，包括堆栈跟踪
         error_trace = traceback.format_exc()
         logger.error(f"错误堆栈跟踪:\n{error_trace}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"导入训练数据失败: {str(e)}。请查看服务器日志获取详细信息。"
-        )
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"导入训练数据失败: {str(e)}。请查看服务器日志获取详细信息。")

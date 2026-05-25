@@ -3,10 +3,9 @@
  * 已统一使用 request 函数，保持代码一致性
  * 包含特殊逻辑：缓存机制、请求去重、文件导出等
  */
-import { request, normalizeResponse, extractErrorMessage, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest, refreshCsrfToken, handleFileDownload } from '../utils/api';
+import { request, normalizeResponse, extractErrorMessage, ensureCsrfToken, handleError, refreshCsrfTokenBeforeRequest, refreshCsrfToken, requestBlobDownload } from '../utils/api';
 import { ElMessage } from 'element-plus';
 import { getSuccessMessage, getWarningMessage } from '../utils/messages';
-import axios from 'axios'; // 保留用于特殊场景（缓存、超时控制、文件下载）
 
 // 全局缓存和请求去重机制
 const clientDetailCache = new Map(); // 客户详情缓存
@@ -177,25 +176,18 @@ export const deleteClient = async (id) => {
 // 导出客户数据
 export const exportClients = async (params = {}) => {
   try {
-    const response = await axios.get('/api/v1/clients/export', {
-      params,
-      responseType: 'blob'
-    });
-
-    // 处理文件下载
-    handleFileDownload(response, '客户数据导出.xlsx', () => {
-      ElMessage.success(getSuccessMessage('CLIENT_EXPORT_SUCCESS'));
-    });
-    
-    return true;
+    return await requestBlobDownload(
+      { url: '/api/v1/clients/export', method: 'get', params },
+      {
+        defaultFilename: '客户数据导出.xlsx',
+        onSuccess: () => ElMessage.success(getSuccessMessage('CLIENT_EXPORT_SUCCESS'))
+      }
+    );
   } catch (error) {
     const errorMsg = extractErrorMessage(error);
-    
-    // 特殊处理：无数据时的警告提示
     if (errorMsg.includes('无数据') || errorMsg.includes('不能导出')) {
       ElMessage.warning(getWarningMessage('NO_DATA_TO_EXPORT'));
-    } else {
-      handleError(error);
     }
+    throw error;
   }
 };

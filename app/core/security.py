@@ -76,6 +76,9 @@ from typing import Any
 
 # 第三方库导入
 from fastapi import Depends, HTTPException, Request, status
+
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from jose.exceptions import ExpiredSignatureError, JWSError, JWTClaimsError
@@ -100,6 +103,16 @@ oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl=f"{settings.API_V1_STR}/auth/login",
     auto_error=False
 )
+
+
+def _raise_auth(
+        detail: str,
+        *,
+        error_code: int = ErrorCode.UNAUTHORIZED,
+        http_status: int = status.HTTP_401_UNAUTHORIZED,
+) -> None:
+    """认证/鉴权失败：标准 JSON 响应体 + 保留真实 HTTP 状态码。"""
+    raise_api_exception(error_code, detail=detail, status_code=http_status)
 
 
 # ====== JWT工具类 ======
@@ -313,10 +326,9 @@ class JWTUtils:
                     blacklisted = result.scalars().first()
                     if blacklisted:
                         logger.warning(f"JWT令牌已被撤销: jti={jti[:8]}...")
-                        raise HTTPException(
-                            status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="登录已失效，请重新登录",
-                            headers={"WWW-Authenticate": "Bearer"},
+                        _raise_auth(
+                            "登录已失效，请重新登录",
+                            error_code=ErrorCode.TOKEN_INVALID,
                         )
             
             return payload
@@ -326,43 +338,38 @@ class JWTUtils:
         except ExpiredSignatureError:
             # 令牌已过期
             logger.warning(f"JWT令牌已过期")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="登录已过期，请重新登录",
-                headers={"WWW-Authenticate": "Bearer"},
+            _raise_auth(
+                "登录已过期，请重新登录",
+                error_code=ErrorCode.TOKEN_EXPIRED,
             )
         except JWTClaimsError as e:
             # JWT声明错误
             logger.error(f"JWT声明错误: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="无效的身份验证令牌",
-                headers={"WWW-Authenticate": "Bearer"},
+            _raise_auth(
+                "无效的身份验证令牌",
+                error_code=ErrorCode.TOKEN_INVALID,
             )
         except JWSError as e:
             # JWT签名验证失败（通常是密钥不匹配或token格式错误）
             # 只在debug模式下记录详细错误，避免日志过多
             logger.debug(f"JWT签名验证失败: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="登录已过期，请重新登录",
-                headers={"WWW-Authenticate": "Bearer"},
+            _raise_auth(
+                "登录已过期，请重新登录",
+                error_code=ErrorCode.TOKEN_EXPIRED,
             )
         except JWTError as e:
             # 其他JWT验证错误（如token格式错误、签名不匹配等）
             # 只在debug模式下记录详细错误，避免日志过多
             logger.debug(f"JWT验证错误: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="无效的身份验证令牌，请重新登录",
-                headers={"WWW-Authenticate": "Bearer"},
+            _raise_auth(
+                "无效的身份验证令牌，请重新登录",
+                error_code=ErrorCode.TOKEN_INVALID,
             )
         except ValidationError:
             # 载荷验证失败
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="令牌验证失败，请重新登录",
-                headers={"WWW-Authenticate": "Bearer"},
+            _raise_auth(
+                "令牌验证失败，请重新登录",
+                error_code=ErrorCode.TOKEN_INVALID,
             )
 
 
@@ -391,11 +398,7 @@ async def get_current_user(
         token = request.cookies.get("access_token")
         
     if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        _raise_auth("未登录或令牌缺失", error_code=ErrorCode.UNAUTHORIZED)
 
     # ====== 验证令牌 ======
     # 验证JWT令牌并获取载荷（同时检查黑名单）
@@ -405,10 +408,9 @@ async def get_current_user(
     # 从载荷中获取用户ID（subject）
     user_id: str = payload.get("sub")
     if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="无法从令牌中获取用户ID",
-            headers={"WWW-Authenticate": "Bearer"},
+        _raise_auth(
+            "无法从令牌中获取用户ID",
+            error_code=ErrorCode.TOKEN_INVALID,
         )
 
     # ====== 查询用户（使用权限缓存优化） ======
@@ -421,26 +423,24 @@ async def get_current_user(
         
         # 如果缓存中有权限信息，先进行基本检查
         if permissions.get("role") is None:
-            # 缓存中没有用户信息，说明用户不存在
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="用户不存在",
-                headers={"WWW-Authenticate": "Bearer"},
+            _raise_auth(
+                "用户不存在",
+                error_code=ErrorCode.USER_NOT_FOUND,
+                http_status=status.HTTP_404_NOT_FOUND,
             )
-        
-        # 检查用户状态（从缓存）
+
         if not permissions.get("is_active", True):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="用户已被禁用",
-                headers={"WWW-Authenticate": "Bearer"},
+            _raise_auth(
+                "用户已被禁用",
+                error_code=ErrorCode.USER_DISABLED,
+                http_status=status.HTTP_403_FORBIDDEN,
             )
-        
+
         if permissions.get("login_restricted", False):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="登录已被限制",
-                headers={"WWW-Authenticate": "Bearer"},
+            _raise_auth(
+                "登录已被限制",
+                error_code=ErrorCode.FORBIDDEN,
+                http_status=status.HTTP_403_FORBIDDEN,
             )
         
         # 如果缓存检查通过，仍然需要查询完整的用户对象（因为需要返回User对象）
@@ -449,16 +449,15 @@ async def get_current_user(
         user = result.scalars().first()
         
         if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="用户不存在",
-                headers={"WWW-Authenticate": "Bearer"},
+            _raise_auth(
+                "用户不存在",
+                error_code=ErrorCode.USER_NOT_FOUND,
+                http_status=status.HTTP_404_NOT_FOUND,
             )
-        
+
         return user
-        
+
     except HTTPException:
-        # 重新抛出HTTP异常
         raise
     except Exception as e:
         # 缓存功能失败，回退到直接查询数据库
@@ -469,28 +468,24 @@ async def get_current_user(
         user = result.scalars().first()
 
         if user is None:
-            # 用户不存在（可能已被删除）
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="用户不存在",
-                headers={"WWW-Authenticate": "Bearer"},
+            _raise_auth(
+                "用户不存在",
+                error_code=ErrorCode.USER_NOT_FOUND,
+                http_status=status.HTTP_404_NOT_FOUND,
             )
 
-        # ====== 用户状态检查 ======
-        # 检查用户是否被禁用
         if not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="用户已被禁用",
-                headers={"WWW-Authenticate": "Bearer"},
+            _raise_auth(
+                "用户已被禁用",
+                error_code=ErrorCode.USER_DISABLED,
+                http_status=status.HTTP_403_FORBIDDEN,
             )
 
-        # 检查用户登录是否受限
         if user.login_restricted:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=user.login_message or "登录已被限制",
-                headers={"WWW-Authenticate": "Bearer"},
+            _raise_auth(
+                user.login_message or "登录已被限制",
+                error_code=ErrorCode.FORBIDDEN,
+                http_status=status.HTTP_403_FORBIDDEN,
             )
 
         return user
@@ -515,10 +510,10 @@ async def require_admin(
         HTTPException: 如果用户不是管理员
     """
     if current_user.role != UserRole.ADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="需要管理员权限",
-            headers={"WWW-Authenticate": "Bearer"},
+        _raise_auth(
+            "需要管理员权限",
+            error_code=ErrorCode.FORBIDDEN,
+            http_status=status.HTTP_403_FORBIDDEN,
         )
     return current_user
 
@@ -542,10 +537,10 @@ async def require_client(
         HTTPException: 如果用户不是客户
     """
     if current_user.role != UserRole.CLIENT:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="需要客户权限",
-            headers={"WWW-Authenticate": "Bearer"},
+        _raise_auth(
+            "需要客户权限",
+            error_code=ErrorCode.FORBIDDEN,
+            http_status=status.HTTP_403_FORBIDDEN,
         )
     return current_user
 
@@ -566,10 +561,10 @@ async def require_admin_or_self(
     client = result.scalars().first()
 
     if not client:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="没有权限访问此客户数据",
-            headers={"WWW-Authenticate": "Bearer"},
+        _raise_auth(
+            "没有权限访问此客户数据",
+            error_code=ErrorCode.CLIENT_NO_PERMISSION,
+            http_status=status.HTTP_403_FORBIDDEN,
         )
 
     return current_user

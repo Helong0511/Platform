@@ -27,3 +27,16 @@ export const {
   }
 });
 
+/**
+ * Offer 统计（点击、转化、收入、趋势图）
+ * @param {number} offerId
+ * @param {'day'|'week'|'month'} period
+ */
+export const getOfferStats = (offerId, period = 'week') => {
+  return request({
+    url: `/api/v1/offers/${offerId}/stats`,
+    method: 'get',
+    params: { period }
+  }, { returnDataOnly: true });
+};
+

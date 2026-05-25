@@ -35,8 +35,8 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue';
-import { getAdData } from '@/api/adData';
-import { getProducts } from '@/api/product';
+import { getAdDataList } from '@/api/ad-data';
+import { getProductList } from '@/api/product';
 
 const filterForm = reactive({ product_id: null, date_range: [] });
 const data = ref([]);
@@ -48,15 +48,18 @@ const total = ref(0);
 const loadData = async () => {
   loading.value = true;
   try {
-    const response = await getAdData({ ...filterForm, page: page.value });
-    data.value = response.data.data || [];
-    total.value = response.data.total || 0;
+    const response = await getAdDataList({ ...filterForm, page: page.value });
+    data.value = response.data || [];
+    total.value = response.total || 0;
   } catch (error) { console.error(error); }
   finally { loading.value = false; }
 };
 
 const loadProducts = async () => {
-  try { const res = await getProducts(); products.value = res.data.data || []; }
+  try {
+    const res = await getProductList({ page_size: 100 });
+    products.value = res.data || [];
+  }
   catch (error) { console.error(error); }
 };
 

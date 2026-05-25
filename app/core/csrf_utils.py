@@ -3,9 +3,11 @@ CSRF工具函数
 提供安全的HTTPException抛出机制，避免在连接断开时抛出异常
 """
 import logging
-from fastapi import HTTPException, status, Request
-from typing import Optional
+from fastapi import status, Request
 from anyio import EndOfStream
+
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +86,9 @@ def safe_raise_csrf_exception(
         # 其他异常，继续执行
         pass
     
-    # 只有在连接仍然有效时才抛出异常
-    raise HTTPException(status_code=status_code, detail=detail)
+    raise_api_exception(
+        ErrorCode.FORBIDDEN,
+        detail=detail,
+        status_code=status_code,
+    )
 

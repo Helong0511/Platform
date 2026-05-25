@@ -75,7 +75,7 @@ import { ElMessage } from 'element-plus';
 import router from '../router';
 import { initTimezone } from '../utils/dateFormat';
 import { logger } from '../utils/logger';
-import { request } from '../utils/api';
+import { loginOAuth2, logout as authLogout } from '../api/auth';
 
 
 
@@ -203,45 +203,11 @@ export const useAuthStore = defineStore('auth', {
       this.loading = true;
       this.error = null;
       try {
-        // 检测是否为移动设备，移动端使用更长的超时时间
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-        const timeout = isMobile ? 30000 : 15000; // 移动端30秒，桌面端15秒
-
-        const response = await axios.post('/api/v1/auth/login', new URLSearchParams({
-          username: credentials.username,
-          password: credentials.password,
-          grant_type: 'password'
-        }), {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          timeout: timeout
-        });
-
-        // 安全解构响应数据，防止数据格式错误导致登录失败
-        const responseData = response.data || {};
-
-        // 检查响应体格式：如果是错误格式（有 code 字段且 code !== 200），说明是业务错误
-        // 这种情况不应该发生（因为错误应该返回非 200 状态码），但为了安全起见还是检查
-        if (responseData.code !== undefined && responseData.code !== 200) {
-          const errorMsg = responseData.detail || responseData.message || '登录失败';
-          const error = new Error(errorMsg);
-          error.response = {
-            status: response.status,
-            data: responseData
-          };
-          throw error;
-        }
-
-        // 正常响应格式：{access_token, token_type, refresh_token, user}
-        // 注意：token 已经过 set-cookie 设置到 HttpOnly cookie 中
-        // API响应数据使用snake_case，这是正确的
+        const responseData = await loginOAuth2(
+          credentials.username,
+          credentials.password
+        );
         const userInfoFromApi = responseData.user;
-
-        // 验证响应数据完整性
-        if (!userInfoFromApi) {
-          throw new Error('登录响应数据格式错误：缺少用户信息');
-        }
 
         // 保存用户信息到sessionStorage (token 存储在 cookie 中)
         sessionStorage.setItem('userInfo', JSON.stringify(userInfoFromApi));
@@ -290,14 +256,17 @@ export const useAuthStore = defineStore('auth', {
         let errorMsg = '登录失败';
 
         if (err.response) {
-          // 后端返回的错误
           const status = err.response.status;
-          const detail = err.response.data?.detail || err.response.data?.message;
+          const body = err.response.data;
+          const bodyCode = body?.code;
+          const detail =
+            body?.detail ||
+            body?.message ||
+            (bodyCode && bodyCode !== 200 ? body?.message : null);
 
-          // 403 错误通常是权限问题（如客户被禁用、用户被禁用等）
-          if (status === 403) {
+          if (status === 403 || bodyCode === 403) {
             errorMsg = detail || '禁止登录，请联系管理员';
-          } else if (status === 401) {
+          } else if (status === 401 || bodyCode === 401) {
             errorMsg = detail || '用户名或密码不正确';
           } else {
             errorMsg = detail || '登录失败';
@@ -334,8 +303,7 @@ export const useAuthStore = defineStore('auth', {
       // ====== 调用后端API记录退出登录日志 ======
       // 注意：即使API调用失败，也要继续清除本地状态
       try {
-        const { logout } = await import('../api/user');
-        await logout();
+        await authLogout();
       } catch (error) {
         // API调用失败不影响退出登录流程（可能是token已过期）
         // 静默处理，不显示错误消息

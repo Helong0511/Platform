@@ -259,22 +259,42 @@ class AdTrackingCodec:
     # 短 id 与外层共用字母表，避免引入另一套字符校验规则。
     _SHORT_ID_ALPHABET = TOKEN_OUTER_ALPHABET
 
-    # 开发环境默认密钥：**禁止**在生产直接使用；应用启动应检测并拒绝默认密钥或强制配置 env。
+    # 仅本地开发兜底；与 .env 生产密钥必须不同
     _DEFAULT_KEY_HEX = (
         "02f0b613d3ce47c0784815fef40efcc6f09e51ba7889952a6123553f08a0d1b6"
     )
 
     @classmethod
+    def _resolve_master_key_hex(cls) -> str:
+        """优先环境变量，其次 settings（与 pydantic 加载的 .env 一致）。"""
+        hx = os.environ.get("AD_TRACKING_MASTER_KEY_HEX", "").strip()
+        if hx:
+            return hx
+        try:
+            from app.core.config import settings
+
+            hx = getattr(settings, "AD_TRACKING_MASTER_KEY_HEX", "").strip()
+            if hx:
+                return hx
+        except Exception:
+            pass
+        return cls._DEFAULT_KEY_HEX
+
+    @classmethod
     def _master_key(cls) -> bytes:
         """
-        从环境变量读取 32 字节主密钥；缺失则用内置十六进制默认串。
+        从环境变量 / settings 读取 32 字节主密钥；均缺失则用开发默认串。
 
         注意：
         - 必须是**恰好** 64 个十六进制字符（0-9a-fA-F），否则 ``bytes.fromhex`` 抛错。
         - 生产应在启动时校验：若仍为 ``_DEFAULT_KEY_HEX``，可拒绝启动或打致命日志。
         - 密钥轮换：更换 env 后**旧令牌全部失效**（HMAC 与 keystream 均绑定新密钥）。
         """
-        hx = os.environ.get("AD_TRACKING_MASTER_KEY_HEX", cls._DEFAULT_KEY_HEX).strip()
+        hx = cls._resolve_master_key_hex()
+        if len(hx) != 64:
+            raise ValueError(
+                "AD_TRACKING_MASTER_KEY_HEX 必须为 64 位十六进制（32 字节）"
+            )
         return bytes.fromhex(hx)
 
     @classmethod
@@ -399,6 +419,7 @@ class AdTrackingCodec:
             format: TokenFormat = "auto",
             store_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
             max_outer_chars: Optional[int] = None,
+            allow_full: bool = True,
     ) -> str:
         """
         生成广告追踪值。
@@ -411,6 +432,8 @@ class AdTrackingCodec:
         max_outer_chars:
             紧凑模式外层字符上限。None 时使用 _MAX_OUTER_CHARS_COMPACT(60)；
             平台场景可传 255，与数据库 click_id varchar(255) 对齐。
+        allow_full:
+            False 时 auto 不得在紧凑上限内塞不下时升级为 full（短链 ≤60 场景）。
 
         实现顺序（与 parse 逆过程对称）：
         采集元数据 → 决定 compact/full → 打包用户区 → 组 header+user → XOR 加密 →
@@ -444,12 +467,20 @@ class AdTrackingCodec:
                 trial = json.dumps(
                     user_params, separators=(",", ":"), ensure_ascii=False
                 ).encode("utf-8")
-                resolved = (
-                    "compact" if len(trial) <= max_user_cap else "full"
-                )
+                if len(trial) <= max_user_cap:
+                    resolved = "compact"
+                elif allow_full:
+                    resolved = "full"
+                else:
+                    raise ValueError(
+                        f"紧凑格式用户数据最大 {max_user_cap} 字节，当前 {len(trial)}；"
+                        "已禁止升级为 full。"
+                    )
         elif format == "compact":
             resolved = "compact"
         else:
+            if not allow_full:
+                raise ValueError("已禁止 full 格式生成")
             resolved = "full"
 
         user_bytes, payload_kind = cls._pack_payload(
@@ -498,11 +529,16 @@ class AdTrackingCodec:
                 )
             return out
 
-        # full：校验外层字符集与数据库 click_id 上限。
+        # full：校验外层字符集、外层上限与数据库 click_id 上限。
         out = _outer_encode(combined)
         if any(c not in _OUTER_MAP for c in out):
             raise RuntimeError(
                 "完整格式外层必须为 TOKEN_OUTER_ALPHABET（58 字符，无易混 0/O/I/l）"
+            )
+        if len(out) > outer_cap:
+            raise ValueError(
+                f"完整格式 click_id 超过外层上限 {outer_cap} 字符，"
+                "请减少 url_params 或使用 store_callback。"
             )
         if len(out) > cls.MAX_CLICK_ID_LENGTH:
             raise ValueError(

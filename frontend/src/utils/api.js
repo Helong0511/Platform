@@ -18,18 +18,17 @@
  *   data?: any         // 响应数据（可选，成功时包含实际数据）
  * }
  * 
- * 分页响应格式：
+ * 分页响应格式（PaginatedResponseBaseSchema，扁平结构）：
  * {
  *   code: 200,
  *   message: "success",
- *   data: {
- *     data: [...],        // 数据列表
- *     total: 100,          // 总记录数
- *     page: 1,             // 当前页码
- *     page_size: 10,       // 每页条数
- *     total_pages: 10     // 总页数
- *   }
+ *   data: [...],           // 数据列表（数组，非嵌套）
+ *   total: 100,
+ *   page: 1,
+ *   page_size: 10,
+ *   total_pages: 10
  * }
+ * 兼容旧嵌套格式：data: { data: [...], total, page, page_size }
  * 
  * 错误处理：
  * - 自动提取错误信息（优先使用detail，其次使用message）
@@ -279,6 +278,10 @@ export const extractErrorMessage = (error) => {
       return error.message || '请求失败';
     }
     
+    // 标准包装：HTTP 200 但 code !== 200
+    if (errorData && typeof errorData === 'object' && errorData.code !== undefined && errorData.code !== 200) {
+      return errorData.detail || errorData.message || '请求失败';
+    }
     // 优先使用 detail，其次使用 message
     if (errorData && typeof errorData === 'object' && errorData.detail) {
       return errorData.detail;
@@ -574,6 +577,152 @@ export const refreshCsrfTokenBeforeRequest = async (endpoint = null) => {
   
   // 确保token存在
   await ensureCsrfToken();
+};
+
+/**
+ * 解析 blob 响应中的业务错误（HTTP 200 + JSON body，常见于导出失败）
+ * @param {Blob} blob - 响应 blob
+ * @param {string} [contentType] - Content-Type 响应头
+ * @returns {Promise<Error|null>} 业务错误对象，无错误时返回 null
+ */
+export const parseBlobErrorResponse = async (blob, contentType = '') => {
+  if (!(blob instanceof Blob)) {
+    return null;
+  }
+
+  const tryParseJsonBlob = async (sourceBlob) => {
+    const text = await sourceBlob.text();
+    const errorData = JSON.parse(text);
+    if (errorData.code !== undefined && errorData.code !== 200) {
+      const errorMsg = errorData.detail || errorData.message || '请求失败';
+      const error = new Error(errorMsg);
+      error.code = errorData.code;
+      error.response = {
+        data: errorData,
+        status: 200,
+        statusText: 'OK'
+      };
+      return error;
+    }
+    return null;
+  };
+
+  if (contentType.includes('application/json')) {
+    try {
+      return await tryParseJsonBlob(blob);
+    } catch {
+      return null;
+    }
+  }
+
+  const blobSize = blob.size || 0;
+  if (blobSize > 0 && blobSize < 5000) {
+    try {
+      return await tryParseJsonBlob(blob.slice(0));
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+};
+
+/**
+ * 统一的 blob 下载请求（导出 Excel 等）
+ * @param {Object} config - axios 配置（须含 url；responseType 自动设为 blob）
+ * @param {Object} [options]
+ * @param {string} [options.defaultFilename] - 默认文件名
+ * @param {Function} [options.onSuccess] - 下载成功回调
+ * @param {boolean} [options.silent] - 是否静默错误提示
+ * @returns {Promise<boolean>}
+ */
+/**
+ * 统一 FormData / 文件上传请求
+ * @param {Object} config - axios 配置（data 为 FormData）
+ * @param {Object} [options]
+ * @param {boolean} [options.returnDataOnly] - 是否只返回 data
+ * @param {boolean} [options.silent] - 静默错误
+ * @param {number} [options.timeout] - 超时毫秒
+ * @param {string} [options.refreshEndpoint] - 上传前用于刷新 CSRF 的 GET 端点
+ */
+/**
+ * 带 CSRF 失败自动重试的上传（最多重试 1 次）
+ */
+export const requestUploadWithCsrfRetry = async (config, options = {}) => {
+  const { maxRetries = 1, ...uploadOptions } = options;
+  let lastError;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        sessionStorage.removeItem('csrf_token');
+        await ensureCsrfToken();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      } else {
+        await ensureCsrfToken();
+      }
+      return await requestUpload(config, uploadOptions);
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxRetries && error.response?.status === 403) {
+        const msg = extractErrorMessage(error);
+        if (/csrf|令牌/i.test(msg)) {
+          continue;
+        }
+      }
+      throw error;
+    }
+  }
+  throw lastError;
+};
+
+export const requestUpload = async (config, options = {}) => {
+  const {
+    returnDataOnly = true,
+    silent = false,
+    timeout = null,
+    refreshEndpoint = null
+  } = options;
+
+  if (refreshEndpoint) {
+    await refreshCsrfTokenBeforeRequest(refreshEndpoint);
+  } else {
+    await ensureCsrfToken();
+  }
+
+  const uploadConfig = {
+    ...config,
+    method: config.method || 'post',
+    headers: {
+      ...(config.headers || {}),
+      // 不设置 Content-Type，由浏览器为 FormData 自动添加 boundary
+    }
+  };
+  if (timeout !== null) {
+    uploadConfig.timeout = timeout;
+  }
+
+  return request(uploadConfig, { returnDataOnly, silent, timeout });
+};
+
+export const requestBlobDownload = async (config, options = {}) => {
+  const {
+    defaultFilename = 'download.xlsx',
+    onSuccess = null,
+    silent = false
+  } = options;
+
+  try {
+    const response = await axios({ ...config, responseType: 'blob' });
+    const contentType = response.headers['content-type'] || '';
+    const blobError = await parseBlobErrorResponse(response.data, contentType);
+    if (blobError) {
+      throw blobError;
+    }
+    handleFileDownload(response, defaultFilename, onSuccess);
+    return true;
+  } catch (error) {
+    handleError(error, { silent });
+  }
 };
 
 /**

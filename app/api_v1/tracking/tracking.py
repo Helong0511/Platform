@@ -21,6 +21,7 @@ from app.core.tracking.click_id_generator import (
     generate_click_id_unified,
     generate_unique_click_id,
 )
+from app.core.tracking.click_token import regenerate_click_id_from_click_data
 from app.core.tracking.tracklink_generator import generate_downstream_tracklink
 from app.core.device_info import collect_request_info
 from app.models.models import User, Offer, Publisher, Click
@@ -58,11 +59,8 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
                         logger.warning(
                             f"检测到重复的 click_id: {click_id}，将重新生成"
                         )
-                        click_data['click_id'] = generate_click_id_unified(
-                            offer_id=click_data.get('offer_id'),
-                            publisher_id=click_data.get('publisher_id'),
-                            advertiser_id=click_data.get('advertiser_id'),
-                            short_link_id=click_data.get('short_link_id'),
+                        click_data['click_id'] = regenerate_click_id_from_click_data(
+                            click_data
                         )
                         click_id = click_data['click_id']
                 
@@ -78,11 +76,8 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
                 if 'Duplicate entry' in error_msg or 'UNIQUE constraint' in error_msg or 'click_id' in error_msg:
                     # 检测到重复的 click_id，重新生成并重试
                     old_click_id = click_data.get('click_id')
-                    click_data['click_id'] = generate_click_id_unified(
-                        offer_id=click_data.get('offer_id'),
-                        publisher_id=click_data.get('publisher_id'),
-                        advertiser_id=click_data.get('advertiser_id'),
-                        short_link_id=click_data.get('short_link_id'),
+                    click_data['click_id'] = regenerate_click_id_from_click_data(
+                        click_data
                     )
                     logger.warning(
                         f"检测到重复的 click_id（尝试 {attempt + 1}/{max_retries}）: "

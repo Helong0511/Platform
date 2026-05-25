@@ -5,7 +5,7 @@ import logging
 import re
 from typing import Any, Dict, Optional, Tuple
 
-from fastapi import HTTPException, status
+from app.routes.short_link.errors import raise_short_link_not_found
 from fastapi.responses import HTMLResponse
 
 from app.core.cloak_scripts_paths import read_bridge_html_template_cached, resolve_bridge_html_read_path
@@ -44,10 +44,7 @@ def resolve_bridge_html(dp: Optional[str]) -> Tuple[str, str, str]:
         bridge_page_name = "master.html"
         bridge_page_path = resolve_bridge_html_read_path("master.html")
     if not bridge_page_path:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="桥页文件不存在",
-        )
+        raise_short_link_not_found("桥页文件不存在")
     html_content = read_bridge_html_template_cached(bridge_page_path)
     cloak_key = (
         bridge_page_name[:-5] if bridge_page_name.endswith(".html") else "master"

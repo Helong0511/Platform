@@ -109,8 +109,8 @@ const loadUsers = async () => {
   loading.value = true;
   try {
     const response = await getUsers({ ...filterForm, page: pagination.page, page_size: pagination.page_size });
-    users.value = response.data.data || [];
-    pagination.total = response.data.total || 0;
+    users.value = response.data || [];
+    pagination.total = response.total || 0;
   } catch (error) {
     ElMessage.error('加载用户列表失败');
   } finally {

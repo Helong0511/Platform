@@ -1234,7 +1234,7 @@ async def favicon():
             }
         )
     else:
-        raise HTTPException(status_code=404, detail="Favicon not found")
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
 
 # ====== 注册路由 ======
