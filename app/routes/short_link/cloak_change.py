@@ -132,11 +132,6 @@ def register_cloak_change_routes(router: APIRouter) -> None:
             if dp_as_offer is not None:
                 offer_id_q = dp_as_offer
 
-            click_id_cloak = generate_click_id_unified(
-                offer_id=offer_id_q,
-                publisher_id=channel_id_q,
-                for_short_link=True,
-            )
             request_info_cloak = collect_request_info(request) if request else {}
             final_channel_id_cloak = channel_id_q
             final_offer_id_cloak, advertiser_id_cloak = await resolve_offer_id(offer_id_q, db)
@@ -152,6 +147,17 @@ def register_cloak_change_routes(router: APIRouter) -> None:
                         final_offer_id_cloak,
                         fallback_pub,
                     )
+            # click_id 必须在渠道回退之后生成，否则令牌可能缺少 publisher_id，导致后续展示“未关联渠道”
+            click_id_cloak = generate_click_id_unified(
+                offer_id=final_offer_id_cloak,
+                publisher_id=final_channel_id_cloak,
+                advertiser_id=advertiser_id_cloak,
+                short_link_id=(cached_data or {}).get("id"),
+                url_params=request_info_cloak.get("url_params_dict")
+                if isinstance(request_info_cloak.get("url_params_dict"), dict)
+                else None,
+                for_short_link=True,
+            )
             original_url_before_replace = original_url
             original_url_after_replace = await replace_short_link_placeholders(
                 original_url_before_replace,
@@ -197,7 +203,8 @@ def register_cloak_change_routes(router: APIRouter) -> None:
                         try:
                             up_m: dict = {}
                             if request_info_visit.get("url_params"):
-                                up_m = json.loads(request_info_visit["url_params"])
+                                loaded = json.loads(request_info_visit["url_params"])
+                                up_m = loaded if isinstance(loaded, dict) else {}
                         except Exception:
                             up_m = {}
                         up_m["cloak_visit"] = True

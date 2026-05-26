@@ -34,6 +34,14 @@ class ClickAssociator:
 
         token_assoc = resolve_click_from_token(click_id)
         if token_assoc:
+            # 令牌可能只携带部分业务字段（例如早期 /change 在渠道回退前生成了 click_id）。
+            # 若缺少关键归因字段，则尝试回退 DB 再补全，避免出现“未关联渠道”但 clicks 表实际有值。
+            if token_assoc.get("publisher_id") is None:
+                db_assoc = await ClickAssociator.associate_from_db(click_id, db)
+                if db_assoc:
+                    merged = dict(db_assoc)
+                    merged.update({k: v for k, v in token_assoc.items() if v is not None})
+                    return merged
             return await ClickAssociator._enrich_association(token_assoc, db)
 
         return await ClickAssociator.associate_from_db(click_id, db)

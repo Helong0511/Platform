@@ -167,13 +167,12 @@ async def track_click(
         # 4. 收集完整的请求信息（包括软件、硬件信息和URL参数）
         request_info = collect_request_info(request) if request else {}
 
-        url_params_raw = request_info.get('url_params')
-        if isinstance(url_params_raw, str):
-            try:
-                url_params_raw = json.loads(url_params_raw)
-            except Exception:
-                url_params_raw = None
-        url_params_dict = url_params_raw if isinstance(url_params_raw, dict) else None
+        # 令牌生成使用 dict 版本；落库使用 url_params（JSON 字符串，含重复参数）
+        url_params_dict = (
+            request_info.get("url_params_dict")
+            if isinstance(request_info.get("url_params_dict"), dict)
+            else None
+        )
 
         click_id = generate_click_id_unified(
             offer_id=offer.id,

@@ -254,8 +254,21 @@ def collect_request_info(request: Request) -> Dict[str, Any]:
     for key, value in request.headers.items():
         headers[key] = value
     
-    # 收集URL参数
-    url_params = dict(request.query_params)
+    # 收集URL参数（必须保留全部：含重复 key、空值；用于 clicks 访问记录）
+    # - url_params: JSON(dict[str, list[str]]) 便于存库与后续追加字段
+    # - url_params_dict: dict[str, str|list[str]] 便于生成 click_id 令牌使用
+    url_params_multi: Dict[str, list[str]] = {}
+    for k, v in request.query_params.multi_items():
+        ks = str(k)
+        vs = "" if v is None else str(v)
+        url_params_multi.setdefault(ks, []).append(vs)
+
+    url_params_dict: Dict[str, Any] = {}
+    for k, vals in url_params_multi.items():
+        if len(vals) == 1:
+            url_params_dict[k] = vals[0]
+        else:
+            url_params_dict[k] = vals
     
     # 获取其他重要信息
     referer = request.headers.get("referer")
@@ -283,8 +296,10 @@ def collect_request_info(request: Request) -> Dict[str, Any]:
         'device_brand': device_info.get('device_brand'),
         'device_model': device_info.get('device_model'),
         
-        # URL参数（JSON格式存储）
-        'url_params': json.dumps(url_params) if url_params else None,
+        # URL参数（JSON格式存储，保留全部参数与重复值）
+        'url_params': json.dumps(url_params_multi, ensure_ascii=False) if url_params_multi else None,
+        # 给令牌生成用（dict 形式，不丢重复值）
+        'url_params_dict': url_params_dict if url_params_multi else None,
         
         # 所有请求头（JSON格式存储，用于详细分析）
         'all_headers': json.dumps(headers) if headers else None,

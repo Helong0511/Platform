@@ -155,7 +155,7 @@ async def handle_cached_redirect(
         publisher_id=final_channel_id,
         advertiser_id=advertiser_id,
         short_link_id=short_link_id,
-        url_params=request_info.get("url_params") if isinstance(request_info.get("url_params"), dict) else None,
+        url_params=request_info.get("url_params_dict") if isinstance(request_info.get("url_params_dict"), dict) else None,
         for_short_link=True,
     )
 
@@ -287,7 +287,7 @@ async def handle_database_redirect(
         publisher_id=final_channel_id,
         advertiser_id=advertiser_id,
         short_link_id=short_link.id,
-        url_params=request_info.get("url_params") if isinstance(request_info.get("url_params"), dict) else None,
+        url_params=request_info.get("url_params_dict") if isinstance(request_info.get("url_params_dict"), dict) else None,
         for_short_link=True,
     )
 
