@@ -7,6 +7,11 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.url.placeholder_validation import (
+    format_placeholder_validation_error,
+    validate_track_url_placeholders,
+)
+
 
 class OfferBase(BaseModel):
     """Offer基础模型"""
@@ -39,6 +44,17 @@ class OfferBase(BaseModel):
                     raise ValueError("URL格式无效，必须包含协议和域名")
             except Exception:
                 raise ValueError("URL格式无效")
+        return v
+
+    @field_validator('advertiser_tracklink')
+    @classmethod
+    def validate_advertiser_tracklink_placeholders(cls, v):
+        """校验上游 Tracklink 占位符"""
+        if not v:
+            return v
+        ph = validate_track_url_placeholders(v, skip_association_warnings=True)
+        if not ph.ok:
+            raise ValueError(format_placeholder_validation_error(ph))
         return v
 
 
@@ -80,6 +96,28 @@ class OfferUpdate(BaseModel):
     publisher_ids: Optional[list[int]] = Field(None, description="分配的渠道ID列表（已废弃，使用publisher_configs）")
     publisher_configs: Optional[List[PublisherConfig]] = Field(None,
                                                                description="渠道配置列表，每个渠道对应一个下游Cap和下游PO")
+
+    @field_validator('preview_link', 'advertiser_tracklink', 'postback_url')
+    @classmethod
+    def validate_url(cls, v):
+        if v:
+            try:
+                parsed = urlparse(v)
+                if not parsed.scheme or not parsed.netloc:
+                    raise ValueError("URL格式无效，必须包含协议和域名")
+            except Exception:
+                raise ValueError("URL格式无效")
+        return v
+
+    @field_validator('advertiser_tracklink')
+    @classmethod
+    def validate_advertiser_tracklink_placeholders(cls, v):
+        if not v:
+            return v
+        ph = validate_track_url_placeholders(v, skip_association_warnings=True)
+        if not ph.ok:
+            raise ValueError(format_placeholder_validation_error(ph))
+        return v
 
 
 class OfferResponse(OfferBase):

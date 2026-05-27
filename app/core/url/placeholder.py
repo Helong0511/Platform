@@ -50,6 +50,44 @@ PLACEHOLDER_ALIAS_MAP: Dict[str, str] = {
 }
 
 _BRACE_PATTERN = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+_DOUBLE_BRACE_PATTERN = re.compile(r"\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}")
+# 检测单/双花括号占位符（build_final_url、merge 等）
+ANY_NAMED_PLACEHOLDER_RE = re.compile(
+    r"\{\{[a-zA-Z_][a-zA-Z0-9_]*\}\}|\{[a-zA-Z_][a-zA-Z0-9_]*\}"
+)
+
+
+def placeholder_delimiters(name: str) -> List[str]:
+    """占位符字面量，长格式优先（先替换 ``{{name}}`` 再 ``{name}``）。"""
+    return [f"{{{{{name}}}}}", f"{{{name}}}"]
+
+
+def expand_brace_placeholder_variants(tokens: List[str]) -> List[str]:
+    """为 ``{click_id}`` 等同名列表追加 ``{{click_id}}`` 双花括号形式。"""
+    out: List[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        for t in (token, "{" + token + "}" if token.startswith("{") and token.endswith("}") else token):
+            if t not in seen:
+                seen.add(t)
+                out.append(t)
+    return out
+
+
+def replace_placeholder_literals(text: str, name: str, replacement: str) -> str:
+    """将 text 中 ``{name}`` / ``{{name}}`` 均替换为 replacement。"""
+    result = text
+    for token in placeholder_delimiters(name):
+        result = result.replace(token, replacement)
+    return result
+
+
+def text_has_named_placeholder(text: str, literal_tokens: List[str]) -> bool:
+    """检测文本是否含给定占位符字面量（含双花括号扩展）。"""
+    for token in expand_brace_placeholder_variants(literal_tokens):
+        if token in text:
+            return True
+    return False
 
 
 def normalize_placeholder_name(name: str) -> str:
@@ -79,13 +117,14 @@ def _lookup_value(data: Dict[str, Any], field_name: str) -> Optional[Any]:
 
 def resolve_brace_placeholders(url: str, data: Dict[str, Any]) -> str:
     """
-    替换 URL 中的 ``{field}`` 占位符（Postback 渠道 URL 等）。
+    替换 URL 中的 ``{field}`` / ``{{field}}`` 占位符（Postback 渠道 URL 等）。
     """
     resolved = url
     for placeholder, field_name in PLACEHOLDER_BRACE_MAP.items():
         value = _lookup_value(data, field_name)
         if value is not None:
-            resolved = resolved.replace(placeholder, str(value))
+            inner = placeholder[1:-1]  # click_id from {click_id}
+            resolved = replace_placeholder_literals(resolved, inner, str(value))
     unresolved = extract_brace_placeholders(resolved)
     if unresolved:
         logger.warning("未解析的占位符：%s", unresolved)
@@ -98,5 +137,24 @@ def extract_brace_placeholders(url: str) -> List[str]:
 
 
 def find_named_placeholders(text: str) -> List[str]:
-    """提取 ``{name}`` 中的 name 列表（短链逻辑用）。"""
-    return _BRACE_PATTERN.findall(text)
+    """提取 ``{name}`` / ``{{name}}`` 中的 name 列表（短链逻辑用，去重保序）。"""
+    seen: set[str] = set()
+    names: List[str] = []
+
+    for name in _DOUBLE_BRACE_PATTERN.findall(text):
+        if name not in seen:
+            seen.add(name)
+            names.append(name)
+
+    for m in _BRACE_PATTERN.finditer(text):
+        start = m.start()
+        end = m.end()
+        if start > 0 and text[start - 1] == "{":
+            continue
+        if end < len(text) and text[end] == "}":
+            continue
+        name = m.group(1)
+        if name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names

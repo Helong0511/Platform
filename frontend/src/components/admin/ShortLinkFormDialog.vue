@@ -17,13 +17,26 @@
           v-model="formData.original_url"
           type="textarea"
           :rows="5"
-          placeholder="https://example.com/very/long/url"
+          placeholder="https://example.com/very/long/url?click_id={click_id}"
           clearable
+          @input="refreshPlaceholderFeedback"
         />
         <div class="form-hint">
           <el-icon :size="16"><InfoFilled /></el-icon>
-          <span>必须包含协议（http://或https://）</span>
+          <span>必须包含协议（http://或https://）；占位符支持 {click_id} 与 {{click_id}} 两种写法</span>
         </div>
+        <div v-if="placeholderHint" class="form-hint placeholder-hint">
+          <span>{{ placeholderHint }}</span>
+        </div>
+        <el-alert
+          v-for="(msg, idx) in placeholderWarnings"
+          :key="`ph-warn-${idx}`"
+          :title="msg"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="placeholder-alert"
+        />
       </el-form-item>
 
       <el-form-item label="自定义代码" prop="short_code">
@@ -145,6 +158,7 @@
 import { ref, computed } from 'vue';
 import { InfoFilled, Refresh } from '@element-plus/icons-vue';
 import { useDevice } from '@/composables/useDevice';
+import { PLACEHOLDER_HINT, validateShortLinkPlaceholders } from '@/utils/shortLinkPlaceholderValidate';
 
 const props = defineProps({
   modelValue: {
@@ -193,6 +207,23 @@ const visible = computed({
 
 const title = computed(() => props.isEdit ? '编辑短链接' : '创建短链接');
 
+const placeholderFeedback = ref({ warnings: [] });
+const placeholderHint = PLACEHOLDER_HINT;
+const placeholderWarnings = computed(() => placeholderFeedback.value.warnings || []);
+
+const refreshPlaceholderFeedback = () => {
+  const url = props.formData.original_url;
+  if (!url) {
+    placeholderFeedback.value = { warnings: [] };
+    return;
+  }
+  const { warnings } = validateShortLinkPlaceholders(url, {
+    offerId: props.formData.offer_id ?? null,
+    channelId: props.formData.channel_id ?? null,
+  });
+  placeholderFeedback.value = { warnings };
+};
+
 const handleClose = () => {
   emit('close');
 };
@@ -219,5 +250,13 @@ const handleGenerateCode = () => {
   margin-top: 4px;
   color: var(--el-text-color-secondary);
   font-size: 12px;
+}
+
+.placeholder-hint {
+  line-height: 1.5;
+}
+
+.placeholder-alert {
+  margin-top: 8px;
 }
 </style>

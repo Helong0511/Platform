@@ -10,6 +10,7 @@ import {
 } from '../api/offer';
 import { ensureCsrfToken } from '../utils/api';
 import { logger } from '../utils/logger';
+import { createOfferTracklinkRules } from '../utils/shortLinkFormRules';
 
 export function createEmptyOfferForm() {
   return {
@@ -88,6 +89,7 @@ export function useOfferForm({ isAdmin, loadData, publisherList }) {
   const formRules = {
     offer_name: [{ required: true, message: '请输入Offer名称', trigger: 'blur' }],
     advertiser_id: [{ required: true, message: '请选择广告主', trigger: 'change' }],
+    ...createOfferTracklinkRules(() => formData),
     'publisher_configs.*.downstream_cap': [
       { type: 'number', min: 0, message: '下游Cap不能为负数', trigger: 'blur' },
     ],

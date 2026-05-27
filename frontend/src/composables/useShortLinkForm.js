@@ -7,7 +7,7 @@ import {
   generateShortCode,
 } from '../api/short-link';
 import { logger } from '../utils/logger';
-import { shortLinkFormRules } from '../utils/shortLinkFormRules';
+import { createShortLinkFormRules } from '../utils/shortLinkFormRules';
 
 const emptyForm = () => ({
   original_url: '',
@@ -31,6 +31,7 @@ export function useShortLinkForm({ refreshListAndStats }) {
   const isEdit = ref(false);
   const currentLinkId = ref(null);
   const formData = reactive(emptyForm());
+  const formRules = createShortLinkFormRules(() => formData);
 
   const handleCreate = () => {
     isEdit.value = false;
@@ -125,7 +126,7 @@ export function useShortLinkForm({ refreshListAndStats }) {
     dialogVisible,
     isEdit,
     formData,
-    formRules: shortLinkFormRules,
+    formRules,
     handleCreate,
     handleEdit,
     handleSave,

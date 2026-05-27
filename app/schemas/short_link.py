@@ -6,7 +6,12 @@ from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.core.url.placeholder_validation import (
+    format_placeholder_validation_error,
+    validate_track_url_placeholders,
+)
 
 
 class ShortLinkBase(BaseModel):
@@ -59,6 +64,17 @@ class ShortLinkBase(BaseModel):
                 raise ValueError("Facebook API 版本格式不正确，应为 v21.0 格式")
         return v
 
+    @model_validator(mode="after")
+    def validate_url_placeholders(self):
+        ph = validate_track_url_placeholders(
+            self.original_url,
+            offer_id=self.offer_id,
+            channel_id=self.channel_id,
+        )
+        if not ph.ok:
+            raise ValueError(format_placeholder_validation_error(ph))
+        return self
+
 
 class ShortLinkCreate(ShortLinkBase):
     """创建短链接"""
@@ -98,6 +114,19 @@ class ShortLinkUpdate(BaseModel):
             if not re.match(r'^v\d+\.\d+$', v):
                 raise ValueError("Facebook API 版本格式不正确，应为 v21.0 格式")
         return v
+
+    @model_validator(mode="after")
+    def validate_url_placeholders(self):
+        if not self.original_url:
+            return self
+        ph = validate_track_url_placeholders(
+            self.original_url,
+            offer_id=self.offer_id,
+            channel_id=self.channel_id,
+        )
+        if not ph.ok:
+            raise ValueError(format_placeholder_validation_error(ph))
+        return self
 
 
 class ShortLinkResponse(ShortLinkBase):

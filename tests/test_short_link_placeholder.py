@@ -57,6 +57,23 @@ def test_build_final_url_merges_replaced_query_param():
     assert "{click_id}" not in final
 
 
+def test_build_final_url_detects_double_brace_in_template():
+    before = "https://up.test/land?cid={{click_id}}"
+    after = "https://up.test/land?cid=abc"
+    final = build_final_url(
+        before,
+        after,
+        "abc",
+        final_offer_id=1,
+        final_channel_id=2,
+        request_params={"click_id": "ignored"},
+        request_info={},
+        advertiser_id=None,
+    )
+    assert final == after
+    assert "ignored" not in final
+
+
 def test_build_final_url_skips_plain_utm_not_in_template():
     before = "https://up.test/land?x={click_id}"
     after = "https://up.test/land?x=abc"

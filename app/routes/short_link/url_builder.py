@@ -3,11 +3,15 @@ URL构建服务
 处理URL参数合并和最终URL构建逻辑
 """
 import logging
-import re
 from collections import OrderedDict
 from typing import Optional
 from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
 
+from app.core.url.placeholder import (
+    ANY_NAMED_PLACEHOLDER_RE,
+    expand_brace_placeholder_variants,
+    text_has_named_placeholder,
+)
 from app.routes.short_link.placeholder import replace_param_value_placeholders
 
 logger = logging.getLogger(__name__)
@@ -34,8 +38,8 @@ def merge_url_params(base_url: str, query_params: dict) -> str:
     existing_params = parse_qs(parsed.query, keep_blank_values=True)
     existing_params_lower = {k.lower(): v for k, v in existing_params.items()}
 
-    # 定义占位符模式列表
-    all_placeholder_patterns = [
+    # 定义占位符模式列表（含 {{name}} 双花括号）
+    all_placeholder_patterns = expand_brace_placeholder_variants([
         '{click_id}', '{clickId}', '{clickid}', '{ClickId}', '{CLICK_ID}',
         '{aff_click_id}', '{AFF_CLICK_ID}', '{affclickid}', '{AFFCLICKID}',
         '{offer_id}', '{offerId}', '{offerid}', '{OfferId}', '{OFFER_ID}',
@@ -43,7 +47,7 @@ def merge_url_params(base_url: str, query_params: dict) -> str:
         '{sub_affid}', '{SUB_AFFID}', '{subaffid}', '{SUBAFFID}',
         '{publisher_id}', '{publisherId}', '{publisherid}', '{PublisherId}', '{PUBLISHER_ID}',
         '{ip}', '{os}', '{device_type}', '{country}', '{advertiser_id}',
-    ]
+    ])
 
     # 定义参数别名映射（用于检测基础URL中是否已存在参数的别名）
     param_alias_mapping = {
@@ -161,9 +165,9 @@ def build_final_url(
     Returns:
         str: 最终的重定向URL，包含所有合并后的查询参数
     """
-    placeholder_pattern_regex = re.compile(r'\{[a-zA-Z_][a-zA-Z0-9_]*\}')
+    placeholder_pattern_regex = ANY_NAMED_PLACEHOLDER_RE
 
-    # 检测原始URL中的占位符
+    # 检测原始URL中的占位符（含 {{click_id}} 等）
     placeholder_params_to_check = {
         'click_id': ['{click_id}', '{clickId}', '{clickid}', '{ClickId}', '{CLICK_ID}', '{aff_click_id}',
                      '{AFF_CLICK_ID}'],
@@ -175,7 +179,9 @@ def build_final_url(
 
     has_placeholder = {}
     for param_name, placeholder_variants in placeholder_params_to_check.items():
-        has_placeholder[param_name] = any(variant in original_url_before_replace for variant in placeholder_variants)
+        has_placeholder[param_name] = text_has_named_placeholder(
+            original_url_before_replace, placeholder_variants
+        )
 
     # 准备要合并的参数
     request_params_with_click = {}

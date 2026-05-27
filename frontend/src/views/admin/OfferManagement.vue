@@ -396,6 +396,9 @@
             :rows="2"
             placeholder="上游的Tracklink（不显示给下游，建立单子时配置我们的参数）"
           />
+          <div class="form-hint" style="margin-top: 4px; color: var(--el-text-color-secondary); font-size: 12px;">
+            占位符支持 {click_id}、{{click_id}}、{clickId}、{channel_id}、{sub_affid} 等；无法解析的占位符将无法保存
+          </div>
         </el-form-item>
 
         <el-form-item label="下游Tracklink" prop="downstream_tracklink">

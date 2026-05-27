@@ -15,6 +15,7 @@ from app.core.url.placeholder import (
     PLACEHOLDER_ALIAS_MAP,
     find_named_placeholders,
     normalize_placeholder_name,
+    replace_placeholder_literals,
 )
 from app.models.models import Offer, Publisher, Advertiser
 
@@ -185,9 +186,9 @@ async def replace_short_link_placeholders(
             unreplaced_placeholders.append(placeholder)
             continue
 
-        # 替换占位符为实际值（URL编码）
+        # 替换占位符为实际值（URL编码）；支持 {name} 与 {{name}}
         encoded_value = quote(str(value), safe='')
-        result_url = result_url.replace(f'{{{placeholder}}}', encoded_value)
+        result_url = replace_placeholder_literals(result_url, placeholder, encoded_value)
 
     # 移除包含未替换占位符的URL参数
     if unreplaced_placeholders:
@@ -201,9 +202,14 @@ async def replace_short_link_placeholders(
             for param_name, param_values in query_params_lower.items():
                 for param_value in param_values:
                     for unreplaced_placeholder in unreplaced_placeholders:
-                        placeholder_pattern = f'{{{unreplaced_placeholder}}}'
-                        if placeholder_pattern in param_value:
-                            params_to_remove.append(param_name)
+                        for pattern in (
+                            f'{{{{{unreplaced_placeholder}}}}}',
+                            f'{{{unreplaced_placeholder}}}',
+                        ):
+                            if pattern in param_value:
+                                params_to_remove.append(param_name)
+                                break
+                        if param_name in params_to_remove:
                             break
                     if param_name in params_to_remove:
                         break
@@ -299,6 +305,6 @@ def replace_param_value_placeholders(
             continue
 
         encoded_value = quote(str(value), safe='')
-        result_value = result_value.replace(f'{{{placeholder}}}', encoded_value)
+        result_value = replace_placeholder_literals(result_value, placeholder, encoded_value)
 
     return result_value, all_replaced
