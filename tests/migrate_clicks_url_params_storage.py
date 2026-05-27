@@ -1,10 +1,12 @@
 """
 将 clicks / clicks_archive 表中旧版标量形态的 url_params 迁移为 dict[str, list[str]]。
 
-用法（项目根目录）:
-  python tests/migrate_clicks_url_params_storage.py --dry-run
-  python tests/migrate_clicks_url_params_storage.py --apply
-  python tests/migrate_clicks_url_params_storage.py --apply --table clicks_archive
+用法（项目根目录，Linux 一般用 python3）:
+  python3 tests/migrate_clicks_url_params_storage.py --dry-run
+  python3 tests/migrate_clicks_url_params_storage.py --apply
+  python3 tests/migrate_clicks_url_params_storage.py --apply --table clicks_archive
+
+  不带参数时等同于 --dry-run（仅预览，不写库）。
 """
 from __future__ import annotations
 
@@ -83,10 +85,16 @@ async def _migrate_table(
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="迁移 clicks.url_params 存库形态")
-    parser.add_argument(
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="仅预览需更新的记录（默认）",
+    )
+    mode_group.add_argument(
         "--apply",
         action="store_true",
-        help="实际写入（默认仅 dry-run）",
+        help="实际写入数据库",
     )
     parser.add_argument(
         "--table",
@@ -114,7 +122,7 @@ async def main() -> None:
 
     print(f"合计: 扫描 {total_scanned}, 需更新 {total_updated}")
     if dry_run and total_updated:
-        print("确认后执行: python tests/migrate_clicks_url_params_storage.py --apply")
+        print("确认后执行: python3 tests/migrate_clicks_url_params_storage.py --apply")
 
 
 if __name__ == "__main__":
