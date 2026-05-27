@@ -11,7 +11,11 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 
 from app.core.tracking.click_token import resolve_click_from_token
-from app.core.url.url_params_util import normalize_url_params, parse_stored_url_params
+from app.core.url.url_params_util import (
+    merge_association_url_params,
+    normalize_url_params,
+    parse_stored_url_params,
+)
 from app.models.models import Click, Offer, Publisher, Advertiser
 
 logger = logging.getLogger(__name__)
@@ -23,9 +27,30 @@ class ClickAssociator:
     @staticmethod
     def _with_normalized_url_params(association: Dict[str, Any]) -> Dict[str, Any]:
         up = association.get("url_params")
-        if isinstance(up, dict) and up:
+        if isinstance(up, dict):
             association = {**association, "url_params": normalize_url_params(up)}
+        elif isinstance(up, str) and up.strip():
+            association = {
+                **association,
+                "url_params": parse_stored_url_params(up),
+            }
         return association
+
+    @staticmethod
+    def _merge_token_and_db_association(
+        db_assoc: Dict[str, Any],
+        token_assoc: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        merged = dict(db_assoc)
+        for key, value in token_assoc.items():
+            if value is None or key == "url_params":
+                continue
+            merged[key] = value
+        merged["url_params"] = merge_association_url_params(
+            db_assoc.get("url_params"),
+            token_assoc.get("url_params"),
+        )
+        return merged
 
     @staticmethod
     async def associate(
@@ -46,8 +71,9 @@ class ClickAssociator:
             if token_assoc.get("publisher_id") is None:
                 db_assoc = await ClickAssociator.associate_from_db(click_id, db)
                 if db_assoc:
-                    merged = dict(db_assoc)
-                    merged.update({k: v for k, v in token_assoc.items() if v is not None})
+                    merged = ClickAssociator._merge_token_and_db_association(
+                        db_assoc, token_assoc
+                    )
                     return ClickAssociator._with_normalized_url_params(merged)
             return ClickAssociator._with_normalized_url_params(
                 await ClickAssociator._enrich_association(token_assoc, db)

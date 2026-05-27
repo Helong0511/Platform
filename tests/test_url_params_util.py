@@ -98,6 +98,47 @@ def test_click_persist_canonicalizes_scalar_url_params():
     assert data["fbclid"] == ["f"]
 
 
+def test_merge_association_url_params_token_empty_keeps_db():
+    from app.core.url.url_params_util import merge_association_url_params
+
+    db = {"dp": ["149"], "fbclid": ["x"], "cloak_dp_effective": "149"}
+    token = {}
+    out = merge_association_url_params(db, token)
+    assert out["dp"] == "149"
+    assert out["fbclid"] == "x"
+    assert out["cloak_dp_effective"] == "149"
+
+
+def test_merge_association_url_params_token_overrides_scalar():
+    from app.core.url.url_params_util import merge_association_url_params
+
+    db = {"dp": ["149"], "utm_source": ["db"]}
+    token = {"utm_source": "token", "sub1": "a"}
+    out = merge_association_url_params(db, token)
+    assert out["dp"] == "149"
+    assert out["utm_source"] == "token"
+    assert out["sub1"] == "a"
+
+
+def test_merge_token_db_association_via_associator():
+    from app.core.postback.transformers.click_associator import ClickAssociator
+
+    db_assoc = {
+        "click_id": "c1",
+        "publisher_id": 10,
+        "url_params": {"dp": ["149"], "fbclid": ["from_db"]},
+    }
+    token_assoc = {
+        "offer_id": 1,
+        "publisher_id": 20,
+        "url_params": {},
+    }
+    merged = ClickAssociator._merge_token_and_db_association(db_assoc, token_assoc)
+    assert merged["publisher_id"] == 20
+    assert merged["url_params"]["fbclid"] == "from_db"
+    assert merged["url_params"]["dp"] == "149"
+
+
 def test_url_builder_params_from_list_url_params():
     from app.core.postback.forwarding.url_builder import UrlBuilder
 

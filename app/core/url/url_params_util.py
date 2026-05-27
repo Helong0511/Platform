@@ -66,11 +66,9 @@ def resolve_dp_from_url_params(url_params: Optional[Dict[str, Any]]) -> Optional
     """解析斗篷 dp：优先 ``cloak_dp_effective``，否则规范化 query 中的 ``dp``。"""
     if not url_params or not isinstance(url_params, dict):
         return None
-    eff = url_params.get("cloak_dp_effective")
-    if eff is not None:
-        s = str(eff).strip()
-        if s:
-            return s
+    eff = scalar_query_value(url_params.get("cloak_dp_effective"))
+    if eff:
+        return eff
     return scalar_query_value(url_params.get("dp"))
 
 
@@ -176,6 +174,42 @@ def canonicalize_url_params_json_text(raw_text: Optional[str]) -> Optional[str]:
     if new_text == raw_text:
         return None
     return new_text
+
+
+def merge_association_url_params(
+    db_params: Any,
+    token_params: Any,
+) -> Dict[str, Any]:
+    """
+    合并 DB 与令牌中的 url_params（业务扁平 dict）。
+
+    - 以 DB 为底；令牌侧非空标量覆盖同名 query 键
+    - 令牌 ``url_params`` 为空 ``{}`` 时不覆盖 DB
+    - ``cloak_*`` 元数据以 DB（桥页落库）为准
+    """
+    db_raw: Dict[str, Any] = db_params if isinstance(db_params, dict) else {}
+    if not db_raw and isinstance(db_params, str):
+        db_raw = parse_stored_url_params(db_params, for_use=False)
+    db_norm = normalize_url_params(db_raw or None)
+
+    token_raw: Dict[str, Any] = token_params if isinstance(token_params, dict) else {}
+    token_norm = normalize_url_params(token_raw or None)
+
+    if not token_norm:
+        return db_norm
+    if not db_norm:
+        return token_norm
+
+    merged = dict(db_norm)
+    for key, value in token_norm.items():
+        if key in CLOAK_META_KEYS:
+            continue
+        if value is not None and str(value).strip() != "":
+            merged[key] = value
+    for key in CLOAK_META_KEYS:
+        if key in db_norm:
+            merged[key] = db_norm[key]
+    return merged
 
 
 def build_click_association_payload(association: Dict[str, Any]) -> Dict[str, Any]:

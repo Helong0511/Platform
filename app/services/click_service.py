@@ -16,6 +16,7 @@ from sqlalchemy.orm import joinedload, load_only
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
+from app.core.url.url_params_util import normalize_url_params
 from app.models.models import Click, Offer, Publisher, Advertiser, ShortLink
 
 logger = logging.getLogger(__name__)
@@ -73,11 +74,17 @@ class ClickService:
         }
 
         if include_heavy_fields:
+            parsed_url_params = ClickService._parse_json_text_field(click.url_params)
             click_data.update({
                 "user_agent": click.user_agent,
                 "short_link_title": click.short_link.title if click.short_link else None,
                 "short_link_url": click.short_link.original_url if click.short_link else None,
-                "url_params": ClickService._parse_json_text_field(click.url_params),
+                "url_params": parsed_url_params,
+                "url_params_normalized": (
+                    normalize_url_params(parsed_url_params)
+                    if isinstance(parsed_url_params, dict)
+                    else {}
+                ),
                 "all_headers": ClickService._parse_json_text_field(click.all_headers),
                 "original_request_url": click.original_request_url,
                 "final_redirect_url": click.final_redirect_url,
