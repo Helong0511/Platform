@@ -631,6 +631,10 @@ def association_from_parsed(parsed: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     url_params = ui.get(_KEY_URL_PARAMS) or ui.get("url_params")
     if url_params is not None and not isinstance(url_params, dict):
         url_params = None
+    else:
+        from app.core.url.url_params_util import normalize_url_params
+
+        url_params = normalize_url_params(url_params) if url_params else {}
 
     return {
         "click_id": None,
@@ -706,14 +710,18 @@ def regenerate_click_id_from_click_data(click_data: Dict[str, Any]) -> str:
     url_params: Optional[Dict[str, Any]] = None
     raw_up = click_data.get("url_params")
     if isinstance(raw_up, dict):
-        url_params = raw_up
+        from app.core.url.url_params_util import normalize_url_params
+
+        url_params = normalize_url_params(raw_up)
     elif isinstance(raw_up, str) and raw_up.strip():
         try:
             import json as _json
 
             parsed = _json.loads(raw_up)
             if isinstance(parsed, dict):
-                url_params = parsed
+                from app.core.url.url_params_util import normalize_url_params
+
+                url_params = normalize_url_params(parsed)
         except Exception:
             pass
 

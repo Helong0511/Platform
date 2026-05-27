@@ -10,6 +10,8 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
+from app.core.url.url_params_util import CLOAK_META_KEYS, scalar_query_value
+
 logger = logging.getLogger(__name__)
 
 # Postback 转发常用：花括号键 -> data 字段名
@@ -65,7 +67,13 @@ def normalize_placeholder_name(name: str) -> str:
 def _lookup_value(data: Dict[str, Any], field_name: str) -> Optional[Any]:
     url_params = data.get("url_params") or {}
     if isinstance(url_params, dict) and field_name in url_params:
-        return url_params[field_name]
+        raw = url_params[field_name]
+        if field_name in CLOAK_META_KEYS:
+            return raw
+        scalar = scalar_query_value(raw)
+        if scalar is not None:
+            return scalar
+        return raw if not isinstance(raw, list) else None
     return data.get(field_name)
 
 

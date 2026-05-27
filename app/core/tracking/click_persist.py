@@ -51,11 +51,42 @@ def should_persist_clicks_to_db() -> bool:
     return not bool(getattr(settings, "USE_TRACKING_TOKEN", False))
 
 
+def _canonicalize_click_data_url_params(click_data: Dict[str, Any]) -> Dict[str, Any]:
+    """落库前统一 url_params 为 dict[str, list[str]] + cloak meta 形态。"""
+    import json as _json
+
+    from app.core.url.url_params_util import (
+        canonicalize_url_params_for_storage,
+        parse_stored_url_params,
+    )
+
+    raw = click_data.get("url_params")
+    if not raw:
+        return click_data
+    if isinstance(raw, str):
+        parsed = parse_stored_url_params(raw, for_use=False)
+    elif isinstance(raw, dict):
+        parsed = raw
+    else:
+        return click_data
+    if not parsed:
+        return click_data
+    canon = canonicalize_url_params_for_storage(parsed)
+    if not canon:
+        return click_data
+    return {
+        **click_data,
+        "url_params": _json.dumps(canon, ensure_ascii=False, separators=(",", ":")),
+    }
+
+
 async def persist_click_record(
     click_data: Dict[str, Any],
     background_tasks: Optional[BackgroundTasks] = None,
 ) -> None:
     """Redis 队列优先，失败则后台任务写 clicks 表；令牌模式可整体跳过。"""
+    click_data = _canonicalize_click_data_url_params(click_data)
+
     if not should_persist_clicks_to_db():
         logger.debug(
             "跳过 clicks 表写入（令牌归因）: click_id=%s",

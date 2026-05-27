@@ -29,6 +29,10 @@ from app.core.postback.forwarding.http_client import HttpClient
 from app.core.postback.forwarding.success_checker import SuccessChecker
 from app.core.utils import get_app_now_naive
 from app.services.telegram_notification_service import TelegramNotificationService
+from app.core.url.url_params_util import (
+    build_click_association_payload,
+    scalar_query_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,15 +70,7 @@ class PostbackForwarder:
         # 如果提供了 click_association，直接使用
         if click_association:
             publisher_id = click_association.get('publisher_id')
-            # 构建 click_association_data 字典，包含所有必要的信息
-            click_association_data = {
-                'click_id': click_association.get('click_id'),  # 点击 ID
-                'advertiser_id': click_association.get('advertiser_id'),  # 广告主 ID
-                'offer_id': click_association.get('offer_id'),  # 广告任务 ID
-                'publisher_id': click_association.get('publisher_id'),  # 渠道 ID
-                'short_link_id': click_association.get('short_link_id'),  # 短链接 ID
-                'url_params': click_association.get('url_params', {}),  # URL 参数
-            }
+            click_association_data = build_click_association_payload(click_association)
             
             # 详细日志：Click 关联信息
             logger.info(f"=== Click 关联信息 ===")
@@ -96,15 +92,9 @@ class PostbackForwarder:
                 )
                 if click_association:
                     publisher_id = click_association.get('publisher_id')
-                    # 构建 click_association_data 字典
-                    click_association_data = {
-                        'click_id': click_association.get('click_id'),  # 点击 ID
-                        'advertiser_id': click_association.get('advertiser_id'),  # 广告主
-                        'offer_id': click_association.get('offer_id'),  # 广告任务 ID
-                        'publisher_id': click_association.get('publisher_id'),  # 渠道 ID
-                        'short_link_id': click_association.get('short_link_id'),  # 短链接 ID
-                        'url_params': click_association.get('url_params', {}),  # URL 参数
-                    }
+                    click_association_data = build_click_association_payload(
+                        click_association
+                    )
                     
                     # 详细日志：Click 关联信息
                     logger.info(f"=== Click 关联信息 ===")
@@ -205,19 +195,18 @@ class PostbackForwarder:
             
             # 从 click_association 中提取数据，优先使用 url_params
             url_params = click_association_data.get('url_params', {})
-            if url_params.get('click_id'):
-                # 同时添加带下划线和不带下划线的版本，确保兼容性
-                json_data['clickid'] = url_params['click_id']
-                json_data['click_id'] = url_params['click_id']
-            elif click_association_data.get('click_id'):
-                json_data['clickid'] = click_association_data['click_id']
-                json_data['click_id'] = click_association_data['click_id']
-            
-            # 添加 offer_id
-            if url_params.get('offer_id'):
-                json_data['offer_id'] = url_params['offer_id']
-            elif click_association_data.get('offer_id'):
-                json_data['offer_id'] = click_association_data['offer_id']
+            cid = scalar_query_value(url_params.get('click_id')) or click_association_data.get(
+                'click_id'
+            )
+            if cid:
+                json_data['clickid'] = str(cid)
+                json_data['click_id'] = str(cid)
+
+            oid = scalar_query_value(url_params.get('offer_id')) or click_association_data.get(
+                'offer_id'
+            )
+            if oid is not None:
+                json_data['offer_id'] = str(oid)
             
             logger.info(f"POST JSON 数据: {json_data}")
         else:

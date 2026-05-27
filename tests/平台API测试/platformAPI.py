@@ -104,9 +104,16 @@ if __name__ == '__main__':
     print("产品列表:", json.dumps(products_result, indent=2, ensure_ascii=False))
 
     # 获取详细广告数据（按国家+广告单元）
-    ad_data_result = get_ad_data(data_type='all', start_date='2025-11-23', end_date='2025-11-23')
+    ad_data_result = get_ad_data(data_type='all', start_date='2026-05-27', end_date='2026-05-27')
     print("详细广告数据:", json.dumps(ad_data_result, indent=2, ensure_ascii=False))
 
     # 获取每日汇总数据（按产品+日期+广告单元汇总）
-    daily_summary_result = get_ad_data(data_type='day', start_date='2025-11-23', end_date='2025-11-23')
+    daily_summary_result = get_ad_data(data_type='day', start_date='2026-05-27', end_date='2026-05-27')
     print("每日汇总数据:", json.dumps(daily_summary_result, indent=2, ensure_ascii=False))
+
+    test = None
+
+    if test:
+        print('值为真')
+    else:
+        print('值为假')

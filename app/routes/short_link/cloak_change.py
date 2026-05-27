@@ -200,13 +200,11 @@ def register_cloak_change_routes(router: APIRouter) -> None:
                         short_code, session_id, client_ip
                     ):
                         request_info_visit = dict(request_info_cloak)
-                        try:
-                            up_m: dict = {}
-                            if request_info_visit.get("url_params"):
-                                loaded = json.loads(request_info_visit["url_params"])
-                                up_m = loaded if isinstance(loaded, dict) else {}
-                        except Exception:
-                            up_m = {}
+                        from app.core.url.url_params_util import parse_stored_url_params
+
+                        up_m = parse_stored_url_params(
+                            request_info_visit.get("url_params"), for_use=False
+                        )
                         up_m["cloak_visit"] = True
                         up_m["cloak_dp_effective"] = cloak_key
                         q_dp = request.query_params.get("dp") if request else None

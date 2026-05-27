@@ -27,6 +27,7 @@ from app.core.postback.notifier import PostbackNotifier
 from app.models.models import AdminNotificationConfig, CloakConfig, ShortLink
 from app.services.telegram_notification_service import TelegramNotificationService
 from app.core.third_party_report import send_third_party_report
+from app.core.url.url_params_util import resolve_dp_from_url_params, scalar_query_value
 
 logger = logging.getLogger(__name__)
 
@@ -131,9 +132,9 @@ class PostbackProcessor:
                 click_id = click_association.get('click_id')
                 ip = click_association.get('ip')
                 ua = click_association.get('user_agent')
-                fbclid = url_params.get('fbclid')
-                email = url_params.get('email')
-                phone = url_params.get('phone')
+                fbclid = scalar_query_value(url_params.get('fbclid'))
+                email = scalar_query_value(url_params.get('email'))
+                phone = scalar_query_value(url_params.get('phone'))
                 
                 # 获取 payout 参数并确保转换为数值类型
                 amount_raw = raw_data.get('payout')
@@ -169,9 +170,9 @@ class PostbackProcessor:
                 if fbclid:
                     logger.info(f"=== 检测到 fbclid 参数：{fbclid} ===")
                     
-                    # 从 url_params 提取 dp 参数
+                    # 从 url_params 提取 dp（优先 cloak_dp_effective，兼容 list 存库格式）
                     url_params = click_association.get('url_params', {})
-                    dp = url_params.get('dp') if url_params else None
+                    dp = resolve_dp_from_url_params(url_params)
 
                     cloak_cfg_pb = None
                     if dp:

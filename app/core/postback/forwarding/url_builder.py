@@ -7,6 +7,12 @@ import logging
 from typing import Dict, Any, Optional, Tuple
 from urllib.parse import urlencode, urlparse, parse_qs, urlunparse, quote
 
+from app.core.url.url_params_util import (
+    normalize_url_params,
+    parse_stored_url_params,
+    scalar_query_value,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,9 +78,14 @@ class UrlBuilder:
             dict: 参数字典
         """
         params = {}
-        
-        # 获取 url_params
-        url_params = click_association.get('url_params', {}) if click_association else {}
+
+        url_params: Dict[str, Any] = {}
+        if click_association:
+            raw_up = click_association.get("url_params")
+            if isinstance(raw_up, dict):
+                url_params = normalize_url_params(raw_up)
+            elif isinstance(raw_up, str) and raw_up.strip():
+                url_params = parse_stored_url_params(raw_up)
         
         # 转化相关参数
         if conversion_data.get('conversion_id'):
@@ -88,36 +99,25 @@ class UrlBuilder:
         
         # Click 相关参数 - 优先从 url_params 中获取
         if click_association:
-            # click_id
-            if url_params.get('click_id'):
-                params['click_id'] = str(url_params['click_id'])
-                params['clickid'] = str(url_params['click_id'])  # 同时添加无下划线版本
-            elif click_association.get('click_id'):
-                params['click_id'] = str(click_association['click_id'])
-                params['clickid'] = str(click_association['click_id'])  # 同时添加无下划线版本
-            
-            # offer_id
-            if url_params.get('offer_id'):
-                params['offer_id'] = str(url_params['offer_id'])
-            elif click_association.get('offer_id'):
-                params['offer_id'] = str(click_association['offer_id'])
-            
-            # publisher_id
-            if url_params.get('publisher_id'):
-                params['publisher_id'] = str(url_params['publisher_id'])
-            elif click_association.get('publisher_id'):
-                params['publisher_id'] = str(click_association['publisher_id'])
-            
-            # advertiser_id
-            if url_params.get('advertiser_id'):
-                params['advertiser_id'] = str(url_params['advertiser_id'])
-            elif click_association.get('advertiser_id'):
-                params['advertiser_id'] = str(click_association['advertiser_id'])
-            
-            # short_link_id
-            if url_params.get('short_link_id'):
-                params['short_link_id'] = str(url_params['short_link_id'])
-            elif click_association.get('short_link_id'):
-                params['short_link_id'] = str(click_association['short_link_id'])
+            cid = scalar_query_value(url_params.get("click_id")) or (
+                str(click_association["click_id"])
+                if click_association.get("click_id") is not None
+                else None
+            )
+            if cid:
+                params["click_id"] = cid
+                params["clickid"] = cid
+
+            for key, assoc_key in (
+                ("offer_id", "offer_id"),
+                ("publisher_id", "publisher_id"),
+                ("advertiser_id", "advertiser_id"),
+                ("short_link_id", "short_link_id"),
+            ):
+                val = scalar_query_value(url_params.get(key))
+                if val is not None:
+                    params[key] = val
+                elif click_association.get(assoc_key) is not None:
+                    params[key] = str(click_association[assoc_key])
         
         return params

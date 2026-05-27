@@ -448,12 +448,14 @@ class AdTrackingCodec:
         # 2 字节随机：令相同业务载荷在不同次生成时密文不同，防重放指纹对齐（非密码学 nonce）。
         rand2 = os.urandom(2)
 
-        outer_cap = (
+        # 决策阶段：仅用紧凑外层上限来推导 max_user_cap（用于判定能否走 compact）。
+        # 注意：full 模式的输出外层上限应与 click_id varchar(255) 对齐（否则会把 full 误判成“超出 60 字符”）。
+        compact_outer_cap = (
             cls._MAX_OUTER_CHARS_COMPACT
             if max_outer_chars is None
             else min(int(max_outer_chars), cls.MAX_CLICK_ID_LENGTH)
         )
-        max_combined_cap, max_plaintext_cap, max_user_cap = cls._compact_limits(outer_cap)
+        max_combined_cap, max_plaintext_cap, max_user_cap = cls._compact_limits(compact_outer_cap)
 
         # resolved：本次实际走的「紧凑 / 完整」分支，影响 _pack_payload 与用户区是否 zlib。
         resolved: Literal["compact", "full"]
@@ -482,6 +484,11 @@ class AdTrackingCodec:
             if not allow_full:
                 raise ValueError("已禁止 full 格式生成")
             resolved = "full"
+
+        # 输出阶段：决定走 compact 或 full 后，才设定对应的外层长度上限用于校验。
+        outer_cap = (
+            compact_outer_cap if resolved == "compact" else cls.MAX_CLICK_ID_LENGTH
+        )
 
         user_bytes, payload_kind = cls._pack_payload(
             user_params,

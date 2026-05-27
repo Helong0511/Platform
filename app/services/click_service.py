@@ -2,6 +2,7 @@
 短链接访问记录服务层
 封装点击记录查询的业务逻辑
 """
+import json
 import logging
 from datetime import timedelta
 from time import perf_counter
@@ -25,6 +26,18 @@ class ClickService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    @staticmethod
+    def _parse_json_text_field(raw: Any) -> Any:
+        """将 ORM Text 中的 JSON 字段解析为对象；解析失败则原样返回。"""
+        if raw is None or raw == "":
+            return None
+        if isinstance(raw, (dict, list)):
+            return raw
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return raw
 
     @staticmethod
     def _serialize_click(click: Click, include_heavy_fields: bool = False) -> Dict[str, Any]:
@@ -64,8 +77,8 @@ class ClickService:
                 "user_agent": click.user_agent,
                 "short_link_title": click.short_link.title if click.short_link else None,
                 "short_link_url": click.short_link.original_url if click.short_link else None,
-                "url_params": click.url_params,
-                "all_headers": click.all_headers,
+                "url_params": ClickService._parse_json_text_field(click.url_params),
+                "all_headers": ClickService._parse_json_text_field(click.all_headers),
                 "original_request_url": click.original_request_url,
                 "final_redirect_url": click.final_redirect_url,
             })

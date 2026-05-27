@@ -5,13 +5,13 @@ Click ID 关联器
 """
 import asyncio
 import logging
-import json
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 
 from app.core.tracking.click_token import resolve_click_from_token
+from app.core.url.url_params_util import normalize_url_params, parse_stored_url_params
 from app.models.models import Click, Offer, Publisher, Advertiser
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 
 class ClickAssociator:
     """Click ID 关联器"""
+
+    @staticmethod
+    def _with_normalized_url_params(association: Dict[str, Any]) -> Dict[str, Any]:
+        up = association.get("url_params")
+        if isinstance(up, dict) and up:
+            association = {**association, "url_params": normalize_url_params(up)}
+        return association
 
     @staticmethod
     async def associate(
@@ -41,8 +48,10 @@ class ClickAssociator:
                 if db_assoc:
                     merged = dict(db_assoc)
                     merged.update({k: v for k, v in token_assoc.items() if v is not None})
-                    return merged
-            return await ClickAssociator._enrich_association(token_assoc, db)
+                    return ClickAssociator._with_normalized_url_params(merged)
+            return ClickAssociator._with_normalized_url_params(
+                await ClickAssociator._enrich_association(token_assoc, db)
+            )
 
         return await ClickAssociator.associate_from_db(click_id, db)
 
@@ -139,14 +148,11 @@ class ClickAssociator:
             logger.error(f"多次尝试后仍未找到 Click 记录：click_id={click_id}")
             return None
         
-        # 解析 url_params
-        url_params = {}
-        if click.url_params:
-            try:
-                url_params = json.loads(click.url_params)
-                logger.debug(f"成功解析 url_params: {url_params}")
-            except json.JSONDecodeError:
-                logger.warning(f"解析 url_params 失败: {click.url_params}")
+        url_params = parse_stored_url_params(click.url_params, for_use=False)
+        if url_params:
+            logger.debug("成功解析 url_params: %s", url_params)
+        elif click.url_params:
+            logger.warning("解析 url_params 失败: %s", click.url_params)
         
         # 提取关联信息
         association = {
@@ -171,5 +177,5 @@ class ClickAssociator:
             f"Click ID 关联成功：click_id={click_id}, "
             f"offer_id={click.offer_id}, publisher_id={click.publisher_id}"
         )
-        
-        return association
+
+        return ClickAssociator._with_normalized_url_params(association)

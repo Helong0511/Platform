@@ -12,6 +12,7 @@ from app.core.tracking.click_id_generator import generate_click_id_unified
 from app.core.tracking.click_persist import persist_click_record, should_persist_clicks_to_db
 from app.core.utils import get_app_now_naive
 from app.models.models import ShortLink
+from app.core.url.url_params_util import pack_query_params_for_storage
 from app.routes.short_link.utils import resolve_cloak_click_offer_and_publisher
 
 logger = logging.getLogger(__name__)
@@ -23,16 +24,17 @@ def build_cloak_url_params(
         email: Optional[str],
         phone: Optional[str],
 ) -> Optional[str]:
-    url_params_dict: Dict[str, Any] = {}
+    flat: Dict[str, Any] = {}
     if fbclid:
-        url_params_dict["fbclid"] = fbclid
+        flat["fbclid"] = fbclid
     if resolved_dp:
-        url_params_dict["dp"] = resolved_dp
+        flat["dp"] = resolved_dp
     if email:
-        url_params_dict["email"] = email
+        flat["email"] = email
     if phone:
-        url_params_dict["phone"] = phone
-    return json.dumps(url_params_dict, ensure_ascii=False) if url_params_dict else None
+        flat["phone"] = phone
+    packed = pack_query_params_for_storage(flat)
+    return json.dumps(packed, ensure_ascii=False) if packed else None
 
 
 async def persist_cloak_report_click(

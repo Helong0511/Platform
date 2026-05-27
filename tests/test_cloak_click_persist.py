@@ -18,8 +18,8 @@ def test_build_cloak_url_params():
     import json
 
     data = json.loads(raw)
-    assert data["fbclid"] == "fb1"
-    assert data["dp"] == "dp1"
+    assert data["fbclid"] == ["fb1"]
+    assert data["dp"] == ["dp1"]
 
 
 def test_schedule_skips_when_persist_off(monkeypatch):

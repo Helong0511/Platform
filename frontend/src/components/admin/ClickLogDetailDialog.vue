@@ -207,13 +207,15 @@ const copyToClipboard = async (text) => {
   }
 };
 
-const formatJSON = (jsonString) => {
-  if (!jsonString) return '-';
+const formatJSON = (value) => {
+  if (!value) return '-';
+  if (typeof value === 'object') {
+    return JSON.stringify(value, null, 2);
+  }
   try {
-    const obj = JSON.parse(jsonString);
-    return JSON.stringify(obj, null, 2);
+    return JSON.stringify(JSON.parse(value), null, 2);
   } catch (e) {
-    return jsonString;
+    return String(value);
   }
 };
 
