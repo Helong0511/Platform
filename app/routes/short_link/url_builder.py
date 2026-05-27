@@ -134,12 +134,11 @@ def build_final_url(
         original_url_before_replace: str,
         original_url_after_replace: str,
         click_id: str,
-        offer_id: Optional[int],
-        channel_id: Optional[int],
+        final_offer_id: Optional[int],
         final_channel_id: Optional[int],
         request_params: dict,
         request_info: Optional[dict] = None,
-        advertiser_id: Optional[int] = None
+        advertiser_id: Optional[int] = None,
 ) -> str:
     """
     构建最终的重定向URL
@@ -153,9 +152,8 @@ def build_final_url(
         original_url_before_replace: 替换占位符之前的原始URL
         original_url_after_replace: 替换占位符之后的URL
         click_id: 系统生成的唯一点击ID
-        offer_id: Offer的数据库主键ID（可选）
-        channel_id: 渠道ID（从URL参数获取，可能为None）
-        final_channel_id: 最终使用的渠道ID
+        final_offer_id: 解析后的 Offer 主键（与 replace_short_link_placeholders 一致）
+        final_channel_id: 最终使用的渠道（Publisher）主键
         request_params: 用户请求时携带的查询参数字典
         request_info: 请求信息字典（可选）
         advertiser_id: 广告主的数据库主键ID（可选）
@@ -213,10 +211,10 @@ def build_final_url(
             replaced_value, all_replaced = replace_param_value_placeholders(
                 param_value_str,
                 click_id,
-                offer_id,
+                final_offer_id,
                 final_channel_id,
                 advertiser_id if advertiser_id is not None else None,
-                request_info_for_replace
+                request_info_for_replace,
             )
 
             if all_replaced:

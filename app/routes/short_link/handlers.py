@@ -169,9 +169,14 @@ async def handle_cached_redirect(
     )
 
     final_url = build_final_url(
-        original_url_before_replace, original_url_after_replace, click_id,
-        offer_id, channel_id, final_channel_id, request_params,
-        request_info, advertiser_id
+        original_url_before_replace,
+        original_url_after_replace,
+        click_id,
+        final_offer_id,
+        final_channel_id,
+        request_params,
+        request_info,
+        advertiser_id,
     )
 
     # 获取原始请求URL
@@ -301,9 +306,14 @@ async def handle_database_redirect(
     )
 
     final_url = build_final_url(
-        original_url_before_replace, original_url_after_replace, click_id,
-        offer_id, channel_id, final_channel_id, request_params,
-        request_info, advertiser_id
+        original_url_before_replace,
+        original_url_after_replace,
+        click_id,
+        final_offer_id,
+        final_channel_id,
+        request_params,
+        request_info,
+        advertiser_id,
     )
 
     # 获取原始请求URL
