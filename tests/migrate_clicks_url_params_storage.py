@@ -27,7 +27,7 @@ if _ROOT not in sys.path:
 
 from sqlalchemy import text
 
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, engine
 from app.core.url.url_params_util import canonicalize_url_params_json_text
 
 ALLOWED_TABLES = ("clicks", "clicks_archive")
@@ -263,16 +263,24 @@ async def main() -> None:
 
     if args.estimate:
         print(f"估算模式, 表: {tables}, 抽样={args.estimate_sample}")
+        any_need = False
         for table in tables:
             total, sampled, need = await _estimate_table(
                 table, sample_size=args.estimate_sample
             )
+            if need > 0:
+                any_need = True
             ratio = (need / sampled * 100) if sampled else 0.0
             est_need = int(total * need / sampled) if sampled else 0
             print(
                 f"{table}: 非空 url_params={total:,} 条, "
                 f"抽样 {sampled:,} 条中需迁移 {need:,} 条 ({ratio:.1f}%), "
                 f"估算全表需迁移约 {est_need:,} 条"
+            )
+        if not any_need:
+            print(
+                "\n结论: 抽样未发现旧版标量 url_params，无需执行 --apply 迁移。"
+                "读侧已支持 list/标量混合格式，业务可正常使用。"
             )
         return
 
@@ -321,5 +329,10 @@ async def main() -> None:
         print("本段已无需要迁移的记录（可能已是标准形态）。")
 
 
+async def _run() -> None:
+    await main()
+    await engine.dispose()
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(_run())
