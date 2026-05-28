@@ -121,3 +121,22 @@ async def close_redis_client():
         finally:
             _redis_client = None
 
+
+async def reset_redis_client(reason: str = ""):
+    """
+    重置Redis连接（用于连接异常后的快速自愈）
+    """
+    global _redis_client
+    if _redis_client is None:
+        return
+
+    try:
+        await _redis_client.close()
+    except Exception as e:
+        logger.debug(f"重置Redis连接时关闭失败: {e}")
+    finally:
+        _redis_client = None
+
+    if reason:
+        logger.warning(f"Redis连接已重置，原因: {reason}")
+

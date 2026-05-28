@@ -69,7 +69,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Iterator, Optional
 from app.core.config import settings
-from app.core.redis_client import get_redis_client
+from app.core.redis_client import get_redis_client, reset_redis_client
 from app.core.utils import get_client_ip, get_device_type
 from urllib.parse import unquote
 
@@ -78,6 +78,9 @@ logger = logging.getLogger(__name__)
 # ====== API限流存储 ======
 # 使用内存存储限流信息（Redis不可用时使用）
 _rate_limit_store: dict[str, dict[str, tuple[int, datetime]]] = defaultdict(dict)
+# Redis 限流异常日志限频（避免短时间刷屏）
+_rate_limit_redis_error_log_window_seconds = 60
+_rate_limit_redis_error_last_log_at: dict[str, float] = {}
 
 # ====== 限流配置 ======
 # 从配置中读取限流设置，提供默认值
@@ -143,12 +146,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if redis_client:
             # 使用Redis进行限流（支持多进程）
             try:
-                # 获取当前计数
-                current_count = await redis_client.get(rate_limit_key)
-                current_count = int(current_count) if current_count else 0
-                
+                # 使用 INCR + EXPIRE，减少网络往返并降低连接抖动影响
+                updated_count = int(await redis_client.incr(rate_limit_key))
+                if updated_count == 1:
+                    await redis_client.expire(rate_limit_key, window)
+
                 # 检查是否超过限制
-                if current_count >= limit:
+                if updated_count > limit:
                     logger.warning(f"API限流触发（Redis）: IP={client_ip}, 路径={request.url.path}, 限制={limit}/{window}秒")
                     return JSONResponse(
                         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -162,17 +166,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                         }
                     )
                 
-                # 增加计数并设置过期时间
-                await redis_client.incr(rate_limit_key)
-                await redis_client.expire(rate_limit_key, window)
-                
                 # 继续处理请求
                 response = await call_next(request)
-                
-                # 获取更新后的计数
-                updated_count = await redis_client.get(rate_limit_key)
-                updated_count = int(updated_count) if updated_count else current_count + 1
-                
+
                 # 添加限流响应头
                 remaining = max(0, limit - updated_count)
                 response.headers["X-RateLimit-Limit"] = str(limit)
@@ -183,7 +179,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             except Exception as e:
                 error_msg = str(e) or repr(e) or "未知错误"
                 error_type = type(e).__name__
-                logger.warning(f"Redis限流操作失败: {error_type} - {error_msg}，回退到内存存储")
+                now_ts = time.time()
+                error_key = f"{error_type}:{error_msg[:120]}"
+                last_log_at = _rate_limit_redis_error_last_log_at.get(error_key, 0.0)
+                should_log = (now_ts - last_log_at) >= _rate_limit_redis_error_log_window_seconds
+                if should_log:
+                    logger.warning(f"Redis限流操作失败: {error_type} - {error_msg}，回退到内存存储")
+                    _rate_limit_redis_error_last_log_at[error_key] = now_ts
+                else:
+                    logger.debug(f"Redis限流异常抑制日志: {error_type} - {error_msg}")
+                # 连接异常后重置客户端，避免后续请求反复命中坏连接
+                await reset_redis_client(f"RateLimitMiddleware: {error_type}")
                 # Redis操作失败，回退到内存存储
         
         # ====== 使用内存存储进行限流（Redis不可用时） ======
