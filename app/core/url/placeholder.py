@@ -47,6 +47,7 @@ PLACEHOLDER_ALIAS_MAP: Dict[str, str] = {
     "subaffid": "channel_id",
     "offerId": "offer_id",
     "offerid": "offer_id",
+    "payout": "offer_payout",
 }
 
 _BRACE_PATTERN = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")

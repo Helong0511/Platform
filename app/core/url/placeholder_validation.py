@@ -47,6 +47,7 @@ _SUPPORTED_CANONICAL: Set[str] = {
 _PLACEHOLDER_HINTS: dict[str, str] = {
     "click_id": "{click_id}、{{click_id}}、{clickId}、{aff_click_id}",
     "offer_id": "{offer_id}、{{offer_id}}、{offerId}",
+    "offer_payout": "{offer_payout}、{payout}",
     "channel_id": "{channel_id}、{{channel_id}}、{sub_affid}、{channelId}",
     "publisher_id": "{publisher_id}、{{publisher_id}}",
     "ip": "{ip}、{{ip}}",
@@ -101,7 +102,7 @@ def supported_placeholder_summary() -> str:
     """供错误提示展示的 supported 占位符摘要。"""
     parts = [
         "点击: {click_id}/{clickId}/{aff_click_id}",
-        "产品: {offer_id}/{offerId}、{offer_name}、{advertiser_offer_id}",
+        "产品: {offer_id}/{offerId}、{offer_name}、{advertiser_offer_id}、{offer_payout}/{payout}",
         "渠道: {channel_id}/{sub_affid}、{publisher_id}",
         "设备: {ip}、{os}、{country}、{device_type}、{user_agent}、{referer}",
         "广告主: {advertiser_id}、{advertiser_name}",

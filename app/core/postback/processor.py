@@ -27,7 +27,11 @@ from app.core.postback.notifier import PostbackNotifier
 from app.models.models import AdminNotificationConfig, CloakConfig, ShortLink
 from app.services.telegram_notification_service import TelegramNotificationService
 from app.core.third_party_report import send_third_party_report
-from app.core.url.url_params_util import resolve_dp_from_url_params, scalar_query_value
+from app.core.url.url_params_util import (
+    parse_stored_url_params,
+    resolve_dp_from_url_params,
+    scalar_query_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -126,13 +130,20 @@ class PostbackProcessor:
 
             logger.info(f"Click 关联结果: {click_association}")
             
-            # 检查 url_params 中的 fbclid 参数并上报
+            # 检查 url_params 中的 dp/fbclid 参数并上报
             if click_association:
-                url_params = click_association.get('url_params') or {}
+                raw_url_params = click_association.get('url_params')
+                if isinstance(raw_url_params, dict):
+                    url_params = raw_url_params
+                elif isinstance(raw_url_params, str):
+                    url_params = parse_stored_url_params(raw_url_params)
+                else:
+                    url_params = {}
                 click_id = click_association.get('click_id')
                 ip = click_association.get('ip')
                 ua = click_association.get('user_agent')
                 fbclid = scalar_query_value(url_params.get('fbclid'))
+                dp = resolve_dp_from_url_params(url_params)
                 email = scalar_query_value(url_params.get('email'))
                 phone = scalar_query_value(url_params.get('phone'))
                 
@@ -167,12 +178,13 @@ class PostbackProcessor:
                 logger.info(f"amount:{amount}")
                 logger.info("-" * 50)
 
-                if fbclid:
-                    logger.info(f"=== 检测到 fbclid 参数：{fbclid} ===")
-                    
-                    # 从 url_params 提取 dp（优先 cloak_dp_effective，兼容 list 存库格式）
-                    url_params = click_association.get('url_params', {})
-                    dp = resolve_dp_from_url_params(url_params)
+                # 支持 dp 触发第三方上报：即使 fbclid 缺失，也不因参数存储格式变化而整体跳过
+                if fbclid or dp:
+                    logger.info(
+                        "=== 检测到上报关键参数：fbclid=%s dp=%s ===",
+                        fbclid,
+                        dp,
+                    )
 
                     cloak_cfg_pb = None
                     if dp:
@@ -273,8 +285,24 @@ class PostbackProcessor:
                                 amt_send,
                             )
                         else:
+                            report_adsid = fbclid
+                            if not report_adsid:
+                                report_adsid = (
+                                    scalar_query_value(url_params.get("click_id"))
+                                    or scalar_query_value(url_params.get("cid"))
+                                    or (str(click_id).strip() if click_id else None)
+                                    or (str(normalized_data.get("conversion_id")).strip() if normalized_data.get("conversion_id") else None)
+                                )
+                            if not report_adsid:
+                                logger.warning(
+                                    "=== 存在 dp 但缺少可用 adsid，跳过第三方上报：dp=%s click_id=%s ===",
+                                    dp,
+                                    click_id,
+                                )
+                                report_adsid = None
+
                             report_kw: Dict[str, Any] = {
-                                "adsid": fbclid,
+                                "adsid": report_adsid,
                                 "conversion_id": str(click_id)[:200],
                                 "event": fb_event,
                                 "email": email,
@@ -290,13 +318,20 @@ class PostbackProcessor:
                             if fb_event == "Purchase":
                                 report_kw["currency"] = cur_send or "USD"
                                 report_kw["amount"] = float(amt_send)
-                            await send_third_party_report(**report_kw)
-                            logger.info(f"=== 第三方上报成功：fbclid={fbclid} event={fb_event} ===")
+                            if report_adsid:
+                                await send_third_party_report(**report_kw)
+                                logger.info(
+                                    "=== 第三方上报成功：adsid=%s fbclid=%s dp=%s event=%s ===",
+                                    report_adsid,
+                                    fbclid,
+                                    dp,
+                                    fb_event,
+                                )
                     except Exception as e:
                         logger.error(f"=== 第三方上报失败：{str(e)} ===")
                 else:
                     logger.warning(
-                        f"=== 未检测到 fbclid，跳过第三方上报：click_id={click_id}, "
+                        f"=== 未检测到 fbclid/dp，跳过第三方上报：click_id={click_id}, "
                         f"url_params_keys={list(url_params.keys()) if isinstance(url_params, dict) else 'invalid'} ==="
                     )
             
