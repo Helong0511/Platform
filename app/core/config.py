@@ -479,6 +479,9 @@ class Settings(BaseSettings):
         "ENABLE_SENSITIVE_PATH_GUARD", "true"
     ).lower() in ["true", "1", "yes"]
     SENSITIVE_PATH_BLOCK_EXTRA: str = os.getenv("SENSITIVE_PATH_BLOCK_EXTRA", "")
+    SENSITIVE_PATH_PROBE_RETENTION_DAYS: int = int(
+        os.getenv("SENSITIVE_PATH_PROBE_RETENTION_DAYS", "90")
+    )
     
     # Telegram Bot Token（从 BotFather 获取）
     # 生产环境必须通过环境变量设置

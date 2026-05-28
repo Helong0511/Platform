@@ -101,6 +101,18 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "description": "清理过期超过30天的会话记录和黑名单记录，标记超过7天未活动的会话为非活跃",
     },
 
+    # ========== 清理敏感路径拦截日志 ==========
+    "清理敏感路径拦截日志": {
+        "task_name": "清理敏感路径拦截日志",
+        "task_module": "app.scheduler_module.tasks.cleanup_sensitive_path_probes",
+        "task_function": "cleanup_sensitive_path_probe_logs",
+        "result_getter_module": "app.scheduler_module.tasks.cleanup_sensitive_path_probes",
+        "result_getter_function": "get_task_result",
+        # 数据库配置
+        "cron_expression": "0 3 * * *",  # 每天凌晨3点
+        "description": "自动清理过期敏感路径拦截日志（默认保留最近90天，可通过环境变量调整）",
+    },
+
     # ========== CPL 系统定时任务 ==========
     "每日Cap重置": {
         "task_name": "每日Cap重置",

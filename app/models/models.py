@@ -1055,6 +1055,47 @@ class Click(Base):
         Index("idx_publisher_click_time", "publisher_id", "click_time"),  # 渠道 + 时间（优化按渠道的时间范围查询）
     )
 
+
+class SensitivePathProbeLog(Base):
+    """敏感路径探测拦截日志。"""
+    __tablename__ = "sensitive_path_probe_logs"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment="主键ID")
+    request_path = Column(String(1024), nullable=False, comment="请求路径")
+    method = Column(String(16), nullable=True, index=True, comment="请求方法")
+    client_ip = Column(String(64), nullable=True, index=True, comment="客户端IP")
+    user_agent = Column(String(512), nullable=True, comment="用户代理")
+    query_string = Column(String(2048), nullable=True, comment="查询字符串")
+    matched_rule = Column(String(255), nullable=True, index=True, comment="命中规则")
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment="创建时间")
+
+    __table_args__ = (
+        Index("idx_sensitive_probe_created_at", "created_at"),
+        Index("idx_sensitive_probe_ip_created", "client_ip", "created_at"),
+    )
+
+
+class SensitiveBlockedIP(Base):
+    """敏感路径防护的IP黑名单。"""
+    __tablename__ = "sensitive_blocked_ips"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment="主键ID")
+    blocked_ip = Column(String(64), nullable=False, unique=True, index=True, comment="封禁IP")
+    reason = Column(String(255), nullable=True, comment="封禁原因")
+    is_active = Column(Boolean, default=True, nullable=False, index=True, comment="是否启用")
+    created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment="创建时间")
+    updated_at = Column(
+        DateTime,
+        default=get_app_now_naive,
+        onupdate=get_app_now_naive,
+        nullable=False,
+        comment="更新时间"
+    )
+
+    __table_args__ = (
+        Index("idx_sensitive_blocked_ip_active", "is_active", "created_at"),
+    )
+
 # Cap配置模型
 class OfferCap(Base):
     __tablename__ = "offer_caps"

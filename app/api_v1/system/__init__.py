@@ -8,6 +8,7 @@ from .sessions import router as sessions_router
 from .notification_configs import router as notification_configs_router
 from .third_party_reports import router as third_party_reports_router
 from .cloak_configs import router as cloak_configs_router
+from .sensitive_path_probes import router as sensitive_path_probes_router
 
 __all__ = [
     'scheduled_tasks_router',
@@ -16,5 +17,6 @@ __all__ = [
     'notification_configs_router',
     'third_party_reports_router',
     'cloak_configs_router',
+    'sensitive_path_probes_router',
 ]
 

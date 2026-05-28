@@ -21,7 +21,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Table structure for ad_data
 -- ----------------------------
 DROP TABLE IF EXISTS `ad_data`;
-CREATE TABLE `ad_data`  (
+CREATE TABLE IF NOT EXISTS `ad_data`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '广告数据ID',
   `date` datetime NOT NULL COMMENT '数据日期',
   `country_code` varchar(5) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT 'ZZ' COMMENT '国家代码（ISO 3166-1 二字母代码）',
@@ -57,7 +57,7 @@ CREATE TABLE `ad_data`  (
 -- Table structure for ad_data_archive
 -- ----------------------------
 DROP TABLE IF EXISTS `ad_data_archive`;
-CREATE TABLE `ad_data_archive`  (
+CREATE TABLE IF NOT EXISTS `ad_data_archive`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '广告数据ID',
   `date` datetime NOT NULL COMMENT '数据日期',
   `country_code` varchar(2) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '国家代码（ISO 3166-1 二字母代码）',
@@ -87,7 +87,7 @@ CREATE TABLE `ad_data_archive`  (
 -- Table structure for admin_notification_configs
 -- ----------------------------
 DROP TABLE IF EXISTS `admin_notification_configs`;
-CREATE TABLE `admin_notification_configs`  (
+CREATE TABLE IF NOT EXISTS `admin_notification_configs`  (
   `id` int NOT NULL DEFAULT 1 COMMENT '配置ID（固定为1，单例模式）',
   `telegram_enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否启用 Telegram 通知',
   `telegram_chat_id` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '管理员 Telegram Chat ID',
@@ -107,7 +107,7 @@ CREATE TABLE `admin_notification_configs`  (
 -- Table structure for advertiser_tests
 -- ----------------------------
 DROP TABLE IF EXISTS `advertiser_tests`;
-CREATE TABLE `advertiser_tests`  (
+CREATE TABLE IF NOT EXISTS `advertiser_tests`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '测试记录ID',
   `advertiser_id` int NOT NULL COMMENT '广告主ID',
   `advertiser_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '广告主名称',
@@ -136,7 +136,7 @@ CREATE TABLE `advertiser_tests`  (
 -- Table structure for advertisers
 -- ----------------------------
 DROP TABLE IF EXISTS `advertisers`;
-CREATE TABLE `advertisers`  (
+CREATE TABLE IF NOT EXISTS `advertisers`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '广告主ID',
   `advertiser_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '广告主名称',
   `email` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '邮箱（可选）',
@@ -154,7 +154,7 @@ CREATE TABLE `advertisers`  (
 -- Table structure for affiliate_tests
 -- ----------------------------
 DROP TABLE IF EXISTS `affiliate_tests`;
-CREATE TABLE `affiliate_tests`  (
+CREATE TABLE IF NOT EXISTS `affiliate_tests`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '测试记录ID',
   `publisher_id` int NOT NULL COMMENT '渠道ID',
   `click_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '下游提供的Click ID',
@@ -187,7 +187,7 @@ CREATE TABLE `affiliate_tests`  (
 -- Table structure for clicks
 -- ----------------------------
 DROP TABLE IF EXISTS `clicks`;
-CREATE TABLE `clicks`  (
+CREATE TABLE IF NOT EXISTS `clicks`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '点击记录ID',
   `click_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '点击ID（系统生成，唯一标识）',
   `offer_id` int NULL DEFAULT NULL COMMENT '关联的Offer ID',
@@ -248,7 +248,7 @@ CREATE TABLE `clicks`  (
 -- Table structure for clicks_archive
 -- ----------------------------
 DROP TABLE IF EXISTS `clicks_archive`;
-CREATE TABLE `clicks_archive`  (
+CREATE TABLE IF NOT EXISTS `clicks_archive`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '点击记录ID',
   `click_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '点击ID（系统生成，唯一标识）',
   `offer_id` int NULL DEFAULT NULL COMMENT '关联的Offer ID',
@@ -290,7 +290,7 @@ CREATE TABLE `clicks_archive`  (
 -- Table structure for client_notification_configs
 -- ----------------------------
 DROP TABLE IF EXISTS `client_notification_configs`;
-CREATE TABLE `client_notification_configs`  (
+CREATE TABLE IF NOT EXISTS `client_notification_configs`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '通知配置ID',
   `client_id` int NOT NULL COMMENT '客户ID',
   `notification_enabled` tinyint(1) NULL DEFAULT NULL COMMENT '是否启用通知',
@@ -316,7 +316,7 @@ CREATE TABLE `client_notification_configs`  (
 -- Table structure for clients
 -- ----------------------------
 DROP TABLE IF EXISTS `clients`;
-CREATE TABLE `clients`  (
+CREATE TABLE IF NOT EXISTS `clients`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '客户ID',
   `user_id` int NOT NULL COMMENT '用户ID',
   `company_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '公司名称',
@@ -345,7 +345,7 @@ CREATE TABLE `clients`  (
 -- Table structure for conversion_deduction_configs
 -- ----------------------------
 DROP TABLE IF EXISTS `conversion_deduction_configs`;
-CREATE TABLE `conversion_deduction_configs`  (
+CREATE TABLE IF NOT EXISTS `conversion_deduction_configs`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '配置ID',
   `advertiser_id` int NULL DEFAULT NULL COMMENT '广告主ID（如果配置在广告主级别）',
   `offer_id` int NULL DEFAULT NULL COMMENT 'Offer ID（如果配置在Offer级别）',
@@ -374,7 +374,7 @@ CREATE TABLE `conversion_deduction_configs`  (
 -- Table structure for conversion_deduction_logs
 -- ----------------------------
 DROP TABLE IF EXISTS `conversion_deduction_logs`;
-CREATE TABLE `conversion_deduction_logs`  (
+CREATE TABLE IF NOT EXISTS `conversion_deduction_logs`  (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '记录ID',
   `conversion_id` bigint NULL DEFAULT NULL COMMENT '转化记录ID（关联postback_conversions.id，可为NULL因为扣量的转化可能不保存）',
   `click_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '点击ID',
@@ -411,7 +411,7 @@ CREATE TABLE `conversion_deduction_logs`  (
 -- Table structure for countries
 -- ----------------------------
 DROP TABLE IF EXISTS `countries`;
-CREATE TABLE `countries`  (
+CREATE TABLE IF NOT EXISTS `countries`  (
   `id` int NOT NULL AUTO_INCREMENT,
   `alpha_2_code` char(2) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '国家二字代码',
   `alpha_3_code` char(3) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '国家三字代码',
@@ -437,7 +437,7 @@ CREATE TABLE `countries`  (
 -- Table structure for offer_caps
 -- ----------------------------
 DROP TABLE IF EXISTS `offer_caps`;
-CREATE TABLE `offer_caps`  (
+CREATE TABLE IF NOT EXISTS `offer_caps`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT 'Cap配置ID',
   `cap_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'Cap类型：advertiser_offer/offer',
   `advertiser_id` int NULL DEFAULT NULL COMMENT '广告主ID（如果是advertiser_offer类型）',
@@ -472,7 +472,7 @@ CREATE TABLE `offer_caps`  (
 -- Table structure for offer_discounts
 -- ----------------------------
 DROP TABLE IF EXISTS `offer_discounts`;
-CREATE TABLE `offer_discounts`  (
+CREATE TABLE IF NOT EXISTS `offer_discounts`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '扣量配置ID',
   `discount_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '扣量类型：offer/channel',
   `offer_id` int NULL DEFAULT NULL COMMENT 'Offer ID（如果是offer类型）',
@@ -499,7 +499,7 @@ CREATE TABLE `offer_discounts`  (
 -- Table structure for offer_publisher_assignments
 -- ----------------------------
 DROP TABLE IF EXISTS `offer_publisher_assignments`;
-CREATE TABLE `offer_publisher_assignments`  (
+CREATE TABLE IF NOT EXISTS `offer_publisher_assignments`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '分配ID',
   `offer_id` int NOT NULL COMMENT 'Offer ID',
   `publisher_id` int NOT NULL COMMENT '渠道ID',
@@ -521,7 +521,7 @@ CREATE TABLE `offer_publisher_assignments`  (
 -- Table structure for offers
 -- ----------------------------
 DROP TABLE IF EXISTS `offers`;
-CREATE TABLE `offers`  (
+CREATE TABLE IF NOT EXISTS `offers`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT 'Offer ID（主键）',
   `offer_name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'Offer名称',
   `advertiser_offer_id` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '上游系统中的Offer ID（ADV Offer ID）',
@@ -556,7 +556,7 @@ CREATE TABLE `offers`  (
 -- Table structure for pending_postback_conversions
 -- ----------------------------
 DROP TABLE IF EXISTS `pending_postback_conversions`;
-CREATE TABLE `pending_postback_conversions`  (
+CREATE TABLE IF NOT EXISTS `pending_postback_conversions`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '待确认记录ID',
   `platform` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '平台名称',
   `conversion_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '转化ID',
@@ -602,7 +602,7 @@ CREATE TABLE `pending_postback_conversions`  (
 -- Table structure for postback_conversions
 -- ----------------------------
 DROP TABLE IF EXISTS `postback_conversions`;
-CREATE TABLE `postback_conversions`  (
+CREATE TABLE IF NOT EXISTS `postback_conversions`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '转化记录ID',
   `platform` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '平台名称：macan, addermobi等',
   `conversion_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '转化ID（各平台唯一标识，如Macan的clk_id）',
@@ -653,7 +653,7 @@ CREATE TABLE `postback_conversions`  (
 -- Table structure for postback_forward_logs
 -- ----------------------------
 DROP TABLE IF EXISTS `postback_forward_logs`;
-CREATE TABLE `postback_forward_logs`  (
+CREATE TABLE IF NOT EXISTS `postback_forward_logs`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '转发日志ID',
   `conversion_id` int NOT NULL COMMENT '关联的转化记录ID',
   `product_id` int NULL DEFAULT NULL COMMENT '产品ID',
@@ -690,7 +690,7 @@ CREATE TABLE `postback_forward_logs`  (
 -- Table structure for postback_forward_queue
 -- ----------------------------
 DROP TABLE IF EXISTS `postback_forward_queue`;
-CREATE TABLE `postback_forward_queue`  (
+CREATE TABLE IF NOT EXISTS `postback_forward_queue`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '队列ID',
   `conversion_id` int NOT NULL COMMENT '关联的转化记录ID',
   `product_id` int NOT NULL COMMENT '产品ID',
@@ -717,7 +717,7 @@ CREATE TABLE `postback_forward_queue`  (
 -- Table structure for postback_ip_whitelist
 -- ----------------------------
 DROP TABLE IF EXISTS `postback_ip_whitelist`;
-CREATE TABLE `postback_ip_whitelist`  (
+CREATE TABLE IF NOT EXISTS `postback_ip_whitelist`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '白名单ID',
   `ip_address` varchar(45) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'IP地址（支持IPv4和IPv6）',
   `description` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT 'IP地址描述/备注',
@@ -736,7 +736,7 @@ CREATE TABLE `postback_ip_whitelist`  (
 -- Table structure for postback_notifications
 -- ----------------------------
 DROP TABLE IF EXISTS `postback_notifications`;
-CREATE TABLE `postback_notifications`  (
+CREATE TABLE IF NOT EXISTS `postback_notifications`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '通知记录ID',
   `conversion_id` int NULL DEFAULT NULL COMMENT '转化记录ID（汇总通知时为NULL）',
   `client_id` int NULL DEFAULT NULL COMMENT '客户ID',
@@ -776,7 +776,7 @@ CREATE TABLE `postback_notifications`  (
 -- Table structure for product_assignments
 -- ----------------------------
 DROP TABLE IF EXISTS `product_assignments`;
-CREATE TABLE `product_assignments`  (
+CREATE TABLE IF NOT EXISTS `product_assignments`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '分配记录ID',
   `product_id` int NOT NULL COMMENT '产品ID',
   `client_id` int NOT NULL COMMENT '客户ID',
@@ -797,7 +797,7 @@ CREATE TABLE `product_assignments`  (
 -- Table structure for product_notification_configs
 -- ----------------------------
 DROP TABLE IF EXISTS `product_notification_configs`;
-CREATE TABLE `product_notification_configs`  (
+CREATE TABLE IF NOT EXISTS `product_notification_configs`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '通知配置ID',
   `product_id` int NOT NULL COMMENT '产品ID',
   `notification_enabled` tinyint(1) NULL DEFAULT NULL COMMENT '是否启用通知',
@@ -823,7 +823,7 @@ CREATE TABLE `product_notification_configs`  (
 -- Table structure for products
 -- ----------------------------
 DROP TABLE IF EXISTS `products`;
-CREATE TABLE `products`  (
+CREATE TABLE IF NOT EXISTS `products`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '产品ID',
   `client_id` int NOT NULL COMMENT '客户ID',
   `name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '产品名称',
@@ -849,7 +849,7 @@ CREATE TABLE `products`  (
 -- Table structure for publishers
 -- ----------------------------
 DROP TABLE IF EXISTS `publishers`;
-CREATE TABLE `publishers`  (
+CREATE TABLE IF NOT EXISTS `publishers`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '渠道ID',
   `publisher_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '渠道名称',
   `email` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '邮箱（可选）',
@@ -873,7 +873,7 @@ CREATE TABLE `publishers`  (
 -- Table structure for scheduled_tasks
 -- ----------------------------
 DROP TABLE IF EXISTS `scheduled_tasks`;
-CREATE TABLE `scheduled_tasks`  (
+CREATE TABLE IF NOT EXISTS `scheduled_tasks`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '定时任务ID',
   `task_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '任务名称（唯一）',
   `last_run_time` datetime(6) NULL DEFAULT NULL COMMENT '上次执行时间',
@@ -902,7 +902,7 @@ CREATE TABLE `scheduled_tasks`  (
 -- Table structure for short_links
 -- ----------------------------
 DROP TABLE IF EXISTS `short_links`;
-CREATE TABLE `short_links`  (
+CREATE TABLE IF NOT EXISTS `short_links`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '短链接ID',
   `short_code` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '短链接代码（唯一）',
   `original_url` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '原始URL',
@@ -941,7 +941,7 @@ CREATE TABLE `short_links`  (
 -- Table structure for tb_search_data
 -- ----------------------------
 DROP TABLE IF EXISTS `tb_search_data`;
-CREATE TABLE `tb_search_data`  (
+CREATE TABLE IF NOT EXISTS `tb_search_data`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT 'ID',
   `date` datetime NOT NULL COMMENT '日期',
   `product_id` int NOT NULL COMMENT '产品ID',
@@ -970,7 +970,7 @@ CREATE TABLE `tb_search_data`  (
 -- Table structure for third_party_report_logs
 -- ----------------------------
 DROP TABLE IF EXISTS `third_party_report_logs`;
-CREATE TABLE `third_party_report_logs`  (
+CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '日志ID',
   `source` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '上报来源：short_link/斗篷点击, postback/转化回调',
   `adsid` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '广告事件ID',
@@ -1011,7 +1011,7 @@ CREATE TABLE `third_party_report_logs`  (
 -- Table structure for cloak_configs
 -- ----------------------------
 DROP TABLE IF EXISTS `cloak_configs`;
-CREATE TABLE `cloak_configs`  (
+CREATE TABLE IF NOT EXISTS `cloak_configs`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '配置ID',
   `cloak_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '斗篷名称（如 master）',
   `pixel_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '主像素ID',
@@ -1043,7 +1043,7 @@ CREATE TABLE `cloak_configs`  (
 -- Table structure for token_blacklist
 -- ----------------------------
 DROP TABLE IF EXISTS `token_blacklist`;
-CREATE TABLE `token_blacklist`  (
+CREATE TABLE IF NOT EXISTS `token_blacklist`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '黑名单ID',
   `token_jti` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'JWT令牌ID（jti）',
   `user_id` int NOT NULL COMMENT '用户ID',
@@ -1064,7 +1064,7 @@ CREATE TABLE `token_blacklist`  (
 -- Table structure for user_audit_logs
 -- ----------------------------
 DROP TABLE IF EXISTS `user_audit_logs`;
-CREATE TABLE `user_audit_logs`  (
+CREATE TABLE IF NOT EXISTS `user_audit_logs`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '日志ID',
   `user_id` int NULL DEFAULT NULL COMMENT '用户ID（可为空，记录未登录访问）',
   `username` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '用户名（冗余字段，便于查询）',
@@ -1100,7 +1100,7 @@ CREATE TABLE `user_audit_logs`  (
 -- Table structure for user_sessions
 -- ----------------------------
 DROP TABLE IF EXISTS `user_sessions`;
-CREATE TABLE `user_sessions`  (
+CREATE TABLE IF NOT EXISTS `user_sessions`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '会话ID',
   `user_id` int NOT NULL COMMENT '用户ID',
   `token_jti` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'JWT令牌ID（jti）',
@@ -1127,7 +1127,7 @@ CREATE TABLE `user_sessions`  (
 -- Table structure for users
 -- ----------------------------
 DROP TABLE IF EXISTS `users`;
-CREATE TABLE `users`  (
+CREATE TABLE IF NOT EXISTS `users`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '用户ID',
   `username` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '用户名称(登录名称)',
   `hashed_password` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '用户Hash密码',
@@ -1146,6 +1146,25 @@ CREATE TABLE `users`  (
   INDEX `idx_email`(`email` ASC) USING BTREE,
   FULLTEXT INDEX `ft_users_search`(`username`, `full_name`, `email`) WITH PARSER `ngram`
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '用户表' ROW_FORMAT = DYNAMIC;
+
+DROP TABLE IF EXISTS `sensitive_path_probe_logs`;
+-- 敏感路径拦截日志表
+CREATE TABLE IF NOT EXISTS `sensitive_path_probe_logs` (
+  `id` INT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `request_path` VARCHAR(1024) NOT NULL COMMENT '请求路径',
+  `method` VARCHAR(16) NULL COMMENT '请求方法',
+  `client_ip` VARCHAR(64) NULL COMMENT '客户端IP',
+  `user_agent` VARCHAR(512) NULL COMMENT '用户代理',
+  `query_string` VARCHAR(2048) NULL COMMENT '查询字符串',
+  `matched_rule` VARCHAR(255) NULL COMMENT '命中规则',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  INDEX `idx_sensitive_probe_created_at` (`created_at`),
+  INDEX `idx_sensitive_probe_ip_created` (`client_ip`, `created_at`),
+  INDEX `ix_sensitive_path_probe_logs_method` (`method`),
+  INDEX `ix_sensitive_path_probe_logs_client_ip` (`client_ip`),
+  INDEX `ix_sensitive_path_probe_logs_matched_rule` (`matched_rule`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感路径探测拦截日志';
 
 -- ----------------------------
 -- Procedure structure for purge_clicks_safe

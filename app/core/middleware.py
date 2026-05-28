@@ -64,13 +64,17 @@ import time
 import logging
 import gzip
 from io import BytesIO
+import asyncio
 # 类型注解已迁移到内置类型（Python 3.10+）
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Iterator, Optional
+from sqlalchemy import select
 from app.core.config import settings
+from app.core.database import AsyncSessionLocal
 from app.core.redis_client import get_redis_client, reset_redis_client
 from app.core.utils import get_client_ip, get_device_type
+from app.models.models import SensitivePathProbeLog, SensitiveBlockedIP
 from urllib.parse import unquote
 
 logger = logging.getLogger(__name__)
@@ -745,22 +749,99 @@ class SensitivePathGuardMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp):
         super().__init__(app)
         self._markers = _sensitive_path_markers()
+        self._blocked_ip_cache: set[str] = set()
+        self._blocked_ip_cache_expires_at: float = 0.0
+        self._blocked_ip_cache_ttl_seconds: float = 30.0
+        self._blocked_ip_lock = asyncio.Lock()
+
+    async def _persist_probe_log(
+        self,
+        *,
+        request: Request,
+        client_ip: str,
+        matched_rule: str,
+    ) -> None:
+        """持久化敏感路径拦截日志（失败不影响主流程）。"""
+        try:
+            async with AsyncSessionLocal() as db:
+                db.add(
+                    SensitivePathProbeLog(
+                        request_path=(request.url.path or "")[:1024],
+                        method=(request.method or "")[:16],
+                        client_ip=(client_ip or "unknown")[:64],
+                        user_agent=(request.headers.get("user-agent") or "")[:512],
+                        query_string=(request.url.query or "")[:2048],
+                        matched_rule=matched_rule[:255],
+                    )
+                )
+                await db.commit()
+        except Exception as exc:
+            logger.warning("敏感路径拦截日志入库失败: %s", exc)
+
+    async def _is_blocked_ip(self, client_ip: str) -> bool:
+        """检查是否命中IP黑名单（带短TTL缓存）。"""
+        if not client_ip:
+            return False
+        now_ts = time.time()
+        if now_ts > self._blocked_ip_cache_expires_at:
+            async with self._blocked_ip_lock:
+                if now_ts > self._blocked_ip_cache_expires_at:
+                    try:
+                        async with AsyncSessionLocal() as db:
+                            result = await db.execute(
+                                select(SensitiveBlockedIP.blocked_ip).where(
+                                    SensitiveBlockedIP.is_active == True
+                                )
+                            )
+                            self._blocked_ip_cache = {
+                                (row[0] or "").strip()
+                                for row in result.all()
+                                if (row[0] or "").strip()
+                            }
+                    except Exception as exc:
+                        logger.warning("加载敏感路径IP黑名单失败: %s", exc)
+                        self._blocked_ip_cache = set()
+                    finally:
+                        self._blocked_ip_cache_expires_at = now_ts + self._blocked_ip_cache_ttl_seconds
+        return client_ip in self._blocked_ip_cache
 
     async def dispatch(self, request: Request, call_next):
         if not getattr(settings, "ENABLE_SENSITIVE_PATH_GUARD", True):
             return await call_next(request)
 
+        try:
+            client_ip = get_client_ip(request)
+        except Exception:
+            client_ip = "unknown"
+
+        if await self._is_blocked_ip(client_ip):
+            logger.warning("黑名单IP请求已拦截: path=%s ip=%s", request.url.path, client_ip)
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={"detail": "Forbidden"},
+            )
+
         path = (request.url.path or "").lower()
-        if path in _DEFAULT_BLOCKED_EXACT or any(m in path for m in self._markers):
-            try:
-                client_ip = get_client_ip(request)
-            except Exception:
-                client_ip = "unknown"
+        matched_rule = None
+        if path in _DEFAULT_BLOCKED_EXACT:
+            matched_rule = f"exact:{path}"
+        else:
+            for marker in self._markers:
+                if marker in path:
+                    matched_rule = f"marker:{marker}"
+                    break
+
+        if matched_rule:
             logger.warning(
                 "敏感路径探测已拦截: path=%s ip=%s ua=%s",
                 request.url.path,
                 client_ip,
                 (request.headers.get("user-agent") or "")[:120],
+            )
+            await self._persist_probe_log(
+                request=request,
+                client_ip=client_ip,
+                matched_rule=matched_rule,
             )
             return JSONResponse(
                 status_code=status.HTTP_404_NOT_FOUND,

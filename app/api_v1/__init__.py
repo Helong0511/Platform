@@ -43,6 +43,7 @@ from app.api_v1.system import (
     notification_configs_router as notification_configs,
     third_party_reports_router as third_party_reports,
     cloak_configs_router as cloak_configs,
+    sensitive_path_probes_router as sensitive_path_probes,
 )
 from app.api_v1.system.telegram_status import router as telegram_status
 
@@ -106,6 +107,7 @@ api_router.include_router(notification_configs, prefix="/notification-configs", 
 api_router.include_router(telegram_status, prefix="/telegram", tags=["Telegram状态管理"])
 api_router.include_router(third_party_reports, prefix="/third-party-reports", tags=["第三方上报日志"])
 api_router.include_router(cloak_configs, prefix="/cloak-configs", tags=["斗篷配置管理"])
+api_router.include_router(sensitive_path_probes, prefix="/sensitive-path-probes", tags=["敏感路径拦截日志"])
 
 # ---------- 外部接口模块 ----------
 # 客户API路由（通过API密钥访问，无前缀）
@@ -169,6 +171,7 @@ __all__ = [
     'telegram_status',
     'third_party_reports',
     'cloak_configs',
+    'sensitive_path_probes',
     # 外部接口
     'client_api',
     'telegram',
