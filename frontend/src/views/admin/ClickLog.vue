@@ -151,10 +151,20 @@
               <span v-else class="text-muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="100" align="center" fixed="right">
+          <el-table-column label="操作" width="180" align="center" fixed="right">
             <template #default="scope">
               <el-button type="primary" link size="small" @click="showDetail(scope.row)">
                 详情
+              </el-button>
+              <el-button
+                v-if="scope.row.conversion_id"
+                type="success"
+                link
+                size="small"
+                :loading="!!fbReportLoadingMap[scope.row.id]"
+                @click="reportFacebookForClick(scope.row)"
+              >
+                Facebook补报
               </el-button>
             </template>
           </el-table-column>
@@ -219,12 +229,14 @@ const {
   publisherList,
   detailDialogVisible,
   currentDetail,
+  fbReportLoadingMap,
   loadOffers,
   loadPublishers,
   handleSearch,
   handleReset,
   handleShortCodeClick,
   showDetail,
+  reportFacebookForClick,
   handleSizeChange,
   handlePageChange,
   initPage,

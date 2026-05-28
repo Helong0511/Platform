@@ -1,7 +1,7 @@
 import { reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
-import { getClicks, getClickDetail } from '../api/clicks';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { getClicks, getClickDetail, resendClickFacebookReport } from '../api/clicks';
 import { getOffers } from '../api/offer';
 import { getPublishers } from '../api/publisher';
 import { logger } from '../utils/logger';
@@ -32,6 +32,7 @@ export function useClickLogList() {
   const publisherList = ref([]);
   const detailDialogVisible = ref(false);
   const currentDetail = ref(null);
+  const fbReportLoadingMap = ref({});
 
   let searchDebounceTimer = null;
 
@@ -131,6 +132,44 @@ export function useClickLogList() {
     }
   };
 
+  const reportFacebookForClick = async (row) => {
+    if (!row?.id) {
+      ElMessage.error('记录ID缺失，无法执行补报');
+      return;
+    }
+    if (!row?.conversion_id) {
+      ElMessage.warning('仅已转化记录支持 Facebook 补报');
+      return;
+    }
+
+    try {
+      await ElMessageBox.confirm(
+        '确认对这条已转化点击执行 Facebook 像素补报吗？',
+        '补报确认',
+        {
+          type: 'warning',
+          confirmButtonText: '确认补报',
+          cancelButtonText: '取消',
+        }
+      );
+    } catch {
+      return;
+    }
+
+    fbReportLoadingMap.value = { ...fbReportLoadingMap.value, [row.id]: true };
+    try {
+      const res = await resendClickFacebookReport(row.id);
+      ElMessage.success(res?.message || 'Facebook 像素补报已发送');
+    } catch (error) {
+      logger.error('Facebook 像素补报失败:', error);
+      ElMessage.error(error?.message || 'Facebook 像素补报失败');
+    } finally {
+      const next = { ...fbReportLoadingMap.value };
+      delete next[row.id];
+      fbReportLoadingMap.value = next;
+    }
+  };
+
   const handleSizeChange = (size) => {
     pagination.pageSize = size;
     pagination.page = 1;
@@ -173,6 +212,7 @@ export function useClickLogList() {
     publisherList,
     detailDialogVisible,
     currentDetail,
+    fbReportLoadingMap,
     loadOffers,
     loadPublishers,
     loadData,
@@ -181,6 +221,7 @@ export function useClickLogList() {
     handleReset,
     handleShortCodeClick,
     showDetail,
+    reportFacebookForClick,
     handleSizeChange,
     handlePageChange,
     initPage,

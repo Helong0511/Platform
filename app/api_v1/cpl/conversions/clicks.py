@@ -96,3 +96,33 @@ async def get_click_detail(
     except Exception as e:
         logger.error(f"获取短链接访问记录详情失败: id={click_record_id}, error={str(e)}", exc_info=True)
         raise
+
+
+@router.post(
+    "/{click_record_id}/facebook-report",
+    response_model=ResponseBaseSchema[dict],
+    summary="手动补报 Facebook 像素",
+    dependencies=[Depends(require_admin)]
+)
+async def resend_click_facebook_report(
+        click_record_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """对已转化点击进行 Facebook 像素补报。"""
+    click_service: ClickService = await get_click_service(db)
+    try:
+        result = await click_service.resend_facebook_report(click_record_id)
+        return ResponseBaseSchema.success(
+            data=result,
+            message="Facebook 像素补报已发送"
+        )
+    except Exception as e:
+        logger.error(
+            "Facebook 像素补报失败: click_record_id=%s user=%s error=%s",
+            click_record_id,
+            current_user.username,
+            str(e),
+            exc_info=True
+        )
+        raise

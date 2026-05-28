@@ -13,11 +13,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload, load_only
 
+from app.core.config import settings
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
+from app.core.third_party_report import send_third_party_report
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
-from app.core.url.url_params_util import normalize_url_params
-from app.models.models import Click, Offer, Publisher, Advertiser, ShortLink
+from app.core.url.url_params_util import (
+    normalize_url_params,
+    parse_stored_url_params,
+    resolve_dp_from_url_params,
+    scalar_query_value,
+)
+from app.models.models import Click, Offer, Publisher, Advertiser, ShortLink, PostbackConversion
+from app.services.cloak_pixel_mapping import get_cloak_pixel_config
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +99,52 @@ class ClickService:
             })
 
         return click_data
+
+    @staticmethod
+    def _build_facebook_report_payload(
+            click: Click,
+            conversion: PostbackConversion,
+            url_params: Dict[str, Any],
+            facebook_pixel_id: str,
+            facebook_access_token: str,
+            facebook_api_version: str
+    ) -> Dict[str, Any]:
+        """根据点击/转化信息构建补报参数。"""
+        fbclid = scalar_query_value(url_params.get("fbclid"))
+        click_id_in_url = scalar_query_value(url_params.get("click_id"))
+        cid_in_url = scalar_query_value(url_params.get("cid"))
+        email = scalar_query_value(url_params.get("email"))
+        phone = scalar_query_value(url_params.get("phone"))
+        adsid = fbclid or click_id_in_url or cid_in_url or (click.click_id or "").strip()
+        if not adsid:
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="该记录缺少可用于上报的 adsid（fbclid/click_id）"
+            )
+
+        amount = conversion.payout
+        if amount is None or amount <= 0:
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="该转化金额无效（<=0），无法补报 Purchase"
+            )
+
+        return {
+            "adsid": adsid,
+            "event": "Purchase",
+            "email": email or "",
+            "ip": (click.ip or "").strip(),
+            "phone": phone or "",
+            "ua": (click.user_agent or "").strip(),
+            "source": "click_log_manual_retry",
+            "conversion_id": str(conversion.id)[:200],
+            "currency": "USD",
+            "amount": float(amount),
+            "click_time": click.click_time,
+            "facebook_pixel_id": facebook_pixel_id,
+            "facebook_access_token": facebook_access_token,
+            "facebook_api_version": facebook_api_version,
+        }
 
     async def get_clicks(
             self,
@@ -314,3 +368,91 @@ class ClickService:
             raise_api_exception(ErrorCode.NOT_FOUND, detail="点击记录不存在")
 
         return self._serialize_click(click, include_heavy_fields=True)
+
+    async def resend_facebook_report(self, click_record_id: int) -> Dict[str, Any]:
+        """
+        手动补报 Facebook 像素（仅已转化点击）。
+        """
+        click_query = (
+            select(Click)
+            .options(joinedload(Click.short_link))
+            .where(Click.id == click_record_id)
+        )
+        click_result = await self.db.execute(click_query)
+        click = click_result.unique().scalar_one_or_none()
+        if not click:
+            raise_api_exception(ErrorCode.NOT_FOUND, detail="点击记录不存在")
+        if not click.conversion_id:
+            raise_api_exception(
+                ErrorCode.VALIDATION_ERROR,
+                detail="该点击记录尚未转化，无法进行补报"
+            )
+
+        conv_result = await self.db.execute(
+            select(PostbackConversion).where(PostbackConversion.id == click.conversion_id)
+        )
+        conversion = conv_result.scalars().first()
+        if not conversion:
+            raise_api_exception(
+                ErrorCode.NOT_FOUND,
+                detail=f"未找到关联转化记录：{click.conversion_id}"
+            )
+
+        url_params = parse_stored_url_params(click.url_params)
+        dp = resolve_dp_from_url_params(url_params)
+        short_code = click.short_link.short_code if click.short_link else None
+
+        facebook_pixel_id = settings.FACEBOOK_PIXEL_ID
+        facebook_access_token = settings.FACEBOOK_ACCESS_TOKEN
+        facebook_api_version = settings.FACEBOOK_API_VERSION
+        config_source = "全局配置"
+
+        # 优先级 1：短链接自定义像素
+        if click.short_link and click.short_link.facebook_pixel_id and click.short_link.facebook_access_token:
+            facebook_pixel_id = click.short_link.facebook_pixel_id
+            facebook_access_token = click.short_link.facebook_access_token
+            facebook_api_version = click.short_link.facebook_api_version or settings.FACEBOOK_API_VERSION
+            config_source = f"短链接配置(short_link_id={click.short_link_id})"
+        # 优先级 2：斗篷像素配置
+        elif dp and short_code:
+            try:
+                cloak_cfg = await get_cloak_pixel_config(
+                    db=self.db,
+                    dp=dp,
+                    short_code=short_code,
+                    use_cache=True
+                )
+                if cloak_cfg:
+                    facebook_pixel_id = cloak_cfg.get("facebook_pixel_id") or facebook_pixel_id
+                    facebook_access_token = cloak_cfg.get("facebook_access_token") or facebook_access_token
+                    facebook_api_version = cloak_cfg.get("facebook_api_version") or facebook_api_version
+                    config_source = f"斗篷配置(dp={dp})"
+            except Exception as exc:
+                logger.warning("获取斗篷像素配置失败，继续使用默认配置: %s", exc)
+
+        payload = self._build_facebook_report_payload(
+            click=click,
+            conversion=conversion,
+            url_params=url_params,
+            facebook_pixel_id=facebook_pixel_id,
+            facebook_access_token=facebook_access_token,
+            facebook_api_version=facebook_api_version,
+        )
+        await send_third_party_report(**payload)
+
+        logger.info(
+            "点击记录手动补报成功: click_record_id=%s click_id=%s conversion_id=%s source=%s",
+            click_record_id,
+            click.click_id,
+            click.conversion_id,
+            config_source,
+        )
+
+        return {
+            "click_record_id": click_record_id,
+            "click_id": click.click_id,
+            "conversion_id": click.conversion_id,
+            "dp": dp,
+            "pixel_config_source": config_source,
+            "facebook_pixel_id": facebook_pixel_id,
+        }

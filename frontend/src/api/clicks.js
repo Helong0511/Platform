@@ -26,3 +26,13 @@ export function getClickDetail(clickRecordId) {
     method: 'get'
   }, { returnDataOnly: true })
 }
+
+/**
+ * 手动补报 Facebook 像素
+ */
+export function resendClickFacebookReport(clickRecordId) {
+  return request({
+    url: `/api/v1/clicks/${clickRecordId}/facebook-report`,
+    method: 'post',
+  }, { returnDataOnly: true })
+}
