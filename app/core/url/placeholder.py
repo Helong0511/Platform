@@ -48,10 +48,18 @@ PLACEHOLDER_ALIAS_MAP: Dict[str, str] = {
     "offerId": "offer_id",
     "offerid": "offer_id",
     "payout": "offer_payout",
+    "gaid": "gaid",
+    "idfa": "idfa",
+    "client_ip": "ip",
+    "clientip": "ip",
+    "client_user_agent": "user_agent",
+    "clientuseragent": "user_agent",
+    "client_language": "accept_language",
+    "clientlanguage": "accept_language",
 }
 
-_BRACE_PATTERN = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
-_DOUBLE_BRACE_PATTERN = re.compile(r"\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}")
+_BRACE_PATTERN = re.compile(r"\{([^{}]+)\}")
+_DOUBLE_BRACE_PATTERN = re.compile(r"\{\{([^{}]+)\}\}")
 # 检测单/双花括号占位符（build_final_url、merge 等）
 ANY_NAMED_PLACEHOLDER_RE = re.compile(
     r"\{\{[a-zA-Z_][a-zA-Z0-9_]*\}\}|\{[a-zA-Z_][a-zA-Z0-9_]*\}"
@@ -95,6 +103,9 @@ def normalize_placeholder_name(name: str) -> str:
     """规范化占位符名（别名、驼峰转下划线）。"""
     if not name:
         return name
+    name = name.strip()
+    # 兼容广告平台常见格式：空格/连字符/点号 -> 下划线
+    name = re.sub(r"[\s\-.]+", "_", name)
     low = name.lower()
     if low in PLACEHOLDER_ALIAS_MAP:
         return PLACEHOLDER_ALIAS_MAP[low]

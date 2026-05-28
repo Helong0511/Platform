@@ -22,6 +22,28 @@ from app.models.models import Offer, Publisher, Advertiser
 logger = logging.getLogger(__name__)
 
 
+def _pick_param_value(request_info: dict, *keys: str) -> str:
+    """从 request_info 及其 URL 参数中提取候选值（按 keys 顺序）。"""
+    if not isinstance(request_info, dict):
+        return ""
+    url_params = request_info.get("url_params_dict")
+    if not isinstance(url_params, dict):
+        url_params = {}
+    for k in keys:
+        v = request_info.get(k)
+        if v in (None, ""):
+            v = url_params.get(k)
+        if v in (None, ""):
+            v = url_params.get(k.lower())
+        if v in (None, ""):
+            v = url_params.get(k.upper())
+        if isinstance(v, list):
+            v = v[0] if v else ""
+        if v not in (None, ""):
+            return str(v)
+    return ""
+
+
 async def replace_short_link_placeholders(
         original_url: str,
         click_id: str,
@@ -64,6 +86,9 @@ async def replace_short_link_placeholders(
         'country': request_info.get('country', ''),
         'user_agent': request_info.get('user_agent', ''),
         'referer': request_info.get('referer', ''),
+        'accept_language': _pick_param_value(request_info, 'accept_language', 'language', 'lang'),
+        'gaid': _pick_param_value(request_info, 'gaid', 'GAID'),
+        'idfa': _pick_param_value(request_info, 'idfa', 'IDFA'),
     }
 
     # 并行查询数据库（优化性能）
@@ -270,6 +295,9 @@ def replace_param_value_placeholders(
         'country': request_info.get('country', ''),
         'user_agent': request_info.get('user_agent', ''),
         'referer': request_info.get('referer', ''),
+        'accept_language': _pick_param_value(request_info, 'accept_language', 'language', 'lang'),
+        'gaid': _pick_param_value(request_info, 'gaid', 'GAID'),
+        'idfa': _pick_param_value(request_info, 'idfa', 'IDFA'),
     }
 
     if offer_id:

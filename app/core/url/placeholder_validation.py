@@ -25,6 +25,9 @@ _SUPPORTED_CANONICAL: Set[str] = {
     "country",
     "user_agent",
     "referer",
+    "accept_language",
+    "gaid",
+    "idfa",
     "offer_id",
     "offer_name",
     "advertiser_offer_id",
@@ -56,6 +59,9 @@ _PLACEHOLDER_HINTS: dict[str, str] = {
     "device_type": "{device_type}",
     "user_agent": "{user_agent}",
     "referer": "{referer}",
+    "accept_language": "{accept_language}、{CLIENT LANGUAGE}",
+    "gaid": "{gaid}、{GAID}",
+    "idfa": "{idfa}、{IDFA}",
     "offer_name": "{offer_name}",
     "advertiser_offer_id": "{advertiser_offer_id}",
     "advertiser_id": "{advertiser_id}",
@@ -104,7 +110,8 @@ def supported_placeholder_summary() -> str:
         "点击: {click_id}/{clickId}/{aff_click_id}",
         "产品: {offer_id}/{offerId}、{offer_name}、{advertiser_offer_id}、{offer_payout}/{payout}",
         "渠道: {channel_id}/{sub_affid}、{publisher_id}",
-        "设备: {ip}、{os}、{country}、{device_type}、{user_agent}、{referer}",
+        "设备: {ip}/{CLIENT IP}、{os}、{country}、{device_type}、{user_agent}/{CLIENT USER AGENT}、{referer}、{gaid}/{GAID}、{idfa}/{IDFA}",
+        "语言: {accept_language}/{CLIENT LANGUAGE}",
         "广告主: {advertiser_id}、{advertiser_name}",
         "支持单花括号 {x} 与双花括号 {{x}}",
     ]
@@ -146,8 +153,9 @@ def _find_malformed_brace_snippets(text: str) -> List[str]:
         if s in ("{", "}"):
             snippets.append(s)
             continue
-        inner = s.strip("{}")
-        if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", inner):
+        inner = s.strip("{}").strip()
+        normalized = normalize_placeholder_name(inner)
+        if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", normalized):
             snippets.append(s[:80])
     # 去重保序
     seen: set[str] = set()
