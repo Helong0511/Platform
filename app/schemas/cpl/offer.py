@@ -46,18 +46,6 @@ class OfferBase(BaseModel):
                 raise ValueError("URL格式无效")
         return v
 
-    @field_validator('advertiser_tracklink')
-    @classmethod
-    def validate_advertiser_tracklink_placeholders(cls, v):
-        """校验上游 Tracklink 占位符"""
-        if not v:
-            return v
-        ph = validate_track_url_placeholders(v, skip_association_warnings=True)
-        if not ph.ok:
-            raise ValueError(format_placeholder_validation_error(ph))
-        return v
-
-
 class PublisherConfig(BaseModel):
     """渠道配置"""
     publisher_id: int = Field(..., description="渠道ID")
@@ -72,6 +60,17 @@ class OfferCreate(OfferBase):
     publisher_ids: Optional[list[int]] = Field(None, description="分配的渠道ID列表（已废弃，使用publisher_configs）")
     publisher_configs: Optional[List[PublisherConfig]] = Field(None,
                                                                description="渠道配置列表，每个渠道对应一个下游Cap和下游PO")
+
+    @field_validator('advertiser_tracklink')
+    @classmethod
+    def validate_advertiser_tracklink_placeholders(cls, v):
+        """创建时校验上游 Tracklink 占位符（读取接口不校验，避免历史数据阻断列表）"""
+        if not v:
+            return v
+        ph = validate_track_url_placeholders(v, skip_association_warnings=True)
+        if not ph.ok:
+            raise ValueError(format_placeholder_validation_error(ph))
+        return v
 
 
 class OfferUpdate(BaseModel):

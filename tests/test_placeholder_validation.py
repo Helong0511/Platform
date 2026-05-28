@@ -26,9 +26,20 @@ def test_unknown_placeholder_rejected():
 
 
 def test_malformed_brace_rejected():
-    r = validate_track_url_placeholders("https://x.com?a={click-id}")
+    r = validate_track_url_placeholders("https://x.com?a={click@id}")
+    assert not r.ok
+    assert r.errors
+
+def test_unclosed_brace_rejected():
+    r = validate_track_url_placeholders("https://x.com?a={click_id")
     assert not r.ok
     assert any("无法解析" in e for e in r.errors)
+
+
+def test_hyphen_alias_normalized_to_click_id():
+    """连字符写法与 click_id 等价（广告平台常见）。"""
+    r = validate_track_url_placeholders("https://x.com?a={click-id}")
+    assert r.ok
 
 
 def test_triple_brace_rejected():
@@ -55,3 +66,39 @@ def test_short_link_warns_without_offer():
     r = validate_track_url_placeholders("https://x.com?oid={offer_id}")
     assert r.ok
     assert r.warnings
+
+
+def test_payout_alias_accepted():
+    r = validate_track_url_placeholders("https://x.com?po={payout}")
+    assert r.ok
+
+
+def test_ad_platform_macros_accepted():
+    url = (
+        "https://x.com?gaid={GAID}&idfa={IDFA}"
+        "&ip={CLIENT IP}&ua={CLIENT USER AGENT}&lang={CLIENT LANGUAGE}"
+    )
+    r = validate_track_url_placeholders(url, skip_association_warnings=True)
+    assert r.ok
+    assert not r.errors
+
+
+def test_offer_response_skips_placeholder_validation():
+    """读取 Offer 时不应因历史 tracklink 占位符阻断列表接口。"""
+    from datetime import datetime, timezone
+    from app.schemas.cpl.offer import OfferResponse
+
+    offer = OfferResponse.model_validate(
+        {
+            "id": 1,
+            "offer_name": "test",
+            "advertiser_id": 1,
+            "status": "Active",
+            "postback_method": "GET",
+            "is_active": True,
+            "advertiser_tracklink": "https://x.com?x={UNKNOWN_MACRO}",
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc),
+        }
+    )
+    assert "{UNKNOWN_MACRO}" in (offer.advertiser_tracklink or "")

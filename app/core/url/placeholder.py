@@ -56,6 +56,12 @@ PLACEHOLDER_ALIAS_MAP: Dict[str, str] = {
     "clientuseragent": "user_agent",
     "client_language": "accept_language",
     "clientlanguage": "accept_language",
+    "language": "accept_language",
+    "lang": "accept_language",
+    "subid": "channel_id",
+    "sub_id": "channel_id",
+    "device_id": "device_type",
+    "devad_id": "gaid",
 }
 
 _BRACE_PATTERN = re.compile(r"\{([^{}]+)\}")
