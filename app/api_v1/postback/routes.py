@@ -3,6 +3,7 @@ from fastapi import APIRouter, Request, Query, Depends, Path, Response
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit_log import log_update, log_user_action, commit_audit_log
 from app.core.database import get_db
 from app.core.security import require_admin
 from app.models.models import User
@@ -95,13 +96,25 @@ async def get_postback_forward_logs(
 @router.post("/postback/forward-logs/{forward_log_id}/resend",
              summary="补发 PostBack 转发（管理员）")
 async def resend_postback_forward(
+        request: Request,
         forward_log_id: int = Path(..., ge=1, description="转发日志ID"),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin)
 ):
-    return await forward_log_handler.resend_postback_forward(
+    result = await forward_log_handler.resend_postback_forward(
         forward_log_id, db, current_user
     )
+    await log_user_action(
+        db=db,
+        action_type="TASK_RUN",
+        user=current_user,
+        resource_type="POSTBACK_FORWARD_LOG",
+        resource_id=forward_log_id,
+        resource_name=f"Postback转发补发-{forward_log_id}",
+        request=request,
+    )
+    await commit_audit_log(db)
+    return result
 
 
 # ====== 诊断工具接口 ======
@@ -121,14 +134,26 @@ async def diagnose_postback_record(
 @router.put("/postback/conversions/{conversion_id}/status",
             summary="更新转化状态（管理员）")
 async def update_conversion_status(
+        request: Request,
         conversion_id: int = Path(..., ge=1, description="转化记录ID"),
         status: str = Query(..., description="转化状态（Approved/Pending）"),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin)
 ):
-    return await conversion_handler.update_conversion_status(
+    result = await conversion_handler.update_conversion_status(
         conversion_id, status, db, current_user
     )
+    await log_update(
+        db=db,
+        user=current_user,
+        resource_type="POSTBACK_CONVERSION",
+        resource_id=conversion_id,
+        resource_name=f"转化-{conversion_id}",
+        request=request,
+        details={"status": status},
+    )
+    await commit_audit_log(db)
+    return result
 
 
 # ====== 待确认转化记录管理接口 ======
@@ -153,25 +178,52 @@ async def get_pending_postback_conversions(
 @router.post("/postback/pending-conversions/{pending_id}/approve",
              summary="批准待确认转化记录（管理员）")
 async def approve_pending_conversion(
+        request: Request,
         pending_id: int = Path(..., ge=1, description="待确认记录ID"),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin)
 ):
-    return await pending_handler.approve_pending_conversion(
+    result = await pending_handler.approve_pending_conversion(
         pending_id, db, current_user
     )
+    conversion_id = result.data.id if result.data else None
+    await log_user_action(
+        db=db,
+        action_type="ACTIVATE",
+        user=current_user,
+        resource_type="POSTBACK_PENDING_CONVERSION",
+        resource_id=pending_id,
+        resource_name=f"待确认转化-{pending_id}",
+        request=request,
+        details={"conversion_id": conversion_id, "action": "approve"},
+    )
+    await commit_audit_log(db)
+    return result
 
 
 @router.post("/postback/pending-conversions/{pending_id}/reject",
              summary="拒绝待确认转化记录（管理员）")
 async def reject_pending_conversion(
+        request: Request,
         pending_id: int = Path(..., ge=1, description="待确认记录ID"),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin)
 ):
-    return await pending_handler.reject_pending_conversion(
+    result = await pending_handler.reject_pending_conversion(
         pending_id, db, current_user
     )
+    await log_user_action(
+        db=db,
+        action_type="DEACTIVATE",
+        user=current_user,
+        resource_type="POSTBACK_PENDING_CONVERSION",
+        resource_id=pending_id,
+        resource_name=f"待确认转化-{pending_id}",
+        request=request,
+        details={"action": "reject"},
+    )
+    await commit_audit_log(db)
+    return result
 
 
 @router.get("/postback/check-duplicates",

@@ -24,7 +24,7 @@ from sqlalchemy.future import select
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.api_v1.excel.utils import validate_excel_file, parse_date_value
-from app.core.audit_log import log_user_action
+from app.core.audit_log import log_user_action, log_update, commit_audit_log
 from app.core.config import settings
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
@@ -819,7 +819,9 @@ class ColumnMappingService:
 
 @router.post("/parse-excel", response_model=ResponseBaseSchema[dict], summary="解析Excel列名")
 async def parse_excel_columns(
+        request: Request,
         file: UploadFile = File(...),
+        db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
     """
@@ -842,7 +844,17 @@ async def parse_excel_columns(
         excel_columns_clean = [ColumnMappingService.clean_string_for_json(col) for col in excel_columns]
         recommended_mapping_clean = ColumnMappingService.clean_mapping_for_json(column_mapping_result["mapping"])
 
-        # 返回Excel列名和推荐映射
+        await log_user_action(
+            db=db,
+            action_type="API_ACCESS",
+            user=current_user,
+            resource_type="AD_DATA",
+            resource_name="ML解析Excel列名",
+            request=request,
+            details={"filename": file.filename, "column_count": len(excel_columns_clean)},
+        )
+        await commit_audit_log(db)
+
         return ResponseBaseSchema.success(data={
             "excel_columns": excel_columns_clean,
             "recommended_mapping": recommended_mapping_clean,
@@ -863,7 +875,9 @@ async def parse_excel_columns(
 
 @router.post("/save-mapping", response_model=ResponseBaseSchema[dict], summary="保存用户映射规则")
 async def save_user_mapping(
+        request: Request,
         mapping: dict = Body(..., description="用户选择的列名映射规则，格式：{excel_column: db_field}"),
+        db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin)
 ):
     """
@@ -1056,6 +1070,21 @@ async def save_user_mapping(
                     pass
             raise
 
+        await log_update(
+            db=db,
+            user=current_user,
+            resource_type="SYSTEM",
+            resource_id=0,
+            resource_name="ML列名映射规则",
+            request=request,
+            details={
+                "mapping_count": len(mapping),
+                "new_mappings": new_mappings_count,
+                "updated_mappings": updated_mappings_count,
+            },
+        )
+        await commit_audit_log(db)
+
         return ResponseBaseSchema.success(data={
             "message": f"映射规则保存成功。总映射数量: {len(mapping)}，新增: {new_mappings_count}，更新: {updated_mappings_count}",
             "mapping": mapping,
@@ -1074,7 +1103,9 @@ async def save_user_mapping(
 
 @router.post("/validate", response_model=ResponseBaseSchema[dict], summary="验证Excel列名映射")
 async def validate_excel_columns(
+        request: Request,
         file: UploadFile = File(...),
+        db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
     """
@@ -1111,6 +1142,20 @@ async def validate_excel_columns(
         excel_columns_clean = [ColumnMappingService.clean_string_for_json(col) for col in excel_columns_normalized]
         column_mapping_clean = column_mapping_result.copy()
         column_mapping_clean["mapping"] = ColumnMappingService.clean_mapping_for_json(column_mapping_result["mapping"])
+
+        await log_user_action(
+            db=db,
+            action_type="API_ACCESS",
+            user=current_user,
+            resource_type="AD_DATA",
+            resource_name="ML验证Excel列名映射",
+            request=request,
+            details={
+                "filename": file.filename,
+                "mapping_complete": column_mapping_result["mapping_complete"],
+            },
+        )
+        await commit_audit_log(db)
 
         return ResponseBaseSchema.success(data={
             "column_mapping": column_mapping_clean,
@@ -1185,8 +1230,10 @@ async def get_timezone_config(
 
 @router.post("/preview", response_model=ResponseBaseSchema[dict], summary="预览Excel数据")
 async def preview_excel_data(
+        request: Request,
         file: UploadFile = File(...),
         rows: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="预览行数"),
+        db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
     """
@@ -1278,6 +1325,21 @@ async def preview_excel_data(
 
         logger.debug(
             f"预览数据: total_rows={len(df)}, preview_rows={len(preview_data)}, available_fields={available_fields}")
+
+        await log_user_action(
+            db=db,
+            action_type="API_ACCESS",
+            user=current_user,
+            resource_type="AD_DATA",
+            resource_name="ML预览Excel数据",
+            request=request,
+            details={
+                "filename": file.filename,
+                "total_rows": len(df),
+                "preview_rows": len(preview_data),
+            },
+        )
+        await commit_audit_log(db)
 
         return ResponseBaseSchema.success(data={
             "preview_data": preview_data,
@@ -1551,6 +1613,7 @@ async def import_training_data(
                 "source": "训练导入"
             }
         )
+        await commit_audit_log(db)
 
         # 构建返回消息：使用统一的导入消息构建函数
         message = build_import_message(

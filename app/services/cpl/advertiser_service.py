@@ -9,7 +9,7 @@ from sqlalchemy import func, String, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.audit_log import log_user_action
+from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.infrastructure.cache import CacheInvalidator
@@ -152,7 +152,7 @@ class AdvertiserService(BaseService[Advertiser]):
             resource_name=advertiser.advertiser_name,
             success=True
         )
-        await self.db.commit()
+        await commit_audit_log(self.db)
 
         logger.info(f"广告主已创建: {advertiser.advertiser_name} (ID: {advertiser.id})")
         return advertiser
@@ -209,7 +209,7 @@ class AdvertiserService(BaseService[Advertiser]):
             resource_name=advertiser.advertiser_name,
             success=True
         )
-        await self.db.commit()
+        await commit_audit_log(self.db)
 
         logger.info(f"广告主已更新: {advertiser.advertiser_name} (ID: {advertiser.id})")
         return advertiser

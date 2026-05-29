@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 # 本地导入
+from app.core.audit_log import log_update, log_delete, log_user_action, commit_audit_log
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin, is_admin
 from app.core.config import settings
@@ -411,6 +412,7 @@ async def get_ad_data_detail(
 
 @router.put("/{data_id}", response_model=ResponseBaseSchema[AdDataResponse], summary="更新广告数据")
 async def update_ad_data(
+        request: Request,
         data_id: int = Path(..., ge=1, description="广告数据ID"),
         ad_data_update: AdDataUpdate = Body(...),
         db: AsyncSession = Depends(get_db),
@@ -432,12 +434,24 @@ async def update_ad_data(
     # 调用服务层更新广告数据（服务层会处理所有验证、唯一性检查、比率计算和错误处理）
     ad_data = await ad_data_service.update_ad_data(data_id, update_data, current_user)
 
+    if update_data:
+        await log_update(
+            db=db,
+            user=current_user,
+            resource_type="AD_DATA",
+            resource_id=data_id,
+            resource_name=f"广告数据-{data_id}",
+            request=request,
+            details={"updated_fields": list(update_data.keys())},
+        )
+
     # 返回更新后的广告数据
     return ResponseBaseSchema.success(data=AdDataResponse.model_validate(ad_data))
 
 
 @router.delete("/batch", response_model=ResponseBaseSchema[dict], summary="批量删除广告数据")
 async def batch_delete_ad_data(
+        request: Request,
         data_ids: list[int] = Body(..., description="广告数据ID列表"),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
@@ -454,6 +468,18 @@ async def batch_delete_ad_data(
     # 调用服务层批量删除广告数据（服务层会处理权限检查和批量删除）
     deleted_count = await ad_data_service.batch_delete_ad_data(data_ids, current_user)
 
+    await log_user_action(
+        db=db,
+        action_type="DELETE",
+        user=current_user,
+        resource_type="AD_DATA",
+        resource_id=data_ids[0] if len(data_ids) == 1 else 0,
+        resource_name=f"批量删除广告数据({deleted_count}条)",
+        request=request,
+        details={"data_ids": data_ids, "deleted_count": deleted_count},
+    )
+    await commit_audit_log(db)
+
     return ResponseBaseSchema.success(data={
         "message": f"成功删除 {deleted_count} 条广告数据",
         "deleted_count": deleted_count
@@ -462,6 +488,7 @@ async def batch_delete_ad_data(
 
 @router.delete("/{data_id}", response_model=ResponseBaseSchema[dict], summary="删除广告数据")
 async def delete_ad_data(
+        request: Request,
         data_id: int = Path(..., ge=1, description="广告数据ID"),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
@@ -477,6 +504,16 @@ async def delete_ad_data(
     
     # 调用服务层删除广告数据（服务层会处理权限检查）
     await ad_data_service.delete_ad_data(data_id, current_user)
+
+    await log_delete(
+        db=db,
+        user=current_user,
+        resource_type="AD_DATA",
+        resource_id=data_id,
+        resource_name=f"广告数据-{data_id}",
+        request=request,
+    )
+    await commit_audit_log(db)
 
     return ResponseBaseSchema.success(data={"message": "广告数据已成功删除"})
 

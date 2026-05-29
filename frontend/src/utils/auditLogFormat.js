@@ -21,6 +21,41 @@ export function getActionTypeTag(actionType) {
   return tagMap[actionType] || '';
 }
 
+export function getResourceTypeLabel(resourceType) {
+  const labelMap = {
+    USER: '用户',
+    CLIENT: '客户',
+    PRODUCT: '产品',
+    AD_DATA: '广告数据',
+    SCHEDULED_TASK: '定时任务',
+    SYSTEM: '系统',
+    FRONTEND: '前端',
+    SESSION: '会话',
+    OFFER: 'Offer',
+    PUBLISHER: '渠道',
+    ADVERTISER: '广告主',
+    CONVERSION_DEDUCTION_CONFIG: '转化扣减配置',
+    CLOAK_CONFIG: '斗篷配置',
+    NOTIFICATION_CONFIG: '通知配置',
+    SHORT_LINK: '短链接',
+    OFFER_CAP: 'Cap配置',
+    OFFER_DISCOUNT: '扣量配置',
+    SENSITIVE_BLOCKED_IP: '敏感路径黑名单IP',
+    SENSITIVE_PATH_PROBE_LOG: '敏感路径拦截日志',
+    THIRD_PARTY_REPORT_LOG: '第三方上报日志',
+    TB_SEARCH_DATA: 'TB搜索数据',
+    POSTBACK_FORWARD_LOG: 'Postback转发日志',
+    POSTBACK_CONVERSION: 'Postback转化',
+    POSTBACK_PENDING_CONVERSION: 'Postback待确认转化',
+    POSTBACK_IP_WHITELIST: 'Postback IP白名单',
+    PRODUCT_ASSIGNMENT: '产品分配',
+    AFFILIATE_TEST: '下游测试',
+    TELEGRAM: 'Telegram',
+    CLICK: '点击记录',
+  };
+  return labelMap[resourceType] || resourceType;
+}
+
 export function getActionTypeLabel(actionType) {
   const labelMap = {
     LOGIN: '登录',

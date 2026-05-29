@@ -47,7 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
-from app.core.audit_log import log_login, log_logout
+from app.core.audit_log import log_login, log_logout, commit_audit_log
 from app.core.auth_response import build_token_json_response, raise_auth_error
 from app.core.config import settings
 from app.core.errors import ErrorCode
@@ -83,13 +83,9 @@ async def _record_login_failure(
             success=False,
             error_message=error_message,
         )
-        await db.commit()
+        await commit_audit_log(db)
     except Exception as e:
         logger.warning(f"记录登录失败审计日志失败: {e}")
-        try:
-            await db.rollback()
-        except Exception:
-            pass
 
 
 @router.post("/login", response_model=LoginResponse, summary="用户登录", tags=["认证管理"])

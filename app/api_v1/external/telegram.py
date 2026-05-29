@@ -10,7 +10,7 @@ import threading
 from typing import Optional, List
 from sqlalchemy import select
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,7 @@ from app.core.telegram import (
     TELEBOT_AVAILABLE,
 )
 from app.core.config import settings
+from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
@@ -132,6 +133,7 @@ async def get_bot_status(
 
 @router.post("/send", response_model=ResponseBaseSchema[SendMessageResponse], summary="发送 Telegram 消息")
 async def send_message(
+        http_request: Request,
         request: SendMessageRequest,
         current_user: User = Depends(require_admin),
         db: AsyncSession = Depends(get_db)
@@ -170,6 +172,17 @@ async def send_message(
 
         if success:
             logger.info(f"用户 {current_user.username} 通过 API 发送了 Telegram 消息")
+            await log_user_action(
+                db=db,
+                action_type="API_ACCESS",
+                user=current_user,
+                resource_type="TELEGRAM",
+                resource_id=0,
+                resource_name="发送Telegram消息",
+                request=http_request,
+                details={"chat_id": request.chat_id},
+            )
+            await commit_audit_log(db)
             return ResponseBaseSchema.success(data=SendMessageResponse(
                 success=True,
                 message="消息发送成功"
@@ -195,6 +208,8 @@ async def send_message(
 
 @router.post("/test", response_model=ResponseBaseSchema[SendMessageResponse], summary="测试 Telegram Bot 连接")
 async def test_bot_connection(
+        http_request: Request,
+        db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin)
 ):
     """
@@ -229,6 +244,16 @@ async def test_bot_connection(
         success = send_telegram_message(test_message)
 
         if success:
+            await log_user_action(
+                db=db,
+                action_type="API_ACCESS",
+                user=current_user,
+                resource_type="TELEGRAM",
+                resource_id=0,
+                resource_name="测试Telegram连接",
+                request=http_request,
+            )
+            await commit_audit_log(db)
             return ResponseBaseSchema.success(data=SendMessageResponse(
                 success=True,
                 message="测试消息发送成功，请检查 Telegram 是否收到"
@@ -239,9 +264,6 @@ async def test_bot_connection(
                 message="测试消息发送失败，请检查 TELEGRAM_ADMIN 配置和日志"
             )
 
-    except HTTPException:
-        # 重新抛出 HTTPException
-        raise
     except HTTPException:
         raise
     except Exception as e:
@@ -386,6 +408,8 @@ async def diagnostic_bot(
 
 @router.post("/reset_webhook", response_model=ResponseBaseSchema[SendMessageResponse], summary="强制删除 Webhook")
 async def reset_webhook(
+        http_request: Request,
+        db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin)
 ):
     """
@@ -417,6 +441,16 @@ async def reset_webhook(
                 message=f"Webhook 删除失败，仍然存在: {webhook_info.url}"
             ))
         else:
+            await log_user_action(
+                db=db,
+                action_type="TASK_RUN",
+                user=current_user,
+                resource_type="TELEGRAM",
+                resource_id=0,
+                resource_name="重置Telegram Webhook",
+                request=http_request,
+            )
+            await commit_audit_log(db)
             return ResponseBaseSchema.success(data=SendMessageResponse(
                 success=True,
                 message="Webhook 已成功删除。请重启应用以使轮询正常工作，或等待轮询线程自动重新连接"
@@ -446,6 +480,7 @@ class SendAlertRequest(BaseModel):
 
 @router.post("/send_alert", response_model=ResponseBaseSchema[SendMessageResponse], summary="发送系统告警")
 async def send_alert(
+        http_request: Request,
         request: SendAlertRequest,
         current_user: User = Depends(require_admin),
         db: AsyncSession = Depends(get_db)
@@ -492,6 +527,17 @@ async def send_alert(
 
         if success:
             logger.info(f"用户 {current_user.username} 通过 API 发送了系统告警")
+            await log_user_action(
+                db=db,
+                action_type="API_ACCESS",
+                user=current_user,
+                resource_type="TELEGRAM",
+                resource_id=0,
+                resource_name="发送系统告警",
+                request=http_request,
+                details={"alert_type": request.alert_type},
+            )
+            await commit_audit_log(db)
             return ResponseBaseSchema.success(data=SendMessageResponse(
                 success=True,
                 message="系统告警发送成功"
@@ -520,6 +566,7 @@ class SendBatchRequest(BaseModel):
 
 @router.post("/send_batch", response_model=ResponseBaseSchema[SendMessageResponse], summary="发送批量转化通知")
 async def send_batch_notifications(
+        http_request: Request,
         request: SendBatchRequest,
         current_user: User = Depends(require_admin),
         db: AsyncSession = Depends(get_db)
@@ -569,6 +616,17 @@ async def send_batch_notifications(
 
         if success:
             logger.info(f"用户 {current_user.username} 通过 API 发送了批量转化通知")
+            await log_user_action(
+                db=db,
+                action_type="API_ACCESS",
+                user=current_user,
+                resource_type="TELEGRAM",
+                resource_id=0,
+                resource_name="批量发送转化通知",
+                request=http_request,
+                details={"conversion_count": len(conversions)},
+            )
+            await commit_audit_log(db)
             return ResponseBaseSchema.success(data=SendMessageResponse(
                 success=True,
                 message=f"批量转化通知发送成功，共 {len(conversions)} 条"

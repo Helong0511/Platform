@@ -81,7 +81,7 @@ from sqlalchemy.future import select
 # 本地导入
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
-from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
+from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate, commit_audit_log
 from app.core.validation import sanitize_input
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import optimize_page_size_for_device
@@ -323,6 +323,8 @@ async def create_product(
         )
     except Exception as e:
         logger.error(f"记录产品创建审计日志失败: {str(e)}", exc_info=True)
+    else:
+        await commit_audit_log(db)
     
     # 构建响应数据
     try:
@@ -369,6 +371,7 @@ async def update_product(
 
     product = await product_service.update_product(product_id, update_data, current_user)
 
+    wrote_audit = False
     if "is_active" in update_data and update_data["is_active"] != old_is_active:
         if product.is_active:
             await log_activate(
@@ -388,6 +391,7 @@ async def update_product(
                 resource_name=product.name,
                 request=request,
             )
+        wrote_audit = True
 
     log_details = {
         **update_data,
@@ -424,6 +428,10 @@ async def update_product(
             request=request,
             details=log_details
         )
+        wrote_audit = True
+
+    if wrote_audit:
+        await commit_audit_log(db)
 
     return ResponseBaseSchema.success(data=ProductResponse.model_validate(product))
 
@@ -468,6 +476,7 @@ async def delete_product(
                 "deleted": True
             }
         )
+        await commit_audit_log(db)
 
     result = await product_service.delete_product(product_id, current_user)
 
@@ -485,6 +494,7 @@ async def delete_product(
                 "ad_data_count": ad_data_count
             }
         )
+        await commit_audit_log(db)
         return ResponseBaseSchema.success(data={
             "message": result["message"],
             "transferred": True,

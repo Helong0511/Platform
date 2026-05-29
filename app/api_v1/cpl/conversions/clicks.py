@@ -4,10 +4,11 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Path, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import MAX_PAGE_SIZE
+from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.database import get_db
 from app.core.dependencies import get_click_service
 from app.core.security import get_current_user, require_admin
@@ -105,7 +106,8 @@ async def get_click_detail(
     dependencies=[Depends(require_admin)]
 )
 async def resend_click_facebook_report(
-        click_record_id: int,
+        request: Request,
+        click_record_id: int = Path(..., ge=1),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
@@ -113,6 +115,16 @@ async def resend_click_facebook_report(
     click_service: ClickService = await get_click_service(db)
     try:
         result = await click_service.resend_facebook_report(click_record_id)
+        await log_user_action(
+            db=db,
+            action_type="TASK_RUN",
+            user=current_user,
+            resource_type="CLICK",
+            resource_id=click_record_id,
+            resource_name=f"Facebook像素补报-{click_record_id}",
+            request=request,
+        )
+        await commit_audit_log(db)
         return ResponseBaseSchema.success(
             data=result,
             message="Facebook 像素补报已发送"

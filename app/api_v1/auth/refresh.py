@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.auth_response import build_token_json_response, raise_auth_error
 from app.core.config import settings
+from app.core.audit_log import log_user_action
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.security import JWTUtils
@@ -152,6 +153,16 @@ async def refresh_token(
         }
 
         logger.info(f"用户 {user.username} 刷新令牌成功")
+        await log_user_action(
+            db=db,
+            action_type="LOGIN",
+            user=user,
+            resource_type="SESSION",
+            resource_id=user.id,
+            resource_name=user.username,
+            request=request,
+            details={"action": "refresh_token"},
+        )
         return build_token_json_response(
             access_token=new_access_token,
             refresh_token=new_refresh_token,

@@ -2,7 +2,7 @@
 第三方上报日志API端点
 提供第三方上报日志的查询功能，仅管理员可访问
 """
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, and_
@@ -11,6 +11,7 @@ from time import perf_counter
 from typing import Optional
 import logging
 
+from app.core.audit_log import log_update, log_user_action, commit_audit_log
 from app.core.database import get_db
 from app.core.security import require_admin, get_current_user
 from app.core.constants import MAX_PAGE_SIZE
@@ -303,6 +304,7 @@ async def get_third_party_report(
     description="更新第三方上报日志的参数，仅管理员可访问"
 )
 async def update_third_party_report(
+        request: Request,
         log_id: int,
         params: UpdateReportLogParams,
         db: AsyncSession = Depends(get_db),
@@ -332,7 +334,18 @@ async def update_third_party_report(
                 ErrorCode.RESOURCE_NOT_FOUND,
                 detail="日志记录不存在或更新失败"
             )
-        
+
+        await log_update(
+            db=db,
+            user=current_user,
+            resource_type="THIRD_PARTY_REPORT_LOG",
+            resource_id=log_id,
+            resource_name=f"第三方上报日志-{log_id}",
+            request=request,
+            details={"updated_fields": list(params.model_dump(exclude_unset=True).keys())},
+        )
+        await commit_audit_log(db)
+
         return ResponseBaseSchema.success(
             data={"success": True},
             message="更新日志参数成功"
@@ -355,7 +368,9 @@ async def update_third_party_report(
     description="触发重新上报指定的第三方上报日志，仅管理员可访问"
 )
 async def retry_third_party_report(
+        request: Request,
         log_id: int,
+        db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin)
 ):
     """
@@ -369,7 +384,18 @@ async def retry_third_party_report(
                 ErrorCode.RESOURCE_NOT_FOUND,
                 detail="日志记录不存在或重新上报失败"
             )
-        
+
+        await log_user_action(
+            db=db,
+            action_type="TASK_RUN",
+            user=current_user,
+            resource_type="THIRD_PARTY_REPORT_LOG",
+            resource_id=log_id,
+            resource_name=f"第三方上报重试-{log_id}",
+            request=request,
+        )
+        await commit_audit_log(db)
+
         return ResponseBaseSchema.success(
             data={"success": True},
             message="已触发重新上报，请稍后刷新查看结果"

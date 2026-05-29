@@ -3,12 +3,13 @@ from datetime import datetime, timedelta
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.audit_log import log_create, log_update, log_delete, log_deactivate, commit_audit_log
 from app.core.config import settings
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.database import get_db
@@ -174,11 +175,11 @@ async def get_blocked_ips(
     summary="封禁IP（写入黑名单）",
 )
 async def add_blocked_ip(
+    request: Request,
     payload: BlockIPPayload,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    del current_user
     ip = payload.blocked_ip.strip()
     if not ip:
         raise_api_exception(ErrorCode.VALIDATION_ERROR, detail="IP不能为空")
@@ -194,6 +195,16 @@ async def add_blocked_ip(
             row.updated_at = get_app_now_naive()
             await db.commit()
             await db.refresh(row)
+            await log_update(
+                db=db,
+                user=current_user,
+                resource_type="SENSITIVE_BLOCKED_IP",
+                resource_id=row.id,
+                resource_name=row.blocked_ip,
+                request=request,
+                details={"is_active": True, "reason": row.reason},
+            )
+            await commit_audit_log(db)
             data = {"id": row.id, "blocked_ip": row.blocked_ip, "is_active": row.is_active}
             return ResponseBaseSchema.success(data=data, message="IP已更新为封禁状态")
 
@@ -205,6 +216,16 @@ async def add_blocked_ip(
         db.add(entity)
         await db.commit()
         await db.refresh(entity)
+        await log_create(
+            db=db,
+            user=current_user,
+            resource_type="SENSITIVE_BLOCKED_IP",
+            resource_id=entity.id,
+            resource_name=entity.blocked_ip,
+            request=request,
+            details={"reason": entity.reason},
+        )
+        await commit_audit_log(db)
         return ResponseBaseSchema.success(
             data={"id": entity.id, "blocked_ip": entity.blocked_ip, "is_active": entity.is_active},
             message="IP封禁成功",
@@ -223,11 +244,11 @@ async def add_blocked_ip(
     summary="解封IP",
 )
 async def unblock_ip(
+    request: Request,
     blocked_ip_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    del current_user
     try:
         result = await db.execute(
             select(SensitiveBlockedIP).where(SensitiveBlockedIP.id == blocked_ip_id)
@@ -238,6 +259,15 @@ async def unblock_ip(
         row.is_active = False
         row.updated_at = get_app_now_naive()
         await db.commit()
+        await log_deactivate(
+            db=db,
+            user=current_user,
+            resource_type="SENSITIVE_BLOCKED_IP",
+            resource_id=row.id,
+            resource_name=row.blocked_ip,
+            request=request,
+        )
+        await commit_audit_log(db)
         return ResponseBaseSchema.success(
             data={"id": row.id, "blocked_ip": row.blocked_ip, "is_active": row.is_active},
             message="IP已解封",
@@ -309,11 +339,11 @@ async def get_top_stats(
     summary="清理过期拦截日志",
 )
 async def cleanup_logs(
+    request: Request,
     payload: CleanupPayload,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    del current_user
     retention_days = payload.retention_days or settings.SENSITIVE_PATH_PROBE_RETENTION_DAYS
     cutoff = get_app_now_naive() - timedelta(days=retention_days)
     try:
@@ -322,6 +352,20 @@ async def cleanup_logs(
         )
         deleted_count = int(result.rowcount or 0)
         await db.commit()
+        await log_delete(
+            db=db,
+            user=current_user,
+            resource_type="SENSITIVE_PATH_PROBE_LOG",
+            resource_id=0,
+            resource_name="敏感路径拦截日志",
+            request=request,
+            details={
+                "deleted_count": deleted_count,
+                "retention_days": retention_days,
+                "cutoff": cutoff.isoformat(),
+            },
+        )
+        await commit_audit_log(db)
         return ResponseBaseSchema.success(
             data={
                 "deleted_count": deleted_count,

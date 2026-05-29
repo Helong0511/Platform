@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.audit_log import log_user_action
+from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
@@ -67,6 +67,7 @@ async def import_ad_data(
             "total_rows": import_response.imported_rows + import_response.failed_rows
         }
     )
+    await commit_audit_log(db)
 
     return ResponseBaseSchema.success(data=import_response)
 
@@ -115,6 +116,7 @@ async def export_ad_data(
                 "client_id": client_id
             }
         )
+        await commit_audit_log(db)
 
         return response
     except HTTPException:

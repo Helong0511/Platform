@@ -77,6 +77,23 @@
             <el-option label="渠道" value="PUBLISHER"></el-option>
             <el-option label="广告主" value="ADVERTISER"></el-option>
             <el-option label="转化扣减配置" value="CONVERSION_DEDUCTION_CONFIG"></el-option>
+            <el-option label="斗篷配置" value="CLOAK_CONFIG"></el-option>
+            <el-option label="通知配置" value="NOTIFICATION_CONFIG"></el-option>
+            <el-option label="短链接" value="SHORT_LINK"></el-option>
+            <el-option label="Cap配置" value="OFFER_CAP"></el-option>
+            <el-option label="扣量配置" value="OFFER_DISCOUNT"></el-option>
+            <el-option label="敏感路径黑名单IP" value="SENSITIVE_BLOCKED_IP"></el-option>
+            <el-option label="敏感路径拦截日志" value="SENSITIVE_PATH_PROBE_LOG"></el-option>
+            <el-option label="第三方上报日志" value="THIRD_PARTY_REPORT_LOG"></el-option>
+            <el-option label="TB搜索数据" value="TB_SEARCH_DATA"></el-option>
+            <el-option label="Postback转发日志" value="POSTBACK_FORWARD_LOG"></el-option>
+            <el-option label="Postback转化" value="POSTBACK_CONVERSION"></el-option>
+            <el-option label="Postback待确认转化" value="POSTBACK_PENDING_CONVERSION"></el-option>
+            <el-option label="Postback IP白名单" value="POSTBACK_IP_WHITELIST"></el-option>
+            <el-option label="产品分配" value="PRODUCT_ASSIGNMENT"></el-option>
+            <el-option label="下游测试" value="AFFILIATE_TEST"></el-option>
+            <el-option label="Telegram" value="TELEGRAM"></el-option>
+            <el-option label="点击记录" value="CLICK"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="IP地址">
@@ -157,7 +174,7 @@
         </el-table-column>
         <el-table-column v-if="columnVisibility.resource_type" prop="resource_type" label="资源类型" width="120" show-overflow-tooltip>
           <template #default="scope">
-            {{ scope.row.resource_type || '-' }}
+            {{ getResourceTypeLabel(scope.row.resource_type) || '-' }}
           </template>
         </el-table-column>
         <el-table-column v-if="columnVisibility.resource_name" prop="resource_name" label="资源名称" min-width="150" show-overflow-tooltip>
@@ -247,7 +264,7 @@
             {{ getActionTypeLabel(currentLog.action_type) }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="资源类型">{{ currentLog.resource_type || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="资源类型">{{ getResourceTypeLabel(currentLog.resource_type) || '-' }}</el-descriptions-item>
         <el-descriptions-item label="资源ID">{{ currentLog.resource_id || '-' }}</el-descriptions-item>
         <el-descriptions-item label="资源名称">{{ currentLog.resource_name || '-' }}</el-descriptions-item>
         <el-descriptions-item label="IP地址">{{ currentLog.ip_address || '-' }}</el-descriptions-item>
@@ -337,6 +354,7 @@ import {
   formatAuditJson,
   getActionTypeLabel,
   getActionTypeTag,
+  getResourceTypeLabel,
   getStatusCodeTag,
 } from '../../utils/auditLogFormat';
 

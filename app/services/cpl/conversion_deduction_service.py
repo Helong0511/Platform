@@ -10,6 +10,7 @@
 """
 from typing import Optional, List, Dict, Any, Tuple, Literal
 from datetime import datetime, timedelta
+from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, and_, update, delete
@@ -543,7 +544,8 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
     async def delete_deduction_config(
             self,
             config_id: int,
-            current_user: User
+            current_user: User,
+            request: Optional[Request] = None,
     ) -> None:
         """
         删除扣减配置
@@ -573,6 +575,14 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             target_id = config.publisher_id
 
         try:
+            await log_delete(
+                db=self.db,
+                user=current_user,
+                resource_type="CONVERSION_DEDUCTION_CONFIG",
+                resource_id=config.id,
+                resource_name=f"扣减配置-{config.id}",
+                request=request,
+            )
             await self.db.delete(config)
             await self.db.commit()
 
@@ -672,7 +682,8 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
     async def batch_delete(
             self,
             config_ids: List[int],
-            current_user: User
+            current_user: User,
+            request: Optional[Request] = None,
     ) -> int:
         """
         批量删除扣减配置
@@ -714,7 +725,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
                 resource_type="CONVERSION_DEDUCTION_CONFIG",
                 resource_id=config.id,
                 resource_name=f"扣减配置-{config.id}",
-                request=None
+                request=request,
             )
 
         # 批量删除配置

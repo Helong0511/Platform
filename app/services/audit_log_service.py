@@ -10,7 +10,7 @@ from sqlalchemy import func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.audit_log import log_user_action
+from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.cache import get_cached, set_cached, generate_cache_key
 from app.models.models import UserAuditLog, User
 
@@ -292,7 +292,7 @@ class AuditLogService:
                     "stack_trace": truncated_stack
                 }
             )
-            await self.db.commit()
+            await commit_audit_log(self.db)
         except Exception as e:
             # 记录错误日志失败不应该影响前端，静默处理
             logger.warning(f"记录客户端错误日志失败: {e}")

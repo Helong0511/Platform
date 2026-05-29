@@ -4,9 +4,10 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, Path
+from fastapi import APIRouter, Depends, Query, Path, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit_log import log_create, log_update, log_delete, commit_audit_log
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.database import get_db
 from app.core.dependencies import get_discount_service
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
     dependencies=[Depends(require_admin)],
 )
 async def create_discount(
+        request: Request,
         discount_in: OfferDiscountCreate,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
@@ -41,6 +43,15 @@ async def create_discount(
     discount = await discount_service.create_discount(
         discount_in.model_dump(), current_user
     )
+    await log_create(
+        db=db,
+        user=current_user,
+        resource_type="OFFER_DISCOUNT",
+        resource_id=discount.id,
+        resource_name=f"扣量-{discount.id}",
+        request=request,
+    )
+    await commit_audit_log(db)
     return ResponseBaseSchema.success(
         data=discount_service.to_discount_response(discount)
     )
@@ -108,15 +119,28 @@ async def get_discount(
     dependencies=[Depends(require_admin)],
 )
 async def update_discount(
+        request: Request,
         discount_id: int = Path(..., ge=1),
         discount_in: OfferDiscountUpdate = ...,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
     discount_service: DiscountService = await get_discount_service(db)
+    update_data = discount_in.model_dump(exclude_unset=True)
     discount = await discount_service.update_discount(
-        discount_id, discount_in.model_dump(exclude_unset=True), current_user
+        discount_id, update_data, current_user
     )
+    if update_data:
+        await log_update(
+            db=db,
+            user=current_user,
+            resource_type="OFFER_DISCOUNT",
+            resource_id=discount_id,
+            resource_name=f"扣量-{discount_id}",
+            request=request,
+            details={"updated_fields": list(update_data.keys())},
+        )
+        await commit_audit_log(db)
     return ResponseBaseSchema.success(
         data=discount_service.to_discount_response(discount)
     )
@@ -129,10 +153,20 @@ async def update_discount(
     dependencies=[Depends(require_admin)],
 )
 async def delete_discount(
+        request: Request,
         discount_id: int = Path(..., ge=1),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
     discount_service: DiscountService = await get_discount_service(db)
     await discount_service.delete_discount(discount_id, current_user)
+    await log_delete(
+        db=db,
+        user=current_user,
+        resource_type="OFFER_DISCOUNT",
+        resource_id=discount_id,
+        resource_name=f"扣量-{discount_id}",
+        request=request,
+    )
+    await commit_audit_log(db)
     return ResponseBaseSchema.success(data={"message": "扣量配置已删除"})

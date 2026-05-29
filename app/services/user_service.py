@@ -13,7 +13,7 @@ from app.models.models import User, Client, UserRole, Publisher
 from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
-from app.core.audit_log import log_user_action
+from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.utils import get_app_now_naive
 from app.core.validation import validate_password_strength
 from app.core.permission_cache import invalidate_user_permission_cache
@@ -442,7 +442,7 @@ class UserService(BaseService[User]):
             success=True,
             details={"action": "change_password"}
         )
-        await self.db.commit()
+        await commit_audit_log(self.db)
 
         logger.info(f"用户密码已修改: {user.username} (ID: {user_id})")
 

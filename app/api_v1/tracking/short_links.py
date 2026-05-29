@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, and_, or_
 
+from app.core.audit_log import log_create, log_update, log_delete, log_user_action, commit_audit_log
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.constants import MAX_PAGE_SIZE
@@ -131,6 +132,16 @@ async def create_short_link(
     
     # 调用服务层创建短链接（服务层会处理验证和代码生成）
     short_link = await short_link_service.create_short_link(link_data, current_user)
+
+    await log_create(
+        db=db,
+        user=current_user,
+        resource_type="SHORT_LINK",
+        resource_id=short_link.id,
+        resource_name=short_link.short_code,
+        request=request,
+    )
+    await commit_audit_log(db)
     
     # 构建完整的短链接URL
     base_url = str(request.base_url).rstrip('/')
@@ -241,6 +252,18 @@ async def update_short_link(
     
     # 调用服务层更新短链接（服务层会处理验证、权限检查和缓存清理）
     short_link = await short_link_service.update_short_link(link_id, update_data, current_user)
+
+    if update_data:
+        await log_update(
+            db=db,
+            user=current_user,
+            resource_type="SHORT_LINK",
+            resource_id=link_id,
+            resource_name=short_link.short_code,
+            request=request,
+            details={"updated_fields": list(update_data.keys())},
+        )
+        await commit_audit_log(db)
     
     # 构建完整的短链接URL
     base_url = str(request.base_url).rstrip('/')
@@ -254,6 +277,7 @@ async def update_short_link(
                 response_model=ResponseBaseSchema[dict],
                 summary="删除短链接")
 async def delete_short_link(
+    request: Request,
     link_id: int = Path(..., ge=1, description="短链接ID"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -261,9 +285,24 @@ async def delete_short_link(
     """删除短链接（已重构使用服务层）"""
     # 使用服务层（业务逻辑在ShortLinkService中）
     short_link_service: ShortLinkService = await get_short_link_service(db)
-    
+
+    short_link = await short_link_service.get_short_link_by_id(
+        link_id, current_user, include_relations=False
+    )
+    short_code = short_link.short_code
+
     # 调用服务层删除短链接（服务层会处理权限检查和缓存清理）
     await short_link_service.delete_short_link(link_id, current_user)
+
+    await log_delete(
+        db=db,
+        user=current_user,
+        resource_type="SHORT_LINK",
+        resource_id=link_id,
+        resource_name=short_code,
+        request=request,
+    )
+    await commit_audit_log(db)
     
     return ResponseBaseSchema.success(data={"message": "短链接已删除"})
 
@@ -329,6 +368,7 @@ async def get_short_link_stats(
              response_model=ResponseBaseSchema,
              summary="手动同步点击次数到数据库（管理员）")
 async def sync_short_link_clicks(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
@@ -343,6 +383,17 @@ async def sync_short_link_clicks(
         logger.info(f"管理员 {current_user.id} 手动触发短链接点击次数同步")
         synced_count = await sync_click_counts_to_db(db)
         
+        await log_user_action(
+            db=db,
+            action_type="TASK_RUN",
+            user=current_user,
+            resource_type="SHORT_LINK",
+            resource_id=0,
+            resource_name="同步短链接点击数",
+            request=request,
+            details={"synced_count": synced_count},
+        )
+        await commit_audit_log(db)
         if synced_count > 0:
             logger.info(f"手动同步成功: 更新了 {synced_count} 条记录")
             return ResponseBaseSchema.success(
@@ -583,6 +634,7 @@ async def diagnose_short_link_sync(
              response_model=ResponseBaseSchema,
              summary="批量诊断短链接同步状态（管理员）")
 async def diagnose_short_links_batch(
+    request: Request,
     short_codes: list[str] = Body(..., description="短链接代码列表"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -623,6 +675,18 @@ async def diagnose_short_links_batch(
         "has_issues": sum(1 for r in results if r.get("issues")),
     }
     
+    await log_user_action(
+        db=db,
+        action_type="API_ACCESS",
+        user=current_user,
+        resource_type="SHORT_LINK",
+        resource_id=0,
+        resource_name="批量诊断短链接",
+        request=request,
+        details={"total": summary["total"]},
+    )
+    await commit_audit_log(db)
+
     return ResponseBaseSchema.success(data={
         "summary": summary,
         "details": results

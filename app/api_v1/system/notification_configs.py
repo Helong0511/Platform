@@ -17,6 +17,7 @@ from app.core.errors import ErrorCode
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import parse_date_to_app_timezone, get_app_now_naive
 from app.core.dependencies import get_notification_config_service
+from app.core.audit_log import log_create, log_update, log_delete, log_user_action, commit_audit_log
 from app.core.telegram import send_telegram_message_async
 from app.models.models import (
     Client, Product, User, UserRole,
@@ -99,14 +100,39 @@ async def create_or_update_client_notification_config(
     # 使用服务层（业务逻辑在NotificationConfigService中）
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
-    # 准备配置数据
     config_data = config_in.model_dump(exclude_unset=True)
-    
-    # 调用服务层创建或更新客户通知配置（服务层会处理验证和逻辑）
+
+    existing_result = await db.execute(
+        select(ClientNotificationConfig).where(ClientNotificationConfig.client_id == client_id)
+    )
+    is_create = existing_result.scalars().first() is None
+
     config = await notification_service.create_or_update_client_notification_config(
         client_id, config_data, current_user
     )
-    
+
+    if is_create:
+        await log_create(
+            db=db,
+            user=current_user,
+            resource_type="NOTIFICATION_CONFIG",
+            resource_id=config.id,
+            resource_name=f"客户通知配置-{client_id}",
+            request=request,
+            details={"scope": "client", "client_id": client_id, **config_data},
+        )
+    else:
+        await log_update(
+            db=db,
+            user=current_user,
+            resource_type="NOTIFICATION_CONFIG",
+            resource_id=config.id,
+            resource_name=f"客户通知配置-{client_id}",
+            request=request,
+            details={"scope": "client", "client_id": client_id, **config_data},
+        )
+    await commit_audit_log(db)
+
     return ResponseBaseSchema.success(data=ClientNotificationConfigResponse.model_validate(config))
 
 
@@ -114,17 +140,32 @@ async def create_or_update_client_notification_config(
                response_model=ResponseBaseSchema[dict],
                summary="删除客户通知配置")
 async def delete_client_notification_config(
+    request: Request,
     client_id: int = Path(..., ge=1, description="客户ID"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
     """删除客户的通知配置（仅管理员，已重构使用服务层）"""
-    # 使用服务层（业务逻辑在NotificationConfigService中）
     notification_service: NotificationConfigService = await get_notification_config_service(db)
-    
-    # 调用服务层删除客户通知配置（服务层会处理验证和删除）
+
+    existing_result = await db.execute(
+        select(ClientNotificationConfig).where(ClientNotificationConfig.client_id == client_id)
+    )
+    existing = existing_result.scalars().first()
+    if existing:
+        await log_delete(
+            db=db,
+            user=current_user,
+            resource_type="NOTIFICATION_CONFIG",
+            resource_id=existing.id,
+            resource_name=f"客户通知配置-{client_id}",
+            request=request,
+            details={"scope": "client", "client_id": client_id},
+        )
+        await commit_audit_log(db)
+
     await notification_service.delete_client_notification_config(client_id, current_user)
-    
+
     return ResponseBaseSchema.success(data={"message": "通知配置已删除"})
 
 
@@ -180,14 +221,39 @@ async def create_or_update_product_notification_config(
     # 使用服务层（业务逻辑在NotificationConfigService中）
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
-    # 准备配置数据
     config_data = config_in.model_dump(exclude_unset=True)
-    
-    # 调用服务层创建或更新产品通知配置（服务层会处理验证和逻辑）
+
+    existing_result = await db.execute(
+        select(ProductNotificationConfig).where(ProductNotificationConfig.product_id == product_id)
+    )
+    is_create = existing_result.scalars().first() is None
+
     config = await notification_service.create_or_update_product_notification_config(
         product_id, config_data, current_user
     )
-    
+
+    if is_create:
+        await log_create(
+            db=db,
+            user=current_user,
+            resource_type="NOTIFICATION_CONFIG",
+            resource_id=config.id,
+            resource_name=f"产品通知配置-{product_id}",
+            request=request,
+            details={"scope": "product", "product_id": product_id, **config_data},
+        )
+    else:
+        await log_update(
+            db=db,
+            user=current_user,
+            resource_type="NOTIFICATION_CONFIG",
+            resource_id=config.id,
+            resource_name=f"产品通知配置-{product_id}",
+            request=request,
+            details={"scope": "product", "product_id": product_id, **config_data},
+        )
+    await commit_audit_log(db)
+
     return ResponseBaseSchema.success(data=ProductNotificationConfigResponse.model_validate(config))
 
 
@@ -195,17 +261,32 @@ async def create_or_update_product_notification_config(
                response_model=ResponseBaseSchema[dict],
                summary="删除产品通知配置")
 async def delete_product_notification_config(
+    request: Request,
     product_id: int = Path(..., ge=1, description="产品ID"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
     """删除产品的通知配置（仅管理员，已重构使用服务层）"""
-    # 使用服务层（业务逻辑在NotificationConfigService中）
     notification_service: NotificationConfigService = await get_notification_config_service(db)
-    
-    # 调用服务层删除产品通知配置（服务层会处理验证和删除）
+
+    existing_result = await db.execute(
+        select(ProductNotificationConfig).where(ProductNotificationConfig.product_id == product_id)
+    )
+    existing = existing_result.scalars().first()
+    if existing:
+        await log_delete(
+            db=db,
+            user=current_user,
+            resource_type="NOTIFICATION_CONFIG",
+            resource_id=existing.id,
+            resource_name=f"产品通知配置-{product_id}",
+            request=request,
+            details={"scope": "product", "product_id": product_id},
+        )
+        await commit_audit_log(db)
+
     await notification_service.delete_product_notification_config(product_id, current_user)
-    
+
     return ResponseBaseSchema.success(data={"message": "通知配置已删除"})
 
 
@@ -281,6 +362,7 @@ async def get_notification_record(
              response_model=ResponseBaseSchema[dict],
              summary="补发转化通知")
 async def resend_conversion_notification(
+    request: Request,
     conversion_id: int = Path(..., ge=1, description="转化记录ID"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -298,7 +380,18 @@ async def resend_conversion_notification(
     
     # 调用服务层补发转化通知（服务层会处理权限检查和补发逻辑）
     result = await notification_service.resend_conversion_notification(conversion_id, current_user)
-    
+
+    await log_user_action(
+        db=db,
+        action_type="TASK_RUN",
+        user=current_user,
+        resource_type="NOTIFICATION_CONFIG",
+        resource_id=conversion_id,
+        resource_name=f"补发转化通知-{conversion_id}",
+        request=request,
+    )
+    await commit_audit_log(db)
+
     return ResponseBaseSchema.success(data=result)
 
 
@@ -306,6 +399,7 @@ async def resend_conversion_notification(
              response_model=ResponseBaseSchema[dict],
              summary="基于转发日志补发通知")
 async def resend_notification_from_forward_log(
+    request: Request,
     forward_log_id: int = Path(..., ge=1, description="转发日志ID"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -324,7 +418,18 @@ async def resend_notification_from_forward_log(
     
     # 调用服务层基于转发日志补发通知（服务层会处理权限检查和补发逻辑）
     result = await notification_service.resend_notification_from_forward_log(forward_log_id, current_user)
-    
+
+    await log_user_action(
+        db=db,
+        action_type="TASK_RUN",
+        user=current_user,
+        resource_type="NOTIFICATION_CONFIG",
+        resource_id=forward_log_id,
+        resource_name=f"转发日志补发通知-{forward_log_id}",
+        request=request,
+    )
+    await commit_audit_log(db)
+
     return ResponseBaseSchema.success(data=result)
 
 
@@ -332,6 +437,7 @@ async def resend_notification_from_forward_log(
              response_model=ResponseBaseSchema[dict],
              summary="批量补发转化通知")
 async def batch_resend_conversion_notification(
+    request: Request,
     request_data: dict,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -359,7 +465,19 @@ async def batch_resend_conversion_notification(
     
     # 调用服务层批量补发转化通知（服务层会处理权限检查和补发逻辑）
     result = await notification_service.batch_resend_conversion_notification(conversion_ids, current_user)
-    
+
+    await log_user_action(
+        db=db,
+        action_type="TASK_RUN",
+        user=current_user,
+        resource_type="NOTIFICATION_CONFIG",
+        resource_id=0,
+        resource_name="批量补发转化通知",
+        request=request,
+        details={"conversion_ids": conversion_ids, **(result if isinstance(result, dict) else {})},
+    )
+    await commit_audit_log(db)
+
     return ResponseBaseSchema.success(data=result)
 
 
@@ -404,6 +522,7 @@ async def get_admin_notification_config(
              response_model=ResponseBaseSchema[AdminNotificationConfigResponse],
              summary="创建或更新管理员通知配置")
 async def create_or_update_admin_notification_config(
+    request: Request,
     config_data: AdminNotificationConfigUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -415,11 +534,38 @@ async def create_or_update_admin_notification_config(
     管理员通知配置是单例模式，只有一条记录（id=1）
     """
     notification_service: NotificationConfigService = await get_notification_config_service(db)
+    update_payload = config_data.model_dump(exclude_unset=True)
+
+    existing_result = await db.execute(select(AdminNotificationConfig).limit(1))
+    is_create = existing_result.scalars().first() is None
+
     config = await notification_service.create_or_update_admin_notification_config(
-        config_data.model_dump(exclude_unset=True),
+        update_payload,
         current_user
     )
-    
+
+    if is_create:
+        await log_create(
+            db=db,
+            user=current_user,
+            resource_type="NOTIFICATION_CONFIG",
+            resource_id=config.id,
+            resource_name="管理员通知配置",
+            request=request,
+            details={"scope": "admin", **update_payload},
+        )
+    else:
+        await log_update(
+            db=db,
+            user=current_user,
+            resource_type="NOTIFICATION_CONFIG",
+            resource_id=config.id,
+            resource_name="管理员通知配置",
+            request=request,
+            details={"scope": "admin", **update_payload},
+        )
+    await commit_audit_log(db)
+
     return ResponseBaseSchema.success(data=AdminNotificationConfigResponse.model_validate(config))
 
 
@@ -427,6 +573,7 @@ async def create_or_update_admin_notification_config(
              response_model=ResponseBaseSchema[dict],
              summary="测试 Telegram 连接")
 async def test_telegram_connection(
+    request: Request,
     request_data: TestConnectionRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -446,6 +593,16 @@ async def test_telegram_connection(
     try:
         success = await send_telegram_message_async(telegram_chat_id, test_message)
         if success:
+            await log_user_action(
+                db=db,
+                action_type="API_ACCESS",
+                user=current_user,
+                resource_type="NOTIFICATION_CONFIG",
+                resource_id=0,
+                resource_name="测试Telegram连接",
+                request=request,
+            )
+            await commit_audit_log(db)
             return ResponseBaseSchema.success(data={
                 "success": True,
                 "message": "连接成功，测试消息已发送"
@@ -469,6 +626,7 @@ async def test_telegram_connection(
              response_model=ResponseBaseSchema[dict],
              summary="发送测试消息")
 async def send_test_message(
+    request: Request,
     request_data: TestMessageRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -488,6 +646,17 @@ async def send_test_message(
         
         success = await send_telegram_message_async(telegram_chat_id, test_message)
         if success:
+            await log_user_action(
+                db=db,
+                action_type="API_ACCESS",
+                user=current_user,
+                resource_type="NOTIFICATION_CONFIG",
+                resource_id=0,
+                resource_name="发送Telegram测试消息",
+                request=request,
+                details={"message_type": message_type},
+            )
+            await commit_audit_log(db)
             return ResponseBaseSchema.success(data={
                 "success": True,
                 "message": "测试消息已发送"

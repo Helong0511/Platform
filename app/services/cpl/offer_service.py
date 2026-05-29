@@ -17,7 +17,7 @@ from urllib.parse import urlparse, parse_qs
 from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
-from app.core.audit_log import log_user_action
+from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.infrastructure.cache import CacheInvalidator
 from app.core.config import settings
 import logging
@@ -577,7 +577,7 @@ class OfferService(BaseService[Offer]):
             resource_name=offer.offer_name,
             success=True
         )
-        await self.db.commit()
+        await commit_audit_log(self.db)
 
         logger.info(f"Offer已创建: {offer.offer_name} (ID: {offer.id})")
         return offer, short_link_info
@@ -957,7 +957,7 @@ class OfferService(BaseService[Offer]):
             resource_name=offer.offer_name,
             success=True
         )
-        await self.db.commit()
+        await commit_audit_log(self.db)
 
         logger.info(f"Offer已更新: {offer.offer_name} (ID: {offer.id})")
         return offer, short_link_info, downstream_tracklink_short_link_info, downstream_tracklink_changed

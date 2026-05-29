@@ -84,7 +84,10 @@ import uuid
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
-from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
+from app.core.audit_log import (
+    log_create, log_update, log_delete, log_activate, log_deactivate,
+    log_user_action, commit_audit_log,
+)
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import optimize_page_size_for_device, get_app_now_naive
 from app.core.dependencies import get_user_service
@@ -237,6 +240,7 @@ async def get_user_stats(
 
 @router.get("/export/excel", response_class=StreamingResponse, summary="导出用户数据")
 async def export_users_excel(
+        request: Request,
         username: str | None = Query(None, description="用户名过滤"),
         role: str | None = Query(None, description="角色过滤"),
         status: str | None = Query(None, description="状态过滤: active/inactive"),
@@ -332,6 +336,16 @@ async def export_users_excel(
     encoded_filename = quote(filename.encode('utf-8'))
 
     logger.info(f"User data exported by {current_user.username}, total: {len(data)} users")
+
+    await log_user_action(
+        db=db,
+        action_type="EXPORT",
+        user=current_user,
+        resource_type="USER",
+        request=request,
+        details={"row_count": len(data), "username": username, "role": role, "status": status},
+    )
+    await commit_audit_log(db)
 
     return StreamingResponse(
         output,
@@ -585,6 +599,7 @@ async def create_user(
             "is_active": user.is_active
         }
     )
+    await commit_audit_log(db)
 
     return ResponseBaseSchema.success(data=UserResponse.model_validate(user_dict))
 
@@ -621,6 +636,7 @@ async def update_user(
     if "password" in update_data:
         update_data["password"] = "***"
 
+    wrote_audit = False
     if "is_active" in update_data and update_data["is_active"] != old_is_active:
         if user.is_active:
             await log_activate(
@@ -640,6 +656,7 @@ async def update_user(
                 resource_name=user.username,
                 request=request,
             )
+        wrote_audit = True
 
     if len(update_data) > 1 or "is_active" not in update_data:
         await log_update(
@@ -651,6 +668,10 @@ async def update_user(
             request=request,
             details=update_data
         )
+        wrote_audit = True
+
+    if wrote_audit:
+        await commit_audit_log(db)
 
     # 构建响应数据
     user_dict = {
@@ -705,6 +726,7 @@ async def delete_user(
             "email": user.email
         }
     )
+    await commit_audit_log(db)
     
     # 调用服务层删除用户（服务层会检查关联数据）
     await user_service.delete_user(user_id, current_user)

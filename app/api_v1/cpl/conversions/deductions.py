@@ -7,7 +7,7 @@ from typing import Optional
 from urllib.parse import quote
 
 import pandas as pd
-from fastapi import APIRouter, Depends, Query, Path, HTTPException
+from fastapi import APIRouter, Depends, Query, Path, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,12 @@ from app.core.dependencies import get_conversion_deduction_service
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.security import get_current_user, require_admin
+from app.core.audit_log import (
+    log_user_action,
+    log_activate,
+    log_deactivate,
+    commit_audit_log,
+)
 from app.core.utils import get_app_now_naive
 from app.models.models import User
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -65,12 +71,24 @@ def _excel_response(rows: list, sheet_name: str, filename_prefix: str) -> Stream
     dependencies=[Depends(require_admin)],
 )
 async def create_deduction_config(
+        request: Request,
         config_in: ConversionDeductionConfigCreate,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
     config = await svc.create_deduction_config(config_in.model_dump(), current_user)
+    await log_user_action(
+        db=db,
+        action_type="CREATE",
+        user=current_user,
+        resource_type="CONVERSION_DEDUCTION_CONFIG",
+        resource_id=config.id,
+        resource_name=f"扣减配置-{config.id}",
+        request=request,
+        success=True,
+    )
+    await commit_audit_log(db)
     return ResponseBaseSchema.success(data=svc.to_config_response(config))
 
 
@@ -119,15 +137,27 @@ async def get_deduction_configs(
     dependencies=[Depends(require_admin)],
 )
 async def update_deduction_config(
+        request: Request,
         config_id: int = Path(..., ge=1),
         config_in: ConversionDeductionConfigUpdate = ...,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
-    config = await svc.update_deduction_config(
-        config_id, config_in.model_dump(exclude_unset=True), current_user
+    update_data = config_in.model_dump(exclude_unset=True)
+    config = await svc.update_deduction_config(config_id, update_data, current_user)
+    await log_user_action(
+        db=db,
+        action_type="UPDATE",
+        user=current_user,
+        resource_type="CONVERSION_DEDUCTION_CONFIG",
+        resource_id=config.id,
+        resource_name=f"扣减配置-{config.id}",
+        request=request,
+        success=True,
+        details=update_data,
     )
+    await commit_audit_log(db)
     return ResponseBaseSchema.success(data=svc.to_config_response(config))
 
 
@@ -138,12 +168,13 @@ async def update_deduction_config(
     dependencies=[Depends(require_admin)],
 )
 async def delete_deduction_config(
+        request: Request,
         config_id: int = Path(..., ge=1),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
-    await svc.delete_deduction_config(config_id, current_user)
+    await svc.delete_deduction_config(config_id, current_user, request=request)
     return ResponseBaseSchema.success(data={"id": config_id})
 
 
@@ -154,13 +185,41 @@ async def delete_deduction_config(
     dependencies=[Depends(require_admin)],
 )
 async def update_deduction_config_status(
+        request: Request,
         config_id: int = Path(..., ge=1),
         is_active: bool = Query(...),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
+    before = await svc.get_deduction_config_by_id(config_id)
+    if not before:
+        raise_api_exception(
+            ErrorCode.RESOURCE_NOT_FOUND,
+            detail=f"扣减配置ID {config_id} 不存在",
+        )
+    old_is_active = before.is_active
     await svc.update_deduction_config_status(config_id, is_active, current_user)
+    if old_is_active != is_active:
+        if is_active:
+            await log_activate(
+                db=db,
+                user=current_user,
+                resource_type="CONVERSION_DEDUCTION_CONFIG",
+                resource_id=config_id,
+                resource_name=f"扣减配置-{config_id}",
+                request=request,
+            )
+        else:
+            await log_deactivate(
+                db=db,
+                user=current_user,
+                resource_type="CONVERSION_DEDUCTION_CONFIG",
+                resource_id=config_id,
+                resource_name=f"扣减配置-{config_id}",
+                request=request,
+            )
+        await commit_audit_log(db)
     return ResponseBaseSchema.success(data={"id": config_id, "is_active": is_active})
 
 
@@ -171,6 +230,7 @@ async def update_deduction_config_status(
     dependencies=[Depends(require_admin)],
 )
 async def batch_update_deduction_config_status(
+        request: Request,
         request_data: BatchUpdateStatusRequest,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
@@ -179,6 +239,23 @@ async def batch_update_deduction_config_status(
     updated_count = await svc.batch_update_status(
         request_data.config_ids, request_data.is_active, current_user
     )
+    if updated_count > 0:
+        action = "ACTIVATE" if request_data.is_active else "DEACTIVATE"
+        await log_user_action(
+            db=db,
+            action_type=action,
+            user=current_user,
+            resource_type="CONVERSION_DEDUCTION_CONFIG",
+            resource_id=0,
+            resource_name="批量更新扣减配置状态",
+            request=request,
+            details={
+                "config_ids": request_data.config_ids,
+                "is_active": request_data.is_active,
+                "updated_count": updated_count,
+            },
+        )
+        await commit_audit_log(db)
     return ResponseBaseSchema.success(
         data={"updated_count": updated_count, "is_active": request_data.is_active}
     )
@@ -191,12 +268,13 @@ async def batch_update_deduction_config_status(
     dependencies=[Depends(require_admin)],
 )
 async def batch_delete_deduction_configs(
+        request: Request,
         request_data: BatchDeleteRequest,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
-    deleted_count = await svc.batch_delete(request_data.config_ids, current_user)
+    deleted_count = await svc.batch_delete(request_data.config_ids, current_user, request=request)
     return ResponseBaseSchema.success(data={"deleted_count": deleted_count})
 
 
@@ -286,6 +364,7 @@ async def get_deduction_logs(
     dependencies=[Depends(require_admin)],
 )
 async def export_deduction_configs(
+        request: Request,
         level: Optional[str] = Query(None),
         is_active: Optional[bool] = Query(None),
         keyword: Optional[str] = Query(None),
@@ -311,6 +390,15 @@ async def export_deduction_configs(
             )
         rows = [svc.config_to_export_row(c) for c in configs]
         logger.info("扣减配置导出: user=%s count=%s", current_user.username, len(rows))
+        await log_user_action(
+            db=db,
+            action_type="EXPORT",
+            user=current_user,
+            resource_type="CONVERSION_DEDUCTION_CONFIG",
+            request=request,
+            details={"row_count": len(rows), "export_type": "configs"},
+        )
+        await commit_audit_log(db)
         return _excel_response(rows, "扣减配置", "扣减配置")
     except HTTPException:
         raise
@@ -326,6 +414,7 @@ async def export_deduction_configs(
     dependencies=[Depends(require_admin)],
 )
 async def export_deduction_stats(
+        request: Request,
         start_date: Optional[str] = Query(None),
         end_date: Optional[str] = Query(None),
         group_by: Optional[str] = Query("time"),
@@ -347,6 +436,15 @@ async def export_deduction_stats(
         )
         stats = DeductionStatsResponse(**stats_data)
         rows = svc.stats_to_export_rows(stats)
+        await log_user_action(
+            db=db,
+            action_type="EXPORT",
+            user=current_user,
+            resource_type="CONVERSION_DEDUCTION_CONFIG",
+            request=request,
+            details={"row_count": len(rows), "export_type": "stats"},
+        )
+        await commit_audit_log(db)
         return _excel_response(rows, "扣减统计", "扣减统计")
     except HTTPException:
         raise
@@ -362,6 +460,7 @@ async def export_deduction_stats(
     dependencies=[Depends(require_admin)],
 )
 async def export_deduction_logs(
+        request: Request,
         start_date: Optional[str] = Query(None),
         end_date: Optional[str] = Query(None),
         advertiser_id: Optional[int] = Query(None),
@@ -392,6 +491,15 @@ async def export_deduction_logs(
                 detail="当前筛选条件下没有可导出的日志数据",
             )
         rows = [svc.log_to_export_row(log) for log in logs]
+        await log_user_action(
+            db=db,
+            action_type="EXPORT",
+            user=current_user,
+            resource_type="CONVERSION_DEDUCTION_CONFIG",
+            request=request,
+            details={"row_count": len(rows), "export_type": "logs"},
+        )
+        await commit_audit_log(db)
         return _excel_response(rows, "扣减日志", "扣减日志")
     except HTTPException:
         raise

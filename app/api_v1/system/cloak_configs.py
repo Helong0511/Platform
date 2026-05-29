@@ -25,6 +25,12 @@ from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.security import require_admin
+from app.core.audit_log import (
+    log_create,
+    log_update,
+    log_delete,
+    commit_audit_log,
+)
 from app.models.models import CloakConfig, User
 from app.schemas.base import PaginatedResponseBaseSchema, ResponseBaseSchema
 from app.schemas.cloak import (
@@ -196,9 +202,10 @@ async def list_cloak_configs(
     summary="创建斗篷配置",
 )
 async def create_cloak_config(
+    request: Request,
     data: CloakConfigCreate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin),
 ):
     exists_result = await db.execute(
         select(CloakConfig).where(CloakConfig.cloak_name == data.cloak_name)
@@ -212,6 +219,16 @@ async def create_cloak_config(
     db.add(config)
     await db.commit()
     await db.refresh(config)
+    await log_create(
+        db=db,
+        user=current_user,
+        resource_type="CLOAK_CONFIG",
+        resource_id=config.id,
+        resource_name=config.cloak_name,
+        request=request,
+        details={"cloak_name": config.cloak_name, "is_enabled": config.is_enabled},
+    )
+    await commit_audit_log(db)
     resp = CloakConfigResponse.model_validate(config).model_copy(update=_bridge_usability_fields(config.cloak_name))
     return ResponseBaseSchema.success(data=resp, message="创建斗篷配置成功")
 
@@ -222,10 +239,11 @@ async def create_cloak_config(
     summary="更新斗篷配置",
 )
 async def update_cloak_config(
+    request: Request,
     config_id: int = Path(..., ge=1, description="配置ID"),
     data: CloakConfigUpdate = ...,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin),
 ):
     result = await db.execute(select(CloakConfig).where(CloakConfig.id == config_id))
     config = result.scalars().first()
@@ -274,6 +292,16 @@ async def update_cloak_config(
     if config.cloak_name != old_cloak_name:
         invalidate_cloak_cache_for_dp(config.cloak_name)
 
+    await log_update(
+        db=db,
+        user=current_user,
+        resource_type="CLOAK_CONFIG",
+        resource_id=config.id,
+        resource_name=config.cloak_name,
+        request=request,
+        details=update_data,
+    )
+    await commit_audit_log(db)
     resp = CloakConfigResponse.model_validate(config).model_copy(update=_bridge_usability_fields(config.cloak_name))
     return ResponseBaseSchema.success(data=resp, message="更新斗篷配置成功")
 
@@ -284,10 +312,11 @@ async def update_cloak_config(
     summary="上传斗篷桥页 HTML",
 )
 async def upload_cloak_bridge_html(
+    request: Request,
     config_id: int = Path(..., ge=1, description="配置ID"),
     file: UploadFile = File(..., description="桥页 HTML 文件（UTF-8）"),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin),
 ):
     result = await db.execute(select(CloakConfig).where(CloakConfig.id == config_id))
     config = result.scalars().first()
@@ -327,6 +356,20 @@ async def upload_cloak_bridge_html(
     invalidate_cloak_cache_for_dp(config.cloak_name)
 
     saved_filename = f"{config.cloak_name}.html"
+    await log_update(
+        db=db,
+        user=current_user,
+        resource_type="CLOAK_CONFIG",
+        resource_id=config.id,
+        resource_name=config.cloak_name,
+        request=request,
+        details={
+            "action": "upload_bridge_html",
+            "saved_as": saved_filename,
+            "bytes_written": len(text.encode("utf-8")),
+        },
+    )
+    await commit_audit_log(db)
     return ResponseBaseSchema.success(
         data={
             "cloak_name": config.cloak_name,
@@ -343,9 +386,10 @@ async def upload_cloak_bridge_html(
     summary="删除斗篷配置",
 )
 async def delete_cloak_config(
+    request: Request,
     config_id: int = Path(..., ge=1, description="配置ID"),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin),
 ):
     result = await db.execute(select(CloakConfig).where(CloakConfig.id == config_id))
     config = result.scalars().first()
@@ -353,6 +397,15 @@ async def delete_cloak_config(
         raise_api_exception(ErrorCode.RESOURCE_NOT_FOUND, detail="斗篷配置不存在")
 
     deleted_cloak_name = config.cloak_name
+    await log_delete(
+        db=db,
+        user=current_user,
+        resource_type="CLOAK_CONFIG",
+        resource_id=config.id,
+        resource_name=deleted_cloak_name,
+        request=request,
+    )
+    await commit_audit_log(db)
     await db.delete(config)
     await db.commit()
     invalidate_cloak_cache_for_dp(deleted_cloak_name)

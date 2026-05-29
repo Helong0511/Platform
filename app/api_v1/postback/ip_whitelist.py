@@ -5,6 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit_log import log_create, log_update, log_delete, log_user_action, commit_audit_log
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.database import get_db
 from app.core.security import require_admin
@@ -60,9 +61,20 @@ async def create_ip_whitelist(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin),
 ):
-    return await postback_ip_whitelist_service.create_ip_whitelist(
+    result = await postback_ip_whitelist_service.create_ip_whitelist(
         data=data, db=db, current_user=current_user
     )
+    if result.data:
+        await log_create(
+            db=db,
+            user=current_user,
+            resource_type="POSTBACK_IP_WHITELIST",
+            resource_id=result.data.id,
+            resource_name=result.data.ip_address,
+            request=request,
+        )
+        await commit_audit_log(db)
+    return result
 
 
 @router.put(
@@ -77,12 +89,25 @@ async def update_ip_whitelist(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin),
 ):
-    return await postback_ip_whitelist_service.update_ip_whitelist(
+    result = await postback_ip_whitelist_service.update_ip_whitelist(
         whitelist_id=whitelist_id,
         data=data,
         db=db,
         current_user=current_user,
     )
+    update_fields = data.model_dump(exclude_unset=True)
+    if update_fields:
+        await log_update(
+            db=db,
+            user=current_user,
+            resource_type="POSTBACK_IP_WHITELIST",
+            resource_id=whitelist_id,
+            resource_name=result.data.ip_address if result.data else f"白名单-{whitelist_id}",
+            request=request,
+            details={"updated_fields": list(update_fields.keys())},
+        )
+        await commit_audit_log(db)
+    return result
 
 
 @router.post(
@@ -96,9 +121,26 @@ async def batch_create_ip_whitelist(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin),
 ):
-    return await postback_ip_whitelist_service.batch_create_ip_whitelist(
+    result = await postback_ip_whitelist_service.batch_create_ip_whitelist(
         data=data, db=db, current_user=current_user
     )
+    if result.data and result.data.success_count > 0:
+        await log_user_action(
+            db=db,
+            action_type="CREATE",
+            user=current_user,
+            resource_type="POSTBACK_IP_WHITELIST",
+            resource_id=0,
+            resource_name="批量创建Postback IP白名单",
+            request=request,
+            details={
+                "success_count": result.data.success_count,
+                "failed_count": result.data.failed_count,
+                "total_count": result.data.total_count,
+            },
+        )
+        await commit_audit_log(db)
+    return result
 
 
 @router.delete(
@@ -112,6 +154,17 @@ async def delete_ip_whitelist(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin),
 ):
-    return await postback_ip_whitelist_service.delete_ip_whitelist(
+    result = await postback_ip_whitelist_service.delete_ip_whitelist(
         whitelist_id=whitelist_id, db=db, current_user=current_user
     )
+    ip_address = result.data.get("ip_address") if result.data else None
+    await log_delete(
+        db=db,
+        user=current_user,
+        resource_type="POSTBACK_IP_WHITELIST",
+        resource_id=whitelist_id,
+        resource_name=ip_address or f"白名单-{whitelist_id}",
+        request=request,
+    )
+    await commit_audit_log(db)
+    return result

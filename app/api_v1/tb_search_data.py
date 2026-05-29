@@ -13,6 +13,7 @@ import uuid
 import pandas as pd
 from io import BytesIO
 
+from app.core.audit_log import log_update, log_delete, log_user_action
 from app.core.database import get_db
 from app.core.security import get_current_user, is_admin
 from app.core.constants import MAX_PAGE_SIZE
@@ -290,6 +291,7 @@ async def get_tb_search_data(
 
 @router.post("/import", response_model=ResponseBaseSchema[dict], summary="导入Excel数据")
 async def import_tb_search_data(
+    request: Request,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -451,11 +453,26 @@ async def import_tb_search_data(
     msg = f"成功导入 {success_count} 条数据"
     if errors:
         msg += f"，{len(errors)} 条失败"
-        
+
+    await log_user_action(
+        db=db,
+        action_type="IMPORT",
+        user=current_user,
+        resource_type="TB_SEARCH_DATA",
+        request=request,
+        success=True,
+        details={
+            "filename": file.filename,
+            "success_count": success_count,
+            "error_count": len(errors),
+        },
+    )
+
     return ResponseBaseSchema.success(data={"message": msg, "errors": errors[:10]}) # 只返回前10个错误
 
 @router.delete("/batch", response_model=ResponseBaseSchema[dict], summary="批量删除TB搜索数据")
 async def batch_delete_tb_search_data(
+    request: Request,
     data_ids: list[int] = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -468,12 +485,24 @@ async def batch_delete_tb_search_data(
         
     stmt = delete(TBSearchData).where(TBSearchData.id.in_(data_ids))
     result = await db.execute(stmt)
-    # 注意：不需要手动提交事务，get_db 依赖会自动处理
-    
-    return ResponseBaseSchema.success(data={"message": f"成功删除 {result.rowcount} 条数据"})
+    deleted_count = int(result.rowcount or 0)
+
+    await log_user_action(
+        db=db,
+        action_type="DELETE",
+        user=current_user,
+        resource_type="TB_SEARCH_DATA",
+        resource_id=data_ids[0] if len(data_ids) == 1 else 0,
+        resource_name=f"批量删除TB搜索数据({deleted_count}条)",
+        request=request,
+        details={"data_ids": data_ids, "deleted_count": deleted_count},
+    )
+
+    return ResponseBaseSchema.success(data={"message": f"成功删除 {deleted_count} 条数据"})
 
 @router.delete("/{data_id}", response_model=ResponseBaseSchema[dict], summary="删除TB搜索数据")
 async def delete_tb_search_data(
+    request: Request,
     data_id: int = Path(..., ge=1, description="TB搜索数据ID"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -489,12 +518,21 @@ async def delete_tb_search_data(
         raise_api_exception(ErrorCode.NOT_FOUND, detail="数据不存在")
         
     await db.delete(tb_data)
-    # 注意：不需要手动提交事务，get_db 依赖会自动处理
-    
+
+    await log_delete(
+        db=db,
+        user=current_user,
+        resource_type="TB_SEARCH_DATA",
+        resource_id=data_id,
+        resource_name=f"TB搜索数据-{data_id}",
+        request=request,
+    )
+
     return ResponseBaseSchema.success(data={"message": "删除成功"})
 
 @router.post("/{data_id}", response_model=ResponseBaseSchema[TBSearchDataResponse], summary="更新TB搜索数据")
 async def update_tb_search_data(
+    request: Request,
     data_id: int = Path(..., ge=1, description="TB搜索数据ID"),
     data_update: TBSearchDataUpdate = Body(...),
     db: AsyncSession = Depends(get_db),
@@ -513,7 +551,18 @@ async def update_tb_search_data(
     update_dict = data_update.model_dump(exclude_unset=True)
     for k, v in update_dict.items():
         setattr(tb_data, k, v)
-    
+
+    if update_dict:
+        await log_update(
+            db=db,
+            user=current_user,
+            resource_type="TB_SEARCH_DATA",
+            resource_id=data_id,
+            resource_name=f"TB搜索数据-{data_id}",
+            request=request,
+            details={"updated_fields": list(update_dict.keys())},
+        )
+
     # 注意：不需要手动提交事务，get_db 依赖会自动处理
     # 刷新对象以获取最新数据（在自动提交之前）
     await db.flush()

@@ -420,7 +420,7 @@ class UserAuditLog(Base):
                      comment='用户ID（可为空，记录未登录访问）')
     username = Column(String(50), nullable=True, index=True, comment='用户名（冗余字段，便于查询）')
     action_type = Column(String(50), nullable=False, index=True,
-                         comment='操作类型：LOGIN, LOGOUT, CREATE, UPDATE, DELETE, VIEW, ACCESS等')
+                         comment='操作类型：LOGIN, LOGOUT, CREATE, UPDATE, DELETE, IMPORT, EXPORT, ACTIVATE, DEACTIVATE, TASK_RUN, API_ACCESS, RUNTIME_ERROR, REVOKE_SESSION, REVOKE_ALL_SESSIONS, CSRF_VIOLATION')
     resource_type = Column(String(50), nullable=True, index=True,
                            comment='资源类型：USER, CLIENT, PRODUCT, AD_DATA, SCHEDULED_TASK等')
     resource_id = Column(Integer, nullable=True, comment='资源ID')

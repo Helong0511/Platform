@@ -4,9 +4,10 @@ Cap 管理 API（薄路由层）
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, Path, HTTPException
+from fastapi import APIRouter, Depends, Query, Path, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit_log import log_create, log_update, log_delete, log_user_action, commit_audit_log
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.database import get_db
 from app.core.dependencies import get_cap_service
@@ -27,12 +28,22 @@ logger = logging.getLogger(__name__)
     dependencies=[Depends(require_admin)],
 )
 async def create_cap(
+        request: Request,
         cap_in: OfferCapCreate,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
     cap_service: CapService = await get_cap_service(db)
     cap = await cap_service.create_cap(cap_in.model_dump(), current_user)
+    await log_create(
+        db=db,
+        user=current_user,
+        resource_type="OFFER_CAP",
+        resource_id=cap.id,
+        resource_name=f"Cap-{cap.id}",
+        request=request,
+    )
+    await commit_audit_log(db)
     return ResponseBaseSchema.success(data=cap_service.to_cap_response(cap))
 
 
@@ -101,15 +112,26 @@ async def get_cap(
     dependencies=[Depends(require_admin)],
 )
 async def update_cap(
+        request: Request,
         cap_id: int = Path(..., ge=1),
         cap_in: OfferCapUpdate = ...,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
     cap_service: CapService = await get_cap_service(db)
-    cap = await cap_service.update_cap(
-        cap_id, cap_in.model_dump(exclude_unset=True), current_user
-    )
+    update_data = cap_in.model_dump(exclude_unset=True)
+    cap = await cap_service.update_cap(cap_id, update_data, current_user)
+    if update_data:
+        await log_update(
+            db=db,
+            user=current_user,
+            resource_type="OFFER_CAP",
+            resource_id=cap_id,
+            resource_name=f"Cap-{cap_id}",
+            request=request,
+            details={"updated_fields": list(update_data.keys())},
+        )
+        await commit_audit_log(db)
     return ResponseBaseSchema.success(data=cap_service.to_cap_response(cap))
 
 
@@ -120,12 +142,22 @@ async def update_cap(
     dependencies=[Depends(require_admin)],
 )
 async def delete_cap(
+        request: Request,
         cap_id: int = Path(..., ge=1),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
     cap_service: CapService = await get_cap_service(db)
     await cap_service.delete_cap(cap_id, current_user)
+    await log_delete(
+        db=db,
+        user=current_user,
+        resource_type="OFFER_CAP",
+        resource_id=cap_id,
+        resource_name=f"Cap-{cap_id}",
+        request=request,
+    )
+    await commit_audit_log(db)
     return ResponseBaseSchema.success(data={"message": "Cap配置已删除"})
 
 
@@ -136,6 +168,7 @@ async def delete_cap(
     dependencies=[Depends(require_admin)],
 )
 async def check_cap_consistency_api(
+        request: Request,
         offer_id: Optional[int] = Query(None),
         fix: bool = Query(False),
         db: AsyncSession = Depends(get_db),
@@ -147,6 +180,21 @@ async def check_cap_consistency_api(
             offer_id=offer_id, fix=fix
         )
         logger.info("Cap计数一致性检查完成: %s", message)
+        if fix and inconsistencies:
+            await log_user_action(
+                db=db,
+                action_type="UPDATE",
+                user=current_user,
+                resource_type="OFFER_CAP",
+                resource_id=offer_id or 0,
+                resource_name="Cap计数一致性修复",
+                request=request,
+                details={
+                    "inconsistency_count": len(inconsistencies),
+                    "offer_id": offer_id,
+                },
+            )
+            await commit_audit_log(db)
         return ResponseBaseSchema.success(data=inconsistencies, message=message)
     except HTTPException:
         raise

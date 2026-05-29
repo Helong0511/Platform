@@ -18,7 +18,7 @@ from app.core.config import settings
 from app.core.redis_client import get_redis_client
 from app.core.utils import get_client_ip
 from app.core.csrf_utils import safe_raise_csrf_exception
-from app.core.audit_log import log_user_action
+from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -586,7 +586,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                             "method": request.method
                         }
                     )
-                    await db.commit()
+                    await commit_audit_log(db)
                     break
             except Exception as e:
                 logger.error(f"记录CSRF审计日志失败: {e}")
@@ -623,7 +623,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                             "method": request.method
                         }
                     )
-                    await db.commit()
+                    await commit_audit_log(db)
                     break
             except Exception as e:
                 logger.error(f"记录CSRF审计日志失败: {e}")
@@ -671,7 +671,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                             "received_token_prefix": csrf_token[:10]
                         }
                     )
-                    await db.commit()
+                    await commit_audit_log(db)
                     break
             except Exception as e:
                 logger.error(f"记录CSRF审计日志失败: {e}")

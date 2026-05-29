@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from app.core.database import get_db
 from app.core.security import require_admin
 from app.core.validation import validate_cron_expression, sanitize_input
-from app.core.audit_log import log_activate, log_deactivate
+from app.core.audit_log import log_activate, log_deactivate, log_user_action, commit_audit_log
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.dependencies import get_scheduled_task_service
@@ -266,6 +266,7 @@ async def update_scheduled_task(
                         resource_name=task.task_name,
                         request=request
                     )
+                await commit_audit_log(db)
             except Exception as log_error:
                 # 日志记录失败不应该影响主操作
                 logger.warning(f"记录激活/禁用日志失败: {log_error}", exc_info=True)
@@ -346,6 +347,22 @@ async def trigger_scheduled_task(
             params=task_params,
             current_user=current_user
         )
+
+        await log_user_action(
+            db=db,
+            action_type="TASK_RUN",
+            user=current_user,
+            resource_type="SCHEDULED_TASK",
+            resource_name=task_name,
+            request=request,
+            success=True,
+            details={
+                "trigger": "manual",
+                "params": task_params,
+                "result": result if isinstance(result, dict) else {"message": str(result)},
+            },
+        )
+        await commit_audit_log(db)
 
         return ResponseBaseSchema.success(data=result)
 

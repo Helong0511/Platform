@@ -9,6 +9,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy import update
 
+from app.core.audit_log import log_update, log_delete, log_user_action, commit_audit_log
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.core.dependencies import get_product_assignment_service
@@ -156,7 +157,22 @@ async def cleanup_product_assignments_endpoint(
     
     # 调用服务层清理产品分配记录（服务层会处理清理）
     response_data = await assignment_service.cleanup_product_assignments(product_id, current_user)
-    
+
+    if response_data.get("deleted_count", 0) > 0:
+        await log_delete(
+            db=db,
+            user=current_user,
+            resource_type="PRODUCT_ASSIGNMENT",
+            resource_id=product_id,
+            resource_name=f"产品分配清理-{product_id}",
+            request=request,
+            details={
+                "deleted_count": response_data["deleted_count"],
+                "scope": "single_product",
+            },
+        )
+        await commit_audit_log(db)
+
     return ResponseBaseSchema.success(
         data=response_data,
         message=response_data["message"]
@@ -188,7 +204,22 @@ async def cleanup_all_product_assignments_endpoint(
     
     # 调用服务层清理所有产品分配记录（服务层会处理清理）
     response_data = await assignment_service.cleanup_all_product_assignments(current_user)
-    
+
+    if response_data.get("deleted_count", 0) > 0:
+        await log_delete(
+            db=db,
+            user=current_user,
+            resource_type="PRODUCT_ASSIGNMENT",
+            resource_id=0,
+            resource_name="全部产品分配清理",
+            request=request,
+            details={
+                "deleted_count": response_data["deleted_count"],
+                "scope": "all_products",
+            },
+        )
+        await commit_audit_log(db)
+
     return ResponseBaseSchema.success(
         data=response_data,
         message=response_data["message"]
@@ -227,7 +258,19 @@ async def update_assignment_dates(
     assignment_dict = await assignment_service.update_assignment_dates(
         assignment_id, update_data, current_user
     )
-    
+
+    if update_data:
+        await log_update(
+            db=db,
+            user=current_user,
+            resource_type="PRODUCT_ASSIGNMENT",
+            resource_id=assignment_id,
+            resource_name=f"产品分配-{assignment_id}",
+            request=request,
+            details={"updated_fields": list(update_data.keys())},
+        )
+        await commit_audit_log(db)
+
     return ResponseBaseSchema.success(
         data=ProductAssignmentResponse(**assignment_dict),
         message="日期更新成功，时间连贯性验证通过"
@@ -270,7 +313,21 @@ async def batch_update_assignment_dates(
     
     # 调用服务层批量更新分配记录日期（服务层会处理验证、回滚等）
     result = await assignment_service.batch_update_assignment_dates(updates, current_user)
-    
+
+    await log_update(
+        db=db,
+        user=current_user,
+        resource_type="PRODUCT_ASSIGNMENT",
+        resource_id=result.get("product_id", 0),
+        resource_name=f"产品分配批量更新",
+        request=request,
+        details={
+            "updated_count": result.get("updated_count"),
+            "product_id": result.get("product_id"),
+        },
+    )
+    await commit_audit_log(db)
+
     return ResponseBaseSchema.success(
         data=result,
         message=f"批量更新成功，共更新 {result['updated_count']} 条记录"

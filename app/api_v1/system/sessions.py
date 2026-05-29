@@ -19,7 +19,7 @@ from app.core.constants import MAX_PAGE_SIZE
 from app.core.utils import get_app_now_naive
 from app.core.dependencies import get_session_service
 from app.services.session_service import SessionService
-from app.core.audit_log import log_user_action
+from app.core.audit_log import log_user_action, commit_audit_log
 from jose import jwt
 from sqlalchemy.orm import selectinload
 from app.models.models import User, UserRole
@@ -130,6 +130,7 @@ async def revoke_my_session(
             request=request,
             success=True
         )
+        await commit_audit_log(db)
     except Exception as e:
         logger.warning(f"记录审计日志失败: {e}")
     
@@ -188,6 +189,7 @@ async def revoke_all_my_sessions(
             request=request,
             success=True
         )
+        await commit_audit_log(db)
     except Exception as e:
         logger.warning(f"记录审计日志失败: {e}")
     
@@ -259,6 +261,7 @@ async def revoke_user_session(
             request=request,
             success=True
         )
+        await commit_audit_log(db)
     except Exception as e:
         logger.warning(f"记录审计日志失败: {e}")
     
@@ -296,9 +299,10 @@ async def revoke_all_user_sessions(
             request=request,
             success=True
         )
+        await commit_audit_log(db)
     except Exception as e:
         logger.warning(f"记录审计日志失败: {e}")
-    
+
     return ResponseBaseSchema.success(
         data={"message": f"已撤销用户 {username} 的 {revoked_count} 个会话", "revoked_count": revoked_count},
         message=f"已撤销 {revoked_count} 个会话"

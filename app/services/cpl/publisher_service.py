@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
-from app.core.audit_log import log_user_action
+from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.validation import validate_postback_url_placeholders
@@ -178,7 +178,7 @@ class PublisherService(BaseService[Publisher]):
             resource_name=publisher.publisher_name,
             success=True
         )
-        await self.db.commit()
+        await commit_audit_log(self.db)
 
         logger.info(f"渠道已创建: {publisher.publisher_name} (ID: {publisher.id})")
         return publisher
@@ -250,7 +250,7 @@ class PublisherService(BaseService[Publisher]):
             resource_name=publisher.publisher_name,
             success=True
         )
-        await self.db.commit()
+        await commit_audit_log(self.db)
 
         logger.info(f"渠道已更新: {publisher.publisher_name} (ID: {publisher.id})")
         return publisher

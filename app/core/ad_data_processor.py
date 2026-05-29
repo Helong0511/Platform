@@ -719,27 +719,6 @@ async def process_api_ad_data(
                             f"变化字段: {', '.join(update_fields)}"
                         )
 
-                        try:
-                            await log_user_action(
-                                db=db,
-                                action_type="UPDATE",
-                                username="SYSTEM",
-                                resource_type="AD_DATA",
-                                resource_id=existing_data.id,
-                                resource_name=f"{product_name} - {date_str}",
-                                ip_address=source,
-                                success=True,
-                                details={
-                                    "date": date_str,
-                                    "product_id": product_id,
-                                    "product_name": product_name,
-                                    "country_code": country_code,
-                                    "update_fields": update_fields,
-                                    "source": f"{source}自动更新"
-                                }
-                            )
-                        except Exception as log_error:
-                            logger.warning(f"记录广告数据更新操作日志失败: {log_error}")
                     else:
                         skipped_count += 1
                         logger.info(f"数据完全相同，跳过: 日期={date_str}, 产品={product_name}, 国家={country_code}")
@@ -780,34 +759,6 @@ async def process_api_ad_data(
                         f"收益={total_revenue:.2f}->{revenue_after_deduct:.2f}"
                     )
 
-                    try:
-                        await log_user_action(
-                            db=db,
-                            action_type="CREATE",
-                            username="SYSTEM",
-                            resource_type="AD_DATA",
-                            resource_id=new_ad_data.id,
-                            resource_name=f"{product_name} - {date_str}",
-                            ip_address=source,
-                            success=True,
-                            details={
-                                "date": date_str,
-                                "product_id": product_id,
-                                "product_name": product_name,
-                                "country_code": country_code,
-                                "request_count": grouped_data["request_count"],
-                                "match_count": grouped_data["match_count"],
-                                "display_count": grouped_data["display_count"],
-                                "click_count": grouped_data["click_count"],
-                                "ecpm_before_deduct": round(final_ecpm, 2),
-                                "ecpm_after_deduct": round(ecpm_after_deduct, 2),
-                                "revenue_before_deduct": round(total_revenue, 2),
-                                "revenue_after_deduct": round(revenue_after_deduct, 2),
-                                "source": f"{source}自动导入"
-                            }
-                        )
-                    except Exception as log_error:
-                        logger.warning(f"记录广告数据创建操作日志失败: {log_error}")
 
             except Exception as e:
                 error_msg = str(e)
@@ -1040,27 +991,6 @@ async def process_api_ad_data(
                             f"更新广告数据（无法识别国家代码，已累加）: 日期={date_str}, 产品={product_name}, 国家=AA, 变化字段: {', '.join(update_fields)}"
                         )
 
-                        try:
-                            await log_user_action(
-                                db=db,
-                                action_type="UPDATE",
-                                username="SYSTEM",
-                                resource_type="AD_DATA",
-                                resource_id=existing_data.id,
-                                resource_name=f"{product_name} - {date_str}",
-                                ip_address=source,
-                                success=True,
-                                details={
-                                    "date": date_str,
-                                    "product_id": product_id,
-                                    "product_name": product_name,
-                                    "country_code": country_code,
-                                    "update_fields": update_fields,
-                                    "source": f"{source}自动更新（无法识别国家代码，已累加）"
-                                }
-                            )
-                        except Exception as log_error:
-                            logger.warning(f"记录广告数据更新操作日志失败: {log_error}")
                     else:
                         skipped_count += 1
                         logger.info(f"数据完全相同，跳过: 日期={date_str}, 产品={product_name}, 国家=AA")
@@ -1101,35 +1031,6 @@ async def process_api_ad_data(
                         f"收益={total_revenue:.2f}->{revenue_after_deduct:.2f}"
                     )
 
-                    try:
-                        await log_user_action(
-                            db=db,
-                            action_type="CREATE",
-                            username="SYSTEM",
-                            resource_type="AD_DATA",
-                            resource_id=new_ad_data.id,
-                            resource_name=f"{product_name} - {date_str}",
-                            ip_address=source,
-                            success=True,
-                            details={
-                                "date": date_str,
-                                "product_id": product_id,
-                                "product_name": product_name,
-                                "country_code": country_code,
-                                "request_count": grouped_data["request_count"],
-                                "match_count": grouped_data["match_count"],
-                                "display_count": grouped_data["display_count"],
-                                "click_count": grouped_data["click_count"],
-                                "ecpm_before_deduct": round(final_ecpm, 2),
-                                "ecpm_after_deduct": round(ecpm_after_deduct, 2),
-                                "revenue_before_deduct": round(total_revenue, 2),
-                                "revenue_after_deduct": round(revenue_after_deduct, 2),
-                                "source": f"{source}自动导入（无法识别国家代码，已累加）"
-                            }
-                        )
-                    except Exception as log_error:
-                        logger.warning(f"记录广告数据创建操作日志失败: {log_error}")
-
             except Exception as e:
                 error_msg = str(e)
                 if "IntegrityError" in str(type(e)) or "Duplicate entry" in error_msg or "uq_ad_data" in error_msg:
@@ -1142,7 +1043,27 @@ async def process_api_ad_data(
                     logger.error(f"处理无法识别国家代码的数据时出错: {error_msg}", exc_info=True)
                 error_count += 1
 
-    # 返回处理结果统计
+    if inserted_count > 0 or updated_count > 0:
+        try:
+            await log_user_action(
+                db=db,
+                action_type="IMPORT",
+                username="SYSTEM",
+                resource_type="AD_DATA",
+                resource_name=source,
+                ip_address=source,
+                success=True,
+                details={
+                    "inserted_count": inserted_count,
+                    "updated_count": updated_count,
+                    "skipped_count": skipped_count,
+                    "error_count": error_count,
+                    "source": f"{source}自动导入",
+                },
+            )
+        except Exception as log_error:
+            logger.warning(f"记录广告数据导入汇总审计失败: {log_error}")
+
     return {
         "inserted_count": inserted_count,
         "updated_count": updated_count,

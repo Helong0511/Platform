@@ -23,7 +23,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
-from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
+from app.core.audit_log import (
+    log_create, log_update, log_delete, log_activate, log_deactivate,
+    log_user_action, commit_audit_log,
+)
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.database import get_db
 from app.core.dependencies import get_client_service
@@ -364,7 +367,7 @@ async def update_client(
 
     logger.info(f"Client {client.company_name} updated by {current_user.username}")
 
-    # 如果 is_active 改变，记录激活/禁用日志
+    wrote_audit = False
     if is_active_changed:
         if client.is_active:
             await log_activate(
@@ -384,10 +387,9 @@ async def update_client(
                 resource_name=client.company_name,
                 request=request
             )
+        wrote_audit = True
 
-    # 记录更新操作（排除 is_active，因为已经单独记录）
     update_data = client_in.model_dump(exclude_unset=True)
-    # 如果只更新了 is_active，不记录 UPDATE 日志（避免重复）
     if len(update_data) > 1 or "is_active" not in update_data:
         await log_update(
             db=db,
@@ -398,6 +400,10 @@ async def update_client(
             request=request,
             details=update_data
         )
+        wrote_audit = True
+
+    if wrote_audit:
+        await commit_audit_log(db)
 
     return ResponseBaseSchema.success(data=ClientResponse.model_validate(client))
 
@@ -511,10 +517,10 @@ async def update_client_switches(
             request=request,
             details=update_details
         )
+        await commit_audit_log(db)
     except HTTPException:
         raise
     except Exception as log_error:
-        # 日志记录失败不应该影响API响应，只记录警告
         logger.warning(f"记录更新日志失败: {str(log_error)}")
 
     # 确保返回的数据包含最新的开关状态
@@ -534,6 +540,7 @@ async def update_client_switches(
 
 @router.get("/export", response_class=StreamingResponse, summary="导出客户数据")
 async def export_clients_excel(
+        request: Request,
         company_name: str | None = Query(None, description="公司名称过滤"),
         is_active: bool | None = Query(None, description="是否激活过滤"),
         db: AsyncSession = Depends(get_db),
@@ -631,6 +638,16 @@ async def export_clients_excel(
     encoded_filename = quote(filename.encode('utf-8'))
 
     logger.info(f"Client data exported by {current_user.username}, total: {len(data)} clients")
+
+    await log_user_action(
+        db=db,
+        action_type="EXPORT",
+        user=current_user,
+        resource_type="CLIENT",
+        request=request,
+        details={"row_count": len(data), "company_name": company_name, "is_active": is_active},
+    )
+    await commit_audit_log(db)
 
     return StreamingResponse(
         output,

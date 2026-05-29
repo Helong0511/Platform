@@ -5,12 +5,13 @@ import logging
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, Query, Path, HTTPException
+from fastapi import APIRouter, Depends, Query, Path, HTTPException, Request
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 
+from app.core.audit_log import log_create, commit_audit_log
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.database import get_db
 from app.core.errors import ErrorCode
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
              summary="创建下游测试记录并发送Postback",
              dependencies=[Depends(require_admin)])
 async def create_affiliate_test(
+        request: Request,
         test_in: AffiliateTestCreate,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
@@ -135,6 +137,20 @@ async def create_affiliate_test(
         test_data.publisher_name = test.publisher.publisher_name if test.publisher else None
 
         logger.info(f"下游测试记录创建成功: test_id={test.id}, status={status}")
+        await log_create(
+            db=db,
+            user=current_user,
+            resource_type="AFFILIATE_TEST",
+            resource_id=test.id,
+            resource_name=f"下游测试-{test.id}",
+            request=request,
+            details={
+                "publisher_id": test_in.publisher_id,
+                "offer_id": test_in.offer_id,
+                "status": status,
+            },
+        )
+        await commit_audit_log(db)
         return ResponseBaseSchema.success(data=test_data)
     except HTTPException:
         raise

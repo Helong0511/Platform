@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.api_auth import verify_client_request
-from app.core.audit_log import log_user_action
+from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.telegram import send_telegram_message_async
 from app.core.database import get_db
 from app.core.errors import ErrorCode
@@ -166,6 +166,7 @@ async def get_client_products(
                     "api_endpoint": "/client_products"
                 }
             )
+            await commit_audit_log(db)
         except Exception as log_error:
             # 日志记录失败不应该影响API响应
             logger.warning(f"记录客户API访问日志失败: {log_error}")
@@ -527,6 +528,7 @@ async def get_client_data(
                     "api_endpoint": "/client_data"
                 }
             )
+            await commit_audit_log(db)
         except Exception as log_error:
             # 日志记录失败不应该影响API响应
             logger.warning(f"记录客户API访问日志失败: {log_error}")
