@@ -1191,48 +1191,214 @@ NORTH_AMERICA = {
     }
 }
 
+import random
+
+ALL_COUNTRIES = {**AFRICA, **ASIA, **EUROPE, **NORTH_AMERICA}
+
+REGIONS = {
+    "africa": AFRICA,
+    "asia": ASIA,
+    "europe": EUROPE,
+    "north_america": NORTH_AMERICA,
+}
+
+# 常用投放/测试国家，可按业务自行增删
+COMMON_COUNTRIES = [
+    "United States", "China", "India", "Japan", "Indonesia", "Philippines",
+    "Vietnam", "Thailand", "Malaysia", "South Korea", "United Kingdom",
+    "Germany", "France", "Italy", "Spain", "Netherlands", "Poland",
+    "Turkey", "Saudi Arabia", "United Arab Emirates",     "Mexico", "Canada",
+    "Nigeria", "South Africa", "Egypt", "Kenya", "Pakistan", "Bangladesh",
+]
 
 
+def _random_digits(count: int, first_nonzero: bool = True) -> str:
+    if count <= 0:
+        return ""
+    parts = []
+    for i in range(count):
+        if i == 0 and first_nonzero:
+            parts.append(str(random.randint(1, 9)))
+        else:
+            parts.append(str(random.randint(0, 9)))
+    return "".join(parts)
 
 
+def get_country_name(name_or_code: str) -> str:
+    """英文名 / alpha2(CN) / alpha3(CHN) -> 标准国家名。"""
+    if name_or_code in ALL_COUNTRIES:
+        return name_or_code
+    key = name_or_code.strip().upper()
+    for name, cfg in ALL_COUNTRIES.items():
+        if cfg["alpha2"] == key or cfg["alpha3"] == key:
+            return name
+    raise KeyError(f"未知国家: {name_or_code}")
 
 
+def find_countries(keyword: str) -> list[str]:
+    """按关键字模糊搜索国家（英文名、区号、alpha2/alpha3）。"""
+    q = keyword.strip().lower()
+    if not q:
+        return []
+    found = []
+    for name, cfg in ALL_COUNTRIES.items():
+        hay = " ".join([
+            name.lower(),
+            cfg["code"].lower(),
+            cfg["alpha2"].lower(),
+            cfg["alpha3"].lower(),
+        ])
+        if q in hay:
+            found.append(name)
+    return sorted(found)
 
 
+def build_country_pool(
+    *,
+    countries: list[str] | None = None,
+    region: str | None = None,
+    pool: str | None = None,
+) -> list[str]:
+    """
+    构建本次生成可用的国家列表（三选一，优先级：countries > region > pool）。
+
+    pool:
+      - "common": 仅常用国家（COMMON_COUNTRIES）
+      - "all" 或 None: 全部 170 国
+    """
+    if countries is not None:
+        resolved = []
+        for c in countries:
+            name = get_country_name(c)
+            if name not in resolved:
+                resolved.append(name)
+        if not resolved:
+            raise ValueError("countries 为空或均无法识别")
+        return resolved
+
+    if region is not None:
+        return list_countries(region)
+
+    if pool in (None, "all"):
+        return list(ALL_COUNTRIES.keys())
+    if pool == "common":
+        return [c for c in COMMON_COUNTRIES if c in ALL_COUNTRIES]
+    raise ValueError(f"未知 pool: {pool}，可选: common, all")
 
 
+def _pick_country(
+    country_name: str | None,
+    *,
+    countries: list[str] | None = None,
+    region: str | None = None,
+    pool: str | None = None,
+) -> str:
+    if country_name is not None:
+        return get_country_name(country_name)
+    return random.choice(build_country_pool(countries=countries, region=region, pool=pool))
 
 
+def _parse_dial_code(code: str) -> tuple[str, str | None]:
+    """解析区号，如 '+1-242' -> ('+1', '242')，'+86' -> ('+86', None)。"""
+    if "-" not in code:
+        return code, None
+    main, area = code.split("-", 1)
+    return main, area
 
 
+def _generate_national(country_name: str) -> str:
+    """生成本国号码（不含国家码、不含 +）。"""
+    cfg = ALL_COUNTRIES[country_name]
+    prefix = random.choice(cfg["prefixes"])
+    length = random.randint(cfg["min_length"], cfg["max_length"])
+    remain = length - len(prefix)
+    if remain < 0:
+        raise ValueError(f"{country_name} 前缀 {prefix!r} 超过最大长度 {length}")
+    return prefix + _random_digits(remain)
 
 
+def generate_phone(
+    country_name: str | None = None,
+    *,
+    include_country_code: bool = True,
+    with_plus: bool = True,
+    countries: list[str] | None = None,
+    region: str | None = None,
+    pool: str | None = None,
+) -> str:
+    """
+    按各国规则随机生成电话号码。
+
+    国家太多时，用下面方式缩小范围（country_name 为 None 时生效，三选一）：
+      - country_name="China" 或 "CN"：指定一国
+      - countries=["US", "CN", "IN"]：只在列表里随机
+      - region="asia"：只在亚洲随机
+      - pool="common"：只在常用国家随机（推荐默认用法）
+
+    include_country_code / with_plus：见上文 E.164 说明。
+    """
+    country_name = _pick_country(
+        country_name, countries=countries, region=region, pool=pool
+    )
+
+    national = _generate_national(country_name)
+    if not include_country_code:
+        return national
+
+    cfg = ALL_COUNTRIES[country_name]
+    main_code, area_code = _parse_dial_code(cfg["code"])
+    prefix = next((p for p in cfg["prefixes"] if national.startswith(p)), "")
+    if area_code and prefix == area_code:
+        dial_digits = main_code.lstrip("+") + national
+    else:
+        dial_digits = cfg["code"].lstrip("+").replace("-", "") + national
+
+    return f"+{dial_digits}" if with_plus else dial_digits
 
 
+def generate_batch(
+    n: int = 10,
+    country_name: str | None = None,
+    *,
+    include_country_code: bool = True,
+    with_plus: bool = True,
+    countries: list[str] | None = None,
+    region: str | None = None,
+    pool: str | None = None,
+) -> list[str]:
+    """批量生成 n 个号码；未指定 country_name 时，每条可在池内随机不同国家。"""
+    return [
+        generate_phone(
+            country_name,
+            include_country_code=include_country_code,
+            with_plus=with_plus,
+            countries=countries,
+            region=region,
+            pool=pool,
+        )
+        for _ in range(n)
+    ]
 
 
+def list_countries(region: str | None = None) -> list[str]:
+    """列出国家名。region 可选: africa / asia / europe / north_america"""
+    if region is None:
+        return sorted(ALL_COUNTRIES.keys())
+    key = region.lower().replace("-", "_")
+    if key not in REGIONS:
+        raise ValueError(f"未知区域: {region}，可选: {', '.join(REGIONS)}")
+    return sorted(REGIONS[key].keys())
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+if __name__ == "__main__":
+    print("指定国家 CN:", generate_phone("CN"))
+    print("常用池随机:", generate_phone(pool="common"))
+    print("仅亚洲:", generate_phone(region="asia"))
+    print("自定义列表:", generate_phone(countries=["US", "MX", "CA"]))
+    print("搜索 united:", find_countries("united"))
+    print("常用池数量:", len(build_country_pool(pool="common")))
+    print("批量(常用池):", generate_batch(3, pool="common"))
+    print(f"全部共 {len(ALL_COUNTRIES)} 个国家/地区")
 
 
 
