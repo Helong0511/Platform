@@ -565,6 +565,8 @@ async def get_client_data(
             message=f"成功获取 {len(data_list)} 条广告数据"
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e

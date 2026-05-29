@@ -256,6 +256,8 @@ async def create_client(
         )
 
         return ResponseBaseSchema.success(data=ClientResponse.model_validate(client))
+    except HTTPException:
+        raise
 
     except Exception as e:
         # 注意：不需要手动回滚事务，get_db 依赖会自动处理
@@ -482,6 +484,8 @@ async def update_client_switches(
             client.api_enabled = False
         if client.password_change_enabled is None:
             client.password_change_enabled = False
+    except HTTPException:
+        raise
 
     except Exception as e:
         # 注意：不需要手动回滚事务，get_db 依赖会自动处理
@@ -507,6 +511,8 @@ async def update_client_switches(
             request=request,
             details=update_details
         )
+    except HTTPException:
+        raise
     except Exception as log_error:
         # 日志记录失败不应该影响API响应，只记录警告
         logger.warning(f"记录更新日志失败: {str(log_error)}")

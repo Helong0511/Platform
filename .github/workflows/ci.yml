@@ -18,6 +18,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Compile Python
         run: python -m compileall app -q
+      - name: Codebase audit
+        run: python tests/audit_codebase.py
       - name: Run unit tests
         env:
           UNIT_TEST: "1"

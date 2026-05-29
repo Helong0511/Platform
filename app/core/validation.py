@@ -535,112 +535,34 @@ def validate_and_sanitize(text: str, field_name: str, max_length: int | None = N
     return True, None, sanitized
 
 
-# ====== Postback URL 占位符验证 ======
-# CPL 系统支持的占位符变量列表（基于 app/core/postback/forwarder.py）
-# 这些变量在 Postback URL 替换时会被实际值替换
-SUPPORTED_PLACEHOLDERS = {
-    # PostbackConversion 直接字段
-    'conversion_id', 'platform', 'event_name', 'event_value', 'payout',
-    'devad_id', 'os', 'carrier', 'ip', 'gid', 'product_id', 'client_id',
-    'click_id', 'click_time', 'conversion_status', 'timestamp', 'created_at',
-    # Click 关联字段
-    'click_offer_id', 'click_publisher_id', 'click_advertiser_id', 'click_ip',
-    'click_device', 'click_country', 'click_user_agent', 'click_referer',
-    # Offer 关联字段
-    'offer_id', 'offer_name', 'advertiser_offer_id', 'offer_advertiser_id',
-    'offer_payout', 'affiliate_payout', 'offer_country', 'offer_category',
-    'offer_type', 'offer_status',
-    # Publisher 关联字段
-    'publisher_id', 'channel_id', 'publisher_name', 'publisher_email',
-    # Advertiser 关联字段
-    'advertiser_id', 'advertiser_name', 'advertiser_email',
-    # 支持的别名（转换为标准格式后验证）
-    'clickid', 'clickId', 'clk_id', 'cid',
-    'conversionId', 'conv_id',
-    'publisherId', 'channelId', 'offerId',
-    'eventName', 'eventId', 'event_id',
-}
-
-# 别名映射（用于规范化占位符名称）
-PLACEHOLDER_ALIAS_MAP = {
-    'clickid': 'click_id',
-    'clickId': 'click_id',
-    'clk_id': 'click_id',
-    'cid': 'click_id',
-    'conversionId': 'conversion_id',
-    'conv_id': 'conversion_id',
-    'publisherId': 'publisher_id',
-    'channelId': 'channel_id',
-    'offerId': 'offer_id',
-    'eventName': 'event_name',
-    'eventId': 'event_name',
-    'event_id': 'event_name',
-}
-
-
-def normalize_placeholder(placeholder: str) -> str:
-    """
-    规范化占位符名称（处理别名和大小写）
-    
-    参数:
-        placeholder: 占位符名称（不含花括号）
-    
-    返回:
-        规范化后的占位符名称
-    """
-    # 转换为小写
-    normalized = placeholder.lower()
-    
-    # 检查别名映射
-    if normalized in PLACEHOLDER_ALIAS_MAP:
-        return PLACEHOLDER_ALIAS_MAP[normalized]
-    
-    # 将驼峰命名转换为下划线命名
-    # 例如：clickId -> click_id
-    normalized = re.sub(r'(?<!^)(?=[A-Z])', '_', placeholder).lower()
-    
-    return normalized
+# ====== Postback URL 占位符验证（委托统一模块，与 tracklink 规则对齐）======
+from app.core.url.postback_placeholder_validation import (  # noqa: E402
+    canonical_postback_field,
+    validate_postback_placeholders,
+)
+from app.core.url.placeholder_validation import format_placeholder_validation_error
 
 
 def validate_postback_url_placeholders(postback_url: str | None) -> tuple[bool, str | None]:
     """
-    验证 Postback URL 中的占位符是否都在 CPL 系统支持的变量列表中
-    
-    参数:
-        postback_url: Postback URL 字符串（可以为 None）
-    
+    验证 Postback URL 中的占位符是否可解析（与 ``resolve_brace_placeholders`` 一致）。
+
     返回:
         (是否有效, 错误信息)
-        如果 URL 为空或 None，返回 (True, None)
-        如果所有占位符都有效，返回 (True, None)
-        如果有无效占位符，返回 (False, 错误信息)
     """
-    # 如果 URL 为空，直接返回有效
-    if not postback_url or not postback_url.strip():
+    result = validate_postback_placeholders(postback_url)
+    if result.ok:
         return True, None
-    
-    # 使用正则表达式查找所有占位符 {变量名}
-    pattern = r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}'
-    placeholders = re.findall(pattern, postback_url)
-    
-    # 如果没有占位符，直接返回有效
-    if not placeholders:
-        return True, None
-    
-    # 检查每个占位符是否在支持的列表中
-    invalid_placeholders = []
-    for placeholder in placeholders:
-        # 规范化占位符名称
-        normalized = normalize_placeholder(placeholder)
-        
-        # 检查规范化后的名称是否在支持的列表中
-        # 同时也要检查原始占位符（支持别名）
-        if normalized not in SUPPORTED_PLACEHOLDERS and placeholder not in SUPPORTED_PLACEHOLDERS:
-            invalid_placeholders.append(placeholder)
-    
-    # 如果有无效占位符，返回错误信息
-    if invalid_placeholders:
-        invalid_list = ', '.join([f'{{{p}}}' for p in invalid_placeholders])
-        return False, f"Postback URL 中包含不支持的占位符: {invalid_list}。请使用 CPL 系统支持的变量。"
-    
-    return True, None
+    return False, format_placeholder_validation_error(result)
+
+
+# 向后兼容：旧代码若引用 SUPPORTED_PLACEHOLDERS / normalize_placeholder
+SUPPORTED_PLACEHOLDERS = frozenset(
+    {canonical_postback_field(n) for n in (
+        "click_id", "conversion_id", "payout", "event_name", "event_value",
+        "offer_id", "publisher_id", "channel_id", "advertiser_id", "ip",
+        "os", "country", "gaid", "idfa", "user_agent", "referer", "accept_language",
+        "device_type", "short_link_id",
+    )}
+)
+normalize_placeholder = canonical_postback_field

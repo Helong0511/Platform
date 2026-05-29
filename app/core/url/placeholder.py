@@ -21,14 +21,24 @@ PLACEHOLDER_BRACE_MAP: Dict[str, str] = {
     "{conversion_id}": "conversion_id",
     "{payout}": "payout",
     "{event_name}": "event_name",
+    "{event_value}": "event_value",
     "{offer_id}": "offer_id",
     "{publisher_id}": "publisher_id",
+    "{channel_id}": "publisher_id",
     "{advertiser_id}": "advertiser_id",
     "{ip}": "ip",
     "{country}": "country",
     "{os}": "os",
     "{device}": "device",
+    "{device_type}": "device_type",
     "{short_link_id}": "short_link_id",
+    "{gaid}": "gaid",
+    "{GAID}": "gaid",
+    "{idfa}": "idfa",
+    "{IDFA}": "idfa",
+    "{user_agent}": "user_agent",
+    "{referer}": "referer",
+    "{accept_language}": "accept_language",
 }
 
 # 短链：占位符名（无花括号）-> 规范字段名
@@ -133,16 +143,50 @@ def _lookup_value(data: Dict[str, Any], field_name: str) -> Optional[Any]:
     return data.get(field_name)
 
 
+def _resolve_field_aliases(field_name: str) -> List[str]:
+    """查找顺序：规范名，Postback 常用别名。"""
+    names = [field_name]
+    if field_name == "offer_payout":
+        names.append("payout")
+    elif field_name == "payout":
+        names.append("offer_payout")
+    if field_name == "publisher_id":
+        names.append("channel_id")
+    elif field_name == "channel_id":
+        names.append("publisher_id")
+    return names
+
+
 def resolve_brace_placeholders(url: str, data: Dict[str, Any]) -> str:
     """
     替换 URL 中的 ``{field}`` / ``{{field}}`` 占位符（Postback 渠道 URL 等）。
     """
     resolved = url
     for placeholder, field_name in PLACEHOLDER_BRACE_MAP.items():
-        value = _lookup_value(data, field_name)
+        value = None
+        for candidate in _resolve_field_aliases(field_name):
+            value = _lookup_value(data, candidate)
+            if value is not None:
+                break
         if value is not None:
             inner = placeholder[1:-1]  # click_id from {click_id}
             resolved = replace_placeholder_literals(resolved, inner, str(value))
+
+    # 第二遍：按 URL 中实际占位符名解析（含 {CLIENT IP}、{payout} 等）
+    for raw_name in find_named_placeholders(resolved):
+        canonical = normalize_placeholder_name(raw_name)
+        if canonical in ("channel_id", "sub_affid", "subid", "sub_id"):
+            canonical = "publisher_id"
+        elif canonical == "offer_payout":
+            canonical = "payout"
+        value = None
+        for candidate in _resolve_field_aliases(canonical):
+            value = _lookup_value(data, candidate)
+            if value is not None:
+                break
+        if value is not None:
+            resolved = replace_placeholder_literals(resolved, raw_name, str(value))
+
     unresolved = extract_brace_placeholders(resolved)
     if unresolved:
         logger.warning("未解析的占位符：%s", unresolved)

@@ -120,7 +120,7 @@ async def refresh_token(
             user.id, expires_delta=access_token_expires
         )
         new_refresh_token = JWTUtils.create_refresh_token(
-            user.id, expires_delta=timedelta(days=7)
+            user.id, expires_delta=timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
         )
 
         # 获取客户相关信息（如果是客户角色）

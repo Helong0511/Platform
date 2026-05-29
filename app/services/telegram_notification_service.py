@@ -14,9 +14,10 @@ from sqlalchemy import and_, func, select
 from app.models.models import (
     PostbackConversion, Client, Product, Publisher, Offer, User, PostbackNotification, Click
 )
-from app.core.auto_bot import send_telegram_message, send_telegram_message_with_buttons
-from app.core.telegram.message_sender import send_telegram_message_async
-from app.core.telegram import send_telegram_message_async as send_telegram_message_async_from_telegram
+from app.core.telegram import (
+    send_telegram_message_async,
+    send_telegram_message_with_buttons,
+)
 from app.core.utils import get_app_now_naive
 from app.core.telegram_utils import (
     format_telegram_message,
@@ -687,7 +688,7 @@ class TelegramNotificationService:
 
             all_success = True
             for msg in messages:
-                success = await send_telegram_message_async_from_telegram(telegram_chat_id, msg)
+                success = await send_telegram_message_async(telegram_chat_id, msg)
                 if not success:
                     all_success = False
 

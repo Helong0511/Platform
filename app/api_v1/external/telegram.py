@@ -14,8 +14,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auto_bot import (
-    send_telegram_message, bot_initialized, get_bot_status_info, bot, TELEBOT_AVAILABLE
+from app.core.telegram import (
+    send_telegram_message,
+    bot_initialized,
+    get_bot_status_info,
+    bot,
+    TELEBOT_AVAILABLE,
 )
 from app.core.config import settings
 from app.core.database import get_db
@@ -370,6 +374,8 @@ async def diagnostic_bot(
             recommendations=recommendations
         ))
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"诊断 Telegram Bot 时发生错误: {e}", exc_info=True)
         raise_api_exception(
@@ -416,6 +422,8 @@ async def reset_webhook(
                 message="Webhook 已成功删除。请重启应用以使轮询正常工作，或等待轮询线程自动重新连接"
             ))
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"删除 Webhook 时发生错误: {e}", exc_info=True)
         raise_api_exception(

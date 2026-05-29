@@ -83,6 +83,37 @@ def test_ad_platform_macros_accepted():
     assert not r.errors
 
 
+def test_postback_payout_and_macros_accepted():
+    from app.core.validation import validate_postback_url_placeholders
+
+    ok, err = validate_postback_url_placeholders(
+        "https://pub.com/pb?payout={payout}&cid={clickId}"
+        "&gaid={GAID}&ip={CLIENT IP}"
+    )
+    assert ok, err
+
+
+def test_postback_unknown_placeholder_rejected():
+    from app.core.validation import validate_postback_url_placeholders
+
+    ok, err = validate_postback_url_placeholders(
+        "https://pub.com/pb?x={publisher_email}"
+    )
+    assert not ok
+    assert err and "publisher_email" in err
+
+
+def test_postback_resolve_second_pass_client_ip():
+    from app.core.url.placeholder import resolve_brace_placeholders
+
+    url = "https://pub.com/pb?ip={CLIENT IP}&p={payout}"
+    data = {"ip": "1.2.3.4", "payout": "9.99", "url_params": {}}
+    out = resolve_brace_placeholders(url, data)
+    assert "1.2.3.4" in out
+    assert "9.99" in out
+    assert "{" not in out or "{CLIENT" not in out
+
+
 def test_offer_response_skips_placeholder_validation():
     """读取 Offer 时不应因历史 tracklink 占位符阻断列表接口。"""
     from datetime import datetime, timezone

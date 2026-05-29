@@ -246,8 +246,9 @@ class JWTUtils:
         if expires_delta:
             expire = datetime.now(timezone.utc) + expires_delta
         else:
-            # 默认7天过期
-            expire = datetime.now(timezone.utc) + timedelta(days=7)
+            expire = datetime.now(timezone.utc) + timedelta(
+                days=settings.REFRESH_TOKEN_EXPIRE_DAYS
+            )
 
         # 构建JWT载荷
         jti = secrets.token_urlsafe(16)

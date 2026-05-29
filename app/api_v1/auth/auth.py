@@ -249,9 +249,8 @@ async def login(
         user.id, expires_delta=access_token_expires
     )
 
-    # 生成刷新令牌（7天过期）
     refresh_token = JWTUtils.create_refresh_token(
-        user.id, expires_delta=timedelta(days=7)
+        user.id, expires_delta=timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     )
 
     # ====== 记录会话信息 ======
@@ -279,6 +278,8 @@ async def login(
             options={"verify_exp": False}  # 不验证过期时间，只获取jti
         )
         token_jti = payload.get("jti")
+    except HTTPException:
+        raise
     except Exception as e:
         # 会话记录失败不应该影响登录
         logger.warning(f"记录会话信息失败: {e}")
@@ -342,6 +343,8 @@ async def login(
 
     try:
         await log_login(db=db, user=user, request=request, success=True)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning(f"记录登录日志失败: {e}")
 
@@ -373,6 +376,8 @@ async def logout(
         logger.info(f"User {current_user.username} logged out successfully")
 
         return ResponseBaseSchema.success(data={"message": "退出登录成功"})
+    except HTTPException:
+        raise
     except Exception as e:
         # 日志记录失败不应该影响退出登录
         logger.warning(f"记录退出登录日志失败: {e}")

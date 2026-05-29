@@ -169,7 +169,9 @@ class Settings(BaseSettings):
     # 可以通过环境变量 ACCESS_TOKEN_EXPIRE_MINUTES 设置
     # 默认值：20分钟（开发环境），生产环境建议设置为 60-120 分钟
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "240"))
-    
+    # 刷新令牌过期时间（天），环境变量 REFRESH_TOKEN_EXPIRE_DAYS
+    REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+
     # JWT算法配置
     # RS256（推荐，非对称加密）或 HS256（对称加密）
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "RS256")

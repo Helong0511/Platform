@@ -110,6 +110,8 @@ async def get_audit_logs(
             page_size=page_size,
             message="获取日志列表成功"
         )
+    except HTTPException:
+        raise
 
     except Exception as e:
         logger.error(f"获取用户操作日志列表失败: {e}", exc_info=True)
@@ -157,6 +159,8 @@ async def get_audit_log_stats(
             data=stats,
             message="获取统计信息成功"
         )
+    except HTTPException:
+        raise
 
     except Exception as e:
         logger.error(f"获取日志统计信息失败: {e}", exc_info=True)
@@ -278,6 +282,8 @@ async def log_client_error(
             data={"message": "错误日志已记录"},
             message="错误日志已记录"
         )
+    except HTTPException:
+        raise
 
     except Exception as e:
         # 记录错误日志失败不应该影响前端，静默处理

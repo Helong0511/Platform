@@ -160,6 +160,8 @@ async def get_scheduled_tasks(
             page_size=page_size
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取定时任务列表失败: {e}", exc_info=True)
         raise_api_exception(
@@ -419,6 +421,8 @@ async def reload_all_scheduled_tasks(
 
         return ResponseBaseSchema.success(data=result)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"重新加载所有定时任务失败: {e}", exc_info=True)
         raise_api_exception(

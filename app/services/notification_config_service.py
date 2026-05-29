@@ -711,6 +711,8 @@ class NotificationConfigService:
                 "forward_log_id": forward_log_id,
                 "conversion_id": forward_log.conversion_id
             }
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(
                 f"基于转发日志补发通知失败: forward_log_id={forward_log_id}, error={str(e)}",

@@ -1044,6 +1044,8 @@ async def save_user_mapping(
                 f"新增={new_mappings_count}, 更新={updated_mappings_count}, "
                 f"字段={list(set(mapping.values()))}"
             )
+        except HTTPException:
+            raise
         except Exception as e:
             # 清理临时文件
             temp_file = MAPPING_RULES_FILE + ".tmp"
@@ -1155,6 +1157,8 @@ async def get_mapping_status(
 
         return ResponseBaseSchema.success(data=status_info)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取映射规则状态失败: {str(e)}")
         raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"获取映射规则状态失败: {str(e)}")

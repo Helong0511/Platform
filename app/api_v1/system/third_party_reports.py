@@ -153,6 +153,8 @@ async def get_third_party_reports(
             page_size=page_size,
             message="获取第三方上报日志列表成功"
         )
+    except HTTPException:
+        raise
 
     except Exception as e:
         logger.error(f"获取第三方上报日志列表失败: {e}", exc_info=True)
@@ -241,6 +243,8 @@ async def get_third_party_report_stats(
             data=stats,
             message="获取统计信息成功"
         )
+    except HTTPException:
+        raise
 
     except Exception as e:
         logger.error(f"获取第三方上报统计信息失败: {e}", exc_info=True)

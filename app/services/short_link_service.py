@@ -13,6 +13,7 @@ from sqlalchemy import exc
 
 from app.models.models import ShortLink, User, UserRole, Offer, Publisher
 from app.services.base_service import BaseService
+from fastapi import HTTPException
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.short_link.generator import (
@@ -346,6 +347,8 @@ class ShortLinkService(BaseService[ShortLink]):
                 ErrorCode.INTERNAL_ERROR,
                 detail="创建短链接时发生数据库错误，请稍后重试"
             )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"创建短链接失败: {str(e)}", exc_info=True)
             # 抛出标准化的服务器错误异常

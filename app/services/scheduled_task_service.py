@@ -14,6 +14,7 @@ from sqlalchemy.future import select
 
 from app.core.constants import MAX_TASK_NAME_LENGTH, QUERY_TIMEOUT
 from app.core.errors import ErrorCode
+from fastapi import HTTPException
 from app.core.exceptions import raise_api_exception
 from app.core.fulltext_search import search_with_fulltext
 from app.core.utils import get_app_now_naive
@@ -368,6 +369,8 @@ class ScheduledTaskService:
                     ErrorCode.INVALID_PARAMETER,
                     detail=f"任务 '{task_name}' 重新注册失败（参数错误）: {str(e)}"
                 )
+            except HTTPException:
+                raise
             except Exception as e:
                 logger.error(f"任务 '{task_name}' 重新注册失败: {e}", exc_info=True)
                 raise_api_exception(

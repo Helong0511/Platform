@@ -400,6 +400,8 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
 
             return assignment_dict
 
+        except HTTPException:
+            raise
         except Exception as e:
             # 回滚更改
             try:
@@ -542,6 +544,8 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
                 "message": f"成功批量更新 {len(updates)} 条记录，时间连贯性验证通过"
             }
 
+        except HTTPException:
+            raise
         except Exception as e:
             # 回滚所有更改
             try:
