@@ -43,6 +43,7 @@ async def log_user_action(
         resource_name: Optional[str] = None,
         request: Optional[Request] = None,
         ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
         status_code: Optional[int] = None,
         success: bool = True,
         error_message: Optional[str] = None,
@@ -63,6 +64,7 @@ async def log_user_action(
         resource_name: 资源名称
         request: FastAPI请求对象（如果提供，会自动获取IP、路径等信息）
         ip_address: IP地址（如果未提供request对象）
+        user_agent: 用户代理（如果未提供request对象，或需覆盖request中的值）
         status_code: HTTP状态码
         success: 操作是否成功
         error_message: 错误信息
@@ -102,11 +104,12 @@ async def log_user_action(
         # 确定请求信息
         final_request_method = None
         final_request_path = None
-        final_user_agent = None
+        final_user_agent = user_agent[:500] if user_agent else None
         if request:
             final_request_method = request.method
             final_request_path = request.url.path
-            final_user_agent = request.headers.get("user-agent", "")[:500]  # 限制长度
+            if not final_user_agent:
+                final_user_agent = request.headers.get("user-agent", "")[:500]  # 限制长度
 
         # 处理请求参数（移除敏感信息）
         final_request_params = None
