@@ -152,6 +152,7 @@ class AdvertiserService(BaseService[Advertiser]):
             resource_name=advertiser.advertiser_name,
             success=True
         )
+        await self.db.commit()
 
         logger.info(f"广告主已创建: {advertiser.advertiser_name} (ID: {advertiser.id})")
         return advertiser
@@ -208,6 +209,7 @@ class AdvertiserService(BaseService[Advertiser]):
             resource_name=advertiser.advertiser_name,
             success=True
         )
+        await self.db.commit()
 
         logger.info(f"广告主已更新: {advertiser.advertiser_name} (ID: {advertiser.id})")
         return advertiser

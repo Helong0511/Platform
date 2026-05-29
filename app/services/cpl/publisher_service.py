@@ -178,6 +178,7 @@ class PublisherService(BaseService[Publisher]):
             resource_name=publisher.publisher_name,
             success=True
         )
+        await self.db.commit()
 
         logger.info(f"渠道已创建: {publisher.publisher_name} (ID: {publisher.id})")
         return publisher
@@ -249,6 +250,7 @@ class PublisherService(BaseService[Publisher]):
             resource_name=publisher.publisher_name,
             success=True
         )
+        await self.db.commit()
 
         logger.info(f"渠道已更新: {publisher.publisher_name} (ID: {publisher.id})")
         return publisher

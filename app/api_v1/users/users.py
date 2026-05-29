@@ -609,15 +609,38 @@ async def update_user(
     
     # 获取更新数据（排除未设置的字段）
     update_data = user_in.model_dump(exclude_unset=True)
-    
-    # 调用服务层更新用户（服务层会处理所有验证、权限检查和审计日志）
+
+    # 更新前记录 is_active 旧值，用于激活/禁用审计
+    user_before = await user_service.get_user_by_id(user_id, current_user, include_client=False)
+    old_is_active = user_before.is_active
+
+    # 调用服务层更新用户（服务层会处理所有验证和权限检查）
     user = await user_service.update_user(user_id, update_data, current_user)
-    
-    # 记录更新操作（使用audit_log的log_update函数）
-    # 移除敏感信息
+
+    # 记录更新操作
     if "password" in update_data:
         update_data["password"] = "***"
-    # 如果只更新了 is_active，不记录 UPDATE 日志（避免重复，因为服务层已记录激活/禁用日志）
+
+    if "is_active" in update_data and update_data["is_active"] != old_is_active:
+        if user.is_active:
+            await log_activate(
+                db=db,
+                user=current_user,
+                resource_type="USER",
+                resource_id=user.id,
+                resource_name=user.username,
+                request=request,
+            )
+        else:
+            await log_deactivate(
+                db=db,
+                user=current_user,
+                resource_type="USER",
+                resource_id=user.id,
+                resource_name=user.username,
+                request=request,
+            )
+
     if len(update_data) > 1 or "is_active" not in update_data:
         await log_update(
             db=db,

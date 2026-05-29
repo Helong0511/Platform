@@ -13,7 +13,7 @@ from app.models.models import User, Client, UserRole, Publisher
 from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
-from app.core.audit_log import log_user_action, log_activate, log_deactivate
+from app.core.audit_log import log_user_action
 from app.core.utils import get_app_now_naive
 from app.core.validation import validate_password_strength
 from app.core.permission_cache import invalidate_user_permission_cache
@@ -226,18 +226,6 @@ class UserService(BaseService[User]):
         except Exception as e:
             logger.warning(f"清除权限缓存失败: {e}")
 
-        # 记录审计日志
-        await log_user_action(
-            db=self.db,
-            action_type="CREATE",
-            user=current_user,
-            username=current_user.username,
-            resource_type="USER",
-            resource_id=user.id,
-            resource_name=user.username,
-            success=True
-        )
-
         logger.info(f"用户已创建: {user.username} (ID: {user.id})")
         return user
 
@@ -325,9 +313,6 @@ class UserService(BaseService[User]):
                         detail=f"无效的角色值：{role_value}。支持的角色：admin, client"
                     )
 
-        # 检查 is_active 是否改变（用于记录激活/禁用日志）
-        old_is_active = user.is_active
-
         # 更新其他字段
         for key, value in user_data.items():
             if hasattr(user, key):
@@ -341,37 +326,6 @@ class UserService(BaseService[User]):
             await invalidate_user_permission_cache(user_id)
         except Exception as e:
             logger.warning(f"清除权限缓存失败: {e}")
-
-        # 如果 is_active 改变，记录激活/禁用日志
-        if 'is_active' in user_data and user_data['is_active'] != old_is_active:
-            if user.is_active:
-                await log_activate(
-                    db=self.db,
-                    user=current_user,
-                    resource_type="USER",
-                    resource_id=user.id,
-                    resource_name=user.username
-                )
-            else:
-                await log_deactivate(
-                    db=self.db,
-                    user=current_user,
-                    resource_type="USER",
-                    resource_id=user.id,
-                    resource_name=user.username
-                )
-
-        # 记录审计日志
-        await log_user_action(
-            db=self.db,
-            action_type="UPDATE",
-            user=current_user,
-            username=current_user.username,
-            resource_type="USER",
-            resource_id=user.id,
-            resource_name=user.username,
-            success=True
-        )
 
         logger.info(f"用户已更新: {user.username} (ID: {user.id})")
         return user
@@ -400,18 +354,6 @@ class UserService(BaseService[User]):
                 ErrorCode.OPERATION_FAILED,
                 detail=f"用户 {user.username} 有关联的客户数据，无法删除"
             )
-
-        # 记录审计日志（在删除前）
-        await log_user_action(
-            db=self.db,
-            action_type="DELETE",
-            user=current_user,
-            username=current_user.username,
-            resource_type="USER",
-            resource_id=user.id,
-            resource_name=user.username,
-            success=True
-        )
 
         # 删除用户
         await self.db.delete(user)
@@ -500,6 +442,7 @@ class UserService(BaseService[User]):
             success=True,
             details={"action": "change_password"}
         )
+        await self.db.commit()
 
         logger.info(f"用户密码已修改: {user.username} (ID: {user_id})")
 

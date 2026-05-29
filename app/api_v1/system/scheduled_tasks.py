@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from app.core.database import get_db
 from app.core.security import require_admin
 from app.core.validation import validate_cron_expression, sanitize_input
-from app.core.audit_log import log_create, log_update, log_delete, log_activate, log_deactivate
+from app.core.audit_log import log_activate, log_deactivate
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.dependencies import get_scheduled_task_service
@@ -237,16 +237,16 @@ async def update_scheduled_task(
     task_service: ScheduledTaskService = await get_scheduled_task_service(db)
     
     try:
-        # 调用服务层更新定时任务状态（服务层会处理验证、更新、调度器注册等）
+        existing_task = await task_service.get_scheduled_task_by_name(task_name)
+        old_is_active = existing_task.is_active if existing_task else None
+
         task = await task_service.update_scheduled_task_status(
             task_name=task_name,
             is_active=task_update.is_active,
             current_user=current_user
         )
 
-        # 记录激活/禁用日志
-        old_is_active = task.is_active != task_update.is_active  # 检查状态是否改变
-        if old_is_active:
+        if old_is_active is not None and old_is_active != task.is_active:
             try:
                 if task.is_active:
                     await log_activate(

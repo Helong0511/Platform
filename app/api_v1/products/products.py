@@ -301,7 +301,7 @@ async def create_product(
     # 调用服务层创建产品（服务层会处理所有验证和默认客户逻辑）
     product = await product_service.create_product(product_data, current_user)
     
-    # 记录创建操作（使用audit_log的log_create函数）
+    # 记录创建操作
     try:
         await log_create(
             db=db,
@@ -321,13 +321,8 @@ async def create_product(
                 "notification_address": product.notification_address
             }
         )
-        await db.commit()
     except Exception as e:
         logger.error(f"记录产品创建审计日志失败: {str(e)}", exc_info=True)
-        try:
-            await db.rollback()
-        except Exception:
-            pass
     
     # 构建响应数据
     try:
@@ -364,18 +359,61 @@ async def update_product(
     
     # 获取更新数据（排除未设置的字段）
     update_data = product_in.model_dump(exclude_unset=True)
-    
-    # 调用服务层更新产品（服务层会处理所有验证、产品分配历史转移和审计日志）
+
+    product_before = await product_service.get_product_by_id(
+        product_id, current_user, include_client=False
+    )
+    old_is_active = product_before.is_active
+    old_ecpm_deduct_ratio = product_before.ecpm_deduct_ratio
+    old_revenue_deduct_ratio = product_before.revenue_deduct_ratio
+
     product = await product_service.update_product(product_id, update_data, current_user)
-    
-    # 记录更新操作（使用audit_log的log_update函数）
-    # 构建详细的变更记录
+
+    if "is_active" in update_data and update_data["is_active"] != old_is_active:
+        if product.is_active:
+            await log_activate(
+                db=db,
+                user=current_user,
+                resource_type="PRODUCT",
+                resource_id=product.id,
+                resource_name=product.name,
+                request=request,
+            )
+        else:
+            await log_deactivate(
+                db=db,
+                user=current_user,
+                resource_type="PRODUCT",
+                resource_id=product.id,
+                resource_name=product.name,
+                request=request,
+            )
+
     log_details = {
         **update_data,
         "note": "修改扣减比例后，不会更新现有广告数据，新比例只影响未来导入的数据"
     }
-    
-    # 如果只更新了 is_active，不记录 UPDATE 日志（避免重复，因为服务层已记录激活/禁用日志）
+    if "ecpm_deduct_ratio" in update_data or "revenue_deduct_ratio" in update_data:
+        deduct_ratio_changes = {}
+        if "ecpm_deduct_ratio" in update_data:
+            new_ecpm_ratio = update_data["ecpm_deduct_ratio"]
+            deduct_ratio_changes["ecpm_deduct_ratio"] = {
+                "old_value": old_ecpm_deduct_ratio,
+                "new_value": new_ecpm_ratio,
+                "change": f"{old_ecpm_deduct_ratio} → {new_ecpm_ratio}",
+                "change_percentage": f"{(new_ecpm_ratio - old_ecpm_deduct_ratio) * 100:.2f}%",
+            }
+        if "revenue_deduct_ratio" in update_data:
+            new_revenue_ratio = update_data["revenue_deduct_ratio"]
+            deduct_ratio_changes["revenue_deduct_ratio"] = {
+                "old_value": old_revenue_deduct_ratio,
+                "new_value": new_revenue_ratio,
+                "change": f"{old_revenue_deduct_ratio} → {new_revenue_ratio}",
+                "change_percentage": f"{(new_revenue_ratio - old_revenue_deduct_ratio) * 100:.2f}%",
+            }
+        log_details["deduct_ratio_changes"] = deduct_ratio_changes
+        log_details["is_deduct_ratio_adjusted"] = True
+
     if len(update_data) > 1 or "is_active" not in update_data:
         await log_update(
             db=db,
@@ -407,14 +445,33 @@ async def delete_product(
     """
     # 使用服务层（业务逻辑在ProductService中）
     product_service: ProductService = await get_product_service(db)
-    
-    # 调用服务层删除产品（服务层会处理智能删除逻辑）
+
+    product = await product_service.get_product_by_id(
+        product_id, current_user, include_client=False
+    )
+
+    count_result = await db.execute(
+        select(func.count(AdData.id)).where(AdData.product_id == product_id)
+    )
+    ad_data_count = count_result.scalar() or 0
+
+    if ad_data_count == 0:
+        await log_delete(
+            db=db,
+            user=current_user,
+            resource_type="PRODUCT",
+            resource_id=product_id,
+            resource_name=product.name,
+            request=request,
+            details={
+                "client_id": product.client_id,
+                "deleted": True
+            }
+        )
+
     result = await product_service.delete_product(product_id, current_user)
-    
-    # 如果产品被转移，记录更新操作
+
     if result.get("transferred"):
-        # 获取产品信息用于记录日志
-        product = await product_service.get_product_by_id(product_id, current_user, include_client=False)
         await log_update(
             db=db,
             user=current_user,
@@ -425,7 +482,7 @@ async def delete_product(
             details={
                 "action": "transfer_to_admin_default_client",
                 "new_client_id": result.get("new_client_id"),
-                "ad_data_count": "已关联广告数据"
+                "ad_data_count": ad_data_count
             }
         )
         return ResponseBaseSchema.success(data={
@@ -433,6 +490,5 @@ async def delete_product(
             "transferred": True,
             "new_client_id": result.get("new_client_id")
         })
-    else:
-        # 产品已删除，服务层已记录删除日志
-        return ResponseBaseSchema.success(data={"message": result["message"]})
+
+    return ResponseBaseSchema.success(data={"message": result["message"]})

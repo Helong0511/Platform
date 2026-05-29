@@ -577,6 +577,7 @@ class OfferService(BaseService[Offer]):
             resource_name=offer.offer_name,
             success=True
         )
+        await self.db.commit()
 
         logger.info(f"Offer已创建: {offer.offer_name} (ID: {offer.id})")
         return offer, short_link_info
@@ -956,6 +957,7 @@ class OfferService(BaseService[Offer]):
             resource_name=offer.offer_name,
             success=True
         )
+        await self.db.commit()
 
         logger.info(f"Offer已更新: {offer.offer_name} (ID: {offer.id})")
         return offer, short_link_info, downstream_tracklink_short_link_info, downstream_tracklink_changed

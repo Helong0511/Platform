@@ -586,6 +586,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                             "method": request.method
                         }
                     )
+                    await db.commit()
                     break
             except Exception as e:
                 logger.error(f"记录CSRF审计日志失败: {e}")
@@ -622,6 +623,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                             "method": request.method
                         }
                     )
+                    await db.commit()
                     break
             except Exception as e:
                 logger.error(f"记录CSRF审计日志失败: {e}")
@@ -669,6 +671,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                             "received_token_prefix": csrf_token[:10]
                         }
                     )
+                    await db.commit()
                     break
             except Exception as e:
                 logger.error(f"记录CSRF审计日志失败: {e}")

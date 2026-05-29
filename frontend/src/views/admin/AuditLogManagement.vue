@@ -57,6 +57,9 @@
             <el-option label="定时任务运行" value="TASK_RUN"></el-option>
             <el-option label="API访问" value="API_ACCESS"></el-option>
             <el-option label="程序运行错误" value="RUNTIME_ERROR"></el-option>
+            <el-option label="撤销会话" value="REVOKE_SESSION"></el-option>
+            <el-option label="撤销全部会话" value="REVOKE_ALL_SESSIONS"></el-option>
+            <el-option label="CSRF违规" value="CSRF_VIOLATION"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="资源类型">
@@ -69,6 +72,11 @@
             <el-option label="定时任务" value="SCHEDULED_TASK"></el-option>
             <el-option label="系统" value="SYSTEM"></el-option>
             <el-option label="前端" value="FRONTEND"></el-option>
+            <el-option label="会话" value="SESSION"></el-option>
+            <el-option label="Offer" value="OFFER"></el-option>
+            <el-option label="渠道" value="PUBLISHER"></el-option>
+            <el-option label="广告主" value="ADVERTISER"></el-option>
+            <el-option label="转化扣减配置" value="CONVERSION_DEDUCTION_CONFIG"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="IP地址">

@@ -13,7 +13,6 @@ from app.models.models import Product, Client, User, UserRole, AdData
 from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
-from app.core.audit_log import log_user_action, log_activate, log_deactivate, log_update, log_delete
 from app.core.utils import get_app_now_naive, find_or_create_default_client
 from app.core.product_assignment import initialize_product_assignment, transfer_product_assignment
 import logging
@@ -317,18 +316,6 @@ class ProductService(BaseService[Product]):
         await self.db.commit()
         await self.db.refresh(product)
 
-        # 记录审计日志
-        await log_user_action(
-            db=self.db,
-            action_type="CREATE",
-            user=current_user,
-            username=current_user.username,
-            resource_type="PRODUCT",
-            resource_id=product.id,
-            resource_name=product.name,
-            success=True
-        )
-
         logger.info(f"产品已创建: {product.name} (ID: {product.id})")
         return product
 
@@ -354,11 +341,6 @@ class ProductService(BaseService[Product]):
 
         # 获取产品
         product = await self.get_product_by_id(product_id, current_user, include_client=False)
-
-        # 记录旧的扣减比例，用于记录变更历史
-        old_ecpm_deduct_ratio = product.ecpm_deduct_ratio
-        old_revenue_deduct_ratio = product.revenue_deduct_ratio
-        old_is_active = product.is_active
 
         # 如果更改产品名称，检查是否已存在
         if 'name' in product_data and product_data['name'] != product.name:
@@ -495,65 +477,6 @@ class ProductService(BaseService[Product]):
         await self.db.commit()
         await self.db.refresh(product)
 
-        # 如果 is_active 改变，记录激活/禁用日志
-        if 'is_active' in product_data and product_data['is_active'] != old_is_active:
-            if product.is_active:
-                await log_activate(
-                    db=self.db,
-                    user=current_user,
-                    resource_type="PRODUCT",
-                    resource_id=product.id,
-                    resource_name=product.name
-                )
-            else:
-                await log_deactivate(
-                    db=self.db,
-                    user=current_user,
-                    resource_type="PRODUCT",
-                    resource_id=product.id,
-                    resource_name=product.name
-                )
-
-        # 记录审计日志
-        log_details = {**product_data}
-        log_details["note"] = "修改扣减比例后，不会更新现有广告数据，新比例只影响未来导入的数据"
-
-        # 如果修改了扣减比例，记录变更历史
-        if 'ecpm_deduct_ratio' in product_data or 'revenue_deduct_ratio' in product_data:
-            deduct_ratio_changes = {}
-            if 'ecpm_deduct_ratio' in product_data:
-                new_ecpm_ratio = product_data['ecpm_deduct_ratio']
-                deduct_ratio_changes["ecpm_deduct_ratio"] = {
-                    "old_value": old_ecpm_deduct_ratio,
-                    "new_value": new_ecpm_ratio,
-                    "change": f"{old_ecpm_deduct_ratio} → {new_ecpm_ratio}",
-                    "change_percentage": f"{(new_ecpm_ratio - old_ecpm_deduct_ratio) * 100:.2f}%"
-                }
-            if 'revenue_deduct_ratio' in product_data:
-                new_revenue_ratio = product_data['revenue_deduct_ratio']
-                deduct_ratio_changes["revenue_deduct_ratio"] = {
-                    "old_value": old_revenue_deduct_ratio,
-                    "new_value": new_revenue_ratio,
-                    "change": f"{old_revenue_deduct_ratio} → {new_revenue_ratio}",
-                    "change_percentage": f"{(new_revenue_ratio - old_revenue_deduct_ratio) * 100:.2f}%"
-                }
-            log_details["deduct_ratio_changes"] = deduct_ratio_changes
-            log_details["is_deduct_ratio_adjusted"] = True
-
-        # 如果只更新了 is_active，不记录 UPDATE 日志（避免重复）
-        if len(product_data) > 1 or 'is_active' not in product_data:
-            await log_user_action(
-                db=self.db,
-                action_type="UPDATE",
-                user=current_user,
-                username=current_user.username,
-                resource_type="PRODUCT",
-                resource_id=product.id,
-                resource_name=product.name,
-                success=True,
-                details=log_details
-            )
-
         logger.info(f"产品已更新: {product.name} (ID: {product.id})")
         return product
 
@@ -647,21 +570,6 @@ class ProductService(BaseService[Product]):
             await self.db.commit()
             await self.db.refresh(product)
 
-            # 记录更新操作（产品转移）
-            await log_update(
-                db=self.db,
-                user=current_user,
-                resource_type="PRODUCT",
-                resource_id=product_id,
-                resource_name=product.name,
-                details={
-                    "action": "transfer_to_admin_default_client",
-                    "old_client_id": old_client_id,
-                    "new_client_id": admin_default_client.id,
-                    "ad_data_count": ad_data_count
-                }
-            )
-
             return {
                 "transferred": True,
                 "message": f"产品已转移到默认客户（导入数据）（该产品关联了 {ad_data_count} 条广告数据）",
@@ -670,19 +578,6 @@ class ProductService(BaseService[Product]):
         else:
             # 没有关联广告数据：直接删除产品
             logger.debug(f"产品 {product.name} (ID: {product_id}) 没有关联广告数据，将直接删除")
-
-            # 记录删除操作（在删除前）
-            await log_delete(
-                db=self.db,
-                user=current_user,
-                resource_type="PRODUCT",
-                resource_id=product_id,
-                resource_name=product.name,
-                details={
-                    "client_id": product.client_id,
-                    "deleted": True
-                }
-            )
 
             # 删除产品
             await self.db.delete(product)

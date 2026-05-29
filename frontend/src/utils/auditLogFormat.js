@@ -14,6 +14,9 @@ export function getActionTypeTag(actionType) {
     TASK_RUN: 'primary',
     API_ACCESS: '',
     RUNTIME_ERROR: 'danger',
+    REVOKE_SESSION: 'warning',
+    REVOKE_ALL_SESSIONS: 'warning',
+    CSRF_VIOLATION: 'danger',
   };
   return tagMap[actionType] || '';
 }
@@ -32,6 +35,9 @@ export function getActionTypeLabel(actionType) {
     TASK_RUN: '定时任务运行',
     API_ACCESS: 'API访问',
     RUNTIME_ERROR: '程序运行错误',
+    REVOKE_SESSION: '撤销会话',
+    REVOKE_ALL_SESSIONS: '撤销全部会话',
+    CSRF_VIOLATION: 'CSRF违规',
   };
   return labelMap[actionType] || actionType;
 }

@@ -29,6 +29,9 @@ ALLOWED_ACTION_TYPES = {
     "TASK_RUN",  # 定时任务运行
     "API_ACCESS",  # 客户API访问
     "RUNTIME_ERROR",  # 程序运行错误
+    "REVOKE_SESSION",  # 撤销会话
+    "REVOKE_ALL_SESSIONS",  # 撤销全部会话
+    "CSRF_VIOLATION",  # CSRF验证失败
 }
 
 
@@ -55,7 +58,7 @@ async def log_user_action(
     
     Args:
         db: 数据库会话
-        action_type: 操作类型（LOGIN, LOGOUT, CREATE, UPDATE, DELETE, VIEW, ACCESS等）
+        action_type: 操作类型（LOGIN, LOGOUT, CREATE, UPDATE, DELETE, IMPORT, EXPORT, ACTIVATE, DEACTIVATE, TASK_RUN, API_ACCESS, RUNTIME_ERROR, REVOKE_SESSION, REVOKE_ALL_SESSIONS, CSRF_VIOLATION）
         user: 用户对象（如果提供，会自动获取user_id和username）
         user_id: 用户ID（如果未提供user对象）
         username: 用户名（如果未提供user对象且未提供user_id，可直接指定用户名，如"SYSTEM"）
@@ -200,16 +203,20 @@ async def log_user_action(
 # 便捷函数
 async def log_login(
         db: AsyncSession,
-        user: User,
         request: Request,
+        user: Optional[User] = None,
+        username: Optional[str] = None,
         success: bool = True,
         error_message: Optional[str] = None
 ) -> None:
-    """记录登录操作"""
+    """记录登录操作（成功或失败）"""
+    if user is None and not username:
+        return
     await log_user_action(
         db=db,
         action_type="LOGIN",
         user=user,
+        username=username if user is None else None,
         request=request,
         success=success,
         error_message=error_message

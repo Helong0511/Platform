@@ -65,6 +65,33 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+async def _record_login_failure(
+        db: AsyncSession,
+        request: Request,
+        *,
+        error_message: str,
+        user: User | None = None,
+        username: str | None = None,
+) -> None:
+    """记录登录失败审计日志，失败时不影响登录流程"""
+    try:
+        await log_login(
+            db=db,
+            request=request,
+            user=user,
+            username=username,
+            success=False,
+            error_message=error_message,
+        )
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"记录登录失败审计日志失败: {e}")
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+
+
 @router.post("/login", response_model=LoginResponse, summary="用户登录", tags=["认证管理"])
 async def login(
         request: Request,
@@ -161,6 +188,11 @@ async def login(
         # 检查用户是否存在以及密码是否正确（使用安全的密码验证方法）
         if not user:
             logger.warning(f"用户登录失败: 用户不存在, 用户名={form_data.username}, IP={client_ip}")
+            await _record_login_failure(
+                db, request,
+                username=form_data.username,
+                error_message="用户名或密码不正确",
+            )
             raise_auth_error(
                 ErrorCode.INVALID_CREDENTIALS,
                 "用户名或密码不正确",
@@ -169,6 +201,11 @@ async def login(
 
         if not user.verify_password(form_data.password):
             logger.warning(f"用户登录失败: 密码错误, 用户名={form_data.username}, IP={client_ip}")
+            await _record_login_failure(
+                db, request,
+                user=user,
+                error_message="用户名或密码不正确",
+            )
             raise_auth_error(
                 ErrorCode.INVALID_CREDENTIALS,
                 "用户名或密码不正确",
@@ -199,6 +236,11 @@ async def login(
 
     if not user.is_active:
         logger.warning(f"用户登录失败: 用户已被禁用, 用户名={form_data.username}, IP={client_ip}")
+        await _record_login_failure(
+            db, request,
+            user=user,
+            error_message="用户已被禁用",
+        )
         raise_auth_error(
             ErrorCode.USER_DISABLED,
             "用户已被禁用",
@@ -207,6 +249,11 @@ async def login(
 
     if user.login_restricted:
         logger.warning(f"用户登录失败: 登录受限, 用户名={form_data.username}, IP={client_ip}")
+        await _record_login_failure(
+            db, request,
+            user=user,
+            error_message=user.login_message or "登录已被限制",
+        )
         raise_auth_error(
             ErrorCode.FORBIDDEN,
             user.login_message or "登录已被限制",
@@ -234,6 +281,11 @@ async def login(
                             f"客户登录失败: IP不在白名单中, "
                             f"用户名={form_data.username}, IP={client_ip}, "
                             f"白名单={allowed_ips}"
+                        )
+                        await _record_login_failure(
+                            db, request,
+                            user=user,
+                            error_message=f"IP地址 {client_ip} 不在允许列表中",
                         )
                         raise_auth_error(
                             ErrorCode.FORBIDDEN,
