@@ -5,7 +5,7 @@ Postback 相关的 Schema 定义
 from datetime import datetime
 from typing import Optional, Dict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # ====== 请求模型 ======
@@ -29,8 +29,7 @@ class PostbackRequest(BaseModel):
     client_id: Optional[int] = Field(None, description="客户ID")
 
     # 允许其他字段（用于存储平台特定的字段）
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")
 
 
 # ====== 响应模型 ======
@@ -79,8 +78,7 @@ class PostbackConversionResponse(BaseModel):
     created_at: datetime
     notification_count: Optional[int] = Field(0, description="成功发送的通知记录数量（只统计 status='sent' 的记录）")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PostbackStatsResponse(BaseModel):
@@ -124,8 +122,7 @@ class PostbackForwardLogResponse(BaseModel):
     created_at: datetime
     completed_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PendingPostbackConversionResponse(BaseModel):
@@ -157,5 +154,4 @@ class PendingPostbackConversionResponse(BaseModel):
     product_name: Optional[str] = Field(None, description="产品名称")
     client_name: Optional[str] = Field(None, description="客户名称")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

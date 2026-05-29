@@ -358,7 +358,7 @@ class OfferService(BaseService[Offer]):
         创建Offer（支持渠道分配和短链接创建）
         
         Args:
-            offer_data: Offer数据字典（可能包含publisher_configs或publisher_ids）
+            offer_data: Offer数据字典（可能包含 publisher_configs）
             current_user: 当前用户
         
         Returns:
@@ -420,7 +420,6 @@ class OfferService(BaseService[Offer]):
         # 处理渠道分配
         publisher_ids_for_short_link = []
         publisher_configs = offer_data.get('publisher_configs')
-        publisher_ids = offer_data.get('publisher_ids')
 
         if publisher_configs is not None:
             if len(publisher_configs) == 0:
@@ -525,26 +524,6 @@ class OfferService(BaseService[Offer]):
                     )
                     self.db.add(assignment)
                     publisher_ids_for_short_link.append(pub_id)
-        elif publisher_ids:
-            # 向后兼容：使用旧的 publisher_ids（批量校验，避免 N+1）
-            unique_ids = list(dict.fromkeys(publisher_ids))
-            pub_result = await self.db.execute(
-                select(Publisher).where(Publisher.id.in_(unique_ids))
-            )
-            publishers_by_id = {p.id: p for p in pub_result.scalars().all()}
-            for pub_id in unique_ids:
-                if pub_id not in publishers_by_id:
-                    raise_api_exception(
-                        ErrorCode.RESOURCE_NOT_FOUND,
-                        detail=f"渠道ID {pub_id} 不存在"
-                    )
-                assignment = OfferPublisherAssignment(
-                    offer_id=offer.id,
-                    publisher_id=pub_id,
-                    is_active=True
-                )
-                self.db.add(assignment)
-                publisher_ids_for_short_link.append(pub_id)
 
         try:
             await self.db.commit()
@@ -734,7 +713,6 @@ class OfferService(BaseService[Offer]):
         old_publisher_ids = None
         publisher_ids_for_short_link = []
         publisher_configs = offer_data.get('publisher_configs')
-        publisher_ids = offer_data.get('publisher_ids')
 
         if publisher_configs is not None:
             # 使用新的渠道配置方式
@@ -855,39 +833,6 @@ class OfferService(BaseService[Offer]):
                     )
                     self.db.add(assignment)
                     publisher_ids_for_short_link.append(pub_id)
-        elif publisher_ids is not None:
-            # 向后兼容：使用旧的publisher_ids方式
-            # 获取旧的渠道分配列表（用于比较）
-            old_assignments_result = await self.db.execute(
-                select(OfferPublisherAssignment).where(OfferPublisherAssignment.offer_id == offer.id)
-            )
-            old_assignments = old_assignments_result.scalars().all()
-            old_publisher_ids = {assignment.publisher_id for assignment in old_assignments}
-
-            # 先删除所有现有分配
-            await self.db.execute(
-                delete(OfferPublisherAssignment).where(OfferPublisherAssignment.offer_id == offer.id)
-            )
-
-            # 添加新分配（批量校验渠道存在，避免 N+1 与缩进错误）
-            if publisher_ids:
-                pub_result = await self.db.execute(
-                    select(Publisher).where(Publisher.id.in_(publisher_ids))
-                )
-                publishers_by_id = {p.id: p for p in pub_result.scalars().all()}
-                for pub_id in publisher_ids:
-                    if pub_id not in publishers_by_id:
-                        raise_api_exception(
-                            ErrorCode.RESOURCE_NOT_FOUND,
-                            detail=f"渠道ID {pub_id} 不存在"
-                        )
-                    assignment = OfferPublisherAssignment(
-                        offer_id=offer.id,
-                        publisher_id=pub_id,
-                        is_active=True
-                    )
-                    self.db.add(assignment)
-                    publisher_ids_for_short_link.append(pub_id)
 
         try:
             await self.db.commit()
@@ -920,10 +865,6 @@ class OfferService(BaseService[Offer]):
             new_publisher_ids = set(publisher_ids_for_short_link)
             if old_publisher_ids != new_publisher_ids:
                 need_sync_short_links = True
-        elif publisher_ids is not None:
-            new_publisher_ids = set(publisher_ids or [])
-            if old_publisher_ids != new_publisher_ids:
-                need_sync_short_links = True
         elif advertiser_tracklink_changed:
             need_sync_short_links = True
 
@@ -933,8 +874,6 @@ class OfferService(BaseService[Offer]):
             # 获取当前的渠道分配
             if publisher_configs is not None:
                 current_publisher_ids = publisher_ids_for_short_link
-            elif publisher_ids is not None:
-                current_publisher_ids = publisher_ids
             else:
                 # 如果没有明确指定publisher_ids，使用现有的分配
                 existing_assignments_result = await self.db.execute(

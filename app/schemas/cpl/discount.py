@@ -4,7 +4,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class OfferDiscountBase(BaseModel):
@@ -39,5 +39,4 @@ class OfferDiscountResponse(OfferDiscountBase):
     offer_name: Optional[str] = None
     publisher_name: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

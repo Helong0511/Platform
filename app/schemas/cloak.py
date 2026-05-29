@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 
 # ---------------------------------------------------------------------------
 # Meta Pixel / Conversions API 官方「标准事件」event_name（与 Meta 文档 Standard Events 一致）。
@@ -302,8 +302,7 @@ class CloakConfigResponse(CloakConfigBase):
         description="斗篷是否可用：已检测到对应桥页 HTML 则为可用，否则不可用（无法启用对外使用）",
     )
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TestCloakReportRequest(BaseModel):

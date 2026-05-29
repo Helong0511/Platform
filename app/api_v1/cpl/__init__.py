@@ -7,7 +7,6 @@ from .affiliate_debug import affiliate_tests_router
 from .caps import router as caps_router
 from .conversions.clicks import router as clicks_router
 from .conversions.deductions import router as conversion_deductions_router
-from .conversions.log import router as conversion_log_router
 from .conversions.summary import router as conversion_summary_router
 from .discounts import router as discounts_router
 from .offers import router as offers_router
@@ -21,7 +20,6 @@ __all__ = [
     'discounts_router',
     'conversion_deductions_router',
     'conversion_summary_router',
-    'conversion_log_router',
     'clicks_router',
     'affiliate_tests_router',
 ]

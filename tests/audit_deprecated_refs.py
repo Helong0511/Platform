@@ -13,16 +13,15 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "app"
 FRONTEND = ROOT / "frontend" / "src"
 
-# 禁止在生产代码中出现的导入（兼容垫片 auto_bot.py 自身除外）
+# 禁止在生产代码中出现的导入
 FORBIDDEN_IMPORT_PREFIXES = (
-    "app.core.auto_bot",
+    "app.core.auto_bot",  # 已删除，勿恢复兼容垫片
     "app.core.response",  # 旧 ResponseBase（code=0）
 )
 
 # 允许存在但应逐步淘汰的路径片段（仅报告，不失败）
 WARN_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("asyncio.get_event_loop()", re.compile(r"asyncio\.get_event_loop\s*\(")),
-    ("conversion_log_router 注册", re.compile(r"include_router\s*\(\s*conversion_log")),
     ("旧短链路由 short_link_redirect", re.compile(r"from app\.routes\.short_link_redirect import")),
 ]
 
@@ -50,8 +49,6 @@ def iter_frontend_js(base: Path):
 
 def check_python_imports(path: Path) -> list[str]:
     rel = path.relative_to(ROOT).as_posix()
-    if rel == "app/core/auto_bot.py":
-        return []
     text = path.read_text(encoding="utf-8")
     issues: list[str] = []
     try:
@@ -81,17 +78,32 @@ def check_frontend_deprecated(path: Path) -> list[str]:
     text = path.read_text(encoding="utf-8", errors="replace")
     rel = path.relative_to(ROOT).as_posix()
     issues: list[str] = []
-    if "@deprecated" in text or "auto_bot" in text:
+    if "auto_bot" in text:
         for i, line in enumerate(text.splitlines(), 1):
-            if "@deprecated" in line or "auto_bot" in line:
-                issues.append(f"{rel}:{i} {line.strip()[:120]}")
-    if re.search(r"from\s+['\"].*api/user['\"]", text) and "logout" in text:
-        if re.search(r"import\s*\{[^}]*\blogout\b", text):
-            issues.append(f"{rel} [warn] 从 api/user 导入 logout（应使用 api/auth）")
-    if re.search(r"\bshortLinkFormRules\b", text) and "createShortLinkFormRules" not in text:
-        if "export const shortLinkFormRules" not in text:
-            issues.append(f"{rel} [warn] 使用已弃用 shortLinkFormRules")
+            if "auto_bot" in line:
+                issues.append(f"{rel}:{i} [forbidden] auto_bot 引用")
+    if re.search(r"import\s*\{[^}]*\blogout\b[^}]*\}\s*from\s+['\"][^'\"]*api/user", text):
+        issues.append(f"{rel} [warn] 从 api/user 导入 logout（应使用 api/auth）")
+    if re.search(
+        r"import\s*\{[^}]*\bshortLinkFormRules\b[^}]*\}\s*from",
+        text,
+    ):
+        issues.append(f"{rel} [warn] 导入已弃用 shortLinkFormRules（应使用 createShortLinkFormRules）")
     return issues
+
+
+def find_deprecated_markers() -> list[str]:
+    """列出仍带 @deprecated 标记的源文件（供人工清理）。"""
+    out: list[str] = []
+    for path in iter_frontend_js(FRONTEND):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "@deprecated" not in text:
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        for i, line in enumerate(text.splitlines(), 1):
+            if "@deprecated" in line:
+                out.append(f"{rel}:{i} {line.strip()[:100]}")
+    return out
 
 
 def main() -> int:
@@ -131,16 +143,25 @@ def main() -> int:
     for x in warnings[:40]:
         print(" ", x)
 
-    # 静态：auto_bot 仅自身
+    # 静态：auto_bot 仅兼容垫片与审计脚本自身
     auto_bot_refs = []
+    skip_auto_bot_text = {"tests/audit_deprecated_refs.py"}
     for path in iter_py(ROOT):
-        if path.name.endswith(".py") and path != APP / "core" / "auto_bot.py":
-            t = path.read_text(encoding="utf-8", errors="replace")
-            if "auto_bot" in t:
-                auto_bot_refs.append(path.relative_to(ROOT).as_posix())
-    print("\n=== 含 auto_bot 字符串的文件（除兼容垫片外应为 0）===")
+        rel = path.relative_to(ROOT).as_posix()
+        if not path.name.endswith(".py") or rel in skip_auto_bot_text:
+            continue
+        t = path.read_text(encoding="utf-8", errors="replace")
+        if re.search(r"\bapp\.core\.auto_bot\b|from app\.core\.auto_bot|import auto_bot", t):
+            auto_bot_refs.append(rel)
+    print("\n=== 含 app.core.auto_bot 导入的文件（应为 0）===")
     print(len(auto_bot_refs))
     for x in auto_bot_refs[:20]:
+        print(" ", x)
+
+    markers = find_deprecated_markers()
+    print("\n=== 前端 @deprecated 标记（遗留导出，无外部引用可删）===")
+    print(len(markers))
+    for x in markers[:20]:
         print(" ", x)
 
     fail = bool(forbidden) or bool(auto_bot_refs)

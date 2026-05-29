@@ -1,6 +1,6 @@
 from datetime import date
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 # Python 3.10+ 使用内置类型注解
@@ -53,8 +53,7 @@ class AdDataBase(BaseModel):
 class AdDataInDBBase(AdDataBase):
     id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AdDataResponse(AdDataInDBBase):
@@ -98,5 +97,4 @@ class AdDataUpdate(BaseModel):
     revenue_after_deduct: float | None = None
     revenue_before_deduct: float | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

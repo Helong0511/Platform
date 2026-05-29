@@ -33,7 +33,6 @@ from app.services.cpl.discount_service import DiscountService
 from app.services.cpl.conversion_deduction_service import ConversionDeductionService
 from app.services.product_assignment_service import ProductAssignmentService
 from app.services.notification_config_service import NotificationConfigService
-from app.services.cpl.conversion_log_service import ConversionLogService
 from app.services.click_service import ClickService
 from app.services.audit_log_service import AuditLogService
 from app.services.session_service import SessionService
@@ -146,10 +145,6 @@ async def get_notification_config_service(db: AsyncSession = Depends(get_db)):
     """获取通知配置服务实例"""
     return NotificationConfigService(db)
 
-async def get_conversion_log_service(db: AsyncSession = Depends(get_db)):
-    """获取转化日志服务实例"""
-    return ConversionLogService(db)
-
 async def get_click_service(db: AsyncSession = Depends(get_db)):
     """获取点击服务实例"""
     return ClickService(db)
@@ -192,7 +187,6 @@ DiscountServiceDep = Annotated[object, Depends(get_discount_service)]
 ConversionDeductionServiceDep = Annotated[object, Depends(get_conversion_deduction_service)]
 ProductAssignmentServiceDep = Annotated[object, Depends(get_product_assignment_service)]
 NotificationConfigServiceDep = Annotated[object, Depends(get_notification_config_service)]
-ConversionLogServiceDep = Annotated[object, Depends(get_conversion_log_service)]
 ClickServiceDep = Annotated[object, Depends(get_click_service)]
 AuditLogServiceDep = Annotated[object, Depends(get_audit_log_service)]
 SessionServiceDep = Annotated[object, Depends(get_session_service)]

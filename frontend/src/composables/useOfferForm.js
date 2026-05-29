@@ -273,7 +273,6 @@ export function useOfferForm({ isAdmin, loadData, publisherList }) {
         }
         const submitData = { ...formData };
         submitData.publisher_configs = validConfigs;
-        delete submitData.publisher_ids;
         delete submitData.postback_url;
         delete submitData.postback_method;
         let offerData;

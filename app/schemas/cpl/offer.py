@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional, List
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.url.placeholder_validation import (
     format_placeholder_validation_error,
@@ -57,7 +57,6 @@ class PublisherConfig(BaseModel):
 
 class OfferCreate(OfferBase):
     """创建Offer"""
-    publisher_ids: Optional[list[int]] = Field(None, description="分配的渠道ID列表（已废弃，使用publisher_configs）")
     publisher_configs: Optional[List[PublisherConfig]] = Field(None,
                                                                description="渠道配置列表，每个渠道对应一个下游Cap和下游PO")
 
@@ -92,7 +91,6 @@ class OfferUpdate(BaseModel):
     postback_method: Optional[str] = Field(None, description="Postback方法")
     click_validity_hours: Optional[int] = Field(None, ge=1, le=8760, description="点击有效期（小时）")
     is_active: Optional[bool] = Field(None, description="是否激活")
-    publisher_ids: Optional[list[int]] = Field(None, description="分配的渠道ID列表（已废弃，使用publisher_configs）")
     publisher_configs: Optional[List[PublisherConfig]] = Field(None,
                                                                description="渠道配置列表，每个渠道对应一个下游Cap和下游PO")
 
@@ -130,5 +128,4 @@ class OfferResponse(OfferBase):
     advertiser_name: Optional[str] = None
     assigned_publishers: Optional[list[dict]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

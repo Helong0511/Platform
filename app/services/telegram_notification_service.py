@@ -746,14 +746,11 @@ class TelegramNotificationService:
             tuple[bool, Optional[int]]: (是否发送成功, 消息ID)
         """
         try:
-            loop = asyncio.get_event_loop()
-            success, message_id = await loop.run_in_executor(
-                None,
-                lambda: send_telegram_message_with_buttons(
-                    telegram_chat_id,
-                    message,
-                    buttons
-                )
+            success, message_id = await asyncio.to_thread(
+                send_telegram_message_with_buttons,
+                telegram_chat_id,
+                message,
+                buttons,
             )
 
             if db:

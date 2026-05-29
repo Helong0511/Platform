@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 # ==================== 客户通知配置 ====================
@@ -68,8 +68,7 @@ class ClientNotificationConfigResponse(ClientNotificationConfigBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== 产品通知配置 ====================
@@ -131,8 +130,7 @@ class ProductNotificationConfigResponse(ProductNotificationConfigBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== 管理员通知配置 ====================
@@ -185,8 +183,7 @@ class AdminNotificationConfigResponse(AdminNotificationConfigBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== 管理员通知测试请求 ====================
@@ -251,8 +248,7 @@ class PostbackNotificationResponse(BaseModel):
     postback_url: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PostbackNotificationListResponse(BaseModel):

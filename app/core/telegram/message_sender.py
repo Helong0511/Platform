@@ -181,15 +181,13 @@ async def send_telegram_message_async(
         bool: 是否发送成功
     """
     import asyncio
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(
-        None,
-        lambda: send_telegram_message(
-            chat_id_or_message,
-            message,
-            parse_mode,
-            reply_to_message_id
-        )
+
+    return await asyncio.to_thread(
+        send_telegram_message,
+        chat_id_or_message,
+        message,
+        parse_mode,
+        reply_to_message_id,
     )
 
 

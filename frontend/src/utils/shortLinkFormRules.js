@@ -71,9 +71,6 @@ export function createShortLinkFormRules(getFormData) {
   };
 }
 
-/** @deprecated 请使用 createShortLinkFormRules */
-export const shortLinkFormRules = createShortLinkFormRules(() => ({}));
-
 export function createOfferTracklinkRules(getFormData) {
   return {
     advertiser_tracklink: [

@@ -778,13 +778,11 @@ async def update_offer(
     offer_service: OfferService = await get_offer_service(db)
 
     # 准备更新数据（包含渠道配置）
-    update_data = offer_in.model_dump(exclude_unset=True, exclude={'publisher_ids', 'publisher_configs'})
+    update_data = offer_in.model_dump(exclude_unset=True, exclude={'publisher_configs'})
     if offer_in.publisher_configs is not None:
         # 将Pydantic对象转换为字典
         update_data['publisher_configs'] = [config.model_dump() if hasattr(config, 'model_dump') else config for config
                                             in offer_in.publisher_configs]
-    elif offer_in.publisher_ids is not None:
-        update_data['publisher_ids'] = offer_in.publisher_ids
 
     # 调用服务层更新Offer（服务层会处理渠道分配、短链接同步等）
     offer, short_link_info, downstream_tracklink_short_link_info, downstream_tracklink_changed = await offer_service.update_offer(

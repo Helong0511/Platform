@@ -3,7 +3,7 @@ import ipaddress
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, ConfigDict
 
 
 class PostbackIpWhitelistCreate(BaseModel):
@@ -44,8 +44,7 @@ class PostbackIpWhitelistResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PostbackIpWhitelistBatchCreate(BaseModel):
@@ -78,5 +77,4 @@ class PostbackIpWhitelistBatchCreateResponse(BaseModel):
     created_items: List[PostbackIpWhitelistResponse]
     failed_items: List[dict] = Field(default_factory=list)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

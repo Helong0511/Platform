@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
 
 
 class ClientBase(BaseModel):
@@ -36,8 +36,7 @@ class ClientInDBBase(ClientBase):
     id: int
     key: str | None = None  # 客户唯一标识UUID
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ClientResponse(ClientInDBBase):

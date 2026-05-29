@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 
 from app.core.url.placeholder_validation import (
     format_placeholder_validation_error,
@@ -145,8 +145,7 @@ class ShortLinkResponse(ShortLinkBase):
     facebook_access_token: Optional[str] = None
     facebook_api_version: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ShortLinkListResponse(BaseModel):

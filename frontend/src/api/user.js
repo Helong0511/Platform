@@ -20,7 +20,6 @@
  * 包含特殊逻辑：搜索用户、文件导出、密码修改等
  */
 import { request, extractErrorMessage, ensureCsrfToken, refreshCsrfTokenBeforeRequest, handleError, refreshCsrfToken, requestBlobDownload } from '../utils/api';
-import { logout as authLogout } from './auth';
 import { ElMessage } from 'element-plus';
 import { getSuccessMessage, getWarningMessage } from '../utils/messages';
 
@@ -250,5 +249,3 @@ export const changePassword = async (passwordData) => {
  * 退出登录
  * @returns {Promise<void>}
  */
-/** @deprecated 请使用 auth.js 的 logout */
-export const logout = authLogout;

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ExcelBase(BaseModel):
@@ -28,5 +28,4 @@ class ExcelInDBBase(ExcelBase):
     """数据库中的Excel模型"""
     id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

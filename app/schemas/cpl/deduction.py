@@ -9,7 +9,7 @@
 from datetime import datetime
 from typing import Optional, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 
 
 class ConversionDeductionConfigBase(BaseModel):
@@ -142,8 +142,7 @@ class ConversionDeductionConfigResponse(ConversionDeductionConfigBase):
     offer_name: Optional[str] = None
     publisher_name: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ConversionDeductionLogResponse(BaseModel):
@@ -171,8 +170,7 @@ class ConversionDeductionLogResponse(BaseModel):
     offer_name: Optional[str] = None
     publisher_name: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DeductionStatsResponse(BaseModel):
