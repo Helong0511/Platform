@@ -145,6 +145,8 @@ async def get_clients_with_data(
             end_date=end_date
         )
         return ListResponseBaseSchema.success(data=clients_list, count=len(clients_list))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取有数据的客户列表失败: {str(e)}", exc_info=True)
         raise_api_exception(
@@ -181,6 +183,8 @@ async def get_countries_with_data(
             end_date=end_date
         )
         return ListResponseBaseSchema.success(data=countries_list, count=len(countries_list))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取有数据的国家列表失败: {str(e)}", exc_info=True)
         raise_api_exception(
@@ -228,6 +232,8 @@ async def get_products_with_data(
             end_date=end_date
         )
         return ListResponseBaseSchema.success(data=products_list, count=len(products_list))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取有数据的产品列表失败: {str(e)}", exc_info=True)
         raise_api_exception(
@@ -308,6 +314,8 @@ async def get_ad_data_date_range(
             client_id=client_id
         )
         return ResponseBaseSchema.success(data=date_range)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取日期范围失败: {str(e)}", exc_info=True)
         raise_api_exception(

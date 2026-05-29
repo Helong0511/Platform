@@ -11,6 +11,11 @@ from app.core.errors import ErrorCode, get_error_message, create_error_response
 logger = logging.getLogger(__name__)
 
 
+def is_http_exception(exc: BaseException) -> bool:
+    """判断是否为 FastAPI/Starlette 的 HTTPException（含 raise_api_exception 抛出）。"""
+    return isinstance(exc, HTTPException)
+
+
 def raise_api_exception(
         error_code: int,
         message: Optional[str] = None,

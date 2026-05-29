@@ -102,6 +102,8 @@ async def get_sensitive_path_probe_logs(
             page_size=page_size,
             message="获取敏感路径探测拦截日志成功",
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("获取敏感路径探测拦截日志失败: %s", exc, exc_info=True)
         raise_api_exception(
@@ -159,6 +161,8 @@ async def get_blocked_ips(
             page_size=page_size,
             message="获取黑名单IP列表成功",
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("获取黑名单IP列表失败: %s", exc, exc_info=True)
         raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"获取黑名单IP列表失败：{str(exc)}")
@@ -292,6 +296,8 @@ async def get_top_stats(
             data={"days": days, "limit": limit, "top_ips": top_ips, "top_paths": top_paths},
             message="获取TOP统计成功",
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("获取TOP统计失败: %s", exc, exc_info=True)
         raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"获取TOP统计失败：{str(exc)}")
@@ -324,6 +330,8 @@ async def cleanup_logs(
             },
             message="清理完成",
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         await db.rollback()
         logger.error("清理敏感路径拦截日志失败: %s", exc, exc_info=True)

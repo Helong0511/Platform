@@ -7,7 +7,7 @@ import logging
 import asyncio
 from typing import Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, Query, Path, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, Request, BackgroundTasks
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -241,6 +241,8 @@ async def track_click(
         # 7. 重定向
         return RedirectResponse(url=redirect_url, status_code=302)
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"点击追踪失败: {str(e)}", exc_info=True)
         raise_api_exception(

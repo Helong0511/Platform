@@ -4,7 +4,7 @@ Cap 管理 API（薄路由层）
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, Path
+from fastapi import APIRouter, Depends, Query, Path, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import MAX_PAGE_SIZE
@@ -148,6 +148,8 @@ async def check_cap_consistency_api(
         )
         logger.info("Cap计数一致性检查完成: %s", message)
         return ResponseBaseSchema.success(data=inconsistencies, message=message)
+    except HTTPException:
+        raise
     except Exception as e:
         from app.core.errors import ErrorCode
         from app.core.exceptions import raise_api_exception

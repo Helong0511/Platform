@@ -225,6 +225,8 @@ async def get_user_stats(
         await cache.set(cache_key, stats_data, ttl=300)
         
         return ResponseBaseSchema.success(data=stats_data)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取用户统计信息失败: {str(e)}", exc_info=True)
         raise_api_exception(

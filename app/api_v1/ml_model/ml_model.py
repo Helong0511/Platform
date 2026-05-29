@@ -17,7 +17,7 @@ from io import BytesIO
 from typing import Optional
 
 import pandas as pd
-from fastapi import APIRouter, Depends, UploadFile, File, Query, Body, Request
+from fastapi import APIRouter, Depends, UploadFile, File, Query, Body, Request, HTTPException
 from sqlalchemy import and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -1172,6 +1172,8 @@ async def get_timezone_config(
         return ResponseBaseSchema.success(data={
             "timezone": settings.TIMEZONE
         })
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取时区配置失败: {str(e)}")
         raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"获取时区配置失败: {str(e)}")

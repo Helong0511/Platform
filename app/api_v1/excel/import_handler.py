@@ -9,7 +9,7 @@ from io import BytesIO
 from typing import Any
 
 import pandas as pd
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 from sqlalchemy import or_, and_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1143,6 +1143,8 @@ async def import_ad_data_handler(
 
         return import_response
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Ad data import failed: {str(e)}")
         raise_api_exception(

@@ -4,7 +4,7 @@ Excel处理路由模块
 """
 from datetime import date
 
-from fastapi import APIRouter, Depends, UploadFile, File, Query
+from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -117,6 +117,8 @@ async def export_ad_data(
         )
 
         return response
+    except HTTPException:
+        raise
     except Exception as e:
         # 如果已经是通过raise_api_exception抛出的异常，会由异常处理器处理
         # 这里捕获其他未预期的异常

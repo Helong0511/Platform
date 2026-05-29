@@ -116,6 +116,8 @@ async def get_bot_status(
             admin_configured=admin_configured,
             message=status_message
         ))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"查询 Telegram Bot 状态时发生错误: {e}", exc_info=True)
         raise_api_exception(
@@ -177,6 +179,8 @@ async def send_message(
     except HTTPException:
         # 重新抛出 HTTPException（包括 raise_api_exception 抛出的）
         raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"发送 Telegram 消息时发生错误: {e}", exc_info=True)
         raise_api_exception(
@@ -233,6 +237,8 @@ async def test_bot_connection(
 
     except HTTPException:
         # 重新抛出 HTTPException
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         logger.error(f"测试 Telegram Bot 连接时发生错误: {e}", exc_info=True)

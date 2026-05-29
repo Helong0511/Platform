@@ -462,6 +462,8 @@ async def get_task_queue_status(
             message="获取队列状态成功",
             data=status
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取任务队列状态失败: {e}", exc_info=True)
         raise_api_exception(
@@ -492,6 +494,8 @@ async def get_scheduler_status(
         status_data = await task_service.get_scheduler_status()
         
         return ResponseBaseSchema.success(data=status_data)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取调度器状态失败: {e}", exc_info=True)
         raise_api_exception(

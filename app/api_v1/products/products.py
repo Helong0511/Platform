@@ -200,6 +200,8 @@ async def get_available_product_names(
         logger.debug(f"Available products: total={len(product_options)}")
 
         return ListResponseBaseSchema.success(data=product_options, count=len(product_options))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting available product names: {str(e)}", exc_info=True)
         raise_api_exception(
@@ -331,6 +333,8 @@ async def create_product(
     try:
         product_data = ProductResponse.model_validate(product)
         return ResponseBaseSchema.success(data=product_data)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"构建产品响应数据失败: {str(e)}", exc_info=True)
         raise_api_exception(

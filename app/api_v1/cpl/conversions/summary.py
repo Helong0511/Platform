@@ -4,7 +4,7 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -64,6 +64,8 @@ async def get_conversion_summary(
 
         # 服务层已返回完整的统计数据（包括总点击数、总转化率等）
         return ResponseBaseSchema.success(data=summary)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取转化总览统计失败: {str(e)}", exc_info=True)
         raise_api_exception(
@@ -97,6 +99,8 @@ async def get_summary_by_offer(
         )
 
         return ResponseBaseSchema.success(data=stats_list)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"按Offer统计失败: {str(e)}", exc_info=True)
         raise_api_exception(

@@ -7,7 +7,7 @@ from typing import Optional
 from urllib.parse import quote
 
 import pandas as pd
-from fastapi import APIRouter, Depends, Query, Path
+from fastapi import APIRouter, Depends, Query, Path, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -105,6 +105,8 @@ async def get_deduction_configs(
             page=page,
             page_size=page_size,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("获取扣减配置列表失败: %s", e, exc_info=True)
         raise_api_exception(ErrorCode.OPERATION_FAILED, detail=str(e))
@@ -225,6 +227,8 @@ async def get_deduction_stats(
             publisher_id=publisher_id,
         )
         return ResponseBaseSchema.success(data=DeductionStatsResponse(**stats_data))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("获取扣减统计失败: %s", e, exc_info=True)
         raise_api_exception(ErrorCode.OPERATION_FAILED, detail=str(e))
@@ -268,6 +272,8 @@ async def get_deduction_logs(
             page=page,
             page_size=page_size,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("获取扣减日志失败: %s", e, exc_info=True)
         raise_api_exception(ErrorCode.OPERATION_FAILED, detail=str(e))
@@ -306,6 +312,8 @@ async def export_deduction_configs(
         rows = [svc.config_to_export_row(c) for c in configs]
         logger.info("扣减配置导出: user=%s count=%s", current_user.username, len(rows))
         return _excel_response(rows, "扣减配置", "扣减配置")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("导出扣减配置失败: %s", e, exc_info=True)
         raise_api_exception(ErrorCode.OPERATION_FAILED, detail=str(e))
@@ -340,6 +348,8 @@ async def export_deduction_stats(
         stats = DeductionStatsResponse(**stats_data)
         rows = svc.stats_to_export_rows(stats)
         return _excel_response(rows, "扣减统计", "扣减统计")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("导出扣减统计失败: %s", e, exc_info=True)
         raise_api_exception(ErrorCode.OPERATION_FAILED, detail=str(e))
@@ -383,6 +393,8 @@ async def export_deduction_logs(
             )
         rows = [svc.log_to_export_row(log) for log in logs]
         return _excel_response(rows, "扣减日志", "扣减日志")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("导出扣减日志失败: %s", e, exc_info=True)
         raise_api_exception(ErrorCode.OPERATION_FAILED, detail=str(e))

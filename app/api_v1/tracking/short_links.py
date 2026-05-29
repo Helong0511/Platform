@@ -352,6 +352,8 @@ async def sync_short_link_clicks(
             return ResponseBaseSchema.success(
                 data={"synced_count": 0, "message": "没有需要同步的点击次数"}
             )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"手动同步短链接点击次数失败: {str(e)}", exc_info=True)
         raise_api_exception(

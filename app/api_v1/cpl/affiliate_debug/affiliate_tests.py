@@ -5,7 +5,7 @@ import logging
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, Query, Path
+from fastapi import APIRouter, Depends, Query, Path, HTTPException
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -136,6 +136,8 @@ async def create_affiliate_test(
 
         logger.info(f"下游测试记录创建成功: test_id={test.id}, status={status}")
         return ResponseBaseSchema.success(data=test_data)
+    except HTTPException:
+        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"创建下游测试记录失败: {str(e)}", exc_info=True)

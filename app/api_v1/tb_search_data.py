@@ -302,6 +302,8 @@ async def import_tb_search_data(
     try:
         from app.core.excel_io import read_excel_from_bytes
         df = await read_excel_from_bytes(contents)
+    except HTTPException:
+        raise
     except Exception as e:
         raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"读取Excel失败: {str(e)}")
 
@@ -651,6 +653,8 @@ async def get_clients_with_tb_search_data(
         clients_list.sort(key=lambda x: x["full_name"])
         
         return ListResponseBaseSchema.success(data=clients_list, count=len(clients_list))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取有TB搜索数据的客户列表失败: {str(e)}", exc_info=True)
         raise_api_exception(
@@ -744,6 +748,8 @@ async def get_products_with_tb_search_data(
         products_list.sort(key=lambda x: x["name"])
         
         return ListResponseBaseSchema.success(data=products_list, count=len(products_list))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取有TB搜索数据的产品列表失败: {str(e)}", exc_info=True)
         raise_api_exception(
@@ -856,6 +862,8 @@ async def get_countries_with_tb_search_data(
         unique_countries.sort(key=lambda x: x["name_zh"])
         
         return ListResponseBaseSchema.success(data=unique_countries, count=len(unique_countries))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取有TB搜索数据的国家列表失败: {str(e)}", exc_info=True)
         raise_api_exception(

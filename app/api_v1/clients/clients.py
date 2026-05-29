@@ -350,6 +350,8 @@ async def update_client(
         # 刷新对象以获取最新数据（在自动提交之前）
         await db.flush()
         await db.refresh(client)
+    except HTTPException:
+        raise
     except Exception as e:
         # 注意：不需要手动回滚事务，get_db 依赖会自动处理
         logger.error(f"更新客户失败: {str(e)}", exc_info=True)
@@ -512,6 +514,8 @@ async def update_client_switches(
     # 确保返回的数据包含最新的开关状态
     try:
         client_data = ClientResponse.model_validate(client)
+    except HTTPException:
+        raise
     except Exception as validation_error:
         logger.error(f"验证客户响应数据失败: {str(validation_error)}", exc_info=True)
         raise_api_exception(

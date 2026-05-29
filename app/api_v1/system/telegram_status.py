@@ -1,7 +1,7 @@
 """
 Telegram Bot 状态管理接口
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
@@ -42,6 +42,8 @@ async def restart_telegram_bot():
             data={"restarted": False},
             message="Telegram Bot 已经在运行",
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise_api_exception(
             ErrorCode.INTERNAL_ERROR,

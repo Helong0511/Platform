@@ -6,7 +6,7 @@ BFT S2S PostBack 接收接口（薄路由层）。
 """
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -29,6 +29,8 @@ async def receive_bft_postback(
 ):
     try:
         return await postback_bft_service.receive_bft_postback(request, db)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("接收 BFT PostBack 回调时发生错误: %s", e, exc_info=True)
         raise_api_exception(

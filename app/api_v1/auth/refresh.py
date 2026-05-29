@@ -5,16 +5,16 @@
 import logging
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
 from app.core.auth_response import build_token_json_response, raise_auth_error
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.errors import ErrorCode
-from app.core.exceptions import raise_api_exception
 from app.core.security import JWTUtils
 from app.models.models import User, UserRole, Publisher
 from app.schemas.auth import LoginResponse, RefreshTokenRequest
@@ -159,6 +159,8 @@ async def refresh_token(
             message="令牌刷新成功",
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"刷新令牌失败: {str(e)}", exc_info=True)
         raise_auth_error(

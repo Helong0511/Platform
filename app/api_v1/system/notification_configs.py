@@ -455,6 +455,8 @@ async def test_telegram_connection(
                 ErrorCode.OPERATION_FAILED,
                 detail="连接失败，请检查 Chat ID 是否正确"
             )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"测试 Telegram 连接失败: {str(e)}", exc_info=True)
         raise_api_exception(
@@ -495,6 +497,8 @@ async def send_test_message(
                 ErrorCode.OPERATION_FAILED,
                 detail="发送失败，请检查 Chat ID 是否正确"
             )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"发送测试消息失败: {str(e)}", exc_info=True)
         raise_api_exception(

@@ -6,7 +6,7 @@
 - 计算各种指标（覆盖率、展示率、点击率、ROI等）
 - 管理员可查看所有数据，客户只能查看自己的数据
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 from app.core.database import get_db
@@ -46,6 +46,8 @@ async def get_dashboard_stats(period: str = "week", db: AsyncSession = Depends(g
         )
         
         return ResponseBaseSchema.success(data=DashboardStatsResponse(**response_data))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取仪表盘统计数据失败: {str(e)}", exc_info=True)
         raise_api_exception(
@@ -112,6 +114,8 @@ async def get_trend_data(period: str = "week", db: AsyncSession = Depends(get_db
         )
         
         return ResponseBaseSchema.success(data=TrendDataResponse(**response_data))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取趋势数据失败: {str(e)}", exc_info=True)
         raise_api_exception(
