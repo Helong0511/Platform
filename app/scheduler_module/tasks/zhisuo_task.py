@@ -1,0 +1,98 @@
+"""
+zhisuo 定时任务模块
+功能：从 zhisuo API 获取广告单元数据，检查重复后插入到数据库
+"""
+import logging
+from datetime import datetime, timedelta
+
+import pytz
+
+from app.core.config import settings
+from app.scheduler_module.task_names import ZHISUO_API_TASK_NAME
+from app.scheduler_module.task_result_store import get_task_result, set_task_result
+from app.scheduler_module.task_utils import upstream_credential_missing
+from app.scheduler_module.upstream_fetch import fetch_zhisuo_unit_rows
+from app.scheduler_module.upstream_import import import_upstream_ad_data
+
+logger = logging.getLogger(__name__)
+
+APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
+
+ZHISUO_FIELD_MAPPING = {
+    "date": "date",
+    "ad_unit": "ad_unit_name",
+    "product_name": "domain_name",
+    "request_count": "ad_requests",
+    "match_count": "matched_requests",
+    "display_count": "ad_impressions",
+    "click_count": "clicks",
+    "revenue_before_deduct": "estimated_earnings",
+    "ecpm_before_deduct": "ecpm",
+    "coverage_rate": "coverage_rate",
+    "display_rate": "display_rate",
+    "click_rate": "click_through_rate",
+    "cpc": "cpc",
+}
+
+
+async def zhisuo_api_task(
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> None:
+    client_id = settings.ZHISUO_API_CLIENT_ID
+    api_key = settings.ZHISUO_API_KEY
+    base_url = settings.ZHISUO_API_BASE_URL
+
+    if upstream_credential_missing(client_id, api_key):
+        msg = "跳过: Zhisuo API 未配置（请在 .env 设置 ZHISUO_API_CLIENT_ID / ZHISUO_API_KEY）"
+        logger.warning(msg)
+        set_task_result(ZHISUO_API_TASK_NAME, msg)
+        return
+
+    app_time = datetime.now(APP_TIMEZONE)
+    current_time_str = app_time.strftime("%Y-%m-%d %H:%M:%S")
+    logger.info(
+        f"{ZHISUO_API_TASK_NAME} 开始执行 - {current_time_str}（时区: {settings.TIMEZONE}）"
+    )
+
+    try:
+        if start_date:
+            if end_date:
+                zhisuo_start = start_date
+                zhisuo_end = end_date
+            else:
+                zhisuo_start = start_date
+                zhisuo_end = start_date
+        else:
+            app_now = datetime.now(APP_TIMEZONE)
+            app_yesterday = app_now - timedelta(days=1)
+            yesterday_str = app_yesterday.strftime("%Y-%m-%d")
+            today_str = app_now.strftime("%Y-%m-%d")
+
+            if 0 <= app_now.hour <= 2:
+                zhisuo_start = yesterday_str
+                zhisuo_end = today_str
+            else:
+                zhisuo_start = today_str
+                zhisuo_end = today_str
+
+        data = await fetch_zhisuo_unit_rows(
+            base_url=base_url,
+            client_id=client_id,
+            api_key=api_key,
+            start=zhisuo_start,
+            end=zhisuo_end,
+        )
+        await import_upstream_ad_data(
+            task_name=ZHISUO_API_TASK_NAME,
+            data=data,
+            field_mapping=ZHISUO_FIELD_MAPPING,
+            source="zhisuo定时任务",
+            current_time_str=current_time_str,
+            notify_title="zhisuo",
+        )
+
+    except Exception as e:
+        error_msg = f"{ZHISUO_API_TASK_NAME} 执行失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        raise

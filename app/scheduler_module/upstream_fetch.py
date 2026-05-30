@@ -3,9 +3,20 @@
 """
 from __future__ import annotations
 
+import hashlib
+import time
 from typing import Any, Dict, List, Optional
 
-from app.scheduler_module.upstream_http import post_json, raise_unless_api_success
+from app.scheduler_module.upstream_http import get_json, post_json, raise_unless_api_success
+
+ZHISUO_UNIT_PATH = "/api/channelunit"
+
+
+def build_zhisuo_sign(params: Dict[str, Any]) -> str:
+    """按参数名 ASCII 排序后拼接并 MD5（小写）。"""
+    sorted_params = sorted(params.items())
+    query = "&".join(f"{k}={v}" for k, v in sorted_params)
+    return hashlib.md5(query.encode("utf-8")).hexdigest()
 
 
 async def fetch_huguang_rows(
@@ -107,3 +118,55 @@ async def fetch_addermobi_rows(
     json_data = await post_json(url, json_body=payload, headers=headers, label="Addermobi API")
     raise_unless_api_success(json_data, {0}, label="Addermobi API", code_key="status")
     return extract_addermobi_rows(json_data)
+
+
+async def fetch_zhisuo_unit_rows(
+    *,
+    base_url: str,
+    client_id: str,
+    api_key: str,
+    start: str,
+    end: str,
+    limit: int = 100,
+) -> List[Any]:
+    """拉取 zhisuo 广告单元报告（分页合并 list）。"""
+    base = base_url.rstrip("/")
+    all_rows: List[Any] = []
+    page = 1
+
+    while True:
+        timestamp = int(time.time() * 1000)
+        sign_params: Dict[str, Any] = {
+            "clientId": client_id,
+            "start_date": start,
+            "end_date": end,
+            "timestamp": timestamp,
+            "limit": limit,
+            "page": page,
+            "key": api_key,
+        }
+        sign = build_zhisuo_sign(sign_params)
+        request_params = {k: v for k, v in sign_params.items() if k != "key"}
+        request_params["sign"] = sign
+
+        json_data = await get_json(
+            base + ZHISUO_UNIT_PATH,
+            params=request_params,
+            label="Zhisuo API",
+        )
+        raise_unless_api_success(json_data, {1}, label="Zhisuo API", code_key="code")
+
+        data_block = json_data.get("data") or {}
+        if not isinstance(data_block, dict):
+            break
+
+        rows = data_block.get("list") or []
+        if isinstance(rows, list):
+            all_rows.extend(rows)
+
+        total_pages = int(data_block.get("total_pages") or 1)
+        if page >= total_pages:
+            break
+        page += 1
+
+    return all_rows

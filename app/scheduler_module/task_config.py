@@ -228,6 +228,17 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "*/30 * * * *",  # 每30分钟
         "description": "每隔30分钟执行一次，从Huguang API获取广告数据",
     },
+
+    # ========== zhisuo API获取数据任务 ==========
+    "zhisuo API获取数据": {
+        "task_name": "zhisuo API获取数据",
+        "task_module": "app.scheduler_module.tasks.zhisuo_task",
+        "task_function": "zhisuo_api_task",
+        "result_getter_module": "app.scheduler_module.tasks.zhisuo_task",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "*/30 * * * *",
+        "description": "每隔30分钟执行一次，从 zhisuo API 获取广告单元数据",
+    },
     # ==============================================================================
     # 添加新任务示例（取消注释并修改即可）
     # ==============================================================================

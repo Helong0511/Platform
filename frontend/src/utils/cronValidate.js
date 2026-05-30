@@ -68,5 +68,6 @@ export const DATE_RELATED_TASK_NAMES = [
   'Addermobi API获取数据',
   'Skymobi API获取数据',
   'yangyangdeyi API获取数据',
+  'zhisuo API获取数据',
   'TQT API获取数据',
 ];

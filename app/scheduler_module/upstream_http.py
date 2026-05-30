@@ -35,19 +35,26 @@ def parse_json_response(response: httpx.Response, *, label: str = "API") -> Dict
     return data
 
 
-async def post_json(
+async def _request_json(
+    method: str,
     url: str,
     *,
     json_body: Optional[Mapping[str, Any]] = None,
+    params: Optional[Mapping[str, Any]] = None,
     headers: Optional[Mapping[str, str]] = None,
     label: str = "API",
     timeout: float = 20.0,
     verify: bool = True,
 ) -> Dict[str, Any]:
-    """POST 请求并返回解析后的 JSON。"""
     try:
         async with httpx.AsyncClient(timeout=timeout, verify=verify) as client:
-            response = await client.post(url, json=json_body, headers=headers)
+            response = await client.request(
+                method,
+                url,
+                json=json_body,
+                params=params,
+                headers=headers,
+            )
     except httpx.TimeoutException as e:
         logger.error("%s 请求超时: %s", label, e)
         raise Exception(f"{label} 请求超时: 超过{timeout}秒未响应") from e
@@ -59,6 +66,48 @@ async def post_json(
     json_data = parse_json_response(response, label=label)
     logger.info("%s 响应: %s", label, json_data)
     return json_data
+
+
+async def post_json(
+    url: str,
+    *,
+    json_body: Optional[Mapping[str, Any]] = None,
+    headers: Optional[Mapping[str, str]] = None,
+    label: str = "API",
+    timeout: float = 20.0,
+    verify: bool = True,
+) -> Dict[str, Any]:
+    """POST 请求并返回解析后的 JSON。"""
+    return await _request_json(
+        "POST",
+        url,
+        json_body=json_body,
+        headers=headers,
+        label=label,
+        timeout=timeout,
+        verify=verify,
+    )
+
+
+async def get_json(
+    url: str,
+    *,
+    params: Optional[Mapping[str, Any]] = None,
+    headers: Optional[Mapping[str, str]] = None,
+    label: str = "API",
+    timeout: float = 20.0,
+    verify: bool = True,
+) -> Dict[str, Any]:
+    """GET 请求并返回解析后的 JSON。"""
+    return await _request_json(
+        "GET",
+        url,
+        params=params,
+        headers=headers,
+        label=label,
+        timeout=timeout,
+        verify=verify,
+    )
 
 
 def api_error_message(

@@ -466,15 +466,23 @@ class Settings(BaseSettings):
     # ====== 上游广告数据 API 凭证（仅 .env，代码内无默认值） ======
     TQT_APP_KEY: str = os.getenv("TQT_APP_KEY", "")
     TQT_API_SECRET: str = os.getenv("TQT_API_SECRET", "")
+    
     SKYMOBI_API_ID: str = os.getenv("SKYMOBI_API_ID", "")
     SKYMOBI_API_KEY: str = os.getenv("SKYMOBI_API_KEY", "")
+    
     HUGUANG_API_KEY: str = os.getenv("HUGUANG_API_KEY", "")
     HUGUANG_API_DOMAIN: str = os.getenv("HUGUANG_API_DOMAIN", "")
     HUGUANG_API_USERNAME: str = os.getenv("HUGUANG_API_USERNAME", "")
+    
     TBSJ_API_USERNAME: str = os.getenv("TBSJ_API_USERNAME", "")
     TBSJ_API_PASSWORD: str = os.getenv("TBSJ_API_PASSWORD", "")
+    
     ADDERMOBI_API_USERNAME: str = os.getenv("ADDERMOBI_API_USERNAME", "")
     ADDERMOBI_API_PASSWORD: str = os.getenv("ADDERMOBI_API_PASSWORD", "")
+    
+    ZHISUO_API_CLIENT_ID: str = os.getenv("ZHISUO_API_CLIENT_ID", "")
+    ZHISUO_API_KEY: str = os.getenv("ZHISUO_API_KEY", "")
+    ZHISUO_API_BASE_URL: str = os.getenv("ZHISUO_API_BASE_URL", "https://ch.tecnee.xyz")
 
     # ====== 敏感路径防护（防扫描 / 探测） ======
     ENABLE_SENSITIVE_PATH_GUARD: bool = os.getenv(
