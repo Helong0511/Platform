@@ -1,0 +1,48 @@
+import hashlib
+import time
+from datetime import date
+
+import requests
+
+url = "https://ch.tecnee.xyz"
+
+day_report = "/api/channeldaily"
+country = "/api/channelcountry"
+unit = "/api/channelunit"
+
+## 替换后的参数
+clientId = 'zhisuo24'                              # 客户ID（替换）
+key = '913453ad411f016cf4c3899bc1177e9d'           # 私钥（替换）
+
+start_date = date.today().isoformat()              # 当前日期，例如 '2026-05-29'
+end_date = date.today().isoformat()                # 结束日期（可根据需要调整）
+timestamp = int(time.time() * 1000)                # 当前13位毫秒时间戳
+page = 1
+limit = 100
+
+# 构建参数字典（key 在排序前添加）
+params = {
+    'clientId': clientId,
+    'start_date': start_date,
+    'end_date': end_date,
+    'timestamp': timestamp,
+    'limit': limit,
+    'page': page,
+    'key':key
+}
+
+# 按 ASCII 码排序（参数名排序）
+sorted_params = sorted(params.items())
+
+# 拼接查询字符串
+query_parts = [f"{k}={v}" for k, v in sorted_params]
+query = '&'.join(query_parts)
+
+# 生成签名（MD5，输出小写）
+sign = hashlib.md5(query.encode('utf-8')).hexdigest()
+del params['key']
+params['sign'] = sign
+# response = requests.get(url + day_report, params=params)
+response = requests.get(url + unit, params=params)
+print(response.json())
+

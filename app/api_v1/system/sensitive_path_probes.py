@@ -6,8 +6,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.core.audit_log import log_create, log_update, log_delete, log_deactivate, commit_audit_log
 from app.core.config import settings
@@ -24,6 +26,47 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 TOP_LIMIT_MAX = 50
+_BLOCKED_IP_UPSERT_RETRIES = 3
+
+
+async def _upsert_sensitive_blocked_ip(
+    db: AsyncSession,
+    ip: str,
+    reason: Optional[str],
+    update_reason: bool,
+) -> tuple[SensitiveBlockedIP, bool]:
+    """写入或激活 IP 黑名单；并发冲突时自动重试。返回 (记录, 是否为更新)。"""
+    last_exc: Optional[Exception] = None
+    for _ in range(_BLOCKED_IP_UPSERT_RETRIES):
+        try:
+            result = await db.execute(
+                select(SensitiveBlockedIP).where(SensitiveBlockedIP.blocked_ip == ip)
+            )
+            row = result.scalars().first()
+            if row:
+                row.is_active = True
+                if update_reason:
+                    row.reason = reason
+                row.updated_at = get_app_now_naive()
+                await db.commit()
+                await db.refresh(row)
+                return row, True
+
+            entity = SensitiveBlockedIP(
+                blocked_ip=ip,
+                reason=reason,
+                is_active=True,
+            )
+            db.add(entity)
+            await db.commit()
+            await db.refresh(entity)
+            return entity, False
+        except (IntegrityError, StaleDataError) as exc:
+            last_exc = exc
+            await db.rollback()
+            continue
+
+    raise last_exc or RuntimeError("封禁IP重试次数耗尽")
 
 
 class BlockIPPayload(BaseModel):
@@ -183,18 +226,15 @@ async def add_blocked_ip(
     ip = payload.blocked_ip.strip()
     if not ip:
         raise_api_exception(ErrorCode.VALIDATION_ERROR, detail="IP不能为空")
+    reason = (payload.reason or "").strip() or None
     try:
-        result = await db.execute(
-            select(SensitiveBlockedIP).where(SensitiveBlockedIP.blocked_ip == ip)
+        row, is_update = await _upsert_sensitive_blocked_ip(
+            db=db,
+            ip=ip,
+            reason=reason,
+            update_reason=payload.reason is not None,
         )
-        row = result.scalars().first()
-        if row:
-            row.is_active = True
-            if payload.reason is not None:
-                row.reason = payload.reason.strip() or None
-            row.updated_at = get_app_now_naive()
-            await db.commit()
-            await db.refresh(row)
+        if is_update:
             await log_update(
                 db=db,
                 user=current_user,
@@ -204,31 +244,22 @@ async def add_blocked_ip(
                 request=request,
                 details={"is_active": True, "reason": row.reason},
             )
-            await commit_audit_log(db)
-            data = {"id": row.id, "blocked_ip": row.blocked_ip, "is_active": row.is_active}
-            return ResponseBaseSchema.success(data=data, message="IP已更新为封禁状态")
-
-        entity = SensitiveBlockedIP(
-            blocked_ip=ip,
-            reason=(payload.reason or "").strip() or None,
-            is_active=True,
-        )
-        db.add(entity)
-        await db.commit()
-        await db.refresh(entity)
-        await log_create(
-            db=db,
-            user=current_user,
-            resource_type="SENSITIVE_BLOCKED_IP",
-            resource_id=entity.id,
-            resource_name=entity.blocked_ip,
-            request=request,
-            details={"reason": entity.reason},
-        )
+            message = "IP已更新为封禁状态"
+        else:
+            await log_create(
+                db=db,
+                user=current_user,
+                resource_type="SENSITIVE_BLOCKED_IP",
+                resource_id=row.id,
+                resource_name=row.blocked_ip,
+                request=request,
+                details={"reason": row.reason},
+            )
+            message = "IP封禁成功"
         await commit_audit_log(db)
         return ResponseBaseSchema.success(
-            data={"id": entity.id, "blocked_ip": entity.blocked_ip, "is_active": entity.is_active},
-            message="IP封禁成功",
+            data={"id": row.id, "blocked_ip": row.blocked_ip, "is_active": row.is_active},
+            message=message,
         )
     except HTTPException:
         raise
