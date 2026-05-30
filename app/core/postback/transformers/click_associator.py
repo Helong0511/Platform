@@ -66,15 +66,15 @@ class ClickAssociator:
 
         token_assoc = resolve_click_from_token(click_id)
         if token_assoc:
-            # 令牌可能只携带部分业务字段（例如早期 /change 在渠道回退前生成了 click_id）。
-            # 若缺少关键归因字段，则尝试回退 DB 再补全，避免出现“未关联渠道”但 clicks 表实际有值。
-            if token_assoc.get("publisher_id") is None:
-                db_assoc = await ClickAssociator.associate_from_db(click_id, db)
-                if db_assoc:
-                    merged = ClickAssociator._merge_token_and_db_association(
-                        db_assoc, token_assoc
-                    )
-                    return ClickAssociator._with_normalized_url_params(merged)
+            # 令牌内 url_params 常为空或已被裁剪；fbclid/dp/email/phone 等多在 clicks 表。
+            # 只要 DB 有对应行，始终合并 url_params 与 ip/ua 等落库字段。
+            db_assoc = await ClickAssociator.associate_from_db(click_id, db)
+            if db_assoc:
+                merged = ClickAssociator._merge_token_and_db_association(
+                    db_assoc, token_assoc
+                )
+                merged = await ClickAssociator._enrich_association(merged, db)
+                return ClickAssociator._with_normalized_url_params(merged)
             return ClickAssociator._with_normalized_url_params(
                 await ClickAssociator._enrich_association(token_assoc, db)
             )
