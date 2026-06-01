@@ -11,7 +11,7 @@ import { getSuccessMessage } from '../utils/messages';
 
 const {
   getUsers,
-  getUser: getUserDetail,
+  getUserDetail,
   createUser,
   updateUser,
   deleteUser: deleteUserBase

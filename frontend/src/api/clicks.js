@@ -5,7 +5,7 @@ import { createCrudApi } from '@/utils/crudApi';
 import { request } from '@/utils/api';
 import { withCsrfMutate } from '@/utils/csrfMutate';
 
-const { getClicks, getClick: getClickDetail } = createCrudApi('/api/v1/clicks', {
+const { getClicks, getClickDetail } = createCrudApi('/api/v1/clicks', {
   methodNames: {
     list: 'getClicks',
     get: 'getClickDetail'

@@ -10,7 +10,7 @@ import { ElMessage } from 'element-plus';
 import { getSuccessMessage } from '../utils/messages';
 
 const {
-  getClients: getClientList,
+  getClientList,
   createClient,
   updateClient: updateClientBase,
   deleteClient: deleteClientBase
