@@ -312,6 +312,7 @@ import { getOffers } from '@/api/offer'
 import { getPublishers } from '@/api/publisher'
 import * as echarts from 'echarts'
 import { logger } from '@/utils/logger'
+import { formatCurrency } from '@/utils/currencyFormat'
 
 const loading = ref(false)
 const dateRange = ref([])
@@ -342,16 +343,6 @@ const filterForm = reactive({
 const advertiserOptions = ref([])
 const offerOptions = ref([])
 const publisherOptions = ref([])
-
-// 格式化货币
-const formatCurrency = (amount) => {
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(amount)
-}
 
 // 获取统计数据
 const fetchStats = async () => {

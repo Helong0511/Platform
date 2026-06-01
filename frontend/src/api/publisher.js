@@ -11,5 +11,5 @@ export const {
   createPublisher,
   updatePublisher,
   deletePublisher
-} = createCrudApi('/api/v1/publishers');
+} = createCrudApi('/api/v1/publishers', { csrfOnMutate: true });
 

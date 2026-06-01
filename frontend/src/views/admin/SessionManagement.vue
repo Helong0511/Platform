@@ -258,6 +258,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue';
+import { useSessionManagementColumnVisibility } from '../../composables/useSessionManagementColumnVisibility';
 import { ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Search, Refresh, Delete, Setting } from '@element-plus/icons-vue';
 import { 
@@ -277,72 +278,13 @@ const isAdmin = computed(() => authStore.isAdmin);
 // 标签页
 const activeTab = ref('sessions');
 
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  id: true,  // 固定显示
-  ip_address: true,
-  device_info: true,
-  user_agent: true,
-  location: true,
-  is_active: true,
-  created_at: true,  // 固定显示
-  last_activity: true,
-  expires_at: true
-})
-
-const columnVisibility = reactive(getDefaultColumnVisibility())
-
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    // 当 checkbox-group 的值变化时，更新对象
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('sessionManagement_columnVisibility')
-    if (saved) {
-      const savedVisibility = JSON.parse(saved)
-      // 合并保存的设置和默认设置
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
-      // 确保固定列始终显示
-      columnVisibility.id = true
-      columnVisibility.created_at = true
-    }
-  } catch (error) {
-    logger.error('加载列显示设置失败:', error)
-  }
-}
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    // 只保存可调整的列，不保存固定列
-    const toSave = {
-      ip_address: columnVisibility.ip_address,
-      device_info: columnVisibility.device_info,
-      user_agent: columnVisibility.user_agent,
-      location: columnVisibility.location,
-      is_active: columnVisibility.is_active,
-      last_activity: columnVisibility.last_activity,
-      expires_at: columnVisibility.expires_at
-    }
-    localStorage.setItem('sessionManagement_columnVisibility', JSON.stringify(toSave))
-    columnSettingVisible.value = false
-    ElMessage.success('列显示设置已保存')
-  } catch (error) {
-    logger.error('保存列显示设置失败:', error)
-    ElMessage.error('保存设置失败')
-  }
-}
+const {
+  columnSettingVisible,
+  columnVisibility,
+  columnVisibilityArray,
+  loadColumnVisibility,
+  saveColumnVisibility
+} = useSessionManagementColumnVisibility();
 
 // 会话相关
 const loading = ref(false);
@@ -351,7 +293,6 @@ const sessions = ref([]);
 const sessionsPage = ref(1);
 const sessionsPageSize = ref(10);
 const sessionsTotal = ref(0);
-const columnSettingVisible = ref(false);
 
 // 黑名单相关
 const blacklistLoading = ref(false);

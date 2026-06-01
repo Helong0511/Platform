@@ -286,7 +286,7 @@ import {
   CircleCheck, CircleClose, Document, Box, Warning, View, Check
 } from '@element-plus/icons-vue';
 import { validateExcelData, getModelStatus, parseExcelColumns, saveMapping, previewExcelData, importTrainingData } from '../../api/ml-model';
-import { formatDateTime as formatDateTimeWithTimezone } from '../../utils/dateFormat';
+import { formatDateTime } from '../../utils/dateFormat';
 import { extractErrorMessage, isErrorHandled } from '../../utils/api';
 import { logger } from '../../utils/logger';
 
@@ -764,11 +764,6 @@ const handleImportExcel = async () => {
   } finally {
     importing.value = false;
   }
-};
-
-// 格式化日期时间（使用统一的时区格式化函数）
-const formatDateTime = (dateTimeStr) => {
-  return formatDateTimeWithTimezone(dateTimeStr);
 };
 
 // 组件挂载时加载状态

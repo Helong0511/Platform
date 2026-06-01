@@ -313,15 +313,25 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../store';
 import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElTag, ElIcon, ElLoading, ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Download, Search, Delete, InfoFilled, Setting, Right } from '@element-plus/icons-vue';
-import { getAdDataList, exportAdData, getProductsForSelect, getClientsWithData, getProductsWithData, getCountriesWithData, updateAdData, getProductById, deleteAdData, batchDeleteAdData, getAdDataDateRange } from '../api/ad-data';
+import { getAdDataList, exportAdData, getProductsForSelect, updateAdData, getProductById, deleteAdData, batchDeleteAdData, getAdDataDateRange } from '../api/ad-data';
 import { useRouter, useRoute } from 'vue-router';
 import { getSuccessMessage, getWarningMessage } from '../utils/messages';
-import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
+import { extractErrorMessage, isErrorHandled } from '../utils/api';
+import { ensureCsrfToken } from '../utils/csrfMutate';
 import { useDevice } from '../composables/useDevice';
+import { useAdDataTableFormat } from '../composables/useAdDataTableFormat';
+import {
+  useAdDataColumnVisibility,
+  createAdDataDefaultColumns,
+  AD_DATA_SAVABLE_COLUMN_KEYS
+} from '../composables/useAdDataColumnVisibility';
+import { useAdDataFilterCascade } from '../composables/useAdDataFilterCascade';
+import { useDebouncedPaginatedFetch } from '../composables/useDebouncedPaginatedFetch';
+import { useAdDataProductPanel } from '../composables/useAdDataProductPanel';
 import ProductManagementDialog from '../components/admin/ProductManagementDialog.vue';
 
 // 路由实例
@@ -337,26 +347,25 @@ const { isMobile, isTablet, isDesktop } = useDevice();
 
 // 状态管理
 const adDataList = ref([]);
-const products = ref([]); // 编辑对话框使用的产品列表
-const filterProducts = ref([{ label: '全部产品', value: '' }]); // 筛选表单使用的产品列表，初始化为至少包含"全部产品"选项
-const filterCountries = ref([{ code: '', name_zh: '全部区域' }]); // 筛选表单使用的国家列表
-const users = ref([]);
+const products = ref([]);
 const loading = ref(false);
-const columnSettingVisible = ref(false);
 const pagination = ref({
   current: 1,
   size: 10,
   total: 0
 });
 
-// 产品管理相关状态
-const productManagementVisible = ref(false);
-const selectedClientId = ref('');
-const selectedClientName = ref('');
-const selectedClientProducts = ref([]);
-const loadingProducts = ref(false);
-const selectedProductId = ref('');
-const selectedProductName = ref('');
+const {
+  productManagementVisible,
+  selectedClientId,
+  selectedClientName,
+  selectedClientProducts,
+  loadingProducts,
+  selectedProductId,
+  selectedProductName,
+  openProductPanel,
+  loadClientProducts
+} = useAdDataProductPanel();
 
 // 排序状态
 const sortInfo = ref({
@@ -372,415 +381,121 @@ const searchForm = ref({
   countryCode: '' // 国家代码筛选
 });
 
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  date: true,  // 固定显示
-  user_name: isAdmin.value,
-  product_name: true,  // 固定显示
-  ad_unit: true,
-  country_name_zh: true,
-  request_count: true,
-  match_count: true,
-  coverage_rate: true,
-  display_count: true,
-  display_rate: true,
-  click_count: true,
-  click_rate: true,
-  viewability_rate: true,
-  cpc: true,
-  pageviews: true,
-  ecpm_after_deduct: true,
-  ecpm_before_deduct: isAdmin.value,
-  revenue_after_deduct: true,
-  revenue_before_deduct: isAdmin.value
+const {
+  columnSettingVisible,
+  columnVisibility,
+  columnVisibilityArray,
+  loadColumnVisibility,
+  saveColumnVisibility
+} = useAdDataColumnVisibility(
+  'adData_columnVisibility',
+  () => createAdDataDefaultColumns(() => isAdmin.value),
+  AD_DATA_SAVABLE_COLUMN_KEYS
+);
+
+const { formatPercentage, formatCurrency, getSummaries } = useAdDataTableFormat({
+  getIsAdmin: () => isAdmin.value,
+  cpcSummaryMode: 'weighted'
 });
 
-const columnVisibility = reactive(getDefaultColumnVisibility());
+const {
+  users,
+  filterProducts,
+  filterCountries,
+  fetchClientsWithData,
+  fetchFilterProducts,
+  fetchFilterCountries,
+  handleFilterClientChange,
+  handleFilterProductChange,
+  handleCountryChange,
+  reloadFiltersAfterDateChange
+} = useAdDataFilterCascade({ searchForm, includeCountry: true });
 
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    // 当 checkbox-group 的值变化时，更新对象
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('adData_columnVisibility');
-    if (saved) {
-      const savedVisibility = JSON.parse(saved);
-      // 合并保存的设置和默认设置
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility);
-      // 确保固定列始终显示
-      columnVisibility.date = true;
-      columnVisibility.product_name = true;
-    }
-  } catch (error) {
-    console.error('加载列显示设置失败:', error);
-  }
-};
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    // 只保存可调整的列，不保存固定列
-    const toSave = {
-      user_name: columnVisibility.user_name,
-      ad_unit: columnVisibility.ad_unit,
-      country_name_zh: columnVisibility.country_name_zh,
-      request_count: columnVisibility.request_count,
-      match_count: columnVisibility.match_count,
-      coverage_rate: columnVisibility.coverage_rate,
-      display_count: columnVisibility.display_count,
-      display_rate: columnVisibility.display_rate,
-      click_count: columnVisibility.click_count,
-      click_rate: columnVisibility.click_rate,
-      viewability_rate: columnVisibility.viewability_rate,
-      cpc: columnVisibility.cpc,
-      pageviews: columnVisibility.pageviews,
-      ecpm_after_deduct: columnVisibility.ecpm_after_deduct,
-      ecpm_before_deduct: columnVisibility.ecpm_before_deduct,
-      revenue_after_deduct: columnVisibility.revenue_after_deduct,
-      revenue_before_deduct: columnVisibility.revenue_before_deduct
+const { runFetch: fetchAdData, cancel: cancelAdDataFetch } = useDebouncedPaginatedFetch({
+  loading,
+  pagination,
+  buildParams: () => {
+    const params = {
+      page: pagination.value.current,
+      page_size: pagination.value.size
     };
-    localStorage.setItem('adData_columnVisibility', JSON.stringify(toSave));
-    columnSettingVisible.value = false;
-    ElMessage.success('列显示设置已保存');
-  } catch (error) {
-    console.error('保存列显示设置失败:', error);
-    ElMessage.error('保存设置失败');
-  }
-};
-
-// 格式化百分比
-// 注意：后端返回的比率已经是百分比形式（如85.5表示85.5%），所以不需要再乘以100
-const formatPercentage = (row, column, value) => {
-  // value 已经是百分比数值（如85.5），直接添加%符号即可
-  // 确保始终显示两位小数，不足两位用0补齐
-  const numValue = Number(value);
-  if (isNaN(numValue)) {
-    return '0.00%';
-  }
-  return `${numValue.toFixed(2)}%`;
-};
-
-// 格式化货币
-const formatCurrency = (row, column, value) => {
-  // 确保始终显示两位小数，不足两位用0补齐
-  const numValue = Number(value);
-  if (isNaN(numValue)) {
-    return '$0.00';
-  }
-  return `$${numValue.toFixed(2)}`;
-};
-
-// 计算合计行
-const getSummaries = (param) => {
-  const { columns, data } = param;
-  const sums = [];
-  
-  columns.forEach((column, index) => {
-    if (index === 0) {
-      // 第一列是选择框，显示"合计"
-      sums[index] = '合计';
+    if (isAdmin.value && searchForm.value.clientId) {
+      params.client_id = searchForm.value.clientId;
+    }
+    if (searchForm.value.productId) {
+      params.product_id = searchForm.value.productId;
+    }
+    if (searchForm.value.countryCode) {
+      params.country_code = searchForm.value.countryCode;
+    }
+    if (searchForm.value.dateRange?.length === 2) {
+      params.start_date = searchForm.value.dateRange[0];
+      params.end_date = searchForm.value.dateRange[1];
+    }
+    if (sortInfo.value.prop) {
+      params.sort_by = sortInfo.value.prop;
+      params.sort_order = sortInfo.value.order === 'ascending' ? 'asc' : 'desc';
+    }
+    return params;
+  },
+  fetchPage: (params) => getAdDataList(params),
+  applyResponse: (response) => {
+    adDataList.value = response.data || [];
+    pagination.value.total =
+      typeof response.total === 'number'
+        ? response.total
+        : parseInt(response.total || 0, 10);
+    if (adDataList.value.length > 0) {
+      const requiredFields = ['date', 'product_name', 'request_count', 'match_count'];
+      const missingFields = requiredFields.filter((field) => !(field in adDataList.value[0]));
+      if (missingFields.length > 0) {
+        ElMessage.warning(`数据格式不完整，缺少字段: ${missingFields.join(', ')}`);
+      }
+    }
+  },
+  checkAuth: () => authStore.isAuthenticated,
+  onUnauthenticated: () => {
+    ElMessage.warning('登录已过期，请重新登录');
+    router.push('/login').catch(() => {
+      window.location.href = '/login';
+    });
+  },
+  afterEmpty: async (response) => {
+    if (
+      (response.data?.length ?? 0) > 0 ||
+      pagination.value.total > 0 ||
+      (searchForm.value.dateRange?.length ?? 0) > 0
+    ) {
       return;
     }
-    
-    const prop = column.property;
-    const values = data.map(item => Number(item[prop]) || 0);
-    
-    if (!values.every(value => isNaN(value))) {
-      if (prop === 'request_count' || prop === 'match_count' || prop === 'display_count' || prop === 'click_count') {
-        // 数值列：求和
-        sums[index] = values.reduce((prev, curr) => {
-          const value = Number(curr);
-          if (!isNaN(value)) {
-            return prev + curr;
-          } else {
-            return prev;
-          }
-        }, 0).toLocaleString();
-      } else if (prop === 'cpc') {
-        // CPC列：按公式计算
-        // 管理员登录：CPC = 收益（扣前）/ 点击数
-        // 客户端登录：CPC = 收益（扣后）/ 点击数
-        const totalClick = data.reduce((sum, item) => sum + (Number(item.click_count) || 0), 0);
-        let totalRevenue = 0;
-        if (isAdmin.value) {
-          // 管理员：使用收益（扣前）
-          totalRevenue = data.reduce((sum, item) => sum + (Number(item.revenue_before_deduct) || 0), 0);
-        } else {
-          // 客户端：使用收益（扣后）
-          totalRevenue = data.reduce((sum, item) => sum + (Number(item.revenue_after_deduct) || 0), 0);
-        }
-        const cpc = totalClick > 0 ? (totalRevenue / totalClick) : 0;
-        sums[index] = `$${cpc.toFixed(2)}`;
-      } else if (prop === 'pageviews') {
-        // PageViews列：求和
-        sums[index] = values.reduce((prev, curr) => {
-          const value = Number(curr);
-          if (!isNaN(value)) {
-            return prev + curr;
-          } else {
-            return prev;
-          }
-        }, 0).toLocaleString();
-      } else if (prop === 'revenue_after_deduct' || prop === 'revenue_before_deduct') {
-        // 收益列：求和
-        const sum = values.reduce((prev, curr) => {
-          const value = Number(curr);
-          if (!isNaN(value)) {
-            return prev + curr;
-          } else {
-            return prev;
-          }
-        }, 0);
-        sums[index] = `$${sum.toFixed(2)}`;
-      } else if (prop === 'coverage_rate') {
-        // 覆盖率 = (匹配数总和 / 请求数总和) * 100
-        const totalRequest = data.reduce((sum, item) => sum + (Number(item.request_count) || 0), 0);
-        const totalMatch = data.reduce((sum, item) => sum + (Number(item.match_count) || 0), 0);
-        const rate = totalRequest > 0 ? (totalMatch / totalRequest * 100) : 0;
-        sums[index] = `${rate.toFixed(2)}%`;
-      } else if (prop === 'display_rate') {
-        // 展示率 = (展示数总和 / 匹配数总和) * 100
-        const totalMatch = data.reduce((sum, item) => sum + (Number(item.match_count) || 0), 0);
-        const totalDisplay = data.reduce((sum, item) => sum + (Number(item.display_count) || 0), 0);
-        const rate = totalMatch > 0 ? (totalDisplay / totalMatch * 100) : 0;
-        sums[index] = `${rate.toFixed(2)}%`;
-      } else if (prop === 'click_rate') {
-        // 点击率 = (点击数总和 / 展示数总和) * 100
-        const totalDisplay = data.reduce((sum, item) => sum + (Number(item.display_count) || 0), 0);
-        const totalClick = data.reduce((sum, item) => sum + (Number(item.click_count) || 0), 0);
-        const rate = totalDisplay > 0 ? (totalClick / totalDisplay * 100) : 0;
-        sums[index] = `${rate.toFixed(2)}%`;
-      } else if (prop === 'viewability_rate') {
-        // 可见率：使用加权平均（基于点击数）
-        let totalWeighted = 0;
-        let totalWeight = 0;
-        data.forEach(item => {
-          const viewabilityRate = Number(item.viewability_rate) || 0;
-          const clickCount = Number(item.click_count) || 0;
-          if (viewabilityRate > 0 && clickCount > 0) {
-            totalWeighted += viewabilityRate * clickCount;
-            totalWeight += clickCount;
-          }
-        });
-        const rate = totalWeight > 0 ? (totalWeighted / totalWeight) : 0;
-        sums[index] = `${rate.toFixed(2)}%`;
-      } else if (prop === 'ecpm_after_deduct') {
-        // eCPM(扣) = (收益(扣)总和 / 展示数总和) * 1000
-        const totalDisplay = data.reduce((sum, item) => sum + (Number(item.display_count) || 0), 0);
-        const totalRevenue = data.reduce((sum, item) => sum + (Number(item.revenue_after_deduct) || 0), 0);
-        const ecpm = totalDisplay > 0 ? (totalRevenue / totalDisplay * 1000) : 0;
-        sums[index] = `$${ecpm.toFixed(2)}`;
-      } else if (prop === 'ecpm_before_deduct') {
-        // eCPM = (收益总和 / 展示数总和) * 1000
-        const totalDisplay = data.reduce((sum, item) => sum + (Number(item.display_count) || 0), 0);
-        const totalRevenue = data.reduce((sum, item) => sum + (Number(item.revenue_before_deduct) || 0), 0);
-        const ecpm = totalDisplay > 0 ? (totalRevenue / totalDisplay * 1000) : 0;
-        sums[index] = `$${ecpm.toFixed(2)}`;
-      } else {
-        // 其他列（日期、客户、产品、国家、操作）显示空
-        sums[index] = '';
-      }
-    } else {
-      sums[index] = '';
-    }
-  });
-  
-  return sums;
-};
-
-// 防抖定时器
-let fetchAdDataTimer = null;
-// 当前正在进行的请求Promise（用于请求去重）
-let currentRequestPromise = null;
-// 当前请求的参数（用于判断是否为重复请求）
-let currentRequestParams = null;
-
-// 获取广告数据
-const fetchAdData = async () => {
-  // 如果正在加载，直接返回，防止重复请求
-  if (loading.value) {
-    return;
-  }
-  
-  // 构建当前请求参数
-  const params = {
-    page: pagination.value.current,
-    page_size: pagination.value.size
-  };
-  if (isAdmin.value && searchForm.value.clientId) {
-    params.client_id = searchForm.value.clientId;
-  }
-  if (searchForm.value.productId) {
-    params.product_id = searchForm.value.productId;
-  }
-  if (searchForm.value.countryCode) {
-    params.country_code = searchForm.value.countryCode;
-  }
-  if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
-    params.start_date = searchForm.value.dateRange[0];
-    params.end_date = searchForm.value.dateRange[1];
-  }
-  
-  // 添加排序参数
-  if (sortInfo.value.prop) {
-    params.sort_by = sortInfo.value.prop;
-    params.sort_order = sortInfo.value.order === 'ascending' ? 'asc' : 'desc';
-  }
-  
-  // 检查是否为重复请求（相同的参数且正在请求中）
-  const paramsKey = JSON.stringify(params);
-  if (currentRequestPromise && currentRequestParams === paramsKey) {
-    // 相同的请求正在进行，等待现有请求完成
     try {
-      await currentRequestPromise;
-    } catch (error) {
-      // 忽略错误，让现有请求处理
-    }
-    return;
-  }
-  
-  // 清除之前的防抖定时器
-  if (fetchAdDataTimer) {
-    clearTimeout(fetchAdDataTimer);
-  }
-  
-  // 设置防抖：300ms内只执行最后一次
-  fetchAdDataTimer = setTimeout(async () => {
-    // 标记当前请求参数
-    currentRequestParams = paramsKey;
-    
-    // 创建请求Promise
-    const requestPromise = (async () => {
-      try {
-        loading.value = true;
-        
-        // 检查状态是否已认证
-        if (!authStore.isAuthenticated) {
-          ElMessage.warning('登录已过期，请重新登录');
-          router.push('/login').catch(() => {
-            window.location.href = '/login';
-          });
-          return;
-        }
-
-        const response = await getAdDataList(params);
-      
-      // response已经是标准分页格式，直接使用data和total字段
-      // getAdDataList使用paginated: true，失败时会抛出异常
-      adDataList.value = response.data || [];
-      
-      // 确保total是数字类型，避免字符串类型导致的计算错误
-      const totalValue = typeof response.total === 'number' ? response.total : parseInt(response.total || 0, 10);
-      pagination.value.total = totalValue;
-      
-      // 如果没有数据且没有选择日期范围，尝试获取数据的日期范围并提示用户
-      if (adDataList.value.length === 0 && pagination.value.total === 0 && 
-          (!searchForm.value.dateRange || searchForm.value.dateRange.length === 0)) {
-        try {
-          const clientId = isAdmin.value && searchForm.value.clientId ? searchForm.value.clientId : null;
-          const dateRange = await getAdDataDateRange(clientId);
-          if (dateRange && dateRange.min_date && dateRange.max_date) {
-            ElMessage.info({
-              message: `当前月暂无数据。数据日期范围：${dateRange.min_date} 至 ${dateRange.max_date}，请选择对应的日期范围进行查询。`,
-              duration: 8000,
-              showClose: true
-            });
-          } else {
-            ElMessage.info({
-              message: '当前月暂无数据。如果数据在其他月份，请选择对应的日期范围进行查询。',
-              duration: 5000,
-              showClose: true
-            });
-          }
-        } catch (error) {
-          // 如果获取日期范围失败，显示通用提示
-          ElMessage.info({
-            message: '当前月暂无数据。如果数据在其他月份，请选择对应的日期范围进行查询。',
-            duration: 5000,
-            showClose: true
-          });
-        }
+      const clientId =
+        isAdmin.value && searchForm.value.clientId ? searchForm.value.clientId : null;
+      const dateRange = await getAdDataDateRange(clientId);
+      if (dateRange?.min_date && dateRange?.max_date) {
+        ElMessage.info({
+          message: `当前月暂无数据。数据日期范围：${dateRange.min_date} 至 ${dateRange.max_date}，请选择对应的日期范围进行查询。`,
+          duration: 8000,
+          showClose: true
+        });
+      } else {
+        ElMessage.info({
+          message: '当前月暂无数据。如果数据在其他月份，请选择对应的日期范围进行查询。',
+          duration: 5000,
+          showClose: true
+        });
       }
-      
-        // 验证数据完整性
-        if (adDataList.value.length > 0) {
-          const requiredFields = ['date', 'product_name', 'request_count', 'match_count'];
-          const missingFields = requiredFields.filter(field => !(field in adDataList.value[0]));
-          if (missingFields.length > 0) {
-            ElMessage.warning(`数据格式不完整，缺少字段: ${missingFields.join(', ')}`);
-          }
-        }
-      } catch (error) {
-        // 401错误已在拦截器中处理，直接返回
-        if (error.response?.status === 401) {
-          loading.value = false;
-          return;
-        }
-        
-        // 检查错误是否已被处理（如拦截器或API函数已显示）
-        if (!isErrorHandled(error)) {
-          const errorMsg = extractErrorMessage(error);
-          ElMessage.error(errorMsg);
-        }
-      } finally {
-        loading.value = false;
-        // 清除当前请求标记
-        if (currentRequestParams === paramsKey) {
-          currentRequestPromise = null;
-          currentRequestParams = null;
-        }
-      }
-    })();
-    
-    // 保存当前请求Promise
-    currentRequestPromise = requestPromise;
-    
-    // 等待请求完成
-    await requestPromise;
-  }, 300);
-};
-
-// 获取有数据的客户列表（用于筛选）
-const fetchClientsWithData = async () => {
-  try {
-    // 获取当前日期范围（用于筛选客户）
-    let startDate = null;
-    let endDate = null;
-    if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
-      startDate = searchForm.value.dateRange[0];
-      endDate = searchForm.value.dateRange[1];
+    } catch {
+      ElMessage.info({
+        message: '当前月暂无数据。如果数据在其他月份，请选择对应的日期范围进行查询。',
+        duration: 5000,
+        showClose: true
+      });
     }
-    
-    const result = await getClientsWithData(startDate, endDate);
-    const data = result.data || [];
-    // 转换为下拉选择格式，添加"全部客户"选项
-    users.value = [
-      { label: '全部客户', value: '' },
-      ...data
-        .filter(item => item && item.id != null) // 过滤掉无效的客户
-        .map(item => ({
-          label: item.full_name || '未知客户',
-          value: item.id
-        }))
-    ];
-  } catch (error) {
-    // 静默失败，使用默认值
-    users.value = [{ label: '全部客户', value: '' }];
   }
-};
+});
 
-// 获取产品列表（用于筛选）
+// 编辑对话框产品下拉
 const fetchProducts = async (clientId) => {
   try {
     const data = await getProductsForSelect(clientId);
@@ -795,236 +510,20 @@ const fetchProducts = async (clientId) => {
   }
 };
 
-// 获取筛选表单的产品列表（只显示有数据的产品）
-/**
- * 获取筛选条件中的产品列表
- * 
- * 逻辑说明：
- * 1. 默认显示本月数据：
- *    - 客户=全部客户 → 产品=本月全部产品（可选择）
- *    - 客户=特定客户 → 产品=该客户本月全部产品（可选择）
- * 
- * 2. 选择了日期范围：
- *    - 客户=全部客户 → 产品=该日期范围全部产品（可选择）
- *    - 客户=特定客户 → 产品=该客户该日期范围全部产品（可选择）
- * 
- * @param {string|null} clientId - 客户ID，null表示全部客户
- */
-const fetchFilterProducts = async (clientId) => {
-  try {
-    // 获取当前日期范围（用于筛选产品）
-    // 如果没有选择日期范围，后端会默认使用本月数据
-    let startDate = null;
-    let endDate = null;
-    if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
-      startDate = searchForm.value.dateRange[0];
-      endDate = searchForm.value.dateRange[1];
-    }
-    
-    // 调用API获取产品列表
-    // - clientId = null（全部客户）→ 获取所有客户的产品
-    // - clientId = 具体值 → 只获取该客户的产品
-    // - 日期范围：如果选择了日期范围，使用该范围；否则后端默认使用本月数据
-    const result = await getProductsWithData(clientId || null, startDate, endDate);
-    const data = result.data || [];
-    
-    // 转换为下拉选择格式，按 id 倒序排序
-    const productOptions = data
-      .filter(item => item && item.id != null) // 过滤掉无效的产品
-      .map(item => ({
-        label: item.name || '未知产品',
-        value: String(item.id),
-        id: item.id // 保留 id 用于排序
-      }))
-      .sort((a, b) => {
-        // 按产品 id 倒序排序（从大到小）
-        return Number(b.id) - Number(a.id);
-      });
-    
-    // 添加"全部产品"选项到最前面
-    filterProducts.value = [
-      { label: '全部产品', value: '' },
-      ...productOptions
-    ];
-  } catch (error) {
-    if (!isErrorHandled(error)) {
-      const errorMsg = extractErrorMessage(error);
-      ElMessage.error(errorMsg);
-    }
-    // 确保至少有一个"全部产品"选项
-    filterProducts.value = [{ label: '全部产品', value: '' }];
-  }
-};
-
-/**
- * 客户选择变化时的处理函数
- * 
- * 当客户选择变化时：
- * - 清空当前产品选择和国家选择
- * - 重新加载产品列表（根据选择的客户和当前日期范围）
- * - 重新加载国家列表（根据选择的客户和当前日期范围）
- * 
- * @param {string|null} clientId - 选择的客户ID，null或空字符串表示全部客户
- */
-const handleFilterClientChange = async (clientId) => {
-  // 清空产品选择和国家选择
-  searchForm.value.productId = '';
-  searchForm.value.countryCode = '';
-  
-  // 重新加载产品列表
-  await fetchFilterProducts(clientId || null);
-  
-  // 重新加载国家列表（清空产品后，国家列表基于客户和日期范围）
-  await fetchFilterCountries(clientId || null, null);
-  
-  // 修复选中值显示
-  nextTick(() => {
-    setTimeout(() => {
-      // 强制更新 el-select 状态，确保选中值正确显示
-      if (typeof window.fixSelectDisplay === 'function') {
-        window.fixSelectDisplay();
-      }
-    }, 100)
-  })
-};
-
-/**
- * 筛选表单产品选择变化时的处理函数
- * 
- * 当筛选表单的产品选择变化时：
- * - 重新加载国家列表（根据当前客户、产品和日期范围）
- */
-const handleFilterProductChange = async () => {
-  const clientId = searchForm.value.clientId || null;
-  const productId = searchForm.value.productId ? parseInt(searchForm.value.productId) : null;
-  
-  // 重新加载国家列表
-  await fetchFilterCountries(clientId, productId);
-  
-  // 如果当前选择的国家不在新列表中，清空国家选择
-  if (searchForm.value.countryCode) {
-    const countryExists = filterCountries.value.some(c => c.code === searchForm.value.countryCode);
-    if (!countryExists) {
-      searchForm.value.countryCode = '';
-    }
-  }
-  
-  // 修复选中值显示
-  nextTick(() => {
-    setTimeout(() => {
-      // 强制更新 el-select 状态，确保选中值正确显示
-      if (typeof window.fixSelectDisplay === 'function') {
-        window.fixSelectDisplay();
-      }
-    }, 100)
-  })
-};
-
-/**
- * 获取筛选表单的国家列表（只显示有数据的国家）
- */
-const fetchFilterCountries = async (clientId = null, productId = null) => {
-  try {
-    // 获取当前日期范围（用于筛选国家）
-    let startDate = null;
-    let endDate = null;
-    if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
-      startDate = searchForm.value.dateRange[0];
-      endDate = searchForm.value.dateRange[1];
-    }
-    
-    // 调用API获取国家列表
-    const result = await getCountriesWithData(clientId, productId, startDate, endDate);
-    const data = result.data || [];
-    
-    // 转换为下拉选择格式
-    // 过滤掉code为空、null或'ZZ'的项，避免重复的"全部区域"选项
-    // 'ZZ'是后端返回的"全部区域"代码，前端使用空字符串''表示"全部区域"
-    const countryOptions = data
-      .filter(item => item && item.code != null && item.code !== '' && item.code !== 'ZZ')
-      .map(item => ({
-        code: item.code,
-        name_zh: item.name_zh || item.code
-      }))
-      // 去重：根据code去重，避免重复的国家选项
-      .filter((item, index, self) => 
-        index === self.findIndex(t => t.code === item.code)
-      )
-      .sort((a, b) => {
-        // 按国家名称排序
-        return a.name_zh.localeCompare(b.name_zh, 'zh-CN');
-      });
-    
-    // 确保只有一个"全部区域"选项，添加到最前面
-    filterCountries.value = [
-      { code: '', name_zh: '全部区域' },
-      ...countryOptions
-    ];
-  } catch (error) {
-    if (!isErrorHandled(error)) {
-      const errorMsg = extractErrorMessage(error);
-      ElMessage.error(errorMsg);
-    }
-    // 确保至少有一个"全部区域"选项
-    filterCountries.value = [{ code: '', name_zh: '全部区域' }];
-  }
-};
-
-/**
- * 国家选择变化时的处理函数
- */
-const handleCountryChange = () => {
-  // 国家选择变化时不需要重新加载其他数据
-  // 只需要在查询时使用新的国家筛选条件
-  
-  // 修复选中值显示
-  nextTick(() => {
-    setTimeout(() => {
-      // 强制更新 el-select 状态，确保选中值正确显示
-      if (typeof window.fixSelectDisplay === 'function') {
-        window.fixSelectDisplay();
-      }
-    }, 100)
-  })
-};
-
-
-
-/**
- * 日期范围变化时的处理函数
- * 
- * 当日期范围变化时：
- * - 重新加载有数据的客户列表（管理员）
- * - 重新加载产品列表（根据当前客户选择和新的日期范围）
- * - 重新加载国家列表（根据当前客户、产品和新的日期范围）
- * - 如果当前选择的产品在新日期范围内不存在，清空产品选择
- * - 如果当前选择的国家在新日期范围内不存在，清空国家选择
- */
 const handleDateRangeChange = async () => {
-  // 重新加载有数据的客户列表（管理员）
-  if (isAdmin.value) {
-    await fetchClientsWithData();
-  }
-  
-  // 重新加载有数据的产品列表
-  const clientId = searchForm.value.clientId || null;
-  await fetchFilterProducts(clientId);
-  
-  // 如果当前选择的产品不在新列表中，清空产品选择
+  await reloadFiltersAfterDateChange(isAdmin.value);
   if (searchForm.value.productId) {
-    const productExists = filterProducts.value.some(p => p.value === searchForm.value.productId);
+    const productExists = filterProducts.value.some(
+      (p) => p.value === searchForm.value.productId
+    );
     if (!productExists) {
       searchForm.value.productId = '';
     }
   }
-  
-  // 重新加载有数据的国家列表
-  const productId = searchForm.value.productId ? parseInt(searchForm.value.productId) : null;
-  await fetchFilterCountries(clientId, productId);
-  
-  // 如果当前选择的国家不在新列表中，清空国家选择
   if (searchForm.value.countryCode) {
-    const countryExists = filterCountries.value.some(c => c.code === searchForm.value.countryCode);
+    const countryExists = filterCountries.value.some(
+      (c) => c.code === searchForm.value.countryCode
+    );
     if (!countryExists) {
       searchForm.value.countryCode = '';
     }
@@ -1616,75 +1115,17 @@ onUnmounted(() => {
     clearTimeout(mountedTimeoutId);
     mountedTimeoutId = null;
   }
-  if (fetchAdDataTimer) {
-    clearTimeout(fetchAdDataTimer);
-    fetchAdDataTimer = null;
-  }
-  // 清理请求标记
-  currentRequestPromise = null;
-  currentRequestParams = null;
+  cancelAdDataFetch();
 });
 
-// 处理产品点击事件
 const handleProductClick = (row) => {
-  // 设置选中的客户信息
-  selectedClientId.value = row.client_id || authStore.userInfo?.id;
-  selectedClientName.value = row.user_name || authStore.userInfo?.full_name || '未知客户';
-  
-  // 设置选中的产品信息
-  selectedProductId.value = String(row.product_id || '');
-  selectedProductName.value = row.product_name || '';
-  
-  // 加载该客户的产品列表
-  loadClientProducts(selectedClientId.value);
-  
-  // 显示产品管理对话框
-  productManagementVisible.value = true;
+  openProductPanel(row, {
+    defaultClientId: authStore.userInfo?.id,
+    defaultClientName: authStore.userInfo?.full_name || '未知客户'
+  });
 };
 
-// 加载客户产品列表
-const loadClientProducts = async (clientId) => {
-  if (!clientId) {
-    selectedClientProducts.value = [];
-    return;
-  }
-  
-  loadingProducts.value = true;
-  try {
-    // 如果有选中的产品ID，使用 getProductById 获取完整的产品信息
-    if (selectedProductId.value) {
-      try {
-        const productDetail = await getProductById(selectedProductId.value);
-        if (productDetail) {
-          selectedClientProducts.value = [productDetail];
-        } else {
-          selectedClientProducts.value = [];
-        }
-      } catch (error) {
-        // 如果获取产品详情失败，使用 getProductsWithData 作为备选
-        const result = await getProductsWithData(clientId);
-        let products = result.data || [];
-        products = products.filter(product => String(product.id) === selectedProductId.value);
-        selectedClientProducts.value = products;
-      }
-    } else {
-      // 如果没有选中的产品ID，使用 getProductsWithData 获取所有产品
-      const result = await getProductsWithData(clientId);
-      selectedClientProducts.value = result.data || [];
-    }
-  } catch (error) {
-    if (!isErrorHandled(error)) {
-      ElMessage.error(extractErrorMessage(error));
-    }
-    selectedClientProducts.value = [];
-  } finally {
-    loadingProducts.value = false;
-  }
-};
-
-// 处理产品管理刷新事件
 const handleProductManagementRefresh = () => {
-  // 产品管理对话框关闭时刷新数据
   fetchAdData();
 };
 

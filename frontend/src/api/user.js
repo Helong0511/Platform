@@ -1,74 +1,34 @@
 /**
- * 用户管理API模块
- * 
- * 提供用户相关的所有API调用方法，包括：
- * - 用户列表查询（支持分页、筛选）
- * - 用户详情查询
- * - 用户创建、更新、删除
- * - 用户密码修改
- * - 用户数据导出
- * - 用户统计信息查询
- * 
- * 所有方法都包含完整的错误处理和CSRF令牌管理
- * 
+ * 用户管理 API：列表/详情/CRUD、密码、导出、统计
  * @module api/user
  */
-
-/**
- * 用户管理API模块
- * 已统一使用 request 函数，保持代码一致性
- * 包含特殊逻辑：搜索用户、文件导出、密码修改等
- */
-import { request, extractErrorMessage, ensureCsrfToken, refreshCsrfTokenBeforeRequest, handleError, refreshCsrfToken, requestBlobDownload } from '../utils/api';
+import { createCrudApi } from '@/utils/crudApi';
+import { request } from '../utils/api';
+import { requestListExport } from './helpers/exportDownload';
+import { prepareCsrfMutate, CSRF_REFRESH_USERS } from '../utils/csrfMutate';
 import { ElMessage } from 'element-plus';
-import { getSuccessMessage, getWarningMessage } from '../utils/messages';
+import { getSuccessMessage } from '../utils/messages';
 
-/**
- * 获取用户列表（支持分页和筛选）
- * 
- * 功能说明：
- * - 支持按用户名、角色等条件筛选
- * - 支持分页查询
- * - 返回标准化的分页响应格式
- * 
- * @param {Object} params - 查询参数对象
- * @param {number} params.page - 页码，从1开始，默认1
- * @param {number} params.page_size - 每页条数，默认10
- * @param {string} [params.username] - 用户名筛选（支持模糊匹配）
- * @param {string} [params.role] - 角色筛选，可选值：'admin' | 'client'
- * @param {boolean} [params.is_active] - 是否激活筛选，true/false
- * 
- * @returns {Promise<Object>} 返回标准化的分页响应对象
- * @returns {Object} 返回对象结构：
- *   - data: {Array<Object>} 用户列表数组
- *   - total: {number} 总记录数
- *   - page: {number} 当前页码
- *   - page_size: {number} 每页条数
- *   - total_pages: {number} 总页数
- * 
- * @example
- * // 获取第一页用户列表
- * const result = await getUsers({ page: 1, page_size: 10 });
- * console.log(result.data); // 用户列表
- * 
- * // 按角色筛选管理员
- * const admins = await getUsers({ role: 'admin', page: 1 });
- * 
- * @throws {Error} 当API请求失败时抛出错误，错误会被handleError处理
- */
-export const getUsers = async (params) => {
-  return request({
-    url: '/api/v1/users/',
-    method: 'get',
-    params
-  }, { paginated: true });
-};
+const {
+  getUsers,
+  getUser: getUserDetail,
+  createUser,
+  updateUser,
+  deleteUser: deleteUserBase
+} = createCrudApi('/api/v1/users', {
+  methodNames: {
+    list: 'getUsers',
+    get: 'getUserDetail',
+    create: 'createUser',
+    update: 'updateUser',
+    delete: 'deleteUser'
+  },
+  csrfOnMutate: true,
+  csrfEndpoint: CSRF_REFRESH_USERS
+});
 
-/**
- * 搜索用户（根据用户名或ID）
- * @param {string|number} searchTerm - 搜索关键词（用户名或ID）
- * @returns {Promise<Object|null>} 找到的用户对象，如果未找到返回null
- */
+export { getUsers, getUserDetail, createUser, updateUser };
+
 export const searchUser = async (searchTerm) => {
   try {
     if (!searchTerm || searchTerm.toString().trim() === '') {
@@ -76,19 +36,15 @@ export const searchUser = async (searchTerm) => {
     }
 
     const term = searchTerm.toString().trim();
-    
-    // 如果是纯数字，可能是ID，先尝试通过ID查找
+
     if (/^\d+$/.test(term)) {
       try {
-        const result = await request(
-          { url: `/api/v1/users/${term}`, method: 'get' },
-          { returnDataOnly: true, silent: true }
-        );
-        if (result && result.id) {
+        const result = await getUserDetail(term, { silent: true });
+        if (result?.id) {
           return result;
         }
       } catch {
-        // ID查找失败，继续用用户名查找
+        /* 继续按用户名查 */
       }
     }
 
@@ -100,125 +56,40 @@ export const searchUser = async (searchTerm) => {
       },
       { paginated: true, silent: true }
     );
-    
-    if (usersData.data && usersData.data.length > 0) {
-      // 精确匹配用户名
-      const exactMatch = usersData.data.find(user => 
-        user.username && user.username.toLowerCase() === term.toLowerCase()
+    if (usersData.data?.length > 0) {
+      const exactMatch = usersData.data.find(
+        (user) => user.username?.toLowerCase() === term.toLowerCase()
       );
-      if (exactMatch) {
-        return exactMatch;
-      }
-      // 返回第一个匹配结果
-      return usersData.data[0];
+      return exactMatch || usersData.data[0];
     }
-    
     return null;
-  } catch (error) {
-    // 静默失败，返回null
+  } catch {
     return null;
   }
 };
 
-/**
- * 获取用户详情
- * @param {number} id - 用户ID
- * @returns {Promise<Object>} 用户详情数据
- */
-export const getUserDetail = async (id) => {
-  return request({
-    url: `/api/v1/users/${id}`,
-    method: 'get'
-  }, { returnDataOnly: true });
-};
+/** 获取当前登录用户信息 */
+export const getCurrentUserInfo = async () =>
+  request({ url: '/api/v1/users/me', method: 'get' }, { returnDataOnly: true });
 
-/**
- * 获取当前用户信息
- * @returns {Promise<Object>} 当前用户信息
- */
-export const getCurrentUserInfo = async () => {
-  return request({
-    url: '/api/v1/users/me',
-    method: 'get'
-  }, { returnDataOnly: true });
-};
+/** @deprecated 请使用 getCurrentUserInfo */
+export const getCurrentUser = getCurrentUserInfo;
 
-/**
- * 创建用户
- * @param {Object} userData - 用户数据
- * @returns {Promise<Object>} 创建的用户数据
- */
-export const createUser = async (userData) => {
-  // 在保存前刷新CSRF令牌，确保使用最新的令牌
-  await refreshCsrfTokenBeforeRequest('/api/v1/users/stats');
-  
-  return request({
-    url: '/api/v1/users/',
-    method: 'post',
-    data: userData
-  }, { returnDataOnly: true });
-};
-
-/**
- * 更新用户
- * @param {number} id - 用户ID
- * @param {Object} userData - 用户数据
- * @returns {Promise<Object>} 更新后的用户数据
- */
-export const updateUser = async (id, userData) => {
-  // 在保存前刷新CSRF令牌，确保使用最新的令牌
-  await refreshCsrfTokenBeforeRequest('/api/v1/users/stats');
-  
-  return request({
-    url: `/api/v1/users/${id}`,
-    method: 'put',
-    data: userData
-  }, { returnDataOnly: true });
-};
-
-/**
- * 删除用户
- * @param {number} id - 用户ID
- * @returns {Promise<boolean>} 是否删除成功
- */
 export const deleteUser = async (id) => {
-  // 在删除前刷新CSRF令牌，确保使用最新的令牌
-  await refreshCsrfTokenBeforeRequest('/api/v1/users/stats');
-  
-  await request({
-    url: `/api/v1/users/${id}`,
-    method: 'delete'
-  });
+  await prepareCsrfMutate(CSRF_REFRESH_USERS);
+  await deleteUserBase(id);
   return true;
 };
 
-/**
- * 导出用户数据
- * @param {Object} params - 查询参数（与getUsers相同）
- * @returns {Promise<void>}
- */
-export const exportUsers = async (params = {}) => {
-  try {
-    return await requestBlobDownload(
-      { url: '/api/v1/users/export/excel', method: 'get', params },
-      {
-        defaultFilename: '用户数据.xlsx',
-        onSuccess: () => ElMessage.success(getSuccessMessage('USER_EXPORT_SUCCESS'))
-      }
-    );
-  } catch (error) {
-    const errorMsg = extractErrorMessage(error) || '导出失败';
-    if (errorMsg.includes('无数据') || errorMsg.includes('不能导出')) {
-      ElMessage.warning(getWarningMessage('NO_DATA_TO_EXPORT'));
+export const exportUsers = (params = {}) =>
+  requestListExport(
+    { url: '/api/v1/users/export/excel', method: 'get', params },
+    {
+      defaultFilename: '用户数据.xlsx',
+      onSuccess: () => ElMessage.success(getSuccessMessage('USER_EXPORT_SUCCESS'))
     }
-    throw error;
-  }
-};
+  );
 
-/**
- * 获取用户统计信息
- * @returns {Promise<Object>} 统计信息
- */
 export const getUserStats = async () => {
   return request({
     url: '/api/v1/users/stats',
@@ -226,26 +97,14 @@ export const getUserStats = async () => {
   }, { returnDataOnly: true });
 };
 
-/**
- * 修改当前用户密码
- * @param {Object} passwordData - 密码数据
- * @param {string} passwordData.old_password - 当前密码
- * @param {string} passwordData.new_password - 新密码
- * @returns {Promise<Object>} 更新结果
- */
 export const changePassword = async (passwordData) => {
-  // 在保存前刷新CSRF令牌，确保使用最新的令牌
-  await refreshCsrfToken('/api/v1/users/stats');
-  await ensureCsrfToken();
-  
-  return request({
-    url: '/api/v1/users/me/password',
-    method: 'put',
-    data: passwordData
-  }, { returnDataOnly: true });
+  await prepareCsrfMutate(CSRF_REFRESH_USERS);
+  return request(
+    {
+      url: '/api/v1/users/me/password',
+      method: 'put',
+      data: passwordData
+    },
+    { returnDataOnly: true }
+  );
 };
-
-/**
- * 退出登录
- * @returns {Promise<void>}
- */

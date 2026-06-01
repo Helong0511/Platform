@@ -1,7 +1,8 @@
 import { ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { getClientList, getClientDetail, createClient, updateClient, deleteClient } from '../api/client';
-import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
+import { extractErrorMessage, isErrorHandled } from '../utils/api';
+import { ensureCsrfToken } from '../utils/csrfMutate';
 
 /**
  * 客户管理 Composable

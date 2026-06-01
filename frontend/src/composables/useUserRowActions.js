@@ -2,7 +2,8 @@ import { ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { deleteUser, updateUser, getUserDetail } from '../api/user';
 import { updateClient, updateClientSwitches } from '../api/client';
-import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
+import { extractErrorMessage, isErrorHandled } from '../utils/api';
+import { ensureCsrfToken } from '../utils/csrfMutate';
 import { resolveClientIdForUser, ensureUserHasClient } from '../utils/userClient';
 import { logger } from '../utils/logger';
 

@@ -77,9 +77,7 @@ from sqlalchemy import func
 # Python 3.10+ 使用内置类型注解
 import logging
 from datetime import datetime
-from io import BytesIO
-from urllib.parse import quote
-import pandas as pd
+from app.core.excel_io import excel_streaming_response
 import uuid
 
 from app.core.database import get_db
@@ -319,22 +317,6 @@ async def export_users_excel(
 
         data.append(row)
 
-    # 创建Excel文件
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df = pd.DataFrame(data)
-        df.to_excel(writer, index=False, sheet_name="用户数据")
-
-        # 设置列宽自适应
-        worksheet = writer.sheets["用户数据"]
-        for column_cells in worksheet.columns:
-            max_length = max(len(str(cell.value)) for cell in column_cells) if column_cells else 0
-            worksheet.column_dimensions[column_cells[0].column_letter].width = min(max_length + 2, 50)
-
-    output.seek(0)
-    filename = f"用户数据_{get_app_now_naive().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    encoded_filename = quote(filename.encode('utf-8'))
-
     logger.info(f"User data exported by {current_user.username}, total: {len(data)} users")
 
     await log_user_action(
@@ -347,13 +329,7 @@ async def export_users_excel(
     )
     await commit_audit_log(db)
 
-    return StreamingResponse(
-        output,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
-        }
-    )
+    return excel_streaming_response(data, "用户数据", "用户数据")
 
 
 @router.get("/me", response_model=ResponseBaseSchema[UserResponse], summary="获取当前用户信息")

@@ -2,11 +2,8 @@
 转化扣减配置管理 API（薄路由层）
 """
 import logging
-from io import BytesIO
 from typing import Optional
-from urllib.parse import quote
 
-import pandas as pd
 from fastapi import APIRouter, Depends, Query, Path, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +20,7 @@ from app.core.audit_log import (
     log_deactivate,
     commit_audit_log,
 )
-from app.core.utils import get_app_now_naive
+from app.core.excel_io import excel_streaming_response
 from app.models.models import User
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.schemas.cpl.deduction import (
@@ -39,29 +36,6 @@ from app.services.cpl.conversion_deduction_service import ConversionDeductionSer
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-def _excel_response(rows: list, sheet_name: str, filename_prefix: str) -> StreamingResponse:
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df = pd.DataFrame(rows)
-        df.to_excel(writer, index=False, sheet_name=sheet_name)
-        worksheet = writer.sheets[sheet_name]
-        for column_cells in worksheet.columns:
-            max_length = max(
-                len(str(cell.value)) for cell in column_cells
-            ) if column_cells else 0
-            worksheet.column_dimensions[column_cells[0].column_letter].width = min(
-                max_length + 2, 50
-            )
-    output.seek(0)
-    filename = f"{filename_prefix}_{get_app_now_naive().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    encoded_filename = quote(filename.encode("utf-8"))
-    return StreamingResponse(
-        output,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
-    )
 
 
 @router.post(
@@ -399,7 +373,7 @@ async def export_deduction_configs(
             details={"row_count": len(rows), "export_type": "configs"},
         )
         await commit_audit_log(db)
-        return _excel_response(rows, "扣减配置", "扣减配置")
+        return excel_streaming_response(rows, "扣减配置", "扣减配置")
     except HTTPException:
         raise
     except Exception as e:
@@ -445,7 +419,7 @@ async def export_deduction_stats(
             details={"row_count": len(rows), "export_type": "stats"},
         )
         await commit_audit_log(db)
-        return _excel_response(rows, "扣减统计", "扣减统计")
+        return excel_streaming_response(rows, "扣减统计", "扣减统计")
     except HTTPException:
         raise
     except Exception as e:
@@ -500,7 +474,7 @@ async def export_deduction_logs(
             details={"row_count": len(rows), "export_type": "logs"},
         )
         await commit_audit_log(db)
-        return _excel_response(rows, "扣减日志", "扣减日志")
+        return excel_streaming_response(rows, "扣减日志", "扣减日志")
     except HTTPException:
         raise
     except Exception as e:

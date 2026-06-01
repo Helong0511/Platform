@@ -176,8 +176,8 @@
 
 <script setup>
 import { computed } from 'vue';
-import { ElMessage } from 'element-plus';
 import { formatDate } from '@/utils/dateFormat';
+import { copyToClipboard } from '@/utils/clipboard';
 
 const props = defineProps({
   modelValue: {
@@ -196,16 +196,6 @@ const visible = computed({
   get: () => props.modelValue,
   set: (value) => emit('update:modelValue', value)
 });
-
-const copyToClipboard = async (text) => {
-  if (!text) return;
-  try {
-    await navigator.clipboard.writeText(text);
-    ElMessage.success('已复制到剪贴板');
-  } catch (error) {
-    ElMessage.error('复制失败');
-  }
-};
 
 const formatJSON = (value) => {
   if (!value) return '-';

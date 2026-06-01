@@ -1,48 +1,75 @@
-import { request } from '@/utils/api'
+import { request } from '@/utils/api';
+import { withCsrfMutate } from '@/utils/csrfMutate';
+
+const LIST_TIMEOUT = 30000;
 
 export function getSensitivePathProbeLogs(params) {
-  return request({
-    url: '/api/v1/sensitive-path-probes/',
-    method: 'get',
-    params,
-  }, { paginated: true, timeout: 30000 })
+  return request(
+    {
+      url: '/api/v1/sensitive-path-probes/',
+      method: 'get',
+      params
+    },
+    { paginated: true, timeout: LIST_TIMEOUT }
+  );
 }
 
 export function getSensitivePathTopStats(params) {
-  return request({
-    url: '/api/v1/sensitive-path-probes/stats/top',
-    method: 'get',
-    params,
-  }, { returnDataOnly: true, timeout: 30000 })
+  return request(
+    {
+      url: '/api/v1/sensitive-path-probes/stats/top',
+      method: 'get',
+      params
+    },
+    { returnDataOnly: true, timeout: LIST_TIMEOUT }
+  );
 }
 
 export function getSensitiveBlockedIps(params) {
-  return request({
-    url: '/api/v1/sensitive-path-probes/blocked-ips',
-    method: 'get',
-    params,
-  }, { paginated: true, timeout: 30000 })
+  return request(
+    {
+      url: '/api/v1/sensitive-path-probes/blocked-ips',
+      method: 'get',
+      params
+    },
+    { paginated: true, timeout: LIST_TIMEOUT }
+  );
 }
 
 export function addSensitiveBlockedIp(data) {
-  return request({
-    url: '/api/v1/sensitive-path-probes/blocked-ips',
-    method: 'post',
-    data,
-  }, { returnDataOnly: true, timeout: 30000 })
+  return withCsrfMutate(() =>
+    request(
+      {
+        url: '/api/v1/sensitive-path-probes/blocked-ips',
+        method: 'post',
+        data
+      },
+      { returnDataOnly: true, timeout: LIST_TIMEOUT }
+    )
+  );
 }
 
 export function unblockSensitiveBlockedIp(id) {
-  return request({
-    url: `/api/v1/sensitive-path-probes/blocked-ips/${id}/unblock`,
-    method: 'post',
-  }, { returnDataOnly: true, timeout: 30000 })
+  return withCsrfMutate(() =>
+    request(
+      {
+        url: `/api/v1/sensitive-path-probes/blocked-ips/${id}/unblock`,
+        method: 'post'
+      },
+      { returnDataOnly: true, timeout: LIST_TIMEOUT }
+    )
+  );
 }
 
 export function cleanupSensitivePathProbeLogs(data) {
-  return request({
-    url: '/api/v1/sensitive-path-probes/cleanup',
-    method: 'post',
-    data,
-  }, { returnDataOnly: true, timeout: 30000 })
+  return withCsrfMutate(() =>
+    request(
+      {
+        url: '/api/v1/sensitive-path-probes/cleanup',
+        method: 'post',
+        data
+      },
+      { returnDataOnly: true, timeout: LIST_TIMEOUT }
+    )
+  );
 }

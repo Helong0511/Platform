@@ -71,31 +71,3 @@ export const logout = async () => {
     method: 'post'
   }, { returnDataOnly: true, silent: true });
 };
-
-/**
- * 获取当前用户信息
- * @returns {Promise<Object>} 用户信息
- */
-export const getCurrentUser = async () => {
-  return request({
-    url: '/api/v1/users/me',
-    method: 'get'
-  }, { returnDataOnly: true });
-};
-
-/**
- * 修改当前用户密码
- * @param {string} oldPassword - 旧密码
- * @param {string} newPassword - 新密码
- * @returns {Promise<Object>} 修改密码响应
- */
-export const changePassword = async (oldPassword, newPassword) => {
-  return request({
-    url: '/api/v1/users/me/password',
-    method: 'put',
-    data: {
-      old_password: oldPassword,
-      new_password: newPassword
-    }
-  }, { returnDataOnly: true });
-};

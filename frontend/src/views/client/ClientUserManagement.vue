@@ -149,8 +149,10 @@ import { Lock, Box, UserFilled, Setting } from '@element-plus/icons-vue';
 import { useAuthStore } from '../../store';
 import { getProductList } from '../../api/product';
 import { changePassword, getCurrentUserInfo } from '../../api/user';
-import { formatDate as formatDateWithTimezone } from '../../utils/dateFormat';
-import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../../utils/api';
+import { formatDate } from '../../utils/dateFormat';
+import { extractErrorMessage, isErrorHandled } from '../../utils/api';
+import { ensureCsrfToken } from '../../utils/csrfMutate';
+import { useClientUserManagementColumnVisibility } from '../../composables/useClientUserManagementColumnVisibility';
 
 // Store
 const authStore = useAuthStore();
@@ -204,73 +206,14 @@ const passwordRules = {
 // 产品列表
 const products = ref([]);
 const productsLoading = ref(false);
-const columnSettingVisible = ref(false);
 
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  id: true,
-  name: true,  // 固定显示
-  created_at: true
-})
-
-const columnVisibility = reactive(getDefaultColumnVisibility())
-
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    // 当 checkbox-group 的值变化时，更新对象
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('clientUserManagement_columnVisibility')
-    if (saved) {
-      const savedVisibility = JSON.parse(saved)
-      // 合并保存的设置和默认设置
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
-      // 确保产品名称始终显示
-      columnVisibility.name = true
-    }
-  } catch (error) {
-    console.error('加载列显示设置失败:', error)
-  }
-}
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    // 只保存可调整的列，不保存固定列
-    const toSave = {
-      id: columnVisibility.id,
-      created_at: columnVisibility.created_at
-    }
-    localStorage.setItem('clientUserManagement_columnVisibility', JSON.stringify(toSave))
-    columnSettingVisible.value = false
-    ElMessage.success('列显示设置已保存')
-  } catch (error) {
-    console.error('保存列显示设置失败:', error)
-    ElMessage.error('保存设置失败')
-  }
-}
-
-// 格式化百分比
-const formatPercentage = (value) => {
-  if (value === null || value === undefined) return '-';
-  return `${(value * 100).toFixed(2)}%`;
-};
-
-// 日期格式化
-const formatDate = (dateStr) => {
-  return formatDateWithTimezone(dateStr);
-};
+const {
+  columnSettingVisible,
+  columnVisibility,
+  columnVisibilityArray,
+  loadColumnVisibility,
+  saveColumnVisibility
+} = useClientUserManagementColumnVisibility();
 
 // 重置密码表单
 const resetPasswordForm = () => {

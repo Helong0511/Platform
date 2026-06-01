@@ -1,38 +1,25 @@
 /**
  * 短链接管理 API
- * 已统一使用 request 函数，保持代码一致性
  */
-import { request, refreshCsrfTokenBeforeRequest } from '../utils/api';
+import { createCrudApi } from '@/utils/crudApi';
+import { request } from '../utils/api';
+const {
+  getShortLinks,
+  createShortLink,
+  updateShortLink,
+  deleteShortLink
+} = createCrudApi('/api/v1/short-links', {
+  methodNames: {
+    list: 'getShortLinks',
+    create: 'createShortLink',
+    update: 'updateShortLink',
+    delete: 'deleteShortLink'
+  },
+  csrfOnMutate: true
+});
 
-/**
- * 创建短链接
- */
-export const createShortLink = async (linkData) => {
-  // 在保存前刷新CSRF令牌，确保使用最新的令牌
-  // 注意：使用不需要管理员权限的端点来刷新CSRF令牌
-  await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
-  
-  return request({
-    url: '/api/v1/short-links/',
-    method: 'post',
-    data: linkData
-  }, { returnDataOnly: true });
-};
+export { getShortLinks, createShortLink, updateShortLink, deleteShortLink };
 
-/**
- * 获取短链接列表
- */
-export const getShortLinks = async (params = {}) => {
-  return request({
-    url: '/api/v1/short-links/',
-    method: 'get',
-    params
-  }, { paginated: true });
-};
-
-/**
- * 获取短链接详情
- */
 export const getShortLinkDetail = async (linkId) => {
   return request({
     url: `/api/v1/short-links/${linkId}/detail`,
@@ -40,38 +27,6 @@ export const getShortLinkDetail = async (linkId) => {
   }, { returnDataOnly: true });
 };
 
-/**
- * 更新短链接
- */
-export const updateShortLink = async (linkId, linkData) => {
-  // 在保存前刷新CSRF令牌，确保使用最新的令牌
-  // 注意：使用不需要管理员权限的端点来刷新CSRF令牌
-  await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
-  
-  return request({
-    url: `/api/v1/short-links/${linkId}`,
-    method: 'put',
-    data: linkData
-  }, { returnDataOnly: true });
-};
-
-/**
- * 删除短链接
- */
-export const deleteShortLink = async (linkId) => {
-  // 在删除前刷新CSRF令牌，确保使用最新的令牌
-  // 注意：使用不需要管理员权限的端点来刷新CSRF令牌
-  await refreshCsrfTokenBeforeRequest('/api/v1/dashboard/stats');
-  
-  return request({
-    url: `/api/v1/short-links/${linkId}`,
-    method: 'delete'
-  }, { returnDataOnly: true });
-};
-
-/**
- * 获取短链接统计
- */
 export const getShortLinkStats = async () => {
   return request({
     url: '/api/v1/short-links/stats/summary',
@@ -79,9 +34,6 @@ export const getShortLinkStats = async () => {
   }, { returnDataOnly: true });
 };
 
-/**
- * 检查短链接代码是否存在
- */
 export const checkShortCode = async (shortCode) => {
   return request({
     url: `/api/v1/short-links/check-code/${shortCode}`,
@@ -89,9 +41,6 @@ export const checkShortCode = async (shortCode) => {
   }, { returnDataOnly: true });
 };
 
-/**
- * 生成短链接代码
- */
 export const generateShortCode = async () => {
   return request({
     url: '/api/v1/short-links/generate-code',

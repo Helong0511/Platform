@@ -1,14 +1,67 @@
 """
-Excel 异步读取（避免在 async 路由中阻塞事件循环）
+Excel 读写工具：异步读取、同步导出流
 """
 import asyncio
 import logging
 from io import BytesIO
-from typing import Optional
+from typing import Any, List, Optional, Union
+from urllib.parse import quote
 
 import pandas as pd
+from fastapi.responses import StreamingResponse
+
+from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
+
+EXCEL_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+RowsInput = Union[List[dict[str, Any]], List[Any]]
+
+
+def build_excel_bytes(
+        rows: RowsInput,
+        sheet_name: str,
+        *,
+        max_col_width: Optional[int] = 50,
+) -> BytesIO:
+    """
+    将行数据写入 xlsx，返回可 seek(0) 的 BytesIO。
+    max_col_width=None 时不限制列宽上限（仅 max_length+2）。
+    """
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df = pd.DataFrame(rows)
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+        worksheet = writer.sheets[sheet_name]
+        for column_cells in worksheet.columns:
+            max_length = max(
+                len(str(cell.value)) for cell in column_cells
+            ) if column_cells else 0
+            width = max_length + 2
+            if max_col_width is not None:
+                width = min(width, max_col_width)
+            worksheet.column_dimensions[column_cells[0].column_letter].width = width
+    output.seek(0)
+    return output
+
+
+def excel_streaming_response(
+        rows: RowsInput,
+        sheet_name: str,
+        filename_prefix: str,
+        *,
+        max_col_width: Optional[int] = 50,
+) -> StreamingResponse:
+    """生成带时间戳文件名的 Excel 下载响应。"""
+    output = build_excel_bytes(rows, sheet_name, max_col_width=max_col_width)
+    filename = f"{filename_prefix}_{get_app_now_naive().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    encoded_filename = quote(filename.encode("utf-8"))
+    return StreamingResponse(
+        output,
+        media_type=EXCEL_MEDIA_TYPE,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
+    )
 
 
 async def read_excel_from_bytes(

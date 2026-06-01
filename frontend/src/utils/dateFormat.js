@@ -1,8 +1,7 @@
-import { ElMessage } from 'element-plus';
-import { getTimezone } from '../api/ml-model';
+import { getTimezone } from '../api/app-config';
 
 // 时区缓存（避免重复请求）
-let cachedTimezone = 'Asia/Shanghai'; // 默认值
+let cachedTimezone = 'Asia/Shanghai';
 let timezoneInitialized = false;
 let timezonePromise = null;
 
@@ -14,34 +13,28 @@ export const initTimezone = async () => {
   if (timezoneInitialized) {
     return;
   }
-  
-  // 直接尝试获取时区配置，如果失败（如未登录）则使用默认值
-  // 系统使用 HttpOnly Cookie，axios 会自动携带认证信息
+
   if (!timezonePromise) {
-    timezonePromise = getTimezone().then(tz => {
+    timezonePromise = getTimezone().then((tz) => {
       cachedTimezone = tz;
       timezoneInitialized = true;
       return tz;
     }).catch(() => {
-      // 如果获取失败（如未登录或网络错误），使用默认值
       cachedTimezone = 'Asia/Shanghai';
       timezoneInitialized = true;
       return cachedTimezone;
     });
   }
-  
+
   return timezonePromise;
 };
 
 /**
  * 格式化日期时间（同步版本，使用缓存的时区）
- * @param {string} dateString - 日期字符串（ISO 8601格式，带时区信息，后端返回的是应用时区）
- * @returns {string} 格式化后的日期字符串（应用配置的时区）
  */
 export const formatDate = (dateString) => {
   if (!dateString) return '-';
   const date = new Date(dateString);
-  // 使用缓存的时区或默认值
   return date.toLocaleString('zh-CN', {
     timeZone: cachedTimezone,
     year: 'numeric',
@@ -53,14 +46,11 @@ export const formatDate = (dateString) => {
 };
 
 /**
- * 格式化日期时间（完整格式，同步版本）
- * @param {string} dateString - 日期字符串（ISO 8601格式，带时区信息，后端返回的是应用时区）
- * @returns {string} 格式化后的日期时间字符串（应用配置的时区）
+ * 格式化日期时间（含秒）
  */
 export const formatDateTime = (dateString) => {
   if (!dateString) return '-';
   const date = new Date(dateString);
-  // 使用缓存的时区或默认值
   return date.toLocaleString('zh-CN', {
     timeZone: cachedTimezone,
     year: 'numeric',
@@ -73,18 +63,15 @@ export const formatDateTime = (dateString) => {
 };
 
 /**
- * 复制文本到剪贴板
- * @param {string} text - 要复制的文本
- * @returns {Promise<boolean>} 是否复制成功
+ * 仅日期（产品分配历史等）
  */
-export const copyToClipboard = async (text) => {
-  try {
-    await navigator.clipboard.writeText(text);
-    ElMessage.success('已复制到剪贴板');
-    return true;
-  } catch (error) {
-    ElMessage.error('复制失败');
-    return false;
-  }
+export const formatDateOnly = (dateStr) => {
+  if (!dateStr) return '-';
+  const date = new Date(dateStr);
+  return date.toLocaleDateString('zh-CN', {
+    timeZone: cachedTimezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
 };
-

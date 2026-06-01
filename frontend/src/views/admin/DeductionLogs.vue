@@ -327,7 +327,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
+import { useDeductionLogsColumnVisibility } from '../../composables/useDeductionLogsColumnVisibility'
 import { ElMessage, ElTooltip, ElDescriptions, ElDescriptionsItem, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Search, Refresh, Document, Download, Setting } from '@element-plus/icons-vue'
 import { getDeductionLogs } from '@/api/deduction'
@@ -335,13 +336,13 @@ import { getAdvertisers } from '@/api/advertiser'
 import { getOffers } from '@/api/offer'
 import { getPublishers } from '@/api/publisher'
 import { logger } from '@/utils/logger'
+import { formatCurrency } from '@/utils/currencyFormat'
 
 const loading = ref(false)
 const tableData = ref([])
 const dateRange = ref([])
 const detailDialogVisible = ref(false)
 const currentLog = ref(null)
-const columnSettingVisible = ref(false)
 
 const searchForm = reactive({
   start_time: null,
@@ -363,84 +364,13 @@ const advertiserOptions = ref([])
 const offerOptions = ref([])
 const publisherOptions = ref([])
 
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  id: true,  // 固定显示
-  conversion_id: true,
-  click_id: true,  // 固定显示
-  advertiser_name: true,
-  offer_name: true,
-  publisher_name: true,
-  volume_deduction: true,
-  amount_deduction: true,
-  deduction_strategy: true,
-  created_at: true
-})
-
-const columnVisibility = reactive(getDefaultColumnVisibility())
-
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    // 当 checkbox-group 的值变化时，更新对象
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('deductionLogs_columnVisibility')
-    if (saved) {
-      const savedVisibility = JSON.parse(saved)
-      // 合并保存的设置和默认设置
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
-      // 确保固定列始终显示
-      columnVisibility.id = true
-      columnVisibility.click_id = true
-    }
-  } catch (error) {
-    logger.error('加载列显示设置失败:', error)
-  }
-}
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    // 只保存可调整的列，不保存固定列
-    const toSave = {
-      conversion_id: columnVisibility.conversion_id,
-      advertiser_name: columnVisibility.advertiser_name,
-      offer_name: columnVisibility.offer_name,
-      publisher_name: columnVisibility.publisher_name,
-      volume_deduction: columnVisibility.volume_deduction,
-      amount_deduction: columnVisibility.amount_deduction,
-      deduction_strategy: columnVisibility.deduction_strategy,
-      created_at: columnVisibility.created_at
-    }
-    localStorage.setItem('deductionLogs_columnVisibility', JSON.stringify(toSave))
-    columnSettingVisible.value = false
-    ElMessage.success('列显示设置已保存')
-  } catch (error) {
-    logger.error('保存列显示设置失败:', error)
-    ElMessage.error('保存设置失败')
-  }
-}
-
-// 格式化货币
-const formatCurrency = (amount) => {
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(amount)
-}
+const {
+  columnSettingVisible,
+  columnVisibility,
+  columnVisibilityArray,
+  loadColumnVisibility,
+  saveColumnVisibility
+} = useDeductionLogsColumnVisibility()
 
 // 获取策略标签
 const getStrategyLabel = (strategy) => {

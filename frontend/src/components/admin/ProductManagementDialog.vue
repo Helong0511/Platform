@@ -551,7 +551,8 @@ import { Plus, Edit, Delete, Box, Clock, InfoFilled, Check, CircleCheck, CircleC
 import { getAvailableProductNames, getProductDetail, getProductAssignments } from '../../api/product';
 import { getClientDetail } from '../../api/client';
 import { logger } from '../../utils/logger';
-import { formatDate as formatDateWithTimezone } from '../../utils/dateFormat';
+import { formatDate } from '../../utils/dateFormat';
+import { formatRatioAsPercent as formatPercentage } from '../../utils/percentFormat';
 import { useDevice } from '../../composables/useDevice';
 import ProductAssignmentHistoryDialog from './ProductAssignmentHistoryDialog.vue';
 
@@ -778,14 +779,6 @@ watch(visible, (val) => {
   emit('update:modelValue', val);
 });
 
-const formatDate = (dateString) => {
-  // 使用统一的时区格式化函数
-  return formatDateWithTimezone(dateString);
-};
-
-const formatPercentage = (value) => {
-  return ((value || 0) * 100).toFixed(2) + '%';
-};
 
 const handleClose = () => {
   visible.value = false;

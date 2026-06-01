@@ -11,10 +11,7 @@
 import logging
 import re
 import uuid
-from io import BytesIO
-from urllib.parse import quote
-
-import pandas as pd
+from app.core.excel_io import excel_streaming_response
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, Path
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -621,22 +618,6 @@ async def export_clients_excel(
 
         data.append(row)
 
-    # 创建Excel文件
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df = pd.DataFrame(data)
-        df.to_excel(writer, index=False, sheet_name="客户数据")
-
-        # 设置列宽自适应
-        worksheet = writer.sheets["客户数据"]
-        for column_cells in worksheet.columns:
-            max_length = max(len(str(cell.value)) for cell in column_cells) if column_cells else 0
-            worksheet.column_dimensions[column_cells[0].column_letter].width = min(max_length + 2, 50)
-
-    output.seek(0)
-    filename = f"客户数据_{get_app_now_naive().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    encoded_filename = quote(filename.encode('utf-8'))
-
     logger.info(f"Client data exported by {current_user.username}, total: {len(data)} clients")
 
     await log_user_action(
@@ -649,13 +630,7 @@ async def export_clients_excel(
     )
     await commit_audit_log(db)
 
-    return StreamingResponse(
-        output,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
-        }
-    )
+    return excel_streaming_response(data, "客户数据", "客户数据")
 
 
 @router.delete("/{client_id}", response_model=ResponseBaseSchema[dict], summary="删除客户")

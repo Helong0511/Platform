@@ -214,7 +214,7 @@ import { useShortLinkColumnVisibility } from '../../composables/useShortLinkColu
 import { useShortLinkList } from '../../composables/useShortLinkList';
 import { useShortLinkForm } from '../../composables/useShortLinkForm';
 import { copyToClipboard } from '../../utils/clipboard';
-import { formatDate as formatDateWithTimezone } from '../../utils/dateFormat';
+import { formatDate } from '../../utils/dateFormat';
 import ShortLinkFormDialog from './ShortLinkFormDialog.vue';
 
 const {
@@ -258,8 +258,6 @@ const {
   handleGenerateCode,
   handleDialogClose,
 } = useShortLinkForm({ refreshListAndStats });
-
-const formatDate = formatDateWithTimezone;
 
 bindRouteSearchWatch();
 

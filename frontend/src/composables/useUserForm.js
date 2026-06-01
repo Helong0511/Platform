@@ -6,8 +6,9 @@ import {
   getUserDetail,
 } from '../api/user';
 import { updateClient, createClient } from '../api/client';
-import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
-import { formatDate as formatDateWithTimezone } from '../utils/dateFormat';
+import { extractErrorMessage, isErrorHandled } from '../utils/api';
+import { ensureCsrfToken } from '../utils/csrfMutate';
+import { formatDate } from '../utils/dateFormat';
 import { generateUUID } from '../utils/uuid';
 import { logger } from '../utils/logger';
 
@@ -115,8 +116,6 @@ export function useUserForm({ users, loading, fetchUsers, fetchStats }) {
     }
     return rules;
   });
-
-  const formatDate = (dateStr) => formatDateWithTimezone(dateStr);
 
   const handleUsernameBlur = () => {
     if (!currentUserId.value && userForm.username?.trim()) {

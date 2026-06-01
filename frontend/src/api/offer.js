@@ -14,6 +14,7 @@ export const {
   deleteOffer,
   checkOfferShortLink
 } = createCrudApi('/api/v1/offers', {
+  csrfOnMutate: true,
   customMethods: {
     /**
      * 检查Offer的短链接是否存在

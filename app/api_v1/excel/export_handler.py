@@ -5,10 +5,6 @@ Excel导出处理模块
 import logging
 from calendar import monthrange
 from datetime import date, datetime
-from io import BytesIO
-from urllib.parse import quote
-
-import pandas as pd
 from fastapi import Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, and_, or_, text
@@ -20,7 +16,7 @@ from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.query_utils import check_use_assignment_table
 from app.core.security import get_current_user
-from app.core.utils import get_app_now_naive
+from app.core.excel_io import excel_streaming_response
 from app.models.models import User, Client, Product, AdData, UserRole, ProductAssignment, CountryInfo
 
 logger = logging.getLogger(__name__)
@@ -247,144 +243,105 @@ async def export_ad_data_handler(
             detail=f"当前筛选条件下没有可导出的数据（{filter_text}）。请调整筛选条件或确认是否有数据后重试"
         )
 
-    # 创建Excel文件
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # 根据用户角色定义列名
-        is_admin = current_user.role == UserRole.ADMIN
+    is_admin = current_user.role == UserRole.ADMIN
 
-        # 获取所有相关产品信息
-        product_ids = list({ad_data.product_id for ad_data, _ in ad_data_results})
-        products_query = select(Product).where(Product.id.in_(product_ids))
-        products_result = await db.execute(products_query)
-        products = products_result.scalars().all()
-        product_map = {p.id: p.name for p in products}
+    product_ids = list({ad_data.product_id for ad_data, _ in ad_data_results})
+    products_query = select(Product).where(Product.id.in_(product_ids))
+    products_result = await db.execute(products_query)
+    products = products_result.scalars().all()
+    product_map = {p.id: p.name for p in products}
 
-        # 创建产品ID到客户用户名的映射（仅管理员需要）
-        product_to_user_map = {}
+    product_to_user_map = {}
+    if is_admin:
+        client_ids = list({p.client_id for p in products})
+        clients_query = select(Client, User).join(
+            User, Client.user_id == User.id
+        ).where(Client.id.in_(client_ids))
+        clients_result = await db.execute(clients_query)
+        client_user_map = {}
+        for client, user in clients_result.all():
+            client_user_map[client.id] = user.full_name or user.username
+
+        for product in products:
+            product_to_user_map[product.id] = client_user_map.get(
+                product.client_id, "未知用户"
+            )
+
+    data = []
+    for item, country_info in ad_data_results:
+        coverage_rate = item.coverage_rate if item.coverage_rate is not None else round(
+            (item.match_count / item.request_count * 100) if item.request_count > 0 else 0.0,
+            2
+        )
+        display_rate = item.display_rate if item.display_rate is not None else round(
+            (item.display_count / item.match_count * 100) if item.match_count > 0 else 0.0,
+            2
+        )
+        click_rate = item.click_rate if item.click_rate is not None else round(
+            (item.click_count / item.display_count * 100) if item.display_count > 0 else 0.0,
+            2
+        )
+
+        date_value = item.date
+        if isinstance(date_value, datetime):
+            date_value = date_value.date()
+        elif hasattr(date_value, 'date'):
+            date_value = date_value.date()
+
+        country_code = item.country_code or ""
+        if country_info:
+            country_name = country_info.country_name_zh
+        elif country_code == "AA":
+            country_name = "未知区域"
+        elif country_code == "ZZ":
+            country_name = "全部区域"
+        else:
+            country_name = ""
+
         if is_admin:
-            # 获取所有相关客户和用户信息
-            client_ids = list({p.client_id for p in products})
-            clients_query = select(Client, User).join(
-                User, Client.user_id == User.id
-            ).where(Client.id.in_(client_ids))
-            clients_result = await db.execute(clients_query)
-            client_user_map = {}
-            for client, user in clients_result.all():
-                client_user_map[client.id] = user.full_name or user.username
+            row_data = {
+                "数据日期": date_value,
+                "所属用户": product_to_user_map.get(item.product_id, "未知用户"),
+                "产品名称": product_map.get(item.product_id, "未知产品"),
+                "广告单元": item.ad_unit or "",
+                "国家代码": country_code,
+                "国家": country_name,
+                "请求数": item.request_count,
+                "匹配数": item.match_count,
+                "覆盖率": f"{coverage_rate}%",
+                "展示数": item.display_count,
+                "展示率": f"{display_rate}%",
+                "点击数": item.click_count,
+                "点击率": f"{click_rate}%",
+                "CPC($)": round(item.cpc or 0.0, 2),
+                "PageViews": item.pageviews or 0,
+                "eCPM(扣)($)": round(item.ecpm_after_deduct, 4),
+                "eCPM($)": round(item.ecpm_before_deduct, 4),
+                "收益(扣)($)": round(item.revenue_after_deduct, 4),
+                "收益($)": round(item.revenue_before_deduct, 4)
+            }
+        else:
+            row_data = {
+                "数据日期": date_value,
+                "产品名称": product_map.get(item.product_id, "未知产品"),
+                "广告单元": item.ad_unit or "",
+                "国家代码": country_code,
+                "国家": country_name,
+                "请求数": item.request_count,
+                "匹配数": item.match_count,
+                "覆盖率": f"{coverage_rate}%",
+                "展示数": item.display_count,
+                "展示率": f"{display_rate}%",
+                "点击数": item.click_count,
+                "点击率": f"{click_rate}%",
+                "CPC($)": round(item.cpc or 0.0, 2),
+                "PageViews": item.pageviews or 0,
+                "eCPM($)": round(item.ecpm_after_deduct, 4),
+                "收益($)": round(item.revenue_after_deduct, 4)
+            }
 
-            for product in products:
-                product_to_user_map[product.id] = client_user_map.get(
-                    product.client_id, "未知用户"
-                )
+        data.append(row_data)
 
-        # 创建数据列表
-        data = []
-        for item, country_info in ad_data_results:
-            # 使用数据库字段中的比率（如果为空则计算）
-            coverage_rate = item.coverage_rate if item.coverage_rate is not None else round(
-                (item.match_count / item.request_count * 100) if item.request_count > 0 else 0.0,
-                2
-            )
-            display_rate = item.display_rate if item.display_rate is not None else round(
-                (item.display_count / item.match_count * 100) if item.match_count > 0 else 0.0,
-                2
-            )
-            click_rate = item.click_rate if item.click_rate is not None else round(
-                (item.click_count / item.display_count * 100) if item.display_count > 0 else 0.0,
-                2
-            )
-
-            # 处理日期格式
-            date_value = item.date
-            if isinstance(date_value, datetime):
-                date_value = date_value.date()
-            elif hasattr(date_value, 'date'):
-                date_value = date_value.date()
-
-            # 获取国家信息
-            country_code = item.country_code or ""
-            # 如果通过JOIN找到了国家信息，使用它；否则根据country_code回退
-            if country_info:
-                country_name = country_info.country_name_zh
-            elif country_code == "AA":
-                country_name = "未知区域"
-            elif country_code == "ZZ":
-                country_name = "全部区域"
-            else:
-                country_name = ""
-
-            # 按照指定顺序构建数据行
-            if is_admin:
-                # 管理员：显示所有列，按照指定顺序
-                row_data = {
-                    "数据日期": date_value,
-                    "所属用户": product_to_user_map.get(item.product_id, "未知用户"),
-                    "产品名称": product_map.get(item.product_id, "未知产品"),
-                    "广告单元": item.ad_unit or "",
-                    "国家代码": country_code,
-                    "国家": country_name,
-                    "请求数": item.request_count,
-                    "匹配数": item.match_count,
-                    "覆盖率": f"{coverage_rate}%",
-                    "展示数": item.display_count,
-                    "展示率": f"{display_rate}%",
-                    "点击数": item.click_count,
-                    "点击率": f"{click_rate}%",
-                    "CPC($)": round(item.cpc or 0.0, 2),
-                    "PageViews": item.pageviews or 0,
-                    "eCPM(扣)($)": round(item.ecpm_after_deduct, 4),
-                    "eCPM($)": round(item.ecpm_before_deduct, 4),
-                    "收益(扣)($)": round(item.revenue_after_deduct, 4),
-                    "收益($)": round(item.revenue_before_deduct, 4)
-                }
-            else:
-                # 客户：只显示扣减后的数据，按照指定顺序（不包含"所属用户"列）
-                row_data = {
-                    "数据日期": date_value,
-                    "产品名称": product_map.get(item.product_id, "未知产品"),
-                    "广告单元": item.ad_unit or "",
-                    "国家代码": country_code,
-                    "国家": country_name,
-                    "请求数": item.request_count,
-                    "匹配数": item.match_count,
-                    "覆盖率": f"{coverage_rate}%",
-                    "展示数": item.display_count,
-                    "展示率": f"{display_rate}%",
-                    "点击数": item.click_count,
-                    "点击率": f"{click_rate}%",
-                    "CPC($)": round(item.cpc or 0.0, 2),
-                    "PageViews": item.pageviews or 0,
-                    "eCPM($)": round(item.ecpm_after_deduct, 4),
-                    "收益($)": round(item.revenue_after_deduct, 4)
-                }
-
-            data.append(row_data)
-
-        # 转换为DataFrame
-        df = pd.DataFrame(data)
-
-        # 写入Excel
-        df.to_excel(writer, index=False, sheet_name="广告数据")
-
-        # 设置列宽自适应
-        worksheet = writer.sheets["广告数据"]
-        # 根据内容自适应列宽
-        for column_cells in worksheet.columns:
-            max_length = max(len(str(cell.value)) for cell in column_cells)
-            worksheet.column_dimensions[column_cells[0].column_letter].width = max_length + 2
-
-    # 准备响应
-    output.seek(0)
-    filename = f"广告数据_{get_app_now_naive().strftime('%Y%m%d_%H%M%S')}.xlsx"
-
-    # 对文件名进行URL编码以支持中文字符
-    encoded_filename = quote(filename, safe='')
-    # 使用RFC 2231格式支持中文文件名
-    content_disposition = f"attachment; filename*=UTF-8''{encoded_filename}"
-
-    return StreamingResponse(
-        output,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": content_disposition}
+    return excel_streaming_response(
+        data, "广告数据", "广告数据", max_col_width=None
     )

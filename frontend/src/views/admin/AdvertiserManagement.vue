@@ -173,7 +173,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
+import { useAdvertiserManagementColumnVisibility } from '../../composables/useAdvertiserManagementColumnVisibility'
 import { ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Plus, Search, Refresh, Edit, Delete, User, Setting } from '@element-plus/icons-vue'
 import { getAdvertisers, createAdvertiser, updateAdvertiser, deleteAdvertiser } from '@/api/advertiser'
@@ -183,7 +184,6 @@ import { formatDate } from '@/utils/date'
 const loading = ref(false)
 const submitting = ref(false)
 const dialogVisible = ref(false)
-const columnSettingVisible = ref(false)
 const isEdit = ref(false)
 const searchKeyword = ref('')
 const filterActive = ref(null)
@@ -197,68 +197,13 @@ const pagination = reactive({
 
 const tableData = ref([])
 
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  id: true,  // 固定显示
-  advertiser_name: true,  // 固定显示
-  advertiser_params: true,
-  mobile: true,
-  email: true,
-  is_active: true,
-  created_at: true
-})
-
-const columnVisibility = reactive(getDefaultColumnVisibility())
-
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    // 当 checkbox-group 的值变化时，更新对象
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('advertiserManagement_columnVisibility')
-    if (saved) {
-      const savedVisibility = JSON.parse(saved)
-      // 合并保存的设置和默认设置
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
-      // 确保固定列始终显示
-      columnVisibility.id = true
-      columnVisibility.advertiser_name = true
-    }
-  } catch (error) {
-    logger.error('加载列显示设置失败:', error)
-  }
-}
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    // 只保存可调整的列，不保存固定列
-    const toSave = {
-      advertiser_params: columnVisibility.advertiser_params,
-      mobile: columnVisibility.mobile,
-      email: columnVisibility.email,
-      is_active: columnVisibility.is_active,
-      created_at: columnVisibility.created_at
-    }
-    localStorage.setItem('advertiserManagement_columnVisibility', JSON.stringify(toSave))
-    columnSettingVisible.value = false
-    ElMessage.success('列显示设置已保存')
-  } catch (error) {
-    logger.error('保存列显示设置失败:', error)
-    ElMessage.error('保存设置失败')
-  }
-}
+const {
+  columnSettingVisible,
+  columnVisibility,
+  columnVisibilityArray,
+  loadColumnVisibility,
+  saveColumnVisibility
+} = useAdvertiserManagementColumnVisibility()
 
 const formData = reactive({
   advertiser_name: '',

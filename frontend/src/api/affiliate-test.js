@@ -1,37 +1,19 @@
 /**
  * 下游测试 API
  */
-import { request } from '@/utils/api'
+import { createCrudApi } from '@/utils/crudApi';
 
-/**
- * 获取下游测试记录列表
- */
-export function getAffiliateTests(params) {
-  return request({
-    url: '/api/v1/affiliate-tests/',
-    method: 'get',
-    params
-  }, { paginated: true })
-}
+const { getAffiliateTests, getAffiliateTest, createAffiliateTest } = createCrudApi(
+  '/api/v1/affiliate-tests',
+  {
+    csrfOnMutate: true,
+    include: ['list', 'get', 'create'],
+    methodNames: {
+      list: 'getAffiliateTests',
+      get: 'getAffiliateTest',
+      create: 'createAffiliateTest'
+    }
+  }
+);
 
-/**
- * 获取下游测试记录详情
- */
-export function getAffiliateTest(id) {
-  return request({
-    url: `/api/v1/affiliate-tests/${id}`,
-    method: 'get'
-  }, { returnDataOnly: true })
-}
-
-/**
- * 创建下游测试记录并发送Postback
- */
-export function createAffiliateTest(data) {
-  return request({
-    url: '/api/v1/affiliate-tests/',
-    method: 'post',
-    data
-  }, { returnDataOnly: true })
-}
-
+export { getAffiliateTests, getAffiliateTest, createAffiliateTest };

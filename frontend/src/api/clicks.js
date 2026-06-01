@@ -1,38 +1,29 @@
 /**
  * 短链接访问记录 API
  */
-import { request } from '@/utils/api'
+import { createCrudApi } from '@/utils/crudApi';
+import { request } from '@/utils/api';
+import { withCsrfMutate } from '@/utils/csrfMutate';
 
-/**
- * 获取短链接访问记录列表
- */
-export function getClicks(params) {
-  return request({
-    url: '/api/v1/clicks/',
-    method: 'get',
-    params
-  }, {
-    paginated: true,
-    timeout: 45000
-  })
-}
+const { getClicks, getClick: getClickDetail } = createCrudApi('/api/v1/clicks', {
+  methodNames: {
+    list: 'getClicks',
+    get: 'getClickDetail'
+  },
+  include: ['list', 'get'],
+  listOptions: { timeout: 45000 }
+});
 
-/**
- * 获取短链接访问记录详情
- */
-export function getClickDetail(clickRecordId) {
-  return request({
-    url: `/api/v1/clicks/${clickRecordId}`,
-    method: 'get'
-  }, { returnDataOnly: true })
-}
+export { getClicks, getClickDetail };
 
-/**
- * 手动补报 Facebook 像素
- */
 export function resendClickFacebookReport(clickRecordId) {
-  return request({
-    url: `/api/v1/clicks/${clickRecordId}/facebook-report`,
-    method: 'post',
-  }, { returnDataOnly: true })
+  return withCsrfMutate(() =>
+    request(
+      {
+        url: `/api/v1/clicks/${clickRecordId}/facebook-report`,
+        method: 'post'
+      },
+      { returnDataOnly: true }
+    )
+  );
 }

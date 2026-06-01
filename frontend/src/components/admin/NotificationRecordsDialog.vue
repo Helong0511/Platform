@@ -124,7 +124,7 @@ import { ref, reactive, computed, watch } from 'vue';
 import { getNotificationRecords } from '../../api/notification';
 import { useDevice } from '../../composables/useDevice';
 import { logger } from '../../utils/logger';
-import { formatDate as formatDateWithTimezone } from '../../utils/dateFormat';
+import { formatDate } from '../../utils/dateFormat';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -208,10 +208,6 @@ const handlePageChange = (page) => {
 
 const handleClose = () => {
   visible.value = false;
-};
-
-const formatDate = (dateString) => {
-  return formatDateWithTimezone(dateString);
 };
 
 const getChannelLabel = (channel) => {

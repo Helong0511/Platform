@@ -245,13 +245,27 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, nextTick } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useAuthStore } from '../../store';
 import { ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Upload, Delete, Setting, Right } from '@element-plus/icons-vue';
-import { getTBSearchDataList, updateTBSearchData, deleteTBSearchData, batchDeleteTBSearchData, importTBSearchData, getClientsWithTBSearchData, getProductsWithTBSearchData, getCountriesWithTBSearchData } from '../../api/tb-search-data';
+import {
+  getTBSearchDataList,
+  updateTBSearchData,
+  deleteTBSearchData,
+  batchDeleteTBSearchData,
+  importTBSearchData,
+  getProductsWithTBSearchData
+} from '../../api/tb-search-data';
 import { getProductById } from '../../api/ad-data';
-import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../../utils/api';
+import { extractErrorMessage, isErrorHandled } from '../../utils/api';
+import { useDataPageFilterCascade } from '../../composables/useDataPageFilterCascade';
+import { useDebouncedPaginatedFetch } from '../../composables/useDebouncedPaginatedFetch';
+import { useAdDataProductPanel } from '../../composables/useAdDataProductPanel';
+import {
+  useTbSearchColumnVisibility
+} from '../../composables/useTbSearchColumnVisibility';
+import { useTbSearchTableFormat } from '../../composables/useTbSearchTableFormat';
 import ProductManagementDialog from '../../components/admin/ProductManagementDialog.vue';
 
 const authStore = useAuthStore();
@@ -260,10 +274,6 @@ const isAdmin = computed(() => authStore.isAdmin);
 const loading = ref(false);
 const importing = ref(false);
 const tableData = ref([]);
-const columnSettingVisible = ref(false);
-const users = ref([]);
-const products = ref([]);
-const countries = ref([]);
 const selectedRows = ref([]);
 
 const pagination = ref({
@@ -279,78 +289,13 @@ const searchForm = ref({
   countryCode: ''
 });
 
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  date: true,  // 固定显示
-  user_name: isAdmin.value,
-  product_name: true,  // 固定显示
-  country_name_zh: true,
-  redirects: true,
-  searches: true,
-  monetized: true,
-  clicks: true,
-  revenue: true,
-  revenue_before_deduct: isAdmin.value,
-  rpm: true,
-  rpm_before_deduct: isAdmin.value
-});
-
-const columnVisibility = reactive(getDefaultColumnVisibility());
-
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    // 当 checkbox-group 的值变化时，更新对象
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('tbSearchData_columnVisibility');
-    if (saved) {
-      const savedVisibility = JSON.parse(saved);
-      // 合并保存的设置和默认设置
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility);
-      // 确保固定列始终显示
-      columnVisibility.date = true;
-      columnVisibility.product_name = true;
-    }
-  } catch (error) {
-    console.error('加载列显示设置失败:', error);
-  }
-};
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    // 只保存可调整的列，不保存固定列
-    const toSave = {
-      user_name: columnVisibility.user_name,
-      country_name_zh: columnVisibility.country_name_zh,
-      redirects: columnVisibility.redirects,
-      searches: columnVisibility.searches,
-      monetized: columnVisibility.monetized,
-      clicks: columnVisibility.clicks,
-      revenue: columnVisibility.revenue,
-      revenue_before_deduct: columnVisibility.revenue_before_deduct,
-      rpm: columnVisibility.rpm,
-      rpm_before_deduct: columnVisibility.rpm_before_deduct
-    };
-    localStorage.setItem('tbSearchData_columnVisibility', JSON.stringify(toSave));
-    columnSettingVisible.value = false;
-    ElMessage.success('列显示设置已保存');
-  } catch (error) {
-    console.error('保存列显示设置失败:', error);
-    ElMessage.error('保存设置失败');
-  }
-};
+const {
+  columnSettingVisible,
+  columnVisibility,
+  columnVisibilityArray,
+  loadColumnVisibility,
+  saveColumnVisibility
+} = useTbSearchColumnVisibility(() => isAdmin.value);
 
 const sortInfo = ref({
   prop: 'date',
@@ -360,300 +305,130 @@ const sortInfo = ref({
 const editDialogVisible = ref(false);
 const editForm = ref({});
 
-// 产品管理相关状态
-const productManagementDialogVisible = ref(false);
-const selectedClientId = ref('');
-const selectedClientName = ref('');
-const selectedClientProducts = ref([]);
-const loadingProducts = ref(false);
-const selectedProductId = ref('');
-const selectedProductName = ref('');
-
-// 处理产品点击事件
-const handleProductClick = (row) => {
-  // 确保 row 对象存在
-  if (!row) return;
-  
-  // 设置选中的客户信息
-  selectedClientId.value = row.client_id || row.user_id || authStore.userInfo?.id;
-  selectedClientName.value = row.user_name || row.full_name || authStore.userInfo?.full_name || '未知客户';
-  
-  // 设置选中的产品信息
-  selectedProductId.value = String(row.product_id || '');
-  selectedProductName.value = row.product_name || '';
-  
-  // 加载该客户的产品列表
-  loadClientProducts(selectedClientId.value);
-  
-  // 显示产品管理对话框
-  productManagementDialogVisible.value = true;
-};
-
-// 加载客户产品列表
-const loadClientProducts = async (clientId) => {
-  if (!clientId) {
-    selectedClientProducts.value = [];
-    return;
-  }
-  
-  loadingProducts.value = true;
-  try {
-    // 如果有选中的产品ID，使用 getProductById 获取完整的产品信息
-    if (selectedProductId.value) {
-      try {
-        const productDetail = await getProductById(selectedProductId.value);
-        if (productDetail) {
-          selectedClientProducts.value = [productDetail];
-        } else {
-          selectedClientProducts.value = [];
-        }
-      } catch (error) {
-        // 如果获取产品详情失败，使用 getProductsWithTBSearchData 作为备选
-        const result = await getProductsWithTBSearchData(clientId);
-        let products = result.data || [];
-        products = products.filter(product => String(product.id) === selectedProductId.value);
-        selectedClientProducts.value = products;
-      }
-    } else {
-      // 如果没有选中的产品ID，使用 getProductsWithTBSearchData 获取所有产品
-      const result = await getProductsWithTBSearchData(clientId);
-      selectedClientProducts.value = result.data || [];
-    }
-  } catch (error) {
-    if (!isErrorHandled(error)) {
-      ElMessage.error(extractErrorMessage(error));
-    }
-    selectedClientProducts.value = [];
-  } finally {
-    loadingProducts.value = false;
-  }
-};
-
-// 产品管理对话框刷新后的回调
-const handleProductManagementRefresh = () => {
-  // 产品管理可能修改了产品信息，这里可以选择刷新当前页面数据
-  fetchData();
-};
-
-onMounted(async () => {
-  // 加载列显示设置
-  loadColumnVisibility();
-  await loadFilterOptions();
-  fetchData();
+const {
+  productManagementVisible: productManagementDialogVisible,
+  selectedClientId,
+  selectedClientName,
+  selectedClientProducts,
+  loadingProducts,
+  selectedProductId,
+  selectedProductName,
+  openProductPanel
+} = useAdDataProductPanel({
+  getProductById,
+  fetchProductsForClient: (clientId) =>
+    getProductsWithTBSearchData(clientId).then((r) => r?.data || [])
 });
 
-// 获取当前日期范围（用于筛选条件）
-const getDateRange = () => {
-  let startDate = null;
-  let endDate = null;
-  if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
-    startDate = searchForm.value.dateRange[0];
-    endDate = searchForm.value.dateRange[1];
-  }
-  return { startDate, endDate };
-};
+const {
+  users,
+  filterProducts: products,
+  filterCountries: countries,
+  handleFilterClientChange,
+  handleFilterProductChange,
+  reloadFiltersAfterDateChange,
+  loadAllFilterOptions
+} = useDataPageFilterCascade({
+  searchForm,
+  includeCountry: true,
+  source: 'tb-search'
+});
 
-// 加载所有筛选条件
-const loadFilterOptions = async () => {
-  const { startDate, endDate } = getDateRange();
-  
-  if (isAdmin.value) {
-    await loadUsers(startDate, endDate);
-  }
-  await loadProducts(searchForm.value.clientId || null, startDate, endDate);
-  await loadCountries(searchForm.value.clientId || null, searchForm.value.productId || null, startDate, endDate);
-};
+const { formatCurrency, getSummaries } = useTbSearchTableFormat();
 
-const loadUsers = async (startDate = null, endDate = null) => {
-  try {
-    const result = await getClientsWithTBSearchData(startDate, endDate);
-    const data = result.data || [];
-    
-    users.value = [
-      { label: '全部客户', value: '' },
-      ...data.map(item => ({
-        value: item.id,
-        label: item.full_name || '未知客户'
-      }))
-    ];
-  } catch (error) {
-    if (!isErrorHandled(error)) {
-      // 错误已通过 isErrorHandled 处理
-    }
-    users.value = [{ label: '全部客户', value: '' }];
-  }
-};
-
-const loadProducts = async (clientId = null, startDate = null, endDate = null) => {
-  try {
-    const result = await getProductsWithTBSearchData(clientId, startDate, endDate);
-    const data = result.data || [];
-    
-    products.value = [
-      { label: '全部产品', value: '' },
-      ...data.map(item => ({
-        value: String(item.id),
-        label: item.name || '未知产品'
-      }))
-    ];
-  } catch (error) {
-    if (!isErrorHandled(error)) {
-      // 错误已通过 isErrorHandled 处理
-    }
-    products.value = [{ label: '全部产品', value: '' }];
-  }
-};
-
-const loadCountries = async (clientId = null, productId = null, startDate = null, endDate = null) => {
-  try {
-    const result = await getCountriesWithTBSearchData(clientId, productId, startDate, endDate);
-    const data = result.data || [];
-    
-    countries.value = [
-      { code: '', name_zh: '全部区域' },
-      ...data.map(item => ({
-        code: item.code,
-        name_zh: item.name_zh || item.code
-      }))
-    ];
-  } catch (error) {
-    if (!isErrorHandled(error)) {
-      // 错误已通过 isErrorHandled 处理
-    }
-    countries.value = [{ code: '', name_zh: '全部区域' }];
-  }
-};
-
-// 日期范围变化时的处理
-const handleDateRangeChange = async () => {
-  // 重新加载所有筛选条件（基于新的日期范围）
-  await loadFilterOptions();
-  // 如果当前选择的产品或国家不在新列表中，清空选择
-  if (searchForm.value.productId) {
-    const productExists = products.value.some(p => p.value === searchForm.value.productId);
-    if (!productExists) {
-      searchForm.value.productId = '';
-    }
-  }
-  if (searchForm.value.countryCode) {
-    const countryExists = countries.value.some(c => c.code === searchForm.value.countryCode);
-    if (!countryExists) {
-      searchForm.value.countryCode = '';
-    }
-  }
-  // 重置分页并获取数据
-  pagination.value.current = 1;
-  fetchData();
-};
-
-const handleClientChange = async (val) => {
-  const { startDate, endDate } = getDateRange();
-  await loadProducts(val || null, startDate, endDate);
-  await loadCountries(val || null, null, startDate, endDate);
-  // 如果当前选择的产品不在新列表中，清空产品选择
-  if (searchForm.value.productId) {
-    const productExists = products.value.some(p => p.value === searchForm.value.productId);
-    if (!productExists) {
-      searchForm.value.productId = '';
-    }
-  }
-  // 清空国家选择，因为产品变化了
-  searchForm.value.countryCode = '';
-  pagination.value.current = 1;
-  
-  // 修复选中值显示
-  nextTick(() => {
-    setTimeout(() => {
-      if (typeof window.fixSelectDisplay === 'function') {
-        window.fixSelectDisplay();
-      }
-    }, 100);
-  });
-  
-  fetchData();
-};
-
-// 产品选择变化时的处理
-const handleProductChange = async () => {
-  const { startDate, endDate } = getDateRange();
-  await loadCountries(searchForm.value.clientId || null, searchForm.value.productId || null, startDate, endDate);
-  // 如果当前选择的国家不在新列表中，清空国家选择
-  if (searchForm.value.countryCode) {
-    const countryExists = countries.value.some(c => c.code === searchForm.value.countryCode);
-    if (!countryExists) {
-      searchForm.value.countryCode = '';
-    }
-  }
-  pagination.value.current = 1;
-  
-  // 修复选中值显示
-  nextTick(() => {
-    setTimeout(() => {
-      if (typeof window.fixSelectDisplay === 'function') {
-        window.fixSelectDisplay();
-      }
-    }, 100);
-  });
-  
-  fetchData();
-};
-
-// 分页处理
-const handleSizeChange = (size) => {
-  pagination.value.size = size;
-  pagination.value.current = 1;  // 分页大小变化时重置到第一页
-  fetchData();
-};
-
-const handlePageChange = (page) => {
-  pagination.value.current = page;
-  fetchData();
-};
-
-const fetchData = async () => {
-  loading.value = true;
-  try {
+const { runFetch: fetchData } = useDebouncedPaginatedFetch({
+  loading,
+  pagination,
+  debounceMs: 0,
+  buildParams: () => {
     const params = {
       page: pagination.value.current,
       page_size: pagination.value.size,
       sort_by: sortInfo.value.prop,
       sort_order: sortInfo.value.order === 'ascending' ? 'asc' : 'desc'
     };
-    
-    // 如果选择了日期范围，使用选择的日期范围
-    // 如果没有选择日期范围，后端默认使用当前月的数据
-    if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
+    if (searchForm.value.dateRange?.length === 2) {
       params.start_date = searchForm.value.dateRange[0];
       params.end_date = searchForm.value.dateRange[1];
     }
-    // 如果没有选择日期范围，不传递日期参数，让后端使用默认的当前月
-    
     if (searchForm.value.clientId) params.client_id = searchForm.value.clientId;
     if (searchForm.value.productId) params.product_id = searchForm.value.productId;
     if (searchForm.value.countryCode) params.country_code = searchForm.value.countryCode;
-
-    const res = await getTBSearchDataList(params);
-    
-    // res已经是标准分页格式，直接使用data和total字段
-    // getTBSearchDataList使用paginated: true，失败时会抛出异常
-    tableData.value = res.data || [];
-    // 确保total是数字类型
-    const totalValue = typeof res.total === 'number' ? res.total : parseInt(res.total || 0, 10);
-    pagination.value.total = totalValue;
-    
-    // 如果查询结果为空，且没有选择任何筛选条件，提示用户
-    if (tableData.value.length === 0 && pagination.value.total === 0 && 
-        !searchForm.value.dateRange && !searchForm.value.clientId && 
-        !searchForm.value.productId && !searchForm.value.countryCode) {
-      // 已经在使用大日期范围，如果还是没有数据，说明确实没有数据
-    }
-  } catch (error) {
-    if (!isErrorHandled(error)) {
-      ElMessage.error(extractErrorMessage(error));
-    }
-  } finally {
-    loading.value = false;
+    return params;
+  },
+  fetchPage: (params) => getTBSearchDataList(params),
+  applyResponse: (response) => {
+    tableData.value = response.data || [];
+    pagination.value.total =
+      typeof response.total === 'number'
+        ? response.total
+        : parseInt(response.total || 0, 10);
   }
+});
+
+const handleProductClick = (row) => {
+  if (!row) return;
+  openProductPanel(row, {
+    defaultClientId: authStore.userInfo?.id,
+    defaultClientName: authStore.userInfo?.full_name || '未知客户'
+  });
+};
+
+const handleProductManagementRefresh = () => {
+  fetchData();
+};
+
+onMounted(async () => {
+  loadColumnVisibility();
+  await loadAllFilterOptions(isAdmin.value);
+  fetchData();
+});
+
+const syncFilterSelections = () => {
+  if (searchForm.value.productId) {
+    const productExists = products.value.some((p) => p.value === searchForm.value.productId);
+    if (!productExists) {
+      searchForm.value.productId = '';
+    }
+  }
+  if (searchForm.value.countryCode) {
+    const countryExists = countries.value.some((c) => c.code === searchForm.value.countryCode);
+    if (!countryExists) {
+      searchForm.value.countryCode = '';
+    }
+  }
+};
+
+const handleDateRangeChange = async () => {
+  await reloadFiltersAfterDateChange(isAdmin.value);
+  syncFilterSelections();
+  pagination.value.current = 1;
+  fetchData();
+};
+
+const handleClientChange = async (val) => {
+  await handleFilterClientChange(val);
+  syncFilterSelections();
+  pagination.value.current = 1;
+  fetchData();
+};
+
+const handleProductChange = async () => {
+  await handleFilterProductChange();
+  syncFilterSelections();
+  pagination.value.current = 1;
+  fetchData();
+};
+
+const handleSizeChange = (size) => {
+  pagination.value.size = size;
+  pagination.value.current = 1;
+  fetchData();
+};
+
+const handlePageChange = (page) => {
+  pagination.value.current = page;
+  fetchData();
 };
 
 const handleSortChange = ({ prop, order }) => {
@@ -673,46 +448,8 @@ const resetFilter = async () => {
     countryCode: ''
   };
   pagination.value.current = 1;
-  await loadFilterOptions();
+  await loadAllFilterOptions(isAdmin.value);
   fetchData();
-};
-
-const formatCurrency = (val) => {
-  return val ? `$${Number(val).toFixed(2)}` : '$0.00';
-};
-
-const getSummaries = (param) => {
-  const { columns, data } = param;
-  const sums = [];
-  
-  // 确保 data 是数组
-  if (!Array.isArray(data)) {
-    return columns.map(() => '');
-  }
-  
-  columns.forEach((column, index) => {
-    if (index === 0) {
-      sums[index] = '合计';
-      return;
-    }
-    const prop = column.property;
-    if (['redirects', 'searches', 'monetized', 'clicks', 'revenue', 'revenue_before_deduct', 'rpm', 'rpm_before_deduct'].includes(prop)) {
-      const values = data.map(item => {
-        const value = item?.[prop];
-        return value !== null && value !== undefined ? Number(value) : 0;
-      }).filter(val => !Number.isNaN(val));
-      
-      if (values.length > 0) {
-        const sum = values.reduce((prev, curr) => prev + curr, 0);
-        sums[index] = ['revenue', 'revenue_before_deduct', 'rpm', 'rpm_before_deduct'].includes(prop) ? formatCurrency(sum) : sum;
-      } else {
-        sums[index] = '';
-      }
-    } else {
-      sums[index] = '';
-    }
-  });
-  return sums;
 };
 
 const handleImport = async (options) => {
@@ -756,7 +493,7 @@ const handleImport = async (options) => {
     }
     
     // 重新加载筛选条件（基于当前日期范围）
-    await loadFilterOptions();
+    await loadAllFilterOptions(isAdmin.value);
     
     // 刷新数据
     await fetchData();

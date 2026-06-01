@@ -11,7 +11,6 @@ from sqlalchemy import delete, func, select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
 import pandas as pd
-from io import BytesIO
 
 from app.core.audit_log import log_update, log_delete, log_user_action
 from app.core.database import get_db

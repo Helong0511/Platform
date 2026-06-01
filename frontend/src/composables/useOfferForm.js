@@ -8,7 +8,7 @@ import {
   getOffer,
   checkOfferShortLink,
 } from '../api/offer';
-import { ensureCsrfToken } from '../utils/api';
+import { ensureCsrfToken } from '../utils/csrfMutate';
 import { logger } from '../utils/logger';
 import { createOfferTracklinkRules } from '../utils/shortLinkFormRules';
 

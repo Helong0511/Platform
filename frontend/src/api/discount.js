@@ -11,5 +11,5 @@ export const {
   createDiscount,
   updateDiscount,
   deleteDiscount
-} = createCrudApi('/api/v1/discounts');
+} = createCrudApi('/api/v1/discounts', { csrfOnMutate: true });
 

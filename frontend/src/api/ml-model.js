@@ -6,6 +6,7 @@ import {
   requestUploadWithCsrfRetry,
   handleError
 } from '../utils/api';
+import { withCsrfMutate } from '../utils/csrfMutate';
 
 const uploadExcelFile = (url, file, extraConfig = {}) => {
   const formData = new FormData();
@@ -39,17 +40,7 @@ export const getModelStatus = async () => {
   }, { returnDataOnly: true });
 };
 
-export const getTimezone = async () => {
-  try {
-    const data = await request({
-      url: '/api/v1/ml-model/timezone',
-      method: 'get'
-    }, { returnDataOnly: true });
-    return data.timezone || 'Asia/Shanghai';
-  } catch {
-    return 'Asia/Shanghai';
-  }
-};
+export { getTimezone } from './app-config';
 
 export const parseExcelColumns = async (file) => {
   try {
@@ -59,13 +50,17 @@ export const parseExcelColumns = async (file) => {
   }
 };
 
-export const saveMapping = async (mapping) => {
-  return request({
-    url: '/api/v1/ml-model/save-mapping',
-    method: 'post',
-    data: mapping
-  }, { returnDataOnly: true });
-};
+export const saveMapping = async (mapping) =>
+  withCsrfMutate(() =>
+    request(
+      {
+        url: '/api/v1/ml-model/save-mapping',
+        method: 'post',
+        data: mapping
+      },
+      { returnDataOnly: true }
+    )
+  );
 
 export const previewExcelData = async (file, rows = 10) => {
   try {

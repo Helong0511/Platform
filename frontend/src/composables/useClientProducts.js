@@ -2,7 +2,8 @@ import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getProductList, createProduct, updateProduct, deleteProduct } from '../api/product';
 import { logger } from '../utils/logger';
-import { extractErrorMessage, isErrorHandled, ensureCsrfToken } from '../utils/api';
+import { extractErrorMessage, isErrorHandled } from '../utils/api';
+import { ensureCsrfToken } from '../utils/csrfMutate';
 import { getCsrfToken } from '../utils/csrfToken';
 
 /**

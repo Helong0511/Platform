@@ -11,5 +11,5 @@ export const {
   createAdvertiser,
   updateAdvertiser,
   deleteAdvertiser
-} = createCrudApi('/api/v1/advertisers');
+} = createCrudApi('/api/v1/advertisers', { csrfOnMutate: true });
 

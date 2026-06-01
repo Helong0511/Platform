@@ -1,14 +1,5 @@
 /** Postback 转化展示格式化工具 */
-
-export function formatCurrency(value) {
-  if (!value && value !== 0) return '-';
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
-}
+export { formatCurrency } from './currencyFormat';
 
 export function formatOs(os) {
   if (!os) return '-';

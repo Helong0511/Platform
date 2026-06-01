@@ -151,8 +151,8 @@ import { ref, watch, computed, nextTick } from 'vue';
 import { ElMessage, ElMessageBox, ElAlert } from 'element-plus';
 import { OfficeBuilding, Edit } from '@element-plus/icons-vue';
 import { getProductAssignments, updateAssignmentDates, batchUpdateAssignmentDates } from '../../api/product';
-import { refreshCsrfTokenBeforeRequest } from '../../utils/api';
 import { logger } from '../../utils/logger';
+import { formatDateOnly as formatDate } from '../../utils/dateFormat';
 
 // 格式化客户全名（优先显示用户全名，如果没有则显示公司名称、联系人、电话）
 const formatClientFullName = (assignment) => {
@@ -297,16 +297,6 @@ const fetchAssignments = async () => {
   } finally {
     loading.value = false;
   }
-};
-
-const formatDate = (dateStr) => {
-  if (!dateStr) return '-';
-  const date = new Date(dateStr);
-  return date.toLocaleDateString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  });
 };
 
 const formatDateRange = (assignment) => {
@@ -740,15 +730,6 @@ const handleBatchSave = async () => {
   batchSaving.value = true;
   
   try {
-    // 在批量保存前，先获取最新的CSRF令牌（确保令牌是最新的）
-    try {
-      await refreshCsrfTokenBeforeRequest(
-        `/api/v1/product-assignments/products/${props.productId}/assignments`
-      );
-    } catch (tokenError) {
-      logger.warn('批量保存前刷新 CSRF token 时出错:', tokenError);
-    }
-    
     const changes = Array.from(pendingChanges.value.entries());
     
     // 如果只有一条记录，使用单个更新API（更轻量）

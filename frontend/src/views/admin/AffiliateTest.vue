@@ -245,7 +245,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
+import { useAffiliateTestColumnVisibility } from '../../composables/useAffiliateTestColumnVisibility'
 import { ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus'
 import { Plus, Search, Refresh, View, Download, Setting } from '@element-plus/icons-vue'
 import { getAffiliateTests, createAffiliateTest } from '@/api/affiliate-test'
@@ -253,6 +254,7 @@ import { getPublishers } from '@/api/publisher'
 import { getOffers } from '@/api/offer'
 import { logger } from '@/utils/logger'
 import { formatDate } from '@/utils/date'
+import { copyToClipboard } from '@/utils/clipboard'
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -273,70 +275,13 @@ const tableData = ref([])
 const publisherList = ref([])
 const offerList = ref([])
 const currentTest = ref(null)
-const columnSettingVisible = ref(false)
-
-// 列显示状态（默认全部显示）
-const getDefaultColumnVisibility = () => ({
-  publisher_name: true,
-  offer_name: true,  // 固定显示
-  click_id: true,  // 固定显示
-  price: true,
-  country: true,
-  status: true,
-  postback_time: true
-})
-
-const columnVisibility = reactive(getDefaultColumnVisibility())
-
-// 计算属性：将对象转换为数组，用于 el-checkbox-group
-const columnVisibilityArray = computed({
-  get: () => {
-    return Object.keys(columnVisibility).filter(key => columnVisibility[key])
-  },
-  set: (value) => {
-    // 当 checkbox-group 的值变化时，更新对象
-    Object.keys(columnVisibility).forEach(key => {
-      columnVisibility[key] = value.includes(key)
-    })
-  }
-})
-
-// 从localStorage加载列显示设置
-const loadColumnVisibility = () => {
-  try {
-    const saved = localStorage.getItem('affiliateTest_columnVisibility')
-    if (saved) {
-      const savedVisibility = JSON.parse(saved)
-      // 合并保存的设置和默认设置
-      Object.assign(columnVisibility, getDefaultColumnVisibility(), savedVisibility)
-      // 确保固定列始终显示
-      columnVisibility.offer_name = true
-      columnVisibility.click_id = true
-    }
-  } catch (error) {
-    console.error('加载列显示设置失败:', error)
-  }
-}
-
-// 保存列显示设置到localStorage
-const saveColumnVisibility = () => {
-  try {
-    // 只保存可调整的列，不保存固定列
-    const toSave = {
-      publisher_name: columnVisibility.publisher_name,
-      price: columnVisibility.price,
-      country: columnVisibility.country,
-      status: columnVisibility.status,
-      postback_time: columnVisibility.postback_time
-    }
-    localStorage.setItem('affiliateTest_columnVisibility', JSON.stringify(toSave))
-    columnSettingVisible.value = false
-    ElMessage.success('列显示设置已保存')
-  } catch (error) {
-    console.error('保存列显示设置失败:', error)
-    ElMessage.error('保存设置失败')
-  }
-}
+const {
+  columnSettingVisible,
+  columnVisibility,
+  columnVisibilityArray,
+  loadColumnVisibility,
+  saveColumnVisibility
+} = useAffiliateTestColumnVisibility()
 
 const formData = reactive({
   publisher_id: null,
@@ -437,18 +382,6 @@ const handleAdd = async () => {
 const handleView = (row) => {
   currentTest.value = row
   detailDialogVisible.value = true
-}
-
-// 复制到剪贴板
-const copyToClipboard = async (text) => {
-  if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('已复制到剪贴板')
-  } catch (error) {
-    logger.error('复制失败:', error)
-    ElMessage.error('复制失败')
-  }
 }
 
 // 提交

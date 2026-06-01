@@ -11,5 +11,5 @@ export const {
   createCap,
   updateCap,
   deleteCap
-} = createCrudApi('/api/v1/caps');
+} = createCrudApi('/api/v1/caps', { csrfOnMutate: true });
 
