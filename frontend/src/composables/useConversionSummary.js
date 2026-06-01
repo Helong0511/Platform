@@ -176,14 +176,15 @@ export function useConversionSummary(isAdmin) {
           start_date: dateRange.value[0],
           end_date: dateRange.value[1],
         });
-        if (fullResponse?.data?.stats_list) {
-          extractOptionsFromStats(fullResponse.data.stats_list);
+        // getConversionSummary 使用 returnDataOnly，直接返回统计对象
+        if (fullResponse?.stats_list) {
+          extractOptionsFromStats(fullResponse.stats_list);
         }
       }
 
       const response = await getConversionSummary(params);
-      if (response?.data) {
-        Object.assign(summaryData, response.data);
+      if (response) {
+        Object.assign(summaryData, response);
         if (
           summaryData.total_profit === 0 &&
           summaryData.total_po > 0 &&
@@ -191,7 +192,7 @@ export function useConversionSummary(isAdmin) {
         ) {
           summaryData.total_profit = summaryData.total_po - summaryData.total_po_after_discount;
         }
-        statsList.value = response.data.stats_list || [];
+        statsList.value = response.stats_list || [];
       }
     } catch (error) {
       logger.error('获取统计数据失败:', error);

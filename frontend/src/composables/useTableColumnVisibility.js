@@ -16,33 +16,49 @@ export function useTableColumnVisibility(storageKey, options) {
   const columnSettingVisible = ref(false);
   const columnVisibility = reactive(getDefaultColumns());
 
+  const applyPinnedColumns = () => {
+    pinColumns.forEach((key) => {
+      if (key in columnVisibility) {
+        columnVisibility[key] = true;
+      }
+    });
+  };
+
   const columnVisibilityArray = computed({
     get: () => Object.keys(columnVisibility).filter((key) => columnVisibility[key]),
     set: (value) => {
+      const selected = new Set(value);
       Object.keys(columnVisibility).forEach((key) => {
-        columnVisibility[key] = value.includes(key);
+        if (pinColumns.includes(key)) {
+          columnVisibility[key] = true;
+        } else {
+          columnVisibility[key] = selected.has(key);
+        }
       });
     },
   });
 
   const loadColumnVisibility = () => {
     try {
+      Object.assign(columnVisibility, getDefaultColumns());
       const saved = localStorage.getItem(storageKey);
       if (saved) {
-        Object.assign(columnVisibility, getDefaultColumns(), JSON.parse(saved));
-        pinColumns.forEach((key) => {
-          if (key in columnVisibility) {
-            columnVisibility[key] = true;
-          }
-        });
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          Object.assign(columnVisibility, parsed);
+        }
       }
+      applyPinnedColumns();
     } catch (error) {
       logger.error('加载列显示设置失败:', error);
+      Object.assign(columnVisibility, getDefaultColumns());
+      applyPinnedColumns();
     }
   };
 
   const saveColumnVisibility = () => {
     try {
+      applyPinnedColumns();
       localStorage.setItem(storageKey, JSON.stringify(getSavableColumns(columnVisibility)));
       columnSettingVisible.value = false;
       ElMessage.success('列显示设置已保存');
@@ -52,11 +68,23 @@ export function useTableColumnVisibility(storageKey, options) {
     }
   };
 
+  const resetColumnVisibility = () => {
+    Object.assign(columnVisibility, getDefaultColumns());
+    applyPinnedColumns();
+    try {
+      localStorage.removeItem(storageKey);
+      ElMessage.success('已恢复默认列显示');
+    } catch (error) {
+      logger.error('重置列显示设置失败:', error);
+    }
+  };
+
   return {
     columnSettingVisible,
     columnVisibility,
     columnVisibilityArray,
     loadColumnVisibility,
     saveColumnVisibility,
+    resetColumnVisibility
   };
 }
