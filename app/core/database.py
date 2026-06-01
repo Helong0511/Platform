@@ -31,6 +31,7 @@ from sqlalchemy.future import select
 from app.core.config import settings
 from collections.abc import AsyncGenerator  # Python 3.10+ 推荐使用 collections.abc
 from fastapi import HTTPException
+from fastapi.exceptions import RequestValidationError
 import logging
 import aiomysql as aiomysql_lib
 
@@ -144,6 +145,9 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         except HTTPException:
             # HTTPException是FastAPI的业务逻辑异常，不应该回滚或记录为数据库错误
             # 直接抛出，让FastAPI的异常处理器处理
+            raise
+        except RequestValidationError:
+            await session.rollback()
             raise
         except Exception as e:
             # 发生真正的数据库异常时，回滚事务并记录错误

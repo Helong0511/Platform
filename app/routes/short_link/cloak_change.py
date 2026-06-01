@@ -25,6 +25,7 @@ from app.routes.short_link.cloak_show_count import (
 )
 from app.routes.short_link.placeholder import replace_short_link_placeholders
 from app.routes.short_link.url_builder import build_final_url
+from app.routes.short_link.short_code_validate import validate_route_short_code
 from app.routes.short_link.utils import (
     create_click_record,
     offer_id_from_numeric_dp,
@@ -57,6 +58,8 @@ def register_cloak_change_routes(router: APIRouter) -> None:
         - 支持安全验证，防止路径遍历攻击
         """
         try:
+            short_code = validate_route_short_code(short_code)
+
             # 记录请求信息
             client_ip = request.client.host if request.client else "未知"
             user_agent = request.headers.get("user-agent", "未知")

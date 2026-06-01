@@ -900,6 +900,28 @@ def _make_json_serializable(obj):
         return obj
 
 
+def _client_api_validation_hint(path: str, errors: list) -> str | None:
+    """客户开放 API 常见校验失败的可读说明。"""
+    if "/client_data" not in path and "/client_products" not in path:
+        return None
+    for err in errors:
+        loc = err.get("loc") or ()
+        if err.get("type") == "missing" and "req_time" in loc:
+            return (
+                "缺少必填参数 req_time（10 位 Unix 秒级时间戳，如 int(time.time())）。"
+                "签名须按字母序拼接 client_id、data_type、end_date、req_time、start_date"
+                "（仅非空字段）后追加 &key=客户密钥，再 MD5 小写。"
+            )
+        if err.get("type") == "missing" and "sign" in loc:
+            return "缺少必填参数 sign（MD5 签名，须与 req_time 等参数一并参与计算）。"
+    if any(err.get("type") == "json_invalid" for err in errors):
+        return (
+            "请求体不是合法 JSON，请设置 Content-Type: application/json，"
+            "并检查 JSON 语法（如逗号、引号、括号是否匹配）。"
+        )
+    return None
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """
@@ -911,9 +933,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     errors = exc.errors()
     serializable_errors = _make_json_serializable(errors)
 
-    # 尝试提取第一个错误的详细信息
-    error_detail = "请检查请求参数格式"
-    if errors and len(errors) > 0:
+    path = request.url.path
+    error_detail = _client_api_validation_hint(path, errors) or "请检查请求参数格式"
+    if error_detail == "请检查请求参数格式" and errors:
         first_error = errors[0]
         loc = first_error.get("loc", [])
         msg = first_error.get("msg", "")
