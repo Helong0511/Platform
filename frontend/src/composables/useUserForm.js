@@ -254,8 +254,9 @@ export function useUserForm({ users, loading, fetchUsers, fetchStats }) {
               address: userForm.address?.trim() || null,
               is_active: userForm.is_active !== undefined ? userForm.is_active : true,
             });
-            if (response?.data?.id) {
-              userForm.client_id = response.data.id;
+            // createClient 使用 returnDataOnly，直接返回客户对象
+            if (response?.id) {
+              userForm.client_id = response.id;
             }
             ElMessage.success('客户信息创建成功');
           }

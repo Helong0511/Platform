@@ -371,7 +371,7 @@ const handleRevokeAllSessions = async () => {
 
     revokingAll.value = true;
     const result = await revokeAllMySessions();
-    ElMessage.success(result.message || `已撤销 ${result.data?.revoked_count || 0} 个会话`);
+    ElMessage.success(result?.message || `已撤销 ${result?.revoked_count ?? 0} 个会话`);
     await fetchSessions();
   } catch (error) {
     if (error !== 'cancel') {

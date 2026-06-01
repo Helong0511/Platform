@@ -28,6 +28,7 @@ function extractResourceName(basePath) {
  * @param {boolean} [options.listTrailingSlash] 列表 URL 是否带尾部斜杠，默认 true
  * @param {string[]} [options.include] 生成的方法：list|get|create|update|delete
  * @param {Object} [options.methodNames] 覆盖方法名 { list, get, create, update, delete }
+ *   解构返回值时必须使用此处定义的名称（勿用默认 get${Resource}s 等别名，否则会得到 undefined）
  * @param {Function} [options.beforeMutate] create/update/delete 前执行（如刷新 CSRF）
  * @param {boolean} [options.csrfOnMutate] 为 true 时在 beforeMutate 前先刷新 CSRF
  * @param {string} [options.csrfEndpoint] csrfOnMutate 使用的 GET 端点
