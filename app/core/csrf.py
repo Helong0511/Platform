@@ -6,7 +6,7 @@ import secrets
 import logging
 import hashlib
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 from fastapi import Request, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
@@ -25,10 +25,6 @@ logger = logging.getLogger(__name__)
 
 # CSRF令牌存储（内存存储，Redis不可用时使用）
 _csrf_tokens: Dict[str, str] = {}
-# Redis客户端缓存
-_redis_client_cache: Optional[Any] = None
-# Redis客户端缓存过期时间（秒）
-_REDIS_CLIENT_CACHE_TTL = 300
 # 内存令牌存储最大大小
 _MEMORY_TOKEN_STORE_MAX_SIZE = 10000
 # 内存令牌清理阈值（当达到最大大小的80%时触发清理）
@@ -250,43 +246,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.app = app
     
-    async def _get_redis_client(self) -> Optional[Any]:
-        """
-        获取Redis客户端（带缓存）
-        缓存Redis客户端连接，减少连接开销
-        实现更可靠的连接管理和错误处理
-        """
-        global _redis_client_cache
-        
-        # 检查缓存是否有效
-        if _redis_client_cache:
-            try:
-                # 测试Redis连接是否仍然有效
-                await _redis_client_cache.ping()
-                return _redis_client_cache
-            except Exception as e:
-                logger.warning(f"Redis连接已失效: {str(e)}，将重新获取连接")
-                _redis_client_cache = None
-        
-        # 缓存无效，获取新的Redis客户端
-        try:
-            redis_client = await get_redis_client()
-            if redis_client:
-                try:
-                    # 验证新连接是否有效
-                    await redis_client.ping()
-                    _redis_client_cache = redis_client
-                    logger.debug("成功获取并验证Redis客户端连接")
-                except Exception as e:
-                    logger.warning(f"Redis连接验证失败: {str(e)}，将使用内存存储")
-                    redis_client = None
-            else:
-                logger.debug("无法获取Redis客户端，将使用内存存储")
-            return redis_client
-        except Exception as e:
-            logger.warning(f"获取Redis客户端失败: {str(e)}，将使用内存存储")
-            return None
-    
     async def _generate_session_id(self, request: Request) -> str:
         """
         生成会话标识
@@ -335,7 +294,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         从存储中检索CSRF令牌
         优先从Redis获取，然后从内存存储获取
         """
-        redis_client = await self._get_redis_client()
+        redis_client = await get_redis_client()
         csrf_key = f"csrf_token:{session_id}"
         
         # 尝试从Redis获取
@@ -359,7 +318,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         优先使用Redis，Redis不可用时使用内存存储
         实现内存令牌存储的大小限制和自动清理
         """
-        redis_client = await self._get_redis_client()
+        redis_client = await get_redis_client()
         csrf_key = f"csrf_token:{session_id}"
         
         if redis_client:
@@ -685,7 +644,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         
         # 检查令牌是否即将过期，需要刷新
         should_refresh = False
-        redis_client = await self._get_redis_client()
+        redis_client = await get_redis_client()
         csrf_key = f"csrf_token:{session_id}"
         last_refresh_key = f"csrf_token_last_refresh:{session_id}"
         
@@ -797,8 +756,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 "anyio" in error_module):
                 logger.debug(f"请求流异常: {method} {path}")
                 raise
-            # 检查是否是HTTPException，如果是则直接抛出，不记录为错误
-            from fastapi.exceptions import HTTPException
             if isinstance(e, HTTPException):
                 raise
             # 其他异常，记录日志并重新抛出

@@ -148,42 +148,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         current_window_key = f"{int(now.timestamp() / window)}"
         rate_limit_key = f"rate_limit:{client_ip}:{current_window_key}"
         
+        redis_counted = False
+        updated_count = 0
         if redis_client:
-            # 使用Redis进行限流（支持多进程）
+            # Redis 计数与 call_next 分离，避免将 CSRF/业务 HTTPException 误判为 Redis 故障
             try:
-                # 使用 INCR + EXPIRE，减少网络往返并降低连接抖动影响
                 updated_count = int(await redis_client.incr(rate_limit_key))
                 if updated_count == 1:
                     await redis_client.expire(rate_limit_key, window)
-
-                # 检查是否超过限制
-                if updated_count > limit:
-                    logger.warning(f"API限流触发（Redis）: IP={client_ip}, 路径={request.url.path}, 限制={limit}/{window}秒")
-                    return JSONResponse(
-                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        content={
-                            "detail": "请求过于频繁，请稍后再试"
-                        },
-                        headers={
-                            "Retry-After": str(window),
-                            "X-RateLimit-Limit": str(limit),
-                            "X-RateLimit-Remaining": "0",
-                        }
-                    )
-                
-                # 继续处理请求
-                response = await call_next(request)
-
-                # 添加限流响应头
-                remaining = max(0, limit - updated_count)
-                response.headers["X-RateLimit-Limit"] = str(limit)
-                response.headers["X-RateLimit-Remaining"] = str(remaining)
-                response.headers["X-RateLimit-Reset"] = str(int((now + timedelta(seconds=window)).timestamp()))
-                
-                return response
-            except StarletteHTTPException:
-                # CSRF/业务层返回的 4xx 不应视为 Redis 故障，直接向上抛出
-                raise
+                redis_counted = True
             except Exception as e:
                 error_msg = str(e) or repr(e) or "未知错误"
                 error_type = type(e).__name__
@@ -196,9 +169,27 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     _rate_limit_redis_error_last_log_at[error_key] = now_ts
                 else:
                     logger.debug(f"Redis限流异常抑制日志: {error_type} - {error_msg}")
-                # 连接异常后重置客户端，避免后续请求反复命中坏连接
                 await reset_redis_client(f"RateLimitMiddleware: {error_type}")
-                # Redis操作失败，回退到内存存储
+
+        if redis_counted:
+            if updated_count > limit:
+                logger.warning(f"API限流触发（Redis）: IP={client_ip}, 路径={request.url.path}, 限制={limit}/{window}秒")
+                return JSONResponse(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    content={"detail": "请求过于频繁，请稍后再试"},
+                    headers={
+                        "Retry-After": str(window),
+                        "X-RateLimit-Limit": str(limit),
+                        "X-RateLimit-Remaining": "0",
+                    },
+                )
+
+            response = await call_next(request)
+            remaining = max(0, limit - updated_count)
+            response.headers["X-RateLimit-Limit"] = str(limit)
+            response.headers["X-RateLimit-Remaining"] = str(remaining)
+            response.headers["X-RateLimit-Reset"] = str(int((now + timedelta(seconds=window)).timestamp()))
+            return response
         
         # ====== 使用内存存储进行限流（Redis不可用时） ======
         client_requests = _rate_limit_store[client_ip]
@@ -609,13 +600,11 @@ class CompressionMiddleware(BaseHTTPMiddleware):
                 headers=headers,
                 media_type=response.media_type
             )
+        except StarletteHTTPException:
+            raise
         except Exception as e:
             logger.error(f"压缩中间件处理请求时出错: {e}", exc_info=True)
-            # 如果中间件出错，尝试继续处理（可能会失败，但至少不会导致服务崩溃）
-            try:
-                return await call_next(request)
-            except:
-                raise
+            raise
 
 
 def is_mobile_device(request: Request) -> bool:
