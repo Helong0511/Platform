@@ -367,41 +367,46 @@ export const useAuthStore = defineStore('auth', {
       }
       return this.isAuthenticated;
     },
-    async fetchUserInfo() {
+    async fetchUserInfo(options = {}) {
       // 检查是否已认证（系统使用 HttpOnly Cookie，不需要检查 token）
       if (!this.isAuthenticated) return;
 
+      const { silent = false } = options;
       this.loading = true;
       try {
-        // 使用request工具函数，returnDataOnly: true直接返回数据对象
         const userData = await request({
           url: '/api/v1/users/me',
           method: 'get'
-        }, { returnDataOnly: true });
+        }, { returnDataOnly: true, silent });
         
         this.userInfo = userData || {};
         sessionStorage.setItem('userInfo', JSON.stringify(this.userInfo));
       } catch (err) {
-        // 如果是401错误，说明token无效，清除认证信息
-        // 但不要在登录页显示错误信息
-        if (err.response?.status === 401) {
-          // 清除认证信息
+        const httpStatus = err.response?.status;
+        const businessCode = err.code ?? err.response?.data?.code;
+        const isAuthFailure =
+          httpStatus === 401 ||
+          businessCode === 401 ||
+          businessCode === 2002 ||
+          businessCode === 2003;
+
+        if (isAuthFailure) {
           clearAuthData();
           this.userInfo = {};
           this.isAuthenticated = false;
 
-          // 只在非登录页显示错误信息
-          if (window.location.pathname !== '/login') {
+          if (!silent && window.location.pathname !== '/login') {
             ElMessage.error('会话已过期，请重新登录');
-            // 跳转到登录页
             router.push('/login').catch(() => { });
           }
-        } else {
-          // 其他错误，正常显示
-          this.logout();
-          if (window.location.pathname !== '/login') {
-            ElMessage.error('获取用户信息失败，请重新登录');
-          }
+          return;
+        }
+
+        // 非认证类错误：保留登录态，仅记录（避免 API 文档等页误触发整站登出）
+        logger.warn('获取用户信息失败（非认证错误）:', err);
+        if (!silent && window.location.pathname !== '/login') {
+          const detail = err.message || '获取用户信息失败';
+          ElMessage.warning(detail);
         }
       } finally {
         this.loading = false;

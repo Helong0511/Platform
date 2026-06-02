@@ -49,6 +49,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.audit_log import log_login, log_logout, commit_audit_log
 from app.core.auth_response import build_token_json_response, raise_auth_error
+from app.core.auth_user_payload import build_auth_user_payload
 from app.core.config import settings
 from app.core.errors import ErrorCode
 from app.core.database import get_db
@@ -361,33 +362,27 @@ async def login(
     # 如果是客户角色，获取客户的api_enabled和has_publisher信息
     api_enabled = False
     has_publisher = False
+    client_record = None
     if user.role == UserRole.CLIENT and user.clients:
-        # 客户用户：获取第一个客户的api_enabled状态
-        client = user.clients[0]
-        if client:
-            api_enabled = client.api_enabled
-
-            # 检查该客户是否有关联的渠道（只检查激活的渠道）
+        client_record = user.clients[0]
+        if client_record:
+            api_enabled = bool(client_record.api_enabled)
             publisher_check = await db.execute(
                 select(func.count(Publisher.id)).where(
                     and_(
-                        Publisher.client_id == client.id,
-                        Publisher.is_active == True
+                        Publisher.client_id == client_record.id,
+                        Publisher.is_active == True,
                     )
                 )
             )
-            publisher_count = publisher_check.scalar() or 0
-            has_publisher = publisher_count > 0
+            has_publisher = (publisher_check.scalar() or 0) > 0
 
-    user_payload = {
-        "id": user.id,
-        "username": user.username,
-        "full_name": user.full_name,
-        "email": user.email,
-        "role": user.role.value,
-        "api_enabled": api_enabled,
-        "has_publisher": has_publisher,
-    }
+    user_payload = build_auth_user_payload(
+        user,
+        api_enabled=api_enabled,
+        has_publisher=has_publisher,
+        client=client_record,
+    )
 
     try:
         await log_login(db=db, user=user, request=request, success=True)

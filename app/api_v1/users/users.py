@@ -391,7 +391,19 @@ async def get_current_user_info(
         'has_publisher': has_publisher,  # 是否有关联的渠道（用于前端菜单显示）
         'client': client_data  # 客户信息（如果存在）
     }
-    user_data = UserResponse.model_validate(user_dict).model_dump()
+    try:
+        user_data = UserResponse.model_validate(user_dict).model_dump()
+    except Exception as exc:
+        logger.error(
+            "当前用户信息序列化失败 user_id=%s: %s",
+            current_user.id,
+            exc,
+            exc_info=True,
+        )
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail="用户信息格式异常，请联系管理员检查账号邮箱等字段",
+        )
 
     return ResponseBaseSchema.success(data=user_data)
 

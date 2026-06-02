@@ -68,9 +68,12 @@ export const searchUser = async (searchTerm) => {
   }
 };
 
-/** 获取当前登录用户信息 */
-export const getCurrentUserInfo = async () =>
-  request({ url: '/api/v1/users/me', method: 'get' }, { returnDataOnly: true });
+/** 获取当前登录用户信息 @param {Object} [options] 传给 request 的选项，如 { silent: true } */
+export const getCurrentUserInfo = async (options = {}) =>
+  request(
+    { url: '/api/v1/users/me', method: 'get' },
+    { returnDataOnly: true, ...options }
+  );
 
 /** @deprecated 请使用 getCurrentUserInfo */
 export const getCurrentUser = getCurrentUserInfo;

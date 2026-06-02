@@ -498,7 +498,9 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
 import { onMounted, ref } from 'vue';
 import { ElCard, ElTag, ElCollapse, ElCollapseItem, ElTable, ElTableColumn, ElAlert, ElTabs, ElTabPane } from 'element-plus';
 import { useAuthStore } from '@/store';
+import { getCurrentUserInfo } from '@/api/user';
 import { useClientApiDocExamples } from '@/composables/useClientApiDocExamples';
+import { logger } from '@/utils/logger';
 
 const authStore = useAuthStore();
 const activeTab = ref('python');
@@ -519,8 +521,18 @@ const {
 } = useClientApiDocExamples();
 
 onMounted(async () => {
-  if (!authStore.userInfo?.client?.key) {
-    await authStore.fetchUserInfo();
+  if (authStore.userInfo?.client?.key) {
+    return;
+  }
+  try {
+    const userData = await getCurrentUserInfo({ silent: true });
+    if (userData && typeof userData === 'object') {
+      authStore.userInfo = { ...authStore.userInfo, ...userData };
+      sessionStorage.setItem('userInfo', JSON.stringify(authStore.userInfo));
+    }
+  } catch (err) {
+    logger.warn('API 对接文档页加载客户密钥失败:', err);
+    // 不登出：页面顶部已有未获取参数的提示
   }
 });
 
