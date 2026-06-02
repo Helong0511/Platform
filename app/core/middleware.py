@@ -58,6 +58,7 @@ API限流（RateLimitMiddleware）：
 """
 from fastapi import Request, Response, status
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp, Message
 import time
@@ -180,6 +181,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 response.headers["X-RateLimit-Reset"] = str(int((now + timedelta(seconds=window)).timestamp()))
                 
                 return response
+            except StarletteHTTPException:
+                # CSRF/业务层返回的 4xx 不应视为 Redis 故障，直接向上抛出
+                raise
             except Exception as e:
                 error_msg = str(e) or repr(e) or "未知错误"
                 error_type = type(e).__name__
