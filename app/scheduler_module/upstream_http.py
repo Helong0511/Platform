@@ -3,14 +3,33 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Callable, Dict, Mapping, Optional, Union
 
 import httpx
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 SuccessCheck = Union[set[Any], Callable[[Dict[str, Any]], bool]]
+
+# 重试间隔（秒）：第 1 次失败后等 2s，第 2 次 5s …
+_UPSTREAM_RETRY_DELAYS = (2.0, 5.0, 10.0)
+
+
+def _httpx_timeout(total: float) -> httpx.Timeout:
+    connect = min(float(settings.UPSTREAM_HTTP_CONNECT_TIMEOUT), total)
+    return httpx.Timeout(total, connect=connect)
+
+
+def _default_max_retries() -> int:
+    return max(1, int(settings.UPSTREAM_HTTP_MAX_RETRIES))
+
+
+def _default_timeout() -> float:
+    return max(5.0, float(settings.UPSTREAM_HTTP_TIMEOUT))
 
 
 def ensure_http_ok(response: httpx.Response, *, label: str = "API") -> None:
@@ -43,29 +62,71 @@ async def _request_json(
     params: Optional[Mapping[str, Any]] = None,
     headers: Optional[Mapping[str, str]] = None,
     label: str = "API",
-    timeout: float = 20.0,
+    timeout: Optional[float] = None,
     verify: bool = True,
+    max_retries: Optional[int] = None,
 ) -> Dict[str, Any]:
-    try:
-        async with httpx.AsyncClient(timeout=timeout, verify=verify) as client:
-            response = await client.request(
-                method,
-                url,
-                json=json_body,
-                params=params,
-                headers=headers,
-            )
-    except httpx.TimeoutException as e:
-        logger.error("%s 请求超时: %s", label, e)
-        raise Exception(f"{label} 请求超时: 超过{timeout}秒未响应") from e
-    except httpx.RequestError as e:
-        logger.error("%s 请求错误: %s", label, e)
-        raise Exception(f"{label} 请求失败: {e}") from e
+    total_timeout = timeout if timeout is not None else _default_timeout()
+    attempts = max_retries if max_retries is not None else _default_max_retries()
+    attempts = max(1, attempts)
+    last_error: Optional[Exception] = None
 
-    ensure_http_ok(response, label=label)
-    json_data = parse_json_response(response, label=label)
-    logger.info("%s 响应: %s", label, json_data)
-    return json_data
+    for attempt in range(attempts):
+        try:
+            async with httpx.AsyncClient(
+                timeout=_httpx_timeout(total_timeout),
+                verify=verify,
+            ) as client:
+                response = await client.request(
+                    method,
+                    url,
+                    json=json_body,
+                    params=params,
+                    headers=headers,
+                )
+            ensure_http_ok(response, label=label)
+            json_data = parse_json_response(response, label=label)
+            if attempt > 0:
+                logger.info("%s 第 %s 次重试成功", label, attempt + 1)
+            else:
+                logger.info("%s 响应: %s", label, json_data)
+            return json_data
+        except httpx.TimeoutException as e:
+            last_error = e
+            if attempt < attempts - 1:
+                delay = _UPSTREAM_RETRY_DELAYS[min(attempt, len(_UPSTREAM_RETRY_DELAYS) - 1)]
+                logger.warning(
+                    "%s 请求超时 (尝试 %s/%s，限时 %.0fs)，%.0fs 后重试",
+                    label,
+                    attempt + 1,
+                    attempts,
+                    total_timeout,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            logger.error("%s 请求超时: 超过 %.0f 秒未响应 (%s 次尝试)", label, total_timeout, attempts)
+            raise Exception(
+                f"{label} 请求超时: 超过{total_timeout}秒未响应（已重试 {attempts} 次）"
+            ) from e
+        except httpx.RequestError as e:
+            last_error = e
+            if attempt < attempts - 1:
+                delay = _UPSTREAM_RETRY_DELAYS[min(attempt, len(_UPSTREAM_RETRY_DELAYS) - 1)]
+                logger.warning(
+                    "%s 网络错误 (尝试 %s/%s): %s，%.0fs 后重试",
+                    label,
+                    attempt + 1,
+                    attempts,
+                    e,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            logger.error("%s 请求错误: %s", label, e)
+            raise Exception(f"{label} 请求失败: {e}") from e
+
+    raise Exception(f"{label} 请求失败: {last_error}")
 
 
 async def post_json(
@@ -74,8 +135,9 @@ async def post_json(
     json_body: Optional[Mapping[str, Any]] = None,
     headers: Optional[Mapping[str, str]] = None,
     label: str = "API",
-    timeout: float = 20.0,
+    timeout: Optional[float] = None,
     verify: bool = True,
+    max_retries: Optional[int] = None,
 ) -> Dict[str, Any]:
     """POST 请求并返回解析后的 JSON。"""
     return await _request_json(
@@ -86,6 +148,7 @@ async def post_json(
         label=label,
         timeout=timeout,
         verify=verify,
+        max_retries=max_retries,
     )
 
 
@@ -95,8 +158,9 @@ async def get_json(
     params: Optional[Mapping[str, Any]] = None,
     headers: Optional[Mapping[str, str]] = None,
     label: str = "API",
-    timeout: float = 20.0,
+    timeout: Optional[float] = None,
     verify: bool = True,
+    max_retries: Optional[int] = None,
 ) -> Dict[str, Any]:
     """GET 请求并返回解析后的 JSON。"""
     return await _request_json(
@@ -107,6 +171,7 @@ async def get_json(
         label=label,
         timeout=timeout,
         verify=verify,
+        max_retries=max_retries,
     )
 
 

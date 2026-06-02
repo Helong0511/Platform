@@ -476,6 +476,11 @@ class Settings(BaseSettings):
     
     TBSJ_API_USERNAME: str = os.getenv("TBSJ_API_USERNAME", "")
     TBSJ_API_PASSWORD: str = os.getenv("TBSJ_API_PASSWORD", "")
+
+    # 定时任务拉取上游 API（TBSJ / Huguang 等）HTTP 超时与重试
+    UPSTREAM_HTTP_TIMEOUT: float = float(os.getenv("UPSTREAM_HTTP_TIMEOUT", "45"))
+    UPSTREAM_HTTP_CONNECT_TIMEOUT: float = float(os.getenv("UPSTREAM_HTTP_CONNECT_TIMEOUT", "15"))
+    UPSTREAM_HTTP_MAX_RETRIES: int = int(os.getenv("UPSTREAM_HTTP_MAX_RETRIES", "3"))
     
     ADDERMOBI_API_USERNAME: str = os.getenv("ADDERMOBI_API_USERNAME", "")
     ADDERMOBI_API_PASSWORD: str = os.getenv("ADDERMOBI_API_PASSWORD", "")

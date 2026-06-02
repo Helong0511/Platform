@@ -145,7 +145,9 @@ async def tbsj_api_task(
         error_msg = f"{TBSJ_API_TASK_NAME} 执行失败: {str(e)}"
         # 记录详细错误信息（包括完整的堆栈跟踪）
         # 注意：只记录一次，避免重复。如果业务层已记录错误，这里只记录简要信息
-        logger.error(error_msg, exc_info=True)
+        # 超时/网络类错误已有 upstream_http 重试日志，避免重复打印整段堆栈
+        log_timeout = "请求超时" in str(e) or "请求失败" in str(e)
+        logger.error(error_msg, exc_info=not log_timeout)
 
         # 重新抛出异常，让定时任务调度器的锁机制能够记录错误状态
         # 这样可以在数据库中标记任务执行失败，便于后续排查问题
