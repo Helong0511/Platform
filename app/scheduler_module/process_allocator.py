@@ -21,6 +21,12 @@ from app.scheduler_module.task_queue import get_task_queue
 
 logger = logging.getLogger(__name__)
 
+
+def _is_dedicated_scheduler_process() -> bool:
+    """独立调度服务（Platform-scheduler）仅 1 worker，不做跨进程分配。"""
+    return os.getenv("GUNICORN_ROLE", "api").strip().lower() == "scheduler"
+
+
 # 尝试导入psutil，如果不可用则使用备用方法
 try:
     import psutil
@@ -132,6 +138,10 @@ async def get_process_for_task(
 
     max_concurrent = getattr(settings, 'MAX_CONCURRENT_SCHEDULED_TASKS', 2)
     current_pid = get_current_pid()
+
+    # 独立调度进程：全部在本 worker 执行，避免误分到已关闭调度器的 API worker
+    if _is_dedicated_scheduler_process():
+        return True, current_pid
 
     # 从数据库查询相同cron表达式的任务，确定应该由哪个进程执行
     if db is None:
