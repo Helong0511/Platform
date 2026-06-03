@@ -63,7 +63,7 @@ export const SCHEDULED_TASK_EDIT_RULES = {
   ],
 };
 
-/** 需要日期参数的手动触发任务名称 */
+/** 需要日期参数的手动触发任务名称（兼容旧前端；新任务以 API 后缀规则为准） */
 export const DATE_RELATED_TASK_NAMES = [
   'Addermobi API获取数据',
   'Skymobi API获取数据',
@@ -71,4 +71,16 @@ export const DATE_RELATED_TASK_NAMES = [
   'zhisuo API获取数据',
   'TQT API获取数据',
   'Pomiad API获取数据',
+  'Huguang API获取数据',
 ];
+
+/** 手动触发是否弹出日期选择（上游 API 拉数任务） */
+export function taskSupportsManualDateRange(task) {
+  const name = typeof task === 'string' ? task : task?.task_name;
+  if (!name) return false;
+  if (typeof task === 'object' && task.supports_manual_date_range === true) {
+    return true;
+  }
+  if (DATE_RELATED_TASK_NAMES.includes(name)) return true;
+  return String(name).endsWith('API获取数据');
+}

@@ -6,7 +6,7 @@ import {
   releaseTaskLock,
 } from '../api/scheduled-task';
 import { extractErrorMessage, isErrorHandled } from '../utils/api';
-import { DATE_RELATED_TASK_NAMES } from '../utils/cronValidate';
+import { taskSupportsManualDateRange } from '../utils/cronValidate';
 
 /**
  * 定时任务行操作：启停、手动触发、释放锁。
@@ -34,7 +34,7 @@ export function useScheduledTaskActions({ fetchTasks }) {
   };
 
   const handleTrigger = async (task) => {
-    if (DATE_RELATED_TASK_NAMES.includes(task.task_name)) {
+    if (taskSupportsManualDateRange(task)) {
       currentTriggerTask.value = task;
       triggerParams.value = { start_date: '', end_date: '' };
       triggerDialogVisible.value = true;

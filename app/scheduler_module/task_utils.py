@@ -190,3 +190,10 @@ def resolve_upstream_date_range(
 def upstream_credential_missing(*values: Optional[str]) -> bool:
     """任一上游凭证为空则视为未配置。"""
     return any(v is None or not str(v).strip() for v in values)
+
+
+def task_supports_manual_date_range(task_name: Optional[str]) -> bool:
+    """手动触发时是否支持 start_date / end_date（上游 API 拉数类任务）。"""
+    if not task_name:
+        return False
+    return str(task_name).endswith("API获取数据")

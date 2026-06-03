@@ -32,6 +32,7 @@ from app.models.models import User, ScheduledTask
 from app.core.utils import get_app_now_naive
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
 from app.scheduler_module.task_registry import get_task_function_info
+from app.scheduler_module.task_utils import task_supports_manual_date_range
 from pydantic import BaseModel, field_validator, Field
 
 # 创建路由实例
@@ -43,6 +44,20 @@ logger = logging.getLogger(__name__)
 from app.core.constants import MAX_TASK_NAME_LENGTH, QUERY_TIMEOUT, MAX_PAGE_SIZE
 MAX_DESCRIPTION_LENGTH = 500
 MAX_FUNCTION_PATH_LENGTH = 255
+
+
+def _enrich_scheduled_task_dict(task: ScheduledTask, task_dict: dict) -> dict:
+    """补充函数信息与是否支持手动触发日期参数。"""
+    task_dict["supports_manual_date_range"] = task_supports_manual_date_range(task.task_name)
+    try:
+        func_info = get_task_function_info(task.task_name, task.function_path)
+        if func_info:
+            task_dict["function_name"] = func_info["function_name"]
+            task_dict["function_module"] = func_info["function_module"]
+    except Exception as func_err:
+        logger.warning(f"获取任务 {task.task_name} 的函数信息失败: {func_err}")
+    return task_dict
+
 
 # ====== Schema 定义 ======
 from app.schemas.base import BaseSchema
@@ -66,6 +81,7 @@ class ScheduledTaskResponse(BaseSchema):
     function_name: Optional[str] = None  # 执行函数名称
     function_module: Optional[str] = None  # 函数所在模块路径
     function_path: Optional[str] = None  # 执行函数路径（数据库字段）
+    supports_manual_date_range: bool = False  # 手动触发是否可选日期范围
     created_at: datetime
     updated_at: datetime
 
@@ -113,16 +129,7 @@ async def get_scheduled_tasks(
         for task in tasks:
             try:
                 task_dict = ScheduledTaskResponse.model_validate(task).model_dump()
-                # 获取函数信息（优先使用 function_path）
-                # 如果获取函数信息失败，不影响任务列表的返回
-                try:
-                    func_info = get_task_function_info(task.task_name, task.function_path)
-                    if func_info:
-                        task_dict["function_name"] = func_info["function_name"]
-                        task_dict["function_module"] = func_info["function_module"]
-                except Exception as func_err:
-                    # 获取函数信息失败，记录警告但不影响任务列表
-                    logger.warning(f"获取任务 {task.task_name} 的函数信息失败: {func_err}")
+                _enrich_scheduled_task_dict(task, task_dict)
                 task_list.append(ScheduledTaskResponse(**task_dict))
             except Exception as task_err:
                 # 单个任务转换失败，记录错误但继续处理其他任务
@@ -145,8 +152,9 @@ async def get_scheduled_tasks(
                         "description": task.description,
                         "function_path": task.function_path,
                         "created_at": task.created_at,
-                        "updated_at": task.updated_at
+                        "updated_at": task.updated_at,
                     }
+                    _enrich_scheduled_task_dict(task, task_dict)
                     task_list.append(ScheduledTaskResponse(**task_dict))
                 except Exception:
                     # 如果基本字段也失败，跳过这个任务
@@ -199,10 +207,7 @@ async def get_scheduled_task(
 
         # 转换为响应模型并添加函数信息
         task_dict = ScheduledTaskResponse.model_validate(task).model_dump()
-        func_info = get_task_function_info(task.task_name, task.function_path)
-        if func_info:
-            task_dict["function_name"] = func_info["function_name"]
-            task_dict["function_module"] = func_info["function_module"]
+        _enrich_scheduled_task_dict(task, task_dict)
 
         return ResponseBaseSchema.success(data=ScheduledTaskResponse(**task_dict))
 
@@ -274,10 +279,7 @@ async def update_scheduled_task(
         # 转换为响应模型并添加函数信息
         try:
             task_dict = ScheduledTaskResponse.model_validate(task).model_dump()
-            func_info = get_task_function_info(task.task_name, task.function_path)
-            if func_info:
-                task_dict["function_name"] = func_info["function_name"]
-                task_dict["function_module"] = func_info["function_module"]
+            _enrich_scheduled_task_dict(task, task_dict)
         except Exception as dict_error:
             # 如果转换失败，使用基本字段构建响应
             logger.warning(f"转换任务响应模型失败: {dict_error}，使用基本字段", exc_info=True)
@@ -295,8 +297,9 @@ async def update_scheduled_task(
                 "error_count": task.error_count,
                 "last_error": task.last_error,
                 "created_at": task.created_at,
-                "updated_at": task.updated_at
+                "updated_at": task.updated_at,
             }
+            _enrich_scheduled_task_dict(task, task_dict)
 
         return ResponseBaseSchema.success(data=ScheduledTaskResponse(**task_dict))
 
