@@ -494,6 +494,12 @@ class Settings(BaseSettings):
     ZHISUO_API_ACCOUNTS: str = os.getenv("ZHISUO_API_ACCOUNTS", "")
     ZHISUO_API_BASE_URL: str = os.getenv("ZHISUO_API_BASE_URL", "https://ch.tecnee.xyz")
 
+    POMIAD_API_BASE_URL: str = os.getenv("POMIAD_API_BASE_URL", "https://data.pomiad.com/ys_data")
+    POMIAD_API_USERNAME: str = os.getenv("POMIAD_API_USERNAME", "")
+    POMIAD_API_PASSWORD: str = os.getenv("POMIAD_API_PASSWORD", "")
+    POMIAD_IS_BY_COUNTRY: int = int(os.getenv("POMIAD_IS_BY_COUNTRY", "0"))
+    POMIAD_API_DATA_LIMIT: int = int(os.getenv("POMIAD_API_DATA_LIMIT", "100"))
+
     def get_zhisuo_accounts(self) -> List[Dict[str, str]]:
         """返回 zhisuo 账号列表，每项含 client_id、api_key。"""
         raw = (self.ZHISUO_API_ACCOUNTS or "").strip()

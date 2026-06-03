@@ -170,3 +170,257 @@ async def fetch_zhisuo_unit_rows(
         page += 1
 
     return all_rows
+
+
+def _pomiad_ok(json_data: Dict[str, Any]) -> bool:
+    return json_data.get("rtn") == 200
+
+
+async def _pomiad_login(
+    *,
+    base_url: str,
+    username: str,
+    password: str,
+) -> str:
+    url = f"{base_url.rstrip('/')}/login"
+    json_data = await post_json(
+        url,
+        json_body={"username": username, "password": password},
+        label="Pomiad API 登录",
+    )
+    raise_unless_api_success(json_data, _pomiad_ok, label="Pomiad API 登录")
+    token = json_data.get("token")
+    if not token:
+        raise Exception("Pomiad API 登录成功但未返回 token")
+    return str(token)
+
+
+async def fetch_pomiad_rows(
+    *,
+    base_url: str,
+    username: str,
+    password: str,
+    start: str,
+    end: str,
+    is_by_country: int = 0,
+    api_data_limit: int = 100,
+) -> List[Any]:
+    """
+    Pomiad 拉数：login → api_data 发现站点 → 按 site_url×日期循环 data_detail。
+    返回 data_detail 明细列表（入库数据源）。
+    """
+    base = base_url.rstrip("/")
+    api_data_url = f"{base}/normal/api_data"
+    data_detail_url = f"{base}/normal/data_detail"
+
+    token = await _pomiad_login(base_url=base, username=username, password=password)
+    auth_headers = {"Authorization": token}
+
+    site_tasks: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    page = 1
+
+    while True:
+        params = {
+            "page": page,
+            "limit": api_data_limit,
+            "start_at": start,
+            "end_at": end,
+        }
+        json_data = await get_json(
+            api_data_url,
+            params=params,
+            headers=auth_headers,
+            label="Pomiad api_data",
+        )
+        if json_data.get("rtn") == 401:
+            token = await _pomiad_login(base_url=base, username=username, password=password)
+            auth_headers = {"Authorization": token}
+            json_data = await get_json(
+                api_data_url,
+                params=params,
+                headers=auth_headers,
+                label="Pomiad api_data",
+            )
+        raise_unless_api_success(json_data, _pomiad_ok, label="Pomiad api_data")
+
+        wrapper = json_data.get("data") or {}
+        rows = wrapper.get("data") or []
+        for row in rows:
+            site_url = row.get("site") or row.get("domain_name") or ""
+            data_date = row.get("data_date") or ""
+            if not site_url or not data_date:
+                continue
+            key = (site_url, data_date)
+            if key not in seen:
+                seen.add(key)
+                site_tasks.append(key)
+
+        total = int(wrapper.get("count") or 0)
+        if page * api_data_limit >= total or not rows:
+            break
+        page += 1
+
+    if not site_tasks:
+        return []
+
+    all_detail_rows: List[Any] = []
+    for site_url, data_date in site_tasks:
+        payload = {
+            "site_url": site_url,
+            "data_date": data_date,
+            "is_by_country": is_by_country,
+        }
+        json_data = await post_json(
+            data_detail_url,
+            json_body=payload,
+            headers={**auth_headers, "Content-Type": "application/json"},
+            label=f"Pomiad data_detail ({site_url} @ {data_date})",
+        )
+        if json_data.get("rtn") == 401:
+            token = await _pomiad_login(base_url=base, username=username, password=password)
+            auth_headers = {"Authorization": token}
+            json_data = await post_json(
+                data_detail_url,
+                json_body=payload,
+                headers={**auth_headers, "Content-Type": "application/json"},
+                label=f"Pomiad data_detail ({site_url} @ {data_date})",
+            )
+        raise_unless_api_success(
+            json_data,
+            _pomiad_ok,
+            label=f"Pomiad data_detail ({site_url} @ {data_date})",
+        )
+        detail_rows = (json_data.get("data") or {}).get("data") or []
+        if isinstance(detail_rows, list):
+            all_detail_rows.extend(detail_rows)
+
+    return all_detail_rows
+
+
+def _pomiad_ok(json_data: Dict[str, Any]) -> bool:
+    return json_data.get("rtn") == 200
+
+
+async def _pomiad_login(
+    *,
+    base_url: str,
+    username: str,
+    password: str,
+) -> str:
+    url = f"{base_url.rstrip('/')}/login"
+    json_data = await post_json(
+        url,
+        json_body={"username": username, "password": password},
+        label="Pomiad API 登录",
+    )
+    raise_unless_api_success(json_data, _pomiad_ok, label="Pomiad API 登录")
+    token = json_data.get("token")
+    if not token:
+        raise Exception("Pomiad API 登录成功但未返回 token")
+    return str(token)
+
+
+async def fetch_pomiad_rows(
+    *,
+    base_url: str,
+    username: str,
+    password: str,
+    start: str,
+    end: str,
+    is_by_country: int = 0,
+    api_data_limit: int = 100,
+) -> List[Any]:
+    """
+    Pomiad 拉数：login → api_data 发现站点 → 按 site_url×日期循环 data_detail。
+    返回 data_detail 明细列表（入库数据源）。
+    """
+    base = base_url.rstrip("/")
+    api_data_url = f"{base}/normal/api_data"
+    data_detail_url = f"{base}/normal/data_detail"
+
+    token = await _pomiad_login(base_url=base, username=username, password=password)
+    auth_headers = {"Authorization": token}
+
+    # 1. api_data 分页获取站点任务
+    site_tasks: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    page = 1
+
+    while True:
+        params = {
+            "page": page,
+            "limit": api_data_limit,
+            "start_at": start,
+            "end_at": end,
+        }
+        json_data = await get_json(
+            api_data_url,
+            params=params,
+            headers=auth_headers,
+            label="Pomiad api_data",
+        )
+        if json_data.get("rtn") == 401:
+            token = await _pomiad_login(base_url=base, username=username, password=password)
+            auth_headers = {"Authorization": token}
+            json_data = await get_json(
+                api_data_url,
+                params=params,
+                headers=auth_headers,
+                label="Pomiad api_data",
+            )
+        raise_unless_api_success(json_data, _pomiad_ok, label="Pomiad api_data")
+
+        wrapper = json_data.get("data") or {}
+        rows = wrapper.get("data") or []
+        for row in rows:
+            site_url = row.get("site") or row.get("domain_name") or ""
+            data_date = row.get("data_date") or ""
+            if not site_url or not data_date:
+                continue
+            key = (site_url, data_date)
+            if key not in seen:
+                seen.add(key)
+                site_tasks.append(key)
+
+        total = int(wrapper.get("count") or 0)
+        if page * api_data_limit >= total or not rows:
+            break
+        page += 1
+
+    if not site_tasks:
+        return []
+
+    # 2. 循环 data_detail
+    all_detail_rows: List[Any] = []
+    for site_url, data_date in site_tasks:
+        payload = {
+            "site_url": site_url,
+            "data_date": data_date,
+            "is_by_country": is_by_country,
+        }
+        json_data = await post_json(
+            data_detail_url,
+            json_body=payload,
+            headers={**auth_headers, "Content-Type": "application/json"},
+            label=f"Pomiad data_detail ({site_url} @ {data_date})",
+        )
+        if json_data.get("rtn") == 401:
+            token = await _pomiad_login(base_url=base, username=username, password=password)
+            auth_headers = {"Authorization": token}
+            json_data = await post_json(
+                data_detail_url,
+                json_body=payload,
+                headers={**auth_headers, "Content-Type": "application/json"},
+                label=f"Pomiad data_detail ({site_url} @ {data_date})",
+            )
+        raise_unless_api_success(
+            json_data,
+            _pomiad_ok,
+            label=f"Pomiad data_detail ({site_url} @ {data_date})",
+        )
+        detail_rows = (json_data.get("data") or {}).get("data") or []
+        if isinstance(detail_rows, list):
+            all_detail_rows.extend(detail_rows)
+
+    return all_detail_rows

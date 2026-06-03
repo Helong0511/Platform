@@ -70,4 +70,5 @@ export const DATE_RELATED_TASK_NAMES = [
   'yangyangdeyi API获取数据',
   'zhisuo API获取数据',
   'TQT API获取数据',
+  'Pomiad API获取数据',
 ];

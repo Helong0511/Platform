@@ -40,6 +40,9 @@ HUGUANG_API_TASK_NAME = "Huguang API获取数据"
 # zhisuo API获取数据任务
 ZHISUO_API_TASK_NAME = "zhisuo API获取数据"
 
+# Pomiad API获取数据任务
+POMIAD_API_TASK_NAME = "Pomiad API获取数据"
+
 # CPL 系统定时任务
 RESET_DAILY_CAPS_TASK_NAME = "每日Cap重置"
 
@@ -57,6 +60,7 @@ TASK_NAME_MAP = {
     "addermobi_task": ADDERMOBI_API_TASK_NAME,
     "huguang_task": HUGUANG_API_TASK_NAME,
     "zhisuo_task": ZHISUO_API_TASK_NAME,
+    "pomiad_task": POMIAD_API_TASK_NAME,
     "cpl_tasks": RESET_DAILY_CAPS_TASK_NAME,
 }
 
@@ -74,6 +78,7 @@ ALL_TASK_NAMES = [
     ADDERMOBI_API_TASK_NAME,
     HUGUANG_API_TASK_NAME,
     ZHISUO_API_TASK_NAME,
+    POMIAD_API_TASK_NAME,
     RESET_DAILY_CAPS_TASK_NAME,
 ]
 
