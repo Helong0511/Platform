@@ -5,6 +5,23 @@
         <div class="header">敏感路径拦截日志</div>
       </template>
 
+      <el-alert
+        v-if="levelHints.length"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 12px;"
+        title="预警等级说明"
+      >
+        <template #default>
+          <span v-for="(item, idx) in levelHints" :key="item.level">
+            <el-tag :type="severityTagType(item.level)" size="small" style="margin-right: 4px;">{{ item.label }}</el-tag>
+            {{ item.description }}
+            <span v-if="item.auto_block_threshold">（{{ item.auto_block_threshold }}次/窗口自动封禁）</span>
+            <span v-if="idx < levelHints.length - 1">；</span>
+          </span>
+        </template>
+      </el-alert>
+
       <div class="toolbar">
         <el-select v-model="statsDays" style="width: 140px">
           <el-option :value="1" label="近1天" />
@@ -19,7 +36,20 @@
 
       <div class="charts">
         <el-card class="chart-card" shadow="never">
-          <template #header>TOP IP 命中次数</template>
+          <template #header>
+            <div class="chart-header">
+              <span>TOP IP 命中次数</span>
+              <el-button
+                type="danger"
+                size="small"
+                :disabled="!lastTopIps.length"
+                :loading="batchBlocking"
+                @click="handleBatchBlockTopIps"
+              >
+                封禁 TOP IP
+              </el-button>
+            </div>
+          </template>
           <div ref="topIpChartRef" class="chart"></div>
         </el-card>
         <el-card class="chart-card" shadow="never">
@@ -34,6 +64,23 @@
           <el-input v-model="blockForm.blocked_ip" placeholder="IP地址" style="width: 220px" />
           <el-input v-model="blockForm.reason" placeholder="封禁原因（可选）" style="width: 320px" />
           <el-button type="danger" @click="handleAddBlockedIp">一键封禁IP</el-button>
+        </div>
+        <div class="batch-block-row">
+          <el-input
+            v-model="batchIpText"
+            type="textarea"
+            :rows="3"
+            placeholder="批量封禁：每行一个 IP，或用逗号/空格分隔"
+            style="flex: 1; min-width: 280px;"
+          />
+          <el-input
+            v-model="batchBlockReason"
+            placeholder="批量封禁原因（可选）"
+            style="width: 280px;"
+          />
+          <el-button type="danger" :loading="batchBlocking" @click="handleBatchBlockByText">
+            批量封禁
+          </el-button>
         </div>
         <el-table v-loading="blockedLoading" :data="blockedIps" stripe style="margin-top: 12px;">
           <el-table-column prop="blocked_ip" label="IP" width="200" />
@@ -65,16 +112,44 @@
         <el-input v-model="filters.client_ip" placeholder="客户端IP" clearable style="width: 180px" />
         <el-input v-model="filters.request_path" placeholder="请求路径关键字" clearable style="width: 260px" />
         <el-input v-model="filters.matched_rule" placeholder="命中规则" clearable style="width: 220px" />
+        <el-select v-model="filters.severity_level" placeholder="预警等级" clearable style="width: 140px">
+          <el-option :value="1" label="低危" />
+          <el-option :value="2" label="中危" />
+          <el-option :value="3" label="高危" />
+          <el-option :value="4" label="危急" />
+        </el-select>
         <el-button type="primary" @click="handleSearch">查询</el-button>
         <el-button @click="handleReset">重置</el-button>
+        <el-button
+          type="danger"
+          :disabled="!selectedRows.length"
+          :loading="batchBlocking"
+          @click="handleBatchBlockSelected"
+        >
+          批量封禁选中 ({{ selectedRows.length }})
+        </el-button>
       </div>
 
-      <el-table v-loading="loading" :data="tableData" stripe>
+      <el-table
+        v-loading="loading"
+        :data="tableData"
+        stripe
+        @selection-change="onSelectionChange"
+      >
+        <el-table-column type="selection" width="48" :selectable="rowSelectable" />
         <el-table-column prop="created_at" label="拦截时间" width="180">
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
         <el-table-column prop="method" label="方法" width="90" />
         <el-table-column prop="client_ip" label="IP" width="160" />
+        <el-table-column label="等级" width="88">
+          <template #default="{ row }">
+            <el-tag :type="severityTagType(row.severity_level)" size="small">
+              {{ row.severity_label || '中危' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="action_taken" label="处置" width="130" show-overflow-tooltip />
         <el-table-column prop="request_path" label="请求路径" min-width="340" show-overflow-tooltip />
         <el-table-column prop="query_string" label="Query" min-width="240" show-overflow-tooltip />
         <el-table-column prop="matched_rule" label="命中规则" min-width="180" show-overflow-tooltip />
@@ -114,23 +189,36 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
 import {
   addSensitiveBlockedIp,
+  batchAddSensitiveBlockedIps,
   cleanupSensitivePathProbeLogs,
   getSensitiveBlockedIps,
   getSensitivePathProbeLogs,
   getSensitivePathTopStats,
+  getSensitiveSeverityLevels,
   unblockSensitiveBlockedIp,
 } from '@/api/sensitive-path-probes'
 import { formatDate } from '@/utils/date'
 
 const loading = ref(false)
 const blockedLoading = ref(false)
+const batchBlocking = ref(false)
 const tableData = ref([])
+const selectedRows = ref([])
+const batchIpText = ref('')
+const batchBlockReason = ref('')
 const blockedIps = ref([])
+const levelHints = ref([])
 const filters = reactive({
   client_ip: '',
   request_path: '',
   matched_rule: '',
+  severity_level: null,
 })
+
+const severityTagType = (level) => {
+  const map = { 1: 'info', 2: 'warning', 3: 'danger', 4: 'danger' }
+  return map[level] || 'info'
+}
 const blockForm = reactive({
   blocked_ip: '',
   reason: '',
@@ -146,6 +234,7 @@ const topIpChartRef = ref(null)
 const topPathChartRef = ref(null)
 let topIpChart = null
 let topPathChart = null
+const lastTopIps = ref([])
 
 const loadData = async () => {
   loading.value = true
@@ -156,6 +245,7 @@ const loadData = async () => {
       client_ip: filters.client_ip || undefined,
       request_path: filters.request_path || undefined,
       matched_rule: filters.matched_rule || undefined,
+      severity_level: filters.severity_level ?? undefined,
     })
     tableData.value = res.data || []
     pagination.total = res.total || 0
@@ -209,6 +299,9 @@ const renderBarChart = (chartRef, chartInstanceRef, title, rows) => {
 const loadTopStats = async () => {
   try {
     const data = await getSensitivePathTopStats({ days: statsDays.value, limit: 10 })
+    lastTopIps.value = (data?.top_ips || [])
+      .map(item => item.name)
+      .filter(ip => ip && ip !== 'unknown')
     await nextTick()
     topIpChart = renderBarChart(topIpChartRef, topIpChart, '命中次数', data?.top_ips || [])
     topPathChart = renderBarChart(topPathChartRef, topPathChart, '命中次数', data?.top_paths || [])
@@ -251,6 +344,109 @@ const handleUnblock = async (row) => {
   }
 }
 
+const rowSelectable = (row) => Boolean(row.client_ip && row.client_ip !== 'unknown')
+
+const onSelectionChange = (rows) => {
+  selectedRows.value = rows || []
+}
+
+const parseIpLines = (text) => {
+  if (!text?.trim()) return []
+  return text
+    .split(/[\n,\s;]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+}
+
+const handleBatchBlockByText = async () => {
+  const ips = parseIpLines(batchIpText.value)
+  if (!ips.length) {
+    ElMessage.warning('请输入至少一个 IP')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认批量封禁 ${ips.length} 个 IP 吗？`,
+      '批量封禁确认',
+      { type: 'warning' }
+    )
+    batchBlocking.value = true
+    const res = await batchAddSensitiveBlockedIps({
+      blocked_ips: ips,
+      reason: batchBlockReason.value.trim() || undefined,
+    })
+    ElMessage.success(res?.message || '批量封禁完成')
+    batchIpText.value = ''
+    await loadBlockedIps()
+  } catch (e) {
+    if (e !== 'cancel') {
+      ElMessage.error(e?.message || '批量封禁失败')
+    }
+  } finally {
+    batchBlocking.value = false
+  }
+}
+
+const handleBatchBlockTopIps = async () => {
+  const ips = lastTopIps.value
+  if (!ips.length) {
+    ElMessage.warning('暂无 TOP IP 数据，请先刷新统计')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认封禁统计周期内 TOP ${ips.length} 个 IP 吗？`,
+      '批量封禁确认',
+      { type: 'warning' }
+    )
+    batchBlocking.value = true
+    const res = await batchAddSensitiveBlockedIps({
+      blocked_ips: ips,
+      reason: batchBlockReason.value.trim() || `批量封禁：近${statsDays.value}天 TOP 探测 IP`,
+    })
+    ElMessage.success(res?.message || '批量封禁完成')
+    await loadBlockedIps()
+  } catch (e) {
+    if (e !== 'cancel') {
+      ElMessage.error(e?.message || '批量封禁失败')
+    }
+  } finally {
+    batchBlocking.value = false
+  }
+}
+
+const handleBatchBlockSelected = async () => {
+  const logIds = selectedRows.value.map(r => r.id).filter(Boolean)
+  if (!logIds.length) {
+    ElMessage.warning('请先勾选拦截日志')
+    return
+  }
+  const uniqueIps = [...new Set(
+    selectedRows.value.map(r => r.client_ip).filter(ip => ip && ip !== 'unknown')
+  )]
+  try {
+    await ElMessageBox.confirm(
+      `确认批量封禁 ${uniqueIps.length} 个 IP（来自 ${logIds.length} 条日志）吗？`,
+      '批量封禁确认',
+      { type: 'warning' }
+    )
+    batchBlocking.value = true
+    const res = await batchAddSensitiveBlockedIps({
+      log_ids: logIds,
+      reason: batchBlockReason.value.trim() || undefined,
+    })
+    ElMessage.success(res?.message || '批量封禁完成')
+    selectedRows.value = []
+    await loadBlockedIps()
+  } catch (e) {
+    if (e !== 'cancel') {
+      ElMessage.error(e?.message || '批量封禁失败')
+    }
+  } finally {
+    batchBlocking.value = false
+  }
+}
+
 const handleQuickBlock = async (row) => {
   blockForm.blocked_ip = row.client_ip
   blockForm.reason = `来自敏感路径拦截日志，路径: ${row.request_path}`
@@ -288,8 +484,17 @@ const handleReset = () => {
   filters.client_ip = ''
   filters.request_path = ''
   filters.matched_rule = ''
+  filters.severity_level = null
   pagination.page = 1
   loadData()
+}
+
+const loadLevelHints = async () => {
+  try {
+    levelHints.value = await getSensitiveSeverityLevels() || []
+  } catch {
+    levelHints.value = []
+  }
 }
 
 const handleSizeChange = (size) => {
@@ -303,7 +508,10 @@ const handleCurrentChange = (page) => {
   loadData()
 }
 
-onMounted(refreshAll)
+onMounted(async () => {
+  await loadLevelHints()
+  await refreshAll()
+})
 
 onBeforeUnmount(() => {
   if (topIpChart) topIpChart.dispose()
@@ -317,8 +525,10 @@ onBeforeUnmount(() => {
 .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
 .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
 .chart-card { min-height: 320px; }
+.chart-header { display: flex; justify-content: space-between; align-items: center; }
 .chart { width: 100%; height: 260px; }
 .block-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.batch-block-row { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; margin-top: 12px; }
 .filters { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
 .pager { display: flex; justify-content: flex-end; margin-top: 16px; }
 @media (max-width: 1024px) {

@@ -1067,11 +1067,20 @@ class SensitivePathProbeLog(Base):
     user_agent = Column(String(512), nullable=True, comment="用户代理")
     query_string = Column(String(2048), nullable=True, comment="查询字符串")
     matched_rule = Column(String(255), nullable=True, index=True, comment="命中规则")
+    severity_level = Column(
+        Integer,
+        nullable=False,
+        default=2,
+        index=True,
+        comment="预警等级：1低危 2中危 3高危 4危急",
+    )
+    action_taken = Column(String(64), nullable=True, comment="处置动作：blocked_404/auto_blocked_ip等")
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment="创建时间")
 
     __table_args__ = (
         Index("idx_sensitive_probe_created_at", "created_at"),
         Index("idx_sensitive_probe_ip_created", "client_ip", "created_at"),
+        Index("idx_sensitive_probe_severity_created", "severity_level", "created_at"),
     )
 
 

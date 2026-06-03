@@ -1,10 +1,11 @@
 """敏感路径探测拦截日志管理 API。"""
 from datetime import datetime, timedelta
 import logging
+import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import and_, func, delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,11 +14,17 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.core.audit_log import log_create, log_update, log_delete, log_deactivate, commit_audit_log
 from app.core.config import settings
+from app.core.sensitive_path_rules import (
+    LEVEL_LABELS,
+    SensitivePathLevel,
+    get_level_policy,
+)
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.security import require_admin
+from app.core.sensitive_path_guard import bust_sensitive_blocked_ip_cache
 from app.core.utils import get_app_now_naive
 from app.models.models import SensitivePathProbeLog, SensitiveBlockedIP, User
 from app.schemas.base import PaginatedResponseBaseSchema, ResponseBaseSchema
@@ -27,6 +34,20 @@ logger = logging.getLogger(__name__)
 
 TOP_LIMIT_MAX = 50
 _BLOCKED_IP_UPSERT_RETRIES = 3
+_BATCH_BLOCK_MAX_IPS = 200
+_BATCH_BLOCK_MAX_LOG_IDS = 500
+_IP_PATTERN = re.compile(
+    r"^(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9a-fA-F:]+)$"
+)
+
+
+def _normalize_block_ip(raw: str) -> Optional[str]:
+    ip = (raw or "").strip()
+    if not ip or ip.lower() == "unknown" or len(ip) > 64:
+        return None
+    if not _IP_PATTERN.match(ip):
+        return None
+    return ip
 
 
 async def _upsert_sensitive_blocked_ip(
@@ -78,6 +99,61 @@ class CleanupPayload(BaseModel):
     retention_days: Optional[int] = Field(None, ge=1, le=3650, description="保留天数")
 
 
+class BatchBlockIPsPayload(BaseModel):
+    """批量封禁 IP（写入敏感路径黑名单）。"""
+
+    blocked_ips: Optional[list[str]] = Field(
+        None, max_length=_BATCH_BLOCK_MAX_IPS, description="IP 列表"
+    )
+    log_ids: Optional[list[int]] = Field(
+        None, max_length=_BATCH_BLOCK_MAX_LOG_IDS, description="拦截日志 ID 列表（取其 client_ip）"
+    )
+    reason: Optional[str] = Field(None, max_length=255, description="统一封禁原因")
+    update_reason: bool = Field(False, description="已存在记录时是否更新原因")
+
+    @model_validator(mode="after")
+    def require_sources(self):
+        has_ips = bool(self.blocked_ips)
+        has_logs = bool(self.log_ids)
+        if not has_ips and not has_logs:
+            raise ValueError("blocked_ips 与 log_ids 至少填写一项")
+        return self
+
+
+@router.get(
+    "/levels",
+    response_model=ResponseBaseSchema[list],
+    summary="获取敏感路径预警等级与处置说明",
+)
+async def get_severity_levels(
+    current_user: User = Depends(require_admin),
+):
+    del current_user
+    levels = []
+    for lv in SensitivePathLevel:
+        policy = get_level_policy(lv)
+        levels.append({
+            "level": int(lv),
+            "label": LEVEL_LABELS[int(lv)],
+            "log_level": "ERROR" if policy.log_level >= 40 else ("WARNING" if policy.log_level >= 30 else "INFO"),
+            "http_status": policy.http_status,
+            "auto_block_threshold": policy.auto_block_threshold,
+            "telegram_alert": policy.telegram_alert,
+            "description": _level_description(lv),
+        })
+    return ResponseBaseSchema.success(data=levels, message="获取预警等级说明成功")
+
+
+def _level_description(level: SensitivePathLevel) -> str:
+    desc = {
+        SensitivePathLevel.LOW: "框架指纹/文档探测，仅记录并返回404",
+        SensitivePathLevel.MEDIUM: "CMS/中间件常见扫描，窗口内累计达阈值自动封禁IP",
+        SensitivePathLevel.HIGH: "凭证、配置泄露与路径穿越，更低阈值自动封禁",
+        SensitivePathLevel.CRITICAL: "RCE/已知利用链，最低阈值自动封禁并 Telegram 预警（防抖）",
+    }
+    return desc.get(level, "")
+
+
 @router.get(
     "/",
     response_model=PaginatedResponseBaseSchema[list],
@@ -89,6 +165,9 @@ async def get_sensitive_path_probe_logs(
     client_ip: Optional[str] = Query(None, description="客户端IP"),
     request_path: Optional[str] = Query(None, description="请求路径（模糊匹配）"),
     matched_rule: Optional[str] = Query(None, description="命中规则"),
+    severity_level: Optional[int] = Query(
+        None, ge=1, le=4, description="预警等级：1低危 2中危 3高危 4危急"
+    ),
     start_date: Optional[datetime] = Query(None, description="开始时间"),
     end_date: Optional[datetime] = Query(None, description="结束时间"),
     db: AsyncSession = Depends(get_db),
@@ -106,6 +185,8 @@ async def get_sensitive_path_probe_logs(
             filters.append(SensitivePathProbeLog.request_path.like(f"%{request_path.strip()}%"))
         if matched_rule:
             filters.append(SensitivePathProbeLog.matched_rule == matched_rule.strip())
+        if severity_level is not None:
+            filters.append(SensitivePathProbeLog.severity_level == severity_level)
         if start_date:
             filters.append(SensitivePathProbeLog.created_at >= start_date)
         if end_date:
@@ -134,6 +215,9 @@ async def get_sensitive_path_probe_logs(
                 "user_agent": row.user_agent,
                 "query_string": row.query_string,
                 "matched_rule": row.matched_rule,
+                "severity_level": row.severity_level,
+                "severity_label": LEVEL_LABELS.get(int(row.severity_level or 2), "中危"),
+                "action_taken": row.action_taken,
                 "created_at": row.created_at,
             }
             for row in rows
@@ -257,6 +341,7 @@ async def add_blocked_ip(
             )
             message = "IP封禁成功"
         await commit_audit_log(db)
+        bust_sensitive_blocked_ip_cache()
         return ResponseBaseSchema.success(
             data={"id": row.id, "blocked_ip": row.blocked_ip, "is_active": row.is_active},
             message=message,
@@ -267,6 +352,124 @@ async def add_blocked_ip(
         await db.rollback()
         logger.error("封禁IP失败: %s", exc, exc_info=True)
         raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"封禁IP失败：{str(exc)}")
+
+
+@router.post(
+    "/blocked-ips/batch",
+    response_model=ResponseBaseSchema[dict],
+    summary="批量封禁IP（写入黑名单）",
+)
+async def batch_add_blocked_ips(
+    request: Request,
+    payload: BatchBlockIPsPayload,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    reason = (payload.reason or "").strip() or "批量封禁：敏感路径探测"
+    ips: list[str] = []
+    skipped: list[str] = []
+
+    if payload.blocked_ips:
+        for raw in payload.blocked_ips:
+            ip = _normalize_block_ip(raw)
+            if ip:
+                ips.append(ip)
+            else:
+                skipped.append((raw or "").strip() or "(空)")
+
+    if payload.log_ids:
+        result = await db.execute(
+            select(
+                SensitivePathProbeLog.id,
+                SensitivePathProbeLog.client_ip,
+                SensitivePathProbeLog.request_path,
+            ).where(SensitivePathProbeLog.id.in_(payload.log_ids))
+        )
+        rows = result.all()
+        found_ids = {int(r[0]) for r in rows}
+        for log_id in payload.log_ids:
+            if int(log_id) not in found_ids:
+                skipped.append(f"log_id:{log_id}")
+        for _id, client_ip, request_path in rows:
+            ip = _normalize_block_ip(client_ip or "")
+            if ip:
+                ips.append(ip)
+            else:
+                skipped.append(f"log:{_id}")
+
+    # 去重且限制数量
+    unique_ips: list[str] = []
+    seen: set[str] = set()
+    for ip in ips:
+        if ip in seen:
+            continue
+        seen.add(ip)
+        unique_ips.append(ip)
+    if len(unique_ips) > _BATCH_BLOCK_MAX_IPS:
+        raise_api_exception(
+            ErrorCode.VALIDATION_ERROR,
+            detail=f"去重后 IP 数量超过上限 {_BATCH_BLOCK_MAX_IPS}，请分批操作",
+        )
+    if not unique_ips:
+        raise_api_exception(ErrorCode.VALIDATION_ERROR, detail="没有可封禁的有效 IP")
+
+    created_count = 0
+    updated_count = 0
+    failed: list[dict] = []
+
+    for ip in unique_ips:
+        ip_reason = reason
+        if payload.log_ids and not payload.reason:
+            ip_reason = f"批量封禁：敏感路径拦截日志关联 IP"
+        try:
+            _row, is_update = await _upsert_sensitive_blocked_ip(
+                db=db,
+                ip=ip,
+                reason=ip_reason,
+                update_reason=payload.update_reason or bool(payload.reason),
+            )
+            if is_update:
+                updated_count += 1
+            else:
+                created_count += 1
+        except Exception as exc:
+            failed.append({"ip": ip, "error": str(exc)[:200]})
+
+    bust_sensitive_blocked_ip_cache()
+
+    await log_create(
+        db=db,
+        user=current_user,
+        resource_type="SENSITIVE_BLOCKED_IP",
+        resource_id=0,
+        resource_name=f"批量封禁IP({created_count + updated_count}个)",
+        request=request,
+        details={
+            "ips": unique_ips,
+            "created_count": created_count,
+            "updated_count": updated_count,
+            "failed_count": len(failed),
+            "skipped": skipped[:50],
+        },
+    )
+    await commit_audit_log(db)
+
+    message = (
+        f"批量封禁完成：新增 {created_count}，更新 {updated_count}，"
+        f"失败 {len(failed)}，跳过无效 {len(skipped)}"
+    )
+    return ResponseBaseSchema.success(
+        data={
+            "created_count": created_count,
+            "updated_count": updated_count,
+            "failed_count": len(failed),
+            "skipped_count": len(skipped),
+            "total_requested": len(unique_ips),
+            "failed": failed[:20],
+            "skipped": skipped[:20],
+        },
+        message=message,
+    )
 
 
 @router.post(
@@ -353,8 +556,31 @@ async def get_top_stats(
             {"name": (row[0] or "/"), "count": int(row[1] or 0)}
             for row in top_path_result.all()
         ]
+        severity_result = await db.execute(
+            select(
+                SensitivePathProbeLog.severity_level,
+                func.count(SensitivePathProbeLog.id).label("count"),
+            )
+            .where(SensitivePathProbeLog.created_at >= cutoff)
+            .group_by(SensitivePathProbeLog.severity_level)
+            .order_by(SensitivePathProbeLog.severity_level.desc())
+        )
+        by_severity = [
+            {
+                "level": int(row[0] or 2),
+                "label": LEVEL_LABELS.get(int(row[0] or 2), "中危"),
+                "count": int(row[1] or 0),
+            }
+            for row in severity_result.all()
+        ]
         return ResponseBaseSchema.success(
-            data={"days": days, "limit": limit, "top_ips": top_ips, "top_paths": top_paths},
+            data={
+                "days": days,
+                "limit": limit,
+                "top_ips": top_ips,
+                "top_paths": top_paths,
+                "by_severity": by_severity,
+            },
             message="获取TOP统计成功",
         )
     except HTTPException:

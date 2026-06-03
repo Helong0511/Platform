@@ -1157,10 +1157,13 @@ CREATE TABLE IF NOT EXISTS `sensitive_path_probe_logs` (
   `user_agent` VARCHAR(512) NULL COMMENT '用户代理',
   `query_string` VARCHAR(2048) NULL COMMENT '查询字符串',
   `matched_rule` VARCHAR(255) NULL COMMENT '命中规则',
+  `severity_level` TINYINT NOT NULL DEFAULT 2 COMMENT '预警等级：1低危 2中危 3高危 4危急',
+  `action_taken` VARCHAR(64) NULL COMMENT '处置动作：blocked_404/auto_blocked_ip等',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   PRIMARY KEY (`id`),
   INDEX `idx_sensitive_probe_created_at` (`created_at`),
   INDEX `idx_sensitive_probe_ip_created` (`client_ip`, `created_at`),
+  INDEX `idx_sensitive_probe_severity_created` (`severity_level`, `created_at`),
   INDEX `ix_sensitive_path_probe_logs_method` (`method`),
   INDEX `ix_sensitive_path_probe_logs_client_ip` (`client_ip`),
   INDEX `ix_sensitive_path_probe_logs_matched_rule` (`matched_rule`)

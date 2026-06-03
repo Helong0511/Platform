@@ -497,6 +497,24 @@ class Settings(BaseSettings):
     SENSITIVE_PATH_PROBE_RETENTION_DAYS: int = int(
         os.getenv("SENSITIVE_PATH_PROBE_RETENTION_DAYS", "90")
     )
+    SENSITIVE_PATH_HIT_WINDOW_SECONDS: int = int(
+        os.getenv("SENSITIVE_PATH_HIT_WINDOW_SECONDS", "1800")
+    )
+    SENSITIVE_PATH_AUTO_BLOCK_MEDIUM: int = int(
+        os.getenv("SENSITIVE_PATH_AUTO_BLOCK_MEDIUM", "50")
+    )
+    SENSITIVE_PATH_AUTO_BLOCK_HIGH: int = int(
+        os.getenv("SENSITIVE_PATH_AUTO_BLOCK_HIGH", "20")
+    )
+    SENSITIVE_PATH_AUTO_BLOCK_CRITICAL: int = int(
+        os.getenv("SENSITIVE_PATH_AUTO_BLOCK_CRITICAL", "5")
+    )
+    SENSITIVE_PATH_ALERT_CRITICAL: bool = os.getenv(
+        "SENSITIVE_PATH_ALERT_CRITICAL", "true"
+    ).lower() in ["true", "1", "yes"]
+    SENSITIVE_PATH_ALERT_DEBOUNCE_SECONDS: int = int(
+        os.getenv("SENSITIVE_PATH_ALERT_DEBOUNCE_SECONDS", "300")
+    )
     
     # Telegram Bot Token（从 BotFather 获取）
     # 生产环境必须通过环境变量设置

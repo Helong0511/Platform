@@ -79,6 +79,12 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.redis_client import get_redis_client, reset_redis_client
 from app.core.security import is_authenticated_request
+from app.core.sensitive_path_guard import (
+    HandleResult,
+    handle_probe_hit,
+    register_blocked_ip_cache_bust,
+)
+from app.core.sensitive_path_rules import level_label, match_sensitive_path
 from app.core.utils import get_client_ip, get_device_type
 from app.models.models import SensitivePathProbeLog, SensitiveBlockedIP
 from urllib.parse import unquote
@@ -693,72 +699,25 @@ class StreamErrorHandlingMiddleware(BaseHTTPMiddleware):
             raise exc
 
 
-# ====== 敏感路径防护（防目录扫描、常见漏洞探测） ======
-_DEFAULT_BLOCKED_PATH_MARKERS: tuple[str, ...] = (
-    "/.env",
-    "/.git",
-    "/.svn",
-    "/.hg",
-    "/wp-admin",
-    "/wp-login",
-    "/wp-content",
-    "/wp-includes",
-    "/phpmyadmin",
-    "/pma/",
-    "/mysql",
-    "/admin.php",
-    "/config.php",
-    "/setup.php",
-    "/install.php",
-    "/.aws",
-    "/vendor/phpunit",
-    "/actuator",
-    "/swagger-ui",
-    "/../",
-    "/..\\",
-)
-
-_DEFAULT_BLOCKED_EXACT: frozenset[str] = frozenset({
-    "/.env",
-    "/env",
-    "/.git/config",
-    "/server-status",
-    "/server-info",
-})
-
-_PROD_EXTRA_DOC_PATHS: tuple[str, ...] = (
-    "/docs",
-    "/redoc",
-    "/openapi.json",
-)
-
-
-def _sensitive_path_markers() -> tuple[str, ...]:
-    markers = list(_DEFAULT_BLOCKED_PATH_MARKERS)
-    if settings.is_production:
-        markers.extend(_PROD_EXTRA_DOC_PATHS)
-    extra = (getattr(settings, "SENSITIVE_PATH_BLOCK_EXTRA", None) or "").strip()
-    if extra:
-        for part in extra.split(","):
-            p = part.strip().lower()
-            if p:
-                markers.append(p if p.startswith("/") else f"/{p}")
-    return tuple(markers)
+# ====== 敏感路径防护（分级规则见 app.core.sensitive_path_rules） ======
 
 
 class SensitivePathGuardMiddleware(BaseHTTPMiddleware):
     """
-    拦截常见敏感路径与扫描探测，统一返回 404，避免暴露环境信息。
-    生产环境额外屏蔽 /docs、/openapi.json 等（与 main.py 关闭文档一致）。
+    分级拦截敏感路径探测：低危仅记录，中高危累计自动封禁，危急触发 Telegram 预警。
+    规则与等级定义见 sensitive_path_rules.py。
     """
 
     def __init__(self, app: ASGIApp):
         super().__init__(app)
-        self._markers = _sensitive_path_markers()
         self._blocked_ip_cache: set[str] = set()
         self._blocked_ip_cache_expires_at: float = 0.0
         self._blocked_ip_cache_ttl_seconds: float = 30.0
         self._blocked_ip_lock = asyncio.Lock()
+        register_blocked_ip_cache_bust(self._invalidate_blocked_ip_cache)
+
+    def _invalidate_blocked_ip_cache(self) -> None:
+        self._blocked_ip_cache_expires_at = 0.0
 
     async def _persist_probe_log(
         self,
@@ -766,6 +725,8 @@ class SensitivePathGuardMiddleware(BaseHTTPMiddleware):
         request: Request,
         client_ip: str,
         matched_rule: str,
+        severity_level: int,
+        action_taken: str,
     ) -> None:
         """持久化敏感路径拦截日志（失败不影响主流程）。"""
         try:
@@ -778,6 +739,8 @@ class SensitivePathGuardMiddleware(BaseHTTPMiddleware):
                         user_agent=(request.headers.get("user-agent") or "")[:512],
                         query_string=(request.url.query or "")[:2048],
                         matched_rule=matched_rule[:255],
+                        severity_level=int(severity_level),
+                        action_taken=(action_taken or "")[:64],
                     )
                 )
                 await db.commit()
@@ -827,30 +790,38 @@ class SensitivePathGuardMiddleware(BaseHTTPMiddleware):
                 content={"detail": "Forbidden"},
             )
 
-        path = (request.url.path or "").lower()
-        matched_rule = None
-        if path in _DEFAULT_BLOCKED_EXACT:
-            matched_rule = f"exact:{path}"
-        else:
-            for marker in self._markers:
-                if marker in path:
-                    matched_rule = f"marker:{marker}"
-                    break
+        path_raw = request.url.path or ""
+        match = match_sensitive_path(path_raw)
 
-        if matched_rule:
-            logger.info(
-                "敏感路径探测已拦截: path=%s ip=%s ua=%s",
-                request.url.path,
+        if match:
+            handle_result: HandleResult = await handle_probe_hit(
+                client_ip=client_ip,
+                path=path_raw,
+                match=match,
+            )
+            log_msg = (
+                "敏感路径探测已拦截 [%s]: path=%s ip=%s rule=%s action=%s hits=%s ua=%s"
+            )
+            log_args = (
+                level_label(int(match.level)),
+                path_raw,
                 client_ip,
+                match.matched_rule,
+                handle_result.action_taken,
+                handle_result.hit_count,
                 (request.headers.get("user-agent") or "")[:120],
             )
+            logger.log(match.policy.log_level, log_msg, *log_args)
+
             await self._persist_probe_log(
                 request=request,
                 client_ip=client_ip,
-                matched_rule=matched_rule,
+                matched_rule=match.matched_rule,
+                severity_level=int(match.level),
+                action_taken=handle_result.action_taken,
             )
             return JSONResponse(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=match.policy.http_status,
                 content={"detail": "Not Found"},
             )
 

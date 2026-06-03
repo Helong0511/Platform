@@ -3,6 +3,16 @@ import { withCsrfMutate } from '@/utils/csrfMutate';
 
 const LIST_TIMEOUT = 30000;
 
+export function getSensitiveSeverityLevels() {
+  return request(
+    {
+      url: '/api/v1/sensitive-path-probes/levels',
+      method: 'get',
+    },
+    { returnDataOnly: true, timeout: LIST_TIMEOUT }
+  );
+}
+
 export function getSensitivePathProbeLogs(params) {
   return request(
     {
@@ -41,6 +51,20 @@ export function addSensitiveBlockedIp(data) {
     request(
       {
         url: '/api/v1/sensitive-path-probes/blocked-ips',
+        method: 'post',
+        data
+      },
+      { returnDataOnly: true, timeout: LIST_TIMEOUT }
+    )
+  );
+}
+
+/** 批量封禁 IP：blocked_ips 和/或 log_ids */
+export function batchAddSensitiveBlockedIps(data) {
+  return withCsrfMutate(() =>
+    request(
+      {
+        url: '/api/v1/sensitive-path-probes/blocked-ips/batch',
         method: 'post',
         data
       },
