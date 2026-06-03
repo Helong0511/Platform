@@ -11,6 +11,7 @@ import tempfile
 import traceback
 import warnings
 from contextlib import asynccontextmanager
+from app.core.log_filters import PostbackLoggerFilter
 from app.core.log_handlers import SafeRotatingFileHandler
 
 from anyio import EndOfStream
@@ -146,19 +147,20 @@ try:
         encoding='utf-8'
     )
     scheduler_log_handler.setFormatter(detailed_formatter)
-    scheduler_log_handler.setLevel(logging.DEBUG)  # 记录 DEBUG 及以上级别，更详细
+    _scheduler_file_level = logging.INFO if settings.is_production else logging.DEBUG
+    scheduler_log_handler.setLevel(_scheduler_file_level)
 
     # 只添加到调度器相关的 logger
     # 注意：propagate=True，这样 WARNING 及以上级别会同时输出到 app.log
     scheduler_logger = logging.getLogger('app.scheduler')
     scheduler_logger.addHandler(scheduler_log_handler)
-    scheduler_logger.setLevel(logging.DEBUG)
+    scheduler_logger.setLevel(_scheduler_file_level)
     scheduler_logger.propagate = True  # 允许传播，WARNING+ 会输出到 app.log
 
     # 调度器模块的 logger
     scheduler_module_logger = logging.getLogger('app.scheduler_module')
     scheduler_module_logger.addHandler(scheduler_log_handler)
-    scheduler_module_logger.setLevel(logging.DEBUG)
+    scheduler_module_logger.setLevel(_scheduler_file_level)
     scheduler_module_logger.propagate = True  # 允许传播，WARNING+ 会输出到 app.log
 except (OSError, PermissionError) as e:
     root_logger.warning(f"无法创建 scheduler.log 文件: {e}")
@@ -196,14 +198,16 @@ try:
         encoding='utf-8'
     )
     postback_log_handler.setFormatter(detailed_formatter)
-    postback_log_handler.setLevel(logging.DEBUG)  # 记录 DEBUG 及以上级别，更详细
+    _postback_file_level = logging.INFO if settings.is_production else logging.DEBUG
+    postback_log_handler.setLevel(_postback_file_level)
+    postback_log_handler.addFilter(PostbackLoggerFilter())
 
-    # 只添加到 PostBack 相关的 logger
-    # 注意：propagate=True，这样 WARNING 及以上级别会同时输出到 app.log
-    postback_logger = logging.getLogger('app.core.postback')
-    postback_logger.addHandler(postback_log_handler)
-    postback_logger.setLevel(logging.DEBUG)
-    postback_logger.propagate = True  # 允许传播，WARNING+ 会输出到 app.log
+    # PostBack：子 logger 向上传播，父节点挂 handler + Filter 即可覆盖 postback 相关模块
+    for _postback_parent in ('app.core.postback', 'app.services.cpl'):
+        _pb_logger = logging.getLogger(_postback_parent)
+        _pb_logger.addHandler(postback_log_handler)
+        _pb_logger.setLevel(_postback_file_level)
+        _pb_logger.propagate = True
 except (OSError, PermissionError) as e:
     root_logger.warning(f"无法创建 postback.log 文件: {e}")
 

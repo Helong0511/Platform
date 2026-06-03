@@ -374,6 +374,37 @@ class JWTUtils:
             )
 
 
+def extract_access_token_from_request(request: Request) -> str | None:
+    """从 Authorization 头或 HttpOnly Cookie 提取访问令牌。"""
+    authorization = request.headers.get("Authorization")
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+        if token:
+            return token
+    cookie_token = request.cookies.get("access_token")
+    if cookie_token and cookie_token.strip():
+        return cookie_token.strip()
+    return None
+
+
+async def is_authenticated_request(request: Request) -> bool:
+    """
+    判断请求是否携带有效的访问令牌（管理员、客户登录后均视为已认证）。
+    用于限流等中间件：已登录不限流，未登录仍按 IP 限流。
+    不查黑名单（db=None），业务接口仍由 get_current_user 完整校验。
+    """
+    token = extract_access_token_from_request(request)
+    if not token:
+        return False
+    try:
+        payload = await JWTUtils.verify_token(token, db=None)
+    except HTTPException:
+        return False
+    if payload.get("type") == "refresh":
+        return False
+    return bool(payload.get("sub"))
+
+
 # ====== 获取当前用户依赖 ======
 async def get_current_user(
         request: Request,
@@ -392,12 +423,9 @@ async def get_current_user(
         db: 数据库会话
         token: JWT令牌（从请求头自动提取）
     """
-    # ====== 令牌提取优先级 ======
-    # 如果请求头中没有 token (oauth2_scheme 返回 None 或解析失败)
-    # 则尝试从 Cookie 中获取
     if not token:
-        token = request.cookies.get("access_token")
-        
+        token = extract_access_token_from_request(request)
+
     if not token:
         _raise_auth("未登录或令牌缺失", error_code=ErrorCode.UNAUTHORIZED)
 

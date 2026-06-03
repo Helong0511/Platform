@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive
 from app.models.models import ThirdPartyReportLog
+from app.core.log_utils import mask_email, mask_hash_prefix, mask_phone
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,10 @@ async def create_report_log(
             existing_log = result.scalars().first()
             
             if existing_log:
-                logger.warning(f"[第三方上报] 已存在记录: source={source}, adsid={adsid}, id={existing_log.id}")
+                logger.info(
+                    "[第三方上报] 已存在记录: source=%s, adsid=%s, id=%s",
+                    source, adsid, existing_log.id,
+                )
                 return existing_log.id
             
             # 创建新记录
@@ -281,7 +285,7 @@ async def send_third_party_report(
     access_token = facebook_access_token or settings.FACEBOOK_ACCESS_TOKEN
     api_version = facebook_api_version or settings.FACEBOOK_API_VERSION
     
-    logger.warning(f"[第三方上报] 使用像素配置 - Pixel ID: {pixel_id}, API 版本：{api_version}")
+    logger.info("[第三方上报] 使用像素配置 - Pixel ID: %s, API 版本：%s", pixel_id, api_version)
     
     for attempt in range(max_retries):
         try:
@@ -349,17 +353,25 @@ async def send_third_party_report(
             report_params_json = json.dumps(send_data, ensure_ascii=False)
             await update_report_log(report_log_id, report_params=report_params_json, attempt_count=attempt + 1)
 
-            logger.warning(f"[第三方上报] 开始发送 (尝试 {attempt + 1}/{max_retries}): adsid={adsid}, ip={ip}, use_hash={use_hash}")
-            logger.warning(f"[第三方上报] 参数详情 - 原始: email={email}, phone={phone}, ip={ip}, ua={ua}")
-            if use_hash:
-                logger.warning(f"[第三方上报] 参数详情 - 哈希后: email_hash={sha256_hash(email)}, phone_hash={sha256_hash(phone)}")
-            else:
-                logger.warning(f"[第三方上报] 参数详情 - 不哈希: email={email}, phone={phone}, ip={ip}")
+            logger.info(
+                "[第三方上报] 开始发送 (尝试 %s/%s): adsid=%s, ip=%s, use_hash=%s, email=%s, phone=%s",
+                attempt + 1, max_retries, adsid, ip, use_hash,
+                mask_email(email), mask_phone(phone),
+            )
+            if use_hash and (email or phone):
+                logger.debug(
+                    "[第三方上报] 哈希摘要: email_hash=%s, phone_hash=%s",
+                    mask_hash_prefix(sha256_hash(email)),
+                    mask_hash_prefix(sha256_hash(phone)),
+                )
 
             # 增加超时时间，应对网络延迟
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, json=send_data, params=params)
-                logger.warning(f"[第三方上报] 响应: status={response.status_code}, content={response.text[:200]}")
+                logger.debug(
+                    "[第三方上报] 响应: status=%s, content=%s",
+                    response.status_code, response.text[:200],
+                )
 
                 if response.status_code == 200:
                     try:
@@ -367,7 +379,10 @@ async def send_third_party_report(
                         if response_json.get("events_received"):
                             log_id = response_json.get("fbtrace_id", "")
                             report_success_time = get_app_now_naive()
-                            logger.warning(f"[第三方上报] adsid{adsid} ✓ 成功 (尝试 {attempt + 1}/{max_retries}), fbtrace_id={log_id}")
+                            logger.info(
+                                "[第三方上报] adsid=%s 成功 (尝试 %s/%s), fbtrace_id=%s",
+                                adsid, attempt + 1, max_retries, log_id,
+                            )
                             
                             await update_report_log(
                                 report_log_id,
@@ -392,7 +407,7 @@ async def send_third_party_report(
                                 if settings.TELEGRAM_ADMIN:
                                     await send_telegram_message(settings.TELEGRAM_ADMIN, notification_message)
                                 else:
-                                    logger.warning("TELEGRAM_ADMIN未配置，无法发送Purchase事件通知")
+                                    logger.warning("TELEGRAM_ADMIN 未配置，无法发送 Purchase 事件通知")
                             
                             return
                         else:
@@ -442,7 +457,7 @@ async def send_third_party_report(
         # 指数退避策略
         if attempt < max_retries - 1:
             delay = base_delay * (2 ** attempt)
-            logger.warning(f"[第三方上报] 等待 {delay} 秒后重试...")
+            logger.debug("[第三方上报] 等待 %s 秒后重试...", delay)
             await asyncio.sleep(delay)
 
     # 构建失败原因字符串
@@ -506,13 +521,19 @@ async def send_third_party_report(
             report_params_json = json.dumps(send_data, ensure_ascii=False)
             await update_report_log(report_log_id, report_params=report_params_json, attempt_count=max_retries + 1)
 
-            logger.warning(f"[第三方上报] 开始发送 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希): adsid={adsid}, ip={ip}, use_hash=False")
-            logger.warning(f"[第三方上报] 参数详情 - 不哈希: email={email}, phone={phone}, ip={ip}, ua={ua}")
+            logger.info(
+                "[第三方上报] 开始发送 (尝试 %s/%s - 不使用哈希): adsid=%s, ip=%s, email=%s, phone=%s",
+                max_retries + 1, max_retries + 1, adsid, ip,
+                mask_email(email), mask_phone(phone),
+            )
 
             # 增加超时时间，应对网络延迟
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, json=send_data, params=params)
-                logger.warning(f"[第三方上报] 响应: status={response.status_code}, content={response.text[:200]}")
+                logger.debug(
+                    "[第三方上报] 响应: status=%s, content=%s",
+                    response.status_code, response.text[:200],
+                )
 
                 if response.status_code == 200:
                     try:
@@ -520,7 +541,10 @@ async def send_third_party_report(
                         if response_json.get("events_received"):
                             log_id = response_json.get("fbtrace_id", "")
                             report_success_time = get_app_now_naive()
-                            logger.warning(f"[第三方上报] adsid{adsid} ✓ 成功 (尝试 {max_retries + 1}/{max_retries + 1} - 不使用哈希), fbtrace_id={log_id}")
+                            logger.info(
+                                "[第三方上报] adsid=%s 成功 (尝试 %s/%s - 不使用哈希), fbtrace_id=%s",
+                                adsid, max_retries + 1, max_retries + 1, log_id,
+                            )
                             
                             await update_report_log(
                                 report_log_id,
@@ -599,7 +623,7 @@ async def send_third_party_report(
             f"失败原因:{failure_reasons_str}\n"
             f"时间: {time.strftime('%Y-%m-%d %H:%M:%S')}"
         )
-        logger.warning(f"[第三方上报] 告警已发送")
+        logger.info("[第三方上报] 告警已发送")
     except Exception as notify_err:
         logger.warning(f"[第三方上报] 发送告警失败: {notify_err}")
 
@@ -672,7 +696,7 @@ async def retry_report_log(log_id: int):
                 )
             asyncio.create_task(background_send())
             
-            logger.warning(f"[第三方上报] 已触发重新上报: id={log_id}")
+            logger.info("[第三方上报] 已触发重新上报: id=%s", log_id)
             return True
             
     except Exception as e:
@@ -731,7 +755,7 @@ async def update_report_log_params(
                 log_entry.use_hash = use_hash
             
             await db.commit()
-            logger.warning(f"[第三方上报] 已更新日志参数: id={log_id}")
+            logger.info("[第三方上报] 已更新日志参数: id=%s", log_id)
             return True
             
     except Exception as e:

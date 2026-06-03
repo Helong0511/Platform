@@ -20,8 +20,16 @@ from app.core.utils import get_client_ip
 from app.core.csrf_utils import safe_raise_csrf_exception
 from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.database import get_db
+from app.core.log_filters import CsrfProbePathFilter
 
 logger = logging.getLogger(__name__)
+
+
+def _csrf_violation_log_level(request: Request) -> int:
+    """扫描/探测请求记 INFO，合法前端 CSRF 失败记 WARNING。"""
+    if CsrfProbePathFilter.is_probe(request.method, request.url.path):
+        return logging.INFO
+    return logging.WARNING
 
 # CSRF令牌存储（内存存储，Redis不可用时使用）
 _csrf_tokens: Dict[str, str] = {}
@@ -68,11 +76,11 @@ def validate_referer(request: Request) -> bool:
             if referer_domain == allowed_domain or referer_domain.endswith("." + allowed_domain):
                 return True
         
-        logger.warning(f"CSRF检查：Referer域名 {referer_domain} 不在允许列表中")
+        logger.info("CSRF检查：Referer 域名 %s 不在允许列表中", referer_domain)
         return False
         
     except Exception as e:
-        logger.warning(f"CSRF检查：Referer验证失败: {e}")
+        logger.info("CSRF检查：Referer 验证失败: %s", e)
         return False
 
 
@@ -516,7 +524,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         
         # 验证Referer（额外的安全层）
         if not validate_referer(request):
-            logger.warning(f"CSRF检查失败：Referer验证失败: {request.method} {request.url.path}")
+            logger.log(
+                _csrf_violation_log_level(request),
+                "CSRF检查失败：Referer验证失败: %s %s",
+                request.method,
+                request.url.path,
+            )
             # 生成新令牌并返回错误
             new_csrf_token = generate_csrf_token()
             await self._store_csrf_token(session_id, new_csrf_token, request)
@@ -526,7 +539,13 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         csrf_token = get_csrf_token_from_request(request)
         
         if not csrf_token:
-            logger.warning(f"CSRF令牌缺失: {request.method} {request.url.path}, session_id: {session_id}")
+            logger.log(
+                _csrf_violation_log_level(request),
+                "CSRF令牌缺失: %s %s, session_id: %s",
+                request.method,
+                request.url.path,
+                session_id,
+            )
             # 记录审计日志
             try:
                 async for db in get_db():
@@ -560,7 +579,13 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         # 确保总是有一个有效的令牌
         if not stored_token:
             # 令牌不存在，生成新令牌
-            logger.warning(f"CSRF令牌不存在: {request.method} {request.url.path}, session_id: {session_id}")
+            logger.log(
+                _csrf_violation_log_level(request),
+                "CSRF令牌不存在: %s %s, session_id: %s",
+                request.method,
+                request.url.path,
+                session_id,
+            )
             stored_token = generate_csrf_token()
             await self._store_csrf_token(session_id, stored_token, request)
             logger.info(f"CSRF令牌不存在，生成新令牌: {stored_token[:10]}...")
@@ -597,16 +622,14 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             user_agent_hash = hashlib.sha256(user_agent.encode('utf-8')).hexdigest()[:16]
             csrf_key = f"csrf_token:{session_id}"
             
-            logger.warning(
-                f"CSRF令牌不匹配: {request.method} {request.url.path}\n"
-                f"  IP: {client_ip}\n"
-                f"  User-Agent: {user_agent}\n"
-                f"  User-Agent Hash: {user_agent_hash}\n"
-                f"  Session ID: {session_id}\n"
-                f"  User ID: {user_id}\n"
-                f"  CSRF Key: {csrf_key}\n"
-                f"  期望的令牌: {stored_token[:10]}...\n"
-                f"  实际的令牌: {csrf_token[:10]}..."
+            logger.log(
+                _csrf_violation_log_level(request),
+                "CSRF令牌不匹配: %s %s | IP=%s | session=%s | user=%s",
+                request.method,
+                request.url.path,
+                client_ip,
+                session_id,
+                user_id,
             )
             
             # 记录审计日志

@@ -20,8 +20,12 @@
 8. CORSMiddleware（跨域处理）
 
 API限流（RateLimitMiddleware）：
-- 默认限流：100次/分钟（可配置）
-- 登录接口限流：5次/分钟（防止暴力破解）
+- 已登录用户（有效 access_token，含管理员与客户）：不限流
+
+慢请求（PerformanceMonitoringMiddleware）：
+- 2–3s：INFO；3–8s：WARNING；>8s：ERROR
+- 未登录：默认限流 100次/分钟（可配置）
+- 登录接口（未带有效令牌）：5次/分钟（防止暴力破解）
 - 短链接路由：不限流（支持高并发）
 - 存储方式：优先使用Redis，降级到内存存储
 - 限流标识：使用客户端IP地址
@@ -74,6 +78,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.redis_client import get_redis_client, reset_redis_client
+from app.core.security import is_authenticated_request
 from app.core.utils import get_client_ip, get_device_type
 from app.models.models import SensitivePathProbeLog, SensitiveBlockedIP
 from urllib.parse import unquote
@@ -120,6 +125,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if is_short_link:
             response = await call_next(request)
             return response
+
+        # 已登录（管理员 / 客户）：不限流
+        if await is_authenticated_request(request):
+            return await call_next(request)
         
         # ====== 获取客户端标识 ======
         # 使用IP地址作为限流标识（生产环境可结合用户ID）
@@ -244,8 +253,8 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp):
         super().__init__(app)
         self.app = app
-        self.slow_request_threshold = 1.0  # 慢请求阈值（秒）
-        self.very_slow_request_threshold = 3.0  # 非常慢请求阈值（秒）
+        self.slow_request_threshold = 3.0  # 慢请求 WARNING 阈值（秒）
+        self.very_slow_request_threshold = 8.0  # 非常慢请求 ERROR 阈值（秒）
         
         # 性能统计（可选，用于监控）
         self.request_count = 0
@@ -280,6 +289,8 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
         elif process_time > self.slow_request_threshold:
             self.slow_request_count += 1
             self._log_performance(request, process_time, level="warning")
+        elif process_time > 2.0:
+            self._log_performance(request, process_time, level="info")
         
         # 添加性能响应头
         response.headers["X-Process-Time"] = f"{process_time:.4f}"
@@ -321,6 +332,8 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
         
         if level == "error":
             logger.error(log_message)
+        elif level == "info":
+            logger.info(log_message)
         else:
             logger.warning(log_message)
 
@@ -825,7 +838,7 @@ class SensitivePathGuardMiddleware(BaseHTTPMiddleware):
                     break
 
         if matched_rule:
-            logger.warning(
+            logger.info(
                 "敏感路径探测已拦截: path=%s ip=%s ua=%s",
                 request.url.path,
                 client_ip,

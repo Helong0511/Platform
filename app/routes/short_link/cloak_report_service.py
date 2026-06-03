@@ -129,19 +129,19 @@ async def record_cloak_click_count(
 ) -> None:
     cached_data = await get_short_link_from_cache(short_code)
     if cached_data:
-        logger.warning(
+        logger.debug(
             "[斗篷点击] 从缓存获取数据: short_code=%s, 原始click_count=%s",
             short_code,
             cached_data.get("click_count", 0),
         )
         cached_data["click_count"] = cached_data.get("click_count", 0) + 1
-        logger.warning(
+        logger.debug(
             "[斗篷点击] 更新缓存: short_code=%s, 新click_count=%s",
             short_code,
             cached_data["click_count"],
         )
         update_result = await update_short_link_cache(short_code, cached_data)
-        logger.warning("[斗篷点击] 缓存更新结果: %s", update_result)
+        logger.debug("[斗篷点击] 缓存更新结果: %s", update_result)
         if background_tasks:
             schedule_cloak_report_click_persist(
                 background_tasks,
@@ -158,7 +158,7 @@ async def record_cloak_click_count(
             )
         return
 
-    logger.warning("[斗篷点击] 缓存未命中，从数据库查询: short_code=%s", short_code)
+    logger.debug("[斗篷点击] 缓存未命中，从数据库查询: short_code=%s", short_code)
     result = await db.execute(
         select(ShortLink).where(ShortLink.short_code == short_code)
     )
@@ -167,23 +167,23 @@ async def record_cloak_click_count(
         logger.warning("[斗篷点击] 短链接不存在: short_code=%s", short_code)
         return
 
-    logger.warning(
+    logger.debug(
         "[斗篷点击] 数据库查询结果: short_code=%s, id=%s, 原始click_count=%s",
         short_code,
         short_link.id,
         short_link.click_count or 0,
     )
     short_link.click_count = (short_link.click_count or 0) + 1
-    logger.warning(
+    logger.debug(
         "[斗篷点击] 更新数据库: short_code=%s, 新click_count=%s",
         short_code,
         short_link.click_count,
     )
     try:
         await db.commit()
-        logger.warning("[斗篷点击] 数据库提交成功")
+        logger.debug("[斗篷点击] 数据库提交成功")
     except StaleDataError:
-        logger.warning("[斗篷点击] 数据库更新冲突，忽略StaleDataError")
+        logger.debug("[斗篷点击] 数据库更新冲突，忽略 StaleDataError")
         await db.rollback()
     else:
         if background_tasks:
@@ -284,7 +284,7 @@ def _resolve_fb_report_params(
             send_fb = True
             if resolved_dp:
                 source = f"short_link_dp_{resolved_dp}"
-                logger.warning("[第三方上报] 检测到 dp 参数：%s，已更新 source 标识", resolved_dp)
+                logger.info("[第三方上报] 检测到 dp 参数：%s，已更新 source 标识", resolved_dp)
             if pixel_config:
                 report_event = pixel_config.get("cloak_report_event") or "ViewContent"
                 rv = pixel_config.get("cloak_report_value")
@@ -394,7 +394,7 @@ async def schedule_cloak_facebook_report(
         return
 
     background_tasks.add_task(send_third_party_report, **report_kwargs)
-    logger.warning(
+    logger.info(
         "[第三方上报] 已添加到后台任务队列：phase=%s, adsid=%s, ip=%s, "
         "source=%s, event=%s, pixel_config=%s",
         report_phase,

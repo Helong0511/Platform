@@ -6,6 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.log_utils import mask_email, mask_phone
 from app.routes.short_link.cloak_report_service import (
     duplicate_report_response,
     ensure_fbclid,
@@ -67,17 +68,13 @@ def register_cloak_report_routes(router: APIRouter) -> None:
                 }
 
             fbclid = ensure_fbclid(fbclid)
-            logger.warning("[斗篷点击] fbclid: %s", fbclid)
+            logger.debug("[斗篷点击] fbclid: %s", fbclid)
 
-            log_message = (
-                f"report [斗篷点击] 收到上报请求:\nid={id},\nfbclid={fbclid},"
-                f"\nclient_ip={client_ip},\nuser_agent={user_agent},\nreferer={referer}"
+            logger.info(
+                "report [斗篷点击] 收到上报: id=%s, fbclid=%s, client_ip=%s, "
+                "email=%s, phone=%s, referer=%s",
+                id, fbclid, client_ip, mask_email(email), mask_phone(phone), referer,
             )
-            if email:
-                log_message += f",\nemail={email}"
-            if phone:
-                log_message += f",\nphone={phone}"
-            logger.warning(log_message)
 
             ua_from_request = (
                 request.headers.get("user-agent", "未知") if request else "未知"
@@ -123,7 +120,7 @@ def register_cloak_report_routes(router: APIRouter) -> None:
                     background_tasks=background_tasks,
                 )
 
-            logger.warning(
+            logger.info(
                 "[斗篷上报] 处理完成：phase=%s, id=%s, fbclid=%s, client_ip=%s",
                 report_phase,
                 id,
