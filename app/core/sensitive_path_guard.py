@@ -173,7 +173,6 @@ async def _send_critical_alert(
             alert_type="敏感路径防护",
             description=desc,
             location={"module": "SensitivePathGuard", "function": "dispatch"},
-            telegram_chat_id=None,
             db=None,
         )
     except Exception as exc:

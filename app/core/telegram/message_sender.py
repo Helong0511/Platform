@@ -9,7 +9,7 @@ import time
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
-from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH
+from app.core.telegram_utils import truncate_message, MAX_TELEGRAM_MESSAGE_LENGTH, validate_chat_id
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -99,23 +99,34 @@ def send_telegram_message(
             logger.warning("TELEGRAM_ADMIN 未设置，无法发送消息")
             return False
     else:
-        # 新方式：两个参数
+        # 新方式：两个参数；未传 chat_id 时回退 TELEGRAM_ADMIN
         actual_chat_id = chat_id_or_message
         actual_message = message
-    
+        if not actual_chat_id or (isinstance(actual_chat_id, str) and not actual_chat_id.strip()):
+            actual_chat_id = getattr(settings, 'TELEGRAM_ADMIN', None)
+
+    if not actual_chat_id or (isinstance(actual_chat_id, str) and not str(actual_chat_id).strip()):
+        logger.warning("Telegram Chat ID 未设置，无法发送消息")
+        return False
+
     # 截断过长的消息
     if len(actual_message) > MAX_TELEGRAM_MESSAGE_LENGTH:
         truncated_msg = truncate_message(actual_message, MAX_TELEGRAM_MESSAGE_LENGTH)
         logger.info(f"消息过长，已截断：{len(actual_message)} -> {len(truncated_msg)} 字符")
         actual_message = truncated_msg
     
-    # 支持逗号分隔的多个 Chat ID
-    chat_ids = [id.strip() for id in str(actual_chat_id).split(",")]
+    # 支持逗号分隔的多个 Chat ID，过滤无效 ID（含 str(None) 等）
+    chat_ids = [
+        cid for cid in (s.strip() for s in str(actual_chat_id).split(","))
+        if cid and validate_chat_id(cid)
+    ]
+    if not chat_ids:
+        logger.warning(f"无有效的 Telegram Chat ID，无法发送消息: {actual_chat_id!r}")
+        return False
+
     all_success = True
-    
+
     for chat_id in chat_ids:
-        if not chat_id:
-            continue
             
         # 重试机制
         success = False
@@ -212,6 +223,10 @@ def send_telegram_message_with_buttons(
     bot_available, status_msg = _check_bot_available()
     if not bot_available:
         logger.warning(f"Bot 不可用，无法发送消息: {status_msg}")
+        return False, None
+
+    if not chat_id or not validate_chat_id(str(chat_id).strip()):
+        logger.warning(f"无效的 Telegram Chat ID，无法发送带按钮消息: {chat_id!r}")
         return False, None
     
     # 重新导入模块以获取最新状态

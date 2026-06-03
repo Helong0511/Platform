@@ -19,6 +19,7 @@ from app.core.telegram import (
     send_telegram_message_with_buttons,
 )
 from app.core.utils import get_app_now_naive
+from app.core.config import settings
 from app.core.telegram_utils import (
     format_telegram_message,
     build_conversion_message,
@@ -37,6 +38,16 @@ class TelegramNotificationService:
 
     def __init__(self, db: Optional[AsyncSession] = None):
         self.db = db
+
+    @staticmethod
+    def _resolve_admin_chat_id(telegram_chat_id: Optional[str] = None) -> Optional[str]:
+        """未指定 chat_id 时使用环境变量 TELEGRAM_ADMIN。"""
+        if telegram_chat_id and str(telegram_chat_id).strip():
+            return str(telegram_chat_id).strip()
+        admin = getattr(settings, "TELEGRAM_ADMIN", None)
+        if admin and str(admin).strip():
+            return str(admin).strip()
+        return None
 
     @staticmethod
     def build_client_conversion_message(
@@ -478,8 +489,12 @@ class TelegramNotificationService:
             bool: 是否发送成功
         """
         try:
+            chat_id = TelegramNotificationService._resolve_admin_chat_id(telegram_chat_id)
+            if not chat_id:
+                logger.warning("Telegram Chat ID 未配置，无法发送管理员通知")
+                return False
 
-            success = await send_telegram_message_async(telegram_chat_id, message)
+            success = await send_telegram_message_async(chat_id, message)
 
             # 记录通知历史（如果有转化记录和数据库会话）
             if conversion and db:
@@ -541,7 +556,15 @@ class TelegramNotificationService:
                 error=error
             )
 
-            success = await send_telegram_message_async(telegram_chat_id, message)
+            chat_id = TelegramNotificationService._resolve_admin_chat_id(telegram_chat_id)
+            if not chat_id:
+                logger.warning(
+                    "Telegram Chat ID 未配置，无法发送系统告警: alert_type=%s",
+                    alert_type,
+                )
+                return False
+
+            success = await send_telegram_message_async(chat_id, message)
 
             if db:
                 try:
@@ -566,7 +589,18 @@ class TelegramNotificationService:
                     if db:
                         await db.rollback()
 
-            logger.warning(f"系统告警已发送: alert_type={alert_type}, description={description}")
+            if success:
+                logger.warning(
+                    "系统告警已发送: alert_type=%s, description=%s",
+                    alert_type,
+                    description,
+                )
+            else:
+                logger.warning(
+                    "系统告警发送失败: alert_type=%s, description=%s",
+                    alert_type,
+                    description,
+                )
             return success
         except Exception as e:
             logger.error(f"发送系统告警通知失败: {str(e)}", exc_info=True)
@@ -601,7 +635,12 @@ class TelegramNotificationService:
                 period=period
             )
 
-            success = await send_telegram_message_async(telegram_chat_id, message)
+            chat_id = TelegramNotificationService._resolve_admin_chat_id(telegram_chat_id)
+            if not chat_id:
+                logger.warning("Telegram Chat ID 未配置，无法发送汇总统计通知")
+                return False
+
+            success = await send_telegram_message_async(chat_id, message)
 
             if db:
                 try:
@@ -746,9 +785,14 @@ class TelegramNotificationService:
             tuple[bool, Optional[int]]: (是否发送成功, 消息ID)
         """
         try:
+            chat_id = TelegramNotificationService._resolve_admin_chat_id(telegram_chat_id)
+            if not chat_id:
+                logger.warning("Telegram Chat ID 未配置，无法发送带按钮通知")
+                return False, None
+
             success, message_id = await asyncio.to_thread(
                 send_telegram_message_with_buttons,
-                telegram_chat_id,
+                chat_id,
                 message,
                 buttons,
             )
