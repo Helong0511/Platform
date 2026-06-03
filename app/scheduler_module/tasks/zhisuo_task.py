@@ -10,7 +10,6 @@ import pytz
 from app.core.config import settings
 from app.scheduler_module.task_names import ZHISUO_API_TASK_NAME
 from app.scheduler_module.task_result_store import get_task_result, set_task_result
-from app.scheduler_module.task_utils import upstream_credential_missing
 from app.scheduler_module.upstream_fetch import fetch_zhisuo_unit_rows
 from app.scheduler_module.upstream_import import import_upstream_ad_data
 
@@ -39,12 +38,14 @@ async def zhisuo_api_task(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> None:
-    client_id = settings.ZHISUO_API_CLIENT_ID
-    api_key = settings.ZHISUO_API_KEY
+    accounts = settings.get_zhisuo_accounts()
     base_url = settings.ZHISUO_API_BASE_URL
 
-    if upstream_credential_missing(client_id, api_key):
-        msg = "跳过: Zhisuo API 未配置（请在 .env 设置 ZHISUO_API_CLIENT_ID / ZHISUO_API_KEY）"
+    if not accounts:
+        msg = (
+            "跳过: Zhisuo API 未配置（请在 .env 设置 ZHISUO_API_CLIENT_ID / ZHISUO_API_KEY，"
+            "或 ZHISUO_API_CLIENT_ID_2 / ZHISUO_API_KEY_2，或 ZHISUO_API_ACCOUNTS）"
+        )
         logger.warning(msg)
         set_task_result(ZHISUO_API_TASK_NAME, msg)
         return
@@ -76,16 +77,33 @@ async def zhisuo_api_task(
                 zhisuo_start = today_str
                 zhisuo_end = today_str
 
-        data = await fetch_zhisuo_unit_rows(
-            base_url=base_url,
-            client_id=client_id,
-            api_key=api_key,
-            start=zhisuo_start,
-            end=zhisuo_end,
-        )
+        all_data = []
+        fetch_errors: list[str] = []
+        for acc in accounts:
+            client_id = acc["client_id"]
+            try:
+                rows = await fetch_zhisuo_unit_rows(
+                    base_url=base_url,
+                    client_id=client_id,
+                    api_key=acc["api_key"],
+                    start=zhisuo_start,
+                    end=zhisuo_end,
+                )
+                all_data.extend(rows)
+                logger.info("Zhisuo 账号 %s 拉取 %d 条", client_id, len(rows))
+            except Exception as e:
+                err_msg = f"账号 {client_id}: {e}"
+                fetch_errors.append(err_msg)
+                logger.error("Zhisuo 拉取失败 - %s", err_msg, exc_info=True)
+
+        if fetch_errors and not all_data:
+            raise Exception("所有 Zhisuo 账号拉取失败: " + "; ".join(fetch_errors))
+        if fetch_errors:
+            logger.warning("部分 Zhisuo 账号拉取失败: %s", "; ".join(fetch_errors))
+
         await import_upstream_ad_data(
             task_name=ZHISUO_API_TASK_NAME,
-            data=data,
+            data=all_data,
             field_mapping=ZHISUO_FIELD_MAPPING,
             source="zhisuo定时任务",
             current_time_str=current_time_str,

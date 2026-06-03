@@ -4,7 +4,8 @@
 使用环境变量或默认值，确保生产环境的安全性
 """
 # Python 3.10+ 使用内置类型注解，只有特殊类型需要从 typing 导入
-from typing import ClassVar, Dict
+import json
+from typing import ClassVar, Dict, List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator, Field
 from dotenv import load_dotenv
@@ -487,7 +488,45 @@ class Settings(BaseSettings):
     
     ZHISUO_API_CLIENT_ID: str = os.getenv("ZHISUO_API_CLIENT_ID", "")
     ZHISUO_API_KEY: str = os.getenv("ZHISUO_API_KEY", "")
+    ZHISUO_API_CLIENT_ID_2: str = os.getenv("ZHISUO_API_CLIENT_ID_2", "")
+    ZHISUO_API_KEY_2: str = os.getenv("ZHISUO_API_KEY_2", "")
+    # 可选 JSON 数组，格式 [{"client_id":"...","api_key":"..."}]；若设置则优先于上述单账号变量
+    ZHISUO_API_ACCOUNTS: str = os.getenv("ZHISUO_API_ACCOUNTS", "")
     ZHISUO_API_BASE_URL: str = os.getenv("ZHISUO_API_BASE_URL", "https://ch.tecnee.xyz")
+
+    def get_zhisuo_accounts(self) -> List[Dict[str, str]]:
+        """返回 zhisuo 账号列表，每项含 client_id、api_key。"""
+        raw = (self.ZHISUO_API_ACCOUNTS or "").strip()
+        if raw:
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError as e:
+                logger.warning("ZHISUO_API_ACCOUNTS JSON 解析失败: %s", e)
+                parsed = None
+            if isinstance(parsed, list):
+                accounts: List[Dict[str, str]] = []
+                for item in parsed:
+                    if not isinstance(item, dict):
+                        continue
+                    client_id = str(
+                        item.get("client_id") or item.get("clientId") or ""
+                    ).strip()
+                    api_key = str(item.get("api_key") or item.get("key") or "").strip()
+                    if client_id and api_key:
+                        accounts.append({"client_id": client_id, "api_key": api_key})
+                if accounts:
+                    return accounts
+
+        accounts = []
+        for client_id, api_key in (
+            (self.ZHISUO_API_CLIENT_ID, self.ZHISUO_API_KEY),
+            (self.ZHISUO_API_CLIENT_ID_2, self.ZHISUO_API_KEY_2),
+        ):
+            cid = (client_id or "").strip()
+            key = (api_key or "").strip()
+            if cid and key:
+                accounts.append({"client_id": cid, "api_key": key})
+        return accounts
 
     # ====== 敏感路径防护（防扫描 / 探测） ======
     ENABLE_SENSITIVE_PATH_GUARD: bool = os.getenv(
