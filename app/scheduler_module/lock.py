@@ -311,10 +311,21 @@ async def release_task_lock(
                 # 失败时如果没有提供信息，last_error保持原值（可能是之前的错误）
 
             await db.commit()
-            logger.debug(
-                f"任务 {task_name} 锁已释放，执行{'成功' if success else '失败'} "
-                f"（进程ID: {get_current_pid()}, 主机: {CURRENT_HOST}）"
-            )
+            if success:
+                logger.debug(
+                    f"任务 {task_name} 锁已释放，执行成功 "
+                    f"（进程ID: {get_current_pid()}, 主机: {CURRENT_HOST}）"
+                )
+            else:
+                from app.scheduler_module.task_utils import log_scheduled_task_failure_recorded
+
+                log_scheduled_task_failure_recorded(
+                    task_name,
+                    result_info,
+                    error_count=task_record.error_count,
+                    success_count=task_record.success_count,
+                    run_count=task_record.run_count,
+                )
         else:
             logger.warning(f"任务记录不存在: {task_name}")
             await db.rollback()

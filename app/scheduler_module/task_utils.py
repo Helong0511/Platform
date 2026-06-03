@@ -4,7 +4,7 @@
 """
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple, Union
 
 import pytz
 from sqlalchemy import select
@@ -15,8 +15,122 @@ from app.models.models import User, UserRole
 
 logger = logging.getLogger(__name__)
 
+# 与 lock.MAX_ERROR_MESSAGE_LENGTH 保持一致，供 last_error 入库
+SCHEDULED_TASK_ERROR_MAX_LEN = 1000
+
 # 应用时区配置
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
+
+
+def truncate_task_error_message(message: str, max_len: int = SCHEDULED_TASK_ERROR_MAX_LEN) -> str:
+    """截断任务错误信息，避免数据库字段溢出。"""
+    text = (message or "").strip()
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3] + "..."
+
+
+def log_scheduled_task_start(
+        task_name: str,
+        *,
+        pid: Optional[int] = None,
+        host: Optional[str] = None,
+        cron_expression: Optional[str] = None,
+        trigger: str = "scheduled",
+) -> None:
+    """记录定时任务开始执行（便于与失败日志对照）。"""
+    logger.info(
+        "[定时任务开始] task=%s | trigger=%s | pid=%s | host=%s | cron=%s",
+        task_name,
+        trigger,
+        pid if pid is not None else "-",
+        host or "-",
+        cron_expression or "-",
+    )
+
+
+def log_scheduled_task_failure(
+        task_name: str,
+        error: Union[BaseException, str],
+        *,
+        duration_seconds: Optional[float] = None,
+        pid: Optional[int] = None,
+        host: Optional[str] = None,
+        cron_expression: Optional[str] = None,
+        trigger: str = "scheduled",
+        exc_info: bool = True,
+        extra: Optional[dict[str, Any]] = None,
+) -> str:
+    """
+    统一记录定时任务执行失败（ERROR，写入 scheduler.log / app.log）。
+
+    Returns:
+        截断后的错误摘要，可供 last_error 入库。
+    """
+    if isinstance(error, BaseException):
+        error_type = type(error).__name__
+        error_msg = str(error) or repr(error)
+    else:
+        error_type = "Error"
+        error_msg = str(error)
+
+    truncated = truncate_task_error_message(error_msg)
+    parts = [
+        f"[定时任务失败] task={task_name}",
+        f"trigger={trigger}",
+        f"error_type={error_type}",
+        f"message={truncated}",
+    ]
+    if duration_seconds is not None:
+        parts.append(f"duration_sec={duration_seconds:.2f}")
+    if pid is not None:
+        parts.append(f"pid={pid}")
+    if host:
+        parts.append(f"host={host}")
+    if cron_expression:
+        parts.append(f"cron={cron_expression}")
+    if extra:
+        for key, value in extra.items():
+            parts.append(f"{key}={value}")
+
+    log_line = " | ".join(parts)
+    if isinstance(error, BaseException) and exc_info:
+        logger.error(log_line, exc_info=error)
+    else:
+        logger.error(log_line)
+    return truncated
+
+
+def log_scheduled_task_failure_recorded(
+        task_name: str,
+        result_message: Optional[str],
+        *,
+        error_count: int,
+        success_count: Optional[int] = None,
+        run_count: Optional[int] = None,
+) -> None:
+    """任务失败状态已写入 scheduled_tasks 表后的补充日志。"""
+    logger.warning(
+        "[定时任务失败已入库] task=%s | error_count=%s | success_count=%s | run_count=%s | last_error=%s",
+        task_name,
+        error_count,
+        success_count if success_count is not None else "-",
+        run_count if run_count is not None else "-",
+        truncate_task_error_message(result_message or "未知错误", 500),
+    )
+
+
+def log_scheduled_task_skip(
+        task_name: str,
+        reason: str,
+        *,
+        detail: Optional[str] = None,
+) -> None:
+    """记录定时任务被跳过（未计为失败，但排查「未执行」时有用）。"""
+    msg = f"[定时任务跳过] task={task_name} | reason={reason}"
+    if detail:
+        msg = f"{msg} | {detail}"
+    logger.warning(msg)
 
 
 def get_current_time_str() -> str:
@@ -60,21 +174,20 @@ def log_task_result(task_name: str, result_summary: str, level: str = "info") ->
     """
     if level == "warning":
         logger.warning(f"[定时任务执行] {task_name} 执行完成: {result_summary}")
-    logger.info(f"{task_name} 执行完成: {result_summary}")
+    else:
+        logger.info(f"{task_name} 执行完成: {result_summary}")
 
 
 def log_task_error(task_name: str, error_msg: str, exc_info: bool = True) -> None:
     """
-    记录任务执行错误
-    
-    Args:
-        task_name: 任务名称
-        error_msg: 错误信息
-        exc_info: 是否记录异常堆栈（默认：True）
+    记录任务执行错误（任务函数内调用；调度器层会再次记录时可设 exc_info=False 避免重复堆栈）。
     """
-    full_error_msg = f"{task_name} 执行失败: {error_msg}"
-    logger.error(full_error_msg, exc_info=exc_info)
-    logger.warning(f"[{task_name}] {full_error_msg}")
+    log_scheduled_task_failure(
+        task_name,
+        error_msg,
+        trigger="task_body",
+        exc_info=exc_info,
+    )
 
 
 def format_result_summary(

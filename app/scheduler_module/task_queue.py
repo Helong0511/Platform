@@ -16,6 +16,7 @@ from enum import IntEnum
 from typing import Optional, Callable, Any, Dict
 
 from app.core.config import settings
+from app.scheduler_module.task_utils import log_scheduled_task_failure
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,12 @@ class TaskQueue:
             else:
                 logger.error(f"任务 '{task_name}' 的 task_func 类型无效: {type(task_func)}")
         except Exception as e:
-            logger.error(f"任务 '{task_name}' 执行出错: {e}", exc_info=True)
+            log_scheduled_task_failure(
+                task_name,
+                e,
+                trigger="task_queue",
+                exc_info=True,
+            )
         finally:
             # 任务执行完成，从运行列表中移除
             async with self.lock:

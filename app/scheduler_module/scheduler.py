@@ -32,6 +32,11 @@ from app.scheduler_module.task_queue import submit_task_to_queue, TaskPriority
 from app.scheduler_module.process_allocator import (
     should_execute_in_current_process, register_task_process_assignment
 )
+from app.scheduler_module.task_utils import (
+    log_scheduled_task_failure,
+    log_scheduled_task_skip,
+    log_scheduled_task_start,
+)
 from app.scheduler_module.task_registry import (
     auto_register_tasks,
     get_task_function_by_name_or_path
@@ -150,12 +155,15 @@ async def execute_task_with_lock(
                 elapsed = (now_app - last_run_app).total_seconds()
 
                 if elapsed < DEFAULT_TIMEOUT_SECONDS:
-                    # 任务正在运行且未超时，直接跳过（避免重复执行）
-                    worker_pid = os.getpid()
-                    logger.debug(
-                        f"[Worker PID:{worker_pid}] 任务 '{task_name}' 正在运行中"
-                        f"（进程ID: {task_record.last_run_pid}, 主机: {task_record.last_run_host}, "
-                        f"运行时间: {elapsed:.1f}秒），跳过本次执行"
+                    log_scheduled_task_skip(
+                        task_name,
+                        "任务仍在运行中，跳过本次触发",
+                        detail=(
+                            f"holder_pid={task_record.last_run_pid} "
+                            f"holder_host={task_record.last_run_host} "
+                            f"elapsed_sec={elapsed:.1f} "
+                            f"timeout_sec={DEFAULT_TIMEOUT_SECONDS}"
+                        ),
                     )
                     return
 
@@ -176,11 +184,10 @@ async def execute_task_with_lock(
             task_name, cron_expression
         )
         if not should_execute:
-            # 不应该由当前进程执行，跳过
-            worker_pid = os.getpid()
-            logger.debug(
-                f"[Worker PID:{worker_pid}] 任务 '{task_name}' 已分配给其他进程执行，"
-                f"当前进程跳过（这是正常的，多进程环境下任务会分配到不同进程）"
+            log_scheduled_task_skip(
+                task_name,
+                "进程分配：应由其他 worker 执行",
+                detail=f"current_pid={os.getpid()} host={CURRENT_HOST} cron={cron_expression}",
             )
             return
 
@@ -225,8 +232,11 @@ async def _execute_task_with_lock_internal(
     # 尝试获取锁
     acquired, lock_db = await acquire_task_lock(task_name)
     if not acquired:
-        skip_msg = f"任务 '{task_name}' 无法获取锁，跳过执行（可能正在其他进程中运行）"
-        logger.debug(skip_msg)
+        log_scheduled_task_skip(
+            task_name,
+            "无法获取任务锁",
+            detail=f"pid={get_current_pid()} host={CURRENT_HOST}",
+        )
         return
 
     # 确保数据库会话在 finally 中关闭
@@ -246,12 +256,11 @@ async def _execute_task_with_lock_internal(
         except Exception as e:
             logger.warning(f"查询任务信息失败（不影响任务执行）: {e}")
 
-        worker_pid = os.getpid()
-
-        # 只记录一次任务开始执行的日志
-        logger.debug(
-            f"[Worker PID:{worker_pid}] 任务 '{task_name}' 开始执行 "
-            f"（进程ID: {get_current_pid()}, 主机: {CURRENT_HOST}）"
+        log_scheduled_task_start(
+            task_name,
+            pid=get_current_pid(),
+            host=CURRENT_HOST,
+            cron_expression=task_record.cron_expression if task_record else None,
         )
 
         # 执行任务
@@ -323,17 +332,17 @@ async def _execute_task_with_lock_internal(
                         logger.warning(f"关闭审计日志数据库会话失败: {close_error}")
 
         except Exception as e:
-            error_msg = str(e)
-            # 限制错误信息长度，避免数据库字段溢出
-            MAX_ERROR_LENGTH = 1000
-            if len(error_msg) > MAX_ERROR_LENGTH:
-                error_msg = error_msg[:MAX_ERROR_LENGTH] + "..."
-            error_log = f"任务 '{task_name}' 执行失败: {error_msg}"
-            logger.error(error_log, exc_info=True)
-
-            # 计算执行时间（使用北京时间）
             end_time = get_app_now_naive()
             execution_duration = (end_time - start_time).total_seconds()
+            error_msg = log_scheduled_task_failure(
+                task_name,
+                e,
+                duration_seconds=execution_duration,
+                pid=get_current_pid(),
+                host=CURRENT_HOST,
+                cron_expression=task_record.cron_expression if task_record else None,
+                exc_info=True,
+            )
 
             # 尝试从任务函数获取执行结果（即使失败也可能有部分结果信息）
             result_message = None

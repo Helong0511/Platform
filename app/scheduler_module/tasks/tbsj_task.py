@@ -13,7 +13,7 @@ from app.scheduler_module.upstream_import import import_upstream_ad_data
 from app.scheduler_module.upstream_http import post_json
 from app.scheduler_module.task_names import TBSJ_API_TASK_NAME
 from app.scheduler_module.task_result_store import get_task_result, set_task_result
-from app.scheduler_module.task_utils import upstream_credential_missing
+from app.scheduler_module.task_utils import log_task_error, upstream_credential_missing
 
 # 获取当前模块的日志记录器
 logger = logging.getLogger(__name__)
@@ -136,19 +136,7 @@ async def tbsj_api_task(
         )
 
     except Exception as e:
-        # ========== 全局错误处理 ==========
-
-        # 捕获任务执行过程中的任何异常
-        # 注意：如果任务执行失败，异常会被捕获并记录
-        # 定时任务调度器的锁机制会自动释放，错误信息会保存到数据库
-
-        error_msg = f"{TBSJ_API_TASK_NAME} 执行失败: {str(e)}"
-        # 记录详细错误信息（包括完整的堆栈跟踪）
-        # 注意：只记录一次，避免重复。如果业务层已记录错误，这里只记录简要信息
-        # 超时/网络类错误已有 upstream_http 重试日志，避免重复打印整段堆栈
+        # 调度器层会记录完整堆栈；此处补充业务上下文，网络类错误不再重复打堆栈
         log_timeout = "请求超时" in str(e) or "请求失败" in str(e)
-        logger.error(error_msg, exc_info=not log_timeout)
-
-        # 重新抛出异常，让定时任务调度器的锁机制能够记录错误状态
-        # 这样可以在数据库中标记任务执行失败，便于后续排查问题
+        log_task_error(TBSJ_API_TASK_NAME, str(e), exc_info=not log_timeout)
         raise
