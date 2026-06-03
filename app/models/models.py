@@ -82,10 +82,10 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='用户ID')
-    username = Column(String(50), unique=True, index=True, nullable=False, comment='用户名称(登录名称)')
+    username = Column(String(50), unique=True, nullable=False, comment='用户名称(登录名称)')
     hashed_password = Column('hashed_password', String(191), nullable=False, comment='用户Hash密码')
     full_name = Column(String(100), comment='用户全名')
-    email = Column(String(100), unique=True, index=True, comment='用户邮箱')
+    email = Column(String(100), unique=True, comment='用户邮箱')
     role = Column(Enum(UserRole, values_callable=lambda obj: [e.value for e in UserRole], create_constraint=True), 
                   default=UserRole.CLIENT, nullable=False,
                   comment='用户角色(ADMIN 管理员 / CLIENT 客户)')
@@ -554,13 +554,17 @@ class PostbackConversion(Base):
         Index("idx_postback_client", "client_id"),
         Index("idx_postback_created_at", "created_at"),
         Index("idx_postback_platform_event", "platform", "event_name"),
-        Index("idx_postback_click_id", "click_id"),
-        Index("idx_postback_conversion_status", "conversion_status"),
-        # 复合索引：优化常见查询组合
-        Index("idx_postback_created_at_click_id", "created_at", "click_id"),  # 日期 + click_id
-        Index("idx_postback_created_at_platform", "created_at", "platform"),  # 日期 + 平台
-        Index("idx_postback_created_at_status", "created_at", "conversion_status"),  # 日期 + 状态
-        # 唯一性约束：同一平台的同一转化ID只能有一条记录（防止重复处理）
+        Index("idx_click_id", "click_id"),
+        Index("idx_conversion_status", "conversion_status"),
+        Index("idx_postback_conversion_id", "conversion_id"),
+        Index("idx_postback_offer_id", "offer_id"),
+        Index("idx_postback_publisher_id", "publisher_id"),
+        Index("idx_postback_advertiser_id", "advertiser_id"),
+        Index("idx_is_deducted", "is_deducted"),
+        Index("idx_deduction_type", "deduction_type"),
+        Index("idx_postback_created_at_click_id", "created_at", "click_id"),
+        Index("idx_postback_created_at_platform", "created_at", "platform"),
+        Index("idx_postback_created_at_status", "created_at", "conversion_status"),
         UniqueConstraint("platform", "conversion_id", "event_name", name="uq_postback_platform_conversion_event"),
     )
 
@@ -993,20 +997,20 @@ class Click(Base):
     __tablename__ = "clicks"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='点击记录ID')
-    click_id = Column(String(255), unique=True, nullable=False, index=True, comment='点击ID（系统生成，唯一标识）')
-    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的Offer ID')
-    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的渠道ID')
-    advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的广告主ID')
-    short_link_id = Column(Integer, ForeignKey("short_links.id", ondelete="SET NULL"), nullable=True, index=True, comment='关联的短链接ID')
-    click_time = Column(DateTime, nullable=False, index=True, comment='点击时间')
+    click_id = Column(String(255), unique=True, nullable=False, comment='点击ID（系统生成，唯一标识）')
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"), nullable=True, comment='关联的Offer ID')
+    publisher_id = Column(Integer, ForeignKey("publishers.id", ondelete="SET NULL"), nullable=True, comment='关联的渠道ID')
+    advertiser_id = Column(Integer, ForeignKey("advertisers.id", ondelete="SET NULL"), nullable=True, comment='关联的广告主ID')
+    short_link_id = Column(Integer, ForeignKey("short_links.id", ondelete="SET NULL"), nullable=True, comment='关联的短链接ID')
+    click_time = Column(DateTime, nullable=False, comment='点击时间')
     ip = Column(String(50), nullable=True, comment='点击IP地址')
     device = Column(String(100), nullable=True, comment='设备信息（兼容旧字段）')
     country = Column(String(50), nullable=True, comment='国家')
     user_agent = Column(Text, nullable=True, comment='User Agent')
     referer = Column(Text, nullable=True, comment='来源页面')
-    conversion_id = Column(Integer, nullable=True, index=True, comment='关联的转化ID（如果已转化）')
+    conversion_id = Column(Integer, nullable=True, comment='关联的转化ID（如果已转化）')
     created_at = Column(DateTime, default=get_app_now_naive, nullable=False, comment='创建时间')
-    
+
     # 软件信息
     os = Column(String(50), nullable=True, comment='操作系统名称')
     os_version = Column(String(50), nullable=True, comment='操作系统版本')
@@ -1036,23 +1040,25 @@ class Click(Base):
     short_link = relationship("ShortLink", foreign_keys=[short_link_id])
 
     __table_args__ = (
-        Index("idx_click_id", "click_id"),
         Index("idx_offer_id", "offer_id"),
         Index("idx_publisher_id", "publisher_id"),
         Index("idx_advertiser_id", "advertiser_id"),
         Index("idx_short_link_id", "short_link_id"),
         Index("idx_click_time", "click_time"),
         Index("idx_conversion_id", "conversion_id"),
-        # 性能优化索引
-        Index("idx_ip", "ip"),  # IP字段索引，用于IP查询优化
-        Index("idx_country", "country"),  # 国家字段索引
-        # 复合索引：优化常见查询组合
-        Index("idx_click_time_offer", "click_time", "offer_id"),  # 时间 + 产品
-        Index("idx_click_time_publisher", "click_time", "publisher_id"),  # 时间 + 渠道
-        Index("idx_click_time_offer_publisher", "click_time", "offer_id", "publisher_id"),  # 时间 + 产品 + 渠道
-        Index("idx_click_time_advertiser", "click_time", "advertiser_id"),  # 时间 + 广告主
-        Index("idx_offer_publisher", "offer_id", "publisher_id"),  # 产品 + 渠道
-        Index("idx_publisher_click_time", "publisher_id", "click_time"),  # 渠道 + 时间（优化按渠道的时间范围查询）
+        Index("idx_ip", "ip"),
+        Index("idx_country", "country"),
+        Index("idx_device_type", "device_type"),
+        Index("idx_os", "os"),
+        Index("idx_browser", "browser"),
+        Index("idx_is_bot", "is_bot"),
+        Index("idx_clicks_time_offer", "click_time", "offer_id"),
+        Index("idx_click_time_publisher", "click_time", "publisher_id"),
+        Index("idx_clicks_time_offer_publisher", "click_time", "offer_id", "publisher_id"),
+        Index("idx_clicks_offer_publisher_time", "offer_id", "publisher_id", "click_time"),
+        Index("idx_safe_delete", "advertiser_id", "offer_id", "publisher_id", "created_at"),
+        Index("idx_clicks_created_at_id", "created_at", "id"),
+        Index("idx_clicks_is_bot_id", "is_bot", "id"),
     )
 
 
@@ -1350,7 +1356,7 @@ class PendingPostbackConversion(Base):
     # 关联信息
     product_id = Column(Integer, ForeignKey("products.id", ondelete="SET NULL"), nullable=True, comment='关联的产品ID')
     client_id = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, comment='关联的客户ID')
-    click_id = Column(String(255), nullable=True, index=True, comment='关联的Click ID')
+    click_id = Column(String(255), nullable=True, comment='关联的Click ID')
     click_time = Column(DateTime, nullable=True, comment='点击时间')
     
     # 原始数据（JSON格式）
@@ -1372,6 +1378,7 @@ class PendingPostbackConversion(Base):
         Index("idx_status", "status"),
         Index("idx_request_ip", "request_ip"),
         Index("idx_created_at", "created_at"),
+        Index("idx_pending_click_id", "click_id"),
     )
 
 

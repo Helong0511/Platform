@@ -17,8 +17,8 @@ class UserSession(Base):
     __tablename__ = "user_sessions"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='会话ID')
-    user_id = Column(Integer, nullable=False, index=True, comment='用户ID')
-    token_jti = Column(String(64), nullable=False, unique=True, index=True, comment='JWT令牌ID（jti）')
+    user_id = Column(Integer, nullable=False, comment='用户ID')
+    token_jti = Column(String(64), nullable=False, unique=True, comment='JWT令牌ID（jti）')
     ip_address = Column(String(50), nullable=True, index=True, comment='登录IP地址')
     user_agent = Column(String(500), nullable=True, comment='用户代理（浏览器信息）')
     device_info = Column(String(200), nullable=True, comment='设备信息（移动端/桌面端）')
@@ -42,10 +42,10 @@ class TokenBlacklist(Base):
     __tablename__ = "token_blacklist"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='黑名单ID')
-    token_jti = Column(String(64), nullable=False, unique=True, index=True, comment='JWT令牌ID（jti）')
-    user_id = Column(Integer, nullable=False, index=True, comment='用户ID')
+    token_jti = Column(String(64), nullable=False, unique=True, comment='JWT令牌ID（jti）')
+    user_id = Column(Integer, nullable=False, comment='用户ID')
     revoked_at = Column(DateTime, default=get_app_now_naive, nullable=False, index=True, comment='撤销时间')
-    expires_at = Column(DateTime, nullable=False, index=True, comment='Token过期时间')
+    expires_at = Column(DateTime, nullable=False, comment='Token过期时间')
     reason = Column(String(200), nullable=True, comment='撤销原因（用户退出、强制退出等）')
 
     __table_args__ = (

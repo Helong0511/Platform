@@ -15,6 +15,14 @@
 */
 
 SET NAMES utf8mb4;
+
+-- 若数据库不存在则创建，并切换到该库
+CREATE DATABASE IF NOT EXISTS `platform`
+  DEFAULT CHARACTER SET utf8mb4
+  DEFAULT COLLATE utf8mb4_0900_ai_ci;
+
+USE `platform`;
+
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- ----------------------------
@@ -122,12 +130,8 @@ CREATE TABLE IF NOT EXISTS `advertiser_tests`  (
   `created_at` datetime NOT NULL COMMENT '创建时间',
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_advertiser_id`(`advertiser_id` ASC) USING BTREE,
-  INDEX `idx_test_time`(`test_time` ASC) USING BTREE,
-  INDEX `ix_advertiser_tests_id`(`id` ASC) USING BTREE,
-  INDEX `ix_advertiser_tests_advertiser_id`(`advertiser_id` ASC) USING BTREE,
   INDEX `idx_offer_id`(`offer_id` ASC) USING BTREE,
-  INDEX `ix_advertiser_tests_offer_id`(`offer_id` ASC) USING BTREE,
-  INDEX `ix_advertiser_tests_test_time`(`test_time` ASC) USING BTREE,
+  INDEX `idx_test_time`(`test_time` ASC) USING BTREE,
   CONSTRAINT `advertiser_tests_ibfk_1` FOREIGN KEY (`advertiser_id`) REFERENCES `advertisers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `advertiser_tests_ibfk_2` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
@@ -169,16 +173,10 @@ CREATE TABLE IF NOT EXISTS `affiliate_tests`  (
   `created_at` datetime NOT NULL COMMENT '创建时间',
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_publisher_id`(`publisher_id` ASC) USING BTREE,
-  INDEX `ix_affiliate_tests_id`(`id` ASC) USING BTREE,
   INDEX `idx_offer_id`(`offer_id` ASC) USING BTREE,
-  INDEX `ix_affiliate_tests_click_id`(`click_id` ASC) USING BTREE,
-  INDEX `ix_affiliate_tests_status`(`status` ASC) USING BTREE,
-  INDEX `idx_postback_time`(`postback_time` ASC) USING BTREE,
-  INDEX `ix_affiliate_tests_postback_time`(`postback_time` ASC) USING BTREE,
-  INDEX `idx_status`(`status` ASC) USING BTREE,
   INDEX `idx_click_id`(`click_id` ASC) USING BTREE,
-  INDEX `ix_affiliate_tests_offer_id`(`offer_id` ASC) USING BTREE,
-  INDEX `ix_affiliate_tests_publisher_id`(`publisher_id` ASC) USING BTREE,
+  INDEX `idx_status`(`status` ASC) USING BTREE,
+  INDEX `idx_postback_time`(`postback_time` ASC) USING BTREE,
   CONSTRAINT `affiliate_tests_ibfk_1` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `affiliate_tests_ibfk_2` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
@@ -218,7 +216,6 @@ CREATE TABLE IF NOT EXISTS `clicks`  (
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `click_id`(`click_id` ASC) USING BTREE,
-  INDEX `idx_click_id`(`click_id` ASC) USING BTREE,
   INDEX `idx_offer_id`(`offer_id` ASC) USING BTREE,
   INDEX `idx_publisher_id`(`publisher_id` ASC) USING BTREE,
   INDEX `idx_advertiser_id`(`advertiser_id` ASC) USING BTREE,
@@ -234,10 +231,10 @@ CREATE TABLE IF NOT EXISTS `clicks`  (
   INDEX `idx_is_bot`(`is_bot` ASC) USING BTREE,
   INDEX `idx_ip`(`ip` ASC) USING BTREE,
   INDEX `idx_country`(`country` ASC) USING BTREE,
-  INDEX `idx_click_time_offer`(`click_time` ASC, `offer_id` ASC) USING BTREE,
   INDEX `idx_click_time_publisher`(`click_time` ASC, `publisher_id` ASC) USING BTREE,
-  INDEX `idx_click_time_offer_publisher`(`click_time` ASC, `offer_id` ASC, `publisher_id` ASC) USING BTREE,
   INDEX `idx_safe_delete`(`advertiser_id` ASC, `offer_id` ASC, `publisher_id` ASC, `created_at` ASC) USING BTREE,
+  INDEX `idx_clicks_created_at_id`(`created_at` ASC, `id` ASC) USING BTREE,
+  INDEX `idx_clicks_is_bot_id`(`is_bot` ASC, `id` ASC) USING BTREE,
   CONSTRAINT `clicks_ibfk_1` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `clicks_ibfk_2` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `clicks_ibfk_3` FOREIGN KEY (`advertiser_id`) REFERENCES `advertisers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
@@ -307,8 +304,6 @@ CREATE TABLE IF NOT EXISTS `client_notification_configs`  (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `ix_client_notification_configs_client_id`(`client_id` ASC) USING BTREE,
   INDEX `idx_client_notification_config_enabled`(`notification_enabled` ASC) USING BTREE,
-  INDEX `idx_client_notification_config_client`(`client_id` ASC) USING BTREE,
-  INDEX `ix_client_notification_configs_id`(`id` ASC) USING BTREE,
   CONSTRAINT `client_notification_configs_ibfk_1` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
@@ -336,7 +331,6 @@ CREATE TABLE IF NOT EXISTS `clients`  (
   UNIQUE INDEX `uq_clients_key`(`key` ASC) USING BTREE,
   UNIQUE INDEX `chat_id`(`chat_id` ASC) USING BTREE,
   INDEX `idx_client_user`(`user_id` ASC) USING BTREE,
-  INDEX `idx_clients_key`(`key` ASC) USING BTREE,
   FULLTEXT INDEX `ft_clients_search`(`company_name`, `contact_person`) WITH PARSER `ngram`,
   CONSTRAINT `fk_clients_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '客户表' ROW_FORMAT = DYNAMIC;
@@ -452,16 +446,10 @@ CREATE TABLE IF NOT EXISTS `offer_caps`  (
   `created_at` datetime NOT NULL COMMENT '创建时间',
   `updated_at` datetime NULL DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
-  INDEX `ix_offer_caps_advertiser_id`(`advertiser_id` ASC) USING BTREE,
-  INDEX `ix_offer_caps_id`(`id` ASC) USING BTREE,
-  INDEX `ix_offer_caps_offer_id`(`offer_id` ASC) USING BTREE,
   INDEX `idx_offer_id`(`offer_id` ASC) USING BTREE,
   INDEX `idx_advertiser_id`(`advertiser_id` ASC) USING BTREE,
-  INDEX `ix_offer_caps_cap_type`(`cap_type` ASC) USING BTREE,
-  INDEX `ix_offer_caps_publisher_id`(`publisher_id` ASC) USING BTREE,
   INDEX `idx_publisher_id`(`publisher_id` ASC) USING BTREE,
   INDEX `idx_is_active`(`is_active` ASC) USING BTREE,
-  INDEX `ix_offer_caps_is_active`(`is_active` ASC) USING BTREE,
   INDEX `idx_cap_type`(`cap_type` ASC) USING BTREE,
   CONSTRAINT `offer_caps_ibfk_1` FOREIGN KEY (`advertiser_id`) REFERENCES `advertisers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `offer_caps_ibfk_2` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
@@ -482,15 +470,10 @@ CREATE TABLE IF NOT EXISTS `offer_discounts`  (
   `created_at` datetime NOT NULL COMMENT '创建时间',
   `updated_at` datetime NULL DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
-  INDEX `ix_offer_discounts_publisher_id`(`publisher_id` ASC) USING BTREE,
   INDEX `idx_is_active`(`is_active` ASC) USING BTREE,
   INDEX `idx_publisher_id`(`publisher_id` ASC) USING BTREE,
-  INDEX `ix_offer_discounts_offer_id`(`offer_id` ASC) USING BTREE,
-  INDEX `ix_offer_discounts_is_active`(`is_active` ASC) USING BTREE,
   INDEX `idx_offer_id`(`offer_id` ASC) USING BTREE,
   INDEX `idx_discount_type`(`discount_type` ASC) USING BTREE,
-  INDEX `ix_offer_discounts_discount_type`(`discount_type` ASC) USING BTREE,
-  INDEX `ix_offer_discounts_id`(`id` ASC) USING BTREE,
   CONSTRAINT `offer_discounts_ibfk_1` FOREIGN KEY (`offer_id`) REFERENCES `offers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `offer_discounts_ibfk_2` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
@@ -585,15 +568,11 @@ CREATE TABLE IF NOT EXISTS `pending_postback_conversions`  (
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `product_id`(`product_id` ASC) USING BTREE,
   INDEX `client_id`(`client_id` ASC) USING BTREE,
-  INDEX `ix_pending_postback_conversions_request_ip`(`request_ip` ASC) USING BTREE,
-  INDEX `ix_pending_postback_conversions_id`(`id` ASC) USING BTREE,
   INDEX `ix_pending_postback_conversions_platform`(`platform` ASC) USING BTREE,
   INDEX `idx_status`(`status` ASC) USING BTREE,
-  INDEX `ix_pending_postback_conversions_status`(`status` ASC) USING BTREE,
   INDEX `idx_request_ip`(`request_ip` ASC) USING BTREE,
-  INDEX `ix_pending_postback_conversions_click_id`(`click_id` ASC) USING BTREE,
   INDEX `idx_created_at`(`created_at` ASC) USING BTREE,
-  INDEX `ix_pending_postback_conversions_created_at`(`created_at` ASC) USING BTREE,
+  INDEX `idx_pending_click_id`(`click_id` ASC) USING BTREE,
   CONSTRAINT `pending_postback_conversions_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `pending_postback_conversions_ibfk_2` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
@@ -641,8 +620,7 @@ CREATE TABLE IF NOT EXISTS `postback_conversions`  (
   INDEX `idx_postback_platform_event`(`platform` ASC, `event_name` ASC) USING BTREE COMMENT '平台和事件名称复合索引（优化事件统计查询）',
   INDEX `idx_click_id`(`click_id` ASC) USING BTREE,
   INDEX `idx_conversion_status`(`conversion_status` ASC) USING BTREE,
-  INDEX `idx_postback_click_id`(`click_id` ASC) USING BTREE,
-  INDEX `idx_postback_conversion_status`(`conversion_status` ASC) USING BTREE,
+  INDEX `idx_postback_conversion_id`(`conversion_id` ASC) USING BTREE,
   INDEX `idx_is_deducted`(`is_deducted` ASC) USING BTREE,
   INDEX `idx_deduction_type`(`deduction_type` ASC) USING BTREE,
   CONSTRAINT `postback_conversions_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
@@ -670,17 +648,11 @@ CREATE TABLE IF NOT EXISTS `postback_forward_logs`  (
   `created_at` datetime NOT NULL COMMENT '创建时间',
   `completed_at` datetime NULL DEFAULT NULL COMMENT '完成时间',
   PRIMARY KEY (`id`) USING BTREE,
-  INDEX `ix_postback_forward_logs_publisher_id`(`publisher_id` ASC) USING BTREE,
   INDEX `idx_forward_log_product`(`product_id` ASC) USING BTREE,
-  INDEX `ix_postback_forward_logs_success`(`success` ASC) USING BTREE,
   INDEX `idx_forward_log_conversion`(`conversion_id` ASC) USING BTREE,
   INDEX `idx_forward_log_success`(`success` ASC) USING BTREE,
-  INDEX `ix_postback_forward_logs_product_id`(`product_id` ASC) USING BTREE,
-  INDEX `ix_postback_forward_logs_id`(`id` ASC) USING BTREE,
   INDEX `idx_forward_log_created_at`(`created_at` ASC) USING BTREE,
-  INDEX `ix_postback_forward_logs_created_at`(`created_at` ASC) USING BTREE,
   INDEX `idx_forward_log_publisher`(`publisher_id` ASC) USING BTREE,
-  INDEX `ix_postback_forward_logs_conversion_id`(`conversion_id` ASC) USING BTREE,
   CONSTRAINT `postback_forward_logs_ibfk_1` FOREIGN KEY (`conversion_id`) REFERENCES `postback_conversions` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `postback_forward_logs_ibfk_2` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `postback_forward_logs_ibfk_3` FOREIGN KEY (`publisher_id`) REFERENCES `publishers` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
@@ -703,9 +675,6 @@ CREATE TABLE IF NOT EXISTS `postback_forward_queue`  (
   `created_at` datetime NOT NULL COMMENT '创建时间',
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_forward_queue_time`(`next_retry_time` ASC) USING BTREE,
-  INDEX `ix_postback_forward_queue_id`(`id` ASC) USING BTREE,
-  INDEX `ix_postback_forward_queue_conversion_id`(`conversion_id` ASC) USING BTREE,
-  INDEX `ix_postback_forward_queue_next_retry_time`(`next_retry_time` ASC) USING BTREE,
   INDEX `idx_forward_queue_conversion`(`conversion_id` ASC) USING BTREE,
   INDEX `ix_postback_forward_queue_product_id`(`product_id` ASC) USING BTREE,
   INDEX `ix_postback_forward_queue_created_at`(`created_at` ASC) USING BTREE,
@@ -726,10 +695,7 @@ CREATE TABLE IF NOT EXISTS `postback_ip_whitelist`  (
   `updated_at` datetime NOT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `ix_postback_ip_whitelist_ip_address`(`ip_address` ASC) USING BTREE,
-  INDEX `ix_postback_ip_whitelist_id`(`id` ASC) USING BTREE,
-  INDEX `ix_postback_ip_whitelist_is_active`(`is_active` ASC) USING BTREE,
-  INDEX `idx_is_active`(`is_active` ASC) USING BTREE,
-  INDEX `idx_ip_address`(`ip_address` ASC) USING BTREE
+  INDEX `idx_is_active`(`is_active` ASC) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
@@ -751,21 +717,13 @@ CREATE TABLE IF NOT EXISTS `postback_notifications`  (
   `postback_url` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL COMMENT 'Postback URL（转发通知时使用）',
   `created_at` datetime NOT NULL COMMENT '创建时间',
   PRIMARY KEY (`id`) USING BTREE,
-  INDEX `ix_postback_notifications_publisher_id`(`publisher_id` ASC) USING BTREE,
   INDEX `idx_postback_notification_publisher`(`publisher_id` ASC) USING BTREE,
   INDEX `idx_postback_notification_conversion`(`conversion_id` ASC) USING BTREE,
-  INDEX `ix_postback_notifications_conversion_id`(`conversion_id` ASC) USING BTREE,
-  INDEX `ix_postback_notifications_auto_notify`(`auto_notify` ASC) USING BTREE,
   INDEX `idx_postback_notification_product`(`product_id` ASC) USING BTREE,
-  INDEX `ix_postback_notifications_product_id`(`product_id` ASC) USING BTREE,
   INDEX `idx_postback_notification_created_at`(`created_at` ASC) USING BTREE,
-  INDEX `ix_postback_notifications_id`(`id` ASC) USING BTREE,
   INDEX `idx_postback_notification_client`(`client_id` ASC) USING BTREE,
-  INDEX `ix_postback_notifications_created_at`(`created_at` ASC) USING BTREE,
   INDEX `idx_postback_notification_auto_notify`(`auto_notify` ASC) USING BTREE,
-  INDEX `ix_postback_notifications_notification_status`(`notification_status` ASC) USING BTREE,
   INDEX `idx_postback_notification_status`(`notification_status` ASC) USING BTREE,
-  INDEX `ix_postback_notifications_client_id`(`client_id` ASC) USING BTREE,
   CONSTRAINT `postback_notifications_ibfk_1` FOREIGN KEY (`conversion_id`) REFERENCES `postback_conversions` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT,
   CONSTRAINT `postback_notifications_ibfk_2` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `postback_notifications_ibfk_3` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
@@ -815,7 +773,6 @@ CREATE TABLE IF NOT EXISTS `product_notification_configs`  (
   UNIQUE INDEX `ix_product_notification_configs_product_id`(`product_id` ASC) USING BTREE,
   INDEX `idx_product_notification_config_product`(`product_id` ASC) USING BTREE,
   INDEX `idx_product_notification_config_enabled`(`notification_enabled` ASC) USING BTREE,
-  INDEX `ix_product_notification_configs_id`(`id` ASC) USING BTREE,
   CONSTRAINT `product_notification_configs_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
@@ -962,7 +919,6 @@ CREATE TABLE IF NOT EXISTS `tb_search_data`  (
   INDEX `idx_tb_search_data_date_product`(`date` ASC, `product_id` ASC) USING BTREE,
   INDEX `idx_tb_search_data_product`(`product_id` ASC) USING BTREE,
   INDEX `idx_tb_search_data_date`(`date` ASC) USING BTREE,
-  INDEX `ix_tb_search_data_id`(`id` ASC) USING BTREE,
   CONSTRAINT `tb_search_data_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = 'TB收索数据' ROW_FORMAT = DYNAMIC;
 
@@ -1003,8 +959,7 @@ CREATE TABLE IF NOT EXISTS `third_party_report_logs`  (
   INDEX `idx_third_party_status`(`status` ASC) USING BTREE,
   INDEX `idx_third_party_created_at`(`created_at` ASC) USING BTREE,
   INDEX `idx_third_party_status_created`(`status` ASC, `created_at` ASC) USING BTREE,
-  INDEX `idx_conversion_id`(`conversion_id` ASC) USING BTREE,
-  INDEX `idx_event`(`event` ASC) USING BTREE
+  INDEX `idx_conversion_id`(`conversion_id` ASC) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '第三方上报日志表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
@@ -1035,7 +990,6 @@ CREATE TABLE IF NOT EXISTS `cloak_configs`  (
   `updated_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uq_cloak_name`(`cloak_name` ASC) USING BTREE,
-  INDEX `idx_cloak_name`(`cloak_name` ASC) USING BTREE,
   INDEX `idx_cloak_enabled`(`is_enabled` ASC) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '斗篷配置表' ROW_FORMAT = Dynamic;
 
@@ -1053,11 +1007,8 @@ CREATE TABLE IF NOT EXISTS `token_blacklist`  (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `ix_token_blacklist_token_jti`(`token_jti` ASC) USING BTREE,
   INDEX `ix_token_blacklist_revoked_at`(`revoked_at` ASC) USING BTREE,
-  INDEX `ix_token_blacklist_user_id`(`user_id` ASC) USING BTREE,
   INDEX `idx_blacklist_user`(`user_id` ASC) USING BTREE,
-  INDEX `idx_blacklist_expires`(`expires_at` ASC) USING BTREE,
-  INDEX `ix_token_blacklist_id`(`id` ASC) USING BTREE,
-  INDEX `ix_token_blacklist_expires_at`(`expires_at` ASC) USING BTREE
+  INDEX `idx_blacklist_expires`(`expires_at` ASC) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
@@ -1116,8 +1067,6 @@ CREATE TABLE IF NOT EXISTS `user_sessions`  (
   UNIQUE INDEX `uq_user_sessions_token_jti`(`token_jti` ASC) USING BTREE,
   INDEX `idx_session_user_active`(`user_id` ASC, `is_active` ASC) USING BTREE,
   INDEX `idx_session_expires`(`expires_at` ASC) USING BTREE,
-  INDEX `idx_user_id`(`user_id` ASC) USING BTREE,
-  INDEX `idx_token_jti`(`token_jti` ASC) USING BTREE,
   INDEX `idx_ip_address`(`ip_address` ASC) USING BTREE,
   INDEX `idx_is_active`(`is_active` ASC) USING BTREE,
   INDEX `idx_last_activity`(`last_activity` ASC) USING BTREE
@@ -1142,8 +1091,6 @@ CREATE TABLE IF NOT EXISTS `users`  (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uq_users_username`(`username` ASC) USING BTREE,
   UNIQUE INDEX `uq_users_email`(`email` ASC) USING BTREE,
-  INDEX `idx_username`(`username` ASC) USING BTREE,
-  INDEX `idx_email`(`email` ASC) USING BTREE,
   FULLTEXT INDEX `ft_users_search`(`username`, `full_name`, `email`) WITH PARSER `ngram`
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '用户表' ROW_FORMAT = DYNAMIC;
 
@@ -1186,7 +1133,6 @@ BEGIN
     DECLARE v_total_deleted BIGINT DEFAULT 0;
     DECLARE v_remaining BIGINT DEFAULT 0;
 
-    -- 降低长时间锁等待风险（按需调整）
     SET SESSION innodb_lock_wait_timeout = 5;
 
     CREATE TEMPORARY TABLE IF NOT EXISTS tmp_delete_ids (
@@ -1208,10 +1154,16 @@ BEGIN
         FROM clicks c
         WHERE c.created_at < p_delete_before_date
           AND c.click_id IS NOT NULL
+          AND c.conversion_id IS NULL
           AND NOT EXISTS (
               SELECT 1
               FROM postback_conversions pc
               WHERE pc.conversion_id = c.click_id
+          )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM pending_postback_conversions ppc
+              WHERE ppc.click_id = c.click_id
           )
         ORDER BY c.id
         LIMIT p_batch_size;
@@ -1254,10 +1206,16 @@ BEGIN
     FROM clicks c
     WHERE c.created_at < p_delete_before_date
       AND c.click_id IS NOT NULL
+      AND c.conversion_id IS NULL
       AND NOT EXISTS (
           SELECT 1
           FROM postback_conversions pc
           WHERE pc.conversion_id = c.click_id
+      )
+      AND NOT EXISTS (
+          SELECT 1
+          FROM pending_postback_conversions ppc
+          WHERE ppc.click_id = c.click_id
       );
 
     SELECT
@@ -1269,6 +1227,120 @@ BEGIN
         v_remaining AS remaining_count;
 
     DROP TEMPORARY TABLE IF EXISTS tmp_delete_ids;
+END
+;;
+delimiter ;
+
+-- ----------------------------
+-- Procedure structure for purge_clicks_bots_safe
+-- ----------------------------
+DROP PROCEDURE IF EXISTS `purge_clicks_bots_safe`;
+delimiter ;;
+CREATE PROCEDURE `purge_clicks_bots_safe`(
+    IN p_batch_size INT,
+    IN p_sleep_seconds DECIMAL(8,3),
+    IN p_max_batches INT,
+    IN p_dry_run BOOLEAN)
+BEGIN
+    DECLARE v_batch INT DEFAULT 0;
+    DECLARE v_selected INT DEFAULT 0;
+    DECLARE v_deleted INT DEFAULT 0;
+    DECLARE v_total_deleted BIGINT DEFAULT 0;
+    DECLARE v_remaining BIGINT DEFAULT 0;
+
+    SET SESSION innodb_lock_wait_timeout = 5;
+
+    CREATE TEMPORARY TABLE IF NOT EXISTS tmp_bot_delete_ids (
+        id BIGINT PRIMARY KEY
+    ) ENGINE=InnoDB;
+
+    bot_purge_loop: LOOP
+        SET v_batch = v_batch + 1;
+
+        IF v_batch > p_max_batches THEN
+            SELECT 'STOP_MAX_BATCHES' AS status, p_max_batches AS max_batches, v_total_deleted AS total_deleted;
+            LEAVE bot_purge_loop;
+        END IF;
+
+        TRUNCATE TABLE tmp_bot_delete_ids;
+
+        INSERT INTO tmp_bot_delete_ids (id)
+        SELECT c.id
+        FROM clicks c
+        WHERE c.is_bot = 1
+          AND c.click_id IS NOT NULL
+          AND c.conversion_id IS NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM postback_conversions pc
+              WHERE pc.conversion_id = c.click_id
+          )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM pending_postback_conversions ppc
+              WHERE ppc.click_id = c.click_id
+          )
+        ORDER BY c.id
+        LIMIT p_batch_size;
+
+        SET v_selected = ROW_COUNT();
+
+        IF v_selected = 0 THEN
+            LEAVE bot_purge_loop;
+        END IF;
+
+        IF p_dry_run THEN
+            SELECT
+                'DRY_RUN' AS status,
+                v_batch AS batch_no,
+                v_selected AS candidate_rows;
+        ELSE
+            START TRANSACTION;
+                DELETE c
+                FROM clicks c
+                INNER JOIN tmp_bot_delete_ids t ON t.id = c.id;
+                SET v_deleted = ROW_COUNT();
+            COMMIT;
+
+            SET v_total_deleted = v_total_deleted + v_deleted;
+
+            SELECT
+                'DELETED' AS status,
+                v_batch AS batch_no,
+                v_selected AS selected_rows,
+                v_deleted AS deleted_rows,
+                v_total_deleted AS total_deleted;
+        END IF;
+
+        IF p_sleep_seconds > 0 THEN
+            DO SLEEP(p_sleep_seconds);
+        END IF;
+    END LOOP;
+
+    SELECT COUNT(*) INTO v_remaining
+    FROM clicks c
+    WHERE c.is_bot = 1
+      AND c.click_id IS NOT NULL
+      AND c.conversion_id IS NULL
+      AND NOT EXISTS (
+          SELECT 1
+          FROM postback_conversions pc
+          WHERE pc.conversion_id = c.click_id
+      )
+      AND NOT EXISTS (
+          SELECT 1
+          FROM pending_postback_conversions ppc
+          WHERE ppc.click_id = c.click_id
+      );
+
+    SELECT
+        p_batch_size AS batch_size,
+        p_dry_run AS dry_run,
+        v_batch AS batches_ran,
+        v_total_deleted AS total_deleted,
+        v_remaining AS remaining_bot_count;
+
+    DROP TEMPORARY TABLE IF EXISTS tmp_bot_delete_ids;
 END
 ;;
 delimiter ;
