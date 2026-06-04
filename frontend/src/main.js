@@ -12,6 +12,7 @@ import 'element-plus/dist/index.css';
 import './style.css';
 import { initAxiosConfig } from './utils/axiosConfig';
 import { initGlobalErrorHandler } from './utils/globalErrorHandler';
+import { initVersionCheck } from './utils/versionCheck';
 
 // 初始化 Axios 配置（必须在创建 Vue 应用之前）
 initAxiosConfig();
@@ -33,3 +34,8 @@ app.use(ElementPlus, { locale: zhCn });
 
 // 挂载应用
 app.mount('#app');
+
+// 生产环境：检测前端新版本并提示刷新
+if (import.meta.env.PROD) {
+  initVersionCheck({ enabled: true, showMessage: true });
+}

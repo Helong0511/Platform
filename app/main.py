@@ -889,7 +889,7 @@ def _make_json_serializable(obj):
         try:
             # 尝试解码为UTF-8字符串
             return obj.decode('utf-8', errors='replace')
-        except:
+        except (UnicodeDecodeError, AttributeError):
             # 如果无法解码，返回base64编码
             return base64.b64encode(obj).decode('utf-8')
     elif isinstance(obj, dict):

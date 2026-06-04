@@ -1411,8 +1411,6 @@ const fetchProductAssignments = async (productId, useCache = false) => {
         assignments = result.data;
       } else if (result.data.data && Array.isArray(result.data.data)) {
         assignments = result.data.data;
-      } else if (result.data && Array.isArray(result.data)) {
-        assignments = result.data;
       }
     }
     

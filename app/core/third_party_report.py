@@ -678,7 +678,7 @@ async def retry_report_log(log_id: int):
                                 if "custom_data" in event_data:
                                     currency = event_data["custom_data"].get("currency", "USD")
                                     amount = event_data["custom_data"].get("value", 0.0)
-                        except:
+                        except (KeyError, TypeError, AttributeError):
                             pass
                 
                 await send_third_party_report(

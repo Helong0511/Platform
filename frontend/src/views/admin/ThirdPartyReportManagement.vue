@@ -455,6 +455,7 @@ const handleViewDetail = async (log) => {
     currentLog.value = data;
     detailDialogVisible.value = true;
   } catch (error) {
+    logger.error('加载上报详情失败:', error);
   }
 };
 

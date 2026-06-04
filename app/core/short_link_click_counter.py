@@ -572,7 +572,7 @@ async def sync_click_counts_to_db(db: AsyncSession, short_codes: list[str] = Non
                 failed_updates.extend(batch)
                 try:
                     await db.rollback()
-                except:
+                except Exception:
                     pass
         
         if synced > 0:
@@ -806,7 +806,7 @@ async def _batch_update_click_counts_with_retry(
             logger.warning(f"检查短链接存在性失败（锁获取失败）: {e}")
             try:
                 await db.rollback()
-            except:
+            except Exception:
                 pass
             failed_codes = [code for code, _, _ in batch]
             failed_counts = {code: count for code, count, _ in batch}
@@ -1110,7 +1110,7 @@ async def _batch_update_click_counts_with_retry(
                 logger.warning(f"查询短链接存在性失败: {query_error}")
                 try:
                     await db.rollback()
-                except:
+                except Exception:
                     pass
                 existing_codes = set()
             
@@ -1195,7 +1195,7 @@ async def _batch_update_click_counts_with_retry(
             )
             try:
                 await db.rollback()
-            except:
+            except Exception:
                 pass
             # 注意：由于现在不再在获取时删除计数器，计数器仍然存在，无需恢复
             # 计数器会在下次同步时重试
@@ -1211,7 +1211,7 @@ async def _batch_update_click_counts_with_retry(
         )
         try:
             await db.rollback()
-        except:
+        except Exception:
             pass
         # 注意：由于现在不再在获取时删除计数器，计数器仍然存在，无需恢复
         # 计数器会在下次同步时重试
@@ -1321,7 +1321,7 @@ async def _update_click_count_with_retry(
                 )
                 try:
                     await db.rollback()
-                except:
+                except Exception:
                     pass
                 return False
         except Exception as e:
@@ -1331,7 +1331,7 @@ async def _update_click_count_with_retry(
             )
             try:
                 await db.rollback()
-            except:
+            except Exception:
                 pass
             return False
     
@@ -1469,7 +1469,7 @@ async def sync_click_counts_to_db_batch(
             )
             try:
                 await db.rollback()
-            except:
+            except Exception:
                 pass
     
     return synced

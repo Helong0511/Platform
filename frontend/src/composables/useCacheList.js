@@ -1,30 +1,36 @@
 import { computed, ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { createMockCacheList } from '../data/mockCacheList';
+import { listCacheEntries } from '../api/cache';
 import { logger } from '../utils/logger';
 
 /**
- * 缓存列表（当前为演示数据，待对接后端缓存 API）。
+ * 缓存列表（对接 /api/v1/cache/entries）。
  */
 export function useCacheList() {
   const loading = ref(false);
-  const cacheList = ref(createMockCacheList());
+  const cacheList = ref([]);
+  const redisAvailable = ref(true);
 
   const flatCacheList = computed(() => cacheList.value);
 
-  const refreshCacheList = () => {
+  const refreshCacheList = async () => {
     loading.value = true;
-    setTimeout(() => {
-      try {
-        cacheList.value = createMockCacheList();
+    try {
+      const res = await listCacheEntries({ limit: 300 });
+      const data = res?.data ?? res;
+      cacheList.value = data?.items ?? [];
+      redisAvailable.value = data?.redis_available !== false;
+      if (!redisAvailable.value) {
+        ElMessage.warning('Redis 不可用，无法加载缓存列表');
+      } else {
         ElMessage.success('缓存列表已刷新');
-      } catch (error) {
-        logger.error('刷新缓存列表失败:', error);
-        ElMessage.error('刷新失败');
-      } finally {
-        loading.value = false;
       }
-    }, 500);
+    } catch (error) {
+      logger.error('刷新缓存列表失败:', error);
+      ElMessage.error(error?.message || '刷新失败');
+    } finally {
+      loading.value = false;
+    }
   };
 
   const removeByKey = (key) => {
@@ -42,6 +48,7 @@ export function useCacheList() {
     loading,
     cacheList,
     flatCacheList,
+    redisAvailable,
     refreshCacheList,
     removeByKey,
     clearAll,

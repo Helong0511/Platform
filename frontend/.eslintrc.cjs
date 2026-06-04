@@ -19,5 +19,11 @@ module.exports = {
     'vue/multi-word-component-names': 'off',
     'vue/no-unused-vars': 'warn',
     'no-unused-vars': 'warn'
-  }
+  },
+  overrides: [
+    {
+      files: ['src/components/admin/ShortLinkFormDialog.vue'],
+      rules: { 'vue/no-mutating-props': 'off' }
+    }
+  ]
 };

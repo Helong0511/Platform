@@ -189,7 +189,7 @@ def format_value(value: Any) -> str:
     elif isinstance(value, (dict, list)):
         try:
             return json.dumps(value, ensure_ascii=False, indent=2)
-        except:
+        except (TypeError, ValueError):
             return str(value)
     elif isinstance(value, datetime):
         return value.strftime("%Y-%m-%d %H:%M:%S")

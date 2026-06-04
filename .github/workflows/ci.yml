@@ -22,6 +22,8 @@ jobs:
         run: python tests/audit_codebase.py
       - name: Deprecated refs audit
         run: python tests/audit_deprecated_refs.py
+      - name: Frontend CRUD audit
+        run: node tests/audit_frontend_crud_api.mjs
       - name: Run unit tests
         env:
           UNIT_TEST: "1"
@@ -41,4 +43,5 @@ jobs:
         with:
           node-version: "20"
       - run: npm ci || npm install
+      - run: npm run lint
       - run: npm run build

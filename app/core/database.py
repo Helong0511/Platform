@@ -90,19 +90,25 @@ except Exception as e:
     logger.warning(f"应用 aiomysql 兼容性补丁失败: {e}")
 
 # ====== 创建数据库引擎 ======
-# 多进程环境优化：每个 worker 进程有独立的连接池
-# 使用配置中的连接池参数，优化数据库连接性能
-engine = create_async_engine(
-    str(settings.SQLALCHEMY_DATABASE_URI),
-    echo=False,  # 生产环境关闭SQL日志
-    pool_pre_ping=True,  # 连接前检查连接是否有效（防止连接过期）
-    pool_recycle=settings.DB_POOL_RECYCLE,  # 连接回收时间（秒）
-    pool_size=settings.DB_POOL_SIZE,  # 连接池大小（每个 worker）
-    max_overflow=settings.DB_MAX_OVERFLOW,  # 最大溢出连接数（每个 worker）
-    connect_args={
-        "connect_timeout": 10,  # 连接超时：10秒（aiomysql 支持）
-    }
-)
+_db_url = str(settings.SQLALCHEMY_DATABASE_URI)
+_engine_kwargs = {
+    "echo": False,
+    "pool_pre_ping": True,
+}
+if _db_url.startswith("sqlite"):
+    # 单测/CI 内存 SQLite 不支持 pool_size/max_overflow
+    engine = create_async_engine(_db_url, **_engine_kwargs)
+else:
+    engine = create_async_engine(
+        _db_url,
+        pool_recycle=settings.DB_POOL_RECYCLE,
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_MAX_OVERFLOW,
+        connect_args={
+            "connect_timeout": 10,
+        },
+        **_engine_kwargs,
+    )
 # 多进程环境说明：
 # - 每个 worker 进程有独立的连接池
 # - 总连接数 = (pool_size + max_overflow) × workers

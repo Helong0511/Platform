@@ -19,6 +19,7 @@
  * 权限控制：
  * - requiresAuth: 需要登录才能访问
  * - requiresAdmin: 需要管理员权限才能访问
+ * - requiresPublisher: 需要管理员或有关联渠道的客户才能访问
  * 
  * @module router/index
  */
@@ -210,7 +211,7 @@ const routes = [
         path: 'admin/short-links',
         name: 'ShortLinkManagement',
         component: ShortLinkManagement,
-        meta: { requiresAdmin: false }
+        meta: { requiresAdmin: true }
       },
       {
         path: 'admin/advertisers',
@@ -228,7 +229,7 @@ const routes = [
         path: 'admin/offers',
         name: 'OfferManagement',
         component: OfferManagement,
-        meta: { requiresAdmin: false }
+        meta: { requiresPublisher: true }
       },
       {
         path: 'admin/caps',
@@ -270,7 +271,7 @@ const routes = [
         path: 'admin/conversion-summary',
         name: 'ConversionSummary',
         component: ConversionSummary,
-        meta: { requiresAdmin: false }
+        meta: { requiresPublisher: true }
       },
       {
         path: 'admin/conversion-log',
@@ -333,6 +334,13 @@ const router = createRouter({
   history: createWebHistory(),
   routes
 });
+
+/** 是否允许访问 Offer / 转化总览（与 Sidebar 菜单规则一致） */
+function hasPublisherAccess(authStore) {
+  if (authStore.isAdmin) return true;
+  return authStore.userInfo?.has_publisher === true
+    || authStore.userInfo?.client?.has_publisher === true;
+}
 
 /**
  * 路由守卫 - 全局前置守卫
@@ -431,6 +439,23 @@ router.beforeEach((to, from, next) => {
         const fallbackPath = from.path && from.path !== '/login' && from.path.startsWith('/app')
           ? from.path
           : '/app/dashboard';
+        return next(fallbackPath);
+      }
+    }
+
+    // ====== 渠道关联权限检查（Offer / 转化总览） ======
+    if (to.meta.requiresPublisher) {
+      if (!authStore.isAuthenticated) {
+        clearAuthData();
+        ElMessage.warning('请先登录');
+        return next('/login');
+      }
+
+      if (!hasPublisherAccess(authStore)) {
+        const fallbackPath = from.path && from.path !== '/login' && from.path.startsWith('/app')
+          ? from.path
+          : getDefaultRoute(authStore.userInfo);
+        ElMessage.warning('无权访问该页面');
         return next(fallbackPath);
       }
     }

@@ -1,50 +1,55 @@
 import { ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import {
+  clearAllCacheEntries,
+  deleteCacheEntry,
+  getCacheEntry,
+} from '../api/cache';
 import { logger } from '../utils/logger';
 
 /**
- * 缓存查看、刷新、清除与导出（演示逻辑）。
- * @param {{ removeByKey: (key: string) => void, clearAll: () => void, refreshCacheList: () => void }} deps
+ * 缓存查看、刷新、清除（对接后端 API）。
+ * @param {{ removeByKey: (key: string) => void, clearAll: () => void, refreshCacheList: () => Promise<void> }} deps
  */
 export function useCacheActions({ removeByKey, clearAll, refreshCacheList }) {
   const clearingAll = ref(false);
   const cacheDetailVisible = ref(false);
   const currentCache = ref({});
 
-  const viewCache = (cache) => {
-    currentCache.value = { ...cache };
-    cacheDetailVisible.value = true;
-  };
-
-  const refreshCache = async (cache) => {
+  const viewCache = async (cache) => {
     try {
-      await ElMessageBox.confirm('确定要刷新此缓存吗？', '提示', {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      });
-      setTimeout(() => {
-        ElMessage.success(`缓存 ${cache.key} 已刷新`);
-      }, 300);
+      const res = await getCacheEntry(cache.key);
+      const data = res?.data ?? res;
+      currentCache.value = { ...cache, ...data };
+      cacheDetailVisible.value = true;
     } catch (error) {
-      if (error !== 'cancel') {
-        logger.error('刷新缓存失败:', error);
-      }
+      logger.error('加载缓存详情失败:', error);
+      ElMessage.error(error?.message || '加载详情失败');
     }
   };
 
+  const refreshCache = async () => {
+    await refreshCacheList();
+  };
+
   const clearCache = async (cache) => {
+    if (cache.protected) {
+      ElMessage.warning('该缓存键受保护，不可删除');
+      return;
+    }
     try {
-      await ElMessageBox.confirm('确定要清除此缓存吗？', '警告', {
+      await ElMessageBox.confirm(`确定要清除缓存 ${cache.key} 吗？`, '警告', {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
         type: 'warning',
       });
+      await deleteCacheEntry(cache.key);
       removeByKey(cache.key);
       ElMessage.success(`缓存 ${cache.key} 已清除`);
     } catch (error) {
       if (error !== 'cancel') {
         logger.error('清除缓存失败:', error);
+        ElMessage.error(error?.message || '清除失败');
       }
     }
   };
@@ -52,7 +57,7 @@ export function useCacheActions({ removeByKey, clearAll, refreshCacheList }) {
   const clearAllCache = async () => {
     try {
       await ElMessageBox.confirm(
-        '确定要清除所有缓存吗？此操作不可恢复！',
+        '确定要清除所有非受保护缓存吗？CSRF/限流等系统键将保留。',
         '危险',
         {
           confirmButtonText: '确定',
@@ -61,23 +66,38 @@ export function useCacheActions({ removeByKey, clearAll, refreshCacheList }) {
         },
       );
       clearingAll.value = true;
-      setTimeout(() => {
-        clearAll();
-        ElMessage.success('所有缓存已清除');
-        clearingAll.value = false;
-      }, 500);
+      const res = await clearAllCacheEntries();
+      const deleted = res?.data?.deleted ?? res?.deleted ?? 0;
+      clearAll();
+      ElMessage.success(`已清除 ${deleted} 个缓存键`);
+      await refreshCacheList();
     } catch (error) {
       if (error !== 'cancel') {
         logger.error('清除全部缓存失败:', error);
+        ElMessage.error(error?.message || '清除失败');
       }
+    } finally {
       clearingAll.value = false;
     }
   };
 
-  const exportCacheStats = () => {
-    setTimeout(() => {
-      ElMessage.success('缓存统计已导出（演示）');
-    }, 300);
+  const exportCacheStats = async () => {
+    try {
+      const { getCacheStats } = await import('../api/cache');
+      const res = await getCacheStats();
+      const data = res?.data ?? res;
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `cache-stats-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      ElMessage.success('缓存统计已导出');
+    } catch (error) {
+      logger.error('导出缓存统计失败:', error);
+      ElMessage.error(error?.message || '导出失败');
+    }
   };
 
   return {

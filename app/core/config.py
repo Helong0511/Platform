@@ -17,21 +17,23 @@ import logging
 logger = logging.getLogger(__name__)
 
 # 加载环境变量
-# 使用 override=True 确保 .env 文件中的值覆盖系统环境变量
-# 如果无法读取 .env 文件（如权限问题），静默失败
-# 因为 systemd 可能已经通过 EnvironmentFile 加载了环境变量
-try:
-    load_dotenv(override=True)
-except (PermissionError, IOError, OSError) as e:
-    # 如果无法读取 .env 文件，记录警告但继续运行
-    # 这通常发生在 systemd 服务中，因为环境变量可能已经通过 EnvironmentFile 加载
-    if os.getenv("PRODUCTION_ENV"):
-        # 生产环境：如果环境变量已设置，说明 systemd 已加载，可以继续
-        logger.warning(f"无法读取 .env 文件（可能已通过 systemd EnvironmentFile 加载）: {e}")
-    else:
-        # 开发环境：给出更明确的提示
-        logger.warning(f"无法读取 .env 文件: {e}")
-        logger.info("如果使用 systemd 服务，请确保 .env 文件权限正确：sudo chown www-data:www-data /data/Platform/.env && sudo chmod 640 /data/Platform/.env")
+# 单测/CI 由 conftest 注入环境变量，不读取 .env，避免本地生产配置干扰
+if os.getenv("UNIT_TEST") != "1":
+    # 使用 override=True 确保 .env 文件中的值覆盖系统环境变量
+    # 如果无法读取 .env 文件（如权限问题），静默失败
+    # 因为 systemd 可能已经通过 EnvironmentFile 加载了环境变量
+    try:
+        load_dotenv(override=True)
+    except (PermissionError, IOError, OSError) as e:
+        # 如果无法读取 .env 文件，记录警告但继续运行
+        # 这通常发生在 systemd 服务中，因为环境变量可能已经通过 EnvironmentFile 加载
+        if os.getenv("PRODUCTION_ENV"):
+            # 生产环境：如果环境变量已设置，说明 systemd 已加载，可以继续
+            logger.warning(f"无法读取 .env 文件（可能已通过 systemd EnvironmentFile 加载）: {e}")
+        else:
+            # 开发环境：给出更明确的提示
+            logger.warning(f"无法读取 .env 文件: {e}")
+            logger.info("如果使用 systemd 服务，请确保 .env 文件权限正确：sudo chown www-data:www-data /data/Platform/.env && sudo chmod 640 /data/Platform/.env")
 
 
 class Settings(BaseSettings):
@@ -40,7 +42,7 @@ class Settings(BaseSettings):
     使用Pydantic BaseSettings自动加载环境变量
     """
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=None if os.getenv("UNIT_TEST") == "1" else ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",  # 忽略未定义的字段（如 MYSQL_DATABASE, MYSQL_USER 等，这些用于构建 DATABASE_URL）

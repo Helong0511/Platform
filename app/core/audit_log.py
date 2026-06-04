@@ -156,7 +156,7 @@ async def log_user_action(
                 # 如果转换失败，尝试直接序列化
                 try:
                     final_details = json.dumps(details, ensure_ascii=False, default=str)
-                except:
+                except (TypeError, ValueError):
                     final_details = str(details)[:1000]  # 限制长度
 
         # 创建日志记录

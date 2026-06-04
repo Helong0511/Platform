@@ -290,7 +290,7 @@ def acquire_bot_lock(lock_file_path: Optional[Path] = None, max_retries: int = 1
                         try:
                             if lock_file_tmp.exists():
                                 lock_file_tmp.unlink()
-                        except:
+                        except OSError:
                             pass
                         if attempt < max_retries:
                             logger.info(f"[PID:{current_pid}] 无法获取 Telegram Bot 启动锁（其他进程可能已启动），{retry_delay}秒后重试...")

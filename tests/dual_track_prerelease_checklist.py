@@ -152,6 +152,7 @@ _PYTEST_FILES = [
     "tests/test_cloak_click_persist.py",
     "tests/test_click_associator_token.py",
     "tests/test_conversion_saver_attribution.py",
+    "tests/test_ad_tracking_codec_production_key.py",
 ]
 
 
