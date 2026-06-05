@@ -1,18 +1,24 @@
 /**
  * 版本检查工具
- * 用于检测前端是否有新版本，如果有则自动刷新页面
+ * 对比「JS 包内构建版本」与「服务端 version.json」，不一致时自动刷新
  */
 import axios from 'axios';
 import { ElMessage } from 'element-plus';
 
-// 当前版本号（从版本文件加载）
-let currentVersion = null;
+/** 构建时由 vite-plugin-version 注入，与 dist/version.json 一致 */
+const BUILD_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
+
+// 当前运行中的构建版本（固定为包内版本，不从服务端初始化）
+let currentVersion = BUILD_VERSION;
 // 是否已初始化
 let isInitialized = false;
 // 是否正在检查
 let isChecking = false;
-// 路由监听器引用（用于清理）
+// 路由/轮询清理函数
 let routeWatcher = null;
+let removeRouterGuard = null;
+let loginPollTimer = null;
+let reloadScheduled = false;
 // 节流相关变量
 let lastCheckTime = 0;
 let throttleTimer = null;
@@ -51,6 +57,11 @@ const THROTTLE_CONFIG = {
   enabled: true,           // 是否启用节流
   interval: 5000,          // 节流间隔（毫秒），5秒内只检查一次
 };
+
+// 登录页轮询间隔（毫秒）
+const DEFAULT_POLL_INTERVAL = 60000;
+
+const isLoginPath = (path) => path === '/login' || path === '/';
 
 /**
  * 打印日志（使用console.log，确保在开发环境也能看到）
@@ -189,14 +200,7 @@ const checkForUpdate = async (bypassThrottle = false) => {
 
     performanceMetrics.successfulChecks++;
 
-    // 如果还没有当前版本，设置为最新版本
-    if (!currentVersion) {
-      currentVersion = latestVersion;
-      log.debug('初始化版本号:', currentVersion);
-      return false;
-    }
-
-    // 如果版本号不同，说明有新版本或版本回退
+    // 包内构建版本 vs 服务端最新版本
     if (latestVersion !== currentVersion) {
       const isUpdate = latestVersion > currentVersion;
       const isRollback = latestVersion < currentVersion;
@@ -288,6 +292,11 @@ const checkForUpdate = async (bypassThrottle = false) => {
  * @param {number} delay 刷新延迟时间（毫秒），默认 2000
  */
 const reloadPage = (showMessage = true, delay = 2000) => {
+  if (reloadScheduled) {
+    return;
+  }
+  reloadScheduled = true;
+
   if (showMessage) {
     ElMessage.info({
       message: '检测到新版本，页面即将刷新...',
@@ -305,7 +314,7 @@ const reloadPage = (showMessage = true, delay = 2000) => {
 };
 
 /**
- * 初始化版本检查（仅在页面打开时检查一次）
+ * 初始化版本检查（登录页进入时检查 + 定时轮询）
  * @param {Object} options 配置选项
  * @param {boolean} options.enabled 是否启用版本检查，默认 true
  * @param {boolean} options.showMessage 检测到更新时是否显示提示消息，默认 true
@@ -313,8 +322,10 @@ const reloadPage = (showMessage = true, delay = 2000) => {
  * @param {boolean} options.enableThrottle 是否启用节流，默认 true
  * @param {number} options.throttleInterval 节流间隔（毫秒），默认 5000
  * @param {boolean} options.enableOfflineDetection 是否启用离线检测，默认 true
+ * @param {number} options.pollInterval 登录页轮询间隔（毫秒），默认 60000
+ * @param {import('vue-router').Router} [options.router] Vue Router 实例
  */
-export const initVersionCheck = async (options = {}) => {
+export const initVersionCheck = (options = {}) => {
   if (isInitialized) {
     log.warn('版本检查已经初始化，跳过重复初始化');
     return;
@@ -327,6 +338,8 @@ export const initVersionCheck = async (options = {}) => {
     enableThrottle = true,
     throttleInterval = 5000,
     enableOfflineDetection = true,
+    pollInterval = DEFAULT_POLL_INTERVAL,
+    router = null,
   } = options;
   isInitialized = true;
 
@@ -356,54 +369,65 @@ export const initVersionCheck = async (options = {}) => {
     return;
   }
 
-  // 加载初始版本号
-  currentVersion = await loadCurrentVersion();
-  if (currentVersion) {
-    log.debug('版本检查已初始化，当前版本:', currentVersion);
-    if (enableThrottle) {
-      log.debug(`节流已启用，间隔：${throttleInterval}ms`);
-    }
-  } else {
-    log.warn('无法加载初始版本号，版本检查可能无法正常工作');
+  if (!currentVersion || currentVersion === 'dev') {
+    log.warn('构建版本无效，版本检查已跳过');
     return;
   }
 
-  // 只在登录页面时检查版本
-  if (enabled) {
-    // 使用 window.location.pathname 检测路由，避免 useRoute() 在非 Vue 组件上下文中返回 undefined
-    const checkRoute = () => {
-      const currentPath = window.location.pathname;
-      const isLoginPage = currentPath === '/login' || currentPath === '/';
-
-      if (isLoginPage) {
-        log.debug('检测到登录页面，检查版本更新...');
-        checkForUpdate().then((hasUpdate) => {
-          if (hasUpdate) {
-            reloadPage(showMessage, reloadDelay);
-          }
-        });
-      }
-    };
-
-    // 初始检查
-    checkRoute();
-
-    // 监听路由变化（使用 popstate 事件）
-    // 注意：这种方式只能捕获浏览器的前进/后退操作
-    // 编程式导航（router.push、router.replace）需要通过其他方式处理
-    const handleRouteChange = () => {
-      checkRoute();
-    };
-
-    window.addEventListener('popstate', handleRouteChange);
-
-    // 保存清理函数
-    routeWatcher = () => {
-      window.removeEventListener('popstate', handleRouteChange);
-    };
-
-    log.info('版本检查已启用，仅在登录页面时检查');
+  log.debug('版本检查已初始化，包内构建版本:', currentVersion);
+  if (enableThrottle) {
+    log.debug(`节流已启用，间隔：${throttleInterval}ms`);
   }
+
+  const runLoginPageCheck = () => {
+    log.debug('登录页检查版本更新...');
+    checkForUpdate().then((hasUpdate) => {
+      if (hasUpdate) {
+        reloadPage(showMessage, reloadDelay);
+      }
+    });
+  };
+
+  const stopLoginPolling = () => {
+    if (loginPollTimer) {
+      clearInterval(loginPollTimer);
+      loginPollTimer = null;
+    }
+  };
+
+  const startLoginPolling = () => {
+    stopLoginPolling();
+    if (pollInterval > 0) {
+      loginPollTimer = setInterval(runLoginPageCheck, pollInterval);
+    }
+  };
+
+  const handleLoginRoute = (path) => {
+    if (!isLoginPath(path)) {
+      stopLoginPolling();
+      return;
+    }
+    runLoginPageCheck();
+    startLoginPolling();
+  };
+
+  handleLoginRoute(window.location.pathname);
+
+  const handlePopState = () => {
+    handleLoginRoute(window.location.pathname);
+  };
+  window.addEventListener('popstate', handlePopState);
+  routeWatcher = () => {
+    window.removeEventListener('popstate', handlePopState);
+  };
+
+  if (router && typeof router.afterEach === 'function') {
+    removeRouterGuard = router.afterEach((to) => {
+      handleLoginRoute(to.path);
+    });
+  }
+
+  log.info('版本检查已启用：登录页进入时检查，并每 %d 秒轮询', pollInterval / 1000);
 };
 
 /**
@@ -412,8 +436,20 @@ export const initVersionCheck = async (options = {}) => {
  */
 export const stopVersionCheck = () => {
   isInitialized = false;
+  reloadScheduled = false;
 
-  // 清理路由监听器
+  if (loginPollTimer) {
+    clearInterval(loginPollTimer);
+    loginPollTimer = null;
+  }
+
+  if (removeRouterGuard) {
+    removeRouterGuard();
+    removeRouterGuard = null;
+    log.info('路由守卫已清理');
+  }
+
+  // 清理 popstate 监听器
   if (routeWatcher) {
     routeWatcher();
     routeWatcher = null;
@@ -525,7 +561,9 @@ export const healthCheck = async () => {
       initialized: isInitialized,
       hasCurrentVersion: currentVersion !== null,
       isOnline: isOnline,
-      routeWatcherActive: routeWatcher !== null,
+      routeWatcherActive: routeWatcher !== null || removeRouterGuard !== null,
+      buildVersion: BUILD_VERSION,
+      loginPollingActive: loginPollTimer !== null,
       offlineDetectionActive: offlineEventListener !== null && onlineEventListener !== null,
     },
     metrics: getPerformanceMetrics(),

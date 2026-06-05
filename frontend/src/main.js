@@ -35,7 +35,7 @@ app.use(ElementPlus, { locale: zhCn });
 // 挂载应用
 app.mount('#app');
 
-// 生产环境：检测前端新版本并提示刷新
+// 生产环境：登录页对比包内版本与服务端 version.json，有更新则自动刷新
 if (import.meta.env.PROD) {
-  initVersionCheck({ enabled: true, showMessage: true });
+  initVersionCheck({ enabled: true, showMessage: true, router });
 }
