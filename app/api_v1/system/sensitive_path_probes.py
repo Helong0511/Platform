@@ -206,6 +206,32 @@ async def get_sensitive_path_probe_logs(
         count_result = await db.execute(count_query)
         total = count_result.scalar() or 0
 
+        page_ips = list({
+            row.client_ip
+            for row in rows
+            if row.client_ip and row.client_ip != "unknown"
+        })
+        ip_hit_counts: dict[str, int] = {}
+        blocked_ip_set: set[str] = set()
+        if page_ips:
+            hit_count_result = await db.execute(
+                select(
+                    SensitivePathProbeLog.client_ip,
+                    func.count(SensitivePathProbeLog.id),
+                )
+                .where(SensitivePathProbeLog.client_ip.in_(page_ips))
+                .group_by(SensitivePathProbeLog.client_ip)
+            )
+            ip_hit_counts = {ip: int(cnt) for ip, cnt in hit_count_result.all()}
+
+            blocked_result = await db.execute(
+                select(SensitiveBlockedIP.blocked_ip).where(
+                    SensitiveBlockedIP.blocked_ip.in_(page_ips),
+                    SensitiveBlockedIP.is_active.is_(True),
+                )
+            )
+            blocked_ip_set = {ip for (ip,) in blocked_result.all()}
+
         data = [
             {
                 "id": row.id,
@@ -219,6 +245,8 @@ async def get_sensitive_path_probe_logs(
                 "severity_label": LEVEL_LABELS.get(int(row.severity_level or 2), "中危"),
                 "action_taken": row.action_taken,
                 "created_at": row.created_at,
+                "ip_hit_count": ip_hit_counts.get(row.client_ip, 1) if row.client_ip else 0,
+                "is_blocked": bool(row.client_ip and row.client_ip in blocked_ip_set),
             }
             for row in rows
         ]

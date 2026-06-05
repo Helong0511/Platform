@@ -141,7 +141,18 @@
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
         <el-table-column prop="method" label="方法" width="90" />
-        <el-table-column prop="client_ip" label="IP" width="160" />
+        <el-table-column prop="client_ip" label="IP" width="160">
+          <template #default="{ row }">
+            <span>{{ row.client_ip }}</span>
+            <el-tag v-if="row.is_blocked" type="danger" size="small" style="margin-left: 6px;">已封禁</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="ip_hit_count" label="IP次数" width="88" align="center">
+          <template #default="{ row }">
+            <span v-if="row.client_ip && row.client_ip !== 'unknown'">{{ row.ip_hit_count ?? 1 }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="等级" width="88">
           <template #default="{ row }">
             <el-tag :type="severityTagType(row.severity_level)" size="small">
@@ -157,7 +168,7 @@
         <el-table-column label="操作" width="100" fixed="right">
           <template #default="{ row }">
             <el-button
-              v-if="row.client_ip && row.client_ip !== 'unknown'"
+              v-if="row.client_ip && row.client_ip !== 'unknown' && !row.is_blocked"
               type="danger"
               link
               @click="handleQuickBlock(row)"
@@ -323,7 +334,7 @@ const handleAddBlockedIp = async () => {
     ElMessage.success('IP封禁成功')
     blockForm.blocked_ip = ''
     blockForm.reason = ''
-    await loadBlockedIps()
+    await Promise.all([loadBlockedIps(), loadData()])
   } catch (e) {
     ElMessage.error(e?.message || 'IP封禁失败')
   }
@@ -336,7 +347,7 @@ const handleUnblock = async (row) => {
     })
     await unblockSensitiveBlockedIp(row.id)
     ElMessage.success('IP已解封')
-    await loadBlockedIps()
+    await Promise.all([loadBlockedIps(), loadData()])
   } catch (e) {
     if (e !== 'cancel') {
       ElMessage.error(e?.message || 'IP解封失败')
@@ -344,7 +355,9 @@ const handleUnblock = async (row) => {
   }
 }
 
-const rowSelectable = (row) => Boolean(row.client_ip && row.client_ip !== 'unknown')
+const rowSelectable = (row) => Boolean(
+  row.client_ip && row.client_ip !== 'unknown' && !row.is_blocked
+)
 
 const onSelectionChange = (rows) => {
   selectedRows.value = rows || []
@@ -377,7 +390,7 @@ const handleBatchBlockByText = async () => {
     })
     ElMessage.success(res?.message || '批量封禁完成')
     batchIpText.value = ''
-    await loadBlockedIps()
+    await Promise.all([loadBlockedIps(), loadData()])
   } catch (e) {
     if (e !== 'cancel') {
       ElMessage.error(e?.message || '批量封禁失败')
@@ -405,7 +418,7 @@ const handleBatchBlockTopIps = async () => {
       reason: batchBlockReason.value.trim() || `批量封禁：近${statsDays.value}天 TOP 探测 IP`,
     })
     ElMessage.success(res?.message || '批量封禁完成')
-    await loadBlockedIps()
+    await Promise.all([loadBlockedIps(), loadData()])
   } catch (e) {
     if (e !== 'cancel') {
       ElMessage.error(e?.message || '批量封禁失败')
@@ -437,7 +450,7 @@ const handleBatchBlockSelected = async () => {
     })
     ElMessage.success(res?.message || '批量封禁完成')
     selectedRows.value = []
-    await loadBlockedIps()
+    await Promise.all([loadBlockedIps(), loadData()])
   } catch (e) {
     if (e !== 'cancel') {
       ElMessage.error(e?.message || '批量封禁失败')
