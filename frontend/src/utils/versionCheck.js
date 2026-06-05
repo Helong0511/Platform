@@ -61,7 +61,7 @@ const THROTTLE_CONFIG = {
 // 登录页轮询间隔（毫秒）
 const DEFAULT_POLL_INTERVAL = 60000;
 
-const isLoginPath = (path) => path === '/login' || path === '/';
+const isLoginPath = (path) => path === '/login';
 
 /**
  * 打印日志（使用console.log，确保在开发环境也能看到）
@@ -411,8 +411,6 @@ export const initVersionCheck = (options = {}) => {
     startLoginPolling();
   };
 
-  handleLoginRoute(window.location.pathname);
-
   const handlePopState = () => {
     handleLoginRoute(window.location.pathname);
   };
@@ -422,12 +420,35 @@ export const initVersionCheck = (options = {}) => {
   };
 
   if (router && typeof router.afterEach === 'function') {
-    removeRouterGuard = router.afterEach((to) => {
-      handleLoginRoute(to.path);
+    let initialNavigationHandled = false;
+
+    const runInitialLoginCheck = (path) => {
+      if (initialNavigationHandled) {
+        return;
+      }
+      initialNavigationHandled = true;
+      handleLoginRoute(path);
+    };
+
+    removeRouterGuard = router.afterEach((to, from) => {
+      if (!initialNavigationHandled) {
+        runInitialLoginCheck(to.path);
+        return;
+      }
+      if (to.path !== from.path) {
+        handleLoginRoute(to.path);
+      }
     });
+
+    // 初始导航若早于 afterEach 注册完成，由 isReady 兜底（只执行一次）
+    router.isReady().then(() => {
+      runInitialLoginCheck(router.currentRoute.value.path);
+    });
+  } else {
+    handleLoginRoute(window.location.pathname);
   }
 
-  log.info('版本检查已启用：登录页进入时检查，并每 %d 秒轮询', pollInterval / 1000);
+  log.info(`版本检查已启用：登录页进入时检查，并每 ${pollInterval / 1000} 秒轮询`);
 };
 
 /**
