@@ -1,5 +1,8 @@
 """
 上游 API HTTP 响应解析辅助（各任务共用）。
+
+定时拉数任务（TQT / Skymobi / yangyangdeyi / Addermobi / Huguang / zhisuo / Pomiad）
+均通过本模块的 post_json / get_json 请求上游；对 HTTP 5xx、429 自动重试。
 """
 from __future__ import annotations
 
@@ -37,12 +40,24 @@ def _is_retriable_http_status(status_code: int) -> bool:
     return status_code == 429 or 500 <= status_code < 600
 
 
-def ensure_http_ok(response: httpx.Response, *, label: str = "API") -> None:
+def ensure_http_ok(
+    response: httpx.Response,
+    *,
+    label: str = "API",
+    attempts: Optional[int] = None,
+) -> None:
     if response.status_code != 200:
         text = (response.text or "")[:500]
-        logger.error("%s HTTP错误: status=%s body=%s", label, response.status_code, text)
+        retry_suffix = f"（已重试 {attempts} 次）" if attempts and attempts > 1 else ""
+        logger.error(
+            "%s HTTP错误: status=%s body=%s%s",
+            label,
+            response.status_code,
+            text,
+            retry_suffix,
+        )
         raise Exception(
-            f"{label} HTTP错误: 状态码={response.status_code}, 响应={text[:100]}"
+            f"{label} HTTP错误: 状态码={response.status_code}, 响应={text[:100]}{retry_suffix}"
         )
 
 
@@ -104,7 +119,11 @@ async def _request_json(
                     )
                     await asyncio.sleep(delay)
                     continue
-                ensure_http_ok(response, label=label)
+                ensure_http_ok(
+                    response,
+                    label=label,
+                    attempts=attempts if _is_retriable_http_status(response.status_code) else None,
+                )
             json_data = parse_json_response(response, label=label)
             if attempt > 0:
                 logger.info("%s 第 %s 次重试成功", label, attempt + 1)
