@@ -10,11 +10,14 @@ import {
 } from '../api/cloak-config';
 import {
   CLOAK_REPORT_EVENTS,
+  CLOAK_TEST_REPORT_PHASES,
   formatJson,
+  getTestPhaseEventMeta,
   maskToken,
   reportEventCellLabel,
   rowIsUsable,
   validateReportEventName,
+  validateTestReportPhase,
 } from '../utils/cloakReportEvents';
 
 export function useCloakConfigs() {
@@ -24,6 +27,10 @@ export function useCloakConfigs() {
   const formRef = ref(null);
   const editDialogVisible = ref(false);
   const testDialogVisible = ref(false);
+  const testPhaseDialogVisible = ref(false);
+  const testPhase = ref('click');
+  const testPhaseTargetRow = ref(null);
+  const testSubmitting = ref(false);
   const uploadDialogVisible = ref(false);
   const uploadDialogKey = ref(0);
   const uploadTargetRow = ref(null);
@@ -336,14 +343,28 @@ export function useCloakConfigs() {
     }
   };
 
-  const handleTestReport = async (row) => {
+  const handleTestReport = (row) => {
+    testPhaseTargetRow.value = row;
+    testPhase.value = 'click';
+    testPhaseDialogVisible.value = true;
+  };
+
+  const submitTestReport = async () => {
+    const row = testPhaseTargetRow.value;
+    if (!row?.id) {
+      ElMessage.warning('无效的斗篷配置');
+      return;
+    }
+    const phaseWarning = validateTestReportPhase(row, testPhase.value);
+    if (phaseWarning) {
+      ElMessage.warning(phaseWarning);
+      return;
+    }
+    testSubmitting.value = true;
     try {
-      if (row.report_event === 'Purchase' && (row.report_value == null || Number(row.report_value) <= 0)) {
-        ElMessage.warning('当前斗篷为购物事件，请先在编辑中保存有效金额后再测上报');
-        return;
-      }
       currentTestingRow.value = row;
       const result = await testCloakReport(row.id, {
+        report_phase: testPhase.value,
         adsid: `test-${Date.now()}`,
         email: 'test@example.com',
         phone: '13800138000',
@@ -352,11 +373,30 @@ export function useCloakConfigs() {
         use_hash: true,
       });
       testResult.value = result;
+      testPhaseDialogVisible.value = false;
       testDialogVisible.value = true;
     } catch (error) {
       ElMessage.error(error?.message || '测试上报失败');
+    } finally {
+      testSubmitting.value = false;
     }
   };
+
+  const currentTestPhaseLabel = computed(() => {
+    const phase = testResult.value?.report_phase || testPhase.value;
+    return CLOAK_TEST_REPORT_PHASES.find((o) => o.value === phase)?.label || phase;
+  });
+
+  const currentTestEventMeta = computed(() => {
+    if (testResult.value?.report_event) {
+      return {
+        event: testResult.value.report_event,
+        value: testResult.value.report_value,
+        currency: testResult.value.report_currency || 'USD',
+      };
+    }
+    return getTestPhaseEventMeta(currentTestingRow.value, testPhase.value);
+  });
 
   watch(
     () => [pagination.page, pagination.pageSize],
@@ -371,12 +411,19 @@ export function useCloakConfigs() {
 
   return {
     CLOAK_REPORT_EVENTS,
+    CLOAK_TEST_REPORT_PHASES,
     loading,
     saving,
     tableData,
     formRef,
     editDialogVisible,
     testDialogVisible,
+    testPhaseDialogVisible,
+    testPhase,
+    testPhaseTargetRow,
+    testSubmitting,
+    currentTestPhaseLabel,
+    currentTestEventMeta,
     uploadDialogVisible,
     uploadDialogKey,
     uploadTargetRow,
@@ -407,5 +454,6 @@ export function useCloakConfigs() {
     handleUploadDialogClosed,
     submitBridgeHtml,
     handleTestReport,
+    submitTestReport,
   };
 }

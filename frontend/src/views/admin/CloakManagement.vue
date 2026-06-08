@@ -297,17 +297,38 @@
     </el-dialog>
 
     <el-dialog
+      v-model="testPhaseDialogVisible"
+      title="选择测试上报类型"
+      width="480px"
+      :close-on-click-modal="false"
+    >
+      <el-alert type="info" :closable="false" style="margin-bottom: 12px;">
+        斗篷：{{ testPhaseTargetRow?.cloak_name || '-' }}。请选择要模拟的上报阶段，将按该阶段在编辑中的事件与金额向 Facebook 发送测试 CAPI。
+      </el-alert>
+      <el-radio-group v-model="testPhase" style="display: flex; flex-direction: column; gap: 12px;">
+        <el-radio v-for="opt in CLOAK_TEST_REPORT_PHASES" :key="opt.value" :label="opt.value">
+          {{ opt.label }}
+        </el-radio>
+      </el-radio-group>
+      <template #footer>
+        <el-button @click="testPhaseDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="testSubmitting" @click="submitTestReport">开始测试</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
       v-model="testDialogVisible"
       title="测试上报结果"
       width="900px"
       :close-on-click-modal="false"
     >
       <el-alert type="info" :closable="false" style="margin-bottom: 12px;">
-        当前斗篷：{{ currentTestingRow?.cloak_name || '-' }}；上报事件：{{
-          currentTestingRow?.report_event || 'ViewContent'
+        当前斗篷：{{ currentTestingRow?.cloak_name || '-' }}；上报阶段：{{ currentTestPhaseLabel }}；上报事件：{{
+          currentTestEventMeta.event
         }}
-        <template v-if="currentTestingRow?.report_event === 'Purchase'">
-          ；金额：{{ currentTestingRow?.report_value }} {{ currentTestingRow?.report_currency || 'USD' }}
+        <template v-if="currentTestEventMeta.event === 'Purchase'">
+          ；金额：{{ currentTestEventMeta.value ?? '（测试默认）' }}
+          {{ currentTestEventMeta.currency || 'USD' }}
         </template>
       </el-alert>
       <el-descriptions title="主上报结果" :column="1" border>
@@ -353,12 +374,19 @@ import { useCloakConfigs } from '../../composables/useCloakConfigs';
 
 const {
   CLOAK_REPORT_EVENTS,
+  CLOAK_TEST_REPORT_PHASES,
   loading,
   saving,
   tableData,
   formRef,
   editDialogVisible,
   testDialogVisible,
+  testPhaseDialogVisible,
+  testPhase,
+  testPhaseTargetRow,
+  testSubmitting,
+  currentTestPhaseLabel,
+  currentTestEventMeta,
   uploadDialogVisible,
   uploadDialogKey,
   uploadTargetRow,
@@ -388,6 +416,7 @@ const {
   handleUploadDialogClosed,
   submitBridgeHtml,
   handleTestReport,
+  submitTestReport,
 } = useCloakConfigs();
 </script>
 

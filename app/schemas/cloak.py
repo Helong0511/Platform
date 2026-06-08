@@ -3,7 +3,7 @@
 """
 import re
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 
@@ -306,7 +306,11 @@ class CloakConfigResponse(CloakConfigBase):
 
 
 class TestCloakReportRequest(BaseModel):
-    """测试上报请求（事件名与金额取自斗篷配置中的「上报事件」「金额」）"""
+    """测试上报请求（事件名与金额按 report_phase 取自斗篷配置对应阶段）"""
+    report_phase: Literal["load", "click", "postback"] = Field(
+        "click",
+        description="测试上报阶段：load=加载完成（载），click=点击跳转（点），postback=转化（转）",
+    )
     adsid: str = Field("test-fbclid-123456", min_length=1, max_length=500, description="测试广告事件ID")
     email: str = Field("test@example.com", min_length=1, max_length=255, description="测试邮箱")
     phone: str = Field("13800138000", min_length=1, max_length=50, description="测试手机号")

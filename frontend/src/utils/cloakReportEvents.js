@@ -2,6 +2,53 @@
  * Meta 标准事件与斗篷上报校验（与后端 app/schemas/cloak.py 一致）。
  */
 
+/** 测试上报可选阶段（默认 click = 点击跳转） */
+export const CLOAK_TEST_REPORT_PHASES = [
+  { value: 'click', label: '点击跳转上报（点）', short: '点' },
+  { value: 'load', label: '加载完成上报（载）', short: '载' },
+  { value: 'postback', label: 'Postback 转化上报（转）', short: '转' },
+];
+
+export function getTestPhaseEventMeta(row, phase) {
+  if (!row) {
+    return { event: '-', value: null, currency: 'USD' };
+  }
+  if (phase === 'load') {
+    return {
+      event: row.load_report_event || 'PageView',
+      value: row.load_report_value,
+      currency: row.load_report_currency || 'USD',
+    };
+  }
+  if (phase === 'postback') {
+    return {
+      event: row.postback_report_event || 'Purchase',
+      value: row.postback_report_value,
+      currency: row.postback_report_currency || 'USD',
+    };
+  }
+  return {
+    event: row.report_event || 'ViewContent',
+    value: row.report_value,
+    currency: row.report_currency || 'USD',
+  };
+}
+
+export function validateTestReportPhase(row, phase) {
+  const { event, value } = getTestPhaseEventMeta(row, phase);
+  if (event !== 'Purchase') {
+    return null;
+  }
+  if (phase === 'postback' && (value == null || value === '')) {
+    return null;
+  }
+  if (value == null || Number(value) <= 0) {
+    const hit = CLOAK_TEST_REPORT_PHASES.find((o) => o.value === phase);
+    return `当前为${hit?.label || phase}且事件为 Purchase，请先在编辑中保存有效金额后再测上报`;
+  }
+  return null;
+}
+
 export const CLOAK_REPORT_EVENTS = [
   { value: 'PageView', label: 'PageView（页面浏览）' },
   { value: 'ViewContent', label: 'ViewContent（查看内容）' },

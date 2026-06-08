@@ -88,6 +88,50 @@ def _resolve_real_user_agent(request: Request) -> str:
     return user_agent or f"server/{socket.gethostname()}"
 
 
+def _resolve_test_report_params(config: CloakConfig, phase: str) -> tuple[str, Optional[float], Optional[str]]:
+    """按测试阶段解析 CAPI 事件名、金额与货币。"""
+    if phase == "load":
+        return (
+            config.load_report_event or "PageView",
+            config.load_report_value,
+            config.load_report_currency,
+        )
+    if phase == "postback":
+        value = config.postback_report_value
+        if config.postback_report_event == "Purchase" and value is None:
+            # 转化 Purchase 未配固定金额时，测试用默认金额（线上由 postback payout 决定）
+            value = 9.99
+        return (
+            config.postback_report_event or "Purchase",
+            value,
+            config.postback_report_currency,
+        )
+    return (
+        config.report_event or "ViewContent",
+        config.report_value,
+        config.report_currency,
+    )
+
+
+def _validate_test_report_phase(config: CloakConfig, phase: str) -> None:
+    event, value, _currency = _resolve_test_report_params(config, phase)
+    if event != "Purchase":
+        return
+    if value is None or float(value) <= 0:
+        phase_labels = {
+            "load": "加载完成上报（载）",
+            "click": "点击跳转上报（点）",
+            "postback": "Postback 转化上报（转）",
+        }
+        raise_api_exception(
+            ErrorCode.VALIDATION_ERROR,
+            detail=(
+                f"{phase_labels.get(phase, phase)} 事件为 Purchase 时须先在斗篷配置中保存大于 0 的金额"
+                f"{'（转化可留空以使用测试默认金额）' if phase == 'postback' else ''}，再执行测上报"
+            ),
+        )
+
+
 def _build_facebook_payload(
     test_data: TestCloakReportRequest,
     client_ip: str,
@@ -429,13 +473,9 @@ async def test_cloak_report(
     if not config:
         raise_api_exception(ErrorCode.RESOURCE_NOT_FOUND, detail="斗篷配置不存在")
 
-    if config.report_event == "Purchase" and (
-        config.report_value is None or float(config.report_value) <= 0
-    ):
-        raise_api_exception(
-            ErrorCode.VALIDATION_ERROR,
-            detail="上报事件为 Purchase 时须先在斗篷配置中保存大于 0 的金额，再执行测上报",
-        )
+    phase = test_data.report_phase
+    _validate_test_report_phase(config, phase)
+    report_event, report_value, report_currency = _resolve_test_report_params(config, phase)
 
     client_ip = _resolve_real_client_ip(request)
     client_user_agent = _resolve_real_user_agent(request)
@@ -443,9 +483,9 @@ async def test_cloak_report(
         test_data,
         client_ip,
         client_user_agent,
-        report_event=config.report_event,
-        report_value=config.report_value,
-        report_currency=config.report_currency,
+        report_event=report_event,
+        report_value=report_value,
+        report_currency=report_currency,
     )
     primary_result = await _send_test_report(config.pixel_id, config.access_token, payload)
 
@@ -457,6 +497,10 @@ async def test_cloak_report(
         data={
             "cloak_name": config.cloak_name,
             "is_enabled": config.is_enabled,
+            "report_phase": phase,
+            "report_event": report_event,
+            "report_value": report_value,
+            "report_currency": report_currency,
             "primary": primary_result,
             "backup": backup_result,
             "backup_skipped": backup_result is None,
