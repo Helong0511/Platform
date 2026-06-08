@@ -28,7 +28,7 @@ export function useCloakConfigs() {
   const editDialogVisible = ref(false);
   const testDialogVisible = ref(false);
   const testPhaseDialogVisible = ref(false);
-  const testPhase = ref('click');
+  const testPhase = ref('postback');
   const testPhaseTargetRow = ref(null);
   const testSubmitting = ref(false);
   const uploadDialogVisible = ref(false);
@@ -345,7 +345,7 @@ export function useCloakConfigs() {
 
   const handleTestReport = (row) => {
     testPhaseTargetRow.value = row;
-    testPhase.value = 'click';
+    testPhase.value = 'postback';
     testPhaseDialogVisible.value = true;
   };
 

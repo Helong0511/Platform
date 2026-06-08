@@ -308,7 +308,7 @@ class CloakConfigResponse(CloakConfigBase):
 class TestCloakReportRequest(BaseModel):
     """测试上报请求（事件名与金额按 report_phase 取自斗篷配置对应阶段）"""
     report_phase: Literal["load", "click", "postback"] = Field(
-        "click",
+        "postback",
         description="测试上报阶段：load=加载完成（载），click=点击跳转（点），postback=转化（转）",
     )
     adsid: str = Field("test-fbclid-123456", min_length=1, max_length=500, description="测试广告事件ID")

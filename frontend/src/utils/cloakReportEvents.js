@@ -2,11 +2,11 @@
  * Meta 标准事件与斗篷上报校验（与后端 app/schemas/cloak.py 一致）。
  */
 
-/** 测试上报可选阶段（默认 click = 点击跳转） */
+/** 测试上报可选阶段（默认 postback = 转化后上报） */
 export const CLOAK_TEST_REPORT_PHASES = [
+  { value: 'postback', label: 'Postback 转化上报（转）', short: '转' },
   { value: 'click', label: '点击跳转上报（点）', short: '点' },
   { value: 'load', label: '加载完成上报（载）', short: '载' },
-  { value: 'postback', label: 'Postback 转化上报（转）', short: '转' },
 ];
 
 export function getTestPhaseEventMeta(row, phase) {
