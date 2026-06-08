@@ -32,6 +32,11 @@ def _default_timeout() -> float:
     return max(5.0, float(settings.UPSTREAM_HTTP_TIMEOUT))
 
 
+def _is_retriable_http_status(status_code: int) -> bool:
+    """上游瞬时故障（5xx、限流）可重试；4xx 视为请求/凭证问题不重试。"""
+    return status_code == 429 or 500 <= status_code < 600
+
+
 def ensure_http_ok(response: httpx.Response, *, label: str = "API") -> None:
     if response.status_code != 200:
         text = (response.text or "")[:500]
@@ -84,7 +89,22 @@ async def _request_json(
                     params=params,
                     headers=headers,
                 )
-            ensure_http_ok(response, label=label)
+            if response.status_code != 200:
+                text = (response.text or "")[:500]
+                if _is_retriable_http_status(response.status_code) and attempt < attempts - 1:
+                    delay = _UPSTREAM_RETRY_DELAYS[min(attempt, len(_UPSTREAM_RETRY_DELAYS) - 1)]
+                    logger.warning(
+                        "%s HTTP %s (尝试 %s/%s)，%.0fs 后重试 body=%s",
+                        label,
+                        response.status_code,
+                        attempt + 1,
+                        attempts,
+                        delay,
+                        text[:100],
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                ensure_http_ok(response, label=label)
             json_data = parse_json_response(response, label=label)
             if attempt > 0:
                 logger.info("%s 第 %s 次重试成功", label, attempt + 1)
