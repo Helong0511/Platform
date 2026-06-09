@@ -5,7 +5,7 @@ Pomiad 上游 API 对接测试
 流程:
 1. POST /ys_data/login 获取 token
 2. GET  /ys_data/normal/api_data 获取站点列表（site_url）
-3. POST /ys_data/normal/data_detail 按 site_url + data_date 拉取明细
+3. POST /ys_data/normal/data_detail 按 site_url + data_date + is_by_country 拉取明细
 """
 import json
 import time
@@ -22,8 +22,8 @@ DATA_DETAIL_URL = f"{BASE_URL}/normal/data_detail"
 USERNAME = "Yic"
 PASSWORD = "Yic12356"
 
-API_DATA_LIMIT = 100
-TEST_DATES = ["2026-06-01", "2026-06-02"]
+API_DATA_LIMIT = 1000
+TEST_DATES = ["2026-06-06"]
 IS_BY_COUNTRY = 0
 FLOAT_DECIMALS = 6
 
@@ -316,9 +316,9 @@ def print_field_mapping_all(rows: list[dict]) -> None:
         calc_click = round(clicks / imps * 100, 2) if imps > 0 else 0.0      # 点击率 = 点击数/展示数
 
         mappings.append(normalize_numbers({
-            # --- 直接映射入库 ---
-            "date": row.get("data_date_f"),                              # 日期 ← data_date_f
-            "product_name": row.get("domain_name") or row.get("site"),   # 产品/站点 ← domain_name
+            # --- 直接映射入库（与 pomiad_task.POMIAD_FIELD_MAPPING / 前端 AdData 列一致）---
+            "date": row.get("data_date_f"),                              # 数据日期 ← data_date_f
+            "product_name": row.get("domain_name") or row.get("site"),   # 产品名称 ← domain_name / site
             "ad_unit": row.get("ad_unit_name"),                          # 广告单元 ← ad_unit_name
             "country_code": row.get("country_name") or row.get("country_code"),  # 国家 ← country_name
             "request_count": req,                                        # 请求数 ← ad_request
@@ -437,7 +437,7 @@ def find_sites_with_data(token: str) -> tuple[list[dict], str]:
 
 def main():
     print_config()
-    print("\n流程: login → api_data 获取 site_url 列表 → 按每个 site_url×日期 循环拉 data_detail")
+    print("\n流程: login → api_data(page/limit/start_at/end_at) → 按 site_url×日期 POST data_detail")
 
     token = login()
 

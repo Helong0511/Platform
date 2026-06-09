@@ -32,19 +32,22 @@ logger = logging.getLogger(__name__)
 # 应用时区（与配置 TIMEZONE 一致，用于日志与通知时间展示）
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
-# Pomiad API 字段 → 库表广告明细字段映射
+# Pomiad data_detail → 平台标准字段 → 前端 AdData 列表头（frontend/src/views/AdData.vue）
+# 格式：平台字段 → Pomiad API 字段 | 前端列名
 POMIAD_FIELD_MAPPING = {
-    "date": "data_date_f",
-    "ad_unit": "ad_unit_name",
-    "product_name": "domain_name",
-    "country_code": "country_name",
-    "request_count": "ad_request",
-    "match_count": "match_count",
-    "display_count": "imps",
-    "click_count": "clicks",
-    "revenue_before_deduct": "final_revenue",
-    "ecpm_before_deduct": "cpm",
-    "cpc": "cpc",
+    "date": "data_date_f",                    # 前端「数据日期」← data_date_f
+    "product_name": "domain_name",            # 前端「产品名称」← domain_name（空时回退 site）
+    "ad_unit": "ad_unit_name",                # 前端「广告单元」← ad_unit_name
+    "country_code": "country_name",           # 前端「国家」← country_name（展示为 country_name_zh）
+    "request_count": "ad_request",            # 前端「请求数」← ad_request
+    "match_count": "match_count",             # 前端「匹配数」← match_count
+    "display_count": "imps",                  # 前端「展示数」← imps
+    "click_count": "clicks",                  # 前端「点击数」← clicks
+    "revenue_before_deduct": "final_revenue", # 前端「收益」(管理员) ← final_revenue（分成后）
+    "ecpm_before_deduct": "cpm",              # 前端「eCPM」(管理员) ← cpm
+    "cpc": "cpc",                             # 前端「CPC」← cpc
+    # 未映射、入库后自动计算：覆盖率、展示率、点击率（coverage_rate / display_rate / click_rate）
+    # 未映射、按产品减扣比例计算：收益(扣)、eCPM(扣)（revenue_after_deduct / ecpm_after_deduct）
 }
 
 
