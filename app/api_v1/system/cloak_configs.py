@@ -4,6 +4,7 @@
 import logging
 import socket
 import time
+import uuid
 from typing import Optional
 
 import httpx
@@ -159,7 +160,7 @@ def _build_facebook_payload(
         "event_name": report_event,
         "event_time": current_ts,
         "action_source": "website",
-        "event_id": "cloak-test-event-id",
+        "event_id": f"cloak-sim-{uuid.uuid4()}",
         "user_data": user_data,
     }
     if report_event == "Purchase" and report_value is not None:
