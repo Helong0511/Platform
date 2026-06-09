@@ -57,6 +57,60 @@ from app.models.models import CountryInfo
 logger = logging.getLogger(__name__)
 
 
+def _pick_best_country_match(
+    countries: list[CountryInfo],
+    country_input: str,
+) -> Optional[CountryInfo]:
+    """多条命中时优先精确名称，否则取名称最长（更具体）的国家。"""
+    if not countries:
+        return None
+    if len(countries) == 1:
+        return countries[0]
+
+    inp = country_input.strip().lower()
+    for field in (
+        "country_name_en",
+        "official_name_en",
+        "country_name_zh",
+        "official_name_zh",
+    ):
+        exact = [
+            c for c in countries
+            if (getattr(c, field, None) or "").strip().lower() == inp
+        ]
+        if exact:
+            return max(exact, key=lambda c: len((getattr(c, field, None) or "")))
+
+    def _name_len(country: CountryInfo) -> int:
+        return max(
+            len(country.country_name_en or ""),
+            len(country.official_name_en or ""),
+            len(country.country_name_zh or ""),
+            len(country.official_name_zh or ""),
+        )
+
+    return max(countries, key=_name_len)
+
+
+async def _fetch_country_match(
+    db: AsyncSession,
+    query,
+    country_input: str,
+) -> Optional[CountryInfo]:
+    """执行国家查询；多条时不抛异常，选取最精确的一条。"""
+    result = await db.execute(query)
+    countries = list(result.scalars().all())
+    if not countries:
+        return None
+    if len(countries) > 1:
+        logger.debug(
+            "国家名称匹配到多条记录(%d)，输入=%r，将自动选取最精确项",
+            len(countries),
+            country_input,
+        )
+    return _pick_best_country_match(countries, country_input)
+
+
 def resolve_country_name(
     country_info: Optional[any],
     country_code: Optional[str] = None,
@@ -128,86 +182,76 @@ async def find_country_code_by_any_format(
     if not country_input:
         return None
     
-    # 按优先级顺序查询
+    # 按优先级顺序查询（模糊匹配可能命中多条，统一走 _fetch_country_match）
     # 1. 首先尝试 alpha_2_code（二字母代码）
     query = select(CountryInfo).where(CountryInfo.alpha_2_code == country_input.upper())
-    result = await db.execute(query)
-    country = result.scalar_one_or_none()
+    country = await _fetch_country_match(db, query, country_input)
     if country:
         return country.alpha_2_code
-    
+
     # 2. 尝试 alpha_3_code（三字母代码）
     query = select(CountryInfo).where(CountryInfo.alpha_3_code == country_input.upper())
-    result = await db.execute(query)
-    country = result.scalar_one_or_none()
+    country = await _fetch_country_match(db, query, country_input)
     if country:
         return country.alpha_2_code
-    
+
     # 3. 尝试 numeric_code（数字代码）
     query = select(CountryInfo).where(CountryInfo.numeric_code == country_input)
-    result = await db.execute(query)
-    country = result.scalar_one_or_none()
+    country = await _fetch_country_match(db, query, country_input)
     if country:
         return country.alpha_2_code
-    
+
     # 4. 尝试 country_name_en（英文名称，不区分大小写，支持部分匹配）
-    # 先尝试精确匹配
     query = select(CountryInfo).where(CountryInfo.country_name_en.ilike(country_input))
-    result = await db.execute(query)
-    country = result.scalar_one_or_none()
+    country = await _fetch_country_match(db, query, country_input)
     if country:
         return country.alpha_2_code
-    
-    # 如果精确匹配失败，尝试部分匹配（包含关系）
-    query = select(CountryInfo).where(CountryInfo.country_name_en.ilike(f"%{country_input}%"))
-    result = await db.execute(query)
-    country = result.scalar_one_or_none()
+
+    query = (
+        select(CountryInfo)
+        .where(CountryInfo.country_name_en.ilike(f"%{country_input}%"))
+        .order_by(func.length(CountryInfo.country_name_en).desc())
+    )
+    country = await _fetch_country_match(db, query, country_input)
     if country:
         return country.alpha_2_code
-    
+
     # 5. 尝试 official_name_en（官方英文名称）
     query = select(CountryInfo).where(CountryInfo.official_name_en.ilike(country_input))
-    result = await db.execute(query)
-    country = result.scalar_one_or_none()
+    country = await _fetch_country_match(db, query, country_input)
     if country:
         return country.alpha_2_code
-    
-    # 官方英文名称部分匹配
-    query = select(CountryInfo).where(CountryInfo.official_name_en.ilike(f"%{country_input}%"))
-    result = await db.execute(query)
-    country = result.scalar_one_or_none()
+
+    query = (
+        select(CountryInfo)
+        .where(CountryInfo.official_name_en.ilike(f"%{country_input}%"))
+        .order_by(func.length(CountryInfo.official_name_en).desc())
+    )
+    country = await _fetch_country_match(db, query, country_input)
     if country:
         return country.alpha_2_code
-    
+
     # 6. 尝试 country_name_zh（中文名称，先精确匹配，再模糊匹配）
-    # 先尝试精确匹配
     query = select(CountryInfo).where(CountryInfo.country_name_zh == country_input)
-    result = await db.execute(query)
-    country = result.scalar_one_or_none()
+    country = await _fetch_country_match(db, query, country_input)
     if country:
         return country.alpha_2_code
-    
-    # 如果精确匹配失败，尝试部分匹配（包含关系）
-    # 支持两种情况：
-    # 1. 输入值包含在数据库名称中：如 "孟加拉" 匹配 "孟加拉国"
-    # 2. 数据库名称包含在输入值中：如 "多米尼加共和国" 匹配 "多米尼加"
-    # 优先匹配最长的匹配项（按名称长度降序排序）
-    
-    # 情况1：输入值包含在数据库名称中（如 "孟加拉" 匹配 "孟加拉国"）
-    query = select(CountryInfo).where(CountryInfo.country_name_zh.like(f"%{country_input}%")).order_by(
-        func.length(CountryInfo.country_name_zh).desc()  # 按名称长度降序，优先匹配最长的
+
+    query = (
+        select(CountryInfo)
+        .where(CountryInfo.country_name_zh.like(f"%{country_input}%"))
+        .order_by(func.length(CountryInfo.country_name_zh).desc())
     )
-    result = await db.execute(query)
-    country = result.scalar_one_or_none()
+    country = await _fetch_country_match(db, query, country_input)
     if country:
         return country.alpha_2_code
-    
-    # 情况2：数据库名称包含在输入值中（如 "多米尼加共和国" 匹配 "多米尼加"）
-    query = select(CountryInfo).where(CountryInfo.country_name_zh.like(f"{country_input}%")).order_by(
-        func.length(CountryInfo.country_name_zh).desc()  # 按名称长度降序，优先匹配最长的
+
+    query = (
+        select(CountryInfo)
+        .where(CountryInfo.country_name_zh.like(f"{country_input}%"))
+        .order_by(func.length(CountryInfo.country_name_zh).desc())
     )
-    result = await db.execute(query)
-    country = result.scalar_one_or_none()
+    country = await _fetch_country_match(db, query, country_input)
     if country:
         return country.alpha_2_code
     
@@ -230,29 +274,27 @@ async def find_country_code_by_any_format(
     
     # 7. 尝试 official_name_zh（官方中文名称）
     query = select(CountryInfo).where(CountryInfo.official_name_zh == country_input)
-    result = await db.execute(query)
-    country = result.scalar_one_or_none()
+    country = await _fetch_country_match(db, query, country_input)
     if country:
         return country.alpha_2_code
-    
-    # 官方中文名称部分匹配
-    query = select(CountryInfo).where(CountryInfo.official_name_zh.like(f"%{country_input}%")).order_by(
-        func.length(CountryInfo.official_name_zh).desc()
+
+    query = (
+        select(CountryInfo)
+        .where(CountryInfo.official_name_zh.like(f"%{country_input}%"))
+        .order_by(func.length(CountryInfo.official_name_zh).desc())
     )
-    result = await db.execute(query)
-    country = result.scalar_one_or_none()
+    country = await _fetch_country_match(db, query, country_input)
     if country:
         return country.alpha_2_code
-    
-    # 8. 特殊处理：unknown 匹配 "未知区域"
-    if country_input.lower() == "unknown":
+
+    # 8. 特殊处理：unknown / n/a 匹配「未知区域」
+    if country_input.lower() in {"unknown", "n/a", "na"}:
         query = select(CountryInfo).where(
-            (CountryInfo.country_name_en.ilike("unknown")) | 
-            (CountryInfo.country_name_zh == "未知区域") |
-            (CountryInfo.alpha_2_code == "AA")
+            (CountryInfo.country_name_en.ilike("unknown"))
+            | (CountryInfo.country_name_zh == "未知区域")
+            | (CountryInfo.alpha_2_code == "AA")
         )
-        result = await db.execute(query)
-        country = result.scalar_one_or_none()
+        country = await _fetch_country_match(db, query, country_input)
         if country:
             return country.alpha_2_code
     

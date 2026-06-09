@@ -51,12 +51,17 @@ POMIAD_FIELD_MAPPING = {
 }
 
 
+# Pomiad 上游无国家维度时的占位值，清空后按「未提供国家」入库为 AA
+_POMIAD_EMPTY_COUNTRY_NAMES = frozenset({"n/a", "na", "unknown", "-", "none"})
+
+
 def preprocess_pomiad_rows(ad_data: list) -> list:
     """
-    Pomiad 行数据预处理：补全产品域名。
+    Pomiad 行数据预处理：补全产品域名、清洗无效国家名。
 
     当 domain_name 为空时，回退使用 API 返回的 site 字段作为域名，
-    保证入库时产品维度可关联。
+    保证入库时产品维度可关联。country_name 为 N/A 等占位值时清空，
+    避免模糊匹配触发多国冲突。
 
     参数:
         ad_data: fetch_pomiad_rows 返回的原始行列表（就地修改）
@@ -67,6 +72,9 @@ def preprocess_pomiad_rows(ad_data: list) -> list:
     for item in ad_data:
         if not str(item.get("domain_name") or "").strip():
             item["domain_name"] = (item.get("site") or "").strip()
+        country_name = str(item.get("country_name") or "").strip()
+        if country_name.lower() in _POMIAD_EMPTY_COUNTRY_NAMES:
+            item["country_name"] = ""
     return ad_data
 
 
