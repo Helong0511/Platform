@@ -1,7 +1,15 @@
-"""
-第三方上报日志API端点
-提供第三方上报日志的查询功能，仅管理员可访问
-"""
+"""第三方上报日志 API
+
+职责：查询 Meta/TikTok 等第三方 Conversions API 上报记录，用于斗篷与像素排错。
+
+权限：仅管理员（require_admin）。
+
+主要端点（前缀 /third-party-reports）：
+- GET /              分页列表
+- GET /{id}          单条详情
+- GET /stats         上报统计。
+
+说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。"""
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -35,7 +43,11 @@ logger = logging.getLogger(__name__)
 
 
 class UpdateReportLogParams(BaseModel):
-    """更新第三方上报日志参数模型"""
+    """
+    更新第三方上报日志参数模型
+    
+    更新请求体：字段均为可选，客户端仅提交需要修改的列。
+    """
     adsid: Optional[str] = Field(None, max_length=500, description="广告ID")
     event: Optional[str] = Field(None, max_length=50, description="事件类型")
     conversion_id: Optional[str] = Field(None, max_length=255, description="转化ID")
@@ -77,7 +89,9 @@ async def get_third_party_reports(
     - 状态（pending, success, failed）
     - 时间范围
     """
+    # ---------- 入口：参数与依赖准备 ----------
     started_at = perf_counter()
+    # ---------- 异常处理 ----------
     try:
         # 构建查询
         query = select(ThirdPartyReportLog)
@@ -85,19 +99,26 @@ async def get_third_party_reports(
 
         # 添加筛选条件
         filters = []
+        # ---------- 条件分支 ----------
         if source:
             filters.append(ThirdPartyReportLog.source == source)
+        # ---------- 条件分支 ----------
         if adsid:
             filters.append(ThirdPartyReportLog.adsid == adsid)
+        # ---------- 条件分支 ----------
         if event:
             filters.append(ThirdPartyReportLog.event == event)
+        # ---------- 条件分支 ----------
         if status:
             filters.append(ThirdPartyReportLog.status == status)
+        # ---------- 条件分支 ----------
         if start_date:
             filters.append(ThirdPartyReportLog.created_at >= start_date)
+        # ---------- 条件分支 ----------
         if end_date:
             filters.append(ThirdPartyReportLog.created_at <= end_date)
 
+        # ---------- 条件分支 ----------
         if filters:
             query = query.where(and_(*filters))
             count_query = count_query.where(and_(*filters))
@@ -124,8 +145,10 @@ async def get_third_party_reports(
         # 转换为响应模型
         serialize_started_at = perf_counter()
         log_responses = []
+        # ---------- 循环处理 ----------
         for log in logs:
             item = ThirdPartyReportLogListResponse.model_validate(log).model_dump()
+            # ---------- 条件分支 ----------
             if log.report_params:
                 preview = log.report_params[:120]
                 item["report_params_preview"] = f"{preview}..." if len(log.report_params) > 120 else preview
@@ -186,11 +209,15 @@ async def get_third_party_report_stats(
     - 各来源数量
     - 各事件类型数量
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         # 基础筛选条件
         filters = []
+        # ---------- 条件分支 ----------
         if start_date:
             filters.append(ThirdPartyReportLog.created_at >= start_date)
+        # ---------- 条件分支 ----------
         if end_date:
             filters.append(ThirdPartyReportLog.created_at <= end_date)
 
@@ -267,7 +294,10 @@ async def get_third_party_report(
         current_user: User = Depends(require_admin)
 ):
     """
-    获取第三方上报日志详情
+    按 ID 获取单条第三方上报日志详情。
+
+    权限：仅管理员。
+    含上报参数、响应状态、重试次数等调试信息。
     """
     try:
         # 查询日志
@@ -311,8 +341,13 @@ async def update_third_party_report(
         current_user: User = Depends(require_admin)
 ):
     """
-    更新第三方上报日志参数
+    更新第三方上报日志的上报参数。
+
+    权限：仅管理员。
+    可修改 adsid、event、conversion_id 等字段；变更写审计日志。
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         success = await update_report_log_params(
             log_id=log_id,
@@ -329,6 +364,7 @@ async def update_third_party_report(
             use_hash=params.use_hash
         )
         
+        # ---------- 条件分支 ----------
         if not success:
             raise_api_exception(
                 ErrorCode.RESOURCE_NOT_FOUND,
@@ -374,11 +410,17 @@ async def retry_third_party_report(
         current_user: User = Depends(require_admin)
 ):
     """
-    重新上报第三方上报日志
+    对失败的第三方上报记录执行手动重试。
+
+    权限：仅管理员。
+    触发重新上报并更新日志状态；操作写审计日志。
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         success = await retry_report_log(log_id)
         
+        # ---------- 条件分支 ----------
         if not success:
             raise_api_exception(
                 ErrorCode.RESOURCE_NOT_FOUND,

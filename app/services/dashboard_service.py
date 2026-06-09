@@ -1,6 +1,16 @@
 """
-仪表盘统计服务层
-封装仪表盘统计和趋势分析的业务逻辑
+仪表盘统计服务层。
+
+功能说明：
+- 封装管理端首页的核心 KPI：产品数、客户数、广告量、收入趋势等
+- 按角色过滤可见范围；热点查询结果缓存 5 分钟减轻 DB 压力
+
+在系统中的位置：
+- 被 ``app.api_v1`` Dashboard 路由调用；依赖 ``app.core.cache`` 与 ``query_utils``
+
+注意事项：
+1. 客户用户仅统计已分配产品相关数据
+2. 趋势图日期序列须补全缺失日期，避免折线断裂
 """
 import logging
 from datetime import timedelta
@@ -20,9 +30,15 @@ logger = logging.getLogger(__name__)
 
 
 class DashboardService:
-    """仪表盘统计服务"""
+    """
+    仪表盘统计服务。
+
+    所有公开方法均接受 current_user，在 SQL 层完成数据隔离；
+    聚合字段与前端 StatsCards / 趋势图组件字段一一对应。
+    """
 
     def __init__(self, db: AsyncSession):
+        """注入异步数据库会话。"""
         self.db = db
 
     async def get_dashboard_stats(
@@ -31,14 +47,17 @@ class DashboardService:
             current_user: User
     ) -> Dict[str, Any]:
         """
-        获取仪表盘统计数据
+        获取仪表盘核心指标卡片数据（含环比趋势）。
+
+        流程：读缓存 → 解析周期起止日期 → 聚合当前周期 → 聚合上一周期 →
+        计算各指标环比% → 按角色组装 stats 列表与 ROI。
 
         Args:
-            period: 时间周期（day, week, month, last_month）
-            current_user: 当前用户
+            period: 时间周期，支持 day / week / month / last_month
+            current_user: 当前登录用户（决定数据可见范围）
 
         Returns:
-            Dict: 统计数据
+            含 stats（指标卡片列表）与 metrics（total_revenue、roi）的字典
         """
         # ====== 缓存优化 ======
         # 生成缓存键（包含用户ID和周期）
@@ -76,7 +95,8 @@ class DashboardService:
                 detail=f"无效的时间周期参数: {period}，支持: day, week, month, last_month"
             )
 
-        # 构建查询
+        # ====== 当前周期聚合查询 ======
+        # 覆盖率/展示率/CTR 优先取行均值，无数据时按总量反算百分比
         query = select(
             func.cast(func.sum(AdData.request_count), Float).label('total_requests'),
             func.sum(AdData.match_count).label('total_matches'),
@@ -147,7 +167,7 @@ class DashboardService:
             await set_cached(cache_key, response_data, ttl=60)
             return response_data
 
-        # 计算上一周期日期范围
+        # ====== 上一周期日期范围（用于环比趋势） ======
         if period == "day":
             start_date_prev = start_date - timedelta(days=1)
             end_date_prev = end_date - timedelta(days=1)
@@ -164,7 +184,7 @@ class DashboardService:
             end_date_prev = first_day_of_last_month - timedelta(days=1)
             start_date_prev = first_day_of_two_months_ago
 
-        # 查询上一周期数据
+        # ====== 上一周期聚合（字段与当前周期保持一致） ======
         query_prev = select(
             func.cast(func.sum(AdData.request_count), Float).label('total_requests'),
             func.sum(AdData.match_count).label('total_matches'),
@@ -220,8 +240,9 @@ class DashboardService:
         result_prev = await self.db.execute(query_prev)
         result_prev = result_prev.first()
 
-        # 计算趋势百分比
+        # ====== 环比趋势：上一周期为 0 时，当前>0 记为 +100% ======
         def calculate_trend(current, previous):
+            """环比涨跌幅（%）；上一周期为 0 时当前>0 记为 +100%。"""
             current = float(current or 0)
             previous = float(previous or 0)
             if previous == 0:
@@ -320,7 +341,7 @@ class DashboardService:
         else:
             stats_data = base_stats
 
-        # 计算ROI
+        # ROI = 减扣后总收益 / 总请求数 × 1000（千次请求收益）
         total_revenue = round(float(result.total_revenue_deducted or 0), 2) if (
                 result and result.total_revenue_deducted) else 0.0
         total_requests = float(result.total_requests or 0) if result else 0.0
@@ -346,14 +367,16 @@ class DashboardService:
             days: int = 7
     ) -> Dict[str, Any]:
         """
-        获取最近的广告数据
+        获取最近 N 天各产品广告表现排行（按减扣后收益降序，最多 10 条）。
+
+        异常时返回空列表而非抛错，避免仪表盘整页失败。
 
         Args:
             current_user: 当前用户
-            days: 查询天数（默认7天）
+            days: 回溯天数，默认 7
 
         Returns:
-            Dict: 广告数据
+            含 ads（产品列表）与 summary（汇总计数）的字典
         """
         try:
             # 查询最近N天的数据
@@ -457,14 +480,17 @@ class DashboardService:
             current_user: User
     ) -> Dict[str, Any]:
         """
-        获取趋势数据
+        获取趋势折线图时序数据。
+
+        日视图按小时聚合（%H:00）；周/月/上月按自然日聚合。
+        转化数序列固定为 0（AdData 表无 conversion_count 字段，占位供前端图例）。
 
         Args:
-            period: 时间周期（day, week, month, last_month）
+            period: 时间周期（day / week / month / last_month）
             current_user: 当前用户
 
         Returns:
-            Dict: 趋势数据
+            含 dates 与各指标 series 的字典
         """
         # ====== 缓存优化 ======
         cache_key = generate_cache_key("dashboard_trends", period, current_user.id)

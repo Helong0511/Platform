@@ -1,6 +1,12 @@
-"""
-广告主管理 API
-"""
+"""广告主（上游）管理 API 路由模块。
+
+提供广告主 CRUD 接口，业务逻辑委托 AdvertiserService 处理，
+路由层仅负责参数校验、权限注入与响应序列化。
+
+路由前缀：/api/v1/cpl/advertisers（由上层 router 挂载）
+权限：创建/更新/删除/详情需管理员；列表接口按当前用户数据权限过滤。
+
+说明：CPL 子系统接口，涵盖广告主（上游）、渠道（下游）、Offer、Cap、扣量与转化。"""
 import logging
 from typing import Optional
 
@@ -29,7 +35,13 @@ async def create_advertiser(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """创建广告主（已重构使用服务层）"""
+    """
+    创建广告主（上游）。
+
+    权限：仅管理员。
+    请求体：AdvertiserCreate，包含名称、联系方式、上游 Tracklink 等字段。
+    业务：委托 AdvertiserService 完成字段校验、唯一性检查、入库及审计日志记录。
+    """
     # 使用服务层（业务逻辑在AdvertiserService中）
     advertiser_service: AdvertiserService = await get_advertiser_service(db)
 
@@ -53,7 +65,13 @@ async def get_advertisers(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """获取广告主列表（已重构使用服务层）"""
+    """
+    分页获取广告主列表。
+
+    权限：登录用户；非管理员仅能看到有数据权限的广告主。
+    筛选：支持关键词搜索（名称/ID）、is_active 状态过滤。
+    分页：page、page_size 参数，page_size 上限受 MAX_PAGE_SIZE 约束。
+    """
     # 使用服务层（业务逻辑在AdvertiserService中）
     advertiser_service: AdvertiserService = await get_advertiser_service(db)
     advertisers, total = await advertiser_service.get_advertisers(
@@ -81,7 +99,13 @@ async def get_advertiser(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """获取广告主详情（已重构使用服务层）"""
+    """
+    按 ID 获取单个广告主详情。
+
+    权限：仅管理员。
+    路径参数：advertiser_id 为正整数。
+    不存在或无权访问时由服务层抛出业务异常。
+    """
     # 使用服务层（业务逻辑在AdvertiserService中）
     advertiser_service: AdvertiserService = await get_advertiser_service(db)
     advertiser = await advertiser_service.get_advertiser_by_id(advertiser_id, current_user)
@@ -99,7 +123,13 @@ async def update_advertiser(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """更新广告主（已重构使用服务层）"""
+    """
+    更新广告主信息。
+
+    权限：仅管理员。
+    请求体：AdvertiserUpdate，仅提交需变更的字段（exclude_unset）。
+    业务：服务层负责字段校验、关联缓存失效及审计日志。
+    """
     # 使用服务层（业务逻辑在AdvertiserService中）
     advertiser_service: AdvertiserService = await get_advertiser_service(db)
 
@@ -121,7 +151,13 @@ async def delete_advertiser(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """删除广告主（已重构使用服务层）"""
+    """
+    删除广告主。
+
+    权限：仅管理员。
+    业务：服务层会检查是否仍有关联 Offer/转化等数据，有关联时拒绝删除。
+    成功删除后记录审计日志。
+    """
     # 使用服务层（业务逻辑在AdvertiserService中）
     advertiser_service: AdvertiserService = await get_advertiser_service(db)
 

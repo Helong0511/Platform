@@ -1,7 +1,10 @@
 """
-缓存工具模块
-提供查询结果缓存功能，使用 Redis 作为缓存后端
-如果 Redis 不可用，则跳过缓存（不影响功能）
+查询结果缓存工具模块。
+
+职责：为业务查询提供 Redis 键值缓存（命中则跳过 DB/计算），Redis 不可用时静默降级、不影响主流程。
+
+在系统中的位置：``app.core.cache``，被 Dashboard、统计类 API 等通过 ``@cache_query`` 或
+``get_or_set_cache`` 调用；底层依赖 ``app.core.redis_client``。
 """
 from app.core.redis_client import get_redis_client
 import json
@@ -125,9 +128,12 @@ def cache_query(ttl: int = DEFAULT_TTL, key_prefix: str = ""):
             return stats
     """
     def decorator(func: Callable) -> Callable:
+        """将异步查询函数包装为带 Redis 缓存的版本。"""
+
         @wraps(func)
         async def wrapper(*args, **kwargs):
-            # 生成缓存键
+            """执行缓存读 → 未命中则调用原函数 → 写回缓存。"""
+            # ---------- 生成缓存键 ----------
             cache_key = generate_cache_key(
                 key_prefix or func.__name__,
                 *args,

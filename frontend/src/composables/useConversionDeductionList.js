@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 扣减配置列表
+ * @file composables/useConversionDeductionList.js
+ */
 import { reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
@@ -13,12 +17,19 @@ import { logger } from '../utils/logger';
 /**
  * 转化扣减配置列表、筛选、分页与批量操作。
  */
+/**
+ * 组合式函数 - 扣减配置列表
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useConversionDeductionList() {
+  // 数据加载中
   const loading = ref(false);
   const tableData = ref([]);
+  // selectedConfigs 响应式状态
   const selectedConfigs = ref([]);
   const advertiserList = ref([]);
 
+  // 筛选表单字段
   const searchForm = reactive({
     keyword: '',
     level: null,
@@ -26,6 +37,7 @@ export function useConversionDeductionList() {
     is_active: null,
   });
 
+  // 分页状态 { page, pageSize/page_size, total }
   const pagination = reactive({
     page: 1,
     page_size: 20,

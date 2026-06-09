@@ -1,5 +1,17 @@
 """
 Postback 下游转发日志查询与补发服务。
+
+功能说明：
+- 分页查询 PostbackForwardLog，支持按转化、产品、渠道、成功状态及日期筛选
+- 根据历史转发日志手动触发补发，将转化再次转发至下游渠道（Publisher）
+- 为 API 层提供 list / resend 两套命名别名，底层逻辑共用
+
+在系统中的位置：
+- 被管理端转发日志 API 调用；补发委托 ``PostbackForwarder``
+
+注意事项：
+1. 补发须记录新日志行，保留原始失败记录审计
+2. 重复补发前检查下游是否已成功接收，避免重复计费
 """
 import logging
 from datetime import timedelta
@@ -22,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 
 class PostbackForwardLogService:
+    """Postback 下游转发日志的查询与手动补发业务层。"""
+
     async def list_forward_logs(
         self,
         *,
@@ -36,6 +50,23 @@ class PostbackForwardLogService:
         db: AsyncSession,
         current_user: User,
     ):
+        """
+        分页查询下游转发日志。
+
+        Args:
+            conversion_id: 关联转化主键，可选。
+            product_id: 产品 ID 筛选，可选。
+            publisher_id: 渠道（Publisher）ID 筛选，可选。
+            success: 转发是否成功，None 表示不限。
+            start_date: 起始日期 YYYY-MM-DD，按应用时区解析。
+            end_date: 结束日期 YYYY-MM-DD，含当日全天。
+            page / page_size: 分页参数。
+            db: 异步数据库会话。
+            current_user: 当前登录用户（用于审计上下文，查询本身不做额外权限分支）。
+
+        Returns:
+            PaginatedResponseBaseSchema，data 为 PostbackForwardLogResponse 列表。
+        """
         try:
             conditions = []
             if conversion_id:
@@ -47,6 +78,7 @@ class PostbackForwardLogService:
             if success is not None:
                 conditions.append(PostbackForwardLog.success == success)
 
+            # 日期范围：结束日采用「次日零点前」左闭右开，避免漏掉当天记录
             if start_date:
                 try:
                     start_dt = parse_date_to_app_timezone(start_date, is_end_date=False)
@@ -105,6 +137,20 @@ class PostbackForwardLogService:
         db: AsyncSession,
         current_user: User,
     ):
+        """
+        根据转发日志 ID 手动补发 Postback 至下游渠道。
+
+        从日志还原 conversion_id，加载转化记录后调用 PostbackForwarder。
+        仅支持 publisher_id 目标；产品级下游转发已废弃。
+
+        Args:
+            forward_log_id: PostbackForwardLog 主键。
+            db: 异步数据库会话。
+            current_user: 操作人，写入 info 日志。
+
+        Returns:
+            ResponseBaseSchema，data 含 message、forward_log_id、conversion_id。
+        """
         try:
             result = await db.execute(
                 select(PostbackForwardLog).where(PostbackForwardLog.id == forward_log_id)
@@ -177,6 +223,11 @@ class PostbackForwardLogService:
         db: AsyncSession,
         current_user: User,
     ):
+        """
+        API 路由别名：分页查询转发日志，委托 list_forward_logs。
+
+        request 参数保留以兼容路由签名，当前未使用。
+        """
         return await self.list_forward_logs(
             conversion_id=conversion_id,
             product_id=product_id,
@@ -196,6 +247,7 @@ class PostbackForwardLogService:
         db: AsyncSession,
         current_user: User,
     ):
+        """API 路由别名：补发转发，委托 resend_forward。"""
         return await self.resend_forward(
             forward_log_id=forward_log_id,
             db=db,

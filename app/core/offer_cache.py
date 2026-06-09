@@ -1,6 +1,9 @@
 """
-Offer信息缓存模块（高并发优化）
-缓存Offer的advertiser_id映射，减少数据库查询
+Offer 信息 Redis 缓存模块。
+
+职责：缓存 offer_id → advertiser_id 等热点字段，降低 Postback/Tracklink 链路中的 DB 查询。
+
+在系统中的位置：``app.core.offer_cache``，由转化处理与 ``cache_manager`` 预热/失效逻辑调用。
 """
 import logging
 import json

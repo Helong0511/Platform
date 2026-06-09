@@ -1,12 +1,13 @@
 """
-转化扣减配置管理服务层
-封装扣减配置的业务逻辑
+转化扣减（CPL）配置管理服务层。
 
-重构说明:
-- 提取公共验证逻辑
-- 优化数据库查询
-- 改进错误处理和日志记录
-- 添加配置缓存失效机制
+职责：
+- 广告主 / Offer / 渠道三级扣减配置 CRUD、批量启停与删除
+- 扣减日志分页查询、按维度聚合统计
+- 配置变更后失效 Redis 缓存（cpl:deduction_config:*）
+- API 响应转换与 Excel 导出行映射
+
+扣减类型：扣量（volume）与扣金额（amount）；各层级同时仅允许一条激活配置。
 """
 from typing import Optional, List, Dict, Any, Tuple, Literal
 from datetime import datetime, timedelta
@@ -44,12 +45,14 @@ ConfigLevel = Literal['advertiser', 'offer', 'publisher']
 
 class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
     """
-    转化扣减配置服务
-    
-    提供扣减配置的CRUD操作、日志查询和统计功能
+    CPL 转化扣减配置服务。
+
+    配置按 advertiser_id / offer_id / publisher_id 三选一绑定层级；
+    私有方法负责目标存在性校验、重复激活检查、字段组装与缓存失效。
     """
 
     def __init__(self, db: AsyncSession):
+        """注入数据库会话并绑定 ConversionDeductionConfig 模型。"""
         super().__init__(db, ConversionDeductionConfig)
 
     async def _validate_target_exists(
@@ -204,14 +207,17 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             current_user: User
     ) -> ConversionDeductionConfig:
         """
-        创建扣减配置
+        创建扣减配置。
+
+        须至少启用扣量或扣金额之一；同一层级目标不可存在第二条激活配置。
+        创建成功后失效对应缓存并 joinedload 关联名称。
 
         Args:
-            config_data: 扣减配置数据
+            config_data: 含 level、target_id 及扣减参数字段
             current_user: 当前用户
 
         Returns:
-            ConversionDeductionConfig: 创建的扣减配置对象
+            新建的扣减配置对象（含关联广告主/Offer/渠道）
         """
         # 验证至少启用一种扣减方式
         if not config_data.get('enable_volume_deduction') and not config_data.get('enable_amount_deduction'):
@@ -304,18 +310,21 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             advertiser_id: Optional[int] = None
     ) -> Tuple[List[ConversionDeductionConfig], int]:
         """
-        获取扣减配置列表
+        分页查询扣减配置列表。
+
+        level 通过对应 ID 字段非空判断层级；advertiser_id 筛选同时覆盖
+        广告主级配置及其下属 Offer 配置。keyword 在内存中按 target_name 过滤。
 
         Args:
             page: 页码
             page_size: 每页数量
-            level: 配置层级过滤
-            is_active: 状态过滤
-            keyword: 搜索关键词
-            advertiser_id: 广告主ID过滤
+            level: advertiser / offer / publisher
+            is_active: 启用状态
+            keyword: 目标名称关键词
+            advertiser_id: 广告主 ID（含其 Offer 子配置）
 
         Returns:
-            Tuple[List[ConversionDeductionConfig], int]: (扣减配置列表, 总数)
+            (配置列表, 总条数)
         """
         # 构建查询
         query = select(ConversionDeductionConfig)
@@ -333,10 +342,8 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
         if is_active is not None:
             conditions.append(ConversionDeductionConfig.is_active == is_active)
 
+        # ====== 广告主筛选：本级配置 + 其下属 Offer 配置 ======
         if advertiser_id:
-            # 对于广告主级别的配置，直接筛选advertiser_id
-            # 对于Offer级别的配置，需要通过join来筛选
-            # 这里简化处理，只筛选广告主级别的配置和相关的Offer配置
             advertiser_conditions = []
             # 广告主级别的配置
             advertiser_conditions.append(ConversionDeductionConfig.advertiser_id == advertiser_id)
@@ -422,15 +429,17 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             current_user: User
     ) -> ConversionDeductionConfig:
         """
-        更新扣减配置
+        更新扣减配置字段（不可变更 level / target_id）。
+
+        提交后按原层级失效缓存并重新加载关联信息。
 
         Args:
-            config_id: 配置ID
-            update_data: 更新数据
+            config_id: 配置 ID
+            update_data: 待更新字段字典
             current_user: 当前用户
 
         Returns:
-            ConversionDeductionConfig: 更新后的扣减配置对象
+            更新后的配置对象
         """
         config = await self.get_deduction_config_by_id(config_id)
         if not config:
@@ -608,15 +617,17 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             current_user: User
     ) -> int:
         """
-        批量更新扣减配置状态
+        批量启用或禁用扣减配置。
+
+        使用单条 UPDATE 语句；逐条失效各配置对应缓存。
 
         Args:
-            config_ids: 配置ID列表
-            is_active: 是否激活
+            config_ids: 配置 ID 列表
+            is_active: 目标启用状态
             current_user: 当前用户
 
         Returns:
-            int: 成功更新的数量
+            成功更新的条数
         """
         if not config_ids:
             raise_api_exception(
@@ -776,20 +787,23 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             publisher_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        获取扣减统计
+        聚合扣减日志统计（默认近 30 天）。
+
+        汇总 original/deducted/final 的数量与金额，并计算扣量/扣金额比例；
+        group_by 为 advertiser/offer/publisher 时返回分项 items 列表。
 
         Args:
-            start_date: 开始日期（YYYY-MM-DD）
-            end_date: 结束日期（YYYY-MM-DD）
-            group_by: 分组方式
-            advertiser_id: 广告主ID过滤
-            offer_id: Offer ID过滤
-            publisher_id: 渠道ID过滤
+            start_date: 开始日期 YYYY-MM-DD
+            end_date: 结束日期 YYYY-MM-DD（含当日）
+            group_by: 分组维度（time 或未指定则仅返回汇总）
+            advertiser_id: 广告主过滤
+            offer_id: Offer 过滤
+            publisher_id: 渠道过滤
 
         Returns:
-            Dict: 扣减统计数据
+            汇总指标及可选 items 分组列表
         """
-        # 解析日期
+        # 解析日期范围（end_date 取次日零点作为上界）
         if start_date:
             start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         else:
@@ -837,7 +851,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
         volume_deduction_ratio = deducted_volume / original_volume if original_volume > 0 else 0.0
         amount_deduction_ratio = deducted_amount / original_amount if original_amount > 0 else 0.0
 
-        # 分组统计（根据group_by参数实现分组）
+        # ====== 按广告主/Offer/渠道维度分组聚合 ======
         items = []
         if group_by and group_by != 'time':
             # 根据分组方式构建分组查询
@@ -912,21 +926,24 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
             click_id: Optional[str] = None
     ) -> Tuple[List[ConversionDeductionLog], int]:
         """
-        获取扣减日志
+        分页查询扣减执行日志。
+
+        支持日期范围及广告主/Offer/渠道/转化/点击 ID 筛选；
+        默认按 created_at 降序，joinedload 关联名称。
 
         Args:
             page: 页码
             page_size: 每页数量
-            start_date: 开始日期（YYYY-MM-DD）
-            end_date: 结束日期（YYYY-MM-DD）
-            advertiser_id: 广告主ID过滤
-            offer_id: Offer ID过滤
-            publisher_id: 渠道ID过滤
-            conversion_id: 转化ID过滤
-            click_id: 点击ID过滤
+            start_date: 开始日期 YYYY-MM-DD
+            end_date: 结束日期 YYYY-MM-DD
+            advertiser_id: 广告主 ID
+            offer_id: Offer ID
+            publisher_id: 渠道 ID
+            conversion_id: 转化 ID
+            click_id: 点击 ID
 
         Returns:
-            Tuple[List[ConversionDeductionLog], int]: (扣减日志列表, 总数)
+            (日志列表, 总条数)
         """
         # 解析日期
         conditions = []
@@ -978,6 +995,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
     def to_config_response(
             config: ConversionDeductionConfig,
     ) -> ConversionDeductionConfigResponse:
+        """将 ORM 配置转为 API 响应，并填充 level、target_id、target_name。"""
         config_data = ConversionDeductionConfigResponse.model_validate(config)
         if config.advertiser:
             config_data.target_name = config.advertiser.advertiser_name
@@ -999,10 +1017,12 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
     def to_config_response_list(
             self, configs: List[ConversionDeductionConfig]
     ) -> List[ConversionDeductionConfigResponse]:
+        """批量转换配置列表为 API 响应。"""
         return [self.to_config_response(c) for c in configs]
 
     @staticmethod
     def to_log_response(log: ConversionDeductionLog) -> ConversionDeductionLogResponse:
+        """将扣减日志 ORM 转为 API 响应，附加关联名称字段。"""
         log_data = ConversionDeductionLogResponse.model_validate(log)
         if log.advertiser:
             log_data.advertiser_name = log.advertiser.advertiser_name
@@ -1015,10 +1035,12 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
     def to_log_response_list(
             self, logs: List[ConversionDeductionLog]
     ) -> List[ConversionDeductionLogResponse]:
+        """将扣量日志 ORM 列表批量转为 API 响应 Schema 列表。"""
         return [self.to_log_response(log) for log in logs]
 
     @staticmethod
     def config_to_export_row(config: ConversionDeductionConfig) -> Dict[str, Any]:
+        """将单条配置转为 Excel 导出行（中文列名）。"""
         level_name = ""
         target_name = ""
         if config.advertiser:
@@ -1067,6 +1089,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
         }
 
     def log_to_export_row(self, log: ConversionDeductionLog) -> Dict[str, Any]:
+        """将单条扣减日志转为 Excel 导出行。"""
         log_response = self.to_log_response(log)
         strategy_map = {
             "random": "随机",
@@ -1099,6 +1122,7 @@ class ConversionDeductionService(BaseService[ConversionDeductionConfig]):
 
     @staticmethod
     def stats_to_export_rows(stats: DeductionStatsResponse) -> List[Dict[str, Any]]:
+        """将统计数据转为 Excel 导出行列表（首行为汇总，其余为分组项）。"""
         data = [
             {
                 "类型": "汇总",

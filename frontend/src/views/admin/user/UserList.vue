@@ -1,11 +1,20 @@
 <!--
-用户列表组件
-从 UserManagement.vue 拆分
+  用户列表子组件（UserList.vue）
+
+  从 UserManagement.vue 拆分，负责：
+  1. 筛选区：关键词搜索、角色、状态过滤
+  2. 用户表格：分页展示，支持列显隐
+  3. 行操作：编辑、禁用/启用、删除（由父组件处理弹窗）
+
+  通过 props/emit 与父组件通信。
 -->
 <template>
+  <!-- 页面根容器 -->
   <div class="user-list-container">
     <!-- 筛选 -->
+    <!-- 筛选区 -->
     <el-card class="filter-card">
+      <!-- 表单区域 -->
       <el-form :model="filterForm" :inline="true" size="default">
         <el-form-item label="搜索">
           <el-input
@@ -51,7 +60,8 @@
         </el-button>
       </div>
 
-      <el-table v-loading="loading" :data="users" border stripe>
+      <!-- 数据表格 -->
+    <el-table v-loading="loading" :data="users" border stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="username" label="用户名" min-width="150" />
         <el-table-column prop="full_name" label="全名" min-width="120" />

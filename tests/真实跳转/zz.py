@@ -1,15 +1,9 @@
-# ==============================
-# wxPython 跳转链分析工具（最终完整版）
-# 功能：
-# 1. 真实浏览器抓跳转（Playwright）
-# 2. 只保留“文档跳转”（过滤JS/CSS等资源）
-# 3. 域名解析 + 去重
-# 4. 清晰输出（原始URL / 跳转次数 / 域名链）
-# ==============================
+"""
+wxPython + Playwright 跳转链分析工具。
 
-# 安装：
-# pip install wxPython playwright
-# python -m playwright install chromium
+功能：真实浏览器抓取文档级跳转链、域名去重、输出原始 URL 与跳转次数。
+依赖：pip install wxPython playwright && python -m playwright install chromium
+"""
 
 import wx
 from urllib.parse import urlparse

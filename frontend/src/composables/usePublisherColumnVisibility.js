@@ -1,7 +1,15 @@
+/**
+ * 组合式函数 - 渠道表格列显隐
+ * @file composables/usePublisherColumnVisibility.js
+ */
 import { useTableColumnVisibility } from './useTableColumnVisibility';
 
 const STORAGE_KEY = 'publisherManagement_columnVisibility';
 
+/**
+ * 组合式函数 - 渠道表格列显隐
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function usePublisherColumnVisibility() {
   return useTableColumnVisibility(STORAGE_KEY, {
     getDefaultColumns: () => ({

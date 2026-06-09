@@ -1,6 +1,9 @@
 """
-权限缓存模块
-提供用户权限信息的缓存功能，减少数据库查询
+用户权限 Redis 缓存模块。
+
+职责：缓存用户角色、client_id、api_enabled 等鉴权字段，减少每次请求的 User 表查询。
+
+在系统中的位置：``app.core.permission_cache``，由 ``security.get_current_user`` 链路调用。
 """
 import logging
 import json

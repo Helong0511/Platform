@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - Postback 列显隐
+ * @file composables/usePostbackColumnVisibility.js
+ */
 import { useTableColumnVisibility } from './useTableColumnVisibility';
 
 const STORAGE_KEY = 'postbackManagement_columnVisibility';
@@ -5,6 +9,10 @@ const STORAGE_KEY = 'postbackManagement_columnVisibility';
 /**
  * Postback 转化列表列显示偏好（localStorage）。
  * @param {import('vue').ComputedRef<boolean>} isAdmin
+ */
+/**
+ * 组合式函数 - Postback 列显隐
+ * @returns {Object} 响应式状态与业务操作方法
  */
 export function usePostbackColumnVisibility(isAdmin) {
   return useTableColumnVisibility(STORAGE_KEY, {

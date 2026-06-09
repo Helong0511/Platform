@@ -1,5 +1,19 @@
 """
-短链接重定向工具函数
+短链接重定向工具函数模块。
+
+功能说明：
+- ``resolve_offer_id``：按主键或上游 Offer ID 解析 Offer 与广告主，并回写 Offer 缓存
+- ``offer_id_from_numeric_dp``：斗篷场景下纯数字 dp 与平台 Offer 主键对齐
+- ``resolve_cloak_click_offer_and_publisher``：/report 写入 clicks 时的 offer、渠道归因
+- ``resolve_default_publisher_for_offer``：短链未绑渠道时按产品分配回退 publisher
+- ``create_click_record``：异步创建点击记录（Redis 队列或 BackgroundTasks）
+
+在系统中的位置：
+- 被 ``handlers``、斗篷 report/change 等模块复用；点击持久化委托 ``app.core.tracking.click_persist``
+
+注意事项：
+1. Offer 查询失败时返回 (None, None)，调用方需处理无归因场景
+2. 渠道回退取 is_active 分配中 id 最小的一条，保证结果稳定可预期
 """
 import logging
 from typing import Optional

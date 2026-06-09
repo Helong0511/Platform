@@ -1,5 +1,12 @@
+<!--
+  客户通知配置弹窗
+  @file components/admin/ClientNotificationConfigDialog.vue
+-->
 <template>
-  <el-dialog
+  <!-- 页面主模板 -->
+<!-- 弹窗区域 -->
+<!-- 弹窗 -->
+    <el-dialog
     v-model="visible"
     :title="`${clientName} - 通知配置`"
     :width="isMobile ? '95%' : '800px'"
@@ -7,6 +14,7 @@
     @close="handleClose"
     append-to-body
   >
+    <!-- 表单区域 -->
     <el-form
       ref="formRef"
       :model="formData"

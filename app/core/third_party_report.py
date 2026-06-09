@@ -219,6 +219,7 @@ async def send_third_party_report(
         raise ValueError(error_msg)
 
     async def _mark_failed_and_raise(error_msg: str):
+        """将上报日志标为 failed 后抛出 ValueError，供上层中断流程。"""
         logger.error(f"[第三方上报] {error_msg}")
         await update_report_log(
             report_log_id,
@@ -659,7 +660,8 @@ async def retry_report_log(log_id: int):
             
             # 创建一个后台任务来发送上报
             async def background_send():
-                # 优先使用log_entry中的currency和amount字段
+                """后台重试：从日志条目解析金额/币种后再次调用第三方上报 API。"""
+                # ---------- 解析金额与币种 ----------
                 currency = log_entry.currency or "USD"
                 amount = log_entry.amount or 0.0
                 

@@ -1,3 +1,8 @@
+"""
+平台客户端 API 签名联调脚本（/api/v1 外部接口）。
+
+使用 client_id + secret_key + req_time 生成 MD5 签名，请求广告数据等受保护端点。
+"""
 import hashlib
 import time
 import requests

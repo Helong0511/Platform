@@ -45,6 +45,7 @@ def canonical_postback_field(raw_name: str) -> str:
 
 
 def _is_supported_postback_name(raw_name: str) -> bool:
+    """判断 Postback URL 占位符是否可被 resolve_brace_placeholders 解析。"""
     canonical = canonical_postback_field(raw_name)
     if canonical in _POSTBACK_RESOLVABLE:
         return True
@@ -54,6 +55,7 @@ def _is_supported_postback_name(raw_name: str) -> bool:
 
 
 def postback_placeholder_summary() -> str:
+    """返回 Postback URL 支持的占位符摘要，用于校验失败时的错误提示。"""
     return (
         "转化: {conversion_id}、{payout}、{event_name}、{event_value}；"
         "点击: {click_id}/{clickId}、{offer_id}、{publisher_id}/{channel_id}、{advertiser_id}；"

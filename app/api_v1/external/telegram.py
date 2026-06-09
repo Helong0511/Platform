@@ -1,10 +1,10 @@
-"""
-Telegram Bot API 端点
+"""Telegram Bot API 端点
 提供 Telegram Bot 相关的管理功能，包括：
 - 发送消息
 - 查询 Bot 状态
-- 测试连接
-"""
+- 测试连接。
+
+说明：对外开放接口，含客户 API（密钥+签名鉴权）与 Telegram 管理。"""
 import logging
 import threading
 from typing import Optional, List
@@ -40,19 +40,31 @@ logger = logging.getLogger(__name__)
 
 # ====== 请求/响应模型 ======
 class SendMessageRequest(BaseModel):
-    """发送消息请求模型"""
+    """
+    发送消息请求模型
+    
+    API 请求体，描述客户端提交的参数格式与约束。
+    """
     message: str = Field(..., description="要发送的消息内容", min_length=1, max_length=4096)
     chat_id: Optional[str] = Field(None, description="目标聊天ID（可选，默认使用配置中的 TELEGRAM_ADMIN）")
 
 
 class SendMessageResponse(BaseModel):
-    """发送消息响应模型"""
+    """
+    发送消息响应模型
+    
+    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    """
     success: bool = Field(..., description="是否发送成功")
     message: str = Field(..., description="响应消息")
 
 
 class BotStatusResponse(BaseModel):
-    """Bot 状态响应模型"""
+    """
+    Bot 状态响应模型
+    
+    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    """
     initialized: bool = Field(..., description="Bot 是否已初始化")
     token_configured: bool = Field(..., description="Token 是否已配置")
     admin_configured: bool = Field(..., description="管理员 Chat ID 是否已配置")
@@ -60,7 +72,11 @@ class BotStatusResponse(BaseModel):
 
 
 class DiagnosticResponse(BaseModel):
-    """诊断响应模型"""
+    """
+    诊断响应模型
+    
+    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    """
     bot_initialized: bool = Field(..., description="Bot 是否已初始化")
     bot_thread_alive: bool = Field(..., description="轮询线程是否运行")
     webhook_url: str | None = Field(None, description="Webhook URL（如果有）")
@@ -79,9 +95,11 @@ async def get_bot_status(
     
     需要管理员权限
     """
-
+    # ---------- 入口：参数与依赖准备 ----------
+   
     # 检查是否启用 Telegram
     telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+    # ---------- 条件分支 ----------
     if not telegram_enabled:
         return ResponseBaseSchema.success(data=BotStatusResponse(
             initialized=False,
@@ -90,6 +108,7 @@ async def get_bot_status(
             message="Telegram Bot 功能已禁用（TELEGRAM_ENABLE=false）"
         ))
 
+    # ---------- 异常处理 ----------
     try:
 
         # 获取详细状态信息
@@ -101,17 +120,21 @@ async def get_bot_status(
         connection_test = status_info.get("connection_test", "未测试")
 
         # 构建状态消息
+        # ---------- 条件分支 ----------
         if bot_initialized and token_configured:
+            # ---------- 条件分支 ----------
             if bot_thread_alive:
                 status_message = "Telegram Bot 已初始化并运行中"
             else:
                 status_message = "Telegram Bot 已初始化，但轮询线程未运行"
+        # ---------- 条件分支 ----------
         elif token_configured:
             status_message = "Token 已配置，但 Bot 未初始化"
         else:
             status_message = "Token 未配置，请设置 TELEGRAM_TOKEN 环境变量"
 
         # 添加连接测试信息
+        # ---------- 条件分支 ----------
         if connection_test != "成功" and bot_initialized:
             status_message += f" | 连接测试: {connection_test}"
 
@@ -146,9 +169,11 @@ async def send_message(
     - 如果未指定 chat_id，将使用配置中的 TELEGRAM_ADMIN
     - 消息长度限制：1-4096 字符
     """
-
+    # ---------- 入口：参数与依赖准备 ----------
+   
     # 检查是否启用 Telegram
     telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+    # ---------- 条件分支 ----------
     if not telegram_enabled:
         raise_api_exception(
             error_code=ErrorCode.SERVICE_UNAVAILABLE,
@@ -156,7 +181,9 @@ async def send_message(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE
         )
 
+    # ---------- 异常处理 ----------
     try:
+        # ---------- 条件分支 ----------
         if not bot_initialized:
             raise_api_exception(
                 error_code=ErrorCode.SERVICE_UNAVAILABLE,
@@ -170,6 +197,7 @@ async def send_message(
             request.message
         )
 
+        # ---------- 条件分支 ----------
         if success:
             logger.info(f"用户 {current_user.username} 通过 API 发送了 Telegram 消息")
             await log_user_action(
@@ -219,9 +247,11 @@ async def test_bot_connection(
     
     需要管理员权限
     """
-
+    # ---------- 入口：参数与依赖准备 ----------
+   
     # 检查是否启用 Telegram
     telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+    # ---------- 条件分支 ----------
     if not telegram_enabled:
         raise_api_exception(
             error_code=ErrorCode.SERVICE_UNAVAILABLE,
@@ -229,7 +259,9 @@ async def test_bot_connection(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE
         )
 
+    # ---------- 异常处理 ----------
     try:
+        # ---------- 条件分支 ----------
         if not bot_initialized:
             raise_api_exception(
                 error_code=ErrorCode.SERVICE_UNAVAILABLE,
@@ -243,6 +275,7 @@ async def test_bot_connection(
 
         success = send_telegram_message(test_message)
 
+        # ---------- 条件分支 ----------
         if success:
             await log_user_action(
                 db=db,
@@ -285,11 +318,14 @@ async def diagnostic_bot(
     
     需要管理员权限
     """
-
+    # ---------- 入口：参数与依赖准备 ----------
+   
+    # ---------- 异常处理 ----------
     try:
         recommendations = []
 
         # 1. 检查 Bot 初始化
+        # ---------- 条件分支 ----------
         if not bot_initialized:
             recommendations.append("❌ Bot 未初始化，请检查 TELEGRAM_TOKEN 配置")
             return ResponseBaseSchema.success(data=DiagnosticResponse(
@@ -301,6 +337,7 @@ async def diagnostic_bot(
             ))
 
         # 2. 检查模块可用性
+        # ---------- 条件分支 ----------
         if not TELEBOT_AVAILABLE:
             recommendations.append("❌ pyTelegramBotAPI 未安装，请运行: pip install pyTelegramBotAPI")
             return ResponseBaseSchema.success(data=DiagnosticResponse(
@@ -312,6 +349,7 @@ async def diagnostic_bot(
             ))
 
         # 3. 检查 Bot 对象
+        # ---------- 条件分支 ----------
         if not bot:
             recommendations.append("❌ Bot 对象不存在")
             return ResponseBaseSchema.success(data=DiagnosticResponse(
@@ -324,19 +362,24 @@ async def diagnostic_bot(
 
         # 4. 检查线程状态
         bot_thread_alive = False
+        # ---------- 循环处理 ----------
         for thread in threading.enumerate():
+            # ---------- 条件分支 ----------
             if thread.name == "TelegramBot":
                 bot_thread_alive = thread.is_alive()
                 break
 
+        # ---------- 条件分支 ----------
         if not bot_thread_alive:
             recommendations.append("⚠️ 轮询线程未运行，请重启应用或检查日志")
 
         # 5. 检查 Webhook
         webhook_url = None
+        # ---------- 异常处理 ----------
         try:
             webhook_info = bot.get_webhook_info()
             webhook_url = webhook_info.url if webhook_info.url else None
+            # ---------- 条件分支 ----------
             if webhook_url:
                 recommendations.append(f"⚠️ 检测到 Webhook: {webhook_url}，这将阻止 polling 工作！请删除 webhook")
         except Exception as e:
@@ -344,22 +387,28 @@ async def diagnostic_bot(
 
         # 6. 检查消息处理器
         handlers_count = 0
+        # ---------- 异常处理 ----------
         try:
+            # ---------- 条件分支 ----------
             if hasattr(bot, 'message_handlers'):
                 handlers_count = len(bot.message_handlers)
+                # ---------- 条件分支 ----------
                 if handlers_count == 0:
                     recommendations.append("⚠️ 没有注册任何消息处理器！命令无法工作")
                 else:
                     # 检查命令处理器
                     command_handlers = []
+                    # ---------- 循环处理 ----------
                     for handler in bot.message_handlers:
                         filters = handler.get('filters', {})
                         commands = filters.get('commands', [])
+                        # ---------- 条件分支 ----------
                         if commands:
                             command_handlers.extend(commands)
 
                     expected_commands = ['id', 'test', 'clock', 'stats']
                     missing_commands = [cmd for cmd in expected_commands if cmd not in command_handlers]
+                    # ---------- 条件分支 ----------
                     if missing_commands:
                         recommendations.append(f"⚠️ 缺少命令处理器: {missing_commands}")
                     else:
@@ -369,6 +418,7 @@ async def diagnostic_bot(
 
         # 7. 测试连接
         connection_test = "未测试"
+        # ---------- 异常处理 ----------
         try:
             bot_info = bot.get_me()
             connection_test = f"成功: @{bot_info.username} (ID: {bot_info.id})"
@@ -377,12 +427,15 @@ async def diagnostic_bot(
             recommendations.append(f"❌ Bot 连接测试失败: {str(e)}")
 
         # 8. 给出修复建议
+        # ---------- 条件分支 ----------
         if not bot_thread_alive:
             recommendations.append("💡 如果轮询线程未运行，命令将无法响应。请检查应用日志或重启应用")
 
+        # ---------- 条件分支 ----------
         if webhook_url:
             recommendations.append("💡 删除 webhook 后，轮询才能正常工作。可以使用 /api/v1/telegram/reset_webhook 删除")
 
+        # ---------- 条件分支 ----------
         if handlers_count > 0 and bot_thread_alive and not webhook_url:
             recommendations.append("✅ 所有检查通过，如果命令仍无响应，请检查日志中的轮询信息")
             recommendations.append("💡 查看日志中是否有 '收到 X 个更新' 或 '检测到命令' 的信息")
@@ -419,9 +472,12 @@ async def reset_webhook(
     
     需要管理员权限
     """
-
+    # ---------- 入口：参数与依赖准备 ----------
+   
+    # ---------- 异常处理 ----------
     try:
 
+        # ---------- 条件分支 ----------
         if not bot_initialized or not TELEBOT_AVAILABLE or not bot:
             raise_api_exception(
                 error_code=ErrorCode.SERVICE_UNAVAILABLE,
@@ -435,6 +491,7 @@ async def reset_webhook(
         # 检查确认
         webhook_info = bot.get_webhook_info()
 
+        # ---------- 条件分支 ----------
         if webhook_info.url:
             return ResponseBaseSchema.success(data=SendMessageResponse(
                 success=False,
@@ -469,7 +526,11 @@ async def reset_webhook(
 # ====== 新的实用 API 端点 ======
 
 class SendAlertRequest(BaseModel):
-    """发送告警请求模型"""
+    """
+    发送告警请求模型
+    
+    API 请求体，描述客户端提交的参数格式与约束。
+    """
     alert_type: str = Field(..., description="告警类型", min_length=1, max_length=100)
     description: str = Field(..., description="告警描述", min_length=1, max_length=1000)
     module: Optional[str] = Field(None, description="模块名称", max_length=100)
@@ -486,12 +547,14 @@ async def send_alert(
         db: AsyncSession = Depends(get_db)
 ):
     """
-    发送系统告警通知到 Telegram
-    
-    需要管理员权限
+    发送系统告警通知到指定 Telegram Chat。
+
+    权限：仅管理员；写入审计日志；失败时返回明确错误码。
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 检查是否启用 Telegram
     telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+    # ---------- 条件分支 ----------
     if not telegram_enabled:
         raise_api_exception(
             error_code=ErrorCode.SERVICE_UNAVAILABLE,
@@ -499,7 +562,9 @@ async def send_alert(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE
         )
 
+    # ---------- 异常处理 ----------
     try:
+        # ---------- 条件分支 ----------
         if not bot_initialized:
             raise_api_exception(
                 error_code=ErrorCode.SERVICE_UNAVAILABLE,
@@ -509,10 +574,13 @@ async def send_alert(
 
         # 构建位置信息
         location = {}
+        # ---------- 条件分支 ----------
         if request.module:
             location['module'] = request.module
+        # ---------- 条件分支 ----------
         if request.function:
             location['function'] = request.function
+        # ---------- 条件分支 ----------
         if request.line:
             location['line'] = str(request.line)
 
@@ -525,6 +593,7 @@ async def send_alert(
             db=db
         )
 
+        # ---------- 条件分支 ----------
         if success:
             logger.info(f"用户 {current_user.username} 通过 API 发送了系统告警")
             await log_user_action(
@@ -559,7 +628,11 @@ async def send_alert(
 
 
 class SendBatchRequest(BaseModel):
-    """发送批量通知请求模型"""
+    """
+    发送批量通知请求模型
+    
+    API 请求体，描述客户端提交的参数格式与约束。
+    """
     conversions: List[int] = Field(..., description="转化记录ID列表")
     telegram_chat_id: Optional[str] = Field(None, description="目标聊天ID（可选，默认使用配置中的 TELEGRAM_ADMIN")
 
@@ -572,12 +645,14 @@ async def send_batch_notifications(
         db: AsyncSession = Depends(get_db)
 ):
     """
-    发送批量转化通知到 Telegram
-    
-    需要管理员权限
+    批量发送转化通知到 Telegram（补发或测试场景）。
+
+    权限：仅管理员；按请求中的转化 ID 列表逐条推送并汇总成功/失败数。
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 检查是否启用 Telegram
     telegram_enabled = getattr(settings, 'TELEGRAM_ENABLE', True)
+    # ---------- 条件分支 ----------
     if not telegram_enabled:
         raise_api_exception(
             error_code=ErrorCode.SERVICE_UNAVAILABLE,
@@ -585,7 +660,9 @@ async def send_batch_notifications(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE
         )
 
+    # ---------- 异常处理 ----------
     try:
+        # ---------- 条件分支 ----------
         if not bot_initialized:
             raise_api_exception(
                 error_code=ErrorCode.SERVICE_UNAVAILABLE,
@@ -601,6 +678,7 @@ async def send_batch_notifications(
         )
         conversions = result.scalars().all()
 
+        # ---------- 条件分支 ----------
         if not conversions:
             return ResponseBaseSchema.success(data=SendMessageResponse(
                 success=False,
@@ -614,6 +692,7 @@ async def send_batch_notifications(
             db=db
         )
 
+        # ---------- 条件分支 ----------
         if success:
             logger.info(f"用户 {current_user.username} 通过 API 发送了批量转化通知")
             await log_user_action(

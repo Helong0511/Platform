@@ -1,5 +1,6 @@
 /**
- * 客户管理 API（CRUD + 详情缓存 + 导出）
+ * 客户（下游/渠道/商户）管理 API
+ * @file api/client.js
  */
 import { createCrudApi } from '@/utils/crudApi';
 import { createCachedDetailFetcher } from '@/utils/cachedDetailFetch';
@@ -26,10 +27,14 @@ const {
   csrfEndpoint: CSRF_REFRESH_CLIENTS
 });
 
+/** 客户列表查询与新建 */
 export { getClientList, createClient };
 
 const clientDetailCache = createCachedDetailFetcher();
 
+/**
+ * 获取客户（下游）详情，支持本地缓存。
+ */
 export const getClientDetail = async (id, options = {}) => {
   const { useCache = true, silent = false } = options;
   try {
@@ -52,10 +57,16 @@ export const getClientDetail = async (id, options = {}) => {
   }
 };
 
+/**
+ * 清除Client Detail Cache。
+ */
 export const clearClientDetailCache = (id = null) => {
   clientDetailCache.clear(id);
 };
 
+/**
+ * 更新Client。
+ */
 export const updateClient = async (id, clientData) => {
   await prepareCsrfMutate(CSRF_REFRESH_CLIENTS);
   const result = await updateClientBase(id, clientData);
@@ -63,6 +74,9 @@ export const updateClient = async (id, clientData) => {
   return result;
 };
 
+/**
+ * 更新Client Switches。
+ */
 export const updateClientSwitches = async (id, switchData) => {
   await prepareCsrfMutate(CSRF_REFRESH_CLIENTS);
   const result = await request(
@@ -77,12 +91,18 @@ export const updateClientSwitches = async (id, switchData) => {
   return result;
 };
 
+/**
+ * 删除Client。
+ */
 export const deleteClient = async (id) => {
   await prepareCsrfMutate(CSRF_REFRESH_CLIENTS);
   await deleteClientBase(id);
   return true;
 };
 
+/**
+ * 导出Clients。
+ */
 export const exportClients = (params = {}) =>
   requestListExport(
     { url: '/api/v1/clients/export', method: 'get', params },

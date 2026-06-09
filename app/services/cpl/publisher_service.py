@@ -1,6 +1,16 @@
 """
-渠道服务层
-封装渠道相关的业务逻辑
+渠道（下游/商户）服务层。
+
+功能说明：
+- 渠道 CRUD、分页搜索、Postback URL 占位符校验
+- 与 Offer 分配、转化转发配置联动
+
+在系统中的位置：
+- 被管理端渠道 API 调用；继承 ``BaseService``
+
+注意事项：
+1. postback_url 保存前须通过 ``validate_postback_url_placeholders`` 校验
+2. 渠道与客户的归属关系影响数据可见范围
 """
 import logging
 from typing import Optional, List, Dict, Any
@@ -21,9 +31,15 @@ logger = logging.getLogger(__name__)
 
 
 class PublisherService(BaseService[Publisher]):
-    """渠道服务"""
+    """
+    渠道业务服务。
+
+    渠道即下游商户，承载点击追踪与 Postback 回传配置。
+    通过 client_id 关联平台客户账号。
+    """
 
     def __init__(self, db: AsyncSession):
+        """注入异步数据库会话。"""
         super().__init__(db, Publisher)
 
     async def get_publisher_by_id(
@@ -33,15 +49,18 @@ class PublisherService(BaseService[Publisher]):
             include_client: bool = True
     ) -> Publisher:
         """
-        根据ID获取渠道详情
-        
+        按主键获取渠道详情。
+
         Args:
-            publisher_id: 渠道ID
-            current_user: 当前用户
-            include_client: 是否包含客户信息
-        
+            publisher_id: 渠道主键
+            current_user: 当前登录用户（预留权限扩展）
+            include_client: True 时 selectinload 预加载 Client 及关联 User
+
         Returns:
-            Publisher: 渠道对象
+            Publisher: 渠道 ORM 对象
+
+        Raises:
+            APIException: 记录不存在
         """
         query = select(Publisher).where(Publisher.id == publisher_id)
 
@@ -69,17 +88,19 @@ class PublisherService(BaseService[Publisher]):
             is_active: Optional[bool] = None
     ) -> tuple[List[Publisher], int]:
         """
-        获取渠道列表（支持分页、筛选、搜索）
-        
+        分页查询渠道列表。
+
+        支持名称/ID 模糊搜索、激活状态过滤，预加载所属客户信息。
+
         Args:
-            current_user: 当前用户
-            page: 页码
-            page_size: 每页数量
-            search: 搜索关键词
-            is_active: 激活状态过滤
-        
+            current_user: 当前登录用户
+            page: 页码，从 1 开始
+            page_size: 每页条数
+            search: 搜索词，匹配 publisher_name 或 id
+            is_active: 激活状态过滤，None 不过滤
+
         Returns:
-            tuple: (渠道列表, 总数)
+            tuple[List[Publisher], int]: (当前页列表, 总条数)
         """
         query = select(Publisher)
 
@@ -129,14 +150,20 @@ class PublisherService(BaseService[Publisher]):
             current_user: User
     ) -> Publisher:
         """
-        创建渠道
-        
+        创建渠道（仅管理员）。
+
+        若提供 postback_url，须通过占位符校验。
+
         Args:
-            publisher_data: 渠道数据字典
-            current_user: 当前用户
-        
+            publisher_data: 含 publisher_name（必填）、postback_url、
+                price_discount、client_id、is_active 等
+            current_user: 当前登录用户，须为管理员
+
         Returns:
-            Publisher: 创建的渠道对象
+            Publisher: 已持久化的渠道对象
+
+        Raises:
+            APIException: 非管理员、占位符非法或校验失败
         """
         # 权限检查：仅管理员可创建
         self.require_admin(current_user)
@@ -190,13 +217,15 @@ class PublisherService(BaseService[Publisher]):
             current_user: User
     ) -> Publisher:
         """
-        更新渠道信息
-        
+        更新渠道信息（仅管理员）。
+
+        仅更新请求体中出现的字段；postback_method 为空时默认 GET。
+
         Args:
-            publisher_id: 渠道ID
-            publisher_data: 更新的数据字典
-            current_user: 当前用户
-        
+            publisher_id: 待更新渠道主键
+            publisher_data: 部分字段字典
+            current_user: 当前登录用户，须为管理员
+
         Returns:
             Publisher: 更新后的渠道对象
         """
@@ -261,11 +290,16 @@ class PublisherService(BaseService[Publisher]):
             current_user: User
     ) -> None:
         """
-        删除渠道
-        
+        删除渠道（仅管理员）。
+
+        若仍存在 OfferPublisherAssignment 则拒绝删除。
+
         Args:
-            publisher_id: 渠道ID
-            current_user: 当前用户
+            publisher_id: 待删除渠道主键
+            current_user: 当前登录用户，须为管理员
+
+        Raises:
+            APIException: 存在 Offer 分配或记录不存在
         """
         # 权限检查
         self.require_admin(current_user)

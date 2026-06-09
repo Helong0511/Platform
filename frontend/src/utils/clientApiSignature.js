@@ -1,7 +1,7 @@
 /**
- * 客户 API MD5 签名（与后端 app/core/api_auth.py verify_signature 一致）
+ * 工具模块 - 客户 API 签名生成
+ * @file utils/clientApiSignature.js
  */
-
 function md5Hex(str) {
   const utf8 = unescape(encodeURIComponent(str));
   const bytes = new Uint8Array(utf8.length);
@@ -159,6 +159,7 @@ function add32(a, b) {
 }
 
 /**
+ * 生成客户端外部 API 请求 MD5 签名（client_id + req_time + 可选日期参数 + secret）。
  * @param {object} opts
  * @param {number|string} opts.clientId
  * @param {number|string} opts.reqTime
@@ -191,6 +192,9 @@ export function generateClientApiSign(
   return md5Hex(tempStr);
 }
 
+/**
+ * 格式化Today Date。
+ */
 export function formatTodayDate() {
   const d = new Date();
   const y = d.getFullYear();

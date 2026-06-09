@@ -1,5 +1,12 @@
+<!--
+  点击日志详情弹窗
+  @file components/admin/ClickLogDetailDialog.vue
+-->
 <template>
-  <el-dialog
+  <!-- 页面主模板 -->
+<!-- 弹窗区域 -->
+<!-- 弹窗 -->
+    <el-dialog
     v-model="visible"
     title="点击记录详情"
     width="80%"

@@ -1,7 +1,6 @@
 /**
  * 短链 / Offer Tracklink 占位符校验（与后端 validate_track_url_placeholders 规则一致）
  */
-
 const SUPPORTED_CANONICAL = new Set([
   'click_id', 'ip', 'os', 'device_type', 'country', 'user_agent', 'referer',
   'accept_language', 'language', 'lang', 'gaid', 'idfa', 'devad_id',
@@ -125,6 +124,7 @@ function findMalformedSnippets(remainder) {
 }
 
 /**
+ * 校验短链 original_url 中占位符语法及与 offer_id/channel_id 的一致性。
  * @returns {{ ok: boolean, errors: string[], warnings: string[] }}
  */
 export function validateShortLinkPlaceholders(url, { offerId = null, channelId = null } = {}) {

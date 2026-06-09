@@ -1,6 +1,9 @@
 """
-广告数据处理工具模块
-提供标准化的API数据后处理函数，供多个API调用
+广告数据（AdData）导入与聚合处理工具。
+
+职责：解析上游 API/Excel 原始行、国家代码映射、比率计算、批量入库与 Telegram 告警。
+
+在系统中的位置：``app.core.ad_data_processor``，由定时拉取任务与管理端导入 API 调用。
 """
 import logging
 import asyncio

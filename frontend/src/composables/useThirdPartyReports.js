@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 第三方报表列表
+ * @file composables/useThirdPartyReports.js
+ */
 import { ref, reactive, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getThirdPartyReports, getThirdPartyReportStats } from '../api/third-party-report';
@@ -7,21 +11,29 @@ import { logger } from '../utils/logger';
 /**
  * 第三方上报日志列表、统计与分页。
  */
+/**
+ * 组合式函数 - 第三方报表列表
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useThirdPartyReports(authStore, router) {
+  // logs 响应式状态
   const logs = ref([]);
   const loading = ref(false);
+  // 统计数据
   const stats = ref(null);
   const pagination = reactive({
     page: 1,
     pageSize: 10,
     total: 0,
   });
+  // 筛选表单字段
   const searchForm = reactive({
     source: '',
     adsid: '',
     event: '',
     status: '',
   });
+  // dateRange 响应式状态
   const dateRange = ref(getCurrentMonthRange());
 
   const fetchStats = async () => {

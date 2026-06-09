@@ -26,6 +26,7 @@ class ClickAssociator:
 
     @staticmethod
     def _with_normalized_url_params(association: Dict[str, Any]) -> Dict[str, Any]:
+        """将关联结果中的 url_params 统一为扁平 dict（兼容 JSON 字符串存储）。"""
         up = association.get("url_params")
         if isinstance(up, dict):
             association = {**association, "url_params": normalize_url_params(up)}
@@ -41,6 +42,7 @@ class ClickAssociator:
         db_assoc: Dict[str, Any],
         token_assoc: Dict[str, Any],
     ) -> Dict[str, Any]:
+        """合并数据库点击行与令牌解析结果，url_params 做键级合并。"""
         merged = dict(db_assoc)
         for key, value in token_assoc.items():
             if value is None or key == "url_params":

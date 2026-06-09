@@ -1,8 +1,14 @@
+<!--
+  登录页：用户名密码登录，获取 JWT 后写入 store 并跳转首页。
+  支持客户角色登录限制提示、记住用户名、版本号展示。
+-->
 <template>
-  <div class="login-container">
+  <!-- 页面主模板 -->
+<div class="login-container">
     
     <div class="login-card">
       <div class="login-title">广告数据管理</div>
+      <!-- 表单区域 -->
       <el-form ref="loginFormRef" :model="loginForm" :rules="rules" class="login-form" @submit.prevent="handleLogin" :validate-on-rule-change="false">
         <el-form-item prop="username">
           <el-input

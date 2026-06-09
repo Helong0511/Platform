@@ -1,3 +1,8 @@
+"""
+落地页热区标注 GUI（wxPython）：在截图上框选可点击区域并写入 regions.json。
+
+支持多 classname（如 apple），坐标保留一位小数；供 替换热区.py 生成 CSS。
+"""
 import wx
 import os
 import json

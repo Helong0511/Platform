@@ -1,6 +1,9 @@
 """
-点击记录队列模块（高并发优化）
-使用Redis队列缓冲点击记录，定时批量插入到数据库，提高高并发性能
+点击记录 Redis 队列模块（高并发写库削峰）。
+
+职责：将点击先入 ``clicks:queue``，由定时任务批量落库；令牌模式且关闭落库时直接 no-op。
+
+在系统中的位置：``app.core.clicks_queue``，与 ``tracking.click_persist`` 策略联动。
 """
 import logging
 import json

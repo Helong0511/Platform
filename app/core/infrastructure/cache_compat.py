@@ -1,6 +1,9 @@
 """
-缓存兼容层
-保持与旧 cache.py 的兼容性，同时使用新的缓存抽象层（带监控）
+缓存兼容适配层。
+
+职责：对外保持与旧 ``app.core.cache`` 相同的 get/set 签名，内部走基础设施层并记录命中率指标。
+
+在系统中的位置：扣减配置等模块通过本层读写缓存，逐步迁移至 ``infrastructure.cache``。
 """
 import json
 import hashlib

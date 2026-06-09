@@ -1,8 +1,15 @@
 /**
  * 货币与广告表格金额格式化
+ * @file utils/currencyFormat.js
+ *
+ * 统一 USD 货币展示格式，供表格列 formatter 与统计卡片使用。
  */
 
-/** Postback / 扣减等展示用（Intl 货币格式） */
+/**
+ * 将数值格式化为 USD 货币字符串
+ * @param {number} value - 金额数值
+ * @returns {string} 格式化后的货币文本，空值返回 '-'
+ */
 export function formatCurrency(value) {
   if (!value && value !== 0) return '-';
   return new Intl.NumberFormat('zh-CN', {

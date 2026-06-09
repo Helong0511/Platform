@@ -1,4 +1,9 @@
+<!--
+  管理端 - 用户管理入口
+  @file views/admin/UserManagement.vue
+-->
 <template>
+  <!-- 页面主模板 -->
   <div class="user-management-container">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -35,7 +40,9 @@
     </div>
 
     <!-- 筛选控件 -->
+    <!-- 筛选区 -->
     <el-card class="filter-card" shadow="never">
+      <!-- 表单区域 -->
       <el-form :inline="true" :model="searchForm" class="filter-form">
         <el-form-item label="用户名">
           <el-input 
@@ -76,7 +83,8 @@
 
     <!-- 用户数据表格 -->
     <el-card class="data-table-card" shadow="never">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="table-header">
           <span>用户列表</span>
           <el-button 

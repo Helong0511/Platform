@@ -1,7 +1,15 @@
+/**
+ * 组合式函数 - 第三方报表列显隐
+ * @file composables/useThirdPartyReportColumnVisibility.js
+ */
 import { useTableColumnVisibility } from './useTableColumnVisibility';
 
 const STORAGE_KEY = 'thirdPartyReportManagement_columnVisibility';
 
+/**
+ * 组合式函数 - 第三方报表列显隐
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useThirdPartyReportColumnVisibility() {
   return useTableColumnVisibility(STORAGE_KEY, {
     getDefaultColumns: () => ({

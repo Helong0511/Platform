@@ -1,12 +1,12 @@
-"""
-客户管理API端点
+"""客户管理API端点
 提供客户信息的CRUD操作，包括：
 - 获取客户列表（支持分页和过滤）
 - 获取客户详情
 - 创建新客户（支持创建新用户或关联已有用户）
 - 更新客户信息
-- 删除客户（检查关联数据）
-"""
+- 删除客户（检查关联数据）。
+
+说明：REST API 端点，统一 ResponseBaseSchema 响应；鉴权由各端点 Depends 声明。"""
 # Python 3.10+ 使用内置类型注解
 import logging
 import re
@@ -44,7 +44,11 @@ logger = logging.getLogger(__name__)
 
 # 快速更新客户开关的请求模型
 class ClientSwitchUpdate(BaseModel):
-    """快速更新客户开关的请求模型"""
+    """
+    快速更新客户开关的请求模型
+    
+    更新请求体：字段均为可选，客户端仅提交需要修改的列。
+    """
     api_enabled: bool | None = None
     password_change_enabled: bool | None = None
 
@@ -99,16 +103,19 @@ async def get_client(
     - 客户用户只能查看自己的客户信息
     - 返回客户完整信息，包括关联的用户信息
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 构建查询 - 使用JOIN避免N+1查询问题
     query = select(Client).options(selectinload(Client.user)).where(Client.id == client_id)
 
     # 如果是客户用户，只能查看自己的客户信息
+    # ---------- 条件分支 ----------
     if current_user.role == UserRole.CLIENT:
         query = query.where(Client.user_id == current_user.id)
 
     result = await db.execute(query)
     client = result.scalars().first()
 
+    # ---------- 条件分支 ----------
     if not client:
         raise_api_exception(
             ErrorCode.CLIENT_NOT_FOUND,
@@ -136,6 +143,7 @@ async def get_client(
         'user_name': user.username if user else None
     }
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=client_data)
 
 
@@ -283,10 +291,12 @@ async def update_client(
     - 可更新客户联系信息和状态
     - 支持关联用户变更
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 获取客户
     result = await db.execute(select(Client).where(Client.id == client_id))
     client = result.scalars().first()
 
+    # ---------- 条件分支 ----------
     if not client:
         raise_api_exception(
             ErrorCode.CLIENT_NOT_FOUND,
@@ -294,10 +304,12 @@ async def update_client(
         )
 
     # 如果变更了关联用户
+    # ---------- 条件分支 ----------
     if client_in.user_id and client_in.user_id != client.user_id:
         # 检查新用户是否存在
         result = await db.execute(select(User).where(User.id == client_in.user_id))
         new_user = result.scalars().first()
+        # ---------- 条件分支 ----------
         if not new_user:
             raise_api_exception(
                 ErrorCode.USER_NOT_FOUND,
@@ -307,6 +319,7 @@ async def update_client(
         # 检查新用户是否已有客户关联
         result = await db.execute(select(Client).where(Client.user_id == client_in.user_id))
         existing_client = result.scalars().first()
+        # ---------- 条件分支 ----------
         if existing_client and existing_client.id != client_id:
             raise_api_exception(
                 ErrorCode.CLIENT_ALREADY_EXISTS,
@@ -317,10 +330,12 @@ async def update_client(
     update_data = client_in.model_dump(exclude_unset=True)
 
     # 如果更新了key字段，需要验证
+    # ---------- 条件分支 ----------
     if 'key' in update_data and update_data['key']:
         new_key = update_data['key'].strip()
         # 验证UUID格式（简单验证，36个字符，包含连字符）
         uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        # ---------- 条件分支 ----------
         if not re.match(uuid_pattern, new_key, re.IGNORECASE):
             raise_api_exception(
                 ErrorCode.VALIDATION_ERROR,
@@ -328,9 +343,11 @@ async def update_client(
             )
 
         # 检查key是否已被其他客户使用
+        # ---------- 条件分支 ----------
         if new_key != client.key:
             result = await db.execute(select(Client).where(Client.key == new_key))
             existing_client = result.scalars().first()
+            # ---------- 条件分支 ----------
             if existing_client:
                 raise_api_exception(
                     ErrorCode.VALIDATION_ERROR,
@@ -341,12 +358,15 @@ async def update_client(
     old_is_active = client.is_active
     is_active_changed = False
 
+    # ---------- 循环处理 ----------
     for key, value in update_data.items():
+        # ---------- 条件分支 ----------
         if key == "is_active" and value != old_is_active:
             is_active_changed = True
         setattr(client, key, value)
 
     # 保存到数据库
+    # ---------- 异常处理 ----------
     try:
         # 注意：不需要手动提交事务，get_db 依赖会自动处理
         # 刷新对象以获取最新数据（在自动提交之前）
@@ -365,7 +385,9 @@ async def update_client(
     logger.info(f"Client {client.company_name} updated by {current_user.username}")
 
     wrote_audit = False
+    # ---------- 条件分支 ----------
     if is_active_changed:
+        # ---------- 条件分支 ----------
         if client.is_active:
             await log_activate(
                 db=db,
@@ -387,6 +409,7 @@ async def update_client(
         wrote_audit = True
 
     update_data = client_in.model_dump(exclude_unset=True)
+    # ---------- 条件分支 ----------
     if len(update_data) > 1 or "is_active" not in update_data:
         await log_update(
             db=db,
@@ -399,9 +422,11 @@ async def update_client(
         )
         wrote_audit = True
 
+    # ---------- 条件分支 ----------
     if wrote_audit:
         await commit_audit_log(db)
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=ClientResponse.model_validate(client))
 
 
@@ -419,12 +444,14 @@ async def update_client_switches(
     - 仅管理员可访问
     - 可以单独更新api_enabled或password_change_enabled，或同时更新两者
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 获取客户（使用selectinload预加载用户关系，保持与其他端点一致）
     result = await db.execute(
         select(Client).options(selectinload(Client.user)).where(Client.id == client_id)
     )
     client = result.scalars().first()
 
+    # ---------- 条件分支 ----------
     if not client:
         raise_api_exception(
             ErrorCode.CLIENT_NOT_FOUND,
@@ -435,6 +462,7 @@ async def update_client_switches(
     update_details = {}
     update_values = {}
 
+    # ---------- 条件分支 ----------
     if switch_data.api_enabled is not None:
         # 处理 None 值，确保 old_value 是布尔值
         old_value = bool(client.api_enabled) if client.api_enabled is not None else False
@@ -443,6 +471,7 @@ async def update_client_switches(
         update_values['api_enabled'] = new_value
         update_details['api_enabled'] = {'old': old_value, 'new': new_value}
 
+    # ---------- 条件分支 ----------
     if switch_data.password_change_enabled is not None:
         # 处理 None 值，确保 old_value 是布尔值
         old_value = bool(client.password_change_enabled) if client.password_change_enabled is not None else False
@@ -452,6 +481,7 @@ async def update_client_switches(
         update_details['password_change_enabled'] = {'old': old_value, 'new': new_value}
 
     # 如果没有要更新的值，直接返回
+    # ---------- 条件分支 ----------
     if not update_values:
         raise_api_exception(
             ErrorCode.VALIDATION_ERROR,
@@ -459,6 +489,7 @@ async def update_client_switches(
         )
 
     # 保存到数据库
+    # ---------- 异常处理 ----------
     try:
         # 使用 SQLAlchemy 的 update 语句直接更新数据库，确保数据被保存
         stmt = update(Client).where(Client.id == client_id).values(**update_values)
@@ -471,6 +502,7 @@ async def update_client_switches(
             select(Client).options(selectinload(Client.user)).where(Client.id == client_id)
         )
         client = result.scalars().first()
+        # ---------- 条件分支 ----------
         if not client:
             logger.error(f"更新后无法找到客户 {client_id}")
             raise_api_exception(
@@ -483,8 +515,10 @@ async def update_client_switches(
         await db.refresh(client)
 
         # 确保布尔字段不是 None（数据库约束应该保证，但为了安全起见）
+        # ---------- 条件分支 ----------
         if client.api_enabled is None:
             client.api_enabled = False
+        # ---------- 条件分支 ----------
         if client.password_change_enabled is None:
             client.password_change_enabled = False
     except HTTPException:
@@ -493,6 +527,7 @@ async def update_client_switches(
     except Exception as e:
         # 注意：不需要手动回滚事务，get_db 依赖会自动处理
         # 如果是我们自己的异常，直接抛出
+        # ---------- 条件分支 ----------
         if isinstance(e, HTTPException):
             raise e
         logger.error(f"更新客户开关失败: {str(e)}", exc_info=True)
@@ -504,6 +539,7 @@ async def update_client_switches(
     logger.info(f"Client {client.company_name} switches updated by {current_user.username}: {update_details}")
 
     # 记录更新操作
+    # ---------- 异常处理 ----------
     try:
         await log_update(
             db=db,
@@ -521,6 +557,7 @@ async def update_client_switches(
         logger.warning(f"记录更新日志失败: {str(log_error)}")
 
     # 确保返回的数据包含最新的开关状态
+    # ---------- 异常处理 ----------
     try:
         client_data = ClientResponse.model_validate(client)
     except HTTPException:
@@ -532,6 +569,7 @@ async def update_client_switches(
             detail=f"验证客户数据失败：{str(validation_error)}。请刷新页面重试"
         )
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=client_data)
 
 
@@ -549,10 +587,12 @@ async def export_clients_excel(
     - 支持按公司名称和激活状态过滤
     - 返回Excel文件流
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 构建查询（与get_clients相同的逻辑）
     query = select(Client).options(selectinload(Client.user))
 
     # 应用过滤条件
+    # ---------- 条件分支 ----------
     if company_name:
         # 使用全文搜索（优先）或LIKE查询
         query = await search_with_fulltext(
@@ -564,6 +604,7 @@ async def export_clients_excel(
             use_fulltext=True
         )
 
+    # ---------- 条件分支 ----------
     if is_active is not None:
         query = query.where(Client.is_active == is_active)
 
@@ -574,6 +615,7 @@ async def export_clients_excel(
     clients = result.unique().scalars().all()
 
     # 如果没有数据，抛出错误提示用户
+    # ---------- 条件分支 ----------
     if not clients:
         raise_api_exception(
             error_code=ErrorCode.NOT_FOUND,
@@ -583,6 +625,7 @@ async def export_clients_excel(
 
     # 准备导出数据
     data = []
+    # ---------- 循环处理 ----------
     for client in clients:
         user = client.user
         row = {
@@ -601,6 +644,7 @@ async def export_clients_excel(
         }
 
         # 添加用户信息
+        # ---------- 条件分支 ----------
         if user:
             row.update({
                 "用户ID": user.id,
@@ -630,6 +674,7 @@ async def export_clients_excel(
     )
     await commit_audit_log(db)
 
+    # ---------- 构建响应 ----------
     return excel_streaming_response(data, "客户数据", "客户数据")
 
 
@@ -646,10 +691,12 @@ async def delete_client(
     - 检查是否有关联产品，如果有则不允许删除
     - 删除客户时不会删除关联的用户账号
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 获取客户
     result = await db.execute(select(Client).where(Client.id == client_id))
     client = result.scalars().first()
 
+    # ---------- 条件分支 ----------
     if not client:
         raise_api_exception(
             ErrorCode.CLIENT_NOT_FOUND,
@@ -662,6 +709,7 @@ async def delete_client(
     )
     product_count = product_count_result.scalar() or 0
 
+    # ---------- 条件分支 ----------
     if product_count > 0:
         raise_api_exception(
             ErrorCode.CLIENT_HAS_PRODUCTS,
@@ -684,4 +732,5 @@ async def delete_client(
 
     logger.info(f"Client {client.company_name} deleted by {current_user.username}")
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data={"message": "客户已成功删除"})

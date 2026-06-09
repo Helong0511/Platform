@@ -12,10 +12,7 @@
  * // 成功消息
  * ElMessage.success(getSuccessMessage('CREATE_SUCCESS'));
  */
-
-/**
- * 操作类型枚举
- */
+/** 操作类型与资源类型枚举常量 */
 export const OperationType = {
   // 通用操作
   CREATE: 'CREATE',

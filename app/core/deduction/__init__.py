@@ -1,5 +1,7 @@
 """
-扣减管理模块
+转化扣减（Deduction）管理包。
+
+对外导出：按 offer/publisher/advertiser 查找扣减配置、应用扣减策略与统计接口。
 """
 from app.core.deduction.deduction_manager import (
     # 向后兼容的函数接口

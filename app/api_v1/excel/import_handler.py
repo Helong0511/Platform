@@ -1,7 +1,10 @@
-"""
-Excel导入处理模块
-处理广告数据的Excel导入逻辑
-"""
+"""广告数据 Excel 导入处理
+
+职责：解析上传 xlsx/xls，校验列映射与业务字段，批量 upsert AdData 并返回导入统计。
+
+权限：需登录；写入范围按角色与客户归属校验。
+
+说明：Excel 批量导入/导出，支持广告数据等业务的表格批处理。"""
 import asyncio
 import logging
 from datetime import datetime, date
@@ -43,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_xlrd(strict: bool, error_message: str) -> bool:
+    """_ensure_xlrd 处理函数。（详见字段 Field description）。"""
     try:
         import xlrd
         logger.debug(
@@ -95,11 +99,16 @@ def clean_numeric_value(value: Any) -> float:
 async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes]:
     """
     验证并读取Excel文件
+        
+        返回:
+            (DataFrame, 文件内容bytes)
     
-    返回:
-        (DataFrame, 文件内容bytes)
+    鉴权：由 Depends(get_current_user) 或 require_admin 控制；客户角色仅可操作自有数据。
+    响应：统一 ResponseBaseSchema / PaginatedResponseBaseSchema 包装。
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 验证文件类型
+    # ---------- 条件分支 ----------
     if file.content_type not in ALLOWED_MIME_TYPES or not allowed_file(file.filename):
         raise_api_exception(
             ErrorCode.IMPORT_FILE_INVALID,
@@ -111,12 +120,14 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
     contents = await file.read()
 
     # 检查文件大小
+    # ---------- 条件分支 ----------
     if len(contents) > max_size:
         raise_api_exception(
             ErrorCode.BAD_REQUEST,
             detail=f"文件大小超过限制（最大 {max_size / 1024 / 1024:.1f}MB）"
         )
 
+    # ---------- 条件分支 ----------
     if not contents:
         raise_api_exception(
             ErrorCode.IMPORT_FILE_INVALID,
@@ -135,19 +146,25 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
                  f"文件头={file_signature.hex()[:32]}")
 
     # 根据文件扩展名和内容检测选择引擎
+    # ---------- 条件分支 ----------
     if filename_lower.endswith('.xlsx'):
         engine = "openpyxl"
+        # ---------- 条件分支 ----------
         if not is_xlsx:
             logger.warning(f"文件名是 .xlsx，但文件内容不是有效的 ZIP 格式（.xlsx 文件）")
+    # ---------- 条件分支 ----------
     elif filename_lower.endswith('.xls'):
         engine = "xlrd"
+        # ---------- 条件分支 ----------
         if not is_xls:
             logger.warning(f"文件名是 .xls，但文件内容不是有效的 OLE 格式（.xls 文件）")
     else:
         # 如果无法从文件名判断，尝试检测文件内容
+        # ---------- 条件分支 ----------
         if is_xlsx:
             engine = "openpyxl"
             logger.info("通过文件内容检测到 .xlsx 格式")
+        # ---------- 条件分支 ----------
         elif is_xls:
             engine = "xlrd"
             logger.info("通过文件内容检测到 .xls 格式")
@@ -157,6 +174,7 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
             logger.warning("无法确定文件格式，默认尝试 openpyxl 引擎")
 
     # 检查必要的库是否可用
+    # ---------- 条件分支 ----------
     if engine == "xlrd":
         _ensure_xlrd(strict=True, error_message="xlrd 库未安装，无法读取 .xls 格式文件")
 
@@ -166,6 +184,7 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
     tried_engines = []
 
     # 首先尝试指定的引擎
+    # ---------- 异常处理 ----------
     try:
         logger.debug(f"尝试使用 {engine} 引擎解析文件")
         df, engine = await read_excel_with_fallback(
@@ -180,6 +199,7 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
         logger.warning(f"使用 {engine} 引擎解析失败: {str(e)}")
 
     # 如果所有尝试都失败，抛出友好的错误信息
+    # ---------- 条件分支 ----------
     if df is None or df.empty:
         error_msg = str(last_error) if last_error else "无法解析Excel文件"
 
@@ -187,22 +207,28 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
         detail_parts = []
 
         # 检查文件格式
+        # ---------- 条件分支 ----------
         if not is_xlsx and not is_xls:
             detail_parts.append("文件内容不是有效的 Excel 格式（.xlsx 或 .xls）")
             # 检查是否是其他常见格式
+            # ---------- 条件分支 ----------
             if contents[:5] == b'<?xml' or contents[:5] == b'<html' or contents[:5] == b'<!DOC':
                 detail_parts.append("文件可能是 HTML 或 XML 格式，不是 Excel 文件")
+            # ---------- 条件分支 ----------
             elif b',' in contents[:100] and b'\n' in contents[:100]:
                 detail_parts.append("文件可能是 CSV 格式，请使用 Excel 打开并另存为 .xlsx 格式")
 
         # 提供更友好的错误信息
+        # ---------- 条件分支 ----------
         if "no valid workbook" in error_msg.lower() or "workbook" in error_msg.lower():
             detail_parts.append("Excel文件格式无效或文件已损坏")
             detail_parts.append("请确保文件是有效的 .xlsx 或 .xls 格式，且文件未损坏")
             detail_parts.append("建议：使用 Excel 打开文件，然后另存为 .xlsx 格式")
+        # ---------- 条件分支 ----------
         elif "invalid" in error_msg.lower() or "InvalidFileException" in str(type(last_error).__name__):
             detail_parts.append("无效的Excel文件格式")
             detail_parts.append("请确保文件是 .xlsx 或 .xls 格式，且文件未损坏")
+        # ---------- 条件分支 ----------
         elif "empty" in error_msg.lower() or "no columns" in error_msg.lower():
             detail_parts.append("Excel文件为空或没有数据")
             detail_parts.append("请确保文件包含至少一行数据")
@@ -211,6 +237,7 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
             detail_parts.append("请检查文件格式是否正确，或尝试重新保存文件")
 
         # 添加诊断信息
+        # ---------- 条件分支 ----------
         if tried_engines:
             detail_parts.append(f"已尝试的解析引擎: {', '.join(tried_engines)}")
 
@@ -220,15 +247,19 @@ async def validate_and_read_excel(file: UploadFile) -> tuple[pd.DataFrame, bytes
 
         raise_api_exception(ErrorCode.IMPORT_DATA_VALIDATION_FAILED, detail=detail)
 
+    # ---------- 构建响应 ----------
     return df, contents
 
 
 async def process_column_mapping(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
     处理列名映射和验证
+        
+        返回:
+            (处理后的DataFrame, 映射结果)
     
-    返回:
-        (处理后的DataFrame, 映射结果)
+    鉴权：由 Depends(get_current_user) 或 require_admin 控制；客户角色仅可操作自有数据。
+    响应：统一 ResponseBaseSchema / PaginatedResponseBaseSchema 包装。
     """
     # 步骤1：规范化Excel列名
     excel_columns_normalized = ColumnMappingService.normalize_excel_columns(df.columns)
@@ -407,9 +438,12 @@ async def build_product_maps(
 ) -> tuple[dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]]]:
     """
     构建产品映射表
+        
+        返回:
+            (product_map, product_name_map)
     
-    返回:
-        (product_map, product_name_map)
+    鉴权：由 Depends(get_current_user) 或 require_admin 控制；客户角色仅可操作自有数据。
+    响应：统一 ResponseBaseSchema / PaginatedResponseBaseSchema 包装。
     """
     product_query = select(Product, Client)
     product_query = product_query.join(Client, Product.client_id == Client.id)
@@ -450,18 +484,24 @@ async def find_or_create_product(
 ) -> dict[str, Any]:
     """
     查找或创建产品
+        
+        返回:
+            产品信息字典
     
-    返回:
-        产品信息字典
+    鉴权：由 Depends(get_current_user) 或 require_admin 控制；客户角色仅可操作自有数据。
+    响应：统一 ResponseBaseSchema / PaginatedResponseBaseSchema 包装。
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 确定目标客户ID（查询参数优先）
     target_client_id = client_id or target_client_id
 
     # 首先尝试按产品名称查找
     matches = product_name_map.get(product_name, [])
 
+    # ---------- 条件分支 ----------
     if len(matches) > 0:
         # 规则1.1：产品名称能找到客户
+        # ---------- 条件分支 ----------
         if len(matches) == 1:
             product_info = matches[0]
             target_client_id = product_info["client_id"]
@@ -471,10 +511,12 @@ async def find_or_create_product(
             )
         else:
             # 多个匹配，优先使用指定客户ID的产品
+            # ---------- 条件分支 ----------
             if target_client_id:
                 matched_product = next(
                     (m for m in matches if m["client_id"] == target_client_id), None
                 )
+                # ---------- 条件分支 ----------
                 if matched_product:
                     product_info = matched_product
                     logger.info(
@@ -503,6 +545,7 @@ async def find_or_create_product(
         return product_info
     else:
         # 规则1.2：产品名称不能找到客户
+        # ---------- 条件分支 ----------
         if mapping_complete:
             logger.info(
                 f"✅ 映射完整，产品名称'{product_name}'找不到客户，"
@@ -511,6 +554,7 @@ async def find_or_create_product(
 
             # 获取或创建默认客户：使用统一的辅助函数
             create_client = None
+            # ---------- 条件分支 ----------
             if not target_client_id:
                 create_client = await find_or_create_default_client(db, current_user.id)
                 target_client_id = create_client.id
@@ -524,9 +568,11 @@ async def find_or_create_product(
                     select(Client).where(Client.id == target_client_id)
                 )
                 create_client = client_result.scalars().first()
+                # ---------- 条件分支 ----------
                 if not create_client:
                     raise ValueError(f"客户ID {target_client_id} 不存在")
 
+            # ---------- 条件分支 ----------
             if not create_client:
                 client_result = await db.execute(
                     select(Client).where(Client.id == target_client_id)
@@ -547,6 +593,7 @@ async def find_or_create_product(
             await db.refresh(new_product)
 
             # 初始化产品分配记录（确保新创建的产品有分配记录）
+            # ---------- 异常处理 ----------
             try:
                 product_start_date = date.today()
                 await initialize_product_assignment(
@@ -619,6 +666,8 @@ async def process_row_data(
         current_user: 当前用户
         result: 结果字典（用于更新统计）
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         # 解析日期（Excel导入的日期默认是系统时区，不需要转换）
         date_value = row["date"]
@@ -626,13 +675,16 @@ async def process_row_data(
 
         # 获取产品名称
         product_name = str(row["product_name"]).strip()
+        # ---------- 条件分支 ----------
         if not product_name:
             raise ValueError("产品名称不能为空")
 
         # 获取Excel中的client_id（如果存在）
         excel_client_id = None
+        # ---------- 条件分支 ----------
         if "client_id" in row.index and pd.notna(row.get("client_id")):
             excel_client_id = int(row["client_id"])
+        # ---------- 条件分支 ----------
         elif "客户ID" in row.index and pd.notna(row.get("客户ID")):
             excel_client_id = int(row["客户ID"])
 
@@ -649,6 +701,7 @@ async def process_row_data(
         )
 
         # 确定扣减比例
+        # ---------- 条件分支 ----------
         if product_info.get("product_name") != product_name:
             logger.info(
                 f"产品名称不匹配（Excel: {product_name}, "
@@ -662,20 +715,26 @@ async def process_row_data(
 
         # 广告单元（可选）
         ad_unit = ''
+        # ---------- 条件分支 ----------
         if "ad_unit" in row.index and pd.notna(row.get("ad_unit")):
             ad_unit = normalize_ad_unit(row["ad_unit"])
+        # ---------- 条件分支 ----------
         elif "广告单元" in row.index and pd.notna(row.get("广告单元")):
             ad_unit = normalize_ad_unit(row["广告单元"])
 
         # 国家代码（可选，默认全部区域）
         country_code = "ZZ"
         country_input = None
+        # ---------- 条件分支 ----------
         if "country_code" in row.index and pd.notna(row.get("country_code")):
             country_input = str(row["country_code"]).strip()
+        # ---------- 条件分支 ----------
         elif "国家代码" in row.index and pd.notna(row.get("国家代码")):
             country_input = str(row["国家代码"]).strip()
+        # ---------- 条件分支 ----------
         if country_input:
             found_country_code = await find_country_code_by_any_format(db, country_input)
+            # ---------- 条件分支 ----------
             if found_country_code:
                 country_code = found_country_code
             else:
@@ -685,6 +744,7 @@ async def process_row_data(
                 )
                 country_code = "ZZ"
 
+        # ---------- 条件分支 ----------
         if country_code == "ZZ":
             country_condition = or_(
                 AdData.country_code == "ZZ",
@@ -694,6 +754,7 @@ async def process_row_data(
             country_condition = AdData.country_code == country_code
 
         # 解析数值字段
+        # ---------- 异常处理 ----------
         try:
             request_count = int(row["request_count"])
             match_count = int(row["match_count"])
@@ -704,6 +765,7 @@ async def process_row_data(
             # 优先使用Excel表中的映射关系数据，如果不存在或为空/NaN，才按照计算公式计算
             # 覆盖率（匹配率）= 匹配数/请求数 * 100
             coverage_rate_val = row.get("coverage_rate")
+            # ---------- 条件分支 ----------
             if coverage_rate_val is not None and pd.notna(coverage_rate_val) and str(coverage_rate_val).strip() != "":
                 coverage_rate = clean_numeric_value(coverage_rate_val)
             else:
@@ -711,6 +773,7 @@ async def process_row_data(
 
             # 展示率 = 展示数/匹配数 * 100
             display_rate_val = row.get("display_rate")
+            # ---------- 条件分支 ----------
             if display_rate_val is not None and pd.notna(display_rate_val) and str(display_rate_val).strip() != "":
                 display_rate = clean_numeric_value(display_rate_val)
             else:
@@ -718,6 +781,7 @@ async def process_row_data(
 
             # 点击率 = 点击数/展示数 * 100
             click_rate_val = row.get("click_rate")
+            # ---------- 条件分支 ----------
             if click_rate_val is not None and pd.notna(click_rate_val) and str(click_rate_val).strip() != "":
                 click_rate = clean_numeric_value(click_rate_val)
             else:
@@ -725,6 +789,7 @@ async def process_row_data(
 
             # 可见率（可选字段，如果Excel中有则使用，否则使用默认值0.0）
             viewability_rate_val = safe_get_value(row, "viewability_rate")
+            # ---------- 条件分支 ----------
             if is_valid_numeric_value(viewability_rate_val):
                 viewability_rate = clean_numeric_value(viewability_rate_val)
             else:
@@ -732,6 +797,7 @@ async def process_row_data(
 
             # eCPM = 收益/展示数 * 1000
             ecpm_before_val = safe_get_value(row, "ecpm_before_deduct")
+            # ---------- 条件分支 ----------
             if is_valid_numeric_value(ecpm_before_val):
                 ecpm_before = clean_numeric_value(ecpm_before_val)
             else:
@@ -739,6 +805,7 @@ async def process_row_data(
 
             # CPC（可选字段，如果Excel中有则使用，否则使用默认值0.0）
             cpc_val = safe_get_value(row, "cpc")
+            # ---------- 条件分支 ----------
             if is_valid_numeric_value(cpc_val):
                 cpc = clean_numeric_value(cpc_val)
             else:
@@ -746,6 +813,7 @@ async def process_row_data(
 
             # PageViews（可选字段，如果Excel中有则使用，否则使用默认值0）
             pageviews_val = safe_get_value(row, "pageviews")
+            # ---------- 条件分支 ----------
             if is_valid_numeric_value(pageviews_val):
                 pageviews = int(pageviews_val)
             else:
@@ -755,8 +823,10 @@ async def process_row_data(
             raise ValueError(f"数值字段格式错误: {str(e)}")
 
         # 验证数值非负
+        # ---------- 条件分支 ----------
         if request_count < 0 or match_count < 0 or display_count < 0 or click_count < 0:
             raise ValueError("请求数、匹配数、展示数和点击数不能为负数")
+        # ---------- 条件分支 ----------
         if ecpm_before < 0 or revenue_before < 0:
             raise ValueError("eCPM和收益不能为负数")
 
@@ -772,6 +842,7 @@ async def process_row_data(
 
         # 检查是否已存在相同日期和产品的记录（使用预查询的结果或单独查询）
         existing_data = None
+        # ---------- 条件分支 ----------
         if existing_records is not None:
             # 使用预查询的结果（优化性能）
             # 确保日期格式一致（使用date对象，不包含时间）
@@ -792,6 +863,7 @@ async def process_row_data(
             existing_result = await db.execute(existing_query)
             existing_data = existing_result.scalars().first()
 
+        # ---------- 条件分支 ----------
         if existing_data:
             # 更新现有记录
             logger.info(
@@ -800,8 +872,10 @@ async def process_row_data(
             )
             # 检查数据是否减少（在更新之前）
             # 格式化日期字符串（data_date 可能是 date 或 datetime 类型）
+            # ---------- 条件分支 ----------
             if isinstance(data_date, datetime):
                 date_str = data_date.date().isoformat()
+            # ---------- 条件分支 ----------
             elif hasattr(data_date, 'isoformat'):
                 date_str = data_date.isoformat()
             else:
@@ -882,6 +956,7 @@ async def process_row_data(
 
             # 将新创建的记录添加到existing_records缓存中，以便后续行能检测到同一批数据中的重复
             # 这样可以避免同一批数据中的重复记录被插入（虽然数据库唯一性约束也会防止，但提前检测更好）
+            # ---------- 条件分支 ----------
             if existing_records is not None:
                 # 确保日期格式一致（使用date对象，不包含时间）
                 date_key = normalize_date_key(data_date)
@@ -906,13 +981,18 @@ async def import_ad_data_handler(
 ) -> ExcelImportResponse:
     """
     导入广告数据的主处理函数
+        
+        返回:
+            ExcelImportResponse对象
     
-    返回:
-        ExcelImportResponse对象
+    鉴权：由 Depends(get_current_user) 或 require_admin 控制；客户角色仅可操作自有数据。
+    响应：统一 ResponseBaseSchema / PaginatedResponseBaseSchema 包装。
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 验证并读取Excel文件
     df, contents = await validate_and_read_excel(file)
 
+    # ---------- 异常处理 ----------
     try:
         # 处理列名映射
         df, column_mapping_result = await process_column_mapping(df)
@@ -937,11 +1017,14 @@ async def import_ad_data_handler(
 
         # 构建需要跳过的行号集合（Excel内部重复时，只保留最后一行）
         rows_to_skip = set()
+        # ---------- 条件分支 ----------
         if excel_duplicates:
             duplicate_count = sum(len(v) - 1 for v in excel_duplicates.values())
             result["duplicate_rows"] = duplicate_count
+            # ---------- 循环处理 ----------
             for (dup_date, dup_product), dup_rows in excel_duplicates.items():
                 # 只保留最后一行，跳过前面的重复行
+                # ---------- 条件分支 ----------
                 if len(dup_rows) > 1:
                     # 跳过除最后一行外的所有重复行
                     rows_to_skip.update(dup_rows[:-1])
@@ -963,23 +1046,29 @@ async def import_ad_data_handler(
         # 批量预查询数据库中可能重复的记录（优化性能）
         # 收集所有需要检查的日期和产品ID组合
         date_product_pairs = set()
+        # ---------- 循环处理 ----------
         for index, row in df.iterrows():
             row_num = index + 2
+            # ---------- 条件分支 ----------
             if row_num in rows_to_skip:
                 continue
+            # ---------- 异常处理 ----------
             try:
                 date_value = row["date"]
                 data_date = parse_date_value(date_value)
                 product_name = str(row["product_name"]).strip()
+                # ---------- 条件分支 ----------
                 if not product_name:
                     continue
                 # 查找产品ID
                 matches = product_name_map.get(product_name, [])
+                # ---------- 条件分支 ----------
                 if matches:
                     product_id = matches[0]["product_id"] if len(matches) == 1 else (
                         next((m["product_id"] for m in matches if m["client_id"] == client_id), None)
                         if client_id else matches[0]["product_id"]
                     )
+                    # ---------- 条件分支 ----------
                     if product_id:
                         date_product_pairs.add((data_date, product_id))
             except Exception:
@@ -987,8 +1076,10 @@ async def import_ad_data_handler(
 
         # 批量查询数据库中已存在的记录（优化性能，减少数据库查询次数）
         existing_records = {}
+        # ---------- 条件分支 ----------
         if date_product_pairs:
             conditions = []
+            # ---------- 循环处理 ----------
             for date, product_id in date_product_pairs:
                 # 确保日期格式正确（AdData.date是DateTime类型，需要转换为datetime进行比较）
                 # 使用统一的日期范围函数
@@ -1000,9 +1091,11 @@ async def import_ad_data_handler(
                         AdData.product_id == product_id
                     )
                 )
+            # ---------- 条件分支 ----------
             if conditions:
                 existing_query = select(AdData).where(or_(*conditions))
                 existing_result = await db.execute(existing_query)
+                # ---------- 循环处理 ----------
                 for record in existing_result.scalars().all():
                     # 使用日期（不包含时间）和产品ID作为key
                     record_date = record.date.date() if hasattr(record.date, 'date') else record.date
@@ -1012,9 +1105,11 @@ async def import_ad_data_handler(
                 logger.debug(f"批量查询到 {len(existing_records)} 条已存在的记录")
 
         # 处理每一行数据（跳过Excel内部重复的行）
+        # ---------- 循环处理 ----------
         for index, row in df.iterrows():
             row_num = index + 2
             # 跳过Excel内部重复的行（只保留最后一行）
+            # ---------- 条件分支 ----------
             if row_num in rows_to_skip:
                 logger.debug(f"跳过Excel内部重复行: 第{row_num}行")
                 continue
@@ -1042,6 +1137,7 @@ async def import_ad_data_handler(
 
         # 提前刷新以触发可能的 IntegrityError（在 get_db 自动提交之前）
         # 这样可以在提交前捕获错误并给出更友好的错误消息
+        # ---------- 异常处理 ----------
         try:
             await db.flush()  # 刷新到数据库但不提交，触发约束检查
         except IntegrityError as e:
@@ -1091,6 +1187,7 @@ async def import_ad_data_handler(
         )
 
         # 发送 Telegram 通知（仅在成功导入时）
+        # ---------- 条件分支 ----------
         if result['success_rows'] > 0:
             # 构建通知消息
             telegram_msg = f"📊 Excel 导入成功\n\n"
@@ -1099,27 +1196,34 @@ async def import_ad_data_handler(
             telegram_msg += f"总计: {result['total_rows']} 行\n"
             telegram_msg += f"✅ 成功: {result['success_rows']} 条"
 
+            # ---------- 条件分支 ----------
             if result.get('new_rows', 0) > 0:
                 telegram_msg += f"（新增 {result['new_rows']} 条"
+            # ---------- 条件分支 ----------
             if result.get('updated_rows', 0) > 0:
+                # ---------- 条件分支 ----------
                 if result.get('new_rows', 0) > 0:
                     telegram_msg += f"，更新 {result['updated_rows']} 条）"
                 else:
                     telegram_msg += f"（更新 {result['updated_rows']} 条）"
             else:
+                # ---------- 条件分支 ----------
                 if result.get('new_rows', 0) > 0:
                     telegram_msg += "）"
 
+            # ---------- 条件分支 ----------
             if result.get('failed_rows', 0) > 0:
                 telegram_msg += f"\n❌ 失败: {result['failed_rows']} 条"
 
             # 获取管理员配置并发送通知
+            # ---------- 异常处理 ----------
             try:
                 admin_config_result = await db.execute(
                     select(AdminNotificationConfig).where(AdminNotificationConfig.id == 1)
                 )
                 admin_config = admin_config_result.scalars().first()
 
+                # ---------- 条件分支 ----------
                 if (
                         admin_config
                         and admin_config.telegram_enabled

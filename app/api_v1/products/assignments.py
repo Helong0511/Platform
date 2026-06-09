@@ -1,7 +1,20 @@
-"""
-产品分配历史管理API端点
-提供产品分配历史的查询功能
-"""
+"""产品分配历史管理 API
+
+职责：查询产品在客户间的归属时间段，支持批量修正分配起止日期与无效记录清理。
+
+权限：
+- 按产品/客户查询：管理员全量；客户仅自身产品
+- 日期修正与清理：仅管理员
+
+主要端点（前缀 /product-assignments）：
+- GET  /products/{id}/assignments   产品维度分配历史
+- GET  /clients/{id}/assignments    客户维度分配历史（管理员）
+- PUT  /assignments/{id}/dates      修正单条起止日期
+- PUT  /assignments/batch-dates     批量修正
+- POST /assignments/validate        校验一致性
+- POST /assignments/cleanup         清理无效记录。
+
+说明：REST API 端点，统一 ResponseBaseSchema 响应；鉴权由各端点 Depends 声明。"""
 import logging
 from fastapi import APIRouter, Depends, Path, Query, Request, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -152,12 +165,14 @@ async def cleanup_product_assignments_endpoint(
     
     仅管理员可以访问此端点
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在ProductAssignmentService中）
     assignment_service: ProductAssignmentService = await get_product_assignment_service(db)
     
     # 调用服务层清理产品分配记录（服务层会处理清理）
     response_data = await assignment_service.cleanup_product_assignments(product_id, current_user)
 
+    # ---------- 条件分支 ----------
     if response_data.get("deleted_count", 0) > 0:
         await log_delete(
             db=db,
@@ -173,6 +188,7 @@ async def cleanup_product_assignments_endpoint(
         )
         await commit_audit_log(db)
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(
         data=response_data,
         message=response_data["message"]
@@ -248,6 +264,7 @@ async def update_assignment_dates(
     
     仅管理员可以访问此端点
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在ProductAssignmentService中）
     assignment_service: ProductAssignmentService = await get_product_assignment_service(db)
     
@@ -259,6 +276,7 @@ async def update_assignment_dates(
         assignment_id, update_data, current_user
     )
 
+    # ---------- 条件分支 ----------
     if update_data:
         await log_update(
             db=db,
@@ -271,6 +289,7 @@ async def update_assignment_dates(
         )
         await commit_audit_log(db)
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(
         data=ProductAssignmentResponse(**assignment_dict),
         message="日期更新成功，时间连贯性验证通过"
@@ -301,11 +320,13 @@ async def batch_update_assignment_dates(
     
     仅管理员可以访问此端点
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在ProductAssignmentService中）
     assignment_service: ProductAssignmentService = await get_product_assignment_service(db)
     
     # 准备批量更新数据
     updates = []
+    # ---------- 循环处理 ----------
     for update_item in batch_update.updates:
         update_data = update_item.model_dump(exclude_unset=True, exclude={'assignment_id'})
         update_data['assignment_id'] = update_item.assignment_id
@@ -328,6 +349,7 @@ async def batch_update_assignment_dates(
     )
     await commit_audit_log(db)
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(
         data=result,
         message=f"批量更新成功，共更新 {result['updated_count']} 条记录"

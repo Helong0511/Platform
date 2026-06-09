@@ -1,6 +1,9 @@
 """
-用户操作日志记录工具
-提供统一的日志记录接口，用于记录用户的各种操作
+用户审计日志（UserAuditLog）写入工具。
+
+职责：统一记录登录、CRUD、运行时错误等操作，附带 IP、资源类型与 JSON 详情。
+
+在系统中的位置：``app.core.audit_log``，被 API 层、异常处理器与敏感操作 Service 调用。
 """
 import json
 import logging

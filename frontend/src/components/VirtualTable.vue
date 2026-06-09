@@ -4,7 +4,9 @@
 基于 Element Plus 的 el-table，添加虚拟滚动支持
 -->
 <template>
-  <div class="virtual-table-container" ref="containerRef">
+  <!-- 页面主模板 -->
+<div class="virtual-table-container" ref="containerRef">
+    <!-- 数据表格 -->
     <el-table
       v-loading="loading"
       :data="visibleData"

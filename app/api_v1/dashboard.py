@@ -1,11 +1,11 @@
-"""
-仪表盘统计API端点
+"""仪表盘统计API端点
 提供数据统计和趋势分析功能，包括：
 - 获取仪表盘统计数据（按天、周、月、上月）
 - 获取趋势数据（按日期分组）
 - 计算各种指标（覆盖率、展示率、点击率、ROI等）
-- 管理员可查看所有数据，客户只能查看自己的数据
-"""
+- 管理员可查看所有数据，客户只能查看自己的数据。
+
+说明：REST API 端点，统一 ResponseBaseSchema 响应；鉴权由各端点 Depends 声明。"""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging

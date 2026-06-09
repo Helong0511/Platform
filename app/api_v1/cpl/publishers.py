@@ -1,6 +1,12 @@
-"""
-渠道管理 API
-"""
+"""渠道（下游）管理 API 路由模块。
+
+提供渠道 CRUD 接口，业务逻辑委托 PublisherService 处理。
+列表与详情响应会附带关联客户名称（client_name），便于管理端展示。
+
+路由前缀：/api/v1/cpl/publishers（由上层 router 挂载）
+权限：创建/更新/删除/详情需管理员；列表接口按当前用户数据权限过滤。
+
+说明：CPL 子系统接口，涵盖广告主（上游）、渠道（下游）、Offer、Cap、扣量与转化。"""
 import logging
 from typing import Optional
 
@@ -29,7 +35,13 @@ async def create_publisher(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """创建渠道（已重构使用服务层）"""
+    """
+    创建渠道（下游/Publisher）。
+
+    权限：仅管理员。
+    请求体：PublisherCreate，含渠道名称、关联客户、Postback 地址等。
+    业务：委托 PublisherService 完成校验、入库及审计日志；可关联客户账号。
+    """
     # 使用服务层（业务逻辑在PublisherService中）
     publisher_service: PublisherService = await get_publisher_service(db)
 
@@ -66,7 +78,14 @@ async def get_publishers(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """获取渠道列表（已重构使用服务层，批量加载客户信息）"""
+    """
+    分页获取渠道列表。
+
+    权限：登录用户，按数据权限过滤可见渠道。
+    筛选：关键词搜索、is_active 状态、client_id 客户过滤。
+    优化：批量预加载关联客户信息，避免 N+1 查询。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在PublisherService中，已优化批量加载）
     publisher_service: PublisherService = await get_publisher_service(db)
     publishers, total = await publisher_service.get_publishers(
@@ -79,15 +98,19 @@ async def get_publishers(
 
     # 构建响应数据（客户信息已通过selectinload预加载）
     publishers_data = []
+    # ---------- 循环处理 ----------
     for pub in publishers:
         pub_data = PublisherResponse.model_validate(pub)
         # 客户信息已预加载
+        # ---------- 条件分支 ----------
         if pub.client and pub.client.user:
             pub_data.client_name = pub.client.user.full_name if pub.client.user.full_name else pub.client.company_name
+        # ---------- 条件分支 ----------
         elif pub.client:
             pub_data.client_name = pub.client.company_name
         publishers_data.append(pub_data)
 
+    # ---------- 构建响应 ----------
     return PaginatedResponseBaseSchema.success(
         data=publishers_data,
         total=total,
@@ -105,7 +128,12 @@ async def get_publisher(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """获取渠道详情（已重构使用服务层）"""
+    """
+    按 ID 获取渠道详情。
+
+    权限：仅管理员。
+    返回渠道完整信息及关联客户摘要。
+    """
     # 使用服务层（业务逻辑在PublisherService中）
     publisher_service: PublisherService = await get_publisher_service(db)
 
@@ -135,7 +163,13 @@ async def update_publisher(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """更新渠道（已重构使用服务层）"""
+    """
+    更新渠道信息。
+
+    权限：仅管理员。
+    请求体：PublisherUpdate，仅提交变更字段。
+    业务：服务层处理校验、缓存失效及审计日志。
+    """
     # 使用服务层（业务逻辑在PublisherService中）
     publisher_service: PublisherService = await get_publisher_service(db)
 
@@ -170,7 +204,12 @@ async def delete_publisher(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """删除渠道（已重构使用服务层）"""
+    """
+    删除渠道。
+
+    权限：仅管理员。
+    业务：服务层检查关联 Offer 分配、转化记录等，有关联时拒绝删除。
+    """
     # 使用服务层（业务逻辑在PublisherService中）
     publisher_service: PublisherService = await get_publisher_service(db)
 

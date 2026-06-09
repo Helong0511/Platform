@@ -1,5 +1,4 @@
-"""
-客户API端点
+"""客户API端点
 提供客户通过API密钥访问的接口，包括：
 - 查询所有产品名称
 - 查询广告数据（默认当前月数据）
@@ -7,8 +6,9 @@
 请求验证：
 - 验证客户ID和API密钥（secret_key）
 - 验证请求时间差异（10秒内）
-- 验证MD5签名
-"""
+- 验证MD5签名。
+
+说明：对外开放接口，含客户 API（密钥+签名鉴权）与 Telegram 管理。"""
 import asyncio
 import logging
 from calendar import monthrange
@@ -39,19 +39,29 @@ logger = logging.getLogger(__name__)
 
 # ====== 请求模型 ======
 class ClientAPIBaseRequest(BaseModel):
-    """客户API基础请求模型（所有接口共用）"""
+    """
+    客户 API 基础请求模型（所有对外接口共用）。
+
+    字段：client_id、req_time（10 位秒级时间戳）、sign（MD5 签名）。
+    服务端校验时间差 ≤10 秒且签名与 secret_key 匹配。
+    """
     client_id: int = Field(..., description="客户ID")
     req_time: int = Field(..., description="请求时间戳（10位秒级）")
     sign: str = Field(..., description="MD5签名")
 
 
 class ClientProductsRequest(ClientAPIBaseRequest):
-    """查询产品信息请求模型"""
+    """查询客户名下全部激活产品名称列表，无额外参数。（详见字段 Field description）。"""
     pass
 
 
 class ClientDataRequest(ClientAPIBaseRequest):
-    """查询广告数据请求模型"""
+    """
+    查询客户广告数据请求。
+
+    data_type：all=按国家+广告单元明细，day=按产品+日期+广告单元日汇总。
+    日期缺省为当前自然月首尾。
+    """
     data_type: str = Field(default="all",
                            description="数据类型：'all' 表示详细数据（按国家+广告单元），'day' 表示每日汇总（按产品+日期+广告单元），默认为 'all'")
     start_date: str | None = Field(default=None, description="起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天")
@@ -71,6 +81,7 @@ class ProductNameResponse(BaseModel):
     name: str
 
     class Config:
+        """Pydantic 配置：允许从 SQLAlchemy ORM 对象构造响应实例。"""
         from_attributes = True
 
 
@@ -102,10 +113,16 @@ class AdDataItemResponse(BaseModel):
     ecpm: float = Field(..., description="eCPM（减扣后的，浮点数，保留2位小数）")
     revenue: float = Field(..., description="收益（减扣后的，浮点数，保留2位小数）")
 
-    class Config:
-        from_attributes = True
-
-
+    """
+    查询客户的所有产品名称
+    - 需要提供client_id、req_time和sign
+    - 返回该客户的所有激活产品名称列表
+    
+    功能：查询单条或详情（get_client_products）。
+    实现：异步端点，通过 Service 层访问数据库/缓存。
+    鉴权：由 Depends(get_current_user) 或 require_admin 控制访问范围。
+    响应：统一 ResponseBaseSchema / PaginatedResponseBaseSchema 包装。
+    """
 # 签名验证函数已移至 app/core/api_auth.py
 
 
@@ -122,6 +139,8 @@ async def get_client_products(
     - 需要提供client_id、req_time和sign
     - 返回该客户的所有激活产品名称列表
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         # 验证请求（产品接口不需要额外的参数）
         client = await verify_client_request(api_request, db)
@@ -144,6 +163,7 @@ async def get_client_products(
         logger.info(f"客户 {client.id} 查询产品列表，返回 {len(product_list)} 个产品")
 
         # 记录API访问日志
+        # ---------- 异常处理 ----------
         try:
             # 获取客户关联的用户名（如果有）
             user_id = client.user_id
@@ -179,6 +199,7 @@ async def get_client_products(
         )
 
     except Exception as e:
+        # ---------- 条件分支 ----------
         if isinstance(e, HTTPException):
             raise e
         logger.error(f"查询产品列表失败: {str(e)}", exc_info=True)
@@ -209,6 +230,8 @@ async def get_client_data(
     - data_type='all': 返回详细数据，按国家+广告单元分组；响应含 ad_unit 字段（无则为空字符串）
     - data_type='day': 返回每日汇总，按产品+日期+广告单元汇总；有 ad_unit 时拆分多行；国家显示"全部区域"
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         # 验证请求（传递额外的参数用于签名验证）
         client = await verify_client_request(
@@ -225,7 +248,9 @@ async def get_client_data(
         _, last_day = monthrange(today.year, today.month)
         default_month_end = date(today.year, today.month, last_day)
 
+        # ---------- 条件分支 ----------
         if api_request.start_date:
+            # ---------- 异常处理 ----------
             try:
                 start_date_obj = datetime.strptime(api_request.start_date, "%Y-%m-%d").date()
             except ValueError:
@@ -237,7 +262,9 @@ async def get_client_data(
             # 未提供起始日期，使用当前月第一天
             start_date_obj = default_month_start
 
+        # ---------- 条件分支 ----------
         if api_request.end_date:
+            # ---------- 异常处理 ----------
             try:
                 end_date_obj = datetime.strptime(api_request.end_date, "%Y-%m-%d").date()
             except ValueError:
@@ -250,6 +277,7 @@ async def get_client_data(
             end_date_obj = default_month_end
 
         # 验证日期范围
+        # ---------- 条件分支 ----------
         if start_date_obj > end_date_obj:
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
@@ -262,6 +290,7 @@ async def get_client_data(
         # 根据 data_type 决定查询逻辑（data_type 默认为 'all'）
         data_type = api_request.data_type or "all"
 
+        # ---------- 条件分支 ----------
         if data_type == "day":
             # 每日汇总模式：按产品+日期+广告单元汇总，国家显示"全部区域"
             # 构建汇总查询
@@ -285,6 +314,7 @@ async def get_client_data(
             # 只显示激活状态的产品
             query = query.where(Product.is_active == True)
 
+            # ---------- 条件分支 ----------
             if use_assignment_table:
                 # 使用产品分配历史表
                 end_date_with_default = func.coalesce(
@@ -306,6 +336,7 @@ async def get_client_data(
 
             # 应用日期范围过滤
             date_condition = date_range_condition(AdData.date, start_date_obj, end_date_obj)
+            # ---------- 条件分支 ----------
             if date_condition is not None:
                 query = query.where(date_condition)
 
@@ -325,6 +356,7 @@ async def get_client_data(
 
             # 转换为响应格式
             data_list = []
+            # ---------- 循环处理 ----------
             for row in summary_data:
                 date_obj = row.date if isinstance(row.date, date) else row.date.date()
                 date_str = date_obj.isoformat()
@@ -401,6 +433,7 @@ async def get_client_data(
             # 只显示激活状态的产品
             query = query.where(Product.is_active == True)
 
+            # ---------- 条件分支 ----------
             if use_assignment_table:
                 # 使用产品分配历史表
                 end_date_with_default = func.coalesce(
@@ -422,6 +455,7 @@ async def get_client_data(
 
             # 应用日期范围过滤
             date_condition = date_range_condition(AdData.date, start_date_obj, end_date_obj)
+            # ---------- 条件分支 ----------
             if date_condition is not None:
                 query = query.where(date_condition)
             query = query.order_by(AdData.date.asc())
@@ -431,10 +465,13 @@ async def get_client_data(
 
             # 转换为响应格式
             data_list = []
+            # ---------- 循环处理 ----------
             for row in ad_data_list:
                 # 解构数据：ad_data, product_name, country_name_zh
+                # ---------- 条件分支 ----------
                 if len(row) >= 3:
                     ad_data, product_name, country_name_zh = row
+                # ---------- 条件分支 ----------
                 elif len(row) >= 2:
                     ad_data, product_name = row
                     country_name_zh = None
@@ -465,10 +502,13 @@ async def get_client_data(
                 # 处理国家代码和国家名称
                 country_code_str = ad_data.country_code or ""
 
+                # ---------- 条件分支 ----------
                 if country_name_zh:
                     final_country_name = country_name_zh
+                # ---------- 条件分支 ----------
                 elif ad_data.country_code == "AA":
                     final_country_name = "未知区域"
+                # ---------- 条件分支 ----------
                 elif ad_data.country_code == "ZZ":
                     final_country_name = "全部区域"
                 else:
@@ -501,6 +541,7 @@ async def get_client_data(
         )
 
         # 记录API访问日志
+        # ---------- 异常处理 ----------
         try:
             # 获取客户关联的用户名（如果有）
             user_id = client.user_id
@@ -534,6 +575,7 @@ async def get_client_data(
             logger.warning(f"记录客户API访问日志失败: {log_error}")
 
         # 发送 Telegram 通知（仅在成功获取数据时）
+        # ---------- 条件分支 ----------
         if len(data_list) > 0:
 
             # 获取用户全名（优先使用 full_name，否则使用 username）
@@ -545,11 +587,13 @@ async def get_client_data(
             telegram_msg += f"数据类型: {data_type}\n"
             telegram_msg += f"✅ 成功获取: {len(data_list)} 条数据"
 
+            # ---------- 条件分支 ----------
             if start_date_obj and end_date_obj:
                 telegram_msg += f"\n日期范围: {start_date_obj.strftime('%Y-%m-%d')} 至 {end_date_obj.strftime('%Y-%m-%d')}"
 
             # 使用 await 发送消息，设置超时避免阻塞太久
             # send_telegram_message 内部已有完整的容错处理
+            # ---------- 异常处理 ----------
             try:
                 await asyncio.wait_for(
                     send_telegram_message_async(telegram_msg),
@@ -570,6 +614,7 @@ async def get_client_data(
     except HTTPException:
         raise
     except Exception as e:
+        # ---------- 条件分支 ----------
         if isinstance(e, HTTPException):
             raise e
         logger.error(f"查询广告数据失败: {str(e)}", exc_info=True)

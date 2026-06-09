@@ -115,10 +115,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """
 
     def __init__(self, app: ASGIApp):
+        """Args: app — 下游 ASGI 应用。"""
         super().__init__(app)
         self.app = app
 
     async def dispatch(self, request: Request, call_next):
+        """
+        对未登录请求按 IP 滑动窗口限流；已登录、短链与上报路由豁免。
+
+        Returns:
+            429 JSON 响应或下游处理器响应（附带 X-RateLimit-* 头）
+        """
         # ====== 排除短链接路由和上报路由（不限流） ======
         # 短链接访问和点击上报需要高并发支持，不能限流
         path = request.url.path
@@ -257,19 +264,20 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
     """
     
     def __init__(self, app: ASGIApp):
+        """初始化慢请求阈值与进程内累计统计计数器。"""
         super().__init__(app)
         self.app = app
         self.slow_request_threshold = 3.0  # 慢请求 WARNING 阈值（秒）
         self.very_slow_request_threshold = 8.0  # 非常慢请求 ERROR 阈值（秒）
-        
+
         # 性能统计（可选，用于监控）
         self.request_count = 0
         self.total_process_time = 0.0
         self.slow_request_count = 0
         self.very_slow_request_count = 0
-    
+
     async def dispatch(self, request: Request, call_next):
-        
+        """记录请求耗时，慢请求分级写日志，响应头附加 X-Process-Time。"""
         start_time = time.time()
         
         # 处理请求
@@ -351,10 +359,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """
 
     def __init__(self, app: ASGIApp):
+        """Args: app — 下游 ASGI 应用。"""
         super().__init__(app)
         self.app = app
 
     async def dispatch(self, request: Request, call_next):
+        """为所有响应附加 CSP、HSTS、Referrer-Policy 等安全头。"""
         response = await call_next(request)
 
         # ====== 安全响应头（防止网络劫持和XSS攻击） ======
@@ -446,12 +456,14 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """
 
     def __init__(self, app: ASGIApp):
+        """绑定 access 专用 logger，与业务 logger 分离。"""
         super().__init__(app)
         self.app = app
         # 获取访问日志记录器
         self.access_logger = logging.getLogger('access')
 
     async def dispatch(self, request: Request, call_next):
+        """记录请求方法、路径、状态码与耗时；生产环境仅记录错误请求。"""
         # ====== 记录请求开始时间 ======
         start_time = time.time()
 
@@ -527,6 +539,7 @@ class CompressionMiddleware(BaseHTTPMiddleware):
     """
 
     def __init__(self, app: ASGIApp):
+        """配置最小压缩体积与可压缩的 Content-Type 白名单。"""
         super().__init__(app)
         self.app = app
         # 最小压缩大小（小于此大小不压缩）
@@ -566,10 +579,11 @@ class CompressionMiddleware(BaseHTTPMiddleware):
         return True
 
     async def dispatch(self, request: Request, call_next):
+        """对 JSON/HTML 等文本响应做 gzip 压缩（客户端须支持 Accept-Encoding: gzip）。"""
         try:
             response = await call_next(request)
 
-            # 判断是否需要压缩
+            # ---------- 判断是否需要压缩 ----------
             if not self._should_compress(request, response):
                 return response
 
@@ -648,9 +662,10 @@ class StreamErrorHandlingMiddleware(BaseHTTPMiddleware):
     """
     
     def __init__(self, app: ASGIApp):
+        """Args: app — 下游 ASGI 应用。"""
         super().__init__(app)
         self.app = app
-    
+
     def _is_stream_error(self, exc: Exception) -> bool:
         """
         检查异常是否是流关闭相关的异常（客户端提前关闭连接）
@@ -709,6 +724,7 @@ class SensitivePathGuardMiddleware(BaseHTTPMiddleware):
     """
 
     def __init__(self, app: ASGIApp):
+        """初始化 IP 黑名单短 TTL 缓存，并注册封禁后的缓存失效回调。"""
         super().__init__(app)
         self._blocked_ip_cache: set[str] = set()
         self._blocked_ip_cache_expires_at: float = 0.0
@@ -717,6 +733,7 @@ class SensitivePathGuardMiddleware(BaseHTTPMiddleware):
         register_blocked_ip_cache_bust(self._invalidate_blocked_ip_cache)
 
     def _invalidate_blocked_ip_cache(self) -> None:
+        """封禁 IP 变更时使本地缓存立即过期，下次请求重新拉 Redis。"""
         self._blocked_ip_cache_expires_at = 0.0
 
     async def _persist_probe_log(
@@ -775,9 +792,16 @@ class SensitivePathGuardMiddleware(BaseHTTPMiddleware):
         return client_ip in self._blocked_ip_cache
 
     async def dispatch(self, request: Request, call_next):
+        """
+        匹配敏感路径规则：黑名单 IP 返回 403，命中规则返回 404 并累计计数/自动封禁。
+
+        Returns:
+            JSONResponse（拦截）或下游正常响应
+        """
         if not getattr(settings, "ENABLE_SENSITIVE_PATH_GUARD", True):
             return await call_next(request)
 
+        # ---------- 解析客户端 IP ----------
         try:
             client_ip = get_client_ip(request)
         except Exception:

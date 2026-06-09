@@ -1,5 +1,4 @@
-"""
-用户管理API端点模块
+"""用户管理API端点模块
 
 功能说明：
 提供用户信息的完整CRUD操作，包括：
@@ -65,8 +64,9 @@
 2. 密码使用bcrypt加密，无法解密
 3. 删除用户前必须检查关联数据
 4. 用户名和邮箱必须唯一
-5. 客户角色用户只能有一个关联的客户
-"""
+5. 客户角色用户只能有一个关联的客户。
+
+说明：REST API 端点，统一 ResponseBaseSchema 响应；鉴权由各端点 Depends 声明。"""
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, Path
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
@@ -251,14 +251,18 @@ async def export_users_excel(
     - 支持按用户名、角色和状态过滤
     - 返回Excel文件流
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在UserService中）
     user_service: UserService = await get_user_service(db)
     
     # 转换status参数为布尔值（服务层期望布尔值）
     is_active = None
+    # ---------- 条件分支 ----------
     if status and status.strip():
+        # ---------- 条件分支 ----------
         if status.lower() == 'active':
             is_active = True
+        # ---------- 条件分支 ----------
         elif status.lower() == 'inactive':
             is_active = False
     
@@ -274,6 +278,7 @@ async def export_users_excel(
     )
 
     # 如果没有数据，抛出错误提示用户
+    # ---------- 条件分支 ----------
     if not users:
         raise_api_exception(
             error_code=ErrorCode.NOT_FOUND,
@@ -285,6 +290,7 @@ async def export_users_excel(
 
     # 准备导出数据（客户信息已通过selectinload预加载）
     data = []
+    # ---------- 循环处理 ----------
     for user in users:
         # 客户信息已通过selectinload预加载，直接访问
         client = user.clients[0] if user.role == UserRole.CLIENT and user.clients else None
@@ -300,6 +306,7 @@ async def export_users_excel(
         }
 
         # 如果是客户，添加客户信息
+        # ---------- 条件分支 ----------
         if client:
             row.update({
                 "公司名称": client.company_name or "",
@@ -329,6 +336,7 @@ async def export_users_excel(
     )
     await commit_audit_log(db)
 
+    # ---------- 构建响应 ----------
     return excel_streaming_response(data, "用户数据", "用户数据")
 
 
@@ -343,6 +351,7 @@ async def get_current_user_info(
     - 需要认证（任何已登录用户都可以访问）
     - 返回当前用户的完整信息，包括客户信息（如果用户是客户角色）
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在UserService中）
     user_service: UserService = await get_user_service(db)
     
@@ -353,9 +362,11 @@ async def get_current_user_info(
     api_enabled = False
     password_change_enabled = False
     has_publisher = False
+    # ---------- 条件分支 ----------
     if user.role == UserRole.CLIENT:
         # 客户信息已通过selectinload预加载，直接访问
         client = user.clients[0] if user.clients else None
+        # ---------- 条件分支 ----------
         if client:
             api_enabled = client.api_enabled  # 获取API开关状态
             password_change_enabled = client.password_change_enabled  # 获取密码修改开关状态
@@ -391,6 +402,7 @@ async def get_current_user_info(
         'has_publisher': has_publisher,  # 是否有关联的渠道（用于前端菜单显示）
         'client': client_data  # 客户信息（如果存在）
     }
+    # ---------- 异常处理 ----------
     try:
         user_data = UserResponse.model_validate(user_dict).model_dump()
     except Exception as exc:
@@ -405,6 +417,7 @@ async def get_current_user_info(
             detail="用户信息格式异常，请联系管理员检查账号邮箱等字段",
         )
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=user_data)
 
 
@@ -449,6 +462,7 @@ async def get_user(
     - 返回用户完整信息，包括客户信息（如果用户是客户角色）
     - 使用服务层，业务逻辑已优化
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在UserService中）
     user_service: UserService = await get_user_service(db)
     user = await user_service.get_user_by_id(user_id, current_user, include_client=True)
@@ -457,9 +471,11 @@ async def get_user(
     client_data = None
     api_enabled = False
     password_change_enabled = False
+    # ---------- 条件分支 ----------
     if user.role == UserRole.CLIENT:
         # 客户信息已通过selectinload预加载，直接访问
         client = user.clients[0] if user.clients else None
+        # ---------- 条件分支 ----------
         if client:
             api_enabled = client.api_enabled  # 获取API开关状态
             password_change_enabled = client.password_change_enabled  # 获取密码修改开关状态
@@ -491,6 +507,7 @@ async def get_user(
     }
     user_data = UserResponse.model_validate(user_dict).model_dump()
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=user_data)
 
 
@@ -607,6 +624,7 @@ async def update_user(
     - 可更新用户角色、状态和登录限制
     - 支持密码更新
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在UserService中）
     user_service: UserService = await get_user_service(db)
     
@@ -621,11 +639,14 @@ async def update_user(
     user = await user_service.update_user(user_id, update_data, current_user)
 
     # 记录更新操作
+    # ---------- 条件分支 ----------
     if "password" in update_data:
         update_data["password"] = "***"
 
     wrote_audit = False
+    # ---------- 条件分支 ----------
     if "is_active" in update_data and update_data["is_active"] != old_is_active:
+        # ---------- 条件分支 ----------
         if user.is_active:
             await log_activate(
                 db=db,
@@ -646,6 +667,7 @@ async def update_user(
             )
         wrote_audit = True
 
+    # ---------- 条件分支 ----------
     if len(update_data) > 1 or "is_active" not in update_data:
         await log_update(
             db=db,
@@ -658,6 +680,7 @@ async def update_user(
         )
         wrote_audit = True
 
+    # ---------- 条件分支 ----------
     if wrote_audit:
         await commit_audit_log(db)
 
@@ -672,6 +695,7 @@ async def update_user(
         'created_at': user.created_at,
         'updated_at': user.updated_at
     }
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=UserResponse.model_validate(user_dict))
 
 
@@ -688,7 +712,9 @@ async def delete_user(
     - 检查用户是否存在关联客户数据
     - 永久删除用户
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 防止删除自己
+    # ---------- 条件分支 ----------
     if user_id == current_user.id:
         raise_api_exception(
             ErrorCode.CANNOT_DELETE_SELF,
@@ -719,4 +745,5 @@ async def delete_user(
     # 调用服务层删除用户（服务层会检查关联数据）
     await user_service.delete_user(user_id, current_user)
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data={"message": "用户已成功删除"})

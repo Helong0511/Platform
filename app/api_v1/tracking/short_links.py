@@ -1,7 +1,20 @@
-"""
-短链接服务API端点
-提供短链接的生成、重定向、管理功能
-"""
+"""短链接服务 API
+
+职责：短码生成、302 跳转、点击计数同步、Offer/渠道关联与斗篷桥页配置。
+
+权限：
+- GET /{short_code} 跳转：公开（记录点击）
+- CRUD 与管理接口：需登录；部分操作需管理员
+
+主要端点（前缀 /short-links）：
+- POST   /              创建短链接
+- GET    /              分页列表
+- GET    /{id}          详情
+- PUT    /{id}          更新
+- DELETE /{id}          删除
+- GET    /{short_code}  公开跳转。
+
+说明：点击追踪与短链接服务，记录访问并对接斗篷跳转。"""
 import logging
 from typing import Optional
 from datetime import datetime, timezone
@@ -54,7 +67,12 @@ logger = logging.getLogger(__name__)
 async def generate_short_code(
     db: AsyncSession = Depends(get_db)
 ):
-    """生成唯一的短链接代码（公开接口，用于前端自动生成）"""
+    """
+    生成唯一短链接代码。
+
+    权限：登录用户；供前端表单自动生成 short_code。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     
     # 获取所有已存在的代码
     result = await db.execute(select(ShortLink.short_code))
@@ -71,6 +89,7 @@ async def generate_short_code(
         # 每次尝试最多100次
         code = generate_unique_short_code(existing_codes, length=length, max_attempts=100)
         
+        # ---------- 条件分支 ----------
         if code:
             # 生成成功
             logger.info(f"成功生成短链接代码: {code} (长度: {length})")
@@ -81,12 +100,14 @@ async def generate_short_code(
         logger.warning(f"生成短链接代码失败 (长度: {length}, 连续失败: {consecutive_failures})")
         
         # 如果连续失败5次，增加位数
+        # ---------- 条件分支 ----------
         if consecutive_failures >= max_consecutive_failures:
             length += 1
             consecutive_failures = 0  # 重置计数器
             logger.info(f"增加短链接代码长度到 {length} 位")
             
             # 如果达到最大长度，停止尝试
+            # ---------- 条件分支 ----------
             if length > max_length:
                 break
     
@@ -103,7 +124,11 @@ async def check_short_code(
     short_code: str = Path(..., description="短链接代码"),
     db: AsyncSession = Depends(get_db)
 ):
-    """检查短链接代码是否存在（公开接口，用于前端验证）"""
+    """
+    检查短链接代码是否已被占用。
+
+    权限：登录用户；供前端实时校验输入。
+    """
     result = await db.execute(
         select(ShortLink).where(ShortLink.short_code == short_code)
     )
@@ -123,7 +148,12 @@ async def create_short_link(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """创建短链接（已重构使用服务层）"""
+    """
+    创建短链接。
+
+    权限：仅管理员。
+    业务：委托 ShortLinkService 完成 URL 校验、代码生成及审计日志。
+    """
     # 使用服务层（业务逻辑在ShortLinkService中）
     short_link_service: ShortLinkService = await get_short_link_service(db)
     
@@ -167,7 +197,12 @@ async def get_short_links(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取短链接列表（已重构使用服务层）"""
+    """
+    分页获取短链接列表，支持标题/URL/短码搜索及 Offer、创建者筛选。
+
+    权限：登录用户，按数据权限过滤可见范围；响应附带完整 short_url。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在ShortLinkService中）
     short_link_service: ShortLinkService = await get_short_link_service(db)
     
@@ -184,17 +219,21 @@ async def get_short_links(
     # 构建完整的短链接URL
     base_url = str(request.base_url).rstrip('/')
     links_data = []
+    # ---------- 循环处理 ----------
     for link in short_links:
         link_data = ShortLinkResponse.model_validate(link)
         link_data.short_url = f"{base_url}/s/{link.short_code}"
         # 添加创建者名称（已通过joinedload预加载）
+        # ---------- 条件分支 ----------
         if link.creator:
             link_data.creator_name = link.creator.username
         # 添加渠道名称（已通过joinedload预加载）
+        # ---------- 条件分支 ----------
         if link.channel:
             link_data.channel_name = link.channel.publisher_name
         links_data.append(link_data)
     
+    # ---------- 构建响应 ----------
     return PaginatedResponseBaseSchema.success(
         data=links_data,
         total=total,
@@ -212,7 +251,11 @@ async def get_short_link_detail(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取短链接详情（已重构使用服务层）"""
+    """
+    按 link_id 获取单条短链接详情（含点击数、渠道名、完整 short_url）。
+
+    权限：登录用户；无权限时返回 404。
+    """
     # 使用服务层（业务逻辑在ShortLinkService中）
     short_link_service: ShortLinkService = await get_short_link_service(db)
     
@@ -243,7 +286,12 @@ async def update_short_link(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """更新短链接（已重构使用服务层）"""
+    """
+    按 link_id 更新短链接（URL、标题、Offer 关联、像素配置等）。
+
+    修改 original_url 时重新校验 Tracklink 占位符。
+    权限：仅管理员。
+    """
     # 使用服务层（业务逻辑在ShortLinkService中）
     short_link_service: ShortLinkService = await get_short_link_service(db)
     
@@ -282,7 +330,11 @@ async def delete_short_link(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """删除短链接（已重构使用服务层）"""
+    """
+    删除短链接。
+
+    权限：仅管理员；有关联点击时由服务层拦截。
+    """
     # 使用服务层（业务逻辑在ShortLinkService中）
     short_link_service: ShortLinkService = await get_short_link_service(db)
 
@@ -314,15 +366,22 @@ async def get_short_link_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取短链接统计信息"""
+    """
+    获取短链接点击统计摘要。
+
+    权限：登录用户；含点击量、转化率等聚合指标。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     # 构建基础查询条件
     base_conditions = []
+    # ---------- 条件分支 ----------
     if current_user.role != UserRole.ADMIN:
         # 普通用户只能查看自己的统计
         base_conditions.append(ShortLink.created_by == current_user.id)
     
     # 计算总数
     total_query = select(func.count(ShortLink.id))
+    # ---------- 条件分支 ----------
     if base_conditions:
         total_query = total_query.where(and_(*base_conditions))
     total_result = await db.execute(total_query)
@@ -330,11 +389,13 @@ async def get_short_link_stats(
     
     # 计算总点击次数
     click_query = select(func.sum(ShortLink.click_count))
+    # ---------- 条件分支 ----------
     if base_conditions:
         click_query = click_query.where(and_(*base_conditions))
     click_result = await db.execute(click_query)
     total_clicks = click_result.scalar() or 0
     # 确保 total_clicks 是整数
+    # ---------- 条件分支 ----------
     if total_clicks is None:
         total_clicks = 0
     else:
@@ -356,6 +417,7 @@ async def get_short_link_stats(
     expired_result = await db.execute(expired_query)
     expired_links = expired_result.scalar() or 0
     
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=ShortLinkStatsResponse(
         total_links=total_links,
         total_clicks=total_clicks,
@@ -378,7 +440,9 @@ async def sync_short_link_clicks(
     
     注意：此接口需要管理员权限
     """
+    # ---------- 入口：参数与依赖准备 ----------
     
+    # ---------- 异常处理 ----------
     try:
         logger.info(f"管理员 {current_user.id} 手动触发短链接点击次数同步")
         synced_count = await sync_click_counts_to_db(db)
@@ -394,6 +458,7 @@ async def sync_short_link_clicks(
             details={"synced_count": synced_count},
         )
         await commit_audit_log(db)
+        # ---------- 条件分支 ----------
         if synced_count > 0:
             logger.info(f"手动同步成功: 更新了 {synced_count} 条记录")
             return ResponseBaseSchema.success(
@@ -426,6 +491,7 @@ async def check_click_count_stats(
     
     注意：此接口需要管理员权限
     """
+    # ---------- 入口：参数与依赖准备 ----------
     
     # 获取进程内计数器统计信息（使用安全的函数，而不是直接访问私有变量）
     memory_stats = await get_click_counter_stats()
@@ -443,8 +509,10 @@ async def check_click_count_stats(
     
     # 检查Redis状态
     redis = await get_redis_client()
+    # ---------- 条件分支 ----------
     if redis:
         stats["redis_available"] = True
+        # ---------- 异常处理 ----------
         try:
             # 使用SCAN而不是KEYS，避免在生产环境阻塞
             pattern = f"{CLICK_COUNTER_PREFIX}*"
@@ -452,6 +520,7 @@ async def check_click_count_stats(
             cursor = 0
             max_iterations = 100  # 限制迭代次数，避免长时间阻塞（最多10000个键）
             iteration = 0
+            # ---------- 异常处理 ----------
             try:
                 while True:
                     cursor, batch_keys = await redis.scan(cursor, match=pattern, count=100)
@@ -459,6 +528,7 @@ async def check_click_count_stats(
                     iteration += 1
                     
                     # 安全检查：防止无限循环
+                    # ---------- 条件分支 ----------
                     if iteration >= max_iterations:
                         logger.warning(
                             f"Redis SCAN达到最大迭代次数 {max_iterations}，停止扫描。"
@@ -466,6 +536,7 @@ async def check_click_count_stats(
                         )
                         break
                     
+                    # ---------- 条件分支 ----------
                     if cursor == 0:
                         break
             except Exception as scan_error:
@@ -476,17 +547,21 @@ async def check_click_count_stats(
             stats["redis_counters"] = len(keys)
             
             # 获取每个计数器的详细信息（最多显示20个）
+            # ---------- 循环处理 ----------
             for key in keys[:20]:
                 # 安全地提取 short_code：使用 startswith 检查并移除前缀
+                # ---------- 条件分支 ----------
                 if not key.startswith(CLICK_COUNTER_PREFIX):
                     continue
                 
                 short_code = key[len(CLICK_COUNTER_PREFIX):]
                 
                 # 验证 short_code 不为空
+                # ---------- 条件分支 ----------
                 if not short_code:
                     continue
                 
+                # ---------- 异常处理 ----------
                 try:
                     count = await redis.get(key)
                     count_value = int(count) if count else 0
@@ -501,6 +576,7 @@ async def check_click_count_stats(
             stats["redis_error"] = str(e)
     
     # 获取数据库中的总点击次数
+    # ---------- 异常处理 ----------
     try:
         result = await db.execute(select(func.sum(ShortLink.click_count)))
         total_clicks = result.scalar() or 0
@@ -508,6 +584,7 @@ async def check_click_count_stats(
     except Exception as e:
         stats["database_error"] = str(e)
     
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=stats)
 
 
@@ -533,6 +610,7 @@ async def diagnose_short_link_sync(
     
     注意：此接口需要管理员权限
     """
+    # ---------- 入口：参数与依赖准备 ----------
     from app.core.short_link_click_counter import get_click_counter_stats
     from app.core.constants import APP_TIMEZONE
     
@@ -550,24 +628,29 @@ async def diagnose_short_link_sync(
     }
     
     # 1. 检查数据库中的短链接
+    # ---------- 异常处理 ----------
     try:
         result = await db.execute(
             select(ShortLink).where(ShortLink.short_code == short_code)
         )
         short_link = result.scalars().first()
         
+        # ---------- 条件分支 ----------
         if short_link:
             diagnosis["exists"] = True
             diagnosis["is_active"] = short_link.is_active
             diagnosis["database_click_count"] = short_link.click_count or 0
             
             # 检查是否过期
+            # ---------- 条件分支 ----------
             if short_link.expires_at:
                 expires_at = short_link.expires_at
+                # ---------- 条件分支 ----------
                 if expires_at.tzinfo is not None:
                     expires_at = expires_at.astimezone(APP_TIMEZONE).replace(tzinfo=None)
                 now = get_app_now_naive()
                 diagnosis["is_expired"] = expires_at < now
+                # ---------- 条件分支 ----------
                 if diagnosis["is_expired"]:
                     diagnosis["issues"].append("短链接已过期")
                     diagnosis["recommendations"].append("如果短链接已过期但仍在使用，请更新过期时间")
@@ -580,12 +663,16 @@ async def diagnose_short_link_sync(
     
     # 2. 检查Redis中的计数器
     redis = await get_redis_client()
+    # ---------- 条件分支 ----------
     if redis:
+        # ---------- 异常处理 ----------
         try:
             redis_key = f"{CLICK_COUNTER_PREFIX}{short_code}"
             counter_value = await redis.get(redis_key)
+            # ---------- 条件分支 ----------
             if counter_value:
                 diagnosis["redis_counter_value"] = int(counter_value)
+                # ---------- 条件分支 ----------
                 if diagnosis["redis_counter_value"] > 0:
                     diagnosis["issues"].append(f"Redis中有待同步的计数器值: {diagnosis['redis_counter_value']}")
                     diagnosis["recommendations"].append("等待下次自动同步（每5分钟），或手动触发同步")
@@ -597,11 +684,15 @@ async def diagnose_short_link_sync(
         diagnosis["recommendations"].append("检查Redis连接配置")
     
     # 3. 检查进程内计数器
+    # ---------- 异常处理 ----------
     try:
         memory_stats = await get_click_counter_stats()
+        # ---------- 循环处理 ----------
         for counter_detail in memory_stats.get("counter_details", []):
+            # ---------- 条件分支 ----------
             if counter_detail.get("short_code") == short_code:
                 diagnosis["memory_counter_value"] = counter_detail.get("count", 0)
+                # ---------- 条件分支 ----------
                 if diagnosis["memory_counter_value"] > 0:
                     diagnosis["issues"].append(f"进程内有待同步的计数器值: {diagnosis['memory_counter_value']}")
                     diagnosis["recommendations"].append("等待下次自动同步（每5分钟），或手动触发同步")
@@ -610,11 +701,14 @@ async def diagnose_short_link_sync(
         logger.warning(f"诊断短链接时查询进程内计数器失败: {e}")
     
     # 4. 分析可能的问题
+    # ---------- 条件分支 ----------
     if not diagnosis["exists"]:
         diagnosis["recommendations"].append("如果短链接不存在，Redis中的计数器将在下次同步时自动清理")
+    # ---------- 条件分支 ----------
     elif not diagnosis["is_active"]:
         diagnosis["issues"].append("短链接已禁用")
         diagnosis["recommendations"].append("如果短链接已禁用但仍在使用，请重新激活")
+    # ---------- 条件分支 ----------
     elif diagnosis["is_expired"]:
         diagnosis["recommendations"].append("如果短链接已过期但仍在使用，请更新过期时间")
     
@@ -624,9 +718,11 @@ async def diagnose_short_link_sync(
         (diagnosis["memory_counter_value"] and diagnosis["memory_counter_value"] > 0)
     )
     
+    # ---------- 条件分支 ----------
     if has_pending_sync and diagnosis["exists"] and diagnosis["is_active"] and not diagnosis["is_expired"]:
         diagnosis["recommendations"].append("短链接状态正常，待同步的计数器将在下次自动同步时处理")
     
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=diagnosis)
 
 
@@ -646,12 +742,15 @@ async def diagnose_short_links_batch(
     
     注意：此接口需要管理员权限
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 条件分支 ----------
     if not short_codes:
         raise_api_exception(
             ErrorCode.INVALID_PARAMETER,
             detail="请提供至少一个短链接代码"
         )
     
+    # ---------- 条件分支 ----------
     if len(short_codes) > 50:
         raise_api_exception(
             ErrorCode.INVALID_PARAMETER,
@@ -659,6 +758,7 @@ async def diagnose_short_links_batch(
         )
     
     results = []
+    # ---------- 循环处理 ----------
     for short_code in short_codes:
         # 调用单个诊断函数（复用逻辑）
         diagnosis = await diagnose_short_link_sync(short_code, db, current_user)
@@ -687,6 +787,7 @@ async def diagnose_short_links_batch(
     )
     await commit_audit_log(db)
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data={
         "summary": summary,
         "details": results

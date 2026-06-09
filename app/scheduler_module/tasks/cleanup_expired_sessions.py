@@ -1,6 +1,16 @@
 """
-清理过期会话和黑名单记录的定时任务
-建议每天凌晨2点执行
+清理过期会话与 Token 黑名单定时任务。
+
+功能说明：
+- 删除已过期的 UserSession 与 TokenBlacklist 记录
+- 建议每天凌晨执行，控制会话表膨胀
+
+在系统中的位置：
+- 由 CLEANUP_SESSIONS_TASK_NAME 调度触发
+
+注意事项：
+1. 仅删除 expires_at < now 的行，勿误删仍有效会话
+2. 大批量删除分批 commit，避免长锁
 """
 import logging
 from datetime import timedelta

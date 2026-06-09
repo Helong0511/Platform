@@ -1,7 +1,15 @@
+/**
+ * 组合式函数 - 广告主管理列显隐
+ * @file composables/useAdvertiserManagementColumnVisibility.js
+ */
 import { useTableColumnVisibility } from './useTableColumnVisibility';
 
 const STORAGE_KEY = 'advertiserManagement_columnVisibility';
 
+/**
+ * 组合式函数 - 广告主管理列显隐
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useAdvertiserManagementColumnVisibility() {
   return useTableColumnVisibility(STORAGE_KEY, {
     getDefaultColumns: () => ({

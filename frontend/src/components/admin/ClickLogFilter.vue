@@ -1,4 +1,9 @@
+<!--
+  点击日志筛选表单
+  @file components/admin/ClickLogFilter.vue
+-->
 <template>
+  <!-- 筛选区 -->
   <div class="click-log-filter">
     <el-collapse v-model="filterCollapse" class="filter-collapse">
       <el-collapse-item name="filter" :title="filterCollapse.includes('filter') ? '收起筛选条件' : '展开筛选条件'">

@@ -1,3 +1,7 @@
+/**
+ * 工具模块 - 用户-客户关联判断工具
+ * @file utils/userClient.js
+ */
 import { logger } from './logger';
 
 /**
@@ -38,6 +42,9 @@ export async function resolveClientIdForUser(user, getUserDetail) {
   return null;
 }
 
+/**
+ * 确认User Has Client。
+ */
 export async function ensureUserHasClient(user, getUserDetail, ElMessage) {
   if (user.role !== 'client') {
     return false;

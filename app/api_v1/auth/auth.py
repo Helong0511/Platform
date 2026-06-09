@@ -1,5 +1,4 @@
-"""
-用户认证API端点模块
+"""用户认证API端点模块
 
 功能说明：
 提供用户登录和身份验证相关的所有API端点，包括：
@@ -33,8 +32,9 @@
 1. 登录接口使用OAuth2PasswordRequestForm格式（username/password）
 2. 所有需要认证的接口都需要在请求头中携带Bearer令牌
 3. 客户角色的IP白名单验证：127.0.0.1始终允许
-4. 登录失败不会暴露具体原因（用户名不存在或密码错误都返回相同错误）
-"""
+4. 登录失败不会暴露具体原因（用户名不存在或密码错误都返回相同错误）。
+
+说明：用户认证，含登录、刷新令牌、登出及 JWT 校验。"""
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -74,7 +74,7 @@ async def _record_login_failure(
         user: User | None = None,
         username: str | None = None,
 ) -> None:
-    """记录登录失败审计日志，失败时不影响登录流程"""
+    """记录登录失败审计日志，失败时不影响登录流程（详见字段 Field description）。"""
     try:
         await log_login(
             db=db,
@@ -410,6 +410,11 @@ async def logout(
     - 记录退出登录操作到审计日志
     - 注意：JWT是无状态的，这里主要是记录日志
     - 实际的token失效由前端清除，或等待token过期
+    
+    功能：用户登出（logout）。
+    实现：异步端点，通过 Service 层访问数据库/缓存。
+    鉴权：由 Depends(get_current_user) 或 require_admin 控制访问范围。
+    响应：统一 ResponseBaseSchema / PaginatedResponseBaseSchema 包装。
     """
     try:
         # 记录退出登录日志

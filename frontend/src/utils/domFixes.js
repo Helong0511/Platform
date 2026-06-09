@@ -1,6 +1,8 @@
 /**
  * DOM 修复工具
- * 修复表单元素可访问性问题和浏览器兼容性问题
+ * @file utils/domFixes.js
+ *
+ * 修复 Element Plus 表单元素可访问性问题及浏览器兼容性差异。
  */
 import router from '../router';
 

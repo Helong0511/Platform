@@ -1,5 +1,6 @@
 /**
- * 短链接访问记录 API
+ * 点击日志 API：短链接访问记录查询
+ * @file api/clicks.js
  */
 import { createCrudApi } from '@/utils/crudApi';
 import { request } from '@/utils/api';
@@ -14,8 +15,14 @@ const { getClicks, getClickDetail } = createCrudApi('/api/v1/clicks', {
   listOptions: { timeout: 45000 }
 });
 
+/** 分页获取点击日志列表 */
 export { getClicks, getClickDetail };
 
+/**
+ * 补发指定点击记录的 Facebook CAPI 上报
+ * @param {number|string} clickRecordId - 点击记录 ID
+ * @returns {Promise<Object>} 上报结果
+ */
 export function resendClickFacebookReport(clickRecordId) {
   return withCsrfMutate(() =>
     request(

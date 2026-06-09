@@ -1,7 +1,13 @@
+<!--
+  API 文档页：客户对接接口说明
+  @file views/ApiDocumentation.vue
+-->
 <template>
-  <div class="api-documentation-container">
+  <!-- 页面主模板 -->
+<div class="api-documentation-container">
     <el-card class="documentation-card">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="card-header">
           <h1>客户API对接文档</h1>
           <el-tag type="info" size="large">API版本: v1</el-tag>

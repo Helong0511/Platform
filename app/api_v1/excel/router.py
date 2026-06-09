@@ -1,7 +1,10 @@
-"""
-Excel处理路由模块
-提供Excel导入和导出功能
-"""
+"""Excel 导入/导出 HTTP 路由
+
+职责：暴露 /excel/import 与 /excel/export 端点，委托 import_handler / export_handler。
+
+权限：需登录。
+
+说明：Excel 批量导入/导出，支持广告数据等业务的表格批处理。"""
 from datetime import date
 
 from fastapi import APIRouter, Depends, UploadFile, File, Query, HTTPException
@@ -44,6 +47,7 @@ async def import_ad_data(
     - 批量导入广告数据
     - 返回导入结果和错误信息
     """
+    # ---------- 入口：参数与依赖准备 ----------
     import_response = await import_ad_data_handler(
         file=file,
         db=db,
@@ -69,6 +73,7 @@ async def import_ad_data(
     )
     await commit_audit_log(db)
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=import_response)
 
 
@@ -91,6 +96,8 @@ async def export_ad_data(
     - 支持按日期范围和产品ID过滤
     - 成功时返回Excel文件流，失败时返回JSON错误响应
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         response = await export_ad_data_handler(
             start_date=start_date,

@@ -70,6 +70,7 @@ class CloakPixelMappingService:
     """
     
     def __init__(self):
+        """初始化内存缓存与时间戳表，TTL 默认 1 小时。"""
         # 内存缓存：{short_code: pixel_config}
         self._cache: Dict[str, Dict[str, Any]] = {}
         # 缓存过期时间（秒）

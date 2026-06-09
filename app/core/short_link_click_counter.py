@@ -1,6 +1,9 @@
 """
-短链接点击次数异步更新模块
-使用Redis计数器异步批量更新点击次数，减少数据库压力
+短链接点击计数异步刷盘模块。
+
+职责：Redis 原子递增 + 定时/阈值触发批量写回 ``short_links.click_count``，并失效短链缓存。
+
+在系统中的位置：``app.core.short_link_click_counter``，由短链跳转路由与定时任务调用。
 """
 import logging
 import asyncio

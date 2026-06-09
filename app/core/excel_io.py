@@ -1,5 +1,9 @@
 """
-Excel 读写工具：异步读取、同步导出流
+Excel 导入导出工具模块。
+
+职责：pandas/openpyxl 读写 xlsx，提供异步读盘与 StreamingResponse 导出，供广告数据导入与报表下载。
+
+在系统中的位置：``app.core.excel_io``，由管理端导入/导出 API 调用。
 """
 import asyncio
 import logging

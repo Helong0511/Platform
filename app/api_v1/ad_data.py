@@ -1,13 +1,13 @@
-"""
-广告数据管理API端点
+"""广告数据管理API端点
 提供广告数据的CRUD操作和统计分析功能，包括：
 - 获取广告数据列表（支持分页、过滤、排序）
 - 获取广告数据详情
 - 更新广告数据（字段白名单验证）
 - 获取广告数据汇总统计
 - 支持按日期范围、客户ID、产品ID过滤
-- 管理员可查看所有数据，客户只能查看自己的数据
-"""
+- 管理员可查看所有数据，客户只能查看自己的数据。
+
+说明：REST API 端点，统一 ResponseBaseSchema 响应；鉴权由各端点 Depends 声明。"""
 # 标准库导入
 import logging
 from calendar import monthrange
@@ -204,16 +204,16 @@ async def get_products_with_data(
 ):
     """
     获取有广告数据的产品列表（用于下拉选择，已重构使用服务层）
-    
+
     筛选逻辑：
     1. 默认显示本月数据：
-       - client_id=None（全部客户）→ 返回本月全部产品
-       - client_id=具体值（特定客户）→ 返回该客户本月全部产品
-    
+    - client_id=None（全部客户）→ 返回本月全部产品
+    - client_id=具体值（特定客户）→ 返回该客户本月全部产品
+
     2. 选择了日期范围：
-       - client_id=None（全部客户）→ 返回该日期范围全部产品
-       - client_id=具体值（特定客户）→ 返回该客户该日期范围全部产品
-    
+    - client_id=None（全部客户）→ 返回该日期范围全部产品
+    - client_id=具体值（特定客户）→ 返回该客户该日期范围全部产品
+
     其他规则：
     - 只返回在指定日期范围内有数据的产品
     - 如果没有指定日期范围，使用当前月作为默认范围
@@ -222,9 +222,11 @@ async def get_products_with_data(
     - 产品列表按名称排序
     - 使用缓存提升性能（缓存 5 分钟）
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在AdDataService中）
     ad_data_service: AdDataService = await get_ad_data_service(db)
     
+    # ---------- 异常处理 ----------
     try:
         products_list = await ad_data_service.get_products_with_data(
             current_user=current_user,
@@ -337,6 +339,7 @@ async def get_ad_data_detail(
     - 客户只能查看自己的广告数据详情
     - 返回完整的广告指标，包括计算出的各种比率
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在AdDataService中）
     ad_data_service: AdDataService = await get_ad_data_service(db)
     
@@ -365,16 +368,21 @@ async def get_ad_data_detail(
 
     # 将 DateTime 转换为 date
     date_value = ad_data.date
+    # ---------- 条件分支 ----------
     if isinstance(date_value, datetime):
         date_value = date_value.date()
+    # ---------- 条件分支 ----------
     elif hasattr(date_value, 'date'):
         date_value = date_value.date()
 
     # 获取国家名称：如果通过JOIN找到了国家信息，使用它；否则根据country_code回退
+    # ---------- 条件分支 ----------
     if country_info:
         country_name_zh = country_info.country_name_zh
+    # ---------- 条件分支 ----------
     elif ad_data.country_code == "AA":
         country_name_zh = "未知区域"
+    # ---------- 条件分支 ----------
     elif ad_data.country_code == "ZZ":
         country_name_zh = "全部区域"
     else:
@@ -407,6 +415,7 @@ async def get_ad_data_detail(
         "updated_at": ad_data.updated_at
     }
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=AdDataResponse(**response_data))
 
 

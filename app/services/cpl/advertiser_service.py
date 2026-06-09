@@ -1,6 +1,16 @@
 """
-广告主服务层
-封装广告主相关的业务逻辑
+广告主（上游）服务层。
+
+功能说明：
+- 广告主 CRUD、分页搜索、关联 Offer 统计
+- 变更后失效相关基础设施缓存（Offer、Cap 等）
+
+在系统中的位置：
+- 被管理端广告主 API 调用；写操作记录审计日志
+
+注意事项：
+1. 删除广告主前须确认无活跃 Offer 与转化数据
+2. slug/名称变更会影响 Postback platform 匹配，需同步更新诊断工具提示
 """
 import logging
 from typing import Optional, List, Dict, Any
@@ -20,9 +30,15 @@ logger = logging.getLogger(__name__)
 
 
 class AdvertiserService(BaseService[Advertiser]):
-    """广告主服务"""
+    """
+    广告主业务服务。
+
+    继承 BaseService，以 Advertiser 为实体类型。
+    广告主即上游供应方，是 Offer 的归属主体。
+    """
 
     def __init__(self, db: AsyncSession):
+        """注入异步数据库会话。"""
         super().__init__(db, Advertiser)
 
     async def get_advertiser_by_id(
@@ -31,14 +47,17 @@ class AdvertiserService(BaseService[Advertiser]):
             current_user: User
     ) -> Advertiser:
         """
-        根据ID获取广告主详情
-        
+        按主键获取广告主详情。
+
         Args:
-            advertiser_id: 广告主ID
-            current_user: 当前用户
-        
+            advertiser_id: 广告主主键
+            current_user: 当前登录用户（预留权限扩展）
+
         Returns:
-            Advertiser: 广告主对象
+            Advertiser: 广告主 ORM 对象
+
+        Raises:
+            APIException: 记录不存在时抛出 RESOURCE_NOT_FOUND
         """
         advertiser = await self.get_by_id(advertiser_id)
 
@@ -59,17 +78,19 @@ class AdvertiserService(BaseService[Advertiser]):
             is_active: Optional[bool] = None
     ) -> tuple[List[Advertiser], int]:
         """
-        获取广告主列表（支持分页、筛选、搜索）
-        
+        分页查询广告主列表。
+
+        支持按名称或 ID 模糊搜索、按激活状态过滤，按创建时间倒序。
+
         Args:
-            current_user: 当前用户
-            page: 页码
-            page_size: 每页数量
-            search: 搜索关键词
-            is_active: 激活状态过滤
-        
+            current_user: 当前登录用户
+            page: 页码，从 1 开始
+            page_size: 每页条数
+            search: 搜索词，匹配 advertiser_name 或 id
+            is_active: True/False 过滤激活状态，None 不过滤
+
         Returns:
-            tuple: (广告主列表, 总数)
+            tuple[List[Advertiser], int]: (当前页列表, 符合条件的总条数)
         """
         query = select(Advertiser)
 
@@ -116,14 +137,18 @@ class AdvertiserService(BaseService[Advertiser]):
             current_user: User
     ) -> Advertiser:
         """
-        创建广告主
-        
+        创建广告主（仅管理员）。
+
         Args:
-            advertiser_data: 广告主数据字典
-            current_user: 当前用户
-        
+            advertiser_data: 含 advertiser_name（必填）、email、mobile、
+                advertiser_params、is_active 等字段
+            current_user: 当前登录用户，须为管理员
+
         Returns:
-            Advertiser: 创建的广告主对象
+            Advertiser: 已持久化并 refresh 的广告主对象
+
+        Raises:
+            APIException: 非管理员无权限
         """
         # 权限检查：仅管理员可创建
         self.require_admin(current_user)
@@ -164,13 +189,15 @@ class AdvertiserService(BaseService[Advertiser]):
             current_user: User
     ) -> Advertiser:
         """
-        更新广告主信息
-        
+        更新广告主信息（仅管理员）。
+
+        仅更新请求体中出现的字段；成功后失效该广告主下 Offer 相关缓存。
+
         Args:
-            advertiser_id: 广告主ID
-            advertiser_data: 更新的数据字典
-            current_user: 当前用户
-        
+            advertiser_id: 待更新广告主主键
+            advertiser_data: 部分字段字典，键存在才覆盖
+            current_user: 当前登录用户，须为管理员
+
         Returns:
             Advertiser: 更新后的广告主对象
         """
@@ -220,11 +247,16 @@ class AdvertiserService(BaseService[Advertiser]):
             current_user: User
     ) -> None:
         """
-        删除广告主
-        
+        删除广告主（仅管理员）。
+
+        若仍有关联 Offer 则拒绝删除，避免破坏投放链路。
+
         Args:
-            advertiser_id: 广告主ID
-            current_user: 当前用户
+            advertiser_id: 待删除广告主主键
+            current_user: 当前登录用户，须为管理员
+
+        Raises:
+            APIException: 存在关联 Offer 或记录不存在
         """
         # 权限检查
         self.require_admin(current_user)

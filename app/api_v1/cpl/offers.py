@@ -1,6 +1,12 @@
-"""
-Offer 管理 API
-"""
+"""Offer 管理 API 路由模块。
+
+提供 Offer CRUD、统计查询、渠道分配及主短链接自动创建等功能。
+复杂业务（Cap 校验、扣价、缓存失效、审计日志）委托 OfferService 处理；
+创建/更新 Offer 时可能联动生成主短链接（基于上游 Tracklink）。
+
+路由前缀：/api/v1/cpl/offers（由上层 router 挂载）。
+
+说明：CPL 子系统接口，涵盖广告主（上游）、渠道（下游）、Offer、Cap、扣量与转化。"""
 import logging
 from typing import Optional
 
@@ -58,14 +64,18 @@ async def create_short_link_for_offer(
     Returns:
         (短链接对象, 是否重复) 元组，如果失败返回 (None, False)
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         # 使用上游Tracklink作为原始URL
+        # ---------- 条件分支 ----------
         if not advertiser_tracklink:
             logger.warning(f"Offer {offer_id} 没有配置上游Tracklink，无法创建短链接")
             return None, False
 
         # 验证URL格式，确保以http://或https://开头
         original_url = advertiser_tracklink.strip()
+        # ---------- 条件分支 ----------
         if not original_url.startswith(('http://', 'https://')):
             logger.error(
                 f"Offer {offer_id} 的上游Tracklink格式无效（必须以http://或https://开头）: {advertiser_tracklink}")
@@ -82,6 +92,7 @@ async def create_short_link_for_offer(
         )
         existing_link = existing_result.scalars().first()
 
+        # ---------- 条件分支 ----------
         if existing_link:
             # 如果已存在，返回已存在的短链接和重复标志
             logger.info(f"Offer主短链接已存在: offer_id={offer_id}, short_code={existing_link.short_code}")
@@ -110,11 +121,13 @@ async def create_short_link_for_offer(
 
         # 尝试从ID生成
         code_from_id = generate_short_code_from_id(short_link.id, min_length=4)
+        # ---------- 条件分支 ----------
         if code_from_id not in existing_codes:
             short_link.short_code = code_from_id
         else:
             # 如果ID生成的代码已存在，使用随机生成
             unique_code = generate_unique_short_code(existing_codes, length=6)
+            # ---------- 条件分支 ----------
             if not unique_code:
                 logger.error(f"生成短链接代码失败: offer_id={offer_id}")
                 return None, False
@@ -174,17 +187,22 @@ async def check_and_create_downstream_tracklink_short_link(
         (短链接对象, 是否新创建) 元组，如果失败返回 (None, False)
         is_new: True表示新创建的，False表示已存在
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
+        # ---------- 条件分支 ----------
         if not downstream_tracklink:
             logger.warning(f"Offer {offer_id} 没有配置下游Tracklink，跳过检查")
             return None, False
 
+        # ---------- 条件分支 ----------
         if not advertiser_tracklink:
             logger.warning(f"Offer {offer_id} 没有配置上游Tracklink，无法创建短链接")
             return None, False
 
         # 验证上游Tracklink URL格式，确保以http://或https://开头
         original_url = advertiser_tracklink.strip()
+        # ---------- 条件分支 ----------
         if not original_url.startswith(('http://', 'https://')):
             logger.warning(
                 f"Offer {offer_id} 的上游Tracklink格式无效（必须以http://或https://开头）: {advertiser_tracklink}")
@@ -202,6 +220,7 @@ async def check_and_create_downstream_tracklink_short_link(
         )
         existing_link = existing_result.scalars().first()
 
+        # ---------- 条件分支 ----------
         if existing_link:
             # 如果已存在，返回已存在的短链接
             logger.info(
@@ -215,7 +234,9 @@ async def check_and_create_downstream_tracklink_short_link(
         # 不存在，创建新的短链接（使用上游Tracklink作为original_url）
         # 使用重试机制处理并发冲突
         max_retries = 3
+        # ---------- 循环处理 ----------
         for attempt in range(max_retries):
+            # ---------- 异常处理 ----------
             try:
                 short_link = ShortLink(
                     original_url=original_url,  # 使用上游Tracklink作为original_url
@@ -238,11 +259,13 @@ async def check_and_create_downstream_tracklink_short_link(
 
                 # 尝试从ID生成
                 code_from_id = generate_short_code_from_id(short_link.id, min_length=4)
+                # ---------- 条件分支 ----------
                 if code_from_id not in existing_codes:
                     short_link.short_code = code_from_id
                 else:
                     # 如果ID生成的代码已存在，使用随机生成
                     unique_code = generate_unique_short_code(existing_codes, length=6)
+                    # ---------- 条件分支 ----------
                     if not unique_code:
                         logger.error(f"生成下游Tracklink短链接代码失败: offer_id={offer_id}")
                         await db.rollback()
@@ -273,6 +296,7 @@ async def check_and_create_downstream_tracklink_short_link(
                         "duplicate key" in error_msg.lower()
                 )
 
+                # ---------- 条件分支 ----------
                 if is_integrity_error and attempt < max_retries - 1:
                     # 回滚当前事务
                     await db.rollback()
@@ -293,6 +317,7 @@ async def check_and_create_downstream_tracklink_short_link(
                         )
                     )
                     existing_link = existing_result.scalars().first()
+                    # ---------- 条件分支 ----------
                     if existing_link:
                         # 另一个请求已经创建了，返回已存在的短链接
                         logger.info(
@@ -306,6 +331,7 @@ async def check_and_create_downstream_tracklink_short_link(
                 else:
                     # 其他错误或重试次数用尽，记录错误并返回失败
                     await db.rollback()
+                    # ---------- 条件分支 ----------
                     if is_integrity_error:
                         logger.error(
                             f"短链接代码冲突，重试次数用尽: "
@@ -354,20 +380,24 @@ async def sync_short_links_for_offer(
             'final_short_link_url': str  # 主短链接URL
         }
     """
+    # ---------- 入口：参数与依赖准备 ----------
     result = {
         'created': False,
         'updated': False,
         'final_short_link_url': None
     }
 
+    # ---------- 异常处理 ----------
     try:
         # 如果没有上游Tracklink，无法创建短链接
+        # ---------- 条件分支 ----------
         if not advertiser_tracklink:
             logger.warning(f"Offer {offer_id} 没有配置上游Tracklink，跳过短链接创建")
             return result
 
         # 验证上游Tracklink URL格式
         original_url = advertiser_tracklink.strip()
+        # ---------- 条件分支 ----------
         if not original_url.startswith(('http://', 'https://')):
             logger.error(
                 f"Offer {offer_id} 的上游Tracklink格式无效（必须以http://或https://开头）: {advertiser_tracklink}")
@@ -384,8 +414,10 @@ async def sync_short_links_for_offer(
         )
         existing_link = existing_result.scalars().first()
 
+        # ---------- 条件分支 ----------
         if existing_link:
             # 短链接存在，检查原始URL是否与当前上游Tracklink一致
+            # ---------- 条件分支 ----------
             if existing_link.original_url == original_url:
                 # 原始URL一致，不做任何操作
                 logger.info(
@@ -410,6 +442,7 @@ async def sync_short_links_for_offer(
             )
             offer = offer_result.scalars().first()
 
+            # ---------- 条件分支 ----------
             if offer and offer.downstream_tracklink != short_link_url:
                 offer.downstream_tracklink = short_link_url
                 logger.info(f"更新Offer的downstream_tracklink: offer_id={offer_id}, tracklink={short_link_url}")
@@ -427,6 +460,7 @@ async def sync_short_links_for_offer(
                 advertiser_tracklink=advertiser_tracklink
             )
 
+            # ---------- 条件分支 ----------
             if short_link:
                 short_link_url = get_short_link_url(base_url, short_link.short_code)
                 result['final_short_link_url'] = short_link_url
@@ -438,6 +472,7 @@ async def sync_short_links_for_offer(
                 )
                 offer = offer_result.scalars().first()
 
+                # ---------- 条件分支 ----------
                 if offer:
                     offer.downstream_tracklink = short_link_url
                     logger.info(f"更新Offer的downstream_tracklink: offer_id={offer_id}, tracklink={short_link_url}")
@@ -448,6 +483,7 @@ async def sync_short_links_for_offer(
                 )
                 offer = offer_result.scalars().first()
 
+                # ---------- 条件分支 ----------
                 if offer:
                     offer.downstream_tracklink = None
                     logger.warning(f"清空Offer的downstream_tracklink: offer_id={offer_id}（创建短链接失败）")
@@ -468,12 +504,20 @@ async def create_offer(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """创建Offer（已重构使用服务层）"""
+    """
+    创建 Offer 并可选联动生成主短链接。
+
+    权限：仅管理员。
+    请求体：OfferCreate，含广告主、定价、Tracklink 等。
+    业务：委托 OfferService；若配置上游 Tracklink 则自动创建主短链接。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在OfferService中）
     offer_service: OfferService = await get_offer_service(db)
 
     # 准备Offer数据（包含渠道配置）
     offer_data = offer_in.model_dump()
+    # ---------- 条件分支 ----------
     if offer_in.publisher_configs is not None:
         # 将Pydantic对象转换为字典
         offer_data['publisher_configs'] = [config.model_dump() if hasattr(config, 'model_dump') else config for config
@@ -492,19 +536,23 @@ async def create_offer(
 
     # 构建响应消息，包含短链接信息
     message = "Offer创建成功"
+    # ---------- 条件分支 ----------
     if short_link_info:
+        # ---------- 条件分支 ----------
         if short_link_info.get('duplicate'):
             message = (
                 f"Offer创建成功。"
                 f"主短链接已存在: {short_link_info.get('final_short_link_url', 'N/A')}。"
                 f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
             )
+        # ---------- 条件分支 ----------
         elif short_link_info.get('created'):
             message = (
                 f"Offer创建成功。"
                 f"已创建主短链接: {short_link_info.get('final_short_link_url', 'N/A')}。"
                 f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
             )
+        # ---------- 条件分支 ----------
         elif short_link_info.get('final_short_link_url'):
             message = (
                 f"Offer创建成功。"
@@ -513,6 +561,7 @@ async def create_offer(
             )
 
     logger.info(f"Offer创建成功: id={offer.id}, message={message}")
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=offer_response, message=message)
 
 
@@ -531,7 +580,13 @@ async def get_offers(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """获取Offer列表（已重构使用服务层，批量加载关联数据）"""
+    """
+    分页获取 Offer 列表。
+
+    权限：登录用户，按数据权限过滤。
+    筛选：关键词、广告主、启用状态等；批量预加载广告主与统计摘要。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在OfferService中，已优化批量加载）
     offer_service: OfferService = await get_offer_service(db)
     offers, total, assignments_map = await offer_service.get_offers(
@@ -548,6 +603,7 @@ async def get_offers(
 
     # 构建响应数据（广告主信息已通过joinedload预加载，渠道分配已批量加载）
     offer_list = []
+    # ---------- 循环处理 ----------
     for offer in offers:
         offer_data = OfferResponse.model_validate(offer)
         # 从已加载的关联中获取广告主名称
@@ -557,6 +613,7 @@ async def get_offers(
 
         offer_list.append(offer_data)
 
+    # ---------- 构建响应 ----------
     return PaginatedResponseBaseSchema.success(
         data=offer_list,
         total=total,
@@ -577,11 +634,13 @@ async def check_offer_short_link(
     检查Offer的短链接是否存在
     检查条件：下游Tracklink在short_links表中存在，并且original_url等于上游Tracklink
     """
+    # ---------- 入口：参数与依赖准备 ----------
     result = await db.execute(
         select(Offer).where(Offer.id == offer_id)
     )
     offer = result.scalars().first()
 
+    # ---------- 条件分支 ----------
     if not offer:
         raise_api_exception(
             ErrorCode.RESOURCE_NOT_FOUND,
@@ -589,11 +648,13 @@ async def check_offer_short_link(
         )
 
     # 如果没有下游Tracklink或上游Tracklink，返回不存在
+    # ---------- 条件分支 ----------
     if not offer.downstream_tracklink or not offer.advertiser_tracklink:
         return ResponseBaseSchema.success(data={"exists": False, "short_link": None})
 
     # 验证上游Tracklink URL格式
     original_url = offer.advertiser_tracklink.strip()
+    # ---------- 条件分支 ----------
     if not original_url.startswith(('http://', 'https://')):
         return ResponseBaseSchema.success(data={"exists": False, "short_link": None})
 
@@ -609,6 +670,7 @@ async def check_offer_short_link(
     )
     existing_link = existing_result.scalars().first()
 
+    # ---------- 条件分支 ----------
     if existing_link:
         # 生成短链接URL
         base_url = settings.TRACKING_BASE_URL
@@ -628,6 +690,7 @@ async def check_offer_short_link(
             }
         })
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data={"exists": False, "short_link": None})
 
 
@@ -642,7 +705,8 @@ async def get_offer_stats(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
-    """点击、转化、收入汇总及按日趋势（供管理端 Offer 统计卡片使用）。"""
+    """点击、转化、收入汇总及按日趋势（供管理端 Offer 统计卡片使用）。（详见字段 Field description）。"""
+    # ---------- 入口：参数与依赖准备 ----------
     offer_service: OfferService = await get_offer_service(db)
     await offer_service.get_offer_by_id(offer_id, current_user, include_advertiser=False, include_assignments=False)
 
@@ -650,28 +714,34 @@ async def get_offer_stats(
     prev_start, prev_end = offer_stats_previous_range(period, start)
 
     async def _count_clicks(s, e=None):
+        """统计时间区间内 Offer 点击数；e 为开区间上界。（详见字段 Field description）。"""
         q = select(func.count(Click.id)).where(
             Click.offer_id == offer_id,
             Click.click_time >= s,
         )
+        # ---------- 条件分支 ----------
         if e is not None:
             q = q.where(Click.click_time < e)
         return int((await db.execute(q)).scalar() or 0)
 
     async def _count_conversions(s, e=None):
+        """统计时间区间内 Offer 转化数。（详见字段 Field description）。"""
         q = select(func.count(PostbackConversion.id)).where(
             PostbackConversion.offer_id == offer_id,
             PostbackConversion.created_at >= s,
         )
+        # ---------- 条件分支 ----------
         if e is not None:
             q = q.where(PostbackConversion.created_at < e)
         return int((await db.execute(q)).scalar() or 0)
 
     async def _sum_revenue(s, e=None):
+        """汇总时间区间内 Offer 转化 payout 收入。（详见字段 Field description）。"""
         q = select(func.coalesce(func.sum(PostbackConversion.payout), 0)).where(
             PostbackConversion.offer_id == offer_id,
             PostbackConversion.created_at >= s,
         )
+        # ---------- 条件分支 ----------
         if e is not None:
             q = q.where(PostbackConversion.created_at < e)
         return float((await db.execute(q)).scalar() or 0)
@@ -707,10 +777,12 @@ async def get_offer_stats(
     ).all()
 
     by_date: dict[str, dict] = {}
+    # ---------- 循环处理 ----------
     for d, cnt in click_rows:
         key = d.isoformat() if hasattr(d, "isoformat") else str(d)
         by_date.setdefault(key, {"date": key, "clicks": 0, "conversions": 0, "revenue": 0.0})
         by_date[key]["clicks"] = int(cnt or 0)
+    # ---------- 循环处理 ----------
     for d, cnt, rev in conv_rows:
         key = d.isoformat() if hasattr(d, "isoformat") else str(d)
         by_date.setdefault(key, {"date": key, "clicks": 0, "conversions": 0, "revenue": 0.0})
@@ -719,6 +791,7 @@ async def get_offer_stats(
 
     chart_data = [by_date[k] for k in sorted(by_date.keys())]
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(
         data={
             "clicks": clicks,
@@ -744,7 +817,11 @@ async def get_offer(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """获取Offer详情（已重构使用服务层，权限检查和数据加载都在服务层）"""
+    """
+    按 ID 获取 Offer 详情。
+
+    权限：登录用户；服务层负责权限校验与关联数据加载。
+    """
     # 使用服务层（业务逻辑在OfferService中，包含权限检查）
     offer_service: OfferService = await get_offer_service(db)
 
@@ -773,12 +850,19 @@ async def update_offer(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """更新Offer（已重构使用服务层）"""
+    """
+    更新 Offer 信息。
+
+    权限：仅管理员。
+    业务：服务层处理 Cap 校验、短链接同步、缓存失效及审计日志。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在OfferService中）
     offer_service: OfferService = await get_offer_service(db)
 
     # 准备更新数据（包含渠道配置）
     update_data = offer_in.model_dump(exclude_unset=True, exclude={'publisher_configs'})
+    # ---------- 条件分支 ----------
     if offer_in.publisher_configs is not None:
         # 将Pydantic对象转换为字典
         update_data['publisher_configs'] = [config.model_dump() if hasattr(config, 'model_dump') else config for config
@@ -802,19 +886,23 @@ async def update_offer(
 
     # 构建响应消息，包含短链接信息
     message = "Offer更新成功"
+    # ---------- 条件分支 ----------
     if short_link_info:
+        # ---------- 条件分支 ----------
         if short_link_info.get('duplicate'):
             message = (
                 f"Offer更新成功。"
                 f"主短链接已存在: {short_link_info.get('final_short_link_url', 'N/A')}。"
                 f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
             )
+        # ---------- 条件分支 ----------
         elif short_link_info.get('created'):
             message = (
                 f"Offer更新成功。"
                 f"已创建主短链接: {short_link_info.get('final_short_link_url', 'N/A')}。"
                 f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
             )
+        # ---------- 条件分支 ----------
         elif short_link_info.get('final_short_link_url'):
             message = (
                 f"Offer更新成功。"
@@ -822,17 +910,21 @@ async def update_offer(
                 f"每个渠道使用主短链接 + 参数（offer_id和channel_id）"
             )
 
+    # ---------- 条件分支 ----------
     if downstream_tracklink_changed:
         message += f" 已删除旧的短链接。"
 
     # 添加下游Tracklink短链接信息
+    # ---------- 条件分支 ----------
     if downstream_tracklink_short_link_info:
+        # ---------- 条件分支 ----------
         if downstream_tracklink_short_link_info['is_new']:
             message += f" 已为下游Tracklink创建短链接: {downstream_tracklink_short_link_info['short_link_url']}。"
         else:
             message += f" 下游Tracklink短链接已存在: {downstream_tracklink_short_link_info['short_link_url']}。"
 
     logger.info(f"Offer更新成功: id={offer.id}, message={message}")
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=offer_data, message=message)
 
 
@@ -845,7 +937,12 @@ async def delete_offer(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """删除Offer（已重构使用服务层）"""
+    """
+    删除 Offer。
+
+    权限：仅管理员。
+    业务：服务层检查关联转化/短链接等，有关联时拒绝删除。
+    """
     # 使用服务层（业务逻辑在OfferService中）
     offer_service: OfferService = await get_offer_service(db)
 

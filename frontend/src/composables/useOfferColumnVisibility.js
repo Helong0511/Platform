@@ -1,7 +1,15 @@
+/**
+ * 组合式函数 - Offer 表格列显隐持久化
+ * @file composables/useOfferColumnVisibility.js
+ */
 import { useTableColumnVisibility } from './useTableColumnVisibility';
 
 const STORAGE_KEY = 'offerManagement_columnVisibility';
 
+/**
+ * 组合式函数 - Offer 表格列显隐持久化
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useOfferColumnVisibility(isAdmin) {
   return useTableColumnVisibility(STORAGE_KEY, {
     getDefaultColumns: () => ({

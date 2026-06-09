@@ -1,6 +1,21 @@
 """
-URL构建服务
-处理URL参数合并和最终URL构建逻辑
+短链接最终 URL 构建服务。
+
+功能说明：
+- ``build_final_url``：在占位符替换完成后，决定是否合并用户请求参数，产出 302 目标地址
+- ``merge_url_params``：将查询参数合并进已有 URL，处理别名冲突与含占位符的参数值
+
+核心策略：
+- 原始 URL 已含某系统参数占位符（如 ``{click_id}``）时，不再重复追加同名查询参数
+- 用户参数值含未替换占位符时过滤该参数；可替换则先走 ``replace_param_value_placeholders``
+- 默认不自动追加 click_id/offer_id 等系统参数，最终 URL 以替换后的原始 URL 为准
+
+在系统中的位置：
+- 被 ``handlers`` 在生成 RedirectResponse 前调用
+
+注意事项：
+1. 参数别名映射（aff_click_id、sub_affid 等）与占位符检测需保持与上游约定一致
+2. 合并时保持已有参数顺序，click_id 新增时置于最前（若允许添加）
 """
 import logging
 from collections import OrderedDict

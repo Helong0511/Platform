@@ -1,4 +1,16 @@
+<!--
+  审计日志管理页面（AuditLogManagement.vue）
+
+  功能区块：
+  1. 统计卡片：总日志数、成功/失败数、活跃用户数
+  2. 筛选区：用户名、操作类型、资源类型、时间范围、状态
+  3. 日志表格：分页展示操作记录，支持列显隐配置
+  4. 详情弹窗：查看单条日志的请求/响应详情
+
+  数据与筛选逻辑由 composable useAuditLogs.js 提供。
+-->
 <template>
+  <!-- 页面主模板 -->
   <div class="audit-log-management-container">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -26,7 +38,9 @@
     </div>
 
     <!-- 筛选控件 -->
+    <!-- 筛选区 -->
     <el-card class="filter-card" shadow="never">
+      <!-- 表单区域 -->
       <el-form :inline="true" :model="searchForm" class="filter-form">
         <el-form-item label="用户名">
           <el-input 
@@ -139,7 +153,8 @@
 
     <!-- 日志数据表格 -->
     <el-card class="data-table-card" shadow="never">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="table-header">
           <span>日志列表</span>
           <el-button 

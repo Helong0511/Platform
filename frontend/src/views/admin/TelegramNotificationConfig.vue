@@ -1,4 +1,9 @@
+<!--
+  管理端 - Telegram 通知配置
+  @file views/admin/TelegramNotificationConfig.vue
+-->
 <template>
+  <!-- 页面主模板 -->
   <div class="telegram-notification-config">
     <!-- 页面标题 -->
     <div class="page-header">
@@ -8,6 +13,7 @@
 
     <!-- 配置表单 -->
     <el-card class="config-card" v-loading="loading">
+      <!-- 表单区域 -->
       <el-form
         ref="formRef"
         :model="formData"

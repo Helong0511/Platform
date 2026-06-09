@@ -1,5 +1,4 @@
-"""
-斗篷配置相关 Schema
+"""斗篷配置相关 Schema
 
 定义斗篷（Cloak）配置的请求/响应 Pydantic 模型，以及 Meta Pixel / Conversions API
 事件名校验逻辑。供管理端 API 与运行时上报服务共用。
@@ -7,19 +6,20 @@
 上报阶段说明（与 cloak_configs API 一致）：
 - click：用户点击桥页按钮跳转时触发（report_* 字段）
 - load：桥页 HTML 加载完成时触发（load_report_* 字段）
-- postback：下游转化回传时触发（postback_report_* 字段）
-"""
+- postback：下游转化回传时触发（postback_report_* 字段）。
+
+说明：斗篷配置、上报事件与货币等字段的 Pydantic 校验。"""
 import re
 from datetime import datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
 # Meta Pixel / Conversions API 官方「标准事件」event_name（与 Meta 文档 Standard Events 一致）。
 # 文档：https://developers.facebook.com/docs/meta-pixel/reference
 # 说明：无名为「点击查看」的标准事件；内容/落地互动常用 ViewContent；按钮类可用自定义名如 Click。
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
 FACEBOOK_STANDARD_EVENT_NAMES = frozenset(
     {
         "AddPaymentInfo",  # 填写支付信息
@@ -159,25 +159,25 @@ class CloakConfigBase(BaseModel):
     @field_validator("report_event")
     @classmethod
     def validate_report_event(cls, value: str) -> str:
-        """点击阶段事件名校验"""
+        """点击阶段 Facebook 上报事件名：须为平台允许的 cloak 事件枚举值。"""
         return validate_cloak_report_event_name(value)
 
     @field_validator("load_report_event")
     @classmethod
     def validate_load_report_event(cls, value: str) -> str:
-        """加载阶段事件名校验"""
+        """落地页加载阶段上报事件名：须为平台允许的 cloak 事件枚举值。（详见字段 Field description）。"""
         return validate_cloak_report_event_name(value)
 
     @field_validator("postback_report_event")
     @classmethod
     def validate_postback_report_event(cls, value: str) -> str:
-        """postback 阶段事件名校验"""
+        """Postback 转化阶段上报事件名：须为平台允许的 cloak 事件枚举值。"""
         return validate_cloak_report_event_name(value)
 
     @field_validator("report_currency", "load_report_currency", "postback_report_currency")
     @classmethod
     def validate_currencies(cls, value: Optional[str]) -> Optional[str]:
-        """货币代码统一为大写 ISO 4217，空则默认 USD"""
+        """上报货币代码：规范为大写 ISO 4217（如 USD）；空值默认 USD。"""
         if value is None:
             return "USD"
         v = value.strip().upper()
@@ -212,7 +212,7 @@ class CloakConfigBase(BaseModel):
     @field_validator("pixel_id")
     @classmethod
     def validate_pixel_id(cls, value: str) -> str:
-        """Meta Pixel ID 为纯数字字符串"""
+        """Meta Pixel ID 为纯数字字符串（详见字段 Field description）。"""
         value = value.strip()
         if not value.isdigit():
             raise ValueError("像素ID必须为数字")
@@ -221,7 +221,7 @@ class CloakConfigBase(BaseModel):
     @field_validator("backup_pixel_id")
     @classmethod
     def validate_backup_pixel_id(cls, value: Optional[str]) -> Optional[str]:
-        """备份像素可选；空字符串视为未配置"""
+        """备份像素可选；空字符串视为未配置（详见字段 Field description）。"""
         if value is None:
             return None
         value = value.strip()
@@ -234,7 +234,7 @@ class CloakConfigBase(BaseModel):
     @field_validator("access_token", "backup_access_token")
     @classmethod
     def trim_tokens(cls, value: Optional[str]) -> Optional[str]:
-        """去除 Token 首尾空白，空串归一为 None"""
+        """去除 Token 首尾空白，空串归一为 None（详见字段 Field description）。"""
         if value is None:
             return None
         value = value.strip()
@@ -242,7 +242,11 @@ class CloakConfigBase(BaseModel):
 
 
 class CloakConfigCreate(CloakConfigBase):
-    """创建斗篷配置：字段与 CloakConfigBase 相同，无额外必填项"""
+    """
+    创建斗篷配置：字段与 CloakConfigBase 相同，无额外必填项
+    
+    继承 CloakConfigBase。创建请求体：提交新记录所需字段，由 Pydantic 校验必填项与取值范围。
+    """
     pass
 
 
@@ -275,6 +279,7 @@ class CloakConfigUpdate(BaseModel):
     @field_validator("report_event")
     @classmethod
     def validate_report_event(cls, value: Optional[str]) -> Optional[str]:
+        """更新时可选；有值则校验点击阶段事件名（详见字段 Field description）。"""
         if value is None:
             return None
         return validate_cloak_report_event_name(value)
@@ -282,6 +287,7 @@ class CloakConfigUpdate(BaseModel):
     @field_validator("load_report_event")
     @classmethod
     def validate_load_report_event(cls, value: Optional[str]) -> Optional[str]:
+        """更新时可选；有值则校验加载阶段事件名（详见字段 Field description）。"""
         if value is None:
             return None
         return validate_cloak_report_event_name(value)
@@ -289,6 +295,7 @@ class CloakConfigUpdate(BaseModel):
     @field_validator("postback_report_event")
     @classmethod
     def validate_postback_report_event(cls, value: Optional[str]) -> Optional[str]:
+        """更新时可选；有值则校验 postback 阶段事件名（详见字段 Field description）。"""
         if value is None:
             return None
         return validate_cloak_report_event_name(value)
@@ -296,7 +303,7 @@ class CloakConfigUpdate(BaseModel):
     @field_validator("report_currency", "load_report_currency", "postback_report_currency")
     @classmethod
     def validate_currencies_update(cls, value: Optional[str]) -> Optional[str]:
-        """更新时 None 表示不修改；有值则规范化大写"""
+        """更新时 None 表示不修改；有值则规范化大写（详见字段 Field description）。"""
         if value is None:
             return None
         v = value.strip().upper()
@@ -305,6 +312,7 @@ class CloakConfigUpdate(BaseModel):
     @field_validator("cloak_name")
     @classmethod
     def validate_cloak_name(cls, value: Optional[str]) -> Optional[str]:
+        """更新时可选；有值则校验安全字符集（详见字段 Field description）。"""
         if value is None:
             return None
         value = value.strip()
@@ -315,6 +323,7 @@ class CloakConfigUpdate(BaseModel):
     @field_validator("pixel_id")
     @classmethod
     def validate_pixel_id(cls, value: Optional[str]) -> Optional[str]:
+        """更新时可选；有值则校验为纯数字（详见字段 Field description）。"""
         if value is None:
             return None
         value = value.strip()
@@ -325,6 +334,7 @@ class CloakConfigUpdate(BaseModel):
     @field_validator("backup_pixel_id")
     @classmethod
     def validate_backup_pixel_id(cls, value: Optional[str]) -> Optional[str]:
+        """更新时可选；空串视为清除备份像素（详见字段 Field description）。"""
         if value is None:
             return None
         value = value.strip()
@@ -337,6 +347,7 @@ class CloakConfigUpdate(BaseModel):
     @field_validator("access_token", "backup_access_token")
     @classmethod
     def trim_tokens(cls, value: Optional[str]) -> Optional[str]:
+        """更新时修剪 Token 首尾空白（详见字段 Field description）。"""
         if value is None:
             return None
         value = value.strip()

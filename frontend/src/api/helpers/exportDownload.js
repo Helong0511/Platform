@@ -1,5 +1,8 @@
 /**
- * 列表 Excel 导出：统一下载与「无数据」错误处理
+ * 列表 Excel 导出辅助
+ * @file api/helpers/exportDownload.js
+ *
+ * 统一下载 blob 响应与「无数据不可导出」的错误处理逻辑。
  */
 import { requestBlobDownload, extractErrorMessage, handleError } from '../../utils/api';
 import { ElMessage } from 'element-plus';

@@ -1,7 +1,15 @@
+/**
+ * 组合式函数 - Postback IP 白名单列显隐
+ * @file composables/usePostbackIpWhitelistColumnVisibility.js
+ */
 import { useTableColumnVisibility } from './useTableColumnVisibility';
 
 const STORAGE_KEY = 'postbackIpWhitelist_columnVisibility';
 
+/**
+ * 组合式函数 - Postback IP 白名单列显隐
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function usePostbackIpWhitelistColumnVisibility() {
   return useTableColumnVisibility(STORAGE_KEY, {
     getDefaultColumns: () => ({

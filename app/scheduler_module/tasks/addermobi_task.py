@@ -1,6 +1,16 @@
 """
-Addermobi定时任务模块
-功能：从Addermobi API获取广告数据，检查重复后插入到数据库
+Addermobi 上游广告数据拉取定时任务。
+
+功能说明：
+- 从 Addermobi API 拉取广告单元数据，映射后 import_upstream_ad_data 入库
+- 支持按配置日期区间增量同步
+
+在系统中的位置：
+- 由 ADDERMOBI_API_TASK_NAME 调度
+
+注意事项：
+1. 凭证未配置时 upstream_credential_missing 跳过任务
+2. 注意 API 限频，必要时在 fetch 层加 sleep
 """
 import json
 import logging

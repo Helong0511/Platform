@@ -1,6 +1,12 @@
-"""
-下游测试 API
-"""
+"""下游（渠道）联调测试 API 路由模块。
+
+供管理员模拟渠道侧 Postback 回调，验证 Offer 归因、金额计算与
+下游通知链路是否正常。测试记录写入 AffiliateTest 表并记录审计日志。
+
+路由前缀：/api/v1/cpl/affiliate-tests
+权限：所有端点需管理员。
+
+说明：CPL 子系统接口，涵盖广告主（上游）、渠道（下游）、Offer、Cap、扣量与转化。"""
 import logging
 from typing import Optional
 
@@ -36,12 +42,19 @@ async def create_affiliate_test(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """创建下游测试记录并发送Postback（仅管理员）"""
+    """
+    创建下游测试记录并模拟发送 Postback。
+
+    权限：仅管理员。
+    用于验证渠道 Postback 接收与归因链路是否正常。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     # 验证渠道和Offer是否存在
     pub_result = await db.execute(
         select(Publisher).where(Publisher.id == test_in.publisher_id)
     )
     publisher = pub_result.scalars().first()
+    # ---------- 条件分支 ----------
     if not publisher:
         raise_api_exception(
             ErrorCode.RESOURCE_NOT_FOUND,
@@ -52,6 +65,7 @@ async def create_affiliate_test(
         select(Offer).where(Offer.id == test_in.offer_id)
     )
     offer = offer_result.scalars().first()
+    # ---------- 条件分支 ----------
     if not offer:
         raise_api_exception(
             ErrorCode.RESOURCE_NOT_FOUND,
@@ -70,8 +84,10 @@ async def create_affiliate_test(
 
     # 优先使用渠道级别的下游PO，如果没有则使用Offer级别的（向后兼容）
     affiliate_payout = None
+    # ---------- 条件分支 ----------
     if assignment and assignment.affiliate_payout is not None:
         affiliate_payout = assignment.affiliate_payout
+    # ---------- 条件分支 ----------
     elif offer.affiliate_payout is not None:
         affiliate_payout = offer.affiliate_payout
 
@@ -81,14 +97,18 @@ async def create_affiliate_test(
     status = "Failed"
     affiliate_return_content = None
 
+    # ---------- 条件分支 ----------
     if postback_url:
+        # ---------- 异常处理 ----------
         try:
             # 替换URL中的占位符
             postback_url = postback_url.replace('{click_id}', test_in.click_id)
             postback_url = postback_url.replace('{offer_id}', str(offer.id))
             postback_url = postback_url.replace('{publisher_id}', str(publisher.id))
 
+            # ---------- 上下文管理 ----------
             async with httpx.AsyncClient(timeout=10.0) as client:
+                # ---------- 条件分支 ----------
                 if postback_method.upper() == 'POST':
                     response = await client.post(postback_url, json={
                         'click_id': test_in.click_id,
@@ -121,6 +141,7 @@ async def create_affiliate_test(
         affiliate_return_content=affiliate_return_content
     )
 
+    # ---------- 异常处理 ----------
     try:
         db.add(test)
         await db.commit()
@@ -176,15 +197,24 @@ async def get_affiliate_tests(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """获取下游测试记录列表（仅管理员）"""
+    """
+    分页查询下游（渠道）联调测试记录列表。
+
+    支持按 publisher_id、offer_id、status 筛选。
+    权限：仅管理员；用于排查下游对接问题。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     query = select(AffiliateTest)
 
+    # ---------- 条件分支 ----------
     if publisher_id:
         query = query.where(AffiliateTest.publisher_id == publisher_id)
 
+    # ---------- 条件分支 ----------
     if offer_id:
         query = query.where(AffiliateTest.offer_id == offer_id)
 
+    # ---------- 条件分支 ----------
     if status:
         query = query.where(AffiliateTest.status == status)
 
@@ -202,6 +232,7 @@ async def get_affiliate_tests(
     # 批量加载关联信息（优化N+1查询）
     publisher_ids = [test.publisher_id for test in tests if test.publisher_id]
     publishers_map = {}
+    # ---------- 条件分支 ----------
     if publisher_ids:
         publishers_result = await db.execute(
             select(Publisher).where(Publisher.id.in_(publisher_ids))
@@ -211,12 +242,14 @@ async def get_affiliate_tests(
 
     # 构建返回数据
     test_list = []
+    # ---------- 循环处理 ----------
     for test in tests:
         test_data = AffiliateTestResponse.model_validate(test)
         publisher = publishers_map.get(test.publisher_id)
         test_data.publisher_name = publisher.publisher_name if publisher else None
         test_list.append(test_data)
 
+    # ---------- 构建响应 ----------
     return PaginatedResponseBaseSchema.success(
         data=test_list,
         total=total,
@@ -234,7 +267,11 @@ async def get_affiliate_test(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """获取下游测试记录详情（仅管理员）"""
+    """
+    获取单条下游测试记录详情。
+
+    权限：仅管理员；含 Postback 发送结果与响应内容。
+    """
     # 使用joinedload优化关联查询
     query = select(AffiliateTest).where(AffiliateTest.id == test_id).options(
         joinedload(AffiliateTest.publisher)

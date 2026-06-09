@@ -48,6 +48,10 @@ class RedisCacheBackend(CacheBackend):
     """Redis缓存后端实现"""
     
     def __init__(self, redis_client):
+        """
+        Args:
+            redis_client: 已连接的 aioredis 客户端实例；为 None 时所有操作降级为无缓存
+        """
         self.redis = redis_client
     
     async def get(self, key: str) -> Optional[Any]:
@@ -141,6 +145,7 @@ class MemoryCacheBackend(CacheBackend):
     """内存缓存后端实现（Redis不可用时的降级方案）"""
     
     def __init__(self):
+        """初始化进程内字典缓存，键值附带可选过期时间戳。"""
         self._cache: Dict[str, tuple[Any, Optional[float]]] = {}
         self._time = time.time
     
@@ -241,9 +246,12 @@ def cached(key_pattern: str, ttl: int = 300):
             pass
     """
     def decorator(func):
+        """将异步函数包装为带基础设施层缓存的版本。"""
+
         @wraps(func)
         async def wrapper(*args, **kwargs):
-            # 生成缓存键
+            """读缓存 → 未命中执行原函数 → 写回缓存。"""
+            # ---------- 生成缓存键 ----------
             try:
                 cache_key = key_pattern.format(*args, **kwargs)
             except (KeyError, IndexError):

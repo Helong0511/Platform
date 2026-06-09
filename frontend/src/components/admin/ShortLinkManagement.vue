@@ -1,5 +1,10 @@
+<!--
+  短链接管理内嵌组件
+  @file components/admin/ShortLinkManagement.vue
+-->
 <template>
-  <div class="short-link-management">
+  <!-- 页面主模板 -->
+<div class="short-link-management">
     <!-- 统计卡片 -->
     <div class="stats-cards">
       <el-card class="stat-card">
@@ -176,6 +181,7 @@
     />
 
     <!-- 列设置对话框 -->
+    <!-- 弹窗 -->
     <el-dialog
       v-model="columnSettingVisible"
       title="列显示设置"

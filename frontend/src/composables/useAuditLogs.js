@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 审计日志列表查询
+ * @file composables/useAuditLogs.js
+ */
 import { reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getAuditLogs, getAuditLog, getAuditLogStats } from '../api/audit-log';
@@ -6,20 +10,29 @@ import { getCurrentMonthRange } from '../utils/thirdPartyReportFormat';
 /**
  * 审计日志列表、统计与分页。
  */
+/**
+ * 组合式函数 - 审计日志列表查询
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useAuditLogs(authStore, router) {
+  // logs 响应式状态
   const logs = ref([]);
   const loading = ref(false);
+  // 统计数据
   const stats = ref(null);
   const isInitializing = ref(true);
+  // detailDialogVisible 响应式状态
   const detailDialogVisible = ref(false);
   const currentLog = ref(null);
 
+  // 分页状态 { page, pageSize/page_size, total }
   const pagination = reactive({
     page: 1,
     pageSize: 10,
     total: 0,
   });
 
+  // 筛选表单字段
   const searchForm = reactive({
     username: '',
     action_type: '',
@@ -28,6 +41,7 @@ export function useAuditLogs(authStore, router) {
     success: null,
   });
 
+  // dateRange 响应式状态
   const dateRange = ref(getCurrentMonthRange());
 
   const fetchStats = async () => {

@@ -1,6 +1,16 @@
 """
-任务注册表
-将数据库中的任务名称映射到实际的任务函数
+任务函数注册表模块。
+
+功能说明：
+- 将数据库 scheduled_tasks.name 映射到 Python 可调用任务函数
+- 支持按模块路径动态加载（``load_function_by_path``）与自动扫描注册
+
+在系统中的位置：
+- 被调度器触发任务时解析函数；配置来源 ``task_config.py``
+
+注意事项：
+1. 模块路径须经白名单校验，防止任意代码执行
+2. 任务名与 task_names.py 常量保持一致，避免 DB 与代码脱节
 """
 import logging
 import re

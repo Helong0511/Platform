@@ -1,8 +1,7 @@
 /**
- * 设备检测 Composable
- * 区分桌面端、平板端、手机端
+ * 组合式函数 - 设备类型检测（移动/桌面）
+ * @file composables/useDevice.js
  */
-
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 
 // 设备类型枚举
@@ -38,8 +37,10 @@ function detectDeviceType(width) {
  * @returns {Object} 设备信息和方法
  */
 export function useDevice() {
+  // deviceType 响应式状态
   const deviceType = ref(DeviceType.DESKTOP);
   const windowWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1024);
+  // windowHeight 响应式状态
   const windowHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 768);
 
   // 更新设备类型

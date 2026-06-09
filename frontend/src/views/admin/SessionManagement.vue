@@ -1,4 +1,9 @@
+<!--
+  管理端 - 在线会话管理
+  @file views/admin/SessionManagement.vue
+-->
 <template>
+  <!-- 页面主模板 -->
   <div class="session-management-container">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -24,7 +29,9 @@
       <!-- 会话列表标签页 -->
       <el-tab-pane label="我的会话" name="sessions">
         <!-- 筛选控件 -->
+        <!-- 筛选区 -->
         <el-card class="filter-card" shadow="never">
+          <!-- 表单区域 -->
           <el-form :inline="true" class="filter-form">
             <el-form-item>
               <el-button type="primary" @click="fetchSessions" :loading="loading" :icon="Refresh">
@@ -45,7 +52,8 @@
 
         <!-- 会话数据表格 -->
         <el-card class="data-table-card" shadow="never">
-          <template #header>
+          <!-- 卡片标题栏 -->
+    <template #header>
             <div class="table-header">
               <span>会话列表</span>
               <el-button 

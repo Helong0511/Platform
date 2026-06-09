@@ -1,6 +1,18 @@
-<!-- Offer 统计面板（生产 OfferManagement 详情 Tab 使用） -->
+<!--
+  Offer 统计面板（OfferStatsPanel.vue）
+
+  嵌入 Offer 管理详情 Tab，展示：
+  1. 点击/转化趋势图表
+  2. 关键指标卡片：CTR、CVR、收益等
+  3. 时间范围切换与数据刷新
+
+  通过 props 接收 offerId，自行请求统计数据。
+-->
 <template>
-  <div class="offer-stats-panel" v-loading="loading">
+  <!-- 页面主模板 -->
+  <!-- 页面主模板 -->
+<div class="offer-stats-panel" v-loading="loading">
+    <!-- 工具栏 -->
     <div class="panel-toolbar">
       <span class="toolbar-title">数据概览</span>
       <el-select v-model="timeRange" size="default" @change="handleTimeRangeChange">

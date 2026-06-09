@@ -32,6 +32,7 @@ def describe_click_persist_mode() -> str:
 
 
 def log_click_persist_mode_at_startup() -> None:
+    """应用启动时记录当前点击落库策略（写库 / 仅令牌 / 环境变量覆盖）。"""
     logger.info("点击落库策略: %s", describe_click_persist_mode())
 
 

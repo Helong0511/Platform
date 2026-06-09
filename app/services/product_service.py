@@ -1,6 +1,16 @@
 """
-产品服务层
-封装产品相关的业务逻辑
+产品服务层。
+
+功能说明：
+- 产品 CRUD 与分页列表（客户用户仅可见归属产品）
+- 创建时初始化 ProductAssignment；客户变更时 transfer_product_assignment
+- 删除：有 AdData 则转移至「默认客户（导入数据）」，否则物理删除
+
+特殊逻辑：
+- 创建时若同名产品属于默认客户，则改绑 client_id 复用历史广告数据
+
+在系统中的位置：
+- 被管理端产品 API 调用；继承 ``BaseService[Product]``
 """
 from typing import Optional, List, Dict, Any
 from datetime import date, timedelta
@@ -21,9 +31,14 @@ logger = logging.getLogger(__name__)
 
 
 class ProductService(BaseService[Product]):
-    """产品服务"""
+    """
+    产品管理服务。
+
+    写操作（创建/更新/删除）仅管理员可执行；读操作按 UserRole 过滤可见范围。
+    """
 
     def __init__(self, db: AsyncSession):
+        """注入数据库会话并绑定 Product 模型。"""
         super().__init__(db, Product)
 
     async def get_product_by_id(
@@ -33,18 +48,17 @@ class ProductService(BaseService[Product]):
             include_client: bool = True
     ) -> Product:
         """
-        根据ID获取产品详情
-        
+        根据 ID 获取产品详情。
+
+        客户用户通过 JOIN Client 过滤；不存在时区分「无权限」与「未找到」。
+
         Args:
-            product_id: 产品ID
-            current_user: 当前用户（用于权限检查）
-            include_client: 是否包含客户信息
-        
+            product_id: 产品 ID
+            current_user: 当前用户
+            include_client: 是否 selectinload 客户信息
+
         Returns:
-            Product: 产品对象
-        
-        Raises:
-            HTTPException: 如果产品不存在或没有权限
+            Product 对象
         """
         # 构建查询 - 使用JOIN优化，避免N+1查询
         query = select(Product).where(Product.id == product_id)
@@ -88,19 +102,21 @@ class ProductService(BaseService[Product]):
             search: Optional[str] = None
     ) -> tuple[List[Product], int]:
         """
-        获取产品列表（支持分页、筛选、搜索）
-        
+        分页获取产品列表。
+
+        名称/搜索优先前缀匹配或全文索引；管理员可按 client_id 筛选。
+
         Args:
-            current_user: 当前用户（用于权限检查）
+            current_user: 当前用户
             page: 页码
             page_size: 每页数量
-            client_id: 客户ID过滤
-            name: 产品名称过滤
-            is_active: 激活状态过滤
-            search: 搜索关键词
-        
+            client_id: 客户 ID（管理员）
+            name: 产品名称前缀
+            is_active: 启用状态
+            search: 搜索词（全文或前缀）
+
         Returns:
-            tuple: (产品列表, 总数)
+            (产品列表, 总条数)
         """
         # 构建查询 - 使用JOIN优化
         query = select(Product)
@@ -184,14 +200,17 @@ class ProductService(BaseService[Product]):
             current_user: User
     ) -> Product:
         """
-        创建产品（支持处理默认客户（导入数据）的特殊逻辑）
-        
+        创建产品（仅管理员）。
+
+        若已存在同名且归属「默认客户（导入数据）」的产品，则更新其 client_id
+        与扣减比例（复用历史 AdData），否则新建并 initialize_product_assignment。
+
         Args:
-            product_data: 产品数据字典
+            product_data: 含 name、client_id、扣减比例、Postback 配置等
             current_user: 当前用户
-        
+
         Returns:
-            Product: 创建或更新的产品对象
+            创建或改绑后的产品对象
         """
         # 权限检查：仅管理员可创建产品
         self.require_admin(current_user)
@@ -237,7 +256,7 @@ class ProductService(BaseService[Product]):
                 detail=f"客户ID {client_id} 已存在同名产品：{product_data['name']}。请使用不同的产品名称或更新现有产品"
             )
 
-        # 检查是否存在相同名称的产品属于默认客户（导入数据）
+        # ====== 默认客户（导入数据）同名产品改绑逻辑 ======
         product_with_client_query = select(Product, Client).join(
             Client, Product.client_id == Client.id
         ).where(
@@ -326,15 +345,19 @@ class ProductService(BaseService[Product]):
             current_user: User
     ) -> Product:
         """
-        更新产品信息（支持产品分配历史转移）
-        
+        更新产品信息（仅管理员，支持客户转移）。
+
+        client_id 变更时须通过 transfer_product_assignment 维护分配历史；
+        transfer_date / old_client_end_date 用于精确控制切换日期，须满足
+        「旧客户结束日 + 1 天 = 新客户开始日」以避免 AdData 空窗。
+
         Args:
-            product_id: 产品ID
-            product_data: 更新的数据字典（可能包含transfer_date和old_client_end_date）
+            product_id: 产品 ID
+            product_data: 更新字段（可含 transfer_date、old_client_end_date）
             current_user: 当前用户
-        
+
         Returns:
-            Product: 更新后的产品对象
+            更新后的产品对象
         """
         # 权限检查：仅管理员可更新产品
         self.require_admin(current_user)
@@ -374,7 +397,7 @@ class ProductService(BaseService[Product]):
                     detail=f"收益减扣比例必须在0到1之间。当前值：{revenue_ratio}"
                 )
 
-        # 处理client_id变更（包括产品分配历史转移）
+        # ====== 客户转移：校验日期连续性并写分配历史 ======
         old_client_id = product.client_id
         if 'client_id' in product_data and product_data['client_id'] != product.client_id:
             new_client_id = product_data['client_id']
@@ -486,21 +509,18 @@ class ProductService(BaseService[Product]):
             current_user: User
     ) -> Dict[str, Any]:
         """
-        删除产品（支持转移到默认客户）
-        
+        删除或软转移产品（仅管理员）。
+
         删除规则：
-        1. 如果产品关联了广告数据 → 将产品的 client_id 改为管理员的默认客户（不删除产品）
-        2. 如果没有关联广告数据 → 直接删除产品
-        
+        1. 有关联 AdData → 转移至「默认客户（导入数据）」并清零扣减比例
+        2. 无关联数据 → 物理删除
+
         Args:
-            product_id: 产品ID
+            product_id: 产品 ID
             current_user: 当前用户
-        
+
         Returns:
-            Dict: 包含操作结果的字典
-                - transferred: bool - 是否转移到默认客户
-                - message: str - 操作消息
-                - new_client_id: int - 新客户ID（如果转移）
+            含 transferred、message、new_client_id（转移时）的结果字典
         """
         # 权限检查
         self.require_admin(current_user)

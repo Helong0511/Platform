@@ -1,5 +1,10 @@
+<!--
+  主布局：顶栏、侧边栏与内容区
+  @file components/Layout/MainLayout.vue
+-->
 <template>
-  <el-container class="main-container">
+  <!-- 页面主模板 -->
+<el-container class="main-container">
     <!-- 桌面端侧边栏 -->
     <el-aside width="200px" class="sidebar desktop-sidebar" v-if="isAuthenticated">
       <Sidebar />

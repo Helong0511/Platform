@@ -23,10 +23,13 @@ export function useMobileTouch(options = {}) {
     preventDefault = true // 是否阻止默认行为
   } = options;
 
+  // touchStartX 响应式状态
   const touchStartX = ref(0);
   const touchStartY = ref(0);
+  // touchEndX 响应式状态
   const touchEndX = ref(0);
   const touchEndY = ref(0);
+  // isTouching 响应式状态
   const isTouching = ref(false);
   const longPressTimer = ref(null);
 
@@ -194,10 +197,13 @@ export function usePullToRefresh(onRefresh, options = {}) {
     maxPullDistance = 150 // 最大下拉距离
   } = options;
 
+  // isRefreshing 响应式状态
   const isRefreshing = ref(false);
   const pullDistance = ref(0);
+  // startY 响应式状态
   const startY = ref(0);
   const currentY = ref(0);
+  // isPulling 响应式状态
   const isPulling = ref(false);
 
   const handleTouchStart = (e) => {

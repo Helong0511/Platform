@@ -1,4 +1,8 @@
-"""URL 与占位符统一工具。"""
+"""
+URL 与占位符统一工具（app/core/url）。
+
+短链跳转、Postback 转发共用的 query 参数规范化、花括号占位符解析与校验入口。
+"""
 from app.core.url.placeholder import (
     PLACEHOLDER_ALIAS_MAP,
     PLACEHOLDER_BRACE_MAP,

@@ -1,6 +1,16 @@
 """
-转化服务层
-封装转化相关的业务逻辑和统计查询
+转化统计业务服务层。
+
+职责：
+- 转化总览（get_conversion_summary）：按 Offer×渠道 聚合点击、转化、CR、PO 与利润
+- 按 Offer 维度汇总（get_conversions_by_offer）
+- 客户角色数据隔离：仅统计所属 Client 下激活渠道的点击与转化
+- 客户侧 downstream_cap 上限裁剪，触顶时可自动关闭关联短链接
+
+统计口径：全局汇总优先 click_id 关联 Click，且仅计入激活且 status=Active 的 Offer；
+分组统计规则略有差异，详见各方法内分段注释。
+
+对应路由：app/api_v1/cpl/conversions
 """
 from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,13 +32,17 @@ logger = logging.getLogger(__name__)
 
 
 class ConversionService:
-    """转化服务"""
+    """
+    转化统计服务（无 BaseService 继承）。
+
+    面向管理端报表与客户仪表盘，聚合 Click 与 PostbackConversion 数据，
+    并叠加扣量、下游 PO 上限等业务规则计算可见收益。
+    """
 
     def __init__(self, db: AsyncSession):
         """
-        初始化转化服务
         Args:
-            db: 异步数据库会话
+            db: 异步 SQLAlchemy 会话
         """
         self.db = db
 
@@ -42,21 +56,25 @@ class ConversionService:
             advertiser_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        获取转化总览统计（优化查询，批量加载关联数据）
-        返回完整统计数据，包括点击、转化、转化率、支付金额等
-        
+        获取转化总览统计（仪表盘核心接口）。
+
+        默认查询最近 30 天；客户用户无渠道时返回全零结构。
+        返回全局汇总与按 (offer_id, publisher_id) 分组的 stats_list。
+
         Args:
-            current_user: 当前用户
-            start_date: 开始日期
-            end_date: 结束日期
-            offer_id: Offer ID过滤
-            publisher_id: 渠道ID过滤
-            advertiser_id: 广告主ID过滤
-        
+            current_user: 当前登录用户，CLIENT 角色触发数据隔离
+            start_date: 起始日期 YYYY-MM-DD，可选
+            end_date: 结束日期 YYYY-MM-DD，可选（含当日）
+            offer_id: 按 Offer 过滤
+            publisher_id: 按渠道过滤
+            advertiser_id: 按广告主过滤
+
         Returns:
-            Dict: 统计信息，包含 total_clicks, total_conversions, cr, total_po, stats_list
+            Dict: total_clicks、total_conversions、cr、total_po、
+                total_po_after_discount、total_profit、conversion_cap、
+                stats_list、start_date、end_date
         """
-        # 解析日期
+        # --- 日期范围：默认近 30 天，结束日含全天 ---
         start_datetime = None
         end_datetime = None
 
@@ -75,7 +93,7 @@ class ConversionService:
             end_datetime = get_app_now_naive()
             end_datetime = end_datetime.replace(hour=23, minute=59, second=59, microsecond=999999)
 
-        # 权限过滤：客户只能查看自己的数据
+        # --- 客户角色：解析 client_id 与可见渠道列表 ---
         client_publisher_ids = None
         client_id = None
         if current_user.role == UserRole.CLIENT:
@@ -122,7 +140,7 @@ class ConversionService:
                     "end_date": end_date or (end_datetime.strftime("%Y-%m-%d"))
                 }
 
-        # 构建点击查询条件
+        # --- 构建点击/转化公共时间窗与维度条件 ---
         click_conditions = [
             Click.click_time >= start_datetime,
             Click.click_time < end_datetime
@@ -153,9 +171,7 @@ class ConversionService:
         click_query = select(func.count(Click.id)).where(and_(*click_conditions))
         total_clicks = (await self.db.execute(click_query)).scalar() or 0
 
-        # 统计总转化数量（支持多种关联方式：click_id、gid、client_id）
-        # 客户用户：支持通过Click.publisher_id、gid字段、client_id字段过滤
-        # 注意：只统计 Offer 激活的转化（不计入未激活 Offer 的转化）
+        # --- 全局转化计数：主路径 click_id JOIN，仅 Active Offer ---
         click_alias_for_count = aliased(Click)
         offer_alias_for_count = aliased(Offer)
 
@@ -197,9 +213,7 @@ class ConversionService:
         # 这里先计算一个初始值，后续会被更新
         total_conversions = count_1
 
-        # 统计总支付金额（PO）- 使用扣减后的 payout（支持多种关联方式）
-        # 客户用户：支持通过Click.publisher_id、gid字段、client_id字段过滤
-        # 注意：只统计 Offer 激活的转化（不计入未激活 Offer 的转化）
+        # --- 全局 PO 汇总（扣减后 payout，口径同转化计数）---
         click_alias_for_po = aliased(Click)
         offer_alias_for_po = aliased(Offer)
 
@@ -238,7 +252,7 @@ class ConversionService:
         # 扣价后的总支付金额
         total_po_after_discount = po_1
 
-        # 按Offer和Publisher分组统计点击
+        # --- 分组统计：先聚合点击，再合并转化 ---
         click_group_query = select(
             Click.offer_id,
             Click.publisher_id,
@@ -411,7 +425,7 @@ class ConversionService:
         # 重新计算总转化率（使用更新后的总转化数量）
         cr = (total_conversions / total_clicks * 100) if total_clicks > 0 else 0
 
-        # 批量加载Offer和Advertiser信息（避免N+1查询）
+        # --- 批量加载维度名称与 Offer-渠道分配（避免 N+1）---
         offers_map = {}
         advertisers_map = {}
         if offer_ids:
@@ -449,8 +463,8 @@ class ConversionService:
                 key = (assignment.offer_id, assignment.publisher_id)
                 offer_publisher_assignments_map[key] = assignment
 
-        # 第二遍：使用offer_publisher_assignments_map计算考虑下游PO限制后的实际收益
-        calculated_total_po_after_discount = 0.0  # 重新计算扣价后的总支付金额
+        # --- 第二遍：按 affiliate_payout 裁剪下游可见收益 ---
+        calculated_total_po_after_discount = 0.0
         for conv_data in conversion_data_list:
             key = conv_data["key"]
             conv_count_val = conv_data["conv_count_val"]
@@ -482,7 +496,7 @@ class ConversionService:
         total_po_after_discount = calculated_total_po_after_discount
         total_profit = total_po - total_po_after_discount
 
-        # 计算客户的转化上限（conversion_cap）
+        # --- 客户角色：downstream_cap 裁剪与触顶关短链 ---
         conversion_cap = 0
         if current_user.role == UserRole.CLIENT and client_id:
             # 查询客户关联的所有渠道的下游CAP限制
@@ -648,17 +662,21 @@ class ConversionService:
             end_date: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        按Offer统计转化数据（优化查询）
-        
+        按 Offer 维度汇总点击、转化、CR 与 PO。
+
+        仅统计时间窗内有过转化记录的 Offer（含未激活 Offer）；
+        转化计数仍限定 Active 且 is_active 的 Offer。
+
         Args:
-            current_user: 当前用户
-            start_date: 开始日期
-            end_date: 结束日期
-        
+            current_user: 当前登录用户，CLIENT 角色限定所属渠道
+            start_date: 起始日期，可选
+            end_date: 结束日期，可选
+
         Returns:
-            List: 按Offer的统计列表
+            List[Dict]: 每项含 offer_id、offer_name、click_count、
+                conversion_count、cr、po，按点击量降序
         """
-        # 解析日期
+        # --- 日期解析 ---
         start_datetime = None
         end_datetime = None
 
@@ -668,16 +686,14 @@ class ConversionService:
             end_datetime = parse_date_to_app_timezone(end_date)
             end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
 
-        # 权限过滤
+        # --- 客户角色：限定可见渠道 ---
         client_publisher_ids = None
         if current_user.role == UserRole.CLIENT:
-            # 查询客户关联的Client记录
             client_result = await self.db.execute(
                 select(Client.id).where(Client.user_id == current_user.id).limit(1)
             )
             client_id = client_result.scalar_one_or_none()
             if client_id:
-                # 查询客户关联的所有渠道
                 publisher_result = await self.db.execute(
                     select(Publisher.id).where(Publisher.client_id == client_id)
                 )
@@ -687,8 +703,7 @@ class ConversionService:
             else:
                 return []
 
-        # 先查询有转化数据的 Offer ID（不管 Offer 是否激活）
-        # 这样确保所有有转化数据的 Offer 都会被统计
+        # --- 确定时间窗内有过转化的 Offer 集合 ---
         conversion_offer_query = (
             select(Click.offer_id)
             .join(
@@ -732,7 +747,7 @@ class ConversionService:
         # 提取所有offer的id
         offer_ids = [offer.id for offer in offers]
 
-        # 批量查询点击统计（优化：一次查询获取所有数据）
+        # --- 批量聚合各 Offer 的点击与转化（转化仅计 Active Offer）---
         click_query = select(
             Click.offer_id,
             func.count(Click.click_id).label('click_count')

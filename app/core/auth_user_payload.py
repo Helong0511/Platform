@@ -1,4 +1,9 @@
-"""登录/刷新令牌响应中的 user 载荷构建（含客户 API 对接所需字段）。"""
+"""
+登录/刷新令牌响应中的 user 载荷构建。
+
+位于认证层（app/core），将 User/Client 模型字段序列化为前端 LoginResponse.user，
+客户角色附带 API 密钥等信息，供对接文档页直接展示。
+"""
 from __future__ import annotations
 
 from typing import Any

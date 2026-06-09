@@ -172,6 +172,7 @@ def _schedule_db_show_count_sync(
 ) -> None:
     """后台任务：将缓存中已递增的 show_count 同步到数据库（仅当库值落后时更新）。"""
     async def update_show_count_db():
+        """后台协程：仅当库内 show_count 落后于缓存目标值时写库。"""
         try:
             db_session = AsyncSessionLocal()
             result = await db_session.execute(
@@ -214,6 +215,7 @@ async def _record_first_show_and_get_url(
         db: AsyncSession,
         background_tasks: BackgroundTasks,
 ) -> Optional[str]:
+    """本会话首次展示：递增 show_count（缓存优先）并返回 original_url。"""
     logger.debug("[斗篷服务] 首次访问，开始统计展示次数: short_code=%s", short_code)
     if cached_data:
         original_url = cached_data.get("original_url")

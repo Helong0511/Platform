@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 短链接列表
+ * @file composables/useShortLinkList.js
+ */
 import { reactive, ref, watch, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
@@ -9,22 +13,31 @@ import { logger } from '../utils/logger';
 /**
  * 短链接列表、统计、筛选与路由 search 参数联动。
  */
+/**
+ * 组合式函数 - 短链接列表
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useShortLinkList() {
   const route = useRoute();
+  // 数据加载中
   const loading = ref(false);
   const links = ref([]);
+  // Offer 下拉选项
   const offerList = ref([]);
   const channelList = ref([]);
+  // 统计数据
   const stats = reactive({
     total_links: 0,
     total_clicks: 0,
     active_links: 0,
     expired_links: 0,
   });
+  // filters 响应式状态
   const filters = reactive({
     search: '',
     is_active: null,
   });
+  // 分页状态 { page, pageSize/page_size, total }
   const pagination = reactive({
     page: 1,
     pageSize: 20,

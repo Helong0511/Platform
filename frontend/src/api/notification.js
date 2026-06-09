@@ -1,5 +1,6 @@
 /**
- * 通知配置管理 API
+ * 通知配置 API：Telegram/产品/客户通知
+ * @file api/notification.js
  */
 import { request } from '../utils/api';
 import { withCsrfMutate } from '../utils/csrfMutate';
@@ -14,6 +15,9 @@ export {
 
 // ==================== 通知记录 ====================
 
+/**
+ * 分页获取通知发送记录。
+ */
 export const getNotificationRecords = async (params = {}) =>
   request(
     {
@@ -24,6 +28,9 @@ export const getNotificationRecords = async (params = {}) =>
     { paginated: true }
   );
 
+/**
+ * 获取单条通知记录详情。
+ */
 export const getNotificationRecord = async (notificationId) =>
   request(
     {
@@ -35,6 +42,9 @@ export const getNotificationRecord = async (notificationId) =>
 
 // ==================== 补发通知 ====================
 
+/**
+ * resendConversionNotification 接口。
+ */
 export const resendConversionNotification = async (conversionId) =>
   withCsrfMutate(() =>
     request(
@@ -46,6 +56,9 @@ export const resendConversionNotification = async (conversionId) =>
     )
   );
 
+/**
+ * 批量Resend Conversion Notification。
+ */
 export const batchResendConversionNotification = async (conversionIds) =>
   withCsrfMutate(() =>
     request(
@@ -60,12 +73,18 @@ export const batchResendConversionNotification = async (conversionIds) =>
 
 // ==================== 管理员通知配置 ====================
 
+/**
+ * 获取管理员侧通知配置。
+ */
 export const getAdminNotificationConfig = async () =>
   request(
     { url: '/api/v1/notification-configs/admin/config', method: 'get' },
     { returnDataOnly: true }
   );
 
+/**
+ * 保存Admin Notification Config。
+ */
 export const saveAdminNotificationConfig = async (configData) =>
   withCsrfMutate(() =>
     request(
@@ -78,6 +97,9 @@ export const saveAdminNotificationConfig = async (configData) =>
     )
   );
 
+/**
+ * testTelegramConnection 接口。
+ */
 export const testTelegramConnection = async (chatId) =>
   withCsrfMutate(() =>
     request(
@@ -90,6 +112,9 @@ export const testTelegramConnection = async (chatId) =>
     )
   );
 
+/**
+ * 发送Test Message。
+ */
 export const sendTestMessage = async (chatId, messageType = 'conversion') =>
   withCsrfMutate(() =>
     request(

@@ -1,6 +1,17 @@
 """
-短链接访问记录服务层
-封装点击记录查询的业务逻辑
+短链接访问记录（点击日志）服务层。
+
+功能说明：
+- 点击记录分页查询与详情（列表省略 url_params/all_headers 等大字段）
+- 默认最近 7 天范围；按 click_id/conversion_id 精确查时不限时间窗口
+- 支持手动补报 Facebook Purchase 事件（像素配置短链→斗篷→全局多级回退）
+
+在系统中的位置：
+- 被管理端点击日志 API 调用；补报委托 ``send_third_party_report``
+
+注意事项：
+1. 列表使用 load_only + joinedload；慢查询（≥1.5s）打 warning 便于索引优化
+2. 补报前须校验转化是否已存在，避免重复 CAPI 事件
 """
 import json
 import logging
@@ -31,9 +42,15 @@ logger = logging.getLogger(__name__)
 
 
 class ClickService:
-    """短链接访问记录服务"""
+    """
+    点击日志服务。
+
+    查询侧强调日期范围护栏与 IP 匹配策略；补报侧按
+    短链自定义像素 → 斗篷配置 → 全局配置 解析 Facebook 凭证。
+    """
 
     def __init__(self, db: AsyncSession):
+        """注入异步数据库会话。"""
         self.db = db
 
     @staticmethod
@@ -50,7 +67,12 @@ class ClickService:
 
     @staticmethod
     def _serialize_click(click: Click, include_heavy_fields: bool = False) -> Dict[str, Any]:
-        """序列化点击记录，列表场景默认不返回大字段以提升性能。"""
+        """
+        将 Click ORM 转为 API 字典。
+
+        列表默认省略 user_agent/url_params/all_headers 等大字段；
+        详情页传 include_heavy_fields=True 返回完整诊断信息。
+        """
         click_data = {
             "id": click.id,
             "click_id": click.click_id,
@@ -109,7 +131,15 @@ class ClickService:
             facebook_access_token: str,
             facebook_api_version: str
     ) -> Dict[str, Any]:
-        """根据点击/转化信息构建补报参数。"""
+        """
+        组装 Facebook CAPI 补报 payload。
+
+        从 url_params 解析 adsid（fbclid/click_id/cid 优先级）及联系字段；
+        转化金额须 > 0 才允许 Purchase 事件。
+
+        Raises:
+            VALIDATION_ERROR: 缺少 adsid 或金额无效
+        """
         fbclid = scalar_query_value(url_params.get("fbclid"))
         click_id_in_url = scalar_query_value(url_params.get("click_id"))
         cid_in_url = scalar_query_value(url_params.get("cid"))
@@ -162,28 +192,25 @@ class ClickService:
             end_date: Optional[str] = None
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
-        获取短链接访问记录列表
+        分页查询短链接点击记录。
+
+        未传日期且非精确 click_id/conversion_id 查询时，默认最近 7 天；
+        显式日期范围不得超过 90 天。
 
         Args:
-            page: 页码
-            page_size: 每页数量
-            click_id: Click ID过滤
-            conversion_id: 转化ID过滤
-            offer_id: Offer ID过滤
-            publisher_id: 渠道ID过滤
-            advertiser_id: 广告主ID过滤
-            short_link_id: 短链接ID过滤
-            ip: IP地址过滤
-            country: 国家过滤
-            start_date: 开始日期（YYYY-MM-DD）
-            end_date: 结束日期（YYYY-MM-DD）
+            page/page_size: 分页
+            click_id/conversion_id: 精确 ID 过滤（存在时跳过默认 7 天）
+            offer_id/publisher_id/advertiser_id/short_link_id: 业务维度过滤
+            ip: 支持精确、前缀或 LIKE 通配
+            country: 国家码
+            start_date/end_date: YYYY-MM-DD，应用时区解析
 
         Returns:
-            Tuple[List[Dict], int]: (点击记录列表, 总数)
+            (序列化后的点击字典列表, 总条数)
         """
         started_at = perf_counter()
 
-        # 解析日期（使用应用时区，与数据库时间一致）
+        # --- 时间范围：默认 7 天 / 解析入参 / 90 天上限 ---
         start_datetime = None
         end_datetime = None
 
@@ -215,7 +242,7 @@ class ClickService:
                     detail="开始日期不能晚于结束日期"
                 )
 
-        # 构建查询 - 使用 joinedload 预加载关联数据，避免 N+1 查询
+        # --- 查询体：load_only 减列 + joinedload 防 N+1 ---
         query = select(Click).options(
             load_only(
                 Click.id,
@@ -269,22 +296,16 @@ class ClickService:
             conditions.append(Click.short_link_id == short_link_id)
 
         if ip:
-            # 优化：使用精确匹配或前缀匹配，避免全表扫描
-            # 如果IP包含通配符，使用LIKE；否则使用精确匹配（更快）
             ip_trimmed = ip.strip()
+            # 通配符 → LIKE；IPv4 尾点 → 前缀；否则精确匹配
             if '%' in ip_trimmed or '_' in ip_trimmed:
-                # 用户明确使用通配符，使用LIKE
                 conditions.append(Click.ip.like(ip_trimmed))
             elif '.' in ip_trimmed:
-                # IPv4地址，支持精确匹配或前缀匹配（如 192.168.）
                 if ip_trimmed.endswith('.'):
-                    # 前缀匹配，如 "192.168." -> "192.168.%"
                     conditions.append(Click.ip.like(f"{ip_trimmed}%"))
                 else:
-                    # 精确匹配，性能最好
                     conditions.append(Click.ip == ip_trimmed)
             else:
-                # 其他情况，使用精确匹配
                 conditions.append(Click.ip == ip_trimmed)
 
         if country:
@@ -344,7 +365,18 @@ class ClickService:
         return click_list, total
 
     async def get_click_detail(self, click_record_id: int) -> Dict[str, Any]:
-        """获取单条点击记录详情（包含大字段）。"""
+        """
+        获取单条点击详情（含 user_agent、url_params、headers 等大字段）。
+
+        Args:
+            click_record_id: clicks 表主键 id（非 click_id 字符串）
+
+        Returns:
+            完整序列化字典
+
+        Raises:
+            NOT_FOUND: 记录不存在
+        """
         query = (
             select(Click)
             .options(
@@ -371,7 +403,19 @@ class ClickService:
 
     async def resend_facebook_report(self, click_record_id: int) -> Dict[str, Any]:
         """
-        手动补报 Facebook 像素（仅已转化点击）。
+        对已转化点击手动补报 Facebook Purchase 事件。
+
+        须存在 conversion_id 及有效 PostbackConversion；像素凭证按
+        短链级 → 斗篷(dp+short_code) → settings 全局 三级解析。
+
+        Args:
+            click_record_id: clicks 表主键
+
+        Returns:
+            补报摘要（pixel 来源、conversion_id、dp 等）
+
+        Raises:
+            NOT_FOUND / VALIDATION_ERROR: 记录或转化缺失、未转化、参数不足
         """
         click_query = (
             select(Click)
@@ -407,13 +451,12 @@ class ClickService:
         facebook_api_version = settings.FACEBOOK_API_VERSION
         config_source = "全局配置"
 
-        # 优先级 1：短链接自定义像素
+        # 像素凭证优先级：短链自定义 > 斗篷配置 > 全局 settings
         if click.short_link and click.short_link.facebook_pixel_id and click.short_link.facebook_access_token:
             facebook_pixel_id = click.short_link.facebook_pixel_id
             facebook_access_token = click.short_link.facebook_access_token
             facebook_api_version = click.short_link.facebook_api_version or settings.FACEBOOK_API_VERSION
             config_source = f"短链接配置(short_link_id={click.short_link_id})"
-        # 优先级 2：斗篷像素配置
         elif dp and short_code:
             try:
                 cloak_cfg = await get_cloak_pixel_config(

@@ -68,6 +68,7 @@ try:
 
     # 创建修复后的 connect 函数
     async def _patched_aiomysql_connect(*args, **kwargs):
+        """过滤 SQLAlchemy 传入 aiomysql 不支持的超时参数后建立连接。"""
         # 过滤掉 aiomysql 不支持的参数
         # aiomysql 支持的参数：host, port, user, password, db, charset, connect_timeout, autocommit, loop, minsize, maxsize
         supported_params = {

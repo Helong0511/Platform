@@ -20,9 +20,18 @@ logger = logging.getLogger(__name__)
 
 
 class CapSynchronizer:
-    """Cap 同步器"""
-    
+    """
+    Offer Cap 计数同步器：以 Redis 为权威源，将每日/总 Cap 计数写回数据库。
+
+    供定时任务或管理端手动触发，保证 DB 中的 ``current_daily_count`` /
+    ``current_total_count`` 与 Redis 键 ``cpl:cap:*`` 一致。
+    """
+
     def __init__(self, db: AsyncSession):
+        """
+        Args:
+            db: 异步数据库会话，用于查询与更新 OfferCap 记录
+        """
         self.db = db
     
     async def sync_all_active_caps(self) -> Dict[str, int]:

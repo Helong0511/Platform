@@ -1,5 +1,8 @@
 /**
- * 广告数据 / 每日汇总 / TB 搜索 — 表格列显示与 localStorage 持久化
+ * 广告数据表格列显隐管理
+ * @file composables/useAdDataColumnVisibility.js
+ *
+ * 封装广告数据、每日汇总、TB 搜索等页面的列显隐与 localStorage 持久化。
  */
 import { useTableColumnVisibility } from './useTableColumnVisibility';
 
@@ -7,6 +10,10 @@ import { useTableColumnVisibility } from './useTableColumnVisibility';
  * @param {string} storageKey
  * @param {() => Record<string, boolean>} getDefaultColumns
  * @param {string[]} savableKeys 持久化时保存的列键
+ */
+/**
+ * 组合式函数 - 广告数据列显隐
+ * @returns {Object} 响应式状态与业务操作方法
  */
 export function useAdDataColumnVisibility(storageKey, getDefaultColumns, savableKeys) {
   return useTableColumnVisibility(storageKey, {

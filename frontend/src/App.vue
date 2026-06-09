@@ -1,3 +1,11 @@
+<!--
+  应用根组件（App.vue）
+
+  职责：
+  1. 挂载 vue-router 的 RouterView，渲染当前路由页面
+  2. 全局捕获并过滤浏览器扩展引起的无害错误（避免控制台噪音）
+  3. 监听 unhandledrejection，同样忽略扩展相关的 Promise 拒绝
+-->
 <script setup>
 import { RouterView } from 'vue-router';
 import { onMounted, onBeforeUnmount } from 'vue';
@@ -102,6 +110,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <!-- 路由视图：根据当前 URL 渲染对应页面组件 -->
   <RouterView />
 </template>
 

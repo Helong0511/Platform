@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 用户表单：角色与权限字段
+ * @file composables/useUserForm.js
+ */
 import { computed, nextTick, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
@@ -12,6 +16,7 @@ import { formatDate } from '../utils/dateFormat';
 import { generateUUID } from '../utils/uuid';
 import { logger } from '../utils/logger';
 
+/** 返回用户/客户新建表单的默认空对象（含 client_key 等扩展字段）。 */
 export function createEmptyUserForm() {
   return {
     username: '',
@@ -64,13 +69,21 @@ function mapUserToForm(userData, fallbackUser) {
 /**
  * 用户添加/编辑/查看表单。
  */
+/**
+ * 组合式函数 - 用户表单：角色与权限字段
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useUserForm({ users, loading, fetchUsers, fetchStats }) {
+  // 弹窗显隐
   const dialogVisible = ref(false);
   const viewDialogVisible = ref(false);
+  // dialogTitle 响应式状态
   const dialogTitle = ref('添加用户');
   const currentUserId = ref(null);
+  // viewingUser 响应式状态
   const viewingUser = ref(null);
   const userFormRef = ref(null);
+  // userForm 响应式状态
   const userForm = reactive(createEmptyUserForm());
 
   const showClientForm = computed(() => {

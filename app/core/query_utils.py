@@ -1,6 +1,9 @@
 """
-查询工具模块
-提供常用的查询优化函数，避免在列上使用函数导致索引失效
+SQL 查询条件优化工具。
+
+职责：生成可走索引的日期范围、产品分配 JOIN 等条件，避免在列上套函数导致全表扫描。
+
+在系统中的位置：``app.core.query_utils``，由报表与广告数据查询 Service 引用。
 """
 from calendar import monthrange
 from datetime import date, datetime

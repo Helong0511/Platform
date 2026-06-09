@@ -1,17 +1,28 @@
+/**
+ * 组合式函数 - 渠道列表数据
+ * @file composables/usePublisherList.js
+ */
 import { reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getPublishers } from '../api/publisher';
 import { logger } from '../utils/logger';
 
+/**
+ * 组合式函数 - 渠道列表数据
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function usePublisherList() {
+  // 数据加载中
   const loading = ref(false);
   const searchKeyword = ref('');
+  // 按激活状态筛选
   const filterActive = ref(null);
   const pagination = reactive({
     page: 1,
     pageSize: 20,
     total: 0,
   });
+  // 表格当前页数据
   const tableData = ref([]);
 
   const loadData = async () => {

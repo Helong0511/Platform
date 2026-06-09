@@ -49,6 +49,8 @@ class Logger {
   }
 }
 
+/** 全局日志单例，生产环境默认禁用 console 输出 */
 export const logger = new Logger();
+/** 默认导出 logger 单例 */
 export default logger;
 

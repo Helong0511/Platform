@@ -1,7 +1,13 @@
+<!--
+  Cap 上限配置管理页面
+  职责：按 Offer/渠道/广告主维度配置日 Cap 与总 Cap，支持筛选、列显隐与 CRUD 弹窗。
+-->
 <template>
-  <div class="cap-management">
+  <!-- 页面主模板 -->
+<div class="cap-management">
     <el-card class="page-card">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="card-header">
           <div class="header-left">
             <el-icon class="header-icon"><Switch /></el-icon>

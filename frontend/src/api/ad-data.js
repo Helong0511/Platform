@@ -16,6 +16,9 @@ import {
 const adDataWithDataFilters = createWithDataFilterApi('ad-data');
 
 // 获取广告数据列表
+/**
+ * 分页获取广告数据列表。
+ */
 export const getAdDataList = async (params) => {
   const timeout = getAdDataListTimeout();
 
@@ -27,6 +30,9 @@ export const getAdDataList = async (params) => {
 };
 
 // 获取每日汇总数据
+/**
+ * 获取广告数据按日汇总。
+ */
 export const getDailySummary = async (params) => {
   const timeout = getAdDataListTimeout();
 
@@ -40,6 +46,9 @@ export const getDailySummary = async (params) => {
 // 注意：getAdDataDetail 和 getAdDataStats 已移除，因为未在代码中使用
 
 // 导出广告数据（无数据错误由调用方展示提示）
+/**
+ * 导出Ad Data。
+ */
 export const exportAdData = (params) =>
   requestListExport(
     { url: '/api/v1/excel/export/ad-data', method: 'get', params },
@@ -47,6 +56,9 @@ export const exportAdData = (params) =>
   );
 
 // 导入广告数据
+/**
+ * 导入Ad Data。
+ */
 export const importAdData = async (formData) => {
   const result = await requestUpload(
     {
@@ -60,6 +72,9 @@ export const importAdData = async (formData) => {
 };
 
 // 更新广告数据
+/**
+ * 更新Ad Data。
+ */
 export const updateAdData = async (adData) => {
   const { id, ...updateData } = adData;
   return withCsrfMutate(() =>
@@ -71,6 +86,9 @@ export const updateAdData = async (adData) => {
 };
 
 // 删除广告数据
+/**
+ * 删除Ad Data。
+ */
 export const deleteAdData = async (dataId) =>
   withCsrfMutate(() =>
     request(
@@ -80,6 +98,9 @@ export const deleteAdData = async (dataId) =>
   );
 
 // 批量删除广告数据
+/**
+ * 批量Delete Ad Data。
+ */
 export const batchDeleteAdData = async (dataIds) =>
   withCsrfMutate(() =>
     request(
@@ -101,6 +122,9 @@ export const getProductsForSelect = fetchProductsAsSelectOptions;
 // 注意：getClientsByUserId 已移除，因为未在代码中使用
 
 // 获取产品详情
+/**
+ * 根据 ID 获取产品信息。
+ */
 export const getProductById = async (productId) => {
   return request({
     url: `/api/v1/products/${productId}`,
@@ -111,6 +135,9 @@ export const getProductById = async (productId) => {
 // 注意：getAdDataTrend 已移除，因为未在代码中使用
 
 // 获取数据的日期范围
+/**
+ * 获取广告数据可用日期范围。
+ */
 export const getAdDataDateRange = async (clientId = null) => {
   const params = {};
   if (clientId) params.client_id = clientId;

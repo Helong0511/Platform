@@ -1,5 +1,6 @@
 /**
- * ML模型管理 API
+ * 机器学习模型管理 API
+ * @file api/ml-model.js
  */
 import {
   request,
@@ -42,6 +43,9 @@ export const getModelStatus = async () => {
 
 export { getTimezone } from './app-config';
 
+/**
+ * parseExcelColumns 接口。
+ */
 export const parseExcelColumns = async (file) => {
   try {
     return await uploadExcelFile('/api/v1/ml-model/parse-excel', file);
@@ -50,6 +54,9 @@ export const parseExcelColumns = async (file) => {
   }
 };
 
+/**
+ * 保存Mapping。
+ */
 export const saveMapping = async (mapping) =>
   withCsrfMutate(() =>
     request(
@@ -62,6 +69,9 @@ export const saveMapping = async (mapping) =>
     )
   );
 
+/**
+ * previewExcelData 接口。
+ */
 export const previewExcelData = async (file, rows = 10) => {
   try {
     return await uploadExcelFile(`/api/v1/ml-model/preview?rows=${rows}`, file);
@@ -70,6 +80,9 @@ export const previewExcelData = async (file, rows = 10) => {
   }
 };
 
+/**
+ * 导入Training Data。
+ */
 export const importTrainingData = async (file) => {
   try {
     return await uploadExcelFile('/api/v1/ml-model/import', file);

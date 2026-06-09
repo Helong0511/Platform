@@ -1,9 +1,19 @@
+"""下游客户（Client）Schema：公司信息、IP 白名单、API 开关、关联用户等。
+
+客户 = 渠道 = 商户，与 User 一对一或关联已有用户创建。
+
+说明：请求/响应 JSON 结构定义，供 FastAPI 校验与 OpenAPI 文档生成。"""
 from typing import Optional
 
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 
 
 class ClientBase(BaseModel):
+    """
+    客户公共字段：公司信息、IP 白名单、API/改密开关
+    
+    公共字段基类，供 Create/Update/Response 等子模型复用，避免重复定义。
+    """
     company_name: str | None = None
     contact_person: str | None = None
     phone: str | None = None
@@ -17,6 +27,11 @@ class ClientBase(BaseModel):
 
 
 class ClientCreate(ClientBase):
+    """
+    创建客户：可关联已有 user_id，或同时创建新登录账号
+    
+    创建请求体：包含新建记录所需字段，提交前由 Pydantic 自动校验类型与取值范围。
+    """
     company_name: str
     # 用户ID（如果提供，则关联已有用户；如果不提供，则创建新用户）
     user_id: int | None = None
@@ -29,10 +44,20 @@ class ClientCreate(ClientBase):
 
 
 class ClientUpdate(ClientBase):
+    """
+    更新客户信息，key 为可选 UUID 字段
+    
+    更新请求体：字段均为可选，客户端仅提交需要修改的列。
+    """
     key: str | None = None  # 客户唯一标识UUID（可选，允许更新）
 
 
 class ClientInDBBase(ClientBase):
+    """
+    数据库客户记录
+    
+    公共字段基类，供 Create/Update/Response 等子模型复用，避免重复定义。
+    """
     id: int
     key: str | None = None  # 客户唯一标识UUID
 
@@ -40,10 +65,20 @@ class ClientInDBBase(ClientBase):
 
 
 class ClientResponse(ClientInDBBase):
+    """
+    客户详情 API 响应，附带关联用户全名
+    
+    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    """
     user_full_name: Optional[str] = None  # 用户全名（从关联的User获取）
 
 
 class ClientListResponse(BaseModel):
+    """
+    客户分页列表响应
+    
+    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    """
     data: list[ClientResponse]
     total: int
     page: int

@@ -1,7 +1,15 @@
+/**
+ * 组合式函数 - 下游测试列显隐
+ * @file composables/useAffiliateTestColumnVisibility.js
+ */
 import { useTableColumnVisibility } from './useTableColumnVisibility';
 
 const STORAGE_KEY = 'affiliateTest_columnVisibility';
 
+/**
+ * 组合式函数 - 下游测试列显隐
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useAffiliateTestColumnVisibility() {
   return useTableColumnVisibility(STORAGE_KEY, {
     getDefaultColumns: () => ({

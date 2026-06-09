@@ -1,7 +1,15 @@
+/**
+ * 组合式函数 - 扣减日志列显隐
+ * @file composables/useDeductionLogsColumnVisibility.js
+ */
 import { useTableColumnVisibility } from './useTableColumnVisibility';
 
 const STORAGE_KEY = 'deductionLogs_columnVisibility';
 
+/**
+ * 组合式函数 - 扣减日志列显隐
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useDeductionLogsColumnVisibility() {
   return useTableColumnVisibility(STORAGE_KEY, {
     getDefaultColumns: () => ({

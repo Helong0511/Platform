@@ -1,6 +1,16 @@
 """
-产品分配历史管理服务层
-封装产品分配历史的业务逻辑
+产品分配历史管理服务层。
+
+功能说明：
+- 产品与客户分配关系的创建、转移、历史查询与批量校验
+- 维护 ProductAssignment 表，支撑广告数据权限隔离与报表过滤
+
+在系统中的位置：
+- 被产品管理、客户管理 API 调用；与 ``app.core.product_assignment`` 工具配合
+
+注意事项：
+1. 转移分配须在同一事务内更新历史记录与当前生效行
+2. 清理无效分配（客户已删除等）应定期由校验接口触发
 """
 import logging
 from typing import List, Dict, Any
@@ -20,9 +30,15 @@ logger = logging.getLogger(__name__)
 
 
 class ProductAssignmentService(BaseService[ProductAssignment]):
-    """产品分配历史服务"""
+    """
+    产品分配历史服务。
+
+    继承 BaseService 获得通用 CRUD；日期变更类操作均委托
+    app.core.product_assignment 中的 validate / cleanup 工具函数。
+    """
 
     def __init__(self, db: AsyncSession):
+        """注入数据库会话并绑定 ProductAssignment 模型。"""
         super().__init__(db, ProductAssignment)
 
     async def get_product_assignments(
@@ -31,14 +47,17 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
             current_user: User
     ) -> List[Dict[str, Any]]:
         """
-        获取指定产品的分配历史记录
+        获取指定产品的分配历史（含客户、用户关联信息）。
+
+        客户角色仅能查看归属自身的产品；无记录时会二次校验产品是否存在
+        以区分「产品不存在」与「无权限」。
 
         Args:
-            product_id: 产品ID
+            product_id: 产品 ID
             current_user: 当前用户
 
         Returns:
-            List[Dict]: 分配历史记录列表
+            分配记录字典列表（含 client_name、user_full_name 等展示字段）
         """
         # 优化查询：一次性查询产品、客户、用户和分配历史，减少数据库往返
         if current_user.role == UserRole.ADMIN:
@@ -124,14 +143,16 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
             current_user: User
     ) -> List[Dict[str, Any]]:
         """
-        获取指定客户的所有产品分配历史记录（仅管理员）
+        获取指定客户名下所有产品的分配历史（仅管理员）。
+
+        按产品 ID、开始日期降序排列；每条记录附带产品与客户展示字段。
 
         Args:
-            client_id: 客户ID
+            client_id: 客户 ID
             current_user: 当前用户
 
         Returns:
-            List[Dict]: 分配历史记录列表
+            分配记录字典列表
         """
         # 检查客户是否存在 - 使用selectinload预加载用户信息
         client_query = select(Client).options(selectinload(Client.user)).where(Client.id == client_id)
@@ -185,14 +206,16 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
             current_user: User
     ) -> Dict[str, Any]:
         """
-        验证产品分配记录的逻辑完整性（仅管理员）
+        校验产品分配时间线连贯性（仅管理员）。
+
+        委托 validate_product_assignments，检查重叠、空窗等问题。
 
         Args:
-            product_id: 产品ID
+            product_id: 产品 ID
             current_user: 当前用户
 
         Returns:
-            Dict: 验证结果
+            含 is_valid、errors、warnings 及计数的验证结果
         """
         # 检查产品是否存在
         product_query = select(Product).where(Product.id == product_id)
@@ -226,14 +249,16 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
             current_user: User
     ) -> Dict[str, Any]:
         """
-        清理产品分配记录中的无效数据（仅管理员）
+        清理指定产品的无效分配记录（仅管理员）。
+
+        委托 cleanup_invalid_assignments，删除逻辑上不应存在的记录。
 
         Args:
-            product_id: 产品ID
+            product_id: 产品 ID
             current_user: 当前用户
 
         Returns:
-            Dict: 清理结果
+            含 deleted_count、deleted_records、errors 的清理结果
         """
         # 检查产品是否存在
         product_query = select(Product).where(Product.id == product_id)
@@ -292,15 +317,18 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
             current_user: User
     ) -> Dict[str, Any]:
         """
-        更新产品分配历史的日期（仅管理员）
+        更新单条分配记录的起止日期（仅管理员）。
+
+        流程：基本日期校验 → flush → 全产品时间线 validate →
+        通过则 commit 并返回关联信息，失败则 rollback。
 
         Args:
-            assignment_id: 分配记录ID
-            date_update: 日期更新数据
+            assignment_id: 分配记录 ID
+            date_update: 含 start_date / end_date 的字典
             current_user: 当前用户
 
         Returns:
-            Dict: 更新后的分配记录数据
+            更新后的分配记录字典
         """
 
         # 查询分配记录
@@ -429,14 +457,17 @@ class ProductAssignmentService(BaseService[ProductAssignment]):
             current_user: User
     ) -> Dict[str, Any]:
         """
-        批量更新产品分配历史的日期（仅管理员）
+        批量更新同一产品下多条分配记录的日期（仅管理员）。
+
+        约束：所有 assignment_id 必须属于同一 product_id；
+        全部 flush 后做一次产品级 validate，任一错误则整体回滚。
 
         Args:
-            updates: 更新列表，每个元素包含 assignment_id, start_date, end_date
+            updates: 更新列表，每项含 assignment_id、start_date、end_date
             current_user: 当前用户
 
         Returns:
-            Dict: 批量更新结果
+            含 updated_count、product_id、message 的结果字典
         """
         if not updates or len(updates) == 0:
             raise_api_exception(

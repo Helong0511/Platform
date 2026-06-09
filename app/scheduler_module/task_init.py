@@ -1,7 +1,16 @@
 """
-定时任务数据库初始化工具
-自动检查并添加配置文件中定义的任务到数据库
-所有配置都在 task_config.py 中统一管理
+定时任务数据库初始化工具。
+
+功能说明：
+- 启动时将 ``task_config.py`` 中定义的任务同步到 ``scheduled_tasks`` 表
+- 新增配置自动 INSERT，已存在则可选更新 Cron/描述
+
+在系统中的位置：
+- 由 ``app.main`` lifespan 在调度器启动前调用
+
+注意事项：
+1. 仅以 task_config 为真相源，手工改 DB 可能在下次 init 被覆盖
+2. 禁用任务用 is_active=False，勿直接删行以免丢失执行历史
 """
 import logging
 

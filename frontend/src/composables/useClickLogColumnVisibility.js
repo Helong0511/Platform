@@ -1,7 +1,15 @@
+/**
+ * 组合式函数 - 点击日志列显隐
+ * @file composables/useClickLogColumnVisibility.js
+ */
 import { useTableColumnVisibility } from './useTableColumnVisibility';
 
 const STORAGE_KEY = 'clickLog_columnVisibility';
 
+/**
+ * 组合式函数 - 点击日志列显隐
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useClickLogColumnVisibility() {
   return useTableColumnVisibility(STORAGE_KEY, {
     getDefaultColumns: () => ({

@@ -1,3 +1,7 @@
+/**
+ * 生成 RFC4122 v4 形态 UUID。
+ * 优先使用 crypto.randomUUID；旧环境回退到 Math.random 模板替换。
+ */
 export function generateUUID() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();

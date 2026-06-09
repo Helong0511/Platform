@@ -1,8 +1,16 @@
 """
-广告数据服务模块
+广告数据服务子包。
 
-生产 API 使用 ``app.services.ad_data.service.AdDataService``（经 ``ad_data_service`` 包路径导出）。
-子包提供查询构建器、计算器、校验器，供逐步拆分使用。
+功能说明：
+- 封装广告明细的查询、统计、校验与收入/比率计算
+- 子模块分工：``service`` 主服务、``queries`` 查询构建、``calculators`` 指标计算、``validators`` 入参校验
+
+在系统中的位置：
+- 由 ``app.services.ad_data_service`` 统一导出；也可被定时任务、报表直接引用
+
+注意事项：
+1. 查询逻辑优先放入 queries，避免 service.py 无限膨胀
+2. 日期与产品分配过滤需与 ``app.core.query_utils`` 约定保持一致
 """
 
 from app.services.ad_data.service import AdDataService, join_country_info_for_ad_data

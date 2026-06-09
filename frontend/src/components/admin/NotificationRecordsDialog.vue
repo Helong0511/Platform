@@ -1,5 +1,12 @@
+<!--
+  通知发送记录弹窗
+  @file components/admin/NotificationRecordsDialog.vue
+-->
 <template>
-  <el-dialog
+  <!-- 页面主模板 -->
+<!-- 弹窗区域 -->
+<!-- 弹窗 -->
+    <el-dialog
     v-model="visible"
     title="通知记录"
     :width="isMobile ? '95%' : '1200px'"
@@ -9,7 +16,9 @@
   >
     <div class="notification-records-content">
       <!-- 筛选栏 -->
+      <!-- 筛选区 -->
       <div class="filter-bar">
+        <!-- 表单区域 -->
         <el-form :inline="true" :model="filters">
           <el-form-item label="状态">
             <el-select 
@@ -44,6 +53,7 @@
       </div>
 
       <!-- 表格 -->
+      <!-- 数据表格 -->
       <el-table
         v-loading="loading"
         :data="records"

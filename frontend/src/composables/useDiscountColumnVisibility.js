@@ -1,7 +1,15 @@
+/**
+ * 组合式函数 - 扣量列显隐
+ * @file composables/useDiscountColumnVisibility.js
+ */
 import { useTableColumnVisibility } from './useTableColumnVisibility';
 
 const STORAGE_KEY = 'discountManagement_columnVisibility';
 
+/**
+ * 组合式函数 - 扣量列显隐
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useDiscountColumnVisibility() {
   return useTableColumnVisibility(STORAGE_KEY, {
     getDefaultColumns: () => ({

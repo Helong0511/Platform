@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 用户列表：搜索、分页与批量操作
+ * @file composables/useUserList.js
+ */
 import { ref, reactive, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getUsers, getUserStats } from '../api/user';
@@ -38,15 +42,22 @@ function normalizeClientUser(user) {
 /**
  * 用户列表、统计与分页（含防抖/去重）。
  */
+/**
+ * 组合式函数 - 用户列表：搜索、分页与批量操作
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useUserList(authStore, router) {
+  // users 响应式状态
   const users = ref([]);
   const loading = ref(false);
+  // 统计数据
   const stats = ref(null);
   const pagination = ref({
     current: 1,
     size: 10,
     total: 0,
   });
+  // 筛选表单字段
   const searchForm = reactive({
     username: '',
     role: '',

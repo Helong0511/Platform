@@ -356,6 +356,7 @@ async def record_http_exception_log(
         return
     
     async def record_error_log():
+        """后台任务：将 5xx HTTPException 写入审计日志表（独立会话，不阻塞响应）。"""
         audit_db = None
         try:
             audit_db = AsyncSessionLocal()

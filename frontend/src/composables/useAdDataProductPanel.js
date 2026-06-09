@@ -1,5 +1,8 @@
 /**
- * 广告数据页 — 产品管理侧栏/弹窗状态与加载
+ * 广告数据页 — 产品管理侧栏/弹窗
+ * @file composables/useAdDataProductPanel.js
+ *
+ * 管理产品详情侧栏与编辑弹窗的打开/关闭、数据加载状态。
  */
 import { ref } from 'vue';
 import { getProductById, getProductsWithData } from '../api/ad-data';
@@ -9,17 +12,25 @@ import { getProductById, getProductsWithData } from '../api/ad-data';
  * @param {(id: string|number) => Promise<Object>} [options.getProductById]
  * @param {(clientId: string|number) => Promise<{data: Array}>} [options.fetchProductsForClient]
  */
+/**
+ * 组合式函数 - 广告数据产品面板状态
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useAdDataProductPanel(options = {}) {
   const fetchProductById = options.getProductById ?? getProductById;
   const fetchProductsForClient =
     options.fetchProductsForClient ??
     ((clientId) => getProductsWithData(clientId).then((r) => r.data || []));
+  // productManagementVisible 响应式状态
   const productManagementVisible = ref(false);
   const selectedClientId = ref(null);
+  // selectedClientName 响应式状态
   const selectedClientName = ref('');
   const selectedClientProducts = ref([]);
+  // loadingProducts 响应式状态
   const loadingProducts = ref(false);
   const selectedProductId = ref('');
+  // selectedProductName 响应式状态
   const selectedProductName = ref('');
 
   const loadClientProducts = async (clientId, preferredProductId = null) => {

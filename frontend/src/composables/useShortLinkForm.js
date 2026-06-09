@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 短链接表单：占位符校验与预览
+ * @file composables/useShortLinkForm.js
+ */
 import { reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
@@ -24,11 +28,18 @@ const emptyForm = () => ({
  * 短链接创建/编辑对话框与保存、删除。
  * @param {{ refreshListAndStats: () => Promise<void> }} deps
  */
+/**
+ * 组合式函数 - 短链接表单：占位符校验与预览
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useShortLinkForm({ refreshListAndStats }) {
+  // saving 响应式状态
   const saving = ref(false);
   const generatingCode = ref(false);
+  // 弹窗显隐
   const dialogVisible = ref(false);
   const isEdit = ref(false);
+  // currentLinkId 响应式状态
   const currentLinkId = ref(null);
   const formData = reactive(emptyForm());
   const formRules = createShortLinkFormRules(() => formData);

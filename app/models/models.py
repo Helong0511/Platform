@@ -210,8 +210,13 @@ class Client(Base):
     )
 
 
-# 产品模型
 class Product(Base):
+    """
+    产品模型
+
+    客户名下的广告产品，关联广告数据、TB 搜索及分配历史。
+    表名: products
+    """
     __tablename__ = "products"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='产品ID')
@@ -240,8 +245,13 @@ class Product(Base):
     )
 
 
-# 广告数据模型
 class AdData(Base):
+    """
+    广告数据模型
+
+    按日期/国家/广告单元存储展示、点击与收益指标。
+    表名: ad_data；含 calculate_rates 自动算率
+    """
     __tablename__ = "ad_data"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='广告数据ID')
@@ -311,8 +321,13 @@ class AdData(Base):
     country = relationship("CountryInfo", foreign_keys=[country_code])
 
 
-# TB搜索数据模型
 class TBSearchData(Base):
+    """
+    TB 搜索数据模型
+
+    TB 搜索渠道专项指标（redirects/searches/revenue 等）。
+    表名: tb_search_data
+    """
     __tablename__ = "tb_search_data"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='ID')
@@ -351,8 +366,13 @@ class TBSearchData(Base):
     )
 
 
-# 产品分配历史模型
 class ProductAssignment(Base):
+    """
+    产品分配历史
+
+    产品分配给客户的历史区间（start_date/end_date）。
+    表名: product_assignments
+    """
     __tablename__ = "product_assignments"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='分配记录ID')
@@ -381,8 +401,13 @@ class ProductAssignment(Base):
     )
 
 
-# 定时任务执行记录表（用于多进程环境下确保任务只执行一次）
 class ScheduledTask(Base):
+    """
+    定时任务执行记录
+
+    定时任务运行状态与统计，配合 scheduler 分布式锁。
+    表名: scheduled_tasks
+    """
     __tablename__ = "scheduled_tasks"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='定时任务ID')
@@ -411,8 +436,13 @@ class ScheduledTask(Base):
     )
 
 
-# 用户操作日志表（审计日志）
 class UserAuditLog(Base):
+    """
+    用户操作审计日志
+
+    用户/API 操作审计日志，含请求上下文与成败状态。
+    表名: user_audit_logs
+    """
     __tablename__ = "user_audit_logs"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='日志ID')
@@ -447,8 +477,13 @@ class UserAuditLog(Base):
     )
 
 
-# 国家信息模型（ISO 3166-1标准）
 class CountryInfo(Base):
+    """
+    国家信息
+
+    ISO 3166-1 国家代码与多语言名称。
+    表名: countries
+    """
     __tablename__ = "countries"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='ID')
@@ -500,8 +535,13 @@ class CountryInfo(Base):
         return self.country_name_zh
 
 
-# Postback 转化事件模型
 class PostbackConversion(Base):
+    """
+    Postback 转化事件
+
+    S2S Postback 转化记录，含扣减字段与 CPL 归因快照。
+    表名: postback_conversions
+    """
     __tablename__ = "postback_conversions"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='转化记录ID')
@@ -569,8 +609,13 @@ class PostbackConversion(Base):
     )
 
 
-# Postback 下游转发日志模型
 class PostbackForwardLog(Base):
+    """
+    Postback 下游转发日志
+
+    转化向下游渠道转发的请求与响应日志。
+    表名: postback_forward_logs
+    """
     __tablename__ = "postback_forward_logs"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='转发日志ID')
@@ -603,8 +648,13 @@ class PostbackForwardLog(Base):
     )
 
 
-# Postback 转发队列模型
 class PostbackForwardQueue(Base):
+    """
+    Postback 转发重试队列
+
+    转发失败后的延迟重试队列。
+    表名: postback_forward_queue
+    """
     __tablename__ = "postback_forward_queue"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='队列ID')
@@ -628,8 +678,13 @@ class PostbackForwardQueue(Base):
     )
 
 
-# 客户通知配置模型
 class ClientNotificationConfig(Base):
+    """
+    客户通知配置
+
+    客户级转化/Telegram 等通知偏好。
+    表名: client_notification_configs
+    """
     __tablename__ = "client_notification_configs"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='通知配置ID')
@@ -656,8 +711,13 @@ class ClientNotificationConfig(Base):
     )
 
 
-# 产品通知配置模型
 class ProductNotificationConfig(Base):
+    """
+    产品通知配置
+
+    产品级通知渠道与阈值配置。
+    表名: product_notification_configs
+    """
     __tablename__ = "product_notification_configs"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='通知配置ID')
@@ -684,8 +744,13 @@ class ProductNotificationConfig(Base):
     )
 
 
-# 管理员通知配置模型（单例模式，只有一条记录）
 class AdminNotificationConfig(Base):
+    """
+    管理员通知配置
+
+    管理员全局通知开关（单例，应用层保证 id=1）。
+    表名: admin_notification_configs
+    """
     __tablename__ = "admin_notification_configs"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='配置ID（固定为1）')
@@ -799,8 +864,13 @@ class CloakConfig(Base):
     )
 
 
-# Postback 通知记录模型
 class PostbackNotification(Base):
+    """
+    Postback 通知记录
+
+    Postback 相关通知的发送记录与状态。
+    表名: postback_notifications
+    """
     __tablename__ = "postback_notifications"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='通知记录ID')
@@ -834,8 +904,13 @@ class PostbackNotification(Base):
     )
 
 
-# 短链接模型
 class ShortLink(Base):
+    """
+    短链接
+
+    短链接实体，可绑定 Offer/渠道与 Facebook 像素。
+    表名: short_links
+    """
     __tablename__ = "short_links"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='短链接 ID')
@@ -877,8 +952,13 @@ class ShortLink(Base):
 
 # ==================== CPL 系统数据模型 ====================
 
-# 广告主模型（上游）
 class Advertiser(Base):
+    """
+    广告主（上游）
+
+    CPL 广告主，旗下多个 Offer。
+    表名: advertisers
+    """
     __tablename__ = "advertisers"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='广告主ID')
@@ -900,8 +980,13 @@ class Advertiser(Base):
     )
 
 
-# 渠道模型（下游）
 class Publisher(Base):
+    """
+    渠道（下游）
+
+    CPL 渠道/商户，可配置 Postback 与折扣。
+    表名: publishers
+    """
     __tablename__ = "publishers"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='渠道ID')
@@ -930,8 +1015,13 @@ class Publisher(Base):
     )
 
 
-# Offer模型（单子）
 class Offer(Base):
+    """
+    Offer 单子
+
+    CPL Offer，关联广告主与渠道分配。
+    表名: offers
+    """
     __tablename__ = "offers"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='Offer ID（主键）')
@@ -972,8 +1062,13 @@ class Offer(Base):
     )
 
 
-# Offer-渠道分配模型
 class OfferPublisherAssignment(Base):
+    """
+    Offer-渠道分配
+
+    Offer 与渠道的分配关系及渠道专属 Cap/PO。
+    表名: offer_publisher_assignments
+    """
     __tablename__ = "offer_publisher_assignments"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='分配ID')
@@ -998,8 +1093,13 @@ class OfferPublisherAssignment(Base):
     )
 
 
-# 点击记录模型
 class Click(Base):
+    """
+    点击记录
+
+    点击追踪主表，存储设备/UA/URL 参数等归因信息。
+    表名: clicks
+    """
     __tablename__ = "clicks"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='点击记录ID')
@@ -1069,7 +1169,12 @@ class Click(Base):
 
 
 class SensitivePathProbeLog(Base):
-    """敏感路径探测拦截日志。"""
+    """
+    敏感路径探测拦截日志。
+
+    记录扫描 .env、phpMyAdmin 等敏感 URI 的请求，供安全审计与自动封 IP。
+    表名: sensitive_path_probe_logs
+    """
     __tablename__ = "sensitive_path_probe_logs"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment="主键ID")
@@ -1097,7 +1202,12 @@ class SensitivePathProbeLog(Base):
 
 
 class SensitiveBlockedIP(Base):
-    """敏感路径防护的IP黑名单。"""
+    """
+    敏感路径防护 IP 黑名单。
+
+    命中高危规则或累计探测次数后自动写入，Middleware 拦截后续请求。
+    表名: sensitive_blocked_ips
+    """
     __tablename__ = "sensitive_blocked_ips"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment="主键ID")
@@ -1117,8 +1227,13 @@ class SensitiveBlockedIP(Base):
         Index("idx_sensitive_blocked_ip_active", "is_active", "created_at"),
     )
 
-# Cap配置模型
 class OfferCap(Base):
+    """
+    Offer Cap 配置
+
+    Offer 日/总 Cap 及当前计数。
+    表名: offer_caps
+    """
     __tablename__ = "offer_caps"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='Cap配置ID')
@@ -1150,8 +1265,13 @@ class OfferCap(Base):
     )
 
 
-# 扣量配置模型
 class OfferDiscount(Base):
+    """
+    Offer 扣量配置
+
+    Offer 或渠道级别的价格扣量比例。
+    表名: offer_discounts
+    """
     __tablename__ = "offer_discounts"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='扣量配置ID')
@@ -1176,8 +1296,13 @@ class OfferDiscount(Base):
     )
 
 
-# 上游测试记录模型（已废弃，保留模型定义以兼容现有数据库表）
 class AdvertiserTest(Base):
+    """
+    上游测试记录（已废弃）
+
+    上游 Offer 测试记录，表已废弃，保留 ORM 兼容。
+    表名: advertiser_tests
+    """
     __tablename__ = "advertiser_tests"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='测试记录ID')
@@ -1204,8 +1329,13 @@ class AdvertiserTest(Base):
     )
 
 
-# 下游测试记录模型
 class AffiliateTest(Base):
+    """
+    下游测试记录
+
+    向下游发送测试 Postback 的记录。
+    表名: affiliate_tests
+    """
     __tablename__ = "affiliate_tests"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='测试记录ID')
@@ -1236,8 +1366,13 @@ class AffiliateTest(Base):
 
 # ==================== CPL扣减系统模型 ====================
 
-# 转化扣减配置模型
 class ConversionDeductionConfig(Base):
+    """
+    转化扣减配置
+
+    广告主/Offer/渠道三级扣量扣金额配置。
+    表名: conversion_deduction_configs
+    """
     __tablename__ = "conversion_deduction_configs"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='配置ID')
@@ -1281,8 +1416,13 @@ class ConversionDeductionConfig(Base):
     )
 
 
-# 转化扣减执行记录模型
 class ConversionDeductionLog(Base):
+    """
+    转化扣减执行记录
+
+    单次转化扣减执行明细与前后金额。
+    表名: conversion_deduction_logs
+    """
     __tablename__ = "conversion_deduction_logs"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='记录ID')
@@ -1334,7 +1474,8 @@ class ConversionDeductionLog(Base):
     )
 
 
-# 待确认 Postback 转化记录模型（不在白名单的 IP 发送的转化数据）
+# ====== Postback 待确认与白名单 ======
+
 class PendingPostbackConversion(Base):
     """
     待确认 Postback 转化记录模型
@@ -1388,7 +1529,6 @@ class PendingPostbackConversion(Base):
     )
 
 
-# Postback IP 白名单模型
 class PostbackIpWhitelist(Base):
     """
     Postback IP 白名单模型
@@ -1414,7 +1554,8 @@ class PostbackIpWhitelist(Base):
     )
 
 
-# 第三方上报日志模型
+# ====== 第三方广告平台上报 ======
+
 class ThirdPartyReportLog(Base):
     """
     第三方上报日志模型

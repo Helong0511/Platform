@@ -1,7 +1,13 @@
+<!--
+  管理端 - 广告主（上游）管理
+  @file views/admin/AdvertiserManagement.vue
+-->
 <template>
-  <div class="advertiser-management">
+  <!-- 页面主模板 -->
+<div class="advertiser-management">
     <el-card class="page-card">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="card-header">
           <div class="header-left">
             <el-icon class="header-icon"><User /></el-icon>

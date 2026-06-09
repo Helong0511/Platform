@@ -1,7 +1,12 @@
-"""
-用户操作日志Schema
-用于API请求和响应的数据验证
-"""
+"""用户操作审计日志 Schema
+
+职责：定义审计日志查询参数、列表轻量字段与详情响应结构。
+
+供 /audit-logs API 与 log_* 审计写入共用字段约定。
+
+说明：请求/响应 JSON 结构定义，供 FastAPI 自动校验与 OpenAPI 文档生成。
+
+说明：请求/响应 JSON 结构定义，供 FastAPI 校验与 OpenAPI 文档生成。"""
 from datetime import datetime
 from typing import Optional
 
@@ -11,7 +16,11 @@ from app.schemas.base import BaseSchema, ResponseBaseSchema, PaginatedResponseBa
 
 
 class UserAuditLogBase(BaseSchema):
-    """用户操作日志基础模型"""
+    """
+    用户操作日志基础模型
+    
+    继承 BaseSchema。公共字段基类，供 Create/Update/Response 等模型复用。
+    """
     user_id: Optional[int] = Field(None, description="用户ID")
     username: Optional[str] = Field(None, max_length=50, description="用户名")
     action_type: str = Field(..., max_length=50, description="操作类型")
@@ -26,13 +35,25 @@ class UserAuditLogBase(BaseSchema):
     status_code: Optional[int] = Field(None, description="HTTP状态码")
     success: bool = Field(True, description="操作是否成功")
     error_message: Optional[str] = Field(None, description="错误信息")
-    details: Optional[str] = Field(None, description="详细信息")
+    """
+    用户操作日志响应模型
+    
+    继承 UserAuditLogBase。单条或列表项的 API 响应数据结构。
+    """
 
 
 class UserAuditLogResponse(UserAuditLogBase):
-    """用户操作日志响应模型"""
+    """
+    用户操作日志响应模型
+    
+    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    """
     id: int
-    created_at: datetime
+    """
+    用户操作日志列表响应模型（轻量字段，优化列表加载性能）
+    
+    继承 BaseSchema。单条或列表项的 API 响应数据结构。
+    """
 
     model_config = {
         "from_attributes": True
@@ -40,7 +61,11 @@ class UserAuditLogResponse(UserAuditLogBase):
 
 
 class UserAuditLogListResponse(BaseSchema):
-    """用户操作日志列表响应模型（轻量字段，优化列表加载性能）"""
+    """
+    用户操作日志列表响应模型（轻量字段，优化列表加载性能）
+    
+    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    """
     id: int
     user_id: Optional[int] = Field(None, description="用户ID")
     username: Optional[str] = Field(None, max_length=50, description="用户名")
@@ -49,7 +74,11 @@ class UserAuditLogListResponse(BaseSchema):
     resource_id: Optional[int] = Field(None, description="资源ID")
     resource_name: Optional[str] = Field(None, max_length=255, description="资源名称")
     ip_address: Optional[str] = Field(None, max_length=50, description="IP地址")
-    request_method: Optional[str] = Field(None, max_length=10, description="HTTP请求方法")
+    """
+    用户操作日志查询参数
+    
+    继承 BaseModel。查询/筛选/分页参数模型。
+    """
     request_path: Optional[str] = Field(None, max_length=500, description="请求路径")
     status_code: Optional[int] = Field(None, description="HTTP状态码")
     success: bool = Field(True, description="操作是否成功")
@@ -61,7 +90,11 @@ class UserAuditLogListResponse(BaseSchema):
 
 
 class UserAuditLogQuery(BaseModel):
-    """用户操作日志查询参数"""
+    """
+    用户操作日志查询参数
+    
+    查询/筛选参数模型，用于列表接口的过滤条件与分页。
+    """
     page: int = Field(1, ge=1, description="页码")
     page_size: int = Field(10, ge=1, le=100, description="每页数量")
     user_id: Optional[int] = Field(None, description="用户ID筛选")

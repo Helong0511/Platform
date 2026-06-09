@@ -1,6 +1,21 @@
 """
-短链接重定向请求处理模块
-处理缓存命中和数据库查询两种场景的重定向逻辑
+短链接重定向请求处理模块。
+
+功能说明：
+- ``handle_cached_redirect``：Redis 缓存命中时校验状态/过期、替换占位符、写点击、302 跳转
+- ``handle_database_redirect``：缓存未命中时查库、回写缓存，其余流程与缓存路径一致
+- ``log_redirect_details``：以 WARNING 级别输出完整重定向链路日志，便于线上排查
+
+处理流程（两条路径共用）：
+1. 校验短链启用与过期 → 2. 解析 Offer/渠道 → 3. 生成 click_id
+4. 占位符替换 → 5. 构建最终 URL → 6. 异步写点击 → 7. 递增点击计数 → 8. 302
+
+在系统中的位置：
+- 由 ``router.redirect_short_link_public`` 调用；依赖 ``placeholder``、``url_builder``、``utils``
+
+注意事项：
+1. 缓存路径若缺少 short_link_id 会回查数据库补全，避免点击记录丢失主键
+2. 原始 URL 缺协议时数据库路径会尝试补 ``https://``，缓存路径则直接 500
 """
 import logging
 from datetime import datetime

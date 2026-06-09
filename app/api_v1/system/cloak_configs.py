@@ -1,5 +1,4 @@
-"""
-斗篷配置管理 API
+"""斗篷配置管理 API
 
 本模块提供后台管理员对「斗篷（Cloak）」配置的 CRUD、桥页 HTML 上传，以及 Facebook Conversions API（CAPI）
 测试上报能力。
@@ -10,7 +9,8 @@
 - 每个斗篷绑定主/备 Facebook Pixel 及 Access Token，用于向 Meta 发送 CAPI 事件。
 
 权限：所有接口均需管理员身份（require_admin）。
-"""
+
+说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。"""
 import logging
 import socket
 import time
@@ -57,9 +57,9 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
 # 内部辅助函数：桥页可用性、校验、测试上报
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
 
 
 def _bridge_usability_fields(cloak_name: str) -> dict:
@@ -185,14 +185,18 @@ def _resolve_test_report_params(config: CloakConfig, phase: str) -> tuple[str, O
     Returns:
         (event_name, value, currency) 三元组；非 Purchase 事件时 value/currency 可能为 None
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 条件分支 ----------
     if phase == "load":
         return (
             config.load_report_event or "PageView",
             config.load_report_value,
             config.load_report_currency,
         )
+    # ---------- 条件分支 ----------
     if phase == "postback":
         value = config.postback_report_value
+        # ---------- 条件分支 ----------
         if config.postback_report_event == "Purchase" and value is None:
             # 转化 Purchase 未配固定金额时，测试用默认金额（线上由 postback payout 决定）
             value = 9.99
@@ -202,6 +206,7 @@ def _resolve_test_report_params(config: CloakConfig, phase: str) -> tuple[str, O
             config.postback_report_currency,
         )
     # 默认 click 阶段
+    # ---------- 构建响应 ----------
     return (
         config.report_event or "ViewContent",
         config.report_value,
@@ -267,6 +272,7 @@ def _build_facebook_payload(
     Returns:
         可直接作为 httpx post json= 的 dict
     """
+    # ---------- 入口：参数与依赖准备 ----------
     current_ts = int(time.time())
     # user_data：CAPI 用于匹配与归因的字段
     user_data = {
@@ -275,6 +281,7 @@ def _build_facebook_payload(
         # fbc 格式 fb.1.{timestamp}.{fbclid}，测试用 adsid 占位
         "fbc": f"fb.1.{current_ts}.{test_data.adsid}",
     }
+    # ---------- 条件分支 ----------
     if test_data.use_hash:
         # 生产环境通常对 PII 做 SHA256；测试可切换明文对比 Graph API 行为
         from app.core.third_party_report import sha256_hash
@@ -292,10 +299,12 @@ def _build_facebook_payload(
         "user_data": user_data,
     }
     # Meta 要求 Purchase 必须带 value + currency
+    # ---------- 条件分支 ----------
     if report_event == "Purchase" and report_value is not None:
         cur = (report_currency or "USD").strip().upper() or "USD"
         event_obj["custom_data"] = {"currency": cur, "value": float(report_value)}
 
+    # ---------- 构建响应 ----------
     return {"data": [event_obj]}
 
 
@@ -319,11 +328,14 @@ async def _send_test_report(
     Returns:
         含 request_url、脱敏 request_query、request_body、response_status、response_body、success 的字典
     """
+    # ---------- 入口：参数与依赖准备 ----------
     api_version = (api_version or settings.FACEBOOK_API_VERSION or "v23.0").strip()
     request_url = f"https://graph.facebook.com/{api_version}/{pixel_id}/events"
     request_query = {"access_token": access_token}
     masked_request_query = {"access_token": _mask_token(access_token)}
+    # ---------- 异常处理 ----------
     try:
+        # ---------- 上下文管理 ----------
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(request_url, json=payload, params=request_query)
         return {
@@ -346,9 +358,9 @@ async def _send_test_report(
         }
 
 
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
 # REST 接口：斗篷配置 CRUD、桥页上传、测试上报
-# ---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
 
 
 @router.get(
@@ -460,24 +472,30 @@ async def update_cloak_config(
 
     更新后使 dp=斗篷名 相关的像素映射缓存失效；若改名则旧名、新名缓存均清理。
     """
+    # ---------- 入口：参数与依赖准备 ----------
     result = await db.execute(select(CloakConfig).where(CloakConfig.id == config_id))
     config = result.scalars().first()
+    # ---------- 条件分支 ----------
     if not config:
         raise_api_exception(ErrorCode.RESOURCE_NOT_FOUND, detail="斗篷配置不存在")
 
     old_cloak_name = config.cloak_name
     update_data = data.model_dump(exclude_unset=True)
+    # ---------- 条件分支 ----------
     if "cloak_name" in update_data and update_data["cloak_name"] != config.cloak_name:
         duplicate_result = await db.execute(
             select(CloakConfig).where(CloakConfig.cloak_name == update_data["cloak_name"], CloakConfig.id != config_id)
         )
+        # ---------- 条件分支 ----------
         if duplicate_result.scalars().first():
             raise_api_exception(ErrorCode.VALIDATION_ERROR, detail=f"斗篷名称已存在：{update_data['cloak_name']}")
 
+    # ---------- 循环处理 ----------
     for key, value in update_data.items():
         setattr(config, key, value)
 
     # 点击阶段 Purchase 须配置 report_value
+    # ---------- 条件分支 ----------
     if config.report_event == "Purchase" and (
         config.report_value is None or float(config.report_value) <= 0
     ):
@@ -487,7 +505,9 @@ async def update_cloak_config(
         )
 
     # 加载阶段：启用且 Purchase 须配置 load_report_value
+    # ---------- 条件分支 ----------
     if config.load_report_enabled and config.load_report_event == "Purchase":
+        # ---------- 条件分支 ----------
         if config.load_report_value is None or float(config.load_report_value) <= 0:
             raise_api_exception(
                 ErrorCode.VALIDATION_ERROR,
@@ -495,7 +515,9 @@ async def update_cloak_config(
             )
 
     # postback：固定金额若填写则须 > 0；留空表示线上用 postback payout
+    # ---------- 条件分支 ----------
     if config.postback_report_enabled and config.postback_report_event == "Purchase":
+        # ---------- 条件分支 ----------
         if config.postback_report_value is not None and float(config.postback_report_value) <= 0:
             raise_api_exception(
                 ErrorCode.VALIDATION_ERROR,
@@ -508,6 +530,7 @@ async def update_cloak_config(
     await db.refresh(config)
     # 斗篷名出现在投放链接 dp 参数中，配置变更需刷新运行时缓存
     invalidate_cloak_cache_for_dp(old_cloak_name)
+    # ---------- 条件分支 ----------
     if config.cloak_name != old_cloak_name:
         invalidate_cloak_cache_for_dp(config.cloak_name)
 
@@ -522,6 +545,7 @@ async def update_cloak_config(
     )
     await commit_audit_log(db)
     resp = CloakConfigResponse.model_validate(config).model_copy(update=_bridge_usability_fields(config.cloak_name))
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=resp, message="更新斗篷配置成功")
 
 
@@ -545,13 +569,16 @@ async def upload_cloak_bridge_html(
 
     文件最终以配置中的 cloak_name 命名，与上传时的原始文件名无关。
     """
+    # ---------- 入口：参数与依赖准备 ----------
     result = await db.execute(select(CloakConfig).where(CloakConfig.id == config_id))
     config = result.scalars().first()
+    # ---------- 条件分支 ----------
     if not config:
         raise_api_exception(ErrorCode.RESOURCE_NOT_FOUND, detail="斗篷配置不存在")
 
     # 多读 1 字节用于判断是否超限，避免大文件占满内存
     raw = await file.read(MAX_BRIDGE_HTML_BYTES + 1)
+    # ---------- 条件分支 ----------
     if len(raw) > MAX_BRIDGE_HTML_BYTES:
         raise_api_exception(
             ErrorCode.VALIDATION_ERROR,
@@ -559,20 +586,25 @@ async def upload_cloak_bridge_html(
         )
 
     filename = (file.filename or "").strip().lower()
+    # ---------- 条件分支 ----------
     if filename and not filename.endswith(".html"):
         raise_api_exception(ErrorCode.VALIDATION_ERROR, detail="请上传 .html 文件")
 
+    # ---------- 异常处理 ----------
     try:
         text = validate_bridge_html_bytes(raw)
     except ValueError as exc:
         raise_api_exception(ErrorCode.VALIDATION_ERROR, detail=str(exc))
 
+    # ---------- 异常处理 ----------
     try:
         target_path = resolve_bridge_html_write_path(config.cloak_name)
     except (FileNotFoundError, PermissionError) as exc:
         raise_api_exception(ErrorCode.VALIDATION_ERROR, detail=str(exc))
 
+    # ---------- 异常处理 ----------
     try:
+        # ---------- 上下文管理 ----------
         with open(target_path, "w", encoding="utf-8", newline="") as f:
             f.write(text)
     except OSError as exc:
@@ -598,6 +630,7 @@ async def upload_cloak_bridge_html(
         },
     )
     await commit_audit_log(db)
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(
         data={
             "cloak_name": config.cloak_name,
@@ -621,9 +654,14 @@ async def delete_cloak_config(
 ):
     """
     删除斗篷配置记录。
-
+    
     注意：不自动删除磁盘上的 {cloak_name}.html，仅删数据库行并清理 dp 缓存。
     审计日志在物理删除前写入。
+    
+    功能：删除记录（delete_cloak_config）。
+    实现：异步端点，通过 Service 层访问数据库/缓存。
+    鉴权：由 Depends(get_current_user) 或 require_admin 控制访问范围。
+    响应：统一 ResponseBaseSchema / PaginatedResponseBaseSchema 包装。
     """
     result = await db.execute(select(CloakConfig).where(CloakConfig.id == config_id))
     config = result.scalars().first()
@@ -667,8 +705,10 @@ async def test_cloak_report(
     若配置了备份像素与 Token，会并行逻辑先后各发一次，返回 primary 与 backup 详情；
     无备份时 backup 为 null，backup_skipped 为 true。
     """
+    # ---------- 入口：参数与依赖准备 ----------
     result = await db.execute(select(CloakConfig).where(CloakConfig.id == config_id))
     config = result.scalars().first()
+    # ---------- 条件分支 ----------
     if not config:
         raise_api_exception(ErrorCode.RESOURCE_NOT_FOUND, detail="斗篷配置不存在")
 
@@ -689,9 +729,11 @@ async def test_cloak_report(
     primary_result = await _send_test_report(config.pixel_id, config.access_token, payload)
 
     backup_result = None
+    # ---------- 条件分支 ----------
     if config.backup_pixel_id and config.backup_access_token:
         backup_result = await _send_test_report(config.backup_pixel_id, config.backup_access_token, payload)
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(
         data={
             "cloak_name": config.cloak_name,

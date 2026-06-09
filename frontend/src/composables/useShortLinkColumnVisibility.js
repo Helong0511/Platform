@@ -1,7 +1,15 @@
+/**
+ * 组合式函数 - 短链接列显隐
+ * @file composables/useShortLinkColumnVisibility.js
+ */
 import { useTableColumnVisibility } from './useTableColumnVisibility';
 
 const STORAGE_KEY = 'shortLinkManagement_columnVisibility';
 
+/**
+ * 组合式函数 - 短链接列显隐
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useShortLinkColumnVisibility() {
   return useTableColumnVisibility(STORAGE_KEY, {
     getDefaultColumns: () => ({

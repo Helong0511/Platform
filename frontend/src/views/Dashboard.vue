@@ -1,5 +1,10 @@
+<!--
+  数据仪表盘：统计卡片与广告效果趋势图
+  @file views/Dashboard.vue
+-->
 <template>
-  <div class="dashboard-container">
+  <!-- 页面主模板 -->
+<div class="dashboard-container">
 
     <!-- 趋势图表 -->
     <el-card class="chart-card">

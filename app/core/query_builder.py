@@ -1,6 +1,9 @@
 """
-统一查询构建器
-提供通用的数据库查询构建方法，减少重复代码
+链式 SQLAlchemy 查询构建器。
+
+职责：封装分页、排序、关联加载、条件组合等通用列表查询模式，减少 Service 层重复代码。
+
+在系统中的位置：``app.core.query_builder.QueryBuilder``，由各业务 Service 按需实例化。
 """
 from typing import Optional, List, Dict, Any, Callable, TypeVar
 from sqlalchemy.ext.asyncio import AsyncSession

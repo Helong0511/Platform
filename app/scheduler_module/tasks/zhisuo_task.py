@@ -1,6 +1,16 @@
 """
-zhisuo 定时任务模块
-功能：从 zhisuo API 获取广告单元数据，检查重复后插入到数据库
+zhisuo 上游广告数据拉取定时任务。
+
+功能说明：
+- 从 zhisuo API 获取广告单元数据，检查重复后插入 ad_data
+- 通过 fetch_zhisuo_unit_rows 请求 /api/channelunit 接口
+
+在系统中的位置：
+- 由 ZHISUO_API_TASK_NAME 调度
+
+注意事项：
+1. 签名/鉴权参数变更须同步 upstream_fetch
+2. 空响应与业务错误码区分处理，避免误记为成功
 """
 import logging
 from datetime import datetime, timedelta
@@ -38,6 +48,11 @@ async def zhisuo_api_task(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> None:
+    """
+    zhisuo 定时拉数：支持多账号顺序拉取后合并入库。
+
+    单账号失败不阻断其余账号；仅当全部失败时抛异常。凌晨 0-2 点拉昨日至今日。
+    """
     accounts = settings.get_zhisuo_accounts()
     base_url = settings.ZHISUO_API_BASE_URL
 

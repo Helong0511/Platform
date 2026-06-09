@@ -1,5 +1,6 @@
 /**
- * 数据页筛选级联（可注入 ad-data / tb-search-data 等 API）
+ * 组合式函数 - 数据页通用筛选级联
+ * @file composables/useDataPageFilterCascade.js
  */
 import { ref, nextTick } from 'vue';
 import { ElMessage } from 'element-plus';
@@ -58,6 +59,10 @@ const TB_SEARCH_API = {
  * @param {'ad-data'|'tb-search'} [options.source='ad-data']
  * @param {Object} [options.api] 自定义 API，覆盖 source
  */
+/**
+ * 组合式函数 - 数据页通用筛选级联
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useDataPageFilterCascade({
   searchForm,
   includeCountry = false,
@@ -67,8 +72,10 @@ export function useDataPageFilterCascade({
   const api =
     apiOverride || (source === 'tb-search' ? TB_SEARCH_API : AD_DATA_API);
 
+  // users 响应式状态
   const users = ref([{ label: '全部客户', value: '' }]);
   const filterProducts = ref([{ label: '全部产品', value: '' }]);
+  // filterCountries 响应式状态
   const filterCountries = ref([{ code: '', name_zh: '全部区域' }]);
 
   const fetchClientsWithData = async () => {

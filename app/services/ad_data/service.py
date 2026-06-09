@@ -1,6 +1,24 @@
 """
-广告数据服务层
-封装广告数据的业务逻辑
+广告数据服务层（AdDataService）
+
+职责概览：
+    封装广告数据（AdData）的完整业务逻辑，供 API 层调用。
+    涵盖 CRUD、权限校验、筛选器数据源、汇总统计、分页列表等能力。
+
+模块分区：
+    1. 辅助函数       — join_country_info_for_ad_data
+    2. 权限工具       — require_admin
+    3. 单条 CRUD      — get / update / delete
+    4. 筛选器数据源   — 客户 / 国家 / 产品 / 日期范围下拉
+    5. 批量操作       — batch_delete_ad_data
+    6. 汇总统计       — get_ad_data_summary / get_daily_summary
+    7. 明细列表       — get_ad_data
+
+核心设计：
+    - 客户归属：根据系统配置，在 Product.client_id（旧）与
+      ProductAssignment 历史表（新）两种 JOIN 路径间自动切换。
+    - 权限模型：管理员可见全部数据及减扣前指标；客户用户仅见自己名下数据。
+    - 缓存策略：筛选器与汇总接口使用 Redis 短 TTL 缓存，降低重复查询压力。
 """
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import date, datetime, timedelta
@@ -43,25 +61,63 @@ logger = logging.getLogger(__name__)
 
 def join_country_info_for_ad_data(query):
     """
-    辅助函数：统一处理 CountryInfo 的 JOIN，解决排序规则冲突问题
-    传入 AdData.country_code 列
+    为广告数据查询左关联国家信息表（CountryInfo）。
+
+    通过 AdData.country_code 列关联，统一处理不同字符集/排序规则
+    导致的 JOIN 冲突，供本模块内所有需要国家名称的查询复用。
+
+    Args:
+        query: 已包含 AdData 的 SQLAlchemy 查询对象
+
+    Returns:
+        附加了 CountryInfo 左连接后的查询对象
     """
     return join_country_info_util(query, AdData.country_code)
 
 
+# ═══════════════════════════════════════════════════════════════════
+# 广告数据服务主类
+# ═══════════════════════════════════════════════════════════════════
+
 class AdDataService(BaseService[AdData]):
-    """广告数据服务"""
+    """
+    广告数据业务服务。
+
+    继承 BaseService[AdData] 获得通用 CRUD 能力，
+    在此基础上扩展多表关联查询、权限过滤、聚合统计等业务方法。
+
+    所有公开方法均接收 current_user 参数，在方法内部完成权限校验，
+    确保客户用户无法越权访问其他客户的数据。
+    """
 
     def __init__(self, db: AsyncSession):
+        """
+        初始化服务实例。
+
+        Args:
+            db: 异步数据库会话，由依赖注入层传入
+        """
         super().__init__(db, AdData)
 
+    # ── 权限工具 ─────────────────────────────────────────────────────
+
     def require_admin(self, current_user: User):
-        """检查用户是否为管理员，如果不是则抛出权限不足异常"""
+        """
+        校验当前用户是否为管理员，非管理员则抛出 403 异常。
+
+        Args:
+            current_user: 当前登录用户
+
+        Raises:
+            APIException: 用户角色非 ADMIN 时抛出 FORBIDDEN
+        """
         if current_user.role != UserRole.ADMIN:
             raise_api_exception(
                 ErrorCode.FORBIDDEN,
                 detail="只有管理员才能执行此操作"
             )
+
+    # ── 单条查询 ─────────────────────────────────────────────────────
 
     async def get_ad_data_by_id(
             self,
@@ -69,17 +125,23 @@ class AdDataService(BaseService[AdData]):
             current_user: User
     ) -> Tuple[AdData, Product, Client, User, Optional[ProductAssignment], Optional[CountryInfo]]:
         """
-        根据ID获取广告数据详情（包含关联信息）
+        根据 ID 获取广告数据详情，含产品、客户、用户、分配记录及国家信息。
+
+        查询链路：AdData → Product → (ProductAssignment?) → Client → User → CountryInfo
+        执行后会校验关联实体完整性，并按用户角色做数据归属权限检查。
 
         Args:
-            data_id: 广告数据ID
-            current_user: 当前用户
+            data_id: 广告数据主键 ID
+            current_user: 当前登录用户
 
         Returns:
-            Tuple: (ad_data, product, client, user, assignment_or_none, country_info_or_none)
+            六元组 (ad_data, product, client, user, assignment_or_none, country_info_or_none)
+
+        Raises:
+            APIException: 记录不存在、数据格式错误、关联缺失或无权访问时抛出
         """
 
-        # 检查是否使用产品分配历史表
+        # ── 1. 判断客户归属模式（分配历史表 vs 旧模式）──────────────
         use_assignment_table = await check_use_assignment_table(self.db)
 
         if use_assignment_table:
@@ -165,6 +227,8 @@ class AdDataService(BaseService[AdData]):
 
         return ad_data, product, client, user, assignment, country_info
 
+    # ── 更新 ─────────────────────────────────────────────────────────
+
     async def update_ad_data(
             self,
             data_id: int,
@@ -172,18 +236,29 @@ class AdDataService(BaseService[AdData]):
             current_user: User
     ) -> AdData:
         """
-        更新广告数据（包含完整的业务逻辑：验证、唯一性检查、比率计算、错误处理）
+        更新广告数据（仅管理员可操作）。
+
+        完整业务流程：
+            1. 权限校验（仅管理员）
+            2. 字段白名单过滤
+            3. 关联实体存在性验证（产品、国家代码）
+            4. 唯一性约束预检（日期+产品+国家+广告单元）
+            5. 写入字段并重新计算比率
+            6. flush 触发 DB 约束，捕获 IntegrityError 并给出友好提示
 
         Args:
-            data_id: 广告数据ID
-            update_data: 更新的数据字典
-            current_user: 当前用户
+            data_id: 广告数据主键 ID
+            update_data: 待更新字段字典
+            current_user: 当前登录用户
 
         Returns:
-            AdData: 更新后的广告数据对象
+            更新并刷新后的 AdData 对象
+
+        Raises:
+            APIException: 权限不足、记录不存在、唯一性冲突或写入失败时抛出
         """
 
-        # 权限检查
+        # ── 权限：仅管理员可更新 ─────────────────────────────────────
         if not is_admin(current_user):
             raise_api_exception(
                 ErrorCode.AD_DATA_UPDATE_FORBIDDEN,
@@ -201,7 +276,7 @@ class AdDataService(BaseService[AdData]):
                 detail=f"广告数据ID {data_id} 不存在"
             )
 
-        # 定义允许更新的字段白名单
+        # ── 字段白名单：过滤不允许客户端修改的字段 ───────────────────
         allowed_fields = {
             'product_id', 'ad_unit', 'country_code', 'request_count', 'match_count', 'display_count',
             'click_count', 'viewability_rate', 'ecpm_after_deduct', 'ecpm_before_deduct',
@@ -247,15 +322,15 @@ class AdDataService(BaseService[AdData]):
                 # 如果传入空字符串或 None，设置为 'ZZ'（全部区域）
                 filtered_update_data['country_code'] = 'ZZ'
 
-        # 检查唯一性约束：如果更新了 product_id 或 country_code，需要检查是否会违反唯一性约束
-        # 唯一性约束：同一日期、产品ID和国家代码只能有一条记录
+        # ── 唯一性预检：日期 + 产品 + 国家 + 广告单元 组合不可重复 ──
+        # 约束名：uq_ad_data_date_product_country_unit
         if 'product_id' in filtered_update_data or 'country_code' in filtered_update_data:
             # 确定更新后的值
             new_product_id = filtered_update_data.get('product_id', ad_data.product_id)
             new_country_code = filtered_update_data.get('country_code', ad_data.country_code)
             new_ad_unit = filtered_update_data.get('ad_unit', ad_data.ad_unit or '')
 
-            # 构建日期范围查询（AdData.date 是 DateTime 类型）
+            # 将广告日期归一化为当天 00:00:00 ~ 23:59:59 范围，用于同日判重
             if isinstance(ad_data.date, datetime):
                 date_start = ad_data.date.replace(hour=0, minute=0, second=0, microsecond=0)
                 date_end = ad_data.date.replace(hour=23, minute=59, second=59, microsecond=999999)
@@ -264,7 +339,7 @@ class AdDataService(BaseService[AdData]):
                 date_end = datetime.combine(ad_data.date, datetime.max.time())
 
             # 查询是否存在相同的记录（排除当前记录）
-            # 国家代码匹配逻辑：如果新国家代码是'ZZ'，匹配'ZZ'或NULL
+            # 'ZZ' 表示全部区域，与 NULL 视为等价
             if new_country_code == "ZZ":
                 country_condition = or_(
                     AdData.country_code == "ZZ",
@@ -386,19 +461,24 @@ class AdDataService(BaseService[AdData]):
         logger.info(f"广告数据已更新: ID={data_id}")
         return ad_data
 
+    # ── 删除 ─────────────────────────────────────────────────────────
+
     async def delete_ad_data(
             self,
             data_id: int,
             current_user: User
     ) -> None:
         """
-        删除广告数据
+        删除单条广告数据（仅管理员可操作）。
 
         Args:
-            data_id: 广告数据ID
-            current_user: 当前用户
+            data_id: 广告数据主键 ID
+            current_user: 当前登录用户
+
+        Raises:
+            APIException: 非管理员、记录不存在时抛出
         """
-        # 权限检查
+        # ── 权限：仅管理员可删除 ─────────────────────────────────────
         if not is_admin(current_user):
             raise_api_exception(
                 ErrorCode.FORBIDDEN,
@@ -420,6 +500,10 @@ class AdDataService(BaseService[AdData]):
 
         logger.info(f"广告数据已删除: ID={data_id}")
 
+    # ═══════════════════════════════════════════════════════════════════
+    # 筛选器下拉数据源（供前端级联筛选使用，部分接口带 Redis 缓存）
+    # ═══════════════════════════════════════════════════════════════════
+
     async def get_clients_with_data(
             self,
             current_user: User,
@@ -427,17 +511,20 @@ class AdDataService(BaseService[AdData]):
             end_date: Optional[date] = None
     ) -> List[Dict[str, Any]]:
         """
-        获取有广告数据的客户列表（用于下拉选择）
+        获取在指定日期范围内有广告数据的客户列表（下拉筛选用）。
+
+        返回去重后的客户 ID 及用户显示名，按名称排序。
+        结果缓存 5 分钟（Redis key 含用户 ID 与日期范围）。
 
         Args:
-            current_user: 当前用户
-            start_date: 开始日期
-            end_date: 结束日期
+            current_user: 当前登录用户（非管理员仅返回自己名下客户）
+            start_date: 统计起始日期，缺省时默认当前月
+            end_date: 统计结束日期，缺省时默认当前月
 
         Returns:
-            List[Dict]: 客户列表
+            客户字典列表，每项含 id、full_name、user_id
         """
-        # 缓存优化
+        # ── Redis 缓存命中则直接返回 ─────────────────────────────────
         cache_key = generate_cache_key("clients_with_data", current_user.id, start_date, end_date)
         cached = await get_cached(cache_key)
         if cached:
@@ -446,9 +533,9 @@ class AdDataService(BaseService[AdData]):
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(self.db)
 
-        # 构建基础查询 - 返回 Client.id 和 User.full_name
+        # ── 构建 DISTINCT 客户查询（两种 JOIN 路径）──────────────────
         if use_assignment_table:
-            # 使用产品分配历史表：从AdData开始，明确指定FROM子句
+            # 分配历史表模式：从 AdData 出发，按日期匹配归属客户
             query = select(func.distinct(Client.id), User.full_name, User.username, Client.user_id)
             query = query.select_from(AdData)
             query = query.join(Product, AdData.product_id == Product.id)
@@ -519,19 +606,22 @@ class AdDataService(BaseService[AdData]):
             end_date: Optional[date] = None
     ) -> List[Dict[str, Any]]:
         """
-        获取有广告数据的国家列表（用于下拉选择）
+        获取在指定条件下有广告数据的国家/区域列表（下拉筛选用）。
+
+        支持按客户、产品、日期范围逐级收窄范围。
+        特殊代码 'ZZ' 显示为「全部区域」，空值记录会被过滤。
 
         Args:
-            current_user: 当前用户
-            client_id: 客户ID过滤
-            product_id: 产品ID过滤
-            start_date: 开始日期
-            end_date: 结束日期
+            current_user: 当前登录用户
+            client_id: 可选，管理员按客户 ID 过滤
+            product_id: 可选，按产品 ID 过滤
+            start_date: 统计起始日期，缺省默认当前月
+            end_date: 统计结束日期，缺省默认当前月
 
         Returns:
-            List[Dict]: 国家列表
+            国家字典列表，每项含 code（alpha_2）、name_zh（中文名）
         """
-        # 检查是否使用产品分配历史表
+        # ── 判断客户归属 JOIN 模式 ───────────────────────────────────
         use_assignment_table = await check_use_assignment_table(self.db)
 
         # 构建基础查询 - 返回 distinct 的 country_code
@@ -626,18 +716,21 @@ class AdDataService(BaseService[AdData]):
             end_date: Optional[date] = None
     ) -> List[Dict[str, Any]]:
         """
-        获取有广告数据的产品列表（用于下拉选择）
+        获取在指定日期范围内有广告数据的产品列表（下拉筛选用）。
+
+        管理员可按 client_id 限定客户范围；客户用户仅见自己名下产品。
+        结果按产品 ID 倒序排列，缓存 5 分钟。
 
         Args:
-            current_user: 当前用户
-            client_id: 客户ID过滤
-            start_date: 开始日期
-            end_date: 结束日期
+            current_user: 当前登录用户
+            client_id: 可选，管理员按客户 ID 过滤
+            start_date: 统计起始日期，缺省默认当前月
+            end_date: 统计结束日期，缺省默认当前月
 
         Returns:
-            List[Dict]: 产品列表
+            产品字典列表，每项含 id、name、client_id
         """
-        # 缓存优化
+        # ── Redis 缓存命中则直接返回 ─────────────────────────────────
         cache_key = generate_cache_key("products_with_data", current_user.id, client_id, start_date, end_date)
         cached = await get_cached(cache_key)
         if cached:
@@ -717,16 +810,19 @@ class AdDataService(BaseService[AdData]):
             client_id: Optional[int] = None
     ) -> Dict[str, Optional[str]]:
         """
-        获取广告数据的日期范围（最早日期和最新日期）
+        获取当前用户可见广告数据的最早与最晚日期（日期选择器边界）。
+
+        使用 MIN/MAX 聚合 AdData.date，结果格式为 ISO 日期字符串。
+        无数据时 min_date、max_date 均为 None。
 
         Args:
-            current_user: 当前用户
-            client_id: 客户ID过滤
+            current_user: 当前登录用户
+            client_id: 可选，管理员按客户 ID 过滤
 
         Returns:
-            Dict: 包含 min_date 和 max_date 的字典
+            字典 {"min_date": str|None, "max_date": str|None}
         """
-        # 检查是否使用产品分配历史表
+        # ── 判断客户归属 JOIN 模式 ───────────────────────────────────
         use_assignment_table = await check_use_assignment_table(self.db)
 
         # 构建查询：获取日期的最小值和最大值
@@ -786,20 +882,30 @@ class AdDataService(BaseService[AdData]):
                 "max_date": None
             }
 
+    # ═══════════════════════════════════════════════════════════════════
+    # 批量操作
+    # ═══════════════════════════════════════════════════════════════════
+
     async def batch_delete_ad_data(
             self,
             data_ids: List[int],
             current_user: User
     ) -> int:
         """
-        批量删除广告数据
+        批量删除广告数据。
+
+        先查出所有目标记录及其客户归属，再按权限过滤出可删除子集，
+        最后通过 DELETE ... WHERE id IN (...) 批量执行（比逐条删除更高效）。
 
         Args:
-            data_ids: 广告数据ID列表
-            current_user: 当前用户
+            data_ids: 待删除的广告数据 ID 列表
+            current_user: 当前登录用户（客户用户仅能删除自己名下数据）
 
         Returns:
-            int: 实际删除的记录数
+            实际删除的记录数
+
+        Raises:
+            APIException: ID 列表为空、记录不存在或全部无权删除时抛出
         """
         if not data_ids or len(data_ids) == 0:
             raise_api_exception(
@@ -895,6 +1001,10 @@ class AdDataService(BaseService[AdData]):
 
         return deleted_count
 
+    # ═══════════════════════════════════════════════════════════════════
+    # 汇总统计
+    # ═══════════════════════════════════════════════════════════════════
+
     async def get_ad_data_summary(
             self,
             current_user: User,
@@ -904,19 +1014,25 @@ class AdDataService(BaseService[AdData]):
             product_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        获取广告数据汇总统计
+        获取广告数据 KPI 汇总（请求/匹配/展示/点击总量及平均转化率）。
+
+        主查询对所有匹配记录做 SUM 聚合；平均转化率优先取库内预计算字段，
+        字段为空时回退到 SUM 比值（COALESCE + CASE 保证向后兼容）。
+        管理员额外查询减扣前 eCPM/收入。结果缓存 2 分钟。
 
         Args:
-            current_user: 当前用户
-            start_date: 开始日期
-            end_date: 结束日期
-            client_id: 客户ID过滤
-            product_id: 产品ID过滤
+            current_user: 当前登录用户
+            start_date: 统计起始日期，缺省默认当前月
+            end_date: 统计结束日期，缺省默认当前月
+            client_id: 可选，管理员按客户 ID 过滤
+            product_id: 可选，按产品 ID 过滤
 
         Returns:
-            Dict: 汇总统计数据
+            汇总字典，含 total_requests/matches/displays/clicks、
+            avg_coverage/display/click_rate、total_ecpm/revenue_after_deduct；
+            管理员额外含 before_deduct 字段
         """
-        # 缓存优化
+        # ── Redis 缓存命中则直接返回 ─────────────────────────────────
         cache_key = generate_cache_key("ad_data_summary", current_user.id, start_date, end_date, client_id, product_id)
         cached = await get_cached(cache_key)
         if cached:
@@ -925,8 +1041,8 @@ class AdDataService(BaseService[AdData]):
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(self.db)
 
-        # 构建主查询：汇总所有指标
-        # 使用数据库字段计算平均值，如果字段为空则使用计算值（使用 COALESCE 确保向后兼容）
+        # ── 主聚合查询：SUM 核心指标 + COALESCE 平均转化率 ──────────
+        # 转化率回退逻辑：字段有值取 AVG，否则用 SUM 比值动态计算
         query = select(
             func.sum(AdData.request_count).label("total_requests"),
             func.sum(AdData.match_count).label("total_matches"),
@@ -1026,7 +1142,7 @@ class AdDataService(BaseService[AdData]):
             avg_display_rate = summary.avg_display_rate or 0
             avg_click_rate = summary.avg_click_rate or 0
 
-        # 如果是管理员，还需要汇总未减扣的数据
+        # ── 管理员附加查询：减扣前 eCPM 与收入（客户不可见）──────────
         total_ecpm_before = 0
         total_revenue_before = 0
         if is_admin(current_user):
@@ -1116,26 +1232,30 @@ class AdDataService(BaseService[AdData]):
             sort_order: str = "desc"
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
-        获取每日汇总数据（按产品+日期汇总）
+        获取按「产品 + 日期 + 广告单元」分组的每日汇总列表（分页）。
+
+        与 get_ad_data 不同，本方法将同一产品同一天的明细行合并为一行，
+        并在应用层根据汇总值重新计算覆盖率/展示率/点击率/eCPM。
+        部分排序字段（如 ecpm_before_deduct）需在内存中排序。
 
         Args:
-            current_user: 当前用户
-            page: 页码
-            page_size: 每页数量
-            start_date: 开始日期
-            end_date: 结束日期
-            client_id: 客户ID过滤
-            product_id: 产品ID过滤（字符串格式）
-            sort_by: 排序字段
-            sort_order: 排序方向
+            current_user: 当前登录用户
+            page: 页码，从 1 开始
+            page_size: 每页条数
+            start_date: 统计起始日期，缺省默认当前月
+            end_date: 统计结束日期，缺省默认当前月
+            client_id: 可选，管理员按客户 ID 过滤
+            product_id: 可选，产品 ID（字符串，兼容前端传参）
+            sort_by: 排序字段名，默认 date
+            sort_order: 排序方向 asc/desc，默认 desc
 
         Returns:
-            Tuple[List[Dict], int]: (汇总数据列表, 总数)
+            (汇总行字典列表, 分组总数)
         """
-        # 检查是否使用产品分配历史表
+        # ── 判断客户归属 JOIN 模式 ───────────────────────────────────
         use_assignment_table = await check_use_assignment_table(self.db)
 
-        # 构建汇总查询：按产品+日期分组
+        # ── 分组聚合：产品 + 日期 + 广告单元 维度 SUM 各指标 ────────
         query = select(
             func.date(AdData.date).label("date"),
             Product.id.label("product_id"),
@@ -1203,7 +1323,7 @@ class AdDataService(BaseService[AdData]):
             default_to_current_month=True
         )
 
-        # 分组：有广告单元时按单元拆分；空广告单元合并为一行
+        # GROUP BY：有广告单元时按单元拆分；空单元合并为一行
         query = query.group_by(
             func.date(AdData.date),
             Product.id,
@@ -1236,7 +1356,7 @@ class AdDataService(BaseService[AdData]):
             "revenue_before_deduct": func.sum(AdData.revenue_before_deduct)
         }
 
-        # 需要内存排序的字段
+        # 减扣前 eCPM 需在响应组装后于内存中排序（SQL 层未预聚合）
         memory_sort_fields = {"ecpm_before_deduct"}
 
         # 判断是否需要内存排序
@@ -1258,11 +1378,10 @@ class AdDataService(BaseService[AdData]):
             else:
                 query = query.order_by(sort_column.asc())
 
-        # 计算总数
+        # ── 计数：子查询统计 DISTINCT 分组数（内存排序时跳过）────────
         total = 0
         if not need_memory_sort:
             try:
-                # 使用子查询优化计数
                 subquery = select(
                     func.date(AdData.date).label("date"),
                     Product.id.label("product_id"),
@@ -1352,7 +1471,7 @@ class AdDataService(BaseService[AdData]):
             total_revenue_after = float(row.revenue_after_deduct or 0.0)
             total_revenue_before = float(row.revenue_before_deduct or 0.0)
 
-            # 根据汇总后的数值重新计算比率
+            # 应用层重算漏斗比率与 eCPM（基于 SUM 后的分子分母）
             coverage_rate = round(
                 (total_match_count / total_request_count * PERCENTAGE_MULTIPLIER) if total_request_count > 0 else 0.0,
                 2
@@ -1423,6 +1542,10 @@ class AdDataService(BaseService[AdData]):
 
         return ad_data_responses, total
 
+    # ═══════════════════════════════════════════════════════════════════
+    # 明细列表（逐行展示，含国家维度）
+    # ═══════════════════════════════════════════════════════════════════
+
     async def get_ad_data(
             self,
             current_user: User,
@@ -1437,30 +1560,33 @@ class AdDataService(BaseService[AdData]):
             sort_order: str = "desc"
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
-        获取广告数据列表（支持分页、过滤和排序）
+        获取广告数据明细列表（分页、多条件过滤、排序）。
+
+        每条记录对应一个「日期 + 产品 + 国家 + 广告单元」维度，
+        返回完整的漏斗指标及国家中文名。管理员额外可见减扣前数据与客户信息。
 
         Args:
-            current_user: 当前用户
-            page: 页码
-            page_size: 每页数量
-            start_date: 开始日期
-            end_date: 结束日期
-            client_id: 客户ID过滤
-            product_id: 产品ID过滤（字符串格式）
-            country_code: 国家代码过滤
-            sort_by: 排序字段
-            sort_order: 排序方向
+            current_user: 当前登录用户
+            page: 页码，从 1 开始
+            page_size: 每页条数
+            start_date: 统计起始日期，缺省默认当前月
+            end_date: 统计结束日期，缺省默认当前月
+            client_id: 可选，管理员按客户 ID 过滤
+            product_id: 可选，产品 ID（字符串，兼容前端传参）
+            country_code: 可选，ISO alpha-2 国家代码（'ZZ' 表示不过滤）
+            sort_by: 排序字段名，默认 date
+            sort_order: 排序方向 asc/desc，默认 desc
 
         Returns:
-            Tuple[List[Dict], int]: (广告数据列表, 总数)
+            (广告数据行字典列表, 总记录数)
         """
-        # 延迟导入，避免循环导入
+        # 延迟导入，避免与 excel 模块循环依赖
         from app.api_v1.excel.utils import normalize_date_key
 
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(self.db)
 
-        # 构建查询基础
+        # ── 构建多表 JOIN 主查询（含国家信息）────────────────────────
         if use_assignment_table:
             # 使用产品分配历史表进行查询
             query = select(AdData, Product, Client, User, ProductAssignment, CountryInfo)
@@ -1566,10 +1692,9 @@ class AdDataService(BaseService[AdData]):
         else:
             query = query.order_by(sort_column.asc())
 
-        # 计算总数
+        # ── 独立计数查询（不 JOIN User/CountryInfo，减少开销）────────
         total = 0
         try:
-            # 构建过滤条件列表
             filter_conditions = []
 
             # 权限过滤
@@ -1611,7 +1736,6 @@ class AdDataService(BaseService[AdData]):
                 # 直接添加条件，不再检查类型
                 filter_conditions.append(date_condition)
 
-            # 优化：计数查询不需要JOIN User表
             count_query = select(func.count(AdData.id))
             count_query = count_query.join(Product, AdData.product_id == Product.id)
             if use_assignment_table:
@@ -1640,12 +1764,12 @@ class AdDataService(BaseService[AdData]):
             logger.error(f"计算广告数据总数失败: {str(e)}")
             total = 0
 
-        # 分页查询
+        # ── 分页执行主查询 ───────────────────────────────────────────
         offset = (page - 1) * page_size
         result = await self.db.execute(query.offset(offset).limit(page_size))
         data = result.unique().all()
 
-        # 转换为响应格式
+        # ── 逐行解包并组装响应字典 ───────────────────────────────────
         ad_data_responses = []
         for row in data:
             try:

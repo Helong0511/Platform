@@ -1,5 +1,16 @@
 """
-点击记录归档任务（薄任务层，逻辑在 ClicksArchiveService）。
+点击记录归档定时任务（薄任务层）。
+
+功能说明：
+- 调用 ``ClicksArchiveService`` 将过期 clicks 迁至 clicks_archive 并删主表
+- 写入 task_result_store 摘要供管理端查看
+
+在系统中的位置：
+- 在 task_config 中配置 Cron；逻辑实现在 ``app.services.tracking.clicks_archive_service``
+
+注意事项：
+1. 执行前检查 PERSIST_CLICKS_TO_DB 与主表行数，避免空跑
+2. 大表归档建议低峰期执行，监控 DB 慢查询
 """
 import logging
 
@@ -58,4 +69,4 @@ async def archive_old_clicks(days: int = 90) -> dict:
             log_task_error(task_name, str(e), exc_info=True)
             set_task_result(task_name, f"执行失败: {str(e)}")
             raise
-
+

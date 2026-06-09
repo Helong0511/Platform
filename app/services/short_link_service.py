@@ -1,6 +1,20 @@
 """
-短链接服务层
-封装短链接相关的业务逻辑
+短链接服务层。
+
+功能说明：
+- 短链接 CRUD、分页搜索与权限隔离（非管理员仅见自建链接）
+- 创建两阶段生成 short_code：临时代码 flush 取 ID 后按 ID 或随机生成唯一码
+- 更新/删除后失效 Redis 短链缓存及点击计数器
+
+搜索策略：
+- 疑似 short_code 时优先精确/前缀匹配；否则全文索引 title/description
+
+在系统中的位置：
+- 被管理端短链接 API 调用；与 ``app.core.short_link_cache`` 联动
+
+注意事项：
+1. original_url 保存前应校验协议与占位符合法性
+2. 绑定 offer_id/channel_id 影响重定向归因，变更后须考虑缓存一致性
 """
 import re
 import uuid
@@ -28,9 +42,15 @@ logger = logging.getLogger(__name__)
 
 
 class ShortLinkService(BaseService[ShortLink]):
-    """短链接服务"""
+    """
+    短链接服务。
+
+    与 Offer/Publisher 关联校验、joinedload 预加载创建者与渠道；
+    写路径注意 short_code 唯一性与并发下的临时代码策略。
+    """
 
     def __init__(self, db: AsyncSession):
+        """注入数据库会话并绑定 ShortLink 模型。"""
         super().__init__(db, ShortLink)
 
     async def get_short_link_by_id(
@@ -40,15 +60,17 @@ class ShortLinkService(BaseService[ShortLink]):
             include_relations: bool = True
     ) -> ShortLink:
         """
-        根据ID获取短链接详情
-        
+        按 ID 获取短链接详情。
+
+        非管理员仅能访问 created_by == current_user.id 的记录。
+
         Args:
-            link_id: 短链接ID
+            link_id: 短链接主键
             current_user: 当前用户
-            include_relations: 是否包含关联信息（创建者、渠道）
-        
+            include_relations: 是否 joinedload creator、channel
+
         Returns:
-            ShortLink: 短链接对象
+            ShortLink 实体
         """
         query = select(ShortLink).where(ShortLink.id == link_id)
 
@@ -94,23 +116,26 @@ class ShortLinkService(BaseService[ShortLink]):
             offer_id: Optional[int] = None
     ) -> tuple[List[ShortLink], int]:
         """
-        获取短链接列表（支持分页、筛选、搜索）
-        
+        分页查询短链接列表。
+
+        管理员可见全部；普通用户自动加 created_by 过滤。
+        search 会根据关键词形态选择 short_code 精确/前缀或 title/description 全文/前缀策略。
+
         Args:
             current_user: 当前用户
             page: 页码
-            page_size: 每页数量
-            search: 搜索关键词（标题、URL、代码、描述）
-            is_active: 激活状态过滤
-            created_by: 创建者ID过滤
-            offer_id: Offer ID过滤
-        
+            page_size: 每页条数
+            search: 标题/URL/代码/描述关键词
+            is_active: 启用状态
+            created_by: 创建者 ID（管理员筛选用）
+            offer_id: 关联 Offer ID
+
         Returns:
-            tuple: (短链接列表, 总数)
+            (短链接列表, 总条数)
         """
         query = select(ShortLink)
 
-        # 权限检查：管理员可以查看所有，普通用户只能查看自己的
+        # 数据隔离：非管理员只能看自己的链接
         if current_user.role != UserRole.ADMIN:
             query = query.where(ShortLink.created_by == current_user.id)
 
@@ -127,53 +152,39 @@ class ShortLinkService(BaseService[ShortLink]):
             conditions.append(ShortLink.offer_id == offer_id)
 
         if search:
-            # 优化搜索：优先精确匹配short_code，然后使用全文索引或前缀匹配
             search_trimmed = search.strip()
 
-            # 限制搜索关键词长度，防止过长搜索影响性能
             if len(search_trimmed) > 100:
                 search_trimmed = search_trimmed[:100]
                 logger.warning(f"搜索关键词过长，已截断到100字符: {search}")
 
-            # 判断搜索关键词是否像短链接代码（只包含字母、数字、连字符和下划线）
+            # 分支 A：形如短码 → 走 short_code 索引友好路径
             is_likely_short_code = bool(re.match(r'^[a-zA-Z0-9_-]+$', search_trimmed))
 
             search_conditions = []
 
             if is_likely_short_code:
-                # 如果看起来像短链接代码，优先精确匹配（性能最好）
-                # 1. 精确匹配short_code（最快，使用唯一索引）
                 search_conditions.append(ShortLink.short_code == search_trimmed)
-
-                # 2. 前缀匹配short_code（可以使用索引）
-                if len(search_trimmed) >= 2:  # 至少2个字符才使用前缀匹配
+                if len(search_trimmed) >= 2:
                     search_conditions.append(ShortLink.short_code.like(f"{search_trimmed}%"))
             else:
-                # 如果不是短链接代码格式，只搜索标题、描述和URL
-                # 使用全文索引搜索title和description（如果存在全文索引）
+                # 分支 B：自然语言关键词 → 全文索引，失败则 title/description 前缀
                 try:
-                    # 尝试使用全文索引搜索title
                     fulltext_title = text(
                         "MATCH(title) AGAINST(:search_term IN NATURAL LANGUAGE MODE)"
                     ).bindparams(search_term=search_trimmed)
                     search_conditions.append(fulltext_title)
 
-                    # 尝试使用全文索引搜索description
                     fulltext_desc = text(
                         "MATCH(description) AGAINST(:search_term IN NATURAL LANGUAGE MODE)"
                     ).bindparams(search_term=search_trimmed)
                     search_conditions.append(fulltext_desc)
                 except Exception:
-                    # 全文索引不存在或查询失败，使用前缀匹配（可以使用普通索引）
-                    # title前缀匹配
                     search_conditions.append(ShortLink.title.like(f"{search_trimmed}%"))
-                    # description前缀匹配
                     search_conditions.append(ShortLink.description.like(f"{search_trimmed}%"))
 
-            # 3. original_url的搜索（性能较差，但保留功能）
-            # URL通常很长，LIKE查询性能很差，但为了功能完整性保留
-            # 增加最小长度限制到10个字符，减少全表扫描的影响
-            if len(search_trimmed) >= 4:  # URL搜索至少10个字符（性能优化）
+            # 分支 C：original_url 子串（长度门槛降低全表扫描风险）
+            if len(search_trimmed) >= 4:
                 search_conditions.append(ShortLink.original_url.like(f"%{search_trimmed}%"))
 
             if search_conditions:
@@ -212,14 +223,17 @@ class ShortLinkService(BaseService[ShortLink]):
             current_user: User
     ) -> ShortLink:
         """
-        创建短链接
-        
+        创建短链接。
+
+        short_code 未指定时：insert 临时代码 → flush 得 ID → 按 ID 生成或随机唯一码 → commit。
+        关联 offer_id/channel_id 时校验外键存在。
+
         Args:
-            link_data: 短链接数据字典
-            current_user: 当前用户
-        
+            link_data: 须含 original_url；可选 short_code、offer_id、channel_id 等
+            current_user: 创建者
+
         Returns:
-            ShortLink: 创建的短链接对象
+            持久化后的 ShortLink
         """
         logger.info(f"开始创建短链接，数据: {link_data}")
         logger.info(f"当前用户: {current_user.id} ({current_user.username})")
@@ -249,7 +263,7 @@ class ShortLinkService(BaseService[ShortLink]):
             else:
                 short_code = None
 
-            # 验证 Offer 是否存在（如果提供了 offer_id）
+            # --- 外键校验：Offer / 渠道 ---
             if link_data.get('offer_id'):
                 logger.debug(f"验证Offer是否存在: {link_data['offer_id']}")
                 offer_result = await self.db.execute(
@@ -275,9 +289,7 @@ class ShortLinkService(BaseService[ShortLink]):
                         detail=f"渠道ID {link_data['channel_id']} 不存在"
                     )
 
-            # 创建短链接
-            logger.debug("创建短链接对象")
-            # 为每个请求生成唯一的临时代码，避免并发冲突
+            # --- 两阶段 short_code：临时代码占位，flush 后生成最终唯一码 ---
             temp_code = f"temp_{uuid.uuid4().hex[:8]}" if not short_code else short_code
             short_link = ShortLink(
                 original_url=link_data['original_url'],
@@ -300,20 +312,14 @@ class ShortLinkService(BaseService[ShortLink]):
 
             # 如果没有提供自定义代码，生成唯一代码
             if not link_data.get('short_code'):
-                logger.debug("生成唯一短链接代码")
-                # 获取所有已存在的代码，排除临时代码
                 result = await self.db.execute(select(ShortLink.short_code))
                 existing_codes = {row[0] for row in result.all() if not row[0].startswith('temp_')}
-                logger.debug(f"已存在的代码数量: {len(existing_codes)}")
 
-                # 尝试从ID生成
                 code_from_id = generate_short_code_from_id(short_link.id, min_length=4)
-                logger.debug(f"从ID生成的代码: {code_from_id}")
                 if code_from_id not in existing_codes:
                     short_link.short_code = code_from_id
-                    logger.debug(f"使用从ID生成的代码: {code_from_id}")
                 else:
-                    # 如果ID生成的代码已存在，使用随机生成
+                    # ID 派生码冲突时退化为随机唯一码
                     unique_code = generate_unique_short_code(existing_codes, length=6)
                     logger.debug(f"随机生成的代码: {unique_code}")
                     if not unique_code:
@@ -364,15 +370,17 @@ class ShortLinkService(BaseService[ShortLink]):
             current_user: User
     ) -> ShortLink:
         """
-        更新短链接
-        
+        更新短链接字段。
+
+        提交后 invalidate_short_link_cache，避免跳转仍读到旧 URL。
+
         Args:
-            link_id: 短链接ID
-            link_data: 更新的数据字典
+            link_id: 短链接主键
+            link_data: 待更新字段
             current_user: 当前用户
-        
+
         Returns:
-            ShortLink: 更新后的短链接对象
+            更新后的 ShortLink
         """
         # 获取短链接
         short_link = await self.get_short_link_by_id(link_id, current_user, include_relations=False)
@@ -428,10 +436,12 @@ class ShortLinkService(BaseService[ShortLink]):
             current_user: User
     ) -> None:
         """
-        删除短链接
-        
+        删除短链接。
+
+        删除后清理 Redis 短链缓存与点击计数器，防止幽灵计数同步。
+
         Args:
-            link_id: 短链接ID
+            link_id: 短链接主键
             current_user: 当前用户
         """
         # 获取短链接

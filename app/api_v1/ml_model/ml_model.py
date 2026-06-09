@@ -1,10 +1,15 @@
-"""
-导入训练API端点
-专注于Excel列名和字段的智能匹配
-- 用户手动保存映射规则
-- 智能列名映射（基于用户映射规则和标准映射表）
-- 确保包含所有11个必要字段
-"""
+"""Excel 列映射智能训练 API
+
+职责：上传样本 Excel 推断列名与标准字段映射，持久化用户映射规则供导入复用。
+
+权限：仅管理员（require_admin）。
+
+主要端点（前缀 /ml-model）：
+- POST /analyze-columns    分析列名匹配度
+- GET/POST /mapping-rules  读取/保存映射规则
+- POST /import-with-mapping  按规则导入预览。
+
+说明：REST API 端点，统一 ResponseBaseSchema 响应；鉴权由各端点 Depends 声明。"""
 import asyncio
 import json
 import logging
@@ -70,6 +75,11 @@ ALL_FIELDS = {**REQUIRED_FIELDS, **OPTIONAL_FIELDS}
 
 
 def _ensure_xlrd(strict: bool, error_message: str) -> bool:
+    """
+    检查 xlrd 库是否可用（读取 .xls 格式所需）。
+
+    strict=True 时缺失库直接抛业务异常；否则仅记录日志并返回 False。
+    """
     try:
         import xlrd
         return True
@@ -81,7 +91,11 @@ def _ensure_xlrd(strict: bool, error_message: str) -> bool:
 
 
 async def _read_excel_file_async(contents: bytes, filename: Optional[str] = None) -> pd.DataFrame:
-    """在线程池中读取 Excel，避免阻塞事件循环"""
+    """
+    在线程池中异步读取 Excel 文件。
+
+    避免 pandas 解析阻塞 FastAPI 事件循环，支持 .xlsx/.xls。
+    """
     return await asyncio.to_thread(_read_excel_file, contents, filename)
 
 
@@ -99,30 +113,38 @@ def _read_excel_file(contents: bytes, filename: Optional[str] = None) -> pd.Data
     异常:
         HTTPException: 如果文件无法解析
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 检测文件格式（通过文件内容）
     is_xlsx = contents[:4] == b'PK\x03\x04'  # .xlsx 文件（ZIP格式）
     is_xls = contents[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'  # .xls 文件（OLE格式）
 
     # 根据文件扩展名和内容检测选择引擎
     filename_lower = filename.lower() if filename else ""
+    # ---------- 条件分支 ----------
     if filename_lower.endswith('.xlsx'):
         engine = "openpyxl"
+        # ---------- 条件分支 ----------
         if not is_xlsx:
             logger.warning(f"文件名是 .xlsx，但文件内容不是有效的 ZIP 格式")
+    # ---------- 条件分支 ----------
     elif filename_lower.endswith('.xls'):
         engine = "xlrd"
+        # ---------- 条件分支 ----------
         if not is_xls:
             logger.warning(f"文件名是 .xls，但文件内容不是有效的 OLE 格式")
     else:
         # 如果无法从文件名判断，尝试检测文件内容
+        # ---------- 条件分支 ----------
         if is_xlsx:
             engine = "openpyxl"
+        # ---------- 条件分支 ----------
         elif is_xls:
             engine = "xlrd"
         else:
             engine = "openpyxl"  # 默认尝试 openpyxl
 
     # 检查必要的库是否可用
+    # ---------- 条件分支 ----------
     if engine == "xlrd":
         _ensure_xlrd(strict=True, error_message="xlrd 库未安装，无法读取 .xls 格式文件")
 
@@ -132,6 +154,7 @@ def _read_excel_file(contents: bytes, filename: Optional[str] = None) -> pd.Data
     tried_engines = []
 
     # 首先尝试指定的引擎
+    # ---------- 异常处理 ----------
     try:
         df = pd.read_excel(BytesIO(contents), engine=engine)
         tried_engines.append(engine)
@@ -142,8 +165,11 @@ def _read_excel_file(contents: bytes, filename: Optional[str] = None) -> pd.Data
         logger.warning(f"使用 {engine} 引擎解析失败: {error_msg}")
 
         # 如果第一次尝试失败，尝试另一个引擎
+        # ---------- 条件分支 ----------
         if engine == "openpyxl":
+            # ---------- 异常处理 ----------
             try:
+                # ---------- 条件分支 ----------
                 if _ensure_xlrd(strict=False, error_message="xlrd 库未安装，无法尝试 .xls 格式"):
                     logger.info("尝试使用 xlrd 引擎解析文件（可能是 .xls 格式）")
                     df = pd.read_excel(BytesIO(contents), engine="xlrd")
@@ -153,7 +179,9 @@ def _read_excel_file(contents: bytes, filename: Optional[str] = None) -> pd.Data
                 last_error = e2
                 tried_engines.append("xlrd")
                 logger.error(f"使用 xlrd 引擎也失败: {str(e2)}")
+        # ---------- 条件分支 ----------
         elif engine == "xlrd":
+            # ---------- 异常处理 ----------
             try:
                 logger.info("尝试使用 openpyxl 引擎解析文件（可能是 .xlsx 格式）")
                 df = pd.read_excel(BytesIO(contents), engine="openpyxl")
@@ -165,6 +193,7 @@ def _read_excel_file(contents: bytes, filename: Optional[str] = None) -> pd.Data
                 logger.error(f"使用 openpyxl 引擎也失败: {str(e2)}")
 
     # 如果所有尝试都失败，抛出友好的错误信息
+    # ---------- 条件分支 ----------
     if df is None or df.empty:
         error_msg = str(last_error) if last_error else "无法解析Excel文件"
 
@@ -172,22 +201,28 @@ def _read_excel_file(contents: bytes, filename: Optional[str] = None) -> pd.Data
         detail_parts = []
 
         # 检查文件格式
+        # ---------- 条件分支 ----------
         if not is_xlsx and not is_xls:
             detail_parts.append("文件内容不是有效的 Excel 格式（.xlsx 或 .xls）")
             # 检查是否是其他常见格式
+            # ---------- 条件分支 ----------
             if contents[:5] == b'<?xml' or contents[:5] == b'<html' or contents[:5] == b'<!DOC':
                 detail_parts.append("文件可能是 HTML 或 XML 格式，不是 Excel 文件")
+            # ---------- 条件分支 ----------
             elif b',' in contents[:100] and b'\n' in contents[:100]:
                 detail_parts.append("文件可能是 CSV 格式，请使用 Excel 打开并另存为 .xlsx 格式")
 
         # 提供更友好的错误信息
+        # ---------- 条件分支 ----------
         if "no valid workbook" in error_msg.lower() or "workbook" in error_msg.lower():
             detail_parts.append("Excel文件格式无效或文件已损坏")
             detail_parts.append("请确保文件是有效的 .xlsx 或 .xls 格式，且文件未损坏")
             detail_parts.append("建议：使用 Excel 打开文件，然后另存为 .xlsx 格式")
+        # ---------- 条件分支 ----------
         elif "invalid" in error_msg.lower() or "InvalidFileException" in str(type(last_error).__name__):
             detail_parts.append("无效的Excel文件格式")
             detail_parts.append("请确保文件是 .xlsx 或 .xls 格式，且文件未损坏")
+        # ---------- 条件分支 ----------
         elif "empty" in error_msg.lower() or "no columns" in error_msg.lower():
             detail_parts.append("Excel文件为空或没有数据")
             detail_parts.append("请确保文件包含至少一行数据")
@@ -196,6 +231,7 @@ def _read_excel_file(contents: bytes, filename: Optional[str] = None) -> pd.Data
             detail_parts.append("请检查文件格式是否正确，或尝试重新保存文件")
 
         # 添加诊断信息
+        # ---------- 条件分支 ----------
         if tried_engines:
             detail_parts.append(f"已尝试的解析引擎: {', '.join(tried_engines)}")
 
@@ -205,11 +241,16 @@ def _read_excel_file(contents: bytes, filename: Optional[str] = None) -> pd.Data
 
         raise_api_exception(ErrorCode.BAD_REQUEST, detail=detail)
 
+    # ---------- 构建响应 ----------
     return df
 
 
 class ColumnMappingService:
-    """列名映射服务"""
+    """
+    保存用户自定义的 Excel 列名映射配置。
+
+    权限：仅管理员；用于 ML 导入训练的数据列对齐。
+    """
 
     @staticmethod
     def calculate_similarity(str1: str, str2: str) -> float:
@@ -222,8 +263,9 @@ class ColumnMappingService:
     @staticmethod
     def extract_keywords(text: str) -> set[str]:
         """
-        提取文本中的关键词（去除常见停用词）
-        返回关键词集合
+        从列名或表头文本中提取关键词集合。
+
+        去除中文停用词与括号等噪声，供 Excel 列映射相似度匹配使用。
         """
         # 常见停用词
         stop_words = {'的', '了', '在', '是', '和', '与', '或', '及', '等', '等', '(', ')', '（', '）', '未', '减', '扣'}
@@ -825,8 +867,13 @@ async def parse_excel_columns(
         current_user: User = Depends(get_current_user)
 ):
     """
-    解析Excel文件的列名，返回所有列名供用户选择映射
+    解析上传 Excel 文件的列名列表。
+
+    权限：登录用户。
+    返回所有列名供前端展示映射配置界面。
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         # 验证文件并读取内容（使用公共验证函数）
         contents = await validate_excel_file(file)
@@ -881,7 +928,10 @@ async def save_user_mapping(
         current_user: User = Depends(require_admin)
 ):
     """
-    保存用户手动选择的列名映射规则
+    保存用户自定义的 Excel 列名到数据库字段的映射规则。
+
+    权限：仅管理员。
+    请求体：{excel_column: db_field} 键值对，供后续导入训练使用。
     """
     try:
         # 验证映射规则
@@ -1114,6 +1164,8 @@ async def validate_excel_columns(
     - 使用标准映射表和关键词匹配
     - 返回列名映射结果和缺失字段提示
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         # 验证文件并读取内容（使用公共验证函数）
         contents = await validate_excel_file(file)
@@ -1129,6 +1181,7 @@ async def validate_excel_columns(
 
         # 生成建议
         recommendations = []
+        # ---------- 条件分支 ----------
         if column_mapping_result["mapping_complete"]:
             recommendations.append("✅ 所有必需列都已成功映射")
         else:
@@ -1214,8 +1267,10 @@ async def get_timezone_config(
         current_user: User = Depends(get_current_user)
 ):
     """
-    获取应用时区配置
-    - 用于前端时间显示
+    获取应用全局时区配置（如 Asia/Shanghai）。
+
+    供前端 Excel 导入、时间展示与列映射界面使用。
+    权限：登录用户。
     """
     try:
         return ResponseBaseSchema.success(data={
@@ -1241,6 +1296,8 @@ async def preview_excel_data(
     - 使用最新的映射规则进行数据映射
     - 返回前N行数据供预览
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         # 验证文件并读取内容（使用公共验证函数）
         contents = await validate_excel_file(file)
@@ -1266,12 +1323,15 @@ async def preview_excel_data(
         # mapping格式: {excel_column: db_field}
         # 需要创建 {excel_column: db_field} 的映射来重命名列
         column_rename_mapping = {}
+        # ---------- 循环处理 ----------
         for excel_col, db_field in mapping.items():
             # excel_col 应该是规范化后的Excel列名
             # 确保excel_col在DataFrame的列中
+            # ---------- 条件分支 ----------
             if excel_col in df_mapped.columns:
                 column_rename_mapping[excel_col] = db_field
 
+        # ---------- 条件分支 ----------
         if column_rename_mapping:
             df_mapped = df_mapped.rename(columns=column_rename_mapping)
             logger.debug(f"列名映射: {column_rename_mapping}")
@@ -1283,6 +1343,7 @@ async def preview_excel_data(
         available_fields = [f for f in all_fields if f in df_mapped.columns]
 
         # 如果没有可用字段，返回空数据
+        # ---------- 条件分支 ----------
         if not available_fields:
             logger.warning(f"没有可用的映射字段，mapping: {mapping}, df_mapped.columns: {list(df_mapped.columns)}")
             return ResponseBaseSchema.success(data={
@@ -1298,17 +1359,22 @@ async def preview_excel_data(
 
         # 转换为字典列表
         preview_data = []
+        # ---------- 循环处理 ----------
         for _, row in df_preview.iterrows():
             row_dict = {}
+            # ---------- 循环处理 ----------
             for field in available_fields:
                 value = row[field]
                 # 处理NaN值
+                # ---------- 条件分支 ----------
                 if pd.isna(value):
                     row_dict[field] = None
                 else:
                     # 清理值以确保JSON序列化安全
+                    # ---------- 条件分支 ----------
                     if isinstance(value, (int, float)):
                         row_dict[field] = value
+                    # ---------- 条件分支 ----------
                     elif isinstance(value, str):
                         row_dict[field] = ColumnMappingService.clean_string_for_json(value)
                     else:
@@ -1317,6 +1383,7 @@ async def preview_excel_data(
 
         # 构建字段信息（包含中文名称，支持必需字段和可选字段）
         field_info = {}
+        # ---------- 循环处理 ----------
         for field in available_fields:
             field_info[field] = {
                 "name": ALL_FIELDS.get(field, field),

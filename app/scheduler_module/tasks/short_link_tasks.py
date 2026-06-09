@@ -1,6 +1,16 @@
 """
-短链接相关定时任务
-定期同步点击次数到数据库，批量处理点击记录队列
+短链接相关定时任务模块。
+
+功能说明：
+- 将 Redis 中的点击计数同步回 short_links.click_count 字段
+- 调度 clicks_batch_processor 消费点击队列
+
+在系统中的位置：
+- 与短链接高并发写入链路配合，保证 DB 计数最终一致
+
+注意事项：
+1. 同步频率与 Redis 计数器实现匹配，避免覆盖更新的计数
+2. 短链大量活跃时监控任务耗时，必要时拆分同步与队列处理 Cron
 """
 import logging
 from datetime import datetime, timezone

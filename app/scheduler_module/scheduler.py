@@ -1,6 +1,17 @@
 """
-定时任务调度器
-使用 APScheduler 实现定时任务，并通过数据库锁确保多进程环境下任务只执行一次
+定时任务调度器核心模块。
+
+功能说明：
+- 使用 APScheduler AsyncIOScheduler 注册 Cron/Interval 触发器
+- ``execute_task_with_lock`` 结合 DB 锁与进程分配器，保证多进程只跑一次
+- 任务执行结果写入 task_result_store，并同步 scheduled_tasks 表状态
+
+在系统中的位置：
+- 被 ``scheduler_module.__init__`` 导出；启动入口在 ``app.main`` lifespan
+
+注意事项：
+1. 任务函数须为 async 或可 await 的协程，阻塞 IO 应放线程池
+2. 跳过执行（锁未获取）须记 audit 日志，便于排查「任务未跑」误报
 """
 import warnings
 
@@ -122,6 +133,7 @@ async def execute_task_with_lock(
         priority = TaskPriority.NORMAL
 
         async def wrapped_task():
+            """手动触发路径：跳过进程分配后直接带锁执行。"""
             await _execute_task_with_lock_internal(task_name, task_func, *args, **kwargs)
 
         await submit_task_to_queue(
@@ -197,6 +209,7 @@ async def execute_task_with_lock(
 
     # 创建包装函数，将实际执行逻辑包装为异步函数
     async def wrapped_task():
+        """定时触发路径：经任务队列提交后带分布式锁执行。"""
         await _execute_task_with_lock_internal(task_name, task_func, *args, **kwargs)
 
     # 将任务提交到队列，队列会管理并发执行
@@ -451,6 +464,7 @@ def register_scheduled_task(
     # 创建包装函数，确保带锁执行
     # 定时触发时，不跳过进程检查（skip_process_check=False）
     async def locked_task() -> None:
+        """APScheduler 回调：按 cron/interval 触发时走带锁执行（含进程分配）。"""
         await execute_task_with_lock(task_name, task_func, skip_process_check=False, *args, **kwargs)
 
     # 确定触发器

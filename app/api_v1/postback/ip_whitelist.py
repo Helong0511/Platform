@@ -1,4 +1,17 @@
-"""Postback IP 白名单 API（薄路由层）。"""
+"""Postback IP 白名单管理 API
+
+职责：维护允许向平台发送转化 Postback 的 IP 列表（单条/批量 CRUD）。
+
+权限：仅管理员
+
+主要端点：
+- GET    /postback/ip-whitelist           分页列表
+- POST   /postback/ip-whitelist           创建
+- PUT    /postback/ip-whitelist/{id}      更新
+- POST   /postback/ip-whitelist/batch     批量创建
+- DELETE /postback/ip-whitelist/{id}      删除。
+
+说明：处理上游转化回调、下游转发、去重诊断与 IP 白名单管理。"""
 import logging
 from typing import List, Optional
 
@@ -40,6 +53,12 @@ async def get_ip_whitelist(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin),
 ):
+    """
+    分页查询 Postback IP 白名单。
+
+    权限：仅管理员。
+    筛选：ip_address 模糊匹配、is_active 启用状态。
+    """
     return await postback_ip_whitelist_service.list_ip_whitelist(
         ip_address=ip_address,
         is_active=is_active,
@@ -61,6 +80,12 @@ async def create_ip_whitelist(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin),
 ):
+    """
+    新增单条 Postback IP 白名单。
+
+    权限：仅管理员。
+    请求体：PostbackIpWhitelistCreate；创建成功后写审计日志。
+    """
     result = await postback_ip_whitelist_service.create_ip_whitelist(
         data=data, db=db, current_user=current_user
     )
@@ -89,6 +114,12 @@ async def update_ip_whitelist(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin),
 ):
+    """
+    更新 Postback IP 白名单记录。
+
+    权限：仅管理员。
+    支持部分字段更新；有变更时写审计日志。
+    """
     result = await postback_ip_whitelist_service.update_ip_whitelist(
         whitelist_id=whitelist_id,
         data=data,
@@ -121,6 +152,12 @@ async def batch_create_ip_whitelist(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin),
 ):
+    """
+    批量导入 Postback IP 白名单。
+
+    权限：仅管理员。
+    返回成功/失败计数；至少有一条成功时写审计日志。
+    """
     result = await postback_ip_whitelist_service.batch_create_ip_whitelist(
         data=data, db=db, current_user=current_user
     )
@@ -154,6 +191,12 @@ async def delete_ip_whitelist(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(require_admin),
 ):
+    """
+    删除 Postback IP 白名单记录。
+
+    权限：仅管理员。
+    删除后写审计日志。
+    """
     result = await postback_ip_whitelist_service.delete_ip_whitelist(
         whitelist_id=whitelist_id, db=db, current_user=current_user
     )

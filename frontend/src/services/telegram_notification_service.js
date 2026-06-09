@@ -1,6 +1,8 @@
 /**
  * Telegram 通知服务（前端）
- * 用于构建测试消息预览
+ * @file services/telegram_notification_service.js
+ *
+ * 构建各类通知的测试消息预览文本，供配置页发送测试通知使用。
  */
 
 export class TelegramNotificationService {

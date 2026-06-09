@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - Offer 详情面板：关联数据展示
+ * @file composables/useOfferDetail.js
+ */
 import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getOffer } from '../api/offer';
@@ -18,17 +22,27 @@ import { logger } from '../utils/logger';
 /**
  * Offer 详情弹窗、关联 Cap/扣量、渠道短链展示。
  */
+/**
+ * 组合式函数 - Offer 详情面板：关联数据展示
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useOfferDetail({ authStore, isAdmin, currentClientId }) {
+  // detailDialogVisible 响应式状态
   const detailDialogVisible = ref(false);
   const detailLoading = ref(false);
+  // activeTab 响应式状态
   const activeTab = ref('basic');
   const currentOffer = ref(null);
+  // relatedCaps 响应式状态
   const relatedCaps = ref([]);
   const relatedDiscounts = ref([]);
+  // capsLoading 响应式状态
   const capsLoading = ref(false);
   const discountsLoading = ref(false);
+  // publisherShortLinks 响应式状态
   const publisherShortLinks = ref({});
   const creatingShortLinks = ref({});
+  // clientPublisherTracklink 响应式状态
   const clientPublisherTracklink = ref(null);
   const loadingClientTracklink = ref(false);
 

@@ -251,6 +251,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     """
     
     def __init__(self, app: ASGIApp):
+        """挂载 ASGI 应用，供 dispatch 中生成/校验 CSRF 令牌。"""
         super().__init__(app)
         self.app = app
     

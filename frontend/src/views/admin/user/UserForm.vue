@@ -1,9 +1,13 @@
 <!--
-用户表单组件
-从 UserManagement.vue 拆分
+  管理端 - 用户表单（新建/编辑）
+  @file views/admin/user/UserForm.vue
 -->
 <template>
-  <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑用户' : '新建用户'" width="500px" :close-on-click-modal="false" @closed="handleClosed">
+  <!-- 页面主模板 -->
+<!-- 弹窗区域 -->
+<!-- 弹窗 -->
+    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑用户' : '新建用户'" width="500px" :close-on-click-modal="false" @closed="handleClosed">
+    <!-- 表单区域 -->
     <el-form ref="formRef" :model="formData" :rules="rules" label-width="100px">
       <el-form-item label="用户名" prop="username">
         <el-input v-model="formData.username" placeholder="请输入用户名" maxlength="50" />

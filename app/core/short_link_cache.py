@@ -1,6 +1,9 @@
 """
-短链接缓存模块
-使用Redis缓存短链接数据，减少数据库查询，提高高并发性能
+短链接 Redis 缓存模块。
+
+职责：以 short_code 为键缓存短链元数据，支撑 ``/s/{code}`` 高并发跳转。
+
+在系统中的位置：``app.core.short_link_cache``，由 ``ShortLinkService`` 与 ``cache_manager`` 读写。
 """
 import logging
 import json

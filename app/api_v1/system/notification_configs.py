@@ -1,7 +1,18 @@
-"""
-通知配置管理API端点
-提供客户和产品通知配置的CRUD操作，以及通知记录的查询
-"""
+"""通知配置管理 API
+
+职责：客户/产品/管理员三级通知策略 CRUD、Telegram 连通性测试、Postback 通知记录查询。
+
+权限：
+- 客户/产品配置：管理员全量；客户仅查看/修改自身
+- 管理员全局配置与测试：仅管理员
+- 通知记录查询：管理员
+
+主要端点（前缀 /notification-configs）：
+- CRUD /clients/{id}、/products/{id}、/admin
+- POST /admin/test-connection、/admin/test-message
+- GET  /notifications  通知发送记录。
+
+说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。"""
 import json
 import logging
 from typing import Optional
@@ -58,7 +69,11 @@ async def get_client_notification_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取客户的通知配置（已重构使用服务层）"""
+    """
+    获取指定客户的转化通知配置。
+
+    权限：登录用户；含 Telegram/邮件/Webhook 等通道设置。
+    """
     # 使用服务层（业务逻辑在NotificationConfigService中）
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
@@ -96,7 +111,13 @@ async def create_or_update_client_notification_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """创建或更新客户的通知配置（仅管理员，已重构使用服务层）"""
+    """
+    创建或更新指定客户的转化通知配置（Telegram/邮件/短信等）。
+
+    若记录已存在则 upsert 更新；变更写入审计日志。
+    权限：仅管理员。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在NotificationConfigService中）
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
@@ -111,6 +132,7 @@ async def create_or_update_client_notification_config(
         client_id, config_data, current_user
     )
 
+    # ---------- 条件分支 ----------
     if is_create:
         await log_create(
             db=db,
@@ -133,6 +155,7 @@ async def create_or_update_client_notification_config(
         )
     await commit_audit_log(db)
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=ClientNotificationConfigResponse.model_validate(config))
 
 
@@ -145,7 +168,12 @@ async def delete_client_notification_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """删除客户的通知配置（仅管理员，已重构使用服务层）"""
+    """
+    删除指定客户的转化通知配置记录。
+
+    删除后该客户不再接收配置的转化推送。
+    权限：仅管理员。
+    """
     notification_service: NotificationConfigService = await get_notification_config_service(db)
 
     existing_result = await db.execute(
@@ -179,7 +207,12 @@ async def get_product_notification_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取产品的通知配置（已重构使用服务层）"""
+    """
+    获取指定产品 ID 的转化通知配置详情。
+
+    客户角色仅可查看自有产品；管理员可查看全部。
+    权限：登录用户（按数据范围过滤）。
+    """
     # 使用服务层（业务逻辑在NotificationConfigService中）
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
@@ -217,7 +250,13 @@ async def create_or_update_product_notification_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """创建或更新产品的通知配置（仅管理员，已重构使用服务层）"""
+    """
+    创建或更新指定产品的转化通知配置（覆盖客户级默认）。
+
+    支持配置高价值阈值、通知渠道与频率等。
+    权限：仅管理员。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在NotificationConfigService中）
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
@@ -232,6 +271,7 @@ async def create_or_update_product_notification_config(
         product_id, config_data, current_user
     )
 
+    # ---------- 条件分支 ----------
     if is_create:
         await log_create(
             db=db,
@@ -254,6 +294,7 @@ async def create_or_update_product_notification_config(
         )
     await commit_audit_log(db)
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=ProductNotificationConfigResponse.model_validate(config))
 
 
@@ -266,7 +307,11 @@ async def delete_product_notification_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
-    """删除产品的通知配置（仅管理员，已重构使用服务层）"""
+    """
+    删除指定产品的转化通知配置，回退为客户级或全局默认。
+
+    权限：仅管理员；操作记入审计日志。
+    """
     notification_service: NotificationConfigService = await get_notification_config_service(db)
 
     existing_result = await db.execute(
@@ -310,7 +355,12 @@ async def get_notification_records(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取通知记录列表（支持分页和过滤，已重构使用服务层）"""
+    """
+    分页查询转化通知发送记录。
+
+    权限：登录用户；支持按客户、产品、状态筛选。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在NotificationConfigService中）
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
@@ -330,6 +380,7 @@ async def get_notification_records(
         current_user=current_user
     )
     
+    # ---------- 构建响应 ----------
     return PaginatedResponseBaseSchema.success(
         data=[PostbackNotificationResponse.model_validate(n) for n in notifications],
         total=total,
@@ -346,7 +397,11 @@ async def get_notification_record(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取通知记录详情（已重构使用服务层）"""
+    """
+    获取单条通知发送记录详情。
+
+    权限：登录用户；含发送状态、重试次数、响应内容等。
+    """
     # 使用服务层（业务逻辑在NotificationConfigService中）
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     
@@ -452,8 +507,10 @@ async def batch_resend_conversion_notification(
       "conversion_ids": [1, 2, 3]
     }
     """
+    # ---------- 入口：参数与依赖准备 ----------
     conversion_ids = request_data.get("conversion_ids", [])
     
+    # ---------- 条件分支 ----------
     if not isinstance(conversion_ids, list):
         raise_api_exception(
             ErrorCode.VALIDATION_ERROR,
@@ -478,6 +535,7 @@ async def batch_resend_conversion_notification(
     )
     await commit_audit_log(db)
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=result)
 
 
@@ -533,6 +591,7 @@ async def create_or_update_admin_notification_config(
     仅管理员可访问
     管理员通知配置是单例模式，只有一条记录（id=1）
     """
+    # ---------- 入口：参数与依赖准备 ----------
     notification_service: NotificationConfigService = await get_notification_config_service(db)
     update_payload = config_data.model_dump(exclude_unset=True)
 
@@ -544,6 +603,7 @@ async def create_or_update_admin_notification_config(
         current_user
     )
 
+    # ---------- 条件分支 ----------
     if is_create:
         await log_create(
             db=db,
@@ -566,6 +626,7 @@ async def create_or_update_admin_notification_config(
         )
     await commit_audit_log(db)
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=AdminNotificationConfigResponse.model_validate(config))
 
 
@@ -584,14 +645,17 @@ async def test_telegram_connection(
     仅管理员可访问
     发送一条测试消息到指定的 Chat ID
     """
+    # ---------- 入口：参数与依赖准备 ----------
     
     telegram_chat_id = request_data.telegram_chat_id
     
     # 发送测试消息
     test_message = "🔔 Telegram 通知测试\n\n这是一条测试消息，如果您收到此消息，说明 Telegram 连接正常。"
     
+    # ---------- 异常处理 ----------
     try:
         success = await send_telegram_message_async(telegram_chat_id, test_message)
+        # ---------- 条件分支 ----------
         if success:
             await log_user_action(
                 db=db,
@@ -637,14 +701,17 @@ async def send_test_message(
     仅管理员可访问
     发送指定类型的测试消息到指定的 Chat ID
     """
+    # ---------- 入口：参数与依赖准备 ----------
     telegram_chat_id = request_data.telegram_chat_id
     message_type = request_data.message_type
     
+    # ---------- 异常处理 ----------
     try:
         # 使用 TelegramNotificationService 构建测试消息
         test_message = TelegramNotificationService.build_test_message(message_type)
         
         success = await send_telegram_message_async(telegram_chat_id, test_message)
+        # ---------- 条件分支 ----------
         if success:
             await log_user_action(
                 db=db,

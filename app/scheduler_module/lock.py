@@ -1,7 +1,16 @@
 """
-定时任务锁机制
-独立的多进程锁模块
-使用数据库行锁确保多进程环境下任务只执行一次
+定时任务分布式锁模块。
+
+功能说明：
+- 基于 ``scheduled_task_locks`` 表行锁实现跨进程互斥
+- ``acquire_task_lock`` / ``release_task_lock`` 包裹任务执行，超时自动释放
+
+在系统中的位置：
+- 被 ``scheduler.execute_task_with_lock`` 调用
+
+注意事项：
+1. 锁标识包含 host+pid，防止僵尸锁；异常退出依赖超时回收
+2. 任务执行时间超过 DEFAULT_TIMEOUT_SECONDS 可能导致锁被误释放，须合理设置超时
 """
 import logging
 import os

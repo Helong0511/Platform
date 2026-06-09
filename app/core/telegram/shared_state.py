@@ -17,6 +17,7 @@ STATE_FILE = (
 
 
 def _is_process_alive(pid: int) -> bool:
+    """向进程发送信号 0 探测是否仍存活（不实际终止进程）。"""
     try:
         os.kill(pid, 0)
         return True

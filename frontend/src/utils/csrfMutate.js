@@ -1,16 +1,24 @@
 /**
- * 写操作前统一刷新 CSRF
+ * 写操作前统一刷新 CSRF 令牌
+ * @file utils/csrfMutate.js
+ *
+ * 封装 withCsrfMutate / prepareCsrfMutate，在 POST/PUT/DELETE 前自动刷新 CSRF。
  */
 import { refreshCsrfTokenBeforeRequest, ensureCsrfToken } from './api';
 
+/** 重导出：确保本地 CSRF 令牌可用 */
 export { ensureCsrfToken };
 
-/** 多数管理端写操作使用的轻量 GET 端点 */
+/** 多数管理端写操作使用的轻量 GET 端点（用于刷新 CSRF） */
 export const CSRF_REFRESH_DASHBOARD = '/api/v1/dashboard/stats';
 
+/** 客户模块写操作前的 CSRF 刷新端点 */
 export const CSRF_REFRESH_CLIENTS = '/api/v1/clients/?page_size=1';
+/** 产品模块写操作前的 CSRF 刷新端点 */
 export const CSRF_REFRESH_PRODUCTS = '/api/v1/products/?page_size=1';
+/** 用户模块写操作前的 CSRF 刷新端点 */
 export const CSRF_REFRESH_USERS = '/api/v1/users/stats';
+/** 会话模块写操作前的 CSRF 刷新端点 */
 export const CSRF_REFRESH_SESSIONS = '/api/v1/sessions/me/sessions';
 
 /**

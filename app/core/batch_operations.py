@@ -1,6 +1,9 @@
 """
-批量操作工具模块
-提供高效的批量插入/更新功能，使用 MySQL 的 INSERT ... ON DUPLICATE KEY UPDATE
+广告数据批量 upsert 工具。
+
+职责：使用 MySQL ``INSERT ... ON DUPLICATE KEY UPDATE`` 分批写入 AdData，提升导入性能。
+
+在系统中的位置：``app.core.batch_operations``，由广告数据导入与定时同步任务调用。
 """
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.mysql import insert

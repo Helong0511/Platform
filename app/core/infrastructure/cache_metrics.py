@@ -23,23 +23,28 @@ class CacheMetrics:
     
     @property
     def total_requests(self) -> int:
+        """缓存请求总数（命中 + 未命中，不含错误）。"""
         return self.hits + self.misses
-    
+
     @property
     def hit_rate(self) -> float:
+        """命中率，范围 0.0–1.0；无请求时返回 0。"""
         total = self.total_requests
         return self.hits / total if total > 0 else 0.0
-    
+
     @property
     def error_rate(self) -> float:
+        """错误率（errors / 总操作次数），范围 0.0–1.0。"""
         total = self.total_requests + self.errors
         return self.errors / total if total > 0 else 0.0
-    
+
     @property
     def avg_response_time_ms(self) -> float:
+        """平均缓存操作耗时（毫秒），仅统计命中与未命中。"""
         return self.total_time_ms / self.total_requests if self.total_requests > 0 else 0.0
-    
+
     def to_dict(self) -> Dict:
+        """导出为可序列化字典，命中率/错误率为百分比（保留两位小数）。"""
         return {
             'hits': self.hits,
             'misses': self.misses,
@@ -58,6 +63,7 @@ class CacheMetricsCollector:
     _metrics: Dict[str, CacheMetrics] = field(default_factory=dict)
     
     def __new__(cls):
+        """单例收集器：进程内共享各 key_prefix 的命中/未命中计数。"""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._metrics = {}

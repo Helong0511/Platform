@@ -1,7 +1,9 @@
 """
-分页查询工具模块
+通用数据库分页查询工具。
 
-提供通用的分页查询函数，减少重复代码
+职责：对 SQLAlchemy Select 应用 offset/limit 并返回 (items, total)，自动限制 page_size 上限。
+
+在系统中的位置：``app.core.pagination.paginate_query``，供各 Service 列表接口复用。
 """
 from typing import TypeVar, Optional, List, Callable, Any
 from sqlalchemy.ext.asyncio import AsyncSession

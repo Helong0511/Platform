@@ -1,5 +1,16 @@
 """
 Postback 统计查询服务。
+
+功能说明：
+- 按 platform 聚合 PostbackConversion 的转化数、payout、event_value 等指标
+- 支持平台、日期区间筛选，供管理端报表与概览使用
+
+在系统中的位置：
+- 被 Postback 统计 API 与 Dashboard 子面板调用
+
+注意事项：
+1. 日期筛选使用 ``parse_date_to_app_timezone`` 统一边界
+2. 聚合 SQL 注意索引（platform、conversion_time）命中
 """
 import logging
 from typing import List, Optional
@@ -20,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 
 class PostbackStatsService:
+    """按平台聚合 Postback 转化数量与 payout 等业务指标。"""
+
     async def get_postback_stats(
         self,
         *,
@@ -29,6 +42,19 @@ class PostbackStatsService:
         db: AsyncSession,
         current_user: User,
     ):
+        """
+        查询 Postback 转化统计，按 platform 分组。
+
+        Args:
+            platform: 限定单个平台，None 表示全部平台分别统计。
+            start_date / end_date: 可选日期边界 YYYY-MM-DD，过滤 created_at。
+            db: 异步数据库会话。
+            current_user: 当前用户，仅用于操作日志。
+
+        Returns:
+            ResponseBaseSchema，data 为 PostbackStatsResponse 列表，
+            含 total_conversions、total_payout、unique_events 等字段。
+        """
         try:
             query = select(
                 PostbackConversion.platform,

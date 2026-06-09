@@ -1,6 +1,17 @@
 """
-定时任务管理服务层
-封装定时任务查询和管理的业务逻辑
+定时任务管理服务层。
+
+功能说明：
+- 定时任务分页查询（全文搜索、状态筛选、查询超时保护）
+- 启用/禁用并同步 APScheduler（register_scheduled_task / remove_job）
+- 手动触发、单任务/全量重载、释放任务锁、队列与调度器状态查询
+
+在系统中的位置：
+- 被管理端定时任务 API 调用；与 ``scheduler_module`` 调度器双向同步
+
+注意事项：
+1. 手动触发时 skip_process_check=True，跳过多进程分配限制供紧急执行
+2. 全量重载会短暂中断调度，宜在低峰期操作
 """
 import asyncio
 import logging
@@ -29,9 +40,15 @@ logger = logging.getLogger(__name__)
 
 
 class ScheduledTaskService:
-    """定时任务服务"""
+    """
+    定时任务运维服务。
+
+    数据库 ScheduledTask 表为配置源，运行时由 APScheduler 持有 job；
+    启用状态变更或 reload 时通过 register_scheduled_task / remove_job 同步。
+    """
 
     def __init__(self, db: AsyncSession):
+        """注入异步数据库会话。"""
         self.db = db
 
     async def get_scheduled_tasks(
@@ -43,17 +60,19 @@ class ScheduledTaskService:
             task_name: Optional[str] = None
     ) -> Tuple[List[ScheduledTask], int]:
         """
-        获取定时任务列表
+        分页查询定时任务配置。
+
+        任务名搜索优先全文索引，回退 LIKE；count 与列表查询均设 QUERY_TIMEOUT 超时保护。
 
         Args:
             page: 页码
             page_size: 每页数量
-            is_active: 是否启用过滤
-            is_running: 是否运行中过滤
-            task_name: 任务名称搜索
+            is_active: 是否启用
+            is_running: 是否运行中（持锁）
+            task_name: 任务名称关键词
 
         Returns:
-            Tuple[List[ScheduledTask], int]: (任务列表, 总数)
+            (任务列表, 总条数)
         """
         # 构建查询条件
         conditions = []
@@ -172,15 +191,19 @@ class ScheduledTaskService:
             current_user: User
     ) -> ScheduledTask:
         """
-        更新定时任务状态
+        启用或禁用定时任务。
+
+        使用 SELECT FOR UPDATE 防并发；状态变更后：
+        - 禁用 → 从调度器 remove_job
+        - 启用 → 按 function_path / cron_expression 重新 register
 
         Args:
-            task_name: 任务名称
-            is_active: 是否启用
-            current_user: 当前用户
+            task_name: 任务名称（支持 URL 编码）
+            is_active: 目标启用状态
+            current_user: 操作管理员
 
         Returns:
-            ScheduledTask: 更新后的任务对象
+            更新后的 ScheduledTask
         """
         # URL 解码
         task_name = unquote(task_name)
@@ -278,15 +301,18 @@ class ScheduledTaskService:
             current_user: User
     ) -> Dict[str, Any]:
         """
-        手动触发定时任务
+        手动触发定时任务（异步后台执行，不等待完成）。
+
+        若 job 未注册则尝试自动 register；通过 execute_task_with_lock 提交执行，
+        可传入 start_date / end_date 覆盖任务默认日期范围。
 
         Args:
             task_name: 任务名称
-            params: 任务参数
-            current_user: 当前用户
+            params: 可选参数（start_date、end_date）
+            current_user: 操作管理员
 
         Returns:
-            Dict: 触发结果
+            含 message 的触发确认字典
         """
         # URL 解码
         task_name = unquote(task_name)
@@ -317,10 +343,9 @@ class ScheduledTaskService:
                 detail="定时任务未启用，无法触发"
             )
 
-        # 导入调度器并触发任务
+        # ====== 调度器 job 自愈：未注册则按 DB 配置重新 register ======
         sched = get_scheduler()
 
-        # 查找任务
         job = sched.get_job(task_name)
         if not job:
             # 任务未在调度器中注册，尝试自动重新注册
@@ -388,6 +413,7 @@ class ScheduledTaskService:
 
         # 手动触发时，跳过进程分配检查（skip_process_check=True）
         async def trigger_task():
+            """后台协程：带锁执行指定任务函数，手动触发时跳过进程分配检查。"""
             try:
                 logger.info(f"开始手动触发任务 '{task_name}'（跳过进程分配检查）")
 
@@ -423,14 +449,16 @@ class ScheduledTaskService:
             current_user: User
     ) -> Dict[str, Any]:
         """
-        重新加载任务配置
+        从数据库重读单任务配置并同步到 APScheduler。
+
+        禁用则 remove_job；启用则校验 function_path 与 cron 后 register。
 
         Args:
             task_name: 任务名称
-            current_user: 当前用户
+            current_user: 操作管理员
 
         Returns:
-            Dict: 重新加载结果
+            含 message、cron_expression、is_active 的结果字典
         """
         # URL 解码
         task_name = unquote(task_name)
@@ -501,13 +529,13 @@ class ScheduledTaskService:
 
     async def reload_all_scheduled_tasks(self, current_user: User) -> Dict[str, Any]:
         """
-        重新加载所有任务配置
+        全量重载：调用 init_scheduled_tasks 从 DB 重建所有 job。
 
         Args:
-            current_user: 当前用户
+            current_user: 操作管理员
 
         Returns:
-            Dict: 重新加载结果
+            操作确认消息
         """
 
         # 重新初始化所有任务（会从数据库重新读取）
@@ -519,10 +547,10 @@ class ScheduledTaskService:
 
     async def get_task_queue_status(self) -> Dict[str, Any]:
         """
-        获取任务队列状态
+        获取内存任务队列状态（排队/执行中任务数等）。
 
         Returns:
-            Dict: 队列状态信息
+            队列状态字典，结构由 task_queue 模块定义
         """
 
         queue = get_task_queue()
@@ -532,16 +560,18 @@ class ScheduledTaskService:
 
     async def get_scheduler_status(self) -> Dict[str, Any]:
         """
-        获取调度器状态
+        获取当前 worker 的 APScheduler 运行状态。
+
+        返回 worker_pid、是否 running、已注册 job 列表及下次执行时间。
 
         Returns:
-            Dict: 调度器状态信息
+            调度器状态字典
         """
 
         sched = get_scheduler()
         worker_pid = os.getpid()
 
-        # 获取所有已注册的任务
+        # 遍历已注册 job，组装下次执行时间与触发器信息
         jobs = sched.get_jobs()
 
         # 构建任务详情列表
@@ -571,14 +601,16 @@ class ScheduledTaskService:
             current_user: User
     ) -> Dict[str, Any]:
         """
-        释放任务锁（紧急操作）
+        强制释放任务运行锁（紧急运维）。
+
+        将 is_running 置 False 并记录 last_error，用于任务异常退出后锁未释放的场景。
 
         Args:
             task_name: 任务名称
-            current_user: 当前用户
+            current_user: 操作管理员
 
         Returns:
-            Dict: 释放结果
+            操作结果消息
         """
         # URL 解码
         task_name = unquote(task_name)

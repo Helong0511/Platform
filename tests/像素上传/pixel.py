@@ -1,5 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+"""
+Facebook Pixel / Conversions API 批量测试上报脚本。
+
+模拟用户 IP、UA、邮箱、手机号，向 Graph API 发送 PageView/Lead 等事件；
+DEBUG=True 时仅打印请求体不实际发送。
+"""
 import hashlib
 import random
 import time

@@ -325,6 +325,7 @@ const reloadPage = (showMessage = true, delay = 2000) => {
  * @param {number} options.pollInterval 登录页轮询间隔（毫秒），默认 60000
  * @param {import('vue-router').Router} [options.router] Vue Router 实例
  */
+/** 初始化生产环境版本检测：对比包内版本与 version.json，有更新则提示并刷新。 */
 export const initVersionCheck = (options = {}) => {
   if (isInitialized) {
     log.warn('版本检查已经初始化，跳过重复初始化');

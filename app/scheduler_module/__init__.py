@@ -1,6 +1,16 @@
 """
-定时任务模块
-独立的任务调度模块，包含调度器、锁机制、任务注册等功能
+定时任务调度子系统包。
+
+功能说明：
+- 导出调度器生命周期（init/start/shutdown）、分布式锁、任务注册与执行入口
+- 基于 APScheduler + 数据库行锁，支持多 worker 部署下单次执行
+
+在系统中的位置：
+- 由 ``app.main`` lifespan 启动；任务定义在 ``tasks/``，配置在 ``task_config.py``
+
+注意事项：
+1. 新增任务须同时在 task_config.py、task_names.py 与 tasks 模块中注册
+2. 长耗时任务应通过 task_queue 限制并发，避免拖垮事件循环
 """
 
 from .lock import (

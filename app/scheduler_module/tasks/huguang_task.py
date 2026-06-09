@@ -1,6 +1,16 @@
 """
-Huguang定时任务模块
-功能：从Huguang API获取广告数据，检查重复后插入到数据库
+Huguang 上游广告数据拉取定时任务。
+
+功能说明：
+- 从 Huguang API 获取广告明细，经字段映射与去重写入 ad_data 表
+- 日期区间由 resolve_upstream_date_range 统一解析
+
+在系统中的位置：
+- 由 HUGUANG_API_TASK_NAME 调度
+
+注意事项：
+1. 与其它上游任务共用 upstream_import，勿重复实现提交/通知逻辑
+2. 失败摘要写入 set_task_result 供管理端展示
 """
 import logging
 from datetime import datetime
@@ -21,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
+# 上游字段 → 平台 ad_data 标准字段
 HUGUANG_FIELD_MAPPING = {
     "date": "date",
     "ad_unit": "ad_unit",
@@ -39,6 +50,13 @@ async def huguang_api_task(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> None:
+    """
+    Huguang 定时拉数任务：拉取国家维度报表并去重入库。
+
+    Args:
+        start_date: 可选起始日期 YYYY-MM-DD，缺省由 resolve_upstream_date_range 推算
+        end_date: 可选结束日期；凌晨 0-2 点可能拉取昨日+今日双日数据
+    """
     api_key = settings.HUGUANG_API_KEY
     domain = settings.HUGUANG_API_DOMAIN
     username = settings.HUGUANG_API_USERNAME

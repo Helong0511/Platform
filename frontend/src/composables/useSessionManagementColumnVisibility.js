@@ -1,7 +1,15 @@
+/**
+ * 组合式函数 - 会话管理列显隐
+ * @file composables/useSessionManagementColumnVisibility.js
+ */
 import { useTableColumnVisibility } from './useTableColumnVisibility';
 
 const STORAGE_KEY = 'sessionManagement_columnVisibility';
 
+/**
+ * 组合式函数 - 会话管理列显隐
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useSessionManagementColumnVisibility() {
   return useTableColumnVisibility(STORAGE_KEY, {
     getDefaultColumns: () => ({

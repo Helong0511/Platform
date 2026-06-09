@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 点击日志列表查询
+ * @file composables/useClickLogList.js
+ */
 import { reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -9,9 +13,14 @@ import { logger } from '../utils/logger';
 /**
  * 短链接访问记录（Click Log）列表与筛选。
  */
+/**
+ * 组合式函数 - 点击日志列表查询
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useClickLogList() {
   const route = useRoute();
   const router = useRouter();
+  // 数据加载中
   const loading = ref(false);
   const filters = reactive({
     clickId: '',
@@ -22,15 +31,19 @@ export function useClickLogList() {
     country: '',
     dateRange: [],
   });
+  // 分页状态 { page, pageSize/page_size, total }
   const pagination = reactive({
     page: 1,
     pageSize: 20,
     total: 0,
   });
+  // 表格当前页数据
   const tableData = ref([]);
   const offerList = ref([]);
+  // 渠道下拉选项
   const publisherList = ref([]);
   const detailDialogVisible = ref(false);
+  // currentDetail 响应式状态
   const currentDetail = ref(null);
   const fbReportLoadingMap = ref({});
 

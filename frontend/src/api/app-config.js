@@ -1,5 +1,8 @@
 /**
- * 应用级配置 API（时区等），与具体业务模块解耦
+ * 应用级配置 API
+ * @file api/app-config.js
+ *
+ * 获取与具体业务模块解耦的全局配置（如时区），供报表与展示使用。
  */
 import { request } from '../utils/api';
 

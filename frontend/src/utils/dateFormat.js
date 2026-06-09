@@ -1,3 +1,9 @@
+/**
+ * 日期时间格式化工具（前端展示用）。
+ *
+ * 从后端 app-config 拉取业务时区并缓存，将 ISO/时间戳格式化为本地可读字符串。
+ * 须在用户登录后调用 initTimezone() 初始化时区，否则默认 Asia/Shanghai。
+ */
 import { getTimezone } from '../api/app-config';
 
 // 时区缓存（避免重复请求）

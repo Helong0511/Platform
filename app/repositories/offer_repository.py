@@ -16,6 +16,7 @@ class OfferRepository(BaseRepository[Offer]):
     """Offer仓储"""
     
     def __init__(self, db: AsyncSession):
+        """绑定异步会话与 Offer 模型，供列表/统计查询复用。"""
         super().__init__(db, Offer)
     
     async def get_by_advertiser_id(

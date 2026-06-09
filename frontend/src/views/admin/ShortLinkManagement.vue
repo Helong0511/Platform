@@ -1,5 +1,10 @@
+<!--
+  管理端 - 短链接管理
+  @file views/admin/ShortLinkManagement.vue
+-->
 <template>
-  <div class="short-link-management-page">
+  <!-- 页面主模板 -->
+<div class="short-link-management-page">
     <ShortLinkManagement />
   </div>
 </template>

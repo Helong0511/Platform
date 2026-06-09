@@ -1,3 +1,11 @@
+/**
+ * Vite 构建配置。
+ *
+ * - Vue 插件、路径别名 @ → src
+ * - versionPlugin：构建时写入 version.json 供前端热更新检测
+ * - copyFaviconPlugin：构建结束复制 favicon.ico 到 dist
+ * - 开发/生产代理与环境相关选项见下方 defineConfig
+ */
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'

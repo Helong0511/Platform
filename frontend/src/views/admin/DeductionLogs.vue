@@ -1,7 +1,13 @@
+<!--
+  管理端 - 扣减执行日志
+  @file views/admin/DeductionLogs.vue
+-->
 <template>
-  <div class="deduction-logs">
+  <!-- 页面主模板 -->
+<div class="deduction-logs">
     <el-card class="page-card">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="card-header">
           <div class="header-left">
             <el-icon class="header-icon"><Document /></el-icon>

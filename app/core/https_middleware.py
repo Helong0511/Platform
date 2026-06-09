@@ -19,11 +19,25 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
     """
 
     def __init__(self, app: ASGIApp):
+        """
+        Args:
+            app: 下游 ASGI 应用（FastAPI 实例）
+        """
         super().__init__(app)
         self.app = app
 
     async def dispatch(self, request: Request, call_next):
-        # 仅在生产环境启用 HTTPS 强制
+        """
+        生产环境将 HTTP 请求重定向或拒绝为 HTTPS，并为响应附加 HSTS 头。
+
+        Args:
+            request: 当前 HTTP 请求
+            call_next: 调用链中的下一个处理器
+
+        Returns:
+            RedirectResponse（GET 非 HTTPS）、JSONResponse（非 GET）或下游响应
+        """
+        # ---------- 非生产环境直接放行 ----------
         if not settings.is_production:
             return await call_next(request)
 

@@ -1,7 +1,13 @@
+<!--
+  管理端 - 系统缓存管理
+  @file views/admin/CacheManagement.vue
+-->
 <template>
-  <div class="cache-management">
+  <!-- 页面主模板 -->
+<div class="cache-management">
     <el-card class="page-card">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="card-header">
           <h1 class="page-title">缓存管理</h1>
           <el-button type="primary" @click="refreshCacheList" :loading="loading">

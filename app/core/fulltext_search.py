@@ -1,6 +1,9 @@
 """
-全文搜索工具模块
-提供全文搜索查询构建功能，支持MySQL FULLTEXT索引
+MySQL 全文搜索查询构建工具。
+
+职责：在合法字段名约束下生成 FULLTEXT/LIKE 混合条件，供列表页关键词检索。
+
+在系统中的位置：``app.core.fulltext_search``，由各 Service 层列表查询引用。
 """
 import re
 import logging

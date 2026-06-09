@@ -1,6 +1,12 @@
-"""
-转化总览统计 API
-"""
+"""转化总览统计 API 路由模块。
+
+按时间范围、Offer、渠道等维度聚合转化数量与金额，
+供管理端仪表盘与转化汇总页展示。业务逻辑委托 ConversionService。
+
+路由前缀：/api/v1/cpl/conversions/summary
+权限：已登录用户（按数据权限过滤可见范围）。
+
+说明：CPL 子系统接口，涵盖广告主（上游）、渠道（下游）、Offer、Cap、扣量与转化。"""
 import logging
 from typing import Optional
 
@@ -47,6 +53,8 @@ async def get_conversion_summary(
     
     客户登录时，只显示该客户关联的渠道的转化数据
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         # 使用服务层（业务逻辑在ConversionService中，已优化批量加载）
 
@@ -83,9 +91,15 @@ async def get_summary_by_offer(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """按Offer统计转化数据（已重构使用服务层，批量查询优化）
+    """
+    按Offer统计转化数据（已重构使用服务层，批量查询优化）
     
     客户登录时，只显示该客户关联的渠道的转化数据
+    
+    功能：查询单条或详情（get_summary_by_offer）。
+    实现：异步端点，通过 Service 层访问数据库/缓存。
+    鉴权：由 Depends(get_current_user) 或 require_admin 控制访问范围。
+    响应：统一 ResponseBaseSchema / PaginatedResponseBaseSchema 包装。
     """
     try:
         # 使用服务层（业务逻辑在ConversionService中，已优化批量查询）

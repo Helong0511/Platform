@@ -1,7 +1,13 @@
+<!--
+  管理端 - 下游联调测试
+  @file views/admin/AffiliateTest.vue
+-->
 <template>
-  <div class="affiliate-test">
+  <!-- 页面主模板 -->
+<div class="affiliate-test">
     <el-card class="page-card">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="card-header">
           <div class="header-left">
             <el-icon class="header-icon"><Download /></el-icon>

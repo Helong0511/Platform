@@ -131,6 +131,11 @@ def normalize_placeholder_name(name: str) -> str:
 
 
 def _lookup_value(data: Dict[str, Any], field_name: str) -> Optional[Any]:
+    """
+    从占位符上下文中取值：优先 url_params，再回退 data 顶层字段。
+
+    斗篷衍生键（cloak_*）保留原始类型；普通 query 键规范为标量字符串。
+    """
     url_params = data.get("url_params") or {}
     if isinstance(url_params, dict) and field_name in url_params:
         raw = url_params[field_name]

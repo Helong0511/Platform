@@ -72,6 +72,7 @@ _TOKEN_ONLY_CHARS = set(TOKEN_OUTER_ALPHABET) - _LEGACY_ALPHABET
 
 
 def click_id_max_length() -> int:
+    """返回 click_id 数据库列上限（varchar 255）。"""
     return CLICK_ID_MAX_LENGTH
 
 
@@ -119,12 +120,14 @@ def _looks_like_tracking_token(click_id: str) -> bool:
 
 
 def _ms_to_naive_beijing(ts_ms: int) -> datetime:
+    """将毫秒时间戳转为北京时间 naive datetime（与业务日期字段一致）。"""
     dt_utc = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
     dt_bj = dt_utc.astimezone(_BEIJING)
     return dt_bj.replace(tzinfo=None)
 
 
 def _pick_int(data: Dict[str, Any], *keys: str) -> Optional[int]:
+    """从字典中按候选键顺序取第一个可解析为 int 的值。"""
     for k in keys:
         if k not in data or data[k] is None:
             continue
@@ -193,6 +196,7 @@ def _coerce_url_params(
     seen: set[str] = set()
 
     def _add(key: str, val: Any) -> None:
+        """向规范化列表追加键值，超长截断并去重。"""
         if val is None or key in seen or len(items) >= max_keys:
             return
         if isinstance(val, (dict, list)):
@@ -239,6 +243,7 @@ def _url_params_slim_ladder(
     seen: set[str] = set()
 
     def _push(d: Dict[str, Any]) -> None:
+        """将一档 url_params 加入阶梯列表（按内容指纹去重）。"""
         if not d:
             return
         sig = tuple(sorted((k, str(v)) for k, v in d.items()))
@@ -252,6 +257,7 @@ def _url_params_slim_ladder(
     raw_seen: set[str] = set()
 
     def _raw_put(key: str, val: Any) -> None:
+        """档位 0：尽量原样保留键值，仅截断超长字符串。"""
         if key in raw_seen or len(raw) >= 40 or val is None:
             return
         if isinstance(val, (str, int, float, bool)):
@@ -313,12 +319,14 @@ def _attach_url_params(
     base: Dict[str, Any],
     url_params: Dict[str, Any],
 ) -> Dict[str, Any]:
+    """将 url_params 以紧凑键 ``up`` 并入令牌 userinfo 载荷。"""
     merged = dict(base)
     merged[_KEY_URL_PARAMS] = url_params
     return merged
 
 
 def _params_fingerprint(p: Optional[Dict[str, Any]]) -> Optional[str]:
+    """对 url_params 做稳定 JSON 序列化，用于生成尝试去重与日志标识。"""
     if not p:
         return None
     try:
@@ -346,6 +354,7 @@ def _build_generation_attempts(
     seen_fp: set[str] = set()
 
     def _add(p: Optional[Dict[str, Any]]) -> None:
+        """将一种载荷组合加入生成尝试序列（指纹去重）。"""
         if p is None:
             return
         fp = _params_fingerprint(p)
@@ -484,6 +493,7 @@ def generate_tracking_click_id(
     )
 
     def _try_generate(params: Optional[Dict[str, Any]], fmt: str) -> str:
+        """按 compact/full/auto 多格式尝试生成追踪令牌，失败抛最后一次异常。"""
         last: Optional[Exception] = None
         for use_fmt in _formats_for_attempt(params, fmt):
             try:
@@ -520,6 +530,7 @@ def generate_tracking_click_id(
     had_url_params_input = bool(url_params and isinstance(url_params, dict))
 
     def _attempt_once(attempt_params: Optional[Dict[str, Any]]) -> Optional[str]:
+        """单次生成尝试：校验长度上限与 DB click_id 字段长度。"""
         nonlocal last_error
         try:
             token = _try_generate(attempt_params, fmt)

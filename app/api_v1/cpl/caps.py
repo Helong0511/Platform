@@ -1,6 +1,20 @@
-"""
-Cap 管理 API（薄路由层）
-"""
+"""Cap（转化上限）管理 API
+
+职责：Offer 维度的日/总转化上限配置 CRUD，以及计数一致性巡检与修复。
+
+权限：
+- 列表查询：已登录用户
+- 创建/详情/更新/删除/一致性检查：仅管理员（require_admin）
+
+主要端点（前缀 /caps）：
+- POST   /              创建 Cap 配置
+- GET    /              分页列表（可按 offer/渠道/广告主/类型筛选）
+- GET    /{cap_id}      详情
+- PUT    /{cap_id}      更新
+- DELETE /{cap_id}      删除
+- POST   /check-consistency  检查或修复计数不一致。
+
+说明：CPL 子系统接口，涵盖广告主（上游）、渠道（下游）、Offer、Cap、扣量与转化。"""
 import logging
 from typing import Optional
 
@@ -33,6 +47,13 @@ async def create_cap(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    创建 Offer Cap（流量上限）配置。
+
+    权限：仅管理员。
+    请求体：OfferCapCreate，指定 Cap 类型（日/总）、目标 Offer/渠道及上限值。
+    业务：入库后写审计日志，并同步 Cap 计数缓存。
+    """
     cap_service: CapService = await get_cap_service(db)
     cap = await cap_service.create_cap(cap_in.model_dump(), current_user)
     await log_create(
@@ -63,6 +84,12 @@ async def get_caps(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    分页查询 Cap 配置列表。
+
+    权限：登录用户，按数据权限过滤。
+    筛选：cap_type、offer_id、advertiser_id、channel_id、is_active 等。
+    """
     cap_service: CapService = await get_cap_service(db)
     caps, total = await cap_service.get_caps(
         page=page,
@@ -92,6 +119,12 @@ async def get_cap(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    按 ID 获取单条 Cap 配置详情。
+
+    权限：仅管理员。
+    不存在时由服务层返回 404。
+    """
     cap_service: CapService = await get_cap_service(db)
     cap = await cap_service.get_cap_by_id(cap_id)
     if not cap:
@@ -118,6 +151,12 @@ async def update_cap(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    部分更新 Cap 配置。
+
+    权限：仅管理员。
+    有实际字段变更时写审计日志并刷新 Cap 缓存。
+    """
     cap_service: CapService = await get_cap_service(db)
     update_data = cap_in.model_dump(exclude_unset=True)
     cap = await cap_service.update_cap(cap_id, update_data, current_user)
@@ -147,6 +186,12 @@ async def delete_cap(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    删除 Cap 配置。
+
+    权限：仅管理员。
+    删除后写审计日志并失效相关 Cap 计数缓存。
+    """
     cap_service: CapService = await get_cap_service(db)
     await cap_service.delete_cap(cap_id, current_user)
     await log_delete(
@@ -174,12 +219,20 @@ async def check_cap_consistency_api(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    检查 Cap 内存计数与数据库转化数是否一致。
+
+    fix=true 时自动修复偏差并记录审计日志。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     cap_service: CapService = await get_cap_service(db)
+    # ---------- 异常处理 ----------
     try:
         inconsistencies, message = await cap_service.check_cap_consistency(
             offer_id=offer_id, fix=fix
         )
         logger.info("Cap计数一致性检查完成: %s", message)
+        # ---------- 条件分支 ----------
         if fix and inconsistencies:
             await log_user_action(
                 db=db,

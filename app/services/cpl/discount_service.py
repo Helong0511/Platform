@@ -1,6 +1,16 @@
 """
-Discount 管理服务层
-封装扣量配置的业务逻辑
+折扣配置服务层。
+
+功能说明：
+- 管理 Offer/渠道折扣规则，影响结算金额与报表展示
+- 校验折扣区间、生效时间与互斥关系
+
+在系统中的位置：
+- 被管理端折扣 API 调用
+
+注意事项：
+1. 折扣变更不追溯历史转化，仅影响新入库数据计算
+2. 删除折扣前确认无进行中的结算依赖
 """
 import logging
 from typing import Optional, List, Dict, Any
@@ -20,13 +30,28 @@ logger = logging.getLogger(__name__)
 
 
 class DiscountService(BaseService[OfferDiscount]):
-    """扣量配置服务"""
+    """
+    扣量配置业务服务。
+
+    discount_type 区分全局渠道扣量或单 Offer 级扣量；
+    discount_ratio 表示扣减比例，影响转化 payout 计算。
+    """
 
     def __init__(self, db: AsyncSession):
+        """注入异步数据库会话。"""
         super().__init__(db, OfferDiscount)
 
     @staticmethod
     def to_discount_response(discount: OfferDiscount) -> OfferDiscountResponse:
+        """
+        将 ORM 实体转为 API 响应 Schema，并填充关联名称。
+
+        Args:
+            discount: 已预加载 publisher/offer 的 OfferDiscount
+
+        Returns:
+            OfferDiscountResponse: 含 publisher_name、offer_name
+        """
         discount_data = OfferDiscountResponse.model_validate(discount)
         discount_data.publisher_name = (
             discount.publisher.publisher_name if discount.publisher else None
@@ -37,6 +62,15 @@ class DiscountService(BaseService[OfferDiscount]):
     def to_discount_response_list(
             self, discounts: List[OfferDiscount]
     ) -> List[OfferDiscountResponse]:
+        """
+        批量转换扣量配置列表为响应 Schema。
+
+        Args:
+            discounts: OfferDiscount 实体列表
+
+        Returns:
+            List[OfferDiscountResponse]: 与输入顺序一致的响应列表
+        """
         return [self.to_discount_response(d) for d in discounts]
 
     async def create_discount(
@@ -45,16 +79,21 @@ class DiscountService(BaseService[OfferDiscount]):
             current_user: User
     ) -> OfferDiscount:
         """
-        创建扣量配置
+        创建扣量配置。
+
+        publisher_id 必填且须存在；discount_type 为 offer 时 offer_id 须有效。
 
         Args:
-            discount_data: 扣量配置数据
-            current_user: 当前用户
+            discount_data: 含 discount_type、publisher_id、discount_ratio 等
+            current_user: 当前操作用户
 
         Returns:
-            OfferDiscount: 创建的扣量配置对象
+            OfferDiscount: 创建成功并已 joinedload 关联实体的对象
+
+        Raises:
+            APIException: 关联实体不存在或写入失败
         """
-        # 验证渠道是否存在
+        # --- 关联实体校验 ---
         pub_result = await self.db.execute(
             select(Publisher).where(Publisher.id == discount_data['publisher_id'])
         )
@@ -119,18 +158,18 @@ class DiscountService(BaseService[OfferDiscount]):
             is_active: Optional[bool] = None
     ) -> tuple[List[OfferDiscount], int]:
         """
-        获取扣量配置列表
+        分页查询扣量配置列表。
 
         Args:
-            page: 页码
-            page_size: 每页数量
-            discount_type: 扣量类型过滤
-            offer_id: Offer ID过滤
-            publisher_id: 渠道ID过滤
-            is_active: 是否激活过滤
+            page: 页码，从 1 开始
+            page_size: 每页条数
+            discount_type: 扣量粒度类型过滤
+            offer_id: 按 Offer 过滤
+            publisher_id: 按渠道过滤
+            is_active: 激活状态过滤
 
         Returns:
-            tuple[List[OfferDiscount], int]: (扣量配置列表, 总数)
+            tuple[List[OfferDiscount], int]: (当前页列表, 总条数)
         """
         query = select(OfferDiscount)
 
@@ -167,13 +206,13 @@ class DiscountService(BaseService[OfferDiscount]):
 
     async def get_discount_by_id(self, discount_id: int) -> Optional[OfferDiscount]:
         """
-        根据ID获取扣量配置详情
+        按主键获取扣量配置详情（含渠道与 Offer 关联）。
 
         Args:
-            discount_id: 扣量配置ID
+            discount_id: 扣量配置主键
 
         Returns:
-            Optional[OfferDiscount]: 扣量配置对象，如果不存在则返回None
+            Optional[OfferDiscount]: 存在则返回预加载关联的实体，否则 None
         """
         # 使用joinedload优化关联查询
         query = select(OfferDiscount).where(OfferDiscount.id == discount_id).options(
@@ -191,15 +230,18 @@ class DiscountService(BaseService[OfferDiscount]):
             current_user: User
     ) -> OfferDiscount:
         """
-        更新扣量配置
+        更新扣量配置。
 
         Args:
-            discount_id: 扣量配置ID
-            update_data: 更新数据
-            current_user: 当前用户
+            discount_id: 扣量配置主键
+            update_data: 待更新字段字典
+            current_user: 当前操作用户
 
         Returns:
-            OfferDiscount: 更新后的扣量配置对象
+            OfferDiscount: 更新后并重新 joinedload 的实体
+
+        Raises:
+            APIException: 记录不存在或提交失败
         """
         result = await self.db.execute(
             select(OfferDiscount).where(OfferDiscount.id == discount_id)
@@ -245,11 +287,14 @@ class DiscountService(BaseService[OfferDiscount]):
             current_user: User
     ) -> None:
         """
-        删除扣量配置
+        物理删除扣量配置。
 
         Args:
-            discount_id: 扣量配置ID
-            current_user: 当前用户
+            discount_id: 扣量配置主键
+            current_user: 当前操作用户
+
+        Raises:
+            APIException: 记录不存在或删除失败
         """
         result = await self.db.execute(
             select(OfferDiscount).where(OfferDiscount.id == discount_id)

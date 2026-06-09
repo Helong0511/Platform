@@ -127,6 +127,7 @@ def register_handlers():
         from app.core.telegram.callback_handlers.postback_approval import handle_postback_approval
         
         def debug_all_messages(message):
+            """开发调试用：记录所有入站 Telegram 消息（生产可酌情关闭）。"""
             logger.info(f"[DEBUG] 收到消息：text={message.text}, chat_id={message.chat.id}, from_user={message.from_user.id}")
         
         logger.info("正在注册 /start 命令处理器...")
@@ -279,6 +280,7 @@ def start_polling():
     
     # 轮询异常在库内线程拦截，避免 502/超时 打出 ERROR 堆栈或退出轮询
     def _stop_polling_on_conflict(exc: Exception) -> None:
+        """409 冲突回调：停止当前轮询，避免多进程同时 getUpdates。"""
         try:
             bot.stop_polling()
         except Exception as stop_err:
@@ -401,6 +403,7 @@ def start_bot_thread():
     
     # 定义线程运行函数
     def run_polling():
+        """守护线程入口：调用 start_polling 并捕获未处理异常写日志。"""
         logger.info("Telegram Bot 轮询线程开始运行")
         try:
             start_polling()

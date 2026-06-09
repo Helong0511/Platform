@@ -1,3 +1,10 @@
+/**
+ * 第三方上报页展示格式化工具
+ *
+ * 职责：来源/状态标签、HTTP 状态色、JSON 美化、当月默认时间范围。
+ * @file utils/thirdPartyReportFormat.js
+ */
+/** 根据上报来源返回 Element Plus 标签 type */
 export function getSourceTag(source) {
   const tagMap = {
     short_link: 'primary',
@@ -7,6 +14,7 @@ export function getSourceTag(source) {
   return tagMap[source] || '';
 }
 
+/** 上报来源的中文展示名 */
 export function getSourceLabel(source) {
   const labelMap = {
     short_link: '短链接',
@@ -16,6 +24,9 @@ export function getSourceLabel(source) {
   return labelMap[source] || source;
 }
 
+/**
+ * 上报状态对应的 Element Plus 标签 type。
+ */
 export function getStatusTag(status) {
   const tagMap = {
     success: 'success',
@@ -25,6 +36,9 @@ export function getStatusTag(status) {
   return tagMap[status] || '';
 }
 
+/**
+ * 上报状态的中文展示名。
+ */
 export function getStatusLabel(status) {
   const labelMap = {
     success: '成功',
@@ -34,6 +48,9 @@ export function getStatusLabel(status) {
   return labelMap[status] || status;
 }
 
+/**
+ * HTTP 响应状态码对应的标签 type。
+ */
 export function getResponseStatusTag(statusCode) {
   if (statusCode >= 200 && statusCode < 300) return 'success';
   if (statusCode >= 300 && statusCode < 400) return 'info';
@@ -42,6 +59,9 @@ export function getResponseStatusTag(statusCode) {
   return '';
 }
 
+/**
+ * 将上报 JSON 格式化为缩进可读文本。
+ */
 export function formatReportJson(jsonString) {
   try {
     const obj = typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
@@ -51,6 +71,9 @@ export function formatReportJson(jsonString) {
   }
 }
 
+/**
+ * 返回当月首尾 ISO 时间字符串，供默认日期筛选。
+ */
 export function getCurrentMonthRange() {
   const now = new Date();
   const year = now.getFullYear();

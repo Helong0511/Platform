@@ -1,7 +1,13 @@
+<!--
+  管理端 - 短链接访问记录
+  @file views/admin/ClickLog.vue
+-->
 <template>
-  <div class="click-log">
+  <!-- 页面主模板 -->
+<div class="click-log">
     <el-card class="page-card">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="card-header">
           <div class="header-left">
             <el-icon class="header-icon">

@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - Offer 表单：创建/编辑校验与提交
+ * @file composables/useOfferForm.js
+ */
 import { reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
@@ -12,6 +16,7 @@ import { ensureCsrfToken } from '../utils/csrfMutate';
 import { logger } from '../utils/logger';
 import { createOfferTracklinkRules } from '../utils/shortLinkFormRules';
 
+/** 返回 Offer 新建表单的默认空对象（字段与后端 CreateOffer 对齐）。 */
 export function createEmptyOfferForm() {
   return {
     offer_name: '',
@@ -77,13 +82,21 @@ function mapOfferToForm(offerData) {
 /**
  * Offer 创建/编辑表单与行内开关、删除。
  */
+/**
+ * 组合式函数 - Offer 表单：创建/编辑校验与提交
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useOfferForm({ isAdmin, loadData, publisherList }) {
+  // 提交中状态
   const submitting = ref(false);
   const dialogVisible = ref(false);
+  // 是否为编辑模式
   const isEdit = ref(false);
   const formRef = ref(null);
+  // generatingShortLink 响应式状态
   const generatingShortLink = ref(false);
   const shortLinkExists = ref(false);
+  // 表单数据
   const formData = reactive(createEmptyOfferForm());
 
   const formRules = {

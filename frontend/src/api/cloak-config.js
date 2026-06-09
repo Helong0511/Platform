@@ -24,6 +24,7 @@ const {
   csrfOnMutate: true
 });
 
+/** 斗篷配置 CRUD：列表、新建、更新、删除 */
 export {
   getCloakConfigs,
   createCloakConfig,

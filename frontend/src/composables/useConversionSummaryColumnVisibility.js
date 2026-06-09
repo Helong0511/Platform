@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 转化总览列显隐
+ * @file composables/useConversionSummaryColumnVisibility.js
+ */
 import { useTableColumnVisibility } from './useTableColumnVisibility';
 
 const STORAGE_KEY = 'conversionSummary_columnVisibility';
@@ -5,6 +9,10 @@ const STORAGE_KEY = 'conversionSummary_columnVisibility';
 /**
  * 转化总览表格列显示偏好（localStorage）。
  * @param {import('vue').ComputedRef<boolean>} isAdmin
+ */
+/**
+ * 组合式函数 - 转化总览列显隐
+ * @returns {Object} 响应式状态与业务操作方法
  */
 export function useConversionSummaryColumnVisibility(isAdmin) {
   return useTableColumnVisibility(STORAGE_KEY, {

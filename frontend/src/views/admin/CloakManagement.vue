@@ -11,6 +11,7 @@
   业务逻辑集中在 composable useCloakConfigs.js，本文件仅负责 UI 绑定。
 -->
 <template>
+  <!-- 页面主模板 -->
   <div class="cloak-management">
     <!-- 页面标题与业务说明 -->
     <div class="page-header">
@@ -22,7 +23,9 @@
     </div>
 
     <!-- 搜索与新增工具栏 -->
+    <!-- 工具栏 -->
     <el-card shadow="never" class="toolbar-card">
+      <!-- 表单区域 -->
       <el-form :inline="true" :model="searchForm">
         <el-form-item label="斗篷名称">
           <el-input
@@ -42,6 +45,7 @@
 
     <!-- 斗篷配置列表：可用性由后端 bridge_html_present / is_usable 决定 -->
     <el-card shadow="never">
+      <!-- 数据表格 -->
       <el-table v-loading="loading" :data="tableData" border stripe>
         <el-table-column prop="cloak_name" label="斗篷名称" min-width="130" />
         <el-table-column label="可用性" width="128" align="center">
@@ -125,6 +129,7 @@
     </el-card>
 
     <!-- 新建/编辑弹窗：三阶段上报（载=load、点=click、转=postback） -->
+    <!-- 弹窗 -->
     <el-dialog
       v-model="editDialogVisible"
       :title="editingId ? '编辑斗篷配置' : '新增斗篷配置'"

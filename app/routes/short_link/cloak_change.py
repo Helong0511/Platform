@@ -1,10 +1,21 @@
 """
-斗篷 /change 桥页路由
+斗篷 /change 桥页路由模块。
 
-用户访问 /change/{short_code}?dp=斗篷名 时：
-1. 统计展示次数、解析原始跳转 URL
-2. 加载对应 {dp}.html 桥页并注入元数据、跳转地址、加载上报脚本
-3. 首次会话访问时写入 clicks 表（带去重）
+功能说明：
+- 注册 ``GET /change/{short_code}``，根据 ``dp`` 查询参数加载对应斗篷桥页 HTML
+- 统计展示次数、解析短链原始跳转 URL，向桥页注入元数据、最终跳转地址与 /report 上报脚本
+- 同会话首次访问时异步写入 clicks 表（Redis 去重），供后续转化归因
+
+处理流程：
+1. 校验 short_code、dp → 2. 读缓存/查库获取短链 → 3. 查 CloakConfig 与桥页文件
+4. 递增展示计数 → 5. 生成 click_id → 6. 渲染 HTML 响应
+
+在系统中的位置：
+- 由 ``router.register_cloak_change_routes`` 挂载；依赖 ``cloak_bridge_html``、``cloak_show_count``
+
+注意事项：
+1. dp 须与磁盘桥页文件名（如 ``145.html``）及像素映射配置一致
+2. 展示计数与点击落库分离，勿在 change 阶段重复触发 CAPI 转化事件
 """
 import json
 import logging

@@ -1,6 +1,16 @@
 """
-点击记录批量处理任务（高并发优化）
-从Redis队列批量取出点击记录，批量插入到数据库
+点击记录 Redis 队列批量入库任务。
+
+功能说明：
+- 从 Redis clicks 队列批量 dequeue，批量 INSERT 到 clicks 表
+- 高并发短链接场景下削峰填谷，避免同步写库拖慢重定向
+
+在系统中的位置：
+- 被 short_link_tasks 或独立 Cron 触发；队列见 ``app.core.clicks_queue``
+
+注意事项：
+1. IntegrityError 重复 click_id 应跳过单条继续批处理
+2. 队列积压时增大 batch size 与执行频率，监控 queue length
 """
 import logging
 from datetime import datetime, timezone

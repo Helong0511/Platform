@@ -1,5 +1,17 @@
 """
-Postback 转化查询与管理服务（由原 conversion_handler 迁入）。
+Postback 转化记录查询与管理服务。
+
+职责：
+- 管理端分页查询 PostbackConversion（多维度筛选、归因信息富化）
+- 优先使用转化行快照列筛选，减少 JOIN clicks 表
+- 按 click_id 查无结果时回查 ConversionDeductionLog（扣量未入主表）
+- 计算实际转发 payout（受 Offer-渠道 affiliate_payout 上限约束）
+- 管理员手动更新转化状态（仅 Approved/Pending）
+
+由原 conversion_handler 迁入；兼容别名 ConversionHandler / conversion_handler。
+列表依赖快照字段语义，修改模型字段时请同步本服务。
+
+对应路由：app/api_v1/postback
 """
 import logging
 from datetime import timedelta
@@ -28,7 +40,12 @@ logger = logging.getLogger(__name__)
 
 
 class PostbackConversionService:
-    """Postback 转化记录服务"""
+    """
+    Postback 转化记录服务。
+
+    面向管理端「转化管理」列表与状态维护，不负责 Postback 接收入库
+    （入库逻辑在 postback pipeline / receive_service）。
+    """
 
     async def get_postback_conversions(
             self,
@@ -50,8 +67,27 @@ class PostbackConversionService:
             current_user: User
     ):
         """
-        查询 PostBack 转化记录（仅管理员）
-        已融合转化日志功能，支持所有筛选条件
+        分页查询 Postback 转化记录（仅管理员）。
+
+        支持平台、产品、客户、归因维度、状态、日期及 conversion_or_click_id 联合检索；
+        响应项富化产品/客户名、点击归因、通知次数与实际转发金额。
+
+        Args:
+            request: FastAPI 请求对象（预留扩展）
+            platform: 平台标识过滤
+            product_id: 产品 ID
+            client_id: 客户 ID
+            conversion_or_click_id: 转化 ID 或 click_id（OR 匹配）
+            click_id: 精确 click_id
+            offer_id / publisher_id / advertiser_id: 归因快照列筛选
+            conversion_status: 转化状态
+            start_date / end_date: 创建时间范围 YYYY-MM-DD
+            page / page_size: 分页参数
+            db: 异步数据库会话
+            current_user: 当前管理员用户
+
+        Returns:
+            PaginatedResponseBaseSchema: 含转化列表、total、分页元数据
         """
         started_at = perf_counter()
         try:
@@ -63,7 +99,7 @@ class PostbackConversionService:
             # 归因已回填后直接用 postback 快照列筛选，无需 JOIN clicks
             query = select(PostbackConversion)
 
-            # 应用过滤条件
+            # --- 主表筛选条件（快照列优先，无需 JOIN clicks）---
             conditions = []
 
             if platform:
@@ -137,8 +173,7 @@ class PostbackConversionService:
             conversions = result.scalars().all()
             list_elapsed_ms = int((perf_counter() - list_started_at) * 1000)
 
-            # 如果使用 conversion_or_click_id 查询且主表没有结果，尝试查询扣减日志表
-            # 这样可以找到被扣量而未保存到主表的转化记录
+            # --- 主表无命中时：回查扣减日志（扣量未写入主表）---
             deduction_logs = []
             if conversion_or_click_id and len(conversions) == 0:
                 deduction_query = select(ConversionDeductionLog).where(
@@ -166,8 +201,7 @@ class PostbackConversionService:
                         f"click_id={conversion_or_click_id}"
                     )
 
-            # 批量查询通知记录数量（只统计成功发送的通知，status='sent'）
-            # 注意：只统计有 conversion_id 的通知（汇总通知 conversion_id 为 NULL，不统计）
+            # --- 批量加载通知数、产品/客户名、归因实体 ---
             conversion_ids = [conv.id for conv in conversions]
             notification_counts = {}
             if conversion_ids:
@@ -272,7 +306,7 @@ class PostbackConversionService:
                     key = (row.offer_id, row.publisher_id)
                     assignments_map[key] = row.affiliate_payout
 
-            # 转换为响应格式，并添加关联信息
+            # --- 组装响应：快照列优先，历史数据回退 clicks 表 ---
             enrich_started_at = perf_counter()
             conversion_list = []
             for conv in conversions:
@@ -417,12 +451,21 @@ class PostbackConversionService:
             current_user: User
     ):
         """
-        更新转化状态（仅管理员）
-        融合转化日志功能
-        
-        注意：
-        - 只能手动设置为 Approved 或 Pending
-        - 系统自动设置的状态（CapReached/OfferInactive/ClickExpired）不能手动修改
+        手动更新单条转化状态（仅管理员）。
+
+        仅允许设为 Approved 或 Pending；系统态（CapReached 等）不可人工覆盖。
+
+        Args:
+            conversion_id: PostbackConversion 主键
+            status: 目标状态，Approved 或 Pending
+            db: 异步数据库会话
+            current_user: 当前管理员用户
+
+        Returns:
+            ResponseBaseSchema: 含 conversion_id 与更新后 status
+
+        Raises:
+            APIException: 记录不存在或 status 非法
         """
         try:
             result = await db.execute(

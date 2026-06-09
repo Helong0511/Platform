@@ -1,11 +1,19 @@
+<!--
+  短链接创建/编辑弹窗
+  @file components/admin/ShortLinkFormDialog.vue
+-->
 <template>
-  <el-dialog
+  <!-- 页面主模板 -->
+<!-- 弹窗区域 -->
+<!-- 弹窗 -->
+    <el-dialog
     :model-value="visible"
     :title="title"
     :width="isMobile ? '95%' : '600px'"
     :append-to-body="true"
     @update:model-value="handleClose"
   >
+    <!-- 表单区域 -->
     <el-form
       ref="formRef"
       :model="formData"

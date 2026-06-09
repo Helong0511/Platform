@@ -1,5 +1,10 @@
+<!--
+  广告数据 - 每日报表
+  @file views/ad-data/DailyReport.vue
+-->
 <template>
-  <div class="daily-report-container">
+  <!-- 页面主模板 -->
+<div class="daily-report-container">
     <div class="page-header">
       <div class="action-buttons">
         <el-button type="primary" @click="handleExport" :icon="Download">
@@ -9,7 +14,9 @@
     </div>
 
     <!-- 筛选控件 -->
+    <!-- 筛选区 -->
     <el-card class="filter-card">
+      <!-- 表单区域 -->
       <el-form :inline="true" :model="searchForm" class="filter-form">
         <el-form-item label="日期范围">
           <el-date-picker
@@ -61,7 +68,8 @@
 
     <!-- 数据表格 -->
     <el-card class="data-table-card">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <span style="font-weight: 600; font-size: 16px;">每日报表数据</span>
           <el-button 

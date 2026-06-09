@@ -1,7 +1,9 @@
 """
-高级缓存功能
+高级缓存防护策略模块。
 
-提供缓存穿透保护、缓存击穿保护、缓存雪崩防护等高级功能
+职责：空值标记防穿透、互斥锁防击穿、随机 TTL 防雪崩，包装 ``get_cache_backend`` 读写。
+
+在系统中的位置：热点配置/字典类数据可选用本模块的 ``cache_with_protection`` 等 API。
 """
 import random
 import asyncio
@@ -22,14 +24,17 @@ class NoneMarker:
     _instance = None
     
     def __new__(cls):
+        """单例：全局共用一个 NONE_MARKER，表示「缓存命中且值为空」。"""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
     
     def __repr__(self):
+        """调试输出固定标记名，便于日志区分 None 与未命中。"""
         return "<CACHE_NONE_MARKER>"
     
     def __bool__(self):
+        """布尔上下文视为 False，但须用 ``is NONE_MARKER`` 与真 None 区分。"""
         return False  # 布尔值为 False，但可以用 is 判断
 
 NONE_MARKER = NoneMarker()

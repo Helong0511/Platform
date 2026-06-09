@@ -1,6 +1,9 @@
 """
-设备信息收集工具
-从User-Agent和请求头中提取软件、硬件信息
+设备与客户端信息采集工具。
+
+职责：解析 User-Agent、请求头，输出 OS/浏览器/设备类型等结构化字段，供点击与转化归因。
+
+在系统中的位置：``app.core.device_info``，被 Postback 解析与短链跳转链路引用。
 """
 import re
 import json

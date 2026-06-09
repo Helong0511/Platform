@@ -1,7 +1,13 @@
+<!--
+  管理端 - 渠道（下游）管理
+  @file views/admin/PublisherManagement.vue
+-->
 <template>
-  <div class="publisher-management">
+  <!-- 页面主模板 -->
+<div class="publisher-management">
     <el-card class="page-card">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="card-header">
           <div class="header-left">
             <el-icon class="header-icon"><Connection /></el-icon>

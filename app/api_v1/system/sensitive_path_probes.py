@@ -1,4 +1,12 @@
-"""敏感路径探测拦截日志管理 API。"""
+"""敏感路径探测拦截日志管理 API 路由模块。
+
+记录并管理对外暴露敏感路径（如 .env、admin 后台）的扫描探测行为，
+支持按 IP 封禁、风险等级分类、日志清理与统计查询。
+
+路由前缀：/api/v1/system/sensitive-path-probes
+权限：所有端点需管理员。
+
+说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。"""
 from datetime import datetime, timedelta
 import logging
 import re
@@ -42,6 +50,7 @@ _IP_PATTERN = re.compile(
 
 
 def _normalize_block_ip(raw: str) -> Optional[str]:
+    """_normalize_block_ip 处理函数。（详见字段 Field description）。"""
     ip = (raw or "").strip()
     if not ip or ip.lower() == "unknown" or len(ip) > 64:
         return None
@@ -91,16 +100,20 @@ async def _upsert_sensitive_blocked_ip(
 
 
 class BlockIPPayload(BaseModel):
+    """单条 IP 封禁请求体：指定待封禁 IP 及可选原因说明。（详见字段 Field description）。"""
+
     blocked_ip: str = Field(..., min_length=1, max_length=64, description="待封禁IP")
     reason: Optional[str] = Field(None, max_length=255, description="封禁原因")
 
 
 class CleanupPayload(BaseModel):
+    """探测日志清理请求体：按保留天数删除过期记录。（详见字段 Field description）。"""
+
     retention_days: Optional[int] = Field(None, ge=1, le=3650, description="保留天数")
 
 
 class BatchBlockIPsPayload(BaseModel):
-    """批量封禁 IP（写入敏感路径黑名单）。"""
+    """批量封禁 IP（写入敏感路径黑名单）。（详见字段 Field description）。"""
 
     blocked_ips: Optional[list[str]] = Field(
         None, max_length=_BATCH_BLOCK_MAX_IPS, description="IP 列表"
@@ -113,6 +126,7 @@ class BatchBlockIPsPayload(BaseModel):
 
     @model_validator(mode="after")
     def require_sources(self):
+        """校验批量封禁请求至少提供 IP 列表或日志 ID 列表之一。（详见字段 Field description）。"""
         has_ips = bool(self.blocked_ips)
         has_logs = bool(self.log_ids)
         if not has_ips and not has_logs:
@@ -128,6 +142,11 @@ class BatchBlockIPsPayload(BaseModel):
 async def get_severity_levels(
     current_user: User = Depends(require_admin),
 ):
+    """
+    获取敏感路径探测的预警等级枚举及处置说明。
+
+    权限：仅管理员；供前端筛选与展示使用。
+    """
     del current_user
     levels = []
     for lv in SensitivePathLevel:
@@ -145,6 +164,7 @@ async def get_severity_levels(
 
 
 def _level_description(level: SensitivePathLevel) -> str:
+    """_level_description 处理函数。（详见字段 Field description）。"""
     desc = {
         SensitivePathLevel.LOW: "框架指纹/文档探测，仅记录并返回404",
         SensitivePathLevel.MEDIUM: "CMS/中间件常见扫描，窗口内累计达阈值自动封禁IP",
@@ -173,25 +193,39 @@ async def get_sensitive_path_probe_logs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    """
+    分页查询敏感路径探测拦截日志。
+
+    权限：仅管理员；支持 IP、路径、等级、日期范围筛选。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     del current_user  # 仅用于权限校验
+    # ---------- 异常处理 ----------
     try:
         query = select(SensitivePathProbeLog)
         count_query = select(func.count(SensitivePathProbeLog.id))
 
         filters = []
+        # ---------- 条件分支 ----------
         if client_ip:
             filters.append(SensitivePathProbeLog.client_ip == client_ip.strip())
+        # ---------- 条件分支 ----------
         if request_path:
             filters.append(SensitivePathProbeLog.request_path.like(f"%{request_path.strip()}%"))
+        # ---------- 条件分支 ----------
         if matched_rule:
             filters.append(SensitivePathProbeLog.matched_rule == matched_rule.strip())
+        # ---------- 条件分支 ----------
         if severity_level is not None:
             filters.append(SensitivePathProbeLog.severity_level == severity_level)
+        # ---------- 条件分支 ----------
         if start_date:
             filters.append(SensitivePathProbeLog.created_at >= start_date)
+        # ---------- 条件分支 ----------
         if end_date:
             filters.append(SensitivePathProbeLog.created_at <= end_date)
 
+        # ---------- 条件分支 ----------
         if filters:
             where_clause = and_(*filters)
             query = query.where(where_clause)
@@ -213,6 +247,7 @@ async def get_sensitive_path_probe_logs(
         })
         ip_hit_counts: dict[str, int] = {}
         blocked_ip_set: set[str] = set()
+        # ---------- 条件分支 ----------
         if page_ips:
             hit_count_result = await db.execute(
                 select(
@@ -281,15 +316,26 @@ async def get_blocked_ips(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    """
+    分页查询敏感路径探测触发的 IP 黑名单记录。
+
+    支持按 is_active、blocked_ip 筛选；用于安全运维审计。
+    权限：仅管理员。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     del current_user
+    # ---------- 异常处理 ----------
     try:
         query = select(SensitiveBlockedIP)
         count_query = select(func.count(SensitiveBlockedIP.id))
         filters = []
+        # ---------- 条件分支 ----------
         if is_active is not None:
             filters.append(SensitiveBlockedIP.is_active == is_active)
+        # ---------- 条件分支 ----------
         if blocked_ip:
             filters.append(SensitiveBlockedIP.blocked_ip.like(f"%{blocked_ip.strip()}%"))
+        # ---------- 条件分支 ----------
         if filters:
             where_clause = and_(*filters)
             query = query.where(where_clause)
@@ -335,10 +381,18 @@ async def add_blocked_ip(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    """
+    将单个 IP 写入敏感路径黑名单。
+
+    权限：仅管理员；封禁后该 IP 访问敏感路径将被拦截。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     ip = payload.blocked_ip.strip()
+    # ---------- 条件分支 ----------
     if not ip:
         raise_api_exception(ErrorCode.VALIDATION_ERROR, detail="IP不能为空")
     reason = (payload.reason or "").strip() or None
+    # ---------- 异常处理 ----------
     try:
         row, is_update = await _upsert_sensitive_blocked_ip(
             db=db,
@@ -346,6 +400,7 @@ async def add_blocked_ip(
             reason=reason,
             update_reason=payload.reason is not None,
         )
+        # ---------- 条件分支 ----------
         if is_update:
             await log_update(
                 db=db,
@@ -393,18 +448,28 @@ async def batch_add_blocked_ips(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    """
+    批量将 IP 写入敏感路径黑名单。
+
+    权限：仅管理员；支持从探测日志批量选取 IP。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     reason = (payload.reason or "").strip() or "批量封禁：敏感路径探测"
     ips: list[str] = []
     skipped: list[str] = []
 
+    # ---------- 条件分支 ----------
     if payload.blocked_ips:
+        # ---------- 循环处理 ----------
         for raw in payload.blocked_ips:
             ip = _normalize_block_ip(raw)
+            # ---------- 条件分支 ----------
             if ip:
                 ips.append(ip)
             else:
                 skipped.append((raw or "").strip() or "(空)")
 
+    # ---------- 条件分支 ----------
     if payload.log_ids:
         result = await db.execute(
             select(
@@ -415,11 +480,15 @@ async def batch_add_blocked_ips(
         )
         rows = result.all()
         found_ids = {int(r[0]) for r in rows}
+        # ---------- 循环处理 ----------
         for log_id in payload.log_ids:
+            # ---------- 条件分支 ----------
             if int(log_id) not in found_ids:
                 skipped.append(f"log_id:{log_id}")
+        # ---------- 循环处理 ----------
         for _id, client_ip, request_path in rows:
             ip = _normalize_block_ip(client_ip or "")
+            # ---------- 条件分支 ----------
             if ip:
                 ips.append(ip)
             else:
@@ -428,16 +497,20 @@ async def batch_add_blocked_ips(
     # 去重且限制数量
     unique_ips: list[str] = []
     seen: set[str] = set()
+    # ---------- 循环处理 ----------
     for ip in ips:
+        # ---------- 条件分支 ----------
         if ip in seen:
             continue
         seen.add(ip)
         unique_ips.append(ip)
+    # ---------- 条件分支 ----------
     if len(unique_ips) > _BATCH_BLOCK_MAX_IPS:
         raise_api_exception(
             ErrorCode.VALIDATION_ERROR,
             detail=f"去重后 IP 数量超过上限 {_BATCH_BLOCK_MAX_IPS}，请分批操作",
         )
+    # ---------- 条件分支 ----------
     if not unique_ips:
         raise_api_exception(ErrorCode.VALIDATION_ERROR, detail="没有可封禁的有效 IP")
 
@@ -445,10 +518,13 @@ async def batch_add_blocked_ips(
     updated_count = 0
     failed: list[dict] = []
 
+    # ---------- 循环处理 ----------
     for ip in unique_ips:
         ip_reason = reason
+        # ---------- 条件分支 ----------
         if payload.log_ids and not payload.reason:
             ip_reason = f"批量封禁：敏感路径拦截日志关联 IP"
+        # ---------- 异常处理 ----------
         try:
             _row, is_update = await _upsert_sensitive_blocked_ip(
                 db=db,
@@ -456,6 +532,7 @@ async def batch_add_blocked_ips(
                 reason=ip_reason,
                 update_reason=payload.update_reason or bool(payload.reason),
             )
+            # ---------- 条件分支 ----------
             if is_update:
                 updated_count += 1
             else:
@@ -486,6 +563,7 @@ async def batch_add_blocked_ips(
         f"批量封禁完成：新增 {created_count}，更新 {updated_count}，"
         f"失败 {len(failed)}，跳过无效 {len(skipped)}"
     )
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(
         data={
             "created_count": created_count,
@@ -511,6 +589,12 @@ async def unblock_ip(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    """
+    将指定 ID 的 IP 从敏感路径黑名单中解除封禁。
+
+    解除后该 IP 可再次访问平台；操作记入审计日志。
+    权限：仅管理员。
+    """
     try:
         result = await db.execute(
             select(SensitiveBlockedIP).where(SensitiveBlockedIP.id == blocked_ip_id)
@@ -553,7 +637,14 @@ async def get_top_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    """
+    获取敏感路径探测 TOP 统计（高频 IP、高频路径）。
+
+    权限：仅管理员。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     del current_user
+    # ---------- 异常处理 ----------
     try:
         cutoff = get_app_now_naive() - timedelta(days=days)
         top_ip_result = await db.execute(
@@ -629,8 +720,15 @@ async def cleanup_logs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    """
+    按保留天数清理过期的敏感路径拦截日志。
+
+    权限：仅管理员。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     retention_days = payload.retention_days or settings.SENSITIVE_PATH_PROBE_RETENTION_DAYS
     cutoff = get_app_now_naive() - timedelta(days=retention_days)
+    # ---------- 异常处理 ----------
     try:
         result = await db.execute(
             delete(SensitivePathProbeLog).where(SensitivePathProbeLog.created_at < cutoff)

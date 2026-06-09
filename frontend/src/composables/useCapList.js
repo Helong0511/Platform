@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - Cap 列表数据加载
+ * @file composables/useCapList.js
+ */
 import { reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getCaps, updateCap } from '../api/cap';
@@ -9,19 +13,28 @@ import { logger } from '../utils/logger';
 /**
  * Cap 配置列表、筛选与行内状态切换。
  */
+/**
+ * 组合式函数 - Cap 列表数据加载
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useCapList() {
+  // 数据加载中
   const loading = ref(false);
   const filterCapType = ref(null);
+  // filterOffer 响应式状态
   const filterOffer = ref(null);
   const filterPublisher = ref(null);
+  // 按激活状态筛选
   const filterActive = ref(null);
   const pagination = reactive({
     page: 1,
     pageSize: 20,
     total: 0,
   });
+  // 表格当前页数据
   const tableData = ref([]);
   const offerList = ref([]);
+  // 广告主下拉选项
   const advertiserList = ref([]);
   const publisherList = ref([]);
 

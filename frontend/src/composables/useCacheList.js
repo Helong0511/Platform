@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 缓存列表：分页查询与筛选
+ * @file composables/useCacheList.js
+ */
 import { computed, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { listCacheEntries } from '../api/cache';
@@ -6,9 +10,15 @@ import { logger } from '../utils/logger';
 /**
  * 缓存列表（对接 /api/v1/cache/entries）。
  */
+/**
+ * 组合式函数 - 缓存列表：分页查询与筛选
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useCacheList() {
+  // 数据加载中
   const loading = ref(false);
   const cacheList = ref([]);
+  // redisAvailable 响应式状态
   const redisAvailable = ref(true);
 
   const flatCacheList = computed(() => cacheList.value);

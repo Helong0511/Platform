@@ -1,5 +1,7 @@
 """
-认证相关响应与异常辅助（与业务 API 的 ResponseBaseSchema 对齐）
+认证相关响应与异常辅助（与业务 API 的 ResponseBaseSchema 对齐）。
+
+封装登录/刷新成功时的 JSON 响应与 HttpOnly Cookie 设置，以及认证类 HTTP 异常抛出。
 """
 from typing import Any, Dict, Optional
 
@@ -18,7 +20,14 @@ def raise_auth_error(
         *,
         http_status: int = status.HTTP_401_UNAUTHORIZED,
 ) -> None:
-    """抛出认证类错误（保留真实 HTTP 状态码，响应体为标准 JSON）"""
+    """
+    抛出认证类错误（保留真实 HTTP 状态码，响应体为标准 JSON）。
+
+    Args:
+        error_code: 业务错误码（ErrorCode 枚举值）
+        detail: 错误详情文案
+        http_status: HTTP 状态码，默认 401
+    """
     raise_api_exception(error_code, detail=detail, status_code=http_status)
 
 

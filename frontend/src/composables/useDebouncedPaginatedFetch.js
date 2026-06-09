@@ -1,5 +1,8 @@
 /**
  * 防抖 + 请求去重的分页列表拉取
+ * @file composables/useDebouncedPaginatedFetch.js
+ *
+ * 封装列表页通用的防抖搜索、并发请求取消与分页参数构建逻辑。
  */
 import { ElMessage } from 'element-plus';
 import { extractErrorMessage, isErrorHandled } from '../utils/api';
@@ -15,6 +18,10 @@ import { extractErrorMessage, isErrorHandled } from '../utils/api';
  * @param {() => void} [options.onUnauthenticated]
  * @param {() => Promise<void>} [options.afterEmpty]
  * @param {number} [options.debounceMs=300] 设为 0 或负数则立即请求（仍保留去重）
+ */
+/**
+ * 组合式函数 - 防抖分页请求：避免频繁 API 调用
+ * @returns {Object} 响应式状态与业务操作方法
  */
 export function useDebouncedPaginatedFetch({
   loading,

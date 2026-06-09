@@ -1,4 +1,18 @@
-"""BFT S2S Postback 接收服务。"""
+"""
+BFT S2S Postback 接收服务。
+
+功能说明：
+- 处理 BFT 平台专用回调路径：解析请求、字段别名归一化
+- 非阻塞发送 Telegram 管理员通知，便于即时感知回调流量
+- 委托 ``PostbackProcessor``（platform=bft）完成与通用 Postback 相同的入库流程
+
+在系统中的位置：
+- 被 BFT 专用 Postback 路由调用
+
+注意事项：
+1. BFT 字段映射变更须同步更新 Schema 与诊断工具
+2. Telegram 通知失败不得影响返回「ok」给上游
+"""
 import asyncio
 import json
 import logging
@@ -20,7 +34,11 @@ logger = logging.getLogger(__name__)
 
 
 def _map_bft_click_and_event(raw_data: Dict[str, Any]) -> Dict[str, Any]:
-    """将常见别名映射为 clk_id / event_name（供处理器与日志使用）。"""
+    """
+    将 BFT 及常见上游别名映射为 clk_id / event_name。
+
+    处理器与日志统一依赖标准键名；未映射到的字段原样保留。
+    """
     mapped = raw_data.copy()
     if not mapped.get("clk_id"):
         click_id = (
@@ -48,9 +66,14 @@ def _map_bft_click_and_event(raw_data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 class PostbackBftService:
-    """BFT Postback 回调（含 Telegram 即时通知）。"""
+    """BFT Postback 回调：Telegram 即时通知 + 统一转化处理流水线。"""
 
     async def _notify_telegram(self, request: Request, raw_data: Dict[str, Any]) -> None:
+        """
+        异步发送 BFT 回调摘要至管理员 Telegram（fire-and-forget）。
+
+        失败仅打 warning，不影响主流程入库。
+        """
         try:
             client_ip = get_client_ip(request)
             if client_ip == "unknown":
@@ -100,6 +123,18 @@ class PostbackBftService:
             request: Request,
             db: AsyncSession,
     ) -> Response:
+        """
+        BFT 回调 HTTP 入口。
+
+        解析原始参数 → 发送 Telegram 通知 → 执行 process_bft_postback。
+
+        Args:
+            request: FastAPI 请求。
+            db: 异步数据库会话。
+
+        Returns:
+            text/plain「ok」，HTTP 200。
+        """
         raw_data = await collect_postback_raw_data(request)
         await self._notify_telegram(request, raw_data)
         return await self.process_bft_postback(request, raw_data, db)
@@ -110,6 +145,17 @@ class PostbackBftService:
             raw_data: Dict[str, Any],
             db: AsyncSession,
     ) -> Response:
+        """
+        BFT 转化处理核心：补 IP、字段映射后交给 PostbackProcessor。
+
+        Args:
+            request: 用于提取客户端 IP 与日志上下文。
+            raw_data: 已解析的回调参数字典（可含别名键）。
+            db: 异步数据库会话。
+
+        Returns:
+            text/plain「ok」，HTTP 200；业务异常转为 API 异常。
+        """
         try:
             client_ip = get_client_ip(request)
             if client_ip and client_ip != "unknown" and "ip" not in raw_data:

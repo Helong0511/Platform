@@ -1,6 +1,17 @@
 """
-用户操作日志服务层
-封装操作日志查询和统计的业务逻辑
+用户操作审计日志服务层。
+
+功能说明：
+- 多维度筛选分页查询 ``UserAuditLog``（用户、操作类型、资源、时间、成功与否）
+- 聚合统计操作类型/资源类型/成功率等，结果缓存 5 分钟减轻 Dashboard 压力
+- 接收前端上报的运行时错误并写入审计表，便于关联用户操作与前端异常
+
+在系统中的位置：
+- 被管理端审计日志 API 与前端错误上报接口调用
+
+注意事项：
+1. 统计缓存键含 start_date/end_date，区间变更须自然失效
+2. 审计日志可能含敏感参数，列表接口应脱敏或省略 request_body
 """
 import logging
 from datetime import datetime
@@ -18,9 +29,14 @@ logger = logging.getLogger(__name__)
 
 
 class AuditLogService:
-    """用户操作日志服务"""
+    """
+    审计日志服务。
+
+    只读查询与 stats 聚合；log_client_error 为写路径，失败时 rollback 且不影响前端。
+    """
 
     def __init__(self, db: AsyncSession):
+        """注入异步数据库会话。"""
         self.db = db
 
     async def get_audit_logs(
@@ -37,24 +53,24 @@ class AuditLogService:
             end_date: Optional[datetime] = None
     ) -> Tuple[List[UserAuditLog], int]:
         """
-        获取用户操作日志列表
+        分页查询审计日志。
+
+        各筛选条件 AND 组合；默认按 created_at 降序。
 
         Args:
             page: 页码
-            page_size: 每页数量
-            user_id: 用户ID筛选
-            username: 用户名筛选
-            action_type: 操作类型筛选
-            resource_type: 资源类型筛选
-            ip_address: IP地址筛选
-            success: 是否成功筛选
-            start_date: 开始时间
-            end_date: 结束时间
+            page_size: 每页条数
+            user_id: 操作用户 ID
+            username: 用户名模糊匹配
+            action_type: 操作类型（如 CREATE、UPDATE）
+            resource_type: 资源类型
+            ip_address: 客户端 IP 精确匹配
+            success: 是否成功
+            start_date/end_date: 时间范围（闭区间端点由调用方约定）
 
         Returns:
-            Tuple[List[UserAuditLog], int]: (日志列表, 总数)
+            (日志列表, 总条数)
         """
-        # 构建查询
         query = select(UserAuditLog)
         count_query = select(func.count(UserAuditLog.id))
 
@@ -110,16 +126,19 @@ class AuditLogService:
             end_date: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """
-        获取日志统计摘要
+        获取审计日志统计摘要。
+
+        含总量、成功/失败数、Top10 操作类型与资源类型、活跃用户数。
+        相同时间范围命中缓存则直接返回（TTL 300s）。
 
         Args:
-            start_date: 开始时间
-            end_date: 结束时间
+            start_date: 统计起始时间
+            end_date: 统计结束时间
 
         Returns:
-            Dict: 统计信息
+            聚合统计字典
         """
-        # ====== 缓存优化 ======
+        # --- 缓存层：避免 Dashboard 频繁全表聚合 ---
         cache_key = generate_cache_key("audit_log_stats", start_date, end_date)
         cached = await get_cached(cache_key)
         if cached:
@@ -135,7 +154,7 @@ class AuditLogService:
         if end_date:
             conditions.append(UserAuditLog.created_at <= end_date)
 
-        # 总日志数
+        # --- 多维度 COUNT / GROUP BY 聚合 ---
         total_count_result = await self.db.execute(
             select(func.count(UserAuditLog.id)).where(
                 and_(*conditions) if conditions else True
@@ -225,13 +244,13 @@ class AuditLogService:
 
     async def get_audit_log_by_id(self, log_id: int) -> Optional[UserAuditLog]:
         """
-        获取用户操作日志详情
+        按主键获取单条审计日志。
 
         Args:
-            log_id: 日志ID
+            log_id: 日志 ID
 
         Returns:
-            Optional[UserAuditLog]: 日志对象，如果不存在则返回None
+            UserAuditLog 或 None
         """
         result = await self.db.execute(
             select(UserAuditLog).where(UserAuditLog.id == log_id)
@@ -250,20 +269,23 @@ class AuditLogService:
             username: Optional[str] = None
     ) -> None:
         """
-        记录客户端运行错误
+        记录前端运行时错误到审计表。
+
+        action_type=RUNTIME_ERROR，resource_type=FRONTEND；消息与堆栈截断以防过大。
+        写入失败仅打 warning，不向上抛出，避免错误上报链路递归失败。
 
         Args:
-            error_type: 错误类型
-            error_message: 错误信息
-            error_stack: 错误堆栈
-            error_url: 错误发生的URL
-            user_agent: 用户代理
-            ip_address: IP地址
-            current_user: 当前用户（可选）
-            username: 用户名（可选）
+            error_type: 错误分类（默认 JavaScriptError）
+            error_message: 错误消息
+            error_stack: 堆栈（可选）
+            error_url: 发生页面 URL
+            user_agent: UA 字符串
+            ip_address: 客户端 IP
+            current_user: 已登录用户（可选）
+            username: 未登录时的用户名占位（可选）
         """
 
-        # 限制错误信息长度
+        # 截断超长字段，控制单行 audit 体积
         max_error_length = 1000
         truncated_error = error_message[:max_error_length] if len(error_message) > max_error_length else error_message
 

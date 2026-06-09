@@ -580,6 +580,20 @@ async def require_admin_or_self(
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db)
 ) -> User:
+    """
+    要求当前用户为管理员，或为客户且仅能访问自身 client_id 对应的数据。
+
+    Args:
+        client_id: 目标下游客户 ID
+        current_user: 当前登录用户（依赖注入）
+        db: 数据库会话（依赖注入）
+
+    Returns:
+        通过校验的 User 对象
+
+    Raises:
+        HTTPException: 非管理员且无权访问该客户时返回 403
+    """
     if current_user.role == UserRole.ADMIN:
         return current_user
 

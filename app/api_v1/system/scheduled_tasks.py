@@ -1,5 +1,4 @@
-"""
-定时任务管理API端点
+"""定时任务管理API端点
 提供定时任务的查看和管理功能，包括：
 - 获取定时任务列表
 - 获取定时任务详情
@@ -9,8 +8,9 @@
 - 手动触发定时任务
 - 重新加载任务配置
 - 释放任务锁
-- 仅管理员可访问
-"""
+- 仅管理员可访问。
+
+说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。"""
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, Path, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -47,7 +47,7 @@ MAX_FUNCTION_PATH_LENGTH = 255
 
 
 def _enrich_scheduled_task_dict(task: ScheduledTask, task_dict: dict) -> dict:
-    """补充函数信息与是否支持手动触发日期参数。"""
+    """补充函数信息与是否支持手动触发日期参数。（详见字段 Field description）。"""
     task_dict["supports_manual_date_range"] = task_supports_manual_date_range(task.task_name)
     try:
         func_info = get_task_function_info(task.task_name, task.function_path)
@@ -64,7 +64,11 @@ from app.schemas.base import BaseSchema
 
 
 class ScheduledTaskResponse(BaseSchema):
-    """定时任务响应模型"""
+    """
+    定时任务响应模型
+    
+    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    """
     id: int
     task_name: str
     last_run_time: Optional[datetime] = None
@@ -87,7 +91,11 @@ class ScheduledTaskResponse(BaseSchema):
 
 
 class ScheduledTaskUpdate(BaseModel):
-    """定时任务更新模型（仅支持启用/禁用）"""
+    """
+    定时任务更新模型（仅支持启用/禁用）
+    
+    更新请求体：字段均为可选，客户端仅提交需要修改的列。
+    """
     is_active: bool
 
 
@@ -111,9 +119,11 @@ async def get_scheduled_tasks(
     - 仅管理员可访问
     - 支持分页和过滤
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在ScheduledTaskService中）
     task_service: ScheduledTaskService = await get_scheduled_task_service(db)
     
+    # ---------- 异常处理 ----------
     try:
         # 调用服务层获取定时任务列表（服务层会处理查询、过滤、分页、超时保护等）
         tasks, total = await task_service.get_scheduled_tasks(
@@ -126,7 +136,9 @@ async def get_scheduled_tasks(
 
         # 转换为响应模型，并添加函数信息
         task_list = []
+        # ---------- 循环处理 ----------
         for task in tasks:
+            # ---------- 异常处理 ----------
             try:
                 task_dict = ScheduledTaskResponse.model_validate(task).model_dump()
                 _enrich_scheduled_task_dict(task, task_dict)
@@ -135,6 +147,7 @@ async def get_scheduled_tasks(
                 # 单个任务转换失败，记录错误但继续处理其他任务
                 logger.error(f"转换任务 {task.task_name if hasattr(task, 'task_name') else '未知'} 失败: {task_err}", exc_info=True)
                 # 尝试使用基本字段构建响应
+                # ---------- 异常处理 ----------
                 try:
                     task_dict = {
                         "id": task.id,
@@ -189,8 +202,10 @@ async def get_scheduled_task(
         current_user: User = Depends(require_admin)
 ):
     """
-    获取定时任务详情（已重构使用服务层）
-    - 仅管理员可访问
+    获取单条定时任务详情（已重构使用服务层）。
+
+    参数 task_name：注册表中的任务唯一名称。
+    权限：仅管理员；返回 cron、最近执行结果与运行状态。
     """
     # 使用服务层（业务逻辑在ScheduledTaskService中）
     task_service: ScheduledTaskService = await get_scheduled_task_service(db)
@@ -238,9 +253,11 @@ async def update_scheduled_task(
     - 仅管理员可访问
     - 仅支持启用/禁用定时任务
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在ScheduledTaskService中）
     task_service: ScheduledTaskService = await get_scheduled_task_service(db)
     
+    # ---------- 异常处理 ----------
     try:
         existing_task = await task_service.get_scheduled_task_by_name(task_name)
         old_is_active = existing_task.is_active if existing_task else None
@@ -251,8 +268,11 @@ async def update_scheduled_task(
             current_user=current_user
         )
 
+        # ---------- 条件分支 ----------
         if old_is_active is not None and old_is_active != task.is_active:
+            # ---------- 异常处理 ----------
             try:
+                # ---------- 条件分支 ----------
                 if task.is_active:
                     await log_activate(
                         db=db,
@@ -277,6 +297,7 @@ async def update_scheduled_task(
                 logger.warning(f"记录激活/禁用日志失败: {log_error}", exc_info=True)
 
         # 转换为响应模型并添加函数信息
+        # ---------- 异常处理 ----------
         try:
             task_dict = ScheduledTaskResponse.model_validate(task).model_dump()
             _enrich_scheduled_task_dict(task, task_dict)
@@ -314,7 +335,11 @@ async def update_scheduled_task(
 
 
 class TriggerTaskParams(BaseModel):
-    """手动触发任务的参数"""
+    """
+    手动触发任务的参数
+    
+    业务数据模型，用于 API 请求/响应的序列化与校验。
+    """
     start_date: Optional[str] = Field(None, description="起始日期 (YYYY-MM-DD)")
     end_date: Optional[str] = Field(None, description="结束日期 (YYYY-MM-DD)")
 
@@ -335,12 +360,15 @@ async def trigger_scheduled_task(
     - 仅管理员可访问
     - 立即执行指定的定时任务
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在ScheduledTaskService中）
     task_service: ScheduledTaskService = await get_scheduled_task_service(db)
     
+    # ---------- 异常处理 ----------
     try:
         # 准备任务参数
         task_params = None
+        # ---------- 条件分支 ----------
         if params:
             task_params = params.model_dump(exclude_unset=True)
 

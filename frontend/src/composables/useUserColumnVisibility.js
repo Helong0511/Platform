@@ -1,7 +1,15 @@
+/**
+ * 组合式函数 - 用户表格列显隐
+ * @file composables/useUserColumnVisibility.js
+ */
 import { useTableColumnVisibility } from './useTableColumnVisibility';
 
 const STORAGE_KEY = 'userManagement_columnVisibility';
 
+/**
+ * 组合式函数 - 用户表格列显隐
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useUserColumnVisibility() {
   return useTableColumnVisibility(STORAGE_KEY, {
     getDefaultColumns: () => ({

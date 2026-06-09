@@ -1,9 +1,19 @@
-/** 短链接表单校验规则 */
-
+/**
+ * 短链接表单校验规则
+ * @file utils/shortLinkFormRules.js
+ *
+ * 校验原始 URL 格式、占位符合法性及短码唯一性等字段。
+ */
 import { PLACEHOLDER_HINT, validateShortLinkPlaceholders } from './shortLinkPlaceholderValidate';
 
+/** 占位符提示文案与校验函数（重导出） */
 export { PLACEHOLDER_HINT, validateShortLinkPlaceholders };
 
+/**
+ * 创建短链接表单 Element Plus 校验规则
+ * @param {Function} getFormData - 获取当前表单数据
+ * @returns {Object} rules 对象
+ */
 export function createShortLinkFormRules(getFormData) {
   return {
     original_url: [
@@ -71,6 +81,9 @@ export function createShortLinkFormRules(getFormData) {
   };
 }
 
+/**
+ * 创建Offer Tracklink Rules。
+ */
 export function createOfferTracklinkRules(getFormData) {
   return {
     advertiser_tracklink: [

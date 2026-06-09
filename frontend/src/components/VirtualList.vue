@@ -4,7 +4,8 @@
 适用于简单的列表场景（非表格）
 -->
 <template>
-  <div 
+  <!-- 页面主模板 -->
+<div 
     class="virtual-list-container" 
     ref="containerRef"
     :style="{ height: `${height}px`, overflow: 'auto' }"

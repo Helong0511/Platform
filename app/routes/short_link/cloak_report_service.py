@@ -1,11 +1,23 @@
 """
-斗篷 /report 业务逻辑层（参数解析、Redis 去重、点击统计、Facebook CAPI 调度）。
+斗篷 /report 业务逻辑层。
 
-与 cloak_report.py（路由层）的分工：
-- 路由层：HTTP 入参校验、组装 JSON 响应
-- 本模块：dp 解析、phase 规范化、Redis 去重、click_count 递增、CAPI 后台任务
+功能说明：
+- dp 解析与校验、phase 规范化（load/click）、fbclid 补全
+- Redis 去重（``build_dedupe_key`` + ``try_mark_report_dedupe``），避免重复计数与重复 CAPI
+- 短链 click_count 递增、缓存同步；click 阶段调度 ``cloak_click_persist`` 落库
+- 后台任务调用 ``send_third_party_report`` 向 Facebook CAPI 发送对应阶段事件
 
-postback 阶段转化上报不在此处理，由下游 postback 处理器读取 clicks.url_params.dp 后单独发 CAPI。
+与路由层分工：
+- ``cloak_report.py``：HTTP 入参、脱敏日志、JSON 响应
+- 本模块：可复用的纯业务函数，亦可被测试或其它入口调用
+
+在系统中的位置：
+- 依赖 ``app.services.cloak_pixel_mapping`` 获取像素配置；配置项见 ``app.core.config.settings``
+
+注意事项：
+1. dp 合法字符集与 Schema、像素映射服务保持一致（``_DP_RE``）
+2. StaleDataError 等并发更新异常需捕获，避免阻断用户跳转体验
+3. postback 转化上报不在此处理，勿在此模块发送 Purchase 等转化事件
 """
 import logging
 import re

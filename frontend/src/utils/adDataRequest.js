@@ -1,5 +1,8 @@
 /**
  * 广告数据相关请求配置
+ * @file utils/adDataRequest.js
+ *
+ * 根据设备类型（移动/桌面）返回不同的请求超时时间。
  */
 
 const MOBILE_UA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;

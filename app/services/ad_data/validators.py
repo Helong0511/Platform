@@ -1,7 +1,16 @@
 """
-广告数据验证器
+广告数据入参校验模块。
 
-验证广告数据的完整性和有效性
+功能说明：
+- 校验广告数据创建/更新/查询请求的日期范围、产品归属、数值字段合法性
+- 在 service 写入或查询前统一拦截无效参数，减少数据库异常
+
+在系统中的位置：
+- 被 ``app.services.ad_data.service`` 在写操作与复杂查询前调用
+
+注意事项：
+1. 校验失败应抛出带 ErrorCode 的业务异常，而非裸 ValueError
+2. 日期边界使用业务时区（北京时间）规则，与 ``get_app_now_naive`` 一致
 """
 import logging
 from datetime import datetime

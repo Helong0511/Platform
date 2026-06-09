@@ -68,7 +68,6 @@
  * 
  * @module store/index
  */
-
 import { createPinia, defineStore } from 'pinia';
 import axios from 'axios';
 import { ElMessage } from 'element-plus';
@@ -82,6 +81,7 @@ import { loginOAuth2, logout as authLogout } from '../api/auth';
 
 
 const pinia = createPinia();
+/** Pinia 实例，在 main.js 中 app.use(pinia) 注册 */
 export default pinia;
 
 // 配置Axios基础URL
@@ -121,6 +121,7 @@ export const getDefaultRoute = (userInfo) => {
 /**
  * 安全清除认证信息
  * 统一处理 token 和 userInfo 的清除，确保状态一致性
+ * @returns {void}
  */
 export const clearAuthData = () => {
   try {

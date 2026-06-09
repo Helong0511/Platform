@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - TB 搜索列显隐
+ * @file composables/useTbSearchColumnVisibility.js
+ */
 import {
   useAdDataColumnVisibility
 } from './useAdDataColumnVisibility';
@@ -33,6 +37,10 @@ export const TB_SEARCH_SAVABLE_COLUMN_KEYS = [
   'rpm_before_deduct'
 ];
 
+/**
+ * 组合式函数 - TB 搜索列显隐
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useTbSearchColumnVisibility(getIsAdmin) {
   return useAdDataColumnVisibility(
     'tbSearchData_columnVisibility',

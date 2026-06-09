@@ -1,4 +1,15 @@
-"""待确认 Postback 转化服务。"""
+"""
+待确认 Postback 转化业务服务。
+
+职责：
+- 查询来自非白名单 IP 的 PendingPostbackConversion（分页、筛选）
+- 管理员手动批准/拒绝；批准时写入 PostbackConversion 并回填归因
+- IP 加白后批量自动批准（auto_approve_pending_by_ip），跳过已存在正式记录
+
+确认入库须做幂等校验；长期积压可通过诊断服务排查归因失败原因。
+
+对应路由：app/api_v1/postback（pending 子路由）
+"""
 import logging
 from typing import Any, Dict, Optional
 
@@ -23,11 +34,24 @@ logger = logging.getLogger(__name__)
 
 
 class PostbackPendingService:
-    """待确认 Postback 转化服务"""
+    """
+    待确认 Postback 转化服务。
+
+    桥接「IP 未加白」与「正式转化入库」两个阶段；
+    与 PostbackIpWhitelistService 联动实现运维加白即转正。
+    """
 
     async def _resolve_click_assoc(
             self, pending: PendingPostbackConversion, db: AsyncSession
     ) -> Optional[Dict[str, Any]]:
+        """
+        解析待确认记录的点击归因信息。
+
+        优先从 click_token 内存解析，失败则查 clicks 表。
+
+        Returns:
+            含 offer_id、publisher_id、advertiser_id、click_time 的字典，或 None
+        """
         if not pending.click_id:
             return None
         click_assoc = resolve_click_from_token(pending.click_id)
@@ -40,6 +64,11 @@ class PostbackPendingService:
     async def _pending_conversion_exists(
             self, pending: PendingPostbackConversion, db: AsyncSession
     ) -> bool:
+        """
+        检查正式转化表是否已有同 platform + conversion_id + event_name 记录。
+
+        用于批准前幂等校验，避免重复入库。
+        """
         existing = await db.execute(
             select(PostbackConversion).where(
                 PostbackConversion.platform == pending.platform,
@@ -54,6 +83,14 @@ class PostbackPendingService:
             pending: PendingPostbackConversion,
             db: AsyncSession,
     ) -> PostbackConversion:
+        """
+        由待确认记录构造 PostbackConversion 并标记 pending 为 approved。
+
+        不执行 commit，由调用方统一提交事务。
+
+        Returns:
+            已 add 至 session 的 PostbackConversion（status=Pending）
+        """
         click_assoc = await self._resolve_click_assoc(pending, db)
         conversion = PostbackConversion(
             platform=pending.platform,
@@ -90,7 +127,19 @@ class PostbackPendingService:
             db: AsyncSession,
             current_user: User,
     ) -> Dict[str, Any]:
-        """将来自指定 IP 的待确认记录批量批准为正式转化。"""
+        """
+        将指定来源 IP 下所有 pending 待确认记录批量批准。
+
+        已存在正式记录的仅更新 pending 状态为 approved 并计入 skipped_count。
+
+        Args:
+            ip_address: 待匹配 request_ip（去首尾空白）
+            db: 异步数据库会话
+            current_user: 触发操作的管理员（写日志用）
+
+        Returns:
+            Dict: approved_count、skipped_count、failed_count、approved_ids
+        """
         result = {
             "approved_count": 0,
             "skipped_count": 0,
@@ -172,8 +221,21 @@ class PostbackPendingService:
             current_user: User
     ):
         """
-        查询待确认 Postback 转化记录（仅管理员）
-        这些记录来自不在白名单的 IP 地址
+        分页查询待确认 Postback 转化（仅管理员）。
+
+        记录来自非白名单 IP 的 Postback 请求，status 默认 pending。
+
+        Args:
+            platform: 平台标识过滤
+            request_ip: 来源 IP 模糊匹配
+            status: pending / approved / rejected
+            start_date / end_date: 创建时间范围 YYYY-MM-DD
+            page / page_size: 分页参数
+            db: 异步数据库会话
+            current_user: 当前管理员用户
+
+        Returns:
+            PaginatedResponseBaseSchema: 待确认列表及 total
         """
         try:
             query = select(PendingPostbackConversion)
@@ -281,10 +343,23 @@ class PostbackPendingService:
             current_user: User
     ):
         """
-        批准待确认转化记录，创建正式转化记录（仅管理员）
+        手动批准单条待确认记录（仅管理员）。
+
+        写入 PostbackConversion 并将 pending.status 置为 approved。
+
+        Args:
+            pending_id: PendingPostbackConversion 主键
+            db: 异步数据库会话
+            current_user: 当前管理员用户
+
+        Returns:
+            ResponseBaseSchema: 新建 PostbackConversionResponse
+
+        Raises:
+            APIException: 记录不存在、已处理或正式记录已存在
         """
         try:
-            # 查询待确认记录
+            # --- 加载 pending 并校验状态 ---
             result = await db.execute(
                 select(PendingPostbackConversion).where(
                     PendingPostbackConversion.id == pending_id,
@@ -339,10 +414,20 @@ class PostbackPendingService:
             current_user: User
     ):
         """
-        拒绝待确认转化记录（仅管理员）
+        拒绝单条待确认记录（仅管理员）。
+
+        仅更新 pending.status 为 rejected，不写入正式转化表。
+
+        Args:
+            pending_id: PendingPostbackConversion 主键
+            db: 异步数据库会话
+            current_user: 当前管理员用户
+
+        Returns:
+            ResponseBaseSchema: 含 id 与 status=rejected
         """
         try:
-            # 查询待确认记录
+            # --- 加载 pending 并校验状态 ---
             result = await db.execute(
                 select(PendingPostbackConversion).where(
                     PendingPostbackConversion.id == pending_id,

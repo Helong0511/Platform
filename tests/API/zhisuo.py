@@ -1,3 +1,8 @@
+"""
+智索（Zhisuo）渠道 API 联调脚本。
+
+按 clientId + key 签名，请求 channeldaily / channelcountry / channelunit 等报表接口。
+"""
 import hashlib
 import time
 

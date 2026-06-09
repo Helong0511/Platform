@@ -10,6 +10,7 @@ Postback 转化管理页面
 - 转化日志功能已融合到此页面，原转化日志页面已重定向到此页面
 -->
 <template>
+  <!-- 页面主模板 -->
   <div class="postback-management-container">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -34,7 +35,9 @@ Postback 转化管理页面
     </div>
 
     <!-- 筛选控件 -->
+    <!-- 筛选区 -->
     <el-card class="filter-card" shadow="never">
+      <!-- 表单区域 -->
       <el-form :inline="true" :model="searchForm" class="filter-form">
         <el-form-item label="平台">
           <el-select v-model="searchForm.platform" placeholder="全部" clearable style="width: 150px;" name="platform" popper-class="select-dropdown" :teleported="true">
@@ -181,7 +184,8 @@ Postback 转化管理页面
 
     <!-- 统计数据卡片 -->
     <el-card class="stats-card" shadow="never" v-if="stats && stats.length > 0">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="stats-header">
           <span>平台统计</span>
         </div>

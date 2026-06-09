@@ -1,6 +1,18 @@
 """
-FastAPI应用主入口
-配置应用、中间件、路由、异常处理等
+FastAPI 应用主入口模块。
+
+功能说明：
+- 创建 FastAPI 应用实例，配置 lifespan（数据库、Redis、调度器、Telegram Bot）
+- 注册中间件链：HTTPS、性能监控、日志、CSRF、限流、安全头、敏感路径防护
+- 挂载 ``api_v1`` 路由、短链接公开路由、静态资源与全局异常处理器
+
+在系统中的位置：
+- 由 uvicorn/gunicorn 以 ``app.main:app`` 启动；是整个后端进程的组装根
+
+注意事项：
+1. 中间件注册顺序影响执行顺序，后添加的先执行（见 middleware 模块文档）
+2. 生产环境日志级别默认 WARNING，可通过 ``LOG_LEVEL`` 环境变量覆盖
+3. 多 worker 下 Telegram Bot 与调度器依赖文件锁/DB 锁避免重复运行
 """
 import asyncio
 import base64
@@ -270,10 +282,12 @@ class LoggingStream:
     """将 stdout/stderr 重定向到日志文件"""
 
     def __init__(self, logger, log_level=logging.INFO):
+        """绑定目标 logger 与写入级别（stdout 默认 INFO）。"""
         self.logger = logger
         self.log_level = log_level
 
     def write(self, message):
+        """将 print 输出逐行写入日志，自动加 [STDOUT] 前缀。"""
         if message and message.strip():  # 忽略空行
             # 移除换行符，logger 会自动添加
             message = message.rstrip('\n\r')
@@ -283,6 +297,7 @@ class LoggingStream:
                     self.logger.log(self.log_level, f"[STDOUT] {message}")
 
     def flush(self):
+        """兼容 file-like 接口，无缓冲无需刷新。"""
         pass
 
 
@@ -363,6 +378,7 @@ class StreamErrorFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
+        """返回 False 时丢弃含 EndOfStream 的 uvicorn/anyio 断连日志。"""
         # 检查日志消息中是否包含 EndOfStream
         if hasattr(record, 'msg') and record.msg:
             msg = str(record.msg)
@@ -406,8 +422,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    应用生命周期管理
-    启动时初始化数据库，关闭时清理资源
+    应用生命周期管理（启动 / 关闭）。
+
+    启动：时区校验 → 建表 → init_db → 缓存预热 → 调度器与 Telegram Bot → Redis
+    关闭：停止调度器、释放 Bot 锁、关闭 Redis、通知服务下线
     """
     # ====== 启动时执行 ======
     worker_pid = os.getpid()
@@ -573,6 +591,7 @@ async def lifespan(app: FastAPI):
     try:
         # 在后台任务中执行缓存预热，不阻塞应用启动
         async def warmup_cache_background():
+            """启动后后台预热字典/配置类缓存，失败仅打警告不阻塞服务。"""
             try:
                 async with AsyncSessionLocal() as db:
                     await CacheManager.warmup_all(db)
@@ -1125,6 +1144,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     try:
         # 异步记录错误日志，不阻塞错误响应
         async def record_error_log():
+            """将未处理异常异步写入 UserAuditLog，尽量解析当前登录用户。"""
             audit_db = None
             try:
                 audit_db = AsyncSessionLocal()
@@ -1234,6 +1254,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # 根路由健康检查
 @app.get("/")
 async def root():
+    """根路径健康检查，供负载均衡或运维探测服务存活。"""
     return {
         "status": "success",
         "message": f"{settings.SERVER_NAME} is running",
@@ -1243,6 +1264,7 @@ async def root():
 # 处理 favicon.ico 请求
 @app.get("/favicon.ico")
 async def favicon():
+    """返回站点 favicon；生产用 /data/Platform/scripts，开发环境回退到项目 scripts 目录。"""
     # 优先使用服务器路径，本地开发时会自动回退到本地路径
     favicon_path = "/data/Platform/scripts/favicon.ico"
     

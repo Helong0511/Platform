@@ -1,9 +1,12 @@
+/**
+ * Vite 插件：构建时生成 version.json，并将版本号注入 JS 包。
+ * 供前端 versionCheck 对比包内版本与服务端版本，触发自动刷新。
+ */
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
 /**
- * Vite 插件：在构建时生成版本文件，并将版本号注入 JS 包
- * 用于前端自动刷新检测（包内版本 vs 服务端 version.json）
+ * 导出 versionPlugin 工厂函数，在 vite.config.js 中注册。
  */
 export function versionPlugin() {
   let version = null;

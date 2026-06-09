@@ -1,6 +1,24 @@
-"""
-转化扣减配置管理 API（薄路由层）
-"""
+"""转化扣减（Conversion Deduction）配置管理 API
+
+职责：按广告主/Offer/渠道层级配置转化扣减规则，并提供统计、日志查询与 Excel 导出。
+
+权限：
+- 列表查询：已登录用户
+- 创建/更新/删除/批量操作/统计/日志/导出：仅管理员
+
+主要端点（前缀 /conversion-deductions）：
+- POST   /                      创建扣减配置
+- GET    /                      分页列表
+- PUT    /{config_id}           更新
+- DELETE /{config_id}           删除
+- PATCH  /{config_id}/status    启用/停用
+- POST   /batch/update-status   批量改状态
+- POST   /batch/delete          批量删除
+- GET    /stats                 扣减统计
+- GET    /logs                  扣减执行日志
+- GET    /export                导出 Excel。
+
+说明：CPL 子系统接口，涵盖广告主（上游）、渠道（下游）、Offer、Cap、扣量与转化。"""
 import logging
 from typing import Optional
 
@@ -50,6 +68,12 @@ async def create_deduction_config(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    创建转化扣减配置。
+
+    权限：仅管理员。
+    支持广告主/Offer/渠道三个层级，配置扣减比例与策略。
+    """
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
     config = await svc.create_deduction_config(config_in.model_dump(), current_user)
     await log_user_action(
@@ -81,6 +105,11 @@ async def get_deduction_configs(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    分页查询转化扣减配置列表。
+
+    权限：登录用户，按数据权限过滤。
+    """
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
     try:
         configs, total = await svc.get_deduction_configs(
@@ -117,6 +146,11 @@ async def update_deduction_config(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    更新转化扣减配置。
+
+    权限：仅管理员；支持部分字段更新。
+    """
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
     update_data = config_in.model_dump(exclude_unset=True)
     config = await svc.update_deduction_config(config_id, update_data, current_user)
@@ -147,6 +181,12 @@ async def delete_deduction_config(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    删除指定 ID 的转化扣减配置（物理删除）。
+
+    删除后不再对新转化生效；历史扣减日志保留。
+    权限：仅管理员。
+    """
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
     await svc.delete_deduction_config(config_id, current_user, request=request)
     return ResponseBaseSchema.success(data={"id": config_id})
@@ -165,6 +205,12 @@ async def update_deduction_config_status(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    切换单条扣减配置的启用状态（is_active 查询参数）。
+
+    禁用后该配置不再参与新转化的扣减计算。
+    权限：仅管理员。
+    """
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
     before = await svc.get_deduction_config_by_id(config_id)
     if not before:
@@ -209,6 +255,12 @@ async def batch_update_deduction_config_status(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    批量切换多条扣减配置的启用状态。
+
+    请求体含 config_ids 列表与目标 is_active；返回成功/失败计数。
+    权限：仅管理员。
+    """
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
     updated_count = await svc.batch_update_status(
         request_data.config_ids, request_data.is_active, current_user
@@ -247,6 +299,12 @@ async def batch_delete_deduction_configs(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    按 ID 列表批量删除扣减配置。
+
+    适用于清理过期或错误配置；历史日志不受影响。
+    权限：仅管理员。
+    """
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
     deleted_count = await svc.batch_delete(request_data.config_ids, current_user, request=request)
     return ResponseBaseSchema.success(data={"deleted_count": deleted_count})
@@ -268,6 +326,11 @@ async def get_deduction_stats(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    查询扣减统计数据。
+
+    权限：登录用户；可按时间、层级、目标 ID 聚合。
+    """
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
     try:
         stats_data = await svc.get_deduction_stats(
@@ -305,6 +368,11 @@ async def get_deduction_logs(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    分页查询扣减执行日志。
+
+    权限：登录用户；记录每次扣减决策与结果。
+    """
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
     try:
         logs, total = await svc.get_deduction_logs(
@@ -346,7 +414,15 @@ async def export_deduction_configs(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    按筛选条件导出扣减配置列表为 Excel 文件流。
+
+    支持 level、is_active、keyword、advertiser_id 过滤。
+    权限：仅管理员；响应用于浏览器下载。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
+    # ---------- 异常处理 ----------
     try:
         configs, _ = await svc.get_deduction_configs(
             page=1,
@@ -356,6 +432,7 @@ async def export_deduction_configs(
             keyword=keyword,
             advertiser_id=advertiser_id,
         )
+        # ---------- 条件分支 ----------
         if not configs:
             raise_api_exception(
                 ErrorCode.NOT_FOUND,
@@ -398,6 +475,11 @@ async def export_deduction_stats(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    导出扣减统计数据为 Excel 文件。
+
+    权限：仅管理员。
+    """
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
     try:
         stats_data = await svc.get_deduction_stats(
@@ -445,7 +527,14 @@ async def export_deduction_logs(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    """
+    导出扣减执行日志为 Excel 文件。
+
+    权限：仅管理员。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     svc: ConversionDeductionService = await get_conversion_deduction_service(db)
+    # ---------- 异常处理 ----------
     try:
         logs, _ = await svc.get_deduction_logs(
             page=1,
@@ -458,6 +547,7 @@ async def export_deduction_logs(
             conversion_id=conversion_id,
             click_id=click_id,
         )
+        # ---------- 条件分支 ----------
         if not logs:
             raise_api_exception(
                 ErrorCode.NOT_FOUND,

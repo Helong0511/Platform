@@ -1,7 +1,11 @@
-"""
-系统管理模块
-提供系统级别的管理功能
-"""
+"""系统管理模块路由聚合
+
+职责：定时任务、审计日志、会话、通知配置、斗篷、缓存等运维能力。
+
+权限：绝大多数端点需管理员。
+
+说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。
+说明：包入口，聚合子模块 router 或导出 Schema 供上层引用。"""
 from .scheduled_tasks import router as scheduled_tasks_router
 from .audit_logs import router as audit_logs_router
 from .sessions import router as sessions_router

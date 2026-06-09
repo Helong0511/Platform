@@ -11,8 +11,9 @@
 注意：
 - 转化日志功能已融合到此模块，原 /api/v1/conversion-logs 接口已废弃
 - 建议使用 /api/v1/postback/conversions 接口进行所有转化记录查询
-- 此文件已被拆分为多个模块，实际实现位于 handlers 目录
-"""
+- 此文件已被拆分为多个模块，实际实现位于 handlers 目录。
+
+说明：处理上游转化回调、下游转发、去重诊断与 IP 白名单管理。"""
 from .routes import router
 from .handlers import (
     conversion_handler,

@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 通用表格列显隐（localStorage 持久化）
+ * @file composables/useTableColumnVisibility.js
+ */
 import { computed, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { logger } from '../utils/logger';
@@ -11,8 +15,13 @@ import { logger } from '../utils/logger';
  * @param {(visibility: Record<string, boolean>) => Record<string, boolean>} options.getSavableColumns 持久化字段子集
  * @param {string[]} [options.pinColumns] 加载后强制为 true 的列（如 id）
  */
+/**
+ * 组合式函数 - 通用表格列显隐（localStorage 持久化）
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useTableColumnVisibility(storageKey, options) {
   const { getDefaultColumns, getSavableColumns, pinColumns = [] } = options;
+  // columnSettingVisible 响应式状态
   const columnSettingVisible = ref(false);
   const columnVisibility = reactive(getDefaultColumns());
 

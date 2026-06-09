@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 客户 API 文档示例代码生成
+ * @file composables/useClientApiDocExamples.js
+ */
 import { computed, ref } from 'vue';
 import { useAuthStore } from '@/store';
 import {
@@ -5,8 +9,13 @@ import {
   generateClientApiSign
 } from '@/utils/clientApiSignature';
 
+/**
+ * 组合式函数 - 客户 API 文档示例代码生成
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useClientApiDocExamples() {
   const authStore = useAuthStore();
+  // exampleReqTime 响应式状态
   const exampleReqTime = ref(Math.floor(Date.now() / 1000));
 
   const clientId = computed(() => {

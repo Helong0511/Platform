@@ -1,7 +1,16 @@
-"""
-用户会话管理API端点
-提供会话查看、强制退出等功能
-"""
+"""用户会话管理 API
+
+职责：查看在线会话、强制下线、令牌黑名单管理，支撑安全运维与并发登录控制。
+
+权限：全部端点需管理员（require_admin）。
+
+主要端点（前缀 /sessions）：
+- GET    /              会话分页列表
+- GET    /stats         会话统计
+- DELETE /{session_id}  强制结束指定会话
+- POST   /revoke-user/{user_id}  撤销用户全部会话。
+
+说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。"""
 import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Path, Query
@@ -34,7 +43,11 @@ logger = logging.getLogger(__name__)
 
 # ====== Schema定义 ======
 class SessionResponse(BaseModel):
-    """会话响应模型"""
+    """
+    用户登录会话详情：含 token_jti、IP、UA、设备信息、活跃状态与过期时间。
+
+    用于管理员查看在线会话或用户自助管理多设备登录。
+    """
     id: int
     user_id: int
     token_jti: str
@@ -48,11 +61,16 @@ class SessionResponse(BaseModel):
     expires_at: datetime
 
     class Config:
+        """允许从 ORM UserSession 构造。用于 API 请求/响应序列化与 OpenAPI 文档生成。"""
         from_attributes = True
 
 
 class BlacklistResponse(BaseModel):
-    """黑名单响应模型"""
+    """
+    已撤销 JWT 黑名单记录：含 token_jti、撤销原因与过期时间。
+
+    用于审计强制下线与令牌失效追踪。
+    """
     id: int
     token_jti: str
     user_id: int
@@ -62,6 +80,7 @@ class BlacklistResponse(BaseModel):
     reason: Optional[str] = None
 
     class Config:
+        """Pydantic 配置：允许从 TokenBlacklist ORM 记录构造。"""
         from_attributes = True
 
 
@@ -152,6 +171,7 @@ async def revoke_all_my_sessions(
     - 将所有其他会话的token加入黑名单
     - 标记所有其他会话为非活跃
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在SessionService中）
     session_service: SessionService = await get_session_service(db)
     
@@ -159,7 +179,9 @@ async def revoke_all_my_sessions(
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     current_jti = None
     
+    # ---------- 条件分支 ----------
     if token:
+        # ---------- 异常处理 ----------
         try:
             payload = jwt.decode(
                 token,
@@ -179,6 +201,7 @@ async def revoke_all_my_sessions(
     )
     
     # 记录审计日志
+    # ---------- 异常处理 ----------
     try:
         await log_user_action(
             db=db,
@@ -193,6 +216,7 @@ async def revoke_all_my_sessions(
     except Exception as e:
         logger.warning(f"记录审计日志失败: {e}")
     
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(
         data={"message": f"已撤销 {revoked_count} 个会话", "revoked_count": revoked_count},
         message=f"已撤销 {revoked_count} 个会话"
@@ -209,7 +233,10 @@ async def get_user_sessions(
         page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数")
 ):
     """
-    获取指定用户的活跃会话列表（仅管理员，已重构使用服务层）
+    分页获取指定用户的活跃会话列表。
+
+    权限：仅管理员。
+    返回会话 ID、设备类型、IP、最后活跃时间等；委托 SessionService 处理。
     """
     # 使用服务层（业务逻辑在SessionService中）
     session_service: SessionService = await get_session_service(db)
@@ -241,7 +268,10 @@ async def revoke_user_session(
         current_user: User = Depends(require_admin)
 ):
     """
-    撤销指定用户的指定会话（仅管理员，已重构使用服务层）
+    撤销指定用户的单条会话（强制下线）。
+
+    权限：仅管理员。
+    业务：将令牌加入黑名单并标记会话失效；写审计日志。
     """
     # 使用服务层（业务逻辑在SessionService中）
     session_service: SessionService = await get_session_service(db)
@@ -279,7 +309,10 @@ async def revoke_all_user_sessions(
         current_user: User = Depends(require_admin)
 ):
     """
-    撤销指定用户的所有会话（仅管理员，已重构使用服务层）
+    撤销指定用户的全部活跃会话。
+
+    权限：仅管理员。
+    返回撤销数量；批量加入黑名单并写审计日志。
     """
     # 使用服务层（业务逻辑在SessionService中）
     session_service: SessionService = await get_session_service(db)
@@ -324,6 +357,7 @@ async def get_blacklist(
     - 支持按用户ID筛选
     - 返回分页结果
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 构建查询，关联用户表获取用户名
     
     query = select(TokenBlacklist, User.username).join(
@@ -331,6 +365,7 @@ async def get_blacklist(
     )
     
     # 如果指定了用户ID，添加筛选条件
+    # ---------- 条件分支 ----------
     if user_id:
         query = query.where(TokenBlacklist.user_id == user_id)
     
@@ -339,6 +374,7 @@ async def get_blacklist(
     
     # 获取总数
     count_query = select(func.count()).select_from(TokenBlacklist)
+    # ---------- 条件分支 ----------
     if user_id:
         count_query = count_query.where(TokenBlacklist.user_id == user_id)
     
@@ -354,6 +390,7 @@ async def get_blacklist(
     
     # 转换为响应格式，包含用户名
     blacklist_responses = []
+    # ---------- 循环处理 ----------
     for blacklist_item, username in rows:
         blacklist_dict = {
             "id": blacklist_item.id,
@@ -366,6 +403,7 @@ async def get_blacklist(
         }
         blacklist_responses.append(BlacklistResponse(**blacklist_dict))
     
+    # ---------- 构建响应 ----------
     return PaginatedResponseBaseSchema.success(
         data=blacklist_responses,
         total=total,

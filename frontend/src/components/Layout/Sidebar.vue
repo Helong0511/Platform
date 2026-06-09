@@ -1,5 +1,10 @@
+<!--
+  侧边栏导航：按角色显示菜单项
+  @file components/Layout/Sidebar.vue
+-->
 <template>
-  <el-menu
+  <!-- 页面主模板 -->
+<el-menu
     :default-active="activeMenu"
     class="sidebar-menu"
     :background-color="bgDark"

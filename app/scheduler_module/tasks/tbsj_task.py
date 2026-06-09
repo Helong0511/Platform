@@ -1,6 +1,16 @@
 """
-yangyangdeyi定时任务模块
-功能：从yangyangdeyi API获取广告数据，检查重复后插入到数据库
+yangyangdeyi（TBSJ）上游广告数据拉取定时任务。
+
+功能说明：
+- 从 yangyangdeyi API 获取广告数据，校验重复后写入 ad_data
+- 使用 post_json 请求与 upstream_import 统一入库流程
+
+在系统中的位置：
+- 由 TBSJ_API_TASK_NAME 调度
+
+注意事项：
+1. 接口字段变更须同步 fetch_tbsj_rows 与导入映射
+2. 时区转换使用 pytz，与上游报表日期对齐
 """
 import logging
 from datetime import datetime, timedelta

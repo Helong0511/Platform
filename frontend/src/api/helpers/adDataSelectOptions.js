@@ -1,8 +1,15 @@
 /**
- * 广告数据页筛选下拉：客户（含用户名）、产品
+ * 广告数据页筛选下拉选项加载
+ * @file api/helpers/adDataSelectOptions.js
+ *
+ * 将客户与产品数据转换为 el-select 所需的 { value, label } 格式。
  */
 import { request, handleError } from '../../utils/api';
 
+/**
+ * 获取客户下拉选项（label 含客户 ID 与关联用户名）
+ * @returns {Promise<Array<{value: number, label: string}>>}
+ */
 export async function fetchClientsAsUserSelectOptions() {
   try {
     const usersData = await request(
@@ -46,6 +53,11 @@ export async function fetchClientsAsUserSelectOptions() {
   }
 }
 
+/**
+ * 获取产品下拉选项，可按客户 ID 过滤
+ * @param {number|null} [clientId] - 客户 ID，为空则返回全部产品
+ * @returns {Promise<Array<{value: number, label: string}>>}
+ */
 export async function fetchProductsAsSelectOptions(clientId = null) {
   try {
     const params = { page_size: 100 };

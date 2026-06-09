@@ -29,6 +29,9 @@ const {
 
 export { getUsers, getUserDetail, createUser, updateUser };
 
+/**
+ * searchUser 接口。
+ */
 export const searchUser = async (searchTerm) => {
   try {
     if (!searchTerm || searchTerm.toString().trim() === '') {
@@ -93,6 +96,9 @@ export const exportUsers = (params = {}) =>
     }
   );
 
+/**
+ * 获取用户管理页汇总统计。
+ */
 export const getUserStats = async () => {
   return request({
     url: '/api/v1/users/stats',
@@ -100,6 +106,9 @@ export const getUserStats = async () => {
   }, { returnDataOnly: true });
 };
 
+/**
+ * changePassword 接口。
+ */
 export const changePassword = async (passwordData) => {
   await prepareCsrfMutate(CSRF_REFRESH_USERS);
   return request(

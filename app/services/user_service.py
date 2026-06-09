@@ -1,6 +1,20 @@
 """
-用户服务层
-封装用户相关的业务逻辑
+用户服务层。
+
+功能说明：
+- 用户 CRUD、分页列表与统计（按角色过滤可见范围）
+- 创建用户时可同事务创建关联 Client（company_name 等字段）
+- 密码修改、用户名/邮箱唯一性校验；变更后失效权限缓存
+
+权限模型：
+- 管理员全量；普通用户仅可操作自身，且不可自行降级管理员角色
+
+在系统中的位置：
+- 被管理端用户 API 与认证模块调用；写操作记录审计日志
+
+注意事项：
+1. 密码经模型 ``set_password`` bcrypt 加密，服务层勿存明文
+2. 禁用用户须同步撤销活跃会话，防止旧 token 继续使用
 """
 from typing import Optional, List, Dict, Any
 import uuid
@@ -23,9 +37,15 @@ logger = logging.getLogger(__name__)
 
 
 class UserService(BaseService[User]):
-    """用户服务"""
+    """
+    用户服务。
+
+    基于 BaseService/仓储层分页查询；写操作后调用 invalidate_user_permission_cache
+    保证权限缓存与库表一致。
+    """
 
     def __init__(self, db: AsyncSession):
+        """注入数据库会话并绑定 User 模型。"""
         super().__init__(db, User)
 
     async def get_user_by_id(
@@ -35,22 +55,19 @@ class UserService(BaseService[User]):
             include_client: bool = True
     ) -> User:
         """
-        根据ID获取用户详情
-        
-        使用新的仓储层，代码更简洁
-        
+        按 ID 获取用户详情。
+
+        非管理员只能查询 user_id == current_user.id。
+
         Args:
-            user_id: 用户ID
-            current_user: 当前用户（用于权限检查）
-            include_client: 是否包含客户信息
-        
+            user_id: 用户主键
+            current_user: 当前用户
+            include_client: 是否预加载 clients 关联
+
         Returns:
-            User: 用户对象
-        
-        Raises:
-            HTTPException: 如果用户不存在或没有权限
+            User 实体
         """
-        # 权限检查：非管理员只能查看自己的信息
+        # 读权限：本人或管理员
         self.require_owner_or_admin(current_user, user_id)
 
         # 通过仓储层获取数据
@@ -76,21 +93,21 @@ class UserService(BaseService[User]):
             search: Optional[str] = None
     ) -> tuple[List[User], int]:
         """
-        获取用户列表（支持分页、筛选、搜索）
-        
-        使用新的查询构建器和仓储层，代码更简洁，性能更优
-        
+        分页获取用户列表（仅管理员）。
+
+        支持 username/role/is_active 及 search 关键词（用户名、全名、邮箱）。
+
         Args:
-            current_user: 当前用户（用于权限检查）
+            current_user: 当前用户（须为管理员）
             page: 页码
-            page_size: 每页数量
-            username: 用户名过滤
-            role: 角色过滤
-            is_active: 激活状态过滤
-            search: 搜索关键词（用户名、全名、邮箱）
-        
+            page_size: 每页条数
+            username: 用户名过滤（与 search 合并为搜索词）
+            role: 角色字符串过滤
+            is_active: 激活状态
+            search: 通用搜索关键词
+
         Returns:
-            tuple: (用户列表, 总数)
+            (用户列表, 总条数)
         """
         # 权限检查：仅管理员可查看所有用户
         self.require_admin(current_user)
@@ -128,19 +145,20 @@ class UserService(BaseService[User]):
             current_user: User
     ) -> User:
         """
-        创建用户（支持同时创建客户信息）
-        
+        创建用户，可选同事务创建 Client。
+
+        流程：唯一性校验 → 建 User → flush → 若有 company_name 则建 Client → commit → 清权限缓存。
+
         Args:
-            user_data: 用户数据字典（可能包含company_name等客户信息）
-            current_user: 当前用户（用于权限检查和审计日志）
-        
+            user_data: 用户字段；可含 company_name/contact_person 等客户字段
+            current_user: 当前管理员
+
         Returns:
-            User: 创建的用户对象（包含客户信息，如果创建了客户）
+            User（若创建了 Client 则含 clients 关联）
         """
-        # 权限检查
+        # --- 唯一性：用户名必填唯一，邮箱可选唯一 ---
         self.require_admin(current_user)
 
-        # 验证用户名唯一性
         conditions = [User.username == user_data['username']]
         if user_data.get('email'):
             conditions.append(User.email == user_data['email'])
@@ -167,7 +185,7 @@ class UserService(BaseService[User]):
                     detail=f"邮箱 '{user_data['email']}' 已被使用，请使用其他邮箱地址"
                 )
 
-        # 创建用户
+        # --- 持久化 User ---
         user = User(
             username=user_data['username'],
             email=user_data.get('email'),
@@ -187,7 +205,7 @@ class UserService(BaseService[User]):
         await self.db.flush()  # 先flush以获取user.id
         await self.db.refresh(user)
 
-        # 如果提供了客户信息，同时创建客户（在同一事务中）
+        # --- 可选：同一事务内创建 Client（一用户通常对应一个客户主体）---
         if user_data.get('company_name'):
             # 检查该用户是否已有客户关联
             client_count = await self.db.execute(
@@ -236,20 +254,23 @@ class UserService(BaseService[User]):
             current_user: User
     ) -> User:
         """
-        更新用户信息
-        
+        更新用户信息。
+
+        非管理员不可改 role；管理员不可将自己降为非 admin。
+        修改 username/email/password 时分别做唯一性与强度校验。
+
         Args:
-            user_id: 用户ID
-            user_data: 更新的数据字典
+            user_id: 目标用户 ID
+            user_data: 待更新字段
             current_user: 当前用户
-        
+
         Returns:
-            User: 更新后的用户对象
+            更新后的 User
         """
         # 获取用户
         user = await self.get_user_by_id(user_id, current_user, include_client=False)
 
-        # 权限检查：非管理员只能修改自己的信息（且不能修改角色）
+        # 非管理员：剥离 role，且只能改自己
         if current_user.role != UserRole.ADMIN:
             if current_user.id != user_id:
                 raise_api_exception(
@@ -336,11 +357,13 @@ class UserService(BaseService[User]):
             current_user: User
     ) -> None:
         """
-        删除用户
-        
+        删除用户（仅管理员）。
+
+        若用户仍有关联 Client 则拒绝删除，避免孤儿业务数据。
+
         Args:
-            user_id: 用户ID
-            current_user: 当前用户
+            user_id: 目标用户 ID
+            current_user: 当前管理员
         """
         # 权限检查
         self.require_admin(current_user)
@@ -375,10 +398,16 @@ class UserService(BaseService[User]):
             current_user: User
     ) -> None:
         """
-        修改用户密码
-        
+        修改密码。
+
+        规则摘要：
+        - 非管理员只能改自己的密码
+        - CLIENT 角色需 client.password_change_enabled
+        - 管理员改他人密码可跳过旧密码校验
+        - 新密码须通过强度校验且不同于当前密码
+
         Args:
-            user_id: 用户ID
+            user_id: 目标用户 ID
             old_password: 旧密码
             new_password: 新密码
             current_user: 当前用户
@@ -448,12 +477,12 @@ class UserService(BaseService[User]):
 
     async def get_user_stats(self) -> Dict[str, Any]:
         """
-        获取用户统计信息
-        
+        汇总用户数量统计（Dashboard 等）。
+
         Returns:
-            Dict: 统计信息
+            total_users、by_role、by_status、with_client_info 等聚合字段
         """
-        # 总用户数
+        # 总量与分角色/分状态计数
         total_result = await self.db.execute(select(func.count(User.id)))
         total_users = total_result.scalar() or 0
 
@@ -500,13 +529,15 @@ class UserService(BaseService[User]):
 
     async def check_client_has_publisher(self, client_id: int) -> bool:
         """
-        检查客户是否有关联的激活渠道
-        
+        判断客户是否至少有一个激活中的渠道（Publisher）。
+
+        用于业务侧「客户是否已配置下游渠道」类校验。
+
         Args:
-            client_id: 客户ID
-        
+            client_id: 客户 ID
+
         Returns:
-            bool: 如果客户有激活的渠道返回True，否则返回False
+            True 表示存在 is_active 的 Publisher
         """
         publisher_result = await self.db.execute(
             select(func.count(Publisher.id)).where(

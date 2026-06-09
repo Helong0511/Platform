@@ -1,6 +1,16 @@
 """
-Pomiad 定时任务模块
-功能：从 Pomiad API 获取广告明细数据，检查重复后插入到数据库
+Pomiad 上游广告数据拉取定时任务。
+
+功能说明：
+- 从 Pomiad API 拉取广告明细，字段映射后经 upstream_import 去重入库
+- 未配置 POMIAD_API_USERNAME/PASSWORD 时跳过并写入说明
+
+在系统中的位置：
+- 由 POMIAD_API_TASK_NAME 调度
+
+注意事项：
+1. 拉数日期默认按上游报表时区解析
+2. 有新增/更新时 upstream_import 会发 Telegram，注意通知频率
 """
 import logging
 from datetime import datetime
@@ -19,8 +29,10 @@ from app.scheduler_module.upstream_import import import_upstream_ad_data
 
 logger = logging.getLogger(__name__)
 
+# 应用时区（与配置 TIMEZONE 一致，用于日志与通知时间展示）
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
+# Pomiad API 字段 → 库表广告明细字段映射
 POMIAD_FIELD_MAPPING = {
     "date": "data_date_f",
     "ad_unit": "ad_unit_name",
@@ -37,7 +49,18 @@ POMIAD_FIELD_MAPPING = {
 
 
 def preprocess_pomiad_rows(ad_data: list) -> list:
-    """domain_name 为空时回退到 site"""
+    """
+    Pomiad 行数据预处理：补全产品域名。
+
+    当 domain_name 为空时，回退使用 API 返回的 site 字段作为域名，
+    保证入库时产品维度可关联。
+
+    参数:
+        ad_data: fetch_pomiad_rows 返回的原始行列表（就地修改）
+
+    返回:
+        处理后的同一列表引用
+    """
     for item in ad_data:
         if not str(item.get("domain_name") or "").strip():
             item["domain_name"] = (item.get("site") or "").strip()
@@ -48,6 +71,19 @@ async def pomiad_api_task(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> None:
+    """
+    Pomiad 定时任务主函数。
+
+    流程：校验凭证 → 解析日期范围 → 拉取 API 数据 → 预处理 → 标准入库。
+
+    参数:
+        start_date: 可选起始日期 (YYYY-MM-DD)；未提供时由 resolve_upstream_date_range 按调度时刻推算
+        end_date: 可选结束日期 (YYYY-MM-DD)；未提供时与 start_date 或默认策略一致
+
+    异常:
+        拉数或入库失败时记录错误日志并重新抛出，由调度器标记任务失败
+    """
+    # ========== Pomiad API 配置 ==========
     username = settings.POMIAD_API_USERNAME
     password = settings.POMIAD_API_PASSWORD
     base_url = settings.POMIAD_API_BASE_URL
@@ -64,11 +100,18 @@ async def pomiad_api_task(
     )
 
     try:
+        # ============================================
+        # 任务主逻辑：拉数 + 入库
+        # ============================================
+
+        # ---------- 日期范围（凌晨可能拉取昨日+今日双日数据） ----------
         pomiad_start, pomiad_end = resolve_upstream_date_range(
             start_date,
             end_date,
             early_morning_dual_day=True,
         )
+
+        # ---------- 调用 Pomiad API ----------
         data = await fetch_pomiad_rows(
             base_url=base_url,
             username=username,
@@ -78,6 +121,8 @@ async def pomiad_api_task(
             is_by_country=settings.POMIAD_IS_BY_COUNTRY,
             api_data_limit=settings.POMIAD_API_DATA_LIMIT,
         )
+
+        # ---------- 标准上游入库（含 domain 预处理与 Telegram 通知） ----------
         await import_upstream_ad_data(
             task_name=POMIAD_API_TASK_NAME,
             data=data,

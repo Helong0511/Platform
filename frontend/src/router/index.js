@@ -476,4 +476,5 @@ router.beforeEach((to, from, next) => {
   }
 });
 
+/** Vue Router 实例，包含全部路由规则与导航守卫 */
 export default router;

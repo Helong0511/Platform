@@ -1,6 +1,6 @@
 /**
- * 通用 CRUD API 生成器
- * @module utils/crudApi
+ * 工具模块 - CRUD API 工厂：生成标准增删改查方法
+ * @file utils/crudApi.js
  */
 import { request } from './api';
 import { csrfBeforeMutate } from './csrfMutate';
@@ -35,6 +35,9 @@ function extractResourceName(basePath) {
  * @param {Object} [options.listOptions] 传给 request 的列表选项
  * @param {Object} [options.getOptions] 传给 request 的详情选项
  * @param {Object} [options.mutateOptions] 传给 request 的写操作选项
+ */
+/**
+ * 创建Crud Api。
  */
 export function createCrudApi(basePath, options = {}) {
   const {
@@ -135,6 +138,9 @@ export function createCrudApi(basePath, options = {}) {
   };
 }
 
+/**
+ * 创建Multiple Crud Apis。
+ */
 export function createMultipleCrudApis(configs) {
   const result = {};
   configs.forEach((config) => {

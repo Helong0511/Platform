@@ -1,4 +1,9 @@
+<!--
+  客户端 - 客户子用户管理
+  @file views/client/ClientUserManagement.vue
+-->
 <template>
+  <!-- 页面主模板 -->
   <div class="client-user-management-container">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -7,7 +12,8 @@
 
     <!-- 修改密码卡片（仅当允许修改密码时显示） -->
     <el-card class="password-card" shadow="never" v-if="canChangePassword">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="card-header">
           <el-icon :size="16"><Lock /></el-icon>
           <span>修改登录密码</span>

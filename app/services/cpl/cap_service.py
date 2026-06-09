@@ -1,6 +1,16 @@
 """
-Cap 管理服务层
-封装Cap配置的业务逻辑
+Cap（转化上限）服务层。
+
+功能说明：
+- Offer/渠道维度日 Cap 配置 CRUD 与当前计数查询
+- 与 ``app.core.cap`` 计数器及每日重置定时任务配合
+
+在系统中的位置：
+- 被管理端 Cap 管理 API 调用
+
+注意事项：
+1. Cap 归零由 ``cpl_tasks.reset_daily_caps`` 在 UTC 0 点执行
+2. 修改 Cap 配置后应同步 Redis/内存计数状态（如有缓存）
 """
 import logging
 from typing import Optional, List, Dict, Any
@@ -21,13 +31,28 @@ logger = logging.getLogger(__name__)
 
 
 class CapService(BaseService[OfferCap]):
-    """Cap配置服务"""
+    """
+    Cap 配置业务服务。
+
+    管理 Offer 维度的日 Cap / 总 Cap 及当前计数。
+    cap_type 区分全局、广告主-Offer、渠道等粒度。
+    """
 
     def __init__(self, db: AsyncSession):
+        """注入异步数据库会话。"""
         super().__init__(db, OfferCap)
 
     @staticmethod
     def to_cap_response(cap: OfferCap) -> OfferCapResponse:
+        """
+        将 ORM 实体转为 API 响应 Schema，并填充关联名称。
+
+        Args:
+            cap: 已预加载 offer/advertiser/publisher 的 OfferCap
+
+        Returns:
+            OfferCapResponse: 含 offer_name、advertiser_name、publisher_name
+        """
         cap_data = OfferCapResponse.model_validate(cap)
         cap_data.offer_name = cap.offer.offer_name if cap.offer else None
         cap_data.advertiser_name = (
@@ -39,6 +64,15 @@ class CapService(BaseService[OfferCap]):
         return cap_data
 
     def to_cap_response_list(self, caps: List[OfferCap]) -> List[OfferCapResponse]:
+        """
+        批量转换 Cap 列表为响应 Schema。
+
+        Args:
+            caps: OfferCap 实体列表
+
+        Returns:
+            List[OfferCapResponse]: 与输入顺序一致的响应列表
+        """
         return [self.to_cap_response(cap) for cap in caps]
 
     async def check_cap_consistency(
@@ -46,6 +80,16 @@ class CapService(BaseService[OfferCap]):
             offer_id: Optional[int] = None,
             fix: bool = False,
     ) -> tuple[list, str]:
+        """
+        检查 Cap 当前计数与真实转化数是否一致。
+
+        Args:
+            offer_id: 限定单个 Offer，None 表示全量扫描
+            fix: True 时由 consistency_checker 自动修复不一致项
+
+        Returns:
+            tuple[list, str]: (不一致记录列表, 人类可读摘要信息)
+        """
         from app.core.cap.consistency_checker import check_cap_consistency
 
         inconsistencies = await check_cap_consistency(
@@ -67,16 +111,22 @@ class CapService(BaseService[OfferCap]):
             current_user: User
     ) -> OfferCap:
         """
-        创建Cap配置
+        创建 Cap 配置。
+
+        校验 Offer 必存在；advertiser_offer 类型需校验广告主；
+        指定 publisher_id 时校验渠道。设置 total_cap 时自动写入 cap_start_date。
 
         Args:
-            cap_data: Cap配置数据
-            current_user: 当前用户
+            cap_data: 含 cap_type、offer_id 及可选 daily_cap、total_cap 等
+            current_user: 当前操作用户（审计预留）
 
         Returns:
-            OfferCap: 创建的Cap配置对象
+            OfferCap: 创建成功并已 joinedload 关联实体的对象
+
+        Raises:
+            APIException: 关联实体不存在或数据库写入失败
         """
-        # 验证Offer是否存在
+        # --- 关联实体校验 ---
         offer_result = await self.db.execute(
             select(Offer).where(Offer.id == cap_data['offer_id'])
         )
@@ -165,19 +215,21 @@ class CapService(BaseService[OfferCap]):
             is_active: Optional[bool] = None
     ) -> tuple[List[OfferCap], int]:
         """
-        获取Cap配置列表
+        分页查询 Cap 配置列表。
+
+        支持多维度过滤，结果按创建时间倒序，预加载 Offer/广告主/渠道。
 
         Args:
-            page: 页码
-            page_size: 每页数量
-            cap_type: Cap类型过滤
-            offer_id: Offer ID过滤
-            advertiser_id: 广告主ID过滤
-            publisher_id: 渠道ID过滤
-            is_active: 是否激活过滤
+            page: 页码，从 1 开始
+            page_size: 每页条数
+            cap_type: Cap 粒度类型过滤
+            offer_id: 按 Offer 过滤
+            advertiser_id: 按广告主过滤
+            publisher_id: 按渠道过滤
+            is_active: 激活状态过滤
 
         Returns:
-            tuple[List[OfferCap], int]: (Cap配置列表, 总数)
+            tuple[List[OfferCap], int]: (当前页列表, 总条数)
         """
         query = select(OfferCap)
 
@@ -218,13 +270,13 @@ class CapService(BaseService[OfferCap]):
 
     async def get_cap_by_id(self, cap_id: int) -> Optional[OfferCap]:
         """
-        根据ID获取Cap配置详情
+        按主键获取 Cap 详情（含关联名称所需的外键实体）。
 
         Args:
-            cap_id: Cap配置ID
+            cap_id: Cap 配置主键
 
         Returns:
-            Optional[OfferCap]: Cap配置对象，如果不存在则返回None
+            Optional[OfferCap]: 存在则返回预加载关联的实体，否则 None
         """
         # 使用joinedload优化关联查询
         query = select(OfferCap).where(OfferCap.id == cap_id).options(
@@ -243,15 +295,20 @@ class CapService(BaseService[OfferCap]):
             current_user: User
     ) -> OfferCap:
         """
-        更新Cap配置
+        更新 Cap 配置。
+
+        首次设置 total_cap 且尚无 cap_start_date 时，自动补写开始日期。
 
         Args:
-            cap_id: Cap配置ID
-            update_data: 更新数据
-            current_user: 当前用户
+            cap_id: Cap 配置主键
+            update_data: 待更新字段字典，仅模型存在的属性会被 setattr
+            current_user: 当前操作用户
 
         Returns:
-            OfferCap: 更新后的Cap配置对象
+            OfferCap: 更新后并重新 joinedload 的实体
+
+        Raises:
+            APIException: 记录不存在或提交失败
         """
         result = await self.db.execute(
             select(OfferCap).where(OfferCap.id == cap_id)
@@ -302,11 +359,14 @@ class CapService(BaseService[OfferCap]):
             current_user: User
     ) -> None:
         """
-        删除Cap配置
+        物理删除 Cap 配置。
 
         Args:
-            cap_id: Cap配置ID
-            current_user: 当前用户
+            cap_id: Cap 配置主键
+            current_user: 当前操作用户
+
+        Raises:
+            APIException: 记录不存在或删除失败
         """
         result = await self.db.execute(
             select(OfferCap).where(OfferCap.id == cap_id)

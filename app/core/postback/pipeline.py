@@ -38,6 +38,15 @@ class PostbackPipelineContext:
 
 
 async def step_associate_click(ctx: PostbackPipelineContext) -> Optional[Dict[str, Any]]:
+    """
+    流水线步骤：根据 click_id 关联点击记录，填充归因上下文。
+
+    Args:
+        ctx: 流水线上下文（读写 normalized_data、click_association）
+
+    Returns:
+        Click 关联信息字典；无 click_id 或关联失败时可能为 None
+    """
     click_id = ctx.normalized_data.get("click_id")
     ctx.click_association = await ClickAssociator.associate(click_id, ctx.db)
     return ctx.click_association
@@ -55,6 +64,15 @@ async def step_check_duplicate(ctx: PostbackPipelineContext) -> bool:
 def attribution_ids_from_association(
     association: Optional[Dict[str, Any]],
 ) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+    """
+    从 Click 关联结果提取 offer / publisher / advertiser 三元组。
+
+    Args:
+        association: ``ClickAssociator.associate`` 返回的关联字典
+
+    Returns:
+        (offer_id, publisher_id, advertiser_id)，缺失字段为 None
+    """
     if not association:
         return None, None, None
     return (
@@ -65,6 +83,15 @@ def attribution_ids_from_association(
 
 
 async def step_check_cap(ctx: PostbackPipelineContext) -> Tuple[bool, str]:
+    """
+    流水线步骤：检查 Cap 是否超限，超限时关闭对应短链并更新 conversion_status。
+
+    Args:
+        ctx: 流水线上下文
+
+    Returns:
+        (cap_ok, cap_status)：cap_ok 为 False 表示已超量
+    """
     offer_id, publisher_id, advertiser_id = attribution_ids_from_association(
         ctx.click_association
     )
@@ -95,6 +122,15 @@ async def step_check_cap(ctx: PostbackPipelineContext) -> Tuple[bool, str]:
 
 
 async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[float, Any]:
+    """
+    流水线步骤：按扣量规则计算最终 payout，写入 ctx.final_payout。
+
+    Args:
+        ctx: 流水线上下文
+
+    Returns:
+        (final_payout, discount_info)：扣量详情由 DiscountChecker 返回
+    """
     offer_id, publisher_id, _ = attribution_ids_from_association(ctx.click_association)
     original = ctx.normalized_data.get("payout") or 0.0
     final_payout, info = await DiscountChecker.calculate(
@@ -110,6 +146,15 @@ async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[float, Any]
 
 
 async def step_save_conversion(ctx: PostbackPipelineContext) -> PostbackConversion:
+    """
+    流水线步骤：持久化转化记录，并回写 Click 表的 conversion_id。
+
+    Args:
+        ctx: 流水线上下文
+
+    Returns:
+        新建的 PostbackConversion 实例
+    """
     ctx.conversion = await ConversionSaver.save(
         normalized_data=ctx.normalized_data,
         click_association=ctx.click_association,

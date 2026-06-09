@@ -1,5 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+"""
+Facebook Pixel CAPI 事件上报测试（含 Purchase 金额、SHA256 用户数据）。
+
+支持主/备 Pixel 双路上报；文件内注释含 curl 验证 Token 示例。
+"""
 import datetime
 import hashlib
 import random

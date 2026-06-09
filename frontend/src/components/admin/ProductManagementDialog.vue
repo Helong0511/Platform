@@ -1,5 +1,11 @@
+<!--
+  产品管理弹窗
+  @file components/admin/ProductManagementDialog.vue
+-->
 <template>
-  <el-dialog 
+  <!-- 页面主模板 -->
+<!-- 弹窗区域 -->
+<el-dialog 
     v-model="visible" 
     :width="isMobile ? '95%' : (isTablet ? '90%' : '1400px')"
     :close-on-click-modal="false"
@@ -10,6 +16,7 @@
     :center="true"
     :append-to-body="true"
   >
+    <!-- 卡片标题栏 -->
     <template #header>
       <div class="dialog-header">
         <div class="header-content">

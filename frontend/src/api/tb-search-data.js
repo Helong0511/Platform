@@ -11,6 +11,9 @@ import { createWithDataFilterApi } from './helpers/withDataFilters';
 const tbWithDataFilters = createWithDataFilterApi('tb-search-data', { returnRaw: true });
 
 // 获取TB搜索数据列表
+/**
+ * 分页获取 TB 搜索数据列表（支持数据权限过滤）。
+ */
 export const getTBSearchDataList = async (params) => {
   const timeout = getAdDataListTimeout();
 
@@ -25,6 +28,9 @@ export const getTBSearchDataList = async (params) => {
 };
 
 // 更新TB搜索数据
+/**
+ * 更新T B Search Data。
+ */
 export const updateTBSearchData = async (data) => {
   const { id, ...updateData } = data;
   return withCsrfMutate(() =>
@@ -36,6 +42,9 @@ export const updateTBSearchData = async (data) => {
 };
 
 // 删除TB搜索数据
+/**
+ * 删除T B Search Data。
+ */
 export const deleteTBSearchData = async (dataId) =>
   withCsrfMutate(() =>
     request(
@@ -45,6 +54,9 @@ export const deleteTBSearchData = async (dataId) =>
   );
 
 // 批量删除TB搜索数据
+/**
+ * 批量Delete T B Search Data。
+ */
 export const batchDeleteTBSearchData = async (dataIds) =>
   withCsrfMutate(() =>
     request(
@@ -54,6 +66,9 @@ export const batchDeleteTBSearchData = async (dataIds) =>
   );
 
 // 导入TB搜索数据
+/**
+ * 导入T B Search Data。
+ */
 export const importTBSearchData = async (formData) =>
   requestUpload(
     {

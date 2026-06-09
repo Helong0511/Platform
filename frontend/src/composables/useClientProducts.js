@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 客户关联产品：分配与历史
+ * @file composables/useClientProducts.js
+ */
 import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getProductList, createProduct, updateProduct, deleteProduct } from '../api/product';
@@ -10,11 +14,18 @@ import { getCsrfToken } from '../utils/csrfToken';
  * 客户产品管理 Composable
  * 处理产品相关的操作
  */
+/**
+ * 组合式函数 - 客户关联产品：分配与历史
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useClientProducts() {
+  // productDialogVisible 响应式状态
   const productDialogVisible = ref(false);
   const currentClientIdForProducts = ref(null);
+  // currentClientName 响应式状态
   const currentClientName = ref('');
   const products = ref([]);
+  // productLoading 响应式状态
   const productLoading = ref(false);
 
   /**

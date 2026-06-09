@@ -1,8 +1,9 @@
-# !/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-CPL API测试脚本
-用于测试FuseClick的getOffers API
+CPL API 联调脚本：测试 Huguang/FuseClick getOffers 等上游接口。
+
+用于本地验证 API Key、域名与 Offer 列表拉取是否正常。
 """
 
 import json

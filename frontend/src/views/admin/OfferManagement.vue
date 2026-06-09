@@ -1,7 +1,14 @@
+<!--
+  Offer 管理页面
+  职责：Offer CRUD、Tracklink 配置、详情统计 Tab、列显隐与批量操作。
+  @file views/admin/OfferManagement.vue
+-->
 <template>
-  <div class="offer-management">
+  <!-- 页面主模板 -->
+<div class="offer-management">
     <el-card class="page-card">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="card-header">
           <div class="header-left">
             <el-icon class="header-icon"><Box /></el-icon>

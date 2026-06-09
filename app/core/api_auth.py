@@ -1,6 +1,9 @@
 """
-客户API认证工具模块
-提供客户API请求的签名验证和请求验证功能
+下游（客户/渠道）开放 API 认证工具。
+
+职责：校验 client_id + 时间戳 + MD5 签名，防止重放与参数篡改。
+
+在系统中的位置：``app.core.api_auth``，由 ``app.api_v1`` 客户数据导出等开放接口调用。
 """
 import hashlib
 import logging

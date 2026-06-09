@@ -1,6 +1,9 @@
 /**
- * 认证API模块
- * 提供登录、登出、令牌刷新等功能
+ * 认证 API 模块
+ * @file api/auth.js
+ *
+ * 提供 OAuth2 密码模式登录、令牌刷新、登出等接口。
+ * 登录接口不走标准 { code, data } 包装，需单独解析响应。
  */
 import axios from 'axios';
 import { request } from '../utils/api';
@@ -14,6 +17,9 @@ import { parseAuthResponseData } from '../utils/authResponse';
  * @param {Object} [options]
  * @param {number} [options.timeout] - 超时毫秒
  * @returns {Promise<Object>} { access_token, token_type, refresh_token, user }
+ */
+/**
+ * loginOAuth2 接口。
  */
 export const loginOAuth2 = async (username, password, options = {}) => {
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);

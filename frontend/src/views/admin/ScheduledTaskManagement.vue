@@ -1,4 +1,16 @@
+<!--
+  定时任务管理页面（ScheduledTaskManagement.vue）
+
+  功能区块：
+  1. 统计卡片：总任务数、启用/运行中/失败数量
+  2. 筛选区：任务名称、启用状态
+  3. 任务表格：Cron 表达式、上次/下次执行、手动触发
+  4. 编辑弹窗：配置任务参数与 Cron 调度规则
+
+  列表与操作逻辑由 composable useScheduledTasks.js 提供。
+-->
 <template>
+  <!-- 页面主模板 -->
   <div class="scheduled-task-management-container">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -26,7 +38,9 @@
     </div>
 
     <!-- 筛选控件 -->
+    <!-- 筛选区 -->
     <el-card class="filter-card" shadow="never">
+      <!-- 表单区域 -->
       <el-form :inline="true" :model="searchForm" class="filter-form">
         <el-form-item label="任务名称">
           <el-input 
@@ -83,7 +97,8 @@
 
     <!-- 任务数据表格 -->
     <el-card class="data-table-card" shadow="never">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="table-header">
           <span>任务列表</span>
         </div>

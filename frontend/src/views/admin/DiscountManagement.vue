@@ -1,7 +1,20 @@
+<!--
+  扣量（Discount）配置管理页面（DiscountManagement.vue）
+
+  功能区块：
+  1. 筛选区：按 Offer、渠道、广告主筛选扣量规则
+  2. 规则表格：扣量比例、生效时间、启用状态
+  3. 编辑弹窗：新建/修改扣量配置
+
+  表单与列表逻辑由 useDiscountList.js、useDiscountForm.js 提供。
+-->
 <template>
-  <div class="discount-management">
+  <!-- 页面主模板 -->
+  <!-- 页面主模板 -->
+<div class="discount-management">
     <el-card class="page-card">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="card-header">
           <div class="header-left">
             <el-icon class="header-icon"><Discount /></el-icon>

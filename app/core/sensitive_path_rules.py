@@ -18,6 +18,8 @@ from app.core.config import settings
 
 
 class SensitivePathLevel(IntEnum):
+    """敏感路径预警等级，数值越大处置越严格。"""
+
     LOW = 1
     MEDIUM = 2
     HIGH = 3
@@ -103,6 +105,8 @@ def get_level_policy(level: SensitivePathLevel) -> LevelActionPolicy:
 
 @dataclass(frozen=True)
 class PathRule:
+    """单条路径匹配规则：子串包含或精确路径。"""
+
     pattern: str
     level: SensitivePathLevel
     exact: bool = False
@@ -110,6 +114,8 @@ class PathRule:
 
 @dataclass(frozen=True)
 class SensitivePathMatch:
+    """路径匹配成功后的完整上下文（规则名、等级、处置策略）。"""
+
     matched_rule: str
     level: SensitivePathLevel
     policy: LevelActionPolicy
@@ -219,6 +225,7 @@ _PROD_LOW_DOC_MARKERS: tuple[str, ...] = (
 
 
 def _marker_rules() -> tuple[PathRule, ...]:
+    """合并内置子串规则、生产环境低危文档路径及 SENSITIVE_PATH_BLOCK_EXTRA 扩展。"""
     rules: list[PathRule] = []
     for m in _CRITICAL_MARKERS:
         rules.append(PathRule(m, SensitivePathLevel.CRITICAL))
@@ -264,6 +271,7 @@ _MARKER_RULES_CACHE: Optional[tuple[PathRule, ...]] = None
 
 
 def all_marker_rules() -> tuple[PathRule, ...]:
+    """返回全部子串规则（带进程内缓存，配置变更需 reload_marker_rules）。"""
     global _MARKER_RULES_CACHE
     if _MARKER_RULES_CACHE is None:
         _MARKER_RULES_CACHE = _marker_rules()
@@ -299,6 +307,7 @@ def match_sensitive_path(path: str) -> Optional[SensitivePathMatch]:
 
 
 def _build_match(matched_rule: str, level: SensitivePathLevel) -> SensitivePathMatch:
+    """根据等级组装 SensitivePathMatch，并合并 settings 中的阈值覆盖。"""
     return SensitivePathMatch(
         matched_rule=matched_rule,
         level=level,
@@ -307,4 +316,5 @@ def _build_match(matched_rule: str, level: SensitivePathLevel) -> SensitivePathM
 
 
 def level_label(level: int) -> str:
+    """将等级数值转为中文标签（低危/中危/高危/危急）。"""
     return LEVEL_LABELS.get(int(level), f"L{level}")

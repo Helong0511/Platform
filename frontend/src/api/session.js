@@ -1,6 +1,6 @@
 /**
- * 会话管理 API
- * @module api/session
+ * 会话管理 API：在线用户会话查询与踢出
+ * @file api/session.js
  */
 import { request } from '../utils/api';
 import {
@@ -16,6 +16,9 @@ export const getMySessions = async (params = {}) =>
     { paginated: true }
   );
 
+/**
+ * revokeMySession 接口。
+ */
 export const revokeMySession = async (sessionId) =>
   withCsrfMutate(
     () =>
@@ -29,6 +32,9 @@ export const revokeMySession = async (sessionId) =>
     CSRF_REFRESH_SESSIONS
   );
 
+/**
+ * revokeAllMySessions 接口。
+ */
 export const revokeAllMySessions = async () =>
   withCsrfMutate(
     () =>
@@ -39,6 +45,9 @@ export const revokeAllMySessions = async () =>
     CSRF_REFRESH_SESSIONS
   );
 
+/**
+ * 获取指定用户的活跃会话列表。
+ */
 export const getUserSessions = async (userId, params = {}) =>
   request(
     {
@@ -49,6 +58,9 @@ export const getUserSessions = async (userId, params = {}) =>
     { paginated: true }
   );
 
+/**
+ * revokeUserSession 接口。
+ */
 export const revokeUserSession = async (userId, sessionId) =>
   withCsrfMutate(
     () =>
@@ -62,6 +74,9 @@ export const revokeUserSession = async (userId, sessionId) =>
     CSRF_BLACKLIST
   );
 
+/**
+ * revokeAllUserSessions 接口。
+ */
 export const revokeAllUserSessions = async (userId) =>
   withCsrfMutate(
     () =>
@@ -75,6 +90,9 @@ export const revokeAllUserSessions = async (userId) =>
     CSRF_BLACKLIST
   );
 
+/**
+ * 获取会话黑名单列表。
+ */
 export const getBlacklist = async (params = {}) =>
   request(
     { url: '/api/v1/sessions/blacklist', method: 'get', params },

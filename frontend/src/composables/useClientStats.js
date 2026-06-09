@@ -1,10 +1,19 @@
+/**
+ * 组合式函数 - 客户统计卡片数据
+ * @file composables/useClientStats.js
+ */
 import { ref } from 'vue';
 
 /**
  * 客户统计信息 Composable
  * 处理统计数据的计算和更新
  */
+/**
+ * 组合式函数 - 客户统计卡片数据
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useClientStats() {
+  // 统计数据
   const stats = ref({
     total: 0,
     active: 0,

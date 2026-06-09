@@ -1,5 +1,10 @@
+<!--
+  统计卡片组：仪表盘指标展示
+  @file components/admin/StatsCards.vue
+-->
 <template>
-  <el-row :gutter="20" class="stats-row">
+  <!-- 页面主模板 -->
+<el-row :gutter="20" class="stats-row">
     <el-col :span="6">
       <el-card class="stat-card stat-card-total">
         <div class="stat-content">

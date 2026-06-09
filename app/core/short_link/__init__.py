@@ -1,5 +1,7 @@
 """
-短链接服务核心模块
+短码生成算法包。
+
+对外导出 Base62 编解码与 short_code 生成函数，供 ``ShortLinkService`` 创建短链时使用。
 """
 from app.core.short_link.generator import (
     encode_base62,

@@ -1,6 +1,16 @@
+/**
+ * 剪贴板复制工具。
+ *
+ * 优先使用 navigator.clipboard；不支持时回退到隐藏 textarea + document.execCommand。
+ */
 import { ElMessage } from 'element-plus';
 import { logger } from './logger';
 
+/**
+ * 将文本复制到系统剪贴板
+ * @param {string} text - 待复制的文本
+ * @returns {Promise<void>} 复制成功弹出提示，失败显示错误消息
+ */
 export async function copyToClipboard(text) {
   if (!text) return;
   try {

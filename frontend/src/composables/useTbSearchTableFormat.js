@@ -1,5 +1,8 @@
 /**
- * TB 搜索数据表格合计行
+ * TB 搜索数据表格格式化
+ * @file composables/useTbSearchTableFormat.js
+ *
+ * 提供 TB 搜索报表的货币格式化与数值列合计行计算。
  */
 import { formatTbCurrency } from '../utils/currencyFormat';
 
@@ -16,6 +19,10 @@ const SUM_NUMERIC_PROPS = [
 
 const CURRENCY_PROPS = ['revenue', 'revenue_before_deduct', 'rpm', 'rpm_before_deduct'];
 
+/**
+ * 组合式函数 - TB 搜索表格字段格式化
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useTbSearchTableFormat() {
   const formatCurrency = formatTbCurrency;
 

@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 扣量配置列表
+ * @file composables/useDiscountList.js
+ */
 import { reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getDiscounts, updateDiscount } from '../api/discount';
@@ -8,19 +12,28 @@ import { logger } from '../utils/logger';
 /**
  * 扣量配置列表、筛选与行内状态切换。
  */
+/**
+ * 组合式函数 - 扣量配置列表
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useDiscountList() {
+  // 数据加载中
   const loading = ref(false);
   const filterDiscountType = ref(null);
+  // filterOffer 响应式状态
   const filterOffer = ref(null);
   const filterPublisher = ref(null);
+  // 按激活状态筛选
   const filterActive = ref(null);
   const pagination = reactive({
     page: 1,
     pageSize: 20,
     total: 0,
   });
+  // 表格当前页数据
   const tableData = ref([]);
   const offerList = ref([]);
+  // 渠道下拉选项
   const publisherList = ref([]);
 
   const loadOffers = async () => {

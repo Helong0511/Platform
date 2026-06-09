@@ -1,4 +1,12 @@
-"""点击记录归档（主表 -> clicks_archive）。"""
+"""
+点击记录归档服务（主表 clicks → clicks_archive）。
+
+职责：
+- 将 click_time 早于保留期的记录 INSERT IGNORE 至归档表后 DELETE 主表
+- 归档表不存在时自动 CREATE；令牌模式且主表为空时跳过
+
+默认保留 90 天；由定时任务 archive_old_clicks 调用模块单例 clicks_archive_service。
+"""
 import logging
 from datetime import timedelta
 from typing import Any, Dict
@@ -55,21 +63,43 @@ CREATE TABLE `clicks_archive`
 
 
 class ClicksArchiveService:
-    """将过期 clicks 迁移至 clicks_archive 并删除主表数据。"""
+    """
+    点击数据冷热分离服务。
+
+    使用 INSERT IGNORE 避免主键冲突后 DELETE 主表；
+    模块级单例 clicks_archive_service 供定时任务直接调用。
+    """
 
     async def count_clicks(self, db: AsyncSession) -> int:
+        """统计主表 clicks 当前总行数。"""
         result = await db.execute(text("SELECT COUNT(*) FROM `clicks`"))
         return int(result.scalar() or 0)
 
     async def should_skip_archive(self, db: AsyncSession) -> bool:
         """
-        令牌模式且主表无数据时跳过（新流量不再写 clicks，仅保留历史清理能力）。
+        判断是否应跳过归档。
+
+        当 should_persist_clicks_to_db() 为 False（令牌模式）且主表为空时返回 True，
+        表示新流量不再写入 clicks，无需执行归档迁移。
         """
         if should_persist_clicks_to_db():
             return False
         return await self.count_clicks(db) == 0
 
     async def archive_old_clicks(self, db: AsyncSession, days: int = 90) -> Dict[str, Any]:
+        """
+        归档并清理过期点击记录。
+
+        流程：计算 cutoff → 跳过判断 → 确保归档表存在 → 统计待归档数 →
+        INSERT IGNORE 到 clicks_archive → DELETE 主表 → commit。
+
+        Args:
+            db: 数据库会话
+            days: 保留最近 N 天，默认 90
+
+        Returns:
+            含 archived_count、deleted_count、archive_date、skipped、message 的统计字典
+        """
         now = get_app_now_naive()
         archive_date = now - timedelta(days=days)
         archive_date_str = archive_date.strftime("%Y-%m-%d %H:%M:%S")
@@ -105,6 +135,7 @@ class ClicksArchiveService:
 
         logger.info("发现 %s 条需要归档的点击记录", total_count)
 
+        # ====== 迁移：INSERT IGNORE 防重复，再 DELETE 主表 ======
         archive_result = await db.execute(
             text(
                 """
@@ -148,6 +179,7 @@ class ClicksArchiveService:
         }
 
     async def _ensure_archive_table(self, db: AsyncSession) -> None:
+        """检查 clicks_archive 是否存在，不存在则按 DDL 创建。"""
         check_sql = text(
             """
             SELECT COUNT(*) FROM information_schema.tables

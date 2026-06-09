@@ -1,5 +1,12 @@
+<!--
+  产品分配历史弹窗
+  @file components/admin/ProductAssignmentHistoryDialog.vue
+-->
 <template>
-  <el-dialog
+  <!-- 页面主模板 -->
+<!-- 弹窗区域 -->
+<!-- 弹窗 -->
+    <el-dialog
     v-model="visible"
     title="产品分配历史"
     width="800px"

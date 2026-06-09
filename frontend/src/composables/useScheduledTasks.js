@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 定时任务列表与状态
+ * @file composables/useScheduledTasks.js
+ */
 import { computed, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getScheduledTasks } from '../api/scheduled-task';
@@ -8,24 +12,34 @@ const FETCH_DEBOUNCE_MS = 2000;
 /**
  * 定时任务列表、筛选、防抖拉取与自动刷新生命周期。
  */
+/**
+ * 组合式函数 - 定时任务列表与状态
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useScheduledTasks() {
+  // 数据加载中
   const loading = ref(false);
   const tasks = ref([]);
+  // 筛选表单字段
   const searchForm = reactive({
     task_name: '',
     is_active: null,
     is_running: null,
   });
+  // 分页状态 { page, pageSize/page_size, total }
   const pagination = reactive({
     page: 1,
     pageSize: 10,
     total: 0,
   });
 
+  // abortController 响应式状态
   const abortController = ref(null);
   const fetchDebounceTimer = ref(null);
+  // refreshTimer 响应式状态
   const refreshTimer = ref(null);
   const visibilityHandler = ref(null);
+  // isInitializing 响应式状态
   const isInitializing = ref(true);
 
   const stats = computed(() => {

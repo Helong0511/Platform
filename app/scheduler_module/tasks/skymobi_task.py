@@ -1,5 +1,16 @@
 """
-Skymobi定时任务模块
+Skymobi 上游广告数据拉取定时任务。
+
+功能说明：
+- 从 Skymobi CRM API 拉取 H5 广告单元日报，映射字段后去重写入 ad_data
+- 使用 fetch_skymobi_rows 封装鉴权与分页
+
+在系统中的位置：
+- 由 SKYMOBI_API_TASK_NAME 调度
+
+注意事项：
+1. Skymobi 时区与报表日期须与 resolve_upstream_date_range 一致
+2. 新增单元类型时检查映射是否覆盖全部必填列
 """
 import logging
 from datetime import datetime, timedelta
@@ -38,6 +49,12 @@ async def skymobi_api_task(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> None:
+    """
+    Skymobi 定时拉数：单日查询，凌晨 0-2 点默认拉昨日数据。
+
+    Args:
+        start_date: 指定日期则覆盖自动推算；end_date 参数保留兼容暂未使用
+    """
     api_id = settings.SKYMOBI_API_ID
     api_key = settings.SKYMOBI_API_KEY
 

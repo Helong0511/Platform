@@ -1,5 +1,15 @@
 /**
- * Cron 表达式前端基本格式校验（详细语义由后端校验）。
+ * Cron 表达式前端格式校验
+ * @file utils/cronValidate.js
+ *
+ * 校验 5 段式 Cron 基本格式，详细语义由后端二次校验。
+ */
+
+/**
+ * Element Plus 表单 validator：校验 Cron 表达式格式
+ * @param {Object} rule - 校验规则
+ * @param {string} value - 输入值
+ * @param {Function} callback - 校验回调
  */
 export function validateCronExpression(rule, value, callback) {
   if (!value) {

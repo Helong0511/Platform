@@ -1,7 +1,7 @@
-"""
-Postback 相关的 Schema 定义
-用于统一处理各平台的 postback 回调数据
-"""
+"""Postback 相关的 Schema 定义
+用于统一处理各平台的 postback 回调数据。
+
+说明：处理上游转化回调、下游转发、去重诊断与 IP 白名单管理。"""
 from datetime import datetime
 from typing import Optional, Dict
 
@@ -10,7 +10,11 @@ from pydantic import BaseModel, Field, ConfigDict
 
 # ====== 请求模型 ======
 class PostbackRequest(BaseModel):
-    """通用 Postback 请求模型（用于POST请求）"""
+    """
+    通用 Postback 请求模型（用于POST请求）
+    
+    API 请求体，描述客户端提交的参数格式与约束。
+    """
     # 基础字段（各平台通用）
     conversion_id: Optional[str] = Field(None, description="转化ID（各平台唯一标识）")
     event_name: Optional[str] = Field(None, description="事件名称")
@@ -34,7 +38,11 @@ class PostbackRequest(BaseModel):
 
 # ====== 响应模型 ======
 class PostbackResponse(BaseModel):
-    """Postback 响应模型"""
+    """
+    Postback 响应模型
+    
+    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    """
     success: bool = Field(..., description="是否成功")
     message: str = Field(..., description="响应消息")
     conversion_id: Optional[str] = Field(None, description="转化ID")
@@ -43,7 +51,11 @@ class PostbackResponse(BaseModel):
 
 # ====== 查询和统计模型 ======
 class PostbackConversionResponse(BaseModel):
-    """Postback 转化记录响应模型"""
+    """
+    Postback 转化记录响应模型
+    
+    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    """
     id: int
     platform: str
     conversion_id: str
@@ -82,7 +94,11 @@ class PostbackConversionResponse(BaseModel):
 
 
 class PostbackStatsResponse(BaseModel):
-    """Postback 统计响应模型"""
+    """
+    Postback 统计响应模型
+    
+    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    """
     platform: str = Field(..., description="平台名称")
     total_conversions: int = Field(..., description="总转化数")
     total_original_payout: Optional[float] = Field(None, description="原始总支付金额（PO）")
@@ -93,7 +109,11 @@ class PostbackStatsResponse(BaseModel):
 
 
 class PostbackQueryParams(BaseModel):
-    """Postback 查询参数模型"""
+    """
+    Postback 查询参数模型
+    
+    查询/筛选参数模型，用于列表接口的过滤条件与分页。
+    """
     platform: Optional[str] = Field(None, description="平台名称")
     product_id: Optional[int] = Field(None, description="产品ID")
     client_id: Optional[int] = Field(None, description="客户ID")
@@ -105,7 +125,11 @@ class PostbackQueryParams(BaseModel):
 
 
 class PostbackForwardLogResponse(BaseModel):
-    """Postback 下游转发日志响应模型"""
+    """
+    Postback 下游转发日志响应模型
+    
+    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    """
     id: int
     conversion_id: int
     product_id: Optional[int]
@@ -126,7 +150,11 @@ class PostbackForwardLogResponse(BaseModel):
 
 
 class PendingPostbackConversionResponse(BaseModel):
-    """待确认 Postback 转化记录响应模型"""
+    """
+    待确认 Postback 转化记录响应模型
+    
+    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    """
     id: int
     platform: str
     conversion_id: str

@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - Offer 列表页：筛选、分页、数据加载
+ * @file composables/useOfferList.js
+ */
 import { nextTick, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getOffers } from '../api/offer';
@@ -15,22 +19,32 @@ function fixSelectDisplayLater() {
   });
 }
 
+/**
+ * 组合式函数 - Offer 列表页：筛选、分页、数据加载
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useOfferList() {
+  // 数据加载中
   const loading = ref(false);
   const searchKeyword = ref('');
+  // 按广告主（上游）筛选
   const filterAdvertiser = ref(null);
   const filterStatus = ref(null);
+  // 按激活状态筛选
   const filterActive = ref(null);
   const filterPublisher = ref(null);
 
+  // 分页状态 { page, pageSize/page_size, total }
   const pagination = reactive({
     page: 1,
     pageSize: 20,
     total: 0,
   });
 
+  // 表格当前页数据
   const tableData = ref([]);
   const advertiserList = ref([]);
+  // 渠道下拉选项
   const publisherList = ref([]);
 
   const loadAdvertisers = async () => {

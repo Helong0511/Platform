@@ -1,7 +1,10 @@
-"""
-Excel处理工具函数
-提供文件验证、数据处理等工具函数
-"""
+"""Excel 处理公共工具
+
+职责：文件 MIME/扩展名校验、日期列解析、单元格归一化等导入导出共用逻辑。
+
+供 excel 与 tb_search_data 等模块复用。
+
+说明：Excel 批量导入/导出，支持广告数据等业务的表格批处理。"""
 import logging
 from datetime import datetime, timedelta, date
 from typing import Any
@@ -25,7 +28,15 @@ ALLOWED_EXTENSIONS = {"xlsx", "xls"}
 
 
 def allowed_file(filename: str) -> bool:
-    """检查文件扩展名是否允许"""
+    """
+    校验上传文件扩展名是否在白名单内。
+    
+    仅允许 xlsx/xls/csv 等已配置的格式，防止恶意文件上传。
+    
+    功能：检查是否允许（allowed_file）。
+    鉴权：由 Depends(get_current_user) 或 require_admin 控制访问范围。
+    响应：统一 ResponseBaseSchema / PaginatedResponseBaseSchema 包装。
+    """
     return (
             "." in filename
             and filename.endswith(('.xlsx', '.xls'))
@@ -83,38 +94,48 @@ def parse_date_value(date_value: Any) -> datetime.date:
     异常:
         ValueError: 如果日期格式无效
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 处理字符串格式
+    # ---------- 条件分支 ----------
     if isinstance(date_value, str):
         # 去除前后空格
         date_value = date_value.strip()
+        # ---------- 异常处理 ----------
         try:
             return datetime.strptime(date_value, "%Y-%m-%d").date()
         except ValueError:
+            # ---------- 异常处理 ----------
             try:
                 return datetime.strptime(date_value, "%Y/%m/%d").date()
             except ValueError:
                 # 尝试其他常见格式
+                # ---------- 异常处理 ----------
                 try:
                     return datetime.strptime(date_value, "%Y-%m-%d %H:%M:%S").date()
                 except ValueError:
+                    # ---------- 异常处理 ----------
                     try:
                         return datetime.strptime(date_value, "%Y/%m/%d %H:%M:%S").date()
                     except ValueError:
                         raise ValueError(f"日期格式无效，应为YYYY-MM-DD或YYYY/MM/DD")
 
     # 处理 datetime 对象
+    # ---------- 条件分支 ----------
     elif isinstance(date_value, datetime):
         return date_value.date()
 
     # 处理 pandas Timestamp 对象
+    # ---------- 条件分支 ----------
     elif hasattr(date_value, 'date') and hasattr(date_value, 'to_pydatetime'):
         # pandas Timestamp 对象
+        # ---------- 异常处理 ----------
         try:
             return date_value.date()
         except (AttributeError, ValueError):
             pass
 
     # 处理数字类型（Excel 日期序列号）
+    # ---------- 条件分支 ----------
     elif isinstance(date_value, (int, float)):
         # Excel 日期序列号：从 1900-01-01 开始的天数
         # 注意：Excel 有一个 bug，它认为 1900 年是闰年，所以需要调整
@@ -122,13 +143,16 @@ def parse_date_value(date_value: Any) -> datetime.date:
         excel_epoch = datetime(1899, 12, 30)  # Excel 的基准日期（1900-01-01 是序列号 1）
 
         # 检查是否是合理的日期序列号（1 到 1000000 之间）
+        # ---------- 条件分支 ----------
         if 1 <= date_value <= 1000000:
+            # ---------- 异常处理 ----------
             try:
                 # 计算日期：Excel 序列号 - 1 天（因为 Excel 认为 1900-01-01 是第 1 天）
                 days = int(date_value) - 1
                 result_date = (excel_epoch + timedelta(days=days)).date()
 
                 # 验证日期是否合理（1900-01-01 到 2100-12-31）
+                # ---------- 条件分支 ----------
                 if datetime(1900, 1, 1).date() <= result_date <= datetime(2100, 12, 31).date():
                     return result_date
                 else:
@@ -165,24 +189,30 @@ def safe_get_value(
         value = safe_get_value(row, "coverage_rate", default=0.0)
         # 如果 row["coverage_rate"] 是 None、NaN 或空字符串，返回 0.0
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 条件分支 ----------
     if key not in row:
         return default
 
     value = row.get(key)
 
     # 检查是否为 None
+    # ---------- 条件分支 ----------
     if value is None:
         return default
 
     # 检查是否为 NaN（pandas 的 NaN）
+    # ---------- 条件分支 ----------
     if pd.isna(value):
         return default
 
     # 转换为字符串并检查是否为空
     str_value = str(value).strip()
+    # ---------- 条件分支 ----------
     if not allow_empty_string and str_value == "":
         return default
 
+    # ---------- 构建响应 ----------
     return value
 
 
@@ -263,10 +293,13 @@ def calculate_rates(df: pd.DataFrame) -> pd.DataFrame:
     返回:
         更新后的DataFrame
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 覆盖率（匹配率）= 匹配数/请求数 * 100
     # 只有当字段不存在或值为NaN时，才计算（0是有效值，不计算）
+    # ---------- 条件分支 ----------
     if 'coverage_rate' not in df.columns:
         # 字段不存在，创建新列并计算
+        # ---------- 条件分支 ----------
         if 'request_count' in df.columns and 'match_count' in df.columns:
             # 避免除零错误
             df['coverage_rate'] = 0.0
@@ -276,39 +309,49 @@ def calculate_rates(df: pd.DataFrame) -> pd.DataFrame:
     else:
         # 字段存在，但值为NaN的行才计算
         mask = df['coverage_rate'].isna()
+        # ---------- 条件分支 ----------
         if mask.any() and 'request_count' in df.columns and 'match_count' in df.columns:
             calculated = 0.0
             valid_mask = mask & (df['request_count'] > 0)
+            # ---------- 条件分支 ----------
             if valid_mask.any():
                 calculated = (df.loc[valid_mask, 'match_count'] / df.loc[valid_mask, 'request_count'] * 100).fillna(0)
                 df.loc[valid_mask, 'coverage_rate'] = calculated
             df.loc[mask & (df['request_count'] == 0), 'coverage_rate'] = 0
 
     # 展示率 = 展示数/匹配数 * 100
+    # ---------- 条件分支 ----------
     if 'display_rate' not in df.columns:
+        # ---------- 条件分支 ----------
         if 'match_count' in df.columns and 'display_count' in df.columns:
             df['display_rate'] = 0.0
             mask = df['match_count'] > 0
             df.loc[mask, 'display_rate'] = (df.loc[mask, 'display_count'] / df.loc[mask, 'match_count'] * 100).fillna(0)
     else:
         mask = df['display_rate'].isna()
+        # ---------- 条件分支 ----------
         if mask.any() and 'match_count' in df.columns and 'display_count' in df.columns:
             valid_mask = mask & (df['match_count'] > 0)
+            # ---------- 条件分支 ----------
             if valid_mask.any():
                 calculated = (df.loc[valid_mask, 'display_count'] / df.loc[valid_mask, 'match_count'] * 100).fillna(0)
                 df.loc[valid_mask, 'display_rate'] = calculated
             df.loc[mask & (df['match_count'] == 0), 'display_rate'] = 0
 
     # 点击率 = 点击数/展示数 * 100
+    # ---------- 条件分支 ----------
     if 'click_rate' not in df.columns:
+        # ---------- 条件分支 ----------
         if 'display_count' in df.columns and 'click_count' in df.columns:
             df['click_rate'] = 0.0
             mask = df['display_count'] > 0
             df.loc[mask, 'click_rate'] = (df.loc[mask, 'click_count'] / df.loc[mask, 'display_count'] * 100).fillna(0)
     else:
         mask = df['click_rate'].isna()
+        # ---------- 条件分支 ----------
         if mask.any() and 'display_count' in df.columns and 'click_count' in df.columns:
             valid_mask = mask & (df['display_count'] > 0)
+            # ---------- 条件分支 ----------
             if valid_mask.any():
                 calculated = (df.loc[valid_mask, 'click_count'] / df.loc[valid_mask, 'display_count'] * 100).fillna(0)
                 df.loc[valid_mask, 'click_rate'] = calculated
@@ -316,7 +359,9 @@ def calculate_rates(df: pd.DataFrame) -> pd.DataFrame:
 
     # eCPM = 收益/展示数 * 1000
     # 只有当 ecpm_before_deduct 不存在或值为NaN时，才从收益和展示数计算
+    # ---------- 条件分支 ----------
     if 'ecpm_before_deduct' not in df.columns:
+        # ---------- 条件分支 ----------
         if 'revenue_before_deduct' in df.columns and 'display_count' in df.columns:
             df['ecpm_before_deduct'] = 0.0
             mask = df['display_count'] > 0
@@ -324,12 +369,15 @@ def calculate_rates(df: pd.DataFrame) -> pd.DataFrame:
                         df.loc[mask, 'revenue_before_deduct'] / df.loc[mask, 'display_count'] * 1000).fillna(0)
     else:
         mask = df['ecpm_before_deduct'].isna()
+        # ---------- 条件分支 ----------
         if mask.any() and 'revenue_before_deduct' in df.columns and 'display_count' in df.columns:
             valid_mask = mask & (df['display_count'] > 0)
+            # ---------- 条件分支 ----------
             if valid_mask.any():
                 calculated = (df.loc[valid_mask, 'revenue_before_deduct'] / df.loc[
                     valid_mask, 'display_count'] * 1000).fillna(0)
                 df.loc[valid_mask, 'ecpm_before_deduct'] = calculated
             df.loc[mask & (df['display_count'] == 0), 'ecpm_before_deduct'] = 0
 
+    # ---------- 构建响应 ----------
     return df

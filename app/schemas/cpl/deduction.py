@@ -1,11 +1,11 @@
-"""
-转化扣减配置 Schema
+"""转化扣减配置 Schema
 
 重构说明:
 - 添加更详细的字段验证
 - 改进文档字符串
-- 添加示例值
-"""
+- 添加示例值。
+
+说明：CPL 子系统接口，涵盖广告主（上游）、渠道（下游）、Offer、Cap、扣量与转化。"""
 from datetime import datetime
 from typing import Optional, Literal
 
@@ -81,7 +81,7 @@ class ConversionDeductionConfigBase(BaseModel):
     @field_validator('volume_deduction_ratio', 'amount_deduction_ratio')
     @classmethod
     def validate_ratio(cls, v: float) -> float:
-        """验证比例值"""
+        """验证比例值。用于 API 请求/响应序列化与 OpenAPI 文档生成。"""
         if v < 0 or v > 1:
             raise ValueError('比例必须在0-1之间')
         return v
@@ -100,7 +100,7 @@ class ConversionDeductionConfigCreate(ConversionDeductionConfigBase):
 
     @model_validator(mode='after')
     def validate_at_least_one_enabled(self):
-        """验证至少启用一种扣减方式"""
+        """验证至少启用一种扣减方式。用于 API 请求/响应序列化与 OpenAPI 文档生成。"""
         if not self.enable_volume_deduction and not self.enable_amount_deduction:
             raise ValueError('请至少启用一种扣减方式（扣量或扣金额）')
 
@@ -116,7 +116,11 @@ class ConversionDeductionConfigCreate(ConversionDeductionConfigBase):
 
 
 class ConversionDeductionConfigUpdate(BaseModel):
-    """更新扣减配置"""
+    """
+    更新扣减配置请求体。
+
+    所有字段可选；仅提交需变更项。支持单独切换扣量/扣金额开关及比例。
+    """
     level: Optional[str] = Field(None, description="配置层级")
     target_id: Optional[int] = Field(None, description="配置对象ID")
     enable_volume_deduction: Optional[bool] = Field(None, description="是否启用按比例扣量")
@@ -129,7 +133,11 @@ class ConversionDeductionConfigUpdate(BaseModel):
 
 
 class ConversionDeductionConfigResponse(ConversionDeductionConfigBase):
-    """扣减配置响应"""
+    """
+    扣减配置详情响应。
+
+    含 level 对应广告主/Offer/渠道 ID 及名称，供管理端列表与编辑表单展示。
+    """
     id: int
     advertiser_id: Optional[int] = None
     offer_id: Optional[int] = None
@@ -146,7 +154,11 @@ class ConversionDeductionConfigResponse(ConversionDeductionConfigBase):
 
 
 class ConversionDeductionLogResponse(BaseModel):
-    """扣减日志响应"""
+    """
+    单次转化扣减日志响应。
+
+    记录扣减前后 volume/amount、所用配置与策略，便于审计与对账。
+    """
     id: int
     conversion_id: Optional[int] = None
     click_id: Optional[str] = None
@@ -174,7 +186,11 @@ class ConversionDeductionLogResponse(BaseModel):
 
 
 class DeductionStatsResponse(BaseModel):
-    """扣减统计响应"""
+    """
+    扣减汇总统计响应。
+
+    聚合原始/扣减/最终 volume 与 amount，及按维度拆分的 items 明细列表。
+    """
     original_volume: int = 0
     deducted_volume: int = 0
     final_volume: int = 0
@@ -187,11 +203,11 @@ class DeductionStatsResponse(BaseModel):
 
 
 class BatchUpdateStatusRequest(BaseModel):
-    """批量更新状态请求"""
+    """批量更新状态请求。用于 API 请求/响应序列化与 OpenAPI 文档生成。"""
     config_ids: list[int] = Field(..., min_length=1, description="配置ID列表")
     is_active: bool = Field(..., description="是否激活")
 
 
 class BatchDeleteRequest(BaseModel):
-    """批量删除请求"""
+    """批量删除请求。用于 API 请求/响应序列化与 OpenAPI 文档生成。"""
     config_ids: list[int] = Field(..., min_length=1, description="配置ID列表")

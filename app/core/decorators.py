@@ -1,6 +1,10 @@
 """
-统一装饰器模块
-提供权限检查、参数验证等装饰器
+API 路由装饰器集合。
+
+职责：在 FastAPI 端点外层统一做权限校验（管理员/角色/资源归属）与分页参数规范化。
+
+在系统中的位置：``app.core.decorators``，由 ``app.api_v1`` 各路由模块按需引用；
+异常统一通过 ``raise_api_exception`` 抛出标准业务错误码。
 """
 from functools import wraps
 from typing import Callable, Any
@@ -28,9 +32,12 @@ def require_admin(func: Callable = None):
             ...
     """
     def decorator(f: Callable) -> Callable:
+        """包装目标端点，注入管理员角色校验。"""
+
         @wraps(f)
         async def wrapper(*args, **kwargs):
-            # 从kwargs中获取current_user
+            """校验 current_user 为 ADMIN 后调用原函数。"""
+            # ---------- 解析当前用户 ----------
             current_user = kwargs.get('current_user')
             if not current_user:
                 # 尝试从args中获取
@@ -71,21 +78,24 @@ def require_roles(*allowed_roles: UserRole):
             ...
     """
     def decorator(func: Callable) -> Callable:
+        """包装目标端点，校验用户角色在 allowed_roles 内。"""
+
         @wraps(func)
         async def wrapper(*args, **kwargs):
+            """校验角色后调用原函数。"""
             current_user = kwargs.get('current_user')
             if not current_user:
                 for arg in args:
                     if isinstance(arg, User):
                         current_user = arg
                         break
-            
+
             if not current_user:
                 raise_api_exception(
                     ErrorCode.UNAUTHORIZED,
                     detail="需要登录"
                 )
-            
+
             if current_user.role not in allowed_roles:
                 raise_api_exception(
                     ErrorCode.FORBIDDEN,
@@ -116,22 +126,25 @@ def check_resource_owner(resource_user_id_attr: str = "user_id"):
         resource_user_id_attr: 资源对象中表示用户ID的属性名
     """
     def decorator(func: Callable) -> Callable:
+        """包装目标端点，非管理员须能解析 resource_id（具体归属校验在服务层）。"""
+
         @wraps(func)
         async def wrapper(*args, **kwargs):
+            """解析用户与资源 ID，管理员直接放行。"""
             current_user = kwargs.get('current_user')
             if not current_user:
                 for arg in args:
                     if isinstance(arg, User):
                         current_user = arg
                         break
-            
+
             if not current_user:
                 raise_api_exception(
                     ErrorCode.UNAUTHORIZED,
                     detail="需要登录"
                 )
-            
-            # 管理员可以访问所有资源
+
+            # ---------- 管理员放行 ----------
             if current_user.role == UserRole.ADMIN:
                 return await func(*args, **kwargs)
             
@@ -187,8 +200,11 @@ def validate_pagination(page: int = 1, page_size: int = 20, max_page_size: int =
             ...
     """
     def decorator(func: Callable) -> Callable:
+        """包装目标端点，规范化并校验 page / page_size 参数。"""
+
         @wraps(func)
         async def wrapper(*args, **kwargs):
+            """校验分页范围后写回 kwargs 并调用原函数。"""
             page_val = kwargs.get('page', page)
             page_size_val = kwargs.get('page_size', page_size)
             

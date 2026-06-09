@@ -25,6 +25,10 @@ class DeductionConfigCache:
     """扣量配置缓存管理器"""
     
     def __init__(self, db: AsyncSession):
+        """
+        Args:
+            db: 异步数据库会话，缓存未命中时从此加载 ConversionDeductionConfig
+        """
         self.db = db
     
     async def get_config(

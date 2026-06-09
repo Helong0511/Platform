@@ -1,12 +1,18 @@
+<!--
+  管理端 - 机器学习模型
+  @file views/admin/MLModelManagement.vue
+-->
 <template>
-  <div class="ml-model-management">
+  <!-- 页面主模板 -->
+<div class="ml-model-management">
 
     <!-- 功能区域 -->
     <el-row :gutter="20" class="main-row">
       <!-- 列名映射训练和验证 -->
       <el-col :span="24">
         <el-card shadow="hover">
-          <template #header>
+          <!-- 卡片标题栏 -->
+    <template #header>
             <div class="section-header">
               <el-icon :size="16"><Upload /></el-icon>
               <span>训练导入</span>

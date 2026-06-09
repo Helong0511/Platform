@@ -1,8 +1,4 @@
 /**
- * 百分比展示（比率 0–1 或已为百分数）
- */
-
-/**
  * 比率转百分比，如 0.15 → "15.00%"
  * @param {number|null|undefined} value
  * @param {{ empty?: string }} [options] empty 为 null/undefined 时的展示，默认 "0.00%"

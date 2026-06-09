@@ -1,7 +1,13 @@
+<!--
+  管理端 - 敏感路径探测
+  @file views/admin/SensitivePathProbeManagement.vue
+-->
 <template>
-  <div class="page">
+  <!-- 页面主模板 -->
+<div class="page">
     <el-card>
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="header">敏感路径拦截日志</div>
       </template>
 

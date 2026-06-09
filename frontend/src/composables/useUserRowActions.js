@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 用户行操作：启用/禁用/重置密码
+ * @file composables/useUserRowActions.js
+ */
 import { ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { deleteUser, updateUser, getUserDetail } from '../api/user';
@@ -10,13 +14,19 @@ import { logger } from '../utils/logger';
 /**
  * 用户列表行操作：删除、状态、客户开关、产品、通知配置。
  */
+/**
+ * 组合式函数 - 用户行操作：启用/禁用/重置密码
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useUserRowActions({
   fetchUsers,
   fetchStats,
   openProductDialog,
 }) {
+  // notificationConfigDialogVisible 响应式状态
   const notificationConfigDialogVisible = ref(false);
   const currentClientIdForNotification = ref(null);
+  // currentClientNameForNotification 响应式状态
   const currentClientNameForNotification = ref('');
 
   const refreshUsersAndStats = async () => {

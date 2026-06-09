@@ -1,5 +1,10 @@
-/** 转化扣减配置表单校验 */
-
+/**
+ * 转化扣减配置表单校验规则
+ * @file utils/conversionDeductionFormRules.js
+ *
+ * @param {Function} getForm - 获取当前表单数据的函数
+ * @returns {Object} Element Plus 表单 rules 对象
+ */
 export function createConversionDeductionFormRules(getForm) {
   return {
     level: [{ required: true, message: '请选择配置层级', trigger: 'change' }],
@@ -33,6 +38,9 @@ export function createConversionDeductionFormRules(getForm) {
   };
 }
 
+/**
+ * emptyConversionDeductionForm 接口。
+ */
 export function emptyConversionDeductionForm() {
   return {
     level: 'advertiser',

@@ -1,12 +1,22 @@
+/**
+ * 组合式函数 - 客户表单：基本信息与 API 密钥
+ * @file composables/useClientForm.js
+ */
 import { ref, reactive } from 'vue';
 
 /**
  * 客户表单管理 Composable
  * 处理表单状态和对话框
  */
+/**
+ * 组合式函数 - 客户表单：基本信息与 API 密钥
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useClientForm() {
+  // 弹窗显隐
   const dialogVisible = ref(false);
   const dialogTitle = ref('添加客户');
+  // currentClientId 响应式状态
   const currentClientId = ref(null);
   const clientFormDialogRef = ref(null);
 

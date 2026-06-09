@@ -1,6 +1,24 @@
-"""
-TB搜索数据管理API端点
-"""
+"""淘宝搜索数据（TB Search Data）管理 API
+
+职责：
+- 分页查询 TB 搜索指标（redirects/searches/clicks/revenue/rpm 等）
+- Excel 批量导入（管理员）
+- 单条/批量删除与更新（管理员）
+- 筛选下拉：有数据的客户、产品、国家列表
+
+权限：
+- 列表与筛选：登录用户；非管理员仅能看到自己名下客户数据
+- 导入/更新/删除：仅管理员
+
+主要端点：
+- GET  /              分页列表（支持日期、客户、产品、国家筛选）
+- POST /import         Excel 导入
+- POST /{data_id}      更新单条
+- DELETE /{data_id}    删除单条
+- DELETE /batch        批量删除
+- GET  /clients-with-data、/products-with-data、/countries-with-data  筛选选项。
+
+说明：REST API 端点，统一 ResponseBaseSchema 响应；鉴权由各端点 Depends 声明。"""
 import logging
 from calendar import monthrange
 from datetime import date, datetime, timedelta
@@ -68,11 +86,21 @@ async def get_tb_search_data(
     sort_by: str = Query("date", description="排序字段"),
     sort_order: str = Query("desc", description="排序方向")
 ):
+    """
+    分页获取 TB 搜索数据列表。
+
+    - 支持按日期、客户、产品、国家筛选；未传日期时默认当前月
+    - 自动选择产品分配历史表或旧 client_id 关联方式
+    - 非管理员仅能查看自己名下客户数据
+    """
+    # ---------- 入口：参数与依赖准备 ----------
     page_size = optimize_page_size_for_device(request, page_size, default_page_size=10)
 
     # 检查是否使用产品分配历史表
     use_assignment_table = await check_use_assignment_table(db)
+    # ---------- 条件分支 ----------
     if not settings.is_production:
+        # ---------- 条件分支 ----------
         if use_assignment_table:
             logger.debug("TB搜索数据：使用产品分配历史表查询")
         else:
@@ -80,6 +108,7 @@ async def get_tb_search_data(
 
     # 构建查询
     # 使用LEFT JOIN确保即使关联数据缺失也能查询到TB搜索数据
+    # ---------- 条件分支 ----------
     if use_assignment_table:
         # 使用产品分配历史表进行查询
         query = select(TBSearchData, Product, Client, User, ProductAssignment, CountryInfo)
@@ -109,8 +138,10 @@ async def get_tb_search_data(
         query = join_country_info(query)
 
     # 权限过滤
+    # ---------- 条件分支 ----------
     if not is_admin(current_user):
         query = query.where(Client.user_id == current_user.id)
+    # ---------- 条件分支 ----------
     elif client_id:
         query = query.where(Client.id == client_id)
 
@@ -119,7 +150,9 @@ async def get_tb_search_data(
     query = query.where(or_(Product.id.is_(None), Product.is_active == True))
 
     # 过滤条件
+    # ---------- 条件分支 ----------
     if safe_strip(product_id):
+        # ---------- 异常处理 ----------
         try:
             pid = int(product_id)
             query = query.where(TBSearchData.product_id == pid)
@@ -127,6 +160,7 @@ async def get_tb_search_data(
             pass
 
     code = safe_strip(country_code)
+    # ---------- 条件分支 ----------
     if code and code != 'ZZ' and len(code) <= 2:
         query = query.where(TBSearchData.country_code == code)
 
@@ -134,10 +168,13 @@ async def get_tb_search_data(
     # 如果传递了日期范围，使用传递的日期范围
     # 如果没有传递日期范围，默认显示当前月的数据（与其他端点保持一致）
     # 但前端可以通过传递一个很大的日期范围来显示所有数据
+    # ---------- 条件分支 ----------
     if start_date:
         query = query.where(TBSearchData.date >= datetime.combine(start_date, datetime.min.time()))
+    # ---------- 条件分支 ----------
     if end_date:
         query = query.where(TBSearchData.date <= datetime.combine(end_date, datetime.max.time()))
+    # ---------- 条件分支 ----------
     elif not start_date and not end_date:
         # 如果没有传递日期范围，默认显示当前月的数据
         today = date.today()
@@ -162,6 +199,7 @@ async def get_tb_search_data(
     }
     
     sort_col = sort_fields.get(sort_by, TBSearchData.date)
+    # ---------- 条件分支 ----------
     if sort_order == "desc":
         query = query.order_by(sort_col.desc())
     else:
@@ -172,6 +210,7 @@ async def get_tb_search_data(
     count_query = select(func.count(TBSearchData.id))
     count_query = count_query.outerjoin(Product, TBSearchData.product_id == Product.id)
     
+    # ---------- 条件分支 ----------
     if use_assignment_table:
         # 使用产品分配历史表
         count_query = count_query.outerjoin(
@@ -191,15 +230,19 @@ async def get_tb_search_data(
         count_query = count_query.outerjoin(Client, Product.client_id == Client.id)
     
     # 应用相同的过滤条件
+    # ---------- 条件分支 ----------
     if not is_admin(current_user):
         count_query = count_query.where(Client.user_id == current_user.id)
+    # ---------- 条件分支 ----------
     elif client_id:
         count_query = count_query.where(Client.id == client_id)
     
     # 产品状态过滤：只显示激活状态的产品（如果产品存在）
     count_query = count_query.where(or_(Product.id.is_(None), Product.is_active == True))
         
+    # ---------- 条件分支 ----------
     if safe_strip(product_id):
+        # ---------- 异常处理 ----------
         try:
             pid = int(product_id)
             count_query = count_query.where(TBSearchData.product_id == pid)
@@ -207,14 +250,18 @@ async def get_tb_search_data(
             pass
             
     code = safe_strip(country_code)
+    # ---------- 条件分支 ----------
     if code and code != 'ZZ' and len(code) <= 2:
         count_query = count_query.where(TBSearchData.country_code == code)
             
     # 日期范围过滤（与主查询保持一致）
+    # ---------- 条件分支 ----------
     if start_date:
         count_query = count_query.where(TBSearchData.date >= datetime.combine(start_date, datetime.min.time()))
+    # ---------- 条件分支 ----------
     if end_date:
         count_query = count_query.where(TBSearchData.date <= datetime.combine(end_date, datetime.max.time()))
+    # ---------- 条件分支 ----------
     elif not start_date and not end_date:
         # 如果没有传递日期范围，默认显示当前月的数据
         today = date.today()
@@ -233,8 +280,10 @@ async def get_tb_search_data(
     data = result.unique().all()
 
     response_list = []
+    # ---------- 循环处理 ----------
     for row in data:
         # 根据是否使用产品分配历史表，解包不同的结果
+        # ---------- 条件分支 ----------
         if use_assignment_table:
             tb_data, product, client, user, product_assignment, country_info = row
         else:
@@ -281,6 +330,7 @@ async def get_tb_search_data(
         )
         response_list.append(item)
 
+    # ---------- 构建响应 ----------
     return PaginatedResponseBaseSchema.success(
         data=response_list,
         total=total,
@@ -295,11 +345,20 @@ async def import_tb_search_data(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """
+    从 Excel 批量导入 TB 搜索数据（仅管理员）。
+
+    必需列：DATE、SUBID（产品名）、GEO；可选 REDIRECTS/SEARCHES/MONETIZED/CLICKS/REVENUE/RPM。
+    产品不存在时自动创建；同日期+产品+国家已存在则更新；按产品扣量比例计算 revenue/rpm。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 条件分支 ----------
     if not is_admin(current_user):
         raise_api_exception(ErrorCode.PERMISSION_DENIED, detail="仅管理员可导入")
 
     # 验证文件并读取内容（使用公共验证函数）
     contents = await validate_excel_file(file)
+    # ---------- 异常处理 ----------
     try:
         from app.core.excel_io import read_excel_from_bytes
         df = await read_excel_from_bytes(contents)
@@ -315,6 +374,7 @@ async def import_tb_search_data(
     
     required_cols = ["DATE", "SUBID", "GEO"]
     missing = [col for col in required_cols if col not in df.columns]
+    # ---------- 条件分支 ----------
     if missing:
         #raise_api_exception(ErrorCode.INVALID_PARAMS, detail=f"缺少必要列: {', '.join(missing)}")
         return ResponseBaseSchema.success(data={"message": f"导入失败：缺少必要列 {', '.join(missing)}。请检查Excel文件格式。", "errors": [f"缺少必要列: {', '.join(missing)}"]})
@@ -322,13 +382,16 @@ async def import_tb_search_data(
     success_count = 0
     errors = []
     
+    # ---------- 循环处理 ----------
     for index, row in df.iterrows():
+        # ---------- 异常处理 ----------
         try:
             # 解析日期：使用统一的日期键规范化函数
             date_val = normalize_date_key(parse_date_value(row["DATE"]))
                 
             # 解析产品名称（SUBID）
             product_name = str(row["SUBID"]).strip()
+            # ---------- 条件分支 ----------
             if not product_name:
                 raise ValueError("SUBID(产品名称)不能为空")
                 
@@ -338,6 +401,7 @@ async def import_tb_search_data(
             product_res = await db.execute(select(Product).where(Product.name == product_name))
             product = product_res.scalars().first()
             
+            # ---------- 条件分支 ----------
             if not product:
                 # 产品不存在，自动创建
                 # 1. 查找或创建默认客户：使用统一的辅助函数
@@ -360,10 +424,12 @@ async def import_tb_search_data(
             # 解析GEO
             geo = str(row["GEO"]).strip()
             # 简单验证GEO
+            # ---------- 条件分支 ----------
             if len(geo) > 2:
                 # 尝试查找对应的二字代码
                 # 这里简单处理，如果找不到且长度>2则设为ZZ
                 found = await find_country_code_by_any_format(db, geo)
+                # ---------- 条件分支 ----------
                 if found:
                     geo = found
                 else:
@@ -393,16 +459,20 @@ async def import_tb_search_data(
             # RPM：只有在单元格为空/NaN时才按公式计算；如果有值（包括0），则直接使用
             rpm_cell = row.get("RPM", None)
             rpm_origin: float | None = None
+            # ---------- 条件分支 ----------
             if rpm_cell is None or (isinstance(rpm_cell, float) and pd.isna(rpm_cell)) or (isinstance(rpm_cell, str) and rpm_cell.strip() == ""):
                 rpm_origin = None
             else:
+                # ---------- 异常处理 ----------
                 try:
                     rpm_origin = float(rpm_cell)
                 except Exception:
                     rpm_origin = None
 
+            # ---------- 条件分支 ----------
             if rpm_origin is None and searches > 0:
                 rpm_origin = (revenue_origin / searches) * 1000
+            # ---------- 条件分支 ----------
             if rpm_origin is None:
                 rpm_origin = 0.0
             
@@ -414,6 +484,7 @@ async def import_tb_search_data(
             revenue = truncate_to_2_decimal(revenue_origin * (1 - revenue_deduct_ratio))
             rpm = truncate_to_2_decimal(rpm_origin * (1 - ecpm_deduct_ratio))
             
+            # ---------- 条件分支 ----------
             if existing:
                 # 更新
                 existing.redirects = redirects
@@ -450,6 +521,7 @@ async def import_tb_search_data(
     # 如果发生异常，get_db 会自动回滚
         
     msg = f"成功导入 {success_count} 条数据"
+    # ---------- 条件分支 ----------
     if errors:
         msg += f"，{len(errors)} 条失败"
 
@@ -467,6 +539,7 @@ async def import_tb_search_data(
         },
     )
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data={"message": msg, "errors": errors[:10]}) # 只返回前10个错误
 
 @router.delete("/batch", response_model=ResponseBaseSchema[dict], summary="批量删除TB搜索数据")
@@ -476,6 +549,11 @@ async def batch_delete_tb_search_data(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """
+    按 ID 列表批量删除 TB 搜索数据。
+
+    权限：仅管理员。
+    """
     if not is_admin(current_user):
         raise_api_exception(ErrorCode.PERMISSION_DENIED, detail="仅管理员可删除")
         
@@ -506,6 +584,12 @@ async def delete_tb_search_data(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """
+    按主键删除单条 TB 搜索数据记录。
+
+    删除不可恢复；用于纠正错误或清理测试数据。
+    权限：仅管理员。
+    """
     if not is_admin(current_user):
         raise_api_exception(ErrorCode.PERMISSION_DENIED, detail="仅管理员可删除")
 
@@ -537,6 +621,14 @@ async def update_tb_search_data(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """
+    更新单条 TB 搜索数据字段。
+
+    权限：仅管理员。
+    返回含关联产品、客户信息的完整响应体。
+    """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 条件分支 ----------
     if not is_admin(current_user):
         raise_api_exception(ErrorCode.PERMISSION_DENIED, detail="仅管理员可修改")
 
@@ -544,13 +636,16 @@ async def update_tb_search_data(
     result = await db.execute(query)
     tb_data = result.scalar_one_or_none()
     
+    # ---------- 条件分支 ----------
     if not tb_data:
         raise_api_exception(ErrorCode.NOT_FOUND, detail="数据不存在")
 
     update_dict = data_update.model_dump(exclude_unset=True)
+    # ---------- 循环处理 ----------
     for k, v in update_dict.items():
         setattr(tb_data, k, v)
 
+    # ---------- 条件分支 ----------
     if update_dict:
         await log_update(
             db=db,
@@ -591,6 +686,7 @@ async def update_tb_search_data(
 
     # 使用统一的名称获取函数
     
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=TBSearchDataResponse(
         id=tb_data.id,
         date=date_val,
@@ -627,11 +723,14 @@ async def get_clients_with_tb_search_data(
     - 管理员可查看所有有数据的客户
     - 客户只能看到自己
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(db)
         
         # 构建基础查询 - 返回 Client.id 和 User.full_name
+        # ---------- 条件分支 ----------
         if use_assignment_table:
             # 使用产品分配历史表
             query = select(func.distinct(Client.id), User.full_name, User.username, Client.user_id)
@@ -662,17 +761,21 @@ async def get_clients_with_tb_search_data(
         query = query.where(Product.is_active == True)
         
         # 权限过滤
+        # ---------- 条件分支 ----------
         if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
         
         # 日期范围过滤
+        # ---------- 条件分支 ----------
         if start_date:
             start_datetime = datetime.combine(start_date, datetime.min.time())
             query = query.where(TBSearchData.date >= start_datetime)
+        # ---------- 条件分支 ----------
         if end_date:
             end_datetime = datetime.combine(end_date, datetime.max.time())
             query = query.where(TBSearchData.date <= end_datetime)
         # 如果没有指定日期范围，默认查询当前月的数据
+        # ---------- 条件分支 ----------
         elif not start_date and not end_date:
             today = date.today()
             month_start = date(today.year, today.month, 1)
@@ -690,6 +793,7 @@ async def get_clients_with_tb_search_data(
         
         # 转换为响应格式
         clients_list = []
+        # ---------- 循环处理 ----------
         for client_id, full_name, username, user_id in clients_data:
             clients_list.append({
                 "id": client_id,
@@ -725,11 +829,14 @@ async def get_products_with_tb_search_data(
     - 只返回激活状态的产品
     - 使用产品分配历史表时，会根据日期匹配正确的客户归属
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(db)
         
         # 构建基础查询
+        # ---------- 条件分支 ----------
         if use_assignment_table:
             # 使用产品分配历史表
             query = select(func.distinct(Product.id), Product.name, Product.client_id)
@@ -756,19 +863,24 @@ async def get_products_with_tb_search_data(
         query = query.where(Product.is_active == True)
         
         # 权限过滤
+        # ---------- 条件分支 ----------
         if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
+        # ---------- 条件分支 ----------
         elif client_id:
             query = query.where(Client.id == client_id)
         
         # 日期范围过滤
+        # ---------- 条件分支 ----------
         if start_date:
             start_datetime = datetime.combine(start_date, datetime.min.time())
             query = query.where(TBSearchData.date >= start_datetime)
+        # ---------- 条件分支 ----------
         if end_date:
             end_datetime = datetime.combine(end_date, datetime.max.time())
             query = query.where(TBSearchData.date <= end_datetime)
         # 如果没有指定日期范围，默认查询当前月的数据
+        # ---------- 条件分支 ----------
         elif not start_date and not end_date:
             today = date.today()
             month_start = date(today.year, today.month, 1)
@@ -786,6 +898,7 @@ async def get_products_with_tb_search_data(
         
         # 转换为响应格式
         products_list = []
+        # ---------- 循环处理 ----------
         for product_id, product_name, product_client_id in products_data:
             products_list.append({
                 "id": product_id,
@@ -819,11 +932,14 @@ async def get_countries_with_tb_search_data(
     - 只返回在指定条件下有数据的国家
     - 如果没有指定日期范围，使用当前月作为默认范围
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(db)
         
         # 构建基础查询
+        # ---------- 条件分支 ----------
         if use_assignment_table:
             # 使用产品分配历史表
             query = select(func.distinct(TBSearchData.country_code), CountryInfo.country_name_zh)
@@ -854,13 +970,17 @@ async def get_countries_with_tb_search_data(
         query = query.where(Product.is_active == True)
         
         # 权限过滤
+        # ---------- 条件分支 ----------
         if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
+        # ---------- 条件分支 ----------
         elif client_id:
             query = query.where(Client.id == client_id)
         
         # 产品ID过滤
+        # ---------- 条件分支 ----------
         if product_id:
+            # ---------- 异常处理 ----------
             try:
                 pid = int(product_id)
                 query = query.where(TBSearchData.product_id == pid)
@@ -868,13 +988,16 @@ async def get_countries_with_tb_search_data(
                 pass
         
         # 日期范围过滤
+        # ---------- 条件分支 ----------
         if start_date:
             start_datetime = datetime.combine(start_date, datetime.min.time())
             query = query.where(TBSearchData.date >= start_datetime)
+        # ---------- 条件分支 ----------
         if end_date:
             end_datetime = datetime.combine(end_date, datetime.max.time())
             query = query.where(TBSearchData.date <= end_datetime)
         # 如果没有指定日期范围，默认查询当前月的数据
+        # ---------- 条件分支 ----------
         elif not start_date and not end_date:
             today = date.today()
             month_start = date(today.year, today.month, 1)
@@ -892,7 +1015,9 @@ async def get_countries_with_tb_search_data(
         
         # 转换为响应格式
         countries_list = []
+        # ---------- 循环处理 ----------
         for country_code, country_name_zh in countries_data:
+            # ---------- 条件分支 ----------
             if country_code and country_code != 'ZZ':
                 countries_list.append({
                     "code": country_code,
@@ -902,7 +1027,9 @@ async def get_countries_with_tb_search_data(
         # 去重并排序
         seen = set()
         unique_countries = []
+        # ---------- 循环处理 ----------
         for country in countries_list:
+            # ---------- 条件分支 ----------
             if country["code"] not in seen:
                 seen.add(country["code"])
                 unique_countries.append(country)

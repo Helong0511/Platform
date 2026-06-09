@@ -1,7 +1,20 @@
+<!--
+  转化总览报表页面（ConversionSummary.vue）
+
+  功能区块：
+  1. 筛选区：日期范围、平台、产品、客户等多维筛选
+  2. 汇总表格：按维度聚合展示转化数与金额
+  3. 列显隐：支持自定义表格列展示
+
+  数据加载与格式化由 useConversionSummary.js 提供。
+-->
 <template>
-  <div class="conversion-summary">
+  <!-- 页面主模板 -->
+  <!-- 页面主模板 -->
+<div class="conversion-summary">
     <el-card class="page-card">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="card-header">
           <div class="header-left">
             <el-icon class="header-icon"><DataAnalysis /></el-icon>

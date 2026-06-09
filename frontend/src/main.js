@@ -1,5 +1,12 @@
 /**
- * 主入口文件（优化版）
+ * Vue 应用入口
+ * @file main.js
+ *
+ * 启动流程：
+ * 1. 初始化 Axios 拦截器与全局错误处理
+ * 2. 创建 Vue 实例，注册 Element Plus 及全部图标
+ * 3. 挂载 Pinia、Router 后渲染根组件 App.vue
+ * 4. 生产环境启用版本检查，发现新版本自动刷新
  */
 import { createApp } from 'vue';
 import App from './App.vue';

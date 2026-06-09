@@ -1,4 +1,15 @@
-"""Postback IP 白名单服务。"""
+"""
+Postback IP 白名单业务服务。
+
+职责：
+- 白名单 CRUD、分页查询与批量导入
+- 新增 IP 后自动批准该来源的待确认转化（委托 PostbackPendingService）
+- 接收链路由 PostbackProcessor 校验来源 IP；非白名单请求进入待确认队列
+
+注意：白名单为空时的放行策略以平台配置为准；CIDR 须与 get_client_ip 解析一致。
+
+对应路由：app/api_v1/postback（ip_whitelist 子路由）
+"""
 import logging
 from typing import List, Optional
 
@@ -25,7 +36,12 @@ logger = logging.getLogger(__name__)
 
 
 class PostbackIpWhitelistService:
-    """Postback IP 白名单 CRUD 与批量操作。"""
+    """
+    Postback IP 白名单服务。
+
+    管理允许直接入库 Postback 转化请求的来源 IP；
+    与待确认转化服务联动，实现「加白即批准」的运维流程。
+    """
 
     async def list_ip_whitelist(
             self,
@@ -36,6 +52,19 @@ class PostbackIpWhitelistService:
             db: AsyncSession,
             current_user: User,
     ):
+        """
+        分页查询 IP 白名单。
+
+        Args:
+            ip_address: IP 模糊匹配，可选
+            is_active: 激活状态过滤，可选
+            page / page_size: 分页参数
+            db: 异步数据库会话
+            current_user: 当前管理员用户
+
+        Returns:
+            PaginatedResponseBaseSchema: 白名单列表与 total
+        """
         try:
             query = select(PostbackIpWhitelist)
             conditions = []
@@ -88,6 +117,22 @@ class PostbackIpWhitelistService:
             db: AsyncSession,
             current_user: User,
     ):
+        """
+        新增单条 IP 白名单。
+
+        创建成功后对该 IP 下所有 pending 待确认记录执行自动批准。
+
+        Args:
+            data: PostbackIpWhitelistCreate（ip_address、description、is_active）
+            db: 异步数据库会话
+            current_user: 当前管理员用户
+
+        Returns:
+            ResponseBaseSchema: 新建记录；message 含自动批准条数摘要
+
+        Raises:
+            APIException: IP 已存在或写入失败
+        """
         try:
             existing = await db.execute(
                 select(PostbackIpWhitelist).where(
@@ -150,6 +195,20 @@ class PostbackIpWhitelistService:
             db: AsyncSession,
             current_user: User,
     ):
+        """
+        更新白名单记录（部分字段）。
+
+        修改 ip_address 时校验不与其它记录冲突。
+
+        Args:
+            whitelist_id: 白名单主键
+            data: PostbackIpWhitelistUpdate 部分字段
+            db: 异步数据库会话
+            current_user: 当前管理员用户
+
+        Returns:
+            ResponseBaseSchema: 更新后的白名单记录
+        """
         try:
             result = await db.execute(
                 select(PostbackIpWhitelist).where(
@@ -213,6 +272,19 @@ class PostbackIpWhitelistService:
             db: AsyncSession,
             current_user: User,
     ):
+        """
+        批量创建 IP 白名单。
+
+        跳过已存在 IP 并记入 failed_items；成功项逐条触发自动批准。
+
+        Args:
+            data: PostbackIpWhitelistBatchCreate（ip_addresses 列表及公共字段）
+            db: 异步数据库会话
+            current_user: 当前管理员用户
+
+        Returns:
+            ResponseBaseSchema: 含 success/failed 计数及明细列表
+        """
         try:
             created_items: List[PostbackIpWhitelist] = []
             failed_items = []
@@ -345,6 +417,17 @@ class PostbackIpWhitelistService:
             db: AsyncSession,
             current_user: User,
     ):
+        """
+        删除单条 IP 白名单。
+
+        Args:
+            whitelist_id: 白名单主键
+            db: 异步数据库会话
+            current_user: 当前管理员用户
+
+        Returns:
+            ResponseBaseSchema: 已删除记录的 id 与 ip_address
+        """
         try:
             result = await db.execute(
                 select(PostbackIpWhitelist).where(

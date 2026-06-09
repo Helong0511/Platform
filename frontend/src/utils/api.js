@@ -67,7 +67,6 @@
  * 
  * @module utils/api
  */
-
 // 静态导入所有依赖，避免Vite构建警告（动态导入与静态导入混用）
 import logger from './logger';
 import axios from 'axios';
@@ -171,6 +170,7 @@ export const normalizeResponse = (response, options = {}) => {
  *   total_pages: 10     // 总页数
  * }
  * 
+ * 将后端 PaginatedResponseBaseSchema 统一为前端列表使用的 { data, total, page, page_size } 结构。
  * @param {Object} response - axios响应对象
  * @returns {Object} 标准化后的分页数据
  */
@@ -675,6 +675,12 @@ export const requestUploadWithCsrfRetry = async (config, options = {}) => {
   throw lastError;
 };
 
+/**
+ * 文件上传请求（自动附带 CSRF 令牌）
+ * @param {Object} config - axios 请求配置（data 为 FormData）
+ * @param {Object} [options] - returnDataOnly、silent、timeout、refreshEndpoint
+ * @returns {Promise<*>}
+ */
 export const requestUpload = async (config, options = {}) => {
   const {
     returnDataOnly = true,
@@ -704,6 +710,12 @@ export const requestUpload = async (config, options = {}) => {
   return request(uploadConfig, { returnDataOnly, silent, timeout });
 };
 
+/**
+ * 下载 blob 响应并触发浏览器保存（如 Excel 导出）
+ * @param {Object} config - axios 请求配置
+ * @param {Object} [options] - defaultFilename、onSuccess、silent
+ * @returns {Promise<boolean|undefined>}
+ */
 export const requestBlobDownload = async (config, options = {}) => {
   const {
     defaultFilename = 'download.xlsx',

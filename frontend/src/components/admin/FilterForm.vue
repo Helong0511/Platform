@@ -1,5 +1,12 @@
+<!--
+  通用筛选表单组件
+  @file components/admin/FilterForm.vue
+-->
 <template>
-  <el-card class="filter-card" shadow="never">
+  <!-- 页面主模板 -->
+<!-- 筛选区 -->
+<el-card class="filter-card" shadow="never">
+    <!-- 表单区域 -->
     <el-form :inline="true" :model="modelValue" class="filter-form" label-width="90px">
       <el-form-item label="公司名称">
         <el-input 

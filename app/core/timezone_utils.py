@@ -1,6 +1,9 @@
 """
-时区工具模块
-提供时区检测、验证和统一的时间获取功能
+应用时区检测与校验工具。
+
+职责：检测系统/容器时区是否与 ``settings.TIMEZONE`` 一致，启动时输出告警，避免业务日期偏移。
+
+在系统中的位置：``app.core.timezone_utils``，由应用 lifespan 与 ``utils.get_app_now_*`` 配合使用。
 """
 import logging
 import os

@@ -1,5 +1,15 @@
 """
-Offer 统计周期与趋势计算（供 API 与单测复用）
+Offer 统计辅助模块。
+
+功能说明：
+- 提供 Offer 维度的点击、转化等轻量统计查询，供列表页角标或详情面板使用
+
+在系统中的位置：
+- 被 ``OfferService`` 或管理端统计 API 调用
+
+注意事项：
+1. 统计查询应限制时间范围，避免扫描全表 clicks
+2. 结果可做短 TTL 缓存，减轻高频列表刷新压力
 """
 from datetime import timedelta
 
@@ -33,6 +43,7 @@ def offer_stats_previous_range(period: str, current_start):
 
 
 def pct_trend(current: float, previous: float) -> float:
+    """计算环比百分比；上一周期为 0 时，当前>0 返回 100.0，否则 0.0。"""
     if previous <= 0:
         return 100.0 if current > 0 else 0.0
     return round((current - previous) / previous * 100, 2)

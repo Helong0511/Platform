@@ -1,6 +1,12 @@
-"""
-短链接访问记录 API（clicks 表数据）
-"""
+"""短链接点击访问记录 API 路由模块。
+
+提供 clicks 表数据的分页查询与详情查看，支持按 click_id、Offer、
+渠道、时间范围等维度筛选。业务逻辑委托 ClickService 处理。
+
+路由前缀：/api/v1/cpl/clicks
+权限：所有端点需管理员。
+
+说明：CPL 子系统接口，涵盖广告主（上游）、渠道（下游）、Offer、Cap、扣量与转化。"""
 import logging
 from typing import Optional
 
@@ -48,9 +54,11 @@ async def get_clicks(
     - 如果没有提供日期范围，默认查询最近7天的数据（优化性能）
     - 最大查询范围限制为90天（防止查询过大数据量）
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在ClickService中）
     click_service: ClickService = await get_click_service(db)
 
+    # ---------- 异常处理 ----------
     try:
         # 调用服务层获取点击记录列表（服务层会处理查询、过滤、分页、日期验证等）
         click_list, total = await click_service.get_clicks(
@@ -88,7 +96,12 @@ async def get_click_detail(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """获取单条短链接访问记录详情（包含请求头等完整字段）。"""
+    """
+    获取单条短链接点击记录详情。
+
+    权限：登录用户。
+    返回完整请求头、设备信息、归因参数等调试字段。
+    """
     click_service: ClickService = await get_click_service(db)
 
     try:
@@ -111,7 +124,12 @@ async def resend_click_facebook_report(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """对已转化点击进行 Facebook 像素补报。"""
+    """
+    对已归因转化的点击补发 Facebook Pixel/CAPI 上报。
+
+    权限：仅管理员。
+    用于修复漏报或测试斗篷上报链路。
+    """
     click_service: ClickService = await get_click_service(db)
     try:
         result = await click_service.resend_facebook_report(click_record_id)

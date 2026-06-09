@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - Cap 表单编辑
+ * @file composables/useCapForm.js
+ */
 import { reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { getCaps, createCap, updateCap, deleteCap } from '../api/cap';
@@ -18,11 +22,18 @@ const emptyForm = () => ({
  * Cap 配置创建/编辑对话框。
  * @param {{ loadData: () => Promise<void> }} deps
  */
+/**
+ * 组合式函数 - Cap 表单编辑
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useCapForm({ loadData }) {
+  // 提交中状态
   const submitting = ref(false);
   const dialogVisible = ref(false);
+  // 是否为编辑模式
   const isEdit = ref(false);
   const formRef = ref(null);
+  // 表单数据
   const formData = reactive(emptyForm());
   const formRules = createCapFormRules(() => formData);
 

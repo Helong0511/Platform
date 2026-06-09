@@ -1,10 +1,19 @@
+/**
+ * 组合式函数 - 通用分页与筛选状态
+ * @file composables/usePagination.js
+ */
 import { ref, reactive } from 'vue';
 
 /**
  * 分页和筛选 Composable
  * 处理分页状态和筛选条件
  */
+/**
+ * 组合式函数 - 通用分页与筛选状态
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function usePagination(initialSize = 10) {
+  // 分页状态 { page, pageSize/page_size, total }
   const pagination = ref({
     current: 1,
     size: initialSize,

@@ -1,7 +1,14 @@
-"""
-点击追踪 API 端点
-处理点击追踪、Click ID 生成、Tracklink 生成等功能
-"""
+"""点击追踪 API
+
+职责：接收渠道点击、生成 Click ID、拼装下游 Tracklink 并 302 跳转至上游 Offer。
+
+权限：追踪跳转端点公开；调试/查询接口需登录。
+
+主要端点（无前缀，注意路由顺序）：
+- GET /track/{offer_id}           主追踪入口（生成 click 并跳转）
+- GET /track/click/{click_id}     按已有 Click ID 重定向。
+
+说明：点击追踪与短链接服务，记录访问并对接斗篷跳转。"""
 import json
 import logging
 import asyncio
@@ -44,16 +51,22 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
         click_data: 点击记录数据
         max_retries: 最大重试次数
     """
+    # ---------- 入口：参数与依赖准备 ----------
     
+    # ---------- 上下文管理 ----------
     async with AsyncSessionLocal() as session:
+        # ---------- 循环处理 ----------
         for attempt in range(max_retries):
+            # ---------- 异常处理 ----------
             try:
                 # 在插入前检查 click_id 是否已存在
                 click_id = click_data.get('click_id')
+                # ---------- 条件分支 ----------
                 if click_id:
                     existing_click = await session.execute(
                         select(Click).where(Click.click_id == click_id)
                     )
+                    # ---------- 条件分支 ----------
                     if existing_click.scalars().first():
                         # click_id 已存在，重新生成
                         logger.warning(
@@ -73,6 +86,7 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
             except IntegrityError as e:
                 # 处理唯一性约束错误（重复的 click_id）
                 error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+                # ---------- 条件分支 ----------
                 if 'Duplicate entry' in error_msg or 'UNIQUE constraint' in error_msg or 'click_id' in error_msg:
                     # 检测到重复的 click_id，重新生成并重试
                     old_click_id = click_data.get('click_id')
@@ -88,6 +102,7 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
                     continue
                 else:
                     # 其他完整性约束错误，按正常流程处理
+                    # ---------- 条件分支 ----------
                     if attempt < max_retries - 1:
                         logger.warning(
                             f"异步保存点击记录失败（尝试 {attempt + 1}/{max_retries}）: {e}, "
@@ -99,6 +114,7 @@ async def create_click_background(click_data: dict, max_retries: int = 3):
                     else:
                         raise
             except Exception as e:
+                # ---------- 条件分支 ----------
                 if attempt < max_retries - 1:
                     logger.warning(
                         f"异步保存点击记录失败（尝试 {attempt + 1}/{max_retries}）: {e}, "
@@ -128,7 +144,14 @@ async def track_click(
     """
     点击追踪接口（公开接口，无需认证）
     记录点击信息并生成 Click ID，然后重定向到目标 URL
+    
+    功能：处理业务请求（track_click）。
+    实现：异步端点，通过 Service 层访问数据库/缓存。
+    鉴权：由 Depends(get_current_user) 或 require_admin 控制访问范围。
+    响应：统一 ResponseBaseSchema / PaginatedResponseBaseSchema 包装。
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         # 1. 查询 Offer
         result = await db.execute(
@@ -136,12 +159,14 @@ async def track_click(
         )
         offer = result.scalars().first()
         
+        # ---------- 条件分支 ----------
         if not offer:
             raise_api_exception(
                 ErrorCode.RESOURCE_NOT_FOUND,
                 detail=f"Offer ID {offer_id} 不存在"
             )
         
+        # ---------- 条件分支 ----------
         if not offer.is_active or offer.status != 'Active':
             raise_api_exception(
                 ErrorCode.RESOURCE_NOT_FOUND,
@@ -154,6 +179,7 @@ async def track_click(
         )
         publisher = pub_result.scalars().first()
         
+        # ---------- 条件分支 ----------
         if not publisher:
             raise_api_exception(
                 ErrorCode.RESOURCE_NOT_FOUND,
@@ -223,11 +249,14 @@ async def track_click(
         logger.info(f"点击请求已接收 (异步写入): click_id={click_id}, offer_id={offer_id}")
         
         # 6. 生成重定向 URL（使用下游 Tracklink 或 Preview Link）
+        # ---------- 条件分支 ----------
         if offer.downstream_tracklink:
             # 如果有下游 Tracklink，使用它
             redirect_url = offer.downstream_tracklink.replace('{click_id}', click_id)
+            # ---------- 条件分支 ----------
             if publisher:
                 redirect_url = redirect_url.replace('{publisher_id}', str(publisher.id))
+        # ---------- 条件分支 ----------
         elif offer.preview_link:
             # 否则使用 Preview Link，添加 Click ID 参数
             separator = '&' if '?' in offer.preview_link else '?'

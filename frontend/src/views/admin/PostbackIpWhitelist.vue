@@ -1,4 +1,16 @@
+<!--
+  Postback IP 白名单管理页面（PostbackIpWhitelist.vue）
+
+  功能区块：
+  1. 工具栏：单条/批量添加 IP、筛选与刷新
+  2. 白名单表格：IP 地址、备注、启用状态、创建时间
+  3. 编辑弹窗：新建或修改白名单记录
+  4. 批量添加弹窗：多行 IP 一次性导入
+
+  仅白名单内的 IP 发送的 postback 请求会被系统接收并记录。
+-->
 <template>
+  <!-- 页面主模板 -->
   <div class="ip-whitelist-container">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -19,7 +31,9 @@
     </div>
 
     <!-- 筛选控件 -->
+    <!-- 筛选区 -->
     <el-card class="filter-card" shadow="never">
+      <!-- 表单区域 -->
       <el-form :inline="true" :model="searchForm" class="filter-form">
         <el-form-item label="IP地址">
           <el-input 
@@ -53,7 +67,8 @@
 
     <!-- 数据表格 -->
     <el-card class="data-table-card" shadow="never">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="table-header">
           <span>IP 白名单列表</span>
           <el-button 

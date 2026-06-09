@@ -106,6 +106,7 @@ def invalidate_bridge_template_cache(path: Optional[str] = None) -> None:
 
 
 def _permission_help_extra(path: str) -> str:
+    """生成桥页文件不可写时的运维提示文案（含 chown/chmod 命令）。"""
     return (
         f"路径：{path}。"
         "若文件属主为 root，请在服务器执行（将运行用户换成实际进程用户，如 www-data）："

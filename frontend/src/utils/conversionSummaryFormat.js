@@ -1,3 +1,7 @@
+/**
+ * 工具模块 - 转化总览字段格式化
+ * @file utils/conversionSummaryFormat.js
+ */
 import { ElMessage } from 'element-plus';
 
 /** 当月首日与末日（YYYY-MM-DD，本地时区） */

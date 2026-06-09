@@ -1,7 +1,15 @@
-"""
-用户操作日志API端点
-提供用户操作日志的查询功能，仅管理员可访问
-"""
+"""用户操作审计日志 API
+
+职责：分页查询登录、CRUD、任务执行等审计记录，支持多维度筛选。
+
+权限：仅管理员（require_admin）。
+
+主要端点（前缀 /audit-logs）：
+- GET /              分页列表
+- GET /action-types  操作类型枚举
+- GET /stats         统计概览。
+
+说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。"""
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -65,10 +73,12 @@ async def get_audit_logs(
     - 操作是否成功
     - 时间范围
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在AuditLogService中）
     audit_log_service: AuditLogService = await get_audit_log_service(db)
     started_at = perf_counter()
     
+    # ---------- 异常处理 ----------
     try:
         # 调用服务层获取操作日志列表（服务层会处理查询、过滤、分页）
         service_started_at = perf_counter()
@@ -145,9 +155,11 @@ async def get_audit_log_stats(
     
     使用缓存提升性能（缓存 5 分钟）
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在AuditLogService中）
     audit_log_service: AuditLogService = await get_audit_log_service(db)
     
+    # ---------- 异常处理 ----------
     try:
         # 调用服务层获取日志统计摘要（服务层会处理查询、统计、缓存）
         stats = await audit_log_service.get_audit_log_stats(
@@ -182,7 +194,10 @@ async def get_audit_log(
         current_user: User = Depends(require_admin)
 ):
     """
-    获取用户操作日志详情（已重构使用服务层）
+    按 ID 获取单条操作审计日志详情。
+
+    权限：仅管理员。
+    含操作人、资源类型、变更前后详情、请求 IP 等完整字段。
     """
     # 使用服务层（业务逻辑在AuditLogService中）
     audit_log_service: AuditLogService = await get_audit_log_service(db)
@@ -232,29 +247,38 @@ async def log_client_error(
     
     注意：此端点允许未认证用户访问，用于记录前端错误
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在AuditLogService中）
     
     audit_log_service: AuditLogService = await get_audit_log_service(db)
     
+    # ---------- 异常处理 ----------
     try:
         # 尝试获取当前用户（如果有认证信息）
         current_user = None
         username = None
+        # ---------- 异常处理 ----------
         try:
             # 从请求头中获取token
             auth_header = request.headers.get("Authorization", "")
+            # ---------- 条件分支 ----------
             if auth_header.startswith("Bearer "):
                 token = auth_header.replace("Bearer ", "")
+                # ---------- 条件分支 ----------
                 if token:
                     # verify_token 是异步方法，需要使用 await
                     payload = await JWTUtils.verify_token(token, db=db)
+                    # ---------- 条件分支 ----------
                     if payload and "sub" in payload:
                         user_id = payload.get("sub")
+                        # ---------- 条件分支 ----------
                         if user_id:
+                            # ---------- 异常处理 ----------
                             try:
                                 user_id_int = int(user_id)
                                 result = await db.execute(select(User).where(User.id == user_id_int))
                                 current_user = result.scalar_one_or_none()
+                                # ---------- 条件分支 ----------
                                 if current_user:
                                     username = current_user.username
                             except (ValueError, Exception):

@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 扣减配置表单
+ * @file composables/useConversionDeductionForm.js
+ */
 import { computed, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
@@ -18,15 +22,24 @@ import {
  * 转化扣减配置新增/编辑对话框。
  * @param {{ fetchData: () => Promise<void> }} deps
  */
+/**
+ * 组合式函数 - 扣减配置表单
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useConversionDeductionForm({ fetchData }) {
+  // 弹窗显隐
   const dialogVisible = ref(false);
   const dialogMode = ref('add');
+  // currentConfig 响应式状态
   const currentConfig = ref(null);
   const submitting = ref(false);
+  // targetLoading 响应式状态
   const targetLoading = ref(false);
   const targetOptions = ref([]);
+  // formRef 响应式状态
   const formRef = ref(null);
 
+  // 编辑表单数据
   const form = reactive(emptyConversionDeductionForm());
   const rules = createConversionDeductionFormRules(() => form);
 

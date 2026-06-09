@@ -1,7 +1,16 @@
-"""
-API端点模块统一导出
-按业务模块组织，提供清晰的导入路径
-"""
+"""API v1 路由统一聚合入口
+
+职责：按业务域 import 各子模块 router，并注册到 api_router，供 FastAPI 主应用挂载。
+
+权限：各子模块自行声明（require_admin / get_current_user 等），本文件不做鉴权。
+
+主要前缀一览：
+- /auth、/users、/clients、/products、/ad-data、/dashboard
+- /excel、/ml-model、/scheduled-tasks、/audit-logs、/cloak-configs
+- /advertisers、/publishers、/offers、/caps、/discounts（CPL）
+- 无前缀：Postback、点击追踪、客户 API。
+
+说明：包入口，聚合子模块 router 供 api_router 注册。"""
 from fastapi import APIRouter
 
 # 创建统一的路由聚合器

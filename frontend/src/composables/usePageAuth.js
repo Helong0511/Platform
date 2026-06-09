@@ -7,6 +7,10 @@ import { useRouter } from 'vue-router';
 import { useAuthStore } from '../store';
 import { ElMessage } from 'element-plus';
 
+/**
+ * 组合式函数 - 页面级权限校验
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function usePageAuth() {
   const router = useRouter();
   const authStore = useAuthStore();

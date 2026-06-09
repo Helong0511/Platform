@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 缓存操作：删除单条/批量清理
+ * @file composables/useCacheActions.js
+ */
 import { ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
@@ -11,9 +15,15 @@ import { logger } from '../utils/logger';
  * 缓存查看、刷新、清除（对接后端 API）。
  * @param {{ removeByKey: (key: string) => void, clearAll: () => void, refreshCacheList: () => Promise<void> }} deps
  */
+/**
+ * 组合式函数 - 缓存操作：删除单条/批量清理
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useCacheActions({ removeByKey, clearAll, refreshCacheList }) {
+  // clearingAll 响应式状态
   const clearingAll = ref(false);
   const cacheDetailVisible = ref(false);
+  // currentCache 响应式状态
   const currentCache = ref({});
 
   const viewCache = async (cache) => {

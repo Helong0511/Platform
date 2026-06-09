@@ -1,3 +1,8 @@
+"""
+Facebook Pixel Token 有效性快速校验：GET graph.facebook.com/{pixel_id}。
+
+用于排查 Access Token 过期或权限不足问题。
+"""
 import requests
 
 # 测试 lp6

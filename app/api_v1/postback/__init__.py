@@ -1,4 +1,11 @@
-"""Postback 模块初始化"""
+"""Postback 服务模块
+
+职责：统一 Postback 回调接收、转化管理、BFT 兼容路由、IP 白名单。
+
+外部回调无需登录；管理端接口需管理员。
+
+说明：处理上游转化回调、下游转发、去重诊断与 IP 白名单管理。
+说明：包入口，聚合子模块 router 或导出 Schema 供上层引用。"""
 from fastapi import APIRouter
 from .routes import router as postback_router
 from .bft import router as bft_router

@@ -1,3 +1,8 @@
+"""
+落地页热区 CSS 生成工具：读取 regions.json，输出与模板一致的 .apple-btn 等样式块。
+
+配合 wxPython 热区标注工具使用，将可视化框选结果转为可粘贴的 CSS。
+"""
 import json
 import os
 import re

@@ -33,31 +33,42 @@ import {
  * 斗篷管理页组合式函数：集中管理列表、表单、上传、测试上报的全部状态与事件。
  * 供 CloakManagement.vue 解构使用，保持 Vue 组件仅负责模板渲染。
  */
+/**
+ * 组合式函数 - 斗篷配置列表与表单状态
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useCloakConfigs() {
   // ---------- 列表与加载状态 ----------
   const loading = ref(false); // 表格数据请求中
   const saving = ref(false); // 编辑弹窗保存中
+  // 表格当前页数据
   const tableData = ref([]); // 当前页斗篷配置行
 
   // ---------- 编辑弹窗 ----------
   const formRef = ref(null); // Element Plus 表单实例，保存前调用 validate()
   const editDialogVisible = ref(false);
+  // editingId 响应式状态
   const editingId = ref(null); // null=新建，数字=编辑已有配置 id
 
   // ---------- 测试上报弹窗（两步骤：选阶段 → 看结果） ----------
   const testDialogVisible = ref(false); // 展示 CAPI 请求/响应详情
   const testPhaseDialogVisible = ref(false); // 选择 load/click/postback 阶段
+  // testPhase 响应式状态
   const testPhase = ref('postback'); // 当前选中的测试阶段，默认转化
   const testPhaseTargetRow = ref(null); // 待测试的表格行
+  // testSubmitting 响应式状态
   const testSubmitting = ref(false);
   const currentTestingRow = ref(null);
+  // testResult 响应式状态
   const testResult = ref(null); // testCloakReport API 返回的 primary/backup 详情
 
   // ---------- 桥页 HTML 上传弹窗 ----------
   const uploadDialogVisible = ref(false);
   const uploadDialogKey = ref(0); // 递增以强制 el-upload 重新挂载，清空已选文件
+  // uploadTargetRow 响应式状态
   const uploadTargetRow = ref(null);
   const uploadSelectedFile = ref(null); // el-upload on-change 得到的 raw File
+  // uploading 响应式状态
   const uploading = ref(false);
 
   // ---------- 搜索与分页 ----------

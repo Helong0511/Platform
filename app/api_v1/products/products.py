@@ -1,5 +1,4 @@
-"""
-产品管理API端点模块
+"""产品管理API端点模块
 
 功能说明：
 提供产品信息的完整CRUD操作，包括：
@@ -63,8 +62,9 @@
 2. 删除产品前必须检查关联的广告数据
 3. 产品转移会自动处理分配历史
 4. Postback URL支持占位符变量
-5. 所有操作都记录审计日志
-"""
+5. 所有操作都记录审计日志。
+
+说明：REST API 端点，统一 ResponseBaseSchema 响应；鉴权由各端点 Depends 声明。"""
 # 标准库导入
 import logging
 import uuid
@@ -106,11 +106,17 @@ logger = logging.getLogger(__name__)
 
 # 用于返回的产品简要信息模型
 class ProductNameOption(BaseModel):
+    """
+    下拉选择用的产品简要信息（id + 名称 + 归属客户）
+    
+    继承 BaseModel。业务数据模型，用于序列化与反序列化。
+    """
     id: int
     name: str
     client_id: int
 
     class Config:
+        """允许从 ORM Product 构造。用于 API 请求/响应序列化与 OpenAPI 文档生成。"""
         from_attributes = True
 
 
@@ -129,6 +135,8 @@ async def get_available_product_names(
     - 支持搜索过滤
     - 返回产品对象列表，包含id、name、client_id
     """
+    # ---------- 入口：参数与依赖准备 ----------
+    # ---------- 异常处理 ----------
     try:
         # 1. 查找所有管理员用户和关联的客户 - 使用JOIN优化，一次性查询
         # 优化：使用JOIN一次性获取管理员用户及其关联的客户ID，减少查询次数
@@ -145,9 +153,11 @@ async def get_available_product_names(
         )
 
         # 如果指定了要排除的客户ID，排除该客户已有的所有产品（包括转移后的产品）
+        # ---------- 条件分支 ----------
         if exclude_client_id:
             # 明确排除当前客户的所有产品（client_id == exclude_client_id）
             # 返回：关联管理员的客户的产品（排除当前客户的） + 其他客户的产品（排除当前客户的）
+            # ---------- 条件分支 ----------
             if admin_client_ids:
                 # 排除当前客户的产品，保留关联管理员的客户的产品和其他客户的产品
                 products_query = products_query.where(Product.client_id != exclude_client_id)
@@ -156,6 +166,7 @@ async def get_available_product_names(
                 products_query = products_query.where(Product.client_id != exclude_client_id)
         else:
             # 如果没有指定排除客户ID，返回关联管理员的客户的产品和所有其他客户的产品
+            # ---------- 条件分支 ----------
             if admin_client_ids:
                 # 返回所有产品（包括管理员客户和其他客户）
                 pass  # 不需要额外过滤
@@ -164,8 +175,10 @@ async def get_available_product_names(
                 pass
 
         # 4. 应用搜索过滤（优先使用全文搜索，回退到LIKE）
+        # ---------- 条件分支 ----------
         if search and search.strip():
             cleaned_search = sanitize_input(search.strip(), max_length=100)
+            # ---------- 条件分支 ----------
             if cleaned_search:
                 products_query = await search_with_fulltext(
                     db=db,
@@ -184,6 +197,7 @@ async def get_available_product_names(
         # 6. 转换为响应模型
         product_options = []
         admin_client_ids_set = set(admin_client_ids)  # 转换为set以提高查找效率
+        # ---------- 循环处理 ----------
         for product in products:
             product_options.append(ProductNameOption(
                 id=product.id,
@@ -292,6 +306,7 @@ async def create_product(
     - 设置产品名称和减扣比例
     - 支持处理默认客户（导入数据）的特殊逻辑
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在ProductService中）
     product_service: ProductService = await get_product_service(db)
     
@@ -302,6 +317,7 @@ async def create_product(
     product = await product_service.create_product(product_data, current_user)
     
     # 记录创建操作
+    # ---------- 异常处理 ----------
     try:
         await log_create(
             db=db,
@@ -327,6 +343,7 @@ async def create_product(
         await commit_audit_log(db)
     
     # 构建响应数据
+    # ---------- 异常处理 ----------
     try:
         product_data = ProductResponse.model_validate(product)
         return ResponseBaseSchema.success(data=product_data)
@@ -356,6 +373,7 @@ async def update_product(
     - 修改扣减比例后，不会更新现有的广告数据，新比例只影响未来导入的数据
     - 支持产品分配历史转移
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在ProductService中）
     product_service: ProductService = await get_product_service(db)
     
@@ -372,7 +390,9 @@ async def update_product(
     product = await product_service.update_product(product_id, update_data, current_user)
 
     wrote_audit = False
+    # ---------- 条件分支 ----------
     if "is_active" in update_data and update_data["is_active"] != old_is_active:
+        # ---------- 条件分支 ----------
         if product.is_active:
             await log_activate(
                 db=db,
@@ -397,8 +417,10 @@ async def update_product(
         **update_data,
         "note": "修改扣减比例后，不会更新现有广告数据，新比例只影响未来导入的数据"
     }
+    # ---------- 条件分支 ----------
     if "ecpm_deduct_ratio" in update_data or "revenue_deduct_ratio" in update_data:
         deduct_ratio_changes = {}
+        # ---------- 条件分支 ----------
         if "ecpm_deduct_ratio" in update_data:
             new_ecpm_ratio = update_data["ecpm_deduct_ratio"]
             deduct_ratio_changes["ecpm_deduct_ratio"] = {
@@ -407,6 +429,7 @@ async def update_product(
                 "change": f"{old_ecpm_deduct_ratio} → {new_ecpm_ratio}",
                 "change_percentage": f"{(new_ecpm_ratio - old_ecpm_deduct_ratio) * 100:.2f}%",
             }
+        # ---------- 条件分支 ----------
         if "revenue_deduct_ratio" in update_data:
             new_revenue_ratio = update_data["revenue_deduct_ratio"]
             deduct_ratio_changes["revenue_deduct_ratio"] = {
@@ -418,6 +441,7 @@ async def update_product(
         log_details["deduct_ratio_changes"] = deduct_ratio_changes
         log_details["is_deduct_ratio_adjusted"] = True
 
+    # ---------- 条件分支 ----------
     if len(update_data) > 1 or "is_active" not in update_data:
         await log_update(
             db=db,
@@ -430,9 +454,11 @@ async def update_product(
         )
         wrote_audit = True
 
+    # ---------- 条件分支 ----------
     if wrote_audit:
         await commit_audit_log(db)
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=ProductResponse.model_validate(product))
 
 
@@ -451,6 +477,7 @@ async def delete_product(
       1. 如果产品关联了广告数据 → 将产品的 client_id 改为管理员的默认客户（不删除产品）
       2. 如果没有关联广告数据 → 直接删除产品
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在ProductService中）
     product_service: ProductService = await get_product_service(db)
 
@@ -463,6 +490,7 @@ async def delete_product(
     )
     ad_data_count = count_result.scalar() or 0
 
+    # ---------- 条件分支 ----------
     if ad_data_count == 0:
         await log_delete(
             db=db,
@@ -480,6 +508,7 @@ async def delete_product(
 
     result = await product_service.delete_product(product_id, current_user)
 
+    # ---------- 条件分支 ----------
     if result.get("transferred"):
         await log_update(
             db=db,
@@ -501,4 +530,5 @@ async def delete_product(
             "new_client_id": result.get("new_client_id")
         })
 
+    # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data={"message": result["message"]})

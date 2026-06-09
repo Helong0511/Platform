@@ -1,7 +1,13 @@
+<!--
+  管理端 - 转化扣减配置
+  @file views/admin/ConversionDeductionManagement.vue
+-->
 <template>
-  <div class="conversion-deduction-management">
+  <!-- 页面主模板 -->
+<div class="conversion-deduction-management">
     <el-card class="page-card">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="card-header">
           <div class="header-left">
             <el-icon class="header-icon"><Setting /></el-icon>

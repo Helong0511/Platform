@@ -1,5 +1,11 @@
-/** 转化扣减配置展示文案 */
+/**
+ * 转化扣减配置展示格式化
+ * @file utils/conversionDeductionFormat.js
+ *
+ * 将扣减层级、状态等枚举值转为中文标签与 Element Plus 标签颜色。
+ */
 
+/** 扣减层级 → 中文标签 */
 export function getLevelLabel(level) {
   const map = {
     advertiser: '广告主',
@@ -18,6 +24,9 @@ export function getLevelTagType(level) {
   return map[level] || '';
 }
 
+/**
+ * 转化扣量策略的中文展示名。
+ */
 export function getStrategyLabel(strategy) {
   const map = {
     random: '随机',

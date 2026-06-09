@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_gunicorn_role() -> str:
+    """读取 Gunicorn 进程角色：api（默认）或 scheduler。"""
     return os.getenv("GUNICORN_ROLE", "api").strip().lower()
 
 
@@ -23,6 +24,7 @@ def get_service_display_name() -> str:
 
 
 def get_service_port_hint() -> str:
+    """返回当前服务对外监听端口提示（scheduler 8961，api 8960）。"""
     if get_gunicorn_role() == "scheduler":
         return "8961"
     return "8960"
@@ -45,6 +47,7 @@ def should_send_service_lifecycle_notify() -> bool:
 
 
 def build_service_started_message() -> str:
+    """拼装服务启动通知正文（含系统名与监听地址）。"""
     label = get_service_display_name()
     port = get_service_port_hint()
     return (
@@ -55,11 +58,18 @@ def build_service_started_message() -> str:
 
 
 def build_service_stopped_message() -> str:
+    """拼装服务关闭通知正文。"""
     label = get_service_display_name()
     return f"🧩 【{label}】已关闭\n系统：{settings.SERVER_NAME}"
 
 
 def notify_service_started() -> bool:
+    """
+    向管理员 Telegram 发送服务启动通知。
+
+    Returns:
+        是否成功发送；TELEGRAM_ENABLE=false 或非负责 worker 时返回 False
+    """
     if not getattr(settings, "TELEGRAM_ENABLE", True):
         logger.info("TELEGRAM_ENABLE=false，跳过服务启动通知")
         return False
@@ -72,6 +82,12 @@ def notify_service_started() -> bool:
 
 
 def notify_service_stopped() -> bool:
+    """
+    向管理员 Telegram 发送服务关闭通知。
+
+    Returns:
+        是否成功发送
+    """
     if not getattr(settings, "TELEGRAM_ENABLE", True):
         return False
     if not should_send_service_lifecycle_notify():

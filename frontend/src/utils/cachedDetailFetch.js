@@ -1,12 +1,8 @@
 /**
  * 带 TTL 缓存与请求去重的详情拉取
- */
-
-/**
- * @param {Object} options
- * @param {number} [options.ttlMs=300000]
- * @param {number} [options.maxEntries=50]
- * @param {number} [options.errorCacheMs=30000]
+ * @file utils/cachedDetailFetch.js
+ *
+ * 创建详情缓存器，避免重复请求同一 ID，支持过期时间与并发去重。
  */
 export function createCachedDetailFetcher(options = {}) {
   const ttlMs = options.ttlMs ?? 5 * 60 * 1000;

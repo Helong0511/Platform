@@ -1,4 +1,18 @@
-"""Postback 重复转化检查服务。"""
+"""
+Postback 重复转化检查服务。
+
+功能说明：
+- 检测正式转化表、待确认表内 platform+conversion_id+event_name 重复组
+- 检测待确认与正式表之间的「跨表重复」，辅助排查重复回调或幂等失效
+- 管理员运维工具，只读查询，不修改数据
+
+在系统中的位置：
+- 被管理端运维/诊断 API 调用
+
+注意事项：
+1. 仅管理员可访问，避免泄露转化明细给普通客户
+2. 结果用于人工决策，不自动删除重复记录
+"""
 import logging
 from typing import Optional, Dict, Any
 
@@ -16,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class PostbackDuplicateService:
-    """Postback 重复转化检查服务"""
+    """Postback 重复转化检测：表内重复与跨表重复。"""
 
     async def check_duplicate_conversions(
             self,
@@ -26,18 +40,30 @@ class PostbackDuplicateService:
             current_user: User
     ):
         """
-        检查重复的转化记录（仅管理员）
-        
-        检查以下情况：
-        1. 正式转化记录表中的重复记录（相同 platform + conversion_id + event_name）
-        2. 待确认记录表中的重复记录（相同 platform + conversion_id + event_name）
-        3. 待确认记录与正式记录之间的重复（相同 platform + conversion_id + event_name）
+        检查重复的转化记录（仅管理员）。
+
+        重复判定键：platform + conversion_id + event_name。
+
+        检查范围：
+        1. postback_conversions 表内 count>1 的分组及明细
+        2. pending_postback_conversions（status=pending）表内重复
+        3. pending 与 formal 之间相同三元组是否同时存在
+
+        Args:
+            platform: 可选，限定平台。
+            conversion_id: 可选，限定转化 ID。
+            db: 异步数据库会话。
+            current_user: 操作管理员，写入 info 日志。
+
+        Returns:
+            ResponseBaseSchema，data 含 formal_duplicates、pending_duplicates、
+            cross_duplicates 及 summary 计数。
         """
         try:
             duplicates_info: Dict[str, Any] = {
-                "formal_duplicates": [],  # 正式记录中的重复
-                "pending_duplicates": [],  # 待确认记录中的重复
-                "cross_duplicates": [],  # 待确认与正式记录之间的重复
+                "formal_duplicates": [],
+                "pending_duplicates": [],
+                "cross_duplicates": [],
                 "summary": {
                     "formal_duplicate_count": 0,
                     "pending_duplicate_count": 0,
@@ -45,7 +71,7 @@ class PostbackDuplicateService:
                 }
             }
 
-            # 1. 检查正式转化记录表中的重复
+            # 1. 正式表：GROUP BY 后 HAVING count > 1
             formal_query = select(
                 PostbackConversion.platform,
                 PostbackConversion.conversion_id,
@@ -66,7 +92,6 @@ class PostbackDuplicateService:
             formal_duplicates = formal_result.all()
 
             for dup in formal_duplicates:
-                # 查询所有重复的记录详情
                 detail_query = select(PostbackConversion).where(
                     PostbackConversion.platform == dup.platform,
                     PostbackConversion.conversion_id == dup.conversion_id,
@@ -94,7 +119,7 @@ class PostbackDuplicateService:
 
             duplicates_info["summary"]["formal_duplicate_count"] = len(formal_duplicates)
 
-            # 2. 检查待确认记录表中的重复（只检查 pending 状态的）
+            # 2. 待确认表：仅 status=pending 参与重复统计
             pending_query = select(
                 PendingPostbackConversion.platform,
                 PendingPostbackConversion.conversion_id,
@@ -117,7 +142,6 @@ class PostbackDuplicateService:
             pending_duplicates = pending_result.all()
 
             for dup in pending_duplicates:
-                # 查询所有重复的记录详情
                 detail_query = select(PendingPostbackConversion).where(
                     PendingPostbackConversion.platform == dup.platform,
                     PendingPostbackConversion.conversion_id == dup.conversion_id,
@@ -147,8 +171,7 @@ class PostbackDuplicateService:
 
             duplicates_info["summary"]["pending_duplicate_count"] = len(pending_duplicates)
 
-            # 3. 检查待确认记录与正式记录之间的重复
-            # 查询所有待确认的记录
+            # 3. 跨表：批量加载 pending 对应的 formal 行，避免逐条查询
             all_pending_query = select(PendingPostbackConversion).where(
                 PendingPostbackConversion.status == 'pending'
             )

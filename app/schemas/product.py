@@ -1,9 +1,19 @@
+"""产品（Product）Schema：扣量比例、下游 Postback 转发、通知地址、客户转移日期等。
+
+产品归属下游客户，与 Offer、广告数据、转化回传链路关联。
+
+说明：请求/响应 JSON 结构定义，供 FastAPI 校验与 OpenAPI 文档生成。"""
 from datetime import datetime, date
 
 from pydantic import BaseModel, Field, ConfigDict
 
 
 class ProductBase(BaseModel):
+    """
+    产品公共字段：扣量比例、下游 Postback、通知地址、客户转移日期等
+    
+    公共字段基类，供 Create/Update/Response 等子模型复用，避免重复定义。
+    """
     name: str | None = None
     ecpm_deduct_ratio: float | None = Field(None, ge=0, le=1)
     revenue_deduct_ratio: float | None = Field(None, ge=0, le=1)
@@ -37,6 +47,11 @@ class ProductBase(BaseModel):
 
 
 class ProductCreate(ProductBase):
+    """
+    创建产品请求（名称、扣量比例、归属客户为必填）
+    
+    创建请求体：包含新建记录所需字段，提交前由 Pydantic 自动校验类型与取值范围。
+    """
     name: str
     ecpm_deduct_ratio: float = Field(..., ge=0, le=1)
     revenue_deduct_ratio: float = Field(..., ge=0, le=1)
@@ -44,10 +59,20 @@ class ProductCreate(ProductBase):
 
 
 class ProductUpdate(ProductBase):
+    """
+    更新产品请求，支持变更 client_id 并指定转移日期
+    
+    更新请求体：字段均为可选，客户端仅提交需要修改的列。
+    """
     pass
 
 
 class ProductInDBBase(ProductBase):
+    """
+    数据库产品记录，含主键与时间戳
+    
+    公共字段基类，供 Create/Update/Response 等子模型复用，避免重复定义。
+    """
     id: int
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -56,10 +81,20 @@ class ProductInDBBase(ProductBase):
 
 
 class ProductResponse(ProductInDBBase):
+    """
+    单条产品 API 响应
+    
+    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    """
     pass
 
 
 class ProductListResponse(BaseModel):
+    """
+    产品分页列表响应
+    
+    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    """
     data: list[ProductResponse]
     total: int
     page: int

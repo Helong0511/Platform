@@ -1,5 +1,7 @@
-/** 审计日志展示与 JSON 格式化 */
-
+/**
+ * 工具模块 - 审计日志字段格式化
+ * @file utils/auditLogFormat.js
+ */
 export function getActionTypeTag(actionType) {
   const tagMap = {
     LOGIN: 'success',
@@ -21,6 +23,9 @@ export function getActionTypeTag(actionType) {
   return tagMap[actionType] || '';
 }
 
+/**
+ * 审计日志资源类型的中文名。
+ */
 export function getResourceTypeLabel(resourceType) {
   const labelMap = {
     USER: '用户',
@@ -56,6 +61,9 @@ export function getResourceTypeLabel(resourceType) {
   return labelMap[resourceType] || resourceType;
 }
 
+/**
+ * 审计日志操作类型的中文名。
+ */
 export function getActionTypeLabel(actionType) {
   const labelMap = {
     LOGIN: '登录',
@@ -77,6 +85,9 @@ export function getActionTypeLabel(actionType) {
   return labelMap[actionType] || actionType;
 }
 
+/**
+ * HTTP 状态码对应的标签 type。
+ */
 export function getStatusCodeTag(statusCode) {
   if (statusCode >= 200 && statusCode < 300) return 'success';
   if (statusCode >= 300 && statusCode < 400) return 'info';
@@ -85,6 +96,9 @@ export function getStatusCodeTag(statusCode) {
   return '';
 }
 
+/**
+ * 格式化Audit Json。
+ */
 export function formatAuditJson(jsonString) {
   try {
     let obj = typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;

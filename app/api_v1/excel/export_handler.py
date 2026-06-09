@@ -1,7 +1,10 @@
-"""
-Excel导出处理模块
-处理广告数据的Excel导出逻辑
-"""
+"""广告数据 Excel 导出处理
+
+职责：按筛选条件查询 AdData，生成 xlsx 流式响应；支持管理员全量与客户自有数据。
+
+权限：需登录；数据范围按角色过滤。
+
+说明：Excel 批量导入/导出，支持广告数据等业务的表格批处理。"""
 import logging
 from calendar import monthrange
 from datetime import date, datetime
@@ -36,13 +39,21 @@ async def export_ad_data_handler(
     - 客户只能导出自己的广告数据
     - 支持按日期范围、产品ID和国家代码过滤
     - 返回Excel文件流
+    
+    功能：导出数据（export_ad_data_handler）。
+    实现：异步端点，通过 Service 层访问数据库/缓存。
+    鉴权：由 Depends(get_current_user) 或 require_admin 控制访问范围。
+    响应：统一 ResponseBaseSchema / PaginatedResponseBaseSchema 包装。
     """
+    # ---------- 入口：参数与依赖准备 ----------
     # 获取客户信息 - 使用selectinload预加载（如果需要）
+    # ---------- 条件分支 ----------
     if current_user.role != UserRole.ADMIN:
         # 优化：直接查询客户，避免额外查询
         client_query = select(Client).where(Client.user_id == current_user.id)
         client_result = await db.execute(client_query)
         client = client_result.scalars().first()
+        # ---------- 条件分支 ----------
         if not client:
             logger.warning(f"客户用户 {current_user.username} 没有关联的客户账户")
             raise_api_exception(
@@ -59,6 +70,7 @@ async def export_ad_data_handler(
         data_count_query = select(func.count(AdData.id)).join(
             Product, AdData.product_id == Product.id
         )
+        # ---------- 条件分支 ----------
         if use_assignment_table_for_count:
             # 使用产品分配历史表（优化：避免在 AdData.date 上使用 func.date()）
             # 使用与 ad_data.py 完全相同的方式，将日期范围条件放在 JOIN 条件中
@@ -79,10 +91,12 @@ async def export_ad_data_handler(
             # JOIN Client表，然后通过WHERE子句过滤客户ID（与 ad_data.py 保持一致）
             data_count_query = data_count_query.join(Client, ProductAssignment.client_id == Client.id)
             # 在WHERE子句中过滤客户ID（如果指定了客户ID）
+            # ---------- 条件分支 ----------
             if target_client_id is not None:
                 data_count_query = data_count_query.where(Client.id == target_client_id)
         else:
             # 旧的查询方式
+            # ---------- 条件分支 ----------
             if target_client_id is not None:
                 data_count_query = data_count_query.where(Product.client_id == target_client_id)
 
@@ -90,9 +104,11 @@ async def export_ad_data_handler(
         data_count_query = data_count_query.where(Product.is_active == True)
 
         # 应用日期范围过滤（如果指定了日期范围）
+        # ---------- 条件分支 ----------
         if start_date:
             start_datetime = datetime.combine(start_date, datetime.min.time())
             data_count_query = data_count_query.where(AdData.date >= start_datetime)
+        # ---------- 条件分支 ----------
         if end_date:
             end_datetime = datetime.combine(end_date, datetime.max.time())
             data_count_query = data_count_query.where(AdData.date <= end_datetime)
@@ -100,6 +116,7 @@ async def export_ad_data_handler(
         data_count_result = await db.execute(data_count_query)
         total_data_count = data_count_result.scalar() or 0
 
+        # ---------- 条件分支 ----------
         if total_data_count == 0:
             logger.info(f"客户用户 {current_user.username} (客户ID: {target_client_id}) 没有任何广告数据")
             raise_api_exception(
@@ -118,6 +135,7 @@ async def export_ad_data_handler(
     query = select(AdData, CountryInfo)
     query = query.join(Product, AdData.product_id == Product.id)
 
+    # ---------- 条件分支 ----------
     if use_assignment_table:
         # 使用产品分配历史表：根据日期范围匹配正确的客户归属（优化：避免在 AdData.date 上使用 func.date()）
         # 注意：导出时需要考虑日期范围，确保只导出该客户在该时间段内的数据
@@ -139,11 +157,13 @@ async def export_ad_data_handler(
         # JOIN Client表，然后通过WHERE子句过滤客户ID（与 ad_data.py 保持一致）
         query = query.join(Client, ProductAssignment.client_id == Client.id)
         # 在WHERE子句中过滤客户ID（如果指定了客户ID）
+        # ---------- 条件分支 ----------
         if target_client_id is not None:
             query = query.where(Client.id == target_client_id)
     else:
         # 旧的查询方式：直接通过Product.client_id关联
         # 如果指定了客户ID，直接过滤；如果没有指定，需要JOIN Client表来支持后续的权限过滤
+        # ---------- 条件分支 ----------
         if target_client_id is not None:
             query = query.where(Product.client_id == target_client_id)
         else:
@@ -162,13 +182,16 @@ async def export_ad_data_handler(
     query = query.where(Product.is_active == True)
 
     # 应用日期过滤（直接使用条件，避免函数可能的问题）
+    # ---------- 条件分支 ----------
     if start_date:
         start_datetime = datetime.combine(start_date, datetime.min.time())
         query = query.where(AdData.date >= start_datetime)
+    # ---------- 条件分支 ----------
     if end_date:
         end_datetime = datetime.combine(end_date, datetime.max.time())
         query = query.where(AdData.date <= end_datetime)
     # 如果没有指定日期范围，默认查询当前月的数据（与 ad_data.py 保持一致）
+    # ---------- 条件分支 ----------
     elif not start_date and not end_date:
         today = date.today()
         # 当前月的第一天
@@ -183,7 +206,9 @@ async def export_ad_data_handler(
         query = query.where(AdData.date <= month_end_datetime)
 
     # 应用产品过滤
+    # ---------- 条件分支 ----------
     if product_id:
+        # ---------- 条件分支 ----------
         if use_assignment_table:
             # 使用产品分配历史表时，需要验证产品在指定日期范围内是否属于该客户
             # 这里简化处理：如果查询能返回数据，说明产品在该时间段属于该客户
@@ -198,6 +223,7 @@ async def export_ad_data_handler(
             )
             product_result = await db.execute(product_query)
             product = product_result.scalars().first()
+            # ---------- 条件分支 ----------
             if not product:
                 raise_api_exception(
                     error_code=ErrorCode.NOT_FOUND,
@@ -207,11 +233,14 @@ async def export_ad_data_handler(
         query = query.where(AdData.product_id == product_id)
 
     # 国家代码过滤
+    # ---------- 条件分支 ----------
     if country_code and country_code.strip():
         country_code_clean = country_code.strip()
         # 验证国家代码长度（ISO 3166-1 二字母代码最多2个字符）
+        # ---------- 条件分支 ----------
         if country_code_clean != 'ZZ' and len(country_code_clean) <= 2:
             query = query.where(AdData.country_code == country_code_clean)
+        # ---------- 条件分支 ----------
         elif len(country_code_clean) > 2:
             # 国家代码长度超过2个字符，记录警告但不报错
             logger.warning(f"导出时国家代码长度超过2个字符: {country_code_clean}，将忽略此过滤条件")
@@ -221,17 +250,23 @@ async def export_ad_data_handler(
     ad_data_results = result.all()  # 返回 (AdData, CountryInfo) 元组列表
 
     # 如果没有数据，抛出错误提示用户
+    # ---------- 条件分支 ----------
     if not ad_data_results or len(ad_data_results) == 0:
         # 构建更详细的错误信息
         filter_info = []
+        # ---------- 条件分支 ----------
         if start_date:
             filter_info.append(f"开始日期: {start_date}")
+        # ---------- 条件分支 ----------
         if end_date:
             filter_info.append(f"结束日期: {end_date}")
+        # ---------- 条件分支 ----------
         if product_id:
             filter_info.append(f"产品ID: {product_id}")
+        # ---------- 条件分支 ----------
         if client_id:
             filter_info.append(f"客户ID: {client_id}")
+        # ---------- 条件分支 ----------
         if country_code and country_code.strip() and country_code.strip() != 'ZZ':
             filter_info.append(f"国家代码: {country_code}")
 
@@ -252,6 +287,7 @@ async def export_ad_data_handler(
     product_map = {p.id: p.name for p in products}
 
     product_to_user_map = {}
+    # ---------- 条件分支 ----------
     if is_admin:
         client_ids = list({p.client_id for p in products})
         clients_query = select(Client, User).join(
@@ -259,15 +295,18 @@ async def export_ad_data_handler(
         ).where(Client.id.in_(client_ids))
         clients_result = await db.execute(clients_query)
         client_user_map = {}
+        # ---------- 循环处理 ----------
         for client, user in clients_result.all():
             client_user_map[client.id] = user.full_name or user.username
 
+        # ---------- 循环处理 ----------
         for product in products:
             product_to_user_map[product.id] = client_user_map.get(
                 product.client_id, "未知用户"
             )
 
     data = []
+    # ---------- 循环处理 ----------
     for item, country_info in ad_data_results:
         coverage_rate = item.coverage_rate if item.coverage_rate is not None else round(
             (item.match_count / item.request_count * 100) if item.request_count > 0 else 0.0,
@@ -283,21 +322,27 @@ async def export_ad_data_handler(
         )
 
         date_value = item.date
+        # ---------- 条件分支 ----------
         if isinstance(date_value, datetime):
             date_value = date_value.date()
+        # ---------- 条件分支 ----------
         elif hasattr(date_value, 'date'):
             date_value = date_value.date()
 
         country_code = item.country_code or ""
+        # ---------- 条件分支 ----------
         if country_info:
             country_name = country_info.country_name_zh
+        # ---------- 条件分支 ----------
         elif country_code == "AA":
             country_name = "未知区域"
+        # ---------- 条件分支 ----------
         elif country_code == "ZZ":
             country_name = "全部区域"
         else:
             country_name = ""
 
+        # ---------- 条件分支 ----------
         if is_admin:
             row_data = {
                 "数据日期": date_value,
@@ -342,6 +387,7 @@ async def export_ad_data_handler(
 
         data.append(row_data)
 
+    # ---------- 构建响应 ----------
     return excel_streaming_response(
         data, "广告数据", "广告数据", max_col_width=None
     )

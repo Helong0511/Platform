@@ -1,6 +1,16 @@
 """
-通知配置管理服务层
-封装客户和产品通知配置的业务逻辑
+通知配置管理服务层。
+
+功能说明：
+- 客户级、产品级、管理员级 Postback/转化通知配置的 CRUD
+- 校验转发 URL 占位符、测试连通性、触发即时通知与汇总策略
+
+在系统中的位置：
+- 被管理端通知配置 API 调用；与 ``PostbackForwarder``、``PostbackNotifier`` 联动
+
+注意事项：
+1. 配置变更后应失效相关缓存，避免旧配置继续转发
+2. 客户用户仅能修改自身 Client 下配置
 """
 import logging
 from typing import Optional, List, Dict, Any, Tuple
@@ -32,9 +42,15 @@ logger = logging.getLogger(__name__)
 
 
 class NotificationConfigService:
-    """通知配置服务"""
+    """
+    通知配置与通知记录服务。
+
+    配置类方法按 client_id / product_id 隔离；记录查询支持多维度筛选，
+    并在指定 conversion_id 无记录时自动补建 pending 通知（便于前端展示）。
+    """
 
     def __init__(self, db: AsyncSession):
+        """注入异步数据库会话。"""
         self.db = db
 
     # ==================== 客户通知配置 ====================
@@ -45,14 +61,16 @@ class NotificationConfigService:
             current_user: User
     ) -> Optional[ClientNotificationConfig]:
         """
-        获取客户的通知配置
+        获取指定客户的 Telegram 通知配置。
+
+        非管理员须为本人所属客户；配置不存在时返回 None（非 404）。
 
         Args:
-            client_id: 客户ID
+            client_id: 客户 ID
             current_user: 当前用户
 
         Returns:
-            Optional[ClientNotificationConfig]: 通知配置对象，如果不存在则返回None
+            配置对象或 None
         """
         # 权限检查：管理员或客户本人
         if current_user.role != UserRole.ADMIN:
@@ -84,15 +102,17 @@ class NotificationConfigService:
             current_user: User
     ) -> ClientNotificationConfig:
         """
-        创建或更新客户的通知配置
+        创建或更新客户通知配置（upsert）。
+
+        已存在则逐字段 setattr 更新；不存在则新建 ClientNotificationConfig。
 
         Args:
-            client_id: 客户ID
-            config_data: 配置数据
+            client_id: 客户 ID
+            config_data: 配置字段字典（如 chat_id、开关等）
             current_user: 当前用户
 
         Returns:
-            ClientNotificationConfig: 通知配置对象
+            保存后的配置对象
         """
         # 验证客户是否存在
         result = await self.db.execute(select(Client).where(Client.id == client_id))
@@ -347,24 +367,28 @@ class NotificationConfigService:
             current_user: User = None
     ) -> Tuple[List[PostbackNotification], int]:
         """
-        获取通知记录列表
+        分页查询 Postback 通知记录。
+
+        客户用户自动限定 client_id；支持转化/产品/渠道/状态/渠道类型/日期等筛选。
+        特殊逻辑：按 conversion_id 查询且结果为空时，若该转化确实无任何通知记录，
+        则自动创建一条 pending 状态的 Telegram 通知（便于运营补发）。
 
         Args:
             page: 页码
             page_size: 每页数量
-            conversion_id: 转化记录ID过滤
-            client_id: 客户ID过滤
-            product_id: 产品ID过滤
-            publisher_id: 渠道ID过滤
-            notification_status: 通知状态过滤
-            notification_channel: 通知渠道过滤
-            notification_type: 通知类型过滤
+            conversion_id: 转化记录 ID
+            client_id: 客户 ID
+            product_id: 产品 ID
+            publisher_id: 渠道 ID
+            notification_status: 通知状态（pending/sent/failed 等）
+            notification_channel: 通知渠道
+            notification_type: 通知类型
             start_date: 开始日期（YYYY-MM-DD）
             end_date: 结束日期（YYYY-MM-DD）
             current_user: 当前用户
 
         Returns:
-            Tuple[List[PostbackNotification], int]: (通知记录列表, 总数)
+            (通知记录列表, 总条数)
         """
         # 权限检查：管理员可以查看所有，客户只能查看自己的
         query = select(PostbackNotification)
@@ -438,7 +462,7 @@ class NotificationConfigService:
         result = await self.db.execute(query)
         notifications = result.scalars().all()
 
-        # 如果指定了 conversion_id 且没有找到通知记录，检查是否真的没有任何通知记录
+        # ====== 自动补建通知记录（仅 conversion_id 查询且无结果时） ======
         if conversion_id and total == 0:
             # 检查该转化记录是否真的没有任何通知记录（不考虑其他过滤条件）
             check_query = select(func.count(PostbackNotification.id)).where(
@@ -729,14 +753,17 @@ class NotificationConfigService:
             current_user: User
     ) -> Dict[str, Any]:
         """
-        批量补发转化通知（批量补发 Postback 转发给渠道）
-        
+        批量补发转化 Postback 转发（最多 50 条）。
+
+        逐条调用 PostbackForwarder.forward_to_publisher，单条失败不影响其余；
+        返回成功/失败计数及失败明细。
+
         Args:
-            conversion_ids: 转化记录ID列表
+            conversion_ids: 转化记录 ID 列表
             current_user: 当前用户
 
         Returns:
-            Dict: 批量补发结果
+            含 success_count、failed_count、failed_items 的结果字典
         """
         if not conversion_ids:
             raise_api_exception(
@@ -827,10 +854,10 @@ class NotificationConfigService:
             self
     ) -> Optional[AdminNotificationConfig]:
         """
-        获取管理员通知配置
-        
+        获取平台级管理员通知配置（单例，id 固定为 1）。
+
         Returns:
-            Optional[AdminNotificationConfig]: 通知配置对象，如果不存在则返回None
+            配置对象或 None
         """
         # 管理员通知配置是单例模式，id 固定为 1
         result = await self.db.execute(

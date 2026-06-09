@@ -1,6 +1,16 @@
 """
-TQT定时任务模块
-功能：从TQT API获取广告数据，检查重复后插入到数据库
+TQT 上游广告数据拉取定时任务。
+
+功能说明：
+- 从 TQT API 按日期拉取广告明细，字段映射后经 upstream_import 去重入库
+- 凭证缺失时跳过并写入任务结果说明
+
+在系统中的位置：
+- 由 TQT_API_TASK_NAME 调度；HTTP 见 upstream_fetch/upstream_http
+
+注意事项：
+1. .env 须配置 TQT 相关账号密码与 endpoint
+2. 拉取日期范围默认昨天至今，避免重复全量扫
 """
 import hashlib
 import logging

@@ -1,10 +1,21 @@
 """
-斗篷 /report 点击上报路由
+斗篷 /report 点击上报路由（HTTP 层）。
 
-桥页前端在加载完成（phase=load）或按钮点击（phase=click）时请求本接口：
-- 校验 email/phone、解析 dp 与客户端信息
-- Redis 去重后更新短链点击计数
-- 后台任务向 Facebook CAPI 发送对应阶段事件
+功能说明：
+- 注册 ``GET /report/{short_code}``，接收桥页前端 load/click 两阶段上报
+- 校验 email/phone 格式、解析 dp 与客户端元数据，委托 ``cloak_report_service`` 执行业务逻辑
+- 成功时返回 JSON（含去重标记）；失败时记录脱敏日志
+
+上报阶段：
+- ``load``：桥页加载完成，发 PageView 类 CAPI 事件
+- ``click``：用户点击跳转按钮，递增计数、可选落库、发 Lead/Click 类 CAPI 事件
+
+在系统中的位置：
+- 由 ``router.register_cloak_report_routes`` 挂载；业务逻辑在 ``cloak_report_service``
+
+注意事项：
+1. postback 转化上报不在此处理，由下游 postback 读 clicks.url_params.dp 单独发 CAPI
+2. 日志中 email/phone 须经 ``mask_email`` / ``mask_phone`` 脱敏
 """
 import logging
 from typing import Optional

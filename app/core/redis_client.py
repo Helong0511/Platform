@@ -1,6 +1,9 @@
 """
-Redis客户端模块
-提供Redis连接和操作功能，用于限流、CSRF令牌存储等
+Redis 异步客户端单例模块。
+
+职责：维护全局连接池，供限流、CSRF、缓存、Cap 计数、点击队列等模块复用；不可用时返回 None 触发内存降级。
+
+在系统中的位置：``app.core.redis_client.get_redis_client``，被 core 层绝大多数有状态组件引用。
 """
 import logging
 from typing import Optional

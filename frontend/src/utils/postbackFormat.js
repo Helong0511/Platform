@@ -1,4 +1,9 @@
-/** Postback 转化展示格式化工具 */
+/**
+ * Postback 转化展示格式化
+ * @file utils/postbackFormat.js
+ *
+ * 重导出货币格式化，并提供 OS、状态等字段的中文映射。
+ */
 export { formatCurrency } from './currencyFormat';
 
 export function formatOs(os) {
@@ -17,6 +22,9 @@ export function formatOs(os) {
   return osMap[os] || os;
 }
 
+/**
+ * 操作系统类型对应的标签 type。
+ */
 export function getOsTagType(os) {
   if (!os) return 'info';
   const osLower = os.toLowerCase();
@@ -29,6 +37,9 @@ export function getOsTagType(os) {
   return 'info';
 }
 
+/**
+ * 格式化Json。
+ */
 export function formatJson(jsonString) {
   try {
     const obj = typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;

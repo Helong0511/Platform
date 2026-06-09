@@ -1,5 +1,8 @@
 /**
- * 广告数据 / 每日汇总表格：百分比、货币、合计行
+ * 广告数据表格字段格式化
+ * @file composables/useAdDataTableFormat.js
+ *
+ * 提供百分比、货币、CPC 合计行等表格列 formatter，区分管理员与客户视图。
  */
 import { formatAdTableCurrency, formatAdTableCurrencyAmount } from '../utils/currencyFormat';
 import { createPercentTableFormatter } from '../utils/percentFormat';
@@ -8,6 +11,10 @@ import { createPercentTableFormatter } from '../utils/percentFormat';
  * @param {Object} options
  * @param {() => boolean} [options.getIsAdmin] 是否管理员（影响 CPC 合计算法）
  * @param {'weighted'|'sum'} [options.cpcSummaryMode] CPC 合计：weighted=收益/点击，sum=列求和
+ */
+/**
+ * 组合式函数 - 广告数据表格字段格式化
+ * @returns {Object} 响应式状态与业务操作方法
  */
 export function useAdDataTableFormat(options = {}) {
   const getIsAdmin = options.getIsAdmin ?? (() => false);

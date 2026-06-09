@@ -1,3 +1,9 @@
+"""
+全球手机号码生成规则数据表（按大洲/国家）。
+
+每项含国际区号、长度范围、号段前缀及 ISO alpha2/alpha3/numeric，
+供 tests/全球手机号码/examples.py 等脚本随机生成符合格式的测试号码。
+"""
 # 非洲
 AFRICA = {
     "Algeria": {"code": "+213", "min_length": 9, "max_length": 10, "prefixes": ["5", "6", "7"], "alpha2": "DZ",

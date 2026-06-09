@@ -1,12 +1,20 @@
 """
-服务基类
-提供通用服务方法和工具函数
+服务基类模块。
 
-职责：
-- 业务逻辑封装
-- 权限检查
-- 数据验证
-- 不直接操作数据库（通过仓储层）
+功能说明：
+- 提供 ``BaseService`` 泛型基类：仓储注入、权限检查、分页辅助、批量操作
+- 统一管理员/客户角色的资源访问判断逻辑
+
+设计原则：
+- 服务层包含业务逻辑，数据访问通过仓储层
+- 权限检查在服务方法入口完成，API 层仅做认证
+
+在系统中的位置：
+- 被各 ``*Service`` 继承（User、Client、Product、Offer 等）
+
+注意事项：
+1. 子类应通过 ``self._check_admin_or_owner`` 等基类方法鉴权，勿重复实现
+2. 勿在基类中引入特定业务耦合，保持通用性
 """
 import logging
 from typing import Generic, TypeVar, Optional, List, Dict, Any, Tuple

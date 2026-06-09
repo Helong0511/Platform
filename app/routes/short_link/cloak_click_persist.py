@@ -1,11 +1,18 @@
 """
-斗篷 /report 点击落库模块（尊重全局开关 PERSIST_CLICKS_TO_DB）。
+斗篷 /report 点击落库模块。
 
-当 phase=click 时，cloak_report_service.record_cloak_click_count 在更新 click_count 后，
-通过本模块将点击详情写入 clicks 表（同步或后台任务）。
+功能说明：
+- 在 ``phase=click`` 且计数更新后，将斗篷点击详情写入 ``clicks`` 表（同步或 BackgroundTasks）
+- ``build_cloak_url_params`` 打包 fbclid、dp、email、phone 等至 url_params，供 postback 转化回溯
+- 尊重全局开关 ``PERSIST_CLICKS_TO_DB``：关闭时所有落库函数直接返回，不影响计数与 CAPI
 
-url_params 中保存 fbclid、dp、email、phone，供 postback 转化时回溯斗篷配置并发 CAPI。
-若 PERSIST_CLICKS_TO_DB=false，所有落库函数直接返回，不影响计数与 Facebook 上报。
+在系统中的位置：
+- 由 ``cloak_report_service.record_cloak_click_count`` 调度；持久化委托 ``app.core.tracking.click_persist``
+
+注意事项：
+1. 落库与 Redis 去重、Facebook 上报解耦，关闭 DB 持久化不影响前台上报链路
+2. offer/publisher 解析复用 ``resolve_cloak_click_offer_and_publisher``，与 /change 归因规则一致
+3. url_params 字段约定勿随意变更，postback 处理器依赖 dp 找回斗篷像素配置
 """
 import json
 import logging
@@ -151,6 +158,7 @@ def schedule_cloak_report_click_persist(
         return
 
     async def _task():
+        """FastAPI 后台任务入口：异步执行斗篷点击落库。"""
         await persist_cloak_report_click(
             short_code=short_code,
             fbclid=fbclid,

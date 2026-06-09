@@ -1,3 +1,8 @@
+"""
+PNG 转 ICO 小工具：将 16×16、32×32 PNG 分别保存为 favicon 用 ICO 文件。
+
+依赖 Pillow；路径为本地开发机绝对路径，运行前请按实际素材目录修改。
+"""
 from PIL import Image
 
 # Load images

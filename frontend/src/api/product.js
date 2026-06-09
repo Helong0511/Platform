@@ -1,5 +1,8 @@
 /**
- * 产品管理 API（标准 CRUD + 分配历史等扩展）
+ * 产品管理 API
+ * @file api/product.js
+ *
+ * 标准 CRUD、产品分配历史、批量操作等扩展接口，写操作附带 CSRF 令牌。
  */
 import { createCrudApi } from '@/utils/crudApi';
 import { request, extractErrorMessage, handleError } from '../utils/api';
@@ -30,11 +33,17 @@ const {
 
 export { getProductList, createProduct, updateProduct, deleteProduct };
 
+/**
+ * 获取产品详情。
+ */
 export const getProductDetail = async (id, options = {}) => {
   const { silent = false } = options;
   return fetchProductDetail(id, { silent, timeout: 10000 });
 };
 
+/**
+ * 获取可分配的产品名称列表。
+ */
 export const getAvailableProductNames = async (excludeClientId = null, search = null) => {
   try {
     const params = {};
@@ -56,6 +65,9 @@ export const getAvailableProductNames = async (excludeClientId = null, search = 
   }
 };
 
+/**
+ * 获取产品分配记录列表。
+ */
 export const getProductAssignments = async (productId) => {
   try {
     return await request({
@@ -70,6 +82,9 @@ export const getProductAssignments = async (productId) => {
   }
 };
 
+/**
+ * 获取客户（下游）的产品分配情况。
+ */
 export const getClientAssignments = async (clientId) => {
   return request({
     url: `/api/v1/product-assignments/clients/${clientId}/assignments`,
@@ -77,6 +92,9 @@ export const getClientAssignments = async (clientId) => {
   }, { returnDataOnly: true });
 };
 
+/**
+ * 更新Assignment Dates。
+ */
 export const updateAssignmentDates = (assignmentId, dateUpdate) =>
   withCsrfMutate(
     () =>
@@ -91,6 +109,9 @@ export const updateAssignmentDates = (assignmentId, dateUpdate) =>
     CSRF_REFRESH_PRODUCTS
   );
 
+/**
+ * 批量Update Assignment Dates。
+ */
 export const batchUpdateAssignmentDates = async (updates) => {
   try {
     return await withCsrfMutate(

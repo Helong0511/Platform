@@ -1,6 +1,16 @@
 """
-通知汇总任务
-定时处理 hourly 和 daily 频率的通知汇总
+通知汇总定时任务模块。
+
+功能说明：
+- 按 hourly/daily 频率聚合 Postback 转化通知，批量发送 Telegram 摘要
+- 读取客户/产品通知配置，跳过未启用或空数据客户
+
+在系统中的位置：
+- 由通知配置中的频率字段驱动 Cron；实现委托 telegram_notification_service
+
+注意事项：
+1. 汇总窗口边界使用业务时区，与配置表 timezone 字段一致
+2. 发送失败记日志，下次窗口可补发或依赖人工重试
 """
 import json
 import logging

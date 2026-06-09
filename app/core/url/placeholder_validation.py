@@ -101,6 +101,8 @@ _MALFORMED_BRACE_RE = re.compile(
 
 @dataclass
 class PlaceholderValidationResult:
+    """短链/Offer URL 占位符校验结果。"""
+
     ok: bool
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
@@ -130,6 +132,7 @@ def _canonical_placeholder_name(raw_name: str) -> str:
 
 
 def _is_supported_name(raw_name: str) -> bool:
+    """判断占位符名是否在短链替换白名单内（含别名映射）。"""
     canonical = _canonical_placeholder_name(raw_name)
     if canonical in _SUPPORTED_CANONICAL:
         return True
@@ -141,6 +144,7 @@ def _is_supported_name(raw_name: str) -> bool:
 
 
 def _strip_valid_placeholder_tokens(text: str, names: List[str]) -> str:
+    """从文本中移除已识别的合法占位符 token，便于检测残留非法花括号。"""
     remainder = text
     for name in names:
         for token in placeholder_delimiters(name):

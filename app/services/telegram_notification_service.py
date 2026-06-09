@@ -1,6 +1,12 @@
 """
-Telegram 通知服务
-负责构建和发送 Telegram 通知消息（客户和管理员）
+Telegram 通知服务。
+
+职责：
+- 构建客户/管理员/系统各类 Postback 通知消息（转化、高价值、转发成败、告警等）
+- 调用 send_telegram_message_async 发送并写入 PostbackNotification 历史
+- 支持汇总、批量转化、带按钮交互通知；超长消息自动分片
+
+管理员 Chat ID 默认取自 TELEGRAM_ADMIN；发送失败返回 False 不抛异常。
 """
 import json
 import logging
@@ -34,14 +40,20 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramNotificationService:
-    """Telegram 通知服务"""
+    """
+    Telegram 消息构建与发送服务。
+
+    多数方法为 @staticmethod，db 可选注入用于写入通知历史；
+    消息模板与格式化逻辑委托 app.core.telegram_utils。
+    """
 
     def __init__(self, db: Optional[AsyncSession] = None):
+        """可选注入数据库会话，供发送方法记录 PostbackNotification。"""
         self.db = db
 
     @staticmethod
     def _resolve_admin_chat_id(telegram_chat_id: Optional[str] = None) -> Optional[str]:
-        """未指定 chat_id 时使用环境变量 TELEGRAM_ADMIN。"""
+        """解析管理员 Chat ID：入参优先，否则回退 TELEGRAM_ADMIN 环境变量。"""
         if telegram_chat_id and str(telegram_chat_id).strip():
             return str(telegram_chat_id).strip()
         admin = getattr(settings, "TELEGRAM_ADMIN", None)
@@ -195,10 +207,9 @@ class TelegramNotificationService:
             if offer.offer_name:
                 msg += f"• Offer 名称: {offer.offer_name}\n"
 
-        # 添加当天总转化个数统计
+        # ====== 当日转化统计（管理员消息附加信息） ======
         if db:
             try:
-                # 计算当天总转化数
                 today = conversion.created_at.date() if conversion.created_at else get_app_now_naive().date()
 
                 # 构建当天的开始和结束时间
@@ -409,19 +420,21 @@ class TelegramNotificationService:
             db: Optional[AsyncSession] = None
     ) -> bool:
         """
-        发送客户通知
-        
+        向客户 Telegram Chat 发送通知并可选写入历史。
+
+        有 conversion 时关联转化 ID；汇总类通知用 client_id / product_id 标识来源。
+
         Args:
-            message: 通知消息
-            telegram_chat_id: Telegram Chat ID
-            conversion: 转化记录（可选，用于记录通知历史）
-            client_id: 客户ID（可选，用于汇总通知）
-            product_id: 产品ID（可选，用于汇总通知）
-            notification_type: 通知类型（conversion, summary_hourly, summary_daily）
-            db: 数据库会话（可选）
-        
+            message: 消息正文
+            telegram_chat_id: 目标 Chat ID
+            conversion: 转化记录（单条通知时）
+            client_id: 客户 ID（汇总通知时）
+            product_id: 产品 ID（汇总通知时）
+            notification_type: conversion / summary_hourly / summary_daily 等
+            db: 数据库会话
+
         Returns:
-            bool: 是否发送成功
+            是否发送成功
         """
         try:
 
@@ -476,17 +489,20 @@ class TelegramNotificationService:
             db: Optional[AsyncSession] = None
     ) -> bool:
         """
-        发送管理员通知
-        
+        向管理员 Telegram 发送通知。
+
+        Chat ID 未传时走 _resolve_admin_chat_id；有 conversion 时写入通知历史
+        （client_id / product_id 置空，区分于客户通知）。
+
         Args:
-            message: 通知消息
-            telegram_chat_id: Telegram Chat ID（可选，如果未提供则使用配置中的）
-            conversion: 转化记录（可选，用于记录通知历史）
-            notification_type: 通知类型（conversion, forward_failure, system_error等）
-            db: 数据库会话（可选）
-        
+            message: 消息正文
+            telegram_chat_id: 可选 Chat ID
+            conversion: 关联转化记录
+            notification_type: conversion / forward_failure / system_error 等
+            db: 数据库会话
+
         Returns:
-            bool: 是否发送成功
+            是否发送成功
         """
         try:
             chat_id = TelegramNotificationService._resolve_admin_chat_id(telegram_chat_id)
@@ -535,18 +551,20 @@ class TelegramNotificationService:
             db: Optional[AsyncSession] = None
     ) -> bool:
         """
-        发送系统告警通知
-        
+        发送系统异常/错误告警至管理员 Telegram。
+
+        消息由 build_alert_message 组装；写入 notification_type=system_alert 历史。
+
         Args:
-            alert_type: 告警类型
+            alert_type: 告警类型标识
             description: 告警描述
-            location: 位置信息（模块、函数、行号等）
-            error: 异常对象（可选）
-            telegram_chat_id: Telegram Chat ID（可选）
-            db: 数据库会话（可选，用于记录通知历史）
-        
+            location: 模块/函数/行号等位置信息
+            error: 可选异常对象
+            telegram_chat_id: 可选 Chat ID
+            db: 数据库会话
+
         Returns:
-            bool: 是否发送成功
+            是否发送成功
         """
         try:
             message = build_alert_message(

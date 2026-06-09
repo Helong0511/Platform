@@ -1,5 +1,11 @@
-/** 缓存管理页展示格式化 */
+/**
+ * 缓存管理页展示格式化
+ * @file utils/cacheFormat.js
+ *
+ * 将缓存大小、过期时间、类型等原始值转为用户友好的展示文案。
+ */
 
+/** 将字节数格式化为 B/KB/MB/GB */
 export function formatCacheSize(bytes) {
   if (bytes === 0) return '0 B';
   const k = 1024;
@@ -8,6 +14,7 @@ export function formatCacheSize(bytes) {
   return `${parseFloat((bytes / k ** i).toFixed(2))} ${sizes[i]}`;
 }
 
+/** 将过期时间戳转为相对时间描述（如「5分钟」「已过期」） */
 export function formatCacheExpireTime(expireTime) {
   if (!expireTime) return '永不过期';
   const diff = expireTime - Date.now();
@@ -18,6 +25,9 @@ export function formatCacheExpireTime(expireTime) {
   return `${Math.floor(diff / 86400000)}天`;
 }
 
+/**
+ * 缓存类型对应的标签颜色。
+ */
 export function getCacheTypeColor(type) {
   const colorMap = {
     API: 'primary',
@@ -34,6 +44,9 @@ export function getCacheTypeColor(type) {
   return colorMap[type] || 'info';
 }
 
+/**
+ * 格式化Cache Content。
+ */
 export function formatCacheContent(content) {
   try {
     return JSON.stringify(JSON.parse(content), null, 2);

@@ -1,5 +1,16 @@
 """
-各上游 API 拉数封装（HTTP + 成功判断 + 数据列表提取）。
+各上游广告主 API 拉数封装模块。
+
+功能说明：
+- 为每家上游提供 ``fetch_*_rows``：鉴权、分页、业务成功码校验、行列表提取
+- 统一通过 ``upstream_http`` 发起 HTTP，减少各 task 重复 httpx 代码
+
+在系统中的位置：
+- 被 skymobi/tqt/huguang 等各上游定时任务调用
+
+注意事项：
+1. 字段路径变更须同步更新 upstream_import 的列映射
+2. 拉数失败应抛明确异常，由 task 层捕获并 set_task_result
 """
 from __future__ import annotations
 
@@ -27,6 +38,7 @@ async def fetch_huguang_rows(
     start: str,
     end: str,
 ) -> List[Any]:
+    """Huguang 按国家维度拉取广告数据，返回 data 列表。"""
     url = f"http://{domain}:5858/api/country"
     json_data = await post_json(
         url,
@@ -49,6 +61,7 @@ async def fetch_skymobi_rows(
     api_key: str,
     date_str: str,
 ) -> List[Any]:
+    """Skymobi 按单日拉取 H5 广告数据，返回 list 字段。"""
     url = (
         f"https://crm.skymobi.online/api/adxh5"
         f"?apikey={api_key}&date={date_str}&uid={api_id}&page=1&limit=1000"
@@ -64,9 +77,11 @@ async def fetch_tqt_rows(
     params: Dict[str, Any],
     headers: Dict[str, str],
 ) -> List[Any]:
+    """TQT 拉数：兼容 state=ok 或 code=200，从 data.list 或顶层 list 取行。"""
     json_data = await post_json(url, json_body=params, headers=headers, label="TQT API")
 
     def _ok(data: Dict[str, Any]) -> bool:
+        """TQT 接口成功判定：state=ok 或 code=200。"""
         return data.get("state") == "ok" or data.get("code") == 200
 
     raise_unless_api_success(json_data, _ok, label="TQT API")
@@ -81,6 +96,7 @@ async def fetch_tbsj_rows(
     params: Dict[str, Any],
     headers: Dict[str, str],
 ) -> List[Any]:
+    """TBSJ 广告单元接口，成功码 20000，返回 data.items 或 items。"""
     json_data = await post_json(
         base_url + "/adunit",
         json_body=params,
@@ -95,6 +111,7 @@ async def fetch_tbsj_rows(
 
 
 def extract_addermobi_rows(json_data: Dict[str, Any]) -> List[Any]:
+    """Addermobi 响应行提取：兼容 rows 为 list/dict 及 data/list 多种嵌套。"""
     if "rows" in json_data:
         rows_value = json_data["rows"]
         if isinstance(rows_value, list):
@@ -115,6 +132,7 @@ async def fetch_addermobi_rows(
     payload: Dict[str, Any],
     headers: Dict[str, str],
 ) -> List[Any]:
+    """Addermobi POST 拉数，status=0 为成功，经 extract_addermobi_rows 解析行。"""
     json_data = await post_json(url, json_body=payload, headers=headers, label="Addermobi API")
     raise_unless_api_success(json_data, {0}, label="Addermobi API", code_key="status")
     return extract_addermobi_rows(json_data)
@@ -173,6 +191,7 @@ async def fetch_zhisuo_unit_rows(
 
 
 def _pomiad_ok(json_data: Dict[str, Any]) -> bool:
+    """Pomiad 业务成功判断：rtn == 200。"""
     return json_data.get("rtn") == 200
 
 
@@ -182,6 +201,7 @@ async def _pomiad_login(
     username: str,
     password: str,
 ) -> str:
+    """Pomiad 登录获取 Authorization token，供后续 api_data/data_detail 使用。"""
     url = f"{base_url.rstrip('/')}/login"
     json_data = await post_json(
         url,
@@ -216,6 +236,7 @@ async def fetch_pomiad_rows(
     token = await _pomiad_login(base_url=base, username=username, password=password)
     auth_headers = {"Authorization": token}
 
+    # 阶段一：api_data 分页收集 (site_url, data_date) 任务
     site_tasks: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
     page = 1
@@ -299,6 +320,7 @@ async def fetch_pomiad_rows(
 
 
 def _pomiad_ok(json_data: Dict[str, Any]) -> bool:
+    """Pomiad 上游响应成功判定：rtn 字段为 200。"""
     return json_data.get("rtn") == 200
 
 
@@ -308,6 +330,7 @@ async def _pomiad_login(
     username: str,
     password: str,
 ) -> str:
+    """Pomiad 登录获取 session/token，供后续拉数接口使用。"""
     url = f"{base_url.rstrip('/')}/login"
     json_data = await post_json(
         url,

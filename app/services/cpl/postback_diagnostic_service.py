@@ -1,4 +1,18 @@
-"""Postback 转化诊断服务。"""
+"""
+Postback 转化诊断服务。
+
+功能说明：
+- 当管理端「收到通知却查不到转化」时，跨主表、扣减日志、通知记录排查
+- 识别平台名称变更（如 bft → 广告主 slug）并给出可操作查询建议
+- 仅管理员使用，返回结构化诊断结果而非修改数据
+
+在系统中的位置：
+- 被管理端 Postback 诊断 API 调用
+
+注意事项：
+1. 诊断链路只读，禁止在诊断接口内修复数据
+2. 建议输出应包含具体 SQL 过滤条件或 API 查询参数示例
+"""
 import logging
 from typing import Dict, Any
 
@@ -18,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 class PostbackDiagnosticService:
-    """Postback 转化诊断服务"""
+    """Postback 转化缺失/异常场景的多表联合诊断。"""
 
     async def diagnose_postback_record(
             self,
@@ -27,16 +41,21 @@ class PostbackDiagnosticService:
             current_user: User
     ):
         """
-        诊断 PostBack 记录问题
-        
-        当收到通知但找不到记录时，使用此接口进行诊断
-        会检查：
-        1. 主表（postback_conversions）中是否存在
-        2. 扣减日志表（conversion_deduction_logs）中是否存在
-        3. 通知记录表（postback_notifications）中是否存在
-        4. 可能的平台名称变化
-        
-        仅管理员可访问
+        按 conversion_id 或 click_id 诊断 Postback 记录去向。
+
+        依次检查：
+        1. postback_conversions 主表
+        2. conversion_deduction_logs 扣减日志（含被扣量未入主表的情况）
+        3. postback_notifications 通知记录（证明曾处理过）
+        4. 平台名称是否与入库时不一致
+
+        Args:
+            conversion_or_click_id: 上游 conversion_id 或 click_id 字符串。
+            db: 异步数据库会话。
+            current_user: 操作管理员，写入 info 日志。
+
+        Returns:
+            ResponseBaseSchema，data 含 found_in_* 标志、明细列表与 suggestions。
         """
         try:
             diagnosis_result: Dict[str, Any] = {
@@ -48,7 +67,7 @@ class PostbackDiagnosticService:
                 "suggestions": []
             }
 
-            # 1. 检查主表（postback_conversions）
+            # 1. 主表：conversion_id 或 click_id 任一匹配即可
             main_table_query = select(PostbackConversion).where(
                 or_(
                     PostbackConversion.conversion_id == conversion_or_click_id,
@@ -72,7 +91,6 @@ class PostbackDiagnosticService:
                     }
                     for record in main_records
                 ]
-                # 收集所有平台名称（使用集合推导式去重）
                 platforms = list({r.platform for r in main_records})
                 if len(platforms) > 1 or (len(platforms) == 1 and platforms[0] != "bft"):
                     diagnosis_result["platform_name_changes"] = platforms
@@ -85,7 +103,7 @@ class PostbackDiagnosticService:
                     "在主表中未找到记录。可能原因：1) 数据验证失败 2) 被扣量 3) 重复检测跳过 4) 平台名称变化"
                 )
 
-            # 2. 检查扣减日志表（conversion_deduction_logs）
+            # 2. 扣减日志：被扣量的转化可能只落在此表
             deduction_query = select(ConversionDeductionLog).where(
                 ConversionDeductionLog.click_id == conversion_or_click_id
             ).order_by(ConversionDeductionLog.created_at.desc())
@@ -108,7 +126,6 @@ class PostbackDiagnosticService:
                     }
                     for log in deduction_logs
                 ]
-                # 检查是否有被扣量的记录
                 deducted_logs = [log for log in deduction_logs if log.deducted_volume > 0]
                 if deducted_logs:
                     diagnosis_result["suggestions"].append(
@@ -117,8 +134,7 @@ class PostbackDiagnosticService:
                         f"可以在'扣减管理'页面查看这些记录。"
                     )
 
-            # 3. 检查通知记录表（postback_notifications）
-            # 通过 click_id 或 conversion_id 查找通知记录
+            # 3. 通知记录：通过关联转化反查是否曾触发通知
             notification_query = select(PostbackNotification).join(
                 PostbackConversion,
                 PostbackNotification.conversion_id == PostbackConversion.id
@@ -148,7 +164,7 @@ class PostbackDiagnosticService:
                     f"找到 {len(notifications)} 条通知记录，说明系统已收到并处理了该转化。"
                 )
 
-            # 4. 提供建议
+            # 4. 汇总：主表与扣减表均无时给出排查方向
             if not diagnosis_result["found_in_main_table"] and not diagnosis_result["found_in_deduction_logs"]:
                 diagnosis_result["suggestions"].append(
                     "未在任何表中找到记录。可能原因："

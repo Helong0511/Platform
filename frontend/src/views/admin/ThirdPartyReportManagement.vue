@@ -1,4 +1,9 @@
+<!--
+  管理端 - 第三方报表
+  @file views/admin/ThirdPartyReportManagement.vue
+-->
 <template>
+  <!-- 页面主模板 -->
   <div class="third-party-report-management-container">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -26,7 +31,9 @@
     </div>
 
     <!-- 筛选控件 -->
+    <!-- 筛选区 -->
     <el-card class="filter-card" shadow="never">
+      <!-- 表单区域 -->
       <el-form :inline="true" :model="searchForm" class="filter-form">
         <el-form-item label="来源">
           <el-select v-model="searchForm.source" placeholder="全部" clearable style="width: 150px;" name="source"
@@ -82,7 +89,8 @@
 
     <!-- 日志数据表格 -->
     <el-card class="data-table-card" shadow="never">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="table-header">
           <span>上报日志列表</span>
           <el-button type="text" :icon="Setting" @click="columnSettingVisible = true" style="float: right;">

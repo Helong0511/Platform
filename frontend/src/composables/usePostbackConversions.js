@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - Postback 转化记录查询
+ * @file composables/usePostbackConversions.js
+ */
 import { ref, reactive, watch } from 'vue';
 import { getPostbackConversions, getPostbackStats } from '../api/postback';
 import { getOffers } from '../api/offer';
@@ -8,9 +12,15 @@ import { logger } from '../utils/logger';
 /**
  * Postback 转化列表：筛选、分页、统计与下拉数据。
  */
+/**
+ * 组合式函数 - Postback 转化记录查询
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function usePostbackConversions() {
+  // conversions 响应式状态
   const conversions = ref([]);
   const loading = ref(false);
+  // 统计数据
   const stats = ref([]);
   const pagination = reactive({
     page: 1,
@@ -18,6 +28,7 @@ export function usePostbackConversions() {
     total: 0,
   });
 
+  // 筛选表单字段
   const searchForm = reactive({
     platform: '',
     conversion_or_click_id: '',
@@ -32,8 +43,10 @@ export function usePostbackConversions() {
     end_date: '',
   });
 
+  // Offer 下拉选项
   const offerList = ref([]);
   const publisherList = ref([]);
+  // 广告主下拉选项
   const advertiserList = ref([]);
   const dateRange = ref(null);
 

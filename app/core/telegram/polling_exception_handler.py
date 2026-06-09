@@ -61,6 +61,10 @@ class TelegramPollingExceptionHandler:
     """轮询异常处理器，供 TeleBot(exception_handler=...) 使用。"""
 
     def __init__(self, on_conflict: Optional[Callable[[BaseException], None]] = None):
+        """
+        Args:
+            on_conflict: 检测到 409 轮询冲突时的回调（通常用于停止当前 Bot 实例）
+        """
         self.on_conflict = on_conflict
         self.conflict_detected = False
 

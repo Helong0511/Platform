@@ -97,6 +97,7 @@ class ForwardingCacheMetrics:
     _instance = None
     
     def __new__(cls):
+        """单例：累计 Publisher/Offer 转发缓存命中与未命中次数。"""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance.publisher_hits = 0

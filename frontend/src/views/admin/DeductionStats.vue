@@ -1,7 +1,13 @@
+<!--
+  管理端 - 扣减统计
+  @file views/admin/DeductionStats.vue
+-->
 <template>
-  <div class="deduction-stats">
+  <!-- 页面主模板 -->
+<div class="deduction-stats">
     <el-card class="page-card">
-      <template #header>
+      <!-- 卡片标题栏 -->
+    <template #header>
         <div class="card-header">
           <div class="header-left">
             <el-icon class="header-icon"><DataAnalysis /></el-icon>

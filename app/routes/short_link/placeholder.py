@@ -1,6 +1,21 @@
 """
-占位符替换服务
-处理短链接URL中的占位符替换逻辑
+短链接占位符替换服务。
+
+功能说明：
+- ``replace_short_link_placeholders``：替换原始 URL 中 ``{click_id}``、``{offer_id}`` 等命名占位符
+- ``replace_param_value_placeholders``：替换用户查询参数值内嵌的占位符（构建最终 URL 时使用）
+- 支持 ``channel_id`` / ``sub_affid`` 映射到 ``publisher_id``，以及 ``{{name}}`` 双花括号写法
+
+数据来源：
+- 请求上下文：IP、UA、设备、gaid/idfa 等来自 ``request_info``
+- 实体字段：Offer、Publisher、Advertiser 通过并行异步查询填充
+
+在系统中的位置：
+- 被 ``handlers``、``url_builder.build_final_url`` 调用；底层占位符解析见 ``app.core.url.placeholder``
+
+注意事项：
+1. 值为空的占位符会从 URL 中移除对应查询参数，避免向上游传递未替换字面量
+2. 替换后的查询参数名统一为小写，减少同名参数大小写冲突
 """
 import asyncio
 import logging
@@ -99,6 +114,7 @@ async def replace_short_link_placeholders(
         values['offer_id'] = str(offer_id)
 
         async def query_offer():
+            """并行子任务：按 offer_id 查询 Offer 行，失败返回 None。"""
             try:
                 offer_result = await db.execute(
                     select(Offer).where(Offer.id == offer_id)
@@ -121,6 +137,7 @@ async def replace_short_link_placeholders(
         values['channel_id'] = publisher_id_str
 
         async def query_publisher():
+            """并行子任务：按 publisher_id 查询渠道行，失败返回 None。"""
             try:
                 publisher_result = await db.execute(
                     select(Publisher).where(Publisher.id == publisher_id)
@@ -142,6 +159,7 @@ async def replace_short_link_placeholders(
         values['advertiser_id'] = str(advertiser_id)
 
         async def query_advertiser():
+            """并行子任务：按 advertiser_id 查询广告主行，失败返回 None。"""
             try:
                 advertiser_result = await db.execute(
                     select(Advertiser).where(Advertiser.id == advertiser_id)

@@ -1,5 +1,8 @@
 """
 敏感路径防护执行：计数、自动封禁、Telegram 预警。
+
+由 middleware 在请求进入业务路由前调用；规则定义见 sensitive_path_rules。
+命中后按等级累计滑动窗口次数，达阈值写入 SensitiveBlockedIP 并可选推送 Telegram。
 """
 from __future__ import annotations
 
@@ -43,6 +46,7 @@ def bust_sensitive_blocked_ip_cache() -> None:
 
 
 def _bust_blocked_ip_cache() -> None:
+    """遍历已注册的回调，使中间件侧 IP 黑名单缓存立即失效。"""
     for cb in _blocked_ip_cache_bust_callbacks:
         try:
             cb()
@@ -54,12 +58,24 @@ class SensitivePathHitTracker:
     """滑动窗口内按等级累计探测次数（Redis 优先）。"""
 
     def __init__(self) -> None:
+        """从配置读取滑动窗口秒数，默认 1800 秒（30 分钟）。"""
         self._window = int(getattr(settings, "SENSITIVE_PATH_HIT_WINDOW_SECONDS", 1800))
 
     def _redis_key(self, ip: str, level: SensitivePathLevel) -> str:
+        """构造滑动窗口计数用的 Redis 键：sensitive_probe:{ip}:L{等级}。"""
         return f"sensitive_probe:{ip}:L{int(level)}"
 
     async def increment(self, ip: str, level: SensitivePathLevel) -> int:
+        """
+        在滑动窗口内将指定 IP、等级的探测次数 +1。
+
+        Args:
+            ip: 客户端 IP
+            level: 敏感路径等级
+
+        Returns:
+            窗口内累计次数；无效 IP 或 Redis/内存均失败时返回 0
+        """
         if not ip or ip == "unknown":
             return 0
         redis = await get_redis_client()
@@ -75,6 +91,7 @@ class SensitivePathHitTracker:
         return self._mem_increment(ip, level)
 
     def _mem_increment(self, ip: str, level: SensitivePathLevel) -> int:
+        """Redis 不可用时的进程内滑动窗口计数降级实现。"""
         now = time.time()
         expire = now + self._window
         bucket = _mem_hit_store.setdefault(ip, {})
@@ -128,6 +145,11 @@ async def _upsert_blocked_ip(ip: str, reason: str) -> bool:
 
 
 async def _should_send_telegram_alert(ip: str) -> bool:
+    """
+    判断当前 IP 是否允许发送 Telegram 预警（防抖窗口内仅一次）。
+
+    Redis 可用时用 SET NX EX；否则降级进程内时间戳记录。
+    """
     debounce = int(getattr(settings, "SENSITIVE_PATH_ALERT_DEBOUNCE_SECONDS", 300))
     redis = await get_redis_client()
     key = f"sensitive_probe:alert:{ip}"
@@ -154,6 +176,7 @@ async def _send_critical_alert(
     hit_count: int,
     auto_blocked: bool,
 ) -> None:
+    """向管理员 Telegram 推送危急等级敏感路径探测预警（受全局开关与防抖约束）。"""
     if not getattr(settings, "SENSITIVE_PATH_ALERT_CRITICAL", True):
         return
     if not await _should_send_telegram_alert(client_ip):
@@ -181,9 +204,11 @@ async def _send_critical_alert(
 
 @dataclass
 class HandleResult:
-    action_taken: str
-    auto_blocked: bool
-    hit_count: int
+    """敏感路径命中后的处置结果，供中间件记录审计日志。"""
+
+    action_taken: str  # 如 blocked_404、auto_blocked_ip
+    auto_blocked: bool  # 是否本次新写入 IP 黑名单
+    hit_count: int  # 滑动窗口内该等级累计命中次数
 
 
 async def handle_probe_hit(

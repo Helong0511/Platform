@@ -1,6 +1,9 @@
 """
-缓存管理模块
-提供缓存预热、精确失效、缓存标签等功能
+统一缓存管理模块。
+
+职责：短链/Offer 预热、按标签批量失效、维护 Redis 标签→键映射，供管理端与定时任务使用。
+
+在系统中的位置：``app.core.cache_manager.CacheManager``，协调 ``offer_cache`` 与 ``short_link_cache``。
 """
 import logging
 from typing import Optional, Set, List, Dict, Any

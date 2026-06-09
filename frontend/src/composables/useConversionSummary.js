@@ -1,3 +1,7 @@
+/**
+ * 组合式函数 - 转化总览：维度筛选与汇总
+ * @file composables/useConversionSummary.js
+ */
 import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
@@ -17,23 +21,35 @@ import {
  * 转化总览：筛选、级联下拉、统计加载与表格汇总/导出。
  * @param {import('vue').ComputedRef<boolean>} isAdmin
  */
+/**
+ * 组合式函数 - 转化总览：维度筛选与汇总
+ * @returns {Object} 响应式状态与业务操作方法
+ */
 export function useConversionSummary(isAdmin) {
   const router = useRouter();
+  // 数据加载中
   const loading = ref(false);
   const dateRange = ref([]);
+  // filterOffer 响应式状态
   const filterOffer = ref(null);
   const filterAdvertiser = ref(null);
+  // 按渠道（下游）筛选
   const filterPublisher = ref(null);
 
+  // Offer 下拉选项
   const offerList = ref([]);
   const advertiserList = ref([]);
+  // 渠道下拉选项
   const publisherList = ref([]);
 
+  // allAdvertisersFromStats 响应式状态
   const allAdvertisersFromStats = ref([]);
   const allOffersFromStats = ref([]);
+  // allPublishersFromStats 响应式状态
   const allPublishersFromStats = ref([]);
   const offerPublisherMap = ref(new Map());
 
+  // summaryData 响应式状态
   const summaryData = reactive({
     total_clicks: 0,
     total_conversions: 0,
@@ -45,6 +61,7 @@ export function useConversionSummary(isAdmin) {
     stats_list: [],
   });
 
+  // statsList 响应式状态
   const statsList = ref([]);
 
   const loadOffers = async () => {

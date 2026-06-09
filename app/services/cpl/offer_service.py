@@ -1,6 +1,16 @@
 """
-Offer服务层
-封装Offer相关的业务逻辑，优化数据库查询
+Offer 投放业务服务层。
+
+职责：
+- Offer CRUD、分页列表与详情（客户角色仅能访问已分配渠道下的 Offer）
+- 渠道分配（OfferPublisherAssignment）与短链接自动同步
+- 创建/更新时生成下游 Tracklink、Postback URL，校验 publisher_configs
+- 搜索支持 ID 精确匹配、上游 Offer ID、全文/前缀名称检索
+- 写操作限管理员；变更后失效 Offer 缓存并写审计日志
+
+注意：删除前检查点击记录；Tracklink 占位符规则与 app.core.url.placeholder 一致。
+
+对应路由：app/api_v1/cpl/offers
 """
 from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,14 +36,21 @@ logger = logging.getLogger(__name__)
 
 
 def _get_sync_short_links_for_offer():
+    """延迟导入短链接同步函数，避免 offer_service 与 API 层循环依赖。"""
     from app.api_v1.cpl.offers import sync_short_links_for_offer
     return sync_short_links_for_offer
 
 
 class OfferService(BaseService[Offer]):
-    """Offer服务"""
+    """
+    Offer 业务服务。
+
+    Offer 是广告主与渠道之间的投放单元，承载追踪链接、
+    出价、Cap 及渠道分配。客户用户仅能查看/操作已授权渠道关联的 Offer。
+    """
 
     def __init__(self, db: AsyncSession):
+        """注入异步数据库会话。"""
         super().__init__(db, Offer)
 
     async def get_offer_by_id(
@@ -44,21 +61,23 @@ class OfferService(BaseService[Offer]):
             include_assignments: bool = False
     ) -> Offer:
         """
-        根据ID获取Offer详情（优化查询，避免N+1问题，包含权限检查）
-        
+        按主键获取 Offer 详情（含权限校验）。
+
+        客户用户须存在激活的 OfferPublisherAssignment 且渠道属于该客户。
+
         Args:
-            offer_id: Offer ID
-            current_user: 当前用户
-            include_advertiser: 是否包含广告主信息
-            include_assignments: 是否包含渠道分配信息
-        
+            offer_id: Offer 主键
+            current_user: 当前登录用户
+            include_advertiser: True 时 joinedload 广告主
+            include_assignments: True 时 selectinload 渠道分配及 Publisher
+
         Returns:
-            Offer: Offer对象
-        
+            Offer: Offer ORM 对象
+
         Raises:
-            HTTPException: 如果Offer不存在或用户无权访问
+            APIException: 不存在或客户无权访问
         """
-        # 权限检查：客户只能查看分配给自己的渠道的Offer
+        # --- 客户角色：校验 Offer-渠道分配归属 ---
         if current_user.role == UserRole.CLIENT:
             # 获取当前用户的client_id
             client_result = await self.db.execute(
@@ -126,14 +145,16 @@ class OfferService(BaseService[Offer]):
             current_user: User
     ) -> List[Dict[str, Any]]:
         """
-        获取Offer的渠道分配列表（优化查询，批量加载）
-        
+        获取指定 Offer 的激活渠道分配列表。
+
+        客户用户仅返回属于该客户的渠道；每条含 downstream_cap、affiliate_payout。
+
         Args:
-            offer_id: Offer ID
-            current_user: 当前用户
-        
+            offer_id: Offer 主键
+            current_user: 当前登录用户
+
         Returns:
-            List[Dict]: 渠道分配列表
+            List[Dict]: 含 id、publisher_name、client_id、downstream_cap、affiliate_payout
         """
         # 加载分配的渠道（只加载激活的渠道和激活的分配）
         pub_query = (
@@ -180,21 +201,25 @@ class OfferService(BaseService[Offer]):
             is_active: Optional[bool] = None
     ) -> Tuple[List[Offer], int, Dict[int, List[Dict[str, Any]]]]:
         """
-        获取Offer列表（优化查询，批量加载关联数据）
-        
+        分页查询 Offer 列表，并批量返回渠道分配映射。
+
+        客户用户通过 join OfferPublisherAssignment 限定可见范围；
+        搜索优先 ID 精确匹配，再尝试全文索引或名称前缀。
+
         Args:
-            current_user: 当前用户
-            page: 页码
-            page_size: 每页数量
-            search: 搜索关键词
-            advertiser_id: 广告主ID过滤
-            publisher_id: 渠道ID过滤（只返回分配给该渠道的Offer）
-            status: 状态过滤
-            country: 国家过滤
+            current_user: 当前登录用户
+            page: 页码，从 1 开始
+            page_size: 每页条数
+            search: 搜索词（ID / 上游 Offer ID / 名称）
+            advertiser_id: 按广告主过滤
+            publisher_id: 仅返回已分配给该渠道的 Offer
+            status: Offer 状态过滤
+            country: 国家/GEO 过滤
             is_active: 激活状态过滤
-        
+
         Returns:
-            tuple: (Offer列表, 总数, 渠道分配映射)
+            Tuple[List[Offer], int, Dict[int, List[Dict]]]:
+                (Offer 列表, 总条数, offer_id -> 渠道分配列表)
         """
         query = select(Offer)
 
@@ -355,16 +380,22 @@ class OfferService(BaseService[Offer]):
             current_user: User
     ) -> Tuple[Offer, Optional[Dict[str, Any]]]:
         """
-        创建Offer（支持渠道分配和短链接创建）
-        
+        创建 Offer（仅管理员），并可选同步渠道短链接。
+
+        flush 后自动生成 downstream_tracklink 与 postback_url；
+        publisher_configs 定义渠道分配及下游 Cap/PO。
+
         Args:
-            offer_data: Offer数据字典（可能包含 publisher_configs）
-            current_user: 当前用户
-        
+            offer_data: Offer 字段及 publisher_configs 列表
+            current_user: 当前登录用户，须为管理员
+
         Returns:
-            Tuple[Offer, Optional[Dict]]: (创建的Offer对象, 短链接信息)
+            Tuple[Offer, Optional[Dict]]: (Offer 实体, 短链接同步结果或 None)
+
+        Raises:
+            APIException: 参数非法、渠道重复、唯一约束冲突等
         """
-        # 权限检查：仅管理员可创建
+        # --- 权限与广告主校验 ---
         self.require_admin(current_user)
 
         # 验证广告主是否存在
@@ -417,7 +448,7 @@ class OfferService(BaseService[Offer]):
         offer.downstream_tracklink = downstream_tracklink
         offer.postback_url = postback_url
 
-        # 处理渠道分配
+        # --- 解析并校验 publisher_configs，写入 OfferPublisherAssignment ---
         publisher_ids_for_short_link = []
         publisher_configs = offer_data.get('publisher_configs')
 
@@ -589,18 +620,22 @@ class OfferService(BaseService[Offer]):
             current_user: User
     ) -> Tuple[Offer, Optional[Dict[str, Any]], Optional[Dict[str, Any]], bool]:
         """
-        更新Offer信息（支持渠道分配更新和短链接同步）
-        
+        更新 Offer（仅管理员），同步渠道分配与短链接。
+
+        advertiser_tracklink 变更时尝试更新主短链 original_url；
+        publisher_configs 变更或上游链接变更时触发短链接同步。
+
         Args:
-            offer_id: Offer ID
-            offer_data: 更新的数据字典（可能包含publisher_configs或publisher_ids）
-            current_user: 当前用户
-        
+            offer_id: Offer 主键
+            offer_data: 待更新字段，可含 publisher_configs
+            current_user: 当前登录用户，须为管理员
+
         Returns:
-            Tuple[Offer, Optional[Dict], Optional[Dict], bool]: 
-            (更新后的Offer对象, 短链接信息, 下游Tracklink短链接信息, downstream_tracklink是否改变)
+            Tuple[Offer, Optional[Dict], Optional[Dict], bool]:
+                (Offer, 渠道短链同步信息, 下游 Tracklink 短链信息,
+                 downstream_tracklink 是否发生变更)
         """
-        # 权限检查
+        # --- 权限校验 ---
         self.require_admin(current_user)
 
         # 获取Offer
@@ -968,13 +1003,18 @@ class OfferService(BaseService[Offer]):
             current_user: User
     ) -> None:
         """
-        删除Offer
-        
+        删除 Offer（仅管理员）。
+
+        若存在关联点击记录则拒绝删除，保护历史归因数据。
+
         Args:
-            offer_id: Offer ID
-            current_user: 当前用户
+            offer_id: Offer 主键
+            current_user: 当前登录用户，须为管理员
+
+        Raises:
+            APIException: 存在点击记录或记录不存在
         """
-        # 权限检查
+        # --- 权限校验 ---
         self.require_admin(current_user)
 
         # 获取Offer
@@ -1010,17 +1050,15 @@ class OfferService(BaseService[Offer]):
 
     def _extract_short_code_from_url(self, url: str) -> Optional[str]:
         """
-        从URL中提取短链接代码
-        
+        从下游 Tracklink URL 中解析短码（short_code）。
+
+        支持带查询参数或仅路径的 /s/{short_code} 形式。
+
         Args:
-            url: 短链接URL，格式可能是:
-                - {base_url}/s/{short_code}
-                - {base_url}/s/{short_code}?offer_id=X&channel_id=Y
-                - /s/{short_code}
-                - /s/{short_code}?offer_id=X&channel_id=Y
-        
+            url: 短链接完整 URL 或路径
+
         Returns:
-            短链接代码，如果无法提取则返回None
+            Optional[str]: 短码字符串，解析失败返回 None
         """
         if not url:
             return None

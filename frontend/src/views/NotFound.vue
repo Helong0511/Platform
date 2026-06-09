@@ -1,5 +1,13 @@
+<!--
+  404 兜底页（NotFound.vue）
+
+  路由未匹配时由 vue-router 渲染此页面：
+  1. 展示 404 提示文案
+  2. 提供返回仪表盘（/dashboard）的链接
+-->
 <template>
-  <div class="not-found-container">
+  <!-- 页面主模板 -->
+<div class="not-found-container">
     <h1>404 - 页面未找到</h1>
     <p>您访问的页面不存在或已被移除</p>
     <router-link to="/dashboard" class="back-link">返回首页</router-link>

@@ -1,6 +1,20 @@
 """
-用户会话管理服务层
-封装会话查询和撤销的业务逻辑
+用户会话管理服务层。
+
+功能说明：
+- 查询当前用户或指定用户的活跃会话（未过期、is_active=True）
+- 撤销单个/批量会话：JWT jti 写入 ``TokenBlacklist`` 且 ``UserSession.is_active=False``
+
+撤销策略：
+- 双写保证已签发 token 立即失效，即使用户未主动登出
+- ``expires_at`` 比较统一使用 ``get_app_now_naive()``（北京时间）
+
+在系统中的位置：
+- 被管理端会话管理 API 与认证流程调用
+
+注意事项：
+1. 批量撤销管理员会话时须防止把自己踢下线（API 层通常排除当前 jti）
+2. 过期会话清理由 ``cleanup_expired_sessions`` 定时任务物理删除
 """
 import logging
 from typing import Optional, List, Tuple
@@ -19,9 +33,16 @@ logger = logging.getLogger(__name__)
 
 
 class SessionService:
-    """用户会话服务"""
+    """
+    用户会话服务。
+
+    面向两类调用方：
+    - 用户自助：查看/撤销自己的会话，批量撤销时可保留当前 token（current_jti）
+    - 管理员：查看/强制撤销任意用户的会话
+    """
 
     def __init__(self, db: AsyncSession):
+        """注入异步数据库会话。"""
         self.db = db
 
     async def get_my_sessions(
@@ -31,17 +52,17 @@ class SessionService:
             page_size: int = 10
     ) -> Tuple[List[UserSession], int]:
         """
-        获取当前用户的活跃会话列表
+        获取当前用户的活跃会话列表（仅未过期）。
 
         Args:
-            user_id: 用户ID
-            page: 页码
-            page_size: 每页数量
+            user_id: 用户 ID
+            page: 页码（从 1 开始）
+            page_size: 每页条数
 
         Returns:
-            Tuple[List[UserSession], int]: (会话列表, 总数)
+            (会话列表, 总条数)；按 last_activity 降序
         """
-        # 构建查询（expires_at 存储的是北京时间，使用北京时间比较）
+        # 活跃会话：expires_at 存应用时区 naive 时间
         now = get_app_now_naive()
         query = select(UserSession).where(
             UserSession.user_id == user_id,
@@ -73,14 +94,16 @@ class SessionService:
             current_user: User
     ) -> None:
         """
-        撤销当前用户的指定会话
+        撤销当前用户的指定会话。
+
+        校验会话归属后写入黑名单并标记为非活跃；提交失败时回滚并抛出 OPERATION_FAILED。
 
         Args:
-            session_id: 会话ID
-            user_id: 用户ID
-            current_user: 当前用户
+            session_id: 会话主键
+            user_id: 当前用户 ID（须与会话 user_id 一致）
+            current_user: 当前用户实体（预留审计扩展）
         """
-        # 查询会话
+        # 归属校验：仅能撤销自己的会话
         result = await self.db.execute(
             select(UserSession).where(
                 UserSession.id == session_id,
@@ -95,7 +118,7 @@ class SessionService:
                 detail="会话不存在或不属于当前用户"
             )
 
-        # 将token加入黑名单
+        # 撤销双写：黑名单使 JWT 失效，is_active 便于列表过滤
         blacklist_entry = TokenBlacklist(
             token_jti=session.token_jti,
             user_id=user_id,
@@ -103,8 +126,6 @@ class SessionService:
             reason="用户主动撤销会话"
         )
         self.db.add(blacklist_entry)
-
-        # 标记会话为非活跃
         session.is_active = False
 
         try:
@@ -125,17 +146,19 @@ class SessionService:
             current_user: User
     ) -> int:
         """
-        撤销当前用户的所有其他会话（保留当前会话）
+        撤销当前用户除当前 token 外的全部活跃会话。
+
+        通过 current_jti 排除本端会话，避免用户把自己踢下线。
 
         Args:
-            user_id: 用户ID
-            current_jti: 当前token的jti（用于排除当前会话）
-            current_user: 当前用户
+            user_id: 用户 ID
+            current_jti: 当前 JWT 的 jti；为 None 时撤销该用户全部活跃会话
+            current_user: 当前用户实体
 
         Returns:
-            int: 撤销的会话数量
+            成功撤销的会话数量
         """
-        # 查询所有其他活跃会话
+        # 筛选：活跃且未过期，可选排除 current_jti
         query = select(UserSession).where(
             UserSession.user_id == user_id,
             UserSession.is_active == True,
@@ -157,8 +180,6 @@ class SessionService:
                 reason="用户撤销所有其他会话"
             )
             self.db.add(blacklist_entry)
-
-            # 标记会话为非活跃
             session.is_active = False
             revoked_count += 1
 
@@ -182,17 +203,19 @@ class SessionService:
             page_size: int = 10
     ) -> Tuple[List[UserSession], int]:
         """
-        获取指定用户的活跃会话列表（仅管理员）
+        管理员查看指定用户的活跃会话列表。
+
+        用户不存在时抛出 USER_NOT_FOUND；查询条件与 get_my_sessions 一致。
 
         Args:
-            user_id: 用户ID
+            user_id: 目标用户 ID
             page: 页码
-            page_size: 每页数量
+            page_size: 每页条数
 
         Returns:
-            Tuple[List[UserSession], int]: (会话列表, 总数)
+            (会话列表, 总条数)
         """
-        # 先检查用户是否存在
+        # 前置校验：避免对无效 user_id 做无意义分页查询
         user_result = await self.db.execute(select(User.id).where(User.id == user_id))
         user_exists = user_result.scalar() is not None
 
@@ -233,14 +256,15 @@ class SessionService:
             current_user: User
     ) -> None:
         """
-        撤销指定用户的指定会话（仅管理员）
+        管理员强制撤销指定用户的单个会话。
+
+        黑名单 reason 记录操作管理员用户名，便于审计追溯。
 
         Args:
-            user_id: 用户ID
-            session_id: 会话ID
-            current_user: 当前用户（管理员）
+            user_id: 目标用户 ID
+            session_id: 会话主键
+            current_user: 执行操作的管理员
         """
-        # 查询会话
         result = await self.db.execute(
             select(UserSession).where(
                 UserSession.id == session_id,
@@ -255,7 +279,7 @@ class SessionService:
                 detail="会话不存在"
             )
 
-        # 将token加入黑名单
+        # 撤销双写（管理员强制下线）
         blacklist_entry = TokenBlacklist(
             token_jti=session.token_jti,
             user_id=user_id,
@@ -263,8 +287,6 @@ class SessionService:
             reason=f"管理员 {current_user.username} 强制撤销"
         )
         self.db.add(blacklist_entry)
-
-        # 标记会话为非活跃
         session.is_active = False
 
         try:
@@ -284,16 +306,16 @@ class SessionService:
             current_user: User
     ) -> Tuple[int, str]:
         """
-        撤销指定用户的所有会话（仅管理员）
+        管理员强制撤销指定用户的全部活跃会话。
 
         Args:
-            user_id: 用户ID
-            current_user: 当前用户（管理员）
+            user_id: 目标用户 ID
+            current_user: 执行操作的管理员
 
         Returns:
-            Tuple[int, str]: (撤销的会话数量, 用户名)
+            (撤销数量, 被操作用户名)
         """
-        # 检查用户是否存在
+        # 加载用户实体以返回 username，并确认用户存在
         user_result = await self.db.execute(select(User).where(User.id == user_id))
         user = user_result.scalars().first()
 
@@ -303,7 +325,7 @@ class SessionService:
                 detail=f"用户ID {user_id} 不存在"
             )
 
-        # 查询所有活跃会话
+        # 批量撤销该用户全部活跃会话
         query = select(UserSession).where(
             UserSession.user_id == user_id,
             UserSession.is_active == True,
@@ -315,7 +337,6 @@ class SessionService:
 
         revoked_count = 0
         for session in sessions:
-            # 将token加入黑名单
             blacklist_entry = TokenBlacklist(
                 token_jti=session.token_jti,
                 user_id=user_id,
@@ -323,8 +344,6 @@ class SessionService:
                 reason=f"管理员 {current_user.username} 强制撤销所有会话"
             )
             self.db.add(blacklist_entry)
-
-            # 标记会话为非活跃
             session.is_active = False
             revoked_count += 1
 

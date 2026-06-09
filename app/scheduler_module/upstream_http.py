@@ -1,8 +1,16 @@
 """
-上游 API HTTP 响应解析辅助（各任务共用）。
+上游 API HTTP 客户端辅助模块。
 
-定时拉数任务（TQT / Skymobi / yangyangdeyi / Addermobi / Huguang / zhisuo / Pomiad）
-均通过本模块的 post_json / get_json 请求上游；对 HTTP 5xx、429 自动重试。
+功能说明：
+- 提供 ``post_json`` / ``get_json`` 及业务成功码校验
+- 对 HTTP 5xx、429 自动重试，超时与连接错误记录日志
+
+在系统中的位置：
+- 被 ``upstream_fetch`` 与各上游 task 直接调用
+
+注意事项：
+1. 重试次数与退避见 settings，避免上游封禁
+2. 响应体过大时注意内存，必要时分页拉取
 """
 from __future__ import annotations
 
@@ -23,15 +31,18 @@ _UPSTREAM_RETRY_DELAYS = (2.0, 5.0, 10.0)
 
 
 def _httpx_timeout(total: float) -> httpx.Timeout:
+    """构造 httpx 超时：connect 不超过配置上限与 total 的较小值。"""
     connect = min(float(settings.UPSTREAM_HTTP_CONNECT_TIMEOUT), total)
     return httpx.Timeout(total, connect=connect)
 
 
 def _default_max_retries() -> int:
+    """读取上游 HTTP 最大重试次数，至少 1 次。"""
     return max(1, int(settings.UPSTREAM_HTTP_MAX_RETRIES))
 
 
 def _default_timeout() -> float:
+    """读取上游 HTTP 总超时秒数，下限 5 秒。"""
     return max(5.0, float(settings.UPSTREAM_HTTP_TIMEOUT))
 
 
@@ -46,6 +57,7 @@ def ensure_http_ok(
     label: str = "API",
     attempts: Optional[int] = None,
 ) -> None:
+    """非 200 状态码时记录响应体并抛异常，可附带重试次数说明。"""
     if response.status_code != 200:
         text = (response.text or "")[:500]
         retry_suffix = f"（已重试 {attempts} 次）" if attempts and attempts > 1 else ""
@@ -62,6 +74,7 @@ def ensure_http_ok(
 
 
 def parse_json_response(response: httpx.Response, *, label: str = "API") -> Dict[str, Any]:
+    """解析 HTTP 响应为 JSON 字典，空体或非法 JSON 时抛可读异常。"""
     try:
         data = response.json()
     except Exception as e:
@@ -86,6 +99,10 @@ async def _request_json(
     verify: bool = True,
     max_retries: Optional[int] = None,
 ) -> Dict[str, Any]:
+    """
+    上游 HTTP 请求核心：5xx/429/超时/网络错误按退避策略重试，成功返回 JSON 字典。
+    post_json / get_json 均委托本函数。
+    """
     total_timeout = timeout if timeout is not None else _default_timeout()
     attempts = max_retries if max_retries is not None else _default_max_retries()
     attempts = max(1, attempts)
@@ -220,6 +237,7 @@ def api_error_message(
     code_keys: tuple[str, ...] = ("code", "ret", "status", "state"),
     msg_keys: tuple[str, ...] = ("msg", "message"),
 ) -> Optional[str]:
+    """从上游 JSON 中提取业务错误码与消息，兼容各平台字段命名差异。"""
     code = None
     for k in code_keys:
         if k in json_data:

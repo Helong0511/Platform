@@ -1,7 +1,20 @@
-<!-- 广告数据列表组件 -->
+<!--
+  广告数据列表组件（AdDataList.vue）
+
+  作为广告数据模块的子组件，负责：
+  1. 多维筛选：产品、客户、日期、平台等
+  2. 数据表格：分页展示广告明细，支持列显隐
+  3. 导出：按当前筛选条件导出 Excel
+
+  筛选联动与表格格式化由对应 composable 提供。
+-->
 <template>
-  <div class="ad-data-list">
+  <!-- 页面主模板 -->
+  <!-- 页面主模板 -->
+<div class="ad-data-list">
+    <!-- 筛选区 -->
     <el-card class="filter-card">
+      <!-- 表单区域 -->
       <el-form :model="filterForm" :inline="true">
         <el-form-item label="产品">
           <el-select v-model="filterForm.product_id" placeholder="全部" clearable filterable>
@@ -18,6 +31,7 @@
       </el-form>
     </el-card>
     <el-card class="table-card">
+      <!-- 数据表格 -->
       <el-table v-loading="loading" :data="data" border>
         <el-table-column prop="date" label="日期" width="120" />
         <el-table-column prop="product_name" label="产品" min-width="150" />
@@ -28,6 +42,7 @@
         <el-table-column prop="ecpm_after_deduct" label="eCPM" width="100" />
         <el-table-column prop="revenue_after_deduct" label="收益" width="100" />
       </el-table>
+      <!-- 分页 -->
       <el-pagination v-model:current-page="page" :total="total" :page-size="20" layout="total,prev,pager,next" @current-change="loadData" />
     </el-card>
   </div>

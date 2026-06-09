@@ -1,6 +1,16 @@
 """
-用户会话模型
-用于跟踪用户的活跃会话，支持会话管理和强制退出
+用户会话与 Token 黑名单模型。
+
+功能说明：
+- ``UserSession``：跟踪用户活跃登录会话（jti、IP、UA、过期时间等）
+- ``TokenBlacklist``：记录已撤销 JWT，配合会话服务实现强制下线
+
+在系统中的位置：
+- 被 ``session_service``、认证中间件、``cleanup_expired_sessions`` 定时任务使用
+
+注意事项：
+1. 时间字段使用 ``get_app_now_naive()``（北京时间 naive datetime）
+2. 撤销会话须同时写黑名单并将 ``is_active=False``，双写保证 token 立即失效
 """
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Index
 from sqlalchemy.orm import relationship

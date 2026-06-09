@@ -1,6 +1,16 @@
 """
-定时任务工具函数
-提供通用的任务执行辅助功能，减少重复代码
+定时任务通用工具函数模块。
+
+功能说明：
+- 统一任务启动/跳过/失败日志格式；格式化结果摘要写入 last_error
+- 上游拉数共用：日期区间解析、凭证缺失检测、时区转换
+
+在系统中的位置：
+- 被 scheduler 与各 tasks/*.py 广泛引用
+
+注意事项：
+1. SCHEDULED_TASK_ERROR_MAX_LEN 与 lock 模块一致，截断错误信息防 DB 溢出
+2. upstream_credential_missing 返回 True 时任务应 skip 而非抛未捕获异常
 """
 import logging
 from datetime import datetime, timedelta
