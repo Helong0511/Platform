@@ -1,4 +1,11 @@
-"""Cloak /change bridge page routes."""
+"""
+斗篷 /change 桥页路由
+
+用户访问 /change/{short_code}?dp=斗篷名 时：
+1. 统计展示次数、解析原始跳转 URL
+2. 加载对应 {dp}.html 桥页并注入元数据、跳转地址、加载上报脚本
+3. 首次会话访问时写入 clicks 表（带去重）
+"""
 import json
 import logging
 from typing import Optional
@@ -37,6 +44,8 @@ logger = logging.getLogger(__name__)
 
 
 def register_cloak_change_routes(router: APIRouter) -> None:
+    """将 /change/{short_code} 桥页路由注册到短链接路由器。"""
+
     @router.get("/change/{short_code}",
                 summary="打开桥页并跳转到指定 URL（支持 dp 参数动态加载不同桥页）",
                 tags=["斗篷服务"])
@@ -58,9 +67,10 @@ def register_cloak_change_routes(router: APIRouter) -> None:
         - 支持安全验证，防止路径遍历攻击
         """
         try:
+            # ---------- 1. 短码校验 ----------
             short_code = validate_route_short_code(short_code)
 
-            # 记录请求信息
+            # ---------- 2. 记录请求元信息（日志与后续落库） ----------
             client_ip = request.client.host if request.client else "未知"
             user_agent = request.headers.get("user-agent", "未知")
             referer = request.headers.get("referer", "未知")
@@ -80,6 +90,7 @@ def register_cloak_change_routes(router: APIRouter) -> None:
             else:
                 logger.debug(f"[斗篷服务] 缓存未命中: short_code={short_code}")
 
+            # ---------- 3. 会话 ID 与展示次数统计，获取原始跳转 URL ----------
             session_id = resolve_session_id(request)
             original_url, is_first_visit = await resolve_cloak_change_original_url(
                 short_code,
@@ -89,6 +100,7 @@ def register_cloak_change_routes(router: APIRouter) -> None:
                 background_tasks,
             )
 
+            # ---------- 4. 解析 offer_id / channel_id（查询参数 → 缓存 → 数据库） ----------
             # 与 /s/{short_code} 一致：替换 {click_id}、{channel_id} 等占位符，并合并本次请求的查询参数
             request_params = {k.lower(): v for k, v in request.query_params.items()}
             offer_id_q: Optional[int] = None
@@ -130,11 +142,12 @@ def register_cloak_change_routes(router: APIRouter) -> None:
                 except Exception as exc:
                     logger.warning("[斗篷服务] 读取短链 offer/channel 用于占位符: %s", exc)
 
-            # 纯数字 dp（如 145）= 平台 Offer 主键：覆盖短链上的 offer_id，保证与斗篷页一致
+            # 纯数字 dp（如 145）表示平台 Offer 主键，覆盖短链 offer_id，与投放页产品一致
             dp_as_offer = offer_id_from_numeric_dp(dp)
             if dp_as_offer is not None:
                 offer_id_q = dp_as_offer
 
+            # ---------- 5. 生成 click_id 并构建最终跳转 URL（占位符 + 查询参数合并） ----------
             request_info_cloak = collect_request_info(request) if request else {}
             final_channel_id_cloak = channel_id_q
             final_offer_id_cloak, advertiser_id_cloak = await resolve_offer_id(offer_id_q, db)
@@ -188,10 +201,11 @@ def register_cloak_change_routes(router: APIRouter) -> None:
                 original_url[:200] + ("..." if len(original_url) > 200 else ""),
             )
 
+            # ---------- 6. 加载桥页 HTML（dp → {dp}.html，不存在则回退 master.html） ----------
             html_content, bridge_page_name, cloak_key = resolve_bridge_html(dp)
             logger.debug("[斗篷服务] 请求的桥页：%s", bridge_page_name)
 
-            # 写入短链接访问记录（clicks 表）：仅本会话首次访问 + IP 短窗口去重，避免一次打开产生多条记录
+            # ---------- 7. 桥页首次访问落库 clicks（会话 + IP 去重，避免刷新/并发双写） ----------
             if background_tasks and is_first_visit:
                 try:
                     sl_pk = (cached_data or {}).get("id")
@@ -233,6 +247,7 @@ def register_cloak_change_routes(router: APIRouter) -> None:
                 except Exception as exc:
                     logger.warning("[斗篷服务] 排队桥页访问记录失败: %s", exc, exc_info=True)
 
+            # ---------- 8. 读取斗篷配置，注入元数据 / 跳转 URL / 加载上报脚本 ----------
             try:
                 cc_res = await db.execute(
                     select(CloakConfig).where(CloakConfig.cloak_name == cloak_key)

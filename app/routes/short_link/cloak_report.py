@@ -1,4 +1,11 @@
-"""Cloak /report click reporting routes."""
+"""
+斗篷 /report 点击上报路由
+
+桥页前端在加载完成（phase=load）或按钮点击（phase=click）时请求本接口：
+- 校验 email/phone、解析 dp 与客户端信息
+- Redis 去重后更新短链点击计数
+- 后台任务向 Facebook CAPI 发送对应阶段事件
+"""
 import logging
 from typing import Optional
 
@@ -23,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 
 def register_cloak_report_routes(router: APIRouter) -> None:
+    """将 /report 路由注册到短链接路由器。"""
+
     @router.get(
         "/report",
         summary="处理短链接点击上报（支持 dp 参数和 Facebook 像素上报）",
@@ -42,7 +51,20 @@ def register_cloak_report_routes(router: APIRouter) -> None:
             background_tasks: BackgroundTasks = None,
             db: AsyncSession = Depends(get_db),
     ):
+        """
+        处理桥页前端发起的 load/click 阶段上报请求。
+
+        处理流程：
+        1. 解析客户端 IP/UA/Referer、dp 参数、上报阶段 phase
+        2. 校验 email、phone 非空；fbclid 缺失时用 UUID 占位
+        3. Redis 去重（load 同会话一次；click 同 session 计一次点击）
+        4. phase=click 时递增 short_links.click_count 并排队写入 clicks 表
+        5. 后台任务向 Facebook CAPI 发送对应阶段事件（见 cloak_report_service）
+
+        注意：postback 转化上报不走本接口，由下游转化处理器单独触发。
+        """
         try:
+            # 提取客户端信息，供日志、落库与 CAPI user_data 使用
             meta = extract_request_client_meta(request)
             client_ip = meta["client_ip"]
             user_agent = meta["user_agent"]

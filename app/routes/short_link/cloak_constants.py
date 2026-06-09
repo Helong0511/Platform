@@ -1,6 +1,23 @@
-"""斗篷 / 桥页相关常量。"""
+"""
+斗篷 / 桥页相关常量。
 
-# 桥页注入：DOMContentLoaded 时请求 /report?phase=load
+CLOAK_LOAD_REPORT_INJECT 是一段内联 JavaScript，由服务端在渲染桥页时插入 </body> 之前。
+执行时机与逻辑（DOMContentLoaded 后）：
+
+1. 读取 window.__CLOAK_META__（cloak_bridge_html.build_meta_snippet 注入的 base64 JSON）
+2. 若 load_report_enabled 为 false，直接退出（不请求 /report）
+3. 若 sessionStorage.cloak_load_fb_done 已存在，说明本会话已上报过 load，跳过
+4. 从 URL 路径解析短链 short_code（pathname 最后一段，如 /change/abc123 → abc123）
+5. 确保 sessionStorage 中有 ad_event_email、ad_event_phone（无则随机生成，供 CAPI 匹配）
+6. 从 URL 查询参数取 fbclid，若无则生成 UUID 形态占位符
+7. 拼接 GET /report?phase=load&fbclid=...&email=...&phone=...&dp=...&report_event=...
+8. 请求成功（r.ok）后写入 cloak_load_fb_done，防止同会话重复 load 上报
+
+注意：点击阶段（phase=click）由桥页模板内按钮逻辑触发，不在此脚本内处理。
+"""
+
+# 桥页「加载完成」阶段 Facebook 上报脚本（压缩为单行以减小 HTML 体积）
+# 依赖：__CLOAK_META__、cloakReportQuerySuffix()（均由 build_meta_snippet 定义）
 CLOAK_LOAD_REPORT_INJECT = (
     "<script>(function(){document.addEventListener('DOMContentLoaded',function(){try{"
     "var M=window.__CLOAK_META__||{};if(!M.load_report_enabled)return;"

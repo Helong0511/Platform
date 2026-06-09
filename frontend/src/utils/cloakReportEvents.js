@@ -9,6 +9,11 @@ export const CLOAK_TEST_REPORT_PHASES = [
   { value: 'load', label: '加载完成上报（载）', short: '载' },
 ];
 
+/**
+ * 根据测试阶段从表格行读取对应的事件名、金额、货币（与后端 _resolve_test_report_params 一致）
+ * @param {object|null} row 斗篷配置行
+ * @param {'load'|'click'|'postback'} phase 上报阶段
+ */
 export function getTestPhaseEventMeta(row, phase) {
   if (!row) {
     return { event: '-', value: null, currency: 'USD' };
@@ -34,6 +39,10 @@ export function getTestPhaseEventMeta(row, phase) {
   };
 }
 
+/**
+ * 测试上报前校验：Purchase 须有效金额（postback 可留空走服务端测试默认）
+ * @returns {string|null} 警告文案，null 表示可继续
+ */
 export function validateTestReportPhase(row, phase) {
   const { event, value } = getTestPhaseEventMeta(row, phase);
   if (event !== 'Purchase') {
@@ -76,6 +85,7 @@ export const FACEBOOK_STANDARD_EVENT_SET = new Set(
 
 export const CLOAK_CUSTOM_REPORT_EVENT_RE = /^[A-Za-z][A-Za-z0-9_]{1,62}$/;
 
+/** Element Plus 表单校验器：Meta 标准事件或自定义事件命名规则 */
 export function validateReportEventName(_rule, value, callback) {
   const v = (value || '').trim();
   if (!v) {
@@ -93,6 +103,7 @@ export function validateReportEventName(_rule, value, callback) {
   );
 }
 
+/** 列表「上报事件」列展示：标准事件显示中文说明，自定义事件标注「自定义」 */
 export function reportEventCellLabel(code) {
   const raw = (code || '').trim();
   if (!raw) return '-';
@@ -101,16 +112,19 @@ export function reportEventCellLabel(code) {
   return `${raw}（自定义）`;
 }
 
+/** 斗篷是否可用：后端返回 is_usable 或 bridge_html_present 为真 */
 export function rowIsUsable(row) {
   return row && (row.is_usable === true || row.bridge_html_present === true);
 }
 
+/** Token 脱敏展示（与后端 _mask_token 规则一致） */
 export function maskToken(token) {
   if (!token) return '-';
   if (token.length <= 10) return '******';
   return `${token.slice(0, 6)}******${token.slice(-4)}`;
 }
 
+/** 测试上报结果 JSON 格式化，便于弹窗 pre 展示 */
 export function formatJson(value) {
   if (!value) return '-';
   if (typeof value === 'string') {

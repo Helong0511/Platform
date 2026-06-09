@@ -1,4 +1,12 @@
-"""斗篷 /report 业务逻辑（参数解析、去重、点击统计、Facebook CAPI）。"""
+"""
+斗篷 /report 业务逻辑层（参数解析、Redis 去重、点击统计、Facebook CAPI 调度）。
+
+与 cloak_report.py（路由层）的分工：
+- 路由层：HTTP 入参校验、组装 JSON 响应
+- 本模块：dp 解析、phase 规范化、Redis 去重、click_count 递增、CAPI 后台任务
+
+postback 阶段转化上报不在此处理，由下游 postback 处理器读取 clicks.url_params.dp 后单独发 CAPI。
+"""
 import logging
 import re
 import uuid
@@ -20,11 +28,14 @@ from app.services.cloak_pixel_mapping import get_cloak_pixel_config
 
 logger = logging.getLogger(__name__)
 
+# dp 参数合法字符集（与 Schema、像素映射服务一致）
 _DP_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+# /report 接口支持的上报阶段（postback 由转化处理器单独处理，不走本模块）
 _VALID_PHASES = frozenset({"load", "click"})
 
 
 def extract_request_client_meta(request: Optional[Request]) -> Dict[str, str]:
+    """从 FastAPI Request 提取客户端 IP、UA、Referer，用于日志与 CAPI user_data。"""
     if not request:
         return {"client_ip": "未知", "user_agent": "未知", "referer": "未知"}
     return {
@@ -39,6 +50,12 @@ def resolve_report_dp(
         request: Optional[Request],
         referer: str,
 ) -> Optional[str]:
+    """
+    解析本次上报关联的斗篷名（dp）。
+
+    优先级：Query 参数 dp → 请求 query 中大小写变体 → Referer URL 中的 dp。
+    格式非法时返回 None 并打警告日志。
+    """
     resolved = dp.strip() if dp and dp.strip() else None
     if not resolved and request:
         for key in ("dp", "DP", "Dp"):
@@ -61,6 +78,7 @@ def resolve_report_dp(
 
 
 def normalize_report_phase(phase: Optional[str]) -> str:
+    """将 phase 规范为 load 或 click，未知值默认 click。"""
     raw = (phase or "click").strip().lower()
     return raw if raw in _VALID_PHASES else "click"
 
@@ -71,6 +89,12 @@ def build_dedupe_key(
         session_id: Optional[str],
         fbclid: str,
 ) -> Optional[str]:
+    """
+    构造 Redis 去重键。
+
+    - load：同会话/同 short_code 仅上报一次 Facebook（键含 session 或 fbclid）
+    - click：同 session 仅计一次点击（与 click_count 统计一致）
+    """
     if report_phase == "load":
         dedupe_id = session_id or fbclid or "anon"
         return f"cloak_load_fb:{short_code}:{dedupe_id}"
@@ -81,7 +105,10 @@ def build_dedupe_key(
 
 async def try_mark_report_dedupe(dedupe_key: str) -> bool:
     """
-    Returns True if this is a duplicate (key already existed).
+    尝试在 Redis 中标记去重键（SET NX，TTL 24 小时）。
+
+    Returns:
+        True 表示重复请求（键已存在）；False 表示首次请求或 Redis 不可用。
     """
     redis = await get_redis_client()
     if not redis:
@@ -99,6 +126,7 @@ def duplicate_report_response(
         client_ip: str,
         fbclid: str,
 ) -> Dict[str, Any]:
+    """去重命中时返回与成功相同结构的 JSON，避免前端重试逻辑误判为失败。"""
     msg = (
         "load report duplicate skip"
         if report_phase == "load"
@@ -127,6 +155,11 @@ async def record_cloak_click_count(
         referer: str,
         original_request_url: Optional[str],
 ) -> None:
+    """
+    点击阶段（phase=click）递增短链 click_count，并排队写入 clicks 表。
+
+    优先更新 Redis 缓存中的计数；缓存未命中则直接写库。落库细节见 cloak_click_persist。
+    """
     cached_data = await get_short_link_from_cache(short_code)
     if cached_data:
         logger.debug(
@@ -208,6 +241,7 @@ def _log_url_report_mismatch(
         report_value: Optional[float],
         report_currency: str,
 ) -> None:
+    """若桥页 URL 携带 report_* 查询参数但与服务端配置不一致，仅打警告（以服务端为准）。"""
     q_evt = request.query_params.get("report_event")
     q_val = request.query_params.get("report_value")
     q_cur = request.query_params.get("report_currency")
@@ -245,6 +279,12 @@ def _resolve_fb_report_params(
         resolved_dp: Optional[str],
         dp_param: str,
 ) -> tuple[bool, str, Optional[float], str, str, str]:
+    """
+    根据阶段与像素配置决定是否发送 CAPI，并解析事件名、金额、货币、source 标识。
+
+    Returns:
+        (send_fb, report_event, report_value, report_currency, source, conv_seg)
+    """
     send_fb = False
     report_event = "ViewContent"
     report_value: Optional[float] = None
@@ -315,6 +355,11 @@ async def schedule_cloak_facebook_report(
         db: AsyncSession,
         background_tasks: BackgroundTasks,
 ) -> None:
+    """
+    解析像素配置与阶段参数后，将 send_third_party_report 加入后台任务队列。
+
+    无 dp 时默认按 master 查斗篷配置；Purchase 无有效金额时跳过上报并记错误日志。
+    """
     if not (email and phone and background_tasks):
         return
 
@@ -407,4 +452,5 @@ async def schedule_cloak_facebook_report(
 
 
 def ensure_fbclid(fbclid: Optional[str]) -> str:
+    """桥页未传 fbclid 时用 UUID 占位，保证 CAPI fbc 链路可构造。"""
     return fbclid if fbclid else str(uuid.uuid4())

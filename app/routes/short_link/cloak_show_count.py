@@ -1,4 +1,16 @@
-"""斗篷 /change 桥页展示次数统计与 original_url 解析。"""
+"""
+斗篷 /change 桥页展示次数统计与 original_url 解析。
+
+职责：
+1. 按浏览器会话（session_id Cookie）统计 short_links.show_count，同会话重复打开桥页不重复计数
+2. 返回短链配置的 original_url，供 cloak_change 做占位符替换与最终跳转
+3. 控制桥页首次访问时是否写入 clicks 表（会话维度 + IP 短窗口去重）
+
+与 Redis 的配合：
+- show_count:{short_code}:{session_id}：展示去重，TTL 6 小时
+- cloak_visit_click:{short_code}:{session_id}：桥页访问落库去重
+- cloak_visit_click_ip:{short_code}:{ip}：Cookie 未落盘时的并发请求去重
+"""
 import logging
 import uuid
 from typing import Any, Dict, Optional, Tuple
@@ -16,12 +28,25 @@ from app.routes.short_link.errors import raise_short_link_not_found
 
 logger = logging.getLogger(__name__)
 
+# 展示次数与会话落库去重的 Redis 键 TTL（秒），与 session_id Cookie max_age 对齐（6 小时）
 SHOW_COUNT_TTL_SECONDS = 21600
-# 同 IP 在 Cookie 未生效前的并发 /change 请求去重窗口（秒）
+# 同 IP 在 Cookie 未生效前的并发 /change 请求去重窗口（秒），避免双写 clicks
 CLOAK_VISIT_CLICK_IP_DEDUPE_SECONDS = 30
 
 
 def resolve_session_id(request: Request) -> str:
+    """
+    解析或生成桥页会话 ID。
+
+    优先读取 request 中 session_id Cookie（由 build_bridge_html_response 在首次响应时写入）；
+    首次访问无 Cookie 时生成 UUID，并在响应中 Set-Cookie 使后续 /change、/report 共享同一会话。
+
+    Args:
+        request: FastAPI 请求对象
+
+    Returns:
+        会话 ID 字符串（UUID 或已有 Cookie 值）
+    """
     session_id = request.cookies.get("session_id")
     if not session_id:
         session_id = str(uuid.uuid4())
@@ -95,6 +120,7 @@ async def _fetch_original_url_from_db(
         short_code: str,
         db: AsyncSession,
 ) -> Optional[str]:
+    """重复访问且缓存未命中时，仅从库读取 original_url（不递增 show_count）。"""
     result = await db.execute(
         select(ShortLink).where(ShortLink.short_code == short_code)
     )
@@ -109,6 +135,7 @@ async def _increment_show_count_in_db(
         short_code: str,
         db: AsyncSession,
 ) -> Optional[str]:
+    """缓存未命中时同步递增 short_links.show_count 并返回 original_url。"""
     result = await db.execute(
         select(ShortLink).where(ShortLink.short_code == short_code)
     )
@@ -143,6 +170,7 @@ def _schedule_db_show_count_sync(
         cached_data: Dict[str, Any],
         background_tasks: BackgroundTasks,
 ) -> None:
+    """后台任务：将缓存中已递增的 show_count 同步到数据库（仅当库值落后时更新）。"""
     async def update_show_count_db():
         try:
             db_session = AsyncSessionLocal()

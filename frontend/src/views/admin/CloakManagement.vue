@@ -1,5 +1,18 @@
+<!--
+  斗篷管理页面（CloakManagement.vue）
+
+  功能区块：
+  1. 工具栏：按斗篷名称搜索、分页列表
+  2. 表格：可用性、像素、三阶段上报开关（载/点/转）、启用开关、操作按钮
+  3. 编辑弹窗：新建/编辑斗篷配置（加载、点击、postback 三阶段 CAPI 参数）
+  4. 上传弹窗：上传 {cloak_name}.html 桥页文件
+  5. 测试弹窗：选择阶段 → 调用 test-report API → 展示主/备像素 CAPI 响应
+
+  业务逻辑集中在 composable useCloakConfigs.js，本文件仅负责 UI 绑定。
+-->
 <template>
   <div class="cloak-management">
+    <!-- 页面标题与业务说明 -->
     <div class="page-header">
       <h2>斗篷管理</h2>
       <p>
@@ -8,6 +21,7 @@
       </p>
     </div>
 
+    <!-- 搜索与新增工具栏 -->
     <el-card shadow="never" class="toolbar-card">
       <el-form :inline="true" :model="searchForm">
         <el-form-item label="斗篷名称">
@@ -26,6 +40,7 @@
       </el-form>
     </el-card>
 
+    <!-- 斗篷配置列表：可用性由后端 bridge_html_present / is_usable 决定 -->
     <el-card shadow="never">
       <el-table v-loading="loading" :data="tableData" border stripe>
         <el-table-column prop="cloak_name" label="斗篷名称" min-width="130" />
@@ -109,6 +124,7 @@
       </div>
     </el-card>
 
+    <!-- 新建/编辑弹窗：三阶段上报（载=load、点=click、转=postback） -->
     <el-dialog
       v-model="editDialogVisible"
       :title="editingId ? '编辑斗篷配置' : '新增斗篷配置'"
@@ -260,6 +276,7 @@
       </template>
     </el-dialog>
 
+    <!-- 桥页 HTML 上传：保存为 {cloak_name}.html，上传后可用性变为「可用」 -->
     <el-dialog
       v-model="uploadDialogVisible"
       title="上传桥页 HTML"
@@ -296,6 +313,7 @@
       </template>
     </el-dialog>
 
+    <!-- 测试上报：先选择阶段（载/点/转），再向 Facebook CAPI 发送模拟事件 -->
     <el-dialog
       v-model="testPhaseDialogVisible"
       title="选择测试上报类型"
@@ -316,6 +334,7 @@
       </template>
     </el-dialog>
 
+    <!-- 测试上报结果：展示主像素与备份像素的请求/响应详情（Token 已脱敏） -->
     <el-dialog
       v-model="testDialogVisible"
       title="测试上报结果"
@@ -369,6 +388,10 @@
 </template>
 
 <script setup>
+/**
+ * 斗篷管理页面：列表、编辑三阶段上报、上传桥页 HTML、测试 CAPI。
+ * 业务状态与 API 调用集中在 composable useCloakConfigs.js。
+ */
 import { Plus, Refresh, Search, Upload } from '@element-plus/icons-vue';
 import { useCloakConfigs } from '../../composables/useCloakConfigs';
 

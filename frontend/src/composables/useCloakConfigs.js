@@ -1,3 +1,12 @@
+/**
+ * 斗篷管理页组合式逻辑（useCloakConfigs）
+ *
+ * 职责：
+ * - 分页列表与搜索
+ * - 新建/编辑表单（载/点/转三阶段上报、Purchase 金额校验）
+ * - 桥页 HTML 上传、启用开关（须磁盘存在对应 .html）
+ * - 分阶段测试 CAPI 上报并展示主/备像素响应
+ */
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
@@ -20,29 +29,42 @@ import {
   validateTestReportPhase,
 } from '../utils/cloakReportEvents';
 
+/**
+ * 斗篷管理页组合式函数：集中管理列表、表单、上传、测试上报的全部状态与事件。
+ * 供 CloakManagement.vue 解构使用，保持 Vue 组件仅负责模板渲染。
+ */
 export function useCloakConfigs() {
-  const loading = ref(false);
-  const saving = ref(false);
-  const tableData = ref([]);
-  const formRef = ref(null);
-  const editDialogVisible = ref(false);
-  const testDialogVisible = ref(false);
-  const testPhaseDialogVisible = ref(false);
-  const testPhase = ref('postback');
-  const testPhaseTargetRow = ref(null);
-  const testSubmitting = ref(false);
-  const uploadDialogVisible = ref(false);
-  const uploadDialogKey = ref(0);
-  const uploadTargetRow = ref(null);
-  const uploadSelectedFile = ref(null);
-  const uploading = ref(false);
-  const editingId = ref(null);
-  const currentTestingRow = ref(null);
-  const testResult = ref(null);
+  // ---------- 列表与加载状态 ----------
+  const loading = ref(false); // 表格数据请求中
+  const saving = ref(false); // 编辑弹窗保存中
+  const tableData = ref([]); // 当前页斗篷配置行
 
+  // ---------- 编辑弹窗 ----------
+  const formRef = ref(null); // Element Plus 表单实例，保存前调用 validate()
+  const editDialogVisible = ref(false);
+  const editingId = ref(null); // null=新建，数字=编辑已有配置 id
+
+  // ---------- 测试上报弹窗（两步骤：选阶段 → 看结果） ----------
+  const testDialogVisible = ref(false); // 展示 CAPI 请求/响应详情
+  const testPhaseDialogVisible = ref(false); // 选择 load/click/postback 阶段
+  const testPhase = ref('postback'); // 当前选中的测试阶段，默认转化
+  const testPhaseTargetRow = ref(null); // 待测试的表格行
+  const testSubmitting = ref(false);
+  const currentTestingRow = ref(null);
+  const testResult = ref(null); // testCloakReport API 返回的 primary/backup 详情
+
+  // ---------- 桥页 HTML 上传弹窗 ----------
+  const uploadDialogVisible = ref(false);
+  const uploadDialogKey = ref(0); // 递增以强制 el-upload 重新挂载，清空已选文件
+  const uploadTargetRow = ref(null);
+  const uploadSelectedFile = ref(null); // el-upload on-change 得到的 raw File
+  const uploading = ref(false);
+
+  // ---------- 搜索与分页 ----------
   const searchForm = reactive({ cloak_name: '' });
   const pagination = reactive({ page: 1, pageSize: 10, total: 0 });
 
+  // 编辑表单数据，字段与后端 CloakConfigCreate / CloakConfigUpdate 对齐
   const formData = reactive({
     cloak_name: '',
     pixel_id: '',
@@ -64,6 +86,7 @@ export function useCloakConfigs() {
     is_enabled: true,
   });
 
+  // 表单校验：与后端 app/schemas/cloak.py 规则对齐
   const rules = computed(() => ({
     cloak_name: [{ required: true, message: '请输入斗篷名称', trigger: 'blur' }],
     report_event: [{ validator: validateReportEventName, trigger: 'change' }],
@@ -132,6 +155,7 @@ export function useCloakConfigs() {
     ],
   }));
 
+  /** 重置编辑弹窗为新建默认值（新建时 is_enabled 默认关闭，须先上传 HTML 再开启） */
   const resetFormData = () => {
     formData.cloak_name = '';
     formData.pixel_id = '';
@@ -212,6 +236,7 @@ export function useCloakConfigs() {
     editDialogVisible.value = true;
   };
 
+  /** 按当前表单与 Purchase 规则组装提交体（非 Purchase 阶段不传金额/货币） */
   const buildPayload = () => ({
     cloak_name: formData.cloak_name,
     pixel_id: formData.pixel_id,
@@ -284,6 +309,7 @@ export function useCloakConfigs() {
     }
   };
 
+  /** 列表开关：无桥页文件时不允许开启 */
   const handleToggle = async (row, value) => {
     if (value && !rowIsUsable(row)) {
       ElMessage.warning('请先上传对应桥页 HTML，检测到文件后方可开启斗篷');

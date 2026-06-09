@@ -707,8 +707,14 @@ class AdminNotificationConfig(Base):
     )
 
 
-# 斗篷像素配置模型
 class CloakConfig(Base):
+    """
+    斗篷像素配置表（cloak_configs）。
+
+    一条记录对应一个 cloak_name（与磁盘桥页 {cloak_name}.html、投放链接 dp 参数一致），
+    存储主/备 Facebook Pixel、三阶段 CAPI 上报开关与事件参数。
+    管理端通过 app/api_v1/system/cloak_configs.py 维护；运行时由 cloak_pixel_mapping 读取。
+    """
     __tablename__ = "cloak_configs"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='配置ID')

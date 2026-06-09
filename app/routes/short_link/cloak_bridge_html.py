@@ -1,4 +1,15 @@
-"""斗篷桥页 HTML 加载、元数据注入与响应构建。"""
+"""
+斗篷桥页 HTML 加载、元数据注入与 HTTP 响应构建。
+
+本模块是 /change 桥页渲染的核心，将磁盘上的 {cloak_name}.html 模板加工为可投放页面：
+
+1. resolve_bridge_html：按 dp 参数加载 HTML，失败时回退 master.html
+2. cloak_meta_from_row：把数据库 CloakConfig 转为前端可用的 __CLOAK_META__ 字典
+3. build_meta_snippet / inject_meta_into_html：向 <head> 注入 base64 元数据与 cloakReportQuerySuffix
+4. inject_original_url_into_html：替换模板内 getOriginalUrl()，注入服务端算好的跳转 URL
+5. append_load_report_inject：在 </body> 前插入加载完成上报脚本（CLOAK_LOAD_REPORT_INJECT）
+6. build_bridge_html_response：返回 HTMLResponse，设置 no-cache、CSP、session_id Cookie
+"""
 import base64
 import json
 import logging
@@ -14,6 +25,7 @@ from app.routes.short_link.cloak_constants import CLOAK_LOAD_REPORT_INJECT
 
 logger = logging.getLogger(__name__)
 
+# 桥页 HTML 响应的 Content-Security-Policy，限制脚本与资源来源以降低 XSS 风险
 BRIDGE_CSP = (
     "default-src 'self'; script-src 'self' 'unsafe-inline'; "
     "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
@@ -24,6 +36,7 @@ BRIDGE_CSP = (
 
 
 def sanitize_dp_param(dp: Optional[str]) -> Optional[str]:
+    """过滤 dp 中的非法字符，防止路径遍历；非法时返回 None 走默认 master 桥页。"""
     if dp and not re.match(r"^[a-zA-Z0-9_-]+$", dp):
         logger.debug("[斗篷服务] dp 参数包含非法字符：%s，使用默认桥页", dp)
         return None
@@ -56,6 +69,11 @@ def cloak_meta_from_row(
         cloak_cfg_row: Optional[CloakConfig],
         cloak_key: str,
 ) -> Dict[str, Any]:
+    """
+    将数据库 CloakConfig 行转为注入桥页的 __CLOAK_META__ 字典。
+
+    无配置行时使用点击/加载上报的保守默认值（点击开启、加载关闭）。
+    """
     if cloak_cfg_row:
         return {
             "report_event": (cloak_cfg_row.report_event or "ViewContent").strip()
@@ -94,6 +112,11 @@ def cloak_meta_from_row(
 
 
 def build_meta_snippet(cloak_meta: Dict[str, Any]) -> str:
+    """
+    生成注入 <head> 的脚本片段：base64 元数据 + 解析为 window.__CLOAK_META__。
+
+    同时定义 cloakReportQuerySuffix()，供桥页点击/加载上报时拼接 report_event 等查询参数。
+    """
     meta_b64 = base64.b64encode(
         json.dumps(cloak_meta, separators=(",", ":")).encode("utf-8")
     ).decode("ascii")
@@ -114,6 +137,7 @@ def build_meta_snippet(cloak_meta: Dict[str, Any]) -> str:
 
 
 def inject_meta_into_html(html_content: str, meta_snippet: str) -> str:
+    """将元数据脚本插入 HTML 的 <head> 内；无 head 标签则 prepend 到全文开头。"""
     if "<head>" in html_content:
         return html_content.replace("<head>", "<head>\n" + meta_snippet + "\n", 1)
     return meta_snippet + "\n" + html_content
@@ -124,6 +148,11 @@ def inject_original_url_into_html(
         original_url: str,
         dp: Optional[str],
 ) -> str:
+    """
+    替换桥页模板中的 getOriginalUrl() 实现，注入服务端解析后的最终跳转 URL。
+
+    跳转 URL 会附带 email、phone、fbclid、dp 等查询参数（与短链占位符逻辑一致）。
+    """
     escaped_url = original_url.replace("\\", "\\\\").replace('"', '\\"')
     escaped_dp = (dp or "").replace("\\", "\\\\").replace('"', '\\"')
     pattern = r"function getOriginalUrl\([^)]*\) \{[\s\S]*?return originalUrl;[\s\S]*?\}"
@@ -167,6 +196,7 @@ def inject_original_url_into_html(
 
 
 def append_load_report_inject(html_content: str) -> str:
+    """在 </body> 前插入 CLOAK_LOAD_REPORT_INJECT；无 body 则追加到文末。"""
     if re.search(r"</body\s*>", html_content, flags=re.IGNORECASE):
         return re.sub(
             r"</body\s*>",
@@ -184,12 +214,16 @@ def prepare_bridge_html(
         original_url: str,
         dp: Optional[str],
 ) -> str:
+    """桥页渲染流水线：注入元数据 → 注入跳转 URL → 注入加载上报脚本。"""
     html_content = inject_meta_into_html(html_content, build_meta_snippet(cloak_meta))
     html_content = inject_original_url_into_html(html_content, original_url, dp)
     return append_load_report_inject(html_content)
 
 
 def build_bridge_html_response(html_content: str, session_id: str) -> HTMLResponse:
+    """
+    构造桥页 HTML 响应：禁用缓存、设置 CSP、写入 session_id Cookie（展示次数去重用）。
+    """
     response = HTMLResponse(content=html_content)
     response.headers["Content-Security-Policy"] = BRIDGE_CSP
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"

@@ -1,8 +1,15 @@
 """
-斗篷与 Facebook 像素配置映射服务
+斗篷与 Facebook 像素配置映射服务。
 
-提供斗篷名称与 Facebook 像素配置的一对一映射关系
-支持高效查询、参数验证和详细的日志记录
+运行时根据投放链接中的 dp 参数（斗篷名）解析应使用的 Facebook Pixel 与 CAPI Token，
+供 /report 与 postback 处理器发送 Conversions API 事件。
+
+配置优先级（高 → 低）：
+1. 短链接自身配置的 facebook_pixel_id / facebook_access_token
+2. cloak_configs 表中已启用且磁盘存在 {dp}.html 的斗篷配置
+3. settings 全局 FACEBOOK_PIXEL_ID / FACEBOOK_ACCESS_TOKEN
+
+缓存：内存缓存键为 {short_code}:{dp}，TTL 1 小时；配置或桥页变更时调用 invalidate_cloak_cache_for_dp。
 """
 import logging
 import re

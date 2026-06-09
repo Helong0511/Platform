@@ -1,7 +1,15 @@
 """
-斗篷桥页 HTML 在磁盘上的路径解析（与 short_link.router 读取顺序保持一致）。
+斗篷桥页 HTML 在磁盘上的路径解析与校验工具。
 
-优先使用服务器目录 /data/Platform/scripts，其次为项目根目录下的 scripts/。
+路径查找顺序（与 short_link /change 读取一致）：
+1. 生产：/data/Platform/scripts/{cloak_name}.html
+2. 开发：{项目根}/scripts/{cloak_name}.html
+
+主要能力：
+- resolve_bridge_html_read_path：读取时找首个存在的文件
+- resolve_bridge_html_write_path：上传时覆盖已有文件或写入首个可写目录
+- read_bridge_html_template_cached：按 mtime 缓存模板内容，降低高并发读盘压力
+- validate_bridge_html_bytes：管理端上传前的 UTF-8 / HTML 结构 / 大小校验
 """
 from __future__ import annotations
 
@@ -10,24 +18,27 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 
-# 桥页模板内存缓存（路径规范化 -> (mtime, 内容)），mtime 变化自动失效；减轻 /change 每次读盘
+# 桥页模板 LRU 缓存：键为规范化绝对路径，值为 (mtime, 文本内容)
+# 文件 mtime 变化或 invalidate_bridge_template_cache 调用时自动失效
 _MAX_BRIDGE_TEMPLATE_CACHE_ENTRIES = 128
 _bridge_template_cache: OrderedDict[str, tuple[float, str]] = OrderedDict()
 
+# 生产环境桥页根目录（与部署脚本约定一致）
 SCRIPTS_DIR_SERVER = "/data/Platform/scripts"
 
 
 def _project_scripts_dir() -> str:
-    # app/core -> app -> 项目根
+    """本地开发环境桥页目录：项目根下的 scripts/（app/core -> app -> 根）。"""
     return str(Path(__file__).resolve().parent.parent.parent / "scripts")
 
 
 def iter_bridge_search_bases() -> tuple[str, str]:
-    """返回 (服务器路径, 本地项目 scripts 路径)。"""
+    """返回桥页 HTML 查找/写入的候选根目录：(服务器路径, 本地 scripts 路径)。"""
     return SCRIPTS_DIR_SERVER, _project_scripts_dir()
 
 
 def bridge_html_filename(cloak_name: str) -> str:
+    """斗篷名对应的桥页文件名，如 master -> master.html。"""
     return f"{cloak_name}.html"
 
 
@@ -47,8 +58,19 @@ def bridge_html_exists(cloak_name: str) -> bool:
 
 def read_bridge_html_template_cached(absolute_path: str) -> str:
     """
-    读取桥页 HTML 模板（带内存缓存，按 mtime 失效）。
-    用于 /change：同一文件高并发下避免重复磁盘 IO。
+    读取桥页 HTML 模板（带 LRU 内存缓存，按文件 mtime 自动失效）。
+
+    /change 高并发场景下同一 {cloak_name}.html 会被频繁读取；缓存命中时直接返回内存内容，
+    文件被管理端上传覆盖后 mtime 变化，下次读取自动刷新。
+
+    Args:
+        absolute_path: 桥页文件的绝对路径（通常来自 resolve_bridge_html_read_path）
+
+    Returns:
+        HTML 文件全文（UTF-8 字符串）
+
+    Raises:
+        OSError: 文件不存在或无法读取时向上抛出
     """
     norm = os.path.normpath(os.path.abspath(absolute_path))
     try:
@@ -94,7 +116,23 @@ def _permission_help_extra(path: str) -> str:
 
 def resolve_bridge_html_write_path(cloak_name: str) -> str:
     """
-    决定写入的完整路径：若已有文件则覆盖该路径；否则写入第一个存在且可写的目录。
+    决定管理端上传桥页 HTML 时应写入的完整文件路径。
+
+    写入策略（按优先级）：
+    1. 若任一候选目录已存在 {cloak_name}.html 且可写 → 覆盖该文件
+    2. 若文件存在但不可写、目录可写 → 尝试删除后重写
+    3. 若文件不存在 → 写入第一个存在且可写的候选目录
+    4. 若服务器目录不可用 → 仅在本地 scripts 下 mkdir 后写入（开发环境）
+
+    Args:
+        cloak_name: 斗篷名称，对应文件名 {cloak_name}.html
+
+    Returns:
+        可写入的绝对路径字符串
+
+    Raises:
+        PermissionError: 文件存在但进程无写权限且无法删除
+        FileNotFoundError: 所有候选目录均不可写
     """
     name = bridge_html_filename(cloak_name)
     for base in iter_bridge_search_bases():
@@ -128,12 +166,28 @@ def resolve_bridge_html_write_path(cloak_name: str) -> str:
     )
 
 
+# 管理端上传桥页 HTML 的最大字节数（2MB），与 cloak_configs API 校验一致
 MAX_BRIDGE_HTML_BYTES = 2 * 1024 * 1024
 
 
 def validate_bridge_html_bytes(raw: bytes) -> str:
     """
-    校验上传内容为 UTF-8 HTML，返回解码后的文本（用于写入磁盘）。
+    校验管理端上传的桥页 HTML 字节流，返回可写入磁盘的 UTF-8 文本。
+
+    校验项：
+    1. 大小不超过 MAX_BRIDGE_HTML_BYTES
+    2. 必须为合法 UTF-8 编码（拒绝 GBK 等）
+    3. 去掉 BOM 后内容长度 ≥ 20 字符（防止空文件）
+    4. 前 4000 字符内须含 <!doctype html> 或 <html（基本 HTML 结构）
+
+    Args:
+        raw: 上传文件的原始字节
+
+    Returns:
+        解码后的 HTML 字符串（保留原始换行，写入时用 utf-8 newline=""）
+
+    Raises:
+        ValueError: 任一项校验不通过
     """
     if len(raw) > MAX_BRIDGE_HTML_BYTES:
         raise ValueError(f"HTML 文件过大，限制 {MAX_BRIDGE_HTML_BYTES // (1024 * 1024)}MB")

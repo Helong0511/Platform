@@ -1,4 +1,12 @@
-"""斗篷 /report 点击落库（尊重 PERSIST_CLICKS_TO_DB）。"""
+"""
+斗篷 /report 点击落库模块（尊重全局开关 PERSIST_CLICKS_TO_DB）。
+
+当 phase=click 时，cloak_report_service.record_cloak_click_count 在更新 click_count 后，
+通过本模块将点击详情写入 clicks 表（同步或后台任务）。
+
+url_params 中保存 fbclid、dp、email、phone，供 postback 转化时回溯斗篷配置并发 CAPI。
+若 PERSIST_CLICKS_TO_DB=false，所有落库函数直接返回，不影响计数与 Facebook 上报。
+"""
 import json
 import logging
 from typing import Any, Dict, Optional
@@ -24,6 +32,11 @@ def build_cloak_url_params(
         email: Optional[str],
         phone: Optional[str],
 ) -> Optional[str]:
+    """
+    将斗篷 /report 关键参数打包为 clicks.url_params JSON 字符串。
+
+    供 postback 处理器通过 dp 回溯斗篷配置、通过 fbclid 发 CAPI。
+    """
     flat: Dict[str, Any] = {}
     if fbclid:
         flat["fbclid"] = fbclid

@@ -1,5 +1,9 @@
 /**
- * 斗篷配置管理 API
+ * 斗篷配置管理 API（对接 /api/v1/cloak-configs）
+ *
+ * - CRUD：列表、创建、更新、删除
+ * - testCloakReport：模拟 CAPI 测试上报（主/备像素）
+ * - uploadCloakBridgeHtml：上传 {cloak_name}.html 桥页文件
  */
 import { createCrudApi } from '@/utils/crudApi';
 import { request } from '../utils/api';
@@ -27,6 +31,7 @@ export {
   deleteCloakConfig
 };
 
+/** 向指定斗篷配置发送测试 Facebook CAPI 事件（超时 30s） */
 export const testCloakReport = async (id, data) =>
   withCsrfMutate(() =>
     request(
@@ -39,6 +44,7 @@ export const testCloakReport = async (id, data) =>
     )
   );
 
+/** 上传桥页 HTML，服务端保存为 {cloak_name}.html（超时 60s，multipart） */
 export const uploadCloakBridgeHtml = async (id, file) => {
   const formData = new FormData();
   formData.append('file', file);
