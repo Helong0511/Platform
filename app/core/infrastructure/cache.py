@@ -8,11 +8,26 @@ import re
 import hashlib
 import logging
 from abc import ABC, abstractmethod
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Optional, Any, Dict
 from functools import wraps
 from app.core.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
+
+
+def _json_default(obj: Any) -> Any:
+    """Redis 缓存 JSON 序列化：处理 Decimal、日期等常见不可序列化类型。"""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, date):
+        return obj.isoformat()
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
+    return str(obj)
 
 
 class CacheBackend(ABC):
@@ -81,7 +96,9 @@ class RedisCacheBackend(CacheBackend):
         try:
             # 序列化值
             if isinstance(value, (dict, list)):
-                serialized_value = json.dumps(value, ensure_ascii=False)
+                serialized_value = json.dumps(
+                    value, ensure_ascii=False, default=_json_default
+                )
             else:
                 serialized_value = str(value)
             
