@@ -33,8 +33,16 @@ def get_logger(name: str = "app.main") -> logging.Logger:
 def _setup_logging() -> None:
     # ====== 辅助函数 ======
     def _get_log_directory() -> str:
-        """获取日志目录路径，如果无法创建则使用临时目录"""
-        log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
+        """获取日志目录路径（项目根 ``logs/``，与 gunicorn.conf.py、.env LOG_FILE 一致）。"""
+        # __file__ = app/bootstrap/logging_setup.py → 上三级为项目根
+        project_root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
+        log_file = getattr(settings, "LOG_FILE", "logs/app.log")
+        if os.path.isabs(log_file):
+            log_dir = os.path.dirname(log_file)
+        else:
+            log_dir = os.path.join(project_root, os.path.dirname(log_file) or "logs")
         try:
             os.makedirs(log_dir, exist_ok=True, mode=LOG_DIR_MODE)
             # 尝试设置目录权限（如果可能）
