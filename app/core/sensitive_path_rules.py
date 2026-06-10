@@ -5,7 +5,7 @@
   LOW(1)      指纹/文档探测 — INFO + 404 + 仅入库
   MEDIUM(2)   常见 CMS/中间件扫描 — WARNING + 404 + 累计达阈值自动封禁
   HIGH(3)     凭证/配置/路径穿越 — WARNING + 404 + 更低阈值自动封禁
-  CRITICAL(4) RCE/已知利用链 — ERROR + 404 + 最低阈值自动封禁 + Telegram 预警（防抖）
+  CRITICAL(4) RCE/已知利用链 — WARNING + 404 + 最低阈值自动封禁 + Telegram 预警（防抖）
 """
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ DEFAULT_LEVEL_POLICIES: dict[SensitivePathLevel, LevelActionPolicy] = {
         telegram_alert=False,
     ),
     SensitivePathLevel.CRITICAL: LevelActionPolicy(
-        log_level=logging.ERROR,
+        log_level=logging.WARNING,
         http_status=404,
         auto_block_threshold=5,
         telegram_alert=True,
