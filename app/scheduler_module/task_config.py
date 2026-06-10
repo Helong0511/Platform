@@ -175,7 +175,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "task_name": "TQT API获取数据",
         "task_module": "app.scheduler_module.tasks.tqt_task",
         "task_function": "tqt_api_task",
-        "result_getter_module": "app.scheduler_module.tasks.tqt_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
         "result_getter_function": "get_task_result",
         # 数据库配置
         "cron_expression": "*/30 * * * *",  # 每10分钟
@@ -187,7 +187,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "task_name": "Skymobi API获取数据",
         "task_module": "app.scheduler_module.tasks.skymobi_task",
         "task_function": "skymobi_api_task",
-        "result_getter_module": "app.scheduler_module.tasks.skymobi_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
         "result_getter_function": "get_task_result",
         # 数据库配置
         "cron_expression": "*/30 * * * *",  # 每10分钟
@@ -199,7 +199,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "task_name": "yangyangdeyi API获取数据",
         "task_module": "app.scheduler_module.tasks.tbsj_task",
         "task_function": "tbsj_api_task",
-        "result_getter_module": "app.scheduler_module.tasks.tbsj_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
         "result_getter_function": "get_task_result",
         # 数据库配置
         "cron_expression": "*/30 * * * *",  # 每10分钟
@@ -211,7 +211,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "task_name": "Addermobi API获取数据",
         "task_module": "app.scheduler_module.tasks.addermobi_task",
         "task_function": "addermobi_api_task",
-        "result_getter_module": "app.scheduler_module.tasks.addermobi_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
         "result_getter_function": "get_task_result",
         # 数据库配置
         "cron_expression": "*/30 * * * *",  # 每10分钟
@@ -222,7 +222,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "task_name": "Huguang API获取数据",
         "task_module": "app.scheduler_module.tasks.huguang_task",
         "task_function": "huguang_api_task",
-        "result_getter_module": "app.scheduler_module.tasks.huguang_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
         "result_getter_function": "get_task_result",
         # 数据库配置
         "cron_expression": "*/30 * * * *",  # 每30分钟
@@ -234,7 +234,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "task_name": "zhisuo API获取数据",
         "task_module": "app.scheduler_module.tasks.zhisuo_task",
         "task_function": "zhisuo_api_task",
-        "result_getter_module": "app.scheduler_module.tasks.zhisuo_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
         "result_getter_function": "get_task_result",
         "cron_expression": "*/30 * * * *",
         "description": "每隔30分钟执行一次，从 zhisuo API 获取广告单元数据",
@@ -245,7 +245,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "task_name": "Pomiad API获取数据",
         "task_module": "app.scheduler_module.tasks.pomiad_task",
         "task_function": "pomiad_api_task",
-        "result_getter_module": "app.scheduler_module.tasks.pomiad_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
         "result_getter_function": "get_task_result",
         "cron_expression": "*/30 * * * *",
         "description": "每隔30分钟执行一次，从 Pomiad API 获取广告明细数据",

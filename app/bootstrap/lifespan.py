@@ -1,6 +1,7 @@
 """
 FastAPI 应用 lifespan（启动 / 关闭）。
 """
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
