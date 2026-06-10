@@ -10,6 +10,7 @@ import { logger } from '../utils/logger';
 import { formatDate } from '../utils/dateFormat';
 import {
   formatClientFullName,
+  formatProductOptionLabel,
   getTodayDateString,
   getYesterdayDateString,
 } from '../utils/productClientFormat';
@@ -119,25 +120,31 @@ export function useProductForm(props, emit) {
     }
   };
 
-  const filterAndReturnSuggestions = (queryString, cb) => {
-    const results = queryString
-      ? productNames.value.filter((product) =>
-          product.name.toLowerCase().includes(queryString.toLowerCase()),
-        ).map((product) => ({
-          value: product.name,
-          product,
-        }))
-      : productNames.value.map((product) => ({
-        value: product.name,
-        product,
-      }));
+  const buildProductSuggestion = (product) => ({
+    value: product.name,
+    label: formatProductOptionLabel(product),
+    product,
+  });
 
-    if (queryString && queryString.trim() !== '') {
-      const trimmedQuery = queryString.trim();
-      const exists = results.some((item) => item.value === trimmedQuery);
+  const filterAndReturnSuggestions = (queryString, cb) => {
+    const normalizedQuery = queryString?.trim().toLowerCase() || '';
+    const matchProduct = (product) => {
+      if (!normalizedQuery) return true;
+      const label = formatProductOptionLabel(product).toLowerCase();
+      return product.name.toLowerCase().includes(normalizedQuery)
+        || label.includes(normalizedQuery);
+    };
+
+    const results = productNames.value
+      .filter(matchProduct)
+      .map(buildProductSuggestion);
+
+    if (normalizedQuery) {
+      const exists = results.some((item) => item.value === queryString.trim());
       if (!exists) {
         results.unshift({
-          value: trimmedQuery,
+          value: queryString.trim(),
+          label: queryString.trim(),
           product: null,
         });
       }

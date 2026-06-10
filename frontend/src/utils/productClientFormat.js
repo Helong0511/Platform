@@ -3,6 +3,16 @@
  */
 import { formatDate } from './dateFormat';
 
+export function formatProductOptionLabel(product) {
+  if (!product?.name) return '';
+
+  const ownerName = product.user_full_name || product.full_name || '';
+  if (!ownerName) {
+    return product.name;
+  }
+  return `${ownerName} · ${product.name}`;
+}
+
 export function formatClientFullName(clientInfo) {
   if (!clientInfo) return '未知客户';
 

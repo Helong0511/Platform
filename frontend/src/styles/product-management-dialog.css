@@ -477,6 +477,19 @@
   padding: 0 12px;
 }
 
+.product-name-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.4;
+  padding: 2px 0;
+}
+
+.product-name-option-label {
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+}
+
 .form-hint-container {
   min-height: 40px;
   display: flex;

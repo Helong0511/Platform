@@ -114,6 +114,7 @@ class ProductNameOption(BaseModel):
     id: int
     name: str
     client_id: int
+    user_full_name: str | None = None
 
     class Config:
         """允许从 ORM Product 构造。用于 API 请求/响应序列化与 OpenAPI 文档生成。"""
@@ -146,8 +147,13 @@ async def get_available_product_names(
         admin_clients_result = await db.execute(admin_clients_query)
         admin_client_ids = [row[0] for row in admin_clients_result.all()]
 
-        # 3. 构建查询：获取关联管理员的客户的产品和其他客户的产品
-        products_query = select(Product).where(
+        # 3. 构建查询：获取产品及其归属客户的用户全名
+        products_query = select(
+            Product,
+            User.full_name.label("user_full_name"),
+        ).join(Client, Product.client_id == Client.id).join(
+            User, Client.user_id == User.id
+        ).where(
             Product.name.isnot(None),
             Product.name != ''
         )
@@ -191,18 +197,17 @@ async def get_available_product_names(
 
         # 5. 执行查询
         products_result = await db.execute(products_query)
-        # 虽然此查询没有使用joinedload，但为了安全起见使用unique()
-        products = products_result.unique().scalars().all()
 
         # 6. 转换为响应模型
         product_options = []
         admin_client_ids_set = set(admin_client_ids)  # 转换为set以提高查找效率
         # ---------- 循环处理 ----------
-        for product in products:
+        for product, user_full_name in products_result.unique().all():
             product_options.append(ProductNameOption(
                 id=product.id,
                 name=product.name,
-                client_id=product.client_id
+                client_id=product.client_id,
+                user_full_name=user_full_name,
             ))
 
         # 7. 排序：优先显示关联管理员的客户的产品，然后按名称排序

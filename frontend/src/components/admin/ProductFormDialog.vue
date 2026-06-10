@@ -40,9 +40,9 @@
               <el-icon :size="20"><Box /></el-icon>
             </template>
             <template #default="{ item }">
-              <div style="display: flex; align-items: center; gap: 8px;">
+              <div class="product-name-option">
                 <el-icon :size="16"><Box /></el-icon>
-                <span>{{ item.value }}</span>
+                <span class="product-name-option-label">{{ item.label || item.value }}</span>
               </div>
             </template>
           </el-autocomplete>
