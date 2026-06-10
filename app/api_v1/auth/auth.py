@@ -221,7 +221,7 @@ async def login(
             exc_info=True
         )
         # 在开发环境返回更详细的错误信息，生产环境返回通用错误
-        if os.getenv("PRODUCTION_ENV", "").lower() != "production":
+        if settings.is_development:
             detail = f"登录失败: {error_type}: {error_msg}"
         else:
             detail = "登录失败，请稍后重试"

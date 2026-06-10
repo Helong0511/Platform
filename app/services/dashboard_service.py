@@ -19,7 +19,12 @@ from typing import Dict, Any
 from sqlalchemy import select, func, case, Float, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.cache import get_cached, set_cached, generate_cache_key
+from app.core.infrastructure.cache_compat import (
+    generate_cache_key,
+    invalidate_cache,
+    legacy_get_cached as get_cached,
+    legacy_set_cached as set_cached,
+)
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.query_utils import date_range_condition, product_assignment_join_condition, check_use_assignment_table
@@ -64,7 +69,7 @@ class DashboardService:
         cache_key = generate_cache_key("dashboard_stats", period, current_user.id)
 
         # 尝试从缓存获取（缓存 1 分钟）
-        cached = await get_cached(cache_key)
+        cached = await get_cached(cache_key, key_prefix="dashboard")
         if cached:
             try:
                 logger.debug(f"缓存命中: dashboard_stats, period={period}, user={current_user.id}")
@@ -164,7 +169,7 @@ class DashboardService:
                 "stats": [],
                 "metrics": {"total_revenue": 0.0, "roi": 0.0}
             }
-            await set_cached(cache_key, response_data, ttl=60)
+            await set_cached(cache_key, response_data, ttl=60, key_prefix="dashboard")
             return response_data
 
         # ====== 上一周期日期范围（用于环比趋势） ======
@@ -357,7 +362,7 @@ class DashboardService:
         }
 
         # 缓存结果（缓存 1 分钟）
-        await set_cached(cache_key, response_data, ttl=60)
+        await set_cached(cache_key, response_data, ttl=60, key_prefix="dashboard")
 
         return response_data
 
@@ -495,7 +500,7 @@ class DashboardService:
         # ====== 缓存优化 ======
         cache_key = generate_cache_key("dashboard_trends", period, current_user.id)
 
-        cached = await get_cached(cache_key)
+        cached = await get_cached(cache_key, key_prefix="dashboard")
         if cached:
             try:
                 logger.debug(f"缓存命中: dashboard_trends, period={period}, user={current_user.id}")
@@ -606,6 +611,6 @@ class DashboardService:
         }
 
         # 缓存结果（缓存 1 分钟）
-        await set_cached(cache_key, response_data, ttl=60)
+        await set_cached(cache_key, response_data, ttl=60, key_prefix="dashboard")
 
         return response_data

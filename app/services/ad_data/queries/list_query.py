@@ -1,211 +1,276 @@
 """
-广告数据列表查询构建器。
+广告数据明细列表查询构建器。
 
 功能说明：
 - 构建广告明细分页列表的 SELECT/WHERE/JOIN/ORDER 条件
 - 支持产品、客户、日期、国家等多维筛选与排序
+- 返回 API 层可直接使用的字典列表
 
 在系统中的位置：
-- 被 ``AdDataService`` 列表接口调用
-
-注意事项：
-1. 客户用户查询须自动附加产品分配过滤条件
-2. 优先使用索引字段（date、product_id）缩小扫描范围
+- 被 ``AdDataService.get_ad_data`` 调用
 """
 import logging
-from typing import Optional, List, Dict, Any, Tuple
+from calendar import monthrange
+from datetime import date
+from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import func, and_
+from sqlalchemy import and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.country_code import resolve_country_name
 from app.core.query_utils import (
-    product_assignment_join_condition,
-    check_use_assignment_table
+    apply_date_range_filter,
+    check_use_assignment_table,
+    date_range_condition,
 )
-from app.models.models import AdData, Product, Client, User, UserRole, ProductAssignment
+from app.services.ad_data.queries.join_helpers import (
+    CLIENT_LOAD_ONLY,
+    join_country_info_for_ad_data,
+    join_product_and_client,
+)
+from app.core.security import is_admin
+from app.core.utils import (
+    calculate_click_rate,
+    calculate_coverage_rate,
+    calculate_display_rate,
+    unpack_ad_data_query_result,
+)
+from app.models.models import AdData, Client, CountryInfo, Product, ProductAssignment, User
 
 logger = logging.getLogger(__name__)
 
 
-class ListQueryBuilder:
-    """
-    广告数据列表查询构建器。
-
-    将分页、权限、过滤、计数等逻辑拆分为私有方法，
-    对外仅暴露 build_list_query 入口。
-    """
+class AdDataListQuery:
+    """广告数据明细列表查询（含国家维度、权限与响应组装）。"""
 
     def __init__(self, db: AsyncSession):
-        """
-        初始化构建器。
-
-        Args:
-            db: 异步数据库会话
-        """
         self.db = db
 
-    async def build_list_query(
-            self,
-            current_user: User,
-            page: int = 1,
-            page_size: int = 20,
-            filters: Optional[Dict[str, Any]] = None
-    ) -> Tuple[List[AdData], int]:
-        """
-        构建列表查询并返回分页结果。
-
-        流程：构建基础查询 → 应用 offset/limit → 执行数据查询 → 独立计数查询。
-
-        Args:
-            current_user: 当前登录用户，用于权限过滤
-            page: 页码，从 1 开始
-            page_size: 每页记录数
-            filters: 可选过滤字典，支持 date_from、date_to、product_id、country_code
-
-        Returns:
-            (当前页 AdData 列表, 符合条件的总记录数)
-        """
-        filters = filters or {}
-
-        # ── 1. 构建带权限与过滤的基础查询 ────────────────────────────
-        query = await self._build_base_query(current_user, filters)
-
-        # ── 2. 应用分页 ──────────────────────────────────────────────
-        offset = (page - 1) * page_size
-        query = query.offset(offset).limit(page_size)
-
-        # ── 3. 执行数据查询 ──────────────────────────────────────────
-        result = await self.db.execute(query)
-        data = result.scalars().all()
-
-        # ── 4. 独立计数（与分页无关，获取全量匹配数）────────────────
-        total = await self._get_total_count(current_user, filters)
-
-        return data, total
-
-    async def _build_base_query(
-            self,
-            current_user: User,
-            filters: Dict[str, Any]
-    ):
-        """
-        构建列表基础查询（不含分页）。
-
-        JOIN 路径选择：
-            - 分配历史表模式 + 含日期过滤：通过 ProductAssignment 按日期匹配客户
-            - 分配历史表模式 + 无日期过滤：回退 Product.client_id 直接关联
-            - 旧模式：Product.client_id 直接关联
-
-        Args:
-            current_user: 当前用户
-            filters: 过滤条件字典
-
-        Returns:
-            已应用权限与过滤的 SQLAlchemy 查询对象
-        """
+    async def fetch(
+        self,
+        current_user: User,
+        page: int = 1,
+        page_size: int = 10,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        client_id: Optional[int] = None,
+        product_id: Optional[str] = None,
+        country_code: Optional[str] = None,
+        sort_by: str = "date",
+        sort_order: str = "desc",
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        from app.api_v1.excel.utils import normalize_date_key
 
         use_assignment_table = await check_use_assignment_table(self.db)
+        query = await self._build_main_query(use_assignment_table, current_user, client_id, product_id, country_code, start_date, end_date)
+        query = self._apply_sort(query, sort_by, sort_order)
+        total = await self._count_total(
+            use_assignment_table, current_user, client_id, product_id, country_code, start_date, end_date
+        )
 
+        offset = (page - 1) * page_size
+        result = await self.db.execute(query.offset(offset).limit(page_size))
+        data = result.unique().all()
+
+        return self._build_responses(data, use_assignment_table, current_user, normalize_date_key), total
+
+    async def _build_main_query(
+        self,
+        use_assignment_table: bool,
+        current_user: User,
+        client_id: Optional[int],
+        product_id: Optional[str],
+        country_code: Optional[str],
+        start_date: Optional[date],
+        end_date: Optional[date],
+    ):
         if use_assignment_table:
-            query = select(AdData).join(Product, AdData.product_id == Product.id)
-
-            # 有日期范围时，必须走分配历史表才能确定当时归属的客户
-            if 'date_from' in filters or 'date_to' in filters:
-                date_from = filters.get('date_from')
-                date_to = filters.get('date_to')
-                query = query.join(
-                    ProductAssignment,
-                    and_(
-                        ProductAssignment.product_id == Product.id,
-                        product_assignment_join_condition(
-                            AdData.date,
-                            ProductAssignment.start_date,
-                            ProductAssignment.end_date
-                        )
-                    )
-                )
-                query = query.join(Client, ProductAssignment.client_id == Client.id)
-            else:
-                query = query.join(Client, Product.client_id == Client.id)
+            query = select(AdData, Product, Client, User, ProductAssignment, CountryInfo)
         else:
-            query = select(AdData).join(Product, AdData.product_id == Product.id)
-            query = query.join(Client, Product.client_id == Client.id)
+            query = select(AdData, Product, Client, User, CountryInfo)
 
-        # ── 关联用户表（权限过滤依赖 Client.user_id）──────────────────
+        query = query.options(CLIENT_LOAD_ONLY)
+        query = join_product_and_client(query, use_assignment_table)
         query = query.join(User, Client.user_id == User.id)
+        query = join_country_info_for_ad_data(query)
 
-        # ── 非管理员仅能查看自己名下客户的数据 ───────────────────────
-        if current_user.role != UserRole.ADMIN:
+        if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
+        elif client_id:
+            query = query.where(Client.id == client_id)
 
-        # ── 仅展示激活状态的产品 ─────────────────────────────────────
         query = query.where(Product.is_active == True)
 
-        # ── 应用业务过滤条件 ─────────────────────────────────────────
-        query = self._apply_filters(query, filters)
+        if product_id and product_id.strip():
+            try:
+                query = query.where(AdData.product_id == int(product_id))
+            except ValueError:
+                logger.warning("无效的产品ID参数: %s", product_id)
 
-        return query
+        if country_code and country_code.strip():
+            country_code_clean = country_code.strip()
+            if country_code_clean and country_code_clean != "ZZ" and len(country_code_clean) <= 2:
+                query = query.where(AdData.country_code == country_code_clean)
+            elif country_code_clean and len(country_code_clean) > 2:
+                logger.warning("国家代码长度超过2个字符: %s，将忽略此过滤条件", country_code_clean)
 
-    def _apply_filters(self, query, filters: Dict[str, Any]):
-        """
-        将前端传入的过滤条件追加到查询 WHERE 子句。
+        return apply_date_range_filter(
+            query,
+            AdData.date,
+            start_date,
+            end_date,
+            default_to_current_month=True,
+        )
 
-        支持的过滤键：
-            - date_from / date_to：广告数据日期范围（闭区间）
-            - product_id：产品 ID 精确匹配
-            - country_code：国家代码精确匹配
+    def _apply_sort(self, query, sort_by: str, sort_order: str):
+        valid_sort_fields = {
+            "date": AdData.date,
+            "client": Client.company_name,
+            "client_id": Client.id,
+            "product": Product.name,
+            "product_id": Product.id,
+            "request_count": AdData.request_count,
+            "match_count": AdData.match_count,
+            "display_count": AdData.display_count,
+            "click_count": AdData.click_count,
+            "cpc": AdData.cpc,
+            "pageviews": AdData.pageviews,
+            "ecpm_after_deduct": AdData.ecpm_after_deduct,
+            "ecpm_before_deduct": AdData.ecpm_before_deduct,
+            "revenue_after_deduct": AdData.revenue_after_deduct,
+            "revenue_before_deduct": AdData.revenue_before_deduct,
+            "coverage_rate": AdData.coverage_rate,
+            "display_rate": AdData.display_rate,
+            "click_rate": AdData.click_rate,
+            "viewability_rate": AdData.viewability_rate,
+        }
 
-        Args:
-            query: 待追加条件的查询对象
-            filters: 过滤条件字典
+        if sort_by not in valid_sort_fields:
+            sort_by = "date"
 
-        Returns:
-            追加过滤后的查询对象
-        """
+        sort_column = valid_sort_fields[sort_by]
+        if sort_order.lower() == "desc":
+            return query.order_by(sort_column.desc())
+        return query.order_by(sort_column.asc())
 
-        if 'date_from' in filters:
-            query = query.where(AdData.date >= filters['date_from'])
-
-        if 'date_to' in filters:
-            query = query.where(AdData.date <= filters['date_to'])
-
-        if 'product_id' in filters:
-            query = query.where(AdData.product_id == filters['product_id'])
-
-        if 'country_code' in filters:
-            query = query.where(AdData.country_code == filters['country_code'])
-
-        return query
-
-    async def _get_total_count(
-            self,
-            current_user: User,
-            filters: Dict[str, Any]
+    async def _count_total(
+        self,
+        use_assignment_table: bool,
+        current_user: User,
+        client_id: Optional[int],
+        product_id: Optional[str],
+        country_code: Optional[str],
+        start_date: Optional[date],
+        end_date: Optional[date],
     ) -> int:
-        """
-        获取符合权限与过滤条件的广告数据总记录数。
+        try:
+            filter_conditions = []
 
-        注意：当前实现为简化版计数，非管理员时仅做权限 JOIN，
-        未完全复用 _build_base_query 中的全部过滤条件（如日期、产品等），
-        调用方需知悉此差异。
+            if not is_admin(current_user):
+                filter_conditions.append(Client.user_id == current_user.id)
+            elif client_id:
+                filter_conditions.append(Client.id == client_id)
 
-        Args:
-            current_user: 当前用户
-            filters: 过滤条件字典（当前计数逻辑未全部应用）
+            filter_conditions.append(Product.is_active == True)
 
-        Returns:
-            匹配记录总数，无记录时返回 0
-        """
+            if product_id and product_id.strip():
+                try:
+                    filter_conditions.append(AdData.product_id == int(product_id))
+                except ValueError:
+                    pass
 
-        query = select(func.count(AdData.id))
+            if country_code and country_code.strip():
+                country_code_clean = country_code.strip()
+                if country_code_clean and country_code_clean != "ZZ" and len(country_code_clean) <= 2:
+                    filter_conditions.append(AdData.country_code == country_code_clean)
 
-        # 非管理员需 JOIN 产品与客户以施加权限限制
-        if current_user.role != UserRole.ADMIN:
-            query = query.join(Product, AdData.product_id == Product.id)
-            query = query.join(Client, Product.client_id == Client.id)
-            query = query.where(Client.user_id == current_user.id)
-            query = query.where(Product.is_active == True)
+            date_range_start = start_date
+            date_range_end = end_date
+            if not date_range_start and not date_range_end:
+                today = date.today()
+                month_start = date(today.year, today.month, 1)
+                _, last_day = monthrange(today.year, today.month)
+                date_range_end = date(today.year, today.month, last_day)
+                date_range_start = month_start
 
-        result = await self.db.execute(query)
-        return result.scalar() or 0
+            date_condition = date_range_condition(AdData.date, date_range_start, date_range_end)
+            if date_condition is not None:
+                filter_conditions.append(date_condition)
+
+            count_query = select(func.count(AdData.id))
+            count_query = join_product_and_client(count_query, use_assignment_table)
+
+            if filter_conditions:
+                count_query = count_query.where(and_(*filter_conditions))
+
+            count_result = await self.db.execute(count_query)
+            return count_result.scalar() or 0
+        except Exception as e:
+            logger.error("计算广告数据总数失败: %s", str(e))
+            return 0
+
+    def _build_responses(self, data, use_assignment_table: bool, current_user: User, normalize_date_key):
+        ad_data_responses = []
+        for row in data:
+            try:
+                ad_data, product, client, user, _assignment, country_info = unpack_ad_data_query_result(
+                    row, use_assignment_table
+                )
+            except (ValueError, Exception) as e:
+                logger.warning("解构数据失败: %s, row=%s", str(e), row)
+                continue
+
+            coverage_rate = calculate_coverage_rate(
+                ad_data.match_count, ad_data.request_count, ad_data.coverage_rate
+            )
+            display_rate = calculate_display_rate(
+                ad_data.display_count, ad_data.match_count, ad_data.display_rate
+            )
+            click_rate = calculate_click_rate(
+                ad_data.click_count, ad_data.display_count, ad_data.click_rate
+            )
+            viewability_rate = ad_data.viewability_rate if ad_data.viewability_rate is not None else 0.0
+            date_value = normalize_date_key(ad_data.date)
+            country_name_zh = resolve_country_name(country_info, ad_data.country_code)
+
+            response_data = {
+                "id": ad_data.id,
+                "date": date_value,
+                "product_id": product.id,
+                "product_name": product.name,
+                "ad_unit": ad_data.ad_unit or "",
+                "country_code": ad_data.country_code,
+                "country_name_zh": country_name_zh,
+                "request_count": ad_data.request_count,
+                "match_count": ad_data.match_count,
+                "coverage_rate": coverage_rate,
+                "display_count": ad_data.display_count,
+                "display_rate": display_rate,
+                "click_count": ad_data.click_count,
+                "click_rate": click_rate,
+                "viewability_rate": round(viewability_rate, 2),
+                "cpc": round(ad_data.cpc or 0.0, 2),
+                "pageviews": ad_data.pageviews or 0,
+                "ecpm_after_deduct": round(ad_data.ecpm_after_deduct, 4),
+                "revenue_after_deduct": round(ad_data.revenue_after_deduct, 4),
+            }
+
+            if is_admin(current_user):
+                response_data.update(
+                    {
+                        "client_id": client.id,
+                        "client_name": client.company_name,
+                        "user_name": user.full_name or user.username,
+                        "ecpm_before_deduct": round(ad_data.ecpm_before_deduct, 4),
+                        "revenue_before_deduct": round(ad_data.revenue_before_deduct, 4),
+                    }
+                )
+
+            ad_data_responses.append(response_data)
+
+        return ad_data_responses
+
+
+# 兼容旧名称
+ListQueryBuilder = AdDataListQuery

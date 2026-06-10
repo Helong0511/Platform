@@ -2,7 +2,7 @@
 广告数据查询子模块包。
 
 功能说明：
-- 导出 list/detail/stats 等专用查询构建器，将复杂 SQL 从 service 中拆分
+- 导出 list/detail 等专用查询构建器，将复杂 SQL 从 service 中拆分
 
 在系统中的位置：
 - 被 ``app.services.ad_data.service`` 组合调用
@@ -12,12 +12,23 @@
 2. 新增查询类型应新增独立 query 文件，避免单文件过大
 """
 
+from app.services.ad_data.queries.batch_delete_query import BatchDeleteQuery
 from app.services.ad_data.queries.detail_query import DetailQueryBuilder
-from app.services.ad_data.queries.list_query import ListQueryBuilder
-from app.services.ad_data.queries.stats_query import StatsQueryBuilder
+from app.services.ad_data.queries.daily_summary_query import DailySummaryQuery
+from app.services.ad_data.queries.filter_options_query import FilterOptionsQuery
+from app.services.ad_data.queries.join_helpers import join_country_info_for_ad_data
+from app.services.ad_data.queries.list_query import AdDataListQuery, ListQueryBuilder
+from app.services.ad_data.queries.summary_query import AdDataSummaryQuery
+from app.services.ad_data.queries.uniqueness_query import AdDataUniquenessQuery
 
 __all__ = [
     'ListQueryBuilder',
+    'AdDataListQuery',
     'DetailQueryBuilder',
-    'StatsQueryBuilder',
+    'DailySummaryQuery',
+    'FilterOptionsQuery',
+    'AdDataSummaryQuery',
+    'BatchDeleteQuery',
+    'AdDataUniquenessQuery',
+    'join_country_info_for_ad_data',
 ]

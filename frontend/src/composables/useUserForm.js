@@ -2,7 +2,7 @@
  * 组合式函数 - 用户表单：角色与权限字段
  * @file composables/useUserForm.js
  */
-import { computed, nextTick, reactive, ref, watch } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
   createUser,
@@ -82,8 +82,6 @@ export function useUserForm({ users, loading, fetchUsers, fetchStats }) {
   const currentUserId = ref(null);
   // viewingUser 响应式状态
   const viewingUser = ref(null);
-  const userFormRef = ref(null);
-  // userForm 响应式状态
   const userForm = reactive(createEmptyUserForm());
 
   const showClientForm = computed(() => {
@@ -163,7 +161,6 @@ export function useUserForm({ users, loading, fetchUsers, fetchStats }) {
     dialogTitle.value = '添加用户';
     Object.assign(userForm, createEmptyUserForm());
     dialogVisible.value = true;
-    nextTick(() => userFormRef.value?.clearValidate());
   };
 
   const handleView = async (user) => {
@@ -202,21 +199,15 @@ export function useUserForm({ users, loading, fetchUsers, fetchStats }) {
       }
       Object.assign(userForm, mapUserToForm(user, user));
     }
-    userFormRef.value?.clearValidate();
     dialogVisible.value = true;
   };
 
   const handleSaveUser = async () => {
-    if (!userFormRef.value) {
-      ElMessage.warning('表单未初始化，请稍后再试');
-      return;
-    }
     try {
       await ensureCsrfToken(() => fetchUsers());
       if (!currentUserId.value && userForm.username?.trim()) {
         handleUsernameBlur();
       }
-      await userFormRef.value.validate();
       loading.value = true;
 
       const submitData = {
@@ -292,19 +283,12 @@ export function useUserForm({ users, loading, fetchUsers, fetchStats }) {
     }
   };
 
-  watch(dialogVisible, (open) => {
-    if (open) {
-      nextTick(() => userFormRef.value?.clearValidate());
-    }
-  });
-
   return {
     dialogVisible,
     viewDialogVisible,
     dialogTitle,
     currentUserId,
     viewingUser,
-    userFormRef,
     userForm,
     showClientForm,
     formRules,

@@ -6,8 +6,7 @@ import { reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { getClicks, getClickDetail, resendClickFacebookReport } from '../api/clicks';
-import { getOffers } from '../api/offer';
-import { getPublishers } from '../api/publisher';
+import { useCplFilterOptions } from './useCplFilterOptions';
 import { logger } from '../utils/logger';
 
 /**
@@ -39,34 +38,18 @@ export function useClickLogList() {
   });
   // 表格当前页数据
   const tableData = ref([]);
-  const offerList = ref([]);
-  // 渠道下拉选项
-  const publisherList = ref([]);
+  const {
+    offerList,
+    publisherList,
+    loadOffers,
+    loadPublishers,
+  } = useCplFilterOptions({ activeOffersOnly: true });
   const detailDialogVisible = ref(false);
   // currentDetail 响应式状态
   const currentDetail = ref(null);
   const fbReportLoadingMap = ref({});
 
   let searchDebounceTimer = null;
-
-  const loadOffers = async () => {
-    try {
-      const response = await getOffers({ page: 1, page_size: 100, is_active: true });
-      offerList.value = (response.data || []).slice().sort((a, b) => a.id - b.id);
-    } catch (error) {
-      logger.error('加载Offer列表失败:', error);
-      ElMessage.warning('加载Offer列表失败，筛选功能可能受限');
-    }
-  };
-
-  const loadPublishers = async () => {
-    try {
-      const response = await getPublishers({ page: 1, page_size: 100 });
-      publisherList.value = response.data || [];
-    } catch (error) {
-      logger.error('加载渠道列表失败:', error);
-    }
-  };
 
   const loadData = async () => {
     loading.value = true;

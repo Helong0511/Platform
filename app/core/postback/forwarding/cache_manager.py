@@ -9,7 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.models.models import Publisher, Offer
-from app.core.cache import get_cached, set_cached, generate_cache_key
+from app.core.infrastructure.cache_compat import (
+    generate_cache_key,
+    legacy_get_cached as get_cached,
+    legacy_set_cached as set_cached,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +36,7 @@ class CacheManager:
         cache_key = generate_cache_key("publisher", publisher_id)
         
         # 尝试从缓存获取
-        cached_data = await get_cached(cache_key)
+        cached_data = await get_cached(cache_key, key_prefix="postback_forward")
         if cached_data:
             try:
                 result = await db.execute(
@@ -63,7 +67,7 @@ class CacheManager:
                     "postback_method": publisher.postback_method,
                     "postback_success_check": publisher.postback_success_check
                 }
-                await set_cached(cache_key, publisher_data, ttl=300)
+                await set_cached(cache_key, publisher_data, ttl=300, key_prefix="postback_forward")
             except Exception as e:
                 logger.debug(f"缓存 Publisher 信息失败：{str(e)}")
         
@@ -84,7 +88,7 @@ class CacheManager:
         cache_key = generate_cache_key("offer", offer_id)
         
         # 尝试从缓存获取
-        cached_data = await get_cached(cache_key)
+        cached_data = await get_cached(cache_key, key_prefix="postback_forward")
         if cached_data:
             try:
                 result = await db.execute(
@@ -113,7 +117,7 @@ class CacheManager:
                     "offer_name": offer.offer_name,
                     "advertiser_id": offer.advertiser_id
                 }
-                await set_cached(cache_key, offer_data, ttl=300)
+                await set_cached(cache_key, offer_data, ttl=300, key_prefix="postback_forward")
             except Exception as e:
                 logger.debug(f"缓存 Offer 信息失败：{str(e)}")
         

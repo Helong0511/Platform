@@ -1,0 +1,1350 @@
+﻿/* 对话框样式 */
+.product-management-dialog :deep(.el-dialog) {
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+  margin: 5vh auto !important;
+  top: 0;
+  transform: translateY(0);
+}
+
+.product-management-dialog :deep(.el-dialog__wrapper) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.product-management-dialog :deep(.el-dialog__header) {
+  padding: 0;
+  margin: 0;
+  border-bottom: none;
+  flex-shrink: 0;
+}
+
+.product-management-dialog :deep(.el-dialog__body) {
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* 对话框头部 */
+.dialog-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 5px 40px;
+  color: white;
+  position: relative;
+  overflow: hidden;
+}
+
+.dialog-header::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
+  animation: pulse 3s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.3;
+  }
+}
+
+.header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.header-icon {
+  font-size: 48px;
+  opacity: 0.9;
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.header-title {
+  margin: 0;
+  font-size: var(--font-size-large-title);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-white);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.header-subtitle {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  opacity: 0.9;
+  font-weight: var(--font-weight-normal);
+}
+
+.header-right {
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+  padding: var(--spacing-lg) var(--spacing-xxl);
+  border-radius: var(--radius-xxl);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.header-right :deep(.el-statistic__number) {
+  color: var(--text-white);
+  font-size: var(--font-size-title);
+  font-weight: var(--font-weight-bold);
+}
+
+.header-right :deep(.el-statistic__head) {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: var(--font-size-sm);
+}
+
+.header-right :deep(.el-icon) {
+  color: var(--text-white);
+  font-size: var(--font-size-xxl);
+}
+
+/* 内容区域 */
+.product-management-content {
+  padding: var(--spacing-lg) var(--spacing-xxxxl) var(--spacing-lg);
+  background: var(--bg-page);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* 操作栏 */
+.action-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-lg);
+  padding: 0 var(--spacing-xl);
+  height: 50px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-xxl);
+  box-shadow: var(--shadow-light);
+  flex-shrink: 0;
+}
+
+.add-button {
+  height: 44px;
+  padding: 0 var(--spacing-xxxl);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(135deg, var(--primary-color) 0%, #764ba2 100%);
+  border: none;
+  box-shadow: var(--shadow-medium);
+  transition: var(--transition-base);
+}
+
+.add-button:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-dark);
+}
+
+.action-right {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+/* 表格包装器 */
+.table-wrapper {
+  background: var(--bg-primary);
+  border-radius: var(--radius-xxl);
+  padding: var(--spacing-lg);
+  box-shadow: var(--shadow-light);
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+
+.product-table {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.product-table :deep(.el-table) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.product-table :deep(.el-table__header-wrapper) {
+  flex-shrink: 0;
+}
+
+.product-table :deep(.el-table__body-wrapper) {
+  flex: 1;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  min-height: 0;
+  max-height: 100%;
+}
+
+/* 优化滚动条样式 */
+.product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar {
+  width: 8px;
+}
+
+.product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+.product-table :deep(.el-table__row) {
+  transition: all 0.2s ease;
+}
+
+.product-table :deep(.el-table__row:hover) {
+  background-color: #f5f7fa;
+}
+
+.product-table :deep(.el-table td) {
+  padding: 12px 0;
+}
+
+.product-table :deep(.el-table th) {
+  padding: 12px 0;
+}
+
+/* 产品名称单元格 */
+.product-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.product-icon {
+  font-size: var(--font-size-xl);
+  color: var(--primary-color);
+}
+
+.product-name {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+}
+
+/* 时间单元格 */
+.time-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--text-regular);
+  font-size: var(--font-size-sm);
+}
+
+.time-cell .el-icon {
+  color: var(--text-secondary);
+}
+
+/* 操作按钮 */
+.action-buttons {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.action-btn {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  border-radius: var(--radius-md);
+  font-weight: var(--font-weight-medium);
+  transition: var(--transition-base);
+}
+
+.edit-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(64, 158, 255, 0.3);
+}
+
+.delete-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(245, 108, 108, 0.3);
+}
+
+/* 产品表单对话框 */
+.product-form-dialog :deep(.el-dialog) {
+  border-radius: var(--radius-xxl);
+}
+
+.product-form-dialog :deep(.el-dialog__header) {
+  padding: var(--spacing-xxl) var(--spacing-xxxl);
+  border-bottom: 1px solid var(--border-lighter);
+}
+
+.product-form-dialog :deep(.el-dialog__body) {
+  padding: var(--spacing-xxxl);
+}
+
+.product-form-dialog :deep(.el-dialog__footer) {
+  padding: var(--spacing-xl) var(--spacing-xxxl);
+  border-top: 1px solid var(--border-lighter);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-md);
+}
+
+.product-form {
+  padding: var(--spacing-xl) 0;
+}
+
+.product-form :deep(.el-form-item) {
+  margin-bottom: var(--spacing-xxxl);
+}
+
+.product-form :deep(.el-form-item__label) {
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-md);
+  color: var(--text-primary);
+  line-height: 40px;
+}
+
+.product-form :deep(.el-form-item__content) {
+  line-height: 40px;
+}
+
+/* 成功检查配置帮助样式（桌面端） */
+.success-check-help {
+  margin-top: 10px;
+  padding: 12px;
+  background-color: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.help-title {
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 10px;
+}
+
+.help-content {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.help-section {
+  margin-bottom: 15px;
+}
+
+.help-section:last-child {
+  margin-bottom: 0;
+}
+
+.help-section-title {
+  font-weight: 600;
+  color: #409eff;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.help-example {
+  margin-bottom: 10px;
+  padding: 8px;
+  background-color: #ffffff;
+  border-left: 3px solid #409eff;
+  border-radius: 4px;
+}
+
+.example-label {
+  font-weight: 500;
+  color: #606266;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.example-code {
+  background-color: #f0f2f5;
+  padding: 6px 10px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #e6a23c;
+  word-break: break-all;
+  margin: 4px 0;
+}
+
+.example-desc {
+  color: #909399;
+  font-size: 11px;
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.help-note {
+  margin-top: 15px;
+  padding: 10px;
+  background-color: #fef0f0;
+  border: 1px solid #fde2e2;
+  border-radius: 4px;
+  color: #f56c6c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.help-note .el-icon {
+  color: #f56c6c;
+  margin-right: 4px;
+}
+
+.help-note strong {
+  font-weight: 600;
+}
+
+/* 产品名称表单项 */
+.product-name-item {
+  margin-bottom: var(--spacing-xxxl) !important;
+}
+
+.product-name-wrapper {
+  width: 100%;
+  min-height: 90px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.product-name-select {
+  width: 100% !important;
+  min-width: 400px;
+}
+
+.product-name-select :deep(.el-input__wrapper) {
+  transition: none !important;
+}
+
+.product-name-select :deep(.el-input__inner) {
+  font-size: 14px;
+  padding: 0 12px;
+}
+
+.form-hint-container {
+  min-height: 40px;
+  display: flex;
+  align-items: flex-start;
+  transition: none;
+}
+
+.form-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin-top: 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  width: 100%;
+  min-height: 32px;
+  transition: none;
+}
+
+.form-hint .el-icon {
+  color: var(--primary-color);
+  font-size: var(--font-size-lg);
+}
+
+/* 状态字段包装器 */
+.status-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  width: 100%;
+}
+
+.status-wrapper .el-switch {
+  align-self: flex-start;
+}
+
+.status-wrapper .form-hint {
+  margin-top: var(--spacing-xs);
+  background-color: #fef0f0;
+  border: 1px solid #fde2e2;
+  color: #f56c6c;
+}
+
+.status-wrapper .form-hint .el-icon {
+  color: #f56c6c;
+}
+
+.dialog-footer-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.dialog-footer-buttons .el-button {
+  padding: 12px 28px;
+  font-size: 15px;
+  font-weight: 500;
+  border-radius: 8px;
+}
+
+/* 响应式设计 */
+@media (max-width: 1600px) {
+  .product-management-dialog :deep(.el-dialog) {
+    width: 95% !important;
+    max-width: 1400px;
+    margin: 5vh auto !important;
+    top: 0;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 767px) {
+  /* 对话框移动端优化 */
+  .product-management-dialog :deep(.el-dialog) {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+    transform: none !important;
+    max-height: 100vh;
+    height: 100vh;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .product-management-dialog :deep(.el-dialog__wrapper) {
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    padding: 0;
+  }
+  
+  .product-management-dialog :deep(.el-dialog__header) {
+    padding: 12px 16px;
+    flex-shrink: 0;
+  }
+  
+  .product-management-dialog :deep(.el-dialog__body) {
+    padding: 0;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  
+  .product-management-dialog :deep(.el-dialog__footer) {
+    padding: 12px 16px;
+    flex-shrink: 0;
+  }
+  
+  .product-management-dialog :deep(.el-dialog__headerbtn) {
+    top: 12px;
+    right: 16px;
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+  }
+
+  /* 对话框头部移动端优化 - 更紧凑 */
+  .dialog-header {
+    padding: 8px 12px;
+    min-height: 50px;
+  }
+
+  .header-content {
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .header-left {
+    width: 100%;
+    gap: 12px;
+  }
+
+  .header-icon {
+    font-size: 32px;
+  }
+
+  .header-title {
+    font-size: 18px;
+    line-height: 1.2;
+  }
+  
+  .header-subtitle {
+    font-size: 13px;
+    line-height: 1.2;
+  }
+
+  .header-right {
+    width: 100%;
+    padding: 12px 16px;
+    border-radius: 12px;
+  }
+
+  .header-right :deep(.el-statistic__number) {
+    font-size: 24px;
+  }
+
+  .header-right :deep(.el-statistic__head) {
+    font-size: 12px;
+  }
+
+  /* 内容区域移动端优化 - 更紧凑 */
+  .product-management-content {
+    padding: 8px 8px 0 8px;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: 100%;
+  }
+
+  /* 操作栏移动端优化 - 更紧凑 */
+  .action-bar {
+    flex-direction: column;
+    gap: 8px;
+    align-items: stretch;
+    margin-bottom: 8px;
+    padding: 8px;
+    height: auto;
+    min-height: auto;
+  }
+
+  .action-left,
+  .action-right {
+    width: 100%;
+  }
+
+  .add-button {
+    width: 100%;
+    height: 48px;
+    min-height: 48px;
+    font-size: 16px;
+    padding: 0 20px;
+    border-radius: 12px;
+  }
+
+  .action-right .el-tag {
+    width: 100%;
+    justify-content: center;
+    padding: 12px;
+    font-size: 14px;
+    border-radius: 12px;
+  }
+
+  /* 表格包装器移动端优化 - 更紧凑 */
+  .table-wrapper {
+    padding: 6px;
+    flex: 1;
+    min-height: 0;
+    border-radius: 8px;
+    margin-bottom: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  
+  /* 表格移动端优化 */
+  .product-table {
+    font-size: 12px;
+    border-radius: 8px;
+    min-width: 100%;
+    width: 100%;
+  }
+
+  .product-table :deep(.el-table) {
+    min-width: 600px; /* 减小最小宽度，让表格更紧凑 */
+    width: 100%;
+  }
+
+  .product-table :deep(.el-table__header-wrapper) {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  .product-table :deep(.el-table__body-wrapper) {
+    overflow-x: auto;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    flex: 1;
+    min-height: 0;
+    max-height: 100%;
+  }
+
+  /* 表格容器添加滚动提示 */
+  .table-wrapper {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .table-wrapper::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 30px;
+    background: linear-gradient(to right, transparent, rgba(0, 0, 0, 0.05));
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* 移动端滚动条优化 */
+  .product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 2px;
+  }
+
+  .product-table :deep(.el-table__body-wrapper)::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.3);
+  }
+
+  /* 表格空状态移动端优化 */
+  .product-table :deep(.el-table__empty-block) {
+    padding: 40px 20px;
+  }
+
+  .product-table :deep(.el-table__empty-text) {
+    font-size: 14px;
+    color: #909399;
+  }
+  
+  .product-table :deep(.el-table__cell) {
+    padding: 6px 4px;
+    word-break: break-word;
+    white-space: nowrap;
+    min-width: 40px;
+  }
+  
+  .product-table :deep(.el-table__header th) {
+    font-size: 10px;
+    padding: 6px 4px;
+    white-space: nowrap;
+    font-weight: 600;
+    min-width: 40px;
+  }
+  
+  .product-table :deep(.el-table__body td) {
+    font-size: 10px;
+    padding: 6px 4px;
+    vertical-align: middle;
+    white-space: nowrap;
+    min-width: 40px;
+  }
+
+  /* ID列优化 - 更紧凑 */
+  .product-table :deep(.id-column) {
+    width: 40px !important;
+    min-width: 40px !important;
+    max-width: 40px !important;
+  }
+
+  /* 产品名称列优化 - 增加宽度显示更多内容 */
+  .product-table :deep(.name-column) {
+    min-width: 120px !important;
+    max-width: 180px !important;
+  }
+
+  /* eCPM列优化 - 更紧凑 */
+  .product-table :deep(.ecpm-column) {
+    width: 65px !important;
+    min-width: 65px !important;
+    max-width: 65px !important;
+  }
+
+  /* 收益列优化 - 更紧凑 */
+  .product-table :deep(.revenue-column) {
+    width: 60px !important;
+    min-width: 60px !important;
+    max-width: 60px !important;
+  }
+
+  /* 状态列优化 - 更紧凑 */
+  .product-table :deep(.status-column) {
+    width: 60px !important;
+    min-width: 60px !important;
+    max-width: 60px !important;
+  }
+
+  /* 时间列优化 - 更紧凑 */
+  .product-table :deep(.time-column) {
+    width: 100px !important;
+    min-width: 100px !important;
+    max-width: 100px !important;
+  }
+
+  /* 操作列优化 - 更紧凑 */
+  .product-table :deep(.action-column) {
+    width: 100px !important;
+    min-width: 100px !important;
+    max-width: 100px !important;
+    position: sticky;
+    right: 0;
+    background: var(--bg-primary);
+    z-index: 10;
+  }
+
+  .product-table :deep(.el-table__header-cell) {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+  }
+
+  /* 表格列移动端优化 */
+  .product-table :deep(.el-table-column--selection) {
+    width: 50px !important;
+    min-width: 50px !important;
+  }
+
+  /* 产品名称单元格移动端优化 - 更紧凑 */
+  .product-name-cell {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    max-width: 180px;
+    overflow: hidden;
+  }
+
+  .product-icon {
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  .product-name {
+    font-size: 10px;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+    max-width: 160px;
+  }
+
+  /* 时间单元格移动端优化 - 更紧凑 */
+  .time-cell {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 3px;
+    font-size: 9px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .time-cell .el-icon {
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+
+  .time-cell span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9px;
+  }
+
+  /* 操作按钮移动端优化 - 更紧凑 */
+  .action-buttons.mobile-actions {
+    display: flex;
+    flex-direction: row;
+    gap: 3px;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: nowrap;
+    width: 100%;
+    padding: 0;
+  }
+
+  .action-buttons.mobile-actions .action-btn {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0;
+    border-radius: 50%;
+    margin: 0;
+    flex-shrink: 0;
+  }
+
+  .action-buttons.mobile-actions .action-btn .el-icon {
+    margin-right: 0;
+    font-size: 12px;
+  }
+
+  .action-buttons.mobile-actions .action-btn.is-circle {
+    width: 28px;
+    height: 28px;
+  }
+
+  /* 确保操作按钮在固定列中正确显示 */
+  .product-table :deep(.action-column .action-buttons) {
+    justify-content: center;
+    width: 100%;
+    gap: 3px;
+  }
+
+  .product-table :deep(.action-column) {
+    padding: 4px !important;
+  }
+
+  /* 标签移动端优化 - 更紧凑 */
+  .product-table :deep(.el-tag) {
+    font-size: 9px;
+    padding: 1px 4px;
+    line-height: 1.2;
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    height: auto;
+    min-height: 18px;
+  }
+
+  /* 确保标签不会换行 */
+  .product-table :deep(.el-tag span) {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    font-size: 9px;
+    line-height: 1.2;
+  }
+
+  /* 表格行触摸反馈优化 */
+  .product-table :deep(.el-table__row) {
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.05);
+    transition: background-color 0.2s;
+  }
+
+  .product-table :deep(.el-table__row:active) {
+    background-color: #f0f2f5;
+  }
+
+  /* 按钮触摸反馈优化 */
+  .action-btn,
+  .add-button {
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+    touch-action: manipulation;
+  }
+
+  .action-btn:active,
+  .add-button:active {
+    opacity: 0.8;
+    transform: scale(0.98);
+  }
+
+  /* 加载状态移动端优化 */
+  .product-table :deep(.el-loading-mask) {
+    border-radius: 8px;
+  }
+
+  .product-table :deep(.el-loading-spinner) {
+    margin-top: -25px;
+  }
+
+  .product-table :deep(.el-loading-text) {
+    font-size: 14px;
+    margin-top: 8px;
+  }
+
+  /* 表格固定列移动端优化 */
+  .product-table :deep(.el-table__fixed),
+  .product-table :deep(.el-table__fixed-right) {
+    box-shadow: none;
+  }
+
+  /* 表格边框移动端优化 */
+  .product-table :deep(.el-table) {
+    border: 1px solid #ebeef5;
+  }
+
+  .product-table :deep(.el-table th),
+  .product-table :deep(.el-table td) {
+    border-right: 1px solid #ebeef5;
+  }
+
+  /* 操作栏标签移动端优化 */
+  .action-right .el-tag {
+    font-size: 13px;
+    padding: 8px 12px;
+  }
+  
+  /* 产品表单对话框移动端优化 */
+  .product-form-dialog :deep(.el-dialog) {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+    transform: none !important;
+    max-height: 100vh;
+    height: 100vh;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .product-form-dialog :deep(.el-dialog__wrapper) {
+    padding: 0;
+  }
+  
+  .product-form-dialog :deep(.el-dialog__header) {
+    padding: 16px;
+    flex-shrink: 0;
+    border-bottom: 1px solid #ebeef5;
+  }
+
+  .product-form-dialog :deep(.el-dialog__title) {
+    font-size: 18px;
+    font-weight: 600;
+  }
+  
+  .product-form-dialog :deep(.el-dialog__body) {
+    padding: 16px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .product-form-dialog :deep(.el-dialog__footer) {
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: row;
+    gap: 12px;
+    border-top: 1px solid #ebeef5;
+    flex-shrink: 0;
+  }
+  
+  .product-form-dialog :deep(.el-dialog__footer .el-button) {
+    flex: 1;
+    height: 48px;
+    min-height: 48px;
+    font-size: 16px;
+    border-radius: 12px;
+  }
+
+  .product-form-dialog :deep(.el-dialog__headerbtn) {
+    top: 16px;
+    right: 16px;
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+  }
+  
+  /* 表单移动端优化 */
+  .product-form {
+    padding: 0;
+  }
+
+  .product-form :deep(.el-form-item) {
+    margin-bottom: 24px;
+  }
+
+  .product-form :deep(.el-form-item__label) {
+    width: 100% !important;
+    text-align: left !important;
+    margin-bottom: 8px !important;
+    padding: 0 !important;
+    font-size: 14px;
+    font-weight: 600;
+    color: #303133;
+    line-height: 1.5;
+  }
+  
+  .product-form :deep(.el-form-item__content) {
+    width: 100% !important;
+    margin-left: 0 !important;
+    line-height: normal;
+  }
+  
+  .product-form :deep(.el-input),
+  .product-form :deep(.el-select),
+  .product-form :deep(.el-input-number),
+  .product-form :deep(.el-autocomplete) {
+    width: 100% !important;
+  }
+  
+  .product-form :deep(.el-input__wrapper) {
+    min-height: 48px;
+    font-size: 16px;
+    border-radius: 8px;
+  }
+
+  .product-form :deep(.el-input__inner) {
+    font-size: 16px;
+    padding: 0 16px;
+  }
+  
+  .product-form :deep(.el-select .el-input__wrapper) {
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  .product-form :deep(.el-select .el-input__inner) {
+    font-size: 16px;
+  }
+  
+  .product-form :deep(.el-input-number) {
+    width: 100% !important;
+  }
+  
+  .product-form :deep(.el-input-number .el-input__wrapper) {
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  .product-form :deep(.el-input-number .el-input__inner) {
+    font-size: 16px;
+  }
+
+  .product-form :deep(.el-autocomplete .el-input__wrapper) {
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  .product-form :deep(.el-autocomplete .el-input__inner) {
+    font-size: 16px;
+  }
+  
+  /* 开关移动端优化 */
+  .status-wrapper .el-switch {
+    min-width: 50px;
+    min-height: 28px;
+  }
+
+  .status-wrapper .el-switch :deep(.el-switch__core) {
+    min-width: 50px;
+    height: 28px;
+  }
+
+  .status-wrapper .el-switch :deep(.el-switch__action) {
+    width: 24px;
+    height: 24px;
+  }
+  
+  /* 表单提示移动端优化 */
+  .form-hint {
+    font-size: 12px;
+    padding: 8px 12px;
+    line-height: 1.5;
+    margin-top: 8px;
+  }
+
+  .form-hint .el-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  .form-hint span {
+    flex: 1;
+    word-break: break-word;
+  }
+
+  .product-name-wrapper {
+    min-height: auto;
+  }
+
+  .form-hint-container {
+    min-height: auto;
+  }
+
+  /* 日期选择器移动端优化 */
+  .product-form :deep(.el-date-editor) {
+    width: 100% !important;
+  }
+
+  .product-form :deep(.el-date-editor .el-input__wrapper) {
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  .product-form :deep(.el-date-editor .el-input__inner) {
+    font-size: 16px;
+  }
+  
+  /* 成功检查配置帮助样式 */
+  .success-check-help {
+    margin-top: 8px;
+    padding: 8px;
+    background-color: #f5f7fa;
+    border: 1px solid #e4e7ed;
+    border-radius: 4px;
+    font-size: 11px;
+  }
+
+  .help-title {
+    font-weight: 600;
+    color: #303133;
+    margin-bottom: 8px;
+    font-size: 12px;
+  }
+
+  .help-content {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .help-section {
+    margin-bottom: 12px;
+  }
+
+  .help-section-title {
+    font-weight: 600;
+    color: #409eff;
+    margin-bottom: 6px;
+    font-size: 12px;
+  }
+
+  .help-example {
+    margin-bottom: 8px;
+    padding: 6px;
+    background-color: #ffffff;
+    border-left: 3px solid #409eff;
+    border-radius: 4px;
+  }
+
+  .example-label {
+    font-weight: 500;
+    color: #606266;
+    margin-bottom: 3px;
+    font-size: 11px;
+  }
+
+  .example-code {
+    background-color: #f0f2f5;
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    color: #e6a23c;
+    word-break: break-all;
+    margin: 3px 0;
+  }
+
+  .example-desc {
+    color: #909399;
+    font-size: 10px;
+    margin-top: 3px;
+    font-style: italic;
+  }
+
+  .help-note {
+    margin-top: 12px;
+    padding: 8px;
+    background-color: #fef0f0;
+    border: 1px solid #fde2e2;
+    border-radius: 4px;
+    color: #f56c6c;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  .help-note .el-icon {
+    color: #f56c6c;
+    margin-right: 4px;
+  }
+
+  /* 对话框底部按钮移动端优化 */
+  .dialog-footer-buttons {
+    width: 100%;
+    gap: 12px;
+  }
+
+  .dialog-footer-buttons .el-button {
+    flex: 1;
+    height: 48px;
+    min-height: 48px;
+    font-size: 16px;
+    border-radius: 12px;
+  }
+
+  /* 产品转移日期对话框移动端优化 */
+  .product-transfer-date-dialog :deep(.el-dialog) {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    max-height: 100vh;
+    height: 100vh;
+    border-radius: 0;
+  }
+
+  .product-transfer-date-dialog :deep(.el-dialog__body) {
+    padding: 16px;
+    max-height: calc(100vh - 140px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}

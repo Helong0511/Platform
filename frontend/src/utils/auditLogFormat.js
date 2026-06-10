@@ -96,8 +96,10 @@ export function getStatusCodeTag(statusCode) {
   return '';
 }
 
+import { formatJson as formatJsonBase } from './jsonFormat';
+
 /**
- * 格式化Audit Json。
+ * 格式化Audit Json（含日期字段简化）。
  */
 export function formatAuditJson(jsonString) {
   try {
@@ -127,7 +129,7 @@ export function formatAuditJson(jsonString) {
       return value;
     };
 
-    return JSON.stringify(formatValue(obj), null, 2);
+    return formatJsonBase(formatValue(obj));
   } catch {
     if (typeof jsonString === 'string') {
       let formatted = jsonString.replace(
@@ -139,12 +141,8 @@ export function formatAuditJson(jsonString) {
         },
       );
       formatted = formatted.replace(/'/g, '"');
-      try {
-        return JSON.stringify(JSON.parse(formatted), null, 2);
-      } catch {
-        return formatted;
-      }
+      return formatJsonBase(formatted, formatted);
     }
-    return String(jsonString);
+    return formatJsonBase(jsonString, String(jsonString ?? ''));
   }
 }

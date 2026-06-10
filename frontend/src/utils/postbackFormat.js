@@ -37,14 +37,4 @@ export function getOsTagType(os) {
   return 'info';
 }
 
-/**
- * 格式化Json。
- */
-export function formatJson(jsonString) {
-  try {
-    const obj = typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
-    return JSON.stringify(obj, null, 2);
-  } catch (_e) {
-    return jsonString;
-  }
-}
+export { formatJson } from './jsonFormat';

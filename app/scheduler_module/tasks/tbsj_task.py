@@ -1,152 +1,80 @@
 """
 yangyangdeyi（TBSJ）上游广告数据拉取定时任务。
-
-功能说明：
-- 从 yangyangdeyi API 获取广告数据，校验重复后写入 ad_data
-- 使用 post_json 请求与 upstream_import 统一入库流程
-
-在系统中的位置：
-- 由 TBSJ_API_TASK_NAME 调度
-
-注意事项：
-1. 接口字段变更须同步 fetch_tbsj_rows 与导入映射
-2. 时区转换使用 pytz，与上游报表日期对齐
 """
 import logging
-from datetime import datetime, timedelta
-
-import pytz
 
 from app.core.config import settings
-from app.scheduler_module.upstream_fetch import fetch_tbsj_rows
-from app.scheduler_module.upstream_import import import_upstream_ad_data
-from app.scheduler_module.upstream_http import post_json
 from app.scheduler_module.task_names import TBSJ_API_TASK_NAME
-from app.scheduler_module.task_result_store import get_task_result, set_task_result
-from app.scheduler_module.task_utils import log_task_error, upstream_credential_missing
+from app.scheduler_module.task_utils import log_task_error, resolve_upstream_date_range
+from app.scheduler_module.upstream_fetch import fetch_tbsj_rows
+from app.scheduler_module.upstream_http import post_json
+from app.scheduler_module.upstream_task_runner import run_upstream_import_task
 
-# 获取当前模块的日志记录器
 logger = logging.getLogger(__name__)
 
+TBSJ_URL = 'https://data.tongbaishijia.com/api/thirdservice'
+TBSJ_HEADERS = {'Content-Type': 'application/json;charset=utf-8'}
 
-# 应用时区配置（从统一配置读取）
-# 用于将本地时间转换为标准时区
-APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
+TBSJ_FIELD_MAPPING = {
+    "date": "date",
+    "ad_unit": "ad_unit",
+    "product_name": "product",
+    "country_code": "country_code",
+    "request_count": "ad_requests",
+    "match_count": "ad_matches",
+    "display_count": "ad_impressions",
+    "click_count": "ad_clicks",
+    "ecpm_before_deduct": "ecpm",
+    "coverage_rate": "ad_coverage",
+    "display_rate": "ad_impression_rate",
+    "click_rate": "ctr",
+    "revenue_before_deduct": "earnings",
+}
 
 
 async def tbsj_api_task(
-        start_date: str | None = None,
-        end_date: str | None = None
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> None:
-    """
-    yangyangdeyi定时任务主函数
-    
-    参数:
-        start_date: 可选，起始日期 (格式: YYYY-MM-DD)，如果不提供则根据时间自动选择
-        end_date: 可选，结束日期 (格式: YYYY-MM-DD)，如果不提供则使用start_date
-    """
-    # ========== yangyangdeyi API配置 ==========
-    # HTTP请求头配置
-    Headers = {'Content-Type': 'application/json;charset=utf-8'}
-
-    # API请求地址
-    tbsj_url = 'https://data.tongbaishijia.com/api/thirdservice'
-
+    """yangyangdeyi 定时任务：Token 鉴权后拉数并入库。"""
     username = settings.TBSJ_API_USERNAME
     password = settings.TBSJ_API_PASSWORD
 
-    if upstream_credential_missing(username, password):
-        msg = "跳过: TBSJ API 未配置（请在 .env 设置 TBSJ_API_USERNAME / TBSJ_API_PASSWORD）"
-        logger.warning(msg)
-        set_task_result(TBSJ_API_TASK_NAME, msg)
-        return
-
-    app_time = datetime.now(APP_TIMEZONE)
-    current_time_str = app_time.strftime("%Y-%m-%d %H:%M:%S")
-    logger.info(f"{TBSJ_API_TASK_NAME} 开始执行 - {current_time_str}（时区: {settings.TIMEZONE}）")
-
-    try:
-        # ============================================
-        # 任务主逻辑开始
-        # ============================================
-
-        token_post = {
-            "username": username,
-            "password": password
-        }
-
+    async def fetch_data():
         token_json = await post_json(
-            tbsj_url + "/token",
-            json_body=token_post,
-            headers=Headers,
+            TBSJ_URL + "/token",
+            json_body={"username": username, "password": password},
+            headers=TBSJ_HEADERS,
             label="TBSJ Token API",
             verify=False,
         )
         access_token = token_json.get("access_token", "")
         if not access_token:
             raise Exception("TBSJ API 响应中缺少 access_token")
-        Headers["Authorization"] = f"Bearer {access_token}"
 
-        # 修改日期计算逻辑
-        if start_date:
-            # 使用传入的日期
-            if end_date:
-                tbsj_start = start_date
-                tbsj_end = end_date
-            else:
-                tbsj_start = start_date
-                tbsj_end = start_date
-        else:
-            # 原有的自动计算逻辑
-            app_now = datetime.now(APP_TIMEZONE)
-            app_yesterday = app_now - timedelta(days=1)
-            yesterday_str = app_yesterday.strftime("%Y-%m-%d")
-            today_str = app_now.strftime("%Y-%m-%d")
-
-            if 0 <= app_now.hour <= 2:
-                tbsj_start = yesterday_str
-                tbsj_end = today_str
-            else:
-                tbsj_start = today_str
-                tbsj_end = today_str
-
-        tbsj_params = {
-            "page": 1,
-            "limit": 1000,
-            "start": tbsj_start,
-            "end": tbsj_end
-        }
-
-        data = await fetch_tbsj_rows(
-            base_url=tbsj_url,
-            params=tbsj_params,
-            headers=Headers,
+        auth_headers = {**TBSJ_HEADERS, "Authorization": f"Bearer {access_token}"}
+        tbsj_start, tbsj_end = resolve_upstream_date_range(
+            start_date,
+            end_date,
+            early_morning_dual_day=True,
         )
-        await import_upstream_ad_data(
-            task_name=TBSJ_API_TASK_NAME,
-            data=data,
-            field_mapping={
-                "date": "date",
-                "ad_unit": "ad_unit",
-                "product_name": "product",
-                "country_code": "country_code",
-                "request_count": "ad_requests",
-                "match_count": "ad_matches",
-                "display_count": "ad_impressions",
-                "click_count": "ad_clicks",
-                "ecpm_before_deduct": "ecpm",
-                "coverage_rate": "ad_coverage",
-                "display_rate": "ad_impression_rate",
-                "click_rate": "ctr",
-                "revenue_before_deduct": "earnings",
-            },
+        return await fetch_tbsj_rows(
+            base_url=TBSJ_URL,
+            params={"page": 1, "limit": 1000, "start": tbsj_start, "end": tbsj_end},
+            headers=auth_headers,
+        )
+
+    try:
+        await run_upstream_import_task(
+            TBSJ_API_TASK_NAME,
+            credentials=(username, password),
+            skip_hint="跳过: TBSJ API 未配置（请在 .env 设置 TBSJ_API_USERNAME / TBSJ_API_PASSWORD）",
+            fetch_data=fetch_data,
+            field_mapping=TBSJ_FIELD_MAPPING,
             source="yangyangdeyi定时任务",
-            current_time_str=current_time_str,
             notify_title="yangyangdeyi",
         )
-
     except Exception as e:
-        # 调度器层会记录完整堆栈；此处补充业务上下文，网络类错误不再重复打堆栈
         log_timeout = "请求超时" in str(e) or "请求失败" in str(e)
         log_task_error(TBSJ_API_TASK_NAME, str(e), exc_info=not log_timeout)
         raise

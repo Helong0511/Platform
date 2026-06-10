@@ -22,7 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.audit_log import log_user_action, commit_audit_log
-from app.core.cache import get_cached, set_cached, generate_cache_key
+from app.core.infrastructure.cache_compat import (
+    generate_cache_key,
+    legacy_get_cached as get_cached,
+    legacy_set_cached as set_cached,
+)
 from app.models.models import UserAuditLog, User
 
 logger = logging.getLogger(__name__)
@@ -140,7 +144,7 @@ class AuditLogService:
         """
         # --- 缓存层：避免 Dashboard 频繁全表聚合 ---
         cache_key = generate_cache_key("audit_log_stats", start_date, end_date)
-        cached = await get_cached(cache_key)
+        cached = await get_cached(cache_key, key_prefix="audit_log")
         if cached:
             logger.debug("缓存命中: audit_log_stats")
             return cached
@@ -238,7 +242,7 @@ class AuditLogService:
         }
 
         # 缓存结果（缓存 5 分钟）
-        await set_cached(cache_key, stats, ttl=300)
+        await set_cached(cache_key, stats, ttl=300, key_prefix="audit_log")
 
         return stats
 

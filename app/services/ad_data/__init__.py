@@ -17,16 +17,15 @@ from app.services.ad_data.service import AdDataService, join_country_info_for_ad
 from app.services.ad_data.calculators.rate_calculator import RateCalculator
 from app.services.ad_data.calculators.revenue_calculator import RevenueCalculator
 from app.services.ad_data.queries.detail_query import DetailQueryBuilder
-from app.services.ad_data.queries.list_query import ListQueryBuilder
-from app.services.ad_data.queries.stats_query import StatsQueryBuilder
+from app.services.ad_data.queries.list_query import AdDataListQuery, ListQueryBuilder
 from app.services.ad_data.validators import AdDataValidator
 
 __all__ = [
     "AdDataService",
     "join_country_info_for_ad_data",
+    "AdDataListQuery",
     "ListQueryBuilder",
     "DetailQueryBuilder",
-    "StatsQueryBuilder",
     "RateCalculator",
     "RevenueCalculator",
     "AdDataValidator",

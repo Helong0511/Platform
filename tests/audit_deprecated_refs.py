@@ -22,7 +22,6 @@ FORBIDDEN_IMPORT_PREFIXES = (
 # 允许存在但应逐步淘汰的路径片段（仅报告，不失败）
 WARN_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("asyncio.get_event_loop()", re.compile(r"asyncio\.get_event_loop\s*\(")),
-    ("旧短链路由 short_link_redirect", re.compile(r"from app\.routes\.short_link_redirect import")),
 ]
 
 SKIP_DIRS = {"__pycache__", ".git", "venv", "node_modules", "dist"}

@@ -5,65 +5,28 @@
 import { reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getCaps, updateCap } from '../api/cap';
-import { getOffers } from '../api/offer';
-import { getAdvertisers } from '../api/advertiser';
-import { getPublishers } from '../api/publisher';
+import { useCplFilterOptions } from './useCplFilterOptions';
 import { logger } from '../utils/logger';
 
-/**
- * Cap 配置列表、筛选与行内状态切换。
- */
-/**
- * 组合式函数 - Cap 列表数据加载
- * @returns {Object} 响应式状态与业务操作方法
- */
 export function useCapList() {
-  // 数据加载中
   const loading = ref(false);
   const filterCapType = ref(null);
-  // filterOffer 响应式状态
   const filterOffer = ref(null);
   const filterPublisher = ref(null);
-  // 按激活状态筛选
   const filterActive = ref(null);
   const pagination = reactive({
     page: 1,
     pageSize: 20,
     total: 0,
   });
-  // 表格当前页数据
   const tableData = ref([]);
-  const offerList = ref([]);
-  // 广告主下拉选项
-  const advertiserList = ref([]);
-  const publisherList = ref([]);
 
-  const loadOffers = async () => {
-    try {
-      const response = await getOffers({ page: 1, page_size: 100 });
-      offerList.value = (response.data || []).slice().sort((a, b) => a.id - b.id);
-    } catch (error) {
-      logger.error('加载Offer列表失败:', error);
-    }
-  };
-
-  const loadAdvertisers = async () => {
-    try {
-      const response = await getAdvertisers({ page: 1, page_size: 100 });
-      advertiserList.value = response.data || [];
-    } catch (error) {
-      logger.error('加载广告主列表失败:', error);
-    }
-  };
-
-  const loadPublishers = async () => {
-    try {
-      const response = await getPublishers({ page: 1, page_size: 100 });
-      publisherList.value = response.data || [];
-    } catch (error) {
-      logger.error('加载渠道列表失败:', error);
-    }
-  };
+  const {
+    offerList,
+    advertiserList,
+    publisherList,
+    loadAll,
+  } = useCplFilterOptions();
 
   const loadData = async () => {
     loading.value = true;
@@ -132,9 +95,7 @@ export function useCapList() {
   };
 
   const initPage = () => {
-    loadOffers();
-    loadAdvertisers();
-    loadPublishers();
+    loadAll();
     loadData();
   };
 

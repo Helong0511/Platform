@@ -15,21 +15,29 @@ Offer 投放业务服务层。
 from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import func, String, and_, or_, delete, text
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy import and_, func, delete
+from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import IntegrityError
 
 from app.models.models import (
-    Offer, Advertiser, Publisher, Client, User, UserRole,
+    Offer, Advertiser, User,
     OfferPublisherAssignment, ShortLink, Click
 )
-from urllib.parse import urlparse, parse_qs
 from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.infrastructure.cache import CacheInvalidator
 from app.core.config import settings
+from app.services.cpl.offer.helpers import (
+    build_tracking_urls,
+    extract_short_code_from_url,
+    load_publishers_by_ids,
+    parse_publisher_configs,
+)
+from app.services.cpl.offer.queries.assignments_query import OfferAssignmentsQuery
+from app.services.cpl.offer.queries.detail_query import OfferDetailQuery
+from app.services.cpl.offer.queries.list_query import OfferListQuery
 import logging
 
 logger = logging.getLogger(__name__)
@@ -60,133 +68,19 @@ class OfferService(BaseService[Offer]):
             include_advertiser: bool = True,
             include_assignments: bool = False
     ) -> Offer:
-        """
-        按主键获取 Offer 详情（含权限校验）。
-
-        客户用户须存在激活的 OfferPublisherAssignment 且渠道属于该客户。
-
-        Args:
-            offer_id: Offer 主键
-            current_user: 当前登录用户
-            include_advertiser: True 时 joinedload 广告主
-            include_assignments: True 时 selectinload 渠道分配及 Publisher
-
-        Returns:
-            Offer: Offer ORM 对象
-
-        Raises:
-            APIException: 不存在或客户无权访问
-        """
-        # --- 客户角色：校验 Offer-渠道分配归属 ---
-        if current_user.role == UserRole.CLIENT:
-            # 获取当前用户的client_id
-            client_result = await self.db.execute(
-                select(Client.id).where(Client.user_id == current_user.id).limit(1)
-            )
-            client_id = client_result.scalar_one_or_none()
-
-            if client_id:
-                # 检查该Offer是否分配给该客户的渠道（只检查激活的渠道和激活的分配）
-                check_result = await self.db.execute(
-                    select(OfferPublisherAssignment)
-                    .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
-                    .where(
-                        and_(
-                            OfferPublisherAssignment.offer_id == offer_id,
-                            Publisher.client_id == client_id,
-                            Publisher.is_active == True,
-                            OfferPublisherAssignment.is_active == True
-                        )
-                    )
-                    .limit(1)
-                )
-                if not check_result.scalar_one_or_none():
-                    raise_api_exception(
-                        ErrorCode.RESOURCE_NOT_FOUND,
-                        detail=f"Offer ID {offer_id} 不存在或无权访问"
-                    )
-            else:
-                raise_api_exception(
-                    ErrorCode.RESOURCE_NOT_FOUND,
-                    detail=f"Offer ID {offer_id} 不存在或无权访问"
-                )
-
-        query = select(Offer).where(Offer.id == offer_id)
-
-        # 使用joinedload/selectinload优化关联查询
-        options = []
-        if include_advertiser:
-            options.append(joinedload(Offer.advertiser))
-        if include_assignments:
-            options.append(selectinload(Offer.offer_assignments).joinedload(OfferPublisherAssignment.publisher))
-
-        if options:
-            query = query.options(*options)
-
-        result = await self.db.execute(query)
-        # 使用joinedload时，为了安全起见使用unique()去重
-        # 注意：scalar_one_or_none()用于标量值，这里应该使用scalars().one_or_none()
-        if options:
-            offer = result.unique().scalars().one_or_none()
-        else:
-            offer = result.scalars().one_or_none()
-
-        if not offer:
-            raise_api_exception(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                detail=f"Offer ID {offer_id} 不存在"
-            )
-
-        return offer
+        return await OfferDetailQuery(self.db).fetch_by_id(
+            offer_id,
+            current_user,
+            include_advertiser=include_advertiser,
+            include_assignments=include_assignments,
+        )
 
     async def get_offer_assignments(
             self,
             offer_id: int,
             current_user: User
     ) -> List[Dict[str, Any]]:
-        """
-        获取指定 Offer 的激活渠道分配列表。
-
-        客户用户仅返回属于该客户的渠道；每条含 downstream_cap、affiliate_payout。
-
-        Args:
-            offer_id: Offer 主键
-            current_user: 当前登录用户
-
-        Returns:
-            List[Dict]: 含 id、publisher_name、client_id、downstream_cap、affiliate_payout
-        """
-        # 加载分配的渠道（只加载激活的渠道和激活的分配）
-        pub_query = (
-            select(OfferPublisherAssignment, Publisher)
-            .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
-            .where(OfferPublisherAssignment.offer_id == offer_id)
-            .where(OfferPublisherAssignment.is_active == True)
-            .where(Publisher.is_active == True)
-        )
-
-        # 如果是客户用户，只加载属于该客户的渠道
-        if current_user.role == UserRole.CLIENT:
-            client_result = await self.db.execute(
-                select(Client.id).where(Client.user_id == current_user.id).limit(1)
-            )
-            client_id = client_result.scalar_one_or_none()
-            if client_id:
-                pub_query = pub_query.where(Publisher.client_id == client_id)
-
-        pub_result = await self.db.execute(pub_query)
-        assignments = pub_result.all()
-
-        return [
-            {
-                "id": pub.id,
-                "publisher_name": pub.publisher_name,
-                "client_id": pub.client_id,
-                "downstream_cap": assignment.downstream_cap,
-                "affiliate_payout": assignment.affiliate_payout
-            }
-            for assignment, pub in assignments
-        ]
+        return await OfferAssignmentsQuery(self.db).fetch_for_offer(offer_id, current_user)
 
     async def get_offers(
             self,
@@ -200,179 +94,17 @@ class OfferService(BaseService[Offer]):
             country: Optional[str] = None,
             is_active: Optional[bool] = None
     ) -> Tuple[List[Offer], int, Dict[int, List[Dict[str, Any]]]]:
-        """
-        分页查询 Offer 列表，并批量返回渠道分配映射。
-
-        客户用户通过 join OfferPublisherAssignment 限定可见范围；
-        搜索优先 ID 精确匹配，再尝试全文索引或名称前缀。
-
-        Args:
-            current_user: 当前登录用户
-            page: 页码，从 1 开始
-            page_size: 每页条数
-            search: 搜索词（ID / 上游 Offer ID / 名称）
-            advertiser_id: 按广告主过滤
-            publisher_id: 仅返回已分配给该渠道的 Offer
-            status: Offer 状态过滤
-            country: 国家/GEO 过滤
-            is_active: 激活状态过滤
-
-        Returns:
-            Tuple[List[Offer], int, Dict[int, List[Dict]]]:
-                (Offer 列表, 总条数, offer_id -> 渠道分配列表)
-        """
-        query = select(Offer)
-
-        # 权限过滤：客户只能查看分配给自己的渠道的Offer
-        has_join = False
-        if current_user.role == UserRole.CLIENT:
-            # 获取当前用户的client_id
-            client_result = await self.db.execute(
-                select(Client.id).where(Client.user_id == current_user.id).limit(1)
-            )
-            client_id = client_result.scalar_one_or_none()
-
-            if client_id:
-                # 通过join过滤：只返回分配给该客户渠道的Offer
-                query = query.join(
-                    OfferPublisherAssignment, Offer.id == OfferPublisherAssignment.offer_id
-                ).join(
-                    Publisher, OfferPublisherAssignment.publisher_id == Publisher.id
-                ).where(
-                    and_(
-                        Publisher.client_id == client_id,
-                        Publisher.is_active == True,
-                        OfferPublisherAssignment.is_active == True
-                    )
-                ).distinct()
-                has_join = True
-            else:
-                # 如果客户没有关联的Client记录，返回空列表
-                return [], 0, {}
-
-        # 筛选条件
-        conditions = []
-
-        if search:
-            # 优化搜索：优先精确匹配，然后使用全文索引或前缀匹配
-            search_trimmed = search.strip()
-            search_conditions = []
-
-            # 1. 尝试精确匹配ID（最快，使用主键索引）
-            try:
-                search_id = int(search_trimmed)
-                search_conditions.append(Offer.id == search_id)
-            except ValueError:
-                # 不是数字，继续其他搜索方式
-                pass
-
-            # 2. 精确匹配上游Offer ID（使用索引，如果字段有索引）
-            if search_trimmed:
-                search_conditions.append(Offer.advertiser_offer_id == search_trimmed)
-
-            # 3. 使用全文索引搜索名称（如果存在全文索引）
-            # 回退到前缀匹配（可以使用索引）或LIKE查询
-            try:
-                # 尝试使用全文索引
-                fulltext_condition = text(
-                    "MATCH(offer_name) AGAINST(:search_term IN NATURAL LANGUAGE MODE)"
-                ).bindparams(search_term=search_trimmed)
-                search_conditions.append(fulltext_condition)
-            except Exception:
-                # 全文索引不存在或查询失败，使用前缀匹配（可以使用普通索引）
-                # 前缀匹配比 %keyword% 性能好，可以使用索引
-                search_conditions.append(Offer.offer_name.like(f"{search_trimmed}%"))
-                # 如果前缀匹配没有结果，也可以尝试包含匹配（性能较差，但更灵活）
-                # search_conditions.append(Offer.offer_name.like(f"%{search_trimmed}%"))
-
-            if search_conditions:
-                conditions.append(or_(*search_conditions))
-
-        if advertiser_id:
-            conditions.append(Offer.advertiser_id == advertiser_id)
-
-        # 渠道过滤：只返回分配给指定渠道的Offer
-        if publisher_id:
-            # 需要通过 join OfferPublisherAssignment 来过滤
-            # 如果已经有 join（客户用户的情况），直接添加条件
-            # 否则需要添加 join
-            if not has_join:
-                # 管理员用户，需要添加 join
-                query = query.join(
-                    OfferPublisherAssignment, Offer.id == OfferPublisherAssignment.offer_id
-                ).where(
-                    and_(
-                        OfferPublisherAssignment.publisher_id == publisher_id,
-                        OfferPublisherAssignment.is_active == True
-                    )
-                ).distinct()
-            else:
-                # 客户用户已经有 join，直接添加条件
-                conditions.append(OfferPublisherAssignment.publisher_id == publisher_id)
-
-        if status:
-            conditions.append(Offer.status == status)
-
-        if country:
-            conditions.append(Offer.country == country)
-
-        if is_active is not None:
-            conditions.append(Offer.is_active == is_active)
-
-        if conditions:
-            query = query.where(and_(*conditions))
-
-        # 总数查询（优化：不加载关联数据）
-        count_query = select(func.count()).select_from(query.subquery())
-        total_result = await self.db.execute(count_query)
-        total = total_result.scalar() or 0
-
-        # 分页查询（使用joinedload优化广告主加载）
-        offset = (page - 1) * page_size
-        query = query.options(joinedload(Offer.advertiser))
-        query = query.order_by(Offer.created_at.desc())
-        query = query.offset(offset).limit(page_size)
-
-        result = await self.db.execute(query)
-        # 使用joinedload时，为了安全起见使用unique()去重
-        offers = result.unique().scalars().all()
-
-        # 批量加载所有offer的渠道分配（避免N+1查询）
-        assignments_map = {}
-        offer_ids = [offer.id for offer in offers]
-
-        if offer_ids:
-            # 构建渠道分配查询（批量加载）
-            pub_query = (
-                select(OfferPublisherAssignment, Publisher)
-                .join(Publisher, OfferPublisherAssignment.publisher_id == Publisher.id)
-                .where(OfferPublisherAssignment.offer_id.in_(offer_ids))
-                .where(OfferPublisherAssignment.is_active == True)
-                .where(Publisher.is_active == True)
-            )
-
-            # 如果是客户用户，只加载属于该客户的渠道
-            if current_user.role == UserRole.CLIENT:
-                client_result = await self.db.execute(
-                    select(Client.id).where(Client.user_id == current_user.id).limit(1)
-                )
-                client_id = client_result.scalar_one_or_none()
-                if client_id:
-                    pub_query = pub_query.where(Publisher.client_id == client_id)
-
-            pub_result = await self.db.execute(pub_query)
-            for assignment, publisher in pub_result.all():
-                if assignment.offer_id not in assignments_map:
-                    assignments_map[assignment.offer_id] = []
-                assignments_map[assignment.offer_id].append({
-                    "id": publisher.id,
-                    "publisher_name": publisher.publisher_name,
-                    "client_id": publisher.client_id,
-                    "downstream_cap": assignment.downstream_cap,
-                    "affiliate_payout": assignment.affiliate_payout
-                })
-
-        return offers, total, assignments_map
+        return await OfferListQuery(self.db).fetch(
+            current_user=current_user,
+            page=page,
+            page_size=page_size,
+            search=search,
+            advertiser_id=advertiser_id,
+            publisher_id=publisher_id,
+            status=status,
+            country=country,
+            is_active=is_active,
+        )
 
     async def create_offer(
             self,
@@ -442,110 +174,19 @@ class OfferService(BaseService[Offer]):
         self.db.add(offer)
         await self.db.flush()  # 先flush以获取offer.id
 
-        # 生成下游Tracklink和Postback URL
-        downstream_tracklink = f"{base_url.rstrip('/')}/api/v1/track/click/{offer.id}?publisher_id={{publisher_id}}"
-        postback_url = f"{base_url.rstrip('/')}/api/v1/postback?click_id={{click_id}}&offer_id={offer.id}"
+        downstream_tracklink, postback_url = build_tracking_urls(offer.id, base_url)
         offer.downstream_tracklink = downstream_tracklink
         offer.postback_url = postback_url
 
-        # --- 解析并校验 publisher_configs，写入 OfferPublisherAssignment ---
         publisher_ids_for_short_link = []
         publisher_configs = offer_data.get('publisher_configs')
 
         if publisher_configs is not None:
-            if len(publisher_configs) == 0:
-                raise_api_exception(
-                    ErrorCode.INVALID_PARAMETER,
-                    detail="渠道配置不能为空，请至少添加一个渠道"
-                )
-
-            publisher_id_list = [
-                config.get('publisher_id') if isinstance(config, dict) else config.publisher_id
-                for config in publisher_configs
-            ]
-            valid_publisher_ids = [pid for pid in publisher_id_list if pid is not None]
-            if len(valid_publisher_ids) != len(set(valid_publisher_ids)):
-                raise_api_exception(
-                    ErrorCode.INVALID_PARAMETER,
-                    detail="渠道配置中存在重复的渠道ID"
-                )
-
-            parsed_publisher_configs = []
-            for config in publisher_configs:
-                if isinstance(config, dict):
-                    pub_id = config.get('publisher_id')
-                    downstream_cap = config.get('downstream_cap')
-                    affiliate_payout = config.get('affiliate_payout')
-                else:
-                    pub_id = config.publisher_id
-                    downstream_cap = config.downstream_cap
-                    affiliate_payout = config.affiliate_payout
-
-                if pub_id is None:
-                    raise_api_exception(
-                        ErrorCode.INVALID_PARAMETER,
-                        detail="渠道配置中的publisher_id不能为空，请确保已选择渠道"
-                    )
-
-                try:
-                    pub_id = int(pub_id)
-                except (ValueError, TypeError):
-                    raise_api_exception(
-                        ErrorCode.INVALID_PARAMETER,
-                        detail=f"渠道配置中的publisher_id必须是整数，当前值: {pub_id} (类型: {type(pub_id).__name__})"
-                    )
-
-                if pub_id <= 0:
-                    raise_api_exception(
-                        ErrorCode.INVALID_PARAMETER,
-                        detail=f"渠道配置中的publisher_id必须大于0，当前值: {pub_id}"
-                    )
-
-                if downstream_cap is not None:
-                    try:
-                        downstream_cap = int(downstream_cap)
-                    except (ValueError, TypeError):
-                        raise_api_exception(
-                            ErrorCode.INVALID_PARAMETER,
-                            detail=f"渠道ID {pub_id} 的下游Cap必须是整数，当前值: {downstream_cap} (类型: {type(downstream_cap).__name__})"
-                        )
-
-                if affiliate_payout is not None:
-                    try:
-                        affiliate_payout = float(affiliate_payout)
-                    except (ValueError, TypeError):
-                        raise_api_exception(
-                            ErrorCode.INVALID_PARAMETER,
-                            detail=f"渠道ID {pub_id} 的下游PO必须是数字，当前值: {affiliate_payout} (类型: {type(affiliate_payout).__name__})"
-                        )
-
-                if downstream_cap is not None and downstream_cap < 0:
-                    raise_api_exception(
-                        ErrorCode.INVALID_PARAMETER,
-                        detail=f"渠道ID {pub_id} 的下游Cap不能为负数"
-                    )
-
-                if affiliate_payout is not None and affiliate_payout < 0:
-                    raise_api_exception(
-                        ErrorCode.INVALID_PARAMETER,
-                        detail=f"渠道ID {pub_id} 的下游PO不能为负数"
-                    )
-
-                parsed_publisher_configs.append((pub_id, downstream_cap, affiliate_payout))
-
+            parsed_publisher_configs = parse_publisher_configs(publisher_configs)
             if parsed_publisher_configs:
                 pub_ids = [item[0] for item in parsed_publisher_configs]
-                pub_result = await self.db.execute(
-                    select(Publisher).where(Publisher.id.in_(pub_ids))
-                )
-                publishers_by_id = {p.id: p for p in pub_result.scalars().all()}
-
+                await load_publishers_by_ids(self.db, pub_ids)
                 for pub_id, downstream_cap, affiliate_payout in parsed_publisher_configs:
-                    if pub_id not in publishers_by_id:
-                        raise_api_exception(
-                            ErrorCode.RESOURCE_NOT_FOUND,
-                            detail=f"渠道ID {pub_id} 不存在"
-                        )
                     assignment = OfferPublisherAssignment(
                         offer_id=offer.id,
                         publisher_id=pub_id,
@@ -679,7 +320,7 @@ class OfferService(BaseService[Offer]):
                     try:
                         # 从下游Tracklink中提取short_code
                         # 格式可能是: {base_url}/s/{short_code} 或 {base_url}/s/{short_code}?offer_id=X&channel_id=Y
-                        short_code = self._extract_short_code_from_url(current_downstream_tracklink)
+                        short_code = extract_short_code_from_url(current_downstream_tracklink)
                         if short_code:
                             # 查找对应的短链接记录
                             short_link_result = await self.db.execute(
@@ -751,115 +392,21 @@ class OfferService(BaseService[Offer]):
         publisher_configs = offer_data.get('publisher_configs')
 
         if publisher_configs is not None:
-            # 使用新的渠道配置方式
-            # 获取旧的渠道分配列表（用于比较）
             old_assignments_result = await self.db.execute(
                 select(OfferPublisherAssignment).where(OfferPublisherAssignment.offer_id == offer.id)
             )
             old_assignments = old_assignments_result.scalars().all()
             old_publisher_ids = {assignment.publisher_id for assignment in old_assignments}
 
-            # 先删除所有现有分配
             await self.db.execute(
                 delete(OfferPublisherAssignment).where(OfferPublisherAssignment.offer_id == offer.id)
             )
 
-            # 添加新分配
-            if len(publisher_configs) == 0:
-                raise_api_exception(
-                    ErrorCode.INVALID_PARAMETER,
-                    detail="渠道配置不能为空，请至少添加一个渠道"
-                )
-
-            # 验证是否有重复的publisher_id（先过滤None值，因为None会在后面单独验证）
-            publisher_id_list = [
-                config.get('publisher_id') if isinstance(config, dict) else config.publisher_id
-                for config in publisher_configs
-            ]
-            # 过滤掉None值，因为None会在后面单独验证
-            valid_publisher_ids = [pid for pid in publisher_id_list if pid is not None]
-            if len(valid_publisher_ids) != len(set(valid_publisher_ids)):
-                raise_api_exception(
-                    ErrorCode.INVALID_PARAMETER,
-                    detail="渠道配置中存在重复的渠道ID"
-                )
-
-            parsed_publisher_configs = []
-            for config in publisher_configs:
-                if isinstance(config, dict):
-                    pub_id = config.get('publisher_id')
-                    downstream_cap = config.get('downstream_cap')
-                    affiliate_payout = config.get('affiliate_payout')
-                else:
-                    pub_id = config.publisher_id
-                    downstream_cap = config.downstream_cap
-                    affiliate_payout = config.affiliate_payout
-
-                if pub_id is None:
-                    raise_api_exception(
-                        ErrorCode.INVALID_PARAMETER,
-                        detail="渠道配置中的publisher_id不能为空，请确保已选择渠道"
-                    )
-
-                try:
-                    pub_id = int(pub_id)
-                except (ValueError, TypeError):
-                    raise_api_exception(
-                        ErrorCode.INVALID_PARAMETER,
-                        detail=f"渠道配置中的publisher_id必须是整数，当前值: {pub_id} (类型: {type(pub_id).__name__})"
-                    )
-
-                if pub_id <= 0:
-                    raise_api_exception(
-                        ErrorCode.INVALID_PARAMETER,
-                        detail=f"渠道配置中的publisher_id必须大于0，当前值: {pub_id}"
-                    )
-
-                if downstream_cap is not None:
-                    try:
-                        downstream_cap = int(downstream_cap)
-                    except (ValueError, TypeError):
-                        raise_api_exception(
-                            ErrorCode.INVALID_PARAMETER,
-                            detail=f"渠道ID {pub_id} 的下游Cap必须是整数，当前值: {downstream_cap} (类型: {type(downstream_cap).__name__})"
-                        )
-
-                if affiliate_payout is not None:
-                    try:
-                        affiliate_payout = float(affiliate_payout)
-                    except (ValueError, TypeError):
-                        raise_api_exception(
-                            ErrorCode.INVALID_PARAMETER,
-                            detail=f"渠道ID {pub_id} 的下游PO必须是数字，当前值: {affiliate_payout} (类型: {type(affiliate_payout).__name__})"
-                        )
-
-                if downstream_cap is not None and downstream_cap < 0:
-                    raise_api_exception(
-                        ErrorCode.INVALID_PARAMETER,
-                        detail=f"渠道ID {pub_id} 的下游Cap不能为负数"
-                    )
-
-                if affiliate_payout is not None and affiliate_payout < 0:
-                    raise_api_exception(
-                        ErrorCode.INVALID_PARAMETER,
-                        detail=f"渠道ID {pub_id} 的下游PO不能为负数"
-                    )
-
-                parsed_publisher_configs.append((pub_id, downstream_cap, affiliate_payout))
-
+            parsed_publisher_configs = parse_publisher_configs(publisher_configs)
             if parsed_publisher_configs:
                 pub_ids = [item[0] for item in parsed_publisher_configs]
-                pub_result = await self.db.execute(
-                    select(Publisher).where(Publisher.id.in_(pub_ids))
-                )
-                publishers_by_id = {p.id: p for p in pub_result.scalars().all()}
-
+                await load_publishers_by_ids(self.db, pub_ids)
                 for pub_id, downstream_cap, affiliate_payout in parsed_publisher_configs:
-                    if pub_id not in publishers_by_id:
-                        raise_api_exception(
-                            ErrorCode.RESOURCE_NOT_FOUND,
-                            detail=f"渠道ID {pub_id} 不存在"
-                        )
                     assignment = OfferPublisherAssignment(
                         offer_id=offer.id,
                         publisher_id=pub_id,
@@ -1047,43 +594,3 @@ class OfferService(BaseService[Offer]):
         await self.db.commit()
 
         logger.info(f"Offer已删除: {offer.offer_name} (ID: {offer_id})")
-
-    def _extract_short_code_from_url(self, url: str) -> Optional[str]:
-        """
-        从下游 Tracklink URL 中解析短码（short_code）。
-
-        支持带查询参数或仅路径的 /s/{short_code} 形式。
-
-        Args:
-            url: 短链接完整 URL 或路径
-
-        Returns:
-            Optional[str]: 短码字符串，解析失败返回 None
-        """
-        if not url:
-            return None
-
-        try:
-            # 解析URL
-            parsed = urlparse(url)
-            path = parsed.path
-
-            # 检查路径是否包含 /s/
-            if '/s/' in path:
-                # 提取 /s/ 后面的部分
-                parts = path.split('/s/')
-                if len(parts) > 1:
-                    short_code = parts[1].split('/')[0].split('?')[0]
-                    if short_code:
-                        return short_code.strip()
-
-            # 如果路径直接以 /s/ 开头
-            if path.startswith('/s/'):
-                short_code = path[3:].split('/')[0].split('?')[0]
-                if short_code:
-                    return short_code.strip()
-
-            return None
-        except Exception as e:
-            logger.warning(f"提取短链接代码失败: url={url}, error={str(e)}")
-            return None

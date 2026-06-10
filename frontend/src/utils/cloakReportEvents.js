@@ -123,14 +123,8 @@ export function maskToken(token) {
 }
 
 /** 测试上报结果 JSON 格式化，便于弹窗 pre 展示 */
+import { formatJson as formatJsonBase } from './jsonFormat';
+
 export function formatJson(value) {
-  if (!value) return '-';
-  if (typeof value === 'string') {
-    try {
-      return JSON.stringify(JSON.parse(value), null, 2);
-    } catch {
-      return value;
-    }
-  }
-  return JSON.stringify(value, null, 2);
+  return formatJsonBase(value, '-');
 }

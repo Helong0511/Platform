@@ -6,9 +6,7 @@ import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { getConversionSummary } from '../api/conversion-summary';
-import { getOffers } from '../api/offer';
-import { getPublishers } from '../api/publisher';
-import { getAdvertisers } from '../api/advertiser';
+import { useCplFilterOptions } from './useCplFilterOptions';
 import { logger } from '../utils/logger';
 import {
   buildConversionTableSummaries,
@@ -36,11 +34,15 @@ export function useConversionSummary(isAdmin) {
   // 按渠道（下游）筛选
   const filterPublisher = ref(null);
 
-  // Offer 下拉选项
-  const offerList = ref([]);
-  const advertiserList = ref([]);
-  // 渠道下拉选项
-  const publisherList = ref([]);
+  // Offer 下拉选项（无日期范围时从 API 加载，有范围时由统计数据填充）
+  const {
+    offerList,
+    advertiserList,
+    publisherList,
+    loadAdvertisers,
+    loadPublishers,
+    loadOffers,
+  } = useCplFilterOptions();
 
   // allAdvertisersFromStats 响应式状态
   const allAdvertisersFromStats = ref([]);
@@ -63,35 +65,6 @@ export function useConversionSummary(isAdmin) {
 
   // statsList 响应式状态
   const statsList = ref([]);
-
-  const loadOffers = async () => {
-    try {
-      const response = await getOffers({ page: 1, page_size: 100 });
-      if (response?.data) {
-        offerList.value = (response.data || []).slice().sort((a, b) => a.id - b.id);
-      }
-    } catch (error) {
-      logger.error('加载Offer列表失败:', error);
-    }
-  };
-
-  const loadAdvertisers = async () => {
-    try {
-      const response = await getAdvertisers({ page: 1, page_size: 100 });
-      if (response?.data) advertiserList.value = response.data || [];
-    } catch (error) {
-      logger.error('加载广告主列表失败:', error);
-    }
-  };
-
-  const loadPublishers = async () => {
-    try {
-      const response = await getPublishers({ page: 1, page_size: 100 });
-      if (response?.data) publisherList.value = response.data || [];
-    } catch (error) {
-      logger.error('加载渠道列表失败:', error);
-    }
-  };
 
   const extractOptionsFromStats = (list) => {
     const advertiserMap = new Map();

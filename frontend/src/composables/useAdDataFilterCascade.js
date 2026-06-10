@@ -1,10 +1,5 @@
 /**
- * 广告数据页筛选级联（重导出）
+ * 广告数据页筛选级联（重导出，兼容旧 import 路径）
  * @file composables/useAdDataFilterCascade.js
- *
- * 从 useDataPageFilterCascade 重导出，供广告数据模块按名称引用。
  */
-export {
-  useDataPageFilterCascade,
-  useAdDataFilterCascade
-} from './useDataPageFilterCascade';
+export { useDataPageFilterCascade as useAdDataFilterCascade } from './useDataPageFilterCascade';

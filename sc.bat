@@ -38,5 +38,3 @@ for /d /r "%targetDir%" %%d in (.pytest_cache) do (
 
 echo ==============================================
 echo 完成！共删除了 !count! 个 __pycache__ 目录。
-
-pause

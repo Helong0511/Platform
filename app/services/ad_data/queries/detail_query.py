@@ -2,142 +2,115 @@
 广告数据详情查询构建器。
 
 功能说明：
-- 按主键或业务键查询单条/批量广告明细
-- 预加载关联产品、客户信息，减少 N+1 查询
+- 按主键查询单条广告明细及关联实体
+- 预加载产品、客户、用户、分配记录与国家信息
 
 在系统中的位置：
-- 被 ``AdDataService`` 详情与编辑接口调用
-
-注意事项：
-1. 详情查询需校验当前用户是否有权访问对应产品
-2. 大字段（备注等）仅在详情接口 select，列表接口应省略
+- 被 ``AdDataService.get_ad_data_by_id`` 调用
 """
 import logging
 from typing import Optional, Tuple
 
-from sqlalchemy import and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import load_only
 
-from app.core.query_utils import (
-    product_assignment_join_condition,
-    check_use_assignment_table,
-    join_country_info as join_country_info_util
-)
+from app.core.errors import ErrorCode
+from app.core.exceptions import raise_api_exception
+from app.core.query_utils import check_use_assignment_table
+from app.core.security import is_admin
 from app.core.utils import unpack_ad_data_query_result
-from app.models.models import AdData, Product, Client, User, ProductAssignment, CountryInfo
+from app.models.models import AdData, Client, CountryInfo, Product, ProductAssignment, User
+from app.services.ad_data.queries.join_helpers import (
+    CLIENT_LOAD_ONLY,
+    join_country_info_for_ad_data,
+    join_product_and_client,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def join_country_info_for_ad_data(query):
-    """
-    为广告数据查询左关联国家信息表。
-
-    通过 AdData.country_code 与 CountryInfo 关联，统一处理排序规则冲突，
-    避免不同字符集/排序规则导致的 JOIN 异常。
-
-    Args:
-        query: 已包含 AdData 的 SQLAlchemy 查询对象
-
-    Returns:
-        附加了 CountryInfo 左连接后的查询对象
-    """
-    return join_country_info_util(query, AdData.country_code)
-
-
 class DetailQueryBuilder:
-    """
-    广告数据详情查询构建器。
-
-    封装单条记录的多表 JOIN 逻辑，屏蔽产品分配历史表与旧关联方式的差异，
-    对外统一返回四元组 (ad_data, product, client, user)。
-    """
+    """广告数据单条详情查询。"""
 
     def __init__(self, db: AsyncSession):
-        """
-        初始化构建器。
-
-        Args:
-            db: 异步数据库会话
-        """
         self.db = db
 
-    async def build_detail_query(
-            self,
-            data_id: int,
-            current_user
-    ) -> Optional[Tuple[AdData, Product, Client, User]]:
+    async def fetch_by_id(
+        self,
+        data_id: int,
+    ) -> Optional[
+        Tuple[AdData, Product, Client, User, Optional[ProductAssignment], Optional[CountryInfo]]
+    ]:
         """
-        构建并执行详情查询，返回单条广告数据及其关联实体。
-
-        查询链路：AdData → Product → (ProductAssignment?) → Client → User → CountryInfo
-
-        Args:
-            data_id: 广告数据主键 ID
-            current_user: 当前登录用户（预留权限扩展，当前查询未使用）
+        按 ID 查询详情及全部关联实体。
 
         Returns:
-            成功时返回 (ad_data, product, client, user) 四元组；
-            记录不存在或解包失败时返回 None。
+            六元组；记录不存在或解包失败时返回 None
         """
-
-        # ── 1. 判断客户归属模式 ──────────────────────────────────────
         use_assignment_table = await check_use_assignment_table(self.db)
 
         if use_assignment_table:
-            # ── 2a. 产品分配历史表模式 ─────────────────────────────────
-            # 按广告日期匹配 ProductAssignment，确定当时归属的客户
             query = select(AdData, Product, Client, User, ProductAssignment, CountryInfo)
-            # 仅加载 Client 必要字段，减少数据传输
-            query = query.options(load_only(
-                Client.id, Client.user_id, Client.company_name, Client.contact_person,
-                Client.phone, Client.address, Client.is_active, Client.created_at, Client.updated_at
-            ))
-            query = query.join(Product, AdData.product_id == Product.id)
-            query = query.join(
-                ProductAssignment,
-                and_(
-                    ProductAssignment.product_id == Product.id,
-                    product_assignment_join_condition(
-                        AdData.date,
-                        ProductAssignment.start_date,
-                        ProductAssignment.end_date
-                    )
-                )
-            )
-            query = query.join(Client, ProductAssignment.client_id == Client.id)
         else:
-            # ── 2b. 旧模式：产品直接绑定客户 ───────────────────────────
             query = select(AdData, Product, Client, User, CountryInfo)
-            query = query.options(load_only(
-                Client.id, Client.user_id, Client.company_name, Client.contact_person,
-                Client.phone, Client.address, Client.is_active, Client.created_at, Client.updated_at
-            ))
-            query = query.join(Product, AdData.product_id == Product.id)
-            query = query.join(Client, Product.client_id == Client.id)
 
-        # ── 3. 公共关联与过滤条件 ──────────────────────────────────────
+        query = query.options(CLIENT_LOAD_ONLY)
+        query = join_product_and_client(query, use_assignment_table)
         query = query.join(User, Client.user_id == User.id)
         query = join_country_info_for_ad_data(query)
-        query = query.where(AdData.id == data_id)
-        query = query.where(Product.is_active == True)
+        query = query.where(AdData.id == data_id, Product.is_active == True)
 
-        # ── 4. 执行查询 ────────────────────────────────────────────────
-        result = await self.db.execute(query)
-        data = result.unique().first()
-
+        data = (await self.db.execute(query)).unique().first()
         if not data:
             return None
 
-        # ── 5. 解包多表查询结果 ────────────────────────────────────────
-        # unpack 根据 use_assignment_table 自动处理 5/6 列元组差异
         try:
-            ad_data, product, client, user, assignment, country_info = unpack_ad_data_query_result(
-                data, use_assignment_table
-            )
-            return ad_data, product, client, user
+            return unpack_ad_data_query_result(data, use_assignment_table)
         except Exception as e:
-            logger.error(f"解构数据失败：{str(e)}")
+            logger.error("解构详情数据失败：%s", str(e))
             return None
+
+    async def build_detail_query(self, data_id: int, current_user) -> Optional[Tuple[AdData, Product, Client, User]]:
+        """兼容旧接口：返回四元组（不含 assignment / country_info）。"""
+        row = await self.fetch_by_id(data_id)
+        if not row:
+            return None
+        ad_data, product, client, user, _assignment, _country_info = row
+        return ad_data, product, client, user
+
+    async def fetch_and_authorize(
+        self,
+        data_id: int,
+        current_user: User,
+    ) -> Tuple[AdData, Product, Client, User, Optional[ProductAssignment], Optional[CountryInfo]]:
+        """查询详情并校验关联完整性及访问权限。"""
+        row = await self.fetch_by_id(data_id)
+        if not row:
+            raise_api_exception(
+                ErrorCode.AD_DATA_NOT_FOUND,
+                detail=f"广告数据ID {data_id} 不存在",
+            )
+
+        ad_data, product, client, user, assignment, country_info = row
+
+        if not product:
+            raise_api_exception(
+                ErrorCode.AD_DATA_PRODUCT_NOT_FOUND,
+                detail=f"广告数据关联的产品ID {ad_data.product_id} 不存在",
+            )
+        if not client:
+            raise_api_exception(
+                ErrorCode.CLIENT_NOT_FOUND,
+                detail=f"广告数据关联的客户ID {product.client_id if product else '未知'} 不存在",
+            )
+        if not user:
+            raise_api_exception(
+                ErrorCode.USER_NOT_FOUND,
+                detail=f"广告数据关联的用户ID {client.user_id if client else '未知'} 不存在",
+            )
+        if not is_admin(current_user) and client.user_id != current_user.id:
+            raise_api_exception(
+                ErrorCode.AD_DATA_NO_PERMISSION,
+                detail=f"您没有权限访问广告数据ID {data_id}，该数据不属于您的客户账户",
+            )
+        return ad_data, product, client, user, assignment, country_info

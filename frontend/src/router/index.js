@@ -28,6 +28,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { useAuthStore, validateAuthData, clearAuthData, getDefaultRoute } from '../store';
 import { logger } from '../utils/logger';
+import MainLayout from '../components/Layout/MainLayout.vue';
 
 /**
  * 创建异步组件加载器（支持错误处理和重试）
@@ -101,7 +102,6 @@ const CloakManagement = createAsyncComponent(() => import(/* webpackChunkName: "
 const SensitivePathProbeManagement = createAsyncComponent(() => import(/* webpackChunkName: "sensitive-path-probe" */ '../views/admin/SensitivePathProbeManagement.vue'), 'SensitivePathProbeManagement');
 const ClientUserManagement = createAsyncComponent(() => import(/* webpackChunkName: "client-user-management" */ '../views/client/ClientUserManagement.vue'), 'ClientUserManagement');
 const ApiDocumentation = createAsyncComponent(() => import(/* webpackChunkName: "api-documentation" */ '../views/ApiDocumentation.vue'), 'ApiDocumentation');
-const MainLayout = createAsyncComponent(() => import(/* webpackChunkName: "layout" */ '../components/Layout/MainLayout.vue'), 'MainLayout');
 
 /**
  * 路由规则配置

@@ -5,54 +5,28 @@
 import { reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { getDiscounts, updateDiscount } from '../api/discount';
-import { getOffers } from '../api/offer';
-import { getPublishers } from '../api/publisher';
+import { useCplFilterOptions } from './useCplFilterOptions';
 import { logger } from '../utils/logger';
 
-/**
- * 扣量配置列表、筛选与行内状态切换。
- */
-/**
- * 组合式函数 - 扣量配置列表
- * @returns {Object} 响应式状态与业务操作方法
- */
 export function useDiscountList() {
-  // 数据加载中
   const loading = ref(false);
   const filterDiscountType = ref(null);
-  // filterOffer 响应式状态
   const filterOffer = ref(null);
   const filterPublisher = ref(null);
-  // 按激活状态筛选
   const filterActive = ref(null);
   const pagination = reactive({
     page: 1,
     pageSize: 20,
     total: 0,
   });
-  // 表格当前页数据
   const tableData = ref([]);
-  const offerList = ref([]);
-  // 渠道下拉选项
-  const publisherList = ref([]);
 
-  const loadOffers = async () => {
-    try {
-      const response = await getOffers({ page: 1, page_size: 100 });
-      offerList.value = (response.data || []).slice().sort((a, b) => a.id - b.id);
-    } catch (error) {
-      logger.error('加载Offer列表失败:', error);
-    }
-  };
-
-  const loadPublishers = async () => {
-    try {
-      const response = await getPublishers({ page: 1, page_size: 100 });
-      publisherList.value = response.data || [];
-    } catch (error) {
-      logger.error('加载渠道列表失败:', error);
-    }
-  };
+  const {
+    offerList,
+    publisherList,
+    loadOffers,
+    loadPublishers,
+  } = useCplFilterOptions();
 
   const loadData = async () => {
     loading.value = true;

@@ -46,6 +46,21 @@ export default defineConfig({
   server: {
     port: 3310,
     host: true,
+    // 开发模式预编译常用模块，减少首次打开菜单时的 Vite 转换等待
+    warmup: {
+      clientFiles: [
+        './src/main.js',
+        './src/router/index.js',
+        './src/components/Layout/MainLayout.vue',
+        './src/components/Layout/Sidebar.vue',
+        './src/views/Dashboard.vue',
+        './src/views/Login.vue',
+        './src/views/AdData.vue',
+        './src/views/admin/OfferManagement.vue',
+        './src/views/admin/PostbackManagement.vue',
+        './src/views/admin/CloakManagement.vue',
+      ],
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:8960',
@@ -132,8 +147,17 @@ export default defineConfig({
 
   // 优化配置
   optimizeDeps: {
-    // 预构建依赖
-    include: ['vue', 'vue-router', 'pinia', 'element-plus', 'axios'],
+    // 预构建依赖，加快 dev 冷启动与首屏
+    include: [
+      'vue',
+      'vue-router',
+      'pinia',
+      'element-plus',
+      'element-plus/dist/locale/zh-cn.mjs',
+      'axios',
+      'echarts',
+      '@element-plus/icons-vue',
+    ],
   },
 
 })

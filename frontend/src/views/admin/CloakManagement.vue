@@ -431,6 +431,7 @@ const {
   maskToken,
   formatJson,
   reportEventCellLabel,
+  fetchConfigs,
   handleSearch,
   handleReset,
   handleCreate,

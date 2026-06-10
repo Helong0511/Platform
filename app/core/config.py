@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 import secrets
 import os
 import logging
+import platform
 
 # 获取日志记录器
 logger = logging.getLogger(__name__)
@@ -36,6 +37,31 @@ if os.getenv("UNIT_TEST") != "1":
             logger.info("如果使用 systemd 服务，请确保 .env 文件权限正确：sudo chown www-data:www-data /data/Platform/.env && sudo chmod 640 /data/Platform/.env")
 
 
+def detect_production_env(explicit: str | None = None) -> str:
+    """
+    推断运行环境。
+
+    - 单测（UNIT_TEST=1）：尊重环境变量 PRODUCTION_ENV
+    - Windows：development（本地开发）
+    - Linux（含 Ubuntu）：production
+    - 其它系统：development
+    """
+    if os.getenv("UNIT_TEST") == "1":
+        raw = explicit if explicit is not None else os.getenv("PRODUCTION_ENV", "development")
+        return str(raw).lower() if raw else "development"
+
+    system = platform.system()
+    if system == "Windows":
+        return "development"
+    if system == "Linux":
+        return "production"
+    return "development"
+
+
+def is_production_env_name(env_name: str) -> bool:
+    return env_name in ("production", "prod")
+
+
 class Settings(BaseSettings):
     """
     应用配置类
@@ -49,30 +75,36 @@ class Settings(BaseSettings):
     )
 
     # ====== 环境配置 ======
-    # 生产环境标志（生产环境必须设置为 "production" 或 "prod"）
-    # 注意：如果未设置或设置为其他值，默认为开发环境
+    # 按运行平台自动推断：Windows → development，Linux（Ubuntu）→ production
+    # 单测可通过 UNIT_TEST=1 + PRODUCTION_ENV 覆盖
     PRODUCTION_ENV: str = Field(
-        default="development",
-        description="环境类型：production/prod 为生产环境，其他为开发环境"
+        default_factory=lambda: detect_production_env(),
+        description="环境类型：由操作系统推断，或由单测环境变量覆盖",
     )
     
     @field_validator("PRODUCTION_ENV", mode="before")
     @classmethod
     def validate_production_env(cls, v):
-        """规范化环境配置值"""
-        if v is None:
-            return "development"
-        if isinstance(v, str):
-            return v.lower()
-        return str(v).lower()
+        """规范化环境配置值（平台优先于 .env 中的 PRODUCTION_ENV）。"""
+        resolved = detect_production_env(v)
+        env_from_file = os.getenv("PRODUCTION_ENV")
+        if (
+            os.getenv("UNIT_TEST") != "1"
+            and env_from_file
+            and env_from_file.lower() != resolved
+        ):
+            logger.info(
+                "已按运行平台(%s)使用 PRODUCTION_ENV=%s（忽略 .env 中的 %s）",
+                platform.system(),
+                resolved,
+                env_from_file,
+            )
+        return resolved
 
     @property
     def is_production(self) -> bool:
-        """判断是否为生产环境
-        
-        使用验证后的PRODUCTION_ENV值，确保环境一致性
-        """
-        return self.PRODUCTION_ENV in ["production", "prod"]
+        """判断是否为生产环境"""
+        return is_production_env_name(self.PRODUCTION_ENV)
 
     @property
     def is_development(self) -> bool:
@@ -133,8 +165,7 @@ class Settings(BaseSettings):
         验证SECRET_KEY
         如果未设置，自动生成一个随机密钥（64字符，URL安全）
         """
-        production_env = os.getenv("PRODUCTION_ENV", "development").lower()
-        is_prod = production_env in ["production", "prod"]
+        is_prod = is_production_env_name(detect_production_env())
 
         if not v or v == "your-fixed-secret-key-here":
             if is_prod:
@@ -213,8 +244,7 @@ class Settings(BaseSettings):
     @property
     def BACKEND_CORS_ORIGINS(self) -> list[str]:
         """获取CORS来源列表"""
-        production_env = os.getenv("PRODUCTION_ENV", "development").lower()
-        is_prod = production_env in ["production", "prod"]
+        is_prod = is_production_env_name(detect_production_env())
 
         # 从字符串字段读取
         cors_str = self.BACKEND_CORS_ORIGINS_STR or os.getenv("BACKEND_CORS_ORIGINS", "")
@@ -237,6 +267,16 @@ class Settings(BaseSettings):
             ]
 
         # 生产环境验证：不能包含localhost或127.0.0.1
+        if not is_prod:
+            for origin in (
+                "http://localhost:3310",
+                "http://127.0.0.1:3310",
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+            ):
+                if origin not in origins:
+                    origins.append(origin)
+
         if is_prod:
             for origin in origins:
                 if "localhost" in origin.lower() or "127.0.0.1" in origin.lower():
@@ -262,8 +302,7 @@ class Settings(BaseSettings):
     def validate_database_uri(cls, v):
         """验证数据库连接URI"""
         # 获取环境标志
-        production_env = os.getenv("PRODUCTION_ENV", "development").lower()
-        is_prod = production_env in ["production", "prod"]
+        is_prod = is_production_env_name(detect_production_env())
         
         # 检查是否明确设置了 DATABASE_URL 环境变量
         explicit_database_url = os.getenv("DATABASE_URL") or os.getenv("SQLALCHEMY_DATABASE_URI")
@@ -351,8 +390,7 @@ class Settings(BaseSettings):
         验证管理员密码强度
         生产环境必须设置足够复杂的密码
         """
-        production_env = os.getenv("PRODUCTION_ENV", "development").lower()
-        is_prod = production_env in ["production", "prod"]
+        is_prod = is_production_env_name(detect_production_env())
 
         if not v or not str(v).strip():
             if is_prod:
@@ -574,8 +612,7 @@ class Settings(BaseSettings):
     @classmethod
     def validate_telegram_token(cls, v: str | None) -> str | None:
         """验证 Telegram Token"""
-        production_env = os.getenv("PRODUCTION_ENV", "development").lower()
-        is_prod = production_env in ["production", "prod"]
+        is_prod = is_production_env_name(detect_production_env())
         
         if is_prod:
             # 生产环境：如果设置了但为空，给出警告

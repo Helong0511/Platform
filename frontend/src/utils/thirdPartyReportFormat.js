@@ -4,6 +4,10 @@
  * 职责：来源/状态标签、HTTP 状态色、JSON 美化、当月默认时间范围。
  * @file utils/thirdPartyReportFormat.js
  */
+import { formatJson as formatJsonBase } from './jsonFormat';
+import { getCurrentMonthRange } from './dateRangeFormat';
+
+export { getCurrentMonthRange };
 /** 根据上报来源返回 Element Plus 标签 type */
 export function getSourceTag(source) {
   const tagMap = {
@@ -59,35 +63,7 @@ export function getResponseStatusTag(statusCode) {
   return '';
 }
 
-/**
- * 将上报 JSON 格式化为缩进可读文本。
- */
+/** 将上报 JSON 格式化为缩进可读文本。 */
 export function formatReportJson(jsonString) {
-  try {
-    const obj = typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
-    return JSON.stringify(obj, null, 2);
-  } catch {
-    return String(jsonString);
-  }
-}
-
-/**
- * 返回当月首尾 ISO 时间字符串，供默认日期筛选。
- */
-export function getCurrentMonthRange() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const startDate = new Date(year, month, 1, 0, 0, 0);
-  const lastDay = new Date(year, month + 1, 0, 23, 59, 59);
-  const fmt = (date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    const h = String(date.getHours()).padStart(2, '0');
-    const min = String(date.getMinutes()).padStart(2, '0');
-    const s = String(date.getSeconds()).padStart(2, '0');
-    return `${y}-${m}-${d}T${h}:${min}:${s}`;
-  };
-  return [fmt(startDate), fmt(lastDay)];
+  return formatJsonBase(jsonString, String(jsonString ?? ''));
 }

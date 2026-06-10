@@ -23,7 +23,12 @@ from app.models.models import (
     ConversionDeductionConfig, 
     ConversionDeductionLog,
 )
-from app.core.cache import get_cached, set_cached, invalidate_cache, CACHE_PREFIX
+from app.core.infrastructure.cache_compat import (
+    CACHE_PREFIX,
+    invalidate_cache,
+    legacy_get_cached as get_cached,
+    legacy_set_cached as set_cached,
+)
 from app.core.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)

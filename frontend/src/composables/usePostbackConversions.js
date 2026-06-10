@@ -4,9 +4,7 @@
  */
 import { ref, reactive, watch } from 'vue';
 import { getPostbackConversions, getPostbackStats } from '../api/postback';
-import { getOffers } from '../api/offer';
-import { getPublishers } from '../api/publisher';
-import { getAdvertisers } from '../api/advertiser';
+import { useCplFilterOptions } from './useCplFilterOptions';
 import { logger } from '../utils/logger';
 
 /**
@@ -44,10 +42,12 @@ export function usePostbackConversions() {
   });
 
   // Offer 下拉选项
-  const offerList = ref([]);
-  const publisherList = ref([]);
-  // 广告主下拉选项
-  const advertiserList = ref([]);
+  const {
+    offerList,
+    publisherList,
+    advertiserList,
+    loadAll: loadFilterOptions,
+  } = useCplFilterOptions({ activeOffersOnly: true });
   const dateRange = ref(null);
 
   const buildListParams = () => {
@@ -93,33 +93,6 @@ export function usePostbackConversions() {
     }
   };
 
-  const loadOffers = async () => {
-    try {
-      const response = await getOffers({ page: 1, page_size: 100, is_active: true });
-      offerList.value = (response.data || []).slice().sort((a, b) => a.id - b.id);
-    } catch (error) {
-      logger.error('加载Offer列表失败:', error);
-    }
-  };
-
-  const loadPublishers = async () => {
-    try {
-      const response = await getPublishers({ page: 1, page_size: 100 });
-      publisherList.value = response.data || [];
-    } catch (error) {
-      logger.error('加载渠道列表失败:', error);
-    }
-  };
-
-  const loadAdvertisers = async () => {
-    try {
-      const response = await getAdvertisers({ page: 1, page_size: 100 });
-      advertiserList.value = response.data || [];
-    } catch (error) {
-      logger.error('加载广告主列表失败:', error);
-    }
-  };
-
   const resetFilter = () => {
     searchForm.platform = '';
     searchForm.conversion_or_click_id = '';
@@ -156,7 +129,7 @@ export function usePostbackConversions() {
   };
 
   const loadAll = async () => {
-    await Promise.all([loadOffers(), loadPublishers(), loadAdvertisers()]);
+    await loadFilterOptions();
     await fetchConversions();
     await fetchStats();
   };

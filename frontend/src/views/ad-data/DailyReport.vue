@@ -195,7 +195,7 @@ import {
   createAdDataDefaultColumns,
   AD_DATA_SAVABLE_COLUMN_KEYS
 } from '../../composables/useAdDataColumnVisibility';
-import { useAdDataFilterCascade } from '../../composables/useAdDataFilterCascade';
+import { useDataPageFilterCascade } from '../../composables/useDataPageFilterCascade';
 import { useDebouncedPaginatedFetch } from '../../composables/useDebouncedPaginatedFetch';
 import { useAdDataProductPanel } from '../../composables/useAdDataProductPanel';
 import ProductManagementDialog from '../../components/admin/ProductManagementDialog.vue';
@@ -268,7 +268,7 @@ const {
   fetchFilterProducts,
   handleFilterClientChange,
   reloadFiltersAfterDateChange
-} = useAdDataFilterCascade({ searchForm, includeCountry: false });
+} = useDataPageFilterCascade({ searchForm, includeCountry: false, source: 'ad-data' });
 
 const { runFetch: fetchDailyData, cancel: cancelDailyFetch } = useDebouncedPaginatedFetch({
   loading,

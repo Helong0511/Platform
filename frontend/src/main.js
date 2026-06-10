@@ -13,7 +13,6 @@ import App from './App.vue';
 import router from './router';
 import pinia from './store';
 import ElementPlus from 'element-plus';
-import * as ElementPlusIconsVue from '@element-plus/icons-vue';
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs';
 import 'element-plus/dist/index.css';
 import './style.css';
@@ -29,10 +28,7 @@ initGlobalErrorHandler();
 // 创建 Vue 实例
 const app = createApp(App);
 
-// 注册所有图标标
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
-  app.component(key, component);
-}
+// 图标由各页面按需 import（避免全量注册拖慢首屏与 dev 启动）
 
 // 使用插件
 app.use(pinia);

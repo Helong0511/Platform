@@ -1,26 +1,76 @@
 """
 广告数据入参校验模块。
-
-功能说明：
-- 校验广告数据创建/更新/查询请求的日期范围、产品归属、数值字段合法性
-- 在 service 写入或查询前统一拦截无效参数，减少数据库异常
-
-在系统中的位置：
-- 被 ``app.services.ad_data.service`` 在写操作与复杂查询前调用
-
-注意事项：
-1. 校验失败应抛出带 ErrorCode 的业务异常，而非裸 ValueError
-2. 日期边界使用业务时区（北京时间）规则，与 ``get_app_now_naive`` 一致
 """
 import logging
 from datetime import datetime
-from typing import Dict, Any, List, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+
+from app.core.country_code import find_country_code_by_any_format
+from app.core.exceptions import raise_api_exception
+from app.core.errors import ErrorCode
+from app.core.utils import normalize_ad_unit
+from app.models.models import Product
 
 logger = logging.getLogger(__name__)
+
+UPDATE_ALLOWED_FIELDS: Set[str] = {
+    "product_id",
+    "ad_unit",
+    "country_code",
+    "request_count",
+    "match_count",
+    "display_count",
+    "click_count",
+    "viewability_rate",
+    "ecpm_after_deduct",
+    "ecpm_before_deduct",
+    "revenue_after_deduct",
+    "revenue_before_deduct",
+}
 
 
 class AdDataValidator:
     """广告数据验证器"""
+
+    @staticmethod
+    def filter_update_fields(update_data: Dict[str, Any]) -> Dict[str, Any]:
+        """按白名单过滤可更新字段，并规范化 ad_unit。"""
+        filtered = {k: v for k, v in update_data.items() if k in UPDATE_ALLOWED_FIELDS}
+        if "ad_unit" in filtered:
+            filtered["ad_unit"] = normalize_ad_unit(filtered["ad_unit"])
+        return filtered
+
+    @staticmethod
+    async def validate_product_exists(db: AsyncSession, product_id: int) -> None:
+        result = await db.execute(select(Product).where(Product.id == product_id))
+        if not result.scalars().first():
+            raise_api_exception(
+                ErrorCode.AD_DATA_PRODUCT_NOT_FOUND,
+                detail=f"指定的产品ID {product_id} 不存在，请确认产品是否存在",
+            )
+
+    @staticmethod
+    async def resolve_country_code(db: AsyncSession, country_input: Optional[str]) -> str:
+        """解析并规范化国家代码；空值视为 ZZ（全部区域）。"""
+        if not country_input:
+            return "ZZ"
+        found = await find_country_code_by_any_format(db, country_input)
+        if found:
+            return found
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=(
+                f"无法识别国家代码格式: {country_input}。"
+                "请使用有效的国家代码（如 'US'、'USA'、'840'、'United States of America' 或 '美国'）"
+            ),
+        )
+
+    @staticmethod
+    def needs_uniqueness_check(filtered_update_data: Dict[str, Any]) -> bool:
+        return "product_id" in filtered_update_data or "country_code" in filtered_update_data
 
     @staticmethod
     def validate_update_data(

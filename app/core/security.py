@@ -104,6 +104,51 @@ oauth2_scheme = OAuth2PasswordBearer(
     auto_error=False
 )
 
+# 开发环境无 RSA 文件时，进程内复用同一对临时密钥（避免每次加载生成新密钥导致验签失败）
+_ephemeral_rsa_private_pem: str | None = None
+_ephemeral_rsa_public_pem: str | None = None
+
+
+def _generate_ephemeral_rsa_pair() -> tuple[str, str]:
+    """生成并缓存进程级临时 RSA 密钥对（仅当未配置密钥文件时使用）。"""
+    global _ephemeral_rsa_private_pem, _ephemeral_rsa_public_pem
+    if _ephemeral_rsa_private_pem and _ephemeral_rsa_public_pem:
+        return _ephemeral_rsa_private_pem, _ephemeral_rsa_public_pem
+
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.backends import default_backend
+
+    private_key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+        backend=default_backend(),
+    )
+    _ephemeral_rsa_private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+    _ephemeral_rsa_public_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+    return _ephemeral_rsa_private_pem, _ephemeral_rsa_public_pem
+
+
+def _resolve_rsa_key_path(key_path: str) -> str:
+    """将 Linux 部署路径映射到本地 keys/ 目录（Windows 开发用）。"""
+    if key_path and os.path.exists(key_path):
+        return key_path
+    if not key_path:
+        return key_path
+    filename = os.path.basename(key_path.replace("\\", "/"))
+    if not filename:
+        return key_path
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    local_path = os.path.join(project_root, "keys", filename)
+    return local_path if os.path.exists(local_path) else key_path
+
 
 def _raise_auth(
         detail: str,
@@ -139,48 +184,25 @@ class JWTUtils:
         if key_content:
             return key_content
         
-        # 尝试从文件加载密钥
-        if key_path and os.path.exists(key_path):
+        # 尝试从文件加载密钥（含项目 keys/ 目录回退）
+        resolved_path = _resolve_rsa_key_path(key_path)
+        if resolved_path and os.path.exists(resolved_path):
             try:
-                with open(key_path, "r") as f:
+                with open(resolved_path, "r", encoding="utf-8") as f:
                     return f.read()
             except Exception as e:
                 logger.error(f"加载RSA {key_type} 密钥文件失败: {e}")
                 raise
         
         # 调试：输出环境变量值
-        production_env = os.getenv("PRODUCTION_ENV", "development").lower()
+        from app.core.config import detect_production_env
+        production_env = detect_production_env()
         logger.info(f"RSA密钥加载调试：PRODUCTION_ENV={production_env}")
         
-        # 宽松处理：如果没有找到密钥，总是生成临时密钥
-        # 这样可以确保测试环境和开发环境正常运行
-        logger.warning(f"未配置RSA {key_type} 密钥，生成临时测试密钥")
-        # 生成2048位RSA密钥对
-        try:
-            from cryptography.hazmat.primitives.asymmetric import rsa
-            from cryptography.hazmat.primitives import serialization
-            from cryptography.hazmat.backends import default_backend
-            
-            private_key = rsa.generate_private_key(
-                public_exponent=65537,
-                key_size=2048,
-                backend=default_backend()
-            )
-            
-            if key_type == "private":
-                return private_key.private_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PrivateFormat.PKCS8,
-                    encryption_algorithm=serialization.NoEncryption()
-                ).decode("utf-8")
-            else:
-                return private_key.public_key().public_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PublicFormat.SubjectPublicKeyInfo
-                ).decode("utf-8")
-        except ImportError:
-            logger.error("cryptography库未安装，无法生成临时RSA密钥")
-            raise ValueError(f"未配置RSA {key_type} 密钥，且无法生成临时密钥（cryptography库未安装）")
+        # 无密钥文件：使用进程内固定的临时密钥对
+        logger.warning(f"未配置RSA {key_type} 密钥，使用进程内临时测试密钥对")
+        private_pem, public_pem = _generate_ephemeral_rsa_pair()
+        return private_pem if key_type == "private" else public_pem
     
     @staticmethod
     def create_access_token(subject: str | Any, expires_delta: timedelta | None = None) -> str:

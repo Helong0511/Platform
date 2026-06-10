@@ -159,6 +159,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../../store';
 import { ElMenu, ElMenuItem, ElSubMenu, ElIcon } from 'element-plus';
 import { PieChart, Document, UserFilled, Upload, Timer, Link, Connection, Box, DataAnalysis, Lock, Bell, DataLine, Setting } from '@element-plus/icons-vue';
+import { prefetchRoute, prefetchAllRoutes } from '../../utils/prefetchRoutes';
 
 const authStore = useAuthStore();
 const route = useRoute();
@@ -193,6 +194,10 @@ onMounted(() => {
   bgDark.value = getCSSVariable('--bg-dark') || '#2c3e50';
   textWhite.value = getCSSVariable('--text-white') || '#ffffff';
   primaryColor.value = getCSSVariable('--primary-color') || '#409eff';
+  // 开发模式：登录后后台预加载各菜单页 chunk，减少 Vite 首次点击等待
+  if (import.meta.env.DEV) {
+    prefetchAllRoutes();
+  }
 });
 // 检查客户API是否启用（从userInfo中获取api_enabled字段）
 const apiEnabled = computed(() => {
@@ -219,6 +224,7 @@ const handleMenuSelect = (index) => {
   // 手动处理导航（因为 router 属性可能不工作）
   if (index && typeof index === 'string') {
     try {
+      prefetchRoute(index);
       router.push(index).catch(err => {
         // 忽略重复导航错误
         if (err.name !== 'NavigationDuplicated') {

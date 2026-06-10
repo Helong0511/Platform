@@ -3,20 +3,9 @@
  * @file utils/conversionSummaryFormat.js
  */
 import { ElMessage } from 'element-plus';
+import { getDefaultMonthDateRange } from './dateRangeFormat';
 
-/** 当月首日与末日（YYYY-MM-DD，本地时区） */
-export function getDefaultMonthDateRange() {
-  const today = new Date();
-  const start = new Date(today.getFullYear(), today.getMonth(), 1);
-  const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-  const formatDate = (date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-  return [formatDate(start), formatDate(end)];
-}
+export { getDefaultMonthDateRange };
 
 /** 客户侧转化数展示（受 Cap 限制） */
 export function getDisplayConversion(conversions, cap, isAdmin) {

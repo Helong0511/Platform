@@ -78,9 +78,6 @@ export const getCurrentUserInfo = async (options = {}) =>
     { returnDataOnly: true, ...options }
   );
 
-/** @deprecated 请使用 getCurrentUserInfo */
-export const getCurrentUser = getCurrentUserInfo;
-
 export const deleteUser = async (id) => {
   await prepareCsrfMutate(CSRF_REFRESH_USERS);
   await deleteUserBase(id);

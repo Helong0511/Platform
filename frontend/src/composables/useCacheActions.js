@@ -8,6 +8,7 @@ import {
   clearAllCacheEntries,
   deleteCacheEntry,
   getCacheEntry,
+  getCacheStats,
 } from '../api/cache';
 import { logger } from '../utils/logger';
 
@@ -93,7 +94,6 @@ export function useCacheActions({ removeByKey, clearAll, refreshCacheList }) {
 
   const exportCacheStats = async () => {
     try {
-      const { getCacheStats } = await import('../api/cache');
       const res = await getCacheStats();
       const data = res?.data ?? res;
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });

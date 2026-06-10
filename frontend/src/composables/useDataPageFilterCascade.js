@@ -230,8 +230,3 @@ export function useDataPageFilterCascade({
     loadAllFilterOptions
   };
 }
-
-/** @deprecated 使用 useDataPageFilterCascade({ source: 'ad-data' }) */
-export function useAdDataFilterCascade(options) {
-  return useDataPageFilterCascade({ ...options, source: 'ad-data' });
-}
