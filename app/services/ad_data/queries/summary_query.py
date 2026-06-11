@@ -11,7 +11,7 @@
 """
 import logging
 from datetime import date, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, case, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,6 +76,104 @@ def compute_ad_data_derived_metrics(
     }
 
 
+def build_ad_data_stats_payload(
+    *,
+    raw: Dict[str, Any],
+    total_revenue_before: float,
+    for_admin: bool,
+    start_date: date,
+    end_date: date,
+    product_id: Optional[int] = None,
+    product_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """将聚合行转为与 Web 表格列对齐的统计字典。"""
+    derived = compute_ad_data_derived_metrics(
+        total_requests=float(raw["total_requests"]),
+        total_matches=float(raw["total_matches"]),
+        total_displays=float(raw["total_displays"]),
+        total_clicks=float(raw["total_clicks"]),
+        total_revenue_after=float(raw["total_revenue_after"]),
+        total_revenue_before=total_revenue_before,
+        total_pageviews=float(raw["total_pageviews"]),
+        weighted_viewability=float(raw["weighted_viewability"]),
+        viewability_weight=float(raw["viewability_weight"]),
+        for_admin=for_admin,
+    )
+
+    payload: Dict[str, Any] = {
+        "date_range": {
+            "start_date": start_date,
+            "end_date": end_date,
+        },
+        "total_requests": int(raw["total_requests"]),
+        "total_matches": int(raw["total_matches"]),
+        "total_displays": int(raw["total_displays"]),
+        "total_clicks": int(raw["total_clicks"]),
+        "avg_coverage_rate": derived["coverage_rate"],
+        "avg_display_rate": derived["display_rate"],
+        "avg_click_rate": derived["click_rate"],
+        "total_ecpm_after_deduct": derived["ecpm_after_deduct"],
+        "total_revenue_after_deduct": round(float(raw["total_revenue_after"]), 4),
+        "request_count": int(raw["total_requests"]),
+        "match_count": int(raw["total_matches"]),
+        "display_count": int(raw["total_displays"]),
+        "click_count": int(raw["total_clicks"]),
+        "pageviews": int(raw["total_pageviews"]),
+        "coverage_rate": derived["coverage_rate"],
+        "display_rate": derived["display_rate"],
+        "click_rate": derived["click_rate"],
+        "viewability_rate": derived["viewability_rate"],
+        "cpc": derived["cpc"],
+        "ecpm_after_deduct": derived["ecpm_after_deduct"],
+        "revenue_after_deduct": round(float(raw["total_revenue_after"]), 4),
+    }
+
+    if product_id is not None:
+        payload["product_id"] = product_id
+        payload["product_name"] = product_name or ""
+
+    if for_admin:
+        payload.update(
+            {
+                "total_ecpm_before_deduct": derived["ecpm_before_deduct"],
+                "total_revenue_before_deduct": round(total_revenue_before, 4),
+                "ecpm_before_deduct": derived["ecpm_before_deduct"],
+                "revenue_before_deduct": round(total_revenue_before, 4),
+            }
+        )
+
+    return payload
+
+
+def _empty_aggregate_raw() -> Dict[str, Any]:
+    return {
+        "total_requests": 0,
+        "total_matches": 0,
+        "total_displays": 0,
+        "total_clicks": 0,
+        "total_revenue_after": 0.0,
+        "total_pageviews": 0,
+        "weighted_viewability": 0.0,
+        "viewability_weight": 0.0,
+        "total_revenue_before": 0.0,
+    }
+
+
+def _row_to_aggregate_raw(row) -> Dict[str, Any]:
+    """SQL 聚合行 → 统一 raw 字典。"""
+    return {
+        "total_requests": row.total_requests or 0,
+        "total_matches": row.total_matches or 0,
+        "total_displays": row.total_displays or 0,
+        "total_clicks": row.total_clicks or 0,
+        "total_revenue_after": float(row.total_revenue_after or 0),
+        "total_pageviews": row.total_pageviews or 0,
+        "weighted_viewability": float(row.weighted_viewability or 0),
+        "viewability_weight": float(row.viewability_weight or 0),
+        "total_revenue_before": float(getattr(row, "total_revenue_before", 0) or 0),
+    }
+
+
 class AdDataSummaryQuery:
     """广告数据 KPI 汇总查询。"""
 
@@ -103,98 +201,73 @@ class AdDataSummaryQuery:
         query = self._build_main_query(use_assignment_table, current_user, client_id, product_id, start_date, end_date)
 
         summary = (await self.db.execute(query)).first()
-        if summary is None:
-            raw = {
-                "total_requests": 0,
-                "total_matches": 0,
-                "total_displays": 0,
-                "total_clicks": 0,
-                "total_revenue_after": 0.0,
-                "total_pageviews": 0,
-                "weighted_viewability": 0.0,
-                "viewability_weight": 0.0,
-            }
-        else:
-            raw = {
-                "total_requests": summary.total_requests or 0,
-                "total_matches": summary.total_matches or 0,
-                "total_displays": summary.total_displays or 0,
-                "total_clicks": summary.total_clicks or 0,
-                "total_revenue_after": float(summary.total_revenue_after or 0),
-                "total_pageviews": summary.total_pageviews or 0,
-                "weighted_viewability": float(summary.weighted_viewability or 0),
-                "viewability_weight": float(summary.viewability_weight or 0),
-            }
+        raw = _row_to_aggregate_raw(summary) if summary else _empty_aggregate_raw()
 
-        total_revenue_before = 0.0
         admin_user = is_admin(current_user)
-        if admin_user:
-            admin_query = self._build_admin_query(
-                use_assignment_table, client_id, product_id, start_date, end_date
-            )
-            admin_summary = (await self.db.execute(admin_query)).first()
-            if admin_summary:
-                total_revenue_before = float(admin_summary.total_revenue_before or 0)
-
-        derived = compute_ad_data_derived_metrics(
-            total_requests=float(raw["total_requests"]),
-            total_matches=float(raw["total_matches"]),
-            total_displays=float(raw["total_displays"]),
-            total_clicks=float(raw["total_clicks"]),
-            total_revenue_after=raw["total_revenue_after"],
-            total_revenue_before=total_revenue_before,
-            total_pageviews=float(raw["total_pageviews"]),
-            weighted_viewability=raw["weighted_viewability"],
-            viewability_weight=raw["viewability_weight"],
-            for_admin=admin_user,
-        )
-
         effective_start = start_date or (date.today() - timedelta(days=30))
         effective_end = end_date or date.today()
 
-        response_data: Dict[str, Any] = {
-            "date_range": {
-                "start_date": effective_start,
-                "end_date": effective_end,
-            },
-            # 兼容旧字段
-            "total_requests": int(raw["total_requests"]),
-            "total_matches": int(raw["total_matches"]),
-            "total_displays": int(raw["total_displays"]),
-            "total_clicks": int(raw["total_clicks"]),
-            "avg_coverage_rate": derived["coverage_rate"],
-            "avg_display_rate": derived["display_rate"],
-            "avg_click_rate": derived["click_rate"],
-            "total_ecpm_after_deduct": derived["ecpm_after_deduct"],
-            "total_revenue_after_deduct": round(raw["total_revenue_after"], 4),
-            # 与 Web 表格列名对齐
-            "request_count": int(raw["total_requests"]),
-            "match_count": int(raw["total_matches"]),
-            "display_count": int(raw["total_displays"]),
-            "click_count": int(raw["total_clicks"]),
-            "pageviews": int(raw["total_pageviews"]),
-            "coverage_rate": derived["coverage_rate"],
-            "display_rate": derived["display_rate"],
-            "click_rate": derived["click_rate"],
-            "viewability_rate": derived["viewability_rate"],
-            "cpc": derived["cpc"],
-            "ecpm_after_deduct": derived["ecpm_after_deduct"],
-            "revenue_after_deduct": round(raw["total_revenue_after"], 4),
-        }
-
-        if admin_user:
-            response_data.update(
-                {
-                    "total_ecpm_before_deduct": derived["ecpm_before_deduct"],
-                    "total_revenue_before_deduct": round(total_revenue_before, 4),
-                    "ecpm_before_deduct": derived["ecpm_before_deduct"],
-                    "revenue_before_deduct": round(total_revenue_before, 4),
-                }
-            )
+        response_data = build_ad_data_stats_payload(
+            raw=raw,
+            total_revenue_before=raw["total_revenue_before"],
+            for_admin=admin_user,
+            start_date=effective_start,
+            end_date=effective_end,
+        )
 
         if not skip_cache:
             await set_cached(cache_key, response_data, ttl=120, key_prefix="ad_data")
         return response_data
+
+    async def fetch_by_product(
+        self,
+        current_user: User,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        client_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        按产品分组汇总广告数据 KPI。
+
+        Returns:
+            产品统计列表，按收益(扣)降序
+        """
+        use_assignment_table = await check_use_assignment_table(self.db)
+        query = self._build_product_group_query(
+            use_assignment_table, current_user, client_id, start_date, end_date
+        )
+        rows = (await self.db.execute(query)).all()
+
+        effective_start = start_date or (date.today() - timedelta(days=30))
+        effective_end = end_date or date.today()
+        admin_user = is_admin(current_user)
+
+        products: List[Dict[str, Any]] = []
+        for row in rows:
+            raw = _row_to_aggregate_raw(row)
+            if (
+                raw["total_requests"] == 0
+                and raw["total_matches"] == 0
+                and raw["total_displays"] == 0
+                and raw["total_clicks"] == 0
+                and raw["total_revenue_after"] == 0
+            ):
+                continue
+
+            products.append(
+                build_ad_data_stats_payload(
+                    raw=raw,
+                    total_revenue_before=raw["total_revenue_before"],
+                    for_admin=admin_user,
+                    start_date=effective_start,
+                    end_date=effective_end,
+                    product_id=row.product_id,
+                    product_name=row.product_name,
+                )
+            )
+
+        products.sort(key=lambda item: item.get("revenue_after_deduct", 0), reverse=True)
+        return products
 
     def _build_main_query(
         self,
@@ -205,32 +278,7 @@ class AdDataSummaryQuery:
         start_date: Optional[date],
         end_date: Optional[date],
     ):
-        query = select(
-            func.sum(AdData.request_count).label("total_requests"),
-            func.sum(AdData.match_count).label("total_matches"),
-            func.sum(AdData.display_count).label("total_displays"),
-            func.sum(AdData.click_count).label("total_clicks"),
-            func.sum(AdData.revenue_after_deduct).label("total_revenue_after"),
-            func.sum(AdData.pageviews).label("total_pageviews"),
-            func.sum(
-                case(
-                    (
-                        and_(AdData.viewability_rate > 0, AdData.click_count > 0),
-                        AdData.viewability_rate * AdData.click_count,
-                    ),
-                    else_=0,
-                )
-            ).label("weighted_viewability"),
-            func.sum(
-                case(
-                    (
-                        and_(AdData.viewability_rate > 0, AdData.click_count > 0),
-                        AdData.click_count,
-                    ),
-                    else_=0,
-                )
-            ).label("viewability_weight"),
-        )
+        query = select(*self._aggregate_select_columns())
 
         query = join_product_and_client(query, use_assignment_table)
 
@@ -271,3 +319,61 @@ class AdDataSummaryQuery:
         return apply_date_range_filter(
             admin_query, AdData.date, start_date, end_date, default_to_current_month=True
         )
+
+    def _aggregate_select_columns(self):
+        """公共 SUM 聚合列（含扣前收益，供产品分组复用）。"""
+        return (
+            func.sum(AdData.request_count).label("total_requests"),
+            func.sum(AdData.match_count).label("total_matches"),
+            func.sum(AdData.display_count).label("total_displays"),
+            func.sum(AdData.click_count).label("total_clicks"),
+            func.sum(AdData.revenue_after_deduct).label("total_revenue_after"),
+            func.sum(AdData.revenue_before_deduct).label("total_revenue_before"),
+            func.sum(AdData.pageviews).label("total_pageviews"),
+            func.sum(
+                case(
+                    (
+                        and_(AdData.viewability_rate > 0, AdData.click_count > 0),
+                        AdData.viewability_rate * AdData.click_count,
+                    ),
+                    else_=0,
+                )
+            ).label("weighted_viewability"),
+            func.sum(
+                case(
+                    (
+                        and_(AdData.viewability_rate > 0, AdData.click_count > 0),
+                        AdData.click_count,
+                    ),
+                    else_=0,
+                )
+            ).label("viewability_weight"),
+        )
+
+    def _build_product_group_query(
+        self,
+        use_assignment_table: bool,
+        current_user: User,
+        client_id: Optional[int],
+        start_date: Optional[date],
+        end_date: Optional[date],
+    ):
+        query = select(
+            Product.id.label("product_id"),
+            Product.name.label("product_name"),
+            *self._aggregate_select_columns(),
+        )
+
+        query = join_product_and_client(query, use_assignment_table)
+
+        if not is_admin(current_user):
+            query = query.where(Client.user_id == current_user.id)
+        elif client_id:
+            query = query.where(Client.id == client_id)
+
+        query = query.where(Product.is_active == True)
+
+        query = apply_date_range_filter(
+            query, AdData.date, start_date, end_date, default_to_current_month=True
+        )
+        return query.group_by(Product.id, Product.name)

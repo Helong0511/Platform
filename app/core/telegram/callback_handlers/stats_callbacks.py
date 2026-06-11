@@ -29,7 +29,7 @@ def _process_stats_request(
         STATS_MENU_CALLBACK,
         build_stats_menu_buttons,
         fetch_stats_sync,
-        format_stats_message,
+        format_stats_messages,
     )
 
     try:
@@ -47,7 +47,7 @@ def _process_stats_request(
             return
 
         _, _, period_label = resolve_stats_date_range(period_key)
-        text = format_stats_message(summary, period_label)
+        messages = format_stats_messages(summary, period_label)
         buttons = build_stats_menu_buttons(include_back=True)
 
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -62,10 +62,16 @@ def _process_stats_request(
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
-            text=text,
+            text=messages[0],
             parse_mode="HTML",
             reply_markup=markup,
         )
+        for extra_text in messages[1:]:
+            bot.send_message(
+                chat_id=chat_id,
+                text=extra_text,
+                parse_mode="HTML",
+            )
         logger.info(
             f"[统计回调] 已展示 {STATS_PERIOD_LABELS.get(period_key, period_key)} 统计, chat_id={chat_id}"
         )
