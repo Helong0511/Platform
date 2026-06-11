@@ -28,6 +28,7 @@ from app.core.config import settings
 from app.core.constants import MAX_PAGE_SIZE, ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
 from app.models.models import AdData, Client, Product, User, UserRole, ProductAssignment, CountryInfo
 from sqlalchemy import and_, or_
+from app.core.country_code import resolve_country_name
 from app.core.query_utils import (
     product_assignment_join_condition, 
     check_use_assignment_table, 
@@ -375,18 +376,7 @@ async def get_ad_data_detail(
     elif hasattr(date_value, 'date'):
         date_value = date_value.date()
 
-    # 获取国家名称：如果通过JOIN找到了国家信息，使用它；否则根据country_code回退
-    # ---------- 条件分支 ----------
-    if country_info:
-        country_name_zh = country_info.country_name_zh
-    # ---------- 条件分支 ----------
-    elif ad_data.country_code == "AA":
-        country_name_zh = "未知区域"
-    # ---------- 条件分支 ----------
-    elif ad_data.country_code == "ZZ":
-        country_name_zh = "全部区域"
-    else:
-        country_name_zh = None
+    country_name_zh = resolve_country_name(country_info, ad_data.country_code)
 
     # 构建响应数据
     response_data = {

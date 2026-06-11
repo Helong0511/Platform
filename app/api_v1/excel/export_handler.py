@@ -14,6 +14,7 @@ from sqlalchemy import func, and_, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.country_code import resolve_country_name
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
@@ -330,17 +331,7 @@ async def export_ad_data_handler(
             date_value = date_value.date()
 
         country_code = item.country_code or ""
-        # ---------- 条件分支 ----------
-        if country_info:
-            country_name = country_info.country_name_zh
-        # ---------- 条件分支 ----------
-        elif country_code == "AA":
-            country_name = "未知区域"
-        # ---------- 条件分支 ----------
-        elif country_code == "ZZ":
-            country_name = "全部区域"
-        else:
-            country_name = ""
+        country_name = resolve_country_name(country_info, country_code) or ""
 
         # ---------- 条件分支 ----------
         if is_admin:

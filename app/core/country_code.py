@@ -147,7 +147,7 @@ def resolve_country_name(
         default_all: 全部区域的默认名称（默认为 "全部区域"）
     
     Returns:
-        国家名称字符串，如果无法解析则返回 None
+        国家名称字符串；未在 countries 表登记时回退显示原始 country_code
     
     Example:
         # 有国家信息时
@@ -156,19 +156,24 @@ def resolve_country_name(
         # 处理特殊代码
         country_name = resolve_country_name(None, "ZZ")  # -> "全部区域"
         country_name = resolve_country_name(None, "AA")  # -> "未知区域"
+        country_name = resolve_country_name(None, "XX")  # -> "XX"（未识别，显示代码）
     """
     # 优先使用 CountryInfo 中的名称
     if country_info and hasattr(country_info, 'country_name_zh'):
         return country_info.country_name_zh
     
-    # 如果没有 CountryInfo，根据 country_code 处理特殊代码
+    # 如果没有 CountryInfo，根据 country_code 处理特殊代码或未识别代码
     if country_code:
-        if country_code == "ZZ":
+        code = country_code.strip()
+        if not code:
+            return None
+        if code == "ZZ":
             return default_all
-        elif country_code == "AA":
+        if code == "AA":
             return default_unknown
+        # 未在 countries 表登记：显示原始国家代码，避免前端国家列为空
+        return code
     
-    # 无法解析
     return None
 
 
