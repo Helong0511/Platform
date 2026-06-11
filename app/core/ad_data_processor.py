@@ -15,7 +15,12 @@ from sqlalchemy import select, or_
 
 from app.models.models import AdData, User
 from app.core.audit_log import log_user_action
-from app.core.country_code import find_country_code_by_any_format, preserve_unrecognized_country_code
+from app.core.country_code import (
+    find_country_code_by_any_format,
+    format_country_display,
+    preserve_unrecognized_country_code,
+    resolve_country_display,
+)
 from app.core.utils import truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data, normalize_ad_unit
 from app.core.telegram import send_telegram_message_async
 from app.core.config import settings
@@ -38,7 +43,8 @@ async def check_and_notify_data_decrease(
         date_str: str,
         product_name: str,
         country_code: str,
-        source: str = "API"
+        source: str = "API",
+        db: Optional[AsyncSession] = None,
 ) -> None:
     """
     检查待更新数据是否比原有数据减少，如果减少则发送Telegram通知给管理员
@@ -99,11 +105,10 @@ async def check_and_notify_data_decrease(
 
         # 如果有数据减少，发送通知
         if decreased_fields:
-            country_display = country_code if country_code else "未知"
-            if country_code == "AA":
-                country_display = "未知区域"
-            elif country_code == "ZZ":
-                country_display = "全部区域"
+            if db is not None:
+                country_display = await resolve_country_display(db, country_code)
+            else:
+                country_display = format_country_display(country_code)
 
             # 获取当前时间（使用时区）
             current_time = datetime.now(APP_TIMEZONE)
@@ -642,7 +647,8 @@ async def process_api_ad_data(
                         date_str=date_str,
                         product_name=product_name,
                         country_code=country_code,
-                        source=source
+                        source=source,
+                        db=db,
                     )
 
                     # 检查是否需要更新
@@ -923,7 +929,8 @@ async def process_api_ad_data(
                         date_str=date_str,
                         product_name=product_name,
                         country_code=country_code,
-                        source=f"{source}（无法识别国家代码，已累加）"
+                        source=f"{source}（无法识别国家代码，已累加）",
+                        db=db,
                     )
 
                     # 检查是否需要更新

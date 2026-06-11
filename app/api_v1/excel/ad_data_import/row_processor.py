@@ -277,7 +277,8 @@ async def process_row_data(
                 date_str=date_str,
                 product_name=product_name,
                 country_code=country_code,
-                source=f"Excel导入（用户: {current_user.username}）"
+                source=f"Excel导入（用户: {current_user.username}）",
+                db=db,
             )
 
             existing_data.country_code = country_code

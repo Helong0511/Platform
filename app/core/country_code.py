@@ -77,6 +77,47 @@ def preserve_unrecognized_country_code(
     return code[:max_length]
 
 
+def format_country_display(
+    country_code: Optional[str],
+    country_name_zh: Optional[str] = None,
+) -> str:
+    """
+    通知/日志用国家展示。
+
+    - 已在 countries 表登记：代码 + 中文名（如 PK 巴基斯坦）
+    - 未识别 / 无中文名：仅显示代码（如 KV）
+    - ZZ、AA：固定为「全部区域」「未知区域」
+    """
+    if not country_code or not str(country_code).strip():
+        return "未知"
+    code = str(country_code).strip()
+    if code == "ZZ":
+        return "全部区域"
+    if code == "AA":
+        return "未知区域"
+    name = (country_name_zh or "").strip()
+    if name and name != code:
+        return f"{code} {name}"
+    return code
+
+
+async def resolve_country_display(
+    db: AsyncSession,
+    country_code: Optional[str],
+) -> str:
+    """从 countries 表解析国家展示文案，供 Telegram 等通知使用。"""
+    if not country_code or not str(country_code).strip():
+        return "未知"
+    code = str(country_code).strip()
+    if code in ("ZZ", "AA"):
+        return format_country_display(code)
+    result = await db.execute(
+        select(CountryInfo.country_name_zh).where(CountryInfo.alpha_2_code == code)
+    )
+    country_name_zh = result.scalar_one_or_none()
+    return format_country_display(code, country_name_zh)
+
+
 def _pick_best_country_match(
     countries: list[CountryInfo],
     country_input: str,
