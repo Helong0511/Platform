@@ -25,8 +25,8 @@
   - 优先匹配最长的匹配项（最完整的匹配）
 
 特殊代码处理：
-- "ZZ"：全部区域（用于统计查询）
-- "AA"：未知区域（用于无法识别的国家）
+- "ZZ"：全部区域（用于统计查询；数据源未提供国家时也使用）
+- "AA"：未知区域（历史数据或 countries 表登记项；新导入无法识别时保留原始代码）
 - "unknown"：自动匹配为未知区域
 
 使用场景：
@@ -55,6 +55,26 @@ from app.models.models import CountryInfo
 
 # 获取当前模块的日志记录器
 logger = logging.getLogger(__name__)
+
+# 业务表 country_code 字段最大长度（与 ad_data / tb_search_data 表结构一致）
+COUNTRY_CODE_STORAGE_MAX_LENGTH = 5
+
+
+def preserve_unrecognized_country_code(
+    country_input: str,
+    max_length: int = COUNTRY_CODE_STORAGE_MAX_LENGTH,
+) -> str:
+    """
+    无法识别国家时保留原始输入，截断至数据库字段长度上限。
+
+    空值仍返回 ZZ（全部区域），表示数据源未提供国家信息。
+    """
+    if not country_input or not isinstance(country_input, str):
+        return "ZZ"
+    code = country_input.strip()
+    if not code:
+        return "ZZ"
+    return code[:max_length]
 
 
 def _pick_best_country_match(

@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.country_code import find_country_code_by_any_format
+from app.core.country_code import find_country_code_by_any_format, preserve_unrecognized_country_code
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.utils import normalize_ad_unit
@@ -60,13 +60,7 @@ class AdDataValidator:
         found = await find_country_code_by_any_format(db, country_input)
         if found:
             return found
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=(
-                f"无法识别国家代码格式: {country_input}。"
-                "请使用有效的国家代码（如 'US'、'USA'、'840'、'United States of America' 或 '美国'）"
-            ),
-        )
+        return preserve_unrecognized_country_code(country_input)
 
     @staticmethod
     def needs_uniqueness_check(filtered_update_data: Dict[str, Any]) -> bool:

@@ -20,8 +20,14 @@ from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.security import require_admin
 from app.models.models import CountryInfo, User
-from app.schemas.base import PaginatedResponseBaseSchema, ResponseBaseSchema
-from app.schemas.country import CountryCreate, CountryResponse, CountryUpdate
+from app.schemas.base import ListResponseBaseSchema, PaginatedResponseBaseSchema, ResponseBaseSchema
+from app.schemas.country import (
+    CountryCreate,
+    CountryResponse,
+    CountryUpdate,
+    UnrecognizedCountryCodeItem,
+)
+from app.services.country_service import collect_unrecognized_country_codes
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -117,6 +123,28 @@ async def list_countries(
         page=page,
         page_size=page_size,
         message="获取国家列表成功",
+    )
+
+
+@router.get(
+    "/unrecognized",
+    response_model=ListResponseBaseSchema[list[UnrecognizedCountryCodeItem]],
+    summary="收集未识别的国家代码",
+)
+async def list_unrecognized_country_codes(
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(require_admin),
+):
+    """
+    扫描广告数据、TB 搜索数据及归档表，汇总未在 countries 表登记的国家代码。
+
+    便于管理员快速补全国家信息；ZZ（全部区域）与已登记代码不在结果中。
+    """
+    items = await collect_unrecognized_country_codes(db)
+    return ListResponseBaseSchema.success(
+        data=items,
+        count=len(items),
+        message="获取未识别国家代码成功",
     )
 
 

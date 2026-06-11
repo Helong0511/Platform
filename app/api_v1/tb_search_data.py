@@ -54,7 +54,7 @@ from app.core.utils import (
     find_or_create_default_client, optimize_page_size_for_device,
     get_product_name, get_client_name, get_user_name, truncate_to_2_decimal
 )
-from app.core.country_code import resolve_country_name, find_country_code_by_any_format
+from app.core.country_code import resolve_country_name, find_country_code_by_any_format, preserve_unrecognized_country_code
 from app.api_v1.excel.utils import (
     allowed_file, ALLOWED_MIME_TYPES, parse_date_value, normalize_date_key, validate_excel_file
 )
@@ -421,19 +421,13 @@ async def import_tb_search_data(
             
             subid = product.id
                 
-            # 解析GEO
-            geo = str(row["GEO"]).strip()
-            # 简单验证GEO
-            # ---------- 条件分支 ----------
-            if len(geo) > 2:
-                # 尝试查找对应的二字代码
-                # 这里简单处理，如果找不到且长度>2则设为ZZ
-                found = await find_country_code_by_any_format(db, geo)
-                # ---------- 条件分支 ----------
-                if found:
-                    geo = found
-                else:
-                    geo = "ZZ"
+            # 解析 GEO：能识别则用标准二字码，否则保留原始值（截断至字段长度）
+            geo_raw = str(row["GEO"]).strip() if pd.notna(row.get("GEO")) else ""
+            if geo_raw:
+                found = await find_country_code_by_any_format(db, geo_raw)
+                geo = found if found else preserve_unrecognized_country_code(geo_raw)
+            else:
+                geo = "ZZ"
             
             # 查找是否已存在
             existing_query = select(TBSearchData).where(

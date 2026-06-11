@@ -902,7 +902,7 @@ CREATE TABLE IF NOT EXISTS `tb_search_data`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT 'ID',
   `date` datetime NOT NULL COMMENT '日期',
   `product_id` int NOT NULL COMMENT '产品ID',
-  `country_code` varchar(2) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '国家代码',
+  `country_code` varchar(5) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '国家代码（未识别时保留原始值，最长5字符）',
   `redirects` int NULL DEFAULT NULL COMMENT 'REDIRECTS',
   `searches` int NULL DEFAULT NULL COMMENT 'SEARCHES',
   `monetized` int NULL DEFAULT NULL COMMENT 'MONETIZED',

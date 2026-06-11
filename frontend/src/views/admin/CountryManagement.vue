@@ -45,6 +45,92 @@
       </el-form>
     </el-card>
 
+    <el-card shadow="never" class="unrecognized-card">
+      <template #header>
+        <div class="unrecognized-header">
+          <div>
+            <span class="unrecognized-title">未识别国家代码</span>
+            <span class="unrecognized-desc">来自广告数据 / TB 搜索数据 / 归档表，尚未在 countries 表登记</span>
+          </div>
+          <el-button :icon="Refresh" :loading="unrecognizedLoading" @click="fetchUnrecognized">
+            刷新收集
+          </el-button>
+        </div>
+      </template>
+
+      <el-alert
+        v-if="!unrecognizedLoading && unrecognizedList.length === 0"
+        type="success"
+        :closable="false"
+        show-icon
+        title="暂无未识别国家代码，业务数据中的代码均已在 countries 表登记。"
+      />
+
+      <el-table
+        v-else
+        v-loading="unrecognizedLoading"
+        :data="unrecognizedList"
+        border
+        stripe
+        size="small"
+      >
+        <el-table-column prop="country_code" label="国家代码" width="120" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.is_valid_alpha2 ? 'warning' : 'danger'" size="small">
+              {{ row.country_code }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="total_count" label="出现次数" width="100" align="center" sortable />
+        <el-table-column label="数据来源" min-width="200">
+          <template #default="{ row }">
+            <el-tag
+              v-for="source in row.sources"
+              :key="source"
+              size="small"
+              type="info"
+              style="margin-right: 6px;"
+            >
+              {{ sourceLabel(source) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="明细" min-width="220">
+          <template #default="{ row }">
+            <span v-if="row.ad_data_count">广告 {{ row.ad_data_count }}</span>
+            <span v-if="row.tb_search_data_count">
+              <template v-if="row.ad_data_count"> · </template>
+              TB {{ row.tb_search_data_count }}
+            </span>
+            <span v-if="row.ad_data_archive_count">
+              <template v-if="row.ad_data_count || row.tb_search_data_count"> · </template>
+              归档 {{ row.ad_data_archive_count }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" fixed="right" align="center">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="!row.is_valid_alpha2"
+              content="代码格式非标准二字字母，请先在业务数据中修正后再添加"
+              placement="top"
+            >
+              <el-button type="primary" link size="small" disabled>快速添加</el-button>
+            </el-tooltip>
+            <el-button
+              v-else
+              type="primary"
+              link
+              size="small"
+              @click="handleQuickAdd(row)"
+            >
+              快速添加
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
     <el-card shadow="never" class="table-card">
       <el-table v-loading="loading" :data="tableData" border stripe>
         <el-table-column prop="alpha_2_code" label="国家代码" width="110" align="center">
@@ -155,6 +241,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue';
 import {
+  ElAlert,
   ElButton,
   ElCard,
   ElDialog,
@@ -168,18 +255,27 @@ import {
   ElSwitch,
   ElTable,
   ElTableColumn,
-  ElTag
+  ElTag,
+  ElTooltip
 } from 'element-plus';
 import { Plus, Refresh, Search } from '@element-plus/icons-vue';
-import { getCountries, createCountry, updateCountry, deleteCountry } from '../../api/country';
+import {
+  getCountries,
+  createCountry,
+  updateCountry,
+  deleteCountry,
+  getUnrecognizedCountryCodes
+} from '../../api/country';
 import { useDevice } from '../../composables/useDevice';
 import { logger } from '../../utils/logger';
 
 const { isMobile } = useDevice();
 
 const loading = ref(false);
+const unrecognizedLoading = ref(false);
 const submitting = ref(false);
 const tableData = ref([]);
+const unrecognizedList = ref([]);
 const dialogVisible = ref(false);
 const editingId = ref(null);
 const formRef = ref(null);
@@ -227,6 +323,27 @@ const formRules = {
   country_name_en: [{ required: true, message: '请输入国家英文名称', trigger: 'blur' }]
 };
 
+const SOURCE_LABELS = {
+  ad_data: '广告数据',
+  tb_search_data: 'TB搜索数据',
+  ad_data_archive: '广告归档'
+};
+
+const sourceLabel = (source) => SOURCE_LABELS[source] || source;
+
+const fetchUnrecognized = async () => {
+  unrecognizedLoading.value = true;
+  try {
+    const data = await getUnrecognizedCountryCodes();
+    unrecognizedList.value = Array.isArray(data) ? data : [];
+  } catch (error) {
+    logger.error('收集未识别国家代码失败', error);
+    ElMessage.error(error.message || '收集未识别国家代码失败');
+  } finally {
+    unrecognizedLoading.value = false;
+  }
+};
+
 const resetForm = () => {
   Object.assign(formData, defaultFormData());
   editingId.value = null;
@@ -271,6 +388,12 @@ const handleReset = () => {
 
 const handleCreate = () => {
   resetForm();
+  dialogVisible.value = true;
+};
+
+const handleQuickAdd = (row) => {
+  resetForm();
+  formData.alpha_2_code = row.country_code.toUpperCase();
   dialogVisible.value = true;
 };
 
@@ -325,6 +448,7 @@ const handleSubmit = async () => {
     }
     dialogVisible.value = false;
     fetchList();
+    fetchUnrecognized();
   } catch (error) {
     logger.error('保存国家失败', error);
     ElMessage.error(error.message || '保存失败');
@@ -356,6 +480,7 @@ const handleDelete = async (row) => {
 
 onMounted(() => {
   fetchList();
+  fetchUnrecognized();
 });
 </script>
 
@@ -385,8 +510,26 @@ onMounted(() => {
 }
 
 .filter-card,
+.unrecognized-card,
 .table-card {
   margin-bottom: 16px;
+}
+
+.unrecognized-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.unrecognized-title {
+  font-weight: 600;
+  margin-right: 12px;
+}
+
+.unrecognized-desc {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
 }
 
 .pagination-container {

@@ -15,7 +15,7 @@ from sqlalchemy import select, or_
 
 from app.models.models import AdData, User
 from app.core.audit_log import log_user_action
-from app.core.country_code import find_country_code_by_any_format
+from app.core.country_code import find_country_code_by_any_format, preserve_unrecognized_country_code
 from app.core.utils import truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data, normalize_ad_unit
 from app.core.telegram import send_telegram_message_async
 from app.core.config import settings
@@ -155,7 +155,7 @@ async def process_api_ad_data(
     功能说明：
     1. 先按照日期、产品、国家对API返回的数据进行分组累加
     2. 累加后按照日期、产品、国家检查是否有重复数据
-    3. 识别不出来国家代码的数据，将数据累加后添加或更新到广告数据里（使用'AA'作为国家代码）
+    3. 识别不出来国家代码的数据，保留原始国家代码写入（无国家输入时使用 ZZ）
     4. 根据产品的减扣比例自动计算减扣后的eCPM和收益
     5. 如果数据已存在，会检查是否需要更新
     
@@ -393,8 +393,12 @@ async def process_api_ad_data(
                     item_data["viewability_rate"] = item_viewability_rate
                 recognized_data[key]["items"].append(item_data)
             else:
-                # 无法识别国家代码，按 (date_str, product_name, ad_unit) 分组累加
-                key = (item_date_str, item_product_name, item_ad_unit)
+                # 有国家输入但无法识别：保留原始代码分组；无输入：按 ZZ（全部区域）分组
+                if has_country_input:
+                    storage_code = preserve_unrecognized_country_code(item_country_input)
+                    key = (item_date_str, item_product_name, item_ad_unit, storage_code)
+                else:
+                    key = (item_date_str, item_product_name, item_ad_unit)
                 if key not in unrecognized_data:
                     unrecognized_data[key] = {
                         "date_str": item_date_str,
@@ -466,7 +470,7 @@ async def process_api_ad_data(
                             telegram_msg += f"日期: {item_date_str}\n"
                             telegram_msg += f"产品: {item_product_name}\n"
                             telegram_msg += f"国家代码输入: [{item_country_input}]\n\n"
-                            telegram_msg += f"说明：提供了国家代码但无法识别，该数据将累加后使用'AA'（未知区域）作为国家代码存储"
+                            telegram_msg += f"说明：提供了国家代码但无法识别，将保留原始值「{preserve_unrecognized_country_code(item_country_input)}」写入"
                             
                             # 发送通知（异步，不阻塞）
                             try:
@@ -776,12 +780,15 @@ async def process_api_ad_data(
                     logger.error(f"处理能识别国家代码的数据时出错: {error_msg}", exc_info=True)
                 error_count += 1
 
-    # ========== 第三步：处理无法识别国家代码的累加数据（按日期、产品检查重复，使用'AA'作为国家代码） ==========
+    # ========== 第三步：处理无国家输入（ZZ）或无法识别（保留原始代码）的累加数据 ==========
     for key, grouped_data in unrecognized_data.items():
         async with db.begin_nested():
             try:
-                date_str, product_name, ad_unit = key
-                country_code = "AA"  # 使用'AA'（未知区域）作为无法识别国家代码的数据的国家代码
+                if len(key) == 4:
+                    date_str, product_name, ad_unit, country_code = key
+                else:
+                    date_str, product_name, ad_unit = key
+                    country_code = "ZZ"
 
                 # 查找或创建产品
                 product_info = await find_or_create_product(
@@ -888,7 +895,7 @@ async def process_api_ad_data(
                 ecpm_after_deduct = truncate_to_2_decimal(final_ecpm * (1 - ecpm_deduct_ratio))
                 revenue_after_deduct = truncate_to_2_decimal(total_revenue * (1 - revenue_deduct_ratio))
 
-                # 检查数据是否重复（按日期、产品、国家代码'AA'、广告单元）
+                # 检查数据是否重复（按日期、产品、国家代码、广告单元）
                 item_date = grouped_data["date"]
                 date_start, date_end = get_date_range(item_date)
 
@@ -1027,7 +1034,7 @@ async def process_api_ad_data(
                     inserted_count += 1
 
                     logger.info(
-                        f"添加广告数据（无法识别国家代码，已累加）: 日期={date_str}, 产品={product_name}, 国家=AA, "
+                        f"添加广告数据（国家代码未识别，已保留原始值）: 日期={date_str}, 产品={product_name}, 国家={country_code}, "
                         f"请求数={grouped_data['request_count']}, 匹配数={grouped_data['match_count']}, "
                         f"展示数={grouped_data['display_count']}, 点击数={grouped_data['click_count']}, "
                         f"eCPM={final_ecpm:.2f}->{ecpm_after_deduct:.2f}, "
@@ -1040,7 +1047,7 @@ async def process_api_ad_data(
                     logger.warning(
                         f"数据重复冲突（唯一性约束）: 日期={date_str if 'date_str' in locals() else '未知'}, "
                         f"产品={product_name if 'product_name' in locals() else '未知'}, "
-                        f"国家代码=AA, 错误: {error_msg[:200]}"
+                        f"国家代码={country_code if 'country_code' in locals() else '未知'}, 错误: {error_msg[:200]}"
                     )
                 else:
                     logger.error(f"处理无法识别国家代码的数据时出错: {error_msg}", exc_info=True)

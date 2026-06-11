@@ -15,7 +15,7 @@ from app.api_v1.excel.utils import (
 )
 from app.core.ad_data_processor import check_and_notify_data_decrease
 from app.core.constants import ECPM_MULTIPLIER
-from app.core.country_code import find_country_code_by_any_format
+from app.core.country_code import find_country_code_by_any_format, preserve_unrecognized_country_code
 from app.core.utils import (
     get_date_range, normalize_ad_unit, normalize_date_for_ad_data, truncate_to_2_decimal,
 )
@@ -122,11 +122,12 @@ async def process_row_data(
             if found_country_code:
                 country_code = found_country_code
             else:
+                country_code = preserve_unrecognized_country_code(country_input)
                 logger.warning(
                     f"无法识别国家代码格式: {country_input}, "
-                    f"日期={row.get('date', '未知')}, 产品={product_name}, 使用默认值 'ZZ'"
+                    f"日期={row.get('date', '未知')}, 产品={product_name}, "
+                    f"保留原始值 '{country_code}'"
                 )
-                country_code = "ZZ"
 
         # ---------- 条件分支 ----------
         if country_code == "ZZ":

@@ -139,3 +139,15 @@ class CountryResponse(CountryBase, IDBaseSchema):
     """国家信息 API 响应。"""
 
     pass
+
+
+class UnrecognizedCountryCodeItem(BaseSchema):
+    """业务数据中出现但未在 countries 表登记的国家代码。"""
+
+    country_code: str = Field(..., description="未识别的国家代码")
+    ad_data_count: int = Field(0, description="广告数据中出现次数")
+    tb_search_data_count: int = Field(0, description="TB搜索数据中出现次数")
+    ad_data_archive_count: int = Field(0, description="广告数据归档中出现次数")
+    total_count: int = Field(0, description="总出现次数")
+    sources: list[str] = Field(default_factory=list, description="数据来源表标识")
+    is_valid_alpha2: bool = Field(False, description="是否为合法 ISO 二字代码格式，可直接添加")

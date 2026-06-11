@@ -113,8 +113,8 @@ class AdData(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='广告数据ID')
     date = Column(DateTime, nullable=False, comment='数据日期')
 
-    # 国家代码字段（ISO 3166-1 二字母代码）
-    country_code = Column(String(2), ForeignKey("countries.alpha_2_code", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, comment='国家代码（ISO 3166-1 二字母代码）')
+    # 国家代码（ISO 3166-1 二字母代码；无法识别时可保留原始值，最长 5 字符）
+    country_code = Column(String(5), ForeignKey("countries.alpha_2_code", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, comment='国家代码（ISO 3166-1 二字母代码，未识别时保留原始值）')
 
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, comment='产品ID')
     ad_unit = Column(String(100), nullable=False, default='', server_default='', comment='广告单元')
@@ -188,7 +188,7 @@ class TBSearchData(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='ID')
     date = Column(DateTime, nullable=False, comment='日期')
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, comment='产品ID')
-    country_code = Column(String(2), ForeignKey("countries.alpha_2_code", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, comment='国家代码')
+    country_code = Column(String(5), ForeignKey("countries.alpha_2_code", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, comment='国家代码（未识别时保留原始值）')
     redirects = Column(Integer, default=0, comment='REDIRECTS')
     searches = Column(Integer, default=0, comment='SEARCHES')
     monetized = Column(Integer, default=0, comment='MONETIZED')
