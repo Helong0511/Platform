@@ -9,39 +9,8 @@ import threading
 
 logger = logging.getLogger(__name__)
 
-from app.core.config import settings
 from app.core.utils import get_app_now_naive
-
-
-def _create_sync_db_engine():
-    """
-    创建同步数据库引擎（用于 Telegram bot 回调的同步操作）
-    
-    Returns:
-        SessionLocal: 同步数据库会话工厂
-    """
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    
-    sync_db_url = settings.SQLALCHEMY_DATABASE_URI
-    if "+aiomysql" in sync_db_url:
-        sync_db_url = sync_db_url.replace("+aiomysql", "+pymysql")
-    elif "+asyncmy" in sync_db_url:
-        sync_db_url = sync_db_url.replace("+asyncmy", "+pymysql")
-    elif "mysql://" in sync_db_url and "+" not in sync_db_url:
-        pass
-    else:
-        sync_db_url = sync_db_url.replace("mysql://", "mysql+pymysql://")
-    
-    sync_engine = create_engine(
-        sync_db_url,
-        pool_pre_ping=True,
-        pool_recycle=settings.DB_POOL_RECYCLE,
-        pool_size=5,
-        max_overflow=3,
-        echo=False
-    )
-    return sessionmaker(bind=sync_engine)
+from app.core.telegram.sync_db import get_sync_session_factory
 
 
 def process_pending_conversion(pending_id: int, action: str, callback_query_id: str, chat_id: int, message_id: int):
@@ -59,7 +28,7 @@ def process_pending_conversion(pending_id: int, action: str, callback_query_id: 
     from sqlalchemy import select as sync_select
     from app.models.models import PendingPostbackConversion, PostbackConversion
     
-    SessionLocal = _create_sync_db_engine()
+    SessionLocal = get_sync_session_factory()
     
     try:
         with SessionLocal() as db:
