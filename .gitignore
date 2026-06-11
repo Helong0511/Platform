@@ -173,10 +173,11 @@ dist-ssr/
 frontend/dist/
 *.local
 
-# npm/yarn/pnpm 锁定文件（可选，根据项目需要决定是否忽略）
+# npm/yarn/pnpm 锁定文件（frontend 需提交 lock 以保证服务器可重复安装）
 package-lock.json
 yarn.lock
 pnpm-lock.yaml
+!frontend/package-lock.json
 
 # Vite 构建缓存
 .vite/
