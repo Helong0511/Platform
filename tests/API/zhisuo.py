@@ -19,8 +19,8 @@ unit = "/api/channelunit"
 # key = '913453ad411f016cf4c3899bc1177e9d'           # 私钥（替换）
 
 
-clientId = 'zhisuo252'  # 客户ID（替换）
-key = '7593dee39ca94fc7bc39dea69ccaa7db'  # 私钥（替换）
+clientId = 'KE11'  # 客户ID（替换）
+key = 'cded7587a3b1aad269b9c9f5248f8b7e'  # 私钥（替换）
 
 # start_date = date.today().isoformat()              # 当前日期，例如 '2026-05-29'
 # end_date = date.today().isoformat()                # 结束日期（可根据需要调整）
@@ -30,7 +30,7 @@ end_date = '2026-06-30'
 
 timestamp = int(time.time() * 1000)  # 当前13位毫秒时间戳
 page = 1
-limit = 100
+limit = 1000
 
 # 构建参数字典（key 在排序前添加）
 params = {

@@ -145,7 +145,7 @@ async def fetch_zhisuo_unit_rows(
     api_key: str,
     start: str,
     end: str,
-    limit: int = 100,
+    limit: int = 1000,
 ) -> List[Any]:
     """拉取 zhisuo 广告单元报告（分页合并 list）。"""
     base = base_url.rstrip("/")
