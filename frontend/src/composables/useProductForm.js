@@ -9,10 +9,12 @@ import { getClientDetail } from '../api/client';
 import { logger } from '../utils/logger';
 import { formatDate } from '../utils/dateFormat';
 import {
+  addDaysToDateString,
   formatClientFullName,
   formatProductOptionLabel,
   getTodayDateString,
   getYesterdayDateString,
+  toDateStringOnly,
 } from '../utils/productClientFormat';
 
 function createEmptyFormData() {
@@ -675,48 +677,40 @@ export function useProductForm(props, emit) {
   };
 
   const confirmTransferDate = async () => {
-    if (!transferDateForm.startDate) {
+    const startDateStr = toDateStringOnly(transferDateForm.startDate);
+    if (!startDateStr) {
       ElMessage.warning('请选择开始日期');
       return;
     }
 
-    const startDate = new Date(transferDateForm.startDate);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    startDate.setHours(0, 0, 0, 0);
-    if (startDate > today) {
+    if (startDateStr > getTodayDateString()) {
       ElMessage.warning('开始日期不能是未来日期');
       return;
     }
 
-    let lastClientEndDate = transferDateForm.lastClientEndDate || getYesterdayDateString();
+    const lastClientEndDate = toDateStringOnly(
+      transferDateForm.lastClientEndDate || getYesterdayDateString(),
+    );
 
-    if (lastClientStartDate.value) {
-      const lastStartDate = new Date(lastClientStartDate.value);
-      lastStartDate.setHours(0, 0, 0, 0);
-      const endDate = new Date(lastClientEndDate);
-      endDate.setHours(0, 0, 0, 0);
-      if (endDate < lastStartDate) {
-        ElMessage.warning(`最后一个客户的结束日期不能小于该客户的开始日期（${formatDate(lastClientStartDate.value)}）`);
-        return;
-      }
+    const lastStartDateStr = toDateStringOnly(lastClientStartDate.value);
+    if (lastStartDateStr && lastClientEndDate < lastStartDateStr) {
+      ElMessage.warning(`最后一个客户的结束日期不能小于该客户的开始日期（${formatDate(lastClientStartDate.value)}）`);
+      return;
     }
 
-    const endDate = new Date(lastClientEndDate);
-    endDate.setHours(0, 0, 0, 0);
-    // 旧客户结束日必须早于新客户开始日（默认：昨天结束 → 今天开始）
-    if (endDate >= startDate) {
+    // 旧客户结束日必须严格早于新客户开始日（默认：昨天 < 今天）
+    if (lastClientEndDate >= startDateStr) {
       ElMessage.warning('最后一个客户的结束日期必须早于新客户的开始日期');
       return;
     }
 
-    const expectedStartDate = new Date(endDate);
-    expectedStartDate.setDate(expectedStartDate.getDate() + 1);
-    expectedStartDate.setHours(0, 0, 0, 0);
-
-    if (startDate.getTime() !== expectedStartDate.getTime()) {
-      const expectedDateStr = `${expectedStartDate.getFullYear()}-${String(expectedStartDate.getMonth() + 1).padStart(2, '0')}-${String(expectedStartDate.getDate()).padStart(2, '0')}`;
-      ElMessage.warning(`日期连续性错误：新客户开始日期（${transferDateForm.startDate}）必须是旧客户结束日期（${lastClientEndDate}）+ 1天，期望值：${expectedDateStr}，以确保广告数据无空窗期`);
+    // 核心业务：新客户开始日 = 旧客户结束日 + 1 天（恰好相差 1 天，无空窗）
+    const expectedStartDateStr = addDaysToDateString(lastClientEndDate, 1);
+    if (startDateStr !== expectedStartDateStr) {
+      ElMessage.warning(
+        `日期连续性错误：新客户开始日期（${startDateStr}）必须是旧客户结束日期（${lastClientEndDate}）+ 1天，`
+        + `期望值：${expectedStartDateStr}，以确保广告数据无空窗期`,
+      );
       return;
     }
 

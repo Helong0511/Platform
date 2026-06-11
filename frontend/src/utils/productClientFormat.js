@@ -62,3 +62,23 @@ export function getYesterdayDateString() {
   const day = String(yesterday.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
+
+/** 将 API 日期或 YYYY-MM-DD 规范为 YYYY-MM-DD（避免时区解析偏移） */
+export function toDateStringOnly(value) {
+  if (!value) return '';
+  const str = String(value);
+  return str.length >= 10 ? str.slice(0, 10) : str;
+}
+
+/** 在 YYYY-MM-DD 上加减天数，返回 YYYY-MM-DD */
+export function addDaysToDateString(dateStr, days) {
+  const normalized = toDateStringOnly(dateStr);
+  if (!normalized) return '';
+  const [year, month, day] = normalized.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() + days);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
