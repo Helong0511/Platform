@@ -9,8 +9,10 @@ from app.core.telegram.bot_state import bot, bot_initialized, TELEBOT_AVAILABLE
 # 装饰器会在模块导入时自动注册到 bot
 from app.core.telegram.callback_handlers.postback_approval import handle_postback_approval
 from app.core.telegram.callback_handlers.menu_callbacks import handle_menu_callbacks
+from app.core.telegram.callback_handlers.stats_callbacks import handle_stats_callbacks
 
 __all__ = [
     'handle_postback_approval',
-    'handle_menu_callbacks'
+    'handle_menu_callbacks',
+    'handle_stats_callbacks',
 ]

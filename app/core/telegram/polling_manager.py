@@ -86,6 +86,7 @@ def set_bot_commands():
         commands_list = [
             ("start", "启动 Bot"),
             ("help", "显示帮助信息"),
+            ("stats", "转化统计（昨天/本周/上周/本月）"),
             ("id", "查询聊天 ID（群组中需使用 /id@botname）")
         ]
         
@@ -123,7 +124,9 @@ def register_handlers():
         from app.core.telegram.command_handlers.id_command import get_chat_id
         from app.core.telegram.command_handlers.start_command import cmd_start
         from app.core.telegram.command_handlers.help_command import cmd_help
+        from app.core.telegram.command_handlers.stats_command import cmd_stats
         from app.core.telegram.callback_handlers.menu_callbacks import handle_menu_callbacks
+        from app.core.telegram.callback_handlers.stats_callbacks import handle_stats_callbacks
         from app.core.telegram.callback_handlers.postback_approval import handle_postback_approval
         
         def debug_all_messages(message):
@@ -136,8 +139,11 @@ def register_handlers():
         bot.message_handler(commands=['help'])(cmd_help)
         logger.info("正在注册 /id 命令处理器...")
         bot.message_handler(commands=['id'])(get_chat_id)
+        logger.info("正在注册 /stats 命令处理器...")
+        bot.message_handler(commands=['stats'])(cmd_stats)
         
         logger.info("正在注册回调处理器...")
+        bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("stats_"))(handle_stats_callbacks)
         bot.callback_query_handler(func=lambda call: call.data in ["View", "clock"])(handle_menu_callbacks)
         bot.callback_query_handler(func=lambda call: call.data.startswith("postback_approve_") or call.data.startswith("postback_reject_"))(handle_postback_approval)
         
