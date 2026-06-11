@@ -212,6 +212,17 @@ export function useProductForm(props, emit) {
     await fetchProductAssignments(product.id, true);
   };
 
+  const clearTransferState = () => {
+    pendingTransferData.value = null;
+    transferDateForm.oldClientId = null;
+    transferDateForm.oldClientName = '';
+    transferDateForm.oldClientFullInfo = null;
+    transferDateForm.startDate = null;
+    transferDateForm.lastClientEndDate = null;
+    productAssignments.value = [];
+    lastClientStartDate.value = null;
+  };
+
   const handleProductNameSelect = async (item) => {
     if (!item?.value) {
       return;
@@ -238,13 +249,12 @@ export function useProductForm(props, emit) {
           logger.warn('handleProductNameSelect: 获取原产品信息失败:', error);
         }
       } else {
-        productAssignments.value = [];
-        lastClientStartDate.value = null;
+        clearTransferState();
+        selectedProduct.value = item.product;
       }
     } else {
       selectedProduct.value = null;
-      productAssignments.value = [];
-      lastClientStartDate.value = null;
+      clearTransferState();
     }
   };
 
@@ -263,12 +273,7 @@ export function useProductForm(props, emit) {
     currentProductId.value = null;
     productNames.value = [];
     selectedProduct.value = null;
-    pendingTransferData.value = null;
-    transferDateForm.startDate = null;
-    transferDateForm.lastClientEndDate = null;
-    transferDateForm.oldClientFullInfo = null;
-    productAssignments.value = [];
-    lastClientStartDate.value = null;
+    clearTransferState();
   };
 
   const handleAdd = async () => {
@@ -277,6 +282,7 @@ export function useProductForm(props, emit) {
     Object.assign(formData, createEmptyFormData());
     productNameBackup.value = '';
     selectedProduct.value = null;
+    clearTransferState();
     await loadProductNames();
     clearFormValidation();
     formDialogVisible.value = true;
@@ -413,8 +419,10 @@ export function useProductForm(props, emit) {
       }
     }
 
-    if (!transferDateForm.startDate) {
-      if (selectedProduct.value && productAssignments.value.length === 0) {
+    // 选择其他客户产品时仅预填日期，须用户确认后才视为转移完成
+    if (!pendingTransferData.value?.endDate) {
+      productIdToUpdate = selectedProduct.value.id;
+      if (productAssignments.value.length === 0) {
         try {
           await fetchProductAssignments(selectedProduct.value.id, true);
         } catch (error) {
@@ -424,6 +432,7 @@ export function useProductForm(props, emit) {
       return { productIdToUpdate, isTransferProduct: true, needsDateDialog: true };
     }
 
+    productIdToUpdate = pendingTransferData.value.productId;
     return { productIdToUpdate, isTransferProduct: true, needsDateDialog: false };
   };
 
@@ -442,7 +451,8 @@ export function useProductForm(props, emit) {
       client_id: props.clientId,
     };
 
-    if (pendingTransferData.value) {
+    // 仅在实际执行产品转移时剥离创建字段，避免残留转移状态误删产品名称
+    if (isTransferProduct && pendingTransferData.value) {
       delete submitData.name;
       delete submitData.ecpm_deduct_ratio;
       delete submitData.revenue_deduct_ratio;
@@ -524,7 +534,7 @@ export function useProductForm(props, emit) {
       saving.value = true;
 
       const submitData = buildSubmitData(isTransferProduct);
-      if (!validateSubmitData(submitData, isTransferProduct || !!pendingTransferData.value)) {
+      if (!validateSubmitData(submitData, isTransferProduct)) {
         saving.value = false;
         return;
       }
