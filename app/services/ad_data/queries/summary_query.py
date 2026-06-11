@@ -2,17 +2,18 @@
 广告数据 KPI 汇总查询。
 
 功能说明：
-- 对匹配记录做 SUM 聚合，计算漏斗总量与平均转化率
-- 管理员额外查询减扣前 eCPM/收入；结果带 Redis 缓存
+- 对匹配记录做 SUM 聚合，计算漏斗总量与衍生指标
+- 衍生指标口径与前端广告数据表格「合计行」一致（useAdDataTableFormat）
+- 管理员额外返回减扣前 eCPM/收益；结果带 Redis 缓存
 
 在系统中的位置：
-- 被 ``AdDataService.get_ad_data_summary`` 调用
+- 被 ``AdDataService.get_ad_data_summary`` 与 Telegram 统计菜单调用
 """
 import logging
 from datetime import date, timedelta
 from typing import Any, Dict, Optional
 
-from sqlalchemy import Float, case, func
+from sqlalchemy import and_, case, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -27,6 +28,52 @@ from app.models.models import AdData, Client, Product, User
 from app.services.ad_data.queries.join_helpers import join_product_and_client
 
 logger = logging.getLogger(__name__)
+
+
+def compute_ad_data_derived_metrics(
+    *,
+    total_requests: float,
+    total_matches: float,
+    total_displays: float,
+    total_clicks: float,
+    total_revenue_after: float,
+    total_revenue_before: float,
+    total_pageviews: float,
+    weighted_viewability: float,
+    viewability_weight: float,
+    for_admin: bool,
+) -> Dict[str, float]:
+    """
+    由聚合总量计算覆盖率、eCPM、CPC 等衍生指标。
+
+    算法与 ``frontend/src/composables/useAdDataTableFormat.js`` 合计行一致。
+    """
+    coverage_rate = (total_matches / total_requests * 100.0) if total_requests > 0 else 0.0
+    display_rate = (total_displays / total_matches * 100.0) if total_matches > 0 else 0.0
+    click_rate = (total_clicks / total_displays * 100.0) if total_displays > 0 else 0.0
+    viewability_rate = (
+        weighted_viewability / viewability_weight if viewability_weight > 0 else 0.0
+    )
+
+    ecpm_after_deduct = (
+        (total_revenue_after / total_displays * 1000.0) if total_displays > 0 else 0.0
+    )
+    ecpm_before_deduct = (
+        (total_revenue_before / total_displays * 1000.0) if total_displays > 0 else 0.0
+    )
+
+    revenue_for_cpc = total_revenue_before if for_admin else total_revenue_after
+    cpc = (revenue_for_cpc / total_clicks) if total_clicks > 0 else 0.0
+
+    return {
+        "coverage_rate": round(coverage_rate, 2),
+        "display_rate": round(display_rate, 2),
+        "click_rate": round(click_rate, 2),
+        "viewability_rate": round(viewability_rate, 2),
+        "cpc": round(cpc, 4),
+        "ecpm_after_deduct": round(ecpm_after_deduct, 4),
+        "ecpm_before_deduct": round(ecpm_before_deduct, 4),
+    }
 
 
 class AdDataSummaryQuery:
@@ -55,62 +102,91 @@ class AdDataSummaryQuery:
 
         summary = (await self.db.execute(query)).first()
         if summary is None:
-            totals = {
+            raw = {
                 "total_requests": 0,
                 "total_matches": 0,
                 "total_displays": 0,
                 "total_clicks": 0,
-                "total_ecpm_after": 0,
-                "total_revenue_after": 0,
-                "avg_coverage_rate": 0,
-                "avg_display_rate": 0,
-                "avg_click_rate": 0,
+                "total_revenue_after": 0.0,
+                "total_pageviews": 0,
+                "weighted_viewability": 0.0,
+                "viewability_weight": 0.0,
             }
         else:
-            totals = {
+            raw = {
                 "total_requests": summary.total_requests or 0,
                 "total_matches": summary.total_matches or 0,
                 "total_displays": summary.total_displays or 0,
                 "total_clicks": summary.total_clicks or 0,
-                "total_ecpm_after": summary.total_ecpm_after or 0,
-                "total_revenue_after": summary.total_revenue_after or 0,
-                "avg_coverage_rate": summary.avg_coverage_rate or 0,
-                "avg_display_rate": summary.avg_display_rate or 0,
-                "avg_click_rate": summary.avg_click_rate or 0,
+                "total_revenue_after": float(summary.total_revenue_after or 0),
+                "total_pageviews": summary.total_pageviews or 0,
+                "weighted_viewability": float(summary.weighted_viewability or 0),
+                "viewability_weight": float(summary.viewability_weight or 0),
             }
 
-        total_ecpm_before = 0
-        total_revenue_before = 0
-        if is_admin(current_user):
+        total_revenue_before = 0.0
+        admin_user = is_admin(current_user)
+        if admin_user:
             admin_query = self._build_admin_query(
                 use_assignment_table, client_id, product_id, start_date, end_date
             )
             admin_summary = (await self.db.execute(admin_query)).first()
             if admin_summary:
-                total_ecpm_before = admin_summary.total_ecpm_before or 0
-                total_revenue_before = admin_summary.total_revenue_before or 0
+                total_revenue_before = float(admin_summary.total_revenue_before or 0)
 
-        response_data = {
+        derived = compute_ad_data_derived_metrics(
+            total_requests=float(raw["total_requests"]),
+            total_matches=float(raw["total_matches"]),
+            total_displays=float(raw["total_displays"]),
+            total_clicks=float(raw["total_clicks"]),
+            total_revenue_after=raw["total_revenue_after"],
+            total_revenue_before=total_revenue_before,
+            total_pageviews=float(raw["total_pageviews"]),
+            weighted_viewability=raw["weighted_viewability"],
+            viewability_weight=raw["viewability_weight"],
+            for_admin=admin_user,
+        )
+
+        effective_start = start_date or (date.today() - timedelta(days=30))
+        effective_end = end_date or date.today()
+
+        response_data: Dict[str, Any] = {
             "date_range": {
-                "start_date": start_date or (date.today() - timedelta(days=30)),
-                "end_date": end_date or date.today(),
+                "start_date": effective_start,
+                "end_date": effective_end,
             },
-            "total_requests": totals["total_requests"],
-            "total_matches": totals["total_matches"],
-            "total_displays": totals["total_displays"],
-            "total_clicks": totals["total_clicks"],
-            "avg_coverage_rate": round(totals["avg_coverage_rate"], 4),
-            "avg_display_rate": round(totals["avg_display_rate"], 4),
-            "avg_click_rate": round(totals["avg_click_rate"], 4),
-            "total_ecpm_after_deduct": round(totals["total_ecpm_after"], 4),
-            "total_revenue_after_deduct": round(totals["total_revenue_after"], 4),
+            # 兼容旧字段
+            "total_requests": int(raw["total_requests"]),
+            "total_matches": int(raw["total_matches"]),
+            "total_displays": int(raw["total_displays"]),
+            "total_clicks": int(raw["total_clicks"]),
+            "avg_coverage_rate": derived["coverage_rate"],
+            "avg_display_rate": derived["display_rate"],
+            "avg_click_rate": derived["click_rate"],
+            "total_ecpm_after_deduct": derived["ecpm_after_deduct"],
+            "total_revenue_after_deduct": round(raw["total_revenue_after"], 4),
+            # 与 Web 表格列名对齐
+            "request_count": int(raw["total_requests"]),
+            "match_count": int(raw["total_matches"]),
+            "display_count": int(raw["total_displays"]),
+            "click_count": int(raw["total_clicks"]),
+            "pageviews": int(raw["total_pageviews"]),
+            "coverage_rate": derived["coverage_rate"],
+            "display_rate": derived["display_rate"],
+            "click_rate": derived["click_rate"],
+            "viewability_rate": derived["viewability_rate"],
+            "cpc": derived["cpc"],
+            "ecpm_after_deduct": derived["ecpm_after_deduct"],
+            "revenue_after_deduct": round(raw["total_revenue_after"], 4),
         }
 
-        if current_user.role == "admin":
+        if admin_user:
             response_data.update(
                 {
-                    "total_ecpm_before_deduct": round(total_ecpm_before, 4),
+                    "total_ecpm_before_deduct": derived["ecpm_before_deduct"],
                     "total_revenue_before_deduct": round(total_revenue_before, 4),
+                    "ecpm_before_deduct": derived["ecpm_before_deduct"],
+                    "revenue_before_deduct": round(total_revenue_before, 4),
                 }
             )
 
@@ -131,35 +207,26 @@ class AdDataSummaryQuery:
             func.sum(AdData.match_count).label("total_matches"),
             func.sum(AdData.display_count).label("total_displays"),
             func.sum(AdData.click_count).label("total_clicks"),
-            func.sum(AdData.ecpm_after_deduct).label("total_ecpm_after"),
             func.sum(AdData.revenue_after_deduct).label("total_revenue_after"),
-            func.coalesce(
-                func.avg(AdData.coverage_rate),
+            func.sum(AdData.pageviews).label("total_pageviews"),
+            func.sum(
                 case(
-                    (func.sum(AdData.request_count) == 0, 0),
-                    else_=func.cast(func.sum(AdData.match_count), Float)
-                    * 100.0
-                    / func.cast(func.sum(AdData.request_count), Float),
-                ),
-            ).label("avg_coverage_rate"),
-            func.coalesce(
-                func.avg(AdData.display_rate),
+                    (
+                        and_(AdData.viewability_rate > 0, AdData.click_count > 0),
+                        AdData.viewability_rate * AdData.click_count,
+                    ),
+                    else_=0,
+                )
+            ).label("weighted_viewability"),
+            func.sum(
                 case(
-                    (func.sum(AdData.match_count) == 0, 0),
-                    else_=func.cast(func.sum(AdData.display_count), Float)
-                    * 100.0
-                    / func.cast(func.sum(AdData.match_count), Float),
-                ),
-            ).label("avg_display_rate"),
-            func.coalesce(
-                func.avg(AdData.click_rate),
-                case(
-                    (func.sum(AdData.display_count) == 0, 0),
-                    else_=func.cast(func.sum(AdData.click_count), Float)
-                    * 100.0
-                    / func.cast(func.sum(AdData.display_count), Float),
-                ),
-            ).label("avg_click_rate"),
+                    (
+                        and_(AdData.viewability_rate > 0, AdData.click_count > 0),
+                        AdData.click_count,
+                    ),
+                    else_=0,
+                )
+            ).label("viewability_weight"),
         )
 
         query = join_product_and_client(query, use_assignment_table)
@@ -187,7 +254,6 @@ class AdDataSummaryQuery:
         end_date: Optional[date],
     ):
         admin_query = select(
-            func.sum(AdData.ecpm_before_deduct).label("total_ecpm_before"),
             func.sum(AdData.revenue_before_deduct).label("total_revenue_before"),
         )
 

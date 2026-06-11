@@ -16,6 +16,28 @@ import {
 } from '../api/tb-search-data';
 import { extractErrorMessage, isErrorHandled } from '../utils/api';
 
+/** 国家筛选项展示：二字代码 + 中文名（无中文名或与代码相同时仅显示代码） */
+export function formatCountryFilterLabel(country) {
+  if (!country?.code) {
+    return country?.name_zh || '全部区域';
+  }
+  const name = (country.name_zh || '').trim();
+  if (!name || name === country.code) {
+    return country.code;
+  }
+  return `${country.code} ${name}`;
+}
+
+function normalizeCountryOption(item) {
+  const code = item.code;
+  const name_zh = item.name_zh || code;
+  return {
+    code,
+    name_zh,
+    label: formatCountryFilterLabel({ code, name_zh })
+  };
+}
+
 function getDateRangeFromForm(searchForm) {
   if (searchForm.dateRange?.length === 2) {
     return {
@@ -76,7 +98,7 @@ export function useDataPageFilterCascade({
   const users = ref([{ label: '全部客户', value: '' }]);
   const filterProducts = ref([{ label: '全部产品', value: '' }]);
   // filterCountries 响应式状态
-  const filterCountries = ref([{ code: '', name_zh: '全部区域' }]);
+  const filterCountries = ref([{ code: '', name_zh: '全部区域', label: '全部区域' }]);
 
   const fetchClientsWithData = async () => {
     try {
@@ -135,24 +157,27 @@ export function useDataPageFilterCascade({
       if (api.filterCountriesAdvanced) {
         countryOptions = data
           .filter((item) => item?.code != null && item.code !== '' && item.code !== 'ZZ')
-          .map((item) => ({
+          .map((item) => normalizeCountryOption({
             code: item.code,
             name_zh: item.name_zh || item.code
           }))
           .filter((item, index, self) => index === self.findIndex((t) => t.code === item.code))
           .sort((a, b) => a.name_zh.localeCompare(b.name_zh, 'zh-CN'));
       } else {
-        countryOptions = data.map((item) => ({
+        countryOptions = data.map((item) => normalizeCountryOption({
           code: item.code,
           name_zh: item.name_zh || item.code
         }));
       }
-      filterCountries.value = [{ code: '', name_zh: '全部区域' }, ...countryOptions];
+      filterCountries.value = [
+        { code: '', name_zh: '全部区域', label: '全部区域' },
+        ...countryOptions
+      ];
     } catch (error) {
       if (!isErrorHandled(error)) {
         ElMessage.error(extractErrorMessage(error));
       }
-      filterCountries.value = [{ code: '', name_zh: '全部区域' }];
+      filterCountries.value = [{ code: '', name_zh: '全部区域', label: '全部区域' }];
     }
   };
 

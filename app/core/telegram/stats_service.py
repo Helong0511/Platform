@@ -1,12 +1,12 @@
 """
-Telegram Bot 转化统计查询与消息格式化。
+Telegram Bot 广告数据统计查询与消息格式化。
 
-Bot 回调线程内创建独立 async 引擎并调用 ConversionService，
-与 Web 端转化总览 API 保持完全一致口径（含 affiliate_payout 裁剪等逻辑）。
+Bot 回调线程内创建独立 async 引擎并调用 AdDataSummaryQuery，
+与 Web 端广告数据表格合计行口径一致。
 """
 import asyncio
-import html
 import logging
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 from app.core.telegram.stats_period import resolve_stats_date_range
@@ -36,82 +36,77 @@ def build_stats_menu_buttons(include_back: bool = False) -> List[List[Dict[str, 
     return buttons
 
 
+def _fmt_count(value: Any) -> str:
+    return f"{int(value or 0):,}"
+
+
+def _fmt_pct(value: Any) -> str:
+    return f"{float(value or 0):.2f}%"
+
+
+def _fmt_money(value: Any, digits: int = 2) -> str:
+    return f"${float(value or 0):.{digits}f}"
+
+
 def format_stats_message(summary: Dict[str, Any], period_label: str) -> str:
     """
-    将转化总览数据格式化为 Telegram 消息。
+    将广告数据汇总格式化为 Telegram 消息。
 
-    字段命名与 Web 端转化总览卡片一致：Revenue / Pub Revenue / Profit。
+    展示字段与 Web 端广告数据报表列一致。
     """
-    start_date = summary.get("start_date", "")
-    end_date = summary.get("end_date", "")
-    cr = summary.get("cr") or 0
-    total_po = float(summary.get("total_po") or 0)
-    total_po_after_discount = float(summary.get("total_po_after_discount") or 0)
-    total_profit = float(summary.get("total_profit") or 0)
+    date_range = summary.get("date_range") or {}
+    start_date = date_range.get("start_date", "")
+    end_date = date_range.get("end_date", "")
+    if hasattr(start_date, "isoformat"):
+        start_date = start_date.isoformat()
+    if hasattr(end_date, "isoformat"):
+        end_date = end_date.isoformat()
 
     fields = {
-        "总点击": summary.get("total_clicks", 0),
-        "总转化": summary.get("total_conversions", 0),
-        "转化率 (CR)": f"{cr:.2f}%",
-        "Revenue": f"${total_po:.2f}",
-        "Pub Revenue": f"${total_po_after_discount:.2f}",
-        "Profit": f"${total_profit:.2f}",
+        "请求数": _fmt_count(summary.get("request_count")),
+        "匹配数": _fmt_count(summary.get("match_count")),
+        "覆盖率": _fmt_pct(summary.get("coverage_rate")),
+        "展示数": _fmt_count(summary.get("display_count")),
+        "展示率": _fmt_pct(summary.get("display_rate")),
+        "点击数": _fmt_count(summary.get("click_count")),
+        "点击率": _fmt_pct(summary.get("click_rate")),
+        "可见率": _fmt_pct(summary.get("viewability_rate")),
+        "CPC": _fmt_money(summary.get("cpc"), 4),
+        "PageViews": _fmt_count(summary.get("pageviews")),
+        "eCPM(扣)": _fmt_money(summary.get("ecpm_after_deduct"), 4),
+        "收益(扣)": _fmt_money(summary.get("revenue_after_deduct"), 4),
     }
+
+    if summary.get("ecpm_before_deduct") is not None:
+        fields["eCPM"] = _fmt_money(summary.get("ecpm_before_deduct"), 4)
+        fields["收益"] = _fmt_money(summary.get("revenue_before_deduct"), 4)
 
     footer = f"📅 统计区间: {start_date} ~ {end_date}"
 
-    message = format_telegram_message(
-        title=f"{period_label}转化统计",
-        fields=fields,
-        footer=footer,
-        message_type="stats",
+    return truncate_message(
+        format_telegram_message(
+            title=f"{period_label}广告数据统计",
+            fields=fields,
+            footer=footer,
+            message_type="stats",
+        )
     )
 
-    stats_list = summary.get("stats_list") or []
-    if stats_list:
-        # 与 Web 端表格一致：按点击量降序，取前 8 条有数据的行
-        sorted_rows = sorted(
-            stats_list,
-            key=lambda row: (row.get("click_count") or 0, row.get("conversion_count") or 0),
-            reverse=True,
-        )[:8]
-        message += "\n\n<b>分类明细（Top 8，按点击排序）</b>\n"
-        for idx, row in enumerate(sorted_rows, 1):
-            offer_name = html.escape(str(row.get("offer_name") or "未知 Offer"))
-            publisher_name = html.escape(str(row.get("publisher_name") or "未知渠道"))
-            clicks = row.get("click_count") or 0
-            conversions = row.get("conversion_count") or 0
-            row_cr = row.get("cr") or 0
-            row_po = float(row.get("po") or 0)
-            row_pub_rev = float(row.get("po_after_discount") or 0)
-            message += (
-                f"\n{idx}. {offer_name}\n"
-                f"   渠道: {publisher_name}\n"
-                f"   点击 {clicks} | 转化 {conversions} | CR {row_cr:.2f}%\n"
-                f"   Revenue ${row_po:.2f} | Pub Rev ${row_pub_rev:.2f}"
-            )
 
-    return truncate_message(message)
-
-
-async def _fetch_conversion_summary_isolated(period_key: str) -> Dict[str, Any]:
-    """
-    在独立 async 引擎中调用 ConversionService。
-
-    不可复用主进程 AsyncSessionLocal（绑定主事件循环），
-    须在线程内新建引擎并在 finally 中 dispose。
-    """
-    # 确保 aiomysql 兼容性补丁已加载
+async def _fetch_ad_data_summary_isolated(period_key: str) -> Dict[str, Any]:
+    """在独立 async 引擎中调用 AdDataSummaryQuery。"""
     import app.core.database  # noqa: F401
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
     from app.core.config import settings
     from app.scheduler_module.task_utils import get_admin_user
-    from app.services.cpl.conversion_service import ConversionService
+    from app.services.ad_data.queries.summary_query import AdDataSummaryQuery
 
-    start_date, end_date, _ = resolve_stats_date_range(period_key)
+    start_str, end_str, _ = resolve_stats_date_range(period_key)
+    start_date = date.fromisoformat(start_str)
+    end_date = date.fromisoformat(end_str)
+
     db_url = str(settings.SQLALCHEMY_DATABASE_URI)
-
     engine_kwargs: Dict[str, Any] = {
         "echo": False,
         "pool_pre_ping": True,
@@ -139,8 +134,7 @@ async def _fetch_conversion_summary_isolated(period_key: str) -> Dict[str, Any]:
             if not admin_user:
                 raise RuntimeError("未找到管理员账号，无法查询统计")
 
-            service = ConversionService(db)
-            return await service.get_conversion_summary(
+            return await AdDataSummaryQuery(db).fetch(
                 current_user=admin_user,
                 start_date=start_date,
                 end_date=end_date,
@@ -150,14 +144,9 @@ async def _fetch_conversion_summary_isolated(period_key: str) -> Dict[str, Any]:
 
 
 def fetch_stats_sync(period_key: str) -> Optional[Dict[str, Any]]:
-    """
-    同步拉取统计：供 Telegram 回调线程调用。
-
-    Returns:
-        转化总览字典；失败时返回 None
-    """
+    """同步拉取统计：供 Telegram 回调线程调用。"""
     try:
-        return asyncio.run(_fetch_conversion_summary_isolated(period_key))
+        return asyncio.run(_fetch_ad_data_summary_isolated(period_key))
     except Exception as exc:
         logger.error(f"Telegram 统计查询失败: period={period_key}, error={exc}", exc_info=True)
         return None

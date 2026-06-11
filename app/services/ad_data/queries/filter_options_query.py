@@ -123,12 +123,17 @@ class FilterOptionsQuery:
         for country_code, country_name_zh in (await self.db.execute(query)).all():
             if not country_code:
                 continue
-            display_name = resolve_country_name(
-                None,
-                country_code,
-                default_unknown="未知区域",
-                default_all="全部区域",
-            ) or country_name_zh or country_code
+            # 优先使用 JOIN 到的中文名；无登记记录时再回退为代码或特殊区域名称
+            display_name = (
+                country_name_zh
+                or resolve_country_name(
+                    None,
+                    country_code,
+                    default_unknown="未知区域",
+                    default_all="全部区域",
+                )
+                or country_code
+            )
             countries_list.append({"code": country_code, "name_zh": display_name})
 
         countries_list.sort(key=lambda x: x["name_zh"])

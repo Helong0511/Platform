@@ -30,7 +30,7 @@ def cmd_start(message):
         f"👋 你好，{user_name}！\n\n"
         f"我是广告管理平台的 Bot，可以帮助你：\n"
         f"• 接收转化通知\n"
-        f"• 查看转化统计\n"
+        f"• 查看广告数据统计\n"
         f"• 管理 Postback 待确认项\n\n"
         f"使用 /stats 查看统计，或 /help 查看所有命令。"
     )

@@ -74,7 +74,7 @@
             @change="fetchData"
             style="width: 100%;"
           >
-            <el-option v-for="country in countries" :key="country.code" :label="country.name_zh" :value="country.code"></el-option>
+            <el-option v-for="country in countries" :key="country.code" :label="country.label || country.name_zh" :value="country.code"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item>

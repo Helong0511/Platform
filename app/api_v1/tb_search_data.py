@@ -1013,9 +1013,15 @@ async def get_countries_with_tb_search_data(
         for country_code, country_name_zh in countries_data:
             # ---------- 条件分支 ----------
             if country_code and country_code != 'ZZ':
+                display_name = (
+                    country_name_zh
+                    or resolve_country_name(None, country_code)
+                    or country_code
+                    or "未知区域"
+                )
                 countries_list.append({
                     "code": country_code,
-                    "name_zh": country_name_zh or country_code or "未知区域"
+                    "name_zh": display_name,
                 })
         
         # 去重并排序

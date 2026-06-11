@@ -86,7 +86,7 @@ def set_bot_commands():
         commands_list = [
             ("start", "启动 Bot"),
             ("help", "显示帮助信息"),
-            ("stats", "转化统计（昨天/本周/上周/本月）"),
+            ("stats", "广告数据统计（昨天/本周/上周/本月）"),
             ("id", "查询聊天 ID（群组中需使用 /id@botname）")
         ]
         
