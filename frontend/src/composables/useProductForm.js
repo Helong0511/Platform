@@ -704,8 +704,9 @@ export function useProductForm(props, emit) {
 
     const endDate = new Date(lastClientEndDate);
     endDate.setHours(0, 0, 0, 0);
-    if (endDate < startDate) {
-      ElMessage.warning('最后一个客户的结束日期不能小于新客户的开始日期');
+    // 旧客户结束日必须早于新客户开始日（默认：昨天结束 → 今天开始）
+    if (endDate >= startDate) {
+      ElMessage.warning('最后一个客户的结束日期必须早于新客户的开始日期');
       return;
     }
 
