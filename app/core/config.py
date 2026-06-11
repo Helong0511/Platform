@@ -532,6 +532,8 @@ class Settings(BaseSettings):
     ZHISUO_API_KEY_2: str = os.getenv("ZHISUO_API_KEY_2", "")
     ZHISUO_API_CLIENT_ID_3: str = os.getenv("ZHISUO_API_CLIENT_ID_3", "")
     ZHISUO_API_KEY_3: str = os.getenv("ZHISUO_API_KEY_3", "")
+    ZHISUO_API_CLIENT_ID_4: str = os.getenv("ZHISUO_API_CLIENT_ID_4", "")
+    ZHISUO_API_KEY_4: str = os.getenv("ZHISUO_API_KEY_4", "")
     # 可选 JSON 数组，格式 [{"client_id":"...","api_key":"..."}]；若设置则优先于上述单账号变量
     ZHISUO_API_ACCOUNTS: str = os.getenv("ZHISUO_API_ACCOUNTS", "")
     ZHISUO_API_BASE_URL: str = os.getenv("ZHISUO_API_BASE_URL", "https://ch.tecnee.xyz")
@@ -570,6 +572,7 @@ class Settings(BaseSettings):
             (self.ZHISUO_API_CLIENT_ID, self.ZHISUO_API_KEY),
             (self.ZHISUO_API_CLIENT_ID_2, self.ZHISUO_API_KEY_2),
             (self.ZHISUO_API_CLIENT_ID_3, self.ZHISUO_API_KEY_3),
+            (self.ZHISUO_API_CLIENT_ID_4, self.ZHISUO_API_KEY_4),
         ):
             cid = (client_id or "").strip()
             key = (api_key or "").strip()

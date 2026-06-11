@@ -44,7 +44,7 @@ async def zhisuo_api_task(
     if not accounts:
         msg = (
             "跳过: Zhisuo API 未配置（请在 .env 设置 ZHISUO_API_CLIENT_ID / ZHISUO_API_KEY，"
-            "或 ZHISUO_API_CLIENT_ID_2~3 / ZHISUO_API_KEY_2~3，或 ZHISUO_API_ACCOUNTS）"
+            "或 ZHISUO_API_CLIENT_ID_2~4 / ZHISUO_API_KEY_2~4，或 ZHISUO_API_ACCOUNTS）"
         )
         logger.warning(msg)
         set_task_result(ZHISUO_API_TASK_NAME, msg)
