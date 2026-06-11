@@ -138,6 +138,7 @@ async def _fetch_ad_data_summary_isolated(period_key: str) -> Dict[str, Any]:
                 current_user=admin_user,
                 start_date=start_date,
                 end_date=end_date,
+                skip_cache=True,
             )
     finally:
         await engine.dispose()

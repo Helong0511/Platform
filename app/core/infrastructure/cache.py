@@ -2,6 +2,7 @@
 缓存抽象层
 提供统一的缓存接口，支持多种缓存后端
 """
+import asyncio
 import json
 import time
 import re
@@ -226,13 +227,24 @@ class MemoryCacheBackend(CacheBackend):
         return True
 
 
-# 全局缓存后端实例
+# 全局缓存后端实例（绑定创建时的事件循环）
 _cache_backend: Optional[CacheBackend] = None
+_cache_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 async def get_cache_backend() -> CacheBackend:
     """获取缓存后端实例（单例模式）"""
-    global _cache_backend
+    global _cache_backend, _cache_loop
+
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    if _cache_backend is not None and current_loop is not None:
+        if _cache_loop is not current_loop or _cache_loop.is_closed():
+            _cache_backend = None
+            _cache_loop = None
     
     if _cache_backend is None:
         # 尝试使用Redis
@@ -244,6 +256,9 @@ async def get_cache_backend() -> CacheBackend:
             # 降级到内存缓存
             _cache_backend = MemoryCacheBackend()
             logger.info("使用内存缓存作为缓存后端（Redis不可用）")
+
+        if current_loop is not None:
+            _cache_loop = current_loop
     
     return _cache_backend
 

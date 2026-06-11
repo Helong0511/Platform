@@ -89,13 +89,15 @@ class AdDataSummaryQuery:
         end_date: Optional[date] = None,
         client_id: Optional[int] = None,
         product_id: Optional[int] = None,
+        skip_cache: bool = False,
     ) -> Dict[str, Any]:
         cache_key = generate_cache_key(
             "ad_data_summary", current_user.id, start_date, end_date, client_id, product_id
         )
-        cached = await get_cached(cache_key, key_prefix="ad_data")
-        if cached:
-            return cached
+        if not skip_cache:
+            cached = await get_cached(cache_key, key_prefix="ad_data")
+            if cached:
+                return cached
 
         use_assignment_table = await check_use_assignment_table(self.db)
         query = self._build_main_query(use_assignment_table, current_user, client_id, product_id, start_date, end_date)
@@ -190,7 +192,8 @@ class AdDataSummaryQuery:
                 }
             )
 
-        await set_cached(cache_key, response_data, ttl=120, key_prefix="ad_data")
+        if not skip_cache:
+            await set_cached(cache_key, response_data, ttl=120, key_prefix="ad_data")
         return response_data
 
     def _build_main_query(

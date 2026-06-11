@@ -5,6 +5,7 @@ Redis 异步客户端单例模块。
 
 在系统中的位置：``app.core.redis_client.get_redis_client``，被 core 层绝大多数有状态组件引用。
 """
+import asyncio
 import logging
 from typing import Optional
 try:
@@ -18,8 +19,16 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Redis连接池（全局单例）
+# Redis连接池（全局单例，绑定创建时的事件循环）
 _redis_client: Optional[aioredis.Redis] = None
+_redis_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _reset_redis_singleton() -> None:
+    """丢弃当前单例引用（不在异构事件循环上 close，避免二次破坏）。"""
+    global _redis_client, _redis_loop
+    _redis_client = None
+    _redis_loop = None
 
 
 async def get_redis_client() -> Optional[aioredis.Redis]:
@@ -27,17 +36,25 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
     获取Redis客户端
     如果Redis未配置或连接失败，返回None（使用内存存储）
     """
-    global _redis_client
-    
-    # 如果已经连接，直接返回
+    global _redis_client, _redis_loop
+
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+
+    # 事件循环切换或已关闭时（如 Telegram 线程 asyncio.run）不复用旧客户端
     if _redis_client is not None:
-        try:
-            # 测试连接是否有效
-            await _redis_client.ping()
-            return _redis_client
-        except Exception as e:
-            logger.warning(f"Redis连接测试失败: {e}，尝试重新连接")
-            _redis_client = None
+        if _redis_loop is not current_loop or _redis_loop.is_closed():
+            logger.debug("Redis 客户端与当前事件循环不匹配，将重新连接")
+            _reset_redis_singleton()
+        else:
+            try:
+                await _redis_client.ping()
+                return _redis_client
+            except Exception as e:
+                logger.warning(f"Redis连接测试失败: {e}，尝试重新连接")
+                _reset_redis_singleton()
     
     # 从配置中读取Redis连接信息
     redis_host = getattr(settings, 'REDIS_HOST', None) or None
@@ -96,7 +113,8 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
             logger.info("Redis读写操作测试成功")
         else:
             logger.warning("Redis读写操作测试失败")
-        
+
+        _redis_loop = current_loop
         return _redis_client
     except Exception as e:
         error_msg = str(e)
@@ -105,7 +123,7 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
             f"连接配置: {redis_host}:{redis_port}/{redis_db}。"
             f"请检查：1) Redis服务是否运行 2) 端口是否正确 3) 密码是否正确 4) 防火墙是否阻止连接"
         )
-        _redis_client = None
+        _reset_redis_singleton()
         return None
 
 
@@ -122,7 +140,7 @@ async def close_redis_client():
         except Exception as e:
             logger.error(f"关闭Redis连接时出错: {e}")
         finally:
-            _redis_client = None
+            _reset_redis_singleton()
 
 
 async def reset_redis_client(reason: str = ""):
@@ -138,7 +156,7 @@ async def reset_redis_client(reason: str = ""):
     except Exception as e:
         logger.debug(f"重置Redis连接时关闭失败: {e}")
     finally:
-        _redis_client = None
+        _reset_redis_singleton()
 
     if reason:
         logger.warning(f"Redis连接已重置，原因: {reason}")
