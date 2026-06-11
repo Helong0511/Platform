@@ -100,6 +100,7 @@ const CacheManagement = createAsyncComponent(() => import(/* webpackChunkName: "
 const ThirdPartyReportManagement = createAsyncComponent(() => import(/* webpackChunkName: "third-party-report" */ '../views/admin/ThirdPartyReportManagement.vue'), 'ThirdPartyReportManagement');
 const CloakManagement = createAsyncComponent(() => import(/* webpackChunkName: "cloak-management" */ '../views/admin/CloakManagement.vue'), 'CloakManagement');
 const SensitivePathProbeManagement = createAsyncComponent(() => import(/* webpackChunkName: "sensitive-path-probe" */ '../views/admin/SensitivePathProbeManagement.vue'), 'SensitivePathProbeManagement');
+const CountryManagement = createAsyncComponent(() => import(/* webpackChunkName: "country-management" */ '../views/admin/CountryManagement.vue'), 'CountryManagement');
 const ClientUserManagement = createAsyncComponent(() => import(/* webpackChunkName: "client-user-management" */ '../views/client/ClientUserManagement.vue'), 'ClientUserManagement');
 const ApiDocumentation = createAsyncComponent(() => import(/* webpackChunkName: "api-documentation" */ '../views/ApiDocumentation.vue'), 'ApiDocumentation');
 
@@ -312,6 +313,12 @@ const routes = [
         path: 'admin/sensitive-path-probes',
         name: 'SensitivePathProbeManagement',
         component: SensitivePathProbeManagement,
+        meta: { requiresAdmin: true }
+      },
+      {
+        path: 'admin/countries',
+        name: 'CountryManagement',
+        component: CountryManagement,
         meta: { requiresAdmin: true }
       },
       {

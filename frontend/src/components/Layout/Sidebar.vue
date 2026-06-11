@@ -138,6 +138,9 @@
       <el-menu-item index="/app/admin/sensitive-path-probes">
         <span>敏感路径拦截日志</span>
       </el-menu-item>
+      <el-menu-item index="/app/admin/countries">
+        <span>国家维护</span>
+      </el-menu-item>
     </el-sub-menu>
     
     <el-menu-item v-if="!isAdmin" index="/app/client/user-management">
