@@ -47,6 +47,7 @@
 4. 部分匹配可能返回多个结果，优先返回最长的匹配项
 """
 import logging
+import unicodedata
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -59,16 +60,61 @@ logger = logging.getLogger(__name__)
 # 业务表 country_code 字段最大长度（与 ad_data / tb_search_data 表结构一致）
 COUNTRY_CODE_STORAGE_MAX_LENGTH = 100
 
-# 上游英文国名兜底（countries 表未命中时使用，键为小写）
+# 上游英文国名兜底（countries 表未命中时使用，键为小写无重音）
 _COMMON_ENGLISH_COUNTRY_ALIASES: dict[str, str] = {
     "united states": "US",
     "united kingdom": "GB",
+    "great britain": "GB",
     "germany": "DE",
     "japan": "JP",
     "australia": "AU",
     "brazil": "BR",
     "canada": "CA",
+    "south korea": "KR",
+    "republic of korea": "KR",
+    "korea": "KR",
+    "turkiye": "TR",
+    "turkey": "TR",
+    "vietnam": "VN",
+    "viet nam": "VN",
+    "india": "IN",
+    "indonesia": "ID",
+    "philippines": "PH",
+    "malaysia": "MY",
+    "singapore": "SG",
+    "thailand": "TH",
+    "mexico": "MX",
+    "france": "FR",
+    "italy": "IT",
+    "spain": "ES",
+    "netherlands": "NL",
+    "poland": "PL",
+    "taiwan": "TW",
+    "hong kong": "HK",
+    "russia": "RU",
+    "ukraine": "UA",
+    "saudi arabia": "SA",
+    "united arab emirates": "AE",
+    "uae": "AE",
 }
+
+
+def _strip_diacritics(text: str) -> str:
+    """去除重音符号，便于 Turkiye/Türkiye 等匹配。"""
+    nfkd = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def _lookup_common_english_alias(country_input: str) -> Optional[str]:
+    """常见英文国名静态映射（忽略大小写与重音）。"""
+    keys = {
+        _normalize_country_text(country_input),
+        _normalize_country_text(_strip_diacritics(country_input)),
+    }
+    for key in keys:
+        if key and key in _COMMON_ENGLISH_COUNTRY_ALIASES:
+            return _COMMON_ENGLISH_COUNTRY_ALIASES[key]
+    return None
 
 
 def preserve_unrecognized_country_code(
@@ -416,8 +462,8 @@ async def find_country_code_by_any_format(
         if country:
             return country.alpha_2_code
     
-    # 常见英文国名兜底（如智索 API 返回 United States）
-    alias_code = _COMMON_ENGLISH_COUNTRY_ALIASES.get(_normalize_country_text(country_input))
+    # 常见英文国名兜底（如智索 API 返回 South Korea / Turkiye / Vietnam）
+    alias_code = _lookup_common_english_alias(country_input)
     if alias_code:
         return alias_code
 
