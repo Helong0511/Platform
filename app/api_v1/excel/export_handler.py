@@ -14,7 +14,7 @@ from sqlalchemy import func, and_, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.country_code import resolve_country_name
+from app.core.country_code import build_ad_data_country_filter, resolve_country_name
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
@@ -233,18 +233,9 @@ async def export_ad_data_handler(
                 )
         query = query.where(AdData.product_id == product_id)
 
-    # 国家代码过滤
-    # ---------- 条件分支 ----------
-    if country_code and country_code.strip():
-        country_code_clean = country_code.strip()
-        # 验证国家代码长度（ISO 3166-1 二字母代码最多2个字符）
-        # ---------- 条件分支 ----------
-        if country_code_clean != 'ZZ' and len(country_code_clean) <= 2:
-            query = query.where(AdData.country_code == country_code_clean)
-        # ---------- 条件分支 ----------
-        elif len(country_code_clean) > 2:
-            # 国家代码长度超过2个字符，记录警告但不报错
-            logger.warning(f"导出时国家代码长度超过2个字符: {country_code_clean}，将忽略此过滤条件")
+    country_filter = await build_ad_data_country_filter(db, AdData.country_code, country_code)
+    if country_filter is not None:
+        query = query.where(country_filter)
 
     # 执行查询
     result = await db.execute(query.order_by(AdData.date.desc()))

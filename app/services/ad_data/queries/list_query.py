@@ -18,7 +18,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.country_code import resolve_country_name
+from app.core.country_code import build_ad_data_country_filter, resolve_country_name
 from app.core.query_utils import (
     apply_date_range_filter,
     check_use_assignment_table,
@@ -108,12 +108,11 @@ class AdDataListQuery:
             except ValueError:
                 logger.warning("无效的产品ID参数: %s", product_id)
 
-        if country_code and country_code.strip():
-            country_code_clean = country_code.strip()
-            if country_code_clean and country_code_clean != "ZZ" and len(country_code_clean) <= 2:
-                query = query.where(AdData.country_code == country_code_clean)
-            elif country_code_clean and len(country_code_clean) > 2:
-                logger.warning("国家代码长度超过2个字符: %s，将忽略此过滤条件", country_code_clean)
+        country_filter = await build_ad_data_country_filter(
+            self.db, AdData.country_code, country_code
+        )
+        if country_filter is not None:
+            query = query.where(country_filter)
 
         return apply_date_range_filter(
             query,
@@ -180,10 +179,11 @@ class AdDataListQuery:
                 except ValueError:
                     pass
 
-            if country_code and country_code.strip():
-                country_code_clean = country_code.strip()
-                if country_code_clean and country_code_clean != "ZZ" and len(country_code_clean) <= 2:
-                    filter_conditions.append(AdData.country_code == country_code_clean)
+            country_filter = await build_ad_data_country_filter(
+                self.db, AdData.country_code, country_code
+            )
+            if country_filter is not None:
+                filter_conditions.append(country_filter)
 
             date_range_start = start_date
             date_range_end = end_date

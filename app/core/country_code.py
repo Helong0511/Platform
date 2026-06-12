@@ -48,9 +48,9 @@
 """
 import logging
 import unicodedata
-from typing import Optional
+from typing import Any, Optional, Set
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import or_, select, func
 
 from app.models.models import CountryInfo
 
@@ -132,6 +132,53 @@ def preserve_unrecognized_country_code(
     if not code:
         return "ZZ"
     return code[:max_length]
+
+
+def collect_country_filter_values(
+    country_input: str,
+    resolved_code: Optional[str] = None,
+) -> Set[str]:
+    """
+    汇总国家筛选候选值：原始输入、解析后的 ISO 代码、保留的原始国名。
+    用于兼容库中同时存在 KR 与 South Korea 等情况。
+    """
+    country_code_clean = country_input.strip()
+    if not country_code_clean:
+        return set()
+    candidates: Set[str] = {country_code_clean}
+    if resolved_code:
+        candidates.add(resolved_code)
+    preserved = preserve_unrecognized_country_code(country_code_clean)
+    if preserved != "ZZ":
+        candidates.add(preserved)
+    return candidates
+
+
+async def build_ad_data_country_filter(
+    db: AsyncSession,
+    country_code_column: Any,
+    country_input: Optional[str],
+) -> Any | None:
+    """
+    构建 ad_data 国家字段的 SQLAlchemy 筛选条件。
+
+    支持 ISO 二字母、英文/中文国名，以及库中已存储的完整原始国名（最长 100 字符）。
+    返回 None 表示不按国家筛选。
+    """
+    if not country_input or not str(country_input).strip():
+        return None
+
+    country_code_clean = str(country_input).strip()
+    if country_code_clean == "ZZ":
+        return or_(country_code_column == "ZZ", country_code_column.is_(None))
+
+    resolved = await find_country_code_by_any_format(db, country_code_clean)
+    candidates = collect_country_filter_values(country_code_clean, resolved)
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return country_code_column == next(iter(candidates))
+    return or_(*[country_code_column == value for value in sorted(candidates)])
 
 
 def format_country_display(
