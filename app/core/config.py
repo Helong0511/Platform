@@ -537,7 +537,7 @@ class Settings(BaseSettings):
     # 可选 JSON 数组，格式 [{"client_id":"...","api_key":"..."}]；若设置则优先于上述单账号变量
     ZHISUO_API_ACCOUNTS: str = os.getenv("ZHISUO_API_ACCOUNTS", "")
     ZHISUO_API_BASE_URL: str = os.getenv("ZHISUO_API_BASE_URL", "https://ch.tecnee.xyz")
-    # 广告单元 / 国家报告拉数开关（可单独开启，也可全部开启；全部开启时两种维度分别入库）
+    # 广告单元 / 国家报告拉数全局默认（未在 ZHISUO_API_ACCOUNT_FETCH 中配置的账号使用）
     ZHISUO_API_FETCH_UNIT: bool = os.getenv("ZHISUO_API_FETCH_UNIT", "true").lower() in [
         "true",
         "1",
@@ -548,6 +548,8 @@ class Settings(BaseSettings):
         "1",
         "yes",
     ]
+    # 按 clientId 覆盖拉数开关，JSON 对象，如 {"zhisuo24":{"fetch_unit":true,"fetch_country":true}}
+    ZHISUO_API_ACCOUNT_FETCH: str = os.getenv("ZHISUO_API_ACCOUNT_FETCH", "")
 
     POMIAD_API_BASE_URL: str = os.getenv("POMIAD_API_BASE_URL", "https://data.pomiad.com/ys_data")
     POMIAD_API_USERNAME: str = os.getenv("POMIAD_API_USERNAME", "")
@@ -555,8 +557,65 @@ class Settings(BaseSettings):
     POMIAD_IS_BY_COUNTRY: int = int(os.getenv("POMIAD_IS_BY_COUNTRY", "0"))
     POMIAD_API_DATA_LIMIT: int = int(os.getenv("POMIAD_API_DATA_LIMIT", "100"))
 
-    def get_zhisuo_accounts(self) -> List[Dict[str, str]]:
-        """返回 zhisuo 账号列表，每项含 client_id、api_key。"""
+    @staticmethod
+    def _coerce_zhisuo_fetch_bool(value: object, default: bool) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return default
+        return str(value).strip().lower() in ("true", "1", "yes")
+
+    def _get_zhisuo_account_fetch_overrides(self) -> Dict[str, Dict[str, object]]:
+        raw = (self.ZHISUO_API_ACCOUNT_FETCH or "").strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as e:
+            logger.warning("ZHISUO_API_ACCOUNT_FETCH JSON 解析失败: %s", e)
+            return {}
+        if not isinstance(parsed, dict):
+            return {}
+        return {
+            str(key).strip(): value
+            for key, value in parsed.items()
+            if str(key).strip() and isinstance(value, dict)
+        }
+
+    def _resolve_zhisuo_fetch_flags(
+        self,
+        client_id: str,
+        item: Dict[str, object] | None = None,
+    ) -> Dict[str, bool]:
+        """解析单个 zhisuo 账号的广告单元 / 国家报告拉数开关。"""
+        fetch_unit = self.ZHISUO_API_FETCH_UNIT
+        fetch_country = self.ZHISUO_API_FETCH_COUNTRY
+        if item:
+            if "fetch_unit" in item:
+                fetch_unit = self._coerce_zhisuo_fetch_bool(item.get("fetch_unit"), fetch_unit)
+            if "fetch_country" in item:
+                fetch_country = self._coerce_zhisuo_fetch_bool(
+                    item.get("fetch_country"), fetch_country
+                )
+        overrides = self._get_zhisuo_account_fetch_overrides()
+        client_override = (
+            overrides.get(client_id)
+            or overrides.get(client_id.lower())
+            or overrides.get(client_id.upper())
+            or {}
+        )
+        if "fetch_unit" in client_override:
+            fetch_unit = self._coerce_zhisuo_fetch_bool(
+                client_override.get("fetch_unit"), fetch_unit
+            )
+        if "fetch_country" in client_override:
+            fetch_country = self._coerce_zhisuo_fetch_bool(
+                client_override.get("fetch_country"), fetch_country
+            )
+        return {"fetch_unit": fetch_unit, "fetch_country": fetch_country}
+
+    def get_zhisuo_accounts(self) -> List[Dict[str, object]]:
+        """返回 zhisuo 账号列表，每项含 client_id、api_key、fetch_unit、fetch_country。"""
         raw = (self.ZHISUO_API_ACCOUNTS or "").strip()
         if raw:
             try:
@@ -565,7 +624,7 @@ class Settings(BaseSettings):
                 logger.warning("ZHISUO_API_ACCOUNTS JSON 解析失败: %s", e)
                 parsed = None
             if isinstance(parsed, list):
-                accounts: List[Dict[str, str]] = []
+                accounts: List[Dict[str, object]] = []
                 for item in parsed:
                     if not isinstance(item, dict):
                         continue
@@ -574,11 +633,19 @@ class Settings(BaseSettings):
                     ).strip()
                     api_key = str(item.get("api_key") or item.get("key") or "").strip()
                     if client_id and api_key:
-                        accounts.append({"client_id": client_id, "api_key": api_key})
+                        flags = self._resolve_zhisuo_fetch_flags(client_id, item)
+                        accounts.append(
+                            {
+                                "client_id": client_id,
+                                "api_key": api_key,
+                                "fetch_unit": flags["fetch_unit"],
+                                "fetch_country": flags["fetch_country"],
+                            }
+                        )
                 if accounts:
                     return accounts
 
-        accounts = []
+        accounts: List[Dict[str, object]] = []
         for client_id, api_key in (
             (self.ZHISUO_API_CLIENT_ID, self.ZHISUO_API_KEY),
             (self.ZHISUO_API_CLIENT_ID_2, self.ZHISUO_API_KEY_2),
@@ -588,7 +655,15 @@ class Settings(BaseSettings):
             cid = (client_id or "").strip()
             key = (api_key or "").strip()
             if cid and key:
-                accounts.append({"client_id": cid, "api_key": key})
+                flags = self._resolve_zhisuo_fetch_flags(cid)
+                accounts.append(
+                    {
+                        "client_id": cid,
+                        "api_key": key,
+                        "fetch_unit": flags["fetch_unit"],
+                        "fetch_country": flags["fetch_country"],
+                    }
+                )
         return accounts
 
     # ====== 敏感路径防护（防扫描 / 探测） ======

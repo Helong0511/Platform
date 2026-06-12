@@ -3,7 +3,7 @@ zhisuo 上游广告数据拉取定时任务。
 
 功能说明：
 - 从 zhisuo API 获取广告单元 / 国家报告数据，检查重复后插入 ad_data
-- 通过 ZHISUO_API_FETCH_UNIT / ZHISUO_API_FETCH_COUNTRY 开关分别控制
+- 每个账号可单独配置 fetch_unit / fetch_country（见 ZHISUO_API_ACCOUNT_FETCH）
 - 国家报告返回英文国名（如 United States），入库时由 process_api_ad_data 转为 ISO 二字母代码
 - 支持多账号顺序拉取后合并入库
 """
@@ -59,25 +59,38 @@ ZHISUO_COUNTRY_FIELD_MAPPING = {
 }
 
 
+def _filter_accounts_for_report(
+    accounts: list[dict[str, Any]],
+    *,
+    report: str,
+) -> list[dict[str, Any]]:
+    """按报告类型筛选启用了对应开关的账号。"""
+    flag_key = "fetch_unit" if report == "unit" else "fetch_country"
+    return [acc for acc in accounts if acc.get(flag_key)]
+
+
 async def _fetch_zhisuo_rows_for_accounts(
     fetch_fn: Callable[..., Awaitable[list[Any]]],
     *,
     base_url: str,
-    accounts: list[dict[str, str]],
+    accounts: list[dict[str, Any]],
     start: str,
     end: str,
     report_label: str,
 ) -> list[Any]:
     """多账号顺序拉取并合并行列表。"""
+    if not accounts:
+        return []
+
     all_data: list[Any] = []
     fetch_errors: list[str] = []
     for acc in accounts:
-        client_id = acc["client_id"]
+        client_id = str(acc["client_id"])
         try:
             rows = await fetch_fn(
                 base_url=base_url,
                 client_id=client_id,
-                api_key=acc["api_key"],
+                api_key=str(acc["api_key"]),
                 start=start,
                 end=end,
             )
@@ -99,11 +112,11 @@ async def zhisuo_api_task(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> None:
-    """zhisuo 定时拉数：按开关拉取广告单元 / 国家报告并分别入库。"""
+    """zhisuo 定时拉数：按账号开关拉取广告单元 / 国家报告并分别入库。"""
     accounts = settings.get_zhisuo_accounts()
     base_url = settings.ZHISUO_API_BASE_URL
-    fetch_unit = settings.ZHISUO_API_FETCH_UNIT
-    fetch_country = settings.ZHISUO_API_FETCH_COUNTRY
+    unit_accounts = _filter_accounts_for_report(accounts, report="unit")
+    country_accounts = _filter_accounts_for_report(accounts, report="country")
 
     if not accounts:
         msg = (
@@ -114,18 +127,21 @@ async def zhisuo_api_task(
         set_task_result(ZHISUO_API_TASK_NAME, msg)
         return
 
-    if not fetch_unit and not fetch_country:
+    if not unit_accounts and not country_accounts:
         msg = (
-            "跳过: Zhisuo 广告单元与国家报告均未启用"
-            "（请设置 ZHISUO_API_FETCH_UNIT 或 ZHISUO_API_FETCH_COUNTRY 为 true）"
+            "跳过: 所有 Zhisuo 账号均未启用广告单元或国家报告拉数"
+            "（请检查 ZHISUO_API_FETCH_UNIT / ZHISUO_API_FETCH_COUNTRY / ZHISUO_API_ACCOUNT_FETCH）"
         )
         logger.warning(msg)
         set_task_result(ZHISUO_API_TASK_NAME, msg)
         return
 
-    if fetch_unit and fetch_country:
-        logger.info(
-            "Zhisuo 已同时启用广告单元与国家报告，将分别拉取并入库"
+    for acc in accounts:
+        logger.debug(
+            "Zhisuo 账号 %s 拉数开关: 广告单元=%s, 国家报告=%s",
+            acc["client_id"],
+            acc.get("fetch_unit"),
+            acc.get("fetch_country"),
         )
 
     zhisuo_start, zhisuo_end = resolve_upstream_date_range(
@@ -139,11 +155,11 @@ async def zhisuo_api_task(
 
     phase_summaries: list[str] = []
     try:
-        if fetch_unit:
+        if unit_accounts:
             unit_rows = await _fetch_zhisuo_rows_for_accounts(
                 fetch_zhisuo_unit_rows,
                 base_url=base_url,
-                accounts=accounts,
+                accounts=unit_accounts,
                 start=zhisuo_start,
                 end=zhisuo_end,
                 report_label="广告单元",
@@ -157,13 +173,14 @@ async def zhisuo_api_task(
                 notify_title="zhisuo-广告单元",
                 update_task_result=False,
             )
-            phase_summaries.append(f"广告单元: {unit_summary}")
+            unit_ids = ",".join(str(a["client_id"]) for a in unit_accounts)
+            phase_summaries.append(f"广告单元[{unit_ids}]: {unit_summary}")
 
-        if fetch_country:
+        if country_accounts:
             country_rows = await _fetch_zhisuo_rows_for_accounts(
                 fetch_zhisuo_country_rows,
                 base_url=base_url,
-                accounts=accounts,
+                accounts=country_accounts,
                 start=zhisuo_start,
                 end=zhisuo_end,
                 report_label="国家报告",
@@ -177,14 +194,14 @@ async def zhisuo_api_task(
                 notify_title="zhisuo-国家报告",
                 update_task_result=False,
             )
-            phase_summaries.append(f"国家报告: {country_summary}")
+            country_ids = ",".join(str(a["client_id"]) for a in country_accounts)
+            phase_summaries.append(f"国家报告[{country_ids}]: {country_summary}")
 
         set_task_result(
             ZHISUO_API_TASK_NAME,
             "执行成功: " + "; ".join(phase_summaries),
         )
     except Exception as e:
-        # 与 scheduler 中 log_scheduled_task_failure 返回的 error_msg 保持一致，避免重复拼接
         error_detail = truncate_task_error_message(str(e))
         logger.error(f"{ZHISUO_API_TASK_NAME} 执行失败: {error_detail}", exc_info=True)
         logger.warning(f"[zhisuo] {ZHISUO_API_TASK_NAME} 执行失败: {error_detail}")
