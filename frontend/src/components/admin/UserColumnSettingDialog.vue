@@ -16,6 +16,8 @@
       <el-checkbox label="full_name">全名</el-checkbox>
       <el-checkbox label="role">角色</el-checkbox>
       <el-checkbox label="email">邮箱</el-checkbox>
+      <el-checkbox v-if="hasClientUsers" label="company_name">公司名称</el-checkbox>
+      <el-checkbox v-if="hasClientUsers" label="contact_person">联系人</el-checkbox>
       <el-checkbox label="is_active">状态</el-checkbox>
       <el-checkbox v-if="hasClientUsers" label="api_enabled">API访问</el-checkbox>
       <el-checkbox v-if="hasClientUsers" label="password_change_enabled">允许修改密码</el-checkbox>

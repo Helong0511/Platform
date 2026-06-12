@@ -45,6 +45,16 @@
           {{ scope.row.email || '-' }}
         </template>
       </el-table-column>
+      <el-table-column v-if="hasClientUsers && columnVisibility.company_name" prop="company_name" label="公司名称" min-width="150" show-overflow-tooltip>
+        <template #default="scope">
+          {{ scope.row.role === 'client' ? (scope.row.client?.company_name || '-') : '-' }}
+        </template>
+      </el-table-column>
+      <el-table-column v-if="hasClientUsers && columnVisibility.contact_person" prop="contact_person" label="联系人" min-width="120" show-overflow-tooltip>
+        <template #default="scope">
+          {{ scope.row.role === 'client' ? (scope.row.client?.contact_person || '-') : '-' }}
+        </template>
+      </el-table-column>
       <el-table-column v-if="columnVisibility.is_active" prop="is_active" label="状态" width="100" align="center">
         <template #default="scope">
           <el-switch
