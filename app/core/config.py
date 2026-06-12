@@ -537,6 +537,17 @@ class Settings(BaseSettings):
     # 可选 JSON 数组，格式 [{"client_id":"...","api_key":"..."}]；若设置则优先于上述单账号变量
     ZHISUO_API_ACCOUNTS: str = os.getenv("ZHISUO_API_ACCOUNTS", "")
     ZHISUO_API_BASE_URL: str = os.getenv("ZHISUO_API_BASE_URL", "https://ch.tecnee.xyz")
+    # 广告单元 / 国家报告拉数开关（可单独开启，也可全部开启；全部开启时两种维度分别入库）
+    ZHISUO_API_FETCH_UNIT: bool = os.getenv("ZHISUO_API_FETCH_UNIT", "true").lower() in [
+        "true",
+        "1",
+        "yes",
+    ]
+    ZHISUO_API_FETCH_COUNTRY: bool = os.getenv("ZHISUO_API_FETCH_COUNTRY", "false").lower() in [
+        "true",
+        "1",
+        "yes",
+    ]
 
     POMIAD_API_BASE_URL: str = os.getenv("POMIAD_API_BASE_URL", "https://data.pomiad.com/ys_data")
     POMIAD_API_USERNAME: str = os.getenv("POMIAD_API_USERNAME", "")

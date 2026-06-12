@@ -11,9 +11,9 @@
 1. alpha_2_code（二字母代码）：如 "US", "CN", "GB"
 2. alpha_3_code（三字母代码）：如 "USA", "CHN", "GBR"
 3. numeric_code（数字代码）：如 "840", "156", "826"
-4. country_name_en（英文名称）：如 "United States", "China"
-5. country_name_zh（中文名称）：如 "美国", "中国"
-6. official_name_en（官方英文名称）：如 "United States of America"
+4. country_name_en（英文常用名）：如 "United States", "China"（优先）
+5. official_name_en（官方英文名）：如 "United States of America"（仅 country_name_en 未命中时）
+6. country_name_zh（中文名称）：如 "美国", "中国"
 7. official_name_zh（官方中文名称）：如 "中华人民共和国"
 
 匹配策略：
@@ -118,26 +118,46 @@ async def resolve_country_display(
     return format_country_display(code, country_name_zh)
 
 
+def _normalize_country_text(value: Optional[str]) -> str:
+    return (value or "").strip().lower()
+
+
 def _pick_best_country_match(
     countries: list[CountryInfo],
     country_input: str,
 ) -> Optional[CountryInfo]:
-    """多条命中时优先精确名称，否则取名称最长（更具体）的国家。"""
+    """多条命中时：country_name_en 优先于 official_name_en，精确优先于模糊，名称更长更具体。"""
     if not countries:
         return None
     if len(countries) == 1:
         return countries[0]
 
-    inp = country_input.strip().lower()
-    for field in (
-        "country_name_en",
-        "official_name_en",
-        "country_name_zh",
-        "official_name_zh",
-    ):
+    inp = _normalize_country_text(country_input)
+
+    def _field_matches(country: CountryInfo, field: str, *, exact: bool) -> bool:
+        name = _normalize_country_text(getattr(country, field, None))
+        if not name:
+            return False
+        if exact:
+            return name == inp
+        return inp in name or name in inp
+
+    # 英文：先 country_name_en，再 official_name_en
+    for field in ("country_name_en", "official_name_en"):
+        exact = [c for c in countries if _field_matches(c, field, exact=True)]
+        if exact:
+            return max(exact, key=lambda c: len(getattr(c, field, None) or ""))
+
+    for field in ("country_name_en", "official_name_en"):
+        partial = [c for c in countries if _field_matches(c, field, exact=False)]
+        if partial:
+            return max(partial, key=lambda c: len(getattr(c, field, None) or ""))
+
+    # 中文及其他字段
+    for field in ("country_name_zh", "official_name_zh"):
         exact = [
             c for c in countries
-            if (getattr(c, field, None) or "").strip().lower() == inp
+            if _normalize_country_text(getattr(c, field, None)) == inp
         ]
         if exact:
             return max(exact, key=lambda c: len((getattr(c, field, None) or "")))
@@ -151,6 +171,52 @@ def _pick_best_country_match(
         )
 
     return max(countries, key=_name_len)
+
+
+async def _match_country_by_name_field(
+    db: AsyncSession,
+    country_input: str,
+    field: str,
+) -> Optional[CountryInfo]:
+    """按单个名称字段匹配：精确 → 模糊包含 → 双向包含。"""
+    column = getattr(CountryInfo, field)
+
+    query = select(CountryInfo).where(column.ilike(country_input))
+    country = await _fetch_country_match(db, query, country_input)
+    if country:
+        return country
+
+    query = (
+        select(CountryInfo)
+        .where(column.ilike(f"%{country_input}%"))
+        .order_by(func.length(column).desc())
+    )
+    country = await _fetch_country_match(db, query, country_input)
+    if country:
+        return country
+
+    inp = _normalize_country_text(country_input)
+    result = await db.execute(select(CountryInfo))
+    matches = []
+    for country in result.scalars().all():
+        name = _normalize_country_text(getattr(country, field, None))
+        if name and (inp in name or name in inp):
+            matches.append(country)
+    return _pick_best_country_match(matches, country_input)
+
+
+async def _match_country_by_english_names(
+    db: AsyncSession,
+    country_input: str,
+) -> Optional[str]:
+    """
+    英文国名解析：优先 country_name_en，未命中再尝试 official_name_en。
+    """
+    for field in ("country_name_en", "official_name_en"):
+        country = await _match_country_by_name_field(db, country_input, field)
+        if country:
+            return country.alpha_2_code
+    return None
 
 
 async def _fetch_country_match(
@@ -229,9 +295,9 @@ async def find_country_code_by_any_format(
     1. alpha_2_code（二字母代码，如 "US"）
     2. alpha_3_code（三字母代码，如 "USA"）
     3. numeric_code（数字代码，如 "840"）
-    4. country_name_en（英文名称，如 "United States of America"）
-    5. country_name_zh（中文名称，如 "美国"）
-    6. official_name_en（官方英文名称）
+    4. country_name_en（英文常用名，如 "United States"）
+    5. official_name_en（官方英文名，如 "United States of America"；仅第 4 步未命中时）
+    6. country_name_zh（中文名称，如 "美国"）
     7. official_name_zh（官方中文名称）
     
     参数:
@@ -267,35 +333,10 @@ async def find_country_code_by_any_format(
     if country:
         return country.alpha_2_code
 
-    # 4. 尝试 country_name_en（英文名称，不区分大小写，支持部分匹配）
-    query = select(CountryInfo).where(CountryInfo.country_name_en.ilike(country_input))
-    country = await _fetch_country_match(db, query, country_input)
-    if country:
-        return country.alpha_2_code
-
-    query = (
-        select(CountryInfo)
-        .where(CountryInfo.country_name_en.ilike(f"%{country_input}%"))
-        .order_by(func.length(CountryInfo.country_name_en).desc())
-    )
-    country = await _fetch_country_match(db, query, country_input)
-    if country:
-        return country.alpha_2_code
-
-    # 5. 尝试 official_name_en（官方英文名称）
-    query = select(CountryInfo).where(CountryInfo.official_name_en.ilike(country_input))
-    country = await _fetch_country_match(db, query, country_input)
-    if country:
-        return country.alpha_2_code
-
-    query = (
-        select(CountryInfo)
-        .where(CountryInfo.official_name_en.ilike(f"%{country_input}%"))
-        .order_by(func.length(CountryInfo.official_name_en).desc())
-    )
-    country = await _fetch_country_match(db, query, country_input)
-    if country:
-        return country.alpha_2_code
+    # 4–5. 英文国名：先 country_name_en，未命中再 official_name_en
+    english_code = await _match_country_by_english_names(db, country_input)
+    if english_code:
+        return english_code
 
     # 6. 尝试 country_name_zh（中文名称，先精确匹配，再模糊匹配）
     query = select(CountryInfo).where(CountryInfo.country_name_zh == country_input)

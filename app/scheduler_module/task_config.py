@@ -237,7 +237,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "result_getter_module": "app.scheduler_module.task_result_store",
         "result_getter_function": "get_task_result",
         "cron_expression": "*/30 * * * *",
-        "description": "每隔30分钟执行一次，从 zhisuo API 获取广告单元数据",
+        "description": "每隔30分钟执行一次，从 zhisuo API 获取广告单元/国家报告数据（由 ZHISUO_API_FETCH_UNIT / ZHISUO_API_FETCH_COUNTRY 控制）",
     },
 
     # ========== Pomiad API获取数据任务 ==========

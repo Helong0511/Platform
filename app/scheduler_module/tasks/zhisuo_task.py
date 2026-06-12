@@ -2,21 +2,29 @@
 zhisuo 上游广告数据拉取定时任务。
 
 功能说明：
-- 从 zhisuo API 获取广告单元数据，检查重复后插入 ad_data
+- 从 zhisuo API 获取广告单元 / 国家报告数据，检查重复后插入 ad_data
+- 通过 ZHISUO_API_FETCH_UNIT / ZHISUO_API_FETCH_COUNTRY 开关分别控制
+- 国家报告返回英文国名（如 United States），入库时由 process_api_ad_data 转为 ISO 二字母代码
 - 支持多账号顺序拉取后合并入库
 """
 import logging
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from app.core.config import settings
 from app.scheduler_module.task_names import ZHISUO_API_TASK_NAME
 from app.scheduler_module.task_result_store import set_task_result
-from app.scheduler_module.task_utils import resolve_upstream_date_range
-from app.scheduler_module.upstream_fetch import fetch_zhisuo_unit_rows
-from app.scheduler_module.upstream_task_runner import run_upstream_import_task
+from app.scheduler_module.task_utils import (
+    get_current_time_str,
+    log_task_start,
+    resolve_upstream_date_range,
+)
+from app.scheduler_module.upstream_fetch import fetch_zhisuo_country_rows, fetch_zhisuo_unit_rows
+from app.scheduler_module.upstream_import import import_upstream_ad_data
 
 logger = logging.getLogger(__name__)
 
-ZHISUO_FIELD_MAPPING = {
+ZHISUO_UNIT_FIELD_MAPPING = {
     "date": "date",
     "ad_unit": "ad_unit_name",
     "product_name": "domain_name",
@@ -32,14 +40,69 @@ ZHISUO_FIELD_MAPPING = {
     "cpc": "cpc",
 }
 
+# country 字段为英文国名，process_api_ad_data 会调用 find_country_code_by_any_format 转为 US 等
+ZHISUO_COUNTRY_FIELD_MAPPING = {
+    "date": "date",
+    "product_name": "domain_name",
+    "country_code": "country",
+    "request_count": "ad_requests",
+    "match_count": "matched_requests",
+    "display_count": "ad_impressions",
+    "click_count": "clicks",
+    "revenue_before_deduct": "estimated_earnings",
+    "ecpm_before_deduct": "ecpm",
+    "coverage_rate": "coverage_rate",
+    "display_rate": "display_rate",
+    "click_rate": "click_through_rate",
+    "cpc": "cpc",
+}
+
+
+async def _fetch_zhisuo_rows_for_accounts(
+    fetch_fn: Callable[..., Awaitable[list[Any]]],
+    *,
+    base_url: str,
+    accounts: list[dict[str, str]],
+    start: str,
+    end: str,
+    report_label: str,
+) -> list[Any]:
+    """多账号顺序拉取并合并行列表。"""
+    all_data: list[Any] = []
+    fetch_errors: list[str] = []
+    for acc in accounts:
+        client_id = acc["client_id"]
+        try:
+            rows = await fetch_fn(
+                base_url=base_url,
+                client_id=client_id,
+                api_key=acc["api_key"],
+                start=start,
+                end=end,
+            )
+            all_data.extend(rows)
+            logger.info("Zhisuo %s 账号 %s 拉取 %d 条", report_label, client_id, len(rows))
+        except Exception as e:
+            err_msg = f"{report_label} 账号 {client_id}: {e}"
+            fetch_errors.append(err_msg)
+            logger.error("Zhisuo 拉取失败 - %s", err_msg, exc_info=True)
+
+    if fetch_errors and not all_data:
+        raise Exception(f"所有 Zhisuo {report_label} 拉取失败: " + "; ".join(fetch_errors))
+    if fetch_errors:
+        logger.warning("部分 Zhisuo %s 拉取失败: %s", report_label, "; ".join(fetch_errors))
+    return all_data
+
 
 async def zhisuo_api_task(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> None:
-    """zhisuo 定时拉数：多账号拉取合并后入库。"""
+    """zhisuo 定时拉数：按开关拉取广告单元 / 国家报告并分别入库。"""
     accounts = settings.get_zhisuo_accounts()
     base_url = settings.ZHISUO_API_BASE_URL
+    fetch_unit = settings.ZHISUO_API_FETCH_UNIT
+    fetch_country = settings.ZHISUO_API_FETCH_COUNTRY
 
     if not accounts:
         msg = (
@@ -50,42 +113,77 @@ async def zhisuo_api_task(
         set_task_result(ZHISUO_API_TASK_NAME, msg)
         return
 
+    if not fetch_unit and not fetch_country:
+        msg = (
+            "跳过: Zhisuo 广告单元与国家报告均未启用"
+            "（请设置 ZHISUO_API_FETCH_UNIT 或 ZHISUO_API_FETCH_COUNTRY 为 true）"
+        )
+        logger.warning(msg)
+        set_task_result(ZHISUO_API_TASK_NAME, msg)
+        return
+
+    if fetch_unit and fetch_country:
+        logger.info(
+            "Zhisuo 已同时启用广告单元与国家报告，将分别拉取并入库"
+        )
+
     zhisuo_start, zhisuo_end = resolve_upstream_date_range(
         start_date,
         end_date,
         early_morning_dual_day=True,
     )
 
-    async def fetch_data():
-        all_data = []
-        fetch_errors: list[str] = []
-        for acc in accounts:
-            client_id = acc["client_id"]
-            try:
-                rows = await fetch_zhisuo_unit_rows(
-                    base_url=base_url,
-                    client_id=client_id,
-                    api_key=acc["api_key"],
-                    start=zhisuo_start,
-                    end=zhisuo_end,
-                )
-                all_data.extend(rows)
-                logger.info("Zhisuo 账号 %s 拉取 %d 条", client_id, len(rows))
-            except Exception as e:
-                err_msg = f"账号 {client_id}: {e}"
-                fetch_errors.append(err_msg)
-                logger.error("Zhisuo 拉取失败 - %s", err_msg, exc_info=True)
+    current_time_str = get_current_time_str()
+    log_task_start(ZHISUO_API_TASK_NAME)
 
-        if fetch_errors and not all_data:
-            raise Exception("所有 Zhisuo 账号拉取失败: " + "; ".join(fetch_errors))
-        if fetch_errors:
-            logger.warning("部分 Zhisuo 账号拉取失败: %s", "; ".join(fetch_errors))
-        return all_data
+    phase_summaries: list[str] = []
+    try:
+        if fetch_unit:
+            unit_rows = await _fetch_zhisuo_rows_for_accounts(
+                fetch_zhisuo_unit_rows,
+                base_url=base_url,
+                accounts=accounts,
+                start=zhisuo_start,
+                end=zhisuo_end,
+                report_label="广告单元",
+            )
+            unit_summary = await import_upstream_ad_data(
+                task_name=ZHISUO_API_TASK_NAME,
+                data=unit_rows,
+                field_mapping=ZHISUO_UNIT_FIELD_MAPPING,
+                source="zhisuo定时任务-广告单元",
+                current_time_str=current_time_str,
+                notify_title="zhisuo-广告单元",
+                update_task_result=False,
+            )
+            phase_summaries.append(f"广告单元: {unit_summary}")
 
-    await run_upstream_import_task(
-        ZHISUO_API_TASK_NAME,
-        fetch_data=fetch_data,
-        field_mapping=ZHISUO_FIELD_MAPPING,
-        source="zhisuo定时任务",
-        notify_title="zhisuo",
-    )
+        if fetch_country:
+            country_rows = await _fetch_zhisuo_rows_for_accounts(
+                fetch_zhisuo_country_rows,
+                base_url=base_url,
+                accounts=accounts,
+                start=zhisuo_start,
+                end=zhisuo_end,
+                report_label="国家报告",
+            )
+            country_summary = await import_upstream_ad_data(
+                task_name=ZHISUO_API_TASK_NAME,
+                data=country_rows,
+                field_mapping=ZHISUO_COUNTRY_FIELD_MAPPING,
+                source="zhisuo定时任务-国家报告",
+                current_time_str=current_time_str,
+                notify_title="zhisuo-国家报告",
+                update_task_result=False,
+            )
+            phase_summaries.append(f"国家报告: {country_summary}")
+
+        set_task_result(
+            ZHISUO_API_TASK_NAME,
+            "执行成功: " + "; ".join(phase_summaries),
+        )
+    except Exception as e:
+        error_msg = f"{ZHISUO_API_TASK_NAME} 执行失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        logger.warning(f"[zhisuo] {error_msg}")
+        raise

@@ -38,6 +38,7 @@ async def finalize_upstream_import(
     task_name: str,
     current_time_str: str,
     notify_title: str,
+    update_task_result: bool = True,
 ) -> str:
     """
     上游导入收尾：提交事务、记录任务结果、可选 Telegram 通知。
@@ -97,7 +98,8 @@ async def finalize_upstream_import(
             logger.warning(f"发送 Telegram 通知超时: {task_name}")
 
     # ---------- 写入任务结果供调度器持久化 ----------
-    set_task_result(task_name, f"执行成功: {result_summary}")
+    if update_task_result:
+        set_task_result(task_name, f"执行成功: {result_summary}")
     return result_summary
 
 
@@ -142,7 +144,8 @@ async def import_upstream_ad_data(
     current_time_str: str,
     notify_title: str,
     data_transform: Optional[Callable[[List[Any]], List[Any]]] = None,
-) -> None:
+    update_task_result: bool = True,
+) -> str:
     """
     标准上游拉数入库入口：预处理 → process_api_ad_data → 提交与通知。
 
@@ -161,8 +164,10 @@ async def import_upstream_ad_data(
     # ---------- 空数据快速返回 ----------
     if not data:
         logger.info("暂无产品数据")
-        set_task_result(task_name, "执行成功: 暂无产品数据")
-        return
+        empty_msg = "执行成功: 暂无产品数据"
+        if update_task_result:
+            set_task_result(task_name, empty_msg)
+        return empty_msg
 
     # ---------- 可选数据预处理 ----------
     if data_transform:
@@ -174,8 +179,10 @@ async def import_upstream_ad_data(
         admin_user = await get_admin_user(db)
         if not admin_user:
             logger.error("未找到管理员用户，无法处理产品，跳过本次任务")
-            set_task_result(task_name, "跳过: 未找到管理员用户")
-            return
+            skip_msg = "跳过: 未找到管理员用户"
+            if update_task_result:
+                set_task_result(task_name, skip_msg)
+            return skip_msg
 
         result = await process_api_ad_data(
             data=data,
@@ -184,10 +191,11 @@ async def import_upstream_ad_data(
             source=source,
             field_mapping=dict(field_mapping),
         )
-        await finalize_upstream_import(
+        return await finalize_upstream_import(
             db,
             result,
             task_name=task_name,
             current_time_str=current_time_str,
             notify_title=notify_title,
+            update_task_result=update_task_result,
         )

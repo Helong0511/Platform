@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from app.scheduler_module.upstream_http import get_json, post_json, raise_unless_api_success
 
 ZHISUO_UNIT_PATH = "/api/channelunit"
+ZHISUO_COUNTRY_PATH = "/api/channelcountry"
 
 
 def build_zhisuo_sign(params: Dict[str, Any]) -> str:
@@ -138,16 +139,18 @@ async def fetch_addermobi_rows(
     return extract_addermobi_rows(json_data)
 
 
-async def fetch_zhisuo_unit_rows(
+async def fetch_zhisuo_report_rows(
     *,
     base_url: str,
     client_id: str,
     api_key: str,
     start: str,
     end: str,
+    path: str,
+    label: str = "Zhisuo API",
     limit: int = 1000,
 ) -> List[Any]:
-    """拉取 zhisuo 广告单元报告（分页合并 list）。"""
+    """拉取 zhisuo 报表接口（分页合并 list）。"""
     base = base_url.rstrip("/")
     all_rows: List[Any] = []
     page = 1
@@ -168,11 +171,11 @@ async def fetch_zhisuo_unit_rows(
         request_params["sign"] = sign
 
         json_data = await get_json(
-            base + ZHISUO_UNIT_PATH,
+            base + path,
             params=request_params,
-            label="Zhisuo API",
+            label=label,
         )
-        raise_unless_api_success(json_data, {1}, label="Zhisuo API", code_key="code")
+        raise_unless_api_success(json_data, {1}, label=label, code_key="code")
 
         data_block = json_data.get("data") or {}
         if not isinstance(data_block, dict):
@@ -188,6 +191,50 @@ async def fetch_zhisuo_unit_rows(
         page += 1
 
     return all_rows
+
+
+async def fetch_zhisuo_unit_rows(
+    *,
+    base_url: str,
+    client_id: str,
+    api_key: str,
+    start: str,
+    end: str,
+    limit: int = 1000,
+) -> List[Any]:
+    """拉取 zhisuo 广告单元报告（分页合并 list）。"""
+    return await fetch_zhisuo_report_rows(
+        base_url=base_url,
+        client_id=client_id,
+        api_key=api_key,
+        start=start,
+        end=end,
+        path=ZHISUO_UNIT_PATH,
+        label="Zhisuo 广告单元 API",
+        limit=limit,
+    )
+
+
+async def fetch_zhisuo_country_rows(
+    *,
+    base_url: str,
+    client_id: str,
+    api_key: str,
+    start: str,
+    end: str,
+    limit: int = 1000,
+) -> List[Any]:
+    """拉取 zhisuo 国家报告（分页合并 list）。"""
+    return await fetch_zhisuo_report_rows(
+        base_url=base_url,
+        client_id=client_id,
+        api_key=api_key,
+        start=start,
+        end=end,
+        path=ZHISUO_COUNTRY_PATH,
+        label="Zhisuo 国家报告 API",
+        limit=limit,
+    )
 
 
 # Pomiad 接口路径（参见 tests/Pomiad_com_data_api.pdf）

@@ -55,5 +55,6 @@ sign = hashlib.md5(query.encode('utf-8')).hexdigest()
 del params['key']
 params['sign'] = sign
 # response = requests.get(url + day_report, params=params)
-response = requests.get(url + unit, params=params)
+# response = requests.get(url + unit, params=params)
+response = requests.get(url + country, params=params)
 print(response.json())
