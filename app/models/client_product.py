@@ -113,8 +113,8 @@ class AdData(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='广告数据ID')
     date = Column(DateTime, nullable=False, comment='数据日期')
 
-    # 国家代码（ISO 3166-1 二字母代码；无法识别时可保留原始值，最长 5 字符）
-    country_code = Column(String(5), ForeignKey("countries.alpha_2_code", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, comment='国家代码（ISO 3166-1 二字母代码，未识别时保留原始值）')
+    # 国家代码（ISO 二字母；无法识别时保留完整原始国名，最长 100 字符）
+    country_code = Column(String(100), nullable=True, comment='国家代码（ISO 二字母；未识别时保留原始国名）')
 
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, comment='产品ID')
     ad_unit = Column(String(100), nullable=False, default='', server_default='', comment='广告单元')
@@ -174,7 +174,11 @@ class AdData(Base):
 
     # 关系
     product = relationship("Product", back_populates="ad_data")
-    country = relationship("CountryInfo", foreign_keys=[country_code])
+    country = relationship(
+        "CountryInfo",
+        primaryjoin="AdData.country_code == CountryInfo.alpha_2_code",
+        viewonly=True,
+    )
 
 class TBSearchData(Base):
     """
@@ -188,7 +192,7 @@ class TBSearchData(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment='ID')
     date = Column(DateTime, nullable=False, comment='日期')
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, comment='产品ID')
-    country_code = Column(String(5), ForeignKey("countries.alpha_2_code", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, comment='国家代码（未识别时保留原始值）')
+    country_code = Column(String(100), nullable=True, comment='国家代码（ISO 二字母；未识别时保留原始国名）')
     redirects = Column(Integer, default=0, comment='REDIRECTS')
     searches = Column(Integer, default=0, comment='SEARCHES')
     monetized = Column(Integer, default=0, comment='MONETIZED')
@@ -205,7 +209,11 @@ class TBSearchData(Base):
 
     # 关系
     product = relationship("Product", back_populates="tb_search_data")
-    country = relationship("CountryInfo", foreign_keys=[country_code])
+    country = relationship(
+        "CountryInfo",
+        primaryjoin="TBSearchData.country_code == CountryInfo.alpha_2_code",
+        viewonly=True,
+    )
 
     __table_args__ = (
         Index("idx_tb_search_data_date", "date"),

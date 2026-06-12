@@ -57,7 +57,18 @@ from app.models.models import CountryInfo
 logger = logging.getLogger(__name__)
 
 # 业务表 country_code 字段最大长度（与 ad_data / tb_search_data 表结构一致）
-COUNTRY_CODE_STORAGE_MAX_LENGTH = 5
+COUNTRY_CODE_STORAGE_MAX_LENGTH = 100
+
+# 上游英文国名兜底（countries 表未命中时使用，键为小写）
+_COMMON_ENGLISH_COUNTRY_ALIASES: dict[str, str] = {
+    "united states": "US",
+    "united kingdom": "GB",
+    "germany": "DE",
+    "japan": "JP",
+    "australia": "AU",
+    "brazil": "BR",
+    "canada": "CA",
+}
 
 
 def preserve_unrecognized_country_code(
@@ -65,7 +76,7 @@ def preserve_unrecognized_country_code(
     max_length: int = COUNTRY_CODE_STORAGE_MAX_LENGTH,
 ) -> str:
     """
-    无法识别国家时保留原始输入，截断至数据库字段长度上限。
+    无法识别国家时保留完整原始输入，截断至数据库字段长度上限。
 
     空值仍返回 ZZ（全部区域），表示数据源未提供国家信息。
     """
@@ -405,6 +416,10 @@ async def find_country_code_by_any_format(
         if country:
             return country.alpha_2_code
     
-    # 如果所有格式都找不到，返回 None
+    # 常见英文国名兜底（如智索 API 返回 United States）
+    alias_code = _COMMON_ENGLISH_COUNTRY_ALIASES.get(_normalize_country_text(country_input))
+    if alias_code:
+        return alias_code
+
     return None
 

@@ -32,7 +32,7 @@ DROP TABLE IF EXISTS `ad_data`;
 CREATE TABLE IF NOT EXISTS `ad_data`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '广告数据ID',
   `date` datetime NOT NULL COMMENT '数据日期',
-  `country_code` varchar(5) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT 'ZZ' COMMENT '国家代码（ISO 3166-1 二字母代码）',
+  `country_code` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT 'ZZ' COMMENT '国家代码（ISO 二字母；未识别时保留原始国名）',
   `product_id` int NOT NULL COMMENT '产品ID',
   `ad_unit` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '' COMMENT '广告单元',
   `request_count` int NOT NULL DEFAULT 0 COMMENT '请求数',
@@ -68,7 +68,7 @@ DROP TABLE IF EXISTS `ad_data_archive`;
 CREATE TABLE IF NOT EXISTS `ad_data_archive`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '广告数据ID',
   `date` datetime NOT NULL COMMENT '数据日期',
-  `country_code` varchar(2) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '国家代码（ISO 3166-1 二字母代码）',
+  `country_code` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '国家代码（ISO 二字母；未识别时保留原始国名）',
   `product_id` int NOT NULL COMMENT '产品ID',
   `ad_unit` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '' COMMENT '广告单元',
   `request_count` int NOT NULL DEFAULT 0 COMMENT '请求数',
@@ -87,7 +87,6 @@ CREATE TABLE IF NOT EXISTS `ad_data_archive`  (
   INDEX `idx_ad_data_archive_product`(`product_id` ASC) USING BTREE,
   INDEX `idx_ad_data_archive_date_product`(`date` ASC, `product_id` ASC) USING BTREE,
   INDEX `idx_ad_data_archive_country_code`(`country_code` ASC) USING BTREE,
-  CONSTRAINT `fk_ad_data_archive_country_code` FOREIGN KEY (`country_code`) REFERENCES `countries` (`alpha_2_code`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_ad_data_archive_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '广告数据归档表' ROW_FORMAT = DYNAMIC;
 
@@ -902,7 +901,7 @@ CREATE TABLE IF NOT EXISTS `tb_search_data`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT 'ID',
   `date` datetime NOT NULL COMMENT '日期',
   `product_id` int NOT NULL COMMENT '产品ID',
-  `country_code` varchar(5) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '国家代码（未识别时保留原始值，最长5字符）',
+  `country_code` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '国家代码（ISO 二字母；未识别时保留原始国名）',
   `redirects` int NULL DEFAULT NULL COMMENT 'REDIRECTS',
   `searches` int NULL DEFAULT NULL COMMENT 'SEARCHES',
   `monetized` int NULL DEFAULT NULL COMMENT 'MONETIZED',

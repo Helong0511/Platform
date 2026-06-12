@@ -18,6 +18,7 @@ from app.scheduler_module.task_utils import (
     get_current_time_str,
     log_task_start,
     resolve_upstream_date_range,
+    truncate_task_error_message,
 )
 from app.scheduler_module.upstream_fetch import fetch_zhisuo_country_rows, fetch_zhisuo_unit_rows
 from app.scheduler_module.upstream_import import import_upstream_ad_data
@@ -183,8 +184,9 @@ async def zhisuo_api_task(
             "执行成功: " + "; ".join(phase_summaries),
         )
     except Exception as e:
-        error_msg = f"执行失败: {str(e)}"
-        logger.error(f"{ZHISUO_API_TASK_NAME} {error_msg}", exc_info=True)
-        logger.warning(f"[zhisuo] {ZHISUO_API_TASK_NAME} {error_msg}")
-        set_task_result(ZHISUO_API_TASK_NAME, error_msg)
+        # 与 scheduler 中 log_scheduled_task_failure 返回的 error_msg 保持一致，避免重复拼接
+        error_detail = truncate_task_error_message(str(e))
+        logger.error(f"{ZHISUO_API_TASK_NAME} 执行失败: {error_detail}", exc_info=True)
+        logger.warning(f"[zhisuo] {ZHISUO_API_TASK_NAME} 执行失败: {error_detail}")
+        set_task_result(ZHISUO_API_TASK_NAME, error_detail)
         raise
