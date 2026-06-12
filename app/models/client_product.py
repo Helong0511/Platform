@@ -3,7 +3,7 @@
 """
 from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, Enum, Text, Index, \
     UniqueConstraint, Date
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import foreign, relationship
 from datetime import datetime
 import enum
 import uuid
@@ -176,7 +176,7 @@ class AdData(Base):
     product = relationship("Product", back_populates="ad_data")
     country = relationship(
         "CountryInfo",
-        primaryjoin="AdData.country_code == CountryInfo.alpha_2_code",
+        primaryjoin="foreign(AdData.country_code) == CountryInfo.alpha_2_code",
         viewonly=True,
     )
 
@@ -211,7 +211,7 @@ class TBSearchData(Base):
     product = relationship("Product", back_populates="tb_search_data")
     country = relationship(
         "CountryInfo",
-        primaryjoin="TBSearchData.country_code == CountryInfo.alpha_2_code",
+        primaryjoin="foreign(TBSearchData.country_code) == CountryInfo.alpha_2_code",
         viewonly=True,
     )
 
