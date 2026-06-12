@@ -183,7 +183,8 @@ async def zhisuo_api_task(
             "执行成功: " + "; ".join(phase_summaries),
         )
     except Exception as e:
-        error_msg = f"{ZHISUO_API_TASK_NAME} 执行失败: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        logger.warning(f"[zhisuo] {error_msg}")
+        error_msg = f"执行失败: {str(e)}"
+        logger.error(f"{ZHISUO_API_TASK_NAME} {error_msg}", exc_info=True)
+        logger.warning(f"[zhisuo] {ZHISUO_API_TASK_NAME} {error_msg}")
+        set_task_result(ZHISUO_API_TASK_NAME, error_msg)
         raise
