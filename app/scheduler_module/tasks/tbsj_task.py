@@ -60,7 +60,8 @@ async def tbsj_api_task(
         )
         return await fetch_tbsj_rows(
             base_url=TBSJ_URL,
-            params={"page": 1, "limit": 1000, "start": tbsj_start, "end": tbsj_end},
+            start=tbsj_start,
+            end=tbsj_end,
             headers=auth_headers,
         )
 

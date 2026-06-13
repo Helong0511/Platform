@@ -94,21 +94,53 @@ async def fetch_tqt_rows(
 async def fetch_tbsj_rows(
     *,
     base_url: str,
-    params: Dict[str, Any],
-    headers: Dict[str, str],
+    start: str,
+    end: str,
+    headers: Dict[str, Any],
+    limit: int = 1000,
 ) -> List[Any]:
-    """TBSJ 广告单元接口，成功码 20000，返回 data.items 或 items。"""
-    json_data = await post_json(
-        base_url + "/adunit",
-        json_body=params,
-        headers=headers,
-        label="TBSJ API",
-        verify=False,
-    )
-    raise_unless_api_success(json_data, {20000}, label="TBSJ API", code_key="code")
-    if "data" in json_data and isinstance(json_data["data"], dict):
-        return json_data["data"].get("items") or []
-    return json_data.get("items") or []
+    """TBSJ 广告单元接口（/adunit），按 total 全量分页，成功码 20000。"""
+    base = base_url.rstrip("/")
+    start_at, end_at = format_tbsj_datetime_range(start, end)
+    all_rows: List[Any] = []
+    page = 1
+
+    while True:
+        json_data = await post_json(
+            base + "/adunit",
+            json_body={
+                "page": page,
+                "limit": limit,
+                "start": start_at,
+                "end": end_at,
+            },
+            headers=headers,
+            label=f"TBSJ API adunit (page={page})",
+            verify=False,
+        )
+        raise_unless_api_success(json_data, {20000}, label="TBSJ API", code_key="code")
+
+        data_block = json_data.get("data") or {}
+        if not isinstance(data_block, dict):
+            break
+
+        rows = data_block.get("items") or []
+        if isinstance(rows, list):
+            all_rows.extend(rows)
+
+        total = int(data_block.get("total") or 0)
+        if not rows or (total > 0 and len(all_rows) >= total):
+            break
+        page += 1
+
+    return all_rows
+
+
+def format_tbsj_datetime_range(start: str, end: str) -> tuple[str, str]:
+    """TBSJ API 日期范围：start 日 00:00:00，end 日 23:59:59。"""
+    start_day = (start or "").strip()[:10]
+    end_day = (end or start or "").strip()[:10]
+    return f"{start_day} 00:00:00", f"{end_day} 23:59:59"
 
 
 def extract_addermobi_rows(json_data: Dict[str, Any]) -> List[Any]:
