@@ -212,7 +212,8 @@ async def process_api_ad_data(
     error_count = 0
     import_date_min: Optional[date] = None
     import_date_max: Optional[date] = None
-    imported_product_ids: Set[int] = set()
+    # 本次成功 insert/update 的产品 ID（skip / error 不计入，用于分配空窗检查范围）
+    written_product_ids: Set[int] = set()
 
     # ========== 第一步：预处理所有数据，识别国家代码并分组 ==========
     # 存储能识别国家代码的数据：按 (date_str, product_name, country_code) 分组累加
@@ -519,8 +520,9 @@ async def process_api_ad_data(
 
     # ========== 第二步：处理能识别国家代码的数据（按日期、产品、国家检查重复，累加后处理） ==========
     for key, grouped_data in recognized_data.items():
-        saved_product_id: Optional[int] = None
-        async with db.begin_nested():
+        pending_write: Optional[str] = None  # "insert" | "update"
+        pending_product_id: Optional[int] = None
+        async with db.begin_nested() as savepoint:
             try:
                 date_str = grouped_data["date_str"]
                 product_name = grouped_data["product_name"]
@@ -737,8 +739,8 @@ async def process_api_ad_data(
                         existing_data.revenue_after_deduct = revenue_after_deduct
 
                     if need_update:
-                        updated_count += 1
-                        saved_product_id = product_id
+                        pending_write = "update"
+                        pending_product_id = product_id
                         logger.info(
                             f"更新广告数据: 日期={date_str}, 产品={product_name}, 国家={country_code}, "
                             f"变化字段: {', '.join(update_fields)}"
@@ -774,8 +776,8 @@ async def process_api_ad_data(
                     db.add(new_ad_data)
                     await db.flush()
                     await db.refresh(new_ad_data)
-                    inserted_count += 1
-                    saved_product_id = product_id
+                    pending_write = "insert"
+                    pending_product_id = product_id
 
                     logger.info(
                         f"添加广告数据: 日期={date_str}, 产品={product_name}, 国家={country_code}, "
@@ -787,6 +789,9 @@ async def process_api_ad_data(
 
 
             except Exception as e:
+                await savepoint.rollback()
+                pending_write = None
+                pending_product_id = None
                 error_msg = str(e)
                 if "IntegrityError" in str(type(e)) or "Duplicate entry" in error_msg or "uq_ad_data" in error_msg:
                     logger.warning(
@@ -797,16 +802,20 @@ async def process_api_ad_data(
                     )
                 else:
                     logger.error(f"处理能识别国家代码的数据时出错: {error_msg}", exc_info=True)
-                saved_product_id = None
                 error_count += 1
 
-        if saved_product_id is not None:
-            imported_product_ids.add(saved_product_id)
+        if pending_write == "insert" and pending_product_id is not None:
+            inserted_count += 1
+            written_product_ids.add(pending_product_id)
+        elif pending_write == "update" and pending_product_id is not None:
+            updated_count += 1
+            written_product_ids.add(pending_product_id)
 
     # ========== 第三步：处理无国家输入（ZZ）或无法识别（保留原始代码）的累加数据 ==========
     for key, grouped_data in unrecognized_data.items():
-        saved_product_id: Optional[int] = None
-        async with db.begin_nested():
+        pending_write: Optional[str] = None
+        pending_product_id: Optional[int] = None
+        async with db.begin_nested() as savepoint:
             try:
                 if len(key) == 4:
                     date_str, product_name, ad_unit, country_code = key
@@ -1021,8 +1030,8 @@ async def process_api_ad_data(
                         existing_data.revenue_after_deduct = revenue_after_deduct
 
                     if need_update:
-                        updated_count += 1
-                        saved_product_id = product_id
+                        pending_write = "update"
+                        pending_product_id = product_id
                         logger.info(
                             f"更新广告数据（无法识别国家代码，已累加）: 日期={date_str}, 产品={product_name}, 国家=AA, 变化字段: {', '.join(update_fields)}"
                         )
@@ -1057,8 +1066,8 @@ async def process_api_ad_data(
                     db.add(new_ad_data)
                     await db.flush()
                     await db.refresh(new_ad_data)
-                    inserted_count += 1
-                    saved_product_id = product_id
+                    pending_write = "insert"
+                    pending_product_id = product_id
 
                     logger.info(
                         f"添加广告数据（国家代码未识别，已保留原始值）: 日期={date_str}, 产品={product_name}, 国家={country_code}, "
@@ -1069,6 +1078,9 @@ async def process_api_ad_data(
                     )
 
             except Exception as e:
+                await savepoint.rollback()
+                pending_write = None
+                pending_product_id = None
                 error_msg = str(e)
                 if "IntegrityError" in str(type(e)) or "Duplicate entry" in error_msg or "uq_ad_data" in error_msg:
                     logger.warning(
@@ -1078,11 +1090,14 @@ async def process_api_ad_data(
                     )
                 else:
                     logger.error(f"处理无法识别国家代码的数据时出错: {error_msg}", exc_info=True)
-                saved_product_id = None
                 error_count += 1
 
-        if saved_product_id is not None:
-            imported_product_ids.add(saved_product_id)
+        if pending_write == "insert" and pending_product_id is not None:
+            inserted_count += 1
+            written_product_ids.add(pending_product_id)
+        elif pending_write == "update" and pending_product_id is not None:
+            updated_count += 1
+            written_product_ids.add(pending_product_id)
 
     if inserted_count > 0 or updated_count > 0:
         try:
@@ -1112,7 +1127,7 @@ async def process_api_ad_data(
             db,
             start_date=import_date_min,
             end_date=import_date_max,
-            product_ids=sorted(imported_product_ids) if imported_product_ids else None,
+            product_ids=sorted(written_product_ids) if written_product_ids else None,
         )
 
     return {
