@@ -104,6 +104,7 @@ async def fetch_tbsj_rows(
     start_at, end_at = format_tbsj_datetime_range(start, end)
     all_rows: List[Any] = []
     page = 1
+    total = 0
 
     while True:
         json_data = await post_json(
@@ -128,12 +129,21 @@ async def fetch_tbsj_rows(
         if isinstance(rows, list):
             all_rows.extend(rows)
 
-        total = int(data_block.get("total") or 0)
-        if not rows or (total > 0 and len(all_rows) >= total):
+        total = int(data_block.get("total") or total)
+        if _should_break_tbsj_pagination(rows, total=total, collected=len(all_rows)):
             break
         page += 1
 
     return all_rows
+
+
+def _should_break_tbsj_pagination(rows: Any, *, total: int, collected: int) -> bool:
+    """TBSJ 分页终止：items 非列表、空页、或已凑齐 total 时结束。"""
+    if not isinstance(rows, list):
+        return True
+    if not rows:
+        return True
+    return total > 0 and collected >= total
 
 
 def format_tbsj_datetime_range(start: str, end: str) -> tuple[str, str]:
