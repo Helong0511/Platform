@@ -746,6 +746,7 @@ async def process_api_ad_data(
 
                     else:
                         skipped_count += 1
+                        saved_product_id = product_id
                         logger.info(f"数据完全相同，跳过: 日期={date_str}, 产品={product_name}, 国家={country_code}")
                 else:
                     # 创建新记录
@@ -1029,6 +1030,7 @@ async def process_api_ad_data(
 
                     else:
                         skipped_count += 1
+                        saved_product_id = product_id
                         logger.info(f"数据完全相同，跳过: 日期={date_str}, 产品={product_name}, 国家=AA")
                 else:
                     # 创建新记录
