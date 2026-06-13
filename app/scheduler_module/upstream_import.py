@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ad_data_processor import process_api_ad_data
+from app.core.product_assignment import format_assignment_gap_telegram_message
 from app.core.telegram import send_telegram_message_async
 from app.core.database import AsyncSessionLocal
 from app.scheduler_module.task_result_store import set_task_result
@@ -70,6 +71,8 @@ async def finalize_upstream_import(
     updated_count = result.get("updated_count", 0)
     skipped_count = result.get("skipped_count", 0)
     error_count = result.get("error_count", 0)
+    assignment_gaps = result.get("assignment_gaps") or []
+    assignment_orphan_total = int(result.get("assignment_orphan_total") or 0)
 
     result_summary = format_result_summary(
         inserted=inserted_count,
@@ -79,7 +82,7 @@ async def finalize_upstream_import(
     )
     logger.info(f"数据导入完成: {result_summary}")
 
-    # ---------- Telegram 通知（仅在有实际写入时发送） ----------
+    # ---------- Telegram 通知（有写入时发送；分配空窗单独告警） ----------
     if inserted_count > 0 or updated_count > 0:
         telegram_msg = (
             f"⏰ {notify_title} 定时任务执行完成\n\n"
@@ -92,10 +95,20 @@ async def finalize_upstream_import(
         if error_count > 0:
             telegram_msg += f"\n❌ 错误: {error_count} 条"
         try:
-            # 5 秒超时，避免通知阻塞调度器主流程
             await asyncio.wait_for(send_telegram_message_async(telegram_msg), timeout=5.0)
         except asyncio.TimeoutError:
             logger.warning(f"发送 Telegram 通知超时: {task_name}")
+
+    if assignment_orphan_total > 0:
+        gap_msg = format_assignment_gap_telegram_message(
+            notify_title=notify_title,
+            gaps=assignment_gaps,
+            total_orphan=assignment_orphan_total,
+        )
+        try:
+            await asyncio.wait_for(send_telegram_message_async(gap_msg), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning(f"发送产品分配空窗 Telegram 告警超时: {task_name}")
 
     # ---------- 写入任务结果供调度器持久化 ----------
     if update_task_result:

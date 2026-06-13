@@ -3,11 +3,11 @@
 用于记录和管理产品在不同时间段的客户归属
 """
 from collections import defaultdict
-from typing import Any
+from typing import Any, Optional, Sequence
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, func, exists, text
 from datetime import date, datetime, timezone, timedelta
-from app.models.models import Product, ProductAssignment, Client
+from app.models.models import Product, ProductAssignment, Client, AdData
 import logging
 
 logger = logging.getLogger(__name__)
@@ -500,6 +500,100 @@ async def validate_product_assignments(
             )
     
     return {"errors": errors, "warnings": warnings}
+
+
+def _assignment_covers_ad_data_date_condition():
+    """与详情报表 join_product_and_client 一致的分配日期匹配条件。"""
+    return and_(
+        ProductAssignment.product_id == AdData.product_id,
+        AdData.date >= ProductAssignment.start_date,
+        or_(
+            ProductAssignment.end_date.is_(None),
+            AdData.date < func.date_add(ProductAssignment.end_date, text("INTERVAL 1 DAY")),
+        ),
+    )
+
+
+async def find_ad_data_assignment_gaps(
+    db: AsyncSession,
+    *,
+    start_date: date,
+    end_date: date,
+    product_ids: Optional[Sequence[int]] = None,
+    limit: int = 15,
+) -> tuple[list[dict[str, Any]], int]:
+    """
+    查找 ad_data 在指定日期范围内无产品分配覆盖的记录（按产品+日期聚合）。
+
+    Returns:
+        (gap 列表, orphan 总行数)
+    """
+    has_assignment = exists(select(1).where(_assignment_covers_ad_data_date_condition()))
+
+    filters = [
+        func.date(AdData.date) >= start_date,
+        func.date(AdData.date) <= end_date,
+        ~has_assignment,
+    ]
+    if product_ids:
+        filters.append(AdData.product_id.in_(list(product_ids)))
+
+    count_query = select(func.count(AdData.id)).select_from(AdData).where(*filters)
+    total_orphan = int((await db.execute(count_query)).scalar() or 0)
+    if total_orphan == 0:
+        return [], 0
+
+    detail_query = (
+        select(
+            Product.id.label("product_id"),
+            Product.name.label("product_name"),
+            func.date(AdData.date).label("data_date"),
+            func.count(AdData.id).label("row_count"),
+        )
+        .join(Product, AdData.product_id == Product.id)
+        .where(*filters)
+        .group_by(Product.id, Product.name, func.date(AdData.date))
+        .order_by(func.date(AdData.date).desc(), func.count(AdData.id).desc())
+        .limit(limit)
+    )
+    rows = (await db.execute(detail_query)).all()
+    gaps = [
+        {
+            "product_id": r.product_id,
+            "product_name": r.product_name,
+            "data_date": r.data_date.isoformat() if hasattr(r.data_date, "isoformat") else str(r.data_date),
+            "row_count": int(r.row_count),
+        }
+        for r in rows
+    ]
+    return gaps, total_orphan
+
+
+def format_assignment_gap_telegram_message(
+    *,
+    notify_title: str,
+    gaps: list[dict[str, Any]],
+    total_orphan: int,
+) -> str:
+    """格式化产品分配空窗 Telegram 告警正文。"""
+    lines = [
+        "⚠️ 产品分配覆盖异常",
+        "",
+        f"来源: {notify_title}",
+        f"无有效分配、详情报表不可见的广告数据: {total_orphan} 条",
+        "",
+        "明细（产品 × 日期）:",
+    ]
+    for item in gaps:
+        lines.append(
+            f"• {item['product_name']} | {item['data_date']} | {item['row_count']} 条"
+        )
+    listed = sum(g["row_count"] for g in gaps)
+    if total_orphan > listed:
+        lines.append(f"• … 其余 {total_orphan - listed} 条未列出")
+    lines.append("")
+    lines.append("请在「产品管理 → 分配历史」检查空窗日期并补全归属。")
+    return "\n".join(lines)
 
 
 async def initialize_product_assignment(

@@ -7,8 +7,8 @@
 """
 import logging
 import asyncio
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional, Set
 import pytz
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
@@ -199,6 +199,7 @@ async def process_api_ad_data(
 
     # 导入build_product_maps和find_or_create_product函数
     from app.api_v1.excel.import_handler import build_product_maps, find_or_create_product
+    from app.core.product_assignment import find_ad_data_assignment_gaps
 
     # ========== 构建产品映射（与Excel导入逻辑一致） ==========
     product_map, product_name_map = await build_product_maps(db)
@@ -209,6 +210,9 @@ async def process_api_ad_data(
     updated_count = 0
     skipped_count = 0
     error_count = 0
+    import_date_min: Optional[date] = None
+    import_date_max: Optional[date] = None
+    imported_product_ids: Set[int] = set()
 
     # ========== 第一步：预处理所有数据，识别国家代码并分组 ==========
     # 存储能识别国家代码的数据：按 (date_str, product_name, country_code) 分组累加
@@ -256,6 +260,12 @@ async def process_api_ad_data(
                 logger.warning(f"日期格式错误: {item_date_str}, 错误: {str(e)}, 跳过该条数据")
                 error_count += 1
                 continue
+
+            data_day = item_date.date()
+            if import_date_min is None or data_day < import_date_min:
+                import_date_min = data_day
+            if import_date_max is None or data_day > import_date_max:
+                import_date_max = data_day
 
             # 验证产品名称
             if not item_product_name or not item_product_name.strip():
@@ -526,8 +536,9 @@ async def process_api_ad_data(
                     product_map=product_map,
                     product_name_map=product_name_map,
                     db=db,
-                    current_user=admin_user
+                    current_user=admin_user,
                 )
+                imported_product_ids.add(product_info["product_id"])
 
                 product_id = product_info["product_id"]
                 ecpm_deduct_ratio = product_info.get("ecpm_deduct_ratio", 0.0)
@@ -805,8 +816,9 @@ async def process_api_ad_data(
                     product_map=product_map,
                     product_name_map=product_name_map,
                     db=db,
-                    current_user=admin_user
+                    current_user=admin_user,
                 )
+                imported_product_ids.add(product_info["product_id"])
 
                 product_id = product_info["product_id"]
                 ecpm_deduct_ratio = product_info.get("ecpm_deduct_ratio", 0.0)
@@ -1081,9 +1093,21 @@ async def process_api_ad_data(
         except Exception as log_error:
             logger.warning(f"记录广告数据导入汇总审计失败: {log_error}")
 
+    assignment_gaps: list[dict[str, Any]] = []
+    assignment_orphan_total = 0
+    if import_date_min and import_date_max and (inserted_count > 0 or updated_count > 0):
+        assignment_gaps, assignment_orphan_total = await find_ad_data_assignment_gaps(
+            db,
+            start_date=import_date_min,
+            end_date=import_date_max,
+            product_ids=sorted(imported_product_ids) if imported_product_ids else None,
+        )
+
     return {
         "inserted_count": inserted_count,
         "updated_count": updated_count,
         "skipped_count": skipped_count,
-        "error_count": error_count
+        "error_count": error_count,
+        "assignment_gaps": assignment_gaps,
+        "assignment_orphan_total": assignment_orphan_total,
     }
