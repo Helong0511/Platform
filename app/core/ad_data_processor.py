@@ -519,6 +519,7 @@ async def process_api_ad_data(
 
     # ========== 第二步：处理能识别国家代码的数据（按日期、产品、国家检查重复，累加后处理） ==========
     for key, grouped_data in recognized_data.items():
+        saved_product_id: Optional[int] = None
         async with db.begin_nested():
             try:
                 date_str = grouped_data["date_str"]
@@ -538,7 +539,6 @@ async def process_api_ad_data(
                     db=db,
                     current_user=admin_user,
                 )
-                imported_product_ids.add(product_info["product_id"])
 
                 product_id = product_info["product_id"]
                 ecpm_deduct_ratio = product_info.get("ecpm_deduct_ratio", 0.0)
@@ -738,6 +738,7 @@ async def process_api_ad_data(
 
                     if need_update:
                         updated_count += 1
+                        saved_product_id = product_id
                         logger.info(
                             f"更新广告数据: 日期={date_str}, 产品={product_name}, 国家={country_code}, "
                             f"变化字段: {', '.join(update_fields)}"
@@ -774,6 +775,7 @@ async def process_api_ad_data(
                     await db.flush()
                     await db.refresh(new_ad_data)
                     inserted_count += 1
+                    saved_product_id = product_id
 
                     logger.info(
                         f"添加广告数据: 日期={date_str}, 产品={product_name}, 国家={country_code}, "
@@ -795,10 +797,15 @@ async def process_api_ad_data(
                     )
                 else:
                     logger.error(f"处理能识别国家代码的数据时出错: {error_msg}", exc_info=True)
+                saved_product_id = None
                 error_count += 1
+
+        if saved_product_id is not None:
+            imported_product_ids.add(saved_product_id)
 
     # ========== 第三步：处理无国家输入（ZZ）或无法识别（保留原始代码）的累加数据 ==========
     for key, grouped_data in unrecognized_data.items():
+        saved_product_id: Optional[int] = None
         async with db.begin_nested():
             try:
                 if len(key) == 4:
@@ -818,7 +825,6 @@ async def process_api_ad_data(
                     db=db,
                     current_user=admin_user,
                 )
-                imported_product_ids.add(product_info["product_id"])
 
                 product_id = product_info["product_id"]
                 ecpm_deduct_ratio = product_info.get("ecpm_deduct_ratio", 0.0)
@@ -1016,6 +1022,7 @@ async def process_api_ad_data(
 
                     if need_update:
                         updated_count += 1
+                        saved_product_id = product_id
                         logger.info(
                             f"更新广告数据（无法识别国家代码，已累加）: 日期={date_str}, 产品={product_name}, 国家=AA, 变化字段: {', '.join(update_fields)}"
                         )
@@ -1051,6 +1058,7 @@ async def process_api_ad_data(
                     await db.flush()
                     await db.refresh(new_ad_data)
                     inserted_count += 1
+                    saved_product_id = product_id
 
                     logger.info(
                         f"添加广告数据（国家代码未识别，已保留原始值）: 日期={date_str}, 产品={product_name}, 国家={country_code}, "
@@ -1070,7 +1078,11 @@ async def process_api_ad_data(
                     )
                 else:
                     logger.error(f"处理无法识别国家代码的数据时出错: {error_msg}", exc_info=True)
+                saved_product_id = None
                 error_count += 1
+
+        if saved_product_id is not None:
+            imported_product_ids.add(saved_product_id)
 
     if inserted_count > 0 or updated_count > 0:
         try:

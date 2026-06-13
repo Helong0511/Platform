@@ -528,7 +528,11 @@ async def find_ad_data_assignment_gaps(
     Returns:
         (gap 列表, orphan 总行数)
     """
-    has_assignment = exists(select(1).where(_assignment_covers_ad_data_date_condition()))
+    has_assignment = exists(
+        select(1)
+        .select_from(ProductAssignment)
+        .where(_assignment_covers_ad_data_date_condition())
+    )
 
     filters = [
         func.date(AdData.date) >= start_date,
