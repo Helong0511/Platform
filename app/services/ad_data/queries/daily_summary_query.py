@@ -2,7 +2,7 @@
 广告数据每日汇总查询构建器。
 
 功能说明：
-- 按统计维度分组聚合：按国家 / 按广告单元 / 按国家+广告单元
+- 按统计维度分组聚合：按国家维度汇总到日期+产品 / 按广告单元 / 按国家+广告单元
 - 支持权限过滤、分页、SQL/内存混合排序
 
 在系统中的位置：
@@ -97,14 +97,16 @@ class DailySummaryQuery:
             User.username,
         ]
 
-        include_country = dim in ("country", "country_ad_unit")
-        include_ad_unit = dim in ("ad_unit", "country_ad_unit")
+        # 每日汇总分组：country 维度仅筛选国家级明细，汇总到「日期+产品」；
+        # 仅 country_ad_unit 才按国家列分组展示。
+        group_by_country = dim == "country_ad_unit"
+        group_by_ad_unit = dim in ("ad_unit", "country_ad_unit")
 
         select_cols = list(base_dims)
-        if include_country:
+        if group_by_country:
             select_cols.append(AdData.country_code.label("country_code"))
             group_by_cols.append(AdData.country_code)
-        if include_ad_unit:
+        if group_by_ad_unit:
             select_cols.append(AdData.ad_unit.label("ad_unit"))
             group_by_cols.append(AdData.ad_unit)
 
@@ -113,7 +115,7 @@ class DailySummaryQuery:
         query = query.where(Product.is_active == True)
         query = query.join(User, Client.user_id == User.id)
 
-        if include_country:
+        if group_by_country:
             query = join_country_info_for_ad_data(query)
 
         if not is_admin(current_user):
@@ -154,8 +156,8 @@ class DailySummaryQuery:
         valid_sort_fields = {
             "date": func.date(AdData.date),
             "product": Product.name,
-            "ad_unit": AdData.ad_unit if include_ad_unit else None,
-            "country": AdData.country_code if include_country else None,
+            "ad_unit": AdData.ad_unit if group_by_ad_unit else None,
+            "country": AdData.country_code if group_by_country else None,
             "product_id": Product.id,
             "request_count": func.sum(AdData.request_count),
             "match_count": func.sum(AdData.match_count),
@@ -202,8 +204,8 @@ class DailySummaryQuery:
                 dim,
                 start_date,
                 end_date,
-                include_country,
-                include_ad_unit,
+                group_by_country,
+                group_by_ad_unit,
             )
 
         if need_memory_sort:
@@ -215,7 +217,7 @@ class DailySummaryQuery:
             all_summary_data = result.all()
 
         country_name_map: Dict[str, str] = {}
-        if include_country and all_summary_data:
+        if group_by_country and all_summary_data:
             codes = {
                 getattr(row, "country_code", None)
                 for row in all_summary_data
@@ -284,10 +286,10 @@ class DailySummaryQuery:
             client_name = row.client_name or ""
             user_name = row.user_full_name or row.user_username or ""
 
-            row_country_code = getattr(row, "country_code", None) if include_country else "ZZ"
-            row_ad_unit = getattr(row, "ad_unit", "") if include_ad_unit else ""
+            row_country_code = getattr(row, "country_code", None) if group_by_country else "ZZ"
+            row_ad_unit = getattr(row, "ad_unit", "") if group_by_ad_unit else ""
 
-            if dim == "ad_unit":
+            if dim in ("country", "ad_unit"):
                 display_country_code = "ZZ"
                 country_name_zh = "全部区域"
             else:
@@ -358,8 +360,8 @@ class DailySummaryQuery:
         dimension: str,
         start_date: Optional[date],
         end_date: Optional[date],
-        include_country: bool,
-        include_ad_unit: bool,
+        group_by_country: bool,
+        group_by_ad_unit: bool,
     ) -> int:
         try:
             sub_cols = [
@@ -368,10 +370,10 @@ class DailySummaryQuery:
             ]
             group_cols = [func.date(AdData.date), Product.id]
 
-            if include_country:
+            if group_by_country:
                 sub_cols.append(AdData.country_code.label("country_code"))
                 group_cols.append(AdData.country_code)
-            if include_ad_unit:
+            if group_by_ad_unit:
                 sub_cols.append(AdData.ad_unit.label("ad_unit"))
                 group_cols.append(AdData.ad_unit)
 

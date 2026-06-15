@@ -240,8 +240,8 @@ class ClientAdDataQuery:
         use_assignment_table: bool,
         dimension: str,
     ) -> list[dict[str, Any]]:
-        include_country = dimension in ("country", "country_ad_unit")
-        include_ad_unit = dimension in ("ad_unit", "country_ad_unit")
+        group_by_country = dimension == "country_ad_unit"
+        group_by_ad_unit = dimension in ("ad_unit", "country_ad_unit")
 
         select_cols: list[Any] = [
             func.date(AdData.date).label("date"),
@@ -254,10 +254,10 @@ class ClientAdDataQuery:
             Product.name,
         ]
 
-        if include_country:
+        if group_by_country:
             select_cols.append(AdData.country_code.label("country_code"))
             group_cols.append(AdData.country_code)
-        if include_ad_unit:
+        if group_by_ad_unit:
             select_cols.append(AdData.ad_unit.label("ad_unit"))
             group_cols.append(AdData.ad_unit)
 
@@ -279,7 +279,7 @@ class ClientAdDataQuery:
 
         rows = (await self.db.execute(query)).all()
         country_name_map: dict[str, str] = {}
-        if include_country and rows:
+        if group_by_country and rows:
             codes = {getattr(row, "country_code", None) for row in rows if getattr(row, "country_code", None)}
             if codes:
                 cn_result = await self.db.execute(
@@ -330,8 +330,8 @@ class ClientAdDataQuery:
             ad_unit = row.ad_unit or ""
             country_code = "ZZ"
             country_name_zh = "全部区域"
-        elif dim == "ad_unit":
-            ad_unit = getattr(row, "ad_unit", "") or ""
+        elif dim in ("country", "ad_unit"):
+            ad_unit = getattr(row, "ad_unit", "") or "" if dim == "ad_unit" else ""
             country_code = "ZZ"
             country_name_zh = "全部区域"
         else:
