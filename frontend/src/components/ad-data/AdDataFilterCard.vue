@@ -174,6 +174,60 @@ const hintText = computed(() => {
 </script>
 
 <style scoped>
+.filter-card {
+  margin-bottom: var(--spacing-xl);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-light);
+}
+
+.filter-form {
+  margin-bottom: 0;
+}
+
+.filter-form :deep(.el-form-item) {
+  width: 340px;
+  margin-bottom: var(--spacing-lg);
+  margin-right: 16px;
+  vertical-align: top;
+  display: inline-flex;
+  align-items: center;
+}
+
+.filter-form :deep(.el-form-item:first-child) {
+  width: 400px;
+}
+
+.filter-form :deep(.el-form-item:last-child) {
+  width: auto;
+  margin-right: 0;
+}
+
+.filter-form :deep(.el-form-item__label) {
+  width: auto;
+  min-width: 80px;
+  flex-shrink: 0;
+  text-align: right;
+  padding-right: 12px;
+  line-height: 32px;
+}
+
+.filter-form :deep(.el-form-item__content) {
+  flex: 1;
+  min-width: 200px;
+  line-height: 32px;
+}
+
+.filter-form :deep(.el-input),
+.filter-form :deep(.el-select),
+.filter-form :deep(.el-date-editor) {
+  width: 100%;
+}
+
+.filter-form :deep(.el-input__wrapper),
+.filter-form :deep(.el-select .el-input__wrapper) {
+  min-height: 32px;
+}
+
 .filter-hint {
   display: flex;
   align-items: flex-start;
@@ -182,5 +236,70 @@ const hintText = computed(() => {
   font-size: 13px;
   color: #909399;
   line-height: 1.5;
+}
+
+@media (max-width: 767px) {
+  .filter-card {
+    margin-bottom: var(--spacing-md);
+  }
+
+  .filter-card :deep(.el-card__body) {
+    padding: var(--spacing-md);
+  }
+
+  .filter-form {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .filter-form :deep(.el-form--inline) {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .filter-form :deep(.el-form-item),
+  .filter-form :deep(.el-form-item:first-child) {
+    width: 100%;
+    margin-right: 0;
+    margin-bottom: var(--spacing-md);
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filter-form :deep(.el-form-item__label) {
+    width: 100%;
+    min-width: 0;
+    text-align: left;
+    padding-right: 0;
+    margin-bottom: var(--spacing-xs);
+  }
+
+  .filter-form :deep(.el-form-item__content) {
+    width: 100%;
+    min-width: 0;
+    margin-left: 0;
+  }
+
+  .filter-form :deep(.el-input),
+  .filter-form :deep(.el-select),
+  .filter-form :deep(.el-date-editor) {
+    width: 100%;
+  }
+
+  .filter-form :deep(.el-form-item:last-child) {
+    flex-direction: row;
+    gap: var(--spacing-sm);
+    margin-bottom: 0;
+  }
+
+  .filter-form :deep(.el-form-item:last-child .el-form-item__content) {
+    display: flex;
+    gap: var(--spacing-sm);
+  }
+
+  .filter-form :deep(.el-form-item:last-child .el-button) {
+    flex: 1;
+    min-height: var(--touch-target-size);
+  }
 }
 </style>
