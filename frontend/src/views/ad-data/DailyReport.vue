@@ -153,7 +153,7 @@ import { useAuthStore } from '../../store';
 import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElIcon, ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Download, Setting, Right } from '@element-plus/icons-vue';
 import { getDailySummary, exportAdData, getAdDataDateRange } from '../../api/ad-data';
-import { DEFAULT_AD_DATA_DIMENSION } from '../../constants/adDataDimension';
+import { DEFAULT_AD_DATA_DIMENSION, loadAdDataDimensionPreference } from '../../constants/adDataDimension';
 import { useRouter } from 'vue-router';
 import { extractErrorMessage, isErrorHandled } from '../../utils/api';
 import { useDevice } from '../../composables/useDevice';
@@ -211,7 +211,7 @@ const searchForm = ref({
   clientId: '',
   dateRange: [],
   productId: '',
-  dimension: DEFAULT_AD_DATA_DIMENSION,
+  dimension: loadAdDataDimensionPreference(authStore.userInfo?.id),
   countryCode: '',
   adUnit: ''
 });
@@ -250,7 +250,8 @@ const {
   searchForm,
   includeCountry: true,
   includeDimension: true,
-  source: 'ad-data'
+  source: 'ad-data',
+  getUserId: () => authStore.userInfo?.id
 });
 
 const buildDailySearchParams = () => {
@@ -394,7 +395,7 @@ const resetFilter = async () => {
     clientId: '',
     dateRange: [],
     productId: '',
-    dimension: DEFAULT_AD_DATA_DIMENSION,
+    dimension: loadAdDataDimensionPreference(authStore.userInfo?.id),
     countryCode: '',
     adUnit: ''
   };

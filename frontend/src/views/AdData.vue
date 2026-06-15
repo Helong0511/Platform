@@ -146,7 +146,7 @@ import {
 import { useDataPageFilterCascade } from '../composables/useDataPageFilterCascade';
 import { useDebouncedPaginatedFetch } from '../composables/useDebouncedPaginatedFetch';
 import { useAdDataProductPanel } from '../composables/useAdDataProductPanel';
-import { DEFAULT_AD_DATA_DIMENSION } from '../constants/adDataDimension';
+import { DEFAULT_AD_DATA_DIMENSION, loadAdDataDimensionPreference } from '../constants/adDataDimension';
 import ProductManagementDialog from '../components/admin/ProductManagementDialog.vue';
 import AdDataFilterCard from '../components/ad-data/AdDataFilterCard.vue';
 import AdDataDetailTable from '../components/ad-data/AdDataDetailTable.vue';
@@ -196,7 +196,7 @@ const searchForm = ref({
   clientId: '',
   dateRange: [],
   productId: '',
-  dimension: DEFAULT_AD_DATA_DIMENSION,
+  dimension: loadAdDataDimensionPreference(authStore.userInfo?.id),
   countryCode: '',
   adUnit: ''
 });
@@ -237,7 +237,8 @@ const {
   searchForm,
   includeCountry: true,
   includeDimension: true,
-  source: 'ad-data'
+  source: 'ad-data',
+  getUserId: () => authStore.userInfo?.id
 });
 
 const buildAdDataSearchParams = () => {
@@ -402,7 +403,7 @@ const resetFilter = async () => {
     clientId: '',
     dateRange: [],
     productId: '',
-    dimension: DEFAULT_AD_DATA_DIMENSION,
+    dimension: loadAdDataDimensionPreference(authStore.userInfo?.id),
     countryCode: '',
     adUnit: ''
   };

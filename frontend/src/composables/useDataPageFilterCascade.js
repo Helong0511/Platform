@@ -2,7 +2,7 @@
  * 组合式函数 - 数据页通用筛选级联
  * @file composables/useDataPageFilterCascade.js
  */
-import { ref, nextTick } from 'vue';
+import { ref, nextTick, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
   getClientsWithData,
@@ -18,6 +18,8 @@ import {
 import { extractErrorMessage, isErrorHandled } from '../utils/api';
 import {
   DEFAULT_AD_DATA_DIMENSION,
+  loadAdDataDimensionPreference,
+  saveAdDataDimensionPreference,
   showAdUnitFilterForDimension,
   showCountryFilterForDimension
 } from '../constants/adDataDimension';
@@ -92,13 +94,15 @@ const TB_SEARCH_API = {
  * @param {boolean} [options.includeDimension=false]
  * @param {'ad-data'|'tb-search'} [options.source='ad-data']
  * @param {Object} [options.api] 自定义 API，覆盖 source
+ * @param {() => string|number|null|undefined} [options.getUserId] 当前用户 ID，用于统计维度偏好持久化
  */
 export function useDataPageFilterCascade({
   searchForm,
   includeCountry = false,
   includeDimension = false,
   source = 'ad-data',
-  api: apiOverride = null
+  api: apiOverride = null,
+  getUserId = null
 }) {
   const api =
     apiOverride || (source === 'tb-search' ? TB_SEARCH_API : AD_DATA_API);
@@ -268,6 +272,9 @@ export function useDataPageFilterCascade({
   };
 
   const handleDimensionChange = async () => {
+    if (includeDimension && getUserId) {
+      saveAdDataDimensionPreference(getUserId(), searchForm.value.dimension);
+    }
     searchForm.value.countryCode = '';
     searchForm.value.adUnit = '';
     await reloadSecondaryFilters();
@@ -297,6 +304,21 @@ export function useDataPageFilterCascade({
     await fetchFilterProducts(searchForm.value.clientId || null);
     await reloadSecondaryFilters();
   };
+
+  if (includeDimension && getUserId) {
+    watch(
+      () => getUserId(),
+      (userId) => {
+        if (userId == null || userId === '') {
+          return;
+        }
+        const saved = loadAdDataDimensionPreference(userId);
+        if (searchForm.value.dimension !== saved) {
+          searchForm.value.dimension = saved;
+        }
+      }
+    );
+  }
 
   return {
     users,
