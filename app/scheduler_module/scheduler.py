@@ -54,6 +54,7 @@ from app.scheduler_module.task_registry import (
 )
 from app.scheduler_module.task_result_registry import get_task_result, auto_register_task_results
 from app.core.config import settings
+from app.core.db_errors import is_database_unreachable_error
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from app.core.database import AsyncSessionLocal
 from app.models.models import ScheduledTask
@@ -69,6 +70,19 @@ DEFAULT_MISFIRE_GRACE_TIME = 60  # 默认错过执行时间容忍度（秒）
 scheduler: Optional[AsyncIOScheduler] = None
 # 线程锁，确保调度器初始化的线程安全
 _scheduler_lock = threading.Lock()
+# 关闭标志：停服期间拒绝新任务，避免 MySQL 已停后仍触发 cron
+_scheduler_shutting_down = False
+
+
+def is_scheduler_shutting_down() -> bool:
+    """调度器是否正在关闭（lifespan 退出或 shutdown_scheduler 调用后）。"""
+    return _scheduler_shutting_down
+
+
+def mark_scheduler_shutting_down() -> None:
+    """标记调度器进入关闭流程，后续 cron 触发将直接跳过。"""
+    global _scheduler_shutting_down
+    _scheduler_shutting_down = True
 
 
 def get_scheduler() -> AsyncIOScheduler:
@@ -123,6 +137,14 @@ async def execute_task_with_lock(
         *args: 任务函数位置参数
         **kwargs: 任务函数关键字参数
     """
+    if is_scheduler_shutting_down():
+        log_scheduled_task_skip(
+            task_name,
+            "调度器正在关闭",
+            detail=f"pid={os.getpid()} host={CURRENT_HOST}",
+        )
+        return
+
     # 如果跳过进程检查（手动触发），直接执行
     if skip_process_check:
         worker_pid = os.getpid()
@@ -185,6 +207,13 @@ async def execute_task_with_lock(
         else:
             cron_expression = task_record.cron_expression
     except Exception as e:
+        if is_database_unreachable_error(e):
+            log_scheduled_task_skip(
+                task_name,
+                "数据库不可用",
+                detail=str(e),
+            )
+            return
         logger.warning(f"查询任务信息失败: {e}，将直接执行")
         cron_expression = None
     finally:
@@ -691,9 +720,11 @@ async def shutdown_scheduler() -> None:
     
     等待所有正在执行的任务完成后再关闭
     """
+    mark_scheduler_shutting_down()
     sched = get_scheduler()
     if sched.running:
         try:
+            sched.pause()
             sched.shutdown(wait=True)
             logger.info("定时任务调度器已关闭")
         except asyncio.CancelledError:

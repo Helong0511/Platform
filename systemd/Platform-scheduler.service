@@ -30,6 +30,8 @@ ExecStart=/data/Platform/venv/bin/gunicorn \
 
 Restart=always
 RestartSec=10
+# 须大于 gunicorn.conf.py graceful_timeout(30)，确保停服时 cron 不再触发
+TimeoutStopSec=45
 LimitNOFILE=65535
 
 StandardOutput=journal

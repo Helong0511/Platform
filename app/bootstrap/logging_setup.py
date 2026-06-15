@@ -310,20 +310,8 @@ def _setup_logging() -> None:
         apscheduler_scheduler_logger.addHandler(scheduler_log_handler)
         apscheduler_scheduler_logger.propagate = True
 
-    # 调度器模块的详细日志输出到 scheduler.log
-    # 这些模块的 INFO 级别日志会输出到 scheduler.log
-    # WARNING 及以上级别会同时输出到 app.log（因为 propagate=True）
-    if scheduler_log_handler:
-        # process_allocator, task_queue, lock 的详细日志输出到 scheduler.log
-        for module_name in ['app.scheduler_module.process_allocator',
-                            'app.scheduler_module.task_queue',
-                            'app.scheduler_module.lock',
-                            'app.scheduler_module.scheduler']:
-            module_logger = logging.getLogger(module_name)
-            module_logger.addHandler(scheduler_log_handler)
-            module_logger.setLevel(logging.INFO)  # 允许 INFO 级别输出到 scheduler.log
-            module_logger.propagate = True  # WARNING+ 会传播到 root logger（app.log）
-
+    # app.scheduler_module 父 logger 已通过 propagate 接收子模块日志，
+    # 勿再为子模块单独 addHandler，否则 scheduler.log / app.log 会重复写入。
 
     # ====== 配置 uvicorn 日志过滤器 ======
     # 过滤掉 EndOfStream 异常，这些是客户端提前关闭连接的正常情况，不应该记录为错误

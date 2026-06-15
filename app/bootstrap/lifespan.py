@@ -234,6 +234,12 @@ async def lifespan(app: FastAPI):
     # ====== 关闭时执行 ======
     logger.info("应用关闭中...")
     try:
+        from app.scheduler_module.scheduler import mark_scheduler_shutting_down
+
+        mark_scheduler_shutting_down()
+    except Exception:
+        pass
+    try:
         if settings.should_run_scheduler():
             await shutdown_scheduler()
     except asyncio.CancelledError:

@@ -39,6 +39,8 @@ ExecStart=/data/Platform/venv/bin/gunicorn \
 # 重启策略
 Restart=always
 RestartSec=10
+# 须大于 gunicorn.conf.py graceful_timeout(30)，留足 worker 优雅退出时间
+TimeoutStopSec=45
 
 # 资源限制
 LimitNOFILE=65535

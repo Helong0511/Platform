@@ -22,6 +22,7 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.db_errors import is_database_unreachable_error
 from app.core.database import AsyncSessionLocal
 from app.core.utils import get_app_now_naive, APP_TIMEZONE
 from app.models.models import ScheduledTask
@@ -154,6 +155,13 @@ async def acquire_task_lock(
         return True, db
 
     except Exception as e:
+        # 维护/停库期间不记 ERROR，避免部署窗口误报
+        if is_database_unreachable_error(e):
+            logger.warning(f"数据库不可用，无法获取任务锁: {task_name}")
+            await db.rollback()
+            await db.close()
+            return False, None
+
         # 处理各种可能的异常
         error_str = str(e)
         # MySQL 锁相关错误
