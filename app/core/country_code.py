@@ -61,64 +61,88 @@ logger = logging.getLogger(__name__)
 # 业务表 country_code 字段最大长度（与 ad_data / tb_search_data 表结构一致）
 COUNTRY_CODE_STORAGE_MAX_LENGTH = 100
 
-# 上游英文国名兜底（countries 表未命中时使用，键为小写无重音）
-_COMMON_ENGLISH_COUNTRY_ALIASES: dict[str, str] = {
-    "united states": "US",
-    "united kingdom": "GB",
-    "great britain": "GB",
-    "germany": "DE",
-    "japan": "JP",
-    "australia": "AU",
-    "brazil": "BR",
-    "canada": "CA",
-    "south korea": "KR",
-    "republic of korea": "KR",
-    "korea": "KR",
-    "turkiye": "TR",
-    "turkey": "TR",
-    "vietnam": "VN",
-    "viet nam": "VN",
-    "india": "IN",
-    "indonesia": "ID",
-    "philippines": "PH",
-    "malaysia": "MY",
-    "singapore": "SG",
-    "thailand": "TH",
-    "mexico": "MX",
-    "france": "FR",
-    "italy": "IT",
-    "spain": "ES",
-    "netherlands": "NL",
-    "poland": "PL",
-    "taiwan": "TW",
-    "hong kong": "HK",
-    "russia": "RU",
-    "ukraine": "UA",
-    "saudi arabia": "SA",
-    "united arab emirates": "AE",
-    "uae": "AE",
-    # 属地 / 群岛（智索等上游常见写法）
-    "us virgin islands": "VI",
-    "u.s. virgin islands": "VI",
-    "united states virgin islands": "VI",
-    "virgin islands, us": "VI",
-    "virgin islands, u.s.": "VI",
-    "virgin islands (u.s.)": "VI",
-    "virgin islands us": "VI",
-    "british virgin islands": "VG",
-    "virgin islands, uk": "VG",
-    "virgin islands, u.k.": "VG",
-    "virgin islands (uk)": "VG",
-    "puerto rico": "PR",
-    "guam": "GU",
-    "american samoa": "AS",
-    "northern mariana islands": "MP",
-    "cayman islands": "KY",
-    "bermuda": "BM",
-    "hong kong sar": "HK",
-    "macau": "MO",
-    "macao": "MO",
+
+def _normalize_country_text(value: Optional[str]) -> str:
+    text = (value or "").strip().lower()
+    # U.S. / U.K. 等缩写统一，便于与库表及别名匹配
+    text = re.sub(r"\bu\.s\.", "us", text)
+    text = re.sub(r"\bu\.k\.", "uk", text)
+    text = re.sub(r"[()]", " ", text)
+    text = re.sub(r"\s*,\s*", ", ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _build_alias_map_from_labels(labels: dict[str, str]) -> dict[str, str]:
+    """将展示用别名（任意写法）规范化为唯一 lookup 键。"""
+    merged: dict[str, str] = {}
+    for label, code in labels.items():
+        key = _normalize_country_text(label)
+        if key:
+            merged[key] = code.upper()
+    return merged
+
+
+# 内置别名展示标签（可保留 u.s. / 括号等写法，加载时统一规范化）
+_BUILTIN_ENGLISH_COUNTRY_ALIAS_LABELS: dict[str, str] = {
+    "United States": "US",
+    "United Kingdom": "GB",
+    "Great Britain": "GB",
+    "Germany": "DE",
+    "Japan": "JP",
+    "Australia": "AU",
+    "Brazil": "BR",
+    "Canada": "CA",
+    "South Korea": "KR",
+    "Republic of Korea": "KR",
+    "Korea": "KR",
+    "Turkiye": "TR",
+    "Turkey": "TR",
+    "Vietnam": "VN",
+    "Viet Nam": "VN",
+    "India": "IN",
+    "Indonesia": "ID",
+    "Philippines": "PH",
+    "Malaysia": "MY",
+    "Singapore": "SG",
+    "Thailand": "TH",
+    "Mexico": "MX",
+    "France": "FR",
+    "Italy": "IT",
+    "Spain": "ES",
+    "Netherlands": "NL",
+    "Poland": "PL",
+    "Taiwan": "TW",
+    "Hong Kong": "HK",
+    "Russia": "RU",
+    "Ukraine": "UA",
+    "Saudi Arabia": "SA",
+    "United Arab Emirates": "AE",
+    "UAE": "AE",
+    # 属地 / 群岛（智索等上游常见写法，含缩写与括号变体）
+    "U.S. Virgin Islands": "VI",
+    "US Virgin Islands": "VI",
+    "United States Virgin Islands": "VI",
+    "Virgin Islands, U.S.": "VI",
+    "Virgin Islands (U.S.)": "VI",
+    "British Virgin Islands": "VG",
+    "Virgin Islands, UK": "VG",
+    "Virgin Islands (UK)": "VG",
+    "Puerto Rico": "PR",
+    "Guam": "GU",
+    "American Samoa": "AS",
+    "Northern Mariana Islands": "MP",
+    "Cayman Islands": "KY",
+    "Bermuda": "BM",
+    "Hong Kong SAR": "HK",
+    "Macau": "MO",
+    "Macao": "MO",
 }
+
+# 查找键均为 normalize 后的形式，与 country_aliases.alias_normalized 一致
+_BUILTIN_ENGLISH_COUNTRY_ALIASES: dict[str, str] = _build_alias_map_from_labels(
+    _BUILTIN_ENGLISH_COUNTRY_ALIAS_LABELS
+)
 
 
 def _strip_diacritics(text: str) -> str:
@@ -127,16 +151,65 @@ def _strip_diacritics(text: str) -> str:
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
-def _lookup_common_english_alias(country_input: str) -> Optional[str]:
-    """常见英文国名静态映射（忽略大小写与重音）。"""
+def normalize_country_alias_key(value: Optional[str]) -> str:
+    """英文别名匹配用规范化键（与 country_aliases.alias_normalized 一致）。"""
+    return _normalize_country_text(value)
+
+
+def _lookup_builtin_english_alias(country_input: str) -> Optional[str]:
+    """内置英文国名静态映射（忽略大小写与重音）。"""
     keys = {
-        _normalize_country_text(country_input),
-        _normalize_country_text(_strip_diacritics(country_input)),
+        normalize_country_alias_key(country_input),
+        normalize_country_alias_key(_strip_diacritics(country_input)),
     }
     for key in keys:
-        if key and key in _COMMON_ENGLISH_COUNTRY_ALIASES:
-            return _COMMON_ENGLISH_COUNTRY_ALIASES[key]
+        if key and key in _BUILTIN_ENGLISH_COUNTRY_ALIASES:
+            return _BUILTIN_ENGLISH_COUNTRY_ALIASES[key]
     return None
+
+
+def _lookup_common_english_alias(country_input: str) -> Optional[str]:
+    """兼容旧调用：仅查内置字典。"""
+    return _lookup_builtin_english_alias(country_input)
+
+
+async def lookup_country_alias(
+    db: AsyncSession,
+    country_input: str,
+    alias_map: Optional[dict[str, str]] = None,
+) -> Optional[str]:
+    """优先 country_aliases 表，未命中再回退内置字典。"""
+    if not country_input or not isinstance(country_input, str):
+        return None
+    key = normalize_country_alias_key(country_input)
+    if not key:
+        return None
+    if alias_map is None:
+        alias_map = await load_country_alias_map(db)
+    code = alias_map.get(key)
+    if code:
+        return code.upper()
+    return _lookup_builtin_english_alias(country_input)
+
+
+async def load_country_alias_map(db: AsyncSession) -> dict[str, str]:
+    """加载 alias_normalized → alpha_2_code；表不存在时回退内置字典。"""
+    try:
+        from app.models.models import CountryAlias
+        result = await db.execute(
+            select(CountryAlias.alias_normalized, CountryAlias.alpha_2_code)
+        )
+        alias_map = {
+            str(row[0]): str(row[1]).upper()
+            for row in result.all()
+            if row[0] and row[1]
+        }
+        if alias_map:
+            return alias_map
+    except Exception as exc:
+        logger.debug("读取 country_aliases 失败，使用内置别名: %s", exc)
+        await db.rollback()
+    return dict(_BUILTIN_ENGLISH_COUNTRY_ALIASES)
 
 
 def preserve_unrecognized_country_code(
@@ -242,17 +315,6 @@ async def resolve_country_display(
     )
     country_name_zh = result.scalar_one_or_none()
     return format_country_display(code, country_name_zh)
-
-
-def _normalize_country_text(value: Optional[str]) -> str:
-    text = (value or "").strip().lower()
-    # U.S. / U.K. 等缩写统一，便于与库表及别名匹配
-    text = re.sub(r"\bu\.s\.", "us", text)
-    text = re.sub(r"\bu\.k\.", "uk", text)
-    text = re.sub(r"[()]", " ", text)
-    text = re.sub(r"\s*,\s*", ", ", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
 
 
 def _pick_best_country_match(
@@ -538,8 +600,8 @@ async def find_country_code_by_any_format(
         if country:
             return country.alpha_2_code
     
-    # 常见英文国名兜底（如智索 API 返回 South Korea / Turkiye / Vietnam）
-    alias_code = _lookup_common_english_alias(country_input)
+    # 常见英文国名：country_aliases 表 → 内置字典
+    alias_code = await lookup_country_alias(db, country_input)
     if alias_code:
         return alias_code
 

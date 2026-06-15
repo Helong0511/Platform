@@ -36,3 +36,24 @@ export const getUnrecognizedCountryCodes = () =>
     { url: '/api/v1/countries/unrecognized', method: 'get' },
     { returnDataOnly: true }
   );
+
+/** 国家英文别名列表 */
+export const getCountryAliases = (params = {}) =>
+  request(
+    { url: '/api/v1/countries/aliases', method: 'get', params },
+    { returnDataOnly: true }
+  );
+
+/** 创建国家英文别名 */
+export const createCountryAlias = (data) =>
+  request(
+    { url: '/api/v1/countries/aliases', method: 'post', data },
+    { returnDataOnly: true, csrf: true }
+  );
+
+/** 删除国家英文别名 */
+export const deleteCountryAlias = (aliasId) =>
+  request(
+    { url: `/api/v1/countries/aliases/${aliasId}`, method: 'delete' },
+    { returnDataOnly: true, csrf: true }
+  );

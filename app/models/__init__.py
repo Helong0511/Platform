@@ -12,7 +12,7 @@ from app.models.client_product import (
     TBSearchData,
     ProductAssignment,
 )
-from app.models.system import ScheduledTask, UserAuditLog, CountryInfo
+from app.models.system import ScheduledTask, UserAuditLog, CountryInfo, CountryAlias
 from app.models.postback import (
     PostbackConversion,
     PostbackForwardLog,
@@ -58,6 +58,7 @@ __all__ = [
     "ScheduledTask",
     "UserAuditLog",
     "CountryInfo",
+    "CountryAlias",
     "PostbackConversion",
     "PostbackForwardLog",
     "PostbackForwardQueue",

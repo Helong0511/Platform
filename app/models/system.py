@@ -142,3 +142,23 @@ class CountryInfo(Base):
         """向后兼容属性：返回 country_name_zh"""
         return self.country_name_zh
 
+
+class CountryAlias(Base):
+    """
+    国家英文别名
+
+    上游 API 非标准国名 → ISO alpha-2，可在国家维护界面配置。
+    表名: country_aliases
+    """
+    __tablename__ = "country_aliases"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment="ID")
+    alias_name = Column(String(150), nullable=False, comment="别名原文")
+    alias_normalized = Column(String(150), unique=True, nullable=False, index=True, comment="规范化键")
+    alpha_2_code = Column(String(2), nullable=False, index=True, comment="映射 ISO 二字代码")
+    remark = Column(String(255), nullable=True, comment="备注")
+
+    __table_args__ = (
+        Index("idx_country_alias_alpha2", "alpha_2_code"),
+    )
+

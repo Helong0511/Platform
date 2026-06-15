@@ -19,15 +19,22 @@ from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.security import require_admin
-from app.models.models import CountryInfo, User
+from app.models.models import CountryInfo, CountryAlias, User
 from app.schemas.base import ListResponseBaseSchema, PaginatedResponseBaseSchema, ResponseBaseSchema
 from app.schemas.country import (
+    CountryAliasCreate,
+    CountryAliasResponse,
     CountryCreate,
     CountryResponse,
     CountryUpdate,
     UnrecognizedCountryCodeItem,
 )
-from app.services.country_service import collect_unrecognized_country_codes
+from app.services.country_service import (
+    collect_unrecognized_country_codes,
+    create_country_alias,
+    delete_country_alias,
+    list_country_aliases,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -124,6 +131,70 @@ async def list_countries(
         page_size=page_size,
         message="获取国家列表成功",
     )
+
+
+@router.get(
+    "/aliases",
+    response_model=ListResponseBaseSchema[list[CountryAliasResponse]],
+    summary="获取国家英文别名列表",
+)
+async def list_country_alias_entries(
+    keyword: Optional[str] = Query(None, description="别名或目标代码关键字"),
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(require_admin),
+):
+    """列出 country_aliases 表中的英文国名 → ISO 二字代码映射。"""
+    rows = await list_country_aliases(db, keyword=keyword)
+    data = [CountryAliasResponse.model_validate(row) for row in rows]
+    return ListResponseBaseSchema.success(
+        data=data,
+        count=len(data),
+        message="获取国家别名列表成功",
+    )
+
+
+@router.post(
+    "/aliases",
+    response_model=ResponseBaseSchema[CountryAliasResponse],
+    summary="创建国家英文别名",
+)
+async def create_country_alias_entry(
+    data: CountryAliasCreate,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(require_admin),
+):
+    """新增英文国名别名，入库与解析时优先使用。"""
+    try:
+        row = await create_country_alias(db, data)
+        await db.commit()
+        await db.refresh(row)
+    except ValueError as exc:
+        await db.rollback()
+        raise_api_exception(ErrorCode.VALIDATION_ERROR, detail=str(exc))
+    return ResponseBaseSchema.success(
+        data=CountryAliasResponse.model_validate(row),
+        message="创建国家别名成功",
+    )
+
+
+@router.delete(
+    "/aliases/{alias_id}",
+    response_model=ResponseBaseSchema[None],
+    summary="删除国家英文别名",
+)
+async def delete_country_alias_entry(
+    alias_id: int = Path(..., ge=1, description="别名ID"),
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(require_admin),
+):
+    """删除英文国名别名（不影响 countries 表）。"""
+    try:
+        await delete_country_alias(db, alias_id)
+        await db.commit()
+    except LookupError as exc:
+        await db.rollback()
+        raise_api_exception(ErrorCode.NOT_FOUND, detail=str(exc))
+    return ResponseBaseSchema.success(message="删除国家别名成功")
 
 
 @router.get(

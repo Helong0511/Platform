@@ -45,6 +45,38 @@
       </el-form>
     </el-card>
 
+    <el-card shadow="never" class="alias-card">
+      <template #header>
+        <div class="unrecognized-header">
+          <div>
+            <span class="unrecognized-title">英文别名映射</span>
+            <span class="unrecognized-desc">上游非标准国名 → ISO 二字代码（如 U.S. Virgin Islands → VI）</span>
+          </div>
+          <div>
+            <el-button type="primary" :icon="Plus" @click="openAliasDialog">新增别名</el-button>
+            <el-button :icon="Refresh" :loading="aliasLoading" @click="fetchAliases">刷新</el-button>
+          </div>
+        </div>
+      </template>
+      <el-table v-loading="aliasLoading" :data="aliasList" border stripe size="small">
+        <el-table-column prop="alias_name" label="别名" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="alpha_2_code" label="映射代码" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag type="success" size="small">{{ row.alpha_2_code }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="alias_normalized" label="规范化键" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.remark || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="80" align="center">
+          <template #default="{ row }">
+            <el-button type="danger" link size="small" @click="handleDeleteAlias(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
     <el-card shadow="never" class="unrecognized-card">
       <template #header>
         <div class="unrecognized-header">
@@ -82,7 +114,20 @@
           </template>
         </el-table-column>
         <el-table-column prop="total_count" label="出现次数" width="100" align="center" sortable />
-        <el-table-column label="数据来源" min-width="200">
+        <el-table-column label="建议映射" width="110" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.suggested_alpha_2" type="success" size="small">{{ row.suggested_alpha_2 }}</el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="别名" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.alias_registered ? 'success' : 'info'" size="small">
+              {{ row.alias_registered ? '已登记' : '未登记' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="数据来源" min-width="160">
           <template #default="{ row }">
             <el-tag
               v-for="source in row.sources"
@@ -95,7 +140,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="明细" min-width="220">
+        <el-table-column label="明细" min-width="240">
           <template #default="{ row }">
             <span v-if="row.ad_data_count">广告 {{ row.ad_data_count }}</span>
             <span v-if="row.tb_search_data_count">
@@ -106,13 +151,25 @@
               <template v-if="row.ad_data_count || row.tb_search_data_count"> · </template>
               归档 {{ row.ad_data_archive_count }}
             </span>
+            <div v-if="row.variant_codes?.length > 1" class="variant-hint">
+              含 {{ row.variant_codes.length }} 种写法
+            </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right" align="center">
+        <el-table-column label="操作" width="140" fixed="right" align="center">
           <template #default="{ row }">
+            <el-button
+              v-if="row.suggested_alpha_2"
+              type="primary"
+              link
+              size="small"
+              @click="handleQuickAddSuggested(row)"
+            >
+              添加 {{ row.suggested_alpha_2 }}
+            </el-button>
             <el-tooltip
-              v-if="!row.is_valid_alpha2"
-              content="代码格式非标准二字字母，请先在业务数据中修正后再添加"
+              v-else-if="!row.is_valid_alpha2"
+              content="非标准二字代码，可先添加别名映射或修正业务数据"
               placement="top"
             >
               <el-button type="primary" link size="small" disabled>快速添加</el-button>
@@ -235,6 +292,30 @@
         <el-button type="primary" :loading="submitting" @click="handleSubmit">确定</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="aliasDialogVisible"
+      title="新增英文别名"
+      :width="isMobile ? '95%' : '520px'"
+      :close-on-click-modal="false"
+      append-to-body
+    >
+      <el-form ref="aliasFormRef" :model="aliasForm" :rules="aliasFormRules" label-width="100px">
+        <el-form-item label="别名" prop="alias_name">
+          <el-input v-model="aliasForm.alias_name" placeholder="如 U.S. Virgin Islands" maxlength="150" />
+        </el-form-item>
+        <el-form-item label="映射代码" prop="alpha_2_code">
+          <el-input v-model="aliasForm.alpha_2_code" maxlength="2" placeholder="如 VI" style="width: 120px;" />
+        </el-form-item>
+        <el-form-item label="备注" prop="remark">
+          <el-input v-model="aliasForm.remark" placeholder="可选" maxlength="255" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="aliasDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="aliasSubmitting" @click="submitAlias">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -264,7 +345,10 @@ import {
   createCountry,
   updateCountry,
   deleteCountry,
-  getUnrecognizedCountryCodes
+  getUnrecognizedCountryCodes,
+  getCountryAliases,
+  createCountryAlias,
+  deleteCountryAlias
 } from '../../api/country';
 import { useDevice } from '../../composables/useDevice';
 import { logger } from '../../utils/logger';
@@ -273,12 +357,17 @@ const { isMobile } = useDevice();
 
 const loading = ref(false);
 const unrecognizedLoading = ref(false);
+const aliasLoading = ref(false);
+const aliasSubmitting = ref(false);
 const submitting = ref(false);
 const tableData = ref([]);
 const unrecognizedList = ref([]);
+const aliasList = ref([]);
 const dialogVisible = ref(false);
+const aliasDialogVisible = ref(false);
 const editingId = ref(null);
 const formRef = ref(null);
+const aliasFormRef = ref(null);
 
 const searchForm = reactive({
   keyword: '',
@@ -305,6 +394,20 @@ const defaultFormData = () => ({
 });
 
 const formData = reactive(defaultFormData());
+
+const aliasForm = reactive({
+  alias_name: '',
+  alpha_2_code: '',
+  remark: ''
+});
+
+const aliasFormRules = {
+  alias_name: [{ required: true, message: '请输入别名', trigger: 'blur' }],
+  alpha_2_code: [
+    { required: true, message: '请输入映射代码', trigger: 'blur' },
+    { pattern: /^[A-Za-z]{2}$/, message: '必须为 2 位字母', trigger: 'blur' }
+  ]
+};
 
 const formRules = {
   alpha_2_code: [
@@ -341,6 +444,71 @@ const fetchUnrecognized = async () => {
     ElMessage.error(error.message || '收集未识别国家代码失败');
   } finally {
     unrecognizedLoading.value = false;
+  }
+};
+
+const fetchAliases = async () => {
+  aliasLoading.value = true;
+  try {
+    const data = await getCountryAliases();
+    aliasList.value = Array.isArray(data) ? data : [];
+  } catch (error) {
+    logger.error('获取国家别名失败', error);
+    ElMessage.error(error.message || '获取国家别名失败');
+  } finally {
+    aliasLoading.value = false;
+  }
+};
+
+const openAliasDialog = (preset = {}) => {
+  aliasForm.alias_name = preset.alias_name || '';
+  aliasForm.alpha_2_code = preset.alpha_2_code || '';
+  aliasForm.remark = preset.remark || '';
+  aliasDialogVisible.value = true;
+  aliasFormRef.value?.clearValidate();
+};
+
+const submitAlias = async () => {
+  if (!aliasFormRef.value) return;
+  try {
+    await aliasFormRef.value.validate();
+  } catch {
+    return;
+  }
+  aliasSubmitting.value = true;
+  try {
+    await createCountryAlias({
+      alias_name: aliasForm.alias_name.trim(),
+      alpha_2_code: aliasForm.alpha_2_code.trim().toUpperCase(),
+      remark: aliasForm.remark?.trim() || null
+    });
+    ElMessage.success('别名创建成功');
+    aliasDialogVisible.value = false;
+    fetchAliases();
+    fetchUnrecognized();
+  } catch (error) {
+    logger.error('创建别名失败', error);
+    ElMessage.error(error.message || '创建别名失败');
+  } finally {
+    aliasSubmitting.value = false;
+  }
+};
+
+const handleDeleteAlias = async (row) => {
+  try {
+    await ElMessageBox.confirm(`确定删除别名「${row.alias_name}」吗？`, '删除确认', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消'
+    });
+    await deleteCountryAlias(row.id);
+    ElMessage.success('删除成功');
+    fetchAliases();
+    fetchUnrecognized();
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || '删除失败');
+    }
   }
 };
 
@@ -394,6 +562,13 @@ const handleCreate = () => {
 const handleQuickAdd = (row) => {
   resetForm();
   formData.alpha_2_code = row.country_code.toUpperCase();
+  dialogVisible.value = true;
+};
+
+const handleQuickAddSuggested = (row) => {
+  resetForm();
+  formData.alpha_2_code = row.suggested_alpha_2;
+  formData.country_name_en = row.country_code;
   dialogVisible.value = true;
 };
 
@@ -481,6 +656,7 @@ const handleDelete = async (row) => {
 onMounted(() => {
   fetchList();
   fetchUnrecognized();
+  fetchAliases();
 });
 </script>
 
@@ -510,9 +686,16 @@ onMounted(() => {
 }
 
 .filter-card,
+.alias-card,
 .unrecognized-card,
 .table-card {
   margin-bottom: 16px;
+}
+
+.variant-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .unrecognized-header {

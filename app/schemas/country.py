@@ -144,10 +144,45 @@ class CountryResponse(CountryBase, IDBaseSchema):
 class UnrecognizedCountryCodeItem(BaseSchema):
     """业务数据中出现但未在 countries 表登记的国家代码。"""
 
-    country_code: str = Field(..., description="未识别的国家代码")
+    country_code: str = Field(..., description="未识别的国家代码（代表写法）")
     ad_data_count: int = Field(0, description="广告数据中出现次数")
     tb_search_data_count: int = Field(0, description="TB搜索数据中出现次数")
     ad_data_archive_count: int = Field(0, description="广告数据归档中出现次数")
     total_count: int = Field(0, description="总出现次数")
     sources: list[str] = Field(default_factory=list, description="数据来源表标识")
     is_valid_alpha2: bool = Field(False, description="是否为合法 ISO 二字代码格式，可直接添加")
+    suggested_alpha_2: Optional[str] = Field(None, description="别名可映射到的 ISO 二字代码")
+    alias_registered: bool = Field(False, description="是否已在 country_aliases 表登记别名")
+    variant_codes: list[str] = Field(default_factory=list, description="合并统计的原始写法变体")
+
+
+class CountryAliasBase(BaseSchema):
+    """国家英文别名公共字段。"""
+
+    alias_name: str = Field(..., min_length=1, max_length=150, description="别名原文")
+    alpha_2_code: str = Field(..., min_length=2, max_length=2, description="映射 ISO 二字代码")
+    remark: Optional[str] = Field(None, max_length=255, description="备注")
+
+    @field_validator("alpha_2_code")
+    @classmethod
+    def validate_alpha_2(cls, value: str) -> str:
+        return _normalize_alpha2(value)
+
+    @field_validator("alias_name", "remark")
+    @classmethod
+    def strip_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return value.strip() or None
+
+
+class CountryAliasCreate(CountryAliasBase):
+    """创建国家别名。"""
+
+    pass
+
+
+class CountryAliasResponse(CountryAliasBase, IDBaseSchema):
+    """国家别名 API 响应。"""
+
+    alias_normalized: str = Field(..., description="规范化键")

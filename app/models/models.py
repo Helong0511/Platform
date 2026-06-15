@@ -6,7 +6,7 @@ ORM 模型重导出垫片（兼容 ``from app.models.models import X``）。
 from app.models.base import Base, pwd_context, UserRole
 from app.models.user import User
 from app.models.client_product import Client, Product, AdData, TBSearchData, ProductAssignment
-from app.models.system import ScheduledTask, UserAuditLog, CountryInfo
+from app.models.system import ScheduledTask, UserAuditLog, CountryInfo, CountryAlias
 from app.models.postback import PostbackConversion, PostbackForwardLog, PostbackForwardQueue, ClientNotificationConfig, ProductNotificationConfig, AdminNotificationConfig, CloakConfig, PostbackNotification, ShortLink, PendingPostbackConversion
 from app.models.cpl import Advertiser, Publisher, Offer, OfferPublisherAssignment, Click, OfferCap, OfferDiscount, AdvertiserTest, AffiliateTest
 from app.models.deduction import ConversionDeductionConfig, ConversionDeductionLog
@@ -24,6 +24,7 @@ __all__ = [
     "ScheduledTask",
     "UserAuditLog",
     "CountryInfo",
+    "CountryAlias",
     "PostbackConversion",
     "PostbackForwardLog",
     "PostbackForwardQueue",

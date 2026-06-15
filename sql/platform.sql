@@ -427,6 +427,21 @@ CREATE TABLE IF NOT EXISTS `countries`  (
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = 'ISO 3166-1国家代码表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
+-- Table structure for country_aliases
+-- ----------------------------
+DROP TABLE IF EXISTS `country_aliases`;
+CREATE TABLE IF NOT EXISTS `country_aliases`  (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `alias_name` varchar(150) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '别名原文',
+  `alias_normalized` varchar(150) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '规范化键',
+  `alpha_2_code` char(2) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '映射 ISO 二字代码',
+  `remark` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '备注',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uq_country_alias_normalized`(`alias_normalized` ASC) USING BTREE,
+  INDEX `idx_country_alias_alpha2`(`alpha_2_code` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '国家英文别名映射' ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
 -- Table structure for offer_caps
 -- ----------------------------
 DROP TABLE IF EXISTS `offer_caps`;
