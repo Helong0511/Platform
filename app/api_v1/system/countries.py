@@ -207,7 +207,7 @@ async def list_unrecognized_country_codes(
     _current_user: User = Depends(require_admin),
 ):
     """
-    扫描广告数据、TB 搜索数据及归档表，汇总未在 countries 表登记的国家代码。
+    扫描广告数据、TB 搜索数据及归档表，汇总未在 countries 表登记、且无法由英文别名解析的国家代码。
 
     便于管理员快速补全国家信息；ZZ（全部区域）与已登记代码不在结果中。
     """

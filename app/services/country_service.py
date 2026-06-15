@@ -93,11 +93,12 @@ def _merge_counts_by_bucket(
             return
 
         suggested = resolve_alpha2_via_alias(code, alias_map)
-        norm = normalize_country_alias_key(code)
+        # 已有英文别名可解析的写法不再视为「未识别」（见英文别名映射维护）
         if suggested:
-            bucket_key = f"alias-target:{suggested.upper()}"
-            display = code
-        elif _ALPHA2_PATTERN.match(code):
+            return
+
+        norm = normalize_country_alias_key(code)
+        if _ALPHA2_PATTERN.match(code):
             bucket_key = f"alpha2:{upper}"
             display = upper
         else:
@@ -108,7 +109,7 @@ def _merge_counts_by_bucket(
             buckets[bucket_key] = {
                 "display": display,
                 "variant_codes": set(),
-                "suggested_alpha_2": suggested,
+                "suggested_alpha_2": None,
                 "ad_data_count": 0,
                 "tb_search_data_count": 0,
                 "ad_data_archive_count": 0,
@@ -117,8 +118,6 @@ def _merge_counts_by_bucket(
         bucket["variant_codes"].add(code)
         if len(code) > len(bucket["display"]):
             bucket["display"] = code
-        if suggested and not bucket["suggested_alpha_2"]:
-            bucket["suggested_alpha_2"] = suggested
         if source == "ad_data":
             bucket["ad_data_count"] += count
         elif source == "tb_search_data":
@@ -140,10 +139,10 @@ async def collect_unrecognized_country_codes(
     db: AsyncSession,
 ) -> list[UnrecognizedCountryCodeItem]:
     """
-    汇总业务数据中未在 countries 表登记的国家代码。
+    汇总业务数据中未在 countries 表登记、且无法由英文别名解析的国家代码。
 
-    - 合并写法变体（如 U.S. Virgin Islands / US Virgin Islands）的出现次数
-    - 标注别名可映射的 suggested_alpha_2
+    - 已在英文别名映射中的写法（含内置别名）不列入本列表
+    - 合并剩余写法变体的出现次数
     """
     known_result = await db.execute(select(CountryInfo.alpha_2_code))
     known_codes = {
@@ -153,12 +152,6 @@ async def collect_unrecognized_country_codes(
     }
 
     alias_map = await load_country_alias_map(db)
-    db_alias_keys = set()
-    try:
-        result = await db.execute(select(CountryAlias.alias_normalized))
-        db_alias_keys = {str(r[0]) for r in result.all() if r[0]}
-    except Exception:
-        await db.rollback()
 
     ad_counts = await _count_by_country_code(db, AdData.country_code)
     tb_counts = await _count_by_country_code(db, TBSearchData.country_code)
@@ -179,9 +172,6 @@ async def collect_unrecognized_country_codes(
             continue
 
         display = bucket["display"]
-        suggested = bucket.get("suggested_alpha_2")
-        norm = normalize_country_alias_key(display)
-        alias_registered = norm in db_alias_keys or norm in alias_map
 
         sources: list[str] = []
         if bucket["ad_data_count"]:
@@ -200,8 +190,8 @@ async def collect_unrecognized_country_codes(
                 total_count=total,
                 sources=sources,
                 is_valid_alpha2=bool(_ALPHA2_PATTERN.match(display)),
-                suggested_alpha_2=suggested,
-                alias_registered=alias_registered,
+                suggested_alpha_2=None,
+                alias_registered=False,
                 variant_codes=sorted(bucket["variant_codes"]),
             )
         )

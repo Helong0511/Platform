@@ -82,7 +82,7 @@
         <div class="unrecognized-header">
           <div>
             <span class="unrecognized-title">未识别国家代码</span>
-            <span class="unrecognized-desc">来自广告数据 / TB 搜索数据 / 归档表，尚未在 countries 表登记</span>
+            <span class="unrecognized-desc">尚未在 countries 表登记，且无法由上方英文别名解析的代码</span>
           </div>
           <el-button :icon="Refresh" :loading="unrecognizedLoading" @click="fetchUnrecognized">
             刷新收集
@@ -95,7 +95,7 @@
         type="success"
         :closable="false"
         show-icon
-        title="暂无未识别国家代码，业务数据中的代码均已在 countries 表登记。"
+        title="暂无待处理项：业务数据中的代码均已登记，或已由英文别名映射覆盖。"
       />
 
       <el-table
@@ -114,19 +114,6 @@
           </template>
         </el-table-column>
         <el-table-column prop="total_count" label="出现次数" width="100" align="center" sortable />
-        <el-table-column label="建议映射" width="110" align="center">
-          <template #default="{ row }">
-            <el-tag v-if="row.suggested_alpha_2" type="success" size="small">{{ row.suggested_alpha_2 }}</el-tag>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="别名" width="90" align="center">
-          <template #default="{ row }">
-            <el-tag :type="row.alias_registered ? 'success' : 'info'" size="small">
-              {{ row.alias_registered ? '已登记' : '未登记' }}
-            </el-tag>
-          </template>
-        </el-table-column>
         <el-table-column label="数据来源" min-width="160">
           <template #default="{ row }">
             <el-tag
@@ -156,20 +143,11 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right" align="center">
+        <el-table-column label="操作" width="100" fixed="right" align="center">
           <template #default="{ row }">
-            <el-button
-              v-if="row.suggested_alpha_2"
-              type="primary"
-              link
-              size="small"
-              @click="handleQuickAddSuggested(row)"
-            >
-              添加 {{ row.suggested_alpha_2 }}
-            </el-button>
             <el-tooltip
-              v-else-if="!row.is_valid_alpha2"
-              content="非标准二字代码，可先添加别名映射或修正业务数据"
+              v-if="!row.is_valid_alpha2"
+              content="非标准二字代码，请先在业务数据中修正，或添加到上方英文别名映射"
               placement="top"
             >
               <el-button type="primary" link size="small" disabled>快速添加</el-button>
@@ -562,13 +540,6 @@ const handleCreate = () => {
 const handleQuickAdd = (row) => {
   resetForm();
   formData.alpha_2_code = row.country_code.toUpperCase();
-  dialogVisible.value = true;
-};
-
-const handleQuickAddSuggested = (row) => {
-  resetForm();
-  formData.alpha_2_code = row.suggested_alpha_2;
-  formData.country_name_en = row.country_code;
   dialogVisible.value = true;
 };
 
