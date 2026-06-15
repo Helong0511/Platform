@@ -127,7 +127,7 @@ function vueDesc(relPath) {
     'views/NotFound.vue': '404 页面：路由未匹配时的友好提示',
     'views/AdData.vue': '广告数据入口：子路由容器',
     'views/ApiDocumentation.vue': 'API 文档页：客户对接接口说明',
-    'views/ad-data/DailyReport.vue': '广告数据 - 每日报表',
+    'views/ad-data/DailyReport.vue': '广告数据 - 每日统计',
     'views/ad-data/TBSearchData.vue': '广告数据 - TB 搜索数据',
     'views/admin/AdvertiserManagement.vue': '管理端 - 广告主（上游）管理',
     'views/admin/AffiliateTest.vue': '管理端 - 下游联调测试',

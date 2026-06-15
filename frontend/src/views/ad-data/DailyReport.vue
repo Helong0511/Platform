@@ -1,5 +1,5 @@
 <!--
-  广告数据 - 每日报表
+  广告数据 - 每日统计
   @file views/ad-data/DailyReport.vue
 -->
 <template>
@@ -38,7 +38,7 @@
       <!-- 卡片标题栏 -->
     <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-weight: 600; font-size: 16px;">每日报表数据</span>
+          <span style="font-weight: 600; font-size: 16px;">每日统计数据</span>
           <el-button 
             type="text" 
             :icon="Setting" 

@@ -234,7 +234,7 @@ async def get_client_data(
     
     返回说明：
     - data_type='all': 返回明细行；传入 dimension 时与后台「详细报表」口径一致
-    - data_type='day': 返回日汇总；传入 dimension 时按维度分组，与后台「每日报表」一致
+    - data_type='day': 返回日汇总；传入 dimension 时按维度分组，与后台「每日统计」一致
     - 未传 dimension：返回库中全部匹配行（兼容旧版；若同时存在国家/单元 API 数据可能重复统计，建议传 dimension）
     """
     # ---------- 入口：参数与依赖准备 ----------

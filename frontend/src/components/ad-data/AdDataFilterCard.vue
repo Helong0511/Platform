@@ -1,5 +1,5 @@
 <!--
-  广告数据报表 - 筛选区（详细报表 / 每日报表共用）
+  广告数据报表 - 筛选区（详细报表 / 每日统计共用）
   @file components/ad-data/AdDataFilterCard.vue
 -->
 <template>

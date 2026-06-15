@@ -425,7 +425,7 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
             <p><strong>数据模式说明</strong>：</p>
             <ul>
               <li><strong>data_type='all'（详细数据）</strong>：返回明细行；配合 <code>dimension</code> 时与后台「详细报表」一致</li>
-              <li><strong>data_type='day'（每日汇总）</strong>：按日汇总；配合 <code>dimension</code> 时与后台「每日报表」一致；未传 <code>dimension</code> 时仍按「日期+产品+广告单元」汇总（历史行为）</li>
+              <li><strong>data_type='day'（每日汇总）</strong>：按日汇总；配合 <code>dimension</code> 时与后台「每日统计」一致；未传 <code>dimension</code> 时仍按「日期+产品+广告单元」汇总（历史行为）</li>
             </ul>
             <p><strong>广告单元（ad_unit）说明</strong>：</p>
             <ul>

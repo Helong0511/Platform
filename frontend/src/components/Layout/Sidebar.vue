@@ -26,7 +26,7 @@
         <span>广告数据</span>
       </template>
       <el-menu-item index="/app/ad-data/daily-report">
-        <span>每日报表</span>
+        <span>每日统计</span>
       </el-menu-item>
       <el-menu-item index="/app/ad-data/detail-report">
         <span>详细报表</span>
