@@ -27,6 +27,7 @@ from app.core.security import is_admin
 from app.models.models import AdData, Client, CountryInfo, Product, ProductAssignment, User
 from app.services.ad_data.queries.dimension_filter import (
     build_ad_data_dimension_filter,
+    build_ad_unit_exact_filter,
     normalize_dimension,
 )
 from app.services.ad_data.queries.join_helpers import (
@@ -103,6 +104,7 @@ class FilterOptionsQuery:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         dimension: Optional[str] = None,
+        ad_unit: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         dim = normalize_dimension(dimension)
         if dim == "ad_unit":
@@ -125,6 +127,10 @@ class FilterOptionsQuery:
 
         if product_id:
             query = query.where(AdData.product_id == product_id)
+
+        ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
+        if ad_unit_filter is not None:
+            query = query.where(ad_unit_filter)
 
         query = apply_date_range_filter(
             query, AdData.date, start_date, end_date, default_to_current_month=True

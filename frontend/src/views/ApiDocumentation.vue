@@ -66,7 +66,7 @@
           <p><strong>注意</strong>：</p>
           <ul>
             <li><code>/client_data</code> 接口的 <code>data_type</code> 参数是必填的，必须包含在签名计算中</li>
-            <li><code>dimension</code> 为可选参数；传入时须参与签名。取值：<code>country</code>（按国家）、<code>ad_unit</code>（按广告单元）、<code>country_ad_unit</code>（按国家+广告单元）</li>
+            <li><code>dimension</code> 为可选参数；传入时须参与签名。取值：<code>country</code>（按国家）、<code>ad_unit</code>（按广告单元）、<code>ad_unit_country</code>（按广告单元+国家，<code>country_ad_unit</code> 为兼容别名）</li>
             <li>若同时存在国家 API 与广告单元 API 数据，强烈建议传入 <code>dimension</code>，否则不传时返回全量行可能重复统计</li>
             <li>只有非空参数才参与签名计算。如果未提供可选参数，则不包含在签名中</li>
           </ul>
@@ -419,7 +419,7 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
             <ul>
               <li><code>country</code>：仅国家维度（<code>ad_unit</code> 为空，国家 ≠ AA/ZZ）</li>
               <li><code>ad_unit</code>：仅广告单元维度（国家为 ZZ/AA/空，<code>ad_unit</code> 有值）</li>
-              <li><code>country_ad_unit</code>：国家与广告单元交叉明细</li>
+              <li><code>ad_unit_country</code>：广告单元与国家交叉明细（<code>country_ad_unit</code> 为兼容别名）</li>
               <li>不传：返回库中全部匹配行（兼容旧版；双 API 场景可能重复统计）</li>
             </ul>
             <p><strong>数据模式说明</strong>：</p>
@@ -570,7 +570,7 @@ const adDataRequestParams = [
   { name: 'client_id', type: 'int', required: '是', description: '客户ID' },
   { name: 'req_time', type: 'int', required: '是', description: '请求时间戳（10位秒级，Unix时间戳）' },
   { name: 'data_type', type: 'string', required: '是', description: '数据类型：\'all\' 明细，\'day\' 日汇总' },
-  { name: 'dimension', type: 'string', required: '否', description: '统计维度：country / ad_unit / country_ad_unit；与后台报表一致，双 API 客户建议必传' },
+  { name: 'dimension', type: 'string', required: '否', description: '统计维度：country / ad_unit / ad_unit_country（country_ad_unit 为兼容别名）；与后台报表一致，双 API 客户建议必传' },
   { name: 'start_date', type: 'string', required: '否', description: '起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天' },
   { name: 'end_date', type: 'string', required: '否', description: '终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天' },
   { name: 'sign', type: 'string', required: '是', description: 'MD5签名（小写），包含所有非空参数' }
@@ -581,7 +581,7 @@ const adDataResponseFields = [
   { field: 'date', type: 'string', description: '数据日期（ISO格式：YYYY-MM-DD）' },
   { field: 'product_name', type: 'string', description: '产品名称（确保不为null）' },
   { field: 'ad_unit', type: 'string', description: '广告单元（可为空字符串）' },
-  { field: 'country_code', type: 'string', description: '国家二字代码；dimension=country 时为实际国家；dimension=ad_unit 或 day 未传 dimension 时多为 ZZ；dimension=country_ad_unit 时为实际国家' },
+  { field: 'country_code', type: 'string', description: '国家二字代码；dimension=country 时为实际国家；dimension=ad_unit 或 day 未传 dimension 时多为 ZZ；dimension=ad_unit_country 时为实际国家' },
   { field: 'country_name_zh', type: 'string', description: '国家中文名称；与 country_code 对应，无国家拆分时为「全部区域」' },
   { field: 'request_count', type: 'int', description: '请求数（整数）' },
   { field: 'match_count', type: 'int', description: '匹配数（整数）' },

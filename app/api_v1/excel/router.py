@@ -91,7 +91,7 @@ async def export_ad_data(
         ad_unit: str | None = Query(None, description="广告单元精确过滤"),
         dimension: str | None = Query(
             "country",
-            description="统计维度：country=按国家，ad_unit=按广告单元，country_ad_unit=按国家+广告单元",
+            description="统计维度：country=按国家，ad_unit=按广告单元，ad_unit_country=按广告单元+国家（country_ad_unit 为兼容别名）",
         ),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)

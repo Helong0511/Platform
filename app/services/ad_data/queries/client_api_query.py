@@ -19,6 +19,7 @@ from app.core.country_code import resolve_country_name
 from app.core.query_utils import check_use_assignment_table, date_range_condition
 from app.models.models import AdData, Client, CountryInfo, Product, ProductAssignment
 from app.services.ad_data.queries.dimension_filter import (
+    is_cross_dimension,
     maybe_build_ad_data_dimension_filter,
     parse_optional_dimension,
 )
@@ -240,8 +241,8 @@ class ClientAdDataQuery:
         use_assignment_table: bool,
         dimension: str,
     ) -> list[dict[str, Any]]:
-        group_by_country = dimension == "country_ad_unit"
-        group_by_ad_unit = dimension in ("ad_unit", "country_ad_unit")
+        group_by_country = is_cross_dimension(dimension)
+        group_by_ad_unit = dimension == "ad_unit" or is_cross_dimension(dimension)
 
         select_cols: list[Any] = [
             func.date(AdData.date).label("date"),
@@ -254,12 +255,12 @@ class ClientAdDataQuery:
             Product.name,
         ]
 
-        if group_by_country:
-            select_cols.append(AdData.country_code.label("country_code"))
-            group_cols.append(AdData.country_code)
         if group_by_ad_unit:
             select_cols.append(AdData.ad_unit.label("ad_unit"))
             group_cols.append(AdData.ad_unit)
+        if group_by_country:
+            select_cols.append(AdData.country_code.label("country_code"))
+            group_cols.append(AdData.country_code)
 
         query = select(
             *select_cols,
@@ -336,7 +337,7 @@ class ClientAdDataQuery:
             country_name_zh = "全部区域"
         else:
             row_country = getattr(row, "country_code", "") or ""
-            ad_unit = getattr(row, "ad_unit", "") or "" if dim == "country_ad_unit" else ""
+            ad_unit = getattr(row, "ad_unit", "") or "" if is_cross_dimension(dim) else ""
             country_code = row_country
             stub = (
                 SimpleNamespace(country_name_zh=country_name_map[row_country])

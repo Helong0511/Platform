@@ -60,14 +60,14 @@ class ClientDataRequest(ClientAPIBaseRequest):
     查询客户广告数据请求。
 
     data_type：all=明细，day=日汇总。
-    dimension（可选）：country / ad_unit / country_ad_unit，与后台报表统计维度一致；不传则保持历史全量返回。
+    dimension（可选）：country / ad_unit / ad_unit_country（country_ad_unit 为兼容别名），与后台报表统计维度一致；不传则保持历史全量返回。
     日期缺省为当前自然月首尾。
     """
     data_type: str = Field(default="all",
                            description="数据类型：'all' 表示详细数据，'day' 表示每日汇总，默认为 'all'")
     dimension: str | None = Field(
         default=None,
-        description="统计维度（可选）：country=按国家，ad_unit=按广告单元，country_ad_unit=按国家+广告单元；不传则不过滤维度",
+        description="统计维度（可选）：country=按国家，ad_unit=按广告单元，ad_unit_country=按广告单元+国家（country_ad_unit 为兼容别名）；不传则不过滤维度",
     )
     start_date: str | None = Field(default=None, description="起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天")
     end_date: str | None = Field(default=None, description="终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天")
@@ -227,7 +227,7 @@ async def get_client_data(
     - client_id: 客户ID（必填）
     - req_time: 请求时间戳（必填）
     - data_type: 数据类型，'all' 表示详细数据，'day' 表示每日汇总，默认为 'all'
-    - dimension: 统计维度（可选），'country' / 'ad_unit' / 'country_ad_unit'；不传则保持历史行为
+    - dimension: 统计维度（可选），'country' / 'ad_unit' / 'ad_unit_country'（'country_ad_unit' 为兼容别名）；不传则保持历史行为
     - start_date: 起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天
     - end_date: 终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天
     - sign: MD5签名（必填），包含所有非空参数

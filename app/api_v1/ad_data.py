@@ -83,7 +83,7 @@ async def get_ad_data(
         ad_unit: str | None = Query(None, description="广告单元精确过滤"),
         dimension: str | None = Query(
             "country",
-            description="统计维度：country=按国家，ad_unit=按广告单元，country_ad_unit=按国家+广告单元",
+            description="统计维度：country=按国家，ad_unit=按广告单元，ad_unit_country=按广告单元+国家（country_ad_unit 为兼容别名）",
         ),
         sort_by: str = Query("date", description="排序字段，默认为date"),
         sort_order: str = Query("desc", description="排序方向，asc或desc")
@@ -174,8 +174,9 @@ async def get_countries_with_data(
         end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD"),
         dimension: str | None = Query(
             "country",
-            description="统计维度：country=按国家，ad_unit=按广告单元，country_ad_unit=按国家+广告单元",
+            description="统计维度：country=按国家，ad_unit=按广告单元，ad_unit_country=按广告单元+国家（country_ad_unit 为兼容别名）",
         ),
+        ad_unit: str | None = Query(None, description="广告单元过滤，用于级联筛选国家"),
 ):
     """
     获取有广告数据的国家列表（用于下拉选择，已重构使用服务层）
@@ -186,7 +187,7 @@ async def get_countries_with_data(
     """
     # 使用服务层（业务逻辑在AdDataService中）
     ad_data_service: AdDataService = await get_ad_data_service(db)
-    
+
     try:
         countries_list = await ad_data_service.get_countries_with_data(
             current_user=current_user,
@@ -195,6 +196,7 @@ async def get_countries_with_data(
             start_date=start_date,
             end_date=end_date,
             dimension=dimension,
+            ad_unit=ad_unit,
         )
         return ListResponseBaseSchema.success(data=countries_list, count=len(countries_list))
     except HTTPException:
@@ -217,7 +219,7 @@ async def get_ad_units_with_data(
         end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD"),
         dimension: str | None = Query(
             "ad_unit",
-            description="统计维度：country=按国家，ad_unit=按广告单元，country_ad_unit=按国家+广告单元",
+            description="统计维度：country=按国家，ad_unit=按广告单元，ad_unit_country=按广告单元+国家（country_ad_unit 为兼容别名）",
         ),
         country_code: str | None = Query(None, description="国家代码过滤，用于级联筛选广告单元"),
 ):
@@ -311,7 +313,7 @@ async def get_daily_summary(
         ad_unit: str | None = Query(None, description="广告单元精确过滤"),
         dimension: str | None = Query(
             "country",
-            description="统计维度：country=按国家，ad_unit=按广告单元，country_ad_unit=按国家+广告单元",
+            description="统计维度：country=按国家，ad_unit=按广告单元，ad_unit_country=按广告单元+国家（country_ad_unit 为兼容别名）",
         ),
         sort_by: str = Query("date", description="排序字段，默认为date"),
         sort_order: str = Query("desc", description="排序方向，asc或desc")
@@ -320,7 +322,7 @@ async def get_daily_summary(
     获取每日汇总数据（按统计维度分组，已重构使用服务层）
     - 按国家：筛选国家级明细，按产品+日期汇总（所有国家合并为一条）
     - 按广告单元：按产品+日期+广告单元汇总
-    - 按国家+广告单元：按产品+日期+国家+广告单元汇总
+    - 按广告单元+国家：按产品+日期+广告单元+国家汇总
     - 支持分页、过滤和排序
     - 管理员可查看所有数据，客户只能查看自己的数据
     """

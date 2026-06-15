@@ -51,7 +51,7 @@ def verify_signature(
         req_time: 请求时间戳
         sign: 请求签名
         data_type: 数据类型（可选）
-        dimension: 统计维度（可选，country / ad_unit / country_ad_unit）
+        dimension: 统计维度（可选，country / ad_unit / ad_unit_country；country_ad_unit 为兼容别名）
         start_date: 开始日期（可选）
         end_date: 结束日期（可选）
     

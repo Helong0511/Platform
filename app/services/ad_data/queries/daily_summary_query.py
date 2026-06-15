@@ -2,7 +2,7 @@
 广告数据每日汇总查询构建器。
 
 功能说明：
-- 按统计维度分组聚合：按国家维度汇总到日期+产品 / 按广告单元 / 按国家+广告单元
+- 按统计维度分组聚合：按国家维度汇总到日期+产品 / 按广告单元 / 按广告单元+国家
 - 支持权限过滤、分页、SQL/内存混合排序
 
 在系统中的位置：
@@ -25,6 +25,7 @@ from app.models.models import AdData, Client, CountryInfo, Product, User
 from app.services.ad_data.queries.dimension_filter import (
     build_ad_data_dimension_filter,
     build_ad_unit_exact_filter,
+    is_cross_dimension,
     normalize_dimension,
 )
 from app.services.ad_data.queries.join_helpers import (
@@ -97,18 +98,17 @@ class DailySummaryQuery:
             User.username,
         ]
 
-        # 每日汇总分组：country 维度仅筛选国家级明细，汇总到「日期+产品」；
-        # 仅 country_ad_unit 才按国家列分组展示。
-        group_by_country = dim == "country_ad_unit"
-        group_by_ad_unit = dim in ("ad_unit", "country_ad_unit")
+        # 仅 ad_unit_country 才按国家列分组展示；列顺序为广告单元在前、国家在后。
+        group_by_country = is_cross_dimension(dim)
+        group_by_ad_unit = dim == "ad_unit" or is_cross_dimension(dim)
 
         select_cols = list(base_dims)
-        if group_by_country:
-            select_cols.append(AdData.country_code.label("country_code"))
-            group_by_cols.append(AdData.country_code)
         if group_by_ad_unit:
             select_cols.append(AdData.ad_unit.label("ad_unit"))
             group_by_cols.append(AdData.ad_unit)
+        if group_by_country:
+            select_cols.append(AdData.country_code.label("country_code"))
+            group_by_cols.append(AdData.country_code)
 
         query = select(*select_cols, *metric_columns)
         query = join_product_and_client(query, use_assignment_table)
@@ -370,12 +370,12 @@ class DailySummaryQuery:
             ]
             group_cols = [func.date(AdData.date), Product.id]
 
-            if group_by_country:
-                sub_cols.append(AdData.country_code.label("country_code"))
-                group_cols.append(AdData.country_code)
             if group_by_ad_unit:
                 sub_cols.append(AdData.ad_unit.label("ad_unit"))
                 group_cols.append(AdData.ad_unit)
+            if group_by_country:
+                sub_cols.append(AdData.country_code.label("country_code"))
+                group_cols.append(AdData.country_code)
 
             subquery = select(*sub_cols)
             subquery = join_product_and_client(subquery, use_assignment_table)

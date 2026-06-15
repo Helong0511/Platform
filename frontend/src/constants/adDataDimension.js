@@ -5,12 +5,18 @@
 
 import { logger } from '../utils/logger';
 
-/** @typedef {'country' | 'ad_unit' | 'country_ad_unit'} AdDataDimension */
+/** @typedef {'country' | 'ad_unit' | 'ad_unit_country'} AdDataDimension */
+
+/** 交叉维度：按广告单元+国家 */
+export const AD_UNIT_COUNTRY_DIMENSION = 'ad_unit_country';
+
+/** 已废弃别名，读取偏好时自动迁移 */
+export const LEGACY_CROSS_DIMENSION = 'country_ad_unit';
 
 export const AD_DATA_DIMENSION_OPTIONS = [
   { value: 'country', label: '按国家' },
   { value: 'ad_unit', label: '按广告单元' },
-  { value: 'country_ad_unit', label: '按国家+广告单元' }
+  { value: AD_UNIT_COUNTRY_DIMENSION, label: '按广告单元+国家' }
 ];
 
 export const DEFAULT_AD_DATA_DIMENSION = 'country';
@@ -24,11 +30,23 @@ const AD_DATA_DIMENSION_VALUES = new Set(
 export const AD_DATA_DIMENSION_HINTS = {
   country: '仅展示国家维度数据（不含广告单元细分），避免与国家/单元 API 重复统计。',
   ad_unit: '仅展示广告单元维度数据（国家显示为全部区域），不含按国家拆分的数据。',
-  country_ad_unit: '展示国家与广告单元交叉明细数据。'
+  [AD_UNIT_COUNTRY_DIMENSION]: '展示广告单元与国家交叉明细数据（先选广告单元，再选国家）。'
 };
 
+export function normalizeAdDataDimension(dimension) {
+  if (dimension === LEGACY_CROSS_DIMENSION) {
+    return AD_UNIT_COUNTRY_DIMENSION;
+  }
+  return dimension;
+}
+
 export function isValidAdDataDimension(dimension) {
-  return AD_DATA_DIMENSION_VALUES.has(dimension);
+  const normalized = normalizeAdDataDimension(dimension);
+  return AD_DATA_DIMENSION_VALUES.has(normalized);
+}
+
+export function isAdUnitCountryDimension(dimension) {
+  return normalizeAdDataDimension(dimension) === AD_UNIT_COUNTRY_DIMENSION;
 }
 
 function buildAdDataDimensionStorageKey(userId) {
@@ -41,7 +59,7 @@ export function loadAdDataDimensionPreference(userId) {
   try {
     const saved = localStorage.getItem(buildAdDataDimensionStorageKey(userId));
     if (saved && isValidAdDataDimension(saved)) {
-      return saved;
+      return normalizeAdDataDimension(saved);
     }
   } catch (error) {
     logger.error('加载统计维度偏好失败:', error);
@@ -51,20 +69,28 @@ export function loadAdDataDimensionPreference(userId) {
 
 /** 持久化统计维度选择，下次登录默认使用 */
 export function saveAdDataDimensionPreference(userId, dimension) {
-  if (!isValidAdDataDimension(dimension)) {
+  const normalized = normalizeAdDataDimension(dimension);
+  if (!isValidAdDataDimension(normalized)) {
     return;
   }
   try {
-    localStorage.setItem(buildAdDataDimensionStorageKey(userId), dimension);
+    localStorage.setItem(buildAdDataDimensionStorageKey(userId), normalized);
   } catch (error) {
     logger.error('保存统计维度偏好失败:', error);
   }
 }
 
 export function showCountryFilterForDimension(dimension) {
-  return dimension === 'country' || dimension === 'country_ad_unit';
+  const dim = normalizeAdDataDimension(dimension);
+  return dim === 'country' || dim === AD_UNIT_COUNTRY_DIMENSION;
 }
 
 export function showAdUnitFilterForDimension(dimension) {
-  return dimension === 'ad_unit' || dimension === 'country_ad_unit';
+  const dim = normalizeAdDataDimension(dimension);
+  return dim === 'ad_unit' || dim === AD_UNIT_COUNTRY_DIMENSION;
+}
+
+/** 交叉维度下筛选区先展示广告单元、后展示国家 */
+export function showAdUnitBeforeCountryInFilter(dimension) {
+  return isAdUnitCountryDimension(dimension);
 }

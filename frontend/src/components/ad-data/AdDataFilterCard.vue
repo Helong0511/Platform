@@ -65,22 +65,6 @@
           />
         </el-select>
       </el-form-item>
-      <el-form-item v-if="showCountry" label="国家">
-        <el-select
-          v-model="searchForm.countryCode"
-          placeholder="全部国家"
-          style="width: 100%;"
-          clearable
-          @change="emit('country-change')"
-        >
-          <el-option
-            v-for="country in filterCountries"
-            :key="country.code"
-            :label="country.label || country.name_zh"
-            :value="country.code"
-          />
-        </el-select>
-      </el-form-item>
       <el-form-item v-if="showAdUnit" label="广告单元">
         <el-select
           v-model="searchForm.adUnit"
@@ -95,6 +79,22 @@
             :key="unit.value"
             :label="unit.label"
             :value="unit.value"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item v-if="showCountry" label="国家">
+        <el-select
+          v-model="searchForm.countryCode"
+          placeholder="全部国家"
+          style="width: 100%;"
+          clearable
+          @change="emit('country-change')"
+        >
+          <el-option
+            v-for="country in filterCountries"
+            :key="country.code"
+            :label="country.label || country.name_zh"
+            :value="country.code"
           />
         </el-select>
       </el-form-item>

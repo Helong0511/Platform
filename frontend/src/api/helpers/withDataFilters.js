@@ -53,7 +53,8 @@ export function createWithDataFilterApi(moduleKey, options = {}) {
       productId = null,
       startDate = null,
       endDate = null,
-      dimension = null
+      dimension = null,
+      adUnit = null
     ) => {
       const params = {};
       if (clientId) params.client_id = clientId;
@@ -61,6 +62,7 @@ export function createWithDataFilterApi(moduleKey, options = {}) {
       if (startDate) params.start_date = startDate;
       if (endDate) params.end_date = endDate;
       if (dimension) params.dimension = dimension;
+      if (adUnit) params.ad_unit = adUnit;
       const payload = await fetchWithDataResource(`${prefix}/countries-with-data`, params);
       return pick(payload);
     },

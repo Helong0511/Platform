@@ -4,21 +4,35 @@
 三种互斥维度，避免国家 API 与广告单元 API 数据重复展示：
 - country：按国家（ad_unit 为空，国家非 AA/ZZ）
 - ad_unit：按广告单元（国家为 AA/ZZ/空，ad_unit 有值）
-- country_ad_unit：按国家+广告单元（两者均有有效值）
+- ad_unit_country：按广告单元+国家（两者均有有效值）
+- country_ad_unit：已废弃别名，等价于 ad_unit_country
 """
 from typing import Any, Optional, Set
 
 from sqlalchemy import and_, or_
 
-VALID_DIMENSIONS: Set[str] = frozenset({"country", "ad_unit", "country_ad_unit"})
+CROSS_DIMENSION = "ad_unit_country"
+LEGACY_CROSS_DIMENSION = "country_ad_unit"
+VALID_DIMENSIONS: Set[str] = frozenset({"country", "ad_unit", CROSS_DIMENSION})
+INPUT_DIMENSIONS: Set[str] = VALID_DIMENSIONS | {LEGACY_CROSS_DIMENSION}
 DEFAULT_DIMENSION = "country"
 
 
 def normalize_dimension(dimension: Optional[str]) -> str:
     """规范化统计维度参数，非法或空值回退为默认「按国家」。"""
-    if dimension and str(dimension).strip() in VALID_DIMENSIONS:
-        return str(dimension).strip()
+    if not dimension:
+        return DEFAULT_DIMENSION
+    stripped = str(dimension).strip()
+    if stripped == LEGACY_CROSS_DIMENSION:
+        return CROSS_DIMENSION
+    if stripped in VALID_DIMENSIONS:
+        return stripped
     return DEFAULT_DIMENSION
+
+
+def is_cross_dimension(dimension: Optional[str]) -> bool:
+    """是否为「按广告单元+国家」交叉维度。"""
+    return normalize_dimension(dimension) == CROSS_DIMENSION
 
 
 def parse_optional_dimension(dimension: Optional[str]) -> Optional[str]:
@@ -34,8 +48,8 @@ def parse_optional_dimension(dimension: Optional[str]) -> Optional[str]:
     stripped = str(dimension).strip()
     if not stripped:
         return None
-    if stripped in VALID_DIMENSIONS:
-        return stripped
+    if stripped in INPUT_DIMENSIONS:
+        return normalize_dimension(stripped)
     return None
 
 
@@ -46,12 +60,13 @@ def ensure_valid_optional_dimension(dimension: Optional[str]) -> Optional[str]:
     stripped = str(dimension).strip()
     if not stripped:
         return None
-    if stripped not in VALID_DIMENSIONS:
+    if stripped not in INPUT_DIMENSIONS:
         raise ValueError(
             f"无效的 dimension 参数: {stripped}，"
-            f"可选值: country（按国家）、ad_unit（按广告单元）、country_ad_unit（按国家+广告单元）"
+            f"可选值: country（按国家）、ad_unit（按广告单元）、"
+            f"ad_unit_country（按广告单元+国家）；country_ad_unit 为兼容别名"
         )
-    return stripped
+    return normalize_dimension(stripped)
 
 
 def maybe_build_ad_data_dimension_filter(
