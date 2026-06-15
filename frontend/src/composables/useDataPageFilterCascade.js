@@ -71,8 +71,8 @@ const AD_DATA_API = {
   getProducts: (clientId, start, end) => getProductsWithData(clientId, start, end),
   getCountries: (clientId, productId, start, end, dimension) =>
     getCountriesWithData(clientId, productId, start, end, dimension),
-  getAdUnits: (clientId, productId, start, end, dimension) =>
-    getAdUnitsWithData(clientId, productId, start, end, dimension),
+  getAdUnits: (clientId, productId, start, end, dimension, countryCode) =>
+    getAdUnitsWithData(clientId, productId, start, end, dimension, countryCode),
   filterCountriesAdvanced: true,
   supportsDimension: true
 };
@@ -86,6 +86,13 @@ const TB_SEARCH_API = {
   filterCountriesAdvanced: false,
   supportsDimension: false
 };
+
+function valuesEqual(a, b) {
+  if (a == null || a === '' || b == null || b === '') {
+    return a === b;
+  }
+  return String(a) === String(b);
+}
 
 /**
  * @param {Object} options
@@ -204,7 +211,12 @@ export function useDataPageFilterCascade({
     }
   };
 
-  const fetchFilterAdUnits = async (clientId = null, productId = null) => {
+  const getClientId = () => searchForm.value.clientId || null;
+
+  const getProductId = () =>
+    searchForm.value.productId ? parseInt(searchForm.value.productId, 10) : null;
+
+  const fetchFilterAdUnits = async (clientId = null, productId = null, countryCode = null) => {
     if (!includeDimension || !api.getAdUnits) return;
     const dimension = getDimension();
     if (!showAdUnitFilterForDimension(dimension)) {
@@ -218,7 +230,8 @@ export function useDataPageFilterCascade({
         productId || null,
         startDate,
         endDate,
-        dimension
+        dimension,
+        countryCode || null
       );
       const data = result?.data || [];
       const adUnitOptions = data
@@ -239,15 +252,78 @@ export function useDataPageFilterCascade({
   };
 
   const reloadSecondaryFilters = async () => {
-    const clientId = searchForm.value.clientId || null;
-    const productId = searchForm.value.productId
-      ? parseInt(searchForm.value.productId, 10)
-      : null;
+    const clientId = getClientId();
+    const productId = getProductId();
+    const countryCode = searchForm.value.countryCode || null;
     await fetchFilterCountries(clientId, productId);
-    await fetchFilterAdUnits(clientId, productId);
+    await fetchFilterAdUnits(clientId, productId, countryCode);
   };
 
-  const handleFilterClientChange = async (clientId) => {
+  /** 剔除当前条件下已失效的筛选项（日期/客户变更后调用） */
+  const pruneInvalidFilterSelections = (isAdmin = false) => {
+    let changed = false;
+
+    if (isAdmin && searchForm.value.clientId) {
+      const clientExists = users.value.some((u) =>
+        valuesEqual(u.value, searchForm.value.clientId)
+      );
+      if (!clientExists) {
+        searchForm.value.clientId = '';
+        searchForm.value.productId = '';
+        if (includeCountry || includeDimension) {
+          searchForm.value.countryCode = '';
+        }
+        if (includeDimension) {
+          searchForm.value.adUnit = '';
+        }
+        changed = true;
+      }
+    }
+
+    if (searchForm.value.productId) {
+      const productExists = filterProducts.value.some((p) =>
+        valuesEqual(p.value, searchForm.value.productId)
+      );
+      if (!productExists) {
+        searchForm.value.productId = '';
+        if (includeCountry || includeDimension) {
+          searchForm.value.countryCode = '';
+        }
+        if (includeDimension) {
+          searchForm.value.adUnit = '';
+        }
+        changed = true;
+      }
+    }
+
+    if (searchForm.value.countryCode) {
+      const countryExists = filterCountries.value.some((c) =>
+        valuesEqual(c.code, searchForm.value.countryCode)
+      );
+      if (!countryExists) {
+        searchForm.value.countryCode = '';
+        if (includeDimension) {
+          searchForm.value.adUnit = '';
+        }
+        changed = true;
+      }
+    }
+
+    if (searchForm.value.adUnit) {
+      const adUnitExists = filterAdUnits.value.some((u) =>
+        valuesEqual(u.value, searchForm.value.adUnit)
+      );
+      if (!adUnitExists) {
+        searchForm.value.adUnit = '';
+        changed = true;
+      }
+    }
+
+    return changed;
+  };
+
+  const handleFilterClientChange = async () => {
+    const clientId = getClientId();
     searchForm.value.productId = '';
     if (includeCountry || includeDimension) {
       searchForm.value.countryCode = '';
@@ -255,7 +331,7 @@ export function useDataPageFilterCascade({
     if (includeDimension) {
       searchForm.value.adUnit = '';
     }
-    await fetchFilterProducts(clientId || null);
+    await fetchFilterProducts(clientId);
     await reloadSecondaryFilters();
     fixSelectDisplay();
   };
@@ -284,7 +360,11 @@ export function useDataPageFilterCascade({
     fixSelectDisplay();
   };
 
-  const handleCountryChange = () => {
+  const handleCountryChange = async () => {
+    if (includeDimension) {
+      searchForm.value.adUnit = '';
+      await fetchFilterAdUnits(getClientId(), getProductId(), searchForm.value.countryCode || null);
+    }
     fixSelectDisplay();
   };
 
@@ -296,16 +376,18 @@ export function useDataPageFilterCascade({
     if (isAdmin) {
       await fetchClientsWithData();
     }
-    await fetchFilterProducts(searchForm.value.clientId || null);
+    await fetchFilterProducts(getClientId());
     await reloadSecondaryFilters();
+    pruneInvalidFilterSelections(isAdmin);
   };
 
   const loadAllFilterOptions = async (isAdmin) => {
     if (isAdmin) {
       await fetchClientsWithData();
     }
-    await fetchFilterProducts(searchForm.value.clientId || null);
+    await fetchFilterProducts(getClientId());
     await reloadSecondaryFilters();
+    pruneInvalidFilterSelections(isAdmin);
   };
 
   if (includeDimension && getUserId) {
@@ -338,6 +420,7 @@ export function useDataPageFilterCascade({
     handleCountryChange,
     handleAdUnitChange,
     reloadFiltersAfterDateChange,
-    loadAllFilterOptions
+    loadAllFilterOptions,
+    pruneInvalidFilterSelections
   };
 }

@@ -16,7 +16,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.country_code import resolve_country_name
+from app.core.country_code import build_ad_data_country_filter, resolve_country_name
 from app.core.infrastructure.cache_compat import (
     generate_cache_key,
     legacy_get_cached as get_cached,
@@ -160,6 +160,7 @@ class FilterOptionsQuery:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         dimension: Optional[str] = None,
+        country_code: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         dim = normalize_dimension(dimension)
         if dim == "country":
@@ -182,6 +183,12 @@ class FilterOptionsQuery:
 
         if product_id:
             query = query.where(AdData.product_id == product_id)
+
+        country_filter = await build_ad_data_country_filter(
+            self.db, AdData.country_code, country_code
+        )
+        if country_filter is not None:
+            query = query.where(country_filter)
 
         query = apply_date_range_filter(
             query, AdData.date, start_date, end_date, default_to_current_month=True

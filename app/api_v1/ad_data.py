@@ -219,6 +219,7 @@ async def get_ad_units_with_data(
             "ad_unit",
             description="统计维度：country=按国家，ad_unit=按广告单元，country_ad_unit=按国家+广告单元",
         ),
+        country_code: str | None = Query(None, description="国家代码过滤，用于级联筛选广告单元"),
 ):
     """获取有广告数据的广告单元列表（用于下拉选择）。"""
     ad_data_service: AdDataService = await get_ad_data_service(db)
@@ -231,6 +232,7 @@ async def get_ad_units_with_data(
             start_date=start_date,
             end_date=end_date,
             dimension=dimension,
+            country_code=country_code,
         )
         return ListResponseBaseSchema.success(data=ad_units_list, count=len(ad_units_list))
     except HTTPException:

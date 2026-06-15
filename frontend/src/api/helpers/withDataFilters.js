@@ -70,7 +70,8 @@ export function createWithDataFilterApi(moduleKey, options = {}) {
       productId = null,
       startDate = null,
       endDate = null,
-      dimension = null
+      dimension = null,
+      countryCode = null
     ) => {
       const params = {};
       if (clientId) params.client_id = clientId;
@@ -78,6 +79,7 @@ export function createWithDataFilterApi(moduleKey, options = {}) {
       if (startDate) params.start_date = startDate;
       if (endDate) params.end_date = endDate;
       if (dimension) params.dimension = dimension;
+      if (countryCode) params.country_code = countryCode;
       const payload = await fetchWithDataResource(`${prefix}/ad-units-with-data`, params);
       return pick(payload);
     }

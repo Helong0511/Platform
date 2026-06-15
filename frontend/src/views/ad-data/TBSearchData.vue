@@ -335,7 +335,8 @@ const {
   handleFilterClientChange,
   handleFilterProductChange,
   reloadFiltersAfterDateChange,
-  loadAllFilterOptions
+  loadAllFilterOptions,
+  pruneInvalidFilterSelections
 } = useDataPageFilterCascade({
   searchForm,
   includeCountry: true,
@@ -393,29 +394,17 @@ onMounted(async () => {
 });
 
 const syncFilterSelections = () => {
-  if (searchForm.value.productId) {
-    const productExists = products.value.some((p) => p.value === searchForm.value.productId);
-    if (!productExists) {
-      searchForm.value.productId = '';
-    }
-  }
-  if (searchForm.value.countryCode) {
-    const countryExists = countries.value.some((c) => c.code === searchForm.value.countryCode);
-    if (!countryExists) {
-      searchForm.value.countryCode = '';
-    }
-  }
+  pruneInvalidFilterSelections(isAdmin.value);
 };
 
 const handleDateRangeChange = async () => {
   await reloadFiltersAfterDateChange(isAdmin.value);
-  syncFilterSelections();
   pagination.value.current = 1;
   fetchData();
 };
 
-const handleClientChange = async (val) => {
-  await handleFilterClientChange(val);
+const handleClientChange = async () => {
+  await handleFilterClientChange();
   syncFilterSelections();
   pagination.value.current = 1;
   fetchData();

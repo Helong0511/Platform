@@ -97,11 +97,12 @@ class AdDataService(BaseService[AdData]):
             start_date: Optional[date] = None,
             end_date: Optional[date] = None,
             dimension: Optional[str] = None,
+            country_code: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         from app.services.ad_data.queries.filter_options_query import FilterOptionsQuery
 
         return await FilterOptionsQuery(self.db).fetch_ad_units(
-            current_user, client_id, product_id, start_date, end_date, dimension
+            current_user, client_id, product_id, start_date, end_date, dimension, country_code
         )
 
     async def get_products_with_data(

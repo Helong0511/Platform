@@ -345,30 +345,6 @@ const { runFetch: fetchDailyData, cancel: cancelDailyFetch } = useDebouncedPagin
 
 const handleDateRangeChange = async () => {
   await reloadFiltersAfterDateChange(isAdmin.value);
-  if (searchForm.value.productId) {
-    const productExists = filterProducts.value.some(
-      (p) => p.value === searchForm.value.productId
-    );
-    if (!productExists) {
-      searchForm.value.productId = '';
-    }
-  }
-  if (searchForm.value.countryCode) {
-    const countryExists = filterCountries.value.some(
-      (c) => c.code === searchForm.value.countryCode
-    );
-    if (!countryExists) {
-      searchForm.value.countryCode = '';
-    }
-  }
-  if (searchForm.value.adUnit) {
-    const adUnitExists = filterAdUnits.value.some(
-      (u) => u.value === searchForm.value.adUnit
-    );
-    if (!adUnitExists) {
-      searchForm.value.adUnit = '';
-    }
-  }
 };
 
 // 处理排序变化
