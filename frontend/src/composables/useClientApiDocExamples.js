@@ -78,9 +78,29 @@ export function useClientApiDocExamples() {
     );
   });
 
+  const signAdDataAllCountry = computed(() => {
+    if (!hasCredentials.value) return '';
+    return generateClientApiSign(
+      {
+        clientId: clientId.value,
+        reqTime: rt.value,
+        dataType: 'all',
+        dimension: 'country',
+        startDate: td.value,
+        endDate: td.value
+      },
+      secretKey.value
+    );
+  });
+
   const adDataSignTempStr = computed(() => {
     if (!hasCredentials.value) return '';
     return `client_id=${clientId.value}&data_type=all&end_date=${td.value}&req_time=${rt.value}&start_date=${td.value}&key=${secretKey.value}`;
+  });
+
+  const adDataSignWithDimensionTempStr = computed(() => {
+    if (!hasCredentials.value) return '';
+    return `client_id=${clientId.value}&data_type=all&dimension=country&end_date=${td.value}&req_time=${rt.value}&start_date=${td.value}&key=${secretKey.value}`;
   });
 
   const productSignTempStr = computed(() => {
@@ -124,6 +144,33 @@ export function useClientApiDocExamples() {
         req_time: rt.value,
         sign: signAdDataAll.value,
         data_type: 'all',
+        start_date: td.value,
+        end_date: td.value
+      },
+      null,
+      2
+    );
+  });
+
+  const adDataRequestAllWithDimensionJson = computed(() => {
+    if (!hasCredentials.value) {
+      return `{
+  "client_id": "您的客户ID",
+  "req_time": ${rt.value},
+  "sign": "登录后自动生成",
+  "data_type": "all",
+  "dimension": "country",
+  "start_date": "${td.value}",
+  "end_date": "${td.value}"
+}`;
+    }
+    return JSON.stringify(
+      {
+        client_id: Number(clientId.value),
+        req_time: rt.value,
+        sign: signAdDataAllCountry.value,
+        data_type: 'all',
+        dimension: 'country',
         start_date: td.value,
         end_date: td.value
       },
@@ -195,6 +242,7 @@ import time
 client_id = ${cid.value}
 req_time = ${rt.value}  # 页面加载时的时间戳（10位秒级），实际请求请用 int(time.time())
 data_type = 'all'  # 必填参数：'all' 或 'day'
+dimension = 'country'  # 可选：country / ad_unit / country_ad_unit；不传则不过滤维度
 start_date = '${td.value}'  # 当天日期
 end_date = '${td.value}'  # 当天日期
 SECRET_KEY = '${sk.value}'
@@ -207,6 +255,8 @@ params = {
 }
 
 # 添加可选参数（如果提供）
+if dimension:
+    params['dimension'] = str(dimension)
 if start_date:
     params['start_date'] = str(start_date)
 if end_date:
@@ -217,14 +267,14 @@ sorted_keys = sorted(params.keys())
 
 # 3. 拼接字符串
 temp_str = '&'.join([f"{key}={params[key]}" for key in sorted_keys])
-# 结果: ${adDataSignTempStr.value || 'client_id=...&data_type=all&...'}
+# 结果: ${adDataSignWithDimensionTempStr.value || adDataSignTempStr.value || 'client_id=...&data_type=all&...'}
 
 # 4. 追加密钥
 temp_str = temp_str + f'&key={SECRET_KEY}'
 
 # 5. MD5加密并转为小写
 sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
-# sign = ${signAdDataAll.value ? `'${signAdDataAll.value}'` : '（需配置密钥后生成）'}`
+# sign = ${signAdDataAllCountry.value ? `'${signAdDataAllCountry.value}'` : '（需配置密钥后生成）'}`
   );
 
   const pythonFullExample = computed(
@@ -238,7 +288,7 @@ BASE_URL = 'https://client.btfrx.online/api/v1'
 CLIENT_ID = ${cid.value}
 SECRET_KEY = '${sk.value}'
 
-def generate_signature(client_id, req_time, secret_key, data_type=None, start_date=None, end_date=None):
+def generate_signature(client_id, req_time, secret_key, data_type=None, dimension=None, start_date=None, end_date=None):
     """生成签名
     
     Args:
@@ -246,6 +296,7 @@ def generate_signature(client_id, req_time, secret_key, data_type=None, start_da
         req_time: 请求时间戳
         secret_key: 密钥
         data_type: 数据类型（对于 /client_data 接口是必填的，'all' 或 'day'）
+        dimension: 统计维度（可选，country / ad_unit / country_ad_unit）
         start_date: 起始日期（可选）
         end_date: 终止日期（可选）
     """
@@ -257,6 +308,8 @@ def generate_signature(client_id, req_time, secret_key, data_type=None, start_da
     # 添加参数（对于 /client_data 接口，data_type 是必填的）
     if data_type:
         params['data_type'] = str(data_type)
+    if dimension:
+        params['dimension'] = str(dimension)
     if start_date:
         params['start_date'] = str(start_date)
     if end_date:
@@ -290,15 +343,16 @@ def get_products():
     
     return response.json()
 
-def get_ad_data(data_type, start_date=None, end_date=None):
+def get_ad_data(data_type, start_date=None, end_date=None, dimension=None):
     """获取广告数据
     Args:
-        data_type: 必填，数据类型，'all' 表示详细数据（按国家+广告单元），'day' 表示每日汇总（按产品+日期+广告单元）
-        start_date: 可选，起始日期（格式：YYYY-MM-DD），不提供则使用当前月第一天
-        end_date: 可选，终止日期（格式：YYYY-MM-DD），不提供则使用当前月最后一天
+        data_type: 必填，'all' 明细 或 'day' 日汇总
+        start_date: 可选，起始日期（格式：YYYY-MM-DD）
+        end_date: 可选，终止日期（格式：YYYY-MM-DD）
+        dimension: 可选，country / ad_unit / country_ad_unit（与后台报表一致；建议双 API 客户必传）
     """
     req_time = int(time.time())
-    sign = generate_signature(CLIENT_ID, req_time, SECRET_KEY, data_type, start_date, end_date)
+    sign = generate_signature(CLIENT_ID, req_time, SECRET_KEY, data_type, dimension, start_date, end_date)
     
     params = {
         'client_id': CLIENT_ID,
@@ -308,6 +362,8 @@ def get_ad_data(data_type, start_date=None, end_date=None):
     }
     
     # 添加可选参数
+    if dimension:
+        params['dimension'] = dimension
     if start_date:
         params['start_date'] = start_date
     if end_date:
@@ -331,13 +387,13 @@ if __name__ == '__main__':
     products_result = get_products()
     print("产品列表:", json.dumps(products_result, indent=2, ensure_ascii=False))
     
-    # 获取详细广告数据（按国家+广告单元）
-    ad_data_result = get_ad_data(data_type='all', start_date=today, end_date=today)
-    print("详细广告数据:", json.dumps(ad_data_result, indent=2, ensure_ascii=False))
+    # 获取详细广告数据（按国家维度，推荐）
+    ad_data_result = get_ad_data(data_type='all', dimension='country', start_date=today, end_date=today)
+    print("按国家-详细数据:", json.dumps(ad_data_result, indent=2, ensure_ascii=False))
     
-    # 获取每日汇总数据（按产品+日期+广告单元汇总）
-    daily_summary_result = get_ad_data(data_type='day', start_date=today, end_date=today)
-    print("每日汇总数据:", json.dumps(daily_summary_result, indent=2, ensure_ascii=False))`
+    # 获取每日汇总（按国家维度）
+    daily_summary_result = get_ad_data(data_type='day', dimension='country', start_date=today, end_date=today)
+    print("按国家-每日汇总:", json.dumps(daily_summary_result, indent=2, ensure_ascii=False))`
   );
 
   const javaFullExample = computed(() => {
@@ -360,12 +416,12 @@ public class ClientAPI {
     
     // 查询产品接口的签名生成（不需要 data_type 参数）
     private static String generateSignature(int clientId, long reqTime, String secretKey) {
-        return generateSignature(clientId, reqTime, secretKey, null, null, null);
+        return generateSignature(clientId, reqTime, secretKey, null, null, null, null);
     }
     
     // 查询广告数据接口的签名生成（data_type 是必填的）
     private static String generateSignature(int clientId, long reqTime, String secretKey, 
-                                             String dataType, String startDate, String endDate) {
+                                             String dataType, String dimension, String startDate, String endDate) {
         try {
             // 准备参数
             Map<String, String> params = new LinkedHashMap<>();
@@ -375,6 +431,9 @@ public class ClientAPI {
             // 对于 /client_data 接口，data_type 是必填的
             if (dataType != null && !dataType.isEmpty()) {
                 params.put("data_type", dataType);
+            }
+            if (dimension != null && !dimension.isEmpty()) {
+                params.put("dimension", dimension);
             }
             
             // 添加可选参数（如果提供）
@@ -449,9 +508,9 @@ public class ClientAPI {
      * @param startDate 可选，起始日期（格式：YYYY-MM-DD）
      * @param endDate 可选，终止日期（格式：YYYY-MM-DD）
      */
-    public static String getAdData(String dataType, String startDate, String endDate) throws Exception {
+    public static String getAdData(String dataType, String startDate, String endDate, String dimension) throws Exception {
         long reqTime = Instant.now().getEpochSecond();
-        String sign = generateSignature(CLIENT_ID, reqTime, SECRET_KEY, dataType, startDate, endDate);
+        String sign = generateSignature(CLIENT_ID, reqTime, SECRET_KEY, dataType, dimension, startDate, endDate);
         
         Map<String, Object> params = new HashMap<>();
         params.put("client_id", CLIENT_ID);
@@ -460,6 +519,9 @@ public class ClientAPI {
         params.put("sign", sign);
         
         // 添加可选参数
+        if (dimension != null && !dimension.isEmpty()) {
+            params.put("dimension", dimension);
+        }
         if (startDate != null && !startDate.isEmpty()) {
             params.put("start_date", startDate);
         }
@@ -485,8 +547,8 @@ public class ClientAPI {
     public static void main(String[] args) throws Exception {
         String today = "${today}";
         getProducts();
-        getAdData("all", today, today);
-        getAdData("day", today, today);
+        getAdData("all", today, today, "country");
+        getAdData("day", today, today, "country");
     }
 }`;
   });
@@ -499,6 +561,7 @@ public class ClientAPI {
     hasCredentials,
     productRequestJson,
     adDataRequestAllJson,
+    adDataRequestAllWithDimensionJson,
     adDataRequestDayJson,
     pythonSignProducts,
     pythonSignAdData,

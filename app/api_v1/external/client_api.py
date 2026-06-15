@@ -16,7 +16,6 @@ from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, and_, text, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -26,10 +25,11 @@ from app.core.telegram import send_telegram_message_async
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
-from app.core.query_utils import date_range_condition, check_use_assignment_table
 from app.core.utils import get_user_name_by_id
-from app.models.models import AdData, Product, ProductAssignment, CountryInfo
+from app.models.models import Product
 from app.schemas.base import ResponseBaseSchema
+from app.services.ad_data.queries.client_api_query import ClientAdDataQuery
+from app.services.ad_data.queries.dimension_filter import ensure_valid_optional_dimension
 
 # 创建路由实例
 router = APIRouter()
@@ -59,11 +59,16 @@ class ClientDataRequest(ClientAPIBaseRequest):
     """
     查询客户广告数据请求。
 
-    data_type：all=按国家+广告单元明细，day=按产品+日期+广告单元日汇总。
+    data_type：all=明细，day=日汇总。
+    dimension（可选）：country / ad_unit / country_ad_unit，与后台报表统计维度一致；不传则保持历史全量返回。
     日期缺省为当前自然月首尾。
     """
     data_type: str = Field(default="all",
-                           description="数据类型：'all' 表示详细数据（按国家+广告单元），'day' 表示每日汇总（按产品+日期+广告单元），默认为 'all'")
+                           description="数据类型：'all' 表示详细数据，'day' 表示每日汇总，默认为 'all'")
+    dimension: str | None = Field(
+        default=None,
+        description="统计维度（可选）：country=按国家，ad_unit=按广告单元，country_ad_unit=按国家+广告单元；不传则不过滤维度",
+    )
     start_date: str | None = Field(default=None, description="起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天")
     end_date: str | None = Field(default=None, description="终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天")
 
@@ -221,23 +226,33 @@ async def get_client_data(
     参数说明：
     - client_id: 客户ID（必填）
     - req_time: 请求时间戳（必填）
-    - data_type: 数据类型，'all' 表示详细数据（按国家+广告单元），'day' 表示每日汇总（按产品+日期+广告单元），默认为 'all'
+    - data_type: 数据类型，'all' 表示详细数据，'day' 表示每日汇总，默认为 'all'
+    - dimension: 统计维度（可选），'country' / 'ad_unit' / 'country_ad_unit'；不传则保持历史行为
     - start_date: 起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天
     - end_date: 终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天
     - sign: MD5签名（必填），包含所有非空参数
     
     返回说明：
-    - data_type='all': 返回详细数据，按国家+广告单元分组；响应含 ad_unit 字段（无则为空字符串）
-    - data_type='day': 返回每日汇总，按产品+日期+广告单元汇总；有 ad_unit 时拆分多行；国家显示"全部区域"
+    - data_type='all': 返回明细行；传入 dimension 时与后台「详细报表」口径一致
+    - data_type='day': 返回日汇总；传入 dimension 时按维度分组，与后台「每日报表」一致
+    - 未传 dimension：返回库中全部匹配行（兼容旧版；若同时存在国家/单元 API 数据可能重复统计，建议传 dimension）
     """
     # ---------- 入口：参数与依赖准备 ----------
     # ---------- 异常处理 ----------
     try:
-        # 验证请求（传递额外的参数用于签名验证）
+        try:
+            parsed_dimension = ensure_valid_optional_dimension(api_request.dimension)
+        except ValueError as exc:
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail=str(exc),
+            )
+
         client = await verify_client_request(
             api_request,
             db,
             data_type=api_request.data_type,
+            dimension=parsed_dimension,
             start_date=api_request.start_date,
             end_date=api_request.end_date
         )
@@ -284,259 +299,25 @@ async def get_client_data(
                 detail="起始日期不能大于终止日期"
             )
 
-        # 检查是否使用产品分配历史表
-        use_assignment_table = await check_use_assignment_table(db)
-
-        # 根据 data_type 决定查询逻辑（data_type 默认为 'all'）
         data_type = api_request.data_type or "all"
-
-        # ---------- 条件分支 ----------
-        if data_type == "day":
-            # 每日汇总模式：按产品+日期+广告单元汇总，国家显示"全部区域"
-            # 构建汇总查询
-            # 注意：覆盖率、展示率、点击率、eCPM、CPC 不在查询中计算，而是在返回数据时根据汇总后的数值重新计算
-            query = select(
-                func.date(AdData.date).label("date"),
-                Product.id.label("product_id"),
-                Product.name.label("product_name"),
-                AdData.ad_unit.label("ad_unit"),
-                func.sum(AdData.request_count).label("request_count"),
-                func.sum(AdData.match_count).label("match_count"),
-                func.sum(AdData.display_count).label("display_count"),
-                func.sum(AdData.click_count).label("click_count"),
-                func.avg(AdData.viewability_rate).label("viewability_rate"),
-                func.sum(AdData.pageviews).label("pageviews"),
-                func.sum(AdData.revenue_after_deduct).label("revenue")
-            ).join(
-                Product, AdData.product_id == Product.id
+        if data_type not in ("all", "day"):
+            raise_api_exception(
+                ErrorCode.OPERATION_FAILED,
+                detail="data_type 参数无效，仅支持 'all' 或 'day'",
             )
 
-            # 只显示激活状态的产品
-            query = query.where(Product.is_active == True)
-
-            # ---------- 条件分支 ----------
-            if use_assignment_table:
-                # 使用产品分配历史表
-                end_date_with_default = func.coalesce(
-                    func.date_add(ProductAssignment.end_date, text("INTERVAL 1 DAY")),
-                    literal_column("'2099-12-31'")
-                )
-                query = query.join(
-                    ProductAssignment,
-                    and_(
-                        ProductAssignment.product_id == Product.id,
-                        AdData.date >= ProductAssignment.start_date,
-                        AdData.date < end_date_with_default
-                    )
-                )
-                query = query.where(ProductAssignment.client_id == client.id)
-            else:
-                # 旧的查询方式
-                query = query.where(Product.client_id == client.id)
-
-            # 应用日期范围过滤
-            date_condition = date_range_condition(AdData.date, start_date_obj, end_date_obj)
-            # ---------- 条件分支 ----------
-            if date_condition is not None:
-                query = query.where(date_condition)
-
-            # 按产品ID、日期、广告单元分组
-            query = query.group_by(
-                func.date(AdData.date),
-                Product.id,
-                Product.name,
-                AdData.ad_unit,
-            ).order_by(
-                func.date(AdData.date).asc(),
-                Product.id.asc()
-            )
-
-            result = await db.execute(query)
-            summary_data = result.all()
-
-            # 转换为响应格式
-            data_list = []
-            # ---------- 循环处理 ----------
-            for row in summary_data:
-                date_obj = row.date if isinstance(row.date, date) else row.date.date()
-                date_str = date_obj.isoformat()
-
-                # 获取汇总后的数值
-                total_request_count = int(row.request_count or 0)
-                total_match_count = int(row.match_count or 0)
-                total_display_count = int(row.display_count or 0)
-                total_click_count = int(row.click_count or 0)
-                total_viewability_rate = float(row.viewability_rate or 0.0)
-                total_pageviews = int(row.pageviews or 0)
-                total_revenue = float(row.revenue or 0.0)
-
-                # 根据汇总后的数值重新计算比率
-                # 覆盖率 = 匹配数 / 请求数 * 100
-                coverage_rate = round(
-                    (total_match_count / total_request_count * 100) if total_request_count > 0 else 0.0,
-                    2
-                )
-
-                # 展示率 = 展示数 / 匹配数 * 100
-                display_rate = round(
-                    (total_display_count / total_match_count * 100) if total_match_count > 0 else 0.0,
-                    2
-                )
-
-                # 点击率 = 点击数 / 展示数 * 100
-                click_rate = round(
-                    (total_click_count / total_display_count * 100) if total_display_count > 0 else 0.0,
-                    2
-                )
-
-                # CPC = 收益（扣后）/ 点击数（客户端登录使用扣后收益）
-                cpc = round(
-                    (total_revenue / total_click_count) if total_click_count > 0 else 0.0,
-                    2
-                )
-
-                # eCPM = 收益 / 展示数 * 1000
-                ecpm = round(
-                    (total_revenue / total_display_count * 1000) if total_display_count > 0 else 0.0,
-                    2
-                )
-
-                data_list.append(AdDataItemResponse(
-                    date=date_str,
-                    product_name=row.product_name or "",
-                    ad_unit=row.ad_unit or "",
-                    country_code="ZZ",  # 每日汇总模式使用"ZZ"表示全部区域
-                    country_name_zh="全部区域",  # 每日汇总模式统一显示"全部区域"
-                    request_count=total_request_count,
-                    match_count=total_match_count,
-                    coverage_rate=float(coverage_rate),
-                    display_count=total_display_count,
-                    display_rate=float(display_rate),
-                    click_count=total_click_count,
-                    click_rate=float(click_rate),
-                    viewability_rate=round(total_viewability_rate, 2),
-                    cpc=float(cpc),
-                    pageviews=total_pageviews,
-                    ecpm=float(ecpm),
-                    revenue=round(total_revenue, 2)
-                ))
-        else:
-            # 详细数据模式（data_type='all'）：按国家分组，保持原有逻辑
-            query = select(AdData, Product.name, CountryInfo.country_name_zh).join(
-                Product, AdData.product_id == Product.id
-            ).outerjoin(
-                CountryInfo,
-                AdData.country_code.collate('utf8mb4_unicode_ci') ==
-                CountryInfo.alpha_2_code.collate('utf8mb4_unicode_ci')
-            )
-
-            # 只显示激活状态的产品
-            query = query.where(Product.is_active == True)
-
-            # ---------- 条件分支 ----------
-            if use_assignment_table:
-                # 使用产品分配历史表
-                end_date_with_default = func.coalesce(
-                    func.date_add(ProductAssignment.end_date, text("INTERVAL 1 DAY")),
-                    literal_column("'2099-12-31'")
-                )
-                query = query.join(
-                    ProductAssignment,
-                    and_(
-                        ProductAssignment.product_id == Product.id,
-                        AdData.date >= ProductAssignment.start_date,
-                        AdData.date < end_date_with_default
-                    )
-                )
-                query = query.where(ProductAssignment.client_id == client.id)
-            else:
-                # 旧的查询方式
-                query = query.where(Product.client_id == client.id)
-
-            # 应用日期范围过滤
-            date_condition = date_range_condition(AdData.date, start_date_obj, end_date_obj)
-            # ---------- 条件分支 ----------
-            if date_condition is not None:
-                query = query.where(date_condition)
-            query = query.order_by(AdData.date.asc())
-
-            result = await db.execute(query)
-            ad_data_list = result.all()
-
-            # 转换为响应格式
-            data_list = []
-            # ---------- 循环处理 ----------
-            for row in ad_data_list:
-                # 解构数据：ad_data, product_name, country_name_zh
-                # ---------- 条件分支 ----------
-                if len(row) >= 3:
-                    ad_data, product_name, country_name_zh = row
-                # ---------- 条件分支 ----------
-                elif len(row) >= 2:
-                    ad_data, product_name = row
-                    country_name_zh = None
-                else:
-                    continue
-                # 格式化日期为ISO格式字符串
-                date_obj = ad_data.date.date() if hasattr(ad_data.date, 'date') else ad_data.date
-                date_str = date_obj.isoformat()
-
-                # 使用数据库字段中的比率（如果为空则计算）
-                coverage_rate = ad_data.coverage_rate if ad_data.coverage_rate is not None else round(
-                    (ad_data.match_count / ad_data.request_count * 100)
-                    if ad_data.request_count > 0 else 0.0,
-                    2
-                )
-                display_rate = ad_data.display_rate if ad_data.display_rate is not None else round(
-                    (ad_data.display_count / ad_data.match_count * 100)
-                    if ad_data.match_count > 0 else 0.0,
-                    2
-                )
-                click_rate = ad_data.click_rate if ad_data.click_rate is not None else round(
-                    (ad_data.click_count / ad_data.display_count * 100)
-                    if ad_data.display_count > 0 else 0.0,
-                    2
-                )
-                viewability_rate = ad_data.viewability_rate if ad_data.viewability_rate is not None else 0.0
-
-                # 处理国家代码和国家名称
-                country_code_str = ad_data.country_code or ""
-
-                # ---------- 条件分支 ----------
-                if country_name_zh:
-                    final_country_name = country_name_zh
-                # ---------- 条件分支 ----------
-                elif ad_data.country_code == "AA":
-                    final_country_name = "未知区域"
-                # ---------- 条件分支 ----------
-                elif ad_data.country_code == "ZZ":
-                    final_country_name = "全部区域"
-                else:
-                    final_country_name = ""
-
-                # 确保所有数值类型正确
-                data_list.append(AdDataItemResponse(
-                    date=date_str,
-                    product_name=product_name or "",
-                    ad_unit=ad_data.ad_unit or "",
-                    country_code=country_code_str,  # 返回二字国家代码
-                    country_name_zh=final_country_name,
-                    request_count=int(ad_data.request_count),
-                    match_count=int(ad_data.match_count),
-                    coverage_rate=float(coverage_rate),
-                    display_count=int(ad_data.display_count),
-                    display_rate=float(display_rate),
-                    click_count=int(ad_data.click_count),
-                    click_rate=float(click_rate),
-                    viewability_rate=float(round(viewability_rate, 2)),
-                    cpc=float(round(ad_data.cpc or 0.0, 2)),
-                    pageviews=int(ad_data.pageviews or 0),
-                    ecpm=float(round(ad_data.ecpm_after_deduct, 2)),
-                    revenue=float(round(ad_data.revenue_after_deduct, 2))
-                ))
+        raw_rows = await ClientAdDataQuery(db).fetch(
+            client=client,
+            start_date=start_date_obj,
+            end_date=end_date_obj,
+            data_type=data_type,
+            dimension=parsed_dimension,
+        )
+        data_list = [AdDataItemResponse(**row) for row in raw_rows]
 
         logger.info(
-            f"客户 {client.id} 查询广告数据（data_type={data_type}, {start_date_obj} 至 {end_date_obj}），"
+            f"客户 {client.id} 查询广告数据（data_type={data_type}, dimension={parsed_dimension or '未指定'}, "
+            f"{start_date_obj} 至 {end_date_obj}），"
             f"返回 {len(data_list)} 条记录"
         )
 
@@ -566,6 +347,7 @@ async def get_client_data(
                         "end": end_date_obj.isoformat()
                     },
                     "data_type": data_type,
+                    "dimension": parsed_dimension,
                     "api_endpoint": "/client_data"
                 }
             )
@@ -585,6 +367,8 @@ async def get_client_data(
             telegram_msg = f"📡 API 数据获取成功\n\n"
             telegram_msg += f"客户: {user_full_name}\n"
             telegram_msg += f"数据类型: {data_type}\n"
+            if parsed_dimension:
+                telegram_msg += f"统计维度: {parsed_dimension}\n"
             telegram_msg += f"✅ 成功获取: {len(data_list)} 条数据"
 
             # ---------- 条件分支 ----------

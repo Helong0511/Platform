@@ -164,12 +164,13 @@ function add32(a, b) {
  * @param {number|string} opts.clientId
  * @param {number|string} opts.reqTime
  * @param {string} [opts.dataType]
+ * @param {string} [opts.dimension]
  * @param {string} [opts.startDate]
  * @param {string} [opts.endDate]
  * @param {string} secretKey
  */
 export function generateClientApiSign(
-  { clientId, reqTime, dataType, startDate, endDate },
+  { clientId, reqTime, dataType, dimension, startDate, endDate },
   secretKey
 ) {
   const params = {
@@ -178,6 +179,9 @@ export function generateClientApiSign(
   };
   if (dataType) {
     params.data_type = String(dataType);
+  }
+  if (dimension) {
+    params.dimension = String(dimension);
   }
   if (startDate) {
     params.start_date = String(startDate);

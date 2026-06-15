@@ -21,6 +21,51 @@ def normalize_dimension(dimension: Optional[str]) -> str:
     return DEFAULT_DIMENSION
 
 
+def parse_optional_dimension(dimension: Optional[str]) -> Optional[str]:
+    """
+    解析可选统计维度（客户 API 等兼容场景）。
+
+    - 未传 / 空字符串：返回 None，表示不按维度筛选（保持旧行为）
+    - 合法值：返回规范化后的维度
+    - 非法值：返回 None，由调用方校验并报错
+    """
+    if dimension is None:
+        return None
+    stripped = str(dimension).strip()
+    if not stripped:
+        return None
+    if stripped in VALID_DIMENSIONS:
+        return stripped
+    return None
+
+
+def ensure_valid_optional_dimension(dimension: Optional[str]) -> Optional[str]:
+    """解析可选 dimension；非法非空值抛出 ValueError。"""
+    if dimension is None:
+        return None
+    stripped = str(dimension).strip()
+    if not stripped:
+        return None
+    if stripped not in VALID_DIMENSIONS:
+        raise ValueError(
+            f"无效的 dimension 参数: {stripped}，"
+            f"可选值: country（按国家）、ad_unit（按广告单元）、country_ad_unit（按国家+广告单元）"
+        )
+    return stripped
+
+
+def maybe_build_ad_data_dimension_filter(
+    country_code_column: Any,
+    ad_unit_column: Any,
+    dimension: Optional[str],
+) -> Any | None:
+    """未传 dimension 时返回 None；传入合法 dimension 时返回筛选条件。"""
+    dim = parse_optional_dimension(dimension)
+    if dim is None:
+        return None
+    return build_ad_data_dimension_filter(country_code_column, ad_unit_column, dim)
+
+
 def _empty_ad_unit_condition(ad_unit_column: Any) -> Any:
     return or_(ad_unit_column.is_(None), ad_unit_column == "")
 

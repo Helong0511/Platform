@@ -14,7 +14,7 @@ CLIENT_ID = 1025
 SECRET_KEY = 'fdedbcee-08b8-451d-9878-128a9c168bdd'
 
 
-def generate_signature(client_id, req_time, secret_key, data_type=None, start_date=None, end_date=None):
+def generate_signature(client_id, req_time, secret_key, data_type=None, dimension=None, start_date=None, end_date=None):
     """生成签名
 
     Args:
@@ -22,6 +22,7 @@ def generate_signature(client_id, req_time, secret_key, data_type=None, start_da
         req_time: 请求时间戳
         secret_key: 密钥
         data_type: 数据类型（对于 /client_data 接口是必填的，'all' 或 'day'）
+        dimension: 统计维度（可选，country / ad_unit / country_ad_unit）
         start_date: 起始日期（可选）
         end_date: 终止日期（可选）
     """
@@ -33,6 +34,8 @@ def generate_signature(client_id, req_time, secret_key, data_type=None, start_da
     # 添加参数（对于 /client_data 接口，data_type 是必填的）
     if data_type:
         params['data_type'] = str(data_type)
+    if dimension:
+        params['dimension'] = str(dimension)
     if start_date:
         params['start_date'] = str(start_date)
     if end_date:
@@ -68,15 +71,16 @@ def get_products():
     return response.json()
 
 
-def get_ad_data(data_type, start_date=None, end_date=None):
+def get_ad_data(data_type, start_date=None, end_date=None, dimension=None):
     """获取广告数据
     Args:
-        data_type: 必填，数据类型，'all' 表示详细数据（按国家+广告单元），'day' 表示每日汇总（按产品+日期+广告单元）
+        data_type: 必填，数据类型，'all' 表示详细数据，'day' 表示每日汇总
         start_date: 可选，起始日期（格式：YYYY-MM-DD），不提供则使用当前月第一天
         end_date: 可选，终止日期（格式：YYYY-MM-DD），不提供则使用当前月最后一天
+        dimension: 可选，country / ad_unit / country_ad_unit（与后台报表一致；双 API 客户建议必传）
     """
     req_time = int(time.time())
-    sign = generate_signature(CLIENT_ID, req_time, SECRET_KEY, data_type, start_date, end_date)
+    sign = generate_signature(CLIENT_ID, req_time, SECRET_KEY, data_type, dimension, start_date, end_date)
 
     params = {
         'client_id': CLIENT_ID,
@@ -86,6 +90,8 @@ def get_ad_data(data_type, start_date=None, end_date=None):
     }
 
     # 添加可选参数
+    if dimension:
+        params['dimension'] = dimension
     if start_date:
         params['start_date'] = start_date
     if end_date:
@@ -108,12 +114,18 @@ if __name__ == '__main__':
     products_result = get_products()
     print("产品列表:", json.dumps(products_result, indent=2, ensure_ascii=False))
 
-    # 获取详细广告数据（按国家+广告单元）
-    ad_data_result = get_ad_data(data_type='all', start_date='2026-05-27', end_date='2026-05-27')
+    # 获取详细广告数据（按国家维度，与后台报表一致）
+    ad_data_result = get_ad_data(
+        data_type='all', dimension='country',
+        start_date='2026-05-27', end_date='2026-05-27'
+    )
     print("详细广告数据:", json.dumps(ad_data_result, indent=2, ensure_ascii=False))
 
-    # 获取每日汇总数据（按产品+日期+广告单元汇总）
-    daily_summary_result = get_ad_data(data_type='day', start_date='2026-05-27', end_date='2026-05-27')
+    # 获取每日汇总数据（按国家维度）
+    daily_summary_result = get_ad_data(
+        data_type='day', dimension='country',
+        start_date='2026-05-27', end_date='2026-05-27'
+    )
     print("每日汇总数据:", json.dumps(daily_summary_result, indent=2, ensure_ascii=False))
 
     test = None

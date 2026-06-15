@@ -54,7 +54,7 @@
           <li><strong>准备参数</strong>：将请求参数放入参数字典
             <ul>
               <li><code>/client_products</code> 接口：<code>client_id</code>、<code>req_time</code></li>
-              <li><code>/client_data</code> 接口：<code>client_id</code>、<code>req_time</code>、<code>data_type</code>（必填），以及可选参数 <code>start_date</code>、<code>end_date</code>（如果提供）</li>
+              <li><code>/client_data</code> 接口：<code>client_id</code>、<code>req_time</code>、<code>data_type</code>（必填），以及可选参数 <code>dimension</code>、<code>start_date</code>、<code>end_date</code>（如果提供则参与签名）</li>
             </ul>
           </li>
           <li><strong>参数排序</strong>：按字母顺序对参数键进行排序</li>
@@ -66,7 +66,9 @@
           <p><strong>注意</strong>：</p>
           <ul>
             <li><code>/client_data</code> 接口的 <code>data_type</code> 参数是必填的，必须包含在签名计算中</li>
-            <li>只有非空参数才参与签名计算。如果未提供可选参数（如 <code>start_date</code>、<code>end_date</code>），则不包含在签名中</li>
+            <li><code>dimension</code> 为可选参数；传入时须参与签名。取值：<code>country</code>（按国家）、<code>ad_unit</code>（按广告单元）、<code>country_ad_unit</code>（按国家+广告单元）</li>
+            <li>若同时存在国家 API 与广告单元 API 数据，强烈建议传入 <code>dimension</code>，否则不传时返回全量行可能重复统计</li>
+            <li>只有非空参数才参与签名计算。如果未提供可选参数，则不包含在签名中</li>
           </ul>
         </div>
 
@@ -126,7 +128,7 @@ import java.time.Instant;
 import java.util.*;
 
 public String generateSignature(int clientId, long reqTime, String secretKey, 
-                                 String dataType, String startDate, String endDate) {
+                                 String dataType, String dimension, String startDate, String endDate) {
     try {
         // 准备参数（查询广告数据接口，data_type 是必填的）
         Map&lt;String, String&gt; params = new LinkedHashMap&lt;&gt;();
@@ -135,6 +137,9 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
         params.put("req_time", String.valueOf(reqTime));
         
         // 添加可选参数（如果提供）
+        if (dimension != null && !dimension.isEmpty()) {
+            params.put("dimension", dimension);
+        }
         if (startDate != null && !startDate.isEmpty()) {
             params.put("start_date", startDate);
         }
@@ -271,7 +276,7 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
             </div>
           </template>
 
-          <p>获取客户的广告数据。支持两种数据模式：详细数据（按国家分组）和每日汇总（按产品+日期+广告单元汇总）。每条记录均包含 <code>ad_unit</code> 字段，无广告单元时为空字符串 <code>""</code>。</p>
+          <p>获取客户的广告数据。支持明细（<code>data_type=all</code>）与日汇总（<code>data_type=day</code>）。可通过可选参数 <code>dimension</code> 指定统计维度，与后台「广告数据」报表一致。</p>
 
           <h4>请求参数</h4>
           <el-table :data="adDataRequestParams" border style="width: 100%">
@@ -283,8 +288,11 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
 
           <h4>请求示例</h4>
           <el-collapse>
-            <el-collapse-item title="查看请求示例（详细数据）" name="ad-data-request-all">
+            <el-collapse-item title="查看请求示例（详细数据，兼容旧版不传 dimension）" name="ad-data-request-all">
               <pre><code>{{ adDataRequestAllJson }}</code></pre>
+            </el-collapse-item>
+            <el-collapse-item title="查看请求示例（详细数据，按国家 dimension=country）" name="ad-data-request-all-dimension">
+              <pre><code>{{ adDataRequestAllWithDimensionJson }}</code></pre>
             </el-collapse-item>
             <el-collapse-item title="查看请求示例（每日汇总）" name="ad-data-request-day">
               <pre><code>{{ adDataRequestDayJson }}</code></pre>
@@ -407,10 +415,17 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
               <li><strong>eCPM</strong>: 每千次展示的有效成本</li>
               <li><strong>收益</strong>: 实际收益</li>
             </ul>
+            <p><strong>统计维度（dimension，可选）</strong>：</p>
+            <ul>
+              <li><code>country</code>：仅国家维度（<code>ad_unit</code> 为空，国家 ≠ AA/ZZ）</li>
+              <li><code>ad_unit</code>：仅广告单元维度（国家为 ZZ/AA/空，<code>ad_unit</code> 有值）</li>
+              <li><code>country_ad_unit</code>：国家与广告单元交叉明细</li>
+              <li>不传：返回库中全部匹配行（兼容旧版；双 API 场景可能重复统计）</li>
+            </ul>
             <p><strong>数据模式说明</strong>：</p>
             <ul>
-              <li><strong>data_type='all'（详细数据）</strong>：按「日期 + 产品 + 国家 + 广告单元」分组；同一产品、同一天、同一国家下，不同 <code>ad_unit</code> 为多条记录；返回实际国家代码和国家名称</li>
-              <li><strong>data_type='day'（每日汇总）</strong>：按「日期 + 产品 + 广告单元」汇总（跨国家合并）；<code>ad_unit</code> 为空时合并为一条；有值时每个广告单元单独一条；国家代码统一为 <code>"ZZ"</code>（全部区域）</li>
+              <li><strong>data_type='all'（详细数据）</strong>：返回明细行；配合 <code>dimension</code> 时与后台「详细报表」一致</li>
+              <li><strong>data_type='day'（每日汇总）</strong>：按日汇总；配合 <code>dimension</code> 时与后台「每日报表」一致；未传 <code>dimension</code> 时仍按「日期+产品+广告单元」汇总（历史行为）</li>
             </ul>
             <p><strong>广告单元（ad_unit）说明</strong>：</p>
             <ul>
@@ -519,6 +534,7 @@ const {
   hasCredentials,
   productRequestJson,
   adDataRequestAllJson,
+  adDataRequestAllWithDimensionJson,
   adDataRequestDayJson,
   pythonSignProducts,
   pythonSignAdData,
@@ -553,7 +569,8 @@ const productRequestParams = [
 const adDataRequestParams = [
   { name: 'client_id', type: 'int', required: '是', description: '客户ID' },
   { name: 'req_time', type: 'int', required: '是', description: '请求时间戳（10位秒级，Unix时间戳）' },
-  { name: 'data_type', type: 'string', required: '是', description: '数据类型：\'all\' 表示详细数据（按国家+广告单元），\'day\' 表示每日汇总（按产品+日期+广告单元，无单元时合并）' },
+  { name: 'data_type', type: 'string', required: '是', description: '数据类型：\'all\' 明细，\'day\' 日汇总' },
+  { name: 'dimension', type: 'string', required: '否', description: '统计维度：country / ad_unit / country_ad_unit；与后台报表一致，双 API 客户建议必传' },
   { name: 'start_date', type: 'string', required: '否', description: '起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天' },
   { name: 'end_date', type: 'string', required: '否', description: '终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天' },
   { name: 'sign', type: 'string', required: '是', description: 'MD5签名（小写），包含所有非空参数' }
@@ -564,8 +581,8 @@ const adDataResponseFields = [
   { field: 'date', type: 'string', description: '数据日期（ISO格式：YYYY-MM-DD）' },
   { field: 'product_name', type: 'string', description: '产品名称（确保不为null）' },
   { field: 'ad_unit', type: 'string', description: '广告单元（可为空字符串）' },
-  { field: 'country_code', type: 'string', description: '国家二字代码（ISO 3166-1 alpha-2），详细模式返回实际国家代码（如"US"、"CN"），汇总模式返回"ZZ"表示全部区域' },
-  { field: 'country_name_zh', type: 'string', description: '国家中文名称，详细模式返回实际国家名称（如"美国"、"中国"），汇总模式返回"全部区域"' },
+  { field: 'country_code', type: 'string', description: '国家二字代码；dimension=country 时为实际国家；dimension=ad_unit 或 day 未传 dimension 时多为 ZZ；dimension=country_ad_unit 时为实际国家' },
+  { field: 'country_name_zh', type: 'string', description: '国家中文名称；与 country_code 对应，无国家拆分时为「全部区域」' },
   { field: 'request_count', type: 'int', description: '请求数（整数）' },
   { field: 'match_count', type: 'int', description: '匹配数（整数）' },
   { field: 'coverage_rate', type: 'float', description: '覆盖率（%，浮点数，保留2位小数）' },

@@ -26,6 +26,7 @@ def verify_signature(
     req_time: int, 
     sign: str,
     data_type: str | None = None,
+    dimension: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None
 ) -> bool:
@@ -33,7 +34,7 @@ def verify_signature(
     验证MD5签名
     
     签名算法：
-    1. 按字母排序参数：client_id, data_type, end_date, req_time, start_date（只包含非空参数）
+    1. 按字母排序参数：client_id, data_type, dimension, end_date, req_time, start_date（只包含非空参数）
     2. 拼接：client_id=1000&data_type=all&req_time=1745656222&start_date=2024-01-01
     3. 在末尾追加：&key={SECRET_KEY}
     4. 最终字符串：client_id=1000&data_type=all&req_time=1745656222&start_date=2024-01-01&key=3716607b-04cb-4f71-91c0-2dae7a87fa63
@@ -50,6 +51,7 @@ def verify_signature(
         req_time: 请求时间戳
         sign: 请求签名
         data_type: 数据类型（可选）
+        dimension: 统计维度（可选，country / ad_unit / country_ad_unit）
         start_date: 开始日期（可选）
         end_date: 结束日期（可选）
     
@@ -65,6 +67,8 @@ def verify_signature(
     # 添加可选参数（如果提供了的话）
     if data_type:
         params['data_type'] = str(data_type)
+    if dimension:
+        params['dimension'] = str(dimension)
     if start_date:
         params['start_date'] = str(start_date)
     if end_date:
@@ -88,6 +92,7 @@ async def verify_client_request(
     request: any,  # ClientAPIBaseRequest 类型
     db: AsyncSession,
     data_type: str | None = None,
+    dimension: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     time_tolerance: int = 20
@@ -102,6 +107,7 @@ async def verify_client_request(
         request: 客户API请求对象（包含 client_id, req_time, sign 等字段）
         db: 数据库会话
         data_type: 数据类型（可选，用于签名验证）
+        dimension: 统计维度（可选，用于签名验证）
         start_date: 开始日期（可选，用于签名验证）
         end_date: 结束日期（可选，用于签名验证）
         time_tolerance: 时间容差（秒），默认5秒
@@ -161,6 +167,7 @@ async def verify_client_request(
         req_time=request.req_time,
         sign=request.sign,
         data_type=data_type,
+        dimension=dimension,
         start_date=start_date,
         end_date=end_date
     ):

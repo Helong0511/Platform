@@ -198,7 +198,7 @@ def _client_api_validation_hint(path: str, errors: list) -> str | None:
         if err.get("type") == "missing" and "req_time" in loc:
             return (
                 "缺少必填参数 req_time（10 位 Unix 秒级时间戳，如 int(time.time())）。"
-                "签名须按字母序拼接 client_id、data_type、end_date、req_time、start_date"
+                "签名须按字母序拼接 client_id、data_type、dimension、end_date、req_time、start_date"
                 "（仅非空字段）后追加 &key=客户密钥，再 MD5 小写。"
             )
         if err.get("type") == "missing" and "sign" in loc:
