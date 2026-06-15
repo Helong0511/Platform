@@ -70,7 +70,7 @@ function fixSelectDisplay() {
 const AD_DATA_API = {
   getClients: (start, end) => getClientsWithData(start, end),
   getProducts: (clientId, start, end) => getProductsWithData(clientId, start, end),
-    getCountries: (clientId, productId, start, end, dimension, adUnit) =>
+  getCountries: (clientId, productId, start, end, dimension, adUnit) =>
     getCountriesWithData(clientId, productId, start, end, dimension, adUnit),
   getAdUnits: (clientId, productId, start, end, dimension, countryCode) =>
     getAdUnitsWithData(clientId, productId, start, end, dimension, countryCode),
@@ -88,11 +88,34 @@ const TB_SEARCH_API = {
   supportsDimension: false
 };
 
-function valuesEqual(a, b) {
-  if (a == null || a === '' || b == null || b === '') {
-    return a === b;
+/**
+ * 判断筛选项是否为空（未选择 / 「全部」占位）。
+ * @param {unknown} value 表单或下拉项的值
+ * @returns {boolean} 为空时返回 true
+ */
+function isEmptyFilterValue(value) {
+  return value == null || value === '';
+}
+
+/**
+ * 判断下拉选项是否与表单当前选中值一致（用于 prune 时校验是否仍有效）。
+ *
+ * 业务约定：
+ * - 产品、客户等 ID 类下拉：选项 value 统一为字符串；表单里可能是数字，仅做 String 化后与选项比对。
+ * - 占位项（空字符串）只表示「全部」，不得与任意有效 ID 相等，避免误保留失效选中值。
+ *
+ * @param {unknown} optionValue 下拉项 value
+ * @param {unknown} selectedValue 表单当前选中值
+ * @returns {boolean} 二者表示同一有效选项时返回 true
+ */
+function isFilterOptionSelected(optionValue, selectedValue) {
+  if (isEmptyFilterValue(selectedValue)) {
+    return isEmptyFilterValue(optionValue);
   }
-  return String(a) === String(b);
+  if (isEmptyFilterValue(optionValue)) {
+    return false;
+  }
+  return optionValue === String(selectedValue);
 }
 
 /**
@@ -136,7 +159,7 @@ export function useDataPageFilterCascade({
           .filter((item) => item?.id != null)
           .map((item) => ({
             label: item.full_name || '未知客户',
-            value: item.id
+            value: String(item.id)
           }))
       ];
     } catch {
@@ -275,7 +298,7 @@ export function useDataPageFilterCascade({
 
     if (isAdmin && searchForm.value.clientId) {
       const clientExists = users.value.some((u) =>
-        valuesEqual(u.value, searchForm.value.clientId)
+        isFilterOptionSelected(u.value, searchForm.value.clientId)
       );
       if (!clientExists) {
         searchForm.value.clientId = '';
@@ -287,12 +310,14 @@ export function useDataPageFilterCascade({
           searchForm.value.adUnit = '';
         }
         changed = true;
+      } else {
+        searchForm.value.clientId = String(searchForm.value.clientId);
       }
     }
 
     if (searchForm.value.productId) {
       const productExists = filterProducts.value.some((p) =>
-        valuesEqual(p.value, searchForm.value.productId)
+        isFilterOptionSelected(p.value, searchForm.value.productId)
       );
       if (!productExists) {
         searchForm.value.productId = '';
@@ -303,12 +328,14 @@ export function useDataPageFilterCascade({
           searchForm.value.adUnit = '';
         }
         changed = true;
+      } else {
+        searchForm.value.productId = String(searchForm.value.productId);
       }
     }
 
     if (searchForm.value.countryCode) {
-      const countryExists = filterCountries.value.some((c) =>
-        valuesEqual(c.code, searchForm.value.countryCode)
+      const countryExists = filterCountries.value.some(
+        (c) => c.code === searchForm.value.countryCode
       );
       if (!countryExists) {
         searchForm.value.countryCode = '';
@@ -317,8 +344,8 @@ export function useDataPageFilterCascade({
     }
 
     if (searchForm.value.adUnit) {
-      const adUnitExists = filterAdUnits.value.some((u) =>
-        valuesEqual(u.value, searchForm.value.adUnit)
+      const adUnitExists = filterAdUnits.value.some(
+        (u) => u.value === searchForm.value.adUnit
       );
       if (!adUnitExists) {
         searchForm.value.adUnit = '';
