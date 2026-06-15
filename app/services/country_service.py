@@ -239,10 +239,10 @@ async def create_country_alias(
         raise ValueError(f"别名已存在：{data.alias_name}")
 
     row = CountryAlias(
-        alias_name=data.alias_name.strip(),
+        alias_name=data.alias_name,
         alias_normalized=normalized,
-        alpha_2_code=data.alpha_2_code.strip().upper(),
-        remark=data.remark.strip() if data.remark else None,
+        alpha_2_code=data.alpha_2_code,
+        remark=data.remark,
     )
     db.add(row)
     await db.flush()

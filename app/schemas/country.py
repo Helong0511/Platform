@@ -168,9 +168,17 @@ class CountryAliasBase(BaseSchema):
     def validate_alpha_2(cls, value: str) -> str:
         return _normalize_alpha2(value)
 
-    @field_validator("alias_name", "remark")
+    @field_validator("alias_name")
     @classmethod
-    def strip_text(cls, value: Optional[str]) -> Optional[str]:
+    def strip_alias_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("别名不能为空")
+        return stripped
+
+    @field_validator("remark")
+    @classmethod
+    def strip_remark(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         return value.strip() or None
