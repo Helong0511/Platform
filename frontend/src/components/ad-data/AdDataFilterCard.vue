@@ -19,7 +19,7 @@
           @change="emit('date-range-change')"
         />
       </el-form-item>
-      <el-form-item v-if="isAdmin" label="客户">
+      <el-form-item v-if="isAdmin" label="客户" class="client-filter-item">
         <el-select
           v-model="searchForm.clientId"
           placeholder="全部客户"
@@ -105,6 +105,24 @@ const emit = defineEmits([
 </script>
 
 <style scoped>
+.filter-form {
+  margin-bottom: 0;
+}
+
+.filter-form :deep(.el-form-item) {
+  width: 300px;
+  margin-bottom: var(--spacing-lg, 16px);
+  margin-right: var(--spacing-md, 12px);
+}
+
+.filter-form :deep(.client-filter-item) {
+  width: 400px;
+}
+
+.filter-form :deep(.el-form-item:last-child) {
+  width: auto;
+}
+
 .filter-hint {
   display: flex;
   align-items: flex-start;

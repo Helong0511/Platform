@@ -989,32 +989,7 @@ watch(
   box-shadow: var(--shadow-light);
 }
 
-.filter-form {
-  margin-bottom: 0;
-}
-
-.filter-form :deep(.el-form-item) {
-  width: 300px;
-  margin-bottom: var(--spacing-lg);
-  margin-right: var(--spacing-md);
-}
-
-/* 桌面端筛选表单优化 - 响应式列布局 */
-@media (min-width: 1200px) {
-  .filter-form :deep(.el-form-item) {
-    width: 280px;
-  }
-}
-
-@media (min-width: 1400px) {
-  .filter-form :deep(.el-form-item) {
-    width: 300px;
-  }
-}
-
-.filter-form :deep(.el-form-item:last-child) {
-  width: auto;
-}
+/* 筛选项宽度见 AdDataFilterCard.vue（客户 400px，其余 300px） */
 
 .filter-hint {
   display: flex;
@@ -1115,17 +1090,17 @@ watch(
   }
   
   /* 筛选表单移动端优化 - 强制覆盖 inline 表单样式 */
-  .filter-form {
+  :deep(.filter-form) {
     display: flex !important;
     flex-direction: column !important;
   }
   
-  .filter-form :deep(.el-form--inline) {
+  :deep(.filter-form .el-form--inline) {
     display: flex !important;
     flex-direction: column !important;
   }
   
-  .filter-form :deep(.el-form-item) {
+  :deep(.filter-form .el-form-item) {
     width: 100% !important;
     margin-right: 0 !important;
     margin-bottom: var(--spacing-md) !important;
@@ -1133,7 +1108,7 @@ watch(
     flex-direction: column !important;
   }
   
-  .filter-form :deep(.el-form-item__label) {
+  :deep(.filter-form .el-form-item__label) {
     width: 100% !important;
     text-align: left !important;
     margin-bottom: var(--spacing-xs) !important;
@@ -1145,53 +1120,53 @@ watch(
     display: block !important;
   }
   
-  .filter-form :deep(.el-form-item__content) {
+  :deep(.filter-form .el-form-item__content) {
     width: 100% !important;
     margin-left: 0 !important;
     flex: 1 !important;
   }
   
-  .filter-form :deep(.el-input),
-  .filter-form :deep(.el-select),
-  .filter-form :deep(.el-date-editor),
-  .filter-form :deep(.el-date-picker) {
+  :deep(.filter-form .el-input),
+  :deep(.filter-form .el-select),
+  :deep(.filter-form .el-date-editor),
+  :deep(.filter-form .el-date-picker) {
     width: 100% !important;
     max-width: 100% !important;
   }
   
-  .filter-form :deep(.el-input__wrapper) {
+  :deep(.filter-form .el-input__wrapper) {
     min-height: var(--touch-target-size);
     width: 100% !important;
   }
   
-.filter-form :deep(.el-select .el-input__wrapper) {
+  :deep(.filter-form .el-select .el-input__wrapper) {
   min-height: var(--touch-target-size);
   width: 100% !important;
 }
 
 
   
-  .filter-form :deep(.el-date-editor.el-input__wrapper) {
+  :deep(.filter-form .el-date-editor.el-input__wrapper) {
     width: 100% !important;
     min-height: var(--touch-target-size);
   }
   
   /* 日期选择器特殊处理 */
-  .filter-form :deep(.el-date-editor) {
+  :deep(.filter-form .el-date-editor) {
     width: 100% !important;
     max-width: 100% !important;
   }
   
-  .filter-form :deep(.el-date-editor .el-input__wrapper) {
+  :deep(.filter-form .el-date-editor .el-input__wrapper) {
     width: 100% !important;
   }
   
-  .filter-form :deep(.el-date-editor .el-range-separator) {
+  :deep(.filter-form .el-date-editor .el-range-separator) {
     width: auto !important;
   }
   
   /* 查询和重置按钮移动端优化 */
-  .filter-form :deep(.el-form-item:last-child) {
+  :deep(.filter-form .el-form-item:last-child) {
     display: flex !important;
     flex-direction: row !important;
     gap: var(--spacing-sm);
@@ -1200,18 +1175,18 @@ watch(
     width: 100% !important;
   }
   
-  .filter-form :deep(.el-form-item:last-child .el-form-item__label) {
+  :deep(.filter-form .el-form-item:last-child .el-form-item__label) {
     display: none !important;
   }
   
-  .filter-form :deep(.el-form-item:last-child .el-form-item__content) {
+  :deep(.filter-form .el-form-item:last-child .el-form-item__content) {
     width: 100% !important;
     display: flex !important;
     flex-direction: row !important;
     gap: var(--spacing-sm);
   }
   
-  .filter-form :deep(.el-form-item:last-child .el-button) {
+  :deep(.filter-form .el-form-item:last-child .el-button) {
     flex: 1;
     min-height: var(--touch-target-size);
     width: auto;
@@ -1338,17 +1313,17 @@ watch(
   }
   
   /* 平板端筛选表单优化 - 两列布局 */
-  .filter-form :deep(.el-form-item) {
+  :deep(.filter-form .el-form-item) {
     width: calc(50% - var(--spacing-md));
     margin-right: var(--spacing-md);
     margin-bottom: var(--spacing-md);
   }
   
-  .filter-form :deep(.el-form-item:nth-child(2n)) {
+  :deep(.filter-form .el-form-item:nth-child(2n)) {
     margin-right: 0;
   }
   
-  .filter-form :deep(.el-form-item:last-child) {
+  :deep(.filter-form .el-form-item:last-child) {
     width: 100%;
     margin-right: 0;
     margin-top: var(--spacing-sm);
@@ -1421,7 +1396,7 @@ watch(
     padding: var(--spacing-sm);
   }
   
-  .filter-form :deep(.el-form-item) {
+  :deep(.filter-form .el-form-item) {
     margin-bottom: var(--spacing-sm) !important;
   }
   
@@ -1538,16 +1513,16 @@ watch(
   }
   
   /* 横屏时筛选表单可以两列布局 */
-  .filter-form :deep(.el-form-item) {
+  :deep(.filter-form .el-form-item) {
     width: calc(50% - var(--spacing-sm));
     margin-right: var(--spacing-sm);
   }
   
-  .filter-form :deep(.el-form-item:nth-child(2n)) {
+  :deep(.filter-form .el-form-item:nth-child(2n)) {
     margin-right: 0;
   }
   
-  .filter-form :deep(.el-form-item:last-child) {
+  :deep(.filter-form .el-form-item:last-child) {
     width: 100%;
     margin-right: 0;
   }
