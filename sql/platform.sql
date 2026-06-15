@@ -1131,6 +1131,22 @@ CREATE TABLE IF NOT EXISTS `sensitive_path_probe_logs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感路径探测拦截日志';
 
 -- ----------------------------
+-- Table structure for sensitive_blocked_ips
+-- ----------------------------
+DROP TABLE IF EXISTS `sensitive_blocked_ips`;
+CREATE TABLE IF NOT EXISTS `sensitive_blocked_ips` (
+  `id` INT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `blocked_ip` VARCHAR(64) NOT NULL COMMENT '封禁IP',
+  `reason` VARCHAR(255) NULL COMMENT '封禁原因',
+  `is_active` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `blocked_ip` (`blocked_ip`),
+  INDEX `idx_sensitive_blocked_ip_active` (`is_active`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感路径防护IP黑名单';
+
+-- ----------------------------
 -- Procedure structure for purge_clicks_safe
 -- ----------------------------
 DROP PROCEDURE IF EXISTS `purge_clicks_safe`;

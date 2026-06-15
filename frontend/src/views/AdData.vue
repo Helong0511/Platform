@@ -29,249 +29,52 @@
     </div>
 
     <!-- 筛选控件 -->
-    <!-- 筛选区 -->
-    <el-card class="filter-card">
-      <!-- 表单区域 -->
-      <el-form :inline="true" :model="searchForm" class="filter-form">
-        <el-form-item label="日期范围">
-          <el-date-picker
-            v-model="searchForm.dateRange"
-            name="dateRange"
-            type="daterange"
-            range-separator="至"
-            start-placeholder="开始日期"
-            end-placeholder="结束日期"
-            format="YYYY-MM-DD"
-            value-format="YYYY-MM-DD"
-            style="width: 100%;"
-            @change="handleDateRangeChange"
-          ></el-date-picker>
-        </el-form-item>
-        <el-form-item v-if="isAdmin" label="客户">
-          <el-select 
-            v-model="searchForm.clientId" 
-            placeholder="全部客户" 
-            style="width: 100%;"
-            @change="handleFilterClientChange"
-            clearable
-          >
-            <el-option v-for="user in users" :key="user.value" :label="user.label" :value="user.value"></el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item label="产品">
-          <el-select 
-            v-model="searchForm.productId" 
-            placeholder="全部产品" 
-            style="width: 100%;"
-            clearable
-            @change="handleFilterProductChange"
-          >
-            <el-option v-for="product in filterProducts" :key="product.value" :label="product.label" :value="product.value"></el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item label="国家">
-          <el-select 
-            v-model="searchForm.countryCode" 
-            placeholder="全部区域" 
-            style="width: 100%;"
-            clearable
-            @change="handleCountryChange"
-          >
-            <el-option v-for="country in filterCountries" :key="country.code" :label="country.label || country.name_zh" :value="country.code"></el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="fetchAdData" :loading="loading" :disabled="loading">查询</el-button>
-          <el-button @click="resetFilter" :disabled="loading">重置</el-button>
-        </el-form-item>
-      </el-form>
-      <div class="filter-hint">
-        <el-icon :size="16"><InfoFilled /></el-icon>
-        <span>默认查询数据是本月数据，如果要查询其它时间，请自行选择日期范围。</span>
-      </div>
-    </el-card>
+    <AdDataFilterCard
+      v-model:search-form="searchForm"
+      :is-admin="isAdmin"
+      :loading="loading"
+      :users="users"
+      :filter-products="filterProducts"
+      :filter-countries="filterCountries"
+      @fetch="fetchAdData"
+      @reset="resetFilter"
+      @date-range-change="handleDateRangeChange"
+      @filter-client-change="handleFilterClientChange"
+      @filter-product-change="handleFilterProductChange"
+      @country-change="handleCountryChange"
+    />
 
-    <!-- 数据表格 -->
-    <el-card class="data-table-card">
-      <!-- 卡片标题栏 -->
-    <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-weight: 600; font-size: 16px;">详细报表数据</span>
-          <el-button 
-            type="text" 
-            :icon="Setting" 
-            @click="columnSettingVisible = true"
-          >
-            列设置
-          </el-button>
-        </div>
-      </template>
-      <el-table
-        v-loading="loading"
-        :data="adDataList"
-        border
-        stripe
-        style="width: 100%"
-        @selection-change="handleSelectionChange"
-        @sort-change="handleSortChange"
-        :summary-method="getSummaries"
-        show-summary
-      >
-        <el-table-column type="selection" width="55"></el-table-column>
-        <el-table-column v-if="columnVisibility.date" prop="date" label="数据日期" sortable="custom"></el-table-column>
-        <el-table-column v-if="isAdmin && columnVisibility.user_name" prop="user_name" label="所属客户"></el-table-column>
-        <el-table-column v-if="columnVisibility.product_name" prop="product_name" label="产品名称" sortable="custom" sort-by="product" :min-width="150">
-          <template #default="{ row }">
-            <div class="product-name-cell" @click="handleProductClick(row)">
-              <span class="product-name">{{ row.product_name }}</span>
-              <el-icon class="product-icon"><Right /></el-icon>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column v-if="columnVisibility.ad_unit" prop="ad_unit" label="广告单元" :min-width="120" show-overflow-tooltip></el-table-column>
-        <el-table-column v-if="columnVisibility.country_name_zh" prop="country_name_zh" label="国家"></el-table-column>
-        <el-table-column v-if="columnVisibility.request_count" prop="request_count" label="请求数" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.match_count" prop="match_count" label="匹配数" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.coverage_rate" prop="coverage_rate" label="覆盖率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.display_count" prop="display_count" label="展示数" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.display_rate" prop="display_rate" label="展示率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.click_count" prop="click_count" label="点击数" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.click_rate" prop="click_rate" label="点击率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.viewability_rate" prop="viewability_rate" label="可见率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.cpc" prop="cpc" label="CPC" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.pageviews" prop="pageviews" label="PageViews" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.ecpm_after_deduct" prop="ecpm_after_deduct" :label="isAdmin ? 'eCPM(扣)' : 'eCPM'" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column v-if="isAdmin && columnVisibility.ecpm_before_deduct" prop="ecpm_before_deduct" label="eCPM" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.revenue_after_deduct" prop="revenue_after_deduct" :label="isAdmin ? '收益(扣)' : '收益'" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column v-if="isAdmin && columnVisibility.revenue_before_deduct" prop="revenue_before_deduct" label="收益" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column v-if="isAdmin" label="操作" width="180">
-          <template #default="scope">
-            <el-button size="small" type="primary" @click="handleEdit(scope.row)">修改</el-button>
-            <el-button size="small" type="danger" @click="handleDelete(scope.row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+    <AdDataDetailTable
+      v-model:pagination="pagination"
+      :loading="loading"
+      :ad-data-list="adDataList"
+      :column-visibility="columnVisibility"
+      :is-admin="isAdmin"
+      :is-mobile="isMobile"
+      :format-percentage="formatPercentage"
+      :format-currency="formatCurrency"
+      :get-summaries="getSummaries"
+      @selection-change="handleSelectionChange"
+      @sort-change="handleSortChange"
+      @edit="handleEdit"
+      @delete="handleDelete"
+      @product-click="handleProductClick"
+      @open-column-settings="columnSettingVisible = true"
+    />
 
-      <!-- 分页控件 -->
-      <div class="pagination-container">
-        <el-pagination
-          v-model:current-page="pagination.current"
-          v-model:page-size="pagination.size"
-          :page-sizes="[10, 20, 50, 100]"
-          :total="pagination.total"
-          :layout="isMobile ? 'total, prev, pager, next' : 'total, sizes, prev, pager, next, jumper'"
-          class="pagination-component"
-        ></el-pagination>
-      </div>
-    </el-card>
-
-    <!-- 编辑对话框 -->
-    <el-dialog
-      v-model="editDialogVisible"
-      title="编辑广告数据"
-      :width="isMobile ? '95%' : '600px'"
-      :append-to-body="true"
-    >
-      <el-form ref="editFormRef" :model="editForm" :rules="editRules" :label-width="isMobile ? '0' : '140px'" class="edit-form">
-        <el-form-item label="数据日期" prop="date">
-          <el-date-picker
-            v-model="editForm.date"
-            name="date"
-            type="date"
-            format="YYYY-MM-DD"
-            value-format="YYYY-MM-DD"
-            style="width: 100%;"
-            disabled
-          ></el-date-picker>
-        </el-form-item>
-        <el-form-item label="所属用户" prop="client_id">
-          <el-select 
-            v-model="editForm.client_id" 
-            placeholder="选择用户" 
-            style="width: 100%;"
-          >
-            <el-option v-for="user in users" :key="user.value" :label="user.label" :value="user.value"></el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item label="产品" prop="product_id">
-          <el-select 
-            v-model="editForm.product_id" 
-            placeholder="选择产品" 
-            style="width: 100%;" 
-            @change="handleProductChange" 
-            :disabled="!editForm.client_id"
-          >
-            <el-option v-for="product in products" :key="product.value" :label="product.label" :value="product.value"></el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item label="广告单元" prop="ad_unit">
-          <el-input
-            v-model="editForm.ad_unit"
-            name="ad_unit"
-            placeholder="可选，留空表示无广告单元"
-            clearable
-            style="width: 100%;"
-          ></el-input>
-        </el-form-item>
-        <el-form-item label="国家" prop="country_code">
-          <el-input 
-            v-model="editForm.country_code" 
-            name="country_code"
-            placeholder="输入国家代码（如：US、USA、840、United States of America、美国）"
-            style="width: 100%;"
-          >
-            <template #append>
-              <el-button @click="handleCountryCodeHelp" title="查看帮助">?</el-button>
-            </template>
-          </el-input>
-          <div class="form-tip" style="margin-top: 5px; font-size: 12px; color: #909399;">
-            支持格式：二字母代码（US）、三字母代码（USA）、数字代码（840）、英文名称（United States of America）、中文名称（美国）
-          </div>
-        </el-form-item>
-        <el-form-item label="请求数" prop="request_count">
-          <el-input v-model.number="editForm.request_count" name="request_count" type="number" min="0" placeholder="请输入请求数"></el-input>
-        </el-form-item>
-        <el-form-item label="匹配数" prop="match_count">
-          <el-input v-model.number="editForm.match_count" name="match_count" type="number" min="0" placeholder="请输入匹配数"></el-input>
-        </el-form-item>
-        <el-form-item label="展示数" prop="display_count">
-          <el-input v-model.number="editForm.display_count" name="display_count" type="number" min="0" placeholder="请输入展示数"></el-input>
-        </el-form-item>
-        <el-form-item label="点击数" prop="click_count">
-          <el-input v-model.number="editForm.click_count" name="click_count" type="number" min="0" placeholder="请输入点击数"></el-input>
-        </el-form-item>
-        <el-form-item label="点击率" prop="click_rate">
-          <el-input v-model.number="editForm.click_rate" name="click_rate" type="number" step="0.01" min="0" placeholder="请输入点击率"></el-input>
-        </el-form-item>
-        <el-form-item label="可见率" prop="viewability_rate">
-          <el-input v-model.number="editForm.viewability_rate" name="viewability_rate" type="number" step="0.01" min="0" placeholder="请输入可见率"></el-input>
-        </el-form-item>
-        <el-form-item label="CPC" prop="cpc">
-          <el-input v-model.number="editForm.cpc" name="cpc" type="number" step="0.01" min="0" placeholder="请输入CPC"></el-input>
-        </el-form-item>
-        <el-form-item label="PageViews" prop="pageviews">
-          <el-input v-model.number="editForm.pageviews" name="pageviews" type="number" min="0" placeholder="请输入PageViews"></el-input>
-        </el-form-item>
-        <el-form-item label="eCPM(扣)" prop="ecpm_after_deduct">
-          <el-input v-model.number="editForm.ecpm_after_deduct" name="ecpm_after_deduct" type="number" step="0.01" min="0" placeholder="请输入扣除后的eCPM"></el-input>
-        </el-form-item>
-        <el-form-item label="eCPM" prop="ecpm_before_deduct">
-          <el-input v-model.number="editForm.ecpm_before_deduct" name="ecpm_before_deduct" type="number" step="0.01" min="0" placeholder="请输入eCPM"></el-input>
-        </el-form-item>
-        <el-form-item label="收益(扣)" prop="revenue_after_deduct">
-          <el-input v-model.number="editForm.revenue_after_deduct" name="revenue_after_deduct" type="number" step="0.01" min="0" placeholder="请输入扣除后的收益"></el-input>
-        </el-form-item>
-        <el-form-item label="收益" prop="revenue_before_deduct">
-          <el-input v-model.number="editForm.revenue_before_deduct" name="revenue_before_deduct" type="number" step="0.01" min="0" placeholder="请输入收益"></el-input>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="cancelEdit">取消</el-button>
-          <el-button type="primary" @click="saveEdit">保存</el-button>
-        </div>
-      </template>
-    </el-dialog>
+    <AdDataEditDialog
+      v-model:visible="editDialogVisible"
+      ref="editDialogRef"
+      :edit-form="editForm"
+      :edit-rules="editRules"
+      :users="users"
+      :products="products"
+      :is-mobile="isMobile"
+      @save="saveEdit"
+      @cancel="cancelEdit"
+      @product-change="handleProductChange"
+      @country-help="handleCountryCodeHelp"
+    />
 
     <!-- 列设置对话框 -->
     <el-dialog
@@ -324,7 +127,7 @@
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../store';
 import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElTag, ElIcon, ElLoading, ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
-import { Download, Search, Delete, InfoFilled, Setting, Right } from '@element-plus/icons-vue';
+import { Download, Delete, Setting } from '@element-plus/icons-vue';
 import { getAdDataList, exportAdData, getProductsForSelect, updateAdData, getProductById, deleteAdData, batchDeleteAdData, getAdDataDateRange } from '../api/ad-data';
 import { useRouter, useRoute } from 'vue-router';
 import { getSuccessMessage, getWarningMessage } from '../utils/messages';
@@ -341,6 +144,9 @@ import { useDataPageFilterCascade } from '../composables/useDataPageFilterCascad
 import { useDebouncedPaginatedFetch } from '../composables/useDebouncedPaginatedFetch';
 import { useAdDataProductPanel } from '../composables/useAdDataProductPanel';
 import ProductManagementDialog from '../components/admin/ProductManagementDialog.vue';
+import AdDataFilterCard from '../components/ad-data/AdDataFilterCard.vue';
+import AdDataDetailTable from '../components/ad-data/AdDataDetailTable.vue';
+import AdDataEditDialog from '../components/ad-data/AdDataEditDialog.vue';
 
 // 路由实例
 const router = useRouter();
@@ -631,7 +437,7 @@ watch(
 
 // 编辑对话框状态
 const editDialogVisible = ref(false);
-const editFormRef = ref(null);
+const editDialogRef = ref(null);
 // 表单验证规则
 const editRules = ref({
   product_id: [
@@ -859,7 +665,7 @@ const saveEdit = async () => {
     await ensureCsrfToken(() => fetchAdData());
     
     // 触发表单验证
-    const formRef = editFormRef.value;
+    const formRef = editDialogRef.value?.formRef;
     if (!formRef) return;
     await formRef.validate();
     

@@ -29,76 +29,22 @@
       </template>
 
       <!-- 搜索栏 -->
-      <div class="search-bar">
-        <el-input
-          v-model="searchKeyword"
-          placeholder="搜索Offer名称或ID"
-          clearable
-          style="width: 300px;"
-          @clear="handleSearch"
-          @keyup.enter="handleSearch"
-        >
-          <template #prefix>
-            <el-icon><Search /></el-icon>
-          </template>
-        </el-input>
-        <el-select
-          v-if="isAdmin"
-          v-model="filterAdvertiser"
-          placeholder="请选择广告主"
-          clearable
-          filterable
-          style="width: 180px; margin-left: 10px; min-width: 180px;"
-          @change="handleAdvertiserChange"
-        >
-          <el-option
-            v-for="adv in advertiserList"
-            :key="adv.id"
-            :label="adv.advertiser_name"
-            :value="adv.id"
-          />
-        </el-select>
-        <el-select
-          v-model="filterStatus"
-          placeholder="请选择状态"
-          clearable
-          style="width: 140px; margin-left: 10px; min-width: 140px;"
-          @change="handleStatusChange"
-        >
-          <el-option label="全部" :value="null" />
-          <el-option label="Active" value="Active" />
-          <el-option label="Inactive" value="Inactive" />
-        </el-select>
-        <el-select
-          v-model="filterActive"
-          placeholder="请选择激活状态"
-          clearable
-          style="width: 160px; margin-left: 10px; min-width: 160px;"
-          @change="handleActiveChange"
-        >
-          <el-option label="全部" :value="null" />
-          <el-option label="激活" :value="true" />
-          <el-option label="禁用" :value="false" />
-        </el-select>
-        <el-select
-          v-if="isAdmin"
-          v-model="filterPublisher"
-          placeholder="分配渠道"
-          clearable
-          filterable
-          style="width: 180px; margin-left: 10px; min-width: 180px;"
-          @change="handlePublisherChange"
-        >
-          <el-option
-            v-for="pub in publisherList"
-            :key="pub.id"
-            :label="pub.publisher_name"
-            :value="pub.id"
-          />
-        </el-select>
-        <el-button type="primary" :icon="Search" @click="handleSearch" style="margin-left: 10px;">搜索</el-button>
-        <el-button :icon="Refresh" @click="handleReset">重置</el-button>
-      </div>
+      <OfferSearchBar
+        v-model:search-keyword="searchKeyword"
+        v-model:filter-advertiser="filterAdvertiser"
+        v-model:filter-status="filterStatus"
+        v-model:filter-active="filterActive"
+        v-model:filter-publisher="filterPublisher"
+        :is-admin="isAdmin"
+        :advertiser-list="advertiserList"
+        :publisher-list="publisherList"
+        @search="handleSearch"
+        @reset="handleReset"
+        @advertiser-change="handleAdvertiserChange"
+        @status-change="handleStatusChange"
+        @active-change="handleActiveChange"
+        @publisher-change="handlePublisherChange"
+      />
 
       <!-- 表格 -->
       <div class="table-wrapper">
@@ -933,6 +879,7 @@ import { useOfferList } from '@/composables/useOfferList'
 import { useOfferForm } from '@/composables/useOfferForm'
 import { useOfferDetail } from '@/composables/useOfferDetail'
 import OfferStatsPanel from '@/components/admin/OfferStatsPanel.vue'
+import OfferSearchBar from '@/components/admin/OfferSearchBar.vue'
 
 const authStore = useAuthStore()
 const route = useRoute()

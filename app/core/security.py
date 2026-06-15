@@ -659,3 +659,40 @@ def is_client(user: User) -> bool:
         bool: 如果是客户返回 True，否则返回 False
     """
     return user.role == UserRole.CLIENT
+
+
+async def require_publisher_or_admin(
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+) -> User:
+    """
+    要求管理员，或已关联下游渠道的客户用户。
+
+    用于 Offer 列表、转化总览等 CPL 客户可见接口，与前端 requiresPublisher 路由守卫一致。
+    """
+    if current_user.role == UserRole.ADMIN:
+        return current_user
+    if current_user.role != UserRole.CLIENT:
+        _raise_auth(
+            "需要管理员或渠道客户权限",
+            error_code=ErrorCode.FORBIDDEN,
+            http_status=status.HTTP_403_FORBIDDEN,
+        )
+    from app.models.models import Client
+    from app.services.user_service import UserService
+
+    client_row = await db.execute(select(Client).where(Client.user_id == current_user.id))
+    client = client_row.scalars().first()
+    if not client:
+        _raise_auth(
+            "客户信息不存在",
+            error_code=ErrorCode.CLIENT_NOT_FOUND,
+            http_status=status.HTTP_403_FORBIDDEN,
+        )
+    if not await UserService(db).check_client_has_publisher(client.id):
+        _raise_auth(
+            "需要关联渠道权限",
+            error_code=ErrorCode.FORBIDDEN,
+            http_status=status.HTTP_403_FORBIDDEN,
+        )
+    return current_user

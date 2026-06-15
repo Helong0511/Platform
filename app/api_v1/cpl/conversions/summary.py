@@ -17,7 +17,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_conversion_service
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_publisher_or_admin
 from app.models.models import User
 from app.schemas.base import ResponseBaseSchema
 from app.services.cpl.conversion_service import ConversionService
@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 
 @router.get("/",
             response_model=ResponseBaseSchema[dict],
-            summary="获取转化总览统计")
+            summary="获取转化总览统计",
+            dependencies=[Depends(require_publisher_or_admin)])
 async def get_conversion_summary(
         start_date: Optional[str] = Query(None, description="开始日期（YYYY-MM-DD）"),
         end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),
@@ -84,7 +85,8 @@ async def get_conversion_summary(
 
 @router.get("/by-offer",
             response_model=ResponseBaseSchema[list],
-            summary="按Offer统计")
+            summary="按Offer统计",
+            dependencies=[Depends(require_publisher_or_admin)])
 async def get_summary_by_offer(
         start_date: Optional[str] = Query(None, description="开始日期（YYYY-MM-DD）"),
         end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD）"),

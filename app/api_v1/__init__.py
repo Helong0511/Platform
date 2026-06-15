@@ -11,11 +11,13 @@
 - 无前缀：Postback、点击追踪、客户 API。
 
 说明：包入口，聚合子模块 router 供 api_router 注册。"""
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 # 创建统一的路由聚合器
 api_router = APIRouter()
 main_router = api_router  # 保持向后兼容
+
+from app.core.security import require_admin
 
 # ==================== 认证模块 ====================
 from app.api_v1 import auth
@@ -138,8 +140,13 @@ api_router.include_router(ip_whitelist, prefix="", tags=["Postback IP白名单"]
 # ---------- 追踪模块 ----------
 # 点击追踪路由（必须在其他路由之前，避免路径冲突，无前缀）
 api_router.include_router(tracking, prefix="", tags=["点击追踪"])
-# 短链接服务路由
-api_router.include_router(short_links, prefix="/short-links", tags=["短链接服务"])
+# 短链接服务路由（管理端仅管理员）
+api_router.include_router(
+    short_links,
+    prefix="/short-links",
+    tags=["短链接服务"],
+    dependencies=[Depends(require_admin)],
+)
 
 # ---------- CPL系统模块 ----------
 api_router.include_router(advertisers, prefix="/advertisers", tags=["广告主管理"])

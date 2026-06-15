@@ -21,7 +21,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_offer_service
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
-from app.core.security import get_current_user, require_admin
+from app.core.security import get_current_user, require_admin, require_publisher_or_admin
 from app.core.short_link.generator import (
     generate_short_code_from_id,
     generate_unique_short_code
@@ -567,7 +567,8 @@ async def create_offer(
 
 @router.get("/",
             response_model=PaginatedResponseBaseSchema[list[OfferResponse]],
-            summary="获取Offer列表")
+            summary="获取Offer列表",
+            dependencies=[Depends(require_publisher_or_admin)])
 async def get_offers(
         page: int = Query(1, ge=1, description="页码"),
         page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
@@ -624,7 +625,8 @@ async def get_offers(
 
 @router.get("/{offer_id}/check-short-link",
             response_model=ResponseBaseSchema[dict],
-            summary="检查Offer的短链接是否存在")
+            summary="检查Offer的短链接是否存在",
+            dependencies=[Depends(require_publisher_or_admin)])
 async def check_offer_short_link(
         offer_id: int = Path(..., ge=1, description="Offer ID"),
         db: AsyncSession = Depends(get_db),
@@ -698,6 +700,7 @@ async def check_offer_short_link(
     "/{offer_id}/stats",
     response_model=ResponseBaseSchema[dict],
     summary="获取 Offer 统计",
+    dependencies=[Depends(require_publisher_or_admin)],
 )
 async def get_offer_stats(
         offer_id: int = Path(..., ge=1, description="Offer ID"),
@@ -811,7 +814,8 @@ async def get_offer_stats(
 
 @router.get("/{offer_id}",
             response_model=ResponseBaseSchema[OfferResponse],
-            summary="获取Offer详情")
+            summary="获取Offer详情",
+            dependencies=[Depends(require_publisher_or_admin)])
 async def get_offer(
         offer_id: int = Path(..., ge=1, description="Offer ID"),
         db: AsyncSession = Depends(get_db),

@@ -20,6 +20,8 @@
  * - requiresAuth: 需要登录才能访问
  * - requiresAdmin: 需要管理员权限才能访问
  * - requiresPublisher: 需要管理员或有关联渠道的客户才能访问
+ * - requiresAdDataAccess: 广告数据类页面（有关联渠道的客户不可访问）
+ * - requiresApiEnabled: 客户 API 文档（需 api_enabled）
  * 
  * @module router/index
  */
@@ -145,7 +147,8 @@ const routes = [
       {
         path: 'dashboard',
         name: 'Dashboard',
-        component: Dashboard
+        component: Dashboard,
+        meta: { requiresAdDataAccess: true }
       },
       {
         path: 'ad-data',
@@ -154,17 +157,20 @@ const routes = [
       {
         path: 'ad-data/daily-report',
         name: 'DailyReport',
-        component: DailyReport
+        component: DailyReport,
+        meta: { requiresAdDataAccess: true }
       },
       {
         path: 'ad-data/detail-report',
         name: 'AdData',
-        component: AdData
+        component: AdData,
+        meta: { requiresAdDataAccess: true }
       },
       {
         path: 'ad-data/tb-search-data',
         name: 'TBSearchData',
-        component: TBSearchData
+        component: TBSearchData,
+        meta: { requiresAdDataAccess: true }
       },
       {
         path: 'admin/users',
@@ -329,7 +335,8 @@ const routes = [
       {
         path: 'api-documentation',
         name: 'ApiDocumentation',
-        component: ApiDocumentation
+        component: ApiDocumentation,
+        meta: { requiresApiEnabled: true }
       }
     ]
   },
@@ -463,6 +470,34 @@ router.beforeEach((to, from, next) => {
           ? from.path
           : getDefaultRoute(authStore.userInfo);
         ElMessage.warning('无权访问该页面');
+        return next(fallbackPath);
+      }
+    }
+
+    // ====== 广告数据访问（有关联渠道的客户不可见，与侧栏一致） ======
+    if (to.meta.requiresAdDataAccess) {
+      if (!authStore.isAuthenticated) {
+        clearAuthData();
+        ElMessage.warning('请先登录');
+        return next('/login');
+      }
+      if (!authStore.isAdmin && hasPublisherAccess(authStore)) {
+        const fallbackPath = getDefaultRoute(authStore.userInfo);
+        ElMessage.warning('无权访问广告数据页面');
+        return next(fallbackPath);
+      }
+    }
+
+    // ====== 客户 API 文档（需开启 api_enabled） ======
+    if (to.meta.requiresApiEnabled) {
+      if (!authStore.isAuthenticated) {
+        clearAuthData();
+        ElMessage.warning('请先登录');
+        return next('/login');
+      }
+      if (!authStore.isAdmin && !authStore.userInfo?.api_enabled) {
+        const fallbackPath = getDefaultRoute(authStore.userInfo);
+        ElMessage.warning('API 对接未开启，请联系管理员');
         return next(fallbackPath);
       }
     }
