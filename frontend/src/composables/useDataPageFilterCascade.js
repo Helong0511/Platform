@@ -273,7 +273,10 @@ export function useDataPageFilterCascade({
 
   const handleDimensionChange = async () => {
     if (includeDimension && getUserId) {
-      saveAdDataDimensionPreference(getUserId(), searchForm.value.dimension);
+      const userId = getUserId();
+      if (userId != null && userId !== '') {
+        saveAdDataDimensionPreference(userId, searchForm.value.dimension);
+      }
     }
     searchForm.value.countryCode = '';
     searchForm.value.adUnit = '';
