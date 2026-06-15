@@ -47,6 +47,7 @@
 4. 部分匹配可能返回多个结果，优先返回最长的匹配项
 """
 import logging
+import re
 import unicodedata
 from typing import Any, Optional, Set
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -96,6 +97,27 @@ _COMMON_ENGLISH_COUNTRY_ALIASES: dict[str, str] = {
     "saudi arabia": "SA",
     "united arab emirates": "AE",
     "uae": "AE",
+    # 属地 / 群岛（智索等上游常见写法）
+    "us virgin islands": "VI",
+    "u.s. virgin islands": "VI",
+    "united states virgin islands": "VI",
+    "virgin islands, us": "VI",
+    "virgin islands, u.s.": "VI",
+    "virgin islands (u.s.)": "VI",
+    "virgin islands us": "VI",
+    "british virgin islands": "VG",
+    "virgin islands, uk": "VG",
+    "virgin islands, u.k.": "VG",
+    "virgin islands (uk)": "VG",
+    "puerto rico": "PR",
+    "guam": "GU",
+    "american samoa": "AS",
+    "northern mariana islands": "MP",
+    "cayman islands": "KY",
+    "bermuda": "BM",
+    "hong kong sar": "HK",
+    "macau": "MO",
+    "macao": "MO",
 }
 
 
@@ -223,7 +245,14 @@ async def resolve_country_display(
 
 
 def _normalize_country_text(value: Optional[str]) -> str:
-    return (value or "").strip().lower()
+    text = (value or "").strip().lower()
+    # U.S. / U.K. 等缩写统一，便于与库表及别名匹配
+    text = re.sub(r"\bu\.s\.", "us", text)
+    text = re.sub(r"\bu\.k\.", "uk", text)
+    text = re.sub(r"[()]", " ", text)
+    text = re.sub(r"\s*,\s*", ", ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 def _pick_best_country_match(
