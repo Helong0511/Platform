@@ -133,7 +133,7 @@
         v-model:current-page="paginationModel.current"
         v-model:page-size="paginationModel.size"
         :page-sizes="[10, 20, 50, 100]"
-        :total="pagination.total"
+        :total="paginationModel.total"
         :layout="isMobile ? 'total, prev, pager, next' : 'total, sizes, prev, pager, next, jumper'"
         class="pagination-component"
       />
