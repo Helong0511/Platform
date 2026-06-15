@@ -1,6 +1,12 @@
+#!/usr/bin/env bash
+# 若用 sh update_frontend.sh 调用，自动切换到 bash（dash 不支持 pipefail）
+if [ -z "${BASH_VERSION:-}" ]; then
+    exec bash "$0" "$@"
+fi
+
+set -euo pipefail
 
 clear
-set -euo pipefail
 
 PLATFORM_ROOT="/data/Platform"
 FRONTEND_DIR="${PLATFORM_ROOT}/frontend"
