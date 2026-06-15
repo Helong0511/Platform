@@ -119,6 +119,22 @@ function isFilterOptionSelected(optionValue, selectedValue) {
 }
 
 /**
+ * 将表单筛选字段值规范为字符串（与下拉 option 类型一致）。
+ * @param {import('vue').Ref<Record<string, unknown>>} form 筛选表单 ref
+ * @param {string} field 字段名
+ * @returns {boolean} 发生写回时返回 true（含数字 123 → 字符串 '123' 等类型变化）
+ */
+function normalizeFilterFieldToString(form, field) {
+  const current = form.value[field];
+  const normalized = String(current);
+  if (normalized !== current) {
+    form.value[field] = normalized;
+    return true;
+  }
+  return false;
+}
+
+/**
  * @param {Object} options
  * @param {import('vue').Ref} options.searchForm
  * @param {boolean} [options.includeCountry=false]
@@ -313,8 +329,8 @@ export function useDataPageFilterCascade({
           searchForm.value.adUnit = '';
         }
         changed = true;
-      } else {
-        searchForm.value.clientId = String(searchForm.value.clientId);
+      } else if (normalizeFilterFieldToString(searchForm, 'clientId')) {
+        changed = true;
       }
     }
 
@@ -331,8 +347,8 @@ export function useDataPageFilterCascade({
           searchForm.value.adUnit = '';
         }
         changed = true;
-      } else {
-        searchForm.value.productId = String(searchForm.value.productId);
+      } else if (normalizeFilterFieldToString(searchForm, 'productId')) {
+        changed = true;
       }
     }
 
@@ -343,8 +359,8 @@ export function useDataPageFilterCascade({
       if (!countryExists) {
         searchForm.value.countryCode = '';
         changed = true;
-      } else {
-        searchForm.value.countryCode = String(searchForm.value.countryCode);
+      } else if (normalizeFilterFieldToString(searchForm, 'countryCode')) {
+        changed = true;
       }
     }
 
@@ -358,8 +374,8 @@ export function useDataPageFilterCascade({
           searchForm.value.countryCode = '';
         }
         changed = true;
-      } else {
-        searchForm.value.adUnit = String(searchForm.value.adUnit);
+      } else if (normalizeFilterFieldToString(searchForm, 'adUnit')) {
+        changed = true;
       }
     }
 
