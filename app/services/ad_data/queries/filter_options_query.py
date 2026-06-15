@@ -25,6 +25,10 @@ from app.core.infrastructure.cache_compat import (
 from app.core.query_utils import apply_date_range_filter, check_use_assignment_table
 from app.core.security import is_admin
 from app.models.models import AdData, Client, CountryInfo, Product, ProductAssignment, User
+from app.services.ad_data.queries.dimension_filter import (
+    build_ad_data_dimension_filter,
+    normalize_dimension,
+)
 from app.services.ad_data.queries.join_helpers import (
     join_ad_data_and_client_from_product,
     join_country_info_for_ad_data,
@@ -98,13 +102,21 @@ class FilterOptionsQuery:
         product_id: Optional[int] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        dimension: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        dim = normalize_dimension(dimension)
+        if dim == "ad_unit":
+            return []
+
         use_assignment_table = await check_use_assignment_table(self.db)
 
         query = select(func.distinct(AdData.country_code), CountryInfo.country_name_zh).select_from(AdData)
         query = join_product_and_client(query, use_assignment_table)
         query = join_country_info_for_ad_data(query)
         query = query.where(Product.is_active == True)
+        query = query.where(
+            build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dim)
+        )
 
         if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
@@ -123,7 +135,8 @@ class FilterOptionsQuery:
         for country_code, country_name_zh in (await self.db.execute(query)).all():
             if not country_code:
                 continue
-            # 优先使用 JOIN 到的中文名；无登记记录时再回退为代码或特殊区域名称
+            if country_code in ("AA", "ZZ"):
+                continue
             display_name = (
                 country_name_zh
                 or resolve_country_name(
@@ -138,6 +151,49 @@ class FilterOptionsQuery:
 
         countries_list.sort(key=lambda x: x["name_zh"])
         return countries_list
+
+    async def fetch_ad_units(
+        self,
+        current_user: User,
+        client_id: Optional[int] = None,
+        product_id: Optional[int] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        dimension: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        dim = normalize_dimension(dimension)
+        if dim == "country":
+            return []
+
+        use_assignment_table = await check_use_assignment_table(self.db)
+
+        query = select(func.distinct(AdData.ad_unit)).select_from(AdData)
+        query = join_product_and_client(query, use_assignment_table)
+        query = query.where(Product.is_active == True)
+        query = query.where(
+            build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dim)
+        )
+        query = query.where(and_(AdData.ad_unit.isnot(None), AdData.ad_unit != ""))
+
+        if not is_admin(current_user):
+            query = query.where(Client.user_id == current_user.id)
+        elif client_id:
+            query = query.where(Client.id == client_id)
+
+        if product_id:
+            query = query.where(AdData.product_id == product_id)
+
+        query = apply_date_range_filter(
+            query, AdData.date, start_date, end_date, default_to_current_month=True
+        )
+
+        ad_units_list = [
+            {"value": unit, "label": unit}
+            for (unit,) in (await self.db.execute(query)).all()
+            if unit
+        ]
+        ad_units_list.sort(key=lambda x: x["label"])
+        return ad_units_list
 
     async def fetch_products(
         self,

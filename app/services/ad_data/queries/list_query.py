@@ -24,6 +24,10 @@ from app.core.query_utils import (
     check_use_assignment_table,
     date_range_condition,
 )
+from app.services.ad_data.queries.dimension_filter import (
+    build_ad_data_dimension_filter,
+    build_ad_unit_exact_filter,
+)
 from app.services.ad_data.queries.join_helpers import (
     CLIENT_LOAD_ONLY,
     join_country_info_for_ad_data,
@@ -57,16 +61,36 @@ class AdDataListQuery:
         client_id: Optional[int] = None,
         product_id: Optional[str] = None,
         country_code: Optional[str] = None,
+        ad_unit: Optional[str] = None,
+        dimension: Optional[str] = None,
         sort_by: str = "date",
         sort_order: str = "desc",
     ) -> Tuple[List[Dict[str, Any]], int]:
         from app.api_v1.excel.utils import normalize_date_key
 
         use_assignment_table = await check_use_assignment_table(self.db)
-        query = await self._build_main_query(use_assignment_table, current_user, client_id, product_id, country_code, start_date, end_date)
+        query = await self._build_main_query(
+            use_assignment_table,
+            current_user,
+            client_id,
+            product_id,
+            country_code,
+            ad_unit,
+            dimension,
+            start_date,
+            end_date,
+        )
         query = self._apply_sort(query, sort_by, sort_order)
         total = await self._count_total(
-            use_assignment_table, current_user, client_id, product_id, country_code, start_date, end_date
+            use_assignment_table,
+            current_user,
+            client_id,
+            product_id,
+            country_code,
+            ad_unit,
+            dimension,
+            start_date,
+            end_date,
         )
 
         offset = (page - 1) * page_size
@@ -82,6 +106,8 @@ class AdDataListQuery:
         client_id: Optional[int],
         product_id: Optional[str],
         country_code: Optional[str],
+        ad_unit: Optional[str],
+        dimension: Optional[str],
         start_date: Optional[date],
         end_date: Optional[date],
     ):
@@ -108,11 +134,19 @@ class AdDataListQuery:
             except ValueError:
                 logger.warning("无效的产品ID参数: %s", product_id)
 
+        query = query.where(
+            build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
+        )
+
         country_filter = await build_ad_data_country_filter(
             self.db, AdData.country_code, country_code
         )
         if country_filter is not None:
             query = query.where(country_filter)
+
+        ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
+        if ad_unit_filter is not None:
+            query = query.where(ad_unit_filter)
 
         return apply_date_range_filter(
             query,
@@ -160,6 +194,8 @@ class AdDataListQuery:
         client_id: Optional[int],
         product_id: Optional[str],
         country_code: Optional[str],
+        ad_unit: Optional[str],
+        dimension: Optional[str],
         start_date: Optional[date],
         end_date: Optional[date],
     ) -> int:
@@ -179,11 +215,19 @@ class AdDataListQuery:
                 except ValueError:
                     pass
 
+            filter_conditions.append(
+                build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
+            )
+
             country_filter = await build_ad_data_country_filter(
                 self.db, AdData.country_code, country_code
             )
             if country_filter is not None:
                 filter_conditions.append(country_filter)
+
+            ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
+            if ad_unit_filter is not None:
+                filter_conditions.append(ad_unit_filter)
 
             date_range_start = start_date
             date_range_end = end_date

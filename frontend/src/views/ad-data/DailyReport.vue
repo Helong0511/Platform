@@ -14,57 +14,24 @@
     </div>
 
     <!-- 筛选控件 -->
-    <!-- 筛选区 -->
-    <el-card class="filter-card">
-      <!-- 表单区域 -->
-      <el-form :inline="true" :model="searchForm" class="filter-form">
-        <el-form-item label="日期范围">
-          <el-date-picker
-            v-model="searchForm.dateRange"
-            name="dateRange"
-            type="daterange"
-            range-separator="至"
-            start-placeholder="开始日期"
-            end-placeholder="结束日期"
-            format="YYYY-MM-DD"
-            value-format="YYYY-MM-DD"
-            style="width: 100%;"
-            @change="handleDateRangeChange"
-          ></el-date-picker>
-        </el-form-item>
-        <el-form-item v-if="isAdmin" label="客户">
-          <el-select 
-            v-model="searchForm.clientId" 
-            name="clientId"
-            placeholder="全部客户" 
-            style="width: 100%;"
-            @change="handleFilterClientChange"
-            clearable
-          >
-            <el-option v-for="user in users" :key="user.value" :label="user.label" :value="user.value"></el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item label="产品">
-          <el-select 
-            v-model="searchForm.productId" 
-            name="productId"
-            placeholder="全部产品" 
-            style="width: 100%;"
-            clearable
-          >
-            <el-option v-for="product in filterProducts" :key="product.value" :label="product.label" :value="product.value"></el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="fetchDailyData" :loading="loading" :disabled="loading">查询</el-button>
-          <el-button @click="resetFilter" :disabled="loading">重置</el-button>
-        </el-form-item>
-      </el-form>
-      <div class="filter-hint">
-        <el-icon :size="16"><InfoFilled /></el-icon>
-        <span>每日报表显示按产品每日汇总的数据，国家统一显示"全部区域"。默认查询本月数据。</span>
-      </div>
-    </el-card>
+    <AdDataFilterCard
+      v-model:search-form="searchForm"
+      :is-admin="isAdmin"
+      :loading="loading"
+      :users="users"
+      :filter-products="filterProducts"
+      :filter-countries="filterCountries"
+      :filter-ad-units="filterAdUnits"
+      default-hint="默认查询本月数据。"
+      @fetch="fetchDailyData"
+      @reset="resetFilter"
+      @date-range-change="handleDateRangeChange"
+      @filter-client-change="handleFilterClientChange"
+      @filter-product-change="handleFilterProductChange"
+      @dimension-change="handleDimensionChange"
+      @country-change="handleCountryChange"
+      @ad-unit-change="handleAdUnitChange"
+    />
 
     <!-- 数据表格 -->
     <el-card class="data-table-card">
@@ -184,8 +151,9 @@
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../../store';
 import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElIcon, ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
-import { Download, InfoFilled, Setting, Right } from '@element-plus/icons-vue';
+import { Download, Setting, Right } from '@element-plus/icons-vue';
 import { getDailySummary, exportAdData, getAdDataDateRange } from '../../api/ad-data';
+import { DEFAULT_AD_DATA_DIMENSION } from '../../constants/adDataDimension';
 import { useRouter } from 'vue-router';
 import { extractErrorMessage, isErrorHandled } from '../../utils/api';
 import { useDevice } from '../../composables/useDevice';
@@ -199,6 +167,7 @@ import { useDataPageFilterCascade } from '../../composables/useDataPageFilterCas
 import { useDebouncedPaginatedFetch } from '../../composables/useDebouncedPaginatedFetch';
 import { useAdDataProductPanel } from '../../composables/useAdDataProductPanel';
 import ProductManagementDialog from '../../components/admin/ProductManagementDialog.vue';
+import AdDataFilterCard from '../../components/ad-data/AdDataFilterCard.vue';
 
 // 路由实例
 const router = useRouter();
@@ -241,7 +210,10 @@ const sortInfo = ref({
 const searchForm = ref({
   clientId: '',
   dateRange: [],
-  productId: ''
+  productId: '',
+  dimension: DEFAULT_AD_DATA_DIMENSION,
+  countryCode: '',
+  adUnit: ''
 });
 
 const {
@@ -264,11 +236,45 @@ const { formatPercentage, formatCurrency, getSummaries } = useAdDataTableFormat(
 const {
   users,
   filterProducts,
+  filterCountries,
+  filterAdUnits,
   fetchClientsWithData,
   fetchFilterProducts,
   handleFilterClientChange,
+  handleFilterProductChange,
+  handleDimensionChange,
+  handleCountryChange,
+  handleAdUnitChange,
   reloadFiltersAfterDateChange
-} = useDataPageFilterCascade({ searchForm, includeCountry: false, source: 'ad-data' });
+} = useDataPageFilterCascade({
+  searchForm,
+  includeCountry: true,
+  includeDimension: true,
+  source: 'ad-data'
+});
+
+const buildDailySearchParams = () => {
+  const params = {
+    dimension: searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION
+  };
+  if (isAdmin.value && searchForm.value.clientId) {
+    params.client_id = searchForm.value.clientId;
+  }
+  if (searchForm.value.productId) {
+    params.product_id = searchForm.value.productId;
+  }
+  if (searchForm.value.countryCode) {
+    params.country_code = searchForm.value.countryCode;
+  }
+  if (searchForm.value.adUnit) {
+    params.ad_unit = searchForm.value.adUnit;
+  }
+  if (searchForm.value.dateRange?.length === 2) {
+    params.start_date = searchForm.value.dateRange[0];
+    params.end_date = searchForm.value.dateRange[1];
+  }
+  return params;
+};
 
 const { runFetch: fetchDailyData, cancel: cancelDailyFetch } = useDebouncedPaginatedFetch({
   loading,
@@ -276,18 +282,9 @@ const { runFetch: fetchDailyData, cancel: cancelDailyFetch } = useDebouncedPagin
   buildParams: () => {
     const params = {
       page: pagination.value.current,
-      page_size: pagination.value.size
+      page_size: pagination.value.size,
+      ...buildDailySearchParams()
     };
-    if (isAdmin.value && searchForm.value.clientId) {
-      params.client_id = searchForm.value.clientId;
-    }
-    if (searchForm.value.productId) {
-      params.product_id = searchForm.value.productId;
-    }
-    if (searchForm.value.dateRange?.length === 2) {
-      params.start_date = searchForm.value.dateRange[0];
-      params.end_date = searchForm.value.dateRange[1];
-    }
     if (sortInfo.value.prop) {
       params.sort_by = sortInfo.value.prop;
       params.sort_order = sortInfo.value.order === 'ascending' ? 'asc' : 'desc';
@@ -355,6 +352,22 @@ const handleDateRangeChange = async () => {
       searchForm.value.productId = '';
     }
   }
+  if (searchForm.value.countryCode) {
+    const countryExists = filterCountries.value.some(
+      (c) => c.code === searchForm.value.countryCode
+    );
+    if (!countryExists) {
+      searchForm.value.countryCode = '';
+    }
+  }
+  if (searchForm.value.adUnit) {
+    const adUnitExists = filterAdUnits.value.some(
+      (u) => u.value === searchForm.value.adUnit
+    );
+    if (!adUnitExists) {
+      searchForm.value.adUnit = '';
+    }
+  }
 };
 
 // 处理排序变化
@@ -380,7 +393,10 @@ const resetFilter = async () => {
   searchForm.value = {
     clientId: '',
     dateRange: [],
-    productId: ''
+    productId: '',
+    dimension: DEFAULT_AD_DATA_DIMENSION,
+    countryCode: '',
+    adUnit: ''
   };
   pagination.value.current = 1;
   // 重置排序
@@ -419,22 +435,14 @@ const handleExport = async () => {
       return;
     }
     
-    const params = {};
-    
-    if (isAdmin.value && searchForm.value.clientId) {
-      params.client_id = parseInt(searchForm.value.clientId);
+    const params = { ...buildDailySearchParams() };
+    if (params.client_id) {
+      params.client_id = parseInt(params.client_id, 10);
     }
-    
-    if (searchForm.value.productId) {
-      params.product_id = parseInt(searchForm.value.productId);
+    if (params.product_id) {
+      params.product_id = parseInt(params.product_id, 10);
     }
 
-    if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
-      params.start_date = searchForm.value.dateRange[0];
-      params.end_date = searchForm.value.dateRange[1];
-    }
-    
-    // 注意：导出功能暂时使用详细报表的导出，因为每日汇总的导出需要单独实现
     await exportAdData(params);
     ElMessage.success('导出成功');
   } catch (error) {
@@ -491,6 +499,7 @@ const loadPageData = async () => {
     
     const defaultClientId = isAdmin.value ? null : null;
     await fetchFilterProducts(defaultClientId);
+    await reloadFiltersAfterDateChange(isAdmin.value);
   } catch (error) {
     if (!isErrorHandled(error)) {
       const errorMsg = extractErrorMessage(error);

@@ -36,12 +36,15 @@
       :users="users"
       :filter-products="filterProducts"
       :filter-countries="filterCountries"
+      :filter-ad-units="filterAdUnits"
       @fetch="fetchAdData"
       @reset="resetFilter"
       @date-range-change="handleDateRangeChange"
       @filter-client-change="handleFilterClientChange"
       @filter-product-change="handleFilterProductChange"
+      @dimension-change="handleDimensionChange"
       @country-change="handleCountryChange"
+      @ad-unit-change="handleAdUnitChange"
     />
 
     <AdDataDetailTable
@@ -143,6 +146,7 @@ import {
 import { useDataPageFilterCascade } from '../composables/useDataPageFilterCascade';
 import { useDebouncedPaginatedFetch } from '../composables/useDebouncedPaginatedFetch';
 import { useAdDataProductPanel } from '../composables/useAdDataProductPanel';
+import { DEFAULT_AD_DATA_DIMENSION } from '../constants/adDataDimension';
 import ProductManagementDialog from '../components/admin/ProductManagementDialog.vue';
 import AdDataFilterCard from '../components/ad-data/AdDataFilterCard.vue';
 import AdDataDetailTable from '../components/ad-data/AdDataDetailTable.vue';
@@ -189,10 +193,12 @@ const sortInfo = ref({
 
 // 筛选表单
 const searchForm = ref({
-  clientId: '', // 筛选表单的客户ID（仅管理员可见）
+  clientId: '',
   dateRange: [],
   productId: '',
-  countryCode: '' // 国家代码筛选
+  dimension: DEFAULT_AD_DATA_DIMENSION,
+  countryCode: '',
+  adUnit: ''
 });
 
 const {
@@ -216,14 +222,46 @@ const {
   users,
   filterProducts,
   filterCountries,
+  filterAdUnits,
   fetchClientsWithData,
   fetchFilterProducts,
   fetchFilterCountries,
+  fetchFilterAdUnits,
   handleFilterClientChange,
   handleFilterProductChange,
+  handleDimensionChange,
   handleCountryChange,
+  handleAdUnitChange,
   reloadFiltersAfterDateChange
-} = useDataPageFilterCascade({ searchForm, includeCountry: true, source: 'ad-data' });
+} = useDataPageFilterCascade({
+  searchForm,
+  includeCountry: true,
+  includeDimension: true,
+  source: 'ad-data'
+});
+
+const buildAdDataSearchParams = () => {
+  const params = {
+    dimension: searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION
+  };
+  if (isAdmin.value && searchForm.value.clientId) {
+    params.client_id = searchForm.value.clientId;
+  }
+  if (searchForm.value.productId) {
+    params.product_id = searchForm.value.productId;
+  }
+  if (searchForm.value.countryCode) {
+    params.country_code = searchForm.value.countryCode;
+  }
+  if (searchForm.value.adUnit) {
+    params.ad_unit = searchForm.value.adUnit;
+  }
+  if (searchForm.value.dateRange?.length === 2) {
+    params.start_date = searchForm.value.dateRange[0];
+    params.end_date = searchForm.value.dateRange[1];
+  }
+  return params;
+};
 
 const { runFetch: fetchAdData, cancel: cancelAdDataFetch } = useDebouncedPaginatedFetch({
   loading,
@@ -231,21 +269,9 @@ const { runFetch: fetchAdData, cancel: cancelAdDataFetch } = useDebouncedPaginat
   buildParams: () => {
     const params = {
       page: pagination.value.current,
-      page_size: pagination.value.size
+      page_size: pagination.value.size,
+      ...buildAdDataSearchParams()
     };
-    if (isAdmin.value && searchForm.value.clientId) {
-      params.client_id = searchForm.value.clientId;
-    }
-    if (searchForm.value.productId) {
-      params.product_id = searchForm.value.productId;
-    }
-    if (searchForm.value.countryCode) {
-      params.country_code = searchForm.value.countryCode;
-    }
-    if (searchForm.value.dateRange?.length === 2) {
-      params.start_date = searchForm.value.dateRange[0];
-      params.end_date = searchForm.value.dateRange[1];
-    }
     if (sortInfo.value.prop) {
       params.sort_by = sortInfo.value.prop;
       params.sort_order = sortInfo.value.order === 'ascending' ? 'asc' : 'desc';
@@ -342,6 +368,14 @@ const handleDateRangeChange = async () => {
       searchForm.value.countryCode = '';
     }
   }
+  if (searchForm.value.adUnit) {
+    const adUnitExists = filterAdUnits.value.some(
+      (u) => u.value === searchForm.value.adUnit
+    );
+    if (!adUnitExists) {
+      searchForm.value.adUnit = '';
+    }
+  }
 };
 
 // 处理排序变化
@@ -366,9 +400,11 @@ const handleSortChange = ({ prop, order }) => {
 const resetFilter = async () => {
   searchForm.value = {
     clientId: '',
-    dateRange: [], // 重置日期范围，使用默认的当前月
+    dateRange: [],
     productId: '',
-    countryCode: '' // 重置国家代码筛选
+    dimension: DEFAULT_AD_DATA_DIMENSION,
+    countryCode: '',
+    adUnit: ''
   };
   pagination.value.current = 1;
   // 重置排序
@@ -731,34 +767,13 @@ const handleExport = async () => {
       }
     }
     
-    const params = {};
-    
-    // 如果是管理员，可以选择指定客户ID，也可以不指定（导出所有客户的数据）
-    if (isAdmin.value) {
-      // 如果选择了客户，使用选择的客户ID
-      if (searchForm.value.clientId) {
-        params.client_id = parseInt(searchForm.value.clientId);
-      }
-      // 如果没有选择客户（全部客户），不传递client_id参数，后端会导出所有客户的数据
+    const params = { ...buildAdDataSearchParams() };
+    if (params.client_id) {
+      params.client_id = parseInt(params.client_id, 10);
     }
-    
-    // 添加产品ID过滤
-    if (searchForm.value.productId) {
-      params.product_id = parseInt(searchForm.value.productId);
+    if (params.product_id) {
+      params.product_id = parseInt(params.product_id, 10);
     }
-
-    // 添加国家代码过滤
-    if (searchForm.value.countryCode) {
-      params.country_code = searchForm.value.countryCode;
-    }
-
-    // 添加日期范围过滤
-    if (searchForm.value.dateRange && searchForm.value.dateRange.length === 2) {
-      params.start_date = searchForm.value.dateRange[0];
-      params.end_date = searchForm.value.dateRange[1];
-    }
-    
-    // 排序参数由后端默认处理（按日期降序）
 
     await exportAdData(params);
     // 导出成功，显示提示信息
@@ -875,6 +890,14 @@ const loadPageData = async () => {
         // 静默处理错误
       })
     );
+
+    nonCriticalPromises.push(
+      fetchFilterAdUnits(defaultClientId, null).catch(error => {
+        if (error.response?.status === 401) {
+          return;
+        }
+      })
+    );
     
     // 非关键数据异步加载，不阻塞页面显示
     Promise.allSettled(nonCriticalPromises).catch(() => {
@@ -989,25 +1012,7 @@ watch(
   box-shadow: var(--shadow-light);
 }
 
-/* 筛选项宽度见 AdDataFilterCard.vue（客户 400px，其余 300px） */
-
-.filter-hint {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  margin-top: var(--spacing-md);
-  padding: var(--spacing-sm) var(--spacing-md);
-  background-color: #ecf5ff;
-  border: 1px solid #b3d8ff;
-  border-radius: var(--radius-md, 4px);
-  color: #409eff;
-  font-size: var(--font-size-sm, 14px);
-}
-
-.filter-hint .el-icon {
-  color: #409eff;
-  font-size: var(--font-size-base, 16px);
-}
+/* 筛选项宽度与响应式样式见 AdDataFilterCard.vue */
 
 .pagination-container {
   margin-top: var(--spacing-lg);
@@ -1087,117 +1092,6 @@ watch(
   
   .filter-card :deep(.el-card__body) {
     padding: var(--spacing-md);
-  }
-  
-  /* 筛选表单移动端优化 - 强制覆盖 inline 表单样式 */
-  :deep(.filter-form) {
-    display: flex !important;
-    flex-direction: column !important;
-  }
-  
-  :deep(.filter-form .el-form--inline) {
-    display: flex !important;
-    flex-direction: column !important;
-  }
-  
-  :deep(.filter-form .el-form-item) {
-    width: 100% !important;
-    margin-right: 0 !important;
-    margin-bottom: var(--spacing-md) !important;
-    display: flex !important;
-    flex-direction: column !important;
-  }
-  
-  :deep(.filter-form .el-form-item__label) {
-    width: 100% !important;
-    text-align: left !important;
-    margin-bottom: var(--spacing-xs) !important;
-    padding: 0 !important;
-    margin-right: 0 !important;
-    float: none !important;
-    justify-content: flex-start !important;
-    align-items: flex-start !important;
-    display: block !important;
-  }
-  
-  :deep(.filter-form .el-form-item__content) {
-    width: 100% !important;
-    margin-left: 0 !important;
-    flex: 1 !important;
-  }
-  
-  :deep(.filter-form .el-input),
-  :deep(.filter-form .el-select),
-  :deep(.filter-form .el-date-editor),
-  :deep(.filter-form .el-date-picker) {
-    width: 100% !important;
-    max-width: 100% !important;
-  }
-  
-  :deep(.filter-form .el-input__wrapper) {
-    min-height: var(--touch-target-size);
-    width: 100% !important;
-  }
-  
-  :deep(.filter-form .el-select .el-input__wrapper) {
-  min-height: var(--touch-target-size);
-  width: 100% !important;
-}
-
-
-  
-  :deep(.filter-form .el-date-editor.el-input__wrapper) {
-    width: 100% !important;
-    min-height: var(--touch-target-size);
-  }
-  
-  /* 日期选择器特殊处理 */
-  :deep(.filter-form .el-date-editor) {
-    width: 100% !important;
-    max-width: 100% !important;
-  }
-  
-  :deep(.filter-form .el-date-editor .el-input__wrapper) {
-    width: 100% !important;
-  }
-  
-  :deep(.filter-form .el-date-editor .el-range-separator) {
-    width: auto !important;
-  }
-  
-  /* 查询和重置按钮移动端优化 */
-  :deep(.filter-form .el-form-item:last-child) {
-    display: flex !important;
-    flex-direction: row !important;
-    gap: var(--spacing-sm);
-    margin-top: var(--spacing-sm);
-    margin-bottom: 0 !important;
-    width: 100% !important;
-  }
-  
-  :deep(.filter-form .el-form-item:last-child .el-form-item__label) {
-    display: none !important;
-  }
-  
-  :deep(.filter-form .el-form-item:last-child .el-form-item__content) {
-    width: 100% !important;
-    display: flex !important;
-    flex-direction: row !important;
-    gap: var(--spacing-sm);
-  }
-  
-  :deep(.filter-form .el-form-item:last-child .el-button) {
-    flex: 1;
-    min-height: var(--touch-target-size);
-    width: auto;
-    white-space: nowrap;
-  }
-  
-  .filter-hint {
-    margin-top: var(--spacing-sm);
-    padding: var(--spacing-sm);
-    font-size: var(--font-size-xs);
-    line-height: 1.5;
   }
   
   .data-table-card {
@@ -1312,23 +1206,6 @@ watch(
     padding: var(--spacing-lg);
   }
   
-  /* 平板端筛选表单优化 - 两列布局 */
-  :deep(.filter-form .el-form-item) {
-    width: calc(50% - var(--spacing-md));
-    margin-right: var(--spacing-md);
-    margin-bottom: var(--spacing-md);
-  }
-  
-  :deep(.filter-form .el-form-item:nth-child(2n)) {
-    margin-right: 0;
-  }
-  
-  :deep(.filter-form .el-form-item:last-child) {
-    width: 100%;
-    margin-right: 0;
-    margin-top: var(--spacing-sm);
-  }
-  
   .data-table-card :deep(.el-card__body) {
     padding: var(--spacing-lg);
   }
@@ -1394,16 +1271,6 @@ watch(
   
   .filter-card :deep(.el-card__body) {
     padding: var(--spacing-sm);
-  }
-  
-  :deep(.filter-form .el-form-item) {
-    margin-bottom: var(--spacing-sm) !important;
-  }
-  
-  .filter-hint {
-    font-size: var(--font-size-xs);
-    padding: var(--spacing-xs);
-    line-height: 1.4;
   }
   
   .data-table-card :deep(.el-card__body) {
@@ -1510,21 +1377,6 @@ watch(
   .action-buttons .el-button {
     width: auto;
     min-width: 120px;
-  }
-  
-  /* 横屏时筛选表单可以两列布局 */
-  :deep(.filter-form .el-form-item) {
-    width: calc(50% - var(--spacing-sm));
-    margin-right: var(--spacing-sm);
-  }
-  
-  :deep(.filter-form .el-form-item:nth-child(2n)) {
-    margin-right: 0;
-  }
-  
-  :deep(.filter-form .el-form-item:last-child) {
-    width: 100%;
-    margin-right: 0;
   }
   
   /* 横屏时表格可以显示更多列 */

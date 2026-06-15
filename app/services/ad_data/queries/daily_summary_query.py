@@ -2,7 +2,7 @@
 广告数据每日汇总查询构建器。
 
 功能说明：
-- 按「产品 + 日期 + 广告单元」分组聚合广告指标
+- 按统计维度分组聚合：按国家 / 按广告单元 / 按国家+广告单元
 - 支持权限过滤、分页、SQL/内存混合排序
 
 在系统中的位置：
@@ -10,6 +10,7 @@
 """
 import logging
 from datetime import date
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import func
@@ -17,16 +18,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.constants import ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
+from app.core.country_code import build_ad_data_country_filter, resolve_country_name
 from app.core.query_utils import apply_date_range_filter, check_use_assignment_table
 from app.core.security import is_admin
-from app.models.models import AdData, Client, Product, User
-from app.services.ad_data.queries.join_helpers import join_product_and_client
+from app.models.models import AdData, Client, CountryInfo, Product, User
+from app.services.ad_data.queries.dimension_filter import (
+    build_ad_data_dimension_filter,
+    build_ad_unit_exact_filter,
+    normalize_dimension,
+)
+from app.services.ad_data.queries.join_helpers import (
+    join_country_info_for_ad_data,
+    join_product_and_client,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class DailySummaryQuery:
-    """按产品/日期/广告单元维度的每日汇总查询。"""
+    """按统计维度分组的每日汇总查询。"""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -40,26 +50,22 @@ class DailySummaryQuery:
         end_date: Optional[date] = None,
         client_id: Optional[int] = None,
         product_id: Optional[str] = None,
+        country_code: Optional[str] = None,
+        ad_unit: Optional[str] = None,
+        dimension: Optional[str] = None,
         sort_by: str = "date",
         sort_order: str = "desc",
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
-        获取按「产品 + 日期 + 广告单元」分组的每日汇总列表（分页）。
+        获取按统计维度分组的每日汇总列表（分页）。
 
         Returns:
             (汇总行字典列表, 分组总数)
         """
+        dim = normalize_dimension(dimension)
         use_assignment_table = await check_use_assignment_table(self.db)
 
-        query = select(
-            func.date(AdData.date).label("date"),
-            Product.id.label("product_id"),
-            Product.name.label("product_name"),
-            AdData.ad_unit.label("ad_unit"),
-            Client.id.label("client_id"),
-            Client.company_name.label("client_name"),
-            User.full_name.label("user_full_name"),
-            User.username.label("user_username"),
+        metric_columns = [
             func.sum(AdData.request_count).label("request_count"),
             func.sum(AdData.match_count).label("match_count"),
             func.sum(AdData.display_count).label("display_count"),
@@ -69,11 +75,46 @@ class DailySummaryQuery:
             func.sum(AdData.pageviews).label("pageviews"),
             func.sum(AdData.revenue_after_deduct).label("revenue_after_deduct"),
             func.sum(AdData.revenue_before_deduct).label("revenue_before_deduct"),
-        )
+        ]
 
+        base_dims = [
+            func.date(AdData.date).label("date"),
+            Product.id.label("product_id"),
+            Product.name.label("product_name"),
+            Client.id.label("client_id"),
+            Client.company_name.label("client_name"),
+            User.full_name.label("user_full_name"),
+            User.username.label("user_username"),
+        ]
+
+        group_by_cols: List[Any] = [
+            func.date(AdData.date),
+            Product.id,
+            Product.name,
+            Client.id,
+            Client.company_name,
+            User.full_name,
+            User.username,
+        ]
+
+        include_country = dim in ("country", "country_ad_unit")
+        include_ad_unit = dim in ("ad_unit", "country_ad_unit")
+
+        select_cols = list(base_dims)
+        if include_country:
+            select_cols.append(AdData.country_code.label("country_code"))
+            group_by_cols.append(AdData.country_code)
+        if include_ad_unit:
+            select_cols.append(AdData.ad_unit.label("ad_unit"))
+            group_by_cols.append(AdData.ad_unit)
+
+        query = select(*select_cols, *metric_columns)
         query = join_product_and_client(query, use_assignment_table)
         query = query.where(Product.is_active == True)
         query = query.join(User, Client.user_id == User.id)
+
+        if include_country:
+            query = join_country_info_for_ad_data(query)
 
         if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
@@ -82,10 +123,23 @@ class DailySummaryQuery:
 
         if product_id and product_id.strip():
             try:
-                product_id_int = int(product_id)
-                query = query.where(AdData.product_id == product_id_int)
+                query = query.where(AdData.product_id == int(product_id))
             except ValueError:
                 logger.warning("无效的产品ID参数: %s", product_id)
+
+        query = query.where(
+            build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dim)
+        )
+
+        country_filter = await build_ad_data_country_filter(
+            self.db, AdData.country_code, country_code
+        )
+        if country_filter is not None:
+            query = query.where(country_filter)
+
+        ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
+        if ad_unit_filter is not None:
+            query = query.where(ad_unit_filter)
 
         query = apply_date_range_filter(
             query,
@@ -95,21 +149,13 @@ class DailySummaryQuery:
             default_to_current_month=True,
         )
 
-        query = query.group_by(
-            func.date(AdData.date),
-            Product.id,
-            Product.name,
-            AdData.ad_unit,
-            Client.id,
-            Client.company_name,
-            User.full_name,
-            User.username,
-        )
+        query = query.group_by(*group_by_cols)
 
         valid_sort_fields = {
             "date": func.date(AdData.date),
             "product": Product.name,
-            "ad_unit": AdData.ad_unit,
+            "ad_unit": AdData.ad_unit if include_ad_unit else None,
+            "country": AdData.country_code if include_country else None,
             "product_id": Product.id,
             "request_count": func.sum(AdData.request_count),
             "match_count": func.sum(AdData.match_count),
@@ -125,6 +171,7 @@ class DailySummaryQuery:
             "revenue_after_deduct": func.sum(AdData.revenue_after_deduct),
             "revenue_before_deduct": func.sum(AdData.revenue_before_deduct),
         }
+        valid_sort_fields = {k: v for k, v in valid_sort_fields.items() if v is not None}
 
         memory_sort_fields = {"ecpm_before_deduct"}
         need_memory_sort = sort_by in memory_sort_fields
@@ -150,8 +197,13 @@ class DailySummaryQuery:
                 current_user,
                 client_id,
                 product_id,
+                country_code,
+                ad_unit,
+                dim,
                 start_date,
                 end_date,
+                include_country,
+                include_ad_unit,
             )
 
         if need_memory_sort:
@@ -161,6 +213,23 @@ class DailySummaryQuery:
             offset = (page - 1) * page_size
             result = await self.db.execute(query.offset(offset).limit(page_size))
             all_summary_data = result.all()
+
+        country_name_map: Dict[str, str] = {}
+        if include_country and all_summary_data:
+            codes = {
+                getattr(row, "country_code", None)
+                for row in all_summary_data
+                if getattr(row, "country_code", None)
+            }
+            if codes:
+                cn_result = await self.db.execute(
+                    select(CountryInfo.alpha_2_code, CountryInfo.country_name_zh).where(
+                        CountryInfo.alpha_2_code.in_(list(codes))
+                    )
+                )
+                country_name_map = {
+                    code: name for code, name in cn_result.all() if code
+                }
 
         ad_data_responses = []
         for row in all_summary_data:
@@ -215,14 +284,29 @@ class DailySummaryQuery:
             client_name = row.client_name or ""
             user_name = row.user_full_name or row.user_username or ""
 
+            row_country_code = getattr(row, "country_code", None) if include_country else "ZZ"
+            row_ad_unit = getattr(row, "ad_unit", "") if include_ad_unit else ""
+
+            if dim == "ad_unit":
+                display_country_code = "ZZ"
+                country_name_zh = "全部区域"
+            else:
+                display_country_code = row_country_code or ""
+                country_info_stub = (
+                    SimpleNamespace(country_name_zh=country_name_map[row_country_code])
+                    if row_country_code in country_name_map
+                    else None
+                )
+                country_name_zh = resolve_country_name(country_info_stub, row_country_code)
+
             response_data = {
                 "id": 0,
                 "date": date_str,
                 "product_id": row.product_id,
                 "product_name": row.product_name or "",
-                "ad_unit": row.ad_unit or "",
-                "country_code": "ZZ",
-                "country_name_zh": "全部区域",
+                "ad_unit": row_ad_unit or "",
+                "country_code": display_country_code,
+                "country_name_zh": country_name_zh,
                 "request_count": total_request_count,
                 "match_count": total_match_count,
                 "coverage_rate": coverage_rate,
@@ -269,15 +353,29 @@ class DailySummaryQuery:
         current_user: User,
         client_id: Optional[int],
         product_id: Optional[str],
+        country_code: Optional[str],
+        ad_unit: Optional[str],
+        dimension: str,
         start_date: Optional[date],
         end_date: Optional[date],
+        include_country: bool,
+        include_ad_unit: bool,
     ) -> int:
         try:
-            subquery = select(
+            sub_cols = [
                 func.date(AdData.date).label("date"),
                 Product.id.label("product_id"),
-                AdData.ad_unit.label("ad_unit"),
-            )
+            ]
+            group_cols = [func.date(AdData.date), Product.id]
+
+            if include_country:
+                sub_cols.append(AdData.country_code.label("country_code"))
+                group_cols.append(AdData.country_code)
+            if include_ad_unit:
+                sub_cols.append(AdData.ad_unit.label("ad_unit"))
+                group_cols.append(AdData.ad_unit)
+
+            subquery = select(*sub_cols)
             subquery = join_product_and_client(subquery, use_assignment_table)
             subquery = subquery.where(Product.is_active == True)
 
@@ -288,10 +386,23 @@ class DailySummaryQuery:
 
             if product_id and product_id.strip():
                 try:
-                    product_id_int = int(product_id)
-                    subquery = subquery.where(AdData.product_id == product_id_int)
+                    subquery = subquery.where(AdData.product_id == int(product_id))
                 except ValueError:
                     pass
+
+            subquery = subquery.where(
+                build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
+            )
+
+            country_filter = await build_ad_data_country_filter(
+                self.db, AdData.country_code, country_code
+            )
+            if country_filter is not None:
+                subquery = subquery.where(country_filter)
+
+            ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
+            if ad_unit_filter is not None:
+                subquery = subquery.where(ad_unit_filter)
 
             subquery = apply_date_range_filter(
                 subquery,
@@ -301,11 +412,7 @@ class DailySummaryQuery:
                 default_to_current_month=True,
             )
 
-            subquery = subquery.group_by(
-                func.date(AdData.date),
-                Product.id,
-                AdData.ad_unit,
-            )
+            subquery = subquery.group_by(*group_cols)
 
             count_query = select(func.count()).select_from(subquery.alias("distinct_groups"))
             count_result = await self.db.execute(count_query)

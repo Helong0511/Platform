@@ -7,7 +7,8 @@ import { ElMessage } from 'element-plus';
 import {
   getClientsWithData,
   getProductsWithData,
-  getCountriesWithData
+  getCountriesWithData,
+  getAdUnitsWithData
 } from '../api/ad-data';
 import {
   getClientsWithTBSearchData,
@@ -15,6 +16,11 @@ import {
   getCountriesWithTBSearchData
 } from '../api/tb-search-data';
 import { extractErrorMessage, isErrorHandled } from '../utils/api';
+import {
+  DEFAULT_AD_DATA_DIMENSION,
+  showAdUnitFilterForDimension,
+  showCountryFilterForDimension
+} from '../constants/adDataDimension';
 
 /** 国家筛选项展示：二字代码 + 中文名（无中文名或与代码相同时仅显示代码） */
 export function formatCountryFilterLabel(country) {
@@ -61,9 +67,12 @@ function fixSelectDisplay() {
 const AD_DATA_API = {
   getClients: (start, end) => getClientsWithData(start, end),
   getProducts: (clientId, start, end) => getProductsWithData(clientId, start, end),
-  getCountries: (clientId, productId, start, end) =>
-    getCountriesWithData(clientId, productId, start, end),
-  filterCountriesAdvanced: true
+  getCountries: (clientId, productId, start, end, dimension) =>
+    getCountriesWithData(clientId, productId, start, end, dimension),
+  getAdUnits: (clientId, productId, start, end, dimension) =>
+    getAdUnitsWithData(clientId, productId, start, end, dimension),
+  filterCountriesAdvanced: true,
+  supportsDimension: true
 };
 
 const TB_SEARCH_API = {
@@ -71,34 +80,38 @@ const TB_SEARCH_API = {
   getProducts: (clientId, start, end) => getProductsWithTBSearchData(clientId, start, end),
   getCountries: (clientId, productId, start, end) =>
     getCountriesWithTBSearchData(clientId, productId, start, end),
-  filterCountriesAdvanced: false
+  getAdUnits: null,
+  filterCountriesAdvanced: false,
+  supportsDimension: false
 };
 
 /**
  * @param {Object} options
  * @param {import('vue').Ref} options.searchForm
  * @param {boolean} [options.includeCountry=false]
+ * @param {boolean} [options.includeDimension=false]
  * @param {'ad-data'|'tb-search'} [options.source='ad-data']
  * @param {Object} [options.api] 自定义 API，覆盖 source
- */
-/**
- * 组合式函数 - 数据页通用筛选级联
- * @returns {Object} 响应式状态与业务操作方法
  */
 export function useDataPageFilterCascade({
   searchForm,
   includeCountry = false,
+  includeDimension = false,
   source = 'ad-data',
   api: apiOverride = null
 }) {
   const api =
     apiOverride || (source === 'tb-search' ? TB_SEARCH_API : AD_DATA_API);
 
-  // users 响应式状态
   const users = ref([{ label: '全部客户', value: '' }]);
   const filterProducts = ref([{ label: '全部产品', value: '' }]);
-  // filterCountries 响应式状态
   const filterCountries = ref([{ code: '', name_zh: '全部区域', label: '全部区域' }]);
+  const filterAdUnits = ref([{ value: '', label: '全部广告单元' }]);
+
+  const getDimension = () =>
+    includeDimension
+      ? searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION
+      : null;
 
   const fetchClientsWithData = async () => {
     try {
@@ -143,14 +156,20 @@ export function useDataPageFilterCascade({
   };
 
   const fetchFilterCountries = async (clientId = null, productId = null) => {
-    if (!includeCountry) return;
+    if (!includeCountry && !includeDimension) return;
+    const dimension = getDimension();
+    if (includeDimension && !showCountryFilterForDimension(dimension)) {
+      filterCountries.value = [{ code: '', name_zh: '全部区域', label: '全部区域' }];
+      return;
+    }
     try {
       const { startDate, endDate } = getDateRangeFromForm(searchForm.value);
       const result = await api.getCountries(
         clientId || null,
         productId || null,
         startDate,
-        endDate
+        endDate,
+        dimension
       );
       const data = result?.data || [];
       let countryOptions;
@@ -181,37 +200,85 @@ export function useDataPageFilterCascade({
     }
   };
 
-  const handleFilterClientChange = async (clientId) => {
-    searchForm.value.productId = '';
-    if (includeCountry) {
-      searchForm.value.countryCode = '';
+  const fetchFilterAdUnits = async (clientId = null, productId = null) => {
+    if (!includeDimension || !api.getAdUnits) return;
+    const dimension = getDimension();
+    if (!showAdUnitFilterForDimension(dimension)) {
+      filterAdUnits.value = [{ value: '', label: '全部广告单元' }];
+      return;
     }
-    await fetchFilterProducts(clientId || null);
-    if (includeCountry) {
-      await fetchFilterCountries(clientId || null, null);
+    try {
+      const { startDate, endDate } = getDateRangeFromForm(searchForm.value);
+      const result = await api.getAdUnits(
+        clientId || null,
+        productId || null,
+        startDate,
+        endDate,
+        dimension
+      );
+      const data = result?.data || [];
+      const adUnitOptions = data
+        .filter((item) => item?.value)
+        .map((item) => ({
+          value: item.value,
+          label: item.label || item.value
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
+
+      filterAdUnits.value = [{ value: '', label: '全部广告单元' }, ...adUnitOptions];
+    } catch (error) {
+      if (!isErrorHandled(error)) {
+        ElMessage.error(extractErrorMessage(error));
+      }
+      filterAdUnits.value = [{ value: '', label: '全部广告单元' }];
     }
-    fixSelectDisplay();
   };
 
-  const handleFilterProductChange = async () => {
-    if (!includeCountry) return;
+  const reloadSecondaryFilters = async () => {
     const clientId = searchForm.value.clientId || null;
     const productId = searchForm.value.productId
       ? parseInt(searchForm.value.productId, 10)
       : null;
     await fetchFilterCountries(clientId, productId);
-    if (searchForm.value.countryCode) {
-      const exists = filterCountries.value.some(
-        (c) => c.code === searchForm.value.countryCode
-      );
-      if (!exists) {
-        searchForm.value.countryCode = '';
-      }
+    await fetchFilterAdUnits(clientId, productId);
+  };
+
+  const handleFilterClientChange = async (clientId) => {
+    searchForm.value.productId = '';
+    if (includeCountry || includeDimension) {
+      searchForm.value.countryCode = '';
     }
+    if (includeDimension) {
+      searchForm.value.adUnit = '';
+    }
+    await fetchFilterProducts(clientId || null);
+    await reloadSecondaryFilters();
+    fixSelectDisplay();
+  };
+
+  const handleFilterProductChange = async () => {
+    if (includeDimension) {
+      searchForm.value.countryCode = '';
+      searchForm.value.adUnit = '';
+    } else if (!includeCountry) {
+      return;
+    }
+    await reloadSecondaryFilters();
+    fixSelectDisplay();
+  };
+
+  const handleDimensionChange = async () => {
+    searchForm.value.countryCode = '';
+    searchForm.value.adUnit = '';
+    await reloadSecondaryFilters();
     fixSelectDisplay();
   };
 
   const handleCountryChange = () => {
+    fixSelectDisplay();
+  };
+
+  const handleAdUnitChange = () => {
     fixSelectDisplay();
   };
 
@@ -220,12 +287,7 @@ export function useDataPageFilterCascade({
       await fetchClientsWithData();
     }
     await fetchFilterProducts(searchForm.value.clientId || null);
-    if (includeCountry) {
-      await fetchFilterCountries(
-        searchForm.value.clientId || null,
-        searchForm.value.productId ? parseInt(searchForm.value.productId, 10) : null
-      );
-    }
+    await reloadSecondaryFilters();
   };
 
   const loadAllFilterOptions = async (isAdmin) => {
@@ -233,24 +295,23 @@ export function useDataPageFilterCascade({
       await fetchClientsWithData();
     }
     await fetchFilterProducts(searchForm.value.clientId || null);
-    if (includeCountry) {
-      const productId = searchForm.value.productId
-        ? parseInt(searchForm.value.productId, 10)
-        : null;
-      await fetchFilterCountries(searchForm.value.clientId || null, productId);
-    }
+    await reloadSecondaryFilters();
   };
 
   return {
     users,
     filterProducts,
     filterCountries,
+    filterAdUnits,
     fetchClientsWithData,
     fetchFilterProducts,
     fetchFilterCountries,
+    fetchFilterAdUnits,
     handleFilterClientChange,
     handleFilterProductChange,
+    handleDimensionChange,
     handleCountryChange,
+    handleAdUnitChange,
     reloadFiltersAfterDateChange,
     loadAllFilterOptions
   };

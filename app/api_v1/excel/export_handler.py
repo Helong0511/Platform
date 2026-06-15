@@ -22,6 +22,10 @@ from app.core.query_utils import check_use_assignment_table
 from app.core.security import get_current_user
 from app.core.excel_io import excel_streaming_response
 from app.models.models import User, Client, Product, AdData, UserRole, ProductAssignment, CountryInfo
+from app.services.ad_data.queries.dimension_filter import (
+    build_ad_data_dimension_filter,
+    build_ad_unit_exact_filter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +36,8 @@ async def export_ad_data_handler(
         product_id: int | None = None,
         client_id: int | None = None,
         country_code: str | None = None,
+        ad_unit: str | None = None,
+        dimension: str | None = None,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ) -> StreamingResponse:
@@ -182,6 +188,10 @@ async def export_ad_data_handler(
     # 应用产品状态过滤（只显示激活状态的产品，与 ad_data.py 保持一致）
     query = query.where(Product.is_active == True)
 
+    query = query.where(
+        build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
+    )
+
     # 应用日期过滤（直接使用条件，避免函数可能的问题）
     # ---------- 条件分支 ----------
     if start_date:
@@ -236,6 +246,10 @@ async def export_ad_data_handler(
     country_filter = await build_ad_data_country_filter(db, AdData.country_code, country_code)
     if country_filter is not None:
         query = query.where(country_filter)
+
+    ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
+    if ad_unit_filter is not None:
+        query = query.where(ad_unit_filter)
 
     # 执行查询
     result = await db.execute(query.order_by(AdData.date.desc()))

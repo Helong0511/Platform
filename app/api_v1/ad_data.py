@@ -80,6 +80,11 @@ async def get_ad_data(
         client_id: int | None = Query(None, description="客户ID过滤"),
         product_id: str | None = Query(None, description="产品ID过滤"),
         country_code: str | None = Query(None, description="国家代码过滤（如：US、CN、ZZ表示全部区域）"),
+        ad_unit: str | None = Query(None, description="广告单元精确过滤"),
+        dimension: str | None = Query(
+            "country",
+            description="统计维度：country=按国家，ad_unit=按广告单元，country_ad_unit=按国家+广告单元",
+        ),
         sort_by: str = Query("date", description="排序字段，默认为date"),
         sort_order: str = Query("desc", description="排序方向，asc或desc")
 ):
@@ -107,6 +112,8 @@ async def get_ad_data(
         client_id=client_id,
         product_id=product_id,
         country_code=country_code,
+        ad_unit=ad_unit,
+        dimension=dimension,
         sort_by=sort_by,
         sort_order=sort_order
     )
@@ -164,7 +171,11 @@ async def get_countries_with_data(
         client_id: int | None = Query(None, description="客户ID过滤，None表示全部客户"),
         product_id: int | None = Query(None, description="产品ID过滤，None表示全部产品"),
         start_date: date | None = Query(None, description="开始日期，格式YYYY-MM-DD"),
-        end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD")
+        end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD"),
+        dimension: str | None = Query(
+            "country",
+            description="统计维度：country=按国家，ad_unit=按广告单元，country_ad_unit=按国家+广告单元",
+        ),
 ):
     """
     获取有广告数据的国家列表（用于下拉选择，已重构使用服务层）
@@ -182,7 +193,8 @@ async def get_countries_with_data(
             client_id=client_id,
             product_id=product_id,
             start_date=start_date,
-            end_date=end_date
+            end_date=end_date,
+            dimension=dimension,
         )
         return ListResponseBaseSchema.success(data=countries_list, count=len(countries_list))
     except HTTPException:
@@ -192,6 +204,42 @@ async def get_countries_with_data(
         raise_api_exception(
             ErrorCode.OPERATION_FAILED,
             detail=f"获取有数据的国家列表失败：{str(e)}。请稍后重试或联系管理员"
+        )
+
+
+@router.get("/ad-units-with-data", response_model=ListResponseBaseSchema[list[dict]], summary="获取有数据的广告单元列表")
+async def get_ad_units_with_data(
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+        client_id: int | None = Query(None, description="客户ID过滤，None表示全部客户"),
+        product_id: int | None = Query(None, description="产品ID过滤，None表示全部产品"),
+        start_date: date | None = Query(None, description="开始日期，格式YYYY-MM-DD"),
+        end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD"),
+        dimension: str | None = Query(
+            "ad_unit",
+            description="统计维度：country=按国家，ad_unit=按广告单元，country_ad_unit=按国家+广告单元",
+        ),
+):
+    """获取有广告数据的广告单元列表（用于下拉选择）。"""
+    ad_data_service: AdDataService = await get_ad_data_service(db)
+
+    try:
+        ad_units_list = await ad_data_service.get_ad_units_with_data(
+            current_user=current_user,
+            client_id=client_id,
+            product_id=product_id,
+            start_date=start_date,
+            end_date=end_date,
+            dimension=dimension,
+        )
+        return ListResponseBaseSchema.success(data=ad_units_list, count=len(ad_units_list))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取有数据的广告单元列表失败: {str(e)}", exc_info=True)
+        raise_api_exception(
+            ErrorCode.OPERATION_FAILED,
+            detail=f"获取有数据的广告单元列表失败：{str(e)}。请稍后重试或联系管理员"
         )
 
 
@@ -257,13 +305,20 @@ async def get_daily_summary(
         end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD"),
         client_id: int | None = Query(None, description="客户ID过滤"),
         product_id: str | None = Query(None, description="产品ID过滤"),
+        country_code: str | None = Query(None, description="国家代码过滤"),
+        ad_unit: str | None = Query(None, description="广告单元精确过滤"),
+        dimension: str | None = Query(
+            "country",
+            description="统计维度：country=按国家，ad_unit=按广告单元，country_ad_unit=按国家+广告单元",
+        ),
         sort_by: str = Query("date", description="排序字段，默认为date"),
         sort_order: str = Query("desc", description="排序方向，asc或desc")
 ):
     """
-    获取每日汇总数据（按产品+日期汇总，国家显示"全部区域"，已重构使用服务层）
-    - 按产品ID和日期分组汇总
-    - 国家统一显示"全部区域"
+    获取每日汇总数据（按统计维度分组，已重构使用服务层）
+    - 按国家：按产品+日期+国家汇总
+    - 按广告单元：按产品+日期+广告单元汇总
+    - 按国家+广告单元：按产品+日期+国家+广告单元汇总
     - 支持分页、过滤和排序
     - 管理员可查看所有数据，客户只能查看自己的数据
     """
@@ -282,6 +337,9 @@ async def get_daily_summary(
         end_date=end_date,
         client_id=client_id,
         product_id=product_id,
+        country_code=country_code,
+        ad_unit=ad_unit,
+        dimension=dimension,
         sort_by=sort_by,
         sort_order=sort_order
     )

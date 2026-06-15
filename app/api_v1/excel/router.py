@@ -87,6 +87,12 @@ async def export_ad_data(
         end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD"),
         product_id: int | None = Query(None, description="产品ID过滤"),
         client_id: int | None = Query(None, description="客户ID过滤"),
+        country_code: str | None = Query(None, description="国家代码过滤"),
+        ad_unit: str | None = Query(None, description="广告单元精确过滤"),
+        dimension: str | None = Query(
+            "country",
+            description="统计维度：country=按国家，ad_unit=按广告单元，country_ad_unit=按国家+广告单元",
+        ),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
@@ -104,6 +110,9 @@ async def export_ad_data(
             end_date=end_date,
             product_id=product_id,
             client_id=client_id,
+            country_code=country_code,
+            ad_unit=ad_unit,
+            dimension=dimension,
             db=db,
             current_user=current_user
         )

@@ -80,12 +80,28 @@ class AdDataService(BaseService[AdData]):
             client_id: Optional[int] = None,
             product_id: Optional[int] = None,
             start_date: Optional[date] = None,
-            end_date: Optional[date] = None
+            end_date: Optional[date] = None,
+            dimension: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         from app.services.ad_data.queries.filter_options_query import FilterOptionsQuery
 
         return await FilterOptionsQuery(self.db).fetch_countries(
-            current_user, client_id, product_id, start_date, end_date
+            current_user, client_id, product_id, start_date, end_date, dimension
+        )
+
+    async def get_ad_units_with_data(
+            self,
+            current_user: User,
+            client_id: Optional[int] = None,
+            product_id: Optional[int] = None,
+            start_date: Optional[date] = None,
+            end_date: Optional[date] = None,
+            dimension: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        from app.services.ad_data.queries.filter_options_query import FilterOptionsQuery
+
+        return await FilterOptionsQuery(self.db).fetch_ad_units(
+            current_user, client_id, product_id, start_date, end_date, dimension
         )
 
     async def get_products_with_data(
@@ -139,6 +155,9 @@ class AdDataService(BaseService[AdData]):
             end_date: Optional[date] = None,
             client_id: Optional[int] = None,
             product_id: Optional[str] = None,
+            country_code: Optional[str] = None,
+            ad_unit: Optional[str] = None,
+            dimension: Optional[str] = None,
             sort_by: str = "date",
             sort_order: str = "desc"
     ) -> Tuple[List[Dict[str, Any]], int]:
@@ -152,6 +171,9 @@ class AdDataService(BaseService[AdData]):
             end_date=end_date,
             client_id=client_id,
             product_id=product_id,
+            country_code=country_code,
+            ad_unit=ad_unit,
+            dimension=dimension,
             sort_by=sort_by,
             sort_order=sort_order,
         )
@@ -166,6 +188,8 @@ class AdDataService(BaseService[AdData]):
             client_id: Optional[int] = None,
             product_id: Optional[str] = None,
             country_code: Optional[str] = None,
+            ad_unit: Optional[str] = None,
+            dimension: Optional[str] = None,
             sort_by: str = "date",
             sort_order: str = "desc"
     ) -> Tuple[List[Dict[str, Any]], int]:
@@ -180,6 +204,8 @@ class AdDataService(BaseService[AdData]):
             client_id=client_id,
             product_id=product_id,
             country_code=country_code,
+            ad_unit=ad_unit,
+            dimension=dimension,
             sort_by=sort_by,
             sort_order=sort_order,
         )

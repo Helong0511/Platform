@@ -52,14 +52,33 @@ export function createWithDataFilterApi(moduleKey, options = {}) {
       clientId = null,
       productId = null,
       startDate = null,
-      endDate = null
+      endDate = null,
+      dimension = null
     ) => {
       const params = {};
       if (clientId) params.client_id = clientId;
       if (productId) params.product_id = productId;
       if (startDate) params.start_date = startDate;
       if (endDate) params.end_date = endDate;
+      if (dimension) params.dimension = dimension;
       const payload = await fetchWithDataResource(`${prefix}/countries-with-data`, params);
+      return pick(payload);
+    },
+
+    getAdUnitsWithData: async (
+      clientId = null,
+      productId = null,
+      startDate = null,
+      endDate = null,
+      dimension = null
+    ) => {
+      const params = {};
+      if (clientId) params.client_id = clientId;
+      if (productId) params.product_id = productId;
+      if (startDate) params.start_date = startDate;
+      if (endDate) params.end_date = endDate;
+      if (dimension) params.dimension = dimension;
+      const payload = await fetchWithDataResource(`${prefix}/ad-units-with-data`, params);
       return pick(payload);
     }
   };

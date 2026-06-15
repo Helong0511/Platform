@@ -114,7 +114,8 @@ export const getUsersForSelect = fetchClientsAsUserSelectOptions;
 export const {
   getClientsWithData,
   getProductsWithData,
-  getCountriesWithData
+  getCountriesWithData,
+  getAdUnitsWithData
 } = adDataWithDataFilters;
 
 export const getProductsForSelect = fetchProductsAsSelectOptions;

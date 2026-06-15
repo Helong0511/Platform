@@ -1,5 +1,5 @@
 <!--
-  广告数据详细报表 - 筛选区
+  广告数据报表 - 筛选区（详细报表 / 每日报表共用）
   @file components/ad-data/AdDataFilterCard.vue
 -->
 <template>
@@ -19,7 +19,7 @@
           @change="emit('date-range-change')"
         />
       </el-form-item>
-      <el-form-item v-if="isAdmin" label="客户" class="client-filter-item">
+      <el-form-item v-if="isAdmin" label="客户">
         <el-select
           v-model="searchForm.clientId"
           placeholder="全部客户"
@@ -51,10 +51,24 @@
           />
         </el-select>
       </el-form-item>
-      <el-form-item label="国家">
+      <el-form-item v-if="showDimension" label="统计维度">
+        <el-select
+          v-model="searchForm.dimension"
+          style="width: 100%;"
+          @change="emit('dimension-change')"
+        >
+          <el-option
+            v-for="item in dimensionOptions"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item v-if="showCountry" label="国家">
         <el-select
           v-model="searchForm.countryCode"
-          placeholder="全部区域"
+          placeholder="全部国家"
           style="width: 100%;"
           clearable
           @change="emit('country-change')"
@@ -67,6 +81,23 @@
           />
         </el-select>
       </el-form-item>
+      <el-form-item v-if="showAdUnit" label="广告单元">
+        <el-select
+          v-model="searchForm.adUnit"
+          placeholder="全部广告单元"
+          style="width: 100%;"
+          clearable
+          filterable
+          @change="emit('ad-unit-change')"
+        >
+          <el-option
+            v-for="unit in filterAdUnits"
+            :key="unit.value"
+            :label="unit.label"
+            :value="unit.value"
+          />
+        </el-select>
+      </el-form-item>
       <el-form-item>
         <el-button type="primary" :loading="loading" :disabled="loading" @click="emit('fetch')">
           查询
@@ -76,20 +107,34 @@
     </el-form>
     <div class="filter-hint">
       <el-icon :size="16"><InfoFilled /></el-icon>
-      <span>默认查询数据是本月数据，如果要查询其它时间，请自行选择日期范围。</span>
+      <span>{{ hintText }}</span>
     </div>
   </el-card>
 </template>
 
 <script setup>
+import { computed } from 'vue';
 import { InfoFilled } from '@element-plus/icons-vue';
+import {
+  AD_DATA_DIMENSION_HINTS,
+  AD_DATA_DIMENSION_OPTIONS,
+  DEFAULT_AD_DATA_DIMENSION,
+  showAdUnitFilterForDimension,
+  showCountryFilterForDimension
+} from '../../constants/adDataDimension';
 
-defineProps({
+const props = defineProps({
   isAdmin: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
   users: { type: Array, default: () => [] },
   filterProducts: { type: Array, default: () => [] },
   filterCountries: { type: Array, default: () => [] },
+  filterAdUnits: { type: Array, default: () => [] },
+  showDimension: { type: Boolean, default: true },
+  defaultHint: {
+    type: String,
+    default: '默认查询数据是本月数据，如果要查询其它时间，请自行选择日期范围。'
+  }
 });
 
 const searchForm = defineModel('searchForm', { type: Object, required: true });
@@ -100,29 +145,35 @@ const emit = defineEmits([
   'date-range-change',
   'filter-client-change',
   'filter-product-change',
+  'dimension-change',
   'country-change',
+  'ad-unit-change'
 ]);
+
+const dimensionOptions = AD_DATA_DIMENSION_OPTIONS;
+
+const showCountry = computed(() =>
+  props.showDimension
+    ? showCountryFilterForDimension(searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION)
+    : true
+);
+
+const showAdUnit = computed(() =>
+  props.showDimension &&
+  showAdUnitFilterForDimension(searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION)
+);
+
+const hintText = computed(() => {
+  if (!props.showDimension) {
+    return props.defaultHint;
+  }
+  const dimension = searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION;
+  const dimensionHint = AD_DATA_DIMENSION_HINTS[dimension] || '';
+  return `${dimensionHint} ${props.defaultHint}`;
+});
 </script>
 
 <style scoped>
-.filter-form {
-  margin-bottom: 0;
-}
-
-.filter-form :deep(.el-form-item) {
-  width: 300px;
-  margin-bottom: var(--spacing-lg, 16px);
-  margin-right: var(--spacing-md, 12px);
-}
-
-.filter-form :deep(.client-filter-item) {
-  width: 400px;
-}
-
-.filter-form :deep(.el-form-item:last-child) {
-  width: auto;
-}
-
 .filter-hint {
   display: flex;
   align-items: flex-start;
@@ -130,5 +181,6 @@ const emit = defineEmits([
   margin-top: 8px;
   font-size: 13px;
   color: #909399;
+  line-height: 1.5;
 }
 </style>
