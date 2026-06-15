@@ -61,6 +61,7 @@ logger = logging.getLogger(__name__)
 # 不支持的参数（会被过滤）：
 # - read_timeout: 读取超时
 # - write_timeout: 写入超时
+# - collation: URL 查询参数，不能作为 connect() 关键字参数
 # 
 try:
     # 保存原始的 aiomysql.connect 函数
