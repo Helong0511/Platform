@@ -38,7 +38,7 @@ export function formatCountryFilterLabel(country) {
 }
 
 function normalizeCountryOption(item) {
-  const code = item.code;
+  const code = item.code == null || item.code === '' ? '' : String(item.code);
   const name_zh = item.name_zh || code;
   return {
     code,
@@ -101,8 +101,8 @@ function isEmptyFilterValue(value) {
  * 判断下拉选项是否与表单当前选中值一致（用于 prune 时校验是否仍有效）。
  *
  * 业务约定：
- * - 产品、客户等 ID 类下拉：选项 value 统一为字符串；表单里可能是数字，仅做 String 化后与选项比对。
- * - 占位项（空字符串）只表示「全部」，不得与任意有效 ID 相等，避免误保留失效选中值。
+ * - 下拉选项 value 统一规范为字符串；表单选中值可能是数字等类型，仅对选中值做 String 化后与选项比对。
+ * - 占位项（空字符串）只表示「全部」，不得与任意有效值相等，避免误保留失效选中值。
  *
  * @param {unknown} optionValue 下拉项 value
  * @param {unknown} selectedValue 表单当前选中值
@@ -260,11 +260,14 @@ export function useDataPageFilterCascade({
       );
       const data = result?.data || [];
       const adUnitOptions = data
-        .filter((item) => item?.value)
-        .map((item) => ({
-          value: item.value,
-          label: item.label || item.value
-        }))
+        .filter((item) => item?.value != null && item.value !== '')
+        .map((item) => {
+          const value = String(item.value);
+          return {
+            value,
+            label: item.label || value
+          };
+        })
         .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
 
       filterAdUnits.value = [{ value: '', label: '全部广告单元' }, ...adUnitOptions];
@@ -334,18 +337,20 @@ export function useDataPageFilterCascade({
     }
 
     if (searchForm.value.countryCode) {
-      const countryExists = filterCountries.value.some(
-        (c) => c.code === searchForm.value.countryCode
+      const countryExists = filterCountries.value.some((c) =>
+        isFilterOptionSelected(c.code, searchForm.value.countryCode)
       );
       if (!countryExists) {
         searchForm.value.countryCode = '';
         changed = true;
+      } else {
+        searchForm.value.countryCode = String(searchForm.value.countryCode);
       }
     }
 
     if (searchForm.value.adUnit) {
-      const adUnitExists = filterAdUnits.value.some(
-        (u) => u.value === searchForm.value.adUnit
+      const adUnitExists = filterAdUnits.value.some((u) =>
+        isFilterOptionSelected(u.value, searchForm.value.adUnit)
       );
       if (!adUnitExists) {
         searchForm.value.adUnit = '';
@@ -353,6 +358,8 @@ export function useDataPageFilterCascade({
           searchForm.value.countryCode = '';
         }
         changed = true;
+      } else {
+        searchForm.value.adUnit = String(searchForm.value.adUnit);
       }
     }
 
