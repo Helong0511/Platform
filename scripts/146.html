@@ -479,6 +479,7 @@
         function scheduleRedirect(btnElement, prevText, url, delayMs) {
             setTimeout(function () {
                 window.location.assign(url);
+                clickActionInFlight = false;
                 setTimeout(function () {
                     if (btnElement.isConnected) {
                         restoreSubmitButton(btnElement, prevText);
@@ -501,6 +502,7 @@
 
             if (sessionStorage.getItem('click_reported')) {
                 scheduleRedirect(btnElement, prevText, getOriginalUrl(), CONFIG.REDIRECT_FAST_DELAY);
+                clickActionInFlight = false;
                 return;
             }
 
