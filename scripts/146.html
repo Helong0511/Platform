@@ -426,6 +426,8 @@
             }
         }
 
+        let clickActionInFlight = false;
+
         async function reportClickWithRetry(reportUrl) {
             try {
                 const firstResponse = await fetchWithTimeout(reportUrl, { method: 'GET' }, 2000);
@@ -471,6 +473,7 @@
         function restoreSubmitButton(btnElement, prevText) {
             btnElement.disabled = false;
             btnElement.textContent = prevText;
+            clickActionInFlight = false;
         }
 
         function scheduleRedirect(btnElement, prevText, url, delayMs) {
@@ -485,6 +488,11 @@
         }
 
         async function handleAction(btnElement) {
+            if (clickActionInFlight) {
+                return;
+            }
+            clickActionInFlight = true;
+
             const prevText = btnElement.textContent;
             document.querySelector('.progress-bar-fill').style.transition = 'width 0.8s ease';
             document.querySelector('.progress-bar-fill').style.width = '100%';
@@ -509,8 +517,10 @@
                     reportUrl += '&dp=' + encodeURIComponent(dpParam);
                 }
 
-                await reportClickWithRetry(reportUrl);
-                sessionStorage.setItem('click_reported', 'true');
+                const reported = await reportClickWithRetry(reportUrl);
+                if (reported) {
+                    sessionStorage.setItem('click_reported', 'true');
+                }
 
                 scheduleRedirect(
                     btnElement,
