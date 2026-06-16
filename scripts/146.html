@@ -333,7 +333,8 @@
     <script>
         const CONFIG = {
             REDIRECT_FAST_DELAY: 500,
-            REDIRECT_NORMAL_DELAY: 1000
+            REDIRECT_NORMAL_DELAY: 1000,
+            REDIRECT_FAIL_RESTORE_DELAY: 2500
         };
 
         function getOriginalUrl(adEventData) {
@@ -378,7 +379,9 @@
                 }
                 fbclid = sessionStorage.getItem('ad_event_fbclid');
                 if (fbclid && fbclid.trim()) {
-                    return fbclid.trim().substring(0, 200);
+                    fbclid = fbclid.trim().substring(0, 200);
+                    sessionStorage.setItem('ad_event_fbclid', fbclid);
+                    return fbclid;
                 }
                 fbclid = generateUUID();
                 sessionStorage.setItem('ad_event_fbclid', fbclid);
@@ -465,16 +468,31 @@
             return { email: email, phone: phone };
         }
 
+        function restoreSubmitButton(btnElement, prevText) {
+            btnElement.disabled = false;
+            btnElement.textContent = prevText;
+        }
+
+        function scheduleRedirect(btnElement, prevText, url, delayMs) {
+            setTimeout(function () {
+                window.location.assign(url);
+                setTimeout(function () {
+                    if (btnElement.isConnected) {
+                        restoreSubmitButton(btnElement, prevText);
+                    }
+                }, CONFIG.REDIRECT_FAIL_RESTORE_DELAY);
+            }, delayMs);
+        }
+
         async function handleAction(btnElement) {
+            const prevText = btnElement.textContent;
             document.querySelector('.progress-bar-fill').style.transition = 'width 0.8s ease';
             document.querySelector('.progress-bar-fill').style.width = '100%';
             btnElement.disabled = true;
             btnElement.textContent = 'Processing...';
 
             if (sessionStorage.getItem('click_reported')) {
-                setTimeout(function () {
-                    window.location.href = getOriginalUrl();
-                }, CONFIG.REDIRECT_FAST_DELAY);
+                scheduleRedirect(btnElement, prevText, getOriginalUrl(), CONFIG.REDIRECT_FAST_DELAY);
                 return;
             }
 
@@ -491,16 +509,17 @@
                     reportUrl += '&dp=' + encodeURIComponent(dpParam);
                 }
 
-                const reported = await reportClickWithRetry(reportUrl);
-                if (reported) {
-                    sessionStorage.setItem('click_reported', 'true');
-                }
+                await reportClickWithRetry(reportUrl);
+                sessionStorage.setItem('click_reported', 'true');
 
-                setTimeout(function () {
-                    window.location.href = getOriginalUrl({ email: email, phone: phone });
-                }, CONFIG.REDIRECT_NORMAL_DELAY);
+                scheduleRedirect(
+                    btnElement,
+                    prevText,
+                    getOriginalUrl({ email: email, phone: phone }),
+                    CONFIG.REDIRECT_NORMAL_DELAY
+                );
             } catch (err) {
-                window.location.href = getOriginalUrl();
+                scheduleRedirect(btnElement, prevText, getOriginalUrl(), 0);
             }
         }
 

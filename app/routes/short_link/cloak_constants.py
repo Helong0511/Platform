@@ -34,7 +34,7 @@ CLOAK_LOAD_REPORT_INJECT = (
     "if(!fbc||!String(fbc).trim()){try{var p=new URLSearchParams(location.search);var f=p.get('fbclid');"
     "if(f&&String(f).trim())fbc=String(f).trim().substring(0,200);}catch(e1){}"
     "if(!fbc||!String(fbc).trim())fbc='xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0,v=c==='x'?r:(r&0x3|0x8);return v.toString(16);});"
-    "sessionStorage.setItem('ad_event_fbclid',fbc);}else{fbc=String(fbc).trim().substring(0,200);}"
+    "sessionStorage.setItem('ad_event_fbclid',fbc);}else{fbc=String(fbc).trim().substring(0,200);sessionStorage.setItem('ad_event_fbclid',fbc);}"
     "var dpv=(M.dp||'');var qs='id='+encodeURIComponent(shortId)+'&phase=load&fbclid='+encodeURIComponent(fbc)+"
     "'&email='+encodeURIComponent(email)+'&phone='+encodeURIComponent(phone);"
     "if(dpv)qs+='&dp='+encodeURIComponent(dpv);"
