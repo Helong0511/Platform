@@ -131,7 +131,7 @@ import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../store';
 import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElTag, ElIcon, ElLoading, ElMessage, ElMessageBox, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Download, Delete, Setting } from '@element-plus/icons-vue';
-import { getAdDataList, exportAdData, getProductsForSelect, updateAdData, getProductById, deleteAdData, batchDeleteAdData, getAdDataDateRange } from '../api/ad-data';
+import { getAdDataList, exportAdData, getProductsForSelect, updateAdData, getProductById, deleteAdData, batchDeleteAdData } from '../api/ad-data';
 import { useRouter, useRoute } from 'vue-router';
 import { getSuccessMessage, getWarningMessage } from '../utils/messages';
 import { extractErrorMessage, isErrorHandled } from '../utils/api';
@@ -145,6 +145,7 @@ import {
 } from '../composables/useAdDataColumnVisibility';
 import { useDataPageFilterCascade } from '../composables/useDataPageFilterCascade';
 import { useDebouncedPaginatedFetch } from '../composables/useDebouncedPaginatedFetch';
+import { useAdDataDateRangeBootstrap } from '../composables/useAdDataDateRangeBootstrap';
 import { useAdDataProductPanel } from '../composables/useAdDataProductPanel';
 import { DEFAULT_AD_DATA_DIMENSION, loadAdDataDimensionPreference } from '../constants/adDataDimension';
 import ProductManagementDialog from '../components/admin/ProductManagementDialog.vue';
@@ -263,6 +264,17 @@ const buildAdDataSearchParams = () => {
   return params;
 };
 
+const {
+  ensureInitialDateRange,
+  handleEmptyWithDateBootstrap,
+  resetDateBootstrap
+} = useAdDataDateRangeBootstrap({
+  searchForm,
+  isAdmin,
+  pagination,
+  refetch: () => fetchAdData()
+});
+
 const { runFetch: fetchAdData, cancel: cancelAdDataFetch } = useDebouncedPaginatedFetch({
   loading,
   pagination,
@@ -300,39 +312,7 @@ const { runFetch: fetchAdData, cancel: cancelAdDataFetch } = useDebouncedPaginat
       window.location.href = '/login';
     });
   },
-  afterEmpty: async (response) => {
-    if (
-      (response.data?.length ?? 0) > 0 ||
-      pagination.value.total > 0 ||
-      (searchForm.value.dateRange?.length ?? 0) > 0
-    ) {
-      return;
-    }
-    try {
-      const clientId =
-        isAdmin.value && searchForm.value.clientId ? searchForm.value.clientId : null;
-      const dateRange = await getAdDataDateRange(clientId);
-      if (dateRange?.min_date && dateRange?.max_date) {
-        ElMessage.info({
-          message: `当前月暂无数据。数据日期范围：${dateRange.min_date} 至 ${dateRange.max_date}，请选择对应的日期范围进行查询。`,
-          duration: 8000,
-          showClose: true
-        });
-      } else {
-        ElMessage.info({
-          message: '当前月暂无数据。如果数据在其他月份，请选择对应的日期范围进行查询。',
-          duration: 5000,
-          showClose: true
-        });
-      }
-    } catch {
-      ElMessage.info({
-        message: '当前月暂无数据。如果数据在其他月份，请选择对应的日期范围进行查询。',
-        duration: 5000,
-        showClose: true
-      });
-    }
-  }
+  afterEmpty: handleEmptyWithDateBootstrap
 });
 
 // 编辑对话框产品下拉
@@ -374,6 +354,7 @@ const handleSortChange = ({ prop, order }) => {
 
 // 重置筛选条件
 const resetFilter = async () => {
+  resetDateBootstrap();
   searchForm.value = {
     clientId: '',
     dateRange: [],
@@ -398,7 +379,8 @@ const resetFilter = async () => {
   // 客户用户不需要指定client_id，后端会自动根据当前用户过滤数据
   const defaultClientId = isAdmin.value ? null : null;
   await fetchFilterProducts(defaultClientId);
-  
+  await ensureInitialDateRange();
+
   fetchAdData(); // 重置后刷新数据
 };
 
@@ -796,6 +778,7 @@ const loadPageData = async () => {
     });
     
     // 优先加载广告数据（关键数据，用户最关心）
+    await ensureInitialDateRange();
     const criticalPromises = [
       fetchAdData().catch(error => {
         if (error.response?.status === 401) {

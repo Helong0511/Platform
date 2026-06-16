@@ -49,3 +49,42 @@ export function getDefaultMonthDateRange() {
 export function getCurrentMonthRange() {
   return getMonthDateRange('iso');
 }
+
+/**
+ * 指定日期所在自然月的 YYYY-MM-DD 范围。
+ * @param {string} dateStr
+ * @returns {[string, string]}
+ */
+export function getMonthDateRangeForDate(dateStr) {
+  const [y, m] = String(dateStr).slice(0, 10).split('-').map(Number);
+  const start = `${y}-${String(m).padStart(2, '0')}-01`;
+  const lastDay = new Date(y, m, 0).getDate();
+  const end = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return [start, end];
+}
+
+/**
+ * 广告数据页初次加载的默认日期范围：
+ * - 有数据且与本月相交 → 本月
+ * - 否则 → 最近有数据的那个月
+ * @param {string|null|undefined} minDate
+ * @param {string|null|undefined} maxDate
+ */
+export function resolveInitialAdDataDateRange(minDate, maxDate) {
+  if (!minDate || !maxDate) {
+    return getDefaultMonthDateRange();
+  }
+  const [monthStart, monthEnd] = getDefaultMonthDateRange();
+  if (monthStart <= maxDate && monthEnd >= minDate) {
+    return [monthStart, monthEnd];
+  }
+  return getMonthDateRangeForDate(maxDate);
+}
+
+/** 判断两个日期范围是否相同（YYYY-MM-DD） */
+export function isSameDateRange(rangeA, rangeB) {
+  if (!Array.isArray(rangeA) || !Array.isArray(rangeB) || rangeA.length !== 2 || rangeB.length !== 2) {
+    return false;
+  }
+  return rangeA[0] === rangeB[0] && rangeA[1] === rangeB[1];
+}

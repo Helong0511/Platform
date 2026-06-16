@@ -22,7 +22,7 @@
       :filter-products="filterProducts"
       :filter-countries="filterCountries"
       :filter-ad-units="filterAdUnits"
-      default-hint="默认查询本月数据。"
+      default-hint="默认优先查询本月；若本月无数据将自动扩大至全部可查日期范围。"
       @fetch="fetchDailyData"
       @reset="resetFilter"
       @date-range-change="handleDateRangeChange"
@@ -154,7 +154,7 @@ import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../../store';
 import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElIcon, ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Download, Setting, Right } from '@element-plus/icons-vue';
-import { getDailySummary, exportAdData, getAdDataDateRange } from '../../api/ad-data';
+import { getDailySummary, exportAdData } from '../../api/ad-data';
 import { DEFAULT_AD_DATA_DIMENSION, loadAdDataDimensionPreference } from '../../constants/adDataDimension';
 import { useRouter } from 'vue-router';
 import { extractErrorMessage, isErrorHandled } from '../../utils/api';
@@ -172,6 +172,7 @@ import {
 } from '../../composables/useAdDataColumnVisibility';
 import { useDataPageFilterCascade } from '../../composables/useDataPageFilterCascade';
 import { useDebouncedPaginatedFetch } from '../../composables/useDebouncedPaginatedFetch';
+import { useAdDataDateRangeBootstrap } from '../../composables/useAdDataDateRangeBootstrap';
 import { useAdDataProductPanel } from '../../composables/useAdDataProductPanel';
 import ProductManagementDialog from '../../components/admin/ProductManagementDialog.vue';
 import AdDataFilterCard from '../../components/ad-data/AdDataFilterCard.vue';
@@ -306,6 +307,17 @@ const buildDailySearchParams = () => {
   return params;
 };
 
+const {
+  ensureInitialDateRange,
+  handleEmptyWithDateBootstrap,
+  resetDateBootstrap
+} = useAdDataDateRangeBootstrap({
+  searchForm,
+  isAdmin,
+  pagination,
+  refetch: () => fetchDailyData()
+});
+
 const { runFetch: fetchDailyData, cancel: cancelDailyFetch } = useDebouncedPaginatedFetch({
   loading,
   pagination,
@@ -336,40 +348,7 @@ const { runFetch: fetchDailyData, cancel: cancelDailyFetch } = useDebouncedPagin
       window.location.href = '/login';
     });
   },
-  afterEmpty: async (response) => {
-    if (
-      (response.data?.length ?? 0) > 0 ||
-      pagination.value.total > 0 ||
-      (searchForm.value.dateRange?.length ?? 0) > 0
-    ) {
-      return;
-    }
-    try {
-      const clientId =
-        isAdmin.value && searchForm.value.clientId ? searchForm.value.clientId : null;
-      const dateRange = await getAdDataDateRange(clientId);
-      if (dateRange?.min_date && dateRange?.max_date) {
-        ElMessage.info({
-          message: `当前月暂无数据。数据日期范围：${dateRange.min_date} 至 ${dateRange.max_date}，请选择对应的日期范围进行查询。`,
-          duration: 10000,
-          showClose: true
-        });
-      } else {
-        ElMessage.warning({
-          message:
-            '当前月暂无数据。可能原因：1) 数据在其他月份，请选择日期范围查询；2) 产品未激活；3) 没有权限查看数据。',
-          duration: 8000,
-          showClose: true
-        });
-      }
-    } catch {
-      ElMessage.warning({
-        message: '当前月暂无数据。如果数据在其他月份，请选择对应的日期范围进行查询。',
-        duration: 6000,
-        showClose: true
-      });
-    }
-  }
+  afterEmpty: handleEmptyWithDateBootstrap
 });
 
 const handleDateRangeChange = async () => {
@@ -396,6 +375,7 @@ const handleSortChange = ({ prop, order }) => {
 
 // 重置筛选条件
 const resetFilter = async () => {
+  resetDateBootstrap();
   searchForm.value = {
     clientId: '',
     dateRange: [],
@@ -414,10 +394,11 @@ const resetFilter = async () => {
   if (isAdmin.value) {
     await fetchClientsWithData();
   }
-  
+
   const defaultClientId = isAdmin.value ? null : null;
   await fetchFilterProducts(defaultClientId);
-  
+  await ensureInitialDateRange();
+
   fetchDailyData();
 };
 
@@ -497,6 +478,7 @@ const loadPageData = async () => {
       return;
     }
     
+    await ensureInitialDateRange();
     await fetchDailyData();
     
     if (isAdmin.value) {
