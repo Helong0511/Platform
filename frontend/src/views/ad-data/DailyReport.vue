@@ -50,19 +50,21 @@
       </template>
       <el-table
         v-loading="loading"
-        :data="dailyDataList"
+        :data="displayDailyDataList"
         border
         stripe
         style="width: 100%"
+        :row-class-name="getDailyReportRowClassName"
         @sort-change="handleSortChange"
-        :summary-method="getSummaries"
+        :summary-method="getSummariesForTable"
         show-summary
       >
         <el-table-column v-if="columnVisibility.date" prop="date" label="数据日期" sortable="custom"></el-table-column>
         <el-table-column v-if="isAdmin && columnVisibility.user_name" prop="user_name" label="所属客户"></el-table-column>
         <el-table-column v-if="columnVisibility.product_name" prop="product_name" label="产品名称" sortable="custom" sort-by="product" :min-width="150">
           <template #default="{ row }">
-            <div class="product-name-cell" @click="handleProductClick(row)">
+            <span v-if="row._isUserDateSubtotal" class="daily-report-subtotal-label">小计</span>
+            <div v-else class="product-name-cell" @click="handleProductClick(row)">
               <span class="product-name">{{ row.product_name }}</span>
               <el-icon class="product-icon"><Right /></el-icon>
             </div>
@@ -156,6 +158,11 @@ import { getDailySummary, exportAdData, getAdDataDateRange } from '../../api/ad-
 import { DEFAULT_AD_DATA_DIMENSION, loadAdDataDimensionPreference } from '../../constants/adDataDimension';
 import { useRouter } from 'vue-router';
 import { extractErrorMessage, isErrorHandled } from '../../utils/api';
+import {
+  injectUserDateSubtotals,
+  excludeUserDateSubtotalRows,
+  USER_DATE_SUBTOTAL_FLAG
+} from '../../utils/dailyReportSubtotals';
 import { useDevice } from '../../composables/useDevice';
 import { useAdDataTableFormat } from '../../composables/useAdDataTableFormat';
 import {
@@ -232,6 +239,28 @@ const { formatPercentage, formatCurrency, getSummaries } = useAdDataTableFormat(
   getIsAdmin: () => isAdmin.value,
   cpcSummaryMode: 'sum'
 });
+
+/** 按日期排序时，在每个日期+用户分组末尾插入小计行 */
+const displayDailyDataList = computed(() => {
+  const rows = dailyDataList.value || [];
+  if (!rows.length) {
+    return [];
+  }
+  const sortByDate = !sortInfo.value.prop || sortInfo.value.prop === 'date';
+  const dateSortOrder = sortInfo.value.order === 'ascending' ? 'asc' : 'desc';
+  return injectUserDateSubtotals(rows, {
+    enable: sortByDate,
+    dateSortOrder,
+    isAdmin: isAdmin.value,
+    cpcSummaryMode: 'sum'
+  });
+});
+
+const getSummariesForTable = (param) =>
+  getSummaries({ ...param, data: excludeUserDateSubtotalRows(param.data) });
+
+const getDailyReportRowClassName = ({ row }) =>
+  row[USER_DATE_SUBTOTAL_FLAG] ? 'daily-report-subtotal-row' : '';
 
 const {
   users,
@@ -840,6 +869,24 @@ const handleProductManagementRefresh = () => {
 
 .product-name-cell:hover .product-icon {
   opacity: 1;
+}
+
+.daily-report-subtotal-label {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+:deep(.daily-report-subtotal-row) {
+  background-color: var(--primary-light, #f0f7ff) !important;
+  font-weight: var(--font-weight-semibold);
+}
+
+:deep(.daily-report-subtotal-row td) {
+  background-color: inherit !important;
+}
+
+:deep(.el-table__body tr.daily-report-subtotal-row:hover > td) {
+  background-color: var(--primary-light, #f0f7ff) !important;
 }
 </style>
 
