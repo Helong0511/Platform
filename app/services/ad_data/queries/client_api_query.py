@@ -8,17 +8,16 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from types import SimpleNamespace
 from typing import Any, List, Optional
 
 from sqlalchemy import and_, func, literal_column, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.country_code import resolve_country_name
 from app.core.query_utils import check_use_assignment_table, date_range_condition
 from app.models.models import AdData, Client, CountryInfo, Product, ProductAssignment
 from app.services.ad_data.queries.dimension_filter import (
+    CROSS_DIMENSION,
     is_cross_dimension,
     maybe_build_ad_data_dimension_filter,
     parse_optional_dimension,
@@ -241,7 +240,7 @@ class ClientAdDataQuery:
         use_assignment_table: bool,
         dimension: str,
     ) -> list[dict[str, Any]]:
-        group_by_country = is_cross_dimension(dimension)
+        # 每日汇总不按国家分行；ad_unit_country 汇总所有国家到日期+产品+广告单元。
         group_by_ad_unit = dimension == "ad_unit" or is_cross_dimension(dimension)
 
         select_cols: list[Any] = [
@@ -258,9 +257,6 @@ class ClientAdDataQuery:
         if group_by_ad_unit:
             select_cols.append(AdData.ad_unit.label("ad_unit"))
             group_cols.append(AdData.ad_unit)
-        if group_by_country:
-            select_cols.append(AdData.country_code.label("country_code"))
-            group_cols.append(AdData.country_code)
 
         query = select(
             *select_cols,
@@ -279,27 +275,13 @@ class ClientAdDataQuery:
         )
 
         rows = (await self.db.execute(query)).all()
-        country_name_map: dict[str, str] = {}
-        if group_by_country and rows:
-            codes = {getattr(row, "country_code", None) for row in rows if getattr(row, "country_code", None)}
-            if codes:
-                cn_result = await self.db.execute(
-                    select(CountryInfo.alpha_2_code, CountryInfo.country_name_zh).where(
-                        CountryInfo.alpha_2_code.in_(list(codes))
-                    )
-                )
-                country_name_map = {code: name for code, name in cn_result.all() if code}
 
-        result = []
-        for row in rows:
-            result.append(self._daily_row_to_dict(row, dim=dimension, country_name_map=country_name_map))
-        return result
+        return [self._daily_row_to_dict(row, dim=dimension) for row in rows]
 
     def _daily_row_to_dict(
         self,
         row: Any,
         dim: Optional[str],
-        country_name_map: Optional[dict[str, str]] = None,
     ) -> dict[str, Any]:
         date_obj = row.date if isinstance(row.date, date) else row.date.date()
         date_str = date_obj.isoformat()
@@ -331,20 +313,14 @@ class ClientAdDataQuery:
             ad_unit = row.ad_unit or ""
             country_code = "ZZ"
             country_name_zh = "全部区域"
-        elif dim in ("country", "ad_unit"):
-            ad_unit = getattr(row, "ad_unit", "") or "" if dim == "ad_unit" else ""
+        elif dim in ("country", "ad_unit", CROSS_DIMENSION):
+            ad_unit = getattr(row, "ad_unit", "") or "" if dim != "country" else ""
             country_code = "ZZ"
             country_name_zh = "全部区域"
         else:
-            row_country = getattr(row, "country_code", "") or ""
-            ad_unit = getattr(row, "ad_unit", "") or "" if is_cross_dimension(dim) else ""
-            country_code = row_country
-            stub = (
-                SimpleNamespace(country_name_zh=country_name_map[row_country])
-                if country_name_map and row_country in country_name_map
-                else None
-            )
-            country_name_zh = resolve_country_name(stub, row_country)
+            ad_unit = getattr(row, "ad_unit", "") or ""
+            country_code = "ZZ"
+            country_name_zh = "全部区域"
 
         return {
             "date": date_str,
