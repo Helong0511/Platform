@@ -59,9 +59,9 @@
         :summary-method="getSummariesForTable"
         show-summary
       >
-        <el-table-column v-if="columnVisibility.date" prop="date" label="数据日期" sortable="custom"></el-table-column>
-        <el-table-column v-if="isAdmin && columnVisibility.user_name" prop="user_name" label="所属客户"></el-table-column>
-        <el-table-column v-if="columnVisibility.product_name" prop="product_name" label="产品名称" sortable="custom" sort-by="product" :min-width="150">
+        <el-table-column v-if="effectiveColumnVisibility.date" prop="date" label="数据日期" sortable="custom"></el-table-column>
+        <el-table-column v-if="isAdmin && effectiveColumnVisibility.user_name" prop="user_name" label="所属客户"></el-table-column>
+        <el-table-column v-if="effectiveColumnVisibility.product_name" prop="product_name" label="产品名称" sortable="custom" sort-by="product" :min-width="150">
           <template #default="{ row }">
             <span v-if="row._isUserDateSubtotal" class="daily-report-subtotal-label">小计</span>
             <div v-else class="product-name-cell" @click="handleProductClick(row)">
@@ -70,22 +70,22 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column v-if="columnVisibility.ad_unit" prop="ad_unit" label="广告单元" :min-width="120" show-overflow-tooltip></el-table-column>
-        <el-table-column v-if="columnVisibility.country_name_zh" prop="country_name_zh" label="国家"></el-table-column>
-        <el-table-column v-if="columnVisibility.request_count" prop="request_count" label="请求数" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.match_count" prop="match_count" label="匹配数" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.coverage_rate" prop="coverage_rate" label="覆盖率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.display_count" prop="display_count" label="展示数" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.display_rate" prop="display_rate" label="展示率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.click_count" prop="click_count" label="点击数" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.click_rate" prop="click_rate" label="点击率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.viewability_rate" prop="viewability_rate" label="可见率" :formatter="formatPercentage" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.cpc" prop="cpc" label="CPC" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.pageviews" prop="pageviews" label="PageViews" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.ecpm_after_deduct" prop="ecpm_after_deduct" :label="isAdmin ? 'eCPM(扣)' : 'eCPM'" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column v-if="isAdmin && columnVisibility.ecpm_before_deduct" prop="ecpm_before_deduct" label="eCPM" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column v-if="columnVisibility.revenue_after_deduct" prop="revenue_after_deduct" :label="isAdmin ? '收益(扣)' : '收益'" :formatter="formatCurrency" sortable="custom"></el-table-column>
-        <el-table-column v-if="isAdmin && columnVisibility.revenue_before_deduct" prop="revenue_before_deduct" label="收益" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="effectiveColumnVisibility.ad_unit" prop="ad_unit" label="广告单元" :min-width="120" show-overflow-tooltip></el-table-column>
+        <el-table-column v-if="effectiveColumnVisibility.country_name_zh" prop="country_name_zh" label="国家"></el-table-column>
+        <el-table-column v-if="effectiveColumnVisibility.request_count" prop="request_count" label="请求数" sortable="custom"></el-table-column>
+        <el-table-column v-if="effectiveColumnVisibility.match_count" prop="match_count" label="匹配数" sortable="custom"></el-table-column>
+        <el-table-column v-if="effectiveColumnVisibility.coverage_rate" prop="coverage_rate" label="覆盖率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column v-if="effectiveColumnVisibility.display_count" prop="display_count" label="展示数" sortable="custom"></el-table-column>
+        <el-table-column v-if="effectiveColumnVisibility.display_rate" prop="display_rate" label="展示率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column v-if="effectiveColumnVisibility.click_count" prop="click_count" label="点击数" sortable="custom"></el-table-column>
+        <el-table-column v-if="effectiveColumnVisibility.click_rate" prop="click_rate" label="点击率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column v-if="effectiveColumnVisibility.viewability_rate" prop="viewability_rate" label="可见率" :formatter="formatPercentage" sortable="custom"></el-table-column>
+        <el-table-column v-if="effectiveColumnVisibility.cpc" prop="cpc" label="CPC" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="effectiveColumnVisibility.pageviews" prop="pageviews" label="PageViews" sortable="custom"></el-table-column>
+        <el-table-column v-if="effectiveColumnVisibility.ecpm_after_deduct" prop="ecpm_after_deduct" :label="isAdmin ? 'eCPM(扣)' : 'eCPM'" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="isAdmin && effectiveColumnVisibility.ecpm_before_deduct" prop="ecpm_before_deduct" label="eCPM" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="effectiveColumnVisibility.revenue_after_deduct" prop="revenue_after_deduct" :label="isAdmin ? '收益(扣)' : '收益'" :formatter="formatCurrency" sortable="custom"></el-table-column>
+        <el-table-column v-if="isAdmin && effectiveColumnVisibility.revenue_before_deduct" prop="revenue_before_deduct" label="收益" :formatter="formatCurrency" sortable="custom"></el-table-column>
       </el-table>
 
       <!-- 分页控件 -->
@@ -155,7 +155,12 @@ import { useAuthStore } from '../../store';
 import { ElButton, ElCard, ElTable, ElTableColumn, ElPagination, ElForm, ElFormItem, ElSelect, ElOption, ElDatePicker, ElIcon, ElMessage, ElDialog, ElCheckboxGroup, ElCheckbox } from 'element-plus';
 import { Download, Setting, Right } from '@element-plus/icons-vue';
 import { getDailySummary, exportAdData } from '../../api/ad-data';
-import { DEFAULT_AD_DATA_DIMENSION, loadAdDataDimensionPreference } from '../../constants/adDataDimension';
+import {
+  appendDimensionAwareFilters,
+  applyDimensionColumnDefaults,
+  DEFAULT_AD_DATA_DIMENSION,
+  loadAdDataDimensionPreference
+} from '../../constants/adDataDimension';
 import { useRouter } from 'vue-router';
 import { extractErrorMessage, isErrorHandled } from '../../utils/api';
 import {
@@ -285,27 +290,30 @@ const {
 });
 
 const buildDailySearchParams = () => {
-  const params = {
-    dimension: searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION
-  };
+  const dimension = searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION;
+  const params = { dimension };
   if (isAdmin.value && searchForm.value.clientId) {
     params.client_id = searchForm.value.clientId;
   }
   if (searchForm.value.productId) {
     params.product_id = searchForm.value.productId;
   }
-  if (searchForm.value.countryCode) {
-    params.country_code = searchForm.value.countryCode;
-  }
-  if (searchForm.value.adUnit) {
-    params.ad_unit = searchForm.value.adUnit;
-  }
+  appendDimensionAwareFilters(params, {
+    dimension,
+    countryCode: searchForm.value.countryCode,
+    adUnit: searchForm.value.adUnit
+  });
   if (searchForm.value.dateRange?.length === 2) {
     params.start_date = searchForm.value.dateRange[0];
     params.end_date = searchForm.value.dateRange[1];
   }
   return params;
 };
+
+/** 列设置 + 统计维度：仅影响表格展示 */
+const effectiveColumnVisibility = computed(() =>
+  applyDimensionColumnDefaults(columnVisibility, searchForm.value.dimension)
+);
 
 const {
   ensureInitialDateRange,

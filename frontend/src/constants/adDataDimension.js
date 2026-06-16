@@ -94,3 +94,32 @@ export function showAdUnitFilterForDimension(dimension) {
 export function showAdUnitBeforeCountryInFilter(dimension) {
   return isAdUnitCountryDimension(dimension);
 }
+
+/** 构建列表/导出请求参数时，仅附带当前维度允许的筛选项 */
+export function appendDimensionAwareFilters(params, { dimension, countryCode, adUnit }) {
+  const dim = normalizeAdDataDimension(dimension || DEFAULT_AD_DATA_DIMENSION);
+  if (showCountryFilterForDimension(dim) && countryCode) {
+    params.country_code = countryCode;
+  }
+  if (showAdUnitFilterForDimension(dim) && adUnit) {
+    params.ad_unit = adUnit;
+  }
+  return params;
+}
+
+/**
+ * 按统计维度调整表格列显隐（列设置仅控制展示，不影响查询）。
+ * - 按广告单元：强制显示广告单元列（国家列无意义，可由用户自行隐藏）
+ * - 按国家：广告单元列无意义
+ */
+export function applyDimensionColumnDefaults(columnVisibility, dimension) {
+  const dim = normalizeAdDataDimension(dimension || DEFAULT_AD_DATA_DIMENSION);
+  const result = { ...columnVisibility };
+  if (dim === 'ad_unit' || isAdUnitCountryDimension(dim)) {
+    result.ad_unit = true;
+  }
+  if (dim === 'country') {
+    result.ad_unit = false;
+  }
+  return result;
+}

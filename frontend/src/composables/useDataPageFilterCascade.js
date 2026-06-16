@@ -164,6 +164,24 @@ export function useDataPageFilterCascade({
       ? searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION
       : null;
 
+  /** 清除与当前统计维度不兼容的筛选项（避免 ad_unit 维度残留国家筛选导致查无数据） */
+  const pruneDimensionAwareFilters = () => {
+    if (!includeDimension) {
+      return false;
+    }
+    const dimension = getDimension();
+    let changed = false;
+    if (!showCountryFilterForDimension(dimension) && searchForm.value.countryCode) {
+      searchForm.value.countryCode = '';
+      changed = true;
+    }
+    if (!showAdUnitFilterForDimension(dimension) && searchForm.value.adUnit) {
+      searchForm.value.adUnit = '';
+      changed = true;
+    }
+    return changed;
+  };
+
   const fetchClientsWithData = async () => {
     try {
       const { startDate, endDate } = getDateRangeFromForm(searchForm.value);
@@ -416,6 +434,7 @@ export function useDataPageFilterCascade({
     }
     searchForm.value.countryCode = '';
     searchForm.value.adUnit = '';
+    pruneDimensionAwareFilters();
     await reloadSecondaryFilters();
     fixSelectDisplay();
   };
@@ -464,7 +483,15 @@ export function useDataPageFilterCascade({
         const saved = loadAdDataDimensionPreference(userId);
         if (searchForm.value.dimension !== saved) {
           searchForm.value.dimension = saved;
+          pruneDimensionAwareFilters();
         }
+      }
+    );
+
+    watch(
+      () => searchForm.value.dimension,
+      () => {
+        pruneDimensionAwareFilters();
       }
     );
   }

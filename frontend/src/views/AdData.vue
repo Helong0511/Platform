@@ -51,7 +51,7 @@
       v-model:pagination="pagination"
       :loading="loading"
       :ad-data-list="adDataList"
-      :column-visibility="columnVisibility"
+      :column-visibility="effectiveColumnVisibility"
       :is-admin="isAdmin"
       :is-mobile="isMobile"
       :format-percentage="formatPercentage"
@@ -147,7 +147,12 @@ import { useDataPageFilterCascade } from '../composables/useDataPageFilterCascad
 import { useDebouncedPaginatedFetch } from '../composables/useDebouncedPaginatedFetch';
 import { useAdDataDateRangeBootstrap } from '../composables/useAdDataDateRangeBootstrap';
 import { useAdDataProductPanel } from '../composables/useAdDataProductPanel';
-import { DEFAULT_AD_DATA_DIMENSION, loadAdDataDimensionPreference } from '../constants/adDataDimension';
+import {
+  appendDimensionAwareFilters,
+  applyDimensionColumnDefaults,
+  DEFAULT_AD_DATA_DIMENSION,
+  loadAdDataDimensionPreference
+} from '../constants/adDataDimension';
 import ProductManagementDialog from '../components/admin/ProductManagementDialog.vue';
 import AdDataFilterCard from '../components/ad-data/AdDataFilterCard.vue';
 import AdDataDetailTable from '../components/ad-data/AdDataDetailTable.vue';
@@ -242,27 +247,30 @@ const {
 });
 
 const buildAdDataSearchParams = () => {
-  const params = {
-    dimension: searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION
-  };
+  const dimension = searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION;
+  const params = { dimension };
   if (isAdmin.value && searchForm.value.clientId) {
     params.client_id = searchForm.value.clientId;
   }
   if (searchForm.value.productId) {
     params.product_id = searchForm.value.productId;
   }
-  if (searchForm.value.countryCode) {
-    params.country_code = searchForm.value.countryCode;
-  }
-  if (searchForm.value.adUnit) {
-    params.ad_unit = searchForm.value.adUnit;
-  }
+  appendDimensionAwareFilters(params, {
+    dimension,
+    countryCode: searchForm.value.countryCode,
+    adUnit: searchForm.value.adUnit
+  });
   if (searchForm.value.dateRange?.length === 2) {
     params.start_date = searchForm.value.dateRange[0];
     params.end_date = searchForm.value.dateRange[1];
   }
   return params;
 };
+
+/** 列设置 + 统计维度：仅影响表格展示 */
+const effectiveColumnVisibility = computed(() =>
+  applyDimensionColumnDefaults(columnVisibility, searchForm.value.dimension)
+);
 
 const {
   ensureInitialDateRange,

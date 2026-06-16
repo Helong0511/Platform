@@ -143,3 +143,13 @@ def build_ad_unit_exact_filter(ad_unit_column: Any, ad_unit_input: Optional[str]
     if not ad_unit_input or not str(ad_unit_input).strip():
         return None
     return ad_unit_column == str(ad_unit_input).strip()
+
+
+def country_exact_filter_applies(dimension: Optional[str]) -> bool:
+    """按广告单元维度时国家字段恒为空，国家精确筛选不适用。"""
+    return normalize_dimension(dimension) != "ad_unit"
+
+
+def ad_unit_exact_filter_applies(dimension: Optional[str]) -> bool:
+    """按国家维度时无广告单元数据，广告单元精确筛选不适用。"""
+    return normalize_dimension(dimension) != "country"

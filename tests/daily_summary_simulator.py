@@ -10,7 +10,11 @@ from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from app.core.constants import ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
-from app.services.ad_data.queries.dimension_filter import normalize_dimension
+from app.services.ad_data.queries.dimension_filter import (
+    ad_unit_exact_filter_applies,
+    country_exact_filter_applies,
+    normalize_dimension,
+)
 
 RawRow = Dict[str, Any]
 
@@ -201,9 +205,9 @@ def filter_raw_rows(
             continue
         if not row_matches_product_filter(row, product_id):
             continue
-        if not row_matches_country_filter(row, country_code):
+        if country_exact_filter_applies(dimension) and not row_matches_country_filter(row, country_code):
             continue
-        if not row_matches_ad_unit_filter(row, ad_unit):
+        if ad_unit_exact_filter_applies(dimension) and not row_matches_ad_unit_filter(row, ad_unit):
             continue
         if not row_matches_date_range(row, start_date, end_date):
             continue

@@ -23,8 +23,10 @@ from app.core.security import get_current_user
 from app.core.excel_io import excel_streaming_response
 from app.models.models import User, Client, Product, AdData, UserRole, ProductAssignment, CountryInfo
 from app.services.ad_data.queries.dimension_filter import (
+    ad_unit_exact_filter_applies,
     build_ad_data_dimension_filter,
     build_ad_unit_exact_filter,
+    country_exact_filter_applies,
 )
 
 logger = logging.getLogger(__name__)
@@ -243,13 +245,15 @@ async def export_ad_data_handler(
                 )
         query = query.where(AdData.product_id == product_id)
 
-    country_filter = await build_ad_data_country_filter(db, AdData.country_code, country_code)
-    if country_filter is not None:
-        query = query.where(country_filter)
+    if country_exact_filter_applies(dimension):
+        country_filter = await build_ad_data_country_filter(db, AdData.country_code, country_code)
+        if country_filter is not None:
+            query = query.where(country_filter)
 
-    ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
-    if ad_unit_filter is not None:
-        query = query.where(ad_unit_filter)
+    if ad_unit_exact_filter_applies(dimension):
+        ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
+        if ad_unit_filter is not None:
+            query = query.where(ad_unit_filter)
 
     # 执行查询
     result = await db.execute(query.order_by(AdData.date.desc()))

@@ -23,8 +23,10 @@ from app.core.query_utils import apply_date_range_filter, check_use_assignment_t
 from app.core.security import is_admin
 from app.models.models import AdData, Client, Product, User
 from app.services.ad_data.queries.dimension_filter import (
+    ad_unit_exact_filter_applies,
     build_ad_data_dimension_filter,
     build_ad_unit_exact_filter,
+    country_exact_filter_applies,
     is_cross_dimension,
     normalize_dimension,
 )
@@ -123,15 +125,17 @@ class DailySummaryQuery:
             build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dim)
         )
 
-        country_filter = await build_ad_data_country_filter(
-            self.db, AdData.country_code, country_code
-        )
-        if country_filter is not None:
-            query = query.where(country_filter)
+        if country_exact_filter_applies(dim):
+            country_filter = await build_ad_data_country_filter(
+                self.db, AdData.country_code, country_code
+            )
+            if country_filter is not None:
+                query = query.where(country_filter)
 
-        ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
-        if ad_unit_filter is not None:
-            query = query.where(ad_unit_filter)
+        if ad_unit_exact_filter_applies(dim):
+            ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
+            if ad_unit_filter is not None:
+                query = query.where(ad_unit_filter)
 
         query = apply_date_range_filter(
             query,
@@ -355,15 +359,17 @@ class DailySummaryQuery:
                 build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
             )
 
-            country_filter = await build_ad_data_country_filter(
-                self.db, AdData.country_code, country_code
-            )
-            if country_filter is not None:
-                subquery = subquery.where(country_filter)
+            if country_exact_filter_applies(dimension):
+                country_filter = await build_ad_data_country_filter(
+                    self.db, AdData.country_code, country_code
+                )
+                if country_filter is not None:
+                    subquery = subquery.where(country_filter)
 
-            ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
-            if ad_unit_filter is not None:
-                subquery = subquery.where(ad_unit_filter)
+            if ad_unit_exact_filter_applies(dimension):
+                ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
+                if ad_unit_filter is not None:
+                    subquery = subquery.where(ad_unit_filter)
 
             subquery = apply_date_range_filter(
                 subquery,

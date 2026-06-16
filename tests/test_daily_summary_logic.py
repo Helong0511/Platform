@@ -117,6 +117,15 @@ class TestAdUnitDimensionAggregation:
         assert total == 2
         assert all(not (r.get("country_code") or "").strip() for r in filter_raw_rows(FIXTURE_ROWS, dimension="ad_unit"))
 
+    def test_ignores_stale_country_filter_for_ad_unit_dimension(self):
+        data, total = simulate_daily_summary(
+            FIXTURE_ROWS,
+            dimension="ad_unit",
+            product_id="102",
+            country_code="US",
+        )
+        assert total == 2
+
     def test_zz_with_ad_unit_not_in_ad_unit_dimension(self):
         row = _row(country_code="ZZ", ad_unit="slot-x")
         assert row_matches_dimension(row, "ad_unit") is False
