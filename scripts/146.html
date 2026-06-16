@@ -491,7 +491,6 @@
             if (clickActionInFlight) {
                 return;
             }
-            clickActionInFlight = true;
 
             const prevText = btnElement.textContent;
             document.querySelector('.progress-bar-fill').style.transition = 'width 0.8s ease';
@@ -503,6 +502,8 @@
                 scheduleRedirect(btnElement, prevText, getOriginalUrl(), CONFIG.REDIRECT_FAST_DELAY);
                 return;
             }
+
+            clickActionInFlight = true;
 
             try {
                 const identity = ensureAdEventIdentity();
@@ -535,6 +536,12 @@
 
         document.getElementById('submitBtn').addEventListener('click', function () {
             handleAction(this);
+        });
+
+        window.addEventListener('pageshow', function (event) {
+            if (event.persisted) {
+                clickActionInFlight = false;
+            }
         });
     </script>
 </body>
