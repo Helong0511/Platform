@@ -225,6 +225,7 @@ const {
   filterAdUnits,
   fetchClientsWithData,
   fetchFilterProducts,
+  loadAllFilterOptions,
   handleFilterClientChange,
   handleFilterProductChange,
   handleDimensionChange,
@@ -821,44 +822,9 @@ const loadPageData = async () => {
     // 这些数据可以延迟加载，不影响用户查看主要数据
     const nonCriticalPromises = [];
     
-    // 加载有数据的客户列表（管理员）
-    if (isAdmin.value) {
-      nonCriticalPromises.push(
-        fetchClientsWithData().catch(error => {
-          if (error.response?.status === 401) {
-            return;
-          }
-          // 静默处理错误
-        })
-      );
-    }
-    
-    // 根据用户角色加载产品列表
-    let defaultClientId = null;
-    
-    // 加载编辑对话框的产品列表（用于编辑功能，可以延迟）
+    // 加载筛选下拉（客户 / 产品 / 国家 / 广告单元）
     nonCriticalPromises.push(
-      fetchProducts(defaultClientId).catch(error => {
-        if (error.response?.status === 401) {
-          return;
-        }
-        // 静默处理错误
-      })
-    );
-    
-    // 加载筛选表单的产品列表（只显示有数据的产品，使用当前月的日期范围）
-    nonCriticalPromises.push(
-      fetchFilterProducts(defaultClientId).catch(error => {
-        if (error.response?.status === 401) {
-          return;
-        }
-        // 静默处理错误
-      })
-    );
-    
-    // 加载筛选表单的国家列表（只显示有数据的国家，使用当前月的日期范围）
-    nonCriticalPromises.push(
-      fetchFilterCountries(defaultClientId, null).catch(error => {
+      loadAllFilterOptions(isAdmin.value).catch(error => {
         if (error.response?.status === 401) {
           return;
         }
@@ -866,11 +832,13 @@ const loadPageData = async () => {
       })
     );
 
+    // 预加载编辑对话框产品列表（打开编辑时再按客户刷新）
     nonCriticalPromises.push(
-      fetchFilterAdUnits(defaultClientId, null).catch(error => {
+      fetchProducts(null).catch(error => {
         if (error.response?.status === 401) {
           return;
         }
+        // 静默处理错误
       })
     );
     
