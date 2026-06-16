@@ -227,7 +227,7 @@ export function useDataPageFilterCascade({
       let countryOptions;
       if (api.filterCountriesAdvanced) {
         countryOptions = data
-          .filter((item) => item?.code != null && item.code !== '' && item.code !== 'ZZ')
+          .filter((item) => item?.code != null && item.code !== '')
           .map((item) => normalizeCountryOption({
             code: item.code,
             name_zh: item.name_zh || item.code

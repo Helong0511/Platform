@@ -28,8 +28,8 @@ const AD_DATA_DIMENSION_VALUES = new Set(
 );
 
 export const AD_DATA_DIMENSION_HINTS = {
-  country: '仅展示国家维度数据（不含广告单元细分），避免与国家/单元 API 重复统计。',
-  ad_unit: '仅展示广告单元维度数据（国家显示为全部区域），不含按国家拆分的数据。',
+  country: '国家维度数据（有国家代码，含 AA/ZZ；ad_unit 为空）。',
+  ad_unit: '广告单元维度数据（无国家代码；ad_unit 有值）。',
   [AD_UNIT_COUNTRY_DIMENSION]: '使用广告单元+国家交叉数据源，按日期+产品+广告单元汇总（所有国家合并）；可按广告单元、国家筛选。'
 };
 

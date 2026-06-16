@@ -9,6 +9,8 @@ from app.services.ad_data.queries.dimension_filter import (
     is_cross_dimension,
     normalize_dimension,
     parse_optional_dimension,
+    row_has_country,
+    row_has_no_country,
 )
 
 
@@ -64,3 +66,43 @@ class TestEnsureValidOptionalDimension:
     def test_invalid_raises(self):
         with pytest.raises(ValueError, match="无效的 dimension"):
             ensure_valid_optional_dimension("bad")
+
+
+class TestCountryCodeSemantics:
+    """有国家 / 无国家 行级语义（含 AA、ZZ）。"""
+
+    @pytest.mark.parametrize(
+        "code,expected",
+        [
+            ("US", True),
+            ("AA", True),
+            ("ZZ", True),
+            ("", False),
+            (None, False),
+            ("  ", False),
+        ],
+    )
+    def test_row_has_country(self, code, expected):
+        assert row_has_country(code) is expected
+        assert row_has_no_country(code) is (not expected)
+
+    @pytest.mark.parametrize(
+        "country,ad_unit,dimension,expected",
+        [
+            ("US", "", "country", True),
+            ("ZZ", "", "country", True),
+            ("AA", "", "country", True),
+            ("", "slot-1", "ad_unit", True),
+            (None, "slot-1", "ad_unit", True),
+            ("ZZ", "slot-1", "ad_unit", False),
+            ("ZZ", "slot-1", CROSS_DIMENSION, True),
+            ("US", "banner", CROSS_DIMENSION, True),
+            ("", "banner", CROSS_DIMENSION, False),
+            ("US", "banner", "country", False),
+        ],
+    )
+    def test_dimension_row_classification(self, country, ad_unit, dimension, expected):
+        from tests.daily_summary_simulator import row_matches_dimension
+
+        row = {"country_code": country, "ad_unit": ad_unit}
+        assert row_matches_dimension(row, dimension) is expected

@@ -417,8 +417,8 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
             </ul>
             <p><strong>统计维度（dimension，可选）</strong>：</p>
             <ul>
-              <li><code>country</code>：仅国家维度（<code>ad_unit</code> 为空，国家 ≠ AA/ZZ）</li>
-              <li><code>ad_unit</code>：仅广告单元维度（国家为 ZZ/AA/空，<code>ad_unit</code> 有值）</li>
+              <li><code>country</code>：国家维度（<code>ad_unit</code> 为空，有国家代码，含 AA/ZZ）</li>
+              <li><code>ad_unit</code>：广告单元维度（无国家代码即 NULL/空串，<code>ad_unit</code> 有值）</li>
               <li><code>ad_unit_country</code>：广告单元与国家交叉明细（<code>country_ad_unit</code> 为兼容别名）</li>
               <li>不传：返回库中全部匹配行（兼容旧版；双 API 场景可能重复统计）</li>
             </ul>

@@ -1,10 +1,10 @@
 """
 广告数据统计维度筛选条件。
 
-三种互斥维度，避免国家 API 与广告单元 API 数据重复展示：
-- country：按国家（ad_unit 为空，国家非 AA/ZZ）
-- ad_unit：按广告单元（国家为 AA/ZZ/空，ad_unit 有值）
-- ad_unit_country：按广告单元+国家（两者均有有效值）
+三种互斥维度，避免国家/广告单元/交叉 API 数据重复展示：
+- country：按国家（ad_unit 为空，有国家代码，含 AA/ZZ）
+- ad_unit：按广告单元（无国家代码即 NULL/空串，ad_unit 有值）
+- ad_unit_country：按广告单元+国家（有国家代码含 AA/ZZ，ad_unit 有值）
 - country_ad_unit：已废弃别名，等价于 ad_unit_country
 """
 from typing import Any, Optional, Set
@@ -89,24 +89,30 @@ def _non_empty_ad_unit_condition(ad_unit_column: Any) -> Any:
     return and_(ad_unit_column.isnot(None), ad_unit_column != "")
 
 
-def _no_country_breakdown_condition(country_code_column: Any) -> Any:
-    """广告单元维度：国家为全部区域/未知/空。"""
+def _no_country_condition(country_code_column: Any) -> Any:
+    """无国家：country_code 为 NULL 或空串。"""
     return or_(
         country_code_column.is_(None),
         country_code_column == "",
-        country_code_column == "ZZ",
-        country_code_column == "AA",
     )
 
 
-def _valid_country_breakdown_condition(country_code_column: Any) -> Any:
-    """有效国家拆分：排除 AA、ZZ 及空值。"""
+def _has_country_condition(country_code_column: Any) -> Any:
+    """有国家：country_code 非空（含 AA、ZZ 等特殊代码）。"""
     return and_(
         country_code_column.isnot(None),
         country_code_column != "",
-        country_code_column != "ZZ",
-        country_code_column != "AA",
     )
+
+
+def row_has_country(country_code: Optional[str]) -> bool:
+    """行级判断：是否有国家代码（含 AA、ZZ）。"""
+    return bool((country_code or "").strip())
+
+
+def row_has_no_country(country_code: Optional[str]) -> bool:
+    """行级判断：是否无国家代码。"""
+    return not row_has_country(country_code)
 
 
 def build_ad_data_dimension_filter(
@@ -118,16 +124,16 @@ def build_ad_data_dimension_filter(
     dim = normalize_dimension(dimension)
     if dim == "country":
         return and_(
-            _valid_country_breakdown_condition(country_code_column),
+            _has_country_condition(country_code_column),
             _empty_ad_unit_condition(ad_unit_column),
         )
     if dim == "ad_unit":
         return and_(
-            _no_country_breakdown_condition(country_code_column),
+            _no_country_condition(country_code_column),
             _non_empty_ad_unit_condition(ad_unit_column),
         )
     return and_(
-        _valid_country_breakdown_condition(country_code_column),
+        _has_country_condition(country_code_column),
         _non_empty_ad_unit_condition(ad_unit_column),
     )
 

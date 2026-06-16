@@ -141,8 +141,6 @@ class FilterOptionsQuery:
         for country_code, country_name_zh in (await self.db.execute(query)).all():
             if not country_code:
                 continue
-            if country_code in ("AA", "ZZ"):
-                continue
             display_name = (
                 country_name_zh
                 or resolve_country_name(

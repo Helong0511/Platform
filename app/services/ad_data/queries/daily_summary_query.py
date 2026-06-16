@@ -328,8 +328,9 @@ class DailySummaryQuery:
             sub_cols = [
                 func.date(AdData.date).label("date"),
                 Product.id.label("product_id"),
+                Client.id.label("client_id"),
             ]
-            group_cols = [func.date(AdData.date), Product.id]
+            group_cols = [func.date(AdData.date), Product.id, Client.id]
 
             if group_by_ad_unit:
                 sub_cols.append(AdData.ad_unit.label("ad_unit"))
