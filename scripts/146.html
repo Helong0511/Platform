@@ -502,7 +502,6 @@
 
             if (sessionStorage.getItem('click_reported')) {
                 scheduleRedirect(btnElement, prevText, getOriginalUrl(), CONFIG.REDIRECT_FAST_DELAY);
-                clickActionInFlight = false;
                 return;
             }
 
