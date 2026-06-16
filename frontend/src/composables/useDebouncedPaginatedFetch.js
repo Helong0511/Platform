@@ -42,6 +42,7 @@ export function useDebouncedPaginatedFetch({
     currentParamsKey = paramsKey;
 
     const requestPromise = (async () => {
+      let response;
       try {
         loading.value = true;
 
@@ -50,12 +51,8 @@ export function useDebouncedPaginatedFetch({
           return;
         }
 
-        const response = await fetchPage(params);
+        response = await fetchPage(params);
         applyResponse(response);
-
-        if (afterEmpty) {
-          await afterEmpty(response);
-        }
       } catch (error) {
         if (error.response?.status === 401) {
           return;
@@ -69,6 +66,11 @@ export function useDebouncedPaginatedFetch({
           currentPromise = null;
           currentParamsKey = null;
         }
+      }
+
+      // afterEmpty 可能在回调内触发二次查询（如自动扩大日期范围），须在 loading 复位后执行
+      if (afterEmpty && response !== undefined) {
+        await afterEmpty(response);
       }
     })();
 
