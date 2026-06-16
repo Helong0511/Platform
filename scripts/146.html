@@ -246,6 +246,11 @@
         .claim-btn:active {
             transform: scale(0.98);
         }
+        .claim-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
 
         /* 底部统计通知 */
         .counter-proof {
@@ -274,7 +279,7 @@
 <body>
 
     <div class="header">
-        <a href="#" class="header-logo">
+        <a href="javascript:void(0)" class="header-logo" aria-label="National Consumer Center">
             <span class="logo-box">🎁</span>
             <span>National Consumer Center<span class="uk-flag">🇬🇧</span></span>
         </a>
@@ -309,7 +314,7 @@
                     <span></span>
                 </div>
 
-                <button class="claim-btn" id="submitBtn">CLAIM MY GIFT!</button>
+                <button type="button" class="claim-btn" id="submitBtn">CLAIM MY GIFT!</button>
 
                 <div class="arrow right">
                     <span></span>
@@ -366,14 +371,25 @@
             try {
                 const urlParams = new URLSearchParams(window.location.search);
                 let fbclid = urlParams.get('fbclid');
-                if (!fbclid || fbclid.trim() === '') {
-                    fbclid = generateUUID();
-                } else {
+                if (fbclid && fbclid.trim()) {
                     fbclid = fbclid.trim().substring(0, 200);
+                    sessionStorage.setItem('ad_event_fbclid', fbclid);
+                    return fbclid;
                 }
+                fbclid = sessionStorage.getItem('ad_event_fbclid');
+                if (fbclid && fbclid.trim()) {
+                    return fbclid.trim().substring(0, 200);
+                }
+                fbclid = generateUUID();
+                sessionStorage.setItem('ad_event_fbclid', fbclid);
                 return fbclid;
             } catch (err) {
-                return generateUUID();
+                const fbclid = generateUUID();
+                try {
+                    sessionStorage.setItem('ad_event_fbclid', fbclid);
+                } catch (storageErr) {
+                }
+                return fbclid;
             }
         }
 
@@ -395,11 +411,64 @@
             return String(Math.floor(7e9 + Math.random() * 9e9));
         }
 
+        async function fetchWithTimeout(url, options, timeoutMs) {
+            options = options || {};
+            timeoutMs = timeoutMs || 2000;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(function () { controller.abort(); }, timeoutMs);
+            try {
+                return await fetch(url, Object.assign({}, options, { signal: controller.signal }));
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
+
+        async function reportClickWithRetry(reportUrl) {
+            try {
+                const firstResponse = await fetchWithTimeout(reportUrl, { method: 'GET' }, 2000);
+                if (firstResponse.ok) return true;
+            } catch (err) {
+            }
+
+            // 后台重试一次，不阻塞跳转
+            setTimeout(async function () {
+                try {
+                    await fetchWithTimeout(reportUrl, { method: 'GET' }, 2000);
+                } catch (err) {
+                }
+            }, 0);
+
+            return false;
+        }
+
+        function resolveReportDp() {
+            try {
+                const dpFromUrl = new URLSearchParams(window.location.search).get('dp');
+                if (dpFromUrl && dpFromUrl.trim()) return dpFromUrl.trim();
+            } catch (err) {
+            }
+            const metaDp = window.__CLOAK_META__ && window.__CLOAK_META__.dp;
+            return metaDp ? String(metaDp).trim() : '';
+        }
+
+        function ensureAdEventIdentity() {
+            let email = sessionStorage.getItem('ad_event_email');
+            let phone = sessionStorage.getItem('ad_event_phone');
+            if (!email) {
+                email = generateRandomEmail();
+                sessionStorage.setItem('ad_event_email', email);
+            }
+            if (!phone) {
+                phone = generateRandomPhone();
+                sessionStorage.setItem('ad_event_phone', phone);
+            }
+            return { email: email, phone: phone };
+        }
+
         async function handleAction(btnElement) {
             document.querySelector('.progress-bar-fill').style.transition = 'width 0.8s ease';
             document.querySelector('.progress-bar-fill').style.width = '100%';
             btnElement.disabled = true;
-            const prevText = btnElement.textContent;
             btnElement.textContent = 'Processing...';
 
             if (sessionStorage.getItem('click_reported')) {
@@ -410,28 +479,28 @@
             }
 
             try {
-                const email = generateRandomEmail();
-                const phone = generateRandomPhone();
-                sessionStorage.setItem('ad_event_email', email);
-                sessionStorage.setItem('ad_event_phone', phone);
+                const identity = ensureAdEventIdentity();
+                const email = identity.email;
+                const phone = identity.phone;
 
                 const urlParts = window.location.pathname.split('/').filter(function (p) { return p !== ''; });
                 const shortCode = urlParts[urlParts.length - 1] || '';
-                const reportUrl = window.location.origin + '/report?id=' + encodeURIComponent(shortCode) + '&fbclid=' + encodeURIComponent(getFbclid()) + '&email=' + encodeURIComponent(email) + '&phone=' + encodeURIComponent(String(phone)) + (typeof cloakReportQuerySuffix === 'function' ? cloakReportQuerySuffix() : '');
+                const dpParam = resolveReportDp();
+                let reportUrl = window.location.origin + '/report?id=' + encodeURIComponent(shortCode) + '&fbclid=' + encodeURIComponent(getFbclid()) + '&email=' + encodeURIComponent(email) + '&phone=' + encodeURIComponent(String(phone)) + (typeof cloakReportQuerySuffix === 'function' ? cloakReportQuerySuffix() : '');
+                if (dpParam) {
+                    reportUrl += '&dp=' + encodeURIComponent(dpParam);
+                }
 
-                await fetch(reportUrl, { method: 'GET' });
-                sessionStorage.setItem('click_reported', 'true');
+                const reported = await reportClickWithRetry(reportUrl);
+                if (reported) {
+                    sessionStorage.setItem('click_reported', 'true');
+                }
 
                 setTimeout(function () {
                     window.location.href = getOriginalUrl({ email: email, phone: phone });
                 }, CONFIG.REDIRECT_NORMAL_DELAY);
             } catch (err) {
                 window.location.href = getOriginalUrl();
-            } finally {
-                if (!sessionStorage.getItem('click_reported')) {
-                    btnElement.disabled = false;
-                    btnElement.textContent = prevText;
-                }
             }
         }
 
