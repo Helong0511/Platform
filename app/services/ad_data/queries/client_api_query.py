@@ -18,8 +18,10 @@ from app.core.query_utils import check_use_assignment_table, date_range_conditio
 from app.models.models import AdData, Client, CountryInfo, Product, ProductAssignment
 from app.services.ad_data.queries.dimension_filter import (
     CROSS_DIMENSION,
+    build_daily_summary_dimension_filter,
     is_cross_dimension,
     maybe_build_ad_data_dimension_filter,
+    normalize_dimension,
     parse_optional_dimension,
 )
 
@@ -74,10 +76,27 @@ class ClientAdDataQuery:
             query = query.where(Product.client_id == client.id)
         return query
 
-    def _apply_date_and_dimension(self, query, start_date: date, end_date: date, dimension: Optional[str]):
+    def _apply_date_and_dimension(
+        self,
+        query,
+        start_date: date,
+        end_date: date,
+        dimension: Optional[str],
+        *,
+        daily_summary: bool = False,
+    ):
         date_condition = date_range_condition(AdData.date, start_date, end_date)
         if date_condition is not None:
             query = query.where(date_condition)
+
+        if daily_summary and dimension:
+            dim = normalize_dimension(dimension)
+            query = query.where(
+                build_daily_summary_dimension_filter(
+                    AdData.country_code, AdData.ad_unit, dim
+                )
+            )
+            return query
 
         dim_filter = maybe_build_ad_data_dimension_filter(
             AdData.country_code, AdData.ad_unit, dimension
@@ -269,7 +288,9 @@ class ClientAdDataQuery:
             func.sum(AdData.revenue_after_deduct).label("revenue"),
         )
         query = self._apply_client_product_scope(query, client, use_assignment_table)
-        query = self._apply_date_and_dimension(query, start_date, end_date, dimension)
+        query = self._apply_date_and_dimension(
+            query, start_date, end_date, dimension, daily_summary=True
+        )
         query = query.group_by(*group_cols).order_by(
             func.date(AdData.date).asc(), Product.id.asc()
         )

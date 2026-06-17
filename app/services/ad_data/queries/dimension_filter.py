@@ -1,11 +1,12 @@
 """
 广告数据统计维度筛选条件。
 
-三种互斥维度，避免国家/广告单元/交叉 API 数据重复展示：
+明细列表（互斥字段，避免多 API 重复展示）：
 - country：按国家（ad_unit 为空，有国家代码，含 AA/ZZ）
 - ad_unit：按广告单元（无国家代码即 NULL/空串，ad_unit 有值）
 - ad_unit_country：按广告单元+国家（有国家代码含 AA/ZZ，ad_unit 有值）
-- country_ad_unit：已废弃别名，等价于 ad_unit_country
+
+每日汇总使用 build_daily_summary_dimension_filter（放宽互斥约束，见该函数说明）。
 """
 from typing import Any, Optional, Set
 
@@ -120,7 +121,7 @@ def build_ad_data_dimension_filter(
     ad_unit_column: Any,
     dimension: Optional[str],
 ) -> Any:
-    """构建统计维度 SQLAlchemy 筛选条件。"""
+    """构建明细列表用统计维度筛选（互斥字段，避免多 API 重复计数）。"""
     dim = normalize_dimension(dimension)
     if dim == "country":
         return and_(
@@ -132,6 +133,31 @@ def build_ad_data_dimension_filter(
             _no_country_condition(country_code_column),
             _non_empty_ad_unit_condition(ad_unit_column),
         )
+    return and_(
+        _has_country_condition(country_code_column),
+        _non_empty_ad_unit_condition(ad_unit_column),
+    )
+
+
+def build_daily_summary_dimension_filter(
+    country_code_column: Any,
+    ad_unit_column: Any,
+    dimension: Optional[str],
+) -> Any:
+    """
+    构建每日汇总用统计维度筛选（放宽互斥约束）。
+
+    部分上游（如 Addermobi）单行同时含国家与广告单元，入库为交叉明细；
+    每日汇总按日期+产品（及可选广告单元）聚合，不按国家分行，故：
+    - 按国家：有国家代码即可（含交叉行），再汇总所有国家/广告单元
+    - 按广告单元：有广告单元即可（含交叉行），按广告单元分组
+    - 按广告单元+国家：与明细一致，要求同时有国家与广告单元
+    """
+    dim = normalize_dimension(dimension)
+    if dim == "country":
+        return _has_country_condition(country_code_column)
+    if dim == "ad_unit":
+        return _non_empty_ad_unit_condition(ad_unit_column)
     return and_(
         _has_country_condition(country_code_column),
         _non_empty_ad_unit_condition(ad_unit_column),

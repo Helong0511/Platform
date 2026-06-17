@@ -18,6 +18,7 @@ from tests.daily_summary_simulator import (
     build_group_key,
     filter_raw_rows,
     row_matches_dimension,
+    row_matches_daily_summary_dimension,
     simulate_count_groups,
     simulate_daily_summary,
 )
@@ -105,17 +106,28 @@ class TestCountryDimensionAggregation:
         assert row["revenue_after_deduct"] == 55.0
         assert row["country_code"] == "ZZ"
 
-    def test_excludes_rows_with_ad_unit(self):
-        filtered = filter_raw_rows(FIXTURE_ROWS, dimension="country")
-        product_ids = {r["product_id"] for r in filtered}
-        assert 999 not in product_ids
+    def test_includes_cross_rows_with_ad_unit_for_daily_summary(self):
+        """每日汇总「按国家」应包含交叉明细（同时有国家与广告单元），再按日期+产品聚合。"""
+        filtered = filter_raw_rows(FIXTURE_ROWS, dimension="country", product_id="103")
+        assert len(filtered) == 4
+        data, total = simulate_daily_summary(FIXTURE_ROWS, dimension="country", product_id="103")
+        assert total == 1
+        assert data[0]["request_count"] == 95
 
 
 class TestAdUnitDimensionAggregation:
     def test_splits_by_ad_unit_without_country_code(self):
         data, total = simulate_daily_summary(FIXTURE_ROWS, dimension="ad_unit", product_id="102")
         assert total == 2
-        assert all(not (r.get("country_code") or "").strip() for r in filter_raw_rows(FIXTURE_ROWS, dimension="ad_unit"))
+
+    def test_includes_cross_rows_with_country_for_daily_summary(self):
+        """每日汇总「按广告单元」应包含交叉明细，按广告单元分组。"""
+        data, total = simulate_daily_summary(
+            FIXTURE_ROWS, dimension="ad_unit", product_id="103"
+        )
+        assert total == 3
+        units = {r["ad_unit"] for r in data}
+        assert units == {"banner-x", "banner-y", "banner-z"}
 
     def test_ignores_stale_country_filter_for_ad_unit_dimension(self):
         data, total = simulate_daily_summary(
@@ -126,10 +138,11 @@ class TestAdUnitDimensionAggregation:
         )
         assert total == 2
 
-    def test_zz_with_ad_unit_not_in_ad_unit_dimension(self):
+    def test_zz_with_ad_unit_in_ad_unit_dimension_for_daily_summary(self):
         row = _row(country_code="ZZ", ad_unit="slot-x")
         assert row_matches_dimension(row, "ad_unit") is False
-        assert row_matches_dimension(row, CROSS_DIMENSION) is True
+        assert row_matches_daily_summary_dimension(row, "ad_unit") is True
+        assert row_matches_daily_summary_dimension(row, CROSS_DIMENSION) is True
 
 
 class TestAdUnitCountryDimensionAggregation:

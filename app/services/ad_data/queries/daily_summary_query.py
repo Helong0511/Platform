@@ -24,7 +24,7 @@ from app.core.security import is_admin
 from app.models.models import AdData, Client, Product, User
 from app.services.ad_data.queries.dimension_filter import (
     ad_unit_exact_filter_applies,
-    build_ad_data_dimension_filter,
+    build_daily_summary_dimension_filter,
     build_ad_unit_exact_filter,
     country_exact_filter_applies,
     is_cross_dimension,
@@ -122,7 +122,7 @@ class DailySummaryQuery:
                 logger.warning("无效的产品ID参数: %s", product_id)
 
         query = query.where(
-            build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dim)
+            build_daily_summary_dimension_filter(AdData.country_code, AdData.ad_unit, dim)
         )
 
         if country_exact_filter_applies(dim):
@@ -356,7 +356,9 @@ class DailySummaryQuery:
                     pass
 
             subquery = subquery.where(
-                build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
+                build_daily_summary_dimension_filter(
+                    AdData.country_code, AdData.ad_unit, dimension
+                )
             )
 
             if country_exact_filter_applies(dimension):

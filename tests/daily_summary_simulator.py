@@ -28,7 +28,7 @@ def _parse_date(value: Any) -> date:
 
 
 def row_matches_dimension(row: RawRow, dimension: Optional[str]) -> bool:
-    """镜像 dimension_filter.build_ad_data_dimension_filter 的行级判断。"""
+    """镜像 dimension_filter.build_ad_data_dimension_filter 的行级判断（明细列表）。"""
     dim = normalize_dimension(dimension)
     ad_unit = (row.get("ad_unit") or "").strip()
     country = (row.get("country_code") or "").strip()
@@ -41,6 +41,20 @@ def row_matches_dimension(row: RawRow, dimension: Optional[str]) -> bool:
         return has_country and empty_ad_unit
     if dim == "ad_unit":
         return no_country and bool(ad_unit)
+    return has_country and bool(ad_unit)
+
+
+def row_matches_daily_summary_dimension(row: RawRow, dimension: Optional[str]) -> bool:
+    """镜像 dimension_filter.build_daily_summary_dimension_filter 的行级判断（每日汇总）。"""
+    dim = normalize_dimension(dimension)
+    ad_unit = (row.get("ad_unit") or "").strip()
+    country = (row.get("country_code") or "").strip()
+    has_country = bool(country)
+
+    if dim == "country":
+        return has_country
+    if dim == "ad_unit":
+        return bool(ad_unit)
     return has_country and bool(ad_unit)
 
 
@@ -201,7 +215,7 @@ def filter_raw_rows(
                 continue
         if is_admin and client_id is not None and not row_matches_client_filter(row, client_id):
             continue
-        if not row_matches_dimension(row, dimension):
+        if not row_matches_daily_summary_dimension(row, dimension):
             continue
         if not row_matches_product_filter(row, product_id):
             continue
