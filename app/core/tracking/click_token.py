@@ -65,6 +65,22 @@ _TRACKING_QUERY_KEYS: tuple[str, ...] = (
     "cid",
     "clk_id",
 )
+# 已写入令牌主体（i/oid/pub 等）的 query 键，嵌入 up 时剔除以节省空间
+_REDUNDANT_URL_PARAM_KEYS = frozenset({
+    "offer_id",
+    "channel_id",
+    "publisher_id",
+    "advertiser_id",
+    "short_link_id",
+    "oid",
+    "pub",
+    "aid",
+    "slid",
+    "click_id",
+    "dp",
+})
+# 极限裁剪：仅保留广告点击 ID（Facebook 长 fbclid 场景）
+_CLICK_ID_ONLY_KEYS: tuple[str, ...] = ("fbclid", "gclid", "clickid", "click_id")
 
 # 旧版 click_id 字符集 ⊂ 令牌外层字母表；下列字符仅令牌可能出现
 _LEGACY_ALPHABET = set(CLICK_ID_CHARS)
@@ -184,12 +200,27 @@ def build_minimal_id_list_params(
     return {_KEY_ID_LIST: slots}
 
 
+def _filter_url_params_for_embedding(
+    url_params: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """剔除已在令牌主体中的键，减小 up 体积（完整 query 仍存 clicks.url_params）。"""
+    if not url_params or not isinstance(url_params, dict):
+        return None
+    filtered: Dict[str, Any] = {}
+    for key, val in url_params.items():
+        if val is None or str(key).lower() in _REDUNDANT_URL_PARAM_KEYS:
+            continue
+        filtered[key] = val
+    return filtered or None
+
+
 def _coerce_url_params(
     url_params: Dict[str, Any],
     *,
     max_keys: int,
     max_value_len: int,
     key_priority: Optional[tuple[str, ...]] = None,
+    exclusive_keys: Optional[tuple[str, ...]] = None,
 ) -> Dict[str, Any]:
     """将 url_params 规范为可 JSON 序列化的扁平 dict（可控键数与值长）。"""
     items: List[tuple[str, Any]] = []
@@ -215,9 +246,17 @@ def _coerce_url_params(
         seen.add(key)
         items.append((key, sval))
 
+    lower_map = {str(k).lower(): (str(k), v) for k, v in url_params.items()}
+
+    if exclusive_keys is not None:
+        for pk in exclusive_keys:
+            hit = lower_map.get(pk.lower())
+            if hit:
+                _add(hit[0][:64], hit[1])
+        return dict(items)
+
     # 每一档都先写入追踪键，再写其余参数（尽量带上 fbclid/utm 等）
     priority = key_priority if key_priority is not None else _TRACKING_QUERY_KEYS
-    lower_map = {str(k).lower(): (str(k), v) for k, v in url_params.items()}
     for pk in priority:
         hit = lower_map.get(pk.lower())
         if hit:
@@ -312,6 +351,16 @@ def _url_params_slim_ladder(
             key_priority=_TRACKING_QUERY_KEYS,
         )
     )
+    # 档位 6：仅广告点击 ID（长 fbclid + 多 utm 时仍能塞进 255）
+    for max_k, max_v in ((3, 64), (2, 48), (1, 32), (1, 24)):
+        _push(
+            _coerce_url_params(
+                url_params,
+                max_keys=max_k,
+                max_value_len=max_v,
+                exclusive_keys=_CLICK_ID_ONLY_KEYS,
+            )
+        )
     return ladder if ladder else [None]
 
 
@@ -486,6 +535,8 @@ def generate_tracking_click_id(
     多种编码反复尝试以**尽量**保留 up；仅当全部失败后才去掉 up，再失败则回退旧 click_id。
     """
     _ = for_short_link  # 兼容参数，不再单独限制 60 字符
+    raw_url_params = url_params
+    url_params = _filter_url_params_for_embedding(url_params)
     outer_cap = (
         min(int(max_outer_chars), CLICK_ID_MAX_LENGTH)
         if max_outer_chars is not None
@@ -527,7 +578,7 @@ def generate_tracking_click_id(
     ]
 
     last_error: Optional[Exception] = None
-    had_url_params_input = bool(url_params and isinstance(url_params, dict))
+    had_url_params_to_embed = bool(url_params and isinstance(url_params, dict))
 
     def _attempt_once(attempt_params: Optional[Dict[str, Any]]) -> Optional[str]:
         """单次生成尝试：校验长度上限与 DB click_id 字段长度。"""
@@ -566,13 +617,17 @@ def generate_tracking_click_id(
             token = _attempt_once(attempt_params)
             if not token:
                 continue
-            if had_url_params_input:
+            if had_url_params_to_embed:
+                raw_n = len(raw_url_params) if isinstance(raw_url_params, dict) else 0
+                embed_n = len(url_params) if isinstance(url_params, dict) else 0
                 logger.warning(
                     "click_id 已生成但未嵌入 url_params（255 内所有带 up 尝试均失败）"
-                    " offer=%s pub=%s len=%s",
+                    " offer=%s pub=%s len=%s raw_keys=%s embed_keys=%s",
                     offer_id,
                     publisher_id,
                     len(token),
+                    raw_n,
+                    embed_n,
                 )
             else:
                 logger.debug(
