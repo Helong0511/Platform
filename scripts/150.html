@@ -405,16 +405,33 @@
             return metaDp ? String(metaDp).trim() : '';
         }
 
+        function getSessionItem(key) {
+            try {
+                return sessionStorage.getItem(key);
+            } catch (err) {
+                return null;
+            }
+        }
+
+        function setSessionItem(key, value) {
+            try {
+                sessionStorage.setItem(key, value);
+                return true;
+            } catch (err) {
+                return false;
+            }
+        }
+
         function ensureAdEventIdentity() {
-            let email = sessionStorage.getItem('ad_event_email');
-            let phone = sessionStorage.getItem('ad_event_phone');
+            let email = getSessionItem('ad_event_email') || '';
+            let phone = getSessionItem('ad_event_phone') || '';
             if (!email) {
                 email = generateRandomEmail();
-                sessionStorage.setItem('ad_event_email', email);
+                setSessionItem('ad_event_email', email);
             }
             if (!phone) {
                 phone = generateRandomPhone();
-                sessionStorage.setItem('ad_event_phone', phone);
+                setSessionItem('ad_event_phone', phone);
             }
             return { email: email, phone: phone };
         }
@@ -447,14 +464,16 @@
             btnElement.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
             btnElement.disabled = true;
 
-            const identity = ensureAdEventIdentity();
-
-            if (sessionStorage.getItem('click_reported')) {
-                scheduleRedirect(btnElement, prevHtml, getOriginalUrl(identity), CONFIG.REDIRECT_FAST_DELAY);
-                return;
-            }
+            let identity = { email: '', phone: '' };
 
             try {
+                identity = ensureAdEventIdentity();
+
+                if (getSessionItem('click_reported')) {
+                    scheduleRedirect(btnElement, prevHtml, getOriginalUrl(identity), CONFIG.REDIRECT_FAST_DELAY);
+                    return;
+                }
+
                 const email = identity.email;
                 const phone = identity.phone;
 
@@ -472,7 +491,7 @@
 
                 const reported = await reportClickWithRetry(reportUrl);
                 if (reported) {
-                    sessionStorage.setItem('click_reported', 'true');
+                    setSessionItem('click_reported', 'true');
                 }
 
                 scheduleRedirect(
@@ -482,6 +501,9 @@
                     CONFIG.REDIRECT_NORMAL_DELAY
                 );
             } catch (err) {
+                if (!identity.email || !identity.phone) {
+                    identity = ensureAdEventIdentity();
+                }
                 scheduleRedirect(btnElement, prevHtml, getOriginalUrl(identity), 0);
             }
         }
