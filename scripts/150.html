@@ -386,12 +386,11 @@
             } catch (err) {
             }
 
-            setTimeout(async function () {
-                try {
-                    await fetchWithTimeout(reportUrl, { method: 'GET' }, 2000);
-                } catch (err) {
-                }
-            }, 0);
+            try {
+                const retryResponse = await fetchWithTimeout(reportUrl, { method: 'GET' }, 2000);
+                if (retryResponse.ok) return true;
+            } catch (err) {
+            }
 
             return false;
         }
@@ -448,13 +447,14 @@
             btnElement.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
             btnElement.disabled = true;
 
+            const identity = ensureAdEventIdentity();
+
             if (sessionStorage.getItem('click_reported')) {
-                scheduleRedirect(btnElement, prevHtml, getOriginalUrl(), CONFIG.REDIRECT_FAST_DELAY);
+                scheduleRedirect(btnElement, prevHtml, getOriginalUrl(identity), CONFIG.REDIRECT_FAST_DELAY);
                 return;
             }
 
             try {
-                const identity = ensureAdEventIdentity();
                 const email = identity.email;
                 const phone = identity.phone;
 
@@ -478,11 +478,11 @@
                 scheduleRedirect(
                     btnElement,
                     prevHtml,
-                    getOriginalUrl({ email: email, phone: phone }),
+                    getOriginalUrl(identity),
                     CONFIG.REDIRECT_NORMAL_DELAY
                 );
             } catch (err) {
-                scheduleRedirect(btnElement, prevHtml, getOriginalUrl(), 0);
+                scheduleRedirect(btnElement, prevHtml, getOriginalUrl(identity), 0);
             }
         }
 
