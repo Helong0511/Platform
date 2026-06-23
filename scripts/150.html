@@ -286,12 +286,29 @@
             DEFAULT_ORIGINAL_URL: 'https://client.btfrx.online/s/TyaF?offer_id=150&channel_id=10'
         };
 
+        function getSessionItem(key) {
+            try {
+                return sessionStorage.getItem(key);
+            } catch (err) {
+                return null;
+            }
+        }
+
+        function setSessionItem(key, value) {
+            try {
+                sessionStorage.setItem(key, value);
+                return true;
+            } catch (err) {
+                return false;
+            }
+        }
+
         function getOriginalUrl(adEventData) {
             const urlParams = new URLSearchParams(window.location.search);
             let originalUrl = urlParams.get('original_url') || CONFIG.DEFAULT_ORIGINAL_URL;
 
-            const email = adEventData?.email || sessionStorage.getItem('ad_event_email') || '';
-            const phone = adEventData?.phone || sessionStorage.getItem('ad_event_phone') || '';
+            const email = adEventData?.email || getSessionItem('ad_event_email') || '';
+            const phone = adEventData?.phone || getSessionItem('ad_event_phone') || '';
 
             try {
                 const url = new URL(originalUrl);
@@ -323,24 +340,21 @@
                 let fbclid = urlParams.get('fbclid');
                 if (fbclid && fbclid.trim()) {
                     fbclid = fbclid.trim().substring(0, 200);
-                    sessionStorage.setItem('ad_event_fbclid', fbclid);
+                    setSessionItem('ad_event_fbclid', fbclid);
                     return fbclid;
                 }
-                fbclid = sessionStorage.getItem('ad_event_fbclid');
+                fbclid = getSessionItem('ad_event_fbclid');
                 if (fbclid && fbclid.trim()) {
                     fbclid = fbclid.trim().substring(0, 200);
-                    sessionStorage.setItem('ad_event_fbclid', fbclid);
+                    setSessionItem('ad_event_fbclid', fbclid);
                     return fbclid;
                 }
                 fbclid = generateUUID();
-                sessionStorage.setItem('ad_event_fbclid', fbclid);
+                setSessionItem('ad_event_fbclid', fbclid);
                 return fbclid;
             } catch (err) {
                 const fbclid = generateUUID();
-                try {
-                    sessionStorage.setItem('ad_event_fbclid', fbclid);
-                } catch (storageErr) {
-                }
+                setSessionItem('ad_event_fbclid', fbclid);
                 return fbclid;
             }
         }
@@ -386,11 +400,15 @@
             } catch (err) {
             }
 
-            try {
-                const retryResponse = await fetchWithTimeout(reportUrl, { method: 'GET' }, 2000);
-                if (retryResponse.ok) return true;
-            } catch (err) {
-            }
+            setTimeout(function () {
+                fetchWithTimeout(reportUrl, { method: 'GET' }, 2000)
+                    .then(function (retryResponse) {
+                        if (retryResponse && retryResponse.ok) {
+                            setSessionItem('click_reported', 'true');
+                        }
+                    })
+                    .catch(function () {});
+            }, 0);
 
             return false;
         }
@@ -403,23 +421,6 @@
             }
             const metaDp = window.__CLOAK_META__ && window.__CLOAK_META__.dp;
             return metaDp ? String(metaDp).trim() : '';
-        }
-
-        function getSessionItem(key) {
-            try {
-                return sessionStorage.getItem(key);
-            } catch (err) {
-                return null;
-            }
-        }
-
-        function setSessionItem(key, value) {
-            try {
-                sessionStorage.setItem(key, value);
-                return true;
-            } catch (err) {
-                return false;
-            }
         }
 
         function ensureAdEventIdentity() {
