@@ -16,6 +16,7 @@ import uuid
 from typing import Any, Dict, Optional, Tuple
 
 from fastapi import BackgroundTasks, Request
+from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm.exc import StaleDataError
@@ -173,37 +174,39 @@ def _schedule_db_show_count_sync(
     """后台任务：将缓存中已递增的 show_count 同步到数据库（仅当库值落后时更新）。"""
     async def update_show_count_db():
         """后台协程：仅当库内 show_count 落后于缓存目标值时写库。"""
+        target = cached_data.get("show_count", 0)
         try:
-            db_session = AsyncSessionLocal()
-            result = await db_session.execute(
-                select(ShortLink).where(ShortLink.short_code == short_code)
-            )
-            short_link = result.scalars().first()
-            if short_link:
-                target = cached_data["show_count"]
-                if (short_link.show_count or 0) < target:
-                    short_link.show_count = target
+            async with AsyncSessionLocal() as db_session:
+                # 单条 UPDATE 避免 ORM 先查后改：短链被删或并发时不会抛 StaleDataError
+                result = await db_session.execute(
+                    update(ShortLink)
+                    .where(ShortLink.short_code == short_code)
+                    .where(func.coalesce(ShortLink.show_count, 0) < target)
+                    .values(show_count=target)
+                )
+                if result.rowcount > 0:
                     await db_session.commit()
                     logger.debug(
                         "[斗篷服务] 后台任务更新数据库: short_code=%s, 新show_count=%s",
                         short_code,
-                        short_link.show_count,
+                        target,
                     )
                 else:
+                    await db_session.rollback()
                     logger.debug(
-                        "[斗篷服务] 数据库值已最新，无需更新: short_code=%s", short_code
+                        "[斗篷服务] 数据库无需更新或短链不存在: short_code=%s, target=%s",
+                        short_code,
+                        target,
                     )
-            else:
-                logger.debug(
-                    "[斗篷服务] 后台任务: 短链接不存在: short_code=%s", short_code
-                )
+        except StaleDataError:
+            logger.debug(
+                "[斗篷服务] 后台任务更新冲突，忽略 StaleDataError: short_code=%s",
+                short_code,
+            )
         except Exception as exc:
             logger.error(
                 "[斗篷服务] 后台任务更新数据库失败: %s", exc, exc_info=True
             )
-        finally:
-            if "db_session" in locals():
-                await db_session.close()
 
     background_tasks.add_task(update_show_count_db)
     logger.debug("[斗篷服务] 添加后台任务: 更新数据库展示次数")
