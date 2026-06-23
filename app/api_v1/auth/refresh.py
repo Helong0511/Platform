@@ -52,8 +52,8 @@ def _resolve_refresh_token(request: Request, token_data: Optional[RefreshTokenRe
 @router.post("/refresh", summary="刷新访问令牌")
 async def refresh_token(
         request: Request,
-        db: AsyncSession = Depends(get_db),
         token_data: Optional[RefreshTokenRequest] = Body(default=None),
+        db: AsyncSession = Depends(get_db),
 ):
     """
     使用刷新令牌获取新的访问令牌。

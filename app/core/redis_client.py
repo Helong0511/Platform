@@ -62,13 +62,6 @@ def _redis_force_enabled() -> bool:
     return os.getenv("REDIS_FORCE", "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def _redis_connect_lock_instance() -> asyncio.Lock:
-    global _redis_connect_lock
-    if _redis_connect_lock is None:
-        _redis_connect_lock = asyncio.Lock()
-    return _redis_connect_lock
-
-
 def _redis_socket_connect_timeout() -> float:
     """开发环境缩短连接超时，避免本机无 Redis 时每请求阻塞数秒。"""
     return 1.0 if not settings.is_production else 5.0
@@ -79,11 +72,13 @@ def _mark_redis_connect_failed() -> None:
     _redis_connect_backoff_until = time.monotonic() + _REDIS_CONNECT_BACKOFF_SECONDS
 
 
-def _reset_redis_singleton() -> None:
+def _reset_redis_singleton(*, reset_connect_lock: bool = False) -> None:
     """丢弃当前单例引用（不在异构事件循环上 close，避免二次破坏）。"""
-    global _redis_client, _redis_loop
+    global _redis_client, _redis_loop, _redis_connect_lock
     _redis_client = None
     _redis_loop = None
+    if reset_connect_lock:
+        _redis_connect_lock = None
 
 
 async def get_redis_client() -> Optional[aioredis.Redis]:
@@ -91,7 +86,8 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
     获取Redis客户端
     如果Redis未配置或连接失败，返回None（使用内存存储）
     """
-    global _redis_client, _redis_loop, _redis_dev_no_host_logged, _redis_dev_loopback_skip_logged, _redis_connect_backoff_until
+    global _redis_client, _redis_loop, _redis_dev_no_host_logged, _redis_dev_loopback_skip_logged
+    global _redis_connect_backoff_until, _redis_connect_lock
 
     try:
         current_loop = asyncio.get_running_loop()
@@ -101,8 +97,15 @@ async def get_redis_client() -> Optional[aioredis.Redis]:
     if time.monotonic() < _redis_connect_backoff_until:
         return None
 
-    connect_lock = _redis_connect_lock_instance()
-    async with connect_lock:
+    # 事件循环切换时先丢弃旧 Lock（asyncio.Lock 绑定创建时的事件循环）
+    if _redis_loop is not None and (_redis_loop is not current_loop or _redis_loop.is_closed()):
+        _reset_redis_singleton(reset_connect_lock=True)
+
+    # Lock 仅在已确认存在运行中事件循环的 async 上下文中创建
+    if _redis_connect_lock is None:
+        _redis_connect_lock = asyncio.Lock()
+
+    async with _redis_connect_lock:
         if time.monotonic() < _redis_connect_backoff_until:
             return None
 
