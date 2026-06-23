@@ -393,13 +393,7 @@
 
         let clickActionInFlight = false;
 
-        async function reportClickWithRetry(reportUrl) {
-            try {
-                const firstResponse = await fetchWithTimeout(reportUrl, { method: 'GET' }, 2000);
-                if (firstResponse.ok) return true;
-            } catch (err) {
-            }
-
+        function scheduleBackgroundReportRetry(reportUrl) {
             setTimeout(function () {
                 fetchWithTimeout(reportUrl, { method: 'GET' }, 2000)
                     .then(function (retryResponse) {
@@ -409,7 +403,22 @@
                     })
                     .catch(function () {});
             }, 0);
+        }
 
+        async function reportClickWithRetry(reportUrl) {
+            let firstSucceeded = false;
+
+            try {
+                const firstResponse = await fetchWithTimeout(reportUrl, { method: 'GET' }, 2000);
+                firstSucceeded = !!(firstResponse && firstResponse.ok);
+            } catch (err) {
+            }
+
+            if (firstSucceeded) {
+                return true;
+            }
+
+            scheduleBackgroundReportRetry(reportUrl);
             return false;
         }
 
