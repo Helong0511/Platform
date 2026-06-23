@@ -47,14 +47,18 @@ class UserInfoResponse(BaseSchema):
 
 class LoginResponse(BaseSchema):
     """
-    登录响应模型
-    
-    API 响应数据结构，用于序列化数据库记录或业务计算结果。
+    登录/刷新成功响应（令牌仅存 HttpOnly Cookie，不在 JSON 中返回）。
     """
-    access_token: str
-    refresh_token: str | None = None  # 刷新令牌（可选，用于令牌刷新机制）
     token_type: str = "bearer"
     user: UserInfoResponse
+    access_token: str | None = Field(
+        None,
+        description="已弃用：访问令牌仅通过 HttpOnly Cookie 下发",
+    )
+    refresh_token: str | None = Field(
+        None,
+        description="已弃用：刷新令牌仅通过 HttpOnly Cookie 下发",
+    )
 
 
 class LoginRequest(BaseSchema):
@@ -69,8 +73,6 @@ class LoginRequest(BaseSchema):
 
 class RefreshTokenRequest(BaseSchema):
     """
-    刷新令牌请求模型
-    
-    API 请求体，描述客户端提交的参数格式与约束。
+    刷新令牌请求模型（兼容旧客户端；浏览器端优先使用 Cookie）。
     """
-    refresh_token: str = Field(..., description="刷新令牌")
+    refresh_token: str | None = Field(None, description="刷新令牌（Cookie 缺失时使用）")

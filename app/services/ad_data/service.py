@@ -160,9 +160,10 @@ class AdDataService(BaseService[AdData]):
             country_code: Optional[str] = None,
             ad_unit: Optional[str] = None,
             dimension: Optional[str] = None,
+            split_by_country: bool = False,
             sort_by: str = "date",
             sort_order: str = "desc"
-    ) -> Tuple[List[Dict[str, Any]], int]:
+    ) -> Tuple[List[Dict[str, Any]], int, Dict[str, Any]]:
         from app.services.ad_data.queries.daily_summary_query import DailySummaryQuery
 
         return await DailySummaryQuery(self.db).fetch(
@@ -176,6 +177,7 @@ class AdDataService(BaseService[AdData]):
             country_code=country_code,
             ad_unit=ad_unit,
             dimension=dimension,
+            split_by_country=split_by_country,
             sort_by=sort_by,
             sort_order=sort_order,
         )

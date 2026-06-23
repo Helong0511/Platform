@@ -73,8 +73,8 @@ const createAsyncComponent = (importFn, componentName) => {
 
 const Login = createAsyncComponent(() => import(/* webpackChunkName: "login" */ '../views/Login.vue'), 'Login');
 const Dashboard = createAsyncComponent(() => import(/* webpackChunkName: "dashboard" */ '../views/Dashboard.vue'), 'Dashboard');
-const AdData = createAsyncComponent(() => import(/* webpackChunkName: "ad-data" */ '../views/AdData.vue'), 'AdData');
 const TBSearchData = createAsyncComponent(() => import(/* webpackChunkName: "tb-search-data" */ '../views/ad-data/TBSearchData.vue'), 'TBSearchData');
+const AdData = createAsyncComponent(() => import(/* webpackChunkName: "ad-data" */ '../views/AdData.vue'), 'AdData');
 const DailyReport = createAsyncComponent(() => import(/* webpackChunkName: "daily-report" */ '../views/ad-data/DailyReport.vue'), 'DailyReport');
 const MLModelManagement = createAsyncComponent(() => import(/* webpackChunkName: "ml-model" */ '../views/admin/MLModelManagement.vue'), 'MLModelManagement');
 const NotFound = createAsyncComponent(() => import(/* webpackChunkName: "not-found" */ '../views/NotFound.vue'), 'NotFound');
@@ -105,6 +105,10 @@ const SensitivePathProbeManagement = createAsyncComponent(() => import(/* webpac
 const CountryManagement = createAsyncComponent(() => import(/* webpackChunkName: "country-management" */ '../views/admin/CountryManagement.vue'), 'CountryManagement');
 const ClientUserManagement = createAsyncComponent(() => import(/* webpackChunkName: "client-user-management" */ '../views/client/ClientUserManagement.vue'), 'ClientUserManagement');
 const ApiDocumentation = createAsyncComponent(() => import(/* webpackChunkName: "api-documentation" */ '../views/ApiDocumentation.vue'), 'ApiDocumentation');
+const MonitoringDashboard = createAsyncComponent(() => import(/* webpackChunkName: "monitoring-dashboard" */ '../views/MonitoringDashboard.vue'), 'MonitoringDashboard');
+const AlertManagement = createAsyncComponent(() => import(/* webpackChunkName: "alert-management" */ '../views/AlertManagement.vue'), 'AlertManagement');
+const TrendAnalysis = createAsyncComponent(() => import(/* webpackChunkName: "trend-analysis" */ '../views/TrendAnalysis.vue'), 'TrendAnalysis');
+const PerformanceOptimization = createAsyncComponent(() => import(/* webpackChunkName: "performance-optimization" */ '../views/PerformanceOptimization.vue'), 'PerformanceOptimization');
 
 /**
  * 路由规则配置
@@ -127,12 +131,12 @@ const ApiDocumentation = createAsyncComponent(() => import(/* webpackChunkName: 
 const routes = [
   // 根路径重定向到登录页
   { path: '/', redirect: '/login' },
-  
+
   // 登录页（无需认证）
-  { 
-    path: '/login', 
-    name: 'Login', 
-    component: Login, 
+  {
+    path: '/login',
+    name: 'Login',
+    component: Login,
     meta: { requiresAuth: false }  // 明确标记无需认证
   },
   {
@@ -140,8 +144,8 @@ const routes = [
     component: MainLayout,
     meta: { requiresAuth: true },
     children: [
-      { 
-        path: '', 
+      {
+        path: '',
         redirect: '/app/dashboard'  // 默认重定向到dashboard，实际跳转由登录逻辑和路由守卫处理
       },
       {
@@ -156,21 +160,43 @@ const routes = [
       },
       {
         path: 'ad-data/daily-report',
-        name: 'DailyReport',
+        name: 'DailyReportSummary',
         component: DailyReport,
-        meta: { requiresAdDataAccess: true }
+        meta: { requiresAdDataAccess: true, dailyPageKey: 'summary' }
+      },
+      {
+        path: 'ad-data/daily-report/country',
+        name: 'DailyReportCountry',
+        component: DailyReport,
+        meta: { requiresAdDataAccess: true, dailyPageKey: 'country' }
+      },
+      {
+        path: 'ad-data/daily-report/ad-unit',
+        name: 'DailyReportAdUnit',
+        component: DailyReport,
+        meta: { requiresAdDataAccess: true, dailyPageKey: 'ad_unit' }
+      },
+      {
+        path: 'ad-data/daily-report/ad-unit-country',
+        redirect: '/app/ad-data/detail-report'
       },
       {
         path: 'ad-data/detail-report',
-        name: 'AdData',
-        component: AdData,
-        meta: { requiresAdDataAccess: true }
+        name: 'DailyReportDetail',
+        component: DailyReport,
+        meta: { requiresAdDataAccess: true, dailyPageKey: 'cross' }
       },
       {
         path: 'ad-data/tb-search-data',
         name: 'TBSearchData',
         component: TBSearchData,
         meta: { requiresAdDataAccess: true }
+      },
+      {
+        path: 'admin/ad-data-rows',
+        name: 'AdminAdDataRows',
+        component: AdData,
+        meta: { requiresAdmin: true, requiresAdDataAccess: true }
       },
       {
         path: 'admin/users',
@@ -325,6 +351,30 @@ const routes = [
         path: 'admin/countries',
         name: 'CountryManagement',
         component: CountryManagement,
+        meta: { requiresAdmin: true }
+      },
+      {
+        path: 'admin/monitoring',
+        name: 'MonitoringDashboard',
+        component: MonitoringDashboard,
+        meta: { requiresAdmin: true }
+      },
+      {
+        path: 'admin/monitoring/alerts',
+        name: 'AlertManagement',
+        component: AlertManagement,
+        meta: { requiresAdmin: true }
+      },
+      {
+        path: 'admin/monitoring/trends',
+        name: 'TrendAnalysis',
+        component: TrendAnalysis,
+        meta: { requiresAdmin: true }
+      },
+      {
+        path: 'admin/optimization',
+        name: 'PerformanceOptimization',
+        component: PerformanceOptimization,
         meta: { requiresAdmin: true }
       },
       {

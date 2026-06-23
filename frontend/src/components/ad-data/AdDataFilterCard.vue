@@ -131,6 +131,12 @@ const props = defineProps({
   filterCountries: { type: Array, default: () => [] },
   filterAdUnits: { type: Array, default: () => [] },
   showDimension: { type: Boolean, default: true },
+  /** 固定页说明（每日统计子菜单） */
+  pageHint: { type: String, default: '' },
+  /** 显式控制国家筛选；未传时按统计维度推断 */
+  enableCountryFilter: { type: Boolean, default: null },
+  /** 显式控制广告单元筛选；未传时按统计维度推断 */
+  enableAdUnitFilter: { type: Boolean, default: null },
   defaultHint: {
     type: String,
     default: '默认查询数据是本月数据，如果要查询其它时间，请自行选择日期范围。'
@@ -152,23 +158,32 @@ const emit = defineEmits([
 
 const dimensionOptions = AD_DATA_DIMENSION_OPTIONS;
 
-const showCountry = computed(() =>
-  props.showDimension
-    ? showCountryFilterForDimension(searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION)
-    : true
+const dimension = computed(
+  () => searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION
 );
 
-const showAdUnit = computed(() =>
-  props.showDimension &&
-  showAdUnitFilterForDimension(searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION)
-);
+const showCountry = computed(() => {
+  if (props.enableCountryFilter === true) return true;
+  if (props.enableCountryFilter === false) return false;
+  return props.showDimension
+    ? showCountryFilterForDimension(dimension.value)
+    : true;
+});
+
+const showAdUnit = computed(() => {
+  if (props.enableAdUnitFilter === true) return true;
+  if (props.enableAdUnitFilter === false) return false;
+  return props.showDimension && showAdUnitFilterForDimension(dimension.value);
+});
 
 const hintText = computed(() => {
+  if (props.pageHint) {
+    return props.defaultHint ? `${props.pageHint} ${props.defaultHint}` : props.pageHint;
+  }
   if (!props.showDimension) {
     return props.defaultHint;
   }
-  const dimension = searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION;
-  const dimensionHint = AD_DATA_DIMENSION_HINTS[dimension] || '';
+  const dimensionHint = AD_DATA_DIMENSION_HINTS[dimension.value] || '';
   return `${dimensionHint} ${props.defaultHint}`;
 });
 </script>

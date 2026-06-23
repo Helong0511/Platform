@@ -93,6 +93,16 @@ async def export_ad_data(
             "country",
             description="统计维度：country=按国家，ad_unit=按广告单元，ad_unit_country=按广告单元+国家（country_ad_unit 为兼容别名）",
         ),
+        daily_summary: bool = Query(
+            False,
+            description="每日统计页导出：true 时导出与 daily-summary 相同的聚合结果",
+        ),
+        split_by_country: bool = Query(
+            False,
+            description="国家维度日汇总是否按国家分行（国家数据页）",
+        ),
+        sort_by: str = Query("date", description="排序字段"),
+        sort_order: str = Query("desc", description="排序方向，asc 或 desc"),
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
@@ -113,6 +123,10 @@ async def export_ad_data(
             country_code=country_code,
             ad_unit=ad_unit,
             dimension=dimension,
+            daily_summary=daily_summary,
+            split_by_country=split_by_country,
+            sort_by=sort_by,
+            sort_order=sort_order,
             db=db,
             current_user=current_user
         )

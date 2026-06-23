@@ -39,7 +39,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import jwt
 from sqlalchemy import func, and_
@@ -48,7 +48,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
 from app.core.audit_log import log_login, log_logout, commit_audit_log
-from app.core.auth_response import build_token_json_response, raise_auth_error
+from app.core.auth_response import build_token_json_response, clear_auth_cookies, raise_auth_error
 from app.core.auth_user_payload import build_auth_user_payload
 from app.core.config import settings
 from app.core.errors import ErrorCode
@@ -399,17 +399,18 @@ async def login(
     )
 
 
-@router.post("/logout", response_model=ResponseBaseSchema[dict], summary="用户退出登录")
+@router.post("/logout", summary="用户退出登录")
 async def logout(
         request: Request,
+        response: Response,
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
     """
     用户退出登录接口
     - 记录退出登录操作到审计日志
-    - 注意：JWT是无状态的，这里主要是记录日志
-    - 实际的token失效由前端清除，或等待token过期
+    - 清除 HttpOnly Cookie 中的 access_token 和 refresh_token
+    - 使令牌立即失效
     
     功能：用户登出（logout）。
     实现：异步端点，通过 Service 层访问数据库/缓存。
@@ -423,10 +424,15 @@ async def logout(
 
         logger.info(f"User {current_user.username} logged out successfully")
 
+        clear_auth_cookies(response)
+
         return ResponseBaseSchema.success(data={"message": "退出登录成功"})
     except HTTPException:
         raise
     except Exception as e:
         # 日志记录失败不应该影响退出登录
         logger.warning(f"记录退出登录日志失败: {e}")
+
+        clear_auth_cookies(response)
+        
         return ResponseBaseSchema.success(data={"message": "退出登录成功"})

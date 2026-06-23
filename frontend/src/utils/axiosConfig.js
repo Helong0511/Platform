@@ -14,6 +14,62 @@ import {
   getCsrfTokenFromResponse,
   fetchCsrfTokenFromEndpoints
 } from './csrfToken';
+import { createCacheInterceptor, DEFAULT_GET_CACHE_URL_PATTERNS } from './requestCache.js';
+
+/** 开发环境网络错误提示冷却，避免广告数据页并发筛选请求刷屏 */
+let lastDevNetworkErrorAt = 0;
+const DEV_NETWORK_ERROR_COOLDOWN_MS = 4000;
+/** 开发环境 health 探测缓存，避免每个失败请求都探测 */
+let devBackendHealthCache = { ok: null, checkedAt: 0 };
+const DEV_HEALTH_PROBE_TTL_MS = 5000;
+
+function isCanceledRequest(error) {
+  const code = error?.code;
+  const name = error?.name;
+  const message = error?.message || '';
+  return (
+    code === 'ERR_CANCELED'
+    || name === 'CanceledError'
+    || name === 'AbortError'
+    || message === 'canceled'
+  );
+}
+
+/** 缓存/去重拦截器内部信号，须交给 cache error 处理，不得弹网络错误 */
+function isRequestCacheInternalError(error) {
+  return Boolean(
+    error?._pending
+    || error?._cached
+    || error?.config?.__cacheDedupWaiter
+  );
+}
+
+async function probeDevBackendHealth() {
+  const now = Date.now();
+  if (
+    devBackendHealthCache.ok !== null
+    && now - devBackendHealthCache.checkedAt < DEV_HEALTH_PROBE_TTL_MS
+  ) {
+    return devBackendHealthCache.ok;
+  }
+  try {
+    await axios.get('/api/v1/health', { timeout: 2000, skipRequestCache: true });
+    devBackendHealthCache = { ok: true, checkedAt: now };
+    return true;
+  } catch {
+    devBackendHealthCache = { ok: false, checkedAt: now };
+    return false;
+  }
+}
+
+function showDevNetworkError(message) {
+  const now = Date.now();
+  if (now - lastDevNetworkErrorAt < DEV_NETWORK_ERROR_COOLDOWN_MS) {
+    return;
+  }
+  lastDevNetworkErrorAt = now;
+  ElMessage.error(message);
+}
 
 /**
  * 配置 Axios 请求拦截器
@@ -43,12 +99,13 @@ export const setupRequestInterceptor = () => {
       // 设置合理的超时时间（根据不同的请求类型和设备类型调整）
       if (!config.timeout) {
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const isDev = import.meta.env.DEV;
 
         // 文件上传使用更长的超时时间
         if (config.method === 'post' && config.data instanceof FormData) {
           config.timeout = isMobile ? 60000 : 30000; // 移动端60秒，桌面端30秒
         } else {
-          // 普通请求：移动端使用更长的超时时间
+          // 普通请求：移动端使用更长的超时时间；本地开发适当放宽
           const isAdDataRequest = config.url && (
             config.url.includes('/ad-data/') &&
             !config.url.includes('/export')
@@ -61,9 +118,9 @@ export const setupRequestInterceptor = () => {
           if (isAdDataRequest) {
             config.timeout = isMobile ? 60000 : 45000;
           } else if (isDataListRequest) {
-            config.timeout = isMobile ? 30000 : 20000;
+            config.timeout = isMobile ? 30000 : (isDev ? 30000 : 20000);
           } else {
-            config.timeout = isMobile ? 30000 : 15000;
+            config.timeout = isMobile ? 30000 : (isDev ? 30000 : 15000);
           }
         }
       }
@@ -220,6 +277,11 @@ export const setupResponseInterceptor = () => {
       return response;
     },
     async (error) => {
+      // 缓存命中 / 去重等待：由 cache 响应错误拦截器处理，此处勿弹网络错误
+      if (isRequestCacheInternalError(error)) {
+        return Promise.reject(error);
+      }
+
       // 即使请求失败，也尝试从响应头中获取CSRF令牌（优先处理）
       // 这对于CSRF令牌不匹配的情况特别重要，后端会在错误响应头中返回正确的令牌
       const csrfTokenFromError = extractAndSaveCsrfToken(error);
@@ -248,44 +310,24 @@ export const setupResponseInterceptor = () => {
           return Promise.reject(error);
         }
 
-        // 尝试使用刷新令牌自动刷新访问令牌
+        // 尝试使用刷新令牌自动刷新访问令牌（refresh_token 从 HttpOnly Cookie 自动获取）
         try {
           const { refreshAccessToken } = await import('../api/auth');
           const userInfoStr = sessionStorage.getItem('userInfo');
 
           if (userInfoStr) {
-            const userInfo = JSON.parse(userInfoStr);
-            // 检查是否有刷新令牌（存储在sessionStorage中）
-            const refreshToken = sessionStorage.getItem('refresh_token');
-
-            if (refreshToken) {
-              try {
-                // 尝试刷新令牌
-                const refreshResponse = await refreshAccessToken(refreshToken);
-
-                const tokenPayload = refreshResponse?.data?.access_token
-                  ? refreshResponse.data
-                  : refreshResponse;
-                if (tokenPayload && tokenPayload.access_token) {
-                  if (tokenPayload.user) {
-                    sessionStorage.setItem('userInfo', JSON.stringify(tokenPayload.user));
-                  }
-                  if (tokenPayload.refresh_token) {
-                    sessionStorage.setItem('refresh_token', tokenPayload.refresh_token);
-                  }
-
-                  // 重试原始请求（认证主要靠 HttpOnly Cookie；若有 access_token 则附带 Header）
-                  const originalRequest = error.config;
-                  originalRequest.headers = originalRequest.headers || {};
-                  if (tokenPayload.access_token) {
-                    originalRequest.headers['Authorization'] = `Bearer ${tokenPayload.access_token}`;
-                  }
-                  return axios(originalRequest);
-                }
-              } catch (refreshError) {
-                // 刷新令牌失败，继续执行清除认证数据的流程
-                logger.warn('令牌刷新失败:', refreshError);
+            try {
+              const refreshResponse = await refreshAccessToken();
+              const payload = refreshResponse?.user
+                ? refreshResponse
+                : refreshResponse?.data;
+              if (payload?.user) {
+                sessionStorage.setItem('userInfo', JSON.stringify(payload.user));
+                // 认证由 HttpOnly Cookie 承载，直接重试原请求
+                return axios(error.config);
               }
+            } catch (refreshError) {
+              logger.warn('令牌刷新失败:', refreshError);
             }
           }
         } catch (e) {
@@ -299,7 +341,7 @@ export const setupResponseInterceptor = () => {
           : '登录已过期，请重新登录';
 
         clearAuthData();
-        sessionStorage.removeItem('refresh_token'); // 清除刷新令牌
+        // refresh_token 和 access_token 存储在 HttpOnly Cookie 中，由后端在 logout 接口中清除
         error._handled = true;
 
         if (window.location.pathname !== '/login') {
@@ -364,17 +406,51 @@ export const setupResponseInterceptor = () => {
           error._handled = true;
         }
       } else if (!error._handled && !error.response) {
+        // 路由切换/防抖取消的请求不应提示「无法连接后端」
+        if (isCanceledRequest(error)) {
+          error._handled = true;
+          return Promise.reject(error);
+        }
         // 网络错误或其他错误（无响应）
         if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
           const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-          const errorMsg = isMobile
-            ? '网络连接超时，请检查网络连接或稍后重试'
-            : '请求超时，请检查网络连接';
-          ElMessage.error(errorMsg);
+          const errorMsg = import.meta.env.DEV
+            ? '请求超时：请确认后端已启动 (uvicorn … --port 8960)，且 MySQL 可连接'
+            : (isMobile
+              ? '网络连接超时，请检查网络连接或稍后重试'
+              : '请求超时，请检查网络连接');
+          if (import.meta.env.DEV) {
+            showDevNetworkError(errorMsg);
+          } else {
+            ElMessage.error(errorMsg);
+          }
         } else {
-          ElMessage.error('网络连接失败，请检查网络连接');
+          let errorMsg = import.meta.env.DEV
+            ? '无法连接后端 (8960)，请先启动：uvicorn app.main:app --host 0.0.0.0 --port 8960'
+            : '网络连接失败，请检查网络连接';
+          if (import.meta.env.DEV) {
+            const backendUp = await probeDevBackendHealth();
+            if (backendUp) {
+              errorMsg = '部分请求未完成（可能因页面切换或并发去重），请刷新后重试';
+              logger.warn('[网络] 无响应但 health 正常', {
+                code: error.code,
+                message: error.message,
+                url: error.config?.url,
+              });
+            }
+          }
+          if (import.meta.env.DEV) {
+            showDevNetworkError(errorMsg);
+          } else {
+            ElMessage.error(errorMsg);
+          }
         }
         error._handled = true;
+      } else if (!error._handled && error.response && import.meta.env.DEV) {
+        if (error.response.status === 502 || error.response.status === 504) {
+          showDevNetworkError('后端未响应 (8960)，请确认 uvicorn 已启动且未卡在 reload');
+          error._handled = true;
+        }
       } else if (!error._handled) {
         // 其他未处理的错误
         const errorData = error.response?.data;
@@ -390,11 +466,34 @@ export const setupResponseInterceptor = () => {
 };
 
 /**
+ * 注册请求缓存/去重拦截器（须在 setupResponseInterceptor 之前注册，使 cache error 先于 CSRF error 处理 _cached/_pending）
+ */
+export const setupCacheInterceptor = () => {
+  const cacheInterceptor = createCacheInterceptor({
+    enabled: false,
+    dedup: true,
+    cacheUrlPatterns: DEFAULT_GET_CACHE_URL_PATTERNS,
+    ttl: 5 * 60 * 1000,
+    persist: false,
+  });
+
+  axios.interceptors.request.use(
+    cacheInterceptor.request,
+    (error) => Promise.reject(error)
+  );
+  axios.interceptors.response.use(
+    cacheInterceptor.response,
+    cacheInterceptor.error
+  );
+};
+
+/**
  * 初始化 Axios 配置
  */
 export const initAxiosConfig = () => {
   axios.defaults.withCredentials = true;
   setupRequestInterceptor();
+  setupCacheInterceptor();
   setupResponseInterceptor();
 };
 

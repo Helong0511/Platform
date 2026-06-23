@@ -18,6 +18,7 @@ from app.api_v1.excel.utils import parse_date_value
 from app.core.exceptions import handle_integrity_error, raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.utils import format_error_details, build_import_message, get_date_range
+from app.core.country_code import normalize_ad_data_country_cache_key
 from app.models.models import User, AdData, AdminNotificationConfig
 from app.schemas.excel import ExcelImportResponse
 from app.services.telegram_notification_service import TelegramNotificationService
@@ -151,7 +152,7 @@ async def import_ad_data_handler(
                 for record in existing_result.scalars().all():
                     # 使用日期（不包含时间）和产品ID作为key
                     record_date = record.date.date() if hasattr(record.date, 'date') else record.date
-                    record_country = record.country_code or "ZZ"
+                    record_country = normalize_ad_data_country_cache_key(record.country_code)
                     key = (record_date, record.product_id, record_country, record.ad_unit or '')
                     existing_records[key] = record
                 logger.debug(f"批量查询到 {len(existing_records)} 条已存在的记录")

@@ -315,14 +315,18 @@ async def get_daily_summary(
             "country",
             description="统计维度：country=按国家，ad_unit=按广告单元，ad_unit_country=按广告单元+国家（country_ad_unit 为兼容别名）",
         ),
+        split_by_country: bool = Query(
+            False,
+            description="国家维度日汇总是否按国家分行（国家数据页）；交叉维度时后端自动按国家分组",
+        ),
         sort_by: str = Query("date", description="排序字段，默认为date"),
         sort_order: str = Query("desc", description="排序方向，asc或desc")
 ):
     """
     获取每日汇总数据（按统计维度分组，已重构使用服务层）
-    - 按国家：筛选国家级明细，按产品+日期汇总（所有国家合并为一条）
+    - 按国家：筛选国家级明细，按产品+日期汇总；split_by_country=true 时按国家分行
     - 按广告单元：按产品+日期+广告单元汇总
-    - 按广告单元+国家：筛选交叉明细，按产品+日期+广告单元汇总（所有国家合并）
+    - 按广告单元+国家：筛选交叉明细，按产品+日期+广告单元+国家汇总
     - 支持分页、过滤和排序
     - 管理员可查看所有数据，客户只能查看自己的数据
     """
@@ -333,7 +337,7 @@ async def get_daily_summary(
     ad_data_service: AdDataService = await get_ad_data_service(db)
     
     # 调用服务层获取每日汇总数据（服务层会处理查询、分组、排序、分页等）
-    ad_data_responses, total = await ad_data_service.get_daily_summary(
+    ad_data_responses, total, grand_total = await ad_data_service.get_daily_summary(
         current_user=current_user,
         page=page,
         page_size=page_size,
@@ -344,6 +348,7 @@ async def get_daily_summary(
         country_code=country_code,
         ad_unit=ad_unit,
         dimension=dimension,
+        split_by_country=split_by_country,
         sort_by=sort_by,
         sort_order=sort_order
     )
@@ -355,7 +360,8 @@ async def get_daily_summary(
         data=ad_data_list,
         total=total,
         page=page,
-        page_size=page_size
+        page_size=page_size,
+        grand_total=grand_total,
     )
 
 

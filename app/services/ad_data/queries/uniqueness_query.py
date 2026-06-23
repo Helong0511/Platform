@@ -8,7 +8,10 @@
 """
 from datetime import date, datetime
 from typing import Optional, Tuple
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.country_code import build_ad_data_country_equality
 
 from app.models.models import AdData, CountryInfo, Product
 
@@ -32,10 +35,8 @@ class AdDataUniquenessQuery:
         )
 
     @staticmethod
-    def _country_condition(country_code: str):
-        if country_code == "ZZ":
-            return or_(AdData.country_code == "ZZ", AdData.country_code.is_(None))
-        return AdData.country_code == country_code
+    def _country_condition(country_code: Optional[str]):
+        return build_ad_data_country_equality(AdData.country_code, country_code)
 
     async def find_conflict(
         self,
@@ -92,7 +93,9 @@ class AdDataUniquenessQuery:
         )
 
     async def _resolve_country_name(self, country_code: Optional[str]) -> str:
-        if not country_code or country_code == "ZZ":
+        if not country_code:
+            return "无国家"
+        if country_code == "ZZ":
             return "全部区域"
         result = await self.db.execute(
             select(CountryInfo).where(CountryInfo.alpha_2_code == country_code)

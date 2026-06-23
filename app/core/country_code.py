@@ -25,7 +25,7 @@
   - 优先匹配最长的匹配项（最完整的匹配）
 
 特殊代码处理：
-- "ZZ"：全部区域（用于统计查询；数据源未提供国家时也使用）
+- "ZZ"：全部区域（用于统计筛选与展示；上游 API 无国家字段时入库 NULL）
 - "AA"：未知区域（历史数据或 countries 表登记项；新导入无法识别时保留原始代码）
 - "unknown"：自动匹配为未知区域
 
@@ -219,7 +219,7 @@ def preserve_unrecognized_country_code(
     """
     无法识别国家时保留完整原始输入，截断至数据库字段长度上限。
 
-    空值仍返回 ZZ（全部区域），表示数据源未提供国家信息。
+    空值返回 ZZ（全部区域，用于手动录入/筛选）；上游 API 无国家字段时由入库逻辑写 NULL。
     """
     if not country_input or not isinstance(country_input, str):
         return "ZZ"
@@ -247,6 +247,30 @@ def collect_country_filter_values(
     if preserved != "ZZ":
         candidates.add(preserved)
     return candidates
+
+
+def build_ad_data_country_equality(country_code_column: Any, country_code: Optional[str]) -> Any:
+    """
+    单行 country_code 等值条件（入库去重、Excel 查重）。
+
+    无国家（NULL）与历史 ZZ 视为同一类，避免重复插入。
+    用户显式筛选/写入 ZZ（全部区域）时同样兼容 NULL。
+    """
+    if country_code is None or (isinstance(country_code, str) and not country_code.strip()):
+        return or_(country_code_column.is_(None), country_code_column == "ZZ")
+    if country_code == "ZZ":
+        return or_(country_code_column == "ZZ", country_code_column.is_(None))
+    return country_code_column == country_code
+
+
+def normalize_ad_data_country_cache_key(country_code: Optional[str]) -> Optional[str]:
+    """预加载/Excel 批次去重键：无国家（NULL、空串、ZZ）统一为 None。"""
+    if not country_code or not str(country_code).strip():
+        return None
+    code = str(country_code).strip()
+    if code == "ZZ":
+        return None
+    return code
 
 
 async def build_ad_data_country_filter(

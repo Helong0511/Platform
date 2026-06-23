@@ -16,7 +16,7 @@ import { parseAuthResponseData } from '../utils/authResponse';
  * @param {string} password - 密码
  * @param {Object} [options]
  * @param {number} [options.timeout] - 超时毫秒
- * @returns {Promise<Object>} { access_token, token_type, refresh_token, user }
+ * @returns {Promise<Object>} { token_type, user }（令牌在 HttpOnly Cookie）
  */
 /**
  * loginOAuth2 接口。
@@ -47,16 +47,13 @@ export const loginOAuth2 = async (username, password, options = {}) => {
 
 /**
  * 刷新访问令牌
- * @param {string} refreshToken - 刷新令牌
+ * refresh_token 从 HttpOnly Cookie 中自动获取，无需手动传递
  * @returns {Promise<Object>} 新的令牌和用户信息
  */
-export const refreshAccessToken = async (refreshToken) => {
+export const refreshAccessToken = async () => {
   return request({
     url: '/api/v1/auth/refresh',
-    method: 'post',
-    data: {
-      refresh_token: refreshToken
-    }
+    method: 'post'
   }, { returnDataOnly: true });
 };
 

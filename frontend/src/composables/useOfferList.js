@@ -38,6 +38,8 @@ export function useOfferList() {
     advertiserList,
     publisherList,
     loadAdvertiserPublisher,
+    loadAdvertisers,
+    loadPublishers,
   } = useCplFilterOptions();
 
   const loadData = async () => {
@@ -90,9 +92,9 @@ export function useOfferList() {
     loadData();
   };
 
-  const initPage = () => {
-    loadAdvertiserPublisher();
-    loadData();
+  const initPage = async () => {
+    await loadAdvertiserPublisher();
+    await loadData();
   };
 
   return {
@@ -106,6 +108,9 @@ export function useOfferList() {
     tableData,
     advertiserList,
     publisherList,
+    loadAdvertisers,
+    loadPublishers,
+    loadAdvertiserPublisher,
     loadData,
     handleSearch,
     handleReset,

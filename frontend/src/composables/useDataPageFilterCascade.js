@@ -142,6 +142,7 @@ function normalizeFilterFieldToString(form, field) {
  * @param {'ad-data'|'tb-search'} [options.source='ad-data']
  * @param {Object} [options.api] 自定义 API，覆盖 source
  * @param {() => string|number|null|undefined} [options.getUserId] 当前用户 ID，用于统计维度偏好持久化
+ * @param {boolean} [options.fixedDimension=false] 固定维度页（不读写 localStorage 偏好）
  */
 export function useDataPageFilterCascade({
   searchForm,
@@ -149,7 +150,8 @@ export function useDataPageFilterCascade({
   includeDimension = false,
   source = 'ad-data',
   api: apiOverride = null,
-  getUserId = null
+  getUserId = null,
+  fixedDimension = false
 }) {
   const api =
     apiOverride || (source === 'tb-search' ? TB_SEARCH_API : AD_DATA_API);
@@ -420,6 +422,8 @@ export function useDataPageFilterCascade({
       searchForm.value.adUnit = '';
     } else if (!includeCountry) {
       return;
+    } else {
+      searchForm.value.countryCode = '';
     }
     await reloadSecondaryFilters();
     fixSelectDisplay();
@@ -439,7 +443,26 @@ export function useDataPageFilterCascade({
     fixSelectDisplay();
   };
 
-  const handleCountryChange = () => {
+  const handleCountryChange = async () => {
+    if (includeDimension) {
+      const dimension = getDimension();
+      if (isAdUnitCountryDimension(dimension)) {
+        searchForm.value.adUnit = '';
+        await fetchFilterAdUnits(
+          getClientId(),
+          getProductId(),
+          searchForm.value.countryCode || null
+        );
+        await fetchFilterCountries(getClientId(), getProductId(), null);
+      } else if (showAdUnitFilterForDimension(dimension)) {
+        searchForm.value.adUnit = '';
+        await fetchFilterAdUnits(
+          getClientId(),
+          getProductId(),
+          searchForm.value.countryCode || null
+        );
+      }
+    }
     fixSelectDisplay();
   };
 
@@ -473,7 +496,7 @@ export function useDataPageFilterCascade({
     pruneInvalidFilterSelections(isAdmin);
   };
 
-  if (includeDimension && getUserId) {
+  if (includeDimension && getUserId && !fixedDimension) {
     watch(
       () => getUserId(),
       (userId) => {
@@ -487,7 +510,9 @@ export function useDataPageFilterCascade({
         }
       }
     );
+  }
 
+  if (includeDimension && !fixedDimension) {
     watch(
       () => searchForm.value.dimension,
       () => {
@@ -511,6 +536,7 @@ export function useDataPageFilterCascade({
     handleCountryChange,
     handleAdUnitChange,
     reloadFiltersAfterDateChange,
+    reloadSecondaryFilters,
     loadAllFilterOptions,
     pruneInvalidFilterSelections
   };

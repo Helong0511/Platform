@@ -217,6 +217,22 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[Worker PID:{worker_pid}] 启动缓存预热失败: {e}，继续启动...")
 
+    # 启动系统监控与性能优化后台任务
+    try:
+        from app.core.monitoring import start_monitoring_tasks
+        from app.core.performance_optimization import (
+            optimization_manager,
+            start_bottleneck_detection,
+        )
+
+        await optimization_manager.ensure_hydrated_from_redis()
+        asyncio.create_task(start_monitoring_tasks())
+        asyncio.create_task(start_bottleneck_detection())
+        logger.info(f"[Worker PID:{worker_pid}] 系统监控与瓶颈检测任务已启动")
+    except Exception as e:
+        logger.error(f"[Worker PID:{worker_pid}] 系统监控/瓶颈检测任务启动失败: {e}", exc_info=True)
+        logger.warning(f"[Worker PID:{worker_pid}] 应用将继续启动，监控功能可能不可用")
+
     logger.info("应用启动完成")
 
     # 按 systemd 服务角色发送启动通知（与 Bot 锁无关）
@@ -233,6 +249,14 @@ async def lifespan(app: FastAPI):
 
     # ====== 关闭时执行 ======
     logger.info("应用关闭中...")
+    try:
+        from app.core.monitoring import system_monitor
+
+        await system_monitor.stop_resource_monitor()
+    except asyncio.CancelledError:
+        logger.debug("资源监控关闭时任务被取消（正常关闭流程）")
+    except Exception as e:
+        logger.warning(f"关闭资源监控时出现错误: {e}")
     try:
         from app.scheduler_module.scheduler import mark_scheduler_shutting_down
 

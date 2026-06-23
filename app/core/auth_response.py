@@ -1,61 +1,96 @@
 """
-认证相关响应与异常辅助（与业务 API 的 ResponseBaseSchema 对齐）。
+认证 Cookie 与登录/刷新响应辅助。
 
-封装登录/刷新成功时的 JSON 响应与 HttpOnly Cookie 设置，以及认证类 HTTP 异常抛出。
+令牌仅通过 HttpOnly Cookie 下发，JSON 响应体不包含 access_token / refresh_token。
 """
 from typing import Any, Dict, Optional
 
-from fastapi import status
+from fastapi import Response, status
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import settings
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.schemas.base import ResponseBaseSchema
 
+# 与 Nginx 同域反代一致；set/delete 必须使用相同 path
+AUTH_COOKIE_PATH = "/"
 
-def raise_auth_error(
-        error_code: int,
-        detail: str,
-        *,
-        http_status: int = status.HTTP_401_UNAUTHORIZED,
+
+def clear_auth_cookies(response: Response) -> None:
+    """清除认证 Cookie（logout / refresh 失败时调用）。"""
+    for key in ("access_token", "refresh_token"):
+        response.delete_cookie(
+            key=key,
+            path=AUTH_COOKIE_PATH,
+            httponly=True,
+            secure=settings.is_production,
+            samesite="lax",
+        )
+
+
+def apply_auth_cookies(
+    response: Response,
+    *,
+    access_token: str,
+    refresh_token: Optional[str] = None,
 ) -> None:
-    """
-    抛出认证类错误（保留真实 HTTP 状态码，响应体为标准 JSON）。
-
-    Args:
-        error_code: 业务错误码（ErrorCode 枚举值）
-        detail: 错误详情文案
-        http_status: HTTP 状态码，默认 401
-    """
-    raise_api_exception(error_code, detail=detail, status_code=http_status)
-
-
-def build_token_json_response(
-        access_token: str,
-        refresh_token: Optional[str],
-        user: Dict[str, Any],
-        *,
-        message: str = "登录成功",
-) -> JSONResponse:
-    """
-    构建登录/刷新成功响应：{ code: 200, message, data: LoginResponse 字段 }
-    同时设置 HttpOnly access_token Cookie
-    """
-    token_payload = {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-        "user": user,
-    }
-    body = ResponseBaseSchema.success(data=token_payload, message=message).model_dump()
-    response = JSONResponse(content=body)
+    """设置 access_token / refresh_token HttpOnly Cookie。"""
     response.set_cookie(
         key="access_token",
         value=access_token,
+        path=AUTH_COOKIE_PATH,
         httponly=True,
         secure=settings.is_production,
         samesite="lax",
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
+    if refresh_token:
+        response.set_cookie(
+            key="refresh_token",
+            value=refresh_token,
+            path=AUTH_COOKIE_PATH,
+            httponly=True,
+            secure=settings.is_production,
+            samesite="lax",
+            max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        )
+
+
+def raise_auth_error(
+    error_code: int,
+    detail: str,
+    *,
+    http_status: int = status.HTTP_401_UNAUTHORIZED,
+) -> None:
+    """抛出认证类 HTTP 异常（标准 JSON 响应体）。"""
+    raise_api_exception(error_code, detail=detail, status_code=http_status)
+
+
+def auth_failure_response(exc: StarletteHTTPException) -> JSONResponse:
+    """认证失败响应：保留 HTTP 状态与业务 JSON，并清除无效 Cookie。"""
+    content = exc.detail if isinstance(exc.detail, dict) else {"detail": exc.detail}
+    response = JSONResponse(status_code=exc.status_code, content=content)
+    clear_auth_cookies(response)
+    return response
+
+
+def build_token_json_response(
+    access_token: str,
+    refresh_token: Optional[str],
+    user: Dict[str, Any],
+    *,
+    message: str = "登录成功",
+) -> JSONResponse:
+    """
+    登录/刷新成功：响应体仅含 user + token_type，令牌写入 HttpOnly Cookie。
+    """
+    token_payload = {
+        "token_type": "bearer",
+        "user": user,
+    }
+    body = ResponseBaseSchema.success(data=token_payload, message=message).model_dump()
+    response = JSONResponse(content=body)
+    apply_auth_cookies(response, access_token=access_token, refresh_token=refresh_token)
     return response

@@ -27,9 +27,178 @@ from app.services.ad_data.queries.dimension_filter import (
     build_ad_data_dimension_filter,
     build_ad_unit_exact_filter,
     country_exact_filter_applies,
+    is_cross_dimension,
+    normalize_dimension,
 )
+from app.services.ad_data.queries.daily_summary_query import DailySummaryQuery
 
 logger = logging.getLogger(__name__)
+
+MAX_DAILY_SUMMARY_EXPORT_ROWS = 50_000
+
+
+def resolve_daily_summary_export_grouping(
+    dimension: str | None,
+    split_by_country: bool,
+) -> tuple[bool, bool]:
+    """
+    与 DailySummaryQuery.fetch 及每日统计各子页配置对齐的分组列。
+
+    - 每日统计：country + split_by_country=false → 仅日期+产品
+    - 国家数据：country + split_by_country=true → 日期+产品+国家
+    - 广告单元：ad_unit → 日期+产品+广告单元
+    - 详细报表：ad_unit_country → 日期+产品+广告单元+国家
+    """
+    dim = normalize_dimension(dimension)
+    group_by_ad_unit = dim == "ad_unit" or is_cross_dimension(dim)
+    group_by_country = split_by_country or is_cross_dimension(dim)
+    return group_by_ad_unit, group_by_country
+
+
+def build_daily_summary_export_row(
+    row: dict,
+    *,
+    is_admin_user: bool,
+    group_by_ad_unit: bool,
+    group_by_country: bool,
+) -> dict:
+    """将 daily-summary 汇总行转为 Excel 列（列与每日统计页表格一致）。"""
+    coverage_rate = row.get("coverage_rate", 0) or 0
+    display_rate = row.get("display_rate", 0) or 0
+    click_rate = row.get("click_rate", 0) or 0
+    viewability_rate = row.get("viewability_rate", 0) or 0
+
+    excel_row: dict = {
+        "数据日期": row.get("date", ""),
+        "产品名称": row.get("product_name", ""),
+    }
+    if is_admin_user:
+        excel_row["所属用户"] = row.get("user_name", "")
+    if group_by_ad_unit:
+        excel_row["广告单元"] = row.get("ad_unit") or ""
+    if group_by_country:
+        excel_row["国家"] = row.get("country_name_zh") or ""
+
+    excel_row.update(
+        {
+            "请求数": row.get("request_count", 0),
+            "匹配数": row.get("match_count", 0),
+            "覆盖率": f"{coverage_rate}%",
+            "展示数": row.get("display_count", 0),
+            "展示率": f"{display_rate}%",
+            "点击数": row.get("click_count", 0),
+            "点击率": f"{click_rate}%",
+            "可见率": f"{viewability_rate}%",
+            "CPC($)": round(row.get("cpc") or 0.0, 2),
+            "PageViews": row.get("pageviews", 0) or 0,
+            "eCPM(扣)($)": round(row.get("ecpm_after_deduct") or 0.0, 4),
+            "收益(扣)($)": round(row.get("revenue_after_deduct") or 0.0, 4),
+        }
+    )
+    if is_admin_user:
+        excel_row["eCPM($)"] = round(row.get("ecpm_before_deduct") or 0.0, 4)
+        excel_row["收益($)"] = round(row.get("revenue_before_deduct") or 0.0, 4)
+    else:
+        excel_row["eCPM($)"] = round(row.get("ecpm_after_deduct") or 0.0, 4)
+        excel_row["收益($)"] = round(row.get("revenue_after_deduct") or 0.0, 4)
+
+    return excel_row
+
+
+async def _export_daily_summary_excel(
+    db: AsyncSession,
+    current_user: User,
+    target_client_id: int | None,
+    start_date: date | None,
+    end_date: date | None,
+    product_id: int | None,
+    country_code: str | None,
+    ad_unit: str | None,
+    dimension: str | None,
+    split_by_country: bool,
+    sort_by: str,
+    sort_order: str,
+) -> StreamingResponse:
+    """每日统计页导出：与 daily-summary API 相同聚合粒度，非底层明细。"""
+    group_by_ad_unit, group_by_country = resolve_daily_summary_export_grouping(
+        dimension, split_by_country
+    )
+
+    product_id_str = str(product_id) if product_id is not None else None
+    summary_query = DailySummaryQuery(db)
+
+    _, total, _ = await summary_query.fetch(
+        current_user=current_user,
+        page=1,
+        page_size=1,
+        start_date=start_date,
+        end_date=end_date,
+        client_id=target_client_id,
+        product_id=product_id_str,
+        country_code=country_code,
+        ad_unit=ad_unit,
+        dimension=dimension,
+        split_by_country=split_by_country,
+        sort_by=sort_by or "date",
+        sort_order=sort_order or "desc",
+    )
+
+    if total == 0:
+        filter_info = []
+        if start_date:
+            filter_info.append(f"开始日期: {start_date}")
+        if end_date:
+            filter_info.append(f"结束日期: {end_date}")
+        if product_id:
+            filter_info.append(f"产品ID: {product_id}")
+        if target_client_id:
+            filter_info.append(f"客户ID: {target_client_id}")
+        if country_code and country_code.strip() and country_code.strip() != "ZZ":
+            filter_info.append(f"国家代码: {country_code}")
+        filter_text = "、".join(filter_info) if filter_info else "当前筛选条件"
+        raise_api_exception(
+            error_code=ErrorCode.NOT_FOUND,
+            message="无数据，不能导出",
+            detail=f"当前筛选条件下没有可导出的数据（{filter_text}）。请调整筛选条件或确认是否有数据后重试",
+        )
+
+    export_page_size = min(total, MAX_DAILY_SUMMARY_EXPORT_ROWS)
+    if total > MAX_DAILY_SUMMARY_EXPORT_ROWS:
+        logger.warning(
+            "每日统计导出行数 %s 超过上限 %s，仅导出前 %s 行",
+            total,
+            MAX_DAILY_SUMMARY_EXPORT_ROWS,
+            MAX_DAILY_SUMMARY_EXPORT_ROWS,
+        )
+
+    rows, _, _ = await summary_query.fetch(
+        current_user=current_user,
+        page=1,
+        page_size=export_page_size,
+        start_date=start_date,
+        end_date=end_date,
+        client_id=target_client_id,
+        product_id=product_id_str,
+        country_code=country_code,
+        ad_unit=ad_unit,
+        dimension=dimension,
+        split_by_country=split_by_country,
+        sort_by=sort_by or "date",
+        sort_order=sort_order or "desc",
+    )
+
+    is_admin_user = current_user.role == UserRole.ADMIN
+    data = [
+        build_daily_summary_export_row(
+            row,
+            is_admin_user=is_admin_user,
+            group_by_ad_unit=group_by_ad_unit,
+            group_by_country=group_by_country,
+        )
+        for row in rows
+    ]
+
+    return excel_streaming_response(data, "每日统计", "每日统计", max_col_width=None)
 
 
 async def export_ad_data_handler(
@@ -40,6 +209,10 @@ async def export_ad_data_handler(
         country_code: str | None = None,
         ad_unit: str | None = None,
         dimension: str | None = None,
+        daily_summary: bool = False,
+        split_by_country: bool = False,
+        sort_by: str = "date",
+        sort_order: str = "desc",
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ) -> StreamingResponse:
@@ -136,6 +309,22 @@ async def export_ad_data_handler(
     else:
         # 管理员可以指定客户ID，也可以不指定（导出所有客户的数据）
         target_client_id = client_id
+
+    if daily_summary:
+        return await _export_daily_summary_excel(
+            db=db,
+            current_user=current_user,
+            target_client_id=target_client_id,
+            start_date=start_date,
+            end_date=end_date,
+            product_id=product_id,
+            country_code=country_code,
+            ad_unit=ad_unit,
+            dimension=dimension,
+            split_by_country=split_by_country,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
 
     # 检查是否使用产品分配历史表
     use_assignment_table = await check_use_assignment_table(db)

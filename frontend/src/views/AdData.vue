@@ -6,6 +6,7 @@
   <!-- 页面主模板 -->
 <div class="ad-data-container">
     <div class="page-header">
+      <h2 class="page-title">广告明细维护</h2>
       <div class="action-buttons">
         <el-button 
           type="primary" 
@@ -37,6 +38,7 @@
       :filter-products="filterProducts"
       :filter-countries="filterCountries"
       :filter-ad-units="filterAdUnits"
+      default-hint="行级明细，支持修改与删除；筛选联动与「详细报表」一致。"
       @fetch="fetchAdData"
       @reset="resetFilter"
       @date-range-change="handleDateRangeChange"
@@ -237,7 +239,8 @@ const {
   handleDimensionChange,
   handleCountryChange,
   handleAdUnitChange,
-  reloadFiltersAfterDateChange
+  reloadFiltersAfterDateChange,
+  reloadSecondaryFilters
 } = useDataPageFilterCascade({
   searchForm,
   includeCountry: true,
@@ -387,6 +390,7 @@ const resetFilter = async () => {
   // 客户用户不需要指定client_id，后端会自动根据当前用户过滤数据
   const defaultClientId = isAdmin.value ? null : null;
   await fetchFilterProducts(defaultClientId);
+  await reloadSecondaryFilters();
   await ensureInitialDateRange();
 
   fetchAdData(); // 重置后刷新数据
@@ -549,7 +553,7 @@ const handleEdit = async (row) => {
     client_id: row.client_id,
     product_id: currentProductId, // 确保使用原始产品ID
     ad_unit: row.ad_unit || '',
-    country_code: row.country_code || 'ZZ', // 国家代码，默认为 'ZZ'（全部区域）
+    country_code: row.country_code ?? '',
     request_count: row.request_count,
     match_count: row.match_count,
     coverage_rate: row.coverage_rate || 0,
@@ -676,7 +680,7 @@ const saveEdit = async () => {
       id: editForm.value.id,
       product_id: editForm.value.product_id,
       ad_unit: editForm.value.ad_unit || '',
-      country_code: editForm.value.country_code || 'ZZ', // 国家代码，如果为空则使用默认值 'ZZ'
+      country_code: editForm.value.country_code?.trim() || null,
       request_count: editForm.value.request_count,
       match_count: editForm.value.match_count,
       display_count: editForm.value.display_count,
@@ -900,16 +904,19 @@ const handleProductManagementRefresh = () => {
   fetchAdData();
 };
 
-// 监听路由变化，当从其他页面导航到 AdData 时自动刷新数据
+// 监听路由变化，当从其他页面导航到本页时自动刷新数据
+const ADMIN_AD_DATA_ROWS_PATH = '/app/admin/ad-data-rows';
+
 watch(
   () => route.path,
   (newPath, oldPath) => {
-    // 当路由路径是 /app/ad-data 且不是首次加载时，刷新数据
-    // 确保是从其他页面导航过来的，而不是首次加载
-    if (newPath === '/app/ad-data' && isPageInitialized && oldPath && oldPath !== '/app/ad-data') {
-      // 重置分页到第一页
+    if (
+      newPath === ADMIN_AD_DATA_ROWS_PATH &&
+      isPageInitialized &&
+      oldPath &&
+      oldPath !== ADMIN_AD_DATA_ROWS_PATH
+    ) {
       pagination.value.current = 1;
-      // 刷新数据
       loadPageData();
     }
   },
@@ -933,6 +940,14 @@ watch(
   background-color: var(--bg-primary);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-light);
+}
+
+.page-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary, #303133);
+  flex-shrink: 0;
 }
 
 .action-buttons {

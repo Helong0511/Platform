@@ -910,6 +910,7 @@ const {
   publisherList,
   loadAdvertisers,
   loadPublishers,
+  loadAdvertiserPublisher,
   loadData,
   handleSearch,
   handleReset,
@@ -988,10 +989,8 @@ const handlePageChange = (page) => {
 }
 
 onMounted(async () => {
-  // 加载列显示设置
   loadColumnVisibility()
-  loadAdvertisers()
-  loadPublishers()
+  await loadAdvertiserPublisher()
   
   // 检查路由查询参数
   const offerId = route.query.offer_id

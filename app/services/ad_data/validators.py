@@ -53,14 +53,17 @@ class AdDataValidator:
             )
 
     @staticmethod
-    async def resolve_country_code(db: AsyncSession, country_input: Optional[str]) -> str:
-        """解析并规范化国家代码；空值视为 ZZ（全部区域）。"""
-        if not country_input:
+    async def resolve_country_code(db: AsyncSession, country_input: Optional[str]) -> Optional[str]:
+        """解析并规范化国家代码；空值为 NULL；显式 ZZ 保留为全部区域。"""
+        if not country_input or not str(country_input).strip():
+            return None
+        stripped = str(country_input).strip()
+        if stripped == "ZZ":
             return "ZZ"
-        found = await find_country_code_by_any_format(db, country_input)
+        found = await find_country_code_by_any_format(db, stripped)
         if found:
             return found
-        return preserve_unrecognized_country_code(country_input)
+        return preserve_unrecognized_country_code(stripped)
 
     @staticmethod
     def needs_uniqueness_check(filtered_update_data: Dict[str, Any]) -> bool:

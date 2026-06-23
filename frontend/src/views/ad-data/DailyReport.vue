@@ -22,13 +22,16 @@
       :filter-products="filterProducts"
       :filter-countries="filterCountries"
       :filter-ad-units="filterAdUnits"
+      :show-dimension="false"
+      :page-hint="pageConfig.hint"
+      :enable-country-filter="pageConfig.showCountryFilter"
+      :enable-ad-unit-filter="pageConfig.showAdUnitFilter"
       default-hint="默认优先查询本月；若本月无数据将自动扩大至全部可查日期范围。"
       @fetch="fetchDailyData"
       @reset="resetFilter"
       @date-range-change="handleDateRangeChange"
       @filter-client-change="handleFilterClientChange"
       @filter-product-change="handleFilterProductChange"
-      @dimension-change="handleDimensionChange"
       @country-change="handleCountryChange"
       @ad-unit-change="handleAdUnitChange"
     />
@@ -38,7 +41,7 @@
       <!-- 卡片标题栏 -->
     <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-weight: 600; font-size: 16px;">每日统计数据</span>
+          <span style="font-weight: 600; font-size: 16px;">{{ pageConfig.title }}</span>
           <el-button 
             type="text" 
             :icon="Setting" 
@@ -159,9 +162,9 @@ import {
   appendDimensionAwareFilters,
   applyDimensionColumnDefaults,
   DEFAULT_AD_DATA_DIMENSION,
-  loadAdDataDimensionPreference
+  getDailyReportPageConfig
 } from '../../constants/adDataDimension';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { extractErrorMessage, isErrorHandled } from '../../utils/api';
 import {
   injectUserDateSubtotals,
@@ -184,6 +187,11 @@ import AdDataFilterCard from '../../components/ad-data/AdDataFilterCard.vue';
 
 // 路由实例
 const router = useRouter();
+const route = useRoute();
+
+const pageConfig = computed(() =>
+  getDailyReportPageConfig(route.meta.dailyPageKey || 'summary')
+);
 
 // 获取用户认证状态
 const authStore = useAuthStore();
@@ -194,6 +202,7 @@ const { isMobile } = useDevice();
 
 // 状态管理
 const dailyDataList = ref([]);
+const dailyGrandTotal = ref(null);
 const loading = ref(false);
 const pagination = ref({
   current: 1,
@@ -224,7 +233,7 @@ const searchForm = ref({
   clientId: '',
   dateRange: [],
   productId: '',
-  dimension: loadAdDataDimensionPreference(authStore.userInfo?.id),
+  dimension: pageConfig.value.dimension,
   countryCode: '',
   adUnit: ''
 });
@@ -262,8 +271,12 @@ const displayDailyDataList = computed(() => {
   });
 });
 
-const getSummariesForTable = (param) =>
-  getSummaries({ ...param, data: excludeUserDateSubtotalRows(param.data) });
+const getSummariesForTable = (param) => {
+  const data = dailyGrandTotal.value
+    ? [dailyGrandTotal.value]
+    : excludeUserDateSubtotalRows(param.data);
+  return getSummaries({ ...param, data });
+};
 
 const getDailyReportRowClassName = ({ row }) =>
   row[USER_DATE_SUBTOTAL_FLAG] ? 'daily-report-subtotal-row' : '';
@@ -277,16 +290,16 @@ const {
   fetchFilterProducts,
   handleFilterClientChange,
   handleFilterProductChange,
-  handleDimensionChange,
   handleCountryChange,
   handleAdUnitChange,
-  reloadFiltersAfterDateChange
+  reloadFiltersAfterDateChange,
+  reloadSecondaryFilters
 } = useDataPageFilterCascade({
   searchForm,
   includeCountry: true,
   includeDimension: true,
   source: 'ad-data',
-  getUserId: () => authStore.userInfo?.id
+  fixedDimension: true
 });
 
 const buildDailySearchParams = () => {
@@ -301,8 +314,13 @@ const buildDailySearchParams = () => {
   appendDimensionAwareFilters(params, {
     dimension,
     countryCode: searchForm.value.countryCode,
-    adUnit: searchForm.value.adUnit
+    adUnit: searchForm.value.adUnit,
+    enableCountryFilter: pageConfig.value.showCountryFilter,
+    enableAdUnitFilter: pageConfig.value.showAdUnitFilter
   });
+  if (pageConfig.value.splitByCountry) {
+    params.split_by_country = true;
+  }
   if (searchForm.value.dateRange?.length === 2) {
     params.start_date = searchForm.value.dateRange[0];
     params.end_date = searchForm.value.dateRange[1];
@@ -312,7 +330,10 @@ const buildDailySearchParams = () => {
 
 /** 列设置 + 统计维度：仅影响表格展示 */
 const effectiveColumnVisibility = computed(() =>
-  applyDimensionColumnDefaults(columnVisibility, searchForm.value.dimension)
+  applyDimensionColumnDefaults(columnVisibility, searchForm.value.dimension, {
+    dailySummary: true,
+    showCountryColumn: pageConfig.value.showCountryColumn
+  })
 );
 
 const {
@@ -344,6 +365,7 @@ const { runFetch: fetchDailyData, cancel: cancelDailyFetch } = useDebouncedPagin
   fetchPage: (params) => getDailySummary(params),
   applyResponse: (response) => {
     dailyDataList.value = response.data || [];
+    dailyGrandTotal.value = response.grand_total || null;
     pagination.value.total =
       typeof response.total === 'number'
         ? response.total
@@ -388,7 +410,7 @@ const resetFilter = async () => {
     clientId: '',
     dateRange: [],
     productId: '',
-    dimension: loadAdDataDimensionPreference(authStore.userInfo?.id),
+    dimension: pageConfig.value.dimension,
     countryCode: '',
     adUnit: ''
   };
@@ -405,6 +427,7 @@ const resetFilter = async () => {
 
   const defaultClientId = isAdmin.value ? null : null;
   await fetchFilterProducts(defaultClientId);
+  await reloadSecondaryFilters();
   await ensureInitialDateRange();
 
   fetchDailyData();
@@ -430,7 +453,11 @@ const handleExport = async () => {
       return;
     }
     
-    const params = { ...buildDailySearchParams() };
+    const params = { ...buildDailySearchParams(), daily_summary: true };
+    if (sortInfo.value.prop) {
+      params.sort_by = sortInfo.value.prop;
+      params.sort_order = sortInfo.value.order === 'ascending' ? 'asc' : 'desc';
+    }
     if (params.client_id) {
       params.client_id = parseInt(params.client_id, 10);
     }
@@ -530,6 +557,25 @@ const handleProductClick = (row) => {
 const handleProductManagementRefresh = () => {
   fetchDailyData();
 };
+
+const applyDailyPageConfig = async () => {
+  searchForm.value.dimension = pageConfig.value.dimension;
+  searchForm.value.countryCode = '';
+  searchForm.value.adUnit = '';
+  pagination.value.current = 1;
+  await reloadFiltersAfterDateChange(isAdmin.value);
+  await fetchDailyData();
+};
+
+watch(
+  () => route.meta.dailyPageKey,
+  async (newKey, oldKey) => {
+    if (oldKey == null || newKey === oldKey || isInitializing) {
+      return;
+    }
+    await applyDailyPageConfig();
+  }
+);
 </script>
 
 <style scoped>

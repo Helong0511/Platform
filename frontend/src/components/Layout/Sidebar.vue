@@ -25,14 +25,18 @@
         <el-icon><Document /></el-icon>
         <span>广告数据</span>
       </template>
-      <el-menu-item index="/app/ad-data/daily-report">
-        <span>每日统计</span>
-      </el-menu-item>
-      <el-menu-item index="/app/ad-data/detail-report">
-        <span>详细报表</span>
+      <el-menu-item
+        v-for="item in dailyReportMenuItems"
+        :key="item.path"
+        :index="item.path"
+      >
+        <span>{{ item.label }}</span>
       </el-menu-item>
       <el-menu-item index="/app/ad-data/tb-search-data">
         <span>TB搜索数据</span>
+      </el-menu-item>
+      <el-menu-item v-if="isAdmin" index="/app/admin/ad-data-rows">
+        <span>明细维护</span>
       </el-menu-item>
     </el-sub-menu>
 
@@ -142,6 +146,26 @@
         <span>国家维护</span>
       </el-menu-item>
     </el-sub-menu>
+
+    <!-- 系统监控菜单 -->
+    <el-sub-menu v-if="isAdmin" index="/app/admin/monitoring">
+      <template #title>
+        <el-icon><DataLine /></el-icon>
+        <span>系统监控</span>
+      </template>
+      <el-menu-item index="/app/admin/monitoring">
+        <span>监控仪表盘</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/monitoring/alerts">
+        <span>告警管理</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/monitoring/trends">
+        <span>趋势分析</span>
+      </el-menu-item>
+      <el-menu-item index="/app/admin/optimization">
+        <span>性能优化</span>
+      </el-menu-item>
+    </el-sub-menu>
     
     <el-menu-item v-if="!isAdmin" index="/app/client/user-management">
       <template #icon><UserFilled /></template>
@@ -163,6 +187,9 @@ import { useAuthStore } from '../../store';
 import { ElMenu, ElMenuItem, ElSubMenu, ElIcon } from 'element-plus';
 import { PieChart, Document, UserFilled, Upload, Timer, Link, Connection, Box, DataAnalysis, Lock, Bell, DataLine, Setting } from '@element-plus/icons-vue';
 import { prefetchRoute, prefetchAllRoutes } from '../../utils/prefetchRoutes';
+import { DAILY_REPORT_MENU_ITEMS } from '../../constants/adDataDimension';
+
+const dailyReportMenuItems = DAILY_REPORT_MENU_ITEMS;
 
 const authStore = useAuthStore();
 const route = useRoute();

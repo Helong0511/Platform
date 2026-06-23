@@ -189,7 +189,8 @@ export const normalizePaginatedResponse = (response) => {
       total: normalized.total || 0,
       page: normalized.page || 1,
       page_size: normalized.page_size || 10,
-      total_pages: normalized.total_pages || Math.ceil((normalized.total || 0) / (normalized.page_size || 10))
+      total_pages: normalized.total_pages || Math.ceil((normalized.total || 0) / (normalized.page_size || 10)),
+      grand_total: normalized.grand_total ?? null
     };
   }
   
@@ -356,7 +357,22 @@ export const isErrorHandled = (error) => {
     return true;
   }
   // 检查是否已标记为已处理
-  return error._handled === true;
+  if (error._handled === true) {
+    return true;
+  }
+  // 已取消的请求由拦截器静默处理
+  const code = error?.code;
+  const name = error?.name;
+  const message = error?.message || '';
+  if (
+    code === 'ERR_CANCELED'
+    || name === 'CanceledError'
+    || name === 'AbortError'
+    || message === 'canceled'
+  ) {
+    return true;
+  }
+  return false;
 };
 
 /**

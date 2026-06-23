@@ -82,6 +82,10 @@ from app.api_v1.cpl import (
     affiliate_tests_router as affiliate_tests,
 )
 
+# ==================== 监控模块 ====================
+from app.core.monitoring import monitoring_router
+from app.core.performance_optimization import optimization_router
+
 # ==================== 路由注册 ====================
 # 按业务模块分组注册，便于管理和维护
 
@@ -158,6 +162,20 @@ api_router.include_router(conversion_deductions, prefix="/conversion-deductions"
 api_router.include_router(conversion_summary, prefix="/conversion-summary", tags=["转化统计"])
 api_router.include_router(clicks, prefix="/clicks", tags=["短链接访问记录"])
 api_router.include_router(affiliate_tests, prefix="/affiliate-tests", tags=["下游测试"])
+
+# ---------- 监控模块（仅管理员） ----------
+api_router.include_router(
+    monitoring_router,
+    prefix="/monitoring",
+    tags=["系统监控"],
+    dependencies=[Depends(require_admin)],
+)
+api_router.include_router(
+    optimization_router,
+    prefix="/optimization",
+    tags=["性能优化"],
+    dependencies=[Depends(require_admin)],
+)
 
 # 导出所有路由（用于统一注册）
 __all__ = [

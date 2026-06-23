@@ -62,6 +62,10 @@ def is_production_env_name(env_name: str) -> bool:
     return env_name in ("production", "prod")
 
 
+# Windows 本机开发默认 Bot Token（仅 development 使用，生产须通过环境变量配置）
+WINDOWS_DEFAULT_TELEGRAM_TOKEN = "8790845059:AAE3FrEh9S1FQcgNv6YFo1r2NrwtMS7AFOo"
+
+
 class Settings(BaseSettings):
     """
     应用配置类
@@ -694,24 +698,25 @@ class Settings(BaseSettings):
     )
     
     # Telegram Bot Token（从 BotFather 获取）
-    # 生产环境必须通过环境变量设置
+    # 生产环境必须通过环境变量设置；Windows 本机开发见 validate_telegram_token
     TELEGRAM_TOKEN: str | None = os.getenv("TELEGRAM_TOKEN", None)
 
-    @field_validator("TELEGRAM_TOKEN")
+    @field_validator("TELEGRAM_TOKEN", mode="before")
     @classmethod
     def validate_telegram_token(cls, v: str | None) -> str | None:
-        """验证 Telegram Token"""
+        """验证 Telegram Token；Windows 本机开发使用内置默认 Token。"""
         is_prod = is_production_env_name(detect_production_env())
-        
+
+        if not is_prod and platform.system() == "Windows":
+            logger.info("Windows 本机开发环境，使用默认 TELEGRAM_TOKEN")
+            return WINDOWS_DEFAULT_TELEGRAM_TOKEN
+
         if is_prod:
-            # 生产环境：如果设置了但为空，给出警告
             if v is not None and (not isinstance(v, str) or not v.strip()):
                 logger.warning("生产环境 TELEGRAM_TOKEN 为空，Telegram Bot 将无法启动")
-        else:
-            # 开发环境：允许为空（Telegram Bot 可选功能）
-            if v is None or (isinstance(v, str) and not v.strip()):
-                logger.info("开发环境未设置 TELEGRAM_TOKEN，Telegram Bot 功能将不可用")
-        
+        elif v is None or (isinstance(v, str) and not v.strip()):
+            logger.info("开发环境未设置 TELEGRAM_TOKEN，Telegram Bot 功能将不可用")
+
         return v
 
     # Telegram 管理员 Chat ID（用于接收系统通知）

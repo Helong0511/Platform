@@ -1,4 +1,36 @@
+# ========== Windows 本地运行（按顺序） ==========
+
+# 1. 先启动 MySQL（.env 中 DATABASE_URL 指向 127.0.0.1:3306）
+
+# 2. 启动后端（项目根目录 E:\Platform）
 uvicorn app.main:app --host 0.0.0.0 --port 8960 --reload --reload-dir app
+
+# 若 reload 卡在 "Waiting for background tasks" 或改代码后接口全超时：
+#   Ctrl+C 结束进程，改用无 reload 启动：
+# uvicorn app.main:app --host 0.0.0.0 --port 8960
+
+uvicorn app.main:app --host 0.0.0.0 --port 8960
+
+# 3. 验证后端已就绪（浏览器或 curl，应秒回 {"status":"ok"}）
+# http://127.0.0.1:8960/api/v1/health
+
+# 4. 再启动前端（frontend 目录）
+cd frontend
 npm install
-npm run build
 npm run dev
+# 访问 http://localhost:3310/（勿直接打开 dist；勿在浏览器里直连 :8960）
+
+# ========== 常见「无法连接后端 (8960)」排查 ==========
+# 该提示表示浏览器没收到 HTTP 响应，不一定是后端没开：
+# 1. 先开 http://127.0.0.1:8960/api/v1/health 应秒回 {"status":"ok"}
+# 2. 前端必须用 npm run dev 的 3310 端口（API 走 Vite 代理 /api → 8960）
+# 3. 后端重启瞬间、或切换广告数据子菜单时，旧请求被取消也可能曾误报（已优化提示）
+# 4. reload 卡住时 Ctrl+C 后改用无 reload：uvicorn app.main:app --host 0.0.0.0 --port 8960
+# 5. 若 health 正常仍报错 → 浏览器 F12 网络面板看失败请求的 URL 与状态
+# - 仅广告数据/每日统计慢 → 已优化 SQL；仍慢时缩小日期范围
+# - Redis：本机无 Redis 可保持 REDIS_HOST=127.0.0.1，Windows 开发会自动内存降级
+# - 本机已装 Redis 要用：.env 增加 REDIS_FORCE=true
+
+# API 性能评估（可选）
+# python tests/performance/run_benchmark.py --scenario smoke,normal
+# 报告：tests/performance/reports/

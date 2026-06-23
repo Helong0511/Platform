@@ -86,10 +86,10 @@ export default pinia;
 
 // 配置Axios基础URL
 axios.defaults.baseURL = '/';
-// 设置全局默认timeout（根据设备类型动态设置）
-// 检测是否为移动设备
+// 设置全局默认timeout（根据设备类型动态设置；本地开发放宽）
 const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-axios.defaults.timeout = isMobileDevice ? 30000 : 15000; // 移动端30秒，桌面端15秒
+const isDevBuild = typeof import.meta !== 'undefined' && import.meta.env?.DEV;
+axios.defaults.timeout = isDevBuild ? 30000 : (isMobileDevice ? 30000 : 15000);
 
 /**
  * 获取默认路由（根据用户角色和菜单显示情况）
@@ -100,34 +100,34 @@ export const getDefaultRoute = (userInfo) => {
   if (!userInfo) {
     return '/app/dashboard';
   }
-  
+
   const isAdmin = userInfo.role === 'admin';
   const hasPublisher = userInfo.has_publisher === true || userInfo.client?.has_publisher === true;
-  
+
   // 管理员：跳转到数据仪表
   if (isAdmin) {
     return '/app/dashboard';
   }
-  
+
   // 客户用户且有关联渠道：数据仪表和广告数据被隐藏，优先跳转到转化总览
   if (hasPublisher) {
     return '/app/admin/conversion-summary';
   }
-  
+
   // 客户用户但没有关联渠道：显示数据仪表和广告数据，跳转到数据仪表
   return '/app/dashboard';
 };
 
 /**
  * 安全清除认证信息
- * 统一处理 token 和 userInfo 的清除，确保状态一致性
+ * 统一处理 userInfo 的清除，确保状态一致性
+ * - refresh_token 和 access_token 存储在 HttpOnly Cookie 中，由后端在 logout 接口中清除
  * @returns {void}
  */
 export const clearAuthData = () => {
   try {
     sessionStorage.removeItem('userInfo');
-    sessionStorage.removeItem('refresh_token'); // 清除刷新令牌
-    // 注意：HttpOnly cookie 的清除需要由后端在 logout 接口中处理
+    // 注意：refresh_token 和 access_token 存储在 HttpOnly Cookie 中，由后端在 logout 接口中清除
   } catch (e) {
     logger.warn('清除认证信息时出错:', e);
   }
@@ -211,13 +211,9 @@ export const useAuthStore = defineStore('auth', {
         );
         const userInfoFromApi = responseData.user;
 
-        // 保存用户信息到sessionStorage (token 存储在 cookie 中)
+        // 保存用户信息到sessionStorage (token 存储在 HttpOnly Cookie 中)
         sessionStorage.setItem('userInfo', JSON.stringify(userInfoFromApi));
-        
-        // 保存刷新令牌（如果提供）
-        if (responseData.refresh_token) {
-          sessionStorage.setItem('refresh_token', responseData.refresh_token);
-        }
+        // refresh_token 由后端设置到 HttpOnly Cookie 中，无需前端存储
 
         // 更新状态（使用camelCase）
         this.userInfo = userInfoFromApi;
@@ -380,7 +376,7 @@ export const useAuthStore = defineStore('auth', {
           url: '/api/v1/users/me',
           method: 'get'
         }, { returnDataOnly: true, silent });
-        
+
         this.userInfo = userData || {};
         sessionStorage.setItem('userInfo', JSON.stringify(this.userInfo));
       } catch (err) {

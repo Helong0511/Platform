@@ -1,7 +1,7 @@
 /**
  * 解析认证接口响应（兼容标准包装与历史裸 JSON）
  * @param {Object} responseData - axios response.data
- * @returns {Object} token 载荷 { access_token, refresh_token, token_type, user }
+ * @returns {Object} 认证载荷 { token_type, user }（令牌在 HttpOnly Cookie）
  */
 export const parseAuthResponseData = (responseData) => {
   const raw = responseData || {};

@@ -173,6 +173,8 @@ class ClientAdDataQuery:
 
             if country_name_zh:
                 final_country_name = country_name_zh
+            elif not ad_data.country_code:
+                final_country_name = ""
             elif ad_data.country_code == "AA":
                 final_country_name = "未知区域"
             elif ad_data.country_code == "ZZ":

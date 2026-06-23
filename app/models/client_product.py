@@ -140,11 +140,14 @@ class AdData(Base):
         Index("idx_ad_data_date", "date"),  # 优化日期范围查询
         Index("idx_ad_data_product", "product_id"),  # 优化产品查询
         Index("idx_ad_data_country", "country_code"),  # 优化国家代码查询
+        Index("idx_ad_data_ad_unit", "ad_unit"),  # 优化广告单元查询
         # 复合索引：优化常见查询组合
         Index("idx_ad_data_date_product", "date", "product_id"),  # 日期 + 产品
         Index("idx_ad_data_date_country", "date", "country_code"),  # 日期 + 国家
         Index("idx_ad_data_product_country", "product_id", "country_code"),  # 产品 + 国家
         Index("idx_ad_data_date_product_country", "date", "product_id", "country_code"),  # 日期 + 产品 + 国家
+        Index("idx_ad_data_date_product_ad_unit", "date", "product_id", "ad_unit"),  # 日期 + 产品 + 广告单元
+        Index("idx_ad_data_date_ad_unit", "date", "ad_unit"),  # 日期 + 广告单元
         # 唯一性约束：同一日期、产品、国家、广告单元只能有一条记录（空广告单元为 ''）
         UniqueConstraint("date", "product_id", "country_code", "ad_unit", name="uq_ad_data_date_product_country_unit"),
     )

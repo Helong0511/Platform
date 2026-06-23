@@ -129,6 +129,7 @@ class PaginatedResponseBaseSchema(BaseSchema, Generic[T]):
     page: int = 1
     page_size: int = 10
     total_pages: int = 0
+    grand_total: dict | None = None
 
     @classmethod
     def success(
@@ -137,7 +138,8 @@ class PaginatedResponseBaseSchema(BaseSchema, Generic[T]):
             total: int = 0,
             page: int = 1,
             page_size: int = 10,
-            message: str = "success"
+            message: str = "success",
+            grand_total: dict | None = None,
     ) -> 'PaginatedResponseBaseSchema':
         """构造分页成功响应，根据 total 与 page_size 自动计算 total_pages。"""
         total_pages = (total + page_size - 1) // page_size
@@ -148,5 +150,6 @@ class PaginatedResponseBaseSchema(BaseSchema, Generic[T]):
             total=total,
             page=page,
             page_size=page_size,
-            total_pages=total_pages
+            total_pages=total_pages,
+            grand_total=grand_total,
         )

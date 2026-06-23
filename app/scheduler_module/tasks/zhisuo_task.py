@@ -5,6 +5,8 @@ zhisuo 上游广告数据拉取定时任务。
 - 从 zhisuo API 获取广告单元 / 国家报告数据，检查重复后插入 ad_data
 - 每个账号可单独配置 fetch_unit / fetch_country（见 ZHISUO_API_ACCOUNT_FETCH）
 - 国家报告返回英文国名（如 United States），入库时由 process_api_ad_data 转为 ISO 二字母代码
+- 国家报告与广告单元报告分别入库（纯国家 / 纯广告单元行）；每日汇总按
+  build_daily_summary_dimension_filter 互斥选源，避免 fetch_unit+fetch_country 双开时重复计数。
 - 支持多账号顺序拉取后合并入库
 """
 import logging

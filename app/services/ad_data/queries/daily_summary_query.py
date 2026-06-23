@@ -2,26 +2,27 @@
 广告数据每日汇总查询构建器。
 
 功能说明：
-- 按统计维度分组聚合：按国家→日期+产品；按广告单元→日期+产品+广告单元；
-  按广告单元+国家→日期+产品+广告单元（汇总所有国家，不按国家分行）
+- 按统计维度分组聚合：按国家→日期+产品（可选 split_by_country 按国家分行）；
+  按广告单元→日期+产品+广告单元；按广告单元+国家→日期+产品+广告单元+国家
 - 支持权限过滤、分页、SQL/内存混合排序
 
 在系统中的位置：
 - 被 ``AdDataService.get_daily_summary`` 调用
 """
 import logging
+from calendar import monthrange
 from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import func
+from sqlalchemy import and_, case, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.constants import ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
-from app.core.country_code import build_ad_data_country_filter
+from app.core.country_code import build_ad_data_country_filter, resolve_country_name
 from app.core.query_utils import apply_date_range_filter, check_use_assignment_table
 from app.core.security import is_admin
-from app.models.models import AdData, Client, Product, User
+from app.models.models import AdData, Client, CountryInfo, Product, User
 from app.services.ad_data.queries.dimension_filter import (
     ad_unit_exact_filter_applies,
     build_daily_summary_dimension_filter,
@@ -30,9 +31,71 @@ from app.services.ad_data.queries.dimension_filter import (
     is_cross_dimension,
     normalize_dimension,
 )
-from app.services.ad_data.queries.join_helpers import join_product_and_client
+from app.services.ad_data.queries.join_helpers import join_country_info_for_ad_data, join_product_and_client
+from app.services.ad_data.queries.summary_query import (
+    _empty_aggregate_raw,
+    _row_to_aggregate_raw,
+    compute_ad_data_derived_metrics,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _effective_summary_date_range(
+    start_date: Optional[date],
+    end_date: Optional[date],
+) -> Tuple[Optional[date], Optional[date]]:
+    """与 apply_date_range_filter(default_to_current_month=True) 对齐的有效区间。"""
+    if start_date or end_date:
+        return start_date, end_date
+    today = date.today()
+    _, last_day = monthrange(today.year, today.month)
+    return date(today.year, today.month, 1), date(today.year, today.month, last_day)
+
+
+def _daily_summary_dimension_filter(
+    dimension: str,
+    start_date: Optional[date],
+    end_date: Optional[date],
+):
+    return build_daily_summary_dimension_filter(
+        AdData.country_code,
+        AdData.ad_unit,
+        dimension,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+def _daily_summary_aggregate_columns():
+    """与 summary_query 一致的明细级 SUM 聚合（用于全量合计行）。"""
+    return (
+        func.sum(AdData.request_count).label("total_requests"),
+        func.sum(AdData.match_count).label("total_matches"),
+        func.sum(AdData.display_count).label("total_displays"),
+        func.sum(AdData.click_count).label("total_clicks"),
+        func.sum(AdData.revenue_after_deduct).label("total_revenue_after"),
+        func.sum(AdData.revenue_before_deduct).label("total_revenue_before"),
+        func.sum(AdData.pageviews).label("total_pageviews"),
+        func.sum(
+            case(
+                (
+                    and_(AdData.viewability_rate > 0, AdData.click_count > 0),
+                    AdData.viewability_rate * AdData.click_count,
+                ),
+                else_=0,
+            )
+        ).label("weighted_viewability"),
+        func.sum(
+            case(
+                (
+                    and_(AdData.viewability_rate > 0, AdData.click_count > 0),
+                    AdData.click_count,
+                ),
+                else_=0,
+            )
+        ).label("viewability_weight"),
+    )
 
 
 class DailySummaryQuery:
@@ -53,6 +116,7 @@ class DailySummaryQuery:
         country_code: Optional[str] = None,
         ad_unit: Optional[str] = None,
         dimension: Optional[str] = None,
+        split_by_country: bool = False,
         sort_by: str = "date",
         sort_order: str = "desc",
     ) -> Tuple[List[Dict[str, Any]], int]:
@@ -60,10 +124,24 @@ class DailySummaryQuery:
         获取按统计维度分组的每日汇总列表（分页）。
 
         Returns:
-            (汇总行字典列表, 分组总数)
+            (汇总行字典列表, 分组总数, 全量合计指标)
         """
         dim = normalize_dimension(dimension)
         use_assignment_table = await check_use_assignment_table(self.db)
+        group_by_ad_unit = dim == "ad_unit" or is_cross_dimension(dim)
+        group_by_country = split_by_country or is_cross_dimension(dim)
+        dim_start, dim_end = _effective_summary_date_range(start_date, end_date)
+
+        grand_total = await self.fetch_grand_totals(
+            current_user=current_user,
+            start_date=start_date,
+            end_date=end_date,
+            client_id=client_id,
+            product_id=product_id,
+            country_code=country_code,
+            ad_unit=ad_unit,
+            dimension=dimension,
+        )
 
         metric_columns = [
             func.sum(AdData.request_count).label("request_count"),
@@ -71,7 +149,6 @@ class DailySummaryQuery:
             func.sum(AdData.display_count).label("display_count"),
             func.sum(AdData.click_count).label("click_count"),
             func.avg(AdData.viewability_rate).label("viewability_rate"),
-            func.sum(AdData.cpc).label("cpc"),
             func.sum(AdData.pageviews).label("pageviews"),
             func.sum(AdData.revenue_after_deduct).label("revenue_after_deduct"),
             func.sum(AdData.revenue_before_deduct).label("revenue_before_deduct"),
@@ -97,16 +174,20 @@ class DailySummaryQuery:
             User.username,
         ]
 
-        # 每日汇总不按国家分行；ad_unit_country 仅筛选交叉明细数据源，再按日期+产品+广告单元汇总。
-        group_by_ad_unit = dim == "ad_unit" or is_cross_dimension(dim)
-
         select_cols = list(base_dims)
         if group_by_ad_unit:
             select_cols.append(AdData.ad_unit.label("ad_unit"))
             group_by_cols.append(AdData.ad_unit)
+        if group_by_country:
+            select_cols.append(AdData.country_code.label("country_code"))
+            select_cols.append(func.max(CountryInfo.country_name_zh).label("country_name_zh"))
+            group_by_cols.append(AdData.country_code)
 
         query = select(*select_cols, *metric_columns)
         query = join_product_and_client(query, use_assignment_table)
+        if group_by_country:
+            query = join_country_info_for_ad_data(query)
+
         query = query.where(Product.is_active == True)
         query = query.join(User, Client.user_id == User.id)
 
@@ -121,9 +202,7 @@ class DailySummaryQuery:
             except ValueError:
                 logger.warning("无效的产品ID参数: %s", product_id)
 
-        query = query.where(
-            build_daily_summary_dimension_filter(AdData.country_code, AdData.ad_unit, dim)
-        )
+        query = query.where(_daily_summary_dimension_filter(dim, dim_start, dim_end))
 
         if country_exact_filter_applies(dim):
             country_filter = await build_ad_data_country_filter(
@@ -151,13 +230,12 @@ class DailySummaryQuery:
             "date": func.date(AdData.date),
             "product": Product.name,
             "ad_unit": AdData.ad_unit if group_by_ad_unit else None,
-            "country": None,
+            "country": AdData.country_code if group_by_country else None,
             "product_id": Product.id,
             "request_count": func.sum(AdData.request_count),
             "match_count": func.sum(AdData.match_count),
             "display_count": func.sum(AdData.display_count),
             "click_count": func.sum(AdData.click_count),
-            "cpc": func.sum(AdData.cpc),
             "pageviews": func.sum(AdData.pageviews),
             "coverage_rate": func.avg(AdData.coverage_rate),
             "display_rate": func.avg(AdData.display_rate),
@@ -196,9 +274,12 @@ class DailySummaryQuery:
                 country_code,
                 ad_unit,
                 dim,
+                dim_start,
+                dim_end,
                 start_date,
                 end_date,
                 group_by_ad_unit,
+                group_by_country,
             )
 
         if need_memory_sort:
@@ -225,7 +306,6 @@ class DailySummaryQuery:
             total_display_count = int(row.display_count or 0)
             total_click_count = int(row.click_count or 0)
             total_viewability_rate = float(row.viewability_rate or 0.0)
-            total_cpc = float(row.cpc or 0.0)
             total_pageviews = int(row.pageviews or 0)
             total_revenue_after = float(row.revenue_after_deduct or 0.0)
             total_revenue_before = float(row.revenue_before_deduct or 0.0)
@@ -246,6 +326,10 @@ class DailySummaryQuery:
                 (total_click_count / total_display_count * 100) if total_display_count > 0 else 0.0,
                 2,
             )
+            total_cpc = round(
+                (total_revenue_after / total_click_count) if total_click_count > 0 else 0.0,
+                2,
+            )
             ecpm_after_deduct = round(
                 (total_revenue_after / total_display_count * ECPM_MULTIPLIER)
                 if total_display_count > 0
@@ -264,8 +348,16 @@ class DailySummaryQuery:
 
             row_ad_unit = getattr(row, "ad_unit", "") if group_by_ad_unit else ""
 
-            display_country_code = "ZZ"
-            country_name_zh = "全部区域"
+            if group_by_country:
+                row_country_code = getattr(row, "country_code", "") or ""
+                row_country_name = getattr(row, "country_name_zh", None)
+                display_country_code = row_country_code
+                country_name_zh = row_country_name or resolve_country_name(
+                    None, row_country_code
+                )
+            else:
+                display_country_code = "ZZ"
+                country_name_zh = "全部区域"
 
             response_data = {
                 "id": 0,
@@ -283,7 +375,7 @@ class DailySummaryQuery:
                 "click_count": total_click_count,
                 "click_rate": click_rate,
                 "viewability_rate": round(total_viewability_rate, 2),
-                "cpc": round(total_cpc, 2),
+                "cpc": total_cpc,
                 "pageviews": total_pageviews,
                 "ecpm_after_deduct": ecpm_after_deduct,
                 "revenue_after_deduct": round(total_revenue_after, 4),
@@ -313,7 +405,103 @@ class DailySummaryQuery:
             offset = (page - 1) * page_size
             ad_data_responses = ad_data_responses[offset : offset + page_size]
 
-        return ad_data_responses, total
+        return ad_data_responses, total, grand_total
+
+    async def fetch_grand_totals(
+        self,
+        current_user: User,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        client_id: Optional[int] = None,
+        product_id: Optional[str] = None,
+        country_code: Optional[str] = None,
+        ad_unit: Optional[str] = None,
+        dimension: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """当前筛选条件下全部明细的全量合计（供表格底部合计行，不受分页影响）。"""
+        dim = normalize_dimension(dimension)
+        dim_start, dim_end = _effective_summary_date_range(start_date, end_date)
+        use_assignment_table = await check_use_assignment_table(self.db)
+        admin_user = is_admin(current_user)
+
+        query = select(*_daily_summary_aggregate_columns())
+        query = join_product_and_client(query, use_assignment_table)
+        query = query.where(Product.is_active == True)
+
+        if not admin_user:
+            query = query.where(Client.user_id == current_user.id)
+        elif client_id:
+            query = query.where(Client.id == client_id)
+
+        if product_id and product_id.strip():
+            try:
+                query = query.where(AdData.product_id == int(product_id))
+            except ValueError:
+                logger.warning("无效的产品ID参数: %s", product_id)
+
+        query = query.where(_daily_summary_dimension_filter(dim, dim_start, dim_end))
+
+        if country_exact_filter_applies(dim):
+            country_filter = await build_ad_data_country_filter(
+                self.db, AdData.country_code, country_code
+            )
+            if country_filter is not None:
+                query = query.where(country_filter)
+
+        if ad_unit_exact_filter_applies(dim):
+            ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
+            if ad_unit_filter is not None:
+                query = query.where(ad_unit_filter)
+
+        query = apply_date_range_filter(
+            query,
+            AdData.date,
+            start_date,
+            end_date,
+            default_to_current_month=True,
+        )
+
+        row = (await self.db.execute(query)).first()
+        raw = _row_to_aggregate_raw(row) if row else _empty_aggregate_raw()
+        derived = compute_ad_data_derived_metrics(
+            total_requests=float(raw["total_requests"]),
+            total_matches=float(raw["total_matches"]),
+            total_displays=float(raw["total_displays"]),
+            total_clicks=float(raw["total_clicks"]),
+            total_revenue_after=float(raw["total_revenue_after"]),
+            total_revenue_before=float(raw["total_revenue_before"]),
+            total_pageviews=float(raw["total_pageviews"]),
+            weighted_viewability=float(raw["weighted_viewability"]),
+            viewability_weight=float(raw["viewability_weight"]),
+            for_admin=admin_user,
+        )
+
+        total_revenue_after = round(float(raw["total_revenue_after"]), 4)
+        total_revenue_before = round(float(raw["total_revenue_before"]), 4)
+        total_click = int(raw["total_clicks"])
+        cpc = round(
+            (total_revenue_after / total_click) if total_click > 0 else 0.0,
+            2,
+        )
+
+        payload: Dict[str, Any] = {
+            "request_count": int(raw["total_requests"]),
+            "match_count": int(raw["total_matches"]),
+            "display_count": int(raw["total_displays"]),
+            "click_count": total_click,
+            "pageviews": int(raw["total_pageviews"]),
+            "coverage_rate": derived["coverage_rate"],
+            "display_rate": derived["display_rate"],
+            "click_rate": derived["click_rate"],
+            "viewability_rate": derived["viewability_rate"],
+            "ecpm_after_deduct": derived["ecpm_after_deduct"],
+            "revenue_after_deduct": total_revenue_after,
+            "cpc": cpc,
+        }
+        if admin_user:
+            payload["ecpm_before_deduct"] = derived["ecpm_before_deduct"]
+            payload["revenue_before_deduct"] = total_revenue_before
+        return payload
 
     async def _count_groups(
         self,
@@ -324,9 +512,12 @@ class DailySummaryQuery:
         country_code: Optional[str],
         ad_unit: Optional[str],
         dimension: str,
+        dim_start: Optional[date],
+        dim_end: Optional[date],
         start_date: Optional[date],
         end_date: Optional[date],
         group_by_ad_unit: bool,
+        group_by_country: bool,
     ) -> int:
         try:
             sub_cols = [
@@ -339,6 +530,9 @@ class DailySummaryQuery:
             if group_by_ad_unit:
                 sub_cols.append(AdData.ad_unit.label("ad_unit"))
                 group_cols.append(AdData.ad_unit)
+            if group_by_country:
+                sub_cols.append(AdData.country_code.label("country_code"))
+                group_cols.append(AdData.country_code)
 
             subquery = select(*sub_cols)
             subquery = join_product_and_client(subquery, use_assignment_table)
@@ -356,9 +550,7 @@ class DailySummaryQuery:
                     pass
 
             subquery = subquery.where(
-                build_daily_summary_dimension_filter(
-                    AdData.country_code, AdData.ad_unit, dimension
-                )
+                _daily_summary_dimension_filter(dimension, dim_start, dim_end)
             )
 
             if country_exact_filter_applies(dimension):

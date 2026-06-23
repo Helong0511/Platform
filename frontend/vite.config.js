@@ -63,7 +63,8 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: 'http://localhost:8960',
+        // Windows 下 localhost 可能优先解析 IPv6，固定 127.0.0.1 更稳
+        target: 'http://127.0.0.1:8960',
         changeOrigin: true,
         secure: false,
         // 连接超时设置（增加到60秒，应该大于前端请求的timeout）

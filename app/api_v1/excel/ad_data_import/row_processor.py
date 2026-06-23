@@ -4,7 +4,6 @@ from datetime import datetime
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -15,7 +14,12 @@ from app.api_v1.excel.utils import (
 )
 from app.core.ad_data_processor import check_and_notify_data_decrease
 from app.core.constants import ECPM_MULTIPLIER
-from app.core.country_code import find_country_code_by_any_format, preserve_unrecognized_country_code
+from app.core.country_code import (
+    build_ad_data_country_equality,
+    find_country_code_by_any_format,
+    normalize_ad_data_country_cache_key,
+    preserve_unrecognized_country_code,
+)
 from app.core.utils import (
     get_date_range, normalize_ad_unit, normalize_date_for_ad_data, truncate_to_2_decimal,
 )
@@ -106,8 +110,8 @@ async def process_row_data(
         elif "广告单元" in row.index and pd.notna(row.get("广告单元")):
             ad_unit = normalize_ad_unit(row["广告单元"])
 
-        # 国家代码（可选，默认全部区域）
-        country_code = "ZZ"
+        # 国家代码（可选；无输入时 NULL，与上游 API 入库一致；显式 ZZ 表示全部区域）
+        country_code = None
         country_input = None
         # ---------- 条件分支 ----------
         if "country_code" in row.index and pd.notna(row.get("country_code")):
@@ -129,14 +133,7 @@ async def process_row_data(
                     f"保留原始值 '{country_code}'"
                 )
 
-        # ---------- 条件分支 ----------
-        if country_code == "ZZ":
-            country_condition = or_(
-                AdData.country_code == "ZZ",
-                AdData.country_code.is_(None)
-            )
-        else:
-            country_condition = AdData.country_code == country_code
+        country_condition = build_ad_data_country_equality(AdData.country_code, country_code)
 
         # 解析数值字段
         # ---------- 异常处理 ----------
@@ -232,7 +229,7 @@ async def process_row_data(
             # 使用预查询的结果（优化性能）
             # 确保日期格式一致（使用date对象，不包含时间）
             date_key = normalize_date_key(data_date)
-            key = (date_key, product_info["product_id"], country_code, ad_unit)
+            key = (date_key, product_info["product_id"], normalize_ad_data_country_cache_key(country_code), ad_unit)
             existing_data = existing_records.get(key)
         else:
             # 如果没有预查询结果，则单独查询（向后兼容）
@@ -346,7 +343,7 @@ async def process_row_data(
             if existing_records is not None:
                 # 确保日期格式一致（使用date对象，不包含时间）
                 date_key = normalize_date_key(data_date)
-                key = (date_key, product_info["product_id"], country_code, ad_unit)
+                key = (date_key, product_info["product_id"], normalize_ad_data_country_cache_key(country_code), ad_unit)
                 existing_records[key] = ad_data
 
         result["success_rows"] += 1

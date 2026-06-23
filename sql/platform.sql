@@ -32,7 +32,7 @@ DROP TABLE IF EXISTS `ad_data`;
 CREATE TABLE IF NOT EXISTS `ad_data`  (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '广告数据ID',
   `date` datetime NOT NULL COMMENT '数据日期',
-  `country_code` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT 'ZZ' COMMENT '国家代码（ISO 二字母；未识别时保留原始国名）',
+  `country_code` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '国家代码（ISO 二字母；未识别时保留原始国名；无国家时为 NULL）',
   `product_id` int NOT NULL COMMENT '产品ID',
   `ad_unit` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '' COMMENT '广告单元',
   `request_count` int NOT NULL DEFAULT 0 COMMENT '请求数',

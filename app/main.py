@@ -30,6 +30,7 @@ from app.core.middleware import (
     SensitivePathGuardMiddleware,
     StreamErrorHandlingMiddleware,
 )
+from app.core.monitoring import SystemMonitoringMiddleware
 
 logger = configure_logging()
 
@@ -61,6 +62,9 @@ if settings.is_production:
 
 # 2. 性能监控中间件（记录慢请求）
 app.add_middleware(PerformanceMonitoringMiddleware)
+
+# 2.5 系统监控数据采集（供 /api/v1/monitoring 仪表盘使用）
+app.add_middleware(SystemMonitoringMiddleware)
 
 # 3. 请求日志中间件（记录所有请求）
 app.add_middleware(RequestLoggingMiddleware)
@@ -121,6 +125,12 @@ async def root():
         "message": f"{settings.SERVER_NAME} is running",
         "version": "1.0.0"
     }
+
+
+@app.get(f"{settings.API_V1_STR}/health", tags=["系统"])
+async def api_health_check():
+    """API 存活探测（不访问数据库），供本地开发确认后端已启动。"""
+    return {"status": "ok"}
 
 # 处理 favicon.ico 请求
 @app.get("/favicon.ico")

@@ -8,9 +8,10 @@
  * - error和warn在生产环境也记录，但可以通过环境变量控制
  */
 
-const isDevelopment = import.meta.env.MODE === 'development' || import.meta.env.DEV;
+const viteEnv = typeof import.meta !== 'undefined' ? import.meta.env : undefined;
+const isDevelopment = viteEnv?.MODE === 'development' || viteEnv?.DEV;
 // 生产环境是否允许错误日志（默认false，完全禁用）
-const allowErrorLogInProduction = import.meta.env.VITE_ALLOW_ERROR_LOG === 'true';
+const allowErrorLogInProduction = viteEnv?.VITE_ALLOW_ERROR_LOG === 'true';
 
 class Logger {
   log(...args) {

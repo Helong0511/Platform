@@ -16,6 +16,7 @@ from sqlalchemy import select, or_
 from app.models.models import AdData, User
 from app.core.audit_log import log_user_action
 from app.core.country_code import (
+    build_ad_data_country_equality,
     find_country_code_by_any_format,
     format_country_display,
     preserve_unrecognized_country_code,
@@ -42,7 +43,7 @@ async def check_and_notify_data_decrease(
         new_revenue_after: float,
         date_str: str,
         product_name: str,
-        country_code: str,
+        country_code: Optional[str],
         source: str = "API",
         db: Optional[AsyncSession] = None,
 ) -> None:
@@ -409,7 +410,7 @@ async def process_api_ad_data(
                     item_data["viewability_rate"] = item_viewability_rate
                 recognized_data[key]["items"].append(item_data)
             else:
-                # 有国家输入但无法识别：保留原始代码分组；无输入：按 ZZ（全部区域）分组
+                # 有国家输入但无法识别：保留原始代码分组；无输入：country_code 入库为 NULL
                 if has_country_input:
                     storage_code = preserve_unrecognized_country_code(item_country_input)
                     key = (item_date_str, item_product_name, item_ad_unit, storage_code)
@@ -640,7 +641,7 @@ async def process_api_ad_data(
                     AdData.date >= date_start,
                     AdData.date <= date_end,
                     AdData.product_id == product_id,
-                    AdData.country_code == country_code,
+                    build_ad_data_country_equality(AdData.country_code, country_code),
                     AdData.ad_unit == ad_unit
                 )
                 existing_result = await db.execute(existing_query)
@@ -811,7 +812,7 @@ async def process_api_ad_data(
             updated_count += 1
             written_product_ids.add(pending_product_id)
 
-    # ========== 第三步：处理无国家输入（ZZ）或无法识别（保留原始代码）的累加数据 ==========
+    # ========== 第三步：处理无国家输入（NULL）或无法识别（保留原始代码）的累加数据 ==========
     for key, grouped_data in unrecognized_data.items():
         pending_write: Optional[str] = None
         pending_product_id: Optional[int] = None
@@ -821,7 +822,7 @@ async def process_api_ad_data(
                     date_str, product_name, ad_unit, country_code = key
                 else:
                     date_str, product_name, ad_unit = key
-                    country_code = "ZZ"
+                    country_code = None
 
                 # 查找或创建产品
                 product_info = await find_or_create_product(
@@ -936,7 +937,7 @@ async def process_api_ad_data(
                     AdData.date >= date_start,
                     AdData.date <= date_end,
                     AdData.product_id == product_id,
-                    AdData.country_code == country_code,
+                    build_ad_data_country_equality(AdData.country_code, country_code),
                     AdData.ad_unit == ad_unit
                 )
                 existing_result = await db.execute(existing_query)
@@ -956,13 +957,21 @@ async def process_api_ad_data(
                         date_str=date_str,
                         product_name=product_name,
                         country_code=country_code,
-                        source=f"{source}（无法识别国家代码，已累加）",
+                        source=f"{source}（无国家或无法识别，已累加）",
                         db=db,
                     )
 
                     # 检查是否需要更新
                     need_update = False
                     update_fields = []
+
+                    if existing_data.country_code != country_code:
+                        old_country = existing_data.country_code
+                        existing_data.country_code = country_code
+                        need_update = True
+                        update_fields.append(
+                            f"国家: {old_country or 'NULL'} -> {country_code or 'NULL'}"
+                        )
 
                     if existing_data.request_count != grouped_data["request_count"]:
                         need_update = True
@@ -1033,12 +1042,16 @@ async def process_api_ad_data(
                         pending_write = "update"
                         pending_product_id = product_id
                         logger.info(
-                            f"更新广告数据（无法识别国家代码，已累加）: 日期={date_str}, 产品={product_name}, 国家=AA, 变化字段: {', '.join(update_fields)}"
+                            f"更新广告数据（无国家或无法识别，已累加）: 日期={date_str}, 产品={product_name}, "
+                            f"国家={country_code or 'NULL'}, 变化字段: {', '.join(update_fields)}"
                         )
 
                     else:
                         skipped_count += 1
-                        logger.info(f"数据完全相同，跳过: 日期={date_str}, 产品={product_name}, 国家=AA")
+                        logger.info(
+                            f"数据完全相同，跳过: 日期={date_str}, 产品={product_name}, "
+                            f"国家={country_code or 'NULL'}"
+                        )
                 else:
                     # 创建新记录
                     ad_data_date = normalize_date_for_ad_data(item_date)
