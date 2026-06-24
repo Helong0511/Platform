@@ -252,7 +252,8 @@ async def get_client_data(
             api_request,
             db,
             data_type=api_request.data_type,
-            dimension=parsed_dimension,
+            # 签名须与请求体原文一致；country_ad_unit 等别名在查询前才规范化
+            dimension=api_request.dimension,
             start_date=api_request.start_date,
             end_date=api_request.end_date
         )

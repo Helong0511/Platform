@@ -5,8 +5,8 @@ import json
 
 # 配置信息
 BASE_URL = 'https://client.btfrx.online/api/v1'
-CLIENT_ID = 1025
-SECRET_KEY = 'fdedbcee-08b8-451d-9878-128a9c168bdd'
+CLIENT_ID = 1028
+SECRET_KEY = '65006a7c-1083-41b4-a255-3e9904eea930'
 
 
 def generate_signature(client_id, req_time, secret_key, data_type=None, dimension=None, start_date=None, end_date=None):
@@ -103,18 +103,18 @@ def get_ad_data(data_type, start_date=None, end_date=None, dimension=None):
     return response.json()
 
 
-# 使用示例（日期为当天 2026-06-17）
+# 使用示例（日期为当天 2026-06-24）
 if __name__ == '__main__':
-    today = '2026-06-16'
+    today = '2026-06-23'
+
+    # # 获取产品列表
+    # products_result = get_products()
+    # print("产品列表:", json.dumps(products_result, indent=2, ensure_ascii=False))
 
     # 获取详细广告数据（按国家维度，推荐）
-    ad_data_result = get_ad_data(data_type='all', start_date=today, end_date=today)
-
-    gg_data = ad_data_result.get('data')
-
-    aa = 0
-    for item in gg_data:
-        if item.get('product_name') == "https://animal.infompost.com/":
-            aa = aa + item.get('request_count')
-
-    print(aa)
+    ad_data_result = get_ad_data(data_type='all', dimension='country_ad_unit', start_date=today, end_date=today)
+    print("按国家-详细数据:", json.dumps(ad_data_result, indent=2, ensure_ascii=False))
+    #
+    # # 获取每日汇总（按国家维度）
+    # daily_summary_result = get_ad_data(data_type='day', dimension='country', start_date=today, end_date=today)
+    # print("按国家-每日汇总:", json.dumps(daily_summary_result, indent=2, ensure_ascii=False))
