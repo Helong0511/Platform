@@ -17,8 +17,9 @@ import {
  * @param {import('vue').ComputedRef<boolean>} options.isAdmin
  * @param {import('vue').Ref} options.pagination
  * @param {() => Promise<void>} options.refetch
+ * @param {() => Promise<void>} [options.onDateRangeChanged] 日期被程序改写后刷新筛选项
  */
-export function useAdDataDateRangeBootstrap({ searchForm, isAdmin, pagination, refetch }) {
+export function useAdDataDateRangeBootstrap({ searchForm, isAdmin, pagination, refetch, onDateRangeChanged }) {
   const hasAutoExpandedDateRange = ref(false);
 
   const getClientIdForDateRange = () => {
@@ -74,6 +75,9 @@ export function useAdDataDateRangeBootstrap({ searchForm, isAdmin, pagination, r
         hasAutoExpandedDateRange.value = true;
         searchForm.value.dateRange = fullRange;
         pagination.value.current = 1;
+        if (onDateRangeChanged) {
+          await onDateRangeChanged();
+        }
         await refetch();
         return;
       }

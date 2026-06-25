@@ -42,11 +42,11 @@
       @fetch="fetchAdData"
       @reset="resetFilter"
       @date-range-change="handleDateRangeChange"
-      @filter-client-change="handleFilterClientChange"
-      @filter-product-change="handleFilterProductChange"
-      @dimension-change="handleDimensionChange"
-      @country-change="handleCountryChange"
-      @ad-unit-change="handleAdUnitChange"
+      @filter-client-change="onFilterClientChange"
+      @filter-product-change="onFilterProductChange"
+      @dimension-change="onDimensionChange"
+      @country-change="onCountryChange"
+      @ad-unit-change="onAdUnitChange"
     />
 
     <AdDataDetailTable
@@ -246,7 +246,8 @@ const {
   handleCountryChange,
   handleAdUnitChange,
   reloadFiltersAfterDateChange,
-  reloadSecondaryFilters
+  reloadSecondaryFilters,
+  pruneInvalidFilterSelections
 } = useDataPageFilterCascade({
   searchForm,
   includeCountry: true,
@@ -289,7 +290,8 @@ const {
   searchForm,
   isAdmin,
   pagination,
-  refetch: () => fetchAdData()
+  refetch: () => fetchAdData(),
+  onDateRangeChanged: () => reloadFiltersAfterDateChange(isAdmin.value)
 });
 
 const { runFetch: fetchAdData, cancel: cancelAdDataFetch } = useDebouncedPaginatedFetch({
@@ -349,7 +351,45 @@ const fetchProducts = async (clientId) => {
 };
 
 const handleDateRangeChange = async () => {
+  await nextTick();
   await reloadFiltersAfterDateChange(isAdmin.value);
+  pagination.value.current = 1;
+  fetchAdData();
+};
+
+const refetchAfterFilterCascade = () => {
+  pagination.value.current = 1;
+  fetchAdData();
+};
+
+const onFilterClientChange = async () => {
+  await handleFilterClientChange();
+  pruneInvalidFilterSelections(isAdmin.value);
+  refetchAfterFilterCascade();
+};
+
+const onFilterProductChange = async () => {
+  await handleFilterProductChange();
+  pruneInvalidFilterSelections(isAdmin.value);
+  refetchAfterFilterCascade();
+};
+
+const onDimensionChange = async () => {
+  await handleDimensionChange();
+  pruneInvalidFilterSelections(isAdmin.value);
+  refetchAfterFilterCascade();
+};
+
+const onCountryChange = async () => {
+  await handleCountryChange();
+  pruneInvalidFilterSelections(isAdmin.value);
+  refetchAfterFilterCascade();
+};
+
+const onAdUnitChange = async () => {
+  await handleAdUnitChange();
+  pruneInvalidFilterSelections(isAdmin.value);
+  refetchAfterFilterCascade();
 };
 
 // 处理排序变化
@@ -387,20 +427,10 @@ const resetFilter = async () => {
     prop: 'date',
     order: 'descending'
   };
-  
-  // 重新加载有数据的客户列表（管理员）
-  if (isAdmin.value) {
-    await fetchClientsWithData();
-  }
-  
-  // 重新加载有数据的产品列表（使用当前月的日期范围）
-  // 客户用户不需要指定client_id，后端会自动根据当前用户过滤数据
-  const defaultClientId = isAdmin.value ? null : null;
-  await fetchFilterProducts(defaultClientId);
-  await reloadSecondaryFilters();
-  await ensureInitialDateRange();
 
-  fetchAdData(); // 重置后刷新数据
+  await ensureInitialDateRange();
+  await reloadFiltersAfterDateChange(isAdmin.value);
+  fetchAdData();
 };
 
 // 监听分页变化

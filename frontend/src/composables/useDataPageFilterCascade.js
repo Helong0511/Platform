@@ -151,6 +151,8 @@ function normalizeFilterFieldToString(form, field) {
  * @param {() => string|number|null|undefined} [options.getUserId] 当前用户 ID，用于统计维度偏好持久化
  * @param {boolean} [options.fixedDimension=false] 固定维度页（不读写 localStorage 偏好）
  * @param {boolean} [options.multiSelect=false] 客户/产品/国家/广告单元是否多选
+ * @param {() => boolean|null} [options.getEnableCountryFilter] 页面是否展示国家筛选
+ * @param {() => boolean|null} [options.getEnableAdUnitFilter] 页面是否展示广告单元筛选
  */
 export function useDataPageFilterCascade({
   searchForm,
@@ -160,7 +162,9 @@ export function useDataPageFilterCascade({
   api: apiOverride = null,
   getUserId = null,
   fixedDimension = false,
-  multiSelect = false
+  multiSelect = false,
+  getEnableCountryFilter = null,
+  getEnableAdUnitFilter = null
 }) {
   const api =
     apiOverride || (source === 'tb-search' ? TB_SEARCH_API : AD_DATA_API);
@@ -190,6 +194,29 @@ export function useDataPageFilterCascade({
 
   const getAdUnitFilterParam = () =>
     multiSelect ? toCsvFilterValue(searchForm.value.adUnit) : (searchForm.value.adUnit || null);
+
+  const shouldLoadCountryOptions = () => {
+    if (typeof getEnableCountryFilter === 'function' && getEnableCountryFilter() === false) {
+      return false;
+    }
+    if (!includeCountry && !includeDimension) {
+      return false;
+    }
+    if (includeDimension) {
+      return showCountryFilterForDimension(getDimension());
+    }
+    return true;
+  };
+
+  const shouldLoadAdUnitOptions = () => {
+    if (typeof getEnableAdUnitFilter === 'function' && getEnableAdUnitFilter() === false) {
+      return false;
+    }
+    if (!includeDimension || !api.getAdUnits) {
+      return false;
+    }
+    return showAdUnitFilterForDimension(getDimension());
+  };
 
   /** 清除与当前统计维度不兼容的筛选项（避免 ad_unit 维度残留国家筛选导致查无数据） */
   const pruneDimensionAwareFilters = () => {
@@ -358,15 +385,34 @@ export function useDataPageFilterCascade({
     const clientId = getClientFilterParam();
     const productId = getProductFilterParam();
     const dimension = getDimension();
+    const loadCountries = shouldLoadCountryOptions();
+    const loadAdUnits = shouldLoadAdUnitOptions();
+
+    if (!loadCountries) {
+      filterCountries.value = multiSelect
+        ? []
+        : [{ code: '', name_zh: '全部区域', label: '全部区域' }];
+    }
+    if (!loadAdUnits) {
+      filterAdUnits.value = multiSelect ? [] : [{ value: '', label: '全部广告单元' }];
+    }
 
     if (includeDimension && isAdUnitCountryDimension(dimension)) {
-      await fetchFilterAdUnits(clientId, productId, null);
-      await fetchFilterCountries(clientId, productId, getAdUnitFilterParam());
+      if (loadAdUnits) {
+        await fetchFilterAdUnits(clientId, productId, null);
+      }
+      if (loadCountries) {
+        await fetchFilterCountries(clientId, productId, getAdUnitFilterParam());
+      }
       return;
     }
 
-    await fetchFilterCountries(clientId, productId);
-    await fetchFilterAdUnits(clientId, productId, getCountryFilterParam());
+    if (loadCountries) {
+      await fetchFilterCountries(clientId, productId);
+    }
+    if (loadAdUnits) {
+      await fetchFilterAdUnits(clientId, productId, getCountryFilterParam());
+    }
   };
 
   const pruneFieldSelection = (field, options, getOptionValue) => {
@@ -523,22 +569,25 @@ export function useDataPageFilterCascade({
     fixSelectDisplay();
   };
 
+  /** 日期变更后按级联顺序刷新筛选项：先校验客户，再产品，再国家/广告单元 */
   const reloadFiltersAfterDateChange = async (isAdmin) => {
     if (isAdmin) {
       await fetchClientsWithData();
+      pruneInvalidFilterSelections(true);
     }
-    await fetchFilterProducts(getClientId());
+
+    await fetchFilterProducts(getClientFilterParam());
+    if (pruneInvalidFilterSelections(isAdmin)) {
+      await fetchFilterProducts(getClientFilterParam());
+    }
+
     await reloadSecondaryFilters();
     pruneInvalidFilterSelections(isAdmin);
+    fixSelectDisplay();
   };
 
   const loadAllFilterOptions = async (isAdmin) => {
-    if (isAdmin) {
-      await fetchClientsWithData();
-    }
-    await fetchFilterProducts(getClientId());
-    await reloadSecondaryFilters();
-    pruneInvalidFilterSelections(isAdmin);
+    await reloadFiltersAfterDateChange(isAdmin);
   };
 
   if (includeDimension && getUserId && !fixedDimension) {

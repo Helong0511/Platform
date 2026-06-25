@@ -16,7 +16,7 @@
           format="YYYY-MM-DD"
           value-format="YYYY-MM-DD"
           style="width: 100%;"
-          @change="emit('date-range-change')"
+          @change="handleDateRangePickerChange"
         />
       </el-form-item>
       <el-form-item v-if="isAdmin" label="客户">
@@ -128,7 +128,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, nextTick } from 'vue';
 import { InfoFilled } from '@element-plus/icons-vue';
 import {
   AD_DATA_DIMENSION_HINTS,
@@ -172,6 +172,12 @@ const emit = defineEmits([
   'country-change',
   'ad-unit-change'
 ]);
+
+/** 等待 v-model 同步后再通知父组件刷新级联筛选项 */
+const handleDateRangePickerChange = async () => {
+  await nextTick();
+  emit('date-range-change');
+};
 
 const dimensionOptions = AD_DATA_DIMENSION_OPTIONS;
 

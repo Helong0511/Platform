@@ -31,10 +31,10 @@
       @fetch="fetchDailyData"
       @reset="resetFilter"
       @date-range-change="handleDateRangeChange"
-      @filter-client-change="handleFilterClientChange"
-      @filter-product-change="handleFilterProductChange"
-      @country-change="handleCountryChange"
-      @ad-unit-change="handleAdUnitChange"
+      @filter-client-change="onFilterClientChange"
+      @filter-product-change="onFilterProductChange"
+      @country-change="onCountryChange"
+      @ad-unit-change="onAdUnitChange"
     />
 
     <!-- 数据表格 -->
@@ -288,21 +288,21 @@ const {
   filterProducts,
   filterCountries,
   filterAdUnits,
-  fetchClientsWithData,
-  fetchFilterProducts,
   handleFilterClientChange,
   handleFilterProductChange,
   handleCountryChange,
   handleAdUnitChange,
   reloadFiltersAfterDateChange,
-  reloadSecondaryFilters
+  pruneInvalidFilterSelections
 } = useDataPageFilterCascade({
   searchForm,
   includeCountry: true,
   includeDimension: true,
   source: 'ad-data',
   fixedDimension: true,
-  multiSelect: true
+  multiSelect: true,
+  getEnableCountryFilter: () => pageConfig.value.showCountryFilter,
+  getEnableAdUnitFilter: () => pageConfig.value.showAdUnitFilter
 });
 
 const buildDailySearchParams = () => {
@@ -345,7 +345,8 @@ const {
   searchForm,
   isAdmin,
   pagination,
-  refetch: () => fetchDailyData()
+  refetch: () => fetchDailyData(),
+  onDateRangeChanged: () => reloadFiltersAfterDateChange(isAdmin.value)
 });
 
 const { runFetch: fetchDailyData, cancel: cancelDailyFetch } = useDebouncedPaginatedFetch({
@@ -383,7 +384,39 @@ const { runFetch: fetchDailyData, cancel: cancelDailyFetch } = useDebouncedPagin
 });
 
 const handleDateRangeChange = async () => {
+  await nextTick();
   await reloadFiltersAfterDateChange(isAdmin.value);
+  pagination.value.current = 1;
+  fetchDailyData();
+};
+
+const refetchAfterFilterCascade = () => {
+  pagination.value.current = 1;
+  fetchDailyData();
+};
+
+const onFilterClientChange = async () => {
+  await handleFilterClientChange();
+  pruneInvalidFilterSelections(isAdmin.value);
+  refetchAfterFilterCascade();
+};
+
+const onFilterProductChange = async () => {
+  await handleFilterProductChange();
+  pruneInvalidFilterSelections(isAdmin.value);
+  refetchAfterFilterCascade();
+};
+
+const onCountryChange = async () => {
+  await handleCountryChange();
+  pruneInvalidFilterSelections(isAdmin.value);
+  refetchAfterFilterCascade();
+};
+
+const onAdUnitChange = async () => {
+  await handleAdUnitChange();
+  pruneInvalidFilterSelections(isAdmin.value);
+  refetchAfterFilterCascade();
 };
 
 // 处理排序变化
@@ -421,16 +454,9 @@ const resetFilter = async () => {
     prop: 'date',
     order: 'descending'
   };
-  
-  if (isAdmin.value) {
-    await fetchClientsWithData();
-  }
 
-  const defaultClientId = isAdmin.value ? null : null;
-  await fetchFilterProducts(defaultClientId);
-  await reloadSecondaryFilters();
   await ensureInitialDateRange();
-
+  await reloadFiltersAfterDateChange(isAdmin.value);
   fetchDailyData();
 };
 
@@ -515,15 +541,8 @@ const loadPageData = async () => {
     }
     
     await ensureInitialDateRange();
-    await fetchDailyData();
-    
-    if (isAdmin.value) {
-      await fetchClientsWithData();
-    }
-    
-    const defaultClientId = isAdmin.value ? null : null;
-    await fetchFilterProducts(defaultClientId);
     await reloadFiltersAfterDateChange(isAdmin.value);
+    await fetchDailyData();
   } catch (error) {
     if (!isErrorHandled(error)) {
       const errorMsg = extractErrorMessage(error);
