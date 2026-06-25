@@ -30,6 +30,7 @@ from app.services.ad_data.queries.filter_conditions import (
     apply_product_ids_filter,
     build_ad_units_in_filter,
     build_country_codes_filter,
+    InvalidFilterParameterError,
     parse_csv_ints,
     parse_csv_strs,
 )
@@ -306,6 +307,8 @@ class AdDataListQuery:
 
             count_result = await self.db.execute(count_query)
             return count_result.scalar() or 0
+        except InvalidFilterParameterError:
+            raise
         except Exception as e:
             logger.error("计算广告数据总数失败: %s", str(e))
             return 0

@@ -23,7 +23,10 @@ from app.core.country_code import resolve_country_name
 from app.core.query_utils import apply_date_range_filter, check_use_assignment_table
 from app.core.security import is_admin
 from app.models.models import AdData, Client, CountryInfo, Product, User
-from app.services.ad_data.queries.filter_conditions import apply_ad_data_scope_filters
+from app.services.ad_data.queries.filter_conditions import (
+    InvalidFilterParameterError,
+    apply_ad_data_scope_filters,
+)
 from app.services.ad_data.queries.dimension_filter import (
     build_daily_summary_dimension_filter,
     is_cross_dimension,
@@ -496,6 +499,8 @@ class DailySummaryQuery:
             count_query = select(func.count()).select_from(subquery.alias("distinct_groups"))
             count_result = await self.db.execute(count_query)
             return count_result.scalar() or 0
+        except InvalidFilterParameterError:
+            raise
         except Exception as e:
             logger.error("计算每日汇总总数失败: %s", str(e))
             return 0
