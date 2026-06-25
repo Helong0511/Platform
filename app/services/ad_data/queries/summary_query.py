@@ -163,6 +163,11 @@ def build_table_grand_total_payload(*, raw: Dict[str, Any], for_admin: bool) -> 
     total_revenue_after = round(float(raw["total_revenue_after"]), 4)
     total_revenue_before = round(float(raw["total_revenue_before"]), 4)
     total_click = int(raw["total_clicks"])
+    # 合计行 CPC 口径与历史 fetch_grand_totals 一致：始终用扣后收益，不区分管理员
+    cpc = round(
+        (total_revenue_after / total_click) if total_click > 0 else 0.0,
+        2,
+    )
 
     payload: Dict[str, Any] = {
         "request_count": int(raw["total_requests"]),
@@ -176,7 +181,7 @@ def build_table_grand_total_payload(*, raw: Dict[str, Any], for_admin: bool) -> 
         "viewability_rate": derived["viewability_rate"],
         "ecpm_after_deduct": derived["ecpm_after_deduct"],
         "revenue_after_deduct": total_revenue_after,
-        "cpc": derived["cpc"],
+        "cpc": cpc,
     }
     if for_admin:
         payload["ecpm_before_deduct"] = derived["ecpm_before_deduct"]
