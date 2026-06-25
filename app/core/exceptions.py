@@ -70,6 +70,20 @@ def raise_api_exception(
     )
 
 
+def raise_filter_validation_api_exception(
+    detail: str,
+    *,
+    path: Optional[str] = None,
+) -> None:
+    """将筛选参数校验失败转为标准 API 异常（ErrorCode.VALIDATION_ERROR）。"""
+    raise_api_exception(
+        error_code=ErrorCode.VALIDATION_ERROR,
+        message="请求参数验证失败",
+        detail=detail,
+        path=path,
+    )
+
+
 def _map_error_code_to_status_code(error_code: int) -> int:
     """
     将错误码映射到 HTTP 状态码
