@@ -110,6 +110,22 @@ async def build_country_codes_filter(
     return or_(*conditions)
 
 
+def validate_ad_data_scope_filter_params(
+    *,
+    current_user: User,
+    client_id: Optional[str | int] = None,
+    product_id: Optional[str] = None,
+    country_code: Optional[str] = None,
+    ad_unit: Optional[str] = None,
+) -> None:
+    """预先解析筛选参数；非法整数格式时抛出 InvalidFilterParameterError。"""
+    if is_admin(current_user):
+        parse_csv_ints(client_id, field="client_id")
+    parse_csv_ints(product_id, field="product_id")
+    parse_csv_strs(country_code)
+    parse_csv_strs(ad_unit)
+
+
 async def apply_ad_data_scope_filters(
     db: AsyncSession,
     query: Any,
@@ -122,6 +138,13 @@ async def apply_ad_data_scope_filters(
     dimension: Optional[str] = None,
 ) -> Any:
     """应用客户/产品/国家/广告单元筛选（含多选）。"""
+    validate_ad_data_scope_filter_params(
+        current_user=current_user,
+        client_id=client_id,
+        product_id=product_id,
+        country_code=country_code,
+        ad_unit=ad_unit,
+    )
     client_ids = parse_csv_ints(client_id, field="client_id")
     product_ids = parse_csv_ints(product_id, field="product_id")
     country_codes = parse_csv_strs(country_code)

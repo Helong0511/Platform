@@ -10,11 +10,10 @@
 - 被 ``AdDataService.get_ad_data`` 调用
 """
 import logging
-from calendar import monthrange
 from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import and_, func
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -22,23 +21,13 @@ from app.core.country_code import resolve_country_name
 from app.core.query_utils import (
     apply_date_range_filter,
     check_use_assignment_table,
-    date_range_condition,
 )
 from app.services.ad_data.queries.filter_conditions import (
-    apply_ad_data_scope_filters,
-    apply_client_ids_filter,
-    apply_product_ids_filter,
-    build_ad_units_in_filter,
-    build_country_codes_filter,
     InvalidFilterParameterError,
-    parse_csv_ints,
-    parse_csv_strs,
+    apply_ad_data_scope_filters,
+    validate_ad_data_scope_filter_params,
 )
-from app.services.ad_data.queries.dimension_filter import (
-    ad_unit_exact_filter_applies,
-    build_ad_data_dimension_filter,
-    country_exact_filter_applies,
-)
+from app.services.ad_data.queries.dimension_filter import build_ad_data_dimension_filter
 from app.services.ad_data.queries.join_helpers import (
     CLIENT_LOAD_ONLY,
     join_country_info_for_ad_data,
@@ -80,6 +69,13 @@ class AdDataListQuery:
         from app.api_v1.excel.utils import normalize_date_key
 
         use_assignment_table = await check_use_assignment_table(self.db)
+        validate_ad_data_scope_filter_params(
+            current_user=current_user,
+            client_id=client_id,
+            product_id=product_id,
+            country_code=country_code,
+            ad_unit=ad_unit,
+        )
         query = await self._build_main_query(
             use_assignment_table,
             current_user,
@@ -131,6 +127,13 @@ class AdDataListQuery:
 
         use_assignment_table = await check_use_assignment_table(self.db)
         admin_user = is_admin(current_user)
+        validate_ad_data_scope_filter_params(
+            current_user=current_user,
+            client_id=client_id,
+            product_id=product_id,
+            country_code=country_code,
+            ad_unit=ad_unit,
+        )
 
         query = select(*_daily_summary_aggregate_columns())
         query = join_product_and_client(query, use_assignment_table)
@@ -249,61 +252,29 @@ class AdDataListQuery:
         end_date: Optional[date],
     ) -> int:
         try:
-            filter_conditions = []
-
-            if not is_admin(current_user):
-                filter_conditions.append(Client.user_id == current_user.id)
-            else:
-                client_filter = apply_client_ids_filter(
-                    Client.id, parse_csv_ints(client_id, field="client_id")
-                )
-                if client_filter is not None:
-                    filter_conditions.append(client_filter)
-
-            filter_conditions.append(Product.is_active == True)
-
-            product_filter = apply_product_ids_filter(
-                AdData.product_id, parse_csv_ints(product_id, field="product_id")
-            )
-            if product_filter is not None:
-                filter_conditions.append(product_filter)
-
-            filter_conditions.append(
-                build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
-            )
-
-            if country_exact_filter_applies(dimension):
-                country_filter = await build_country_codes_filter(
-                    self.db, AdData.country_code, parse_csv_strs(country_code)
-                )
-                if country_filter is not None:
-                    filter_conditions.append(country_filter)
-
-            if ad_unit_exact_filter_applies(dimension):
-                ad_unit_filter = build_ad_units_in_filter(
-                    AdData.ad_unit, parse_csv_strs(ad_unit)
-                )
-                if ad_unit_filter is not None:
-                    filter_conditions.append(ad_unit_filter)
-
-            date_range_start = start_date
-            date_range_end = end_date
-            if not date_range_start and not date_range_end:
-                today = date.today()
-                month_start = date(today.year, today.month, 1)
-                _, last_day = monthrange(today.year, today.month)
-                date_range_end = date(today.year, today.month, last_day)
-                date_range_start = month_start
-
-            date_condition = date_range_condition(AdData.date, date_range_start, date_range_end)
-            if date_condition is not None:
-                filter_conditions.append(date_condition)
-
             count_query = select(func.count(AdData.id))
             count_query = join_product_and_client(count_query, use_assignment_table)
-
-            if filter_conditions:
-                count_query = count_query.where(and_(*filter_conditions))
+            count_query = count_query.where(Product.is_active == True)
+            count_query = count_query.where(
+                build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
+            )
+            count_query = await apply_ad_data_scope_filters(
+                self.db,
+                count_query,
+                current_user=current_user,
+                client_id=client_id,
+                product_id=product_id,
+                country_code=country_code,
+                ad_unit=ad_unit,
+                dimension=dimension,
+            )
+            count_query = apply_date_range_filter(
+                count_query,
+                AdData.date,
+                start_date,
+                end_date,
+                default_to_current_month=True,
+            )
 
             count_result = await self.db.execute(count_query)
             return count_result.scalar() or 0

@@ -48,6 +48,7 @@ from app.schemas.ad_data import (
 from app.schemas.base import PaginatedResponseBaseSchema, ResponseBaseSchema, ListResponseBaseSchema
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.services.ad_data.queries.filter_conditions import InvalidFilterParameterError
 from app.services.ad_data_service import AdDataService
 
 # 创建路由实例
@@ -157,6 +158,8 @@ async def get_clients_with_data(
         return ListResponseBaseSchema.success(data=clients_list, count=len(clients_list))
     except HTTPException:
         raise
+    except InvalidFilterParameterError:
+        raise
     except Exception as e:
         logger.error(f"获取有数据的客户列表失败: {str(e)}", exc_info=True)
         raise_api_exception(
@@ -202,6 +205,8 @@ async def get_countries_with_data(
         return ListResponseBaseSchema.success(data=countries_list, count=len(countries_list))
     except HTTPException:
         raise
+    except InvalidFilterParameterError:
+        raise
     except Exception as e:
         logger.error(f"获取有数据的国家列表失败: {str(e)}", exc_info=True)
         raise_api_exception(
@@ -239,6 +244,8 @@ async def get_ad_units_with_data(
         )
         return ListResponseBaseSchema.success(data=ad_units_list, count=len(ad_units_list))
     except HTTPException:
+        raise
+    except InvalidFilterParameterError:
         raise
     except Exception as e:
         logger.error(f"获取有数据的广告单元列表失败: {str(e)}", exc_info=True)
@@ -290,6 +297,8 @@ async def get_products_with_data(
         )
         return ListResponseBaseSchema.success(data=products_list, count=len(products_list))
     except HTTPException:
+        raise
+    except InvalidFilterParameterError:
         raise
     except Exception as e:
         logger.error(f"获取有数据的产品列表失败: {str(e)}", exc_info=True)
@@ -388,6 +397,8 @@ async def get_ad_data_date_range(
         )
         return ResponseBaseSchema.success(data=date_range)
     except HTTPException:
+        raise
+    except InvalidFilterParameterError:
         raise
     except Exception as e:
         logger.error(f"获取日期范围失败: {str(e)}", exc_info=True)

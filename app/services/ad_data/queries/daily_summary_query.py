@@ -26,6 +26,7 @@ from app.models.models import AdData, Client, CountryInfo, Product, User
 from app.services.ad_data.queries.filter_conditions import (
     InvalidFilterParameterError,
     apply_ad_data_scope_filters,
+    validate_ad_data_scope_filter_params,
 )
 from app.services.ad_data.queries.dimension_filter import (
     build_daily_summary_dimension_filter,
@@ -132,6 +133,14 @@ class DailySummaryQuery:
         group_by_ad_unit = dim == "ad_unit" or is_cross_dimension(dim)
         group_by_country = split_by_country or is_cross_dimension(dim)
         dim_start, dim_end = _effective_summary_date_range(start_date, end_date)
+
+        validate_ad_data_scope_filter_params(
+            current_user=current_user,
+            client_id=client_id,
+            product_id=product_id,
+            country_code=country_code,
+            ad_unit=ad_unit,
+        )
 
         grand_total = await self.fetch_grand_totals(
             current_user=current_user,
@@ -410,6 +419,13 @@ class DailySummaryQuery:
         dim_start, dim_end = _effective_summary_date_range(start_date, end_date)
         use_assignment_table = await check_use_assignment_table(self.db)
         admin_user = is_admin(current_user)
+        validate_ad_data_scope_filter_params(
+            current_user=current_user,
+            client_id=client_id,
+            product_id=product_id,
+            country_code=country_code,
+            ad_unit=ad_unit,
+        )
 
         query = select(*_daily_summary_aggregate_columns())
         query = join_product_and_client(query, use_assignment_table)
