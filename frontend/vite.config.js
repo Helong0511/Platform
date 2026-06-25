@@ -13,25 +13,28 @@ import { versionPlugin } from './vite-plugin-version.js'
 import { copyFileSync, existsSync, mkdirSync } from 'fs'
 import { resolve } from 'path'
 
-// 自定义插件：构建后复制 favicon.ico
-const copyFaviconPlugin = {
-  name: 'copy-favicon',
+// 自定义插件：构建后复制 favicon.ico、privacy.html 等静态文件到 dist
+const copyDistStaticPlugin = {
+  name: 'copy-dist-static',
   closeBundle() {
-    const faviconSrc = resolve(__dirname, 'favicon.ico');
-    const faviconDest = resolve(__dirname, 'dist', 'favicon.ico');
-    
-    // 确保 dist 目录存在
     const distDir = resolve(__dirname, 'dist');
     if (!existsSync(distDir)) {
       mkdirSync(distDir, { recursive: true });
     }
-    
-    // 复制 favicon.ico
-    if (existsSync(faviconSrc)) {
-      copyFileSync(faviconSrc, faviconDest);
-      console.log('✅ favicon.ico 已复制到 dist 目录');
-    } else {
-      console.warn('⚠️  favicon.ico 源文件不存在');
+
+    const staticFiles = [
+      { src: resolve(__dirname, 'favicon.ico'), label: 'favicon.ico' },
+      { src: resolve(__dirname, '../scripts/privacy.html'), label: 'privacy.html' },
+    ];
+
+    for (const { src, label } of staticFiles) {
+      const dest = resolve(distDir, label);
+      if (existsSync(src)) {
+        copyFileSync(src, dest);
+        console.log(`✅ ${label} 已复制到 dist 目录`);
+      } else {
+        console.warn(`⚠️  ${label} 源文件不存在: ${src}`);
+      }
     }
   }
 };
@@ -143,7 +146,7 @@ export default defineConfig({
   plugins: [
     vue(),
     versionPlugin(), // 版本文件生成插件
-    copyFaviconPlugin, // 复制 favicon.ico 插件
+    copyDistStaticPlugin, // 复制 favicon、privacy.html 等静态文件
   ],
 
   // 优化配置
