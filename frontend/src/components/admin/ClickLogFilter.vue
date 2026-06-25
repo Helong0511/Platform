@@ -142,29 +142,32 @@ watch(() => props.filters, (newFilters) => {
 // 防抖定时器
 let debounceTimer = null;
 
+const syncAndSearch = () => {
+  const payload = { ...localFilters.value };
+  emit('update:filters', payload);
+  emit('search', payload);
+};
+
 const handleInput = () => {
   if (debounceTimer) {
     clearTimeout(debounceTimer);
   }
-  debounceTimer = setTimeout(() => {
-    emit('search');
-  }, 500);
+  debounceTimer = setTimeout(syncAndSearch, 500);
 };
 
 const handleClear = () => {
-  emit('search');
+  syncAndSearch();
 };
 
 const handleDateChange = () => {
-  emit('search');
+  syncAndSearch();
 };
 
 const handleSearch = () => {
   if (debounceTimer) {
     clearTimeout(debounceTimer);
   }
-  emit('update:filters', { ...localFilters.value });
-  emit('search');
+  syncAndSearch();
 };
 
 const handleReset = () => {

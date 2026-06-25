@@ -112,7 +112,7 @@ if __name__ == '__main__':
     # print("产品列表:", json.dumps(products_result, indent=2, ensure_ascii=False))
 
     # 获取详细广告数据（按国家维度，推荐）  country / ad_unit / country_ad_unit
-    ad_data_result = get_ad_data(data_type='all', dimension='country', start_date=today, end_date=today)
+    ad_data_result = get_ad_data(data_type='all', dimension='ad_unit', start_date=today, end_date=today)
     # print(json.dumps(ad_data_result, indent=2, ensure_ascii=False))
 
     product_name = []
@@ -123,9 +123,13 @@ if __name__ == '__main__':
             # print(item.get('date',''),item.get('product_name',''),item.get('country_code',''),item.get('country_name_zh',''),item.get('request_count',''),item.get('match_count',''),item.get('coverage_rate',''),item.get('display_count',''),item.get('display_rate',''),item.get('click_count',''),item.get('click_rate',''),item.get('viewability_rate',''),item.get('cpc',''),item.get('pageviews',''),item.get('ecpm',''),item.get('revenue',''))
 
             if item.get('product_name','') not in product_name:
+                print(item.get('product_name',''))
                 product_name.append(item.get('product_name',''))
 
-    print(product_name)
+    print(len(product_name))
+
+    product = sorted(product_name)
+    print(product)
 
     # # 获取每日汇总（按国家维度）
     # daily_summary_result = get_ad_data(data_type='day', dimension='country', start_date=today, end_date=today)

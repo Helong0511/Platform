@@ -80,7 +80,15 @@ export function useClickLogList() {
     }
   };
 
-  const handleSearch = () => {
+  /** 合并筛选条件到 composable 内 reactive filters（避免 v-model 整对象替换导致查询参数丢失） */
+  const patchFilters = (partial) => {
+    if (partial && typeof partial === 'object') {
+      Object.assign(filters, partial);
+    }
+  };
+
+  const handleSearch = (partial) => {
+    patchFilters(partial);
     pagination.page = 1;
     loadData();
   };
@@ -212,6 +220,7 @@ export function useClickLogList() {
     loadOffers,
     loadPublishers,
     loadData,
+    patchFilters,
     handleSearch,
     debouncedSearch,
     handleReset,

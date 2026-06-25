@@ -25,8 +25,14 @@
 
       <!-- 筛选栏 -->
       <div class="filter-container">
-        <ClickLogFilter v-model:filters="filters" :offer-list="offerList" :publisher-list="publisherList"
-          @search="handleSearch" @reset="handleReset" />
+        <ClickLogFilter
+          :filters="filters"
+          :offer-list="offerList"
+          :publisher-list="publisherList"
+          @update:filters="patchFilters"
+          @search="handleSearch"
+          @reset="handleReset"
+        />
       </div>
 
       <!-- 表格 -->
@@ -238,6 +244,7 @@ const {
   fbReportLoadingMap,
   loadOffers,
   loadPublishers,
+  patchFilters,
   handleSearch,
   handleReset,
   handleShortCodeClick,
