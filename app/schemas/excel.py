@@ -23,14 +23,14 @@ class ExcelBase(BaseModel):
 
 
 class ExcelImportResponse(ExcelBase):
-  """Excel 导入响应模型。"""
-  status: int = 200
-  imported_rows: int
-  failed_rows: int = 0
-  new_rows: int | None = 0
-  updated_rows: int | None = 0
-  duplicate_rows: int | None = 0
-  error_details: list[str] | None = None
+    """Excel 导入响应模型。"""
+    status: int = 200
+    imported_rows: int
+    failed_rows: int = 0
+    new_rows: int | None = 0
+    updated_rows: int | None = 0
+    duplicate_rows: int | None = 0
+    error_details: list[str] | None = None
 
 
 class ExcelExportResponse(ExcelBase):

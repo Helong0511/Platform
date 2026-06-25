@@ -5,6 +5,8 @@ Telegram 消息发送模块
 """
 import logging
 import importlib
+import re
+import threading
 import time
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -18,6 +20,45 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 3  # 最大重试次数
 BASE_RETRY_DELAY = 2  # 基础重试延迟（秒）
 TIMEOUT_SECONDS = 15  # 超时时间（秒）
+INTER_CHAT_DELAY = 0.35  # 同一批次向多个 Chat ID 发送时的间隔（秒）
+MIN_SEND_INTERVAL = 0.05  # 全局最小发送间隔（秒）
+MAX_RATE_LIMIT_WAIT = 120  # 429 限流时最长等待秒数
+
+_send_lock = threading.Lock()
+_last_send_monotonic = 0.0
+
+
+def _parse_retry_after(error_msg: str) -> Optional[int]:
+    """从 Telegram 429 错误描述中解析 retry_after 秒数。"""
+    match = re.search(r"retry after (\d+)", error_msg, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _is_rate_limit_error(error_msg: str) -> bool:
+    lowered = error_msg.lower()
+    return "429" in error_msg or "too many requests" in lowered
+
+
+def _is_retryable_network_error(error_msg: str) -> bool:
+    lowered = error_msg.lower()
+    return (
+        "timeout" in lowered
+        or "timed out" in lowered
+        or "connection" in lowered
+        or "network" in lowered
+    )
+
+
+def _wait_before_send() -> None:
+    """全局串行化发送并保证最小间隔，避免多线程并发触发限流。"""
+    global _last_send_monotonic
+    with _send_lock:
+        elapsed = time.monotonic() - _last_send_monotonic
+        if elapsed < MIN_SEND_INTERVAL:
+            time.sleep(MIN_SEND_INTERVAL - elapsed)
+        _last_send_monotonic = time.monotonic()
 
 
 def _check_bot_available() -> tuple[bool, str]:
@@ -126,14 +167,15 @@ def send_telegram_message(
 
     all_success = True
 
-    for chat_id in chat_ids:
-            
+    for index, chat_id in enumerate(chat_ids):
+        if index > 0:
+            time.sleep(INTER_CHAT_DELAY)
+
         # 重试机制
         success = False
         for attempt in range(MAX_RETRIES):
             try:
-                # 发送消息，不使用 parse_mode 以避免 HTML 解析错误
-                # 设置超时参数
+                _wait_before_send()
                 bot.send_message(
                     chat_id=chat_id,
                     text=actual_message,
@@ -143,31 +185,50 @@ def send_telegram_message(
                 logger.info(f"已发送 Telegram 消息到：{chat_id}（尝试 {attempt + 1}/{MAX_RETRIES}）")
                 success = True
                 break
-                
+
             except Exception as e:
                 error_msg = str(e)
-                is_timeout = 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower()
-                is_network_error = 'connection' in error_msg.lower() or 'network' in error_msg.lower()
-                
-                if is_timeout or is_network_error:
-                    # 网络相关错误，进行重试
+
+                if _is_rate_limit_error(error_msg):
+                    retry_after = _parse_retry_after(error_msg) or 60
+                    retry_after = min(retry_after, MAX_RATE_LIMIT_WAIT)
                     if attempt < MAX_RETRIES - 1:
-                        retry_delay = BASE_RETRY_DELAY * (2 ** attempt)
-                        logger.warning(f"发送 Telegram 消息到 {chat_id} 超时/网络错误，{retry_delay}秒后重试（{attempt + 1}/{MAX_RETRIES}）：{e}")
-                        time.sleep(retry_delay)
+                        logger.warning(
+                            f"发送 Telegram 消息到 {chat_id} 触发限流，"
+                            f"{retry_after}秒后重试（{attempt + 1}/{MAX_RETRIES}）"
+                        )
+                        time.sleep(retry_after)
                         continue
-                    else:
-                        logger.error(f"发送 Telegram 消息到 {chat_id} 失败，已达到最大重试次数：{e}", exc_info=True)
-                        all_success = False
-                else:
-                    # 其他错误，直接返回失败
-                    logger.error(f"发送 Telegram 消息到 {chat_id} 失败：{e}", exc_info=True)
+                    logger.error(
+                        f"发送 Telegram 消息到 {chat_id} 限流，已达到最大重试次数：{e}",
+                        exc_info=True
+                    )
                     all_success = False
                     break
-        
+
+                if _is_retryable_network_error(error_msg):
+                    if attempt < MAX_RETRIES - 1:
+                        retry_delay = BASE_RETRY_DELAY * (2 ** attempt)
+                        logger.warning(
+                            f"发送 Telegram 消息到 {chat_id} 超时/网络错误，"
+                            f"{retry_delay}秒后重试（{attempt + 1}/{MAX_RETRIES}）：{e}"
+                        )
+                        time.sleep(retry_delay)
+                        continue
+                    logger.error(
+                        f"发送 Telegram 消息到 {chat_id} 失败，已达到最大重试次数：{e}",
+                        exc_info=True
+                    )
+                    all_success = False
+                    break
+
+                logger.error(f"发送 Telegram 消息到 {chat_id} 失败：{e}", exc_info=True)
+                all_success = False
+                break
+
         if not success:
             all_success = False
-    
+
     return all_success
 
 
@@ -258,6 +319,7 @@ def send_telegram_message_with_buttons(
         # 重试机制
         for attempt in range(MAX_RETRIES):
             try:
+                _wait_before_send()
                 sent_message = bot.send_message(
                     chat_id=chat_id,
                     text=message,
@@ -266,26 +328,43 @@ def send_telegram_message_with_buttons(
                 )
                 logger.info(f"已发送带按钮的 Telegram 消息到：{chat_id}（尝试 {attempt + 1}/{MAX_RETRIES}）")
                 return True, sent_message.message_id
-                
+
             except Exception as e:
                 error_msg = str(e)
-                is_timeout = 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower()
-                is_network_error = 'connection' in error_msg.lower() or 'network' in error_msg.lower()
-                
-                if is_timeout or is_network_error:
-                    # 网络相关错误，进行重试
+
+                if _is_rate_limit_error(error_msg):
+                    retry_after = _parse_retry_after(error_msg) or 60
+                    retry_after = min(retry_after, MAX_RATE_LIMIT_WAIT)
+                    if attempt < MAX_RETRIES - 1:
+                        logger.warning(
+                            f"发送带按钮的 Telegram 消息触发限流，"
+                            f"{retry_after}秒后重试（{attempt + 1}/{MAX_RETRIES}）"
+                        )
+                        time.sleep(retry_after)
+                        continue
+                    logger.error(
+                        f"发送带按钮的 Telegram 消息限流，已达到最大重试次数：{e}",
+                        exc_info=True
+                    )
+                    return False, None
+
+                if _is_retryable_network_error(error_msg):
                     if attempt < MAX_RETRIES - 1:
                         retry_delay = BASE_RETRY_DELAY * (2 ** attempt)
-                        logger.warning(f"发送带按钮的 Telegram 消息超时/网络错误，{retry_delay}秒后重试（{attempt + 1}/{MAX_RETRIES}）：{e}")
+                        logger.warning(
+                            f"发送带按钮的 Telegram 消息超时/网络错误，"
+                            f"{retry_delay}秒后重试（{attempt + 1}/{MAX_RETRIES}）：{e}"
+                        )
                         time.sleep(retry_delay)
                         continue
-                    else:
-                        logger.error(f"发送带按钮的 Telegram 消息失败，已达到最大重试次数：{e}", exc_info=True)
-                        return False, None
-                else:
-                    # 其他错误，直接返回失败
-                    logger.error(f"发送带按钮的 Telegram 消息失败：{e}", exc_info=True)
+                    logger.error(
+                        f"发送带按钮的 Telegram 消息失败，已达到最大重试次数：{e}",
+                        exc_info=True
+                    )
                     return False, None
+
+                logger.error(f"发送带按钮的 Telegram 消息失败：{e}", exc_info=True)
+                return False, None
         
     except Exception as e:
         logger.error(f"构建带按钮的 Telegram 消息失败：{e}", exc_info=True)
