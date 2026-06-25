@@ -103,7 +103,7 @@ async def get_ad_data(
     ad_data_service: AdDataService = await get_ad_data_service(db)
     
     # 调用服务层获取广告数据列表（服务层会处理查询、过滤、排序、分页等）
-    ad_data_responses, total = await ad_data_service.get_ad_data(
+    ad_data_responses, total, grand_total = await ad_data_service.get_ad_data(
         current_user=current_user,
         page=page,
         page_size=page_size,
@@ -125,7 +125,8 @@ async def get_ad_data(
         data=ad_data_list,
         total=total,
         page=page,
-        page_size=page_size
+        page_size=page_size,
+        grand_total=grand_total,
     )
 
 

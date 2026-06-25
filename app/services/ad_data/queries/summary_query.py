@@ -145,6 +145,45 @@ def build_ad_data_stats_payload(
     return payload
 
 
+def build_table_grand_total_payload(*, raw: Dict[str, Any], for_admin: bool) -> Dict[str, Any]:
+    """将聚合 raw 转为与 Web 表格合计行字段对齐的字典。"""
+    derived = compute_ad_data_derived_metrics(
+        total_requests=float(raw["total_requests"]),
+        total_matches=float(raw["total_matches"]),
+        total_displays=float(raw["total_displays"]),
+        total_clicks=float(raw["total_clicks"]),
+        total_revenue_after=float(raw["total_revenue_after"]),
+        total_revenue_before=float(raw["total_revenue_before"]),
+        total_pageviews=float(raw["total_pageviews"]),
+        weighted_viewability=float(raw["weighted_viewability"]),
+        viewability_weight=float(raw["viewability_weight"]),
+        for_admin=for_admin,
+    )
+
+    total_revenue_after = round(float(raw["total_revenue_after"]), 4)
+    total_revenue_before = round(float(raw["total_revenue_before"]), 4)
+    total_click = int(raw["total_clicks"])
+
+    payload: Dict[str, Any] = {
+        "request_count": int(raw["total_requests"]),
+        "match_count": int(raw["total_matches"]),
+        "display_count": int(raw["total_displays"]),
+        "click_count": total_click,
+        "pageviews": int(raw["total_pageviews"]),
+        "coverage_rate": derived["coverage_rate"],
+        "display_rate": derived["display_rate"],
+        "click_rate": derived["click_rate"],
+        "viewability_rate": derived["viewability_rate"],
+        "ecpm_after_deduct": derived["ecpm_after_deduct"],
+        "revenue_after_deduct": total_revenue_after,
+        "cpc": derived["cpc"],
+    }
+    if for_admin:
+        payload["ecpm_before_deduct"] = derived["ecpm_before_deduct"]
+        payload["revenue_before_deduct"] = total_revenue_before
+    return payload
+
+
 def _empty_aggregate_raw() -> Dict[str, Any]:
     return {
         "total_requests": 0,

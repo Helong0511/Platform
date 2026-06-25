@@ -196,10 +196,11 @@ class AdDataService(BaseService[AdData]):
             dimension: Optional[str] = None,
             sort_by: str = "date",
             sort_order: str = "desc"
-    ) -> Tuple[List[Dict[str, Any]], int]:
+    ) -> Tuple[List[Dict[str, Any]], int, Optional[Dict[str, Any]]]:
         from app.services.ad_data.queries.list_query import AdDataListQuery
 
-        return await AdDataListQuery(self.db).fetch(
+        list_query = AdDataListQuery(self.db)
+        rows, total = await list_query.fetch(
             current_user=current_user,
             page=page,
             page_size=page_size,
@@ -213,3 +214,14 @@ class AdDataService(BaseService[AdData]):
             sort_by=sort_by,
             sort_order=sort_order,
         )
+        grand_total = await list_query.fetch_grand_totals(
+            current_user=current_user,
+            start_date=start_date,
+            end_date=end_date,
+            client_id=client_id,
+            product_id=product_id,
+            country_code=country_code,
+            ad_unit=ad_unit,
+            dimension=dimension,
+        )
+        return rows, total, grand_total

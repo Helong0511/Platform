@@ -58,7 +58,7 @@
       :is-mobile="isMobile"
       :format-percentage="formatPercentage"
       :format-currency="formatCurrency"
-      :get-summaries="getSummaries"
+      :get-summaries="getSummariesForTable"
       @selection-change="handleSelectionChange"
       @sort-change="handleSortChange"
       @edit="handleEdit"
@@ -173,6 +173,7 @@ const { isMobile, isTablet, isDesktop } = useDevice();
 
 // 状态管理
 const adDataList = ref([]);
+const detailGrandTotal = ref(null);
 const products = ref([]);
 const loading = ref(false);
 const pagination = ref({
@@ -225,6 +226,11 @@ const { formatPercentage, formatCurrency, getSummaries } = useAdDataTableFormat(
   getIsAdmin: () => isAdmin.value,
   cpcSummaryMode: 'weighted'
 });
+
+const getSummariesForTable = (param) => {
+  const data = detailGrandTotal.value ? [detailGrandTotal.value] : param.data;
+  return getSummaries({ ...param, data });
+};
 
 const {
   users,
@@ -304,6 +310,7 @@ const { runFetch: fetchAdData, cancel: cancelAdDataFetch } = useDebouncedPaginat
   fetchPage: (params) => getAdDataList(params),
   applyResponse: (response) => {
     adDataList.value = response.data || [];
+    detailGrandTotal.value = response.grand_total || null;
     pagination.value.total =
       typeof response.total === 'number'
         ? response.total

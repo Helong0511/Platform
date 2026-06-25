@@ -101,6 +101,71 @@ class AdDataListQuery:
 
         return self._build_responses(data, use_assignment_table, current_user, normalize_date_key), total
 
+    async def fetch_grand_totals(
+        self,
+        current_user: User,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        client_id: Optional[int] = None,
+        product_id: Optional[str] = None,
+        country_code: Optional[str] = None,
+        ad_unit: Optional[str] = None,
+        dimension: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """当前筛选条件下全部明细的全量合计（供表格底部合计行，不受分页影响）。"""
+        from app.services.ad_data.queries.daily_summary_query import _daily_summary_aggregate_columns
+        from app.services.ad_data.queries.summary_query import (
+            _empty_aggregate_raw,
+            _row_to_aggregate_raw,
+            build_table_grand_total_payload,
+        )
+
+        use_assignment_table = await check_use_assignment_table(self.db)
+        admin_user = is_admin(current_user)
+
+        query = select(*_daily_summary_aggregate_columns())
+        query = join_product_and_client(query, use_assignment_table)
+        query = query.where(Product.is_active == True)
+
+        if not admin_user:
+            query = query.where(Client.user_id == current_user.id)
+        elif client_id:
+            query = query.where(Client.id == client_id)
+
+        if product_id and product_id.strip():
+            try:
+                query = query.where(AdData.product_id == int(product_id))
+            except ValueError:
+                logger.warning("无效的产品ID参数: %s", product_id)
+
+        query = query.where(
+            build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
+        )
+
+        if country_exact_filter_applies(dimension):
+            country_filter = await build_ad_data_country_filter(
+                self.db, AdData.country_code, country_code
+            )
+            if country_filter is not None:
+                query = query.where(country_filter)
+
+        if ad_unit_exact_filter_applies(dimension):
+            ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
+            if ad_unit_filter is not None:
+                query = query.where(ad_unit_filter)
+
+        query = apply_date_range_filter(
+            query,
+            AdData.date,
+            start_date,
+            end_date,
+            default_to_current_month=True,
+        )
+
+        row = (await self.db.execute(query)).first()
+        raw = _row_to_aggregate_raw(row) if row else _empty_aggregate_raw()
+        return build_table_grand_total_payload(raw=raw, for_admin=admin_user)
+
     async def _build_main_query(
         self,
         use_assignment_table: bool,

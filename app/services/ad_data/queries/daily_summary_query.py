@@ -35,7 +35,7 @@ from app.services.ad_data.queries.join_helpers import join_country_info_for_ad_d
 from app.services.ad_data.queries.summary_query import (
     _empty_aggregate_raw,
     _row_to_aggregate_raw,
-    compute_ad_data_derived_metrics,
+    build_table_grand_total_payload,
 )
 
 logger = logging.getLogger(__name__)
@@ -463,45 +463,7 @@ class DailySummaryQuery:
 
         row = (await self.db.execute(query)).first()
         raw = _row_to_aggregate_raw(row) if row else _empty_aggregate_raw()
-        derived = compute_ad_data_derived_metrics(
-            total_requests=float(raw["total_requests"]),
-            total_matches=float(raw["total_matches"]),
-            total_displays=float(raw["total_displays"]),
-            total_clicks=float(raw["total_clicks"]),
-            total_revenue_after=float(raw["total_revenue_after"]),
-            total_revenue_before=float(raw["total_revenue_before"]),
-            total_pageviews=float(raw["total_pageviews"]),
-            weighted_viewability=float(raw["weighted_viewability"]),
-            viewability_weight=float(raw["viewability_weight"]),
-            for_admin=admin_user,
-        )
-
-        total_revenue_after = round(float(raw["total_revenue_after"]), 4)
-        total_revenue_before = round(float(raw["total_revenue_before"]), 4)
-        total_click = int(raw["total_clicks"])
-        cpc = round(
-            (total_revenue_after / total_click) if total_click > 0 else 0.0,
-            2,
-        )
-
-        payload: Dict[str, Any] = {
-            "request_count": int(raw["total_requests"]),
-            "match_count": int(raw["total_matches"]),
-            "display_count": int(raw["total_displays"]),
-            "click_count": total_click,
-            "pageviews": int(raw["total_pageviews"]),
-            "coverage_rate": derived["coverage_rate"],
-            "display_rate": derived["display_rate"],
-            "click_rate": derived["click_rate"],
-            "viewability_rate": derived["viewability_rate"],
-            "ecpm_after_deduct": derived["ecpm_after_deduct"],
-            "revenue_after_deduct": total_revenue_after,
-            "cpc": cpc,
-        }
-        if admin_user:
-            payload["ecpm_before_deduct"] = derived["ecpm_before_deduct"]
-            payload["revenue_before_deduct"] = total_revenue_before
-        return payload
+        return build_table_grand_total_payload(raw=raw, for_admin=admin_user)
 
     async def _count_groups(
         self,
