@@ -24,7 +24,7 @@ const copyDistStaticPlugin = {
 
     const staticFiles = [
       { src: resolve(__dirname, 'favicon.ico'), label: 'favicon.ico' },
-      { src: resolve(__dirname, '../scripts/privacy.html'), label: 'privacy.html' },
+      { src: resolve(__dirname, 'privacy.html'), label: 'privacy.html' },
     ];
 
     for (const { src, label } of staticFiles) {
