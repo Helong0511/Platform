@@ -194,11 +194,26 @@ export function appendDimensionAwareFilters(
     enableAdUnitFilter === false
       ? false
       : enableAdUnitFilter === true || showAdUnitFilterForDimension(dim);
-  if (allowCountry && countryCode) {
-    params.country_code = countryCode;
+
+  const appendValue = (key, value) => {
+    if (value == null || value === '') {
+      return;
+    }
+    if (Array.isArray(value)) {
+      const normalized = value.map((item) => String(item)).filter(Boolean);
+      if (normalized.length > 0) {
+        params[key] = normalized.join(',');
+      }
+      return;
+    }
+    params[key] = value;
+  };
+
+  if (allowCountry) {
+    appendValue('country_code', countryCode);
   }
-  if (allowAdUnit && adUnit) {
-    params.ad_unit = adUnit;
+  if (allowAdUnit) {
+    appendValue('ad_unit', adUnit);
   }
   return params;
 }

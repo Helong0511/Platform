@@ -22,9 +22,13 @@
       <el-form-item v-if="isAdmin" label="客户">
         <el-select
           v-model="searchForm.clientId"
-          placeholder="全部客户"
+          :placeholder="multiSelect ? '全部客户（可多选）' : '全部客户'"
           style="width: 100%;"
+          :multiple="multiSelect"
+          :collapse-tags="multiSelect"
+          :collapse-tags-tooltip="multiSelect"
           clearable
+          filterable
           @change="emit('filter-client-change')"
         >
           <el-option
@@ -38,9 +42,13 @@
       <el-form-item label="产品">
         <el-select
           v-model="searchForm.productId"
-          placeholder="全部产品"
+          :placeholder="multiSelect ? '全部产品（可多选）' : '全部产品'"
           style="width: 100%;"
+          :multiple="multiSelect"
+          :collapse-tags="multiSelect"
+          :collapse-tags-tooltip="multiSelect"
           clearable
+          filterable
           @change="emit('filter-product-change')"
         >
           <el-option
@@ -68,8 +76,11 @@
       <el-form-item v-if="showAdUnit" label="广告单元">
         <el-select
           v-model="searchForm.adUnit"
-          placeholder="全部广告单元"
+          :placeholder="multiSelect ? '全部广告单元（可多选）' : '全部广告单元'"
           style="width: 100%;"
+          :multiple="multiSelect"
+          :collapse-tags="multiSelect"
+          :collapse-tags-tooltip="multiSelect"
           clearable
           filterable
           @change="emit('ad-unit-change')"
@@ -85,9 +96,13 @@
       <el-form-item v-if="showCountry" label="国家">
         <el-select
           v-model="searchForm.countryCode"
-          placeholder="全部国家"
+          :placeholder="multiSelect ? '全部国家（可多选）' : '全部国家'"
           style="width: 100%;"
+          :multiple="multiSelect"
+          :collapse-tags="multiSelect"
+          :collapse-tags-tooltip="multiSelect"
           clearable
+          filterable
           @change="emit('country-change')"
         >
           <el-option
@@ -137,6 +152,8 @@ const props = defineProps({
   enableCountryFilter: { type: Boolean, default: null },
   /** 显式控制广告单元筛选；未传时按统计维度推断 */
   enableAdUnitFilter: { type: Boolean, default: null },
+  /** 客户/产品/国家/广告单元是否支持多选 */
+  multiSelect: { type: Boolean, default: false },
   defaultHint: {
     type: String,
     default: '默认查询数据是本月数据，如果要查询其它时间，请自行选择日期范围。'

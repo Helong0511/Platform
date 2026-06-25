@@ -14,7 +14,8 @@ from sqlalchemy import func, and_, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.country_code import build_ad_data_country_filter, resolve_country_name
+from app.core.country_code import resolve_country_name
+from app.services.ad_data.queries.filter_conditions import apply_ad_data_scope_filters
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
@@ -23,10 +24,7 @@ from app.core.security import get_current_user
 from app.core.excel_io import excel_streaming_response
 from app.models.models import User, Client, Product, AdData, UserRole, ProductAssignment, CountryInfo
 from app.services.ad_data.queries.dimension_filter import (
-    ad_unit_exact_filter_applies,
     build_ad_data_dimension_filter,
-    build_ad_unit_exact_filter,
-    country_exact_filter_applies,
     is_cross_dimension,
     normalize_dimension,
 )
@@ -108,10 +106,10 @@ def build_daily_summary_export_row(
 async def _export_daily_summary_excel(
     db: AsyncSession,
     current_user: User,
-    target_client_id: int | None,
+    target_client_id: str | None,
     start_date: date | None,
     end_date: date | None,
-    product_id: int | None,
+    product_id: str | None,
     country_code: str | None,
     ad_unit: str | None,
     dimension: str | None,
@@ -124,7 +122,7 @@ async def _export_daily_summary_excel(
         dimension, split_by_country
     )
 
-    product_id_str = str(product_id) if product_id is not None else None
+    product_id_str = product_id
     summary_query = DailySummaryQuery(db)
 
     _, total, _ = await summary_query.fetch(
@@ -204,8 +202,8 @@ async def _export_daily_summary_excel(
 async def export_ad_data_handler(
         start_date: date | None = None,
         end_date: date | None = None,
-        product_id: int | None = None,
-        client_id: int | None = None,
+        product_id: str | None = None,
+        client_id: str | None = None,
         country_code: str | None = None,
         ad_unit: str | None = None,
         dimension: str | None = None,
@@ -354,19 +352,8 @@ async def export_ad_data_handler(
         )
         # JOIN Client表，然后通过WHERE子句过滤客户ID（与 ad_data.py 保持一致）
         query = query.join(Client, ProductAssignment.client_id == Client.id)
-        # 在WHERE子句中过滤客户ID（如果指定了客户ID）
-        # ---------- 条件分支 ----------
-        if target_client_id is not None:
-            query = query.where(Client.id == target_client_id)
     else:
-        # 旧的查询方式：直接通过Product.client_id关联
-        # 如果指定了客户ID，直接过滤；如果没有指定，需要JOIN Client表来支持后续的权限过滤
-        # ---------- 条件分支 ----------
-        if target_client_id is not None:
-            query = query.where(Product.client_id == target_client_id)
-        else:
-            # 如果没有指定客户ID，JOIN Client表以便后续可能的权限过滤
-            query = query.join(Client, Product.client_id == Client.id)
+        query = query.join(Client, Product.client_id == Client.id)
 
     # 左关联国家信息（在所有其他JOIN之后）
     # 修复排序规则冲突：使用 COLLATE 统一排序规则
@@ -381,6 +368,22 @@ async def export_ad_data_handler(
 
     query = query.where(
         build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
+    )
+
+    scope_client_id = (
+        target_client_id
+        if current_user.role == UserRole.ADMIN
+        else str(target_client_id)
+    )
+    query = await apply_ad_data_scope_filters(
+        db,
+        query,
+        current_user=current_user,
+        client_id=scope_client_id,
+        product_id=product_id,
+        country_code=country_code,
+        ad_unit=ad_unit,
+        dimension=dimension,
     )
 
     # 应用日期过滤（直接使用条件，避免函数可能的问题）
@@ -406,43 +409,6 @@ async def export_ad_data_handler(
         month_end_datetime = datetime.combine(month_end, datetime.max.time())
         query = query.where(AdData.date >= month_start_datetime)
         query = query.where(AdData.date <= month_end_datetime)
-
-    # 应用产品过滤
-    # ---------- 条件分支 ----------
-    if product_id:
-        # ---------- 条件分支 ----------
-        if use_assignment_table:
-            # 使用产品分配历史表时，需要验证产品在指定日期范围内是否属于该客户
-            # 这里简化处理：如果查询能返回数据，说明产品在该时间段属于该客户
-            pass  # 验证逻辑已经在JOIN条件中处理
-        else:
-            # 旧的验证方式：验证产品是否属于该客户
-            product_query = select(Product).where(
-                and_(
-                    Product.id == product_id,
-                    Product.client_id == target_client_id
-                )
-            )
-            product_result = await db.execute(product_query)
-            product = product_result.scalars().first()
-            # ---------- 条件分支 ----------
-            if not product:
-                raise_api_exception(
-                    error_code=ErrorCode.NOT_FOUND,
-                    message=f"产品ID {product_id} 不存在或不属于该客户",
-                    detail="请选择有效的产品"
-                )
-        query = query.where(AdData.product_id == product_id)
-
-    if country_exact_filter_applies(dimension):
-        country_filter = await build_ad_data_country_filter(db, AdData.country_code, country_code)
-        if country_filter is not None:
-            query = query.where(country_filter)
-
-    if ad_unit_exact_filter_applies(dimension):
-        ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
-        if ad_unit_filter is not None:
-            query = query.where(ad_unit_filter)
 
     # 执行查询
     result = await db.execute(query.order_by(AdData.date.desc()))

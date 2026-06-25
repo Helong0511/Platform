@@ -24,6 +24,13 @@ import {
   showCountryFilterForDimension,
   isAdUnitCountryDimension
 } from '../constants/adDataDimension';
+import {
+  emptyMultiFilterValue,
+  isEmptyMultiFilter,
+  normalizeMultiFilterArray,
+  pruneMultiSelection,
+  toCsvFilterValue
+} from '../utils/multiFilterValues';
 
 /** 国家筛选项展示：二字代码 + 中文名（无中文名或与代码相同时仅显示代码） */
 export function formatCountryFilterLabel(country) {
@@ -143,6 +150,7 @@ function normalizeFilterFieldToString(form, field) {
  * @param {Object} [options.api] 自定义 API，覆盖 source
  * @param {() => string|number|null|undefined} [options.getUserId] 当前用户 ID，用于统计维度偏好持久化
  * @param {boolean} [options.fixedDimension=false] 固定维度页（不读写 localStorage 偏好）
+ * @param {boolean} [options.multiSelect=false] 客户/产品/国家/广告单元是否多选
  */
 export function useDataPageFilterCascade({
   searchForm,
@@ -151,7 +159,8 @@ export function useDataPageFilterCascade({
   source = 'ad-data',
   api: apiOverride = null,
   getUserId = null,
-  fixedDimension = false
+  fixedDimension = false,
+  multiSelect = false
 }) {
   const api =
     apiOverride || (source === 'tb-search' ? TB_SEARCH_API : AD_DATA_API);
@@ -166,6 +175,22 @@ export function useDataPageFilterCascade({
       ? searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION
       : null;
 
+  const clearFilterField = (field) => {
+    searchForm.value[field] = emptyMultiFilterValue(multiSelect);
+  };
+
+  const getClientFilterParam = () =>
+    multiSelect ? toCsvFilterValue(searchForm.value.clientId) : (searchForm.value.clientId || null);
+
+  const getProductFilterParam = () =>
+    multiSelect ? toCsvFilterValue(searchForm.value.productId) : (searchForm.value.productId || null);
+
+  const getCountryFilterParam = () =>
+    multiSelect ? toCsvFilterValue(searchForm.value.countryCode) : (searchForm.value.countryCode || null);
+
+  const getAdUnitFilterParam = () =>
+    multiSelect ? toCsvFilterValue(searchForm.value.adUnit) : (searchForm.value.adUnit || null);
+
   /** 清除与当前统计维度不兼容的筛选项（避免 ad_unit 维度残留国家筛选导致查无数据） */
   const pruneDimensionAwareFilters = () => {
     if (!includeDimension) {
@@ -173,12 +198,12 @@ export function useDataPageFilterCascade({
     }
     const dimension = getDimension();
     let changed = false;
-    if (!showCountryFilterForDimension(dimension) && searchForm.value.countryCode) {
-      searchForm.value.countryCode = '';
+    if (!showCountryFilterForDimension(dimension) && !isEmptyMultiFilter(searchForm.value.countryCode)) {
+      clearFilterField('countryCode');
       changed = true;
     }
-    if (!showAdUnitFilterForDimension(dimension) && searchForm.value.adUnit) {
-      searchForm.value.adUnit = '';
+    if (!showAdUnitFilterForDimension(dimension) && !isEmptyMultiFilter(searchForm.value.adUnit)) {
+      clearFilterField('adUnit');
       changed = true;
     }
     return changed;
@@ -189,17 +214,17 @@ export function useDataPageFilterCascade({
       const { startDate, endDate } = getDateRangeFromForm(searchForm.value);
       const result = await api.getClients(startDate, endDate);
       const data = result?.data || [];
-      users.value = [
-        { label: '全部客户', value: '' },
-        ...data
+      users.value = data
           .filter((item) => item?.id != null)
           .map((item) => ({
             label: item.full_name || '未知客户',
             value: String(item.id)
-          }))
-      ];
+          }));
+      if (!multiSelect) {
+        users.value = [{ label: '全部客户', value: '' }, ...users.value];
+      }
     } catch {
-      users.value = [{ label: '全部客户', value: '' }];
+      users.value = multiSelect ? [] : [{ label: '全部客户', value: '' }];
     }
   };
 
@@ -217,12 +242,14 @@ export function useDataPageFilterCascade({
         }))
         .sort((a, b) => Number(b.id) - Number(a.id));
 
-      filterProducts.value = [{ label: '全部产品', value: '' }, ...productOptions];
+      filterProducts.value = multiSelect
+        ? productOptions
+        : [{ label: '全部产品', value: '' }, ...productOptions];
     } catch (error) {
       if (!isErrorHandled(error)) {
         ElMessage.error(extractErrorMessage(error));
       }
-      filterProducts.value = [{ label: '全部产品', value: '' }];
+      filterProducts.value = multiSelect ? [] : [{ label: '全部产品', value: '' }];
     }
   };
 
@@ -230,7 +257,9 @@ export function useDataPageFilterCascade({
     if (!includeCountry && !includeDimension) return;
     const dimension = getDimension();
     if (includeDimension && !showCountryFilterForDimension(dimension)) {
-      filterCountries.value = [{ code: '', name_zh: '全部区域', label: '全部区域' }];
+      filterCountries.value = multiSelect
+        ? []
+        : [{ code: '', name_zh: '全部区域', label: '全部区域' }];
       return;
     }
     try {
@@ -260,28 +289,24 @@ export function useDataPageFilterCascade({
           name_zh: item.name_zh || item.code
         }));
       }
-      filterCountries.value = [
-        { code: '', name_zh: '全部区域', label: '全部区域' },
-        ...countryOptions
-      ];
+      filterCountries.value = multiSelect
+        ? countryOptions
+        : [{ code: '', name_zh: '全部区域', label: '全部区域' }, ...countryOptions];
     } catch (error) {
       if (!isErrorHandled(error)) {
         ElMessage.error(extractErrorMessage(error));
       }
-      filterCountries.value = [{ code: '', name_zh: '全部区域', label: '全部区域' }];
+      filterCountries.value = multiSelect
+        ? []
+        : [{ code: '', name_zh: '全部区域', label: '全部区域' }];
     }
   };
-
-  const getClientId = () => searchForm.value.clientId || null;
-
-  const getProductId = () =>
-    searchForm.value.productId ? parseInt(searchForm.value.productId, 10) : null;
 
   const fetchFilterAdUnits = async (clientId = null, productId = null, countryCode = null) => {
     if (!includeDimension || !api.getAdUnits) return;
     const dimension = getDimension();
     if (!showAdUnitFilterForDimension(dimension)) {
-      filterAdUnits.value = [{ value: '', label: '全部广告单元' }];
+      filterAdUnits.value = multiSelect ? [] : [{ value: '', label: '全部广告单元' }];
       return;
     }
     try {
@@ -306,95 +331,110 @@ export function useDataPageFilterCascade({
         })
         .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
 
-      filterAdUnits.value = [{ value: '', label: '全部广告单元' }, ...adUnitOptions];
+      filterAdUnits.value = multiSelect
+        ? adUnitOptions
+        : [{ value: '', label: '全部广告单元' }, ...adUnitOptions];
     } catch (error) {
       if (!isErrorHandled(error)) {
         ElMessage.error(extractErrorMessage(error));
       }
-      filterAdUnits.value = [{ value: '', label: '全部广告单元' }];
+      filterAdUnits.value = multiSelect ? [] : [{ value: '', label: '全部广告单元' }];
     }
   };
 
+  const getClientId = () => getClientFilterParam();
+
+  const getProductId = () => {
+    const raw = getProductFilterParam();
+    if (!raw) return null;
+    if (multiSelect) {
+      const first = normalizeMultiFilterArray(searchForm.value.productId)[0];
+      return first ? parseInt(first, 10) : null;
+    }
+    return parseInt(searchForm.value.productId, 10);
+  };
+
   const reloadSecondaryFilters = async () => {
-    const clientId = getClientId();
-    const productId = getProductId();
+    const clientId = getClientFilterParam();
+    const productId = getProductFilterParam();
     const dimension = getDimension();
 
     if (includeDimension && isAdUnitCountryDimension(dimension)) {
       await fetchFilterAdUnits(clientId, productId, null);
-      await fetchFilterCountries(clientId, productId, searchForm.value.adUnit || null);
+      await fetchFilterCountries(clientId, productId, getAdUnitFilterParam());
       return;
     }
 
-    const countryCode = searchForm.value.countryCode || null;
     await fetchFilterCountries(clientId, productId);
-    await fetchFilterAdUnits(clientId, productId, countryCode);
+    await fetchFilterAdUnits(clientId, productId, getCountryFilterParam());
+  };
+
+  const pruneFieldSelection = (field, options, getOptionValue) => {
+    if (multiSelect) {
+      const pruned = pruneMultiSelection(searchForm.value[field], options, getOptionValue);
+      const current = normalizeMultiFilterArray(searchForm.value[field]);
+      if (pruned.length !== current.length || pruned.some((value, index) => value !== current[index])) {
+        searchForm.value[field] = pruned;
+        return true;
+      }
+      return false;
+    }
+
+    if (!isEmptyMultiFilter(searchForm.value[field])) {
+      const exists = options.some((option) =>
+        isFilterOptionSelected(getOptionValue(option), searchForm.value[field])
+      );
+      if (!exists) {
+        clearFilterField(field);
+        return true;
+      }
+      if (normalizeFilterFieldToString(searchForm, field)) {
+        return true;
+      }
+    }
+    return false;
   };
 
   /** 剔除当前条件下已失效的筛选项（日期/客户变更后调用） */
   const pruneInvalidFilterSelections = (isAdmin = false) => {
     let changed = false;
 
-    if (isAdmin && searchForm.value.clientId) {
-      const clientExists = users.value.some((u) =>
-        isFilterOptionSelected(u.value, searchForm.value.clientId)
-      );
-      if (!clientExists) {
-        searchForm.value.clientId = '';
-        searchForm.value.productId = '';
+    if (isAdmin && !isEmptyMultiFilter(searchForm.value.clientId)) {
+      if (pruneFieldSelection('clientId', users.value, (item) => item.value)) {
+        clearFilterField('productId');
         if (includeCountry || includeDimension) {
-          searchForm.value.countryCode = '';
+          clearFilterField('countryCode');
         }
         if (includeDimension) {
-          searchForm.value.adUnit = '';
+          clearFilterField('adUnit');
         }
-        changed = true;
-      } else if (normalizeFilterFieldToString(searchForm, 'clientId')) {
         changed = true;
       }
     }
 
-    if (searchForm.value.productId) {
-      const productExists = filterProducts.value.some((p) =>
-        isFilterOptionSelected(p.value, searchForm.value.productId)
-      );
-      if (!productExists) {
-        searchForm.value.productId = '';
+    if (!isEmptyMultiFilter(searchForm.value.productId)) {
+      if (pruneFieldSelection('productId', filterProducts.value, (item) => item.value)) {
         if (includeCountry || includeDimension) {
-          searchForm.value.countryCode = '';
+          clearFilterField('countryCode');
         }
         if (includeDimension) {
-          searchForm.value.adUnit = '';
+          clearFilterField('adUnit');
         }
         changed = true;
-      } else if (normalizeFilterFieldToString(searchForm, 'productId')) {
+      }
+    }
+
+    if (!isEmptyMultiFilter(searchForm.value.countryCode)) {
+      if (pruneFieldSelection('countryCode', filterCountries.value, (item) => item.code)) {
         changed = true;
       }
     }
 
-    if (searchForm.value.countryCode) {
-      const countryExists = filterCountries.value.some((c) =>
-        isFilterOptionSelected(c.code, searchForm.value.countryCode)
-      );
-      if (!countryExists) {
-        searchForm.value.countryCode = '';
-        changed = true;
-      } else if (normalizeFilterFieldToString(searchForm, 'countryCode')) {
-        changed = true;
-      }
-    }
-
-    if (searchForm.value.adUnit) {
-      const adUnitExists = filterAdUnits.value.some((u) =>
-        isFilterOptionSelected(u.value, searchForm.value.adUnit)
-      );
-      if (!adUnitExists) {
-        searchForm.value.adUnit = '';
+    if (!isEmptyMultiFilter(searchForm.value.adUnit)) {
+      if (pruneFieldSelection('adUnit', filterAdUnits.value, (item) => item.value)) {
         if (includeDimension && isAdUnitCountryDimension(getDimension())) {
-          searchForm.value.countryCode = '';
+          clearFilterField('countryCode');
         }
-        changed = true;
-      } else if (normalizeFilterFieldToString(searchForm, 'adUnit')) {
         changed = true;
       }
     }
@@ -403,27 +443,26 @@ export function useDataPageFilterCascade({
   };
 
   const handleFilterClientChange = async () => {
-    const clientId = getClientId();
-    searchForm.value.productId = '';
+    clearFilterField('productId');
     if (includeCountry || includeDimension) {
-      searchForm.value.countryCode = '';
+      clearFilterField('countryCode');
     }
     if (includeDimension) {
-      searchForm.value.adUnit = '';
+      clearFilterField('adUnit');
     }
-    await fetchFilterProducts(clientId);
+    await fetchFilterProducts(getClientFilterParam());
     await reloadSecondaryFilters();
     fixSelectDisplay();
   };
 
   const handleFilterProductChange = async () => {
     if (includeDimension) {
-      searchForm.value.countryCode = '';
-      searchForm.value.adUnit = '';
+      clearFilterField('countryCode');
+      clearFilterField('adUnit');
     } else if (!includeCountry) {
       return;
     } else {
-      searchForm.value.countryCode = '';
+      clearFilterField('countryCode');
     }
     await reloadSecondaryFilters();
     fixSelectDisplay();
@@ -436,8 +475,8 @@ export function useDataPageFilterCascade({
         saveAdDataDimensionPreference(userId, searchForm.value.dimension);
       }
     }
-    searchForm.value.countryCode = '';
-    searchForm.value.adUnit = '';
+    clearFilterField('countryCode');
+    clearFilterField('adUnit');
     pruneDimensionAwareFilters();
     await reloadSecondaryFilters();
     fixSelectDisplay();
@@ -447,19 +486,23 @@ export function useDataPageFilterCascade({
     if (includeDimension) {
       const dimension = getDimension();
       if (isAdUnitCountryDimension(dimension)) {
-        searchForm.value.adUnit = '';
+        if (!multiSelect) {
+          clearFilterField('adUnit');
+        }
         await fetchFilterAdUnits(
-          getClientId(),
-          getProductId(),
-          searchForm.value.countryCode || null
+          getClientFilterParam(),
+          getProductFilterParam(),
+          getCountryFilterParam()
         );
-        await fetchFilterCountries(getClientId(), getProductId(), null);
+        await fetchFilterCountries(getClientFilterParam(), getProductFilterParam(), null);
       } else if (showAdUnitFilterForDimension(dimension)) {
-        searchForm.value.adUnit = '';
+        if (!multiSelect) {
+          clearFilterField('adUnit');
+        }
         await fetchFilterAdUnits(
-          getClientId(),
-          getProductId(),
-          searchForm.value.countryCode || null
+          getClientFilterParam(),
+          getProductFilterParam(),
+          getCountryFilterParam()
         );
       }
     }
@@ -468,11 +511,13 @@ export function useDataPageFilterCascade({
 
   const handleAdUnitChange = async () => {
     if (includeDimension && isAdUnitCountryDimension(getDimension())) {
-      searchForm.value.countryCode = '';
+      if (!multiSelect) {
+        clearFilterField('countryCode');
+      }
       await fetchFilterCountries(
-        getClientId(),
-        getProductId(),
-        searchForm.value.adUnit || null
+        getClientFilterParam(),
+        getProductFilterParam(),
+        getAdUnitFilterParam()
       );
     }
     fixSelectDisplay();

@@ -19,15 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.constants import ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
-from app.core.country_code import build_ad_data_country_filter, resolve_country_name
+from app.core.country_code import resolve_country_name
 from app.core.query_utils import apply_date_range_filter, check_use_assignment_table
 from app.core.security import is_admin
 from app.models.models import AdData, Client, CountryInfo, Product, User
+from app.services.ad_data.queries.filter_conditions import apply_ad_data_scope_filters
 from app.services.ad_data.queries.dimension_filter import (
-    ad_unit_exact_filter_applies,
     build_daily_summary_dimension_filter,
-    build_ad_unit_exact_filter,
-    country_exact_filter_applies,
     is_cross_dimension,
     normalize_dimension,
 )
@@ -111,7 +109,7 @@ class DailySummaryQuery:
         page_size: int = 10,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
-        client_id: Optional[int] = None,
+        client_id: Optional[str | int] = None,
         product_id: Optional[str] = None,
         country_code: Optional[str] = None,
         ad_unit: Optional[str] = None,
@@ -190,31 +188,17 @@ class DailySummaryQuery:
 
         query = query.where(Product.is_active == True)
         query = query.join(User, Client.user_id == User.id)
-
-        if not is_admin(current_user):
-            query = query.where(Client.user_id == current_user.id)
-        elif client_id:
-            query = query.where(Client.id == client_id)
-
-        if product_id and product_id.strip():
-            try:
-                query = query.where(AdData.product_id == int(product_id))
-            except ValueError:
-                logger.warning("无效的产品ID参数: %s", product_id)
-
         query = query.where(_daily_summary_dimension_filter(dim, dim_start, dim_end))
-
-        if country_exact_filter_applies(dim):
-            country_filter = await build_ad_data_country_filter(
-                self.db, AdData.country_code, country_code
-            )
-            if country_filter is not None:
-                query = query.where(country_filter)
-
-        if ad_unit_exact_filter_applies(dim):
-            ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
-            if ad_unit_filter is not None:
-                query = query.where(ad_unit_filter)
+        query = await apply_ad_data_scope_filters(
+            self.db,
+            query,
+            current_user=current_user,
+            client_id=client_id,
+            product_id=product_id,
+            country_code=country_code,
+            ad_unit=ad_unit,
+            dimension=dim,
+        )
 
         query = apply_date_range_filter(
             query,
@@ -412,7 +396,7 @@ class DailySummaryQuery:
         current_user: User,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
-        client_id: Optional[int] = None,
+        client_id: Optional[str | int] = None,
         product_id: Optional[str] = None,
         country_code: Optional[str] = None,
         ad_unit: Optional[str] = None,
@@ -427,31 +411,17 @@ class DailySummaryQuery:
         query = select(*_daily_summary_aggregate_columns())
         query = join_product_and_client(query, use_assignment_table)
         query = query.where(Product.is_active == True)
-
-        if not admin_user:
-            query = query.where(Client.user_id == current_user.id)
-        elif client_id:
-            query = query.where(Client.id == client_id)
-
-        if product_id and product_id.strip():
-            try:
-                query = query.where(AdData.product_id == int(product_id))
-            except ValueError:
-                logger.warning("无效的产品ID参数: %s", product_id)
-
         query = query.where(_daily_summary_dimension_filter(dim, dim_start, dim_end))
-
-        if country_exact_filter_applies(dim):
-            country_filter = await build_ad_data_country_filter(
-                self.db, AdData.country_code, country_code
-            )
-            if country_filter is not None:
-                query = query.where(country_filter)
-
-        if ad_unit_exact_filter_applies(dim):
-            ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
-            if ad_unit_filter is not None:
-                query = query.where(ad_unit_filter)
+        query = await apply_ad_data_scope_filters(
+            self.db,
+            query,
+            current_user=current_user,
+            client_id=client_id,
+            product_id=product_id,
+            country_code=country_code,
+            ad_unit=ad_unit,
+            dimension=dim,
+        )
 
         query = apply_date_range_filter(
             query,
@@ -469,7 +439,7 @@ class DailySummaryQuery:
         self,
         use_assignment_table: bool,
         current_user: User,
-        client_id: Optional[int],
+        client_id: Optional[str | int],
         product_id: Optional[str],
         country_code: Optional[str],
         ad_unit: Optional[str],
@@ -499,33 +469,19 @@ class DailySummaryQuery:
             subquery = select(*sub_cols)
             subquery = join_product_and_client(subquery, use_assignment_table)
             subquery = subquery.where(Product.is_active == True)
-
-            if not is_admin(current_user):
-                subquery = subquery.where(Client.user_id == current_user.id)
-            elif client_id:
-                subquery = subquery.where(Client.id == client_id)
-
-            if product_id and product_id.strip():
-                try:
-                    subquery = subquery.where(AdData.product_id == int(product_id))
-                except ValueError:
-                    pass
-
             subquery = subquery.where(
                 _daily_summary_dimension_filter(dimension, dim_start, dim_end)
             )
-
-            if country_exact_filter_applies(dimension):
-                country_filter = await build_ad_data_country_filter(
-                    self.db, AdData.country_code, country_code
-                )
-                if country_filter is not None:
-                    subquery = subquery.where(country_filter)
-
-            if ad_unit_exact_filter_applies(dimension):
-                ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
-                if ad_unit_filter is not None:
-                    subquery = subquery.where(ad_unit_filter)
+            subquery = await apply_ad_data_scope_filters(
+                self.db,
+                subquery,
+                current_user=current_user,
+                client_id=client_id,
+                product_id=product_id,
+                country_code=country_code,
+                ad_unit=ad_unit,
+                dimension=dimension,
+            )
 
             subquery = apply_date_range_filter(
                 subquery,

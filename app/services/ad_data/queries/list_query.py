@@ -18,16 +18,24 @@ from sqlalchemy import and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.country_code import build_ad_data_country_filter, resolve_country_name
+from app.core.country_code import resolve_country_name
 from app.core.query_utils import (
     apply_date_range_filter,
     check_use_assignment_table,
     date_range_condition,
 )
+from app.services.ad_data.queries.filter_conditions import (
+    apply_ad_data_scope_filters,
+    apply_client_ids_filter,
+    apply_product_ids_filter,
+    build_ad_units_in_filter,
+    build_country_codes_filter,
+    parse_csv_ints,
+    parse_csv_strs,
+)
 from app.services.ad_data.queries.dimension_filter import (
     ad_unit_exact_filter_applies,
     build_ad_data_dimension_filter,
-    build_ad_unit_exact_filter,
     country_exact_filter_applies,
 )
 from app.services.ad_data.queries.join_helpers import (
@@ -60,7 +68,7 @@ class AdDataListQuery:
         page_size: int = 10,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
-        client_id: Optional[int] = None,
+        client_id: Optional[str | int] = None,
         product_id: Optional[str] = None,
         country_code: Optional[str] = None,
         ad_unit: Optional[str] = None,
@@ -106,7 +114,7 @@ class AdDataListQuery:
         current_user: User,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
-        client_id: Optional[int] = None,
+        client_id: Optional[str | int] = None,
         product_id: Optional[str] = None,
         country_code: Optional[str] = None,
         ad_unit: Optional[str] = None,
@@ -126,33 +134,19 @@ class AdDataListQuery:
         query = select(*_daily_summary_aggregate_columns())
         query = join_product_and_client(query, use_assignment_table)
         query = query.where(Product.is_active == True)
-
-        if not admin_user:
-            query = query.where(Client.user_id == current_user.id)
-        elif client_id:
-            query = query.where(Client.id == client_id)
-
-        if product_id and product_id.strip():
-            try:
-                query = query.where(AdData.product_id == int(product_id))
-            except ValueError:
-                logger.warning("无效的产品ID参数: %s", product_id)
-
         query = query.where(
             build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
         )
-
-        if country_exact_filter_applies(dimension):
-            country_filter = await build_ad_data_country_filter(
-                self.db, AdData.country_code, country_code
-            )
-            if country_filter is not None:
-                query = query.where(country_filter)
-
-        if ad_unit_exact_filter_applies(dimension):
-            ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
-            if ad_unit_filter is not None:
-                query = query.where(ad_unit_filter)
+        query = await apply_ad_data_scope_filters(
+            self.db,
+            query,
+            current_user=current_user,
+            client_id=client_id,
+            product_id=product_id,
+            country_code=country_code,
+            ad_unit=ad_unit,
+            dimension=dimension,
+        )
 
         query = apply_date_range_filter(
             query,
@@ -170,7 +164,7 @@ class AdDataListQuery:
         self,
         use_assignment_table: bool,
         current_user: User,
-        client_id: Optional[int],
+        client_id: Optional[str | int],
         product_id: Optional[str],
         country_code: Optional[str],
         ad_unit: Optional[str],
@@ -187,35 +181,20 @@ class AdDataListQuery:
         query = join_product_and_client(query, use_assignment_table)
         query = query.join(User, Client.user_id == User.id)
         query = join_country_info_for_ad_data(query)
-
-        if not is_admin(current_user):
-            query = query.where(Client.user_id == current_user.id)
-        elif client_id:
-            query = query.where(Client.id == client_id)
-
         query = query.where(Product.is_active == True)
-
-        if product_id and product_id.strip():
-            try:
-                query = query.where(AdData.product_id == int(product_id))
-            except ValueError:
-                logger.warning("无效的产品ID参数: %s", product_id)
-
         query = query.where(
             build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
         )
-
-        if country_exact_filter_applies(dimension):
-            country_filter = await build_ad_data_country_filter(
-                self.db, AdData.country_code, country_code
-            )
-            if country_filter is not None:
-                query = query.where(country_filter)
-
-        if ad_unit_exact_filter_applies(dimension):
-            ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
-            if ad_unit_filter is not None:
-                query = query.where(ad_unit_filter)
+        query = await apply_ad_data_scope_filters(
+            self.db,
+            query,
+            current_user=current_user,
+            client_id=client_id,
+            product_id=product_id,
+            country_code=country_code,
+            ad_unit=ad_unit,
+            dimension=dimension,
+        )
 
         return apply_date_range_filter(
             query,
@@ -260,7 +239,7 @@ class AdDataListQuery:
         self,
         use_assignment_table: bool,
         current_user: User,
-        client_id: Optional[int],
+        client_id: Optional[str | int],
         product_id: Optional[str],
         country_code: Optional[str],
         ad_unit: Optional[str],
@@ -273,30 +252,34 @@ class AdDataListQuery:
 
             if not is_admin(current_user):
                 filter_conditions.append(Client.user_id == current_user.id)
-            elif client_id:
-                filter_conditions.append(Client.id == client_id)
+            else:
+                client_filter = apply_client_ids_filter(Client.id, parse_csv_ints(client_id))
+                if client_filter is not None:
+                    filter_conditions.append(client_filter)
 
             filter_conditions.append(Product.is_active == True)
 
-            if product_id and product_id.strip():
-                try:
-                    filter_conditions.append(AdData.product_id == int(product_id))
-                except ValueError:
-                    pass
+            product_filter = apply_product_ids_filter(
+                AdData.product_id, parse_csv_ints(product_id)
+            )
+            if product_filter is not None:
+                filter_conditions.append(product_filter)
 
             filter_conditions.append(
                 build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
             )
 
             if country_exact_filter_applies(dimension):
-                country_filter = await build_ad_data_country_filter(
-                    self.db, AdData.country_code, country_code
+                country_filter = await build_country_codes_filter(
+                    self.db, AdData.country_code, parse_csv_strs(country_code)
                 )
                 if country_filter is not None:
                     filter_conditions.append(country_filter)
 
             if ad_unit_exact_filter_applies(dimension):
-                ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
+                ad_unit_filter = build_ad_units_in_filter(
+                    AdData.ad_unit, parse_csv_strs(ad_unit)
+                )
                 if ad_unit_filter is not None:
                     filter_conditions.append(ad_unit_filter)
 

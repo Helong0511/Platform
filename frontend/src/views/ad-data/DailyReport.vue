@@ -26,6 +26,7 @@
       :page-hint="pageConfig.hint"
       :enable-country-filter="pageConfig.showCountryFilter"
       :enable-ad-unit-filter="pageConfig.showAdUnitFilter"
+      :multi-select="true"
       default-hint="默认优先查询本月；若本月无数据将自动扩大至全部可查日期范围。"
       @fetch="fetchDailyData"
       @reset="resetFilter"
@@ -164,6 +165,7 @@ import {
   DEFAULT_AD_DATA_DIMENSION,
   getDailyReportPageConfig
 } from '../../constants/adDataDimension';
+import { appendCsvFilter } from '../../utils/multiFilterValues';
 import { useRoute, useRouter } from 'vue-router';
 import { extractErrorMessage, isErrorHandled } from '../../utils/api';
 import {
@@ -230,12 +232,12 @@ const sortInfo = ref({
 
 // 筛选表单
 const searchForm = ref({
-  clientId: '',
+  clientId: [],
   dateRange: [],
-  productId: '',
+  productId: [],
   dimension: pageConfig.value.dimension,
-  countryCode: '',
-  adUnit: ''
+  countryCode: [],
+  adUnit: []
 });
 
 const {
@@ -299,18 +301,17 @@ const {
   includeCountry: true,
   includeDimension: true,
   source: 'ad-data',
-  fixedDimension: true
+  fixedDimension: true,
+  multiSelect: true
 });
 
 const buildDailySearchParams = () => {
   const dimension = searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION;
   const params = { dimension };
-  if (isAdmin.value && searchForm.value.clientId) {
-    params.client_id = searchForm.value.clientId;
+  if (isAdmin.value) {
+    appendCsvFilter(params, 'client_id', searchForm.value.clientId);
   }
-  if (searchForm.value.productId) {
-    params.product_id = searchForm.value.productId;
-  }
+  appendCsvFilter(params, 'product_id', searchForm.value.productId);
   appendDimensionAwareFilters(params, {
     dimension,
     countryCode: searchForm.value.countryCode,
@@ -407,12 +408,12 @@ const handleSortChange = ({ prop, order }) => {
 const resetFilter = async () => {
   resetDateBootstrap();
   searchForm.value = {
-    clientId: '',
+    clientId: [],
     dateRange: [],
-    productId: '',
+    productId: [],
     dimension: pageConfig.value.dimension,
-    countryCode: '',
-    adUnit: ''
+    countryCode: [],
+    adUnit: []
   };
   pagination.value.current = 1;
   // 重置排序
@@ -560,8 +561,8 @@ const handleProductManagementRefresh = () => {
 
 const applyDailyPageConfig = async () => {
   searchForm.value.dimension = pageConfig.value.dimension;
-  searchForm.value.countryCode = '';
-  searchForm.value.adUnit = '';
+  searchForm.value.countryCode = [];
+  searchForm.value.adUnit = [];
   pagination.value.current = 1;
   await reloadFiltersAfterDateChange(isAdmin.value);
   await fetchDailyData();

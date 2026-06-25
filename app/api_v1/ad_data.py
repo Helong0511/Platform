@@ -77,10 +77,10 @@ async def get_ad_data(
         page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
         start_date: date | None = Query(None, description="开始日期，格式YYYY-MM-DD"),
         end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD"),
-        client_id: int | None = Query(None, description="客户ID过滤"),
-        product_id: str | None = Query(None, description="产品ID过滤"),
-        country_code: str | None = Query(None, description="国家代码过滤（如：US、CN、ZZ表示全部区域）"),
-        ad_unit: str | None = Query(None, description="广告单元精确过滤"),
+        client_id: str | None = Query(None, description="客户ID过滤，支持逗号分隔多选"),
+        product_id: str | None = Query(None, description="产品ID过滤，支持逗号分隔多选"),
+        country_code: str | None = Query(None, description="国家代码过滤（如：US、CN、ZZ表示全部区域），支持逗号分隔多选"),
+        ad_unit: str | None = Query(None, description="广告单元精确过滤，支持逗号分隔多选"),
         dimension: str | None = Query(
             "country",
             description="统计维度：country=按国家，ad_unit=按广告单元，ad_unit_country=按广告单元+国家（country_ad_unit 为兼容别名）",
@@ -169,8 +169,8 @@ async def get_clients_with_data(
 async def get_countries_with_data(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
-        client_id: int | None = Query(None, description="客户ID过滤，None表示全部客户"),
-        product_id: int | None = Query(None, description="产品ID过滤，None表示全部产品"),
+        client_id: str | None = Query(None, description="客户ID过滤，支持逗号分隔多选"),
+        product_id: str | None = Query(None, description="产品ID过滤，支持逗号分隔多选"),
         start_date: date | None = Query(None, description="开始日期，格式YYYY-MM-DD"),
         end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD"),
         dimension: str | None = Query(
@@ -214,8 +214,8 @@ async def get_countries_with_data(
 async def get_ad_units_with_data(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
-        client_id: int | None = Query(None, description="客户ID过滤，None表示全部客户"),
-        product_id: int | None = Query(None, description="产品ID过滤，None表示全部产品"),
+        client_id: str | None = Query(None, description="客户ID过滤，支持逗号分隔多选"),
+        product_id: str | None = Query(None, description="产品ID过滤，支持逗号分隔多选"),
         start_date: date | None = Query(None, description="开始日期，格式YYYY-MM-DD"),
         end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD"),
         dimension: str | None = Query(
@@ -252,7 +252,7 @@ async def get_ad_units_with_data(
 async def get_products_with_data(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user),
-        client_id: int | None = Query(None, description="客户ID过滤，None表示全部客户"),
+        client_id: str | None = Query(None, description="客户ID过滤，支持逗号分隔多选"),
         start_date: date | None = Query(None, description="开始日期，格式YYYY-MM-DD"),
         end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD")
 ):
@@ -308,10 +308,10 @@ async def get_daily_summary(
         page_size: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="每页条数"),
         start_date: date | None = Query(None, description="开始日期，格式YYYY-MM-DD"),
         end_date: date | None = Query(None, description="结束日期，格式YYYY-MM-DD"),
-        client_id: int | None = Query(None, description="客户ID过滤"),
-        product_id: str | None = Query(None, description="产品ID过滤"),
-        country_code: str | None = Query(None, description="国家代码过滤"),
-        ad_unit: str | None = Query(None, description="广告单元精确过滤"),
+        client_id: str | None = Query(None, description="客户ID过滤，支持逗号分隔多选"),
+        product_id: str | None = Query(None, description="产品ID过滤，支持逗号分隔多选"),
+        country_code: str | None = Query(None, description="国家代码过滤，支持逗号分隔多选"),
+        ad_unit: str | None = Query(None, description="广告单元精确过滤，支持逗号分隔多选"),
         dimension: str | None = Query(
             "country",
             description="统计维度：country=按国家，ad_unit=按广告单元，ad_unit_country=按广告单元+国家（country_ad_unit 为兼容别名）",

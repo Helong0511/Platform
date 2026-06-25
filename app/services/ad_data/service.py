@@ -77,8 +77,8 @@ class AdDataService(BaseService[AdData]):
     async def get_countries_with_data(
             self,
             current_user: User,
-            client_id: Optional[int] = None,
-            product_id: Optional[int] = None,
+            client_id: Optional[str] = None,
+            product_id: Optional[str] = None,
             start_date: Optional[date] = None,
             end_date: Optional[date] = None,
             dimension: Optional[str] = None,
@@ -93,8 +93,8 @@ class AdDataService(BaseService[AdData]):
     async def get_ad_units_with_data(
             self,
             current_user: User,
-            client_id: Optional[int] = None,
-            product_id: Optional[int] = None,
+            client_id: Optional[str] = None,
+            product_id: Optional[str] = None,
             start_date: Optional[date] = None,
             end_date: Optional[date] = None,
             dimension: Optional[str] = None,
@@ -109,7 +109,7 @@ class AdDataService(BaseService[AdData]):
     async def get_products_with_data(
             self,
             current_user: User,
-            client_id: Optional[int] = None,
+            client_id: Optional[str] = None,
             start_date: Optional[date] = None,
             end_date: Optional[date] = None
     ) -> List[Dict[str, Any]]:
@@ -139,7 +139,7 @@ class AdDataService(BaseService[AdData]):
             current_user: User,
             start_date: Optional[date] = None,
             end_date: Optional[date] = None,
-            client_id: Optional[int] = None,
+            client_id: Optional[str] = None,
             product_id: Optional[int] = None
     ) -> Dict[str, Any]:
         from app.services.ad_data.queries.summary_query import AdDataSummaryQuery
@@ -155,7 +155,7 @@ class AdDataService(BaseService[AdData]):
             page_size: int = 10,
             start_date: Optional[date] = None,
             end_date: Optional[date] = None,
-            client_id: Optional[int] = None,
+            client_id: Optional[str] = None,
             product_id: Optional[str] = None,
             country_code: Optional[str] = None,
             ad_unit: Optional[str] = None,
@@ -189,7 +189,7 @@ class AdDataService(BaseService[AdData]):
             page_size: int = 10,
             start_date: Optional[date] = None,
             end_date: Optional[date] = None,
-            client_id: Optional[int] = None,
+            client_id: Optional[str] = None,
             product_id: Optional[str] = None,
             country_code: Optional[str] = None,
             ad_unit: Optional[str] = None,

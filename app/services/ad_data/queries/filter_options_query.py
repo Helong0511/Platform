@@ -16,7 +16,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.country_code import build_ad_data_country_filter, resolve_country_name
+from app.core.country_code import resolve_country_name
 from app.core.infrastructure.cache_compat import (
     generate_cache_key,
     legacy_get_cached as get_cached,
@@ -25,9 +25,13 @@ from app.core.infrastructure.cache_compat import (
 from app.core.query_utils import apply_date_range_filter, check_use_assignment_table
 from app.core.security import is_admin
 from app.models.models import AdData, Client, CountryInfo, Product, ProductAssignment, User
+from app.services.ad_data.queries.filter_conditions import (
+    apply_ad_data_scope_filters,
+    apply_client_ids_filter,
+    parse_csv_ints,
+)
 from app.services.ad_data.queries.dimension_filter import (
     build_ad_data_dimension_filter,
-    build_ad_unit_exact_filter,
     normalize_dimension,
 )
 from app.services.ad_data.queries.join_helpers import (
@@ -99,8 +103,8 @@ class FilterOptionsQuery:
     async def fetch_countries(
         self,
         current_user: User,
-        client_id: Optional[int] = None,
-        product_id: Optional[int] = None,
+        client_id: Optional[str | int] = None,
+        product_id: Optional[str] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         dimension: Optional[str] = None,
@@ -119,18 +123,16 @@ class FilterOptionsQuery:
         query = query.where(
             build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dim)
         )
-
-        if not is_admin(current_user):
-            query = query.where(Client.user_id == current_user.id)
-        elif client_id:
-            query = query.where(Client.id == client_id)
-
-        if product_id:
-            query = query.where(AdData.product_id == product_id)
-
-        ad_unit_filter = build_ad_unit_exact_filter(AdData.ad_unit, ad_unit)
-        if ad_unit_filter is not None:
-            query = query.where(ad_unit_filter)
+        query = await apply_ad_data_scope_filters(
+            self.db,
+            query,
+            current_user=current_user,
+            client_id=client_id,
+            product_id=product_id,
+            country_code=None,
+            ad_unit=ad_unit,
+            dimension=dim,
+        )
 
         query = apply_date_range_filter(
             query, AdData.date, start_date, end_date, default_to_current_month=True
@@ -159,8 +161,8 @@ class FilterOptionsQuery:
     async def fetch_ad_units(
         self,
         current_user: User,
-        client_id: Optional[int] = None,
-        product_id: Optional[int] = None,
+        client_id: Optional[str | int] = None,
+        product_id: Optional[str] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         dimension: Optional[str] = None,
@@ -179,20 +181,16 @@ class FilterOptionsQuery:
             build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dim)
         )
         query = query.where(and_(AdData.ad_unit.isnot(None), AdData.ad_unit != ""))
-
-        if not is_admin(current_user):
-            query = query.where(Client.user_id == current_user.id)
-        elif client_id:
-            query = query.where(Client.id == client_id)
-
-        if product_id:
-            query = query.where(AdData.product_id == product_id)
-
-        country_filter = await build_ad_data_country_filter(
-            self.db, AdData.country_code, country_code
+        query = await apply_ad_data_scope_filters(
+            self.db,
+            query,
+            current_user=current_user,
+            client_id=client_id,
+            product_id=product_id,
+            country_code=country_code,
+            ad_unit=None,
+            dimension=dim,
         )
-        if country_filter is not None:
-            query = query.where(country_filter)
 
         query = apply_date_range_filter(
             query, AdData.date, start_date, end_date, default_to_current_month=True
@@ -209,7 +207,7 @@ class FilterOptionsQuery:
     async def fetch_products(
         self,
         current_user: User,
-        client_id: Optional[int] = None,
+        client_id: Optional[str | int] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
     ) -> List[Dict[str, Any]]:
@@ -229,8 +227,10 @@ class FilterOptionsQuery:
 
         if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
-        elif client_id:
-            query = query.where(Client.id == client_id)
+        else:
+            client_filter = apply_client_ids_filter(Client.id, parse_csv_ints(client_id))
+            if client_filter is not None:
+                query = query.where(client_filter)
 
         query = apply_date_range_filter(
             query, AdData.date, start_date, end_date, default_to_current_month=True
@@ -257,7 +257,7 @@ class FilterOptionsQuery:
     async def fetch_date_range(
         self,
         current_user: User,
-        client_id: Optional[int] = None,
+        client_id: Optional[str | int] = None,
     ) -> Dict[str, Optional[str]]:
         use_assignment_table = await check_use_assignment_table(self.db)
 
@@ -271,8 +271,10 @@ class FilterOptionsQuery:
 
         if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
-        elif client_id:
-            query = query.where(Client.id == client_id)
+        else:
+            client_filter = apply_client_ids_filter(Client.id, parse_csv_ints(client_id))
+            if client_filter is not None:
+                query = query.where(client_filter)
 
         row = (await self.db.execute(query)).first()
         if row and row.min_date and row.max_date:
