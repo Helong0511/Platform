@@ -143,7 +143,8 @@ watch(() => props.filters, (newFilters) => {
 let debounceTimer = null;
 
 const syncAndSearch = () => {
-  const payload = { ...localFilters.value };
+  // 筛选栏不维护 conversionId；显式清空，避免 URL ?conversion_id= 深链在手动搜索后仍生效
+  const payload = { ...localFilters.value, conversionId: '' };
   emit('update:filters', payload);
   emit('search', payload);
 };
@@ -177,9 +178,9 @@ const handleReset = () => {
     publisher: null,
     ip: '',
     country: '',
-    dateRange: []
+    dateRange: [],
   };
-  emit('update:filters', { ...localFilters.value });
+  emit('update:filters', { ...localFilters.value, conversionId: '' });
   emit('reset');
 };
 </script>

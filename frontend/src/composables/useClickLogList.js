@@ -80,10 +80,17 @@ export function useClickLogList() {
     }
   };
 
-  /** 合并筛选条件到 composable 内 reactive filters（避免 v-model 整对象替换导致查询参数丢失） */
+  /**
+   * 合并筛选条件到 composable 内 reactive filters。
+   * 筛选栏 payload 不含 conversionId（仅 URL 深链使用）；合并时须显式清空，避免旧条件残留。
+   */
   const patchFilters = (partial) => {
-    if (partial && typeof partial === 'object') {
-      Object.assign(filters, partial);
+    if (!partial || typeof partial !== 'object') {
+      return;
+    }
+    Object.assign(filters, partial);
+    if (!('conversionId' in partial)) {
+      filters.conversionId = '';
     }
   };
 
