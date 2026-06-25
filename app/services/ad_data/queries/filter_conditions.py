@@ -21,7 +21,20 @@ from app.services.ad_data.queries.dimension_filter import (
 )
 
 
-def parse_csv_ints(value: Optional[str | int]) -> Optional[List[int]]:
+class InvalidFilterParameterError(ValueError):
+    """逗号分隔筛选参数格式无效（应返回友好校验错误，而非 500）。"""
+
+    def __init__(self, field: str, invalid_part: str):
+        self.field = field
+        self.invalid_part = invalid_part
+        super().__init__(f"筛选参数 {field} 格式无效：'{invalid_part}' 不是有效的整数")
+
+
+def parse_csv_ints(
+    value: Optional[str | int],
+    *,
+    field: str = "id",
+) -> Optional[List[int]]:
     if value is None:
         return None
     if isinstance(value, int):
@@ -34,7 +47,10 @@ def parse_csv_ints(value: Optional[str | int]) -> Optional[List[int]]:
         part = part.strip()
         if not part:
             continue
-        result.append(int(part))
+        try:
+            result.append(int(part))
+        except ValueError:
+            raise InvalidFilterParameterError(field, part) from None
     return result or None
 
 
@@ -106,8 +122,8 @@ async def apply_ad_data_scope_filters(
     dimension: Optional[str] = None,
 ) -> Any:
     """应用客户/产品/国家/广告单元筛选（含多选）。"""
-    client_ids = parse_csv_ints(client_id)
-    product_ids = parse_csv_ints(product_id)
+    client_ids = parse_csv_ints(client_id, field="client_id")
+    product_ids = parse_csv_ints(product_id, field="product_id")
     country_codes = parse_csv_strs(country_code)
     ad_units = parse_csv_strs(ad_unit)
     dim = normalize_dimension(dimension) if dimension else None

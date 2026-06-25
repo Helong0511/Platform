@@ -19,6 +19,7 @@ from app.core.config import settings
 from app.core.constants import MAX_ERROR_MESSAGE_LENGTH, MAX_STACK_TRACE_LENGTH
 from app.core.database import AsyncSessionLocal
 from app.core.errors import ErrorCode, create_error_response, record_http_exception_log
+from app.services.ad_data.queries.filter_conditions import InvalidFilterParameterError
 from app.core.security import JWTUtils
 from app.core.utils import get_client_ip
 from app.models.models import User
@@ -513,8 +514,21 @@ async def global_exception_handler(request: Request, exc: Exception):
         content=error_response,
     )
 
+async def invalid_filter_parameter_handler(request: Request, exc: InvalidFilterParameterError):
+    """筛选参数（逗号分隔整数）格式无效时返回校验错误，避免 500。"""
+    logger.warning("筛选参数无效: %s | path=%s", exc, request.url.path)
+    error_response = create_error_response(
+        error_code=ErrorCode.VALIDATION_ERROR,
+        message="请求参数验证失败",
+        detail=str(exc),
+        path=request.url.path,
+    )
+    return JSONResponse(status_code=status.HTTP_200_OK, content=error_response)
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """向 FastAPI 实例注册全局异常处理器。"""
     app.exception_handler(RequestValidationError)(validation_exception_handler)
+    app.exception_handler(InvalidFilterParameterError)(invalid_filter_parameter_handler)
     app.exception_handler(HTTPException)(http_exception_handler)
     app.exception_handler(Exception)(global_exception_handler)

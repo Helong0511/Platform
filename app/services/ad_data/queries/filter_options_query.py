@@ -228,7 +228,9 @@ class FilterOptionsQuery:
         if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
         else:
-            client_filter = apply_client_ids_filter(Client.id, parse_csv_ints(client_id))
+            client_filter = apply_client_ids_filter(
+                Client.id, parse_csv_ints(client_id, field="client_id")
+            )
             if client_filter is not None:
                 query = query.where(client_filter)
 
@@ -272,7 +274,9 @@ class FilterOptionsQuery:
         if not is_admin(current_user):
             query = query.where(Client.user_id == current_user.id)
         else:
-            client_filter = apply_client_ids_filter(Client.id, parse_csv_ints(client_id))
+            client_filter = apply_client_ids_filter(
+                Client.id, parse_csv_ints(client_id, field="client_id")
+            )
             if client_filter is not None:
                 query = query.where(client_filter)
 

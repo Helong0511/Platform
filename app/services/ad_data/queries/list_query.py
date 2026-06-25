@@ -253,14 +253,16 @@ class AdDataListQuery:
             if not is_admin(current_user):
                 filter_conditions.append(Client.user_id == current_user.id)
             else:
-                client_filter = apply_client_ids_filter(Client.id, parse_csv_ints(client_id))
+                client_filter = apply_client_ids_filter(
+                    Client.id, parse_csv_ints(client_id, field="client_id")
+                )
                 if client_filter is not None:
                     filter_conditions.append(client_filter)
 
             filter_conditions.append(Product.is_active == True)
 
             product_filter = apply_product_ids_filter(
-                AdData.product_id, parse_csv_ints(product_id)
+                AdData.product_id, parse_csv_ints(product_id, field="product_id")
             )
             if product_filter is not None:
                 filter_conditions.append(product_filter)
