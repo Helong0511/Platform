@@ -138,6 +138,11 @@ def row_is_cross_row(country_code: Optional[str], ad_unit: Optional[str]) -> boo
     return row_has_country(country_code) and bool((ad_unit or "").strip())
 
 
+def row_is_plain_summary(country_code: Optional[str], ad_unit: Optional[str]) -> bool:
+    """Excel 手工导入等：无国家、无广告单元的汇总行。"""
+    return row_has_no_country(country_code) and not (ad_unit or "").strip()
+
+
 def build_dual_api_source_index(rows: list[dict]) -> Tuple[Set[ProductDateKey], Set[ProductDateKey]]:
     """
     从行列表构建「产品+日期」纯国家 / 纯广告单元 索引，供日汇总行级筛选。
@@ -190,6 +195,8 @@ def row_matches_daily_summary_dimension_row(
     if dim == "country":
         if row_is_country_only(cc, au):
             return True
+        if row_is_plain_summary(cc, au):
+            return True
         if row_is_cross_row(cc, au):
             if country_only_keys is not None and pd_key is not None:
                 return pd_key not in country_only_keys
@@ -216,9 +223,12 @@ def build_ad_data_dimension_filter(
     """构建明细列表用统计维度筛选（互斥字段，避免多 API 重复计数）。"""
     dim = normalize_dimension(dimension)
     if dim == "country":
-        return and_(
-            _has_country_condition(country_code_column),
-            _empty_ad_unit_condition(ad_unit_column),
+        return or_(
+            and_(
+                _has_country_condition(country_code_column),
+                _empty_ad_unit_condition(ad_unit_column),
+            ),
+            _plain_summary_row_condition(country_code_column, ad_unit_column),
         )
     if dim == "ad_unit":
         return and_(
@@ -249,6 +259,14 @@ def _cross_row_condition(country_code_column: Any, ad_unit_column: Any) -> Any:
     return and_(
         _has_country_condition(country_code_column),
         _non_empty_ad_unit_condition(ad_unit_column),
+    )
+
+
+def _plain_summary_row_condition(country_code_column: Any, ad_unit_column: Any) -> Any:
+    """无国家且无广告单元（典型 Excel 手工导入行）。"""
+    return and_(
+        _no_country_condition(country_code_column),
+        _empty_ad_unit_condition(ad_unit_column),
     )
 
 
@@ -378,6 +396,7 @@ def build_daily_summary_dimension_filter(
     if dim == "country":
         return or_(
             _country_only_row_condition(country_code_column, ad_unit_column),
+            _plain_summary_row_condition(country_code_column, ad_unit_column),
             and_(
                 _cross_row_condition(country_code_column, ad_unit_column),
                 _outer_row_not_in_country_only_product_dates(model, start_date, end_date),

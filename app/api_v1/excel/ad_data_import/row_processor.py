@@ -7,7 +7,11 @@ import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.api_v1.excel.ad_data_import.helpers import clean_numeric_value
+from app.api_v1.excel.ad_data_import.helpers import (
+    clean_numeric_value,
+    excel_row_has_country_column,
+    read_excel_country_cell_value,
+)
 from app.api_v1.excel.ad_data_import.product_resolver import find_or_create_product
 from app.api_v1.excel.utils import (
     is_valid_numeric_value, normalize_date_key, parse_date_value, safe_get_value,
@@ -26,6 +30,44 @@ from app.core.utils import (
 from app.models.models import User, AdData
 
 logger = logging.getLogger(__name__)
+
+EXCEL_DEFAULT_COUNTRY_CODE = "ZZ"
+
+
+async def resolve_excel_import_country_code(
+        db: AsyncSession,
+        row: pd.Series,
+        *,
+        product_name: str,
+        date_hint: Any = None,
+) -> str:
+    """
+    Excel 导入专用国家解析：
+    - 有国家列且单元格有值：解析后写入（支持 ZZ/US/中文国名等）
+    - 无国家列，或国家列为空：默认 ZZ（全部区域）
+    """
+    if not excel_row_has_country_column(row):
+        return EXCEL_DEFAULT_COUNTRY_CODE
+
+    country_input = read_excel_country_cell_value(row)
+    if not country_input:
+        return EXCEL_DEFAULT_COUNTRY_CODE
+
+    upper = country_input.upper()
+    if upper in ("ZZ", "AA"):
+        return upper
+
+    found_country_code = await find_country_code_by_any_format(db, country_input)
+    if found_country_code:
+        return found_country_code
+
+    preserved = preserve_unrecognized_country_code(country_input)
+    logger.warning(
+        f"无法识别国家代码格式: {country_input}, "
+        f"日期={date_hint or row.get('date', '未知')}, 产品={product_name}, "
+        f"保留原始值 '{preserved}'"
+    )
+    return preserved
 
 
 async def process_row_data(
@@ -110,28 +152,13 @@ async def process_row_data(
         elif "广告单元" in row.index and pd.notna(row.get("广告单元")):
             ad_unit = normalize_ad_unit(row["广告单元"])
 
-        # 国家代码（可选；无输入时 NULL，与上游 API 入库一致；显式 ZZ 表示全部区域）
-        country_code = None
-        country_input = None
-        # ---------- 条件分支 ----------
-        if "country_code" in row.index and pd.notna(row.get("country_code")):
-            country_input = str(row["country_code"]).strip()
-        # ---------- 条件分支 ----------
-        elif "国家代码" in row.index and pd.notna(row.get("国家代码")):
-            country_input = str(row["国家代码"]).strip()
-        # ---------- 条件分支 ----------
-        if country_input:
-            found_country_code = await find_country_code_by_any_format(db, country_input)
-            # ---------- 条件分支 ----------
-            if found_country_code:
-                country_code = found_country_code
-            else:
-                country_code = preserve_unrecognized_country_code(country_input)
-                logger.warning(
-                    f"无法识别国家代码格式: {country_input}, "
-                    f"日期={row.get('date', '未知')}, 产品={product_name}, "
-                    f"保留原始值 '{country_code}'"
-                )
+        # 国家代码（Excel 导入：有国家列则读取，无列或空单元格默认 ZZ）
+        country_code = await resolve_excel_import_country_code(
+            db,
+            row,
+            product_name=product_name,
+            date_hint=row.get("date"),
+        )
 
         country_condition = build_ad_data_country_equality(AdData.country_code, country_code)
 

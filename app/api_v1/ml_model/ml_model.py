@@ -68,6 +68,7 @@ OPTIONAL_FIELDS = {
     "cpc": "CPC",
     "pageviews": "PageViews",
     "ad_unit": "广告单元",
+    "country_code": "国家",
 }
 
 # 所有字段（包含必需字段和可选字段）
