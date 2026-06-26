@@ -9,14 +9,11 @@ Skymobi 上游广告数据拉取定时任务。
 """
 from datetime import datetime, timedelta
 
-import pytz
-
 from app.core.config import settings
 from app.scheduler_module.task_names import SKYMOBI_API_TASK_NAME
+from app.scheduler_module.task_utils import resolve_upstream_date_range
 from app.scheduler_module.upstream_fetch import fetch_skymobi_rows
 from app.scheduler_module.upstream_task_runner import run_upstream_import_task
-
-APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
 
 SKYMOBI_FIELD_MAPPING = {
     "date": "dt",
@@ -39,25 +36,24 @@ async def skymobi_api_task(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> None:
-    """Skymobi 定时拉数：单日查询，凌晨 0-2 点默认拉昨日数据。"""
+    """Skymobi 定时拉数：按日期区间逐日查询（默认昨日~今日）。"""
     api_id = settings.SKYMOBI_API_ID
     api_key = settings.SKYMOBI_API_KEY
 
     async def fetch_data():
-        if start_date:
-            date_str = start_date
-        else:
-            app_now = datetime.now(APP_TIMEZONE)
-            today_str = app_now.strftime("%Y-%m-%d")
-            if 0 <= app_now.hour <= 2:
-                date_str = (app_now - timedelta(days=1)).strftime("%Y-%m-%d")
-            else:
-                date_str = today_str
-        return await fetch_skymobi_rows(
-            api_id=api_id,
-            api_key=api_key,
-            date_str=date_str,
-        )
+        range_start, range_end = resolve_upstream_date_range(start_date, end_date)
+        current = datetime.strptime(range_start, "%Y-%m-%d").date()
+        end = datetime.strptime(range_end, "%Y-%m-%d").date()
+        all_rows = []
+        while current <= end:
+            rows = await fetch_skymobi_rows(
+                api_id=api_id,
+                api_key=api_key,
+                date_str=current.strftime("%Y-%m-%d"),
+            )
+            all_rows.extend(rows)
+            current += timedelta(days=1)
+        return all_rows
 
     await run_upstream_import_task(
         SKYMOBI_API_TASK_NAME,

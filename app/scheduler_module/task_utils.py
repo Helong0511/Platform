@@ -295,19 +295,29 @@ def resolve_upstream_date_range(
     """
     解析上游 API 拉数日期范围。
 
-    early_morning_dual_day: 0–2 点拉「昨日+今日」，否则仅今日（Huguang 等逻辑）。
+    规则：
+    - 未传参：结束日为今日，开始日为结束日前推一天（例：今日 2026-06-26 → 2026-06-25 ~ 2026-06-26）
+    - 仅传 end_date：开始日 = end_date 前推一天
+    - 仅传 start_date：单日拉数（start_date, start_date）
+    - 同时传入 start_date 与 end_date：按传入区间原样使用（手动补数）
+
+    early_morning_dual_day 已废弃，保留参数仅为兼容旧调用。
     """
-    if start_date:
-        if end_date:
-            return start_date, end_date
+    _ = early_morning_dual_day
+
+    if start_date and end_date:
+        return start_date, end_date
+
+    if start_date and not end_date:
         return start_date, start_date
 
     app_now = datetime.now(APP_TIMEZONE)
     today_str = app_now.strftime("%Y-%m-%d")
-    if early_morning_dual_day and 0 <= app_now.hour <= 2:
-        yesterday_str = (app_now - timedelta(days=1)).strftime("%Y-%m-%d")
-        return yesterday_str, today_str
-    return today_str, today_str
+
+    end_str = end_date or today_str
+    end_dt = datetime.strptime(end_str, "%Y-%m-%d").date()
+    start_str = (end_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+    return start_str, end_str
 
 
 def upstream_credential_missing(*values: Optional[str]) -> bool:

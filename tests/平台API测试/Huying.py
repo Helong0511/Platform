@@ -105,7 +105,7 @@ def get_ad_data(data_type, start_date=None, end_date=None, dimension=None):
 
 # 使用示例（日期为当天 2026-06-24）
 if __name__ == '__main__':
-    today = '2026-06-23'
+    today = '2026-06-25'
 
     # # 获取产品列表
     # products_result = get_products()
@@ -115,6 +115,15 @@ if __name__ == '__main__':
     ad_data_result = get_ad_data(data_type='all', dimension='ad_unit', start_date=today, end_date=today)
     # print(json.dumps(ad_data_result, indent=2, ensure_ascii=False))
 
+    need = [
+        'freegame35.rueik.top',
+        'freegame36.rueik.top',
+        'minigame12.7068.top',
+        'minigame13.7068.top',
+        'hotgame67.penajaib.com',
+        'hotgame68.penajaib.com'
+    ]
+
     product_name = []
 
     data = ad_data_result.get('data',[])
@@ -123,13 +132,12 @@ if __name__ == '__main__':
             # print(item.get('date',''),item.get('product_name',''),item.get('country_code',''),item.get('country_name_zh',''),item.get('request_count',''),item.get('match_count',''),item.get('coverage_rate',''),item.get('display_count',''),item.get('display_rate',''),item.get('click_count',''),item.get('click_rate',''),item.get('viewability_rate',''),item.get('cpc',''),item.get('pageviews',''),item.get('ecpm',''),item.get('revenue',''))
 
             if item.get('product_name','') not in product_name:
-                print(item.get('product_name',''))
+                print(item.get('product_name', ''))
                 product_name.append(item.get('product_name',''))
 
-    print(len(product_name))
-
-    product = sorted(product_name)
-    print(product)
+    for item in need:
+        if item not in product_name:
+            print('产品', item, '不存在')
 
     # # 获取每日汇总（按国家维度）
     # daily_summary_result = get_ad_data(data_type='day', dimension='country', start_date=today, end_date=today)
