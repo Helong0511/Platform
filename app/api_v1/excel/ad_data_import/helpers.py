@@ -9,6 +9,9 @@ from app.core.exceptions import raise_api_exception
 
 logger = logging.getLogger(__name__)
 
+# pandas 空值经 str() 后的占位文本，不能当作有效产品名
+_INVALID_EXCEL_TEXT_VALUES = frozenset({"nan", "nat", "none", "<na>"})
+
 # Excel 导入可识别的国家列名（映射后优先 country_code）
 EXCEL_COUNTRY_COLUMN_NAMES = (
     "country_code",
@@ -18,6 +21,58 @@ EXCEL_COUNTRY_COLUMN_NAMES = (
     "Country",
     "国家/地区",
 )
+
+
+def is_blank_excel_cell(value: Any) -> bool:
+    """判断单元格是否为空（None / NaN / NaT / 空字符串）。"""
+    if value is None:
+        return True
+    if pd.isna(value):
+        return True
+    return str(value).strip() == ""
+
+
+def normalize_excel_product_name(value: Any) -> str:
+    """规范化 Excel 产品名称；空值与 nan/NaT 占位符返回空字符串。"""
+    if is_blank_excel_cell(value):
+        return ""
+    text = str(value).strip()
+    if text.lower() in _INVALID_EXCEL_TEXT_VALUES:
+        return ""
+    return text
+
+
+def is_valid_excel_import_row(row: pd.Series) -> bool:
+    """行是否具备有效产品名与日期（用于过滤尾部空白行）。"""
+    if "product_name" not in row.index or "date" not in row.index:
+        return False
+    if not normalize_excel_product_name(row.get("product_name")):
+        return False
+    return not is_blank_excel_cell(row.get("date"))
+
+
+def drop_blank_excel_import_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """移除产品名或日期为空的行（Excel 尾部空白行常导致 NaT 导入错误）。"""
+    if df.empty:
+        return df
+    if "product_name" not in df.columns or "date" not in df.columns:
+        return df
+
+    mask = df.apply(is_valid_excel_import_row, axis=1)
+    dropped = int((~mask).sum())
+    if dropped > 0:
+        logger.info(f"已跳过 {dropped} 行空白或无效数据行（产品名/日期为空）")
+    return df.loc[mask].copy()
+
+
+def safe_int_from_cell(value: Any, field_name: str, *, default: int = 0) -> int:
+    """安全地将 Excel 单元格转为整数，空值返回 default。"""
+    if is_blank_excel_cell(value):
+        return default
+    try:
+        return int(float(value))
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"{field_name}格式无效: {value!r}") from exc
 
 
 def excel_row_has_country_column(row: pd.Series) -> bool:

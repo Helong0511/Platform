@@ -6,7 +6,7 @@ import pandas as pd
 from fastapi import UploadFile
 
 from app.api_v1.excel.utils import ALLOWED_MIME_TYPES, allowed_file, calculate_rates, parse_date_value
-from app.api_v1.excel.ad_data_import.helpers import _ensure_xlrd
+from app.api_v1.excel.ad_data_import.helpers import _ensure_xlrd, drop_blank_excel_import_rows
 from app.api_v1.ml_model.ml_model import ColumnMappingService, REQUIRED_FIELDS
 from app.core.config import settings
 from app.core.errors import ErrorCode
@@ -313,6 +313,9 @@ async def process_column_mapping(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[s
 
     # 计算缺失的比率字段
     df = calculate_rates(df)
+
+    # 过滤尾部空白行，避免 NaT 被 int() 解析报错
+    df = drop_blank_excel_import_rows(df)
 
     return df, column_mapping_result
 

@@ -10,7 +10,9 @@ from sqlalchemy.future import select
 from app.api_v1.excel.ad_data_import.helpers import (
     clean_numeric_value,
     excel_row_has_country_column,
+    normalize_excel_product_name,
     read_excel_country_cell_value,
+    safe_int_from_cell,
 )
 from app.api_v1.excel.ad_data_import.product_resolver import find_or_create_product
 from app.api_v1.excel.utils import (
@@ -104,7 +106,7 @@ async def process_row_data(
         data_date = parse_date_value(date_value)
 
         # 获取产品名称
-        product_name = str(row["product_name"]).strip()
+        product_name = normalize_excel_product_name(row.get("product_name"))
         # ---------- 条件分支 ----------
         if not product_name:
             raise ValueError("产品名称不能为空")
@@ -113,10 +115,10 @@ async def process_row_data(
         excel_client_id = None
         # ---------- 条件分支 ----------
         if "client_id" in row.index and pd.notna(row.get("client_id")):
-            excel_client_id = int(row["client_id"])
+            excel_client_id = safe_int_from_cell(row.get("client_id"), "客户ID")
         # ---------- 条件分支 ----------
         elif "客户ID" in row.index and pd.notna(row.get("客户ID")):
-            excel_client_id = int(row["客户ID"])
+            excel_client_id = safe_int_from_cell(row.get("客户ID"), "客户ID")
 
         # 查找或创建产品
         product_info = await find_or_create_product(
@@ -165,10 +167,10 @@ async def process_row_data(
         # 解析数值字段
         # ---------- 异常处理 ----------
         try:
-            request_count = int(row["request_count"])
-            match_count = int(row["match_count"])
-            display_count = int(row["display_count"])
-            click_count = int(row["click_count"])
+            request_count = safe_int_from_cell(row.get("request_count"), "请求数")
+            match_count = safe_int_from_cell(row.get("match_count"), "匹配数")
+            display_count = safe_int_from_cell(row.get("display_count"), "展示数")
+            click_count = safe_int_from_cell(row.get("click_count"), "点击数")
             revenue_before = clean_numeric_value(row["revenue_before_deduct"])
 
             # 优先使用Excel表中的映射关系数据，如果不存在或为空/NaN，才按照计算公式计算
@@ -224,7 +226,7 @@ async def process_row_data(
             pageviews_val = safe_get_value(row, "pageviews")
             # ---------- 条件分支 ----------
             if is_valid_numeric_value(pageviews_val):
-                pageviews = int(pageviews_val)
+                pageviews = safe_int_from_cell(pageviews_val, "PageViews")
             else:
                 pageviews = 0
 

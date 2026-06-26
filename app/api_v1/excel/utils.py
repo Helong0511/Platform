@@ -95,6 +95,9 @@ def parse_date_value(date_value: Any) -> datetime.date:
         ValueError: 如果日期格式无效
     """
     # ---------- 入口：参数与依赖准备 ----------
+    if pd.isna(date_value):
+        raise ValueError("日期不能为空")
+
     # 处理字符串格式
     # ---------- 条件分支 ----------
     if isinstance(date_value, str):
