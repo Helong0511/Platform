@@ -65,43 +65,40 @@ def drop_blank_excel_import_rows(df: pd.DataFrame) -> pd.DataFrame:
     return df.loc[mask].copy()
 
 
-def safe_int_from_cell(
-    value: Any,
-    field_name: str,
-    *,
-    default: Optional[int] = 0,
-) -> int:
-    """
-    将 Excel 单元格转为整数。
-
-    - default 为整数：空值返回该默认值（用于可选字段）
-    - default=None：空值抛出异常（用于必填字段）
-    """
-    if is_blank_excel_cell(value):
-        if default is None:
-            raise ValueError(f"{field_name}不能为空")
-        return default
+def _parse_int_cell(value: Any, field_name: str) -> int:
     try:
         return int(float(value))
     except (ValueError, TypeError) as exc:
         raise ValueError(f"{field_name}格式无效: {value!r}") from exc
 
 
-def safe_float_from_cell(
-    value: Any,
-    field_name: str,
-    *,
-    default: Optional[float] = 0.0,
-) -> float:
-    """
-    将 Excel 单元格转为浮点数（支持百分比格式）。
-
-    - default 为浮点数：空值返回该默认值（用于可选字段）
-    - default=None：空值抛出异常（用于必填字段）
-    """
+def require_int_from_cell(value: Any, field_name: str) -> int:
+    """将必填 Excel 单元格转为整数；空值抛出 ValueError。"""
     if is_blank_excel_cell(value):
-        if default is None:
-            raise ValueError(f"{field_name}不能为空")
+        raise ValueError(f"{field_name}不能为空")
+    return _parse_int_cell(value, field_name)
+
+
+def safe_int_from_cell(value: Any, field_name: str, *, default: int = 0) -> int:
+    """将可选 Excel 单元格转为整数；空值返回 default。"""
+    if is_blank_excel_cell(value):
+        return default
+    return _parse_int_cell(value, field_name)
+
+
+def require_float_from_cell(value: Any, field_name: str) -> float:
+    """将必填 Excel 单元格转为浮点数；空值抛出 ValueError。"""
+    if is_blank_excel_cell(value):
+        raise ValueError(f"{field_name}不能为空")
+    try:
+        return clean_numeric_value(value)
+    except ValueError as exc:
+        raise ValueError(f"{field_name}格式无效: {value!r}") from exc
+
+
+def safe_float_from_cell(value: Any, field_name: str, *, default: float = 0.0) -> float:
+    """将可选 Excel 单元格转为浮点数；空值返回 default。"""
+    if is_blank_excel_cell(value):
         return default
     try:
         return clean_numeric_value(value)
