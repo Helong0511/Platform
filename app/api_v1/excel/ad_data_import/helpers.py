@@ -65,13 +65,47 @@ def drop_blank_excel_import_rows(df: pd.DataFrame) -> pd.DataFrame:
     return df.loc[mask].copy()
 
 
-def safe_int_from_cell(value: Any, field_name: str, *, default: int = 0) -> int:
-    """安全地将 Excel 单元格转为整数，空值返回 default。"""
+def safe_int_from_cell(
+    value: Any,
+    field_name: str,
+    *,
+    default: Optional[int] = 0,
+) -> int:
+    """
+    将 Excel 单元格转为整数。
+
+    - default 为整数：空值返回该默认值（用于可选字段）
+    - default=None：空值抛出异常（用于必填字段）
+    """
     if is_blank_excel_cell(value):
+        if default is None:
+            raise ValueError(f"{field_name}不能为空")
         return default
     try:
         return int(float(value))
     except (ValueError, TypeError) as exc:
+        raise ValueError(f"{field_name}格式无效: {value!r}") from exc
+
+
+def safe_float_from_cell(
+    value: Any,
+    field_name: str,
+    *,
+    default: Optional[float] = 0.0,
+) -> float:
+    """
+    将 Excel 单元格转为浮点数（支持百分比格式）。
+
+    - default 为浮点数：空值返回该默认值（用于可选字段）
+    - default=None：空值抛出异常（用于必填字段）
+    """
+    if is_blank_excel_cell(value):
+        if default is None:
+            raise ValueError(f"{field_name}不能为空")
+        return default
+    try:
+        return clean_numeric_value(value)
+    except ValueError as exc:
         raise ValueError(f"{field_name}格式无效: {value!r}") from exc
 
 

@@ -12,6 +12,7 @@ from app.api_v1.excel.ad_data_import.helpers import (
     excel_row_has_country_column,
     normalize_excel_product_name,
     read_excel_country_cell_value,
+    safe_float_from_cell,
     safe_int_from_cell,
 )
 from app.api_v1.excel.ad_data_import.product_resolver import find_or_create_product
@@ -167,11 +168,11 @@ async def process_row_data(
         # 解析数值字段
         # ---------- 异常处理 ----------
         try:
-            request_count = safe_int_from_cell(row.get("request_count"), "请求数")
-            match_count = safe_int_from_cell(row.get("match_count"), "匹配数")
-            display_count = safe_int_from_cell(row.get("display_count"), "展示数")
-            click_count = safe_int_from_cell(row.get("click_count"), "点击数")
-            revenue_before = clean_numeric_value(row["revenue_before_deduct"])
+            request_count = safe_int_from_cell(row.get("request_count"), "请求数", default=None)
+            match_count = safe_int_from_cell(row.get("match_count"), "匹配数", default=None)
+            display_count = safe_int_from_cell(row.get("display_count"), "展示数", default=None)
+            click_count = safe_int_from_cell(row.get("click_count"), "点击数", default=None)
+            revenue_before = safe_float_from_cell(row.get("revenue_before_deduct"), "收益", default=None)
 
             # 优先使用Excel表中的映射关系数据，如果不存在或为空/NaN，才按照计算公式计算
             # 覆盖率（匹配率）= 匹配数/请求数 * 100
