@@ -125,6 +125,9 @@ def clean_numeric_value(value: Any) -> float:
     if value is None:
         raise ValueError("值不能为None")
 
+    if pd.isna(value):
+        raise ValueError("值不能为空")
+
     # 转换为字符串并去除首尾空格
     str_value = str(value).strip()
 
