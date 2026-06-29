@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@element-plus/icons-vue": "2.3.2",
-    "axios": "1.6.8",
+    "axios": "^1.8.4",
     "echarts": "6.0.0",
     "element-plus": "2.11.7",
     "pinia": "3.0.3",
@@ -23,6 +23,6 @@
     "eslint": "8.57.0",
     "eslint-plugin-vue": "9.28.0",
     "linkedom": "^0.18.12",
-    "vite": "7.1.7"
+    "vite": "7.3.6"
   }
 }

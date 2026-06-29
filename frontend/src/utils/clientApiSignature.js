@@ -159,17 +159,9 @@ function add32(a, b) {
 }
 
 /**
- * 生成客户端外部 API 请求 MD5 签名（client_id + req_time + 可选日期参数 + secret）。
- * @param {object} opts
- * @param {number|string} opts.clientId
- * @param {number|string} opts.reqTime
- * @param {string} [opts.dataType]
- * @param {string} [opts.dimension]
- * @param {string} [opts.startDate]
- * @param {string} [opts.endDate]
- * @param {string} secretKey
+ * 构建待签名字符串（与后端 _build_sign_string 一致）。
  */
-export function generateClientApiSign(
+export function buildClientApiSignString(
   { clientId, reqTime, dataType, dimension, startDate, endDate },
   secretKey
 ) {
@@ -190,10 +182,44 @@ export function generateClientApiSign(
     params.end_date = String(endDate);
   }
   const sortedKeys = Object.keys(params).sort();
-  const tempStr =
+  return (
     sortedKeys.map((key) => `${key}=${params[key]}`).join('&') +
-    `&key=${secretKey}`;
-  return md5Hex(tempStr);
+    `&key=${secretKey}`
+  );
+}
+
+/**
+ * HMAC-SHA256 签名（推荐，与后端 verify_signature 首选算法一致）。
+ */
+export async function hmacSha256Hex(message, secretKey) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(secretKey),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, enc.encode(message));
+  return [...new Uint8Array(signature)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .toLowerCase();
+}
+
+/**
+ * 生成客户端外部 API 请求 MD5 签名（向后兼容）。
+ */
+export function generateClientApiSignMd5(params, secretKey) {
+  return md5Hex(buildClientApiSignString(params, secretKey));
+}
+
+/**
+ * 生成客户端外部 API 请求 HMAC-SHA256 签名（默认）。
+ */
+export async function generateClientApiSign(params, secretKey) {
+  const signString = buildClientApiSignString(params, secretKey);
+  return hmacSha256Hex(signString, secretKey);
 }
 
 /**

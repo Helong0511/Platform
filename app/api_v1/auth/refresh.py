@@ -34,6 +34,11 @@ from app.core.errors import ErrorCode
 from app.core.security import JWTUtils
 from app.models.models import User, UserRole, Publisher
 from app.schemas.auth import RefreshTokenRequest
+from app.services.session_service import (
+    TokenReuseError,
+    record_access_token_session,
+    revoke_tokens_from_request,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -117,12 +122,29 @@ async def refresh_token(
                 http_status=status.HTTP_403_FORBIDDEN,
             )
 
+        await revoke_tokens_from_request(
+            db=db,
+            request=request,
+            user_id=user.id,
+            reason="刷新令牌轮换",
+            extra_tokens=[refresh_token_value],
+            consume_refresh_token=refresh_token_value,
+        )
+
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         new_access_token = JWTUtils.create_access_token(
             user.id, expires_delta=access_token_expires
         )
         new_refresh_token = JWTUtils.create_refresh_token(
             user.id, expires_delta=timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        )
+
+        await record_access_token_session(
+            db,
+            user_id=user.id,
+            access_token=new_access_token,
+            request=request,
+            access_token_expires=access_token_expires,
         )
 
         api_enabled = False
@@ -169,6 +191,15 @@ async def refresh_token(
 
     except HTTPException as exc:
         return auth_failure_response(exc)
+    except TokenReuseError:
+        try:
+            raise_auth_error(
+                ErrorCode.TOKEN_INVALID,
+                "刷新令牌已失效，请重新登录",
+                http_status=status.HTTP_401_UNAUTHORIZED,
+            )
+        except HTTPException as exc:
+            return auth_failure_response(exc)
     except Exception as e:
         logger.error(f"刷新令牌失败: {str(e)}", exc_info=True)
         try:

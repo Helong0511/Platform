@@ -366,10 +366,9 @@ export const useAuthStore = defineStore('auth', {
       return this.isAuthenticated;
     },
     async fetchUserInfo(options = {}) {
-      // 检查是否已认证（系统使用 HttpOnly Cookie，不需要检查 token）
-      if (!this.isAuthenticated) return;
+      const { silent = false, force = false } = options;
+      if (!force && !this.isAuthenticated) return;
 
-      const { silent = false } = options;
       this.loading = true;
       try {
         const userData = await request({
@@ -379,6 +378,7 @@ export const useAuthStore = defineStore('auth', {
 
         this.userInfo = userData || {};
         sessionStorage.setItem('userInfo', JSON.stringify(this.userInfo));
+        this.isAuthenticated = true;
       } catch (err) {
         const httpStatus = err.response?.status;
         const businessCode = err.code ?? err.response?.data?.code;

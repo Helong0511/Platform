@@ -37,11 +37,10 @@
 说明：用户认证，含登录、刷新令牌、登出及 JWT 校验。"""
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
-from jose import jwt
 from sqlalchemy import func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -54,9 +53,9 @@ from app.core.config import settings
 from app.core.errors import ErrorCode
 from app.core.database import get_db
 from app.core.security import JWTUtils, get_current_user
-from app.core.utils import get_app_now_naive, get_client_ip, get_device_type, APP_TIMEZONE
+from app.core.utils import get_client_ip
 from app.models.models import User, UserRole, Publisher
-from app.models.session import UserSession
+from app.services.session_service import record_access_token_session, revoke_tokens_from_request
 from app.schemas.auth import LoginResponse
 from app.schemas.base import ResponseBaseSchema
 
@@ -303,58 +302,13 @@ async def login(
     )
 
     # ====== 记录会话信息 ======
-    # 解析token获取jti
-    token_jti = None
-    try:
-
-        # 根据配置的算法选择密钥
-        if settings.JWT_ALGORITHM == "RS256":
-            # 使用RS256算法（非对称加密），需要公钥验证
-            public_key = JWTUtils._load_rsa_key(
-                settings.RSA_PUBLIC_KEY,
-                settings.RSA_PUBLIC_KEY_PATH,
-                "public"
-            )
-            key = public_key
-        else:
-            # 使用HS256算法（对称加密），使用相同的密钥
-            key = settings.SECRET_KEY
-
-        payload = jwt.decode(
-            access_token,
-            key,
-            algorithms=[settings.JWT_ALGORITHM],
-            options={"verify_exp": False}  # 不验证过期时间，只获取jti
-        )
-        token_jti = payload.get("jti")
-    except HTTPException:
-        raise
-    except Exception as e:
-        # 会话记录失败不应该影响登录
-        logger.warning(f"记录会话信息失败: {e}")
-
-    if token_jti:
-        # 记录会话到数据库
-        # expires_at 需要保持UTC时间用于比较，但存储时转换为北京时间
-        expires_at_utc = datetime.now(timezone.utc) + access_token_expires
-        # 转换为北京时间（naive）存储到数据库
-        expires_at = expires_at_utc.astimezone(APP_TIMEZONE).replace(tzinfo=None)
-
-        device_type_str = get_device_type(request)
-        user_agent = request.headers.get("User-Agent", "")[:500]
-
-        session = UserSession(
-            user_id=user.id,
-            token_jti=token_jti,
-            ip_address=client_ip,
-            user_agent=user_agent,
-            device_info=device_type_str,
-            is_active=True,
-            last_activity=get_app_now_naive(),  # 使用北京时间
-            expires_at=expires_at  # 已转换为北京时间
-        )
-        db.add(session)
-        # 不在这里commit，由get_db的finally块自动commit
+    await record_access_token_session(
+        db,
+        user_id=user.id,
+        access_token=access_token,
+        request=request,
+        access_token_expires=access_token_expires,
+    )
 
     logger.info(f"User {user.username} logged in successfully")
 
@@ -418,6 +372,12 @@ async def logout(
     响应：统一 ResponseBaseSchema / PaginatedResponseBaseSchema 包装。
     """
     try:
+        await revoke_tokens_from_request(
+            db=db,
+            request=request,
+            user_id=current_user.id,
+            reason="用户退出登录",
+        )
         # 记录退出登录日志
         await log_logout(db=db, user=current_user, request=request)
         # 注意：这里不commit，由get_db的finally块自动commit

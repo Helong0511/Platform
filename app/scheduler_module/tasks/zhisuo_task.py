@@ -174,6 +174,11 @@ async def zhisuo_api_task(
                 current_time_str=current_time_str,
                 notify_title="zhisuo-广告单元",
                 update_task_result=False,
+                notify_params={
+                    "起始日期": zhisuo_start,
+                    "终止日期": zhisuo_end,
+                    "账号": ",".join(str(a["client_id"]) for a in unit_accounts),
+                },
             )
             unit_ids = ",".join(str(a["client_id"]) for a in unit_accounts)
             phase_summaries.append(f"广告单元[{unit_ids}]: {unit_summary}")
@@ -195,6 +200,11 @@ async def zhisuo_api_task(
                 current_time_str=current_time_str,
                 notify_title="zhisuo-国家报告",
                 update_task_result=False,
+                notify_params={
+                    "起始日期": zhisuo_start,
+                    "终止日期": zhisuo_end,
+                    "账号": ",".join(str(a["client_id"]) for a in country_accounts),
+                },
             )
             country_ids = ",".join(str(a["client_id"]) for a in country_accounts)
             phase_summaries.append(f"国家报告[{country_ids}]: {country_summary}")

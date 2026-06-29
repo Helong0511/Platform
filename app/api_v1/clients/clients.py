@@ -42,6 +42,24 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _client_public_dict(client: Client, *, user_full_name: str | None = None) -> dict:
+    """构建不含明文 API 密钥的客户响应字典。"""
+    data = ClientResponse.model_validate(client).model_dump()
+    data["has_api_key"] = bool(data.pop("key", None) or client.key)
+    if user_full_name is not None:
+        data["user_full_name"] = user_full_name
+    elif client.user:
+        data["user_full_name"] = client.user.full_name
+    return data
+
+
+def _client_create_dict(client: Client) -> dict:
+    """创建客户时一次性返回明文密钥，其余场景使用 _client_public_dict。"""
+    data = _client_public_dict(client)
+    data["key"] = client.key
+    return data
+
+
 # 快速更新客户开关的请求模型
 class ClientSwitchUpdate(BaseModel):
     """
@@ -78,10 +96,7 @@ async def get_clients(
 
     client_responses = []
     for client in clients:
-        client_dict = ClientResponse.model_validate(client).model_dump()
-        if client.user:
-            client_dict["user_full_name"] = client.user.full_name
-        client_responses.append(ClientResponse.model_validate(client_dict))
+        client_responses.append(_client_public_dict(client))
 
     return PaginatedResponseBaseSchema.success(
         data=client_responses,
@@ -122,29 +137,26 @@ async def get_client(
             detail=f"客户ID {client_id} 不存在或您没有权限访问"
         )
 
-    # 用户信息已通过selectinload预加载，直接访问
-    user = client.user
-
     # 构建响应数据
-    client_data = {
-        'id': client.id,
-        'key': client.key,
-        'company_name': client.company_name,
-        'contact_person': client.contact_person,
-        'phone': client.phone,
-        'address': client.address,
-        'allowed_ips': client.allowed_ips,
-        'is_active': client.is_active,
-        'api_enabled': client.api_enabled,
-        'password_change_enabled': client.password_change_enabled,
-        'created_at': client.created_at,
-        'updated_at': client.updated_at,
-        'user_id': client.user_id,
-        'user_name': user.username if user else None
-    }
+    return ResponseBaseSchema.success(data=_client_public_dict(client))
 
-    # ---------- 构建响应 ----------
-    return ResponseBaseSchema.success(data=client_data)
+
+@router.get(
+    "/{client_id}/api-key",
+    response_model=ResponseBaseSchema[dict],
+    summary="获取客户 API 密钥（管理员）",
+)
+async def get_client_api_key_admin(
+    client_id: int = Path(..., ge=1, description="客户ID"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """管理员按需获取客户 API 密钥，用于编辑或排查对接问题。"""
+    result = await db.execute(select(Client).where(Client.id == client_id))
+    client = result.scalars().first()
+    if not client:
+        raise_api_exception(ErrorCode.CLIENT_NOT_FOUND, detail="客户信息不存在")
+    return ResponseBaseSchema.success(data={"key": client.key})
 
 
 @router.post("/", response_model=ResponseBaseSchema[ClientResponse], summary="创建客户")
@@ -263,7 +275,7 @@ async def create_client(
             }
         )
 
-        return ResponseBaseSchema.success(data=ClientResponse.model_validate(client))
+        return ResponseBaseSchema.success(data=_client_create_dict(client))
     except HTTPException:
         raise
 
@@ -427,7 +439,7 @@ async def update_client(
         await commit_audit_log(db)
 
     # ---------- 构建响应 ----------
-    return ResponseBaseSchema.success(data=ClientResponse.model_validate(client))
+    return ResponseBaseSchema.success(data=_client_public_dict(client))
 
 
 @router.patch("/{client_id}/switches", response_model=ResponseBaseSchema[ClientResponse], summary="快速更新客户开关")
@@ -557,20 +569,7 @@ async def update_client_switches(
         logger.warning(f"记录更新日志失败: {str(log_error)}")
 
     # 确保返回的数据包含最新的开关状态
-    # ---------- 异常处理 ----------
-    try:
-        client_data = ClientResponse.model_validate(client)
-    except HTTPException:
-        raise
-    except Exception as validation_error:
-        logger.error(f"验证客户响应数据失败: {str(validation_error)}", exc_info=True)
-        raise_api_exception(
-            ErrorCode.OPERATION_FAILED,
-            detail=f"验证客户数据失败：{str(validation_error)}。请刷新页面重试"
-        )
-
-    # ---------- 构建响应 ----------
-    return ResponseBaseSchema.success(data=client_data)
+    return ResponseBaseSchema.success(data=_client_public_dict(client))
 
 
 @router.get("/export", response_class=StreamingResponse, summary="导出客户数据")
@@ -634,7 +633,7 @@ async def export_clients_excel(
             "联系人": client.contact_person or "",
             "联系电话": client.phone or "",
             "地址": client.address or "",
-            "API密钥": client.key or "",
+            "已配置API密钥": "是" if client.key else "否",
             "允许的IP": client.allowed_ips or "",
             "状态": "启用" if client.is_active else "禁用",
             "API开关": "启用" if client.api_enabled else "禁用",

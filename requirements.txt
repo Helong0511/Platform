@@ -5,7 +5,7 @@ sqlalchemy==2.0.36
 pydantic==2.10.4
 redis>=5.2.0
 python-multipart==0.0.20
-python-jose[cryptography]==3.3.0
+PyJWT[crypto]>=2.10.0
 passlib==1.7.4
 openpyxl==3.1.5
 xlrd==2.0.1

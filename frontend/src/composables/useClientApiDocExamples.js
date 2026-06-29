@@ -2,12 +2,14 @@
  * 组合式函数 - 客户 API 文档示例代码生成
  * @file composables/useClientApiDocExamples.js
  */
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useAuthStore } from '@/store';
 import {
+  buildClientApiSignString,
   formatTodayDate,
   generateClientApiSign
 } from '@/utils/clientApiSignature';
+import { getClientApiKey } from '@/api/client-api';
 
 /**
  * 组合式函数 - 客户 API 文档示例代码生成
@@ -29,7 +31,19 @@ export function useClientApiDocExamples() {
     return null;
   });
 
-  const secretKey = computed(() => authStore.userInfo?.client?.key ?? '');
+  const secretKey = ref('');
+
+  onMounted(async () => {
+    if (!clientId.value) return;
+    try {
+      const data = await getClientApiKey();
+      secretKey.value = data?.key ?? '';
+      await refreshSigns();
+    } catch {
+      secretKey.value = '';
+    }
+  });
+
   const todayDate = computed(() => formatTodayDate());
   const hasCredentials = computed(
     () => clientId.value != null && Boolean(secretKey.value)
@@ -42,17 +56,49 @@ export function useClientApiDocExamples() {
   const rt = computed(() => exampleReqTime.value);
   const td = computed(() => todayDate.value);
 
-  const signProducts = computed(() => {
-    if (!hasCredentials.value) return '';
-    return generateClientApiSign(
-      { clientId: clientId.value, reqTime: rt.value },
-      secretKey.value
+  const signProducts = ref('');
+  const signAdDataAll = ref('');
+  const signAdDataDay = ref('');
+  const signAdDataAllCountry = ref('');
+
+  async function refreshSigns() {
+    if (!hasCredentials.value) {
+      signProducts.value = '';
+      signAdDataAll.value = '';
+      signAdDataDay.value = '';
+      signAdDataAllCountry.value = '';
+      return;
+    }
+    const base = { clientId: clientId.value, reqTime: rt.value };
+    const skVal = secretKey.value;
+    signProducts.value = await generateClientApiSign(base, skVal);
+    signAdDataAll.value = await generateClientApiSign(
+      { ...base, dataType: 'all', startDate: td.value, endDate: td.value },
+      skVal
     );
+    signAdDataDay.value = await generateClientApiSign(
+      { ...base, dataType: 'day', startDate: td.value, endDate: td.value },
+      skVal
+    );
+    signAdDataAllCountry.value = await generateClientApiSign(
+      {
+        ...base,
+        dataType: 'all',
+        dimension: 'country',
+        startDate: td.value,
+        endDate: td.value
+      },
+      skVal
+    );
+  }
+
+  watch([clientId, secretKey, exampleReqTime, todayDate], refreshSigns, {
+    immediate: true
   });
 
-  const signAdDataAll = computed(() => {
+  const adDataSignTempStr = computed(() => {
     if (!hasCredentials.value) return '';
-    return generateClientApiSign(
+    return buildClientApiSignString(
       {
         clientId: clientId.value,
         reqTime: rt.value,
@@ -64,23 +110,9 @@ export function useClientApiDocExamples() {
     );
   });
 
-  const signAdDataDay = computed(() => {
+  const adDataSignWithDimensionTempStr = computed(() => {
     if (!hasCredentials.value) return '';
-    return generateClientApiSign(
-      {
-        clientId: clientId.value,
-        reqTime: rt.value,
-        dataType: 'day',
-        startDate: td.value,
-        endDate: td.value
-      },
-      secretKey.value
-    );
-  });
-
-  const signAdDataAllCountry = computed(() => {
-    if (!hasCredentials.value) return '';
-    return generateClientApiSign(
+    return buildClientApiSignString(
       {
         clientId: clientId.value,
         reqTime: rt.value,
@@ -93,19 +125,12 @@ export function useClientApiDocExamples() {
     );
   });
 
-  const adDataSignTempStr = computed(() => {
-    if (!hasCredentials.value) return '';
-    return `client_id=${clientId.value}&data_type=all&end_date=${td.value}&req_time=${rt.value}&start_date=${td.value}&key=${secretKey.value}`;
-  });
-
-  const adDataSignWithDimensionTempStr = computed(() => {
-    if (!hasCredentials.value) return '';
-    return `client_id=${clientId.value}&data_type=all&dimension=country&end_date=${td.value}&req_time=${rt.value}&start_date=${td.value}&key=${secretKey.value}`;
-  });
-
   const productSignTempStr = computed(() => {
     if (!hasCredentials.value) return '';
-    return `client_id=${clientId.value}&req_time=${rt.value}&key=${secretKey.value}`;
+    return buildClientApiSignString(
+      { clientId: clientId.value, reqTime: rt.value },
+      secretKey.value
+    );
   });
 
   const productRequestJson = computed(() => {
@@ -205,7 +230,8 @@ export function useClientApiDocExamples() {
   });
 
   const pythonSignProducts = computed(
-    () => `import hashlib
+    () => `import hmac
+import hashlib
 import time
 
 # 参数（查询产品接口）
@@ -229,13 +255,18 @@ temp_str = '&'.join([f"{key}={params[key]}" for key in sorted_keys])
 # 4. 追加密钥
 temp_str = temp_str + f'&key={SECRET_KEY}'
 
-# 5. MD5加密并转为小写
-sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
+# 5. HMAC-SHA256 签名（推荐；MD5 仍兼容）
+sign = hmac.new(
+    SECRET_KEY.encode('utf-8'),
+    temp_str.encode('utf-8'),
+    hashlib.sha256,
+).hexdigest().lower()
 # sign = ${signProducts.value ? `'${signProducts.value}'` : '（需配置密钥后生成）'}`
   );
 
   const pythonSignAdData = computed(
-    () => `import hashlib
+    () => `import hmac
+import hashlib
 import time
 
 # 参数（查询广告数据接口）
@@ -272,13 +303,18 @@ temp_str = '&'.join([f"{key}={params[key]}" for key in sorted_keys])
 # 4. 追加密钥
 temp_str = temp_str + f'&key={SECRET_KEY}'
 
-# 5. MD5加密并转为小写
-sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
+# 5. HMAC-SHA256 签名（推荐；MD5 仍兼容）
+sign = hmac.new(
+    SECRET_KEY.encode('utf-8'),
+    temp_str.encode('utf-8'),
+    hashlib.sha256,
+).hexdigest().lower()
 # sign = ${signAdDataAllCountry.value ? `'${signAdDataAllCountry.value}'` : '（需配置密钥后生成）'}`
   );
 
   const pythonFullExample = computed(
-    () => `import hashlib
+    () => `import hmac
+import hashlib
 import time
 import requests
 import json
@@ -289,23 +325,12 @@ CLIENT_ID = ${cid.value}
 SECRET_KEY = '${sk.value}'
 
 def generate_signature(client_id, req_time, secret_key, data_type=None, dimension=None, start_date=None, end_date=None):
-    """生成签名
-    
-    Args:
-        client_id: 客户ID
-        req_time: 请求时间戳
-        secret_key: 密钥
-        data_type: 数据类型（对于 /client_data 接口是必填的，'all' 或 'day'）
-        dimension: 统计维度（可选，country / ad_unit / country_ad_unit）
-        start_date: 起始日期（可选）
-        end_date: 终止日期（可选）
-    """
+    """生成 HMAC-SHA256 签名（MD5 仍向后兼容）"""
     params = {
         'client_id': str(client_id),
         'req_time': str(req_time)
     }
     
-    # 添加参数（对于 /client_data 接口，data_type 是必填的）
     if data_type:
         params['data_type'] = str(data_type)
     if dimension:
@@ -319,8 +344,11 @@ def generate_signature(client_id, req_time, secret_key, data_type=None, dimensio
     temp_str = '&'.join([f"{key}={params[key]}" for key in sorted_keys])
     temp_str = temp_str + f'&key={secret_key}'
     
-    sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
-    return sign
+    return hmac.new(
+        secret_key.encode('utf-8'),
+        temp_str.encode('utf-8'),
+        hashlib.sha256,
+    ).hexdigest().lower()
 
 def get_products():
     """获取产品列表"""
@@ -400,7 +428,8 @@ if __name__ == '__main__':
     const id = cid.value;
     const key = sk.value;
     const today = td.value;
-    return `import java.security.MessageDigest;
+    return `import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.time.Instant;
 import java.util.*;
 import java.net.http.HttpClient;
@@ -414,29 +443,23 @@ public class ClientAPI {
     private static final int CLIENT_ID = ${typeof id === 'number' ? id : id};
     private static final String SECRET_KEY = "${key}";
     
-    // 查询产品接口的签名生成（不需要 data_type 参数）
     private static String generateSignature(int clientId, long reqTime, String secretKey) {
         return generateSignature(clientId, reqTime, secretKey, null, null, null, null);
     }
     
-    // 查询广告数据接口的签名生成（data_type 是必填的）
     private static String generateSignature(int clientId, long reqTime, String secretKey, 
                                              String dataType, String dimension, String startDate, String endDate) {
         try {
-            // 准备参数
             Map<String, String> params = new LinkedHashMap<>();
             params.put("client_id", String.valueOf(clientId));
             params.put("req_time", String.valueOf(reqTime));
             
-            // 对于 /client_data 接口，data_type 是必填的
             if (dataType != null && !dataType.isEmpty()) {
                 params.put("data_type", dataType);
             }
             if (dimension != null && !dimension.isEmpty()) {
                 params.put("dimension", dimension);
             }
-            
-            // 添加可选参数（如果提供）
             if (startDate != null && !startDate.isEmpty()) {
                 params.put("start_date", startDate);
             }
@@ -444,7 +467,6 @@ public class ClientAPI {
                 params.put("end_date", endDate);
             }
             
-            // 排序并拼接
             List<String> sortedKeys = new ArrayList<>(params.keySet());
             Collections.sort(sortedKeys);
             
@@ -455,15 +477,12 @@ public class ClientAPI {
                 }
                 sb.append(key).append("=").append(params.get(key));
             }
-            
-            // 追加密钥
             sb.append("&key=").append(secretKey);
             
-            // MD5加密
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            byte[] digest = md.digest(sb.toString().getBytes("UTF-8"));
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secretKey.getBytes("UTF-8"), "HmacSHA256"));
+            byte[] digest = mac.doFinal(sb.toString().getBytes("UTF-8"));
             
-            // 转为小写十六进制字符串
             StringBuilder hexString = new StringBuilder();
             for (byte b : digest) {
                 String hex = Integer.toHexString(0xff & b);
@@ -559,6 +578,10 @@ public class ClientAPI {
     secretKey,
     todayDate,
     hasCredentials,
+    signProducts,
+    signAdDataAll,
+    signAdDataDay,
+    signAdDataAllCountry,
     productRequestJson,
     adDataRequestAllJson,
     adDataRequestAllWithDimensionJson,

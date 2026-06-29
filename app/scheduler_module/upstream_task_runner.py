@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Optional
 
 from app.scheduler_module.task_result_store import set_task_result
@@ -34,6 +34,7 @@ async def run_upstream_import_task(
     skip_hint: str = "",
     data_transform: DataTransform = None,
     log_label: Optional[str] = None,
+    notify_params: Optional[Mapping[str, Any]] = None,
 ) -> None:
     """
     上游拉数任务标准流程：未配置则跳过 → 拉数 → import_upstream_ad_data 入库。
@@ -48,6 +49,7 @@ async def run_upstream_import_task(
         notify_title: Telegram 通知标题
         data_transform: 入库前可选预处理（就地修改列表）
         log_label: 错误日志中的业务标签，默认等于 task_name
+        notify_params: 可选任务参数，写入 Telegram 完成通知
     """
     if credentials is not None and upstream_credential_missing(*credentials):
         logger.warning(skip_hint)
@@ -67,6 +69,7 @@ async def run_upstream_import_task(
             current_time_str=current_time_str,
             notify_title=notify_title,
             data_transform=data_transform,
+            notify_params=notify_params,
         )
     except Exception as e:
         label = log_label or task_name

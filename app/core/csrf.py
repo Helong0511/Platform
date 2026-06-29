@@ -11,8 +11,7 @@ from fastapi import Request, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 from starlette.responses import Response
-from jose import jwt
-from jose.exceptions import JWTError
+from app.core.jwt_codec import JWTError, decode_unsigned_payload as jwt_decode
 from anyio import EndOfStream
 from app.core.config import settings
 from app.core.redis_client import get_redis_client
@@ -113,14 +112,8 @@ def extract_user_id_from_token(request: Request) -> Optional[str]:
         # 注意：这里只提取payload，不进行完整验证（因为可能在CSRF中间件之前执行）
         
         try:
-            # 不验证签名，只解码payload（用于获取用户ID）
-            # 注意：某些版本的python-jose需要密钥参数，即使verify_signature=False
-            # 使用None作为密钥，避免空字符串可能导致的问题
-            payload = jwt.decode(
-                token,
-                None,  # 使用None作为密钥
-                options={"verify_signature": False, "verify_exp": False}
-            )
+            # 不验证签名，只解码 payload（用于获取用户 ID）
+            payload = jwt_decode(token)
             user_id = payload.get("sub")
             if user_id:
                 user_id_str = str(user_id)
@@ -191,6 +184,29 @@ def is_safe_method(method: str) -> bool:
     return method.upper() in ["GET", "HEAD", "OPTIONS", "TRACE"]
 
 
+_POSTBACK_ADMIN_SEGMENTS = frozenset({
+    "conversions",
+    "stats",
+    "forward-logs",
+    "pending-conversions",
+    "diagnose",
+    "check-duplicates",
+})
+
+
+def _is_external_postback_callback(path: str) -> bool:
+    """仅豁免上游平台/BFT 外部回调，管理端 Postback API 仍校验 CSRF。"""
+    if path == "/api/v1/bft/postback":
+        return True
+    prefix = "/api/v1/postback/"
+    if not path.startswith(prefix):
+        return False
+    remainder = path[len(prefix):]
+    if not remainder or "/" in remainder:
+        return False
+    return remainder not in _POSTBACK_ADMIN_SEGMENTS
+
+
 def should_skip_csrf_check(request: Request) -> bool:
     """
     判断是否应该跳过CSRF检查
@@ -198,7 +214,7 @@ def should_skip_csrf_check(request: Request) -> bool:
     1. 安全方法（GET, HEAD, OPTIONS, TRACE）
     2. 登录接口（使用JWT，不需要CSRF）
     3. 客户API接口（使用签名验证，不需要CSRF）
-    4. BFT S2S PostBack接口（外部回调接口，使用参数验证，不需要CSRF）
+    4. 外部 PostBack 回调（使用 IP/参数验证，不需要CSRF）
     5. 静态资源
     """
     path = request.url.path
@@ -219,9 +235,9 @@ def should_skip_csrf_check(request: Request) -> bool:
     if path == "/api/v1/client_products" or path == "/api/v1/client_data":
         return True
     
-    # BFT S2S PostBack接口（外部回调接口，使用参数验证，不需要CSRF）
-    if path == "/api/v1/bft/postback" or path.startswith("/api/v1/postback/"):
-        logger.debug(f"跳过CSRF检查（BFT PostBack接口）: {method} {path}")
+    # BFT S2S PostBack 与上游平台回调（外部接口，使用 IP/参数验证，不需要 CSRF）
+    if _is_external_postback_callback(path):
+        logger.debug(f"跳过CSRF检查（外部PostBack回调）: {method} {path}")
         return True
     
     # 客户端错误记录接口（用于记录前端错误，即使失败也不应影响用户体验，跳过CSRF检查）
@@ -738,8 +754,8 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             logger.info(f"跳过CSRF检查（登录接口）: {method} {path}")
             return await call_next(request)
         
-        if path == "/api/v1/bft/postback" or path.startswith("/api/v1/postback/"):
-            logger.debug(f"跳过CSRF检查（BFT PostBack接口）: {method} {path}")
+        if _is_external_postback_callback(path):
+            logger.debug(f"跳过CSRF检查（外部PostBack回调）: {method} {path}")
             return await call_next(request)
         
         if path == "/api/v1/audit-logs/client-error":

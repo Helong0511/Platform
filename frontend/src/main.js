@@ -19,9 +19,17 @@ import './style.css';
 import { initAxiosConfig } from './utils/axiosConfig';
 import { initGlobalErrorHandler } from './utils/globalErrorHandler';
 import { initVersionCheck } from './utils/versionCheck';
+import {
+  initCsrfTokenSync,
+  initPageLoadCsrfCheck,
+  initPageVisibilityRefresh
+} from './utils/csrfToken';
 
 // 初始化 Axios 配置（必须在创建 Vue 应用之前）
 initAxiosConfig();
+initCsrfTokenSync();
+initPageLoadCsrfCheck();
+initPageVisibilityRefresh();
 // 全局 JS 错误捕获 + 上报审计日志（含扩展错误过滤）
 initGlobalErrorHandler();
 

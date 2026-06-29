@@ -7,10 +7,11 @@ cpl:cap:daily:{offer_id}:{date_str} -> int
 cpl:cap:total:{offer_id} -> int
 """
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 
 from app.core.redis_client import get_redis_client
+from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +80,10 @@ class RedisCapManager:
         """
         redis = await get_redis_client()
         if not redis:
-            logger.warning("Redis不可用，Cap检查跳过 (Fail Open)")
-            return True
+            logger.warning("Redis不可用，Cap递增检查失败 (Fail Closed)")
+            return False
             
-        now = datetime.now(timezone.utc)
+        now = get_app_now_naive()
         key = get_daily_cap_key(offer_id, now, publisher_id)
         
         try:
@@ -100,7 +101,7 @@ class RedisCapManager:
             return True
         except Exception as e:
             logger.error(f"Redis Lua操作失败: {e}", exc_info=True)
-            return True  # Fail Open
+            return False
 
     @staticmethod
     async def check_and_increment_total(
@@ -114,7 +115,8 @@ class RedisCapManager:
         """
         redis = await get_redis_client()
         if not redis:
-            return True
+            logger.warning("Redis不可用，总Cap递增检查失败 (Fail Closed)")
+            return False
             
         key = get_total_cap_key(offer_id, publisher_id)
         
@@ -130,7 +132,7 @@ class RedisCapManager:
             return True
         except Exception as e:
             logger.error(f"Redis Lua操作失败: {e}", exc_info=True)
-            return True
+            return False
             
     @staticmethod
     async def decrement_daily(
@@ -143,7 +145,7 @@ class RedisCapManager:
         redis = await get_redis_client()
         if not redis: return
         
-        now = datetime.now(timezone.utc)
+        now = get_app_now_naive()
         key = get_daily_cap_key(offer_id, now, publisher_id)
         try:
             val = await redis.decr(key)

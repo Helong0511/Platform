@@ -81,18 +81,16 @@ async def process_clicks_queue_task():
 
 async def open_closed_short_links_task():
     """
-    每日自动打开被关闭的短链接
-    每天执行一次，将前一天因达到转化上限而关闭的短链接重新激活
-    前提是关联的 Offer 处于激活状态
+    每日自动打开因 Cap 超限关闭的短链接。
+    仅当关联 Offer 仍激活且 Cap 有余量时才重新打开。
     """
     opened = 0
     try:
         logger.info("开始执行每日打开短链接任务...")
         async with AsyncSessionLocal() as db:
-            # 更新所有被关闭的短链接为激活状态，前提是关联的 Offer 处于激活状态
+            from app.core.cap import check_cap
             from app.models.models import Offer
-            
-            # 构建子查询，获取激活状态的 Offer ID
+
             active_offer_subquery = exists(
                 select(Offer.id)
                 .where(
@@ -103,20 +101,38 @@ async def open_closed_short_links_task():
                     )
                 )
             )
-            
-            # 更新被关闭且关联的 Offer 是激活状态的短链接
-            update_stmt = update(ShortLink).where(
-                and_(
-                    ShortLink.is_active == False,
-                    active_offer_subquery
-                )
-            ).values(is_active=True)
 
-            result = await db.execute(update_stmt)
+            result = await db.execute(
+                select(ShortLink.id, ShortLink.offer_id, ShortLink.channel_id)
+                .where(
+                    and_(
+                        ShortLink.is_active == False,
+                        active_offer_subquery,
+                    )
+                )
+            )
+            candidates = result.all()
+
+            for sl_id, offer_id, channel_id in candidates:
+                if not offer_id:
+                    continue
+                cap_ok, _ = await check_cap(
+                    db=db,
+                    offer_id=offer_id,
+                    publisher_id=channel_id,
+                )
+                if not cap_ok:
+                    continue
+                await db.execute(
+                    update(ShortLink)
+                    .where(ShortLink.id == sl_id)
+                    .values(is_active=True)
+                )
+                opened += 1
+
             await db.commit()
-            opened = result.rowcount or 0
             if opened > 0:
-                logger.info(f"✅ 成功打开 {opened} 个被关闭的短链接")
+                logger.info(f"✅ 成功打开 {opened} 个短链接（Cap 有余量）")
             else:
                 logger.debug("ℹ️ 没有需要打开的短链接")
 

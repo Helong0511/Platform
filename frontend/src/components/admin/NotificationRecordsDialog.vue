@@ -100,7 +100,7 @@
         <el-table-column prop="error_message" label="错误信息" min-width="150" show-overflow-tooltip v-if="hasErrorMessages" />
         <el-table-column prop="postback_url" label="Postback URL" min-width="150" show-overflow-tooltip v-if="hasPostbackUrls">
           <template #default="scope">
-            <el-link v-if="scope.row.postback_url" :href="scope.row.postback_url" target="_blank" type="primary">
+            <el-link v-if="scope.row.postback_url" :href="scope.row.postback_url" target="_blank" rel="noopener noreferrer" type="primary">
               {{ scope.row.postback_url.length > 50 ? scope.row.postback_url.substring(0, 50) + '...' : scope.row.postback_url }}
             </el-link>
             <span v-else>-</span>

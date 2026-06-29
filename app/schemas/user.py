@@ -31,8 +31,8 @@ class UserCreate(UserBase):
     """
     username: str  # 登录名（必填）
     email: EmailStr  # 邮箱（必填）
-    password: str = Field(..., min_length=6, max_length=72,
-                          description="密码（6-72个字符，建议包含大小写字母、数字和特殊字符）")
+    password: str = Field(..., min_length=8, max_length=72,
+                          description="密码（8-72个字符，建议包含大小写字母、数字和特殊字符）")
     full_name: str | None = None  # 全名（可选）
     role: str | None = "client"  # 角色，默认为客户
     login_restricted: bool | None = False  # 登录限制（可选，默认False）
@@ -60,8 +60,8 @@ class PasswordChange(BaseModel):
     
     业务数据模型，用于 API 请求/响应的序列化与校验。
     """
-    old_password: str = Field(..., min_length=6, max_length=72, description="当前密码")
-    new_password: str = Field(..., min_length=6, max_length=72, description="新密码（6-72个字符）")
+    old_password: str = Field(..., min_length=8, max_length=72, description="当前密码")
+    new_password: str = Field(..., min_length=8, max_length=72, description="新密码（8-72个字符）")
 
 
 class UserInDBBase(UserBase):
@@ -79,12 +79,10 @@ class UserInDBBase(UserBase):
 
 class ClientInfo(BaseModel):
     """
-    客户信息模型（用于UserResponse）
-    
-    业务数据模型，用于 API 请求/响应的序列化与校验。
+    客户信息模型（用于 UserResponse）
     """
     id: int
-    key: str | None = None  # 客户唯一标识UUID
+    has_api_key: bool | None = Field(False, description="是否已配置 API 密钥")
     company_name: str | None = None
     contact_person: str | None = None
     phone: str | None = None

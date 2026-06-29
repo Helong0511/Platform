@@ -74,18 +74,18 @@ def get_client_ip(request: Request) -> str:
         客户端IP地址字符串，如果无法获取则返回"unknown"
     """
     try:
-        # 优先从 X-Forwarded-For 获取（代理服务器）
-        forwarded_for = request.headers.get("X-Forwarded-For") or request.headers.get("x-forwarded-for")
-        if forwarded_for:
-            # X-Forwarded-For 可能包含多个IP，取第一个
-            return forwarded_for.split(",")[0].strip()
-        
-        # 从 X-Real-IP 获取（Nginx等反向代理）
-        real_ip = request.headers.get("X-Real-IP") or request.headers.get("x-real-ip")
-        if real_ip:
-            return real_ip.strip()
-        
-        # 最后从客户端直接IP获取
+        from app.core.config import settings
+
+        # 仅在可信反向代理后读取转发头，防止伪造 IP
+        if settings.TRUST_PROXY_HEADERS:
+            forwarded_for = request.headers.get("X-Forwarded-For") or request.headers.get("x-forwarded-for")
+            if forwarded_for:
+                return forwarded_for.split(",")[0].strip()
+
+            real_ip = request.headers.get("X-Real-IP") or request.headers.get("x-real-ip")
+            if real_ip:
+                return real_ip.strip()
+
         if request.client:
             return request.client.host
         

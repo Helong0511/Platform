@@ -233,7 +233,7 @@
                   <el-icon><Warning /></el-icon>
                   <strong>注意：</strong>配置必须是有效的 JSON 格式。如果不填写，默认使用 HTTP 状态码判断（200-299 为成功）。
                   <br>
-                  详细配置示例请参考：<el-link type="primary" href="/docs/postback_success_check_examples.md" target="_blank">配置示例文档</el-link>
+                  详细配置示例请参考：<el-link type="primary" href="/docs/postback_success_check_examples.md" target="_blank" rel="noopener noreferrer">配置示例文档</el-link>
                 </div>
               </div>
             </div>

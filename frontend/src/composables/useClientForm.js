@@ -3,6 +3,8 @@
  * @file composables/useClientForm.js
  */
 import { ref, reactive } from 'vue';
+import { getAdminClientApiKey } from '../api/client';
+import { logger } from '../utils/logger';
 
 /**
  * 客户表单管理 Composable
@@ -67,17 +69,25 @@ export function useClientForm() {
    * 打开编辑对话框
    * @param {Object} clientData - 客户数据
    */
-  const openEditDialog = (clientData) => {
+  const openEditDialog = async (clientData) => {
     currentClientId.value = clientData.id;
     dialogTitle.value = '编辑客户';
     Object.assign(clientForm, {
-      key: clientData.key || '',
+      key: '',
       company_name: clientData.company_name || '',
       contact_person: clientData.contact_person || '',
       phone: clientData.phone || '',
       address: clientData.address || '',
-      is_active: clientData.is_active !== undefined ? clientData.is_active : true
+      is_active: clientData.is_active !== undefined ? clientData.is_active : true,
     });
+    if (clientData.id && (clientData.has_api_key || clientData.key)) {
+      try {
+        const keyData = await getAdminClientApiKey(clientData.id, { silent: true });
+        clientForm.key = keyData?.key || '';
+      } catch (error) {
+        logger.warn('加载客户 API 密钥失败:', error);
+      }
+    }
     dialogVisible.value = true;
   };
 

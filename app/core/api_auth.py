@@ -6,6 +6,7 @@
 在系统中的位置：``app.core.api_auth``，由 ``app.api_v1`` 客户数据导出等开放接口调用。
 """
 import hashlib
+import hmac
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -18,6 +19,34 @@ from app.core.errors import ErrorCode
 from app.models.models import Client
 
 logger = logging.getLogger(__name__)
+
+
+def _build_sign_string(
+    client_id: int,
+    secret_key: str,
+    req_time: int,
+    data_type: str | None = None,
+    dimension: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> str:
+    """构建待签名字符串（MD5 与 HMAC-SHA256 共用）。"""
+    params = {
+        "client_id": str(client_id),
+        "req_time": str(req_time),
+    }
+    if data_type:
+        params["data_type"] = str(data_type)
+    if dimension:
+        params["dimension"] = str(dimension)
+    if start_date:
+        params["start_date"] = str(start_date)
+    if end_date:
+        params["end_date"] = str(end_date)
+
+    sorted_keys = sorted(params.keys())
+    temp_str = "&".join([f"{key}={params[key]}" for key in sorted_keys])
+    return temp_str + f"&key={secret_key}"
 
 
 def verify_signature(
@@ -58,34 +87,22 @@ def verify_signature(
     Returns:
         bool: 签名是否有效
     """
-    # 构建参数字典（只包含非空参数）
-    params = {
-        'client_id': str(client_id),
-        'req_time': str(req_time)
-    }
-    
-    # 添加可选参数（如果提供了的话）
-    if data_type:
-        params['data_type'] = str(data_type)
-    if dimension:
-        params['dimension'] = str(dimension)
-    if start_date:
-        params['start_date'] = str(start_date)
-    if end_date:
-        params['end_date'] = str(end_date)
+    sign_string = _build_sign_string(
+        client_id, secret_key, req_time, data_type, dimension, start_date, end_date
+    )
 
-    # 按key排序并拼接
-    sorted_keys = sorted(params.keys())
-    temp_str = '&'.join([f"{key}={params[key]}" for key in sorted_keys])
+    # HMAC-SHA256（推荐）
+    hmac_sign = hmac.new(
+        secret_key.encode("utf-8"),
+        sign_string.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest().lower()
+    if hmac_sign == sign.lower():
+        return True
 
-    # 在末尾追加 &key={SECRET_KEY}
-    temp_str = temp_str + f'&key={secret_key}'
-
-    # MD5加密并转为小写
-    calculated_sign = hashlib.md5(temp_str.encode('utf-8')).hexdigest().lower()
-
-    # 比较签名（不区分大小写）
-    return calculated_sign.lower() == sign.lower()
+    # MD5（向后兼容）
+    calculated_sign = hashlib.md5(sign_string.encode("utf-8")).hexdigest().lower()
+    return calculated_sign == sign.lower()
 
 
 async def verify_client_request(
@@ -95,7 +112,7 @@ async def verify_client_request(
     dimension: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
-    time_tolerance: int = 20
+    time_tolerance: int = 10
 ) -> Client:
     """
     验证客户请求

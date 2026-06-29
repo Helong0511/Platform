@@ -36,13 +36,14 @@ async def huguang_api_task(
     api_key = settings.HUGUANG_API_KEY
     domain = settings.HUGUANG_API_DOMAIN
     username = settings.HUGUANG_API_USERNAME
+    huguang_start, huguang_end = resolve_upstream_date_range(
+        start_date,
+        end_date,
+        early_morning_dual_day=True,
+    )
+    notify_params = {"起始日期": huguang_start, "终止日期": huguang_end}
 
     async def fetch_data():
-        huguang_start, huguang_end = resolve_upstream_date_range(
-            start_date,
-            end_date,
-            early_morning_dual_day=True,
-        )
         return await fetch_huguang_rows(
             domain=domain,
             api_key=api_key,
@@ -60,4 +61,5 @@ async def huguang_api_task(
         source="Huguang定时任务",
         notify_title="Huguang",
         log_label="Huguang API获取数据",
+        notify_params=notify_params,
     )

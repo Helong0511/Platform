@@ -49,7 +49,7 @@
       <section class="doc-section">
         <h2>认证方式</h2>
         <h3>签名算法</h3>
-        <p>所有API请求都需要进行MD5签名验证，签名算法如下：</p>
+        <p>所有 API 请求都需要进行签名验证。推荐使用 <strong>HMAC-SHA256</strong>；历史集成仍可使用 MD5（向后兼容）。算法如下：</p>
         <ol>
           <li><strong>准备参数</strong>：将请求参数放入参数字典
             <ul>
@@ -60,7 +60,7 @@
           <li><strong>参数排序</strong>：按字母顺序对参数键进行排序</li>
           <li><strong>拼接字符串</strong>：将参数拼接为 <code>key=value&key=value</code> 格式</li>
           <li><strong>追加密钥</strong>：在末尾追加 <code>&key={SECRET_KEY}</code></li>
-          <li><strong>MD5加密</strong>：对整个字符串进行MD5加密并转为小写</li>
+          <li><strong>计算签名</strong>：对拼接后的字符串使用 HMAC-SHA256（密钥为 SECRET_KEY）并转为小写十六进制；旧版 MD5 仍可用</li>
         </ol>
         <div class="info-box">
           <p><strong>注意</strong>：</p>
@@ -69,6 +69,7 @@
             <li><code>dimension</code> 为可选参数；传入时须参与签名。取值：<code>country</code>（按国家）、<code>ad_unit</code>（按广告单元）、<code>ad_unit_country</code>（按广告单元+国家，<code>country_ad_unit</code> 为兼容别名）</li>
             <li>若同时存在国家 API 与广告单元 API 数据，强烈建议传入 <code>dimension</code>，否则不传时返回全量行可能重复统计</li>
             <li>只有非空参数才参与签名计算。如果未提供可选参数，则不包含在签名中</li>
+            <li>时间戳允许误差为 ±10 秒（服务器与客户端时钟须大致同步）</li>
           </ul>
         </div>
 
@@ -80,20 +81,18 @@
             <pre><code>{{ pythonSignAdData }}</code></pre>
           </el-collapse-item>
           <el-collapse-item title="Java签名示例（查询产品）" name="java-products">
-            <pre><code>import java.security.MessageDigest;
-import java.time.Instant;
+            <pre><code>import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.util.*;
 
-public String generateSignature(int clientId, long reqTime, String secretKey) {
-    // 准备参数（查询产品接口）
+public String generateSignature(int clientId, long reqTime, String secretKey) throws Exception {
     Map&lt;String, String&gt; params = new LinkedHashMap&lt;&gt;();
     params.put("client_id", String.valueOf(clientId));
     params.put("req_time", String.valueOf(reqTime));
-    
-    // 排序并拼接
+
     List&lt;String&gt; sortedKeys = new ArrayList&lt;&gt;(params.keySet());
     Collections.sort(sortedKeys);
-    
+
     StringBuilder sb = new StringBuilder();
     for (String key : sortedKeys) {
         if (sb.length() &gt; 0) {
@@ -101,15 +100,12 @@ public String generateSignature(int clientId, long reqTime, String secretKey) {
         }
         sb.append(key).append("=").append(params.get(key));
     }
-    
-    // 追加密钥
     sb.append("&key=").append(secretKey);
-    
-    // MD5加密
-    MessageDigest md = MessageDigest.getInstance("MD5");
-    byte[] digest = md.digest(sb.toString().getBytes("UTF-8"));
-    
-    // 转为小写十六进制字符串
+
+    Mac mac = Mac.getInstance("HmacSHA256");
+    mac.init(new SecretKeySpec(secretKey.getBytes("UTF-8"), "HmacSHA256"));
+    byte[] digest = mac.doFinal(sb.toString().getBytes("UTF-8"));
+
     StringBuilder hexString = new StringBuilder();
     for (byte b : digest) {
         String hex = Integer.toHexString(0xff & b);
@@ -118,25 +114,22 @@ public String generateSignature(int clientId, long reqTime, String secretKey) {
         }
         hexString.append(hex);
     }
-    
     return hexString.toString().toLowerCase();
 }</code></pre>
           </el-collapse-item>
           <el-collapse-item title="Java签名示例（查询广告数据）" name="java-ad-data">
-            <pre><code>import java.security.MessageDigest;
-import java.time.Instant;
+            <pre><code>import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.util.*;
 
-public String generateSignature(int clientId, long reqTime, String secretKey, 
+public String generateSignature(int clientId, long reqTime, String secretKey,
                                  String dataType, String dimension, String startDate, String endDate) {
     try {
-        // 准备参数（查询广告数据接口，data_type 是必填的）
         Map&lt;String, String&gt; params = new LinkedHashMap&lt;&gt;();
         params.put("client_id", String.valueOf(clientId));
-        params.put("data_type", dataType);  // 必填参数
+        params.put("data_type", dataType);
         params.put("req_time", String.valueOf(reqTime));
-        
-        // 添加可选参数（如果提供）
+
         if (dimension != null && !dimension.isEmpty()) {
             params.put("dimension", dimension);
         }
@@ -146,11 +139,10 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
         if (endDate != null && !endDate.isEmpty()) {
             params.put("end_date", endDate);
         }
-        
-        // 排序并拼接
+
         List&lt;String&gt; sortedKeys = new ArrayList&lt;&gt;(params.keySet());
         Collections.sort(sortedKeys);
-        
+
         StringBuilder sb = new StringBuilder();
         for (String key : sortedKeys) {
             if (sb.length() &gt; 0) {
@@ -158,15 +150,12 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
             }
             sb.append(key).append("=").append(params.get(key));
         }
-        
-        // 追加密钥
         sb.append("&key=").append(secretKey);
-        
-        // MD5加密
-        MessageDigest md = MessageDigest.getInstance("MD5");
-        byte[] digest = md.digest(sb.toString().getBytes("UTF-8"));
-        
-        // 转为小写十六进制字符串
+
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(secretKey.getBytes("UTF-8"), "HmacSHA256"));
+        byte[] digest = mac.doFinal(sb.toString().getBytes("UTF-8"));
+
         StringBuilder hexString = new StringBuilder();
         for (byte b : digest) {
             String hex = Integer.toHexString(0xff & b);
@@ -175,7 +164,6 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
             }
             hexString.append(hex);
         }
-        
         return hexString.toString().toLowerCase();
     } catch (Exception e) {
         throw new RuntimeException("生成签名失败", e);
@@ -193,8 +181,8 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
           >
             <ul>
               <li><strong>客户ID验证</strong>：验证 <code>client_id</code> 是否存在且已激活</li>
-              <li><strong>时间戳验证</strong>：请求时间戳与服务器时间差异不能超过5秒（正负5秒）</li>
-              <li><strong>签名验证</strong>：验证MD5签名是否正确</li>
+              <li><strong>时间戳验证</strong>：请求时间戳与服务器时间差异不能超过 10 秒</li>
+              <li><strong>签名验证</strong>：验证 HMAC-SHA256 签名（MD5 向后兼容）</li>
             </ul>
             <p><strong>注意</strong>：<code>SECRET_KEY</code> 不通过请求传递，而是从数据库查询客户的 <code>key</code> 字段进行验证。</p>
           </el-alert>
@@ -502,8 +490,8 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
           show-icon
         >
           <ul>
-            <li><strong>时间同步</strong>：确保客户端系统时间准确，请求时间戳与服务器时间差异不能超过5秒</li>
-            <li><strong>签名大小写</strong>：签名必须使用小写MD5值</li>
+            <li><strong>时间同步</strong>：确保客户端系统时间准确，请求时间戳与服务器时间差异不能超过 10 秒</li>
+            <li><strong>签名大小写</strong>：签名必须使用小写十六进制字符串</li>
             <li><strong>数据类型</strong>：响应中的数值类型明确（int/float），不会返回字符串</li>
             <li><strong>空值处理</strong>：如果查询结果为空，<code>data</code> 字段返回空数组 <code>[]</code>，而不是 <code>null</code></li>
             <li><strong>时区</strong>：所有时间戳使用UTC时区</li>
@@ -516,14 +504,10 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue';
+import { ref } from 'vue';
 import { ElCard, ElTag, ElCollapse, ElCollapseItem, ElTable, ElTableColumn, ElAlert, ElTabs, ElTabPane } from 'element-plus';
-import { useAuthStore } from '@/store';
-import { getCurrentUserInfo } from '@/api/user';
 import { useClientApiDocExamples } from '@/composables/useClientApiDocExamples';
-import { logger } from '@/utils/logger';
 
-const authStore = useAuthStore();
 const activeTab = ref('python');
 
 const {
@@ -542,27 +526,11 @@ const {
   javaFullExample
 } = useClientApiDocExamples();
 
-onMounted(async () => {
-  if (authStore.userInfo?.client?.key) {
-    return;
-  }
-  try {
-    const userData = await getCurrentUserInfo({ silent: true });
-    if (userData && typeof userData === 'object') {
-      authStore.userInfo = { ...authStore.userInfo, ...userData };
-      sessionStorage.setItem('userInfo', JSON.stringify(authStore.userInfo));
-    }
-  } catch (err) {
-    logger.warn('API 对接文档页加载客户密钥失败:', err);
-    // 不登出：页面顶部已有未获取参数的提示
-  }
-});
-
 // 产品接口请求参数
 const productRequestParams = [
   { name: 'client_id', type: 'int', required: '是', description: '客户ID' },
   { name: 'req_time', type: 'int', required: '是', description: '请求时间戳（10位秒级，Unix时间戳）' },
-  { name: 'sign', type: 'string', required: '是', description: 'MD5签名（小写）' }
+  { name: 'sign', type: 'string', required: '是', description: 'HMAC-SHA256 签名（小写十六进制；MD5 仍兼容）' }
 ];
 
 // 广告数据接口请求参数
@@ -573,7 +541,7 @@ const adDataRequestParams = [
   { name: 'dimension', type: 'string', required: '否', description: '统计维度：country / ad_unit / ad_unit_country（country_ad_unit 为兼容别名）；与后台报表一致，双 API 客户建议必传' },
   { name: 'start_date', type: 'string', required: '否', description: '起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天' },
   { name: 'end_date', type: 'string', required: '否', description: '终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天' },
-  { name: 'sign', type: 'string', required: '是', description: 'MD5签名（小写），包含所有非空参数' }
+  { name: 'sign', type: 'string', required: '是', description: 'HMAC-SHA256 签名（小写十六进制），包含所有非空参数' }
 ];
 
 // 广告数据响应字段
@@ -598,7 +566,7 @@ const adDataResponseFields = [
 const errorCodes = [
   { code: 200, message: '成功', solution: '-' },
   { code: 2201, message: '客户不存在或未激活', solution: '检查 client_id 是否正确，确认客户已激活' },
-  { code: 2205, message: '参数验证不通过', solution: '检查以下项：1. 请求时间戳是否在允许范围内（正负5秒） 2. 签名是否正确 3. 参数格式是否正确' },
+  { code: 2205, message: '参数验证不通过', solution: '检查以下项：1. 请求时间戳是否在允许范围内（±10 秒） 2. 签名是否正确 3. 参数格式是否正确' },
   { code: 2501, message: '操作失败', solution: '查看 detail 字段获取详细错误信息' }
 ];
 </script>

@@ -39,9 +39,10 @@ async def skymobi_api_task(
     """Skymobi 定时拉数：按日期区间逐日查询（默认昨日~今日）。"""
     api_id = settings.SKYMOBI_API_ID
     api_key = settings.SKYMOBI_API_KEY
+    range_start, range_end = resolve_upstream_date_range(start_date, end_date)
+    notify_params = {"起始日期": range_start, "终止日期": range_end}
 
     async def fetch_data():
-        range_start, range_end = resolve_upstream_date_range(start_date, end_date)
         current = datetime.strptime(range_start, "%Y-%m-%d").date()
         end = datetime.strptime(range_end, "%Y-%m-%d").date()
         all_rows = []
@@ -64,4 +65,5 @@ async def skymobi_api_task(
         source="Skymobi定时任务",
         notify_title="Skymobi",
         log_label="Skymobi",
+        notify_params=notify_params,
     )

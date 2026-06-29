@@ -8,6 +8,7 @@
     :title="viewingUser?.role === 'admin' ? '管理员详情' : '客户详情'"
     :width="isMobile ? '95%' : '700px'"
     @update:model-value="emit('update:modelValue', $event)"
+    @closed="resetApiKeyState"
   >
     <div v-if="viewingUser" class="user-detail">
       <el-descriptions :column="isMobile ? 1 : 2" border>
@@ -40,7 +41,19 @@
           <template v-if="viewingUser.client">
             <el-descriptions-item label="客户ID">{{ viewingUser.client.id }}</el-descriptions-item>
             <el-descriptions-item label="API密钥" :span="2">
-              <span v-if="viewingUser.client.key" class="mono-key">{{ viewingUser.client.key }}</span>
+              <template v-if="viewingUser.client.has_api_key">
+                <span v-if="revealedApiKey" class="mono-key">{{ revealedApiKey }}</span>
+                <span v-else class="text-muted">已配置（点击显示）</span>
+                <el-button
+                  link
+                  type="primary"
+                  :loading="apiKeyLoading"
+                  style="margin-left: 8px"
+                  @click="handleRevealApiKey"
+                >
+                  {{ revealedApiKey ? '重新加载' : '显示密钥' }}
+                </el-button>
+              </template>
               <span v-else class="text-muted">-</span>
             </el-descriptions-item>
             <el-descriptions-item label="客户状态">
@@ -70,7 +83,11 @@
 </template>
 
 <script setup>
-defineProps({
+import { ref } from 'vue';
+import { ElMessage } from 'element-plus';
+import { getAdminClientApiKey } from '@/api/client';
+
+const props = defineProps({
   modelValue: { type: Boolean, default: false },
   viewingUser: { type: Object, default: null },
   isMobile: { type: Boolean, default: false },
@@ -78,14 +95,38 @@ defineProps({
 });
 
 const emit = defineEmits(['update:modelValue']);
+
+const revealedApiKey = ref('');
+const apiKeyLoading = ref(false);
+
+const resetApiKeyState = () => {
+  revealedApiKey.value = '';
+  apiKeyLoading.value = false;
+};
+
+const handleRevealApiKey = async () => {
+  const clientId = props.viewingUser?.client?.id;
+  if (!clientId) return;
+  apiKeyLoading.value = true;
+  try {
+    const data = await getAdminClientApiKey(clientId);
+    revealedApiKey.value = data?.key || '';
+    if (!revealedApiKey.value) {
+      ElMessage.warning('未找到 API 密钥');
+    }
+  } catch {
+    ElMessage.error('获取 API 密钥失败');
+  } finally {
+    apiKeyLoading.value = false;
+  }
+};
 </script>
 
 <style scoped>
 .mono-key {
-  font-family: monospace;
-  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  word-break: break-all;
 }
-
 .text-muted {
   color: #909399;
 }

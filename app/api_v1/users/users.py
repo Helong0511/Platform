@@ -160,6 +160,7 @@ async def get_users(
                 password_change_enabled = bool(client.password_change_enabled) if client.password_change_enabled is not None else False
                 client_data = {
                     'id': client.id,
+                    'has_api_key': bool(client.key),
                     'company_name': client.company_name,
                     'contact_person': client.contact_person,
                     'phone': client.phone,
@@ -376,7 +377,7 @@ async def get_current_user_info(
             
             client_data = {
                 'id': client.id,
-                'key': client.key,  # 包含API密钥
+                'has_api_key': bool(client.key),
                 'company_name': client.company_name,
                 'contact_person': client.contact_person,
                 'phone': client.phone,
@@ -481,7 +482,7 @@ async def get_user(
             password_change_enabled = client.password_change_enabled  # 获取密码修改开关状态
             client_data = {
                 'id': client.id,
-                'key': client.key,  # 包含API密钥
+                'has_api_key': bool(client.key),
                 'company_name': client.company_name,
                 'contact_person': client.contact_person,
                 'phone': client.phone,
@@ -576,17 +577,23 @@ async def create_user(
         'updated_at': user.updated_at
     }
     
-    # 如果创建了客户，添加客户信息到响应中（包括API密钥）
+    # 如果创建了客户，添加客户信息到响应中
     if user.clients:
         client = user.clients[0]
         user_dict['client'] = {
             'id': client.id,
-            'key': client.key,  # 包含API密钥
+            'has_api_key': bool(client.key),
             'company_name': client.company_name,
             'contact_person': client.contact_person,
             'phone': client.phone,
             'address': client.address,
-            'is_active': client.is_active
+            'is_active': client.is_active,
+            'api_enabled': bool(client.api_enabled) if client.api_enabled is not None else False,
+            'password_change_enabled': (
+                bool(client.password_change_enabled)
+                if client.password_change_enabled is not None
+                else False
+            ),
         }
     
     # 记录创建操作（使用audit_log的log_create函数）

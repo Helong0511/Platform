@@ -438,38 +438,47 @@ function hasPublisherAccess(authStore) {
  * // 2. 如果未登录，重定向到 /login
  * // 3. 如果已登录，允许访问
  */
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   try {
     // 如果是登录页，直接放行，不执行任何检查
     if (to.path === '/login' || to.path === '/') {
       return next();
     }
 
-    // 先验证认证数据完整性（现在基于 userInfo，初始化时会自动同步）
-    const isAuthenticated = validateAuthData();
     const authStore = useAuthStore();
 
-    // ====== 需要认证的路由 ======
+    // ====== 需要认证的路由：先校验本地状态，再向服务端确认会话 ======
     if (to.meta.requiresAuth) {
-      // 如果未认证，或者是 store 状态显示未登录
-      if (!isAuthenticated || !authStore.isAuthenticated) {
-        // 尝试执行一次 checkAuth (如果是因为 store 还没初始化)
-        if (isAuthenticated && !authStore.isAuthenticated) {
-          authStore.checkAuth();
+      const isValid = validateAuthData();
+      if (!isValid) {
+        clearAuthData();
+        authStore.isAuthenticated = false;
+        const shouldShowMessage = to.path !== '/login' &&
+          from.path !== '/login' &&
+          from.path !== '/' &&
+          from.name !== null;
+        if (shouldShowMessage) {
+          ElMessage.warning('请登录后访问');
         }
+        return next('/login');
+      }
 
-        // 再次检查
-        if (!authStore.isAuthenticated) {
-          clearAuthData();
-          const shouldShowMessage = to.path !== '/login' &&
-            from.path !== '/login' &&
-            from.path !== '/' &&
-            from.name !== null;
-          if (shouldShowMessage) {
-            ElMessage.warning('请登录后访问');
-          }
-          return next('/login');
-        }
+      try {
+        await authStore.fetchUserInfo({ silent: true, force: true });
+      } catch {
+        clearAuthData();
+        authStore.isAuthenticated = false;
+        return next('/login');
+      }
+
+      if (!authStore.isAuthenticated) {
+        clearAuthData();
+        return next('/login');
+      }
+    } else {
+      validateAuthData();
+      if (authStore.isAuthenticated === false && validateAuthData()) {
+        authStore.checkAuth();
       }
     }
 

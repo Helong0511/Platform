@@ -30,6 +30,15 @@ const {
 /** 客户列表查询与新建 */
 export { getClientList, createClient };
 
+/**
+ * 管理员按需获取客户 API 密钥。
+ */
+export const getAdminClientApiKey = (clientId, options = {}) =>
+  request(
+    { url: `/api/v1/clients/${clientId}/api-key`, method: 'get' },
+    { returnDataOnly: true, ...options }
+  );
+
 const clientDetailCache = createCachedDetailFetcher();
 
 /**

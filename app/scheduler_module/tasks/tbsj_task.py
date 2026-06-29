@@ -39,6 +39,12 @@ async def tbsj_api_task(
     """yangyangdeyi 定时任务：Token 鉴权后拉数并入库。"""
     username = settings.TBSJ_API_USERNAME
     password = settings.TBSJ_API_PASSWORD
+    tbsj_start, tbsj_end = resolve_upstream_date_range(
+        start_date,
+        end_date,
+        early_morning_dual_day=True,
+    )
+    notify_params = {"起始日期": tbsj_start, "终止日期": tbsj_end}
 
     async def fetch_data():
         token_json = await post_json(
@@ -53,11 +59,6 @@ async def tbsj_api_task(
             raise Exception("TBSJ API 响应中缺少 access_token")
 
         auth_headers = {**TBSJ_HEADERS, "Authorization": f"Bearer {access_token}"}
-        tbsj_start, tbsj_end = resolve_upstream_date_range(
-            start_date,
-            end_date,
-            early_morning_dual_day=True,
-        )
         return await fetch_tbsj_rows(
             base_url=TBSJ_URL,
             start=tbsj_start,
@@ -74,6 +75,7 @@ async def tbsj_api_task(
             field_mapping=TBSJ_FIELD_MAPPING,
             source="yangyangdeyi定时任务",
             notify_title="yangyangdeyi",
+            notify_params=notify_params,
         )
     except Exception as e:
         log_timeout = "请求超时" in str(e) or "请求失败" in str(e)

@@ -147,7 +147,7 @@
           </el-table-column>
           <el-table-column prop="referer" label="来源页面" min-width="220" show-overflow-tooltip>
             <template #default="scope">
-              <el-link v-if="scope.row.referer" :href="scope.row.referer" target="_blank" type="primary"
+              <el-link v-if="scope.row.referer" :href="scope.row.referer" target="_blank" rel="noopener noreferrer" type="primary"
                 :underline="false">
                 {{ scope.row.referer.length > 50 ? scope.row.referer.substring(0, 50) + '...' : scope.row.referer }}
               </el-link>

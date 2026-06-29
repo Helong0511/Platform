@@ -29,7 +29,7 @@ from app.core.utils import get_app_now_naive
 from app.core.dependencies import get_session_service
 from app.services.session_service import SessionService
 from app.core.audit_log import log_user_action, commit_audit_log
-from jose import jwt
+from app.core.jwt_codec import extract_jti_from_request
 from sqlalchemy.orm import selectinload
 from app.models.models import User, UserRole
 from app.models.session import UserSession, TokenBlacklist
@@ -175,24 +175,7 @@ async def revoke_all_my_sessions(
     # 使用服务层（业务逻辑在SessionService中）
     session_service: SessionService = await get_session_service(db)
     
-    # 获取当前token的jti
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    current_jti = None
-    
-    # ---------- 条件分支 ----------
-    if token:
-        # ---------- 异常处理 ----------
-        try:
-            payload = jwt.decode(
-                token,
-                settings.SECRET_KEY,
-                algorithms=["HS256"],
-                options={"verify_exp": False}
-            )
-            current_jti = payload.get("jti")
-        except Exception:
-            pass
-    
+    current_jti = extract_jti_from_request(request)
     # 调用服务层撤销所有其他会话（服务层会处理查询、黑名单、标记等）
     revoked_count = await session_service.revoke_all_my_sessions(
         user_id=current_user.id,

@@ -39,7 +39,7 @@
           <el-input 
             v-model="passwordForm.newPassword" 
             type="password" 
-            placeholder="请输入新密码（至少6位）" 
+            placeholder="请输入新密码（至少8位）" 
             show-password 
             clearable
             style="max-width: 400px;"
@@ -78,9 +78,10 @@
             {{ currentUser.client.id }}
           </el-descriptions-item>
           <el-descriptions-item label="API密钥">
-            <span v-if="currentUser.client.key" style="font-family: monospace; font-size: 13px;">
-              {{ currentUser.client.key }}
+            <span v-if="clientApiKey" style="font-family: monospace; font-size: 13px;">
+              {{ clientApiKey }}
             </span>
+            <span v-else-if="currentUser.client?.has_api_key" style="color: #909399;">加载中...</span>
             <span v-else style="color: #909399;">-</span>
           </el-descriptions-item>
         </el-descriptions>
@@ -155,15 +156,18 @@ import { Lock, Box, UserFilled, Setting } from '@element-plus/icons-vue';
 import { useAuthStore } from '../../store';
 import { getProductList } from '../../api/product';
 import { changePassword, getCurrentUserInfo } from '../../api/user';
+import { getClientApiKey } from '../../api/client-api';
 import { formatDate } from '../../utils/dateFormat';
 import { extractErrorMessage, isErrorHandled } from '../../utils/api';
 import { ensureCsrfToken } from '../../utils/csrfMutate';
 import { useClientUserManagementColumnVisibility } from '../../composables/useClientUserManagementColumnVisibility';
+import { VALIDATION } from '../../config/constants';
 
 // Store
 const authStore = useAuthStore();
 const router = useRouter();
 const currentUser = computed(() => authStore.userInfo);
+const clientApiKey = ref('');
 
 // 计算属性：是否可以修改密码
 const canChangePassword = computed(() => {
@@ -201,7 +205,7 @@ const passwordRules = {
   ],
   newPassword: [
     { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 6, message: '密码长度不能少于 6 个字符', trigger: 'blur' }
+    { min: VALIDATION.PASSWORD_MIN_LENGTH, message: `密码长度不能少于 ${VALIDATION.PASSWORD_MIN_LENGTH} 个字符`, trigger: 'blur' }
   ],
   confirmPassword: [
     { required: true, message: '请再次输入新密码', trigger: 'blur' },
@@ -263,18 +267,26 @@ const handleChangePassword = async () => {
 
 // 获取客户信息
 const fetchClientInfo = async () => {
-  // 获取最新的用户信息，确保包含 password_change_enabled 字段
   try {
     const userData = await getCurrentUserInfo();
     if (userData) {
-      // 更新 store 中的用户信息，包括 password_change_enabled
-      authStore.userInfo = { 
-        ...authStore.userInfo, 
+      authStore.userInfo = {
+        ...authStore.userInfo,
         client: userData.client,
         password_change_enabled: userData.password_change_enabled
       };
     }
-  } catch (error) {
+    if (userData?.client?.has_api_key) {
+      try {
+        const keyData = await getClientApiKey();
+        clientApiKey.value = keyData?.key || '';
+      } catch {
+        clientApiKey.value = '';
+      }
+    } else {
+      clientApiKey.value = '';
+    }
+  } catch {
     // 静默失败，继续使用现有信息
   }
 };

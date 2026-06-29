@@ -117,7 +117,7 @@
         </el-table-column>
         <el-table-column prop="preview_link" label="预览链接" width="120" show-overflow-tooltip>
           <template #default="scope">
-            <el-link v-if="scope.row.preview_link" :href="scope.row.preview_link" target="_blank" type="primary" :underline="false">
+            <el-link v-if="scope.row.preview_link" :href="scope.row.preview_link" target="_blank" rel="noopener noreferrer" type="primary" :underline="false">
               预览
             </el-link>
             <span v-else>-</span>
@@ -130,7 +130,7 @@
               <el-link 
                 v-if="getRowClientPublisherTracklink(scope.row)"
                 :href="getRowClientPublisherTracklink(scope.row)" 
-                target="_blank" 
+                target="_blank" rel="noopener noreferrer" 
                 type="primary"
                 style="word-break: break-all;"
               >
@@ -143,7 +143,7 @@
               <el-link 
                 v-if="scope.row.downstream_tracklink"
                 :href="scope.row.downstream_tracklink" 
-                target="_blank" 
+                target="_blank" rel="noopener noreferrer" 
                 type="primary"
                 style="word-break: break-all;"
               >
@@ -391,7 +391,7 @@
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <el-link
                     :href="formData.downstream_tracklink_short"
-                    target="_blank"
+                    target="_blank" rel="noopener noreferrer"
                     type="primary"
                   >
                     {{ formData.downstream_tracklink_short }}
@@ -637,7 +637,7 @@
               </el-descriptions-item>
               <el-descriptions-item v-if="isAdmin" label="点击有效期(小时)">{{ currentOffer?.click_validity_hours || 720 }}</el-descriptions-item>
               <el-descriptions-item label="预览链接" :span="2">
-                <el-link v-if="currentOffer?.preview_link" :href="currentOffer.preview_link" target="_blank" type="primary">
+                <el-link v-if="currentOffer?.preview_link" :href="currentOffer.preview_link" target="_blank" rel="noopener noreferrer" type="primary">
                   {{ currentOffer.preview_link }}
                 </el-link>
                 <span v-else>-</span>
@@ -654,7 +654,7 @@
                   <template v-if="clientPublisherTracklink">
                     <el-link 
                       :href="clientPublisherTracklink" 
-                      target="_blank" 
+                      target="_blank" rel="noopener noreferrer" 
                       type="primary"
                       style="word-break: break-all;"
                     >
@@ -704,7 +704,7 @@
                       <el-link
                         v-if="getPublisherShortLink(scope.row.id)"
                         :href="getPublisherShortLink(scope.row.id)"
-                        target="_blank"
+                        target="_blank" rel="noopener noreferrer"
                         type="primary"
                         style="flex: 1; word-break: break-all;"
                       >

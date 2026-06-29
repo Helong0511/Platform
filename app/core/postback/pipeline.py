@@ -35,6 +35,8 @@ class PostbackPipelineContext:
     conversion_status: str = "Pending"
     final_payout: float = 0.0
     conversion: Optional[PostbackConversion] = None
+    cap_ok: bool = True
+    skip_save_and_forward: bool = False
 
 
 async def step_associate_click(ctx: PostbackPipelineContext) -> Optional[Dict[str, Any]]:
@@ -55,8 +57,9 @@ async def step_associate_click(ctx: PostbackPipelineContext) -> Optional[Dict[st
 async def step_check_duplicate(ctx: PostbackPipelineContext) -> bool:
     """返回 True 表示重复，应跳过后续入库。"""
     return await DuplicateChecker.is_duplicate(
+        platform=ctx.platform,
         conversion_id=ctx.normalized_data.get("conversion_id"),
-        click_id=ctx.normalized_data.get("click_id"),
+        event_name=ctx.normalized_data.get("event_name"),
         db=ctx.db,
     )
 
@@ -101,6 +104,7 @@ async def step_check_cap(ctx: PostbackPipelineContext) -> Tuple[bool, str]:
         advertiser_id=advertiser_id,
         db=ctx.db,
     )
+    ctx.cap_ok = cap_ok
     ctx.conversion_status = "Pending" if cap_ok else f"CapExceeded({cap_status})"
     if not cap_ok and offer_id and publisher_id:
         try:
@@ -114,7 +118,7 @@ async def step_check_cap(ctx: PostbackPipelineContext) -> Tuple[bool, str]:
                 .values(is_active=False)
             )
             result = await ctx.db.execute(stmt)
-            await ctx.db.commit()
+            await ctx.db.flush()
             logger.info("Cap 超限已关闭短链 %s 条", result.rowcount)
         except Exception as e:
             logger.error("关闭短链失败: %s", e)
@@ -131,17 +135,20 @@ async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[float, Any]
     Returns:
         (final_payout, discount_info)：扣量详情由 DiscountChecker 返回
     """
-    offer_id, publisher_id, _ = attribution_ids_from_association(ctx.click_association)
+    offer_id, publisher_id, advertiser_id = attribution_ids_from_association(ctx.click_association)
     original = ctx.normalized_data.get("payout") or 0.0
-    final_payout, info = await DiscountChecker.calculate(
+    final_payout, info, skip_save = await DiscountChecker.calculate(
         original_payout=original,
         offer_id=offer_id,
         publisher_id=publisher_id,
         product_id=ctx.normalized_data.get("product_id"),
         client_id=ctx.normalized_data.get("client_id"),
+        advertiser_id=advertiser_id,
+        click_id=ctx.normalized_data.get("click_id"),
         db=ctx.db,
     )
     ctx.final_payout = final_payout
+    ctx.skip_save_and_forward = skip_save
     return final_payout, info
 
 

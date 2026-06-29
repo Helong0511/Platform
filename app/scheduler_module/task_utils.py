@@ -14,6 +14,7 @@
 """
 import logging
 from datetime import datetime, timedelta
+from collections.abc import Mapping
 from typing import Any, Optional, Tuple, Union
 
 import pytz
@@ -198,6 +199,27 @@ def log_task_error(task_name: str, error_msg: str, exc_info: bool = True) -> Non
         trigger="task_body",
         exc_info=exc_info,
     )
+
+
+def format_notify_params_block(params: Optional[Mapping[str, Any]] = None) -> str:
+    """
+    将任务参数字典格式化为 Telegram 通知中的多行文本。
+
+    空值、None、纯空白字符串会被跳过；无有效项时返回空字符串。
+    """
+    if not params:
+        return ""
+    lines: list[str] = []
+    for key, value in params.items():
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        lines.append(f"{key}: {text}")
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
 
 
 def format_result_summary(

@@ -222,7 +222,7 @@ async def get_cap_sync_status(db: AsyncSession) -> Dict:
     redis = await get_redis_client()
     
     # 查询 DB 中的 Cap 数量
-    result = await self.db.execute(
+    result = await db.execute(
         select(OfferCap).where(OfferCap.is_active == True)
     )
     db_caps = result.scalars().all()

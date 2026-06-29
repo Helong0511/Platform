@@ -16,10 +16,12 @@
 1. 批量撤销管理员会话时须防止把自己踢下线（API 层通常排除当前 jti）
 2. 过期会话清理由 ``cleanup_expired_sessions`` 定时任务物理删除
 """
+from datetime import datetime, timedelta
 import logging
-from typing import Optional, List, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -30,6 +32,38 @@ from app.models.models import User
 from app.models.session import UserSession, TokenBlacklist
 
 logger = logging.getLogger(__name__)
+
+
+class TokenReuseError(Exception):
+    """令牌已被轮换或撤销，不可重复使用。"""
+
+
+def collect_tokens_from_request(
+    request,
+    extra_tokens: Optional[Iterable[str]] = None,
+) -> list[str]:
+    """从 Cookie、Authorization Bearer 及额外参数收集待撤销令牌（去重保序）。"""
+    seen: set[str] = set()
+    tokens: list[str] = []
+
+    def _add(raw: Optional[str]) -> None:
+        value = (raw or "").strip()
+        if value and value not in seen:
+            seen.add(value)
+            tokens.append(value)
+
+    for cookie_name in ("access_token", "refresh_token"):
+        _add(request.cookies.get(cookie_name))
+
+    authorization = request.headers.get("Authorization", "")
+    if authorization.lower().startswith("bearer "):
+        _add(authorization[7:])
+
+    if extra_tokens:
+        for item in extra_tokens:
+            _add(item)
+
+    return tokens
 
 
 class SessionService:
@@ -359,3 +393,144 @@ class SessionService:
             )
 
         return revoked_count, user.username
+
+
+async def _blacklist_single_token(
+    db: AsyncSession,
+    user_id: int,
+    token: str,
+    reason: str,
+    *,
+    require_fresh: bool = False,
+    flush_immediately: bool = False,
+) -> None:
+    """将单个 JWT 写入黑名单并失效对应会话。"""
+    from datetime import timezone
+
+    from app.core.jwt_codec import decode_token_payload
+    from app.core.utils import APP_TIMEZONE, get_app_now_naive
+
+    payload = decode_token_payload(token, verify_exp=False)
+    jti = payload.get("jti")
+    if not jti:
+        return
+
+    jti_str = str(jti)
+    existing = await db.execute(
+        select(TokenBlacklist).where(TokenBlacklist.token_jti == jti_str)
+    )
+    if existing.scalars().first():
+        if require_fresh:
+            raise TokenReuseError("刷新令牌已被使用")
+        return
+
+    exp_ts = payload.get("exp")
+    if exp_ts:
+        expires_at = (
+            datetime.fromtimestamp(exp_ts, tz=timezone.utc)
+            .astimezone(APP_TIMEZONE)
+            .replace(tzinfo=None)
+        )
+    else:
+        expires_at = get_app_now_naive()
+
+    db.add(
+        TokenBlacklist(
+            token_jti=jti_str,
+            user_id=user_id,
+            expires_at=expires_at,
+            reason=reason,
+        )
+    )
+
+    session_result = await db.execute(
+        select(UserSession).where(UserSession.token_jti == jti_str)
+    )
+    session = session_result.scalars().first()
+    if session:
+        session.is_active = False
+
+    if flush_immediately:
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            await db.rollback()
+            if require_fresh:
+                raise TokenReuseError("刷新令牌已被使用") from exc
+            logger.warning("令牌黑名单写入冲突（已撤销）: jti=%s", jti_str)
+
+
+async def revoke_tokens_from_request(
+    db: AsyncSession,
+    request,
+    user_id: int,
+    reason: str,
+    extra_tokens: Optional[Iterable[str]] = None,
+    *,
+    consume_refresh_token: Optional[str] = None,
+) -> None:
+    """
+    将请求中的 access/refresh 令牌加入黑名单并失效对应会话。
+
+    收集来源：HttpOnly Cookie、Authorization Bearer、extra_tokens。
+    consume_refresh_token：刷新轮换时原子消费 refresh（并发重复刷新会抛 TokenReuseError）。
+    """
+    consumed = (consume_refresh_token or "").strip()
+    if consumed:
+        await _blacklist_single_token(
+            db,
+            user_id,
+            consumed,
+            reason,
+            require_fresh=True,
+            flush_immediately=True,
+        )
+
+    for token in collect_tokens_from_request(request, extra_tokens):
+        if consumed and token == consumed:
+            continue
+        try:
+            await _blacklist_single_token(db, user_id, token, reason)
+        except TokenReuseError:
+            raise
+        except Exception as exc:
+            logger.warning("撤销令牌失败: %s", exc)
+
+
+async def record_access_token_session(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    access_token: str,
+    request,
+    access_token_expires: timedelta,
+) -> None:
+    """登录或刷新成功后，将新 access_token 的 jti 写入活跃会话表。"""
+    from datetime import timezone
+
+    from app.core.jwt_codec import decode_token_payload
+    from app.core.utils import APP_TIMEZONE, get_app_now_naive, get_client_ip, get_device_type
+
+    try:
+        payload = decode_token_payload(access_token, verify_exp=False)
+        token_jti = payload.get("jti")
+        if not token_jti:
+            return
+
+        expires_at_utc = datetime.now(timezone.utc) + access_token_expires
+        expires_at = expires_at_utc.astimezone(APP_TIMEZONE).replace(tzinfo=None)
+
+        db.add(
+            UserSession(
+                user_id=user_id,
+                token_jti=str(token_jti),
+                ip_address=get_client_ip(request),
+                user_agent=(request.headers.get("User-Agent") or "")[:500],
+                device_info=get_device_type(request),
+                is_active=True,
+                last_activity=get_app_now_naive(),
+                expires_at=expires_at,
+            )
+        )
+    except Exception as exc:
+        logger.warning("记录会话信息失败: %s", exc)

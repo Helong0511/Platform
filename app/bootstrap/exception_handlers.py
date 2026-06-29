@@ -235,11 +235,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             error_detail = f"参数错误: {msg}"
 
     logger.warning(f"请求验证失败: {request.url.path} | 错误: {serializable_errors}")
+
+    response_data = None
+    if not settings.is_production:
+        response_data = {"errors": serializable_errors}
+
     error_response = create_error_response(
         error_code=ErrorCode.VALIDATION_ERROR,
         message="请求参数验证失败",
         detail=error_detail,
-        data={"errors": serializable_errors},
+        data=response_data,
         path=request.url.path
     )
     # 业务错误返回200状态码，通过响应体中的code字段表示错误

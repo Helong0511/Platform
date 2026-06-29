@@ -206,9 +206,15 @@ class Settings(BaseSettings):
     # 访问令牌过期时间（分钟）
     # 可以通过环境变量 ACCESS_TOKEN_EXPIRE_MINUTES 设置
     # 默认值：20分钟（开发环境），生产环境建议设置为 60-120 分钟
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "240"))
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
     # 刷新令牌过期时间（天），环境变量 REFRESH_TOKEN_EXPIRE_DAYS
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+
+    # 是否信任 X-Forwarded-For / X-Real-IP（生产环境在反向代理后应为 True）
+    TRUST_PROXY_HEADERS: bool = os.getenv(
+        "TRUST_PROXY_HEADERS",
+        "true" if is_production_env_name(detect_production_env()) else "false",
+    ).lower() in ("true", "1", "yes")
 
     # JWT算法配置
     # RS256（推荐，非对称加密）或 HS256（对称加密）

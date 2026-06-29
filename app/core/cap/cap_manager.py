@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 from app.core.cap.redis_counter import RedisCapManager, get_daily_cap_key, get_total_cap_key
 from app.core.redis_client import get_redis_client
+from app.core.utils import get_app_now_naive
 
 
 async def check_cap(
@@ -78,7 +79,7 @@ async def check_cap(
             return True, None
         
         # 检查每个 Cap 配置
-        now = datetime.now(timezone.utc)
+        now = get_app_now_naive()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
         for cap in caps:
@@ -90,7 +91,7 @@ async def check_cap(
                 
                 if redis:
                     # 尝试从 Redis 读取
-                    now = datetime.now(timezone.utc)
+                    now = get_app_now_naive()
                     redis_key = get_daily_cap_key(cap.offer_id, now, cap.publisher_id)
                     redis_val = await redis.get(redis_key)
                     
@@ -131,8 +132,7 @@ async def check_cap(
         return True, None
     except Exception as e:
         logger.error(f"检查Cap失败: {str(e)}", exc_info=True)
-        # 出错时允许通过，避免影响正常流程
-        return True, None
+        return False, "cap_check_error"
 
 
 async def increment_cap_count(
@@ -189,7 +189,7 @@ async def increment_cap_count(
         result = await db.execute(query)
         caps = result.scalars().all()
         
-        now = datetime.now(timezone.utc)
+        now = get_app_now_naive()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
         all_passed = True
@@ -242,15 +242,13 @@ async def increment_cap_count(
                 except Exception as e:
                     logger.warning(f"Redis总计数递增同步失败: {e}")
         
-        # 提交事务，释放锁
-        await db.commit()
+        # 提交事务，释放锁（由调用方控制外层事务时仅 flush）
+        await db.flush()
         return all_passed
         
     except Exception as e:
         logger.error(f"增加Cap计数失败: {str(e)}", exc_info=True)
-        await db.rollback()
-        # 异常情况下返回 True (Fail Open)，或者可以根据业务需要返回 False
-        return True
+        return False
 
 
 async def reset_daily_caps(db: AsyncSession) -> None:
@@ -263,7 +261,7 @@ async def reset_daily_caps(db: AsyncSession) -> None:
         db: 数据库会话
     """
     try:
-        now = datetime.now(timezone.utc)
+        now = get_app_now_naive()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
         # 1. 查询所有需要重置的 Cap 配置（用于清除Redis）

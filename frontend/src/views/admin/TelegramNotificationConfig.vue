@@ -63,7 +63,7 @@
             <el-icon :size="16"><InfoFilled /></el-icon>
             <span>
               获取 Chat ID：与 @BotFather 创建的机器人对话，发送 /start，然后发送任意消息，
-              <el-link href="https://t.me/userinfobot" target="_blank" type="primary">点击这里</el-link>
+              <el-link href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer" type="primary">点击这里</el-link>
               获取您的 Chat ID
             </span>
           </div>

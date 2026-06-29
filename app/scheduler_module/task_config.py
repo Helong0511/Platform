@@ -121,7 +121,7 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "result_getter_module": "app.scheduler_module.tasks.cpl_tasks",
         "result_getter_function": "get_task_result",
         # 数据库配置
-        "cron_expression": "0 0 * * *",  # 每天 00:00 UTC
+        "cron_expression": "0 0 * * *",  # 每天 00:00（业务时区）
         "description": "重置所有Cap配置的每日计数，每天执行一次",
     },
 
@@ -166,8 +166,18 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "result_getter_module": "app.scheduler_module.tasks.short_link_tasks",
         "result_getter_function": "get_task_result",
         # 数据库配置
-        "cron_expression": "0 0 * * *",  # 每天 00:00 UTC
-        "description": "每天执行一次，将前一天因达到转化上限而关闭的短链接重新激活",
+        "cron_expression": "0 0 * * *",  # 每天 00:00（业务时区，与 Cap 日切对齐）
+        "description": "每天执行一次，在 Cap 有余量时将因超限关闭的短链接重新激活",
+    },
+
+    "Cap计数同步": {
+        "task_name": "Cap计数同步",
+        "task_module": "app.scheduler_module.tasks.cpl_tasks",
+        "task_function": "cap_sync_task",
+        "result_getter_module": "app.scheduler_module.tasks.cpl_tasks",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "*/5 * * * *",
+        "description": "每5分钟将 Redis Cap 计数同步到数据库",
     },
 
     # ========== TQT API获取数据任务 ==========

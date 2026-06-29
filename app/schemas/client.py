@@ -67,10 +67,9 @@ class ClientInDBBase(ClientBase):
 class ClientResponse(ClientInDBBase):
     """
     客户详情 API 响应，附带关联用户全名
-    
-    API 响应数据结构，用于序列化数据库记录或业务计算结果。
     """
-    user_full_name: Optional[str] = None  # 用户全名（从关联的User获取）
+    user_full_name: Optional[str] = None
+    has_api_key: Optional[bool] = Field(None, description="是否已配置 API 密钥（列表/详情脱敏）")
 
 
 class ClientListResponse(BaseModel):

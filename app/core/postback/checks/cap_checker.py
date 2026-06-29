@@ -61,42 +61,48 @@ class CapChecker:
             
         except Exception as e:
             logger.error(f"Cap 检查失败：{e}", exc_info=True)
-            # Cap 检查失败不影响主流程，记录错误但继续
-            return True, "cap_check_error"
+            return False, "cap_check_error"
     
     @staticmethod
     async def increment(
         offer_id: Optional[int],
         publisher_id: Optional[int],
         advertiser_id: Optional[int],
-        db: AsyncSession
+        db: AsyncSession,
+        *,
+        commit: bool = True,
     ) -> bool:
         """
         增加 Cap 计数
-        
+
         Args:
-            offer_id: Offer ID
-            publisher_id: Publisher ID
-            advertiser_id: Advertiser ID
-            db: 数据库会话
-        
-        Returns:
-            bool: 是否成功增加
+            commit: 为 False 时仅 flush，由调用方统一 commit（与转化入库同事务）
         """
         if not offer_id:
             return False
-        
+
         try:
-            await increment_cap_count(
+            passed = await increment_cap_count(
                 offer_id=offer_id,
                 publisher_id=publisher_id,
                 advertiser_id=advertiser_id,
-                db=db
+                db=db,
             )
-            logger.debug(
-                f"Cap 计数已增加：offer_id={offer_id}, publisher_id={publisher_id}"
-            )
-            return True
+            if commit:
+                await db.commit()
+            else:
+                await db.flush()
+            if passed:
+                logger.debug(
+                    f"Cap 计数已增加：offer_id={offer_id}, publisher_id={publisher_id}"
+                )
+            else:
+                logger.warning(
+                    "Cap 计数递增后检测到超限或 Redis 同步失败：offer_id=%s publisher_id=%s",
+                    offer_id,
+                    publisher_id,
+                )
+            return passed
         except Exception as e:
             logger.error(f"增加 Cap 计数失败：{e}", exc_info=True)
             return False

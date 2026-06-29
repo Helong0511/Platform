@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +28,11 @@ from app.core.product_assignment import format_assignment_gap_telegram_message
 from app.core.telegram import send_telegram_message_async
 from app.core.database import AsyncSessionLocal
 from app.scheduler_module.task_result_store import set_task_result
-from app.scheduler_module.task_utils import format_result_summary, get_admin_user
+from app.scheduler_module.task_utils import (
+    format_notify_params_block,
+    format_result_summary,
+    get_admin_user,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +45,7 @@ async def finalize_upstream_import(
     current_time_str: str,
     notify_title: str,
     update_task_result: bool = True,
+    notify_params: Optional[Mapping[str, Any]] = None,
 ) -> str:
     """
     上游导入收尾：提交事务、记录任务结果、可选 Telegram 通知。
@@ -52,6 +58,7 @@ async def finalize_upstream_import(
         task_name: 任务名称，用于写入 task_result_store
         current_time_str: 已格式化的执行时间字符串，用于通知正文
         notify_title: Telegram 通知标题中的上游名称（如「Pomiad」）
+        notify_params: 可选任务参数（如起始/终止日期），展示在 Telegram 通知中
 
     返回:
         格式化后的结果摘要字符串（插入/更新/跳过/错误条数）
@@ -84,9 +91,11 @@ async def finalize_upstream_import(
 
     # ---------- Telegram 通知（有写入时发送；分配空窗单独告警） ----------
     if inserted_count > 0 or updated_count > 0:
+        params_block = format_notify_params_block(notify_params)
         telegram_msg = (
             f"⏰ {notify_title} 定时任务执行完成\n\n"
             f"执行时间: {current_time_str}\n"
+            f"{params_block}"
             f"✅ 成功插入: {inserted_count} 条\n"
             f"✅ 成功更新: {updated_count} 条"
         )
@@ -158,6 +167,7 @@ async def import_upstream_ad_data(
     notify_title: str,
     data_transform: Optional[Callable[[List[Any]], List[Any]]] = None,
     update_task_result: bool = True,
+    notify_params: Optional[Mapping[str, Any]] = None,
 ) -> str:
     """
     标准上游拉数入库入口：预处理 → process_api_ad_data → 提交与通知。
@@ -173,6 +183,7 @@ async def import_upstream_ad_data(
         current_time_str: 执行时间字符串，用于通知
         notify_title: Telegram 通知中的上游显示名
         data_transform: 可选预处理函数（如 Addermobi 匹配数修正、Pomiad domain 回退）
+        notify_params: 可选任务参数，写入 Telegram 完成通知
     """
     # ---------- 空数据快速返回 ----------
     if not data:
@@ -211,4 +222,5 @@ async def import_upstream_ad_data(
             current_time_str=current_time_str,
             notify_title=notify_title,
             update_task_result=update_task_result,
+            notify_params=notify_params,
         )

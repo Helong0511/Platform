@@ -47,13 +47,14 @@ async def tqt_api_task(
     """TQT 定时任务：按日期拉取广告明细并入库。"""
     tqt_app_key = settings.TQT_APP_KEY
     tqt_api_secret = settings.TQT_API_SECRET
+    tqt_start, tqt_end = resolve_upstream_date_range(
+        start_date,
+        end_date,
+        early_morning_dual_day=True,
+    )
+    notify_params = {"起始日期": tqt_start, "终止日期": tqt_end}
 
     async def fetch_data():
-        tqt_start, tqt_end = resolve_upstream_date_range(
-            start_date,
-            end_date,
-            early_morning_dual_day=True,
-        )
         tqt_params = {
             "appKey": tqt_app_key,
             "startDate": tqt_start,
@@ -78,4 +79,5 @@ async def tqt_api_task(
         source="TQT定时任务",
         notify_title="TQT",
         log_label="TQT获取广告数据",
+        notify_params=notify_params,
     )

@@ -65,7 +65,7 @@
       </el-table-column>
       <el-table-column v-if="columnVisibility.short_url" prop="short_url" label="短链接" width="300" show-overflow-tooltip>
         <template #default="scope">
-          <el-link :href="scope.row.short_url" target="_blank" type="primary">
+          <el-link :href="scope.row.short_url" target="_blank" rel="noopener noreferrer" type="primary">
             {{ scope.row.short_url }}
           </el-link>
           <el-button

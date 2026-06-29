@@ -9,12 +9,13 @@ import {
   updateUser,
   getUserDetail,
 } from '../api/user';
-import { updateClient, createClient } from '../api/client';
+import { updateClient, createClient, getAdminClientApiKey } from '../api/client';
 import { extractErrorMessage, isErrorHandled } from '../utils/api';
 import { ensureCsrfToken } from '../utils/csrfMutate';
 import { formatDate } from '../utils/dateFormat';
 import { generateUUID } from '../utils/uuid';
 import { logger } from '../utils/logger';
+import { VALIDATION } from '../config/constants';
 
 /** 返回用户/客户新建表单的默认空对象（含 client_key 等扩展字段）。 */
 export function createEmptyUserForm() {
@@ -61,7 +62,8 @@ function mapUserToForm(userData, fallbackUser) {
     formData.phone = client.phone || '';
     formData.address = client.address || '';
     formData.client_id = client.id || null;
-    formData.client_key = client.key || '';
+    formData.client_key = '';
+    formData.client_has_api_key = Boolean(client.has_api_key);
   }
   return formData;
 }
@@ -112,7 +114,7 @@ export function useUserForm({ users, loading, fetchUsers, fetchStats }) {
     if (!currentUserId.value) {
       rules.password = [
         { required: true, message: '请输入密码', trigger: 'blur' },
-        { min: 6, message: '密码长度不能少于 6 个字符', trigger: 'blur' },
+        { min: VALIDATION.PASSWORD_MIN_LENGTH, message: `密码长度不能少于 ${VALIDATION.PASSWORD_MIN_LENGTH} 个字符`, trigger: 'blur' },
         { max: 72, message: '密码长度不能超过 72 个字符（bcrypt算法限制）', trigger: 'blur' },
       ];
     } else {
@@ -133,7 +135,7 @@ export function useUserForm({ users, loading, fetchUsers, fetchStats }) {
       const username = userForm.username.trim();
       if (!userForm.full_name?.trim()) userForm.full_name = username;
       if (!userForm.email?.trim()) userForm.email = `${username}@btfrx.online`;
-      if (!userForm.password?.trim()) userForm.password = `${username}123456`;
+      if (!userForm.password?.trim()) userForm.password = `${username}12345678`;
       if (userForm.role === 'client' && !userForm.company_name?.trim()) {
         userForm.company_name = username;
       }
@@ -192,6 +194,15 @@ export function useUserForm({ users, loading, fetchUsers, fetchStats }) {
       const userData = await getUserDetail(user.id);
       Object.assign(userForm, mapUserToForm(userData, user));
       userForm.isKeyEditable = false;
+      if (userForm.client_id && userForm.role === 'client') {
+        try {
+          const keyData = await getAdminClientApiKey(userForm.client_id, { silent: true });
+          userForm.client_key = keyData?.key || '';
+        } catch (keyError) {
+          logger.warn('加载客户 API 密钥失败:', keyError);
+          userForm.client_key = '';
+        }
+      }
     } catch (error) {
       logger.error('获取用户详情失败:', error);
       if (!isErrorHandled(error)) {

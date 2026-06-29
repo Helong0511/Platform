@@ -247,6 +247,13 @@ async def log_client_error(
     
     注意：此端点允许未认证用户访问，用于记录前端错误
     """
+    error_type = (error_type or "")[:100]
+    error_message = (error_message or "")[:500]
+    if error_stack:
+        error_stack = error_stack[:2000]
+    if error_url:
+        error_url = error_url[:500]
+
     # ---------- 入口：参数与依赖准备 ----------
     # 使用服务层（业务逻辑在AuditLogService中）
     

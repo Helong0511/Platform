@@ -80,8 +80,14 @@ from fastapi import Depends, HTTPException, Request, status
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from fastapi.security import OAuth2PasswordBearer
-from jose import jwt, JWTError
-from jose.exceptions import ExpiredSignatureError, JWSError, JWTClaimsError
+from app.core.jwt_codec import (
+    ExpiredSignatureError,
+    JWTClaimsError,
+    JWTError,
+    JWSError,
+    decode as jwt_decode,
+    encode as jwt_encode,
+)
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -243,10 +249,10 @@ class JWTUtils:
                 settings.RSA_PRIVATE_KEY_PATH,
                 "private"
             )
-            encoded_jwt = jwt.encode(to_encode, private_key, algorithm="RS256")
+            encoded_jwt = jwt_encode(to_encode, private_key, algorithm="RS256")
         else:
             # 默认使用HS256算法（对称加密）
-            encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=algorithm)
+            encoded_jwt = jwt_encode(to_encode, settings.SECRET_KEY, algorithm=algorithm)
         
         return encoded_jwt
 
@@ -290,9 +296,9 @@ class JWTUtils:
                 settings.RSA_PRIVATE_KEY_PATH,
                 "private"
             )
-            encoded_jwt = jwt.encode(to_encode, private_key, algorithm="RS256")
+            encoded_jwt = jwt_encode(to_encode, private_key, algorithm="RS256")
         else:
-            encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=algorithm)
+            encoded_jwt = jwt_encode(to_encode, settings.SECRET_KEY, algorithm=algorithm)
         
         return encoded_jwt
 
@@ -329,7 +335,7 @@ class JWTUtils:
                 key = settings.SECRET_KEY
             
             # 解码并验证令牌
-            payload = jwt.decode(
+            payload = jwt_decode(
                 token,
                 key,  # 使用相应的密钥
                 algorithms=[algorithm],  # 使用配置的算法

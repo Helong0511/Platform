@@ -15,6 +15,7 @@ CPL 系统定时任务模块。
 import logging
 from datetime import datetime, timezone
 from app.core.cap import reset_daily_caps
+from app.core.cap.cap_sync import CapSynchronizer
 from app.core.database import AsyncSessionLocal
 from app.scheduler_module.task_names import RESET_DAILY_CAPS_TASK_NAME
 from app.scheduler_module.task_result_store import get_task_result, set_task_result
@@ -55,4 +56,24 @@ async def reset_daily_caps_task():
             f"执行失败（耗时: {round(duration, 2)}秒）: {str(e)}",
         )
         logger.error(f"每日Cap重置任务执行失败: {str(e)}", exc_info=True)
+        raise
+
+
+CAP_SYNC_TASK_NAME = "Cap计数同步"
+
+
+async def cap_sync_task():
+    """将 Redis Cap 计数同步到数据库。"""
+    logger.info("开始执行 Cap 计数同步任务...")
+    try:
+        async with AsyncSessionLocal() as db:
+            synchronizer = CapSynchronizer(db)
+            stats = await synchronizer.sync_all_active_caps()
+            await db.commit()
+            msg = f"执行成功: success={stats.get('success', 0)} failed={stats.get('failed', 0)}"
+            set_task_result(CAP_SYNC_TASK_NAME, msg)
+            logger.debug(msg)
+    except Exception as e:
+        set_task_result(CAP_SYNC_TASK_NAME, f"执行失败: {str(e)}")
+        logger.error(f"Cap 计数同步任务失败: {e}", exc_info=True)
         raise

@@ -164,6 +164,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 # 敏感接口使用更严格的限流
                 limit = min(limit, 30)  # 最多30次/分钟
 
+        if path == "/api/v1/audit-logs/client-error":
+            limit = min(limit, 10)
+
         # ====== 尝试使用Redis进行限流 ======
         redis_client = await get_redis_client()
         now = datetime.now(timezone.utc)

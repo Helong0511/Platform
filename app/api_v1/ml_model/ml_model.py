@@ -865,12 +865,12 @@ async def parse_excel_columns(
         request: Request,
         file: UploadFile = File(...),
         db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        current_user: User = Depends(require_admin)
 ):
     """
     解析上传 Excel 文件的列名列表。
 
-    权限：登录用户。
+    权限：管理员。
     返回所有列名供前端展示映射配置界面。
     """
     # ---------- 入口：参数与依赖准备 ----------
@@ -1157,7 +1157,7 @@ async def validate_excel_columns(
         request: Request,
         file: UploadFile = File(...),
         db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        current_user: User = Depends(require_admin)
 ):
     """
     验证Excel文件的列名映射
@@ -1290,7 +1290,7 @@ async def preview_excel_data(
         file: UploadFile = File(...),
         rows: int = Query(10, ge=1, le=MAX_PAGE_SIZE, description="预览行数"),
         db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        current_user: User = Depends(require_admin)
 ):
     """
     预览Excel数据（映射后的数据）

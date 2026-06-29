@@ -25,8 +25,9 @@ from app.core.telegram import send_telegram_message_async
 from app.core.database import get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
+from app.core.security import get_current_user
 from app.core.utils import get_user_name_by_id
-from app.models.models import Product
+from app.models.models import Client, Product, User, UserRole
 from app.schemas.base import ResponseBaseSchema
 from app.services.ad_data.queries.client_api_query import ClientAdDataQuery
 from app.services.ad_data.queries.dimension_filter import ensure_valid_optional_dimension
@@ -35,6 +36,29 @@ from app.services.ad_data.queries.dimension_filter import ensure_valid_optional_
 router = APIRouter()
 # 获取日志记录器
 logger = logging.getLogger(__name__)
+
+
+@router.get(
+    "/client/api-key",
+    response_model=ResponseBaseSchema[dict],
+    summary="获取当前客户 API 密钥",
+)
+async def get_client_api_key(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """客户登录后按需获取 API 密钥，用于对接文档与签名示例。"""
+    if current_user.role != UserRole.CLIENT:
+        raise_api_exception(ErrorCode.FORBIDDEN, detail="仅客户账号可获取 API 密钥")
+    result = await db.execute(
+        select(Client).where(Client.user_id == current_user.id, Client.is_active == True)
+    )
+    client = result.scalars().first()
+    if not client:
+        raise_api_exception(ErrorCode.CLIENT_NOT_FOUND, detail="客户信息不存在")
+    if not client.api_enabled:
+        raise_api_exception(ErrorCode.FORBIDDEN, detail="API 访问未启用")
+    return ResponseBaseSchema.success(data={"key": client.key})
 
 
 # ====== 请求模型 ======

@@ -41,6 +41,12 @@ async def addermobi_api_task(
     username = settings.ADDERMOBI_API_USERNAME
     password = settings.ADDERMOBI_API_PASSWORD
     headers = {'Content-Type': 'application/json'}
+    start_date_str, end_date_str = resolve_upstream_date_range(
+        start_date,
+        end_date,
+        early_morning_dual_day=True,
+    )
+    notify_params = {"起始日期": start_date_str, "终止日期": end_date_str}
 
     async def fetch_data():
         login_json = await post_json(
@@ -61,11 +67,6 @@ async def addermobi_api_task(
             raise Exception("Addermobi API 响应中缺少 access_token")
 
         auth_headers = {**headers, "Authorization": f"Bearer {access_token}"}
-        start_date_str, end_date_str = resolve_upstream_date_range(
-            start_date,
-            end_date,
-            early_morning_dual_day=True,
-        )
         wheres = [
             {"name": "Revenue_time", "value": start_date_str, "displayType": "thanorequal"},
             {"name": "Revenue_time", "value": end_date_str, "displayType": "lessorequal"},
@@ -93,4 +94,5 @@ async def addermobi_api_task(
         notify_title="Addermobi",
         data_transform=preprocess_addermobi_match_counts,
         log_label="Addermobi API获取数据",
+        notify_params=notify_params,
     )

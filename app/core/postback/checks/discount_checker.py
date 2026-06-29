@@ -1,22 +1,22 @@
 """
 扣量计算器
 
-根据配置计算扣量后的金额
+根据 OfferDiscount（比例扣价）与 ConversionDeductionConfig（扣量/扣金额）计算最终 payout。
 """
 import logging
-from typing import Optional, Dict, Any, Tuple
+from typing import Any, Dict, Optional, Tuple
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deduction import find_deduction_config, apply_deduction, log_deduction
+from app.core.deduction import apply_deduction, find_deduction_config, log_deduction
 from app.core.discount import calculate_discount
-from app.models.models import ConversionDeductionLog
 
 logger = logging.getLogger(__name__)
 
 
 class DiscountChecker:
     """扣量计算器"""
-    
+
     @staticmethod
     async def calculate(
         original_payout: float,
@@ -24,99 +24,110 @@ class DiscountChecker:
         publisher_id: Optional[int],
         product_id: Optional[int],
         client_id: Optional[int],
-        db: AsyncSession
-    ) -> Tuple[float, Dict[str, Any]]:
+        advertiser_id: Optional[int],
+        click_id: Optional[str],
+        db: AsyncSession,
+    ) -> Tuple[float, Dict[str, Any], bool]:
         """
-        计算扣量后的金额
-        
-        Args:
-            original_payout: 原始金额
-            offer_id: Offer ID
-            publisher_id: Publisher ID
-            product_id: 产品 ID
-            client_id: 客户 ID
-            db: 数据库会话
-        
+        计算扣量后的金额。
+
         Returns:
-            tuple: (最终金额，扣量详情)
+            (最终金额, 扣量详情, 是否跳过入库与下游转发)
         """
-        deduction_info = {
-            'original_payout': original_payout,
-            'offer_deduction': None,
-            'publisher_deduction': None,
-            'final_payout': original_payout,
+        deduction_info: Dict[str, Any] = {
+            "original_payout": original_payout,
+            "offer_discount": None,
+            "deduction_config": None,
+            "final_payout": original_payout,
         }
-        
-        final_payout = original_payout
-        
-        # 1. Offer 级别扣量
-        if offer_id:
+        final_payout = float(original_payout or 0.0)
+        skip_save_and_forward = False
+
+        # 1. OfferDiscount 比例扣价（offer / channel / publisher 默认）
+        if offer_id and publisher_id:
             try:
-                offer_deduction = await find_deduction_config(
+                discounted_payout, discount_amount, discount_desc = await calculate_discount(
+                    db=db,
                     offer_id=offer_id,
-                    db=db
-                )
-                
-                if offer_deduction:
-                    deducted_amount = apply_deduction(
-                        original_payout,
-                        offer_deduction
-                    )
-                    
-                    deduction_info['offer_deduction'] = {
-                        'config': offer_deduction,
-                        'deducted': original_payout - deducted_amount,
-                    }
-                    
-                    final_payout = deducted_amount
-                    logger.debug(
-                        f"Offer 扣量：offer_id={offer_id}, "
-                        f"original={original_payout}, final={final_payout}"
-                    )
-            except Exception as e:
-                logger.warning(f"Offer 扣量计算失败：{e}")
-        
-        # 2. Publisher 级别扣量
-        if publisher_id:
-            try:
-                publisher_deduction = await find_deduction_config(
                     publisher_id=publisher_id,
-                    db=db
+                    original_payout=final_payout,
                 )
-                
-                if publisher_deduction:
-                    deducted_amount = apply_deduction(
+                if discount_desc:
+                    deduction_info["offer_discount"] = {
+                        "description": discount_desc,
+                        "deducted": discount_amount,
+                        "final_payout": discounted_payout,
+                    }
+                    final_payout = discounted_payout
+                    logger.debug(
+                        "OfferDiscount 扣价：offer_id=%s publisher_id=%s final=%s",
+                        offer_id,
+                        publisher_id,
                         final_payout,
-                        publisher_deduction
                     )
-                    
-                    deduction_info['publisher_deduction'] = {
-                        'config': publisher_deduction,
-                        'deducted': final_payout - deducted_amount,
-                    }
-                    
-                    final_payout = deducted_amount
-                    logger.debug(
-                        f"Publisher 扣量：publisher_id={publisher_id}, "
-                        f"original={original_payout}, final={final_payout}"
-                    )
-            except Exception as e:
-                logger.warning(f"Publisher 扣量计算失败：{e}")
-        
-        # 3. 记录扣量日志
-        if deduction_info['offer_deduction'] or deduction_info['publisher_deduction']:
-            try:
-                await log_deduction(
-                    original_amount=original_payout,
-                    final_amount=final_payout,
+            except Exception as exc:
+                logger.warning("OfferDiscount 计算失败：%s", exc)
+
+        # 2. ConversionDeductionConfig（扣量 / 扣金额）
+        try:
+            config = await find_deduction_config(
+                db=db,
+                advertiser_id=advertiser_id,
+                offer_id=offer_id,
+                publisher_id=publisher_id,
+            )
+            if config:
+                conversion_data = {"original_payout": final_payout}
+                result = await apply_deduction(
+                    db=db,
+                    conversion_data=conversion_data,
+                    config=config,
+                    click_id=click_id,
+                    advertiser_id=advertiser_id,
                     offer_id=offer_id,
                     publisher_id=publisher_id,
-                    deduction_info=deduction_info,
-                    db=db
                 )
-            except Exception as e:
-                logger.warning(f"记录扣量日志失败：{e}")
-        
-        deduction_info['final_payout'] = final_payout
-        
-        return final_payout, deduction_info
+                deduction_info["deduction_config"] = result
+
+                if result.get("should_deduct_volume"):
+                    skip_save_and_forward = True
+                    final_payout = 0.0
+                    try:
+                        await log_deduction(
+                            db=db,
+                            deduction_result=result,
+                            click_id=click_id,
+                            advertiser_id=advertiser_id,
+                            offer_id=offer_id,
+                            publisher_id=publisher_id,
+                            config=config,
+                            deduction_reason="postback_volume_deduction",
+                        )
+                    except Exception as log_exc:
+                        logger.warning("记录扣量日志失败：%s", log_exc)
+                    logger.info(
+                        "转化扣量命中：offer_id=%s publisher_id=%s，跳过入库与转发",
+                        offer_id,
+                        publisher_id,
+                    )
+                else:
+                    final_payout = float(result.get("final_amount", final_payout))
+                    if result.get("should_deduct_amount"):
+                        try:
+                            await log_deduction(
+                                db=db,
+                                deduction_result=result,
+                                click_id=click_id,
+                                advertiser_id=advertiser_id,
+                                offer_id=offer_id,
+                                publisher_id=publisher_id,
+                                config=config,
+                                deduction_reason="postback_amount_deduction",
+                            )
+                        except Exception as log_exc:
+                            logger.warning("记录扣金额日志失败：%s", log_exc)
+        except Exception as exc:
+            logger.warning("ConversionDeductionConfig 处理失败：%s", exc)
+
+        deduction_info["final_payout"] = final_payout
+        return final_payout, deduction_info, skip_save_and_forward

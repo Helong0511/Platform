@@ -121,7 +121,8 @@
           <el-link 
             v-if="detail.short_link_url" 
             :href="detail.short_link_url" 
-            target="_blank" 
+            target="_blank"
+            rel="noopener noreferrer" 
             type="primary"
           >
             {{ detail.short_link_url }}
@@ -132,7 +133,8 @@
           <el-link 
             v-if="detail.referer" 
             :href="detail.referer" 
-            target="_blank" 
+            target="_blank"
+            rel="noopener noreferrer" 
             type="primary"
           >
             {{ detail.referer }}
@@ -143,7 +145,8 @@
           <el-link 
             v-if="detail.original_request_url" 
             :href="detail.original_request_url" 
-            target="_blank" 
+            target="_blank"
+            rel="noopener noreferrer" 
             type="primary"
           >
             {{ detail.original_request_url }}
@@ -154,7 +157,8 @@
           <el-link 
             v-if="detail.final_redirect_url" 
             :href="detail.final_redirect_url" 
-            target="_blank" 
+            target="_blank"
+            rel="noopener noreferrer" 
             type="primary"
           >
             {{ detail.final_redirect_url }}

@@ -55,13 +55,14 @@ async def pomiad_api_task(
     username = settings.POMIAD_API_USERNAME
     password = settings.POMIAD_API_PASSWORD
     base_url = settings.POMIAD_API_BASE_URL
+    pomiad_start, pomiad_end = resolve_upstream_date_range(
+        start_date,
+        end_date,
+        early_morning_dual_day=True,
+    )
+    notify_params = {"起始日期": pomiad_start, "终止日期": pomiad_end}
 
     async def fetch_data():
-        pomiad_start, pomiad_end = resolve_upstream_date_range(
-            start_date,
-            end_date,
-            early_morning_dual_day=True,
-        )
         return await fetch_pomiad_rows(
             base_url=base_url,
             username=username,
@@ -82,4 +83,5 @@ async def pomiad_api_task(
         notify_title="Pomiad",
         data_transform=preprocess_pomiad_rows,
         log_label="Pomiad API获取数据",
+        notify_params=notify_params,
     )
