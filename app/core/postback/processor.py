@@ -202,13 +202,24 @@ class PostbackProcessor:
                 offer_id, publisher_id, advertiser_id = attribution_ids_from_association(
                     click_association
                 )
-                await CapChecker.increment(
+                cap_incremented = await CapChecker.increment(
                     offer_id=offer_id,
                     publisher_id=publisher_id,
                     advertiser_id=advertiser_id,
                     db=db,
                     commit=False,
                 )
+                if not cap_incremented:
+                    logger.error(
+                        "Cap 计数递增失败，回滚转化入库：offer_id=%s publisher_id=%s",
+                        offer_id,
+                        publisher_id,
+                    )
+                    await db.rollback()
+                    return {
+                        "success": False,
+                        "message": "Cap 计数更新失败，转化未入库",
+                    }
             
             # ========== 第 11 步：提交事务（转化 + Cap 计数原子提交） ==========
             logger.info("=== 第 11 步：提交事务 ====")

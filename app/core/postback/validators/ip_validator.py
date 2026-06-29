@@ -96,8 +96,8 @@ class IpValidator:
         whitelist_items = result.all()
 
         if not whitelist_items:
-            logger.warning("Postback IP 白名单为空，跳过 IP 校验（允许通过）")
-            return True
+            logger.warning("Postback IP 白名单为空，拒绝处理")
+            return False
         # 在 Python 中比较（去除空格后比较）
         for whitelist_item in whitelist_items:
             whitelist_ip = whitelist_item.ip_address.strip() if whitelist_item.ip_address else ""

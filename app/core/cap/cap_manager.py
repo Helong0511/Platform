@@ -249,8 +249,8 @@ async def increment_cap_count(
         
     except Exception as e:
         logger.error(f"增加Cap计数失败: {str(e)}", exc_info=True)
-        # 异常情况下返回 True (Fail Open)
-        return True
+        await db.rollback()
+        return False
 
 
 async def reset_daily_caps(db: AsyncSession) -> None:
