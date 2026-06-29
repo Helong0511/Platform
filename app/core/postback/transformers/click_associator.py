@@ -134,9 +134,9 @@ class ClickAssociator:
 
         logger.info(f"开始关联 Click ID（数据库）: {click_id}")
         
-        # 使用指数退避策略重试查询，处理批量处理延迟问题（Postback 路径最多约 0.5s）
-        max_attempts = 2
-        base_delay = 0.2
+        # 使用指数退避策略重试查询，处理批量处理延迟问题（最多约 2.4s）
+        max_attempts = 5
+        base_delay = 0.3
         
         for attempt in range(max_attempts):
             # 查询 Click 记录（带关联的 Offer、Publisher、Advertiser）

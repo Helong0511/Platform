@@ -8,7 +8,6 @@ from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.config import settings
 from app.models.models import PostbackIpWhitelist
 
 logger = logging.getLogger(__name__)
@@ -32,11 +31,9 @@ class IpValidator:
         Returns:
             tuple: (是否通过验证，清理后的 IP 地址)
         """
-        # 生产环境 IP 不可解析时拒绝处理
+        # IP 为空或无法获取时仍允许处理（反向代理/CDN 场景），记录警告
         if not request_ip or not request_ip.strip() or request_ip.strip() == "unknown":
             logger.warning("Postback 请求 IP 为空或无法获取：request_ip=%r", request_ip)
-            if settings.is_production:
-                return False, None
             return True, None
         
         # 清理 IP 地址
@@ -99,9 +96,7 @@ class IpValidator:
         whitelist_items = result.all()
 
         if not whitelist_items:
-            if settings.is_production:
-                logger.warning("Postback IP 白名单为空，生产环境拒绝处理")
-                return False
+            logger.warning("Postback IP 白名单为空，跳过 IP 校验（允许通过）")
             return True
         # 在 Python 中比较（去除空格后比较）
         for whitelist_item in whitelist_items:

@@ -52,7 +52,7 @@ class CapChecker:
                     f"Cap 限制已超出：offer_id={offer_id}, "
                     f"publisher_id={publisher_id}, message={cap_message}"
                 )
-                return False, "cap_exceeded"
+                return False, cap_message or "cap_exceeded"
             
             logger.debug(
                 f"Cap 检查通过：offer_id={offer_id}, publisher_id={publisher_id}"
@@ -61,7 +61,8 @@ class CapChecker:
             
         except Exception as e:
             logger.error(f"Cap 检查失败：{e}", exc_info=True)
-            return False, "cap_check_error"
+            # Cap 检查失败不影响主流程，记录错误但继续
+            return True, "cap_check_error"
     
     @staticmethod
     async def increment(
@@ -82,7 +83,7 @@ class CapChecker:
             return False
 
         try:
-            passed = await increment_cap_count(
+            await increment_cap_count(
                 offer_id=offer_id,
                 publisher_id=publisher_id,
                 advertiser_id=advertiser_id,
@@ -92,17 +93,10 @@ class CapChecker:
                 await db.commit()
             else:
                 await db.flush()
-            if passed:
-                logger.debug(
-                    f"Cap 计数已增加：offer_id={offer_id}, publisher_id={publisher_id}"
-                )
-            else:
-                logger.warning(
-                    "Cap 计数递增后检测到超限或 Redis 同步失败：offer_id=%s publisher_id=%s",
-                    offer_id,
-                    publisher_id,
-                )
-            return passed
+            logger.debug(
+                f"Cap 计数已增加：offer_id={offer_id}, publisher_id={publisher_id}"
+            )
+            return True
         except Exception as e:
             logger.error(f"增加 Cap 计数失败：{e}", exc_info=True)
-            return False
+            return True

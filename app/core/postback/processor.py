@@ -24,6 +24,7 @@ from app.core.postback.pipeline import (
     step_check_cap,
     step_check_duplicate,
     step_save_conversion,
+    deactivate_short_links_on_cap_exceeded,
 )
 from app.core.postback.forwarder import PostbackForwarder
 from app.core.postback.notifier import PostbackNotifier
@@ -201,29 +202,24 @@ class PostbackProcessor:
                 offer_id, publisher_id, advertiser_id = attribution_ids_from_association(
                     click_association
                 )
-                incremented = await CapChecker.increment(
+                await CapChecker.increment(
                     offer_id=offer_id,
                     publisher_id=publisher_id,
                     advertiser_id=advertiser_id,
                     db=db,
                     commit=False,
                 )
-                if not incremented:
-                    logger.error(
-                        "Cap 计数递增失败，回滚转化入库：offer_id=%s publisher_id=%s",
-                        offer_id,
-                        publisher_id,
-                    )
-                    await db.rollback()
-                    return {
-                        "success": False,
-                        "message": "Cap 计数更新失败，转化未入库",
-                    }
             
             # ========== 第 11 步：提交事务（转化 + Cap 计数原子提交） ==========
             logger.info("=== 第 11 步：提交事务 ====")
             await db.commit()
             logger.info("事务提交成功")
+
+            if not cap_ok and cap_status != "cap_check_error":
+                offer_id, publisher_id, _ = attribution_ids_from_association(click_association)
+                if offer_id and publisher_id:
+                    await deactivate_short_links_on_cap_exceeded(db, offer_id, publisher_id)
+                    await db.commit()
             
             # ========== 第 9 步：渠道转发（Cap 超限或扣量时不转发） ==========
             logger.info("=== 第 9 步：渠道转发 ====")

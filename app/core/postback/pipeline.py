@@ -106,23 +106,34 @@ async def step_check_cap(ctx: PostbackPipelineContext) -> Tuple[bool, str]:
     )
     ctx.cap_ok = cap_ok
     ctx.conversion_status = "Pending" if cap_ok else f"CapExceeded({cap_status})"
-    if not cap_ok and offer_id and publisher_id:
-        try:
-            stmt = (
-                update(ShortLink)
-                .where(
-                    ShortLink.offer_id == offer_id,
-                    ShortLink.channel_id == publisher_id,
-                    ShortLink.is_active == True,
-                )
-                .values(is_active=False)
-            )
-            result = await ctx.db.execute(stmt)
-            await ctx.db.flush()
-            logger.info("Cap 超限已关闭短链 %s 条", result.rowcount)
-        except Exception as e:
-            logger.error("关闭短链失败: %s", e)
     return cap_ok, cap_status
+
+
+async def deactivate_short_links_on_cap_exceeded(
+    db: AsyncSession,
+    offer_id: int,
+    publisher_id: int,
+) -> int:
+    """
+    Cap 确认超限且转化已入库后，关闭对应短链（独立提交，避免被主事务 rollback 撤销）。
+    """
+    try:
+        stmt = (
+            update(ShortLink)
+            .where(
+                ShortLink.offer_id == offer_id,
+                ShortLink.channel_id == publisher_id,
+                ShortLink.is_active == True,
+            )
+            .values(is_active=False)
+        )
+        result = await db.execute(stmt)
+        await db.flush()
+        logger.info("Cap 超限已关闭短链 %s 条", result.rowcount)
+        return result.rowcount or 0
+    except Exception as e:
+        logger.error("关闭短链失败: %s", e)
+        return 0
 
 
 async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[float, Any]:

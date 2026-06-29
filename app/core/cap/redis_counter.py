@@ -80,8 +80,8 @@ class RedisCapManager:
         """
         redis = await get_redis_client()
         if not redis:
-            logger.warning("Redis不可用，Cap递增检查失败 (Fail Closed)")
-            return False
+            logger.warning("Redis不可用，Cap检查跳过 (Fail Open)")
+            return True
             
         now = get_app_now_naive()
         key = get_daily_cap_key(offer_id, now, publisher_id)
@@ -101,7 +101,7 @@ class RedisCapManager:
             return True
         except Exception as e:
             logger.error(f"Redis Lua操作失败: {e}", exc_info=True)
-            return False
+            return True  # Fail Open
 
     @staticmethod
     async def check_and_increment_total(
@@ -115,8 +115,8 @@ class RedisCapManager:
         """
         redis = await get_redis_client()
         if not redis:
-            logger.warning("Redis不可用，总Cap递增检查失败 (Fail Closed)")
-            return False
+            logger.warning("Redis不可用，总Cap递增检查跳过 (Fail Open)")
+            return True
             
         key = get_total_cap_key(offer_id, publisher_id)
         
@@ -132,7 +132,7 @@ class RedisCapManager:
             return True
         except Exception as e:
             logger.error(f"Redis Lua操作失败: {e}", exc_info=True)
-            return False
+            return True  # Fail Open
             
     @staticmethod
     async def decrement_daily(
