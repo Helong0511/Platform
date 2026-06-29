@@ -4,13 +4,13 @@ Cap计数一致性校验工具
 """
 import logging
 from typing import List, Dict, Any
-from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.models.models import OfferCap
 from app.core.cap.redis_counter import get_daily_cap_key, get_total_cap_key
 from app.core.redis_client import get_redis_client
+from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ async def check_cap_consistency(
             logger.warning("Redis不可用，无法进行一致性检查")
             return inconsistencies
         
-        now = datetime.now(timezone.utc)
+        now = get_app_now_naive()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
         for cap in caps:

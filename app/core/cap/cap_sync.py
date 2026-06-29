@@ -5,7 +5,7 @@ Cap DB/Redis 同步模块
 使用 Redis 为权威源，定期同步到 DB
 """
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from typing import Optional, List, Dict
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +15,7 @@ from sqlalchemy import and_
 from app.models.models import OfferCap
 from app.core.redis_client import get_redis_client
 from app.core.cap.redis_counter import get_daily_cap_key, get_total_cap_key
+from app.core.utils import get_app_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class CapSynchronizer:
         caps = result.scalars().all()
         
         stats = {'success': 0, 'failed': 0}
-        now = datetime.now(timezone.utc)
+        now = get_app_now_naive()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
         for cap in caps:
@@ -122,7 +123,7 @@ class CapSynchronizer:
                 logger.warning(f"Cap 配置不存在：cap_id={cap_id}")
                 return False
             
-            now = datetime.now(timezone.utc)
+            now = get_app_now_naive()
             
             # 同步每日 Cap
             if cap.daily_cap:
