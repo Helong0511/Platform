@@ -5,7 +5,6 @@ Cap DB/Redis 同步模块
 使用 Redis 为权威源，定期同步到 DB
 """
 import logging
-from datetime import datetime
 from typing import Optional, List, Dict
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -242,5 +241,5 @@ async def get_cap_sync_status(db: AsyncSession) -> Dict:
         'db_caps': len(db_caps),
         'redis_keys': redis_count,
         'sync_status': 'healthy' if redis_count >= len(db_caps) * 0.8 else 'warning',
-        'timestamp': datetime.now().isoformat()
+        'timestamp': get_app_now_naive().isoformat()
     }
