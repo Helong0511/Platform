@@ -140,7 +140,9 @@ async def increment_cap_count(
     db: AsyncSession,
     offer_id: int,
     publisher_id: Optional[int] = None,
-    advertiser_id: Optional[int] = None
+    advertiser_id: Optional[int] = None,
+    *,
+    session_flush: bool = True,
 ) -> bool:
     """
     增加 Cap 计数 (线程/进程安全版本)
@@ -243,14 +245,14 @@ async def increment_cap_count(
                 except Exception as e:
                     logger.warning(f"Redis总计数递增同步失败: {e}")
         
-        # 提交事务，释放锁（由调用方控制外层事务时仅 flush）
-        await db.flush()
+        # 由调用方控制外层事务时可选跳过 flush，与转化入库同一 commit
+        if session_flush:
+            await db.flush()
         return all_passed
         
     except Exception as e:
         logger.error(f"增加Cap计数失败: {str(e)}", exc_info=True)
-        await db.rollback()
-        return False
+        raise
 
 
 async def reset_daily_caps(db: AsyncSession) -> None:

@@ -88,11 +88,8 @@ class CapChecker:
                 publisher_id=publisher_id,
                 advertiser_id=advertiser_id,
                 db=db,
+                session_flush=commit,
             )
-            if commit:
-                await db.commit()
-            else:
-                await db.flush()
             if not passed:
                 logger.warning(
                     "Cap 计数递增未通过：offer_id=%s publisher_id=%s",
@@ -100,14 +97,12 @@ class CapChecker:
                     publisher_id,
                 )
                 return False
+            if commit:
+                await db.commit()
             logger.debug(
                 f"Cap 计数已增加：offer_id={offer_id}, publisher_id={publisher_id}"
             )
             return True
         except Exception as e:
             logger.error(f"增加 Cap 计数失败：{e}", exc_info=True)
-            try:
-                await db.rollback()
-            except Exception as rollback_err:
-                logger.warning("Cap 计数失败后回滚事务异常：%s", rollback_err)
-            return False
+            raise

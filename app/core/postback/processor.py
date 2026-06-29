@@ -183,6 +183,49 @@ class PostbackProcessor:
                 pipe_ctx.final_payout = 0.0
                 final_payout = 0.0
 
+            offer_id, publisher_id, advertiser_id = attribution_ids_from_association(
+                click_association
+            )
+
+            # Cap 递增须在转化入库之前，失败则不写入转化记录
+            if cap_ok:
+                try:
+                    cap_incremented = await CapChecker.increment(
+                        offer_id=offer_id,
+                        publisher_id=publisher_id,
+                        advertiser_id=advertiser_id,
+                        db=db,
+                        commit=False,
+                    )
+                except Exception:
+                    await db.rollback()
+                    logger.error(
+                        "Cap 计数递增异常，已回滚：offer_id=%s publisher_id=%s",
+                        offer_id,
+                        publisher_id,
+                        exc_info=True,
+                    )
+                    return {
+                        "success": False,
+                        "message": "Cap 计数更新失败，转化未入库",
+                    }
+                if not cap_incremented:
+                    await db.rollback()
+                    logger.error(
+                        "Cap 计数递增未通过，已回滚：offer_id=%s publisher_id=%s",
+                        offer_id,
+                        publisher_id,
+                    )
+                    return {
+                        "success": False,
+                        "message": "Cap 计数更新失败，转化未入库",
+                    }
+
+            # Cap 超限时与转化记录同一事务内关闭短链
+            if not cap_ok and cap_status != "cap_check_error":
+                if offer_id and publisher_id:
+                    await deactivate_short_links_on_cap_exceeded(db, offer_id, publisher_id)
+
             logger.info("=== 第 8 步：保存转化记录 ====")
             try:
                 conversion = await step_save_conversion(pipe_ctx)
@@ -193,44 +236,19 @@ class PostbackProcessor:
                     "success": True,
                     "message": "重复转化，已跳过",
                 }
+            except Exception as save_err:
+                await db.rollback()
+                logger.error("保存转化记录失败，已回滚：%s", save_err, exc_info=True)
+                raise
             logger.info(
                 f"转化记录保存成功：ID={conversion.id}, "
                 f"conversion_id={conversion.conversion_id}"
             )
 
-            if cap_ok:
-                offer_id, publisher_id, advertiser_id = attribution_ids_from_association(
-                    click_association
-                )
-                cap_incremented = await CapChecker.increment(
-                    offer_id=offer_id,
-                    publisher_id=publisher_id,
-                    advertiser_id=advertiser_id,
-                    db=db,
-                    commit=False,
-                )
-                if not cap_incremented:
-                    logger.error(
-                        "Cap 计数递增失败，回滚转化入库：offer_id=%s publisher_id=%s",
-                        offer_id,
-                        publisher_id,
-                    )
-                    await db.rollback()
-                    return {
-                        "success": False,
-                        "message": "Cap 计数更新失败，转化未入库",
-                    }
-            
-            # ========== 第 11 步：提交事务（转化 + Cap 计数原子提交） ==========
+            # ========== 第 11 步：提交事务（Cap / 短链 / 转化原子提交） ==========
             logger.info("=== 第 11 步：提交事务 ====")
             await db.commit()
             logger.info("事务提交成功")
-
-            if not cap_ok and cap_status != "cap_check_error":
-                offer_id, publisher_id, _ = attribution_ids_from_association(click_association)
-                if offer_id and publisher_id:
-                    await deactivate_short_links_on_cap_exceeded(db, offer_id, publisher_id)
-                    await db.commit()
             
             # ========== 第 9 步：渠道转发（Cap 超限或扣量时不转发） ==========
             logger.info("=== 第 9 步：渠道转发 ====")

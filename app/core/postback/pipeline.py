@@ -115,25 +115,22 @@ async def deactivate_short_links_on_cap_exceeded(
     publisher_id: int,
 ) -> int:
     """
-    Cap 确认超限且转化已入库后，关闭对应短链（独立提交，避免被主事务 rollback 撤销）。
+    Cap 确认超限后关闭对应短链（与转化入库处于同一事务，由调用方 commit）。
     """
-    try:
-        stmt = (
-            update(ShortLink)
-            .where(
-                ShortLink.offer_id == offer_id,
-                ShortLink.channel_id == publisher_id,
-                ShortLink.is_active == True,
-            )
-            .values(is_active=False)
+    stmt = (
+        update(ShortLink)
+        .where(
+            ShortLink.offer_id == offer_id,
+            ShortLink.channel_id == publisher_id,
+            ShortLink.is_active == True,
         )
-        result = await db.execute(stmt)
-        await db.flush()
-        logger.info("Cap 超限已关闭短链 %s 条", result.rowcount)
-        return result.rowcount or 0
-    except Exception as e:
-        logger.error("关闭短链失败: %s", e)
-        return 0
+        .values(is_active=False)
+    )
+    result = await db.execute(stmt)
+    count = result.rowcount or 0
+    if count:
+        logger.info("Cap 超限已关闭短链 %s 条", count)
+    return count
 
 
 async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[float, Any]:
@@ -181,9 +178,13 @@ async def step_save_conversion(ctx: PostbackPipelineContext) -> PostbackConversi
         db=ctx.db,
     )
     if ctx.click_association and ctx.conversion:
-        await ConversionSaver.update_click_conversion(
+        click_updated = await ConversionSaver.update_click_conversion(
             click_association=ctx.click_association,
             conversion_id=ctx.conversion.id,
             db=ctx.db,
         )
+        if not click_updated:
+            raise RuntimeError(
+                f"Click 表 conversion_id 更新失败：click_id={ctx.click_association.get('click_id')}"
+            )
     return ctx.conversion
