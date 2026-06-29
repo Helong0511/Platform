@@ -68,6 +68,7 @@ class PasswordChange(BaseModel):
     """
     old_password: str = Field(
         ...,
+        min_length=PASSWORD_MIN_LENGTH,
         max_length=BCRYPT_MAX_PASSWORD_LENGTH,
         description="当前密码",
     )

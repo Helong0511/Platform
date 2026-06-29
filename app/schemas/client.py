@@ -72,6 +72,11 @@ class ClientResponse(ClientInDBBase):
     has_api_key: Optional[bool] = Field(None, description="是否已配置 API 密钥（列表/详情脱敏）")
 
 
+class ClientCreateResponse(ClientResponse):
+    """创建客户响应，一次性返回明文 API 密钥。"""
+    key: str | None = Field(None, description="API 密钥（仅创建时返回一次）")
+
+
 class ClientListResponse(BaseModel):
     """
     客户分页列表响应

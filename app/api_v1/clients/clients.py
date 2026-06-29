@@ -34,7 +34,7 @@ from app.core.security import require_admin, require_admin_or_self
 from app.core.utils import get_app_now_naive
 from app.models.models import User, Client, UserRole, Product
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
-from app.schemas.client import ClientCreate, ClientUpdate, ClientResponse
+from app.schemas.client import ClientCreate, ClientUpdate, ClientResponse, ClientCreateResponse
 
 # 创建路由实例
 router = APIRouter()
@@ -42,22 +42,23 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _client_public_dict(client: Client, *, user_full_name: str | None = None) -> dict:
-    """构建不含明文 API 密钥的客户响应字典。"""
+def _client_public_dict(client: Client, *, user_full_name: str | None = None) -> ClientResponse:
+    """构建不含明文 API 密钥的客户响应。"""
     data = ClientResponse.model_validate(client).model_dump()
-    data["has_api_key"] = bool(data.pop("key", None) or client.key)
+    data.pop("key", None)
+    data["has_api_key"] = bool(client.key)
     if user_full_name is not None:
         data["user_full_name"] = user_full_name
     elif client.user:
         data["user_full_name"] = client.user.full_name
-    return data
+    return ClientResponse.model_validate(data)
 
 
-def _client_create_dict(client: Client) -> dict:
+def _client_create_dict(client: Client) -> ClientCreateResponse:
     """创建客户时一次性返回明文密钥，其余场景使用 _client_public_dict。"""
-    data = _client_public_dict(client)
+    data = _client_public_dict(client).model_dump()
     data["key"] = client.key
-    return data
+    return ClientCreateResponse.model_validate(data)
 
 
 # 快速更新客户开关的请求模型
@@ -159,7 +160,7 @@ async def get_client_api_key_admin(
     return ResponseBaseSchema.success(data={"key": client.key})
 
 
-@router.post("/", response_model=ResponseBaseSchema[ClientResponse], summary="创建客户")
+@router.post("/", response_model=ResponseBaseSchema[ClientCreateResponse], summary="创建客户")
 async def create_client(
         request: Request,
         client_in: ClientCreate,
