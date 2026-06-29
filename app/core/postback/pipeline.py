@@ -133,7 +133,7 @@ async def deactivate_short_links_on_cap_exceeded(
     return count
 
 
-async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[float, Any]:
+async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[float, Any, bool]:
     """
     流水线步骤：按扣量规则计算最终 payout，写入 ctx.final_payout。
 
@@ -141,7 +141,7 @@ async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[float, Any]
         ctx: 流水线上下文
 
     Returns:
-        (final_payout, discount_info)：扣量详情由 DiscountChecker 返回
+        (final_payout, discount_info, skip_save_and_forward)
     """
     offer_id, publisher_id, advertiser_id = attribution_ids_from_association(ctx.click_association)
     original = ctx.normalized_data.get("payout") or 0.0
@@ -157,7 +157,7 @@ async def step_apply_discount(ctx: PostbackPipelineContext) -> Tuple[float, Any]
     )
     ctx.final_payout = final_payout
     ctx.skip_save_and_forward = skip_save
-    return final_payout, info
+    return final_payout, info, skip_save
 
 
 async def step_save_conversion(ctx: PostbackPipelineContext) -> PostbackConversion:

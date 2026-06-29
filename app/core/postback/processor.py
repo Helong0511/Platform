@@ -166,10 +166,13 @@ class PostbackProcessor:
             logger.info(f"Cap 检查结果：{cap_ok}, 状态：{conversion_status}")
 
             logger.info("=== 第 7 步：扣量计算 ===")
-            final_payout, deduction_info = await step_apply_discount(pipe_ctx)
-            logger.info(f"扣量计算结果：final_payout={final_payout}, 扣量信息：{deduction_info}")
+            final_payout, deduction_info, skip_save_and_forward = await step_apply_discount(pipe_ctx)
+            logger.info(
+                f"扣量计算结果：final_payout={final_payout}, "
+                f"skip_save={skip_save_and_forward}, 扣量信息：{deduction_info}"
+            )
 
-            if pipe_ctx.skip_save_and_forward:
+            if skip_save_and_forward:
                 await db.commit()
                 logger.info("扣量命中，已记录日志，跳过入库与下游转发")
                 return {

@@ -80,7 +80,8 @@ class CapChecker:
             commit: 为 False 时仅 flush，由调用方统一 commit（与转化入库同事务）
         """
         if not offer_id:
-            return False
+            logger.debug("没有 Offer ID，跳过 Cap 计数递增")
+            return True
 
         try:
             passed = await increment_cap_count(
