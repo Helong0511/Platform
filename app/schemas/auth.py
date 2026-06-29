@@ -6,7 +6,7 @@
 from pydantic import Field
 
 # Python 3.10+ 使用内置类型注解
-from app.core.constants import BCRYPT_MAX_PASSWORD_LENGTH
+from app.core.constants import BCRYPT_MAX_PASSWORD_LENGTH, PASSWORD_MIN_LENGTH
 from app.schemas.base import BaseSchema
 
 
@@ -69,7 +69,11 @@ class LoginRequest(BaseSchema):
     API 请求体，描述客户端提交的参数格式与约束。
     """
     username: str = Field(..., min_length=3, max_length=50)
-    password: str = Field(..., max_length=BCRYPT_MAX_PASSWORD_LENGTH)
+    password: str = Field(
+        ...,
+        min_length=PASSWORD_MIN_LENGTH,
+        max_length=BCRYPT_MAX_PASSWORD_LENGTH,
+    )
 
 
 class RefreshTokenRequest(BaseSchema):
