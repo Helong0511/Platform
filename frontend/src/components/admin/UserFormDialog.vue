@@ -74,14 +74,14 @@
               v-model="userForm.password"
               name="password"
               type="password"
-              :placeholder="!currentUserId ? '请输入密码（至少8位，最多72字符）' : '留空则不修改密码'"
+              :placeholder="!currentUserId ? '请输入密码（至少6位，最多72字符）' : '留空则不修改密码'"
               show-password
               clearable
               maxlength="72"
             />
             <div v-if="!currentUserId" class="form-hint form-hint-offset">
               <el-icon :size="16"><InfoFilled /></el-icon>
-              <span>密码长度限制：8-72个字符（bcrypt算法限制）</span>
+              <span>密码长度限制：6-72个字符（bcrypt算法限制）</span>
             </div>
           </el-form-item>
         </el-col>

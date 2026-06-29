@@ -39,7 +39,7 @@
           <el-input 
             v-model="passwordForm.newPassword" 
             type="password" 
-            placeholder="请输入新密码（至少8位）" 
+            placeholder="请输入新密码（至少6位）" 
             show-password 
             clearable
             style="max-width: 400px;"
