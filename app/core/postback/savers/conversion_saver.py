@@ -155,4 +155,4 @@ class ConversionSaver:
             
         except Exception as e:
             logger.error(f"更新 Click 表 conversion_id 失败：{e}", exc_info=True)
-            raise
+            return False

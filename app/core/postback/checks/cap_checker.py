@@ -88,7 +88,7 @@ class CapChecker:
                 publisher_id=publisher_id,
                 advertiser_id=advertiser_id,
                 db=db,
-                session_flush=commit,
+                session_flush=True,
             )
             if not passed:
                 logger.warning(

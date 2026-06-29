@@ -178,13 +178,9 @@ async def step_save_conversion(ctx: PostbackPipelineContext) -> PostbackConversi
         db=ctx.db,
     )
     if ctx.click_association and ctx.conversion:
-        click_updated = await ConversionSaver.update_click_conversion(
+        await ConversionSaver.update_click_conversion(
             click_association=ctx.click_association,
             conversion_id=ctx.conversion.id,
             db=ctx.db,
         )
-        if not click_updated:
-            raise RuntimeError(
-                f"Click 表 conversion_id 更新失败：click_id={ctx.click_association.get('click_id')}"
-            )
     return ctx.conversion
