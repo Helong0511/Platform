@@ -5,6 +5,7 @@ SQL 查询条件优化工具。
 
 在系统中的位置：``app.core.query_utils``，由报表与广告数据查询 Service 引用。
 """
+import time
 from calendar import monthrange
 from datetime import date, datetime
 from sqlalchemy import Column, and_, or_, text, func, literal_column, case, select
@@ -163,6 +164,17 @@ def apply_date_range_filter(
     return query
 
 
+# 产品分配表开关缓存（全局布尔，变更频率极低）
+_ASSIGNMENT_TABLE_CACHE: tuple[bool, float] | None = None
+_ASSIGNMENT_TABLE_CACHE_TTL = 1800  # 30 分钟
+
+
+def invalidate_assignment_table_cache() -> None:
+    """产品分配记录增删后调用，使 check_use_assignment_table 重新探测。"""
+    global _ASSIGNMENT_TABLE_CACHE
+    _ASSIGNMENT_TABLE_CACHE = None
+
+
 async def check_use_assignment_table(db) -> bool:
     """
     检查是否应该使用产品分配历史表
@@ -176,12 +188,20 @@ async def check_use_assignment_table(db) -> bool:
     Returns:
         bool: 如果应该使用分配历史表返回 True，否则返回 False
     """
+    global _ASSIGNMENT_TABLE_CACHE
+    now = time.monotonic()
+    if _ASSIGNMENT_TABLE_CACHE is not None:
+        cached_value, cached_at = _ASSIGNMENT_TABLE_CACHE
+        if now - cached_at < _ASSIGNMENT_TABLE_CACHE_TTL:
+            return cached_value
+
     try:
-        
         test_query = select(func.count(ProductAssignment.id))
         test_result = await db.execute(test_query)
         assignment_count = test_result.scalar() or 0
-        return assignment_count > 0
+        use_table = assignment_count > 0
+        _ASSIGNMENT_TABLE_CACHE = (use_table, now)
+        return use_table
     except Exception:
         # 如果查询失败（例如表不存在），返回 False，使用旧的查询方式
         return False

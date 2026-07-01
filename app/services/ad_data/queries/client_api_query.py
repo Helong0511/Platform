@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 from sqlalchemy import and_, func, literal_column, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.constants import CLIENT_API_DEFAULT_PAGE_SIZE, CLIENT_API_MAX_PAGE_SIZE
 from app.core.query_utils import check_use_assignment_table, date_range_condition
 from app.models.models import AdData, Client, CountryInfo, Product, ProductAssignment
 from app.services.ad_data.queries.dimension_filter import (
@@ -41,17 +42,23 @@ class ClientAdDataQuery:
         end_date: date,
         data_type: str,
         dimension: Optional[str] = None,
-    ) -> list[dict[str, Any]]:
-        """查询并返回可映射为 AdDataItemResponse 的字典列表。"""
+        page: int = 1,
+        page_size: int = CLIENT_API_DEFAULT_PAGE_SIZE,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """查询并返回 (可映射为 AdDataItemResponse 的字典列表, 总条数)。"""
+        page_size = min(max(1, page_size), CLIENT_API_MAX_PAGE_SIZE)
+        page = max(1, page)
+        offset = (page - 1) * page_size
+
         use_assignment_table = await check_use_assignment_table(self.db)
         dim = parse_optional_dimension(dimension)
 
         if data_type == "day":
             return await self._fetch_daily_summary(
-                client, start_date, end_date, use_assignment_table, dim
+                client, start_date, end_date, use_assignment_table, dim, offset, page_size
             )
         return await self._fetch_detail(
-            client, start_date, end_date, use_assignment_table, dim
+            client, start_date, end_date, use_assignment_table, dim, offset, page_size
         )
 
     def _apply_client_product_scope(self, query, client: Client, use_assignment_table: bool):
@@ -105,6 +112,19 @@ class ClientAdDataQuery:
             query = query.where(dim_filter)
         return query
 
+    async def _count_scoped_rows(
+        self,
+        client: Client,
+        start_date: date,
+        end_date: date,
+        use_assignment_table: bool,
+        dimension: Optional[str],
+    ) -> int:
+        count_query = select(func.count(AdData.id))
+        count_query = self._apply_client_product_scope(count_query, client, use_assignment_table)
+        count_query = self._apply_date_and_dimension(count_query, start_date, end_date, dimension)
+        return int((await self.db.execute(count_query)).scalar() or 0)
+
     async def _fetch_detail(
         self,
         client: Client,
@@ -112,7 +132,13 @@ class ClientAdDataQuery:
         end_date: date,
         use_assignment_table: bool,
         dimension: Optional[str],
-    ) -> list[dict[str, Any]]:
+        offset: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        total = await self._count_scoped_rows(
+            client, start_date, end_date, use_assignment_table, dimension
+        )
+
         query = select(AdData, Product.name, CountryInfo.country_name_zh)
         query = self._apply_client_product_scope(query, client, use_assignment_table)
         query = query.outerjoin(
@@ -121,19 +147,13 @@ class ClientAdDataQuery:
             == CountryInfo.alpha_2_code.collate("utf8mb4_unicode_ci"),
         )
         query = self._apply_date_and_dimension(query, start_date, end_date, dimension)
-        query = query.order_by(AdData.date.asc())
+        query = query.order_by(AdData.date.asc()).offset(offset).limit(page_size)
 
         rows = (await self.db.execute(query)).all()
-        result: list[dict[str, Any]] = []
 
+        result: list[dict[str, Any]] = []
         for row in rows:
-            if len(row) >= 3:
-                ad_data, product_name, country_name_zh = row
-            elif len(row) >= 2:
-                ad_data, product_name = row
-                country_name_zh = None
-            else:
-                continue
+            ad_data, product_name, country_name_zh = row[0], row[1], row[2]
 
             date_obj = ad_data.date.date() if hasattr(ad_data.date, "date") else ad_data.date
             date_str = date_obj.isoformat()
@@ -203,7 +223,7 @@ class ClientAdDataQuery:
                     "revenue": float(round(ad_data.revenue_after_deduct, 2)),
                 }
             )
-        return result
+        return result, total
 
     async def _fetch_daily_summary(
         self,
@@ -212,15 +232,34 @@ class ClientAdDataQuery:
         end_date: date,
         use_assignment_table: bool,
         dimension: Optional[str],
-    ) -> list[dict[str, Any]]:
-        # 未传 dimension：保持历史按「日期+产品+广告单元」汇总
+        offset: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int]:
         if dimension is None:
             return await self._fetch_daily_summary_legacy(
-                client, start_date, end_date, use_assignment_table
+                client, start_date, end_date, use_assignment_table, offset, page_size
             )
         return await self._fetch_daily_summary_by_dimension(
-            client, start_date, end_date, use_assignment_table, dimension
+            client, start_date, end_date, use_assignment_table, dimension, offset, page_size
         )
+
+    async def _paginate_grouped_query(
+        self,
+        query,
+        offset: int,
+        page_size: int,
+    ) -> tuple[list[Any], int]:
+        """对分组聚合结果分页：总数与当前页均基于同一 subquery。"""
+        subq = query.subquery()
+        total = int((await self.db.execute(select(func.count()).select_from(subq))).scalar() or 0)
+        page_query = (
+            select(subq)
+            .order_by(subq.c.date.asc(), subq.c.product_id.asc())
+            .offset(offset)
+            .limit(page_size)
+        )
+        rows = (await self.db.execute(page_query)).all()
+        return rows, total
 
     async def _fetch_daily_summary_legacy(
         self,
@@ -228,7 +267,9 @@ class ClientAdDataQuery:
         start_date: date,
         end_date: date,
         use_assignment_table: bool,
-    ) -> list[dict[str, Any]]:
+        offset: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int]:
         query = select(
             func.date(AdData.date).label("date"),
             Product.id.label("product_id"),
@@ -251,7 +292,8 @@ class ClientAdDataQuery:
             AdData.ad_unit,
         ).order_by(func.date(AdData.date).asc(), Product.id.asc())
 
-        return [self._daily_row_to_dict(row, dim=None) for row in (await self.db.execute(query)).all()]
+        rows, total = await self._paginate_grouped_query(query, offset, page_size)
+        return [self._daily_row_to_dict(row, dim=None) for row in rows], total
 
     async def _fetch_daily_summary_by_dimension(
         self,
@@ -260,8 +302,9 @@ class ClientAdDataQuery:
         end_date: date,
         use_assignment_table: bool,
         dimension: str,
-    ) -> list[dict[str, Any]]:
-        # 每日汇总不按国家分行；ad_unit_country 汇总所有国家到日期+产品+广告单元。
+        offset: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int]:
         group_by_ad_unit = dimension == "ad_unit" or is_cross_dimension(dimension)
 
         select_cols: list[Any] = [
@@ -297,9 +340,8 @@ class ClientAdDataQuery:
             func.date(AdData.date).asc(), Product.id.asc()
         )
 
-        rows = (await self.db.execute(query)).all()
-
-        return [self._daily_row_to_dict(row, dim=dimension) for row in rows]
+        rows, total = await self._paginate_grouped_query(query, offset, page_size)
+        return [self._daily_row_to_dict(row, dim=dimension) for row in rows], total
 
     def _daily_row_to_dict(
         self,

@@ -13,22 +13,24 @@ import asyncio
 import logging
 from calendar import monthrange
 from datetime import date, datetime
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.api_auth import verify_client_request
 from app.core.audit_log import log_user_action, commit_audit_log
-from app.core.telegram import send_telegram_message_async
-from app.core.database import get_db
+from app.core.constants import CLIENT_API_DEFAULT_PAGE_SIZE, CLIENT_API_MAX_PAGE_SIZE
+from app.core.database import AsyncSessionLocal, get_db
 from app.core.errors import ErrorCode
 from app.core.exceptions import raise_api_exception
 from app.core.security import get_current_user
-from app.core.utils import get_user_name_by_id
+from app.core.telegram import send_telegram_message_async
+from app.core.utils import get_client_ip
 from app.models.models import Client, Product, User, UserRole
-from app.schemas.base import ResponseBaseSchema
+from app.schemas.base import PaginatedResponseBaseSchema, ResponseBaseSchema
 from app.services.ad_data.queries.client_api_query import ClientAdDataQuery
 from app.services.ad_data.queries.dimension_filter import ensure_valid_optional_dimension
 
@@ -36,6 +38,74 @@ from app.services.ad_data.queries.dimension_filter import ensure_valid_optional_
 router = APIRouter()
 # 获取日志记录器
 logger = logging.getLogger(__name__)
+
+
+async def _get_client_user_names(db: AsyncSession, user_id: int | None) -> tuple[str, str]:
+    """一次查询获取 username 与展示用 full_name。"""
+    if not user_id:
+        return "CLIENT_None", "CLIENT_None"
+    try:
+        result = await db.execute(
+            select(User.username, User.full_name).where(User.id == user_id)
+        )
+        row = result.first()
+        if not row:
+            return f"CLIENT_{user_id}", f"CLIENT_{user_id}"
+        username = row.username or f"CLIENT_{user_id}"
+        full_name = row.full_name or username
+        return username, full_name
+    except Exception:
+        return f"CLIENT_{user_id}", f"CLIENT_{user_id}"
+
+
+async def _background_client_api_side_effects(
+    *,
+    action_type: str,
+    user_id: int | None,
+    username: str,
+    resource_type: str,
+    resource_id: int | None,
+    resource_name: str,
+    ip_address: str,
+    user_agent: str,
+    success: bool,
+    details: dict[str, Any],
+    request_method: str,
+    request_path: str,
+    telegram_msg: str | None = None,
+) -> None:
+    """审计写库与 Telegram 通知均在响应返回后执行，避免阻塞客户 API。"""
+    try:
+        async with AsyncSessionLocal() as bg_db:
+            await log_user_action(
+                db=bg_db,
+                action_type=action_type,
+                user_id=user_id,
+                username=username,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                resource_name=resource_name,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                request_method=request_method,
+                request_path=request_path,
+                success=success,
+                details=details,
+            )
+            await commit_audit_log(bg_db)
+    except Exception as log_error:
+        logger.warning(f"后台记录客户API访问日志失败: {log_error}")
+
+    if telegram_msg:
+        try:
+            await asyncio.wait_for(
+                send_telegram_message_async(telegram_msg),
+                timeout=15.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("后台发送 Telegram 通知超时")
+        except Exception as notify_error:
+            logger.warning(f"后台发送 Telegram 通知失败: {notify_error}")
 
 
 @router.get(
@@ -95,6 +165,13 @@ class ClientDataRequest(ClientAPIBaseRequest):
     )
     start_date: str | None = Field(default=None, description="起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天")
     end_date: str | None = Field(default=None, description="终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天")
+    page: int | None = Field(default=None, ge=1, description="页码，从 1 开始；不传默认 1")
+    page_size: int | None = Field(
+        default=None,
+        ge=1,
+        le=CLIENT_API_MAX_PAGE_SIZE,
+        description=f"每页条数；不传默认 {CLIENT_API_DEFAULT_PAGE_SIZE}，最大 {CLIENT_API_MAX_PAGE_SIZE}",
+    )
 
 
 # ====== 响应模型 ======
@@ -160,6 +237,7 @@ class AdDataItemResponse(BaseModel):
              summary="查询所有产品名称")
 async def get_client_products(
         request: Request,
+        background_tasks: BackgroundTasks,
         api_request: ClientProductsRequest,
         db: AsyncSession = Depends(get_db)
 ):
@@ -191,37 +269,28 @@ async def get_client_products(
 
         logger.info(f"客户 {client.id} 查询产品列表，返回 {len(product_list)} 个产品")
 
-        # 记录API访问日志
-        # ---------- 异常处理 ----------
-        try:
-            # 获取客户关联的用户名（如果有）
-            user_id = client.user_id
-            username = await get_user_name_by_id(db, client.user_id, "CLIENT", prefer_full_name=False)
+        username, _ = await _get_client_user_names(db, client.user_id)
+        background_tasks.add_task(
+            _background_client_api_side_effects,
+            action_type="API_ACCESS",
+            user_id=client.user_id,
+            username=username,
+            resource_type="PRODUCT",
+            resource_id=None,
+            resource_name="产品列表",
+            ip_address=get_client_ip(request),
+            user_agent=request.headers.get("user-agent", "")[:500],
+            success=True,
+            request_method=request.method,
+            request_path=request.url.path,
+            details={
+                "client_id": client.id,
+                "client_name": client.company_name,
+                "product_count": len(product_list),
+                "api_endpoint": "/client_products",
+            },
+        )
 
-            await log_user_action(
-                db=db,
-                action_type="API_ACCESS",
-                user_id=user_id,
-                username=username,
-                resource_type="PRODUCT",
-                resource_id=None,
-                resource_name="产品列表",
-                request=request,
-                success=True,
-                details={
-                    "client_id": client.id,
-                    "client_name": client.company_name,
-                    "product_count": len(product_list),
-                    "api_endpoint": "/client_products"
-                }
-            )
-            await commit_audit_log(db)
-        except Exception as log_error:
-            # 日志记录失败不应该影响API响应
-            logger.warning(f"记录客户API访问日志失败: {log_error}")
-
-        # 确保data字段不为None（Java客户端兼容性）
-        # 如果列表为空，返回空列表[]而不是None
         return ResponseBaseSchema.success(
             data=product_list if product_list else [],  # 确保返回空列表而不是None
             message=f"成功获取 {len(product_list)} 个产品"
@@ -238,9 +307,14 @@ async def get_client_products(
         )
 
 
-@router.post("/client_data", response_model=ResponseBaseSchema[list[AdDataItemResponse]], summary="查询广告数据")
+@router.post(
+    "/client_data",
+    response_model=PaginatedResponseBaseSchema[list[AdDataItemResponse]],
+    summary="查询广告数据",
+)
 async def get_client_data(
         request: Request,
+        background_tasks: BackgroundTasks,
         api_request: ClientDataRequest,
         db: AsyncSession = Depends(get_db)
 ):
@@ -254,6 +328,7 @@ async def get_client_data(
     - dimension: 统计维度（可选），'country' / 'ad_unit' / 'ad_unit_country'（'country_ad_unit' 为兼容别名）；不传则保持历史行为
     - start_date: 起始日期（格式：YYYY-MM-DD），可选，不提供则使用当前月第一天
     - end_date: 终止日期（格式：YYYY-MM-DD），可选，不提供则使用当前月最后一天
+    - page / page_size: 分页参数（可选）；不传时默认第 1 页、每页 {CLIENT_API_DEFAULT_PAGE_SIZE} 条
     - sign: MD5签名（必填），包含所有非空参数
     
     返回说明：
@@ -279,7 +354,15 @@ async def get_client_data(
             # 签名须与请求体原文一致；country_ad_unit 等别名在查询前才规范化
             dimension=api_request.dimension,
             start_date=api_request.start_date,
-            end_date=api_request.end_date
+            end_date=api_request.end_date,
+            page=api_request.page,
+            page_size=api_request.page_size,
+        )
+
+        page = api_request.page or 1
+        page_size = min(
+            api_request.page_size or CLIENT_API_DEFAULT_PAGE_SIZE,
+            CLIENT_API_MAX_PAGE_SIZE,
         )
 
         # 确定日期范围
@@ -331,93 +414,80 @@ async def get_client_data(
                 detail="data_type 参数无效，仅支持 'all' 或 'day'",
             )
 
-        raw_rows = await ClientAdDataQuery(db).fetch(
+        raw_rows, total = await ClientAdDataQuery(db).fetch(
             client=client,
             start_date=start_date_obj,
             end_date=end_date_obj,
             data_type=data_type,
             dimension=parsed_dimension,
+            page=page,
+            page_size=page_size,
         )
         data_list = [AdDataItemResponse(**row) for row in raw_rows]
 
         logger.info(
             f"客户 {client.id} 查询广告数据（data_type={data_type}, dimension={parsed_dimension or '未指定'}, "
-            f"{start_date_obj} 至 {end_date_obj}），"
-            f"返回 {len(data_list)} 条记录"
+            f"{start_date_obj} 至 {end_date_obj}，page={page}, page_size={page_size}），"
+            f"返回 {len(data_list)}/{total} 条记录"
         )
 
-        # 记录API访问日志
-        # ---------- 异常处理 ----------
-        try:
-            # 获取客户关联的用户名（如果有）
-            user_id = client.user_id
-            username = await get_user_name_by_id(db, client.user_id, "CLIENT", prefer_full_name=False)
+        username, user_full_name = await _get_client_user_names(db, client.user_id)
 
-            await log_user_action(
-                db=db,
-                action_type="API_ACCESS",
-                user_id=user_id,
-                username=username,
-                resource_type="AD_DATA",
-                resource_id=None,
-                resource_name="广告数据",
-                request=request,
-                success=True,
-                details={
-                    "client_id": client.id,
-                    "client_name": client.company_name,
-                    "data_count": len(data_list),
-                    "date_range": {
-                        "start": start_date_obj.isoformat(),
-                        "end": end_date_obj.isoformat()
-                    },
-                    "data_type": data_type,
-                    "dimension": parsed_dimension,
-                    "api_endpoint": "/client_data"
-                }
-            )
-            await commit_audit_log(db)
-        except Exception as log_error:
-            # 日志记录失败不应该影响API响应
-            logger.warning(f"记录客户API访问日志失败: {log_error}")
-
-        # 发送 Telegram 通知（仅在成功获取数据时）
-        # ---------- 条件分支 ----------
+        telegram_msg = None
         if len(data_list) > 0:
-
-            # 获取用户全名（优先使用 full_name，否则使用 username）
-            user_full_name = await get_user_name_by_id(db, client.user_id, "CLIENT", prefer_full_name=True)
-
-            # 构建通知消息
-            telegram_msg = f"📡 API 数据获取成功\n\n"
-            telegram_msg += f"客户: {user_full_name}\n"
-            telegram_msg += f"数据类型: {data_type}\n"
+            telegram_msg = (
+                f"📡 API 数据获取成功\n\n"
+                f"客户: {user_full_name}\n"
+                f"数据类型: {data_type}\n"
+            )
             if parsed_dimension:
                 telegram_msg += f"统计维度: {parsed_dimension}\n"
-            telegram_msg += f"✅ 成功获取: {len(data_list)} 条数据"
-
-            # ---------- 条件分支 ----------
+            telegram_msg += f"✅ 成功获取: {len(data_list)}/{total} 条数据"
             if start_date_obj and end_date_obj:
-                telegram_msg += f"\n日期范围: {start_date_obj.strftime('%Y-%m-%d')} 至 {end_date_obj.strftime('%Y-%m-%d')}"
-
-            # 使用 await 发送消息，设置超时避免阻塞太久
-            # send_telegram_message 内部已有完整的容错处理
-            # ---------- 异常处理 ----------
-            try:
-                await asyncio.wait_for(
-                    send_telegram_message_async(telegram_msg),
-                    timeout=5.0
+                telegram_msg += (
+                    f"\n日期范围: {start_date_obj.strftime('%Y-%m-%d')} 至 "
+                    f"{end_date_obj.strftime('%Y-%m-%d')}"
                 )
-                logger.info(f"Telegram 通知发送成功，客户: {user_full_name}, 数据条数: {len(data_list)}")
-            except asyncio.TimeoutError:
-                logger.warning(f"发送 Telegram 通知超时，客户: {user_full_name}")
-            # 其他异常已在 send_telegram_message 内部处理，这里不需要捕获
+            if total > len(data_list):
+                telegram_msg += f"\n分页: 第 {page} 页，每页 {page_size} 条"
 
-        # 确保data字段不为None（Java客户端兼容性）
-        # 如果列表为空，返回空列表[]而不是None
-        return ResponseBaseSchema.success(
-            data=data_list if data_list else [],  # 确保返回空列表而不是None
-            message=f"成功获取 {len(data_list)} 条广告数据"
+        background_tasks.add_task(
+            _background_client_api_side_effects,
+            action_type="API_ACCESS",
+            user_id=client.user_id,
+            username=username,
+            resource_type="AD_DATA",
+            resource_id=None,
+            resource_name="广告数据",
+            ip_address=get_client_ip(request),
+            user_agent=request.headers.get("user-agent", "")[:500],
+            success=True,
+            request_method=request.method,
+            request_path=request.url.path,
+            details={
+                "client_id": client.id,
+                "client_name": client.company_name,
+                "data_count": len(data_list),
+                "total_count": total,
+                "page": page,
+                "page_size": page_size,
+                "date_range": {
+                    "start": start_date_obj.isoformat(),
+                    "end": end_date_obj.isoformat(),
+                },
+                "data_type": data_type,
+                "dimension": parsed_dimension,
+                "api_endpoint": "/client_data",
+            },
+            telegram_msg=telegram_msg,
+        )
+
+        return PaginatedResponseBaseSchema.success(
+            data=data_list if data_list else [],
+            total=total,
+            page=page,
+            page_size=page_size,
+            message=f"成功获取 {len(data_list)} 条广告数据（共 {total} 条）",
         )
 
     except HTTPException:

@@ -162,7 +162,7 @@ function add32(a, b) {
  * 构建待签名字符串（与后端 _build_sign_string 一致）。
  */
 export function buildClientApiSignString(
-  { clientId, reqTime, dataType, dimension, startDate, endDate },
+  { clientId, reqTime, dataType, dimension, startDate, endDate, page, pageSize },
   secretKey
 ) {
   const params = {
@@ -180,6 +180,12 @@ export function buildClientApiSignString(
   }
   if (endDate) {
     params.end_date = String(endDate);
+  }
+  if (page != null) {
+    params.page = String(page);
+  }
+  if (pageSize != null) {
+    params.page_size = String(pageSize);
   }
   const sortedKeys = Object.keys(params).sort();
   return (

@@ -48,6 +48,8 @@ async def log_user_action(
         resource_id: Optional[int] = None,
         resource_name: Optional[str] = None,
         request: Optional[Request] = None,
+        request_method: Optional[str] = None,
+        request_path: Optional[str] = None,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         status_code: Optional[int] = None,
@@ -108,8 +110,8 @@ async def log_user_action(
             final_ip_address = get_client_ip(request)
 
         # 确定请求信息
-        final_request_method = None
-        final_request_path = None
+        final_request_method = request_method
+        final_request_path = request_path
         final_user_agent = user_agent[:500] if user_agent else None
         if request:
             final_request_method = request.method

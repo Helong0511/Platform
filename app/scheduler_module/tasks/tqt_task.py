@@ -1,7 +1,6 @@
 """
 TQT 上游广告数据拉取定时任务。
 """
-import hashlib
 import logging
 
 from app.core.config import settings
@@ -32,14 +31,6 @@ TQT_FIELD_MAPPING = {
 }
 
 
-def generate_sign(params: dict, api_secret: str) -> str:
-    """根据 TQT API 规则生成 MD5 签名。"""
-    sorted_items = sorted((k, v) for k, v in params.items() if k != "sign")
-    query_str = "".join(f"{k}{v}" for k, v in sorted_items)
-    full_str = f"{api_secret}{query_str}{api_secret}".lower()
-    return hashlib.md5(full_str.encode("utf-8")).hexdigest().lower()
-
-
 async def tqt_api_task(
     start_date: str | None = None,
     end_date: str | None = None,
@@ -59,15 +50,14 @@ async def tqt_api_task(
             "appKey": tqt_app_key,
             "startDate": tqt_start,
             "endDate": tqt_end,
-            "page": 1,
             "pageSize": 1000,
             "type": "country",
         }
-        tqt_params["sign"] = generate_sign(tqt_params, tqt_api_secret)
         return await fetch_tqt_rows(
             url=TQT_URL,
             params=tqt_params,
             headers=TQT_HEADERS,
+            api_secret=tqt_api_secret,
         )
 
     await run_upstream_import_task(

@@ -32,6 +32,11 @@ REDIS_MAX_CONNECTIONS_DEFAULT = 20
 DEFAULT_PAGE_SIZE = 20
 # 最大每页大小
 MAX_PAGE_SIZE = 100
+# 客户开放 API 默认/最大每页（独立于 Web 后台分页上限）
+CLIENT_API_DEFAULT_PAGE_SIZE = 1000
+CLIENT_API_MAX_PAGE_SIZE = 5000
+# 客户开放 API 请求时间戳容差（秒）
+CLIENT_API_TIME_TOLERANCE_SECONDS = 10
 
 # ====== 计算相关常量 ======
 # 百分比乘数：用于将小数转换为百分比（乘以100）

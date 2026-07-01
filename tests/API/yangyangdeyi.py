@@ -30,7 +30,7 @@ from app.core.config import settings
 from app.scheduler_module.task_utils import resolve_upstream_date_range
 from app.scheduler_module.tasks.tbsj_task import TBSJ_FIELD_MAPPING, TBSJ_HEADERS, TBSJ_URL
 from app.scheduler_module.upstream_fetch import (
-    _should_break_tbsj_pagination,
+    _should_break_upstream_pagination,
     format_tbsj_datetime_range,
 )
 
@@ -115,7 +115,14 @@ def fetch_adunit_all(token: str, start_date: str, end_date: str) -> tuple[list, 
             all_rows.extend(rows)
 
         total = int(block.get("total") or total)
-        if _should_break_tbsj_pagination(rows, total=total, collected=len(all_rows)):
+        if _should_break_upstream_pagination(
+            rows,
+            total=total,
+            collected=len(all_rows),
+            page=page,
+            total_pages=0,
+            limit=limit,
+        ):
             break
         page += 1
 

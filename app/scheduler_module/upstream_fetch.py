@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional
 
 from app.scheduler_module.upstream_http import get_json, post_json, raise_unless_api_success
 
+UPSTREAM_PAGINATION_MAX_PAGES = 500
+
 ZHISUO_UNIT_PATH = "/api/channelunit"
 ZHISUO_COUNTRY_PATH = "/api/channelcountry"
 
@@ -29,6 +31,50 @@ def build_zhisuo_sign(params: Dict[str, Any]) -> str:
     sorted_params = sorted(params.items())
     query = "&".join(f"{k}={v}" for k, v in sorted_params)
     return hashlib.md5(query.encode("utf-8")).hexdigest()
+
+
+def build_tqt_sign(params: Dict[str, Any], api_secret: str) -> str:
+    """TQT 报表接口 MD5 签名（与 tqt_task.generate_sign 规则一致）。"""
+    sorted_items = sorted((k, v) for k, v in params.items() if k != "sign")
+    query_str = "".join(f"{k}{v}" for k, v in sorted_items)
+    full_str = f"{api_secret}{query_str}{api_secret}".lower()
+    return hashlib.md5(full_str.encode("utf-8")).hexdigest().lower()
+
+
+def _should_break_upstream_pagination(
+    rows: Any,
+    *,
+    total: int,
+    collected: int,
+    page: int,
+    total_pages: int,
+    limit: int,
+    max_pages: int = UPSTREAM_PAGINATION_MAX_PAGES,
+) -> bool:
+    """
+    上游 API 分页终止判断（通用）。
+
+    - 空页立即停止
+    - 累计达到 total 时停止
+    - 存在 total_pages 时以其为主；已到声明末页但累计未达 total 则继续翻页
+    - 无 total_pages 时依据 total 与本页是否满 limit 判断
+    - 超过 max_pages 强制停止，防止死循环
+    """
+    if page > max_pages:
+        return True
+    if not isinstance(rows, list) or not rows:
+        return True
+    if total > 0 and collected >= total:
+        return True
+    if total_pages > 0:
+        if page < total_pages:
+            return False
+        if total > 0 and collected < total:
+            return False
+        return len(rows) < limit
+    if total > 0:
+        return False
+    return len(rows) < limit
 
 
 async def fetch_huguang_rows(
@@ -61,15 +107,40 @@ async def fetch_skymobi_rows(
     api_id: str,
     api_key: str,
     date_str: str,
+    limit: int = 1000,
 ) -> List[Any]:
-    """Skymobi 按单日拉取 H5 广告数据，返回 list 字段。"""
-    url = (
-        f"https://crm.skymobi.online/api/adxh5"
-        f"?apikey={api_key}&date={date_str}&uid={api_id}&page=1&limit=1000"
-    )
-    json_data = await post_json(url, label="Skymobi API")
-    raise_unless_api_success(json_data, {0}, label="Skymobi API", code_key="ret")
-    return json_data.get("list") or []
+    """Skymobi 按单日拉取 H5 广告数据，全量分页合并 list。"""
+    all_rows: List[Any] = []
+    page = 1
+
+    while True:
+        url = (
+            f"https://crm.skymobi.online/api/adxh5"
+            f"?apikey={api_key}&date={date_str}&uid={api_id}&page={page}&limit={limit}"
+        )
+        json_data = await post_json(url, label=f"Skymobi API (page={page})")
+        raise_unless_api_success(json_data, {0}, label="Skymobi API", code_key="ret")
+
+        rows = json_data.get("list") or []
+        if isinstance(rows, list):
+            all_rows.extend(rows)
+
+        total = int(json_data.get("total") or json_data.get("totalRow") or 0)
+        total_pages = int(
+            json_data.get("totalPage") or json_data.get("total_pages") or 0
+        )
+        if _should_break_upstream_pagination(
+            rows,
+            total=total,
+            collected=len(all_rows),
+            page=page,
+            total_pages=total_pages,
+            limit=limit,
+        ):
+            break
+        page += 1
+
+    return all_rows
 
 
 async def fetch_tqt_rows(
@@ -77,18 +148,67 @@ async def fetch_tqt_rows(
     url: str,
     params: Dict[str, Any],
     headers: Dict[str, str],
+    api_secret: Optional[str] = None,
 ) -> List[Any]:
-    """TQT 拉数：兼容 state=ok 或 code=200，从 data.list 或顶层 list 取行。"""
-    json_data = await post_json(url, json_body=params, headers=headers, label="TQT API")
+    """
+    TQT 拉数：兼容 state=ok 或 code=200，从 data.list 或顶层 list 取行。
 
-    def _ok(data: Dict[str, Any]) -> bool:
-        """TQT 接口成功判定：state=ok 或 code=200。"""
-        return data.get("state") == "ok" or data.get("code") == 200
+    当提供 api_secret 时按 page/pageSize 全量分页，每页重新签名。
+    """
+    all_rows: List[Any] = []
+    page = 1
+    page_size = int(params.get("pageSize") or 1000)
+    base_params = {
+        k: v for k, v in params.items() if k not in ("page", "pageSize", "sign")
+    }
 
-    raise_unless_api_success(json_data, _ok, label="TQT API")
-    if "data" in json_data and isinstance(json_data["data"], dict):
-        return json_data["data"].get("list") or []
-    return json_data.get("list") or []
+    while True:
+        request_params = {**base_params, "page": page, "pageSize": page_size}
+        if api_secret:
+            request_params["sign"] = build_tqt_sign(request_params, api_secret)
+        elif page == 1 and "sign" in params:
+            request_params["sign"] = params["sign"]
+        else:
+            raise ValueError("TQT 分页拉数需提供 api_secret 以按页重签")
+
+        json_data = await post_json(
+            url,
+            json_body=request_params,
+            headers=headers,
+            label=f"TQT API (page={page})",
+        )
+
+        def _ok(data: Dict[str, Any]) -> bool:
+            return data.get("state") == "ok" or data.get("code") == 200
+
+        raise_unless_api_success(json_data, _ok, label="TQT API")
+
+        if "data" in json_data and isinstance(json_data["data"], dict):
+            block = json_data["data"]
+            rows = block.get("list") or []
+            total = int(block.get("totalRow") or 0)
+            total_pages = int(block.get("totalPage") or 0)
+        else:
+            block = {}
+            rows = json_data.get("list") or []
+            total = int(json_data.get("totalRow") or 0)
+            total_pages = int(json_data.get("totalPage") or 0)
+
+        if isinstance(rows, list):
+            all_rows.extend(rows)
+
+        if _should_break_upstream_pagination(
+            rows,
+            total=total,
+            collected=len(all_rows),
+            page=page,
+            total_pages=total_pages,
+            limit=page_size,
+        ):
+            break
+        page += 1
+
+    return all_rows
 
 
 async def fetch_tbsj_rows(
@@ -130,20 +250,18 @@ async def fetch_tbsj_rows(
             all_rows.extend(rows)
 
         total = int(data_block.get("total") or total)
-        if _should_break_tbsj_pagination(rows, total=total, collected=len(all_rows)):
+        if _should_break_upstream_pagination(
+            rows,
+            total=total,
+            collected=len(all_rows),
+            page=page,
+            total_pages=0,
+            limit=limit,
+        ):
             break
         page += 1
 
     return all_rows
-
-
-def _should_break_tbsj_pagination(rows: Any, *, total: int, collected: int) -> bool:
-    """TBSJ 分页终止：items 非列表、空页、或已凑齐 total 时结束。"""
-    if not isinstance(rows, list):
-        return True
-    if not rows:
-        return True
-    return total > 0 and collected >= total
 
 
 def format_tbsj_datetime_range(start: str, end: str) -> tuple[str, str]:
@@ -175,10 +293,40 @@ async def fetch_addermobi_rows(
     payload: Dict[str, Any],
     headers: Dict[str, str],
 ) -> List[Any]:
-    """Addermobi POST 拉数，status=0 为成功，经 extract_addermobi_rows 解析行。"""
-    json_data = await post_json(url, json_body=payload, headers=headers, label="Addermobi API")
-    raise_unless_api_success(json_data, {0}, label="Addermobi API", code_key="status")
-    return extract_addermobi_rows(json_data)
+    """Addermobi POST 拉数，status=0 为成功，全量分页后经 extract_addermobi_rows 解析行。"""
+    all_rows: List[Any] = []
+    page = 1
+    page_size = int(payload.get("rows") or 1000)
+    base_payload = {k: v for k, v in payload.items() if k != "page"}
+
+    while True:
+        request_payload = {**base_payload, "page": page}
+        json_data = await post_json(
+            url,
+            json_body=request_payload,
+            headers=headers,
+            label=f"Addermobi API (page={page})",
+        )
+        raise_unless_api_success(json_data, {0}, label="Addermobi API", code_key="status")
+
+        rows = extract_addermobi_rows(json_data)
+        if not isinstance(rows, list):
+            rows = []
+        all_rows.extend(rows)
+
+        total = int(json_data.get("total") or 0)
+        if _should_break_upstream_pagination(
+            rows,
+            total=total,
+            collected=len(all_rows),
+            page=page,
+            total_pages=0,
+            limit=page_size,
+        ):
+            break
+        page += 1
+
+    return all_rows
 
 
 async def fetch_zhisuo_report_rows(
@@ -227,8 +375,16 @@ async def fetch_zhisuo_report_rows(
         if isinstance(rows, list):
             all_rows.extend(rows)
 
+        total = int(data_block.get("total") or 0)
         total_pages = int(data_block.get("total_pages") or 1)
-        if page >= total_pages:
+        if _should_break_upstream_pagination(
+            rows,
+            total=total,
+            collected=len(all_rows),
+            page=page,
+            total_pages=total_pages,
+            limit=limit,
+        ):
             break
         page += 1
 
@@ -365,6 +521,7 @@ async def fetch_pomiad_rows(
     site_tasks: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
     page = 1
+    scanned_rows = 0
 
     while True:
         params = {
@@ -392,6 +549,9 @@ async def fetch_pomiad_rows(
 
         wrapper = json_data.get("data") or {}
         rows = wrapper.get("data") or []
+        if not isinstance(rows, list):
+            rows = []
+        scanned_rows += len(rows)
         for row in rows:
             site_url = row.get("site") or row.get("domain_name") or ""
             data_date = row.get("data_date") or ""
@@ -403,7 +563,14 @@ async def fetch_pomiad_rows(
                 site_tasks.append(key)
 
         total = int(wrapper.get("count") or 0)
-        if page * api_data_limit >= total or not rows:
+        if _should_break_upstream_pagination(
+            rows,
+            total=total,
+            collected=scanned_rows,
+            page=page,
+            total_pages=0,
+            limit=api_data_limit,
+        ):
             break
         page += 1
 

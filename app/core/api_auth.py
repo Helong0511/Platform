@@ -14,6 +14,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.constants import CLIENT_API_TIME_TOLERANCE_SECONDS
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.models.models import Client
@@ -29,6 +30,8 @@ def _build_sign_string(
     dimension: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
 ) -> str:
     """构建待签名字符串（MD5 与 HMAC-SHA256 共用）。"""
     params = {
@@ -43,6 +46,10 @@ def _build_sign_string(
         params["start_date"] = str(start_date)
     if end_date:
         params["end_date"] = str(end_date)
+    if page is not None:
+        params["page"] = str(page)
+    if page_size is not None:
+        params["page_size"] = str(page_size)
 
     sorted_keys = sorted(params.keys())
     temp_str = "&".join([f"{key}={params[key]}" for key in sorted_keys])
@@ -57,22 +64,24 @@ def verify_signature(
     data_type: str | None = None,
     dimension: str | None = None,
     start_date: str | None = None,
-    end_date: str | None = None
+    end_date: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
 ) -> bool:
     """
     验证MD5签名
     
     签名算法：
-    1. 按字母排序参数：client_id, data_type, dimension, end_date, req_time, start_date（只包含非空参数）
+    1. 按字母排序参数：client_id, data_type, dimension, end_date, page, page_size, req_time, start_date（只包含非空参数）
     2. 拼接：client_id=1000&data_type=all&req_time=1745656222&start_date=2024-01-01
     3. 在末尾追加：&key={SECRET_KEY}
     4. 最终字符串：client_id=1000&data_type=all&req_time=1745656222&start_date=2024-01-01&key=3716607b-04cb-4f71-91c0-2dae7a87fa63
-    5. MD5加密并转为小写
+    5. MD5 或 HMAC-SHA256 加密并转为小写
     
     注意：
-    - secret_key不通过请求传递，而是从数据库查询客户的key字段
+    - secret_key 不通过请求传递，而是从数据库查询客户的 key 字段
     - 只包含非空参数参与签名计算
-    - data_type默认为"all"，如果未提供则使用默认值
+    - page / page_size 仅在请求体显式传入时参与签名
     
     Args:
         client_id: 客户ID
@@ -83,12 +92,15 @@ def verify_signature(
         dimension: 统计维度（可选，country / ad_unit / ad_unit_country；country_ad_unit 为兼容别名）
         start_date: 开始日期（可选）
         end_date: 结束日期（可选）
+        page: 页码（可选，显式传入时参与签名）
+        page_size: 每页条数（可选，显式传入时参与签名）
     
     Returns:
         bool: 签名是否有效
     """
     sign_string = _build_sign_string(
-        client_id, secret_key, req_time, data_type, dimension, start_date, end_date
+        client_id, secret_key, req_time, data_type, dimension, start_date, end_date,
+        page, page_size,
     )
 
     # HMAC-SHA256（推荐）
@@ -112,22 +124,26 @@ async def verify_client_request(
     dimension: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
-    time_tolerance: int = 10
+    page: int | None = None,
+    page_size: int | None = None,
+    time_tolerance: int = CLIENT_API_TIME_TOLERANCE_SECONDS,
 ) -> Client:
     """
     验证客户请求
-    1. 通过client_id查询客户（不暴露secret_key）
-    2. 验证请求时间差异（默认正负5秒内）
-    3. 使用客户的key验证签名
+    1. 通过 client_id 查询客户（不暴露 secret_key）
+    2. 验证请求时间差异（默认正负 10 秒内）
+    3. 使用客户的 key 验证签名
     
     Args:
-        request: 客户API请求对象（包含 client_id, req_time, sign 等字段）
+        request: 客户 API 请求对象（包含 client_id, req_time, sign 等字段）
         db: 数据库会话
         data_type: 数据类型（可选，用于签名验证）
         dimension: 统计维度（可选，用于签名验证）
         start_date: 开始日期（可选，用于签名验证）
         end_date: 结束日期（可选，用于签名验证）
-        time_tolerance: 时间容差（秒），默认5秒
+        page: 页码（可选，显式传入时参与签名验证）
+        page_size: 每页条数（可选，显式传入时参与签名验证）
+        time_tolerance: 时间容差（秒），默认 10 秒
     
     Returns:
         Client: 验证通过的客户对象
@@ -163,7 +179,7 @@ async def verify_client_request(
             detail="客户API访问未启用，请联系管理员开启"
         )
 
-    # 2. 验证请求时间差异（默认正负5秒内）
+    # 2. 验证请求时间差异（默认正负 10 秒内）
     current_timestamp = int(datetime.now(timezone.utc).timestamp())
     time_diff = abs(current_timestamp - request.req_time)
 
@@ -186,7 +202,9 @@ async def verify_client_request(
         data_type=data_type,
         dimension=dimension,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        page=page,
+        page_size=page_size,
     ):
         logger.warning(
             f"签名验证失败: client_id={request.client_id}"

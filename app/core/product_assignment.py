@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func, exists, text
 from datetime import date, datetime, timezone, timedelta
 from app.models.models import Product, ProductAssignment, Client, AdData
+from app.core.query_utils import invalidate_assignment_table_cache
 import logging
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,8 @@ async def create_product_assignment(
     )
     db.add(assignment)
     await db.flush()
-    
+    invalidate_assignment_table_cache()
+
     # 验证分配记录的完整性（捕获验证过程中的异常，避免影响创建）
     try:
         validation_result = await validate_product_assignments(db, product_id)
@@ -816,6 +818,9 @@ async def cleanup_invalid_assignments(
         
         # 提交删除操作
         await db.commit()
+
+        if deleted_count > 0:
+            invalidate_assignment_table_cache()
         
         logger.info(
             f"清理完成：删除了 {deleted_count} 条无效的产品分配记录"
