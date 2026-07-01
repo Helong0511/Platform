@@ -13,6 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.async_orm import resolve_publisher_client_name
 from app.core.constants import MAX_PAGE_SIZE
 from app.core.database import get_db
 from app.core.dependencies import get_publisher_service
@@ -51,15 +52,11 @@ async def create_publisher(
     # 调用服务层创建渠道（服务层会处理验证和审计日志）
     publisher = await publisher_service.create_publisher(publisher_data, current_user)
 
-    # 获取客户信息（用户的 full_name）
-    client_name = None
     if publisher.client_id:
-        # 重新加载以获取客户信息
-        publisher = await publisher_service.get_publisher_by_id(publisher.id, current_user, include_client=True)
-        if publisher.client and publisher.client.user:
-            client_name = publisher.client.user.full_name or publisher.client.company_name
-        elif publisher.client:
-            client_name = publisher.client.company_name
+        publisher = await publisher_service.get_publisher_by_id(
+            publisher.id, current_user, include_client=True
+        )
+    client_name = resolve_publisher_client_name(publisher)
 
     publisher_response = PublisherResponse.model_validate(publisher)
     publisher_response.client_name = client_name
@@ -101,13 +98,7 @@ async def get_publishers(
     # ---------- 循环处理 ----------
     for pub in publishers:
         pub_data = PublisherResponse.model_validate(pub)
-        # 客户信息已预加载
-        # ---------- 条件分支 ----------
-        if pub.client and pub.client.user:
-            pub_data.client_name = pub.client.user.full_name if pub.client.user.full_name else pub.client.company_name
-        # ---------- 条件分支 ----------
-        elif pub.client:
-            pub_data.client_name = pub.client.company_name
+        pub_data.client_name = resolve_publisher_client_name(pub)
         publishers_data.append(pub_data)
 
     # ---------- 构建响应 ----------
@@ -140,12 +131,7 @@ async def get_publisher(
     # 获取渠道（包含客户信息）
     publisher = await publisher_service.get_publisher_by_id(publisher_id, current_user, include_client=True)
 
-    # 获取客户信息（用户的 full_name）
-    client_name = None
-    if publisher.client and publisher.client.user:
-        client_name = publisher.client.user.full_name or publisher.client.company_name
-    elif publisher.client:
-        client_name = publisher.client.company_name
+    client_name = resolve_publisher_client_name(publisher)
 
     publisher_data = PublisherResponse.model_validate(publisher)
     publisher_data.client_name = client_name
@@ -179,15 +165,11 @@ async def update_publisher(
     # 调用服务层更新渠道（服务层会处理验证、缓存失效和审计日志）
     publisher = await publisher_service.update_publisher(publisher_id, update_data, current_user)
 
-    # 获取客户信息（用户的 full_name）
-    client_name = None
     if publisher.client_id:
-        # 重新加载以获取客户信息
-        publisher = await publisher_service.get_publisher_by_id(publisher.id, current_user, include_client=True)
-        if publisher.client and publisher.client.user:
-            client_name = publisher.client.user.full_name or publisher.client.company_name
-        elif publisher.client:
-            client_name = publisher.client.company_name
+        publisher = await publisher_service.get_publisher_by_id(
+            publisher.id, current_user, include_client=True
+        )
+    client_name = resolve_publisher_client_name(publisher)
 
     publisher_data = PublisherResponse.model_validate(publisher)
     publisher_data.client_name = client_name

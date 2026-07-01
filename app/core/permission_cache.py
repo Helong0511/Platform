@@ -12,6 +12,7 @@ from datetime import timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.async_orm import get_first_loaded_collection_item
 from app.core.redis_client import get_redis_client
 from app.models.models import User, UserRole
 from sqlalchemy.orm import selectinload
@@ -83,11 +84,10 @@ async def get_user_permissions(user_id: int, db: AsyncSession) -> Dict[str, Any]
     }
     
     # 如果是客户角色，获取客户信息
-    if user.role == UserRole.CLIENT and user.clients:
-        client = user.clients[0]
-        if client:
-            permissions["client_id"] = client.id
-            permissions["api_enabled"] = client.api_enabled
+    client = get_first_loaded_collection_item(user, "clients")
+    if user.role == UserRole.CLIENT and client:
+        permissions["client_id"] = client.id
+        permissions["api_enabled"] = client.api_enabled
     
     # 写入缓存
     if redis:

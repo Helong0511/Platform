@@ -87,6 +87,7 @@ from app.core.audit_log import (
     log_user_action, commit_audit_log,
 )
 from app.core.constants import MAX_PAGE_SIZE
+from app.core.async_orm import get_first_loaded_collection_item
 from app.core.utils import optimize_page_size_for_device, get_app_now_naive
 from app.core.dependencies import get_user_service
 from app.services.user_service import UserService
@@ -153,7 +154,7 @@ async def get_users(
         password_change_enabled = False
         if user.role == UserRole.CLIENT:
             # 客户信息已通过selectinload预加载，直接访问
-            client = user.clients[0] if user.clients else None
+            client = get_first_loaded_collection_item(user, "clients")
             if client:
                 # 确保从数据库获取最新的开关状态（布尔值）
                 api_enabled = bool(client.api_enabled) if client.api_enabled is not None else False
@@ -294,7 +295,7 @@ async def export_users_excel(
     # ---------- 循环处理 ----------
     for user in users:
         # 客户信息已通过selectinload预加载，直接访问
-        client = user.clients[0] if user.role == UserRole.CLIENT and user.clients else None
+        client = get_first_loaded_collection_item(user, "clients") if user.role == UserRole.CLIENT else None
 
         row = {
             "用户ID": user.id,
@@ -366,7 +367,7 @@ async def get_current_user_info(
     # ---------- 条件分支 ----------
     if user.role == UserRole.CLIENT:
         # 客户信息已通过selectinload预加载，直接访问
-        client = user.clients[0] if user.clients else None
+        client = get_first_loaded_collection_item(user, "clients")
         # ---------- 条件分支 ----------
         if client:
             api_enabled = client.api_enabled  # 获取API开关状态
@@ -475,7 +476,7 @@ async def get_user(
     # ---------- 条件分支 ----------
     if user.role == UserRole.CLIENT:
         # 客户信息已通过selectinload预加载，直接访问
-        client = user.clients[0] if user.clients else None
+        client = get_first_loaded_collection_item(user, "clients")
         # ---------- 条件分支 ----------
         if client:
             api_enabled = client.api_enabled  # 获取API开关状态
@@ -578,8 +579,8 @@ async def create_user(
     }
     
     # 如果创建了客户，添加客户信息到响应中
-    if user.clients:
-        client = user.clients[0]
+    client = get_first_loaded_collection_item(user, "clients")
+    if client:
         user_dict['client'] = {
             'id': client.id,
             'has_api_key': bool(client.key),

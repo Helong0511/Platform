@@ -15,11 +15,12 @@ from app.core.excel_io import excel_streaming_response
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, Path
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import func, inspect as sa_inspect, update
+from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
+from app.core.async_orm import get_loaded_relationship, resolve_client_user_full_name
 from app.core.audit_log import (
     log_create, log_update, log_delete, log_activate, log_deactivate,
     log_user_action, commit_audit_log,
@@ -49,11 +50,10 @@ def _client_public_dict(client: Client, *, user_full_name: str | None = None) ->
     data["has_api_key"] = bool(client.key)
     if user_full_name is not None:
         data["user_full_name"] = user_full_name
-    elif "user" not in sa_inspect(client).unloaded:
-        # 仅访问已预加载的 user，避免异步会话下懒加载触发 MissingGreenlet
-        user = client.user
-        if user:
-            data["user_full_name"] = user.full_name
+    else:
+        full_name = resolve_client_user_full_name(client)
+        if full_name:
+            data["user_full_name"] = full_name
     return ClientResponse.model_validate(data)
 
 
@@ -257,10 +257,7 @@ async def create_client(
         )
 
         db.add(client)
-        # 注意：不需要手动提交事务，get_db 依赖会自动处理
-        # 刷新对象以获取最新数据（在自动提交之前）
         await db.flush()
-        await db.refresh(client)
 
         logger.info(f"创建客户: {client.company_name} (ID: {client.id}), 关联用户: {user.username} (ID: {user.id})")
 
@@ -634,7 +631,7 @@ async def export_clients_excel(
     data = []
     # ---------- 循环处理 ----------
     for client in clients:
-        user = client.user
+        user = get_loaded_relationship(client, "user")
         row = {
             "客户ID": client.id,
             "公司名称": client.company_name or "",

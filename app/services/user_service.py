@@ -27,6 +27,7 @@ from app.models.models import User, Client, UserRole, Publisher
 from app.services.base_service import BaseService
 from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
+from app.core.async_orm import get_first_loaded_collection_item
 from app.core.audit_log import log_user_action, commit_audit_log
 from app.core.utils import get_app_now_naive
 from app.core.validation import validate_password_strength
@@ -202,8 +203,7 @@ class UserService(BaseService[User]):
             user.set_password(user_data['password'])
 
         self.db.add(user)
-        await self.db.flush()  # 先flush以获取user.id
-        await self.db.refresh(user)
+        await self.db.flush()  # 先 flush 以获取 user.id
 
         # --- 可选：同一事务内创建 Client（一用户通常对应一个客户主体）---
         if user_data.get('company_name'):
@@ -226,12 +226,10 @@ class UserService(BaseService[User]):
                 )
                 self.db.add(client)
                 await self.db.flush()
-                await self.db.refresh(client)
 
         await self.db.commit()
-        await self.db.refresh(user)
 
-        # 如果创建了客户，重新加载用户以包含客户信息
+        # 若创建了客户，重新加载用户以包含客户信息（避免异步懒加载）
         if user_data.get('company_name'):
             user_query = select(User).options(selectinload(User.clients)).where(User.id == user.id)
             user_result = await self.db.execute(user_query)
@@ -340,7 +338,8 @@ class UserService(BaseService[User]):
                 setattr(user, key, value)
 
         await self.db.commit()
-        await self.db.refresh(user)
+
+        user = await self.get_user_by_id(user_id, current_user, include_client=False)
 
         # 清除权限缓存（用户信息已更新）
         try:
@@ -372,7 +371,8 @@ class UserService(BaseService[User]):
         user = await self.get_user_by_id(user_id, current_user, include_client=True)
 
         # 检查是否有关联的客户
-        if user.clients:
+        client = get_first_loaded_collection_item(user, "clients")
+        if client:
             raise_api_exception(
                 ErrorCode.OPERATION_FAILED,
                 detail=f"用户 {user.username} 有关联的客户数据，无法删除"
@@ -424,9 +424,9 @@ class UserService(BaseService[User]):
                 )
 
             # 如果是客户角色，检查是否允许修改密码
-            if user.role == UserRole.CLIENT and user.clients:
-                client = user.clients[0]
-                if not client.password_change_enabled:
+            if user.role == UserRole.CLIENT:
+                client = get_first_loaded_collection_item(user, "clients")
+                if client and not client.password_change_enabled:
                     raise_api_exception(
                         ErrorCode.FORBIDDEN,
                         detail="客户密码修改功能已被管理员禁用，请联系管理员修改密码"

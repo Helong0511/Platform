@@ -188,8 +188,8 @@ class ClientService(BaseService[Client]):
         client = Client(**client_data)
         self.db.add(client)
         await self.db.flush()
-        await self.db.refresh(client)
-
+        if client.id is not None:
+            return await self.get_client_by_id(client.id, current_user, include_user=True)
         return client
 
     async def update_client(
@@ -226,9 +226,7 @@ class ClientService(BaseService[Client]):
                 setattr(client, key, value)
 
         await self.db.flush()
-        await self.db.refresh(client)
-
-        return client
+        return await self.get_client_by_id(client_id, current_user, include_user=True)
 
     async def delete_client(
             self,

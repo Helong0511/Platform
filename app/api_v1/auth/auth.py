@@ -49,6 +49,7 @@ from sqlalchemy.orm import selectinload
 from app.core.audit_log import log_login, log_logout, commit_audit_log
 from app.core.auth_response import build_token_json_response, clear_auth_cookies, raise_auth_error
 from app.core.auth_user_payload import build_auth_user_payload
+from app.core.async_orm import get_first_loaded_collection_item
 from app.core.config import settings
 from app.core.errors import ErrorCode
 from app.core.database import get_db
@@ -264,7 +265,7 @@ async def login(
         local_ips = ["127.0.0.1", "localhost", "::1"]
         if client_ip not in local_ips:
             # 优化：客户信息已在查询用户时通过selectinload加载，直接使用
-            client = user.clients[0] if user.clients else None
+            client = get_first_loaded_collection_item(user, "clients")
 
             if client:
                 # 检查IP白名单
@@ -316,20 +317,18 @@ async def login(
     # 如果是客户角色，获取客户的api_enabled和has_publisher信息
     api_enabled = False
     has_publisher = False
-    client_record = None
-    if user.role == UserRole.CLIENT and user.clients:
-        client_record = user.clients[0]
-        if client_record:
-            api_enabled = bool(client_record.api_enabled)
-            publisher_check = await db.execute(
-                select(func.count(Publisher.id)).where(
-                    and_(
-                        Publisher.client_id == client_record.id,
-                        Publisher.is_active == True,
-                    )
+    client_record = get_first_loaded_collection_item(user, "clients")
+    if user.role == UserRole.CLIENT and client_record:
+        api_enabled = bool(client_record.api_enabled)
+        publisher_check = await db.execute(
+            select(func.count(Publisher.id)).where(
+                and_(
+                    Publisher.client_id == client_record.id,
+                    Publisher.is_active == True,
                 )
             )
-            has_publisher = (publisher_check.scalar() or 0) > 0
+        )
+        has_publisher = (publisher_check.scalar() or 0) > 0
 
     user_payload = build_auth_user_payload(
         user,

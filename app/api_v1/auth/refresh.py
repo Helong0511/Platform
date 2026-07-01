@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
+from app.core.async_orm import get_first_loaded_collection_item
 from app.core.auth_response import (
     auth_failure_response,
     build_token_json_response,
@@ -149,20 +150,18 @@ async def refresh_token(
 
         api_enabled = False
         has_publisher = False
-        client_record = None
-        if user.role == UserRole.CLIENT and user.clients:
-            client_record = user.clients[0]
-            if client_record:
-                api_enabled = bool(client_record.api_enabled)
-                publisher_check = await db.execute(
-                    select(func.count(Publisher.id)).where(
-                        and_(
-                            Publisher.client_id == client_record.id,
-                            Publisher.is_active == True,
-                        )
+        client_record = get_first_loaded_collection_item(user, "clients")
+        if user.role == UserRole.CLIENT and client_record:
+            api_enabled = bool(client_record.api_enabled)
+            publisher_check = await db.execute(
+                select(func.count(Publisher.id)).where(
+                    and_(
+                        Publisher.client_id == client_record.id,
+                        Publisher.is_active == True,
                     )
                 )
-                has_publisher = (publisher_check.scalar() or 0) > 0
+            )
+            has_publisher = (publisher_check.scalar() or 0) > 0
 
         user_payload = build_auth_user_payload(
             user,
