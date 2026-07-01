@@ -15,7 +15,7 @@ from app.core.excel_io import excel_streaming_response
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, Path
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import func, update
+from sqlalchemy import func, inspect as sa_inspect, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -49,14 +49,17 @@ def _client_public_dict(client: Client, *, user_full_name: str | None = None) ->
     data["has_api_key"] = bool(client.key)
     if user_full_name is not None:
         data["user_full_name"] = user_full_name
-    elif client.user:
-        data["user_full_name"] = client.user.full_name
+    elif "user" not in sa_inspect(client).unloaded:
+        # 仅访问已预加载的 user，避免异步会话下懒加载触发 MissingGreenlet
+        user = client.user
+        if user:
+            data["user_full_name"] = user.full_name
     return ClientResponse.model_validate(data)
 
 
-def _client_create_dict(client: Client) -> ClientCreateResponse:
+def _client_create_dict(client: Client, *, user_full_name: str | None = None) -> ClientCreateResponse:
     """创建客户时一次性返回明文密钥，其余场景使用 _client_public_dict。"""
-    data = _client_public_dict(client).model_dump()
+    data = _client_public_dict(client, user_full_name=user_full_name).model_dump()
     data["key"] = client.key
     return ClientCreateResponse.model_validate(data)
 
@@ -276,7 +279,9 @@ async def create_client(
             }
         )
 
-        return ResponseBaseSchema.success(data=_client_create_dict(client))
+        return ResponseBaseSchema.success(
+            data=_client_create_dict(client, user_full_name=user.full_name if user else None)
+        )
     except HTTPException:
         raise
 
@@ -305,8 +310,10 @@ async def update_client(
     - 支持关联用户变更
     """
     # ---------- 入口：参数与依赖准备 ----------
-    # 获取客户
-    result = await db.execute(select(Client).where(Client.id == client_id))
+    # 获取客户（预加载 user，避免响应序列化时懒加载）
+    result = await db.execute(
+        select(Client).options(selectinload(Client.user)).where(Client.id == client_id)
+    )
     client = result.scalars().first()
 
     # ---------- 条件分支 ----------
@@ -382,9 +389,7 @@ async def update_client(
     # ---------- 异常处理 ----------
     try:
         # 注意：不需要手动提交事务，get_db 依赖会自动处理
-        # 刷新对象以获取最新数据（在自动提交之前）
         await db.flush()
-        await db.refresh(client)
     except HTTPException:
         raise
     except Exception as e:
@@ -438,6 +443,12 @@ async def update_client(
     # ---------- 条件分支 ----------
     if wrote_audit:
         await commit_audit_log(db)
+
+    # 重新查询并预加载 user（flush 后避免 refresh 导致关系过期引发懒加载）
+    result = await db.execute(
+        select(Client).options(selectinload(Client.user)).where(Client.id == client_id)
+    )
+    client = result.scalars().first()
 
     # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=_client_public_dict(client))
@@ -522,10 +533,6 @@ async def update_client_switches(
                 ErrorCode.CLIENT_NOT_FOUND,
                 detail=f"更新后无法找到客户ID {client_id}，请刷新页面重试"
             )
-
-        # 刷新对象以获取最新数据（在自动提交之前）
-        await db.flush()
-        await db.refresh(client)
 
         # 确保布尔字段不是 None（数据库约束应该保证，但为了安全起见）
         # ---------- 条件分支 ----------
