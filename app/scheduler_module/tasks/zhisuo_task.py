@@ -22,7 +22,12 @@ from app.scheduler_module.task_utils import (
     resolve_upstream_date_range,
     truncate_task_error_message,
 )
-from app.scheduler_module.upstream_fetch import fetch_zhisuo_country_rows, fetch_zhisuo_unit_rows
+from app.scheduler_module.upstream_fetch import (
+    UpstreamFetchResult,
+    UpstreamFetchStats,
+    fetch_zhisuo_country_rows,
+    fetch_zhisuo_unit_rows,
+)
 from app.scheduler_module.upstream_import import import_upstream_ad_data
 
 logger = logging.getLogger(__name__)
@@ -72,32 +77,41 @@ def _filter_accounts_for_report(
 
 
 async def _fetch_zhisuo_rows_for_accounts(
-    fetch_fn: Callable[..., Awaitable[list[Any]]],
+    fetch_fn: Callable[..., Awaitable[UpstreamFetchResult]],
     *,
     base_url: str,
     accounts: list[dict[str, Any]],
     start: str,
     end: str,
     report_label: str,
-) -> list[Any]:
-    """多账号顺序拉取并合并行列表。"""
+) -> UpstreamFetchResult:
+    """多账号顺序拉取并合并行列表与分页统计。"""
     if not accounts:
-        return []
+        return UpstreamFetchResult(rows=[], stats=UpstreamFetchStats())
 
     all_data: list[Any] = []
+    stats_list: list[UpstreamFetchStats] = []
     fetch_errors: list[str] = []
     for acc in accounts:
         client_id = str(acc["client_id"])
         try:
-            rows = await fetch_fn(
+            result = await fetch_fn(
                 base_url=base_url,
                 client_id=client_id,
                 api_key=str(acc["api_key"]),
                 start=start,
                 end=end,
             )
-            all_data.extend(rows)
-            logger.info("Zhisuo %s 账号 %s 拉取 %d 条", report_label, client_id, len(rows))
+            all_data.extend(result.rows)
+            stats_list.append(result.stats)
+            logger.info(
+                "Zhisuo %s 账号 %s 拉取 %d 条（%d/%s 页）",
+                report_label,
+                client_id,
+                result.stats.rows_fetched,
+                result.stats.pages_fetched,
+                result.stats.total_pages or "?",
+            )
         except Exception as e:
             err_msg = f"{report_label} 账号 {client_id}: {e}"
             fetch_errors.append(err_msg)
@@ -107,7 +121,10 @@ async def _fetch_zhisuo_rows_for_accounts(
         raise Exception(f"所有 Zhisuo {report_label} 拉取失败: " + "; ".join(fetch_errors))
     if fetch_errors:
         logger.warning("部分 Zhisuo %s 拉取失败: %s", report_label, "; ".join(fetch_errors))
-    return all_data
+    return UpstreamFetchResult(
+        rows=all_data,
+        stats=UpstreamFetchStats.merge(*stats_list) if stats_list else UpstreamFetchStats(),
+    )
 
 
 async def zhisuo_api_task(
@@ -158,7 +175,7 @@ async def zhisuo_api_task(
     phase_summaries: list[str] = []
     try:
         if unit_accounts:
-            unit_rows = await _fetch_zhisuo_rows_for_accounts(
+            unit_result = await _fetch_zhisuo_rows_for_accounts(
                 fetch_zhisuo_unit_rows,
                 base_url=base_url,
                 accounts=unit_accounts,
@@ -168,7 +185,7 @@ async def zhisuo_api_task(
             )
             unit_summary = await import_upstream_ad_data(
                 task_name=ZHISUO_API_TASK_NAME,
-                data=unit_rows,
+                data=unit_result.rows,
                 field_mapping=ZHISUO_UNIT_FIELD_MAPPING,
                 source="zhisuo定时任务-广告单元",
                 current_time_str=current_time_str,
@@ -179,12 +196,13 @@ async def zhisuo_api_task(
                     "终止日期": zhisuo_end,
                     "账号": ",".join(str(a["client_id"]) for a in unit_accounts),
                 },
+                fetch_stats=unit_result.stats,
             )
             unit_ids = ",".join(str(a["client_id"]) for a in unit_accounts)
             phase_summaries.append(f"广告单元[{unit_ids}]: {unit_summary}")
 
         if country_accounts:
-            country_rows = await _fetch_zhisuo_rows_for_accounts(
+            country_result = await _fetch_zhisuo_rows_for_accounts(
                 fetch_zhisuo_country_rows,
                 base_url=base_url,
                 accounts=country_accounts,
@@ -194,7 +212,7 @@ async def zhisuo_api_task(
             )
             country_summary = await import_upstream_ad_data(
                 task_name=ZHISUO_API_TASK_NAME,
-                data=country_rows,
+                data=country_result.rows,
                 field_mapping=ZHISUO_COUNTRY_FIELD_MAPPING,
                 source="zhisuo定时任务-国家报告",
                 current_time_str=current_time_str,
@@ -205,6 +223,7 @@ async def zhisuo_api_task(
                     "终止日期": zhisuo_end,
                     "账号": ",".join(str(a["client_id"]) for a in country_accounts),
                 },
+                fetch_stats=country_result.stats,
             )
             country_ids = ",".join(str(a["client_id"]) for a in country_accounts)
             phase_summaries.append(f"国家报告[{country_ids}]: {country_summary}")

@@ -12,7 +12,11 @@ from datetime import datetime, timedelta
 from app.core.config import settings
 from app.scheduler_module.task_names import SKYMOBI_API_TASK_NAME
 from app.scheduler_module.task_utils import resolve_upstream_date_range
-from app.scheduler_module.upstream_fetch import fetch_skymobi_rows
+from app.scheduler_module.upstream_fetch import (
+    UpstreamFetchResult,
+    UpstreamFetchStats,
+    fetch_skymobi_rows,
+)
 from app.scheduler_module.upstream_task_runner import run_upstream_import_task
 
 SKYMOBI_FIELD_MAPPING = {
@@ -46,15 +50,20 @@ async def skymobi_api_task(
         current = datetime.strptime(range_start, "%Y-%m-%d").date()
         end = datetime.strptime(range_end, "%Y-%m-%d").date()
         all_rows = []
+        stats_list: list[UpstreamFetchStats] = []
         while current <= end:
-            rows = await fetch_skymobi_rows(
+            result = await fetch_skymobi_rows(
                 api_id=api_id,
                 api_key=api_key,
                 date_str=current.strftime("%Y-%m-%d"),
             )
-            all_rows.extend(rows)
+            all_rows.extend(result.rows)
+            stats_list.append(result.stats)
             current += timedelta(days=1)
-        return all_rows
+        return UpstreamFetchResult(
+            rows=all_rows,
+            stats=UpstreamFetchStats.merge(*stats_list) if stats_list else UpstreamFetchStats(),
+        )
 
     await run_upstream_import_task(
         SKYMOBI_API_TASK_NAME,

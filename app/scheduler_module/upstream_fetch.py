@@ -15,8 +15,10 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import time
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Union
 
 from app.scheduler_module.upstream_http import get_json, post_json, raise_unless_api_success
 
@@ -24,6 +26,87 @@ UPSTREAM_PAGINATION_MAX_PAGES = 500
 
 ZHISUO_UNIT_PATH = "/api/channelunit"
 ZHISUO_COUNTRY_PATH = "/api/channelcountry"
+
+
+@dataclass
+class UpstreamFetchStats:
+    """上游 API 拉数分页统计，用于任务结果与 Telegram 通知。"""
+
+    pages_fetched: int = 0
+    total_pages: int = 0
+    rows_fetched: int = 0
+    total_rows: int = 0
+
+    @classmethod
+    def merge(cls, *items: UpstreamFetchStats) -> UpstreamFetchStats:
+        """合并多次拉数（多账号、多日等）的统计。"""
+        if not items:
+            return cls()
+        total_pages = sum(s.total_pages for s in items if s.total_pages > 0)
+        total_rows = sum(s.total_rows for s in items if s.total_rows > 0)
+        return cls(
+            pages_fetched=sum(s.pages_fetched for s in items),
+            total_pages=total_pages,
+            rows_fetched=sum(s.rows_fetched for s in items),
+            total_rows=total_rows,
+        )
+
+
+@dataclass
+class UpstreamFetchResult:
+    """上游拉数结果：行数据 + 分页统计。"""
+
+    rows: List[Any]
+    stats: UpstreamFetchStats = field(default_factory=UpstreamFetchStats)
+
+    @classmethod
+    def from_rows(
+        cls,
+        rows: List[Any],
+        *,
+        stats: Optional[UpstreamFetchStats] = None,
+    ) -> UpstreamFetchResult:
+        """无分页接口：单页返回全部数据。"""
+        data = rows or []
+        if stats is None:
+            stats = UpstreamFetchStats(
+                pages_fetched=1 if data else 0,
+                total_pages=1 if data else 0,
+                rows_fetched=len(data),
+                total_rows=len(data),
+            )
+        return cls(rows=data, stats=stats)
+
+
+def _build_fetch_stats(
+    *,
+    pages_fetched: int,
+    total_pages: int,
+    rows_fetched: int,
+    total_rows: int,
+    limit: int,
+) -> UpstreamFetchStats:
+    """根据最后一页响应与累计行数生成分页统计。"""
+    resolved_total_pages = total_pages
+    if resolved_total_pages <= 0 and total_rows > 0 and limit > 0:
+        resolved_total_pages = math.ceil(total_rows / limit)
+    resolved_total_rows = total_rows if total_rows > 0 else rows_fetched
+    return UpstreamFetchStats(
+        pages_fetched=pages_fetched,
+        total_pages=resolved_total_pages,
+        rows_fetched=rows_fetched,
+        total_rows=resolved_total_rows,
+    )
+
+
+def unwrap_upstream_fetch_result(
+    result: Union[UpstreamFetchResult, List[Any]],
+) -> tuple[List[Any], Optional[UpstreamFetchStats]]:
+    """兼容拉数函数返回列表或 UpstreamFetchResult。"""
+    if isinstance(result, UpstreamFetchResult):
+        return result.rows, result.stats
+    rows = result or []
+    return rows, None
 
 
 def build_zhisuo_sign(params: Dict[str, Any]) -> str:
@@ -84,7 +167,7 @@ async def fetch_huguang_rows(
     username: str,
     start: str,
     end: str,
-) -> List[Any]:
+) -> UpstreamFetchResult:
     """Huguang 按国家维度拉取广告数据，返回 data 列表。"""
     url = f"http://{domain}:5858/api/country"
     json_data = await post_json(
@@ -99,7 +182,8 @@ async def fetch_huguang_rows(
         verify=False,
     )
     raise_unless_api_success(json_data, {0}, label="Huguang API", code_key="code")
-    return json_data.get("data") or []
+    rows = json_data.get("data") or []
+    return UpstreamFetchResult.from_rows(rows if isinstance(rows, list) else [])
 
 
 async def fetch_skymobi_rows(
@@ -108,10 +192,12 @@ async def fetch_skymobi_rows(
     api_key: str,
     date_str: str,
     limit: int = 1000,
-) -> List[Any]:
+) -> UpstreamFetchResult:
     """Skymobi 按单日拉取 H5 广告数据，全量分页合并 list。"""
     all_rows: List[Any] = []
     page = 1
+    last_total = 0
+    last_total_pages = 0
 
     while True:
         url = (
@@ -129,6 +215,8 @@ async def fetch_skymobi_rows(
         total_pages = int(
             json_data.get("totalPage") or json_data.get("total_pages") or 0
         )
+        last_total = total or last_total
+        last_total_pages = total_pages or last_total_pages
         if _should_break_upstream_pagination(
             rows,
             total=total,
@@ -140,7 +228,14 @@ async def fetch_skymobi_rows(
             break
         page += 1
 
-    return all_rows
+    stats = _build_fetch_stats(
+        pages_fetched=page,
+        total_pages=last_total_pages,
+        rows_fetched=len(all_rows),
+        total_rows=last_total,
+        limit=limit,
+    )
+    return UpstreamFetchResult(rows=all_rows, stats=stats)
 
 
 async def fetch_tqt_rows(
@@ -149,7 +244,7 @@ async def fetch_tqt_rows(
     params: Dict[str, Any],
     headers: Dict[str, str],
     api_secret: Optional[str] = None,
-) -> List[Any]:
+) -> UpstreamFetchResult:
     """
     TQT 拉数：兼容 state=ok 或 code=200，从 data.list 或顶层 list 取行。
 
@@ -158,6 +253,8 @@ async def fetch_tqt_rows(
     all_rows: List[Any] = []
     page = 1
     page_size = int(params.get("pageSize") or 1000)
+    last_total = 0
+    last_total_pages = 0
     base_params = {
         k: v for k, v in params.items() if k not in ("page", "pageSize", "sign")
     }
@@ -194,6 +291,8 @@ async def fetch_tqt_rows(
             total = int(json_data.get("totalRow") or 0)
             total_pages = int(json_data.get("totalPage") or 0)
 
+        last_total = total or last_total
+        last_total_pages = total_pages or last_total_pages
         if isinstance(rows, list):
             all_rows.extend(rows)
 
@@ -208,7 +307,14 @@ async def fetch_tqt_rows(
             break
         page += 1
 
-    return all_rows
+    stats = _build_fetch_stats(
+        pages_fetched=page,
+        total_pages=last_total_pages,
+        rows_fetched=len(all_rows),
+        total_rows=last_total,
+        limit=page_size,
+    )
+    return UpstreamFetchResult(rows=all_rows, stats=stats)
 
 
 async def fetch_tbsj_rows(
@@ -218,7 +324,7 @@ async def fetch_tbsj_rows(
     end: str,
     headers: Dict[str, Any],
     limit: int = 1000,
-) -> List[Any]:
+) -> UpstreamFetchResult:
     """TBSJ 广告单元接口（/adunit），按 total 全量分页，成功码 20000。"""
     base = base_url.rstrip("/")
     start_at, end_at = format_tbsj_datetime_range(start, end)
@@ -261,7 +367,14 @@ async def fetch_tbsj_rows(
             break
         page += 1
 
-    return all_rows
+    stats = _build_fetch_stats(
+        pages_fetched=page,
+        total_pages=0,
+        rows_fetched=len(all_rows),
+        total_rows=total,
+        limit=limit,
+    )
+    return UpstreamFetchResult(rows=all_rows, stats=stats)
 
 
 def format_tbsj_datetime_range(start: str, end: str) -> tuple[str, str]:
@@ -292,11 +405,12 @@ async def fetch_addermobi_rows(
     url: str,
     payload: Dict[str, Any],
     headers: Dict[str, str],
-) -> List[Any]:
+) -> UpstreamFetchResult:
     """Addermobi POST 拉数，status=0 为成功，全量分页后经 extract_addermobi_rows 解析行。"""
     all_rows: List[Any] = []
     page = 1
     page_size = int(payload.get("rows") or 1000)
+    last_total = 0
     base_payload = {k: v for k, v in payload.items() if k != "page"}
 
     while True:
@@ -315,6 +429,7 @@ async def fetch_addermobi_rows(
         all_rows.extend(rows)
 
         total = int(json_data.get("total") or 0)
+        last_total = total or last_total
         if _should_break_upstream_pagination(
             rows,
             total=total,
@@ -326,7 +441,14 @@ async def fetch_addermobi_rows(
             break
         page += 1
 
-    return all_rows
+    stats = _build_fetch_stats(
+        pages_fetched=page,
+        total_pages=0,
+        rows_fetched=len(all_rows),
+        total_rows=last_total,
+        limit=page_size,
+    )
+    return UpstreamFetchResult(rows=all_rows, stats=stats)
 
 
 async def fetch_zhisuo_report_rows(
@@ -339,11 +461,13 @@ async def fetch_zhisuo_report_rows(
     path: str,
     label: str = "Zhisuo API",
     limit: int = 1000,
-) -> List[Any]:
+) -> UpstreamFetchResult:
     """拉取 zhisuo 报表接口（分页合并 list）。"""
     base = base_url.rstrip("/")
     all_rows: List[Any] = []
     page = 1
+    last_total = 0
+    last_total_pages = 0
 
     while True:
         timestamp = int(time.time() * 1000)
@@ -377,6 +501,8 @@ async def fetch_zhisuo_report_rows(
 
         total = int(data_block.get("total") or 0)
         total_pages = int(data_block.get("total_pages") or 1)
+        last_total = total or last_total
+        last_total_pages = total_pages or last_total_pages
         if _should_break_upstream_pagination(
             rows,
             total=total,
@@ -388,7 +514,14 @@ async def fetch_zhisuo_report_rows(
             break
         page += 1
 
-    return all_rows
+    stats = _build_fetch_stats(
+        pages_fetched=page,
+        total_pages=last_total_pages,
+        rows_fetched=len(all_rows),
+        total_rows=last_total,
+        limit=limit,
+    )
+    return UpstreamFetchResult(rows=all_rows, stats=stats)
 
 
 async def fetch_zhisuo_unit_rows(
@@ -503,7 +636,7 @@ async def fetch_pomiad_rows(
     end: str,
     is_by_country: int = 0,
     api_data_limit: int = 100,
-) -> List[Any]:
+) -> UpstreamFetchResult:
     """
     Pomiad 拉数（参数与流程参见 tests/Pomiad_com_data_api.pdf）。
 
@@ -522,6 +655,7 @@ async def fetch_pomiad_rows(
     seen: set[tuple[str, str]] = set()
     page = 1
     scanned_rows = 0
+    last_api_total = 0
 
     while True:
         params = {
@@ -563,6 +697,7 @@ async def fetch_pomiad_rows(
                 site_tasks.append(key)
 
         total = int(wrapper.get("count") or 0)
+        last_api_total = total or last_api_total
         if _should_break_upstream_pagination(
             rows,
             total=total,
@@ -575,7 +710,15 @@ async def fetch_pomiad_rows(
         page += 1
 
     if not site_tasks:
-        return []
+        return UpstreamFetchResult(rows=[], stats=UpstreamFetchStats())
+
+    api_stats = _build_fetch_stats(
+        pages_fetched=page,
+        total_pages=0,
+        rows_fetched=scanned_rows,
+        total_rows=last_api_total,
+        limit=api_data_limit,
+    )
 
     # ---- 阶段二：data_detail 按站点×日期拉明细（POST JSON）----
     all_detail_rows: List[Any] = []
@@ -600,4 +743,10 @@ async def fetch_pomiad_rows(
         if isinstance(detail_rows, list):
             all_detail_rows.extend(detail_rows)
 
-    return all_detail_rows
+    detail_stats = UpstreamFetchStats(
+        pages_fetched=api_stats.pages_fetched,
+        total_pages=api_stats.total_pages,
+        rows_fetched=len(all_detail_rows),
+        total_rows=last_api_total or len(all_detail_rows),
+    )
+    return UpstreamFetchResult(rows=all_detail_rows, stats=detail_stats)

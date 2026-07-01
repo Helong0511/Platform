@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from app.scheduler_module.task_result_store import set_task_result
 from app.scheduler_module.task_utils import (
@@ -16,6 +16,7 @@ from app.scheduler_module.task_utils import (
     log_task_start,
     upstream_credential_missing,
 )
+from app.scheduler_module.upstream_fetch import UpstreamFetchResult, unwrap_upstream_fetch_result
 from app.scheduler_module.upstream_import import import_upstream_ad_data
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ DataTransform = Optional[Callable[[list], list]]
 async def run_upstream_import_task(
     task_name: str,
     *,
-    fetch_data: Callable[[], Awaitable[list[Any]]],
+    fetch_data: Callable[[], Awaitable[Union[UpstreamFetchResult, list[Any]]]],
     field_mapping: dict[str, str],
     source: str,
     notify_title: str,
@@ -60,7 +61,8 @@ async def run_upstream_import_task(
     log_task_start(task_name)
 
     try:
-        data = await fetch_data()
+        fetch_result = await fetch_data()
+        data, fetch_stats = unwrap_upstream_fetch_result(fetch_result)
         await import_upstream_ad_data(
             task_name=task_name,
             data=data,
@@ -70,6 +72,7 @@ async def run_upstream_import_task(
             notify_title=notify_title,
             data_transform=data_transform,
             notify_params=notify_params,
+            fetch_stats=fetch_stats,
         )
     except Exception as e:
         label = log_label or task_name

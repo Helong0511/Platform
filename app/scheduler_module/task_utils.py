@@ -222,6 +222,39 @@ def format_notify_params_block(params: Optional[Mapping[str, Any]] = None) -> st
     return "\n".join(lines) + "\n"
 
 
+def fetch_stats_to_notify_params(
+    stats: Optional[Any] = None,
+) -> dict[str, str]:
+    """
+    将上游拉数分页统计格式化为 Telegram 通知参数字段。
+
+    返回共计/获取页数、共计/获取记录；上游未返回 total 时显示「未知」。
+    """
+    if stats is None:
+        return {}
+
+    def _count(value: int) -> str:
+        return str(value) if value > 0 else "未知"
+
+    pages_fetched = int(getattr(stats, "pages_fetched", 0) or 0)
+    return {
+        "共计页数": _count(int(getattr(stats, "total_pages", 0) or 0)),
+        "获取页数": str(pages_fetched),
+        "共计记录": _count(int(getattr(stats, "total_rows", 0) or 0)),
+        "获取记录": str(int(getattr(stats, "rows_fetched", 0) or 0)),
+    }
+
+
+def merge_notify_params_with_fetch_stats(
+    notify_params: Optional[Mapping[str, Any]],
+    stats: Optional[Any],
+) -> dict[str, Any]:
+    """合并任务参数与拉数分页统计，供 Telegram 通知展示。"""
+    merged: dict[str, Any] = dict(notify_params or {})
+    merged.update(fetch_stats_to_notify_params(stats))
+    return merged
+
+
 def format_result_summary(
         inserted: int = 0,
         updated: int = 0,

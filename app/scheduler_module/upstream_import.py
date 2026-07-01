@@ -32,6 +32,7 @@ from app.scheduler_module.task_utils import (
     format_notify_params_block,
     format_result_summary,
     get_admin_user,
+    merge_notify_params_with_fetch_stats,
 )
 
 logger = logging.getLogger(__name__)
@@ -168,6 +169,7 @@ async def import_upstream_ad_data(
     data_transform: Optional[Callable[[List[Any]], List[Any]]] = None,
     update_task_result: bool = True,
     notify_params: Optional[Mapping[str, Any]] = None,
+    fetch_stats: Optional[Any] = None,
 ) -> str:
     """
     标准上游拉数入库入口：预处理 → process_api_ad_data → 提交与通知。
@@ -184,6 +186,7 @@ async def import_upstream_ad_data(
         notify_title: Telegram 通知中的上游显示名
         data_transform: 可选预处理函数（如 Addermobi 匹配数修正、Pomiad domain 回退）
         notify_params: 可选任务参数，写入 Telegram 完成通知
+        fetch_stats: 可选上游拉数分页统计，合并进 Telegram 通知
     """
     # ---------- 空数据快速返回 ----------
     if not data:
@@ -192,6 +195,11 @@ async def import_upstream_ad_data(
         if update_task_result:
             set_task_result(task_name, empty_msg)
         return empty_msg
+
+    effective_notify_params = merge_notify_params_with_fetch_stats(
+        notify_params,
+        fetch_stats,
+    )
 
     # ---------- 可选数据预处理 ----------
     if data_transform:
@@ -222,5 +230,5 @@ async def import_upstream_ad_data(
             current_time_str=current_time_str,
             notify_title=notify_title,
             update_task_result=update_task_result,
-            notify_params=notify_params,
+            notify_params=effective_notify_params,
         )
