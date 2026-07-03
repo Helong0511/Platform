@@ -380,7 +380,8 @@ const { runFetch: fetchDailyData, cancel: cancelDailyFetch } = useDebouncedPagin
       window.location.href = '/login';
     });
   },
-  afterEmpty: handleEmptyWithDateBootstrap
+  afterEmpty: handleEmptyWithDateBootstrap,
+  debounceMs: 0
 });
 
 const handleDateRangeChange = async () => {
@@ -541,8 +542,9 @@ const loadPageData = async () => {
     }
     
     await ensureInitialDateRange();
-    await reloadFiltersAfterDateChange(isAdmin.value);
+    // 先拉列表（可能自动扩大日期范围），再按最终日期刷新筛选项，避免产品下拉被较早请求覆盖
     await fetchDailyData();
+    await reloadFiltersAfterDateChange(isAdmin.value);
   } catch (error) {
     if (!isErrorHandled(error)) {
       const errorMsg = extractErrorMessage(error);
@@ -583,8 +585,8 @@ const applyDailyPageConfig = async () => {
   searchForm.value.countryCode = [];
   searchForm.value.adUnit = [];
   pagination.value.current = 1;
-  await reloadFiltersAfterDateChange(isAdmin.value);
   await fetchDailyData();
+  await reloadFiltersAfterDateChange(isAdmin.value);
 };
 
 watch(

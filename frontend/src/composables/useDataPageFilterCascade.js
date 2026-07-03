@@ -141,6 +141,20 @@ function normalizeFilterFieldToString(form, field) {
   return false;
 }
 
+/** 异步筛选项拉取序号：仅采纳最后一次请求结果，避免日期自动扩大等场景下旧响应覆盖新列表 */
+function createFetchEpoch() {
+  let epoch = 0;
+  return {
+    begin() {
+      epoch += 1;
+      return epoch;
+    },
+    isCurrent(token) {
+      return token === epoch;
+    }
+  };
+}
+
 /**
  * @param {Object} options
  * @param {import('vue').Ref} options.searchForm
@@ -176,6 +190,11 @@ export function useDataPageFilterCascade({
   const filterProducts = ref([{ label: '全部产品', value: '' }]);
   const filterCountries = ref([{ code: '', name_zh: '全部区域', label: '全部区域' }]);
   const filterAdUnits = ref([{ value: '', label: '全部广告单元' }]);
+
+  const clientsFetchEpoch = createFetchEpoch();
+  const productsFetchEpoch = createFetchEpoch();
+  const countriesFetchEpoch = createFetchEpoch();
+  const adUnitsFetchEpoch = createFetchEpoch();
 
   const getDimension = () =>
     includeDimension
@@ -240,9 +259,13 @@ export function useDataPageFilterCascade({
   };
 
   const fetchClientsWithData = async () => {
+    const token = clientsFetchEpoch.begin();
     try {
       const { startDate, endDate } = getDateRangeFromForm(searchForm.value);
       const result = await api.getClients(startDate, endDate);
+      if (!clientsFetchEpoch.isCurrent(token)) {
+        return;
+      }
       const data = result?.data || [];
       users.value = data
           .filter((item) => item?.id != null)
@@ -254,14 +277,21 @@ export function useDataPageFilterCascade({
         users.value = [{ label: '全部客户', value: '' }, ...users.value];
       }
     } catch {
+      if (!clientsFetchEpoch.isCurrent(token)) {
+        return;
+      }
       users.value = multiSelect ? [] : [{ label: '全部客户', value: '' }];
     }
   };
 
   const fetchFilterProducts = async (clientId) => {
+    const token = productsFetchEpoch.begin();
     try {
       const { startDate, endDate } = getDateRangeFromForm(searchForm.value);
       const result = await api.getProducts(clientId || null, startDate, endDate);
+      if (!productsFetchEpoch.isCurrent(token)) {
+        return;
+      }
       const data = result?.data || [];
       const productOptions = data
         .filter((item) => item?.id != null)
@@ -276,6 +306,9 @@ export function useDataPageFilterCascade({
         ? productOptions
         : [{ label: '全部产品', value: '' }, ...productOptions];
     } catch (error) {
+      if (!productsFetchEpoch.isCurrent(token)) {
+        return;
+      }
       if (!isErrorHandled(error)) {
         ElMessage.error(extractErrorMessage(error));
       }
@@ -292,6 +325,7 @@ export function useDataPageFilterCascade({
         : [{ code: '', name_zh: '全部区域', label: '全部区域' }];
       return;
     }
+    const token = countriesFetchEpoch.begin();
     try {
       const { startDate, endDate } = getDateRangeFromForm(searchForm.value);
       const result = await api.getCountries(
@@ -302,6 +336,9 @@ export function useDataPageFilterCascade({
         dimension,
         adUnit || null
       );
+      if (!countriesFetchEpoch.isCurrent(token)) {
+        return;
+      }
       const data = result?.data || [];
       let countryOptions;
       if (api.filterCountriesAdvanced) {
@@ -323,6 +360,9 @@ export function useDataPageFilterCascade({
         ? countryOptions
         : [{ code: '', name_zh: '全部区域', label: '全部区域' }, ...countryOptions];
     } catch (error) {
+      if (!countriesFetchEpoch.isCurrent(token)) {
+        return;
+      }
       if (!isErrorHandled(error)) {
         ElMessage.error(extractErrorMessage(error));
       }
@@ -339,6 +379,7 @@ export function useDataPageFilterCascade({
       filterAdUnits.value = multiSelect ? [] : [{ value: '', label: '全部广告单元' }];
       return;
     }
+    const token = adUnitsFetchEpoch.begin();
     try {
       const { startDate, endDate } = getDateRangeFromForm(searchForm.value);
       const result = await api.getAdUnits(
@@ -349,6 +390,9 @@ export function useDataPageFilterCascade({
         dimension,
         countryCode || null
       );
+      if (!adUnitsFetchEpoch.isCurrent(token)) {
+        return;
+      }
       const data = result?.data || [];
       const adUnitOptions = data
         .filter((item) => item?.value != null && item.value !== '')
@@ -365,6 +409,9 @@ export function useDataPageFilterCascade({
         ? adUnitOptions
         : [{ value: '', label: '全部广告单元' }, ...adUnitOptions];
     } catch (error) {
+      if (!adUnitsFetchEpoch.isCurrent(token)) {
+        return;
+      }
       if (!isErrorHandled(error)) {
         ElMessage.error(extractErrorMessage(error));
       }

@@ -351,7 +351,8 @@ const { runFetch: fetchAdData, cancel: cancelAdDataFetch } = useDebouncedPaginat
       window.location.href = '/login';
     });
   },
-  afterEmpty: handleEmptyWithDateBootstrap
+  afterEmpty: handleEmptyWithDateBootstrap,
+  debounceMs: 0
 });
 
 // 编辑对话框产品下拉
@@ -845,58 +846,36 @@ const loadPageData = async () => {
       }, 20000);
     });
     
-    // 优先加载广告数据（关键数据，用户最关心）
+    // 先确定日期范围并拉取列表（可能自动扩大日期），再按最终日期加载筛选项
     await ensureInitialDateRange();
-    const criticalPromises = [
-      fetchAdData().catch(error => {
-        if (error.response?.status === 401) {
-          return;
-        }
-        // 静默处理错误
-      })
-    ];
-    
-    // 先等待关键数据加载完成
     try {
       await Promise.race([
-        Promise.allSettled(criticalPromises),
+        fetchAdData().catch((error) => {
+          if (error.response?.status === 401) {
+            return;
+          }
+        }),
         timeoutPromise
       ]);
     } finally {
-      // 清理超时定时器
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
     }
-    
-    // 然后并行加载非关键数据（客户列表、产品列表等）
-    // 这些数据可以延迟加载，不影响用户查看主要数据
-    const nonCriticalPromises = [];
-    
-    // 加载筛选下拉（客户 / 产品 / 国家 / 广告单元）
-    nonCriticalPromises.push(
-      loadAllFilterOptions(isAdmin.value).catch(error => {
-        if (error.response?.status === 401) {
-          return;
-        }
-        // 静默处理错误
-      })
-    );
 
-    // 预加载编辑对话框产品列表（打开编辑时再按客户刷新）
-    nonCriticalPromises.push(
-      fetchProducts(null).catch(error => {
+    const nonCriticalPromises = [
+      loadAllFilterOptions(isAdmin.value).catch((error) => {
         if (error.response?.status === 401) {
           return;
         }
-        // 静默处理错误
+      }),
+      fetchProducts(null).catch((error) => {
+        if (error.response?.status === 401) {
+          return;
+        }
       })
-    );
-    
-    // 非关键数据异步加载，不阻塞页面显示
-    Promise.allSettled(nonCriticalPromises).catch(() => {
-      // 静默处理错误，不影响用户体验
-    });
+    ];
+    await Promise.allSettled(nonCriticalPromises);
   } catch (error) {
     // 超时或其他错误
     if (error.message && error.message.includes('超时')) {
