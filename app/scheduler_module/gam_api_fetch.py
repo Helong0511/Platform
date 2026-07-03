@@ -125,18 +125,18 @@ def _ensure_utf8_environment() -> None:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
 
-    # googleads 内部调用已废弃的 getdefaultlocale()；Windows 下常返回 cp936 导致误报
-    if not getattr(locale, "_gam_utf8_patched", False):
+    # googleads 内部调用已废弃的 getdefaultlocale()；仅 Windows 中文环境需要修补。
+    # 注意：getdefaultlocale 的首参是 envvars 元组，不是 locale.LC_ALL（整数），
+    # 误传整数会在 Linux 上触发 TypeError: 'int' object is not iterable。
+    if sys.platform == "win32" and not getattr(locale, "_gam_utf8_patched", False):
         _orig_getdefaultlocale = locale.getdefaultlocale
 
-        def _utf8_getdefaultlocale(category=locale.LC_ALL):
-            if sys.platform == "win32":
-                lang, enc = locale.getlocale(category)
-                if lang:
-                    # getlocale 示例：('Chinese (Simplified)_China', 'utf8')
-                    lang = lang.split(".")[0].split("_")[0] if "_" in lang else "zh_CN"
-                return lang or "zh_CN", "UTF-8"
-            return _orig_getdefaultlocale(category)
+        def _utf8_getdefaultlocale(*args, **kwargs):
+            lang, enc = locale.getlocale(locale.LC_ALL)
+            if lang:
+                # getlocale 示例：('Chinese (Simplified)_China', 'utf8')
+                lang = lang.split(".")[0].split("_")[0] if "_" in lang else "zh_CN"
+            return lang or "zh_CN", "UTF-8"
 
         locale.getdefaultlocale = _utf8_getdefaultlocale  # type: ignore[method-assign]
         locale._gam_utf8_patched = True  # type: ignore[attr-defined]

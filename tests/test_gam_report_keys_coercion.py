@@ -1,10 +1,15 @@
-"""GAM report_keys / product_whitelist 类型校验测试。"""
+"""GAM report_keys / product_whitelist 类型校验与 locale 补丁测试。"""
 from __future__ import annotations
+
+import locale
+import sys
+from unittest.mock import patch
 
 import pytest
 
 from app.scheduler_module.gam_api_fetch import (
     _coerce_report_keys_input,
+    _ensure_utf8_environment,
     _normalize_account_report_keys,
     _normalize_gam_account,
 )
@@ -41,3 +46,19 @@ def test_normalize_gam_account_rejects_int_report_keys() -> None:
             },
             index=0,
         )
+
+
+def test_getdefaultlocale_patch_skipped_on_linux() -> None:
+    """Linux 上不得替换 getdefaultlocale，避免把 LC_ALL 整数误传给 envvars。"""
+    original = locale.getdefaultlocale
+    if hasattr(locale, "_gam_utf8_patched"):
+        delattr(locale, "_gam_utf8_patched")
+
+    with patch.object(sys, "platform", "linux"):
+        _ensure_utf8_environment()
+        assert locale.getdefaultlocale is original
+
+    # 恢复 Windows 开发机上的模块级副作用
+    if hasattr(locale, "_gam_utf8_patched"):
+        delattr(locale, "_gam_utf8_patched")
+    _ensure_utf8_environment()
