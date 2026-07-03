@@ -1241,8 +1241,8 @@ def _build_ad_manager_client(cfg: dict):
     )
     return ad_manager.AdManagerClient(
         oauth2_client,
-        cfg["application_name"],
-        network_code=cfg["network_code"],
+        str(cfg["application_name"] or ""),
+        network_code=str(cfg["network_code"] or ""),
         cache=_build_gam_zeep_cache(),
     )
 
@@ -1907,6 +1907,7 @@ def fetch_report_rows(
     Returns:
         含 business_rows、product_filter、skipped 等字段的摘要字典
     """
+    _validate_report_spec_shape(spec)
     whitelist = _account_product_whitelist_set(cfg)
     if whitelist and not _spec_includes_product_name(spec):
         skipped = _skipped_report_summary(
