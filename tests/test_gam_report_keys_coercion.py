@@ -62,3 +62,11 @@ def test_getdefaultlocale_patch_skipped_on_linux() -> None:
     if hasattr(locale, "_gam_utf8_patched"):
         delattr(locale, "_gam_utf8_patched")
     _ensure_utf8_environment()
+
+
+def test_gam_cache_dir_defaults_to_project_local() -> None:
+    from app.scheduler_module.gam_api_fetch import DEFAULT_GAM_CACHE_DIR, _resolve_gam_cache_dir
+
+    assert _resolve_gam_cache_dir() == DEFAULT_GAM_CACHE_DIR
+    assert DEFAULT_GAM_CACHE_DIR.name == "gam"
+    assert DEFAULT_GAM_CACHE_DIR.parent.name == ".cache"

@@ -59,6 +59,11 @@ def normalize_gam_api_exception(exc: Exception) -> Exception:
     """将 GAM/Google 异常转为带中文说明的 ValueError（若可识别）。"""
     if isinstance(exc, ValueError):
         return exc
+    if isinstance(exc, PermissionError) and ".cache" in str(exc):
+        return ValueError(
+            f"GAM API 缓存目录无写入权限: {exc}。"
+            "请以 root 执行: bash scripts/ensure_gam_runtime_dirs.sh"
+        )
     lowered = str(exc).lower()
     if any(token in lowered for token in ("invalid_grant", "access_denied", "permission_denied")):
         return gam_api_fetch.format_gam_auth_error(exc)

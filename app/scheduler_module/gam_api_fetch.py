@@ -29,6 +29,7 @@ application_name 优先取账号配置 / 密钥 JSON 可选字段，否则回退
   GAM_START_DATE         开始日期 YYYY-MM-DD，默认昨天
   GAM_END_DATE           结束日期 YYYY-MM-DD，默认与开始日期相同
   GAM_OUTPUT_DIR         输出目录，默认 tests/API/gam_output（联调脚本）
+  GAM_CACHE_DIR          zeep/googleads SOAP 缓存目录，默认 {项目根}/.cache/gam
   GAM_REPORTS            逗号分隔报表键，默认全部（ad_unit,country,site,daily）
   GAM_PRODUCT_WHITELIST  单账号模式：逗号分隔产品名；非空时仅保留白名单内 product_name
 
@@ -95,6 +96,39 @@ import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+# 项目根目录（须在 googleads 导入前确定，用于缓存路径）
+ROOT = Path(__file__).resolve().parents[2]
+
+# zeep/googleads SOAP WSDL 缓存（避免写入 /var/www/.cache 等无权限路径）
+DEFAULT_GAM_CACHE_DIR = ROOT / ".cache" / "gam"
+
+
+def _resolve_gam_cache_dir() -> Path:
+    """解析 GAM zeep 缓存目录（可通过 GAM_CACHE_DIR 覆盖）。"""
+    raw = os.getenv("GAM_CACHE_DIR", "").strip()
+    if not raw:
+        return DEFAULT_GAM_CACHE_DIR
+    path = Path(raw)
+    if not path.is_absolute():
+        path = ROOT / path
+    return path
+
+
+def _ensure_gam_cache_environment() -> None:
+    """
+    将 zeep 缓存定向到项目内可写目录。
+
+    生产环境若以 www-data 运行且 HOME=/var/www，默认会尝试写入 /var/www/.cache 导致 PermissionError。
+    """
+    cache_home = ROOT / ".cache"
+    os.environ.setdefault("XDG_CACHE_HOME", str(cache_home))
+    gam_cache_dir = _resolve_gam_cache_dir()
+    try:
+        gam_cache_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # 目录可能由部署脚本预先创建；真正失败在构建客户端时再报错
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Windows UTF-8 兼容（须在 import googleads 之前执行）
@@ -125,6 +159,8 @@ def _ensure_utf8_environment() -> None:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
 
+    _ensure_gam_cache_environment()
+
     # googleads 内部调用已废弃的 getdefaultlocale()；仅 Windows 中文环境需要修补。
     # 注意：getdefaultlocale 的首参是 envvars 元组，不是 locale.LC_ALL（整数），
     # 误传整数会在 Linux 上触发 TypeError: 'int' object is not iterable。
@@ -149,12 +185,25 @@ _ensure_utf8_environment()
 # 路径与默认配置常量
 # ---------------------------------------------------------------------------
 
-# 项目根目录：app/scheduler_module/gam_api_fetch.py → parents[2] = Platform/
-ROOT = Path(__file__).resolve().parents[2]
 logger = logging.getLogger(__name__)
 
 # GCP 服务账号密钥目录
 SECRETS_DIR = ROOT / "secrets"
+
+
+def _build_gam_zeep_cache():
+    """构建指向项目内路径的 zeep SqliteCache。"""
+    from zeep.cache import SqliteCache
+
+    cache_dir = _resolve_gam_cache_dir()
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise PermissionError(
+            f"无法创建 GAM 缓存目录 {cache_dir}（{exc}）。"
+            f"请以 root 执行: bash {ROOT / 'scripts' / 'ensure_gam_runtime_dirs.sh'}"
+        ) from exc
+    return SqliteCache(path=str(cache_dir / "zeep.db"))
 
 # 默认多账号配置；network_code 从密钥文件名 gam-{network_code}.json 自动解析
 # product_whitelist 非空时仅保留对应 product_name；空列表表示全量
@@ -1129,8 +1178,9 @@ def _parse_report_keys_env() -> list[str]:
 
 def _resolve_report_specs(report_keys: list[str]) -> list[dict]:
     """按配置键顺序返回待拉取的报表定义。"""
+    keys = _normalize_account_report_keys(report_keys)
     by_key = {spec["key"]: spec for spec in GAM_REPORT_SPECS}
-    return [by_key[key] for key in report_keys]
+    return [by_key[key] for key in keys]
 
 
 def _parse_date_env(name: str) -> date | None:
@@ -1193,6 +1243,7 @@ def _build_ad_manager_client(cfg: dict):
         oauth2_client,
         cfg["application_name"],
         network_code=cfg["network_code"],
+        cache=_build_gam_zeep_cache(),
     )
 
 
@@ -1333,6 +1384,7 @@ def _spec_dimension_fields(spec: dict) -> list[tuple[str, str]]:
 
 
 def _spec_metric_columns(spec: dict) -> list[str]:
+    _validate_report_spec_shape(spec)
     return list(spec.get("columns", GAM_FULL_COLUMNS))
 
 
@@ -1942,7 +1994,11 @@ def run_gam_fetch_to_memory(
     run_cfg = _gam_run_config()
     run_cfg["start_date"] = start_date
     run_cfg["end_date"] = end_date
-    default_keys = report_keys or list(GAM_SCHEDULER_REPORT_KEYS)
+    default_keys = (
+        _normalize_account_report_keys(report_keys)
+        if report_keys is not None
+        else list(GAM_SCHEDULER_REPORT_KEYS)
+    )
     if accounts is not None:
         resolved_accounts = [
             _normalize_gam_account(account, index=index)
@@ -1966,8 +2022,8 @@ def run_gam_fetch_to_memory(
             if raw_keys is not None
             else list(default_keys)
         )
-        report_specs = _resolve_report_specs(account_keys)
         try:
+            report_specs = _resolve_report_specs(account_keys)
             client = _build_ad_manager_client(cfg)
             bundles.append(fetch_account_reports_to_memory(client, cfg, report_specs))
         except Exception as exc:

@@ -67,6 +67,8 @@ id "${APP_USER}" >/dev/null 2>&1 || die "用户不存在: ${APP_USER}（可执�
 
 SECRETS_DIR="${PLATFORM_ROOT}/secrets"
 CONFIG_DIR="${PLATFORM_ROOT}/config"
+CACHE_ROOT="${PLATFORM_ROOT}/.cache"
+GAM_CACHE_DIR="${CACHE_ROOT}/gam"
 GAM_CONFIG="${CONFIG_DIR}/gam_scheduler.json"
 
 log "项目目录: ${PLATFORM_ROOT}"
@@ -74,6 +76,8 @@ log "运行用户: ${APP_USER}（自动识别，与 uvicorn 进程一致即可�
 
 install -d -o "${APP_USER}" -g "${APP_USER}" -m 750 "${SECRETS_DIR}"
 install -d -o "${APP_USER}" -g "${APP_USER}" -m 750 "${CONFIG_DIR}"
+install -d -o "${APP_USER}" -g "${APP_USER}" -m 750 "${CACHE_ROOT}"
+install -d -o "${APP_USER}" -g "${APP_USER}" -m 750 "${GAM_CACHE_DIR}"
 
 if [[ ! -f "${GAM_CONFIG}" ]]; then
   sudo -u "${APP_USER}" tee "${GAM_CONFIG}" >/dev/null <<'EOF'
@@ -106,4 +110,10 @@ else
   die "secrets 目录对 ${APP_USER} 仍不可写"
 fi
 
-log "完成（默认路径 ${SECRETS_DIR} / ${GAM_CONFIG}，无需改 systemd）"
+if sudo -u "${APP_USER}" test -w "${GAM_CACHE_DIR}"; then
+  log "GAM 缓存目录可写: ${GAM_CACHE_DIR}"
+else
+  die "GAM 缓存目录对 ${APP_USER} 不可写: ${GAM_CACHE_DIR}"
+fi
+
+log "完成（默认路径 ${SECRETS_DIR} / ${GAM_CONFIG} / ${GAM_CACHE_DIR}，无需改 systemd）"
