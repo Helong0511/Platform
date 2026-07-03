@@ -11,7 +11,7 @@
 - 仅管理员可访问。
 
 说明：系统运维接口，含定时任务、审计日志、会话、缓存、斗篷与敏感路径探测。"""
-from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, Path, Body
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, Path, Body, File, UploadFile, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import and_, func
@@ -28,6 +28,13 @@ from app.core.exceptions import raise_api_exception
 from app.core.errors import ErrorCode
 from app.core.dependencies import get_scheduled_task_service
 from app.services.scheduled_task_service import ScheduledTaskService
+from app.scheduler_module.task_names import GAM_API_TASK_NAME
+from app.services.gam_scheduled_config_service import (
+    get_gam_scheduler_config,
+    save_gam_scheduler_config,
+    upload_gam_credentials_file,
+    refresh_gam_report_types,
+)
 from app.models.models import User, ScheduledTask
 from app.core.utils import get_app_now_naive
 from app.schemas.base import ResponseBaseSchema, PaginatedResponseBaseSchema
@@ -49,6 +56,7 @@ MAX_FUNCTION_PATH_LENGTH = 255
 def _enrich_scheduled_task_dict(task: ScheduledTask, task_dict: dict) -> dict:
     """补充函数信息与是否支持手动触发日期参数。（详见字段 Field description）。"""
     task_dict["supports_manual_date_range"] = task_supports_manual_date_range(task.task_name)
+    task_dict["supports_gam_scheduler_config"] = task.task_name == GAM_API_TASK_NAME
     try:
         func_info = get_task_function_info(task.task_name, task.function_path)
         if func_info:
@@ -86,6 +94,7 @@ class ScheduledTaskResponse(BaseSchema):
     function_module: Optional[str] = None  # 函数所在模块路径
     function_path: Optional[str] = None  # 执行函数路径（数据库字段）
     supports_manual_date_range: bool = False  # 手动触发是否可选日期范围
+    supports_gam_scheduler_config: bool = False  # 是否支持 GAM 多账号配置
     created_at: datetime
     updated_at: datetime
 
@@ -97,6 +106,51 @@ class ScheduledTaskUpdate(BaseModel):
     更新请求体：字段均为可选，客户端仅提交需要修改的列。
     """
     is_active: bool
+
+
+class GamAccountConfigItem(BaseModel):
+    """GAM 单账号完整配置。"""
+    key: str = Field(..., min_length=1, max_length=100)
+    credentials_json: str = Field(..., min_length=1, max_length=500)
+    application_name: str = Field(default="", max_length=200)
+    report_keys: list[str] = Field(
+        default_factory=list,
+        description="该账号拉取的报表类型（多选）",
+    )
+    product_whitelist: list[str] = Field(default_factory=list)
+
+
+class GamSchedulerConfigUpdate(BaseModel):
+    """GAM 多账号完整配置更新。"""
+    description: Optional[str] = Field(default=None, max_length=500)
+    accounts: list[GamAccountConfigItem] = Field(default_factory=list)
+
+
+class GamReportTypesRefreshRequest(BaseModel):
+    """刷新 GAM 报表类型目录请求。"""
+    account_key: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="账号 key（展示用）；与 credentials_json 一起传入时可未保存配置",
+    )
+    credentials_json: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="密钥路径；传入时优先于配置文件中的账号",
+    )
+    application_name: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        description="Google API application_name",
+    )
+
+
+def _ensure_gam_task_name(task_name: str) -> None:
+    if task_name != GAM_API_TASK_NAME:
+        raise_api_exception(
+            ErrorCode.VALIDATION_ERROR,
+            detail=f"任务 {task_name} 不支持 GAM 配置",
+        )
 
 
 # ====== API 端点 ======
@@ -189,6 +243,149 @@ async def get_scheduled_tasks(
             ErrorCode.OPERATION_FAILED,
             detail=f"获取定时任务列表失败：{str(e)}"
         )
+
+
+@router.get(
+    "/{task_name}/gam-config",
+    response_model=ResponseBaseSchema[dict],
+    summary="获取 GAM 多账号完整配置",
+)
+async def get_gam_scheduler_scheduled_task_config(
+        task_name: str = Path(..., description="任务名称", max_length=MAX_TASK_NAME_LENGTH),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin),
+):
+    """获取 Google API 获取数据任务的多账号配置（含白名单）。"""
+    _ensure_gam_task_name(task_name)
+    try:
+        data = await get_gam_scheduler_config(db)
+        return ResponseBaseSchema.success(data=data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("获取 GAM 配置失败: %s", e, exc_info=True)
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"获取 GAM 配置失败：{e}")
+
+
+@router.put(
+    "/{task_name}/gam-config",
+    response_model=ResponseBaseSchema[dict],
+    summary="保存 GAM 多账号完整配置",
+)
+async def update_gam_scheduler_scheduled_task_config(
+        request: Request,
+        task_name: str = Path(..., description="任务名称", max_length=MAX_TASK_NAME_LENGTH),
+        body: GamSchedulerConfigUpdate = Body(...),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin),
+):
+    """保存 Google API 获取数据任务的多账号配置（含白名单），写回 gam_scheduler.json。"""
+    _ensure_gam_task_name(task_name)
+    try:
+        data = await save_gam_scheduler_config(
+            db,
+            accounts=[item.model_dump() for item in body.accounts],
+            description=body.description,
+        )
+        await log_user_action(
+            db=db,
+            action_type="UPDATE",
+            user=current_user,
+            resource_type="SCHEDULED_TASK",
+            resource_name=task_name,
+            request=request,
+            success=True,
+            details={"gam_scheduler_config": data},
+        )
+        await commit_audit_log(db)
+        return ResponseBaseSchema.success(data=data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("保存 GAM 配置失败: %s", e, exc_info=True)
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"保存 GAM 配置失败：{e}")
+
+
+@router.post(
+    "/{task_name}/gam-report-types/refresh",
+    response_model=ResponseBaseSchema[dict],
+    summary="刷新 GAM 报表类型（探测 Google API）",
+)
+async def refresh_gam_report_types_scheduled_task(
+        task_name: str = Path(..., description="任务名称", max_length=MAX_TASK_NAME_LENGTH),
+        body: GamReportTypesRefreshRequest = Body(default=GamReportTypesRefreshRequest()),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin),
+):
+    """调用 GAM API 探测指定账号，返回该账号可用的报表类型。"""
+    _ensure_gam_task_name(task_name)
+    try:
+        data = await refresh_gam_report_types(
+            db,
+            account_key=body.account_key,
+            credentials_json=body.credentials_json,
+            application_name=body.application_name,
+        )
+        return ResponseBaseSchema.success(data=data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("刷新 GAM 报表类型失败: %s", e, exc_info=True)
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"刷新 GAM 报表类型失败：{e}")
+
+
+@router.post(
+    "/{task_name}/gam-secrets/upload",
+    response_model=ResponseBaseSchema[dict],
+    summary="上传 GAM 服务账号密钥文件",
+)
+async def upload_gam_credentials_scheduled_task(
+        request: Request,
+        task_name: str = Path(..., description="任务名称", max_length=MAX_TASK_NAME_LENGTH),
+        file: UploadFile = File(..., description="Google 服务账号 JSON 密钥"),
+        network_code: Optional[str] = Form(
+            default=None,
+            description="GAM 网络 ID；文件名非 gam-{id}.json 时必填",
+            max_length=20,
+        ),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(require_admin),
+):
+    """上传密钥 JSON 到服务端 secrets 目录，并返回 credentials_json 相对路径。"""
+    from app.scheduler_module.gam_credentials_storage import MAX_GAM_CREDENTIALS_BYTES
+
+    _ensure_gam_task_name(task_name)
+    raw = await file.read(MAX_GAM_CREDENTIALS_BYTES + 1)
+    if len(raw) > MAX_GAM_CREDENTIALS_BYTES:
+        raise_api_exception(
+            ErrorCode.VALIDATION_ERROR,
+            detail=f"密钥文件过大，最大允许 {MAX_GAM_CREDENTIALS_BYTES // 1024}KB",
+        )
+
+    try:
+        data = await upload_gam_credentials_file(
+            db,
+            raw=raw,
+            original_filename=file.filename or "credentials.json",
+            network_code=network_code,
+        )
+        await log_user_action(
+            db=db,
+            action_type="UPDATE",
+            user=current_user,
+            resource_type="SCHEDULED_TASK",
+            resource_name=task_name,
+            request=request,
+            success=True,
+            details={"gam_credentials_upload": data},
+        )
+        await commit_audit_log(db)
+        return ResponseBaseSchema.success(data=data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("上传 GAM 密钥文件失败: %s", e, exc_info=True)
+        raise_api_exception(ErrorCode.OPERATION_FAILED, detail=f"上传 GAM 密钥文件失败：{e}")
 
 
 @router.get(

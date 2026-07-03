@@ -164,7 +164,10 @@ export function useDataPageFilterCascade({
   fixedDimension = false,
   multiSelect = false,
   getEnableCountryFilter = null,
-  getEnableAdUnitFilter = null
+  getEnableAdUnitFilter = null,
+  defaultDimension = DEFAULT_AD_DATA_DIMENSION,
+  loadDimensionPreference = loadAdDataDimensionPreference,
+  saveDimensionPreference = saveAdDataDimensionPreference
 }) {
   const api =
     apiOverride || (source === 'tb-search' ? TB_SEARCH_API : AD_DATA_API);
@@ -176,7 +179,7 @@ export function useDataPageFilterCascade({
 
   const getDimension = () =>
     includeDimension
-      ? searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION
+      ? searchForm.value.dimension || defaultDimension
       : null;
 
   const clearFilterField = (field) => {
@@ -518,7 +521,7 @@ export function useDataPageFilterCascade({
     if (includeDimension && getUserId) {
       const userId = getUserId();
       if (userId != null && userId !== '') {
-        saveAdDataDimensionPreference(userId, searchForm.value.dimension);
+        saveDimensionPreference(userId, searchForm.value.dimension);
       }
     }
     clearFilterField('countryCode');
@@ -597,7 +600,7 @@ export function useDataPageFilterCascade({
         if (userId == null || userId === '') {
           return;
         }
-        const saved = loadAdDataDimensionPreference(userId);
+        const saved = loadDimensionPreference(userId);
         if (searchForm.value.dimension !== saved) {
           searchForm.value.dimension = saved;
           pruneDimensionAwareFilters();

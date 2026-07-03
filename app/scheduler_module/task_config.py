@@ -260,6 +260,21 @@ TASK_CONFIGS: Dict[str, TaskConfig] = {
         "cron_expression": "*/30 * * * *",
         "description": "每隔30分钟执行一次，从 Pomiad API 获取广告明细数据",
     },
+
+    # ========== Google API获取数据任务（GAM） ==========
+    "Google API获取数据": {
+        "task_name": "Google API获取数据",
+        "task_module": "app.scheduler_module.tasks.gam_task",
+        "task_function": "google_api_task",
+        "result_getter_module": "app.scheduler_module.task_result_store",
+        "result_getter_function": "get_task_result",
+        "cron_expression": "0 * * * *",
+        "description": (
+            "每小时整点从 Google Ad Manager 拉取 ad_unit/country/site 报表（内存），"
+            "country 交叉行与 ad_unit 纯单元行分形态入库；日期默认昨天+今天；"
+            "需存在 config/gam_scheduler.json 且配置账号后才会执行"
+        ),
+    },
     # ==============================================================================
     # 添加新任务示例（取消注释并修改即可）
     # ==============================================================================

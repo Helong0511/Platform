@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "description": "GAM 定时拉数账号与白名单配置（管理端修改白名单会写回此文件）",
+  "accounts": [
+    {
+      "key": "x_browser",
+      "credentials_json": "secrets/gam-23347342743.json",
+      "application_name": "X BROWSER LIMITED",
+      "report_keys": [
+        "country"
+      ],
+      "product_whitelist": [
+        "casualgames.quest",
+        "iogames.quest",
+        "play2048games.shop",
+        "puzzlegames.shop",
+        "thestrategygames.shop"
+      ]
+    },
+    {
+      "key": "leadwin",
+      "credentials_json": "secrets/gam-23348711678.json",
+      "application_name": "Leadwin",
+      "report_keys": [
+        "country"
+      ],
+      "product_whitelist": []
+    }
+  ]
+}

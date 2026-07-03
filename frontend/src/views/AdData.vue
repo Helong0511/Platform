@@ -38,7 +38,7 @@
       :filter-products="filterProducts"
       :filter-countries="filterCountries"
       :filter-ad-units="filterAdUnits"
-      default-hint="行级明细，支持修改与删除；筛选联动与「详细报表」一致。"
+      default-hint="行级明细，支持修改与删除。GAM/Addermobi 等交叉数据请选「按广告单元+国家」；Zhisuo 纯国家数据请选「按国家」。"
       @fetch="fetchAdData"
       @reset="resetFilter"
       @date-range-change="handleDateRangeChange"
@@ -53,6 +53,7 @@
       v-model:pagination="pagination"
       :loading="loading"
       :ad-data-list="adDataList"
+      :empty-text="detailEmptyText"
       :column-visibility="effectiveColumnVisibility"
       :is-admin="isAdmin"
       :is-mobile="isMobile"
@@ -152,8 +153,10 @@ import { useAdDataProductPanel } from '../composables/useAdDataProductPanel';
 import {
   appendDimensionAwareFilters,
   applyDimensionColumnDefaults,
-  DEFAULT_AD_DATA_DIMENSION,
-  loadAdDataDimensionPreference
+  DEFAULT_AD_DATA_DETAIL_DIMENSION,
+  loadAdDataDetailDimensionPreference,
+  saveAdDataDetailDimensionPreference,
+  normalizeAdDataDimension
 } from '../constants/adDataDimension';
 import ProductManagementDialog from '../components/admin/ProductManagementDialog.vue';
 import AdDataFilterCard from '../components/ad-data/AdDataFilterCard.vue';
@@ -205,7 +208,7 @@ const searchForm = ref({
   clientId: '',
   dateRange: [],
   productId: '',
-  dimension: loadAdDataDimensionPreference(authStore.userInfo?.id),
+  dimension: loadAdDataDetailDimensionPreference(authStore.userInfo?.id),
   countryCode: '',
   adUnit: ''
 });
@@ -253,11 +256,14 @@ const {
   includeCountry: true,
   includeDimension: true,
   source: 'ad-data',
-  getUserId: () => authStore.userInfo?.id
+  getUserId: () => authStore.userInfo?.id,
+  defaultDimension: DEFAULT_AD_DATA_DETAIL_DIMENSION,
+  loadDimensionPreference: loadAdDataDetailDimensionPreference,
+  saveDimensionPreference: saveAdDataDetailDimensionPreference
 });
 
 const buildAdDataSearchParams = () => {
-  const dimension = searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION;
+  const dimension = searchForm.value.dimension || DEFAULT_AD_DATA_DETAIL_DIMENSION;
   const params = { dimension };
   if (isAdmin.value && searchForm.value.clientId) {
     params.client_id = searchForm.value.clientId;
@@ -281,6 +287,19 @@ const buildAdDataSearchParams = () => {
 const effectiveColumnVisibility = computed(() =>
   applyDimensionColumnDefaults(columnVisibility, searchForm.value.dimension)
 );
+
+const detailEmptyText = computed(() => {
+  const dim = normalizeAdDataDimension(
+    searchForm.value.dimension || DEFAULT_AD_DATA_DETAIL_DIMENSION
+  );
+  if (dim === 'country') {
+    return '当前为「按国家」维度，仅显示无广告单元的纯国家行。若库中均为交叉明细，请切换为「按广告单元+国家」。';
+  }
+  if (dim === 'ad_unit') {
+    return '当前为「按广告单元」维度，仅显示无国家代码的纯广告单元行。若库中均为交叉明细，请切换为「按广告单元+国家」。';
+  }
+  return '暂无数据';
+});
 
 const {
   ensureInitialDateRange,
@@ -417,7 +436,7 @@ const resetFilter = async () => {
     clientId: '',
     dateRange: [],
     productId: '',
-    dimension: loadAdDataDimensionPreference(authStore.userInfo?.id),
+    dimension: loadAdDataDetailDimensionPreference(authStore.userInfo?.id),
     countryCode: '',
     adUnit: ''
   };

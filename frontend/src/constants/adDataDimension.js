@@ -21,6 +21,9 @@ export const AD_DATA_DIMENSION_OPTIONS = [
 
 export const DEFAULT_AD_DATA_DIMENSION = 'country';
 
+/** 明细维护页默认维度：GAM/Addermobi 等交叉入库数据需在此维度展示 */
+export const DEFAULT_AD_DATA_DETAIL_DIMENSION = AD_UNIT_COUNTRY_DIMENSION;
+
 /** 每日统计子菜单页配置（固定维度，不再使用下拉选择） */
 export const DAILY_REPORT_PAGE_KEYS = {
   SUMMARY: 'summary',
@@ -100,6 +103,7 @@ export function getDailyReportPageConfig(pageKey) {
 }
 
 const AD_DATA_DIMENSION_STORAGE_PREFIX = 'adData_dimension';
+const AD_DATA_DETAIL_DIMENSION_STORAGE_PREFIX = 'adData_detail_dimension';
 
 const AD_DATA_DIMENSION_VALUES = new Set(
   AD_DATA_DIMENSION_OPTIONS.map((item) => item.value)
@@ -158,6 +162,37 @@ export function saveAdDataDimensionPreference(userId, dimension) {
     localStorage.setItem(buildAdDataDimensionStorageKey(userId), normalized);
   } catch (error) {
     logger.error('保存统计维度偏好失败:', error);
+  }
+}
+
+function buildAdDataDetailDimensionStorageKey(userId) {
+  const id = userId != null && userId !== '' ? String(userId) : 'anonymous';
+  return `${AD_DATA_DETAIL_DIMENSION_STORAGE_PREFIX}_${id}`;
+}
+
+/** 明细维护页：读取上次选择的统计维度（与每日统计页偏好独立） */
+export function loadAdDataDetailDimensionPreference(userId) {
+  try {
+    const saved = localStorage.getItem(buildAdDataDetailDimensionStorageKey(userId));
+    if (saved && isValidAdDataDimension(saved)) {
+      return normalizeAdDataDimension(saved);
+    }
+  } catch (error) {
+    logger.error('加载明细维护统计维度偏好失败:', error);
+  }
+  return DEFAULT_AD_DATA_DETAIL_DIMENSION;
+}
+
+/** 明细维护页：持久化统计维度选择 */
+export function saveAdDataDetailDimensionPreference(userId, dimension) {
+  const normalized = normalizeAdDataDimension(dimension);
+  if (!isValidAdDataDimension(normalized)) {
+    return;
+  }
+  try {
+    localStorage.setItem(buildAdDataDetailDimensionStorageKey(userId), normalized);
+  } catch (error) {
+    logger.error('保存明细维护统计维度偏好失败:', error);
   }
 }
 

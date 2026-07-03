@@ -763,7 +763,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         
         if path.startswith("/api/v1/scheduled-tasks/"):
-            if path.endswith("/trigger") or path.endswith("/reload") or path == "/api/v1/scheduled-tasks/reload-all":
+            if (
+                path.endswith("/trigger")
+                or path.endswith("/reload")
+                or "/gam-secrets/upload" in path
+                or path == "/api/v1/scheduled-tasks/reload-all"
+            ):
                 logger.debug(f"跳过CSRF检查（定时任务接口）: {method} {path}")
                 return await call_next(request)
         

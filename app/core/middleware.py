@@ -818,6 +818,15 @@ class SensitivePathGuardMiddleware(BaseHTTPMiddleware):
             )
 
         path_raw = request.url.path or ""
+        path_l = path_raw.lower()
+        # GAM 定时任务管理端接口（含密钥上传），勿按敏感路径子串误拦
+        if "/api/v1/scheduled-tasks/" in path_l and (
+            "/gam-config" in path_l
+            or "/gam-secrets/" in path_l
+            or "/gam-report-types/" in path_l
+        ):
+            return await call_next(request)
+
         match = match_sensitive_path(path_raw)
 
         if match:

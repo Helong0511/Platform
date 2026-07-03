@@ -92,3 +92,76 @@ export const releaseTaskLock = async (taskName) => {
   ElMessage.success(getSuccessMessage('TASK_LOCK_RELEASED'));
   return result;
 };
+
+/**
+ * 获取 GAM 多账号完整配置。
+ */
+export const getGamSchedulerConfig = async (taskName) =>
+  request(
+    { url: scheduledTaskPath(taskName, 'gam-config'), method: 'get' },
+    { returnDataOnly: true }
+  );
+
+/**
+ * 保存 GAM 多账号完整配置。
+ */
+export const saveGamSchedulerConfig = async (taskName, data) => {
+  const result = await withCsrfMutate(() =>
+    request(
+      {
+        url: scheduledTaskPath(taskName, 'gam-config'),
+        method: 'put',
+        data,
+      },
+      { returnDataOnly: true }
+    )
+  );
+  ElMessage.success('GAM 配置已保存');
+  return result;
+};
+
+/**
+ * 上传 GAM 服务账号密钥 JSON（保存到服务端 secrets 目录）。
+ */
+export const uploadGamCredentials = async (taskName, file, networkCode = null) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (networkCode) {
+    formData.append('network_code', String(networkCode).trim());
+  }
+  const result = await withCsrfMutate(() =>
+    request(
+      {
+        url: scheduledTaskPath(taskName, 'gam-secrets/upload'),
+        method: 'post',
+        data: formData,
+      },
+      { returnDataOnly: true, timeout: 60000 }
+    )
+  );
+  ElMessage.success('密钥文件已上传');
+  return result;
+};
+
+/**
+ * 刷新指定 GAM 账号的报表类型（探测 Google API）。
+ * @param {string} taskName
+ * @param {{ account_key?: string, credentials_json?: string, application_name?: string }} account
+ */
+export const refreshGamReportTypes = async (taskName, account = {}) => {
+  const payload = {};
+  if (account?.account_key) payload.account_key = String(account.account_key).trim();
+  if (account?.credentials_json) payload.credentials_json = String(account.credentials_json).trim();
+  if (account?.application_name) payload.application_name = String(account.application_name).trim();
+  const result = await withCsrfMutate(() =>
+    request(
+      {
+        url: scheduledTaskPath(taskName, 'gam-report-types/refresh'),
+        method: 'post',
+        data: payload,
+      },
+      { returnDataOnly: true, timeout: 180000 }
+    )
+  );
+  return result;
+};

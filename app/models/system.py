@@ -2,7 +2,7 @@
 系统任务、审计日志、国家信息 ORM 模型。
 """
 from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, Enum, Text, Index, \
-    UniqueConstraint, Date
+    UniqueConstraint, Date, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -35,6 +35,7 @@ class ScheduledTask(Base):
     description = Column(Text, nullable=True, comment='任务描述')
     function_path = Column(String(255), nullable=True,
                            comment='执行函数路径（例如：app.scheduler_module.tasks.simple_task.simple_info_task）')
+    task_params = Column(JSON, nullable=True, comment='任务扩展参数（JSON）')
     created_at = Column(DateTime, default=get_app_now_naive, comment='创建时间')
     updated_at = Column(DateTime, default=get_app_now_naive,
                         onupdate=get_app_now_naive, comment='更新时间')

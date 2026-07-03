@@ -121,6 +121,9 @@
       <el-menu-item index="/app/admin/scheduled-tasks">
         <span>定时任务</span>
       </el-menu-item>
+      <el-menu-item index="/app/admin/gam-scheduler">
+        <span>GAM 多账号配置</span>
+      </el-menu-item>
       <el-menu-item index="/app/admin/audit-logs">
         <span>操作日志</span>
       </el-menu-item>

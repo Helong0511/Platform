@@ -15,15 +15,9 @@ import { taskSupportsManualDateRange } from '../utils/cronValidate';
 /**
  * 定时任务行操作：启停、手动触发、释放锁。
  */
-/**
- * 组合式函数 - 定时任务操作：启停/立即执行
- * @returns {Object} 响应式状态与业务操作方法
- */
 export function useScheduledTaskActions({ fetchTasks }) {
-  // triggerDialogVisible 响应式状态
   const triggerDialogVisible = ref(false);
   const currentTriggerTask = ref(null);
-  // triggerParams 响应式状态
   const triggerParams = ref({ start_date: '', end_date: '' });
 
   const scheduleRefresh = (ms = 2000) => {

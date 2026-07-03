@@ -15,6 +15,7 @@
     <el-table
       v-loading="loading"
       :data="adDataList"
+      :empty-text="emptyText"
       border
       stripe
       style="width: 100%"
@@ -155,6 +156,7 @@ defineProps({
   formatPercentage: { type: Function, required: true },
   formatCurrency: { type: Function, required: true },
   getSummaries: { type: Function, required: true },
+  emptyText: { type: String, default: '暂无数据' },
 });
 
 const emit = defineEmits([

@@ -80,6 +80,7 @@ const MLModelManagement = createAsyncComponent(() => import(/* webpackChunkName:
 const NotFound = createAsyncComponent(() => import(/* webpackChunkName: "not-found" */ '../views/NotFound.vue'), 'NotFound');
 const UserManagement = createAsyncComponent(() => import(/* webpackChunkName: "user-management" */ '../views/admin/UserManagement.vue'), 'UserManagement');
 const ScheduledTaskManagement = createAsyncComponent(() => import(/* webpackChunkName: "scheduled-task" */ '../views/admin/ScheduledTaskManagement.vue'), 'ScheduledTaskManagement');
+const GamSchedulerConfig = createAsyncComponent(() => import(/* webpackChunkName: "gam-scheduler-config" */ '../views/admin/GamSchedulerConfig.vue'), 'GamSchedulerConfig');
 const AuditLogManagement = createAsyncComponent(() => import(/* webpackChunkName: "audit-log" */ '../views/admin/AuditLogManagement.vue'), 'AuditLogManagement');
 const PostbackManagement = createAsyncComponent(() => import(/* webpackChunkName: "postback-management" */ '../views/admin/PostbackManagement.vue'), 'PostbackManagement');
 const PostbackIpWhitelist = createAsyncComponent(() => import(/* webpackChunkName: "postback-ip-whitelist" */ '../views/admin/PostbackIpWhitelist.vue'), 'PostbackIpWhitelist');
@@ -214,6 +215,12 @@ const routes = [
         path: 'admin/scheduled-tasks',
         name: 'ScheduledTaskManagement',
         component: ScheduledTaskManagement,
+        meta: { requiresAdmin: true }
+      },
+      {
+        path: 'admin/gam-scheduler',
+        name: 'GamSchedulerConfig',
+        component: GamSchedulerConfig,
         meta: { requiresAdmin: true }
       },
       {

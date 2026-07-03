@@ -30,8 +30,9 @@ from app.services.ad_data.queries.filter_conditions import (
     apply_client_ids_filter,
     parse_csv_ints,
 )
+from app.services.ad_data.queries.daily_summary_query import _effective_summary_date_range
 from app.services.ad_data.queries.dimension_filter import (
-    build_ad_data_dimension_filter,
+    build_daily_summary_dimension_filter,
     normalize_dimension,
 )
 from app.services.ad_data.queries.join_helpers import (
@@ -40,6 +41,27 @@ from app.services.ad_data.queries.join_helpers import (
     join_product_and_client,
 )
 logger = logging.getLogger(__name__)
+
+
+def _filter_dropdown_dimension_filter(
+    dimension: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+):
+    """
+    筛选项下拉与日汇总列表使用相同维度语义。
+
+    GAM 等仅交叉入库时，「国家数据」页的国家下拉需包含交叉行中的国家，
+    不可使用明细列表的互斥维度过滤（否则会始终为空、无法级联）。
+    """
+    eff_start, eff_end = _effective_summary_date_range(start_date, end_date)
+    return build_daily_summary_dimension_filter(
+        AdData.country_code,
+        AdData.ad_unit,
+        dimension,
+        start_date=eff_start,
+        end_date=eff_end,
+    )
 
 
 class FilterOptionsQuery:
@@ -120,9 +142,7 @@ class FilterOptionsQuery:
         query = join_product_and_client(query, use_assignment_table)
         query = join_country_info_for_ad_data(query)
         query = query.where(Product.is_active == True)
-        query = query.where(
-            build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dim)
-        )
+        query = query.where(_filter_dropdown_dimension_filter(dim, start_date, end_date))
         query = await apply_ad_data_scope_filters(
             self.db,
             query,
@@ -177,9 +197,7 @@ class FilterOptionsQuery:
         query = select(func.distinct(AdData.ad_unit)).select_from(AdData)
         query = join_product_and_client(query, use_assignment_table)
         query = query.where(Product.is_active == True)
-        query = query.where(
-            build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dim)
-        )
+        query = query.where(_filter_dropdown_dimension_filter(dim, start_date, end_date))
         query = query.where(and_(AdData.ad_unit.isnot(None), AdData.ad_unit != ""))
         query = await apply_ad_data_scope_filters(
             self.db,

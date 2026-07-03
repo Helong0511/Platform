@@ -116,10 +116,20 @@
             {{ scope.row.id }}
           </template>
         </el-table-column>
-        <el-table-column prop="task_name" label="任务名称" min-width="200" show-overflow-tooltip>
+        <el-table-column prop="task_name" label="任务名称" min-width="240" show-overflow-tooltip>
           <template #default="scope">
             <div class="task-name-cell">
               <span class="task-name-text">{{ scope.row.task_name }}</span>
+              <el-button
+                v-if="isGamSchedulerTask(scope.row)"
+                type="success"
+                link
+                size="small"
+                class="gam-config-link"
+                @click="goToGamSchedulerConfig"
+              >
+                账号配置
+              </el-button>
               <el-tag v-if="scope.row.is_running" type="warning" size="small" style="margin-left: 8px;">
                 运行中
               </el-tag>
@@ -197,9 +207,18 @@
             <span v-else class="text-success">无错误</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right" align="center" class-name="action-column">
+        <el-table-column label="操作" width="360" fixed="right" align="center" class-name="action-column">
           <template #default="scope">
             <div class="action-buttons">
+              <el-button
+                v-if="isGamSchedulerTask(scope.row)"
+                type="success"
+                size="small"
+                @click="goToGamSchedulerConfig"
+                class="action-btn"
+              >
+                账号配置
+              </el-button>
               <el-button
                 type="primary"
                 size="small"
@@ -292,14 +311,16 @@
 
 <script setup>
 import { onMounted, onUnmounted, onBeforeUnmount, nextTick } from 'vue';
-import { onBeforeRouteLeave } from 'vue-router';
+import { onBeforeRouteLeave, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { Search, Refresh, VideoPlay, Unlock, Document, Folder } from '@element-plus/icons-vue';
 import { formatDateTime } from '../../utils/dateFormat';
+import { isGamSchedulerTask } from '../../constants/scheduledTasks';
 import { useDevice } from '../../composables/useDevice';
 import { useScheduledTasks } from '../../composables/useScheduledTasks';
 import { useScheduledTaskActions } from '../../composables/useScheduledTaskActions';
 
+const router = useRouter();
 const { isMobile } = useDevice();
 
 const {
@@ -325,6 +346,10 @@ const {
   confirmTrigger,
   handleReleaseLock,
 } = useScheduledTaskActions({ fetchTasks });
+
+const goToGamSchedulerConfig = () => {
+  router.push('/app/admin/gam-scheduler');
+};
 
 bindPaginationWatch();
 
@@ -533,6 +558,13 @@ onUnmounted(() => {
 .task-name-cell {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.gam-config-link {
+  padding: 0 4px;
+  font-size: 12px;
 }
 
 .task-name-text {
