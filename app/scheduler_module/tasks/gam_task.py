@@ -67,7 +67,13 @@ async def google_api_task(
     account_summaries = []
     for item in gam_accounts:
         key = str(item.get("key") or "?")
-        reports = ",".join(item.get("report_keys") or [])
+        report_keys = item.get("report_keys")
+        if isinstance(report_keys, (list, tuple)):
+            reports = ",".join(str(part) for part in report_keys)
+        elif report_keys is None:
+            reports = ""
+        else:
+            reports = str(report_keys)
         account_summaries.append(f"{key}[{reports}]")
     logger.info(
         "%s 使用 GAM 账号: %s",

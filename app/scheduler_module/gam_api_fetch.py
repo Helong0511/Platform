@@ -879,14 +879,64 @@ def _resolve_application_name(credentials_path: Path, network_code: str) -> str:
     return network_code
 
 
-def _normalize_account_report_keys(keys: list[str] | None) -> list[str]:
+def _coerce_report_keys_input(keys) -> list:
+    """
+    将 report_keys 转为可迭代的字符串列表。
+
+    配置被误写成数字（如 network_code）时抛出明确 ValueError，避免 TypeError。
+    """
+    if keys is None:
+        return []
+    if isinstance(keys, (int, float)):
+        raise ValueError(
+            f"report_keys 必须是字符串数组，不能是数字（疑似误填了 network_code）: {keys!r}"
+        )
+    if isinstance(keys, str):
+        text = keys.strip()
+        if not text:
+            return []
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"report_keys JSON 解析失败: {exc}") from exc
+            if not isinstance(parsed, list):
+                raise ValueError("report_keys JSON 必须是字符串数组")
+            return parsed
+        return [part.strip() for part in text.split(",") if part.strip()]
+    if isinstance(keys, (list, tuple, set, frozenset)):
+        return list(keys)
+    raise ValueError(
+        f"report_keys 格式无效，期望字符串数组，实际为 {type(keys).__name__}: {keys!r}"
+    )
+
+
+def _coerce_str_list(values, *, field_name: str) -> list[str]:
+    """将白名单等字段安全转为字符串列表。"""
+    if values is None:
+        return []
+    if isinstance(values, (int, float)):
+        raise ValueError(
+            f"{field_name} 必须是字符串数组，不能是数字: {values!r}"
+        )
+    if isinstance(values, str):
+        return [values] if values.strip() else []
+    if isinstance(values, (list, tuple, set, frozenset)):
+        return [str(item) for item in values]
+    raise ValueError(
+        f"{field_name} 格式无效，期望字符串数组，实际为 {type(values).__name__}: {values!r}"
+    )
+
+
+def _normalize_account_report_keys(keys: list[str] | str | None) -> list[str]:
     """规范化单账号报表类型列表。"""
     if keys is None:
         return list(GAM_SCHEDULER_REPORT_KEYS)
+    coerced = _coerce_report_keys_input(keys)
     known = {spec["key"] for spec in GAM_REPORT_SPECS}
     normalized: list[str] = []
     seen: set[str] = set()
-    for raw in keys:
+    for raw in coerced:
         key = str(raw).strip()
         if not key or key in seen:
             continue
@@ -1045,8 +1095,11 @@ def _merge_account_config(run_cfg: dict, account: dict) -> dict:
         "account_key": account["key"],
         "credentials_path": account["credentials_path"],
         "application_name": account["application_name"],
-        "network_code": account["network_code"],
-        "product_whitelist": list(account.get("product_whitelist") or []),
+        "network_code": str(account["network_code"]),
+        "product_whitelist": _coerce_str_list(
+            account.get("product_whitelist"),
+            field_name="product_whitelist",
+        ),
     }
 
 
@@ -1173,13 +1226,28 @@ def _build_report_job(
     return {"reportQuery": report_query}
 
 
+def _validate_report_spec_shape(spec: dict) -> None:
+    """校验报表定义中的 dimensions / columns 必须为列表。"""
+    dimensions = spec.get("dimensions")
+    if not isinstance(dimensions, (list, tuple)):
+        raise ValueError(
+            f"报表 {spec.get('key', '?')} 的 dimensions 配置无效: {dimensions!r}"
+        )
+    columns = spec.get("columns", GAM_FULL_COLUMNS)
+    if columns is not None and not isinstance(columns, (list, tuple)):
+        raise ValueError(
+            f"报表 {spec.get('key', '?')} 的 columns 配置无效: {columns!r}"
+        )
+
+
 def _build_report_job_from_spec(spec: dict, start_date: date, end_date: date) -> dict:
     """根据 GAM_REPORT_SPECS 条目构建报表任务。"""
+    _validate_report_spec_shape(spec)
     return _build_report_job(
-        dimensions=spec["dimensions"],
+        dimensions=list(spec["dimensions"]),
         start_date=start_date,
         end_date=end_date,
-        columns=spec.get("columns", GAM_FULL_COLUMNS),
+        columns=list(spec.get("columns", GAM_FULL_COLUMNS)),
         ad_unit_view=spec.get("ad_unit_view"),
     )
 
@@ -1831,7 +1899,14 @@ def fetch_account_reports_to_memory(
     for spec in report_specs:
         summary = fetch_report_rows(client, cfg, spec)
         summaries.append(summary)
-        reports[spec["key"]] = list(summary.get("business_rows") or [])
+        business_rows = summary.get("business_rows")
+        if business_rows is None:
+            business_rows = []
+        elif not isinstance(business_rows, list):
+            raise ValueError(
+                f"报表 {spec['key']} 的 business_rows 类型无效: {type(business_rows).__name__}"
+            )
+        reports[spec["key"]] = business_rows
 
     return {
         "account_key": cfg["account_key"],
@@ -1885,12 +1960,22 @@ def run_gam_fetch_to_memory(
     failures: list[str] = []
     for account in available_accounts:
         cfg = _merge_account_config(run_cfg, account)
-        account_keys = account.get("report_keys") or default_keys
+        raw_keys = account.get("report_keys")
+        account_keys = (
+            _normalize_account_report_keys(raw_keys)
+            if raw_keys is not None
+            else list(default_keys)
+        )
         report_specs = _resolve_report_specs(account_keys)
         try:
             client = _build_ad_manager_client(cfg)
             bundles.append(fetch_account_reports_to_memory(client, cfg, report_specs))
         except Exception as exc:
+            logger.exception(
+                "GAM 账号拉数失败 account=%s network=%s",
+                cfg["account_key"],
+                cfg["network_code"],
+            )
             failures.append(
                 f"{cfg['account_key']}({cfg['network_code']}): {type(exc).__name__}: {exc}"
             )
@@ -2022,7 +2107,11 @@ def _list_saved_queries(client, api_version: str) -> list:
     statement = ad_manager.FilterStatement(limit=20).ToStatement()
     page = report_service.getSavedQueriesByStatement(statement)
     results = getattr(page, "results", None)
-    return list(results or [])
+    if results is None:
+        return []
+    if isinstance(results, (list, tuple)):
+        return list(results)
+    return [results]
 
 
 def get_gam_report_types_catalog() -> list[dict]:

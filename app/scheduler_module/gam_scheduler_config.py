@@ -51,10 +51,33 @@ def _load_gam_report_type_keys() -> frozenset[str]:
     return frozenset(item["key"] for item in get_gam_report_types_catalog())
 
 
-def normalize_report_keys(keys: list[str] | None) -> list[str]:
+def normalize_report_keys(keys: list[str] | str | None) -> list[str]:
     """报表类型多选规范化；未配置时使用默认定时任务报表集。"""
     if keys is None:
         return list(DEFAULT_GAM_REPORT_KEYS)
+
+    if isinstance(keys, (int, float)):
+        raise ValueError(
+            f"report_keys 必须是字符串数组，不能是数字（疑似误填了 network_code）: {keys!r}"
+        )
+    if isinstance(keys, str):
+        text = keys.strip()
+        if not text:
+            return list(DEFAULT_GAM_REPORT_KEYS)
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"report_keys JSON 解析失败: {exc}") from exc
+            if not isinstance(parsed, list):
+                raise ValueError("report_keys JSON 必须是字符串数组")
+            keys = parsed
+        else:
+            keys = [part.strip() for part in text.split(",") if part.strip()]
+    elif not isinstance(keys, (list, tuple, set, frozenset)):
+        raise ValueError(
+            f"report_keys 格式无效，期望字符串数组，实际为 {type(keys).__name__}: {keys!r}"
+        )
 
     known = _load_gam_report_type_keys()
     normalized: list[str] = []
@@ -81,9 +104,20 @@ def get_gam_report_type_options() -> list[dict[str, Any]]:
 
 def normalize_product_whitelist(names: list[str] | None) -> list[str]:
     """白名单名称规范化（小写、去 www、去重排序）。"""
+    if names is None:
+        return []
+    if isinstance(names, (int, float)):
+        raise ValueError(f"product_whitelist 必须是字符串数组，不能是数字: {names!r}")
+    if isinstance(names, str):
+        names = [names] if names.strip() else []
+    elif not isinstance(names, (list, tuple, set, frozenset)):
+        raise ValueError(
+            f"product_whitelist 格式无效，期望字符串数组，实际为 {type(names).__name__}: {names!r}"
+        )
+
     normalized: list[str] = []
     seen: set[str] = set()
-    for raw in names or []:
+    for raw in names:
         name = str(raw).strip().lower()
         if name.startswith("www."):
             name = name[4:]
