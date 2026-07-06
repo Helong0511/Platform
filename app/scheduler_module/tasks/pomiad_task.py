@@ -12,6 +12,7 @@ Pomiad 上游广告数据拉取定时任务。
 1. 拉数日期默认按上游报表时区解析
 2. 有新增/更新时 upstream_import 会发 Telegram，注意通知频率
 """
+from app.core.ad_data_metadata import DATA_SOURCE_POMIAD, REPORT_TYPE_COUNTRY, REPORT_TYPE_CROSS
 from app.core.config import settings
 from app.scheduler_module.task_names import POMIAD_API_TASK_NAME
 from app.scheduler_module.task_utils import resolve_upstream_date_range
@@ -81,6 +82,8 @@ async def pomiad_api_task(
         field_mapping=POMIAD_FIELD_MAPPING,
         source="Pomiad定时任务",
         notify_title="Pomiad",
+        data_source=DATA_SOURCE_POMIAD,
+        report_type=REPORT_TYPE_COUNTRY if settings.POMIAD_IS_BY_COUNTRY else REPORT_TYPE_CROSS,
         data_transform=preprocess_pomiad_rows,
         log_label="Pomiad API获取数据",
         notify_params=notify_params,

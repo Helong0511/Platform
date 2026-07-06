@@ -137,7 +137,7 @@ class ClientAPIBaseRequest(BaseModel):
     客户 API 基础请求模型（所有对外接口共用）。
 
     字段：client_id、req_time（10 位秒级时间戳）、sign（MD5 签名）。
-    服务端校验时间差 ≤10 秒且签名与 secret_key 匹配。
+    服务端校验时间差 ≤15 秒且签名与 secret_key 匹配。
     """
     client_id: int = Field(..., description="客户ID")
     req_time: int = Field(..., description="请求时间戳（10位秒级）")

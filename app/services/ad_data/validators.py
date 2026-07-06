@@ -16,10 +16,19 @@ from app.models.models import Product
 
 logger = logging.getLogger(__name__)
 
+from app.core.ad_data_metadata import (
+    normalize_data_source,
+    normalize_report_type,
+    normalize_upstream_account,
+)
+
 UPDATE_ALLOWED_FIELDS: Set[str] = {
     "product_id",
     "ad_unit",
     "country_code",
+    "data_source",
+    "upstream_account",
+    "report_type",
     "request_count",
     "match_count",
     "display_count",
@@ -41,6 +50,12 @@ class AdDataValidator:
         filtered = {k: v for k, v in update_data.items() if k in UPDATE_ALLOWED_FIELDS}
         if "ad_unit" in filtered:
             filtered["ad_unit"] = normalize_ad_unit(filtered["ad_unit"])
+        if "data_source" in filtered:
+            filtered["data_source"] = normalize_data_source(filtered["data_source"])
+        if "report_type" in filtered:
+            filtered["report_type"] = normalize_report_type(filtered["report_type"])
+        if "upstream_account" in filtered:
+            filtered["upstream_account"] = normalize_upstream_account(filtered["upstream_account"])
         return filtered
 
     @staticmethod
@@ -67,7 +82,14 @@ class AdDataValidator:
 
     @staticmethod
     def needs_uniqueness_check(filtered_update_data: Dict[str, Any]) -> bool:
-        return "product_id" in filtered_update_data or "country_code" in filtered_update_data
+        identity_fields = {
+            "product_id",
+            "country_code",
+            "ad_unit",
+            "data_source",
+            "report_type",
+        }
+        return bool(identity_fields.intersection(filtered_update_data))
 
     @staticmethod
     def validate_update_data(

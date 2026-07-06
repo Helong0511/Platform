@@ -54,6 +54,74 @@
           />
         </el-select>
       </el-form-item>
+      <el-form-item label="来源" prop="data_source">
+        <el-select
+          v-model="editForm.data_source"
+          placeholder="选择或输入数据来源 slug"
+          filterable
+          allow-create
+          default-first-option
+          style="width: 100%;"
+        >
+          <el-option-group label="上游 API">
+            <el-option
+              v-for="item in upstreamSourceOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-option-group>
+          <el-option-group label="其它">
+            <el-option
+              v-for="item in manualSourceOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-option-group>
+        </el-select>
+        <div class="form-tip">与库字段 data_source 一致，如 zhisuo / pomiad / addermobi / gam 等</div>
+      </el-form-item>
+      <el-form-item label="账号" prop="upstream_account">
+        <el-input
+          v-model="editForm.upstream_account"
+          name="upstream_account"
+          placeholder="上游账号，如 KE11、leadwin"
+          clearable
+          maxlength="64"
+          show-word-limit
+          style="width: 100%;"
+        />
+      </el-form-item>
+      <el-form-item label="报表类型" prop="report_type">
+        <el-select v-model="editForm.report_type" placeholder="选择报表类型" style="width: 100%;">
+          <el-option-group label="统计维度">
+            <el-option
+              v-for="item in detailReportTypeOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            >
+              <span>{{ item.label }}</span>
+              <span v-if="item.hint" class="option-hint">{{ item.hint }}</span>
+            </el-option>
+          </el-option-group>
+          <el-option-group label="其它">
+            <el-option
+              v-for="item in otherReportTypeOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            >
+              <span>{{ item.label }}</span>
+              <span v-if="item.hint" class="option-hint">{{ item.hint }}</span>
+            </el-option>
+          </el-option-group>
+        </el-select>
+        <div class="form-tip">
+          unit=广告单元 / country=国家 / cross=交叉 / daily=日报；与列表筛选维度及唯一键一致
+        </div>
+      </el-form-item>
       <el-form-item label="广告单元" prop="ad_unit">
         <el-input
           v-model="editForm.ad_unit"
@@ -125,16 +193,55 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
+import {
+  AD_DATA_SOURCE_MANUAL_OPTIONS,
+  UPSTREAM_API_DATA_SOURCES,
+  buildAdDataSourceOptions,
+  buildAdDataReportTypeOptions,
+  AD_DATA_REPORT_TYPE_DETAIL_OPTIONS,
+  AD_DATA_REPORT_TYPE_OTHER_OPTIONS
+} from '../../constants/adDataDimension';
 
-defineProps({
+const props = defineProps({
   visible: { type: Boolean, default: false },
   editForm: { type: Object, required: true },
   editRules: { type: Object, default: () => ({}) },
   users: { type: Array, default: () => [] },
   products: { type: Array, default: () => [] },
   isMobile: { type: Boolean, default: false },
+  reportTypeOptions: { type: Array, default: () => buildAdDataReportTypeOptions() },
 });
+
+const allReportTypeOptions = computed(() =>
+  buildAdDataReportTypeOptions(props.editForm?.report_type)
+);
+
+const detailReportTypeOptions = computed(() =>
+  allReportTypeOptions.value.filter((item) =>
+    AD_DATA_REPORT_TYPE_DETAIL_OPTIONS.includes(item.value)
+  )
+);
+
+const otherReportTypeOptions = computed(() =>
+  allReportTypeOptions.value.filter((item) =>
+    AD_DATA_REPORT_TYPE_OTHER_OPTIONS.includes(item.value) ||
+    (!AD_DATA_REPORT_TYPE_DETAIL_OPTIONS.includes(item.value) &&
+      !AD_DATA_REPORT_TYPE_OTHER_OPTIONS.includes(item.value))
+  )
+);
+
+const allSourceOptions = computed(() =>
+  buildAdDataSourceOptions(props.editForm?.data_source)
+);
+
+const upstreamSourceOptions = computed(() =>
+  allSourceOptions.value.filter((item) => UPSTREAM_API_DATA_SOURCES.includes(item.value))
+);
+
+const manualSourceOptions = computed(() =>
+  allSourceOptions.value.filter((item) => AD_DATA_SOURCE_MANUAL_OPTIONS.includes(item.value))
+);
 
 const emit = defineEmits(['update:visible', 'save', 'cancel', 'product-change', 'country-help']);
 
@@ -147,5 +254,12 @@ defineExpose({ formRef });
   margin-top: 5px;
   font-size: 12px;
   color: #909399;
+}
+
+.option-hint {
+  display: block;
+  font-size: 11px;
+  color: #a8abb2;
+  line-height: 1.3;
 }
 </style>

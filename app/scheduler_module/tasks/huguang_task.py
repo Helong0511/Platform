@@ -8,6 +8,7 @@ Huguang 上游广告数据拉取定时任务。
 在系统中的位置：
 - 由 HUGUANG_API_TASK_NAME 调度
 """
+from app.core.ad_data_metadata import DATA_SOURCE_HUGUANG
 from app.core.config import settings
 from app.scheduler_module.task_names import HUGUANG_API_TASK_NAME
 from app.scheduler_module.task_utils import resolve_upstream_date_range
@@ -60,6 +61,7 @@ async def huguang_api_task(
         field_mapping=HUGUANG_FIELD_MAPPING,
         source="Huguang定时任务",
         notify_title="Huguang",
+        data_source=DATA_SOURCE_HUGUANG,
         log_label="Huguang API获取数据",
         notify_params=notify_params,
     )

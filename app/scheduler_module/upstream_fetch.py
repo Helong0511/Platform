@@ -26,6 +26,7 @@ UPSTREAM_PAGINATION_MAX_PAGES = 500
 
 ZHISUO_UNIT_PATH = "/api/channelunit"
 ZHISUO_COUNTRY_PATH = "/api/channelcountry"
+ZHISUO_DAILY_PATH = "/api/channeldaily"
 
 
 @dataclass
@@ -461,8 +462,41 @@ async def fetch_zhisuo_report_rows(
     path: str,
     label: str = "Zhisuo API",
     limit: int = 1000,
+    per_day: bool = True,
 ) -> UpstreamFetchResult:
-    """拉取 zhisuo 报表接口（分页合并 list）。"""
+    """
+    拉取 zhisuo 报表接口（分页合并 list）。
+
+    per_day=True 时按自然日循环请求，避免多天区间查询只返回前 N 条导致漏数。
+    """
+    if per_day and start != end:
+        from datetime import date, timedelta
+
+        all_rows: List[Any] = []
+        stats_list: list[UpstreamFetchStats] = []
+        current = date.fromisoformat(start)
+        end_date = date.fromisoformat(end)
+        while current <= end_date:
+            day = current.isoformat()
+            day_result = await fetch_zhisuo_report_rows(
+                base_url=base_url,
+                client_id=client_id,
+                api_key=api_key,
+                start=day,
+                end=day,
+                path=path,
+                label=label,
+                limit=limit,
+                per_day=False,
+            )
+            all_rows.extend(day_result.rows)
+            stats_list.append(day_result.stats)
+            current += timedelta(days=1)
+        return UpstreamFetchResult(
+            rows=all_rows,
+            stats=UpstreamFetchStats.merge(*stats_list) if stats_list else UpstreamFetchStats(),
+        )
+
     base = base_url.rstrip("/")
     all_rows: List[Any] = []
     page = 1
@@ -532,8 +566,8 @@ async def fetch_zhisuo_unit_rows(
     start: str,
     end: str,
     limit: int = 1000,
-) -> List[Any]:
-    """拉取 zhisuo 广告单元报告（分页合并 list）。"""
+) -> UpstreamFetchResult:
+    """拉取 zhisuo 广告单元报告（按天循环 + 分页）。"""
     return await fetch_zhisuo_report_rows(
         base_url=base_url,
         client_id=client_id,
@@ -554,8 +588,8 @@ async def fetch_zhisuo_country_rows(
     start: str,
     end: str,
     limit: int = 1000,
-) -> List[Any]:
-    """拉取 zhisuo 国家报告（分页合并 list）。"""
+) -> UpstreamFetchResult:
+    """拉取 zhisuo 国家报告（按天循环 + 分页）。"""
     return await fetch_zhisuo_report_rows(
         base_url=base_url,
         client_id=client_id,
@@ -564,6 +598,28 @@ async def fetch_zhisuo_country_rows(
         end=end,
         path=ZHISUO_COUNTRY_PATH,
         label="Zhisuo 国家报告 API",
+        limit=limit,
+    )
+
+
+async def fetch_zhisuo_daily_rows(
+    *,
+    base_url: str,
+    client_id: str,
+    api_key: str,
+    start: str,
+    end: str,
+    limit: int = 1000,
+) -> UpstreamFetchResult:
+    """拉取 zhisuo 日报（channeldaily，按天循环 + 分页）。"""
+    return await fetch_zhisuo_report_rows(
+        base_url=base_url,
+        client_id=client_id,
+        api_key=api_key,
+        start=start,
+        end=end,
+        path=ZHISUO_DAILY_PATH,
+        label="Zhisuo 日报 API",
         limit=limit,
     )
 

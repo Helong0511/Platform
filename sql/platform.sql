@@ -49,15 +49,20 @@ CREATE TABLE IF NOT EXISTS `ad_data`  (
   `ecpm_after_deduct` float NOT NULL DEFAULT 0 COMMENT 'eCPM已减扣',
   `revenue_before_deduct` float NOT NULL DEFAULT 0 COMMENT '收益未减扣',
   `revenue_after_deduct` float NOT NULL DEFAULT 0 COMMENT '收益已减扣',
+  `data_source` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'legacy' COMMENT '数据来源：zhisuo/gam/excel/legacy 等',
+  `upstream_account` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '' COMMENT '上游账号标识，如 KE11、leadwin',
+  `report_type` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'legacy' COMMENT '报表维度：unit/country/cross/daily/legacy',
   `created_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '创建时间',
   `updated_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
   `is_deducted` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否已被扣减',
   PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE INDEX `uq_ad_data_date_product_country_unit`(`date` ASC, `product_id` ASC, `country_code` ASC, `ad_unit` ASC) USING BTREE,
+  UNIQUE INDEX `uq_ad_data_identity`(`date` ASC, `product_id` ASC, `country_code` ASC, `ad_unit` ASC, `data_source` ASC, `report_type` ASC) USING BTREE,
   INDEX `idx_ad_data_date`(`date` ASC) USING BTREE,
   INDEX `idx_ad_data_product`(`product_id` ASC) USING BTREE,
   INDEX `idx_ad_data_date_product`(`date` ASC, `product_id` ASC) USING BTREE,
   INDEX `idx_ad_data_country_code`(`country_code` ASC) USING BTREE,
+  INDEX `idx_ad_data_source_type`(`data_source` ASC, `report_type` ASC) USING BTREE,
+  INDEX `idx_ad_data_date_product_type`(`date` ASC, `product_id` ASC, `report_type` ASC) USING BTREE,
   CONSTRAINT `fk_ad_data_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '广告数据表' ROW_FORMAT = DYNAMIC;
 

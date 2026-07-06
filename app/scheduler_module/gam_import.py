@@ -12,6 +12,7 @@ import logging
 from collections import defaultdict
 from typing import Any
 
+from app.core.ad_data_metadata import DATA_SOURCE_GAM, gam_report_key_to_report_type
 from app.scheduler_module.upstream_import import import_upstream_ad_data
 
 logger = logging.getLogger(__name__)
@@ -414,6 +415,9 @@ async def import_gam_account_bundle(
             notify_title=f"GAM-{account_key}-country",
             update_task_result=False,
             notify_params=notify_params,
+            data_source=DATA_SOURCE_GAM,
+            report_type=gam_report_key_to_report_type("country"),
+            upstream_account=account_key,
         )
         phase_summaries.append(f"country({len(country_import_rows)}行): {country_summary}")
     else:
@@ -437,6 +441,9 @@ async def import_gam_account_bundle(
             notify_title=f"GAM-{account_key}-ad_unit",
             update_task_result=True,
             notify_params=notify_params,
+            data_source=DATA_SOURCE_GAM,
+            report_type=gam_report_key_to_report_type("ad_unit"),
+            upstream_account=account_key,
         )
         phase_summaries.append(f"ad_unit({len(ad_unit_import_rows)}行): {ad_unit_summary}")
     else:

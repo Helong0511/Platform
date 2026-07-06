@@ -153,7 +153,14 @@ async def import_ad_data_handler(
                     # 使用日期（不包含时间）和产品ID作为key
                     record_date = record.date.date() if hasattr(record.date, 'date') else record.date
                     record_country = normalize_ad_data_country_cache_key(record.country_code)
-                    key = (record_date, record.product_id, record_country, record.ad_unit or '')
+                    key = (
+                        record_date,
+                        record.product_id,
+                        record_country,
+                        record.ad_unit or '',
+                        record.data_source or 'legacy',
+                        record.report_type or 'legacy',
+                    )
                     existing_records[key] = record
                 logger.debug(f"批量查询到 {len(existing_records)} 条已存在的记录")
 
@@ -197,7 +204,7 @@ async def import_ad_data_handler(
             # 使用统一的 IntegrityError 处理函数
             handle_integrity_error(
                 error=e,
-                constraint_name="uq_ad_data_date_product_country_unit",
+                constraint_name="uq_ad_data_identity",
                 custom_message=(
                     "导入失败：检测到重复数据。"
                     "可能是并发导入导致的，或者数据库中已存在相同日期和产品的记录。"

@@ -38,7 +38,9 @@
       :filter-products="filterProducts"
       :filter-countries="filterCountries"
       :filter-ad-units="filterAdUnits"
-      default-hint="行级明细，支持修改与删除。GAM/Addermobi 等交叉数据请选「按广告单元+国家」；Zhisuo 纯国家数据请选「按国家」。"
+      :dimension-options="AD_DATA_DETAIL_DIMENSION_OPTIONS"
+      show-metadata-filters
+      default-hint="行级明细，支持修改与删除。默认「全部明细」显示所有来源数据；若只看 GAM 交叉行可选「按广告单元+国家」。"
       @fetch="fetchAdData"
       @reset="resetFilter"
       @date-range-change="handleDateRangeChange"
@@ -94,6 +96,9 @@
         <el-checkbox label="date" :disabled="true">数据日期（固定显示）</el-checkbox>
         <el-checkbox v-if="isAdmin" label="user_name">所属客户</el-checkbox>
         <el-checkbox label="product_name" :disabled="true">产品名称（固定显示）</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="data_source">来源</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="upstream_account">账号</el-checkbox>
+        <el-checkbox v-if="isAdmin" label="report_type">报表类型</el-checkbox>
         <el-checkbox label="ad_unit">广告单元</el-checkbox>
         <el-checkbox label="country_name_zh">国家</el-checkbox>
         <el-checkbox label="request_count">请求数</el-checkbox>
@@ -156,7 +161,11 @@ import {
   DEFAULT_AD_DATA_DETAIL_DIMENSION,
   loadAdDataDetailDimensionPreference,
   saveAdDataDetailDimensionPreference,
-  normalizeAdDataDimension
+  normalizeAdDataDimension,
+  normalizeAdDataDetailDimension,
+  AD_DATA_DETAIL_DIMENSION_OPTIONS,
+  AD_DATA_DETAIL_ALL_DIMENSION,
+  AD_UNIT_COUNTRY_DIMENSION
 } from '../constants/adDataDimension';
 import ProductManagementDialog from '../components/admin/ProductManagementDialog.vue';
 import AdDataFilterCard from '../components/ad-data/AdDataFilterCard.vue';
@@ -210,7 +219,10 @@ const searchForm = ref({
   productId: '',
   dimension: loadAdDataDetailDimensionPreference(authStore.userInfo?.id),
   countryCode: '',
-  adUnit: ''
+  adUnit: '',
+  dataSource: '',
+  upstreamAccount: '',
+  reportType: ''
 });
 
 const {
@@ -280,6 +292,18 @@ const buildAdDataSearchParams = () => {
     params.start_date = searchForm.value.dateRange[0];
     params.end_date = searchForm.value.dateRange[1];
   }
+  if (isAdmin.value) {
+    if (searchForm.value.dataSource) {
+      params.data_source = searchForm.value.dataSource;
+    }
+    const account = String(searchForm.value.upstreamAccount || '').trim();
+    if (account) {
+      params.upstream_account = account;
+    }
+    if (searchForm.value.reportType) {
+      params.report_type = searchForm.value.reportType;
+    }
+  }
   return params;
 };
 
@@ -289,14 +313,20 @@ const effectiveColumnVisibility = computed(() =>
 );
 
 const detailEmptyText = computed(() => {
-  const dim = normalizeAdDataDimension(
+  const dim = normalizeAdDataDetailDimension(
     searchForm.value.dimension || DEFAULT_AD_DATA_DETAIL_DIMENSION
   );
+  if (dim === AD_DATA_DETAIL_ALL_DIMENSION) {
+    return '暂无数据。请调整日期范围、客户或产品筛选后重试。';
+  }
   if (dim === 'country') {
     return '当前为「按国家」维度，仅显示无广告单元的纯国家行。若库中均为交叉明细，请切换为「按广告单元+国家」。';
   }
   if (dim === 'ad_unit') {
-    return '当前为「按广告单元」维度，仅显示无国家代码的纯广告单元行。若库中均为交叉明细，请切换为「按广告单元+国家」。';
+    return '当前为「按广告单元」维度，仅显示无国家代码的纯广告单元行。若库中均为交叉明细，请切换为「按广告单元+国家」或「全部明细」。';
+  }
+  if (dim === AD_UNIT_COUNTRY_DIMENSION) {
+    return '当前为「按广告单元+国家」，仅显示同时含国家与广告单元的交叉行。智索 unit/country 数据请选「全部明细」。';
   }
   return '暂无数据';
 });
@@ -439,7 +469,10 @@ const resetFilter = async () => {
     productId: '',
     dimension: loadAdDataDetailDimensionPreference(authStore.userInfo?.id),
     countryCode: '',
-    adUnit: ''
+    adUnit: '',
+    dataSource: '',
+    upstreamAccount: '',
+    reportType: ''
   };
   pagination.value.current = 1;
   // 重置排序
@@ -505,7 +538,13 @@ const editDialogRef = ref(null);
 const editRules = ref({
   product_id: [
   { required: true, message: '请选择产品', trigger: ['change', 'submit'] }
-]
+],
+  data_source: [
+    { required: true, message: '请选择来源', trigger: ['change', 'submit'] }
+  ],
+  report_type: [
+    { required: true, message: '请选择报表类型', trigger: ['change', 'submit'] }
+  ]
 });
 
 const editForm = ref({
@@ -528,7 +567,10 @@ const editForm = ref({
   ecpm_after_deduct: 0,
   ecpm_before_deduct: 0,
   revenue_after_deduct: 0,
-  revenue_before_deduct: 0
+  revenue_before_deduct: 0,
+  data_source: 'legacy',
+  upstream_account: '',
+  report_type: 'legacy'
 });
 
 // 客户ID变化时重新获取产品列表
@@ -624,7 +666,10 @@ const handleEdit = async (row) => {
     ecpm_after_deduct: row.ecpm_after_deduct || 0,
     ecpm_before_deduct: row.ecpm_before_deduct || 0,
     revenue_after_deduct: row.revenue_after_deduct || 0,
-    revenue_before_deduct: row.revenue_before_deduct || 0
+    revenue_before_deduct: row.revenue_before_deduct || 0,
+    data_source: row.data_source || 'legacy',
+    upstream_account: row.upstream_account || '',
+    report_type: row.report_type || 'legacy'
   };
   
   // 使用 nextTick 确保 DOM 更新后再打开对话框
@@ -748,7 +793,10 @@ const saveEdit = async () => {
       ecpm_after_deduct: editForm.value.ecpm_after_deduct,
       ecpm_before_deduct: editForm.value.ecpm_before_deduct,
       revenue_after_deduct: editForm.value.revenue_after_deduct,
-      revenue_before_deduct: editForm.value.revenue_before_deduct
+      revenue_before_deduct: editForm.value.revenue_before_deduct,
+      data_source: editForm.value.data_source || 'legacy',
+      upstream_account: editForm.value.upstream_account?.trim() || '',
+      report_type: editForm.value.report_type || 'legacy'
     };
     
     // 验证产品ID是否存在

@@ -9,6 +9,7 @@ Skymobi 上游广告数据拉取定时任务。
 """
 from datetime import datetime, timedelta
 
+from app.core.ad_data_metadata import DATA_SOURCE_SKYMOBI, REPORT_TYPE_CROSS
 from app.core.config import settings
 from app.scheduler_module.task_names import SKYMOBI_API_TASK_NAME
 from app.scheduler_module.task_utils import resolve_upstream_date_range
@@ -73,6 +74,8 @@ async def skymobi_api_task(
         field_mapping=SKYMOBI_FIELD_MAPPING,
         source="Skymobi定时任务",
         notify_title="Skymobi",
+        data_source=DATA_SOURCE_SKYMOBI,
+        report_type=REPORT_TYPE_CROSS,
         log_label="Skymobi",
         notify_params=notify_params,
     )

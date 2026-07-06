@@ -170,6 +170,9 @@ async def import_upstream_ad_data(
     update_task_result: bool = True,
     notify_params: Optional[Mapping[str, Any]] = None,
     fetch_stats: Optional[Any] = None,
+    data_source: str = "unknown",
+    report_type: str = "legacy",
+    upstream_account: str = "",
 ) -> str:
     """
     标准上游拉数入库入口：预处理 → process_api_ad_data → 提交与通知。
@@ -222,6 +225,9 @@ async def import_upstream_ad_data(
             admin_user=admin_user,
             source=source,
             field_mapping=dict(field_mapping),
+            data_source=data_source,
+            report_type=report_type,
+            upstream_account=upstream_account,
         )
         return await finalize_upstream_import(
             db,

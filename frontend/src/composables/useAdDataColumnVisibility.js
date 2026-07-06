@@ -15,8 +15,23 @@ import { useTableColumnVisibility } from './useTableColumnVisibility';
  * 组合式函数 - 广告数据列显隐
  * @returns {Object} 响应式状态与业务操作方法
  */
+/** 列偏好键迁移：旧版存 label 键，新版存与库字段一致的 raw 键 */
+const AD_DATA_COLUMN_KEY_MIGRATIONS = {
+  data_source_label: 'data_source',
+  report_type_label: 'report_type'
+};
+
+function migrateAdDataColumnKeys(visibility) {
+  Object.entries(AD_DATA_COLUMN_KEY_MIGRATIONS).forEach(([oldKey, newKey]) => {
+    if (oldKey in visibility && !(newKey in visibility)) {
+      visibility[newKey] = visibility[oldKey];
+    }
+    delete visibility[oldKey];
+  });
+}
+
 export function useAdDataColumnVisibility(storageKey, getDefaultColumns, savableKeys) {
-  return useTableColumnVisibility(storageKey, {
+  const base = useTableColumnVisibility(storageKey, {
     getDefaultColumns,
     getSavableColumns: (v) => {
       const toSave = {};
@@ -27,6 +42,16 @@ export function useAdDataColumnVisibility(storageKey, getDefaultColumns, savable
     },
     pinColumns: ['date', 'product_name']
   });
+
+  const loadColumnVisibility = () => {
+    base.loadColumnVisibility();
+    migrateAdDataColumnKeys(base.columnVisibility);
+  };
+
+  return {
+    ...base,
+    loadColumnVisibility
+  };
 }
 
 /** 广告明细 / 日报默认列配置 */
@@ -36,6 +61,9 @@ export function createAdDataDefaultColumns(getIsAdmin) {
     date: true,
     user_name: admin,
     product_name: true,
+    data_source: admin,
+    upstream_account: admin,
+    report_type: admin,
     ad_unit: true,
     country_name_zh: true,
     request_count: true,
@@ -57,6 +85,9 @@ export function createAdDataDefaultColumns(getIsAdmin) {
 
 export const AD_DATA_SAVABLE_COLUMN_KEYS = [
   'user_name',
+  'data_source',
+  'upstream_account',
+  'report_type',
   'ad_unit',
   'country_name_zh',
   'request_count',

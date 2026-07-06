@@ -47,6 +47,53 @@
         </template>
       </el-table-column>
       <el-table-column
+        v-if="isAdmin && columnVisibility.data_source"
+        prop="data_source"
+        label="来源"
+        width="96"
+        show-overflow-tooltip
+      >
+        <template #default="{ row }">
+          <el-tooltip
+            v-if="metadataTooltip(displayDataSource(row), formatSourceLabel)"
+            :content="metadataTooltip(displayDataSource(row), formatSourceLabel)"
+            placement="top"
+          >
+            <span>{{ displayDataSource(row) }}</span>
+          </el-tooltip>
+          <span v-else>{{ displayDataSource(row) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column
+        v-if="isAdmin && columnVisibility.upstream_account"
+        prop="upstream_account"
+        label="账号"
+        width="100"
+        show-overflow-tooltip
+      >
+        <template #default="{ row }">
+          {{ displayUpstreamAccount(row) }}
+        </template>
+      </el-table-column>
+      <el-table-column
+        v-if="isAdmin && columnVisibility.report_type"
+        prop="report_type"
+        label="报表类型"
+        width="108"
+        show-overflow-tooltip
+      >
+        <template #default="{ row }">
+          <el-tooltip
+            v-if="metadataTooltip(displayReportType(row), formatReportTypeLabel)"
+            :content="metadataTooltip(displayReportType(row), formatReportTypeLabel)"
+            placement="top"
+          >
+            <span>{{ displayReportType(row) }}</span>
+          </el-tooltip>
+          <span v-else>{{ displayReportType(row) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column
         v-if="columnVisibility.ad_unit"
         prop="ad_unit"
         label="广告单元"
@@ -144,6 +191,45 @@
 
 <script setup>
 import { Setting, Right } from '@element-plus/icons-vue';
+import {
+  formatAdDataSourceLabel as formatSourceLabel,
+  formatAdDataReportTypeLabel as formatReportTypeLabel
+} from '../../constants/adDataDimension';
+
+/** 优先展示与库字段一致的 raw 值，API 仅返回 label 时回退 */
+function pickMetadataRaw(row, rawKey, labelKey) {
+  const raw = row?.[rawKey];
+  if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+    return String(raw).trim();
+  }
+  const label = row?.[labelKey];
+  if (label !== undefined && label !== null && String(label).trim() !== '') {
+    return String(label).trim();
+  }
+  return '';
+}
+
+function displayDataSource(row) {
+  return pickMetadataRaw(row, 'data_source', 'data_source_label') || '—';
+}
+
+function displayReportType(row) {
+  return pickMetadataRaw(row, 'report_type', 'report_type_label') || '—';
+}
+
+function displayUpstreamAccount(row) {
+  const value = row?.upstream_account;
+  if (value !== undefined && value !== null && String(value).trim() !== '') {
+    return String(value).trim();
+  }
+  return '—';
+}
+
+function metadataTooltip(raw, labelFn) {
+  if (!raw) return '';
+  const label = labelFn(raw);
+  return label && label !== raw ? label : '';
+}
 
 const paginationModel = defineModel('pagination', { type: Object, required: true });
 

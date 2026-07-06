@@ -3,6 +3,7 @@ TQT 上游广告数据拉取定时任务。
 """
 import logging
 
+from app.core.ad_data_metadata import DATA_SOURCE_TQT
 from app.core.config import settings
 from app.scheduler_module.task_names import TQT_API_TASK_NAME
 from app.scheduler_module.task_utils import resolve_upstream_date_range
@@ -68,6 +69,7 @@ async def tqt_api_task(
         field_mapping=TQT_FIELD_MAPPING,
         source="TQT定时任务",
         notify_title="TQT",
+        data_source=DATA_SOURCE_TQT,
         log_label="TQT获取广告数据",
         notify_params=notify_params,
     )

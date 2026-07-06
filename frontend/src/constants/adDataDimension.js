@@ -13,16 +13,25 @@ export const AD_UNIT_COUNTRY_DIMENSION = 'ad_unit_country';
 /** 已废弃别名，读取偏好时自动迁移 */
 export const LEGACY_CROSS_DIMENSION = 'country_ad_unit';
 
+/** 明细维护：显示全部行级数据，不做统计维度互斥筛选 */
+export const AD_DATA_DETAIL_ALL_DIMENSION = 'all';
+
 export const AD_DATA_DIMENSION_OPTIONS = [
   { value: 'country', label: '按国家' },
   { value: 'ad_unit', label: '按广告单元' },
   { value: AD_UNIT_COUNTRY_DIMENSION, label: '按广告单元+国家' }
 ];
 
+/** 明细维护页专用维度选项（含全部明细） */
+export const AD_DATA_DETAIL_DIMENSION_OPTIONS = [
+  { value: AD_DATA_DETAIL_ALL_DIMENSION, label: '全部明细' },
+  ...AD_DATA_DIMENSION_OPTIONS
+];
+
 export const DEFAULT_AD_DATA_DIMENSION = 'country';
 
-/** 明细维护页默认维度：GAM/Addermobi 等交叉入库数据需在此维度展示 */
-export const DEFAULT_AD_DATA_DETAIL_DIMENSION = AD_UNIT_COUNTRY_DIMENSION;
+/** 明细维护页默认维度：显示全部行，避免 Zhisuo 纯 unit/country 在交叉维度下被滤掉 */
+export const DEFAULT_AD_DATA_DETAIL_DIMENSION = AD_DATA_DETAIL_ALL_DIMENSION;
 
 /** 每日统计子菜单页配置（固定维度，不再使用下拉选择） */
 export const DAILY_REPORT_PAGE_KEYS = {
@@ -109,7 +118,13 @@ const AD_DATA_DIMENSION_VALUES = new Set(
   AD_DATA_DIMENSION_OPTIONS.map((item) => item.value)
 );
 
+const AD_DATA_DETAIL_DIMENSION_VALUES = new Set(
+  AD_DATA_DETAIL_DIMENSION_OPTIONS.map((item) => item.value)
+);
+
 export const AD_DATA_DIMENSION_HINTS = {
+  [AD_DATA_DETAIL_ALL_DIMENSION]:
+    '显示全部行级明细（含智索 unit/country、GAM 交叉等），适合维护与核对。统计汇总请用每日统计子菜单。',
   country:
     '按日期+产品汇总（合并所有国家）。Zhisuo 双 API 客户仅计入国家报告；Addermobi 等仅交叉数据时自动使用交叉行。',
   ad_unit:
@@ -128,6 +143,21 @@ export function normalizeAdDataDimension(dimension) {
 export function isValidAdDataDimension(dimension) {
   const normalized = normalizeAdDataDimension(dimension);
   return AD_DATA_DIMENSION_VALUES.has(normalized);
+}
+
+export function isValidAdDataDetailDimension(dimension) {
+  const normalized = normalizeAdDataDetailDimension(dimension);
+  return AD_DATA_DETAIL_DIMENSION_VALUES.has(normalized);
+}
+
+export function normalizeAdDataDetailDimension(dimension) {
+  if (dimension === LEGACY_CROSS_DIMENSION) {
+    return AD_UNIT_COUNTRY_DIMENSION;
+  }
+  if (dimension === AD_DATA_DETAIL_ALL_DIMENSION) {
+    return AD_DATA_DETAIL_ALL_DIMENSION;
+  }
+  return normalizeAdDataDimension(dimension);
 }
 
 export function isAdUnitCountryDimension(dimension) {
@@ -174,8 +204,8 @@ function buildAdDataDetailDimensionStorageKey(userId) {
 export function loadAdDataDetailDimensionPreference(userId) {
   try {
     const saved = localStorage.getItem(buildAdDataDetailDimensionStorageKey(userId));
-    if (saved && isValidAdDataDimension(saved)) {
-      return normalizeAdDataDimension(saved);
+    if (saved && isValidAdDataDetailDimension(saved)) {
+      return normalizeAdDataDetailDimension(saved);
     }
   } catch (error) {
     logger.error('加载明细维护统计维度偏好失败:', error);
@@ -185,8 +215,8 @@ export function loadAdDataDetailDimensionPreference(userId) {
 
 /** 明细维护页：持久化统计维度选择 */
 export function saveAdDataDetailDimensionPreference(userId, dimension) {
-  const normalized = normalizeAdDataDimension(dimension);
-  if (!isValidAdDataDimension(normalized)) {
+  const normalized = normalizeAdDataDetailDimension(dimension);
+  if (!isValidAdDataDetailDimension(normalized)) {
     return;
   }
   try {
@@ -197,12 +227,18 @@ export function saveAdDataDetailDimensionPreference(userId, dimension) {
 }
 
 export function showCountryFilterForDimension(dimension) {
-  const dim = normalizeAdDataDimension(dimension);
+  const dim = normalizeAdDataDetailDimension(dimension);
+  if (dim === AD_DATA_DETAIL_ALL_DIMENSION) {
+    return true;
+  }
   return dim === 'country' || dim === AD_UNIT_COUNTRY_DIMENSION;
 }
 
 export function showAdUnitFilterForDimension(dimension) {
-  const dim = normalizeAdDataDimension(dimension);
+  const dim = normalizeAdDataDetailDimension(dimension);
+  if (dim === AD_DATA_DETAIL_ALL_DIMENSION) {
+    return true;
+  }
   return dim === 'ad_unit' || dim === AD_UNIT_COUNTRY_DIMENSION;
 }
 
@@ -261,8 +297,13 @@ export function appendDimensionAwareFilters(
  */
 export function applyDimensionColumnDefaults(columnVisibility, dimension, options = {}) {
   const { dailySummary = false, showCountryColumn = null } = options;
-  const dim = normalizeAdDataDimension(dimension || DEFAULT_AD_DATA_DIMENSION);
+  const dim = normalizeAdDataDetailDimension(dimension || DEFAULT_AD_DATA_DIMENSION);
   const result = { ...columnVisibility };
+  if (dim === AD_DATA_DETAIL_ALL_DIMENSION) {
+    result.ad_unit = true;
+    result.country_name_zh = true;
+    return result;
+  }
   if (dim === 'ad_unit' || isAdUnitCountryDimension(dim)) {
     result.ad_unit = true;
   }
@@ -276,3 +317,118 @@ export function applyDimensionColumnDefaults(columnVisibility, dimension, option
   }
   return result;
 }
+
+/** ad_data 数据来源中文标签（与 app/core/ad_data_metadata.py 一致） */
+export const AD_DATA_SOURCE_LABELS = {
+  zhisuo: '智索',
+  gam: 'GAM',
+  pomiad: 'Pomiad',
+  addermobi: 'Addermobi',
+  skymobi: 'Skymobi',
+  huguang: 'Huguang',
+  tqt: 'TQT',
+  tbsj: '通百世家(yangyangdeyi)',
+  excel: 'Excel 导入',
+  legacy: '历史',
+  unknown: '未知'
+};
+
+/** 上游 API 拉数来源（编辑下拉优先顺序） */
+export const UPSTREAM_API_DATA_SOURCES = [
+  'zhisuo',
+  'gam',
+  'pomiad',
+  'addermobi',
+  'skymobi',
+  'huguang',
+  'tqt',
+  'tbsj'
+];
+
+/** 明细维护编辑：其它来源（手工/历史） */
+export const AD_DATA_SOURCE_MANUAL_OPTIONS = ['excel', 'legacy', 'unknown'];
+
+/** ad_data 报表维度中文标签（与 app/core/ad_data_metadata.py 一致） */
+export const AD_DATA_REPORT_TYPE_LABELS = {
+  unit: '广告单元',
+  country: '国家',
+  cross: '交叉',
+  daily: '日报',
+  legacy: '历史'
+};
+
+/** 统计维度报表类型（编辑下拉优先） */
+export const AD_DATA_REPORT_TYPE_DETAIL_OPTIONS = ['unit', 'country', 'cross', 'daily'];
+
+/** 其它报表类型 */
+export const AD_DATA_REPORT_TYPE_OTHER_OPTIONS = ['legacy'];
+
+/** 各类型说明（与后端 REPORT_TYPE_HINTS 一致） */
+export const AD_DATA_REPORT_TYPE_HINTS = {
+  unit: '按广告单元，无国家；智索 unit、GAM ad_unit',
+  country: '按国家，无广告单元；智索 country、TQT、Huguang',
+  cross: '国家+广告单元；Addermobi、Skymobi、Pomiad、GAM country',
+  daily: '日汇总，无国家无单元；智索 daily 兜底、GAM daily',
+  legacy: '历史或未标注；新入库会自动按行形态推断'
+};
+
+export function formatAdDataSourceLabel(value) {
+  const key = String(value || 'legacy').trim().toLowerCase() || 'legacy';
+  return AD_DATA_SOURCE_LABELS[key] || key;
+}
+
+export function formatAdDataReportTypeLabel(value) {
+  const key = String(value || 'legacy').trim().toLowerCase() || 'legacy';
+  return AD_DATA_REPORT_TYPE_LABELS[key] || key;
+}
+
+/** 明细维护编辑：数据来源选项（上游 API + 手工/历史） */
+export function buildAdDataSourceOptions(currentValue) {
+  const keys = new Set([
+    ...UPSTREAM_API_DATA_SOURCES,
+    ...AD_DATA_SOURCE_MANUAL_OPTIONS
+  ]);
+  const raw = String(currentValue || '').trim().toLowerCase();
+  if (raw) keys.add(raw);
+  const ordered = [
+    ...UPSTREAM_API_DATA_SOURCES,
+    ...AD_DATA_SOURCE_MANUAL_OPTIONS.filter((k) => keys.has(k)),
+    ...[...keys].filter(
+      (k) => !UPSTREAM_API_DATA_SOURCES.includes(k) && !AD_DATA_SOURCE_MANUAL_OPTIONS.includes(k)
+    )
+  ];
+  return [...new Set(ordered)].map((value) => ({
+    value,
+    label: `${formatAdDataSourceLabel(value)} (${value})`
+  }));
+}
+
+/** @deprecated 使用 buildAdDataSourceOptions */
+export const AD_DATA_SOURCE_OPTIONS = buildAdDataSourceOptions();
+
+/** 明细维护编辑：报表类型选项（统计维度 + 历史） */
+export function buildAdDataReportTypeOptions(currentValue) {
+  const keys = new Set([
+    ...AD_DATA_REPORT_TYPE_DETAIL_OPTIONS,
+    ...AD_DATA_REPORT_TYPE_OTHER_OPTIONS
+  ]);
+  const raw = String(currentValue || '').trim().toLowerCase();
+  if (raw) keys.add(raw);
+  const ordered = [
+    ...AD_DATA_REPORT_TYPE_DETAIL_OPTIONS,
+    ...AD_DATA_REPORT_TYPE_OTHER_OPTIONS.filter((k) => keys.has(k)),
+    ...[...keys].filter(
+      (k) =>
+        !AD_DATA_REPORT_TYPE_DETAIL_OPTIONS.includes(k) &&
+        !AD_DATA_REPORT_TYPE_OTHER_OPTIONS.includes(k)
+    )
+  ];
+  return [...new Set(ordered)].map((value) => ({
+    value,
+    label: `${formatAdDataReportTypeLabel(value)} (${value})`,
+    hint: AD_DATA_REPORT_TYPE_HINTS[value] || ''
+  }));
+}
+
+/** @deprecated 使用 buildAdDataReportTypeOptions */
+export const AD_DATA_REPORT_TYPE_OPTIONS = buildAdDataReportTypeOptions();

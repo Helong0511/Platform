@@ -132,6 +132,18 @@ class AdData(Base):
     ecpm_after_deduct = Column(Float, default=0.0, comment='eCPM已减扣')
     revenue_before_deduct = Column(Float, default=0.0, comment='收益未减扣')
     revenue_after_deduct = Column(Float, default=0.0, comment='收益已减扣')
+    data_source = Column(
+        String(32), nullable=False, default='legacy', server_default='legacy',
+        comment='数据来源：zhisuo/gam/excel/legacy 等',
+    )
+    upstream_account = Column(
+        String(64), nullable=False, default='', server_default='',
+        comment='上游账号标识，如 KE11、leadwin',
+    )
+    report_type = Column(
+        String(16), nullable=False, default='legacy', server_default='legacy',
+        comment='报表维度：unit/country/cross/daily/legacy',
+    )
     created_at = Column(DateTime, default=get_app_now_naive, comment='创建时间')
     updated_at = Column(DateTime, default=get_app_now_naive,
                         onupdate=get_app_now_naive, comment='更新时间')
@@ -148,8 +160,14 @@ class AdData(Base):
         Index("idx_ad_data_date_product_country", "date", "product_id", "country_code"),  # 日期 + 产品 + 国家
         Index("idx_ad_data_date_product_ad_unit", "date", "product_id", "ad_unit"),  # 日期 + 产品 + 广告单元
         Index("idx_ad_data_date_ad_unit", "date", "ad_unit"),  # 日期 + 广告单元
-        # 唯一性约束：同一日期、产品、国家、广告单元只能有一条记录（空广告单元为 ''）
-        UniqueConstraint("date", "product_id", "country_code", "ad_unit", name="uq_ad_data_date_product_country_unit"),
+        Index("idx_ad_data_source_type", "data_source", "report_type"),
+        Index("idx_ad_data_date_product_type", "date", "product_id", "report_type"),
+        # 唯一性：日期+产品+国家+单元+来源+报表维度
+        UniqueConstraint(
+            "date", "product_id", "country_code", "ad_unit",
+            "data_source", "report_type",
+            name="uq_ad_data_identity",
+        ),
     )
 
     # 辅助方法：计算并更新比率字段（用于数据插入/更新时自动计算）

@@ -69,7 +69,7 @@
             <li><code>dimension</code> 为可选参数；传入时须参与签名。取值：<code>country</code>（按国家）、<code>ad_unit</code>（按广告单元）、<code>ad_unit_country</code>（按广告单元+国家，<code>country_ad_unit</code> 为兼容别名）</li>
             <li>若同时存在国家 API 与广告单元 API 数据，强烈建议传入 <code>dimension</code>，否则不传时返回全量行可能重复统计</li>
             <li>只有非空参数才参与签名计算。如果未提供可选参数，则不包含在签名中</li>
-            <li>时间戳允许误差为 ±10 秒（服务器与客户端时钟须大致同步）</li>
+            <li>时间戳允许误差为 ±15 秒（服务器与客户端时钟须大致同步）</li>
           </ul>
         </div>
 
@@ -181,7 +181,7 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
           >
             <ul>
               <li><strong>客户ID验证</strong>：验证 <code>client_id</code> 是否存在且已激活</li>
-              <li><strong>时间戳验证</strong>：请求时间戳与服务器时间差异不能超过 10 秒</li>
+              <li><strong>时间戳验证</strong>：请求时间戳与服务器时间差异不能超过 15 秒</li>
               <li><strong>签名验证</strong>：验证 HMAC-SHA256 签名（MD5 向后兼容）</li>
             </ul>
             <p><strong>注意</strong>：<code>SECRET_KEY</code> 不通过请求传递，而是从数据库查询客户的 <code>key</code> 字段进行验证。</p>
@@ -405,9 +405,9 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
             </ul>
             <p><strong>统计维度（dimension，可选）</strong>：</p>
             <ul>
-              <li><code>country</code>：国家维度（<code>ad_unit</code> 为空，有国家代码，含 AA/ZZ）</li>
-              <li><code>ad_unit</code>：广告单元维度（无国家代码即 NULL/空串，<code>ad_unit</code> 有值）</li>
-              <li><code>ad_unit_country</code>：广告单元与国家交叉明细（<code>country_ad_unit</code> 为兼容别名）</li>
+              <li><code>country</code>：国家有值且 <code>ad_unit</code> 为空（含 AA/ZZ）</li>
+              <li><code>ad_unit</code>：<code>ad_unit</code> 有值且国家为空（NULL/空串）</li>
+              <li><code>ad_unit_country</code>：国家与 <code>ad_unit</code> 均有值（<code>country_ad_unit</code> 为兼容别名）</li>
               <li>不传：返回库中全部匹配行（兼容旧版；双 API 场景可能重复统计）</li>
             </ul>
             <p><strong>数据模式说明</strong>：</p>
@@ -490,7 +490,7 @@ public String generateSignature(int clientId, long reqTime, String secretKey,
           show-icon
         >
           <ul>
-            <li><strong>时间同步</strong>：确保客户端系统时间准确，请求时间戳与服务器时间差异不能超过 10 秒</li>
+            <li><strong>时间同步</strong>：确保客户端系统时间准确，请求时间戳与服务器时间差异不能超过 15 秒</li>
             <li><strong>签名大小写</strong>：签名必须使用小写十六进制字符串</li>
             <li><strong>数据类型</strong>：响应中的数值类型明确（int/float），不会返回字符串</li>
             <li><strong>空值处理</strong>：如果查询结果为空，<code>data</code> 字段返回空数组 <code>[]</code>，而不是 <code>null</code></li>
@@ -566,7 +566,7 @@ const adDataResponseFields = [
 const errorCodes = [
   { code: 200, message: '成功', solution: '-' },
   { code: 2201, message: '客户不存在或未激活', solution: '检查 client_id 是否正确，确认客户已激活' },
-  { code: 2205, message: '参数验证不通过', solution: '检查以下项：1. 请求时间戳是否在允许范围内（±10 秒） 2. 签名是否正确 3. 参数格式是否正确' },
+  { code: 2205, message: '参数验证不通过', solution: '检查以下项：1. 请求时间戳是否在允许范围内（±15 秒） 2. 签名是否正确 3. 参数格式是否正确' },
   { code: 2501, message: '操作失败', solution: '查看 detail 字段获取详细错误信息' }
 ];
 </script>

@@ -36,9 +36,15 @@ async def run_upstream_import_task(
     data_transform: DataTransform = None,
     log_label: Optional[str] = None,
     notify_params: Optional[Mapping[str, Any]] = None,
+    data_source: str = "unknown",
+    report_type: str = "legacy",
+    upstream_account: str = "",
 ) -> None:
     """
     上游拉数任务标准流程：未配置则跳过 → 拉数 → import_upstream_ad_data 入库。
+
+    report_type 默认为 legacy：入库时 process_api_ad_data 会按 ad_unit/country 行形态
+    自动推断为 unit/country/cross/daily；各 task 也可显式传入（如 zhisuo unit/country）。
 
     参数:
         task_name: 调度任务名（与 task_names 常量一致）
@@ -73,6 +79,9 @@ async def run_upstream_import_task(
             data_transform=data_transform,
             notify_params=notify_params,
             fetch_stats=fetch_stats,
+            data_source=data_source,
+            report_type=report_type,
+            upstream_account=upstream_account,
         )
     except Exception as e:
         label = log_label or task_name

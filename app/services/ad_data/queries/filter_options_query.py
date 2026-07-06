@@ -33,6 +33,7 @@ from app.services.ad_data.queries.filter_conditions import (
 from app.services.ad_data.queries.daily_summary_query import _effective_summary_date_range
 from app.services.ad_data.queries.dimension_filter import (
     build_daily_summary_dimension_filter,
+    is_all_list_dimension,
     normalize_dimension,
 )
 from app.services.ad_data.queries.join_helpers import (
@@ -55,6 +56,10 @@ def _filter_dropdown_dimension_filter(
     不可使用明细列表的互斥维度过滤（否则会始终为空、无法级联）。
     """
     eff_start, eff_end = _effective_summary_date_range(start_date, end_date)
+    if is_all_list_dimension(dimension):
+        from sqlalchemy import true
+
+        return true()
     return build_daily_summary_dimension_filter(
         AdData.country_code,
         AdData.ad_unit,

@@ -12,12 +12,12 @@ from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.country_code import build_ad_data_country_filter
+from app.core.ad_data_metadata import normalize_data_source, normalize_report_type
 from app.core.security import is_admin
 from app.models.models import AdData, Client, User
 from app.services.ad_data.queries.dimension_filter import (
     ad_unit_exact_filter_applies,
     country_exact_filter_applies,
-    normalize_dimension,
 )
 
 
@@ -91,6 +91,18 @@ def build_ad_units_in_filter(column: Any, ad_units: Optional[List[str]]) -> Any 
     return column.in_(cleaned)
 
 
+def build_str_values_in_filter(column: Any, values: Optional[List[str]]) -> Any | None:
+    """字符串列精确匹配（支持逗号分隔多选）。"""
+    if not values:
+        return None
+    cleaned = [str(v).strip() for v in values if v is not None and str(v).strip()]
+    if not cleaned:
+        return None
+    if len(cleaned) == 1:
+        return column == cleaned[0]
+    return column.in_(cleaned)
+
+
 async def build_country_codes_filter(
     db: AsyncSession,
     country_code_column: Any,
@@ -117,13 +129,30 @@ def validate_ad_data_scope_filter_params(
     product_id: Optional[str] = None,
     country_code: Optional[str] = None,
     ad_unit: Optional[str] = None,
+    data_source: Optional[str] = None,
+    upstream_account: Optional[str] = None,
+    report_type: Optional[str] = None,
 ) -> None:
     """预先解析筛选参数；非法整数格式时抛出 InvalidFilterParameterError。"""
     if is_admin(current_user):
         parse_csv_ints(client_id, field="client_id")
+        parse_csv_strs(data_source)
+        parse_csv_strs(upstream_account)
+        parse_csv_strs(report_type)
     parse_csv_ints(product_id, field="product_id")
     parse_csv_strs(country_code)
     parse_csv_strs(ad_unit)
+
+
+def validate_ad_data_metadata_filter_params(
+    *,
+    data_source: Optional[str] = None,
+    upstream_account: Optional[str] = None,
+    report_type: Optional[str] = None,
+) -> None:
+    parse_csv_strs(data_source)
+    parse_csv_strs(upstream_account)
+    parse_csv_strs(report_type)
 
 
 async def apply_ad_data_scope_filters(
@@ -136,20 +165,26 @@ async def apply_ad_data_scope_filters(
     country_code: Optional[str] = None,
     ad_unit: Optional[str] = None,
     dimension: Optional[str] = None,
+    data_source: Optional[str] = None,
+    upstream_account: Optional[str] = None,
+    report_type: Optional[str] = None,
 ) -> Any:
-    """应用客户/产品/国家/广告单元筛选（含多选）。"""
+    """应用客户/产品/国家/广告单元及管理员元数据筛选（含多选）。"""
     validate_ad_data_scope_filter_params(
         current_user=current_user,
         client_id=client_id,
         product_id=product_id,
         country_code=country_code,
         ad_unit=ad_unit,
+        data_source=data_source,
+        upstream_account=upstream_account,
+        report_type=report_type,
     )
     client_ids = parse_csv_ints(client_id, field="client_id")
     product_ids = parse_csv_ints(product_id, field="product_id")
     country_codes = parse_csv_strs(country_code)
     ad_units = parse_csv_strs(ad_unit)
-    dim = normalize_dimension(dimension) if dimension else None
+    dim_raw = str(dimension).strip() if dimension else None
 
     if not is_admin(current_user):
         query = query.where(Client.user_id == current_user.id)
@@ -162,16 +197,61 @@ async def apply_ad_data_scope_filters(
     if product_filter is not None:
         query = query.where(product_filter)
 
-    if dim and country_exact_filter_applies(dim):
+    if dim_raw and country_exact_filter_applies(dim_raw):
         country_filter = await build_country_codes_filter(
             db, AdData.country_code, country_codes
         )
         if country_filter is not None:
             query = query.where(country_filter)
 
-    if dim and ad_unit_exact_filter_applies(dim):
+    if dim_raw and ad_unit_exact_filter_applies(dim_raw):
         ad_unit_filter = build_ad_units_in_filter(AdData.ad_unit, ad_units)
         if ad_unit_filter is not None:
             query = query.where(ad_unit_filter)
+
+    return await apply_ad_data_metadata_filters(
+        query,
+        current_user=current_user,
+        data_source=data_source,
+        upstream_account=upstream_account,
+        report_type=report_type,
+    )
+
+
+async def apply_ad_data_metadata_filters(
+    query: Any,
+    *,
+    current_user: User,
+    data_source: Optional[str] = None,
+    upstream_account: Optional[str] = None,
+    report_type: Optional[str] = None,
+) -> Any:
+    """管理员专用：按来源 / 账号 / 报表类型筛选。"""
+    if not is_admin(current_user):
+        return query
+    validate_ad_data_metadata_filter_params(
+        data_source=data_source,
+        upstream_account=upstream_account,
+        report_type=report_type,
+    )
+    sources = parse_csv_strs(data_source)
+    if sources:
+        normalized = [normalize_data_source(s) for s in sources]
+        source_filter = build_str_values_in_filter(AdData.data_source, normalized)
+        if source_filter is not None:
+            query = query.where(source_filter)
+
+    accounts = parse_csv_strs(upstream_account)
+    if accounts:
+        account_filter = build_str_values_in_filter(AdData.upstream_account, accounts)
+        if account_filter is not None:
+            query = query.where(account_filter)
+
+    report_types = parse_csv_strs(report_type)
+    if report_types:
+        normalized_types = [normalize_report_type(rt) for rt in report_types]
+        type_filter = build_str_values_in_filter(AdData.report_type, normalized_types)
+        if type_filter is not None:
+            query = query.where(type_filter)
 
     return query

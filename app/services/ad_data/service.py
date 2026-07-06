@@ -194,6 +194,9 @@ class AdDataService(BaseService[AdData]):
             country_code: Optional[str] = None,
             ad_unit: Optional[str] = None,
             dimension: Optional[str] = None,
+            data_source: Optional[str] = None,
+            upstream_account: Optional[str] = None,
+            report_type: Optional[str] = None,
             sort_by: str = "date",
             sort_order: str = "desc"
     ) -> Tuple[List[Dict[str, Any]], int, Optional[Dict[str, Any]]]:
@@ -211,6 +214,9 @@ class AdDataService(BaseService[AdData]):
             country_code=country_code,
             ad_unit=ad_unit,
             dimension=dimension,
+            data_source=data_source,
+            upstream_account=upstream_account,
+            report_type=report_type,
             sort_by=sort_by,
             sort_order=sort_order,
         )
@@ -223,5 +229,8 @@ class AdDataService(BaseService[AdData]):
             country_code=country_code,
             ad_unit=ad_unit,
             dimension=dimension,
+            data_source=data_source,
+            upstream_account=upstream_account,
+            report_type=report_type,
         )
         return rows, total, grand_total

@@ -131,7 +131,7 @@ async def verify_client_request(
     """
     验证客户请求
     1. 通过 client_id 查询客户（不暴露 secret_key）
-    2. 验证请求时间差异（默认正负 10 秒内）
+    2. 验证请求时间差异（默认正负 15 秒内）
     3. 使用客户的 key 验证签名
     
     Args:
@@ -143,7 +143,7 @@ async def verify_client_request(
         end_date: 结束日期（可选，用于签名验证）
         page: 页码（可选，显式传入时参与签名验证）
         page_size: 每页条数（可选，显式传入时参与签名验证）
-        time_tolerance: 时间容差（秒），默认 10 秒
+        time_tolerance: 时间容差（秒），默认 15 秒
     
     Returns:
         Client: 验证通过的客户对象
@@ -179,7 +179,7 @@ async def verify_client_request(
             detail="客户API访问未启用，请联系管理员开启"
         )
 
-    # 2. 验证请求时间差异（默认正负 10 秒内）
+    # 2. 验证请求时间差异（默认正负 15 秒内）
     current_timestamp = int(datetime.now(timezone.utc).timestamp())
     time_diff = abs(current_timestamp - request.req_time)
 

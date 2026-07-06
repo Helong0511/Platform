@@ -17,6 +17,7 @@ from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.ad_data_metadata import format_data_source_label, format_report_type_label
 from app.core.country_code import resolve_country_name
 from app.core.query_utils import (
     apply_date_range_filter,
@@ -63,6 +64,9 @@ class AdDataListQuery:
         country_code: Optional[str] = None,
         ad_unit: Optional[str] = None,
         dimension: Optional[str] = None,
+        data_source: Optional[str] = None,
+        upstream_account: Optional[str] = None,
+        report_type: Optional[str] = None,
         sort_by: str = "date",
         sort_order: str = "desc",
     ) -> Tuple[List[Dict[str, Any]], int]:
@@ -75,6 +79,9 @@ class AdDataListQuery:
             product_id=product_id,
             country_code=country_code,
             ad_unit=ad_unit,
+            data_source=data_source,
+            upstream_account=upstream_account,
+            report_type=report_type,
         )
         query = await self._build_main_query(
             use_assignment_table,
@@ -86,6 +93,9 @@ class AdDataListQuery:
             dimension,
             start_date,
             end_date,
+            data_source=data_source,
+            upstream_account=upstream_account,
+            report_type=report_type,
         )
         query = self._apply_sort(query, sort_by, sort_order)
         total = await self._count_total(
@@ -98,6 +108,9 @@ class AdDataListQuery:
             dimension,
             start_date,
             end_date,
+            data_source=data_source,
+            upstream_account=upstream_account,
+            report_type=report_type,
         )
 
         offset = (page - 1) * page_size
@@ -116,6 +129,9 @@ class AdDataListQuery:
         country_code: Optional[str] = None,
         ad_unit: Optional[str] = None,
         dimension: Optional[str] = None,
+        data_source: Optional[str] = None,
+        upstream_account: Optional[str] = None,
+        report_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """当前筛选条件下全部明细的全量合计（供表格底部合计行，不受分页影响）。"""
         from app.services.ad_data.queries.daily_summary_query import _daily_summary_aggregate_columns
@@ -133,13 +149,19 @@ class AdDataListQuery:
             product_id=product_id,
             country_code=country_code,
             ad_unit=ad_unit,
+            data_source=data_source,
+            upstream_account=upstream_account,
+            report_type=report_type,
         )
 
         query = select(*_daily_summary_aggregate_columns())
         query = join_product_and_client(query, use_assignment_table)
         query = query.where(Product.is_active == True)
         query = query.where(
-            build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
+            build_ad_data_dimension_filter(
+                AdData.country_code, AdData.ad_unit, dimension,
+                report_type_column=AdData.report_type,
+            )
         )
         query = await apply_ad_data_scope_filters(
             self.db,
@@ -150,6 +172,9 @@ class AdDataListQuery:
             country_code=country_code,
             ad_unit=ad_unit,
             dimension=dimension,
+            data_source=data_source,
+            upstream_account=upstream_account,
+            report_type=report_type,
         )
 
         query = apply_date_range_filter(
@@ -175,6 +200,9 @@ class AdDataListQuery:
         dimension: Optional[str],
         start_date: Optional[date],
         end_date: Optional[date],
+        data_source: Optional[str] = None,
+        upstream_account: Optional[str] = None,
+        report_type: Optional[str] = None,
     ):
         if use_assignment_table:
             query = select(AdData, Product, Client, User, ProductAssignment, CountryInfo)
@@ -187,7 +215,10 @@ class AdDataListQuery:
         query = join_country_info_for_ad_data(query)
         query = query.where(Product.is_active == True)
         query = query.where(
-            build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
+            build_ad_data_dimension_filter(
+                AdData.country_code, AdData.ad_unit, dimension,
+                report_type_column=AdData.report_type,
+            )
         )
         query = await apply_ad_data_scope_filters(
             self.db,
@@ -198,6 +229,9 @@ class AdDataListQuery:
             country_code=country_code,
             ad_unit=ad_unit,
             dimension=dimension,
+            data_source=data_source,
+            upstream_account=upstream_account,
+            report_type=report_type,
         )
 
         return apply_date_range_filter(
@@ -250,13 +284,19 @@ class AdDataListQuery:
         dimension: Optional[str],
         start_date: Optional[date],
         end_date: Optional[date],
+        data_source: Optional[str] = None,
+        upstream_account: Optional[str] = None,
+        report_type: Optional[str] = None,
     ) -> int:
         try:
             count_query = select(func.count(AdData.id))
             count_query = join_product_and_client(count_query, use_assignment_table)
             count_query = count_query.where(Product.is_active == True)
             count_query = count_query.where(
-                build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
+                build_ad_data_dimension_filter(
+                AdData.country_code, AdData.ad_unit, dimension,
+                report_type_column=AdData.report_type,
+            )
             )
             count_query = await apply_ad_data_scope_filters(
                 self.db,
@@ -267,6 +307,9 @@ class AdDataListQuery:
                 country_code=country_code,
                 ad_unit=ad_unit,
                 dimension=dimension,
+                data_source=data_source,
+                upstream_account=upstream_account,
+                report_type=report_type,
             )
             count_query = apply_date_range_filter(
                 count_query,
@@ -336,6 +379,11 @@ class AdDataListQuery:
                         "client_id": client.id,
                         "client_name": client.company_name,
                         "user_name": user.full_name or user.username,
+                        "data_source": ad_data.data_source or "legacy",
+                        "data_source_label": format_data_source_label(ad_data.data_source),
+                        "upstream_account": ad_data.upstream_account or "",
+                        "report_type": ad_data.report_type or "legacy",
+                        "report_type_label": format_report_type_label(ad_data.report_type),
                         "ecpm_before_deduct": round(ad_data.ecpm_before_deduct, 4),
                         "revenue_before_deduct": round(ad_data.revenue_before_deduct, 4),
                     }

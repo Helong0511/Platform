@@ -22,12 +22,88 @@ from app.core.country_code import (
     preserve_unrecognized_country_code,
     resolve_country_display,
 )
+from app.core.ad_data_metadata import (
+    DATA_SOURCE_UNKNOWN,
+    REPORT_TYPE_LEGACY,
+    normalize_report_type,
+    resolve_report_type_for_row,
+)
 from app.core.utils import truncate_to_2_decimal, get_date_range, normalize_date_for_ad_data, normalize_ad_unit
 from app.core.telegram import send_telegram_message_async
 from app.core.config import settings
 
 # 获取当前模块的日志记录器
 logger = logging.getLogger(__name__)
+
+
+def _ad_data_identity_filters(
+    *,
+    product_id: int,
+    date_start,
+    date_end,
+    country_code,
+    ad_unit: str,
+    data_source: str,
+    report_type: str,
+    upstream_account: str,
+):
+    """构建 ad_data 唯一性查询条件（含来源与报表维度）。"""
+    filters = [
+        AdData.date >= date_start,
+        AdData.date <= date_end,
+        AdData.product_id == product_id,
+        build_ad_data_country_equality(AdData.country_code, country_code),
+        AdData.ad_unit == ad_unit,
+        AdData.data_source == data_source,
+        AdData.report_type == report_type,
+    ]
+    if upstream_account:
+        filters.append(AdData.upstream_account == upstream_account)
+    return filters
+
+
+def _report_type_lookup_condition(row_report_type: str):
+    """导入查重：推断出的非 legacy 类型可同时匹配旧 legacy 行以便升级 report_type。"""
+    if row_report_type == REPORT_TYPE_LEGACY:
+        return AdData.report_type == REPORT_TYPE_LEGACY
+    return or_(
+        AdData.report_type == row_report_type,
+        AdData.report_type == REPORT_TYPE_LEGACY,
+    )
+
+
+async def _find_existing_ad_data_for_import(
+    db: AsyncSession,
+    *,
+    product_id: int,
+    date_start,
+    date_end,
+    country_code,
+    ad_unit: str,
+    data_source: str,
+    row_report_type: str,
+    upstream_account: str,
+):
+    """按唯一键查找已有行；legacy 行在推断入库时可被匹配并升级 report_type。"""
+    filters = [
+        AdData.date >= date_start,
+        AdData.date <= date_end,
+        AdData.product_id == product_id,
+        build_ad_data_country_equality(AdData.country_code, country_code),
+        AdData.ad_unit == ad_unit,
+        AdData.data_source == data_source,
+        _report_type_lookup_condition(row_report_type),
+    ]
+    if upstream_account:
+        filters.append(AdData.upstream_account == upstream_account)
+    result = await db.execute(select(AdData).where(*filters))
+    rows = result.scalars().all()
+    if not rows:
+        return None
+    for row in rows:
+        if row.report_type == row_report_type:
+            return row
+    return rows[0]
 
 # 应用时区配置（从统一配置读取）
 APP_TIMEZONE = pytz.timezone(settings.TIMEZONE)
@@ -153,7 +229,11 @@ async def process_api_ad_data(
         db: AsyncSession,
         admin_user: User,
         source: str = "API",
-        field_mapping: Optional[Dict[str, str]] = None
+        field_mapping: Optional[Dict[str, str]] = None,
+        *,
+        data_source: str = DATA_SOURCE_UNKNOWN,
+        report_type: str = REPORT_TYPE_LEGACY,
+        upstream_account: str = "",
 ) -> Dict[str, int]:
     """
     标准化的API广告数据处理函数
@@ -180,6 +260,9 @@ async def process_api_ad_data(
         admin_user: 管理员用户对象（用于产品查找/创建）
         source: 数据来源标识（用于日志记录，默认"API"）
         field_mapping: 字段映射字典，键为标准字段名，值为API返回的字段名
+        data_source: 入库字段，上游系统标识（zhisuo/gam/excel 等）
+        report_type: 入库字段，报表维度（unit/country/cross/daily）
+        upstream_account: 入库字段，上游账号（如 KE11）
     
     返回:
         Dict[str, int]: 处理结果统计
@@ -188,6 +271,10 @@ async def process_api_ad_data(
             - skipped_count: 跳过重复的数据条数
             - error_count: 处理出错的数据条数
     """
+
+    resolved_data_source = str(data_source or DATA_SOURCE_UNKNOWN).strip() or DATA_SOURCE_UNKNOWN
+    resolved_report_type = normalize_report_type(report_type)
+    resolved_upstream_account = str(upstream_account or "").strip()
 
     # 字段映射函数
     def get_field(item: Dict[str, Any], field_name: str, default: Any = None) -> Any:
@@ -636,19 +723,28 @@ async def process_api_ad_data(
 
                 # 检查数据是否重复（按日期、产品、国家、广告单元）
                 date_start, date_end = get_date_range(item_date)
-
-                existing_query = select(AdData).where(
-                    AdData.date >= date_start,
-                    AdData.date <= date_end,
-                    AdData.product_id == product_id,
-                    build_ad_data_country_equality(AdData.country_code, country_code),
-                    AdData.ad_unit == ad_unit
+                row_report_type = resolve_report_type_for_row(
+                    resolved_report_type,
+                    ad_unit=ad_unit,
+                    country_code=country_code,
                 )
-                existing_result = await db.execute(existing_query)
-                existing_data = existing_result.scalars().first()
+
+                existing_data = await _find_existing_ad_data_for_import(
+                    db,
+                    product_id=product_id,
+                    date_start=date_start,
+                    date_end=date_end,
+                    country_code=country_code,
+                    ad_unit=ad_unit,
+                    data_source=resolved_data_source,
+                    row_report_type=row_report_type,
+                    upstream_account=resolved_upstream_account,
+                )
 
                 # 处理数据（新建或更新）
                 if existing_data:
+                    if existing_data.report_type != row_report_type:
+                        existing_data.report_type = row_report_type
                     # 检查数据是否减少（在更新之前）
                     await check_and_notify_data_decrease(
                         existing_data=existing_data,
@@ -759,6 +855,9 @@ async def process_api_ad_data(
                         product_id=product_id,
                         ad_unit=ad_unit,
                         country_code=country_code,
+                        data_source=resolved_data_source,
+                        upstream_account=resolved_upstream_account,
+                        report_type=row_report_type,
                         request_count=grouped_data["request_count"],
                         match_count=grouped_data["match_count"],
                         display_count=grouped_data["display_count"],
@@ -932,19 +1031,28 @@ async def process_api_ad_data(
                 # 检查数据是否重复（按日期、产品、国家代码、广告单元）
                 item_date = grouped_data["date"]
                 date_start, date_end = get_date_range(item_date)
-
-                existing_query = select(AdData).where(
-                    AdData.date >= date_start,
-                    AdData.date <= date_end,
-                    AdData.product_id == product_id,
-                    build_ad_data_country_equality(AdData.country_code, country_code),
-                    AdData.ad_unit == ad_unit
+                row_report_type = resolve_report_type_for_row(
+                    resolved_report_type,
+                    ad_unit=ad_unit,
+                    country_code=country_code,
                 )
-                existing_result = await db.execute(existing_query)
-                existing_data = existing_result.scalars().first()
+
+                existing_data = await _find_existing_ad_data_for_import(
+                    db,
+                    product_id=product_id,
+                    date_start=date_start,
+                    date_end=date_end,
+                    country_code=country_code,
+                    ad_unit=ad_unit,
+                    data_source=resolved_data_source,
+                    row_report_type=row_report_type,
+                    upstream_account=resolved_upstream_account,
+                )
 
                 # 处理数据（新建或更新）
                 if existing_data:
+                    if existing_data.report_type != row_report_type:
+                        existing_data.report_type = row_report_type
                     # 检查数据是否减少（在更新之前）
                     await check_and_notify_data_decrease(
                         existing_data=existing_data,
@@ -1061,6 +1169,9 @@ async def process_api_ad_data(
                         product_id=product_id,
                         ad_unit=ad_unit,
                         country_code=country_code,
+                        data_source=resolved_data_source,
+                        upstream_account=resolved_upstream_account,
+                        report_type=row_report_type,
                         request_count=grouped_data["request_count"],
                         match_count=grouped_data["match_count"],
                         display_count=grouped_data["display_count"],

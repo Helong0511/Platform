@@ -20,6 +20,7 @@ from app.api_v1.excel.ad_data_import.product_resolver import find_or_create_prod
 from app.api_v1.excel.utils import (
     is_valid_numeric_value, normalize_date_key, parse_date_value, safe_get_value,
 )
+from app.core.ad_data_metadata import DATA_SOURCE_EXCEL, infer_report_type_from_shape
 from app.core.ad_data_processor import check_and_notify_data_decrease
 from app.core.constants import ECPM_MULTIPLIER
 from app.core.country_code import (
@@ -253,6 +254,10 @@ async def process_row_data(
             f"eCPM: {ecpm_before} -> {ecpm_after}, 收益: {revenue_before} -> {revenue_after}"
         )
 
+        excel_report_type = infer_report_type_from_shape(
+            ad_unit=ad_unit, country_code=country_code
+        )
+
         # 检查是否已存在相同日期和产品的记录（使用预查询的结果或单独查询）
         existing_data = None
         # ---------- 条件分支 ----------
@@ -260,7 +265,14 @@ async def process_row_data(
             # 使用预查询的结果（优化性能）
             # 确保日期格式一致（使用date对象，不包含时间）
             date_key = normalize_date_key(data_date)
-            key = (date_key, product_info["product_id"], normalize_ad_data_country_cache_key(country_code), ad_unit)
+            key = (
+                date_key,
+                product_info["product_id"],
+                normalize_ad_data_country_cache_key(country_code),
+                ad_unit,
+                DATA_SOURCE_EXCEL,
+                excel_report_type,
+            )
             existing_data = existing_records.get(key)
         else:
             # 如果没有预查询结果，则单独查询（向后兼容）
@@ -271,6 +283,8 @@ async def process_row_data(
                 AdData.date <= date_end,
                 AdData.product_id == product_info["product_id"],
                 AdData.ad_unit == ad_unit,
+                AdData.data_source == DATA_SOURCE_EXCEL,
+                AdData.report_type == excel_report_type,
                 country_condition
             )
             existing_result = await db.execute(existing_query)
@@ -344,6 +358,8 @@ async def process_row_data(
                 product_id=product_info["product_id"],
                 ad_unit=ad_unit,
                 country_code=country_code,
+                data_source=DATA_SOURCE_EXCEL,
+                report_type=excel_report_type,
                 request_count=request_count,
                 match_count=match_count,
                 display_count=display_count,
@@ -374,7 +390,14 @@ async def process_row_data(
             if existing_records is not None:
                 # 确保日期格式一致（使用date对象，不包含时间）
                 date_key = normalize_date_key(data_date)
-                key = (date_key, product_info["product_id"], normalize_ad_data_country_cache_key(country_code), ad_unit)
+                key = (
+                    date_key,
+                    product_info["product_id"],
+                    normalize_ad_data_country_cache_key(country_code),
+                    ad_unit,
+                    DATA_SOURCE_EXCEL,
+                    excel_report_type,
+                )
                 existing_records[key] = ad_data
 
         result["success_rows"] += 1

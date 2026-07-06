@@ -14,7 +14,6 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta
 from typing import Any
 
-# 第三方库导入
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, status
 from sqlalchemy import delete, func, text, literal_column, case, Float
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +27,7 @@ from app.core.config import settings
 from app.core.constants import MAX_PAGE_SIZE, ECPM_MULTIPLIER, PERCENTAGE_MULTIPLIER
 from app.models.models import AdData, Client, Product, User, UserRole, ProductAssignment, CountryInfo
 from sqlalchemy import and_, or_
+from app.core.ad_data_metadata import format_data_source_label, format_report_type_label
 from app.core.country_code import resolve_country_name
 from app.core.query_utils import (
     product_assignment_join_condition, 
@@ -57,6 +57,23 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _serialize_ad_data_list_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    序列化明细列表项：经 AdDataResponse 校验后，保留 list_query 中的全部字段。
+
+    避免 response_model 仅含旧字段时，data_source / report_type 等元数据被丢弃。
+    """
+    serialized: list[dict[str, Any]] = []
+    for item in items:
+        validated = AdDataResponse.model_validate(item)
+        row = validated.model_dump(mode="json")
+        for key, value in item.items():
+            if key not in row:
+                row[key] = value
+        serialized.append(row)
+    return serialized
+
+
 # 使用公共函数 join_country_info，传入 AdData.country_code 列
 def join_country_info(query):
     """
@@ -69,7 +86,7 @@ def join_country_info(query):
     return join_country_info_util(query, AdData.country_code)
 
 
-@router.get("/", response_model=PaginatedResponseBaseSchema[list[AdDataResponse]], summary="获取广告数据列表")
+@router.get("/", response_model=PaginatedResponseBaseSchema[list[dict[str, Any]]], summary="获取广告数据列表")
 async def get_ad_data(
         request: Request,
         db: AsyncSession = Depends(get_db),
@@ -86,6 +103,9 @@ async def get_ad_data(
             "country",
             description="统计维度：country=按国家，ad_unit=按广告单元，ad_unit_country=按广告单元+国家（country_ad_unit 为兼容别名）",
         ),
+        data_source: str | None = Query(None, description="数据来源过滤（管理员），支持逗号分隔多选，如 zhisuo,gam"),
+        upstream_account: str | None = Query(None, description="上游账号过滤（管理员），支持逗号分隔多选，如 KE11"),
+        report_type: str | None = Query(None, description="报表类型过滤（管理员），支持逗号分隔多选，如 unit,country,cross"),
         sort_by: str = Query("date", description="排序字段，默认为date"),
         sort_order: str = Query("desc", description="排序方向，asc或desc")
 ):
@@ -115,12 +135,15 @@ async def get_ad_data(
         country_code=country_code,
         ad_unit=ad_unit,
         dimension=dimension,
+        data_source=data_source,
+        upstream_account=upstream_account,
+        report_type=report_type,
         sort_by=sort_by,
         sort_order=sort_order
     )
 
-    # 转换为响应格式
-    ad_data_list = [AdDataResponse(**item) for item in ad_data_responses]
+    # 转换为响应格式（保留元数据字段，避免 Schema 未热更新时被剥离）
+    ad_data_list = _serialize_ad_data_list_items(ad_data_responses)
 
     return PaginatedResponseBaseSchema.success(
         data=ad_data_list,
@@ -467,6 +490,7 @@ async def get_ad_data_detail(
         "user_name": user.full_name or user.username,  # 添加用户名称
         "product_id": product.id,
         "product_name": product.name,
+        "ad_unit": ad_data.ad_unit or "",
         "country_code": ad_data.country_code,
         "country_name_zh": country_name_zh,
         "request_count": ad_data.request_count,
@@ -484,6 +508,16 @@ async def get_ad_data_detail(
         "created_at": ad_data.created_at,
         "updated_at": ad_data.updated_at
     }
+    if is_admin(current_user):
+        response_data.update(
+            {
+                "data_source": ad_data.data_source or "legacy",
+                "data_source_label": format_data_source_label(ad_data.data_source),
+                "upstream_account": ad_data.upstream_account or "",
+                "report_type": ad_data.report_type or "legacy",
+                "report_type_label": format_report_type_label(ad_data.report_type),
+            }
+        )
 
     # ---------- 构建响应 ----------
     return ResponseBaseSchema.success(data=AdDataResponse(**response_data))

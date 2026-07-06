@@ -2,7 +2,7 @@
 客户开放 API（/client_data）广告数据查询。
 
 按 data_type 返回明细或日汇总；可选 dimension 与后台报表口径一致。
-未传 dimension 时保持历史行为（返回库中全部匹配行，可能含重复统计风险）。
+明细（all）维度优先按 country_code / ad_unit 字段有无筛选；日汇总（day）另见 build_daily_summary_dimension_filter。
 """
 from __future__ import annotations
 
@@ -100,7 +100,12 @@ class ClientAdDataQuery:
             dim = normalize_dimension(dimension)
             query = query.where(
                 build_daily_summary_dimension_filter(
-                    AdData.country_code, AdData.ad_unit, dim
+                    AdData.country_code,
+                    AdData.ad_unit,
+                    dim,
+                    ad_data_model=AdData,
+                    start_date=start_date,
+                    end_date=end_date,
                 )
             )
             return query

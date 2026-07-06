@@ -1,7 +1,7 @@
 """
 广告数据唯一性约束预检查询。
 
-约束：uq_ad_data_date_product_country_unit（日期 + 产品 + 国家 + 广告单元）
+约束：uq_ad_data_identity（日期 + 产品 + 国家 + 广告单元 + 数据来源 + 报表维度）
 
 在系统中的位置：
 - 被 ``AdDataService.update_ad_data`` 在写入前调用
@@ -44,14 +44,21 @@ class AdDataUniquenessQuery:
         product_id: int,
         country_code: str,
         ad_unit: str,
+        *,
+        data_source: Optional[str] = None,
+        report_type: Optional[str] = None,
     ) -> Optional[AdData]:
         date_start, date_end = self._day_bounds(ad_data.date)
+        resolved_source = data_source if data_source is not None else (ad_data.data_source or "legacy")
+        resolved_type = report_type if report_type is not None else (ad_data.report_type or "legacy")
         query = select(AdData).where(
             AdData.id != ad_data.id,
             AdData.date >= date_start,
             AdData.date <= date_end,
             AdData.product_id == product_id,
             AdData.ad_unit == ad_unit,
+            AdData.data_source == resolved_source,
+            AdData.report_type == resolved_type,
             self._country_condition(country_code),
         )
         result = await self.db.execute(query)

@@ -81,10 +81,17 @@ class AdDataUpdateCommand:
             new_product_id = filtered.get("product_id", ad_data.product_id)
             new_country_code = filtered.get("country_code", ad_data.country_code)
             new_ad_unit = filtered.get("ad_unit", ad_data.ad_unit or "")
+            new_data_source = filtered.get("data_source", ad_data.data_source or "legacy")
+            new_report_type = filtered.get("report_type", ad_data.report_type or "legacy")
 
             uniqueness = AdDataUniquenessQuery(self.db)
             conflict = await uniqueness.find_conflict(
-                ad_data, new_product_id, new_country_code, new_ad_unit
+                ad_data,
+                new_product_id,
+                new_country_code,
+                new_ad_unit,
+                data_source=new_data_source,
+                report_type=new_report_type,
             )
             if conflict:
                 raise_api_exception(
@@ -148,7 +155,7 @@ class AdDataUpdateCommand:
         )
         handle_integrity_error(
             error=error,
-            constraint_name="uq_ad_data_date_product_country_unit",
+            constraint_name="uq_ad_data_identity",
             custom_message=custom_message,
             log_context="Update ad data",
         )

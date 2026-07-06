@@ -207,6 +207,9 @@ async def export_ad_data_handler(
         country_code: str | None = None,
         ad_unit: str | None = None,
         dimension: str | None = None,
+        data_source: str | None = None,
+        upstream_account: str | None = None,
+        report_type: str | None = None,
         daily_summary: bool = False,
         split_by_country: bool = False,
         sort_by: str = "date",
@@ -367,7 +370,10 @@ async def export_ad_data_handler(
     query = query.where(Product.is_active == True)
 
     query = query.where(
-        build_ad_data_dimension_filter(AdData.country_code, AdData.ad_unit, dimension)
+        build_ad_data_dimension_filter(
+            AdData.country_code, AdData.ad_unit, dimension,
+            report_type_column=AdData.report_type,
+        )
     )
 
     scope_client_id = (
@@ -384,6 +390,9 @@ async def export_ad_data_handler(
         country_code=country_code,
         ad_unit=ad_unit,
         dimension=dimension,
+        data_source=data_source,
+        upstream_account=upstream_account,
+        report_type=report_type,
     )
 
     # 应用日期过滤（直接使用条件，避免函数可能的问题）
@@ -503,6 +512,9 @@ async def export_ad_data_handler(
                 "数据日期": date_value,
                 "所属用户": product_to_user_map.get(item.product_id, "未知用户"),
                 "产品名称": product_map.get(item.product_id, "未知产品"),
+                "来源": item.data_source or "legacy",
+                "账号": item.upstream_account or "",
+                "报表类型": item.report_type or "legacy",
                 "广告单元": item.ad_unit or "",
                 "国家代码": country_code,
                 "国家": country_name,

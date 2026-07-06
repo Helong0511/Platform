@@ -101,6 +101,11 @@ class AdDataResponse(AdDataInDBBase):
     client_id: int | None = None
     client_name: str | None = None
     user_name: str | None = None  # 添加用户名称字段
+    data_source: str | None = None
+    data_source_label: str | None = None
+    upstream_account: str | None = None
+    report_type: str | None = None
+    report_type_label: str | None = None
     ecpm_before_deduct: float | None = None
     revenue_before_deduct: float | None = None
 
@@ -150,5 +155,8 @@ class AdDataUpdate(BaseModel):
     ecpm_before_deduct: float | None = None
     revenue_after_deduct: float | None = None
     revenue_before_deduct: float | None = None
+    data_source: str | None = None
+    upstream_account: str | None = None
+    report_type: str | None = None
 
     model_config = ConfigDict(from_attributes=True)

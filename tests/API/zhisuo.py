@@ -25,12 +25,12 @@ key = 'cded7587a3b1aad269b9c9f5248f8b7e'  # 私钥（替换）
 # start_date = date.today().isoformat()              # 当前日期，例如 '2026-05-29'
 # end_date = date.today().isoformat()                # 结束日期（可根据需要调整）
 
-start_date = '2026-06-25'
-end_date = '2026-07-01'
+start_date = '2026-07-01'
+end_date = '2026-07-06'
 
 timestamp = int(time.time() * 1000)  # 当前13位毫秒时间戳
 page = 1
-limit = 1000
+limit = 5000
 
 # 构建参数字典（key 在排序前添加）
 params = {
@@ -55,23 +55,34 @@ sign = hashlib.md5(query.encode('utf-8')).hexdigest()
 del params['key']
 params['sign'] = sign
 
+need = [
+    'freegame.rueik.top',
+    'freegame02.rueik.top',
+    'freegame03.rueik.top',
+    'freegame35.rueik.top',
+    'freegame36.rueik.top'
+]
+
 # 日报表
-response = requests.get(url + day_report, params=params).json()
-data = response.get('data', []).get('list', [])
-for item in data:
-    if item.get('domain_name','') == 'wo.kimdogtrainer.com':
-        print(item)
+# response = requests.get(url + day_report, params=params).json()
+# print(response)
+# data = response.get('data', []).get('list', [])
+# for item in data:
+#     if item.get('domain_name','') in need:
+#         print(item)
 
 # 广告单元
 # response = requests.get(url + unit, params=params).json()
+# print(response)
 # data = response.get('data', []).get('list', [])
 # for item in data:
-#     if item.get('domain_name', '') == 'wo.kimdogtrainer.com':
+#     if item.get('domain_name', '') in need:
 #         print(item)
 
 # 国家数据
-# response = requests.get(url + country, params=params).json()
-# data = response.get('data', []).get('list', [])
-# for item in data:
-#     if item.get('domain_name', '') == 'wo.kimdogtrainer.com':
-#         print(item)
+response = requests.get(url + country, params=params).json()
+print(response)
+data = response.get('data', []).get('list', [])
+for item in data:
+    if item.get('domain_name', '') in need:
+        print(item)

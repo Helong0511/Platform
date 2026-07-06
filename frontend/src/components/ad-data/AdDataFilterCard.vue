@@ -113,6 +113,58 @@
           />
         </el-select>
       </el-form-item>
+      <template v-if="isAdmin && showMetadataFilters">
+        <el-form-item label="来源">
+          <el-select
+            v-model="searchForm.dataSource"
+            placeholder="全部来源"
+            style="width: 100%;"
+            clearable
+            filterable
+          >
+            <el-option-group label="上游 API">
+              <el-option
+                v-for="item in upstreamSourceOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-option-group>
+            <el-option-group label="其它">
+              <el-option
+                v-for="item in manualSourceOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-option-group>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="账号">
+          <el-input
+            v-model="searchForm.upstreamAccount"
+            placeholder="上游账号，多个用逗号分隔"
+            clearable
+            style="width: 100%;"
+          />
+        </el-form-item>
+        <el-form-item label="报表类型">
+          <el-select
+            v-model="searchForm.reportType"
+            placeholder="全部报表类型"
+            style="width: 100%;"
+            clearable
+            filterable
+          >
+            <el-option
+              v-for="item in reportTypeOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+      </template>
       <el-form-item>
         <el-button type="primary" :loading="loading" :disabled="loading" @click="emit('fetch')">
           查询
@@ -133,7 +185,11 @@ import { InfoFilled } from '@element-plus/icons-vue';
 import {
   AD_DATA_DIMENSION_HINTS,
   AD_DATA_DIMENSION_OPTIONS,
+  AD_DATA_SOURCE_MANUAL_OPTIONS,
   DEFAULT_AD_DATA_DIMENSION,
+  UPSTREAM_API_DATA_SOURCES,
+  buildAdDataReportTypeOptions,
+  buildAdDataSourceOptions,
   showAdUnitFilterForDimension,
   showCountryFilterForDimension
 } from '../../constants/adDataDimension';
@@ -146,6 +202,8 @@ const props = defineProps({
   filterCountries: { type: Array, default: () => [] },
   filterAdUnits: { type: Array, default: () => [] },
   showDimension: { type: Boolean, default: true },
+  /** 统计维度下拉选项（明细维护页可传入含「全部明细」的选项） */
+  dimensionOptions: { type: Array, default: null },
   /** 固定页说明（每日统计子菜单） */
   pageHint: { type: String, default: '' },
   /** 显式控制国家筛选；未传时按统计维度推断 */
@@ -154,6 +212,8 @@ const props = defineProps({
   enableAdUnitFilter: { type: Boolean, default: null },
   /** 客户/产品/国家/广告单元是否支持多选 */
   multiSelect: { type: Boolean, default: false },
+  /** 管理员明细维护：显示来源/账号/报表类型筛选 */
+  showMetadataFilters: { type: Boolean, default: false },
   defaultHint: {
     type: String,
     default: '默认查询数据是本月数据，如果要查询其它时间，请自行选择日期范围。'
@@ -179,7 +239,9 @@ const handleDateRangePickerChange = async () => {
   emit('date-range-change');
 };
 
-const dimensionOptions = AD_DATA_DIMENSION_OPTIONS;
+const dimensionOptions = computed(
+  () => props.dimensionOptions?.length ? props.dimensionOptions : AD_DATA_DIMENSION_OPTIONS
+);
 
 const dimension = computed(
   () => searchForm.value.dimension || DEFAULT_AD_DATA_DIMENSION
@@ -198,6 +260,15 @@ const showAdUnit = computed(() => {
   if (props.enableAdUnitFilter === false) return false;
   return props.showDimension && showAdUnitFilterForDimension(dimension.value);
 });
+
+const allSourceOptions = computed(() => buildAdDataSourceOptions(searchForm.value?.dataSource));
+const upstreamSourceOptions = computed(() =>
+  allSourceOptions.value.filter((item) => UPSTREAM_API_DATA_SOURCES.includes(item.value))
+);
+const manualSourceOptions = computed(() =>
+  allSourceOptions.value.filter((item) => AD_DATA_SOURCE_MANUAL_OPTIONS.includes(item.value))
+);
+const reportTypeOptions = computed(() => buildAdDataReportTypeOptions(searchForm.value?.reportType));
 
 const hintText = computed(() => {
   if (props.pageHint) {
