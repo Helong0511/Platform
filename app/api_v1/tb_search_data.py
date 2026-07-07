@@ -50,6 +50,11 @@ from app.core.query_utils import (
     join_country_info as join_country_info_util,
     apply_date_range_filter
 )
+from app.services.ad_data.queries.join_helpers import (
+    build_products_with_data_base_query,
+    join_tb_search_and_client_from_product,
+    merge_product_option_rows,
+)
 from app.core.utils import (
     find_or_create_default_client, optimize_page_size_for_device,
     get_product_name, get_client_name, get_user_name, truncate_to_2_decimal
@@ -818,88 +823,57 @@ async def get_products_with_tb_search_data(
 ):
     """
     获取有TB搜索数据的产品列表（用于下拉选择）
-    - 只返回在指定日期范围内有数据的产品
-    - 如果没有指定日期范围，使用当前月作为默认范围
-    - 只返回激活状态的产品
-    - 使用产品分配历史表时，会根据日期匹配正确的客户归属
+    - 分配历史：按数据行日期匹配 ProductAssignment，随日期范围动态变化
+    - 客户角色且启用分配表时：并集补充当前 Product.client_id 名下有数据的产品
+    - 未指定日期范围时默认当前月；仅返回激活产品
     """
     # ---------- 入口：参数与依赖准备 ----------
     # ---------- 异常处理 ----------
     try:
-        # 检查是否使用产品分配历史表
         use_assignment_table = await check_use_assignment_table(db)
-        
-        # 构建基础查询
-        # ---------- 条件分支 ----------
-        if use_assignment_table:
-            # 使用产品分配历史表
-            query = select(func.distinct(Product.id), Product.name, Product.client_id)
-            query = query.join(TBSearchData, TBSearchData.product_id == Product.id)
-            query = query.join(
-                ProductAssignment,
-                and_(
-                    ProductAssignment.product_id == Product.id,
-                    product_assignment_join_condition(
-                        TBSearchData.date,
-                        ProductAssignment.start_date,
-                        ProductAssignment.end_date
-                    )
-                )
-            )
-            query = query.join(Client, ProductAssignment.client_id == Client.id)
-        else:
-            # 旧的查询方式
-            query = select(func.distinct(Product.id), Product.name, Product.client_id)
-            query = query.join(Client, Product.client_id == Client.id)
-            query = query.join(TBSearchData, TBSearchData.product_id == Product.id)
-        
-        # 只显示激活状态的产品
-        query = query.where(Product.is_active == True)
-        
-        # 权限过滤
-        # ---------- 条件分支 ----------
+
+        # 路径 1：分配历史 — 按 TB 数据行日期匹配当时归属（随日期范围动态变化）
+        assignment_query = build_products_with_data_base_query()
+        assignment_query = join_tb_search_and_client_from_product(
+            assignment_query, use_assignment_table
+        )
         if not is_admin(current_user):
-            query = query.where(Client.user_id == current_user.id)
-        # ---------- 条件分支 ----------
+            assignment_query = assignment_query.where(Client.user_id == current_user.id)
         elif client_id:
-            query = query.where(Client.id == client_id)
-        
-        # 日期范围过滤
-        # ---------- 条件分支 ----------
-        if start_date:
-            start_datetime = datetime.combine(start_date, datetime.min.time())
-            query = query.where(TBSearchData.date >= start_datetime)
-        # ---------- 条件分支 ----------
-        if end_date:
-            end_datetime = datetime.combine(end_date, datetime.max.time())
-            query = query.where(TBSearchData.date <= end_datetime)
-        # 如果没有指定日期范围，默认查询当前月的数据
-        # ---------- 条件分支 ----------
-        elif not start_date and not end_date:
-            today = date.today()
-            month_start = date(today.year, today.month, 1)
-            _, last_day = monthrange(today.year, today.month)
-            month_end = date(today.year, today.month, last_day)
-            
-            month_start_datetime = datetime.combine(month_start, datetime.min.time())
-            month_end_datetime = datetime.combine(month_end, datetime.max.time())
-            query = query.where(TBSearchData.date >= month_start_datetime)
-            query = query.where(TBSearchData.date <= month_end_datetime)
-        
-        # 执行查询
-        result = await db.execute(query)
-        products_data = result.all()
-        
-        # 转换为响应格式
-        products_list = []
-        # ---------- 循环处理 ----------
-        for product_id, product_name, product_client_id in products_data:
-            products_list.append({
-                "id": product_id,
-                "name": product_name or "未知产品"
-            })
-        
-        # 按产品名称排序
+            assignment_query = assignment_query.where(Client.id == client_id)
+
+        assignment_query = apply_date_range_filter(
+            assignment_query,
+            TBSearchData.date,
+            start_date,
+            end_date,
+            default_to_current_month=True,
+        )
+        assignment_rows = (await db.execute(assignment_query)).all()
+        row_sets = [assignment_rows]
+
+        # 路径 2：当前归属 + 日期范围内有数据（与广告数据筛选项口径一致）
+        if use_assignment_table and not is_admin(current_user):
+            current_query = build_products_with_data_base_query()
+            current_query = current_query.join(
+                TBSearchData, TBSearchData.product_id == Product.id
+            )
+            current_query = current_query.join(Client, Product.client_id == Client.id)
+            current_query = current_query.where(Client.user_id == current_user.id)
+            current_query = apply_date_range_filter(
+                current_query,
+                TBSearchData.date,
+                start_date,
+                end_date,
+                default_to_current_month=True,
+            )
+            row_sets.append((await db.execute(current_query)).all())
+
+        merged = merge_product_option_rows(*row_sets)
+        products_list = [
+            {"id": item["id"], "name": item["name"]}
+            for item in merged
+        ]
         products_list.sort(key=lambda x: x["name"])
         
         return ListResponseBaseSchema.success(data=products_list, count=len(products_list))

@@ -37,9 +37,11 @@ from app.services.ad_data.queries.dimension_filter import (
     normalize_dimension,
 )
 from app.services.ad_data.queries.join_helpers import (
+    build_products_with_data_base_query,
     join_ad_data_and_client_from_product,
     join_country_info_for_ad_data,
     join_product_and_client,
+    merge_product_option_rows,
 )
 logger = logging.getLogger(__name__)
 
@@ -235,7 +237,12 @@ class FilterOptionsQuery:
         end_date: Optional[date] = None,
     ) -> List[Dict[str, Any]]:
         cache_key = generate_cache_key(
-            "products_with_data", current_user.id, client_id, start_date, end_date
+            "products_with_data",
+            "assignment_and_current_v1",
+            current_user.id,
+            client_id,
+            start_date,
+            end_date,
         )
         cached = await get_cached(cache_key, key_prefix="ad_data")
         if cached:
@@ -243,32 +250,47 @@ class FilterOptionsQuery:
 
         use_assignment_table = await check_use_assignment_table(self.db)
 
-        query = select(func.distinct(Product.id), Product.name, Product.client_id)
-        query = join_ad_data_and_client_from_product(query, use_assignment_table)
-
-        query = query.where(Product.is_active == True)
-
+        # 路径 1：分配历史 — 按每条广告数据的日期匹配当时归属客户（随日期范围动态变化）
+        assignment_query = build_products_with_data_base_query()
+        assignment_query = join_ad_data_and_client_from_product(
+            assignment_query, use_assignment_table
+        )
         if not is_admin(current_user):
-            query = query.where(Client.user_id == current_user.id)
+            assignment_query = assignment_query.where(Client.user_id == current_user.id)
         else:
             client_filter = apply_client_ids_filter(
                 Client.id, parse_csv_ints(client_id, field="client_id")
             )
             if client_filter is not None:
-                query = query.where(client_filter)
+                assignment_query = assignment_query.where(client_filter)
 
-        query = apply_date_range_filter(
-            query, AdData.date, start_date, end_date, default_to_current_month=True
+        assignment_query = apply_date_range_filter(
+            assignment_query,
+            AdData.date,
+            start_date,
+            end_date,
+            default_to_current_month=True,
         )
+        assignment_rows = (await self.db.execute(assignment_query)).all()
 
-        products_list = [
-            {
-                "id": product_id,
-                "name": product_name or "未知产品",
-                "client_id": product_client_id,
-            }
-            for product_id, product_name, product_client_id in (await self.db.execute(query)).all()
-        ]
+        row_sets = [assignment_rows]
+
+        # 路径 2：当前归属 — 启用分配表时，补充 Product.client_id 名下且在日期范围内有数据的产品
+        if use_assignment_table and not is_admin(current_user):
+            current_query = build_products_with_data_base_query()
+            current_query = current_query.join(AdData, AdData.product_id == Product.id)
+            current_query = current_query.join(Client, Product.client_id == Client.id)
+            current_query = current_query.where(Client.user_id == current_user.id)
+            current_query = apply_date_range_filter(
+                current_query,
+                AdData.date,
+                start_date,
+                end_date,
+                default_to_current_month=True,
+            )
+            row_sets.append((await self.db.execute(current_query)).all())
+
+        products_list = merge_product_option_rows(*row_sets)
         products_list.sort(key=lambda x: x["id"], reverse=True)
 
         await set_cached(
