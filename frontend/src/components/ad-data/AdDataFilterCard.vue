@@ -40,24 +40,13 @@
         </el-select>
       </el-form-item>
       <el-form-item label="产品">
-        <el-select
+        <ProductFilterSelect
           v-model="searchForm.productId"
+          :options="filterProducts"
           :placeholder="multiSelect ? '全部产品（可多选）' : '全部产品'"
-          style="width: 100%;"
           :multiple="multiSelect"
-          :collapse-tags="multiSelect"
-          :collapse-tags-tooltip="multiSelect"
-          clearable
-          filterable
           @change="emit('filter-product-change')"
-        >
-          <el-option
-            v-for="product in filterProducts"
-            :key="product.value"
-            :label="product.label"
-            :value="product.value"
-          />
-        </el-select>
+        />
       </el-form-item>
       <el-form-item v-if="showDimension" label="统计维度">
         <el-select
@@ -172,6 +161,15 @@
         <el-button :disabled="loading" @click="emit('reset')">重置</el-button>
       </el-form-item>
     </el-form>
+    <div v-if="showProductOwnershipLegend" class="filter-legend">
+      <span class="filter-legend__label">产品标注：</span>
+      <el-tag size="small" type="success">当前</el-tag>
+      <span class="filter-legend__text">名下产品</span>
+      <el-tag size="small" type="info">历史</el-tag>
+      <span class="filter-legend__text">所选日期内曾归属、已转移</span>
+      <el-tag size="small" type="warning">当前+历史</el-tag>
+      <span class="filter-legend__text">两种口径均匹配</span>
+    </div>
     <div class="filter-hint">
       <el-icon :size="16"><InfoFilled /></el-icon>
       <span>{{ hintText }}</span>
@@ -182,6 +180,7 @@
 <script setup>
 import { computed, nextTick } from 'vue';
 import { InfoFilled } from '@element-plus/icons-vue';
+import ProductFilterSelect from './ProductFilterSelect.vue';
 import {
   AD_DATA_DIMENSION_HINTS,
   AD_DATA_DIMENSION_OPTIONS,
@@ -193,6 +192,10 @@ import {
   showAdUnitFilterForDimension,
   showCountryFilterForDimension
 } from '../../constants/adDataDimension';
+import {
+  hasProductOwnershipLabels,
+  PRODUCT_OWNERSHIP_HINT,
+} from '../../utils/productFilterOptions';
 
 const props = defineProps({
   isAdmin: { type: Boolean, default: false },
@@ -270,15 +273,25 @@ const manualSourceOptions = computed(() =>
 );
 const reportTypeOptions = computed(() => buildAdDataReportTypeOptions(searchForm.value?.reportType));
 
+const showProductOwnershipLegend = computed(() =>
+  hasProductOwnershipLabels(
+    (props.filterProducts || []).filter((item) => item?.value !== '' && item?.value != null)
+  )
+);
+
 const hintText = computed(() => {
+  const ownershipHint = showProductOwnershipLegend.value ? PRODUCT_OWNERSHIP_HINT : '';
   if (props.pageHint) {
-    return props.defaultHint ? `${props.pageHint} ${props.defaultHint}` : props.pageHint;
+    const base = props.defaultHint ? `${props.pageHint} ${props.defaultHint}` : props.pageHint;
+    return ownershipHint ? `${base} ${ownershipHint}` : base;
   }
   if (!props.showDimension) {
-    return props.defaultHint;
+    const base = props.defaultHint;
+    return ownershipHint ? `${base} ${ownershipHint}` : base;
   }
   const dimensionHint = AD_DATA_DIMENSION_HINTS[dimension.value] || '';
-  return `${dimensionHint} ${props.defaultHint}`;
+  const base = `${dimensionHint} ${props.defaultHint}`;
+  return ownershipHint ? `${base} ${ownershipHint}` : base;
 });
 </script>
 
@@ -335,6 +348,24 @@ const hintText = computed(() => {
 .filter-form :deep(.el-input__wrapper),
 .filter-form :deep(.el-select .el-input__wrapper) {
   min-height: 32px;
+}
+
+.filter-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: #606266;
+}
+
+.filter-legend__label {
+  color: #909399;
+}
+
+.filter-legend__text {
+  margin-right: 4px;
 }
 
 .filter-hint {

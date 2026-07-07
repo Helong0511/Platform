@@ -53,7 +53,7 @@ from app.core.query_utils import (
 from app.services.ad_data.queries.join_helpers import (
     build_products_with_data_base_query,
     join_tb_search_and_client_from_product,
-    merge_product_option_rows,
+    merge_product_options_with_ownership,
 )
 from app.core.utils import (
     find_or_create_default_client, optimize_page_size_for_device,
@@ -850,10 +850,10 @@ async def get_products_with_tb_search_data(
             default_to_current_month=True,
         )
         assignment_rows = (await db.execute(assignment_query)).all()
-        row_sets = [assignment_rows]
 
-        # 路径 2：当前归属 + 日期范围内有数据（与广告数据筛选项口径一致）
-        if use_assignment_table and not is_admin(current_user):
+        has_dual_path = use_assignment_table and not is_admin(current_user)
+        current_rows = None
+        if has_dual_path:
             current_query = build_products_with_data_base_query()
             current_query = current_query.join(
                 TBSearchData, TBSearchData.product_id == Product.id
@@ -867,14 +867,17 @@ async def get_products_with_tb_search_data(
                 end_date,
                 default_to_current_month=True,
             )
-            row_sets.append((await db.execute(current_query)).all())
+            current_rows = (await db.execute(current_query)).all()
 
-        merged = merge_product_option_rows(*row_sets)
-        products_list = [
-            {"id": item["id"], "name": item["name"]}
-            for item in merged
-        ]
-        products_list.sort(key=lambda x: x["name"])
+        scope_client_ids = [client_id] if use_assignment_table and is_admin(current_user) and client_id else None
+
+        merged = merge_product_options_with_ownership(
+            assignment_rows,
+            current_rows,
+            scope_client_ids=scope_client_ids,
+            has_dual_path=has_dual_path,
+        )
+        products_list = sorted(merged, key=lambda x: x["name"])
         
         return ListResponseBaseSchema.success(data=products_list, count=len(products_list))
     except HTTPException:

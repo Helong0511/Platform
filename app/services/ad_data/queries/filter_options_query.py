@@ -41,7 +41,7 @@ from app.services.ad_data.queries.join_helpers import (
     join_ad_data_and_client_from_product,
     join_country_info_for_ad_data,
     join_product_and_client,
-    merge_product_option_rows,
+    merge_product_options_with_ownership,
 )
 logger = logging.getLogger(__name__)
 
@@ -238,7 +238,7 @@ class FilterOptionsQuery:
     ) -> List[Dict[str, Any]]:
         cache_key = generate_cache_key(
             "products_with_data",
-            "assignment_and_current_v1",
+            "assignment_and_current_v2",
             current_user.id,
             client_id,
             start_date,
@@ -273,10 +273,9 @@ class FilterOptionsQuery:
         )
         assignment_rows = (await self.db.execute(assignment_query)).all()
 
-        row_sets = [assignment_rows]
-
-        # 路径 2：当前归属 — 启用分配表时，补充 Product.client_id 名下且在日期范围内有数据的产品
-        if use_assignment_table and not is_admin(current_user):
+        has_dual_path = use_assignment_table and not is_admin(current_user)
+        current_rows = None
+        if has_dual_path:
             current_query = build_products_with_data_base_query()
             current_query = current_query.join(AdData, AdData.product_id == Product.id)
             current_query = current_query.join(Client, Product.client_id == Client.id)
@@ -288,9 +287,18 @@ class FilterOptionsQuery:
                 end_date,
                 default_to_current_month=True,
             )
-            row_sets.append((await self.db.execute(current_query)).all())
+            current_rows = (await self.db.execute(current_query)).all()
 
-        products_list = merge_product_option_rows(*row_sets)
+        scope_client_ids = None
+        if use_assignment_table and is_admin(current_user):
+            scope_client_ids = parse_csv_ints(client_id, field="client_id")
+
+        products_list = merge_product_options_with_ownership(
+            assignment_rows,
+            current_rows,
+            scope_client_ids=scope_client_ids,
+            has_dual_path=has_dual_path,
+        )
         products_list.sort(key=lambda x: x["id"], reverse=True)
 
         await set_cached(

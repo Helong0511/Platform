@@ -57,14 +57,12 @@
           </el-select>
         </el-form-item>
         <el-form-item label="产品">
-          <el-select 
-            v-model="searchForm.productId" 
-            placeholder="全部产品" 
-            clearable
+          <ProductFilterSelect
+            v-model="searchForm.productId"
+            :options="products"
+            placeholder="全部产品"
             @change="handleProductChange"
-          >
-            <el-option v-for="product in products" :key="product.value" :label="product.label" :value="product.value"></el-option>
-          </el-select>
+          />
         </el-form-item>
         <el-form-item label="国家">
           <el-select 
@@ -82,6 +80,18 @@
           <el-button @click="resetFilter" :disabled="loading">重置</el-button>
         </el-form-item>
       </el-form>
+      <div v-if="showProductOwnershipLegend" class="filter-legend">
+        <span class="filter-legend__label">产品标注：</span>
+        <el-tag size="small" type="success">当前</el-tag>
+        <span class="filter-legend__text">名下产品</span>
+        <el-tag size="small" type="info">历史</el-tag>
+        <span class="filter-legend__text">所选日期内曾归属、已转移</span>
+        <el-tag size="small" type="warning">当前+历史</el-tag>
+        <span class="filter-legend__text">两种口径均匹配</span>
+      </div>
+      <div v-if="showProductOwnershipLegend" class="filter-hint">
+        {{ productOwnershipHint }}
+      </div>
     </el-card>
 
     <!-- 数据表格 -->
@@ -275,6 +285,11 @@ import {
 } from '../../composables/useTbSearchColumnVisibility';
 import { useTbSearchTableFormat } from '../../composables/useTbSearchTableFormat';
 import ProductManagementDialog from '../../components/admin/ProductManagementDialog.vue';
+import ProductFilterSelect from '../../components/ad-data/ProductFilterSelect.vue';
+import {
+  hasProductOwnershipLabels,
+  PRODUCT_OWNERSHIP_HINT,
+} from '../../utils/productFilterOptions';
 
 const authStore = useAuthStore();
 const isAdmin = computed(() => authStore.isAdmin);
@@ -342,6 +357,13 @@ const {
   includeCountry: true,
   source: 'tb-search'
 });
+
+const showProductOwnershipLegend = computed(() =>
+  hasProductOwnershipLabels(
+    (products.value || []).filter((item) => item?.value !== '' && item?.value != null)
+  )
+);
+const productOwnershipHint = PRODUCT_OWNERSHIP_HINT;
 
 const { formatCurrency, getSummaries } = useTbSearchTableFormat();
 
@@ -569,6 +591,31 @@ const saveEdit = async () => {
 }
 .filter-card {
   margin-bottom: 20px;
+}
+
+.filter-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 4px;
+  font-size: 13px;
+  color: #606266;
+}
+
+.filter-legend__label {
+  color: #909399;
+}
+
+.filter-legend__text {
+  margin-right: 4px;
+}
+
+.filter-hint {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #909399;
+  line-height: 1.5;
 }
 
 /* 筛选表单样式优化 */

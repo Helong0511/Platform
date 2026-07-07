@@ -31,6 +31,7 @@ import {
   pruneMultiSelection,
   toCsvFilterValue
 } from '../utils/multiFilterValues';
+import { mapApiProductToFilterOption } from '../utils/productFilterOptions';
 
 /** 国家筛选项展示：二字代码 + 中文名（无中文名或与代码相同时仅显示代码） */
 export function formatCountryFilterLabel(country) {
@@ -295,11 +296,7 @@ export function useDataPageFilterCascade({
       const data = result?.data || [];
       const productOptions = data
         .filter((item) => item?.id != null)
-        .map((item) => ({
-          label: item.name || '未知产品',
-          value: String(item.id),
-          id: item.id
-        }))
+        .map((item) => mapApiProductToFilterOption(item))
         .sort((a, b) => Number(b.id) - Number(a.id));
 
       filterProducts.value = multiSelect

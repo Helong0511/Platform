@@ -5,7 +5,7 @@
 - 统一 Product / Client / ProductAssignment / CountryInfo 关联路径
 - 供 list、detail、filter、batch_delete 等 query 模块复用
 """
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import load_only
@@ -72,7 +72,7 @@ def join_ad_data_and_client_from_product(query, use_assignment_table: bool):
         query = query.join(AdData, AdData.product_id == Product.id)
         query = query.join(
             ProductAssignment,
-            and_(
+            and_(
                 ProductAssignment.product_id == Product.id,
                 product_assignment_join_condition(
                     AdData.date,
@@ -137,3 +137,92 @@ def merge_product_option_rows(*row_sets) -> List[Dict[str, Any]]:
                 "client_id": product_client_id,
             }
     return list(merged.values())
+
+
+def merge_product_options_with_ownership(
+    assignment_rows,
+    current_rows=None,
+    *,
+    scope_client_ids: Optional[List[int]] = None,
+    has_dual_path: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    合并产品筛选项并标注归属类型。
+
+    ownership_type:
+    - current: 当前名下产品（Product.client_id）
+    - historical: 所选日期范围内按分配历史归属、但当前已不在名下
+    - both: 同时满足当前名下与分配历史匹配
+    """
+    assignment_rows = assignment_rows or []
+    current_rows = current_rows or []
+
+    assignment_ids: set[int] = set()
+    current_ids: set[int] = set()
+    row_meta: Dict[int, tuple] = {}
+
+    for product_id, product_name, product_client_id in assignment_rows:
+        if product_id is None:
+            continue
+        pid = int(product_id)
+        assignment_ids.add(pid)
+        row_meta[pid] = (product_name, product_client_id)
+
+    for product_id, product_name, product_client_id in current_rows:
+        if product_id is None:
+            continue
+        pid = int(product_id)
+        current_ids.add(pid)
+        if pid not in row_meta:
+            row_meta[pid] = (product_name, product_client_id)
+
+    scope_set = set(scope_client_ids) if scope_client_ids else None
+    result: List[Dict[str, Any]] = []
+
+    for pid in assignment_ids | current_ids:
+        product_name, product_client_id = row_meta[pid]
+        ownership = _resolve_product_ownership_type(
+            in_assignment=pid in assignment_ids,
+            in_current=pid in current_ids,
+            product_client_id=product_client_id,
+            scope_client_ids=scope_set,
+            has_dual_path=has_dual_path,
+        )
+        item: Dict[str, Any] = {
+            "id": pid,
+            "name": product_name or "未知产品",
+            "client_id": product_client_id,
+        }
+        if ownership:
+            item["ownership_type"] = ownership
+        result.append(item)
+
+    return result
+
+
+def _resolve_product_ownership_type(
+    *,
+    in_assignment: bool,
+    in_current: bool,
+    product_client_id: Any,
+    scope_client_ids: Optional[set[int]],
+    has_dual_path: bool,
+) -> Optional[str]:
+    if has_dual_path:
+        if in_assignment and in_current:
+            return "both"
+        if in_current:
+            return "current"
+        if in_assignment:
+            return "historical"
+        return None
+
+    if not scope_client_ids:
+        return None
+
+    owner_id = int(product_client_id) if product_client_id is not None else None
+    if owner_id is not None and owner_id in scope_client_ids:
+        return "current"
+    if in_assignment:
+        return "historical"
+    return None
